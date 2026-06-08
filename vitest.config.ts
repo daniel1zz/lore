@@ -22,4 +22,13 @@ export default defineConfig({
       "@adapters": resolve(__dirname, "src/adapters"),
     },
   },
+  // bun:sqlite is a Bun built-in — treat it as an external so Vite does not
+  // attempt to resolve or bundle it. Tests that use SQLiteStore must run
+  // under Bun (bun test) or via Vitest with the Bun runner.
+  ssr: {
+    external: ["bun:sqlite"],
+  },
+  optimizeDeps: {
+    exclude: ["bun:sqlite"],
+  },
 });

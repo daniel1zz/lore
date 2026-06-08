@@ -1,0 +1,142 @@
+/**
+ * StoreInterface — storage abstraction for the Lore corpus.
+ * All methods are synchronous (bun:sqlite is synchronous).
+ * Source: SPEC-001 §4, adapted to use Result<T, LoreError> per task spec.
+ */
+
+import type {
+  AuditEntry,
+  DocId,
+  DocRecord,
+  DocStatus,
+  DocType,
+  LinkRecord,
+  LinkType,
+  Slug,
+  VersionRecord,
+} from "../core/types.js";
+import type { LoreError, Result } from "../core/errors.js";
+
+// ─── Filter Types ──────────────────────────────────────────────────────────
+
+export interface StoreFilters {
+  type?: DocType;
+  status?: DocStatus;
+  parent_id?: DocId;
+  created_by?: string;
+  /** ISO 8601 — only docs updated at or after this timestamp */
+  since?: string;
+  tags?: string[];
+  /** Default: true. When false, soft-deleted docs are included. */
+  exclude_deleted?: boolean;
+}
+
+export interface SearchHit {
+  id: DocId;
+  slug: Slug;
+  title: string;
+  snippet: string;
+  score: number;
+}
+
+export interface AuditFilters {
+  doc_id?: DocId;
+  actor?: string;
+  action?: string;
+  /** ISO 8601 */
+  since?: string;
+  limit?: number;
+}
+
+// ─── Interface ─────────────────────────────────────────────────────────────
+
+/**
+ * Synchronous storage interface.
+ * SQLiteStore implements this via bun:sqlite (synchronous driver).
+ * InMemoryStore will implement this for unit tests.
+ */
+export interface StoreInterface {
+  // ── Document CRUD ──────────────────────────────────────────────────────
+
+  /** Insert a new doc. Fails with DUPLICATE_SLUG if slug already exists. */
+  insert(doc: DocRecord): Result<DocRecord, LoreError>;
+
+  /** Find doc by ULID. Returns null (not error) if not found. */
+  find(id: DocId): Result<DocRecord | null, LoreError>;
+
+  /** Find doc by slug. Returns null (not error) if not found. */
+  findBySlug(slug: Slug): Result<DocRecord | null, LoreError>;
+
+  /**
+   * Find multiple docs matching filters.
+   * By default excludes soft-deleted docs (exclude_deleted defaults to true).
+   */
+  findMany(filters: StoreFilters): Result<DocRecord[], LoreError>;
+
+  /**
+   * Apply a partial patch to an existing doc.
+   * Returns DOC_NOT_FOUND if id is missing.
+   */
+  update(id: DocId, patch: Partial<DocRecord>): Result<DocRecord, LoreError>;
+
+  /**
+   * Set deleted_at to current ISO timestamp.
+   * Doc remains in DB but excluded from findMany by default.
+   */
+  softDelete(id: DocId): Result<void, LoreError>;
+
+  // ── Links ──────────────────────────────────────────────────────────────
+
+  /**
+   * Add a directed link.
+   * Fails with DUPLICATE_LINK if (from_id, to_id, link_type) already exists.
+   * For link_type='parent': validates no cycle in the parent tree.
+   */
+  addLink(link: LinkRecord): Result<LinkRecord, LoreError>;
+
+  /** Remove a specific directed link by composite key. */
+  removeLink(
+    fromId: DocId,
+    toId: DocId,
+    linkType: LinkType,
+  ): Result<void, LoreError>;
+
+  /** Find all links for a doc, filtered by direction. */
+  findLinks(
+    docId: DocId,
+    direction: "in" | "out" | "both",
+  ): Result<LinkRecord[], LoreError>;
+
+  // ── Search ─────────────────────────────────────────────────────────────
+
+  /**
+   * Full-text search via FTS5.
+   * Returns ranked results with BM25 score and content snippets.
+   * Filters applied as post-FTS WHERE clauses on joined docs table.
+   */
+  search(query: string, filters?: StoreFilters): Result<SearchHit[], LoreError>;
+
+  // ── Versions ───────────────────────────────────────────────────────────
+
+  /** Insert a new version snapshot. */
+  insertVersion(version: VersionRecord): Result<VersionRecord, LoreError>;
+
+  /** Return version history for a doc, newest first. */
+  findVersions(
+    docId: DocId,
+    opts?: { limit?: number; offset?: number },
+  ): Result<VersionRecord[], LoreError>;
+
+  // ── Audit ──────────────────────────────────────────────────────────────
+
+  /** Append an immutable audit entry. */
+  appendAuditEntry(entry: AuditEntry): Result<void, LoreError>;
+
+  /** Query audit log with filters. */
+  queryAudit(filters: AuditFilters): Result<AuditEntry[], LoreError>;
+
+  // ── Lifecycle ──────────────────────────────────────────────────────────
+
+  /** Close the underlying database connection. Flushes WAL. */
+  close(): void;
+}
