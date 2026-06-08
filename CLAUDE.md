@@ -4,64 +4,103 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-**Lore** — AI-native shared knowledge / memory platform for AI-first teams (3-5 people + multiple AI agents). Greenfield rewrite of DocMan v1 (which was a single-user stdio MCP server for local markdown at `/Users/apple/.claude/docman-mcp`).
+**Lore** — AI-native shared knowledge/memory platform for AI-first teams (3-5 people + multiple AI agents). Single CLI binary (`lore`) backed by SQLite via `bun:sqlite`. Delivers typed, navigable corpus of PRDs, specs, ADRs, plans, and knowledge, with MDX placeholder resolution, version history, review workflow, and v1 migration.
 
-Lore delivers a single CLI binary that:
-- Reads/writes a typed, navigable corpus of PRDs, specs, ADRs, plans, knowledge
-- Syncs corpus across devices and team members (cloud-backed)
-- Exposes same surface to AI agents (MCP server adapter mode) and humans (web UI)
-- Centers on PRD-as-living-root: PRD embeds MDX placeholder components that resolve to live subtrees on read → entire corpus navigable from one document
+## Commands
 
-## Status
+```bash
+bun run dev               # Run from source (src/index.ts)
+bun run build             # Compile to dist/lore binary (bun build --compile)
+bun run typecheck         # tsc --noEmit (strict)
 
-**Pre-implementation — PRD phase. No code yet.**
+# Tests — two runners, both must pass
+bun run test:vitest       # bunx vitest run — covers non-bun:sqlite files
+bun run test:bun          # bun test ./tests/ — covers SQLiteStore + bun:sqlite tests
+bun run test              # both runners in sequence
 
-- PRD draft v0.1 at `docs/requirements/prd/PRD-001-lore-positioning.md`
-- 6-role ideation synthesis at `docs/knowledge/ideation/IDEATION-001-v2-positioning-synthesis.md`
-- Next: Phase 2 stakeholder review of PRD → Phase 3 synthesis → user approval → design phase → tech-spec → plan → implementation
+# Run a single vitest test file
+bunx vitest run tests/unit/service/corpus-service.test.ts
 
-## Key Decisions Locked
+# Run a single bun test file
+bun test tests/unit/store/sqlite-store.bun.test.ts
+```
 
-1. **Positioning**: Internal-first product (no SaaS in v1.0), OSS path later
-2. **ICP**: AI-first founding teams (3-5 people + multi-agent)
-3. **MVP scope**: Full (CLI + cloud sync + web UI + multi-tenant + auth) — 9mo+ target
-4. **Distribution**: Vendor-neutral CLI on Homebrew / npm (not Claude-Code-MCP-only)
-5. **v1 compatibility**: None — one-shot `lore migrate v1` tool only
+**Test file convention**: Files ending in `.bun.test.ts` run under `bun test` only (they use `bun:sqlite`). All other `.test.ts` files run under vitest. Do not mix runners.
 
-## Architecture Direction (not yet committed)
+## Architecture
 
-- Lang: TypeScript + Bun compile (likely — single binary, JS ecosystem alignment)
-- Storage: libSQL / Turso (likely — embedded SQLite + cloud sync)
-- Sync model: Server-authoritative pull (Replicache pattern, not raw CRDT)
-- Placeholder syntax: MDX `<Component />` (carried over from v1 ADR-01KT8X72 thinking)
-- Multi-transport: same binary serves CLI / MCP server / HTTP / TUI / web UI backend
+### Layer Stack
 
-These are working hypotheses pending tech-assessment phase.
+```
+src/adapters/cli/        ← citty CLI (thin adapter, no business logic)
+src/app.ts               ← composition root: createApp(dbPath) → App
+src/service/             ← business logic, all return Result<T, LoreError>
+src/store/               ← storage abstraction (StoreInterface)
+src/core/                ← types, errors, schemas (Zod)
+```
 
-## v1 Predecessor
+### Key Design Decisions
 
-`/Users/apple/.claude/docman-mcp` — frozen, stays operational for solo use.
+**Result<T, LoreError>** — no exceptions cross service boundaries. Every service method returns `{ ok: true; value: T } | { ok: false; error: LoreError }`. Use `ok()` and `err()` helpers from `src/core/errors.ts`.
 
-v1 design artifacts that informed v2 thinking:
-- `ARCH-01KPZ6GG4N4AXRHX9WKE6DVP6P` — v1 architecture-outline (9 modules)
-- `PRD-01KJ2MTE53XHNSPJY1W43YMRZQ` — v1 main PRD
-- `ADR-01KT8X72CJM7GB0QQKHD551DY5` — PRD-as-living-outline-via-MDX (v1 attempt)
-- `TECH-01KT8XDXQ135ZPXH863X13GHR1` — get_outline tool design (v1, never implemented)
-- `PLAN-01KT8YBZ5JPW75VKD2FE7SD89P` — implementation plan (archived)
+**StoreInterface** is synchronous — `bun:sqlite` is synchronous. `SQLiteStore` implements it for production; `InMemoryStore` implements it for unit tests. Services depend on `StoreInterface`, never on a concrete store.
 
-Do NOT carry over v1 schema / API / code shape verbatim. v2 is greenfield by design.
+**Path aliases** — `tsconfig.json` defines `@core/*`, `@store/*`, `@service/*`, `@adapters/*`. Both are available in source and test files via vitest's `resolve.alias`.
 
-## Document Convention (until tooling exists)
+**DocRecord** has two identifier fields: `id` (ULID, immutable PK) and `slug` (human-readable, editable, format: `{type}-{kebab-title}`). Service methods accept either via `corpusService.resolve(idOrSlug)`.
 
-While Lore itself doesn't exist yet, docs in this project follow conventions Lore will eventually enforce:
-- YAML frontmatter with `id`, `type`, `status`, `priority`, `tags`, `created`, `updated`
-- File naming: `{TYPE}-{NNN}-{slug}.md` (no ULID yet — v2 will decide ID scheme)
-- Roles: `intent` (PRD, user-story), `spec` (feature-spec, tech-spec), `decision` (ADR), `plan`, `knowledge` (ideation, retros)
-- Links: explicit in frontmatter `links:` array (no auto-extraction yet)
+**`bun:sqlite` is external to vitest** — `vitest.config.ts` marks `bun:sqlite` as an SSR external and excludes it from `optimizeDeps`. Tests that touch `SQLiteStore` must use `bun test`, not vitest.
 
-## How to Work in This Project
+### Service Layer (`src/service/`)
 
-- **Read PRD first**: `docs/requirements/prd/PRD-001-lore-positioning.md` is the source of truth for product direction
-- **Don't create design / tech-spec / code yet** — PRD not approved; design phase is the next gate
-- **Reference v1 thoughtfully** — many ideas from v1 (PRD-as-living-root, MDX placeholders) are likely correct for v2, but v2 owns its own decisions
-- **No tooling install required** — pure markdown until Lore exists to manage itself
+| Service | Responsibility |
+|---|---|
+| `CorpusService` | CRUD, list, search, tree, link/unlink, status |
+| `ReviewService` | Pending queue, approve, reject (status transitions) |
+| `VersionService` | Version log, unified diff (`diff` pkg), restore (append-only, non-destructive) |
+| `OutlineService` | MDX placeholder resolution — regex extracts `<ComponentName ... />` tags, queries store |
+| `MigrationService` | One-shot v1→v2 import: parse YAML frontmatter MD files, map types, insert docs + links |
+
+All services are stateless — state lives entirely in `StoreInterface`.
+
+### Document Lifecycle
+
+Status transitions (`src/core/schemas.ts → VALID_TRANSITIONS`):
+```
+draft → in-review → approved → active → archived
+draft → approved (fast-track)
+approved → deprecated
+```
+Editing content/title on an `approved` doc resets it to `draft` automatically.
+
+### MDX Placeholder Components (OutlineService)
+
+Whitelisted components resolved at read time: `ChildrenOf`, `RecentDecisions`, `ActivePlans`, `ModuleTree`, `RelatedOf`, `Embed`, `HealthStats`. Unknown components are stripped with a warning (not an error).
+
+### Type-specific Validation (CreateDocInput)
+
+- `spec` and `task` require `parent_id`
+- `adr` requires `extra.decision_status`
+- `knowledge` requires `extra.sub_type`
+- `task` requires `extra.plan_id`
+
+Enforced via Zod `superRefine` in `src/core/schemas.ts`.
+
+## Specs
+
+All feature specs live under `docs/requirements/spec/`:
+- `SPEC-001` — service layer + DI pattern
+- `SPEC-002` — corpus schema, types, lifecycle
+- `SPEC-003` — CLI adapter (22 commands, exit codes, output format)
+- `SPEC-004` — PRD-as-living-root (MDX placeholders)
+- `SPEC-005` — review workflow
+- `SPEC-006` — version history
+- `SPEC-007` — v1 migration
+
+When implementing a task, read the relevant spec before writing code.
+
+## Implementation Status
+
+Phase 1 is underway. Core layers (`src/core/`, `src/store/`, `src/service/`) are implemented and tested. The CLI adapter (`src/adapters/cli/`) and composition root (`src/app.ts`) are the current implementation target (Tasks C.1 + C.4).
+
+The v1 predecessor at `/Users/apple/.claude/docman-mcp` remains frozen. Do not carry over its schema or API shape — v2 is greenfield.
