@@ -5,3 +5,6 @@ node_modules/
 *.sqlite
 .DS_Store
 coverage/
+
+.agent-worktree-marker
+docs/.docman/
