@@ -1,0 +1,31 @@
+{
+  "name": "lore",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "AI-native shared knowledge/memory platform",
+  "bin": {
+    "lore": "dist/lore"
+  },
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "build": "bun run scripts/build.ts",
+    "test": "bunx vitest run && bun test tests/**/*.bun.test.ts",
+    "test:vitest": "bunx vitest run",
+    "test:bun": "bun test tests/**/*.bun.test.ts",
+    "test:watch": "bunx vitest",
+    "typecheck": "bun run --bun tsc --noEmit"
+  },
+  "dependencies": {
+    "citty": "^0.1.6",
+    "diff": "^7.0.0",
+    "ulidx": "^2.4.1",
+    "yaml": "^2.7.1",
+    "zod": "^3.24.4"
+  },
+  "devDependencies": {
+    "@types/diff": "^7.0.2",
+    "bun-types": "^1.3.14",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.3"
+  }
+}

@@ -1,0 +1,7 @@
+dist/
+node_modules/
+.lore/
+*.db
+*.sqlite
+.DS_Store
+coverage/
