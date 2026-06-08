@@ -514,13 +514,9 @@ describe("Scenario 6: version history (log + diff)", () => {
     expect(result.stdout).toContain("v2");
   });
 
-  it("NEGATIVE: log for nonexistent doc returns empty entries (not an error — ID validation deferred)", () => {
-    // log does not validate doc existence; it returns empty history for unknown IDs.
-    // This is the observable behavior: exit 0, empty entries array.
-    const result = runLore(["log", "01FAKEIDNOTEXIST00000000000", "--json"], tmpDir);
-    expect(result.exitCode).toBe(0);
-    const json = parseJson<{ entries: Array<unknown> }>(result);
-    expect(json.data!.entries.length).toBe(0);
+  it("NEGATIVE: log for nonexistent doc returns DOC_NOT_FOUND error", () => {
+    const result = runLore(["log", "01FAKEIDNOTEXIST00000000000"], tmpDir);
+    expect(result.exitCode).toBe(3);
   });
 
   it("BOUNDARY: log --limit 1 returns only 1 entry", () => {

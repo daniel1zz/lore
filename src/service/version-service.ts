@@ -8,6 +8,7 @@ import { createTwoFilesPatch } from "diff";
 import type { DocId, DocRecord, DocStatus, VersionAction } from "@core/types";
 import { err, ok, type LoreError, type Result } from "@core/errors";
 import type { StoreInterface } from "@store/store-interface";
+import { resolveDocId } from "./resolve.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────────
 
@@ -45,9 +46,12 @@ export class VersionService {
    * Delegates pagination to store.findVersions.
    */
   log(
-    docId: DocId,
+    idOrSlug: string,
     opts?: { limit?: number; offset?: number },
   ): Result<VersionEntry[], LoreError> {
+    const resolved = resolveDocId(this.store, idOrSlug);
+    if (!resolved.ok) return resolved;
+    const docId = resolved.value;
     const result = this.store.findVersions(docId, {
       limit: opts?.limit ?? 20,
       offset: opts?.offset ?? 0,
@@ -76,10 +80,12 @@ export class VersionService {
    * returns a diff with empty content_diff (nothing to compare against).
    */
   diff(
-    docId: DocId,
+    idOrSlug: string,
     opts?: { from?: number; to?: number },
   ): Result<Diff, LoreError> {
-    // Fetch all versions to resolve defaults
+    const resolved = resolveDocId(this.store, idOrSlug);
+    if (!resolved.ok) return resolved;
+    const docId = resolved.value;
     const allResult = this.store.findVersions(docId);
     if (!allResult.ok) return allResult;
 
@@ -168,7 +174,10 @@ export class VersionService {
    * Non-destructive — history is append-only.
    * Resets doc status to 'draft'.
    */
-  restore(docId: DocId, version: number): Result<DocRecord, LoreError> {
+  restore(idOrSlug: string, version: number): Result<DocRecord, LoreError> {
+    const resolved = resolveDocId(this.store, idOrSlug);
+    if (!resolved.ok) return resolved;
+    const docId = resolved.value;
     const allResult = this.store.findVersions(docId);
     if (!allResult.ok) return allResult;
 

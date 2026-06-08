@@ -8,8 +8,7 @@ import type { DocId, DocRecord, DocType } from "../core/types.js";
 import { err, ok, type LoreError, type Result } from "../core/errors.js";
 import { getAllowedTransitions, isValidTransition } from "../core/schemas.js";
 import type { StoreInterface } from "../store/store-interface.js";
-
-const ULID_REGEX = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
+import { resolveDoc } from "./resolve.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────
 
@@ -59,15 +58,7 @@ export class ReviewService {
   constructor(private readonly store: StoreInterface) {}
 
   private resolveDoc(idOrSlug: string): Result<DocRecord, LoreError> {
-    const isUlid = ULID_REGEX.test(idOrSlug);
-    const findResult = isUlid
-      ? this.store.find(idOrSlug)
-      : this.store.findBySlug(idOrSlug);
-    if (!findResult.ok) return findResult;
-    if (findResult.value === null) {
-      return err({ code: "DOC_NOT_FOUND", id: idOrSlug });
-    }
-    return ok(findResult.value);
+    return resolveDoc(this.store, idOrSlug);
   }
 
   /**

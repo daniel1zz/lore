@@ -202,12 +202,12 @@ describe("VersionService.log", () => {
   });
 
   describe("negative cases", () => {
-    it("returns empty array for unknown docId (no versions stored)", () => {
+    it("returns DOC_NOT_FOUND for unknown docId", () => {
       const result = service.log("01HUNKNOWN00000000000000000");
 
-      expect(result.ok).toBe(true);
-      if (!result.ok) return;
-      expect(result.value).toHaveLength(0);
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error.code).toBe("DOC_NOT_FOUND");
     });
   });
 
