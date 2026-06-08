@@ -47,7 +47,7 @@ function makeDoc(overrides: Partial<DocRecord> & { id: string; title: string }):
 }
 
 /** Build a test corpus: 1 PRD root + 3 spec children + 3 ADRs + 2 plans */
-function buildCorpus(store: StoreInterface) {
+async function buildCorpus(store: StoreInterface) {
   const prd = makeDoc({
     id: "prd-001",
     slug: "prd-root",
@@ -138,7 +138,7 @@ function buildCorpus(store: StoreInterface) {
   });
 
   for (const doc of [prd, spec1, spec2, spec3, adr1, adr2, adr3, plan1, plan2]) {
-    const result = store.insert(doc);
+    const result = await store.insert(doc);
     if (!result.ok) throw new Error(`Corpus setup failed: ${result.error.code}`);
   }
 
@@ -150,25 +150,25 @@ function buildCorpus(store: StoreInterface) {
 describe("OutlineService.resolve", () => {
   let store: InMemoryStore;
   let service: OutlineService;
-  let corpus: ReturnType<typeof buildCorpus>;
+  let corpus: Awaited<ReturnType<typeof buildCorpus>>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     store = new InMemoryStore();
     service = new OutlineService(store);
-    corpus = buildCorpus(store);
+    corpus = await buildCorpus(store);
   });
 
   // ── Happy Path ─────────────────────────────────────────────────────────────
 
   describe("happy path", () => {
-    it("resolves ChildrenOf with role filter — returns matching children", () => {
+    it("resolves ChildrenOf with role filter — returns matching children", async () => {
       // AC-OUTLINE-001.01, AC-OUTLINE-001.02
       const prd = makeDoc({
         ...corpus.prd,
         content: '<ChildrenOf role="spec" />',
       });
 
-      const result = service.resolve(prd);
+      const result = await service.resolve(prd);
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -189,14 +189,14 @@ describe("OutlineService.resolve", () => {
       expect(ids).toContain("spec-003");
     });
 
-    it("resolves RecentDecisions with limit=2 — returns 2 most recent ADRs", () => {
+    it("resolves RecentDecisions with limit=2 — returns 2 most recent ADRs", async () => {
       // AC-OUTLINE-002.01
       const prd = makeDoc({
         ...corpus.prd,
         content: "<RecentDecisions limit={2} />",
       });
 
-      const result = service.resolve(prd);
+      const result = await service.resolve(prd);
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -216,14 +216,14 @@ describe("OutlineService.resolve", () => {
       expect(data.decisions[1]?.id).toBe("adr-002");
     });
 
-    it("resolves ActivePlans — returns only active plans", () => {
+    it("resolves ActivePlans — returns only active plans", async () => {
       // AC-OUTLINE-003.01
       const prd = makeDoc({
         ...corpus.prd,
         content: "<ActivePlans />",
       });
 
-      const result = service.resolve(prd);
+      const result = await service.resolve(prd);
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -239,14 +239,14 @@ describe("OutlineService.resolve", () => {
       expect(data.plans[0]?.status).toBe("active");
     });
 
-    it("resolves Embed with valid id — returns full doc content", () => {
+    it("resolves Embed with valid id — returns full doc content", async () => {
       // AC-OUTLINE-004.01
       const prd = makeDoc({
         ...corpus.prd,
         content: '<Embed id="spec-003" />',
       });
 
-      const result = service.resolve(prd);
+      const result = await service.resolve(prd);
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -263,14 +263,14 @@ describe("OutlineService.resolve", () => {
       expect(data.embedded.content).toContain("Storage design details");
     });
 
-    it("resolves HealthStats — returns corpus statistics object", () => {
+    it("resolves HealthStats — returns corpus statistics object", async () => {
       // AC-OUTLINE-007.01
       const prd = makeDoc({
         ...corpus.prd,
         content: "<HealthStats />",
       });
 
-      const result = service.resolve(prd);
+      const result = await service.resolve(prd);
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -294,13 +294,13 @@ describe("OutlineService.resolve", () => {
       expect(data.stats.by_type["prd"]).toBe(1);
     });
 
-    it("resolves ModuleTree — returns tree from current doc as root", () => {
+    it("resolves ModuleTree — returns tree from current doc as root", async () => {
       const prd = makeDoc({
         ...corpus.prd,
         content: "<ModuleTree />",
       });
 
-      const result = service.resolve(prd);
+      const result = await service.resolve(prd);
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -317,8 +317,8 @@ describe("OutlineService.resolve", () => {
       expect(data.modules.children).toHaveLength(3);
     });
 
-    it("resolves RelatedOf — returns linked documents", () => {
-      store.addLink({
+    it("resolves RelatedOf — returns linked documents", async () => {
+      await store.addLink({
         from_id: "prd-001",
         to_id: "adr-001",
         link_type: "informs",
@@ -331,7 +331,7 @@ describe("OutlineService.resolve", () => {
         content: "<RelatedOf />",
       });
 
-      const result = service.resolve(prd);
+      const result = await service.resolve(prd);
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -349,14 +349,14 @@ describe("OutlineService.resolve", () => {
       expect(data.related[0]?.link_type).toBe("informs");
     });
 
-    it("passes through plain markdown with no components — empty resolvedComponents", () => {
+    it("passes through plain markdown with no components — empty resolvedComponents", async () => {
       // AC-OUTLINE-006.01
       const doc = makeDoc({
         ...corpus.prd,
         content: "# Plain Markdown\n\nNo components here.\n\n- List item\n- Another item",
       });
 
-      const result = service.resolve(doc);
+      const result = await service.resolve(doc);
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -366,7 +366,7 @@ describe("OutlineService.resolve", () => {
       expect(result.value.warnings).toHaveLength(0);
     });
 
-    it("resolves multiple components in one doc — all resolved independently", () => {
+    it("resolves multiple components in one doc — all resolved independently", async () => {
       // AC-OUTLINE-008.01
       const prd = makeDoc({
         ...corpus.prd,
@@ -384,7 +384,7 @@ describe("OutlineService.resolve", () => {
         ].join("\n"),
       });
 
-      const result = service.resolve(prd);
+      const result = await service.resolve(prd);
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -401,14 +401,14 @@ describe("OutlineService.resolve", () => {
   // ── Negative Cases ─────────────────────────────────────────────────────────
 
   describe("negative cases", () => {
-    it("strips unknown component and emits warning — does not crash", () => {
+    it("strips unknown component and emits warning — does not crash", async () => {
       // AC-OUTLINE-005.01
       const doc = makeDoc({
         ...corpus.prd,
         content: "<ScriptInjection />",
       });
 
-      const result = service.resolve(doc);
+      const result = await service.resolve(doc);
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -426,14 +426,14 @@ describe("OutlineService.resolve", () => {
       expect(warning.message).toContain("ScriptInjection");
     });
 
-    it("Embed with nonexistent id — graceful null, no crash", () => {
+    it("Embed with nonexistent id — graceful null, no crash", async () => {
       // AC-OUTLINE-004.N01
       const doc = makeDoc({
         ...corpus.prd,
         content: '<Embed id="nonexistent-999" />',
       });
 
-      const result = service.resolve(doc);
+      const result = await service.resolve(doc);
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -448,14 +448,14 @@ describe("OutlineService.resolve", () => {
       expect(data.notFound).toBe("nonexistent-999");
     });
 
-    it("multiple unknown components — all stripped, all warned", () => {
+    it("multiple unknown components — all stripped, all warned", async () => {
       // AC-OUTLINE-005.02
       const doc = makeDoc({
         ...corpus.prd,
         content: "<Script />\n<Iframe src=\"evil.com\" />\n<ChildrenOf />",
       });
 
-      const result = service.resolve(doc);
+      const result = await service.resolve(doc);
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -471,14 +471,14 @@ describe("OutlineService.resolve", () => {
       expect(warnedNames).toContain("Iframe");
     });
 
-    it("ChildrenOf on doc with no children — returns empty children array", () => {
+    it("ChildrenOf on doc with no children — returns empty children array", async () => {
       // AC-OUTLINE-001.N01
       const spec = makeDoc({
         ...corpus.spec1,
         content: "<ChildrenOf />",
       });
 
-      const result = service.resolve(spec);
+      const result = await service.resolve(spec);
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -495,14 +495,14 @@ describe("OutlineService.resolve", () => {
   // ── Boundary Values ────────────────────────────────────────────────────────
 
   describe("boundary values", () => {
-    it("RecentDecisions with limit={1} — returns exactly 1 result", () => {
+    it("RecentDecisions with limit={1} — returns exactly 1 result", async () => {
       // AC-OUTLINE-002.01 boundary
       const doc = makeDoc({
         ...corpus.prd,
         content: "<RecentDecisions limit={1} />",
       });
 
-      const result = service.resolve(doc);
+      const result = await service.resolve(doc);
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -515,17 +515,17 @@ describe("OutlineService.resolve", () => {
       expect(data.decisions).toHaveLength(1);
     });
 
-    it("RecentDecisions default limit (no prop) — returns up to 5 results", () => {
+    it("RecentDecisions default limit (no prop) — returns up to 5 results", async () => {
       // AC-OUTLINE-002.02
-      store.insert(makeDoc({ id: "adr-004", title: "ADR 4", type: "adr", role: "decision" }));
-      store.insert(makeDoc({ id: "adr-005", title: "ADR 5", type: "adr", role: "decision" }));
+      await store.insert(makeDoc({ id: "adr-004", title: "ADR 4", type: "adr", role: "decision" }));
+      await store.insert(makeDoc({ id: "adr-005", title: "ADR 5", type: "adr", role: "decision" }));
 
       const doc = makeDoc({
         ...corpus.prd,
         content: "<RecentDecisions />",
       });
 
-      const result = service.resolve(doc);
+      const result = await service.resolve(doc);
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -538,10 +538,10 @@ describe("OutlineService.resolve", () => {
       expect(data.decisions).toHaveLength(5);
     });
 
-    it("empty content string — returns empty resolvedComponents", () => {
+    it("empty content string — returns empty resolvedComponents", async () => {
       const doc = makeDoc({ ...corpus.prd, content: "" });
 
-      const result = service.resolve(doc);
+      const result = await service.resolve(doc);
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -550,13 +550,13 @@ describe("OutlineService.resolve", () => {
       expect(result.value.warnings).toHaveLength(0);
     });
 
-    it("component with no props — uses defaults (no crash)", () => {
+    it("component with no props — uses defaults (no crash)", async () => {
       const doc = makeDoc({
         ...corpus.prd,
         content: "<ActivePlans />",
       });
 
-      const result = service.resolve(doc);
+      const result = await service.resolve(doc);
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -568,12 +568,12 @@ describe("OutlineService.resolve", () => {
       expect(component.props).toEqual({});
     });
 
-    it("position offsets are correct for first and last components", () => {
+    it("position offsets are correct for first and last components", async () => {
       // AC-OUTLINE-010.01
       const content = "intro text\n<ChildrenOf />\nmiddle\n<HealthStats />\nend";
       const doc = makeDoc({ ...corpus.prd, content });
 
-      const result = service.resolve(doc);
+      const result = await service.resolve(doc);
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -598,11 +598,11 @@ describe("OutlineService.resolve", () => {
   // ── Error Handling ─────────────────────────────────────────────────────────
 
   describe("error handling", () => {
-    it("propagates store STORE_ERROR as Result error — does not throw", () => {
+    it("propagates store STORE_ERROR as Result error — does not throw", async () => {
       // AC-OUTLINE-009.01
       const brokenStore: StoreInterface = {
         ...store,
-        findMany: () => ({
+        findMany: () => Promise.resolve({
           ok: false,
           error: { code: "STORE_ERROR", message: "DB connection lost" },
         }),
@@ -625,7 +625,7 @@ describe("OutlineService.resolve", () => {
       const brokenService = new OutlineService(brokenStore);
       const doc = makeDoc({ ...corpus.prd, content: "<ChildrenOf />" });
 
-      const result = brokenService.resolve(doc);
+      const result = await brokenService.resolve(doc);
 
       expect(result.ok).toBe(false);
       if (result.ok) return;
@@ -633,14 +633,14 @@ describe("OutlineService.resolve", () => {
       expect(result.error.code).toBe("STORE_ERROR");
     });
 
-    it("known component mixed with unknown — unknown stripped, known resolved", () => {
+    it("known component mixed with unknown — unknown stripped, known resolved", async () => {
       // AC-OUTLINE-005.02
       const doc = makeDoc({
         ...corpus.prd,
         content: "<UnknownWidget />\n<HealthStats />",
       });
 
-      const result = service.resolve(doc);
+      const result = await service.resolve(doc);
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -663,14 +663,14 @@ describe("OutlineService.resolve", () => {
   // ── Regression Guards ──────────────────────────────────────────────────────
 
   describe("regression", () => {
-    it("Embed with missing id prop — does not throw, returns error info", () => {
+    it("Embed with missing id prop — does not throw, returns error info", async () => {
       // AC-OUTLINE-004.N02 — Regression: ensure prop-less Embed does not crash
       const doc = makeDoc({
         ...corpus.prd,
         content: "<Embed />",
       });
 
-      const result = service.resolve(doc);
+      const result = await service.resolve(doc);
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -683,14 +683,14 @@ describe("OutlineService.resolve", () => {
       expect(data.embedded).toBeNull();
     });
 
-    it("component regex does not match opening tags — only self-closing", () => {
+    it("component regex does not match opening tags — only self-closing", async () => {
       // Regression: <ChildrenOf> (non self-closing) must NOT be parsed
       const doc = makeDoc({
         ...corpus.prd,
         content: "<ChildrenOf>\n  some content\n</ChildrenOf>",
       });
 
-      const result = service.resolve(doc);
+      const result = await service.resolve(doc);
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -700,14 +700,14 @@ describe("OutlineService.resolve", () => {
       expect(result.value.warnings).toHaveLength(0);
     });
 
-    it("component with numeric and boolean props — parsed correctly", () => {
+    it("component with numeric and boolean props — parsed correctly", async () => {
       // Regression: prop parser must distinguish string vs number types
       const doc = makeDoc({
         ...corpus.prd,
         content: '<RecentDecisions limit={3} status="approved" />',
       });
 
-      const result = service.resolve(doc);
+      const result = await service.resolve(doc);
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -722,13 +722,13 @@ describe("OutlineService.resolve", () => {
       expect(typeof component.props["status"]).toBe("string");
     });
 
-    it("multiple resolve() calls on same service instance are independent", () => {
+    it("multiple resolve() calls on same service instance are independent", async () => {
       // Regression: COMPONENT_REGEX.lastIndex must be reset each call (global flag)
       const doc1 = makeDoc({ ...corpus.prd, content: "<ChildrenOf />" });
       const doc2 = makeDoc({ ...corpus.spec1, content: "<HealthStats />" });
 
-      const result1 = service.resolve(doc1);
-      const result2 = service.resolve(doc2);
+      const result1 = await service.resolve(doc1);
+      const result2 = await service.resolve(doc2);
 
       expect(result1.ok).toBe(true);
       expect(result2.ok).toBe(true);

@@ -26,11 +26,11 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  run({ args }) {
+  async run({ args }) {
     const dbPath = findLoreDb();
     const app = createApp(dbPath);
     try {
-      const result = app.corpusService.delete(args.id, args.confirm ?? false);
+      const result = await app.corpusService.delete(args.id, args.confirm ?? false);
 
       if (!result.ok) {
         process.stderr.write(formatError(result.error) + "\n");

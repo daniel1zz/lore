@@ -42,7 +42,7 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  run({ args }) {
+  async run({ args }) {
     const linkType = (args.type ?? "relates-to") as LinkType;
 
     if (!VALID_LINK_TYPES.includes(linkType)) {
@@ -55,7 +55,7 @@ export default defineCommand({
     const dbPath = findLoreDb();
     const app = createApp(dbPath);
     try {
-      const result = app.corpusService.link(args.from, args.to, linkType);
+      const result = await app.corpusService.link(args.from, args.to, linkType);
 
       if (!result.ok) {
         process.stderr.write(formatError(result.error) + "\n");

@@ -28,12 +28,12 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  run({ args }) {
+  async run({ args }) {
     const dbPath = findLoreDb();
     const app = createApp(dbPath);
     try {
       const limit = parseInt(args.limit ?? "20", 10);
-      const result = app.versionService.log(args.id as DocId, { limit });
+      const result = await app.versionService.log(args.id as DocId, { limit });
 
       if (!result.ok) {
         process.stderr.write(formatError(result.error) + "\n");

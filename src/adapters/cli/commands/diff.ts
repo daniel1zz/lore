@@ -31,7 +31,7 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  run({ args }) {
+  async run({ args }) {
     const dbPath = findLoreDb();
     const app = createApp(dbPath);
     try {
@@ -39,7 +39,7 @@ export default defineCommand({
       if (args.from !== undefined) opts.from = parseInt(args.from, 10);
       if (args.to !== undefined) opts.to = parseInt(args.to, 10);
 
-      const result = app.versionService.diff(args.id as DocId, opts);
+      const result = await app.versionService.diff(args.id as DocId, opts);
 
       if (!result.ok) {
         process.stderr.write(formatError(result.error) + "\n");

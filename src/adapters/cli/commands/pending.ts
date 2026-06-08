@@ -30,7 +30,7 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  run({ args }) {
+  async run({ args }) {
     const dbPath = findLoreDb();
     const app = createApp(dbPath);
     try {
@@ -39,7 +39,7 @@ export default defineCommand({
       if (args.type !== undefined) filters["type"] = args.type as DocType;
       if (args.since !== undefined) filters["since"] = args.since;
 
-      const result = app.reviewService.pending(filters);
+      const result = await app.reviewService.pending(filters);
 
       if (!result.ok) {
         process.stderr.write(formatError(result.error) + "\n");

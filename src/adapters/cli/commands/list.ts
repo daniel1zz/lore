@@ -38,7 +38,7 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  run({ args }) {
+  async run({ args }) {
     const dbPath = findLoreDb();
     const app = createApp(dbPath);
     try {
@@ -49,7 +49,7 @@ export default defineCommand({
       if (args.since !== undefined) filters["since"] = args.since;
       if (args.tag !== undefined) filters["tags"] = [args.tag];
 
-      const result = app.corpusService.list(filters);
+      const result = await app.corpusService.list(filters);
 
       if (!result.ok) {
         process.stderr.write(formatError(result.error) + "\n");

@@ -65,16 +65,16 @@ describe("ReviewService", () => {
 
   describe("pending", () => {
     describe("happy path", () => {
-      it("returns only draft docs from a mixed set", () => {
+      it("returns only draft docs from a mixed set", async () => {
         const draft1 = makeDoc({ status: "draft", created_by: "alice" });
         const draft2 = makeDoc({ status: "draft", created_by: "bob" });
         const approved = makeDoc({ status: "approved", created_by: "carol" });
 
-        store.insert(draft1);
-        store.insert(draft2);
-        store.insert(approved);
+        await store.insert(draft1);
+        await store.insert(draft2);
+        await store.insert(approved);
 
-        const result = service.pending();
+        const result = await service.pending();
 
         expect(result.ok).toBe(true);
         if (!result.ok) return;
@@ -86,7 +86,7 @@ describe("ReviewService", () => {
         expect(ids).not.toContain(approved.id);
       });
 
-      it("returns PendingDoc shape with correct fields", () => {
+      it("returns PendingDoc shape with correct fields", async () => {
         const doc = makeDoc({
           status: "draft",
           created_by: "alice",
@@ -95,9 +95,9 @@ describe("ReviewService", () => {
           version: 3,
           updated_at: "2026-06-05T10:00:00.000Z",
         });
-        store.insert(doc);
+        await store.insert(doc);
 
-        const result = service.pending();
+        const result = await service.pending();
 
         expect(result.ok).toBe(true);
         if (!result.ok) return;
@@ -115,13 +115,13 @@ describe("ReviewService", () => {
     });
 
     describe("filter: author", () => {
-      it("returns only docs created by the specified author", () => {
+      it("returns only docs created by the specified author", async () => {
         const aliceDoc = makeDoc({ status: "draft", created_by: "alice" });
         const bobDoc = makeDoc({ status: "draft", created_by: "bob" });
-        store.insert(aliceDoc);
-        store.insert(bobDoc);
+        await store.insert(aliceDoc);
+        await store.insert(bobDoc);
 
-        const result = service.pending({ author: "alice" });
+        const result = await service.pending({ author: "alice" });
 
         expect(result.ok).toBe(true);
         if (!result.ok) return;
@@ -129,11 +129,11 @@ describe("ReviewService", () => {
         expect(result.value[0]!.id).toBe(aliceDoc.id);
       });
 
-      it("returns empty array when author has no drafts", () => {
+      it("returns empty array when author has no drafts", async () => {
         const doc = makeDoc({ status: "draft", created_by: "alice" });
-        store.insert(doc);
+        await store.insert(doc);
 
-        const result = service.pending({ author: "nobody" });
+        const result = await service.pending({ author: "nobody" });
 
         expect(result.ok).toBe(true);
         if (!result.ok) return;
@@ -142,17 +142,17 @@ describe("ReviewService", () => {
     });
 
     describe("filter: type", () => {
-      it("returns only docs of the specified type", () => {
+      it("returns only docs of the specified type", async () => {
         const prdDoc = makeDoc({ status: "draft", type: "prd" });
         const adrDoc = makeDoc({
           status: "draft",
           type: "adr",
           extra: { decision_status: "proposed" },
         });
-        store.insert(prdDoc);
-        store.insert(adrDoc);
+        await store.insert(prdDoc);
+        await store.insert(adrDoc);
 
-        const result = service.pending({ type: "prd" });
+        const result = await service.pending({ type: "prd" });
 
         expect(result.ok).toBe(true);
         if (!result.ok) return;
@@ -162,7 +162,7 @@ describe("ReviewService", () => {
     });
 
     describe("filter: since", () => {
-      it("returns only docs updated at or after the since timestamp", () => {
+      it("returns only docs updated at or after the since timestamp", async () => {
         const oldDoc = makeDoc({
           status: "draft",
           updated_at: "2026-01-01T00:00:00.000Z",
@@ -172,10 +172,10 @@ describe("ReviewService", () => {
           slug: "prd-newer-doc",
           updated_at: "2026-06-01T00:00:00.000Z",
         });
-        store.insert(oldDoc);
-        store.insert(newDoc);
+        await store.insert(oldDoc);
+        await store.insert(newDoc);
 
-        const result = service.pending({ since: "2026-05-01T00:00:00.000Z" });
+        const result = await service.pending({ since: "2026-05-01T00:00:00.000Z" });
 
         expect(result.ok).toBe(true);
         if (!result.ok) return;
@@ -185,19 +185,19 @@ describe("ReviewService", () => {
     });
 
     describe("boundary values", () => {
-      it("returns empty array when store has no docs at all", () => {
-        const result = service.pending();
+      it("returns empty array when store has no docs at all", async () => {
+        const result = await service.pending();
 
         expect(result.ok).toBe(true);
         if (!result.ok) return;
         expect(result.value).toHaveLength(0);
       });
 
-      it("returns empty array when all docs are approved (no drafts)", () => {
+      it("returns empty array when all docs are approved (no drafts)", async () => {
         const approved = makeDoc({ status: "approved" });
-        store.insert(approved);
+        await store.insert(approved);
 
-        const result = service.pending();
+        const result = await service.pending();
 
         expect(result.ok).toBe(true);
         if (!result.ok) return;
@@ -210,11 +210,11 @@ describe("ReviewService", () => {
 
   describe("approve", () => {
     describe("happy path", () => {
-      it("transitions draft → approved and returns updated doc", () => {
+      it("transitions draft → approved and returns updated doc", async () => {
         const doc = makeDoc({ status: "draft" });
-        store.insert(doc);
+        await store.insert(doc);
 
-        const result = service.approve(doc.id, { reviewer: "carol" });
+        const result = await service.approve(doc.id, { reviewer: "carol" });
 
         expect(result.ok).toBe(true);
         if (!result.ok) return;
@@ -222,24 +222,24 @@ describe("ReviewService", () => {
         expect(result.value.id).toBe(doc.id);
       });
 
-      it("increments the version number on approve", () => {
+      it("increments the version number on approve", async () => {
         const doc = makeDoc({ status: "draft", version: 2 });
-        store.insert(doc);
+        await store.insert(doc);
 
-        const result = service.approve(doc.id, { reviewer: "carol" });
+        const result = await service.approve(doc.id, { reviewer: "carol" });
 
         expect(result.ok).toBe(true);
         if (!result.ok) return;
         expect(result.value.version).toBe(3);
       });
 
-      it("creates a version record with action=approve and correct reviewer", () => {
+      it("creates a version record with action=approve and correct reviewer", async () => {
         const doc = makeDoc({ status: "draft" });
-        store.insert(doc);
+        await store.insert(doc);
 
-        service.approve(doc.id, { reviewer: "reviewer1" });
+        await service.approve(doc.id, { reviewer: "reviewer1" });
 
-        const versionsResult = store.findVersions(doc.id);
+        const versionsResult = await store.findVersions(doc.id);
         expect(versionsResult.ok).toBe(true);
         if (!versionsResult.ok) return;
         expect(versionsResult.value).toHaveLength(1);
@@ -248,13 +248,13 @@ describe("ReviewService", () => {
         expect(versionsResult.value[0]!.created_by).toBe("reviewer1");
       });
 
-      it("appends an audit entry with reviewer and action=approve", () => {
+      it("appends an audit entry with reviewer and action=approve", async () => {
         const doc = makeDoc({ status: "draft" });
-        store.insert(doc);
+        await store.insert(doc);
 
-        service.approve(doc.id, { reviewer: "carol" });
+        await service.approve(doc.id, { reviewer: "carol" });
 
-        const auditResult = store.queryAudit({ doc_id: doc.id });
+        const auditResult = await store.queryAudit({ doc_id: doc.id });
         expect(auditResult.ok).toBe(true);
         if (!auditResult.ok) return;
         expect(auditResult.value).toHaveLength(1);
@@ -263,24 +263,24 @@ describe("ReviewService", () => {
         expect(auditResult.value[0]!.doc_id).toBe(doc.id);
       });
 
-      it("transitions in-review → approved", () => {
+      it("transitions in-review → approved", async () => {
         const doc = makeDoc({ status: "in-review" });
-        store.insert(doc);
+        await store.insert(doc);
 
-        const result = service.approve(doc.id);
+        const result = await service.approve(doc.id);
 
         expect(result.ok).toBe(true);
         if (!result.ok) return;
         expect(result.value.status).toBe("approved");
       });
 
-      it("uses 'system' as reviewer when opts is omitted", () => {
+      it("uses 'system' as reviewer when opts is omitted", async () => {
         const doc = makeDoc({ status: "draft" });
-        store.insert(doc);
+        await store.insert(doc);
 
-        service.approve(doc.id);
+        await service.approve(doc.id);
 
-        const auditResult = store.queryAudit({ doc_id: doc.id });
+        const auditResult = await store.queryAudit({ doc_id: doc.id });
         expect(auditResult.ok).toBe(true);
         if (!auditResult.ok) return;
         expect(auditResult.value[0]!.actor).toBe("system");
@@ -288,11 +288,11 @@ describe("ReviewService", () => {
     });
 
     describe("state transitions (negative)", () => {
-      it("returns INVALID_TRANSITION when doc is already approved", () => {
+      it("returns INVALID_TRANSITION when doc is already approved", async () => {
         const doc = makeDoc({ status: "approved" });
-        store.insert(doc);
+        await store.insert(doc);
 
-        const result = service.approve(doc.id);
+        const result = await service.approve(doc.id);
 
         expect(result.ok).toBe(false);
         if (result.ok) return;
@@ -302,11 +302,11 @@ describe("ReviewService", () => {
         expect(result.error.to).toBe("approved");
       });
 
-      it("returns INVALID_TRANSITION when doc is archived", () => {
+      it("returns INVALID_TRANSITION when doc is archived", async () => {
         const doc = makeDoc({ status: "archived" });
-        store.insert(doc);
+        await store.insert(doc);
 
-        const result = service.approve(doc.id);
+        const result = await service.approve(doc.id);
 
         expect(result.ok).toBe(false);
         if (result.ok) return;
@@ -316,11 +316,11 @@ describe("ReviewService", () => {
         expect(result.error.to).toBe("approved");
       });
 
-      it("returns INVALID_TRANSITION when doc is deprecated", () => {
+      it("returns INVALID_TRANSITION when doc is deprecated", async () => {
         const doc = makeDoc({ status: "deprecated" });
-        store.insert(doc);
+        await store.insert(doc);
 
-        const result = service.approve(doc.id);
+        const result = await service.approve(doc.id);
 
         expect(result.ok).toBe(false);
         if (result.ok) return;
@@ -331,8 +331,8 @@ describe("ReviewService", () => {
     });
 
     describe("error handling", () => {
-      it("returns DOC_NOT_FOUND when id does not exist", () => {
-        const result = service.approve("nonexistent-id");
+      it("returns DOC_NOT_FOUND when id does not exist", async () => {
+        const result = await service.approve("nonexistent-id");
 
         expect(result.ok).toBe(false);
         if (result.ok) return;
@@ -345,11 +345,11 @@ describe("ReviewService", () => {
 
   describe("reject", () => {
     describe("happy path", () => {
-      it("keeps status as draft and records reason in audit", () => {
+      it("keeps status as draft and records reason in audit", async () => {
         const doc = makeDoc({ status: "draft" });
-        store.insert(doc);
+        await store.insert(doc);
 
-        const result = service.reject(doc.id, {
+        const result = await service.reject(doc.id, {
           reviewer: "bob",
           reason: "incomplete",
         });
@@ -358,7 +358,7 @@ describe("ReviewService", () => {
         if (!result.ok) return;
         expect(result.value.status).toBe("draft");
 
-        const auditResult = store.queryAudit({ doc_id: doc.id });
+        const auditResult = await store.queryAudit({ doc_id: doc.id });
         expect(auditResult.ok).toBe(true);
         if (!auditResult.ok) return;
         expect(auditResult.value).toHaveLength(1);
@@ -367,48 +367,48 @@ describe("ReviewService", () => {
         expect(auditResult.value[0]!.details?.["reason"]).toBe("incomplete");
       });
 
-      it("rejects an in-review doc, status returns to draft", () => {
+      it("rejects an in-review doc, status returns to draft", async () => {
         const doc = makeDoc({ status: "in-review" });
-        store.insert(doc);
+        await store.insert(doc);
 
-        const result = service.reject(doc.id, { reason: "needs more work" });
+        const result = await service.reject(doc.id, { reason: "needs more work" });
 
         expect(result.ok).toBe(true);
         if (!result.ok) return;
         expect(result.value.status).toBe("draft");
       });
 
-      it("stores reason in audit details", () => {
+      it("stores reason in audit details", async () => {
         const doc = makeDoc({ status: "draft" });
-        store.insert(doc);
+        await store.insert(doc);
 
-        service.reject(doc.id, { reviewer: "reviewer1", reason: "missing tests" });
+        await service.reject(doc.id, { reviewer: "reviewer1", reason: "missing tests" });
 
-        const auditResult = store.queryAudit({ doc_id: doc.id, action: "reject" });
+        const auditResult = await store.queryAudit({ doc_id: doc.id, action: "reject" });
         expect(auditResult.ok).toBe(true);
         if (!auditResult.ok) return;
         expect(auditResult.value[0]!.details?.["reason"]).toBe("missing tests");
       });
 
-      it("omits reason key from audit details when reason is not provided", () => {
+      it("omits reason key from audit details when reason is not provided", async () => {
         const doc = makeDoc({ status: "draft" });
-        store.insert(doc);
+        await store.insert(doc);
 
-        service.reject(doc.id, { reviewer: "reviewer1" });
+        await service.reject(doc.id, { reviewer: "reviewer1" });
 
-        const auditResult = store.queryAudit({ doc_id: doc.id });
+        const auditResult = await store.queryAudit({ doc_id: doc.id });
         expect(auditResult.ok).toBe(true);
         if (!auditResult.ok) return;
         expect(auditResult.value[0]!.details?.["reason"]).toBeUndefined();
       });
 
-      it("uses 'system' as reviewer when opts is omitted", () => {
+      it("uses 'system' as reviewer when opts is omitted", async () => {
         const doc = makeDoc({ status: "draft" });
-        store.insert(doc);
+        await store.insert(doc);
 
-        service.reject(doc.id);
+        await service.reject(doc.id);
 
-        const auditResult = store.queryAudit({ doc_id: doc.id });
+        const auditResult = await store.queryAudit({ doc_id: doc.id });
         expect(auditResult.ok).toBe(true);
         if (!auditResult.ok) return;
         expect(auditResult.value[0]!.actor).toBe("system");
@@ -416,11 +416,11 @@ describe("ReviewService", () => {
     });
 
     describe("state transitions (negative)", () => {
-      it("returns INVALID_TRANSITION when doc is approved (cannot reject approved)", () => {
+      it("returns INVALID_TRANSITION when doc is approved (cannot reject approved)", async () => {
         const doc = makeDoc({ status: "approved" });
-        store.insert(doc);
+        await store.insert(doc);
 
-        const result = service.reject(doc.id, { reason: "test" });
+        const result = await service.reject(doc.id, { reason: "test" });
 
         expect(result.ok).toBe(false);
         if (result.ok) return;
@@ -430,11 +430,11 @@ describe("ReviewService", () => {
         expect(result.error.to).toBe("draft");
       });
 
-      it("returns INVALID_TRANSITION when doc is archived", () => {
+      it("returns INVALID_TRANSITION when doc is archived", async () => {
         const doc = makeDoc({ status: "archived" });
-        store.insert(doc);
+        await store.insert(doc);
 
-        const result = service.reject(doc.id);
+        const result = await service.reject(doc.id);
 
         expect(result.ok).toBe(false);
         if (result.ok) return;
@@ -443,11 +443,11 @@ describe("ReviewService", () => {
         expect(result.error.from).toBe("archived");
       });
 
-      it("returns INVALID_TRANSITION when doc is deprecated", () => {
+      it("returns INVALID_TRANSITION when doc is deprecated", async () => {
         const doc = makeDoc({ status: "deprecated" });
-        store.insert(doc);
+        await store.insert(doc);
 
-        const result = service.reject(doc.id);
+        const result = await service.reject(doc.id);
 
         expect(result.ok).toBe(false);
         if (result.ok) return;
@@ -458,8 +458,8 @@ describe("ReviewService", () => {
     });
 
     describe("error handling", () => {
-      it("returns DOC_NOT_FOUND when id does not exist", () => {
-        const result = service.reject("nonexistent-id");
+      it("returns DOC_NOT_FOUND when id does not exist", async () => {
+        const result = await service.reject("nonexistent-id");
 
         expect(result.ok).toBe(false);
         if (result.ok) return;
@@ -469,11 +469,11 @@ describe("ReviewService", () => {
 
     describe("regression", () => {
       // Regression: reject MUST NOT increment version — only approve bumps version
-      it("reject does not increment version number", () => {
+      it("reject does not increment version number", async () => {
         const doc = makeDoc({ status: "draft", version: 1 });
-        store.insert(doc);
+        await store.insert(doc);
 
-        const result = service.reject(doc.id, { reason: "incomplete" });
+        const result = await service.reject(doc.id, { reason: "incomplete" });
 
         expect(result.ok).toBe(true);
         if (!result.ok) return;
@@ -481,13 +481,13 @@ describe("ReviewService", () => {
       });
 
       // Regression: approved doc must not appear in pending list
-      it("approved doc no longer appears in pending after approval", () => {
+      it("approved doc no longer appears in pending after approval", async () => {
         const doc = makeDoc({ status: "draft" });
-        store.insert(doc);
+        await store.insert(doc);
 
-        service.approve(doc.id);
+        await service.approve(doc.id);
 
-        const pendingResult = service.pending();
+        const pendingResult = await service.pending();
         expect(pendingResult.ok).toBe(true);
         if (!pendingResult.ok) return;
         const ids = pendingResult.value.map((d) => d.id);

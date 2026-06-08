@@ -1,6 +1,7 @@
 /**
  * StoreInterface — storage abstraction for the Lore corpus.
- * All methods are synchronous (bun:sqlite is synchronous).
+ * All methods return Promise<Result<T, LoreError>> for Turso/libSQL async compatibility.
+ * SQLiteStore wraps sync bun:sqlite calls in async methods.
  * Source: SPEC-001 §4, adapted to use Result<T, LoreError> per task spec.
  */
 
@@ -51,39 +52,40 @@ export interface AuditFilters {
 // ─── Interface ─────────────────────────────────────────────────────────────
 
 /**
- * Synchronous storage interface.
- * SQLiteStore implements this via bun:sqlite (synchronous driver).
- * InMemoryStore will implement this for unit tests.
+ * Async storage interface.
+ * SQLiteStore implements this via bun:sqlite (sync internally, wrapped in async).
+ * TursoStore will implement this via @libsql/client (natively async).
+ * InMemoryStore implements this for unit tests.
  */
 export interface StoreInterface {
   // ── Document CRUD ──────────────────────────────────────────────────────
 
   /** Insert a new doc. Fails with DUPLICATE_SLUG if slug already exists. */
-  insert(doc: DocRecord): Result<DocRecord, LoreError>;
+  insert(doc: DocRecord): Promise<Result<DocRecord, LoreError>>;
 
   /** Find doc by ULID. Returns null (not error) if not found. */
-  find(id: DocId): Result<DocRecord | null, LoreError>;
+  find(id: DocId): Promise<Result<DocRecord | null, LoreError>>;
 
   /** Find doc by slug. Returns null (not error) if not found. */
-  findBySlug(slug: Slug): Result<DocRecord | null, LoreError>;
+  findBySlug(slug: Slug): Promise<Result<DocRecord | null, LoreError>>;
 
   /**
    * Find multiple docs matching filters.
    * By default excludes soft-deleted docs (exclude_deleted defaults to true).
    */
-  findMany(filters: StoreFilters): Result<DocRecord[], LoreError>;
+  findMany(filters: StoreFilters): Promise<Result<DocRecord[], LoreError>>;
 
   /**
    * Apply a partial patch to an existing doc.
    * Returns DOC_NOT_FOUND if id is missing.
    */
-  update(id: DocId, patch: Partial<DocRecord>): Result<DocRecord, LoreError>;
+  update(id: DocId, patch: Partial<DocRecord>): Promise<Result<DocRecord, LoreError>>;
 
   /**
    * Set deleted_at to current ISO timestamp.
    * Doc remains in DB but excluded from findMany by default.
    */
-  softDelete(id: DocId): Result<void, LoreError>;
+  softDelete(id: DocId): Promise<Result<void, LoreError>>;
 
   // ── Links ──────────────────────────────────────────────────────────────
 
@@ -92,20 +94,20 @@ export interface StoreInterface {
    * Fails with DUPLICATE_LINK if (from_id, to_id, link_type) already exists.
    * For link_type='parent': validates no cycle in the parent tree.
    */
-  addLink(link: LinkRecord): Result<LinkRecord, LoreError>;
+  addLink(link: LinkRecord): Promise<Result<LinkRecord, LoreError>>;
 
   /** Remove a specific directed link by composite key. */
   removeLink(
     fromId: DocId,
     toId: DocId,
     linkType: LinkType,
-  ): Result<void, LoreError>;
+  ): Promise<Result<void, LoreError>>;
 
   /** Find all links for a doc, filtered by direction. */
   findLinks(
     docId: DocId,
     direction: "in" | "out" | "both",
-  ): Result<LinkRecord[], LoreError>;
+  ): Promise<Result<LinkRecord[], LoreError>>;
 
   // ── Search ─────────────────────────────────────────────────────────────
 
@@ -114,26 +116,26 @@ export interface StoreInterface {
    * Returns ranked results with BM25 score and content snippets.
    * Filters applied as post-FTS WHERE clauses on joined docs table.
    */
-  search(query: string, filters?: StoreFilters): Result<SearchHit[], LoreError>;
+  search(query: string, filters?: StoreFilters): Promise<Result<SearchHit[], LoreError>>;
 
   // ── Versions ───────────────────────────────────────────────────────────
 
   /** Insert a new version snapshot. */
-  insertVersion(version: VersionRecord): Result<VersionRecord, LoreError>;
+  insertVersion(version: VersionRecord): Promise<Result<VersionRecord, LoreError>>;
 
   /** Return version history for a doc, newest first. */
   findVersions(
     docId: DocId,
     opts?: { limit?: number; offset?: number },
-  ): Result<VersionRecord[], LoreError>;
+  ): Promise<Result<VersionRecord[], LoreError>>;
 
   // ── Audit ──────────────────────────────────────────────────────────────
 
   /** Append an immutable audit entry. */
-  appendAuditEntry(entry: AuditEntry): Result<void, LoreError>;
+  appendAuditEntry(entry: AuditEntry): Promise<Result<void, LoreError>>;
 
   /** Query audit log with filters. */
-  queryAudit(filters: AuditFilters): Result<AuditEntry[], LoreError>;
+  queryAudit(filters: AuditFilters): Promise<Result<AuditEntry[], LoreError>>;
 
   // ── Lifecycle ──────────────────────────────────────────────────────────
 

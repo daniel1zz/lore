@@ -126,35 +126,35 @@ function toSummary(doc: DocRecord): DocSummary {
 
 type ComponentData = unknown;
 
-function resolveChildrenOf(
+async function resolveChildrenOf(
   doc: DocRecord,
   props: Record<string, unknown>,
   store: StoreInterface,
-): Result<ComponentData, LoreError> {
+): Promise<Result<ComponentData, LoreError>> {
   const filters = {
     parent_id: doc.id as string,
     ...(typeof props["type"] === "string" ? { type: props["type"] as import("../core/types.js").DocType } : {}),
     ...(typeof props["status"] === "string" ? { status: props["status"] as import("../core/types.js").DocStatus } : {}),
   };
 
-  const result = store.findMany(filters);
+  const result = await store.findMany(filters);
   if (!result.ok) return result;
 
   const children = result.value.map(toSummary);
   return ok({ children });
 }
 
-function resolveRecentDecisions(
+async function resolveRecentDecisions(
   props: Record<string, unknown>,
   store: StoreInterface,
-): Result<ComponentData, LoreError> {
+): Promise<Result<ComponentData, LoreError>> {
   const limit = typeof props["limit"] === "number" ? props["limit"] : 5;
   const filters = {
     type: "adr" as import("../core/types.js").DocType,
     ...(typeof props["status"] === "string" ? { status: props["status"] as import("../core/types.js").DocStatus } : {}),
   };
 
-  const result = store.findMany(filters);
+  const result = await store.findMany(filters);
   if (!result.ok) return result;
 
   // findMany already returns sorted by updated_at DESC
@@ -162,15 +162,15 @@ function resolveRecentDecisions(
   return ok({ decisions });
 }
 
-function resolveActivePlans(
+async function resolveActivePlans(
   props: Record<string, unknown>,
   store: StoreInterface,
-): Result<ComponentData, LoreError> {
+): Promise<Result<ComponentData, LoreError>> {
   const statusFilter = typeof props["status"] === "string"
     ? props["status"] as import("../core/types.js").DocStatus
     : "active" as import("../core/types.js").DocStatus;
 
-  const result = store.findMany({
+  const result = await store.findMany({
     type: "plan" as import("../core/types.js").DocType,
     status: statusFilter,
   });
@@ -180,22 +180,22 @@ function resolveActivePlans(
   return ok({ plans });
 }
 
-function resolveModuleTree(
+async function resolveModuleTree(
   doc: DocRecord,
   props: Record<string, unknown>,
   store: StoreInterface,
-): Result<ComponentData, LoreError> {
+): Promise<Result<ComponentData, LoreError>> {
   const maxDepth = typeof props["depth"] === "number" ? props["depth"] : 3;
   const rootId = typeof props["root"] === "string" ? props["root"] : doc.id;
 
-  const rootResult = store.find(rootId);
+  const rootResult = await store.find(rootId);
   if (!rootResult.ok) return rootResult;
 
   if (rootResult.value === null) {
     return ok({ modules: null });
   }
 
-  const treeResult = buildTree(rootResult.value, store, 0, maxDepth);
+  const treeResult = await buildTree(rootResult.value, store, 0, maxDepth);
   if (!treeResult.ok) return treeResult;
 
   return ok({ modules: treeResult.value });
@@ -206,22 +206,22 @@ interface TreeNode {
   children: TreeNode[];
 }
 
-function buildTree(
+async function buildTree(
   doc: DocRecord,
   store: StoreInterface,
   currentDepth: number,
   maxDepth: number,
-): Result<TreeNode, LoreError> {
+): Promise<Result<TreeNode, LoreError>> {
   if (currentDepth >= maxDepth) {
     return ok({ doc: toSummary(doc), children: [] });
   }
 
-  const childrenResult = store.findMany({ parent_id: doc.id });
+  const childrenResult = await store.findMany({ parent_id: doc.id });
   if (!childrenResult.ok) return childrenResult;
 
   const childNodes: TreeNode[] = [];
   for (const child of childrenResult.value) {
-    const childTreeResult = buildTree(child, store, currentDepth + 1, maxDepth);
+    const childTreeResult = await buildTree(child, store, currentDepth + 1, maxDepth);
     if (!childTreeResult.ok) return childTreeResult;
     childNodes.push(childTreeResult.value);
   }
@@ -229,16 +229,16 @@ function buildTree(
   return ok({ doc: toSummary(doc), children: childNodes });
 }
 
-function resolveRelatedOf(
+async function resolveRelatedOf(
   doc: DocRecord,
   props: Record<string, unknown>,
   store: StoreInterface,
-): Result<ComponentData, LoreError> {
+): Promise<Result<ComponentData, LoreError>> {
   const direction = (typeof props["direction"] === "string"
     ? props["direction"]
     : "both") as "in" | "out" | "both";
 
-  const linksResult = store.findLinks(doc.id, direction);
+  const linksResult = await store.findLinks(doc.id, direction);
   if (!linksResult.ok) return linksResult;
 
   const typeFilter = typeof props["type"] === "string" ? props["type"] : null;
@@ -252,7 +252,7 @@ function resolveRelatedOf(
 
   for (const link of filteredLinks) {
     const otherId = link.from_id === doc.id ? link.to_id : link.from_id;
-    const docResult = store.find(otherId);
+    const docResult = await store.find(otherId);
     if (!docResult.ok) return docResult;
     if (docResult.value !== null) {
       related.push({ ...toSummary(docResult.value), link_type: link.link_type });
@@ -262,17 +262,17 @@ function resolveRelatedOf(
   return ok({ related });
 }
 
-function resolveEmbed(
+async function resolveEmbed(
   props: Record<string, unknown>,
   store: StoreInterface,
-): Result<ComponentData, LoreError> {
+): Promise<Result<ComponentData, LoreError>> {
   const id = typeof props["id"] === "string" ? props["id"] : null;
 
   if (id === null) {
     return ok({ embedded: null, error: "Embed requires an id prop" });
   }
 
-  const docResult = store.find(id);
+  const docResult = await store.find(id);
   if (!docResult.ok) return docResult;
 
   if (docResult.value === null) {
@@ -317,10 +317,10 @@ function extractSection(content: string, heading: string): string {
   return sectionLines.join("\n");
 }
 
-function resolveHealthStats(
+async function resolveHealthStats(
   store: StoreInterface,
-): Result<ComponentData, LoreError> {
-  const allResult = store.findMany({});
+): Promise<Result<ComponentData, LoreError>> {
+  const allResult = await store.findMany({});
   if (!allResult.ok) return allResult;
 
   const docs = allResult.value;
@@ -372,10 +372,10 @@ export class OutlineService {
    * Store errors propagate as Result errors.
    * Missing embeds degrade gracefully (null data + warning).
    */
-  resolve(
+  async resolve(
     doc: DocRecord,
     opts?: ResolveOpts,
-  ): Result<ResolvedDoc, LoreError> {
+  ): Promise<Result<ResolvedDoc, LoreError>> {
     const resolvedComponents: ResolvedComponent[] = [];
     const warnings: ResolutionWarning[] = [];
 
@@ -402,7 +402,7 @@ export class OutlineService {
       }
 
       const props = parseProps(propsStr);
-      const dataResult = this.resolveComponent(name, doc, props);
+      const dataResult = await this.resolveComponent(name, doc, props);
 
       if (!dataResult.ok) {
         return dataResult;
@@ -423,11 +423,11 @@ export class OutlineService {
     });
   }
 
-  private resolveComponent(
+  private async resolveComponent(
     name: string,
     doc: DocRecord,
     props: Record<string, unknown>,
-  ): Result<ComponentData, LoreError> {
+  ): Promise<Result<ComponentData, LoreError>> {
     switch (name) {
       case "ChildrenOf":
         return resolveChildrenOf(doc, props, this.store);

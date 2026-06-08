@@ -251,19 +251,46 @@ export function slugify(type: DocType, title: string): Slug {
 /**
  * Generate a collision-free slug by appending -2, -3, etc.
  * `existsSlug` must return true if the candidate slug is already taken.
+ * Accepts both sync and async `existsSlug` callbacks.
+ * Returns a Promise when `existsSlug` is async, Slug when sync.
  */
 export function slugifyWithCollision(
   type: DocType,
   title: string,
   existsSlug: (slug: string) => boolean,
-): Slug {
+): Slug;
+export function slugifyWithCollision(
+  type: DocType,
+  title: string,
+  existsSlug: (slug: string) => Promise<boolean>,
+): Promise<Slug>;
+export function slugifyWithCollision(
+  type: DocType,
+  title: string,
+  existsSlug: (slug: string) => boolean | Promise<boolean>,
+): Slug | Promise<Slug> {
   const base = slugify(type, title);
-  if (!existsSlug(base)) return base;
+  const checkResult = existsSlug(base);
 
+  if (checkResult instanceof Promise) {
+    // Async path
+    return (async () => {
+      if (!(await checkResult)) return base;
+      for (let i = 2; i <= 999; i++) {
+        const suffix = `-${i}`;
+        const candidate = base.slice(0, 64 - suffix.length) + suffix;
+        if (!(await existsSlug(candidate))) return candidate as Slug;
+      }
+      throw new Error(`Could not generate unique slug for type=${type} title=${title}`);
+    })();
+  }
+
+  // Sync path
+  if (!checkResult) return base;
   for (let i = 2; i <= 999; i++) {
     const suffix = `-${i}`;
     const candidate = base.slice(0, 64 - suffix.length) + suffix;
-    if (!existsSlug(candidate)) return candidate as Slug;
+    if (!(existsSlug(candidate) as boolean)) return candidate as Slug;
   }
 
   // Unreachable in practice

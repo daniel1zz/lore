@@ -28,7 +28,7 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  run({ args }) {
+  async run({ args }) {
     const versionNum = parseInt(args.version, 10);
     if (isNaN(versionNum) || versionNum < 1) {
       process.stderr.write("Error: version must be a positive integer.\n");
@@ -38,7 +38,7 @@ export default defineCommand({
     const dbPath = findLoreDb();
     const app = createApp(dbPath);
     try {
-      const result = app.versionService.restore(args.id as DocId, versionNum);
+      const result = await app.versionService.restore(args.id as DocId, versionNum);
 
       if (!result.ok) {
         process.stderr.write(formatError(result.error) + "\n");

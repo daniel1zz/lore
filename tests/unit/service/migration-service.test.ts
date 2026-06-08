@@ -384,7 +384,7 @@ MIIEowIBAAKCAQEA...
     };
 
     describe("happy path — import", () => {
-      it("imports 3 docs → findMany returns 3 docs", () => {
+      it("imports 3 docs → findMany returns 3 docs", async () => {
         writeFileSync(join(tempDir, "prd.md"), makePrdFile("PRD-001", "My PRD"));
         writeFileSync(
           join(tempDir, "spec.md"),
@@ -392,27 +392,27 @@ MIIEowIBAAKCAQEA...
         );
         writeFileSync(join(tempDir, "knowledge.md"), makeKnowledgeFile("KNOW-001"));
 
-        const result = service.execute(tempDir, defaultOpts);
+        const result = await service.execute(tempDir, defaultOpts);
         expect(result.ok).toBe(true);
         if (!result.ok) return;
 
         expect(result.value.imported).toBe(3);
         expect(result.value.skipped).toBe(0);
 
-        const findResult = store.findMany({});
+        const findResult = await store.findMany({});
         expect(findResult.ok).toBe(true);
         if (!findResult.ok) return;
         expect(findResult.value).toHaveLength(3);
       });
 
-      it("generates slugs for imported docs", () => {
+      it("generates slugs for imported docs", async () => {
         writeFileSync(join(tempDir, "prd.md"), makePrdFile("PRD-001", "My PRD Title"));
 
-        const result = service.execute(tempDir, defaultOpts);
+        const result = await service.execute(tempDir, defaultOpts);
         expect(result.ok).toBe(true);
         if (!result.ok) return;
 
-        const findResult = store.findMany({});
+        const findResult = await store.findMany({});
         expect(findResult.ok).toBe(true);
         if (!findResult.ok) return;
 
@@ -421,51 +421,51 @@ MIIEowIBAAKCAQEA...
         expect(doc?.slug).toContain("my-prd-title");
       });
 
-      it("maps v1 spec doc → imported as type=spec", () => {
+      it("maps v1 spec doc → imported as type=spec", async () => {
         writeFileSync(
           join(tempDir, "spec.md"),
           makeSpecFile("SPEC-001", "Auth Spec", "PRD-001"),
         );
 
-        const result = service.execute(tempDir, defaultOpts);
+        const result = await service.execute(tempDir, defaultOpts);
         expect(result.ok).toBe(true);
         if (!result.ok) return;
 
-        const findResult = store.findMany({ type: "spec" });
+        const findResult = await store.findMany({ type: "spec" });
         expect(findResult.ok).toBe(true);
         if (!findResult.ok) return;
         expect(findResult.value).toHaveLength(1);
         expect(findResult.value[0]?.type).toBe("spec");
       });
 
-      it("maps v1 prd → imported as type=prd with role=intent", () => {
+      it("maps v1 prd → imported as type=prd with role=intent", async () => {
         writeFileSync(join(tempDir, "prd.md"), makePrdFile("PRD-001", "My PRD"));
 
-        service.execute(tempDir, defaultOpts);
+        await service.execute(tempDir, defaultOpts);
 
-        const findResult = store.findMany({ type: "prd" });
+        const findResult = await store.findMany({ type: "prd" });
         expect(findResult.ok).toBe(true);
         if (!findResult.ok) return;
         expect(findResult.value[0]?.role).toBe("intent");
       });
 
-      it("stores v1_original_id in extra field", () => {
+      it("stores v1_original_id in extra field", async () => {
         writeFileSync(join(tempDir, "prd.md"), makePrdFile("PRD-001", "My PRD"));
 
-        service.execute(tempDir, defaultOpts);
+        await service.execute(tempDir, defaultOpts);
 
-        const findResult = store.findMany({});
+        const findResult = await store.findMany({});
         expect(findResult.ok).toBe(true);
         if (!findResult.ok) return;
         expect(findResult.value[0]?.extra?.["v1_original_id"]).toBe("PRD-001");
       });
 
-      it("maps v1 'published' status → 'approved'", () => {
+      it("maps v1 'published' status → 'approved'", async () => {
         writeFileSync(join(tempDir, "prd.md"), makePrdFile("PRD-001", "My PRD"));
 
-        service.execute(tempDir, defaultOpts);
+        await service.execute(tempDir, defaultOpts);
 
-        const findResult = store.findMany({});
+        const findResult = await store.findMany({});
         expect(findResult.ok).toBe(true);
         if (!findResult.ok) return;
         expect(findResult.value[0]?.status).toBe("approved");
@@ -473,10 +473,10 @@ MIIEowIBAAKCAQEA...
     });
 
     describe("v1 unknown type → knowledge with warning", () => {
-      it("imports custom-note as knowledge type", () => {
+      it("imports custom-note as knowledge type", async () => {
         writeFileSync(join(tempDir, "custom.md"), makeUnknownTypeFile("CUSTOM-001"));
 
-        const result = service.execute(tempDir, defaultOpts);
+        const result = await service.execute(tempDir, defaultOpts);
         expect(result.ok).toBe(true);
         if (!result.ok) return;
 
@@ -484,7 +484,7 @@ MIIEowIBAAKCAQEA...
         expect(result.value.warnings.length).toBeGreaterThan(0);
         expect(result.value.warnings[0]).toContain("custom-note");
 
-        const findResult = store.findMany({ type: "knowledge" });
+        const findResult = await store.findMany({ type: "knowledge" });
         expect(findResult.ok).toBe(true);
         if (!findResult.ok) return;
         expect(findResult.value).toHaveLength(1);
@@ -492,14 +492,14 @@ MIIEowIBAAKCAQEA...
     });
 
     describe("v1 links → link records created", () => {
-      it("creates relates-to link records between imported docs", () => {
+      it("creates relates-to link records between imported docs", async () => {
         writeFileSync(join(tempDir, "prd.md"), makePrdFile("PRD-001", "My PRD"));
         writeFileSync(
           join(tempDir, "spec.md"),
           makeSpecFile("SPEC-001", "Auth Spec", "PRD-001"),
         );
 
-        const result = service.execute(tempDir, defaultOpts);
+        const result = await service.execute(tempDir, defaultOpts);
         expect(result.ok).toBe(true);
         if (!result.ok) return;
 
@@ -507,14 +507,14 @@ MIIEowIBAAKCAQEA...
         expect(result.value.link_resolution.broken).toBe(0);
       });
 
-      it("logs broken links when target not imported", () => {
+      it("logs broken links when target not imported", async () => {
         // SPEC links to PRD-MISSING which is not in corpus
         writeFileSync(
           join(tempDir, "spec.md"),
           makeSpecFile("SPEC-001", "Auth Spec", "PRD-MISSING"),
         );
 
-        const result = service.execute(tempDir, defaultOpts);
+        const result = await service.execute(tempDir, defaultOpts);
         expect(result.ok).toBe(true);
         if (!result.ok) return;
 
@@ -524,18 +524,18 @@ MIIEowIBAAKCAQEA...
     });
 
     describe("dry run", () => {
-      it("dry run → no docs written to store", () => {
+      it("dry run → no docs written to store", async () => {
         writeFileSync(join(tempDir, "prd.md"), makePrdFile("PRD-001", "My PRD"));
         writeFileSync(join(tempDir, "spec.md"), makeSpecFile("SPEC-001", "Auth Spec", "PRD-001"));
 
-        const result = service.execute(tempDir, { ...defaultOpts, dryRun: true });
+        const result = await service.execute(tempDir, { ...defaultOpts, dryRun: true });
         expect(result.ok).toBe(true);
         if (!result.ok) return;
 
         expect(result.value.imported).toBe(0);
         expect(result.value.warnings[0]).toContain("dry-run");
 
-        const findResult = store.findMany({});
+        const findResult = await store.findMany({});
         expect(findResult.ok).toBe(true);
         if (!findResult.ok) return;
         expect(findResult.value).toHaveLength(0);
@@ -543,26 +543,26 @@ MIIEowIBAAKCAQEA...
     });
 
     describe("idempotency — re-run skips existing docs", () => {
-      it("second run on same corpus skips already-imported docs", () => {
+      it("second run on same corpus skips already-imported docs", async () => {
         writeFileSync(join(tempDir, "prd.md"), makePrdFile("PRD-001", "My PRD"));
         writeFileSync(join(tempDir, "spec.md"), makeSpecFile("SPEC-001", "Auth Spec", "PRD-001"));
 
         // First run
-        const first = service.execute(tempDir, defaultOpts);
+        const first = await service.execute(tempDir, defaultOpts);
         expect(first.ok).toBe(true);
         if (!first.ok) return;
         expect(first.value.imported).toBe(2);
         expect(first.value.skipped).toBe(0);
 
         // Second run — same corpus
-        const second = service.execute(tempDir, defaultOpts);
+        const second = await service.execute(tempDir, defaultOpts);
         expect(second.ok).toBe(true);
         if (!second.ok) return;
         expect(second.value.imported).toBe(0);
         expect(second.value.skipped).toBe(2);
 
         // Store still has exactly 2 docs
-        const findResult = store.findMany({});
+        const findResult = await store.findMany({});
         expect(findResult.ok).toBe(true);
         if (!findResult.ok) return;
         expect(findResult.value).toHaveLength(2);
@@ -570,10 +570,10 @@ MIIEowIBAAKCAQEA...
     });
 
     describe("secret scan blocking", () => {
-      it("blocks import when secrets found and skipSecretScan=false", () => {
+      it("blocks import when secrets found and skipSecretScan=false", async () => {
         writeFileSync(join(tempDir, "secret.md"), makeFileWithAwsKey("SECRET-001"));
 
-        const result = service.execute(tempDir, {
+        const result = await service.execute(tempDir, {
           ...defaultOpts,
           skipSecretScan: false,
         });
@@ -586,16 +586,16 @@ MIIEowIBAAKCAQEA...
         expect(result.error.message).toContain("secret");
 
         // Nothing imported
-        const findResult = store.findMany({});
+        const findResult = await store.findMany({});
         expect(findResult.ok).toBe(true);
         if (!findResult.ok) return;
         expect(findResult.value).toHaveLength(0);
       });
 
-      it("proceeds when secrets found but skipSecretScan=true", () => {
+      it("proceeds when secrets found but skipSecretScan=true", async () => {
         writeFileSync(join(tempDir, "secret.md"), makeFileWithAwsKey("SECRET-001"));
 
-        const result = service.execute(tempDir, {
+        const result = await service.execute(tempDir, {
           ...defaultOpts,
           skipSecretScan: true,
         });
@@ -605,10 +605,10 @@ MIIEowIBAAKCAQEA...
         expect(result.value.imported).toBe(1);
       });
 
-      it("proceeds normally when no secrets present", () => {
+      it("proceeds normally when no secrets present", async () => {
         writeFileSync(join(tempDir, "clean.md"), makeKnowledgeFile("KNOW-001"));
 
-        const result = service.execute(tempDir, defaultOpts);
+        const result = await service.execute(tempDir, defaultOpts);
         expect(result.ok).toBe(true);
         if (!result.ok) return;
         expect(result.value.imported).toBe(1);
@@ -616,24 +616,24 @@ MIIEowIBAAKCAQEA...
     });
 
     describe("idStrategy — preserve v1 IDs", () => {
-      it("preserves original v1 ULID when idStrategy=preserve", () => {
+      it("preserves original v1 ULID when idStrategy=preserve", async () => {
         writeFileSync(join(tempDir, "prd.md"), makePrdFile("PRD-ORIG-001", "My PRD"));
 
-        service.execute(tempDir, { ...defaultOpts, idStrategy: "preserve" });
+        await service.execute(tempDir, { ...defaultOpts, idStrategy: "preserve" });
 
-        const docResult = store.find("PRD-ORIG-001");
+        const docResult = await store.find("PRD-ORIG-001");
         expect(docResult.ok).toBe(true);
         if (!docResult.ok) return;
         expect(docResult.value).not.toBeNull();
         expect(docResult.value?.id).toBe("PRD-ORIG-001");
       });
 
-      it("generates new ULID when idStrategy=remap", () => {
+      it("generates new ULID when idStrategy=remap", async () => {
         writeFileSync(join(tempDir, "prd.md"), makePrdFile("PRD-ORIG-001", "My PRD"));
 
-        service.execute(tempDir, { ...defaultOpts, idStrategy: "remap" });
+        await service.execute(tempDir, { ...defaultOpts, idStrategy: "remap" });
 
-        const findResult = store.findMany({});
+        const findResult = await store.findMany({});
         expect(findResult.ok).toBe(true);
         if (!findResult.ok) return;
         expect(findResult.value[0]?.id).not.toBe("PRD-ORIG-001");
@@ -641,8 +641,8 @@ MIIEowIBAAKCAQEA...
     });
 
     describe("error handling", () => {
-      it("returns STORE_ERROR for non-existent source directory", () => {
-        const result = service.execute(
+      it("returns STORE_ERROR for non-existent source directory", async () => {
+        const result = await service.execute(
           "/tmp/nonexistent-lore-migration-test-xyz",
           defaultOpts,
         );
@@ -651,11 +651,11 @@ MIIEowIBAAKCAQEA...
         expect(result.error.code).toBe("STORE_ERROR");
       });
 
-      it("records unparseable files in errors array without crashing", () => {
+      it("records unparseable files in errors array without crashing", async () => {
         writeFileSync(join(tempDir, "bad.md"), makeInvalidYamlFile());
         writeFileSync(join(tempDir, "good.md"), makeKnowledgeFile("KNOW-001"));
 
-        const result = service.execute(tempDir, defaultOpts);
+        const result = await service.execute(tempDir, defaultOpts);
         expect(result.ok).toBe(true);
         if (!result.ok) return;
 

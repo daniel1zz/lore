@@ -27,12 +27,12 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  run({ args }) {
+  async run({ args }) {
     const dbPath = findLoreDb();
     const app = createApp(dbPath);
     try {
       const depth = parseInt(args.depth ?? "3", 10);
-      const result = app.corpusService.tree(args.root, { depth });
+      const result = await app.corpusService.tree(args.root, { depth });
 
       if (!result.ok) {
         process.stderr.write(formatError(result.error) + "\n");

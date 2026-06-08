@@ -43,7 +43,7 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  run({ args }) {
+  async run({ args }) {
     const dbPath = findLoreDb();
     const app = createApp(dbPath);
     try {
@@ -63,7 +63,7 @@ export default defineCommand({
         process.exit(2);
       }
 
-      const result = app.corpusService.set(args.id, patch);
+      const result = await app.corpusService.set(args.id, patch);
 
       if (!result.ok) {
         process.stderr.write(formatError(result.error) + "\n");

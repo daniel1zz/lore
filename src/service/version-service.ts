@@ -45,14 +45,14 @@ export class VersionService {
    * Return version history for a document, newest first.
    * Delegates pagination to store.findVersions.
    */
-  log(
+  async log(
     idOrSlug: string,
     opts?: { limit?: number; offset?: number },
-  ): Result<VersionEntry[], LoreError> {
-    const resolved = resolveDocId(this.store, idOrSlug);
+  ): Promise<Result<VersionEntry[], LoreError>> {
+    const resolved = await resolveDocId(this.store, idOrSlug);
     if (!resolved.ok) return resolved;
     const docId = resolved.value;
-    const result = this.store.findVersions(docId, {
+    const result = await this.store.findVersions(docId, {
       limit: opts?.limit ?? 20,
       offset: opts?.offset ?? 0,
     });
@@ -79,14 +79,14 @@ export class VersionService {
    * When only one version exists and no explicit from/to provided,
    * returns a diff with empty content_diff (nothing to compare against).
    */
-  diff(
+  async diff(
     idOrSlug: string,
     opts?: { from?: number; to?: number },
-  ): Result<Diff, LoreError> {
-    const resolved = resolveDocId(this.store, idOrSlug);
+  ): Promise<Result<Diff, LoreError>> {
+    const resolved = await resolveDocId(this.store, idOrSlug);
     if (!resolved.ok) return resolved;
     const docId = resolved.value;
-    const allResult = this.store.findVersions(docId);
+    const allResult = await this.store.findVersions(docId);
     if (!allResult.ok) return allResult;
 
     const all = allResult.value; // already newest-first
@@ -174,11 +174,11 @@ export class VersionService {
    * Non-destructive — history is append-only.
    * Resets doc status to 'draft'.
    */
-  restore(idOrSlug: string, version: number): Result<DocRecord, LoreError> {
-    const resolved = resolveDocId(this.store, idOrSlug);
+  async restore(idOrSlug: string, version: number): Promise<Result<DocRecord, LoreError>> {
+    const resolved = await resolveDocId(this.store, idOrSlug);
     if (!resolved.ok) return resolved;
     const docId = resolved.value;
-    const allResult = this.store.findVersions(docId);
+    const allResult = await this.store.findVersions(docId);
     if (!allResult.ok) return allResult;
 
     const all = allResult.value;
@@ -196,7 +196,7 @@ export class VersionService {
       });
     }
 
-    const docResult = this.store.find(docId);
+    const docResult = await this.store.find(docId);
     if (!docResult.ok) return docResult;
     if (docResult.value === null) {
       return err({ code: "DOC_NOT_FOUND", id: docId });
@@ -220,11 +220,11 @@ export class VersionService {
       change_summary: `Restored from v${version}`,
     };
 
-    const insertResult = this.store.insertVersion(newVersionRecord);
+    const insertResult = await this.store.insertVersion(newVersionRecord);
     if (!insertResult.ok) return insertResult;
 
     // Append audit entry
-    const auditResult = this.store.appendAuditEntry({
+    const auditResult = await this.store.appendAuditEntry({
       timestamp: now,
       actor: currentDoc.created_by,
       session_id: "restore",
@@ -235,7 +235,7 @@ export class VersionService {
     if (!auditResult.ok) return auditResult;
 
     // Update doc record to match restored version
-    const updateResult = this.store.update(docId, {
+    const updateResult = await this.store.update(docId, {
       content: targetRecord.content,
       extra: { ...targetRecord.extra },
       title: targetRecord.title,

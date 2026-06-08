@@ -40,7 +40,7 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  run({ args }) {
+  async run({ args }) {
     if (args.version !== "v1") {
       process.stderr.write(
         `Error: Unknown migration version '${args.version}'. Currently only 'v1' is supported.\n`,
@@ -112,7 +112,7 @@ export default defineCommand({
       }
 
       // Execute migration
-      const executeResult = app.migrationService.execute(args.from, {
+      const executeResult = await app.migrationService.execute(args.from, {
         dryRun: false,
         skipSecretScan: args["skip-secret-scan"] ?? false,
         idStrategy: (args["id-strategy"] as "preserve" | "remap") ?? "remap",

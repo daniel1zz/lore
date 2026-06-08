@@ -32,14 +32,14 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  run({ args }) {
+  async run({ args }) {
     const dbPath = findLoreDb();
     const app = createApp(dbPath);
     try {
       const filters: Record<string, unknown> = {};
       if (args.type !== undefined) filters["type"] = args.type as DocType;
 
-      const result = app.corpusService.search(args.query, filters);
+      const result = await app.corpusService.search(args.query, filters);
 
       if (!result.ok) {
         process.stderr.write(formatError(result.error) + "\n");

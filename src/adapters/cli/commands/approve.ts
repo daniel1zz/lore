@@ -27,14 +27,14 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  run({ args }) {
+  async run({ args }) {
     const dbPath = findLoreDb();
     const app = createApp(dbPath);
     try {
       const opts: Record<string, unknown> = {};
       if (args.reviewer !== undefined) opts["reviewer"] = args.reviewer;
 
-      const result = app.reviewService.approve(args.id as DocId, opts);
+      const result = await app.reviewService.approve(args.id as DocId, opts);
 
       if (!result.ok) {
         process.stderr.write(formatError(result.error) + "\n");

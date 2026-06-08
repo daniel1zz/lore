@@ -46,7 +46,7 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  run({ args }) {
+  async run({ args }) {
     if (!VALID_TYPES.includes(args.type as DocType)) {
       process.stderr.write(
         `Error: Invalid type '${args.type}'. Valid types: ${VALID_TYPES.join(", ")}\n`,
@@ -66,7 +66,7 @@ export default defineCommand({
         ? args.tags.split(",").map((t: string) => t.trim()).filter(Boolean)
         : [];
 
-      const result = app.corpusService.create({
+      const result = await app.corpusService.create({
         type: args.type as DocType,
         title: args.title,
         ...(args.parent !== undefined ? { parent_id: args.parent } : {}),

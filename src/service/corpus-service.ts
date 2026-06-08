@@ -1,6 +1,6 @@
 /**
  * CorpusService — primary CRUD + graph + search service for the Lore corpus.
- * All methods return Result<T, LoreError>. No thrown exceptions cross this boundary.
+ * All methods return Promise<Result<T, LoreError>>. No thrown exceptions cross this boundary.
  * Source: SPEC-001 §3.1
  */
 
@@ -102,21 +102,21 @@ export class CorpusService {
    * ULID format → find by id. Otherwise → find by slug.
    * If not found, return DOC_NOT_FOUND with fuzzy suggestions (substring on slugs).
    */
-  resolve(input: string): Result<DocId, LoreError> {
+  async resolve(input: string): Promise<Result<DocId, LoreError>> {
     if (isUlid(input)) {
-      const findResult = this.store.find(input);
+      const findResult = await this.store.find(input);
       if (!findResult.ok) return findResult;
       if (findResult.value !== null) return ok(findResult.value.id);
 
-      const suggestions = this.buildSuggestions(input);
+      const suggestions = await this.buildSuggestions(input);
       return err({ code: "DOC_NOT_FOUND", id: input, suggestions });
     }
 
-    const slugResult = this.store.findBySlug(input);
+    const slugResult = await this.store.findBySlug(input);
     if (!slugResult.ok) return slugResult;
     if (slugResult.value !== null) return ok(slugResult.value.id);
 
-    const suggestions = this.buildSlugSuggestions(input);
+    const suggestions = await this.buildSlugSuggestions(input);
     return err({ code: "DOC_NOT_FOUND", id: input, suggestions });
   }
 
@@ -127,7 +127,7 @@ export class CorpusService {
    * Validates via createDocInputSchema, generates ULID + slug, resolves parent,
    * inserts doc + version record + audit entry.
    */
-  create(input: CreateDocInput): Result<DocRecord, LoreError> {
+  async create(input: CreateDocInput): Promise<Result<DocRecord, LoreError>> {
     const parsed = createDocInputSchema.safeParse(input);
     if (!parsed.success) {
       const issue = parsed.error.issues[0];
@@ -161,7 +161,7 @@ export class CorpusService {
     // Resolve parent if provided
     let resolvedParentId: DocId | null = null;
     if (data.parent_id) {
-      const parentResult = this.resolve(data.parent_id);
+      const parentResult = await this.resolve(data.parent_id);
       if (!parentResult.ok) return parentResult;
       resolvedParentId = parentResult.value;
     }
@@ -171,8 +171,8 @@ export class CorpusService {
     const role = DOC_TYPE_ROLE_MAP[data.type];
 
     // Generate collision-free slug
-    const slug = slugifyWithCollision(data.type, data.title, (candidate) => {
-      const r = this.store.findBySlug(candidate);
+    const slug = await slugifyWithCollision(data.type, data.title, async (candidate) => {
+      const r = await this.store.findBySlug(candidate);
       return r.ok && r.value !== null;
     });
 
@@ -195,10 +195,10 @@ export class CorpusService {
       extra: data.extra ?? {},
     };
 
-    const insertResult = this.store.insert(doc);
+    const insertResult = await this.store.insert(doc);
     if (!insertResult.ok) return insertResult;
 
-    const versionResult = this.store.insertVersion({
+    const versionResult = await this.store.insertVersion({
       doc_id: id,
       version: 1,
       content: doc.content,
@@ -211,7 +211,7 @@ export class CorpusService {
     });
     if (!versionResult.ok) return versionResult;
 
-    const auditResult = this.store.appendAuditEntry({
+    const auditResult = await this.store.appendAuditEntry({
       timestamp: now,
       actor: "system",
       session_id: id,
@@ -230,11 +230,11 @@ export class CorpusService {
    * Get a document with navigation context.
    * Builds parent, siblings, children, and related link lists.
    */
-  get(idOrSlug: string, _opts?: GetOpts): Result<DocWithNavigation, LoreError> {
-    const resolveResult = this.resolve(idOrSlug);
+  async get(idOrSlug: string, _opts?: GetOpts): Promise<Result<DocWithNavigation, LoreError>> {
+    const resolveResult = await this.resolve(idOrSlug);
     if (!resolveResult.ok) return resolveResult;
 
-    const findResult = this.store.find(resolveResult.value);
+    const findResult = await this.store.find(resolveResult.value);
     if (!findResult.ok) return findResult;
     if (findResult.value === null) {
       return err({ code: "DOC_NOT_FOUND", id: resolveResult.value });
@@ -245,7 +245,7 @@ export class CorpusService {
     // Parent
     let parent: DocSummary | null = null;
     if (doc.parent_id !== null) {
-      const parentResult = this.store.find(doc.parent_id);
+      const parentResult = await this.store.find(doc.parent_id);
       if (parentResult.ok && parentResult.value !== null) {
         parent = toDocSummary(parentResult.value);
       }
@@ -254,7 +254,7 @@ export class CorpusService {
     // Siblings — same parent (excluding self)
     let siblings: DocSummary[] = [];
     if (doc.parent_id !== null) {
-      const siblingsResult = this.store.findMany({ parent_id: doc.parent_id });
+      const siblingsResult = await this.store.findMany({ parent_id: doc.parent_id });
       if (siblingsResult.ok) {
         siblings = siblingsResult.value
           .filter((d) => d.id !== doc.id)
@@ -263,13 +263,13 @@ export class CorpusService {
     }
 
     // Children — docs where parent_id = this doc's id
-    const childrenResult = this.store.findMany({ parent_id: doc.id });
+    const childrenResult = await this.store.findMany({ parent_id: doc.id });
     const children: DocSummary[] = childrenResult.ok
       ? childrenResult.value.map(toDocSummary)
       : [];
 
     // Related — non-parent outbound links
-    const linksResult = this.store.findLinks(doc.id, "both");
+    const linksResult = await this.store.findLinks(doc.id, "both");
     const related: Array<DocSummary & { link_type: LinkType }> = [];
 
     if (linksResult.ok) {
@@ -278,7 +278,7 @@ export class CorpusService {
 
         // Determine the "other" side of the link
         const otherId = link.from_id === doc.id ? link.to_id : link.from_id;
-        const otherResult = this.store.find(otherId);
+        const otherResult = await this.store.find(otherId);
         if (otherResult.ok && otherResult.value !== null) {
           related.push({ ...toDocSummary(otherResult.value), link_type: link.link_type });
         }
@@ -298,7 +298,7 @@ export class CorpusService {
    * If patching content or title on an 'approved' doc, resets status to 'draft'.
    * Increments version and creates a version record.
    */
-  set(idOrSlug: string, patch: DocPatch): Result<DocRecord, LoreError> {
+  async set(idOrSlug: string, patch: DocPatch): Promise<Result<DocRecord, LoreError>> {
     const parsedPatch = docPatchSchema.safeParse(patch);
     if (!parsedPatch.success) {
       const issue = parsedPatch.error.issues[0];
@@ -309,10 +309,10 @@ export class CorpusService {
       });
     }
 
-    const resolveResult = this.resolve(idOrSlug);
+    const resolveResult = await this.resolve(idOrSlug);
     if (!resolveResult.ok) return resolveResult;
 
-    const findResult = this.store.find(resolveResult.value);
+    const findResult = await this.store.find(resolveResult.value);
     if (!findResult.ok) return findResult;
     if (findResult.value === null) {
       return err({ code: "DOC_NOT_FOUND", id: resolveResult.value });
@@ -344,10 +344,10 @@ export class CorpusService {
     if (parsedPatch.data.extra !== undefined) docPatch.extra = parsedPatch.data.extra;
     if (parsedPatch.data.slug !== undefined) docPatch.slug = parsedPatch.data.slug;
 
-    const updateResult = this.store.update(existing.id, docPatch);
+    const updateResult = await this.store.update(existing.id, docPatch);
     if (!updateResult.ok) return updateResult;
 
-    const versionResult = this.store.insertVersion({
+    const versionResult = await this.store.insertVersion({
       doc_id: existing.id,
       version: newVersion,
       content: updateResult.value.content,
@@ -360,7 +360,7 @@ export class CorpusService {
     });
     if (!versionResult.ok) return versionResult;
 
-    const auditResult = this.store.appendAuditEntry({
+    const auditResult = await this.store.appendAuditEntry({
       timestamp: now,
       actor: "system",
       session_id: existing.id,
@@ -379,28 +379,28 @@ export class CorpusService {
    * Soft-delete a document.
    * Requires confirm=true, otherwise returns DELETE_REQUIRES_CONFIRM.
    */
-  delete(
+  async delete(
     idOrSlug: string,
     confirm: boolean,
-  ): Result<{ id: DocId; recoverable_until: string }, LoreError> {
+  ): Promise<Result<{ id: DocId; recoverable_until: string }, LoreError>> {
     if (!confirm) {
       // Resolve ID for the error even without confirm
-      const r = this.resolve(idOrSlug);
+      const r = await this.resolve(idOrSlug);
       const id = r.ok ? r.value : idOrSlug;
       return err({ code: "DELETE_REQUIRES_CONFIRM", id });
     }
 
-    const resolveResult = this.resolve(idOrSlug);
+    const resolveResult = await this.resolve(idOrSlug);
     if (!resolveResult.ok) return resolveResult;
 
     const id = resolveResult.value;
-    const deleteResult = this.store.softDelete(id);
+    const deleteResult = await this.store.softDelete(id);
     if (!deleteResult.ok) return deleteResult;
 
     const now = new Date().toISOString();
     const recoverableUntil = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
 
-    const versionResult = this.store.insertVersion({
+    const versionResult = await this.store.insertVersion({
       doc_id: id,
       version: 0,
       content: "",
@@ -413,7 +413,7 @@ export class CorpusService {
     });
     if (!versionResult.ok) return versionResult;
 
-    const auditResult = this.store.appendAuditEntry({
+    const auditResult = await this.store.appendAuditEntry({
       timestamp: now,
       actor: "system",
       session_id: id,
@@ -429,8 +429,8 @@ export class CorpusService {
   // ── List ─────────────────────────────────────────────────────────────────
 
   /** List documents matching filters. Returns DocSummary[] with total count. */
-  list(filters: ListFilters): Result<{ docs: DocSummary[]; total: number }, LoreError> {
-    const result = this.store.findMany(filters);
+  async list(filters: ListFilters): Promise<Result<{ docs: DocSummary[]; total: number }, LoreError>> {
+    const result = await this.store.findMany(filters);
     if (!result.ok) return result;
 
     const docs = result.value.map(toDocSummary);
@@ -440,11 +440,11 @@ export class CorpusService {
   // ── Search ───────────────────────────────────────────────────────────────
 
   /** Full-text search delegated to store. */
-  search(
+  async search(
     query: string,
     filters?: SearchFilters,
-  ): Result<{ results: SearchHit[] }, LoreError> {
-    const result = this.store.search(query, filters);
+  ): Promise<Result<{ results: SearchHit[] }, LoreError>> {
+    const result = await this.store.search(query, filters);
     if (!result.ok) return result;
     return ok({ results: result.value });
   }
@@ -455,16 +455,16 @@ export class CorpusService {
    * Build a document tree starting from rootIdOrSlug (or first PRD if none given).
    * Depth defaults to 3.
    */
-  tree(rootIdOrSlug?: string, opts?: TreeOpts): Result<TreeNode, LoreError> {
+  async tree(rootIdOrSlug?: string, opts?: TreeOpts): Promise<Result<TreeNode, LoreError>> {
     const depth = opts?.depth ?? 3;
 
     let rootDoc: DocRecord;
 
     if (rootIdOrSlug) {
-      const resolveResult = this.resolve(rootIdOrSlug);
+      const resolveResult = await this.resolve(rootIdOrSlug);
       if (!resolveResult.ok) return resolveResult;
 
-      const findResult = this.store.find(resolveResult.value);
+      const findResult = await this.store.find(resolveResult.value);
       if (!findResult.ok) return findResult;
       if (findResult.value === null) {
         return err({ code: "DOC_NOT_FOUND", id: resolveResult.value });
@@ -472,7 +472,7 @@ export class CorpusService {
       rootDoc = findResult.value;
     } else {
       // Find first PRD
-      const prdsResult = this.store.findMany({ type: "prd" });
+      const prdsResult = await this.store.findMany({ type: "prd" });
       if (!prdsResult.ok) return prdsResult;
       const first = prdsResult.value[0];
       if (!first) {
@@ -481,7 +481,7 @@ export class CorpusService {
       rootDoc = first;
     }
 
-    const nodeResult = this.buildTreeNode(rootDoc, depth);
+    const nodeResult = await this.buildTreeNode(rootDoc, depth);
     return nodeResult;
   }
 
@@ -491,15 +491,15 @@ export class CorpusService {
    * Create a link between two documents.
    * For type='parent', also updates docs.parent_id on the 'from' doc.
    */
-  link(
+  async link(
     fromIdOrSlug: string,
     toIdOrSlug: string,
     type: LinkType,
-  ): Result<LinkRecord, LoreError> {
-    const fromResult = this.resolve(fromIdOrSlug);
+  ): Promise<Result<LinkRecord, LoreError>> {
+    const fromResult = await this.resolve(fromIdOrSlug);
     if (!fromResult.ok) return fromResult;
 
-    const toResult = this.resolve(toIdOrSlug);
+    const toResult = await this.resolve(toIdOrSlug);
     if (!toResult.ok) return toResult;
 
     const now = new Date().toISOString();
@@ -511,12 +511,12 @@ export class CorpusService {
       created_by: "system",
     };
 
-    const addResult = this.store.addLink(linkRecord);
+    const addResult = await this.store.addLink(linkRecord);
     if (!addResult.ok) return addResult;
 
     // For parent links, update docs.parent_id on the from doc
     if (type === "parent") {
-      const updateResult = this.store.update(fromResult.value, {
+      const updateResult = await this.store.update(fromResult.value, {
         parent_id: toResult.value,
         updated_at: now,
       });
@@ -532,23 +532,23 @@ export class CorpusService {
    * Remove links between two documents.
    * Removes all link types between the pair.
    */
-  unlink(
+  async unlink(
     fromIdOrSlug: string,
     toIdOrSlug: string,
-  ): Result<void, LoreError> {
-    const fromResult = this.resolve(fromIdOrSlug);
+  ): Promise<Result<void, LoreError>> {
+    const fromResult = await this.resolve(fromIdOrSlug);
     if (!fromResult.ok) return fromResult;
 
-    const toResult = this.resolve(toIdOrSlug);
+    const toResult = await this.resolve(toIdOrSlug);
     if (!toResult.ok) return toResult;
 
     // Find all links between them in both directions and remove
-    const linksResult = this.store.findLinks(fromResult.value, "out");
+    const linksResult = await this.store.findLinks(fromResult.value, "out");
     if (!linksResult.ok) return linksResult;
 
     for (const link of linksResult.value) {
       if (link.to_id === toResult.value) {
-        const removeResult = this.store.removeLink(
+        const removeResult = await this.store.removeLink(
           fromResult.value,
           toResult.value,
           link.link_type,
@@ -563,8 +563,8 @@ export class CorpusService {
   // ── Status ───────────────────────────────────────────────────────────────
 
   /** Aggregate corpus statistics. */
-  status(): Result<CorpusStatus, LoreError> {
-    const allDocsResult = this.store.findMany({ exclude_deleted: false });
+  async status(): Promise<Result<CorpusStatus, LoreError>> {
+    const allDocsResult = await this.store.findMany({ exclude_deleted: false });
     if (!allDocsResult.ok) return allDocsResult;
 
     const allDocs = allDocsResult.value;
@@ -597,22 +597,22 @@ export class CorpusService {
 
   // ── Private Helpers ───────────────────────────────────────────────────────
 
-  private buildTreeNode(
+  private async buildTreeNode(
     doc: DocRecord,
     remainingDepth: number,
-  ): Result<TreeNode, LoreError> {
+  ): Promise<Result<TreeNode, LoreError>> {
     const summary = toDocSummary(doc);
 
     if (remainingDepth <= 0) {
       return ok({ doc: summary, children: [] });
     }
 
-    const childrenResult = this.store.findMany({ parent_id: doc.id });
+    const childrenResult = await this.store.findMany({ parent_id: doc.id });
     if (!childrenResult.ok) return childrenResult;
 
     const children: TreeNode[] = [];
     for (const child of childrenResult.value) {
-      const childNodeResult = this.buildTreeNode(child, remainingDepth - 1);
+      const childNodeResult = await this.buildTreeNode(child, remainingDepth - 1);
       if (!childNodeResult.ok) return childNodeResult;
       children.push(childNodeResult.value);
     }
@@ -624,8 +624,8 @@ export class CorpusService {
    * Build substring-match suggestions from all doc IDs.
    * Used when a ULID lookup fails.
    */
-  private buildSuggestions(query: string): string[] {
-    const allResult = this.store.findMany({});
+  private async buildSuggestions(query: string): Promise<string[]> {
+    const allResult = await this.store.findMany({});
     if (!allResult.ok) return [];
     const lower = query.toLowerCase();
     return allResult.value
@@ -638,8 +638,8 @@ export class CorpusService {
    * Build substring-match suggestions from all slugs.
    * Used when a slug lookup fails.
    */
-  private buildSlugSuggestions(query: string): string[] {
-    const allResult = this.store.findMany({});
+  private async buildSlugSuggestions(query: string): Promise<string[]> {
+    const allResult = await this.store.findMany({});
     if (!allResult.ok) return [];
     const lower = query.toLowerCase();
     return allResult.value

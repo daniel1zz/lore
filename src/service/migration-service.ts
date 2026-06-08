@@ -182,10 +182,10 @@ export class MigrationService {
    * Execute import of v1 corpus into the store.
    * Returns MigrationResult or a LoreError if preconditions fail.
    */
-  execute(
+  async execute(
     sourcePath: string,
     opts: MigrateOpts,
-  ): Result<MigrationResult, LoreError> {
+  ): Promise<Result<MigrationResult, LoreError>> {
     const reportResult = this.analyze(sourcePath);
     if (!reportResult.ok) return reportResult;
 
@@ -226,13 +226,13 @@ export class MigrationService {
       }
     }
 
-    const { imported, skipped, warnings, v1IdToNewId } = this.importDocs(
+    const { imported, skipped, warnings, v1IdToNewId } = await this.importDocs(
       parsedDocs,
       opts,
       importErrors,
     );
 
-    const linkResolution = this.resolveLinks(parsedDocs, v1IdToNewId);
+    const linkResolution = await this.resolveLinks(parsedDocs, v1IdToNewId);
 
     return ok({
       imported,
@@ -245,23 +245,23 @@ export class MigrationService {
 
   // ── Private helpers ─────────────────────────────────────────────────────
 
-  private importDocs(
+  private async importDocs(
     parsedDocs: ParsedV1Doc[],
     opts: MigrateOpts,
     importErrors: FileError[],
-  ): {
+  ): Promise<{
     imported: number;
     skipped: number;
     warnings: string[];
     v1IdToNewId: Map<string, DocId>;
-  } {
+  }> {
     let imported = 0;
     let skipped = 0;
     const warnings: string[] = [];
     const v1IdToNewId = new Map<string, DocId>();
 
     // Build a set of existing v1 original IDs to detect re-runs
-    const existingV1Ids = this.collectExistingV1Ids();
+    const existingV1Ids = await this.collectExistingV1Ids();
 
     for (const doc of parsedDocs) {
       // Skip already-imported docs (idempotency)
@@ -280,12 +280,12 @@ export class MigrationService {
       const newId =
         opts.idStrategy === "preserve" ? doc.v1Id : ulid();
 
-      const existingSlugsFn = (slug: string): boolean => {
-        const r = this.store.findBySlug(slug);
+      const existingSlugsFn = async (slug: string): Promise<boolean> => {
+        const r = await this.store.findBySlug(slug);
         return r.ok && r.value !== null;
       };
 
-      const slug = slugifyWithCollision(
+      const slug = await slugifyWithCollision(
         mappingResult.type,
         doc.title,
         existingSlugsFn,
@@ -312,7 +312,7 @@ export class MigrationService {
         extra,
       };
 
-      const insertResult = this.store.insert(docRecord);
+      const insertResult = await this.store.insert(docRecord);
       if (!insertResult.ok) {
         importErrors.push({
           file: doc.filePath,
@@ -325,7 +325,7 @@ export class MigrationService {
       }
 
       // Version record
-      this.store.insertVersion({
+      await this.store.insertVersion({
         doc_id: newId,
         version: 1,
         content: doc.content,
@@ -344,8 +344,8 @@ export class MigrationService {
     return { imported, skipped, warnings, v1IdToNewId };
   }
 
-  private collectExistingV1Ids(): Set<string> {
-    const result = this.store.findMany({});
+  private async collectExistingV1Ids(): Promise<Set<string>> {
+    const result = await this.store.findMany({});
     if (!result.ok) return new Set();
 
     const ids = new Set<string>();
@@ -358,10 +358,10 @@ export class MigrationService {
     return ids;
   }
 
-  private resolveLinks(
+  private async resolveLinks(
     parsedDocs: ParsedV1Doc[],
     v1IdToNewId: Map<string, DocId>,
-  ): { created: number; broken: number } {
+  ): Promise<{ created: number; broken: number }> {
     let created = 0;
     let broken = 0;
 
@@ -386,7 +386,7 @@ export class MigrationService {
           created_by: "migration:v1",
         };
 
-        const addResult = this.store.addLink(linkRecord);
+        const addResult = await this.store.addLink(linkRecord);
         if (addResult.ok) {
           created += 1;
         } else {

@@ -4,14 +4,14 @@ import type { StoreInterface } from "@store/store-interface";
 
 const ULID_REGEX = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
 
-export function resolveDoc(
+export async function resolveDoc(
   store: StoreInterface,
   idOrSlug: string,
-): Result<DocRecord, LoreError> {
+): Promise<Result<DocRecord, LoreError>> {
   const isUlid = ULID_REGEX.test(idOrSlug);
   const findResult = isUlid
-    ? store.find(idOrSlug)
-    : store.findBySlug(idOrSlug);
+    ? await store.find(idOrSlug)
+    : await store.findBySlug(idOrSlug);
   if (!findResult.ok) return findResult;
   if (findResult.value === null) {
     return err({ code: "DOC_NOT_FOUND", id: idOrSlug });
@@ -19,11 +19,11 @@ export function resolveDoc(
   return ok(findResult.value);
 }
 
-export function resolveDocId(
+export async function resolveDocId(
   store: StoreInterface,
   idOrSlug: string,
-): Result<DocId, LoreError> {
-  const result = resolveDoc(store, idOrSlug);
+): Promise<Result<DocId, LoreError>> {
+  const result = await resolveDoc(store, idOrSlug);
   if (!result.ok) return result;
   return ok(result.value.id);
 }

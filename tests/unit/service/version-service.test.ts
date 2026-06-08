@@ -88,19 +88,19 @@ beforeEach(() => {
 
 // ─── Helper: insert doc + version records to simulate history ─────────────────
 
-function setupDocWithVersions(
+async function setupDocWithVersions(
   versionCount: number,
   extraOverrides?: Partial<DocRecord>,
-): DocRecord {
+): Promise<DocRecord> {
   const doc = makeDoc({
     version: versionCount,
     ...extraOverrides,
   });
 
-  store.insert(doc);
+  await store.insert(doc);
 
   for (let i = 1; i <= versionCount; i++) {
-    store.insertVersion(makeVersionRecord(doc.id, i));
+    await store.insertVersion(makeVersionRecord(doc.id, i));
   }
 
   return doc;
@@ -110,10 +110,10 @@ function setupDocWithVersions(
 
 describe("VersionService.log", () => {
   describe("happy path", () => {
-    it("returns 3 versions newest first after create + 2 edits", () => {
-      const doc = setupDocWithVersions(3);
+    it("returns 3 versions newest first after create + 2 edits", async () => {
+      const doc = await setupDocWithVersions(3);
 
-      const result = service.log(doc.id);
+      const result = await service.log(doc.id);
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -124,10 +124,10 @@ describe("VersionService.log", () => {
       expect(result.value[2]!.version).toBe(1);
     });
 
-    it("populates action and created_by fields", () => {
-      const doc = setupDocWithVersions(2);
+    it("populates action and created_by fields", async () => {
+      const doc = await setupDocWithVersions(2);
 
-      const result = service.log(doc.id);
+      const result = await service.log(doc.id);
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -137,14 +137,14 @@ describe("VersionService.log", () => {
       expect(result.value[1]!.action).toBe("create");
     });
 
-    it("propagates change_summary when present", () => {
+    it("propagates change_summary when present", async () => {
       const doc = makeDoc({ version: 1 });
-      store.insert(doc);
-      store.insertVersion(
+      await store.insert(doc);
+      await store.insertVersion(
         makeVersionRecord(doc.id, 1, { change_summary: "initial draft" }),
       );
 
-      const result = service.log(doc.id);
+      const result = await service.log(doc.id);
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -153,10 +153,10 @@ describe("VersionService.log", () => {
   });
 
   describe("boundary values", () => {
-    it("returns only 2 most recent versions when limit=2", () => {
-      const doc = setupDocWithVersions(3);
+    it("returns only 2 most recent versions when limit=2", async () => {
+      const doc = await setupDocWithVersions(3);
 
-      const result = service.log(doc.id, { limit: 2 });
+      const result = await service.log(doc.id, { limit: 2 });
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -166,10 +166,10 @@ describe("VersionService.log", () => {
       expect(result.value[1]!.version).toBe(2);
     });
 
-    it("returns correct page when offset is used", () => {
-      const doc = setupDocWithVersions(3);
+    it("returns correct page when offset is used", async () => {
+      const doc = await setupDocWithVersions(3);
 
-      const result = service.log(doc.id, { offset: 1, limit: 2 });
+      const result = await service.log(doc.id, { offset: 1, limit: 2 });
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -179,21 +179,21 @@ describe("VersionService.log", () => {
       expect(result.value[1]!.version).toBe(1);
     });
 
-    it("returns empty array for doc with no versions", () => {
+    it("returns empty array for doc with no versions", async () => {
       const doc = makeDoc();
-      store.insert(doc);
+      await store.insert(doc);
 
-      const result = service.log(doc.id);
+      const result = await service.log(doc.id);
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
       expect(result.value).toHaveLength(0);
     });
 
-    it("returns empty array when offset exceeds version count", () => {
-      const doc = setupDocWithVersions(2);
+    it("returns empty array when offset exceeds version count", async () => {
+      const doc = await setupDocWithVersions(2);
 
-      const result = service.log(doc.id, { offset: 10 });
+      const result = await service.log(doc.id, { offset: 10 });
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -202,8 +202,8 @@ describe("VersionService.log", () => {
   });
 
   describe("negative cases", () => {
-    it("returns DOC_NOT_FOUND for unknown docId", () => {
-      const result = service.log("01HUNKNOWN00000000000000000");
+    it("returns DOC_NOT_FOUND for unknown docId", async () => {
+      const result = await service.log("01HUNKNOWN00000000000000000");
 
       expect(result.ok).toBe(false);
       if (result.ok) return;
@@ -220,22 +220,22 @@ describe("VersionService.log", () => {
 
 describe("VersionService.diff", () => {
   describe("happy path", () => {
-    it("returns diff between v1 and v3 when explicitly specified", () => {
+    it("returns diff between v1 and v3 when explicitly specified", async () => {
       const doc = makeDoc({ version: 3 });
-      store.insert(doc);
-      store.insertVersion(
+      await store.insert(doc);
+      await store.insertVersion(
         makeVersionRecord(doc.id, 1, { content: "Hello world" }),
       );
-      store.insertVersion(
+      await store.insertVersion(
         makeVersionRecord(doc.id, 2, { content: "Hello world\nLine two" }),
       );
-      store.insertVersion(
+      await store.insertVersion(
         makeVersionRecord(doc.id, 3, {
           content: "Hello world\nLine two\nLine three",
         }),
       );
 
-      const result = service.diff(doc.id, { from: 1, to: 3 });
+      const result = await service.diff(doc.id, { from: 1, to: 3 });
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -247,20 +247,20 @@ describe("VersionService.diff", () => {
       expect(result.value.content_diff).toContain("+Line three");
     });
 
-    it("defaults to diff between latest and previous (v2 vs v3)", () => {
+    it("defaults to diff between latest and previous (v2 vs v3)", async () => {
       const doc = makeDoc({ version: 3 });
-      store.insert(doc);
-      store.insertVersion(
+      await store.insert(doc);
+      await store.insertVersion(
         makeVersionRecord(doc.id, 1, { content: "Version one content" }),
       );
-      store.insertVersion(
+      await store.insertVersion(
         makeVersionRecord(doc.id, 2, { content: "Version two content" }),
       );
-      store.insertVersion(
+      await store.insertVersion(
         makeVersionRecord(doc.id, 3, { content: "Version three content" }),
       );
 
-      const result = service.diff(doc.id);
+      const result = await service.diff(doc.id);
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -271,21 +271,21 @@ describe("VersionService.diff", () => {
       expect(result.value.content_diff).toContain("+Version three content");
     });
 
-    it("detects frontmatter field changes between versions", () => {
+    it("detects frontmatter field changes between versions", async () => {
       const doc = makeDoc({ version: 2 });
-      store.insert(doc);
-      store.insertVersion(
+      await store.insert(doc);
+      await store.insertVersion(
         makeVersionRecord(doc.id, 1, {
           extra: { decision_status: "proposed", reviewer: "alice" },
         }),
       );
-      store.insertVersion(
+      await store.insertVersion(
         makeVersionRecord(doc.id, 2, {
           extra: { decision_status: "accepted", reviewer: "alice" },
         }),
       );
 
-      const result = service.diff(doc.id, { from: 1, to: 2 });
+      const result = await service.diff(doc.id, { from: 1, to: 2 });
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -297,15 +297,15 @@ describe("VersionService.diff", () => {
       expect(changes[0]!.new_value).toBe("accepted");
     });
 
-    it("reports status_change when status differs between versions", () => {
+    it("reports status_change when status differs between versions", async () => {
       const doc = makeDoc({ version: 2 });
-      store.insert(doc);
-      store.insertVersion(makeVersionRecord(doc.id, 1, { status: "draft" }));
-      store.insertVersion(
+      await store.insert(doc);
+      await store.insertVersion(makeVersionRecord(doc.id, 1, { status: "draft" }));
+      await store.insertVersion(
         makeVersionRecord(doc.id, 2, { status: "approved" }),
       );
 
-      const result = service.diff(doc.id, { from: 1, to: 2 });
+      const result = await service.diff(doc.id, { from: 1, to: 2 });
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -316,10 +316,10 @@ describe("VersionService.diff", () => {
       });
     });
 
-    it("omits status_change when status is unchanged", () => {
-      const doc = setupDocWithVersions(2);
+    it("omits status_change when status is unchanged", async () => {
+      const doc = await setupDocWithVersions(2);
 
-      const result = service.diff(doc.id, { from: 1, to: 2 });
+      const result = await service.diff(doc.id, { from: 1, to: 2 });
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -329,10 +329,10 @@ describe("VersionService.diff", () => {
   });
 
   describe("boundary values", () => {
-    it("handles doc with only 1 version gracefully (no previous to diff)", () => {
-      const doc = setupDocWithVersions(1);
+    it("handles doc with only 1 version gracefully (no previous to diff)", async () => {
+      const doc = await setupDocWithVersions(1);
 
-      const result = service.diff(doc.id);
+      const result = await service.diff(doc.id);
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -343,17 +343,17 @@ describe("VersionService.diff", () => {
       expect(result.value.frontmatter_changes).toHaveLength(0);
     });
 
-    it("returns no changed +/- lines when from and to have identical content", () => {
+    it("returns no changed +/- lines when from and to have identical content", async () => {
       const doc = makeDoc({ version: 2 });
-      store.insert(doc);
-      store.insertVersion(
+      await store.insert(doc);
+      await store.insertVersion(
         makeVersionRecord(doc.id, 1, { content: "Same content" }),
       );
-      store.insertVersion(
+      await store.insertVersion(
         makeVersionRecord(doc.id, 2, { content: "Same content" }),
       );
 
-      const result = service.diff(doc.id, { from: 1, to: 2 });
+      const result = await service.diff(doc.id, { from: 1, to: 2 });
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -371,28 +371,28 @@ describe("VersionService.diff", () => {
   });
 
   describe("negative cases", () => {
-    it("returns DOC_NOT_FOUND error for doc with no versions", () => {
-      const result = service.diff("01HUNKNOWN00000000000000000");
+    it("returns DOC_NOT_FOUND error for doc with no versions", async () => {
+      const result = await service.diff("01HUNKNOWN00000000000000000");
 
       expect(result.ok).toBe(false);
       if (result.ok) return;
       expect(result.error.code).toBe("DOC_NOT_FOUND");
     });
 
-    it("returns DOC_NOT_FOUND when explicit from version does not exist", () => {
-      const doc = setupDocWithVersions(2);
+    it("returns DOC_NOT_FOUND when explicit from version does not exist", async () => {
+      const doc = await setupDocWithVersions(2);
 
-      const result = service.diff(doc.id, { from: 99, to: 2 });
+      const result = await service.diff(doc.id, { from: 99, to: 2 });
 
       expect(result.ok).toBe(false);
       if (result.ok) return;
       expect(result.error.code).toBe("DOC_NOT_FOUND");
     });
 
-    it("returns DOC_NOT_FOUND when explicit to version does not exist", () => {
-      const doc = setupDocWithVersions(2);
+    it("returns DOC_NOT_FOUND when explicit to version does not exist", async () => {
+      const doc = await setupDocWithVersions(2);
 
-      const result = service.diff(doc.id, { from: 1, to: 99 });
+      const result = await service.diff(doc.id, { from: 1, to: 99 });
 
       expect(result.ok).toBe(false);
       if (result.ok) return;
@@ -409,20 +409,20 @@ describe("VersionService.diff", () => {
 
 describe("VersionService.restore", () => {
   describe("happy path", () => {
-    it("restores doc at v3 to v1 content, creating new v4", () => {
+    it("restores doc at v3 to v1 content, creating new v4", async () => {
       const doc = makeDoc({ version: 3 });
-      store.insert(doc);
-      store.insertVersion(
+      await store.insert(doc);
+      await store.insertVersion(
         makeVersionRecord(doc.id, 1, { content: "Original content" }),
       );
-      store.insertVersion(
+      await store.insertVersion(
         makeVersionRecord(doc.id, 2, { content: "Edited content" }),
       );
-      store.insertVersion(
+      await store.insertVersion(
         makeVersionRecord(doc.id, 3, { content: "Latest content" }),
       );
 
-      const result = service.restore(doc.id, 1);
+      const result = await service.restore(doc.id, 1);
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -433,17 +433,17 @@ describe("VersionService.restore", () => {
       expect(updated.status).toBe("draft");
     });
 
-    it("creates a new version record with action=restore", () => {
+    it("creates a new version record with action=restore", async () => {
       const doc = makeDoc({ version: 3 });
-      store.insert(doc);
+      await store.insert(doc);
       for (let i = 1; i <= 3; i++) {
-        store.insertVersion(makeVersionRecord(doc.id, i));
+        await store.insertVersion(makeVersionRecord(doc.id, i));
       }
 
-      const restoreResult = service.restore(doc.id, 1);
+      const restoreResult = await service.restore(doc.id, 1);
       expect(restoreResult.ok).toBe(true);
 
-      const versionsResult = store.findVersions(doc.id);
+      const versionsResult = await store.findVersions(doc.id);
       expect(versionsResult.ok).toBe(true);
       if (!versionsResult.ok) return;
 
@@ -456,23 +456,23 @@ describe("VersionService.restore", () => {
       expect(v4!.change_summary).toContain("Restored from v1");
     });
 
-    it("restores title and extra fields from the target version", () => {
+    it("restores title and extra fields from the target version", async () => {
       const doc = makeDoc({ version: 2 });
-      store.insert(doc);
-      store.insertVersion(
+      await store.insert(doc);
+      await store.insertVersion(
         makeVersionRecord(doc.id, 1, {
           title: "Original Title",
           extra: { priority: "high" },
         }),
       );
-      store.insertVersion(
+      await store.insertVersion(
         makeVersionRecord(doc.id, 2, {
           title: "Updated Title",
           extra: { priority: "low" },
         }),
       );
 
-      const result = service.restore(doc.id, 1);
+      const result = await service.restore(doc.id, 1);
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -483,16 +483,16 @@ describe("VersionService.restore", () => {
   });
 
   describe("state transitions", () => {
-    it("v1-v3 remain intact (non-destructive) after restore", () => {
+    it("v1-v3 remain intact (non-destructive) after restore", async () => {
       const doc = makeDoc({ version: 3 });
-      store.insert(doc);
+      await store.insert(doc);
       for (let i = 1; i <= 3; i++) {
-        store.insertVersion(makeVersionRecord(doc.id, i));
+        await store.insertVersion(makeVersionRecord(doc.id, i));
       }
 
-      service.restore(doc.id, 1);
+      await service.restore(doc.id, 1);
 
-      const versionsResult = store.findVersions(doc.id);
+      const versionsResult = await store.findVersions(doc.id);
       expect(versionsResult.ok).toBe(true);
       if (!versionsResult.ok) return;
 
@@ -505,34 +505,34 @@ describe("VersionService.restore", () => {
       expect(versions.find((v) => v.version === 3)).toBeDefined();
     });
 
-    it("restoring again increments version to N+2 (restore is idempotent-safe)", () => {
+    it("restoring again increments version to N+2 (restore is idempotent-safe)", async () => {
       const doc = makeDoc({ version: 2 });
-      store.insert(doc);
-      store.insertVersion(makeVersionRecord(doc.id, 1, { content: "v1" }));
-      store.insertVersion(makeVersionRecord(doc.id, 2, { content: "v2" }));
+      await store.insert(doc);
+      await store.insertVersion(makeVersionRecord(doc.id, 1, { content: "v1" }));
+      await store.insertVersion(makeVersionRecord(doc.id, 2, { content: "v2" }));
 
-      const first = service.restore(doc.id, 1);
+      const first = await service.restore(doc.id, 1);
       expect(first.ok).toBe(true);
       if (!first.ok) return;
       expect(first.value.version).toBe(3);
 
-      const second = service.restore(doc.id, 2);
+      const second = await service.restore(doc.id, 2);
       expect(second.ok).toBe(true);
       if (!second.ok) return;
       expect(second.value.version).toBe(4);
     });
 
-    it("restore sets status to draft regardless of target version status", () => {
+    it("restore sets status to draft regardless of target version status", async () => {
       const doc = makeDoc({ version: 2 });
-      store.insert(doc);
-      store.insertVersion(
+      await store.insert(doc);
+      await store.insertVersion(
         makeVersionRecord(doc.id, 1, { status: "approved" }),
       );
-      store.insertVersion(
+      await store.insertVersion(
         makeVersionRecord(doc.id, 2, { status: "approved" }),
       );
 
-      const result = service.restore(doc.id, 1);
+      const result = await service.restore(doc.id, 1);
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -541,29 +541,29 @@ describe("VersionService.restore", () => {
   });
 
   describe("negative cases", () => {
-    it("returns DOC_NOT_FOUND error for nonexistent version", () => {
-      const doc = setupDocWithVersions(3);
+    it("returns DOC_NOT_FOUND error for nonexistent version", async () => {
+      const doc = await setupDocWithVersions(3);
 
-      const result = service.restore(doc.id, 99);
+      const result = await service.restore(doc.id, 99);
 
       expect(result.ok).toBe(false);
       if (result.ok) return;
       expect(result.error.code).toBe("DOC_NOT_FOUND");
     });
 
-    it("returns DOC_NOT_FOUND error when doc has no versions", () => {
+    it("returns DOC_NOT_FOUND error when doc has no versions", async () => {
       const doc = makeDoc();
-      store.insert(doc);
+      await store.insert(doc);
 
-      const result = service.restore(doc.id, 1);
+      const result = await service.restore(doc.id, 1);
 
       expect(result.ok).toBe(false);
       if (result.ok) return;
       expect(result.error.code).toBe("DOC_NOT_FOUND");
     });
 
-    it("returns DOC_NOT_FOUND error for entirely unknown docId", () => {
-      const result = service.restore("01HUNKNOWN00000000000000000", 1);
+    it("returns DOC_NOT_FOUND error for entirely unknown docId", async () => {
+      const result = await service.restore("01HUNKNOWN00000000000000000", 1);
 
       expect(result.ok).toBe(false);
       if (result.ok) return;
@@ -572,16 +572,16 @@ describe("VersionService.restore", () => {
   });
 
   describe("boundary values", () => {
-    it("can restore to version 1 (minimum valid version)", () => {
+    it("can restore to version 1 (minimum valid version)", async () => {
       const doc = makeDoc({ version: 3 });
-      store.insert(doc);
+      await store.insert(doc);
       for (let i = 1; i <= 3; i++) {
-        store.insertVersion(
+        await store.insertVersion(
           makeVersionRecord(doc.id, i, { content: `v${i} content` }),
         );
       }
 
-      const result = service.restore(doc.id, 1);
+      const result = await service.restore(doc.id, 1);
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;

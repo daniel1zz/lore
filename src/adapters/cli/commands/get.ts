@@ -26,11 +26,11 @@ export default defineCommand({
       description: "Skip MDX resolution",
     },
   },
-  run({ args }) {
+  async run({ args }) {
     const dbPath = findLoreDb();
     const app = createApp(dbPath);
     try {
-      const result = app.corpusService.get(args.id, { resolve_mdx: !args.raw });
+      const result = await app.corpusService.get(args.id, { resolve_mdx: !args.raw });
 
       if (!result.ok) {
         process.stderr.write(formatError(result.error) + "\n");

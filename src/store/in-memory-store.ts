@@ -1,7 +1,8 @@
 /**
  * InMemoryStore — in-memory implementation of StoreInterface for unit tests.
  * Uses plain TypeScript data structures (Map, Array).
- * No SQLite dependency — purely synchronous, zero I/O.
+ * Methods are async to satisfy the async StoreInterface contract,
+ * but internally operate synchronously (no I/O).
  * Source: same interface contract as SQLiteStore.
  */
 
@@ -32,7 +33,7 @@ export class InMemoryStore implements StoreInterface {
 
   // ── Document CRUD ─────────────────────────────────────────────────────────
 
-  insert(doc: DocRecord): Result<DocRecord, LoreError> {
+  async insert(doc: DocRecord): Promise<Result<DocRecord, LoreError>> {
     const slugConflict = this.findSlugConflict(doc.slug);
     if (slugConflict !== null) {
       return err({
@@ -53,12 +54,12 @@ export class InMemoryStore implements StoreInterface {
     return ok(doc);
   }
 
-  find(id: DocId): Result<DocRecord | null, LoreError> {
+  async find(id: DocId): Promise<Result<DocRecord | null, LoreError>> {
     const record = this.docs.get(id);
     return ok(record !== undefined ? { ...record } : null);
   }
 
-  findBySlug(slug: Slug): Result<DocRecord | null, LoreError> {
+  async findBySlug(slug: Slug): Promise<Result<DocRecord | null, LoreError>> {
     for (const doc of this.docs.values()) {
       if (doc.slug === slug) {
         return ok({ ...doc });
@@ -67,7 +68,7 @@ export class InMemoryStore implements StoreInterface {
     return ok(null);
   }
 
-  findMany(filters: StoreFilters): Result<DocRecord[], LoreError> {
+  async findMany(filters: StoreFilters): Promise<Result<DocRecord[], LoreError>> {
     const excludeDeleted = filters.exclude_deleted !== false;
 
     let results = Array.from(this.docs.values()).filter((doc) => {
@@ -103,7 +104,7 @@ export class InMemoryStore implements StoreInterface {
     return ok(results.map((doc) => ({ ...doc })));
   }
 
-  update(id: DocId, patch: Partial<DocRecord>): Result<DocRecord, LoreError> {
+  async update(id: DocId, patch: Partial<DocRecord>): Promise<Result<DocRecord, LoreError>> {
     const existing = this.docs.get(id);
     if (!existing) {
       return err({ code: "DOC_NOT_FOUND", id });
@@ -119,7 +120,7 @@ export class InMemoryStore implements StoreInterface {
     return ok({ ...updated });
   }
 
-  softDelete(id: DocId): Result<void, LoreError> {
+  async softDelete(id: DocId): Promise<Result<void, LoreError>> {
     const existing = this.docs.get(id);
     if (!existing) {
       return err({ code: "DOC_NOT_FOUND", id });
@@ -132,7 +133,7 @@ export class InMemoryStore implements StoreInterface {
 
   // ── Links ─────────────────────────────────────────────────────────────────
 
-  addLink(link: LinkRecord): Result<LinkRecord, LoreError> {
+  async addLink(link: LinkRecord): Promise<Result<LinkRecord, LoreError>> {
     if (link.link_type === "parent") {
       const cycleResult = this.detectParentCycle(link.from_id, link.to_id);
       if (!cycleResult.ok) return cycleResult;
@@ -187,11 +188,11 @@ export class InMemoryStore implements StoreInterface {
     return ok(undefined);
   }
 
-  removeLink(
+  async removeLink(
     fromId: DocId,
     toId: DocId,
     linkType: LinkType,
-  ): Result<void, LoreError> {
+  ): Promise<Result<void, LoreError>> {
     const idx = this.links.findIndex(
       (l) =>
         l.from_id === fromId &&
@@ -206,10 +207,10 @@ export class InMemoryStore implements StoreInterface {
     return ok(undefined);
   }
 
-  findLinks(
+  async findLinks(
     docId: DocId,
     direction: "in" | "out" | "both",
-  ): Result<LinkRecord[], LoreError> {
+  ): Promise<Result<LinkRecord[], LoreError>> {
     let found: LinkRecord[];
 
     if (direction === "out") {
@@ -231,10 +232,10 @@ export class InMemoryStore implements StoreInterface {
    * Simple substring search on title + content + tags (case-insensitive).
    * Not ranked — score is always 0. Mirrors interface contract, not FTS5 quality.
    */
-  search(
+  async search(
     query: string,
     filters?: StoreFilters,
-  ): Result<SearchHit[], LoreError> {
+  ): Promise<Result<SearchHit[], LoreError>> {
     if (!query || query.trim() === "") {
       return ok([]);
     }
@@ -281,15 +282,15 @@ export class InMemoryStore implements StoreInterface {
 
   // ── Versions ──────────────────────────────────────────────────────────────
 
-  insertVersion(version: VersionRecord): Result<VersionRecord, LoreError> {
+  async insertVersion(version: VersionRecord): Promise<Result<VersionRecord, LoreError>> {
     this.versions.push({ ...version });
     return ok(version);
   }
 
-  findVersions(
+  async findVersions(
     docId: DocId,
     opts?: { limit?: number; offset?: number },
-  ): Result<VersionRecord[], LoreError> {
+  ): Promise<Result<VersionRecord[], LoreError>> {
     const limit = opts?.limit ?? 100;
     const offset = opts?.offset ?? 0;
 
@@ -303,12 +304,12 @@ export class InMemoryStore implements StoreInterface {
 
   // ── Audit ─────────────────────────────────────────────────────────────────
 
-  appendAuditEntry(entry: AuditEntry): Result<void, LoreError> {
+  async appendAuditEntry(entry: AuditEntry): Promise<Result<void, LoreError>> {
     this.audit.push({ ...entry });
     return ok(undefined);
   }
 
-  queryAudit(filters: AuditFilters): Result<AuditEntry[], LoreError> {
+  async queryAudit(filters: AuditFilters): Promise<Result<AuditEntry[], LoreError>> {
     let results = this.audit.filter((entry) => {
       if (filters.doc_id !== undefined && entry.doc_id !== filters.doc_id)
         return false;

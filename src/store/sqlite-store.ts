@@ -1,6 +1,7 @@
 /**
  * SQLiteStore — bun:sqlite implementation of StoreInterface.
- * All operations are synchronous.
+ * Methods are async to satisfy the async StoreInterface contract,
+ * but internally use synchronous bun:sqlite operations.
  * Source: SPEC-002 §7.1, §7.2, §7.3; SPEC-001 §4.
  */
 
@@ -192,7 +193,7 @@ export class SQLiteStore implements StoreInterface {
 
   // ── Document CRUD ─────────────────────────────────────────────────────────
 
-  insert(doc: DocRecord): Result<DocRecord, LoreError> {
+  async insert(doc: DocRecord): Promise<Result<DocRecord, LoreError>> {
     try {
       this.db
         .prepare(
@@ -234,7 +235,7 @@ export class SQLiteStore implements StoreInterface {
     }
   }
 
-  find(id: DocId): Result<DocRecord | null, LoreError> {
+  async find(id: DocId): Promise<Result<DocRecord | null, LoreError>> {
     try {
       const row = this.db
         .prepare("SELECT * FROM docs WHERE id = ?")
@@ -245,7 +246,7 @@ export class SQLiteStore implements StoreInterface {
     }
   }
 
-  findBySlug(slug: Slug): Result<DocRecord | null, LoreError> {
+  async findBySlug(slug: Slug): Promise<Result<DocRecord | null, LoreError>> {
     try {
       const row = this.db
         .prepare("SELECT * FROM docs WHERE slug = ?")
@@ -256,7 +257,7 @@ export class SQLiteStore implements StoreInterface {
     }
   }
 
-  findMany(filters: StoreFilters): Result<DocRecord[], LoreError> {
+  async findMany(filters: StoreFilters): Promise<Result<DocRecord[], LoreError>> {
     try {
       const clauses: string[] = [];
       const params: SQLQueryBindings[] = [];
@@ -306,7 +307,7 @@ export class SQLiteStore implements StoreInterface {
     }
   }
 
-  update(id: DocId, patch: Partial<DocRecord>): Result<DocRecord, LoreError> {
+  async update(id: DocId, patch: Partial<DocRecord>): Promise<Result<DocRecord, LoreError>> {
     try {
       const existing = this.db
         .prepare("SELECT * FROM docs WHERE id = ?")
@@ -357,7 +358,7 @@ export class SQLiteStore implements StoreInterface {
     }
   }
 
-  softDelete(id: DocId): Result<void, LoreError> {
+  async softDelete(id: DocId): Promise<Result<void, LoreError>> {
     try {
       const existing = this.db
         .prepare("SELECT id FROM docs WHERE id = ?")
@@ -380,7 +381,7 @@ export class SQLiteStore implements StoreInterface {
 
   // ── Links ─────────────────────────────────────────────────────────────────
 
-  addLink(link: LinkRecord): Result<LinkRecord, LoreError> {
+  async addLink(link: LinkRecord): Promise<Result<LinkRecord, LoreError>> {
     try {
       if (link.link_type === "parent") {
         const cycleResult = this.detectParentCycle(link.from_id, link.to_id);
@@ -446,11 +447,11 @@ export class SQLiteStore implements StoreInterface {
     return ok(undefined);
   }
 
-  removeLink(
+  async removeLink(
     fromId: DocId,
     toId: DocId,
     linkType: LinkType,
-  ): Result<void, LoreError> {
+  ): Promise<Result<void, LoreError>> {
     try {
       this.db
         .prepare(
@@ -463,10 +464,10 @@ export class SQLiteStore implements StoreInterface {
     }
   }
 
-  findLinks(
+  async findLinks(
     docId: DocId,
     direction: "in" | "out" | "both",
-  ): Result<LinkRecord[], LoreError> {
+  ): Promise<Result<LinkRecord[], LoreError>> {
     try {
       let rows: LinkRow[];
 
@@ -492,10 +493,10 @@ export class SQLiteStore implements StoreInterface {
 
   // ── Search ────────────────────────────────────────────────────────────────
 
-  search(
+  async search(
     query: string,
     filters?: StoreFilters,
-  ): Result<SearchHit[], LoreError> {
+  ): Promise<Result<SearchHit[], LoreError>> {
     try {
       const excludeDeleted = filters?.exclude_deleted !== false;
 
@@ -547,13 +548,16 @@ export class SQLiteStore implements StoreInterface {
       // Tags filter applied in-memory if needed
       if (filters?.tags && filters.tags.length > 0) {
         const requiredTags = filters.tags;
-        const filtered = hits.filter((hit) => {
-          const docResult = this.find(hit.id);
-          if (!docResult.ok) return false;
+        const filtered: SearchHit[] = [];
+        for (const hit of hits) {
+          const docResult = await this.find(hit.id);
+          if (!docResult.ok) continue;
           const doc = docResult.value;
-          if (!doc) return false;
-          return requiredTags.every((tag) => doc.tags.includes(tag));
-        });
+          if (!doc) continue;
+          if (requiredTags.every((tag) => doc.tags.includes(tag))) {
+            filtered.push(hit);
+          }
+        }
         return ok(filtered);
       }
 
@@ -565,7 +569,7 @@ export class SQLiteStore implements StoreInterface {
 
   // ── Versions ──────────────────────────────────────────────────────────────
 
-  insertVersion(version: VersionRecord): Result<VersionRecord, LoreError> {
+  async insertVersion(version: VersionRecord): Promise<Result<VersionRecord, LoreError>> {
     try {
       this.db
         .prepare(
@@ -592,10 +596,10 @@ export class SQLiteStore implements StoreInterface {
     }
   }
 
-  findVersions(
+  async findVersions(
     docId: DocId,
     opts?: { limit?: number; offset?: number },
-  ): Result<VersionRecord[], LoreError> {
+  ): Promise<Result<VersionRecord[], LoreError>> {
     try {
       const limit = opts?.limit ?? 100;
       const offset = opts?.offset ?? 0;
@@ -615,7 +619,7 @@ export class SQLiteStore implements StoreInterface {
 
   // ── Audit ─────────────────────────────────────────────────────────────────
 
-  appendAuditEntry(entry: AuditEntry): Result<void, LoreError> {
+  async appendAuditEntry(entry: AuditEntry): Promise<Result<void, LoreError>> {
     try {
       this.db
         .prepare(
@@ -637,7 +641,7 @@ export class SQLiteStore implements StoreInterface {
     }
   }
 
-  queryAudit(filters: AuditFilters): Result<AuditEntry[], LoreError> {
+  async queryAudit(filters: AuditFilters): Promise<Result<AuditEntry[], LoreError>> {
     try {
       const clauses: string[] = [];
       const params: SQLQueryBindings[] = [];

@@ -57,7 +57,7 @@ export interface RejectOpts {
 export class ReviewService {
   constructor(private readonly store: StoreInterface) {}
 
-  private resolveDoc(idOrSlug: string): Result<DocRecord, LoreError> {
+  private async resolveDoc(idOrSlug: string): Promise<Result<DocRecord, LoreError>> {
     return resolveDoc(this.store, idOrSlug);
   }
 
@@ -65,7 +65,7 @@ export class ReviewService {
    * Return all documents with status='draft' matching optional filters.
    * Source: SPEC-005 §3, AC row 1.
    */
-  pending(filters?: PendingFilters): Result<PendingDoc[], LoreError> {
+  async pending(filters?: PendingFilters): Promise<Result<PendingDoc[], LoreError>> {
     const storeFilters: import("../store/store-interface.js").StoreFilters = {
       status: "draft",
       ...(filters?.author !== undefined ? { created_by: filters.author } : {}),
@@ -73,7 +73,7 @@ export class ReviewService {
       ...(filters?.since !== undefined ? { since: filters.since } : {}),
     };
 
-    const result = this.store.findMany(storeFilters);
+    const result = await this.store.findMany(storeFilters);
     if (!result.ok) return result;
 
     const pendingDocs: PendingDoc[] = result.value.map((doc) =>
@@ -88,11 +88,11 @@ export class ReviewService {
    * Creates a version snapshot and audit entry.
    * Source: SPEC-005 §3, §4, AC rows 2, 6.
    */
-  approve(
+  async approve(
     id: string,
     opts?: ApproveOpts,
-  ): Result<DocRecord, LoreError> {
-    const findResult = this.resolveDoc(id);
+  ): Promise<Result<DocRecord, LoreError>> {
+    const findResult = await this.resolveDoc(id);
     if (!findResult.ok) return findResult;
 
     const doc = findResult.value;
@@ -110,7 +110,7 @@ export class ReviewService {
     const now = new Date().toISOString();
     const nextVersion = doc.version + 1;
 
-    const updateResult = this.store.update(doc.id, {
+    const updateResult = await this.store.update(doc.id, {
       status: "approved",
       version: nextVersion,
       updated_at: now,
@@ -119,7 +119,7 @@ export class ReviewService {
 
     const updatedDoc = updateResult.value;
 
-    const versionResult = this.store.insertVersion({
+    const versionResult = await this.store.insertVersion({
       doc_id: doc.id,
       version: nextVersion,
       content: updatedDoc.content,
@@ -132,7 +132,7 @@ export class ReviewService {
     });
     if (!versionResult.ok) return versionResult;
 
-    const auditResult = this.store.appendAuditEntry({
+    const auditResult = await this.store.appendAuditEntry({
       timestamp: now,
       actor: reviewer,
       session_id: `review-${doc.id}`,
@@ -150,11 +150,11 @@ export class ReviewService {
    * Source: SPEC-005 §3, §4, AC rows 4, table row "draft|reject|draft".
    * Only docs in 'draft' or 'in-review' can be rejected.
    */
-  reject(
+  async reject(
     id: string,
     opts?: RejectOpts,
-  ): Result<DocRecord, LoreError> {
-    const findResult = this.resolveDoc(id);
+  ): Promise<Result<DocRecord, LoreError>> {
+    const findResult = await this.resolveDoc(id);
     if (!findResult.ok) return findResult;
 
     const doc = findResult.value;
@@ -177,7 +177,7 @@ export class ReviewService {
     const now = new Date().toISOString();
 
     // Status stays 'draft' — just update updated_at
-    const updateResult = this.store.update(doc.id, {
+    const updateResult = await this.store.update(doc.id, {
       status: "draft",
       updated_at: now,
     });
@@ -194,7 +194,7 @@ export class ReviewService {
       auditDetails["reason"] = reason;
     }
 
-    const auditResult = this.store.appendAuditEntry({
+    const auditResult = await this.store.appendAuditEntry({
       timestamp: now,
       actor: reviewer,
       session_id: `review-${doc.id}`,

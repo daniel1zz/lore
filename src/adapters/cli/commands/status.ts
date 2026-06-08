@@ -17,11 +17,11 @@ export default defineCommand({
       description: "Output as JSON",
     },
   },
-  run({ args }) {
+  async run({ args }) {
     const dbPath = findLoreDb();
     const app = createApp(dbPath);
     try {
-      const result = app.corpusService.status();
+      const result = await app.corpusService.status();
 
       if (!result.ok) {
         process.stderr.write(formatError(result.error) + "\n");
