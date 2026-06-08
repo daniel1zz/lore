@@ -136,10 +136,10 @@ PRD-001 (this document)
 ├── SPEC-007 Migration v1
 │     v1→v2 schema mapping, ID conversion, secret scan, dry-run
 │
-├── (P2) SPEC-TBD MCP Adapter
-├── (P2) SPEC-TBD Sync Engine (Turso + conflict resolution)
-├── (P2) SPEC-TBD Auth & Agent Credentials
-├── (P2) SPEC-TBD HTTP API Adapter
+├── SPEC-008 MCP Server Adapter (@modelcontextprotocol/sdk v1, stdio + HTTP)
+├── SPEC-009 Sync Engine (Turso @libsql/client v0.17, embedded replicas)
+├── SPEC-010 Auth & Agent Credentials (Better-Auth, device flow + API keys)
+├── SPEC-011 HTTP API Adapter (Bun.serve, hosts auth + MCP + REST)
 └── (P3) SPEC-TBD Web UI
 ```
 
