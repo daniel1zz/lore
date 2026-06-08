@@ -9,6 +9,8 @@ import { err, ok, type LoreError, type Result } from "../core/errors.js";
 import { getAllowedTransitions, isValidTransition } from "../core/schemas.js";
 import type { StoreInterface } from "../store/store-interface.js";
 
+const ULID_REGEX = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
+
 // ─── Public Types ──────────────────────────────────────────────────────────
 
 /**
@@ -56,6 +58,18 @@ export interface RejectOpts {
 export class ReviewService {
   constructor(private readonly store: StoreInterface) {}
 
+  private resolveDoc(idOrSlug: string): Result<DocRecord, LoreError> {
+    const isUlid = ULID_REGEX.test(idOrSlug);
+    const findResult = isUlid
+      ? this.store.find(idOrSlug)
+      : this.store.findBySlug(idOrSlug);
+    if (!findResult.ok) return findResult;
+    if (findResult.value === null) {
+      return err({ code: "DOC_NOT_FOUND", id: idOrSlug });
+    }
+    return ok(findResult.value);
+  }
+
   /**
    * Return all documents with status='draft' matching optional filters.
    * Source: SPEC-005 §3, AC row 1.
@@ -84,16 +98,13 @@ export class ReviewService {
    * Source: SPEC-005 §3, §4, AC rows 2, 6.
    */
   approve(
-    id: DocId,
+    id: string,
     opts?: ApproveOpts,
   ): Result<DocRecord, LoreError> {
-    const findResult = this.store.find(id);
+    const findResult = this.resolveDoc(id);
     if (!findResult.ok) return findResult;
 
     const doc = findResult.value;
-    if (doc === null) {
-      return err({ code: "DOC_NOT_FOUND", id });
-    }
 
     if (!isValidTransition(doc.status, "approved")) {
       return err({
@@ -108,7 +119,7 @@ export class ReviewService {
     const now = new Date().toISOString();
     const nextVersion = doc.version + 1;
 
-    const updateResult = this.store.update(id, {
+    const updateResult = this.store.update(doc.id, {
       status: "approved",
       version: nextVersion,
       updated_at: now,
@@ -118,7 +129,7 @@ export class ReviewService {
     const updatedDoc = updateResult.value;
 
     const versionResult = this.store.insertVersion({
-      doc_id: id,
+      doc_id: doc.id,
       version: nextVersion,
       content: updatedDoc.content,
       extra: updatedDoc.extra,
@@ -133,9 +144,9 @@ export class ReviewService {
     const auditResult = this.store.appendAuditEntry({
       timestamp: now,
       actor: reviewer,
-      session_id: `review-${id}`,
+      session_id: `review-${doc.id}`,
       action: "approve",
-      doc_id: id,
+      doc_id: doc.id,
       details: { reviewer, from_status: doc.status, to_status: "approved" },
     });
     if (!auditResult.ok) return auditResult;
@@ -149,16 +160,13 @@ export class ReviewService {
    * Only docs in 'draft' or 'in-review' can be rejected.
    */
   reject(
-    id: DocId,
+    id: string,
     opts?: RejectOpts,
   ): Result<DocRecord, LoreError> {
-    const findResult = this.store.find(id);
+    const findResult = this.resolveDoc(id);
     if (!findResult.ok) return findResult;
 
     const doc = findResult.value;
-    if (doc === null) {
-      return err({ code: "DOC_NOT_FOUND", id });
-    }
 
     // Only 'draft' and 'in-review' can be rejected (they can transition back to draft)
     const canReject =
@@ -178,7 +186,7 @@ export class ReviewService {
     const now = new Date().toISOString();
 
     // Status stays 'draft' — just update updated_at
-    const updateResult = this.store.update(id, {
+    const updateResult = this.store.update(doc.id, {
       status: "draft",
       updated_at: now,
     });
@@ -198,9 +206,9 @@ export class ReviewService {
     const auditResult = this.store.appendAuditEntry({
       timestamp: now,
       actor: reviewer,
-      session_id: `review-${id}`,
+      session_id: `review-${doc.id}`,
       action: "reject",
-      doc_id: id,
+      doc_id: doc.id,
       details: auditDetails,
     });
     if (!auditResult.ok) return auditResult;
