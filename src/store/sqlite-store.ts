@@ -5,9 +5,7 @@
  */
 
 import { Database, type SQLQueryBindings } from "bun:sqlite";
-import { readFileSync } from "fs";
-import { join } from "path";
-import { fileURLToPath } from "url";
+import { MIGRATION_001_SQL } from "./migrations/migration-001.js";
 import type {
   AuditEntry,
   DocId,
@@ -187,13 +185,8 @@ export class SQLiteStore implements StoreInterface {
     ).user_version;
 
     if (currentVersion < 1) {
-      const migrationDir = join(
-        fileURLToPath(import.meta.url),
-        "..",
-        "migrations",
-      );
-      const sql = readFileSync(join(migrationDir, "001-initial.sql"), "utf-8");
-      this.db.exec(sql);
+      // SQL is inlined as a constant — safe for bun build --compile (no fs access at runtime)
+      this.db.exec(MIGRATION_001_SQL);
     }
   }
 

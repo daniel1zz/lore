@@ -182,6 +182,10 @@ defaults:
 
 ## 7. Acceptance Criteria
 
+### 7.1 Unit-level (AC-CLI-001)
+
+`AC-CLI-001`: CLI utility functions (formatError, exitCode, formatTable, formatTree, formatNavigation, relativeTime) produce correct output for all input classes.
+
 | Given | When | Then |
 |---|---|---|
 | User runs `lore get SPEC-001` | CLI adapter parses args | Calls `corpusService.get({id: "SPEC-001"})`, formats result with navigation footer |
@@ -190,3 +194,31 @@ defaults:
 | User runs `lore create spec --title "Auth"` | CLI calls `corpusService.create({type: "spec", title: "Auth"})` | Prompts for parent_id (required for spec), opens $EDITOR for content |
 | User runs `lore list --type spec --status draft` | CLI calls `corpusService.list({type: "spec", status: "draft"})` | Displays formatted table |
 | User pipes `lore list --json \| jq '.docs[].id'` | JSON output | Parseable by jq — proves composability |
+
+### 7.2 End-to-end subprocess-level (AC-E2E-001)
+
+`AC-E2E-001`: The full CLI pipeline — argument parsing → service layer → SQLite persistence → output formatting — behaves correctly as observed from a spawned subprocess.
+
+`AC-E2E-001.01`: `lore init` creates `.lore/` directory containing `lore.db` and `config.yaml`. Running `init` twice exits non-zero.
+
+`AC-E2E-001.02`: `lore get <slug>` displays document content with navigation footer in human-readable form.
+
+`AC-E2E-001.03`: `lore get <slug> --json` outputs valid JSON envelope `{ok, data: {doc, navigation}}`.
+
+`AC-E2E-001.N01`: `lore get <nonexistent>` prints error to stderr and exits with code 3.
+
+`AC-E2E-001.04`: `lore create <type> --title <t>` creates a document and prints its slug. `--json` returns the full document envelope.
+
+`AC-E2E-001.05`: `lore list --type <t>` returns only documents of the specified type.
+
+`AC-E2E-001.06`: `lore list --json` produces a JSON object where `.data.docs[].id` is extractable by downstream tools (jq-composable).
+
+`AC-E2E-001.07`: `lore delete <slug>` without `--confirm` exits with code 4 and prints instructions. With `--confirm` deletes successfully.
+
+`AC-E2E-001.08`: `lore pending` lists draft documents. `lore approve <id>` transitions draft→approved and removes the doc from `pending` output.
+
+`AC-E2E-001.09`: After one `set` update, `lore log <id>` shows 2 version entries. `lore diff <id>` shows v1→v2 changes.
+
+`AC-E2E-001.10`: `lore status --json` returns `{ok: true, data: {total_docs, by_type, last_updated}}` with correct counts.
+
+`AC-E2E-001.11`: `lore tree --json` returns a root doc with children array reflecting parent-child hierarchy.
