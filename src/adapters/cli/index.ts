@@ -30,6 +30,8 @@ const main = defineCommand({
     restore: () => import("./commands/restore.js").then((m) => m.default),
     migrate: () => import("./commands/migrate.js").then((m) => m.default),
     status: () => import("./commands/status.js").then((m) => m.default),
+    serve: () => import("./commands/serve.js").then((m) => m.default),
+    agent: () => import("./commands/agent.js").then((m) => m.default),
   },
 });
 

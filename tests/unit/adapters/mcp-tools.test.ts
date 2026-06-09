@@ -18,10 +18,14 @@ import { VersionService } from "@service/version-service.js";
 import { OutlineService } from "@service/outline-service.js";
 import { MigrationService } from "@service/migration-service.js";
 import type { App } from "../../../src/app.js";
+import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
 import { registerTools } from "../../../src/adapters/mcp/tools.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 // ─── Test Infrastructure ─────────────────────────────────────────────────────
+
+/** Stub ApiKeyStore — not used in MCP tests, present to satisfy App interface. */
+const stubApiKeyStore = {} as ApiKeyStore;
 
 function makeApp(): App {
   const store = new InMemoryStore();
@@ -31,6 +35,7 @@ function makeApp(): App {
     versionService: new VersionService(store),
     outlineService: new OutlineService(store),
     migrationService: new MigrationService(store),
+    apiKeyStore: stubApiKeyStore,
     close: () => undefined,
   };
 }

@@ -7,6 +7,7 @@
 
 import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { MIGRATION_001_SQL } from "./migrations/migration-001.js";
+import { MIGRATION_002_SQL } from "./migrations/migration-002.js";
 import type {
   AuditEntry,
   DocId,
@@ -171,6 +172,15 @@ export class SQLiteStore implements StoreInterface {
     this.init();
   }
 
+  /**
+   * Expose the underlying Database for adapters that need direct SQL access
+   * (e.g. ApiKeyStore for the api_keys table).
+   * Prefer StoreInterface methods for corpus operations.
+   */
+  getDatabase(): Database {
+    return this.db;
+  }
+
   // ── Initialization ────────────────────────────────────────────────────────
 
   private init(): void {
@@ -188,6 +198,10 @@ export class SQLiteStore implements StoreInterface {
     if (currentVersion < 1) {
       // SQL is inlined as a constant — safe for bun build --compile (no fs access at runtime)
       this.db.exec(MIGRATION_001_SQL);
+    }
+
+    if (currentVersion < 2) {
+      this.db.exec(MIGRATION_002_SQL);
     }
   }
 
