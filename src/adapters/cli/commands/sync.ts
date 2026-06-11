@@ -308,7 +308,12 @@ const syncPush = defineCommand({
 
     const configResult = loadConfig(loreDir);
     if (!configResult.ok) {
-      process.stderr.write(`Error: Failed to load config: ${configResult.error.code}\n`);
+      const msg = `Failed to load config: ${configResult.error.code}`;
+      if (args.json) {
+        console.log(JSON.stringify({ ok: false, error: msg }));
+      } else {
+        process.stderr.write(`Error: ${msg}\n`);
+      }
       process.exit(1);
     }
 
@@ -374,7 +379,12 @@ const syncPull = defineCommand({
 
     const configResult = loadConfig(loreDir);
     if (!configResult.ok) {
-      process.stderr.write(`Error: Failed to load config: ${configResult.error.code}\n`);
+      const msg = `Failed to load config: ${configResult.error.code}`;
+      if (args.json) {
+        console.log(JSON.stringify({ ok: false, error: msg }));
+      } else {
+        process.stderr.write(`Error: ${msg}\n`);
+      }
       process.exit(1);
     }
 

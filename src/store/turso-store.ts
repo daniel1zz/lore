@@ -4,11 +4,10 @@
  * Supports file-only mode (localPath) and embedded replica mode
  * (localPath + remoteUrl + authToken).
  *
- * FTS5 index: migration-001 triggers (docs_ai/ad/au) DO fire via libsql
- * (R1 spike, libsql-compat.bun.test.ts). The explicit docs_fts sync here is
- * redundant-but-benign under FTS5 external-content semantics (probe-verified:
- * trigger-only, manual+trigger, and cross-store paths each yield exactly one
- * index entry per doc) and guards DBs whose triggers are absent.
+ * FTS5 index: MIGRATION_001_SQL creates triggers (docs_ai/ad/au) that fire
+ * automatically via libsql for INSERT, UPDATE, and DELETE operations on docs.
+ * Verified by R1 spike (tests/unit/store/libsql-compat.bun.test.ts): triggers
+ * are the sole FTS maintenance mechanism — no manual fts* calls needed.
  *
  * Source: SPEC-009 §3.1; AC-STORE-TURSO-001
  */
@@ -185,10 +184,6 @@ export class TursoStore implements StoreInterface {
 
   // ── Initialization ─────────────────────────────────────────────────────
 
-  private readonly _schemaReady: Promise<void> = Promise.resolve();
-  private _schemaReadyResolve: (() => void) | null = null;
-  private _schemaReadyReject: ((e: unknown) => void) | null = null;
-  private _schemaInitialized = false;
   private _schemaInitPromise: Promise<void> | null = null;
 
   private initSchema(): Promise<void> {
@@ -208,8 +203,6 @@ export class TursoStore implements StoreInterface {
       if (currentVersion < 2) {
         await this.client.executeMultiple(MIGRATION_002_SQL);
       }
-
-      this._schemaInitialized = true;
     })();
 
     return this._schemaInitPromise;
@@ -217,7 +210,6 @@ export class TursoStore implements StoreInterface {
 
   /** Ensure schema is initialized before any operation. */
   private async ensureReady(): Promise<void> {
-    if (this._schemaInitialized) return;
     await this.initSchema();
   }
 
@@ -252,9 +244,6 @@ export class TursoStore implements StoreInterface {
           doc.deleted_at ?? null,
         ] as InValue[],
       });
-
-      // Manually maintain FTS5 index (triggers may not fire via libsql — R1 spike S3.5)
-      await this.ftsInsert(doc.id, doc.title, doc.content, JSON.stringify(doc.tags));
 
       return ok(doc);
     } catch (e) {
@@ -433,8 +422,6 @@ export class TursoStore implements StoreInterface {
           });
         }
 
-        // FTS update after conditional UPDATE success
-        await this.ftsUpdate(id, updated.title, updated.content, JSON.stringify(updated.tags));
         return ok(updated);
       }
 
@@ -466,8 +453,6 @@ export class TursoStore implements StoreInterface {
         ] as InValue[],
       });
 
-      // FTS update after unconditional UPDATE
-      await this.ftsUpdate(id, updated.title, updated.content, JSON.stringify(updated.tags));
       return ok(updated);
     } catch (e) {
       return wrapStoreError(e);
@@ -826,56 +811,4 @@ export class TursoStore implements StoreInterface {
     this.client.close();
   }
 
-  // ── FTS5 Manual Maintenance ───────────────────────────────────────────
-  // Triggers may not fire via libsql (R1 spike S3.5 finding).
-  // TursoStore explicitly syncs the FTS index on every write.
-
-  private async ftsInsert(
-    id: string,
-    title: string,
-    content: string,
-    tags: string,
-  ): Promise<void> {
-    // Get the rowid for the just-inserted doc
-    const rs = await this.client.execute({
-      sql: "SELECT rowid FROM docs WHERE id = ?",
-      args: [id],
-    });
-    const row = rs.rows[0];
-    if (!row) return;
-
-    const rowid = row["rowid"];
-    // Insert into FTS virtual table using rowid
-    await this.client.execute({
-      sql: "INSERT INTO docs_fts(rowid, title, content, tags) VALUES (?, ?, ?, ?)",
-      args: [rowid as InValue, title, content, tags],
-    });
-  }
-
-  private async ftsUpdate(
-    id: string,
-    title: string,
-    content: string,
-    tags: string,
-  ): Promise<void> {
-    // FTS5 content= tables require delete + re-insert for updates
-    const rs = await this.client.execute({
-      sql: "SELECT rowid FROM docs WHERE id = ?",
-      args: [id],
-    });
-    const row = rs.rows[0];
-    if (!row) return;
-
-    const rowid = row["rowid"];
-    // Delete old FTS entry
-    await this.client.execute({
-      sql: "INSERT INTO docs_fts(docs_fts, rowid, title, content, tags) VALUES ('delete', ?, ?, ?, ?)",
-      args: [rowid as InValue, title, content, tags],
-    });
-    // Re-insert new FTS entry
-    await this.client.execute({
-      sql: "INSERT INTO docs_fts(rowid, title, content, tags) VALUES (?, ?, ?, ?)",
-      args: [rowid as InValue, title, content, tags],
-    });
-  }
 }

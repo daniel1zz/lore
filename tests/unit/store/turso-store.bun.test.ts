@@ -784,6 +784,74 @@ describe("TursoStore", () => {
       const ids = result.value.map((h) => h.id);
       expect(ids).toContain(doc.id);
     });
+
+    // [TS-6 REGRESSION] FTS triggers are the sole mechanism (Fix 1 gate regression).
+    // Verifies: insert doc with unique term A, update replacing A with term B →
+    //   search(A) returns 0 hits (old term removed from index),
+    //   search(B) returns 1 hit (new term indexed).
+    // This confirms triggers keep the FTS index correct without manual fts* calls.
+    it("TS-6-REG-01: FTS trigger-only: update removes old term from index, indexes new term", async () => {
+      const doc = makeDoc({
+        slug: "prd-turso-fts-trig-reg",
+        title: "Trigger Regression Test",
+        content: "This content contains uniqueTermAlpha_trigger_reg.",
+      });
+      await store.insert(doc);
+
+      // Verify term A is found before update
+      const beforeResult = await store.search("uniqueTermAlpha_trigger_reg");
+      expect(beforeResult.ok).toBe(true);
+      if (!beforeResult.ok) return;
+      expect(beforeResult.value.map((h) => h.id)).toContain(doc.id);
+
+      // Update doc, replacing term A with term B
+      await store.update(doc.id, {
+        content: "This content now contains uniqueTermBeta_trigger_reg instead.",
+        updated_at: "2026-06-11T12:00:00.000Z",
+      });
+
+      // term A must no longer appear in results (trigger removed old entry)
+      const searchA = await store.search("uniqueTermAlpha_trigger_reg");
+      expect(searchA.ok).toBe(true);
+      if (!searchA.ok) return;
+      expect(searchA.value.map((h) => h.id)).not.toContain(doc.id);
+
+      // term B must appear in results (trigger indexed new entry)
+      const searchB = await store.search("uniqueTermBeta_trigger_reg");
+      expect(searchB.ok).toBe(true);
+      if (!searchB.ok) return;
+      expect(searchB.value.map((h) => h.id)).toContain(doc.id);
+    });
+
+    // [TS-6 REGRESSION] FTS integrity-check passes after normal insert+update operations.
+    // Verifies: `INSERT INTO docs_fts(docs_fts, rank) VALUES ('integrity-check', 0)` executes
+    // without error, proving the FTS index is internally consistent.
+    it("TS-6-REG-02: FTS integrity-check passes after insert and update", async () => {
+      const doc = makeDoc({
+        slug: "prd-turso-fts-integrity",
+        title: "FTS Integrity Check Doc",
+        content: "Content for integrity check test.",
+      });
+      await store.insert(doc);
+      await store.update(doc.id, {
+        content: "Updated content for integrity check.",
+        updated_at: "2026-06-11T12:00:00.000Z",
+      });
+
+      // FTS integrity-check: must execute without throwing
+      // A non-zero return value indicates corruption.
+      const { createClient } = await import("@libsql/client");
+      const checkClient = createClient({ url: `file:${dbPath}` });
+      try {
+        const rs = await checkClient.execute(
+          "INSERT INTO docs_fts(docs_fts, rank) VALUES ('integrity-check', 0)",
+        );
+        // integrity-check returns 0 rows; success means no corruption
+        expect(rs).toBeDefined();
+      } finally {
+        checkClient.close();
+      }
+    });
   });
 
   // ── [TS-7] Regression ─────────────────────────────────────────────────────

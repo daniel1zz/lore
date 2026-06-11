@@ -28,7 +28,7 @@ import type {
 
 export class InMemoryStore implements StoreInterface {
   private readonly docs = new Map<DocId, DocRecord>();
-  private readonly links: LinkRecord[] = [];
+  private links: LinkRecord[] = [];
   private readonly versions: VersionRecord[] = [];
   private readonly audit: AuditEntry[] = [];
 
@@ -178,7 +178,7 @@ export class InMemoryStore implements StoreInterface {
       });
     }
 
-    this.links.push({ ...link });
+    this.links = [...this.links, { ...link }];
     return ok(link);
   }
 
@@ -216,16 +216,12 @@ export class InMemoryStore implements StoreInterface {
     toId: DocId,
     linkType: LinkType,
   ): Promise<Result<void, LoreError>> {
-    const idx = this.links.findIndex(
+    this.links = this.links.filter(
       (l) =>
-        l.from_id === fromId &&
-        l.to_id === toId &&
-        l.link_type === linkType,
+        !(l.from_id === fromId &&
+          l.to_id === toId &&
+          l.link_type === linkType),
     );
-
-    if (idx !== -1) {
-      this.links.splice(idx, 1);
-    }
 
     return ok(undefined);
   }
