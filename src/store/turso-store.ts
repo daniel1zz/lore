@@ -4,9 +4,11 @@
  * Supports file-only mode (localPath) and embedded replica mode
  * (localPath + remoteUrl + authToken).
  *
- * FTS5 index is maintained manually: triggers may not fire via libsql
- * (per R1 spike finding S3.5 in libsql-compat.bun.test.ts). Every
- * INSERT/UPDATE on docs explicitly syncs docs_fts.
+ * FTS5 index: migration-001 triggers (docs_ai/ad/au) DO fire via libsql
+ * (R1 spike, libsql-compat.bun.test.ts). The explicit docs_fts sync here is
+ * redundant-but-benign under FTS5 external-content semantics (probe-verified:
+ * trigger-only, manual+trigger, and cross-store paths each yield exactly one
+ * index entry per doc) and guards DBs whose triggers are absent.
  *
  * Source: SPEC-009 §3.1; AC-STORE-TURSO-001
  */
