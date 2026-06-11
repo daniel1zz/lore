@@ -114,7 +114,7 @@ export class ReviewService {
       status: "approved",
       version: nextVersion,
       updated_at: now,
-    });
+    }, { expected_version: doc.version });
     if (!updateResult.ok) return updateResult;
 
     const updatedDoc = updateResult.value;
@@ -180,7 +180,7 @@ export class ReviewService {
     const updateResult = await this.store.update(doc.id, {
       status: "draft",
       updated_at: now,
-    });
+    }, { expected_version: doc.version });
     if (!updateResult.ok) return updateResult;
 
     const updatedDoc = updateResult.value;

@@ -242,7 +242,7 @@ export class VersionService {
       status: "draft",
       version: nextVersion,
       updated_at: now,
-    });
+    }, { expected_version: currentDoc.version });
 
     return updateResult;
   }
