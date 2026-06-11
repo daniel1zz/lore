@@ -1,6 +1,6 @@
 ---
 id: SPEC-009
-type: spec
+type: feature-spec
 role: spec
 title: "Sync Engine (Turso)"
 status: draft
@@ -147,5 +147,5 @@ sync:
 | Local-only corpus with 8 docs | `lore sync setup` + `lore sync push` | All 8 docs visible on Turso dashboard |
 | Turso sync enabled | Agent A creates doc on machine 1 | Machine 2 sees doc after sync interval |
 | Two agents write same doc | Second write with stale version | STALE_VERSION error, not silent overwrite |
-| Turso unreachable | CLI reads local corpus | Works offline, write queued or error |
+| Turso unreachable | CLI reads local corpus | Reads work offline; writes return STORE_ERROR (fail loud, no queue — D-005) |
 | `lore sync status` | | Shows last sync time, frames synced, remote URL |

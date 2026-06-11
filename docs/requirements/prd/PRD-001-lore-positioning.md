@@ -5,7 +5,7 @@ role: intent
 title: "Lore — Internal-First AI Team Knowledge Platform"
 status: approved
 priority: critical
-version: 0.4
+version: "0.4"
 created: 2026-06-07
 updated: 2026-06-08
 tags: [product-overview, L0, lore, mvp, internal-first, ai-native, protocol-aware]
