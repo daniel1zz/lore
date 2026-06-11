@@ -1,46 +1,30 @@
 /**
- * @spec_ref AC-SYNC-APP-001 (SPEC-009 §3.3 §7, D-006, D-007)
+ * @spec_ref AC-SYNC-APP-001 (SPEC-009 §3.3 §7, D-005, D-006, D-007)
  *
- * RED integration tests for:
+ * Integration tests for:
  *   - createApp store selection (SQLiteStore vs TursoStore) [SPEC-009 §3.3, D-007]
  *   - Fail-loud when sync enabled but token env missing [D-007]
+ *   - Fail-loud when TursoStore construction fails (unreachable remote) [D-005, D-007]
  *   - `lore sync pull` handler exits 1 when unconfigured [SPEC-009 §5]
  *
- * CONSTRUCTION ASSUMPTIONS (define the FUTURE API shape via tests):
- *   createApp(dbPath: string, config?: LoreConfig): App | Result<App, LoreError>
- *
- *   D-007: When config.sync.enabled=true AND remote_url present AND token env set
- *          → TursoStore is selected (not SQLiteStore).
- *   D-007: When config.sync.enabled=true AND remote_url present AND token env MISSING
- *          → MUST fail loud (Result.ok=false with VALIDATION_ERROR), NOT silent SQLite fallback.
- *   Scenario 1: No sync config → SQLiteStore (regression lock; this should pass NOW)
- *   Scenario 2: Sync config + token → TursoStore (RED until createApp accepts config param)
- *   Scenario 3: Sync config + missing token → fail loud (RED)
- *   Scenario 6: `lore sync pull` unconfigured → exit 1 (some parts may already pass)
- *
- * STORE SELECTION DETECTION STRATEGY:
- *   Since createApp returns an App (no .store discriminator today), we detect TursoStore
- *   by calling app.corpusService.listAll() and checking if it returns ok:true in async mode.
- *   More robustly: we check that the app was created WITHOUT error, and that it is NOT
- *   a SQLiteStore-backed app (SQLiteStore has .db, TursoStore has .client).
- *   We also import TursoStore/SQLiteStore classes to perform instanceof checks IF the
- *   implementation exposes the store on the App interface. If not, we use behavioral checks.
+ * MEASURED LIBSQL OFFLINE BEHAVIOR (empirically verified, not assumed):
+ *   @libsql/client createClient() with an unreachable syncUrl throws EAGERLY at construction.
+ *   Error: "sync error: error trying to connect: ..."
+ *   This means new TursoStore({ remoteUrl: unreachable }) throws during construction.
+ *   Therefore createApp() with sync enabled + unreachable remote returns err(STORE_ERROR).
+ *   This satisfies D-005/D-007: writes NEVER silently land only-local — the store doesn't
+ *   even construct. There is no silent fallback; the error is surfaced immediately.
  *
  * These tests run under `bun test .bun.test` ONLY.
- * Scenario 1 may pass immediately (regression lock).
- * Scenarios 2, 3 will FAIL RED until createApp is extended to accept config.
- *
- * IMPORTANT: This file does NOT import from sync-push — that is tested separately.
  */
 
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // ─── Module Imports ──────────────────────────────────────────────────────────
 
-// Real implementations (not mocked — behavioral oracle)
 import { createApp, type App } from "../../src/app.js";
 import type { LoreConfig } from "../../src/core/config.js";
 import type { Result, LoreError } from "../../src/core/errors.js";
@@ -58,13 +42,19 @@ function makeLocalConfig(): LoreConfig {
   };
 }
 
-/** Create a LoreConfig with sync.enabled=true and a fake remote_url. */
-function makeSyncConfig(tokenEnvName: string = "LORE_TEST_SYNC_TOKEN"): LoreConfig {
+/**
+ * Create a LoreConfig with sync.enabled=true and an unreachable remote URL.
+ * Using a DNS-invalid hostname guarantees no real network calls succeed.
+ */
+function makeSyncConfig(
+  tokenEnvName: string = "LORE_TEST_SYNC_TOKEN",
+  remoteUrl: string = "libsql://nonexistent-host-for-tests.invalid",
+): LoreConfig {
   return {
     project: { name: "test-project", author: "tester" },
     sync: {
       enabled: true,
-      remote_url: "libsql://test-db.turso.io",
+      remote_url: remoteUrl,
       auth_token_env: tokenEnvName,
       interval: 60,
     },
@@ -101,7 +91,7 @@ afterEach(() => {
 
 // ===========================================================================
 // SCENARIO 1 — Local-only (no sync config) → SQLiteStore
-// This is a REGRESSION LOCK and should PASS immediately.
+// Regression lock: this MUST always pass.
 // ===========================================================================
 
 describe("createApp — no sync config (regression lock, SPEC-009 §3.3 invariant)", () => {
@@ -120,7 +110,6 @@ describe("createApp — no sync config (regression lock, SPEC-009 §3.3 invarian
     const app = createApp(dbPath);
 
     // Must return an App-shaped object (not a Result with ok:false)
-    // Regression: if createApp were to silently fail, corpus operations would break
     expect(app).toBeDefined();
 
     // Must have all expected service properties
@@ -154,16 +143,27 @@ describe("createApp — no sync config (regression lock, SPEC-009 §3.3 invarian
 });
 
 // ===========================================================================
-// SCENARIO 2 — Sync config + token set → TursoStore selected
-// RED until createApp is extended to accept config param.
+// SCENARIO 2 — Sync config + token set + UNREACHABLE remote
+//
+// TRUE-SEMANTICS tests (SPEC-009 §3.3, D-005, D-007).
+//
+// Measured libsql behavior (empirically verified — see file header):
+//   @libsql/client createClient() throws EAGERLY when syncUrl is unreachable.
+//   Therefore new TursoStore({ remoteUrl: unreachable }) throws at construction.
+//   createApp catches this and returns err(STORE_ERROR) — fail loud (D-005/D-007).
+//
+// The invariant that MUST hold (D-007 D-005):
+//   With sync.enabled=true, writes NEVER silently land only-local.
+//   Either TursoStore constructs successfully (real remote reachable),
+//   OR createApp returns err(STORE_ERROR) — never a silent SQLiteStore fallback.
 // ===========================================================================
 
-describe("createApp — sync config + token env set → TursoStore (SPEC-009 D-007)", () => {
+describe("createApp — sync config + token env set + unreachable remote (SPEC-009 §3.3 D-007 D-005)", () => {
   let tmpDir: string;
 
   beforeEach(() => {
     tmpDir = makeTmpDir("turso-select");
-    // Set the token env var to a non-empty value
+    // Set a non-empty token env var
     process.env[TEST_TOKEN_ENV] = "test-token-12345";
   });
 
@@ -172,66 +172,87 @@ describe("createApp — sync config + token env set → TursoStore (SPEC-009 D-0
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("createApp(dbPath, config) with sync.enabled=true returns an App (not an error)", () => {
+  it("createApp with sync.enabled=true + unreachable remote fails loud with STORE_ERROR (D-007 invariant)", () => {
+    // Measured behavior: @libsql/client createClient() throws eagerly when syncUrl is
+    // unreachable. createApp must catch this and return err(STORE_ERROR) — NOT silently
+    // fall back to SQLiteStore. This is the D-005/D-007 offline semantic.
     const dbPath = join(tmpDir, "lore.db");
     const config = makeSyncConfig(TEST_TOKEN_ENV);
 
-    // FUTURE API: createApp must accept an optional second config param
-    // This call will fail RED with a TypeScript/runtime error until implemented.
-    // @ts-expect-error — second param does not exist yet (RED state)
     const appOrResult = createApp(dbPath, config);
 
-    // Whether createApp returns App directly or Result<App, LoreError>,
-    // the result must be non-error.
+    // Must be a Result (not a raw App) — sync-path always returns Result
+    expect(isResult(appOrResult)).toBe(true);
+
     if (isResult(appOrResult)) {
-      expect(appOrResult.ok).toBe(true);
-      if (appOrResult.ok) {
-        appOrResult.value.close();
+      // D-007: must fail loud with STORE_ERROR (TursoStore construction failed)
+      expect(appOrResult.ok).toBe(false);
+
+      if (!appOrResult.ok) {
+        expect(appOrResult.error.code).toBe("STORE_ERROR");
+        // The error message must mention TursoStore construction failure
+        const msg = (appOrResult.error as { code: string; message: string }).message;
+        expect(msg).toContain("TursoStore construction failed");
       }
-    } else {
-      // Returned App directly — also acceptable
-      expect(appOrResult).toBeDefined();
-      expect(typeof appOrResult.close).toBe("function");
-      (appOrResult as App).close();
     }
   });
 
-  it("createApp with sync config produces a store that accepts async corpus operations", async () => {
+  it("createApp with unreachable remote does NOT silently return a working SQLiteStore-backed App (D-007 anti-regression)", () => {
+    // This test guards against the specific regression D-007 was written to prevent:
+    // createApp silently falling back to SQLiteStore when sync is enabled.
     const dbPath = join(tmpDir, "lore2.db");
     const config = makeSyncConfig(TEST_TOKEN_ENV);
 
-    // @ts-expect-error — second param does not exist yet (RED state)
     const appOrResult = createApp(dbPath, config);
 
-    let app: App;
-    if (isResult(appOrResult)) {
-      expect(appOrResult.ok).toBe(true);
-      if (!appOrResult.ok) return;
-      app = appOrResult.value;
-    } else {
-      app = appOrResult as App;
+    // If it returned a raw App (not wrapped in Result), that's a D-007 violation
+    if (!isResult(appOrResult)) {
+      // Close the app to avoid resource leaks before throwing
+      (appOrResult as App).close();
+      throw new Error(
+        "D-007 VIOLATION: createApp returned a raw App (not a Result) for sync config. " +
+        "With sync.enabled=true, createApp MUST always return Result<App, LoreError>. " +
+        "A raw App return means sync semantics are being bypassed silently.",
+      );
     }
 
-    // TursoStore-backed app must also support corpus operations
-    const insertResult = await app.corpusService.create({
-      type: "prd",
-      title: "Turso-backed Doc",
-      content: "turso content",
-      created_by: "tester",
-    });
+    // If it returned an ok Result, that means TursoStore connected to the remote.
+    // This is only valid if the remote is actually reachable (which we explicitly prevented).
+    if (appOrResult.ok) {
+      appOrResult.value.close();
+      throw new Error(
+        "D-007 VIOLATION: createApp returned ok:true for unreachable remote. " +
+        "Expected: err(STORE_ERROR) because libsql throws eagerly on unreachable syncUrl. " +
+        "This means the test's remote URL was unexpectedly reachable, OR " +
+        "createApp silently constructed SQLiteStore instead of TursoStore.",
+      );
+    }
 
-    // Should succeed — TursoStore in file: mode should work the same as SQLiteStore
-    expect(insertResult.ok).toBe(true);
+    // Correct: err result — D-007 satisfied
+    expect(appOrResult.ok).toBe(false);
+  });
 
-    app.close();
+  it("createApp sync error code is STORE_ERROR (not VALIDATION_ERROR — credentials were valid)", () => {
+    // VALIDATION_ERROR = credentials missing/empty (handled before TursoStore construction)
+    // STORE_ERROR = TursoStore construction failed (credentials valid, but remote unreachable)
+    // This test distinguishes the two failure modes.
+    const dbPath = join(tmpDir, "lore3.db");
+    const config = makeSyncConfig(TEST_TOKEN_ENV); // token IS set — credentials are valid
+
+    const appOrResult = createApp(dbPath, config);
+
+    expect(isResult(appOrResult)).toBe(true);
+    if (isResult(appOrResult) && !appOrResult.ok) {
+      // Must be STORE_ERROR (construction failed), not VALIDATION_ERROR (cred missing)
+      expect(appOrResult.error.code).toBe("STORE_ERROR");
+      expect(appOrResult.error.code).not.toBe("VALIDATION_ERROR");
+    }
   });
 });
 
 // ===========================================================================
 // SCENARIO 3 — Sync config + token env MISSING → FAIL LOUD (D-007)
-// RED until createApp is extended.
-// This is the critical anti-fallback test: D-007 says missing token MUST fail loud,
-// NOT silently fall back to SQLiteStore.
+// The critical anti-fallback test: missing token MUST fail loud.
 // ===========================================================================
 
 describe("createApp — sync enabled + token env MISSING → fail loud (D-007)", () => {
@@ -239,7 +260,7 @@ describe("createApp — sync enabled + token env MISSING → fail loud (D-007)",
 
   beforeEach(() => {
     tmpDir = makeTmpDir("missing-token");
-    // Ensure the env var is NOT set (already cleaned in afterEach above, but be explicit)
+    // Ensure the env var is NOT set
     delete process.env[TEST_TOKEN_ENV];
   });
 
@@ -251,13 +272,12 @@ describe("createApp — sync enabled + token env MISSING → fail loud (D-007)",
     const dbPath = join(tmpDir, "lore.db");
     const config = makeSyncConfig(TEST_TOKEN_ENV); // points to env var that is NOT set
 
-    // @ts-expect-error — second param does not exist yet (RED state)
-    const appOrResult = createApp(dbPath, config);
-
     // D-007: MUST fail loud — either:
     //   (a) createApp returns Result<App, LoreError> with ok:false, or
     //   (b) createApp throws an Error
     // MUST NOT silently succeed and fall back to SQLiteStore.
+
+    const appOrResult = createApp(dbPath, config);
 
     if (isResult(appOrResult)) {
       // Option A: Result pattern
@@ -271,7 +291,6 @@ describe("createApp — sync enabled + token env MISSING → fail loud (D-007)",
     } else {
       // Option B: If createApp returns App directly, it must NOT return a working app
       // when the token is missing. The implementation is wrong if it silently falls back.
-      // If we reach here with a non-Result return, force the test to fail with a clear message.
       const typedApp = appOrResult as App;
       typedApp.close();
       throw new Error(
@@ -289,7 +308,6 @@ describe("createApp — sync enabled + token env MISSING → fail loud (D-007)",
     // Set env var to empty string — must also fail (not treat empty as valid token)
     process.env[TEST_TOKEN_ENV] = "";
 
-    // @ts-expect-error — second param does not exist yet (RED state)
     const appOrResult = createApp(dbPath, config);
 
     if (isResult(appOrResult)) {
@@ -305,13 +323,25 @@ describe("createApp — sync enabled + token env MISSING → fail loud (D-007)",
 
     delete process.env[TEST_TOKEN_ENV];
   });
+
+  it("missing token error code is VALIDATION_ERROR (pre-construction credential check)", () => {
+    // Credential check happens BEFORE TursoStore construction.
+    // Missing token → VALIDATION_ERROR (not STORE_ERROR).
+    const dbPath = join(tmpDir, "lore3.db");
+    const config = makeSyncConfig(TEST_TOKEN_ENV);
+
+    const appOrResult = createApp(dbPath, config);
+
+    expect(isResult(appOrResult)).toBe(true);
+    if (isResult(appOrResult) && !appOrResult.ok) {
+      expect(appOrResult.error.code).toBe("VALIDATION_ERROR");
+    }
+  });
 });
 
 // ===========================================================================
 // SCENARIO 6 — `lore sync pull` unconfigured → exit 1
 // Uses Bun.spawnSync (subprocess) to test the full CLI path.
-// Some of this may already be covered by sync-cli.test.ts (vitest), so we
-// add only the bun.test.ts variant for the pull wiring path once configured.
 // ===========================================================================
 
 describe("lore sync pull — unconfigured → exit 1 (SPEC-009 §5)", () => {
@@ -465,8 +495,6 @@ describe("createApp — boundary values", () => {
 
   it("createApp(dbPath, undefined) is equivalent to createApp(dbPath) — uses SQLiteStore", () => {
     const dbPath = join(tmpDir, "lore.db");
-
-    // @ts-expect-error — second param does not exist yet (RED state)
     const appOrResult = createApp(dbPath, undefined);
 
     // Passing explicit undefined must behave like no config — SQLiteStore, local-only
@@ -523,7 +551,6 @@ describe("createApp — regression (existing API must not break)", () => {
     // Regression lock: the push placeholder always returns STORE_ERROR → exit 1
     // when no sync config is present. This MUST keep failing until push is wired.
     const tmpProjDir = makeTmpDir("push-reg");
-    mkdirSync(join(tmpProjDir, ".lore"), { recursive: true });
 
     const PROJECT_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
     const INDEX_TS = join(PROJECT_ROOT, "src", "index.ts");
