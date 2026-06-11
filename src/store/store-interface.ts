@@ -18,6 +18,28 @@ import type {
 } from "../core/types.js";
 import type { LoreError, Result } from "../core/errors.js";
 
+// ─── Update Options ────────────────────────────────────────────────────────
+
+/**
+ * Options for {@link StoreInterface.update}.
+ *
+ * When `expected_version` is provided the storage layer MUST perform a
+ * conditional UPDATE (`WHERE id = ? AND version = ?`).  If zero rows are
+ * affected (because the stored version no longer matches) the call MUST
+ * return a {@link LoreError} with code `STALE_VERSION` carrying
+ * `{ id, expected: expected_version, actual: <current stored version> }`.
+ *
+ * When omitted the existing unconditional UPDATE semantics are preserved,
+ * keeping all current callers backward-compatible.
+ *
+ * @see PLAN-01KTRJGT31D8WJ4ZRHNARV9YBC phase 1a — CAS/conditional-UPDATE
+ *      implementation lands there.
+ */
+export interface UpdateOpts {
+  /** Guard version. When set, update is conditional on this matching the stored value. */
+  expected_version?: number;
+}
+
 // ─── Filter Types ──────────────────────────────────────────────────────────
 
 export interface StoreFilters {
@@ -77,9 +99,22 @@ export interface StoreInterface {
 
   /**
    * Apply a partial patch to an existing doc.
-   * Returns DOC_NOT_FOUND if id is missing.
+   * Returns `DOC_NOT_FOUND` if `id` is missing.
+   *
+   * **Optimistic locking** — when `opts.expected_version` is provided the
+   * storage layer MUST perform a conditional UPDATE (`WHERE id = ? AND version = ?`).
+   * If the stored version no longer matches, the call MUST return
+   * `{ code: "STALE_VERSION", id, expected: opts.expected_version, actual: <stored> }`.
+   * When `opts` is omitted the unconditional UPDATE behaviour is preserved
+   * (backward-compatible — all existing callers are unaffected).
+   *
+   * @see PLAN-01KTRJGT31D8WJ4ZRHNARV9YBC phase 1a — CAS implementation
    */
-  update(id: DocId, patch: Partial<DocRecord>): Promise<Result<DocRecord, LoreError>>;
+  update(
+    id: DocId,
+    patch: Partial<DocRecord>,
+    opts?: UpdateOpts,
+  ): Promise<Result<DocRecord, LoreError>>;
 
   /**
    * Set deleted_at to current ISO timestamp.

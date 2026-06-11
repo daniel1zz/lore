@@ -23,6 +23,7 @@ import type {
   SearchHit,
   StoreFilters,
   StoreInterface,
+  UpdateOpts,
 } from "./store-interface.js";
 
 // ─── Raw DB row types ──────────────────────────────────────────────────────
@@ -321,7 +322,16 @@ export class SQLiteStore implements StoreInterface {
     }
   }
 
-  async update(id: DocId, patch: Partial<DocRecord>): Promise<Result<DocRecord, LoreError>> {
+  /**
+   * @see UpdateOpts for optimistic-lock semantics.
+   * CAS/conditional-UPDATE implementation is deferred to phase 1a.
+   * @see PLAN-01KTRJGT31D8WJ4ZRHNARV9YBC phase 1a
+   */
+  async update(
+    id: DocId,
+    patch: Partial<DocRecord>,
+    _opts?: UpdateOpts, // intentionally unused — CAS lands in phase 1a
+  ): Promise<Result<DocRecord, LoreError>> {
     try {
       const existing = this.db
         .prepare("SELECT * FROM docs WHERE id = ?")
