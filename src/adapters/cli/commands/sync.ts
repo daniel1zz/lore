@@ -7,37 +7,53 @@
 import { defineCommand } from "citty";
 import { join, dirname } from "path";
 import { existsSync } from "fs";
+import { createClient } from "@libsql/client";
 import { loadConfig, saveConfig, resolveSyncCredentials } from "../../../core/config.js";
 import type { LoreConfig } from "../../../core/config.js";
 import type { Result, LoreError } from "../../../core/errors.js";
-import { err } from "../../../core/errors.js";
+import { err, ok } from "../../../core/errors.js";
+import { syncPush, type PushReport } from "../../http/sync-push.js";
+import { TursoStore } from "../../../store/turso-store.js";
 
-// ─── Phase-2 placeholder signatures ──────────────────────────────────────────
-// These are typed call points for Phase 2 wiring; they return NOT_WIRED errors
-// so callers get a clear, loud failure rather than silent no-op.
-
-type SyncOpResult = Result<void, LoreError>;
+// ─── Push / Pull implementations ─────────────────────────────────────────────
 
 /**
- * Placeholder for Phase 2 push implementation.
- * Returns STORE_ERROR with a clear NOT_WIRED message until wired.
+ * Logical replication push: read all local rows and INSERT OR IGNORE into remote.
+ * Returns a PushReport with per-table row counts on success.
  */
-export function performPush(_url: string, _token: string): SyncOpResult {
-  return err({
-    code: "STORE_ERROR",
-    message: "Push is not yet wired (Phase 2 — TursoStore integration pending)",
-  });
+export async function performPush(
+  localPath: string,
+  remoteUrl: string,
+  authToken: string,
+): Promise<Result<PushReport, LoreError>> {
+  const remoteClient = createClient({ url: remoteUrl, authToken });
+  try {
+    return await syncPush(localPath, remoteClient);
+  } finally {
+    remoteClient.close();
+  }
 }
 
 /**
- * Placeholder for Phase 2 pull implementation.
- * Returns STORE_ERROR with a clear NOT_WIRED message until wired.
+ * Embedded-replica pull: sync remote frames to local embedded replica.
+ * Uses TursoStore.sync() which calls @libsql/client client.sync().
+ * Returns { frameNo, framesSynced } on success.
  */
-export function performPull(_url: string, _token: string): SyncOpResult {
-  return err({
-    code: "STORE_ERROR",
-    message: "Pull is not yet wired (Phase 2 — TursoStore integration pending)",
+export async function performPull(
+  localPath: string,
+  remoteUrl: string,
+  authToken: string,
+): Promise<Result<{ frameNo: number; framesSynced: number } | void, LoreError>> {
+  const store = new TursoStore({
+    localPath,
+    remoteUrl,
+    authToken,
   });
+  try {
+    return await store.sync();
+  } finally {
+    store.close();
+  }
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -283,10 +299,10 @@ const syncStatus = defineCommand({
 
 // ─── sync push ────────────────────────────────────────────────────────────────
 
-const syncPush = defineCommand({
+const syncPushCmd = defineCommand({
   meta: {
     name: "push",
-    description: "Upload local DB to remote Turso (Phase 2)",
+    description: "Upload local DB to remote Turso (logical replication)",
   },
   args: {
     json: {
@@ -331,7 +347,9 @@ const syncPush = defineCommand({
       process.exit(1);
     }
 
-    const pushResult = performPush(credResult.value.url, credResult.value.token);
+    const localDbPath = join(loreDir, ".lore", "lore.db");
+    const pushResult = await performPush(localDbPath, credResult.value.url, credResult.value.token);
+
     if (!pushResult.ok) {
       const msg = pushResult.error.message;
       if (args.json) {
@@ -342,10 +360,16 @@ const syncPush = defineCommand({
       process.exit(1);
     }
 
+    const report = pushResult.value;
+
     if (args.json) {
-      console.log(JSON.stringify({ ok: true, data: { pushed: true } }));
+      console.log(JSON.stringify({ ok: true, data: { pushed: true, report } }));
     } else {
       console.log("Push complete.");
+      for (const t of report.tables) {
+        console.log(`  ${t.table}: ${t.local_rows} local → ${t.remote_rows} remote`);
+      }
+      console.log(`  Total: ${report.total_rows} rows`);
     }
 
     process.exit(0);
@@ -354,10 +378,10 @@ const syncPush = defineCommand({
 
 // ─── sync pull ────────────────────────────────────────────────────────────────
 
-const syncPull = defineCommand({
+const syncPullCmd = defineCommand({
   meta: {
     name: "pull",
-    description: "Sync remote Turso changes to local DB (Phase 2)",
+    description: "Sync remote Turso changes to local DB (embedded replica)",
   },
   args: {
     json: {
@@ -402,7 +426,9 @@ const syncPull = defineCommand({
       process.exit(1);
     }
 
-    const pullResult = performPull(credResult.value.url, credResult.value.token);
+    const localDbPath = join(loreDir, ".lore", "lore.db");
+    const pullResult = await performPull(localDbPath, credResult.value.url, credResult.value.token);
+
     if (!pullResult.ok) {
       const msg = pullResult.error.message;
       if (args.json) {
@@ -413,10 +439,15 @@ const syncPull = defineCommand({
       process.exit(1);
     }
 
+    const syncInfo = pullResult.value;
+
     if (args.json) {
-      console.log(JSON.stringify({ ok: true, data: { pulled: true } }));
+      console.log(JSON.stringify({ ok: true, data: { pulled: true, sync: syncInfo ?? null } }));
     } else {
       console.log("Pull complete.");
+      if (syncInfo) {
+        console.log(`  Frame: ${syncInfo.frameNo}, synced: ${syncInfo.framesSynced}`);
+      }
     }
 
     process.exit(0);
@@ -433,7 +464,7 @@ export default defineCommand({
   subCommands: {
     setup: syncSetup,
     status: syncStatus,
-    push: syncPush,
-    pull: syncPull,
+    push: syncPushCmd,
+    pull: syncPullCmd,
   },
 });
