@@ -438,6 +438,62 @@ not_a_real_key: "surprise"
 });
 
 // ---------------------------------------------------------------------------
+// REGRESSION — Default value locks (phase-0 gate fix, SPEC-009 §6)
+// ---------------------------------------------------------------------------
+
+describe("LoreConfigSchema — default value regression (SPEC-009 §6)", () => {
+  it("defaults sync.interval to 60 when interval is omitted (SPEC-009 §6)", () => {
+    const raw = {
+      project: { name: "lore", author: "owner" },
+      sync: {
+        enabled: true,
+        remote_url: "libsql://lore-db-xxx.turso.io",
+        auth_token_env: "LORE_SYNC_TOKEN",
+        // interval intentionally omitted — must default to 60
+      },
+    };
+    const result = LoreConfigSchema.safeParse(raw);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.sync?.interval).toBe(60);
+    }
+  });
+
+  it("parseConfig defaults sync.interval to 60 when interval is omitted", () => {
+    const raw = {
+      project: { name: "lore", author: "owner" },
+      sync: {
+        enabled: true,
+        remote_url: "libsql://lore-db-xxx.turso.io",
+        auth_token_env: "LORE_SYNC_TOKEN",
+        // interval intentionally omitted — must default to 60
+      },
+    };
+    const result = parseConfig(raw);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.sync?.interval).toBe(60);
+    }
+  });
+
+  it("defaults sync.auth_token_env to 'LORE_SYNC_TOKEN' when auth_token_env is omitted (D-004)", () => {
+    const raw = {
+      project: { name: "lore", author: "owner" },
+      sync: {
+        enabled: true,
+        remote_url: "libsql://lore-db-xxx.turso.io",
+        interval: 30,
+        // auth_token_env intentionally omitted — must default to 'LORE_SYNC_TOKEN'
+      },
+    };
+    const result = LoreConfigSchema.safeParse(raw);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.sync?.auth_token_env).toBe("LORE_SYNC_TOKEN");
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // STATE — N/A: stateless pure functions
-// REGRESSION — N/A: no known regressions pre-implementation
 // ---------------------------------------------------------------------------

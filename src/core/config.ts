@@ -22,7 +22,7 @@ const SyncConfigSchema = z
     enabled: z.boolean(),
     remote_url: z.string().startsWith("libsql://").optional(),
     auth_token_env: z.string().default("LORE_SYNC_TOKEN"),
-    interval: z.number().int().positive(),
+    interval: z.number().int().positive().default(60),
   })
   .strict()
   .superRefine((data, ctx) => {
