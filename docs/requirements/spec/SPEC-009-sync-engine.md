@@ -2,19 +2,21 @@
 id: SPEC-009
 type: feature-spec
 role: spec
-title: "Sync Engine (Turso)"
-status: draft
+title: Sync Engine (Turso)
+status: approved
 priority: critical
 phase: P2
-created: 2026-06-08
-updated: 2026-06-08
-tags: [sync, turso, libsql, cloud, phase-2]
+created: 2026-06-08T00:00:00.000Z
+updated: '2026-06-11T05:17:57.325Z'
+tags:
+  - sync
+  - turso
+  - libsql
+  - cloud
+  - phase-2
 parent: PRD-001
-links:
-  - {id: SPEC-001, type: implements, note: "TursoStore extends StoreInterface"}
-  - {id: SPEC-002, type: consumes, note: "Same schema, synced to cloud"}
+version: 1.0.3
 ---
-
 # SPEC-009: Sync Engine (Turso Embedded Replicas)
 
 ## 1. Purpose
