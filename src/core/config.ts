@@ -1,12 +1,12 @@
 /**
- * LoreConfig — Zod schema, types, and pure parse helpers.
+ * LoreConfig — Zod schema, types, pure parse helpers, and file I/O.
  * Source: SPEC-009 §6, D-004 (auth_token_env is env-var NAME only), D-007 (sync.enabled + remote_url → TursoStore).
- *
- * NO filesystem I/O. File load/save belongs to Phase 1c adapters.
  */
 
 import { z } from "zod";
 import yaml from "yaml";
+import { readFileSync, writeFileSync, mkdirSync } from "fs";
+import { join } from "path";
 import { ok, err } from "./errors.js";
 import type { Result, LoreError } from "./errors.js";
 
@@ -110,4 +110,86 @@ export function loadConfigFromString(
   }
 
   return parseConfig(parsed);
+}
+
+// ─── File I/O ─────────────────────────────────────────────────────────────────
+
+const CONFIG_FILE = ".lore/config.yaml";
+
+/**
+ * Load LoreConfig from <dir>/.lore/config.yaml.
+ * Missing file or invalid content → {ok:false, error}. Never throws.
+ */
+export function loadConfig(dir: string): Result<LoreConfig, LoreError> {
+  try {
+    const configPath = join(dir, CONFIG_FILE);
+    const raw = readFileSync(configPath, "utf8");
+    return loadConfigFromString(raw);
+  } catch (e) {
+    const message =
+      e instanceof Error ? e.message : "Failed to read config file";
+    return err({
+      code: "STORE_ERROR",
+      message,
+      cause: e instanceof Error ? e : undefined,
+    } satisfies LoreError);
+  }
+}
+
+/**
+ * Write LoreConfig to <dir>/.lore/config.yaml.
+ * D-004: only the env-var NAME (auth_token_env) is written — never a resolved token value.
+ * Creates <dir>/.lore/ if it does not exist. Never throws.
+ */
+export function saveConfig(
+  dir: string,
+  config: LoreConfig,
+): Result<void, LoreError> {
+  try {
+    const loreDir = join(dir, ".lore");
+    mkdirSync(loreDir, { recursive: true });
+    const yamlText = yaml.stringify(config);
+    writeFileSync(join(loreDir, "config.yaml"), yamlText, "utf8");
+    return ok(undefined);
+  } catch (e) {
+    const message =
+      e instanceof Error ? e.message : "Failed to write config file";
+    return err({
+      code: "STORE_ERROR",
+      message,
+      cause: e instanceof Error ? e : undefined,
+    } satisfies LoreError);
+  }
+}
+
+/**
+ * Resolve sync credentials from process.env using the env-var name in config.sync.
+ * D-004: token is read from process.env at runtime, never stored on disk.
+ * Missing/empty env var or absent sync section → {ok:false, VALIDATION_ERROR}. Never throws.
+ */
+export function resolveSyncCredentials(
+  config: LoreConfig,
+): Result<{ url: string; token: string }, LoreError> {
+  if (config.sync === undefined) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "sync",
+      message: "No sync section in config — cannot resolve credentials",
+      value: config,
+    } satisfies LoreError);
+  }
+
+  const envVarName = config.sync.auth_token_env;
+  const token = process.env[envVarName];
+
+  if (!token) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "sync.auth_token_env",
+      message: `Environment variable ${envVarName} is not set or is empty`,
+      value: envVarName,
+    } satisfies LoreError);
+  }
+
+  return ok({ url: config.sync.remote_url ?? "", token });
 }
