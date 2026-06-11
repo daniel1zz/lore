@@ -344,7 +344,7 @@ export class CorpusService {
     if (parsedPatch.data.extra !== undefined) docPatch.extra = parsedPatch.data.extra;
     if (parsedPatch.data.slug !== undefined) docPatch.slug = parsedPatch.data.slug;
 
-    const updateResult = await this.store.update(existing.id, docPatch);
+    const updateResult = await this.store.update(existing.id, docPatch, { expected_version: existing.version });
     if (!updateResult.ok) return updateResult;
 
     const versionResult = await this.store.insertVersion({
