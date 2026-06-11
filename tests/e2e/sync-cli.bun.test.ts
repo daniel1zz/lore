@@ -434,11 +434,13 @@ describe("lore sync pull — unconfigured → exit 1 (SPEC-009 §5)", () => {
     expect(hasError).toBe(true);
   });
 
-  it("lore sync pull with valid sync config executes pull (placeholder returns error but exits 1 per NOT_WIRED)", () => {
-    // This tests the wiring path: config loads → credentials resolve → performPull called
-    // Since performPull is currently a placeholder, it returns STORE_ERROR → exit 1.
-    // Once wired, this test will be updated to expect exit 0.
-    // For now, it verifies the credential-resolution path is exercised (not just config-load).
+  it("lore sync pull with valid sync config but unreachable remote exits 1 (fail-loud contract)", () => {
+    // Contract: configured-but-unreachable remote → fail loud with exit 1.
+    // This is permanent correct semantics per D-003/R4: when the remote cannot be
+    // reached, pull MUST NOT silently succeed or fall back to local-only state.
+    // The test verifies the credential-resolution path is exercised (config loaded,
+    // token env resolved) before the network failure causes a STORE_ERROR exit 1.
+    // Reachable-remote happy path = manual acceptance checklist (D-003/R4).
 
     runLore(["init", "--name", "pull-wired-test"], tmpDir);
 
@@ -463,10 +465,9 @@ describe("lore sync pull — unconfigured → exit 1 (SPEC-009 §5)", () => {
       { LORE_TEST_PULL_TOKEN_WIRED: "fake-token-wired" },
     );
 
-    // The placeholder performPull returns STORE_ERROR → exit 1.
-    // This test verifies the credential path is reached (token env was used, not "missing token").
-    // When pull is implemented (Phase 2c), this test should be updated to expect exit 0
-    // for a file: mode scenario. Right now exit 1 is correct because it's a placeholder.
+    // Exit 1 is the correct permanent contract for unreachable-remote pull.
+    // Pull is wired; the remote URL is intentionally unreachable → STORE_ERROR → exit 1.
+    // This verifies the credential path is reached (token env was used, not "missing token").
     expect(result.exitCode).toBe(1);
 
     // Must NOT produce "not configured" or "missing token" error

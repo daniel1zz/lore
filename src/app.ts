@@ -55,11 +55,13 @@ function buildAppFromSqlite(store: SQLiteStore): App {
 
 /**
  * Build an App backed by a TursoStore (embedded replica).
- * ApiKeyStore uses a separate in-memory SQLite DB — the HTTP API key table
- * is local-only metadata (not replicated via Turso). Corpus operations use TursoStore.
+ * ApiKeyStore uses the same local SQLite file as the TursoStore's embedded replica —
+ * api_keys is one of the 5 replicated tables (R3) and must persist across restarts.
+ * WAL multi-connection interop between bun:sqlite and @libsql/client is verified in
+ * tests/unit/store/libsql-compat.bun.test.ts. Corpus operations use TursoStore.
  */
-function buildAppFromTurso(store: TursoStore): App {
-  const apiKeyDb = new Database(":memory:");
+function buildAppFromTurso(store: TursoStore, dbPath: string): App {
+  const apiKeyDb = new Database(dbPath);
   return {
     corpusService: new CorpusService(store),
     reviewService: new ReviewService(store),
@@ -125,7 +127,7 @@ export function createApp(
       authToken,
       syncInterval: config.sync.interval,
     });
-    return { ok: true, value: buildAppFromTurso(store) };
+    return { ok: true, value: buildAppFromTurso(store, dbPath) };
   } catch (e) {
     const message =
       e instanceof Error
