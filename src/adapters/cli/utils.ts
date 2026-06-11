@@ -36,6 +36,7 @@ export function findLoreDb(): string {
   process.exit(1);
 }
 
+
 // ─── Error Formatting ───────────────────────────────────────────────────────
 
 /** Map a LoreError code to a CLI exit code per SPEC-003 §5. */
