@@ -575,6 +575,65 @@ describe("REGRESSION — sync command module existence (SPEC-009 §5)", () => {
   });
 });
 
+// [Fix 6 regression] push/pull --json unconfigured → JSON error on stdout + exit 1
+// Previously push/pull ignored --json for config-load errors and wrote plain text to stderr.
+// This guards the consistent json output behavior mirroring setup/status.
+describe("REGRESSION Fix6 — push/pull --json flag consistency (SPEC-009 §5)", () => {
+  it("push --json unconfigured: outputs JSON {ok:false,error} on stdout and exits 1", async () => {
+    createLoreDb();
+    writeConfigYaml("project:\n  name: no-sync\n  author: tester\n");
+
+    const { push } = await importSyncCommand();
+    const output = captureOutput();
+    const exitCapture = captureExit();
+
+    try {
+      await push.run({ args: { json: true } });
+    } catch (e: any) {
+      if (!e.message?.includes("process.exit")) throw e;
+    } finally {
+      output.restore();
+    }
+
+    expect(exitCapture.exitCode).toBe(1);
+
+    // Must output valid JSON with ok:false to stdout (not stderr)
+    const rawOut = output.stdout.join("").trim();
+    expect(rawOut.length).toBeGreaterThan(0);
+    const parsed = JSON.parse(rawOut);
+    expect(parsed.ok).toBe(false);
+    expect(typeof parsed.error).toBe("string");
+    expect(parsed.error.length).toBeGreaterThan(0);
+  });
+
+  it("pull --json unconfigured: outputs JSON {ok:false,error} on stdout and exits 1", async () => {
+    createLoreDb();
+    writeConfigYaml("project:\n  name: no-sync\n  author: tester\n");
+
+    const { pull } = await importSyncCommand();
+    const output = captureOutput();
+    const exitCapture = captureExit();
+
+    try {
+      await pull.run({ args: { json: true } });
+    } catch (e: any) {
+      if (!e.message?.includes("process.exit")) throw e;
+    } finally {
+      output.restore();
+    }
+
+    expect(exitCapture.exitCode).toBe(1);
+
+    // Must output valid JSON with ok:false to stdout
+    const rawOut = output.stdout.join("").trim();
+    expect(rawOut.length).toBeGreaterThan(0);
+    const parsed = JSON.parse(rawOut);
+    expect(parsed.ok).toBe(false);
+    expect(typeof parsed.error).toBe("string");
+    expect(parsed.error.length).toBeGreaterThan(0);
+  });
+});
+
 describe("REGRESSION — sync push/pull error message quality (SPEC-009 §5)", () => {
   it("push without sync config produces a non-empty, human-readable error on stderr", async () => {
     createLoreDb();

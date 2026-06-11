@@ -54,7 +54,16 @@ export default defineCommand({
     const projectName = args.name ?? cwd.split("/").filter(Boolean).pop() ?? "lore";
 
     // Write config.yaml via SSOT saveConfig (no hand-assembled yaml)
-    saveConfig(cwd, { project: { name: projectName, author: args.author } });
+    const saveResult = saveConfig(cwd, { project: { name: projectName, author: args.author } });
+    if (!saveResult.ok) {
+      const msg = `Failed to write config: ${saveResult.error.message}`;
+      if (args.json) {
+        console.log(JSON.stringify({ ok: false, error: msg }));
+      } else {
+        process.stderr.write(`Error: ${msg}\n`);
+      }
+      process.exit(1);
+    }
 
     // Initialise the SQLite DB (SQLiteStore constructor runs migrations)
     const dbPath = join(loreDir, "lore.db");

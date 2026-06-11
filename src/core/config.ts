@@ -165,7 +165,12 @@ export function saveConfig(
 /**
  * Resolve sync credentials from process.env using the env-var name in config.sync.
  * D-004: token is read from process.env at runtime, never stored on disk.
- * Missing/empty env var or absent sync section → {ok:false, VALIDATION_ERROR}. Never throws.
+ * Fails loud (VALIDATION_ERROR) when:
+ *   - no sync section in config
+ *   - sync.enabled !== true
+ *   - remote_url is absent or empty
+ *   - env var is absent or empty
+ * Never returns ok with empty/missing credentials. Never throws.
  */
 export function resolveSyncCredentials(
   config: LoreConfig,
@@ -176,6 +181,25 @@ export function resolveSyncCredentials(
       field: "sync",
       message: "No sync section in config — cannot resolve credentials",
       value: config,
+    } satisfies LoreError);
+  }
+
+  if (config.sync.enabled !== true) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "sync.enabled",
+      message: "Sync is not enabled (sync.enabled must be true to resolve credentials)",
+      value: config.sync.enabled,
+    } satisfies LoreError);
+  }
+
+  const remoteUrl = config.sync.remote_url;
+  if (!remoteUrl) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "sync.remote_url",
+      message: "sync.remote_url is missing or empty — cannot resolve credentials",
+      value: remoteUrl,
     } satisfies LoreError);
   }
 
@@ -191,5 +215,5 @@ export function resolveSyncCredentials(
     } satisfies LoreError);
   }
 
-  return ok({ url: config.sync.remote_url ?? "", token });
+  return ok({ url: remoteUrl, token });
 }

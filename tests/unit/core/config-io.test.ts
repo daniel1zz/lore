@@ -424,6 +424,38 @@ describe("resolveSyncCredentials() — negative cases (D-004, SPEC-009 §6)", ()
       expect(result.error.code).toBe("VALIDATION_ERROR");
     }
   });
+
+  // [Fix 3 regression] enabled=false with token set → err (fail loud, not silent ok)
+  // Previously resolveSyncCredentials did not check sync.enabled, so a config with
+  // sync.enabled=false but a valid env token would silently return credentials.
+  // This test guards against that latent bug.
+  it("REGRESSION Fix3: returns {ok:false} when sync.enabled=false even if env token is set", async () => {
+    process.env["LORE_SYNC_TOKEN"] = "some-valid-token";
+
+    const { resolveSyncCredentials } = await importConfigIO();
+    // sync section exists but enabled=false — credentials must NOT be resolved
+    const config = {
+      project: { name: "test", author: "tester" },
+      sync: {
+        enabled: false,
+        auth_token_env: "LORE_SYNC_TOKEN",
+        interval: 60,
+        // remote_url omitted (schema allows it when enabled=false)
+      },
+    };
+
+    // Cast to LoreConfig because TypeScript enforces runtime shape via Zod,
+    // but our test exercises the JS runtime guard directly.
+    const result = resolveSyncCredentials(config as any);
+
+    delete process.env["LORE_SYNC_TOKEN"];
+
+    // Must fail loud — not return credentials for a disabled sync config
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("VALIDATION_ERROR");
+    }
+  });
 });
 
 // ===========================================================================
