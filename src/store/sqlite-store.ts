@@ -323,31 +323,89 @@ export class SQLiteStore implements StoreInterface {
   }
 
   /**
-   * @see UpdateOpts for optimistic-lock semantics.
-   * CAS/conditional-UPDATE implementation is deferred to phase 1a.
-   * @see PLAN-01KTRJGT31D8WJ4ZRHNARV9YBC phase 1a
+   * Apply a partial patch to an existing doc.
+   * When opts.expected_version is provided, the UPDATE includes AND version = ?
+   * (conditional CAS). If zero rows are affected:
+   *   - row absent → DOC_NOT_FOUND
+   *   - row present with different version → STALE_VERSION{id, expected, actual}
+   * When opts is omitted or expected_version is not set, unconditional update.
+   * @see UpdateOpts for full contract.
    */
   async update(
     id: DocId,
     patch: Partial<DocRecord>,
-    _opts?: UpdateOpts, // intentionally unused — CAS lands in phase 1a
+    opts?: UpdateOpts,
   ): Promise<Result<DocRecord, LoreError>> {
     try {
-      const existing = this.db
+      const existingRow = this.db
         .prepare("SELECT * FROM docs WHERE id = ?")
         .get(id) as DocRow | null;
 
-      if (!existing) {
+      if (!existingRow) {
         return err({ code: "DOC_NOT_FOUND", id });
       }
 
-      const current = rowToDocRecord(existing);
+      const current = rowToDocRecord(existingRow);
       const updated: DocRecord = {
         ...current,
         ...patch,
         id: current.id, // id is immutable
       };
 
+      if (opts?.expected_version !== undefined) {
+        // Conditional UPDATE: only affects the row if version still matches
+        const result = this.db
+          .prepare(
+            `UPDATE docs SET
+               slug = ?, type = ?, role = ?, title = ?, status = ?,
+               priority = ?, content = ?, parent_id = ?, extra = ?,
+               tags = ?, version = ?, created_at = ?, updated_at = ?,
+               created_by = ?, deleted_at = ?
+             WHERE id = ? AND version = ?`,
+          )
+          .run(
+            updated.slug,
+            updated.type,
+            updated.role,
+            updated.title,
+            updated.status,
+            updated.priority,
+            updated.content,
+            updated.parent_id ?? null,
+            JSON.stringify(updated.extra),
+            JSON.stringify(updated.tags),
+            updated.version,
+            updated.created_at,
+            updated.updated_at,
+            updated.created_by,
+            updated.deleted_at ?? null,
+            id,
+            opts.expected_version,
+          );
+
+        if (result.changes === 0) {
+          // Row exists (checked above) but version didn't match — re-read actual version
+          const actualRow = this.db
+            .prepare("SELECT version FROM docs WHERE id = ?")
+            .get(id) as { version: number } | null;
+
+          if (!actualRow) {
+            // Deleted between our SELECT and the UPDATE (race) — treat as not found
+            return err({ code: "DOC_NOT_FOUND", id });
+          }
+
+          return err({
+            code: "STALE_VERSION",
+            id,
+            expected: opts.expected_version,
+            actual: actualRow.version,
+          });
+        }
+
+        return ok(updated);
+      }
+
+      // Unconditional UPDATE — backward-compatible path
       this.db
         .prepare(
           `UPDATE docs SET
