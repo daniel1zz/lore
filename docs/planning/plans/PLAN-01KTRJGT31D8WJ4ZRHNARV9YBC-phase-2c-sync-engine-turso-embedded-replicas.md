@@ -7,7 +7,7 @@ summary: >-
   Implement SPEC-009: TursoStore (libsql embedded replica), optimistic locking
   across all stores, lore sync CLI (setup/push/pull/status), config.yaml sync
   section. Strategy: Interface-First with 3-way parallel Phase 1.
-status: approved
+status: archived
 priority: critical
 tags:
   - phase-2
@@ -16,8 +16,8 @@ tags:
   - libsql
   - optimistic-locking
 created: '2026-06-10T10:51:15.944Z'
-updated: '2026-06-11T05:10:45.688Z'
-version: 1.0.4
+updated: '2026-06-11T08:28:48.040Z'
+version: 1.0.6
 plan_category: feature
 governance_mode: attended
 invariants:
@@ -28,9 +28,6 @@ invariants:
   - 乐观锁在 storage 层 conditional UPDATE (WHERE version=?)，0 rows → STALE_VERSION
   - bun build --compile 可编译，运行时不读模板文件
   - TS strict + Zod 数据边界（config.yaml 解析必过 Zod）
-links:
-  - target_id: SPEC-009
-    link_type: implements
 ---
 # Phase 2c — Sync Engine (Turso Embedded Replicas)
 
@@ -132,3 +129,20 @@ Run after `lore sync setup --url <libsql://...> ` with LORE_SYNC_TOKEN set:
 - tsc --noEmit full-project OOM (preexisting, also on clean main; TS 5.9.3 + vitest 3.2.6 types). Workaround: src-only tsconfig subset for typecheck oracle. Root-cause fix is a separate task — not in this plan.
 - 12 DocMan orphan docs remain (see RETRO-01KTTHD4F3F6S40C1XQGN85WAS) — fix via docman-doctor when needed.
 - prepare_for_next_session tool errored (SqliteError: no such table documents) — handoff recorded here instead.
+
+
+## Execution Record (2026-06-11, autopilot)
+
+All 22 tasks completed. Final oracles: vitest 576/576 (18 files), bun test .bun.test 269/269 (8 files), compiled binary exercised standalone from clean dir (init/create/list/sync setup/status; push/pull fail-loud without token). validate_plan: warn(87), requirement_coverage 12/12, all warns triaged as false-positives or pre-documented.
+
+### Deviations & fixes during execution
+- D-007 deviation caught: initial app.ts impl kept SQLiteStore for local ops under sync config; corrected to TursoStore embedded-replica routing. Measured: libsql createClient throws eagerly on unreachable syncUrl → createApp returns STORE_ERROR (no silent fallback).
+- EC-5 failure root-caused: bun build --compile does not embed libsql's dynamically-required native addon; earlier "pass" readings were masked by cwd node_modules fallback and trailing-echo exit codes. Fixed via Bun.build onLoad plugin rewriting libsql requireNative to a static .node path (official Bun embed pattern); locked with 13 build-plugin tests. Cross-platform path derivation verified only on darwin-arm64 (loud build-time guard for others).
+- test:bun scoped to .bun.test.ts (0f1273f): bun in-process runner was killed silently (exit 0, no summary) by CLI process.exit once sync-cli handlers became executable; vitest worker isolation masks this. Runner scoping matches the documented convention.
+- TursoStore FTS: migration triggers fire via libsql (R1 spike); redundant manual FTS maintenance removed after probe verification; stale-token + integrity-check regression tests added.
+- Phase-gate review fixes: interval .default(60); resolveSyncCredentials enabled/remote_url guards; init.ts fail-loud on saveConfig; immutable links in InMemoryStore; sync --json consistency; batched push (BATCH_CHUNK_SIZE=500) per D-006; ApiKeyStore persistent (same db file) under Turso mode; handled init-schema rejection.
+
+### Known issues carried forward
+- tsc oracle UNAVAILABLE on this machine: full AND src-only tsc OOM at 8GB heap under both Bun and Node runtimes (probes: src-only, src-minus-mcp). Root-cause fix remains out-of-plan. Dual test suites are the working oracle.
+- DocMan update_doc DB-write path throws SQLite bind TypeError (file write succeeds; reindex syncs). Workaround used throughout this session.
+- EC-6 remote-path manual acceptance checklist awaits user Turso credentials (R4/D-003).
