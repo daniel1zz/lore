@@ -1,0 +1,170 @@
+/**
+ * store-shared.ts — SSOT helpers shared by SQLiteStore and TursoStore.
+ *
+ * Contains:
+ *  - Raw DB row interfaces (DocRow, LinkRow, VersionRow, AuditRow, FtsRow)
+ *  - Row → domain record mappers (rowToDocRecord, etc.)
+ *  - parseJson, wrapStoreError utilities
+ *
+ * Design contract:
+ *  - Both stores share these types/functions — no duplication
+ *  - Row types represent the raw column layout from the database
+ *  - Mappers are pure functions with no side effects
+ *
+ * Source: SPEC-002 §7.1; SPEC-009 §3.1
+ */
+
+import type {
+  AuditEntry,
+  DocRecord,
+  LinkRecord,
+  LinkType,
+  VersionRecord,
+} from "../core/types.js";
+import { err, type LoreError, type Result } from "../core/errors.js";
+
+// ─── Raw DB row types ──────────────────────────────────────────────────────
+
+/**
+ * Raw row from the `docs` table.
+ * Shared between SQLiteStore (bun:sqlite) and TursoStore (@libsql/client).
+ * Numeric fields (version) may be bigint from libsql — callers MUST use Number().
+ */
+export interface DocRow {
+  id: string;
+  slug: string;
+  type: string;
+  role: string;
+  title: string;
+  status: string;
+  priority: string;
+  content: string;
+  parent_id: string | null;
+  extra: string;
+  tags: string;
+  version: number | bigint;
+  created_at: string;
+  updated_at: string;
+  created_by: string;
+  deleted_at: string | null;
+}
+
+export interface LinkRow {
+  from_id: string;
+  to_id: string;
+  link_type: string;
+  created_at: string;
+  created_by: string;
+}
+
+export interface VersionRow {
+  doc_id: string;
+  version: number | bigint;
+  content: string;
+  extra: string;
+  status: string;
+  title: string;
+  action: string;
+  created_at: string;
+  created_by: string;
+  change_summary: string | null;
+}
+
+export interface AuditRow {
+  timestamp: string;
+  actor: string;
+  session_id: string;
+  action: string;
+  doc_id: string | null;
+  details: string;
+}
+
+export interface FtsRow {
+  id: string;
+  slug: string;
+  title: string;
+  snippet: string;
+  rank: number | bigint;
+}
+
+// ─── JSON helpers ──────────────────────────────────────────────────────────
+
+export function parseJson<T>(raw: string, fallback: T): T {
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+// ─── Row mappers ───────────────────────────────────────────────────────────
+
+export function rowToDocRecord(row: DocRow): DocRecord {
+  return {
+    id: row.id,
+    slug: row.slug,
+    type: row.type as DocRecord["type"],
+    role: row.role as DocRecord["role"],
+    title: row.title,
+    status: row.status as DocRecord["status"],
+    priority: row.priority as DocRecord["priority"],
+    content: row.content,
+    parent_id: row.parent_id,
+    extra: parseJson(row.extra, {}),
+    tags: parseJson(row.tags, []),
+    version: Number(row.version),
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    created_by: row.created_by,
+    deleted_at: row.deleted_at,
+  };
+}
+
+export function rowToLinkRecord(row: LinkRow): LinkRecord {
+  return {
+    from_id: row.from_id,
+    to_id: row.to_id,
+    link_type: row.link_type as LinkType,
+    created_at: row.created_at,
+    created_by: row.created_by,
+  };
+}
+
+export function rowToVersionRecord(row: VersionRow): VersionRecord {
+  return {
+    doc_id: row.doc_id,
+    version: Number(row.version),
+    content: row.content,
+    extra: parseJson(row.extra, {}),
+    status: row.status as VersionRecord["status"],
+    title: row.title,
+    action: row.action as VersionRecord["action"],
+    created_at: row.created_at,
+    created_by: row.created_by,
+    ...(row.change_summary !== null
+      ? { change_summary: row.change_summary }
+      : {}),
+  };
+}
+
+export function rowToAuditEntry(row: AuditRow): AuditEntry {
+  return {
+    timestamp: row.timestamp,
+    actor: row.actor,
+    session_id: row.session_id,
+    action: row.action,
+    ...(row.doc_id !== null ? { doc_id: row.doc_id } : {}),
+    details: parseJson(row.details, {}),
+  };
+}
+
+// ─── Error helpers ──────────────────────────────────────────────────────────
+
+export function wrapStoreError(e: unknown): Result<never, LoreError> {
+  const message =
+    e instanceof Error ? e.message : "Unknown store error";
+  if (e instanceof Error) {
+    return err({ code: "STORE_ERROR", message, cause: e });
+  }
+  return err({ code: "STORE_ERROR", message });
+}
