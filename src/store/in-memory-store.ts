@@ -106,18 +106,31 @@ export class InMemoryStore implements StoreInterface {
   }
 
   /**
-   * @see UpdateOpts for optimistic-lock semantics.
-   * CAS/conditional-UPDATE implementation is deferred to phase 1a.
-   * @see PLAN-01KTRJGT31D8WJ4ZRHNARV9YBC phase 1a
+   * Apply a partial patch to an existing doc.
+   * When opts.expected_version is provided, performs a compare-and-swap:
+   * if the stored version does not match, returns STALE_VERSION with diagnostics.
+   * When opts is omitted or expected_version is not set, unconditional update.
+   * @see UpdateOpts for full contract.
    */
   async update(
     id: DocId,
     patch: Partial<DocRecord>,
-    _opts?: UpdateOpts, // intentionally unused — CAS lands in phase 1a
+    opts?: UpdateOpts,
   ): Promise<Result<DocRecord, LoreError>> {
     const existing = this.docs.get(id);
     if (!existing) {
       return err({ code: "DOC_NOT_FOUND", id });
+    }
+
+    if (opts?.expected_version !== undefined) {
+      if (existing.version !== opts.expected_version) {
+        return err({
+          code: "STALE_VERSION",
+          id,
+          expected: opts.expected_version,
+          actual: existing.version,
+        });
+      }
     }
 
     const updated: DocRecord = {
