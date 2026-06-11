@@ -175,11 +175,15 @@ export class TursoStore implements StoreInterface {
         : { url },
     );
 
-    // Schema init is synchronous via executeMultiple; run eagerly in constructor.
-    // We use a void-returning fire-and-forget here because the StoreInterface
-    // does not expose an async init(). All subsequent operations await the client,
-    // so if init fails they will also fail with a STORE_ERROR.
-    void this.initSchema();
+    // Schema init is async; run eagerly in constructor.
+    // The promise is stored in _schemaInitPromise so ensureReady() can await it
+    // and propagate the rejection as a STORE_ERROR Result on the first operation.
+    // We attach a no-op .catch() here to mark the promise as handled at the
+    // Node/Bun level, preventing an unhandledRejection event if initSchema rejects
+    // before any caller awaits ensureReady(). The rejection is NOT swallowed —
+    // ensureReady() re-awaits the stored promise and still throws, which public
+    // methods catch and convert to { ok: false, error: STORE_ERROR }.
+    this.initSchema().catch(() => { /* rejection surfaced via ensureReady() on first operation */ });
   }
 
   // ── Initialization ─────────────────────────────────────────────────────
@@ -795,6 +799,7 @@ export class TursoStore implements StoreInterface {
     }
 
     try {
+      await this.ensureReady();
       const replicated = await this.client.sync();
       if (replicated) {
         return ok({ frameNo: replicated.frame_no, framesSynced: replicated.frames_synced });

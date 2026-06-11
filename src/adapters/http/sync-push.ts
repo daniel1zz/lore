@@ -29,6 +29,13 @@ export interface PushReport {
 
 const REPLICATED_TABLES = ["docs", "links", "versions", "audit", "api_keys"] as const;
 
+/**
+ * Maximum number of INSERT statements per batch() call.
+ * D-006: batch INSERT is required; this constant controls the chunk size to
+ * avoid hitting libsql's per-batch payload limits on large datasets.
+ */
+const BATCH_CHUNK_SIZE = 500;
+
 type ReplicatedTable = (typeof REPLICATED_TABLES)[number];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -71,6 +78,9 @@ async function readAllRows(
 /**
  * Insert all rows from local into remote using INSERT OR IGNORE.
  * Idempotent: duplicate rows (by PK) are silently skipped.
+ *
+ * D-006: uses remoteClient.batch() to send rows in chunks of BATCH_CHUNK_SIZE,
+ * avoiding N+1 serial round-trips. Each chunk is sent as a single "write" batch.
  */
 async function pushTable(
   remoteClient: Client,
@@ -84,13 +94,19 @@ async function pushTable(
   const colList = columns.join(", ");
   const sql = `INSERT OR IGNORE INTO ${table} (${colList}) VALUES (${placeholders})`;
 
-  for (const row of rows) {
-    const args = columns.map((col) => {
+  // Build all statement descriptors first, then send in BATCH_CHUNK_SIZE chunks.
+  const stmts = rows.map((row) => ({
+    sql,
+    args: columns.map((col) => {
       const v = row[col];
       if (v === undefined || v === null) return null;
       return v as string | number | bigint | ArrayBuffer;
-    });
-    await remoteClient.execute({ sql, args });
+    }),
+  }));
+
+  for (let i = 0; i < stmts.length; i += BATCH_CHUNK_SIZE) {
+    const chunk = stmts.slice(i, i + BATCH_CHUNK_SIZE);
+    await remoteClient.batch(chunk, "write");
   }
 }
 
