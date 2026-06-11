@@ -822,4 +822,128 @@ describe("SQLiteStore", () => {
       }
     });
   });
+
+  // ── Optimistic Locking (CAS) — RED scenarios ───────────────────────────────
+  //
+  // @spec_ref AC-STORE-CAS-001
+  // Contract: StoreInterface.update(id, patch, opts?) with opts.expected_version.
+  // Source: src/store/store-interface.ts JSDoc for UpdateOpts, SPEC-009 §4.2, D-002.
+  //
+  // Tests CAS-01 – CAS-04 against SQLiteStore (same contract as InMemoryStore).
+  // CAS-02 and CAS-BOUND-01 are RED until conditional UPDATE lands in SQLiteStore.
+  // CAS-01, CAS-03, CAS-04 are GREEN today (unconditional update, missing doc).
+
+  describe("optimistic locking (CAS)", () => {
+    describe("happy path", () => {
+      it("CAS-01 SQLite: version match → ok, patch applied", async () => {
+        // HAPPY: expected_version matches stored version → conditional update succeeds.
+        const doc = makeDoc({ slug: "prd-cas-sqlite-v3", version: 3 });
+        await store.insert(doc);
+
+        const result = await store.update(
+          doc.id,
+          { content: "CAS updated content", updated_at: "2026-06-11T01:00:00.000Z" },
+          { expected_version: 3 },
+        );
+
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+        expect(result.value.content).toBe("CAS updated content");
+        // Store does NOT own version increment — patch did not include version, so it stays at 3
+        expect(result.value.version).toBe(3);
+      });
+    });
+
+    describe("negative cases", () => {
+      it("CAS-02 SQLite: version mismatch → err STALE_VERSION with {id, expected, actual}", async () => {
+        // NEGATIVE: concurrent writer advanced version to 4; caller expected v3.
+        // SQLiteStore must return STALE_VERSION — RED until conditional UPDATE implemented.
+        const doc = makeDoc({ slug: "prd-cas-sqlite-v4", version: 4 });
+        await store.insert(doc);
+
+        const result = await store.update(
+          doc.id,
+          { content: "stale write" },
+          { expected_version: 3 }, // actual is v4
+        );
+
+        expect(result.ok).toBe(false);
+        if (result.ok) return;
+
+        expect(result.error.code).toBe("STALE_VERSION");
+        if (result.error.code !== "STALE_VERSION") return;
+        expect(result.error.id).toBe(doc.id);
+        expect(result.error.expected).toBe(3);
+        expect(result.error.actual).toBe(4);
+      });
+
+      it("CAS-03 SQLite: doc missing + expected_version → DOC_NOT_FOUND (NOT STALE_VERSION)", async () => {
+        // NEGATIVE: non-existent document — must return DOC_NOT_FOUND regardless of expected_version.
+        const missingId = "01HMISSINGSQLITE0000CASTEST";
+
+        const result = await store.update(
+          missingId,
+          { content: "ghost write" },
+          { expected_version: 1 },
+        );
+
+        expect(result.ok).toBe(false);
+        if (result.ok) return;
+        expect(result.error.code).toBe("DOC_NOT_FOUND");
+        expect(result.error.code).not.toBe("STALE_VERSION");
+      });
+    });
+
+    describe("boundary values", () => {
+      it("CAS-BOUND-01 SQLite: expected_version=0 → STALE_VERSION (docs start at v1)", async () => {
+        // BOUNDARY: v0 never matches a real document (minimum version is 1).
+        const doc = makeDoc({ slug: "prd-cas-sqlite-v1-bv", version: 1 });
+        await store.insert(doc);
+
+        const result = await store.update(
+          doc.id,
+          { content: "v0 update attempt" },
+          { expected_version: 0 },
+        );
+
+        expect(result.ok).toBe(false);
+        if (result.ok) return;
+        expect(result.error.code).toBe("STALE_VERSION");
+      });
+    });
+
+    describe("regression — legacy unconditional semantics preserved", () => {
+      it("CAS-04 SQLite: no opts → unconditional update succeeds", async () => {
+        // REGRESSION: existing callers pass no opts — backward-compatibility must be preserved.
+        // Expected to pass TODAY (before CAS implementation).
+        const doc = makeDoc({ slug: "prd-cas-sqlite-legacy", version: 7 });
+        await store.insert(doc);
+
+        const result = await store.update(doc.id, {
+          content: "unconditional sqlite update",
+          updated_at: "2026-06-11T02:00:00.000Z",
+        });
+
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+        expect(result.value.content).toBe("unconditional sqlite update");
+      });
+
+      it("CAS-04b SQLite: opts={} (empty) → unconditional update", async () => {
+        // REGRESSION: empty opts object should behave like no opts.
+        const doc = makeDoc({ slug: "prd-cas-sqlite-emptyopts", version: 2 });
+        await store.insert(doc);
+
+        const result = await store.update(
+          doc.id,
+          { title: "empty opts update" },
+          {}, // no expected_version key
+        );
+
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+        expect(result.value.title).toBe("empty opts update");
+      });
+    });
+  });
 });
