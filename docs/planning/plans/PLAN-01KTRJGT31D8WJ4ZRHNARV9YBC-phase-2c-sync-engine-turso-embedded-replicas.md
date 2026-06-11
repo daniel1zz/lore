@@ -28,6 +28,9 @@ invariants:
   - 乐观锁在 storage 层 conditional UPDATE (WHERE version=?)，0 rows → STALE_VERSION
   - bun build --compile 可编译，运行时不读模板文件
   - TS strict + Zod 数据边界（config.yaml 解析必过 Zod）
+links:
+  - target_id: SPEC-009
+    link_type: implements
 ---
 # Phase 2c — Sync Engine (Turso Embedded Replicas)
 
