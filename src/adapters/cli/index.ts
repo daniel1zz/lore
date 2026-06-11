@@ -32,6 +32,7 @@ const main = defineCommand({
     status: () => import("./commands/status.js").then((m) => m.default),
     serve: () => import("./commands/serve.js").then((m) => m.default),
     agent: () => import("./commands/agent.js").then((m) => m.default),
+    sync: () => import("./commands/sync.js").then((m) => m.default),
   },
 });
 
