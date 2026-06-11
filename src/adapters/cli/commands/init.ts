@@ -6,6 +6,7 @@ import { defineCommand } from "citty";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { createApp } from "../../../app.js";
+import { saveConfig } from "../../../core/config.js";
 
 export default defineCommand({
   meta: {
@@ -52,10 +53,8 @@ export default defineCommand({
     // Determine project name
     const projectName = args.name ?? cwd.split("/").filter(Boolean).pop() ?? "lore";
 
-    // Write config.yaml
-    const configYaml =
-      `project:\n  name: "${projectName}"\n  author: "${args.author}"\n`;
-    writeFileSync(join(loreDir, "config.yaml"), configYaml);
+    // Write config.yaml via SSOT saveConfig (no hand-assembled yaml)
+    saveConfig(cwd, { project: { name: projectName, author: args.author } });
 
     // Initialise the SQLite DB (SQLiteStore constructor runs migrations)
     const dbPath = join(loreDir, "lore.db");
