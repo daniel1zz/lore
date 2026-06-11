@@ -1,23 +1,20 @@
 /**
- * Composition root — wires services to a local store.
+ * Composition root — wires services to a SQLiteStore.
  * All adapters (CLI, MCP, HTTP) call createApp() to get a wired App instance.
  *
  * Store selection (D-007, SPEC-009 §3.3):
  *   - No config / config.sync absent / sync.enabled=false → SQLiteStore (local-only)
  *   - config.sync.enabled=true + remote_url present:
  *     - Missing or empty token env var → error Result (fail loud, D-007)
- *     - Credentials valid → App backed by TursoStore in file-only mode
- *       (local DB operations; explicit sync commands use TursoStore with remote URL)
+ *     - Credentials valid → SQLiteStore (local ops; sync commands use TursoStore on demand)
  *
- * Note: TursoStore is always constructed in file-only mode (no syncUrl) for the app.
- * The remote URL and auth token are validated at createApp time (fail loud per D-007)
- * but only consumed by the sync commands (lore sync push/pull) which construct their
- * own TursoStore with the remote URL on demand. This separation keeps app startup
- * synchronous and independent of network availability.
+ * All app instances use SQLiteStore for local DB operations. The sync credentials
+ * (remote URL + token) are validated at createApp time (fail loud per D-007) but only
+ * consumed by the sync commands (lore sync push/pull) which construct TursoStore with
+ * the remote URL on demand. This keeps startup synchronous and network-independent.
  */
 
 import { SQLiteStore } from "./store/sqlite-store.js";
-import { TursoStore } from "./store/turso-store.js";
 import { CorpusService } from "./service/corpus-service.js";
 import { ReviewService } from "./service/review-service.js";
 import { VersionService } from "./service/version-service.js";
@@ -53,23 +50,6 @@ function buildAppFromSqlite(store: SQLiteStore): App {
 }
 
 /**
- * Build an App backed by a TursoStore (file-only mode).
- * ApiKeyStore is not yet wired to TursoStore (Phase 2c); a null shim is passed
- * for now — the API key commands are not invoked in sync mode.
- */
-function buildAppFromTurso(store: TursoStore): App {
-  return {
-    corpusService: new CorpusService(store),
-    reviewService: new ReviewService(store),
-    versionService: new VersionService(store),
-    outlineService: new OutlineService(store),
-    migrationService: new MigrationService(store),
-    apiKeyStore: new ApiKeyStore(null as unknown as ReturnType<SQLiteStore["getDatabase"]>),
-    close: () => store.close(),
-  };
-}
-
-/**
  * Create a wired App instance.
  *
  * Overload 1 — no config (or config with no sync section):
@@ -77,7 +57,7 @@ function buildAppFromTurso(store: TursoStore): App {
  *
  * Overload 2 — config provided:
  *   - sync disabled / absent in config → App directly (SQLiteStore, local-only)
- *   - sync enabled + remote_url + token valid → App directly (TursoStore, file-only mode)
+ *   - sync enabled + remote_url + token valid → App directly (SQLiteStore, local ops)
  *   - sync enabled + token missing/empty → Result<App, LoreError> { ok: false }
  *
  * D-007: missing or empty token env var MUST fail loud — no silent SQLiteStore fallback.
