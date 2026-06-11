@@ -9,9 +9,9 @@
   "scripts": {
     "dev": "bun run src/index.ts",
     "build": "bun run scripts/build.ts",
-    "test": "bunx vitest run && bun test ./tests/",
+    "test": "bunx vitest run && bun test .bun.test",
     "test:vitest": "bunx vitest run",
-    "test:bun": "bun test ./tests/",
+    "test:bun": "bun test .bun.test",
     "test:watch": "bunx vitest",
     "typecheck": "bun run --bun tsc --noEmit"
   },
