@@ -1,0 +1,47 @@
+# lore.tree.yaml — declarative document tree blueprint for `lore status --check-tree`.
+# Validates the corpus shape against this spec at every check; --fix can auto-relocate
+# orphan/misplaced documents to their canonical parent.
+#
+# USAGE:
+#   cp lore.tree.yaml.example lore.tree.yaml   # place alongside .lore/ at project root
+#   lore status --check-tree                    # exit 0 = consistent, 3 = drift, 4 = no file
+#   lore status --check-tree --fix              # auto-relocate orphan/misplaced docs
+#   lore status --check-tree --json             # machine-readable output
+#
+# Schema:
+#   version: 1                   (required, literal)
+#   root: TreeNodeSpec
+#
+# TreeNodeSpec:
+#   type:     prd|spec|adr|plan|task|knowledge
+#   slug?:    optional literal-prefix glob (e.g. "prd-*" matches any slug starting with "prd-")
+#   min:      non-negative int  (default 0)   — minimum siblings of this kind required
+#   max:      positive int or null (default null = unbounded)
+#   children: TreeNodeSpec[]   (default [])
+#
+# Exit codes for `lore status --check-tree`:
+#   0 = consistent (corpus matches blueprint)
+#   3 = inconsistent (drift detected; see stdout for details)
+#   4 = no blueprint file found, or blueprint is invalid YAML/schema
+#
+# Drift kinds reported:
+#   missing   — fewer docs of a type than `min` requires
+#   extra     — more docs of a type than `max` allows
+#   orphan    — doc has no parent but its type is not a root type (prd)
+#   misplaced — doc's parent type violates the parent-type contract
+#   cycle     — circular parent reference (A → B → A)
+
+version: 1
+root:
+  type: prd
+  slug: prd-*
+  children:
+    - type: spec
+      min: 1
+      children:
+        - type: plan
+          min: 0
+          children:
+            - { type: task, min: 0 }
+    - type: adr
+      min: 0
