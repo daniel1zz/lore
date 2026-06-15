@@ -1,10 +1,23 @@
 /**
  * lore tree [root-id] — display document hierarchy as a tree.
+ * With --orphans: list orphaned documents (parent_id=null AND type∉ROOT_TYPES,
+ * or parent_id≠null but parent doesn't exist).
+ *
+ * Exit codes:
+ *   Normal: 0 = success, non-zero on error
+ *   --orphans: 0 = no orphans, 3 = orphans found
  */
 
 import { defineCommand } from "citty";
 import { createApp } from "../../../app.js";
 import { findLoreDb, exitCode, formatError, formatTree } from "../utils.js";
+import type { TreeBlueprint } from "../../../core/tree-blueprint.js";
+
+/** Minimal blueprint used only to trigger orphan detection in TreeCheckService. */
+const ORPHAN_DETECTION_BLUEPRINT: TreeBlueprint = {
+  version: 1,
+  root: { type: "prd", min: 0, max: null, children: [] },
+};
 
 export default defineCommand({
   meta: {
@@ -26,11 +39,63 @@ export default defineCommand({
       type: "boolean",
       description: "Output as JSON",
     },
+    orphans: {
+      type: "boolean",
+      description: "List orphan docs (parent_id=null and not root type, or dangling parent)",
+    },
   },
   async run({ args }) {
     const dbPath = findLoreDb();
     const app = createApp(dbPath);
+
     try {
+      // ── orphans branch ────────────────────────────────────────────────────
+      if (args.orphans) {
+        const checkR = await app.treeCheckService.checkTree(
+          ORPHAN_DETECTION_BLUEPRINT,
+        );
+        if (!checkR.ok) {
+          process.stderr.write(formatError(checkR.error) + "\n");
+          process.exit(exitCode(checkR.error));
+        }
+
+        const orphanDrifts = checkR.value.drifts.filter(
+          (d) => d.kind === "orphan" && d.actual !== undefined,
+        );
+
+        if (args.json) {
+          console.log(
+            JSON.stringify(
+              {
+                ok: true,
+                data: {
+                  orphans: orphanDrifts.map((d) => ({
+                    id: d.actual!.id,
+                    slug: d.actual!.slug,
+                    type: d.actual!.type,
+                    parent_id: d.actual!.parent_id,
+                  })),
+                },
+              },
+              null,
+              2,
+            ),
+          );
+        } else if (orphanDrifts.length === 0) {
+          console.log("No orphan documents.");
+        } else {
+          console.log(`${orphanDrifts.length} orphan doc(s):`);
+          for (const d of orphanDrifts) {
+            console.log(
+              `  - ${d.actual!.slug} (${d.actual!.type}, parent_id=${d.actual!.parent_id ?? "null"})`,
+            );
+          }
+        }
+
+        process.exit(orphanDrifts.length > 0 ? 3 : 0);
+      }
+
+      // ── normal tree branch ────────────────────────────────────────────────
       const depth = parseInt(args.depth ?? "3", 10);
       const result = await app.corpusService.tree(args.root, { depth });
 

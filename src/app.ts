@@ -24,6 +24,7 @@ import { ReviewService } from "./service/review-service.js";
 import { VersionService } from "./service/version-service.js";
 import { OutlineService } from "./service/outline-service.js";
 import { MigrationService } from "./service/migration-service.js";
+import { TreeCheckService } from "./service/tree-check-service.js";
 import { ApiKeyStore } from "./adapters/http/auth.js";
 import { resolveSyncCredentials, type LoreConfig } from "./core/config.js";
 import { err, type Result, type LoreError } from "./core/errors.js";
@@ -34,6 +35,7 @@ export interface App {
   versionService: VersionService;
   outlineService: OutlineService;
   migrationService: MigrationService;
+  treeCheckService: TreeCheckService;
   apiKeyStore: ApiKeyStore;
   close(): void;
 }
@@ -48,6 +50,7 @@ function buildAppFromSqlite(store: SQLiteStore): App {
     versionService: new VersionService(store),
     outlineService: new OutlineService(store),
     migrationService: new MigrationService(store),
+    treeCheckService: new TreeCheckService(store),
     apiKeyStore: new ApiKeyStore(store.getDatabase()),
     close: () => store.close(),
   };
@@ -68,6 +71,7 @@ function buildAppFromTurso(store: TursoStore, dbPath: string): App {
     versionService: new VersionService(store),
     outlineService: new OutlineService(store),
     migrationService: new MigrationService(store),
+    treeCheckService: new TreeCheckService(store),
     apiKeyStore: new ApiKeyStore(apiKeyDb),
     close: () => { store.close(); apiKeyDb.close(); },
   };
