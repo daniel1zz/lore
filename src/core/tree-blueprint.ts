@@ -1,7 +1,13 @@
 /**
  * Tree Blueprint — Zod schema + YAML parser for lore.tree.yaml
  * Defines the structural blueprint for a corpus document tree.
- * Source: TECH-01KV4W88GZF74B98BHCBBV9GHD §3.2 + §3.3
+ * Spec: TECH-01KV4W88GZF74B98BHCBBV9GHD §3.2, §3.3
+ *
+ * Uses explicit three-param ZodType<Output, Def, Input> with a cast to
+ * separate the "after-defaults" output shape from the "before-defaults" input
+ * shape. This prevents tsc from OOM-looping on recursive type normalization —
+ * the cast is safe because the Zod schema's runtime behaviour produces
+ * TreeNodeSpec (all required fields filled by defaults).
  */
 
 import { parse as parseYaml } from "yaml";
@@ -23,14 +29,27 @@ export interface TreeBlueprint {
   root: TreeNodeSpec;
 }
 
-const treeNodeSpecSchema: z.ZodType<TreeNodeSpec> = z.lazy(() =>
+// Input shape is intentionally looser than TreeNodeSpec — Zod fills defaults.
+interface TreeNodeSpecInput {
+  type: DocType;
+  slug?: string;
+  min?: number;
+  max?: number | null;
+  children?: TreeNodeSpecInput[];
+}
+
+// The cast via `unknown` is required because TypeScript cannot terminate
+// recursive type normalization for z.lazy + z.object + superRefine chains.
+// Runtime correctness is guaranteed: Zod applies .default() at parse time,
+// so the parsed output always satisfies TreeNodeSpec (all fields required).
+const treeNodeSpecSchema = z.lazy(() =>
   z
     .object({
       type: docTypeSchema,
       slug: z.string().optional(),
       min: z.number().int().min(0).default(0),
       max: z.number().int().positive().nullable().default(null),
-      children: z.array(treeNodeSpecSchema).default([]),
+      children: z.array(treeNodeSpecSchema as z.ZodType<TreeNodeSpec, z.ZodTypeDef, TreeNodeSpecInput>).default([]),
     })
     .superRefine((node, ctx) => {
       if (node.max !== null && node.max < node.min) {
@@ -41,12 +60,13 @@ const treeNodeSpecSchema: z.ZodType<TreeNodeSpec> = z.lazy(() =>
         });
       }
     }),
-);
+) as unknown as z.ZodType<TreeNodeSpec, z.ZodTypeDef, TreeNodeSpecInput>;
 
-export const treeBlueprintSchema = z.object({
-  version: z.literal(1),
-  root: treeNodeSpecSchema,
-});
+export const treeBlueprintSchema: z.ZodType<TreeBlueprint, z.ZodTypeDef, { version: 1; root: TreeNodeSpecInput }> =
+  z.object({
+    version: z.literal(1),
+    root: treeNodeSpecSchema,
+  }) as unknown as z.ZodType<TreeBlueprint, z.ZodTypeDef, { version: 1; root: TreeNodeSpecInput }>;
 
 export function parseTreeBlueprint(raw: string): Result<TreeBlueprint, LoreError> {
   let doc: unknown;
