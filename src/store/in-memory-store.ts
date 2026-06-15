@@ -185,11 +185,16 @@ export class InMemoryStore implements StoreInterface {
   /**
    * Detect whether adding a parent link from_id → to_id would create a cycle.
    * Mirrors SQLiteStore.detectParentCycle — iterative walk up the parent chain.
+   * A self-link (from_id === to_id) is always a cycle.
    */
   private detectParentCycle(
     fromId: DocId,
     toId: DocId,
   ): Result<void, LoreError> {
+    if (fromId === toId) {
+      return err({ code: "LINK_CYCLE", path: [fromId] });
+    }
+
     const path: string[] = [fromId, toId];
     let current = toId;
 

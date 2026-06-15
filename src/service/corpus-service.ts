@@ -23,6 +23,7 @@ import {
   type LinkRecord,
   type LinkType,
 } from "../core/types.js";
+import { isValidParentType, PARENT_TYPE_CONTRACT } from "../core/doc-type-rules.js";
 import type {
   SearchHit,
   StoreInterface,
@@ -164,6 +165,22 @@ export class CorpusService {
       const parentResult = await this.resolve(data.parent_id);
       if (!parentResult.ok) return parentResult;
       resolvedParentId = parentResult.value;
+
+      // Verify parent exists and is not soft-deleted, then enforce type contract
+      const parentDocResult = await this.store.find(resolvedParentId);
+      if (!parentDocResult.ok) return parentDocResult;
+      const parentDoc = parentDocResult.value;
+      if (parentDoc === null || parentDoc.deleted_at !== null) {
+        return err({ code: "DOC_NOT_FOUND", id: resolvedParentId });
+      }
+      if (!isValidParentType(data.type, parentDoc.type)) {
+        return err({
+          code: "INVALID_PARENT_TYPE",
+          child: data.type,
+          parent: parentDoc.type,
+          allowed: [...PARENT_TYPE_CONTRACT[data.type]],
+        });
+      }
     }
 
     const id = ulid() as DocId;
@@ -501,6 +518,33 @@ export class CorpusService {
 
     const toResult = await this.resolve(toIdOrSlug);
     if (!toResult.ok) return toResult;
+
+    // For parent links, enforce type contract before calling store.
+    // Only applies when the child type has a non-empty allowed parent list
+    // (root types with empty allowed list pass through to store-level cycle detection).
+    if (type === "parent") {
+      const fromDocResult = await this.store.find(fromResult.value);
+      if (!fromDocResult.ok) return fromDocResult;
+      const fromDoc = fromDocResult.value;
+      if (fromDoc === null) return err({ code: "DOC_NOT_FOUND", id: fromResult.value });
+
+      const toDocResult = await this.store.find(toResult.value);
+      if (!toDocResult.ok) return toDocResult;
+      const toDoc = toDocResult.value;
+      if (toDoc === null || toDoc.deleted_at !== null) {
+        return err({ code: "DOC_NOT_FOUND", id: toResult.value });
+      }
+
+      const allowedParents = PARENT_TYPE_CONTRACT[fromDoc.type];
+      if (allowedParents.length > 0 && !isValidParentType(fromDoc.type, toDoc.type)) {
+        return err({
+          code: "INVALID_PARENT_TYPE",
+          child: fromDoc.type,
+          parent: toDoc.type,
+          allowed: [...allowedParents],
+        });
+      }
+    }
 
     const now = new Date().toISOString();
     const linkRecord: LinkRecord = {

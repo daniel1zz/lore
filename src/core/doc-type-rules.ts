@@ -14,7 +14,7 @@ export const PARENT_TYPE_CONTRACT = {
   prd:       [],
   spec:      ["prd"],
   adr:       ["prd", "spec"],
-  plan:      ["prd", "spec"],
+  plan:      ["prd"],
   task:      ["plan"],
   knowledge: ["prd", "spec", "adr", "plan", "knowledge"],
 } as const satisfies Record<DocType, readonly DocType[]>;
