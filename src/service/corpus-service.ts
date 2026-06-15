@@ -544,6 +544,19 @@ export class CorpusService {
           allowed: [...allowedParents],
         });
       }
+
+      // Orphan-parent guard: a non-root doc that is itself un-parented cannot
+      // serve as a parent anchor (it would create a detached sub-tree).
+      // Root types (empty allowed list) are exempt — they are valid roots.
+      const toAllowedParents = PARENT_TYPE_CONTRACT[toDoc.type];
+      if (toAllowedParents.length > 0 && toDoc.parent_id === null) {
+        return err({
+          code: "INVALID_PARENT_TYPE",
+          child: fromDoc.type,
+          parent: toDoc.type,
+          allowed: [...allowedParents],
+        });
+      }
     }
 
     const now = new Date().toISOString();
