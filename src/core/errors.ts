@@ -17,6 +17,7 @@ export type LoreError =
   | { code: "DELETE_REQUIRES_CONFIRM"; id: string }
   | { code: "INVALID_TRANSITION"; from: string; to: string; allowed: string[] }
   | { code: "PARENT_REQUIRED"; type: string }
+  | { code: "INVALID_PARENT_TYPE"; child: string; parent: string; allowed: string[] }
   | { code: "STORE_ERROR"; message: string; cause?: Error };
 
 /** Result type — success or failure. Use ok()/err() helpers to construct. */
