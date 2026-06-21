@@ -666,6 +666,305 @@ MIIEowIBAAKCAQEA...
     });
 
     // N/A: stateless service — state transition tests covered in idempotency section
-    // N/A: regression — no known prior bugs at time of writing
+
+    // ─── AC-P1-1: spec type mapping ─────────────────────────────────────────
+    describe("lore-native type: spec → spec (not knowledge)", () => {
+      // HAPPY: lore native `type: spec` maps to v2 type=spec
+      it("imports doc with type=spec as v2 type=spec", async () => {
+        const specNativeFile = `---
+id: "SPEC-001"
+type: spec
+status: draft
+priority: high
+created: "2026-01-01"
+updated: "2026-01-01"
+tags: []
+links: []
+title: "Service Layer"
+---
+
+Spec content.
+`;
+        writeFileSync(join(tempDir, "spec-native.md"), specNativeFile);
+
+        const result = await service.execute(tempDir, defaultOpts);
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+
+        expect(result.value.imported).toBe(1);
+        expect(result.value.warnings).toHaveLength(0);
+
+        const findResult = await store.findMany({ type: "spec" });
+        expect(findResult.ok).toBe(true);
+        if (!findResult.ok) return;
+        expect(findResult.value).toHaveLength(1);
+        expect(findResult.value[0]?.type).toBe("spec");
+      });
+
+      // HAPPY: analyze() reports spec→spec in type_mapping (AC-P1-1)
+      it("analyze() type_mapping shows spec→spec", () => {
+        const specNativeFile = `---
+id: "SPEC-001"
+type: spec
+status: draft
+priority: high
+created: "2026-01-01"
+updated: "2026-01-01"
+tags: []
+links: []
+title: "Service Layer"
+---
+
+Spec content.
+`;
+        writeFileSync(join(tempDir, "spec-native.md"), specNativeFile);
+
+        const result = service.analyze(tempDir);
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+
+        const specEntry = result.value.type_mapping.find((m) => m.v1Type === "spec");
+        expect(specEntry).toBeDefined();
+        expect(specEntry?.v2Type).toBe("spec");
+        expect(specEntry?.count).toBe(1);
+      });
+    });
+
+    // ─── AC-P1-2: object array link parsing ─────────────────────────────────
+    describe("lore-native object-array links", () => {
+      function makeObjectLinkFile(id: string, targets: string[]): string {
+        const linksYaml = targets
+          .map((t, i) => `  - {id: ${t}, type: implements, note: "link ${i}"}`)
+          .join("\n");
+        return `---
+id: "${id}"
+type: spec
+status: draft
+priority: medium
+created: "2026-01-01"
+updated: "2026-01-01"
+tags: []
+links:
+${linksYaml}
+title: "Object Link Doc"
+---
+
+Content.
+`;
+      }
+
+      // HAPPY: object array links produce link records
+      it("creates link records from object-array links (AC-P1-2)", async () => {
+        writeFileSync(join(tempDir, "prd.md"), makePrdFile("PRD-001", "Root"));
+        writeFileSync(
+          join(tempDir, "spec.md"),
+          makeObjectLinkFile("SPEC-001", ["PRD-001"]),
+        );
+
+        const result = await service.execute(tempDir, defaultOpts);
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+
+        expect(result.value.link_resolution.created).toBeGreaterThan(0);
+        expect(result.value.link_resolution.broken).toBe(0);
+      });
+
+      it("creates ≥2 links from multi-target object array", async () => {
+        writeFileSync(join(tempDir, "prd.md"), makePrdFile("PRD-001", "Root"));
+        writeFileSync(
+          join(tempDir, "spec.md"),
+          makeSpecFile("SPEC-000", "Sibling Spec", "PRD-001"),
+        );
+        writeFileSync(
+          join(tempDir, "spec2.md"),
+          makeObjectLinkFile("SPEC-001", ["PRD-001", "SPEC-000"]),
+        );
+
+        const result = await service.execute(tempDir, defaultOpts);
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+
+        expect(result.value.link_resolution.created).toBeGreaterThanOrEqual(2);
+      });
+
+      // NEGATIVE: object link with missing `id` field is skipped, no throw
+      it("skips object link with missing id field — no crash (AC-P1-2 negative)", async () => {
+        const badObjectLinkFile = `---
+id: "SPEC-BAD"
+type: spec
+status: draft
+priority: medium
+created: "2026-01-01"
+updated: "2026-01-01"
+tags: []
+links:
+  - {type: implements, note: "no id field here"}
+  - {id: "PRD-001", type: implements}
+title: "Bad Link Doc"
+---
+
+Content.
+`;
+        writeFileSync(join(tempDir, "prd.md"), makePrdFile("PRD-001", "Root"));
+        writeFileSync(join(tempDir, "spec-bad.md"), badObjectLinkFile);
+
+        const result = await service.execute(tempDir, defaultOpts);
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+
+        // imported both docs without crash
+        expect(result.value.imported).toBe(2);
+        // only the valid object link is resolvable
+        expect(result.value.link_resolution.created).toBe(1);
+      });
+
+      // BOUNDARY: mixed array — both string and object entries
+      it("handles mixed string+object link array (AC-P1-4 regression + AC-P1-2 boundary)", async () => {
+        const mixedLinkFile = `---
+id: "SPEC-MIX"
+type: spec
+status: draft
+priority: medium
+created: "2026-01-01"
+updated: "2026-01-01"
+tags: []
+links:
+  - "PRD-001"
+  - {id: "SPEC-SIB", type: implements}
+title: "Mixed Link Doc"
+---
+
+Content.
+`;
+        writeFileSync(join(tempDir, "prd.md"), makePrdFile("PRD-001", "Root"));
+        writeFileSync(
+          join(tempDir, "spec-sib.md"),
+          makeSpecFile("SPEC-SIB", "Sibling", "PRD-001"),
+        );
+        writeFileSync(join(tempDir, "spec-mix.md"), mixedLinkFile);
+
+        const result = await service.execute(tempDir, defaultOpts);
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+
+        // All 3 docs imported
+        expect(result.value.imported).toBe(3);
+        // SPEC-MIX has 2 links; SPEC-SIB has 1 link to PRD-001 → total 3 created
+        expect(result.value.link_resolution.created).toBe(3);
+        expect(result.value.link_resolution.broken).toBe(0);
+      });
+    });
+
+    // ─── AC-P1-3: parent field back-fill ────────────────────────────────────
+    describe("lore-native parent field", () => {
+      function makeParentedSpecFile(
+        id: string,
+        title: string,
+        parentId: string,
+      ): string {
+        return `---
+id: "${id}"
+type: spec
+status: draft
+priority: medium
+created: "2026-01-01"
+updated: "2026-01-01"
+tags: []
+links: []
+parent: ${parentId}
+title: "${title}"
+---
+
+Spec content.
+`;
+      }
+
+      // HAPPY + STATE: parent_id is set correctly after execute
+      it("sets parent_id on imported spec matching PRD parent (AC-P1-3)", async () => {
+        writeFileSync(join(tempDir, "prd.md"), makePrdFile("PRD-001", "Root PRD"));
+        writeFileSync(
+          join(tempDir, "spec.md"),
+          makeParentedSpecFile("SPEC-001", "Child Spec", "PRD-001"),
+        );
+
+        await service.execute(tempDir, {
+          ...defaultOpts,
+          idStrategy: "preserve",
+        });
+
+        const findResult = await store.findMany({ type: "spec" });
+        expect(findResult.ok).toBe(true);
+        if (!findResult.ok) return;
+        expect(findResult.value).toHaveLength(1);
+        // With preserve strategy, parent_id should be "PRD-001" directly
+        expect(findResult.value[0]?.parent_id).toBe("PRD-001");
+      });
+
+      it("sets parent_id to new ULID when idStrategy=remap", async () => {
+        writeFileSync(join(tempDir, "prd.md"), makePrdFile("PRD-001", "Root PRD"));
+        writeFileSync(
+          join(tempDir, "spec.md"),
+          makeParentedSpecFile("SPEC-001", "Child Spec", "PRD-001"),
+        );
+
+        await service.execute(tempDir, defaultOpts); // remap strategy
+
+        // prd should be found by type
+        const prdResult = await store.findMany({ type: "prd" });
+        expect(prdResult.ok).toBe(true);
+        if (!prdResult.ok) return;
+        const prd = prdResult.value[0];
+        expect(prd).toBeDefined();
+        if (!prd) return;
+
+        // spec should have parent_id = the new ULID of PRD
+        const specResult = await store.findMany({ type: "spec" });
+        expect(specResult.ok).toBe(true);
+        if (!specResult.ok) return;
+        const spec = specResult.value[0];
+        expect(spec?.parent_id).toBe(prd.id);
+        // The parent_id must NOT be the old v1 ID
+        expect(spec?.parent_id).not.toBe("PRD-001");
+      });
+
+      // ERROR: parent references a doc not in corpus → warning, parent_id null
+      it("emits warning when parent doc missing from corpus — parent_id null", async () => {
+        writeFileSync(
+          join(tempDir, "spec.md"),
+          makeParentedSpecFile("SPEC-001", "Orphan Spec", "PRD-NONEXISTENT"),
+        );
+
+        const result = await service.execute(tempDir, defaultOpts);
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+
+        expect(result.value.imported).toBe(1);
+        expect(result.value.warnings.some((w) => w.includes("PRD-NONEXISTENT"))).toBe(true);
+
+        const findResult = await store.findMany({ type: "spec" });
+        expect(findResult.ok).toBe(true);
+        if (!findResult.ok) return;
+        expect(findResult.value[0]?.parent_id).toBeNull();
+      });
+    });
+
+    // ─── AC-P1-4: regression — string array links still work ────────────────
+    describe("regression: v1 string-array links still work (AC-P1-4)", () => {
+      it("preserves string-array link behaviour after refactor", async () => {
+        writeFileSync(join(tempDir, "prd.md"), makePrdFile("PRD-001", "My PRD"));
+        writeFileSync(
+          join(tempDir, "spec.md"),
+          makeSpecFile("SPEC-001", "Auth Spec", "PRD-001"), // uses string array
+        );
+
+        const result = await service.execute(tempDir, defaultOpts);
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+
+        expect(result.value.imported).toBe(2);
+        expect(result.value.link_resolution.created).toBe(1);
+        expect(result.value.link_resolution.broken).toBe(0);
+      });
+    });
   });
 });

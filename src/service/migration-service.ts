@@ -20,6 +20,7 @@ import type {
   DocStatus,
   DocType,
   LinkRecord,
+  LinkType,
   Priority,
 } from "../core/types.js";
 import type { StoreInterface } from "../store/store-interface.js";
@@ -65,6 +66,13 @@ export interface MigrateOpts {
 
 // ─── Internal Parsed Doc ────────────────────────────────────────────────────
 
+/** Normalized internal link entry — produced from either string or object form. */
+interface ParsedLink {
+  targetId: string;
+  /** Resolved to a valid LinkType — unknown values coerced to "relates-to". */
+  linkType: LinkType;
+}
+
 interface ParsedV1Doc {
   filePath: string;
   v1Id: string;
@@ -74,7 +82,9 @@ interface ParsedV1Doc {
   createdAt: string;
   updatedAt: string;
   tags: string[];
-  links: string[];
+  links: ParsedLink[];
+  /** v1 id of the parent doc, if declared in frontmatter via `parent:` field */
+  parentV1Id: string | null;
   title: string;
   content: string;
 }
@@ -89,6 +99,7 @@ interface V2TypeMapping {
 
 const V1_TYPE_MAP: Readonly<Record<string, V2TypeMapping>> = {
   prd: { type: "prd", role: "intent" },
+  spec: { type: "spec", role: "spec" },
   "feature-spec": { type: "spec", role: "spec" },
   "tech-spec": { type: "spec", role: "spec" },
   architecture: { type: "spec", role: "spec" },
@@ -232,6 +243,7 @@ export class MigrationService {
       importErrors,
     );
 
+    await this.resolveParents(parsedDocs, v1IdToNewId, warnings);
     const linkResolution = await this.resolveLinks(parsedDocs, v1IdToNewId);
 
     return ok({
@@ -371,8 +383,8 @@ export class MigrationService {
       const fromId = v1IdToNewId.get(doc.v1Id);
       if (fromId === undefined) continue;
 
-      for (const v1LinkTarget of doc.links) {
-        const toId = v1IdToNewId.get(v1LinkTarget);
+      for (const link of doc.links) {
+        const toId = v1IdToNewId.get(link.targetId);
         if (toId === undefined) {
           broken += 1;
           continue;
@@ -381,7 +393,7 @@ export class MigrationService {
         const linkRecord: LinkRecord = {
           from_id: fromId,
           to_id: toId,
-          link_type: "relates-to",
+          link_type: link.linkType,
           created_at: now,
           created_by: "migration:v1",
         };
@@ -397,6 +409,34 @@ export class MigrationService {
     }
 
     return { created, broken };
+  }
+
+  /**
+   * Back-fill parent_id on imported docs that declared a `parent:` field.
+   * Must run AFTER importDocs so all v1IdToNewId entries are populated.
+   * Docs whose parent v1Id did not import (forward ref or missing) get a warning.
+   */
+  private async resolveParents(
+    parsedDocs: ParsedV1Doc[],
+    v1IdToNewId: Map<string, DocId>,
+    warnings: string[],
+  ): Promise<void> {
+    for (const doc of parsedDocs) {
+      if (doc.parentV1Id === null) continue;
+
+      const childNewId = v1IdToNewId.get(doc.v1Id);
+      if (childNewId === undefined) continue; // doc itself was skipped
+
+      const parentNewId = v1IdToNewId.get(doc.parentV1Id);
+      if (parentNewId === undefined) {
+        warnings.push(
+          `${doc.filePath}: parent "${doc.parentV1Id}" not found in imported corpus — parent_id left null`,
+        );
+        continue;
+      }
+
+      await this.store.update(childNewId, { parent_id: parentNewId });
+    }
   }
 }
 
@@ -484,7 +524,8 @@ function parseV1File(filePath: string): Result<ParsedV1Doc, { message: string }>
       updatedAt:
         typeof record["updated"] === "string" ? record["updated"] : "",
       tags: parseStringArray(record["tags"]),
-      links: parseStringArray(record["links"]),
+      links: parseLinkArray(record["links"]),
+      parentV1Id: typeof record["parent"] === "string" ? record["parent"] : null,
       title,
       content: body.trim(),
     },
@@ -531,6 +572,59 @@ function extractTitle(body: string, record: Record<string, unknown>): string {
 function parseStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((v): v is string => typeof v === "string");
+}
+
+/** Valid LinkType values as a lookup set for O(1) membership test. */
+const VALID_LINK_TYPES = new Set<LinkType>([
+  "parent",
+  "implements",
+  "informs",
+  "supersedes",
+  "relates-to",
+  "blocks",
+]);
+
+/**
+ * Coerce an arbitrary string to a valid LinkType.
+ * Unknown v1/lore-native types (e.g. "consumes", "consumed-by", "contains") fall back
+ * to "relates-to" so the link is still preserved without a store constraint violation.
+ */
+function normalizeLinkType(raw: string): LinkType {
+  const trimmed = raw.trim() as LinkType;
+  return VALID_LINK_TYPES.has(trimmed) ? trimmed : "relates-to";
+}
+
+/**
+ * Parse the `links` frontmatter field, which may be:
+ *   - string array:  ["SPEC-001", "SPEC-002"]
+ *   - object array:  [{id: "SPEC-001", type: "consumes", note: "..."}]
+ *   - mixed array:   ["SPEC-001", {id: "SPEC-002", type: "implements"}]
+ *
+ * Objects missing the `id` field are skipped with no throw (they're malformed).
+ * Returns normalized ParsedLink[] in all cases.
+ */
+function parseLinkArray(value: unknown): ParsedLink[] {
+  if (!Array.isArray(value)) return [];
+
+  const result: ParsedLink[] = [];
+  for (const item of value) {
+    if (typeof item === "string") {
+      if (item.trim()) {
+        result.push({ targetId: item.trim(), linkType: "relates-to" });
+      }
+    } else if (item !== null && typeof item === "object") {
+      const obj = item as Record<string, unknown>;
+      const targetId = typeof obj["id"] === "string" ? obj["id"].trim() : "";
+      if (!targetId) continue; // malformed object — skip silently
+      const linkType =
+        typeof obj["type"] === "string" && obj["type"].trim()
+          ? normalizeLinkType(obj["type"])
+          : "relates-to";
+      result.push({ targetId, linkType });
+    }
+    // other types (number, boolean) silently ignored
+  }
+  return result;
 }
 
 // ─── Type Resolution ────────────────────────────────────────────────────────
@@ -673,9 +767,9 @@ function computeLinkMapping(
   let resolvable = 0;
 
   for (const doc of docs) {
-    for (const linkId of doc.links) {
+    for (const link of doc.links) {
       total += 1;
-      if (allV1Ids.has(linkId)) resolvable += 1;
+      if (allV1Ids.has(link.targetId)) resolvable += 1;
     }
   }
 
