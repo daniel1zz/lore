@@ -28,6 +28,7 @@ import type {
   SearchHit,
   StoreInterface,
 } from "../store/store-interface.js";
+import { NoOpTelemetry, type Telemetry, type TelemetryEvent } from "../core/telemetry.js";
 
 // ─── Local types (mirror SPEC-001 §3.1 interfaces) ────────────────────────
 
@@ -94,7 +95,45 @@ export interface CorpusStatus {
 // ─── CorpusService ─────────────────────────────────────────────────────────
 
 export class CorpusService {
-  constructor(private readonly store: StoreInterface) {}
+  private readonly telemetry: Telemetry;
+
+  /**
+   * @param store - Storage abstraction (SQLiteStore, TursoStore, or InMemoryStore)
+   * @param telemetry - Telemetry sink for instrumented methods (defaults to NoOp)
+   */
+  constructor(
+    private readonly store: StoreInterface,
+    telemetry: Telemetry = new NoOpTelemetry(),
+  ) {
+    this.telemetry = telemetry;
+  }
+
+  /**
+   * Record a telemetry event for a service call outcome.
+   * Never throws — delegates to Telemetry.record() which swallows IO errors.
+   *
+   * @param method - CorpusService method name
+   * @param startMs - High-resolution start time from Date.now()
+   * @param result - The Result from the service call
+   * @param meta - Optional extra context
+   */
+  private recordTelemetryEvent<T>(
+    method: string,
+    startMs: number,
+    result: Result<T, LoreError>,
+    meta?: Record<string, unknown>,
+  ): void {
+    const event: TelemetryEvent = {
+      ts: new Date().toISOString(),
+      service: "CorpusService",
+      method,
+      ok: result.ok,
+      duration_ms: Date.now() - startMs,
+      ...(!result.ok ? { error_code: result.error.code } : {}),
+      ...(meta !== undefined ? { meta } : {}),
+    };
+    this.telemetry.record(event);
+  }
 
   // ── Resolve ──────────────────────────────────────────────────────────────
 
@@ -127,8 +166,16 @@ export class CorpusService {
    * Create a new document.
    * Validates via createDocInputSchema, generates ULID + slug, resolves parent,
    * inserts doc + version record + audit entry.
+   * Telemetry: records one event with doc type and resulting id/slug on success.
    */
   async create(input: CreateDocInput): Promise<Result<DocRecord, LoreError>> {
+    const startMs = Date.now();
+    const result = await this._createImpl(input);
+    this.recordTelemetryEvent("create", startMs, result, { type: input.type });
+    return result;
+  }
+
+  private async _createImpl(input: CreateDocInput): Promise<Result<DocRecord, LoreError>> {
     const parsed = createDocInputSchema.safeParse(input);
     if (!parsed.success) {
       const issue = parsed.error.issues[0];
@@ -246,8 +293,16 @@ export class CorpusService {
   /**
    * Get a document with navigation context.
    * Builds parent, siblings, children, and related link lists.
+   * Telemetry: records one event with the resolved id on success.
    */
   async get(idOrSlug: string, _opts?: GetOpts): Promise<Result<DocWithNavigation, LoreError>> {
+    const startMs = Date.now();
+    const result = await this._getImpl(idOrSlug, _opts);
+    this.recordTelemetryEvent("get", startMs, result, { idOrSlug });
+    return result;
+  }
+
+  private async _getImpl(idOrSlug: string, _opts?: GetOpts): Promise<Result<DocWithNavigation, LoreError>> {
     const resolveResult = await this.resolve(idOrSlug);
     if (!resolveResult.ok) return resolveResult;
 
@@ -445,25 +500,43 @@ export class CorpusService {
 
   // ── List ─────────────────────────────────────────────────────────────────
 
-  /** List documents matching filters. Returns DocSummary[] with total count. */
+  /**
+   * List documents matching filters. Returns DocSummary[] with total count.
+   * Telemetry: records one event with filter type (if any) and result count.
+   */
   async list(filters: ListFilters): Promise<Result<{ docs: DocSummary[]; total: number }, LoreError>> {
-    const result = await this.store.findMany(filters);
-    if (!result.ok) return result;
+    const startMs = Date.now();
+    const storeResult = await this.store.findMany(filters);
+    if (!storeResult.ok) {
+      this.recordTelemetryEvent("list", startMs, storeResult, { filter_type: filters.type });
+      return storeResult;
+    }
 
-    const docs = result.value.map(toDocSummary);
-    return ok({ docs, total: docs.length });
+    const docs = storeResult.value.map(toDocSummary);
+    const result = ok({ docs, total: docs.length });
+    this.recordTelemetryEvent("list", startMs, result, { filter_type: filters.type, count: docs.length });
+    return result;
   }
 
   // ── Search ───────────────────────────────────────────────────────────────
 
-  /** Full-text search delegated to store. */
+  /**
+   * Full-text search delegated to store.
+   * Telemetry: records one event with query length and result count.
+   */
   async search(
     query: string,
     filters?: SearchFilters,
   ): Promise<Result<{ results: SearchHit[] }, LoreError>> {
-    const result = await this.store.search(query, filters);
-    if (!result.ok) return result;
-    return ok({ results: result.value });
+    const startMs = Date.now();
+    const storeResult = await this.store.search(query, filters);
+    if (!storeResult.ok) {
+      this.recordTelemetryEvent("search", startMs, storeResult, { query_length: query.length });
+      return storeResult;
+    }
+    const result = ok({ results: storeResult.value });
+    this.recordTelemetryEvent("search", startMs, result, { query_length: query.length, hits: storeResult.value.length });
+    return result;
   }
 
   // ── Tree ─────────────────────────────────────────────────────────────────
@@ -507,8 +580,20 @@ export class CorpusService {
   /**
    * Create a link between two documents.
    * For type='parent', also updates docs.parent_id on the 'from' doc.
+   * Telemetry: records one event with link_type and from/to ids on success.
    */
   async link(
+    fromIdOrSlug: string,
+    toIdOrSlug: string,
+    type: LinkType,
+  ): Promise<Result<LinkRecord, LoreError>> {
+    const startMs = Date.now();
+    const result = await this._linkImpl(fromIdOrSlug, toIdOrSlug, type);
+    this.recordTelemetryEvent("link", startMs, result, { link_type: type });
+    return result;
+  }
+
+  private async _linkImpl(
     fromIdOrSlug: string,
     toIdOrSlug: string,
     type: LinkType,

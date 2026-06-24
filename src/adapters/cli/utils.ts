@@ -8,12 +8,15 @@ import { join, dirname } from "path";
 import type { LoreError } from "../../core/errors.js";
 import type { TreeNode } from "../../service/corpus-service.js";
 import type { DocWithNavigation } from "../../service/corpus-service.js";
+import { loadConfig } from "../../core/config.js";
+import type { LoreConfig } from "../../core/config.js";
 
 // ─── DB Discovery ───────────────────────────────────────────────────────────
 
 /**
  * Walk up from cwd looking for .lore/lore.db.
  * Exits with code 1 if not found (suggests `lore init`).
+ * @returns absolute path to the lore.db file
  */
 export function findLoreDb(): string {
   let dir = process.cwd();
@@ -35,6 +38,47 @@ export function findLoreDb(): string {
   );
   process.exit(1);
 }
+
+/**
+ * Walk up from cwd to find the lore.db path AND load .lore/config.yaml.
+ * Returns the db path and a config (or undefined if config is absent/unparseable).
+ * Config parse errors are silently ignored — callers fall back to defaults.
+ *
+ * Used by commands that need telemetry or sync config (SPEC-012 §5).
+ * Commands that do not need config can continue using findLoreDb() directly.
+ *
+ * @returns { dbPath, config }
+ */
+export function findLoreDbWithConfig(): { dbPath: string; config: LoreConfig | undefined } {
+  const dbPath = findLoreDb();
+  // The .lore dir is always one level up from lore.db
+  const loreDir = dirname(dbPath);
+  const projectDir = dirname(loreDir);
+  const configResult = loadConfig(projectDir);
+  return {
+    dbPath,
+    config: configResult.ok ? configResult.value : undefined,
+  };
+}
+
+/**
+ * Like findLoreDbWithConfig but strips the sync section from config.
+ * Use this in commands that support telemetry but NOT sync — it guarantees
+ * that createApp(dbPath, config) returns App (not Result<App>).
+ *
+ * reason: createApp overload returns Result<App> only when sync.enabled=true.
+ * Commands that don't handle sync should not accidentally trigger that path.
+ *
+ * @returns { dbPath, config } where config.sync is always undefined
+ */
+export function findLoreDbWithTelemetryConfig(): { dbPath: string; config: LoreConfig | undefined } {
+  const { dbPath, config } = findLoreDbWithConfig();
+  if (config === undefined) return { dbPath, config: undefined };
+  // Strip sync section — reason: prevents accidental Result<App> path in simple commands
+  const { sync: _sync, ...configWithoutSync } = config;
+  return { dbPath, config: configWithoutSync as LoreConfig };
+}
+
 
 
 // ─── Error Formatting ───────────────────────────────────────────────────────
