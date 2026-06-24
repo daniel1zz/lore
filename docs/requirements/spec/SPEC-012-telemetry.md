@@ -1,8 +1,21 @@
-# SPEC-012 — Telemetry Module
+---
+id: SPEC-012
+type: spec
+role: spec
+title: "Telemetry Module"
+status: active
+priority: medium
+phase: P1
+created: 2026-06-24
+updated: 2026-06-24
+tags: [telemetry, observability, phase-1]
+parent: PRD-001
+links:
+  - {id: SPEC-001, type: implements, note: "Telemetry sits at service layer"}
+  - {id: SPEC-003, type: consumes, note: "CLI commands invoke instrumented services"}
+---
 
-**Status**: active  
-**Source**: AC-C1 / AC-C2 / AC-C3 (lore telemetry + eval task)  
-**Related**: SPEC-001 (service layer), SPEC-003 (CLI adapter)
+# SPEC-012 — Telemetry Module
 
 ---
 

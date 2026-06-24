@@ -1,8 +1,22 @@
-# SPEC-013 — Eval Framework
+---
+id: SPEC-013
+type: spec
+role: spec
+title: "Eval Framework"
+status: active
+priority: medium
+phase: P1
+created: 2026-06-24
+updated: 2026-06-24
+tags: [eval, observability, phase-1]
+parent: PRD-001
+links:
+  - {id: SPEC-007, type: consumes, note: "migration-coverage scenario calls MigrationService"}
+  - {id: SPEC-012, type: relates-to, note: "Eval consumes telemetry data in future scenarios"}
+  - {id: SPEC-003, type: implements, note: "lore eval CLI command"}
+---
 
-**Status**: active  
-**Source**: AC-C4 (lore eval scenario task)  
-**Related**: SPEC-007 (migration), SPEC-012 (telemetry), SPEC-003 (CLI adapter)
+# SPEC-013 — Eval Framework
 
 ---
 
