@@ -128,10 +128,11 @@ export function loadConfig(dir: string): Result<LoreConfig, LoreError> {
   } catch (e) {
     const message =
       e instanceof Error ? e.message : "Failed to read config file";
+    const cause = e instanceof Error ? e : undefined;
     return err({
       code: "STORE_ERROR",
       message,
-      cause: e instanceof Error ? e : undefined,
+      ...(cause !== undefined ? { cause } : {}),
     } satisfies LoreError);
   }
 }
@@ -154,10 +155,11 @@ export function saveConfig(
   } catch (e) {
     const message =
       e instanceof Error ? e.message : "Failed to write config file";
+    const cause = e instanceof Error ? e : undefined;
     return err({
       code: "STORE_ERROR",
       message,
-      cause: e instanceof Error ? e : undefined,
+      ...(cause !== undefined ? { cause } : {}),
     } satisfies LoreError);
   }
 }

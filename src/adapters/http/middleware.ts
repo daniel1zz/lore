@@ -45,6 +45,7 @@ export function loreErrorToStatus(error: LoreError): number {
     case "DUPLICATE_LINK":
     case "INVALID_TRANSITION":
     case "PARENT_REQUIRED":
+    case "INVALID_PARENT_TYPE":
       return 422;
     default: {
       const _exhaustive: never = error;

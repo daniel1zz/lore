@@ -1,5 +1,8 @@
 #!/usr/bin/env bun
 
+// Mark as ES module so top-level await is valid per TS1375.
+export {};
+
 // Detect --mcp-server flag before handing off to citty.
 // citty doesn't support top-level flags alongside subcommands,
 // so we intercept here before calling runMain().

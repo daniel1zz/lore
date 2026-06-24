@@ -53,6 +53,7 @@ export function exitCode(error: LoreError): number {
     case "DELETE_REQUIRES_CONFIRM":
     case "INVALID_TRANSITION":
     case "PARENT_REQUIRED":
+    case "INVALID_PARENT_TYPE":
       return 4;
     case "STALE_VERSION":
       return 5;
@@ -124,6 +125,11 @@ export function formatError(error: LoreError): string {
       return (
         `Error: Documents of type '${error.type}' require a parent.\n` +
         "  Pass --parent <id-or-slug> to specify the parent document."
+      );
+    case "INVALID_PARENT_TYPE":
+      return (
+        `Error: Invalid parent type for '${error.child}'.\n` +
+        `  Parent type '${error.parent}' is not allowed. Allowed parent types: ${error.allowed.join(", ")}`
       );
     case "STORE_ERROR":
       return `Error: Storage failure: ${error.message}`;

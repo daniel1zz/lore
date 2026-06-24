@@ -100,6 +100,17 @@ export default defineCommand({
       const result = await app.corpusService.tree(args.root, { depth });
 
       if (!result.ok) {
+        // Special-case: no root argument + no PRDs in corpus → actionable message.
+        if (
+          !args.root &&
+          result.error.code === "DOC_NOT_FOUND" &&
+          result.error.id === "prd"
+        ) {
+          process.stderr.write(
+            "No PRD documents found. Create a PRD first with `lore create prd --title <name>`.\n",
+          );
+          process.exit(3);
+        }
         process.stderr.write(formatError(result.error) + "\n");
         process.exit(exitCode(result.error));
       }

@@ -91,6 +91,14 @@ export default defineCommand({
       process.exit(2);
     }
 
+    // Reject empty string passed explicitly to --parent (citty parses "" as string "").
+    if (args.parent !== undefined && args.parent.trim() === "") {
+      process.stderr.write(
+        "Error: --parent received empty string. Pass a valid document ID or slug, or omit the flag.\n",
+      );
+      process.exit(2);
+    }
+
     // Reject type-flag mismatches: e.g. `lore create prd --decision-status accepted`
     for (const [flag, allowedTypes] of Object.entries(TYPE_SPECIFIC_FLAGS)) {
       const flagValue = args[flag as keyof typeof args];

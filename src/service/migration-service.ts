@@ -694,6 +694,13 @@ function parseIsoDate(raw: string): string {
 
 // ─── Secret Scan ───────────────────────────────────────────────────────────
 
+/**
+ * Placeholder patterns that indicate a previously-redacted value.
+ * A secret match on a line containing one of these tokens is skipped —
+ * it represents documentation of a secret, not the secret itself.
+ */
+const REDACTED_PLACEHOLDER = /\[REDACTED\]|<redacted>|\*{3,}|XXXX/i;
+
 function scanForSecrets(docs: ParsedV1Doc[]): SecretWarning[] {
   const warnings: SecretWarning[] = [];
 
@@ -702,6 +709,12 @@ function scanForSecrets(docs: ParsedV1Doc[]): SecretWarning[] {
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i] ?? "";
       const lineNum = i + 1;
+
+      // If the line already contains a redacted placeholder, skip all pattern
+      // checks for it — it documents a secret rather than containing one.
+      if (REDACTED_PLACEHOLDER.test(line)) {
+        continue;
+      }
 
       // Check named secret patterns
       for (const pattern of SECRET_PATTERNS) {

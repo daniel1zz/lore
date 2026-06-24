@@ -22,9 +22,16 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, mkdirSync } from "fs";
+import { mkdtempSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+
+// ─── Command type with required run handler ────────────────────────────────────
+
+/** A CLI command shape where the run handler is guaranteed to be present. */
+type RunnableCommand = {
+  run: (ctx: { args: Record<string, unknown> }) => Promise<void>;
+};
 
 // ─── Test helpers ──────────────────────────────────────────────────────────────
 
@@ -64,12 +71,35 @@ function captureExit() {
   };
 }
 
-async function importCreateCommand() {
+/**
+ * Run a CLI command's run handler with the given args.
+ * Asserts the run handler exists (fail-loud) before calling it.
+ * This eliminates TS2722 "Cannot invoke an object which is possibly 'undefined'"
+ * at every callsite — the check happens once, here.
+ */
+async function runCmd(
+  cmd: { run?: RunnableCommand["run"] },
+  args: Record<string, unknown>,
+): Promise<void> {
+  if (!cmd.run) {
+    throw new Error("Command is missing run handler");
+  }
+  return cmd.run({ args });
+}
+
+async function importCreateCommand(): Promise<RunnableCommand> {
   // Using dynamic import so module-not-found errors are localised
   const mod = await import("@adapters/cli/commands/create");
-  const cmd = (mod as { default?: { run?: (ctx: { args: Record<string, unknown> }) => Promise<void> } }).default;
+  const cmd = (mod as { default?: { run?: RunnableCommand["run"] } }).default;
   if (!cmd?.run) throw new Error("create command not exported");
-  return cmd;
+  return cmd as RunnableCommand;
+}
+
+async function importGetCommand(): Promise<RunnableCommand> {
+  const getMod = await import("@adapters/cli/commands/get");
+  const getCmd = (getMod as { default?: { run?: RunnableCommand["run"] } }).default;
+  if (!getCmd?.run) throw new Error("get command not exported");
+  return getCmd as RunnableCommand;
 }
 
 // ─── Temp dir lifecycle ────────────────────────────────────────────────────────
@@ -100,13 +130,13 @@ afterEach(() => {
 async function initLoreDb(): Promise<void> {
   // We bootstrap using the init command so that the SQLite schema is applied
   const initMod = await import("@adapters/cli/commands/init");
-  const initCmd = (initMod as { default?: { run?: (ctx: { args: Record<string, unknown> }) => Promise<void> } }).default;
+  const initCmd = (initMod as { default?: { run?: RunnableCommand["run"] } }).default;
   if (!initCmd?.run) throw new Error("init command not exported");
 
   const output = captureOutput();
   const exit = captureExit();
   try {
-    await initCmd.run({ args: { name: "test-corpus", description: "" } });
+    await runCmd(initCmd, { name: "test-corpus", description: "" });
   } catch (e: unknown) {
     if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     if (exit.code !== 0) throw new Error(`init exited with code ${exit.code}`);
@@ -126,7 +156,7 @@ describe("lore create — happy path", () => {
     const output1 = captureOutput();
     const exit1 = captureExit();
     try {
-      await cmd.run({ args: { type: "prd", title: "Parent PRD" } });
+      await runCmd(cmd, { type: "prd", title: "Parent PRD" });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -141,13 +171,11 @@ describe("lore create — happy path", () => {
     const output = captureOutput();
     const exit = captureExit();
     try {
-      await cmd.run({
-        args: {
-          type: "adr",
-          title: "Use X over Y",
-          "decision-status": "proposed",
-          parent: prdSlug,
-        },
+      await runCmd(cmd, {
+        type: "adr",
+        title: "Use X over Y",
+        "decision-status": "proposed",
+        parent: prdSlug,
       });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
@@ -167,9 +195,7 @@ describe("lore create — happy path", () => {
     const output = captureOutput();
     const exit = captureExit();
     try {
-      await cmd.run({
-        args: { type: "knowledge", title: "Research Notes", "sub-type": "research" },
-      });
+      await runCmd(cmd, { type: "knowledge", title: "Research Notes", "sub-type": "research" });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -189,7 +215,7 @@ describe("lore create — happy path", () => {
     const out1 = captureOutput();
     const exit1 = captureExit();
     try {
-      await cmd.run({ args: { type: "prd", title: "Root PRD" } });
+      await runCmd(cmd, { type: "prd", title: "Root PRD" });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -201,7 +227,7 @@ describe("lore create — happy path", () => {
     const out2 = captureOutput();
     const exit2 = captureExit();
     try {
-      await cmd.run({ args: { type: "plan", title: "Sprint Plan", parent: prdSlug } });
+      await runCmd(cmd, { type: "plan", title: "Sprint Plan", parent: prdSlug });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -215,13 +241,11 @@ describe("lore create — happy path", () => {
     const out3 = captureOutput();
     const exit3 = captureExit();
     try {
-      await cmd.run({
-        args: {
-          type: "task",
-          title: "Do the thing",
-          parent: planSlug,
-          "plan-id": planSlug,
-        },
+      await runCmd(cmd, {
+        type: "task",
+        title: "Do the thing",
+        parent: planSlug,
+        "plan-id": planSlug,
       });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
@@ -241,7 +265,7 @@ describe("lore create — happy path", () => {
     const output = captureOutput();
     const exit = captureExit();
     try {
-      await cmd.run({ args: { type: "prd", title: "My PRD" } });
+      await runCmd(cmd, { type: "prd", title: "My PRD" });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -259,7 +283,7 @@ describe("lore create — happy path", () => {
     // Need a prd parent
     const out1 = captureOutput();
     try {
-      await cmd.run({ args: { type: "prd", title: "Root" } });
+      await runCmd(cmd, { type: "prd", title: "Root" });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -270,7 +294,7 @@ describe("lore create — happy path", () => {
     const output = captureOutput();
     const exit = captureExit();
     try {
-      await cmd.run({ args: { type: "plan", title: "My Plan", parent: prdSlug } });
+      await runCmd(cmd, { type: "plan", title: "My Plan", parent: prdSlug });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -292,7 +316,7 @@ describe("lore create — negative cases", () => {
     const exit = captureExit();
 
     try {
-      await cmd.run({ args: { type: "adr", title: "Some ADR" } });
+      await runCmd(cmd, { type: "adr", title: "Some ADR" });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -312,7 +336,7 @@ describe("lore create — negative cases", () => {
     const exit = captureExit();
 
     try {
-      await cmd.run({ args: { type: "adr", title: "ADR", "decision-status": "bogus" } });
+      await runCmd(cmd, { type: "adr", title: "ADR", "decision-status": "bogus" });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -332,7 +356,7 @@ describe("lore create — negative cases", () => {
     const exit = captureExit();
 
     try {
-      await cmd.run({ args: { type: "knowledge", title: "Notes" } });
+      await runCmd(cmd, { type: "knowledge", title: "Notes" });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -352,7 +376,7 @@ describe("lore create — negative cases", () => {
     const exit = captureExit();
 
     try {
-      await cmd.run({ args: { type: "knowledge", title: "Notes", "sub-type": "invalid" } });
+      await runCmd(cmd, { type: "knowledge", title: "Notes", "sub-type": "invalid" });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -372,7 +396,7 @@ describe("lore create — negative cases", () => {
     const exit = captureExit();
 
     try {
-      await cmd.run({ args: { type: "task", title: "Do X", parent: "plan-foo" } });
+      await runCmd(cmd, { type: "task", title: "Do X", parent: "plan-foo" });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -391,9 +415,7 @@ describe("lore create — negative cases", () => {
     const exit = captureExit();
 
     try {
-      await cmd.run({
-        args: { type: "prd", title: "My PRD", "decision-status": "accepted" },
-      });
+      await runCmd(cmd, { type: "prd", title: "My PRD", "decision-status": "accepted" });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -413,7 +435,7 @@ describe("lore create — negative cases", () => {
     const exit = captureExit();
 
     try {
-      await cmd.run({ args: { type: "plan", title: "Plan", "sub-type": "research" } });
+      await runCmd(cmd, { type: "plan", title: "Plan", "sub-type": "research" });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -433,13 +455,11 @@ describe("lore create — negative cases", () => {
     const exit = captureExit();
 
     try {
-      await cmd.run({
-        args: {
-          type: "adr",
-          title: "ADR",
-          "decision-status": "proposed",
-          "plan-id": "plan-foo",
-        },
+      await runCmd(cmd, {
+        type: "adr",
+        title: "ADR",
+        "decision-status": "proposed",
+        "plan-id": "plan-foo",
       });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
@@ -460,7 +480,7 @@ describe("lore create — negative cases", () => {
     const exit = captureExit();
 
     try {
-      await cmd.run({ args: { type: "prd" } });
+      await runCmd(cmd, { type: "prd" });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -469,6 +489,29 @@ describe("lore create — negative cases", () => {
 
     expect(exit.code).toBe(2);
     expect(output.stderr.join("\n")).toContain("--title");
+  });
+
+  it("exits 2 when --parent is an empty string", async () => {
+    await initLoreDb();
+    const cmd = await importCreateCommand();
+    const output = captureOutput();
+    const exit = captureExit();
+
+    try {
+      await runCmd(cmd, {
+        type: "adr",
+        title: "x",
+        "decision-status": "accepted",
+        parent: "",
+      });
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
+    } finally {
+      output.restore();
+    }
+
+    expect(exit.code).toBe(2);
+    expect(output.stderr.join("\n")).toMatch(/empty string|--parent/);
   });
 });
 
@@ -482,7 +525,7 @@ describe("lore create — boundary cases", () => {
     // Create parent prd and plan
     const out1 = captureOutput();
     try {
-      await cmd.run({ args: { type: "prd", title: "Root" } });
+      await runCmd(cmd, { type: "prd", title: "Root" });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -492,7 +535,7 @@ describe("lore create — boundary cases", () => {
 
     const out2 = captureOutput();
     try {
-      await cmd.run({ args: { type: "plan", title: "Sprint", parent: prdSlug } });
+      await runCmd(cmd, { type: "plan", title: "Sprint", parent: prdSlug });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -502,12 +545,10 @@ describe("lore create — boundary cases", () => {
     expect(planSlug).toBeTruthy();
 
     // Retrieve plan ID by using `lore get`
-    const getMod = await import("@adapters/cli/commands/get");
-    const getCmd = (getMod as { default?: { run?: (ctx: { args: Record<string, unknown> }) => Promise<void> } }).default;
-    if (!getCmd?.run) throw new Error("get command not exported");
+    const getCmd = await importGetCommand();
     const out3 = captureOutput();
     try {
-      await getCmd.run({ args: { id: planSlug, json: true } });
+      await runCmd(getCmd, { id: planSlug, json: true });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -523,13 +564,11 @@ describe("lore create — boundary cases", () => {
     const out4 = captureOutput();
     const exit4 = captureExit();
     try {
-      await cmd.run({
-        args: {
-          type: "task",
-          title: "Do X",
-          parent: planSlug,
-          "plan-id": planId, // ULID, not slug
-        },
+      await runCmd(cmd, {
+        type: "task",
+        title: "Do X",
+        parent: planSlug,
+        "plan-id": planId, // ULID, not slug
       });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
@@ -549,7 +588,7 @@ describe("lore create — boundary cases", () => {
       const output = captureOutput();
       const exit = captureExit();
       try {
-        await cmd.run({ args: { type: "adr", title: `ADR-${status}`, "decision-status": status } });
+        await runCmd(cmd, { type: "adr", title: `ADR-${status}`, "decision-status": status });
       } catch (e: unknown) {
         if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
       } finally {
@@ -568,8 +607,10 @@ describe("lore create — boundary cases", () => {
       const output = captureOutput();
       const exit = captureExit();
       try {
-        await cmd.run({
-          args: { type: "knowledge", title: `Knowledge-${subType}`, "sub-type": subType },
+        await runCmd(cmd, {
+          type: "knowledge",
+          title: `Knowledge-${subType}`,
+          "sub-type": subType,
         });
       } catch (e: unknown) {
         if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
@@ -592,13 +633,11 @@ describe("lore create — error handling", () => {
     const exit = captureExit();
 
     try {
-      await cmd.run({
-        args: {
-          type: "task",
-          title: "Task",
-          parent: "plan-does-not-exist",
-          "plan-id": "plan-does-not-exist",
-        },
+      await runCmd(cmd, {
+        type: "task",
+        title: "Task",
+        parent: "plan-does-not-exist",
+        "plan-id": "plan-does-not-exist",
       });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
@@ -619,7 +658,7 @@ describe("lore create — error handling", () => {
     const exit = captureExit();
 
     try {
-      await cmd.run({ args: { type: "bogustype", title: "X" } });
+      await runCmd(cmd, { type: "bogustype", title: "X" });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -640,8 +679,10 @@ describe("lore create — state verification", () => {
 
     const out1 = captureOutput();
     try {
-      await cmd.run({
-        args: { type: "adr", title: "Architecture Decision", "decision-status": "accepted" },
+      await runCmd(cmd, {
+        type: "adr",
+        title: "Architecture Decision",
+        "decision-status": "accepted",
       });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
@@ -655,13 +696,11 @@ describe("lore create — state verification", () => {
     expect(slug).toBeTruthy();
 
     // Use get command with --json to read back the doc
-    const getMod = await import("@adapters/cli/commands/get");
-    const getCmd = (getMod as { default?: { run?: (ctx: { args: Record<string, unknown> }) => Promise<void> } }).default;
-    if (!getCmd?.run) throw new Error("get command not exported");
+    const getCmd = await importGetCommand();
 
     const out2 = captureOutput();
     try {
-      await getCmd.run({ args: { id: slug, json: true } });
+      await runCmd(getCmd, { id: slug, json: true });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -680,7 +719,7 @@ describe("lore create — state verification", () => {
 
     const out1 = captureOutput();
     try {
-      await cmd.run({ args: { type: "knowledge", title: "Team Retro", "sub-type": "retro" } });
+      await runCmd(cmd, { type: "knowledge", title: "Team Retro", "sub-type": "retro" });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -691,13 +730,11 @@ describe("lore create — state verification", () => {
     const slug = slugLine?.split(":")[1]?.trim();
     expect(slug).toBeTruthy();
 
-    const getMod = await import("@adapters/cli/commands/get");
-    const getCmd = (getMod as { default?: { run?: (ctx: { args: Record<string, unknown> }) => Promise<void> } }).default;
-    if (!getCmd?.run) throw new Error("get command not exported");
+    const getCmd = await importGetCommand();
 
     const out2 = captureOutput();
     try {
-      await getCmd.run({ args: { id: slug, json: true } });
+      await runCmd(getCmd, { id: slug, json: true });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -717,7 +754,7 @@ describe("lore create — state verification", () => {
     // Setup: prd → plan → task
     const outPrd = captureOutput();
     try {
-      await cmd.run({ args: { type: "prd", title: "Root PRD" } });
+      await runCmd(cmd, { type: "prd", title: "Root PRD" });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -727,7 +764,7 @@ describe("lore create — state verification", () => {
 
     const outPlan = captureOutput();
     try {
-      await cmd.run({ args: { type: "plan", title: "Sprint 1", parent: prdSlug } });
+      await runCmd(cmd, { type: "plan", title: "Sprint 1", parent: prdSlug });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -737,12 +774,10 @@ describe("lore create — state verification", () => {
     expect(planSlug).toBeTruthy();
 
     // Get plan's ULID
-    const getMod = await import("@adapters/cli/commands/get");
-    const getCmd = (getMod as { default?: { run?: (ctx: { args: Record<string, unknown> }) => Promise<void> } }).default;
-    if (!getCmd?.run) throw new Error("get command not exported");
+    const getCmd = await importGetCommand();
     const outGetPlan = captureOutput();
     try {
-      await getCmd.run({ args: { id: planSlug, json: true } });
+      await runCmd(getCmd, { id: planSlug, json: true });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -758,13 +793,11 @@ describe("lore create — state verification", () => {
     const outTask = captureOutput();
     const exitTask = captureExit();
     try {
-      await cmd.run({
-        args: {
-          type: "task",
-          title: "Implement feature",
-          parent: planSlug,
-          "plan-id": planSlug, // slug input
-        },
+      await runCmd(cmd, {
+        type: "task",
+        title: "Implement feature",
+        parent: planSlug,
+        "plan-id": planSlug, // slug input
       });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
@@ -780,7 +813,7 @@ describe("lore create — state verification", () => {
     // Verify extra.plan_id is the ULID (not the slug)
     const outGetTask = captureOutput();
     try {
-      await getCmd.run({ args: { id: taskSlug, json: true } });
+      await runCmd(getCmd, { id: taskSlug, json: true });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -806,7 +839,7 @@ describe("lore create — regression guards", () => {
     const exit = captureExit();
 
     try {
-      await cmd.run({ args: { type: "spec", title: "Spec Without Parent" } });
+      await runCmd(cmd, { type: "spec", title: "Spec Without Parent" });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
