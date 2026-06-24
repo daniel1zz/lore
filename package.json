@@ -13,7 +13,7 @@
     "test:vitest": "bunx vitest run",
     "test:bun": "bun test .bun.test",
     "test:watch": "bunx vitest",
-    "typecheck": "node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit"
+    "typecheck": "node --max-old-space-size=4096 ./node_modules/typescript/bin/tsc --noEmit"
   },
   "dependencies": {
     "@better-auth/api-key": "^1.6.14",
