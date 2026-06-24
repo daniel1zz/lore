@@ -33,6 +33,7 @@ const main = defineCommand({
     serve: () => import("./commands/serve.js").then((m) => m.default),
     agent: () => import("./commands/agent.js").then((m) => m.default),
     sync: () => import("./commands/sync.js").then((m) => m.default),
+    eval: () => import("./commands/eval.js").then((m) => m.default),
   },
 });
 
