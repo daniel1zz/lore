@@ -346,6 +346,112 @@ MIIEowIBAAKCAQEA...
 
         expect(result.value.secret_warnings).toHaveLength(0);
       });
+
+      // ─── B3: [REDACTED] placeholder skip ──────────────────────────────────
+
+      it("skips lines containing [REDACTED] placeholder — not a real secret (NEGATIVE)", () => {
+        const content = `---
+id: "REDACT-001"
+type: knowledge
+status: draft
+priority: low
+created: "2025-01-01"
+updated: "2025-01-01"
+tags: []
+links: []
+title: "Redacted Doc"
+---
+
+API Key: [REDACTED]
+secret: [REDACTED]
+`;
+        writeFileSync(join(tempDir, "redacted.md"), content);
+
+        const result = service.analyze(tempDir);
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+
+        expect(result.value.secret_warnings).toHaveLength(0);
+      });
+
+      it("skips lines containing <redacted> placeholder (BOUNDARY — alternate form)", () => {
+        const content = `---
+id: "REDACT-002"
+type: knowledge
+status: draft
+priority: low
+created: "2025-01-01"
+updated: "2025-01-01"
+tags: []
+links: []
+title: "Redacted Doc 2"
+---
+
+token: <redacted>
+api_key: ***
+`;
+        writeFileSync(join(tempDir, "redacted2.md"), content);
+
+        const result = service.analyze(tempDir);
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+
+        expect(result.value.secret_warnings).toHaveLength(0);
+      });
+
+      it("still detects a real AWS key on a line without placeholder (REGRESSION — happy path not broken)", () => {
+        const content = `---
+id: "REAL-SECRET-001"
+type: knowledge
+status: draft
+priority: low
+created: "2025-01-01"
+updated: "2025-01-01"
+tags: []
+links: []
+title: "Real Secret"
+---
+
+The aws key is AKIAIOSFODNN7EXAMPLE here.
+`;
+        writeFileSync(join(tempDir, "realsecret.md"), content);
+
+        const result = service.analyze(tempDir);
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+
+        const awsWarning = result.value.secret_warnings.find((w) =>
+          w.pattern.includes("AWS"),
+        );
+        expect(awsWarning).toBeDefined();
+      });
+
+      it("skips AWS key when same line also contains [REDACTED] (BOUNDARY — mixed line)", () => {
+        // A documentation line that shows both the pattern and the placeholder
+        const content = `---
+id: "MIXED-001"
+type: knowledge
+status: draft
+priority: low
+created: "2025-01-01"
+updated: "2025-01-01"
+tags: []
+links: []
+title: "Mixed Doc"
+---
+
+Example key AKIAIOSFODNN7EXAMPLE was changed to [REDACTED].
+`;
+        writeFileSync(join(tempDir, "mixed.md"), content);
+
+        const result = service.analyze(tempDir);
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+
+        // The line contains both a pattern match AND a [REDACTED] placeholder,
+        // so the whole line should be skipped (placeholder wins).
+        expect(result.value.secret_warnings).toHaveLength(0);
+      });
     });
 
     describe("boundary values", () => {
