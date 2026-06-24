@@ -120,7 +120,7 @@ function writeBlueprintRequiringSpec(tmpDir: string): void {
 function createPrd(tmpDir: string, title: string): string {
   const result = runLore(["create", "prd", "--title", title], tmpDir);
   const match = result.stdout.match(/Slug:\s+(\S+)/);
-  return match ? match[1] : "";
+  return match?.[1] ?? "";
 }
 
 /**
@@ -129,7 +129,7 @@ function createPrd(tmpDir: string, title: string): string {
 function createSpec(tmpDir: string, title: string, parentSlug: string): string {
   const result = runLore(["create", "spec", "--title", title, "--parent", parentSlug], tmpDir);
   const match = result.stdout.match(/Slug:\s+(\S+)/);
-  return match ? match[1] : "";
+  return match?.[1] ?? "";
 }
 
 // ─── Scenario 1: Consistent tree + blueprint → exit 0 ──────────────────────

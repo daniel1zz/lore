@@ -133,7 +133,6 @@ describe("createApp — no sync config (regression lock, SPEC-009 §3.3 invarian
       type: "prd",
       title: "Local Test Doc",
       content: "local-only content",
-      created_by: "tester",
     });
 
     expect(insertResult.ok).toBe(true);

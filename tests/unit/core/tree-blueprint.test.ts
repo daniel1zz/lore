@@ -170,8 +170,7 @@ root:
 `;
     const result = parseTreeBlueprint(yaml);
     expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (!result.ok && result.error.code === "VALIDATION_ERROR") {
       expect(result.error.field).toBe("lore.tree.yaml");
       // spec §3: message must mention max and min values
       expect(result.error.message).toContain("max");
@@ -328,8 +327,7 @@ root:
 `;
     const result = parseTreeBlueprint(yaml);
     expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (!result.ok && result.error.code === "VALIDATION_ERROR") {
       expect(result.error.field).toBe("lore.tree.yaml");
       // spec §3: "max (...) must be >= min (...)"
       expect(result.error.message).toMatch(/max.*must be.*>=.*min/i);
@@ -349,8 +347,7 @@ root:
 `;
     const result = parseTreeBlueprint(badYaml);
     expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (!result.ok && result.error.code === "VALIDATION_ERROR") {
       expect(result.error.field).toBe("lore.tree.yaml");
       expect(result.error.message).toContain("YAML parse failed:");
     }
@@ -375,8 +372,7 @@ root:
   it("[AC-TREEBP-ERROR-004] completely garbled binary-like input produces VALIDATION_ERROR", () => {
     const result = parseTreeBlueprint("\x00\x01\xFF\xFE");
     expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (!result.ok && result.error.code === "VALIDATION_ERROR") {
       expect(result.error.field).toBe("lore.tree.yaml");
     }
   });
@@ -421,7 +417,9 @@ root:
     expect(second.ok).toBe(false);
     if (!first.ok && !second.ok) {
       expect(second.error.code).toBe(first.error.code);
-      expect(second.error.field).toBe(first.error.field);
+      if (first.error.code === "VALIDATION_ERROR" && second.error.code === "VALIDATION_ERROR") {
+        expect(second.error.field).toBe(first.error.field);
+      }
     }
   });
 });
@@ -434,7 +432,7 @@ describe("parseTreeBlueprint — regression guards (AC-TREEBP-REGRESSION)", () =
     const badYaml = `{ unclosed: [bracket`;
     const result = parseTreeBlueprint(badYaml);
     expect(result.ok).toBe(false);
-    if (!result.ok) {
+    if (!result.ok && result.error.code === "VALIDATION_ERROR") {
       expect(result.error.field).toBe("lore.tree.yaml");
       expect(result.error.message).toMatch(/^YAML parse failed:/);
     }

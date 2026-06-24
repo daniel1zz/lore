@@ -344,8 +344,11 @@ describe("ApiKeyStore", () => {
         expect(result.ok).toBe(true);
         if (!result.ok) throw new Error("expected ok");
         // newest-agent was created last, so it should appear first in DESC order
-        expect(result.value[0].name).toBe("newest-agent");
-        expect(result.value[1].name).toBe("oldest-agent");
+        const first = result.value[0];
+        const second = result.value[1];
+        if (!first || !second) throw new Error("expected two records");
+        expect(first.name).toBe("newest-agent");
+        expect(second.name).toBe("oldest-agent");
       });
 
       it("returned records include name, owner, rate_limit, created_at, revoked_at fields", async () => {
@@ -354,6 +357,7 @@ describe("ApiKeyStore", () => {
         expect(result.ok).toBe(true);
         if (!result.ok) throw new Error("expected ok");
         const record = result.value[0];
+        if (!record) throw new Error("expected a record");
         expect(record).toHaveProperty("name");
         expect(record).toHaveProperty("owner");
         expect(record).toHaveProperty("rate_limit");

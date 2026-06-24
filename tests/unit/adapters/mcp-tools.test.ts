@@ -17,6 +17,7 @@ import { ReviewService } from "@service/review-service.js";
 import { VersionService } from "@service/version-service.js";
 import { OutlineService } from "@service/outline-service.js";
 import { MigrationService } from "@service/migration-service.js";
+import { TreeCheckService } from "@service/tree-check-service.js";
 import type { App } from "../../../src/app.js";
 import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
 import { registerTools } from "../../../src/adapters/mcp/tools.js";
@@ -35,6 +36,7 @@ function makeApp(): App {
     versionService: new VersionService(store),
     outlineService: new OutlineService(store),
     migrationService: new MigrationService(store),
+    treeCheckService: new TreeCheckService(store),
     apiKeyStore: stubApiKeyStore,
     close: () => undefined,
   };
