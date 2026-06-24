@@ -28,6 +28,11 @@ import { TreeCheckService } from "./service/tree-check-service.js";
 import { ApiKeyStore } from "./adapters/http/auth.js";
 import { resolveSyncCredentials, type LoreConfig } from "./core/config.js";
 import { err, type Result, type LoreError } from "./core/errors.js";
+import {
+  NoOpTelemetry,
+  createTelemetry,
+  type Telemetry,
+} from "./core/telemetry.js";
 
 export interface App {
   corpusService: CorpusService;
@@ -42,17 +47,19 @@ export interface App {
 
 /**
  * Build an App backed by a SQLiteStore.
+ * @param store - SQLiteStore instance
+ * @param telemetry - Telemetry sink; defaults to NoOpTelemetry (no file I/O unless opted in)
  */
-function buildAppFromSqlite(store: SQLiteStore): App {
+function buildAppFromSqlite(store: SQLiteStore, telemetry: Telemetry = new NoOpTelemetry()): App {
   return {
-    corpusService: new CorpusService(store),
+    corpusService: new CorpusService(store, telemetry),
     reviewService: new ReviewService(store),
     versionService: new VersionService(store),
     outlineService: new OutlineService(store),
     migrationService: new MigrationService(store),
     treeCheckService: new TreeCheckService(store),
     apiKeyStore: new ApiKeyStore(store.getDatabase()),
-    close: () => store.close(),
+    close: () => { telemetry.close(); store.close(); },
   };
 }
 
@@ -62,18 +69,21 @@ function buildAppFromSqlite(store: SQLiteStore): App {
  * api_keys is one of the 5 replicated tables (R3) and must persist across restarts.
  * WAL multi-connection interop between bun:sqlite and @libsql/client is verified in
  * tests/unit/store/libsql-compat.bun.test.ts. Corpus operations use TursoStore.
+ * @param store - TursoStore instance
+ * @param dbPath - Local replica path (for ApiKeyStore)
+ * @param telemetry - Telemetry sink; defaults to NoOpTelemetry
  */
-function buildAppFromTurso(store: TursoStore, dbPath: string): App {
+function buildAppFromTurso(store: TursoStore, dbPath: string, telemetry: Telemetry = new NoOpTelemetry()): App {
   const apiKeyDb = new Database(dbPath);
   return {
-    corpusService: new CorpusService(store),
+    corpusService: new CorpusService(store, telemetry),
     reviewService: new ReviewService(store),
     versionService: new VersionService(store),
     outlineService: new OutlineService(store),
     migrationService: new MigrationService(store),
     treeCheckService: new TreeCheckService(store),
     apiKeyStore: new ApiKeyStore(apiKeyDb),
-    close: () => { store.close(); apiKeyDb.close(); },
+    close: () => { telemetry.close(); store.close(); apiKeyDb.close(); },
   };
 }
 
@@ -101,19 +111,25 @@ export function createApp(
   dbPath: string,
   config?: LoreConfig,
 ): App | Result<App, LoreError> {
+  // Resolve telemetry from config — defaults to NoOp when telemetry section is absent.
+  // reason: AC-C3 — createApp default behavior MUST NOT produce file side effects.
+  // Users must explicitly set telemetry.enabled=true in config.yaml to opt in.
+  const telemetry = createTelemetry(config?.telemetry);
+
   // No config supplied or sync section absent / disabled → local-only SQLiteStore
   if (
     config === undefined ||
     config.sync === undefined ||
     !config.sync.enabled
   ) {
-    return buildAppFromSqlite(new SQLiteStore(dbPath));
+    return buildAppFromSqlite(new SQLiteStore(dbPath), telemetry);
   }
 
   // Sync is enabled — resolve credentials (fail loud on missing/empty token, D-007)
   const credResult = resolveSyncCredentials(config);
   if (!credResult.ok) {
     // Propagate error as Result — caller must handle (CLI exits 1, not silently falls back)
+    telemetry.close();
     return credResult;
   }
 
@@ -131,8 +147,9 @@ export function createApp(
       authToken,
       syncInterval: config.sync.interval,
     });
-    return { ok: true, value: buildAppFromTurso(store, dbPath) };
+    return { ok: true, value: buildAppFromTurso(store, dbPath, telemetry) };
   } catch (e) {
+    telemetry.close();
     const message =
       e instanceof Error
         ? `TursoStore construction failed: ${e.message}`

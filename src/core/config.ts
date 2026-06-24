@@ -9,6 +9,7 @@ import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { ok, err } from "./errors.js";
 import type { Result, LoreError } from "./errors.js";
+import { TelemetryConfigSchema } from "./telemetry.js";
 
 // ─── Sync Section Schema ───────────────────────────────────────────────────
 
@@ -51,6 +52,12 @@ export const LoreConfigSchema = z
       })
       .strict(),
     sync: SyncConfigSchema.optional(),
+    /**
+     * Telemetry configuration (SPEC-012).
+     * When absent, defaults to enabled=false (no file side effects).
+     * Set enabled: true to start writing .lore/telemetry.jsonl.
+     */
+    telemetry: TelemetryConfigSchema.optional(),
   })
   .strict();
 

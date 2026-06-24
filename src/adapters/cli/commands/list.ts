@@ -3,8 +3,8 @@
  */
 
 import { defineCommand } from "citty";
-import { createApp } from "../../../app.js";
-import { findLoreDb, exitCode, formatError, formatTable, relativeTime } from "../utils.js";
+import { createApp, type App } from "../../../app.js";
+import { findLoreDbWithTelemetryConfig, exitCode, formatError, formatTable, relativeTime } from "../utils.js";
 import type { DocType, DocStatus } from "../../../core/types.js";
 
 export default defineCommand({
@@ -39,8 +39,9 @@ export default defineCommand({
     },
   },
   async run({ args }) {
-    const dbPath = findLoreDb();
-    const app = createApp(dbPath);
+    const { dbPath, config } = findLoreDbWithTelemetryConfig();
+    // config.sync is stripped — createApp returns App (not Result<App>)
+    const app = createApp(dbPath, config) as App;
     try {
       const filters: Record<string, unknown> = {};
       if (args.type !== undefined) filters["type"] = args.type as DocType;
