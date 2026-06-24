@@ -499,7 +499,9 @@ export class SQLiteStore implements StoreInterface {
         slug: row.slug,
         title: row.title,
         snippet: row.snippet ?? "",
-        score: row.rank,
+        // FTS5 rank is a BM25 float; bun:sqlite may return bigint for integer columns
+        // but BM25 scores are fractional so Number() is safe here.
+        score: typeof row.rank === "bigint" ? Number(row.rank) : row.rank,
       }));
 
       // Tags filter applied in-memory if needed

@@ -12,6 +12,7 @@ import { loadConfig, saveConfig, resolveSyncCredentials } from "../../../core/co
 import type { LoreConfig } from "../../../core/config.js";
 import type { Result, LoreError } from "../../../core/errors.js";
 import { err, ok } from "../../../core/errors.js";
+import { formatError } from "../utils.js";
 import { syncPush, type PushReport } from "../../http/sync-push.js";
 import { TursoStore } from "../../../store/turso-store.js";
 
@@ -164,7 +165,7 @@ const syncSetup = defineCommand({
 
     const saveResult = saveConfig(loreDir, updatedConfig);
     if (!saveResult.ok) {
-      const msg = `Failed to save config: ${saveResult.error.message}`;
+      const msg = `Failed to save config: ${formatError(saveResult.error)}`;
       if (args.json) {
         console.log(JSON.stringify({ ok: false, error: msg }));
       } else {
@@ -338,7 +339,7 @@ const syncPushCmd = defineCommand({
       const msg =
         credResult.error.code === "VALIDATION_ERROR" && credResult.error.field === "sync"
           ? "Sync is not configured. Run `lore sync setup --url libsql://...` first."
-          : `Sync credentials unavailable: ${credResult.error.message}`;
+          : `Sync credentials unavailable: ${formatError(credResult.error)}`;
       if (args.json) {
         console.log(JSON.stringify({ ok: false, error: msg }));
       } else {
@@ -351,7 +352,7 @@ const syncPushCmd = defineCommand({
     const pushResult = await performPush(localDbPath, credResult.value.url, credResult.value.token);
 
     if (!pushResult.ok) {
-      const msg = pushResult.error.message;
+      const msg = formatError(pushResult.error);
       if (args.json) {
         console.log(JSON.stringify({ ok: false, error: msg }));
       } else {
@@ -417,7 +418,7 @@ const syncPullCmd = defineCommand({
       const msg =
         credResult.error.code === "VALIDATION_ERROR" && credResult.error.field === "sync"
           ? "Sync is not configured. Run `lore sync setup --url libsql://...` first."
-          : `Sync credentials unavailable: ${credResult.error.message}`;
+          : `Sync credentials unavailable: ${formatError(credResult.error)}`;
       if (args.json) {
         console.log(JSON.stringify({ ok: false, error: msg }));
       } else {
@@ -430,7 +431,7 @@ const syncPullCmd = defineCommand({
     const pullResult = await performPull(localDbPath, credResult.value.url, credResult.value.token);
 
     if (!pullResult.ok) {
-      const msg = pullResult.error.message;
+      const msg = formatError(pullResult.error);
       if (args.json) {
         console.log(JSON.stringify({ ok: false, error: msg }));
       } else {

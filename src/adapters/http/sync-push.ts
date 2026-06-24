@@ -163,7 +163,8 @@ export async function syncPush(
     return ok({ tables: tableReports, total_rows });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Unknown error during sync push";
-    return err({ code: "STORE_ERROR", message, cause: e instanceof Error ? e : undefined });
+    const cause = e instanceof Error ? e : undefined;
+    return err({ code: "STORE_ERROR", message, ...(cause !== undefined ? { cause } : {}) });
   } finally {
     localClient?.close();
   }

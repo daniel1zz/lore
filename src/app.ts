@@ -137,10 +137,11 @@ export function createApp(
       e instanceof Error
         ? `TursoStore construction failed: ${e.message}`
         : "TursoStore construction failed: unknown error";
+    const cause = e instanceof Error ? e : undefined;
     return err({
       code: "STORE_ERROR",
       message,
-      cause: e instanceof Error ? e : undefined,
+      ...(cause !== undefined ? { cause } : {}),
     } satisfies LoreError);
   }
 }

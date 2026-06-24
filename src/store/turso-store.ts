@@ -167,8 +167,8 @@ export class TursoStore implements StoreInterface {
       this.hasRemote
         ? {
             url,
-            syncUrl: config.remoteUrl,
-            authToken: config.authToken,
+            ...(config.remoteUrl !== undefined ? { syncUrl: config.remoteUrl } : {}),
+            ...(config.authToken !== undefined ? { authToken: config.authToken } : {}),
             syncInterval: config.syncInterval ?? 60,
             readYourWrites: true,
           }

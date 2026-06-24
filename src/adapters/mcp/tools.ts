@@ -285,11 +285,10 @@ export function registerTools(server: McpServer, app: App): void {
     },
   );
 
-  // lore_schema
+  // lore_schema — no input parameters, use 3-arg form to avoid ZodRawShapeCompat overload
   server.tool(
     "lore_schema",
     "Return static corpus schema information (doc types, link types, required fields)",
-    {},
     async () => {
       return textContent(CORPUS_SCHEMA_INFO);
     },
@@ -358,11 +357,10 @@ export function registerTools(server: McpServer, app: App): void {
     },
   );
 
-  // lore_status
+  // lore_status — no input parameters, use 3-arg form to avoid ZodRawShapeCompat overload
   server.tool(
     "lore_status",
     "Get corpus statistics (total docs, by type, by status)",
-    {},
     async () => {
       const result = await corpusService.status();
       if (!result.ok) return errorContent(result.error);
