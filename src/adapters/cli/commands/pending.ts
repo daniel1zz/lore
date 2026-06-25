@@ -3,8 +3,8 @@
  */
 
 import { defineCommand } from "citty";
-import { createApp } from "../../../app.js";
-import { findLoreDb, exitCode, formatError, formatTable, relativeTime } from "../utils.js";
+import { loadLoreApp } from "../loader.js";
+import { exitCode, formatError, formatTable, relativeTime } from "../utils.js";
 import type { DocType } from "../../../core/types.js";
 
 export default defineCommand({
@@ -31,8 +31,7 @@ export default defineCommand({
     },
   },
   async run({ args }) {
-    const dbPath = findLoreDb();
-    const app = createApp(dbPath);
+    const { app } = loadLoreApp();
     try {
       const filters: Record<string, unknown> = {};
       if (args.author !== undefined) filters["author"] = args.author;

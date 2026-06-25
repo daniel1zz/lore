@@ -4,8 +4,7 @@
  */
 
 import { defineCommand } from "citty";
-import { createApp } from "../../../app.js";
-import { findLoreDb } from "../utils.js";
+import { loadLoreApp } from "../loader.js";
 import { startHttpServer } from "../../http/index.js";
 
 export default defineCommand({
@@ -24,8 +23,7 @@ export default defineCommand({
     },
   },
   run({ args }) {
-    const dbPath = findLoreDb();
-    const app = createApp(dbPath);
+    const { app } = loadLoreApp();
 
     const port = args.port !== undefined ? parseInt(args.port, 10) : 3456;
     if (isNaN(port) || port < 1 || port > 65535) {

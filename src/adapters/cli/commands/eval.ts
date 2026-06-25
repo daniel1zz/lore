@@ -11,8 +11,7 @@
  */
 
 import { defineCommand } from "citty";
-import { createApp } from "../../../app.js";
-import { findLoreDb } from "../utils.js";
+import { loadLoreApp } from "../loader.js";
 import { runMigrationCoverage } from "../../../eval/index.js";
 
 // ─── migration subcommand ─────────────────────────────────────────────────────
@@ -43,8 +42,7 @@ const migrationCommand = defineCommand({
       process.exit(2);
     }
 
-    const dbPath = findLoreDb();
-    const app = createApp(dbPath);
+    const { app } = loadLoreApp();
 
     try {
       const result = await runMigrationCoverage(args.from, app);

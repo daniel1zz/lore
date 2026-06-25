@@ -3,8 +3,8 @@
  */
 
 import { defineCommand } from "citty";
-import { createApp } from "../../../app.js";
-import { findLoreDb, exitCode, formatError } from "../utils.js";
+import { loadLoreApp } from "../loader.js";
+import { exitCode, formatError } from "../utils.js";
 import type { LinkType } from "../../../core/types.js";
 
 const VALID_LINK_TYPES: LinkType[] = [
@@ -52,8 +52,7 @@ export default defineCommand({
       process.exit(2);
     }
 
-    const dbPath = findLoreDb();
-    const app = createApp(dbPath);
+    const { app } = loadLoreApp();
     try {
       const result = await app.corpusService.link(args.from, args.to, linkType);
 
