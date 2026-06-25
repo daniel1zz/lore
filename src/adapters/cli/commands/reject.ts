@@ -3,8 +3,8 @@
  */
 
 import { defineCommand } from "citty";
-import { createApp } from "../../../app.js";
-import { findLoreDb, exitCode, formatError } from "../utils.js";
+import { loadLoreApp } from "../loader.js";
+import { exitCode, formatError } from "../utils.js";
 import type { DocId } from "../../../core/types.js";
 
 export default defineCommand({
@@ -32,8 +32,7 @@ export default defineCommand({
     },
   },
   async run({ args }) {
-    const dbPath = findLoreDb();
-    const app = createApp(dbPath);
+    const { app } = loadLoreApp();
     try {
       const opts: Record<string, unknown> = {};
       if (args.reviewer !== undefined) opts["reviewer"] = args.reviewer;

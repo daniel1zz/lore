@@ -9,8 +9,8 @@
  */
 
 import { defineCommand } from "citty";
-import { createApp } from "../../../app.js";
-import { findLoreDb, exitCode, formatError, formatTree } from "../utils.js";
+import { loadLoreApp } from "../loader.js";
+import { exitCode, formatError, formatTree } from "../utils.js";
 import type { TreeBlueprint } from "../../../core/tree-blueprint.js";
 
 /** Minimal blueprint used only to trigger orphan detection in TreeCheckService. */
@@ -45,8 +45,7 @@ export default defineCommand({
     },
   },
   async run({ args }) {
-    const dbPath = findLoreDb();
-    const app = createApp(dbPath);
+    const { app } = loadLoreApp();
 
     try {
       // ── orphans branch ────────────────────────────────────────────────────

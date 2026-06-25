@@ -3,8 +3,8 @@
  */
 
 import { defineCommand } from "citty";
-import { createApp } from "../../../app.js";
-import { findLoreDb, exitCode, formatError } from "../utils.js";
+import { loadLoreApp } from "../loader.js";
+import { exitCode, formatError } from "../utils.js";
 
 export default defineCommand({
   meta: {
@@ -54,8 +54,7 @@ export default defineCommand({
     }
 
     const dryRun = args["dry-run"] ?? false;
-    const dbPath = findLoreDb();
-    const app = createApp(dbPath);
+    const { app } = loadLoreApp();
 
     try {
       if (dryRun) {

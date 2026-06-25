@@ -1,6 +1,18 @@
 /**
- * Shared CLI utilities — DB discovery, error formatting, output helpers.
+ * Shared CLI utilities — error formatting and output helpers.
  * No business logic here; only terminal I/O concerns.
+ *
+ * Public surface:
+ *   - exitCode() / formatError() — error presentation
+ *   - formatTable() / formatTree() / formatNavigation() / relativeTime() — output helpers
+ *
+ * Note: DB discovery and App construction live in `loader.ts` to avoid
+ * importing bun:sqlite into this module (vitest cannot resolve bun:sqlite).
+ * CLI commands that need an App instance should import from `loader.ts`.
+ *
+ * Side-effect class: pure (no IO, no process.exit)
+ *
+ * Source: SPEC-003 §5
  */
 
 import { existsSync } from "fs";
@@ -8,17 +20,16 @@ import { join, dirname } from "path";
 import type { LoreError } from "../../core/errors.js";
 import type { TreeNode } from "../../service/corpus-service.js";
 import type { DocWithNavigation } from "../../service/corpus-service.js";
-import { loadConfig } from "../../core/config.js";
-import type { LoreConfig } from "../../core/config.js";
 
-// ─── DB Discovery ───────────────────────────────────────────────────────────
+// ─── DB Discovery (used only by loader.ts) ──────────────────────────────────
 
 /**
  * Walk up from cwd looking for .lore/lore.db.
  * Exits with code 1 if not found (suggests `lore init`).
+ *
  * @returns absolute path to the lore.db file
  */
-export function findLoreDb(): string {
+export function findLoreDbPath(): string {
   let dir = process.cwd();
 
   // Walk up to filesystem root
@@ -39,51 +50,14 @@ export function findLoreDb(): string {
   process.exit(1);
 }
 
-/**
- * Walk up from cwd to find the lore.db path AND load .lore/config.yaml.
- * Returns the db path and a config (or undefined if config is absent/unparseable).
- * Config parse errors are silently ignored — callers fall back to defaults.
- *
- * Used by commands that need telemetry or sync config (SPEC-012 §5).
- * Commands that do not need config can continue using findLoreDb() directly.
- *
- * @returns { dbPath, config }
- */
-export function findLoreDbWithConfig(): { dbPath: string; config: LoreConfig | undefined } {
-  const dbPath = findLoreDb();
-  // The .lore dir is always one level up from lore.db
-  const loreDir = dirname(dbPath);
-  const projectDir = dirname(loreDir);
-  const configResult = loadConfig(projectDir);
-  return {
-    dbPath,
-    config: configResult.ok ? configResult.value : undefined,
-  };
-}
-
-/**
- * Like findLoreDbWithConfig but strips the sync section from config.
- * Use this in commands that support telemetry but NOT sync — it guarantees
- * that createApp(dbPath, config) returns App (not Result<App>).
- *
- * reason: createApp overload returns Result<App> only when sync.enabled=true.
- * Commands that don't handle sync should not accidentally trigger that path.
- *
- * @returns { dbPath, config } where config.sync is always undefined
- */
-export function findLoreDbWithTelemetryConfig(): { dbPath: string; config: LoreConfig | undefined } {
-  const { dbPath, config } = findLoreDbWithConfig();
-  if (config === undefined) return { dbPath, config: undefined };
-  // Strip sync section — reason: prevents accidental Result<App> path in simple commands
-  const { sync: _sync, ...configWithoutSync } = config;
-  return { dbPath, config: configWithoutSync as LoreConfig };
-}
-
-
-
 // ─── Error Formatting ───────────────────────────────────────────────────────
 
-/** Map a LoreError code to a CLI exit code per SPEC-003 §5. */
+/**
+ * Map a LoreError code to a CLI exit code per SPEC-003 §5.
+ *
+ * @param error - LoreError from a service call
+ * @returns numeric exit code (1 | 3 | 4 | 5)
+ */
 export function exitCode(error: LoreError): number {
   switch (error.code) {
     case "DOC_NOT_FOUND":
@@ -112,7 +86,12 @@ export function exitCode(error: LoreError): number {
   }
 }
 
-/** Human-readable error message with contextual suggestions. */
+/**
+ * Human-readable error message with contextual suggestions.
+ *
+ * @param error - LoreError from a service call
+ * @returns formatted string for stderr output
+ */
 export function formatError(error: LoreError): string {
   switch (error.code) {
     case "DOC_NOT_FOUND": {
@@ -187,7 +166,13 @@ export function formatError(error: LoreError): string {
 
 // ─── Table Output ───────────────────────────────────────────────────────────
 
-/** Render a simple fixed-width table with aligned columns. */
+/**
+ * Render a simple fixed-width table with aligned columns.
+ *
+ * @param headers - column header labels
+ * @param rows - data rows (arrays of strings matching header count)
+ * @returns formatted multi-line string ready for console output
+ */
 export function formatTable(headers: string[], rows: string[][]): string {
   const allRows = [headers, ...rows];
   const widths = headers.map((_, colIdx) =>
@@ -205,7 +190,13 @@ export function formatTable(headers: string[], rows: string[][]): string {
 
 // ─── Tree Output ────────────────────────────────────────────────────────────
 
-/** Render a doc tree with Unicode box-drawing characters. */
+/**
+ * Render a doc tree with Unicode box-drawing characters.
+ *
+ * @param node - root TreeNode from CorpusService.getTree()
+ * @param prefix - indentation prefix (empty string for root)
+ * @returns multi-line string with tree connectors
+ */
 export function formatTree(node: TreeNode, prefix: string = ""): string {
   const label = `${node.doc.id.slice(0, 8)}… ${node.doc.title} (${node.doc.status})`;
   const lines: string[] = [prefix === "" ? label : label];
@@ -248,7 +239,12 @@ function formatTreeChildren(node: TreeNode, prefix: string): string[] {
 
 // ─── Navigation Footer ──────────────────────────────────────────────────────
 
-/** Render the navigation footer section for `lore get` output. */
+/**
+ * Render the navigation footer section for `lore get` output.
+ *
+ * @param nav - navigation section from DocWithNavigation
+ * @returns formatted multi-line string
+ */
 export function formatNavigation(nav: DocWithNavigation["navigation"]): string {
   const lines: string[] = ["── Navigation " + "─".repeat(50)];
 
@@ -291,7 +287,12 @@ export function formatNavigation(nav: DocWithNavigation["navigation"]): string {
 
 // ─── Relative Time ──────────────────────────────────────────────────────────
 
-/** Format ISO timestamp as relative time string ("2h ago", "3d ago"). */
+/**
+ * Format ISO timestamp as relative time string ("2h ago", "3d ago").
+ *
+ * @param iso - ISO 8601 timestamp string
+ * @returns human-readable relative time
+ */
 export function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   const minutes = Math.floor(diff / 60_000);

@@ -5,8 +5,8 @@
  */
 
 import { defineCommand } from "citty";
-import { createApp } from "../../../app.js";
-import { findLoreDb, formatTable } from "../utils.js";
+import { loadLoreApp } from "../loader.js";
+import { formatTable } from "../utils.js";
 
 const agentCreate = defineCommand({
   meta: {
@@ -30,8 +30,7 @@ const agentCreate = defineCommand({
     },
   },
   async run({ args }) {
-    const dbPath = findLoreDb();
-    const app = createApp(dbPath);
+    const { app } = loadLoreApp();
     try {
       const result = await app.apiKeyStore.create(args.name, args.owner ?? "admin");
 
@@ -80,8 +79,7 @@ const agentList = defineCommand({
     },
   },
   run({ args }) {
-    const dbPath = findLoreDb();
-    const app = createApp(dbPath);
+    const { app } = loadLoreApp();
     try {
       const result = app.apiKeyStore.list();
 
@@ -137,8 +135,7 @@ const agentRevoke = defineCommand({
     },
   },
   run({ args }) {
-    const dbPath = findLoreDb();
-    const app = createApp(dbPath);
+    const { app } = loadLoreApp();
     try {
       const result = app.apiKeyStore.revoke(args.name);
 

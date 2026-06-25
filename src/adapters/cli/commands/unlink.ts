@@ -3,8 +3,8 @@
  */
 
 import { defineCommand } from "citty";
-import { createApp } from "../../../app.js";
-import { findLoreDb, exitCode, formatError } from "../utils.js";
+import { loadLoreApp } from "../loader.js";
+import { exitCode, formatError } from "../utils.js";
 
 export default defineCommand({
   meta: {
@@ -28,8 +28,7 @@ export default defineCommand({
     },
   },
   async run({ args }) {
-    const dbPath = findLoreDb();
-    const app = createApp(dbPath);
+    const { app } = loadLoreApp();
     try {
       const result = await app.corpusService.unlink(args.from, args.to);
 

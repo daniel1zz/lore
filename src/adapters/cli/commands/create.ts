@@ -8,8 +8,8 @@
  */
 
 import { defineCommand } from "citty";
-import { createApp, type App } from "../../../app.js";
-import { findLoreDbWithTelemetryConfig, exitCode, formatError } from "../utils.js";
+import { loadLoreApp } from "../loader.js";
+import { exitCode, formatError } from "../utils.js";
 import type { DocType, Priority } from "../../../core/types.js";
 
 const VALID_TYPES: DocType[] = ["prd", "spec", "adr", "plan", "knowledge", "task"];
@@ -155,9 +155,7 @@ export default defineCommand({
       process.exit(2);
     }
 
-    const { dbPath, config } = findLoreDbWithTelemetryConfig();
-    // config.sync is stripped by findLoreDbWithTelemetryConfig — createApp returns App (not Result<App>)
-    const app = createApp(dbPath, config) as App;
+    const { app } = loadLoreApp();
     try {
       const tags = args.tags
         ? args.tags
