@@ -58,16 +58,17 @@ Content for ${id}.
 describe("HAPPY — migration coverage against docs/requirements", () => {
   it("imports all parseable files and reports passed=true", async () => {
     // Use the real docs/requirements directory.
-    // 14 total .md files, 12 have valid YAML frontmatter (parseable).
-    // expected_files = analyze().parseable = 12; imported = 12; links_broken = 0 → passed=true
+    // 14 .md files, all 14 have valid YAML frontmatter (parseable).
+    // expected_files = analyze().parseable = 14; imported = 14; links_broken = 0 → passed=true
     const sourceDir = join(process.cwd(), "docs", "requirements");
     const app = makeApp();
     const result = await runMigrationCoverage(sourceDir, app);
     app.close();
 
     expect(result.source_dir).toBe(sourceDir);
-    expect(result.expected_files).toBe(12);
-    expect(result.imported).toBe(12);
+    expect(result.expected_files).toBe(14);
+    expect(result.imported).toBe(14);
+    expect(result.already_existed).toBe(0);
     expect(result.links_broken).toBe(0);
     expect(result.passed).toBe(true);
     expect(result.duration_ms).toBeGreaterThanOrEqual(0);
@@ -165,6 +166,39 @@ describe("STATE — runMigrationCoverage is deterministic", () => {
       expect(result1.expected_files).toBe(2);
       // imported count is deterministic (same files, same migration logic)
       expect(result1.imported).toBe(result2.imported);
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ─── STATE — re-run on same corpus passes due to already_existed ──────────────
+
+describe("STATE — re-run passes because already_existed compensates imported=0", () => {
+  it("second runMigrationCoverage on same store passes with already_existed=N", async () => {
+    const tmpDir = join(tmpdir(), `lore-eval-rerun-${Date.now()}`);
+    mkdirSync(tmpDir, { recursive: true });
+    writeV1Doc(tmpDir, "a.md", "A-001", "prd");
+    writeV1Doc(tmpDir, "b.md", "B-001", "prd");
+
+    try {
+      // Shared store so second run sees docs from first run
+      const app = makeApp();
+
+      // First run: fresh import — passed=true
+      const result1 = await runMigrationCoverage(tmpDir, app);
+      expect(result1.imported).toBe(2);
+      expect(result1.already_existed).toBe(0);
+      expect(result1.passed).toBe(true);
+
+      // Second run: same store — docs already exist
+      const result2 = await runMigrationCoverage(tmpDir, app);
+      expect(result2.imported).toBe(0);
+      expect(result2.already_existed).toBe(2);
+      // reason: (0 + 2) === 2 expected_files → passed=true (idempotent criterion, SPEC-013 §K2)
+      expect(result2.passed).toBe(true);
+
+      app.close();
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }

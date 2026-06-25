@@ -58,12 +58,13 @@ const migrationCommand = defineCommand({
       // Human-readable output
       console.log("Eval: migration-coverage"); // CLI surface
       console.log("─".repeat(40)); // CLI surface
-      console.log(`Source:        ${result.source_dir}`); // CLI surface
-      console.log(`Expected:      ${result.expected_files}`); // CLI surface
-      console.log(`Imported:      ${result.imported}`); // CLI surface
-      console.log(`Links created: ${result.links_created}`); // CLI surface
-      console.log(`Links broken:  ${result.links_broken}`); // CLI surface
-      console.log(`Duration:      ${result.duration_ms}ms`); // CLI surface
+      console.log(`Source:          ${result.source_dir}`); // CLI surface
+      console.log(`Expected:        ${result.expected_files}`); // CLI surface
+      console.log(`Imported:        ${result.imported}`); // CLI surface
+      console.log(`Already existed: ${result.already_existed}`); // CLI surface
+      console.log(`Links created:   ${result.links_created}`); // CLI surface
+      console.log(`Links broken:    ${result.links_broken}`); // CLI surface
+      console.log(`Duration:        ${result.duration_ms}ms`); // CLI surface
 
       if (Object.keys(result.type_distribution).length > 0) {
         console.log("\nType distribution:"); // CLI surface

@@ -2,8 +2,12 @@
  * Eval scenario: migration-coverage.
  *
  * Runs a full v1 migration against a source directory and evaluates whether:
- *   - All parseable source files were imported (imported === expected_files)
+ *   - All parseable source files were imported or already existed in the store.
+ *     Pass criterion: (imported + already_existed) === expected_files && links_broken === 0
  *   - No links were left broken (links_broken === 0)
+ *
+ * This criterion is idempotent-safe: re-running against a corpus where all docs are
+ * already present yields already_existed=N, imported=0, which still satisfies the gate.
  *
  * Public surface:
  *   - MigrationCoverageResult — structured result type (Zod + z.infer)
@@ -11,12 +15,12 @@
  *
  * Invariants:
  *   - Never throws — errors (non-existent dir, migration failure) are returned as passed=false
- *   - Uses a fresh App instance per invocation — does NOT mutate the caller's corpus
+ *   - Operates on the caller's App store — supports both fresh and incremental import
  *   - Idempotent: given the same sourceDir + App state, produces identical output
  *
  * Side-effect class: IO (reads sourceDir, writes to app's store)
  *
- * Source: SPEC-013
+ * Source: SPEC-013 §K2
  */
 
 import { z } from "zod";
@@ -35,8 +39,14 @@ export const MigrationCoverageResultSchema = z.object({
   source_dir: z.string(),
   /** Number of markdown files expected to be imported */
   expected_files: z.number().int().nonnegative(),
-  /** Number of files successfully imported by the migration service */
+  /** Number of files successfully imported by the migration service in this run */
   imported: z.number().int().nonnegative(),
+  /**
+   * Number of docs that were already present in the store (idempotent re-run).
+   * Combined with `imported`, satisfies: (imported + already_existed) === expected_files.
+   * Source: SPEC-013 §K2
+   */
+  already_existed: z.number().int().nonnegative(),
   /** Number of links created during migration */
   links_created: z.number().int().nonnegative(),
   /** Number of links that could not be resolved during migration */
@@ -46,8 +56,9 @@ export const MigrationCoverageResultSchema = z.object({
   /** Wall-clock duration of the migration in milliseconds */
   duration_ms: z.number(),
   /**
-   * true iff imported === expected_files && links_broken === 0.
-   * This is the single pass/fail gate for CI use.
+   * true iff (imported + already_existed) === expected_files && links_broken === 0.
+   * Idempotent-safe: a re-run against an already-populated corpus still passes.
+   * This is the single pass/fail gate for CI use. Source: SPEC-013 §K2
    */
   passed: z.boolean(),
 });
@@ -109,6 +120,7 @@ export async function runMigrationCoverage(
       source_dir: sourceDir,
       expected_files: 0,
       imported: 0,
+      already_existed: 0,
       links_created: 0,
       links_broken: 0,
       type_distribution: {},
@@ -129,6 +141,7 @@ export async function runMigrationCoverage(
       source_dir: sourceDir,
       expected_files: 0,
       imported: 0,
+      already_existed: 0,
       links_created: 0,
       links_broken: 0,
       type_distribution: {},
@@ -145,6 +158,7 @@ export async function runMigrationCoverage(
       source_dir: sourceDir,
       expected_files: 0,
       imported: 0,
+      already_existed: 0,
       links_created: 0,
       links_broken: 0,
       type_distribution: {},
@@ -168,6 +182,7 @@ export async function runMigrationCoverage(
       source_dir: sourceDir,
       expected_files: expectedFiles,
       imported: 0,
+      already_existed: 0,
       links_created: 0,
       links_broken: 0,
       type_distribution: {},
@@ -188,14 +203,18 @@ export async function runMigrationCoverage(
   }
 
   const imported = migResult.imported;
+  const alreadyExisted = migResult.already_existed;
   const linksCreated = migResult.link_resolution.created;
   const linksBroken = migResult.link_resolution.broken;
-  const passed = imported === expectedFiles && linksBroken === 0;
+  // reason: pass criterion is idempotent-safe — re-running when all docs already exist
+  // yields imported=0, already_existed=N which still satisfies the gate. See SPEC-013 §K2.
+  const passed = (imported + alreadyExisted) === expectedFiles && linksBroken === 0;
 
   return MigrationCoverageResultSchema.parse({
     source_dir: sourceDir,
     expected_files: expectedFiles,
     imported,
+    already_existed: alreadyExisted,
     links_created: linksCreated,
     links_broken: linksBroken,
     type_distribution: typeDistribution,

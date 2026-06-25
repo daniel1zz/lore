@@ -64,26 +64,35 @@ Invariants for all scenarios:
 
 Validates that a v1 corpus import is complete and link-consistent.
 
-**Pass condition**: `imported === expected_files && links_broken === 0`
+**Pass condition (K2 — idempotent-safe)**:
+```
+(imported + already_existed) === expected_files && links_broken === 0
+```
+
+Rationale: migration is idempotent — docs already present in the store are counted as
+`already_existed` (not failures). A re-run against an already-populated corpus yields
+`imported=0, already_existed=N` which still satisfies the gate.
 
 **Result shape**:
 ```typescript
 interface MigrationCoverageResult {
   source_dir: string;
-  expected_files: number;    // .md files recursively counted
-  imported: number;          // migrationService.execute().imported
+  expected_files: number;    // .md files with valid YAML frontmatter (parseable)
+  imported: number;          // migrationService.execute().imported (newly inserted)
+  already_existed: number;   // migrationService.execute().already_existed (idempotent skips)
   links_created: number;     // migrationService.execute().link_resolution.created
   links_broken: number;      // migrationService.execute().link_resolution.broken
   type_distribution: Record<string, number>;  // from corpus after migration
   duration_ms: number;
-  passed: boolean;
+  passed: boolean;           // (imported + already_existed) === expected_files && links_broken === 0
 }
 ```
 
 **Edge cases**:
 - Non-existent source dir → `passed=false`, `expected_files=0`
-- Empty source dir → `passed=true`, `imported=0`, `links_broken=0`
+- Empty source dir → `passed=true`, `imported=0`, `already_existed=0`, `links_broken=0`
 - Migration service returns error → `passed=false`
+- Re-run on already-populated store → `imported=0`, `already_existed=N`, `passed=true`
 
 ---
 
@@ -121,7 +130,9 @@ The eval scenario is designed for CI dogfood. The canonical invocation against t
 
 ```bash
 lore eval migration --from docs/requirements --skip-secret-scan
-# expect: exit 0, imported=12, links_broken=0, passed=true
+# expect: exit 0, (imported + already_existed)=14, links_broken=0, passed=true
+# fresh corpus:  imported=14, already_existed=0
+# re-run:        imported=0,  already_existed=14  (still passed=true)
 ```
 
 This is verified as part of AC-C5 (end-to-end smoke test).
@@ -155,7 +166,8 @@ Future: eval runs could be correlated with telemetry events by session ID to mea
 ## 9. Test Coverage Requirements
 
 See `tests/unit/eval/migration-coverage.test.ts` for coverage:
-- HAPPY: runs on `docs/requirements`, imported=12, passed=true
+- HAPPY: runs on `docs/requirements`, imported=14, already_existed=0, passed=true
 - NEGATIVE: empty dir → passed=true (degenerate valid case)
 - ERROR: non-existent dir → passed=false (no throw)
 - STATE: re-running with same inputs produces deterministic results
+- STATE (K2): second run on same store → imported=0, already_existed=N, passed=true

@@ -131,11 +131,11 @@ export default defineCommand({
 
       console.log("Migration complete");
       console.log("─".repeat(40));
-      console.log(`Imported:  ${migResult.imported}`);
-      console.log(`Skipped:   ${migResult.skipped}`);
-      console.log(`Errors:    ${migResult.errors.length}`);
-      console.log(`Links created: ${migResult.link_resolution.created}`);
-      console.log(`Links broken:  ${migResult.link_resolution.broken}`);
+      console.log(`Imported:        ${migResult.imported}`);
+      console.log(`Already existed: ${migResult.already_existed}`);
+      console.log(`Errors:          ${migResult.errors.length}`);
+      console.log(`Links created:   ${migResult.link_resolution.created}`);
+      console.log(`Links broken:    ${migResult.link_resolution.broken}`);
 
       if (migResult.warnings.length > 0) {
         console.log("\nWarnings:");

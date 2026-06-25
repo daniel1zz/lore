@@ -52,6 +52,13 @@ export interface MigrationReport {
 
 export interface MigrationResult {
   imported: number;
+  /**
+   * Docs that were skipped because they already exist in the store (idempotent re-run).
+   * Distinct from `errors` (parse failures) — these docs are NOT missing from the corpus.
+   * Used by eval scenarios to compute: (imported + already_existed) === expected_files.
+   */
+  already_existed: number;
+  /** @deprecated Kept for forward-compatibility; always 0 — parse failures go to `errors`. */
   skipped: number;
   errors: FileError[];
   link_resolution: { created: number; broken: number };
@@ -205,6 +212,7 @@ export class MigrationService {
     if (opts.dryRun) {
       return ok({
         imported: 0,
+        already_existed: 0,
         skipped: 0,
         errors: [],
         link_resolution: { created: 0, broken: 0 },
@@ -237,7 +245,7 @@ export class MigrationService {
       }
     }
 
-    const { imported, skipped, warnings, v1IdToNewId } = await this.importDocs(
+    const { imported, already_existed, warnings, v1IdToNewId } = await this.importDocs(
       parsedDocs,
       opts,
       importErrors,
@@ -248,7 +256,8 @@ export class MigrationService {
 
     return ok({
       imported,
-      skipped,
+      already_existed,
+      skipped: 0,
       errors: importErrors,
       link_resolution: linkResolution,
       warnings,
@@ -263,12 +272,15 @@ export class MigrationService {
     importErrors: FileError[],
   ): Promise<{
     imported: number;
-    skipped: number;
+    already_existed: number;
     warnings: string[];
     v1IdToNewId: Map<string, DocId>;
   }> {
     let imported = 0;
-    let skipped = 0;
+    // reason: "already_existed" tracks docs that are idempotently skipped (already in store).
+    // This is separate from parse-error skips (which land in importErrors). Eval scenarios use
+    // (imported + already_existed) === expected_files as the pass criterion — see SPEC-013 §K2.
+    let already_existed = 0;
     const warnings: string[] = [];
     const v1IdToNewId = new Map<string, DocId>();
 
@@ -276,9 +288,9 @@ export class MigrationService {
     const existingV1Ids = await this.collectExistingV1Ids();
 
     for (const doc of parsedDocs) {
-      // Skip already-imported docs (idempotency)
+      // Skip already-imported docs (idempotency) — count as already_existed, not skipped
       if (existingV1Ids.has(doc.v1Id)) {
-        skipped += 1;
+        already_existed += 1;
         continue;
       }
 
@@ -353,7 +365,7 @@ export class MigrationService {
       imported += 1;
     }
 
-    return { imported, skipped, warnings, v1IdToNewId };
+    return { imported, already_existed, warnings, v1IdToNewId };
   }
 
   private async collectExistingV1Ids(): Promise<Set<string>> {
