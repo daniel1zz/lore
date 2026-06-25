@@ -31,6 +31,7 @@ import {
   type FtsRow,
   type LinkRow,
   type VersionRow,
+  escapeFtsQuery,
   rowToAuditEntry,
   rowToDocRecord,
   rowToLinkRecord,
@@ -455,6 +456,12 @@ export class SQLiteStore implements StoreInterface {
     filters?: StoreFilters,
   ): Promise<Result<SearchHit[], LoreError>> {
     try {
+      const safeQuery = escapeFtsQuery(query);
+      // reason: FTS5 MATCH errors on empty expression — short-circuit here so
+      // we never pass an empty string to SQLite. Callers expect empty query →
+      // zero results, not an error. See SPEC-013 §3.5.
+      if (safeQuery === "") return ok([]);
+
       const excludeDeleted = filters?.exclude_deleted !== false;
 
       // Build WHERE clause for docs table join
@@ -492,7 +499,7 @@ export class SQLiteStore implements StoreInterface {
 
       const rows = this.db
         .prepare(sql)
-        .all(query, ...docParams) as FtsRow[];
+        .all(safeQuery, ...docParams) as FtsRow[];
 
       const hits: SearchHit[] = rows.map((row) => ({
         id: row.id,

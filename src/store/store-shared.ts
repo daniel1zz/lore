@@ -168,3 +168,58 @@ export function wrapStoreError(e: unknown): Result<never, LoreError> {
   }
   return err({ code: "STORE_ERROR", message });
 }
+
+// ─── FTS5 query escape ─────────────────────────────────────────────────────
+
+/**
+ * Escape an arbitrary user search string into a FTS5-safe MATCH expression.
+ *
+ * Algorithm:
+ *   1. Trim input. If empty, return "".
+ *   2. Split on whitespace (one or more) into pieces.
+ *   3. For each piece, replace internal `"` with `""` (FTS5 phrase escape) and
+ *      wrap in `"…"`.
+ *   4. Join pieces with single spaces.
+ *
+ * Semantics: the resulting expression is an AND of phrase queries (FTS5 default
+ * boolean operator between bare phrases is AND). Each phrase is FTS5-tokenized
+ * internally — so `"append-only"` matches docs containing the consecutive
+ * sequence "append" then "only", which is what users with a hyphenated term in
+ * mind almost always want.
+ *
+ * Returns "" only when input was empty or whitespace-only. Callers MUST treat
+ * empty input as a no-results query and short-circuit BEFORE passing to FTS5
+ * MATCH — FTS5 errors on an empty MATCH expression.
+ *
+ * Note: InMemoryStore uses substring-based search and does NOT use this
+ * function — its semantics intentionally diverge from FTS5 and are out of scope
+ * for this escape mechanism.
+ *
+ * @example
+ *   escapeFtsQuery("")                    === ""
+ *   escapeFtsQuery("   ")                 === ""
+ *   escapeFtsQuery("service")             === '"service"'
+ *   escapeFtsQuery("service layer")       === '"service" "layer"'
+ *   escapeFtsQuery("append-only version") === '"append-only" "version"'
+ *   escapeFtsQuery('he said "hi"')        === '"he" "said" """hi"""'
+ *   escapeFtsQuery("foo*")                === '"foo*"'
+ *   escapeFtsQuery("(append)")            === '"(append)"'
+ *
+ * Source: SPEC-013 §3.5 FTS5-special-token resilience
+ */
+export function escapeFtsQuery(raw: string): string {
+  const trimmed = raw.trim();
+  if (trimmed === "") return "";
+
+  // reason: FTS5 phrase quoting: wrap each whitespace-delimited piece in double
+  // quotes, and escape any embedded double-quote by doubling it (""). This
+  // neutralises all FTS5 operators (hyphen, parens, colon, star, OR, AND, NOT)
+  // because the tokenizer processes the string inside the phrase, not the FTS5
+  // query parser. See SQLite FTS5 docs §3.1 (phrase queries).
+  const pieces = trimmed.split(/\s+/);
+  const escaped = pieces.map((piece) => {
+    const inner = piece.replaceAll('"', '""');
+    return `"${inner}"`;
+  });
+  return escaped.join(" ");
+}
