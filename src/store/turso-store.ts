@@ -33,6 +33,7 @@ import type {
   UpdateOpts,
 } from "./store-interface.js";
 import {
+  escapeFtsQuery,
   rowToAuditEntry,
   rowToDocRecord,
   rowToLinkRecord,
@@ -608,9 +609,15 @@ export class TursoStore implements StoreInterface {
     try {
       await this.ensureReady();
 
+      const safeQuery = escapeFtsQuery(query);
+      // reason: FTS5 MATCH errors on empty expression — short-circuit here so
+      // we never pass an empty string to libsql. Callers expect empty query →
+      // zero results, not an error. See SPEC-013 §3.5.
+      if (safeQuery === "") return ok([]);
+
       const excludeDeleted = filters?.exclude_deleted !== false;
       const docClauses: string[] = [];
-      const docParams: InValue[] = [query];
+      const docParams: InValue[] = [safeQuery];
 
       if (excludeDeleted) {
         docClauses.push("d.deleted_at IS NULL");
