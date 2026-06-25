@@ -44,9 +44,16 @@ function makeApp(): App {
 
 /**
  * Access the internal _registeredTools map to extract a tool handler.
- * The handler signature is (args, extra) => CallToolResult.
+ *
+ * Tools with input use `registerToolWithArgs` which patches `inputSchema` after 3-arg
+ * registration. At runtime the SDK calls `handler(validatedArgs, extra)`, so the handler's
+ * first parameter receives the actual args. The test calls `tool.handler(args, {})` to
+ * simulate this — args go directly as the first param, consistent with runtime behavior.
+ * — reason: ADR-01KVYFJ5G8EVB6S5NMD3PNY5KA §"Fast Path" Pattern 1 (post-registration patch)
  */
-type McpServerInternal = McpServer & {
+// reason: McpServer._registeredTools is private — must use a standalone type (not intersection)
+// and cast via unknown to access internal state without triggering TS private-member collision.
+type McpServerInternal = {
   _registeredTools: Record<
     string,
     { handler: (args: Record<string, unknown>, extra: unknown) => Promise<CallToolResult> }
