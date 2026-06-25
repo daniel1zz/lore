@@ -161,28 +161,28 @@ export const DEFAULT_TOP_K = 5 as const;
  */
 export const DEFAULT_FTS_QUERIES = [
   {
-    query: "service layer dependency injection result",
-    expected_slugs: ["spec-service-layer"],
+    query: "service layer dependency injection",
+    expected_slugs: ["spec-service-layer-architecture"],
   },
   {
     query: "MDX placeholder resolution outline",
     expected_slugs: ["spec-prd-as-living-root"],
   },
   {
-    query: "review workflow approval status transition",
+    query: "review approve reject",
     expected_slugs: ["spec-review-workflow"],
   },
   {
-    query: "version history diff restore append-only",
+    query: "version diff restore",
     expected_slugs: ["spec-version-history"],
   },
   {
-    query: "v1 migration import YAML frontmatter",
-    expected_slugs: ["spec-v1-migration"],
+    query: "migration v1 frontmatter",
+    expected_slugs: ["spec-migration-v1"],
   },
   {
-    query: "telemetry JSONL captures latency event",
-    expected_slugs: ["spec-telemetry"],
+    query: "telemetry JSONL",
+    expected_slugs: ["spec-telemetry-module"],
   },
   {
     query: "eval framework scenario passed recall",
