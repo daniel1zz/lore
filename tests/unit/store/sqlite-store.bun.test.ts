@@ -947,3 +947,231 @@ describe("SQLiteStore", () => {
     });
   });
 });
+
+// ─── FTS5 Special-Token Escape — SPEC-013 §3.5 ───────────────────────────────
+//
+// @spec_ref AC-STORE-FTS-001
+//
+// These tests verify that SQLiteStore.search() safely handles FTS5-special input
+// tokens (hyphens, wildcards, colons, parentheses) that would previously cause a
+// raw SQLite FTS5 MATCH syntax error to propagate as a thrown exception.
+//
+// After the escapeFtsQuery fix is applied in SQLiteStore, all probes below must
+// return Result.ok (never throw / never return Result.err for syntax reasons).
+//
+// Test design:
+//   HAPPY  — hyphen query matches docs containing that hyphenated token
+//   HAPPY  — multi-word AND semantics work post-escape
+//   BOUNDARY — empty / whitespace-only query short-circuits to ok([])
+//   ERROR  — historically crashing inputs surface as ok (never err from SQL error)
+//   REGRESSION — "append-only" canonical case matched correctly
+//   STATE  — store returns consistent results across repeated calls
+
+describe("SQLiteStore.search — FTS5 special-token escape (SPEC-013 §3.5)", () => {
+  let store: SQLiteStore;
+
+  // Each test gets a fresh in-memory store — matches the pattern used above.
+  beforeEach(() => {
+    _counter = 0;
+    store = new SQLiteStore(":memory:");
+  });
+
+  afterEach(() => {
+    store.close();
+  });
+
+  // ── Happy Path ──────────────────────────────────────────────────────────────
+
+  it("FTS-HAPPY-01: returns ok() for query containing hyphen (append-only)", async () => {
+    const doc = makeDoc({
+      slug: "spec-fts-hyphen",
+      title: "Append-Only Journal Design",
+      content: "This spec covers the append-only journal for the version store.",
+      type: "spec",
+      role: "spec",
+    });
+    await store.insert(doc);
+
+    const result = await store.search("append-only");
+    expect(result.ok).toBe(true);
+    // Must find the doc containing the hyphenated token
+    if (!result.ok) return;
+    const ids = result.value.map((h) => h.id);
+    expect(ids).toContain(doc.id);
+  });
+
+  it("FTS-HAPPY-02: hyphenated query does NOT match doc that lacks the hyphenated form", async () => {
+    // Doc A has "append-only" as a true hyphenated word.
+    // Doc B has the words separately in a sentence — FTS5 phrase semantics
+    // ensure "append-only" (after escaping to '"append-only"') matches the
+    // concatenated token, not split words.
+    const docA = makeDoc({
+      slug: "spec-fts-h-a",
+      title: "Append-Only Store",
+      content: "Uses an append-only journal for durability.",
+      type: "spec",
+      role: "spec",
+    });
+    const docB = makeDoc({
+      slug: "spec-fts-h-b",
+      title: "Storage Notes",
+      content: "We should not append. Only log deltas.",
+      type: "spec",
+      role: "spec",
+    });
+    await store.insert(docA);
+    await store.insert(docB);
+
+    const result = await store.search("append-only");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const ids = result.value.map((h) => h.id);
+    // docA must appear (has the literal hyphenated token)
+    expect(ids).toContain(docA.id);
+    // docB must NOT appear (split sentence, not hyphenated token)
+    expect(ids).not.toContain(docB.id);
+  });
+
+  it("FTS-HAPPY-03: prefix wildcard query (foo*) returns ok — no SQL error", async () => {
+    // After the fix, "foo*" is wrapped as '"foo*"'. FTS5 allows * at end of
+    // a quoted phrase for prefix matching. Result may be 0 hits but must not
+    // be an error.
+    const result = await store.search("foo*");
+    expect(result.ok).toBe(true);
+    // Zero hits is acceptable — the critical assertion is no SQL error
+  });
+
+  it("FTS-HAPPY-04: multi-word query uses AND semantics — returns only docs with both terms", async () => {
+    // Doc A has BOTH "service" and "layer" in content.
+    // Doc B has ONLY "service".
+    // search("service layer") must return A but NOT B.
+    const docA = makeDoc({
+      slug: "spec-fts-and-a",
+      title: "Service Layer Design",
+      content: "The service layer handles all business logic.",
+      type: "spec",
+      role: "spec",
+    });
+    const docB = makeDoc({
+      slug: "spec-fts-and-b",
+      title: "Service Overview",
+      content: "Overview of the service module without further details.",
+      type: "spec",
+      role: "spec",
+    });
+    await store.insert(docA);
+    await store.insert(docB);
+
+    const result = await store.search("service layer");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const ids = result.value.map((h) => h.id);
+    expect(ids).toContain(docA.id);
+    expect(ids).not.toContain(docB.id);
+  });
+
+  // ── Boundary Values ─────────────────────────────────────────────────────────
+
+  it("FTS-BOUNDARY-01: empty string query returns ok([]) without hitting FTS", async () => {
+    // Short-circuit: escapeFtsQuery("") === "" → caller must skip MATCH → return []
+    const result = await store.search("");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value).toEqual([]);
+  });
+
+  it("FTS-BOUNDARY-02: whitespace-only query returns ok([]) without hitting FTS", async () => {
+    // "   \t\n  " trims to "" — same short-circuit as empty string
+    const result = await store.search("   \t\n  ");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value).toEqual([]);
+  });
+
+  // ── Error / No-Throw ────────────────────────────────────────────────────────
+
+  it("FTS-ERROR-01: historically problematic inputs never cause thrown SQL error or Result.err", async () => {
+    // Before the fix, FTS5-special tokens triggered a SQL syntax error that propagated
+    // as a thrown exception. After the fix, ALL inputs return Result (never throw).
+    // We specifically target inputs that FTS5 interprets as operators without quoting.
+    const probes = [
+      "append-only",   // hyphen = FTS5 NOT operator
+      "real-world",    // hyphen in different context
+      "foo*",          // naked wildcard
+      "bar?",          // question mark (FTS5 fuzzy in some builds)
+      "(parens)",      // grouping syntax
+      "a:b",           // FTS5 column filter syntax
+      "AND",           // FTS5 boolean operator keyword
+      "OR",            // FTS5 boolean operator keyword
+      "NOT",           // FTS5 boolean operator keyword
+      "-term",         // leading hyphen = NOT
+    ];
+
+    for (const q of probes) {
+      const r = await store.search(q, {});
+      expect(
+        r.ok,
+        `search("${q}") must return ok (not throw). Got: ${JSON.stringify(!r.ok && r)}`,
+      ).toBe(true);
+    }
+  });
+
+  // ── Regression ──────────────────────────────────────────────────────────────
+
+  it("REGRESSION FTS-REG-01: 'append-only' canonical case — finds doc, does not throw", async () => {
+    // This is the exact scenario from the bug report: searching for a hyphenated
+    // term previously crashed SQLiteStore with an FTS5 syntax error.
+    const doc = makeDoc({
+      slug: "spec-fts-reg-hyphen",
+      title: "Version Store Spec",
+      content: "The store uses an append-only log for version history.",
+      type: "spec",
+      role: "spec",
+    });
+    await store.insert(doc);
+
+    // Must not throw; must be ok; must contain the doc
+    const result = await store.search("append-only");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.map((h) => h.id)).toContain(doc.id);
+  });
+
+  it("REGRESSION FTS-REG-02: empty query short-circuit works regardless of docs in store", async () => {
+    // Insert a doc so the store is non-empty — verify short-circuit still works
+    const doc = makeDoc({
+      slug: "spec-fts-reg-empty",
+      title: "Some Doc",
+      content: "Some content here.",
+    });
+    await store.insert(doc);
+
+    const result = await store.search("");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value).toEqual([]);
+  });
+
+  // ── State ───────────────────────────────────────────────────────────────────
+
+  it("FTS-STATE-01: repeated searches with same query return consistent results", async () => {
+    const doc = makeDoc({
+      slug: "spec-fts-state",
+      title: "Idempotent Search",
+      content: "real-world usage of the FTS system.",
+      type: "spec",
+      role: "spec",
+    });
+    await store.insert(doc);
+
+    const first = await store.search("real-world");
+    const second = await store.search("real-world");
+
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+    if (!first.ok || !second.ok) return;
+
+    // Same set of IDs in same order
+    expect(first.value.map((h) => h.id)).toEqual(second.value.map((h) => h.id));
+  });
+});
