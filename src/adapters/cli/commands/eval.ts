@@ -3,16 +3,26 @@
  *
  * Subcommands:
  *   lore eval migration --from <dir> [--skip-secret-scan] [--json]
+ *   lore eval tree [--json]
+ *   lore eval links [--json]
+ *   lore eval types [--json]
  *
  * Exit codes:
  *   0 — scenario ran and passed (result.passed=true)
  *   1 — scenario ran but failed (result.passed=false) or internal error
  *   2 — bad arguments
+ *
+ * Source: SPEC-013 §3
  */
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { runMigrationCoverage } from "../../../eval/index.js";
+import {
+  runMigrationCoverage,
+  runTreeConsistency,
+  runLinkIntegrity,
+  runTypeDistribution,
+} from "../../../eval/index.js";
 
 // ─── migration subcommand ─────────────────────────────────────────────────────
 
@@ -79,11 +89,195 @@ const migrationCommand = defineCommand({
   },
 });
 
+// ─── tree subcommand ──────────────────────────────────────────────────────────
+
+const treeCommand = defineCommand({
+  meta: {
+    name: "tree",
+    description: "Eval tree-consistency: checks for orphan docs, cycles, and invalid parent types",
+  },
+  args: {
+    json: {
+      type: "boolean",
+      description: "Output result as JSON",
+    },
+  },
+  async run({ args }) {
+    const { app } = loadLoreApp();
+
+    try {
+      const result = await runTreeConsistency(app);
+
+      if (args.json) {
+        console.log(JSON.stringify({ ok: result.passed, data: result }, null, 2)); // CLI surface
+        process.exit(result.passed ? 0 : 1);
+      }
+
+      // Human-readable output
+      console.log("Eval: tree-consistency"); // CLI surface
+      console.log("─".repeat(40)); // CLI surface
+      console.log(`Total docs:           ${result.total_docs}`); // CLI surface
+      console.log(`Orphans:              ${result.orphans}`); // CLI surface
+      console.log(`Cycles:               ${result.cycles}`); // CLI surface
+      console.log(`Invalid parent types: ${result.invalid_parent_types}`); // CLI surface
+      console.log(`Duration:             ${result.duration_ms}ms`); // CLI surface
+
+      if (!result.passed) {
+        if (result.details.orphan_ids.length > 0) {
+          console.log("\nOrphan doc IDs (up to 10):"); // CLI surface
+          for (const id of result.details.orphan_ids) {
+            console.log(`  ${id}`); // CLI surface
+          }
+        }
+
+        if (result.details.cycle_paths.length > 0) {
+          console.log("\nCycle paths (up to 10):"); // CLI surface
+          for (const path of result.details.cycle_paths) {
+            console.log(`  ${path.join(" → ")}`); // CLI surface
+          }
+        }
+
+        if (result.details.invalid_pairs.length > 0) {
+          console.log("\nInvalid parent type pairs:"); // CLI surface
+          for (const pair of result.details.invalid_pairs) {
+            console.log(`  ${pair.child_type}(${pair.child_id}) under ${pair.parent_type}(${pair.parent_id})`); // CLI surface
+          }
+        }
+      }
+
+      console.log(`\nResult: ${result.passed ? "PASSED" : "FAILED"}`); // CLI surface
+      process.exit(result.passed ? 0 : 1);
+    } finally {
+      app.close();
+    }
+  },
+});
+
+// ─── links subcommand ─────────────────────────────────────────────────────────
+
+const linksCommand = defineCommand({
+  meta: {
+    name: "links",
+    description: "Eval link-integrity: checks for dangling, deleted-target, and self-loop links",
+  },
+  args: {
+    json: {
+      type: "boolean",
+      description: "Output result as JSON",
+    },
+  },
+  async run({ args }) {
+    const { app } = loadLoreApp();
+
+    try {
+      const result = await runLinkIntegrity(app);
+
+      if (args.json) {
+        console.log(JSON.stringify({ ok: result.passed, data: result }, null, 2)); // CLI surface
+        process.exit(result.passed ? 0 : 1);
+      }
+
+      // Human-readable output
+      console.log("Eval: link-integrity"); // CLI surface
+      console.log("─".repeat(40)); // CLI surface
+      console.log(`Total links:     ${result.total_links}`); // CLI surface
+      console.log(`Dangling:        ${result.dangling}`); // CLI surface
+      console.log(`To deleted:      ${result.to_deleted}`); // CLI surface
+      console.log(`Self-loops:      ${result.self_loops}`); // CLI surface
+      console.log(`Duration:        ${result.duration_ms}ms`); // CLI surface
+
+      if (!result.passed) {
+        if (result.details.dangling_links.length > 0) {
+          console.log("\nDangling links (up to 10):"); // CLI surface
+          for (const link of result.details.dangling_links) {
+            console.log(`  ${link.from_id} --[${link.type}]--> ${link.to_id}`); // CLI surface
+          }
+        }
+
+        if (result.details.deleted_target_links.length > 0) {
+          console.log("\nLinks to deleted docs (up to 10):"); // CLI surface
+          for (const link of result.details.deleted_target_links) {
+            console.log(`  ${link.from_id} --[${link.type}]--> ${link.to_id} (deleted)`); // CLI surface
+          }
+        }
+
+        if (result.details.self_loop_links.length > 0) {
+          console.log("\nSelf-loop links (up to 10):"); // CLI surface
+          for (const link of result.details.self_loop_links) {
+            console.log(`  ${link.from_id} --[${link.type}]--> itself`); // CLI surface
+          }
+        }
+      }
+
+      console.log(`\nResult: ${result.passed ? "PASSED" : "FAILED"}`); // CLI surface
+      process.exit(result.passed ? 0 : 1);
+    } finally {
+      app.close();
+    }
+  },
+});
+
+// ─── types subcommand ─────────────────────────────────────────────────────────
+
+const typesCommand = defineCommand({
+  meta: {
+    name: "types",
+    description: "Eval type-distribution: checks doc type counts against configurable thresholds",
+  },
+  args: {
+    json: {
+      type: "boolean",
+      description: "Output result as JSON",
+    },
+  },
+  async run({ args }) {
+    const { app } = loadLoreApp();
+
+    try {
+      // MVP: always runs with default thresholds.
+      // reason: --config <yaml> flag for custom thresholds is deferred to future work (SPEC-013 §7).
+      // The scenario function accepts custom input for programmatic use (tests, SDK).
+      const result = await runTypeDistribution(app);
+
+      if (args.json) {
+        console.log(JSON.stringify({ ok: result.passed, data: result }, null, 2)); // CLI surface
+        process.exit(result.passed ? 0 : 1);
+      }
+
+      // Human-readable output
+      console.log("Eval: type-distribution"); // CLI surface
+      console.log("─".repeat(40)); // CLI surface
+      console.log("Distribution:"); // CLI surface
+      for (const [type, count] of Object.entries(result.distribution)) {
+        console.log(`  ${type.padEnd(16)} ${count}`); // CLI surface
+      }
+      console.log(`Duration:        ${result.duration_ms}ms`); // CLI surface
+
+      if (result.violations.length > 0) {
+        console.log("\nViolations:"); // CLI surface
+        for (const v of result.violations) {
+          const bounds = [
+            v.min !== undefined ? `min=${v.min}` : null,
+            v.max !== undefined ? `max=${v.max}` : null,
+          ].filter(Boolean).join(", ");
+          console.log(`  ${v.type}: actual=${v.actual} (${bounds}) [${v.reason}]`); // CLI surface
+        }
+      }
+
+      console.log(`\nResult: ${result.passed ? "PASSED" : "FAILED"}`); // CLI surface
+      process.exit(result.passed ? 0 : 1);
+    } finally {
+      app.close();
+    }
+  },
+});
+
 // ─── eval parent command ──────────────────────────────────────────────────────
 
 /**
  * Top-level eval command — routes to scenario subcommands.
- * Currently only "migration" is available; future scenarios are listed in SPEC-013.
+ * Scenarios: migration (§3.1), tree (§3.2), links (§3.3), types (§3.4).
+ * Source: SPEC-013 §3
  */
 export default defineCommand({
   meta: {
@@ -92,5 +286,8 @@ export default defineCommand({
   },
   subCommands: {
     migration: migrationCommand,
+    tree: treeCommand,
+    links: linksCommand,
+    types: typesCommand,
   },
 });
