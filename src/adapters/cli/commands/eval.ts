@@ -6,6 +6,8 @@
  *   lore eval tree [--json]
  *   lore eval links [--json]
  *   lore eval types [--json]
+ *   lore eval fts [--json]
+ *   lore eval placeholders [--json]
  *
  * Exit codes:
  *   0 — scenario ran and passed (result.passed=true)
@@ -22,6 +24,8 @@ import {
   runTreeConsistency,
   runLinkIntegrity,
   runTypeDistribution,
+  runFtsRecall,
+  runPlaceholderParse,
 } from "../../../eval/index.js";
 
 // ─── migration subcommand ─────────────────────────────────────────────────────
@@ -272,11 +276,119 @@ const typesCommand = defineCommand({
   },
 });
 
+// ─── fts subcommand ───────────────────────────────────────────────────────────
+
+const ftsCommand = defineCommand({
+  meta: {
+    name: "fts",
+    description: "Eval fts-recall: avg recall@K of FTS search against curated query/expected-slug fixtures",
+  },
+  args: {
+    json: {
+      type: "boolean",
+      description: "Output result as JSON",
+    },
+  },
+  async run({ args }) {
+    const { app } = loadLoreApp();
+
+    try {
+      // MVP: always runs with default queries and threshold.
+      // reason: --queries / --threshold flags deferred to future work (mirrors --config deferral in typesCommand).
+      const result = await runFtsRecall(undefined, app);
+
+      if (args.json) {
+        console.log(JSON.stringify({ ok: result.passed, data: result }, null, 2)); // CLI surface
+        process.exit(result.passed ? 0 : 1);
+      }
+
+      // Human-readable output
+      console.log("Eval: fts-recall"); // CLI surface
+      console.log("─".repeat(40)); // CLI surface
+      console.log(`Queries:         ${result.total_queries}`); // CLI surface
+      console.log(`Avg recall:      ${result.avg_recall.toFixed(3)}`); // CLI surface
+      console.log(`Threshold:       ${result.pass_threshold}`); // CLI surface
+      console.log(`Duration:        ${result.duration_ms}ms`); // CLI surface
+
+      console.log("\nPer-query recall:"); // CLI surface
+      for (const q of result.per_query) {
+        const flags = [
+          q.failed ? " [SEARCH FAILED]" : "",
+          q.degenerate ? " [no expected slugs in corpus]" : "",
+        ].join("");
+        console.log(`  "${q.query}" → recall=${q.recall.toFixed(2)} hits=${q.hits}/${q.resolved_expected_count}${flags}`); // CLI surface
+      }
+
+      console.log(`\nResult: ${result.passed ? "PASSED" : "FAILED"}`); // CLI surface
+      process.exit(result.passed ? 0 : 1);
+    } finally {
+      app.close();
+    }
+  },
+});
+
+// ─── placeholders subcommand ──────────────────────────────────────────────────
+
+const placeholdersCommand = defineCommand({
+  meta: {
+    name: "placeholders",
+    description: "Eval placeholder-parse: all detected MDX placeholders resolve (no unknown components, no resolution errors)",
+  },
+  args: {
+    json: {
+      type: "boolean",
+      description: "Output result as JSON",
+    },
+  },
+  async run({ args }) {
+    const { app } = loadLoreApp();
+
+    try {
+      const result = await runPlaceholderParse(app);
+
+      if (args.json) {
+        console.log(JSON.stringify({ ok: result.passed, data: result }, null, 2)); // CLI surface
+        process.exit(result.passed ? 0 : 1);
+      }
+
+      // Human-readable output
+      console.log("Eval: placeholder-parse"); // CLI surface
+      console.log("─".repeat(40)); // CLI surface
+      console.log(`Docs scanned:         ${result.total_docs_scanned}`); // CLI surface
+      console.log(`Docs w/ placeholders: ${result.docs_with_placeholders}`); // CLI surface
+      console.log(`Placeholders found:   ${result.total_placeholders_found}`); // CLI surface
+      console.log(`Resolved:             ${result.resolved_total}`); // CLI surface
+      console.log(`Unknown warnings:     ${result.unknown_warnings}`); // CLI surface
+      console.log(`Resolution errors:    ${result.resolution_errors}`); // CLI surface
+      console.log(`Duration:             ${result.duration_ms}ms`); // CLI surface
+
+      if (result.details.unknown_components.length > 0) {
+        console.log("\nUnknown components (up to 10):"); // CLI surface
+        for (const u of result.details.unknown_components) {
+          console.log(`  doc=${u.doc_id} <${u.component} />`); // CLI surface
+        }
+      }
+
+      if (result.details.resolution_error_docs.length > 0) {
+        console.log("\nResolution errors (up to 10):"); // CLI surface
+        for (const e of result.details.resolution_error_docs) {
+          console.log(`  doc=${e.doc_id} [${e.error_code}] ${e.message}`); // CLI surface
+        }
+      }
+
+      console.log(`\nResult: ${result.passed ? "PASSED" : "FAILED"}`); // CLI surface
+      process.exit(result.passed ? 0 : 1);
+    } finally {
+      app.close();
+    }
+  },
+});
+
 // ─── eval parent command ──────────────────────────────────────────────────────
 
 /**
  * Top-level eval command — routes to scenario subcommands.
- * Scenarios: migration (§3.1), tree (§3.2), links (§3.3), types (§3.4).
+ * Scenarios: migration (§3.1), tree (§3.2), links (§3.3), types (§3.4), fts (§3.5), placeholders (§3.6).
  * Source: SPEC-013 §3
  */
 export default defineCommand({
@@ -289,5 +401,7 @@ export default defineCommand({
     tree: treeCommand,
     links: linksCommand,
     types: typesCommand,
+    fts: ftsCommand,
+    placeholders: placeholdersCommand,
   },
 });

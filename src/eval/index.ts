@@ -6,6 +6,8 @@
  *   - runTreeConsistency — tree-consistency scenario (SPEC-013 §3.2)
  *   - runLinkIntegrity — link-integrity scenario (SPEC-013 §3.3)
  *   - runTypeDistribution — type-distribution scenario (SPEC-013 §3.4)
+ *   - runFtsRecall — fts-recall scenario (SPEC-013 §3.5)
+ *   - runPlaceholderParse — placeholder-parse scenario (SPEC-013 §3.6)
  *   - Result schemas and types for each scenario
  *
  * Invariants:
@@ -42,3 +44,20 @@ export {
   type TypeDistributionInput,
   type TypeThreshold,
 } from "./scenarios/type-distribution.js";
+
+export {
+  runFtsRecall,
+  FtsRecallResultSchema,
+  FtsRecallInputSchema,
+  DEFAULT_FTS_QUERIES,
+  DEFAULT_RECALL_THRESHOLD,
+  DEFAULT_TOP_K,
+  type FtsRecallResult,
+  type FtsRecallInput,
+} from "./scenarios/fts-recall.js";
+
+export {
+  runPlaceholderParse,
+  PlaceholderParseResultSchema,
+  type PlaceholderParseResult,
+} from "./scenarios/placeholder-parse.js";
