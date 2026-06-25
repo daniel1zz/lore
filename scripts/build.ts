@@ -17,6 +17,7 @@
 
 import { join } from "path";
 import { existsSync } from "fs";
+import type { BunPlugin, PluginBuilder, OnLoadArgs } from "bun";
 
 const root = join(import.meta.dir, "..");
 const entrypoint = join(root, "src", "index.ts");
@@ -81,8 +82,8 @@ function makeLibsqlPlugin(nativeNodePath: string): BunPlugin {
 
   return {
     name: "libsql-static-native-require",
-    setup(build) {
-      build.onLoad({ filter: /[/\\]libsql[/\\]index\.js$/ }, async (args) => {
+    setup(build: PluginBuilder) {
+      build.onLoad({ filter: /[/\\]libsql[/\\]index\.js$/ }, async (args: OnLoadArgs) => {
         const source = await Bun.file(args.path).text();
 
         // The exact line produced by @neon-rs/load's requireNative() fallback.

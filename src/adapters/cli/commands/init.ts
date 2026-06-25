@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { createApp } from "../../../app.js";
 import { saveConfig } from "../../../core/config.js";
+import { formatError } from "../utils.js";
 
 export default defineCommand({
   meta: {
@@ -56,7 +57,7 @@ export default defineCommand({
     // Write config.yaml via SSOT saveConfig (no hand-assembled yaml)
     const saveResult = saveConfig(cwd, { project: { name: projectName, author: args.author } });
     if (!saveResult.ok) {
-      const msg = `Failed to write config: ${saveResult.error.message}`;
+      const msg = `Failed to write config: ${formatError(saveResult.error)}`;
       if (args.json) {
         console.log(JSON.stringify({ ok: false, error: msg }));
       } else {

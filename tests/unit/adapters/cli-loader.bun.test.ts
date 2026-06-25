@@ -252,7 +252,6 @@ describe("loadLoreApp — REGRESSION (all telemetry-instrumented corpus operatio
       const createPrd = await app.corpusService.create({
         type: "prd",
         title: "Test PRD",
-        author: "tester",
       });
       expect(createPrd.ok).toBe(true);
       if (!createPrd.ok) return;
@@ -261,7 +260,6 @@ describe("loadLoreApp — REGRESSION (all telemetry-instrumented corpus operatio
       const createSpec = await app.corpusService.create({
         type: "spec",
         title: "Test Spec",
-        author: "tester",
         parent_id: prd.id,
       });
       expect(createSpec.ok).toBe(true);

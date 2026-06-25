@@ -8,10 +8,8 @@ export {};
 // so we intercept here before calling runMain().
 if (process.argv.includes("--mcp-server")) {
   const { startMcpServer } = await import("./adapters/mcp/index.js");
-  const { createApp } = await import("./app.js");
-  const { findLoreDb } = await import("./adapters/cli/utils.js");
-  const dbPath = findLoreDb();
-  const app = createApp(dbPath);
+  const { loadLoreApp } = await import("./adapters/cli/loader.js");
+  const { app } = loadLoreApp();
   await startMcpServer(app);
 } else {
   const { runMain } = await import("citty");

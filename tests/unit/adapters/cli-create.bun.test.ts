@@ -59,7 +59,7 @@ function captureOutput() {
 
 function captureExit() {
   let capturedCode: number | undefined;
-  const spy = vi.spyOn(process, "exit").mockImplementation((code?: number | string) => {
+  const spy = vi.spyOn(process, "exit").mockImplementation((code?: string | number | null | undefined): never => {
     capturedCode = typeof code === "number" ? code : 0;
     throw new Error(`process.exit(${code})`);
   });

@@ -162,7 +162,7 @@ beforeAll(async () => {
     action: "create",
     created_at: doc1.created_at,
     created_by: doc1.created_by,
-    change_summary: undefined,
+    // change_summary omitted (exactOptionalPropertyTypes — undefined not allowed for optional string)
   };
   const verResult = await localStore.insertVersion(version);
   if (!verResult.ok) throw new Error("Fixture: failed to insert version");

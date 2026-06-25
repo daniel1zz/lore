@@ -147,7 +147,7 @@ function captureOutput() {
   };
 }
 
-function captureExit(): { exitCode: number | undefined; spy: ReturnType<typeof vi.spyOn> } {
+function captureExit() {
   const captured: { exitCode: number | undefined } = { exitCode: undefined };
   const spy = vi.spyOn(process, "exit").mockImplementation(
     (code?: string | number | null | undefined): never => {
@@ -155,7 +155,7 @@ function captureExit(): { exitCode: number | undefined; spy: ReturnType<typeof v
       throw new Error(`process.exit(${code}) called`);
     },
   );
-  return { ...captured, spy, get exitCode() { return captured.exitCode; } };
+  return { spy, get exitCode() { return captured.exitCode; } };
 }
 
 // ─── Setup: create a .lore/lore.db stub (SQLite not needed for config-only ops)
