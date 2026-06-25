@@ -649,29 +649,73 @@ Example key AKIAIOSFODNN7EXAMPLE was changed to [REDACTED].
     });
 
     describe("idempotency — re-run skips existing docs", () => {
-      it("second run on same corpus skips already-imported docs", async () => {
+      it("second run on same corpus reports already_existed instead of skipped", async () => {
         writeFileSync(join(tempDir, "prd.md"), makePrdFile("PRD-001", "My PRD"));
         writeFileSync(join(tempDir, "spec.md"), makeSpecFile("SPEC-001", "Auth Spec", "PRD-001"));
 
-        // First run
+        // First run — fresh import
         const first = await service.execute(tempDir, defaultOpts);
         expect(first.ok).toBe(true);
         if (!first.ok) return;
         expect(first.value.imported).toBe(2);
+        expect(first.value.already_existed).toBe(0);
         expect(first.value.skipped).toBe(0);
 
-        // Second run — same corpus
+        // Second run — same corpus, all docs already in store
         const second = await service.execute(tempDir, defaultOpts);
         expect(second.ok).toBe(true);
         if (!second.ok) return;
         expect(second.value.imported).toBe(0);
-        expect(second.value.skipped).toBe(2);
+        // reason: already_existed tracks idempotent re-imports; see SPEC-013 §K2
+        expect(second.value.already_existed).toBe(2);
+        expect(second.value.skipped).toBe(0);
 
         // Store still has exactly 2 docs
         const findResult = await store.findMany({});
         expect(findResult.ok).toBe(true);
         if (!findResult.ok) return;
         expect(findResult.value).toHaveLength(2);
+      });
+
+      // STATE: (imported + already_existed) === expected on both runs
+      it("sum of imported + already_existed equals expected on both fresh and re-run", async () => {
+        writeFileSync(join(tempDir, "prd.md"), makePrdFile("PRD-001", "My PRD"));
+        writeFileSync(join(tempDir, "spec.md"), makeSpecFile("SPEC-001", "Auth Spec", "PRD-001"));
+        writeFileSync(join(tempDir, "knowledge.md"), makeKnowledgeFile("KNOW-001"));
+
+        const first = await service.execute(tempDir, defaultOpts);
+        expect(first.ok).toBe(true);
+        if (!first.ok) return;
+        expect(first.value.imported + first.value.already_existed).toBe(3);
+
+        const second = await service.execute(tempDir, defaultOpts);
+        expect(second.ok).toBe(true);
+        if (!second.ok) return;
+        expect(second.value.imported + second.value.already_existed).toBe(3);
+      });
+
+      // BOUNDARY: partial overlap — some docs already exist, new ones import
+      it("partial overlap: already_existed=N, imported=M for the new docs", async () => {
+        writeFileSync(join(tempDir, "prd.md"), makePrdFile("PRD-001", "My PRD"));
+        writeFileSync(join(tempDir, "spec.md"), makeSpecFile("SPEC-001", "Auth Spec", "PRD-001"));
+
+        // First run — imports 2 docs
+        const first = await service.execute(tempDir, defaultOpts);
+        expect(first.ok).toBe(true);
+        if (!first.ok) return;
+        expect(first.value.imported).toBe(2);
+        expect(first.value.already_existed).toBe(0);
+
+        // Add 1 new doc
+        writeFileSync(join(tempDir, "knowledge.md"), makeKnowledgeFile("KNOW-001"));
+
+        // Second run — existing 2 should be already_existed, new 1 should import
+        const second = await service.execute(tempDir, defaultOpts);
+        expect(second.ok).toBe(true);
+        if (!second.ok) return;
+        expect(second.value.imported).toBe(1);
+        expect(second.value.already_existed).toBe(2);
+        expect(second.value.imported + second.value.already_existed).toBe(3);
       });
     });
 

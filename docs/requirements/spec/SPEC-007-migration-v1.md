@@ -98,6 +98,14 @@ interface MigrationReport {
 
 interface MigrationResult {
   imported: number
+  /**
+   * Docs that were already present in the store (idempotent re-run).
+   * These are NOT failures — they mean the migration ran before.
+   * Eval criterion: (imported + already_existed) === expected_files.
+   * Added in K2 fix — see SPEC-013 §migration-coverage for eval usage.
+   */
+  already_existed: number
+  /** Always 0 — parse failures go to `errors`. Kept for forward-compat. */
   skipped: number
   errors: FileError[]
   link_resolution: { created: number, broken: number }
@@ -171,5 +179,5 @@ lore migrate v1 --from ~/.claude/docman-mcp/docs/
 | v1 doc has unknown type "custom-note" | Migration | Imported as `knowledge` type with warning in report |
 | v1 doc contains `AKIA...` pattern | Secret scan | Warning displayed. Migration blocked until `--force` or file fixed |
 | v1 link references non-existent ID | Link resolution | Link skipped. Logged as broken in MigrationResult |
-| Already migrated (docs exist) | `lore migrate v1 --from <path>` again | Skips existing docs (by original v1 ID). Reports: "N docs already exist, skipped" |
+| Already migrated (docs exist) | `lore migrate v1 --from <path>` again | Skips existing docs (by original v1 ID). Reports: `Already existed: N` in CLI output. `already_existed` field in `MigrationResult`. |
 | v1 doc has `links: [ID-A, ID-B]` | Link resolution | Creates `relates-to` links from this doc to A and B. If A is a PRD and this doc is a spec, also infers `parent` link |
