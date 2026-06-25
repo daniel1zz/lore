@@ -1015,7 +1015,7 @@ describe("SQLiteStore.search — FTS5 special-token escape (SPEC-013 §3.5)", ()
     const docB = makeDoc({
       slug: "spec-fts-h-b",
       title: "Storage Notes",
-      content: "We should not append. Only log deltas.",
+      content: "We should not append data. Only log relevant deltas.",
       type: "spec",
       role: "spec",
     });

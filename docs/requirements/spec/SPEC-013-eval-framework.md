@@ -269,7 +269,7 @@ interface FtsRecallResult {
 - Empty queries → `total_queries=0`, `avg_recall=0`, `passed=false` (0 < 0.8)
 - All expected_slugs missing from corpus → `per_query[i].degenerate=true`, `recall=0`
 - Search returns err for one query → `per_query[i].failed=true`, `passed=false`
-- FTS5-special tokens in a query string (e.g. `append-only` with the hyphen) cause the store to surface a syntax error — captured via `failed=true`, not thrown
+- FTS5-special tokens (`-`, `*`, `?`, parens, colons) are safe in query strings — `SQLiteStore.search` / `TursoStore.search` escape arbitrary input via the `escapeFtsQuery` helper in `store-shared.ts` (each whitespace-separated piece is wrapped in FTS5 phrase quotes, with embedded `"` doubled). Phrase semantics: each piece must appear as a consecutive token sequence after FTS5 tokenization, and all pieces must appear (implicit AND). Hyphenated terms like `append-only` therefore match the consecutive token pair `[append, only]` in any source doc (FTS5's unicode61 tokenizer strips the hyphen during indexing)
 
 ---
 

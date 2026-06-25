@@ -36,16 +36,6 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-// ─── Import under test ────────────────────────────────────────────────────────
-// escapeFtsQuery is added by the implementer's branch to src/store/store-shared.ts.
-// The @ts-expect-error below suppresses the "not exported" compile error that
-// exists in THIS worktree only (the function is absent from main until both
-// branches merge).  Post-merge, the @ts-expect-error becomes stale (TS will warn)
-// and should be removed.  The tests themselves are correct and will pass once the
-// production implementation lands.
-//
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-expect-error — escapeFtsQuery not yet in store-shared.ts (added by implementer branch)
 import { escapeFtsQuery } from "@store/store-shared";
 
 // ─── Happy Path ───────────────────────────────────────────────────────────────
