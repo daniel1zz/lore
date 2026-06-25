@@ -2,8 +2,11 @@
  * Eval module — public re-exports for all eval scenarios.
  *
  * Public surface:
- *   - runMigrationCoverage — migration coverage scenario
- *   - MigrationCoverageResult / MigrationCoverageResultSchema — result types
+ *   - runMigrationCoverage — migration coverage scenario (SPEC-013 §3.1)
+ *   - runTreeConsistency — tree-consistency scenario (SPEC-013 §3.2)
+ *   - runLinkIntegrity — link-integrity scenario (SPEC-013 §3.3)
+ *   - runTypeDistribution — type-distribution scenario (SPEC-013 §3.4)
+ *   - Result schemas and types for each scenario
  *
  * Invariants:
  *   - Scenarios never throw; all errors are embedded in the result type
@@ -18,3 +21,24 @@ export {
   MigrationCoverageResultSchema,
   type MigrationCoverageResult,
 } from "./scenarios/migration-coverage.js";
+
+export {
+  runTreeConsistency,
+  TreeConsistencyResultSchema,
+  type TreeConsistencyResult,
+} from "./scenarios/tree-consistency.js";
+
+export {
+  runLinkIntegrity,
+  LinkIntegrityResultSchema,
+  type LinkIntegrityResult,
+} from "./scenarios/link-integrity.js";
+
+export {
+  runTypeDistribution,
+  TypeDistributionResultSchema,
+  DEFAULT_THRESHOLDS,
+  type TypeDistributionResult,
+  type TypeDistributionInput,
+  type TypeThreshold,
+} from "./scenarios/type-distribution.js";

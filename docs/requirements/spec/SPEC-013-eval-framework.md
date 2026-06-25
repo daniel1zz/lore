@@ -7,7 +7,7 @@ status: active
 priority: medium
 phase: P1
 created: 2026-06-24
-updated: 2026-06-24
+updated: 2026-06-25
 tags: [eval, observability, phase-1]
 parent: PRD-001
 links:
@@ -24,7 +24,7 @@ links:
 
 Define a lightweight, extensible eval framework for validating corpus operations. Evals are executable scenarios that produce a structured pass/fail result. They complement unit tests by operating end-to-end against real data (e.g., the actual `docs/requirements/` directory).
 
-MVP delivers one scenario (`migration-coverage`) and the CLI surface to run it.
+MVP delivers four scenarios (`migration-coverage`, `tree-consistency`, `link-integrity`, `type-distribution`) and the CLI surface to run them.
 
 ---
 
@@ -55,7 +55,7 @@ Invariants for all scenarios:
 
 ---
 
-## 3. Implemented Scenarios (MVP)
+## 3. Implemented Scenarios
 
 ### 3.1 migration-coverage
 
@@ -96,10 +96,146 @@ interface MigrationCoverageResult {
 
 ---
 
+### 3.2 tree-consistency
+
+**File**: `src/eval/scenarios/tree-consistency.ts`  
+**CLI**: `lore eval tree`
+
+Validates the corpus parent-tree against three structural invariants:
+1. No orphan docs — every non-root doc must have a `parent_id` pointing to an existing, non-deleted document.
+2. No cycles — no parent chain may contain a cycle.
+3. No invalid parent types — every child's parent must satisfy `PARENT_TYPE_CONTRACT` from `src/core/doc-type-rules.ts`.
+
+Implementation delegates to `app.treeCheckService.checkTree()` with a permissive minimal blueprint (no required children), then maps drift kinds: `"orphan"` → orphans, `"cycle"` → cycles, `"misplaced"` → invalid_parent_types.
+
+**Pass condition**:
+```
+orphans === 0 && cycles === 0 && invalid_parent_types === 0
+```
+
+**Result shape**:
+```typescript
+interface TreeConsistencyResult {
+  total_docs: number;
+  orphans: number;               // docs with missing/invalid parent
+  cycles: number;                // distinct parent-chain cycles detected
+  invalid_parent_types: number;  // PARENT_TYPE_CONTRACT violations
+  duration_ms: number;
+  passed: boolean;
+  details: {
+    orphan_ids: string[];        // up to 10 sampled IDs
+    cycle_paths: string[][];     // up to 10 sampled cycle paths
+    invalid_pairs: Array<{
+      child_id: string;
+      parent_id: string;
+      child_type: string;
+      parent_type: string;
+    }>;
+  };
+}
+```
+
+**Edge cases**:
+- Empty corpus → `passed=true` (degenerate)
+- Store failure → `passed=false`, all counts 0
+
+---
+
+### 3.3 link-integrity
+
+**File**: `src/eval/scenarios/link-integrity.ts`  
+**CLI**: `lore eval links`
+
+Validates that all non-parent links in the corpus point to valid, live documents.
+
+**Note on detection scope**: The implementation uses `corpusService.get(id)` per doc, which surfaces links visible at the service layer. Links to soft-deleted docs are detected (the store returns soft-deleted records). Truly dangling links (pointing to hard-missing doc IDs) are silently dropped by the service layer; detecting them would require raw store access (no new store methods were added per SPEC-013 constraints).
+
+**Pass condition**:
+```
+dangling === 0 && to_deleted === 0 && self_loops === 0
+```
+
+**Result shape**:
+```typescript
+interface LinkIntegrityResult {
+  total_links: number;    // unique non-parent link edges observed
+  dangling: number;       // links to hard-missing docs (service-layer detectable only)
+  to_deleted: number;     // links to soft-deleted docs
+  self_loops: number;     // links where from_id === to_id
+  duration_ms: number;
+  passed: boolean;
+  details: {
+    dangling_links: Array<{from_id: string; to_id: string; type: string}>;     // top-10
+    deleted_target_links: Array<{from_id: string; to_id: string; type: string}>; // top-10
+    self_loop_links: Array<{from_id: string; type: string}>;                    // top-10
+  };
+}
+```
+
+**Edge cases**:
+- Empty corpus or no links → `passed=true`, `total_links=0`
+- Store failure → `passed=false`
+
+---
+
+### 3.4 type-distribution
+
+**File**: `src/eval/scenarios/type-distribution.ts`  
+**CLI**: `lore eval types`
+
+Checks that each `DocType`'s count in the live corpus falls within configurable min/max thresholds. Used to assert "is every type represented at a reasonable level?"
+
+Unknown types in custom thresholds are reported as a violation with `reason="unknown_type"` (fail loud — not silently skipped).
+
+**Default thresholds** (used when no custom input is provided):
+```typescript
+const DEFAULT_THRESHOLDS = [
+  { type: "prd",       min: 1 },  // at least one PRD required
+  { type: "spec",      min: 1 },  // at least one spec required
+  { type: "adr",       min: 0 },  // ADRs optional
+  { type: "plan",      min: 0 },
+  { type: "knowledge", min: 0 },
+  { type: "task",      min: 0 },
+];
+```
+
+**Pass condition**:
+```
+violations.length === 0
+```
+
+**Result shape**:
+```typescript
+interface TypeDistributionResult {
+  distribution: Record<string, number>;  // actual count per live type
+  violations: Array<{
+    type: string;
+    actual: number;
+    min?: number;
+    max?: number;
+    reason: "below_min" | "above_max" | "unknown_type";
+  }>;
+  duration_ms: number;
+  passed: boolean;
+}
+```
+
+**CLI note**: `--config <yaml>` for custom thresholds is deferred to a future iteration. The scenario function accepts `TypeDistributionInput` for programmatic/SDK use.
+
+**Edge cases**:
+- Empty corpus + default thresholds → `passed=false` (prd min=1 violated)
+- Unknown type in custom thresholds → `passed=false`, `reason="unknown_type"` (not silent skip)
+- Store failure → `passed=false`
+
+---
+
 ## 4. CLI Surface
 
 ```
 lore eval migration --from <dir> [--json]
+lore eval tree [--json]
+lore eval links [--json]
+lore eval types [--json]
 ```
 
 Exit codes follow SPEC-003 §5 conventions:
@@ -107,7 +243,7 @@ Exit codes follow SPEC-003 §5 conventions:
 - `1` — scenario failed or internal error
 - `2` — bad arguments
 
-The eval command is registered as `lore eval` with `migration` as a subcommand, making it extensible for future scenarios.
+The `--json` flag outputs the full result as `{ ok: boolean, data: ScenarioResult }`.
 
 ---
 
@@ -115,39 +251,53 @@ The eval command is registered as `lore eval` with `migration` as a subcommand, 
 
 ```
 src/eval/
-  index.ts                         ← public re-exports
+  index.ts                         ← public re-exports (all 4 scenarios)
   scenarios/
     migration-coverage.ts          ← migration scenario impl
+    tree-consistency.ts            ← tree-consistency scenario impl
+    link-integrity.ts              ← link-integrity scenario impl
+    type-distribution.ts           ← type-distribution scenario impl
 src/adapters/cli/commands/
-  eval.ts                          ← CLI command (eval parent + migration subcommand)
+  eval.ts                          ← CLI command (eval parent + 4 subcommands)
+tests/unit/eval/
+  migration-coverage.test.ts
+  tree-consistency.test.ts
+  link-integrity.test.ts
+  type-distribution.test.ts
 ```
 
 ---
 
 ## 6. CI Integration
 
-The eval scenario is designed for CI dogfood. The canonical invocation against the lore repo itself:
+Canonical CI dogfood invocation against the lore repo itself:
 
 ```bash
+# migration scenario (existing)
 lore eval migration --from docs/requirements --skip-secret-scan
 # expect: exit 0, (imported + already_existed)=14, links_broken=0, passed=true
-# fresh corpus:  imported=14, already_existed=0
-# re-run:        imported=0,  already_existed=14  (still passed=true)
-```
 
-This is verified as part of AC-C5 (end-to-end smoke test).
+# tree-consistency (new)
+lore eval tree
+# expect: exit 0, orphans=0, cycles=0, invalid_parent_types=0
+
+# link-integrity (new)
+lore eval links
+# expect: exit 0, dangling=0, to_deleted=0, self_loops=0
+
+# type-distribution (new)
+lore eval types
+# expect: exit 0 (prd>=1, spec>=1 satisfied by the 14-doc corpus)
+```
 
 ---
 
-## 7. Future Scenarios (not in MVP)
+## 7. Future Scenarios (not in current implementation)
 
 | Scenario | Description | Pass Condition |
 |----------|-------------|----------------|
 | `fts-recall` | FTS search recall rate against known query/expected pairs | recall >= 0.8 |
 | `placeholder-parse` | MDX placeholder resolution success rate | all known placeholders resolve |
-| `tree-consistency` | Verify no orphan docs or broken parent links | 0 broken links |
-| `link-integrity` | All doc links point to existing non-deleted docs | 0 dangling links |
-| `type-distribution` | Corpus has expected type distribution | configurable thresholds |
 
 Each future scenario follows the same pattern: async function + structured result + `passed: boolean` + CLI subcommand.
 
@@ -165,9 +315,11 @@ Future: eval runs could be correlated with telemetry events by session ID to mea
 
 ## 9. Test Coverage Requirements
 
-See `tests/unit/eval/migration-coverage.test.ts` for coverage:
-- HAPPY: runs on `docs/requirements`, imported=14, already_existed=0, passed=true
-- NEGATIVE: empty dir → passed=true (degenerate valid case)
-- ERROR: non-existent dir → passed=false (no throw)
-- STATE: re-running with same inputs produces deterministic results
-- STATE (K2): second run on same store → imported=0, already_existed=N, passed=true
+| Test File | Dimensions |
+|-----------|-----------|
+| `tests/unit/eval/migration-coverage.test.ts` | HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE |
+| `tests/unit/eval/tree-consistency.test.ts` | HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE / REGRESSION |
+| `tests/unit/eval/link-integrity.test.ts` | HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE / REGRESSION |
+| `tests/unit/eval/type-distribution.test.ts` | HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE / REGRESSION |
+
+All tests use `InMemoryStore` (no SQLite, no file I/O) and run under vitest.
