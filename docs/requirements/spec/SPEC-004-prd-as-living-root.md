@@ -165,9 +165,9 @@ Each component renders differently per surface:
 
 | Given | When | Then |
 |---|---|---|
-| PRD-001 contains `<ChildrenOf role="spec" />` and 3 child specs exist | `lore get PRD-001` | CLI output includes indented tree of 3 specs with type badges and status |
+| PRD-001 contains `&lt;ChildrenOf role="spec" /&gt;` and 3 child specs exist | `lore get PRD-001` | CLI output includes indented tree of 3 specs with type badges and status |
 | Same PRD | `lore get PRD-001 --raw` | MDX component shown as-is, not resolved |
 | Same PRD | `lore get PRD-001 --json` | JSON includes `resolvedComponents` array with structured children data |
-| PRD contains `<Embed id="NONEXISTENT" />` | Resolution | Component renders as `[Embed: NONEXISTENT not found]` — graceful degradation, not crash |
-| PRD contains `<ScriptInjection />` (not in whitelist) | Resolution | Component stripped from output. Warning in stderr |
+| PRD contains `&lt;Embed id="NONEXISTENT" /&gt;` | Resolution | Component renders as `[Embed: NONEXISTENT not found]` — graceful degradation, not crash |
+| PRD contains `&lt;ScriptInjection /&gt;` (not in whitelist) | Resolution | Component stripped from output. Warning in stderr |
 | 500-doc corpus | Resolve PRD with all 7 component types | Total resolution < 50ms |

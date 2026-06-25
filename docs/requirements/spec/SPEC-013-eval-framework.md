@@ -24,7 +24,7 @@ links:
 
 Define a lightweight, extensible eval framework for validating corpus operations. Evals are executable scenarios that produce a structured pass/fail result. They complement unit tests by operating end-to-end against real data (e.g., the actual `docs/requirements/` directory).
 
-MVP delivers four scenarios (`migration-coverage`, `tree-consistency`, `link-integrity`, `type-distribution`) and the CLI surface to run them.
+MVP delivers six scenarios (`migration-coverage`, `tree-consistency`, `link-integrity`, `type-distribution`, `fts-recall`, `placeholder-parse`) and the CLI surface to run them.
 
 ---
 
@@ -229,6 +229,90 @@ interface TypeDistributionResult {
 
 ---
 
+### 3.5 fts-recall
+
+**File**: `src/eval/scenarios/fts-recall.ts`
+**CLI**: `lore eval fts`
+
+Measures recall@K of `corpusService.search()` against a curated query/expected-slug fixture. Each query carries a `query` string, an `expected_slugs` list, and an optional `top_k` (default 5). Recall per query = `|retrieved_top_k ∩ resolved_expected_ids| / resolved_expected_count`. `avg_recall` is the arithmetic mean over all queries.
+
+The fixture lives inline as `DEFAULT_FTS_QUERIES` and is calibrated against the lore self-corpus (`docs/requirements/`). Custom fixtures and thresholds are accepted via the `FtsRecallInput` programmatic surface; a `--queries <path>` CLI flag is deferred (mirrors `--config` on `types`).
+
+**Pass condition**:
+```
+avg_recall >= pass_threshold && every per_query.failed === false
+```
+Default `pass_threshold = 0.8`. A single search returning a store error trips `passed=false` even if other queries hit 1.0.
+
+**Result shape**:
+```typescript
+interface FtsRecallResult {
+  total_queries: number;
+  avg_recall: number;            // 0..1
+  pass_threshold: number;        // default 0.8
+  per_query: Array<{
+    query: string;
+    expected_slugs: string[];
+    resolved_expected_count: number;  // slugs that exist in the corpus
+    retrieved_top_k: number;          // top_k applied for this query
+    hits: number;                     // |retrieved ∩ resolved_expected|
+    recall: number;                   // 0..1
+    failed: boolean;                  // search returned err
+    degenerate: boolean;              // resolved_expected_count === 0
+  }>;
+  duration_ms: number;
+  passed: boolean;
+}
+```
+
+**Edge cases**:
+- Empty queries → `total_queries=0`, `avg_recall=0`, `passed=false` (0 < 0.8)
+- All expected_slugs missing from corpus → `per_query[i].degenerate=true`, `recall=0`
+- Search returns err for one query → `per_query[i].failed=true`, `passed=false`
+- FTS5-special tokens in a query string (e.g. `append-only` with the hyphen) cause the store to surface a syntax error — captured via `failed=true`, not thrown
+
+---
+
+### 3.6 placeholder-parse
+
+**File**: `src/eval/scenarios/placeholder-parse.ts`
+**CLI**: `lore eval placeholders`
+
+Scans every live doc for self-closing MDX placeholder tags (regex `/<([A-Z][A-Za-z0-9]*)(\s[^>]*)?\s*\/>/g`) and feeds each match-containing doc through `outlineService.resolve()`. Aggregates how many components resolve as whitelisted vs. how many produce "unknown component stripped" warnings vs. how many docs return a store/resolve error.
+
+**Pass condition**:
+```
+unknown_warnings === 0 && resolution_errors === 0
+```
+Read: every detected placeholder is in the OutlineService whitelist AND resolved without storage failure. "Resolved" includes graceful-degradation cases (e.g. `<Embed id="MISSING" />` returns `null` data without raising a warning).
+
+**Result shape**:
+```typescript
+interface PlaceholderParseResult {
+  total_docs_scanned: number;
+  docs_with_placeholders: number;
+  total_placeholders_found: number;    // raw regex hit count
+  resolved_total: number;              // sum of whitelisted resolvedComponents
+  unknown_warnings: number;            // sum of "unknown component stripped" warnings
+  resolution_errors: number;           // docs whose resolve() returned err
+  duration_ms: number;
+  passed: boolean;
+  details: {
+    unknown_components: Array<{ doc_id: string; component: string }>;     // top-10
+    resolution_error_docs: Array<{ doc_id: string; error_code: string; message: string }>;  // top-10
+  };
+}
+```
+
+**Edge cases**:
+- Empty corpus → `passed=true` (vacuously — no docs, no placeholders)
+- Soft-deleted docs are excluded (list() filter)
+- `corpusService.get(id)` failure on a single doc → that doc is skipped (not counted as `resolution_errors`)
+- `corpusService.list()` failure → `passed=false`, all counts 0
+- Authoring caveat: MDX-shaped tokens used **illustratively** inside markdown table cells will still be detected by the regex. Authors should escape such illustrations using HTML entities (`&lt;Foo /&gt;`) so they don't get evaluated as live placeholders. The fenced ` ```mdx ` example block in SPEC-004 §2 is intentional and continues to resolve cleanly because its tags are whitelisted.
+
+---
+
 ## 4. CLI Surface
 
 ```
@@ -236,6 +320,8 @@ lore eval migration --from <dir> [--json]
 lore eval tree [--json]
 lore eval links [--json]
 lore eval types [--json]
+lore eval fts [--json]
+lore eval placeholders [--json]
 ```
 
 Exit codes follow SPEC-003 §5 conventions:
@@ -251,19 +337,23 @@ The `--json` flag outputs the full result as `{ ok: boolean, data: ScenarioResul
 
 ```
 src/eval/
-  index.ts                         ← public re-exports (all 4 scenarios)
+  index.ts                         ← public re-exports (all 6 scenarios)
   scenarios/
     migration-coverage.ts          ← migration scenario impl
     tree-consistency.ts            ← tree-consistency scenario impl
     link-integrity.ts              ← link-integrity scenario impl
     type-distribution.ts           ← type-distribution scenario impl
+    fts-recall.ts                  ← fts-recall scenario impl + DEFAULT_FTS_QUERIES
+    placeholder-parse.ts           ← placeholder-parse scenario impl
 src/adapters/cli/commands/
-  eval.ts                          ← CLI command (eval parent + 4 subcommands)
+  eval.ts                          ← CLI command (eval parent + 6 subcommands)
 tests/unit/eval/
   migration-coverage.test.ts
   tree-consistency.test.ts
   link-integrity.test.ts
   type-distribution.test.ts
+  fts-recall.test.ts
+  placeholder-parse.test.ts
 ```
 
 ---
@@ -288,18 +378,21 @@ lore eval links
 # type-distribution (new)
 lore eval types
 # expect: exit 0 (prd>=1, spec>=1 satisfied by the 14-doc corpus)
+
+# fts-recall (new)
+lore eval fts
+# expect: exit 0, avg_recall >= 0.8 against DEFAULT_FTS_QUERIES (7 calibrated query/slug pairs)
+
+# placeholder-parse (new)
+lore eval placeholders
+# expect: exit 0, unknown_warnings=0, resolution_errors=0
 ```
 
 ---
 
-## 7. Future Scenarios (not in current implementation)
+## 7. Future Scenarios
 
-| Scenario | Description | Pass Condition |
-|----------|-------------|----------------|
-| `fts-recall` | FTS search recall rate against known query/expected pairs | recall >= 0.8 |
-| `placeholder-parse` | MDX placeholder resolution success rate | all known placeholders resolve |
-
-Each future scenario follows the same pattern: async function + structured result + `passed: boolean` + CLI subcommand.
+The §7 backlog is empty as of 2026-06-25 — both `fts-recall` and `placeholder-parse` have been promoted to §3.5 and §3.6. New scenarios proposed after this point should be added to this section before implementation and follow the established pattern: async function + Zod-validated result + `passed: boolean` + CLI subcommand + six-dimension test coverage.
 
 ---
 
@@ -321,5 +414,7 @@ Future: eval runs could be correlated with telemetry events by session ID to mea
 | `tests/unit/eval/tree-consistency.test.ts` | HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE / REGRESSION |
 | `tests/unit/eval/link-integrity.test.ts` | HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE / REGRESSION |
 | `tests/unit/eval/type-distribution.test.ts` | HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE / REGRESSION |
+| `tests/unit/eval/fts-recall.test.ts` | HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE / REGRESSION |
+| `tests/unit/eval/placeholder-parse.test.ts` | HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE / REGRESSION |
 
 All tests use `InMemoryStore` (no SQLite, no file I/O) and run under vitest.
