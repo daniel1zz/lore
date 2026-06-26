@@ -5,11 +5,16 @@
  *   adr       → --decision-status (proposed|accepted|deprecated|superseded)
  *   knowledge → --sub-type (ideation|retro|research|reference)
  *   task      → --parent <plan-slug-or-id> AND --plan-id <plan-slug-or-id>
+ *
+ * Editor flow (SPEC-003 §3.1):
+ *   When --content is omitted, opens defaults.editor / $EDITOR / vi for the doc body.
+ *   --content "" is accepted as explicit empty body (bypasses editor).
  */
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
+import { openEditor } from "../editor.js";
 import type { DocType, Priority } from "../../../core/types.js";
 
 const VALID_TYPES: DocType[] = ["prd", "spec", "adr", "plan", "knowledge", "task"];
@@ -155,7 +160,7 @@ export default defineCommand({
       process.exit(2);
     }
 
-    const { app } = loadLoreApp();
+    const { app, defaults } = loadLoreApp();
     try {
       const tags = args.tags
         ? args.tags
@@ -163,6 +168,19 @@ export default defineCommand({
             .map((t: string) => t.trim())
             .filter(Boolean)
         : [];
+
+      // Editor flow (AC-CR-1/2): open editor when --content flag was not provided at all.
+      // args.content === undefined means the flag was absent (citty does not set it).
+      // args.content === "" means --content "" was passed explicitly → accepted as empty body.
+      let resolvedContent: string | undefined = args.content;
+      if (resolvedContent === undefined) {
+        const editorResult = await openEditor({ defaults });
+        if (!editorResult.ok) {
+          process.stderr.write(formatError(editorResult.error) + "\n");
+          process.exit(exitCode(editorResult.error));
+        }
+        resolvedContent = editorResult.value;
+      }
 
       // Resolve --plan-id slug or ULID → canonical ULID before building extra
       let resolvedPlanId: string | undefined;
@@ -187,7 +205,7 @@ export default defineCommand({
         type: docType,
         title: args.title,
         ...(args.parent !== undefined ? { parent_id: args.parent } : {}),
-        ...(args.content !== undefined ? { content: args.content } : {}),
+        content: resolvedContent,
         priority: (args.priority as Priority) ?? "medium",
         ...(tags.length > 0 ? { tags } : {}),
         ...(extra !== undefined ? { extra } : {}),

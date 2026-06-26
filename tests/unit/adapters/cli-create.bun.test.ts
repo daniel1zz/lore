@@ -106,15 +106,36 @@ async function importGetCommand(): Promise<RunnableCommand> {
 
 let tmpDir: string;
 let originalCwd: string;
+let savedEditor: string | undefined;
 
 beforeEach(() => {
   tmpDir = mkdtempSync(join(tmpdir(), "lore-cli-create-test-"));
   originalCwd = process.cwd();
   process.chdir(tmpDir);
+
+  // reason: lore create now opens $EDITOR when --content is absent (SPEC-003 §3.1).
+  // These tests focus on type-specific flags, not content — provide a minimal fake editor
+  // that writes placeholder content so the tests do not block waiting for a real editor.
+  const editorScript = join(tmpDir, "test-editor.sh");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { writeFileSync } = require("fs") as { writeFileSync: (p: string, d: string, opts: object) => void };
+  writeFileSync(
+    editorScript,
+    "#!/bin/sh\nprintf 'test content placeholder' > \"$1\"\n",
+    { mode: 0o755 },
+  );
+  savedEditor = process.env["EDITOR"];
+  process.env["EDITOR"] = editorScript;
 });
 
 afterEach(() => {
   process.chdir(originalCwd);
+  // Restore EDITOR env var
+  if (savedEditor !== undefined) {
+    process.env["EDITOR"] = savedEditor;
+  } else {
+    delete process.env["EDITOR"];
+  }
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { rmSync } = require("fs") as { rmSync: (p: string, opts: object) => void };
