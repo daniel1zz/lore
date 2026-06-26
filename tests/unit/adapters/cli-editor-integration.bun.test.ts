@@ -106,6 +106,9 @@ beforeEach(() => {
   process.chdir(tmpDir);
   // Save and clear EDITOR so loadLoreApp → openEditor can be controlled per-test
   savedEditor = process.env["EDITOR"];
+  // Force interactive TTY — bun test runs with stdin redirected (isTTY=undefined),
+  // which would make openEditor early-return and skip the editor-error code paths these tests exercise.
+  Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true, writable: true });
 });
 
 afterEach(() => {

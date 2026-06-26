@@ -61,6 +61,9 @@ let scriptDir: string;
 
 beforeEach(() => {
   scriptDir = mkdtempSync(join(tmpdir(), "lore-editor-test-scripts-"));
+  // Simulate interactive TTY — vitest runs with stdin redirected, so isTTY would be undefined
+  // and openEditor would early-return without invoking the editor. Force TTY for these tests.
+  Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true, writable: true });
 });
 
 afterEach(() => {

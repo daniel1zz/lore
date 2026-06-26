@@ -107,6 +107,10 @@ function resolveEditorCommand(defaults?: LoreDefaults): string {
 export async function openEditor(
   opts: OpenEditorOptions = {},
 ): Promise<Result<string, LoreError>> {
+  // Non-interactive (piped / CI / spawned subprocess) — skip editor, keep caller's initialContent.
+  // Matches git/npm/bun behaviour: editor steps only fire in a TTY. Lets `lore create --title X` work
+  // headless without --content (content stays empty, same as pre-editor behaviour).
+  if (!process.stdin.isTTY) return ok(opts.initialContent ?? "");
   const editorCommand = resolveEditorCommand(opts.defaults);
 
   // reason: split on whitespace to support commands like "code --wait" or "subl -w".
