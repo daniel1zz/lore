@@ -22,7 +22,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdirSync, rmSync, existsSync } from "fs";
+import { mkdirSync, rmSync, existsSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -46,13 +46,30 @@ const PROJECT_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, 
 const INDEX_TS = join(PROJECT_ROOT, "src", "index.ts");
 
 /**
+ * Create a module-level fake editor script that writes "test content" to its first arg.
+ * reason: lore create now opens $EDITOR when --content is absent (SPEC-003 §3.1).
+ * E2e tests run as subprocesses (no TTY) so vi would fail. We provide a deterministic
+ * fake editor via EDITOR env var injected in runLore to avoid blocking on a real editor.
+ * The script is created once and reused across all e2e tests.
+ */
+const FAKE_EDITOR_DIR = join(tmpdir(), "lore-e2e-fake-editor");
+mkdirSync(FAKE_EDITOR_DIR, { recursive: true });
+const FAKE_EDITOR_PATH = join(FAKE_EDITOR_DIR, "editor.sh");
+writeFileSync(
+  FAKE_EDITOR_PATH,
+  "#!/bin/sh\nprintf 'test content' > \"$1\"\n",
+  { mode: 0o755 },
+);
+
+/**
  * Run `bun run src/index.ts ...args` in `cwd`.
  * HOME is overridden to `cwd` to isolate global config files.
+ * EDITOR is set to a fake script so lore create's editor flow works in non-interactive mode.
  */
 function runLore(args: string[], cwd: string): RunResult {
   const proc = Bun.spawnSync(["bun", "run", INDEX_TS, ...args], {
     cwd,
-    env: { ...process.env, HOME: cwd },
+    env: { ...process.env, HOME: cwd, EDITOR: FAKE_EDITOR_PATH },
   });
   return {
     stdout: proc.stdout.toString(),
@@ -245,13 +262,17 @@ describe("Scenario 2: full CRUD lifecycle", () => {
     expect(result.stderr).toContain("Invalid type");
   });
 
-  it("NEGATIVE: set with no field flags exits code 2", () => {
+  it("HAPPY: set with --content flag updates the content field", () => {
+    // reason: lore set <id> with no flags now opens $EDITOR (SPEC-003 §3.1 AC-SET-1).
+    // The old "exits code 2 when no flags" behaviour is gone; editor-flow is tested in
+    // unit/adapters/cli-editor-integration.bun.test.ts. This e2e test verifies the
+    // --content flag path still works correctly in the subprocess context.
     const createResult = runLore(["create", "prd", "--title", "Setme", "--json"], tmpDir);
     const slug = parseJson<{ slug: string }>(createResult).data!.slug;
 
-    const result = runLore(["set", slug], tmpDir);
-    expect(result.exitCode).toBe(2);
-    expect(result.stderr).toContain("At least one field");
+    const result = runLore(["set", slug, "--content", "updated body"], tmpDir);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("Updated");
   });
 
   it("BOUNDARY: title with special characters round-trips correctly", () => {

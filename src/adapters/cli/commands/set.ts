@@ -1,10 +1,20 @@
 /**
  * lore set <id> — update specific fields on a document.
+ *
+ * Editor flow (SPEC-003 §3.1, AC-SET-1):
+ *   When no flags are provided, fetches the current doc, opens defaults.editor / $EDITOR / vi
+ *   pre-populated with the current content. If the user saves unchanged content, prints
+ *   "no changes" and exits 0 without bumping the version number.
+ *
+ * Non-editor flow (AC-SET-2):
+ *   When any of --title, --status, --content, --priority, --tags is provided, applies
+ *   those fields directly via corpusService.set() (no editor is opened).
  */
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
+import { openEditor } from "../editor.js";
 import type { DocStatus, Priority } from "../../../core/types.js";
 
 export default defineCommand({
@@ -44,7 +54,7 @@ export default defineCommand({
     },
   },
   async run({ args }) {
-    const { app } = loadLoreApp();
+    const { app, defaults } = loadLoreApp();
     try {
       const patch: Record<string, unknown> = {};
       if (args.title !== undefined) patch["title"] = args.title;
@@ -56,10 +66,37 @@ export default defineCommand({
       }
 
       if (Object.keys(patch).length === 0) {
-        process.stderr.write(
-          "Error: At least one field flag is required (--title, --status, --content, --priority, --tags).\n",
-        );
-        process.exit(2);
+        // No flags provided — open editor pre-populated with current content (AC-SET-1)
+        const resolvedId = await app.corpusService.resolve(args.id);
+        if (!resolvedId.ok) {
+          process.stderr.write(formatError(resolvedId.error) + "\n");
+          process.exit(exitCode(resolvedId.error));
+        }
+        const getResult = await app.corpusService.get(resolvedId.value);
+        if (!getResult.ok) {
+          process.stderr.write(formatError(getResult.error) + "\n");
+          process.exit(exitCode(getResult.error));
+        }
+        const currentDoc = getResult.value.doc;
+
+        const editorResult = await openEditor({
+          initialContent: currentDoc.content,
+          defaults,
+        });
+        if (!editorResult.ok) {
+          process.stderr.write(formatError(editorResult.error) + "\n");
+          process.exit(exitCode(editorResult.error));
+        }
+
+        const newContent = editorResult.value;
+
+        // If the content is unchanged, skip the service call entirely (AC-SET-1)
+        if (newContent === currentDoc.content) {
+          process.stdout.write("no changes\n");
+          return;
+        }
+
+        patch["content"] = newContent;
       }
 
       const result = await app.corpusService.set(args.id, patch);
