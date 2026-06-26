@@ -25,9 +25,9 @@ Define the CLI adapter — the first (Phase 1) transport layer for Lore. The CLI
 ## 2. Design Principles
 
 - **Thin adapter**: `parse args → call service → format output`. Nothing else.
-- **Composable**: Every command outputs structured data that can be piped (`--json` flag for machine-readable output)
-- **Progressive disclosure**: Default output is human-friendly; `--verbose` adds detail; `--json` outputs raw JSON
-- **Consistent error model**: All errors follow same format with exit codes
+- **Composable**: Every command outputs structured data that can be piped (`--json` flag for machine-readable output).
+- **Two output modes**: Default human-friendly text vs `--json` machine-readable. (`--verbose` was considered but dropped — `--json` already provides full detail and the text/JSON split keeps the surface small.)
+- **Consistent error model**: All errors follow same format with exit codes.
 
 ## 3. Command Taxonomy
 
@@ -78,6 +78,19 @@ Define the CLI adapter — the first (Phase 1) transport layer for Lore. The CLI
 | `lore log [<doc-id>]` | `versionService.log()` | Without doc-id: recent audit entries. With doc-id: version history for that doc |
 | `lore diff <doc-id> [v1 v2]` | `versionService.diff()` | Default: latest vs previous. Colored diff output in terminal |
 | `lore restore <doc-id> <version>` | `versionService.restore()` | Creates new version with old content. Prints new version number |
+
+### 3.7 P2 Extension Commands
+
+These commands were added in Phase 2 alongside the MCP / HTTP / sync / eval specs. They are part of the shipped CLI surface and follow the same `--json` and exit-code conventions as P1 commands.
+
+| Command | Spec | Description |
+|---|---|---|
+| `lore serve [--port] [--host]` | SPEC-010 / SPEC-011 | Start the Lore HTTP API server (Bun.serve, bearer-token auth). Mounts the HTTP adapter |
+| `lore agent <create\|list\|revoke>` | SPEC-010 §3.2 | Manage API keys for AI agents (issued tokens for the HTTP API). NOT an MCP-server launcher — MCP is entered via top-level `--mcp-server` flag |
+| `lore sync <setup\|status\|push\|pull>` | SPEC-009 | Configure and operate the Turso embedded-replica sync engine. Bypasses `loadLoreApp` and manages TursoStore directly |
+| `lore eval [--scenario]` | SPEC-013 | Run read-only evaluation scenarios against the corpus (FTS5 resilience, etc.) |
+
+`lore serve`, `lore agent`, and `lore eval` go through `loadLoreApp` and inherit telemetry wiring (AC-K3-1). `lore sync` is exempt — it manages TursoStore itself and does not require a pre-existing corpus DB for all subcommands.
 
 ## 4. Output Formatting
 
@@ -161,16 +174,31 @@ project:
 #   token: "${LORE_SYNC_TOKEN}"
 ```
 
-### 6.2 Global Config (`~/.config/lore/config.yaml`)
+### 6.2 Global Config (XDG-aware)
 
-User-level preferences.
+User-level preferences. **Path resolution order** (pick the first file that exists; if none exists, no global config is loaded):
+
+1. `$LORE_CONFIG_HOME/config.yaml` — app-specific escape hatch (highest precedence)
+2. `$XDG_CONFIG_HOME/lore/config.yaml` — XDG explicit
+3. `~/.config/lore/config.yaml` — XDG default
+
+`$XDG_CONFIG_HOME` defaults to `~/.config` per the XDG Base Directory Specification. macOS / Windows users get the same `~/.config/lore/` path by default — Lore intentionally uses cross-platform XDG (matching `gh`, `helm`, `pnpm`) rather than per-OS native paths (`~/Library/Application Support/` etc.) so docs and tutorials stay portable.
+
+**Schema** (`GlobalConfigSchema`, all keys optional, strict — unknown keys rejected):
 
 ```yaml
 defaults:
-  editor: "${EDITOR}"        # fallback for lore create/set
+  editor: "vim"              # overrides $EDITOR for lore create/set; falls back to $EDITOR, then vi (Unix) / notepad (Windows)
   format: "text"             # default output: text | json
-  color: true
+  color: true                # ANSI colour in terminal output
 ```
+
+**Merge semantics with project config** (`.lore/config.yaml`):
+
+- Global config provides defaults for `defaults.*` keys only — it MUST NOT contain `project`, `sync`, or `telemetry` sections (those are per-project).
+- Project config wins on any conflict (project keys override global keys).
+- A missing global file is not an error; commands proceed with built-in defaults (`format: text`, `color: true`, editor: `$EDITOR` → `vi`/`notepad`).
+- Malformed global config: parse error printed to stderr; commands continue with built-in defaults (fail-loud at the per-key level, not catastrophic — the user should still be able to run `lore`).
 
 ### 6.3 Data Directory
 
