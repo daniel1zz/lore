@@ -4,18 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-**Lore** — AI-native shared knowledge/memory platform for AI-first teams (3-5 people + multiple AI agents). Single CLI binary (`lore`) backed by SQLite via `bun:sqlite`. Delivers typed, navigable corpus of PRDs, specs, ADRs, plans, and knowledge, with MDX placeholder resolution, version history, review workflow, and v1 migration.
+**Lore** — AI-native shared knowledge/memory platform for AI-first teams (3-5 people + multiple AI agents). Single binary (`lore`) with three adapters: citty CLI (default), MCP server (`--mcp-server`), and HTTP server (`lore serve`). Storage is local SQLite via `bun:sqlite` by default; with `sync.enabled` it switches to a Turso embedded replica (`@libsql/client`) for multi-machine visibility. Delivers a typed, navigable corpus of PRDs, specs, ADRs, plans, knowledge, and tasks, with MDX placeholder resolution, version history, review workflow, tree-structure conformance checks, telemetry, and v1 migration.
 
 ## Commands
 
 ```bash
 bun run dev               # Run from source (src/index.ts)
 bun run build             # Compile to dist/lore binary (bun build --compile)
-bun run typecheck         # tsc --noEmit (strict)
+bun run typecheck         # tsc --noEmit for src + tests projects
 
 # Tests — two runners, both must pass
 bun run test:vitest       # bunx vitest run — covers non-bun:sqlite files
-bun run test:bun          # bun test ./tests/ — covers SQLiteStore + bun:sqlite tests
+bun run test:bun          # bun test .bun.test — covers SQLiteStore + bun:sqlite tests
 bun run test              # both runners in sequence
 
 # Run a single vitest test file
@@ -32,24 +32,35 @@ bun test tests/unit/store/sqlite-store.bun.test.ts
 ### Layer Stack
 
 ```
-src/adapters/cli/        ← citty CLI (thin adapter, no business logic)
-src/app.ts               ← composition root: createApp(dbPath) → App
-src/service/             ← business logic, all return Result<T, LoreError>
-src/store/               ← storage abstraction (StoreInterface)
-src/core/                ← types, errors, schemas (Zod)
+src/adapters/cli/        ← citty CLI (default entry, 22 subcommands)
+src/adapters/mcp/        ← MCP stdio server (entered via --mcp-server flag)
+src/adapters/http/       ← Bun.serve HTTP + bearer-auth (lore serve) + sync-push
+src/app.ts               ← composition root: createApp(dbPath, config?) → App | Result<App>
+src/index.ts             ← entry: routes to MCP server or citty CLI based on argv
+src/service/             ← business logic, all return Promise<Result<T, LoreError>>
+src/store/               ← async storage abstraction (StoreInterface)
+src/core/                ← types, errors, Zod schemas, config, telemetry
+src/eval/                ← read-only evaluation scenarios (lore eval)
 ```
 
 ### Key Design Decisions
 
-**Result<T, LoreError>** — no exceptions cross service boundaries. Every service method returns `{ ok: true; value: T } | { ok: false; error: LoreError }`. Use `ok()` and `err()` helpers from `src/core/errors.ts`.
+**Result<T, LoreError>** — no exceptions cross service boundaries. Every service method returns `Promise<{ ok: true; value: T } | { ok: false; error: LoreError }>`. Use `ok()` and `err()` helpers from `src/core/errors.ts`. 13 error codes in the discriminated union.
 
-**StoreInterface** is synchronous — `bun:sqlite` is synchronous. `SQLiteStore` implements it for production; `InMemoryStore` implements it for unit tests. Services depend on `StoreInterface`, never on a concrete store.
+**StoreInterface is async** — methods return `Promise<Result<T, LoreError>>`. This is the contract both `SQLiteStore` (wraps sync `bun:sqlite` calls) and `TursoStore` (`@libsql/client`, natively async) implement. `InMemoryStore` is the test double. Services depend on `StoreInterface`, never on a concrete store.
 
-**Path aliases** — `tsconfig.json` defines `@core/*`, `@store/*`, `@service/*`, `@adapters/*`. Both are available in source and test files via vitest's `resolve.alias`.
+**Store selection (D-007)** — `createApp(dbPath, config?)`:
+- No config / `sync.enabled !== true` → `SQLiteStore` (local-only, returned directly as `App`).
+- `sync.enabled: true` + `remote_url` + valid `LORE_SYNC_TOKEN` env var → `TursoStore` (embedded replica) wrapped in `Result<App>`.
+- Sync enabled but credentials missing or TursoStore construction fails → `err(STORE_ERROR)`. **No silent fallback** to SQLiteStore — offline writes must not land only-local.
 
-**DocRecord** has two identifier fields: `id` (ULID, immutable PK) and `slug` (human-readable, editable, format: `{type}-{kebab-title}`). Service methods accept either via `corpusService.resolve(idOrSlug)`.
+**Path aliases** — `tsconfig.json` defines `@core/*`, `@store/*`, `@service/*`, `@adapters/*`. Available in source and tests; vitest mirrors them via `resolve.alias`.
 
-**`bun:sqlite` is external to vitest** — `vitest.config.ts` marks `bun:sqlite` as an SSR external and excludes it from `optimizeDeps`. Tests that touch `SQLiteStore` must use `bun test`, not vitest.
+**DocRecord has two identifier fields**: `id` (ULID, immutable PK) and `slug` (human-readable, editable, format `{type}-{kebab-title}`). Service methods accept either via `corpusService.resolve(idOrSlug)` (helper in `src/service/resolve.ts`).
+
+**`bun:sqlite` is external to vitest** — `vitest.config.ts` marks `bun:sqlite` as an SSR external and excludes it from `optimizeDeps`. Tests that touch `SQLiteStore` must use `bun test`, not vitest. CLI loader (`src/adapters/cli/loader.ts`) is bun-only to isolate `bun:sqlite` from vitest-reachable utility modules.
+
+**FTS5 query escaping (`escapeFtsQuery` in `store-shared.ts`)** — user search input is wrapped per whitespace-piece in `"…"` phrase quotes, with internal `"` escaped to `""`. Neutralises FTS5 operators (`-`, `()`, `*`, `OR`, `AND`, `NOT`, `:`). Empty input → short-circuit, never reaches FTS5 MATCH.
 
 ### Service Layer (`src/service/`)
 
@@ -60,17 +71,21 @@ src/core/                ← types, errors, schemas (Zod)
 | `VersionService` | Version log, unified diff (`diff` pkg), restore (append-only, non-destructive) |
 | `OutlineService` | MDX placeholder resolution — regex extracts `<ComponentName ... />` tags, queries store |
 | `MigrationService` | One-shot v1→v2 import: parse YAML frontmatter MD files, map types, insert docs + links |
+| `TreeCheckService` | Tree-structure drift detection, auto-fix, parent_id ↔ link-table reconciliation |
 
-All services are stateless — state lives entirely in `StoreInterface`.
+All services are stateless — state lives entirely in `StoreInterface`. Telemetry is wired in `CorpusService` only (see `core/telemetry.ts`, opt-in via config).
 
 ### Document Lifecycle
 
 Status transitions (`src/core/schemas.ts → VALID_TRANSITIONS`):
+
 ```
 draft → in-review → approved → active → archived
 draft → approved (fast-track)
 approved → deprecated
+active → archived | deprecated
 ```
+
 Editing content/title on an `approved` doc resets it to `draft` automatically.
 
 ### MDX Placeholder Components (OutlineService)
@@ -80,15 +95,16 @@ Whitelisted components resolved at read time: `ChildrenOf`, `RecentDecisions`, `
 ### Type-specific Validation (CreateDocInput)
 
 - `spec` and `task` require `parent_id`
-- `adr` requires `extra.decision_status`
-- `knowledge` requires `extra.sub_type`
+- `adr` requires `extra.decision_status` (`proposed | accepted | deprecated | superseded`)
+- `knowledge` requires `extra.sub_type` (`ideation | retro | research | reference`)
 - `task` requires `extra.plan_id`
 
 Enforced via Zod `superRefine` in `src/core/schemas.ts`.
 
 ## Specs
 
-All feature specs live under `docs/requirements/spec/`:
+All feature specs live under `docs/requirements/spec/`. When implementing or changing behaviour in a module, read the relevant spec first.
+
 - `SPEC-001` — service layer + DI pattern
 - `SPEC-002` — corpus schema, types, lifecycle
 - `SPEC-003` — CLI adapter (22 commands, exit codes, output format)
@@ -96,11 +112,43 @@ All feature specs live under `docs/requirements/spec/`:
 - `SPEC-005` — review workflow
 - `SPEC-006` — version history
 - `SPEC-007` — v1 migration
-
-When implementing a task, read the relevant spec before writing code.
+- `SPEC-008` — MCP adapter (16 `lore_*` tools)
+- `SPEC-009` — Turso embedded-replica sync (D-007 fail-loud)
+- `SPEC-010` — HTTP API + API key auth
+- `SPEC-011` — HTTP route layout
+- `SPEC-012` — telemetry (JSONL, opt-in)
+- `SPEC-013` — FTS5 resilience + eval scenarios
 
 ## Implementation Status
 
-Phase 1 is underway. Core layers (`src/core/`, `src/store/`, `src/service/`) are implemented and tested. The CLI adapter (`src/adapters/cli/`) and composition root (`src/app.ts`) are the current implementation target (Tasks C.1 + C.4).
+Phase 1 (core + CLI + service layer) and Phase 2 (MCP server, HTTP server, Turso sync, telemetry, tree conformance, eval) are landed. Active work focuses on incremental hardening (escape paths, drift fixes, additional scenarios).
 
 The v1 predecessor at `/Users/apple/.claude/docman-mcp` remains frozen. Do not carry over its schema or API shape — v2 is greenfield.
+
+<!-- auto:module-index -->
+## Module Index
+
+Module-specific context lives alongside the code:
+
+- [`src/core`](src/core/CLAUDE.md) — types, Result/LoreError, Zod schemas, lifecycle rules, config, telemetry
+- [`src/service`](src/service/CLAUDE.md) — six stateless services, all return `Promise<Result<T, LoreError>>`
+- [`src/store`](src/store/CLAUDE.md) — async StoreInterface + SQLite / Turso / InMemory + FTS5 escape
+- [`src/adapters/cli`](src/adapters/cli/CLAUDE.md) — citty CLI, 22 subcommands, exit-code mapping
+- [`src/adapters/mcp`](src/adapters/mcp/CLAUDE.md) — MCP stdio server, 16 `lore_*` tools, fast-path registration
+- [`src/adapters/http`](src/adapters/http/CLAUDE.md) — Bun.serve API, bearer-token auth, sync-push
+- [`src/eval`](src/eval/CLAUDE.md) — six read-only evaluation scenarios under `lore eval`
+<!-- /auto:module-index -->
+
+<!-- auto:dynamic-context -->
+## Finding Live Project State
+
+Lore is itself the knowledge store — query it through its own CLI rather than reading docs by path:
+
+- `lore search <query>` — FTS5 full-text search over the corpus
+- `lore get <id-or-slug>` — read a document (add `--resolve-mdx` to expand placeholders)
+- `lore list --type <type>` — filter docs by type (`prd | spec | adr | plan | knowledge | task`)
+- `lore tree` — view the document hierarchy (root → specs → tasks)
+- `lore pending` — list docs awaiting review
+- `lore log <id-or-slug>` — version history; `lore diff <id> --from N --to M` for unified diff
+- `lore status` — corpus-level health snapshot
+<!-- /auto:dynamic-context -->

@@ -1,0 +1,31 @@
+# Module: adapters/mcp
+
+## Purpose
+
+MCP (Model Context Protocol) stdio adapter. Entered via `lore --mcp-server` (top-level flag intercepted in `src/index.ts`) or `lore agent`. Registers 16 `lore_*` tools and a small set of MCP resources against `@modelcontextprotocol/sdk`'s `McpServer` and connects over `StdioServerTransport`.
+
+## Key Invariants
+
+- **Never throws across the MCP boundary.** Every tool handler returns `{ content: [text] }` on success or `{ content: [text], isError: true }` on failure. Map service `LoreError` codes inside the handler — do not let them propagate.
+- **3-arg `server.tool(name, desc, handler)` registration, then patch `inputSchema`** — see `tools.ts` header comment. The 4-arg overload with an inline ZodRawShape causes tsc to OOM (>7 GB heap) across 16 call sites. The current pattern (`registerToolWithArgs` helper, post-registration `inputSchema = z.object(...)` patch) keeps tsc check-time within seconds. **Do not rewrite to the 4-arg form.** Source: ADR-01KVYFJ5G8EVB6S5NMD3PNY5KA "Fast Path" Pattern 1.
+- **Schema constants are module-level `z.object(...)` declarations**, not inline literals. Re-using `DOC_TYPE_ENUM` / `DOC_STATUS_ENUM` keeps tsc from re-resolving the shape per call site.
+- **One registration per tool name.** Re-registering the same name corrupts the SDK's `_registeredTools` map.
+- **Idempotent transport lifecycle** — `startMcpServer(app)` awaits `server.connect(transport)` and blocks until the transport closes. Caller is responsible for `app.close()` after return.
+
+## Patterns
+
+- **App is the only dependency** — `registerTools(server, app)` and `registerResources(server, app)` receive the wired App; tools never touch a store or service constructor directly.
+- **`schema-info.ts` carries `CORPUS_SCHEMA_INFO`** — a static description of the corpus shape exposed as an MCP resource. Update it when adding a new doc type or required `extra` field.
+- **Tool naming convention: `lore_<verb>`** — `lore_create`, `lore_get`, `lore_set`, `lore_search`, `lore_list`, `lore_tree`, `lore_link`, `lore_pending`, `lore_approve`, etc. Mirrors the CLI subcommand surface.
+
+## Files
+
+- `index.ts` — `startMcpServer(app)`; wires `McpServer` + `StdioServerTransport`.
+- `tools.ts` — 16 tool registrations, schema constants, Zod input shapes.
+- `resources.ts` — MCP resource registrations (corpus snapshots, etc.).
+- `schema-info.ts` — `CORPUS_SCHEMA_INFO` constant describing doc types and `extra` requirements.
+
+## Links
+
+- Depends on: [`src/core`](../../core/CLAUDE.md), [`src/service`](../../service/CLAUDE.md) (via App).
+- Entry points: `src/index.ts` (`--mcp-server`) and [`src/adapters/cli`](../cli/CLAUDE.md) `lore agent`.
