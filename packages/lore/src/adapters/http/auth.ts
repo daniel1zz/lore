@@ -6,8 +6,8 @@
  */
 
 import { Database } from "bun:sqlite";
-import { err, ok, type Result } from "../../core/errors.js";
-import type { LoreError } from "../../core/errors.js";
+import { err, ok, type Result } from "@lore/core";
+import type { LoreError } from "@lore/core";
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 

@@ -6,11 +6,11 @@
  */
 
 import type { StoreInterface } from "../store/store-interface.js";
-import type { TreeBlueprint, TreeNodeSpec } from "../core/tree-blueprint.js";
-import type { DocType, DocId, DocRecord } from "../core/types.js";
-import { err, ok, type LoreError, type Result } from "../core/errors.js";
-import { isValidParentType, ROOT_TYPES } from "../core/doc-type-rules.js";
-import { ancestorChainWalk } from "../core/graph-utils.js";
+import type { TreeBlueprint, TreeNodeSpec } from "@lore/core";
+import type { DocType, DocId, DocRecord } from "@lore/core";
+import { err, ok, type LoreError, type Result } from "@lore/core";
+import { isValidParentType, ROOT_TYPES } from "@lore/core";
+import { ancestorChainWalk } from "@lore/core";
 
 // ─── Public Types ──────────────────────────────────────────────────────────
 

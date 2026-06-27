@@ -9,8 +9,8 @@ import type { ActorContext } from "./auth.js";
 import { jsonOk, jsonError, loreErrorResponse, parseJsonBody } from "./middleware.js";
 import type { ListFilters, SearchFilters } from "../../service/corpus-service.js";
 import type { PendingFilters } from "../../service/review-service.js";
-import type { CreateDocInput, DocPatch } from "../../core/schemas.js";
-import type { DocStatus, DocType, LinkType } from "../../core/types.js";
+import type { CreateDocInput, DocPatch } from "@lore/core";
+import type { DocStatus, DocType, LinkType } from "@lore/core";
 
 // ─── Route dispatcher ───────────────────────────────────────────────────────
 

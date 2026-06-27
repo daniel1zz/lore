@@ -6,7 +6,7 @@ import { defineCommand } from "citty";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { createApp } from "../../../app.js";
-import { saveConfig } from "../../../core/config.js";
+import { saveConfig } from "@lore/core";
 import { formatError } from "../utils.js";
 
 export default defineCommand({

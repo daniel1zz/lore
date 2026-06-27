@@ -8,8 +8,8 @@
  */
 
 import { createClient, type Client } from "@libsql/client";
-import { ok, err } from "../../core/errors.js";
-import type { Result, LoreError } from "../../core/errors.js";
+import { ok, err } from "@lore/core";
+import type { Result, LoreError } from "@lore/core";
 import { existsSync } from "node:fs";
 
 // ─── Public Types ─────────────────────────────────────────────────────────────

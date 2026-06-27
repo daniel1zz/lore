@@ -25,7 +25,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createClient, type Client } from "@libsql/client";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
-import type { DocRecord, LinkRecord, VersionRecord } from "../../../src/core/types.js";
+import type { DocRecord, LinkRecord, VersionRecord } from "@lore/core";
 
 // ─── Fixture Helpers ─────────────────────────────────────────────────────────
 

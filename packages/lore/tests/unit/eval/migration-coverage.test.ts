@@ -9,14 +9,14 @@ import { describe, it, expect } from "vitest";
 import { mkdirSync, writeFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { InMemoryStore } from "@store/in-memory-store.js";
-import { CorpusService } from "@service/corpus-service.js";
-import { MigrationService } from "@service/migration-service.js";
-import { ReviewService } from "@service/review-service.js";
-import { VersionService } from "@service/version-service.js";
-import { OutlineService } from "@service/outline-service.js";
-import { TreeCheckService } from "@service/tree-check-service.js";
-import { NoOpTelemetry } from "@core/telemetry.js";
+import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { CorpusService } from "../../../src/service/corpus-service.js";
+import { MigrationService } from "../../../src/service/migration-service.js";
+import { ReviewService } from "../../../src/service/review-service.js";
+import { VersionService } from "../../../src/service/version-service.js";
+import { OutlineService } from "../../../src/service/outline-service.js";
+import { TreeCheckService } from "../../../src/service/tree-check-service.js";
+import { NoOpTelemetry } from "@lore/core";
 import { runMigrationCoverage } from "../../../src/eval/scenarios/migration-coverage.js";
 import type { App } from "../../../src/app.js";
 
@@ -58,16 +58,16 @@ Content for ${id}.
 describe("HAPPY — migration coverage against docs/requirements", () => {
   it("imports all parseable files and reports passed=true", async () => {
     // Use the real docs/requirements directory.
-    // 14 .md files, all 14 have valid YAML frontmatter (parseable).
-    // expected_files = analyze().parseable = 14; imported = 14; links_broken = 0 → passed=true
+    // 15 .md files (1 PRD + SPEC-001..SPEC-014), all have valid YAML frontmatter (parseable).
+    // expected_files = analyze().parseable = 15; imported = 15; links_broken = 0 → passed=true
     const sourceDir = join(process.cwd(), "docs", "requirements");
     const app = makeApp();
     const result = await runMigrationCoverage(sourceDir, app);
     app.close();
 
     expect(result.source_dir).toBe(sourceDir);
-    expect(result.expected_files).toBe(14);
-    expect(result.imported).toBe(14);
+    expect(result.expected_files).toBe(15);
+    expect(result.imported).toBe(15);
     expect(result.already_existed).toBe(0);
     expect(result.links_broken).toBe(0);
     expect(result.passed).toBe(true);

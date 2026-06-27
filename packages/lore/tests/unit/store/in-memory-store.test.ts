@@ -25,13 +25,13 @@
  */
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { InMemoryStore } from "@store/in-memory-store";
+import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import type {
   AuditEntry,
   DocRecord,
   LinkRecord,
   VersionRecord,
-} from "@core/types";
+} from "@lore/core";
 
 // ─── Factories ───────────────────────────────────────────────────────────────
 

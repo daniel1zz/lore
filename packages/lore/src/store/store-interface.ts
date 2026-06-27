@@ -15,8 +15,8 @@ import type {
   LinkType,
   Slug,
   VersionRecord,
-} from "../core/types.js";
-import type { LoreError, Result } from "../core/errors.js";
+} from "@lore/core";
+import type { LoreError, Result } from "@lore/core";
 
 // ─── Update Options ────────────────────────────────────────────────────────
 

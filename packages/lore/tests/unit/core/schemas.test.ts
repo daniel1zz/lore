@@ -11,7 +11,7 @@ import {
   docRoleSchema,
   prioritySchema,
   linkTypeSchema,
-} from "@core/schemas";
+} from "@lore/core";
 
 // Test plan for schemas module:
 // HAPPY: valid inputs pass, transitions valid, slugify correct

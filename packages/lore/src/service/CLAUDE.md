@@ -16,7 +16,7 @@ Business logic layer. Six stateless services orchestrate `StoreInterface` calls 
 
 ## Patterns
 
-- **Service per concern, no cross-service calls** — services do not import each other. Composition lives in `src/app.ts`. If a workflow spans two services (e.g. `approve` produces a `versions` entry), the calling layer (CLI / MCP / HTTP) sequences them.
+- **Service per concern, no cross-service calls** — services do not import each other. Composition lives in `packages/lore/src/app.ts`. If a workflow spans two services (e.g. `approve` produces a `versions` entry), the calling layer (CLI / MCP / HTTP) sequences them.
 - **`CorpusService` is the only service wired to telemetry** — constructor takes `Telemetry`; other services don't record events.
 - **Stable public types live next to the service that owns them** — `PendingDoc`, `ApproveOpts` in `review-service.ts`; `Diff`, `FieldChange` in `version-service.ts`; `MigrationReport`, `SecretWarning` in `migration-service.ts`; `TreeDrift`, `FixReport`, `ReconcileReport` in `tree-check-service.ts`. Don't move them to `core/types.ts`.
 - **TreeCheckService is the only service that may modify the link table directly** — it reconciles the `parent_id` column on `docs` against the parent links in the link table. Other services treat them as synchronised.
@@ -32,5 +32,5 @@ Business logic layer. Six stateless services orchestrate `StoreInterface` calls 
 
 ## Links
 
-- Depends on: [`src/core`](../core/CLAUDE.md), [`src/store`](../store/CLAUDE.md).
-- Used by: [`src/adapters/cli`](../adapters/cli/CLAUDE.md), [`src/adapters/mcp`](../adapters/mcp/CLAUDE.md), [`src/adapters/http`](../adapters/http/CLAUDE.md), [`src/eval`](../eval/CLAUDE.md) (read-only), and `src/app.ts`.
+- Depends on: [`@lore/core`](../../../../core/src/CLAUDE.md), [`../store`](../store/CLAUDE.md).
+- Used by: [`../adapters/cli`](../adapters/cli/CLAUDE.md), [`../adapters/mcp`](../adapters/mcp/CLAUDE.md), [`../adapters/http`](../adapters/http/CLAUDE.md), [`../eval`](../eval/CLAUDE.md) (read-only), and `../app.ts`.

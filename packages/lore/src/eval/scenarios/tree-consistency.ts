@@ -29,7 +29,7 @@
 
 import { z } from "zod";
 import type { App } from "../../app.js";
-import type { TreeBlueprint } from "../../core/tree-blueprint.js";
+import type { TreeBlueprint } from "@lore/core";
 
 // ─── Permissive Blueprint ─────────────────────────────────────────────────────
 

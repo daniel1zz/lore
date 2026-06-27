@@ -15,7 +15,7 @@ import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
 import { openEditor } from "../editor.js";
-import type { DocStatus, Priority } from "../../../core/types.js";
+import type { DocStatus, Priority } from "@lore/core";
 
 export default defineCommand({
   meta: {

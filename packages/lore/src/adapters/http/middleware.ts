@@ -3,7 +3,7 @@
  * All functions are pure helpers with no side effects.
  */
 
-import type { LoreError } from "../../core/errors.js";
+import type { LoreError } from "@lore/core";
 
 // ─── JSON response helpers ──────────────────────────────────────────────────
 

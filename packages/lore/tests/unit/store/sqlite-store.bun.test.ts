@@ -21,13 +21,13 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { SQLiteStore } from "@store/sqlite-store";
+import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import type {
   AuditEntry,
   DocRecord,
   LinkRecord,
   VersionRecord,
-} from "@core/types";
+} from "@lore/core";
 
 // ─── Factories ───────────────────────────────────────────────────────────────
 

@@ -32,7 +32,7 @@ import {
   loadGlobalConfig,
   mergeDefaults,
   LoreDefaultsSchema,
-} from "@core/config";
+} from "@lore/core";
 
 // ─── Env-var save/restore ─────────────────────────────────────────────────────
 

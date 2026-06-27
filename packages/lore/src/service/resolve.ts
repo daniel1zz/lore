@@ -1,6 +1,6 @@
-import { err, ok, type LoreError, type Result } from "@core/errors";
-import type { DocId, DocRecord } from "@core/types";
-import type { StoreInterface } from "@store/store-interface";
+import { err, ok, type LoreError, type Result } from "@lore/core";
+import type { DocId, DocRecord } from "@lore/core";
+import type { StoreInterface } from "../store/store-interface.js";
 
 const ULID_REGEX = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
 

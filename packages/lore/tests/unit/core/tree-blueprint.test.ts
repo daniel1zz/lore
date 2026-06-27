@@ -42,7 +42,7 @@ import {
   treeBlueprintSchema,
   type TreeBlueprint,
   type TreeNodeSpec,
-} from "../../../src/core/tree-blueprint.js";
+} from "@lore/core";
 
 // ── HAPPY path ───────────────────────────────────────────────────────────────
 

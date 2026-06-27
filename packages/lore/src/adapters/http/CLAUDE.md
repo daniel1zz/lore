@@ -30,5 +30,5 @@
 
 ## Links
 
-- Depends on: [`src/core`](../../core/CLAUDE.md), [`src/service`](../../service/CLAUDE.md), [`src/store`](../../store/CLAUDE.md) (transitively + `bun:sqlite Database` for ApiKeyStore).
-- Entry point: [`src/adapters/cli`](../cli/CLAUDE.md) `lore serve`.
+- Depends on: [`@lore/core`](../../../../../core/src/CLAUDE.md), [`../../service`](../../service/CLAUDE.md), [`../../store`](../../store/CLAUDE.md) (transitively + `bun:sqlite Database` for ApiKeyStore).
+- Entry point: [`../cli`](../cli/CLAUDE.md) `lore serve`.

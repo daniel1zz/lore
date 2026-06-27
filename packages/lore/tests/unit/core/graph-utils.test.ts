@@ -25,7 +25,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { ancestorChainWalk } from "../../../src/core/graph-utils.js";
+import { ancestorChainWalk } from "@lore/core";
 
 // ── HAPPY path ───────────────────────────────────────────────────────────────
 

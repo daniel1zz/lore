@@ -22,9 +22,9 @@ import { spawnSync } from "child_process";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { ok, err } from "../../core/errors.js";
-import type { Result, LoreError } from "../../core/errors.js";
-import type { LoreDefaults } from "../../core/config.js";
+import { ok, err } from "@lore/core";
+import type { Result, LoreError } from "@lore/core";
+import type { LoreDefaults } from "@lore/core";
 
 // ─── Options ──────────────────────────────────────────────────────────────────
 

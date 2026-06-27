@@ -26,13 +26,13 @@ import { OutlineService } from "./service/outline-service.js";
 import { MigrationService } from "./service/migration-service.js";
 import { TreeCheckService } from "./service/tree-check-service.js";
 import { ApiKeyStore } from "./adapters/http/auth.js";
-import { resolveSyncCredentials, type LoreConfig } from "./core/config.js";
-import { err, type Result, type LoreError } from "./core/errors.js";
+import { resolveSyncCredentials, type LoreConfig } from "@lore/core";
+import { err, type Result, type LoreError } from "@lore/core";
 import {
   NoOpTelemetry,
   createTelemetry,
   type Telemetry,
-} from "./core/telemetry.js";
+} from "@lore/core";
 
 export interface App {
   corpusService: CorpusService;

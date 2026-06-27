@@ -19,12 +19,12 @@
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
-import { InMemoryStore } from "@store/in-memory-store.js";
-import type { DocRecord, DocId, DocType } from "@core/types.js";
-import { DOC_TYPE_ROLE_MAP } from "@core/types.js";
-import type { TreeBlueprint } from "@core/tree-blueprint.js";
+import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import type { DocRecord, DocId, DocType } from "@lore/core";
+import { DOC_TYPE_ROLE_MAP } from "@lore/core";
+import type { TreeBlueprint } from "@lore/core";
 // RED SIGNAL: this import will fail with ERR_MODULE_NOT_FOUND until the impl lands
-import { TreeCheckService } from "@service/tree-check-service.js";
+import { TreeCheckService } from "../../../src/service/tree-check-service.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 

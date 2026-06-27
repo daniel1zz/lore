@@ -5,7 +5,7 @@
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
-import type { LinkType } from "../../../core/types.js";
+import type { LinkType } from "@lore/core";
 
 const VALID_LINK_TYPES: LinkType[] = [
   "parent",

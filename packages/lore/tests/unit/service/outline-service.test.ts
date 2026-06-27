@@ -14,10 +14,10 @@
  */
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { InMemoryStore } from "@store/in-memory-store";
-import { OutlineService } from "@service/outline-service";
-import type { DocRecord } from "@core/types";
-import type { StoreInterface } from "@store/store-interface";
+import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { OutlineService } from "../../../src/service/outline-service.js";
+import type { DocRecord } from "@lore/core";
+import type { StoreInterface } from "../../../src/store/store-interface.js";
 
 // ─── Test Fixtures ──────────────────────────────────────────────────────────
 

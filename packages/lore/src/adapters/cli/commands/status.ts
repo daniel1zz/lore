@@ -13,7 +13,7 @@ import { join } from "path";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
-import { parseTreeBlueprint } from "../../../core/tree-blueprint.js";
+import { parseTreeBlueprint } from "@lore/core";
 
 export default defineCommand({
   meta: {

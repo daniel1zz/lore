@@ -4,9 +4,9 @@
  * Source: SPEC-005 §3, SPEC-001 §3.2
  */
 
-import type { DocId, DocRecord, DocType } from "../core/types.js";
-import { err, ok, type LoreError, type Result } from "../core/errors.js";
-import { getAllowedTransitions, isValidTransition } from "../core/schemas.js";
+import type { DocId, DocRecord, DocType } from "@lore/core";
+import { err, ok, type LoreError, type Result } from "@lore/core";
+import { getAllowedTransitions, isValidTransition } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
 

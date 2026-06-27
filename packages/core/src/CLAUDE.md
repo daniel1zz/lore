@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Foundational types, error model, runtime validation, lifecycle rules, config, and telemetry. Pure modules with no I/O except `config.ts` (file read/write) and `telemetry.ts` (append-only JSONL). Imported by every other module; depends on no module under `src/`.
+Foundational types, error model, runtime validation, lifecycle rules, config, and telemetry. Pure modules with no I/O except `config.ts` (file read/write) and `telemetry.ts` (append-only JSONL). Published as `@lore/core` workspace package; depends on no other `@lore/*` package.
 
 ## Key Invariants
 
@@ -23,5 +23,5 @@ Foundational types, error model, runtime validation, lifecycle rules, config, an
 
 ## Links
 
-- Depends on: **(none in `src/`)** — leaf of the dependency graph.
-- Used by: [`src/service`](../service/CLAUDE.md), [`src/store`](../store/CLAUDE.md), [`src/adapters/cli`](../adapters/cli/CLAUDE.md), [`src/adapters/mcp`](../adapters/mcp/CLAUDE.md), [`src/adapters/http`](../adapters/http/CLAUDE.md), [`src/eval`](../eval/CLAUDE.md), and `src/app.ts`.
+- Depends on: **(no other `@lore/*` packages)** — leaf of the dependency graph.
+- Used by: `@lore/lore` (all of `packages/lore/src/`): service/, store/, adapters/cli/, adapters/mcp/, adapters/http/, eval/, and app.ts.

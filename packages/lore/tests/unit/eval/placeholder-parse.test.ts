@@ -6,20 +6,20 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { InMemoryStore } from "@store/in-memory-store.js";
-import { CorpusService } from "@service/corpus-service.js";
-import { ReviewService } from "@service/review-service.js";
-import { VersionService } from "@service/version-service.js";
-import { OutlineService } from "@service/outline-service.js";
-import { MigrationService } from "@service/migration-service.js";
-import { TreeCheckService } from "@service/tree-check-service.js";
-import { NoOpTelemetry } from "@core/telemetry.js";
+import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { CorpusService } from "../../../src/service/corpus-service.js";
+import { ReviewService } from "../../../src/service/review-service.js";
+import { VersionService } from "../../../src/service/version-service.js";
+import { OutlineService } from "../../../src/service/outline-service.js";
+import { MigrationService } from "../../../src/service/migration-service.js";
+import { TreeCheckService } from "../../../src/service/tree-check-service.js";
+import { NoOpTelemetry } from "@lore/core";
 import {
   runPlaceholderParse,
   PlaceholderParseResultSchema,
 } from "../../../src/eval/scenarios/placeholder-parse.js";
 import type { App } from "../../../src/app.js";
-import type { DocRecord } from "../../../src/core/types.js";
+import type { DocRecord } from "@lore/core";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

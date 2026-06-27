@@ -5,9 +5,9 @@
  */
 
 import { createTwoFilesPatch } from "diff";
-import type { DocId, DocRecord, DocStatus, VersionAction } from "@core/types";
-import { err, ok, type LoreError, type Result } from "@core/errors";
-import type { StoreInterface } from "@store/store-interface";
+import type { DocId, DocRecord, DocStatus, VersionAction } from "@lore/core";
+import { err, ok, type LoreError, type Result } from "@lore/core";
+import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDocId } from "./resolve.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────────
