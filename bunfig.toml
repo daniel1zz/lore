@@ -1,0 +1,5 @@
+# Hoist all workspace dependencies to root node_modules so that
+# scripts/build.ts can resolve native addons like @libsql/<target>
+# via Bun.resolveSync without walking the .bun isolated install tree.
+[install]
+linker = "hoisted"

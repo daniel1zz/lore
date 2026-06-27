@@ -42,12 +42,17 @@ function resolveLibsqlTarget(): string {
 
 /** Resolves the absolute path to the native .node file for the current platform. */
 function resolveNativeNodePath(nativePkg: string): string {
+  // Bun workspaces install dependencies under the owning workspace's node_modules
+  // rather than hoisting to the root. libsql lives at packages/lore/node_modules/@libsql/<target>.
+  // Use packages/lore as the resolver referrer so we find it whether the build runs
+  // in a workspace or a flat checkout.
+  const referrer = join(root, "packages", "lore");
   let pkgJsonPath: string;
   try {
-    pkgJsonPath = Bun.resolveSync(`${nativePkg}/package.json`, root);
+    pkgJsonPath = Bun.resolveSync(`${nativePkg}/package.json`, referrer);
   } catch (e) {
     throw new Error(
-      `[build] Cannot resolve ${nativePkg}/package.json from ${root}. ` +
+      `[build] Cannot resolve ${nativePkg}/package.json from ${referrer}. ` +
         `Run 'bun install' first.\nCause: ${e}`
     );
   }
