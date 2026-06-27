@@ -1,0 +1,10 @@
+{
+  "name": "@lore/dashboard",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "echo 'dashboard slot — implementation pending in a future SPEC' && exit 1",
+    "build": "echo 'dashboard slot — implementation pending in a future SPEC' && exit 1"
+  }
+}
