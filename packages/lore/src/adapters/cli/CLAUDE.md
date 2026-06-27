@@ -20,9 +20,11 @@ citty-based CLI adapter. 22 subcommands, each in its own `commands/<name>.ts`, l
 - **Output helpers in `utils.ts`** — `formatTable`, `formatTree` (Unicode box drawing), `formatNavigation`, `relativeTime`. Pure; no `process.exit` calls. Reusable from tests.
 - **Hyphen-quoted error mode** — `formatError` produces multi-line stderr output with contextual hints (`"Run \`lore get <id>\`..."`). Add a new case when introducing a new `LoreError` code.
 
-## Subcommands (22)
+## Subcommands (23)
 
-`init` `create` `get` `set` `delete` `list` `search` `tree` `link` `unlink` `pending` `approve` `reject` `log` `diff` `restore` `migrate` `status` `serve` `agent` `sync` `eval`
+`init` `create` `get` `set` `delete` `list` `search` `tree` `link` `unlink` `pending` `approve` `reject` `log` `diff` `restore` `migrate` `status` `serve` `agent` `sync` `eval` `dashboard`
+
+`serve` mounts the HTTP adapter; `agent` manages API keys for AI agents — create/list/revoke (SPEC-010 §3.2), NOT an MCP launcher (MCP is entered via the top-level `--mcp-server` flag only); `eval` runs evaluation scenarios; `dashboard` (SPEC-016) starts the HTTP server in-process, spawns the `@lore/dashboard` Vite dev server, ensures `.lore/local-key` exists, and injects a one-time bootstrap token so the SPA can exchange it for an HttpOnly session cookie.
 
 `serve` mounts the HTTP adapter; `agent` manages API keys for AI agents — create/list/revoke (SPEC-010 §3.2), NOT an MCP launcher (MCP is entered via the top-level `--mcp-server` flag only); `eval` runs evaluation scenarios.
 

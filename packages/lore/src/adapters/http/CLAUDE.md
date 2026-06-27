@@ -6,7 +6,7 @@
 
 ## Key Invariants
 
-- **All `/api/*` requests require a valid API key.** `authenticateRequest` checks the bearer token against `ApiKeyStore`; unauthenticated requests return `401 UNAUTHORIZED`. `/health` is the only unauthenticated route.
+- **All `/api/*` requests require a valid identity.** `authenticateRequest` checks the `lore_sid` HttpOnly cookie first (resolved via `SessionStore`); if absent or expired, it falls back to the bearer-token path (`ApiKeyStore`). Unauthenticated requests return `401 UNAUTHORIZED`. `/health` is the only unauthenticated route. `POST /api/auth/local-bootstrap` self-authenticates via `X-Lore-Token` header + Origin allowlist (SPEC-016).
 - **API keys are SHA-256 hashed at rest.** Raw key format is `lore_ak_` + 32 hex chars (`generateApiKey`). Only the SHA-256 hash is written to `api_keys`; the raw key is shown to the user once on creation and never stored.
 - **`ApiKeyStore` takes a `bun:sqlite Database` directly**, not a `StoreInterface`. With `TursoStore` enabled, the composition root opens a separate `Database` against the same local replica file so `api_keys` shares the replicated dataset. Verified by `tests/unit/store/libsql-compat.bun.test.ts`.
 - **JSON envelope** — success → `{ ok: true, value: T }` via `jsonOk`; failure → `{ ok: false, error: { code, message } }` via `jsonError` or `loreErrorResponse`. Status codes mirror the CLI exit-code semantics (4xx for validation/lifecycle, 404 for not-found, 409 for stale version, 5xx for store errors). Never leak raw `Error.stack`.
@@ -23,8 +23,9 @@
 ## Files
 
 - `index.ts` — `startHttpServer`; `Bun.serve` wrapper, `/health` route, auth gate, top-level error handler.
-- `auth.ts` — `generateApiKey`, `hashApiKey`, `ApiKeyStore`, `authenticateRequest`, `ActorContext`.
-- `routes.ts` — `handleApiRoute`; per-endpoint handlers calling services.
+- `auth.ts` — `generateApiKey`, `hashApiKey`, `ApiKeyStore`, `authenticateRequest` (cookie-first → bearer-fallback), `extractSessionCookie`, `ALLOWED_ORIGINS`, `ActorContext`.
+- `sessions.ts` — `SessionStore` (CREATE TABLE IF NOT EXISTS on construct + pruneExpired): `create / resolve / touch / delete`. Sliding 30-day TTL (SPEC-016).
+- `routes.ts` — `handleApiRoute`; per-endpoint handlers calling services. Auth routes: `POST /api/auth/local-bootstrap`, `GET /api/auth/me`, `POST /api/auth/logout`.
 - `middleware.ts` — `jsonOk`, `jsonError`, `loreErrorResponse`, `parseJsonBody`, `corsPreflightResponse`.
 - `sync-push.ts` — `pushToRemote(localPath, remoteUrl, authToken)`; libsql batch INSERT OR IGNORE.
 

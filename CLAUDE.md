@@ -120,6 +120,7 @@ All feature specs live under `docs/requirements/spec/`. When implementing or cha
 - `SPEC-013` — FTS5 resilience + eval scenarios
 - `SPEC-014` — Monorepo skeleton (Bun workspaces, @lore/core + @lore/lore + @lore/dashboard)
 - `SPEC-015` — Dashboard read-only skeleton (Vite + React + shadcn; list/search/tree/detail)
+- `SPEC-016` — Cookie auth via CLI-managed local bootstrap (`lore dashboard` + sessions table)
 
 ## Implementation Status
 
