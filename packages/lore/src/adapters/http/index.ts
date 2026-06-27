@@ -1,11 +1,11 @@
 /**
  * HTTP server — Bun.serve() wrapper that mounts the API router and auth middleware.
- * Source: SPEC-011 §4, §6
+ * Source: SPEC-011 §4, §6; SPEC-016 §3.3 (cookie-first auth + bootstrap route)
  */
 
 import type { App } from "../../app.js";
 import { authenticateRequest } from "./auth.js";
-import { handleApiRoute } from "./routes.js";
+import { handleApiRoute, handleLocalBootstrap } from "./routes.js";
 import { jsonError, corsPreflightResponse } from "./middleware.js";
 
 export interface HttpConfig {
@@ -16,8 +16,9 @@ export interface HttpConfig {
 /**
  * Start the Lore HTTP server.
  * Mounts:
- *   GET  /health          — unauthenticated health check
- *   *    /api/*           — API routes (bearer token required)
+ *   GET  /health                       — unauthenticated health check
+ *   POST /api/auth/local-bootstrap     — open route; own auth (X-Lore-Token + Origin)
+ *   *    /api/*                        — API routes (cookie OR bearer token required)
  * Returns the server instance (Bun.Server).
  */
 export function startHttpServer(app: App, config: HttpConfig = {}): ReturnType<typeof Bun.serve> {
@@ -42,9 +43,16 @@ export function startHttpServer(app: App, config: HttpConfig = {}): ReturnType<t
         });
       }
 
-      // All /api/* routes require authentication
+      // All /api/* routes require authentication, EXCEPT /api/auth/local-bootstrap which has own auth.
       if (url.pathname.startsWith("/api/")) {
-        const authResult = await authenticateRequest(req, app.apiKeyStore);
+        // reason: POST /api/auth/local-bootstrap bypasses authenticateRequest — it uses X-Lore-Token
+        // + Origin allowlist for its own auth. It must run BEFORE the bearer/cookie gate to avoid
+        // a chicken-and-egg deadlock (no session yet → no auth → can't bootstrap). SPEC-016 §3.2.
+        if (req.method === "POST" && url.pathname === "/api/auth/local-bootstrap") {
+          return handleLocalBootstrap(req, app);
+        }
+
+        const authResult = await authenticateRequest(req, app.apiKeyStore, app.sessionStore);
         if (!authResult.ok) {
           return jsonError({ code: "UNAUTHORIZED", message: "Invalid or missing API key" }, 401);
         }

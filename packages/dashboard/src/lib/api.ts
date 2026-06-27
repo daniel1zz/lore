@@ -139,6 +139,10 @@ async function fetchJson<T>(path: string): Promise<T> {
     response = await fetch(path, {
       headers: { Accept: "application/json" },
       signal: AbortSignal.timeout(5000),
+      // reason: credentials: "include" sends the lore_sid session cookie set by bootstrapAuthIfNeeded().
+      // Without this flag, the browser omits cookies even for same-origin requests made via
+      // the Vite proxy. AC-A-S3. SPEC-016 §3.9.
+      credentials: "include",
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Network error";

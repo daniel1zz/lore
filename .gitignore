@@ -10,3 +10,4 @@ coverage/
 docs/.docman/
 packages/*/node_modules
 packages/*/dist
+.lore/local-key
