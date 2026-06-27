@@ -1,16 +1,74 @@
 /**
  * HTTP API route handler — maps URL patterns to service calls.
  * Each route parses params/query/body, calls the service, and returns a JSON envelope.
- * Source: SPEC-011 §3
+ * Source: SPEC-011 §3; SPEC-016 §3.2 (auth routes: local-bootstrap, me, logout)
  */
 
 import type { App } from "../../app.js";
 import type { ActorContext } from "./auth.js";
-import { jsonOk, jsonError, loreErrorResponse, parseJsonBody } from "./middleware.js";
+import { ALLOWED_ORIGINS } from "./auth.js";
+import { jsonOk, jsonError, loreErrorResponse, parseJsonBody, corsHeaders } from "./middleware.js";
 import type { ListFilters, SearchFilters } from "../../service/corpus-service.js";
 import type { PendingFilters } from "../../service/review-service.js";
 import type { CreateDocInput, DocPatch } from "@lore/core";
 import type { DocStatus, DocType, LinkType } from "@lore/core";
+
+// ─── Auth route handlers (SPEC-016) ────────────────────────────────────────────
+
+/**
+ * POST /api/auth/local-bootstrap — trade raw API key for an HttpOnly session cookie.
+ * Verifies Origin against ALLOWED_ORIGINS and X-Lore-Token against api_keys.
+ * Called BEFORE authenticateRequest in index.ts (no prior auth required).
+ *
+ * @param req - Incoming request with X-Lore-Token header and Origin header.
+ * @param app - App instance (needs apiKeyStore and sessionStore).
+ * @returns 200 + Set-Cookie on success, 403 on bad Origin, 401 on bad token.
+ */
+export async function handleLocalBootstrap(req: Request, app: App): Promise<Response> {
+  // Validate Origin against allowlist — CSRF protection for bootstrap endpoint.
+  const origin = req.headers.get("Origin") ?? "";
+  if (!(ALLOWED_ORIGINS as readonly string[]).includes(origin)) {
+    return jsonError(
+      { code: "VALIDATION_ERROR", field: "Origin", message: `Origin not in allowlist: ${origin}` },
+      403,
+    );
+  }
+
+  const token = req.headers.get("X-Lore-Token");
+  if (token === null || token.trim() === "") {
+    return jsonError(
+      { code: "VALIDATION_ERROR", field: "X-Lore-Token", message: "Missing X-Lore-Token header" },
+      401,
+    );
+  }
+
+  // Validate the raw key against api_keys (SHA-256 match).
+  const validateResult = await app.apiKeyStore.validate(token.trim());
+  if (!validateResult.ok) {
+    return jsonError(
+      { code: "VALIDATION_ERROR", field: "X-Lore-Token", message: "Invalid token" },
+      401,
+    );
+  }
+
+  if (app.sessionStore === undefined) {
+    return jsonError({ code: "STORE_ERROR", message: "Session store not initialised" }, 500);
+  }
+
+  const { session_id, expires_at } = app.sessionStore.create(validateResult.value.name);
+
+  // reason: Set-Cookie must be in the Response headers, not in CORS headers.
+  // Max-Age=2592000 = 30 days in seconds. Path=/api keeps the cookie scoped to API routes
+  // only — Vite's / routes never see it, reducing exposure. SPEC-016 §3.2.
+  const cookieValue = `lore_sid=${session_id}; HttpOnly; SameSite=Strict; Path=/api; Max-Age=2592000`;
+  const headers = new Headers(corsHeaders({ "Content-Type": "application/json" }));
+  headers.set("Set-Cookie", cookieValue);
+
+  return new Response(
+    JSON.stringify({ ok: true, data: { session_id, expires_at } }),
+    { status: 200, headers },
+  );
+}
 
 // ─── Route dispatcher ───────────────────────────────────────────────────────
 
@@ -22,13 +80,28 @@ export async function handleApiRoute(
   req: Request,
   url: URL,
   app: App,
-  _actor: ActorContext,
+  actor: ActorContext,
 ): Promise<Response | null> {
   const method = req.method.toUpperCase();
   const path = url.pathname;
 
   // OPTIONS — CORS preflight (already handled in server, but guard here too)
   if (method === "OPTIONS") return new Response(null, { status: 204 });
+
+  // GET /api/auth/me — return session actor context (SPEC-016 §3.2)
+  if (method === "GET" && path === "/api/auth/me") {
+    return jsonOk({
+      name: actor.name,
+      owner: actor.owner ?? "admin",
+      session_id: actor.session_id,
+      expires_at: actor.expires_at ?? null,
+    });
+  }
+
+  // POST /api/auth/logout — delete session + clear cookie (SPEC-016 §3.2)
+  if (method === "POST" && path === "/api/auth/logout") {
+    return handleLogout(actor, app);
+  }
 
   // GET /api/status
   if (method === "GET" && path === "/api/status") {
@@ -87,6 +160,29 @@ export async function handleApiRoute(
 }
 
 // ─── Route handlers ─────────────────────────────────────────────────────────
+
+/**
+ * POST /api/auth/logout — delete the session row and clear the lore_sid cookie.
+ * Idempotent: calling when no session row exists is a no-op (still returns ok).
+ */
+function handleLogout(actor: ActorContext, app: App): Response {
+  if (app.sessionStore !== undefined) {
+    // reason: actor.session_id for cookie-auth is the actual 32-hex session_id.
+    // For bearer-auth, it's a hash prefix — no matching session row, so delete is a no-op.
+    // Either way idempotent. SPEC-016 §3.2.
+    app.sessionStore.delete(actor.session_id);
+  }
+
+  // Clear the cookie by setting Max-Age=0.
+  const clearCookie = "lore_sid=; Path=/api; Max-Age=0";
+  const headers = new Headers(corsHeaders({ "Content-Type": "application/json" }));
+  headers.set("Set-Cookie", clearCookie);
+
+  return new Response(
+    JSON.stringify({ ok: true, data: { ok: true } }),
+    { status: 200, headers },
+  );
+}
 
 async function handleStatus(app: App): Promise<Response> {
   const result = await app.corpusService.status();

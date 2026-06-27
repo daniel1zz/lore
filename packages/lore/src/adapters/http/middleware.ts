@@ -67,7 +67,9 @@ export function corsHeaders(extra: Record<string, string> = {}): Record<string, 
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Authorization, Content-Type",
+    // reason: X-Lore-Token is used by POST /api/auth/local-bootstrap bootstrap exchange (SPEC-016 §3.2).
+    // Including it here ensures CORS preflight allows it when accessed directly (not via Vite proxy).
+    "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Lore-Token",
     ...extra,
   };
 }

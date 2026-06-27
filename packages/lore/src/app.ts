@@ -26,6 +26,7 @@ import { OutlineService } from "./service/outline-service.js";
 import { MigrationService } from "./service/migration-service.js";
 import { TreeCheckService } from "./service/tree-check-service.js";
 import { ApiKeyStore } from "./adapters/http/auth.js";
+import { SessionStore } from "./adapters/http/sessions.js";
 import { resolveSyncCredentials, type LoreConfig } from "@lore/core";
 import { err, type Result, type LoreError } from "@lore/core";
 import {
@@ -42,6 +43,12 @@ export interface App {
   migrationService: MigrationService;
   treeCheckService: TreeCheckService;
   apiKeyStore: ApiKeyStore;
+  /**
+   * SessionStore — optional so existing test stubs (InMemoryStore-backed) remain valid.
+   * Always present in production (HTTP server). Absent in test stubs that don't exercise auth.
+   * Source: SPEC-016 §3.5
+   */
+  sessionStore?: SessionStore;
   close(): void;
 }
 
@@ -51,6 +58,7 @@ export interface App {
  * @param telemetry - Telemetry sink; defaults to NoOpTelemetry (no file I/O unless opted in)
  */
 function buildAppFromSqlite(store: SQLiteStore, telemetry: Telemetry = new NoOpTelemetry()): App {
+  const db = store.getDatabase();
   return {
     corpusService: new CorpusService(store, telemetry),
     reviewService: new ReviewService(store),
@@ -58,7 +66,10 @@ function buildAppFromSqlite(store: SQLiteStore, telemetry: Telemetry = new NoOpT
     outlineService: new OutlineService(store),
     migrationService: new MigrationService(store),
     treeCheckService: new TreeCheckService(store),
-    apiKeyStore: new ApiKeyStore(store.getDatabase()),
+    apiKeyStore: new ApiKeyStore(db),
+    // reason: SessionStore shares the same Database as ApiKeyStore — one connection, no WAL lock
+    // contention. Both auth tables live in the same SQLite file. SPEC-016 §3.5.
+    sessionStore: new SessionStore(db),
     close: () => { telemetry.close(); store.close(); },
   };
 }
@@ -83,6 +94,10 @@ function buildAppFromTurso(store: TursoStore, dbPath: string, telemetry: Telemet
     migrationService: new MigrationService(store),
     treeCheckService: new TreeCheckService(store),
     apiKeyStore: new ApiKeyStore(apiKeyDb),
+    // reason: Same local replica file as ApiKeyStore — sessions table lives alongside api_keys.
+    // api_keys is one of the 5 replicated tables; sessions is local-only (SPEC-016 non-goal:
+    // sessions are ephemeral, not replicated). SPEC-016 §3.5.
+    sessionStore: new SessionStore(apiKeyDb),
     close: () => { telemetry.close(); store.close(); apiKeyDb.close(); },
   };
 }

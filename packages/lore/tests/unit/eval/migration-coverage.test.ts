@@ -58,16 +58,16 @@ Content for ${id}.
 describe("HAPPY — migration coverage against docs/requirements", () => {
   it("imports all parseable files and reports passed=true", async () => {
     // Use the real docs/requirements directory.
-    // 16 .md files (1 PRD + SPEC-001..SPEC-015), all have valid YAML frontmatter (parseable).
-    // expected_files = analyze().parseable = 16; imported = 16; links_broken = 0 → passed=true
+    // 17 .md files (1 PRD + SPEC-001..SPEC-016), all have valid YAML frontmatter (parseable).
+    // expected_files = analyze().parseable = 17; imported = 17; links_broken = 0 → passed=true
     const sourceDir = join(process.cwd(), "docs", "requirements");
     const app = makeApp();
     const result = await runMigrationCoverage(sourceDir, app);
     app.close();
 
     expect(result.source_dir).toBe(sourceDir);
-    expect(result.expected_files).toBe(16);
-    expect(result.imported).toBe(16);
+    expect(result.expected_files).toBe(17);
+    expect(result.imported).toBe(17);
     expect(result.already_existed).toBe(0);
     expect(result.links_broken).toBe(0);
     expect(result.passed).toBe(true);
