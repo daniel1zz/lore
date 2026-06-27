@@ -1,6 +1,6 @@
 /** @spec_ref AC-CORE-006 */
 import { describe, it, expect } from "vitest";
-import { ok, err, type Result, type LoreError } from "@core/errors";
+import { ok, err, type Result, type LoreError } from "@lore/core";
 
 // Test plan for errors module:
 // HAPPY: ok() wraps value, err() wraps error, all 12 LoreError codes constructable

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-MCP (Model Context Protocol) stdio adapter. Entered via `lore --mcp-server` (top-level flag intercepted in `src/index.ts`) or `lore agent`. Registers 16 `lore_*` tools and a small set of MCP resources against `@modelcontextprotocol/sdk`'s `McpServer` and connects over `StdioServerTransport`.
+MCP (Model Context Protocol) stdio adapter. Entered via `lore --mcp-server` (top-level flag intercepted in `packages/lore/src/index.ts`) or `lore agent`. Registers 16 `lore_*` tools and a small set of MCP resources against `@modelcontextprotocol/sdk`'s `McpServer` and connects over `StdioServerTransport`.
 
 ## Key Invariants
 
@@ -27,5 +27,5 @@ MCP (Model Context Protocol) stdio adapter. Entered via `lore --mcp-server` (top
 
 ## Links
 
-- Depends on: [`src/core`](../../core/CLAUDE.md), [`src/service`](../../service/CLAUDE.md) (via App).
-- Entry points: `src/index.ts` (`--mcp-server`) and [`src/adapters/cli`](../cli/CLAUDE.md) `lore agent`.
+- Depends on: [`@lore/core`](../../../../../core/src/CLAUDE.md), [`../../service`](../../service/CLAUDE.md) (via App).
+- Entry points: `../../index.ts` (`--mcp-server`) and [`../cli`](../cli/CLAUDE.md) `lore agent`.

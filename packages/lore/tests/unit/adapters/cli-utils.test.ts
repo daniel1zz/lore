@@ -13,7 +13,7 @@ import {
   formatNavigation,
   relativeTime,
 } from "../../../src/adapters/cli/utils.js";
-import type { LoreError } from "../../../src/core/errors.js";
+import type { LoreError } from "@lore/core";
 import type { TreeNode } from "../../../src/service/corpus-service.js";
 
 // ─── exitCode ──────────────────────────────────────────────────────────────

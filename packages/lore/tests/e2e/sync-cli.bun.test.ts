@@ -26,8 +26,8 @@ import { join } from "node:path";
 // ─── Module Imports ──────────────────────────────────────────────────────────
 
 import { createApp, type App } from "../../src/app.js";
-import type { LoreConfig } from "../../src/core/config.js";
-import type { Result, LoreError } from "../../src/core/errors.js";
+import type { LoreConfig } from "@lore/core";
+import type { Result, LoreError } from "@lore/core";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

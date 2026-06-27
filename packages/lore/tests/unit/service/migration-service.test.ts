@@ -23,8 +23,8 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { InMemoryStore } from "@store/in-memory-store";
-import { MigrationService } from "@service/migration-service";
+import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { MigrationService } from "../../../src/service/migration-service.js";
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 

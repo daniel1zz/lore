@@ -9,20 +9,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-bun run dev               # Run from source (src/index.ts)
+bun run dev               # Run from source (packages/lore/src/index.ts)
 bun run build             # Compile to dist/lore binary (bun build --compile)
-bun run typecheck         # tsc --noEmit for src + tests projects
+bun run typecheck         # tsc --noEmit for all packages + scripts
 
 # Tests — two runners, both must pass
 bun run test:vitest       # bunx vitest run — covers non-bun:sqlite files
-bun run test:bun          # bun test .bun.test — covers SQLiteStore + bun:sqlite tests
+bun run test:bun          # cd packages/lore && bun test .bun.test
 bun run test              # both runners in sequence
 
 # Run a single vitest test file
-bunx vitest run tests/unit/service/corpus-service.test.ts
+bunx vitest run packages/lore/tests/unit/service/corpus-service.test.ts
 
 # Run a single bun test file
-bun test tests/unit/store/sqlite-store.bun.test.ts
+cd packages/lore && bun test tests/unit/store/sqlite-store.bun.test.ts
 ```
 
 **Test file convention**: Files ending in `.bun.test.ts` run under `bun test` only (they use `bun:sqlite`). All other `.test.ts` files run under vitest. Do not mix runners.
@@ -32,20 +32,20 @@ bun test tests/unit/store/sqlite-store.bun.test.ts
 ### Layer Stack
 
 ```
-src/adapters/cli/        ← citty CLI (default entry, 22 subcommands)
-src/adapters/mcp/        ← MCP stdio server (entered via --mcp-server flag)
-src/adapters/http/       ← Bun.serve HTTP + bearer-auth (lore serve) + sync-push
-src/app.ts               ← composition root: createApp(dbPath, config?) → App | Result<App>
-src/index.ts             ← entry: routes to MCP server or citty CLI based on argv
-src/service/             ← business logic, all return Promise<Result<T, LoreError>>
-src/store/               ← async storage abstraction (StoreInterface)
-src/core/                ← types, errors, Zod schemas, config, telemetry
-src/eval/                ← read-only evaluation scenarios (lore eval)
+packages/lore/src/adapters/cli/   ← citty CLI (default entry, 22 subcommands)
+packages/lore/src/adapters/mcp/   ← MCP stdio server (entered via --mcp-server flag)
+packages/lore/src/adapters/http/  ← Bun.serve HTTP + bearer-auth (lore serve) + sync-push
+packages/lore/src/app.ts          ← composition root: createApp(dbPath, config?) → App | Result<App>
+packages/lore/src/index.ts        ← entry: routes to MCP server or citty CLI based on argv
+packages/lore/src/service/        ← business logic, all return Promise<Result<T, LoreError>>
+packages/lore/src/store/          ← async storage abstraction (StoreInterface)
+packages/core/src/                ← types, errors, Zod schemas, config, telemetry (@lore/core)
+packages/lore/src/eval/           ← read-only evaluation scenarios (lore eval)
 ```
 
 ### Key Design Decisions
 
-**Result<T, LoreError>** — no exceptions cross service boundaries. Every service method returns `Promise<{ ok: true; value: T } | { ok: false; error: LoreError }>`. Use `ok()` and `err()` helpers from `src/core/errors.ts`. 13 error codes in the discriminated union.
+**Result<T, LoreError>** — no exceptions cross service boundaries. Every service method returns `Promise<{ ok: true; value: T } | { ok: false; error: LoreError }>`. Use `ok()` and `err()` helpers from `@lore/core`. 13 error codes in the discriminated union.
 
 **StoreInterface is async** — methods return `Promise<Result<T, LoreError>>`. This is the contract both `SQLiteStore` (wraps sync `bun:sqlite` calls) and `TursoStore` (`@libsql/client`, natively async) implement. `InMemoryStore` is the test double. Services depend on `StoreInterface`, never on a concrete store.
 
@@ -54,7 +54,7 @@ src/eval/                ← read-only evaluation scenarios (lore eval)
 - `sync.enabled: true` + `remote_url` + valid `LORE_SYNC_TOKEN` env var → `TursoStore` (embedded replica) wrapped in `Result<App>`.
 - Sync enabled but credentials missing or TursoStore construction fails → `err(STORE_ERROR)`. **No silent fallback** to SQLiteStore — offline writes must not land only-local.
 
-**Path aliases** — `tsconfig.json` defines `@core/*`, `@store/*`, `@service/*`, `@adapters/*`. Available in source and tests; vitest mirrors them via `resolve.alias`.
+**Import style (monorepo)** — path aliases `@core/*`, `@store/*`, `@service/*`, `@adapters/*` are retired. Cross-package imports use `@lore/core` (resolved via Bun workspaces). Intra-package imports within `packages/lore/` use relative `.js` paths. No `resolve.alias` in vitest.
 
 **DocRecord has two identifier fields**: `id` (ULID, immutable PK) and `slug` (human-readable, editable, format `{type}-{kebab-title}`). Service methods accept either via `corpusService.resolve(idOrSlug)` (helper in `src/service/resolve.ts`).
 
@@ -62,7 +62,7 @@ src/eval/                ← read-only evaluation scenarios (lore eval)
 
 **FTS5 query escaping (`escapeFtsQuery` in `store-shared.ts`)** — user search input is wrapped per whitespace-piece in `"…"` phrase quotes, with internal `"` escaped to `""`. Neutralises FTS5 operators (`-`, `()`, `*`, `OR`, `AND`, `NOT`, `:`). Empty input → short-circuit, never reaches FTS5 MATCH.
 
-### Service Layer (`src/service/`)
+### Service Layer (`packages/lore/src/service/`)
 
 | Service | Responsibility |
 |---|---|
@@ -73,11 +73,11 @@ src/eval/                ← read-only evaluation scenarios (lore eval)
 | `MigrationService` | One-shot v1→v2 import: parse YAML frontmatter MD files, map types, insert docs + links |
 | `TreeCheckService` | Tree-structure drift detection, auto-fix, parent_id ↔ link-table reconciliation |
 
-All services are stateless — state lives entirely in `StoreInterface`. Telemetry is wired in `CorpusService` only (see `core/telemetry.ts`, opt-in via config).
+All services are stateless — state lives entirely in `StoreInterface`. Telemetry is wired in `CorpusService` only (see `packages/core/src/telemetry.ts`, opt-in via config).
 
 ### Document Lifecycle
 
-Status transitions (`src/core/schemas.ts → VALID_TRANSITIONS`):
+Status transitions (`packages/core/src/schemas.ts → VALID_TRANSITIONS`):
 
 ```
 draft → in-review → approved → active → archived
@@ -99,7 +99,7 @@ Whitelisted components resolved at read time: `ChildrenOf`, `RecentDecisions`, `
 - `knowledge` requires `extra.sub_type` (`ideation | retro | research | reference`)
 - `task` requires `extra.plan_id`
 
-Enforced via Zod `superRefine` in `src/core/schemas.ts`.
+Enforced via Zod `superRefine` in `packages/core/src/schemas.ts`.
 
 ## Specs
 
@@ -130,13 +130,13 @@ The v1 predecessor at `/Users/apple/.claude/docman-mcp` remains frozen. Do not c
 
 Module-specific context lives alongside the code:
 
-- [`src/core`](src/core/CLAUDE.md) — types, Result/LoreError, Zod schemas, lifecycle rules, config, telemetry
-- [`src/service`](src/service/CLAUDE.md) — six stateless services, all return `Promise<Result<T, LoreError>>`
-- [`src/store`](src/store/CLAUDE.md) — async StoreInterface + SQLite / Turso / InMemory + FTS5 escape
-- [`src/adapters/cli`](src/adapters/cli/CLAUDE.md) — citty CLI, 22 subcommands, exit-code mapping
-- [`src/adapters/mcp`](src/adapters/mcp/CLAUDE.md) — MCP stdio server, 16 `lore_*` tools, fast-path registration
-- [`src/adapters/http`](src/adapters/http/CLAUDE.md) — Bun.serve API, bearer-token auth, sync-push
-- [`src/eval`](src/eval/CLAUDE.md) — six read-only evaluation scenarios under `lore eval`
+- [`@lore/core`](packages/core/src/CLAUDE.md) — types, Result/LoreError, Zod schemas, lifecycle rules, config, telemetry
+- [`packages/lore/src/service`](packages/lore/src/service/CLAUDE.md) — six stateless services, all return `Promise<Result<T, LoreError>>`
+- [`packages/lore/src/store`](packages/lore/src/store/CLAUDE.md) — async StoreInterface + SQLite / Turso / InMemory + FTS5 escape
+- [`packages/lore/src/adapters/cli`](packages/lore/src/adapters/cli/CLAUDE.md) — citty CLI, 22 subcommands, exit-code mapping
+- [`packages/lore/src/adapters/mcp`](packages/lore/src/adapters/mcp/CLAUDE.md) — MCP stdio server, 16 `lore_*` tools, fast-path registration
+- [`packages/lore/src/adapters/http`](packages/lore/src/adapters/http/CLAUDE.md) — Bun.serve API, bearer-token auth, sync-push
+- [`packages/lore/src/eval`](packages/lore/src/eval/CLAUDE.md) — six read-only evaluation scenarios under `lore eval`
 <!-- /auto:module-index -->
 
 <!-- auto:dynamic-context -->

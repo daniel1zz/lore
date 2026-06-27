@@ -10,9 +10,9 @@ import { readFileSync, readdirSync, statSync } from "fs";
 import { join, extname } from "path";
 import { parse as parseYaml } from "yaml";
 import { ulid } from "ulidx";
-import { err, ok } from "../core/errors.js";
-import { slugify, slugifyWithCollision } from "../core/schemas.js";
-import type { LoreError, Result } from "../core/errors.js";
+import { err, ok } from "@lore/core";
+import { slugify, slugifyWithCollision } from "@lore/core";
+import type { LoreError, Result } from "@lore/core";
 import type {
   DocId,
   DocRecord,
@@ -22,7 +22,7 @@ import type {
   LinkRecord,
   LinkType,
   Priority,
-} from "../core/types.js";
+} from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────

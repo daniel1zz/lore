@@ -17,7 +17,7 @@
 
 import { existsSync } from "fs";
 import { join, dirname } from "path";
-import type { LoreError } from "../../core/errors.js";
+import type { LoreError } from "@lore/core";
 import type { TreeNode } from "../../service/corpus-service.js";
 import type { DocWithNavigation } from "../../service/corpus-service.js";
 

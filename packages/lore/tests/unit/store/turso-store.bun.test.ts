@@ -64,7 +64,7 @@ import type {
   DocRecord,
   LinkRecord,
   VersionRecord,
-} from "../../../src/core/types.js";
+} from "@lore/core";
 
 // ─── Factories ───────────────────────────────────────────────────────────────
 

@@ -4,7 +4,7 @@
  * RED integration tests for syncPush — logical replication from local to remote.
  *
  * CONSTRUCTION ASSUMPTIONS:
- *   Import: import { syncPush, type PushReport, type TableReport } from "@adapters/http/sync-push"
+ *   Import: import { syncPush, type PushReport, type TableReport } from "../../../src/adapters/http/sync-push.js"
  *
  *   syncPush(localPath: string, remoteClient: Client): Promise<Result<PushReport, LoreError>>
  *
@@ -33,7 +33,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createClient, type Client } from "@libsql/client";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
-import type { DocRecord, LinkRecord, VersionRecord, AuditEntry } from "../../../src/core/types.js";
+import type { DocRecord, LinkRecord, VersionRecord, AuditEntry } from "@lore/core";
 import { MIGRATION_001_SQL } from "../../../src/store/migrations/migration-001.js";
 import { MIGRATION_002_SQL } from "../../../src/store/migrations/migration-002.js";
 

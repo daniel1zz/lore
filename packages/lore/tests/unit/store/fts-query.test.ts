@@ -36,7 +36,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import { escapeFtsQuery } from "@store/store-shared";
+import { escapeFtsQuery } from "../../../src/store/store-shared.js";
 
 // ─── Happy Path ───────────────────────────────────────────────────────────────
 

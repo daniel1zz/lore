@@ -8,3 +8,5 @@ coverage/
 
 .agent-worktree-marker
 docs/.docman/
+packages/*/node_modules
+packages/*/dist

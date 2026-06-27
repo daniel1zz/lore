@@ -21,11 +21,11 @@
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
-import { InMemoryStore } from "@store/in-memory-store.js";
-import { CorpusService } from "@service/corpus-service.js";
-import { ReviewService } from "@service/review-service.js";
-import { VersionService } from "@service/version-service.js";
-import type { DocRecord } from "@core/types.js";
+import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { CorpusService } from "../../../src/service/corpus-service.js";
+import { ReviewService } from "../../../src/service/review-service.js";
+import { VersionService } from "../../../src/service/version-service.js";
+import type { DocRecord } from "@lore/core";
 
 // ─── Factories ────────────────────────────────────────────────────────────────
 

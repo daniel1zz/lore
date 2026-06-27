@@ -29,5 +29,5 @@ Read-only evaluation scenarios that measure corpus health and search quality. Si
 
 ## Links
 
-- Depends on: [`src/core`](../core/CLAUDE.md), [`src/service`](../service/CLAUDE.md), [`src/store`](../store/CLAUDE.md) (transitively via App).
-- Entry point: [`src/adapters/cli`](../adapters/cli/CLAUDE.md) `lore eval`.
+- Depends on: [`@lore/core`](../../../../core/src/CLAUDE.md), [`../service`](../service/CLAUDE.md), [`../store`](../store/CLAUDE.md) (transitively via App).
+- Entry point: [`../adapters/cli`](../adapters/cli/CLAUDE.md) `lore eval`.

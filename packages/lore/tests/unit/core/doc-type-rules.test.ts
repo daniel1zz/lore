@@ -33,7 +33,7 @@ import {
   PARENT_TYPE_CONTRACT,
   isValidParentType,
   ROOT_TYPES,
-} from "../../../src/core/doc-type-rules.js";
+} from "@lore/core";
 
 // ── HAPPY path ───────────────────────────────────────────────────────────────
 

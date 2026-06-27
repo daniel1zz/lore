@@ -15,7 +15,7 @@ import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
 import { openEditor } from "../editor.js";
-import type { DocType, Priority } from "../../../core/types.js";
+import type { DocType, Priority } from "@lore/core";
 
 const VALID_TYPES: DocType[] = ["prd", "spec", "adr", "plan", "knowledge", "task"];
 

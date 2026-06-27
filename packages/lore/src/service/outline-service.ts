@@ -9,9 +9,9 @@
  * Source: SPEC-004, SPEC-001 §3.4
  */
 
-import type { DocRecord, DocSummary } from "../core/types.js";
-import { ok, err, type Result } from "../core/errors.js";
-import type { LoreError } from "../core/errors.js";
+import type { DocRecord, DocSummary } from "@lore/core";
+import { ok, err, type Result } from "@lore/core";
+import type { LoreError } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 
 // ─── Public Types ───────────────────────────────────────────────────────────
@@ -133,8 +133,8 @@ async function resolveChildrenOf(
 ): Promise<Result<ComponentData, LoreError>> {
   const filters = {
     parent_id: doc.id as string,
-    ...(typeof props["type"] === "string" ? { type: props["type"] as import("../core/types.js").DocType } : {}),
-    ...(typeof props["status"] === "string" ? { status: props["status"] as import("../core/types.js").DocStatus } : {}),
+    ...(typeof props["type"] === "string" ? { type: props["type"] as import("@lore/core").DocType } : {}),
+    ...(typeof props["status"] === "string" ? { status: props["status"] as import("@lore/core").DocStatus } : {}),
   };
 
   const result = await store.findMany(filters);
@@ -150,8 +150,8 @@ async function resolveRecentDecisions(
 ): Promise<Result<ComponentData, LoreError>> {
   const limit = typeof props["limit"] === "number" ? props["limit"] : 5;
   const filters = {
-    type: "adr" as import("../core/types.js").DocType,
-    ...(typeof props["status"] === "string" ? { status: props["status"] as import("../core/types.js").DocStatus } : {}),
+    type: "adr" as import("@lore/core").DocType,
+    ...(typeof props["status"] === "string" ? { status: props["status"] as import("@lore/core").DocStatus } : {}),
   };
 
   const result = await store.findMany(filters);
@@ -167,11 +167,11 @@ async function resolveActivePlans(
   store: StoreInterface,
 ): Promise<Result<ComponentData, LoreError>> {
   const statusFilter = typeof props["status"] === "string"
-    ? props["status"] as import("../core/types.js").DocStatus
-    : "active" as import("../core/types.js").DocStatus;
+    ? props["status"] as import("@lore/core").DocStatus
+    : "active" as import("@lore/core").DocStatus;
 
   const result = await store.findMany({
-    type: "plan" as import("../core/types.js").DocType,
+    type: "plan" as import("@lore/core").DocType,
     status: statusFilter,
   });
   if (!result.ok) return result;

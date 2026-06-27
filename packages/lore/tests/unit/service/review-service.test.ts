@@ -13,9 +13,9 @@
  */
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { InMemoryStore } from "@store/in-memory-store";
-import { ReviewService } from "@service/review-service";
-import type { DocRecord } from "@core/types";
+import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { ReviewService } from "../../../src/service/review-service.js";
+import type { DocRecord } from "@lore/core";
 
 // ─── Factories ───────────────────────────────────────────────────────────────
 

@@ -37,7 +37,7 @@
 
 import { z } from "zod";
 import type { App } from "../../app.js";
-import type { LoreError } from "../../core/errors.js";
+import type { LoreError } from "@lore/core";
 
 // ─── Placeholder Detection Regex ─────────────────────────────────────────────
 

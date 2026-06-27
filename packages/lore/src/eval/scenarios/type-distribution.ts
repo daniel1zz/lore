@@ -37,7 +37,7 @@
 
 import { z } from "zod";
 import type { App } from "../../app.js";
-import type { DocType } from "../../core/types.js";
+import type { DocType } from "@lore/core";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 

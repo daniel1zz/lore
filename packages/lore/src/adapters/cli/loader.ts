@@ -26,8 +26,8 @@ import {
   loadGlobalConfig,
   resolveGlobalConfigPath,
   mergeDefaults,
-} from "../../core/config.js";
-import type { LoreConfig, LoreDefaults } from "../../core/config.js";
+} from "@lore/core";
+import type { LoreConfig, LoreDefaults } from "@lore/core";
 import { createApp, type App } from "../../app.js";
 import { findLoreDbPath } from "./utils.js";
 

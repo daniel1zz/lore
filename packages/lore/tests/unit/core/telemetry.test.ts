@@ -15,7 +15,7 @@ import {
   createTelemetry,
   TelemetryEventSchema,
   type TelemetryEvent,
-} from "@core/telemetry.js";
+} from "@lore/core";
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 

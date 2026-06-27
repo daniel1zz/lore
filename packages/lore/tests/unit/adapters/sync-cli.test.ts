@@ -60,7 +60,7 @@ type SyncRunContext = {
 async function importSyncCommand() {
   // When implementation lands, this module will export a default citty command
   // with subCommands: { setup, status, push, pull }
-  const mod = await import("@adapters/cli/commands/sync");
+  const mod = await import("../../../src/adapters/cli/commands/sync.js");
   const cmd = (mod as any).default;
 
   if (!cmd) {
@@ -565,7 +565,7 @@ describe("REGRESSION — sync command module existence (SPEC-009 §5)", () => {
   it("default export from sync module is a citty command with sync subcommands", async () => {
     // This test verifies the basic module contract.
     // It will fail RED with "module not found" until implementation exists.
-    const mod = await import("@adapters/cli/commands/sync");
+    const mod = await import("../../../src/adapters/cli/commands/sync.js");
     const cmd = (mod as any).default;
 
     expect(cmd).toBeDefined();

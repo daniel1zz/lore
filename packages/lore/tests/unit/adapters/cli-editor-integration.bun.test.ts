@@ -132,7 +132,7 @@ afterEach(() => {
 // ─── DB init helper ───────────────────────────────────────────────────────────
 
 async function initLoreDb(): Promise<void> {
-  const initMod = await import("@adapters/cli/commands/init");
+  const initMod = await import("../../../src/adapters/cli/commands/init.js");
   const initCmd = (initMod as { default?: { run?: RunnableCommand["run"] } }).default;
   if (!initCmd?.run) throw new Error("init command not exported");
 
@@ -157,7 +157,7 @@ describe("lore create — AC-CR-1: editor opens when --content is absent", () =>
     // Fake editor writes "editor content here" to the file (EDITOR env var)
     process.env["EDITOR"] = writeEditorScript(scriptDir, "writer.sh", "editor content here");
 
-    const createMod = await import("@adapters/cli/commands/create");
+    const createMod = await import("../../../src/adapters/cli/commands/create.js");
     const cmd = (createMod as { default?: { run?: RunnableCommand["run"] } }).default;
     if (!cmd) throw new Error("create command not exported");
 
@@ -188,7 +188,7 @@ describe("lore create — AC-CR-2: --content flag bypasses editor", () => {
     writeFileSync(failScript, "#!/bin/sh\nexit 99\n", { mode: 0o755 });
     process.env["EDITOR"] = failScript;
 
-    const createMod = await import("@adapters/cli/commands/create");
+    const createMod = await import("../../../src/adapters/cli/commands/create.js");
     const cmd = (createMod as { default?: { run?: RunnableCommand["run"] } }).default;
     if (!cmd) throw new Error("create command not exported");
 
@@ -223,7 +223,7 @@ describe("lore create — AC-CR-3: editor error produces exit code 4", () => {
     writeFileSync(failScript, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
     process.env["EDITOR"] = failScript;
 
-    const createMod = await import("@adapters/cli/commands/create");
+    const createMod = await import("../../../src/adapters/cli/commands/create.js");
     const cmd = (createMod as { default?: { run?: RunnableCommand["run"] } }).default;
     if (!cmd) throw new Error("create command not exported");
 
@@ -248,7 +248,7 @@ describe("lore create — AC-CR-3: editor error produces exit code 4", () => {
     writeFileSync(eraserScript, "#!/bin/sh\n: > \"$1\"\n", { mode: 0o755 });
     process.env["EDITOR"] = eraserScript;
 
-    const createMod = await import("@adapters/cli/commands/create");
+    const createMod = await import("../../../src/adapters/cli/commands/create.js");
     const cmd = (createMod as { default?: { run?: RunnableCommand["run"] } }).default;
     if (!cmd) throw new Error("create command not exported");
 
@@ -275,7 +275,7 @@ describe("lore create — AC-CR-4: --json mode + editor flow", () => {
 
     process.env["EDITOR"] = writeEditorScript(scriptDir, "writer2.sh", "json editor content");
 
-    const createMod = await import("@adapters/cli/commands/create");
+    const createMod = await import("../../../src/adapters/cli/commands/create.js");
     const cmd = (createMod as { default?: { run?: RunnableCommand["run"] } }).default;
     if (!cmd) throw new Error("create command not exported");
 
@@ -303,7 +303,7 @@ describe("lore set — AC-SET-1: editor opens when no flags provided", () => {
   it.skipIf(isWindows)("prints 'no changes' when editor returns same content (noop script)", async () => {
     await initLoreDb();
 
-    const createMod = await import("@adapters/cli/commands/create");
+    const createMod = await import("../../../src/adapters/cli/commands/create.js");
     const createCmd = (createMod as { default?: { run?: RunnableCommand["run"] } }).default;
     if (!createCmd) throw new Error("create command not exported");
 
@@ -329,7 +329,7 @@ describe("lore set — AC-SET-1: editor opens when no flags provided", () => {
     writeFileSync(noopScript, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
     process.env["EDITOR"] = noopScript;
 
-    const setMod = await import("@adapters/cli/commands/set");
+    const setMod = await import("../../../src/adapters/cli/commands/set.js");
     const setCmd = (setMod as { default?: { run?: RunnableCommand["run"] } }).default;
     if (!setCmd) throw new Error("set command not exported");
 
@@ -351,7 +351,7 @@ describe("lore set — AC-SET-1: editor opens when no flags provided", () => {
   it.skipIf(isWindows)("bumps version when editor returns different content", async () => {
     await initLoreDb();
 
-    const createMod = await import("@adapters/cli/commands/create");
+    const createMod = await import("../../../src/adapters/cli/commands/create.js");
     const createCmd = (createMod as { default?: { run?: RunnableCommand["run"] } }).default;
     if (!createCmd) throw new Error("create command not exported");
 
@@ -375,7 +375,7 @@ describe("lore set — AC-SET-1: editor opens when no flags provided", () => {
     // Editor writes different content
     process.env["EDITOR"] = writeEditorScript(scriptDir, "changer.sh", "updated body");
 
-    const setMod = await import("@adapters/cli/commands/set");
+    const setMod = await import("../../../src/adapters/cli/commands/set.js");
     const setCmd = (setMod as { default?: { run?: RunnableCommand["run"] } }).default;
     if (!setCmd) throw new Error("set command not exported");
 
@@ -401,7 +401,7 @@ describe("lore set — AC-SET-2: any flag bypasses editor", () => {
   it.skipIf(isWindows)("does not open editor when --title is provided", async () => {
     await initLoreDb();
 
-    const createMod = await import("@adapters/cli/commands/create");
+    const createMod = await import("../../../src/adapters/cli/commands/create.js");
     const createCmd = (createMod as { default?: { run?: RunnableCommand["run"] } }).default;
     if (!createCmd) throw new Error("create command not exported");
 
@@ -427,7 +427,7 @@ describe("lore set — AC-SET-2: any flag bypasses editor", () => {
     writeFileSync(failScript, "#!/bin/sh\nexit 99\n", { mode: 0o755 });
     process.env["EDITOR"] = failScript;
 
-    const setMod = await import("@adapters/cli/commands/set");
+    const setMod = await import("../../../src/adapters/cli/commands/set.js");
     const setCmd = (setMod as { default?: { run?: RunnableCommand["run"] } }).default;
     if (!setCmd) throw new Error("set command not exported");
 
@@ -454,7 +454,7 @@ describe("lore set — AC-SET-3: editor error produces exit code 4", () => {
   it.skipIf(isWindows)("exits with code 4 when editor exits non-zero", async () => {
     await initLoreDb();
 
-    const createMod = await import("@adapters/cli/commands/create");
+    const createMod = await import("../../../src/adapters/cli/commands/create.js");
     const createCmd = (createMod as { default?: { run?: RunnableCommand["run"] } }).default;
     if (!createCmd) throw new Error("create command not exported");
 
@@ -478,7 +478,7 @@ describe("lore set — AC-SET-3: editor error produces exit code 4", () => {
     writeFileSync(failScript, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
     process.env["EDITOR"] = failScript;
 
-    const setMod = await import("@adapters/cli/commands/set");
+    const setMod = await import("../../../src/adapters/cli/commands/set.js");
     const setCmd = (setMod as { default?: { run?: RunnableCommand["run"] } }).default;
     if (!setCmd) throw new Error("set command not exported");
 

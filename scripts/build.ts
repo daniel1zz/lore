@@ -20,7 +20,7 @@ import { existsSync } from "fs";
 import type { BunPlugin, PluginBuilder, OnLoadArgs } from "bun";
 
 const root = join(import.meta.dir, "..");
-const entrypoint = join(root, "src", "index.ts");
+const entrypoint = join(root, "packages", "lore", "src", "index.ts");
 const outfile = join(root, "dist", "lore");
 
 /** Maps process.platform + process.arch (+ libc on linux) to the libsql target name. */

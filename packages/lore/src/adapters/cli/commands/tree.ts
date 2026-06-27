@@ -11,7 +11,7 @@
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatTree } from "../utils.js";
-import type { TreeBlueprint } from "../../../core/tree-blueprint.js";
+import type { TreeBlueprint } from "@lore/core";
 
 /** Minimal blueprint used only to trigger orphan detection in TreeCheckService. */
 const ORPHAN_DETECTION_BLUEPRINT: TreeBlueprint = {

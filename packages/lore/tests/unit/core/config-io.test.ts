@@ -63,10 +63,10 @@ async function importConfigIO() {
   // When the implementation lands, src/core/config.ts will export these.
   // Until then, this dynamic import will fail with "does not provide an export"
   // or a module-resolution error, causing the tests that call it to fail RED.
-  const mod = await import("@core/config");
-  type LoadConfig = (dir: string) => import("@core/errors.js").Result<import("@core/config").LoreConfig, import("@core/errors.js").LoreError>;
-  type SaveConfig = (dir: string, config: import("@core/config").LoreConfig) => import("@core/errors.js").Result<void, import("@core/errors.js").LoreError>;
-  type ResolveSyncCredentials = (config: import("@core/config").LoreConfig) => import("@core/errors.js").Result<{ url: string; token: string }, import("@core/errors.js").LoreError>;
+  const mod = await import("@lore/core");
+  type LoadConfig = (dir: string) => import("@lore/core").Result<import("@lore/core").LoreConfig, import("@lore/core").LoreError>;
+  type SaveConfig = (dir: string, config: import("@lore/core").LoreConfig) => import("@lore/core").Result<void, import("@lore/core").LoreError>;
+  type ResolveSyncCredentials = (config: import("@lore/core").LoreConfig) => import("@lore/core").Result<{ url: string; token: string }, import("@lore/core").LoreError>;
 
   const loadConfig = (mod as any).loadConfig as LoadConfig;
   const saveConfig = (mod as any).saveConfig as SaveConfig;

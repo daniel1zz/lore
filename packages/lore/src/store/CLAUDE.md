@@ -25,9 +25,9 @@ Row mappers, FTS5 query escaping, and JSON helpers are shared in `store-shared.t
 - **`store-shared.ts` is the SSOT for row shapes and mappers** — `DocRow`, `LinkRow`, `VersionRow`, `AuditRow`, `FtsRow` and their `rowToX` mappers. Both stores import these; do not duplicate.
 - **Error wrapping via `wrapStoreError`** — unknown thrown values from the driver become `err({ code: "STORE_ERROR", message, cause })`. Service-layer errors (duplicate slug, validation) are constructed directly, not via `wrapStoreError`.
 - **`InMemoryStore` mirrors `SQLiteStore` semantics, not FTS5** — substring scoring differs intentionally. Recall-rate scenarios must run against `SQLiteStore` / `TursoStore`, not in-memory.
-- **`api_keys` is one of the 5 replicated tables** — see `src/adapters/http/sync-push.ts`. Composition root (`src/app.ts`) opens a separate `bun:sqlite` `Database` for `ApiKeyStore` when using `TursoStore` so it shares the same local replica file.
+- **`api_keys` is one of the 5 replicated tables** — see `packages/lore/src/adapters/http/sync-push.ts`. Composition root (`packages/lore/src/app.ts`) opens a separate `bun:sqlite` `Database` for `ApiKeyStore` when using `TursoStore` so it shares the same local replica file.
 
 ## Links
 
-- Depends on: [`src/core`](../core/CLAUDE.md).
-- Used by: [`src/service`](../service/CLAUDE.md), [`src/adapters/http`](../adapters/http/CLAUDE.md) (ApiKeyStore + sync-push hit the libsql client directly), and `src/app.ts`.
+- Depends on: [`@lore/core`](../../../../core/src/CLAUDE.md).
+- Used by: [`../service`](../service/CLAUDE.md), [`../adapters/http`](../adapters/http/CLAUDE.md) (ApiKeyStore + sync-push hit the libsql client directly), and `../app.ts`.

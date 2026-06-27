@@ -89,14 +89,14 @@ async function runCmd(
 
 async function importCreateCommand(): Promise<RunnableCommand> {
   // Using dynamic import so module-not-found errors are localised
-  const mod = await import("@adapters/cli/commands/create");
+  const mod = await import("../../../src/adapters/cli/commands/create.js");
   const cmd = (mod as { default?: { run?: RunnableCommand["run"] } }).default;
   if (!cmd?.run) throw new Error("create command not exported");
   return cmd as RunnableCommand;
 }
 
 async function importGetCommand(): Promise<RunnableCommand> {
-  const getMod = await import("@adapters/cli/commands/get");
+  const getMod = await import("../../../src/adapters/cli/commands/get.js");
   const getCmd = (getMod as { default?: { run?: RunnableCommand["run"] } }).default;
   if (!getCmd?.run) throw new Error("get command not exported");
   return getCmd as RunnableCommand;
@@ -150,7 +150,7 @@ afterEach(() => {
 
 async function initLoreDb(): Promise<void> {
   // We bootstrap using the init command so that the SQLite schema is applied
-  const initMod = await import("@adapters/cli/commands/init");
+  const initMod = await import("../../../src/adapters/cli/commands/init.js");
   const initCmd = (initMod as { default?: { run?: RunnableCommand["run"] } }).default;
   if (!initCmd?.run) throw new Error("init command not exported");
 

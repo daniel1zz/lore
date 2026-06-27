@@ -32,7 +32,7 @@ import {
   parseConfig,
   loadConfigFromString,
   type LoreConfig,
-} from "@core/config";
+} from "@lore/core";
 
 // ---------------------------------------------------------------------------
 // HAPPY PATH

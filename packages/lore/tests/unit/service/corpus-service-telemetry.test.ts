@@ -8,10 +8,10 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { InMemoryStore } from "@store/in-memory-store.js";
-import { CorpusService } from "@service/corpus-service.js";
-import { type Telemetry, type TelemetryEvent } from "@core/telemetry.js";
-import type { CreateDocInput } from "@core/schemas.js";
+import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { CorpusService } from "../../../src/service/corpus-service.js";
+import { type Telemetry, type TelemetryEvent } from "@lore/core";
+import type { CreateDocInput } from "@lore/core";
 
 // ─── Capturing telemetry spy ─────────────────────────────────────────────────
 

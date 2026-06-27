@@ -23,8 +23,8 @@ import type {
   LinkType,
   Slug,
   VersionRecord,
-} from "../core/types.js";
-import { err, ok, type LoreError, type Result } from "../core/errors.js";
+} from "@lore/core";
+import { err, ok, type LoreError, type Result } from "@lore/core";
 import type {
   AuditFilters,
   SearchHit,

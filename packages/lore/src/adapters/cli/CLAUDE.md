@@ -6,7 +6,7 @@ citty-based CLI adapter. 22 subcommands, each in its own `commands/<name>.ts`, l
 
 ## Key Invariants
 
-- **No business logic.** Commands resolve args → call `app.<service>.<method>()` → render output → map error to exit code. New rules belong in `src/service`, not here.
+- **No business logic.** Commands resolve args → call `app.<service>.<method>()` → render output → map error to exit code. New rules belong in `packages/lore/src/service`, not here.
 - **DB discovery + App construction live in `loader.ts`, not `utils.ts`.** `loader.ts` imports `bun:sqlite` (via `app.ts`); `utils.ts` is vitest-reachable and must stay sqlite-free. Commands that need an App import `loadLoreApp` from `loader.ts`; commands that only format errors import from `utils.ts`.
 - **`loadLoreApp()` always returns `App` (never `Result<App>`).** It strips `config.sync` before passing to `createApp`, so corpus-level commands never hit the TursoStore-failure path. Sync-aware commands (`lore sync ...`) manage TursoStore themselves.
 - **`init` and `sync` commands bypass `loadLoreApp`** — `init` runs before a DB exists; `sync` manages TursoStore directly. Document the exemption when adding a new bootstrap-stage command.
@@ -28,6 +28,6 @@ citty-based CLI adapter. 22 subcommands, each in its own `commands/<name>.ts`, l
 
 ## Links
 
-- Depends on: [`src/core`](../../core/CLAUDE.md), [`src/service`](../../service/CLAUDE.md), [`src/store`](../../store/CLAUDE.md) (transitively via `src/app.ts`).
-- Used by: end users via the compiled `dist/lore` binary; `src/index.ts` is the dispatch entry.
-- Mounts: [`src/adapters/http`](../http/CLAUDE.md) (`lore serve`), [`src/adapters/mcp`](../mcp/CLAUDE.md) (`lore agent`), [`src/eval`](../../eval/CLAUDE.md) (`lore eval`).
+- Depends on: [`@lore/core`](../../../../../core/src/CLAUDE.md), [`../../service`](../../service/CLAUDE.md), [`../../store`](../../store/CLAUDE.md) (transitively via `../../app.ts`).
+- Used by: end users via the compiled `dist/lore` binary; `../../index.ts` is the dispatch entry.
+- Mounts: [`../http`](../http/CLAUDE.md) (`lore serve`), [`../mcp`](../mcp/CLAUDE.md) (`lore agent`), [`../../eval`](../../eval/CLAUDE.md) (`lore eval`).

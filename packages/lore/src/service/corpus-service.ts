@@ -5,14 +5,14 @@
  */
 
 import { ulid } from "ulidx";
-import { err, ok, type Result } from "../core/errors.js";
-import type { LoreError } from "../core/errors.js";
+import { err, ok, type Result } from "@lore/core";
+import type { LoreError } from "@lore/core";
 import {
   createDocInputSchema,
   docPatchSchema,
   slugifyWithCollision,
-} from "../core/schemas.js";
-import type { CreateDocInput, DocPatch } from "../core/schemas.js";
+} from "@lore/core";
+import type { CreateDocInput, DocPatch } from "@lore/core";
 import {
   DOC_TYPE_ROLE_MAP,
   type DocId,
@@ -22,13 +22,13 @@ import {
   type DocType,
   type LinkRecord,
   type LinkType,
-} from "../core/types.js";
-import { isValidParentType, PARENT_TYPE_CONTRACT } from "../core/doc-type-rules.js";
+} from "@lore/core";
+import { isValidParentType, PARENT_TYPE_CONTRACT } from "@lore/core";
 import type {
   SearchHit,
   StoreInterface,
 } from "../store/store-interface.js";
-import { NoOpTelemetry, type Telemetry, type TelemetryEvent } from "../core/telemetry.js";
+import { NoOpTelemetry, type Telemetry, type TelemetryEvent } from "@lore/core";
 
 // ─── Local types (mirror SPEC-001 §3.1 interfaces) ────────────────────────
 

@@ -21,9 +21,9 @@
  */
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { InMemoryStore } from "@store/in-memory-store";
-import { VersionService } from "@service/version-service";
-import type { DocRecord, VersionRecord } from "@core/types";
+import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { VersionService } from "../../../src/service/version-service.js";
+import type { DocRecord, VersionRecord } from "@lore/core";
 
 // ─── Factories ────────────────────────────────────────────────────────────────
 

@@ -29,8 +29,8 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { App } from "../../app.js";
-import type { LoreError } from "../../core/errors.js";
-import type { LinkType } from "../../core/types.js";
+import type { LoreError } from "@lore/core";
+import type { LinkType } from "@lore/core";
 import { CORPUS_SCHEMA_INFO } from "./schema-info.js";
 
 // ─── Schema Constants ────────────────────────────────────────────────────────

@@ -20,8 +20,8 @@ import type {
   LinkRecord,
   LinkType,
   VersionRecord,
-} from "../core/types.js";
-import { err, type LoreError, type Result } from "../core/errors.js";
+} from "@lore/core";
+import { err, type LoreError, type Result } from "@lore/core";
 
 // ─── Raw DB row types ──────────────────────────────────────────────────────
 

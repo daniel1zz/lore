@@ -19,7 +19,7 @@ import {
   type KnowledgeExtra,
   type TaskExtra,
   type PlanExtra,
-} from "@core/types";
+} from "@lore/core";
 
 // Test plan for types module:
 // HAPPY: all interfaces constructable, DOC_TYPE_ROLE_MAP correct
