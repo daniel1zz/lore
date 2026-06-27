@@ -268,8 +268,19 @@ async function handleDocRoute(
 
 async function handleSingleDoc(req: Request, method: string, idOrSlug: string, app: App): Promise<Response> {
   if (method === "GET") {
+    const resolveMdx = new URL(req.url).searchParams.get("resolveMdx") === "true";
     const result = await app.corpusService.get(idOrSlug);
     if (!result.ok) return loreErrorResponse(result.error);
+
+    // reason: AC-D-B1 — ?resolveMdx=true triggers OutlineService placeholder resolution;
+    // response extends DocWithNavigation with a resolvedMdx field. AC-D-B2 guarantees
+    // that without the flag the raw content is returned unchanged. See SPEC-015 §3.5.
+    if (resolveMdx) {
+      const resolveResult = await app.outlineService.resolve(result.value.doc);
+      if (!resolveResult.ok) return loreErrorResponse(resolveResult.error);
+      return jsonOk({ ...result.value, resolvedMdx: resolveResult.value });
+    }
+
     return jsonOk(result.value);
   }
 

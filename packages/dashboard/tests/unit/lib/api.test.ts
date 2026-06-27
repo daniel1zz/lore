@@ -1,0 +1,271 @@
+// @vitest-environment jsdom
+/**
+ * Tests for lib/api.ts — typed fetch wrapper.
+ * Source: SPEC-015 §3.4
+ *
+ * Test plan:
+ *   HAPPY:
+ *     - apiGetStatus parses { ok: true, data: T } envelope correctly
+ *     - apiList returns docs array from data field
+ *     - apiSearch returns docs for a query
+ *     - apiGetDoc returns DocWithNavigation
+ *     - apiGetDoc with resolveMdx=true appends ?resolveMdx=true to path
+ *
+ *   NEGATIVE:
+ *     - Non-2xx response throws ApiError with HTTP status
+ *     - Server { ok: false } envelope throws ApiError with server code
+ *     - Unknown error code in envelope is preserved
+ *
+ *   BOUNDARY:
+ *     - Empty docs array in response is returned as-is
+ *     - apiSearch with empty query still builds URL (caller controls enabled)
+ *
+ *   ERROR:
+ *     - Timeout (AbortSignal) throws ApiError with code NETWORK_ERROR
+ *     - JSON parse failure throws ApiError with code PARSE_ERROR
+ *
+ *   STATE:
+ *     - Multiple sequential calls each get their own response (no shared state)
+ *
+ *   REGRESSION:
+ *     - Response without Content-Type header still parses (no Content-Type check)
+ *     - apiGetDoc URL-encodes the idOrSlug parameter
+ */
+
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { apiGetStatus, apiList, apiSearch, apiGetDoc, ApiError } from "../../../src/lib/api";
+
+// ─── Mock fetch ───────────────────────────────────────────────────────────────
+
+function makeFetchMock(body: unknown, status = 200): () => Promise<Response> {
+  return vi.fn().mockResolvedValueOnce(
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+}
+
+function makeNetworkErrorMock(): () => Promise<never> {
+  return vi.fn().mockRejectedValueOnce(new Error("Failed to fetch"));
+}
+
+beforeEach(() => {
+  // Reset fetch mock before each test
+  vi.stubGlobal("fetch", undefined);
+  vi.stubGlobal("AbortSignal", { timeout: () => new AbortController().signal });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+// ─── HAPPY paths ──────────────────────────────────────────────────────────────
+
+describe("apiGetStatus", () => {
+  describe("happy path", () => {
+    it("returns parsed status data from { ok, data } envelope", async () => {
+      const mockStatus = { total_docs: 42, by_type: { prd: 3 }, by_status: { active: 5 } };
+      vi.stubGlobal("fetch", makeFetchMock({ ok: true, data: mockStatus }));
+
+      const result = await apiGetStatus();
+
+      expect(result.total_docs).toBe(42);
+      expect(result.by_type.prd).toBe(3);
+    });
+  });
+});
+
+describe("apiList", () => {
+  describe("happy path", () => {
+    it("returns docs array and total count", async () => {
+      const mockData = { docs: [{ id: "01", slug: "prd-test", title: "Test", type: "prd", status: "draft", updated_at: "" }], total: 1 };
+      vi.stubGlobal("fetch", makeFetchMock({ ok: true, data: mockData }));
+
+      const result = await apiList({});
+
+      expect(result.total).toBe(1);
+      expect(result.docs).toHaveLength(1);
+    });
+
+    it("builds type filter query parameter", async () => {
+      const calls: string[] = [];
+      vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+        calls.push(url);
+        return Promise.resolve(new Response(JSON.stringify({ ok: true, data: { docs: [], total: 0 } }), {
+          status: 200, headers: { "Content-Type": "application/json" },
+        }));
+      }));
+
+      await apiList({ type: "prd" });
+
+      expect(calls[0]).toContain("type=prd");
+    });
+  });
+
+  describe("boundary", () => {
+    it("returns empty docs array when server returns empty list", async () => {
+      vi.stubGlobal("fetch", makeFetchMock({ ok: true, data: { docs: [], total: 0 } }));
+
+      const result = await apiList({});
+
+      expect(result.docs).toHaveLength(0);
+      expect(result.total).toBe(0);
+    });
+  });
+});
+
+describe("apiSearch", () => {
+  describe("happy path", () => {
+    it("includes q parameter in the URL", async () => {
+      const calls: string[] = [];
+      vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+        calls.push(url);
+        return Promise.resolve(new Response(JSON.stringify({ ok: true, data: { docs: [], total: 0 } }), {
+          status: 200, headers: { "Content-Type": "application/json" },
+        }));
+      }));
+
+      await apiSearch("hello world");
+
+      expect(calls[0]).toContain("q=hello+world");
+    });
+
+    it("returns search results", async () => {
+      const mockData = { docs: [{ id: "02", slug: "spec-test", title: "Spec", type: "spec", status: "active", updated_at: "" }], total: 1 };
+      vi.stubGlobal("fetch", makeFetchMock({ ok: true, data: mockData }));
+
+      const result = await apiSearch("test");
+
+      expect(result.total).toBe(1);
+    });
+  });
+});
+
+describe("apiGetDoc", () => {
+  describe("happy path", () => {
+    it("returns DocWithNavigation from server envelope", async () => {
+      const mockDoc = {
+        doc: { id: "01", slug: "prd-test", title: "Test", type: "prd", status: "draft", content: "hello", created_at: "", updated_at: "", created_by: null, parent_id: null, tags: [], extra: {}, version: 1 },
+        navigation: { parent: null, siblings: [], children: [], related: [] },
+      };
+      vi.stubGlobal("fetch", makeFetchMock({ ok: true, data: mockDoc }));
+
+      const result = await apiGetDoc("01");
+
+      expect(result.doc.id).toBe("01");
+      expect(result.navigation.parent).toBeNull();
+    });
+
+    it("appends ?resolveMdx=true when resolveMdx option is set", async () => {
+      const calls: string[] = [];
+      vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+        calls.push(url);
+        const mockDoc = { doc: { id: "01", slug: "s", title: "T", type: "prd", status: "draft", content: "", created_at: "", updated_at: "", created_by: null, parent_id: null, tags: [], extra: {}, version: 1 }, navigation: { parent: null, siblings: [], children: [], related: [] }, resolvedMdx: { content: "", resolvedComponents: [], warnings: [] } };
+        return Promise.resolve(new Response(JSON.stringify({ ok: true, data: mockDoc }), {
+          status: 200, headers: { "Content-Type": "application/json" },
+        }));
+      }));
+
+      await apiGetDoc("01", { resolveMdx: true });
+
+      expect(calls[0]).toContain("resolveMdx=true");
+    });
+
+    it("URL-encodes the idOrSlug with special characters (regression)", async () => {
+      const calls: string[] = [];
+      vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+        calls.push(url);
+        return Promise.resolve(new Response(JSON.stringify({ ok: true, data: { doc: { id: "01", slug: "s", title: "T", type: "prd", status: "draft", content: "", created_at: "", updated_at: "", created_by: null, parent_id: null, tags: [], extra: {}, version: 1 }, navigation: { parent: null, siblings: [], children: [], related: [] } } }), {
+          status: 200, headers: { "Content-Type": "application/json" },
+        }));
+      }));
+
+      await apiGetDoc("prd-my spec");
+
+      expect(calls[0]).toContain(encodeURIComponent("prd-my spec"));
+    });
+  });
+
+  describe("state", () => {
+    it("two sequential calls each use their own response (no shared state)", async () => {
+      let callCount = 0;
+      vi.stubGlobal("fetch", vi.fn().mockImplementation(() => {
+        callCount += 1;
+        const id = `0${callCount}`;
+        return Promise.resolve(new Response(JSON.stringify({ ok: true, data: { doc: { id, slug: `s${id}`, title: `T${id}`, type: "prd", status: "draft", content: "", created_at: "", updated_at: "", created_by: null, parent_id: null, tags: [], extra: {}, version: 1 }, navigation: { parent: null, siblings: [], children: [], related: [] } } }), {
+          status: 200, headers: { "Content-Type": "application/json" },
+        }));
+      }));
+
+      const [r1, r2] = await Promise.all([apiGetDoc("01"), apiGetDoc("02")]);
+
+      expect(r1.doc.id).toBe("01");
+      expect(r2.doc.id).toBe("02");
+    });
+  });
+});
+
+// ─── NEGATIVE / ERROR paths ──────────────────────────────────────────────────
+
+describe("ApiError", () => {
+  describe("negative: server error response", () => {
+    it("throws ApiError when server returns { ok: false }", async () => {
+      vi.stubGlobal("fetch", makeFetchMock({ ok: false, error: { code: "DOC_NOT_FOUND", message: "Not found" } }, 404));
+
+      await expect(apiGetDoc("missing")).rejects.toThrow(ApiError);
+    });
+
+    it("ApiError has status=404 and code=DOC_NOT_FOUND", async () => {
+      vi.stubGlobal("fetch", makeFetchMock({ ok: false, error: { code: "DOC_NOT_FOUND", message: "Not found" } }, 404));
+
+      const err = await apiGetDoc("missing").catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).status).toBe(404);
+      expect((err as ApiError).code).toBe("DOC_NOT_FOUND");
+    });
+
+    it("throws ApiError on non-2xx with no JSON error field", async () => {
+      vi.stubGlobal("fetch", makeFetchMock({ ok: false }, 500));
+
+      await expect(apiList({})).rejects.toThrow(ApiError);
+    });
+  });
+
+  describe("error: network failure", () => {
+    it("throws ApiError with code NETWORK_ERROR on fetch failure", async () => {
+      vi.stubGlobal("fetch", makeNetworkErrorMock());
+
+      const err = await apiGetStatus().catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).code).toBe("NETWORK_ERROR");
+    });
+  });
+
+  describe("error: JSON parse failure", () => {
+    it("throws ApiError with code PARSE_ERROR when response is not valid JSON", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(
+        new Response("not-json", { status: 200, headers: { "Content-Type": "text/plain" } }),
+      ));
+
+      const err = await apiGetStatus().catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).code).toBe("PARSE_ERROR");
+    });
+  });
+
+  describe("regression: no Content-Type header still parses", () => {
+    it("parses response even without Content-Type header", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, data: { total_docs: 0, by_type: {}, by_status: {} } }), { status: 200 }),
+      ));
+
+      const result = await apiGetStatus();
+
+      expect(result.total_docs).toBe(0);
+    });
+  });
+});
