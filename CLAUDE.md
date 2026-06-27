@@ -118,6 +118,8 @@ All feature specs live under `docs/requirements/spec/`. When implementing or cha
 - `SPEC-011` — HTTP route layout
 - `SPEC-012` — telemetry (JSONL, opt-in)
 - `SPEC-013` — FTS5 resilience + eval scenarios
+- `SPEC-014` — Monorepo skeleton (Bun workspaces, @lore/core + @lore/lore + @lore/dashboard)
+- `SPEC-015` — Dashboard read-only skeleton (Vite + React + shadcn; list/search/tree/detail)
 
 ## Implementation Status
 
@@ -137,6 +139,7 @@ Module-specific context lives alongside the code:
 - [`packages/lore/src/adapters/mcp`](packages/lore/src/adapters/mcp/CLAUDE.md) — MCP stdio server, 16 `lore_*` tools, fast-path registration
 - [`packages/lore/src/adapters/http`](packages/lore/src/adapters/http/CLAUDE.md) — Bun.serve API, bearer-token auth, sync-push
 - [`packages/lore/src/eval`](packages/lore/src/eval/CLAUDE.md) — six read-only evaluation scenarios under `lore eval`
+- [`@lore/dashboard`](packages/dashboard/CLAUDE.md) — Vite + React + shadcn local-dev web UI (read-only v1)
 <!-- /auto:module-index -->
 
 <!-- auto:dynamic-context -->
