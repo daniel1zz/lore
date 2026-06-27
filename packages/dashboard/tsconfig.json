@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    // reason: @lore/core resolves to source (packages/core/src/index.ts) which re-exports
+    // config.ts and telemetry.ts that use fs/path/os/process. The dashboard never imports
+    // these Node APIs directly — Vite blocks them at bundle time. Adding "node" here lets
+    // TypeScript resolve @lore/core's transitive Node imports without error. SPEC-015 §4.
+    "types": ["node"],
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+    "baseUrl": "."
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "tests"]
+}
