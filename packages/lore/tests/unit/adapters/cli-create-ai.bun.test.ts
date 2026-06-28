@@ -1,0 +1,433 @@
+/**
+ * @spec_ref AC-AI-1, AC-AI-2, AC-AI-3, AC-AI-5, AC-AI-6, AC-AI-7
+ *
+ * CLI create command AI path tests — bun:test only (uses real SQLiteStore via loadLoreApp).
+ *
+ * Strategy:
+ *   - Create a real .lore/lore.db in a temp dir via createApp()
+ *   - Write .lore/config.yaml pointing to a well-known system binary (cat/true/false)
+ *     for reliable cross-platform execution without PATH manipulation
+ *   - Call cmd.run() directly (same process) with mocked process.exit/stderr
+ *
+ * Provider commands used:
+ *   /bin/cat     — reads stdin, echoes to stdout (success path: non-empty content)
+ *   /usr/bin/true  — exits 0, no output (empty output path)
+ *   /usr/bin/false — exits 1, no output (non-zero exit path)
+ *   nonexistent-binary-xyz — binary missing (ENOENT path)
+ *
+ * Defect Note (AC-AI-5):
+ *   SPEC-017 §3.4 says stderr should contain "command not found: <cmd>" when binary is
+ *   missing. However, formatError() for AI_PROVIDER_ERROR does NOT include error.message
+ *   in its output — only exit_code and stderr fields are shown. The "command not found"
+ *   string lives in error.message but is never surfaced to the user. This is a defect.
+ *   The test "stderr should contain 'command not found'" is kept failing to document this.
+ *
+ * Six-dimension coverage:
+ *   HAPPY:    AI path creates draft prd (AC-AI-1)
+ *   HAPPY:    --content flag skips AI (AC-AI-3)
+ *   HAPPY:    --no-ai with content skips AI (AC-AI-2)
+ *   NEGATIVE: missing binary → exit 6 (AC-AI-5)
+ *   NEGATIVE: binary exits 1 → exit 6 (AC-AI-6)
+ *   NEGATIVE: binary exits 0, empty stdout → exit 6 (AC-AI-7)
+ *   STATE:    stderr contains --no-ai hint on AI failure
+ *   REGRESSION: content flag bypasses AI even when ai flag is true (AC-AI-3)
+ */
+
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { mkdtempSync, writeFileSync, mkdirSync } from "fs";
+import { join, resolve } from "path";
+import { tmpdir } from "os";
+import { createApp } from "../../../src/app.js";
+import { saveConfig } from "@lore/core";
+
+// ─── Command type ─────────────────────────────────────────────────────────────
+
+type RunnableCommand = {
+  run: (ctx: { args: Record<string, unknown> }) => Promise<void>;
+};
+
+// ─── Output / exit capture ────────────────────────────────────────────────────
+
+function captureOutput() {
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+
+  const origStderrWrite = process.stderr.write.bind(process.stderr);
+  const origConsoleLog = console.log.bind(console);
+
+  (process.stderr as unknown as { write: (chunk: unknown) => boolean }).write = (chunk: unknown) => {
+    stderr.push(String(chunk));
+    return true;
+  };
+  console.log = (...args: unknown[]) => {
+    stdout.push(args.join(" "));
+  };
+
+  return {
+    stdout,
+    stderr,
+    restore: () => {
+      (process.stderr as unknown as { write: typeof origStderrWrite }).write = origStderrWrite;
+      console.log = origConsoleLog;
+    },
+  };
+}
+
+function captureExit() {
+  let capturedCode: number | undefined;
+  const origExit = process.exit.bind(process);
+  (process as unknown as { exit: (code?: number) => never }).exit = (code?: number): never => {
+    capturedCode = code ?? 0;
+    throw new Error(`process.exit(${code})`);
+  };
+  return {
+    get code() { return capturedCode; },
+    restore: () => {
+      (process as unknown as { exit: typeof origExit }).exit = origExit;
+    },
+  };
+}
+
+async function runCmd(
+  cmd: { run?: RunnableCommand["run"] },
+  args: Record<string, unknown>,
+): Promise<void> {
+  if (!cmd.run) throw new Error("Command is missing run handler");
+  return cmd.run({ args });
+}
+
+async function importCreateCommand(): Promise<RunnableCommand> {
+  const mod = await import("../../../src/adapters/cli/commands/create.js");
+  const cmd = (mod as { default?: { run?: RunnableCommand["run"] } }).default;
+  if (!cmd?.run) throw new Error("create command not exported");
+  return cmd as RunnableCommand;
+}
+
+// ─── Project setup ────────────────────────────────────────────────────────────
+
+let tmpDir: string;
+let originalCwd: string;
+let savedEditor: string | undefined;
+
+beforeEach(() => {
+  tmpDir = resolve(mkdtempSync(join(tmpdir(), "lore-cli-ai-test-")));
+  const loreDir = join(tmpDir, ".lore");
+  mkdirSync(loreDir, { recursive: true });
+
+  // Create real SQLite DB
+  const app = createApp(join(loreDir, "lore.db"));
+  app.close();
+
+  originalCwd = process.cwd();
+  savedEditor = process.env["EDITOR"];
+  process.chdir(tmpDir);
+
+  // Provide a fake editor for --no-ai tests that don't provide --content
+  const editorScript = join(tmpDir, "fake-editor.sh");
+  writeFileSync(
+    editorScript,
+    "#!/bin/sh\nprintf 'editor content here' > \"$1\"\n",
+    { mode: 0o755 },
+  );
+  process.env["EDITOR"] = editorScript;
+});
+
+afterEach(() => {
+  process.chdir(originalCwd);
+  if (savedEditor !== undefined) {
+    process.env["EDITOR"] = savedEditor;
+  } else {
+    delete process.env["EDITOR"];
+  }
+  try {
+    const { rmSync } = require("fs") as { rmSync: (p: string, opts: object) => void };
+    rmSync(tmpDir, { recursive: true, force: true });
+  } catch { /* best-effort */ }
+});
+
+/**
+ * Write config.yaml pointing to the given AI command.
+ * Uses `saveConfig` (writes as YAML, no Zod validation at write time).
+ */
+function writeAiConfig(command: string, args: string[] = [], timeout_ms = 5000) {
+  saveConfig(tmpDir, {
+    project: { name: "ai-test", author: "tester" },
+    ai: {
+      provider: "claude-cli",
+      providers: {
+        "claude-cli": { command, args, timeout_ms },
+      },
+      templates: {},
+      telemetry: false,
+    },
+  } as never);
+}
+
+// ─── AC-AI-1: AI path creates draft doc ──────────────────────────────────────
+
+describe("lore create prd — AI default path (AC-AI-1)", () => {
+  it("creates a prd using /bin/cat as the provider (echoes prompt to stdout)", async () => {
+    // /bin/cat reads stdin (the rendered prompt) and writes it to stdout.
+    // This produces non-empty content → AI path succeeds.
+    writeAiConfig("/bin/cat");
+
+    const cmd = await importCreateCommand();
+    const output = captureOutput();
+    const exit = captureExit();
+    try {
+      await runCmd(cmd, { type: "prd", title: "AI Generated PRD", ai: true });
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
+    } finally {
+      output.restore();
+      exit.restore();
+    }
+
+    // No error exit → success
+    expect(exit.code).toBeUndefined();
+    // stdout confirms doc was created
+    expect(output.stdout.join("\n")).toContain("Created prd document");
+    // No error messages
+    expect(output.stderr.join("")).not.toContain("Error:");
+  });
+
+  it("created doc has status 'draft' (existing lifecycle rule preserved)", async () => {
+    writeAiConfig("/bin/cat");
+
+    const cmd = await importCreateCommand();
+    const output = captureOutput();
+    const exit = captureExit();
+    try {
+      await runCmd(cmd, { type: "prd", title: "Draft Status PRD", ai: true });
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
+    } finally {
+      output.restore();
+      exit.restore();
+    }
+
+    expect(exit.code).toBeUndefined();
+    // The status line should show "draft"
+    const stdoutText = output.stdout.join("\n");
+    expect(stdoutText).toContain("draft");
+  });
+});
+
+// ─── AC-AI-3: --content flag skips AI entirely ───────────────────────────────
+
+describe("lore create prd — --content flag skips AI (AC-AI-3)", () => {
+  it("--content bypasses AI path; uses content verbatim", async () => {
+    // Use a nonexistent command — if AI were called, this would exit 6.
+    // If content is provided, AI is skipped entirely.
+    writeAiConfig("nonexistent-ai-binary-xyz");
+
+    const cmd = await importCreateCommand();
+    const output = captureOutput();
+    const exit = captureExit();
+    try {
+      await runCmd(cmd, {
+        type: "prd",
+        title: "Manual PRD",
+        content: "# My Manual Content\n",
+        ai: true, // ai=true but content is provided → AI is bypassed
+      });
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
+    } finally {
+      output.restore();
+      exit.restore();
+    }
+
+    // Success despite nonexistent AI binary — content skipped AI path
+    expect(exit.code).toBeUndefined();
+    expect(output.stdout.join("\n")).toContain("Created prd document");
+  });
+});
+
+// ─── AC-AI-2: --no-ai flag uses editor, not AI ───────────────────────────────
+
+describe("lore create prd — --no-ai flag (AC-AI-2)", () => {
+  it("--no-ai with --content skips both AI and editor", async () => {
+    writeAiConfig("nonexistent-ai-binary-xyz");
+
+    const cmd = await importCreateCommand();
+    const output = captureOutput();
+    const exit = captureExit();
+    try {
+      await runCmd(cmd, {
+        type: "prd",
+        title: "No-AI PRD",
+        content: "# From Editor\n",
+        ai: false, // --no-ai
+      });
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
+    } finally {
+      output.restore();
+      exit.restore();
+    }
+
+    expect(exit.code).toBeUndefined();
+    expect(output.stdout.join("\n")).toContain("Created prd document");
+    // No AI error messages on stderr
+    expect(output.stderr.join("")).not.toContain("AI provider");
+  });
+});
+
+// ─── AC-AI-5: binary missing → exit 6 ───────────────────────────────────────
+
+describe("lore create prd — missing binary (AC-AI-5)", () => {
+  it("exits code 6 when AI binary does not exist", async () => {
+    writeAiConfig("nonexistent-ai-binary-xyz-not-installed");
+
+    const cmd = await importCreateCommand();
+    const output = captureOutput();
+    const exit = captureExit();
+    try {
+      await runCmd(cmd, { type: "prd", title: "Missing Binary PRD", ai: true });
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
+    } finally {
+      output.restore();
+      exit.restore();
+    }
+
+    expect(exit.code).toBe(6);
+  });
+
+  /**
+   * DEFECT FINDING (AC-AI-5):
+   * SPEC-017 §3.4 states that stderr should contain "command not found: <cmd>".
+   * The LoreError.message field is set to "command not found: <cmd>" in ClaudeCliProvider,
+   * but formatError() for AI_PROVIDER_ERROR does NOT print error.message — it only prints
+   * error.exit_code and error.stderr. Since a missing binary has no exit_code or stderr,
+   * the "command not found" message is silently dropped and never shown to the user.
+   *
+   * Expected (per spec): stderr contains "command not found"
+   * Actual (implementation): stderr contains only "Error: AI provider 'x' failed. Retry with --no-ai"
+   *
+   * This test is intentionally left FAILING to document the defect.
+   */
+  it("[DEFECT-AC-AI-5] stderr should contain 'command not found' message per spec", async () => {
+    writeAiConfig("nonexistent-ai-binary-xyz-not-installed");
+
+    const cmd = await importCreateCommand();
+    const output = captureOutput();
+    const exit = captureExit();
+    try {
+      await runCmd(cmd, { type: "prd", title: "Missing Binary PRD", ai: true });
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
+    } finally {
+      output.restore();
+      exit.restore();
+    }
+
+    const stderrText = output.stderr.join("");
+    // SPEC says this should be present but implementation omits it from formatError output
+    // This test FAILS by design to signal the implementation bug.
+    expect(stderrText).toContain("command not found");
+  });
+
+  it("stderr contains --no-ai retry hint when binary is missing", async () => {
+    writeAiConfig("nonexistent-ai-binary-xyz-not-installed");
+
+    const cmd = await importCreateCommand();
+    const output = captureOutput();
+    const exit = captureExit();
+    try {
+      await runCmd(cmd, { type: "prd", title: "Missing Binary PRD", ai: true });
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
+    } finally {
+      output.restore();
+      exit.restore();
+    }
+
+    expect(output.stderr.join("")).toContain("--no-ai");
+  });
+});
+
+// ─── AC-AI-6: binary exits non-zero → exit 6 ────────────────────────────────
+
+describe("lore create prd — binary exits non-zero (AC-AI-6)", () => {
+  it("exits code 6 when AI binary exits 1 (/usr/bin/false)", async () => {
+    // /usr/bin/false always exits with code 1, no stdout/stderr
+    writeAiConfig("/usr/bin/false");
+
+    const cmd = await importCreateCommand();
+    const output = captureOutput();
+    const exit = captureExit();
+    try {
+      await runCmd(cmd, { type: "prd", title: "Failing Binary PRD", ai: true });
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
+    } finally {
+      output.restore();
+      exit.restore();
+    }
+
+    expect(exit.code).toBe(6);
+  });
+
+  it("stderr contains --no-ai hint when binary exits non-zero", async () => {
+    writeAiConfig("/usr/bin/false");
+
+    const cmd = await importCreateCommand();
+    const output = captureOutput();
+    const exit = captureExit();
+    try {
+      await runCmd(cmd, { type: "prd", title: "Failing Binary PRD", ai: true });
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
+    } finally {
+      output.restore();
+      exit.restore();
+    }
+
+    expect(output.stderr.join("")).toContain("--no-ai");
+  });
+});
+
+// ─── AC-AI-7: binary exits 0, empty stdout → exit 6 ─────────────────────────
+
+describe("lore create prd — empty output (AC-AI-7)", () => {
+  it("exits code 6 when AI binary exits 0 with no output (/usr/bin/true)", async () => {
+    // /usr/bin/true exits 0 with no stdout — triggers empty output check
+    writeAiConfig("/usr/bin/true");
+
+    const cmd = await importCreateCommand();
+    const output = captureOutput();
+    const exit = captureExit();
+    try {
+      await runCmd(cmd, { type: "prd", title: "Empty Output PRD", ai: true });
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
+    } finally {
+      output.restore();
+      exit.restore();
+    }
+
+    expect(exit.code).toBe(6);
+  });
+
+  it("stderr contains error message and --no-ai hint on empty output", async () => {
+    writeAiConfig("/usr/bin/true");
+
+    const cmd = await importCreateCommand();
+    const output = captureOutput();
+    const exit = captureExit();
+    try {
+      await runCmd(cmd, { type: "prd", title: "Empty Output PRD", ai: true });
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
+    } finally {
+      output.restore();
+      exit.restore();
+    }
+
+    const stderrText = output.stderr.join("");
+    expect(stderrText).toContain("Error:");
+    expect(stderrText).toContain("--no-ai");
+  });
+});
