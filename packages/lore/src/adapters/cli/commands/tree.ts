@@ -55,7 +55,8 @@ export default defineCommand({
         );
         if (!checkR.ok) {
           process.stderr.write(formatError(checkR.error) + "\n");
-          process.exit(exitCode(checkR.error));
+          process.exitCode = exitCode(checkR.error);
+          return;
         }
 
         const orphanDrifts = checkR.value.drifts.filter(
@@ -91,7 +92,8 @@ export default defineCommand({
           }
         }
 
-        process.exit(orphanDrifts.length > 0 ? 3 : 0);
+        process.exitCode = orphanDrifts.length > 0 ? 3 : 0;
+        return;
       }
 
       // ── normal tree branch ────────────────────────────────────────────────
@@ -108,10 +110,12 @@ export default defineCommand({
           process.stderr.write(
             "No PRD documents found. Create a PRD first with `lore create prd --title <name>`.\n",
           );
-          process.exit(3);
+          process.exitCode = 3;
+          return;
         }
         process.stderr.write(formatError(result.error) + "\n");
-        process.exit(exitCode(result.error));
+        process.exitCode = exitCode(result.error);
+        return;
       }
 
       if (args.json) {

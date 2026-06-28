@@ -197,7 +197,8 @@ export default defineCommand({
           const editorResult = await openEditor({ defaults });
           if (!editorResult.ok) {
             process.stderr.write(formatError(editorResult.error) + "\n");
-            process.exit(exitCode(editorResult.error));
+            process.exitCode = exitCode(editorResult.error);
+            return;
           }
           resolvedContent = editorResult.value;
         } else {
@@ -228,7 +229,8 @@ export default defineCommand({
 
           if (!aiResult.ok) {
             process.stderr.write(formatError(aiResult.error) + "\n");
-            process.exit(exitCode(aiResult.error));
+            process.exitCode = exitCode(aiResult.error);
+            return;
           }
 
           resolvedContent = aiResult.value.content;
@@ -247,7 +249,8 @@ export default defineCommand({
         const planResolve = await app.corpusService.resolve(args["plan-id"]);
         if (!planResolve.ok) {
           process.stderr.write(formatError(planResolve.error) + "\n");
-          process.exit(exitCode(planResolve.error));
+          process.exitCode = exitCode(planResolve.error);
+          return;
         }
         resolvedPlanId = planResolve.value;
       }
@@ -272,7 +275,8 @@ export default defineCommand({
 
       if (!result.ok) {
         process.stderr.write(formatError(result.error) + "\n");
-        process.exit(exitCode(result.error));
+        process.exitCode = exitCode(result.error);
+        return;
       }
 
       const doc = result.value;

@@ -58,7 +58,8 @@ export default defineCommand({
         } else {
           process.stderr.write(formatError(syncResult.error) + "\n");
         }
-        process.exit(exitCode(syncResult.error));
+        process.exitCode = exitCode(syncResult.error);
+        return;
       }
 
       const report = syncResult.value;
@@ -67,7 +68,7 @@ export default defineCommand({
         process.stdout.write(JSON.stringify({ ok: true, data: report }, null, 2) + "\n");
         // Exit with 4 if there are per-file errors even in JSON mode (AC-SD-9/10)
         if (report.errors.length > 0) {
-          process.exit(4);
+          process.exitCode = 4;
         }
         return;
       }
@@ -112,7 +113,8 @@ export default defineCommand({
           process.stderr.write(`    ${filename}: ${entry.error}\n`);
         }
         // Exit 4 for any per-file VALIDATION_ERROR (AC-SD-9, AC-SD-10)
-        process.exit(4);
+        process.exitCode = 4;
+        return;
       }
     } finally {
       app.close();

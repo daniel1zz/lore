@@ -282,17 +282,17 @@ describe("lore create prd — missing binary (AC-AI-5)", () => {
 
     const cmd = await importCreateCommand();
     const output = captureOutput();
-    const exit = captureExit();
+    // reason: FU#4 refactored post-app exits to process.exitCode = N; return; — read exitCode directly.
+    // Cast defeats TypeScript's property narrowing after the explicit = undefined assignment above.
+    process.exitCode = undefined;
     try {
       await runCmd(cmd, { type: "prd", title: "Missing Binary PRD", ai: true });
-    } catch (e: unknown) {
-      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
       output.restore();
-      exit.restore();
     }
 
-    expect(exit.code).toBe(6);
+    expect(process.exitCode as number | undefined).toBe(6);
+    process.exitCode = undefined; // reset for subsequent tests
   });
 
   /**
@@ -358,17 +358,17 @@ describe("lore create prd — binary exits non-zero (AC-AI-6)", () => {
 
     const cmd = await importCreateCommand();
     const output = captureOutput();
-    const exit = captureExit();
+    // reason: FU#4 refactored post-app exits to process.exitCode = N; return; — read exitCode directly.
+    // Cast defeats TypeScript's property narrowing after the explicit = undefined assignment above.
+    process.exitCode = undefined;
     try {
       await runCmd(cmd, { type: "prd", title: "Failing Binary PRD", ai: true });
-    } catch (e: unknown) {
-      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
       output.restore();
-      exit.restore();
     }
 
-    expect(exit.code).toBe(6);
+    expect(process.exitCode as number | undefined).toBe(6);
+    process.exitCode = undefined; // reset for subsequent tests
   });
 
   it("stderr contains --no-ai hint when binary exits non-zero", async () => {
@@ -399,17 +399,17 @@ describe("lore create prd — empty output (AC-AI-7)", () => {
 
     const cmd = await importCreateCommand();
     const output = captureOutput();
-    const exit = captureExit();
+    // reason: FU#4 refactored post-app exits to process.exitCode = N; return; — read exitCode directly.
+    // Cast defeats TypeScript's property narrowing after the explicit = undefined assignment above.
+    process.exitCode = undefined;
     try {
       await runCmd(cmd, { type: "prd", title: "Empty Output PRD", ai: true });
-    } catch (e: unknown) {
-      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
       output.restore();
-      exit.restore();
     }
 
-    expect(exit.code).toBe(6);
+    expect(process.exitCode as number | undefined).toBe(6);
+    process.exitCode = undefined; // reset for subsequent tests
   });
 
   it("stderr contains error message and --no-ai hint on empty output", async () => {

@@ -62,7 +62,8 @@ export default defineCommand({
         const analyzeResult = app.migrationService.analyze(args.from);
         if (!analyzeResult.ok) {
           process.stderr.write(formatError(analyzeResult.error) + "\n");
-          process.exit(exitCode(analyzeResult.error));
+          process.exitCode = exitCode(analyzeResult.error);
+          return;
         }
 
         const report = analyzeResult.value;
@@ -119,7 +120,8 @@ export default defineCommand({
 
       if (!executeResult.ok) {
         process.stderr.write(formatError(executeResult.error) + "\n");
-        process.exit(exitCode(executeResult.error));
+        process.exitCode = exitCode(executeResult.error);
+        return;
       }
 
       const migResult = executeResult.value;

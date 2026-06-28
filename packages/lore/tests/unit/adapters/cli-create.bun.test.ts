@@ -656,7 +656,9 @@ describe("lore create — error handling", () => {
     await initLoreDb();
     const cmd = await importCreateCommand();
     const output = captureOutput();
-    const exit = captureExit();
+    // reason: FU#4 refactored post-app exits to process.exitCode = N; return; so the spy
+    // is never triggered for service-layer errors. Reset exitCode before + read it after.
+    process.exitCode = undefined;
 
     try {
       // reason: --no-ai bypasses AI generation (SPEC-017) to reach the service layer where
@@ -668,16 +670,15 @@ describe("lore create — error handling", () => {
         "plan-id": "plan-does-not-exist",
         ai: false,
       });
-    } catch (e: unknown) {
-      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
       output.restore();
     }
 
     // Should exit with a non-zero code (3 = DOC_NOT_FOUND or 4 = validation)
-    expect(exit.code).toBeDefined();
-    expect(exit.code).not.toBe(0);
+    expect(process.exitCode).toBeDefined();
+    expect(process.exitCode).not.toBe(0);
     expect(output.stderr.join("\n")).toMatch(/not found|Error/i);
+    process.exitCode = undefined; // reset for subsequent tests
   });
 
   it("exits 2 for invalid doc type", async () => {
@@ -867,22 +868,23 @@ describe("lore create — regression guards", () => {
     await initLoreDb();
     const cmd = await importCreateCommand();
     const output = captureOutput();
-    const exit = captureExit();
+    // reason: FU#4 refactored post-app exits to process.exitCode = N; return; so
+    // service-layer errors no longer trigger the process.exit spy. Read exitCode directly.
+    process.exitCode = undefined;
 
     try {
       // reason: --no-ai bypasses AI path (SPEC-017) so the command reaches the service layer
       // where PARENT_REQUIRED is enforced for spec type. In non-TTY context, openEditor
       // returns ok("") so no real editor is launched.
       await runCmd(cmd, { type: "spec", title: "Spec Without Parent", ai: false });
-    } catch (e: unknown) {
-      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
       output.restore();
     }
 
     // Should fail (parent required for spec)
-    expect(exit.code).toBeDefined();
-    expect(exit.code).not.toBe(0);
+    expect(process.exitCode).toBeDefined();
+    expect(process.exitCode).not.toBe(0);
+    process.exitCode = undefined; // reset for subsequent tests
   });
 
   // N/A: no other known historical regressions beyond what spec/plan coverage above provides

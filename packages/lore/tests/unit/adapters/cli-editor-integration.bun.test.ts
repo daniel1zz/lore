@@ -229,18 +229,18 @@ describe("lore create — AC-CR-3: editor error produces exit code 4", () => {
     if (!cmd) throw new Error("create command not exported");
 
     const output = captureOutput();
-    const exit = captureExit();
+    // reason: FU#4 refactored post-app exits to process.exitCode = N; return; — read exitCode directly.
+    process.exitCode = undefined;
     try {
       // reason: --no-ai bypasses AI generation (SPEC-017 default) to exercise the editor error path.
       await runCmd(cmd, { type: "prd", title: "PRD With Editor Fail", ai: false });
-    } catch (e: unknown) {
-      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
       output.restore();
     }
 
-    expect(exit.code).toBe(4); // VALIDATION_ERROR → exit 4
+    expect(process.exitCode).toBe(4); // VALIDATION_ERROR → exit 4
     expect(output.stderr.join("\n")).toMatch(/exited with code|editor/i);
+    process.exitCode = undefined; // reset for subsequent tests
   });
 
   it.skipIf(isWindows)("exits with code 4 when editor writes empty content", async () => {
@@ -255,18 +255,18 @@ describe("lore create — AC-CR-3: editor error produces exit code 4", () => {
     if (!cmd) throw new Error("create command not exported");
 
     const output = captureOutput();
-    const exit = captureExit();
+    // reason: FU#4 refactored post-app exits to process.exitCode = N; return; — read exitCode directly.
+    process.exitCode = undefined;
     try {
       // reason: --no-ai bypasses AI generation (SPEC-017 default) to exercise the empty-content editor path.
       await runCmd(cmd, { type: "prd", title: "PRD Empty Content", ai: false });
-    } catch (e: unknown) {
-      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
       output.restore();
     }
 
-    expect(exit.code).toBe(4);
+    expect(process.exitCode).toBe(4);
     expect(output.stderr.join("\n")).toMatch(/content is empty/i);
+    process.exitCode = undefined; // reset for subsequent tests
   });
 });
 
@@ -487,16 +487,16 @@ describe("lore set — AC-SET-3: editor error produces exit code 4", () => {
     if (!setCmd) throw new Error("set command not exported");
 
     const out2 = captureOutput();
-    const exit2 = captureExit();
+    // reason: FU#4 refactored post-app exits to process.exitCode = N; return; — read exitCode directly.
+    process.exitCode = undefined;
     try {
       await runCmd(setCmd, { id: slug });
-    } catch (e: unknown) {
-      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
       out2.restore();
     }
 
-    expect(exit2.code).toBe(4);
+    expect(process.exitCode).toBe(4);
     expect(out2.stderr.join("\n")).toMatch(/exited with code|editor/i);
+    process.exitCode = undefined; // reset for subsequent tests
   });
 });

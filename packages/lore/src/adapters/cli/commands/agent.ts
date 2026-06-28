@@ -42,7 +42,8 @@ const agentCreate = defineCommand({
             "message" in result.error ? result.error.message : JSON.stringify(result.error)
           }\n`);
         }
-        process.exit(1);
+        process.exitCode = 1;
+        return;
       }
 
       const { rawKey, record } = result.value;
@@ -89,7 +90,8 @@ const agentList = defineCommand({
         } else {
           process.stderr.write(`Error: ${"message" in result.error ? result.error.message : result.error.code}\n`);
         }
-        process.exit(1);
+        process.exitCode = 1;
+        return;
       }
 
       const keys = result.value;
@@ -145,7 +147,8 @@ const agentRevoke = defineCommand({
         } else {
           process.stderr.write(`Error: ${"message" in result.error ? result.error.message : result.error.code}\n`);
         }
-        process.exit(1);
+        process.exitCode = 1;
+        return;
       }
 
       if (args.json) {

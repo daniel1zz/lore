@@ -22,6 +22,7 @@
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { parse as parseYaml } from "yaml";
+import { diffChars } from "diff";
 import { err, ok } from "@lore/core";
 import type { LoreError, Priority, Result } from "@lore/core";
 import type { DocId, DocSummary } from "@lore/core";
@@ -177,7 +178,12 @@ export class SyncDocsService {
         if (fileNormalized === corpusNormalized) {
           matched_clean.push({ file: spec.path, slug: existingSummary.slug });
         } else {
-          const diff_chars = Math.abs(fileNormalized.length - corpusNormalized.length);
+          // reason: Math.abs(length diff) reports 0 for equal-length-but-different bodies,
+        // contradicting the matched_drift bucket. diffChars uses LCS for accuracy. SPEC-018 §3.3.
+        const changes = diffChars(corpusNormalized, fileNormalized);
+        const diff_chars = changes
+          .filter((c) => c.added === true || c.removed === true)
+          .reduce((sum, c) => sum + c.value.length, 0);
           matched_drift.push({ file: spec.path, slug: existingSummary.slug, diff_chars });
         }
         continue;
