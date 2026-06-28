@@ -38,6 +38,8 @@ function makeApp(): App {
     // reason: eval scenarios never exercise the AI path; null-cast avoids heavyweight
     // AIProviderService construction while satisfying the now-required field (SPEC-017 §3.12).
     aiProviderService: null as unknown as App["aiProviderService"],
+    // reason: eval scenarios never exercise sync-docs path — null-cast per SPEC-018 §3.6.
+    syncDocsService: null as unknown as App["syncDocsService"],
     close: () => { telemetry.close(); },
   };
 }
@@ -61,17 +63,17 @@ Content for ${id}.
 describe("HAPPY — migration coverage against docs/requirements", () => {
   it("imports all parseable files and reports passed=true", async () => {
     // Use the real docs/requirements directory.
-    // 18 .md files (1 PRD + SPEC-001..SPEC-017), all have valid YAML frontmatter (parseable).
-    // expected_files = analyze().parseable = 18; imported = 18; links_broken = 0 → passed=true
-    // reason: count bumped from 17 to 18 after SPEC-017 was added to docs/requirements/spec/
+    // 19 .md files (1 PRD + SPEC-001..SPEC-018), all have valid YAML frontmatter (parseable).
+    // expected_files = analyze().parseable = 19; imported = 19; links_broken = 0 → passed=true
+    // reason: count bumped from 18 to 19 after SPEC-018 was added to docs/requirements/spec/
     const sourceDir = join(process.cwd(), "docs", "requirements");
     const app = makeApp();
     const result = await runMigrationCoverage(sourceDir, app);
     app.close();
 
     expect(result.source_dir).toBe(sourceDir);
-    expect(result.expected_files).toBe(18);
-    expect(result.imported).toBe(18);
+    expect(result.expected_files).toBe(19);
+    expect(result.imported).toBe(19);
     expect(result.already_existed).toBe(0);
     expect(result.links_broken).toBe(0);
     expect(result.passed).toBe(true);

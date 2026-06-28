@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Business logic layer. Seven stateless services orchestrate `StoreInterface` calls and apply domain rules (lifecycle, parent-type, MDX placeholders, version snapshots, drift checks, AI generation). All public methods return `Promise<Result<T, LoreError>>` — no thrown exceptions cross this boundary.
+Business logic layer. Eight stateless services orchestrate `StoreInterface` calls and apply domain rules (lifecycle, parent-type, MDX placeholders, version snapshots, drift checks, AI generation, file-to-corpus sync). All public methods return `Promise<Result<T, LoreError>>` — no thrown exceptions cross this boundary.
 
 ## Key Invariants
 
@@ -32,6 +32,7 @@ Business logic layer. Seven stateless services orchestrate `StoreInterface` call
 | `MigrationService` | One-shot v1→v2 import; reads YAML-frontmatter MD files, maps types, inserts via store |
 | `TreeCheckService` | Drift detection (`missing \| extra \| misplaced \| cycle \| orphan`), auto-fix, parent_id ↔ link-table reconciliation |
 | `AIProviderService` | AI provider dispatch + template render + ai.generation telemetry (SPEC-017 §3.6) |
+| `SyncDocsService` | One-way file→corpus reconciler for spec files; title-match dedup, drift report, parent resolution (SPEC-018) |
 
 ## Links
 
