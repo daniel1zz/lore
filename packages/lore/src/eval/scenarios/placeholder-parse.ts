@@ -197,6 +197,8 @@ function loreErrorMessage(error: LoreError): string {
       return `parent required for type: ${error.type}`;
     case "INVALID_PARENT_TYPE":
       return `invalid parent type: ${error.child} under ${error.parent}`;
+    case "AI_PROVIDER_ERROR":
+      return `AI provider error: ${error.message}`;
   }
 }
 

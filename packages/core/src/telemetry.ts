@@ -21,6 +21,7 @@
 import { z } from "zod";
 import { appendFileSync, mkdirSync } from "fs";
 import { dirname } from "path";
+import { DocTypeSchema } from "./ai.js";
 
 // ─── Event Schema (Zod SSOT) ──────────────────────────────────────────────────
 
@@ -48,6 +49,45 @@ export const TelemetryEventSchema = z.object({
 /** Derived type — never duplicate the shape as an interface. */
 export type TelemetryEvent = z.infer<typeof TelemetryEventSchema>;
 
+// ─── AI Generation Event Schema ──────────────────────────────────────────────
+
+/**
+ * Zod schema for the ai.generation telemetry event.
+ * Written to the same JSONL sink as TelemetryEvent; discriminated by the `event` field.
+ * Emitted by AIProviderService.generate() on both success and failure paths.
+ *
+ * @example
+ * aiGenerationEventSchema.parse({
+ *   event: "ai.generation", ts: new Date().toISOString(),
+ *   provider: "claude-cli", doc_type: "prd", template_source: "built-in",
+ *   duration_ms: 3200, output_chars: 512, exit_code: 0,
+ * });
+ *
+ * Source: SPEC-017 §3.10
+ */
+export const aiGenerationEventSchema = z.object({
+  event: z.literal("ai.generation"),
+  /** ISO 8601 UTC timestamp */
+  ts: z.string().datetime(),
+  /** Provider name as registered in the registry (e.g. "claude-cli") */
+  provider: z.string(),
+  /** Document type that was being generated */
+  doc_type: DocTypeSchema,
+  /** Whether the built-in template or a user-override was used */
+  template_source: z.enum(["built-in", "user-override"]),
+  /** Wall-clock milliseconds for the full provider round-trip */
+  duration_ms: z.number().nonnegative(),
+  /** Length of output content in characters (0 on failure) */
+  output_chars: z.number().int().nonnegative(),
+  /** Provider process exit code (0 for success, -1 if killed) */
+  exit_code: z.number().int(),
+  /** Error message when generation failed */
+  error: z.string().optional(),
+}).strict();
+
+/** Derived type for an AI generation telemetry event. */
+export type AiGenerationEvent = z.infer<typeof aiGenerationEventSchema>;
+
 // ─── Telemetry Interface ──────────────────────────────────────────────────────
 
 /**
@@ -56,7 +96,7 @@ export type TelemetryEvent = z.infer<typeof TelemetryEventSchema>;
  */
 export interface Telemetry {
   /**
-   * Record a single telemetry event.
+   * Record a single service-layer telemetry event.
    * Must never throw — IO errors MUST be swallowed internally.
    *
    * @param event - Validated telemetry event to persist
@@ -64,9 +104,18 @@ export interface Telemetry {
   record(event: TelemetryEvent): void;
 
   /**
+   * Emit an AI generation event to the same JSONL sink.
+   * Must never throw — IO errors MUST be swallowed internally.
+   * Discriminated from record() events by the `event: "ai.generation"` field.
+   *
+   * @param event - Validated AI generation event to persist
+   */
+  emit(event: AiGenerationEvent): void;
+
+  /**
    * Flush pending events and release file handles.
    * Idempotent — safe to call multiple times.
-   * Subsequent record() calls after close() are no-ops.
+   * Subsequent record()/emit() calls after close() are no-ops.
    */
   close(): void;
 }
@@ -85,6 +134,10 @@ export interface Telemetry {
  */
 export class NoOpTelemetry implements Telemetry {
   record(_event: TelemetryEvent): void {
+    // intentional no-op — reason: test/disabled mode, no side effects desired
+  }
+
+  emit(_event: AiGenerationEvent): void {
     // intentional no-op — reason: test/disabled mode, no side effects desired
   }
 
@@ -142,7 +195,22 @@ export class JsonlTelemetry implements Telemetry {
   }
 
   /**
-   * Mark this instance as closed; subsequent record() calls are ignored.
+   * Append an AI generation event as a JSON line to the same JSONL file.
+   * Discriminated from record() events by `event: "ai.generation"` field.
+   * No-op if already closed. IO errors are swallowed — see invariant.
+   */
+  emit(event: AiGenerationEvent): void {
+    if (this.closed) return;
+    try {
+      const line = JSON.stringify(event) + "\n";
+      appendFileSync(this.filePath, line, "utf8");
+    } catch {
+      // reason: telemetry failures MUST NOT break service callers (SPEC-012 §4)
+    }
+  }
+
+  /**
+   * Mark this instance as closed; subsequent record()/emit() calls are ignored.
    * Synchronous flush is implicit since appendFileSync is synchronous.
    */
   close(): void {

@@ -92,15 +92,17 @@ function extractSlug(result: RunResult): string {
 }
 
 function createPrd(tmpDir: string, title: string): string {
-  return extractSlug(runLore(["create", "prd", "--title", title], tmpDir));
+  // reason: --no-ai bypasses AI generation (SPEC-017 default) so tree-check tests that
+  // use create for setup are not affected by absence of the claude binary in CI.
+  return extractSlug(runLore(["create", "prd", "--title", title, "--no-ai"], tmpDir));
 }
 
 function createSpec(tmpDir: string, title: string, parentSlug: string): string {
-  return extractSlug(runLore(["create", "spec", "--title", title, "--parent", parentSlug], tmpDir));
+  return extractSlug(runLore(["create", "spec", "--title", title, "--parent", parentSlug, "--no-ai"], tmpDir));
 }
 
 function createPlan(tmpDir: string, title: string): string {
-  return extractSlug(runLore(["create", "plan", "--title", title], tmpDir));
+  return extractSlug(runLore(["create", "plan", "--title", title, "--no-ai"], tmpDir));
 }
 
 function writeBlueprint(tmpDir: string, yaml: string): void {
@@ -541,18 +543,22 @@ describe("[REGRESSION] lore create spec without --parent → PARENT_REQUIRED (ex
   // REGRESSION: This must remain a schema-layer PARENT_REQUIRED error (exit 4),
   // NOT an INVALID_PARENT_TYPE error. The two-stage check is: first validate parent_id
   // exists (PARENT_REQUIRED), then validate parent type is correct (INVALID_PARENT_TYPE).
+  //
+  // reason: --no-ai added so the command reaches the service layer (not the AI provider
+  // path which would exit 6 before ever calling service.create). In non-TTY context,
+  // openEditor returns ok("") immediately, so no actual editor is launched. SPEC-017.
   it("exits 4 (not 0 or 3) when creating spec without --parent", () => {
-    const r = runLore(["create", "spec", "--title", "test spec"], tmpDir);
+    const r = runLore(["create", "spec", "--title", "test spec", "--no-ai"], tmpDir);
     expect(r.exitCode).toBe(4);
   });
 
   it("stderr mentions 'parent' when creating spec without --parent", () => {
-    const r = runLore(["create", "spec", "--title", "test spec"], tmpDir);
+    const r = runLore(["create", "spec", "--title", "test spec", "--no-ai"], tmpDir);
     expect(r.stderr.toLowerCase()).toMatch(/parent/);
   });
 
   it("does not emit INVALID_PARENT_TYPE when parent is missing entirely", () => {
-    const r = runLore(["create", "spec", "--title", "test spec"], tmpDir);
+    const r = runLore(["create", "spec", "--title", "test spec", "--no-ai"], tmpDir);
     // Must be PARENT_REQUIRED not INVALID_PARENT_TYPE
     // (INVALID_PARENT_TYPE only triggers when parent exists but type is wrong)
     expect(r.stderr).not.toMatch(/invalid.parent.type/i);

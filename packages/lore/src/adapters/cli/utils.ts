@@ -75,6 +75,10 @@ export function exitCode(error: LoreError): number {
       return 4;
     case "STALE_VERSION":
       return 5;
+    case "AI_PROVIDER_ERROR":
+      // reason: exit 6 reserved for AI provider failures — distinct from generic store/validation
+      // errors so callers can detect AI-specific failures without parsing stderr (SPEC-017 §3.4)
+      return 6;
     case "STORE_ERROR":
       return 1;
     default: {
@@ -154,6 +158,20 @@ export function formatError(error: LoreError): string {
         `Error: Invalid parent type for '${error.child}'.\n` +
         `  Parent type '${error.parent}' is not allowed. Allowed parent types: ${error.allowed.join(", ")}`
       );
+    case "AI_PROVIDER_ERROR": {
+      // Multi-line format per SPEC-017 §3.4: provider name, exit code, stderr excerpt, retry hint
+      const lines = [
+        `Error: AI provider${error.provider ? ` "${error.provider}"` : ""} failed.`,
+      ];
+      if (error.exit_code !== undefined) {
+        lines.push(`  exit code: ${error.exit_code}`);
+      }
+      if (error.stderr) {
+        lines.push(`  stderr: ${error.stderr}`);
+      }
+      lines.push("  Retry with --no-ai to use the editor instead.");
+      return lines.join("\n");
+    }
     case "STORE_ERROR":
       return `Error: Storage failure: ${error.message}`;
     default: {

@@ -164,7 +164,8 @@ describe("lore create — AC-CR-1: editor opens when --content is absent", () =>
     const output = captureOutput();
     const exit = captureExit();
     try {
-      await runCmd(cmd, { type: "prd", title: "My PRD From Editor" });
+      // reason: --no-ai bypasses AI generation (SPEC-017 default) to exercise the editor path.
+      await runCmd(cmd, { type: "prd", title: "My PRD From Editor", ai: false });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -230,7 +231,8 @@ describe("lore create — AC-CR-3: editor error produces exit code 4", () => {
     const output = captureOutput();
     const exit = captureExit();
     try {
-      await runCmd(cmd, { type: "prd", title: "PRD With Editor Fail" });
+      // reason: --no-ai bypasses AI generation (SPEC-017 default) to exercise the editor error path.
+      await runCmd(cmd, { type: "prd", title: "PRD With Editor Fail", ai: false });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -255,7 +257,8 @@ describe("lore create — AC-CR-3: editor error produces exit code 4", () => {
     const output = captureOutput();
     const exit = captureExit();
     try {
-      await runCmd(cmd, { type: "prd", title: "PRD Empty Content" });
+      // reason: --no-ai bypasses AI generation (SPEC-017 default) to exercise the empty-content editor path.
+      await runCmd(cmd, { type: "prd", title: "PRD Empty Content", ai: false });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -282,7 +285,8 @@ describe("lore create — AC-CR-4: --json mode + editor flow", () => {
     const output = captureOutput();
     const exit = captureExit();
     try {
-      await runCmd(cmd, { type: "prd", title: "JSON Mode PRD", json: true });
+      // reason: --no-ai bypasses AI generation (SPEC-017 default) to exercise the editor + JSON path.
+      await runCmd(cmd, { type: "prd", title: "JSON Mode PRD", json: true, ai: false });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {

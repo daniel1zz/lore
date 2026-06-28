@@ -6,9 +6,14 @@
  *   knowledge → --sub-type (ideation|retro|research|reference)
  *   task      → --parent <plan-slug-or-id> AND --plan-id <plan-slug-or-id>
  *
- * Editor flow (SPEC-003 §3.1):
- *   When --content is omitted, opens defaults.editor / $EDITOR / vi for the doc body.
- *   --content "" is accepted as explicit empty body (bypasses editor).
+ * Content decision tree (SPEC-017 §3.11):
+ *   --content "…" passed explicitly → use it (skip AI and editor)
+ *   --no-ai passed → open $EDITOR (pre-SPEC-017 behaviour preserved)
+ *   neither passed  → AI generation via AIProviderService (SPEC-017 default)
+ *
+ * Editor flow (SPEC-003 §3.1, preserved under --no-ai):
+ *   Opens defaults.editor / $EDITOR / vi for the doc body.
+ *   --content "" is accepted as explicit empty body (bypasses both AI and editor).
  */
 
 import { defineCommand } from "citty";
@@ -79,6 +84,15 @@ export default defineCommand({
     "plan-id": {
       type: "string",
       description: "[task only] Plan document ID or slug this task belongs to",
+    },
+    ai: {
+      type: "boolean",
+      // reason: citty/mri treats --no-* as boolean negation: --no-ai sets args.ai=false.
+      // Defining the flag as `ai` with default:true lets --no-ai work via the standard
+      // negation convention (mri sets ai=false) rather than setting a key named "no-ai".
+      // AC-AI-19: help shows --no-ai as the negation form, satisfying spec requirement.
+      default: true,
+      description: "Use AI to generate document content (default true; pass --no-ai for $EDITOR).",
     },
   },
   async run({ args }) {
@@ -169,17 +183,64 @@ export default defineCommand({
             .filter(Boolean)
         : [];
 
-      // Editor flow (AC-CR-1/2): open editor when --content flag was not provided at all.
+      // Content decision tree (SPEC-017 §3.11):
+      //   1. --content passed explicitly → use it (skip AI and editor)
+      //   2. --no-ai passed             → editor flow (pre-SPEC-017 behaviour)
+      //   3. neither                    → AI generation (SPEC-017 default)
+      //
       // args.content === undefined means the flag was absent (citty does not set it).
       // args.content === "" means --content "" was passed explicitly → accepted as empty body.
       let resolvedContent: string | undefined = args.content;
       if (resolvedContent === undefined) {
-        const editorResult = await openEditor({ defaults });
-        if (!editorResult.ok) {
-          process.stderr.write(formatError(editorResult.error) + "\n");
-          process.exit(exitCode(editorResult.error));
+        if (!args.ai) {
+          // --no-ai: fall back to editor (AC-AI-2 — byte-identical to pre-SPEC-017 behaviour)
+          const editorResult = await openEditor({ defaults });
+          if (!editorResult.ok) {
+            process.stderr.write(formatError(editorResult.error) + "\n");
+            process.exit(exitCode(editorResult.error));
+          }
+          resolvedContent = editorResult.value;
+        } else {
+          // AI path (SPEC-017 §3.11 default)
+          // Resolve parent title for template interpolation — one extra O(1) corpus read.
+          // reason: skip when no --parent flag; insignificant vs provider latency (SPEC-017 §7).
+          let parent_title: string | undefined;
+          if (args.parent) {
+            const parentResult = await app.corpusService.get(args.parent);
+            // reason: parent title lookup failure is non-fatal for AI path — template will
+            // omit the {{#parent_title}}…{{/parent_title}} block gracefully.
+            if (parentResult.ok) {
+              parent_title = parentResult.value.doc.title;
+            }
+          }
+
+          const showSpinner = process.stderr.isTTY && !args.json;
+          // reason: app.aiProviderService is always set in production (wired by createApp);
+          // the optional field exists only to keep test stubs valid (SPEC-017 §3.12).
+          const aiService = app.aiProviderService!;
+          if (showSpinner) {
+            process.stderr.write(`⏳ Generating via ${aiService.activeProviderName}...\n`);
+          }
+
+          const aiResult = await aiService.generate({
+            doc_type: docType,
+            title: args.title,
+            ...(parent_title !== undefined ? { parent_title } : {}),
+          });
+
+          if (!aiResult.ok) {
+            process.stderr.write(formatError(aiResult.error) + "\n");
+            process.exit(exitCode(aiResult.error));
+          }
+
+          resolvedContent = aiResult.value.content;
+          if (showSpinner) {
+            process.stderr.write(
+              `✓ Generated ${aiResult.value.content.length} chars in ` +
+              `${(aiResult.value.duration_ms / 1000).toFixed(1)}s\n`,
+            );
+          }
         }
-        resolvedContent = editorResult.value;
       }
 
       // Resolve --plan-id slug or ULID → canonical ULID before building extra
