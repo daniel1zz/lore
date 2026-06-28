@@ -170,7 +170,12 @@ Error: AI provider "<provider>" failed.
 
 ```ts
 const BUILT_IN: Record<string, AiProviderConfig> = {
-  "claude-cli": { command: "claude", args: ["-p"], timeout_ms: 60_000 },
+  // --setting-sources project: skip user-global Claude Code settings (hooks /
+  // ~/.claude/CLAUDE.md / stop-review chain) that would otherwise inject session
+  // output into stdout, while keeping keychain auth and project-local CLAUDE.md
+  // intact. Found via dogfood smoke (commit history). Users can override via
+  // ai.providers.claude-cli.args if they need a different invocation shape.
+  "claude-cli": { command: "claude", args: ["-p", "--setting-sources", "project"], timeout_ms: 60_000 },
 };
 
 export function buildProviderRegistry(

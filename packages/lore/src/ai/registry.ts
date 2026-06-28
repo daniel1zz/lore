@@ -34,7 +34,10 @@ import { ClaudeCliProvider } from "./claude-cli-provider.js";
 const BUILT_IN_PROVIDER_CONFIGS: Record<string, AiProviderConfig> = {
   "claude-cli": {
     command: "claude",
-    args: ["-p"],
+    // --setting-sources project: skip user-global settings (hooks / CLAUDE.md / stop-review
+    // chain) that would otherwise inject Claude Code session output into stdout, while keeping
+    // keychain auth and project-local CLAUDE.md intact. See SPEC-017 §3.5.
+    args: ["-p", "--setting-sources", "project"],
     timeout_ms: 60_000,
   },
 };
