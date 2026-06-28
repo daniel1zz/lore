@@ -281,6 +281,47 @@ describe("AC-SD-5 drift — diff_chars > 0 when body changed (validates FU#1 fix
   });
 });
 
+// ─── Bug B: drift hint format — slug shown + --content-file mentioned ────────
+
+describe("Bug B — drift hint shows slug and mentions --content-file", () => {
+  it("human output for drifted spec includes corpus slug and --content-file guidance", () => {
+    const specDir = join(tmpDir, "docs", "requirements", "spec");
+    mkdirSync(specDir, { recursive: true });
+
+    // Step 1: Create spec file and sync to corpus
+    writeSpecFile(specDir, "SPEC-hint-test.md", {
+      title: "Hint Test Spec",
+      parent: "Integration PRD",
+      body: "Original body content.",
+    });
+    const createResult = runLore(["sync-docs", "--from", specDir], tmpDir);
+    expect(createResult.exitCode).toBe(0);
+
+    // Step 2: Modify file body so drift is detected
+    writeSpecFile(specDir, "SPEC-hint-test.md", {
+      title: "Hint Test Spec",
+      parent: "Integration PRD",
+      body: "Updated body content — this differs from corpus.",
+    });
+
+    // Step 3: Run sync-docs (human mode, not --json) and capture stdout
+    const driftResult = runLore(["sync-docs", "--from", specDir], tmpDir);
+    expect(driftResult.exitCode).toBe(0);
+
+    const out = driftResult.stdout;
+
+    // Hint must mention --content-file (not the old --content "$(cat ...)" form)
+    expect(out).toContain("--content-file");
+
+    // Hint must show the slug (format: <filename>  →  <slug>)
+    expect(out).toContain("→");
+    expect(out).toContain("SPEC-hint-test.md");
+
+    // Must mention corpus is SSOT and no auto-push
+    expect(out).toContain("corpus is SSOT");
+  });
+});
+
 // ─── AC-SD-9: exit 4 on VALIDATION_ERROR ─────────────────────────────────────
 
 describe("AC-SD-9 — per-file validation error exits 4", () => {
