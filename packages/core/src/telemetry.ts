@@ -75,8 +75,8 @@ export const aiGenerationEventSchema = z.object({
   doc_type: DocTypeSchema,
   /** Whether the built-in template or a user-override was used */
   template_source: z.enum(["built-in", "user-override"]),
-  /** Wall-clock milliseconds for the full provider round-trip */
-  duration_ms: z.number().nonnegative(),
+  /** Wall-clock milliseconds for the full provider round-trip (integer; AIProviderService uses Math.round) */
+  duration_ms: z.number().int().nonnegative(),
   /** Length of output content in characters (0 on failure) */
   output_chars: z.number().int().nonnegative(),
   /** Provider process exit code (0 for success, -1 if killed) */

@@ -52,12 +52,12 @@ export interface App {
    */
   sessionStore?: SessionStore;
   /**
-   * AIProviderService — optional so existing test stubs (InMemoryStore-backed) remain valid.
-   * Always present in production (wired by createApp via buildProviderRegistry).
-   * Absent in test stubs that don't exercise the AI path.
+   * AIProviderService — required; always wired by createApp via buildProviderRegistry.
+   * Test fixtures that never exercise the AI path may cast null to this type with a comment
+   * explaining why (see SPEC-017 §3.12 and ai-native-coding guide §"as unknown as").
    * Source: SPEC-017 §3.12
    */
-  aiProviderService?: AIProviderService;
+  aiProviderService: AIProviderService;
   close(): void;
 }
 
@@ -65,12 +65,12 @@ export interface App {
  * Build an App backed by a SQLiteStore.
  * @param store - SQLiteStore instance
  * @param telemetry - Telemetry sink; defaults to NoOpTelemetry (no file I/O unless opted in)
- * @param aiProviderService - Wired AI service from buildProviderRegistry; optional for test compat
+ * @param aiProviderService - Wired AI service from buildProviderRegistry (always required)
  */
 function buildAppFromSqlite(
   store: SQLiteStore,
   telemetry: Telemetry = new NoOpTelemetry(),
-  aiProviderService?: AIProviderService,
+  aiProviderService: AIProviderService,
 ): App {
   const db = store.getDatabase();
   return {
@@ -84,9 +84,7 @@ function buildAppFromSqlite(
     // reason: SessionStore shares the same Database as ApiKeyStore — one connection, no WAL lock
     // contention. Both auth tables live in the same SQLite file. SPEC-016 §3.5.
     sessionStore: new SessionStore(db),
-    // reason: exactOptionalPropertyTypes=true prohibits assigning `undefined` to optional prop.
-    // Spread conditionally so the key is absent rather than present-with-undefined.
-    ...(aiProviderService !== undefined ? { aiProviderService } : {}),
+    aiProviderService,
     close: () => { telemetry.close(); store.close(); },
   };
 }
@@ -100,13 +98,13 @@ function buildAppFromSqlite(
  * @param store - TursoStore instance
  * @param dbPath - Local replica path (for ApiKeyStore)
  * @param telemetry - Telemetry sink; defaults to NoOpTelemetry
- * @param aiProviderService - Wired AI service from buildProviderRegistry; optional for test compat
+ * @param aiProviderService - Wired AI service from buildProviderRegistry (always required)
  */
 function buildAppFromTurso(
   store: TursoStore,
   dbPath: string,
   telemetry: Telemetry = new NoOpTelemetry(),
-  aiProviderService?: AIProviderService,
+  aiProviderService: AIProviderService,
 ): App {
   const apiKeyDb = new Database(dbPath);
   return {
@@ -121,9 +119,7 @@ function buildAppFromTurso(
     // api_keys is one of the 5 replicated tables; sessions is local-only (SPEC-016 non-goal:
     // sessions are ephemeral, not replicated). SPEC-016 §3.5.
     sessionStore: new SessionStore(apiKeyDb),
-    // reason: exactOptionalPropertyTypes=true prohibits assigning `undefined` to optional prop.
-    // Spread conditionally so the key is absent rather than present-with-undefined.
-    ...(aiProviderService !== undefined ? { aiProviderService } : {}),
+    aiProviderService,
     close: () => { telemetry.close(); store.close(); apiKeyDb.close(); },
   };
 }

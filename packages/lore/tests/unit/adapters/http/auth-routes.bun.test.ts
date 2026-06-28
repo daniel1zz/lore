@@ -79,6 +79,9 @@ async function makeTestServer(): Promise<TestContext> {
     treeCheckService: new TreeCheckService(docStore),
     apiKeyStore,
     sessionStore,
+    // reason: auth route tests never exercise the AI path; null-cast avoids heavyweight
+    // AIProviderService construction while satisfying the now-required field (SPEC-017 §3.12).
+    aiProviderService: null as unknown as App["aiProviderService"],
     close: () => db.close(),
   };
 
