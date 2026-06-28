@@ -7,15 +7,23 @@
  *   task      → --parent <plan-slug-or-id> AND --plan-id <plan-slug-or-id>
  *
  * Content decision tree (SPEC-017 §3.11):
+ *   --content-file <path> → read file, use its contents (skip AI and editor)
  *   --content "…" passed explicitly → use it (skip AI and editor)
  *   --no-ai passed → open $EDITOR (pre-SPEC-017 behaviour preserved)
  *   neither passed  → AI generation via AIProviderService (SPEC-017 default)
+ *
+ * --content-file <path>:
+ *   Reads the file at <path> and uses its full contents as the document body.
+ *   Workaround for Bug A: citty/mri treats `---` as an option terminator when passed
+ *   directly to --content. Mutually exclusive with --content (exit 2 if both passed).
+ *   File not found or unreadable → exit 4 (VALIDATION_ERROR).
  *
  * Editor flow (SPEC-003 §3.1, preserved under --no-ai):
  *   Opens defaults.editor / $EDITOR / vi for the doc body.
  *   --content "" is accepted as explicit empty body (bypasses both AI and editor).
  */
 
+import { readFileSync } from "node:fs";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
@@ -59,6 +67,11 @@ export default defineCommand({
     content: {
       type: "string",
       description: "Document content (markdown)",
+    },
+    "content-file": {
+      type: "string",
+      description:
+        "Path to file whose full contents become the document body. Mutually exclusive with --content.",
     },
     priority: {
       type: "string",
@@ -183,7 +196,16 @@ export default defineCommand({
             .filter(Boolean)
         : [];
 
+      // Mutex guard: --content and --content-file are mutually exclusive (exit 2 per Bug A spec).
+      if (args.content !== undefined && args["content-file"] !== undefined) {
+        process.stderr.write(
+          "Error: --content and --content-file are mutually exclusive. Pass only one.\n",
+        );
+        process.exit(2);
+      }
+
       // Content decision tree (SPEC-017 §3.11):
+      //   0. --content-file passed → read file, use as content (skip AI + editor)
       //   1. --content passed explicitly → use it (skip AI and editor)
       //   2. --no-ai passed             → editor flow (pre-SPEC-017 behaviour)
       //   3. neither                    → AI generation (SPEC-017 default)
@@ -191,6 +213,19 @@ export default defineCommand({
       // args.content === undefined means the flag was absent (citty does not set it).
       // args.content === "" means --content "" was passed explicitly → accepted as empty body.
       let resolvedContent: string | undefined = args.content;
+      // reason: --content-file reads from disk and assigns as content, bypassing the mri
+      // argv-terminator bug that drops content starting with `---` (Bug A fix, SPEC-003 §3.1).
+      if (resolvedContent === undefined && args["content-file"] !== undefined) {
+        try {
+          resolvedContent = readFileSync(args["content-file"], "utf8");
+        } catch (e) {
+          process.stderr.write(
+            `Error: cannot read --content-file '${args["content-file"]}': ${e instanceof Error ? e.message : String(e)}\n`,
+          );
+          process.exitCode = 4;
+          return;
+        }
+      }
       if (resolvedContent === undefined) {
         if (!args.ai) {
           // --no-ai: fall back to editor (AC-AI-2 — byte-identical to pre-SPEC-017 behaviour)

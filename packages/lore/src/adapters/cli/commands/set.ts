@@ -7,10 +7,18 @@
  *   "no changes" and exits 0 without bumping the version number.
  *
  * Non-editor flow (AC-SET-2):
- *   When any of --title, --status, --content, --priority, --tags is provided, applies
- *   those fields directly via corpusService.set() (no editor is opened).
+ *   When any of --title, --status, --content, --content-file, --priority, --tags is provided,
+ *   applies those fields directly via corpusService.set() (no editor is opened).
+ *
+ * --content-file <path>:
+ *   Reads the file at <path> and uses its full contents as the new content.
+ *   Workaround for Bug A: citty/mri treats `---` as an option terminator when it appears
+ *   as the value of a `--content VALUE` pair. --content-file avoids this by reading from disk.
+ *   Mutually exclusive with --content (exit 2 if both passed).
+ *   File not found or unreadable → exit 4 (VALIDATION_ERROR).
  */
 
+import { readFileSync } from "node:fs";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
@@ -40,6 +48,11 @@ export default defineCommand({
       type: "string",
       description: "New content (markdown)",
     },
+    "content-file": {
+      type: "string",
+      description:
+        "Path to file whose full contents become the new content. Mutually exclusive with --content.",
+    },
     priority: {
       type: "string",
       description: "New priority: critical | high | medium | low",
@@ -54,12 +67,35 @@ export default defineCommand({
     },
   },
   async run({ args }) {
+    // Mutex guard: --content and --content-file are mutually exclusive (exit 2 per Bug A spec).
+    if (args.content !== undefined && args["content-file"] !== undefined) {
+      process.stderr.write(
+        "Error: --content and --content-file are mutually exclusive. Pass only one.\n",
+      );
+      process.exit(2);
+    }
+
     const { app, defaults } = loadLoreApp();
     try {
       const patch: Record<string, unknown> = {};
       if (args.title !== undefined) patch["title"] = args.title;
       if (args.status !== undefined) patch["status"] = args.status as DocStatus;
       if (args.content !== undefined) patch["content"] = args.content;
+      // reason: --content-file reads from disk and assigns as content, bypassing the mri
+      // argv-terminator bug that drops content starting with `---` (Bug A fix, SPEC-003 §3.1).
+      if (args["content-file"] !== undefined) {
+        let fileContent: string;
+        try {
+          fileContent = readFileSync(args["content-file"], "utf8");
+        } catch (e) {
+          process.stderr.write(
+            `Error: cannot read --content-file '${args["content-file"]}': ${e instanceof Error ? e.message : String(e)}\n`,
+          );
+          process.exitCode = 4;
+          return;
+        }
+        patch["content"] = fileContent;
+      }
       if (args.priority !== undefined) patch["priority"] = args.priority as Priority;
       if (args.tags !== undefined) {
         patch["tags"] = args.tags.split(",").map((t: string) => t.trim()).filter(Boolean);

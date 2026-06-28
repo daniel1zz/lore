@@ -97,13 +97,24 @@ export default defineCommand({
       }
 
       if (report.matched_drift.length > 0) {
+        // reason: old hint used `--content "$(cat <file>)"` which has two bugs:
+        //   (1) leading `---` in the file is treated by mri as an argv terminator → empty content.
+        //   (2) cat includes YAML frontmatter, which lands verbatim in corpus body; on next
+        //       sync-docs run the comparison strips frontmatter from file but compares against
+        //       the full-content corpus body → perpetual drift.
+        // New hint references `--content-file` (Bug A fix) and tells user about frontmatter caveat.
         process.stdout.write(
-          `⚠ ${report.matched_drift.length} spec${report.matched_drift.length === 1 ? "" : "s"} differ${report.matched_drift.length === 1 ? "s" : ""} from corpus body (use \`lore set <slug> --content "$(cat <file>)"\` to push):\n`,
+          `⚠ ${report.matched_drift.length} spec${report.matched_drift.length === 1 ? "" : "s"} differ${report.matched_drift.length === 1 ? "s" : ""} from corpus body — corpus is SSOT; sync-docs does not auto-push.\n`,
         );
+        process.stdout.write(`  Files (corpus slug shown for \`lore set\` / \`lore get\`):\n`);
         for (const entry of report.matched_drift) {
           const filename = entry.file.split("/").pop() ?? entry.file;
-          process.stdout.write(`    ${filename}\n`);
+          process.stdout.write(`    ${filename}  →  ${entry.slug}\n`);
         }
+        process.stdout.write(
+          `  To push file → corpus, manually strip the YAML frontmatter and run:\n` +
+            `    lore set <slug> --content-file <stripped-file>\n`,
+        );
       }
 
       if (report.errors.length > 0) {
