@@ -1,6 +1,6 @@
 ---
 id: SPEC-009
-type: feature-spec
+type: spec
 role: spec
 title: Sync Engine (Turso)
 status: approved
