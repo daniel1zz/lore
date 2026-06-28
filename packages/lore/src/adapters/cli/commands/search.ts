@@ -42,7 +42,8 @@ export default defineCommand({
 
       if (!result.ok) {
         process.stderr.write(formatError(result.error) + "\n");
-        process.exit(exitCode(result.error));
+        process.exitCode = exitCode(result.error);
+        return;
       }
 
       const limit = parseInt(args.limit ?? "10", 10);

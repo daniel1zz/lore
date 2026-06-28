@@ -64,7 +64,8 @@ const migrationCommand = defineCommand({
       if (args.json) {
         // CLI surface — console.log is intentional output here
         console.log(JSON.stringify({ ok: result.passed, data: result }, null, 2)); // CLI surface
-        process.exit(result.passed ? 0 : 1);
+        process.exitCode = result.passed ? 0 : 1;
+        return;
       }
 
       // Human-readable output
@@ -86,7 +87,8 @@ const migrationCommand = defineCommand({
       }
 
       console.log(`\nResult:        ${result.passed ? "PASSED" : "FAILED"}`); // CLI surface
-      process.exit(result.passed ? 0 : 1);
+      process.exitCode = result.passed ? 0 : 1;
+      return;
     } finally {
       app.close();
     }
@@ -114,7 +116,8 @@ const treeCommand = defineCommand({
 
       if (args.json) {
         console.log(JSON.stringify({ ok: result.passed, data: result }, null, 2)); // CLI surface
-        process.exit(result.passed ? 0 : 1);
+        process.exitCode = result.passed ? 0 : 1;
+        return;
       }
 
       // Human-readable output
@@ -150,7 +153,8 @@ const treeCommand = defineCommand({
       }
 
       console.log(`\nResult: ${result.passed ? "PASSED" : "FAILED"}`); // CLI surface
-      process.exit(result.passed ? 0 : 1);
+      process.exitCode = result.passed ? 0 : 1;
+      return;
     } finally {
       app.close();
     }
@@ -178,7 +182,8 @@ const linksCommand = defineCommand({
 
       if (args.json) {
         console.log(JSON.stringify({ ok: result.passed, data: result }, null, 2)); // CLI surface
-        process.exit(result.passed ? 0 : 1);
+        process.exitCode = result.passed ? 0 : 1;
+        return;
       }
 
       // Human-readable output
@@ -214,7 +219,8 @@ const linksCommand = defineCommand({
       }
 
       console.log(`\nResult: ${result.passed ? "PASSED" : "FAILED"}`); // CLI surface
-      process.exit(result.passed ? 0 : 1);
+      process.exitCode = result.passed ? 0 : 1;
+      return;
     } finally {
       app.close();
     }
@@ -245,7 +251,8 @@ const typesCommand = defineCommand({
 
       if (args.json) {
         console.log(JSON.stringify({ ok: result.passed, data: result }, null, 2)); // CLI surface
-        process.exit(result.passed ? 0 : 1);
+        process.exitCode = result.passed ? 0 : 1;
+        return;
       }
 
       // Human-readable output
@@ -269,7 +276,8 @@ const typesCommand = defineCommand({
       }
 
       console.log(`\nResult: ${result.passed ? "PASSED" : "FAILED"}`); // CLI surface
-      process.exit(result.passed ? 0 : 1);
+      process.exitCode = result.passed ? 0 : 1;
+      return;
     } finally {
       app.close();
     }
@@ -299,7 +307,8 @@ const ftsCommand = defineCommand({
 
       if (args.json) {
         console.log(JSON.stringify({ ok: result.passed, data: result }, null, 2)); // CLI surface
-        process.exit(result.passed ? 0 : 1);
+        process.exitCode = result.passed ? 0 : 1;
+        return;
       }
 
       // Human-readable output
@@ -320,7 +329,8 @@ const ftsCommand = defineCommand({
       }
 
       console.log(`\nResult: ${result.passed ? "PASSED" : "FAILED"}`); // CLI surface
-      process.exit(result.passed ? 0 : 1);
+      process.exitCode = result.passed ? 0 : 1;
+      return;
     } finally {
       app.close();
     }
@@ -348,7 +358,8 @@ const placeholdersCommand = defineCommand({
 
       if (args.json) {
         console.log(JSON.stringify({ ok: result.passed, data: result }, null, 2)); // CLI surface
-        process.exit(result.passed ? 0 : 1);
+        process.exitCode = result.passed ? 0 : 1;
+        return;
       }
 
       // Human-readable output
@@ -377,7 +388,8 @@ const placeholdersCommand = defineCommand({
       }
 
       console.log(`\nResult: ${result.passed ? "PASSED" : "FAILED"}`); // CLI surface
-      process.exit(result.passed ? 0 : 1);
+      process.exitCode = result.passed ? 0 : 1;
+      return;
     } finally {
       app.close();
     }

@@ -197,6 +197,90 @@ describe("AC-SD-5 — --json outputs SyncReport", () => {
   });
 });
 
+// ─── AC-SD-5 drift: diff_chars > 0 for changed content (FU#1 regression) ─────
+
+describe("AC-SD-5 drift — diff_chars > 0 when body changed (validates FU#1 fix)", () => {
+  it("same-length different-content body → diff_chars > 0", () => {
+    // reason: Old algorithm Math.abs(len_a - len_b) reports 0 for equal-length-but-different
+    // bodies, contradicting the matched_drift bucket. FU#1 fixes this with diffChars (LCS).
+    const specDir = join(tmpDir, "docs", "requirements", "spec");
+    mkdirSync(specDir, { recursive: true });
+
+    // Step 1: Create spec file with body "AAAA"
+    writeSpecFile(specDir, "SPEC-drift-same-len.md", {
+      title: "Drift SameLength Spec",
+      parent: "Integration PRD",
+      body: "AAAA",
+    });
+
+    // Step 2: Sync to create in corpus
+    const createResult = runLore(["sync-docs", "--from", specDir], tmpDir);
+    expect(createResult.exitCode).toBe(0);
+
+    // Step 3: Modify file to same-length but different body "BBBB"
+    writeSpecFile(specDir, "SPEC-drift-same-len.md", {
+      title: "Drift SameLength Spec",
+      parent: "Integration PRD",
+      body: "BBBB",
+    });
+
+    // Step 4: Run sync-docs in dry-run JSON mode — must detect drift
+    const driftResult = runLore(
+      ["sync-docs", "--from", specDir, "--dry-run", "--json"],
+      tmpDir,
+    );
+    expect(driftResult.exitCode).toBe(0);
+
+    const report = JSON.parse(driftResult.stdout) as {
+      ok: boolean;
+      data: { matched_drift: Array<{ file: string; slug: string; diff_chars: number }> };
+    };
+    expect(report.ok).toBe(true);
+    expect(report.data.matched_drift.length).toBe(1);
+    // Both "AAAA" and "BBBB" have length 4; old algorithm returns 0, new returns 4.
+    expect(report.data.matched_drift[0]!.diff_chars).toBeGreaterThan(0);
+  });
+
+  it("different-length body → diff_chars > 0", () => {
+    const specDir = join(tmpDir, "docs", "requirements", "spec");
+    mkdirSync(specDir, { recursive: true });
+
+    // Step 1: Create spec file with body "AAA" (3 chars)
+    writeSpecFile(specDir, "SPEC-drift-diff-len.md", {
+      title: "Drift DiffLength Spec",
+      parent: "Integration PRD",
+      body: "AAA",
+    });
+
+    // Step 2: Sync to create in corpus
+    const createResult = runLore(["sync-docs", "--from", specDir], tmpDir);
+    expect(createResult.exitCode).toBe(0);
+
+    // Step 3: Modify file to different-length body "BBBBB" (5 chars)
+    writeSpecFile(specDir, "SPEC-drift-diff-len.md", {
+      title: "Drift DiffLength Spec",
+      parent: "Integration PRD",
+      body: "BBBBB",
+    });
+
+    // Step 4: Run sync-docs in dry-run JSON mode — must detect drift
+    const driftResult = runLore(
+      ["sync-docs", "--from", specDir, "--dry-run", "--json"],
+      tmpDir,
+    );
+    expect(driftResult.exitCode).toBe(0);
+
+    const report = JSON.parse(driftResult.stdout) as {
+      ok: boolean;
+      data: { matched_drift: Array<{ file: string; slug: string; diff_chars: number }> };
+    };
+    expect(report.ok).toBe(true);
+    expect(report.data.matched_drift.length).toBe(1);
+    // Different-length case: both old and new algorithms detect drift, but new is more precise.
+    expect(report.data.matched_drift[0]!.diff_chars).toBeGreaterThan(0);
+  });
+});
+
 // ─── AC-SD-9: exit 4 on VALIDATION_ERROR ─────────────────────────────────────
 
 describe("AC-SD-9 — per-file validation error exits 4", () => {
@@ -221,10 +305,17 @@ describe("AC-SD-9 — per-file validation error exits 4", () => {
 // ─── AC-SD-19: sync-docs subcommand is registered and flags work ──────────────
 
 describe("AC-SD-19 — sync-docs subcommand is registered and executable", () => {
-  it("lore sync-docs --dry-run on empty dir exits 0 (subcommand is registered)", () => {
-    // reason: citty --help output is not captured by Bun.spawnSync in bun test context
-    // (citty writes help directly to the inherited stdout fd, not through the piped buffer).
-    // We verify the command exists and flags work by running it in dry-run mode instead.
+  it("lore sync-docs --dry-run on empty dir exits 0 (AC-SD-19 proxy — verifies flags)", () => {
+    // AC-SD-19 Approach C: citty --help is not capturable via piped subprocess in bun:test.
+    // Approach A (Bun.spawn with stdio:pipe) confirmed empty output — citty writes help
+    // directly to the process's inherited terminal fd, bypassing both spawnSync's pipe
+    // buffer and Bun.spawn's explicit pipe redirect. Approach B (citty API direct call)
+    // requires test-time bundler setup incompatible with bun:sqlite constraints.
+    // Resolution: the proxy test below satisfies AC-SD-19 by proving:
+    //   (a) the "sync-docs" subcommand is registered in citty's router (the CLI routes to it),
+    //   (b) the --from, --dry-run, and --json flags are wired (the run succeeds and JSON parses),
+    //   (c) flag handling logic is exercised end-to-end via real subprocess.
+    // Manual smoke (run once): `bun run src/index.ts sync-docs --help` confirms flag listing.
     const emptyDir = join(tmpDir, "verify-flags-dir");
     mkdirSync(emptyDir, { recursive: true });
 

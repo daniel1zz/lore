@@ -70,12 +70,14 @@ export default defineCommand({
         const resolvedId = await app.corpusService.resolve(args.id);
         if (!resolvedId.ok) {
           process.stderr.write(formatError(resolvedId.error) + "\n");
-          process.exit(exitCode(resolvedId.error));
+          process.exitCode = exitCode(resolvedId.error);
+          return;
         }
         const getResult = await app.corpusService.get(resolvedId.value);
         if (!getResult.ok) {
           process.stderr.write(formatError(getResult.error) + "\n");
-          process.exit(exitCode(getResult.error));
+          process.exitCode = exitCode(getResult.error);
+          return;
         }
         const currentDoc = getResult.value.doc;
 
@@ -85,7 +87,8 @@ export default defineCommand({
         });
         if (!editorResult.ok) {
           process.stderr.write(formatError(editorResult.error) + "\n");
-          process.exit(exitCode(editorResult.error));
+          process.exitCode = exitCode(editorResult.error);
+          return;
         }
 
         const newContent = editorResult.value;
@@ -103,7 +106,8 @@ export default defineCommand({
 
       if (!result.ok) {
         process.stderr.write(formatError(result.error) + "\n");
-        process.exit(exitCode(result.error));
+        process.exitCode = exitCode(result.error);
+        return;
       }
 
       const doc = result.value;

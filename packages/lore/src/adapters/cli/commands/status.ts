@@ -71,13 +71,15 @@ export default defineCommand({
           const fixR = await app.treeCheckService.fix(blueprint);
           if (!fixR.ok) {
             process.stderr.write(formatError(fixR.error) + "\n");
-            process.exit(exitCode(fixR.error));
+            process.exitCode = exitCode(fixR.error);
+            return;
           }
 
           const checkR = await app.treeCheckService.checkTree(blueprint);
           if (!checkR.ok) {
             process.stderr.write(formatError(checkR.error) + "\n");
-            process.exit(exitCode(checkR.error));
+            process.exitCode = exitCode(checkR.error);
+            return;
           }
 
           const report = { fix: fixR.value, check: checkR.value };
@@ -116,13 +118,15 @@ export default defineCommand({
             }
           }
 
-          process.exit(fixSucceeded ? 0 : 3);
+          process.exitCode = fixSucceeded ? 0 : 3;
+          return;
         } else {
           // Check-only
           const checkR = await app.treeCheckService.checkTree(blueprint);
           if (!checkR.ok) {
             process.stderr.write(formatError(checkR.error) + "\n");
-            process.exit(exitCode(checkR.error));
+            process.exitCode = exitCode(checkR.error);
+            return;
           }
 
           if (args.json) {
@@ -140,7 +144,8 @@ export default defineCommand({
             }
           }
 
-          process.exit(checkR.value.consistent ? 0 : 3);
+          process.exitCode = checkR.value.consistent ? 0 : 3;
+          return;
         }
       } finally {
         app.close();
@@ -154,7 +159,8 @@ export default defineCommand({
 
       if (!result.ok) {
         process.stderr.write(formatError(result.error) + "\n");
-        process.exit(exitCode(result.error));
+        process.exitCode = exitCode(result.error);
+        return;
       }
 
       const status = result.value;
