@@ -100,6 +100,10 @@ let originalCwd: string;
 let savedEditor: string | undefined;
 
 beforeEach(() => {
+  // reason: process.exitCode set by CLI commands (FU#4 refactor) leaks between in-process
+  // test invocations under bun test. Reset to 0 here to guarantee clean state each test.
+  process.exitCode = 0;
+
   tmpDir = mkdtempSync(join(tmpdir(), "lore-editor-integration-test-"));
   scriptDir = mkdtempSync(join(tmpdir(), "lore-editor-scripts-"));
   originalCwd = process.cwd();
@@ -112,6 +116,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // reason: explicit 0 (not undefined) to reliably clear exitCode in all Bun versions.
+  process.exitCode = 0;
+
   process.chdir(originalCwd);
   // Restore EDITOR env var
   if (savedEditor !== undefined) {
@@ -230,7 +237,7 @@ describe("lore create — AC-CR-3: editor error produces exit code 4", () => {
 
     const output = captureOutput();
     // reason: FU#4 refactored post-app exits to process.exitCode = N; return; — read exitCode directly.
-    process.exitCode = undefined;
+    process.exitCode = 0;
     try {
       // reason: --no-ai bypasses AI generation (SPEC-017 default) to exercise the editor error path.
       await runCmd(cmd, { type: "prd", title: "PRD With Editor Fail", ai: false });
@@ -240,7 +247,7 @@ describe("lore create — AC-CR-3: editor error produces exit code 4", () => {
 
     expect(process.exitCode).toBe(4); // VALIDATION_ERROR → exit 4
     expect(output.stderr.join("\n")).toMatch(/exited with code|editor/i);
-    process.exitCode = undefined; // reset for subsequent tests
+    process.exitCode = 0; // reset for subsequent tests
   });
 
   it.skipIf(isWindows)("exits with code 4 when editor writes empty content", async () => {
@@ -256,7 +263,7 @@ describe("lore create — AC-CR-3: editor error produces exit code 4", () => {
 
     const output = captureOutput();
     // reason: FU#4 refactored post-app exits to process.exitCode = N; return; — read exitCode directly.
-    process.exitCode = undefined;
+    process.exitCode = 0;
     try {
       // reason: --no-ai bypasses AI generation (SPEC-017 default) to exercise the empty-content editor path.
       await runCmd(cmd, { type: "prd", title: "PRD Empty Content", ai: false });
@@ -266,7 +273,7 @@ describe("lore create — AC-CR-3: editor error produces exit code 4", () => {
 
     expect(process.exitCode).toBe(4);
     expect(output.stderr.join("\n")).toMatch(/content is empty/i);
-    process.exitCode = undefined; // reset for subsequent tests
+    process.exitCode = 0; // reset for subsequent tests
   });
 });
 
@@ -488,7 +495,7 @@ describe("lore set — AC-SET-3: editor error produces exit code 4", () => {
 
     const out2 = captureOutput();
     // reason: FU#4 refactored post-app exits to process.exitCode = N; return; — read exitCode directly.
-    process.exitCode = undefined;
+    process.exitCode = 0;
     try {
       await runCmd(setCmd, { id: slug });
     } finally {
@@ -497,6 +504,6 @@ describe("lore set — AC-SET-3: editor error produces exit code 4", () => {
 
     expect(process.exitCode).toBe(4);
     expect(out2.stderr.join("\n")).toMatch(/exited with code|editor/i);
-    process.exitCode = undefined; // reset for subsequent tests
+    process.exitCode = 0; // reset for subsequent tests
   });
 });

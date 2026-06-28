@@ -109,6 +109,10 @@ let originalCwd: string;
 let savedEditor: string | undefined;
 
 beforeEach(() => {
+  // reason: process.exitCode set by CLI commands (FU#4 refactor) leaks between in-process
+  // test invocations under bun test. Reset to 0 here to guarantee clean state each test.
+  process.exitCode = 0;
+
   tmpDir = mkdtempSync(join(tmpdir(), "lore-cli-create-test-"));
   originalCwd = process.cwd();
   process.chdir(tmpDir);
@@ -129,6 +133,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // reason: explicit 0 (not undefined) to reliably clear exitCode in all Bun versions.
+  process.exitCode = 0;
+
   process.chdir(originalCwd);
   // Restore EDITOR env var
   if (savedEditor !== undefined) {
@@ -658,7 +665,7 @@ describe("lore create — error handling", () => {
     const output = captureOutput();
     // reason: FU#4 refactored post-app exits to process.exitCode = N; return; so the spy
     // is never triggered for service-layer errors. Reset exitCode before + read it after.
-    process.exitCode = undefined;
+    process.exitCode = 0;
 
     try {
       // reason: --no-ai bypasses AI generation (SPEC-017) to reach the service layer where
@@ -678,7 +685,7 @@ describe("lore create — error handling", () => {
     expect(process.exitCode).toBeDefined();
     expect(process.exitCode).not.toBe(0);
     expect(output.stderr.join("\n")).toMatch(/not found|Error/i);
-    process.exitCode = undefined; // reset for subsequent tests
+    process.exitCode = 0; // reset for subsequent tests
   });
 
   it("exits 2 for invalid doc type", async () => {
@@ -870,7 +877,7 @@ describe("lore create — regression guards", () => {
     const output = captureOutput();
     // reason: FU#4 refactored post-app exits to process.exitCode = N; return; so
     // service-layer errors no longer trigger the process.exit spy. Read exitCode directly.
-    process.exitCode = undefined;
+    process.exitCode = 0;
 
     try {
       // reason: --no-ai bypasses AI path (SPEC-017) so the command reaches the service layer
@@ -884,7 +891,7 @@ describe("lore create — regression guards", () => {
     // Should fail (parent required for spec)
     expect(process.exitCode).toBeDefined();
     expect(process.exitCode).not.toBe(0);
-    process.exitCode = undefined; // reset for subsequent tests
+    process.exitCode = 0; // reset for subsequent tests
   });
 
   // N/A: no other known historical regressions beyond what spec/plan coverage above provides
