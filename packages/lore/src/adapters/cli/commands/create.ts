@@ -215,9 +215,7 @@ export default defineCommand({
           }
 
           const showSpinner = process.stderr.isTTY && !args.json;
-          // reason: app.aiProviderService is always set in production (wired by createApp);
-          // the optional field exists only to keep test stubs valid (SPEC-017 §3.12).
-          const aiService = app.aiProviderService!;
+          const aiService = app.aiProviderService;
           if (showSpinner) {
             process.stderr.write(`⏳ Generating via ${aiService.activeProviderName}...\n`);
           }

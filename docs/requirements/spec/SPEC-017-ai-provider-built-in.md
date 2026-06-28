@@ -486,7 +486,7 @@ Two-phase split aligned with the CLAUDE.md "implementer ≠ tester" discipline.
 
 **AC-AI-1** `lore create prd --title "X"` with `claude` binary on `$PATH` and clean exit creates a `draft` PRD whose body equals the binary's stdout. stderr contains a single `⏳ Generating` line and a single `✓ Generated N chars` line.
 
-**AC-AI-2** `lore create prd --title "X" --no-ai` is byte-identical in behaviour to today's `lore create prd --title "X"` editor flow. Every existing editor test continues to pass without modification.
+**AC-AI-2** `lore create prd --title "X" --no-ai` is byte-identical in behaviour to today's `lore create prd --title "X"` editor flow. Every existing editor test continues to pass without behavioural regression (tests may add `--no-ai` to opt out of the new default AI path).
 
 **AC-AI-3** `lore create prd --title "X" --content "..."` skips both AI and editor (regression — current SPEC-003 §3.1 behaviour preserved).
 

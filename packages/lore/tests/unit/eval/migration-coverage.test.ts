@@ -35,6 +35,9 @@ function makeApp(): App {
     treeCheckService: new TreeCheckService(store),
     // ApiKeyStore not needed for eval tests
     apiKeyStore: null as unknown as App["apiKeyStore"],
+    // reason: eval scenarios never exercise the AI path; null-cast avoids heavyweight
+    // AIProviderService construction while satisfying the now-required field (SPEC-017 §3.12).
+    aiProviderService: null as unknown as App["aiProviderService"],
     close: () => { telemetry.close(); },
   };
 }

@@ -46,6 +46,9 @@ function makeApp(): App {
     migrationService: new MigrationService(store),
     treeCheckService: new TreeCheckService(store),
     apiKeyStore: stubApiKeyStore,
+    // reason: MDX resolve route tests never exercise the AI path; null-cast avoids heavyweight
+    // AIProviderService construction while satisfying the now-required field (SPEC-017 §3.12).
+    aiProviderService: null as unknown as App["aiProviderService"],
     close: () => undefined,
   };
 }
