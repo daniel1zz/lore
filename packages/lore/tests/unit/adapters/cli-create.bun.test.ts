@@ -177,7 +177,8 @@ describe("lore create — happy path", () => {
     const output1 = captureOutput();
     const exit1 = captureExit();
     try {
-      await runCmd(cmd, { type: "prd", title: "Parent PRD" });
+      // reason: --no-ai bypasses AI generation (SPEC-017 default) for setup steps that test other flags.
+      await runCmd(cmd, { type: "prd", title: "Parent PRD", ai: false });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -197,6 +198,7 @@ describe("lore create — happy path", () => {
         title: "Use X over Y",
         "decision-status": "proposed",
         parent: prdSlug,
+        ai: false,
       });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
@@ -216,7 +218,7 @@ describe("lore create — happy path", () => {
     const output = captureOutput();
     const exit = captureExit();
     try {
-      await runCmd(cmd, { type: "knowledge", title: "Research Notes", "sub-type": "research" });
+      await runCmd(cmd, { type: "knowledge", title: "Research Notes", "sub-type": "research", ai: false });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -236,7 +238,7 @@ describe("lore create — happy path", () => {
     const out1 = captureOutput();
     const exit1 = captureExit();
     try {
-      await runCmd(cmd, { type: "prd", title: "Root PRD" });
+      await runCmd(cmd, { type: "prd", title: "Root PRD", ai: false });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -248,7 +250,7 @@ describe("lore create — happy path", () => {
     const out2 = captureOutput();
     const exit2 = captureExit();
     try {
-      await runCmd(cmd, { type: "plan", title: "Sprint Plan", parent: prdSlug });
+      await runCmd(cmd, { type: "plan", title: "Sprint Plan", parent: prdSlug, ai: false });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -267,6 +269,7 @@ describe("lore create — happy path", () => {
         title: "Do the thing",
         parent: planSlug,
         "plan-id": planSlug,
+        ai: false,
       });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
@@ -286,7 +289,7 @@ describe("lore create — happy path", () => {
     const output = captureOutput();
     const exit = captureExit();
     try {
-      await runCmd(cmd, { type: "prd", title: "My PRD" });
+      await runCmd(cmd, { type: "prd", title: "My PRD", ai: false });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -304,7 +307,7 @@ describe("lore create — happy path", () => {
     // Need a prd parent
     const out1 = captureOutput();
     try {
-      await runCmd(cmd, { type: "prd", title: "Root" });
+      await runCmd(cmd, { type: "prd", title: "Root", ai: false });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -315,7 +318,7 @@ describe("lore create — happy path", () => {
     const output = captureOutput();
     const exit = captureExit();
     try {
-      await runCmd(cmd, { type: "plan", title: "My Plan", parent: prdSlug });
+      await runCmd(cmd, { type: "plan", title: "My Plan", parent: prdSlug, ai: false });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -546,7 +549,7 @@ describe("lore create — boundary cases", () => {
     // Create parent prd and plan
     const out1 = captureOutput();
     try {
-      await runCmd(cmd, { type: "prd", title: "Root" });
+      await runCmd(cmd, { type: "prd", title: "Root", ai: false });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -556,7 +559,7 @@ describe("lore create — boundary cases", () => {
 
     const out2 = captureOutput();
     try {
-      await runCmd(cmd, { type: "plan", title: "Sprint", parent: prdSlug });
+      await runCmd(cmd, { type: "plan", title: "Sprint", parent: prdSlug, ai: false });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -590,6 +593,7 @@ describe("lore create — boundary cases", () => {
         title: "Do X",
         parent: planSlug,
         "plan-id": planId, // ULID, not slug
+        ai: false,
       });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
@@ -609,7 +613,7 @@ describe("lore create — boundary cases", () => {
       const output = captureOutput();
       const exit = captureExit();
       try {
-        await runCmd(cmd, { type: "adr", title: `ADR-${status}`, "decision-status": status });
+        await runCmd(cmd, { type: "adr", title: `ADR-${status}`, "decision-status": status, ai: false });
       } catch (e: unknown) {
         if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
       } finally {
@@ -632,6 +636,7 @@ describe("lore create — boundary cases", () => {
           type: "knowledge",
           title: `Knowledge-${subType}`,
           "sub-type": subType,
+          ai: false,
         });
       } catch (e: unknown) {
         if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
@@ -654,11 +659,14 @@ describe("lore create — error handling", () => {
     const exit = captureExit();
 
     try {
+      // reason: --no-ai bypasses AI generation (SPEC-017) to reach the service layer where
+      // plan-does-not-exist triggers DOC_NOT_FOUND (the intended error under test).
       await runCmd(cmd, {
         type: "task",
         title: "Task",
         parent: "plan-does-not-exist",
         "plan-id": "plan-does-not-exist",
+        ai: false,
       });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
@@ -704,6 +712,7 @@ describe("lore create — state verification", () => {
         type: "adr",
         title: "Architecture Decision",
         "decision-status": "accepted",
+        ai: false,
       });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
@@ -740,7 +749,7 @@ describe("lore create — state verification", () => {
 
     const out1 = captureOutput();
     try {
-      await runCmd(cmd, { type: "knowledge", title: "Team Retro", "sub-type": "retro" });
+      await runCmd(cmd, { type: "knowledge", title: "Team Retro", "sub-type": "retro", ai: false });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -775,7 +784,7 @@ describe("lore create — state verification", () => {
     // Setup: prd → plan → task
     const outPrd = captureOutput();
     try {
-      await runCmd(cmd, { type: "prd", title: "Root PRD" });
+      await runCmd(cmd, { type: "prd", title: "Root PRD", ai: false });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -785,7 +794,7 @@ describe("lore create — state verification", () => {
 
     const outPlan = captureOutput();
     try {
-      await runCmd(cmd, { type: "plan", title: "Sprint 1", parent: prdSlug });
+      await runCmd(cmd, { type: "plan", title: "Sprint 1", parent: prdSlug, ai: false });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -819,6 +828,7 @@ describe("lore create — state verification", () => {
         title: "Implement feature",
         parent: planSlug,
         "plan-id": planSlug, // slug input
+        ai: false,
       });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
@@ -860,7 +870,10 @@ describe("lore create — regression guards", () => {
     const exit = captureExit();
 
     try {
-      await runCmd(cmd, { type: "spec", title: "Spec Without Parent" });
+      // reason: --no-ai bypasses AI path (SPEC-017) so the command reaches the service layer
+      // where PARENT_REQUIRED is enforced for spec type. In non-TTY context, openEditor
+      // returns ok("") so no real editor is launched.
+      await runCmd(cmd, { type: "spec", title: "Spec Without Parent", ai: false });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {

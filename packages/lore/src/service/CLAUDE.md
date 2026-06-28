@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Business logic layer. Six stateless services orchestrate `StoreInterface` calls and apply domain rules (lifecycle, parent-type, MDX placeholders, version snapshots, drift checks). All public methods return `Promise<Result<T, LoreError>>` — no thrown exceptions cross this boundary.
+Business logic layer. Seven stateless services orchestrate `StoreInterface` calls and apply domain rules (lifecycle, parent-type, MDX placeholders, version snapshots, drift checks, AI generation). All public methods return `Promise<Result<T, LoreError>>` — no thrown exceptions cross this boundary.
 
 ## Key Invariants
 
@@ -23,12 +23,15 @@ Business logic layer. Six stateless services orchestrate `StoreInterface` calls 
 
 ## Service Map
 
-- `CorpusService` — CRUD, list, search, tree, link/unlink, status (telemetry-wired).
-- `ReviewService` — pending queue, approve, reject; consumes `isValidTransition`.
-- `VersionService` — log, unified diff (`diff` package), restore (append-only).
-- `OutlineService` — MDX placeholder resolution (whitelisted components: `ChildrenOf`, `RecentDecisions`, `ActivePlans`, `ModuleTree`, `RelatedOf`, `Embed`, `HealthStats`).
-- `MigrationService` — one-shot v1→v2 import; reads YAML-frontmatter MD files, maps types, inserts via store.
-- `TreeCheckService` — drift detection (`missing | extra | misplaced | cycle | orphan`), auto-fix, parent_id ↔ link-table reconciliation.
+| Service | Responsibility |
+|---|---|
+| `CorpusService` | CRUD, list, search, tree, link/unlink, status (telemetry-wired) |
+| `ReviewService` | Pending queue, approve, reject; consumes `isValidTransition` |
+| `VersionService` | Log, unified diff (`diff` package), restore (append-only) |
+| `OutlineService` | MDX placeholder resolution (whitelisted: `ChildrenOf`, `RecentDecisions`, `ActivePlans`, `ModuleTree`, `RelatedOf`, `Embed`, `HealthStats`) |
+| `MigrationService` | One-shot v1→v2 import; reads YAML-frontmatter MD files, maps types, inserts via store |
+| `TreeCheckService` | Drift detection (`missing \| extra \| misplaced \| cycle \| orphan`), auto-fix, parent_id ↔ link-table reconciliation |
+| `AIProviderService` | AI provider dispatch + template render + ai.generation telemetry (SPEC-017 §3.6) |
 
 ## Links
 

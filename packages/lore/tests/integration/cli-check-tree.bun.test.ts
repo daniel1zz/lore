@@ -118,7 +118,9 @@ function writeBlueprintRequiringSpec(tmpDir: string): void {
  * The slug is the first word of stdout after "Slug:".
  */
 function createPrd(tmpDir: string, title: string): string {
-  const result = runLore(["create", "prd", "--title", title], tmpDir);
+  // reason: --no-ai bypasses AI generation (SPEC-017 default) so tree-check tests that
+  // use create for setup are not affected by absence of the claude binary in CI.
+  const result = runLore(["create", "prd", "--title", title, "--no-ai"], tmpDir);
   const match = result.stdout.match(/Slug:\s+(\S+)/);
   return match?.[1] ?? "";
 }
@@ -127,7 +129,7 @@ function createPrd(tmpDir: string, title: string): string {
  * Seed a spec document linked to a parent, return its slug.
  */
 function createSpec(tmpDir: string, title: string, parentSlug: string): string {
-  const result = runLore(["create", "spec", "--title", title, "--parent", parentSlug], tmpDir);
+  const result = runLore(["create", "spec", "--title", title, "--parent", parentSlug, "--no-ai"], tmpDir);
   const match = result.stdout.match(/Slug:\s+(\S+)/);
   return match?.[1] ?? "";
 }
@@ -392,7 +394,8 @@ describe("lore tree --orphans: orphans exist", () => {
     // PRD = root type, not an orphan
     createPrd(tmpDir, "root-prd");
     // Plan without parent = orphan (non-root type, parent_id=null)
-    runLore(["create", "plan", "--title", "Orphaned Plan"], tmpDir);
+    // reason: --no-ai bypasses AI generation (SPEC-017) so test setup is not blocked by claude binary.
+    runLore(["create", "plan", "--title", "Orphaned Plan", "--no-ai"], tmpDir);
   });
 
   afterEach(() => cleanupDir(tmpDir));

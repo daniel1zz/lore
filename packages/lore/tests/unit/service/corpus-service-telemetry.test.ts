@@ -10,7 +10,7 @@
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
-import { type Telemetry, type TelemetryEvent } from "@lore/core";
+import { type Telemetry, type TelemetryEvent, type AiGenerationEvent } from "@lore/core";
 import type { CreateDocInput } from "@lore/core";
 
 // ─── Capturing telemetry spy ─────────────────────────────────────────────────
@@ -18,11 +18,17 @@ import type { CreateDocInput } from "@lore/core";
 /** In-memory telemetry that captures all recorded events for test assertions. */
 class CapturingTelemetry implements Telemetry {
   readonly events: TelemetryEvent[] = [];
+  readonly aiEvents: AiGenerationEvent[] = [];
   private closed = false;
 
   record(event: TelemetryEvent): void {
     if (this.closed) return;
     this.events.push(event);
+  }
+
+  emit(event: AiGenerationEvent): void {
+    if (this.closed) return;
+    this.aiEvents.push(event);
   }
 
   close(): void {

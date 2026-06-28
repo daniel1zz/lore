@@ -29,6 +29,7 @@ import { homedir } from "os";
 import { ok, err } from "./errors.js";
 import type { Result, LoreError } from "./errors.js";
 import { TelemetryConfigSchema } from "./telemetry.js";
+import { AiConfigSchema } from "./ai.js";
 
 // ─── Shared Defaults Schema ───────────────────────────────────────────────────
 
@@ -129,6 +130,13 @@ export const LoreConfigSchema = z
      * Project defaults are CLI-scoped — NOT forwarded to createApp.
      */
     defaults: LoreDefaultsSchema.optional(),
+    /**
+     * AI provider configuration (SPEC-017).
+     * When absent, createApp uses AiConfigSchema.parse({}) defaults (claude-cli provider).
+     * NOT stripped by loadLoreApp — forwarded to createApp alongside telemetry config.
+     * .strict() on AiConfigSchema rejects typos at load time (AC-AI-12).
+     */
+    ai: AiConfigSchema.optional(),
   })
   .strict();
 

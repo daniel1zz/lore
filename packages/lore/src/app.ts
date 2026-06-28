@@ -27,13 +27,15 @@ import { MigrationService } from "./service/migration-service.js";
 import { TreeCheckService } from "./service/tree-check-service.js";
 import { ApiKeyStore } from "./adapters/http/auth.js";
 import { SessionStore } from "./adapters/http/sessions.js";
-import { resolveSyncCredentials, type LoreConfig } from "@lore/core";
+import { resolveSyncCredentials, type LoreConfig, AiConfigSchema } from "@lore/core";
 import { err, type Result, type LoreError } from "@lore/core";
 import {
   NoOpTelemetry,
   createTelemetry,
   type Telemetry,
 } from "@lore/core";
+import { buildProviderRegistry } from "./ai/registry.js";
+import { AIProviderService } from "./service/ai-provider-service.js";
 
 export interface App {
   corpusService: CorpusService;
@@ -49,6 +51,13 @@ export interface App {
    * Source: SPEC-016 §3.5
    */
   sessionStore?: SessionStore;
+  /**
+   * AIProviderService — optional so existing test stubs (InMemoryStore-backed) remain valid.
+   * Always present in production (wired by createApp via buildProviderRegistry).
+   * Absent in test stubs that don't exercise the AI path.
+   * Source: SPEC-017 §3.12
+   */
+  aiProviderService?: AIProviderService;
   close(): void;
 }
 
@@ -56,8 +65,13 @@ export interface App {
  * Build an App backed by a SQLiteStore.
  * @param store - SQLiteStore instance
  * @param telemetry - Telemetry sink; defaults to NoOpTelemetry (no file I/O unless opted in)
+ * @param aiProviderService - Wired AI service from buildProviderRegistry; optional for test compat
  */
-function buildAppFromSqlite(store: SQLiteStore, telemetry: Telemetry = new NoOpTelemetry()): App {
+function buildAppFromSqlite(
+  store: SQLiteStore,
+  telemetry: Telemetry = new NoOpTelemetry(),
+  aiProviderService?: AIProviderService,
+): App {
   const db = store.getDatabase();
   return {
     corpusService: new CorpusService(store, telemetry),
@@ -70,6 +84,9 @@ function buildAppFromSqlite(store: SQLiteStore, telemetry: Telemetry = new NoOpT
     // reason: SessionStore shares the same Database as ApiKeyStore — one connection, no WAL lock
     // contention. Both auth tables live in the same SQLite file. SPEC-016 §3.5.
     sessionStore: new SessionStore(db),
+    // reason: exactOptionalPropertyTypes=true prohibits assigning `undefined` to optional prop.
+    // Spread conditionally so the key is absent rather than present-with-undefined.
+    ...(aiProviderService !== undefined ? { aiProviderService } : {}),
     close: () => { telemetry.close(); store.close(); },
   };
 }
@@ -83,8 +100,14 @@ function buildAppFromSqlite(store: SQLiteStore, telemetry: Telemetry = new NoOpT
  * @param store - TursoStore instance
  * @param dbPath - Local replica path (for ApiKeyStore)
  * @param telemetry - Telemetry sink; defaults to NoOpTelemetry
+ * @param aiProviderService - Wired AI service from buildProviderRegistry; optional for test compat
  */
-function buildAppFromTurso(store: TursoStore, dbPath: string, telemetry: Telemetry = new NoOpTelemetry()): App {
+function buildAppFromTurso(
+  store: TursoStore,
+  dbPath: string,
+  telemetry: Telemetry = new NoOpTelemetry(),
+  aiProviderService?: AIProviderService,
+): App {
   const apiKeyDb = new Database(dbPath);
   return {
     corpusService: new CorpusService(store, telemetry),
@@ -98,6 +121,9 @@ function buildAppFromTurso(store: TursoStore, dbPath: string, telemetry: Telemet
     // api_keys is one of the 5 replicated tables; sessions is local-only (SPEC-016 non-goal:
     // sessions are ephemeral, not replicated). SPEC-016 §3.5.
     sessionStore: new SessionStore(apiKeyDb),
+    // reason: exactOptionalPropertyTypes=true prohibits assigning `undefined` to optional prop.
+    // Spread conditionally so the key is absent rather than present-with-undefined.
+    ...(aiProviderService !== undefined ? { aiProviderService } : {}),
     close: () => { telemetry.close(); store.close(); apiKeyDb.close(); },
   };
 }
@@ -131,13 +157,33 @@ export function createApp(
   // Users must explicitly set telemetry.enabled=true in config.yaml to opt in.
   const telemetry = createTelemetry(config?.telemetry);
 
+  // Build AI provider registry — must happen before store selection so a bad ai.provider
+  // name fails loud at startup rather than at first generate() call.
+  // reason: AiConfigSchema.parse({}) always succeeds (all defaults present), so the registry
+  // never fails when config is absent. Failure only occurs when user sets ai.provider to an
+  // unknown name — which is caught here and surfaces as exit 1 (AC-AI-11).
+  const aiConfig = config?.ai ?? AiConfigSchema.parse({});
+  const registryResult = buildProviderRegistry(aiConfig);
+  if (!registryResult.ok) {
+    telemetry.close();
+    // Folds into the existing Result<App> path (SPEC-017 §3.12)
+    return registryResult;
+  }
+  const aiProviderService = new AIProviderService(
+    registryResult.value.providers,
+    registryResult.value.active,
+    aiConfig.templates,
+    telemetry,
+    aiConfig.telemetry,
+  );
+
   // No config supplied or sync section absent / disabled → local-only SQLiteStore
   if (
     config === undefined ||
     config.sync === undefined ||
     !config.sync.enabled
   ) {
-    return buildAppFromSqlite(new SQLiteStore(dbPath), telemetry);
+    return buildAppFromSqlite(new SQLiteStore(dbPath), telemetry, aiProviderService);
   }
 
   // Sync is enabled — resolve credentials (fail loud on missing/empty token, D-007)
@@ -162,7 +208,7 @@ export function createApp(
       authToken,
       syncInterval: config.sync.interval,
     });
-    return { ok: true, value: buildAppFromTurso(store, dbPath, telemetry) };
+    return { ok: true, value: buildAppFromTurso(store, dbPath, telemetry, aiProviderService) };
   } catch (e) {
     telemetry.close();
     const message =

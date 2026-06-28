@@ -40,6 +40,10 @@ export function loreErrorToStatus(error: LoreError): number {
       return 400;
     case "STORE_ERROR":
       return 500;
+    case "AI_PROVIDER_ERROR":
+      // reason: AI generation is CLI-only in SPEC-017 — HTTP adapter doesn't trigger AI.
+      // Mapping to 500 keeps the HTTP layer safe for future AI-over-HTTP scenarios.
+      return 500;
     case "LINK_CYCLE":
     case "DUPLICATE_SLUG":
     case "DUPLICATE_LINK":
