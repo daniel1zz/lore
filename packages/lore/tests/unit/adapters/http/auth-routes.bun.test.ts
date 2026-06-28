@@ -82,6 +82,8 @@ async function makeTestServer(): Promise<TestContext> {
     // reason: auth route tests never exercise the AI path; null-cast avoids heavyweight
     // AIProviderService construction while satisfying the now-required field (SPEC-017 §3.12).
     aiProviderService: null as unknown as App["aiProviderService"],
+    // reason: auth route tests never exercise sync-docs path — null-cast per SPEC-018 §3.6.
+    syncDocsService: null as unknown as App["syncDocsService"],
     close: () => db.close(),
   };
 

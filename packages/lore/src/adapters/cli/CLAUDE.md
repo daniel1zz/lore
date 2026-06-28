@@ -2,7 +2,7 @@
 
 ## Purpose
 
-citty-based CLI adapter. 22 subcommands, each in its own `commands/<name>.ts`, lazily imported by `index.ts`. Thin adapter only — no business logic; every command resolves args, calls a service via the App composition root, formats the result, and exits.
+citty-based CLI adapter. 24 subcommands, each in its own `commands/<name>.ts`, lazily imported by `index.ts`. Thin adapter only — no business logic; every command resolves args, calls a service via the App composition root, formats the result, and exits.
 
 ## Key Invariants
 
@@ -20,9 +20,11 @@ citty-based CLI adapter. 22 subcommands, each in its own `commands/<name>.ts`, l
 - **Output helpers in `utils.ts`** — `formatTable`, `formatTree` (Unicode box drawing), `formatNavigation`, `relativeTime`. Pure; no `process.exit` calls. Reusable from tests.
 - **Hyphen-quoted error mode** — `formatError` produces multi-line stderr output with contextual hints (`"Run \`lore get <id>\`..."`). Add a new case when introducing a new `LoreError` code.
 
-## Subcommands (23)
+## Subcommands (24)
 
-`init` `create` `get` `set` `delete` `list` `search` `tree` `link` `unlink` `pending` `approve` `reject` `log` `diff` `restore` `migrate` `status` `serve` `agent` `sync` `eval` `dashboard`
+`init` `create` `get` `set` `delete` `list` `search` `tree` `link` `unlink` `pending` `approve` `reject` `log` `diff` `restore` `migrate` `status` `serve` `agent` `sync` `eval` `dashboard` `sync-docs`
+
+`sync-docs` (SPEC-018) scans a directory of `*.md` spec files, creates corpus rows for missing specs matched by title, and reports body drift without auto-applying. Flags: `--from <path>` (scan dir), `--dry-run` (no writes), `--json` (machine-readable SyncReport).
 
 `serve` mounts the HTTP adapter; `agent` manages API keys for AI agents — create/list/revoke (SPEC-010 §3.2), NOT an MCP launcher (MCP is entered via the top-level `--mcp-server` flag only); `eval` runs evaluation scenarios; `dashboard` (SPEC-016) starts the HTTP server in-process, spawns the `@lore/dashboard` Vite dev server, ensures `.lore/local-key` exists, and injects a one-time bootstrap token so the SPA can exchange it for an HttpOnly session cookie.
 

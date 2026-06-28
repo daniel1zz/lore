@@ -36,6 +36,7 @@ import {
 } from "@lore/core";
 import { buildProviderRegistry } from "./ai/registry.js";
 import { AIProviderService } from "./service/ai-provider-service.js";
+import { SyncDocsService } from "./service/sync-docs-service.js";
 
 export interface App {
   corpusService: CorpusService;
@@ -58,6 +59,12 @@ export interface App {
    * Source: SPEC-017 §3.12
    */
   aiProviderService: AIProviderService;
+  /**
+   * SyncDocsService — required; syncs spec files from disk into the corpus.
+   * Constructed from corpusService with no other state.
+   * Source: SPEC-018 §3.6
+   */
+  syncDocsService: SyncDocsService;
   close(): void;
 }
 
@@ -73,8 +80,9 @@ function buildAppFromSqlite(
   aiProviderService: AIProviderService,
 ): App {
   const db = store.getDatabase();
+  const corpusService = new CorpusService(store, telemetry);
   return {
-    corpusService: new CorpusService(store, telemetry),
+    corpusService,
     reviewService: new ReviewService(store),
     versionService: new VersionService(store),
     outlineService: new OutlineService(store),
@@ -85,6 +93,8 @@ function buildAppFromSqlite(
     // contention. Both auth tables live in the same SQLite file. SPEC-016 §3.5.
     sessionStore: new SessionStore(db),
     aiProviderService,
+    // reason: SyncDocsService depends only on CorpusService — no store access, no AI. SPEC-018 §3.6.
+    syncDocsService: new SyncDocsService(corpusService),
     close: () => { telemetry.close(); store.close(); },
   };
 }
@@ -107,8 +117,9 @@ function buildAppFromTurso(
   aiProviderService: AIProviderService,
 ): App {
   const apiKeyDb = new Database(dbPath);
+  const corpusService = new CorpusService(store, telemetry);
   return {
-    corpusService: new CorpusService(store, telemetry),
+    corpusService,
     reviewService: new ReviewService(store),
     versionService: new VersionService(store),
     outlineService: new OutlineService(store),
@@ -120,6 +131,8 @@ function buildAppFromTurso(
     // sessions are ephemeral, not replicated). SPEC-016 §3.5.
     sessionStore: new SessionStore(apiKeyDb),
     aiProviderService,
+    // reason: SyncDocsService depends only on CorpusService — no store access, no AI. SPEC-018 §3.6.
+    syncDocsService: new SyncDocsService(corpusService),
     close: () => { telemetry.close(); store.close(); apiKeyDb.close(); },
   };
 }
