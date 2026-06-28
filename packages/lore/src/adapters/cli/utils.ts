@@ -162,6 +162,7 @@ export function formatError(error: LoreError): string {
       // Multi-line format per SPEC-017 §3.4: provider name, exit code, stderr excerpt, retry hint
       const lines = [
         `Error: AI provider${error.provider ? ` "${error.provider}"` : ""} failed.`,
+        `  ${error.message}`,
       ];
       if (error.exit_code !== undefined) {
         lines.push(`  exit code: ${error.exit_code}`);
