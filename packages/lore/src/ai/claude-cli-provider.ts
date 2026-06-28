@@ -79,7 +79,14 @@ export class ClaudeCliProvider implements AIProvider {
     // Timeout watchdog — sends SIGTERM after timeout_ms if the process is still running
     // reason: must capture the timer id so we can clearTimeout on normal completion;
     // otherwise the timer fires after the function returns, killing an unrelated process.
-    const killer = setTimeout(() => proc.kill("SIGTERM"), this.cfg.timeout_ms);
+    // reason: timedOut flag is set by the closure before killing — allows the error message
+    // to distinguish a timeout ("timed out after Nms") from a normal non-zero exit ("exited N").
+    // Without this flag, both paths produce the same generic "exited N" message (AC-AI-8).
+    let timedOut = false;
+    const killer = setTimeout(() => {
+      timedOut = true;
+      proc.kill("SIGTERM");
+    }, this.cfg.timeout_ms);
 
     // Write prompt to stdin and close — signals EOF so the provider starts generating
     // reason: Bun.spawn option `stdin: "pipe"` guarantees proc.stdin is a FileSink,
@@ -108,7 +115,13 @@ export class ClaudeCliProvider implements AIProvider {
         exit_code,
         // reason: truncate stderr at 1024 chars to keep LoreError payloads bounded
         stderr: stderr.slice(0, 1024),
-        message: `provider "${this.name}" exited ${exit_code}`,
+        // reason: timedOut distinguishes a watchdog kill from a provider's own non-zero exit —
+        // user needs to know "timeout" vs "failed" to take different corrective actions (AC-AI-8).
+        // The word "timeout" must appear literally so callers (tests, tooling) can detect it
+        // without parsing the numeric exit code.
+        message: timedOut
+          ? `provider "${this.name}" timeout: process killed after ${this.cfg.timeout_ms}ms`
+          : `provider "${this.name}" exited ${exit_code}`,
       });
     }
 
