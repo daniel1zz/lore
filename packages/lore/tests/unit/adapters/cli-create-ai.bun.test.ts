@@ -15,12 +15,12 @@
  *   /usr/bin/false — exits 1, no output (non-zero exit path)
  *   nonexistent-binary-xyz — binary missing (ENOENT path)
  *
- * Defect Note (AC-AI-5):
+ * AC-AI-5 Note (resolved — commit 78395bf):
  *   SPEC-017 §3.4 says stderr should contain "command not found: <cmd>" when binary is
- *   missing. However, formatError() for AI_PROVIDER_ERROR does NOT include error.message
- *   in its output — only exit_code and stderr fields are shown. The "command not found"
- *   string lives in error.message but is never surfaced to the user. This is a defect.
- *   The test "stderr should contain 'command not found'" is kept failing to document this.
+ *   missing. Commit 78395bf fixed formatError() for AI_PROVIDER_ERROR to include
+ *   error.message as the second output line, so the "command not found" string is now
+ *   surfaced to the user. The test "(AC-AI-5) stderr should contain 'command not found'"
+ *   now passes by design.
  *
  * Six-dimension coverage:
  *   HAPPY:    AI path creates draft prd (AC-AI-1)
@@ -296,19 +296,20 @@ describe("lore create prd — missing binary (AC-AI-5)", () => {
   });
 
   /**
-   * DEFECT FINDING (AC-AI-5):
-   * SPEC-017 §3.4 states that stderr should contain "command not found: <cmd>".
-   * The LoreError.message field is set to "command not found: <cmd>" in ClaudeCliProvider,
-   * but formatError() for AI_PROVIDER_ERROR does NOT print error.message — it only prints
-   * error.exit_code and error.stderr. Since a missing binary has no exit_code or stderr,
-   * the "command not found" message is silently dropped and never shown to the user.
+   * (AC-AI-5) Defect fixed in commit 78395bf.
    *
-   * Expected (per spec): stderr contains "command not found"
-   * Actual (implementation): stderr contains only "Error: AI provider 'x' failed. Retry with --no-ai"
+   * Original defect: formatError() for AI_PROVIDER_ERROR did NOT include error.message
+   * in its output — only exit_code and stderr fields were shown. Since a missing binary
+   * has no exit_code or stderr, the "command not found" message from ClaudeCliProvider
+   * was silently dropped and never shown to the user.
    *
-   * This test is intentionally left FAILING to document the defect.
+   * Fix: commit 78395bf added `  ${error.message}` as the second line in the
+   * AI_PROVIDER_ERROR case of formatError(), so "command not found: <cmd>" is now
+   * included in stderr output per SPEC-017 §3.4.
+   *
+   * This test now passes by design and documents the correct post-fix behavior.
    */
-  it("[DEFECT-AC-AI-5] stderr should contain 'command not found' message per spec", async () => {
+  it("(AC-AI-5) stderr should contain 'command not found' message per spec", async () => {
     writeAiConfig("nonexistent-ai-binary-xyz-not-installed");
 
     const cmd = await importCreateCommand();
