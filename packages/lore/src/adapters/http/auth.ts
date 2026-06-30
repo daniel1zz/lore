@@ -34,6 +34,15 @@ export interface ActorContext {
   owner?: string;
   /** Session expiry ISO string. Present for cookie-based sessions. */
   expires_at?: string;
+  /**
+   * Caller surface resolved by authenticateRequest.
+   * "http_cookie" — request authenticated via lore_sid cookie (dashboard / human session).
+   * "http_token"  — request authenticated via Bearer API token (agent-issued, SPEC-010).
+   * Optional for backward compat with test fixtures that pre-date SPEC-024.
+   * Routes that care about AI defaults treat absent as "http_token" (safest: AI off).
+   * Source: SPEC-024 §8 Q5, §9.1
+   */
+  callerSurface?: "http_cookie" | "http_token";
 }
 
 export interface ApiKeyRecord {
@@ -262,6 +271,8 @@ export async function authenticateRequest(
         session_id: sid,
         owner: session.owner,
         expires_at: session.expires_at,
+        // SPEC-024 AC-NOAI-7: cookie = human session = dashboard = AI on by default
+        callerSurface: "http_cookie" as const,
       });
     }
   }
@@ -271,5 +282,8 @@ export async function authenticateRequest(
   if (token === null) {
     return err({ code: "VALIDATION_ERROR", field: "Authorization", message: "Missing bearer token" });
   }
-  return keyStore.validate(token);
+  const tokenResult = await keyStore.validate(token);
+  if (!tokenResult.ok) return tokenResult;
+  // SPEC-024 AC-NOAI-6: bearer token = agent-issued = AI off by default
+  return ok({ ...tokenResult.value, callerSurface: "http_token" as const });
 }

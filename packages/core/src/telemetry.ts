@@ -83,6 +83,16 @@ export const aiGenerationEventSchema = z.object({
   exit_code: z.number().int(),
   /** Error message when generation failed */
   error: z.string().optional(),
+  /**
+   * How the AI on/off decision was resolved. SPEC-024 AC-NOAI-8.
+   * Optional for backward compatibility with events emitted before SPEC-024 landed.
+   */
+  ai_default_source: z.enum(["explicit_arg", "config", "env", "cli_flag"]).optional(),
+  /**
+   * Surface from which the AI generation was triggered. SPEC-024 AC-NOAI-8.
+   * Optional for backward compatibility with events emitted before SPEC-024 landed.
+   */
+  caller_surface: z.enum(["cli", "agent", "mcp", "http_cookie", "http_token"]).optional(),
 }).strict();
 
 /** Derived type for an AI generation telemetry event. */

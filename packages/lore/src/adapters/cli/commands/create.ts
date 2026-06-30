@@ -6,11 +6,16 @@
  *   knowledge → --sub-type (ideation|retro|research|reference)
  *   task      → --parent <plan-slug-or-id> AND --plan-id <plan-slug-or-id>
  *
- * Content decision tree (SPEC-017 §3.11):
+ * Content decision tree (SPEC-017 §3.11, amended by SPEC-024):
  *   --content-file <path> → read file, use its contents (skip AI and editor)
  *   --content "…" passed explicitly → use it (skip AI and editor)
- *   --no-ai passed → open $EDITOR (pre-SPEC-017 behaviour preserved)
- *   neither passed  → AI generation via AIProviderService (SPEC-017 default)
+ *   --ai passed explicitly → AI generation (overrides surface default)
+ *   --no-ai passed explicitly → open $EDITOR (overrides surface default)
+ *   neither passed → resolve via app.resolveAiDefault(undefined):
+ *     - "cli" surface (human terminal): default AI on (SPEC-017 unchanged)
+ *     - "agent" surface (CLAUDECODE=1/CI=true/LORE_AI_DEFAULT=off): default AI off
+ *
+ * --ai / --no-ai mutual exclusion: passing both → exit 2 (SPEC-003 usage error).
  *
  * --content-file <path>:
  *   Reads the file at <path> and uses its full contents as the document body.
@@ -18,7 +23,7 @@
  *   directly to --content. Mutually exclusive with --content (exit 2 if both passed).
  *   File not found or unreadable → exit 4 (VALIDATION_ERROR).
  *
- * Editor flow (SPEC-003 §3.1, preserved under --no-ai):
+ * Editor flow (SPEC-003 §3.1, preserved under --no-ai or agent surface default):
  *   Opens defaults.editor / $EDITOR / vi for the doc body.
  *   --content "" is accepted as explicit empty body (bypasses both AI and editor).
  */
@@ -105,12 +110,14 @@ export default defineCommand({
     },
     ai: {
       type: "boolean",
-      // reason: citty/mri treats --no-* as boolean negation: --no-ai sets args.ai=false.
-      // Defining the flag as `ai` with default:true lets --no-ai work via the standard
-      // negation convention (mri sets ai=false) rather than setting a key named "no-ai".
-      // AC-AI-19: help shows --no-ai as the negation form, satisfying spec requirement.
-      default: true,
-      description: "Use AI to generate document content (default true; pass --no-ai for $EDITOR).",
+      // reason: SPEC-024 tri-state AI flag — the ai arg in citty/mri is kept for --help
+      // discoverability, but the actual tri-state detection (--ai / --no-ai / neither) is
+      // done by scanning process.argv directly (see run handler). This is necessary because
+      // mri collapses --ai (true) and no-flag (default) into the same value regardless of
+      // what default we set, making it impossible to distinguish "explicitly passed --ai"
+      // from "no flag passed". No default here — the actual logic uses process.argv.
+      // AC-AI-19 (--no-ai shows in help): mri negation still works for discoverability.
+      description: "Explicitly enable AI content generation (overrides surface default). Pass --no-ai to disable.",
     },
   },
   async run({ args }) {
@@ -192,6 +199,37 @@ export default defineCommand({
       process.exit(2);
     }
 
+    // SPEC-024 §9.1: tri-state AI detection.
+    // reason: citty/mri cannot distinguish "no flag passed" from "flag passed with default value"
+    // for booleans when a default is set. We REMOVED the default from the `ai` citty arg (see
+    // above) so citty now leaves args.ai = undefined when neither --ai nor --no-ai is passed.
+    // However, we ALSO scan process.argv to:
+    //   (a) detect mutual exclusion (--ai AND --no-ai both present → exit 2)
+    //   (b) provide the primary signal for real CLI invocations
+    // The args.ai fallback covers programmatic invocations (bun test / integration harness)
+    // that call cmd.run({ args: { ai: true } }) directly without going through process.argv.
+    //
+    // Precedence: process.argv scan > args.ai (programmatic) > undefined (resolved by surface)
+    // This scan must happen before loadLoreApp() so we can exit 2 before touching the DB.
+    const _rawArgv = process.argv.slice(2);
+    const _hasExplicitAi = _rawArgv.includes("--ai");
+    const _hasExplicitNoAi = _rawArgv.includes("--no-ai");
+
+    if (_hasExplicitAi && _hasExplicitNoAi) {
+      process.stderr.write(
+        "Error: --ai and --no-ai are mutually exclusive. Pass only one.\n",
+      );
+      process.exit(2);
+    }
+
+    const explicitAi: boolean | undefined = _hasExplicitAi
+      ? true
+      : _hasExplicitNoAi
+        ? false
+        // fallback: use citty-parsed args.ai (valid for programmatic invocation where
+        // process.argv was not set; undefined when flag not present since no default).
+        : (args.ai as boolean | undefined);
+
     const { app, defaults } = loadLoreApp();
     try {
       const tags = args.tags
@@ -209,11 +247,15 @@ export default defineCommand({
         process.exit(2);
       }
 
-      // Content decision tree (SPEC-017 §3.11):
+      // Content decision tree (SPEC-017 §3.11, amended by SPEC-024):
       //   0. --content-file passed → read file, use as content (skip AI + editor)
       //   1. --content passed explicitly → use it (skip AI and editor)
-      //   2. --no-ai passed             → editor flow (pre-SPEC-017 behaviour)
-      //   3. neither                    → AI generation (SPEC-017 default)
+      //   2. Resolve AI default (SPEC-024):
+      //        --ai passed → force AI on (explicit_arg)
+      //        --no-ai passed → force AI off → editor (explicit_arg)
+      //        neither → app.resolveAiDefault(undefined) reads surface + config
+      //          "cli" surface → AI on (cli_flag default)
+      //          "agent" surface (CLAUDECODE/CI/LORE_AI_DEFAULT=off) → AI off (env default)
       //
       // args.content === undefined means the flag was absent (citty does not set it).
       // args.content === "" means --content "" was passed explicitly → accepted as empty body.
@@ -232,8 +274,11 @@ export default defineCommand({
         }
       }
       if (resolvedContent === undefined) {
-        if (!args.ai) {
-          // --no-ai: fall back to editor (AC-AI-2 — byte-identical to pre-SPEC-017 behaviour)
+        // SPEC-024: resolve AI default from surface + explicit flag + config
+        const { ai: useAi, source: aiSource } = app.resolveAiDefault(explicitAi);
+
+        if (!useAi) {
+          // No-AI path: fall back to editor (SPEC-003 §3.1 / AC-AI-2)
           const editorResult = await openEditor({ defaults });
           if (!editorResult.ok) {
             process.stderr.write(formatError(editorResult.error) + "\n");
@@ -242,7 +287,7 @@ export default defineCommand({
           }
           resolvedContent = editorResult.value;
         } else {
-          // AI path (SPEC-017 §3.11 default)
+          // AI path (SPEC-017 §3.11 default; surface-aware via SPEC-024)
           // Resolve parent title for template interpolation — one extra O(1) corpus read.
           // reason: skip when no --parent flag; insignificant vs provider latency (SPEC-017 §7).
           let parent_title: string | undefined;
@@ -265,6 +310,9 @@ export default defineCommand({
             doc_type: docType,
             title: args.title,
             ...(parent_title !== undefined ? { parent_title } : {}),
+            // SPEC-024 AC-NOAI-8: pass surface + source for telemetry
+            caller_surface: app.callerSurface,
+            ai_default_source: aiSource,
           });
 
           if (!aiResult.ok) {

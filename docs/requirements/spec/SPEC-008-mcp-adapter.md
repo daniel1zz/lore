@@ -34,7 +34,7 @@ Each tool maps 1:1 to a service layer method. Tool names prefixed with `lore_`.
 
 | Tool | Service Call | Input Schema | Output |
 |---|---|---|---|
-| `lore_create` | `corpusService.create()` | `{type, title, content?, parent?, tags?, extra?}` | `{id, slug, type, status, version}` |
+| `lore_create` | `corpusService.create()` | `{type, title, content?, parent?, tags?, extra?, ai?}` | `{id, slug, type, status, version}` |
 | `lore_get` | `corpusService.get()` + `outlineService.resolve()` | `{id_or_slug, resolve_mdx?, include_navigation?}` | `{doc, navigation?, resolved_components?}` |
 | `lore_set` | `corpusService.set()` | `{id_or_slug, title?, content?, status?, tags?, extra?, slug?}` | `{doc, version}` |
 | `lore_delete` | `corpusService.delete()` | `{id_or_slug, confirm: true}` | `{deleted_id, recoverable_until}` |
@@ -50,6 +50,18 @@ Each tool maps 1:1 to a service layer method. Tool names prefixed with `lore_`.
 | `lore_context_bundle` | composite | `{id_or_slug, max_depth?}` | `{target, linked_specs, related_adrs, active_plans}` |
 | `lore_batch` | composite | `{operations: [{op, args}]}` | `{results: Result[]}` |
 | `lore_status` | `corpusService.status()` | `{}` | `{CorpusStatus}` |
+
+### 3.1 lore_create — ai field (SPEC-024)
+
+`ai?: boolean` — whether to invoke AI content generation before creating the doc.
+
+- Default: `false` — MCP callers are always AI agents; running AI generation by default
+  would cause claude-on-claude nesting (wasteful, SPEC-024 §1 rationale).
+- Pass `ai: true` to explicitly opt in to AI generation (same pipeline as CLI `--ai`).
+- When `ai: true` and `content` is not provided, `AIProviderService.generate()` is called
+  and its output becomes the document body.
+- `caller_surface: "mcp"` and `ai_default_source: "explicit_arg"` are passed to the telemetry
+  event so consumers can distinguish MCP-sourced AI writes from CLI-sourced ones.
 
 ## 4. Resources
 

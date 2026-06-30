@@ -165,7 +165,7 @@ describe("AI integration — stub exits 0 → doc created (AC-AI-1)", () => {
     stubBinDir = binDir;
     writeAiConfig(tmpDir, { command: binName });
 
-    const result = runLore(["create", "prd", "--title", "Stub AI PRD"], tmpDir, binDir);
+    const result = runLore(["create", "prd", "--title", "Stub AI PRD", "--ai"], tmpDir, binDir);
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("Created prd document");
@@ -177,7 +177,7 @@ describe("AI integration — stub exits 0 → doc created (AC-AI-1)", () => {
     stubBinDir = binDir;
     writeAiConfig(tmpDir, { command: binName });
 
-    runLore(["create", "prd", "--title", "List Test PRD"], tmpDir, binDir);
+    runLore(["create", "prd", "--title", "List Test PRD", "--ai"], tmpDir, binDir);
     const listResult = runLore(["list", "--type", "prd"], tmpDir, binDir);
 
     expect(listResult.exitCode).toBe(0);
@@ -189,7 +189,7 @@ describe("AI integration — stub exits 0 → doc created (AC-AI-1)", () => {
     stubBinDir = binDir;
     writeAiConfig(tmpDir, { command: binName });
 
-    const createResult = runLore(["create", "prd", "--title", "Content Test PRD"], tmpDir, binDir);
+    const createResult = runLore(["create", "prd", "--title", "Content Test PRD", "--ai"], tmpDir, binDir);
     // Extract slug from stdout
     const slugMatch = createResult.stdout.match(/prd-[\w-]+/);
     if (!slugMatch) throw new Error("No slug in create output");
@@ -212,7 +212,7 @@ describe("AI integration — stub exits 1 → CLI exits 6 (AC-AI-6)", () => {
     stubBinDir = binDir;
     writeAiConfig(tmpDir, { command: binName });
 
-    const result = runLore(["create", "prd", "--title", "Failing Provider PRD"], tmpDir, binDir);
+    const result = runLore(["create", "prd", "--title", "Failing Provider PRD", "--ai"], tmpDir, binDir);
 
     expect(result.exitCode).toBe(6);
   });
@@ -222,7 +222,7 @@ describe("AI integration — stub exits 1 → CLI exits 6 (AC-AI-6)", () => {
     stubBinDir = binDir;
     writeAiConfig(tmpDir, { command: binName });
 
-    const result = runLore(["create", "prd", "--title", "Failing PRD"], tmpDir, binDir);
+    const result = runLore(["create", "prd", "--title", "Failing PRD", "--ai"], tmpDir, binDir);
 
     expect(result.stderr).toContain("--no-ai");
   });
@@ -236,7 +236,7 @@ describe("AI integration — stub exits 1 → CLI exits 6 (AC-AI-6)", () => {
     const beforeList = runLore(["list", "--type", "prd"], tmpDir, binDir);
     const beforeCount = beforeList.stdout.split("\n").filter((l) => l.includes("prd-")).length;
 
-    runLore(["create", "prd", "--title", "Should Not Appear PRD"], tmpDir, binDir);
+    runLore(["create", "prd", "--title", "Should Not Appear PRD", "--ai"], tmpDir, binDir);
 
     // Get doc count after — should be unchanged
     const afterList = runLore(["list", "--type", "prd"], tmpDir, binDir);
@@ -254,7 +254,7 @@ describe("AI integration — stub exits 0, empty stdout → CLI exits 6 (AC-AI-7
     stubBinDir = binDir;
     writeAiConfig(tmpDir, { command: binName });
 
-    const result = runLore(["create", "prd", "--title", "Empty Output PRD"], tmpDir, binDir);
+    const result = runLore(["create", "prd", "--title", "Empty Output PRD", "--ai"], tmpDir, binDir);
 
     expect(result.exitCode).toBe(6);
     expect(result.stderr).toContain("Error:");
@@ -268,7 +268,7 @@ describe("AI integration — missing binary → CLI exits 6 (AC-AI-5)", () => {
     // Config points to a binary that is not installed anywhere on PATH
     writeAiConfig(tmpDir, { command: "ghost-ai-binary-not-installed-xyz" });
 
-    const result = runLore(["create", "prd", "--title", "No Binary PRD"], tmpDir);
+    const result = runLore(["create", "prd", "--title", "No Binary PRD", "--ai"], tmpDir);
 
     expect(result.exitCode).toBe(6);
   });
@@ -276,7 +276,7 @@ describe("AI integration — missing binary → CLI exits 6 (AC-AI-5)", () => {
   it("stderr contains retry hint (--no-ai) when binary is missing", () => {
     writeAiConfig(tmpDir, { command: "ghost-ai-binary-not-installed-xyz" });
 
-    const result = runLore(["create", "prd", "--title", "No Binary PRD"], tmpDir);
+    const result = runLore(["create", "prd", "--title", "No Binary PRD", "--ai"], tmpDir);
 
     expect(result.stderr).toContain("--no-ai");
   });
@@ -291,7 +291,7 @@ describe("AI integration — telemetry event written (AC-AI-20)", () => {
     // Enable both root telemetry and AI telemetry
     writeAiConfig(tmpDir, { command: binName, telemetry: true, aiTelemetry: true });
 
-    runLore(["create", "prd", "--title", "Telemetry Test PRD"], tmpDir, binDir);
+    runLore(["create", "prd", "--title", "Telemetry Test PRD", "--ai"], tmpDir, binDir);
 
     const telemetryPath = join(tmpDir, ".lore", "telemetry.jsonl");
     expect(existsSync(telemetryPath)).toBe(true);

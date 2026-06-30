@@ -14,6 +14,35 @@ import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
 import { parseTreeBlueprint } from "@lore/core";
+import type { CallerSurface } from "@lore/core";
+
+/** All CallerSurface values in a stable display order. */
+const ALL_SURFACES: ReadonlyArray<CallerSurface> = [
+  "cli",
+  "agent",
+  "mcp",
+  "http_cookie",
+  "http_token",
+] as const;
+
+/**
+ * Compute resolved per-surface AI defaults for the current app config.
+ * Temporarily cycles through each surface using resolveAiDefault.
+ * The current surface is restored after the loop.
+ *
+ * @param app - Wired App instance.
+ * @returns Record mapping each CallerSurface to its resolved AI boolean.
+ */
+function computeAiDefaults(app: ReturnType<typeof loadLoreApp>["app"]): Record<string, boolean> {
+  const saved = app.callerSurface;
+  const result: Record<string, boolean> = {};
+  for (const surface of ALL_SURFACES) {
+    app.callerSurface = surface;
+    result[surface] = app.resolveAiDefault(undefined).ai;
+  }
+  app.callerSurface = saved;
+  return result;
+}
 
 export default defineCommand({
   meta: {
@@ -164,9 +193,11 @@ export default defineCommand({
       }
 
       const status = result.value;
+      // SPEC-024 AC-NOAI-10: resolved per-surface AI defaults.
+      const aiDefaults = computeAiDefaults(app);
 
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: status }, null, 2));
+        console.log(JSON.stringify({ ok: true, data: { ...status, ai_defaults: aiDefaults } }, null, 2));
         return;
       }
 
@@ -194,6 +225,14 @@ export default defineCommand({
           console.log(`  ${s.padEnd(12)} ${count}`);
         }
       }
+
+      // SPEC-024 AC-NOAI-10: show resolved per-surface AI defaults
+      console.log("\nAI defaults (per surface):");
+      for (const [surface, aiOn] of Object.entries(aiDefaults)) {
+        const current = surface === app.callerSurface ? " ← current" : "";
+        console.log(`  ${surface.padEnd(14)} ${aiOn ? "on" : "off"}${current}`);
+      }
+      console.log("  (override via --ai / --no-ai, or LORE_AI_DEFAULT=off, or ai.default_per_surface in config)");
     } finally {
       app.close();
     }

@@ -29,6 +29,9 @@ import { ApiKeyStore } from "./adapters/http/auth.js";
 import { SessionStore } from "./adapters/http/sessions.js";
 import { resolveSyncCredentials, type LoreConfig, AiConfigSchema } from "@lore/core";
 import { err, type Result, type LoreError } from "@lore/core";
+import type { CallerSurface, AiDefaultSource } from "@lore/core";
+import type { AiDefaultPerSurface } from "@lore/core";
+import { resolveAiDefault } from "./ai/resolve-ai.js";
 import {
   NoOpTelemetry,
   createTelemetry,
@@ -72,6 +75,26 @@ export interface App {
    * Source: SPEC-023 §4, §9.1
    */
   phaseService: PhaseService;
+  /**
+   * Current caller surface — set once at adapter startup before any command dispatch.
+   * Adapters set this immediately after receiving the App:
+   *   - CLI/loader.ts: "cli" or "agent" (from env vars CLAUDECODE, CI, LORE_AI_DEFAULT)
+   *   - MCP/index.ts: "mcp" (in-process flag, not env var — see SPEC-024 §9.2)
+   *   - HTTP: not set on App; per-request via ActorContext.callerSurface
+   * Default: "cli" (safest — AI on, no change from SPEC-017 behavior).
+   * Source: SPEC-024 §9.1
+   */
+  callerSurface: CallerSurface;
+  /**
+   * Resolve whether AI generation should run for the current call.
+   * Delegates to resolveAiDefault() with this.callerSurface + config defaults.
+   *
+   * @param explicit - Caller explicit opt-in (true) or opt-out (false); undefined = use default.
+   * @returns {ai, source} — whether to run AI and why (for telemetry).
+   *
+   * Source: SPEC-024 §9.3
+   */
+  resolveAiDefault(explicit: boolean | undefined): { ai: boolean; source: AiDefaultSource };
   close(): void;
 }
 
@@ -80,12 +103,19 @@ export interface App {
  * @param store - SQLiteStore instance
  * @param telemetry - Telemetry sink; defaults to NoOpTelemetry (no file I/O unless opted in)
  * @param aiProviderService - Wired AI service from buildProviderRegistry (always required)
+ * @param aiDefaultPerSurface - Per-surface AI default overrides from config (SPEC-024)
  */
 function buildAppFromSqlite(
   store: SQLiteStore,
   telemetry: Telemetry = new NoOpTelemetry(),
   aiProviderService: AIProviderService,
+  aiDefaultPerSurface?: AiDefaultPerSurface,
 ): App {
+  // reason: SPEC-024 §9.1 — callerSurface must be mutable so adapters can set it at startup.
+  // Using a let variable closed over by the getter/setter ensures reads always see the current
+  // value without exposing it as plain data (where external code could mistake it for an
+  // immutable snapshot). Default "cli" is the safest: AI on, unchanged from SPEC-017 behavior.
+  let _callerSurface: CallerSurface = "cli";
   const db = store.getDatabase();
   const corpusService = new CorpusService(store, telemetry);
   return {
@@ -104,6 +134,12 @@ function buildAppFromSqlite(
     syncDocsService: new SyncDocsService(corpusService),
     // reason: PhaseService depends only on StoreInterface — stateless, no AI, no telemetry. SPEC-023 §9.1.
     phaseService: new PhaseService(store),
+    // SPEC-024: callerSurface getter/setter + resolveAiDefault
+    get callerSurface(): CallerSurface { return _callerSurface; },
+    set callerSurface(s: CallerSurface) { _callerSurface = s; },
+    resolveAiDefault(explicit: boolean | undefined) {
+      return resolveAiDefault(explicit, _callerSurface, aiDefaultPerSurface);
+    },
     close: () => { telemetry.close(); store.close(); },
   };
 }
@@ -118,13 +154,17 @@ function buildAppFromSqlite(
  * @param dbPath - Local replica path (for ApiKeyStore)
  * @param telemetry - Telemetry sink; defaults to NoOpTelemetry
  * @param aiProviderService - Wired AI service from buildProviderRegistry (always required)
+ * @param aiDefaultPerSurface - Per-surface AI default overrides from config (SPEC-024)
  */
 function buildAppFromTurso(
   store: TursoStore,
   dbPath: string,
   telemetry: Telemetry = new NoOpTelemetry(),
   aiProviderService: AIProviderService,
+  aiDefaultPerSurface?: AiDefaultPerSurface,
 ): App {
+  // reason: SPEC-024 §9.1 — same mutable callerSurface pattern as buildAppFromSqlite.
+  let _callerSurface: CallerSurface = "cli";
   const apiKeyDb = new Database(dbPath);
   const corpusService = new CorpusService(store, telemetry);
   return {
@@ -144,6 +184,12 @@ function buildAppFromTurso(
     syncDocsService: new SyncDocsService(corpusService),
     // reason: PhaseService depends only on StoreInterface — stateless, no AI, no telemetry. SPEC-023 §9.1.
     phaseService: new PhaseService(store),
+    // SPEC-024: callerSurface getter/setter + resolveAiDefault
+    get callerSurface(): CallerSurface { return _callerSurface; },
+    set callerSurface(s: CallerSurface) { _callerSurface = s; },
+    resolveAiDefault(explicit: boolean | undefined) {
+      return resolveAiDefault(explicit, _callerSurface, aiDefaultPerSurface);
+    },
     close: () => { telemetry.close(); store.close(); apiKeyDb.close(); },
   };
 }
@@ -197,13 +243,16 @@ export function createApp(
     aiConfig.telemetry,
   );
 
+  // Extract per-surface AI defaults from config (SPEC-024)
+  const aiDefaultPerSurface = aiConfig.default_per_surface;
+
   // No config supplied or sync section absent / disabled → local-only SQLiteStore
   if (
     config === undefined ||
     config.sync === undefined ||
     !config.sync.enabled
   ) {
-    return buildAppFromSqlite(new SQLiteStore(dbPath), telemetry, aiProviderService);
+    return buildAppFromSqlite(new SQLiteStore(dbPath), telemetry, aiProviderService, aiDefaultPerSurface);
   }
 
   // Sync is enabled — resolve credentials (fail loud on missing/empty token, D-007)
@@ -228,7 +277,7 @@ export function createApp(
       authToken,
       syncInterval: config.sync.interval,
     });
-    return { ok: true, value: buildAppFromTurso(store, dbPath, telemetry, aiProviderService) };
+    return { ok: true, value: buildAppFromTurso(store, dbPath, telemetry, aiProviderService, aiDefaultPerSurface) };
   } catch (e) {
     telemetry.close();
     const message =

@@ -15,6 +15,13 @@ import { registerResources } from "./resources.js";
  * Blocks until the transport closes.
  */
 export async function startMcpServer(app: App): Promise<void> {
+  // reason: SPEC-024 §9.2 — MCP surface MUST use in-process flag, not env var.
+  // The timing problem: if we tried to read a LORE_SURFACE env var, the MCP adapter
+  // and the tool handlers share one process, so there is no reliable moment to set
+  // the env var before the handlers read it. Setting the in-process flag here (before
+  // registerTools) guarantees all tool handlers see callerSurface="mcp" at call time.
+  app.callerSurface = "mcp";
+
   const server = new McpServer({
     name: "lore",
     version: "0.1.0",
