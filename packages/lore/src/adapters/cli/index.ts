@@ -36,6 +36,7 @@ const main = defineCommand({
     eval: () => import("./commands/eval.js").then((m) => m.default),
     dashboard: () => import("./commands/dashboard.js").then((m) => m.default),
     "sync-docs": () => import("./commands/sync-docs.js").then((m) => m.default),
+    phase: () => import("./commands/phase.js").then((m) => m.default),
   },
 });
 

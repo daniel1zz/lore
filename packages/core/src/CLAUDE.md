@@ -16,7 +16,18 @@ Foundational types, error model, runtime validation, lifecycle rules, config, an
 ## Patterns
 
 - **Zod is SSOT for runtime-validated shapes** — `TelemetryEventSchema`, `LoreConfigSchema`, `createDocInputSchema`, etc. Derived TS types come from `z.infer<typeof Schema>`; never duplicate the shape as a hand-written interface.
-- **Type-specific validation via `superRefine`** — `createDocInputSchema` enforces `spec/task → parent_id`, `adr → extra.decision_status`, `knowledge → extra.sub_type`, `task → extra.plan_id` (`schemas.ts`).
+- **Type-specific validation via `superRefine`** — `createDocInputSchema` enforces `spec/task → parent_id`, `adr → extra.decision_status`, `knowledge → extra.sub_type`, `task → extra.plan_id`, `plan → extra.phases uniqueness` (`schemas.ts`).
+
+### Plan Phases Schema Invariants (SPEC-023)
+
+`planExtraSchema` (in `schemas.ts`) governs plan extra fields:
+- `phases?: Array<{name: string, description?: string}>` — max 30 entries (hard cap via `.max(30)`).
+- `phases[].name` **must be unique** within the array — enforced by `superRefine` at write time (no built-in Zod uniqueness validator).
+- Names are **case-sensitive, exact-match** at validation time; callers must trim whitespace before passing (service layer handles this).
+- `phase?: string` — legacy singular field, deprecated. `lore migrate phases` converts it to `legacy_phase`. Do NOT write new code that reads `extra.phase` on plans (may be legacy or undefined). Read `extra.phases[]` instead.
+- `legacy_phase?: string` — set by migration only. Informational. Not consumed by runtime code.
+
+`taskExtraSchema` adds `phase?: string` — validated against parent plan's `extra.phases[].name` by `CorpusService` (not Zod, since it's cross-entity). Tasks without `extra.phase` are always valid regardless of plan phase declarations.
 - **Parent-type contract** — `doc-type-rules.ts::PARENT_TYPE_CONTRACT` and `isValidParentType(child, parent)` are imported by `CorpusService` and `TreeCheckService`. Adding a new doc type requires updating this contract.
 - **Graph helpers stay pure** — `graph-utils.ts::ancestorChainWalk` and `tree-blueprint.ts` operate on plain data; they don't take a `StoreInterface`. Callers fetch the data and pass it in.
 - **Config side effects isolated to `loadConfig` / `saveConfig`** — `parseConfig` and `loadConfigFromString` are pure and Result-returning; tests pass YAML strings, not file paths.

@@ -126,6 +126,22 @@ All feature specs live under `docs/requirements/spec/`. When implementing or cha
 
 Phase 1 (core + CLI + service layer) and Phase 2 (MCP server, HTTP server, Turso sync, telemetry, tree conformance, eval) are landed. Active work focuses on incremental hardening (escape paths, drift fixes, additional scenarios).
 
+### Plan Phases (SPEC-023)
+
+Plans support optional declared phases via `extra.phases: Array<{name, description?}>`. Tasks may reference a phase by name via `extra.phase: string`.
+
+Key patterns:
+- `lore phase add <plan> <name> [--description]` — declare a phase on a plan (exit 4 on duplicate)
+- `lore phase list <plan>` — list declared phases
+- `lore phase rm <plan> <name>` — remove (fails if tasks still reference it)
+- `lore phase rename <plan> <old> <new>` — rename in plan + all referencing tasks
+- `lore create task --phase <name> ...` — assign task to phase at creation time
+- `lore list --type task --plan-id <plan> --phase <name>` — filter tasks by phase
+- `lore tree <plan>` — groups tasks under phase headers when plan has phases declared
+- `lore migrate phases [--dry-run]` — one-shot sweep: converts legacy singular `extra.phase` → `extra.legacy_phase` across all plan rows (idempotent)
+
+Cross-entity validation: creating or updating a task with `extra.phase` validates the name against the parent plan's `extra.phases[]` at write time (`CorpusService._createImpl` / `set`). Unknown phase or plan with no phases → `VALIDATION_ERROR`.
+
 The v1 predecessor at `/Users/apple/.claude/docman-mcp` remains frozen. Do not carry over its schema or API shape — v2 is greenfield.
 
 <!-- auto:module-index -->

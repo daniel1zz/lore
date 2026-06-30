@@ -51,6 +51,8 @@ function makeApp(): App {
     aiProviderService: null as unknown as App["aiProviderService"],
     // reason: MDX resolve route tests never exercise sync-docs path — null-cast per SPEC-018 §3.6.
     syncDocsService: null as unknown as App["syncDocsService"],
+    // reason: test does not exercise phase commands; null-cast per pattern from SPEC-023 §9.1.
+    phaseService: null as unknown as App["phaseService"],
     close: () => undefined,
   };
 }

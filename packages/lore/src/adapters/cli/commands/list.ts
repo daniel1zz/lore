@@ -1,5 +1,11 @@
 /**
  * lore list — list documents with optional filters.
+ *
+ * New in SPEC-023:
+ *   --plan-id <id|slug>  Filter by parent plan (resolves slug → ULID, maps to parent_id filter).
+ *   --phase <name>       Filter tasks by extra.phase name (requires --type task or --plan-id).
+ *                        Client-side filter — applied after store fetch since StoreFilters
+ *                        has no extra-field index. Only useful with --type task.
  */
 
 import { defineCommand } from "citty";
@@ -33,6 +39,14 @@ export default defineCommand({
       type: "string",
       description: "Filter by tag",
     },
+    "plan-id": {
+      type: "string",
+      description: "Filter by parent plan ID or slug (resolves to parent_id). Useful with --type task.",
+    },
+    phase: {
+      type: "string",
+      description: "Filter tasks by phase name (extra.phase). Combine with --type task and --plan-id. Source: SPEC-023",
+    },
     json: {
       type: "boolean",
       description: "Output as JSON",
@@ -47,6 +61,55 @@ export default defineCommand({
       if (args.author !== undefined) filters["created_by"] = args.author;
       if (args.since !== undefined) filters["since"] = args.since;
       if (args.tag !== undefined) filters["tags"] = [args.tag];
+
+      // Resolve --plan-id slug or ULID → parent_id ULID filter.
+      if (args["plan-id"] !== undefined) {
+        const resolveResult = await app.corpusService.resolve(args["plan-id"]);
+        if (!resolveResult.ok) {
+          process.stderr.write(formatError(resolveResult.error) + "\n");
+          process.exitCode = exitCode(resolveResult.error);
+          return;
+        }
+        filters["parent_id"] = resolveResult.value;
+      }
+
+      // When --phase filter is active, we need full DocRecord rows (extra.phase is not in DocSummary).
+      // reason: StoreFilters has no extra-field index; client-side filter is applied after fetch.
+      // Source: SPEC-023 §4 AC-PHASE-7
+      const phaseFilter = args.phase;
+      if (phaseFilter !== undefined) {
+        const fullResult = await app.corpusService.listFull(filters);
+        if (!fullResult.ok) {
+          process.stderr.write(formatError(fullResult.error) + "\n");
+          process.exitCode = exitCode(fullResult.error);
+          return;
+        }
+        const filtered = fullResult.value.docs.filter(
+          (doc) => doc.extra["phase"] === phaseFilter,
+        );
+        const total = filtered.length;
+
+        if (args.json) {
+          console.log(JSON.stringify({ ok: true, data: { docs: filtered, total } }, null, 2));
+          return;
+        }
+        if (total === 0) {
+          console.log(`No documents found with phase "${phaseFilter}".`);
+          return;
+        }
+        const headers = ["ID", "Type", "Title", "Status", "Phase", "Updated"];
+        const rows = filtered.map((d) => [
+          d.id.slice(0, 10),
+          d.type,
+          d.title.slice(0, 30),
+          d.status,
+          String(d.extra["phase"] ?? ""),
+          relativeTime(d.updated_at),
+        ]);
+        console.log(formatTable(headers, rows));
+        console.log(`\n${total} document${total === 1 ? "" : "s"} (filter: --phase ${phaseFilter})`);
+        return;
+      }
 
       const result = await app.corpusService.list(filters);
 

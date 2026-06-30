@@ -230,6 +230,48 @@ export class CorpusService {
       }
     }
 
+    // Cross-entity phase validation for tasks with extra.phase (AC-PHASE-3, SPEC-023 §4).
+    // reason: Zod cannot express cross-document constraints — must be enforced in service layer.
+    // Three sub-cases: (1) parent has no phases → VALIDATION_ERROR, (2) phase name not found
+    // → VALIDATION_ERROR, (3) phase found → proceed. Tasks without extra.phase bypass this check.
+    if (data.type === "task" && resolvedParentId !== null) {
+      const taskPhase =
+        typeof data.extra?.["phase"] === "string" ? (data.extra["phase"] as string) : undefined;
+      if (taskPhase !== undefined) {
+        const parentForPhaseResult = await this.store.find(resolvedParentId);
+        if (!parentForPhaseResult.ok) return parentForPhaseResult;
+        const parentForPhase = parentForPhaseResult.value;
+        if (parentForPhase !== null) {
+          const declaredPhases = parentForPhase.extra["phases"];
+          const phasesArray = Array.isArray(declaredPhases) ? declaredPhases : null;
+          if (!phasesArray || phasesArray.length === 0) {
+            return err({
+              code: "VALIDATION_ERROR",
+              field: "extra.phase",
+              message: `task references phase "${taskPhase}" but parent plan declares no phases`,
+              value: taskPhase,
+            });
+          }
+          const match = phasesArray.find(
+            (p): p is { name: string; description?: string } =>
+              typeof p === "object" && p !== null && (p as Record<string, unknown>)["name"] === taskPhase,
+          );
+          if (!match) {
+            const knownNames = phasesArray
+              .filter((p): p is { name: string } => typeof p === "object" && p !== null)
+              .map((p) => (p as { name: string }).name)
+              .join(", ");
+            return err({
+              code: "VALIDATION_ERROR",
+              field: "extra.phase",
+              message: `unknown phase "${taskPhase}"; parent plan declares: [${knownNames}]`,
+              value: taskPhase,
+            });
+          }
+        }
+      }
+    }
+
     const id = ulid() as DocId;
     const now = new Date().toISOString();
     const role = DOC_TYPE_ROLE_MAP[data.type];
@@ -416,6 +458,45 @@ export class CorpusService {
     if (parsedPatch.data.extra !== undefined) docPatch.extra = parsedPatch.data.extra;
     if (parsedPatch.data.slug !== undefined) docPatch.slug = parsedPatch.data.slug;
 
+    // Cross-entity phase validation when updating a task's extra.phase (AC-PHASE-3, SPEC-023 §4).
+    // reason: same constraint as create — must validate phase against parent plan at write time.
+    if (existing.type === "task" && parsedPatch.data.extra !== undefined) {
+      const newPhase = parsedPatch.data.extra["phase"];
+      if (typeof newPhase === "string" && existing.parent_id !== null) {
+        const parentForPhaseResult = await this.store.find(existing.parent_id);
+        if (!parentForPhaseResult.ok) return parentForPhaseResult;
+        const parentForPhase = parentForPhaseResult.value;
+        if (parentForPhase !== null) {
+          const declaredPhases = parentForPhase.extra["phases"];
+          const phasesArray = Array.isArray(declaredPhases) ? declaredPhases : null;
+          if (!phasesArray || phasesArray.length === 0) {
+            return err({
+              code: "VALIDATION_ERROR",
+              field: "extra.phase",
+              message: `task references phase "${newPhase}" but parent plan declares no phases`,
+              value: newPhase,
+            });
+          }
+          const match = phasesArray.find(
+            (p): p is { name: string; description?: string } =>
+              typeof p === "object" && p !== null && (p as Record<string, unknown>)["name"] === newPhase,
+          );
+          if (!match) {
+            const knownNames = phasesArray
+              .filter((p): p is { name: string } => typeof p === "object" && p !== null)
+              .map((p) => (p as { name: string }).name)
+              .join(", ");
+            return err({
+              code: "VALIDATION_ERROR",
+              field: "extra.phase",
+              message: `unknown phase "${newPhase}"; parent plan declares: [${knownNames}]`,
+              value: newPhase,
+            });
+          }
+        }
+      }
+    }
+
     const updateResult = await this.store.update(existing.id, docPatch, { expected_version: existing.version });
     if (!updateResult.ok) return updateResult;
 
@@ -516,6 +597,20 @@ export class CorpusService {
     const result = ok({ docs, total: docs.length });
     this.recordTelemetryEvent("list", startMs, result, { filter_type: filters.type, count: docs.length });
     return result;
+  }
+
+  /**
+   * List documents matching filters, returning full DocRecord rows (including extra).
+   * Use this when extra fields are needed (e.g. phase grouping in tree, phase filter in list).
+   * Callers that only need display fields should use list() to avoid carrying extra payload.
+   *
+   * @param filters - Same filter set as list()
+   * @returns Full DocRecord array (not stripped to DocSummary)
+   */
+  async listFull(filters: ListFilters): Promise<Result<{ docs: DocRecord[]; total: number }, LoreError>> {
+    const storeResult = await this.store.findMany(filters);
+    if (!storeResult.ok) return storeResult;
+    return ok({ docs: storeResult.value, total: storeResult.value.length });
   }
 
   // ── Search ───────────────────────────────────────────────────────────────

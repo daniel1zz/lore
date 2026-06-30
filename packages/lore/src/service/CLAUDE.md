@@ -33,6 +33,7 @@ Business logic layer. Eight stateless services orchestrate `StoreInterface` call
 | `TreeCheckService` | Drift detection (`missing \| extra \| misplaced \| cycle \| orphan`), auto-fix, parent_id ↔ link-table reconciliation |
 | `AIProviderService` | AI provider dispatch + template render + ai.generation telemetry (SPEC-017 §3.6) |
 | `SyncDocsService` | One-way file→corpus reconciler for spec files; title-match dedup, drift report, parent resolution (SPEC-018) |
+| `PhaseService` | addPhase / listPhases / removePhase / renamePhase / migratePhases on plan.extra.phases (SPEC-023) |
 
 ## Links
 

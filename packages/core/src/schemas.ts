@@ -88,14 +88,74 @@ export const taskExtraSchema = z
     plan_id: docIdSchema,
     assignee: z.string().optional(),
     task_status: z.enum(["todo", "in-progress", "done", "blocked"]).optional(),
-  })
-  .passthrough();
-
-export const planExtraSchema = z
-  .object({
+    /**
+     * Optional phase grouping name. When present, validated against the parent
+     * plan's extra.phases[].name in CorpusService.create / set (AC-PHASE-3).
+     * Source: SPEC-023 §4 AC-PHASE-2
+     */
     phase: z.string().optional(),
   })
   .passthrough();
+
+/**
+ * One declared phase on a plan document.
+ * name is case-sensitive, trimmed at write time (Q-extra, SPEC-023 §8).
+ * Source: SPEC-023 §4 AC-PHASE-1
+ */
+export const planPhaseSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+});
+
+/** Derived TypeScript type for a declared plan phase. */
+export type PlanPhase = z.infer<typeof planPhaseSchema>;
+
+/**
+ * Extra fields for plan documents.
+ *
+ * @invariant phases[].name is unique within the array (enforced via superRefine).
+ * @invariant phases is capped at 30 entries (soft-limit: SPEC-023 §6 risk table).
+ * @invariant legacy_phase holds the original extra.phase string after `lore migrate phases` runs.
+ *
+ * Source: SPEC-023 §4 AC-PHASE-1, §8 Q2
+ */
+export const planExtraSchema = z
+  .object({
+    /**
+     * Legacy singular phase string — present only on docs authored before `lore migrate phases`
+     * was run. After migration this field is removed and extra.legacy_phase holds the old value.
+     * Source: SPEC-023 §8 Q2
+     */
+    phase: z.string().optional(),
+    /**
+     * Declared phases for this plan. Tasks may reference these by name via extra.phase.
+     * Uniqueness of name is enforced by Zod superRefine at write time.
+     */
+    phases: z.array(planPhaseSchema).max(30).optional(),
+    /** Populated by `lore migrate phases` from the former singular extra.phase. */
+    legacy_phase: z.string().optional(),
+  })
+  .passthrough()
+  .superRefine((data, ctx) => {
+    // reason: z.array() has no built-in uniqueness validator — must use superRefine.
+    // Colliding index is flagged individually so callers can pinpoint the duplicate.
+    // Source: SPEC-023 §4 AC-PHASE-1
+    if (!data.phases) return;
+    const seen = new Set<string>();
+    for (let i = 0; i < data.phases.length; i++) {
+      const entry = data.phases[i];
+      if (!entry) continue;
+      const name = entry.name;
+      if (seen.has(name)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "phases[].name must be unique",
+          path: ["phases", i, "name"],
+        });
+      }
+      seen.add(name);
+    }
+  });
 
 export const prdExtraSchema = z.record(z.unknown());
 export const specExtraSchema = z.record(z.unknown());
@@ -165,6 +225,23 @@ export const createDocInputSchema = baseCreateDocInputSchema.superRefine(
           message: "task requires extra.plan_id",
           path: ["extra", "plan_id"],
         });
+      }
+    }
+
+    // plan: validate extra.phases uniqueness via planExtraSchema if present
+    // reason: cross-field uniqueness cannot be expressed in the base schema shape;
+    // we delegate to planExtraSchema.safeParse to invoke its superRefine check.
+    // Source: SPEC-023 §4 AC-PHASE-1
+    if (type === "plan" && extra !== undefined) {
+      const planResult = planExtraSchema.safeParse(extra);
+      if (!planResult.success) {
+        for (const issue of planResult.error.issues) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: issue.message,
+            path: ["extra", ...issue.path],
+          });
+        }
       }
     }
   },
