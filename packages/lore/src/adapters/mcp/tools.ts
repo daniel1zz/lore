@@ -60,6 +60,13 @@ export const LoreCreateSchema = z.object({
   parent_id: z.string().optional(),
   tags: z.array(z.string()).optional(),
   extra: z.record(z.unknown()).optional(),
+  /**
+   * Whether to invoke AI content generation.
+   * Defaults to false — MCP callers are always AI agents (claude-on-claude nesting
+   * is wasteful). Pass `ai: true` to explicitly opt in to AI generation.
+   * SPEC-024 AC-NOAI-4 / AC-NOAI-5; also documented in SPEC-008 §3 lore_create row.
+   */
+  ai: z.boolean().default(false),
 });
 
 /** Input schema for lore_get. */
@@ -260,7 +267,25 @@ export function registerTools(server: McpServer, app: App): void {
 
   // lore_create
   registerToolWithArgs(server, "lore_create", "Create a new document in the Lore corpus", LoreCreateSchema, async (args) => {
-    const result = await corpusService.create(args);
+    // SPEC-024 AC-NOAI-4/5: ai=false (default) → create with empty/provided content (no AI call).
+    // ai=true → invoke AIProviderService to generate content before creating the doc.
+    let resolvedContent = args.content;
+    if (resolvedContent === undefined && args.ai) {
+      // reason: MCP surface is always agent; explicit ai:true is the caller's opt-in.
+      // Pass surface + source to AIProviderService for telemetry (AC-NOAI-8).
+      const aiResult = await app.aiProviderService.generate({
+        doc_type: args.type,
+        title: args.title,
+        caller_surface: "mcp",
+        ai_default_source: "explicit_arg",
+      });
+      if (!aiResult.ok) return errorContent(aiResult.error);
+      resolvedContent = aiResult.value.content;
+    }
+
+    // Strip the `ai` field before passing to corpusService.create — it is not a corpus field.
+    const { ai: _ai, ...createInput } = args;
+    const result = await corpusService.create({ ...createInput, content: resolvedContent });
     if (!result.ok) return errorContent(result.error);
     const { id, slug, type, status, version } = result.value;
     return textContent({ id, slug, type, status, version });

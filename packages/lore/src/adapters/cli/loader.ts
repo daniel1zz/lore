@@ -30,9 +30,34 @@ import {
   resolveGlobalConfigPath,
   mergeDefaults,
 } from "@lore/core";
-import type { LoreConfig, LoreDefaults } from "@lore/core";
+import type { LoreConfig, LoreDefaults, CallerSurface } from "@lore/core";
 import { createApp, type App } from "../../app.js";
 import { findLoreDbPath, formatError } from "./utils.js";
+
+/**
+ * Detect whether the current CLI invocation is by an AI agent or a human.
+ *
+ * Classification rules (SPEC-024 §8 Q1):
+ *   - LORE_AI_DEFAULT=off → "agent" (explicit, highest trust)
+ *   - CLAUDECODE=1        → "agent" (Claude Code main loop / subagent)
+ *   - CI=true             → "agent" (any CI runner)
+ *   - none of the above   → "cli" (human terminal, SPEC-017 default)
+ *
+ * reason: env vars read at process startup (before any command dispatch) ensure surface
+ * is stable for the entire request. MCP/HTTP use in-process flags instead — see SPEC-024 §9.2.
+ *
+ * @returns CallerSurface — "cli" or "agent"
+ */
+function detectCliSurface(): CallerSurface {
+  if (
+    process.env["LORE_AI_DEFAULT"] === "off" ||
+    process.env["CLAUDECODE"] === "1" ||
+    process.env["CI"] === "true"
+  ) {
+    return "agent";
+  }
+  return "cli";
+}
 
 /**
  * Load a telemetry-aware App instance for use by CLI commands.
@@ -129,13 +154,23 @@ export function loadLoreApp(): {
   // reason: always returns App when sync is disabled AND ai.provider is a known name;
   // otherwise returns Result and we surface it as exit 1 (AC-AI-11, SPEC-017 §3.12).
   const appOrResult = createApp(dbPath, telemetryOnlyConfig);
+  let app: App;
   if ("ok" in appOrResult) {
     // createApp returned a Result — only happens when ai.provider is unknown
     if (!appOrResult.ok) {
       console.error(formatError(appOrResult.error)); // CLI surface
       process.exit(1);
     }
-    return { app: appOrResult.value, dbPath, defaults };
+    app = appOrResult.value;
+  } else {
+    app = appOrResult;
   }
-  return { app: appOrResult, dbPath, defaults };
+
+  // SPEC-024 §9.1: set callerSurface from env vars before any command dispatch.
+  // reason: must happen here (not inside each command) so the surface is stable
+  // for the entire CLI invocation. MCP sets "mcp" in adapters/mcp/index.ts; HTTP
+  // resolves per-request in ActorContext — see SPEC-024 §9.2.
+  app.callerSurface = detectCliSurface();
+
+  return { app, dbPath, defaults };
 }

@@ -21,6 +21,7 @@
 
 import type { AIProvider, DocType, GenerateOutput, LoreError, Telemetry } from "@lore/core";
 import type { Result } from "@lore/core";
+import type { CallerSurface, AiDefaultSource } from "@lore/core";
 import { BUILT_IN_TEMPLATES, renderTemplate } from "../ai/templates.js";
 
 // ─── AIProviderService ────────────────────────────────────────────────────────
@@ -73,17 +74,36 @@ export class AIProviderService {
    * @param args.doc_type - DocType being created
    * @param args.title - Document title (interpolated into template as {{title}})
    * @param args.parent_title - Optional parent document title (for {{#parent_title}}…{{/parent_title}})
+   * @param args.caller_surface - Surface that initiated the call (SPEC-024 AC-NOAI-8; included in telemetry)
+   * @param args.ai_default_source - How the AI decision was resolved (SPEC-024 AC-NOAI-8; included in telemetry)
    * @returns Result<GenerateOutput, LoreError> — never throws
    *
    * @example
    * const result = await svc.generate({ doc_type: "spec", title: "Auth Flow", parent_title: "Security PRD" });
    * if (!result.ok) { console.error(result.error.message); return; }
    * console.log(result.value.content.slice(0, 80));
+   *
+   * @example
+   * // SPEC-024: pass surface + source for telemetry
+   * const result = await svc.generate({
+   *   doc_type: "spec", title: "Auth Flow",
+   *   caller_surface: "cli", ai_default_source: "cli_flag",
+   * });
    */
   async generate(args: {
     doc_type: DocType;
     title: string;
     parent_title?: string;
+    /**
+     * Caller surface for telemetry (SPEC-024 AC-NOAI-8).
+     * When provided, emitted in the ai.generation event as `caller_surface`.
+     */
+    caller_surface?: CallerSurface;
+    /**
+     * Source of the AI on/off decision for telemetry (SPEC-024 AC-NOAI-8).
+     * When provided, emitted in the ai.generation event as `ai_default_source`.
+     */
+    ai_default_source?: AiDefaultSource;
   }): Promise<Result<GenerateOutput, LoreError>> {
     // Determine template source — user-override wins over built-in
     const userOverride = args.doc_type in this.templates;
@@ -136,6 +156,9 @@ export class AIProviderService {
                   ? result.error.message
                   : result.error.code,
             }),
+        // SPEC-024 AC-NOAI-8: optional surface + source for AI default traceability
+        ...(args.caller_surface !== undefined ? { caller_surface: args.caller_surface } : {}),
+        ...(args.ai_default_source !== undefined ? { ai_default_source: args.ai_default_source } : {}),
       });
     }
 

@@ -121,6 +121,51 @@ All feature specs live under `docs/requirements/spec/`. When implementing or cha
 - `SPEC-014` — Monorepo skeleton (Bun workspaces, @lore/core + @lore/lore + @lore/dashboard)
 - `SPEC-015` — Dashboard read-only skeleton (Vite + React + shadcn; list/search/tree/detail)
 - `SPEC-016` — Cookie auth via CLI-managed local bootstrap (`lore dashboard` + sessions table)
+- `SPEC-024` — Default --no-ai for agent and MCP execution paths (AI surface defaults)
+
+## AI Default Behavior by Caller Surface (SPEC-024)
+
+Lore detects which "caller surface" is invoking it and selects a sensible AI default:
+
+| Surface | How Detected | AI Default | Why |
+|---|---|---|---|
+| `cli` | None of the agent signals below | **on** | Human in a terminal — SPEC-017 default preserved |
+| `agent` | `CLAUDECODE=1` or `CI=true` or `LORE_AI_DEFAULT=off` | **off** | AI-invoked; skip claude-on-claude nesting |
+| `mcp` | In-process flag set by `startMcpServer()` | **off** | MCP callers are always AI agents |
+| `http_cookie` | Cookie session from `lore dashboard` | **on** | Human browser session |
+| `http_token` | Bearer API token | **off** | Agent-issued token |
+
+### Env-var Matrix (recommended values for AI agent environments)
+
+If you are an AI agent using the Lore CLI:
+
+```bash
+# Recommended: suppress AI by default so lore create never triggers a nested Claude call.
+# Any of these three env vars cause surface detection to return "agent":
+export CLAUDECODE=1        # Claude Code sets this automatically
+export CI=true             # CI runners set this automatically
+export LORE_AI_DEFAULT=off # Explicit opt-out for any non-Claude agent
+```
+
+### Overriding the Default
+
+```bash
+lore create spec --title "My Spec" --ai      # Force AI on (any surface)
+lore create spec --title "My Spec" --no-ai  # Force AI off (any surface) → editor
+```
+
+`--ai` and `--no-ai` are mutually exclusive; passing both exits with code 2.
+
+Per-surface config override (in `.lore/config.yaml`):
+```yaml
+ai:
+  default_per_surface:
+    cli: false       # disable AI even for human terminal
+    agent: true      # enable AI for agents (rare)
+```
+
+`lore status --json` exposes `ai_defaults: { cli, agent, mcp, http_cookie, http_token }` —
+the resolved per-surface AI defaults for the current configuration.
 
 ## Implementation Status
 

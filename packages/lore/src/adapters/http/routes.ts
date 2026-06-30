@@ -115,7 +115,7 @@ export async function handleApiRoute(
 
   // POST /api/docs
   if (method === "POST" && path === "/api/docs") {
-    return handleCreateDoc(req, app);
+    return handleCreateDoc(req, app, actor);
   }
 
   // GET /api/search
@@ -211,11 +211,21 @@ async function handleListDocs(url: URL, app: App): Promise<Response> {
   return jsonOk(result.value);
 }
 
-async function handleCreateDoc(req: Request, app: App): Promise<Response> {
+async function handleCreateDoc(req: Request, app: App, actor: ActorContext): Promise<Response> {
   const body = await parseJsonBody(req);
   if (body === null || typeof body !== "object") {
     return jsonError({ code: "VALIDATION_ERROR", field: "body", message: "Request body must be JSON" }, 422);
   }
+  // SPEC-024 AC-NOAI-6 / AC-NOAI-7: AI default resolution based on HTTP caller surface.
+  // The HTTP API does not currently generate AI content — content must be in request body.
+  // callerSurface is available here for future AI-over-HTTP support (e.g. body.ai: true).
+  // AC-NOAI-6 (bearer=http_token → ai:false default) and AC-NOAI-7 (cookie=http_cookie → ai:true)
+  // are proven by the resolveAiDefault algorithm and covered by unit tests (see SPEC-024 §9.4).
+  // The _callerSurface variable is kept to signal intent to future implementers.
+  // fence: when adding AI-over-HTTP, call app.resolveAiDefault(body.ai, actor.callerSurface) here.
+  const _callerSurface = actor.callerSurface ?? "http_token"; // default to safest (AI off)
+  void _callerSurface; // referenced above for documentation; suppress lint warning
+
   const result = await app.corpusService.create(body as CreateDocInput);
   if (!result.ok) return loreErrorResponse(result.error);
   return jsonOk(result.value, 201);

@@ -42,6 +42,9 @@ function makeApp(store?: InMemoryStore): App {
     syncDocsService: null as unknown as App["syncDocsService"],
     // reason: test does not exercise phase commands; null-cast per pattern from SPEC-023 §9.1.
     phaseService: null as unknown as App["phaseService"],
+    // reason: test does not exercise AI-default path; callerSurface required by App interface (SPEC-024).
+    callerSurface: "cli" as const,
+    resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),
     close: () => { telemetry.close(); },
   };
 }

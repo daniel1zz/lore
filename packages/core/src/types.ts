@@ -181,6 +181,34 @@ export interface DocSummary {
   updated_at: string;
 }
 
+// ─── SPEC-024: Caller Surface + AI Default Source ──────────────────────────
+
+/**
+ * Identifies the execution surface that initiated the current lore operation.
+ * Used by resolveAiDefault to select the correct built-in default.
+ *
+ * - "cli"        — human typing in a terminal (no agent env vars set)
+ * - "agent"      — CLI invoked by an AI agent (CLAUDECODE=1, CI=true, LORE_AI_DEFAULT=off)
+ * - "mcp"        — MCP tool call (in-process flag set by adapters/mcp/index.ts at startup)
+ * - "http_cookie" — HTTP request authenticated via cookie session (dashboard / human)
+ * - "http_token"  — HTTP request authenticated via bearer API token (agent-issued)
+ *
+ * Source: SPEC-024 §8, §9.1
+ */
+export type CallerSurface = "cli" | "agent" | "mcp" | "http_cookie" | "http_token";
+
+/**
+ * Identifies how the AI on/off decision was resolved.
+ *
+ * - "explicit_arg" — caller passed --ai or --no-ai (or ai: true/false in MCP)
+ * - "config"       — ai.default_per_surface[surface] was set in config.yaml
+ * - "env"          — CLAUDECODE/CI/LORE_AI_DEFAULT env var drove agent surface (AI off)
+ * - "cli_flag"     — built-in default for human-facing surfaces (AI on; --no-ai was not passed)
+ *
+ * Source: SPEC-024 §9.3
+ */
+export type AiDefaultSource = "explicit_arg" | "config" | "env" | "cli_flag";
+
 // ─── Constants ─────────────────────────────────────────────────────────────
 
 /** Maps each DocType to its canonical DocRole. Immutable SSOT. */

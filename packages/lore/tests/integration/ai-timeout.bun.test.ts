@@ -154,7 +154,7 @@ describe("AI integration — provider timeout (AC-AI-8)", () => {
     writeAiConfigWithTimeout(tmpDir, binName, 200);
 
     const result = runLore(
-      ["create", "prd", "--title", "Timeout Test PRD"],
+      ["create", "prd", "--title", "Timeout Test PRD", "--ai"],
       tmpDir,
       binDir,
     );
@@ -168,7 +168,7 @@ describe("AI integration — provider timeout (AC-AI-8)", () => {
     writeAiConfigWithTimeout(tmpDir, binName, 200);
 
     const result = runLore(
-      ["create", "prd", "--title", "Timeout Message Test PRD"],
+      ["create", "prd", "--title", "Timeout Message Test PRD", "--ai"],
       tmpDir,
       binDir,
     );
@@ -187,7 +187,7 @@ describe("AI integration — provider timeout (AC-AI-8)", () => {
       .split("\n")
       .filter((l) => l.includes("prd-")).length;
 
-    runLore(["create", "prd", "--title", "Should Not Appear PRD"], tmpDir, binDir);
+    runLore(["create", "prd", "--title", "Should Not Appear PRD", "--ai"], tmpDir, binDir);
 
     const afterList = runLore(["list", "--type", "prd"], tmpDir, binDir);
     const afterCount = afterList.stdout
@@ -202,7 +202,7 @@ describe("AI integration — provider timeout (AC-AI-8)", () => {
     writeAiConfigWithTimeout(tmpDir, binName, 200);
 
     const result = runLore(
-      ["create", "prd", "--title", "Timeout Retry Hint PRD"],
+      ["create", "prd", "--title", "Timeout Retry Hint PRD", "--ai"],
       tmpDir,
       binDir,
     );
