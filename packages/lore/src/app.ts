@@ -37,6 +37,7 @@ import {
 import { buildProviderRegistry } from "./ai/registry.js";
 import { AIProviderService } from "./service/ai-provider-service.js";
 import { SyncDocsService } from "./service/sync-docs-service.js";
+import { PhaseService } from "./service/phase-service.js";
 
 export interface App {
   corpusService: CorpusService;
@@ -65,6 +66,12 @@ export interface App {
    * Source: SPEC-018 §3.6
    */
   syncDocsService: SyncDocsService;
+  /**
+   * PhaseService — manages declared phases on plan documents (extra.phases[]).
+   * Provides addPhase / listPhases / removePhase / renamePhase / migratePhases.
+   * Source: SPEC-023 §4, §9.1
+   */
+  phaseService: PhaseService;
   close(): void;
 }
 
@@ -95,6 +102,8 @@ function buildAppFromSqlite(
     aiProviderService,
     // reason: SyncDocsService depends only on CorpusService — no store access, no AI. SPEC-018 §3.6.
     syncDocsService: new SyncDocsService(corpusService),
+    // reason: PhaseService depends only on StoreInterface — stateless, no AI, no telemetry. SPEC-023 §9.1.
+    phaseService: new PhaseService(store),
     close: () => { telemetry.close(); store.close(); },
   };
 }
@@ -133,6 +142,8 @@ function buildAppFromTurso(
     aiProviderService,
     // reason: SyncDocsService depends only on CorpusService — no store access, no AI. SPEC-018 §3.6.
     syncDocsService: new SyncDocsService(corpusService),
+    // reason: PhaseService depends only on StoreInterface — stateless, no AI, no telemetry. SPEC-023 §9.1.
+    phaseService: new PhaseService(store),
     close: () => { telemetry.close(); store.close(); apiKeyDb.close(); },
   };
 }

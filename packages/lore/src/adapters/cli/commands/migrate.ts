@@ -1,5 +1,10 @@
 /**
- * lore migrate v1 --from <path> — import DocMan v1 corpus.
+ * lore migrate <action> — corpus migration commands.
+ *
+ * Actions:
+ *   v1 --from <path>   Import a DocMan v1 corpus.
+ *   phases [--dry-run] Promote legacy singular plan.extra.phase → extra.legacy_phase
+ *                      across all plan rows in a single sweep. Idempotent. (SPEC-023 §4 AC-PHASE-10)
  */
 
 import { defineCommand } from "citty";
@@ -9,18 +14,17 @@ import { exitCode, formatError } from "../utils.js";
 export default defineCommand({
   meta: {
     name: "migrate",
-    description: "Import a DocMan v1 corpus (lore migrate v1 --from <path>)",
+    description: "Corpus migration: `v1 --from <path>` (v1 import) or `phases` (phase schema sweep)",
   },
   args: {
     version: {
       type: "positional",
-      description: "Migration source version (currently: v1)",
+      description: "Migration action: v1 | phases",
       required: true,
     },
     from: {
       type: "string",
-      description: "Source directory path containing v1 markdown files",
-      required: true,
+      description: "[v1 only] Source directory path containing v1 markdown files",
     },
     "dry-run": {
       type: "boolean",
@@ -28,11 +32,11 @@ export default defineCommand({
     },
     "skip-secret-scan": {
       type: "boolean",
-      description: "Skip secret detection before import",
+      description: "[v1 only] Skip secret detection before import",
     },
     "id-strategy": {
       type: "string",
-      description: "ID strategy: preserve | remap (default: remap)",
+      description: "[v1 only] ID strategy: preserve | remap (default: remap)",
       default: "remap",
     },
     json: {
@@ -41,15 +45,49 @@ export default defineCommand({
     },
   },
   async run({ args }) {
-    if (args.version !== "v1") {
+    if (args.version !== "v1" && args.version !== "phases") {
       process.stderr.write(
-        `Error: Unknown migration version '${args.version}'. Currently only 'v1' is supported.\n`,
+        `Error: Unknown migration action '${args.version}'. Supported: v1, phases.\n`,
       );
       process.exit(2);
     }
 
+    // ── phases action ─────────────────────────────────────────────────────
+    if (args.version === "phases") {
+      const dryRun = args["dry-run"] ?? false;
+      const { app } = loadLoreApp();
+      try {
+        const result = await app.phaseService.migratePhases({ dryRun });
+
+        if (!result.ok) {
+          process.stderr.write(formatError(result.error) + "\n");
+          process.exitCode = exitCode(result.error);
+          return;
+        }
+
+        const report = result.value;
+        if (args.json) {
+          console.log(JSON.stringify({ ok: true, data: report }, null, 2));
+          return;
+        }
+
+        const label = dryRun ? "Phase migration (dry-run)" : "Phase migration complete";
+        console.log(label);
+        console.log("─".repeat(40));
+        console.log(`Plans touched:  ${report.touched}`);
+        console.log(`Plans skipped:  ${report.skipped}`);
+        if (dryRun) {
+          console.log("\nRe-run without --dry-run to apply changes.");
+        }
+      } finally {
+        app.close();
+      }
+      return;
+    }
+
+    // ── v1 action ─────────────────────────────────────────────────────────
     if (!args.from) {
-      process.stderr.write("Error: --from <path> is required.\n");
+      process.stderr.write("Error: --from <path> is required for `migrate v1`.\n");
       process.exit(2);
     }
 

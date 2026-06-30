@@ -20,9 +20,9 @@ citty-based CLI adapter. 24 subcommands, each in its own `commands/<name>.ts`, l
 - **Output helpers in `utils.ts`** — `formatTable`, `formatTree` (Unicode box drawing), `formatNavigation`, `relativeTime`. Pure; no `process.exit` calls. Reusable from tests.
 - **Hyphen-quoted error mode** — `formatError` produces multi-line stderr output with contextual hints (`"Run \`lore get <id>\`..."`). Add a new case when introducing a new `LoreError` code.
 
-## Subcommands (24)
+## Subcommands (25)
 
-`init` `create` `get` `set` `delete` `list` `search` `tree` `link` `unlink` `pending` `approve` `reject` `log` `diff` `restore` `migrate` `status` `serve` `agent` `sync` `eval` `dashboard` `sync-docs`
+`init` `create` `get` `set` `delete` `list` `search` `tree` `link` `unlink` `pending` `approve` `reject` `log` `diff` `restore` `migrate` `status` `serve` `agent` `sync` `eval` `dashboard` `sync-docs` `phase`
 
 `sync-docs` (SPEC-018) scans a directory of `*.md` spec files, creates corpus rows for missing specs matched by title, and reports body drift without auto-applying. Flags: `--from <path>` (scan dir), `--dry-run` (no writes), `--json` (machine-readable SyncReport).
 

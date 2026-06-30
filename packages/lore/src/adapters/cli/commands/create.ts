@@ -43,6 +43,7 @@ const TYPE_SPECIFIC_FLAGS: Readonly<Record<string, readonly DocType[]>> = {
   "decision-status": ["adr"],
   "sub-type": ["knowledge"],
   "plan-id": ["task"],
+  phase: ["task"],
 };
 
 export default defineCommand({
@@ -97,6 +98,10 @@ export default defineCommand({
     "plan-id": {
       type: "string",
       description: "[task only] Plan document ID or slug this task belongs to",
+    },
+    phase: {
+      type: "string",
+      description: "[task only] Phase name to assign this task to (must be declared on the parent plan). Source: SPEC-023",
     },
     ai: {
       type: "boolean",
@@ -296,6 +301,7 @@ export default defineCommand({
         args["decision-status"],
         args["sub-type"],
         resolvedPlanId,
+        args.phase,
       );
 
       const result = await app.corpusService.create({
@@ -334,12 +340,14 @@ export default defineCommand({
 /**
  * Assemble the `extra` payload for types that require it.
  * Returns undefined for types that carry no type-specific extra fields (prd, spec, plan).
+ * For tasks: includes plan_id (required) and optionally phase (SPEC-023 AC-PHASE-2).
  */
 function buildExtra(
   docType: DocType,
   decisionStatus: string | undefined,
   subType: string | undefined,
   planId: string | undefined,
+  phase?: string,
 ): Record<string, unknown> | undefined {
   if (docType === "adr" && decisionStatus !== undefined) {
     return { decision_status: decisionStatus };
@@ -348,7 +356,11 @@ function buildExtra(
     return { sub_type: subType };
   }
   if (docType === "task" && planId !== undefined) {
-    return { plan_id: planId };
+    const extra: Record<string, unknown> = { plan_id: planId };
+    if (phase !== undefined) {
+      extra["phase"] = phase.trim();
+    }
+    return extra;
   }
   return undefined;
 }

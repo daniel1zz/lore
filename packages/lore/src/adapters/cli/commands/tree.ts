@@ -3,6 +3,12 @@
  * With --orphans: list orphaned documents (parent_id=null AND type∉ROOT_TYPES,
  * or parent_id≠null but parent doesn't exist).
  *
+ * Phase grouping (SPEC-023):
+ *   When the root document is a plan with extra.phases declared, child tasks are
+ *   rendered grouped under phase headers (including empty phases per AC-PHASE-6).
+ *   Falls back to flat tree rendering for plans without phases, and for all
+ *   non-plan root documents.
+ *
  * Exit codes:
  *   Normal: 0 = success, non-zero on error
  *   --orphans: 0 = no orphans, 3 = orphans found
@@ -11,7 +17,86 @@
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatTree } from "../utils.js";
-import type { TreeBlueprint } from "@lore/core";
+import type { TreeBlueprint, PlanPhase, DocRecord } from "@lore/core";
+
+// ─── Phase Grouping Helpers ───────────────────────────────────────────────────
+
+/**
+ * Extract the phases array from a plan's extra field.
+ * Returns [] if extra.phases is absent or not an array.
+ */
+function extractPhasesFromExtra(extra: Record<string, unknown>): PlanPhase[] {
+  const raw = extra["phases"];
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (p): p is PlanPhase =>
+      typeof p === "object" && p !== null && typeof (p as PlanPhase).name === "string",
+  );
+}
+
+/**
+ * Render a plan's tasks grouped by declared phases.
+ * All declared phases are shown (including empty ones — AC-PHASE-6).
+ * Tasks not assigned to any phase are shown in an "(unphased)" group if any exist.
+ *
+ * Example output:
+ *   plan-my-plan (plan, draft)
+ *   ├── Phase: Foundation (2 tasks)
+ *   │   ├── task-setup (task, done)
+ *   │   └── task-database (task, todo)
+ *   ├── Phase: Build (0 tasks)
+ *   └── (unphased) (1 task)
+ *       └── task-other (task, todo)
+ */
+function formatPhaseTree(
+  plan: DocRecord,
+  phases: PlanPhase[],
+  allTasks: DocRecord[],
+): string {
+  const lines: string[] = [];
+  lines.push(`${plan.slug} (${plan.type}, ${plan.status})`);
+
+  const unphased = allTasks.filter(
+    (t) => !t.extra["phase"] || !phases.some((p) => p.name === t.extra["phase"]),
+  );
+
+  const totalGroups = phases.length + (unphased.length > 0 ? 1 : 0);
+  let groupIndex = 0;
+
+  for (const phase of phases) {
+    groupIndex++;
+    const tasksInPhase = allTasks.filter((t) => t.extra["phase"] === phase.name);
+    const count = tasksInPhase.length;
+    const isLast = groupIndex === totalGroups;
+    const phasePrefix = isLast ? "└── " : "├── ";
+    const childIndent = isLast ? "    " : "│   ";
+    const desc = phase.description ? ` — ${phase.description}` : "";
+    lines.push(`${phasePrefix}Phase: ${phase.name}${desc} (${count} ${count === 1 ? "task" : "tasks"})`);
+
+    for (let i = 0; i < tasksInPhase.length; i++) {
+      const task = tasksInPhase[i]!;
+      const isLastTask = i === tasksInPhase.length - 1;
+      const taskPrefix = isLastTask ? "└── " : "├── ";
+      lines.push(`${childIndent}${taskPrefix}${task.slug} (${task.type}, ${task.status})`);
+    }
+  }
+
+  if (unphased.length > 0) {
+    const isLast = true;
+    const phasePrefix = isLast ? "└── " : "├── ";
+    const childIndent = isLast ? "    " : "│   ";
+    const count = unphased.length;
+    lines.push(`${phasePrefix}(unphased) (${count} ${count === 1 ? "task" : "tasks"})`);
+    for (let i = 0; i < unphased.length; i++) {
+      const task = unphased[i]!;
+      const isLastTask = i === unphased.length - 1;
+      const taskPrefix = isLastTask ? "└── " : "├── ";
+      lines.push(`${childIndent}${taskPrefix}${task.slug} (${task.type}, ${task.status})`);
+    }
+  }
+
+  return lines.join("\n");
+}
 
 /** Minimal blueprint used only to trigger orphan detection in TreeCheckService. */
 const ORPHAN_DETECTION_BLUEPRINT: TreeBlueprint = {
@@ -116,6 +201,61 @@ export default defineCommand({
         process.stderr.write(formatError(result.error) + "\n");
         process.exitCode = exitCode(result.error);
         return;
+      }
+
+      // ── Phase grouping (SPEC-023 AC-PHASE-5, AC-PHASE-6) ─────────────────
+      // When the root is a plan with declared phases, render tasks grouped under
+      // phase headers. Non-plan roots and plans without phases fall back to the
+      // generic formatTree renderer.
+      //
+      // reason: TreeNode.doc is DocSummary (no extra). We fetch the full plan doc
+      // separately; this is one extra O(1) store read, acceptable for a CLI command.
+      if (args.root) {
+        const fullPlanResult = await app.corpusService.get(args.root);
+        if (fullPlanResult.ok && fullPlanResult.value.doc.type === "plan") {
+          const plan = fullPlanResult.value.doc;
+          const phases = extractPhasesFromExtra(plan.extra);
+          if (phases.length > 0) {
+            // Fetch full child task records so we can read extra.phase.
+            const childrenResult = await app.corpusService.listFull({
+              parent_id: plan.id,
+              type: "task",
+            });
+            const allTasks = childrenResult.ok ? childrenResult.value.docs : [];
+
+            if (args.json) {
+              console.log(
+                JSON.stringify(
+                  {
+                    ok: true,
+                    data: {
+                      ...result.value,
+                      phases: phases.map((phase) => ({
+                        name: phase.name,
+                        description: phase.description,
+                        tasks: allTasks
+                          .filter((t) => t.extra["phase"] === phase.name)
+                          .map((t) => ({
+                            id: t.id,
+                            slug: t.slug,
+                            title: t.title,
+                            status: t.status,
+                            updated_at: t.updated_at,
+                          })),
+                      })),
+                    },
+                  },
+                  null,
+                  2,
+                ),
+              );
+              return;
+            }
+
+            console.log(formatPhaseTree(plan, phases, allTasks));
+            return;
+          }
+        }
       }
 
       if (args.json) {
