@@ -141,6 +141,72 @@ How does the HTTP adapter know whether the request came via cookie (human) or be
 
 ## 7. Outstanding Decisions (block implementation)
 
-- Q1: ratify the env-var matrix.
-- Confirm `MCP_TRANSPORT` is a stable env-var name across MCP transports (`stdio` / `http` / `sse`).
-- Decide whether `--ai` flag exists or only `--no-ai` (recommendation: add `--ai`).
+~~Resolved — see §8 below.~~
+
+## 8. Resolved Decisions (ratified 2026-06-30)
+
+| Question | Ratified Answer |
+|---|---|
+| Q1 Env-var matrix | **OR-combine** these signals to classify caller as agent: `LORE_AI_DEFAULT=off` (highest trust, explicit override), `CLAUDECODE=1` (medium), `CI=true` (medium). MCP and HTTP surfaces use **in-process flag**, not env (timing problem — see §9.2). |
+| Q2 Config vs env precedence | **Two layers**: env determines surface classification (`cli` / `agent` / `mcp` / `http_cookie` / `http_token`); config determines the default value per surface. Config key `ai.default_per_surface` carries one boolean per surface. |
+| Q3 `--ai` vs `--no-ai` flag | **Both exist, mutually exclusive.** `--ai` = force on, `--no-ai` = force off, neither = surface default. Passing both → exit 2. |
+| Q4 MCP arg shape | **Explicit `ai?: boolean` in tool schema, default `false`.** SPEC-008 (`lore_create` tool registration) is amended in the same PR as SPEC-024 implementation. |
+| Q5 HTTP cookie vs token | **Middleware sets `request.context.callerSurface = "http_cookie" \| "http_token"`** on auth resolution. Create-route reads it. |
+| Q6 Telemetry granularity | **Two enum fields added** to `ai.generation` event: `ai_default_source: env \| cli_flag \| config \| explicit_arg` and `caller_surface: cli \| agent \| mcp \| http_cookie \| http_token`. |
+
+## 9. Architecture Notes (implementation-ready)
+
+### 9.1 File touch list
+
+| File | Change |
+|---|---|
+| `packages/core/src/types.ts` | Add `CallerSurface = "cli" \| "agent" \| "mcp" \| "http_cookie" \| "http_token"` type. |
+| `packages/core/src/schemas.ts` | Extend `aiGenerationEventSchema` with `ai_default_source` + `caller_surface` enum fields. |
+| `packages/core/src/config.ts` (or wherever `LoreConfigSchema` lives) | Add `ai.default_per_surface: { cli?: boolean, agent?: boolean, mcp?: boolean, http_cookie?: boolean, http_token?: boolean }` to schema. Defaults baked in code, NOT in Zod schema: `{cli: true, agent: false, mcp: false, http_cookie: true, http_token: false}`. |
+| `packages/lore/src/app.ts` | `App` carries `callerSurface: CallerSurface` (mutable until first ai resolution, then frozen) + `resolveAiDefault(callerSurface, configDefaults)` helper. |
+| `packages/lore/src/service/ai-provider-service.ts` (or the SPEC-017 path module) | Inject `App.resolveAiDefault` to decide `ai_default_source` + on/off when `ai` arg is null/undefined. |
+| `packages/lore/src/adapters/cli/index.ts` (CLI entry, before command dispatch) | Read env: if `LORE_AI_DEFAULT=off` OR `CLAUDECODE=1` OR `CI=true` → `app.callerSurface = "agent"`, else `"cli"`. |
+| `packages/lore/src/adapters/cli/commands/create.ts` | Add `--ai` flag (mutually exclusive with `--no-ai`). Resolve `ai = explicit_flag ?? resolveAiDefault(app.callerSurface)`. |
+| `packages/lore/src/adapters/mcp/server.ts` | At startup: `app.callerSurface = "mcp"`. |
+| `packages/lore/src/adapters/mcp/tools.ts` (lore_create registration) | Add `ai: z.boolean().default(false)` to tool input schema. |
+| `packages/lore/src/adapters/http/middleware/auth.ts` (or wherever auth resolves) | After auth, set `request.context.callerSurface = "http_cookie" \| "http_token"` based on session type. |
+| `packages/lore/src/adapters/http/routes/docs.ts` (POST /api/v1/docs, POST /api/dashboard/docs) | Forward `callerSurface` to `app.resolveAiDefault` when caller did not pass explicit `ai`. |
+| `packages/lore/src/adapters/cli/commands/status.ts` | `lore status` (text + --json) reports the resolved per-surface defaults so a confused user can introspect (AC-NOAI-10). |
+| `CLAUDE.md` (root) | Add env-var matrix + recommended values for AI-agent users (AC-NOAI-DOC-1). |
+
+### 9.2 In-process flag, not env (Q1 / Q5 correction)
+
+A process cannot reliably detect itself via an env var it sets on itself (timing: the var must be visible *before* the create-route handler runs, but in the MCP/HTTP adapters the create-route handler and the surface detector share one process). Therefore:
+
+- **CLI / agent / CI** classification uses **env vars** (read at process startup, before any command dispatch).
+- **MCP / HTTP** classification uses an **in-process `callerSurface` flag** on `App` (MCP) or on the request context (HTTP middleware).
+
+This split is intentional. Do NOT try to set `MCP_TRANSPORT` env var from inside the MCP adapter — it won't survive the timing race.
+
+### 9.3 Resolution algorithm (pseudocode)
+
+```
+function resolveAi(explicitArg: boolean | undefined, surface: CallerSurface, config: AiDefaults): {ai: boolean, source: AiDefaultSource} {
+  if (explicitArg !== undefined) return { ai: explicitArg, source: "explicit_arg" }
+  const fromConfig = config[surface]
+  if (fromConfig !== undefined) return { ai: fromConfig, source: "config" }
+  // Built-in defaults
+  const builtIn = { cli: true, agent: false, mcp: false, http_cookie: true, http_token: false }
+  return { ai: builtIn[surface], source: surface === "cli" || surface === "http_cookie" ? "cli_flag" : "env" }
+}
+```
+
+### 9.4 Test layout
+
+- Unit (vitest): `resolveAi` matrix — explicit / config / env override combinations.
+- Unit (vitest): `aiGenerationEventSchema` accepts the two new enum fields.
+- Integration (vitest subprocess): `CLAUDECODE=1 lore create spec --title X --no-ai-fail-if-spawned` smoke verifying AI path is NOT taken.
+- Integration: MCP tool invocation without `ai:` arg creates doc with empty content; with `ai: true` calls provider.
+- Integration: HTTP `POST /api/v1/docs` via bearer token defaults `ai=false`; via cookie defaults `ai=true`.
+- Regression: existing SPEC-017 happy path (`lore create spec --title X` in vanilla shell) unchanged.
+
+### 9.5 Out of §9 scope (still SPEC-024)
+
+- Per-doc-type defaults (`ai.per_type.<type>.provider`) — SPEC-017 §6 deferred, stays deferred.
+- AI default for `lore set` / `lore link` — covered by SPEC-019 when it lands.
+- Telemetry dashboard / cost accounting — separate concern.
