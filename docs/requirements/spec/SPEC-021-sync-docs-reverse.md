@@ -153,5 +153,127 @@ SPEC-018 reads only `docs/requirements/spec/`. New types need new directories. P
 
 ## 7. Outstanding Decisions (block implementation)
 
-- Q1-Q6 above each need a final answer.
-- Confirm `.lore/export-index.json` is git-tracked (recommended: yes — sequence stability across team) or in `.gitignore` (would defeat the purpose). Default recommendation: git-tracked.
+~~Resolved — see §8 below.~~
+
+## 8. Resolved Decisions (ratified 2026-07-01)
+
+| Question | Ratified Answer |
+|---|---|
+| Q1 ID-numbering policy | **C: `.lore/export-index.json`** stores first-time assignment; future runs reuse per-doc-id → human-id mapping. Deterministic + human-eyeball-friendly. |
+| Q2 Drift resolution UX | **Warning-only in v1** — mirrors SPEC-018 §2.1 stance. `--force` writes corpus body over file; **deferred to v2** consistent with SPEC-018's `--force`. |
+| Q3 Auto-export after AI create | **Manual only in v1**. Config option `ai.auto_export: boolean` deferred to SPEC-021.1 follow-up. `lore create --ai` writes only to corpus; user runs `lore export-docs` afterwards. |
+| Q4 Frontmatter `parent:` shape | **Topological export — parents written first.** If a corpus-only parent has no exported file yet, export it implicitly before children. Human-ID resolution via `.lore/export-index.json`. |
+| Q5 task `extra.plan_id` resolution | **Same `.lore/export-index.json` table.** Resolve `plan_id` (ULID) → human ID (e.g. `PLAN-001`) at write time. |
+| Q6 Directory layout | **`mkdir -p docs/requirements/<type>/` per type on first export.** Idempotent. Types: `spec` (existing), `prd`, `adr`, `plan`, `task`, `knowledge`. |
+| Q-extra `.lore/export-index.json` git-tracked? | **Git-tracked** — sequence stability across the team requires shared knowledge of the ID map. Add to root README or CLAUDE.md as a hand-off note; do NOT `.gitignore`. |
+
+## 9. Architecture Notes (implementation-ready)
+
+### 9.1 File touch list
+
+| File | Change |
+|---|---|
+| `packages/core/src/schemas.ts` | Add `exportIndexSchema`: `z.object({ version: z.literal(1), mappings: z.record(z.string(), z.object({ human_id: z.string(), file_path: z.string() })) })`. Emit derived TS type `ExportIndex` via `z.infer`. |
+| `packages/lore/src/service/export-docs-service.ts` | **NEW** (~450 lines, mirrors `sync-docs-service.ts` 460 lines). Public API: `exportDocs({ dryRun, type?, force? }): Promise<Result<ExportReport, LoreError>>`. `ExportReport = { created: string[], skipped_clean: string[], drift: string[], errors: string[] }`. |
+| `packages/lore/src/adapters/cli/commands/export-docs.ts` | **NEW** (~130 lines, mirrors `sync-docs.ts` 134 lines). Flags: `--dry-run`, `--type <type>`, `--force` (v1 rejected with "not yet implemented" hint per Q2), `--json`. |
+| `packages/lore/src/adapters/cli/index.ts` | Register `"export-docs": () => import("./commands/export-docs.js").then((m) => m.default)`. |
+| `packages/lore/src/app.ts` | Wire `ExportDocsService` into `App` composition root (both SQLite and Turso builders). |
+| `packages/lore/tests/unit/service/export-docs-service.test.ts` | **NEW** — happy path, drift detection, topological ordering, collision, empty-type filter. |
+| `packages/lore/tests/integration/cli/export-docs.test.ts` | **NEW** — end-to-end subprocess: create doc, export, verify file exists with correct frontmatter, rerun idempotent. |
+| `packages/lore/tests/integration/cli/roundtrip.test.ts` | **NEW** — round-trip parity: create doc via CLI → `export-docs` → `sync-docs` → status returns "0 created, 0 drifted". |
+
+### 9.2 Frontmatter shape (must roundtrip with SPEC-018 sync-docs)
+
+```yaml
+---
+id: SPEC-025             # human-readable ID from export-index.json, NOT the corpus ULID
+type: spec
+role: spec               # SSOT: derived from type via DOC_TYPE_ROLE_MAP
+title: "Doc title verbatim from corpus"
+status: draft            # current corpus status
+priority: medium         # current corpus priority
+phase: P10               # optional, from doc.extra.phase (legacy) or omitted
+created: 2026-07-01
+updated: 2026-07-01
+tags: [foo, bar]
+parent: PRD-001          # human ID of parent (resolved via index)
+links:
+  - {id: SPEC-017, type: extends, note: "..."}
+---
+```
+
+### 9.3 `.lore/export-index.json` shape
+
+```json
+{
+  "version": 1,
+  "mappings": {
+    "01KVZ4C445EK479938W1TYT3AJ": {
+      "human_id": "PRD-001",
+      "file_path": "docs/requirements/prd/PRD-001-lore-platform.md"
+    },
+    "01KWBSWC5J6K30Q0DHJ3FJGX03": {
+      "human_id": "PLAN-001",
+      "file_path": "docs/requirements/plan/PLAN-001-cli-v3-roadmap.md"
+    }
+  }
+}
+```
+
+- Git-tracked (Q-extra).
+- Rebuilt on next export if lost: match corpus titles against on-disk files by exact title (mirroring SPEC-018 match algorithm) + assign next-available number for anything unmatched.
+- Corpus-only docs (never exported) get a new number: `max(existing_human_ids) + 1` scoped by type.
+
+### 9.4 Human-ID numbering per type
+
+- `spec`: SPEC-NNN (3 digits, zero-padded). Existing files SPEC-001..024 seed the next-index counter to 25.
+- `prd`: PRD-NNN. Existing: PRD-001 only.
+- `adr`: ADR-NNN.
+- `plan`: PLAN-NNN.
+- `task`: TASK-NNN.
+- `knowledge`: KN-NNN (2-letter prefix — 3-letter "KNW" is uglier and "K" is ambiguous).
+
+Numbering scoped per type. `SPEC-025` and `PLAN-025` can coexist.
+
+### 9.5 Topological export ordering
+
+Walk `parent_id` chain from the leaves upward, invert to get root-first order. For SPEC-021's initial export:
+
+```
+PRD-001 → PLAN-001 → TASK-{001..013}  (13 tasks under 1 plan under 1 prd)
+       ↘ SPEC-{001..024}              (24 specs directly under prd)
+```
+
+If cycles detected (should never happen — CorpusService.link rejects cycles), abort with `VALIDATION_ERROR` naming the cycle path.
+
+### 9.6 Drift detection algorithm
+
+For each corpus doc that already has an entry in `.lore/export-index.json`:
+
+1. Read the file at `mapping[doc_id].file_path`.
+2. Strip frontmatter, normalise whitespace.
+3. Compare against corpus `doc.content` (also whitespace-normalised).
+4. If differ → `⚠ drift: <file>` + add to `report.drift[]`, do NOT overwrite (unless `--force`, which is v2).
+
+Frontmatter itself is NOT compared (title/status/priority may legitimately differ if user edited via CLI between exports — body is the diff signal).
+
+### 9.7 Concurrent-writer safety
+
+- `.lore/export-index.json` writes go through `open(O_EXCL)` on a temp file + `rename()` for atomicity.
+- Per-file writes also use `open(O_EXCL)` on the target path.
+- On EEXIST: reread index, recompute next-available number for that type, retry once. Second EEXIST → fail loud with `STORE_ERROR`.
+
+### 9.8 Test layout
+
+- Unit (vitest): schemas (`exportIndexSchema`), service methods (topo sort, drift detection, ID allocation).
+- Integration (vitest subprocess): full CLI, using a temp corpus + temp `docs/` root.
+- Roundtrip (vitest subprocess): export → sync-docs → verify 0 drift.
+
+### 9.9 Out of §9 scope (still SPEC-021)
+
+- `--force` to overwrite drift (Q2 defers to v2).
+- `ai.auto_export` config option (Q3 defers to SPEC-021.1).
+- Version-history export (`lore export-versions` is a separate future SPEC).
+- MCP / HTTP surface for `export-docs`.
+- Watch mode (`--watch` for corpus changes).
+- Deletion sync (soft-deleted corpus rows leave files alone).
