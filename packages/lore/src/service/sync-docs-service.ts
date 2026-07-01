@@ -13,6 +13,8 @@
  *   - aiProviderService is NEVER called from this service (no-AI boundary).
  *     reason: sync-docs is a structural reconciler; AI generation is orthogonal.
  *     AC-SD-15 enforces this at test time via grep.
+ *   - Body comparison uses canonicaliseBody from @lore/core (shared with ExportDocsService).
+ *     reason: SPEC-021 §4 requires both services to normalise identically for roundtrip parity.
  *
  * Side-effect class: IO (readdirSync, readFileSync) + CorpusService async calls.
  *
@@ -23,7 +25,7 @@ import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { parse as parseYaml } from "yaml";
 import { diffChars } from "diff";
-import { err, ok } from "@lore/core";
+import { err, ok, canonicaliseBody } from "@lore/core";
 import type { LoreError, Priority, Result } from "@lore/core";
 import type { DocId, DocSummary } from "@lore/core";
 import { prioritySchema } from "@lore/core";
@@ -172,8 +174,8 @@ export class SyncDocsService {
         }
         const existingContent = getResult.value.doc.content;
 
-        const fileNormalized = normalizeBody(spec.body);
-        const corpusNormalized = normalizeBody(existingContent);
+        const fileNormalized = canonicaliseBody(spec.body);
+        const corpusNormalized = canonicaliseBody(existingContent);
 
         if (fileNormalized === corpusNormalized) {
           matched_clean.push({ file: spec.path, slug: existingSummary.slug });
@@ -428,18 +430,6 @@ function resolveParentId(
       `${spec.path}: multiple PRDs in corpus and frontmatter 'parent: ${spec.parent_title_hint ?? "(none)"}' ` +
       `does not match any PRD title — disambiguate with \`lore create spec --parent <slug>\``,
   });
-}
-
-// ─── Body Comparison ─────────────────────────────────────────────────────────
-
-/**
- * Normalize a body string for comparison: convert CRLF → LF, then trim.
- * This avoids false drift reports due to line-ending differences (SPEC-018 §7).
- *
- * @param body - Raw body text from file or corpus.
- */
-function normalizeBody(body: string): string {
-  return body.replace(/\r\n/g, "\n").trim();
 }
 
 // ─── Corpus Lookup Helpers ───────────────────────────────────────────────────
