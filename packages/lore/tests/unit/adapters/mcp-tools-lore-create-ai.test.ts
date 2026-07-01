@@ -79,6 +79,7 @@ function makeApp(): { app: App; aiProvider: InMemoryAIProvider } {
     aiProviderService: aiService,
     // reason: these services are not exercised by lore_create AI path tests
     syncDocsService: null as unknown as App["syncDocsService"],
+    exportDocsService: null as unknown as App["exportDocsService"],
     phaseService: null as unknown as App["phaseService"],
     // reason: SPEC-024 §9.2 — MCP surface is set at startup, before any tool call
     callerSurface: "mcp" as const,

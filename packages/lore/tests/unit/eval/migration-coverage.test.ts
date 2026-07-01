@@ -40,6 +40,7 @@ function makeApp(): App {
     aiProviderService: null as unknown as App["aiProviderService"],
     // reason: eval scenarios never exercise sync-docs path — null-cast per SPEC-018 §3.6.
     syncDocsService: null as unknown as App["syncDocsService"],
+    exportDocsService: null as unknown as App["exportDocsService"],
     // reason: test does not exercise phase commands; null-cast per pattern from SPEC-023 §9.1.
     phaseService: null as unknown as App["phaseService"],
     // reason: test does not exercise AI-default path; callerSurface required by App interface (SPEC-024).
@@ -68,17 +69,18 @@ Content for ${id}.
 describe("HAPPY — migration coverage against docs/requirements", () => {
   it("imports all parseable files and reports passed=true", async () => {
     // Use the real docs/requirements directory.
-    // 25 .md files (1 PRD + SPEC-001..SPEC-024), all have valid YAML frontmatter (parseable).
-    // expected_files = analyze().parseable = 25; imported = 25; links_broken = 0 → passed=true
-    // reason: count bumped from 19 to 25 after SPEC-019..SPEC-024 were added to docs/requirements/spec/
+    // 38 .md files: 1 PRD + SPEC-001..SPEC-024 (24) + PLAN-001 (1) + TASK-001..TASK-012 (12).
+    // expected_files = analyze().parseable = 38; imported = 38; links_broken = 0 → passed=true
+    // reason: count bumped from 25 to 38 after lore export-docs added docs/requirements/plan/ and
+    //         docs/requirements/task/ in SPEC-021 implementation (2026-07-01).
     const sourceDir = join(process.cwd(), "docs", "requirements");
     const app = makeApp();
     const result = await runMigrationCoverage(sourceDir, app);
     app.close();
 
     expect(result.source_dir).toBe(sourceDir);
-    expect(result.expected_files).toBe(25);
-    expect(result.imported).toBe(25);
+    expect(result.expected_files).toBe(38);
+    expect(result.imported).toBe(38);
     expect(result.already_existed).toBe(0);
     expect(result.links_broken).toBe(0);
     expect(result.passed).toBe(true);

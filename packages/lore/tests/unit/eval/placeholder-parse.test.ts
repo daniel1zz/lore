@@ -40,6 +40,7 @@ function makeApp(store?: InMemoryStore): App {
     aiProviderService: null as unknown as App["aiProviderService"],
     // reason: eval scenarios never exercise sync-docs path — null-cast per SPEC-018 §3.6.
     syncDocsService: null as unknown as App["syncDocsService"],
+    exportDocsService: null as unknown as App["exportDocsService"],
     // reason: test does not exercise phase commands; null-cast per pattern from SPEC-023 §9.1.
     phaseService: null as unknown as App["phaseService"],
     // reason: test does not exercise AI-default path; callerSurface required by App interface (SPEC-024).

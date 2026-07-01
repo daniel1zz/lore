@@ -40,6 +40,7 @@ import {
 import { buildProviderRegistry } from "./ai/registry.js";
 import { AIProviderService } from "./service/ai-provider-service.js";
 import { SyncDocsService } from "./service/sync-docs-service.js";
+import { ExportDocsService } from "./service/export-docs-service.js";
 import { PhaseService } from "./service/phase-service.js";
 
 export interface App {
@@ -69,6 +70,12 @@ export interface App {
    * Source: SPEC-018 §3.6
    */
   syncDocsService: SyncDocsService;
+  /**
+   * ExportDocsService — required; exports corpus docs to per-doc .md files.
+   * Inverse of SyncDocsService. Constructed from StoreInterface with no other state.
+   * Source: SPEC-021 §9.1
+   */
+  exportDocsService: ExportDocsService;
   /**
    * PhaseService — manages declared phases on plan documents (extra.phases[]).
    * Provides addPhase / listPhases / removePhase / renamePhase / migratePhases.
@@ -132,6 +139,8 @@ function buildAppFromSqlite(
     aiProviderService,
     // reason: SyncDocsService depends only on CorpusService — no store access, no AI. SPEC-018 §3.6.
     syncDocsService: new SyncDocsService(corpusService),
+    // reason: ExportDocsService depends only on StoreInterface — no AI, no HTTP. SPEC-021 §9.1.
+    exportDocsService: new ExportDocsService(store),
     // reason: PhaseService depends only on StoreInterface — stateless, no AI, no telemetry. SPEC-023 §9.1.
     phaseService: new PhaseService(store),
     // SPEC-024: callerSurface getter/setter + resolveAiDefault
@@ -182,6 +191,8 @@ function buildAppFromTurso(
     aiProviderService,
     // reason: SyncDocsService depends only on CorpusService — no store access, no AI. SPEC-018 §3.6.
     syncDocsService: new SyncDocsService(corpusService),
+    // reason: ExportDocsService depends only on StoreInterface — no AI, no HTTP. SPEC-021 §9.1.
+    exportDocsService: new ExportDocsService(store),
     // reason: PhaseService depends only on StoreInterface — stateless, no AI, no telemetry. SPEC-023 §9.1.
     phaseService: new PhaseService(store),
     // SPEC-024: callerSurface getter/setter + resolveAiDefault

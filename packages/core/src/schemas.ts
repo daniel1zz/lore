@@ -325,6 +325,43 @@ export function slugify(type: DocType, title: string): Slug {
   return (truncated.length >= 2 ? truncated : prefix) as Slug;
 }
 
+// ─── Export Index Schema ────────────────────────────────────────────────────
+
+/**
+ * Schema for a single entry in the export index mapping table.
+ * One entry per exported corpus doc.
+ *
+ * @example
+ *   const m: ExportIndexMapping = { human_id: "SPEC-025", file_path: "docs/requirements/spec/SPEC-025-foo.md" };
+ */
+export const exportIndexMappingSchema = z.object({
+  /** Human-readable ID, e.g. "SPEC-025". Stable once assigned. */
+  human_id: z.string().min(1),
+  /** Forward-slash path relative to project root, e.g. "docs/requirements/spec/SPEC-025-foo.md". */
+  file_path: z.string().min(1),
+});
+
+/**
+ * Schema for .lore/export-index.json — git-tracked mapping of corpus ULIDs to
+ * human-readable IDs and file paths. Enables stable ID assignment across runs.
+ *
+ * @invariant version is always 1 in v1.
+ * @invariant mappings keys are corpus doc ULIDs (26-char ULID format).
+ * @invariant Within a type, human_id sequential numbers are unique and monotonically increasing.
+ * @invariant file_path uses forward slashes (cross-platform) relative to project root.
+ *
+ * Source: SPEC-021 §9.3
+ */
+export const exportIndexSchema = z.object({
+  version: z.literal(1),
+  mappings: z.record(z.string(), exportIndexMappingSchema),
+});
+
+/** Derived TypeScript type for the export index. Source: SPEC-021 §9.3 */
+export type ExportIndex = z.infer<typeof exportIndexSchema>;
+/** Derived TypeScript type for a single mapping entry. Source: SPEC-021 §9.3 */
+export type ExportIndexMapping = z.infer<typeof exportIndexMappingSchema>;
+
 /**
  * Generate a collision-free slug by appending -2, -3, etc.
  * `existsSlug` must return true if the candidate slug is already taken.
