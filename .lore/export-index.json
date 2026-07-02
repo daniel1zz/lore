@@ -212,6 +212,30 @@
     "01KWGX62EA7J5HC9FHT431P0P8": {
       "human_id": "SPEC-025",
       "file_path": "docs/requirements/spec/SPEC-025-task-workflow-metadata.md"
+    },
+    "01KWH86ZX7009MPM37RXVM2M55": {
+      "human_id": "PLAN-004",
+      "file_path": "docs/requirements/plan/PLAN-004-spec-026-implementation-ai-plan-assessment.md"
+    },
+    "01KWH8721H3KGZNK7ZTFR44VZQ": {
+      "human_id": "TASK-024",
+      "file_path": "docs/requirements/task/TASK-024-closeout-dogfood-assess-export-verification.md"
+    },
+    "01KWHB425TDF0SCH8888BA9MBE": {
+      "human_id": "KN-002",
+      "file_path": "docs/requirements/knowledge/KN-002-assessment-spec-026-implementation-ai-plan-assessm.md"
+    },
+    "01KWH871NZ5ZVC06TZDW4E4EYS": {
+      "human_id": "TASK-025",
+      "file_path": "docs/requirements/task/TASK-025-six-dimension-tests-for-lore-assess-spec-7.md"
+    },
+    "01KWH871AQ4S2N40D4NF2EPGWK": {
+      "human_id": "TASK-026",
+      "file_path": "docs/requirements/task/TASK-026-implement-lore-assess-end-to-end-ac-assess-1-12.md"
+    },
+    "01KWH86C2PRDSCQB99WVNSRV8R": {
+      "human_id": "SPEC-026",
+      "file_path": "docs/requirements/spec/SPEC-026-ai-plan-assessment.md"
     }
   }
 }
