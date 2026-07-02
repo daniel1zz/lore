@@ -125,6 +125,7 @@ All feature specs live under `docs/requirements/spec/`. When implementing or cha
 - `SPEC-024` — Default --no-ai for agent and MCP execution paths (AI surface defaults)
 - `SPEC-019` — AI assistance in `lore set` (`--regenerate` / `--refine` / `--refine-stdin`) and `lore link --infer`; extends SPEC-017 AI provider surface
 - `SPEC-021` — `lore export-docs` reverse sync (corpus → .md files); `.lore/export-index.json` is **git-tracked** (team-shared ID map)
+- `SPEC-022` — Dashboard write UI (create / edit / approve / link): six cookie-gated `/api/dashboard/*` write routes, CodeMirror 6 editor, If-Match optimistic concurrency + ConflictModal, History tab
 
 ## AI Default Behavior by Caller Surface (SPEC-024)
 
@@ -204,7 +205,7 @@ Module-specific context lives alongside the code:
 - [`packages/lore/src/adapters/mcp`](packages/lore/src/adapters/mcp/CLAUDE.md) — MCP stdio server, 16 `lore_*` tools, fast-path registration
 - [`packages/lore/src/adapters/http`](packages/lore/src/adapters/http/CLAUDE.md) — Bun.serve API, bearer-token auth, sync-push
 - [`packages/lore/src/eval`](packages/lore/src/eval/CLAUDE.md) — six read-only evaluation scenarios under `lore eval`
-- [`@lore/dashboard`](packages/dashboard/CLAUDE.md) — Vite + React + shadcn local-dev web UI (read-only v1)
+- [`@lore/dashboard`](packages/dashboard/CLAUDE.md) — Vite + React + shadcn local-dev web UI (read views + SPEC-022 write surface)
 <!-- /auto:module-index -->
 
 <!-- auto:dynamic-context -->

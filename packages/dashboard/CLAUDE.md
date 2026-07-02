@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Local-development web UI for browsing the Lore corpus. Vite + React 19 + TypeScript + Tailwind v4 + shadcn/ui. **Read-only v1** per SPEC-015: list / search / tree / detail. No auth, no write paths.
+Local-development web UI for browsing and editing the Lore corpus. Vite + React 19 + TypeScript + Tailwind v4 + shadcn/ui. Read views per SPEC-015 (list / search / tree / detail) plus the SPEC-022 write surface: create, in-place markdown editing (CodeMirror 6 + split preview), status transitions, link management, version history tab, optimistic-concurrency conflict resolution. Auth is the SPEC-016 cookie bootstrap.
 
 ## Local-dev topology
 
@@ -19,7 +19,7 @@ Two-process model intentional. `vite.config.ts` sets `server.proxy: { "/api": "h
 
 ## Key Invariants
 
-- **Read-only.** Dashboard never calls write endpoints. No POST/PATCH/DELETE in `src/lib/api.ts`. Adding mutations belongs in SPEC-017 — do not pre-empt.
+- **Writes only via `/api/dashboard/*` (SPEC-022).** All mutations go through the six cookie-gated dashboard endpoints (`src/api/mutations.ts`); `src/lib/api.ts` stays read-only. Optimistic concurrency: PATCH sends `If-Match: <version>`; 409 surfaces the ConflictModal; force overwrite = no `If-Match` + `X-Force-Overwrite: 1`. Status transitions render from `getAllowedTransitions()` in `@lore/core` — never hardcode the lifecycle.
 - **No login UI.** Dashboard never asks the user for credentials. `lore dashboard` (SPEC-016) creates `.lore/local-key` if missing, spawns Vite with the raw key as `VITE_LORE_BOOTSTRAP_TOKEN`, and a dev-only Vite plugin inlines it into `index.html` as `window.__LORE_BOOTSTRAP_TOKEN__`. `src/lib/bootstrap.ts::bootstrapAuthIfNeeded()` POSTs the token to `/api/auth/local-bootstrap`, receives an HttpOnly `lore_sid` cookie, and deletes the window global. Every subsequent `fetch` carries `credentials: "include"` — cookie does the auth.
 - **Depends on `@lore/core` only.** `packages/dashboard/package.json` MUST NOT depend on `@lore/lore`. All server interaction goes through HTTP. Boundary check: `grep -r 'from "@lore/lore"' src/ → 0`.
 - **No server-side modules in `src/`.** No `bun:sqlite`, `child_process`, `node:fs`, or any other Node-side built-in. Dashboard is a browser app. Boundary check: `grep -rE 'bun:sqlite|child_process|node:fs' src/ → 0`.
