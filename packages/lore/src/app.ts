@@ -282,6 +282,7 @@ export function createApp(
     telemetry,
     aiConfig.telemetry,
     aiConfig.refine.max_input_chars,
+    aiConfig.assess,
   );
 
   // Extract per-surface AI defaults from config (SPEC-024)

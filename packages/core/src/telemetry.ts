@@ -137,15 +137,16 @@ export const aiGenerationEventSchema = z.object({
    *   "regenerate" — lore set --regenerate (SPEC-019)
    *   "refine"     — lore set --refine / --refine-stdin (SPEC-019)
    *   "infer"      — lore link --infer (SPEC-019)
+   *   "assess"     — lore assess <plan> (SPEC-026)
    *
    * .default("create") so events emitted before SPEC-019 parse cleanly at schema validation
    * time — the field is optional in the INPUT to .parse() but required in the OUTPUT type.
-   * Source: SPEC-019 §8 Q6, AC-AI-TEL-1
+   * Source: SPEC-019 §8 Q6, AC-AI-TEL-1; SPEC-026 §3 D10
    */
-  kind: z.enum(["create", "regenerate", "refine", "infer"]).default("create"),
+  kind: z.enum(["create", "regenerate", "refine", "infer", "assess"]).default("create"),
   /**
    * ULID of the document that was mutated by the AI operation.
-   *   null — for "create" (doc does not exist yet at call time)
+   *   null — for "create"/"assess" (doc does not exist yet at call time)
    *   string — for "regenerate"/"refine" (the doc being re-written)
    *   string — for "infer" (the from-doc's ID)
    * Optional for backward compat with pre-SPEC-019 events.

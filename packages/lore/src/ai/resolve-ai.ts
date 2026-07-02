@@ -4,6 +4,7 @@
  * Public surface:
  *   - BUILT_IN_AI_DEFAULTS — immutable per-surface defaults
  *   - resolveAiDefault(explicit, surface, configDefaults?) → {ai, source}
+ *   - isAssessAiBraked(resolved) → boolean (SPEC-026 D5)
  *
  * Invariants:
  *   - Pure function: no IO, no side effects
@@ -12,7 +13,7 @@
  *
  * Side-effect class: pure
  *
- * Source: SPEC-024 §9.3
+ * Source: SPEC-024 §9.3, SPEC-026 §3 D5
  */
 
 import type { CallerSurface, AiDefaultSource } from "@lore/core";
@@ -98,4 +99,34 @@ export function resolveAiDefault(
   const source: AiDefaultSource =
     surface === "cli" || surface === "http_cookie" ? "cli_flag" : "env";
   return { ai: builtIn, source };
+}
+
+// ─── isAssessAiBraked (SPEC-026 D5) ──────────────────────────────────────────
+
+/**
+ * Determine whether `lore assess` is config-braked for the current surface.
+ *
+ * Unlike every other AI mutation (`create --ai`, `set --regenerate`/`--refine`), `assess`
+ * has no non-AI mode — the command name IS the AI intent (SPEC-026 §3 D5). This means the
+ * built-in per-surface false default (agent/mcp/http_token — see {@link BUILT_IN_AI_DEFAULTS})
+ * must NOT block assess; only an EXPLICIT `ai.default_per_surface.<surface> = false` config
+ * override should require the caller to pass `--ai` / `ai: true`.
+ *
+ * Callers pass the result of `resolveAiDefault(undefined, surface, configDefaults)` — the
+ * "config" source discriminator is exactly the signal that a config override (not a
+ * built-in) drove the false decision, so no extra config plumbing is needed here.
+ *
+ * @param resolved - Result of `resolveAiDefault(undefined, surface, configDefaults)`
+ * @returns true iff assess should require an explicit AI opt-in for this call
+ *
+ * @example
+ * isAssessAiBraked(resolveAiDefault(undefined, "mcp", undefined))
+ * // → false — mcp's built-in default (off) does not brake assess
+ *
+ * @example
+ * isAssessAiBraked(resolveAiDefault(undefined, "mcp", { mcp: false }))
+ * // → true — explicit config override braked
+ */
+export function isAssessAiBraked(resolved: { ai: boolean; source: AiDefaultSource }): boolean {
+  return resolved.source === "config" && !resolved.ai;
 }

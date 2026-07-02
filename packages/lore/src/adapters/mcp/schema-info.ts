@@ -39,11 +39,15 @@ export const CORPUS_SCHEMA_INFO = {
       ] as const,
     },
     knowledge: {
+      // reason: "assessment" (SPEC-026) is written exclusively by `lore assess` — it
+      // additionally requires a Zod-valid extra.assessment (not expressible in this
+      // static string list; see knowledgeExtraSchema in @lore/core for the full contract).
       sub_type: [
         "ideation",
         "retro",
         "research",
         "reference",
+        "assessment",
       ] as const,
     },
     task: {

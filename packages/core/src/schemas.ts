@@ -6,6 +6,7 @@
 import { z } from "zod";
 import type { DocStatus, DocType, Slug } from "./types.js";
 import { evidenceEntrySchema, taskClaimSchema } from "./task-workflow.js";
+import { assessmentResultSchema } from "./assessment.js";
 
 // ─── Primitive Schemas ─────────────────────────────────────────────────────
 
@@ -78,11 +79,35 @@ export const adrExtraSchema = z
   })
   .passthrough();
 
+/**
+ * Extra fields for knowledge documents.
+ *
+ * @invariant sub_type "assessment" is written exclusively by `lore assess` (SPEC-026) —
+ *   it requires a Zod-valid `extra.assessment` (superRefine below). Manually creating a
+ *   knowledge doc with sub_type="assessment" via `lore create` without a matching
+ *   `extra.assessment` payload fails loud rather than silently accepting a half-formed
+ *   assessment doc.
+ * Source: SPEC-002 §2 (base sub_types), SPEC-026 §3 D4, D6 (assessment sub_type)
+ */
 export const knowledgeExtraSchema = z
   .object({
-    sub_type: z.enum(["ideation", "retro", "research", "reference"]),
+    sub_type: z.enum(["ideation", "retro", "research", "reference", "assessment"]),
+    /** Present iff sub_type === "assessment" — the Zod-typed SSOT judge result. */
+    assessment: assessmentResultSchema.optional(),
   })
-  .passthrough();
+  .passthrough()
+  .superRefine((data, ctx) => {
+    // reason: cross-field requirement (sub_type "assessment" implies extra.assessment)
+    // cannot be expressed as a plain Zod object shape — same pattern as planExtraSchema's
+    // phases[].name uniqueness check above. Source: SPEC-026 §3 D4.
+    if (data.sub_type === "assessment" && data.assessment === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "knowledge sub_type 'assessment' requires a Zod-valid extra.assessment",
+        path: ["assessment"],
+      });
+    }
+  });
 
 /**
  * Extra fields for task documents.
@@ -230,15 +255,23 @@ export const createDocInputSchema = baseCreateDocInputSchema.superRefine(
       }
     }
 
-    // knowledge requires extra.sub_type
+    // knowledge requires extra.sub_type (and, for sub_type="assessment", extra.assessment —
+    // SPEC-026 §3 D4). reason: forward knowledgeExtraSchema's own issues (e.g. the specific
+    // "requires extra.assessment" superRefine message) instead of a single generic string,
+    // so a valid sub_type with a missing/invalid extra.assessment reports the real cause.
     if (type === "knowledge") {
       const knowledgeResult = knowledgeExtraSchema.safeParse(extra ?? {});
       if (!knowledgeResult.success) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "knowledge requires extra.sub_type (ideation|retro|research|reference)",
-          path: ["extra", "sub_type"],
-        });
+        for (const issue of knowledgeResult.error.issues) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message:
+              issue.path[0] === "sub_type"
+                ? "knowledge requires extra.sub_type (ideation|retro|research|reference|assessment)"
+                : issue.message,
+            path: ["extra", ...issue.path],
+          });
+        }
       }
     }
 

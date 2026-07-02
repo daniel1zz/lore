@@ -40,7 +40,13 @@ const VALID_TYPES: DocType[] = ["prd", "spec", "adr", "plan", "knowledge", "task
 const ADR_DECISION_STATUSES = ["proposed", "accepted", "deprecated", "superseded"] as const;
 type AdrDecisionStatus = (typeof ADR_DECISION_STATUSES)[number];
 
-const KNOWLEDGE_SUB_TYPES = ["ideation", "retro", "research", "reference"] as const;
+// reason: "assessment" (SPEC-026) is listed for --help discoverability, but is not
+// manually completable via this command — knowledgeExtraSchema's superRefine requires a
+// Zod-valid extra.assessment payload that `lore create` has no flag to supply. Attempting
+// `lore create knowledge --sub-type assessment` fails loud with a clear validation error
+// rather than silently accepting a half-formed assessment doc; only `lore assess` writes
+// sub_type="assessment" docs.
+const KNOWLEDGE_SUB_TYPES = ["ideation", "retro", "research", "reference", "assessment"] as const;
 type KnowledgeSubType = (typeof KNOWLEDGE_SUB_TYPES)[number];
 
 /** Flags that are only meaningful for specific types. Used to detect mismatches. */

@@ -1,5 +1,6 @@
 /**
- * MCP tool registrations — 20 lore_* tools (16 original + 4 SPEC-025 task-workflow tools).
+ * MCP tool registrations — 21 lore_* tools (16 original + 4 SPEC-025 task-workflow tools
+ * + 1 SPEC-026 assess tool).
  *
  * Architecture: Tools with input use the `registerToolWithArgs` helper defined below, which:
  *   1. Calls `server.tool(name, desc, handler)` in 3-arg form (avoids ZodRawShapeCompat type bomb)
@@ -31,6 +32,8 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { App } from "../../app.js";
 import type { LoreError } from "@lore/core";
 import type { LinkType } from "@lore/core";
+import { renderAssessmentContent } from "@lore/core";
+import { isAssessAiBraked } from "../../ai/resolve-ai.js";
 import { CORPUS_SCHEMA_INFO } from "./schema-info.js";
 
 // ─── Schema Constants ────────────────────────────────────────────────────────
@@ -210,6 +213,21 @@ export const LoreEvidenceAddSchema = z.object({
 /** Input schema for lore_ready. */
 export const LoreReadySchema = z.object({
   plan_id_or_slug: z.string(),
+});
+
+/**
+ * Input schema for lore_assess (SPEC-026).
+ * `diff_text` — optional pre-acquired diff content (MCP has no subprocess/file-read seam
+ * like the CLI's `--diff`/`--diff-file` — callers that want diff context read/generate it
+ * themselves and pass the text directly).
+ * `ai` — explicit AI opt-in/out. Unlike lore_create's `ai` (default false — MCP callers are
+ * always agents), assess has no non-AI mode (SPEC-026 §3 D5: the tool name IS the AI intent).
+ * Passing `ai: false` is a contradiction (mirrors CLI `--no-ai` → exit 2) and always errors.
+ */
+export const LoreAssessSchema = z.object({
+  plan_id_or_slug: z.string(),
+  diff_text: z.string().optional(),
+  ai: z.boolean().optional(),
 });
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -554,6 +572,70 @@ export function registerTools(server: McpServer, app: App): void {
     if (!result.ok) return errorContent(result.error);
     return textContent({ ready: result.value });
   });
+
+  // ── SPEC-026: AI plan-outcome assessment ──────────────────────────────────
+
+  // lore_assess
+  registerToolWithArgs(
+    server,
+    "lore_assess",
+    "AI plan-outcome assessment (LLM-as-judge) — judges a plan's completion against its spec's ACs and its tasks' evidence trails, persisting an auditable knowledge doc linked to the plan",
+    LoreAssessSchema,
+    async (args) => {
+      const bundleResult = await corpusService.getPlanBundle(args.plan_id_or_slug);
+      if (!bundleResult.ok) return errorContent(bundleResult.error);
+      const bundle = bundleResult.value;
+
+      // AC-ASSESS-8: zero child tasks → VALIDATION_ERROR before any AI call.
+      if (bundle.tasks.length === 0) {
+        return errorContent({
+          code: "VALIDATION_ERROR",
+          field: "tasks",
+          message: `Plan '${bundle.plan.slug}' has zero child tasks — nothing to assess.`,
+        });
+      }
+
+      // reason: args.ai === false is a contradiction — assess has no non-AI mode
+      // (SPEC-026 §3 D5), mirroring the CLI's `--no-ai` → exit 2.
+      if (args.ai === false) {
+        return errorContent({
+          code: "AI_PROVIDER_ERROR",
+          message: "lore_assess requires AI; ai: false is a contradiction. Omit the field or pass ai: true.",
+        });
+      }
+
+      // SPEC-026 §3 D5: only an EXPLICIT config override braked (not the mcp surface's
+      // built-in AI-off default) requires the caller to pass ai: true.
+      const explicitAi = args.ai === true ? true : undefined;
+      const resolved = app.resolveAiDefault(explicitAi);
+      if (explicitAi === undefined && isAssessAiBraked(resolved)) {
+        return errorContent({
+          code: "AI_PROVIDER_ERROR",
+          message: "AI is disabled for the mcp surface by config.ai.default_per_surface.mcp. Pass ai: true to override.",
+        });
+      }
+
+      const assessResult = await app.aiProviderService.assessPlan(bundle, {
+        ...(args.diff_text !== undefined ? { diffText: args.diff_text } : {}),
+        source: app.callerSurface,
+      });
+      if (!assessResult.ok) return errorContent(assessResult.error);
+
+      const createResult = await corpusService.create({
+        type: "knowledge",
+        title: `Assessment: ${bundle.plan.title} (${new Date().toISOString().slice(0, 10)})`,
+        parent_id: bundle.plan.id,
+        extra: { sub_type: "assessment", assessment: assessResult.value },
+        content: renderAssessmentContent(assessResult.value),
+      });
+      if (!createResult.ok) return errorContent(createResult.error);
+
+      const linkResult = await corpusService.link(createResult.value.id, bundle.plan.id, "informs");
+      if (!linkResult.ok) return errorContent(linkResult.error);
+
+      return textContent({ assessment: createResult.value, result: assessResult.value });
+    },
+  );
 }
 
 // ─── Batch Operation Executor ────────────────────────────────────────────────

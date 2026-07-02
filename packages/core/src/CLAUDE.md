@@ -19,6 +19,20 @@ Foundational types, error model, runtime validation, lifecycle rules, config, an
 - **Zod is SSOT for runtime-validated shapes** — `TelemetryEventSchema`, `LoreConfigSchema`, `createDocInputSchema`, etc. Derived TS types come from `z.infer<typeof Schema>`; never duplicate the shape as a hand-written interface.
 - **Type-specific validation via `superRefine`** — `createDocInputSchema` enforces `spec/task → parent_id`, `adr → extra.decision_status`, `knowledge → extra.sub_type`, `task → extra.plan_id`, `plan → extra.phases uniqueness` (`schemas.ts`).
 
+### AI Plan-Outcome Assessment Schema (SPEC-026)
+
+`assessment.ts` is a pure, browser-safe module (no IO, no `Date.now()`/`Math.random()`):
+- `llmAssessmentOutputSchema` — the shape the AI judge's raw JSON response must match (`verdict`/`overall_score`/`ac_scores`/`gaps`/`recommendations`). Deliberately excludes `scope` and `judgment` — the model cannot know its own provider name, prompt version, or wall-clock duration; `AIProviderService.assessPlan` computes and layers those on after a successful parse.
+- `assessmentResultSchema` = `llmAssessmentOutputSchema.extend({scope, judgment})` — the full persisted shape. This is what `knowledgeExtraSchema`'s `extra.assessment` branch validates against.
+- `planBundleSchema` / `PlanBundle` — `{plan, spec?, tasks[]}`, assembled by `CorpusService.getPlanBundle`. Uses `z.custom<DocRecord>()` per slot (a light structural + `type` check, not a full `DocRecord` re-validation — `DocRecord` has no Zod schema anywhere else in this codebase; it's produced by the trusted store layer).
+- `extractAssessmentJson(raw)` — tolerant JSON extraction from raw AI text: bare JSON → ` ```json ` fence → generic ` ``` ` fence → prose-wrapped (first `{` to last `}`). Never throws; returns a `VALIDATION_ERROR` Result when no JSON is found. Does NOT validate shape (that's `llmAssessmentOutputSchema`'s job) — a bare JSON array parses successfully here and fails schema validation downstream.
+- `truncateSection(text, maxChars)` — single-section truncation primitive consumed by the prompt builder (`packages/lore/src/ai/assess-template.ts`) against `ai.assess.*` config budgets; truncated section names are collected into `judgment.truncated[]`.
+- `renderAssessmentContent(result)` — deterministic Markdown rendering of a persisted `AssessmentResult` for the knowledge doc's `content` field. `extra.assessment` is the SSOT; `content` is generated ONLY by this function at creation time.
+
+`knowledgeExtraSchema.sub_type` enum includes `"assessment"` — its `superRefine` requires a Zod-valid `extra.assessment` whenever `sub_type === "assessment"`. Manually creating a knowledge doc with `sub_type: "assessment"` (e.g. via `lore create` or the dashboard) without a matching `extra.assessment` payload fails loud — only `lore assess` / `lore_assess` write this sub_type.
+
+`AiConfigSchema.assess` (`ai.ts`) holds the four character budgets (`max_plan_chars: 8000`, `max_spec_chars: 12000`, `max_task_chars: 4000`, `max_diff_chars: 24000`), mirroring the `ai.refine.max_input_chars` precedent.
+
 ### Plan Phases Schema Invariants (SPEC-023)
 
 `planExtraSchema` (in `schemas.ts`) governs plan extra fields:

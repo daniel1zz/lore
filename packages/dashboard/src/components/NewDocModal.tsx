@@ -195,7 +195,12 @@ export function NewDocModal({ onCreate, isPending, error, onClose }: NewDocModal
           </div>
         )}
 
-        {/* Knowledge-specific: sub_type */}
+        {/* Knowledge-specific: sub_type.
+            reason (SPEC-026 §4 AC-ASSESS-11): "assessment" is a valid knowledgeExtraSchema
+            sub_type but is deliberately NOT offered here — it requires a Zod-valid
+            extra.assessment payload that this simple form has no field to collect, so
+            selecting it would always fail server-side validation. Assessment docs are
+            written exclusively by `lore assess` / `lore_assess`, never through this modal. */}
         {docType === "knowledge" && (
           <div className="space-y-1">
             <label className="text-sm font-medium" htmlFor="sub-type">Sub-type</label>

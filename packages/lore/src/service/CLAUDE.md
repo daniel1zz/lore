@@ -21,18 +21,19 @@ Business logic layer. Nine stateless services orchestrate `StoreInterface` calls
 - **`TaskWorkflowService` writes only `extra.claim` / `extra.verification_evidence` directly via the store** — never `content`/`title`/`status`, and never through `CorpusService.update`. This is a documented, bounded bypass of the "services don't touch the store for doc mutation outside CorpusService" norm (SPEC-025 §3 D8); it exists because CorpusService's approved→draft demotion invariant is unreachable from these fields by construction, and cross-service calls are forbidden.
 - **Stable public types live next to the service that owns them** — `PendingDoc`, `ApproveOpts` in `review-service.ts`; `Diff`, `FieldChange` in `version-service.ts`; `MigrationReport`, `SecretWarning` in `migration-service.ts`; `TreeDrift`, `FixReport`, `ReconcileReport` in `tree-check-service.ts`. Don't move them to `core/types.ts`.
 - **TreeCheckService is the only service that may modify the link table directly** — it reconciles the `parent_id` column on `docs` against the parent links in the link table. Other services treat them as synchronised.
+- **`CorpusService.getPlanBundle` is the only cross-doc read-orchestration entry point for assessment** (SPEC-026 §3 D1) — it assembles `{plan, spec?, tasks[]}` for `AIProviderService.assessPlan`, the same way `tree()` assembles multi-doc reads for other callers. `AIProviderService` stays store-free (its four pre-existing methods take already-fetched `DocRecord`s); bundle assembly does NOT move into the adapters (CLI/MCP contract: thin pipes only).
 
 ## Service Map
 
 | Service | Responsibility |
 |---|---|
-| `CorpusService` | CRUD, list, search, tree, link/unlink, status (telemetry-wired) |
+| `CorpusService` | CRUD, list, search, tree, link/unlink, status, getPlanBundle (telemetry-wired) |
 | `ReviewService` | Pending queue, approve, reject; consumes `isValidTransition` |
 | `VersionService` | Log, unified diff (`diff` package), restore (append-only) |
 | `OutlineService` | MDX placeholder resolution (whitelisted: `ChildrenOf`, `RecentDecisions`, `ActivePlans`, `ModuleTree`, `RelatedOf`, `Embed`, `HealthStats`) |
 | `MigrationService` | One-shot v1→v2 import; reads YAML-frontmatter MD files, maps types, inserts via store |
 | `TreeCheckService` | Drift detection (`missing \| extra \| misplaced \| cycle \| orphan`), auto-fix, parent_id ↔ link-table reconciliation |
-| `AIProviderService` | AI provider dispatch + template render + ai.generation telemetry (SPEC-017 §3.6) |
+| `AIProviderService` | AI provider dispatch + template render + ai.generation telemetry (SPEC-017 §3.6); assessPlan — LLM-as-judge plan assessment with one corrective retry (SPEC-026) |
 | `SyncDocsService` | One-way file→corpus reconciler for spec files; title-match dedup, drift report, parent resolution (SPEC-018) |
 | `PhaseService` | addPhase / listPhases / removePhase / renamePhase / migratePhases on plan.extra.phases (SPEC-023) |
 | `TaskWorkflowService` | addEvidence / claim / release / ready — evidence log, advisory claim lease, computed readiness over `blocks` links (SPEC-025, own telemetry wiring) |

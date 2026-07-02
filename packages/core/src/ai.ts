@@ -288,6 +288,26 @@ export const AiConfigSchema = z
       })
       .strict()
       .default({}),
+    /**
+     * Plan-outcome assessment operation configuration (SPEC-026).
+     * Character budgets for each material section embedded in the `lore assess` judge
+     * prompt. Any section exceeding its budget is truncated and its name is recorded in
+     * `judgment.truncated[]` (AC-ASSESS-7) — mirrors the `ai.refine.max_input_chars`
+     * precedent so budget config lives in one consistent place.
+     */
+    assess: z
+      .object({
+        /** Max chars of the plan document's content included in the prompt. Default: 8000. */
+        max_plan_chars: z.number().int().positive().default(8000),
+        /** Max chars of the linked spec's content included in the prompt. Default: 12000. */
+        max_spec_chars: z.number().int().positive().default(12000),
+        /** Max chars of each task's content included in the prompt (per task). Default: 4000. */
+        max_task_chars: z.number().int().positive().default(4000),
+        /** Max chars of the optional git diff included in the prompt. Default: 24000. */
+        max_diff_chars: z.number().int().positive().default(24000),
+      })
+      .strict()
+      .default({}),
   })
   .strict()
   // Cross-field constraint: when provider === "http", ai.http is required (AC-HTTP-2).
