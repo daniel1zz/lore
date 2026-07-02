@@ -236,6 +236,10 @@
     "01KWH86C2PRDSCQB99WVNSRV8R": {
       "human_id": "SPEC-026",
       "file_path": "docs/requirements/spec/SPEC-026-ai-plan-assessment.md"
+    },
+    "01KWHB786ZMZTMS1B0CEG1M925": {
+      "human_id": "KN-002",
+      "file_path": "docs/requirements/knowledge/KN-002-assessment-spec-026-implementation-ai-plan-assessm.md"
     }
   }
 }
