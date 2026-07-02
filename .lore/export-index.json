@@ -1,0 +1,197 @@
+{
+  "version": 1,
+  "mappings": {
+    "01KWBVX30DGVDYMTK1DR2ZW8PS": {
+      "human_id": "SPEC-021",
+      "file_path": "docs/requirements/spec/SPEC-021-sync-docs-reverse.md"
+    },
+    "01KWBVX30M4W03TCW8XEMK2ZFD": {
+      "human_id": "SPEC-024",
+      "file_path": "docs/requirements/spec/SPEC-024-default-no-ai-agents.md"
+    },
+    "01KWBVX305W16ZRYT9X5V7XJ7Y": {
+      "human_id": "SPEC-023",
+      "file_path": "docs/requirements/spec/SPEC-023-plan-phases.md"
+    },
+    "01KWBVX30GBGDC7JC4V221RQAB": {
+      "human_id": "SPEC-022",
+      "file_path": "docs/requirements/spec/SPEC-022-dashboard-write-ui.md"
+    },
+    "01KWBSWC5J6K30Q0DHJ3FJGX03": {
+      "human_id": "PLAN-001",
+      "file_path": "docs/requirements/plan/PLAN-001-cli-v3-roadmap-state-alignment-new-surface.md"
+    },
+    "01KWBVX30CKTSVMSP5Y1SC7DYD": {
+      "human_id": "SPEC-020",
+      "file_path": "docs/requirements/spec/SPEC-020-http-ai-provider.md"
+    },
+    "01KWBVX30AS6XNP5X5FQ49QPE4": {
+      "human_id": "SPEC-019",
+      "file_path": "docs/requirements/spec/SPEC-019-ai-in-set-link.md"
+    },
+    "01KWBV2M9VZVF55PZT7B18BV9A": {
+      "human_id": "TASK-001",
+      "file_path": "docs/requirements/task/TASK-001-draft-spec-default-no-ai-for-agent-mcp-paths.md"
+    },
+    "01KWBV2M6VENBN33NGA9TE9NE7": {
+      "human_id": "TASK-002",
+      "file_path": "docs/requirements/task/TASK-002-draft-spec-plan-phases-as-first-class-layer.md"
+    },
+    "01KWBT18V6AC65JQMJMKVMPTJ4": {
+      "human_id": "TASK-003",
+      "file_path": "docs/requirements/task/TASK-003-draft-spec-dashboard-write-ui.md"
+    },
+    "01KWBT18RE2ZBRRWGEJPSJ3KY9": {
+      "human_id": "TASK-004",
+      "file_path": "docs/requirements/task/TASK-004-draft-spec-sync-docs-reverse-corpus-file.md"
+    },
+    "01KWBT18NN062JH29WCSAF7DY9": {
+      "human_id": "TASK-005",
+      "file_path": "docs/requirements/task/TASK-005-draft-spec-http-ai-provider.md"
+    },
+    "01KWBT18JNPKXFZKCVBD3WX0C1": {
+      "human_id": "TASK-006",
+      "file_path": "docs/requirements/task/TASK-006-draft-spec-ai-in-lore-set-lore-link.md"
+    },
+    "01KWBSZGEDHWJJBGNDBM83HEM3": {
+      "human_id": "TASK-007",
+      "file_path": "docs/requirements/task/TASK-007-finalize-spec-003-cli-adapter-v9-in-review-approve.md"
+    },
+    "01KWBT0FMMG3M1KC1QS673P9VV": {
+      "human_id": "TASK-008",
+      "file_path": "docs/requirements/task/TASK-008-promote-spec-018-sync-docs-draft-approved.md"
+    },
+    "01KWBT0FHFMAHD369TP3R20GDJ": {
+      "human_id": "TASK-009",
+      "file_path": "docs/requirements/task/TASK-009-promote-spec-017-ai-provider-draft-approved.md"
+    },
+    "01KWBT0FEK2SET9K0RFCHGRRQB": {
+      "human_id": "TASK-010",
+      "file_path": "docs/requirements/task/TASK-010-promote-spec-016-cookie-auth-draft-approved.md"
+    },
+    "01KWBSZWX44SBGZXT3VJR103BE": {
+      "human_id": "TASK-011",
+      "file_path": "docs/requirements/task/TASK-011-promote-spec-015-dashboard-skeleton-draft-approved.md"
+    },
+    "01KWBSXP93ZDJ6VFQPC2Q4BTQA": {
+      "human_id": "TASK-012",
+      "file_path": "docs/requirements/task/TASK-012-promote-spec-014-monorepo-skeleton-draft-approved.md"
+    },
+    "01KVZ4C4458T454V0JMRQ7CPQT": {
+      "human_id": "SPEC-003",
+      "file_path": "docs/requirements/spec/SPEC-003-cli-adapter.md"
+    },
+    "01KW6G5KX0SZVT65THK1EFFTB0": {
+      "human_id": "SPEC-018",
+      "file_path": "docs/requirements/spec/SPEC-018-sync-docs-command.md"
+    },
+    "01KW6E4DPF21ERDT5D2H87THDN": {
+      "human_id": "SPEC-017",
+      "file_path": "docs/requirements/spec/SPEC-017-ai-provider-built-in.md"
+    },
+    "01KW6E4DAHWQP3HT6XEYD1A91V": {
+      "human_id": "SPEC-016",
+      "file_path": "docs/requirements/spec/SPEC-016-cookie-auth-local-bootstrap.md"
+    },
+    "01KW6E4CYYS7THX3HPMPPKAEZ8": {
+      "human_id": "SPEC-015",
+      "file_path": "docs/requirements/spec/SPEC-015-dashboard-readonly-skeleton.md"
+    },
+    "01KW6E4CG1A33AQP5MC8857T27": {
+      "human_id": "SPEC-014",
+      "file_path": "docs/requirements/spec/SPEC-014-monorepo-skeleton.md"
+    },
+    "01KVZ4C441GQWXW52WB2PZ2SZY": {
+      "human_id": "SPEC-013",
+      "file_path": "docs/requirements/spec/SPEC-013-eval-framework.md"
+    },
+    "01KVZ4C443TDSJZG51V28AYS3V": {
+      "human_id": "SPEC-012",
+      "file_path": "docs/requirements/spec/SPEC-012-telemetry.md"
+    },
+    "01KVZ4C442A3PZJ4PC0XP6RNJG": {
+      "human_id": "SPEC-009",
+      "file_path": "docs/requirements/spec/SPEC-009-sync-engine.md"
+    },
+    "01KVZ4C43WJQDYX3RZAWP7DABY": {
+      "human_id": "SPEC-008",
+      "file_path": "docs/requirements/spec/SPEC-008-mcp-adapter.md"
+    },
+    "01KVZ4C4405Y709PKK199YCQTZ": {
+      "human_id": "SPEC-002",
+      "file_path": "docs/requirements/spec/SPEC-002-corpus-schema.md"
+    },
+    "01KVZ4C4403W3HFHNVXTPHMZ33": {
+      "human_id": "SPEC-007",
+      "file_path": "docs/requirements/spec/SPEC-007-migration-v1.md"
+    },
+    "01KVZ4C4418PNKA5QWTK6M7369": {
+      "human_id": "SPEC-010",
+      "file_path": "docs/requirements/spec/SPEC-010-auth-credentials.md"
+    },
+    "01KVZ4C442WTPZR93VB23S28KY": {
+      "human_id": "SPEC-005",
+      "file_path": "docs/requirements/spec/SPEC-005-review-workflow.md"
+    },
+    "01KVZ4C4421YHS7DDGTXDHBV3K": {
+      "human_id": "SPEC-004",
+      "file_path": "docs/requirements/spec/SPEC-004-prd-as-living-root.md"
+    },
+    "01KVZ4C443TC6JFVD2RG6QECTS": {
+      "human_id": "SPEC-006",
+      "file_path": "docs/requirements/spec/SPEC-006-version-history.md"
+    },
+    "01KVZ4C444MST333J8THG0KHST": {
+      "human_id": "SPEC-001",
+      "file_path": "docs/requirements/spec/SPEC-001-service-layer.md"
+    },
+    "01KVZ4C444R0KQD6QDHD5159FC": {
+      "human_id": "SPEC-011",
+      "file_path": "docs/requirements/spec/SPEC-011-http-api.md"
+    },
+    "01KVZ4C445EK479938W1TYT3AJ": {
+      "human_id": "PRD-001",
+      "file_path": "docs/requirements/prd/PRD-001-lore-positioning.md"
+    },
+    "01KWGD67151EY6X8KZPW5ZE1CS": {
+      "human_id": "PLAN-002",
+      "file_path": "docs/requirements/plan/PLAN-002-spec-022-implementation-dashboard-write-ui.md"
+    },
+    "01KWGD760TWMZDZBDFE5YY6AF0": {
+      "human_id": "TASK-013",
+      "file_path": "docs/requirements/task/TASK-013-closeout-export-docs-sync-full-verification-merge.md"
+    },
+    "01KWGD75MXXDP29P4YX81C2BQG": {
+      "human_id": "TASK-014",
+      "file_path": "docs/requirements/task/TASK-014-playwright-e2e-create-edit-conflict-approve-histor.md"
+    },
+    "01KWGFXGF9H38E6XBHH90RNEF5": {
+      "human_id": "TASK-015",
+      "file_path": "docs/requirements/task/TASK-015-fix-docdetail-post-save-content-not-re-rendering-e.md"
+    },
+    "01KWGF0XVC5070QEJBC41V4RDJ": {
+      "human_id": "TASK-016",
+      "file_path": "docs/requirements/task/TASK-016-fix-lore-core-browser-safety-fs-imports-crash-vite.md"
+    },
+    "01KWGDZDMGN1J6DVPQRJ2DE63H": {
+      "human_id": "TASK-017",
+      "file_path": "docs/requirements/task/TASK-017-fix-status-db-size-bytes-hardcoded-0.md"
+    },
+    "01KWGDYKBDFKB8HYY24H5Z64KW": {
+      "human_id": "KN-001",
+      "file_path": "docs/requirements/knowledge/KN-001-retro-stale-claude-md-caused-false-spec-022-unimpl.md"
+    },
+    "01KWGD759AXNC22E6CRXYYKPNQ": {
+      "human_id": "TASK-018",
+      "file_path": "docs/requirements/task/TASK-018-unit-integration-tests-six-dimension.md"
+    },
+    "01KWGD74XD0ZSCMYPHTW3N2TDD": {
+      "human_id": "TASK-019",
+      "file_path": "docs/requirements/task/TASK-019-dashboard-ui-write-surface-ac-4-5-8-10.md"
+    },
+    "01KWGD74GWH11BMFT59S1TNP56": {
+      "human_id": "TASK-020",
+      "file_path": "docs/requirements/task/TASK-020-server-write-routes-auth-gate-concurrency-ac-1-3-6.md"
+    }
+  }
+}

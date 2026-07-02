@@ -1,6 +1,9 @@
 dist/
 node_modules/
-.lore/
+# .lore/ contents are local (db, WAL, key) EXCEPT export-index.json —
+# SPEC-021: the corpus↔file ID map is git-tracked and team-shared.
+.lore/*
+!.lore/export-index.json
 *.db
 *.sqlite
 .DS_Store

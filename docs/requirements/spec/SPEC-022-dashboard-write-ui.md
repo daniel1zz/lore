@@ -3,24 +3,18 @@ id: SPEC-022
 type: spec
 role: spec
 title: "Dashboard write UI (create / edit / approve / link)"
-status: draft
+status: approved
 priority: medium
 phase: P10
 created: 2026-06-30
-updated: 2026-06-30
-tags: [dashboard, ui, write, mutation, phase-10, stub]
+updated: 2026-07-02
+tags: [dashboard, ui, write, mutation, phase-10, implemented]
 parent: PRD-001
-links:
-  - {id: SPEC-015, type: extends, note: "Adds write capabilities on top of read-only Dashboard skeleton"}
-  - {id: SPEC-016, type: informs, note: "Cookie session is the auth foundation for writes"}
-  - {id: SPEC-010, type: relates-to, note: "Bearer-token HTTP path is the second surface for writes; SPEC-022 covers cookie path"}
-  - {id: SPEC-011, type: informs, note: "Allocates /api/dashboard/* namespace alongside existing /api/v1/* routes"}
-  - {id: SPEC-021, type: relates-to, note: "Dashboard writes need export-docs to land in git"}
 ---
 
 # SPEC-022: Dashboard write UI
 
-> **Status: stub.** SPEC-015 ships v1 as read-only. SPEC-016 paves the auth foundation. This SPEC turns the dashboard into a write surface.
+> **Status: implemented.** Landed on main (commits e329703 / d852b74 / 1cd6faa / c231d57 / 5dc7fdd, plus follow-up 13581bf: production build fix, AC-5 demotion toast, debounced draft save). Remaining spec surface: Playwright e2e (§9.7 browser layer).
 
 ## 1. Purpose
 
