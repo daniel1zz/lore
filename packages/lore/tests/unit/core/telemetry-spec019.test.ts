@@ -39,10 +39,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-// reason: import from source path so these tests reference the worktree's updated
-// packages/core/src/telemetry.ts rather than the node_modules symlink which
-// points to the pre-SPEC-019 main repo. Equivalent to @lore/core once merged.
-import { aiGenerationEventSchema } from "../../../../core/src/telemetry.js";
+import { aiGenerationEventSchema } from "@lore/core";
 
 // ─── Shared fixture factory ────────────────────────────────────────────────────
 
