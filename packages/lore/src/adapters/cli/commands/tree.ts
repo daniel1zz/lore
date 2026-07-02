@@ -16,7 +16,7 @@
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, formatTree } from "../utils.js";
+import { exitCode, formatError, formatTree, formatWorkflowBadge } from "../utils.js";
 import type { TreeBlueprint, PlanPhase, DocRecord } from "@lore/core";
 
 // ─── Phase Grouping Helpers ───────────────────────────────────────────────────
@@ -47,11 +47,15 @@ function extractPhasesFromExtra(extra: Record<string, unknown>): PlanPhase[] {
  *   ├── Phase: Build (0 tasks)
  *   └── (unphased) (1 task)
  *       └── task-other (task, todo)
+ *
+ * Task rows carry a claim/evidence workflow badge (AC-WF-9) — see formatWorkflowBadge.
  */
 function formatPhaseTree(
   plan: DocRecord,
   phases: PlanPhase[],
   allTasks: DocRecord[],
+  nowIso: string,
+  ttlMinutes: number,
 ): string {
   const lines: string[] = [];
   lines.push(`${plan.slug} (${plan.type}, ${plan.status})`);
@@ -77,7 +81,7 @@ function formatPhaseTree(
       const task = tasksInPhase[i]!;
       const isLastTask = i === tasksInPhase.length - 1;
       const taskPrefix = isLastTask ? "└── " : "├── ";
-      lines.push(`${childIndent}${taskPrefix}${task.slug} (${task.type}, ${task.status})`);
+      lines.push(`${childIndent}${taskPrefix}${task.slug} (${task.type}, ${task.status})${formatWorkflowBadge(task, nowIso, ttlMinutes)}`);
     }
   }
 
@@ -91,7 +95,7 @@ function formatPhaseTree(
       const task = unphased[i]!;
       const isLastTask = i === unphased.length - 1;
       const taskPrefix = isLastTask ? "└── " : "├── ";
-      lines.push(`${childIndent}${taskPrefix}${task.slug} (${task.type}, ${task.status})`);
+      lines.push(`${childIndent}${taskPrefix}${task.slug} (${task.type}, ${task.status})${formatWorkflowBadge(task, nowIso, ttlMinutes)}`);
     }
   }
 
@@ -210,19 +214,23 @@ export default defineCommand({
       //
       // reason: TreeNode.doc is DocSummary (no extra). We fetch the full plan doc
       // separately; this is one extra O(1) store read, acceptable for a CLI command.
+      const nowIso = new Date().toISOString();
+      const ttlMinutes = app.taskWorkflowService.claimTtlMinutes;
+
       if (args.root) {
         const fullPlanResult = await app.corpusService.get(args.root);
         if (fullPlanResult.ok && fullPlanResult.value.doc.type === "plan") {
           const plan = fullPlanResult.value.doc;
           const phases = extractPhasesFromExtra(plan.extra);
-          if (phases.length > 0) {
-            // Fetch full child task records so we can read extra.phase.
-            const childrenResult = await app.corpusService.listFull({
-              parent_id: plan.id,
-              type: "task",
-            });
-            const allTasks = childrenResult.ok ? childrenResult.value.docs : [];
+          // Fetch full child task records so we can read extra.phase and render
+          // claim/evidence badges (AC-WF-9) regardless of whether phases are declared.
+          const childrenResult = await app.corpusService.listFull({
+            parent_id: plan.id,
+            type: "task",
+          });
+          const allTasks = childrenResult.ok ? childrenResult.value.docs : [];
 
+          if (phases.length > 0) {
             if (args.json) {
               console.log(
                 JSON.stringify(
@@ -252,7 +260,19 @@ export default defineCommand({
               return;
             }
 
-            console.log(formatPhaseTree(plan, phases, allTasks));
+            console.log(formatPhaseTree(plan, phases, allTasks, nowIso, ttlMinutes));
+            return;
+          }
+
+          if (!args.json && allTasks.length > 0) {
+            // No declared phases — fall through to the flat formatTree renderer,
+            // but still annotate task rows with claim/evidence badges (AC-WF-9).
+            const badges = new Map<string, string>();
+            for (const task of allTasks) {
+              const badge = formatWorkflowBadge(task, nowIso, ttlMinutes);
+              if (badge !== "") badges.set(task.id, badge);
+            }
+            console.log(formatTree(result.value, "", badges));
             return;
           }
         }

@@ -10,7 +10,7 @@
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, formatTable, relativeTime } from "../utils.js";
+import { exitCode, formatError, formatTable, formatWorkflowBadge, relativeTime } from "../utils.js";
 import type { DocType, DocStatus } from "@lore/core";
 
 export default defineCommand({
@@ -97,17 +97,58 @@ export default defineCommand({
           console.log(`No documents found with phase "${phaseFilter}".`);
           return;
         }
+        // reason: workflow badge (claim/evidence, AC-WF-9) is only meaningful for task
+        // rows; --phase filtering only applies to tasks in practice (SPEC-023), so we
+        // always compute it here rather than branching on d.type.
+        const nowIso = new Date().toISOString();
+        const ttlMinutes = app.taskWorkflowService.claimTtlMinutes;
         const headers = ["ID", "Type", "Title", "Status", "Phase", "Updated"];
         const rows = filtered.map((d) => [
           d.id.slice(0, 10),
           d.type,
-          d.title.slice(0, 30),
+          `${d.title.slice(0, 30)}${formatWorkflowBadge(d, nowIso, ttlMinutes)}`,
           d.status,
           String(d.extra["phase"] ?? ""),
           relativeTime(d.updated_at),
         ]);
         console.log(formatTable(headers, rows));
         console.log(`\n${total} document${total === 1 ? "" : "s"} (filter: --phase ${phaseFilter})`);
+        return;
+      }
+
+      // Task-type listings render a claim/evidence workflow badge on each row
+      // (AC-WF-9). This requires the full DocRecord (extra.claim / extra.verification_evidence
+      // are not in DocSummary) — mirrors the --phase branch's listFull usage above.
+      if (filters["type"] === "task") {
+        const fullResult = await app.corpusService.listFull(filters);
+        if (!fullResult.ok) {
+          process.stderr.write(formatError(fullResult.error) + "\n");
+          process.exitCode = exitCode(fullResult.error);
+          return;
+        }
+        const { docs: fullDocs, total: fullTotal } = fullResult.value;
+
+        if (args.json) {
+          console.log(JSON.stringify({ ok: true, data: { docs: fullDocs, total: fullTotal } }, null, 2));
+          return;
+        }
+        if (fullTotal === 0) {
+          console.log("No documents found.");
+          return;
+        }
+
+        const nowIso = new Date().toISOString();
+        const ttlMinutes = app.taskWorkflowService.claimTtlMinutes;
+        const headers = ["ID", "Type", "Title", "Status", "Updated"];
+        const rows = fullDocs.map((d) => [
+          d.id.slice(0, 10),
+          d.type,
+          `${d.title.slice(0, 35)}${formatWorkflowBadge(d, nowIso, ttlMinutes)}`,
+          d.status,
+          relativeTime(d.updated_at),
+        ]);
+        console.log(formatTable(headers, rows));
+        console.log(`\n${fullTotal} document${fullTotal === 1 ? "" : "s"} (filter: --type task)`);
         return;
       }
 

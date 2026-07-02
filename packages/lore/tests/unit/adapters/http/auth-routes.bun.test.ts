@@ -88,6 +88,9 @@ async function makeTestServer(): Promise<TestContext> {
     exportDocsService: null as unknown as App["exportDocsService"],
     // reason: test does not exercise phase commands; null-cast per pattern from SPEC-023 §9.1.
     phaseService: null as unknown as App["phaseService"],
+    // reason: SPEC-025 §9.1 — test does not exercise task-workflow commands; null-cast per
+    // established pattern (see phaseService above) for satisfying newly-required App fields.
+    taskWorkflowService: null as unknown as App["taskWorkflowService"],
     // reason: test does not exercise AI-default path; callerSurface required by App interface (SPEC-024).
     callerSurface: "cli" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),

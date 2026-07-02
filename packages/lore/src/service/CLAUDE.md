@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Business logic layer. Eight stateless services orchestrate `StoreInterface` calls and apply domain rules (lifecycle, parent-type, MDX placeholders, version snapshots, drift checks, AI generation, file-to-corpus sync). All public methods return `Promise<Result<T, LoreError>>` — no thrown exceptions cross this boundary.
+Business logic layer. Nine stateless services orchestrate `StoreInterface` calls and apply domain rules (lifecycle, parent-type, MDX placeholders, version snapshots, drift checks, AI generation, file-to-corpus sync, task execution workflow). All public methods return `Promise<Result<T, LoreError>>` — no thrown exceptions cross this boundary.
 
 ## Key Invariants
 
@@ -17,7 +17,8 @@ Business logic layer. Eight stateless services orchestrate `StoreInterface` call
 ## Patterns
 
 - **Service per concern, no cross-service calls** — services do not import each other. Composition lives in `packages/lore/src/app.ts`. If a workflow spans two services (e.g. `approve` produces a `versions` entry), the calling layer (CLI / MCP / HTTP) sequences them.
-- **`CorpusService` is the only service wired to telemetry** — constructor takes `Telemetry`; other services don't record events.
+- **`CorpusService` is the only service wired to telemetry** — constructor takes `Telemetry`; other services don't record events. Exception: `TaskWorkflowService` also takes its own `Telemetry` DI (SPEC-025 D8) — it never routes writes through `CorpusService` (cross-service calls are forbidden), so telemetry parity requires its own wiring rather than piggybacking on CorpusService's.
+- **`TaskWorkflowService` writes only `extra.claim` / `extra.verification_evidence` directly via the store** — never `content`/`title`/`status`, and never through `CorpusService.update`. This is a documented, bounded bypass of the "services don't touch the store for doc mutation outside CorpusService" norm (SPEC-025 §3 D8); it exists because CorpusService's approved→draft demotion invariant is unreachable from these fields by construction, and cross-service calls are forbidden.
 - **Stable public types live next to the service that owns them** — `PendingDoc`, `ApproveOpts` in `review-service.ts`; `Diff`, `FieldChange` in `version-service.ts`; `MigrationReport`, `SecretWarning` in `migration-service.ts`; `TreeDrift`, `FixReport`, `ReconcileReport` in `tree-check-service.ts`. Don't move them to `core/types.ts`.
 - **TreeCheckService is the only service that may modify the link table directly** — it reconciles the `parent_id` column on `docs` against the parent links in the link table. Other services treat them as synchronised.
 
@@ -34,6 +35,7 @@ Business logic layer. Eight stateless services orchestrate `StoreInterface` call
 | `AIProviderService` | AI provider dispatch + template render + ai.generation telemetry (SPEC-017 §3.6) |
 | `SyncDocsService` | One-way file→corpus reconciler for spec files; title-match dedup, drift report, parent resolution (SPEC-018) |
 | `PhaseService` | addPhase / listPhases / removePhase / renamePhase / migratePhases on plan.extra.phases (SPEC-023) |
+| `TaskWorkflowService` | addEvidence / claim / release / ready — evidence log, advisory claim lease, computed readiness over `blocks` links (SPEC-025, own telemetry wiring) |
 
 ## Links
 

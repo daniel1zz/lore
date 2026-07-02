@@ -1,5 +1,5 @@
 /**
- * MCP tool registrations — all 16 lore_* tools.
+ * MCP tool registrations — 20 lore_* tools (16 original + 4 SPEC-025 task-workflow tools).
  *
  * Architecture: Tools with input use the `registerToolWithArgs` helper defined below, which:
  *   1. Calls `server.tool(name, desc, handler)` in 3-arg form (avoids ZodRawShapeCompat type bomb)
@@ -170,6 +170,48 @@ export const LoreBatchSchema = z.object({
   ),
 });
 
+/** Oracle kinds accepted by lore_evidence_add (SPEC-025 §4 AC-WF-1). */
+const EVIDENCE_ORACLE_ENUM = z.enum(["tsc", "test", "lint", "build", "e2e", "manual", "other"]);
+
+/** Oracle outcomes accepted by lore_evidence_add. */
+const EVIDENCE_RESULT_ENUM = z.enum(["pass", "fail"]);
+
+/**
+ * Input schema for lore_claim.
+ * `by` is required (not defaulted) — MCP callers pass actor identity explicitly
+ * (SPEC-025 §8.3 "MCP callers pass `by` explicitly"), unlike the CLI which falls
+ * back to $LORE_ACTOR / OS username.
+ */
+export const LoreClaimSchema = z.object({
+  id_or_slug: z.string(),
+  by: z.string().min(1),
+  branch: z.string().optional(),
+  steal: z.boolean().optional(),
+});
+
+/** Input schema for lore_release. */
+export const LoreReleaseSchema = z.object({
+  id_or_slug: z.string(),
+  by: z.string().min(1),
+  reason: z.string().optional(),
+  force: z.boolean().optional(),
+});
+
+/** Input schema for lore_evidence_add. */
+export const LoreEvidenceAddSchema = z.object({
+  id_or_slug: z.string(),
+  oracle: EVIDENCE_ORACLE_ENUM,
+  command: z.string().min(1),
+  result: EVIDENCE_RESULT_ENUM,
+  output_tail: z.string().max(4000).optional(),
+  recorded_by: z.string().min(1),
+});
+
+/** Input schema for lore_ready. */
+export const LoreReadySchema = z.object({
+  plan_id_or_slug: z.string(),
+});
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /**
@@ -254,7 +296,8 @@ function registerToolWithArgs<T>(
 // ─── Tool Registrations ──────────────────────────────────────────────────────
 
 /**
- * Registers all 16 lore_* MCP tools on the given server.
+ * Registers all 20 lore_* MCP tools on the given server (16 original + 4 SPEC-025
+ * task-workflow tools: lore_claim, lore_release, lore_evidence_add, lore_ready).
  *
  * Tools with input use `registerToolWithArgs` (avoids ZodRawShapeCompat type bomb).
  * Tools without input (`lore_schema`, `lore_status`) use plain `server.tool(name, desc, cb)`.
@@ -263,7 +306,7 @@ function registerToolWithArgs<T>(
  * @param app - The composition root providing access to all services
  */
 export function registerTools(server: McpServer, app: App): void {
-  const { corpusService, versionService, reviewService, outlineService } = app;
+  const { corpusService, versionService, reviewService, outlineService, taskWorkflowService } = app;
 
   // lore_create
   registerToolWithArgs(server, "lore_create", "Create a new document in the Lore corpus", LoreCreateSchema, async (args) => {
@@ -462,6 +505,55 @@ export function registerTools(server: McpServer, app: App): void {
       return textContent(result.value);
     },
   );
+
+  // ── SPEC-025 task workflow tools ──────────────────────────────────────────
+
+  // lore_claim
+  registerToolWithArgs(server, "lore_claim", "Acquire an advisory execution lease on a task", LoreClaimSchema, async (args) => {
+    const result = await taskWorkflowService.claim(args.id_or_slug, {
+      by: args.by,
+      ...(args.branch !== undefined ? { branch: args.branch } : {}),
+      steal: args.steal === true,
+      // reason: MCP callers are always agents (SPEC-024) — the caller-surface discriminator
+      // for AC-WF-11 telemetry is hardcoded here rather than threaded through args.
+      source: "mcp",
+    });
+    if (!result.ok) return errorContent(result.error);
+    return textContent({ doc: result.value });
+  });
+
+  // lore_release
+  registerToolWithArgs(server, "lore_release", "Clear the advisory execution lease on a task", LoreReleaseSchema, async (args) => {
+    const result = await taskWorkflowService.release(args.id_or_slug, {
+      by: args.by,
+      ...(args.reason !== undefined ? { reason: args.reason } : {}),
+      force: args.force === true,
+      source: "mcp",
+    });
+    if (!result.ok) return errorContent(result.error);
+    return textContent({ doc: result.value });
+  });
+
+  // lore_evidence_add
+  registerToolWithArgs(server, "lore_evidence_add", "Append an oracle verification record to a task", LoreEvidenceAddSchema, async (args) => {
+    const result = await taskWorkflowService.addEvidence(args.id_or_slug, {
+      oracle: args.oracle,
+      command: args.command,
+      result: args.result,
+      recorded_by: args.recorded_by,
+      source: "mcp",
+      ...(args.output_tail !== undefined ? { output_tail: args.output_tail } : {}),
+    });
+    if (!result.ok) return errorContent(result.error);
+    return textContent({ doc: result.value });
+  });
+
+  // lore_ready
+  registerToolWithArgs(server, "lore_ready", "Computed readiness report over a plan's tasks (never stored)", LoreReadySchema, async (args) => {
+    const result = await taskWorkflowService.ready(args.plan_id_or_slug);
+    if (!result.ok) return errorContent(result.error);
+    return textContent({ ready: result.value });
+  });
 }
 
 // ─── Batch Operation Executor ────────────────────────────────────────────────

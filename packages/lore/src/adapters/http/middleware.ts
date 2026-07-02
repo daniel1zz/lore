@@ -35,6 +35,9 @@ export function loreErrorToStatus(error: LoreError): number {
     case "SCHEMA_VIOLATION":
       return 422;
     case "STALE_VERSION":
+    // reason: CLAIM_CONFLICT is a write-contention error like STALE_VERSION — same
+    // HTTP semantics (409 Conflict). Source: SPEC-025 §4 AC-WF-3.
+    case "CLAIM_CONFLICT":
       return 409;
     case "DELETE_REQUIRES_CONFIRM":
       return 400;

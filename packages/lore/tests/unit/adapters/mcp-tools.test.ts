@@ -47,6 +47,9 @@ function makeApp(): App {
     exportDocsService: null as unknown as App["exportDocsService"],
     // reason: test does not exercise phase commands; null-cast per pattern from SPEC-023 §9.1.
     phaseService: null as unknown as App["phaseService"],
+    // reason: SPEC-025 §9.1 — test does not exercise task-workflow commands; null-cast per
+    // established pattern (see phaseService above) for satisfying newly-required App fields.
+    taskWorkflowService: null as unknown as App["taskWorkflowService"],
     // reason: test does not exercise AI-default path; callerSurface required by App interface (SPEC-024).
     callerSurface: "cli" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),
@@ -497,7 +500,9 @@ describe("lore_pending", () => {
 // ─── Tool Registration Completeness ──────────────────────────────────────────
 
 describe("tool registration completeness", () => {
-  it("registers all 16 expected tools", () => {
+  // reason: SPEC-025 §4 AC-WF-10 added 4 task-workflow tools (lore_claim,
+  // lore_release, lore_evidence_add, lore_ready), bringing the total from 16 to 20.
+  it("registers all 20 expected tools", () => {
     const expectedTools = [
       "lore_create",
       "lore_get",
@@ -515,12 +520,16 @@ describe("tool registration completeness", () => {
       "lore_context_bundle",
       "lore_batch",
       "lore_status",
+      "lore_claim",
+      "lore_release",
+      "lore_evidence_add",
+      "lore_ready",
     ];
 
     const internal = server as unknown as McpServerInternal;
     for (const name of expectedTools) {
       expect(internal._registeredTools[name]).toBeDefined();
     }
-    expect(Object.keys(internal._registeredTools)).toHaveLength(16);
+    expect(Object.keys(internal._registeredTools)).toHaveLength(20);
   });
 });

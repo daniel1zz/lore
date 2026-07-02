@@ -614,6 +614,9 @@ describe("OutlineService.resolve", () => {
         addLink: (link) => store.addLink(link),
         removeLink: (from, to, type) => store.removeLink(from, to, type),
         findLinks: (id, dir) => store.findLinks(id, dir),
+        // reason: SPEC-025 §3 D7 — new required StoreInterface method; mechanical
+        // addition (same class of fix as every other explicit delegate above).
+        findLinksByToIds: (toIds, linkType) => store.findLinksByToIds(toIds, linkType),
         search: (q, f) => store.search(q, f),
         insertVersion: (v) => store.insertVersion(v),
         findVersions: (id, opts) => store.findVersions(id, opts),

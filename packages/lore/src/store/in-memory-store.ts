@@ -250,6 +250,18 @@ export class InMemoryStore implements StoreInterface {
     return ok(found.map((l) => ({ ...l })));
   }
 
+  async findLinksByToIds(
+    toIds: DocId[],
+    linkType: LinkType,
+  ): Promise<Result<LinkRecord[], LoreError>> {
+    if (toIds.length === 0) return ok([]);
+    const idSet = new Set(toIds);
+    const found = this.links.filter(
+      (l) => l.link_type === linkType && idSet.has(l.to_id),
+    );
+    return ok(found.map((l) => ({ ...l })));
+  }
+
   // ── Search ────────────────────────────────────────────────────────────────
 
   /**

@@ -17,9 +17,14 @@
 
 import { existsSync } from "fs";
 import { join, dirname } from "path";
-import type { LoreError } from "@lore/core";
+import { userInfo } from "os";
+import { z } from "zod";
+import { evidenceEntrySchema, taskClaimSchema, isClaimStale } from "@lore/core";
+import type { DocRecord, LoreError } from "@lore/core";
 import type { TreeNode } from "../../service/corpus-service.js";
 import type { DocWithNavigation } from "../../service/corpus-service.js";
+
+const evidenceArraySchema = z.array(evidenceEntrySchema);
 
 // ─── DB Discovery (used only by loader.ts) ──────────────────────────────────
 
@@ -74,6 +79,10 @@ export function exitCode(error: LoreError): number {
     case "INVALID_PARENT_TYPE":
       return 4;
     case "STALE_VERSION":
+    // reason: CLAIM_CONFLICT is a write-contention error like STALE_VERSION — both mean
+    // "someone else won the race, re-read and retry" — mapped to the same exit code.
+    // Source: SPEC-025 §4 AC-WF-3
+    case "CLAIM_CONFLICT":
       return 5;
     case "AI_PROVIDER_ERROR":
       // reason: exit 6 reserved for AI provider failures — distinct from generic store/validation
@@ -175,12 +184,83 @@ export function formatError(error: LoreError): string {
     }
     case "STORE_ERROR":
       return `Error: Storage failure: ${error.message}`;
+    case "CLAIM_CONFLICT":
+      return (
+        `Error: Task ${error.id} is claimed by '${error.holder}' (claimed ${error.age_minutes}m ago).\n` +
+        "  Pass --steal (claim) or --force (release) to override, or wait for the lease to expire."
+      );
     default: {
       const _exhaustive: never = error;
       void _exhaustive;
       return "Error: An unexpected error occurred.";
     }
   }
+}
+
+// ─── Actor Resolution ───────────────────────────────────────────────────────
+
+/**
+ * Resolve the acting user identity for `claim` / `release` / `evidence` commands.
+ * Resolution order (first non-empty wins):
+ *   1. --by flag (explicit, always wins)
+ *   2. $LORE_ACTOR environment variable
+ *   3. OS username (os.userInfo().username)
+ *
+ * @param explicit - Value of the --by flag, if the user passed one
+ * @returns Resolved actor identity string (never empty — OS username is always available)
+ * @example
+ *   resolveActor(undefined) // => "$LORE_ACTOR" or OS username
+ *   resolveActor("alice")   // => "alice"
+ */
+export function resolveActor(explicit?: string): string {
+  if (explicit !== undefined && explicit.trim() !== "") return explicit;
+  const envActor = process.env["LORE_ACTOR"];
+  if (envActor !== undefined && envActor.trim() !== "") return envActor;
+  return userInfo().username;
+}
+
+// ─── Task Workflow Badges (SPEC-025 AC-WF-9) ────────────────────────────────
+
+/**
+ * Render a `[claimed:by(stale) ✔n]`-style badge for a task row in `lore list` /
+ * `lore tree`. Reads task.extra.claim / task.extra.verification_evidence directly
+ * (no service round trip — this is presentation, not a domain query) and validates
+ * each via the same Zod schemas the store enforces, so malformed extra silently
+ * renders no badge rather than throwing.
+ *
+ * @param doc - Full task DocRecord (must include `extra` — DocSummary lacks it)
+ * @param nowIso - Current time (ISO 8601) for claim staleness computation
+ * @param ttlMinutes - Claim TTL in minutes — pass `app.taskWorkflowService.claimTtlMinutes`
+ * @returns `""` when the task has neither a claim nor evidence; otherwise a
+ *   bracketed badge string with a leading space, ready to append to a row label
+ * @example
+ *   formatWorkflowBadge(task, new Date().toISOString(), 120)
+ *   // " [claimed:alice ✔3]" or " [claimed:bob (stale) ✘1]" or ""
+ */
+export function formatWorkflowBadge(doc: DocRecord, nowIso: string, ttlMinutes: number): string {
+  const parts: string[] = [];
+
+  const claimRaw = doc.extra["claim"];
+  if (claimRaw !== undefined && claimRaw !== null) {
+    const parsedClaim = taskClaimSchema.safeParse(claimRaw);
+    if (parsedClaim.success) {
+      const stale = isClaimStale(parsedClaim.data, nowIso, ttlMinutes);
+      parts.push(`claimed:${parsedClaim.data.by}${stale ? " (stale)" : ""}`);
+    }
+  }
+
+  const evidenceRaw = doc.extra["verification_evidence"];
+  if (Array.isArray(evidenceRaw) && evidenceRaw.length > 0) {
+    const parsedEvidence = evidenceArraySchema.safeParse(evidenceRaw);
+    if (parsedEvidence.success && parsedEvidence.data.length > 0) {
+      const last = parsedEvidence.data[parsedEvidence.data.length - 1];
+      if (last !== undefined) {
+        parts.push(last.result === "fail" ? `✘${parsedEvidence.data.length}` : `✔${parsedEvidence.data.length}`);
+      }
+    }
+  }
+
+  return parts.length > 0 ? ` [${parts.join(" ")}]` : "";
 }
 
 // ─── Table Output ───────────────────────────────────────────────────────────
@@ -214,10 +294,17 @@ export function formatTable(headers: string[], rows: string[][]): string {
  *
  * @param node - root TreeNode from CorpusService.getTree()
  * @param prefix - indentation prefix (empty string for root)
+ * @param badges - optional DocId → workflow badge string lookup (AC-WF-9); rows
+ *   whose id is absent from the map render with no badge. Default empty (no
+ *   badges) keeps this fully backward-compatible with pre-SPEC-025 callers.
  * @returns multi-line string with tree connectors
  */
-export function formatTree(node: TreeNode, prefix: string = ""): string {
-  const label = `${node.doc.id.slice(0, 8)}… ${node.doc.title} (${node.doc.status})`;
+export function formatTree(
+  node: TreeNode,
+  prefix: string = "",
+  badges: ReadonlyMap<string, string> = new Map(),
+): string {
+  const label = `${node.doc.id.slice(0, 8)}… ${node.doc.title} (${node.doc.status})${badges.get(node.doc.id) ?? ""}`;
   const lines: string[] = [prefix === "" ? label : label];
 
   for (let i = 0; i < node.children.length; i++) {
@@ -226,7 +313,7 @@ export function formatTree(node: TreeNode, prefix: string = ""): string {
     const isLast = i === node.children.length - 1;
     const connector = isLast ? "└── " : "├── ";
     const childPrefix = isLast ? "    " : "│   ";
-    const childLines = formatTreeChildren(child, childPrefix);
+    const childLines = formatTreeChildren(child, childPrefix, badges);
     lines.push(prefix + connector + childLines[0]);
     for (let j = 1; j < childLines.length; j++) {
       lines.push(prefix + childLines[j]);
@@ -236,8 +323,12 @@ export function formatTree(node: TreeNode, prefix: string = ""): string {
   return lines.join("\n");
 }
 
-function formatTreeChildren(node: TreeNode, prefix: string): string[] {
-  const label = `${node.doc.id.slice(0, 8)}… ${node.doc.title} (${node.doc.status})`;
+function formatTreeChildren(
+  node: TreeNode,
+  prefix: string,
+  badges: ReadonlyMap<string, string>,
+): string[] {
+  const label = `${node.doc.id.slice(0, 8)}… ${node.doc.title} (${node.doc.status})${badges.get(node.doc.id) ?? ""}`;
   const lines: string[] = [label];
 
   for (let i = 0; i < node.children.length; i++) {
@@ -246,7 +337,7 @@ function formatTreeChildren(node: TreeNode, prefix: string): string[] {
     const isLast = i === node.children.length - 1;
     const connector = isLast ? "└── " : "├── ";
     const childPrefix = prefix + (isLast ? "    " : "│   ");
-    const childLines = formatTreeChildren(child, childPrefix);
+    const childLines = formatTreeChildren(child, childPrefix, badges);
     lines.push(prefix + connector + childLines[0]);
     for (let j = 1; j < childLines.length; j++) {
       lines.push(prefix + childLines[j]);

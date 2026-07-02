@@ -4,7 +4,7 @@
  * Source: SPEC-001 §5
  */
 
-/** Discriminated union of all service-layer errors. 13 error codes total (14 with AI_PROVIDER_ERROR). */
+/** Discriminated union of all service-layer errors. 13 error codes total (15 with AI_PROVIDER_ERROR + CLAIM_CONFLICT). */
 export type LoreError =
   | { code: "DOC_NOT_FOUND"; id: string; suggestions?: string[] }
   | { code: "SLUG_NOT_FOUND"; slug: string; suggestions?: string[] }
@@ -34,6 +34,21 @@ export type LoreError =
       exit_code?: number;
       /** First 1024 chars of provider stderr for diagnosis */
       stderr?: string;
+    }
+  /**
+   * A `lore claim` or `lore release` write was rejected because the task's advisory
+   * lease is held by someone else and neither the fresh-claim exemption (stale lease)
+   * nor an explicit override (--steal / --force) applies.
+   * CLI exit code: 5 (mapped alongside STALE_VERSION — both are write-contention errors).
+   * Source: SPEC-025 §3 D2, §4 AC-WF-3, AC-WF-6
+   */
+  | {
+      code: "CLAIM_CONFLICT";
+      id: string;
+      /** Current claim holder's actor identity */
+      holder: string;
+      /** Current claim age in minutes at the time of the conflicting request */
+      age_minutes: number;
     };
 
 /** Result type — success or failure. Use ok()/err() helpers to construct. */

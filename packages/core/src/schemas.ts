@@ -5,6 +5,7 @@
 
 import { z } from "zod";
 import type { DocStatus, DocType, Slug } from "./types.js";
+import { evidenceEntrySchema, taskClaimSchema } from "./task-workflow.js";
 
 // ─── Primitive Schemas ─────────────────────────────────────────────────────
 
@@ -83,17 +84,40 @@ export const knowledgeExtraSchema = z
   })
   .passthrough();
 
+/**
+ * Extra fields for task documents.
+ *
+ * @invariant `task_status` (legacy `todo|in-progress|done|blocked` field) was removed
+ *   from the explicit shape (SPEC-025 D6 — zero business-logic consumers, would have
+ *   drifted from computed readiness as a second parallel state signal). `.passthrough()`
+ *   means legacy docs that still carry `extra.task_status` continue to validate — the
+ *   key is preserved, just no longer schema-checked or read by any service.
+ *   Source: SPEC-025 §3 D6, §4 AC-WF-12
+ * @invariant `verification_evidence` is append-only, capped at 50 entries — the 51st
+ *   append fails loud with VALIDATION_ERROR before any write (SPEC-025 §4 AC-WF-2).
+ * @invariant `claim` is an advisory execution lease; expiry is computed read-side via
+ *   `isClaimStale`, never stored (SPEC-025 §3 D2).
+ */
 export const taskExtraSchema = z
   .object({
     plan_id: docIdSchema,
     assignee: z.string().optional(),
-    task_status: z.enum(["todo", "in-progress", "done", "blocked"]).optional(),
     /**
      * Optional phase grouping name. When present, validated against the parent
      * plan's extra.phases[].name in CorpusService.create / set (AC-PHASE-3).
      * Source: SPEC-023 §4 AC-PHASE-2
      */
     phase: z.string().optional(),
+    /**
+     * Append-only oracle verification log. Max 50 entries (SPEC-025 §4 AC-WF-2).
+     * Written exclusively via TaskWorkflowService.addEvidence — never patched in place.
+     */
+    verification_evidence: z.array(evidenceEntrySchema).max(50).optional(),
+    /**
+     * Advisory execution lease. Written exclusively via TaskWorkflowService.claim/release.
+     * Source: SPEC-025 §3 D2
+     */
+    claim: taskClaimSchema.optional(),
   })
   .passthrough();
 

@@ -59,6 +59,17 @@ export const TelemetryEventSchema = z.object({
 /** Derived type — never duplicate the shape as an interface. */
 export type TelemetryEvent = z.infer<typeof TelemetryEventSchema>;
 
+/**
+ * Event names emitted by TaskWorkflowService via TelemetryEvent.method — one per
+ * successful claim / release / evidence write (AC-WF-11, never on failed writes).
+ * Not enforced by TelemetryEventSchema.method (kept as z.string() so this file stays
+ * a stable SSOT without forcing every future service's method names into one enum) —
+ * this type exists so TaskWorkflowService's own event-recording call sites are
+ * exhaustively checked at compile time.
+ * Source: SPEC-025 §4 AC-WF-11, §8.1
+ */
+export type TaskWorkflowEventName = "task.claimed" | "task.released" | "task.evidence_added";
+
 // ─── AI Generation Event Schema ──────────────────────────────────────────────
 
 /**
