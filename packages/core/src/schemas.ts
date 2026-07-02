@@ -164,7 +164,9 @@ export const specExtraSchema = z.record(z.unknown());
 
 const baseCreateDocInputSchema = z.object({
   type: docTypeSchema,
-  title: z.string(),
+  // reason: .min(1) enforces the AC-DASH-WRITE-10 requirement that client-side Zod
+  // validation rejects empty title before making an HTTP call (SPEC-022 §9).
+  title: z.string().min(1, "Title must not be empty"),
   content: z.string().optional(),
   parent_id: z.string().optional(),
   tags: z.array(z.string()).optional(),

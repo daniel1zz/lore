@@ -231,3 +231,61 @@ export async function apiGetDoc(idOrSlug: string, opts: GetDocOpts = {}): Promis
   const qs = buildQueryString({ resolveMdx: opts.resolveMdx });
   return fetchJson<DocWithNavigation>(`/api/docs/${encodeURIComponent(idOrSlug)}${qs}`);
 }
+
+// ─── Version history ──────────────────────────────────────────────────────────
+
+/** A version log entry from the server. */
+export interface VersionLogEntry {
+  version: number;
+  action: string;
+  created_at: string;
+  created_by: string;
+  title: string;
+  status: string;
+  change_summary?: string;
+}
+
+/** Version log response. */
+export interface VersionLogResponse {
+  versions: VersionLogEntry[];
+  total: number;
+}
+
+/** Unified diff between two versions. */
+export interface VersionDiffResponse {
+  from_version: number;
+  to_version: number;
+  content_diff: string;
+}
+
+/**
+ * Fetch version history for a document.
+ *
+ * @param idOrSlug - Document ULID or slug.
+ * @param opts - Pagination options.
+ * @returns Version log with entries.
+ * @throws {ApiError} On HTTP or network error.
+ */
+export async function apiGetVersionLog(
+  idOrSlug: string,
+  opts: { limit?: number; offset?: number } = {},
+): Promise<VersionLogResponse> {
+  const qs = buildQueryString(opts as Record<string, number | undefined>);
+  return fetchJson<VersionLogResponse>(`/api/docs/${encodeURIComponent(idOrSlug)}/log${qs}`);
+}
+
+/**
+ * Fetch a unified diff between two versions of a document.
+ *
+ * @param idOrSlug - Document ULID or slug.
+ * @param opts - from/to version numbers.
+ * @returns Unified diff.
+ * @throws {ApiError} On HTTP or network error.
+ */
+export async function apiGetVersionDiff(
+  idOrSlug: string,
+  opts: { from?: number; to?: number } = {},
+): Promise<VersionDiffResponse> {
+  const qs = buildQueryString(opts as Record<string, number | undefined>);
+  return fetchJson<VersionDiffResponse>(`/api/docs/${encodeURIComponent(idOrSlug)}/diff${qs}`);
+}

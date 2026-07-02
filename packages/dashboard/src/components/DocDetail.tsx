@@ -1,40 +1,267 @@
 /**
- * DocDetail — full document view with metadata table, markdown body, and navigation footer.
- * Purpose: renders the complete doc view for the /docs/$id route.
+ * DocDetail — full document view with read + write modes.
+ * Purpose: renders the complete doc view; adds edit mode, status transitions,
+ *   editable links, and history tab when the server is authenticated (SPEC-022).
  * Public surface: DocDetail, DocDetailProps
- * Invariants: read-only. All write paths (edit, approve, etc.) are out of scope for SPEC-015.
- * Side-effect class: pure
+ * Invariants:
+ *   - Edit mode is toggled by the "Edit" button; shows CodeMirror editor.
+ *   - Save triggers PATCH with If-Match (optimistic concurrency); 409 → ConflictModal.
+ *   - Status transitions go through the appropriate dashboard endpoint
+ *     (approve → /approve, reject → /reject, other → PATCH status field).
+ *   - Links panel shows related docs with add/remove affordances.
+ *   - History tab loads lazily when the "History" tab is clicked.
+ *   - Draft content is restored from localStorage on mount if version matches.
+ *   - onMutated is called after every successful write; the caller is responsible
+ *     for cache invalidation (inversion-of-control avoids needing QueryClientProvider
+ *     in unit tests). SPEC-022 §9.
+ * Side-effect class: IO (fetch, localStorage)
+ * Source: SPEC-015, SPEC-022 §9.2
  */
 
+import { useState, useCallback } from "react";
+import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
+import { Editor } from "@/components/Editor";
+import { StatusPill } from "@/components/StatusPill";
+import { LinksPanel } from "@/components/LinksPanel";
+import { HistoryTab } from "@/components/HistoryTab";
+import { ConflictModal } from "@/components/ConflictModal";
+import { saveDraft, loadDraft, clearDraft, isDraftStale } from "@/store/draft";
 import type { DocWithNavigation } from "@/lib/api";
+import type { DocStatus, LinkType } from "@lore/core";
+import {
+  apiPatchDoc,
+  apiApproveDoc,
+  apiRejectDoc,
+  apiCreateLink,
+  apiDeleteLink,
+  ConflictError,
+  DashboardApiError,
+} from "@/api/mutations";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface DocDetailProps {
   /** Document with navigation context from the API. */
   docWithNav: DocWithNavigation;
   /** Called when the user clicks on a sibling/related doc ID. */
   onNavigate?: (idOrSlug: string) => void;
+  /**
+   * Called after any successful write (save/approve/reject/link).
+   * Caller should invalidate query cache for this doc and related lists.
+   * Decoupled here so DocDetail works in tests without QueryClientProvider.
+   */
+  onMutated?: () => void;
 }
 
+// ─── Tabs ─────────────────────────────────────────────────────────────────────
+
+type ActiveTab = "content" | "history";
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
 /**
- * Full document detail view. Renders markdown content and navigation sidebar context.
+ * Full document detail view with optional write mode.
+ * Detects session via cookie (bootstrapAuthIfNeeded already ran), shows write UI.
  *
  * @example
- * <DocDetail docWithNav={data} onNavigate={(id) => navigate({ to: '/docs/$id', params: { id } })} />
+ * const queryClient = useQueryClient();
+ * <DocDetail
+ *   docWithNav={data}
+ *   onNavigate={(id) => navigate({ to: '/docs/$id', params: { id } })}
+ *   onMutated={() => queryClient.invalidateQueries({ queryKey: ["doc", doc.id] })}
+ * />
  */
-export function DocDetail({ docWithNav, onNavigate }: DocDetailProps): React.ReactElement {
+export function DocDetail({ docWithNav, onNavigate, onMutated }: DocDetailProps): React.ReactElement {
   const { doc, navigation } = docWithNav;
+
+  // ── Edit state ──────────────────────────────────────────────────────────────
+  const [isEditing, setIsEditing] = useState(false);
+  const [editContent, setEditContent] = useState<string>(() => {
+    // Restore draft from localStorage if version matches.
+    const draft = loadDraft(doc.id);
+    if (draft !== null && !isDraftStale(draft, doc.version)) {
+      return draft.content;
+    }
+    return doc.content;
+  });
+  const [isSaving, setIsSaving] = useState(false);
+
+  // ── Conflict modal state ────────────────────────────────────────────────────
+  const [conflictError, setConflictError] = useState<ConflictError | null>(null);
+  const [isForcing, setIsForcing] = useState(false);
+
+  // ── Status transition state ──────────────────────────────────────────────────
+  const [isTransitioning, setIsTransitioning] = useState(false);
+
+  // ── Links state ─────────────────────────────────────────────────────────────
+  const [isLinkPending, setIsLinkPending] = useState(false);
+
+  // ── Tab state ──────────────────────────────────────────────────────────────
+  const [activeTab, setActiveTab] = useState<ActiveTab>("content");
+
+  // ── Draft autosave ────────────────────────────────────────────────────────
+  const handleEditorChange = useCallback(
+    (value: string) => {
+      setEditContent(value);
+      // reason: Draft is saved to localStorage on every keystroke to protect against
+      // accidental refresh. Cleared on successful save. SPEC-022 §6.
+      saveDraft({ doc_id: doc.id, version: doc.version, content: value, last_edited_at: new Date().toISOString() });
+    },
+    [doc.id, doc.version],
+  );
+
+  // ── Save (PATCH) ─────────────────────────────────────────────────────────────
+  async function handleSave(): Promise<void> {
+    setIsSaving(true);
+    try {
+      await apiPatchDoc(doc.id, { content: editContent }, { version: doc.version });
+      clearDraft(doc.id);
+      onMutated?.();
+      setIsEditing(false);
+      toast.success("Document saved");
+    } catch (err) {
+      if (err instanceof ConflictError) {
+        setConflictError(err);
+      } else {
+        const message = err instanceof DashboardApiError ? err.message : "Save failed";
+        toast.error(message);
+      }
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleForceOverwrite(): Promise<void> {
+    setIsForcing(true);
+    try {
+      await apiPatchDoc(doc.id, { content: editContent }, { forceOverwrite: true });
+      clearDraft(doc.id);
+      setConflictError(null);
+      onMutated?.();
+      setIsEditing(false);
+      toast.success("Document saved (force overwrite)");
+    } catch (err) {
+      const message = err instanceof DashboardApiError ? err.message : "Force save failed";
+      toast.error(message);
+    } finally {
+      setIsForcing(false);
+    }
+  }
+
+  // ── Status transition ────────────────────────────────────────────────────────
+  async function handleTransition(toStatus: DocStatus, reason?: string): Promise<void> {
+    setIsTransitioning(true);
+    try {
+      if (toStatus === "approved") {
+        await apiApproveDoc(doc.id);
+        toast.success("Document approved");
+      } else if (toStatus === "draft" && doc.status === "in-review") {
+        await apiRejectDoc(doc.id, reason);
+        toast.success("Document rejected");
+      } else {
+        await apiPatchDoc(doc.id, { status: toStatus });
+        toast.success(`Status → ${toStatus}`);
+      }
+      onMutated?.();
+    } catch (err) {
+      const message = err instanceof DashboardApiError ? err.message : "Transition failed";
+      toast.error(message);
+    } finally {
+      setIsTransitioning(false);
+    }
+  }
+
+  // ── Links ────────────────────────────────────────────────────────────────────
+  async function handleLinkAdd(toId: string, type: LinkType): Promise<string | null> {
+    setIsLinkPending(true);
+    try {
+      await apiCreateLink(doc.id, { to: toId, type });
+      onMutated?.();
+      return null;
+    } catch (err) {
+      if (err instanceof DashboardApiError) return err.message;
+      return "Failed to add link";
+    } finally {
+      setIsLinkPending(false);
+    }
+  }
+
+  async function handleLinkRemove(toId: string): Promise<void> {
+    setIsLinkPending(true);
+    try {
+      await apiDeleteLink(doc.id, toId);
+      onMutated?.();
+    } catch (err) {
+      const message = err instanceof DashboardApiError ? err.message : "Failed to remove link";
+      toast.error(message);
+    } finally {
+      setIsLinkPending(false);
+    }
+  }
+
+  // ── Link entries from navigation ─────────────────────────────────────────────
+  const linkEntries = navigation.related.map((r) => ({
+    to_id: r.id,
+    title: r.title,
+    link_type: r.link_type as LinkType,
+  }));
 
   return (
     <article className="max-w-4xl mx-auto space-y-6">
+      {/* Header */}
       <header>
-        <div className="flex items-center gap-2 mb-2">
+        <div className="flex items-center gap-2 mb-2 flex-wrap">
           <Badge variant="secondary">{doc.type}</Badge>
-          <Badge variant="outline">{doc.status}</Badge>
+          {/* reason: only enable status transitions and Edit when caller provides onMutated
+              (i.e., is in a proper query-provider context). Keeps component usable in
+              read-only / unit-test scenarios without a QueryClientProvider. SPEC-022 §9. */}
+          <StatusPill
+            status={doc.status}
+            {...(onMutated !== undefined ? { onTransition: handleTransition } : {})}
+            isPending={isTransitioning}
+          />
+          <div className="ml-auto flex items-center gap-2">
+            {onMutated !== undefined && !isEditing ? (
+              <button
+                className="text-sm px-3 py-1 border rounded hover:bg-muted"
+                onClick={() => {
+                  setEditContent(doc.content);
+                  setIsEditing(true);
+                }}
+                type="button"
+              >
+                Edit
+              </button>
+            ) : onMutated !== undefined && isEditing ? (
+              <>
+                <button
+                  className="text-sm px-3 py-1 border rounded hover:bg-muted"
+                  onClick={() => {
+                    setIsEditing(false);
+                    setEditContent(doc.content);
+                    clearDraft(doc.id);
+                  }}
+                  type="button"
+                  disabled={isSaving}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="text-sm px-3 py-1 bg-primary text-primary-foreground rounded hover:bg-primary/90 disabled:opacity-50"
+                  onClick={() => void handleSave()}
+                  type="button"
+                  disabled={isSaving}
+                >
+                  {isSaving ? "Saving..." : "Save"}
+                </button>
+              </>
+            ) : null}
+          </div>
         </div>
         <h1 className="text-2xl font-bold tracking-tight">{doc.title}</h1>
         <p className="text-sm text-muted-foreground mt-1 font-mono">{doc.slug}</p>
@@ -42,12 +269,17 @@ export function DocDetail({ docWithNav, onNavigate }: DocDetailProps): React.Rea
 
       <Separator />
 
+      {/* Metadata table */}
       <section aria-label="Document metadata">
         <Table>
           <TableBody>
             <TableRow>
               <TableCell className="font-medium w-32">ID</TableCell>
               <TableCell className="font-mono text-xs">{doc.id}</TableCell>
+            </TableRow>
+            <TableRow>
+              <TableCell className="font-medium">Version</TableCell>
+              <TableCell>v{doc.version}</TableCell>
             </TableRow>
             <TableRow>
               <TableCell className="font-medium">Created</TableCell>
@@ -83,14 +315,53 @@ export function DocDetail({ docWithNav, onNavigate }: DocDetailProps): React.Rea
 
       <Separator />
 
-      <section aria-label="Document content" className="prose prose-sm max-w-none dark:prose-invert">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{doc.content}</ReactMarkdown>
-      </section>
+      {/* Tab switcher */}
+      <div className="flex gap-4 border-b">
+        {(["content", "history"] as ActiveTab[]).map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            className={`pb-2 text-sm font-medium capitalize border-b-2 -mb-px transition-colors ${
+              activeTab === tab
+                ? "border-primary text-primary"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+            onClick={() => setActiveTab(tab)}
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
 
-      {(navigation.parent !== null || navigation.siblings.length > 0 || navigation.children.length > 0) && (
+      {/* Content tab */}
+      {activeTab === "content" && (
+        <section aria-label="Document content">
+          {isEditing ? (
+            <Editor
+              initialValue={editContent}
+              onChange={handleEditorChange}
+              splitView={true}
+            />
+          ) : (
+            <div className="prose prose-sm max-w-none dark:prose-invert">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{doc.content}</ReactMarkdown>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* History tab */}
+      {activeTab === "history" && (
+        <section aria-label="Version history">
+          <HistoryTab docId={doc.id} />
+        </section>
+      )}
+
+      {/* Navigation footer + Links panel */}
+      {(navigation.parent !== null || navigation.siblings.length > 0 || navigation.children.length > 0 || linkEntries.length > 0) && (
         <>
           <Separator />
-          <footer aria-label="Document navigation" className="space-y-3">
+          <footer aria-label="Document navigation" className="space-y-4">
             {navigation.parent !== null && (
               <div>
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">Parent</p>
@@ -120,8 +391,32 @@ export function DocDetail({ docWithNav, onNavigate }: DocDetailProps): React.Rea
                 </div>
               </div>
             )}
+
+            {/* reason: onMutated absent means caller is in read-only context (e.g., unit test).
+                  Pass write handlers only when the parent has registered a cache-invalidation
+                  callback — this avoids mounting LinkAddSearch (with useQuery) in tests
+                  that don't provide QueryClientProvider. SPEC-022 §9. */}
+            <LinksPanel
+              links={linkEntries}
+              {...(onMutated !== undefined
+                ? { onLinkAdd: handleLinkAdd, onLinkRemove: handleLinkRemove }
+                : {})}
+              isPending={isLinkPending}
+            />
           </footer>
         </>
+      )}
+
+      {/* Conflict modal (shown on 409) */}
+      {conflictError !== null && (
+        <ConflictModal
+          serverDoc={conflictError.current}
+          myContent={conflictError.mine}
+          diff={conflictError.diff}
+          isPending={isForcing}
+          onForceOverwrite={() => void handleForceOverwrite()}
+          onClose={() => setConflictError(null)}
+        />
       )}
     </article>
   );

@@ -48,6 +48,7 @@ function makeApp(store?: InMemoryStore): App {
     // reason: test does not exercise AI-default path; callerSurface required by App interface (SPEC-024).
     callerSurface: "cli" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),
+    telemetry,
     close: () => { telemetry.close(); },
   };
 }

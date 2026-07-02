@@ -8,6 +8,7 @@ import type { App } from "../../app.js";
 import type { ActorContext } from "./auth.js";
 import { ALLOWED_ORIGINS } from "./auth.js";
 import { jsonOk, jsonError, loreErrorResponse, parseJsonBody, corsHeaders } from "./middleware.js";
+import { handleDashboardRoute } from "./dashboard-routes.js";
 import type { ListFilters, SearchFilters } from "../../service/corpus-service.js";
 import type { PendingFilters } from "../../service/review-service.js";
 import type { CreateDocInput, DocPatch } from "@lore/core";
@@ -87,6 +88,14 @@ export async function handleApiRoute(
 
   // OPTIONS — CORS preflight (already handled in server, but guard here too)
   if (method === "OPTIONS") return new Response(null, { status: 204 });
+
+  // /api/dashboard/* — cookie-only write endpoints (SPEC-022 §9.3)
+  // reason: dispatched BEFORE the v1 routes so the /api/dashboard/* namespace is
+  // never accidentally matched by v1 wildcard patterns. Bearer-token actors get 403
+  // inside handleDashboardRoute (AC-DASH-WRITE-9); unauthenticated already caught above.
+  if (path.startsWith("/api/dashboard/")) {
+    return handleDashboardRoute(req, url, app, actor);
+  }
 
   // GET /api/auth/me — return session actor context (SPEC-016 §3.2)
   if (method === "GET" && path === "/api/auth/me") {

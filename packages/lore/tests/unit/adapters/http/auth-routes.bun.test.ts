@@ -47,6 +47,7 @@ import { VersionService } from "../../../../src/service/version-service.js";
 import { OutlineService } from "../../../../src/service/outline-service.js";
 import { MigrationService } from "../../../../src/service/migration-service.js";
 import { TreeCheckService } from "../../../../src/service/tree-check-service.js";
+import { NoOpTelemetry } from "@lore/core";
 import { MIGRATION_002_SQL } from "../../../../src/store/migrations/migration-002.js";
 import type { App } from "../../../../src/app.js";
 
@@ -90,6 +91,7 @@ async function makeTestServer(): Promise<TestContext> {
     // reason: test does not exercise AI-default path; callerSurface required by App interface (SPEC-024).
     callerSurface: "cli" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),
+    telemetry: new NoOpTelemetry(),
     close: () => db.close(),
   };
 
