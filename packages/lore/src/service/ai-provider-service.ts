@@ -159,6 +159,14 @@ export class AIProviderService {
         // SPEC-024 AC-NOAI-8: optional surface + source for AI default traceability
         ...(args.caller_surface !== undefined ? { caller_surface: args.caller_surface } : {}),
         ...(args.ai_default_source !== undefined ? { ai_default_source: args.ai_default_source } : {}),
+        // SPEC-020 AC-HTTP-TEL-1: populate usage when the provider returns token counts.
+        // HttpAIProvider always populates usage on success; ClaudeCliProvider never does.
+        // reason: usage is omitted from the spread when absent (not set to undefined) to
+        // keep the strict aiGenerationEventSchema happy — undefined optional fields are
+        // valid in Zod, but omitting them produces cleaner JSONL output for downstream consumers.
+        ...(result.ok && result.value.usage !== undefined
+          ? { usage: result.value.usage }
+          : {}),
       });
     }
 

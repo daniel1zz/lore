@@ -93,6 +93,23 @@ export const aiGenerationEventSchema = z.object({
    * Optional for backward compatibility with events emitted before SPEC-024 landed.
    */
   caller_surface: z.enum(["cli", "agent", "mcp", "http_cookie", "http_token"]).optional(),
+  /**
+   * Token usage from the provider API (SPEC-020 AC-HTTP-TEL-1).
+   * Populated by HttpAIProvider when the Anthropic API returns usage data.
+   * Absent for ClaudeCliProvider (CLI exit-code model has no token tracking).
+   * Optional for backward compatibility with events emitted before SPEC-020 landed.
+   */
+  usage: z
+    .object({
+      input_tokens: z.number().int().nonnegative(),
+      output_tokens: z.number().int().nonnegative(),
+      /**
+       * Anthropic stop reason from the top-level response (e.g. "end_turn", "max_tokens").
+       * Optional: absent when the provider does not return a stop reason.
+       */
+      stop_reason: z.string().optional(),
+    })
+    .optional(),
 }).strict();
 
 /** Derived type for an AI generation telemetry event. */
