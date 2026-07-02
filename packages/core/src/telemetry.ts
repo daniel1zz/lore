@@ -117,6 +117,27 @@ export const aiGenerationEventSchema = z.object({
       stop_reason: z.string().optional(),
     })
     .optional(),
+  /**
+   * Discriminator for what kind of AI operation produced this event.
+   *   "create"     — lore create --ai (SPEC-017; existing events without this field default here)
+   *   "regenerate" — lore set --regenerate (SPEC-019)
+   *   "refine"     — lore set --refine / --refine-stdin (SPEC-019)
+   *   "infer"      — lore link --infer (SPEC-019)
+   *
+   * .default("create") so events emitted before SPEC-019 parse cleanly at schema validation
+   * time — the field is optional in the INPUT to .parse() but required in the OUTPUT type.
+   * Source: SPEC-019 §8 Q6, AC-AI-TEL-1
+   */
+  kind: z.enum(["create", "regenerate", "refine", "infer"]).default("create"),
+  /**
+   * ULID of the document that was mutated by the AI operation.
+   *   null — for "create" (doc does not exist yet at call time)
+   *   string — for "regenerate"/"refine" (the doc being re-written)
+   *   string — for "infer" (the from-doc's ID)
+   * Optional for backward compat with pre-SPEC-019 events.
+   * Source: SPEC-019 AC-AI-TEL-1
+   */
+  target_doc_id: z.string().nullable().optional(),
 }).strict();
 
 /** Derived type for an AI generation telemetry event. */

@@ -66,6 +66,7 @@ function makeApp(): { app: App; aiProvider: InMemoryAIProvider } {
     {},
     new NoOpTelemetry(),
     false,
+    8000, // refineMaxInputChars — SPEC-019 default (tests don't exercise truncation)
   );
 
   const app: App = {

@@ -72,6 +72,7 @@ function makeService({
     templates as never,
     telemetry,
     aiTelemetryEnabled,
+    8000, // refineMaxInputChars — SPEC-019 default (tests don't exercise truncation)
   );
   return { service, provider, telemetry, emitCalls };
 }
