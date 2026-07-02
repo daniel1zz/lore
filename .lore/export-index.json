@@ -252,6 +252,14 @@
     "01KWHB786ZMZTMS1B0CEG1M925": {
       "human_id": "KN-003",
       "file_path": "docs/requirements/knowledge/KN-003-assessment-spec-026-implementation-ai-plan-assessm.md"
+    },
+    "01KWHE1AFQMVH39ZHZ22N8SXK2": {
+      "human_id": "KN-004",
+      "file_path": "docs/requirements/knowledge/KN-004-assess-usage-patterns-scoping-bugfix-plans-and-att.md"
+    },
+    "01KWHDZJHF67GJN5KXE7XSDVVE": {
+      "human_id": "KN-005",
+      "file_path": "docs/requirements/knowledge/KN-005-assessment-spec-021-hardening-export-collision-fix.md"
     }
   }
 }
