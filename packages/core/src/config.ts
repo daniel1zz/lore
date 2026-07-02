@@ -1,31 +1,34 @@
 /**
- * LoreConfig — Zod schema, types, pure parse helpers, and file I/O.
+ * LoreConfig — Zod schema, types, and pure parse helpers. Browser-safe.
  *
  * Public surface:
  *   - LoreConfigSchema / LoreConfig — project-level config (.lore/config.yaml)
  *   - GlobalLoreConfigSchema / GlobalLoreConfig — user-level global config (XDG path)
  *   - LoreDefaultsSchema / LoreDefaults — shared defaults section (editor, format, color)
- *   - parseConfig / loadConfigFromString / loadConfig / saveConfig — project config I/O
- *   - resolveGlobalConfigPath / loadGlobalConfig — global config resolution + loading
+ *   - parseConfig / loadConfigFromString — pure YAML/object → LoreConfig validation
  *   - mergeDefaults — project defaults win over global defaults
- *   - resolveSyncCredentials — D-004 credential resolution (env-var NAME only)
+ *   - resolveSyncCredentials — D-004 credential resolution (env-var NAME only; reads
+ *     process.env, not the filesystem — safe to keep here)
  *
  * Invariants:
  *   - D-004: auth_token_env is ALWAYS an env-var NAME — never the plaintext token
  *   - D-007: sync.enabled=true + remote_url MUST be present (TursoStore selection)
- *   - Global config missing/empty → ok({}) (NOT an error — user-optional)
- *   - Global config malformed → err(VALIDATION_ERROR) (caller decides whether to warn)
+ *   - This file MUST NOT import Node builtins (fs/path/os/child_process/...), even
+ *     transitively — it is re-exported from the browser-safe `@lore/core` barrel
+ *     (`index.ts`) and consumed by `@lore/dashboard`. File-IO helpers (`loadConfig`,
+ *     `saveConfig`, `resolveGlobalConfigPath`, `loadGlobalConfig`) live in the
+ *     Node-only sibling `config-node.ts`, exported only via the `@lore/core/node`
+ *     subpath. Regression oracle: `packages/dashboard/tests/e2e/write-flow.pw.ts`
+ *     (SPEC-022) — a `fs` import reachable from this file crashes the dashboard SPA
+ *     at load time.
  *
- * Side-effect class: IO (loadConfig, saveConfig, loadGlobalConfig read/write disk)
+ * Side-effect class: pure (file IO lives in config-node.ts)
  *
  * Source: SPEC-009 §6, SPEC-003 §6.2
  */
 
 import { z } from "zod";
 import yaml from "yaml";
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
-import { join } from "path";
-import { homedir } from "os";
 import { ok, err } from "./errors.js";
 import type { Result, LoreError } from "./errors.js";
 import { TelemetryConfigSchema } from "./telemetry.js";
@@ -198,178 +201,10 @@ export function loadConfigFromString(
   return parseConfig(parsed);
 }
 
-// ─── File I/O ─────────────────────────────────────────────────────────────────
-
-const CONFIG_FILE = ".lore/config.yaml";
-
-/**
- * Load LoreConfig from <dir>/.lore/config.yaml.
- * Missing file or invalid content → {ok:false, error}. Never throws.
- */
-export function loadConfig(dir: string): Result<LoreConfig, LoreError> {
-  try {
-    const configPath = join(dir, CONFIG_FILE);
-    const raw = readFileSync(configPath, "utf8");
-    return loadConfigFromString(raw);
-  } catch (e) {
-    const message =
-      e instanceof Error ? e.message : "Failed to read config file";
-    const cause = e instanceof Error ? e : undefined;
-    return err({
-      code: "STORE_ERROR",
-      message,
-      ...(cause !== undefined ? { cause } : {}),
-    } satisfies LoreError);
-  }
-}
-
-/**
- * Write LoreConfig to <dir>/.lore/config.yaml.
- * D-004: only the env-var NAME (auth_token_env) is written — never a resolved token value.
- * Creates <dir>/.lore/ if it does not exist. Never throws.
- */
-export function saveConfig(
-  dir: string,
-  config: LoreConfig,
-): Result<void, LoreError> {
-  try {
-    const loreDir = join(dir, ".lore");
-    mkdirSync(loreDir, { recursive: true });
-    const yamlText = yaml.stringify(config);
-    writeFileSync(join(loreDir, "config.yaml"), yamlText, "utf8");
-    return ok(undefined);
-  } catch (e) {
-    const message =
-      e instanceof Error ? e.message : "Failed to write config file";
-    const cause = e instanceof Error ? e : undefined;
-    return err({
-      code: "STORE_ERROR",
-      message,
-      ...(cause !== undefined ? { cause } : {}),
-    } satisfies LoreError);
-  }
-}
-
-// ─── Global Config I/O ────────────────────────────────────────────────────────
-
-/**
- * Resolve the global Lore config file path using the XDG Base Directory spec
- * and the $LORE_CONFIG_HOME app-specific escape hatch (SPEC-003 §6.2).
- *
- * Resolution order (first existing path wins):
- *   1. $LORE_CONFIG_HOME/config.yaml
- *   2. $XDG_CONFIG_HOME/lore/config.yaml
- *   3. ~/.config/lore/config.yaml
- *
- * Returns undefined when no file exists at any candidate path.
- * Pure side-effect: reads env vars + existsSync only. Never writes.
- *
- * @example
- *   const path = resolveGlobalConfigPath();
- *   // "/home/alice/.config/lore/config.yaml" | undefined
- */
-export function resolveGlobalConfigPath(): string | undefined {
-  // 1. $LORE_CONFIG_HOME/config.yaml — app-specific escape hatch (highest precedence)
-  const loreConfigHome = process.env["LORE_CONFIG_HOME"];
-  if (loreConfigHome) {
-    const candidate = join(loreConfigHome, "config.yaml");
-    if (existsSync(candidate)) return candidate;
-  }
-
-  // 2. $XDG_CONFIG_HOME/lore/config.yaml — XDG explicit
-  const xdgConfigHome = process.env["XDG_CONFIG_HOME"];
-  if (xdgConfigHome) {
-    const candidate = join(xdgConfigHome, "lore", "config.yaml");
-    if (existsSync(candidate)) return candidate;
-  }
-
-  // 3. ~/.config/lore/config.yaml — XDG default (macOS/Linux/Windows all use ~/.config per pnpm/helm/gh)
-  const defaultCandidate = join(homedir(), ".config", "lore", "config.yaml");
-  if (existsSync(defaultCandidate)) return defaultCandidate;
-
-  return undefined;
-}
-
-/**
- * Load GlobalLoreConfig from the XDG-resolved path (or a provided path override).
- *
- * Behaviour:
- *   - No file exists at any XDG candidate → ok({})  (missing is NOT an error)
- *   - Empty or null YAML file → ok({})
- *   - Malformed YAML → err(VALIDATION_ERROR)
- *   - Unknown top-level keys (incl. project/sync/telemetry) → err(VALIDATION_ERROR)
- *   - Valid schema → ok(parsed)
- *
- * @param configPath Optional explicit path; when omitted, resolveGlobalConfigPath() is called.
- *   Pass the result of resolveGlobalConfigPath() when you already have it (avoids a double stat).
- * @returns Result<GlobalLoreConfig, LoreError> — never throws.
- * @example
- *   const path = resolveGlobalConfigPath();
- *   if (path) {
- *     const result = loadGlobalConfig(path);
- *     if (!result.ok) console.error(`Warning: global config at ${path} ignored`);
- *   }
- */
-export function loadGlobalConfig(
-  configPath?: string,
-): Result<GlobalLoreConfig, LoreError> {
-  const resolvedPath = configPath ?? resolveGlobalConfigPath();
-
-  // Missing file → ok({}) — global config is always optional
-  if (resolvedPath === undefined) {
-    return ok({});
-  }
-
-  let raw: string;
-  try {
-    raw = readFileSync(resolvedPath, "utf8");
-  } catch (_e) {
-    // reason: file may disappear between resolveGlobalConfigPath and read (TOCTOU).
-    // Treat as missing — still not an error.
-    return ok({});
-  }
-
-  // Empty file → ok({}) — treat same as missing
-  if (!raw.trim()) {
-    return ok({});
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = yaml.parse(raw);
-  } catch (_e) {
-    return err({
-      code: "VALIDATION_ERROR",
-      field: "yaml",
-      message: "Failed to parse YAML: malformed input",
-      value: raw,
-    } satisfies LoreError);
-  }
-
-  // null/undefined (e.g. YAML comment-only file) → ok({})
-  if (parsed === null || parsed === undefined) {
-    return ok({});
-  }
-
-  const parseResult = GlobalLoreConfigSchema.safeParse(parsed);
-  if (parseResult.success) {
-    return ok(parseResult.data);
-  }
-
-  const firstIssue = parseResult.error.issues[0];
-  const field =
-    firstIssue !== undefined
-      ? firstIssue.path.join(".") || "root"
-      : "root";
-  const message =
-    firstIssue !== undefined ? firstIssue.message : parseResult.error.message;
-  return err({
-    code: "VALIDATION_ERROR",
-    field,
-    message,
-    value: parsed,
-  } satisfies LoreError);
-}
+// reason: File-IO helpers (loadConfig, saveConfig, resolveGlobalConfigPath,
+// loadGlobalConfig) moved to config-node.ts — they import fs/path/os and must
+// only be reachable via the `@lore/core/node` subpath. See that file's header
+// for the full list and behaviour contracts (unchanged from before the split).
 
 /**
  * Merge global defaults with project-level defaults.

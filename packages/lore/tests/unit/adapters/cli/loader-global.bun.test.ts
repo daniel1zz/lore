@@ -30,7 +30,7 @@ import { join, resolve } from "path";
 import { tmpdir } from "os";
 import { createApp } from "../../../../src/app.js";
 import { loadLoreApp } from "../../../../src/adapters/cli/loader.js";
-import { saveConfig } from "@lore/core";
+import { saveConfig } from "@lore/core/node";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 

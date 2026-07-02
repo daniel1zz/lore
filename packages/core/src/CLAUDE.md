@@ -6,6 +6,7 @@ Foundational types, error model, runtime validation, lifecycle rules, config, an
 
 ## Key Invariants
 
+- **Browser safety (`index.ts` barrel MUST stay import-safe from a browser bundle)** — `@lore/dashboard` imports only `@lore/core` (never `@lore/core/node`). Vite's dev-mode `fs` stub throws on named-export access **at module-load time**, not call time — so a single top-level `import { x } from "fs"` anywhere in the barrel's transitive closure blanks the SPA before React mounts, even if the importing code path never runs in-browser. Node-builtin-dependent code (`fs`/`path`/`os`/`child_process`) is split into `config-node.ts` (loadConfig/saveConfig/resolveGlobalConfigPath/loadGlobalConfig) and `telemetry-node.ts` (JsonlTelemetry/createTelemetry), both re-exported only via the `@lore/core/node` subpath (`node.ts`, `package.json#exports["./node"]`). `config.ts` and `telemetry.ts` keep the pure Zod schemas/types/interfaces/`NoOpTelemetry` and MUST NOT re-import fs/path/os. **Regression oracle**: `packages/dashboard/tests/e2e/write-flow.pw.ts` (SPEC-022, Playwright) — a `pageerror` in that suite before scenario 1 completes is this exact class of bug recurring. Grep check: `grep -rn 'from "fs"\|from "path"\|from "os"' packages/core/src/index.ts packages/core/src/config.ts packages/core/src/telemetry.ts` → 0 hits.
 - **`DOC_TYPE_ROLE_MAP`** in `types.ts` is the SSOT for `DocType → DocRole`. Never derive role another way.
 - **Result over throws** — `errors.ts` defines the `Result<T, LoreError>` discriminated union and `ok()` / `err()` constructors. Modules that import `LoreError` use these helpers, not raw object literals.
 - **Slug shape** — `^[a-z][a-z0-9-]{1,62}[a-z0-9]$` (3–64 chars, no leading/trailing hyphen). Generation lives in `schemas.ts::slugify`; collision resolution (-2, -3, …) is delegated to the caller via `slugifyWithCollision`'s `existsSlug` callback (sync or async).
@@ -30,9 +31,10 @@ Foundational types, error model, runtime validation, lifecycle rules, config, an
 `taskExtraSchema` adds `phase?: string` — validated against parent plan's `extra.phases[].name` by `CorpusService` (not Zod, since it's cross-entity). Tasks without `extra.phase` are always valid regardless of plan phase declarations.
 - **Parent-type contract** — `doc-type-rules.ts::PARENT_TYPE_CONTRACT` and `isValidParentType(child, parent)` are imported by `CorpusService` and `TreeCheckService`. Adding a new doc type requires updating this contract.
 - **Graph helpers stay pure** — `graph-utils.ts::ancestorChainWalk` and `tree-blueprint.ts` operate on plain data; they don't take a `StoreInterface`. Callers fetch the data and pass it in.
-- **Config side effects isolated to `loadConfig` / `saveConfig`** — `parseConfig` and `loadConfigFromString` are pure and Result-returning; tests pass YAML strings, not file paths.
+- **Config side effects isolated to `loadConfig` / `saveConfig`** (now in `config-node.ts`, `@lore/core/node` subpath) — `parseConfig` and `loadConfigFromString` (in `config.ts`, default barrel) are pure and Result-returning; tests pass YAML strings, not file paths.
 
 ## Links
 
 - Depends on: **(no other `@lore/*` packages)** — leaf of the dependency graph.
-- Used by: `@lore/lore` (all of `packages/lore/src/`): service/, store/, adapters/cli/, adapters/mcp/, adapters/http/, eval/, and app.ts.
+- Used by: `@lore/lore` (all of `packages/lore/src/`): service/, store/, adapters/cli/, adapters/mcp/, adapters/http/, eval/, and app.ts — imports both `@lore/core` and `@lore/core/node`.
+  `@lore/dashboard` — imports `@lore/core` ONLY (never `@lore/core/node`; see Browser safety invariant above).

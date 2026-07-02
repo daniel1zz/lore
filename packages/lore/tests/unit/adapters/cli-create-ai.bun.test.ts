@@ -38,7 +38,7 @@ import { mkdtempSync, writeFileSync, mkdirSync } from "fs";
 import { join, resolve } from "path";
 import { tmpdir } from "os";
 import { createApp } from "../../../src/app.js";
-import { saveConfig } from "@lore/core";
+import { saveConfig } from "@lore/core/node";
 
 // ─── Command type ─────────────────────────────────────────────────────────────
 

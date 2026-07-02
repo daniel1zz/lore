@@ -6,7 +6,9 @@ import { defineCommand } from "citty";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { createApp } from "../../../app.js";
-import { saveConfig } from "@lore/core";
+// reason: saveConfig writes .lore/config.yaml via Node fs — only reachable via
+// the @lore/core/node subpath (browser-safety split, packages/core/src/CLAUDE.md).
+import { saveConfig } from "@lore/core/node";
 import { formatError } from "../utils.js";
 
 export default defineCommand({

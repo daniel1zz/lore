@@ -26,13 +26,11 @@ import {
 } from "fs";
 import { join, resolve } from "path";
 import { tmpdir } from "os";
-import {
-  GlobalLoreConfigSchema,
-  resolveGlobalConfigPath,
-  loadGlobalConfig,
-  mergeDefaults,
-  LoreDefaultsSchema,
-} from "@lore/core";
+import { GlobalLoreConfigSchema, mergeDefaults, LoreDefaultsSchema } from "@lore/core";
+// reason: resolveGlobalConfigPath/loadGlobalConfig read the filesystem via Node
+// fs/path/os — only reachable via the @lore/core/node subpath (browser-safety
+// split, packages/core/src/CLAUDE.md).
+import { resolveGlobalConfigPath, loadGlobalConfig } from "@lore/core/node";
 
 // ─── Env-var save/restore ─────────────────────────────────────────────────────
 
