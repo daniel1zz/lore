@@ -19,7 +19,11 @@ import type { ReadyRecord } from "@lore/core";
 
 /** Render one readiness line, e.g. "[READY] task-foo (draft) ✔2". */
 function formatReadyLine(record: ReadyRecord): string {
-  const status = record.ready ? "READY" : "blocked";
+  const status = record.ready
+    ? "READY"
+    : record.task.status === "archived" || record.task.status === "deprecated"
+      ? "done"
+      : "blocked";
   const claimPart = record.claim
     ? ` claimed:${record.claim.by}${record.claim.stale ? " (stale)" : ""}`
     : "";
