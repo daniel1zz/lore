@@ -600,6 +600,24 @@ export class TursoStore implements StoreInterface {
     }
   }
 
+  async findLinksByToIds(
+    toIds: DocId[],
+    linkType: LinkType,
+  ): Promise<Result<LinkRecord[], LoreError>> {
+    if (toIds.length === 0) return ok([]);
+    try {
+      await this.ensureReady();
+      const placeholders = toIds.map(() => "?").join(", ");
+      const rs = await this.client.execute({
+        sql: `SELECT * FROM links WHERE to_id IN (${placeholders}) AND link_type = ?`,
+        args: [...(toIds as InValue[]), linkType],
+      });
+      return ok(rs.rows.map((row) => rowToLinkRecord(libsqlRowToLinkRow(row))));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
   // ── Search ────────────────────────────────────────────────────────────
 
   async search(

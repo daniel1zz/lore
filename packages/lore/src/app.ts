@@ -27,7 +27,7 @@ import { MigrationService } from "./service/migration-service.js";
 import { TreeCheckService } from "./service/tree-check-service.js";
 import { ApiKeyStore } from "./adapters/http/auth.js";
 import { SessionStore } from "./adapters/http/sessions.js";
-import { resolveSyncCredentials, type LoreConfig, AiConfigSchema } from "@lore/core";
+import { resolveSyncCredentials, resolveClaimTtlMinutes, type LoreConfig, AiConfigSchema } from "@lore/core";
 import { err, type Result, type LoreError } from "@lore/core";
 import type { CallerSurface, AiDefaultSource } from "@lore/core";
 import type { AiDefaultPerSurface } from "@lore/core";
@@ -41,6 +41,7 @@ import { AIProviderService } from "./service/ai-provider-service.js";
 import { SyncDocsService } from "./service/sync-docs-service.js";
 import { ExportDocsService } from "./service/export-docs-service.js";
 import { PhaseService } from "./service/phase-service.js";
+import { TaskWorkflowService } from "./service/task-workflow-service.js";
 
 export interface App {
   corpusService: CorpusService;
@@ -82,6 +83,12 @@ export interface App {
    */
   phaseService: PhaseService;
   /**
+   * TaskWorkflowService — evidence, claim lease, and computed readiness for task docs
+   * (extra.claim / extra.verification_evidence). Own telemetry wiring (D8).
+   * Source: SPEC-025 §3 D5, §9.1
+   */
+  taskWorkflowService: TaskWorkflowService;
+  /**
    * Telemetry sink — exposed for dashboard route handlers to emit source-tagged events.
    * Dashboard handlers record { service: "dashboard", source: "dashboard" } events after
    * successful writes so AC-DASH-WRITE-TEL-1 is satisfied without modifying service signatures.
@@ -117,12 +124,14 @@ export interface App {
  * @param telemetry - Telemetry sink; defaults to NoOpTelemetry (no file I/O unless opted in)
  * @param aiProviderService - Wired AI service from buildProviderRegistry (always required)
  * @param aiDefaultPerSurface - Per-surface AI default overrides from config (SPEC-024)
+ * @param claimTtlMinutes - Task claim lease TTL in minutes (SPEC-025 §3 D2; default 120)
  */
 function buildAppFromSqlite(
   store: SQLiteStore,
   telemetry: Telemetry = new NoOpTelemetry(),
   aiProviderService: AIProviderService,
   aiDefaultPerSurface?: AiDefaultPerSurface,
+  claimTtlMinutes: number = 120,
 ): App {
   // reason: SPEC-024 §9.1 — callerSurface must be mutable so adapters can set it at startup.
   // Using a let variable closed over by the getter/setter ensures reads always see the current
@@ -149,6 +158,9 @@ function buildAppFromSqlite(
     exportDocsService: new ExportDocsService(store),
     // reason: PhaseService depends only on StoreInterface — stateless, no AI, no telemetry. SPEC-023 §9.1.
     phaseService: new PhaseService(store),
+    // reason: own telemetry wiring restores parity with CorpusService (D8) — TaskWorkflowService
+    // never routes writes through CorpusService (cross-service calls forbidden). SPEC-025 §3 D5, D8.
+    taskWorkflowService: new TaskWorkflowService(store, telemetry, { claimTtlMinutes }),
     // reason: telemetry exposed on App so dashboard route handlers can emit source-tagged events
     // without requiring service-layer signature changes (SPEC-022 §9.6).
     telemetry,
@@ -173,6 +185,7 @@ function buildAppFromSqlite(
  * @param telemetry - Telemetry sink; defaults to NoOpTelemetry
  * @param aiProviderService - Wired AI service from buildProviderRegistry (always required)
  * @param aiDefaultPerSurface - Per-surface AI default overrides from config (SPEC-024)
+ * @param claimTtlMinutes - Task claim lease TTL in minutes (SPEC-025 §3 D2; default 120)
  */
 function buildAppFromTurso(
   store: TursoStore,
@@ -180,6 +193,7 @@ function buildAppFromTurso(
   telemetry: Telemetry = new NoOpTelemetry(),
   aiProviderService: AIProviderService,
   aiDefaultPerSurface?: AiDefaultPerSurface,
+  claimTtlMinutes: number = 120,
 ): App {
   // reason: SPEC-024 §9.1 — same mutable callerSurface pattern as buildAppFromSqlite.
   let _callerSurface: CallerSurface = "cli";
@@ -204,6 +218,9 @@ function buildAppFromTurso(
     exportDocsService: new ExportDocsService(store),
     // reason: PhaseService depends only on StoreInterface — stateless, no AI, no telemetry. SPEC-023 §9.1.
     phaseService: new PhaseService(store),
+    // reason: own telemetry wiring restores parity with CorpusService (D8) — TaskWorkflowService
+    // never routes writes through CorpusService (cross-service calls forbidden). SPEC-025 §3 D5, D8.
+    taskWorkflowService: new TaskWorkflowService(store, telemetry, { claimTtlMinutes }),
     // reason: telemetry exposed on App so dashboard route handlers can emit source-tagged events
     // without requiring service-layer signature changes (SPEC-022 §9.6).
     telemetry,
@@ -270,13 +287,16 @@ export function createApp(
   // Extract per-surface AI defaults from config (SPEC-024)
   const aiDefaultPerSurface = aiConfig.default_per_surface;
 
+  // Task claim lease TTL (SPEC-025 §3 D2) — defaults to 120 when config/workflow section absent.
+  const claimTtlMinutes = resolveClaimTtlMinutes(config);
+
   // No config supplied or sync section absent / disabled → local-only SQLiteStore
   if (
     config === undefined ||
     config.sync === undefined ||
     !config.sync.enabled
   ) {
-    return buildAppFromSqlite(new SQLiteStore(dbPath), telemetry, aiProviderService, aiDefaultPerSurface);
+    return buildAppFromSqlite(new SQLiteStore(dbPath), telemetry, aiProviderService, aiDefaultPerSurface, claimTtlMinutes);
   }
 
   // Sync is enabled — resolve credentials (fail loud on missing/empty token, D-007)
@@ -301,7 +321,7 @@ export function createApp(
       authToken,
       syncInterval: config.sync.interval,
     });
-    return { ok: true, value: buildAppFromTurso(store, dbPath, telemetry, aiProviderService, aiDefaultPerSurface) };
+    return { ok: true, value: buildAppFromTurso(store, dbPath, telemetry, aiProviderService, aiDefaultPerSurface, claimTtlMinutes) };
   } catch (e) {
     telemetry.close();
     const message =

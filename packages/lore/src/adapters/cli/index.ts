@@ -38,6 +38,10 @@ const main = defineCommand({
     "sync-docs": () => import("./commands/sync-docs.js").then((m) => m.default),
     "export-docs": () => import("./commands/export-docs.js").then((m) => m.default),
     phase: () => import("./commands/phase.js").then((m) => m.default),
+    claim: () => import("./commands/claim.js").then((m) => m.default),
+    release: () => import("./commands/release.js").then((m) => m.default),
+    evidence: () => import("./commands/evidence.js").then((m) => m.default),
+    ready: () => import("./commands/ready.js").then((m) => m.default),
   },
 });
 

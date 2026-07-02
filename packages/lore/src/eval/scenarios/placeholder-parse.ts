@@ -199,6 +199,8 @@ function loreErrorMessage(error: LoreError): string {
       return `invalid parent type: ${error.child} under ${error.parent}`;
     case "AI_PROVIDER_ERROR":
       return `AI provider error: ${error.message}`;
+    case "CLAIM_CONFLICT":
+      return `claim conflict: held by ${error.holder} (${error.age_minutes}m ago)`;
   }
 }
 

@@ -82,6 +82,9 @@ function makeApp(): { app: App; aiProvider: InMemoryAIProvider } {
     syncDocsService: null as unknown as App["syncDocsService"],
     exportDocsService: null as unknown as App["exportDocsService"],
     phaseService: null as unknown as App["phaseService"],
+    // reason: SPEC-025 §9.1 — test does not exercise task-workflow commands; null-cast per
+    // established pattern (see phaseService above) for satisfying newly-required App fields.
+    taskWorkflowService: null as unknown as App["taskWorkflowService"],
     // reason: SPEC-024 §9.2 — MCP surface is set at startup, before any tool call
     callerSurface: "mcp" as const,
     // reason: simplified resolveAiDefault for unit tests — mirrors mcp built-in (false)

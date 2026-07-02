@@ -144,6 +144,21 @@ export interface StoreInterface {
     direction: "in" | "out" | "both",
   ): Promise<Result<LinkRecord[], LoreError>>;
 
+  /**
+   * Batch-find links of a given type whose `to_id` is in `toIds`, in one round trip.
+   * `WHERE to_id IN (...) AND link_type = ?` — avoids the N+1 pattern of calling
+   * {@link findLinks} once per task when computing readiness over a whole plan.
+   * Returns `ok([])` immediately when `toIds` is empty (no query issued).
+   *
+   * @param toIds - Target doc ids to match on the `to_id` side of the link
+   * @param linkType - Link type to filter on (readiness uses "blocks")
+   * @see PLAN-01KTRJGT31D8WJ4ZRHNARV9YBC / SPEC-025 §3 D7
+   */
+  findLinksByToIds(
+    toIds: DocId[],
+    linkType: LinkType,
+  ): Promise<Result<LinkRecord[], LoreError>>;
+
   // ── Search ─────────────────────────────────────────────────────────────
 
   /**

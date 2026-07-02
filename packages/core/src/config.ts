@@ -105,6 +105,25 @@ const SyncConfigSchema = z
     }
   });
 
+// ─── Workflow Section Schema ───────────────────────────────────────────────
+
+/**
+ * Task execution workflow configuration (SPEC-025).
+ * Controls the advisory claim-lease TTL consumed by TaskWorkflowService.
+ *
+ * @invariant claim_ttl_minutes defaults to 120 — an order of magnitude above
+ *   realistic clock skew between machines (SPEC-025 §5 risk table).
+ */
+const WorkflowConfigSchema = z
+  .object({
+    /** Minutes after which an unrefreshed claim becomes stale and reclaimable. */
+    claim_ttl_minutes: z.number().int().positive().default(120),
+  })
+  .strict();
+
+/** Task execution workflow config section. Source: SPEC-025 §3 D2. */
+export type WorkflowConfig = z.infer<typeof WorkflowConfigSchema>;
+
 // ─── Root Config Schema ────────────────────────────────────────────────────
 
 /**
@@ -140,10 +159,31 @@ export const LoreConfigSchema = z
      * .strict() on AiConfigSchema rejects typos at load time (AC-AI-12).
      */
     ai: AiConfigSchema.optional(),
+    /**
+     * Task execution workflow configuration (SPEC-025).
+     * When absent, createApp uses WorkflowConfigSchema.parse({}) defaults (120min TTL).
+     */
+    workflow: WorkflowConfigSchema.optional(),
   })
   .strict();
 
 export type LoreConfig = z.infer<typeof LoreConfigSchema>;
+
+/**
+ * Resolve the effective claim TTL in minutes from an optional LoreConfig.
+ * Mirrors the `aiConfig = config?.ai ?? AiConfigSchema.parse({})` pattern used
+ * elsewhere in createApp — absence of the whole config or the workflow section
+ * both fall back to the schema default (120).
+ *
+ * @param config - Parsed LoreConfig, or undefined when no config file was loaded
+ * @returns Effective claim_ttl_minutes value
+ * @example
+ *   resolveClaimTtlMinutes(undefined) // => 120
+ *   resolveClaimTtlMinutes({ ..., workflow: { claim_ttl_minutes: 30 } }) // => 30
+ */
+export function resolveClaimTtlMinutes(config: LoreConfig | undefined): number {
+  return (config?.workflow ?? WorkflowConfigSchema.parse({})).claim_ttl_minutes;
+}
 
 // ─── Pure Parse Helpers ────────────────────────────────────────────────────
 

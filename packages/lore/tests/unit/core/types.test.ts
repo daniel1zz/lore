@@ -315,13 +315,16 @@ describe("Type-specific extra interfaces", () => {
   });
 
   it("TaskExtra with all optional fields", () => {
+    // reason: task_status was removed from TaskExtra/taskExtraSchema (SPEC-025 D6 —
+    // zero business-logic consumers, superseded by computed readiness). This test now
+    // exercises the remaining optional fields (assignee, phase) instead.
     const extra: TaskExtra = {
       plan_id: "01J5" as DocId,
       assignee: "agent-001",
-      task_status: "in-progress",
+      phase: "P1",
     };
     expect(extra.assignee).toBe("agent-001");
-    expect(extra.task_status).toBe("in-progress");
+    expect(extra.phase).toBe("P1");
   });
 
   it("PlanExtra with optional phase", () => {

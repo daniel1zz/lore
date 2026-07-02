@@ -449,6 +449,24 @@ export class SQLiteStore implements StoreInterface {
     }
   }
 
+  async findLinksByToIds(
+    toIds: DocId[],
+    linkType: LinkType,
+  ): Promise<Result<LinkRecord[], LoreError>> {
+    if (toIds.length === 0) return ok([]);
+    try {
+      const placeholders = toIds.map(() => "?").join(", ");
+      const rows = this.db
+        .prepare(
+          `SELECT * FROM links WHERE to_id IN (${placeholders}) AND link_type = ?`,
+        )
+        .all(...(toIds as SQLQueryBindings[]), linkType) as LinkRow[];
+      return ok(rows.map(rowToLinkRecord));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
   // ── Search ────────────────────────────────────────────────────────────────
 
   async search(

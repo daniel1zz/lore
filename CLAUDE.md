@@ -128,6 +128,7 @@ All feature specs live under `docs/requirements/spec/`. When implementing or cha
 - `SPEC-019` — AI assistance in `lore set` (`--regenerate` / `--refine` / `--refine-stdin`) and `lore link --infer`; extends SPEC-017 AI provider surface
 - `SPEC-021` — `lore export-docs` reverse sync (corpus → .md files); `.lore/export-index.json` is **git-tracked** (team-shared ID map)
 - `SPEC-022` — Dashboard write UI (create / edit / approve / link): six cookie-gated `/api/dashboard/*` write routes, CodeMirror 6 editor, If-Match optimistic concurrency + ConflictModal, History tab
+- `SPEC-025` — Task execution workflow metadata: append-only oracle evidence (`extra.verification_evidence`), advisory claim lease (`extra.claim`, TTL computed read-side, no daemon), computed readiness over `blocks` links (`lore ready`, never stored); `lore claim` / `lore release` / `evidence`; 4 new MCP tools; claim/evidence badges on `lore tree` / `lore list --type task`
 
 ## AI Default Behavior by Caller Surface (SPEC-024)
 
@@ -192,6 +193,22 @@ Key patterns:
 - `lore migrate phases [--dry-run]` — one-shot sweep: converts legacy singular `extra.phase` → `extra.legacy_phase` across all plan rows (idempotent)
 
 Cross-entity validation: creating or updating a task with `extra.phase` validates the name against the parent plan's `extra.phases[]` at write time (`CorpusService._createImpl` / `set`). Unknown phase or plan with no phases → `VALIDATION_ERROR`.
+
+### Task Execution Workflow (SPEC-025)
+
+Task docs carry two new `extra` fields, both owned exclusively by `TaskWorkflowService` (never `CorpusService`):
+- `extra.verification_evidence` — append-only oracle log (max 50 entries, `output_tail` ≤ 4000 chars). Written via `lore evidence`.
+- `extra.claim` — advisory execution lease `{by, at, branch?}`; expiry is computed read-side against `workflow.claim_ttl_minutes` (config, default 120) — no daemon, no heartbeat. Written via `lore claim` / cleared via `lore release`.
+
+Key patterns:
+- `lore claim <task> [--by] [--branch] [--steal]` — acquire/refresh the lease; fresh claim held by someone else → exit 5 (`CLAIM_CONFLICT`) unless `--steal`
+- `lore release <task> [--by] [--reason] [--force]` — clear the lease; non-holder requires `--force`
+- `lore evidence <task> --oracle <tsc|test|lint|build|e2e|manual|other> --command <cmd> --result <pass|fail> [--output-tail | --output-tail-file] [--by]` — append one oracle record; bumps doc version
+- `lore ready <plan> [--json]` — computed readiness report over the plan's tasks + `blocks` links (never stored); a task is ready iff its status isn't archived/deprecated AND every blocker is archived
+- `lore tree` / `lore list --type task` — render a `[claimed:by (stale) ✔n/✘n]` badge on task rows
+- Actor identity resolution (CLI): `--by` flag > `$LORE_ACTOR` env var > OS username. MCP tools (`lore_claim`, `lore_release`, `lore_evidence_add`, `lore_ready`) require `by` explicitly.
+
+`task_status` was removed from `taskExtraSchema` (dormant, zero consumers) — superseded by computed readiness. Legacy docs still carrying it continue to validate (`.passthrough()`).
 
 The v1 predecessor at `/Users/apple/.claude/docman-mcp` remains frozen. Do not carry over its schema or API shape — v2 is greenfield.
 

@@ -11,7 +11,8 @@ citty-based CLI adapter. 24 subcommands, each in its own `commands/<name>.ts`, l
 - **`loadLoreApp()` always returns `App` (never `Result<App>`).** It strips `config.sync` before passing to `createApp`, so corpus-level commands never hit the TursoStore-failure path. Sync-aware commands (`lore sync ...`) manage TursoStore themselves.
 - **`init` and `sync` commands bypass `loadLoreApp`** — `init` runs before a DB exists; `sync` manages TursoStore directly. Document the exemption when adding a new bootstrap-stage command.
 - **Telemetry must be wired (AC-K3-1)** — `loadLoreApp` always parses `.lore/config.yaml` (failures fall back to `NoOpTelemetry`) so user telemetry preferences apply to every command. Don't call `createApp(dbPath)` directly from a command.
-- **Exit codes per SPEC-003 §5** — mapping is centralised in `utils.ts::exitCode`. `1 = STORE_ERROR / unknown`, `3 = DOC_NOT_FOUND | SLUG_NOT_FOUND`, `4 = validation / lifecycle / link errors`, `5 = STALE_VERSION`. The default branch uses an exhaustive `never` check; add new `LoreError` codes here too.
+- **Exit codes per SPEC-003 §5** — mapping is centralised in `utils.ts::exitCode`. `1 = STORE_ERROR / unknown`, `3 = DOC_NOT_FOUND | SLUG_NOT_FOUND`, `4 = validation / lifecycle / link errors`, `5 = STALE_VERSION | CLAIM_CONFLICT`. The default branch uses an exhaustive `never` check; add new `LoreError` codes here too.
+- **Actor resolution for workflow commands (SPEC-025)** — `claim` / `release` / `evidence` resolve the acting identity via `utils.ts::resolveActor`: `--by` flag > `$LORE_ACTOR` env var > OS username. Never silently falls back to an empty string.
 
 ## Patterns
 
@@ -20,11 +21,13 @@ citty-based CLI adapter. 24 subcommands, each in its own `commands/<name>.ts`, l
 - **Output helpers in `utils.ts`** — `formatTable`, `formatTree` (Unicode box drawing), `formatNavigation`, `relativeTime`. Pure; no `process.exit` calls. Reusable from tests.
 - **Hyphen-quoted error mode** — `formatError` produces multi-line stderr output with contextual hints (`"Run \`lore get <id>\`..."`). Add a new case when introducing a new `LoreError` code.
 
-## Subcommands (25)
+## Subcommands
 
-`init` `create` `get` `set` `delete` `list` `search` `tree` `link` `unlink` `pending` `approve` `reject` `log` `diff` `restore` `migrate` `status` `serve` `agent` `sync` `eval` `dashboard` `sync-docs` `phase`
+`init` `create` `get` `set` `delete` `list` `search` `tree` `link` `unlink` `pending` `approve` `reject` `log` `diff` `restore` `migrate` `status` `serve` `agent` `sync` `eval` `dashboard` `sync-docs` `export-docs` `phase` `claim` `release` `evidence` `ready`
 
 `sync-docs` (SPEC-018) scans a directory of `*.md` spec files, creates corpus rows for missing specs matched by title, and reports body drift without auto-applying. Flags: `--from <path>` (scan dir), `--dry-run` (no writes), `--json` (machine-readable SyncReport).
+
+`claim` / `release` / `evidence` / `ready` (SPEC-025) — task execution workflow: `lore claim <task> [--by] [--branch] [--steal]` acquires an advisory lease; `lore release <task> [--by] [--reason] [--force]` clears it; `lore evidence <task> --oracle <kind> --command <cmd> --result <pass|fail> [--output-tail | --output-tail-file] [--by]` appends an oracle verification record; `lore ready <plan>` prints the computed readiness report (never stored). `lore tree` / `lore list --type task` render a claim/evidence badge on task rows.
 
 `serve` mounts the HTTP adapter; `agent` manages API keys for AI agents — create/list/revoke (SPEC-010 §3.2), NOT an MCP launcher (MCP is entered via the top-level `--mcp-server` flag only); `eval` runs evaluation scenarios; `dashboard` (SPEC-016) starts the HTTP server in-process, spawns the `@lore/dashboard` Vite dev server, ensures `.lore/local-key` exists, and injects a one-time bootstrap token so the SPA can exchange it for an HttpOnly session cookie.
 
