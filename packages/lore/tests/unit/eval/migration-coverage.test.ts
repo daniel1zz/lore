@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { mkdirSync, writeFileSync, rmSync } from "fs";
+import { mkdirSync, writeFileSync, rmSync, readdirSync, statSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
@@ -54,6 +54,36 @@ function makeApp(): App {
   };
 }
 
+/**
+ * Recursively count .md files under a directory. Independent, test-local
+ * implementation (mirrors the eval scenario's private countMarkdownFiles,
+ * which is not exported) — used to derive the expected coverage count from
+ * the real filesystem at test-run time instead of a hardcoded literal.
+ *
+ * reason (root-cause fix, not a symptom patch): docs/requirements grows every
+ * iteration by design (lore export-docs, SPEC-021) — this file's history shows
+ * two prior hardcoded-literal bumps (25→38, 38→49). Hardcoding a third literal
+ * would just be next iteration's failure. Counting the real directory at test
+ * time makes the assertion self-updating and still meaningful: it fails if
+ * migrationService.analyze() ever parses a different number of files than the
+ * directory actually contains (e.g. a newly added .md file with malformed
+ * frontmatter would make expected_files/imported diverge from this count,
+ * which is exactly the signal AC-WF/SPEC-013 §K2 wants surfaced).
+ */
+function countMarkdownFilesRecursive(dir: string): number {
+  let count = 0;
+  for (const entry of readdirSync(dir)) {
+    const fullPath = join(dir, entry);
+    const stat = statSync(fullPath);
+    if (stat.isDirectory()) {
+      count += countMarkdownFilesRecursive(fullPath);
+    } else if (entry.endsWith(".md")) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
 /** Create a minimal v1-format markdown file with required frontmatter. */
 function writeV1Doc(dir: string, filename: string, id: string, type = "spec"): void {
   const content = `---
@@ -72,19 +102,20 @@ Content for ${id}.
 
 describe("HAPPY — migration coverage against docs/requirements", () => {
   it("imports all parseable files and reports passed=true", async () => {
-    // Use the real docs/requirements directory.
-    // 38 .md files: 1 PRD + SPEC-001..SPEC-024 (24) + PLAN-001 (1) + TASK-001..TASK-012 (12).
-    // expected_files = analyze().parseable = 38; imported = 38; links_broken = 0 → passed=true
-    // reason: count bumped from 25 to 38 after lore export-docs added docs/requirements/plan/ and
-    //         docs/requirements/task/ in SPEC-021 implementation (2026-07-01).
+    // Use the real docs/requirements directory. The corpus grows every iteration by
+    // design (lore export-docs, SPEC-021) — derive the expected count dynamically
+    // (recursive .md count) instead of a hardcoded literal. This line's history
+    // already shows two prior hardcoded-literal bumps (25→38, 38→49); a dynamic
+    // count fixes the root cause instead of adding a third symptom-patch.
     const sourceDir = join(process.cwd(), "docs", "requirements");
+    const expectedFileCount = countMarkdownFilesRecursive(sourceDir);
     const app = makeApp();
     const result = await runMigrationCoverage(sourceDir, app);
     app.close();
 
     expect(result.source_dir).toBe(sourceDir);
-    expect(result.expected_files).toBe(38);
-    expect(result.imported).toBe(38);
+    expect(result.expected_files).toBe(expectedFileCount);
+    expect(result.imported).toBe(expectedFileCount);
     expect(result.already_existed).toBe(0);
     expect(result.links_broken).toBe(0);
     expect(result.passed).toBe(true);

@@ -1,0 +1,606 @@
+/**
+ * Six-dimension tests for TaskWorkflowService (SPEC-025).
+ * Uses InMemoryStore — no file I/O, no SQLite.
+ *
+ * Dimension mapping (SPEC-025 §7):
+ *   HAPPY:      claim → evidence → release → ready round-trip
+ *   NEGATIVE:   foreign fresh claim → CLAIM_CONFLICT; non-holder release; steal
+ *               succeeds + records previous holder in version history
+ *   BOUNDARY:   51st evidence entry → VALIDATION_ERROR, doc unchanged; TTL
+ *               boundary via injected `now`
+ *   ERROR:      STALE_VERSION via the sequential-CAS recipe (SPEC-025 §7) —
+ *               NOT Promise.all (InMemoryStore.update has no internal await,
+ *               so "races" resolve in call order and never interleave).
+ *               Deterministic technique used here: the D10 `now()` time seam
+ *               is invoked by the service AFTER it has read the doc (captured
+ *               expected_version) but BEFORE it writes — a side effect inside
+ *               the injected `now()` callback bumps the doc's version via a
+ *               direct, un-awaited (but synchronously-executing, per
+ *               InMemoryStore's no-internal-await contract) store.update()
+ *               call, simulating a concurrent writer without any timing
+ *               flakiness.
+ *   STATE:      claim → stale via `now` injection; ready flips when a blocker
+ *               transitions to archived
+ *   REGRESSION: legacy `task_status` doc still validates (AC-WF-12); existing
+ *               phase validation untouched; telemetry emits exactly one event
+ *               per successful write (AC-WF-11) and zero on failure
+ *
+ * @spec_ref AC-WF-1 AC-WF-2 AC-WF-3 AC-WF-4 AC-WF-5 AC-WF-6 AC-WF-7 AC-WF-9
+ *           AC-WF-11 AC-WF-12
+ */
+
+import { describe, it, expect } from "vitest";
+import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { CorpusService } from "../../../src/service/corpus-service.js";
+import { PhaseService } from "../../../src/service/phase-service.js";
+import { TaskWorkflowService, type EvidenceInput } from "../../../src/service/task-workflow-service.js";
+import { taskExtraSchema } from "@lore/core";
+import type { Telemetry, TelemetryEvent, CreateDocInput } from "@lore/core";
+
+// ─── Capturing telemetry spy (mirrors corpus-service-telemetry.test.ts) ──────
+
+class CapturingTelemetry implements Telemetry {
+  readonly events: TelemetryEvent[] = [];
+  private closed = false;
+  record(event: TelemetryEvent): void {
+    if (this.closed) return;
+    this.events.push(event);
+  }
+  // reason: Telemetry requires emit() for ai.generation events — TaskWorkflowService
+  // never calls it, but the interface must be fully implemented. No-op is correct here.
+  emit(): void {
+    /* not exercised by TaskWorkflowService */
+  }
+  close(): void {
+    this.closed = true;
+  }
+  get last(): TelemetryEvent | undefined {
+    return this.events[this.events.length - 1];
+  }
+}
+
+// ─── Fixture helpers ──────────────────────────────────────────────────────────
+
+function makeServices(ttl = 120) {
+  const store = new InMemoryStore();
+  const corpusService = new CorpusService(store);
+  const telemetry = new CapturingTelemetry();
+  const taskWorkflowService = new TaskWorkflowService(store, telemetry, { claimTtlMinutes: ttl });
+  return { store, corpusService, taskWorkflowService, telemetry };
+}
+
+async function createPlan(cs: CorpusService, title = "Test Plan"): Promise<string> {
+  const result = await cs.create({ type: "plan", title, content: "body" } as CreateDocInput);
+  if (!result.ok) throw new Error(`Failed to create plan: ${JSON.stringify(result.error)}`);
+  return result.value.id;
+}
+
+async function createTask(
+  cs: CorpusService,
+  planId: string,
+  title = "Test Task",
+  extraOpts: Record<string, unknown> = {},
+): Promise<string> {
+  const result = await cs.create({
+    type: "task",
+    title,
+    parent_id: planId,
+    content: "body",
+    extra: { plan_id: planId, ...extraOpts },
+  } as CreateDocInput);
+  if (!result.ok) throw new Error(`Failed to create task: ${JSON.stringify(result.error)}`);
+  return result.value.id;
+}
+
+function evidence(overrides: Partial<EvidenceInput> = {}): EvidenceInput {
+  return {
+    oracle: "tsc",
+    command: "bun run typecheck",
+    result: "pass",
+    recorded_by: "alice",
+    ...overrides,
+  };
+}
+
+// ─── HAPPY — claim → evidence → release → ready round-trip ──────────────────
+
+describe("HAPPY — claim → evidence → release → ready round-trip (AC-WF-1, AC-WF-3, AC-WF-6, AC-WF-7)", () => {
+  it("full lifecycle: acquire lease, log oracle evidence, release, then read a clean ready report", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice" });
+    expect(claimResult.ok).toBe(true);
+    if (!claimResult.ok) return;
+    expect(claimResult.value.extra["claim"]).toMatchObject({ by: "alice" });
+    expect(claimResult.value.version).toBe(2); // v1 create, v2 claim
+
+    const evidenceResult = await taskWorkflowService.addEvidence(taskId, evidence({ recorded_by: "alice" }));
+    expect(evidenceResult.ok).toBe(true);
+    if (!evidenceResult.ok) return;
+    const evidenceArr = evidenceResult.value.extra["verification_evidence"];
+    expect(Array.isArray(evidenceArr)).toBe(true);
+    expect((evidenceArr as unknown[]).length).toBe(1);
+    expect(evidenceResult.value.version).toBe(3);
+
+    const releaseResult = await taskWorkflowService.release(taskId, { by: "alice" });
+    expect(releaseResult.ok).toBe(true);
+    if (!releaseResult.ok) return;
+    expect(releaseResult.value.extra["claim"]).toBeUndefined();
+    expect(releaseResult.value.version).toBe(4);
+
+    const readyResult = await taskWorkflowService.ready(planId);
+    expect(readyResult.ok).toBe(true);
+    if (!readyResult.ok) return;
+    expect(readyResult.value).toHaveLength(1);
+    const record = readyResult.value[0];
+    expect(record?.ready).toBe(true);
+    expect(record?.claim).toBeUndefined();
+    expect(record?.evidence_count).toBe(1);
+    expect(record?.latest_evidence?.result).toBe("pass");
+  });
+
+  it("addEvidence records the exact oracle/command/result fields passed in (defeats a hardcoded-return stub)", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const r1 = await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({ oracle: "lint", command: "bun run lint", result: "fail", output_tail: "3 errors" }),
+    );
+    expect(r1.ok).toBe(true);
+    if (!r1.ok) return;
+    const entries = r1.value.extra["verification_evidence"] as Array<Record<string, unknown>>;
+    expect(entries[0]).toMatchObject({
+      oracle: "lint",
+      command: "bun run lint",
+      result: "fail",
+      output_tail: "3 errors",
+    });
+
+    const r2 = await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({ oracle: "e2e", command: "playwright test", result: "pass" }),
+    );
+    expect(r2.ok).toBe(true);
+    if (!r2.ok) return;
+    const entries2 = r2.value.extra["verification_evidence"] as Array<Record<string, unknown>>;
+    expect(entries2).toHaveLength(2);
+    expect(entries2[1]).toMatchObject({ oracle: "e2e", command: "playwright test", result: "pass" });
+  });
+});
+
+// ─── NEGATIVE ─────────────────────────────────────────────────────────────────
+
+describe("NEGATIVE — foreign fresh claim → CLAIM_CONFLICT (AC-WF-3)", () => {
+  it("a fresh claim held by a different actor rejects a second claimant without --steal", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const first = await taskWorkflowService.claim(taskId, { by: "alice" });
+    expect(first.ok).toBe(true);
+
+    const second = await taskWorkflowService.claim(taskId, { by: "bob" });
+    expect(second.ok).toBe(false);
+    if (second.ok) return;
+    expect(second.error.code).toBe("CLAIM_CONFLICT");
+    if (second.error.code !== "CLAIM_CONFLICT") return;
+    expect(second.error.holder).toBe("alice");
+    expect(second.error.age_minutes).toBeGreaterThanOrEqual(0);
+  });
+
+  it("re-claiming with the SAME actor refreshes the lease instead of conflicting", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    await taskWorkflowService.claim(taskId, { by: "alice" });
+    const second = await taskWorkflowService.claim(taskId, { by: "alice" });
+    expect(second.ok).toBe(true);
+  });
+});
+
+describe("NEGATIVE — non-holder release rejected (AC-WF-6)", () => {
+  it("release by a non-holder without --force → CLAIM_CONFLICT, claim remains intact", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    await taskWorkflowService.claim(taskId, { by: "alice" });
+    const release = await taskWorkflowService.release(taskId, { by: "bob" });
+    expect(release.ok).toBe(false);
+    if (release.ok) return;
+    expect(release.error.code).toBe("CLAIM_CONFLICT");
+    if (release.error.code !== "CLAIM_CONFLICT") return;
+    expect(release.error.holder).toBe("alice");
+
+    // Claim must still be held by alice — the rejected release must not have mutated it.
+    const claimAgain = await taskWorkflowService.claim(taskId, { by: "bob" });
+    expect(claimAgain.ok).toBe(false); // still CLAIM_CONFLICT — proves claim wasn't cleared
+  });
+
+  it("release with --force by a non-holder succeeds and notes the forced override in history", async () => {
+    const { corpusService, taskWorkflowService, store } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    await taskWorkflowService.claim(taskId, { by: "alice" });
+    const release = await taskWorkflowService.release(taskId, { by: "bob", force: true, reason: "stale worker" });
+    expect(release.ok).toBe(true);
+    if (!release.ok) return;
+    expect(release.value.extra["claim"]).toBeUndefined();
+
+    const versions = await store.findVersions(taskId);
+    expect(versions.ok).toBe(true);
+    if (!versions.ok) return;
+    const latestVersion = versions.value[0];
+    expect(latestVersion?.change_summary).toContain("forced");
+    expect(latestVersion?.change_summary).toContain("alice");
+    expect(latestVersion?.change_summary).toContain("stale worker");
+  });
+});
+
+describe("NEGATIVE — steal succeeds and records the previous holder in history (AC-WF-4)", () => {
+  it("--steal overrides a fresh claim held by someone else, and version history names the previous holder", async () => {
+    const { corpusService, taskWorkflowService, store } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    await taskWorkflowService.claim(taskId, { by: "alice" });
+    const stolen = await taskWorkflowService.claim(taskId, { by: "bob", steal: true });
+    expect(stolen.ok).toBe(true);
+    if (!stolen.ok) return;
+    expect(stolen.value.extra["claim"]).toMatchObject({ by: "bob" });
+
+    const versions = await store.findVersions(taskId);
+    expect(versions.ok).toBe(true);
+    if (!versions.ok) return;
+    const latestVersion = versions.value[0];
+    expect(latestVersion?.change_summary).toContain("bob");
+    expect(latestVersion?.change_summary).toContain("alice");
+    expect(latestVersion?.change_summary).toMatch(/previous holder/i);
+  });
+});
+
+describe("NEGATIVE — unknown oracle value rejected at write time", () => {
+  it("an oracle value outside the enum fails VALIDATION_ERROR and does not write", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const bad = evidence({ oracle: "bogus" as unknown as EvidenceInput["oracle"] });
+    const result = await taskWorkflowService.addEvidence(taskId, bad);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+
+    // Doc must be unchanged — no phantom entry, no version bump.
+    const after = await corpusService.get(taskId);
+    expect(after.ok).toBe(true);
+    if (!after.ok) return;
+    expect(after.value.doc.version).toBe(1);
+    expect(after.value.doc.extra["verification_evidence"]).toBeUndefined();
+  });
+});
+
+// ─── BOUNDARY ─────────────────────────────────────────────────────────────────
+
+describe("BOUNDARY — 51st evidence entry rejected, doc unchanged (AC-WF-2)", () => {
+  it("appending a 51st entry to a full 50-entry log fails VALIDATION_ERROR without mutating the doc", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    for (let i = 0; i < 50; i++) {
+      const r = await taskWorkflowService.addEvidence(taskId, evidence({ command: `run ${i}` }));
+      expect(r.ok).toBe(true);
+    }
+
+    const beforeGet = await corpusService.get(taskId);
+    expect(beforeGet.ok).toBe(true);
+    if (!beforeGet.ok) return;
+    const versionBefore = beforeGet.value.doc.version;
+    expect((beforeGet.value.doc.extra["verification_evidence"] as unknown[]).length).toBe(50);
+
+    const overflow = await taskWorkflowService.addEvidence(taskId, evidence({ command: "run 50" }));
+    expect(overflow.ok).toBe(false);
+    if (overflow.ok) return;
+    expect(overflow.error.code).toBe("VALIDATION_ERROR");
+
+    const afterGet = await corpusService.get(taskId);
+    expect(afterGet.ok).toBe(true);
+    if (!afterGet.ok) return;
+    expect(afterGet.value.doc.version).toBe(versionBefore); // unchanged
+    expect((afterGet.value.doc.extra["verification_evidence"] as unknown[]).length).toBe(50); // unchanged
+  }, 20_000);
+});
+
+describe("BOUNDARY — TTL boundary via injected now (AC-WF-4)", () => {
+  it("age exactly at TTL is still a fresh (conflicting) claim, not stale", async () => {
+    const { corpusService, taskWorkflowService } = makeServices(120);
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const claimedAt = "2026-07-02T08:00:00.000Z";
+    await taskWorkflowService.claim(taskId, { by: "alice" }, () => claimedAt);
+
+    const exactlyAtTtl = "2026-07-02T10:00:00.000Z"; // exactly 120 minutes later
+    const attempt = await taskWorkflowService.claim(taskId, { by: "bob" }, () => exactlyAtTtl);
+    expect(attempt.ok).toBe(false);
+    if (attempt.ok) return;
+    expect(attempt.error.code).toBe("CLAIM_CONFLICT");
+  });
+
+  it("age one minute past TTL is stale and claimable without --steal", async () => {
+    const { corpusService, taskWorkflowService } = makeServices(120);
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const claimedAt = "2026-07-02T08:00:00.000Z";
+    await taskWorkflowService.claim(taskId, { by: "alice" }, () => claimedAt);
+
+    const pastTtl = "2026-07-02T10:01:00.000Z"; // 121 minutes later
+    const attempt = await taskWorkflowService.claim(taskId, { by: "bob" }, () => pastTtl);
+    expect(attempt.ok).toBe(true);
+    if (!attempt.ok) return;
+    expect(attempt.value.extra["claim"]).toMatchObject({ by: "bob" });
+  });
+});
+
+// ─── ERROR — sequential-CAS recipe for STALE_VERSION (SPEC-025 §7) ───────────
+
+describe("ERROR — STALE_VERSION via sequential-CAS recipe (SPEC-025 §7, not Promise.all)", () => {
+  it("addEvidence surfaces STALE_VERSION when the doc version changed between read and write", async () => {
+    const { corpusService, taskWorkflowService, store } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    let sideEffectApplied = false;
+    // reason: `now()` is invoked by _addEvidenceImpl AFTER resolveTask() has captured
+    // task.version (the CAS expected_version) but BEFORE writeTaskExtra's store.update
+    // call. Bumping the doc's version here — via a direct, un-awaited store.update()
+    // call that InMemoryStore executes synchronously (no internal await before its CAS
+    // check, per store/CLAUDE.md) — deterministically simulates a concurrent writer
+    // without any Promise.all timing dependency.
+    const now = (): string => {
+      if (!sideEffectApplied) {
+        sideEffectApplied = true;
+        void store.update(
+          taskId,
+          { extra: { plan_id: planId, injected_by_other_writer: true }, version: 2 },
+          { expected_version: 1 },
+        );
+      }
+      return "2026-07-02T10:00:00.000Z";
+    };
+
+    const result = await taskWorkflowService.addEvidence(taskId, evidence(), now);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("STALE_VERSION");
+    if (result.error.code !== "STALE_VERSION") return;
+    expect(result.error.expected).toBe(1);
+    expect(result.error.actual).toBe(2);
+
+    // The "other writer's" change landed; the rejected addEvidence call must not have
+    // clobbered it or partially applied its own evidence entry.
+    const finalDoc = await corpusService.get(taskId);
+    expect(finalDoc.ok).toBe(true);
+    if (!finalDoc.ok) return;
+    expect(finalDoc.value.doc.extra["injected_by_other_writer"]).toBe(true);
+    expect(finalDoc.value.doc.extra["verification_evidence"]).toBeUndefined();
+  });
+
+  it("claim surfaces STALE_VERSION under the same sequential-CAS recipe", async () => {
+    const { corpusService, taskWorkflowService, store } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    let sideEffectApplied = false;
+    const now = (): string => {
+      if (!sideEffectApplied) {
+        sideEffectApplied = true;
+        void store.update(
+          taskId,
+          { extra: { plan_id: planId, injected_by_other_writer: true }, version: 2 },
+          { expected_version: 1 },
+        );
+      }
+      return "2026-07-02T10:00:00.000Z";
+    };
+
+    const result = await taskWorkflowService.claim(taskId, { by: "alice" }, now);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("STALE_VERSION");
+  });
+});
+
+// ─── STATE ────────────────────────────────────────────────────────────────────
+
+describe("STATE — claim → stale transition via now injection (AC-WF-4, D10)", () => {
+  it("the SAME claim reports stale=false then stale=true purely as a function of injected now, via ready()", async () => {
+    const { corpusService, taskWorkflowService } = makeServices(120);
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const claimedAt = "2026-07-02T08:00:00.000Z";
+    await taskWorkflowService.claim(taskId, { by: "alice" }, () => claimedAt);
+
+    const freshReport = await taskWorkflowService.ready(planId, () => "2026-07-02T09:00:00.000Z"); // 60 min later
+    expect(freshReport.ok).toBe(true);
+    if (!freshReport.ok) return;
+    expect(freshReport.value[0]?.claim?.stale).toBe(false);
+
+    const staleReport = await taskWorkflowService.ready(planId, () => "2026-07-02T11:00:00.000Z"); // 180 min later
+    expect(staleReport.ok).toBe(true);
+    if (!staleReport.ok) return;
+    expect(staleReport.value[0]?.claim?.stale).toBe(true);
+  });
+});
+
+describe("STATE — ready() flips when a blocker transitions to archived (AC-WF-7, D3)", () => {
+  it("a blocked task becomes ready once its blocker's status becomes archived", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const blockerId = await createTask(corpusService, planId, "Blocker Task");
+    const blockedId = await createTask(corpusService, planId, "Blocked Task");
+
+    const linkResult = await corpusService.link(blockerId, blockedId, "blocks");
+    expect(linkResult.ok).toBe(true);
+
+    const before = await taskWorkflowService.ready(planId);
+    expect(before.ok).toBe(true);
+    if (!before.ok) return;
+    const blockedBefore = before.value.find((r) => r.task.id === blockedId);
+    expect(blockedBefore?.ready).toBe(false);
+    expect(blockedBefore?.unmet_blockers.map((b) => b.id)).toContain(blockerId);
+
+    const archiveResult = await corpusService.set(blockerId, { status: "archived" });
+    expect(archiveResult.ok).toBe(true);
+
+    const after = await taskWorkflowService.ready(planId);
+    expect(after.ok).toBe(true);
+    if (!after.ok) return;
+    const blockedAfter = after.value.find((r) => r.task.id === blockedId);
+    expect(blockedAfter?.ready).toBe(true);
+    expect(blockedAfter?.unmet_blockers).toEqual([]);
+  });
+});
+
+describe("STATE — ready() rejects a non-plan document (VALIDATION_ERROR)", () => {
+  it("calling ready() with a task id (not a plan) fails loud instead of silently returning []", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const result = await taskWorkflowService.ready(taskId);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("calling ready() with a non-existent plan id → DOC_NOT_FOUND", async () => {
+    const { taskWorkflowService } = makeServices();
+    const result = await taskWorkflowService.ready("plan-does-not-exist");
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("DOC_NOT_FOUND");
+  });
+});
+
+// ─── REGRESSION ───────────────────────────────────────────────────────────────
+
+describe("REGRESSION — legacy task_status doc still validates (AC-WF-12, D6)", () => {
+  it("taskExtraSchema.passthrough() preserves an unrecognised legacy task_status key", () => {
+    const legacyExtra = {
+      plan_id: "01J5X7KZRF4AXRHX9WKE6DVP6P",
+      task_status: "in-progress",
+    };
+    const parsed = taskExtraSchema.safeParse(legacyExtra);
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    // passthrough: the unknown key is preserved, not stripped or rejected.
+    expect((parsed.data as Record<string, unknown>)["task_status"]).toBe("in-progress");
+  });
+
+  it("taskExtraSchema does NOT itself constrain task_status to the old enum (field is unowned now)", () => {
+    // Any string value must pass — task_status is no longer schema-checked.
+    const legacyExtra = { plan_id: "01J5X7KZRF4AXRHX9WKE6DVP6P", task_status: "some-future-value" };
+    const parsed = taskExtraSchema.safeParse(legacyExtra);
+    expect(parsed.success).toBe(true);
+  });
+});
+
+describe("REGRESSION — existing phase validation untouched by claim/evidence writes", () => {
+  it("claim() preserves an existing extra.phase value (spread must not drop unrelated keys)", async () => {
+    const { store, corpusService, taskWorkflowService } = makeServices();
+    const phaseService = new PhaseService(store);
+    const planId = await createPlan(corpusService);
+    await phaseService.addPhase(planId, "Foundation");
+    const taskId = await createTask(corpusService, planId, "Phased Task", { phase: "Foundation" });
+
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice" });
+    expect(claimResult.ok).toBe(true);
+    if (!claimResult.ok) return;
+    expect(claimResult.value.extra["phase"]).toBe("Foundation");
+  });
+
+  it("addEvidence preserves an existing extra.phase value", async () => {
+    const { store, corpusService, taskWorkflowService } = makeServices();
+    const phaseService = new PhaseService(store);
+    const planId = await createPlan(corpusService);
+    await phaseService.addPhase(planId, "Build");
+    const taskId = await createTask(corpusService, planId, "Phased Task", { phase: "Build" });
+
+    const result = await taskWorkflowService.addEvidence(taskId, evidence());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.extra["phase"]).toBe("Build");
+  });
+});
+
+describe("REGRESSION — telemetry emits exactly one event per successful write, zero on failure (AC-WF-11)", () => {
+  it("claim / addEvidence / release each emit exactly one event with the expected method name", async () => {
+    const { corpusService, taskWorkflowService, telemetry } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    await taskWorkflowService.claim(taskId, { by: "alice", source: "cli" });
+    expect(telemetry.events).toHaveLength(1);
+    expect(telemetry.last?.method).toBe("task.claimed");
+    expect(telemetry.last?.ok).toBe(true);
+    expect(telemetry.last?.meta).toMatchObject({ source: "cli" });
+
+    await taskWorkflowService.addEvidence(taskId, evidence({ source: "cli" }));
+    expect(telemetry.events).toHaveLength(2);
+    expect(telemetry.last?.method).toBe("task.evidence_added");
+
+    await taskWorkflowService.release(taskId, { by: "alice", source: "cli" });
+    expect(telemetry.events).toHaveLength(3);
+    expect(telemetry.last?.method).toBe("task.released");
+  });
+
+  it("a failed claim (CLAIM_CONFLICT) does NOT emit a telemetry event", async () => {
+    const { corpusService, taskWorkflowService, telemetry } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    await taskWorkflowService.claim(taskId, { by: "alice" });
+    const countAfterFirstClaim = telemetry.events.length;
+
+    const conflicting = await taskWorkflowService.claim(taskId, { by: "bob" });
+    expect(conflicting.ok).toBe(false);
+    expect(telemetry.events.length).toBe(countAfterFirstClaim); // no new event
+  });
+
+  it("a failed addEvidence (VALIDATION_ERROR, cap reached) does NOT emit a telemetry event", async () => {
+    const { corpusService, taskWorkflowService, telemetry } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    for (let i = 0; i < 50; i++) {
+      await taskWorkflowService.addEvidence(taskId, evidence({ command: `run ${i}` }));
+    }
+    const countAtCap = telemetry.events.length;
+    expect(countAtCap).toBe(50);
+
+    const overflow = await taskWorkflowService.addEvidence(taskId, evidence());
+    expect(overflow.ok).toBe(false);
+    expect(telemetry.events.length).toBe(countAtCap); // no new event on the 51st (rejected) call
+  }, 20_000);
+
+  it("ready() (a read, not a write) never emits a telemetry event — AC-WF-11 scopes it to writes", async () => {
+    const { corpusService, taskWorkflowService, telemetry } = makeServices();
+    const planId = await createPlan(corpusService);
+    await createTask(corpusService, planId);
+    telemetry.events.length = 0;
+
+    await taskWorkflowService.ready(planId);
+    expect(telemetry.events).toHaveLength(0);
+  });
+});
+

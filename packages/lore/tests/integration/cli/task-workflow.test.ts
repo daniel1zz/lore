@@ -1,0 +1,324 @@
+/**
+ * Integration tests for `lore claim` / `lore release` / `lore evidence` / `lore ready`
+ * CLI subcommands (SPEC-025). Runs the real CLI via subprocess against an isolated
+ * temp SQLite DB — same pattern as tests/integration/cli/phase.test.ts.
+ *
+ * Scope: translation-only (args → service call → exit code / JSON shape). Business
+ * rules (CLAIM_CONFLICT precedence, staleness math, evidence cap) are exhaustively
+ * covered at the service layer (tests/unit/service/task-workflow-service.test.ts) —
+ * this file does not re-test them, per SPEC-025 §7 "do not re-test business rules
+ * at three layers".
+ *
+ * Coverage:
+ *   HAPPY:      claim / evidence / release all exit 0 with expected stdout
+ *   NEGATIVE:   claim conflict → exit 5; non-holder release → exit 5
+ *   BOUNDARY:   ready --json flat shape (AC-WF-8, D9 — array of records, not
+ *               grouped by phase in the JSON payload)
+ *   STATE:      claim → evidence → release changes reflected in tree/list badges
+ *   REGRESSION: n/a here (see service-level suite)
+ *
+ * @spec_ref AC-WF-1 AC-WF-3 AC-WF-4 AC-WF-6 AC-WF-7 AC-WF-8 AC-WF-9
+ */
+
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { spawnSync } from "child_process";
+import { mkdirSync, rmSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
+
+// ─── Path setup ───────────────────────────────────────────────────────────────
+
+const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
+const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
+
+// ─── RunResult type ───────────────────────────────────────────────────────────
+
+interface RunResult {
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly exitCode: number;
+}
+
+/**
+ * Spawn `bun run <INDEX_TS> ...args` in `cwd` with an isolated HOME dir.
+ * MOCK RISK: none — this calls the real CLI binary path.
+ */
+function runLore(args: string[], cwd: string): RunResult {
+  const result = spawnSync("bun", ["run", INDEX_TS, ...args], {
+    cwd,
+    env: { ...process.env, HOME: cwd, EDITOR: "true", CLAUDECODE: "1" },
+    encoding: "utf8",
+  });
+  return {
+    stdout: result.stdout ?? "",
+    stderr: result.stderr ?? "",
+    exitCode: result.status ?? 1,
+  };
+}
+
+// ─── Fixture helpers ──────────────────────────────────────────────────────────
+
+let tmpDir: string;
+
+beforeEach(() => {
+  tmpDir = join(
+    tmpdir(),
+    `lore-wf-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  );
+  mkdirSync(tmpDir, { recursive: true });
+
+  const init = runLore(["init"], tmpDir);
+  if (init.exitCode !== 0) {
+    throw new Error(`lore init failed: ${init.stderr}`);
+  }
+});
+
+afterEach(() => {
+  try {
+    rmSync(tmpDir, { recursive: true, force: true });
+  } catch {
+    /* ignore cleanup errors */
+  }
+});
+
+function createPlan(title: string): string {
+  const r = runLore(["create", "plan", "--title", title, "--no-ai", "--content", "body"], tmpDir);
+  if (r.exitCode !== 0) throw new Error(`create plan failed: ${r.stderr}`);
+  const m = r.stdout.match(/Slug:\s+(\S+)/);
+  const slug = m?.[1];
+  if (!slug) throw new Error(`Could not extract plan slug from: ${r.stdout}`);
+  return slug;
+}
+
+function createTask(planSlug: string, title: string): string {
+  const r = runLore(
+    ["create", "task", "--title", title, "--parent", planSlug, "--plan-id", planSlug, "--no-ai", "--content", "body"],
+    tmpDir,
+  );
+  if (r.exitCode !== 0) throw new Error(`create task failed: ${r.stderr}`);
+  const m = r.stdout.match(/Slug:\s+(\S+)/);
+  const slug = m?.[1];
+  if (!slug) throw new Error(`Could not extract task slug from: ${r.stdout}`);
+  return slug;
+}
+
+// ─── HAPPY — lore claim ───────────────────────────────────────────────────────
+
+describe("lore claim — HAPPY", () => {
+  it("AC-WF-3.CLI.H1: exit 0 and confirms the claim, --by wins over $LORE_ACTOR", () => {
+    const planSlug = createPlan("Workflow Plan");
+    const taskSlug = createTask(planSlug, "Claimable Task");
+
+    const result = runLore(["claim", taskSlug, "--by", "alice"], tmpDir);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("Claimed");
+    expect(result.stdout).toContain("alice");
+  });
+
+  it("AC-WF-3.CLI.H2: --json output has doc.extra.claim.by", () => {
+    const planSlug = createPlan("Workflow Plan JSON");
+    const taskSlug = createTask(planSlug, "Claimable Task JSON");
+
+    const result = runLore(["claim", taskSlug, "--by", "alice", "--json"], tmpDir);
+
+    expect(result.exitCode).toBe(0);
+    const parsed = JSON.parse(result.stdout) as { ok: boolean; data?: { doc?: { extra?: Record<string, unknown> } } };
+    expect(parsed.ok).toBe(true);
+    expect((parsed.data?.doc?.extra?.["claim"] as { by?: string } | undefined)?.by).toBe("alice");
+  });
+});
+
+// ─── NEGATIVE — lore claim: conflict ──────────────────────────────────────────
+
+describe("lore claim — NEGATIVE", () => {
+  it("AC-WF-3.CLI.N1: fresh claim by another actor → exit 5 (CLAIM_CONFLICT)", () => {
+    const planSlug = createPlan("Conflict Plan");
+    const taskSlug = createTask(planSlug, "Contested Task");
+
+    runLore(["claim", taskSlug, "--by", "alice"], tmpDir);
+    const result = runLore(["claim", taskSlug, "--by", "bob"], tmpDir);
+
+    expect(result.exitCode).toBe(5);
+    expect(result.stderr).toContain("alice");
+  });
+
+  it("AC-WF-4.CLI.N2: --steal overrides a fresh claim and succeeds (exit 0)", () => {
+    const planSlug = createPlan("Steal Plan");
+    const taskSlug = createTask(planSlug, "Stealable Task");
+
+    runLore(["claim", taskSlug, "--by", "alice"], tmpDir);
+    const result = runLore(["claim", taskSlug, "--by", "bob", "--steal"], tmpDir);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("bob");
+  });
+
+  it("AC-WF-3.CLI.N3: non-existent task slug → exit 3 (DOC_NOT_FOUND)", () => {
+    const result = runLore(["claim", "task-does-not-exist", "--by", "alice"], tmpDir);
+    expect(result.exitCode).toBe(3);
+  });
+});
+
+// ─── HAPPY / NEGATIVE — lore release ──────────────────────────────────────────
+
+describe("lore release", () => {
+  it("AC-WF-6.CLI.H1: release by the holder → exit 0", () => {
+    const planSlug = createPlan("Release Plan");
+    const taskSlug = createTask(planSlug, "Released Task");
+
+    runLore(["claim", taskSlug, "--by", "alice"], tmpDir);
+    const result = runLore(["release", taskSlug, "--by", "alice"], tmpDir);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("Released");
+  });
+
+  it("AC-WF-6.CLI.N1: release by a non-holder without --force → exit 5 (CLAIM_CONFLICT)", () => {
+    const planSlug = createPlan("Release Conflict Plan");
+    const taskSlug = createTask(planSlug, "Guarded Task");
+
+    runLore(["claim", taskSlug, "--by", "alice"], tmpDir);
+    const result = runLore(["release", taskSlug, "--by", "bob"], tmpDir);
+
+    expect(result.exitCode).toBe(5);
+  });
+
+  it("AC-WF-6.CLI.N2: release by a non-holder WITH --force → exit 0", () => {
+    const planSlug = createPlan("Release Force Plan");
+    const taskSlug = createTask(planSlug, "Forcibly Released Task");
+
+    runLore(["claim", taskSlug, "--by", "alice"], tmpDir);
+    const result = runLore(["release", taskSlug, "--by", "bob", "--force"], tmpDir);
+
+    expect(result.exitCode).toBe(0);
+  });
+});
+
+// ─── HAPPY / NEGATIVE — lore evidence ─────────────────────────────────────────
+
+describe("lore evidence", () => {
+  it("AC-WF-1.CLI.H1: exit 0 and appends an oracle record, visible via lore log", () => {
+    const planSlug = createPlan("Evidence Plan");
+    const taskSlug = createTask(planSlug, "Evidenced Task");
+
+    const result = runLore(
+      ["evidence", taskSlug, "--oracle", "tsc", "--command", "bun run typecheck", "--result", "pass"],
+      tmpDir,
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("tsc");
+
+    const log = runLore(["log", taskSlug], tmpDir);
+    expect(log.exitCode).toBe(0);
+    expect(log.stdout.toLowerCase()).toContain("evidence");
+  });
+
+  it("AC-WF-1.CLI.N1: --output-tail and --output-tail-file together → exit 2 (argument error)", () => {
+    const planSlug = createPlan("Evidence Arg Plan");
+    const taskSlug = createTask(planSlug, "Arg Task");
+
+    const result = runLore(
+      [
+        "evidence",
+        taskSlug,
+        "--oracle",
+        "tsc",
+        "--command",
+        "cmd",
+        "--result",
+        "pass",
+        "--output-tail",
+        "abc",
+        "--output-tail-file",
+        "/tmp/does-not-matter",
+      ],
+      tmpDir,
+    );
+
+    expect(result.exitCode).toBe(2);
+  });
+
+  it("AC-WF-2.CLI.N2: invalid --result value → exit 4 (VALIDATION_ERROR)", () => {
+    const planSlug = createPlan("Evidence Invalid Plan");
+    const taskSlug = createTask(planSlug, "Invalid Result Task");
+
+    const result = runLore(
+      ["evidence", taskSlug, "--oracle", "tsc", "--command", "cmd", "--result", "maybe"],
+      tmpDir,
+    );
+
+    expect(result.exitCode).toBe(4);
+  });
+});
+
+// ─── lore ready — BOUNDARY (flat JSON shape, AC-WF-8/D9) ─────────────────────
+
+describe("lore ready — JSON shape", () => {
+  it("AC-WF-8.CLI.J1: --json produces a flat array under data.ready (D9 — no phase nesting)", () => {
+    const planSlug = createPlan("Ready JSON Plan");
+    createTask(planSlug, "Task One");
+    createTask(planSlug, "Task Two");
+
+    const result = runLore(["ready", planSlug, "--json"], tmpDir);
+
+    expect(result.exitCode).toBe(0);
+    const parsed = JSON.parse(result.stdout) as {
+      ok: boolean;
+      data?: { ready?: Array<{ task?: { slug?: string }; ready?: boolean; unmet_blockers?: unknown[] }> };
+    };
+    expect(parsed.ok).toBe(true);
+    expect(Array.isArray(parsed.data?.ready)).toBe(true);
+    expect(parsed.data?.ready).toHaveLength(2);
+    // Flat shape: each record is a plain object with `task`, not grouped under a phase key.
+    for (const record of parsed.data?.ready ?? []) {
+      expect(typeof record.task?.slug).toBe("string");
+      expect(typeof record.ready).toBe("boolean");
+      expect(Array.isArray(record.unmet_blockers)).toBe(true);
+    }
+  });
+
+  it("AC-WF-7.CLI.J2: empty plan (no tasks) → data.ready is an empty array, exit 0", () => {
+    const planSlug = createPlan("Empty Ready Plan");
+
+    const result = runLore(["ready", planSlug, "--json"], tmpDir);
+
+    expect(result.exitCode).toBe(0);
+    const parsed = JSON.parse(result.stdout) as { ok: boolean; data?: { ready?: unknown[] } };
+    expect(parsed.ok).toBe(true);
+    expect(parsed.data?.ready).toEqual([]);
+  });
+
+  it("AC-WF-7.CLI.N1: ready against a non-plan doc → exit 4 (VALIDATION_ERROR)", () => {
+    const planSlug = createPlan("Wrong Type Plan");
+    const taskSlug = createTask(planSlug, "Not A Plan");
+
+    const result = runLore(["ready", taskSlug], tmpDir);
+    expect(result.exitCode).toBe(4);
+  });
+});
+
+// ─── lore tree / lore list — STATE (claim/evidence badges, AC-WF-9) ──────────
+
+describe("lore tree / lore list — workflow badges (AC-WF-9)", () => {
+  it("a claimed task shows a claimed: badge in `lore tree <plan>`", () => {
+    const planSlug = createPlan("Badge Plan");
+    const taskSlug = createTask(planSlug, "Badged Task");
+    runLore(["claim", taskSlug, "--by", "alice"], tmpDir);
+
+    const result = runLore(["tree", planSlug], tmpDir);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("claimed:alice");
+  });
+
+  it("a task with passing evidence shows a ✔ badge in `lore list --type task`", () => {
+    const planSlug = createPlan("Evidence Badge Plan");
+    const taskSlug = createTask(planSlug, "Evidenced Badge Task");
+    runLore(["evidence", taskSlug, "--oracle", "tsc", "--command", "cmd", "--result", "pass"], tmpDir);
+
+    const result = runLore(["list", "--type", "task"], tmpDir);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("✔1");
+  });
+});
