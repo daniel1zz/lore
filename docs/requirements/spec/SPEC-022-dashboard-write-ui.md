@@ -154,6 +154,90 @@ CLI shows `lore log <id>`. Dashboard should show version timeline too. Is this s
 
 ## 7. Outstanding Decisions (block implementation)
 
-- Q1-Q6 above each need a final answer.
-- Editor library choice (Q1) should be benchmarked: CodeMirror 6 vs Lexical vs textarea + simple syntax-hint plugin.
-- Concurrency UX (Q2) needs a user test before locking in.
+~~Resolved — see §8 below.~~
+
+## 8. Resolved Decisions (ratified 2026-07-02)
+
+| Question | Ratified Answer |
+|---|---|
+| Q1 Editor | **CodeMirror 6** with markdown mode + `split-view` live preview panel. Skip MDX rendering in editor (raw component tags shown). |
+| Q2 Concurrency UX on 409 | **Side-by-side diff view + explicit "Force overwrite" button.** No 3-way merge. |
+| Q3 Status transition affordance | **Session user is the reviewer.** `ReviewService.approve({reviewer: session.user_email})` — SPEC-016 stores email in session. |
+| Q4 Link editing UX | **Inline panel with corpus-search autocomplete.** Reuses existing search API. |
+| Q5 Client-side validation | **Yes — share Zod schemas from `@lore/core` via Vite import.** Server remains SSOT; client shortcut for trivial errors. |
+| Q6 Audit trail visibility | **Yes, in this SPEC.** Detail page gets "History" tab listing versions + per-version diff link. |
+| Q-extra `--force` semantics | Force overwrite calls PATCH with `X-Force-Overwrite: 1` header + no `If-Match`; server side writes as latest version + records "forced" in audit. |
+
+## 9. Architecture Notes (implementation-ready)
+
+### 9.1 File touch list (server side — `@lore/lore`)
+
+| File | Change |
+|---|---|
+| `packages/lore/src/adapters/http/routes.ts` | Add write routes under `/api/dashboard/`: `POST /docs`, `PATCH /docs/:id`, `POST /docs/:id/approve`, `POST /docs/:id/reject`, `POST /docs/:id/links`, `DELETE /docs/:id/links/:link_id`. Cookie-gated only (rejects bearer with 403). |
+| `packages/lore/src/adapters/http/dashboard-routes.ts` | **NEW** — dedicated file for the six dashboard write handlers. Keeps `routes.ts` focused on public API. |
+| `packages/lore/src/adapters/http/auth.ts` | Session gate: `requireCookieSession(req): Result<Session, LoreError>` — 401 without session, 403 if bearer-token authenticated. |
+| `packages/lore/src/adapters/http/concurrency.ts` | **NEW** — `checkIfMatch(req, currentVersion)`. If `If-Match` header present and doesn't match → returns 409 payload `{ current: {...}, mine: {...}, diff: [...] }`. |
+
+### 9.2 File touch list (client side — `@lore/dashboard`)
+
+| File | Change |
+|---|---|
+| `packages/dashboard/src/api/mutations.ts` | **NEW** — typed wrappers for the six write endpoints. Uses `@lore/core` Zod schemas for request/response. |
+| `packages/dashboard/src/hooks/useMutation.ts` | **NEW** — thin TanStack Query mutation wrapper with 409 handling (surfaces to caller). |
+| `packages/dashboard/src/components/Editor.tsx` | **NEW** — CodeMirror 6 markdown editor + split preview. `@codemirror/lang-markdown` + `@codemirror/basic-setup`. |
+| `packages/dashboard/src/components/StatusPill.tsx` | Existing pill → interactive dropdown showing only valid transitions (`getAllowedTransitions` from `@lore/core`). |
+| `packages/dashboard/src/components/LinksPanel.tsx` | **NEW** — editable link list with corpus-search autocomplete (debounced 300ms). |
+| `packages/dashboard/src/components/HistoryTab.tsx` | **NEW** — version timeline + diff modal (uses `diff` npm pkg per SPEC-006). |
+| `packages/dashboard/src/pages/DetailPage.tsx` | Wire Edit button → Editor; wire StatusPill; wire LinksPanel; add History tab. |
+| `packages/dashboard/src/pages/ListPage.tsx` | Add "New doc" button → modal with type/title/parent fields. |
+| `packages/dashboard/src/pages/ConflictModal.tsx` | **NEW** — 409 UX: side-by-side diff + Force Overwrite button. |
+| `packages/dashboard/src/store/draft.ts` | **NEW** — localStorage draft cache `{doc_id, version, content, last_edited_at}`. Auto-restored on Detail mount. |
+| `packages/dashboard/package.json` | Add deps: `@codemirror/state`, `@codemirror/view`, `@codemirror/lang-markdown`, `@codemirror/basic-setup`, `diff`. |
+
+### 9.3 Route + method surface
+
+| Method | Path | Guards | Body / Response |
+|---|---|---|---|
+| POST | `/api/dashboard/docs` | Cookie session | Zod validated `CreateDocInput` → 201 `{doc}` |
+| PATCH | `/api/dashboard/docs/:id` | Cookie + `If-Match: <version>` | `DocPatch` → 200 `{doc}` or 409 `{current, mine, diff}` |
+| POST | `/api/dashboard/docs/:id/approve` | Cookie | 200 `{doc}` |
+| POST | `/api/dashboard/docs/:id/reject` | Cookie | `{reason: string}` → 200 |
+| POST | `/api/dashboard/docs/:id/links` | Cookie | `{to: string, type: LinkType, note?: string}` → 201 |
+| DELETE | `/api/dashboard/docs/:id/links/:link_id` | Cookie | 204 |
+
+### 9.4 Optimistic concurrency algorithm
+
+1. Client fetches doc, gets `{doc, version: N}`.
+2. Client PATCH with `If-Match: N` + body.
+3. Server: loads current doc → `version === N`? Yes → apply. No → 409 with `{current, mine, diff}`.
+4. On 409, client renders `ConflictModal` with:
+   - Left pane: "You wrote" (client body)
+   - Right pane: "Now on server" (`current.content`)
+   - Actions: `[Cancel]` `[Force overwrite]`
+5. Force overwrite → PATCH without `If-Match`, with `X-Force-Overwrite: 1` header. Server audit records `"force":true`.
+
+### 9.5 SSOT preservation
+
+- Every mutation goes through `CorpusService` / `ReviewService` — no new mutation paths.
+- Zod validation lives in `@lore/core`; client imports the same schemas for shortcut UX (server remains authoritative).
+- Draft cache is opportunistic UX — never authoritative.
+
+### 9.6 Telemetry
+
+Reuse `doc.created` / `doc.updated` / `doc.approved` / `doc.rejected` events with new `source: "dashboard"` discriminator (parallel to `source: "cli"`). New Zod field on the existing event schema.
+
+### 9.7 Test layout
+
+- Unit (vitest): dashboard hooks + mutation wrappers + StatusPill (React Testing Library).
+- Integration (vitest, subprocess): full HTTP round-trips against a temp SQLite corpus.
+- Browser (Playwright, per SPEC-015 pattern in `@lore/dashboard`): create → edit → conflict-resolve → approve → history flow.
+
+### 9.8 Out of §9 scope (still SPEC-022)
+
+- AI-assisted refine button (deferred to future SPEC after SPEC-019).
+- RBAC / per-role permissions (SPEC-022.2).
+- Soft-delete restore UI (`lore restore` CLI-only for v1).
+- Multi-doc clone / template.
+- Real-time collab (CRDT / Y.js).
+- Rich-text WYSIWYG (markdown only).

@@ -138,5 +138,102 @@ Per-call new fetch vs single keep-alive `Bun.fetch`?
 
 ## 7. Outstanding Decisions (block implementation)
 
-- Q1-Q6 above each need a final answer before this SPEC moves to `in-review`.
-- Wire format shortlist must be confirmed with team before v1 ships.
+~~Resolved — see §8 below.~~
+
+## 8. Resolved Decisions (ratified 2026-07-02)
+
+| Question | Ratified Answer |
+|---|---|
+| Q1 Wire format | **A: Anthropic Messages hardcoded in v1.** No adapter registry. OpenAI/self-hosted → SPEC-020.1 follow-up. |
+| Q2 Streaming vs sync | **Sync only** in v1. Streaming = SPEC-022 follow-up when dashboard UI needs progressive text. |
+| Q3 Auth shape | **`headers:` map with `${ENV_VAR}` interpolation** (already chosen in §2.1). No dedicated `auth_token_env`. |
+| Q4 Telemetry payload growth | **Yes** — extend `aiGenerationEventSchema` with optional `usage: { input_tokens, output_tokens, stop_reason }`. CLI provider leaves null. |
+| Q5 Response validation location | **Inside `HttpAIProvider` via Zod `aiHttpResponseSchema`** (lives in `@lore/core`). Schema mismatch → `AI_PROVIDER_ERROR`. |
+| Q6 Connection pooling | **Per-call `fetch()`** (Bun's built-in). No custom agent. |
+
+## 9. Architecture Notes (implementation-ready)
+
+### 9.1 File touch list
+
+| File | Change |
+|---|---|
+| `packages/core/src/schemas.ts` | Add `aiHttpResponseSchema`: Anthropic Messages response shape `{ id, type, role, model, content: [{type: "text", text: string}], stop_reason?, usage?: { input_tokens, output_tokens } }` with `.strict()`. Extend existing `aiGenerationEventSchema` with optional `usage: { input_tokens, output_tokens, stop_reason? }`. |
+| `packages/core/src/ai.ts` (or wherever `AiConfigSchema` lives) | Add `http: { url: string, model: string, headers: Record<string,string>, timeout_ms?: number, max_tokens?: number }?` under `ai`. Discriminate via existing `ai.provider` enum → `"claude-cli" \| "http"`. |
+| `packages/lore/src/ai/http-provider.ts` | **NEW** — `HttpAIProvider` implementing `AIProvider` interface. Constructor takes resolved config + `process.env`. `generate(prompt, opts)`: builds Anthropic Messages body, resolves `${ENV}` in headers, POSTs via Bun's `fetch()` with AbortController for `timeout_ms`, validates response via `aiHttpResponseSchema`, extracts `content[0].text`, returns `Result<AIGenerateResult, LoreError>` with `usage` populated. |
+| `packages/lore/src/ai/env-resolve.ts` | **NEW (small helper)** — `resolveEnvInHeaders(headers, env): Result<Headers, LoreError>`. Rejects `${FOO}` where `env.FOO` unset/empty. Parallels SPEC-009 `resolveSyncCredentials()`. |
+| `packages/lore/src/ai/provider-factory.ts` (or `app.ts` if factory logic lives there) | Wire `ai.provider === "http"` → construct `HttpAIProvider`; `"claude-cli"` → existing `ClaudeCliProvider`. Reject unknown provider strings via Zod (already in SPEC-017 AC-AI-11). |
+| `packages/lore/src/app.ts` | Route the correct provider based on config; no other change. |
+| `packages/lore/src/ai/telemetry.ts` (or wherever `ai.generation` events are emitted) | Populate `usage` field when provider returns it (HTTP always; CLI leaves null). |
+| `CLAUDE.md` (root) | Add `SPEC-020` to Specs list. Note that HTTP provider exists but CLI is default. |
+| `packages/lore/tests/unit/ai/http-provider.test.ts` | **NEW** (tester subagent). Uses `Bun.serve` fixture as fake Anthropic endpoint. Six-dim coverage. |
+| `packages/core/tests/unit/schemas.test.ts` | Extend with `aiHttpResponseSchema` tests + new `usage` telemetry field. |
+
+### 9.2 Config shape (final)
+
+```yaml
+ai:
+  provider: http                             # or "claude-cli"
+  http:
+    url: "https://api.anthropic.com/v1/messages"
+    model: "claude-opus-4-8"
+    headers:
+      x-api-key: "${ANTHROPIC_API_KEY}"
+      anthropic-version: "2023-06-01"
+    timeout_ms: 60000                        # default 60s
+    max_tokens: 4096                         # default 4096
+```
+
+### 9.3 Request body shape (Anthropic Messages)
+
+```json
+{
+  "model": "claude-opus-4-8",
+  "max_tokens": 4096,
+  "messages": [
+    { "role": "user", "content": "<rendered SPEC-017 template>" }
+  ]
+}
+```
+
+### 9.4 Response body shape (validated via `aiHttpResponseSchema`)
+
+```json
+{
+  "id": "msg_...",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-opus-4-8",
+  "content": [
+    { "type": "text", "text": "..." }
+  ],
+  "stop_reason": "end_turn",
+  "usage": { "input_tokens": 42, "output_tokens": 128 }
+}
+```
+
+Extract `content[0].text` when `content[0].type === "text"`. Any other shape (empty content, non-text first element, missing usage on non-error responses) → `AI_PROVIDER_ERROR`.
+
+### 9.5 Failure mode matrix
+
+| Failure | Behaviour |
+|---|---|
+| Env var (`${FOO}`) unset/empty at config load | `VALIDATION_ERROR`, exit 1 |
+| Network timeout > `timeout_ms` | `AI_PROVIDER_ERROR` with "timeout", exit 6 |
+| HTTP 4xx / 5xx | `AI_PROVIDER_ERROR` with status + first 1024 chars of body, exit 6 |
+| Response body not JSON | `AI_PROVIDER_ERROR` with "response parse", exit 6 |
+| Response schema mismatch | `AI_PROVIDER_ERROR` with Zod issue path, exit 6 |
+| Empty `content[0].text` | `AI_PROVIDER_ERROR` with "empty output" (mirrors SPEC-017 AC-AI-7), exit 6 |
+
+### 9.6 Test layout
+
+- Unit (vitest): `aiHttpResponseSchema` accepts/rejects fixtures; `env-resolve.ts` interpolation; `HttpAIProvider.generate` happy path via `Bun.serve` fake endpoint on ephemeral port.
+- Unit (vitest): factory picks correct provider from config.
+- Integration (vitest): full `lore create spec --ai` with `ai.provider: http` config, fake server verifies request body shape.
+- Regression: `ai.provider: claude-cli` path unchanged (SPEC-017 tests still pass).
+
+### 9.7 Out of §9 scope (still SPEC-020)
+
+- OpenAI wire format — SPEC-020.1.
+- Streaming — SPEC-020.2 or SPEC-022 follow-up.
+- Retry policy — caller-owned via exit code.
+- Cost / billing dashboard — SPEC-012 follow-up.
