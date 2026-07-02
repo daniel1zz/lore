@@ -33,16 +33,26 @@ Always search first — duplicating an existing doc fragments team knowledge. Li
 
 ## Creating documents
 
-| Type | Required besides --title | CLI-creatable? |
-|---|---|---|
-| prd, plan | — | ✅ |
-| spec, task | `--parent <id-or-slug>` (task also needs extra.plan_id) | spec ✅ / task ❌ |
-| adr | extra.decision_status | ❌ (no --extra flag) |
-| knowledge | extra.sub_type | ❌ (no --extra flag) |
+| Type | Required besides --title |
+|---|---|
+| prd, plan | — |
+| spec | `--parent <id-or-slug>` |
+| task | `--parent <plan>` + `--plan-id <plan>` (+ optional `--phase <name>`, must be declared on the plan) |
+| adr | `--decision-status proposed\|accepted\|deprecated\|superseded` |
+| knowledge | `--sub-type ideation\|retro\|research\|reference` |
 
-❌ types: create via the MCP interface instead — `lore --mcp-server` exposes 16 tools whose create accepts full `extra`. (CLI `--extra` support is a known gap.)
+All six types are CLI-creatable (type-specific flags landed with SPEC-023). The MCP interface (`lore --mcp-server`) remains the path for arbitrary `extra` fields beyond these flags.
 
-Flags: `--title --parent --content --priority critical|high|medium|low --tags a,b --json`.
+Flags: `--title --parent --content --content-file <path> --priority critical|high|medium|low --tags a,b --json`.
+
+## Plans with phases (SPEC-023)
+
+```bash
+lore phase add <plan> <name> [--description]   # declare a phase (exit 4 on duplicate)
+lore phase list <plan> | rm | rename           # manage phases
+lore create task --parent <plan> --plan-id <plan> --phase <name> --title "..."
+lore tree <plan>                               # tasks grouped under phase headers
+```
 
 ## Review workflow
 
