@@ -13,6 +13,8 @@ Business logic layer. Nine stateless services orchestrate `StoreInterface` calls
 - **Migration is idempotent** — `MigrationService` distinguishes `imported` from `already_existed`; re-running the same import does not duplicate docs.
 - **Version log is append-only** — `VersionService.restore(id, version)` does not delete newer entries; it inserts a new version with `action: "restore"` containing the historical content snapshot.
 - **OutlineService is regex-based** — no `remark` / `unified` / `mdx` dependency. Self-closing tags only; props limited to `key="string"` and `key={literal}` (`COMPONENT_REGEX` + `PROP_REGEX`). Unknown components are stripped with a warning, not an error.
+- **`ExportDocsService` index allocation is collision-safe against duplicate corpus titles** — `CorpusService` dedupes `slug` only (`slugifyWithCollision`), never `title`; two docs may legitimately share the same title. `buildOrExtendIndex`'s title-match reconcile path (used to rebuild the index from files on disk when `.lore/export-index.json` is missing/partial) MUST NOT hand a `file_path` already claimed by a *different* doc id in the same reconcile pass to a same-titled doc — tracked via a `usedFilePaths` set built from `index.mappings`. Sequential fallback allocation dedupes its computed `file_path` the same way (`-2`/`-3`/... suffix, mirroring `slugifyWithCollision`), failing loud (`VALIDATION_ERROR`) after 999 attempts rather than aliasing another doc's file. A prior version lacked this guard: a same-titled doc silently inherited an unrelated doc's `human_id` + `file_path`, producing a permanent false drift report (SPEC-021 export-collision incident).
+- **`ExportDocsService` self-heals a corrupted index** — if `.lore/export-index.json` already has two doc ids mapped to the same `file_path` (e.g. written by the bug above, or a hand-edit), `repairCollisions` keeps exactly one canonical owner (content match against the on-disk file if unambiguous, else earliest `created_at`), strips the losing mapping(s) so the normal allocation loop reallocates them, and reports every repair via `ExportReport.repaired` — never a silent skip.
 
 ## Patterns
 
@@ -37,6 +39,7 @@ Business logic layer. Nine stateless services orchestrate `StoreInterface` calls
 | `SyncDocsService` | One-way file→corpus reconciler for spec files; title-match dedup, drift report, parent resolution (SPEC-018) |
 | `PhaseService` | addPhase / listPhases / removePhase / renamePhase / migratePhases on plan.extra.phases (SPEC-023) |
 | `TaskWorkflowService` | addEvidence / claim / release / ready — evidence log, advisory claim lease, computed readiness over `blocks` links (SPEC-025, own telemetry wiring) |
+| `ExportDocsService` | One-way corpus→file exporter; maintains `.lore/export-index.json` (collision-safe human_id/file_path allocation, self-heals corrupted mappings) (SPEC-021) |
 
 ## Links
 

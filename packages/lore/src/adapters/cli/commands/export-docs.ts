@@ -165,6 +165,15 @@ export default defineCommand({
         );
       }
 
+      if (report.repaired.length > 0) {
+        process.stdout.write(
+          `⚠ ${report.repaired.length} export-index self-heal repair${report.repaired.length === 1 ? "" : "s"}:\n`,
+        );
+        for (const line of report.repaired) {
+          process.stdout.write(`    ${line}\n`);
+        }
+      }
+
       if (report.errors.length > 0) {
         process.stderr.write(
           `⚠ ${report.errors.length} error${report.errors.length === 1 ? "" : "s"}:\n`,

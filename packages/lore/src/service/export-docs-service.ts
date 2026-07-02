@@ -15,6 +15,20 @@
  *     reason: export-docs is a structural emitter; AI generation is orthogonal.
  *   - Body comparison uses canonicaliseBody from @lore/core (shared with SyncDocsService).
  *     reason: SPEC-021 §4 requires both services to normalise identically for roundtrip parity.
+ *   - Index allocation is collision-safe against duplicate corpus titles.
+ *     reason: CorpusService dedupes `slug` only (slugifyWithCollision), never `title` — two
+ *     docs may legitimately share the same title. buildOrExtendIndex's title-match reconcile
+ *     path (index rebuild after a missing/corrupted index.json) MUST NOT match a file_path
+ *     already claimed by a different doc id in this reconcile pass (tracked via usedFilePaths);
+ *     sequential fallback allocation dedupes its computed file_path the same way (-2, -3, ...
+ *     suffix, mirroring slugifyWithCollision), fail-loud after 999 attempts. A prior version of
+ *     this file lacked the usedFilePaths guard, letting a same-titled doc silently inherit an
+ *     unrelated doc's human_id + file_path (SPEC-021 export-collision incident).
+ *   - Corrupted indexes self-heal. If .lore/export-index.json already contains two doc ids
+ *     mapped to the same file_path (e.g. written by the bug above, or hand-edited), the next
+ *     export run detects it, keeps exactly one canonical owner (content match, else earliest
+ *     created_at), strips the losing mapping(s) so they get freshly reallocated, and reports
+ *     what was repaired via ExportReport.repaired — never a silent skip or data loss.
  *
  * Side-effect class: IO (readFileSync, writeFileSync, mkdirSync) + StoreInterface async calls.
  *
@@ -84,6 +98,12 @@ export interface ExportReport {
   drift: string[];
   /** Per-doc error messages that did not abort the overall run. */
   errors: string[];
+  /**
+   * Human-readable log of index self-heal repairs performed this run (empty when the index
+   * was already consistent). Each entry names the doc id that was stripped of its (corrupted,
+   * collided) mapping and reallocated a fresh human_id + file_path. Never silent.
+   */
+  repaired: string[];
 }
 
 // ─── Human-ID type prefixes ───────────────────────────────────────────────────
@@ -171,9 +191,9 @@ export class ExportDocsService {
     if (!docsResult.ok) return docsResult;
     const allDocs = docsResult.value;
 
-    const indexResult = buildOrExtendIndex(indexPath, docsBaseDir, allDocs);
+    const indexResult = buildOrExtendIndex(indexPath, docsBaseDir, allDocs, opts.projectDir);
     if (!indexResult.ok) return indexResult;
-    const index = indexResult.value;
+    const { index, repaired } = indexResult.value;
 
     // Save index (atomically) before writing any files — all human IDs are now allocated.
     if (!opts.dryRun) {
@@ -196,6 +216,7 @@ export class ExportDocsService {
       skipped_clean: [],
       drift: [],
       errors: [],
+      repaired,
     };
 
     for (const doc of sortedDocs) {
@@ -384,27 +405,43 @@ function maxNumberForPrefix(prefix: string, humanIds: string[]): number {
  *
  * Algorithm (SPEC-021 §9.3, §9.4):
  *   1. Load existing index.
- *   2. Scan files per type dir — build title → humanId/filePath map.
- *   3. Seed per-type next-number counters from index + file scan.
- *   4. For each corpus doc not in index:
- *      a. Match by title to scanned file → inherit its ID + filePath.
- *      b. Else: allocate next sequential number, compute new filePath.
- *   5. Return mutated index (caller must save it atomically).
+ *   2. Self-heal: repair any (human_id, file_path) collision between two different
+ *      doc ids already in the index (see repairCollisions) — logged, never silent.
+ *   3. Scan files per type dir — build title → humanId/filePath map.
+ *   4. Seed per-type next-number counters from index + file scan.
+ *   5. For each corpus doc not in index:
+ *      a. Match by title to scanned file → inherit its ID + filePath, UNLESS that
+ *         filePath is already claimed by a different doc id this pass (usedFilePaths) —
+ *         titles are not unique across docs (only slug is), so this guard is required.
+ *      b. Else: allocate next sequential number, compute new filePath, deduping against
+ *         usedFilePaths with a -2/-3/... suffix (mirrors slugifyWithCollision).
+ *   6. Return mutated index (caller must save it atomically) plus the repair log.
  *
  * @param indexPath - Absolute path to .lore/export-index.json.
  * @param docsBaseDir - Absolute path to docs/requirements/.
  * @param docs - All active corpus docs to reconcile.
- * @returns ok(ExportIndex) with all docs mapped; err on store failure (already handled upstream).
+ * @param projectDir - Absolute project root (for resolving file_path during self-heal).
+ * @returns ok({index, repaired}) with all docs mapped; err on allocation exhaustion or store failure.
  */
 function buildOrExtendIndex(
   indexPath: string,
   docsBaseDir: string,
   docs: DocRecord[],
-): Result<ExportIndex, LoreError> {
+  projectDir: string,
+): Result<{ index: ExportIndex; repaired: string[] }, LoreError> {
   const index = loadIndex(indexPath);
+
+  // Self-heal BEFORE seeding counters/usedFilePaths so repaired (stripped) doc ids are
+  // treated as brand-new allocations below, and the counter/collision state reflects
+  // only the surviving, consistent mappings.
+  const repaired = repairCollisions(index, projectDir, docs);
 
   // Collect all existing human IDs from the index for next-number seeding.
   const existingHumanIds = Object.values(index.mappings).map((m) => m.human_id);
+
+  // file_path values already claimed by a doc id in the index — the SSOT for collision
+  // detection during both title-match and sequential allocation below.
+  const usedFilePaths = new Set(Object.values(index.mappings).map((m) => m.file_path));
 
   // Per-type next-number counters — seeded from index.
   const typeCounters = new Map<DocType, number>();
@@ -438,12 +475,16 @@ function buildOrExtendIndex(
     const typeTitleMap = titleMaps.get(doc.type);
 
     // Try title-match to an existing file (index rebuild path, SPEC-021 §9.3).
+    // reason: title is NOT unique across docs (CorpusService dedupes slug only) — a
+    // filePath already claimed by a different doc id this pass must NOT be inherited,
+    // or two docs end up sharing one human_id + file_path (the export-collision bug).
     const fileMatch = typeTitleMap?.get(doc.title);
-    if (fileMatch) {
+    if (fileMatch && !usedFilePaths.has(fileMatch.filePath)) {
       index.mappings[doc.id] = {
         human_id: fileMatch.humanId,
         file_path: fileMatch.filePath,
       };
+      usedFilePaths.add(fileMatch.filePath);
       continue;
     }
 
@@ -464,13 +505,131 @@ function buildOrExtendIndex(
       : fullSlug;
     // Limit filename length to avoid filesystem issues.
     const truncatedKebab = kebabPart.slice(0, 50).replace(/-+$/, "");
-    const fileName = `${humanId}-${truncatedKebab}.md`;
-    const filePath = `docs/requirements/${TYPE_DIR[doc.type]}/${fileName}`;
 
+    const dirRelPath = `docs/requirements/${TYPE_DIR[doc.type]}`;
+    const filePathResult = allocateUniqueFilePath(dirRelPath, humanId, truncatedKebab, usedFilePaths);
+    if (!filePathResult.ok) return filePathResult;
+    const filePath = filePathResult.value;
+
+    usedFilePaths.add(filePath);
     index.mappings[doc.id] = { human_id: humanId, file_path: filePath };
   }
 
-  return ok(index);
+  return ok({ index, repaired });
+}
+
+/**
+ * Detect and repair export-index corruption: two different doc ids mapped to the same
+ * file_path (which, since fileName always embeds human_id, also means the same human_id).
+ * This can only arise from a prior buggy run (title-match wrongly matching a different
+ * doc with an identical title — see buildOrExtendIndex's usedFilePaths guard) or a manual
+ * hand-edit of export-index.json.
+ *
+ * Repair strategy — for each colliding file_path:
+ *   1. If exactly one claimant's corpus content matches the on-disk file body, it is the
+ *      canonical owner (it actually wrote that file).
+ *   2. Otherwise the claimant with the earliest created_at wins (most likely exported
+ *      first, before the collision occurred).
+ *   All other claimants have their mapping entry DELETED from `index.mappings` — the
+ *   caller's normal allocation loop then treats them as unmapped and assigns each a
+ *   fresh, unique human_id + file_path; Phase 2 of exportDocs writes their (previously
+ *   never-written) file. No data loss, no silent skip — every repair is logged.
+ *
+ * A lone mapping for a doc id that no longer exists in `docs` (soft-deleted / filtered
+ * out) is NOT a collision by itself — it is a harmless orphan entry, left untouched.
+ *
+ * @param index - Loaded export index (mutated in place: losing entries removed).
+ * @param projectDir - Absolute project root, for resolving file_path to an on-disk file.
+ * @param docs - All active corpus docs currently being reconciled.
+ * @returns Human-readable repair log lines (empty when no collision was found).
+ */
+function repairCollisions(index: ExportIndex, projectDir: string, docs: DocRecord[]): string[] {
+  const repairLog: string[] = [];
+  const docById = new Map(docs.map((d) => [d.id, d]));
+
+  const claimantsByFilePath = new Map<string, string[]>();
+  for (const [docId, mapping] of Object.entries(index.mappings)) {
+    const list = claimantsByFilePath.get(mapping.file_path) ?? [];
+    list.push(docId);
+    claimantsByFilePath.set(mapping.file_path, list);
+  }
+
+  for (const [filePath, claimantIds] of claimantsByFilePath) {
+    const activeClaimants = claimantIds.filter((id) => docById.has(id));
+    if (activeClaimants.length < 2) continue; // no real collision
+
+    const absFilePath = join(projectDir, filePath);
+    let onDiskBody: string | undefined;
+    if (existsSync(absFilePath)) {
+      try {
+        onDiskBody = canonicaliseBody(extractBodyFromMd(readFileSync(absFilePath, "utf8")));
+      } catch {
+        onDiskBody = undefined;
+      }
+    }
+
+    const contentMatches =
+      onDiskBody !== undefined
+        ? activeClaimants.filter((id) => canonicaliseBody(docById.get(id)!.content) === onDiskBody)
+        : [];
+
+    const canonicalId =
+      contentMatches.length === 1
+        ? contentMatches[0]!
+        : [...activeClaimants].sort((a, b) =>
+            docById.get(a)!.created_at.localeCompare(docById.get(b)!.created_at),
+          )[0]!;
+
+    for (const id of activeClaimants) {
+      if (id === canonicalId) continue;
+      const lostMapping = index.mappings[id];
+      delete index.mappings[id];
+      repairLog.push(
+        `self-heal: doc ${id} ("${docById.get(id)!.title}") was wrongly mapped to ` +
+          `${lostMapping?.human_id ?? "?"} / ${filePath} (collided with doc ${canonicalId}) — ` +
+          `reallocating a new human_id + file_path`,
+      );
+      process.stderr.write(`⚠ export-index self-heal: ${repairLog[repairLog.length - 1]}\n`);
+    }
+  }
+
+  return repairLog;
+}
+
+/**
+ * Resolve a candidate export file_path to one not yet claimed in usedFilePaths, appending
+ * a -2, -3, ... suffix on collision (mirrors slugifyWithCollision from @lore/core). Fails
+ * loud rather than silently overwriting or aliasing another doc's file.
+ *
+ * @param dirRelPath - Type directory, relative to project root, e.g. "docs/requirements/knowledge".
+ * @param humanId - Allocated human ID, e.g. "KN-003".
+ * @param kebabStem - Truncated kebab-case stem (no human_id prefix, no extension), ≤50 chars.
+ * @param usedFilePaths - file_path values already claimed this reconcile pass.
+ * @returns ok(filePath) on success; err(VALIDATION_ERROR) if exhausted after 999 attempts.
+ */
+function allocateUniqueFilePath(
+  dirRelPath: string,
+  humanId: string,
+  kebabStem: string,
+  usedFilePaths: ReadonlySet<string>,
+): Result<string, LoreError> {
+  const base = `${dirRelPath}/${humanId}-${kebabStem}.md`;
+  if (!usedFilePaths.has(base)) return ok(base);
+
+  const MAX_ATTEMPTS = 999;
+  for (let n = 2; n <= MAX_ATTEMPTS; n++) {
+    const suffix = `-${n}`;
+    const stemBudget = Math.max(50 - suffix.length, 1);
+    const stem = kebabStem.slice(0, stemBudget).replace(/-+$/, "");
+    const candidate = `${dirRelPath}/${humanId}-${stem}${suffix}.md`;
+    if (!usedFilePaths.has(candidate)) return ok(candidate);
+  }
+
+  return err({
+    code: "VALIDATION_ERROR",
+    field: "file_path",
+    message: `Could not allocate a unique export file_path for ${humanId} after ${MAX_ATTEMPTS} attempts (dir=${dirRelPath}, stem=${kebabStem})`,
+  });
 }
 
 /**
