@@ -234,21 +234,19 @@ export async function apiGetDoc(idOrSlug: string, opts: GetDocOpts = {}): Promis
 
 // ─── Version history ──────────────────────────────────────────────────────────
 
-/** A version log entry from the server. */
+/**
+ * A version log entry from the server. Mirrors `VersionEntry`
+ * (`packages/lore/src/service/version-service.ts`) exactly — that service type is the
+ * only source of truth for this shape; do not add fields here that the service doesn't
+ * populate (e.g. a past `title` / `status` drifted in without the server ever emitting
+ * them, which silently rendered as `undefined` in the UI).
+ */
 export interface VersionLogEntry {
   version: number;
   action: string;
   created_at: string;
   created_by: string;
-  title: string;
-  status: string;
   change_summary?: string;
-}
-
-/** Version log response. */
-export interface VersionLogResponse {
-  versions: VersionLogEntry[];
-  total: number;
 }
 
 /** Unified diff between two versions. */
@@ -263,15 +261,19 @@ export interface VersionDiffResponse {
  *
  * @param idOrSlug - Document ULID or slug.
  * @param opts - Pagination options.
- * @returns Version log with entries.
+ * @returns Version log entries, newest first — `GET /api/docs/:id/log`'s `data` field
+ *   is a bare array (`VersionService.log` returns `Result<VersionEntry[], LoreError>`;
+ *   `routes.ts::handleVersionLog` does `jsonOk(result.value)` with no `{versions,total}`
+ *   wrapper — see `packages/lore/tests/unit/adapters/http/routes.test.ts`
+ *   "GET /api/docs/:id/log" which asserts `Array.isArray(body.data)`).
  * @throws {ApiError} On HTTP or network error.
  */
 export async function apiGetVersionLog(
   idOrSlug: string,
   opts: { limit?: number; offset?: number } = {},
-): Promise<VersionLogResponse> {
+): Promise<VersionLogEntry[]> {
   const qs = buildQueryString(opts as Record<string, number | undefined>);
-  return fetchJson<VersionLogResponse>(`/api/docs/${encodeURIComponent(idOrSlug)}/log${qs}`);
+  return fetchJson<VersionLogEntry[]>(`/api/docs/${encodeURIComponent(idOrSlug)}/log${qs}`);
 }
 
 /**

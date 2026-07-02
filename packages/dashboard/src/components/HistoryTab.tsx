@@ -4,6 +4,9 @@
  * Public surface: HistoryTab, HistoryTabProps
  * Invariants:
  *   - Fetches version log on mount via /api/docs/:id/log.
+ *   - `apiGetVersionLog` resolves to a bare `VersionLogEntry[]` (server's
+ *     `GET /api/docs/:id/log` returns `{ ok, data: VersionEntry[] }` — no `{versions,
+ *     total}` wrapper). Do not reintroduce a `.versions` accessor here.
  *   - Diff modal is opened when user clicks a version's diff link.
  *   - Diff is fetched lazily (only when opened).
  *   - Renders a "no history" empty state when only 1 version exists.
@@ -121,15 +124,15 @@ export function HistoryTab({ docId }: HistoryTabProps): React.ReactElement {
     return <p className="text-sm text-destructive">Failed to load version history.</p>;
   }
 
-  if (data === undefined || data.versions.length === 0) {
+  if (data === undefined || data.length === 0) {
     return <p className="text-sm text-muted-foreground">No version history yet.</p>;
   }
 
   return (
     <>
       <div className="space-y-2">
-        {data.versions.map((entry, index) => {
-          const prevEntry = data.versions[index + 1];
+        {data.map((entry, index) => {
+          const prevEntry = data[index + 1];
           const hasDiff = prevEntry !== undefined;
 
           return (
@@ -146,8 +149,6 @@ export function HistoryTab({ docId }: HistoryTabProps): React.ReactElement {
                   <span className="text-xs text-muted-foreground">
                     {new Date(entry.created_at).toLocaleString()}
                   </span>
-                  <span className="text-xs text-muted-foreground">·</span>
-                  <span className="text-xs text-muted-foreground">{entry.status}</span>
                 </div>
                 {entry.change_summary !== undefined && (
                   <p className="text-xs text-muted-foreground mt-1 truncate">{entry.change_summary}</p>
