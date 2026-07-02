@@ -121,6 +121,7 @@ All feature specs live under `docs/requirements/spec/`. When implementing or cha
 - `SPEC-014` — Monorepo skeleton (Bun workspaces, @lore/core + @lore/lore + @lore/dashboard)
 - `SPEC-015` — Dashboard read-only skeleton (Vite + React + shadcn; list/search/tree/detail)
 - `SPEC-016` — Cookie auth via CLI-managed local bootstrap (`lore dashboard` + sessions table)
+- `SPEC-020` — HTTP-backed AI provider (`ai.provider: "http"`) — Anthropic Messages API; `${ENV_VAR}` headers; for CI/team gateways where local `claude` binary is unavailable; CLI is still the default
 - `SPEC-024` — Default --no-ai for agent and MCP execution paths (AI surface defaults)
 - `SPEC-021` — `lore export-docs` reverse sync (corpus → .md files); `.lore/export-index.json` is **git-tracked** (team-shared ID map)
 

@@ -325,6 +325,65 @@ export function slugify(type: DocType, title: string): Slug {
   return (truncated.length >= 2 ? truncated : prefix) as Slug;
 }
 
+// ─── Anthropic Messages HTTP Response Schema (SPEC-020) ────────────────────
+
+/**
+ * Zod schema for a single Anthropic Messages API content block.
+ * Only `type: "text"` blocks are expected for text-generation requests.
+ * `.strict()` rejects unknown fields — prevents silent acceptance of tool_use or image blocks.
+ *
+ * Source: SPEC-020 §9.4
+ */
+export const aiHttpContentBlockSchema = z
+  .object({
+    type: z.literal("text"),
+    text: z.string(),
+  })
+  .strict();
+
+/**
+ * Zod schema for the Anthropic Messages API response body.
+ * Used by HttpAIProvider to validate the raw HTTP response before content extraction.
+ * `.strict()` rejects any unknown top-level fields — schema mismatch → AI_PROVIDER_ERROR.
+ *
+ * @invariant content array must contain at least one element (enforced by .min(1))
+ * @invariant content[0].type must be "text" for extraction to succeed
+ * @invariant Token values MUST NOT appear in this schema — only usage metadata
+ *
+ * @example
+ * const validated = aiHttpResponseSchema.parse(responseBody);
+ * const text = validated.content[0].text; // safe after parse
+ *
+ * @example
+ * // Schema mismatch (tool_use block, unknown field, etc.) → safeParse returns false
+ * const result = aiHttpResponseSchema.safeParse({ ...body, extra_field: "x" });
+ * // result.success === false
+ *
+ * Source: SPEC-020 §9.4 (AC-HTTP-CORE-1)
+ */
+export const aiHttpResponseSchema = z
+  .object({
+    id: z.string(),
+    type: z.literal("message"),
+    role: z.literal("assistant"),
+    model: z.string(),
+    /** At least one content block; HttpAIProvider extracts content[0].text */
+    content: z.array(aiHttpContentBlockSchema).min(1),
+    /** Anthropic stop reason: "end_turn" | "max_tokens" | "stop_sequence" | "tool_use" */
+    stop_reason: z.string().optional(),
+    /** Token usage from the API — optional for resilience against future Anthropic changes */
+    usage: z
+      .object({
+        input_tokens: z.number().int().nonnegative(),
+        output_tokens: z.number().int().nonnegative(),
+      })
+      .optional(),
+  })
+  .strict();
+
+/** Derived TypeScript type for the Anthropic Messages API response. Source: SPEC-020 §9.4 */
+export type AiHttpResponse = z.infer<typeof aiHttpResponseSchema>;
+
 // ─── Export Index Schema ────────────────────────────────────────────────────
 
 /**

@@ -64,17 +64,33 @@ export type GenerateInput = z.infer<typeof GenerateInputSchema>;
  * Output from an AI provider's generate() method on success.
  * Interface (not Zod) — provider classes return this shape directly.
  *
- * @invariant content is always non-empty on success — empty stdout → AI_PROVIDER_ERROR instead
+ * @invariant content is always non-empty on success — empty output → AI_PROVIDER_ERROR instead
+ * @invariant usage is populated by HttpAIProvider when the API returns token counts;
+ *   ClaudeCliProvider leaves it undefined (no token tracking in CLI exit-code model)
  */
 export interface GenerateOutput {
   /** Full text output from the provider (typically Markdown) */
   content: string;
-  /** Wall-clock milliseconds from spawn to last byte captured */
+  /** Wall-clock milliseconds from provider round-trip (spawn/fetch to last byte) */
   duration_ms: number;
-  /** Provider process exit code (0 for success) */
+  /** Provider process exit code (0 for success; -1 for HTTP/network failures) */
   exit_code: number;
   /** Provider name as registered in the provider registry */
   provider_name: string;
+  /**
+   * Token usage from the provider API (populated by HttpAIProvider; absent for ClaudeCliProvider).
+   * Forwarded to aiGenerationEventSchema.usage in telemetry (AC-HTTP-TEL-1).
+   * Source: SPEC-020 §8 Q4
+   */
+  usage?: {
+    input_tokens: number;
+    output_tokens: number;
+    /**
+     * Anthropic stop reason from the top-level response (e.g. "end_turn", "max_tokens").
+     * Distinct from content-block stop reasons. Optional: absent when not provided by the API.
+     */
+    stop_reason?: string;
+  };
 }
 
 // ─── AIProvider interface (type-only) ────────────────────────────────────────
@@ -123,6 +139,52 @@ export const AiProviderConfigSchema = z.object({
 /** Validated per-provider CLI configuration. */
 export type AiProviderConfig = z.infer<typeof AiProviderConfigSchema>;
 
+// ─── HTTP Provider Config Schema (SPEC-020) ──────────────────────────────────
+
+/**
+ * HTTP AI provider configuration — Anthropic Messages v1 wire format.
+ * Required under `ai.http` when `ai.provider: "http"` is set (AC-HTTP-2).
+ *
+ * Header values matching the exact pattern `^\$\{[A-Z_][A-Z0-9_]*\}$` are resolved
+ * from process.env at registry-build time (AC-HTTP-3). Missing or empty env vars
+ * → VALIDATION_ERROR naming the env var. Literal header values are passed through unchanged.
+ *
+ * @invariant url must be a valid absolute HTTP(S) URL
+ * @invariant headers values with the ${ENV_VAR} pattern are resolved at createApp() time,
+ *   not at request time — the token value MUST NOT appear in error messages or logs (D-004)
+ *
+ * @example
+ * AiHttpConfigSchema.parse({
+ *   url: "https://api.anthropic.com/v1/messages",
+ *   model: "claude-opus-4-8",
+ *   headers: { "x-api-key": "${ANTHROPIC_API_KEY}", "anthropic-version": "2023-06-01" },
+ * });
+ * // → { url: "...", model: "claude-opus-4-8", headers: {...}, timeout_ms: 60000, max_tokens: 4096 }
+ *
+ * Source: SPEC-020 §9.2
+ */
+export const AiHttpConfigSchema = z
+  .object({
+    /** Anthropic Messages API endpoint (e.g. "https://api.anthropic.com/v1/messages") */
+    url: z.string().url(),
+    /** Model identifier sent in the request body (e.g. "claude-opus-4-8") */
+    model: z.string().min(1).default("claude-opus-4-8"),
+    /**
+     * HTTP headers map. Values of the form `${ENV_VAR}` are resolved against process.env
+     * at registry-build time (buildProviderRegistry). Missing or empty env vars → VALIDATION_ERROR.
+     * Literal values (not matching the pattern) are passed through unchanged.
+     */
+    headers: z.record(z.string(), z.string()).default({}),
+    /** Milliseconds before AbortController aborts the in-flight fetch (AC-HTTP-6) */
+    timeout_ms: z.number().int().positive().default(60_000),
+    /** Maximum tokens in the generated response (sent as `max_tokens` in request body) */
+    max_tokens: z.number().int().positive().default(4096),
+  })
+  .strict();
+
+/** Validated HTTP AI provider configuration. Source: SPEC-020 §9.2 */
+export type AiHttpConfig = z.infer<typeof AiHttpConfigSchema>;
+
 // ─── Per-Surface AI Default Schema (SPEC-024) ────────────────────────────────
 
 /**
@@ -161,39 +223,66 @@ export type AiDefaultPerSurface = z.infer<typeof AiDefaultPerSurfaceSchema>;
  * @example
  * AiConfigSchema.parse({ provder: "claude-cli" }); // throws ZodError — .strict() catches typo
  */
-export const AiConfigSchema = z.object({
-  /**
-   * Active provider name — must match a key in the merged provider map.
-   * Unknown provider name at createApp time → STORE_ERROR (AC-AI-11).
-   */
-  provider: z.string().min(1).default("claude-cli"),
-  /**
-   * Per-provider config overrides.
-   * Each entry REPLACES (not merges) the corresponding built-in provider entry.
-   * Empty by default — built-in "claude-cli" is always present.
-   */
-  providers: z.record(z.string(), AiProviderConfigSchema).default({}),
-  /**
-   * Per-doc-type template overrides keyed by DocType.
-   * When present, overrides the built-in template for that type.
-   * Absent key → built-in template from BUILT_IN_TEMPLATES is used.
-   * Telemetry tags the event `template_source: "user-override"` when this key is present.
-   */
-  templates: z.record(DocTypeSchema, z.string().min(1)).default({}),
-  /**
-   * Whether to emit ai.generation JSONL telemetry events.
-   * Independent kill switch from the root telemetry.enabled flag (AC-AI-21).
-   */
-  telemetry: z.boolean().default(true),
-  /**
-   * Per-surface AI default overrides (SPEC-024).
-   * When absent, built-in defaults apply:
-   *   cli=true, agent=false, mcp=false, http_cookie=true, http_token=false
-   * When a surface key is present, it overrides the built-in for that surface only.
-   * source is reported as "config" in telemetry when this overrides the built-in.
-   */
-  default_per_surface: AiDefaultPerSurfaceSchema.optional(),
-}).strict();
+export const AiConfigSchema = z
+  .object({
+    /**
+     * Active provider name — must match a key in the merged provider map.
+     * Valid values: "claude-cli" (default) | "http" (SPEC-020).
+     * Unknown provider name at createApp time → STORE_ERROR (AC-AI-11).
+     */
+    provider: z.string().min(1).default("claude-cli"),
+    /**
+     * Per-provider CLI config overrides.
+     * Each entry REPLACES (not merges) the corresponding built-in provider entry.
+     * Empty by default — built-in "claude-cli" is always present.
+     * Not used when provider === "http" (HTTP config lives in ai.http, not here).
+     */
+    providers: z.record(z.string(), AiProviderConfigSchema).default({}),
+    /**
+     * Per-doc-type template overrides keyed by DocType.
+     * When present, overrides the built-in template for that type.
+     * Absent key → built-in template from BUILT_IN_TEMPLATES is used.
+     * Telemetry tags the event `template_source: "user-override"` when this key is present.
+     */
+    templates: z.record(DocTypeSchema, z.string().min(1)).default({}),
+    /**
+     * Whether to emit ai.generation JSONL telemetry events.
+     * Independent kill switch from the root telemetry.enabled flag (AC-AI-21).
+     */
+    telemetry: z.boolean().default(true),
+    /**
+     * Per-surface AI default overrides (SPEC-024).
+     * When absent, built-in defaults apply:
+     *   cli=true, agent=false, mcp=false, http_cookie=true, http_token=false
+     * When a surface key is present, it overrides the built-in for that surface only.
+     * source is reported as "config" in telemetry when this overrides the built-in.
+     */
+    default_per_surface: AiDefaultPerSurfaceSchema.optional(),
+    /**
+     * HTTP AI provider configuration (SPEC-020).
+     * Required when `provider === "http"` — Zod superRefine enforces this (AC-HTTP-2).
+     * Ignored when `provider === "claude-cli"`.
+     * Header values matching `^\$\{[A-Z_][A-Z0-9_]*\}$` are resolved from process.env
+     * at registry-build time (AC-HTTP-3).
+     */
+    http: AiHttpConfigSchema.optional(),
+  })
+  .strict()
+  // Cross-field constraint: when provider === "http", ai.http is required (AC-HTTP-2).
+  // reason: Zod object.strict() only validates field shapes, not cross-field dependencies.
+  // superRefine runs after all field-level validation passes, so http fields are already
+  // validated by AiHttpConfigSchema before this check fires.
+  .superRefine((val, ctx) => {
+    if (val.provider === "http" && val.http === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["http"],
+        message:
+          "ai.http config is required when ai.provider is 'http'. " +
+          "Add ai.http.url (and ai.http.headers with ${ENV_VAR} for auth) to your .lore/config.yaml.",
+      });
+    }
+  });
 
 /** Validated full AI configuration. */
 export type AiConfig = z.infer<typeof AiConfigSchema>;
