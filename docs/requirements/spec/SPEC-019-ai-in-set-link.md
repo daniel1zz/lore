@@ -132,7 +132,105 @@ Or one unified `ai.generation` event with a `kind: create|regenerate|refine|infe
 | `--infer` picks `relates-to` for everything (low-info default) | Telemetry tracks chosen-type distribution; if skewed, raise confidence threshold in v2. |
 | Token budget for `--refine` on large docs | Truncate content to N chars (config: `ai.refine.max_input_chars`, default 8000), warn user when truncated. |
 
-## 7. Out-standing Decisions (block implementation)
+## 7. Outstanding Decisions (block implementation)
 
-- Q1-Q6 above each need a final answer before this SPEC moves to `in-review`.
-- Recommendations are owner's first instinct; do not treat as decided.
+~~Resolved — see §8 below.~~
+
+## 8. Resolved Decisions (ratified 2026-07-02)
+
+| Question | Ratified Answer |
+|---|---|
+| Q1 `--regenerate` vs `--refine` shape | **Two mutually-exclusive flags on `lore set`**: `--regenerate` (re-render type template) and `--refine "<prompt>"` (refine current content with user prompt). Passing both → exit 2. |
+| Q2 `--refine` prompt source | **Inline + stdin**. `lore set <id> --refine "prompt"` OR `echo "prompt" \| lore set <id> --refine-stdin`. No editor. |
+| Q3 `lore link --infer` confidence | **Trust the model unconditionally** in v1. No JSON `{type,confidence}` shape. Interactive `y/N` deferred. |
+| Q4 Template extensibility | **`ai.templates.refine` config slot with hardcoded default** (in service). Symmetric with `ai.templates.<type>`. |
+| Q5 Lifecycle side-effect | **AI-edited content demotes approved → draft** — same service-layer bypass as SPEC-022 AC-DASH-WRITE-5. Handled inside `CorpusService.update`, not `isValidTransition()`. |
+| Q6 Telemetry granularity | **Unified `ai.generation` event with `kind: create \| regenerate \| refine \| infer` discriminator** and optional `target_doc_id` (null for `create`). Extends existing schema; SPEC-020's `usage` field remains orthogonal. |
+
+## 9. Architecture Notes (implementation-ready)
+
+### 9.1 File touch list
+
+| File | Change |
+|---|---|
+| `packages/core/src/telemetry.ts` | Extend `aiGenerationEventSchema` with `kind: z.enum(["create","regenerate","refine","infer"]).default("create")` and `target_doc_id: z.string().nullable().optional()`. SPEC-017's existing events default to `kind: "create"` at emit time (backward compat). |
+| `packages/core/src/ai.ts` (or wherever `AiConfigSchema` lives) | Add `ai.templates.refine?: string` and `ai.templates.link_inference?: string`. Both optional; service supplies defaults. |
+| `packages/lore/src/service/ai-provider-service.ts` (or SPEC-017 service module) | New methods: `regenerateContent(doc, opts)`, `refineContent(doc, userPrompt, opts)`, `inferLinkType(from, to, opts)`. All return `Promise<Result<{content?: string, linkType?: LinkType}, LoreError>>` shape. Each emits an `ai.generation` event with the correct `kind` + `target_doc_id`. |
+| `packages/lore/src/adapters/cli/commands/set.ts` | Add `--regenerate` / `--refine <prompt>` / `--refine-stdin` flags. Mutual exclusion: passing more than one → exit 2. Wire to `AIProviderService.regenerateContent` / `refineContent`. Route via `resolveAiDefault(--ai / --no-ai)` from SPEC-024. |
+| `packages/lore/src/adapters/cli/commands/link.ts` | Add `--infer` flag. Wire to `AIProviderService.inferLinkType`. Validate returned type ∈ `linkTypeSchema` set; invalid → exit 6, no link created. |
+| `packages/lore/src/ai/templates.ts` (or wherever SPEC-017 templates live) | Add default `refine` template (`{{current_content}}` + `{{user_prompt}}` interpolation) and `link_inference` template (`{{from_title}}`, `{{from_body_head}}`, `{{to_title}}`, `{{to_body_head}}` — bodies truncated to 500 chars per SPEC-019 §6). |
+| `packages/core/src/text-normalise.ts` | (Already exists from SPEC-021.) No change needed — `canonicaliseBody` applied on write via CorpusService.set from SPEC-021 FU covers AI-edited content transparently. |
+| `CLAUDE.md` (root) | Add SPEC-019 to Specs list. |
+| **Tests** (dispatch tester) | Unit: template rendering, kind-discriminator on telemetry events, mutual-exclusion flag validation. Integration: `lore set <id> --regenerate` uses fake AIProvider fixture, verify demoted-to-draft transition. `lore link --infer` with fake provider returning valid/invalid types. Regression: existing SPEC-017 `lore create --ai` path unchanged (kind=create default). |
+
+### 9.2 Refine prompt shape
+
+```
+Below is the current content of a document titled "{{title}}":
+
+<content>
+{{current_content}}
+</content>
+
+The user requests the following refinement:
+{{user_prompt}}
+
+Please output the revised full document content (markdown). Do NOT explain your changes; just emit the revised markdown.
+```
+
+### 9.3 Link inference prompt shape
+
+```
+Two documents in a knowledge corpus need a relationship classified.
+
+DOC A: "{{from_title}}"
+<body_head>
+{{from_body_head}}
+</body_head>
+
+DOC B: "{{to_title}}"
+<body_head>
+{{to_body_head}}
+</body_head>
+
+Choose EXACTLY ONE relationship type from this list:
+- parent
+- implements
+- informs
+- supersedes
+- relates-to
+- blocks
+
+Respond with only the single word — no explanation.
+```
+
+Response parsing: `trim() → lowercase → validate against linkTypeSchema`. Invalid → `AI_PROVIDER_ERROR`.
+
+### 9.4 Refine truncation
+
+`--refine` sends current_content up to `ai.refine.max_input_chars` (config, default 8000). If body longer, truncate and warn user. Prevent runaway prompt cost on huge docs.
+
+### 9.5 Test layout
+
+- Unit (vitest): template renderer with fake docs; kind-discriminator telemetry; mutual-exclusion flag validator.
+- Integration (vitest subprocess): fake `AIProvider` implementation (in-memory) that returns canned responses; `lore set --regenerate` writes new content + demotes approved→draft; `lore link --infer` picks correct type from mock.
+- Regression: `lore create --ai` still emits `kind: "create"` event; existing SPEC-017 tests unchanged.
+
+### 9.6 Failure mode matrix
+
+| Failure | Behaviour |
+|---|---|
+| `--regenerate` + `--refine` passed together | Exit 2 (usage error), no service call. |
+| `--refine` without prompt (empty string) | Exit 2 (usage), reject. |
+| `--refine-stdin` with EOF / empty stdin | Exit 2, reject. |
+| AI provider returns empty content | Exit 6, no update, telemetry with `error: "empty output"`. |
+| `--infer` returns non-linkType word | Exit 6, no link created, error names the invalid word. |
+| `--infer` returns valid type but link would cycle | Exit 4 (validation), no link (CorpusService.link enforces). |
+
+### 9.7 Out of §9 scope (still SPEC-019)
+
+- MCP tools `lore_set_ai` / `lore_link_infer` — separate SPEC.
+- Dashboard AI buttons — separate SPEC after both SPEC-019 and SPEC-022 mature.
+- Confidence threshold on `--infer` — deferred.
+- Streaming refine output — deferred.
+- Per-doc-type refine templates (`ai.templates.refine_<type>`) — deferred.
