@@ -237,9 +237,21 @@
       "human_id": "SPEC-026",
       "file_path": "docs/requirements/spec/SPEC-026-ai-plan-assessment.md"
     },
+    "01KWHBEYN5TZGW4V21MZKSA2AJ": {
+      "human_id": "TASK-027",
+      "file_path": "docs/requirements/task/TASK-027-fix-export-human-id-file-path-collision-repair-ind.md"
+    },
+    "01KWHBEYA1SBD4S5GDCV5TDE3M": {
+      "human_id": "PLAN-005",
+      "file_path": "docs/requirements/plan/PLAN-005-spec-021-hardening-export-collision-fixes.md"
+    },
+    "01KWHBEZ0P6N6SBTS20W0P2JPV": {
+      "human_id": "TASK-028",
+      "file_path": "docs/requirements/task/TASK-028-regression-tests-for-export-collisions.md"
+    },
     "01KWHB786ZMZTMS1B0CEG1M925": {
-      "human_id": "KN-002",
-      "file_path": "docs/requirements/knowledge/KN-002-assessment-spec-026-implementation-ai-plan-assessm.md"
+      "human_id": "KN-003",
+      "file_path": "docs/requirements/knowledge/KN-003-assessment-spec-026-implementation-ai-plan-assessm.md"
     }
   }
 }
