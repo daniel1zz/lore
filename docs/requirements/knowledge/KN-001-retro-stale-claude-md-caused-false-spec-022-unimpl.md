@@ -3,7 +3,7 @@ id: KN-001
 type: knowledge
 role: knowledge
 title: "Retro: stale CLAUDE.md caused false 'SPEC-022 unimplemented' judgment"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-02
 updated: 2026-07-02
