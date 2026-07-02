@@ -18,7 +18,7 @@
  * Source: SPEC-015, SPEC-022 §9.2
  */
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -104,26 +104,54 @@ export function DocDetail({ docWithNav, onNavigate, onMutated }: DocDetailProps)
   // ── Tab state ──────────────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<ActiveTab>("content");
 
-  // ── Draft autosave ────────────────────────────────────────────────────────
+  // ── Draft autosave (debounced) ───────────────────────────────────────────────
+  // reason: SPEC-022 §6 risk mitigation ("Markdown editor saves trigger huge version
+  // churn") requires the localStorage draft write to be debounced 1s, distinct from the
+  // explicit Save button which is the only path that PATCHes the server. Writing to
+  // localStorage on every keystroke is wasted work on long documents and was flagged in
+  // review; a trailing-edge debounce keeps the draft-recovery UX while cutting write volume.
+  const DRAFT_SAVE_DEBOUNCE_MS = 1000;
+  const draftSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (draftSaveTimerRef.current !== null) clearTimeout(draftSaveTimerRef.current);
+    };
+  }, []);
+
   const handleEditorChange = useCallback(
     (value: string) => {
       setEditContent(value);
-      // reason: Draft is saved to localStorage on every keystroke to protect against
-      // accidental refresh. Cleared on successful save. SPEC-022 §6.
-      saveDraft({ doc_id: doc.id, version: doc.version, content: value, last_edited_at: new Date().toISOString() });
+      if (draftSaveTimerRef.current !== null) clearTimeout(draftSaveTimerRef.current);
+      draftSaveTimerRef.current = setTimeout(() => {
+        saveDraft({ doc_id: doc.id, version: doc.version, content: value, last_edited_at: new Date().toISOString() });
+      }, DRAFT_SAVE_DEBOUNCE_MS);
     },
     [doc.id, doc.version],
   );
+
+  // reason: Editing content on an approved doc auto-demotes it to draft server-side
+  // (CorpusService.update side effect — no VALID_TRANSITIONS edge exists for this, see
+  // SPEC-022 §4 AC-DASH-WRITE-5 note). The client compares pre-save status against the
+  // server's returned status to surface this non-obvious side effect distinctly, rather
+  // than a generic "saved" toast that would hide the status change from the user.
+  function notifySaveOutcome(previousStatus: DocStatus, savedDoc: { status: DocStatus }, forced: boolean): void {
+    if (previousStatus === "approved" && savedDoc.status === "draft") {
+      toast.success("Saved — status reverted to draft (editing an approved doc requires re-review)");
+      return;
+    }
+    toast.success(forced ? "Document saved (force overwrite)" : "Document saved");
+  }
 
   // ── Save (PATCH) ─────────────────────────────────────────────────────────────
   async function handleSave(): Promise<void> {
     setIsSaving(true);
     try {
-      await apiPatchDoc(doc.id, { content: editContent }, { version: doc.version });
+      const savedDoc = await apiPatchDoc(doc.id, { content: editContent }, { version: doc.version });
       clearDraft(doc.id);
       onMutated?.();
       setIsEditing(false);
-      toast.success("Document saved");
+      notifySaveOutcome(doc.status, savedDoc, false);
     } catch (err) {
       if (err instanceof ConflictError) {
         setConflictError(err);
@@ -139,12 +167,12 @@ export function DocDetail({ docWithNav, onNavigate, onMutated }: DocDetailProps)
   async function handleForceOverwrite(): Promise<void> {
     setIsForcing(true);
     try {
-      await apiPatchDoc(doc.id, { content: editContent }, { forceOverwrite: true });
+      const savedDoc = await apiPatchDoc(doc.id, { content: editContent }, { forceOverwrite: true });
       clearDraft(doc.id);
       setConflictError(null);
       onMutated?.();
       setIsEditing(false);
-      toast.success("Document saved (force overwrite)");
+      notifySaveOutcome(doc.status, savedDoc, true);
     } catch (err) {
       const message = err instanceof DashboardApiError ? err.message : "Force save failed";
       toast.error(message);
