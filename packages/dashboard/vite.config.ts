@@ -4,6 +4,7 @@ import react from "@vitejs/plugin-react";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import tailwindcss from "@tailwindcss/vite";
 import { fileURLToPath, URL } from "node:url";
+import { configDefaults } from "vitest/config";
 
 /**
  * Dev-only Vite plugin that inlines the bootstrap token into index.html.
@@ -66,5 +67,10 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["./tests/setup.ts"],
     globals: false,
+    // reason: Playwright e2e specs (tests/e2e/*.pw.ts) are a separate suite driven by
+    // `playwright test` (see playwright.config.ts), never by vitest. Excluding the dir
+    // is belt-and-suspenders: the filename pattern already doesn't match vitest's
+    // default *.test.ts(x)/*.spec.ts(x) include behaviour. SPEC-022 §9.7.
+    exclude: [...configDefaults.exclude, "tests/e2e/**"],
   },
 });

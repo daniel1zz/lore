@@ -1,3 +1,6 @@
 node_modules
 dist
 src/routeTree.gen.ts
+test-results
+playwright-report
+blob-report

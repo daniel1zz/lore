@@ -27,7 +27,11 @@ export default defineConfig({
       "packages/dashboard/src/**/*.test.ts",
       "packages/dashboard/src/**/*.test.tsx",
     ],
-    exclude: ["**/*.bun.test.ts", "node_modules/**"],
+    // reason: "**/*.pw.ts" (Playwright e2e specs, packages/dashboard/tests/e2e/**) already
+    // fail to match the `include` globs above (which only list *.test.ts(x)), but this
+    // exclude is a belt-and-suspenders guard so a future include-glob change can't
+    // accidentally pull Playwright specs into the vitest run. SPEC-022 §9.7.
+    exclude: ["**/*.bun.test.ts", "**/*.pw.ts", "node_modules/**"],
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov"],
