@@ -1,26 +1,29 @@
 /**
- * Telemetry module — append-only JSONL event sink for service instrumentation.
+ * Telemetry module — schemas, interface, and the null sink. Browser-safe.
  *
  * Public surface:
  *   - TelemetryEvent — schema for a single recorded event (Zod + z.infer)
  *   - Telemetry — interface for recording events and lifecycle
- *   - JsonlTelemetry — writes events to a JSONL file; IO errors are swallowed (never breaks caller)
- *   - NoOpTelemetry — null implementation for tests and opt-out mode
- *   - createTelemetry — factory that reads TelemetryConfig and returns the right impl
+ *   - NoOpTelemetry — null implementation for tests, opt-out mode, and browser callers
+ *   - TelemetryConfigSchema / TelemetryConfig — config shape consumed by LoreConfigSchema
  *
  * Invariants:
- *   - record() MUST NOT throw even if the underlying IO fails
+ *   - record() MUST NOT throw even if the underlying implementation fails
  *   - close() is idempotent; subsequent record() calls after close() are no-ops
- *   - JsonlTelemetry never creates directories; caller must ensure the .lore/ dir exists
+ *   - This file MUST NOT import Node builtins (fs/path/os/child_process/...), even
+ *     transitively — it is re-exported from the browser-safe `@lore/core` barrel
+ *     (`index.ts`) and consumed by `@lore/dashboard`. The file-writing implementation
+ *     (`JsonlTelemetry`) and its factory (`createTelemetry`) live in the Node-only
+ *     sibling `telemetry-node.ts`, exported only via the `@lore/core/node` subpath.
+ *     Regression oracle: `packages/dashboard/tests/e2e/write-flow.pw.ts` (SPEC-022) —
+ *     a `fs` import reachable from this file crashes the dashboard SPA at load time.
  *
- * Side-effect class: IO (JsonlTelemetry only; NoOpTelemetry is pure)
+ * Side-effect class: pure (JsonlTelemetry's IO lives in telemetry-node.ts)
  *
  * Source: SPEC-012
  */
 
 import { z } from "zod";
-import { appendFileSync, mkdirSync } from "fs";
-import { dirname } from "path";
 import { DocTypeSchema } from "./ai.js";
 
 // ─── Event Schema (Zod SSOT) ──────────────────────────────────────────────────
@@ -201,78 +204,6 @@ export class NoOpTelemetry implements Telemetry {
   }
 }
 
-// ─── JsonlTelemetry ───────────────────────────────────────────────────────────
-
-/**
- * JSONL file-based telemetry implementation.
- * Appends one JSON line per event to the configured path.
- *
- * IO errors are caught and silently discarded to satisfy the invariant that
- * telemetry failures MUST NOT propagate to the caller.
- *
- * @example
- * const tel = new JsonlTelemetry("/project/.lore/telemetry.jsonl");
- * tel.record({ ts: new Date().toISOString(), service: "CorpusService", method: "create", ok: true, duration_ms: 12 });
- * tel.close();
- */
-export class JsonlTelemetry implements Telemetry {
-  private readonly filePath: string;
-  private closed: boolean = false;
-
-  /**
-   * @param filePath - Absolute or relative path to the JSONL output file.
-   *   The parent directory is created if it does not exist.
-   */
-  constructor(filePath: string) {
-    this.filePath = filePath;
-    // Ensure parent directory exists (e.g. .lore/) — reason: appendFileSync
-    // will throw if the directory is missing; we create it once here
-    try {
-      mkdirSync(dirname(filePath), { recursive: true });
-    } catch {
-      // If mkdirSync fails (permissions, etc.), we stay in a degraded state
-      // where record() will silently fail. This is acceptable per the invariant.
-    }
-  }
-
-  /**
-   * Append event as a JSON line to the JSONL file.
-   * No-op if already closed. IO errors are swallowed — see invariant.
-   */
-  record(event: TelemetryEvent): void {
-    if (this.closed) return;
-    try {
-      const line = JSON.stringify(event) + "\n";
-      appendFileSync(this.filePath, line, "utf8");
-    } catch {
-      // reason: telemetry failures MUST NOT break service callers (SPEC-012 §4)
-    }
-  }
-
-  /**
-   * Append an AI generation event as a JSON line to the same JSONL file.
-   * Discriminated from record() events by `event: "ai.generation"` field.
-   * No-op if already closed. IO errors are swallowed — see invariant.
-   */
-  emit(event: AiGenerationEvent): void {
-    if (this.closed) return;
-    try {
-      const line = JSON.stringify(event) + "\n";
-      appendFileSync(this.filePath, line, "utf8");
-    } catch {
-      // reason: telemetry failures MUST NOT break service callers (SPEC-012 §4)
-    }
-  }
-
-  /**
-   * Mark this instance as closed; subsequent record()/emit() calls are ignored.
-   * Synchronous flush is implicit since appendFileSync is synchronous.
-   */
-  close(): void {
-    this.closed = true;
-  }
-}
-
 // ─── Config Schema ────────────────────────────────────────────────────────────
 
 /**
@@ -291,24 +222,7 @@ export const TelemetryConfigSchema = z.object({
 
 export type TelemetryConfig = z.infer<typeof TelemetryConfigSchema>;
 
-// ─── Factory ──────────────────────────────────────────────────────────────────
-
-/**
- * Create the appropriate Telemetry implementation based on config.
- *
- * - config undefined or enabled=false → NoOpTelemetry (no file side effects)
- * - enabled=true → JsonlTelemetry writing to config.path
- *
- * @param config - Optional telemetry config from LoreConfig.telemetry
- * @returns A Telemetry implementation ready to record events
- *
- * @example
- * // Caller must opt-in explicitly via config:
- * const tel = createTelemetry({ enabled: true, path: ".lore/telemetry.jsonl" });
- */
-export function createTelemetry(config?: TelemetryConfig): Telemetry {
-  if (config === undefined || !config.enabled) {
-    return new NoOpTelemetry();
-  }
-  return new JsonlTelemetry(config.path);
-}
+// reason: The file-writing factory (createTelemetry) lives in telemetry-node.ts —
+// it must import NoOpTelemetry from here to fall back on when telemetry is disabled,
+// which is why NoOpTelemetry stays exported from this browser-safe file. See
+// `@lore/core/node` (src/node.ts) for `createTelemetry` / `JsonlTelemetry`.

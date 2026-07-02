@@ -32,11 +32,10 @@ import { err, type Result, type LoreError } from "@lore/core";
 import type { CallerSurface, AiDefaultSource } from "@lore/core";
 import type { AiDefaultPerSurface } from "@lore/core";
 import { resolveAiDefault } from "./ai/resolve-ai.js";
-import {
-  NoOpTelemetry,
-  createTelemetry,
-  type Telemetry,
-} from "@lore/core";
+import { NoOpTelemetry, type Telemetry } from "@lore/core";
+// reason: createTelemetry writes JSONL via Node fs — only reachable via the
+// @lore/core/node subpath (browser-safety split, packages/core/src/CLAUDE.md).
+import { createTelemetry } from "@lore/core/node";
 import { buildProviderRegistry } from "./ai/registry.js";
 import { AIProviderService } from "./service/ai-provider-service.js";
 import { SyncDocsService } from "./service/sync-docs-service.js";

@@ -24,13 +24,16 @@
  */
 
 import { dirname } from "path";
+import { mergeDefaults } from "@lore/core";
+import type { LoreConfig, LoreDefaults, CallerSurface } from "@lore/core";
+// reason: loadConfig/loadGlobalConfig/resolveGlobalConfigPath read the filesystem
+// via Node fs/path/os — only reachable via the @lore/core/node subpath
+// (browser-safety split, packages/core/src/CLAUDE.md).
 import {
   loadConfig,
   loadGlobalConfig,
   resolveGlobalConfigPath,
-  mergeDefaults,
-} from "@lore/core";
-import type { LoreConfig, LoreDefaults, CallerSurface } from "@lore/core";
+} from "@lore/core/node";
 import { createApp, type App } from "../../app.js";
 import { findLoreDbPath, formatError } from "./utils.js";
 

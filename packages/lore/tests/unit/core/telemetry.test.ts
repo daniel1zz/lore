@@ -9,13 +9,10 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { existsSync, readFileSync, mkdirSync, rmdirSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import {
-  NoOpTelemetry,
-  JsonlTelemetry,
-  createTelemetry,
-  TelemetryEventSchema,
-  type TelemetryEvent,
-} from "@lore/core";
+import { NoOpTelemetry, TelemetryEventSchema, type TelemetryEvent } from "@lore/core";
+// reason: JsonlTelemetry/createTelemetry write JSONL via Node fs — only reachable
+// via the @lore/core/node subpath (browser-safety split, packages/core/src/CLAUDE.md).
+import { JsonlTelemetry, createTelemetry } from "@lore/core/node";
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 

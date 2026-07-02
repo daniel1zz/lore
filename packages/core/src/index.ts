@@ -1,12 +1,26 @@
 /**
- * @lore/core — public surface.
+ * @lore/core — public surface. MUST BE BROWSER-SAFE.
  *
  * Pure types, errors, schemas, config, telemetry, and graph helpers.
  * MUST NOT import from @lore/lore (boundary enforced by AC-MR-B1 in SPEC-014).
  *
+ * @invariant Every module re-exported from this barrel, and everything it
+ *   transitively imports, MUST be free of Node builtins (`fs`, `path`, `os`,
+ *   `child_process`, `node:*`, ...) and free of `Bun.*` (the latter already
+ *   enforced by AC-AI-13 for ai.ts). Vite's dev-mode `fs` stub throws on any
+ *   named-export access at module-LOAD time (not call time) — a single stray
+ *   top-level `import { x } from "fs"` anywhere in this barrel's dependency
+ *   graph blanks the `@lore/dashboard` SPA before React mounts.
+ *   Node-only helpers (config file I/O, JSONL telemetry writer) live in
+ *   `config-node.ts` / `telemetry-node.ts` and are exported ONLY via the
+ *   `@lore/core/node` subpath (see `node.ts`, `package.json#exports`) — server
+ *   code (`packages/lore/src/**`, `scripts/**`) imports that subpath directly.
+ *   Regression oracle: `packages/dashboard/tests/e2e/write-flow.pw.ts` (SPEC-022)
+ *   — run it after touching any file in this barrel's transitive closure.
+ *
  * Consumed by:
- *   - @lore/lore (all CLI / MCP / HTTP runtime)
- *   - @lore/dashboard (future — types only)
+ *   - @lore/lore (all CLI / MCP / HTTP runtime) — both `@lore/core` and `@lore/core/node`
+ *   - @lore/dashboard (browser SPA) — `@lore/core` ONLY, never `@lore/core/node`
  */
 
 export * from "./errors.js";

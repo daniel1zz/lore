@@ -4,10 +4,12 @@
     "jsx": "react-jsx",
     "jsxImportSource": "react",
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
-    // reason: @lore/core resolves to source (packages/core/src/index.ts) which re-exports
-    // config.ts and telemetry.ts that use fs/path/os/process. The dashboard never imports
-    // these Node APIs directly — Vite blocks them at bundle time. Adding "node" here lets
-    // TypeScript resolve @lore/core's transitive Node imports without error. SPEC-015 §4.
+    // reason: @lore/core resolves to source (packages/core/src/index.ts). The barrel is
+    // browser-safe (no fs/path/os — those live behind the @lore/core/node subpath, never
+    // imported here), but config.ts::resolveSyncCredentials references the `process` global
+    // (process.env[envVarName]) for type-checking purposes even though the dashboard never
+    // calls that function. Adding "node" here resolves the `process` global type only.
+    // See packages/core/src/CLAUDE.md "Browser safety" invariant.
     "types": ["node"],
     "paths": {
       "@/*": ["./src/*"]

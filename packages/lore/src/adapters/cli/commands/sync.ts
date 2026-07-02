@@ -8,10 +8,14 @@ import { defineCommand } from "citty";
 import { join, dirname } from "path";
 import { existsSync } from "fs";
 import { createClient } from "@libsql/client";
-import { loadConfig, saveConfig, resolveSyncCredentials } from "@lore/core";
+import { resolveSyncCredentials } from "@lore/core";
 import type { LoreConfig } from "@lore/core";
 import type { Result, LoreError } from "@lore/core";
 import { err, ok } from "@lore/core";
+// reason: loadConfig/saveConfig read/write .lore/config.yaml via Node fs — only
+// reachable via the @lore/core/node subpath (browser-safety split,
+// packages/core/src/CLAUDE.md).
+import { loadConfig, saveConfig } from "@lore/core/node";
 import { formatError } from "../utils.js";
 import { syncPush, type PushReport } from "../../http/sync-push.js";
 import { TursoStore } from "../../../store/turso-store.js";

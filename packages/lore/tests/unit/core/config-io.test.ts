@@ -60,17 +60,18 @@ import { tmpdir } from "os";
 // the test — that is the RED we want.
 
 async function importConfigIO() {
-  // When the implementation lands, src/core/config.ts will export these.
-  // Until then, this dynamic import will fail with "does not provide an export"
-  // or a module-resolution error, causing the tests that call it to fail RED.
-  const mod = await import("@lore/core");
+  // loadConfig/saveConfig read/write the filesystem via Node fs — they live in
+  // @lore/core/node (browser-safety split, packages/core/src/CLAUDE.md);
+  // resolveSyncCredentials is pure (process.env only) and stays in @lore/core.
+  const nodeMod = await import("@lore/core/node");
+  const coreMod = await import("@lore/core");
   type LoadConfig = (dir: string) => import("@lore/core").Result<import("@lore/core").LoreConfig, import("@lore/core").LoreError>;
   type SaveConfig = (dir: string, config: import("@lore/core").LoreConfig) => import("@lore/core").Result<void, import("@lore/core").LoreError>;
   type ResolveSyncCredentials = (config: import("@lore/core").LoreConfig) => import("@lore/core").Result<{ url: string; token: string }, import("@lore/core").LoreError>;
 
-  const loadConfig = (mod as any).loadConfig as LoadConfig;
-  const saveConfig = (mod as any).saveConfig as SaveConfig;
-  const resolveSyncCredentials = (mod as any).resolveSyncCredentials as ResolveSyncCredentials;
+  const loadConfig = (nodeMod as any).loadConfig as LoadConfig;
+  const saveConfig = (nodeMod as any).saveConfig as SaveConfig;
+  const resolveSyncCredentials = (coreMod as any).resolveSyncCredentials as ResolveSyncCredentials;
 
   if (typeof loadConfig !== "function") {
     throw new Error("@core/config does not export loadConfig — implementation missing (RED expected)");

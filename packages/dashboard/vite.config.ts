@@ -50,19 +50,13 @@ export default defineConfig({
       "/api": "http://localhost:8787",
     },
   },
-  build: {
-    rollupOptions: {
-      // reason: @lore/core's barrel (src/index.ts) re-exports telemetry.ts, which does a
-      // top-level `import { appendFileSync, mkdirSync } from "fs"` for its (server-only) JSONL
-      // sink. The dashboard only consumes @lore/core's types/Zod schemas (createDocInputSchema,
-      // getAllowedTransitions) — the telemetry code path is never invoked in-browser — but Rollup
-      // still statically resolves the barrel's transitive imports and fails production builds
-      // because its default Node-builtin browser stub has no named exports. Marking these
-      // builtins external (not bundled, not analyzed) is the boundary-safe fix on the dashboard
-      // side; @lore/core is out of this task's scope (SPEC-022 §9.2 touches @lore/dashboard only).
-      external: ["fs", "path", "os"],
-    },
-  },
+  // reason: @lore/core's default barrel (src/index.ts) no longer re-exports any module
+  // that imports fs/path/os — Node-builtin-dependent code (config file I/O, JSONL
+  // telemetry writer) moved to config-node.ts/telemetry-node.ts, exported only via the
+  // @lore/core/node subpath (never imported by this package). The previous
+  // `build.rollupOptions.external: ["fs", "path", "os"]` workaround is no longer needed;
+  // removed together with the root-cause fix. See packages/core/src/CLAUDE.md
+  // "Browser safety" invariant and the regression oracle in tests/e2e/write-flow.pw.ts.
   test: {
     environment: "jsdom",
     setupFiles: ["./tests/setup.ts"],
