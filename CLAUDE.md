@@ -123,6 +123,7 @@ All feature specs live under `docs/requirements/spec/`. When implementing or cha
 - `SPEC-016` — Cookie auth via CLI-managed local bootstrap (`lore dashboard` + sessions table)
 - `SPEC-020` — HTTP-backed AI provider (`ai.provider: "http"`) — Anthropic Messages API; `${ENV_VAR}` headers; for CI/team gateways where local `claude` binary is unavailable; CLI is still the default
 - `SPEC-024` — Default --no-ai for agent and MCP execution paths (AI surface defaults)
+- `SPEC-019` — AI assistance in `lore set` (`--regenerate` / `--refine` / `--refine-stdin`) and `lore link --infer`; extends SPEC-017 AI provider surface
 - `SPEC-021` — `lore export-docs` reverse sync (corpus → .md files); `.lore/export-index.json` is **git-tracked** (team-shared ID map)
 
 ## AI Default Behavior by Caller Surface (SPEC-024)

@@ -5,7 +5,11 @@
  * Public surface:
  *   - AIProviderService class
  *     - activeProviderName: string (getter — read by CLI spinner)
- *     - generate(args) → Promise<Result<GenerateOutput, LoreError>>
+ *     - refineMaxInputChars: number (getter — read by CLI for truncation warning)
+ *     - generate(args) → Promise<Result<GenerateOutput, LoreError>>  (SPEC-017 create path)
+ *     - regenerateContent(doc, opts?) → Promise<Result<GenerateOutput, LoreError>>  (SPEC-019)
+ *     - refineContent(doc, userPrompt, opts?) → Promise<Result<GenerateOutput, LoreError>>  (SPEC-019)
+ *     - inferLinkType(from, to, opts?) → Promise<Result<{linkType: LinkType}, LoreError>>  (SPEC-019)
  *
  * Invariants:
  *   - Stateless: every dependency is constructor-injected; no module-level state or globals
@@ -13,16 +17,26 @@
  *   - Telemetry is emitted on BOTH success and failure paths when aiTelemetryEnabled is true
  *   - Never throws — all errors from provider.generate() are forwarded as Result values
  *   - AIProviderService is constructed exclusively by app.ts (AC-AI-14)
+ *   - inferLinkType validates the AI response via linkTypeSchema.safeParse; invalid type
+ *     → err(AI_PROVIDER_ERROR) — no link is created, caller exits 6 (SPEC-019 AC-LINK-AI-2)
+ *   - refineContent truncates doc.content to refineMaxInputChars before building the prompt;
+ *     the CLI is responsible for warning the user if truncation occurred (SPEC-019 §9.4)
  *
  * Side-effect class: IO (delegates to AIProvider.generate and Telemetry.emit)
  *
- * Source: SPEC-017 §3.6
+ * Source: SPEC-017 §3.6, SPEC-019 §9.1
  */
 
-import type { AIProvider, DocType, GenerateOutput, LoreError, Telemetry } from "@lore/core";
-import type { Result } from "@lore/core";
-import type { CallerSurface, AiDefaultSource } from "@lore/core";
-import { BUILT_IN_TEMPLATES, renderTemplate } from "../ai/templates.js";
+import { err, ok } from "@lore/core";
+import type { AIProvider, DocRecord, DocType, GenerateInput, GenerateOutput, LinkType, LoreError, Telemetry } from "@lore/core";
+import type { AiDefaultSource, CallerSurface, Result } from "@lore/core";
+import { linkTypeSchema } from "@lore/core";
+import {
+  BUILT_IN_TEMPLATES,
+  LINK_INFERENCE_TEMPLATE,
+  REFINE_TEMPLATE,
+  renderTemplate,
+} from "../ai/templates.js";
 
 // ─── AIProviderService ────────────────────────────────────────────────────────
 
@@ -31,7 +45,7 @@ import { BUILT_IN_TEMPLATES, renderTemplate } from "../ai/templates.js";
  * Constructed once at createApp() time via the injected provider registry.
  *
  * @example
- * const svc = new AIProviderService(providers, "claude-cli", templates, telemetry, true);
+ * const svc = new AIProviderService(providers, "claude-cli", templates, telemetry, true, 8000);
  * const result = await svc.generate({ doc_type: "prd", title: "My PRD" });
  */
 export class AIProviderService {
@@ -41,14 +55,23 @@ export class AIProviderService {
     /** Active provider name — validated by registry before construction */
     private readonly active: string,
     /**
-     * Per-doc-type template overrides from config.ai.templates.
-     * Keys present here override BUILT_IN_TEMPLATES; absent keys fall back to built-in.
+     * Template overrides from config.ai.templates (string-keyed).
+     * Keys: DocType values override doc-type templates; "refine" / "link_inference" override
+     * the corresponding SPEC-019 built-in templates.
+     * Absent keys fall back to BUILT_IN_TEMPLATES / REFINE_TEMPLATE / LINK_INFERENCE_TEMPLATE.
      */
-    private readonly templates: Partial<Record<DocType, string>>,
+    private readonly templates: Record<string, string>,
     /** Telemetry sink — NoOpTelemetry when telemetry is disabled */
     private readonly telemetry: Telemetry,
     /** Whether to emit ai.generation events (config.ai.telemetry — independent kill switch) */
     private readonly aiTelemetryEnabled: boolean,
+    /**
+     * Maximum characters of doc content to include in the refine prompt.
+     * Sourced from config.ai.refine.max_input_chars (default 8000).
+     * CLI checks against this value and warns the user before calling refineContent.
+     * Source: SPEC-019 §9.4
+     */
+    private readonly _refineMaxInputChars: number,
   ) {}
 
   /**
@@ -61,55 +84,50 @@ export class AIProviderService {
   }
 
   /**
+   * Maximum characters of doc content sent to the provider in refine operations.
+   * Exposed so the CLI can warn the user when truncation will occur (SPEC-019 §9.4).
+   *
+   * @returns Configured max chars (from config.ai.refine.max_input_chars; default 8000)
+   */
+  get refineMaxInputChars(): number {
+    return this._refineMaxInputChars;
+  }
+
+  // ─── SPEC-017: create path ──────────────────────────────────────────────────
+
+  /**
    * Generate document content for the given doc type and title.
+   * Used by `lore create --ai`.
    *
    * Steps:
    *   1. Determine template source (user-override or built-in)
    *   2. Render the template with title + optional parent_title
    *   3. Dispatch to the active provider
-   *   4. Emit ai.generation telemetry (if enabled) — on both success and failure
+   *   4. Emit ai.generation telemetry (kind="create") on both success and failure
    *   5. Return the provider result
    *
-   * @param args - Generation arguments
    * @param args.doc_type - DocType being created
    * @param args.title - Document title (interpolated into template as {{title}})
    * @param args.parent_title - Optional parent document title (for {{#parent_title}}…{{/parent_title}})
-   * @param args.caller_surface - Surface that initiated the call (SPEC-024 AC-NOAI-8; included in telemetry)
-   * @param args.ai_default_source - How the AI decision was resolved (SPEC-024 AC-NOAI-8; included in telemetry)
+   * @param args.caller_surface - Surface that initiated the call (SPEC-024 AC-NOAI-8; telemetry)
+   * @param args.ai_default_source - How the AI decision was resolved (SPEC-024 AC-NOAI-8; telemetry)
    * @returns Result<GenerateOutput, LoreError> — never throws
    *
    * @example
    * const result = await svc.generate({ doc_type: "spec", title: "Auth Flow", parent_title: "Security PRD" });
    * if (!result.ok) { console.error(result.error.message); return; }
    * console.log(result.value.content.slice(0, 80));
-   *
-   * @example
-   * // SPEC-024: pass surface + source for telemetry
-   * const result = await svc.generate({
-   *   doc_type: "spec", title: "Auth Flow",
-   *   caller_surface: "cli", ai_default_source: "cli_flag",
-   * });
    */
   async generate(args: {
     doc_type: DocType;
     title: string;
     parent_title?: string;
-    /**
-     * Caller surface for telemetry (SPEC-024 AC-NOAI-8).
-     * When provided, emitted in the ai.generation event as `caller_surface`.
-     */
     caller_surface?: CallerSurface;
-    /**
-     * Source of the AI on/off decision for telemetry (SPEC-024 AC-NOAI-8).
-     * When provided, emitted in the ai.generation event as `ai_default_source`.
-     */
     ai_default_source?: AiDefaultSource;
   }): Promise<Result<GenerateOutput, LoreError>> {
-    // Determine template source — user-override wins over built-in
     const userOverride = args.doc_type in this.templates;
     const tpl = this.templates[args.doc_type] ?? BUILT_IN_TEMPLATES[args.doc_type];
 
-    // Render the prompt template with provided variables.
     // reason: exactOptionalPropertyTypes=true prohibits assigning undefined to optional prop.
     // Use conditional spread to only include parent_title when it is present.
     const prompt = renderTemplate(tpl, {
@@ -117,59 +135,340 @@ export class AIProviderService {
       ...(args.parent_title !== undefined ? { parent_title: args.parent_title } : {}),
     });
 
-    // reason: provider existence guaranteed by buildProviderRegistry validation at createApp time;
-    // non-null assertion is safe here (AC-AI-14 — service constructed only after registry ok).
-    const provider = this.providers.get(this.active)!;
-
-    const t0 = performance.now();
-    const result = await provider.generate({
+    const { result, duration_ms } = await this._invokeProvider({
       prompt,
       doc_type: args.doc_type,
       title: args.title,
       ...(args.parent_title !== undefined ? { parent_title: args.parent_title } : {}),
     });
-    const duration_ms = Math.round(performance.now() - t0);
 
-    // Emit telemetry on both success and failure paths (when enabled)
-    if (this.aiTelemetryEnabled) {
-      this.telemetry.emit({
-        event: "ai.generation",
-        ts: new Date().toISOString(),
-        provider: this.active,
-        doc_type: args.doc_type,
-        template_source: userOverride ? "user-override" : "built-in",
-        duration_ms,
-        output_chars: result.ok ? result.value.content.length : 0,
-        exit_code: result.ok
-          ? 0
-          : result.error.code === "AI_PROVIDER_ERROR"
-            ? (result.error.exit_code ?? -1)
-            : -1,
-        // reason: LoreError is a discriminated union — not all variants have a `message` field.
-        // Only AI_PROVIDER_ERROR and STORE_ERROR and VALIDATION_ERROR do. Use type narrowing
-        // to extract a display string that works for any error code.
-        ...(result.ok
-          ? {}
-          : {
-              error:
-                "message" in result.error
-                  ? result.error.message
-                  : result.error.code,
-            }),
-        // SPEC-024 AC-NOAI-8: optional surface + source for AI default traceability
-        ...(args.caller_surface !== undefined ? { caller_surface: args.caller_surface } : {}),
-        ...(args.ai_default_source !== undefined ? { ai_default_source: args.ai_default_source } : {}),
-        // SPEC-020 AC-HTTP-TEL-1: populate usage when the provider returns token counts.
-        // HttpAIProvider always populates usage on success; ClaudeCliProvider never does.
-        // reason: usage is omitted from the spread when absent (not set to undefined) to
-        // keep the strict aiGenerationEventSchema happy — undefined optional fields are
-        // valid in Zod, but omitting them produces cleaner JSONL output for downstream consumers.
-        ...(result.ok && result.value.usage !== undefined
-          ? { usage: result.value.usage }
-          : {}),
-      });
-    }
+    this._emitAiEvent(result, duration_ms, {
+      doc_type: args.doc_type,
+      template_source: userOverride ? "user-override" : "built-in",
+      kind: "create",
+      target_doc_id: null,
+      caller_surface: args.caller_surface,
+      ai_default_source: args.ai_default_source,
+    });
 
     return result;
+  }
+
+  // ─── SPEC-019: set --regenerate ─────────────────────────────────────────────
+
+  /**
+   * Regenerate a document's content by re-running its type template.
+   * Used by `lore set <id> --regenerate`.
+   *
+   * Picks the same per-type template that `lore create --ai` would use (BUILT_IN_TEMPLATES[doc.type]
+   * or the user override). Replaces the doc content in the caller after returning.
+   * Emits ai.generation with kind="regenerate" and target_doc_id=doc.id.
+   *
+   * @param doc - The DocRecord being regenerated (fully fetched by the caller)
+   * @param opts.parent_title - Optional parent title for template interpolation
+   * @param opts.caller_surface - Surface for telemetry (SPEC-024)
+   * @param opts.ai_default_source - AI decision source for telemetry (SPEC-024)
+   * @returns Result<GenerateOutput, LoreError> — never throws
+   *
+   * @example
+   * const docResult = await app.corpusService.get(id);
+   * if (!docResult.ok) { ... }
+   * const aiResult = await svc.regenerateContent(docResult.value.doc, { parent_title: "Root PRD" });
+   * if (!aiResult.ok) { process.exitCode = 6; return; }
+   * await app.corpusService.set(id, { content: aiResult.value.content }); // demotes approved→draft
+   *
+   * Source: SPEC-019 AC-SET-AI-1
+   */
+  async regenerateContent(
+    doc: DocRecord,
+    opts?: {
+      // reason: explicit `| undefined` required by exactOptionalPropertyTypes — callers may pass
+      // variables of type `string | undefined` directly (e.g. after a conditional parent fetch).
+      parent_title?: string | undefined;
+      caller_surface?: CallerSurface | undefined;
+      ai_default_source?: AiDefaultSource | undefined;
+    },
+  ): Promise<Result<GenerateOutput, LoreError>> {
+    const userOverride = doc.type in this.templates;
+    const tpl = this.templates[doc.type] ?? BUILT_IN_TEMPLATES[doc.type];
+
+    const prompt = renderTemplate(tpl, {
+      title: doc.title,
+      ...(opts?.parent_title !== undefined ? { parent_title: opts.parent_title } : {}),
+    });
+
+    const { result, duration_ms } = await this._invokeProvider({
+      prompt,
+      doc_type: doc.type,
+      title: doc.title,
+      ...(opts?.parent_title !== undefined ? { parent_title: opts.parent_title } : {}),
+    });
+
+    this._emitAiEvent(result, duration_ms, {
+      doc_type: doc.type,
+      template_source: userOverride ? "user-override" : "built-in",
+      kind: "regenerate",
+      target_doc_id: doc.id,
+      caller_surface: opts?.caller_surface,
+      ai_default_source: opts?.ai_default_source,
+    });
+
+    return result;
+  }
+
+  // ─── SPEC-019: set --refine ─────────────────────────────────────────────────
+
+  /**
+   * Refine a document's content with a user-supplied prompt.
+   * Used by `lore set <id> --refine "<prompt>"` and `lore set <id> --refine-stdin`.
+   *
+   * Content is truncated to refineMaxInputChars before building the prompt; the CLI
+   * is responsible for warning the user about truncation before calling this method.
+   * Emits ai.generation with kind="refine" and target_doc_id=doc.id.
+   *
+   * @param doc - The DocRecord being refined (fully fetched by the caller)
+   * @param userPrompt - The refinement instruction from the user (non-empty, validated by caller)
+   * @param opts.caller_surface - Surface for telemetry (SPEC-024)
+   * @param opts.ai_default_source - AI decision source for telemetry (SPEC-024)
+   * @returns Result<GenerateOutput, LoreError> — never throws
+   *
+   * @example
+   * const aiResult = await svc.refineContent(doc, "Tighten section 3, add more examples");
+   * if (!aiResult.ok) { process.exitCode = 6; return; }
+   * await app.corpusService.set(id, { content: aiResult.value.content }); // demotes approved→draft
+   *
+   * Source: SPEC-019 AC-SET-AI-2, §9.4
+   */
+  async refineContent(
+    doc: DocRecord,
+    userPrompt: string,
+    opts?: {
+      // reason: explicit `| undefined` required by exactOptionalPropertyTypes.
+      caller_surface?: CallerSurface | undefined;
+      ai_default_source?: AiDefaultSource | undefined;
+    },
+  ): Promise<Result<GenerateOutput, LoreError>> {
+    const userOverride = "refine" in this.templates;
+    const tpl = this.templates["refine"] ?? REFINE_TEMPLATE;
+
+    // Truncate content to prevent runaway prompt cost (SPEC-019 §9.4)
+    // reason: truncation happens here (service), not in the CLI, so the boundary is
+    // consistent regardless of which adapter (CLI / future MCP) calls refineContent.
+    const truncatedContent = doc.content.length > this._refineMaxInputChars
+      ? doc.content.slice(0, this._refineMaxInputChars)
+      : doc.content;
+
+    const prompt = renderTemplate(tpl, {
+      title: doc.title,
+      current_content: truncatedContent,
+      user_prompt: userPrompt,
+    });
+
+    const { result, duration_ms } = await this._invokeProvider({
+      prompt,
+      doc_type: doc.type,
+      title: doc.title,
+    });
+
+    this._emitAiEvent(result, duration_ms, {
+      doc_type: doc.type,
+      template_source: userOverride ? "user-override" : "built-in",
+      kind: "refine",
+      target_doc_id: doc.id,
+      caller_surface: opts?.caller_surface,
+      ai_default_source: opts?.ai_default_source,
+    });
+
+    return result;
+  }
+
+  // ─── SPEC-019: link --infer ─────────────────────────────────────────────────
+
+  /**
+   * Infer the link type between two documents using the AI provider.
+   * Used by `lore link <from> <to> --infer`.
+   *
+   * Sends both document titles and first 500 chars of body to the provider.
+   * Parses the response (trim + lowercase + linkTypeSchema.safeParse).
+   * Invalid AI response → err(AI_PROVIDER_ERROR); caller exits 6 without creating a link.
+   * Emits ai.generation with kind="infer" and target_doc_id=from.id.
+   *
+   * @param from - The source document (from-side of the link)
+   * @param to - The target document (to-side of the link)
+   * @param opts.caller_surface - Surface for telemetry (SPEC-024)
+   * @returns Result<{linkType: LinkType}, LoreError> — never throws
+   *
+   * @example
+   * const inferResult = await svc.inferLinkType(fromDoc, toDoc);
+   * if (!inferResult.ok) { process.exitCode = 6; return; } // exit 6: invalid type or provider error
+   * await app.corpusService.link(from.id, to.id, inferResult.value.linkType);
+   *
+   * Source: SPEC-019 AC-LINK-AI-1, AC-LINK-AI-2
+   */
+  async inferLinkType(
+    from: DocRecord,
+    to: DocRecord,
+    opts?: {
+      // reason: explicit `| undefined` required by exactOptionalPropertyTypes.
+      caller_surface?: CallerSurface | undefined;
+    },
+  ): Promise<Result<{ linkType: LinkType }, LoreError>> {
+    const userOverride = "link_inference" in this.templates;
+    const tpl = this.templates["link_inference"] ?? LINK_INFERENCE_TEMPLATE;
+
+    // reason: bodies are truncated to 500 chars per SPEC-019 §9.1 to keep inference
+    // prompts short — the model only needs context, not the full document text.
+    const BODY_HEAD_CHARS = 500;
+    const prompt = renderTemplate(tpl, {
+      from_title: from.title,
+      from_body_head: from.content.slice(0, BODY_HEAD_CHARS),
+      to_title: to.title,
+      to_body_head: to.content.slice(0, BODY_HEAD_CHARS),
+    });
+
+    // reason: GenerateInput requires a valid doc_type and non-empty title.
+    // We use from.type/from.title as the "primary" doc context for the inference call.
+    // The provider only uses the prompt; doc_type/title pass through for telemetry only.
+    const { result, duration_ms } = await this._invokeProvider({
+      prompt,
+      doc_type: from.type,
+      title: from.title,
+    });
+
+    if (!result.ok) {
+      this._emitAiEvent(result, duration_ms, {
+        doc_type: from.type,
+        template_source: userOverride ? "user-override" : "built-in",
+        kind: "infer",
+        target_doc_id: from.id,
+        caller_surface: opts?.caller_surface,
+      });
+      return result;
+    }
+
+    // Parse the provider's response: trim + lowercase + validate against linkTypeSchema
+    // reason: AI may return the type with extra whitespace or mixed case (e.g. "Relates-To\n").
+    // Normalisation makes the check robust without requiring exact-case model output.
+    const rawOutput = result.value.content.trim().toLowerCase();
+    const parseResult = linkTypeSchema.safeParse(rawOutput);
+
+    if (!parseResult.success) {
+      const validationError: Result<GenerateOutput, LoreError> = {
+        ok: false,
+        error: {
+          code: "AI_PROVIDER_ERROR",
+          provider: this.active,
+          exit_code: 0,
+          message:
+            `AI returned invalid link type "${rawOutput}". ` +
+            `Expected one of: parent, implements, informs, supersedes, relates-to, blocks.`,
+        },
+      };
+      this._emitAiEvent(validationError, duration_ms, {
+        doc_type: from.type,
+        template_source: userOverride ? "user-override" : "built-in",
+        kind: "infer",
+        target_doc_id: from.id,
+        caller_surface: opts?.caller_surface,
+      });
+      return validationError;
+    }
+
+    // Success path: emit telemetry with the successful GenerateOutput
+    this._emitAiEvent(result, duration_ms, {
+      doc_type: from.type,
+      template_source: userOverride ? "user-override" : "built-in",
+      kind: "infer",
+      target_doc_id: from.id,
+      caller_surface: opts?.caller_surface,
+    });
+
+    return ok({ linkType: parseResult.data });
+  }
+
+  // ─── Private Helpers ────────────────────────────────────────────────────────
+
+  /**
+   * Invoke the active provider and measure wall-clock latency.
+   * Provider existence is guaranteed by buildProviderRegistry at construction time.
+   *
+   * @param input - Validated GenerateInput (doc_type + title are required by schema)
+   * @returns { result, duration_ms } — result from provider; duration is total wall-clock ms
+   */
+  private async _invokeProvider(input: GenerateInput): Promise<{
+    result: Result<GenerateOutput, LoreError>;
+    duration_ms: number;
+  }> {
+    // reason: provider existence guaranteed by buildProviderRegistry validation at createApp time;
+    // non-null assertion is safe here (AC-AI-14 — service constructed only after registry ok).
+    const provider = this.providers.get(this.active)!;
+    const t0 = performance.now();
+    const result = await provider.generate(input);
+    return { result, duration_ms: Math.round(performance.now() - t0) };
+  }
+
+  /**
+   * Emit an ai.generation telemetry event on both success and failure paths.
+   * No-op when aiTelemetryEnabled is false (AC-AI-21).
+   *
+   * @param result - Provider result (ok or err)
+   * @param duration_ms - Wall-clock milliseconds for the full round-trip
+   * @param meta - Event metadata: doc_type, template_source, kind, target_doc_id, surfaces
+   */
+  private _emitAiEvent(
+    result: Result<GenerateOutput, LoreError>,
+    duration_ms: number,
+    meta: {
+      doc_type: DocType;
+      template_source: "built-in" | "user-override";
+      kind: "create" | "regenerate" | "refine" | "infer";
+      target_doc_id?: string | null | undefined;
+      // reason: exactOptionalPropertyTypes=true requires explicit `| undefined` when callers pass
+      // `opts?.field` (type `T | undefined`). Without it, TS rejects `prop: T | undefined`
+      // assigned to `prop?: T` because the source always has the property present.
+      caller_surface?: CallerSurface | undefined;
+      ai_default_source?: AiDefaultSource | undefined;
+    },
+  ): void {
+    if (!this.aiTelemetryEnabled) return;
+
+    this.telemetry.emit({
+      event: "ai.generation",
+      ts: new Date().toISOString(),
+      provider: this.active,
+      doc_type: meta.doc_type,
+      template_source: meta.template_source,
+      kind: meta.kind,
+      duration_ms,
+      output_chars: result.ok ? result.value.content.length : 0,
+      exit_code: result.ok
+        ? 0
+        : result.error.code === "AI_PROVIDER_ERROR"
+          ? (result.error.exit_code ?? -1)
+          : -1,
+      // reason: LoreError is a discriminated union — not all variants have a `message` field.
+      // Only AI_PROVIDER_ERROR, STORE_ERROR, and VALIDATION_ERROR do. Use presence check to
+      // extract a display string that works for any error code.
+      ...(result.ok
+        ? {}
+        : {
+            error:
+              "message" in result.error
+                ? result.error.message
+                : result.error.code,
+          }),
+      ...(meta.target_doc_id !== undefined ? { target_doc_id: meta.target_doc_id } : {}),
+      // SPEC-024 AC-NOAI-8: optional surface + source for AI default traceability
+      ...(meta.caller_surface !== undefined ? { caller_surface: meta.caller_surface } : {}),
+      ...(meta.ai_default_source !== undefined ? { ai_default_source: meta.ai_default_source } : {}),
+      // SPEC-020 AC-HTTP-TEL-1: populate usage when the provider returns token counts.
+      // HttpAIProvider always populates usage on success; ClaudeCliProvider never does.
+      // reason: usage is omitted from the spread when absent (not set to undefined) to
+      // keep the strict aiGenerationEventSchema happy — undefined optional fields are
+      // valid in Zod, but omitting them produces cleaner JSONL output for downstream consumers.
+      ...(result.ok && result.value.usage !== undefined
+        ? { usage: result.value.usage }
+        : {}),
+    });
   }
 }

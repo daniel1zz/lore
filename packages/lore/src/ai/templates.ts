@@ -1,10 +1,12 @@
 /**
- * Built-in per-doc-type prompt templates for the AI generation path.
+ * Built-in prompt templates for the AI generation path.
  * Pure module — no IO, no Bun.*, no external dependencies.
  *
  * Public surface:
  *   - BUILT_IN_TEMPLATES — Record<DocType, string> with one template per doc type
- *   - renderTemplate(tpl, vars) — minimal mustache-subset rendering
+ *   - REFINE_TEMPLATE — default prompt template for `lore set --refine` (SPEC-019 §9.2)
+ *   - LINK_INFERENCE_TEMPLATE — default prompt template for `lore link --infer` (SPEC-019 §9.3)
+ *   - renderTemplate(tpl, vars) — minimal mustache-subset rendering (generic vars map)
  *
  * Invariants:
  *   - BUILT_IN_TEMPLATES contains exactly one entry for every DocType value
@@ -12,15 +14,17 @@
  *     (reason: prevents {{var}} inside {{#block}}…{{/block}} from being partially expanded)
  *   - renderTemplate returns empty string for missing vars rather than throwing
  *   - Both regexes are linear/non-backtracking on the accepted input shapes (no ReDoS risk)
+ *   - renderTemplate accepts any string → string|undefined map as vars (not only title/parent_title)
  *
  * Side-effect class: pure (no IO)
  *
- * Source: SPEC-017 §3.9
+ * Source: SPEC-017 §3.9, SPEC-019 §9.2–§9.3
  */
 
 import type { DocType } from "@lore/core";
 
 // ─── Built-in Templates ───────────────────────────────────────────────────────
+// Doc-type templates live below; refine/link-inference templates follow after.
 
 /**
  * One prompt template per DocType.
@@ -49,6 +53,42 @@ export const BUILT_IN_TEMPLATES: Record<DocType, string> = {
     'Write a task description titled "{{title}}"{{#parent_title}} for plan "{{parent_title}}"{{/parent_title}}. Sections: Acceptance Criteria, File Anchors, Test Plan. Output GitHub-flavoured Markdown.',
 };
 
+// ─── Refine Template (SPEC-019 §9.2) ─────────────────────────────────────────
+
+/**
+ * Default prompt template for `lore set --refine` / `--refine-stdin`.
+ * Variables: {{title}}, {{current_content}} (may be truncated), {{user_prompt}}.
+ * Overridable via ai.templates.refine in .lore/config.yaml.
+ *
+ * @invariant Must not include {{#conditional}} blocks — only simple {{key}} substitutions.
+ * Source: SPEC-019 §9.2
+ */
+export const REFINE_TEMPLATE =
+  `Below is the current content of a document titled "{{title}}":\n\n` +
+  `<content>\n{{current_content}}\n</content>\n\n` +
+  `The user requests the following refinement:\n{{user_prompt}}\n\n` +
+  `Please output the revised full document content (markdown). ` +
+  `Do NOT explain your changes; just emit the revised markdown.`;
+
+// ─── Link Inference Template (SPEC-019 §9.3) ─────────────────────────────────
+
+/**
+ * Default prompt template for `lore link --infer`.
+ * Variables: {{from_title}}, {{from_body_head}}, {{to_title}}, {{to_body_head}}.
+ * Body heads are truncated to 500 chars by AIProviderService before rendering.
+ * Overridable via ai.templates.link_inference in .lore/config.yaml.
+ *
+ * @invariant Must not include {{#conditional}} blocks — only simple {{key}} substitutions.
+ * Source: SPEC-019 §9.3
+ */
+export const LINK_INFERENCE_TEMPLATE =
+  `Two documents in a knowledge corpus need a relationship classified.\n\n` +
+  `DOC A: "{{from_title}}"\n<body_head>\n{{from_body_head}}\n</body_head>\n\n` +
+  `DOC B: "{{to_title}}"\n<body_head>\n{{to_body_head}}\n</body_head>\n\n` +
+  `Choose EXACTLY ONE relationship type from this list:\n` +
+  `- parent\n- implements\n- informs\n- supersedes\n- relates-to\n- blocks\n\n` +
+  `Respond with only the single word — no explanation.`;
+
 // ─── Template Renderer ────────────────────────────────────────────────────────
 
 /**
@@ -58,8 +98,13 @@ export const BUILT_IN_TEMPLATES: Record<DocType, string> = {
  *   1. Conditional blocks: {{#key}}…{{/key}} → body if vars[key] truthy; "" if falsy
  *   2. Simple substitutions: {{key}} → String(vars[key]) or "" when undefined/null
  *
- * @param tpl - Template string (from BUILT_IN_TEMPLATES or user override)
- * @param vars - Substitution values: title (required), parent_title (optional)
+ * Accepts any string→string|undefined map as vars (not only the doc-type title/parent_title
+ * pair). This allows REFINE_TEMPLATE and LINK_INFERENCE_TEMPLATE to reuse the same renderer.
+ * Callers that previously passed `{ title, parent_title? }` continue to work unchanged.
+ *
+ * @param tpl - Template string (from BUILT_IN_TEMPLATES, REFINE_TEMPLATE, LINK_INFERENCE_TEMPLATE,
+ *   or a user override from ai.templates.<key>)
+ * @param vars - Substitution values map; missing keys render as ""
  * @returns Rendered string with all template markers replaced
  *
  * @example
@@ -74,10 +119,17 @@ export const BUILT_IN_TEMPLATES: Record<DocType, string> = {
  *   title: "Auth",
  * });
  * // → "Spec for Auth"
+ *
+ * @example
+ * renderTemplate(REFINE_TEMPLATE, {
+ *   title: "My PRD",
+ *   current_content: "## Overview\n...",
+ *   user_prompt: "Tighten section 1",
+ * });
  */
 export function renderTemplate(
   tpl: string,
-  vars: { title: string; parent_title?: string },
+  vars: Record<string, string | undefined>,
 ): string {
   // Step 1: conditional blocks {{#key}}...{{/key}} — keep body iff vars[key] is truthy
   // reason: must run before step 2 to avoid {{var}} inside a block being partially expanded

@@ -239,12 +239,19 @@ export const AiConfigSchema = z
      */
     providers: z.record(z.string(), AiProviderConfigSchema).default({}),
     /**
-     * Per-doc-type template overrides keyed by DocType.
-     * When present, overrides the built-in template for that type.
-     * Absent key → built-in template from BUILT_IN_TEMPLATES is used.
+     * Template overrides keyed by template name.
+     * Accepted keys:
+     *   - DocType values ("prd", "spec", "adr", "plan", "knowledge", "task") — override the
+     *     built-in per-type content generation template used by `lore create --ai` /
+     *     `lore set --regenerate`. Absent key → built-in from BUILT_IN_TEMPLATES is used.
+     *   - "refine" — override the refinement prompt template used by `lore set --refine` /
+     *     `--refine-stdin`. Absent → REFINE_TEMPLATE default in templates.ts.
+     *   - "link_inference" — override the link-type inference prompt used by `lore link --infer`.
+     *     Absent → LINK_INFERENCE_TEMPLATE default in templates.ts.
      * Telemetry tags the event `template_source: "user-override"` when this key is present.
+     * Source: SPEC-017 §3.9 (doc-type keys), SPEC-019 §9.1 (refine + link_inference keys)
      */
-    templates: z.record(DocTypeSchema, z.string().min(1)).default({}),
+    templates: z.record(z.string(), z.string().min(1)).default({}),
     /**
      * Whether to emit ai.generation JSONL telemetry events.
      * Independent kill switch from the root telemetry.enabled flag (AC-AI-21).
@@ -266,6 +273,21 @@ export const AiConfigSchema = z
      * at registry-build time (AC-HTTP-3).
      */
     http: AiHttpConfigSchema.optional(),
+    /**
+     * Refinement operation configuration (SPEC-019).
+     * Controls content truncation for the `lore set --refine` / `--refine-stdin` path.
+     */
+    refine: z
+      .object({
+        /**
+         * Maximum characters of existing doc content to include in the refine prompt.
+         * Prevents runaway prompt cost on large docs.
+         * Default: 8000 chars. Source: SPEC-019 §6 risk mitigation.
+         */
+        max_input_chars: z.number().int().positive().default(8000),
+      })
+      .strict()
+      .default({}),
   })
   .strict()
   // Cross-field constraint: when provider === "http", ai.http is required (AC-HTTP-2).
