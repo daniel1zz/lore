@@ -620,6 +620,7 @@ describe("OutlineService.resolve", () => {
         appendAuditEntry: (e) => store.appendAuditEntry(e),
         queryAudit: (f) => store.queryAudit(f),
         close: () => store.close(),
+        dbSizeBytes: () => store.dbSizeBytes(),
       };
 
       const brokenService = new OutlineService(brokenStore);

@@ -620,6 +620,8 @@ describe("status", () => {
     expect(result.value.by_type["adr"]).toBe(1);
     expect(result.value.by_status["draft"]).toBe(3);
     expect(result.value.last_updated).toBeTruthy();
+    // AC-SVC-010.03: db_size_bytes delegates to store.dbSizeBytes(); InMemoryStore has no disk footprint
+    expect(result.value.db_size_bytes).toBe(0);
   });
 
   it("AC-SVC-010.E01: empty corpus → total_docs = 0", async () => {
@@ -642,5 +644,27 @@ describe("status", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.total_docs).toBe(0);
+  });
+
+  it("AC-SVC-010.E02: store.dbSizeBytes() failure propagates as STORE_ERROR — no silent fallback to 0", async () => {
+    const store = makeStore();
+    const brokenStore = Object.create(
+      store,
+      {
+        dbSizeBytes: {
+          value: () =>
+            Promise.resolve({
+              ok: false as const,
+              error: { code: "STORE_ERROR" as const, message: "disk unreachable" },
+            }),
+        },
+      },
+    ) as InstanceType<typeof InMemoryStore>;
+    const { service } = makeService(brokenStore);
+
+    const result = await service.status();
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("STORE_ERROR");
   });
 });

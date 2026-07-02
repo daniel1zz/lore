@@ -823,4 +823,16 @@ export class TursoStore implements StoreInterface {
     this.client.close();
   }
 
+  async dbSizeBytes(): Promise<Result<number, LoreError>> {
+    try {
+      await this.ensureReady();
+      const pageCountRs = await this.client.execute("PRAGMA page_count");
+      const pageSizeRs = await this.client.execute("PRAGMA page_size");
+      const pageCount = pageCountRs.rows[0] ? rowNum(pageCountRs.rows[0], "page_count") : 0;
+      const pageSize = pageSizeRs.rows[0] ? rowNum(pageSizeRs.rows[0], "page_size") : 0;
+      return ok(pageCount * pageSize);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
 }

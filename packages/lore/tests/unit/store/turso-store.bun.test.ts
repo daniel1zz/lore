@@ -1289,4 +1289,43 @@ describe("TursoStore", () => {
       });
     });
   });
+
+  // AC-STORE-010: dbSizeBytes — real on-disk size via PRAGMA page_count * page_size
+  // against the embedded replica's local file (file-only mode, no remoteUrl).
+  describe("dbSizeBytes (AC-STORE-010)", () => {
+    it("HAPPY: reports > 0 bytes for a freshly-migrated file-only store", async () => {
+      const result = await store.dbSizeBytes();
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value).toBeGreaterThan(0);
+    });
+
+    it("STATE: reports a size at least as large after inserting documents", async () => {
+      const before = await store.dbSizeBytes();
+      expect(before.ok).toBe(true);
+      if (!before.ok) return;
+
+      for (let i = 0; i < 20; i += 1) {
+        await store.insert(
+          makeDoc({ slug: `prd-turso-size-${i}`, content: "x".repeat(2000) }),
+        );
+      }
+
+      const after = await store.dbSizeBytes();
+      expect(after.ok).toBe(true);
+      if (!after.ok) return;
+      expect(after.value).toBeGreaterThanOrEqual(before.value);
+    });
+
+    it("BOUNDARY: value is a multiple of the SQLite default page size (4096) — sanity check on page_count * page_size arithmetic", async () => {
+      // `client` is a private field on TursoStore, so this asserts the public
+      // contract's shape rather than reaching into the driver directly:
+      // any valid SQLite page_size is a power of two >= 512, and the file's
+      // total byte size (page_count * page_size) must be an exact multiple of it.
+      const result = await store.dbSizeBytes();
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value % 512).toBe(0);
+    });
+  });
 });

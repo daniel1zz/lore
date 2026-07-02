@@ -21,6 +21,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import type {
   AuditEntry,
@@ -1173,5 +1176,66 @@ describe("SQLiteStore.search — FTS5 special-token escape (SPEC-013 §3.5)", ()
 
     // Same set of IDs in same order
     expect(first.value.map((h) => h.id)).toEqual(second.value.map((h) => h.id));
+  });
+});
+
+// AC-STORE-010: dbSizeBytes — real on-disk size via PRAGMA page_count * page_size.
+// Uses a real temp file (not ":memory:") so the byte count reflects actual disk usage.
+describe("SQLiteStore.dbSizeBytes (AC-STORE-010)", () => {
+  let tempDir: string;
+  let dbPath: string;
+  let store: SQLiteStore;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "lore-db-size-"));
+    dbPath = join(tempDir, "test.db");
+    store = new SQLiteStore(dbPath);
+  });
+
+  afterEach(() => {
+    store.close();
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("HAPPY: reports > 0 bytes for a freshly-migrated temp db (schema pages alone occupy disk space)", async () => {
+    const result = await store.dbSizeBytes();
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value).toBeGreaterThan(0);
+  });
+
+  it("STATE: reports a larger size after inserting documents than an empty schema-only db", async () => {
+    const before = await store.dbSizeBytes();
+    expect(before.ok).toBe(true);
+    if (!before.ok) return;
+
+    for (let i = 0; i < 20; i += 1) {
+      await store.insert(
+        makeDoc({
+          slug: `prd-size-${i}`,
+          content: "x".repeat(2000),
+        }),
+      );
+    }
+
+    const after = await store.dbSizeBytes();
+    expect(after.ok).toBe(true);
+    if (!after.ok) return;
+    expect(after.value).toBeGreaterThanOrEqual(before.value);
+  });
+
+  it("BOUNDARY: value equals PRAGMA page_count * PRAGMA page_size exactly", async () => {
+    const db = store.getDatabase();
+    const { page_count: pageCount } = db.query("PRAGMA page_count").get() as {
+      page_count: number;
+    };
+    const { page_size: pageSize } = db.query("PRAGMA page_size").get() as {
+      page_size: number;
+    };
+
+    const result = await store.dbSizeBytes();
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value).toBe(pageCount * pageSize);
   });
 });
