@@ -23,11 +23,13 @@ citty-based CLI adapter. 24 subcommands, each in its own `commands/<name>.ts`, l
 
 ## Subcommands
 
-`init` `create` `get` `set` `delete` `list` `search` `tree` `link` `unlink` `pending` `approve` `reject` `log` `diff` `restore` `migrate` `status` `serve` `agent` `sync` `eval` `dashboard` `sync-docs` `export-docs` `phase` `claim` `release` `evidence` `ready`
+`init` `create` `get` `set` `delete` `list` `search` `tree` `link` `unlink` `pending` `approve` `reject` `log` `diff` `restore` `migrate` `status` `serve` `agent` `sync` `eval` `dashboard` `sync-docs` `export-docs` `phase` `claim` `release` `evidence` `ready` `assess`
 
 `sync-docs` (SPEC-018) scans a directory of `*.md` spec files, creates corpus rows for missing specs matched by title, and reports body drift without auto-applying. Flags: `--from <path>` (scan dir), `--dry-run` (no writes), `--json` (machine-readable SyncReport).
 
 `claim` / `release` / `evidence` / `ready` (SPEC-025) — task execution workflow: `lore claim <task> [--by] [--branch] [--steal]` acquires an advisory lease; `lore release <task> [--by] [--reason] [--force]` clears it; `lore evidence <task> --oracle <kind> --command <cmd> --result <pass|fail> [--output-tail | --output-tail-file] [--by]` appends an oracle verification record; `lore ready <plan>` prints the computed readiness report (never stored). `lore tree` / `lore list --type task` render a claim/evidence badge on task rows.
+
+`assess` (SPEC-026) — `lore assess <plan> [--diff <git-range> | --diff-file <path>] [--json] [--ai|--no-ai]`: AI plan-outcome assessment (LLM-as-judge). `--diff` shells `git diff <range>` (via `node:child_process.spawnSync`, mirrors `editor.ts`'s subprocess pattern); `--diff-file` reads pre-generated diff text (mirrors `set.ts`'s `--content-file` hermetic-test-seam idiom); passing both → exit 2. Zero child tasks on the plan → exit 4 (`VALIDATION_ERROR`) BEFORE any AI call. Unlike every other AI mutation command, assess has no non-AI mode — `--no-ai` always exits 2, and the surface's built-in AI-off default (agent/mcp/http_token) does NOT brake it; only an explicit `ai.default_per_surface.<surface> = false` config override does (`isAssessAiBraked`, `../../ai/resolve-ai.js`). On success, persists a `knowledge` doc (`sub_type="assessment"`) linked to the plan via `informs` and prints a verdict + AC score table (or `--json` envelope).
 
 `serve` mounts the HTTP adapter; `agent` manages API keys for AI agents — create/list/revoke (SPEC-010 §3.2), NOT an MCP launcher (MCP is entered via the top-level `--mcp-server` flag only); `eval` runs evaluation scenarios; `dashboard` (SPEC-016) starts the HTTP server in-process, spawns the `@lore/dashboard` Vite dev server, ensures `.lore/local-key` exists, and injects a one-time bootstrap token so the SPA can exchange it for an HttpOnly session cookie.
 

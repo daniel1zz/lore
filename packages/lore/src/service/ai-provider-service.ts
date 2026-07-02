@@ -10,6 +10,7 @@
  *     - regenerateContent(doc, opts?) → Promise<Result<GenerateOutput, LoreError>>  (SPEC-019)
  *     - refineContent(doc, userPrompt, opts?) → Promise<Result<GenerateOutput, LoreError>>  (SPEC-019)
  *     - inferLinkType(from, to, opts?) → Promise<Result<{linkType: LinkType}, LoreError>>  (SPEC-019)
+ *     - assessPlan(bundle, opts?) → Promise<Result<AssessmentResult, LoreError>>  (SPEC-026)
  *
  * Invariants:
  *   - Stateless: every dependency is constructor-injected; no module-level state or globals
@@ -21,22 +22,34 @@
  *     → err(AI_PROVIDER_ERROR) — no link is created, caller exits 6 (SPEC-019 AC-LINK-AI-2)
  *   - refineContent truncates doc.content to refineMaxInputChars before building the prompt;
  *     the CLI is responsible for warning the user if truncation occurred (SPEC-019 §9.4)
+ *   - assessPlan gets ONE corrective retry when the judge's JSON is malformed/invalid
+ *     (orchestrated by a sibling private helper, `_attemptJudgeParse` — `_invokeProvider`
+ *     itself is untouched); a second malformed response → AI_PROVIDER_ERROR with a
+ *     ≤500-char raw-output prefix and no document is created (SPEC-026 §3 D2)
  *
  * Side-effect class: IO (delegates to AIProvider.generate and Telemetry.emit)
  *
- * Source: SPEC-017 §3.6, SPEC-019 §9.1
+ * Source: SPEC-017 §3.6, SPEC-019 §9.1, SPEC-026 §3 D1, D2
  */
 
 import { err, ok } from "@lore/core";
 import type { AIProvider, DocRecord, DocType, GenerateInput, GenerateOutput, LinkType, LoreError, Telemetry } from "@lore/core";
 import type { AiDefaultSource, CallerSurface, Result } from "@lore/core";
 import { linkTypeSchema } from "@lore/core";
+import type { AssessmentResult, LlmAssessmentOutput, PlanBundle } from "@lore/core";
+import { extractAssessmentJson, llmAssessmentOutputSchema } from "@lore/core";
 import {
   BUILT_IN_TEMPLATES,
   LINK_INFERENCE_TEMPLATE,
   REFINE_TEMPLATE,
   renderTemplate,
 } from "../ai/templates.js";
+import {
+  ASSESS_PROMPT_VERSION,
+  buildAssessPrompt,
+  buildAssessRetryPrompt,
+  type AssessBudgets,
+} from "../ai/assess-template.js";
 
 // ─── AIProviderService ────────────────────────────────────────────────────────
 
@@ -45,7 +58,8 @@ import {
  * Constructed once at createApp() time via the injected provider registry.
  *
  * @example
- * const svc = new AIProviderService(providers, "claude-cli", templates, telemetry, true, 8000);
+ * const assessBudgets = { max_plan_chars: 8000, max_spec_chars: 12000, max_task_chars: 4000, max_diff_chars: 24000 };
+ * const svc = new AIProviderService(providers, "claude-cli", templates, telemetry, true, 8000, assessBudgets);
  * const result = await svc.generate({ doc_type: "prd", title: "My PRD" });
  */
 export class AIProviderService {
@@ -72,6 +86,12 @@ export class AIProviderService {
      * Source: SPEC-019 §9.4
      */
     private readonly _refineMaxInputChars: number,
+    /**
+     * Character budgets for each material section in the assess judge prompt.
+     * Sourced from config.ai.assess.* (defaults: plan 8000, spec 12000, task 4000, diff 24000).
+     * Source: SPEC-026 §3 D7
+     */
+    private readonly assessBudgets: AssessBudgets,
   ) {}
 
   /**
@@ -386,6 +406,103 @@ export class AIProviderService {
     return ok({ linkType: parseResult.data });
   }
 
+  // ─── SPEC-026: assess ────────────────────────────────────────────────────────
+
+  /**
+   * Judge a plan's outcome against its spec's ACs and its tasks' evidence trails.
+   * Used by `lore assess <plan>`.
+   *
+   * Flow: build the judge prompt (materials truncated per config.ai.assess.* budgets) →
+   * invoke the provider → extract JSON from the raw response → validate against
+   * llmAssessmentOutputSchema → on failure, ONE corrective retry with the parse error
+   * embedded in a follow-up prompt → on a second failure, AI_PROVIDER_ERROR with a
+   * ≤500-char raw-output prefix (no document is created — that is the caller's job, and
+   * it never runs when this returns an error). Emits ai.generation telemetry
+   * (kind="assess") on every terminal outcome exactly once.
+   *
+   * @param bundle - {plan, spec?, tasks[]} from CorpusService.getPlanBundle
+   * @param opts.diffText - Optional diff text (already acquired by the CLI layer)
+   * @param opts.source - Caller surface, forwarded to telemetry as caller_surface
+   * @returns Result<AssessmentResult, LoreError> — never throws
+   *
+   * @example
+   * const bundleResult = await app.corpusService.getPlanBundle("plan-my-feature");
+   * if (!bundleResult.ok) { ... }
+   * const assessResult = await svc.assessPlan(bundleResult.value, { source: app.callerSurface });
+   * if (!assessResult.ok) { process.exitCode = exitCode(assessResult.error); return; }
+   * console.log(assessResult.value.verdict, assessResult.value.overall_score);
+   *
+   * Source: SPEC-026 §3 D1, D2; §4 AC-ASSESS-1, AC-ASSESS-3, AC-ASSESS-4, AC-ASSESS-5
+   */
+  async assessPlan(
+    bundle: PlanBundle,
+    opts?: {
+      // reason: explicit `| undefined` required by exactOptionalPropertyTypes.
+      diffText?: string | undefined;
+      source?: CallerSurface | undefined;
+    },
+  ): Promise<Result<AssessmentResult, LoreError>> {
+    const t0 = performance.now();
+    const { prompt, truncated } = buildAssessPrompt(bundle, opts?.diffText, this.assessBudgets);
+
+    // reason: telemetry meta is identical across every terminal branch below (only the
+    // provider Result and elapsed duration differ) — factored out to keep each branch
+    // a one-line emit call instead of repeating the 5-field meta object four times.
+    const emitAssessEvent = (providerResult: Result<GenerateOutput, LoreError>): void => {
+      this._emitAiEvent(providerResult, Math.round(performance.now() - t0), {
+        doc_type: "knowledge",
+        template_source: "built-in",
+        kind: "assess",
+        target_doc_id: null,
+        caller_surface: opts?.source,
+      });
+    };
+
+    // First attempt.
+    const first = await this._attemptJudgeParse(prompt, bundle);
+    if (!first.providerResult.ok) {
+      emitAssessEvent(first.providerResult);
+      return first.providerResult;
+    }
+    if (first.parsed !== undefined) {
+      emitAssessEvent(first.providerResult);
+      return ok(
+        this._finalizeAssessment(first.parsed, bundle, Math.round(performance.now() - t0), false, truncated),
+      );
+    }
+
+    // Corrective retry (SPEC-026 §3 D2) — embed the parse error + reminder.
+    const retryPrompt = buildAssessRetryPrompt(prompt, first.parseErrorMessage ?? "unknown parse error");
+    const second = await this._attemptJudgeParse(retryPrompt, bundle);
+    if (!second.providerResult.ok) {
+      emitAssessEvent(second.providerResult);
+      return second.providerResult;
+    }
+    if (second.parsed !== undefined) {
+      emitAssessEvent(second.providerResult);
+      return ok(
+        this._finalizeAssessment(second.parsed, bundle, Math.round(performance.now() - t0), true, truncated),
+      );
+    }
+
+    // Both attempts malformed → AI_PROVIDER_ERROR with a raw-output prefix (AC-ASSESS-4).
+    // No document is created — the caller (CLI/MCP) only creates one after an ok() return.
+    // reason: err()'s Result<never, E> return type is assignable to Result<T, E> for any T
+    // (never is bottom), so the same value can be passed to emitAssessEvent (which wants
+    // Result<GenerateOutput, LoreError>) and returned as Result<AssessmentResult, LoreError>
+    // without a cast.
+    const rawPrefix = (second.rawContent ?? "").slice(0, 500);
+    const doubleFailure = err({
+      code: "AI_PROVIDER_ERROR" as const,
+      provider: this.active,
+      message:
+        `AI judge response could not be parsed as valid assessment JSON after one ` +
+        `corrective retry: ${second.parseErrorMessage ?? "unknown error"}. Raw output prefix: ${rawPrefix}`,
+    });
+    emitAssessEvent(doubleFailure);
+    return doubleFailure;
+  }
+
   // ─── Private Helpers ────────────────────────────────────────────────────────
 
   /**
@@ -408,6 +525,87 @@ export class AIProviderService {
   }
 
   /**
+   * One round of the assess judge protocol: invoke the provider with `prompt`, then try to
+   * extract + validate assessment JSON from its response. This is the SIBLING retry helper
+   * required by SPEC-026 §3 D2 — `_invokeProvider` itself is untouched; `assessPlan` calls
+   * this once per attempt (initial + one corrective retry) and inspects the result to decide
+   * whether to retry, finalize, or fail.
+   *
+   * @param prompt - Fully-assembled judge prompt (initial or corrective-retry variant)
+   * @param bundle - Plan bundle, used only for the GenerateInput title (telemetry/doc_type shape)
+   * @returns providerResult (the raw provider call outcome); when providerResult.ok, exactly
+   *   one of `parsed` (validated LlmAssessmentOutput) or `parseErrorMessage` (+ `rawContent`)
+   *   is set — never both.
+   */
+  private async _attemptJudgeParse(
+    prompt: string,
+    bundle: PlanBundle,
+  ): Promise<{
+    providerResult: Result<GenerateOutput, LoreError>;
+    parsed?: LlmAssessmentOutput;
+    parseErrorMessage?: string;
+    rawContent?: string;
+  }> {
+    const { result: providerResult } = await this._invokeProvider({
+      prompt,
+      doc_type: "knowledge",
+      title: bundle.plan.title,
+    });
+
+    if (!providerResult.ok) {
+      return { providerResult };
+    }
+
+    const rawContent = providerResult.value.content;
+    const extracted = extractAssessmentJson(rawContent);
+    if (!extracted.ok) {
+      const message = "message" in extracted.error ? extracted.error.message : extracted.error.code;
+      return { providerResult, rawContent, parseErrorMessage: message };
+    }
+
+    const validated = llmAssessmentOutputSchema.safeParse(extracted.value);
+    if (!validated.success) {
+      const message = validated.error.issues
+        .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
+        .join("; ");
+      return { providerResult, rawContent, parseErrorMessage: message };
+    }
+
+    return { providerResult, rawContent, parsed: validated.data };
+  }
+
+  /**
+   * Assemble the final persisted AssessmentResult from a validated judge output — layers
+   * the service-computed `scope` and `judgment` fields on top of what the model produced
+   * (the model is never asked to, and never does, produce those two fields itself).
+   *
+   * @param parsed - Validated judge output (verdict/overall_score/ac_scores/gaps/recommendations)
+   * @param bundle - Plan bundle — bundle.plan.id becomes scope.id
+   * @param durationMs - Total wall-clock ms for the whole assessPlan call (both attempts)
+   * @param retried - Whether the corrective retry was needed
+   * @param truncated - Section names truncated while building the prompt (AC-ASSESS-7)
+   */
+  private _finalizeAssessment(
+    parsed: LlmAssessmentOutput,
+    bundle: PlanBundle,
+    durationMs: number,
+    retried: boolean,
+    truncated: string[],
+  ): AssessmentResult {
+    return {
+      ...parsed,
+      scope: { type: "plan", id: bundle.plan.id },
+      judgment: {
+        provider: this.active,
+        prompt_version: ASSESS_PROMPT_VERSION,
+        duration_ms: durationMs,
+        retried,
+        truncated,
+      },
+    };
+  }
+
+  /**
    * Emit an ai.generation telemetry event on both success and failure paths.
    * No-op when aiTelemetryEnabled is false (AC-AI-21).
    *
@@ -421,7 +619,7 @@ export class AIProviderService {
     meta: {
       doc_type: DocType;
       template_source: "built-in" | "user-override";
-      kind: "create" | "regenerate" | "refine" | "infer";
+      kind: "create" | "regenerate" | "refine" | "infer" | "assess";
       target_doc_id?: string | null | undefined;
       // reason: exactOptionalPropertyTypes=true requires explicit `| undefined` when callers pass
       // `opts?.field` (type `T | undefined`). Without it, TS rejects `prop: T | undefined`

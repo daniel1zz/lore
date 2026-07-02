@@ -34,3 +34,4 @@ export * from "./tree-blueprint.js";
 export * from "./ai.js";
 export * from "./text-normalise.js";
 export * from "./task-workflow.js";
+export * from "./assessment.js";

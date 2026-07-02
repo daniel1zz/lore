@@ -30,6 +30,7 @@ import type {
   StoreInterface,
 } from "../store/store-interface.js";
 import { NoOpTelemetry, type Telemetry, type TelemetryEvent } from "@lore/core";
+import type { PlanBundle } from "@lore/core";
 
 // ─── Local types (mirror SPEC-001 §3.1 interfaces) ────────────────────────
 
@@ -678,6 +679,67 @@ export class CorpusService {
 
     const nodeResult = await this.buildTreeNode(rootDoc, depth);
     return nodeResult;
+  }
+
+  // ── Plan Bundle (SPEC-026) ──────────────────────────────────────────────
+
+  /**
+   * Assemble the read-only bundle `lore assess` judges: the plan itself, its linked
+   * spec (when the plan is parented under one — undefined when it hangs directly off a
+   * PRD), and every child task (including `extra`, which carries SPEC-025 evidence).
+   *
+   * Bundle assembly (multi-fetch orchestration) lives here rather than in the CLI/MCP
+   * adapters (which must stay thin 4-call pipes) or in AIProviderService (which stays
+   * store-free, matching its four existing methods) — CorpusService already owns read
+   * orchestration for the analogous multi-fetch case, `tree()`. Source: SPEC-026 §3 D1.
+   *
+   * @param planIdOrSlug - ID or slug of the plan document to bundle
+   * @returns Result<PlanBundle, LoreError> — VALIDATION_ERROR when the resolved doc is not
+   *   a plan; DOC_NOT_FOUND when it does not resolve at all
+   *
+   * @example
+   * const bundleResult = await corpusService.getPlanBundle("plan-my-feature");
+   * if (!bundleResult.ok) { ... }
+   * const { plan, spec, tasks } = bundleResult.value; // spec is undefined for PRD-parented plans
+   *
+   * Source: SPEC-026 §4 AC-ASSESS-12
+   */
+  async getPlanBundle(planIdOrSlug: string): Promise<Result<PlanBundle, LoreError>> {
+    const resolveResult = await this.resolve(planIdOrSlug);
+    if (!resolveResult.ok) return resolveResult;
+
+    const planResult = await this.store.find(resolveResult.value);
+    if (!planResult.ok) return planResult;
+    const plan = planResult.value;
+    if (plan === null || plan.deleted_at !== null) {
+      return err({ code: "DOC_NOT_FOUND", id: resolveResult.value });
+    }
+    if (plan.type !== "plan") {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "type",
+        message: `Expected a plan document; got type '${plan.type}'`,
+        value: plan.type,
+      });
+    }
+
+    // reason: a plan's parent is either a spec or a PRD (PARENT_TYPE_CONTRACT.plan =
+    // ["prd", "spec"]) or absent entirely (plan.parent_id is not required at creation).
+    // Only the spec case populates `spec` — PRD-parented and unparented plans get
+    // spec: undefined, not an error (AC-ASSESS-12).
+    let spec: DocRecord | undefined;
+    if (plan.parent_id !== null) {
+      const parentResult = await this.store.find(plan.parent_id);
+      if (!parentResult.ok) return parentResult;
+      if (parentResult.value !== null && parentResult.value.type === "spec") {
+        spec = parentResult.value;
+      }
+    }
+
+    const tasksResult = await this.store.findMany({ parent_id: plan.id, type: "task" });
+    if (!tasksResult.ok) return tasksResult;
+
+    return ok({ plan, ...(spec !== undefined ? { spec } : {}), tasks: tasksResult.value });
   }
 
   // ── Link ─────────────────────────────────────────────────────────────────

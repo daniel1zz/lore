@@ -129,6 +129,7 @@ All feature specs live under `docs/requirements/spec/`. When implementing or cha
 - `SPEC-021` — `lore export-docs` reverse sync (corpus → .md files); `.lore/export-index.json` is **git-tracked** (team-shared ID map)
 - `SPEC-022` — Dashboard write UI (create / edit / approve / link): six cookie-gated `/api/dashboard/*` write routes, CodeMirror 6 editor, If-Match optimistic concurrency + ConflictModal, History tab
 - `SPEC-025` — Task execution workflow metadata: append-only oracle evidence (`extra.verification_evidence`), advisory claim lease (`extra.claim`, TTL computed read-side, no daemon), computed readiness over `blocks` links (`lore ready`, never stored); `lore claim` / `lore release` / `evidence`; 4 new MCP tools; claim/evidence badges on `lore tree` / `lore list --type task`
+- `SPEC-026` — `lore assess <plan>` — AI plan-outcome assessment (LLM-as-judge feedback loop): judges a plan's evidence trail against its spec's ACs, persists a `knowledge` doc (`sub_type="assessment"`) linked to the plan via `informs`; `lore_assess` MCP tool; assess has no non-AI mode (config brake only, no built-in per-surface off)
 
 ## AI Default Behavior by Caller Surface (SPEC-024)
 
@@ -209,6 +210,16 @@ Key patterns:
 - Actor identity resolution (CLI): `--by` flag > `$LORE_ACTOR` env var > OS username. MCP tools (`lore_claim`, `lore_release`, `lore_evidence_add`, `lore_ready`) require `by` explicitly.
 
 `task_status` was removed from `taskExtraSchema` (dormant, zero consumers) — superseded by computed readiness. Legacy docs still carrying it continue to validate (`.passthrough()`).
+
+### AI Plan-Outcome Assessment (SPEC-026)
+
+`lore assess <plan> [--diff <git-range> | --diff-file <path>] [--json] [--ai|--no-ai]` — closes the plan → execute → assess → improve loop. Sends the plan, its spec's ACs (when parented under a spec), every task's SPEC-025 evidence trail, and an optional code diff to the configured AI provider (LLM-as-judge); persists the structured result as a `knowledge` doc (`extra.sub_type = "assessment"`, `extra.assessment` is the Zod-typed SSOT, `content` is a deterministic rendering) with an `informs` link to the plan.
+
+Key patterns:
+- `CorpusService.getPlanBundle(planIdOrSlug)` assembles `{plan, spec?, tasks[]}` — read orchestration lives here (like `tree()`), not in AIProviderService (stays store-free) or the adapters (stay thin pipes).
+- `AIProviderService.assessPlan(bundle, opts)` builds the judge prompt (materials truncated per `ai.assess.*` char budgets, truncated section names recorded in `judgment.truncated[]`), invokes the provider, extracts JSON (`extractAssessmentJson` in `@lore/core`, tolerates fences/prose-wrapping) and validates it — ONE corrective retry on malformed/invalid JSON (parse error embedded in a follow-up prompt), second failure → `AI_PROVIDER_ERROR` with a ≤500-char raw-output prefix and no document is created.
+- **No non-AI mode** — unlike `set --regenerate`/`--refine`, the command name IS the AI intent (SPEC-024's built-in per-surface AI-off default for agent/mcp/http_token does NOT brake assess); only an EXPLICIT `ai.default_per_surface.<surface> = false` config override requires `--ai`. `--no-ai` always exits 2 (contradiction).
+- `InMemoryAIProvider` gained a `sequence` mode (FIFO of scripted responses, one consumed per `generate()` call) so the corrective-retry path has a deterministic test oracle.
 
 The v1 predecessor at `/Users/apple/.claude/docman-mcp` remains frozen. Do not carry over its schema or API shape — v2 is greenfield.
 

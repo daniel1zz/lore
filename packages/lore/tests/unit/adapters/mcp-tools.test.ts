@@ -502,7 +502,8 @@ describe("lore_pending", () => {
 describe("tool registration completeness", () => {
   // reason: SPEC-025 §4 AC-WF-10 added 4 task-workflow tools (lore_claim,
   // lore_release, lore_evidence_add, lore_ready), bringing the total from 16 to 20.
-  it("registers all 20 expected tools", () => {
+  // SPEC-026 §4 AC-ASSESS-10 adds lore_assess, bringing the total from 20 to 21.
+  it("registers all 21 expected tools", () => {
     const expectedTools = [
       "lore_create",
       "lore_get",
@@ -524,12 +525,13 @@ describe("tool registration completeness", () => {
       "lore_release",
       "lore_evidence_add",
       "lore_ready",
+      "lore_assess",
     ];
 
     const internal = server as unknown as McpServerInternal;
     for (const name of expectedTools) {
       expect(internal._registeredTools[name]).toBeDefined();
     }
-    expect(Object.keys(internal._registeredTools)).toHaveLength(20);
+    expect(Object.keys(internal._registeredTools)).toHaveLength(21);
   });
 });

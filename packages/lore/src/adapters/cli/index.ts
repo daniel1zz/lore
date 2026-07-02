@@ -42,6 +42,7 @@ const main = defineCommand({
     release: () => import("./commands/release.js").then((m) => m.default),
     evidence: () => import("./commands/evidence.js").then((m) => m.default),
     ready: () => import("./commands/ready.js").then((m) => m.default),
+    assess: () => import("./commands/assess.js").then((m) => m.default),
   },
 });
 
