@@ -83,6 +83,13 @@ export interface App {
    */
   phaseService: PhaseService;
   /**
+   * Telemetry sink — exposed for dashboard route handlers to emit source-tagged events.
+   * Dashboard handlers record { service: "dashboard", source: "dashboard" } events after
+   * successful writes so AC-DASH-WRITE-TEL-1 is satisfied without modifying service signatures.
+   * Source: SPEC-022 §9.6
+   */
+  telemetry: Telemetry;
+  /**
    * Current caller surface — set once at adapter startup before any command dispatch.
    * Adapters set this immediately after receiving the App:
    *   - CLI/loader.ts: "cli" or "agent" (from env vars CLAUDECODE, CI, LORE_AI_DEFAULT)
@@ -143,6 +150,9 @@ function buildAppFromSqlite(
     exportDocsService: new ExportDocsService(store),
     // reason: PhaseService depends only on StoreInterface — stateless, no AI, no telemetry. SPEC-023 §9.1.
     phaseService: new PhaseService(store),
+    // reason: telemetry exposed on App so dashboard route handlers can emit source-tagged events
+    // without requiring service-layer signature changes (SPEC-022 §9.6).
+    telemetry,
     // SPEC-024: callerSurface getter/setter + resolveAiDefault
     get callerSurface(): CallerSurface { return _callerSurface; },
     set callerSurface(s: CallerSurface) { _callerSurface = s; },
@@ -195,6 +205,9 @@ function buildAppFromTurso(
     exportDocsService: new ExportDocsService(store),
     // reason: PhaseService depends only on StoreInterface — stateless, no AI, no telemetry. SPEC-023 §9.1.
     phaseService: new PhaseService(store),
+    // reason: telemetry exposed on App so dashboard route handlers can emit source-tagged events
+    // without requiring service-layer signature changes (SPEC-022 §9.6).
+    telemetry,
     // SPEC-024: callerSurface getter/setter + resolveAiDefault
     get callerSurface(): CallerSurface { return _callerSurface; },
     set callerSurface(s: CallerSurface) { _callerSurface = s; },

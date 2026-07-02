@@ -1,17 +1,22 @@
 /**
- * Index route — document list view with type filter chips.
+ * Index route — document list view with type filter chips and "New doc" button.
  * Path: /
- * Invariants: read-only list view. Clicking a card navigates to /docs/$id.
+ * Write mode: "New doc" button opens NewDocModal for creating documents (SPEC-022).
  */
 
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DocCard } from "@/components/DocCard";
+import { NewDocModal } from "@/components/NewDocModal";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiList } from "@/lib/api";
 import type { DocType } from "@lore/core";
 import { useState } from "react";
+import { toast } from "sonner";
+import { apiCreateDoc, DashboardApiError } from "@/api/mutations";
+import type { CreateDocPayload } from "@/api/mutations";
+import { Plus } from "lucide-react";
 
 export const Route = createFileRoute("/")({
   component: IndexPage,
@@ -21,7 +26,11 @@ const DOC_TYPES: DocType[] = ["prd", "spec", "adr", "plan", "knowledge", "task"]
 
 function IndexPage(): React.ReactElement {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [selectedType, setSelectedType] = useState<DocType | undefined>(undefined);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["docs", "list", selectedType],
@@ -30,11 +39,39 @@ function IndexPage(): React.ReactElement {
     queryFn: () => apiList(selectedType !== undefined ? { type: selectedType } : {}),
   });
 
+  async function handleCreate(payload: CreateDocPayload): Promise<void> {
+    setIsCreating(true);
+    setCreateError(null);
+    try {
+      const newDoc = await apiCreateDoc(payload);
+      void queryClient.invalidateQueries({ queryKey: ["docs", "list"] });
+      setShowCreateModal(false);
+      toast.success(`Created ${newDoc.slug}`);
+      void navigate({ to: "/docs/$id", params: { id: newDoc.id } });
+    } catch (err) {
+      const message = err instanceof DashboardApiError ? err.message : "Failed to create document";
+      setCreateError(message);
+      toast.error(message);
+    } finally {
+      setIsCreating(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Documents</h1>
-        <p className="text-sm text-muted-foreground mt-1">Browse the shared knowledge corpus</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Documents</h1>
+          <p className="text-sm text-muted-foreground mt-1">Browse the shared knowledge corpus</p>
+        </div>
+        <button
+          className="flex items-center gap-1.5 px-3 py-2 text-sm bg-primary text-primary-foreground rounded hover:bg-primary/90"
+          onClick={() => { setCreateError(null); setShowCreateModal(true); }}
+          type="button"
+        >
+          <Plus className="h-4 w-4" />
+          New doc
+        </button>
       </div>
 
       <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by type">
@@ -94,6 +131,16 @@ function IndexPage(): React.ReactElement {
         <p className="text-xs text-muted-foreground text-right">
           {data.total} document{data.total !== 1 ? "s" : ""} total
         </p>
+      )}
+
+      {/* New Doc Modal */}
+      {showCreateModal && (
+        <NewDocModal
+          onCreate={handleCreate}
+          isPending={isCreating}
+          error={createError}
+          onClose={() => setShowCreateModal(false)}
+        />
       )}
     </div>
   );

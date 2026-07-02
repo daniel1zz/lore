@@ -1,12 +1,12 @@
 /**
  * Doc detail route — full document view for a specific doc ID or slug.
  * Path: /docs/$id
- * Invariants: read-only view. Fetches with resolveMdx=true to show placeholder resolutions.
- *   SPEC-015 §2.2: no write paths in this milestone.
+ * Write mode: wires onMutated callback so DocDetail can invalidate the query
+ *   cache after saves/status-transitions/link changes (SPEC-022).
  */
 
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DocDetail } from "@/components/DocDetail";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiGetDoc } from "@/lib/api";
@@ -18,6 +18,7 @@ export const Route = createFileRoute("/docs/$id")({
 function DocPage(): React.ReactElement {
   const { id } = Route.useParams();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["doc", id],
@@ -27,6 +28,13 @@ function DocPage(): React.ReactElement {
 
   function handleNavigate(targetId: string): void {
     void navigate({ to: "/docs/$id", params: { id: targetId } });
+  }
+
+  function handleMutated(): void {
+    // reason: invalidate both the detail query and all list queries so the
+    // index page reflects updated status/title. SPEC-022 §9.2.
+    void queryClient.invalidateQueries({ queryKey: ["doc", id] });
+    void queryClient.invalidateQueries({ queryKey: ["docs", "list"] });
   }
 
   if (isLoading) {
@@ -66,5 +74,5 @@ function DocPage(): React.ReactElement {
 
   if (data === undefined) return <></>;
 
-  return <DocDetail docWithNav={data} onNavigate={handleNavigate} />;
+  return <DocDetail docWithNav={data} onNavigate={handleNavigate} onMutated={handleMutated} />;
 }

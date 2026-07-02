@@ -44,6 +44,13 @@ export const TelemetryEventSchema = z.object({
   error_code: z.string().optional(),
   /** Optional structured context (doc id, type, query, etc.) */
   meta: z.record(z.unknown()).optional(),
+  /**
+   * Caller surface that originated the write.
+   * "cli" — command-line; "dashboard" — browser dashboard (SPEC-022 §9.6).
+   * Absent on events from services that don't discriminate the surface (pre-SPEC-022 events).
+   * Source: SPEC-022 AC-DASH-WRITE-TEL-1
+   */
+  source: z.enum(["cli", "dashboard"]).optional(),
 });
 
 /** Derived type — never duplicate the shape as an interface. */

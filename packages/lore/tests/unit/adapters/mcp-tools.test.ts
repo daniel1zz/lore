@@ -18,6 +18,7 @@ import { VersionService } from "../../../src/service/version-service.js";
 import { OutlineService } from "../../../src/service/outline-service.js";
 import { MigrationService } from "../../../src/service/migration-service.js";
 import { TreeCheckService } from "../../../src/service/tree-check-service.js";
+import { NoOpTelemetry } from "@lore/core";
 import type { App } from "../../../src/app.js";
 import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
 import { registerTools } from "../../../src/adapters/mcp/tools.js";
@@ -49,6 +50,7 @@ function makeApp(): App {
     // reason: test does not exercise AI-default path; callerSurface required by App interface (SPEC-024).
     callerSurface: "cli" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),
+    telemetry: new NoOpTelemetry(),
     close: () => undefined,
   };
 }

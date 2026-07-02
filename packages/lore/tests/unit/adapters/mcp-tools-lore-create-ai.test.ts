@@ -89,6 +89,7 @@ function makeApp(): { app: App; aiProvider: InMemoryAIProvider } {
       ai: explicit ?? false,
       source: explicit !== undefined ? ("explicit_arg" as const) : ("env" as const),
     }),
+    telemetry: new NoOpTelemetry(),
     close: () => undefined,
   };
 
