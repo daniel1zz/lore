@@ -238,6 +238,7 @@ describe("AC-SD-6 STATE — drift reported but corpus body unchanged", () => {
   it("file body differs from corpus → matched_drift, corpus content unchanged", async () => {
     const { corpus, sync } = makeServices();
     const prd = await createPrd(corpus);
+    // reason: canonicaliseBody is applied on write — corpus always stores body + "\n".
     const originalBody = "# Original Content\n\nThis is the original spec body.";
     const spec = await createSpec(corpus, prd.id, "Drifted Spec", originalBody);
 
@@ -257,11 +258,11 @@ describe("AC-SD-6 STATE — drift reported but corpus body unchanged", () => {
     expect(result.value.matched_clean).toHaveLength(0);
     expect(result.value.created).toHaveLength(0);
 
-    // Corpus body must be unchanged
+    // Corpus body must be unchanged — canonicaliseBody is applied on write so stored value ends with "\n".
     const getResult = await corpus.get(spec.slug);
     expect(getResult.ok).toBe(true);
     if (!getResult.ok) return;
-    expect(getResult.value.doc.content).toBe(originalBody);
+    expect(getResult.value.doc.content).toBe(originalBody + "\n");
   });
 
   it("drift comparison normalizes CRLF → LF on both sides (no false drift)", async () => {

@@ -128,7 +128,9 @@ describe("lore create --content-file — HAPPY path", () => {
     const parsed = JSON.parse(getResult.stdout) as {
       data?: { doc?: { content?: string } };
     };
-    expect(parsed.data?.doc?.content).toBe(expectedContent);
+    // reason: canonicaliseBody applied on write — stored content ends with exactly one "\n".
+    // The key invariant (--- prefix survives the mri argv-terminator bug) is still validated.
+    expect(parsed.data?.doc?.content).toBe(expectedContent + "\n");
   });
 
   it("stores file content verbatim for spec (requires --parent)", () => {
@@ -161,7 +163,8 @@ describe("lore create --content-file — HAPPY path", () => {
     const parsed = JSON.parse(getResult.stdout) as {
       data?: { doc?: { content?: string } };
     };
-    expect(parsed.data?.doc?.content).toBe(expectedContent);
+    // reason: canonicaliseBody applied on write — trailing "\n" always normalised to exactly one.
+    expect(parsed.data?.doc?.content).toBe(expectedContent + "\n");
   });
 
   it("--content-file skips AI and editor paths (no spinner, no editor invocation)", () => {
@@ -194,7 +197,8 @@ describe("lore create --content-file — HAPPY path", () => {
     const parsed = JSON.parse(getResult.stdout) as {
       data?: { doc?: { content?: string } };
     };
-    expect(parsed.data?.doc?.content).toBe("This content came from a file");
+    // reason: canonicaliseBody applied on write — stored content ends with exactly one "\n".
+    expect(parsed.data?.doc?.content).toBe("This content came from a file\n");
   });
 });
 

@@ -121,7 +121,9 @@ describe("lore set --content-file — HAPPY path", () => {
     const parsed = JSON.parse(getResult.stdout) as {
       data?: { doc?: { content?: string } };
     };
-    expect(parsed.data?.doc?.content).toBe(expectedContent);
+    // reason: canonicaliseBody applied on write — stored content ends with exactly one "\n".
+    // The key invariant (--- prefix survives the mri argv-terminator bug) is still validated.
+    expect(parsed.data?.doc?.content).toBe(expectedContent + "\n");
   });
 
   it("stores multi-line file content without modification", () => {
@@ -141,7 +143,8 @@ describe("lore set --content-file — HAPPY path", () => {
     const parsed = JSON.parse(getResult.stdout) as {
       data?: { doc?: { content?: string } };
     };
-    expect(parsed.data?.doc?.content).toBe(expectedContent);
+    // reason: canonicaliseBody applied on write — trailing "\n" always normalised to exactly one.
+    expect(parsed.data?.doc?.content).toBe(expectedContent + "\n");
   });
 
   it("stores empty file content as empty string", () => {

@@ -127,7 +127,8 @@ describe("GET /api/docs/:id?resolveMdx=true", () => {
 
       expect(doc.id).toBe(id);
       expect(doc.title).toBe(title);
-      expect(doc.content).toBe(content);
+      // reason: canonicaliseBody applied on write — stored content ends with exactly one "\n".
+      expect(doc.content).toBe(content + "\n");
     });
 
     it("navigation field is still present when resolveMdx=true", async () => {
@@ -165,7 +166,8 @@ describe("GET /api/docs/:id?resolveMdx=true", () => {
       const data = body.data as Record<string, unknown>;
       const doc = data.doc as Record<string, unknown>;
 
-      expect(doc.content).toBe(content);
+      // reason: canonicaliseBody applied on write — stored content ends with exactly one "\n".
+      expect(doc.content).toBe(content + "\n");
     });
   });
 

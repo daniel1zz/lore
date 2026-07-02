@@ -8,6 +8,7 @@ import { ulid } from "ulidx";
 import { err, ok, type Result } from "@lore/core";
 import type { LoreError } from "@lore/core";
 import {
+  canonicaliseBody,
   createDocInputSchema,
   docPatchSchema,
   slugifyWithCollision,
@@ -290,7 +291,10 @@ export class CorpusService {
       title: data.title,
       status: "draft",
       priority: data.priority ?? "medium",
-      content: data.content ?? "",
+      // reason: canonicalise at write time so corpus content is always normalised.
+      // Prevents roundtrip whitespace drift between export-docs and sync-docs.
+      // Source: SPEC-021 §4 "CRITICAL — whitespace parity"; empty content stays "".
+      content: data.content !== undefined && data.content !== "" ? canonicaliseBody(data.content) : (data.content ?? ""),
       parent_id: resolvedParentId,
       created_at: now,
       updated_at: now,
@@ -452,7 +456,13 @@ export class CorpusService {
       updated_at: now,
     };
     if (parsedPatch.data.title !== undefined) docPatch.title = parsedPatch.data.title;
-    if (parsedPatch.data.content !== undefined) docPatch.content = parsedPatch.data.content;
+    // reason: canonicalise content at write time (same invariant as _createImpl).
+    // Ensures corpus always stores normalised body; sync-docs roundtrip is then lossless.
+    // Source: SPEC-021 §4; empty content stays "".
+    if (parsedPatch.data.content !== undefined) {
+      const raw = parsedPatch.data.content;
+      docPatch.content = raw !== "" ? canonicaliseBody(raw) : raw;
+    }
     if (parsedPatch.data.priority !== undefined) docPatch.priority = parsedPatch.data.priority;
     if (parsedPatch.data.tags !== undefined) docPatch.tags = parsedPatch.data.tags;
     if (parsedPatch.data.extra !== undefined) docPatch.extra = parsedPatch.data.extra;
