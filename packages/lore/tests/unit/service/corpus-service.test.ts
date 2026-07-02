@@ -270,7 +270,8 @@ describe("set", () => {
     if (!setResult.ok) return;
 
     expect(setResult.value.version).toBe(2);
-    expect(setResult.value.content).toBe("Updated content");
+    // reason: canonicaliseBody is applied on write — content always ends with exactly one "\n".
+    expect(setResult.value.content).toBe("Updated content\n");
   });
 
   it("AC-SVC-004.02: update approved doc content → status resets to draft", async () => {

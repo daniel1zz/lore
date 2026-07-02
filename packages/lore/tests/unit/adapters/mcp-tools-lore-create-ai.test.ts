@@ -274,7 +274,8 @@ describe("lore_create — ai: true + content provided (AI skipped)", () => {
 
     const getResult = await getToolHandler(server, "lore_get")({ id_or_slug: created.id });
     const got = parseResult(getResult) as { doc: { content: string } };
-    expect(got.doc.content).toBe(explicitContent);
+    // reason: canonicaliseBody is applied on write — stored content ends with exactly one "\n".
+    expect(got.doc.content).toBe(explicitContent + "\n");
     // And the AI stub content was NOT injected
     expect(got.doc.content).not.toContain("AI Generated");
   });
