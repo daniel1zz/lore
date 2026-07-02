@@ -166,7 +166,7 @@ describe("PATCH /api/dashboard/docs/:id — edit", () => {
       const body = await parseRes(res!);
       expect(body.ok).toBe(true);
       const doc = (body.data as Record<string, unknown>).doc as Record<string, unknown>;
-      expect(doc.content).toBe("Updated content");
+      expect(doc.content).toBe("Updated content\n"); // canonicaliseBody appends trailing \n (SPEC-021 FU)
     });
 
     it("editing content on an approved doc resets status to draft (AC-DASH-WRITE-5)", async () => {
@@ -341,7 +341,7 @@ describe("PATCH with stale If-Match → 409 conflict (AC-DASH-WRITE-3)", () => {
     const body = await parseRes(res!);
     const error = body.error as Record<string, unknown>;
     const current = error.current as Record<string, unknown>;
-    expect(current.content).toBe("the server content that beat you");
+    expect(current.content).toBe("the server content that beat you\n"); // canonicaliseBody appends \n (SPEC-021 FU)
     expect(error.mine).toBe("client attempt");
   });
 });
@@ -368,7 +368,7 @@ describe("PATCH with X-Force-Overwrite: 1 — bypass stale conflict", () => {
     const body = await parseRes(res!);
     expect(body.ok).toBe(true);
     const doc = (body.data as Record<string, unknown>).doc as Record<string, unknown>;
-    expect(doc.content).toBe("forced content");
+    expect(doc.content).toBe("forced content\n"); // canonicaliseBody appends \n (SPEC-021 FU)
   });
 });
 
