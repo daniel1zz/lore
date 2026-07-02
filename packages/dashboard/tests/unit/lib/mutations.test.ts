@@ -176,11 +176,28 @@ describe("apiPatchDoc — header dispatch", () => {
 // ─── NEGATIVE paths ───────────────────────────────────────────────────────────
 
 describe("apiPatchDoc — 409 → ConflictError (AC-DASH-WRITE-3)", () => {
+  // reason: the server ALWAYS wraps error payloads under an `error` key —
+  // `jsonError(payload, status)` (packages/lore/src/adapters/http/middleware.ts)
+  // produces `{ ok: false, error: payload }` for every non-2xx response, including
+  // the 409 conflict payload built by `checkConcurrency`
+  // (packages/lore/src/adapters/http/concurrency.ts). These mocks previously placed
+  // `current`/`mine`/`diff` at the top level of the body, which never matched the real
+  // server and masked a genuine bug in `writeFetch`'s 409 handling (it silently fell
+  // back to a generic DashboardApiError instead of ConflictError — verified against the
+  // live HTTP server via manual curl during diagnosis of the SPEC-022 e2e ConflictModal
+  // failure). Mocks below now mirror the real `{ ok: false, error: {...} }` envelope.
   it("throws ConflictError when server returns 409 with conflict payload", async () => {
     const currentDoc = makeDocRecord({ content: "server content", version: 3 });
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
       mockJsonResponse(
-        { current: currentDoc, mine: "client content", diff: "--- yours\n+++ theirs\n@@ -1 +1 @@\n-client content\n+server content" },
+        {
+          ok: false,
+          error: {
+            current: currentDoc,
+            mine: "client content",
+            diff: "--- yours\n+++ theirs\n@@ -1 +1 @@\n-client content\n+server content",
+          },
+        },
         409,
       ),
     );
@@ -194,7 +211,7 @@ describe("apiPatchDoc — 409 → ConflictError (AC-DASH-WRITE-3)", () => {
     const currentDoc = makeDocRecord({ content: "server content", version: 3 });
     const diff = "--- yours\n+++ theirs\n@@ -1 +1 @@\n-client\n+server";
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
-      mockJsonResponse({ current: currentDoc, mine: "client content", diff }, 409),
+      mockJsonResponse({ ok: false, error: { current: currentDoc, mine: "client content", diff } }, 409),
     );
 
     let caughtError: ConflictError | null = null;
@@ -215,12 +232,27 @@ describe("apiPatchDoc — 409 → ConflictError (AC-DASH-WRITE-3)", () => {
     // ConflictError must extend DashboardApiError for unified catch handling
     const currentDoc = makeDocRecord({ version: 3 });
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
-      mockJsonResponse({ current: currentDoc, mine: "mine", diff: "diff" }, 409),
+      mockJsonResponse({ ok: false, error: { current: currentDoc, mine: "mine", diff: "diff" } }, 409),
     );
 
     const err = await apiPatchDoc("01JTEST", { content: "mine" }, { version: 2 }).catch((e) => e);
     expect(err).toBeInstanceOf(ConflictError);
     expect(err).toBeInstanceOf(DashboardApiError);
+  });
+
+  it("REGRESSION: falls back to generic DashboardApiError when the 409 body lacks the error.current/mine/diff shape (e.g. top-level fields, matching the pre-fix bug)", async () => {
+    // This mirrors the exact defect found in writeFetch: if current/mine/diff were
+    // (incorrectly) placed outside `error`, the client must NOT crash — it degrades to
+    // a generic conflict error rather than silently constructing a broken ConflictError.
+    const currentDoc = makeDocRecord({ version: 3 });
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      mockJsonResponse({ ok: false, current: currentDoc, mine: "mine", diff: "diff" }, 409),
+    );
+
+    const err = await apiPatchDoc("01JTEST", { content: "mine" }, { version: 2 }).catch((e) => e);
+    expect(err).toBeInstanceOf(DashboardApiError);
+    expect(err).not.toBeInstanceOf(ConflictError);
+    expect((err as DashboardApiError).code).toBe("STALE_VERSION");
   });
 });
 

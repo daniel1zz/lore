@@ -14,6 +14,12 @@
  *   - onMutated is called after every successful write; the caller is responsible
  *     for cache invalidation (inversion-of-control avoids needing QueryClientProvider
  *     in unit tests). SPEC-022 §9.
+ *   - `editorSeed` (not `editContent`) is passed as Editor's `initialValue`.
+ *     `editContent` updates on every keystroke; feeding it back into `initialValue`
+ *     would re-trigger CodeMirror's mount effect per keystroke, destroying and
+ *     recreating the view mid-edit (loses focus, resets cursor to doc start,
+ *     scrambles typed input). `editorSeed` is set only when a new edit session
+ *     starts (Edit button click).
  * Side-effect class: IO (fetch, localStorage)
  * Source: SPEC-015, SPEC-022 §9.2
  */
@@ -89,6 +95,17 @@ export function DocDetail({ docWithNav, onNavigate, onMutated }: DocDetailProps)
     }
     return doc.content;
   });
+  // reason: Editor's `initialValue` is the CodeMirror mount effect's only dependency
+  // (Editor.tsx `useEffect([initialValue])`) — every time it changes, CodeMirror
+  // destroys and recreates the whole view, resetting focus and the cursor/selection
+  // to document start. `editContent` is updated on every keystroke by
+  // handleEditorChange, so it must NEVER be fed back into Editor's `initialValue` —
+  // doing so causes a destroy+recreate per keystroke, which drops/scrambles rapidly
+  // typed input (observed: saved content truncated to the first character typed).
+  // `editorSeed` is the value that seeds a NEW edit session only (Edit click) and is
+  // otherwise held stable while `editContent` continues to track the live value for
+  // Save / draft-autosave.
+  const [editorSeed, setEditorSeed] = useState<string>(editContent);
   const [isSaving, setIsSaving] = useState(false);
 
   // ── Conflict modal state ────────────────────────────────────────────────────
@@ -259,6 +276,7 @@ export function DocDetail({ docWithNav, onNavigate, onMutated }: DocDetailProps)
                 className="text-sm px-3 py-1 border rounded hover:bg-muted"
                 onClick={() => {
                   setEditContent(doc.content);
+                  setEditorSeed(doc.content);
                   setIsEditing(true);
                 }}
                 type="button"
@@ -366,7 +384,7 @@ export function DocDetail({ docWithNav, onNavigate, onMutated }: DocDetailProps)
         <section aria-label="Document content">
           {isEditing ? (
             <Editor
-              initialValue={editContent}
+              initialValue={editorSeed}
               onChange={handleEditorChange}
               splitView={true}
             />

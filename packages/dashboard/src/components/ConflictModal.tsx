@@ -10,11 +10,17 @@
  *   - "Force overwrite" calls onForceOverwrite which sends X-Force-Overwrite: 1.
  *   - "Cancel" calls onClose and returns user to editing state.
  *   - Modal traps focus and is closed by Escape key.
+ *   - The unified-diff section is a controlled disclosure (`showDiff` state), NOT a
+ *     native `<details>` element: `<details>` keeps its children in the DOM (just
+ *     CSS-hidden) while collapsed, which duplicates "You wrote" / "Now on server"
+ *     text into the diff's +/- lines even when the diff is collapsed — ambiguous for
+ *     both text search and accessible-text queries. Mounting the diff lines only
+ *     when expanded keeps collapsed == absent from the DOM.
  * Side-effect class: pure (callbacks drive the IO)
  * Source: SPEC-022 §9.4, Q2
  */
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { DocRecord } from "@lore/core";
 import { X } from "lucide-react";
 
@@ -60,6 +66,8 @@ export function ConflictModal({
   onForceOverwrite,
   onClose,
 }: ConflictModalProps): React.ReactElement {
+  const [showDiff, setShowDiff] = useState(false);
+
   // Close on Escape key.
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent): void {
@@ -113,27 +121,36 @@ export function ConflictModal({
           </div>
         </div>
 
-        {/* Diff section (collapsible in a details element) */}
+        {/* Diff section — controlled disclosure; diff lines mount only when expanded
+            (see file-header "reason" note: a native <details> would keep this text in
+            the DOM, colliding with the "You wrote" / "Now on server" panes above). */}
         {diff.trim().length > 0 && (
-          <details className="border-t">
-            <summary className="px-4 py-2 text-xs cursor-pointer text-muted-foreground hover:bg-muted">
-              Show unified diff
-            </summary>
-            <pre className="text-xs font-mono p-4 overflow-auto max-h-40 leading-5">
-              {diff.split("\n").map((line, i) => {
-                const key = `diff-${i}`;
-                let color = "";
-                if (line.startsWith("+")) color = "text-green-600 dark:text-green-400";
-                else if (line.startsWith("-")) color = "text-red-600 dark:text-red-400";
-                else if (line.startsWith("@@")) color = "text-blue-600 dark:text-blue-400";
-                return (
-                  <span key={key} className={`block ${color}`}>
-                    {line}
-                  </span>
-                );
-              })}
-            </pre>
-          </details>
+          <div className="border-t">
+            <button
+              type="button"
+              onClick={() => setShowDiff((prev) => !prev)}
+              aria-expanded={showDiff}
+              className="w-full text-left px-4 py-2 text-xs cursor-pointer text-muted-foreground hover:bg-muted"
+            >
+              {showDiff ? "Hide unified diff" : "Show unified diff"}
+            </button>
+            {showDiff && (
+              <pre className="text-xs font-mono p-4 overflow-auto max-h-40 leading-5">
+                {diff.split("\n").map((line, i) => {
+                  const key = `diff-${i}`;
+                  let color = "";
+                  if (line.startsWith("+")) color = "text-green-600 dark:text-green-400";
+                  else if (line.startsWith("-")) color = "text-red-600 dark:text-red-400";
+                  else if (line.startsWith("@@")) color = "text-blue-600 dark:text-blue-400";
+                  return (
+                    <span key={key} className={`block ${color}`}>
+                      {line}
+                    </span>
+                  );
+                })}
+              </pre>
+            )}
+          </div>
         )}
 
         {/* Footer actions */}

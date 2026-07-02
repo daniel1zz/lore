@@ -91,14 +91,23 @@ interface DocWriteResponse {
   data: { doc: DocRecord };
 }
 
-/** Error envelope. */
+/**
+ * Error envelope. The server always wraps error payloads under `error` (never at the
+ * top level) — `jsonError(payload, status)` in `adapters/http/middleware.ts` produces
+ * `{ ok: false, error: payload }` for every error response, including 409 conflicts
+ * where `payload` is `checkConcurrency`'s `ConflictPayload` (`adapters/http/concurrency.ts`).
+ * `current` / `mine` / `diff` therefore live under `error`, not as siblings of `error`.
+ */
 interface ErrorResponse {
   ok: boolean;
-  error?: { code?: string; message?: string };
-  /** For 409 conflict: concurrency payload. */
-  current?: DocRecord;
-  mine?: string;
-  diff?: string;
+  error?: {
+    code?: string;
+    message?: string;
+    /** For 409 conflict: concurrency payload (ConflictPayload — current/mine/diff). */
+    current?: DocRecord;
+    mine?: string;
+    diff?: string;
+  };
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -142,8 +151,8 @@ async function writeFetch<T>(
 
   // Handle 409 Conflict — throw ConflictError with diff payload.
   if (response.status === 409) {
-    const conflict = parsed as ErrorResponse;
-    if (conflict.current !== undefined && conflict.mine !== undefined && conflict.diff !== undefined) {
+    const conflict = (parsed as ErrorResponse).error;
+    if (conflict?.current !== undefined && conflict.mine !== undefined && conflict.diff !== undefined) {
       throw new ConflictError(conflict.current, conflict.mine, conflict.diff);
     }
     throw new DashboardApiError(409, "STALE_VERSION", "Document modified concurrently");
