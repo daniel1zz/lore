@@ -192,6 +192,26 @@
     "01KWGD74GWH11BMFT59S1TNP56": {
       "human_id": "TASK-020",
       "file_path": "docs/requirements/task/TASK-020-server-write-routes-auth-gate-concurrency-ac-1-3-6.md"
+    },
+    "01KWGX74GMTJMED0QYPWD48GM4": {
+      "human_id": "TASK-021",
+      "file_path": "docs/requirements/task/TASK-021-closeout-dogfood-backfill-export-verification.md"
+    },
+    "01KWGX743BR3R5VH79GY1BA7YG": {
+      "human_id": "TASK-022",
+      "file_path": "docs/requirements/task/TASK-022-six-dimension-tests-for-task-workflow-spec-7.md"
+    },
+    "01KWGX73QMGJ9QT272674D3N4C": {
+      "human_id": "TASK-023",
+      "file_path": "docs/requirements/task/TASK-023-implement-task-workflow-core-service-cli-mcp-ac-wf.md"
+    },
+    "01KWGX6G73S759823TXQ61WG82": {
+      "human_id": "PLAN-003",
+      "file_path": "docs/requirements/plan/PLAN-003-spec-025-implementation-task-workflow-metadata.md"
+    },
+    "01KWGX62EA7J5HC9FHT431P0P8": {
+      "human_id": "SPEC-025",
+      "file_path": "docs/requirements/spec/SPEC-025-task-workflow-metadata.md"
     }
   }
 }
