@@ -833,12 +833,15 @@ export class CorpusService {
           )
         : new Date().toISOString();
 
+    const dbSizeResult = await this.store.dbSizeBytes();
+    if (!dbSizeResult.ok) return dbSizeResult;
+
     return ok({
       total_docs: activeDocs.length,
       by_type,
       by_status,
       last_updated: lastUpdated,
-      db_size_bytes: 0, // In-memory has no disk size; SQLiteStore would provide real value
+      db_size_bytes: dbSizeResult.value,
     });
   }
 

@@ -646,4 +646,18 @@ export class SQLiteStore implements StoreInterface {
   close(): void {
     this.db.close();
   }
+
+  async dbSizeBytes(): Promise<Result<number, LoreError>> {
+    try {
+      const { page_count: pageCount } = this.db
+        .query("PRAGMA page_count")
+        .get() as { page_count: number };
+      const { page_size: pageSize } = this.db
+        .query("PRAGMA page_size")
+        .get() as { page_size: number };
+      return ok(pageCount * pageSize);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
 }

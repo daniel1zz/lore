@@ -363,6 +363,11 @@ export class InMemoryStore implements StoreInterface {
     // intentionally empty — in-memory store has no resources to release
   }
 
+  /** No disk footprint — always reports 0 bytes. */
+  async dbSizeBytes(): Promise<Result<number, LoreError>> {
+    return ok(0);
+  }
+
   // ── Private Helpers ───────────────────────────────────────────────────────
 
   private findSlugConflict(slug: Slug): DocId | null {

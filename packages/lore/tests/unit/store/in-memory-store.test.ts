@@ -879,4 +879,23 @@ describe("InMemoryStore", () => {
       expect(result2.value?.title).toBe("Test Document");
     });
   });
+
+  // AC-STORE-010: dbSizeBytes — no disk footprint for in-memory store
+  describe("dbSizeBytes", () => {
+    it("always reports 0 bytes — no disk-backed storage", async () => {
+      const result = await store.dbSizeBytes();
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value).toBe(0);
+    });
+
+    it("remains 0 after inserting docs — in-memory has no disk size regardless of content", async () => {
+      await store.insert(makeDoc({ slug: "prd-size-check" }));
+
+      const result = await store.dbSizeBytes();
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value).toBe(0);
+    });
+  });
 });

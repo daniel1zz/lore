@@ -176,4 +176,13 @@ export interface StoreInterface {
 
   /** Close the underlying database connection. Flushes WAL. */
   close(): void;
+
+  /**
+   * Report the on-disk size of the underlying database, in bytes.
+   *
+   * `SQLiteStore` / `TursoStore` compute `PRAGMA page_count * PRAGMA page_size`
+   * against the local file (for `TursoStore`, the embedded replica file).
+   * `InMemoryStore` has no disk footprint and always returns `ok(0)`.
+   */
+  dbSizeBytes(): Promise<Result<number, LoreError>>;
 }
