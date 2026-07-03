@@ -18,6 +18,7 @@ Runtime AI provider implementations, registry builder, template engine, assess j
 
 - **No module-level IO** — `ClaudeCliProvider` only spawns inside `generate()`, never in the constructor. Registry construction is purely synchronous object creation.
 - **Timeout watchdog** — `setTimeout` + `proc.kill("SIGTERM")` + `clearTimeout` on normal completion. The killer timer is always cleared to prevent stale-timer surprises on reuse.
+- **Hermetic judge spawn (SPEC-030 AC-HJ-1)** — `ClaudeCliProvider.generate` never builds `Bun.spawn`'s `cwd`/`env`/`args` inline. It calls `buildHermeticSpawnSpec(cfg, {sourceEnv: process.env, tmpDir: tmpdir()})` (`hermetic-spawn.ts`), a pure function so the sanitization logic is vitest-testable even though the callsite is bun-only. The spec: neutral cwd (OS tmpdir, not the host project dir), a sanitized env (denylist strips `CLAUDECODE` + `CLAUDE_*`, everything else — including auth vars — passes through), and, ONLY when the configured command's basename is `claude`, the official `--setting-sources ""` isolation flag appended to args (probed via `claude --help`; `--bare` was rejected because it restricts auth to `ANTHROPIC_API_KEY`/`apiKeyHelper` only). A custom judge command (any other basename) gets no injected flag.
 - **Template rendering is two-pass** — conditionals (`{{#key}}…{{/key}}`) before substitutions (`{{key}}`), to prevent partial expansion of vars inside a collapsed block.
 - **assess has no non-AI mode** (SPEC-026 §3 D5) — `resolve-ai.ts::isAssessAiBraked(resolveAiDefault(undefined, surface, configDefaults))` is the only correct way to gate it: the built-in per-surface AI-off default (agent/mcp/http_token) must NOT brake assess, only an EXPLICIT `ai.default_per_surface.<surface> = false` config override should. Checking `resolveAiDefault(...).ai === false` directly (without the source-tier check) is a bug — it braked assess on every agent/mcp call, defeating D5's entire point.
 
@@ -26,6 +27,7 @@ Runtime AI provider implementations, registry builder, template engine, assess j
 | File | Role |
 |------|------|
 | `claude-cli-provider.ts` | `ClaudeCliProvider` — Bun.spawn-based provider; implements `AIProvider` |
+| `hermetic-spawn.ts` | `buildHermeticSpawnSpec`, `sanitizeSpawnEnv`, `isClaudeCliCommand` — pure spawn-param builders for judge isolation (SPEC-030 AC-HJ-1); vitest-testable |
 | `in-memory-provider.ts` | `InMemoryAIProvider` — test double; configurable mode (`ok` \| `err` \| `sequence`); records all `generate()` calls |
 | `registry.ts` | `buildProviderRegistry(config)` — merges built-ins + user overrides, validates active provider |
 | `templates.ts` | `BUILT_IN_TEMPLATES`, `REFINE_TEMPLATE`, `LINK_INFERENCE_TEMPLATE`, `renderTemplate(tpl, vars)` — minimal mustache-subset renderer |

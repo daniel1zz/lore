@@ -1,8 +1,14 @@
 /**
- * @spec_ref AC-AI-8
+ * @spec_ref AC-AI-8, AC-HJ-4
  *
  * Integration test verifying that a provider command that exceeds timeout_ms produces
  * an error message containing the word "timeout" (AC-AI-8, SPEC-017 §3.4).
+ *
+ * Also pins SPEC-030 AC-HJ-4: the same timeout message must additionally name the exact
+ * config knob to raise (`ai.providers.<name>.timeout_ms`), the actual configured timeout_ms
+ * value, and the entry-REPLACES-built-in-entirely semantics (no deep merge) — read verbatim
+ * from claude-cli-provider.ts before writing these assertions (see the "REGRESSION: AC-HJ-4"
+ * describe block below for the exact source string this pins against).
  *
  * Strategy: spawn the real CLI process (`bun run src/index.ts create ...`) with:
  *   - A stub binary `sleep_long.sh` that sleeps 5 seconds before exiting 0
@@ -13,7 +19,10 @@
  *   - stderr contains the word "timeout"
  *
  * Six-dimension coverage:
- *   ERROR: provider exceeds timeout_ms → CLI exits 6, stderr contains "timeout" (AC-AI-8)
+ *   ERROR:      provider exceeds timeout_ms → CLI exits 6, stderr contains "timeout" (AC-AI-8)
+ *   REGRESSION: the AC-HJ-4 timeout message pins the config-knob guidance substrings
+ *               (ai.providers., .timeout_ms, REPLACES, the exact configured 200ms value) —
+ *               guards against a future wording rewrite silently dropping the guidance
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
@@ -208,5 +217,107 @@ describe("AI integration — provider timeout (AC-AI-8)", () => {
     );
 
     expect(result.stderr).toContain("--no-ai");
+  }, TEST_TIMEOUT_MS);
+});
+
+// ─── AC-HJ-4: timeout message pins the config-knob guidance ─────────────────
+
+// reason: this describe block pins the AC-HJ-4 addition to the SAME timeout error path
+// exercised above (AC-AI-8) rather than duplicating the stub/config plumbing — the
+// guidance substrings are appended to the identical message, so re-running the identical
+// timeout scenario and asserting on the extended substrings is the correct regression proof.
+//
+// Exact source string this pins against (packages/lore/src/ai/claude-cli-provider.ts,
+// read verbatim at the time this test was written):
+//   `provider "${this.name}" timeout: process killed after ${this.cfg.timeout_ms}ms. ` +
+//   `Raise the limit via ai.providers.${this.name}.timeout_ms in .lore/config.yaml — ` +
+//   `NOTE: that config entry REPLACES the built-in provider entry entirely (no merge), ` +
+//   `so you must also restate command and args alongside the new timeout_ms, e.g.: ` +
+//   `ai.providers.${this.name}: { command: ${this.cfg.command}, args: ${JSON.stringify(this.cfg.args)}, timeout_ms: <new value> }`
+//
+// The provider name configured by writeAiConfigWithTimeout() is always "claude-cli"
+// (the fixed `providers: { claude-cli: ... }` key in the YAML template above), and
+// timeout_ms is always the value passed to writeAiConfigWithTimeout(). Assertions below
+// deliberately target substrings that carry the MEANING (config path, REPLACES semantics,
+// the exact configured number) rather than the whole message verbatim, so a minor wording
+// tweak elsewhere in the sentence doesn't spuriously break this pin.
+describe("AI integration — provider timeout message names the config knob to raise (AC-HJ-4)", () => {
+  it('stderr names the exact config path "ai.providers.claude-cli.timeout_ms"', () => {
+    const { binDir, binName } = makeSleepBinary(5);
+    stubBinDir = binDir;
+    writeAiConfigWithTimeout(tmpDir, binName, 200);
+
+    const result = runLore(
+      ["create", "prd", "--title", "AC-HJ-4 Config Path PRD", "--ai"],
+      tmpDir,
+      binDir,
+    );
+
+    expect(result.stderr).toContain("ai.providers.");
+    expect(result.stderr).toContain(".timeout_ms");
+    expect(result.stderr).toContain("ai.providers.claude-cli.timeout_ms");
+  }, TEST_TIMEOUT_MS);
+
+  it('stderr states the entry-REPLACES-built-in-entirely semantics (literal "REPLACES")', () => {
+    const { binDir, binName } = makeSleepBinary(5);
+    stubBinDir = binDir;
+    writeAiConfigWithTimeout(tmpDir, binName, 200);
+
+    const result = runLore(
+      ["create", "prd", "--title", "AC-HJ-4 Replaces Semantics PRD", "--ai"],
+      tmpDir,
+      binDir,
+    );
+
+    expect(result.stderr).toContain("REPLACES");
+  }, TEST_TIMEOUT_MS);
+
+  it("stderr instructs the reader to restate command and args alongside the new timeout_ms", () => {
+    const { binDir, binName } = makeSleepBinary(5);
+    stubBinDir = binDir;
+    writeAiConfigWithTimeout(tmpDir, binName, 200);
+
+    const result = runLore(
+      ["create", "prd", "--title", "AC-HJ-4 Restate Command Args PRD", "--ai"],
+      tmpDir,
+      binDir,
+    );
+
+    expect(result.stderr).toContain("command");
+    expect(result.stderr).toContain("args");
+  }, TEST_TIMEOUT_MS);
+
+  it('stderr pins the exact configured timeout_ms value (200) appearing together with "timeout"', () => {
+    const { binDir, binName } = makeSleepBinary(5);
+    stubBinDir = binDir;
+    writeAiConfigWithTimeout(tmpDir, binName, 200);
+
+    const result = runLore(
+      ["create", "prd", "--title", "AC-HJ-4 Timeout Value PRD", "--ai"],
+      tmpDir,
+      binDir,
+    );
+
+    // The source format is "${timeout_ms}ms" (e.g. "200ms"), embedded right after
+    // "timeout: process killed after".
+    expect(result.stderr).toContain("200ms");
+    expect(result.stderr.toLowerCase()).toContain("timeout");
+    // Still contains the literal word "timeout" (backward compat with AC-AI-8's assertion).
+    expect(result.stderr).toMatch(/timeout/);
+  }, TEST_TIMEOUT_MS);
+
+  it("a differently-configured timeout_ms value (350) is reflected verbatim in stderr, proving the number is not hardcoded", () => {
+    const { binDir, binName } = makeSleepBinary(5);
+    stubBinDir = binDir;
+    writeAiConfigWithTimeout(tmpDir, binName, 350);
+
+    const result = runLore(
+      ["create", "prd", "--title", "AC-HJ-4 Different Timeout PRD", "--ai"],
+      tmpDir,
+      binDir,
+    );
+
+    expect(result.stderr).toContain("350ms");
+    expect(result.stderr).not.toContain("200ms");
   }, TEST_TIMEOUT_MS);
 });
