@@ -103,9 +103,15 @@ export function exitCode(error: LoreError): number {
  * Human-readable error message with contextual suggestions.
  *
  * @param error - LoreError from a service call
+ * @param opts.aiHasNoFallback - Pass `true` from a caller whose command has NO non-AI mode
+ *   (currently only `lore assess`, SPEC-026 §3 D5). When set, an AI_PROVIDER_ERROR renders
+ *   assess-specific recovery guidance instead of the default "Retry with --no-ai" hint —
+ *   suggesting `--no-ai` to a command that always exits 2 on it is actively misleading
+ *   (SPEC-029 AC-AR-5). Every other caller (create/set/link) DOES have a non-AI editor
+ *   fallback, so they omit this option and keep the original hint.
  * @returns formatted string for stderr output
  */
-export function formatError(error: LoreError): string {
+export function formatError(error: LoreError, opts?: { aiHasNoFallback?: boolean }): string {
   switch (error.code) {
     case "DOC_NOT_FOUND": {
       const lines = [`Error: Document not found: ${error.id}`];
@@ -179,7 +185,19 @@ export function formatError(error: LoreError): string {
       if (error.stderr) {
         lines.push(`  stderr: ${error.stderr}`);
       }
-      lines.push("  Retry with --no-ai to use the editor instead.");
+      if (opts?.aiHasNoFallback) {
+        // reason: assess has no non-AI mode (SPEC-026 §3 D5) — suggesting --no-ai here would
+        // send the user straight into another exit-2 contradiction (SPEC-029 AC-AR-5).
+        lines.push("  This command has no non-AI fallback. To recover:");
+        lines.push("    1. Retry the command — the failure may be transient.");
+        lines.push(
+          "    2. Check `ai.provider` in .lore/config.yaml and that the configured provider " +
+            "(e.g. the `claude` binary) is installed and reachable.",
+        );
+        lines.push("    3. Inspect the raw AI output above (already included in the message) for clues.");
+      } else {
+        lines.push("  Retry with --no-ai to use the editor instead.");
+      }
       return lines.join("\n");
     }
     case "STORE_ERROR":

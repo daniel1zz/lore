@@ -177,6 +177,50 @@ describe("formatError", () => {
     expect(msg).toContain("spec-auth");
     expect(msg).toContain("XYZ456");
   });
+
+  // ─── AI_PROVIDER_ERROR — surface-correct hint (SPEC-029 AC-AR-5) ────────────
+
+  describe("AI_PROVIDER_ERROR — --no-ai hint gating (SPEC-029 AC-AR-5)", () => {
+    const aiErrorMessage = "AI judge response could not be parsed as valid assessment JSON.";
+    const aiError: LoreError = {
+      code: "AI_PROVIDER_ERROR",
+      provider: "claude-cli",
+      message: aiErrorMessage,
+    };
+
+    it("REGRESSION: default call (no opts) still suggests --no-ai (create/set/link callers)", () => {
+      const msg = formatError(aiError);
+      expect(msg).toContain("--no-ai");
+    });
+
+    it("REGRESSION: passing opts explicitly with aiHasNoFallback omitted behaves identically to no opts at all", () => {
+      const msg = formatError(aiError, {});
+      expect(msg).toContain("--no-ai");
+    });
+
+    it("with { aiHasNoFallback: true }, the output does NOT contain '--no-ai' anywhere", () => {
+      const msg = formatError(aiError, { aiHasNoFallback: true });
+      expect(msg).not.toContain("--no-ai");
+    });
+
+    it("with { aiHasNoFallback: true }, the output contains assess-specific recovery guidance instead", () => {
+      const msg = formatError(aiError, { aiHasNoFallback: true });
+      // Pinned against the actual wording in utils.ts: retry guidance, provider config check,
+      // and a pointer to the raw output already embedded in the message.
+      expect(msg).toContain("no non-AI fallback");
+      expect(msg).toContain("Retry the command");
+      expect(msg.toLowerCase()).toContain("ai.provider");
+    });
+
+    it("the underlying error message and provider name are still present regardless of aiHasNoFallback", () => {
+      const withFallback = formatError(aiError, { aiHasNoFallback: true });
+      const withoutFallback = formatError(aiError);
+      expect(withFallback).toContain("claude-cli");
+      expect(withFallback).toContain(aiErrorMessage);
+      expect(withoutFallback).toContain("claude-cli");
+      expect(withoutFallback).toContain(aiErrorMessage);
+    });
+  });
 });
 
 // ─── formatTable ──────────────────────────────────────────────────────────

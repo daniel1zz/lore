@@ -451,4 +451,35 @@ describe("lore assess — double-malformed AI output end-to-end (AC-ASSESS-4)", 
       app.close();
     }
   });
+
+  // ─── SPEC-029 AC-AR-5: real CLI stderr never suggests --no-ai for assess ────
+  //
+  // This is the most important end-to-end proof for AC-AR-5: it exercises formatError
+  // through the REAL assess command's failure branch (assess.ts calls
+  // formatError(assessResult.error, { aiHasNoFallback: true })) and inspects the actual
+  // process.stderr bytes, not just a unit-level formatError() call in isolation.
+  it("stderr does NOT contain '--no-ai' and DOES contain assess-specific recovery guidance", async () => {
+    const { planSlug } = await createPlanWithTask();
+    const scriptPath = writeMalformedProviderScript();
+    writeAiConfig(scriptPath);
+
+    const cmd = await importAssessCommand();
+    const output = captureOutput();
+    try {
+      await cmd.run({ args: { plan: planSlug, json: true } });
+    } finally {
+      output.restore();
+    }
+
+    expect(process.exitCode).toBe(6);
+
+    const stderrText = output.stderr.join("");
+    expect(stderrText).not.toContain("--no-ai");
+    // Pinned against utils.ts's actual aiHasNoFallback wording — retry guidance, a
+    // pointer to the ai.provider config / provider binary, and the raw output already
+    // embedded in the message above.
+    expect(stderrText).toContain("no non-AI fallback");
+    expect(stderrText).toContain("Retry the command");
+    expect(stderrText.toLowerCase()).toContain("ai.provider");
+  });
 });

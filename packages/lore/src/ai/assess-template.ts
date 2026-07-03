@@ -19,10 +19,14 @@
  *     which are recorded as individual `"diff:<file-path>"` entries in `truncated[]`
  *     (AC-AE-3) instead of the old single opaque `"diff"` marker.
  *   - Prompt section order matches SPEC-026 §5: role → materials → rubric → output instruction.
+ *   - The Output Instruction explicitly states the per-AC `reasoning` 300-char cap AND that
+ *     exceeding it gets clipped server-side (SPEC-029 AC-AR-1) — present in BOTH the base
+ *     prompt (here) and the corrective-retry prompt (which embeds this prompt verbatim, see
+ *     {@link buildAssessRetryPrompt}). ASSESS_PROMPT_VERSION bumped 1 → 2 for this change.
  *
  * Side-effect class: pure
  *
- * Source: SPEC-026 §3 D2, D7, D8; §5; SPEC-028 AC-AE-2, AC-AE-3, AC-AE-4
+ * Source: SPEC-026 §3 D2, D7, D8; §5; SPEC-028 AC-AE-2, AC-AE-3, AC-AE-4; SPEC-029 AC-AR-1
  */
 
 import { truncateSection, type PlanBundle } from "@lore/core";
@@ -35,7 +39,7 @@ import { truncateDiffByFile } from "./diff-truncation.js";
  * instruction changes in a way that could shift judge behaviour — persisted verbatim into
  * `judgment.prompt_version` on every assessment for audit (SPEC-026 §3 D6).
  */
-export const ASSESS_PROMPT_VERSION = 1;
+export const ASSESS_PROMPT_VERSION = 2;
 
 /** Character budgets for each prompt section, sourced from `config.ai.assess.*`. */
 export interface AssessBudgets {
@@ -166,7 +170,10 @@ export function buildAssessPrompt(
     `  "gaps": ["<string>", ...],\n` +
     `  "recommendations": ["<string>", ...]\n` +
     `}\n` +
-    `Use the exact AC identifiers found in the spec's Acceptance Criteria section above for ac_id.\n`;
+    `Use the exact AC identifiers found in the spec's Acceptance Criteria section above for ac_id.\n` +
+    `IMPORTANT: each ac_scores[].reasoning MUST be 300 characters or fewer. If you exceed 300 ` +
+    `characters, it will be silently clipped (with a trailing "…") before scoring is recorded — ` +
+    `write terse, evidence-focused reasoning instead of relying on the clip.\n`;
 
   return { prompt, truncated };
 }

@@ -36,6 +36,7 @@ import { AIProviderService } from "../../../src/service/ai-provider-service.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { InMemoryAIProvider } from "../../../src/ai/in-memory-provider.js";
+import { buildAssessPrompt, buildAssessRetryPrompt } from "../../../src/ai/assess-template.js";
 import type { Telemetry, TelemetryEvent, AiGenerationEvent, CreateDocInput, PlanBundle } from "@lore/core";
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
@@ -543,5 +544,84 @@ describe("assessPlan — diff-section truncation is file-boundary-aware (SPEC-02
     if (!result.ok) return;
     expect(result.value.judgment.truncated.some((s) => s.startsWith("diff:"))).toBe(false);
     expect(result.value.judgment.truncated).toEqual([]);
+  });
+});
+
+// ─── SPEC-029 AC-AR-1: both judge prompts state the 300-char reasoning limit ──
+
+describe("buildAssessPrompt / buildAssessRetryPrompt — reasoning-limit statement (SPEC-029 AC-AR-1)", () => {
+  it("the base judge prompt states the 300-char reasoning limit AND that overflow gets clipped", async () => {
+    const store = new InMemoryStore();
+    const bundle = await makeBundle(store);
+    const { prompt } = buildAssessPrompt(bundle, undefined, DEFAULT_BUDGETS);
+    expect(prompt).toContain("300 characters");
+    expect(prompt.toLowerCase()).toContain("clip");
+  });
+
+  it("the corrective-retry prompt (built end-to-end from a real base prompt) ALSO states the limit — proves 'both prompts' holds, not just the retry-prompt docstring", async () => {
+    const store = new InMemoryStore();
+    const bundle = await makeBundle(store);
+    const { prompt: basePrompt } = buildAssessPrompt(bundle, undefined, DEFAULT_BUDGETS);
+    const retryPrompt = buildAssessRetryPrompt(basePrompt, "Unexpected token at position 0");
+
+    expect(retryPrompt).toContain("300 characters");
+    expect(retryPrompt.toLowerCase()).toContain("clip");
+  });
+});
+
+// ─── SPEC-029 AC-AR-2 / AC-AR-6: verbose-but-valid never burns the retry budget ─
+
+describe("assessPlan — overlong-but-valid reasoning is clipped without a corrective retry (SPEC-029 AC-AR-2, AC-AR-6)", () => {
+  it("a first response with an overlong ac_scores[0].reasoning succeeds in ONE provider call, clips the field, and records reasoning_clipped", async () => {
+    const store = new InMemoryStore();
+    const bundle = await makeBundle(store);
+
+    const overlongReasoning = "This AC is fully evidenced by the task's verification log. ".repeat(7); // > 300 chars
+    expect(overlongReasoning.length).toBeGreaterThan(300); // sanity: fixture is actually overlong
+
+    const overlongJson = JSON.stringify({
+      verdict: "met",
+      overall_score: 90,
+      ac_scores: [{ ac_id: "AC-ASSESS-1", score: 90, reasoning: overlongReasoning, evidence_refs: [] }],
+      gaps: [],
+      recommendations: [],
+    });
+
+    const provider = new InMemoryAIProvider("in-memory", {
+      kind: "sequence",
+      responses: [{ kind: "ok", content: overlongJson }],
+    });
+    const { service } = makeAssessService({ provider });
+
+    const result = await service.assessPlan(bundle, {});
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // Core AC-AR-2 guarantee: no retry was spent on a verbose-but-otherwise-valid judgment.
+    expect(result.value.judgment.retried).toBe(false);
+    expect(provider.calls).toHaveLength(1);
+
+    // The reasoning field itself was clipped to fit the schema's .max(300).
+    expect(result.value.ac_scores[0]!.reasoning.length).toBeLessThanOrEqual(300);
+
+    // AC-AR-3: the clip is recorded observably, not silent.
+    expect(result.value.judgment.reasoning_clipped).toContain("AC-ASSESS-1");
+  });
+
+  it("when nothing needed clipping, judgment.reasoning_clipped is OMITTED entirely (not present-but-empty)", async () => {
+    const store = new InMemoryStore();
+    const bundle = await makeBundle(store);
+    const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
+    const { service } = makeAssessService({ provider });
+
+    const result = await service.assessPlan(bundle, {});
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // Must check key PRESENCE, not just `.length === 0` — an implementation that sets
+    // `reasoning_clipped: []` instead of omitting the key entirely would pass a naive
+    // `.length` check but violates the additive-only "omitted when empty" contract (AC-AR-3).
+    expect(Object.prototype.hasOwnProperty.call(result.value.judgment, "reasoning_clipped")).toBe(false);
   });
 });

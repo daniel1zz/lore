@@ -24,6 +24,10 @@ import {
   extractAssessmentJson,
   truncateSection,
   renderAssessmentContent,
+  clipTextToBudget,
+  clipOverlongReasoning,
+  DEFAULT_REASONING_CLIP_CHARS,
+  judgmentSchema,
   type AssessmentResult,
 } from "./assessment.js";
 
@@ -284,5 +288,300 @@ describe("renderAssessmentContent — REGRESSION (determinism, no Date/random le
     const a = renderAssessmentContent(makeResult({ verdict: "met", overall_score: 95 }));
     const b = renderAssessmentContent(makeResult({ verdict: "not_met", overall_score: 5 }));
     expect(a).not.toBe(b);
+  });
+});
+
+// ─── clipTextToBudget (SPEC-029 AC-AR-2, AC-AR-6) ─────────────────────────────
+//
+// Spec-first expectations (SPEC-029 AC-AR-2, AC-AR-6), written BEFORE re-reading the
+// clipTextToBudget implementation body in detail:
+//   - a string over budget is cut down to fit, with a trailing ellipsis marker
+//   - a string at-or-under budget is untouched (boundary mirrors truncateSection's `>`)
+//   - the result must NEVER split a UTF-16 surrogate pair, regardless of where the naive
+//     cut point would otherwise land
+
+describe("clipTextToBudget — HAPPY (normal overlong clip)", () => {
+  it("a string well over budget is clipped to <= maxChars with a trailing ellipsis", () => {
+    const text = "a".repeat(305);
+    const result = clipTextToBudget(text, 300);
+    expect(result.length).toBeLessThanOrEqual(300);
+    expect(result.endsWith("…")).toBe(true);
+  });
+
+  it("a short string under budget is returned unchanged (same content, not just same length)", () => {
+    const text = "short reasoning, well under budget";
+    const result = clipTextToBudget(text, 300);
+    expect(result).toBe(text);
+  });
+});
+
+describe("clipTextToBudget — BOUNDARY (exact-boundary semantics, AC-AR-6)", () => {
+  it("text.length === maxChars is NOT clipped (strict > comparison, matches truncateSection)", () => {
+    const text = "x".repeat(300);
+    const result = clipTextToBudget(text, 300);
+    expect(result).toBe(text);
+    expect(result.endsWith("…")).toBe(false);
+  });
+
+  it("text.length === maxChars + 1 IS clipped", () => {
+    const text = "x".repeat(301);
+    const result = clipTextToBudget(text, 300);
+    expect(result).not.toBe(text);
+    expect(result.length).toBeLessThanOrEqual(300);
+  });
+
+  it("referential transparency: an under-budget string returns the SAME reference, not a copy", () => {
+    const text = "under budget";
+    const result = clipTextToBudget(text, 300);
+    expect(result === text).toBe(true);
+  });
+});
+
+describe("clipTextToBudget — REGRESSION (surrogate-pair safety, AC-AR-6)", () => {
+  it("never splits a UTF-16 surrogate pair even when the naive cut point lands mid-pair", () => {
+    // Each "😀" is a 2-code-unit surrogate pair starting at an even index (0, 2, 4, ...).
+    // maxChars=300 → cut = maxChars - 1 = 299 (odd) → charCodeAt(298) is the START (high
+    // surrogate) of the pair at index 149 — the naive cut WOULD split that pair in half
+    // without the backoff guard. This is not a vacuous case: it specifically targets the
+    // documented guard condition.
+    const emoji = "😀"; // 2 UTF-16 code units
+    const text = emoji.repeat(200); // 400 code units, well over the 300 budget
+    const result = clipTextToBudget(text, 300);
+
+    expect(result.length).toBeLessThanOrEqual(300);
+
+    const loneHighSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])/;
+    const loneLowSurrogate = /(?:[^\uD800-\uDBFF]|^)[\uDC00-\uDFFF]/;
+    expect(loneHighSurrogate.test(result)).toBe(false);
+    expect(loneLowSurrogate.test(result)).toBe(false);
+
+    // Array.from iterates by code point — a lone surrogate would still produce a
+    // single-element string of length 1 with code unit in the surrogate range; every
+    // element here must be a full, valid emoji or the trailing "…" marker.
+    for (const ch of Array.from(result)) {
+      expect(ch === "😀" || ch === "…").toBe(true);
+    }
+  });
+
+  it("DEFAULT_REASONING_CLIP_CHARS is 300 (mirrors acScoreSchema's .max(300))", () => {
+    expect(DEFAULT_REASONING_CLIP_CHARS).toBe(300);
+  });
+});
+
+// ─── clipOverlongReasoning (SPEC-029 AC-AR-2, AC-AR-3, AC-AR-6) ───────────────
+
+describe("clipOverlongReasoning — HAPPY", () => {
+  it("clips a single overlong ac_scores[].reasoning and records its ac_id", () => {
+    const input = {
+      ac_scores: [{ ac_id: "AC-1", reasoning: "x".repeat(400), score: 90, evidence_refs: [] }],
+    };
+    const { value, clippedAcIds } = clipOverlongReasoning(input);
+    expect(clippedAcIds).toEqual(["AC-1"]);
+    const output = value as typeof input;
+    expect(output.ac_scores[0]!.reasoning.length).toBeLessThanOrEqual(300);
+    expect(output.ac_scores[0]!.reasoning.endsWith("…")).toBe(true);
+  });
+});
+
+describe("clipOverlongReasoning — NEGATIVE (malformed/unexpected shapes never throw)", () => {
+  it("value that isn't an object passes through unchanged, clippedAcIds empty", () => {
+    const input = "just a string";
+    const { value, clippedAcIds } = clipOverlongReasoning(input);
+    expect(value).toBe(input);
+    expect(clippedAcIds).toEqual([]);
+  });
+
+  it("value is null → passes through unchanged, never throws", () => {
+    expect(() => clipOverlongReasoning(null)).not.toThrow();
+    const { value, clippedAcIds } = clipOverlongReasoning(null);
+    expect(value).toBe(null);
+    expect(clippedAcIds).toEqual([]);
+  });
+
+  it("value is an array (not a plain object) → passes through unchanged", () => {
+    const input = ["not", "an", "object"];
+    const { value, clippedAcIds } = clipOverlongReasoning(input);
+    expect(value).toBe(input);
+    expect(clippedAcIds).toEqual([]);
+  });
+
+  it("object with no ac_scores field at all → passes through unchanged", () => {
+    const input = { verdict: "met", overall_score: 90 };
+    const { value, clippedAcIds } = clipOverlongReasoning(input);
+    expect(value).toBe(input);
+    expect(clippedAcIds).toEqual([]);
+  });
+
+  it("ac_scores present but not an array (a string) → passes through unchanged, never throws", () => {
+    const input = { ac_scores: "not an array" };
+    expect(() => clipOverlongReasoning(input)).not.toThrow();
+    const { value, clippedAcIds } = clipOverlongReasoning(input);
+    expect(value).toBe(input);
+    expect(clippedAcIds).toEqual([]);
+  });
+
+  it("ac_scores is an array of primitives (null, undefined, number) → never throws, none clipped", () => {
+    const input = { ac_scores: [null, undefined, 42] };
+    expect(() => clipOverlongReasoning(input)).not.toThrow();
+    const { clippedAcIds } = clipOverlongReasoning(input);
+    expect(clippedAcIds).toEqual([]);
+  });
+
+  it("an ac_scores entry that isn't an object (a string) is left untouched, no crash", () => {
+    const input = { ac_scores: ["not an object", { ac_id: "AC-1", reasoning: "short" }] };
+    expect(() => clipOverlongReasoning(input)).not.toThrow();
+    const { clippedAcIds } = clipOverlongReasoning(input);
+    expect(clippedAcIds).toEqual([]);
+  });
+
+  it("an ac_scores entry whose reasoning is not a string (e.g. a number) is left untouched", () => {
+    const input = { ac_scores: [{ ac_id: "AC-1", reasoning: 12345 }] };
+    const { value, clippedAcIds } = clipOverlongReasoning(input);
+    expect(clippedAcIds).toEqual([]);
+    expect(value).toBe(input);
+  });
+
+  it("an ac_scores entry missing ac_id but with overlong reasoning records '(unknown)' as the id", () => {
+    const input = { ac_scores: [{ reasoning: "x".repeat(400) }] };
+    const { clippedAcIds } = clipOverlongReasoning(input);
+    expect(clippedAcIds).toEqual(["(unknown)"]);
+  });
+});
+
+describe("clipOverlongReasoning — BOUNDARY (exact 300/301 chars, AC-AR-6)", () => {
+  it("a reasoning of EXACTLY 300 chars is NOT clipped, clippedAcIds empty, string identical", () => {
+    const reasoning = "y".repeat(300);
+    const input = { ac_scores: [{ ac_id: "AC-1", reasoning }] };
+    const { value, clippedAcIds } = clipOverlongReasoning(input);
+    expect(clippedAcIds).toEqual([]);
+    expect(value).toBe(input); // referential transparency: nothing clipped → same reference
+    const output = value as typeof input;
+    expect(output.ac_scores[0]!.reasoning).toBe(reasoning);
+  });
+
+  it("a reasoning of 301 chars IS clipped", () => {
+    const reasoning = "y".repeat(301);
+    const input = { ac_scores: [{ ac_id: "AC-1", reasoning }] };
+    const { value, clippedAcIds } = clipOverlongReasoning(input);
+    expect(clippedAcIds).toEqual(["AC-1"]);
+    const output = value as typeof input;
+    expect(output.ac_scores[0]!.reasoning.length).toBeLessThanOrEqual(300);
+    expect(output.ac_scores[0]!.reasoning).not.toBe(reasoning);
+  });
+
+  it("referential transparency: when nothing is clipped, result.value === input (same reference)", () => {
+    const input = {
+      ac_scores: [
+        { ac_id: "AC-1", reasoning: "short" },
+        { ac_id: "AC-2", reasoning: "also short" },
+      ],
+    };
+    const { value } = clipOverlongReasoning(input);
+    expect(value === input).toBe(true);
+  });
+});
+
+describe("clipOverlongReasoning — STATE (multi-AC partial clipping)", () => {
+  it("only overlong entries are clipped; untouched entries are byte-identical to the input, in encounter order", () => {
+    const shortReasoning = "entry 1 is fine, short reasoning here.";
+    const input = {
+      ac_scores: [
+        { ac_id: "AC-1", reasoning: "z".repeat(350) },
+        { ac_id: "AC-2", reasoning: shortReasoning },
+        { ac_id: "AC-3", reasoning: "w".repeat(400) },
+      ],
+    };
+    const { value, clippedAcIds } = clipOverlongReasoning(input);
+    expect(clippedAcIds).toEqual(["AC-1", "AC-3"]);
+
+    const output = value as typeof input;
+    expect(output.ac_scores[0]!.reasoning.length).toBeLessThanOrEqual(300);
+    expect(output.ac_scores[2]!.reasoning.length).toBeLessThanOrEqual(300);
+    // Entry 1 (index 1, AC-2) must be untouched — same string, same reference even.
+    expect(output.ac_scores[1]!.reasoning).toBe(shortReasoning);
+    expect(output.ac_scores[1]).toBe(input.ac_scores[1]);
+  });
+
+  it("does not mutate the original input object or its ac_scores array in place", () => {
+    const original300 = "z".repeat(350);
+    const input = { ac_scores: [{ ac_id: "AC-1", reasoning: original300 }] };
+    const inputAcScoresRef = input.ac_scores;
+
+    const { value } = clipOverlongReasoning(input);
+
+    // Input itself must be untouched — original reasoning string still overlong.
+    expect(input.ac_scores[0]!.reasoning).toBe(original300);
+    expect(input.ac_scores).toBe(inputAcScoresRef);
+    // The returned value must be a DIFFERENT object (shallow clone), not the same reference.
+    expect(value).not.toBe(input);
+  });
+});
+
+// ─── judgmentSchema — REGRESSION (additive-only reasoning_clipped, AC-AR-3) ───
+
+describe("judgmentSchema — REGRESSION (pre-SPEC-029 backward compatibility)", () => {
+  it("a judgment object with NO reasoning_clipped key still validates (pre-existing persisted docs)", () => {
+    const legacyJudgment = {
+      provider: "claude-cli",
+      prompt_version: 1,
+      duration_ms: 4230,
+      retried: false,
+      truncated: [],
+    };
+    const result = judgmentSchema.safeParse(legacyJudgment);
+    expect(result.success).toBe(true);
+  });
+
+  it("a judgment object WITH reasoning_clipped also validates (new shape)", () => {
+    const newJudgment = {
+      provider: "claude-cli",
+      prompt_version: 2,
+      duration_ms: 4230,
+      retried: false,
+      truncated: [],
+      reasoning_clipped: ["AC-1", "AC-2"],
+    };
+    const result = judgmentSchema.safeParse(newJudgment);
+    expect(result.success).toBe(true);
+  });
+});
+
+// ─── renderAssessmentContent — reasoning_clipped line (SPEC-029 AC-AR-3) ──────
+
+describe("renderAssessmentContent — reasoning_clipped rendering (SPEC-029 AC-AR-3)", () => {
+  it("renders a 'Reasoning clipped for:' line when judgment.reasoning_clipped is present and non-empty", () => {
+    const content = renderAssessmentContent(
+      makeResult({
+        judgment: {
+          provider: "p",
+          prompt_version: 2,
+          duration_ms: 1,
+          retried: false,
+          truncated: [],
+          reasoning_clipped: ["AC-1", "AC-2"],
+        },
+      }),
+    );
+    expect(content).toContain("Reasoning clipped for: AC-1, AC-2");
+  });
+
+  it("omits the reasoning_clipped line entirely when the field is absent (pre-SPEC-029 assessment)", () => {
+    const resultWithoutField = makeResult({
+      judgment: { provider: "p", prompt_version: 1, duration_ms: 1, retried: false, truncated: [] },
+    });
+    const content = renderAssessmentContent(resultWithoutField);
+    expect(content).not.toContain("Reasoning clipped");
+  });
+
+  it("the Judgment section has exactly 5 bullet lines for legacy data — no 6th 'Reasoning clipped' line sneaking in", () => {
+    // Proves the new rendering code path is fully inert for legacy data — no stray
+    // "(none)" placeholder, no blank extra line, nothing. Isolate the "## Judgment"
+    // section specifically (gaps/recommendations in the default fixture also render
+    // "- " bullet lines, so a whole-document count would be misleading).
+    const judgmentNoField = { provider: "p", prompt_version: 1, duration_ms: 1, retried: false, truncated: [] };
+    const content = renderAssessmentContent(makeResult({ judgment: judgmentNoField }));
+    const judgmentSection = content.slice(content.indexOf("## Judgment"));
+    const bulletLines = judgmentSection.split("\n").filter((l) => l.startsWith("- "));
+    expect(bulletLines).toHaveLength(5);
   });
 });

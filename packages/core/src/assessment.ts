@@ -15,6 +15,9 @@
  *   - planBundleSchema / PlanBundle — {plan, spec?, tasks[]} assembled by CorpusService.getPlanBundle
  *   - extractAssessmentJson(raw) — tolerant JSON extraction from raw AI text (fences, prose-wrapped)
  *   - truncateSection(text, maxChars) — single-section truncation primitive
+ *   - clipTextToBudget(text, maxChars) — single-string, surrogate-pair-safe character clip
+ *   - clipOverlongReasoning(value, maxChars?) — clips ac_scores[].reasoning on an UNVALIDATED
+ *     judge response, before it reaches llmAssessmentOutputSchema.safeParse (SPEC-029 AC-AR-2)
  *   - renderAssessmentContent(result) — deterministic Markdown rendering of a persisted result
  *
  * Invariants:
@@ -27,10 +30,18 @@
  *     DocRecord has no Zod schema elsewhere in this codebase; it is produced by the trusted
  *     store layer). The check exists to catch PlanBundle *assembly* bugs (e.g. wrong doc.type
  *     landing in the wrong slot) at the CorpusService/AIProviderService seam.
+ *   - clipOverlongReasoning is applied BEFORE Zod validation, never after — a semantically
+ *     valid but verbose judgment must never fail the whole assess run on acScoreSchema's
+ *     `.max(300)` (SPEC-029 AC-AR-2). It never mutates its input (returns a shallow clone
+ *     only when something was actually clipped) and never throws on malformed shapes — it
+ *     leaves anything it cannot positively identify as an overlong reasoning string for Zod
+ *     to reject downstream as usual.
+ *   - judgment.reasoning_clipped is additive-only — an optional field so every assessment
+ *     persisted before SPEC-029 still validates unchanged (AC-AR-3).
  *
  * Side-effect class: pure
  *
- * Source: SPEC-026 §3 D2, D6, D7; §4 AC-ASSESS-1..13; §5; §8.1, §8.2
+ * Source: SPEC-026 §3 D2, D6, D7; §4 AC-ASSESS-1..13; §5; §8.1, §8.2; SPEC-029 AC-AR-2, AC-AR-3
  */
 
 import { z } from "zod";
@@ -83,11 +94,20 @@ export type AcScore = z.infer<typeof acScoreSchema>;
  *
  * @invariant truncated lists section names the judge did NOT see in full (e.g. "plan",
  *   "spec", "task:<slug>", "diff") — see {@link truncateSection}.
+ * @invariant reasoning_clipped is additive-only (SPEC-029 AC-AR-3) — optional so every
+ *   assessment persisted before SPEC-029 still validates. Absent/undefined means no
+ *   ac_scores[].reasoning was clipped; when present, it lists the ac_id of every AC score
+ *   whose reasoning was shortened by {@link clipOverlongReasoning} before this judgment was
+ *   built — never an empty array (the field is simply omitted when nothing was clipped).
  *
  * @example
  * judgmentSchema.parse({
  *   provider: "claude-cli", prompt_version: 1, duration_ms: 4230,
  *   retried: false, truncated: [],
+ * });
+ * judgmentSchema.parse({
+ *   provider: "claude-cli", prompt_version: 1, duration_ms: 4230,
+ *   retried: false, truncated: [], reasoning_clipped: ["AC-ASSESS-3"],
  * });
  */
 export const judgmentSchema = z.object({
@@ -96,6 +116,7 @@ export const judgmentSchema = z.object({
   duration_ms: z.number().int().nonnegative(),
   retried: z.boolean(),
   truncated: z.array(z.string()),
+  reasoning_clipped: z.array(z.string()).optional(),
 });
 
 /** Derived TypeScript type for judge run metadata. */
@@ -311,6 +332,112 @@ export function truncateSection(text: string, maxChars: number): TruncationResul
   return { text: text.slice(0, maxChars), truncated: true };
 }
 
+// ─── Reasoning-Length Resilience (SPEC-029) ────────────────────────────────
+
+/** Marker appended to a clipped `reasoning` string — signals partial content, not a typo. */
+const REASONING_CLIP_MARKER = "…";
+
+/** Default character budget for one ac_scores[].reasoning entry — mirrors acScoreSchema's `.max(300)`. */
+export const DEFAULT_REASONING_CLIP_CHARS = 300;
+
+/**
+ * Clip a single string to at most `maxChars` UTF-16 code units, appending a trailing
+ * ellipsis marker when clipped. Boundary semantics mirror {@link truncateSection}:
+ * `text.length <= maxChars` is a no-op (strict `>` comparison) — a string exactly at the
+ * budget is never touched.
+ *
+ * @invariant Never splits a UTF-16 surrogate pair. If the naive cut point falls right
+ *   after a high surrogate (i.e. would emit a lone unpaired high surrogate as the last
+ *   code unit before the marker), the cut backs off by one unit so the returned string
+ *   only ever contains complete code points.
+ *
+ * @param text - Candidate string (e.g. one ac_scores[].reasoning entry)
+ * @param maxChars - Character budget (default 300, matches acScoreSchema's cap)
+ * @returns The original string unchanged, or a clipped string ending in "…" whose
+ *   `.length` is `<= maxChars`
+ *
+ * @example
+ * clipTextToBudget("a".repeat(305), 300).length; // → 300
+ * clipTextToBudget("short reasoning", 300); // → "short reasoning" (unchanged, under budget)
+ */
+export function clipTextToBudget(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+
+  let cut = maxChars - REASONING_CLIP_MARKER.length;
+  if (cut < 0) cut = 0;
+
+  // reason: avoid emitting a lone high surrogate as the char immediately before the
+  // ellipsis marker — if the naive cut point lands right after one, back off by one code
+  // unit so `text.slice(0, cut)` never ends mid-surrogate-pair (SPEC-029 AC-AR-6).
+  const precedingCodeUnit = cut > 0 ? text.charCodeAt(cut - 1) : 0;
+  const cutsMidSurrogatePair = precedingCodeUnit >= 0xd800 && precedingCodeUnit <= 0xdbff;
+  if (cutsMidSurrogatePair) cut -= 1;
+
+  return text.slice(0, cut) + REASONING_CLIP_MARKER;
+}
+
+/** Result of {@link clipOverlongReasoning} — the (possibly modified) value plus which AC ids were clipped. */
+export interface ClipReasoningResult {
+  value: unknown;
+  clippedAcIds: string[];
+}
+
+/**
+ * Clip every `ac_scores[].reasoning` entry over `maxChars` in an UNVALIDATED judge
+ * response, BEFORE it reaches `llmAssessmentOutputSchema.safeParse`. Exists because a
+ * semantically valid but verbose judgment must never fail the whole assess run on a
+ * `.max(300)` schema violation (SPEC-029 AC-AR-2) — the one corrective-retry budget
+ * (SPEC-026 §3 D2) should be spent on genuinely malformed JSON, not on a judge that wrote
+ * 310 characters of otherwise-good reasoning.
+ *
+ * Operates defensively on `unknown` (pre-validation) input — `value` may not even be an
+ * object, or `ac_scores` may not be an array; that is Zod's job to reject downstream. This
+ * function only clips what it can positively identify as an overlong `reasoning` string
+ * and leaves everything else untouched.
+ *
+ * @param value - Parsed-but-unvalidated JSON, typically from {@link extractAssessmentJson}
+ * @param maxChars - Character budget per reasoning entry (default {@link DEFAULT_REASONING_CLIP_CHARS})
+ * @returns `{ value, clippedAcIds }` — `value` is a shallow-cloned copy ONLY when at least
+ *   one entry was clipped (referential transparency: the input is never mutated in place);
+ *   `clippedAcIds` lists the `ac_id` of every clipped entry, in encounter order (empty when
+ *   nothing needed clipping)
+ *
+ * @example
+ * const raw = { ac_scores: [{ ac_id: "AC-1", reasoning: "x".repeat(400) }] };
+ * const { value, clippedAcIds } = clipOverlongReasoning(raw);
+ * clippedAcIds; // → ["AC-1"]
+ */
+export function clipOverlongReasoning(
+  value: unknown,
+  maxChars: number = DEFAULT_REASONING_CLIP_CHARS,
+): ClipReasoningResult {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return { value, clippedAcIds: [] };
+  }
+
+  const acScores = (value as { ac_scores?: unknown }).ac_scores;
+  if (!Array.isArray(acScores)) {
+    return { value, clippedAcIds: [] };
+  }
+
+  const clippedAcIds: string[] = [];
+  let anyClipped = false;
+  const nextAcScores = acScores.map((entry) => {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return entry;
+
+    const reasoning = (entry as { reasoning?: unknown }).reasoning;
+    if (typeof reasoning !== "string" || reasoning.length <= maxChars) return entry;
+
+    anyClipped = true;
+    const acId = (entry as { ac_id?: unknown }).ac_id;
+    clippedAcIds.push(typeof acId === "string" ? acId : "(unknown)");
+    return { ...entry, reasoning: clipTextToBudget(reasoning, maxChars) };
+  });
+
+  if (!anyClipped) return { value, clippedAcIds: [] };
+  return { value: { ...(value as object), ac_scores: nextAcScores }, clippedAcIds };
+}
+
 // ─── Content Rendering ──────────────────────────────────────────────────────
 
 /**
@@ -375,6 +502,12 @@ export function renderAssessmentContent(result: AssessmentResult): string {
   lines.push(
     `- Truncated sections: ${result.judgment.truncated.length > 0 ? result.judgment.truncated.join(", ") : "(none)"}`,
   );
+  if (result.judgment.reasoning_clipped && result.judgment.reasoning_clipped.length > 0) {
+    // reason: additive-only field (SPEC-029 AC-AR-3) — only rendered when present, so
+    // pre-SPEC-029 assessments (no reasoning_clipped in judgment) render identically to
+    // before this line existed.
+    lines.push(`- Reasoning clipped for: ${result.judgment.reasoning_clipped.join(", ")}`);
+  }
 
   return lines.join("\n") + "\n";
 }
