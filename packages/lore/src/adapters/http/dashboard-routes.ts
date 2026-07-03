@@ -1,8 +1,8 @@
 /**
  * Dashboard write route handlers — /api/dashboard/* namespace.
- * Purpose: six write endpoints for the browser dashboard (SPEC-022 §9.3).
+ * Purpose: eight write endpoints for the browser dashboard (SPEC-022 §9.3, SPEC-027 AC-DH-6/7).
  *   All routes require cookie-based authentication (AC-DASH-WRITE-9: bearer → 403).
- *   All writes flow through existing CorpusService / ReviewService (SPEC-022 §9.5).
+ *   All writes flow through existing CorpusService / ReviewService / VersionService (SPEC-022 §9.5).
  *   Telemetry: emits source:"dashboard" events per AC-DASH-WRITE-TEL-1.
  * Public surface: handleDashboardRoute
  * Invariants:
@@ -12,8 +12,15 @@
  *   - Stale version → 409 with { current, mine, diff } payload.
  *   - Approve uses session actor.owner as the reviewer identity.
  *   - LINK_CYCLE error → 422 (handled by loreErrorResponse SSOT in middleware.ts).
+ *   - DELETE /api/dashboard/docs/:id is a soft delete (30-day recoverable) — reuses
+ *     CorpusService.delete, the same service method the bearer-auth v1
+ *     `DELETE /api/docs/:id` route calls. Requires `?confirm=true`; the dashboard
+ *     UI only issues the request after its own confirmation dialog, but the
+ *     server-side confirm gate stays as defense-in-depth (SPEC-027 AC-DH-6).
+ *   - POST /api/dashboard/docs/:id/restore is append-only — reuses VersionService.restore,
+ *     which creates a new version N+1 rather than mutating history (SPEC-027 AC-DH-7).
  * Side-effect class: IO (delegates to service layer)
- * Source: SPEC-022 §9.1, §9.3, §9.4, §9.5, §9.6
+ * Source: SPEC-022 §9.1, §9.3, §9.4, §9.5, §9.6; SPEC-027 AC-DH-6, AC-DH-7
  */
 
 import type { App } from "../../app.js";
@@ -82,7 +89,9 @@ type DashboardPathMatch =
   | { type: "approve"; id: string }
   | { type: "reject"; id: string }
   | { type: "createLink"; id: string }
-  | { type: "deleteLink"; id: string; linkId: string };
+  | { type: "deleteLink"; id: string; linkId: string }
+  | { type: "deleteDoc"; id: string }
+  | { type: "restore"; id: string };
 
 function matchDashboardPath(method: string, path: string): DashboardPathMatch | null {
   // POST /api/dashboard/docs
@@ -96,6 +105,12 @@ function matchDashboardPath(method: string, path: string): DashboardPathMatch | 
     return { type: "patch", id: decodeURIComponent(patchMatch[1]) };
   }
 
+  // DELETE /api/dashboard/docs/:id (soft delete — SPEC-027 AC-DH-6)
+  const deleteDocMatch = path.match(/^\/api\/dashboard\/docs\/([^/]+)$/);
+  if (deleteDocMatch?.[1] !== undefined && method === "DELETE") {
+    return { type: "deleteDoc", id: decodeURIComponent(deleteDocMatch[1]) };
+  }
+
   // POST /api/dashboard/docs/:id/approve
   const approveMatch = path.match(/^\/api\/dashboard\/docs\/([^/]+)\/approve$/);
   if (approveMatch?.[1] !== undefined && method === "POST") {
@@ -106,6 +121,12 @@ function matchDashboardPath(method: string, path: string): DashboardPathMatch | 
   const rejectMatch = path.match(/^\/api\/dashboard\/docs\/([^/]+)\/reject$/);
   if (rejectMatch?.[1] !== undefined && method === "POST") {
     return { type: "reject", id: decodeURIComponent(rejectMatch[1]) };
+  }
+
+  // POST /api/dashboard/docs/:id/restore (append-only version restore — SPEC-027 AC-DH-7)
+  const restoreMatch = path.match(/^\/api\/dashboard\/docs\/([^/]+)\/restore$/);
+  if (restoreMatch?.[1] !== undefined && method === "POST") {
+    return { type: "restore", id: decodeURIComponent(restoreMatch[1]) };
   }
 
   // DELETE /api/dashboard/docs/:id/links/:linkId
@@ -296,6 +317,59 @@ async function handleDashboardDeleteLink(
   return new Response(null, { status: 204 });
 }
 
+/**
+ * DELETE /api/dashboard/docs/:id — soft-delete a document (30-day recoverable).
+ * Reuses CorpusService.delete (same method the bearer-auth `DELETE /api/docs/:id`
+ * route calls). Requires `?confirm=true`; the dashboard UI's confirm dialog is
+ * the primary gate, this is a defense-in-depth server-side check.
+ * Returns 200 with { id, recoverable_until }. Missing confirm → DELETE_REQUIRES_CONFIRM (400).
+ */
+async function handleDashboardDelete(
+  req: Request,
+  id: string,
+  app: App,
+): Promise<Response> {
+  const confirm = new URL(req.url).searchParams.get("confirm") === "true";
+
+  const result = await app.corpusService.delete(id, confirm);
+  if (!result.ok) return loreErrorResponse(result.error);
+
+  emitDashboardTelemetry(app, "delete", { doc_id: result.value.id });
+  return jsonOk(result.value);
+}
+
+/**
+ * POST /api/dashboard/docs/:id/restore — restore a document to a previous version.
+ * Body: { version: number }. Reuses VersionService.restore — append-only, creates
+ * a new version N+1 rather than mutating history (SPEC-027 AC-DH-7).
+ * Returns 200 with { doc: DocRecord }. Invalid/missing version → VALIDATION_ERROR (422).
+ */
+async function handleDashboardRestore(
+  req: Request,
+  id: string,
+  app: App,
+): Promise<Response> {
+  const body = await parseJsonBody(req);
+  if (body === null || typeof body !== "object") {
+    return jsonError({ code: "VALIDATION_ERROR", field: "body", message: "Request body must be JSON with 'version'" }, 422);
+  }
+
+  const { version } = body as Record<string, unknown>;
+  if (typeof version !== "number" || !Number.isInteger(version) || version < 1) {
+    return jsonError({ code: "VALIDATION_ERROR", field: "version", message: "'version' must be a positive integer" }, 422);
+  }
+
+  const result = await app.versionService.restore(id, version);
+  if (!result.ok) return loreErrorResponse(result.error);
+
+  emitDashboardTelemetry(app, "restore", {
+    doc_id: result.value.id,
+    restored_from_version: version,
+    new_version: result.value.version,
+  });
+  return jsonOk({ doc: result.value });
+}
+
 // ─── Route dispatcher ─────────────────────────────────────────────────────────
 
 /**
@@ -338,5 +412,9 @@ export async function handleDashboardRoute(
       return handleDashboardCreateLink(req, match.id, app);
     case "deleteLink":
       return handleDashboardDeleteLink(match.id, match.linkId, app);
+    case "deleteDoc":
+      return handleDashboardDelete(req, match.id, app);
+    case "restore":
+      return handleDashboardRestore(req, match.id, app);
   }
 }

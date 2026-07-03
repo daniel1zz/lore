@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 
 /**
- * @spec_ref AC-DASH-WRITE-3, AC-DASH-WRITE-9, AC-DASH-WRITE-10
+ * @spec_ref AC-DASH-WRITE-3, AC-DASH-WRITE-9, AC-DASH-WRITE-10, AC-DH-6, AC-DH-7
  *
  * Unit tests for dashboard write API mutations.
- * Source: SPEC-022 §9.3, §9.4, mutations.ts public surface.
+ * Source: SPEC-022 §9.3, §9.4, mutations.ts public surface; SPEC-027 AC-DH-6, AC-DH-7.
  *
  * Spec expectations (written before reading implementation):
  *   - apiCreateDoc: validates payload client-side; throws DashboardApiError on 4xx
@@ -15,6 +15,8 @@
  *   - Without version and forceOverwrite: sends neither If-Match nor X-Force-Overwrite
  *   - All requests use credentials: "include" (cookie auth per SPEC-022 §9.5)
  *   - Empty title must fail before HTTP call (AC-DASH-WRITE-10)
+ *   - apiDeleteDoc always appends ?confirm=true to the DELETE URL (AC-DH-6)
+ *   - apiRestoreVersion sends POST with a JSON { version } body (AC-DH-7)
  *
  * MOCK RISK: fetch is mocked globally. Real network/cookie behavior is not tested here.
  * Integration test (dashboard-routes.test.ts) covers server-side without mocks.
@@ -31,6 +33,8 @@ import {
   apiRejectDoc,
   apiCreateLink,
   apiDeleteLink,
+  apiDeleteDoc,
+  apiRestoreVersion,
   DashboardApiError,
   ConflictError,
 } from "../../../src/api/mutations";
@@ -366,6 +370,110 @@ describe("DashboardApiError error classification", () => {
     expect(err).toBeInstanceOf(DashboardApiError);
     expect(err.code).toBe("NETWORK_ERROR");
     expect(err.status).toBe(0);
+  });
+});
+
+// ─── apiDeleteDoc (SPEC-027 AC-DH-6) ────────────────────────────────────────────
+
+describe("apiDeleteDoc — happy path (AC-DH-6)", () => {
+  it("returns {id, recoverable_until} from the response on success", async () => {
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      mockJsonResponse({ ok: true, data: { id: "01JTEST", recoverable_until: "2024-02-01T00:00:00Z" } }),
+    );
+
+    const result = await apiDeleteDoc("01JTEST");
+    expect(result).toStrictEqual({ id: "01JTEST", recoverable_until: "2024-02-01T00:00:00Z" });
+  });
+
+  it("sends DELETE with credentials: include and ?confirm=true appended to the URL", async () => {
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      mockJsonResponse({ ok: true, data: { id: "01JTEST", recoverable_until: "2024-02-01T00:00:00Z" } }),
+    );
+
+    await apiDeleteDoc("01JTEST");
+
+    const call = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[0]).toBe("/api/dashboard/docs/01JTEST?confirm=true");
+    expect(call[1]?.method).toBe("DELETE");
+    expect(call[1]?.credentials).toBe("include");
+  });
+
+  it("URL-encodes a slug id containing special characters", async () => {
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      mockJsonResponse({ ok: true, data: { id: "prd-a/b", recoverable_until: "2024-02-01T00:00:00Z" } }),
+    );
+
+    await apiDeleteDoc("prd-a/b");
+
+    const call = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[0]).toBe(`/api/dashboard/docs/${encodeURIComponent("prd-a/b")}?confirm=true`);
+  });
+});
+
+describe("apiDeleteDoc — error path", () => {
+  it("throws DashboardApiError with status 404 when the doc doesn't exist", async () => {
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      mockJsonResponse({ ok: false, error: { code: "DOC_NOT_FOUND", message: "not found" } }, 404),
+    );
+
+    const err = await apiDeleteDoc("missing-id").catch((e) => e);
+    expect(err).toBeInstanceOf(DashboardApiError);
+    expect(err.status).toBe(404);
+  });
+
+  it("throws DashboardApiError with status 400 when confirm is rejected server-side", async () => {
+    // BOUNDARY: apiDeleteDoc always sends confirm=true, so this exercises the
+    // server's defense-in-depth path being surfaced faithfully to the caller
+    // rather than silently swallowed.
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      mockJsonResponse({ ok: false, error: { code: "DELETE_REQUIRES_CONFIRM", message: "confirm required" } }, 400),
+    );
+
+    const err = await apiDeleteDoc("01JTEST").catch((e) => e);
+    expect(err).toBeInstanceOf(DashboardApiError);
+    expect(err.status).toBe(400);
+    expect(err.code).toBe("DELETE_REQUIRES_CONFIRM");
+  });
+});
+
+// ─── apiRestoreVersion (SPEC-027 AC-DH-7) ───────────────────────────────────────
+
+describe("apiRestoreVersion — happy path (AC-DH-7)", () => {
+  it("returns the restored DocRecord from the response", async () => {
+    const doc = makeDocRecord({ version: 3, status: "draft" });
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      mockJsonResponse({ ok: true, data: { doc } }),
+    );
+
+    const result = await apiRestoreVersion("01JTEST", 1);
+    expect(result).toStrictEqual(doc);
+  });
+
+  it("sends POST with a JSON { version } body to the /restore endpoint", async () => {
+    const doc = makeDocRecord({ version: 3 });
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      mockJsonResponse({ ok: true, data: { doc } }),
+    );
+
+    await apiRestoreVersion("01JTEST", 1);
+
+    const call = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[0]).toBe("/api/dashboard/docs/01JTEST/restore");
+    expect(call[1]?.method).toBe("POST");
+    expect(call[1]?.credentials).toBe("include");
+    expect(JSON.parse(call[1]?.body as string)).toStrictEqual({ version: 1 });
+  });
+});
+
+describe("apiRestoreVersion — error path", () => {
+  it("throws DashboardApiError with status 404 when the target version doesn't exist", async () => {
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      mockJsonResponse({ ok: false, error: { code: "DOC_NOT_FOUND", message: "Version 99 not found" } }, 404),
+    );
+
+    const err = await apiRestoreVersion("01JTEST", 99).catch((e) => e);
+    expect(err).toBeInstanceOf(DashboardApiError);
+    expect(err.status).toBe(404);
   });
 });
 

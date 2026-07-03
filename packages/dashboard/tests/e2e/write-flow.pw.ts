@@ -17,9 +17,9 @@
  * browser-context cookie jar) to PATCH the doc out-of-band, so the cookie flows
  * automatically without any test-side cookie plumbing.
  *
- * Source: SPEC-022 §4 (AC-DASH-WRITE-1..10), §9.3, §9.4, §9.7.
+ * Source: SPEC-022 §4 (AC-DASH-WRITE-1..10), §9.3, §9.4, §9.7; SPEC-027 AC-DH-6, AC-DH-7.
  * @spec_ref AC-DASH-WRITE-2, AC-DASH-WRITE-3, AC-DASH-WRITE-4, AC-DASH-WRITE-5,
- *           AC-DASH-WRITE-7, AC-DASH-WRITE-8, AC-DASH-WRITE-10
+ *           AC-DASH-WRITE-7, AC-DASH-WRITE-8, AC-DASH-WRITE-10, AC-DH-6, AC-DH-7
  */
 
 import { test, expect, type Page } from "@playwright/test";
@@ -207,5 +207,50 @@ test.describe("SPEC-022 dashboard write flow", () => {
     await expect(diffModal).toBeVisible();
     await diffModal.getByRole("button", { name: "Close" }).click();
     await expect(diffModal).not.toBeVisible();
+  });
+
+  // ── 7. Restore (SPEC-027 AC-DH-7) ─────────────────────────────────────────────
+
+  test("restore: restoring an older version creates a new version and refreshes the doc view", async () => {
+    const versionBeforeRestore = await readDisplayedVersion();
+
+    // History tab is still active from the previous test. Restore the oldest
+    // row (last in the descending-by-version list — the original creation
+    // content) so the restored content is guaranteed to differ from the
+    // current "E2E-POST-APPROVAL-EDIT" content written in the previous test.
+    const restoreButtons = page.getByRole("button", { name: "restore" });
+    await expect(restoreButtons.first()).toBeVisible();
+    await restoreButtons.last().click();
+
+    await expect(page.getByText(/^Restored to v\d+$/)).toBeVisible();
+
+    // Restore is append-only — it must produce version N+1, never reuse/overwrite.
+    expect(await readDisplayedVersion()).toBe(versionBeforeRestore + 1);
+    // VersionService.restore always resets status to draft (mirrors CLI/HTTP behavior).
+    await expect(page.getByRole("button", { name: /^Status: draft/ })).toBeVisible();
+
+    // Switch to the content tab: the most recent marker must be gone now that
+    // content has been rolled back to the original (v1) creation content.
+    await page.getByRole("button", { name: "content" }).click();
+    await expect(page.getByText("E2E-POST-APPROVAL-EDIT")).not.toBeVisible();
+  });
+
+  // ── 8. Delete (SPEC-027 AC-DH-6) ───────────────────────────────────────────────
+
+  test("delete: confirming the delete dialog soft-deletes the doc and navigates home", async () => {
+    await page.getByRole("button", { name: "Delete" }).click();
+
+    const confirmDialog = page.getByRole("alertdialog", { name: "Confirm delete" });
+    await expect(confirmDialog).toBeVisible();
+    await expect(confirmDialog.getByText(`Delete "${docTitle}"?`)).toBeVisible();
+
+    await confirmDialog.getByRole("button", { name: /Delete \(recoverable\)/ }).click();
+
+    await expect(page.getByText("Document deleted (recoverable for 30 days)")).toBeVisible();
+    await expect(confirmDialog).not.toBeVisible();
+
+    // onDeleted navigates away from the now-gone document's page (SPEC-027 AC-DH-6).
+    await expect(page).toHaveURL("http://localhost:5173/");
+    await expect(page.getByRole("heading", { name: "Documents" })).toBeVisible();
   });
 });

@@ -1,6 +1,7 @@
 /**
- * HistoryTab — document version timeline with per-version diff modal.
- * Purpose: show version history for a document and allow viewing diffs (AC-DASH-WRITE-8).
+ * HistoryTab — document version timeline with per-version diff modal + restore.
+ * Purpose: show version history for a document, allow viewing diffs (AC-DASH-WRITE-8),
+ *   and restore a document's content back to any prior version (SPEC-027 AC-DH-7).
  * Public surface: HistoryTab, HistoryTabProps
  * Invariants:
  *   - Fetches version log on mount via /api/docs/:id/log.
@@ -10,13 +11,20 @@
  *   - Diff modal is opened when user clicks a version's diff link.
  *   - Diff is fetched lazily (only when opened).
  *   - Renders a "no history" empty state when only 1 version exists.
- * Side-effect class: IO (fetch via useQuery)
- * Source: SPEC-022 §9.2, AC-DASH-WRITE-8
+ *   - Restore is append-only (POST .../restore creates version N+1, never deletes
+ *     history) — no confirmation dialog is required the way delete's is, since
+ *     restoring cannot lose data. On success, this component invalidates its own
+ *     `version-log` query (so the new N+1 entry appears) and calls `onRestored`
+ *     so the parent DocDetail refreshes the doc content/metadata it owns.
+ * Side-effect class: IO (fetch via useQuery/useMutation, localStorage untouched)
+ * Source: SPEC-022 §9.2, AC-DASH-WRITE-8; SPEC-027 AC-DH-7
  */
 
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { apiGetVersionLog, apiGetVersionDiff } from "@/lib/api";
+import { apiRestoreVersion, DashboardApiError } from "@/api/mutations";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DiffView } from "@/components/DiffView";
 import { X } from "lucide-react";
@@ -26,6 +34,13 @@ import { X } from "lucide-react";
 export interface HistoryTabProps {
   /** Document ULID or slug. */
   docId: string;
+  /**
+   * Called after a successful restore. The parent (DocDetail) uses this to
+   * refresh the doc's content/status/version it displays outside this tab —
+   * mirrors `DocDetail`'s own `onMutated` inversion-of-control pattern.
+   * When omitted, the restore affordance is not rendered (read-only context).
+   */
+  onRestored?: () => void;
 }
 
 // ─── Diff Modal ───────────────────────────────────────────────────────────────
@@ -88,15 +103,35 @@ function DiffModal({ docId, fromVersion, toVersion, onClose }: DiffModalProps): 
  * Adjacent version pairs have a "diff" link that opens the DiffModal.
  *
  * @example
- * <HistoryTab docId={doc.id} />
+ * <HistoryTab docId={doc.id} onRestored={() => queryClient.invalidateQueries({ queryKey: ["doc", doc.id] })} />
  */
-export function HistoryTab({ docId }: HistoryTabProps): React.ReactElement {
+export function HistoryTab({ docId, onRestored }: HistoryTabProps): React.ReactElement {
   const [diffVersions, setDiffVersions] = useState<{ from: number; to: number } | null>(null);
+  const [restoringVersion, setRestoringVersion] = useState<number | null>(null);
+  const queryClient = useQueryClient();
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["version-log", docId],
     queryFn: () => apiGetVersionLog(docId, { limit: 50 }),
   });
+
+  async function handleRestore(version: number): Promise<void> {
+    setRestoringVersion(version);
+    try {
+      await apiRestoreVersion(docId, version);
+      toast.success(`Restored to v${version}`);
+      // reason: restore creates version N+1 — refresh this tab's own log so the
+      // new entry appears, then let the parent refresh the doc content/metadata
+      // it owns (this component has no access to the outer "doc" query key).
+      await queryClient.invalidateQueries({ queryKey: ["version-log", docId] });
+      onRestored?.();
+    } catch (err) {
+      const message = err instanceof DashboardApiError ? err.message : "Restore failed";
+      toast.error(message);
+    } finally {
+      setRestoringVersion(null);
+    }
+  }
 
   if (isLoading) {
     return (
@@ -149,6 +184,19 @@ export function HistoryTab({ docId }: HistoryTabProps): React.ReactElement {
                   type="button"
                 >
                   diff
+                </button>
+              )}
+              {/* reason: restore is gated on onRestored, mirroring DocDetail's
+                  onMutated !== undefined gating — hides the write affordance in
+                  read-only contexts (e.g. unit tests without a mutation callback). */}
+              {onRestored !== undefined && (
+                <button
+                  className="shrink-0 text-xs text-primary hover:underline disabled:opacity-50 disabled:pointer-events-none"
+                  onClick={() => void handleRestore(entry.version)}
+                  type="button"
+                  disabled={restoringVersion !== null}
+                >
+                  {restoringVersion === entry.version ? "restoring..." : "restore"}
                 </button>
               )}
             </div>
