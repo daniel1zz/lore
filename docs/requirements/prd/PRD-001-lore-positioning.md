@@ -5,9 +5,9 @@ role: intent
 title: "Lore — Internal-First AI Team Knowledge Platform"
 status: approved
 priority: critical
-version: "0.4"
+version: "0.5"
 created: 2026-06-07
-updated: 2026-06-08
+updated: 2026-07-03
 tags: [product-overview, L0, lore, mvp, internal-first, ai-native, protocol-aware]
 audience: [founding-team, ai-agents]
 children:
@@ -45,6 +45,8 @@ changelog:
 
 Lore is an AI-native shared knowledge / memory platform for AI-first founding teams (3-5 people + multiple AI agents). A single CLI binary backed by a service layer abstraction delivers a typed, navigable corpus of PRDs, specs, ADRs, plans, and knowledge. **PRD-as-living-root**: every document is reachable through a tree rooted at the product PRD.
 
+**Lore is the sole project context**: every development-lifecycle output (requirements, designs, decisions, plans, execution evidence, assessments) lives in the corpus as a typed document; git-tracked files and dashboards are projections of the corpus, never parallel sources of truth. The dashboard's home surface IS the resolved living PRD. (Enforcement: §13; conformance oracle: `lore status --check-tree`.)
+
 - **Positioning**: Internal-first for 9-12 months, OSS path later. No commercial monetization.
 - **Architecture**: Service layer abstraction — CLI is the first adapter (P1), MCP/HTTP/TUI are mechanical additions (P2/P3).
 - **Strategy**: Protocol-aware App — v1.0 architecture preserves protocol extraction for v2.1+.
@@ -73,6 +75,7 @@ Lore is an AI-native shared knowledge / memory platform for AI-first founding te
 | G5 | Cloud sync — multi-user multi-device shared corpus | P2 |
 | G6 | HTTP API adapter | P2 |
 | G7 | Internal adoption: 3+ projects, 90%+ new docs in Lore | P2 |
+| G8 | Output contract live: `lore status --check-tree` reports 0 drift on this repo AND every closed plan since v0.5 carries all six stage outputs (§13.2) | P2+, checked at each plan closeout |
 
 ### Non-Goals (v1.0)
 
@@ -111,37 +114,13 @@ Adapters are thin I/O mappers — zero business logic duplication.
 
 ## 5. Module Map
 
-This PRD is the tree root. Each module is a child feature spec with full detail (interfaces, data models, behavior contracts). Cross-links between specs are typed relationships.
+This PRD is the tree root. Each module is a child spec (kind=feature/tech/design, §13.1) with full detail (interfaces, data models, behavior contracts, visual specs). Cross-links between specs are typed relationships.
 
-```
-PRD-001 (this document)
-├── SPEC-001 Service Layer Architecture
-│     Core interfaces, DI pattern, storage abstraction, error model
-│
-├── SPEC-002 Corpus Schema
-│     Document types, link types, lifecycle states, version model, FTS5
-│
-├── SPEC-003 CLI Adapter
-│     Command taxonomy (22 commands), arg parsing, output format, errors
-│
-├── SPEC-004 PRD-as-Living-Root
-│     MDX components, resolution pipeline, rendering contract (CLI/Web/MCP)
-│
-├── SPEC-005 Review Workflow
-│     pending/approve/reject flow, agent-default-draft, status transitions
-│
-├── SPEC-006 Version History
-│     Snapshot model, diff semantics, restore, audit log
-│
-├── SPEC-007 Migration v1
-│     v1→v2 schema mapping, ID conversion, secret scan, dry-run
-│
-├── SPEC-008 MCP Server Adapter (@modelcontextprotocol/sdk v1, stdio + HTTP)
-├── SPEC-009 Sync Engine (Turso @libsql/client v0.17, embedded replicas)
-├── SPEC-010 Auth & Agent Credentials (Better-Auth, device flow + API keys)
-├── SPEC-011 HTTP API Adapter (Bun.serve, hosts auth + MCP + REST)
-└── (P3) SPEC-TBD Web UI
-```
+The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
+
+<ChildrenOf />
+
+Text readers: run `lore tree <this-prd>` — the tree command splices the live children — or use the dashboard tree view. **Known limitation (accepted at v0.5, closed by SPEC-032)**: `OutlineService.resolve()` returns the placeholder data as a separate `resolvedComponents` array and leaves `content` verbatim (it does not splice rendered text back into the body). So every plain-text projection — `lore get --resolve-mdx` stdout AND the SPEC-021 `export-docs` `.md` snapshot — shows the raw `<ChildrenOf />` tag; only structured consumers (the dashboard) render it inline. SPEC-032 makes text projections splice placeholders so §5 reads as a tree everywhere.
 
 ## 6. Phased Delivery
 
@@ -165,7 +144,7 @@ Multi-user multi-agent shared corpus.
 |---|---|
 | M4 | MCP adapter on service layer. Agent credentials. Cloud sync via Turso |
 | M5 | Conflict resolution. Multi-user auth. HTTP API. `lore watch` |
-| M6 | Team adoption: 3+ projects. **Gate: success metrics check** |
+| M6 | Team adoption: 3+ projects. **Gate: success metrics check** + **output-contract gate: `check-tree` drift = 0; no stage skipped in last 3 closed plans (§13.2)** |
 
 **Kill**: <50% adoption, sync conflicts >1/week, teammate reverts to old tools >1 week.
 
@@ -220,7 +199,7 @@ Gated on Phase 2 metrics.
 | Duplicate-decision docs | 0/month | Audit log |
 | Voluntary side-project use | ≥ 1 teammate | Self-report |
 
-**Kill criteria**: See §6 per-phase gates. Global: if Anthropic/Cursor ships multi-vendor shared memory → decision gate ADR.
+**Kill criteria**: See §6 per-phase gates. Global: if Anthropic/Cursor ships multi-vendor shared memory → decision gate ADR. **Output-contract theater check**: if the contract is bypassed (`--force`, self-approval without review, or a stage skipped) in >30% of plans over any 4-week window → the gates add friction without compliance; trigger a decision-gate ADR to simplify or drop them.
 
 ## 9. Risks
 
@@ -256,6 +235,44 @@ Gated on Phase 2 metrics.
 
 **Action**: Complete competitive analysis before design phase.
 
+## 13. Output Contract & Document Taxonomy
+
+### 13.1 Spec kinds
+
+`spec` docs carry `extra.spec_kind: "feature" | "tech" | "design"`, **write-time validated as a Zod enum (fail-loud; unknown values rejected)**, default `"feature"` (backward compatible — all existing specs are feature specs). A one-shot audit `lore migrate spec-kind --dry-run` (parity with `migrate phases`) flags existing specs that are actually tech/design before the taxonomy is relied upon. Design specs are first-class normative contracts: reviewed, approval-gated, implementation must conform. Binary/HTML artifacts (prototypes, mockups, screenshots) live in-repo under `docs/design/`, referenced from the design spec by relative path — the corpus stores the normative text, the repo stores the artifact.
+
+### 13.2 Stage → required output → completion gate
+
+| Stage | Required output | Mounts under | Stage complete when |
+|---|---|---|---|
+| Direction / inception | PRD version bump | root | PRD approved |
+| Feature definition | spec (kind=feature) | PRD | spec approved |
+| UI/UX design | spec (kind=design) + repo prototype artifact | PRD, `relates`→feature spec | spec approved |
+| Technical decision | adr | prd or spec | adr accepted |
+| Structural tech design | spec (kind=tech) | PRD, `relates`→driving spec/adr | spec approved |
+| Execution | plan → tasks + verification evidence (SPEC-025) | spec → plan | tasks archived |
+| Closeout | assessment (SPEC-026) + retro knowledge | plan | assess verdict persisted |
+
+Cardinality: one required output doc per stage instance; multi-spec efforts repeat rows per spec. All spec kinds mount under the PRD — the live `PARENT_TYPE_CONTRACT` keeps `spec: ["prd"]` (NOT widened to spec-under-spec); cross-references between specs use typed links, not tree parenthood.
+
+### 13.3 Enforcement layers (status: partially live)
+
+1. **Create-time hard gate — LIVE**: `PARENT_TYPE_CONTRACT` (`@lore/core` doc-type-rules) already rejects illegal parent types at create/link time. Escape hatch: `knowledge` mounts anywhere — ad-hoc notes are never blocked.
+2. **Check-time soft gate — shipped, unarmed**: `lore status --check-tree` exists but the repo has no `lore.tree.yaml` blueprint yet. SPEC-032 authors the blueprint and arms the check.
+3. **Process convention (NOT a hard gate)**: a stage is complete iff its doc reaches `approved`. Anti-rubber-stamp rule: for design/tech specs the approver SHOULD differ from the author (agent-authored → human-approved). Candidate hardening (SPEC-032): `lore ready` warns when a plan's parent spec is not approved.
+
+Remaining SPEC-032 scope: `lore.tree.yaml` authoring, `spec_kind` Zod enum + `migrate spec-kind` audit, text-projection placeholder splicing (both `lore get --resolve-mdx` stdout and `export-docs` `.md` — `OutlineService.resolve()` today emits `resolvedComponents` data but leaves `content` verbatim), ready-warning, CLAUDE.md duplication lint. SPEC-033 scope: dashboard home replaced by the resolved-PRD projection (today's home is an unrelated hardcoded doc-list — a page rewrite, not a tweak).
+
+### 13.4 Context boundary (SSOT rule)
+
+- **Lore corpus**: everything about the product and the process — requirements, designs, decisions, plans, evidence, assessments, learnings.
+- **In-repo CLAUDE.md**: code-adjacent technical navigation only (how to modify this code), atomically co-evolving with the code, referencing Lore slugs for the "why".
+- A fact lives in one place and is linked from the other, never duplicated. Verification oracle (SPEC-032 candidate): a doc-lint flags CLAUDE.md sections that duplicate ≥N% of a corpus doc's text.
+
+### 13.5 Dashboard = PRD projection
+
+Dashboard home = resolveMdx-rendered living PRD (SPEC-004 machinery: ChildrenOf / RecentDecisions / ActivePlans / HealthStats) + pending-review and ready-task panels. Product current shape = the resolved PRD; iteration history = version log + assessment timeline; decisions = RecentDecisions + adr filter. Full page rewrite specified in SPEC-033.
+
 ## 12. Out of Scope
 
 - v2.1+: Agent-memory protocol RFC (extracted from v1.0 architecture)
@@ -271,3 +288,4 @@ Gated on Phase 2 metrics.
 - **Phase 2 review**: 6-role stakeholder review (2 APPROVE_WITH_CONDITIONS / 4 REQUEST_CHANGES). All conditions addressed in v0.2-0.3.
 - **Owner decisions**: A1 skip external validation; protocol-aware app; 3-phase delivery; Web UI → SHOULD; P1 CLI-only; service layer abstraction.
 - **v0.4**: PRD restructured to outline-level. Detail lives in 7 child feature specs.
+- **v0.5** (2026-07-03): Sole-context positioning (§1) + output contract & document taxonomy (§13: spec_kind feature/tech/design, stage→output→gate table, 3 enforcement layers, SSOT boundary, dashboard-as-PRD-projection) + G8 + §6/§8 governance hooks + §5 module map converted to live `<ChildrenOf />`. Owner-approved: taxonomy option C (spec_kind field, not a new first-class type); full-chain launch. 5-stakeholder review applied — enforcement-layer status corrected to as-built (Layers 1-2 already implemented in `@lore/core`), spec-under-spec mount rejected (contract stays `spec:["prd"]`), export-fidelity limitation documented, spec_kind write-time validation + migrate audit added, approver≠author convention added. Landing specs: SPEC-032 (contract mechanization) + SPEC-033 (dashboard projection). Input: `knowledge-lore-as-sole-dev-context-output-contract-spec-kind-tax`.

@@ -432,6 +432,10 @@
     "01KWKT3C9XY7839RV0FRM3ZP8G": {
       "human_id": "KN-018",
       "file_path": "docs/requirements/knowledge/KN-018-dashboard-product-design-review-2026-07-03-walkthr.md"
+    },
+    "01KWKY3VFEKVD8C6KJ2JAJ2CK1": {
+      "human_id": "KN-019",
+      "file_path": "docs/requirements/knowledge/KN-019-lore-as-sole-dev-context-output-contract-spec-kind.md"
     }
   }
 }
