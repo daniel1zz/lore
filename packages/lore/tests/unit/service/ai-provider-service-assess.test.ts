@@ -493,3 +493,55 @@ describe("assessPlan — budget truncation is recorded in judgment.truncated (AC
     expect(result.value.judgment.truncated).not.toContain("plan");
   });
 });
+
+// ─── SPEC-028 AC-AE-3 / AC-AE-4: diff-section truncation uses truncateDiffByFile ────
+//
+// Chosen at the service layer (not the CLI bun-test layer) per SPEC-028 task dispatch:
+// InMemoryAIProvider + a real assessPlan() call exercises the exact same
+// buildAssessPrompt → truncateDiffByFile wiring the CLI uses, without the overhead of a
+// real SQLite DB + subprocess spawn — faster and just as end-to-end for what matters here
+// (does `judgment.truncated` carry "diff:<path>" markers, not the old bare "diff" string).
+
+describe("assessPlan — diff-section truncation is file-boundary-aware (SPEC-028 AC-AE-3, AC-AE-4)", () => {
+  const srcDiffChunk = `diff --git a/src/foo.ts b/src/foo.ts\nindex 1..2 100644\n--- a/src/foo.ts\n+++ b/src/foo.ts\n@@ -1,1 +1,1 @@\n${"+".repeat(50)}`;
+  const docsDiffChunk = `diff --git a/docs/readme.md b/docs/readme.md\nindex 1..2 100644\n--- a/docs/readme.md\n+++ b/docs/readme.md\n@@ -1,1 +1,1 @@\n${"+".repeat(50)}`;
+
+  it("an oversized diff records 'diff:<path>' entries for each dropped file, NOT the old bare 'diff' marker (AC-AE-3)", async () => {
+    const store = new InMemoryStore();
+    const bundle = await makeBundle(store);
+    const diffText = `${srcDiffChunk}\n${docsDiffChunk}`;
+    // Budget fits the src/ chunk alone (higher priority) but not the docs chunk too.
+    const budgets = { ...DEFAULT_BUDGETS, max_diff_chars: srcDiffChunk.length + 10 };
+    expect(diffText.length).toBeGreaterThan(budgets.max_diff_chars); // sanity: must actually truncate
+
+    const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
+    const { service } = makeAssessService({ provider, budgets });
+
+    const result = await service.assessPlan(bundle, { diffText });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.judgment.truncated).toContain("diff:docs/readme.md");
+    // The old opaque single "diff" marker must NOT appear — SPEC-028 replaced it with
+    // per-file "diff:<path>" entries.
+    expect(result.value.judgment.truncated).not.toContain("diff");
+
+    // The src/ file (higher priority) must have survived into the actual prompt sent.
+    const prompt = provider.calls[0]?.prompt ?? "";
+    expect(prompt).toContain("src/foo.ts");
+  });
+
+  it("a diff within budget produces zero 'diff:*' entries in judgment.truncated (AC-AE-4 no-op)", async () => {
+    const store = new InMemoryStore();
+    const bundle = await makeBundle(store);
+    // Well within the default 24000-char max_diff_chars budget.
+    const diffText = "diff --git a/foo.ts b/foo.ts\n+added line\n";
+    const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
+    const { service } = makeAssessService({ provider });
+
+    const result = await service.assessPlan(bundle, { diffText });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.judgment.truncated.some((s) => s.startsWith("diff:"))).toBe(false);
+    expect(result.value.judgment.truncated).toEqual([]);
+  });
+});

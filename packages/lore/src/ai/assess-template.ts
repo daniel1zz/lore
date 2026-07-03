@@ -12,16 +12,23 @@
  *   - No IO — pure string assembly over already-fetched PlanBundle data.
  *   - Truncation is applied per-section via @lore/core's truncateSection; every truncated
  *     section's name is collected into the returned `truncated[]` list (AC-ASSESS-7).
+ *   - The diff section is the one exception: it uses `truncateDiffByFile` (SPEC-028), NOT
+ *     `truncateSection` — a blind tail cut can slice a file's hunk in half and silently
+ *     drop whichever files sort last. `truncateDiffByFile` keeps whole files in priority
+ *     order (source > test > other) and reports exactly which files were dropped/head-cut,
+ *     which are recorded as individual `"diff:<file-path>"` entries in `truncated[]`
+ *     (AC-AE-3) instead of the old single opaque `"diff"` marker.
  *   - Prompt section order matches SPEC-026 §5: role → materials → rubric → output instruction.
  *
  * Side-effect class: pure
  *
- * Source: SPEC-026 §3 D2, D7, D8; §5
+ * Source: SPEC-026 §3 D2, D7, D8; §5; SPEC-028 AC-AE-2, AC-AE-3, AC-AE-4
  */
 
 import { truncateSection, type PlanBundle } from "@lore/core";
 import { evidenceEntrySchema } from "@lore/core";
 import { z } from "zod";
+import { truncateDiffByFile } from "./diff-truncation.js";
 
 /**
  * Judge prompt schema version. Bump whenever the prompt text, rubric anchors, or output
@@ -112,9 +119,14 @@ export function buildAssessPrompt(
 
   let diffBlock = "(no diff provided)";
   if (diffText !== undefined) {
-    const diffSection = truncateSection(diffText, budgets.max_diff_chars);
-    if (diffSection.truncated) truncated.push("diff");
-    diffBlock = diffSection.text;
+    // reason: file-boundary truncation (SPEC-028 AC-AE-2) replaces the old blind tail cut
+    // for the diff section only — every other section still uses truncateSection above.
+    const diffResult = truncateDiffByFile(diffText, budgets.max_diff_chars);
+    if (diffResult.truncated) {
+      for (const filePath of diffResult.omittedFiles) truncated.push(`diff:${filePath}`);
+      if (diffResult.headTruncatedFile) truncated.push(`diff:${diffResult.headTruncatedFile.filePath}`);
+    }
+    diffBlock = diffResult.text;
   }
 
   const prompt =

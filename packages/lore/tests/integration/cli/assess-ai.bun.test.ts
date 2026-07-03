@@ -315,6 +315,114 @@ describe("lore assess --diff <range> — real git subprocess fixture (AC-ASSESS-
   });
 });
 
+// ─── SPEC-028 AC-AE-1: pre-flight diff-budget stderr warning ─────────────────
+//
+// Write config.yaml pointing ai.provider at the fixed-JSON script (as HAPPY tests above
+// do) but ALSO override ai.assess.max_diff_chars to a small number, so a diff of a known
+// size can be pushed over/under the budget deterministically without needing a 24000+
+// char fixture.
+
+function writeAiConfigWithDiffBudget(command: string, maxDiffChars: number) {
+  saveConfig(tmpDir, {
+    project: { name: "assess-ai-test", author: "tester" },
+    ai: {
+      provider: "claude-cli",
+      providers: { "claude-cli": { command, args: [], timeout_ms: 5000 } },
+      templates: {},
+      telemetry: false,
+      assess: { max_diff_chars: maxDiffChars },
+    },
+  } as never);
+}
+
+describe("lore assess — SPEC-028 AC-AE-1: pre-flight diff-budget stderr warning", () => {
+  it("warns on stderr when the diff exceeds ai.assess.max_diff_chars, and --json stdout stays a clean parseable envelope", async () => {
+    const { planSlug } = await createPlanWithTask();
+    const captureFile = join(tmpDir, "captured-warn-prompt.txt");
+    const scriptPath = writeFixedJsonProviderScript(captureFile);
+    const maxDiffChars = 50;
+    writeAiConfigWithDiffBudget(scriptPath, maxDiffChars);
+
+    const diffFile = join(tmpDir, "oversized.diff");
+    const diffContent = `diff --git a/foo.ts b/foo.ts\n+++ b/foo.ts\n+${"x".repeat(100)}\n`;
+    writeFileSync(diffFile, diffContent);
+    expect(diffContent.length).toBeGreaterThan(maxDiffChars); // sanity: must exceed budget
+
+    const cmd = await importAssessCommand();
+    const output = captureOutput();
+    try {
+      await cmd.run({ args: { plan: planSlug, "diff-file": diffFile, json: true } });
+    } finally {
+      output.restore();
+    }
+
+    const stderrText = output.stderr.join("");
+    expect(stderrText).toContain(`diff is ${diffContent.length} chars`);
+    expect(stderrText).toContain(`budget of ${maxDiffChars}`);
+    expect(stderrText).toContain("--diff-file");
+    expect(stderrText).toContain("ai.assess.max_diff_chars");
+
+    // --json stdout must remain a single clean JSON envelope — parse it to prove it, not
+    // just eyeball a substring.
+    const stdoutText = output.stdout.join("\n");
+    const parsed = JSON.parse(stdoutText) as { ok: boolean };
+    expect(parsed.ok).toBe(true);
+  });
+
+  it("does NOT warn when the diff is within budget, and --json stdout is still clean JSON", async () => {
+    const { planSlug } = await createPlanWithTask();
+    const captureFile = join(tmpDir, "captured-nowarn-prompt.txt");
+    const scriptPath = writeFixedJsonProviderScript(captureFile);
+    const maxDiffChars = 1000;
+    writeAiConfigWithDiffBudget(scriptPath, maxDiffChars);
+
+    const diffFile = join(tmpDir, "small.diff");
+    const diffContent = "diff --git a/foo.ts b/foo.ts\n+++ b/foo.ts\n+small change\n";
+    writeFileSync(diffFile, diffContent);
+    expect(diffContent.length).toBeLessThanOrEqual(maxDiffChars); // sanity: within budget
+
+    const cmd = await importAssessCommand();
+    const output = captureOutput();
+    try {
+      await cmd.run({ args: { plan: planSlug, "diff-file": diffFile, json: true } });
+    } finally {
+      output.restore();
+    }
+
+    const stderrText = output.stderr.join("");
+    expect(stderrText).not.toContain("Warning: diff is");
+    expect(stderrText).not.toContain("exceeding the configured");
+
+    const stdoutText = output.stdout.join("\n");
+    const parsed = JSON.parse(stdoutText) as { ok: boolean };
+    expect(parsed.ok).toBe(true);
+  });
+
+  it("a diff exactly AT the budget (not over it) does not warn (strict > comparison, boundary)", async () => {
+    const { planSlug } = await createPlanWithTask();
+    const captureFile = join(tmpDir, "captured-boundary-prompt.txt");
+    const scriptPath = writeFixedJsonProviderScript(captureFile);
+
+    const diffFile = join(tmpDir, "boundary.diff");
+    const diffContent = "diff --git a/foo.ts b/foo.ts\n+++ b/foo.ts\n+exact\n";
+    writeFileSync(diffFile, diffContent);
+    // Configure the budget to be EXACTLY diffContent.length — the CLI's check is a strict
+    // `>`, so this must NOT warn.
+    writeAiConfigWithDiffBudget(scriptPath, diffContent.length);
+
+    const cmd = await importAssessCommand();
+    const output = captureOutput();
+    try {
+      await cmd.run({ args: { plan: planSlug, "diff-file": diffFile, json: true } });
+    } finally {
+      output.restore();
+    }
+
+    const stderrText = output.stderr.join("");
+    expect(stderrText).not.toContain("Warning: diff is");
+  });
+});
+
 // ─── ERROR: double-malformed provider output → exit 6, no doc created (AC-ASSESS-4) ─
 
 describe("lore assess — double-malformed AI output end-to-end (AC-ASSESS-4)", () => {

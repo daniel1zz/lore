@@ -6,6 +6,7 @@
  *   - AIProviderService class
  *     - activeProviderName: string (getter — read by CLI spinner)
  *     - refineMaxInputChars: number (getter — read by CLI for truncation warning)
+ *     - assessMaxDiffChars: number (getter — read by CLI for the AC-AE-1 pre-flight warning)
  *     - generate(args) → Promise<Result<GenerateOutput, LoreError>>  (SPEC-017 create path)
  *     - regenerateContent(doc, opts?) → Promise<Result<GenerateOutput, LoreError>>  (SPEC-019)
  *     - refineContent(doc, userPrompt, opts?) → Promise<Result<GenerateOutput, LoreError>>  (SPEC-019)
@@ -111,6 +112,18 @@ export class AIProviderService {
    */
   get refineMaxInputChars(): number {
     return this._refineMaxInputChars;
+  }
+
+  /**
+   * Maximum characters of diff text sent to the assess judge prompt.
+   * Exposed so the CLI can print the AC-AE-1 pre-flight budget warning BEFORE invoking
+   * the provider, without duplicating `config.ai.assess.max_diff_chars` lookup logic.
+   *
+   * @returns Configured max chars (from config.ai.assess.max_diff_chars; default 24000)
+   * Source: SPEC-028 AC-AE-1
+   */
+  get assessMaxDiffChars(): number {
+    return this.assessBudgets.max_diff_chars;
   }
 
   // ─── SPEC-017: create path ──────────────────────────────────────────────────
