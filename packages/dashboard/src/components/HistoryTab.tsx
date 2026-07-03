@@ -18,6 +18,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiGetVersionLog, apiGetVersionDiff } from "@/lib/api";
 import { Skeleton } from "@/components/ui/skeleton";
+import { DiffView } from "@/components/DiffView";
 import { X } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -71,20 +72,7 @@ function DiffModal({ docId, fromVersion, toVersion, onClose }: DiffModalProps): 
             data.content_diff.trim() === "" ? (
               <p className="text-sm text-muted-foreground">No content changes between these versions.</p>
             ) : (
-              <pre className="text-xs font-mono whitespace-pre-wrap leading-5">
-                {data.content_diff.split("\n").map((line, i) => {
-                  const key = `${i}-${line.slice(0, 20)}`;
-                  let color = "";
-                  if (line.startsWith("+")) color = "text-green-600 dark:text-green-400";
-                  else if (line.startsWith("-")) color = "text-red-600 dark:text-red-400";
-                  else if (line.startsWith("@@")) color = "text-blue-600 dark:text-blue-400";
-                  return (
-                    <span key={key} className={`block ${color}`}>
-                      {line}
-                    </span>
-                  );
-                })}
-              </pre>
+              <DiffView diff={data.content_diff} className="whitespace-pre-wrap" />
             )
           )}
         </div>
