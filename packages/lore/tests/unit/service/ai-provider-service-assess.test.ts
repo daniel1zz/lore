@@ -38,6 +38,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { InMemoryAIProvider } from "../../../src/ai/in-memory-provider.js";
 import { buildAssessPrompt, buildAssessRetryPrompt } from "../../../src/ai/assess-template.js";
 import type { Telemetry, TelemetryEvent, AiGenerationEvent, CreateDocInput, PlanBundle } from "@lore/core";
+import { renderAssessmentContent } from "@lore/core";
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 
@@ -623,5 +624,65 @@ describe("assessPlan — overlong-but-valid reasoning is clipped without a corre
     // `reasoning_clipped: []` instead of omitting the key entirely would pass a naive
     // `.length` check but violates the additive-only "omitted when empty" contract (AC-AR-3).
     expect(Object.prototype.hasOwnProperty.call(result.value.judgment, "reasoning_clipped")).toBe(false);
+  });
+
+  it("the rendered content (as it will be persisted to the knowledge doc) includes the clipped-reasoning line — closes SPEC-030 AC-HJ-7 / round-3 AC-AR-3 rendering gap", async () => {
+    // Spec-first: renderAssessmentContent (packages/core/src/assessment.ts) is documented to
+    // render a "- Reasoning clipped for: <ac ids>" line when judgment.reasoning_clipped is
+    // present and non-empty (SPEC-029 AC-AR-3). That claim was previously only exercised
+    // against a hand-crafted AssessmentResult literal — never against a REAL computed
+    // result from assessPlan(). This test closes that gap by feeding the actual returned
+    // result.value through the actual rendering function used at persist time
+    // (packages/lore/src/adapters/cli/commands/assess.ts:232 — `content: renderAssessmentContent(result)`).
+    const store = new InMemoryStore();
+    const bundle = await makeBundle(store);
+
+    const overlongReasoning = "This AC is fully evidenced by the task's verification log. ".repeat(7); // > 300 chars
+    expect(overlongReasoning.length).toBeGreaterThan(300); // sanity: fixture is actually overlong
+
+    const overlongJson = JSON.stringify({
+      verdict: "met",
+      overall_score: 90,
+      ac_scores: [{ ac_id: "AC-ASSESS-1", score: 90, reasoning: overlongReasoning, evidence_refs: [] }],
+      gaps: [],
+      recommendations: [],
+    });
+
+    const provider = new InMemoryAIProvider("in-memory", {
+      kind: "sequence",
+      responses: [{ kind: "ok", content: overlongJson }],
+    });
+    const { service } = makeAssessService({ provider });
+
+    const result = await service.assessPlan(bundle, {});
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // Sanity: the computed result really does carry reasoning_clipped (mirrors the
+    // sibling test above) before we assert on its rendering.
+    expect(result.value.judgment.reasoning_clipped).toContain("AC-ASSESS-1");
+
+    const content = renderAssessmentContent(result.value);
+
+    expect(content).toContain("Reasoning clipped for:");
+    expect(content).toContain("AC-ASSESS-1");
+  });
+
+  it("regression: when nothing was clipped, the rendered content does NOT contain 'Reasoning clipped' — proves the end-to-end path doesn't spuriously render the line", async () => {
+    const store = new InMemoryStore();
+    const bundle = await makeBundle(store);
+    const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
+    const { service } = makeAssessService({ provider });
+
+    const result = await service.assessPlan(bundle, {});
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(Object.prototype.hasOwnProperty.call(result.value.judgment, "reasoning_clipped")).toBe(false);
+
+    const content = renderAssessmentContent(result.value);
+
+    expect(content).not.toContain("Reasoning clipped");
   });
 });
