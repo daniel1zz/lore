@@ -22,6 +22,7 @@
 
 import { useEffect, useState } from "react";
 import type { DocRecord } from "@lore/core";
+import { DiffView } from "@/components/DiffView";
 import { X } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -134,22 +135,7 @@ export function ConflictModal({
             >
               {showDiff ? "Hide unified diff" : "Show unified diff"}
             </button>
-            {showDiff && (
-              <pre className="text-xs font-mono p-4 overflow-auto max-h-40 leading-5">
-                {diff.split("\n").map((line, i) => {
-                  const key = `diff-${i}`;
-                  let color = "";
-                  if (line.startsWith("+")) color = "text-green-600 dark:text-green-400";
-                  else if (line.startsWith("-")) color = "text-red-600 dark:text-red-400";
-                  else if (line.startsWith("@@")) color = "text-blue-600 dark:text-blue-400";
-                  return (
-                    <span key={key} className={`block ${color}`}>
-                      {line}
-                    </span>
-                  );
-                })}
-              </pre>
-            )}
+            {showDiff && <DiffView diff={diff} className="p-4 overflow-auto max-h-40" />}
           </div>
         )}
 
