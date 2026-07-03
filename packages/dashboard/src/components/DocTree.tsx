@@ -3,6 +3,9 @@
  * Purpose: renders the corpus tree structure with expand/collapse per node.
  * Public surface: DocTree, DocTreeProps
  * Invariants: read-only. No mutations. Collapse state is local to component.
+ *   The corpus tree has exactly one root (`CorpusService.tree` returns a single
+ *   recursive `TreeNode`, never a forest) — `root` is a singular prop, not an array.
+ *   Doc fields (title/type/id/slug) live under `node.doc`, not flattened onto the node.
  * Side-effect class: stateful (collapse state per node)
  */
 
@@ -13,12 +16,10 @@ import { cn } from "@/lib/utils";
 import type { TreeNode } from "@/lib/api";
 
 export interface DocTreeProps {
-  /** Top-level nodes to render. */
-  nodes: TreeNode[];
+  /** Root node of the tree, or null/undefined when there is nothing to render. */
+  root: TreeNode | null | undefined;
   /** Called when a node is clicked. */
   onSelect?: (node: TreeNode) => void;
-  /** Visual depth level (used for indentation). */
-  depth?: number;
 }
 
 interface DocTreeNodeProps {
@@ -66,9 +67,9 @@ function DocTreeNode({ node, onSelect, depth }: DocTreeNodeProps): React.ReactEl
         ) : (
           <FileText className="h-3 w-3 shrink-0 text-muted-foreground" />
         )}
-        <span className="flex-1 truncate">{node.title}</span>
+        <span className="flex-1 truncate">{node.doc.title}</span>
         <Badge variant="outline" className="text-xs shrink-0">
-          {node.type}
+          {node.doc.type}
         </Badge>
       </div>
 
@@ -77,7 +78,7 @@ function DocTreeNode({ node, onSelect, depth }: DocTreeNodeProps): React.ReactEl
           {node.children.map((child) => (
             // reason: exactOptionalPropertyTypes forbids passing `undefined` for optional props;
             // conditional spread omits the prop entirely when onSelect is not provided.
-            <DocTreeNode key={child.id} node={child} {...(onSelect ? { onSelect } : {})} depth={depth + 1} />
+            <DocTreeNode key={child.doc.id} node={child} {...(onSelect ? { onSelect } : {})} depth={depth + 1} />
           ))}
         </ul>
       )}
@@ -86,21 +87,19 @@ function DocTreeNode({ node, onSelect, depth }: DocTreeNodeProps): React.ReactEl
 }
 
 /**
- * Collapsible document tree. Nodes at depth < 2 start expanded.
+ * Collapsible document tree rooted at a single node. Nodes at depth < 2 start expanded.
  *
  * @example
- * <DocTree nodes={treeData} onSelect={(node) => navigate({ to: '/docs/$id', params: { id: node.id } })} />
+ * <DocTree root={treeRoot} onSelect={(node) => navigate({ to: '/docs/$id', params: { id: node.doc.id } })} />
  */
-export function DocTree({ nodes, onSelect, depth = 0 }: DocTreeProps): React.ReactElement {
-  if (nodes.length === 0) {
+export function DocTree({ root, onSelect }: DocTreeProps): React.ReactElement {
+  if (root == null) {
     return <p className="text-sm text-muted-foreground py-4 text-center">No documents in tree.</p>;
   }
 
   return (
     <ul className="space-y-0.5" role="tree">
-      {nodes.map((node) => (
-        <DocTreeNode key={node.id} node={node} {...(onSelect ? { onSelect } : {})} depth={depth} />
-      ))}
+      <DocTreeNode node={root} {...(onSelect ? { onSelect } : {})} depth={0} />
     </ul>
   );
 }

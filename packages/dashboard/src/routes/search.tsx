@@ -7,7 +7,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { z } from "zod";
-import { DocCard } from "@/components/DocCard";
+import { SearchResultCard } from "@/components/SearchResultCard";
 import { SearchBar } from "@/components/SearchBar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiSearch } from "@/lib/api";
@@ -64,22 +64,24 @@ function SearchPage(): React.ReactElement {
       {data !== undefined && (
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            {data.total} result{data.total !== 1 ? "s" : ""} for <strong>"{q}"</strong>
+            {/* reason: CorpusService.search returns { results }, no server-computed total
+                (SPEC-031 read-path fix) — the count is derived client-side. */}
+            {data.results.length} result{data.results.length !== 1 ? "s" : ""} for <strong>"{q}"</strong>
           </p>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {data.docs.map((doc) => (
-              <DocCard
-                key={doc.id}
-                doc={doc}
+            {data.results.map((hit) => (
+              <SearchResultCard
+                key={hit.id}
+                hit={hit}
                 onClick={() =>
                   // reason: routeTree.gen.ts is hand-written for initial typecheck; TanStack Router's
                   // generated types are complex. Double-cast through unknown avoids "non-overlapping types"
                   // error until tsr generate regenerates routeTree from the actual route files. SPEC-015 §4.
-                  void navigate({ to: "/docs/$id", params: { id: doc.id } } as unknown as Parameters<typeof navigate>[0])
+                  void navigate({ to: "/docs/$id", params: { id: hit.id } } as unknown as Parameters<typeof navigate>[0])
                 }
               />
             ))}
-            {data.docs.length === 0 && (
+            {data.results.length === 0 && (
               <p className="col-span-full text-center text-sm text-muted-foreground py-8">
                 No documents match your query.
               </p>
