@@ -7,19 +7,27 @@
  *
  * Invariants:
  *   - Imports AIProvider from @lore/core (cross-package via package name), NOT via relative path (AC-AI-13)
- *   - Spawns the configured command with configured args; prompt is written to stdin
+ *   - Spawn parameters (command/args/cwd/env) come from `buildHermeticSpawnSpec` (hermetic-spawn.ts)
+ *     — the ONLY place that owns cwd/env sanitization logic (SPEC-030 AC-HJ-1). This class never
+ *     builds spawn params inline so those params stay unit-testable under vitest.
+ *   - The judge subprocess runs hermetically: neutral cwd (OS tmpdir), sanitized env (no
+ *     CLAUDECODE / CLAUDE_* leakage), and — for the `claude` binary specifically — the official
+ *     `--setting-sources ""` isolation flag. See hermetic-spawn.ts module header for the full
+ *     rationale and the `--bare` alternative that was probed and rejected.
  *   - SIGTERM is sent after timeout_ms via clearTimeout-safe watchdog
  *   - All failure paths (spawn error, non-zero exit, empty stdout, timeout) return Result errors
  *   - Never throws — all errors are wrapped in err({ code: "AI_PROVIDER_ERROR", ... })
  *
  * Side-effect class: IO (Bun.spawn, stdin/stdout/stderr pipes)
  *
- * Source: SPEC-017 §3.7
+ * Source: SPEC-017 §3.7, SPEC-030 AC-HJ-1/AC-HJ-2/AC-HJ-4
  */
 
+import { tmpdir } from "node:os";
 import { ok, err } from "@lore/core";
 import type { AIProvider, AiProviderConfig, GenerateInput, GenerateOutput, LoreError } from "@lore/core";
 import type { Result } from "@lore/core";
+import { buildHermeticSpawnSpec } from "./hermetic-spawn.js";
 
 // ─── ClaudeCliProvider ────────────────────────────────────────────────────────
 
@@ -60,10 +68,16 @@ export class ClaudeCliProvider implements AIProvider {
   async generate(input: GenerateInput): Promise<Result<GenerateOutput, LoreError>> {
     const t0 = performance.now();
 
+    // SPEC-030 AC-HJ-1: spawn params (command/args/cwd/env) come from the pure builder —
+    // this callsite never inlines cwd/env logic so that logic stays vitest-testable.
+    const spawnSpec = buildHermeticSpawnSpec(this.cfg, { sourceEnv: process.env, tmpDir: tmpdir() });
+
     // Attempt to spawn — catches ENOENT (binary not on PATH)
     let proc: ReturnType<typeof Bun.spawn>;
     try {
-      proc = Bun.spawn([this.cfg.command, ...this.cfg.args], {
+      proc = Bun.spawn([spawnSpec.command, ...spawnSpec.args], {
+        cwd: spawnSpec.cwd,
+        env: spawnSpec.env,
         stdin: "pipe",
         stdout: "pipe",
         stderr: "pipe",
@@ -119,8 +133,17 @@ export class ClaudeCliProvider implements AIProvider {
         // user needs to know "timeout" vs "failed" to take different corrective actions (AC-AI-8).
         // The word "timeout" must appear literally so callers (tests, tooling) can detect it
         // without parsing the numeric exit code.
+        // SPEC-030 AC-HJ-4: name the actual configured timeout_ms value AND the exact config
+        // knob to raise it, AND the entry-REPLACES-built-in semantics — a provider override
+        // under `ai.providers.<name>` replaces the WHOLE built-in entry, so a reader who adds
+        // only `timeout_ms` without restating `command`/`args` silently loses those fields
+        // (this is the exact silent-fallback failure mode SPEC-030 §1.2/§1.3 calls out).
         message: timedOut
-          ? `provider "${this.name}" timeout: process killed after ${this.cfg.timeout_ms}ms`
+          ? `provider "${this.name}" timeout: process killed after ${this.cfg.timeout_ms}ms. ` +
+            `Raise the limit via ai.providers.${this.name}.timeout_ms in .lore/config.yaml — ` +
+            `NOTE: that config entry REPLACES the built-in provider entry entirely (no merge), ` +
+            `so you must also restate command and args alongside the new timeout_ms, e.g.: ` +
+            `ai.providers.${this.name}: { command: ${this.cfg.command}, args: ${JSON.stringify(this.cfg.args)}, timeout_ms: <new value> }`
           : `provider "${this.name}" exited ${exit_code}`,
       });
     }
