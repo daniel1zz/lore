@@ -160,7 +160,7 @@ export function StatusPill({ status, onTransition, isPending }: StatusPillProps)
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
+      <DropdownMenuTrigger asChild disabled={isPending === true}>
         <button
           className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium cursor-pointer ${colorClass} hover:opacity-80 disabled:opacity-50`}
           disabled={isPending}
