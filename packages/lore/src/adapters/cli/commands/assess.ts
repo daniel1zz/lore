@@ -209,7 +209,10 @@ export default defineCommand({
         source: app.callerSurface,
       });
       if (!assessResult.ok) {
-        process.stderr.write(formatError(assessResult.error) + "\n");
+        // reason: assess has no non-AI mode (SPEC-026 §3 D5) — the shared AI_PROVIDER_ERROR
+        // hint's default "Retry with --no-ai" is actively misleading here (SPEC-029 AC-AR-5,
+        // AC-AR-4 preserves the underlying error shape/exit code unchanged).
+        process.stderr.write(formatError(assessResult.error, { aiHasNoFallback: true }) + "\n");
         process.exitCode = exitCode(assessResult.error);
         return;
       }

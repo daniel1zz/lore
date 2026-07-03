@@ -27,10 +27,14 @@
  *     (orchestrated by a sibling private helper, `_attemptJudgeParse` — `_invokeProvider`
  *     itself is untouched); a second malformed response → AI_PROVIDER_ERROR with a
  *     ≤500-char raw-output prefix and no document is created (SPEC-026 §3 D2)
+ *   - assessPlan clips any `ac_scores[].reasoning` over 300 chars BEFORE Zod validation
+ *     (`clipOverlongReasoning`, SPEC-029 AC-AR-2) — a verbose-but-otherwise-valid judgment
+ *     never burns the corrective retry on reasoning length alone; clipped AC ids surface
+ *     as `judgment.reasoning_clipped` (AC-AR-3)
  *
  * Side-effect class: IO (delegates to AIProvider.generate and Telemetry.emit)
  *
- * Source: SPEC-017 §3.6, SPEC-019 §9.1, SPEC-026 §3 D1, D2
+ * Source: SPEC-017 §3.6, SPEC-019 §9.1, SPEC-026 §3 D1, D2; SPEC-029 AC-AR-2, AC-AR-3
  */
 
 import { err, ok } from "@lore/core";
@@ -38,7 +42,7 @@ import type { AIProvider, DocRecord, DocType, GenerateInput, GenerateOutput, Lin
 import type { AiDefaultSource, CallerSurface, Result } from "@lore/core";
 import { linkTypeSchema } from "@lore/core";
 import type { AssessmentResult, LlmAssessmentOutput, PlanBundle } from "@lore/core";
-import { extractAssessmentJson, llmAssessmentOutputSchema } from "@lore/core";
+import { clipOverlongReasoning, extractAssessmentJson, llmAssessmentOutputSchema } from "@lore/core";
 import {
   BUILT_IN_TEMPLATES,
   LINK_INFERENCE_TEMPLATE,
@@ -480,7 +484,14 @@ export class AIProviderService {
     if (first.parsed !== undefined) {
       emitAssessEvent(first.providerResult);
       return ok(
-        this._finalizeAssessment(first.parsed, bundle, Math.round(performance.now() - t0), false, truncated),
+        this._finalizeAssessment(
+          first.parsed,
+          bundle,
+          Math.round(performance.now() - t0),
+          false,
+          truncated,
+          first.clippedAcIds ?? [],
+        ),
       );
     }
 
@@ -494,7 +505,14 @@ export class AIProviderService {
     if (second.parsed !== undefined) {
       emitAssessEvent(second.providerResult);
       return ok(
-        this._finalizeAssessment(second.parsed, bundle, Math.round(performance.now() - t0), true, truncated),
+        this._finalizeAssessment(
+          second.parsed,
+          bundle,
+          Math.round(performance.now() - t0),
+          true,
+          truncated,
+          second.clippedAcIds ?? [],
+        ),
       );
     }
 
@@ -548,7 +566,8 @@ export class AIProviderService {
    * @param bundle - Plan bundle, used only for the GenerateInput title (telemetry/doc_type shape)
    * @returns providerResult (the raw provider call outcome); when providerResult.ok, exactly
    *   one of `parsed` (validated LlmAssessmentOutput) or `parseErrorMessage` (+ `rawContent`)
-   *   is set — never both.
+   *   is set — never both. `clippedAcIds` is set alongside `parsed` (SPEC-029 AC-AR-2) — empty
+   *   when nothing needed clipping.
    */
   private async _attemptJudgeParse(
     prompt: string,
@@ -556,6 +575,7 @@ export class AIProviderService {
   ): Promise<{
     providerResult: Result<GenerateOutput, LoreError>;
     parsed?: LlmAssessmentOutput;
+    clippedAcIds?: string[];
     parseErrorMessage?: string;
     rawContent?: string;
   }> {
@@ -576,7 +596,12 @@ export class AIProviderService {
       return { providerResult, rawContent, parseErrorMessage: message };
     }
 
-    const validated = llmAssessmentOutputSchema.safeParse(extracted.value);
+    // reason: clip overlong ac_scores[].reasoning BEFORE Zod validation (SPEC-029 AC-AR-2) —
+    // a judgment that is semantically valid but merely verbose must never fail the whole
+    // assess run (and burn the one corrective retry) on acScoreSchema's `.max(300)`.
+    const { value: clippedJson, clippedAcIds } = clipOverlongReasoning(extracted.value);
+
+    const validated = llmAssessmentOutputSchema.safeParse(clippedJson);
     if (!validated.success) {
       const message = validated.error.issues
         .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
@@ -584,7 +609,7 @@ export class AIProviderService {
       return { providerResult, rawContent, parseErrorMessage: message };
     }
 
-    return { providerResult, rawContent, parsed: validated.data };
+    return { providerResult, rawContent, parsed: validated.data, clippedAcIds };
   }
 
   /**
@@ -597,6 +622,9 @@ export class AIProviderService {
    * @param durationMs - Total wall-clock ms for the whole assessPlan call (both attempts)
    * @param retried - Whether the corrective retry was needed
    * @param truncated - Section names truncated while building the prompt (AC-ASSESS-7)
+   * @param clippedAcIds - AC ids whose reasoning was clipped before validation (SPEC-029
+   *   AC-AR-2); empty when nothing needed clipping — `judgment.reasoning_clipped` is only
+   *   set (additive-only field, AC-AR-3) when this is non-empty
    */
   private _finalizeAssessment(
     parsed: LlmAssessmentOutput,
@@ -604,6 +632,7 @@ export class AIProviderService {
     durationMs: number,
     retried: boolean,
     truncated: string[],
+    clippedAcIds: string[],
   ): AssessmentResult {
     return {
       ...parsed,
@@ -614,6 +643,7 @@ export class AIProviderService {
         duration_ms: durationMs,
         retried,
         truncated,
+        ...(clippedAcIds.length > 0 ? { reasoning_clipped: clippedAcIds } : {}),
       },
     };
   }
