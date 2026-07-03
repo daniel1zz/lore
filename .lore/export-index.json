@@ -300,6 +300,10 @@
     "01KWJZCQ6CTRAJEGRKA111MJHV": {
       "human_id": "SPEC-027",
       "file_path": "docs/requirements/spec/SPEC-027-spec-027-dashboard-hardening-write-path-integrity.md"
+    },
+    "01KWK1C8AKXGN4YYK096PGK22J": {
+      "human_id": "KN-007",
+      "file_path": "docs/requirements/knowledge/KN-007-dogfood-retro-spec-027-self-hosted-via-plan-claim.md"
     }
   }
 }
