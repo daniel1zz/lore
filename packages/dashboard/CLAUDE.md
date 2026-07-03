@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Local-development web UI for browsing and editing the Lore corpus. Vite + React 19 + TypeScript + Tailwind v4 + shadcn/ui. Read views per SPEC-015 (list / search / tree / detail) plus the SPEC-022 write surface: create, in-place markdown editing (CodeMirror 6 + split preview), status transitions, link management, version history tab, optimistic-concurrency conflict resolution. Auth is the SPEC-016 cookie bootstrap.
+Local-development web UI for browsing and editing the Lore corpus. Vite + React 19 + TypeScript + Tailwind v4 + shadcn/ui. Read views per SPEC-015 (list / search / tree / detail) plus the SPEC-022 write surface: create, in-place markdown editing (CodeMirror 6 + split preview), status transitions, link management, version history tab, optimistic-concurrency conflict resolution. SPEC-027 hardening added soft delete (confirmation-gated) and per-version restore (append-only), both cookie-gated. Auth is the SPEC-016 cookie bootstrap.
 
 ## Local-dev topology
 
@@ -19,7 +19,8 @@ Two-process model intentional. `vite.config.ts` sets `server.proxy: { "/api": "h
 
 ## Key Invariants
 
-- **Writes only via `/api/dashboard/*` (SPEC-022).** All mutations go through the six cookie-gated dashboard endpoints (`src/api/mutations.ts`); `src/lib/api.ts` stays read-only. Optimistic concurrency: PATCH sends `If-Match: <version>`; 409 surfaces the ConflictModal; force overwrite = no `If-Match` + `X-Force-Overwrite: 1`. Status transitions render from `getAllowedTransitions()` in `@lore/core` — never hardcode the lifecycle.
+- **Writes only via `/api/dashboard/*` (SPEC-022 + SPEC-027).** All mutations go through the eight cookie-gated dashboard endpoints (`src/api/mutations.ts`): create, PATCH, approve, reject, link create/delete, DELETE doc (`?confirm=true` required), POST restore. `src/lib/api.ts` stays read-only. Optimistic concurrency: PATCH sends `If-Match: <version>` — including status transitions (SPEC-027 AC-DH-2); 409 surfaces the ConflictModal; force overwrite = no `If-Match` + `X-Force-Overwrite: 1`. Status transitions render from `getAllowedTransitions()` in `@lore/core` — never hardcode the lifecycle.
+- **Edit-session state must not survive doc navigation.** `docs.$id.tsx` mounts `<DocDetail>` with `key={doc.id}` so a warm TanStack Query cache hit cannot reuse a component instance carrying another doc's unsaved editor state (SPEC-027 AC-DH-1 — removing the key reintroduces a cross-document write bug pinned by `DocDetail.write.test.tsx`). Save/Cancel must clear the draft debounce timer before `clearDraft` (AC-DH-3).
 - **No login UI.** Dashboard never asks the user for credentials. `lore dashboard` (SPEC-016) creates `.lore/local-key` if missing, spawns Vite with the raw key as `VITE_LORE_BOOTSTRAP_TOKEN`, and a dev-only Vite plugin inlines it into `index.html` as `window.__LORE_BOOTSTRAP_TOKEN__`. `src/lib/bootstrap.ts::bootstrapAuthIfNeeded()` POSTs the token to `/api/auth/local-bootstrap`, receives an HttpOnly `lore_sid` cookie, and deletes the window global. Every subsequent `fetch` carries `credentials: "include"` — cookie does the auth.
 - **Depends on `@lore/core` only.** `packages/dashboard/package.json` MUST NOT depend on `@lore/lore`. All server interaction goes through HTTP. Boundary check: `grep -r 'from "@lore/lore"' src/ → 0`.
 - **No server-side modules in `src/`.** No `bun:sqlite`, `child_process`, `node:fs`, or any other Node-side built-in. Dashboard is a browser app. Boundary check: `grep -rE 'bun:sqlite|child_process|node:fs' src/ → 0`.
@@ -38,8 +39,9 @@ Two-process model intentional. `vite.config.ts` sets `server.proxy: { "/api": "h
 - vitest with `environment: "jsdom"` (set in `vite.config.ts` test block).
 - Component tests use `@testing-library/react` + `user-event`.
 - `tests/setup.ts` imports `@testing-library/jest-dom/vitest`.
-- 6-dimension coverage (HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE / REGRESSION) for `api.ts`; behavioural for components.
-- No E2E (Playwright/Cypress) until SPEC-016 adds auth flow worth E2E-ing.
+- 6-dimension coverage (HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE / REGRESSION) for `api.ts`, `mutations.ts`, `draft.ts`, and every write component (SPEC-027 AC-DH-8).
+- Component tests exist for all feature components: DocCard, DocDetail (read + `DocDetail.write` + `DocDetail.delete`), DocTree, SearchBar, Editor, ConflictModal, NewDocModal, StatusPill, LinksPanel, HistoryTab, DiffView.
+- E2E: `tests/e2e/write-flow.pw.ts` (Playwright, real chromium + `lore serve` + vite dev) — create / edit+save / conflict / approve / auto-demote / history / restore / delete. Run: `cd packages/dashboard && bunx playwright test`. This suite is also the regression oracle for the `@lore/core` browser-safe invariant.
 
 ## Files
 
@@ -48,12 +50,15 @@ Two-process model intentional. `vite.config.ts` sets `server.proxy: { "/api": "h
 - `src/main.tsx` — `createRoot` + `RouterProvider` + `QueryClientProvider` + `<ThemeProvider>` (theme hook bootstrap).
 - `src/index.css` — `@import "tailwindcss"` + shadcn CSS variables.
 - `src/lib/{api,query-client,theme,utils}.ts` — fetch wrapper / Query client / theme hook / shadcn `cn()`.
-- `src/routes/{__root,index,search,tree,docs.$id}.tsx` — TanStack Router files.
-- `src/components/{DocCard,DocDetail,DocTree,SearchBar,ThemeToggle}.tsx` — feature components.
+- `src/routes/{__root,index,search,tree,docs.$id}.tsx` — TanStack Router files (`docs.$id` wires `onDeleted` → navigate home and keys `<DocDetail>` by doc id).
+- `src/components/{DocCard,DocDetail,DocTree,SearchBar,ThemeToggle,Editor,ConflictModal,NewDocModal,StatusPill,LinksPanel,HistoryTab,DiffView}.tsx` — feature components. `DiffView` is the single shared unified-diff renderer (HistoryTab + ConflictModal both consume it — don't reimplement line coloring).
+- `src/api/mutations.ts` — write API client (`DashboardApiError` / `ConflictError`, eight endpoints incl. `apiDeleteDoc` / `apiRestoreVersion`).
+- `src/store/draft.ts` — localStorage draft shadow copy (server is authoritative; stale-judged by version).
 - `src/components/ui/` — shadcn primitives (10).
 - `tests/setup.ts` — testing-library matcher install.
-- `tests/unit/lib/api.test.ts` — 6-dim coverage for the fetch wrapper.
-- `tests/component/{DocCard,DocDetail,DocTree,SearchBar}.test.tsx` — behavioural component tests.
+- `tests/unit/lib/{api,bootstrap,draft,mutations}.test.ts` — 6-dim unit coverage.
+- `tests/component/*.test.tsx` — behavioural component tests (one file per feature component; write-path splits: `DocDetail.write`, `DocDetail.delete`).
+- `tests/e2e/write-flow.pw.ts` — Playwright end-to-end write flow.
 
 ## Links
 
@@ -67,7 +72,6 @@ Two-process model intentional. `vite.config.ts` sets `server.proxy: { "/api": "h
 - Vite production build + `lore serve` mounting static (defer).
 - Embedding bundle into `dist/lore` binary (defer).
 - Deployment to Vercel / remote (defer).
-- Write CRUD UI (→ SPEC-017).
-- Cookie auth / login (→ SPEC-016).
-- Diff viewer / version history page (later SPEC).
+- SPEC-023 phases / SPEC-025 claim+evidence badges / SPEC-026 assessment rendering (separate spec).
+- Session-expiry recovery UX (401 → guided re-bootstrap prompt).
 - i18n.
