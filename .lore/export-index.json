@@ -408,6 +408,30 @@
     "01KWKDC46MX3AAH21DNPBV6V4Y": {
       "human_id": "SPEC-030",
       "file_path": "docs/requirements/spec/SPEC-030-spec-030-hermetic-judge-sessions-fail-loud-ai-conf.md"
+    },
+    "01KWKT26EJX9AKRQ1M2H0MF9W6": {
+      "human_id": "TASK-046",
+      "file_path": "docs/requirements/task/TASK-046-t2-wire-tailwindcss-typography-so-prose-classes-re.md"
+    },
+    "01KWKT2637SFS1FG6FRAC2KGWH": {
+      "human_id": "TASK-047",
+      "file_path": "docs/requirements/task/TASK-047-t1-read-path-contract-fixes-tree-search-read-flow.md"
+    },
+    "01KWKTZPFT8PJDK0ZH1P1DT9X1": {
+      "human_id": "KN-017",
+      "file_path": "docs/requirements/knowledge/KN-017-assessment-spec-031-implementation-dashboard-read.md"
+    },
+    "01KWKT1V6W3GZWP10AZ0NW2QKN": {
+      "human_id": "PLAN-011",
+      "file_path": "docs/requirements/plan/PLAN-011-spec-031-implementation-dashboard-read-path-fixes.md"
+    },
+    "01KWKT1J7VHTD7YNXWHX82GHGG": {
+      "human_id": "SPEC-031",
+      "file_path": "docs/requirements/spec/SPEC-031-spec-031-dashboard-read-path-contract-fixes-markdo.md"
+    },
+    "01KWKT3C9XY7839RV0FRM3ZP8G": {
+      "human_id": "KN-018",
+      "file_path": "docs/requirements/knowledge/KN-018-dashboard-product-design-review-2026-07-03-walkthr.md"
     }
   }
 }
