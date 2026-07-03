@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
 
 /* Tailwind v4 needs every utility (border-border, bg-background, etc.) declared
  * here for `@apply` to resolve. `hsl(var(--token))` keeps the values driven by

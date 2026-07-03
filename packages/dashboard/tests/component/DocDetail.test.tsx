@@ -68,6 +68,43 @@ describe("DocDetail", () => {
       expect(screen.getByText("This is a test PRD.")).toBeInTheDocument();
     });
 
+    it("renders markdown headings, lists, and GFM tables as real elements inside the prose container", () => {
+      // Pins the ReactMarkdown + remark-gfm pipeline and the @tailwindcss/typography
+      // wiring (SPEC-031 AC-5/AC-6): jsdom can't assert computed CSS from the plugin,
+      // so this asserts the structural contract (actual <h1>/<h2>/<table> elements)
+      // plus presence of the `.prose` class that the plugin's styles target.
+      const docWithRichMarkdown: DocWithNavigation = {
+        ...mockDocWithNav,
+        doc: {
+          ...mockDocRecord,
+          content:
+            "# Heading\n\n## Sub\n\n- item one\n- item two\n\n" +
+            "| Col A | Col B |\n| --- | --- |\n| a1 | b1 |\n",
+        },
+      };
+
+      const { container } = render(<DocDetail docWithNav={docWithRichMarkdown} />);
+
+      const proseContainer = container.querySelector(".prose");
+      expect(proseContainer).not.toBeNull();
+      expect(proseContainer).toHaveClass("prose", "prose-sm", "dark:prose-invert");
+
+      const h1 = proseContainer!.querySelector("h1");
+      const h2 = proseContainer!.querySelector("h2");
+      const table = proseContainer!.querySelector("table");
+      const list = proseContainer!.querySelector("ul");
+
+      expect(h1).not.toBeNull();
+      expect(h1).toHaveTextContent("Heading");
+      expect(h2).not.toBeNull();
+      expect(h2).toHaveTextContent("Sub");
+      expect(table).not.toBeNull();
+      expect(table!.querySelectorAll("th")).toHaveLength(2);
+      expect(table!.querySelectorAll("td")).toHaveLength(2);
+      expect(list).not.toBeNull();
+      expect(list!.querySelectorAll("li")).toHaveLength(2);
+    });
+
     it("renders type badge", () => {
       render(<DocDetail docWithNav={mockDocWithNav} />);
       expect(screen.getByText("prd")).toBeInTheDocument();
