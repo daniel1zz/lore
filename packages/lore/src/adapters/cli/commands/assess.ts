@@ -6,18 +6,21 @@
  * code diff to the configured AI provider; persists the structured judgment as a
  * `knowledge` doc (sub_type="assessment") linked to the plan via an `informs` link.
  *
- * Flow (SPEC-026 §8.3): resolve → corpusService.getPlanBundle → (zero tasks → exit 4,
- * before any AI call) → diff acquisition (--diff shells `git diff <range>`; --diff-file
- * reads a file; both → exit 2) → AI surface-brake check → aiProviderService.assessPlan →
- * corpusService.create (knowledge, sub_type=assessment) → corpusService.link (informs) →
- * human render (verdict + score table) or --json envelope.
+ * Flow (SPEC-026 §8.3, SPEC-028 AC-AE-1): resolve → corpusService.getPlanBundle →
+ * (zero tasks → exit 4, before any AI call) → diff acquisition (--diff shells `git diff
+ * <range>`; --diff-file reads a file; both → exit 2) → pre-flight diff-budget warning
+ * (stderr-only, fires when diffText exceeds ai.assess.max_diff_chars, BEFORE the provider
+ * call) → AI surface-brake check → aiProviderService.assessPlan → corpusService.create
+ * (knowledge, sub_type=assessment) → corpusService.link (informs) → human render
+ * (verdict + score table) or --json envelope.
  *
  * AI default (SPEC-026 §3 D5): unlike `set --regenerate`/`--refine`, assess has no
  * non-AI mode — the command name IS the AI intent. It runs with AI on every surface by
  * default; only an EXPLICIT `ai.default_per_surface.<surface> = false` config override
  * requires `--ai` to proceed. `--no-ai` is always a contradiction → exit 2.
  *
- * Source: SPEC-026 §3 D1-D5; §4 AC-ASSESS-1, AC-ASSESS-6, AC-ASSESS-8, AC-ASSESS-9
+ * Source: SPEC-026 §3 D1-D5; §4 AC-ASSESS-1, AC-ASSESS-6, AC-ASSESS-8, AC-ASSESS-9;
+ * SPEC-028 AC-AE-1
  */
 
 import { spawnSync } from "node:child_process";
@@ -160,6 +163,22 @@ export default defineCommand({
           process.stderr.write(`Error: could not read --diff-file: ${message}\n`);
           process.exitCode = 2;
           return;
+        }
+      }
+
+      // ─── Step 3.5: pre-flight diff-budget warning (SPEC-028 AC-AE-1) ──────────
+      // reason: printed BEFORE the provider call, stderr-only so --json stdout stays a
+      // clean envelope. Actual truncation (file-boundary, not blind tail cut) happens
+      // later inside buildAssessPrompt via truncateDiffByFile — this is advance notice.
+      if (diffText !== undefined) {
+        const maxDiffChars = app.aiProviderService.assessMaxDiffChars;
+        if (diffText.length > maxDiffChars) {
+          process.stderr.write(
+            `Warning: diff is ${diffText.length} chars, exceeding the configured ai.assess.max_diff_chars ` +
+              `budget of ${maxDiffChars}. It will be truncated by file (production source kept first, then ` +
+              `tests, then everything else — no file is cut in half). To include the full diff, curate a ` +
+              `smaller diff with --diff-file, or raise ai.assess.max_diff_chars in .lore/config.yaml.\n`,
+          );
         }
       }
 
