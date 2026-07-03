@@ -15,6 +15,11 @@
  *   - onMutated is called after every successful write; the caller is responsible
  *     for cache invalidation (inversion-of-control avoids needing QueryClientProvider
  *     in unit tests). SPEC-022 §9.
+ *   - Delete requires an explicit confirmation dialog (AlertDialogConfirm) before
+ *     the DELETE request fires — no direct-click delete. On success, `onDeleted`
+ *     is called (distinct from `onMutated`) so the caller navigates away from the
+ *     now-gone document instead of re-fetching it. Delete is a 30-day-recoverable
+ *     soft delete, not permanent removal (SPEC-027 AC-DH-6).
  *   - `editorSeed` (not `editContent`) is passed as Editor's `initialValue`.
  *     `editContent` updates on every keystroke; feeding it back into `initialValue`
  *     would re-trigger CodeMirror's mount effect per keystroke, destroying and
@@ -56,9 +61,66 @@ import {
   apiRejectDoc,
   apiCreateLink,
   apiDeleteLink,
+  apiDeleteDoc,
   ConflictError,
   DashboardApiError,
 } from "@/api/mutations";
+
+// ─── Delete confirmation dialog ────────────────────────────────────────────────
+
+interface DeleteConfirmDialogProps {
+  title: string;
+  isPending: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+/**
+ * Explicit confirmation dialog for the destructive-looking (but recoverable)
+ * delete action. Mirrors the hand-rolled overlay pattern already used by
+ * ConflictModal / HistoryTab's DiffModal rather than introducing a new
+ * shadcn primitive for a single call site.
+ */
+function DeleteConfirmDialog({ title, isPending, onConfirm, onCancel }: DeleteConfirmDialogProps): React.ReactElement {
+  return (
+    <div
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+      onClick={onCancel}
+      role="alertdialog"
+      aria-modal="true"
+      aria-label="Confirm delete"
+    >
+      <div
+        className="bg-background border rounded-lg shadow-xl max-w-md w-full p-6 space-y-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="font-semibold text-lg">Delete "{title}"?</h3>
+        <p className="text-sm text-muted-foreground">
+          This document will be recoverable for 30 days. It will no longer appear in lists or search
+          until restored.
+        </p>
+        <div className="flex justify-end gap-2">
+          <button
+            className="text-sm px-3 py-1 border rounded hover:bg-muted"
+            onClick={onCancel}
+            type="button"
+            disabled={isPending}
+          >
+            Cancel
+          </button>
+          <button
+            className="text-sm px-3 py-1 bg-destructive text-destructive-foreground rounded hover:bg-destructive/90 disabled:opacity-50"
+            onClick={onConfirm}
+            type="button"
+            disabled={isPending}
+          >
+            {isPending ? "Deleting..." : "Delete (recoverable)"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -73,6 +135,14 @@ export interface DocDetailProps {
    * Decoupled here so DocDetail works in tests without QueryClientProvider.
    */
   onMutated?: () => void;
+  /**
+   * Called after a successful delete, in place of `onMutated` (there is no
+   * document left to re-fetch). Caller should navigate away from this doc's
+   * page — the Delete button/dialog is only rendered when this is provided,
+   * matching the existing `onMutated !== undefined` gating for other write
+   * affordances. SPEC-027 AC-DH-6.
+   */
+  onDeleted?: () => void;
 }
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
@@ -91,9 +161,10 @@ type ActiveTab = "content" | "history";
  *   docWithNav={data}
  *   onNavigate={(id) => navigate({ to: '/docs/$id', params: { id } })}
  *   onMutated={() => queryClient.invalidateQueries({ queryKey: ["doc", doc.id] })}
+ *   onDeleted={() => navigate({ to: '/' })}
  * />
  */
-export function DocDetail({ docWithNav, onNavigate, onMutated }: DocDetailProps): React.ReactElement {
+export function DocDetail({ docWithNav, onNavigate, onMutated, onDeleted }: DocDetailProps): React.ReactElement {
   const { doc, navigation } = docWithNav;
 
   // ── Edit state ──────────────────────────────────────────────────────────────
@@ -128,6 +199,10 @@ export function DocDetail({ docWithNav, onNavigate, onMutated }: DocDetailProps)
 
   // ── Links state ─────────────────────────────────────────────────────────────
   const [isLinkPending, setIsLinkPending] = useState(false);
+
+  // ── Delete state ─────────────────────────────────────────────────────────────
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // ── Tab state ──────────────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<ActiveTab>("content");
@@ -285,6 +360,30 @@ export function DocDetail({ docWithNav, onNavigate, onMutated }: DocDetailProps)
     }
   }
 
+  // ── Delete ───────────────────────────────────────────────────────────────────
+  async function handleDelete(): Promise<void> {
+    setIsDeleting(true);
+    try {
+      await apiDeleteDoc(doc.id);
+      // reason: cancel any pending draft-autosave timer and clear the localStorage
+      // draft for this doc — otherwise a stray timer or a stale draft would
+      // resurrect content for a document that no longer exists in the active list.
+      if (draftSaveTimerRef.current !== null) {
+        clearTimeout(draftSaveTimerRef.current);
+        draftSaveTimerRef.current = null;
+      }
+      clearDraft(doc.id);
+      toast.success("Document deleted (recoverable for 30 days)");
+      setIsDeleteDialogOpen(false);
+      onDeleted?.();
+    } catch (err) {
+      const message = err instanceof DashboardApiError ? err.message : "Delete failed";
+      toast.error(message);
+    } finally {
+      setIsDeleting(false);
+    }
+  }
+
   // ── Link entries from navigation ─────────────────────────────────────────────
   const linkEntries = navigation.related.map((r) => ({
     to_id: r.id,
@@ -307,6 +406,19 @@ export function DocDetail({ docWithNav, onNavigate, onMutated }: DocDetailProps)
             isPending={isTransitioning}
           />
           <div className="ml-auto flex items-center gap-2">
+            {/* reason: gated on onDeleted (not onMutated) — Delete has no document
+                left to re-render after success, so it needs the distinct
+                navigate-away callback rather than a cache-invalidation callback.
+                Hidden while editing to avoid deleting mid-edit. SPEC-027 AC-DH-6. */}
+            {onDeleted !== undefined && !isEditing && (
+              <button
+                className="text-sm px-3 py-1 border border-destructive text-destructive rounded hover:bg-destructive/10"
+                onClick={() => setIsDeleteDialogOpen(true)}
+                type="button"
+              >
+                Delete
+              </button>
+            )}
             {onMutated !== undefined && !isEditing ? (
               <button
                 className="text-sm px-3 py-1 border rounded hover:bg-muted"
@@ -444,7 +556,11 @@ export function DocDetail({ docWithNav, onNavigate, onMutated }: DocDetailProps)
       {/* History tab */}
       {activeTab === "history" && (
         <section aria-label="Version history">
-          <HistoryTab docId={doc.id} />
+          {/* reason: onRestored reuses onMutated — restore's effect on this doc
+              (content/status/version changed) is exactly the cache invalidation
+              onMutated already triggers. Gated the same way as Edit/LinksPanel:
+              absent in read-only contexts. SPEC-027 AC-DH-7. */}
+          <HistoryTab docId={doc.id} {...(onMutated !== undefined ? { onRestored: onMutated } : {})} />
         </section>
       )}
 
@@ -507,6 +623,16 @@ export function DocDetail({ docWithNav, onNavigate, onMutated }: DocDetailProps)
           isPending={isForcing}
           onForceOverwrite={() => void handleForceOverwrite()}
           onClose={() => setConflictError(null)}
+        />
+      )}
+
+      {/* Delete confirmation dialog (AC-DH-6) */}
+      {isDeleteDialogOpen && (
+        <DeleteConfirmDialog
+          title={doc.title}
+          isPending={isDeleting}
+          onConfirm={() => void handleDelete()}
+          onCancel={() => setIsDeleteDialogOpen(false)}
         />
       )}
     </article>

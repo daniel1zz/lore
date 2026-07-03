@@ -37,6 +37,17 @@ function DocPage(): React.ReactElement {
     void queryClient.invalidateQueries({ queryKey: ["docs", "list"] });
   }
 
+  function handleDeleted(): void {
+    // reason: the doc this page was showing no longer exists in the active
+    // set — there is nothing left to re-fetch, unlike handleMutated. Drop
+    // the now-stale detail query and navigate away rather than invalidating
+    // it (which would just re-fetch a doc that's now soft-deleted).
+    // SPEC-027 AC-DH-6.
+    queryClient.removeQueries({ queryKey: ["doc", id] });
+    void queryClient.invalidateQueries({ queryKey: ["docs", "list"] });
+    void navigate({ to: "/" });
+  }
+
   if (isLoading) {
     return (
       <div className="max-w-4xl mx-auto space-y-4">
@@ -81,5 +92,13 @@ function DocPage(): React.ReactElement {
   // was mounted for doc A — without a fresh key, that state (and an in-flight
   // unsaved edit) silently carries over and can be saved against the wrong
   // document. See SPEC-027 AC-DH-1.
-  return <DocDetail key={data.doc.id} docWithNav={data} onNavigate={handleNavigate} onMutated={handleMutated} />;
+  return (
+    <DocDetail
+      key={data.doc.id}
+      docWithNav={data}
+      onNavigate={handleNavigate}
+      onMutated={handleMutated}
+      onDeleted={handleDeleted}
+    />
+  );
 }

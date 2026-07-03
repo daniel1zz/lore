@@ -190,6 +190,125 @@ describe("PATCH /api/dashboard/docs/:id — edit", () => {
   });
 });
 
+describe("DELETE /api/dashboard/docs/:id — soft delete (SPEC-027 AC-DH-6)", () => {
+  describe("happy path", () => {
+    it("returns 200 with {id, recoverable_until} after confirmed delete", async () => {
+      const { id } = await createPrd("Deletable Doc");
+
+      const req = jsonReq("DELETE", `/api/dashboard/docs/${id}?confirm=true`);
+      const url = makeUrl(`/api/dashboard/docs/${id}?confirm=true`);
+      const res = await handleDashboardRoute(req, url, app, COOKIE_ACTOR);
+      expect(res).not.toBeNull();
+      expect(res!.status).toBe(200);
+      const body = await parseRes(res!);
+      expect(body.ok).toBe(true);
+      const data = body.data as Record<string, unknown>;
+      expect(data.id).toBe(id);
+      expect(typeof data.recoverable_until).toBe("string");
+    });
+
+    it("the deleted doc's record carries a non-null deleted_at afterward", async () => {
+      const { id } = await createPrd("Deleted Doc Marker");
+
+      const req = jsonReq("DELETE", `/api/dashboard/docs/${id}?confirm=true`);
+      const url = makeUrl(`/api/dashboard/docs/${id}?confirm=true`);
+      await handleDashboardRoute(req, url, app, COOKIE_ACTOR);
+
+      const getResult = await app.corpusService.get(id);
+      if (!getResult.ok) throw new Error("expected doc to still resolve after soft delete");
+      expect(getResult.value.doc.deleted_at).not.toBeNull();
+    });
+  });
+
+  describe("negative", () => {
+    it("without ?confirm=true returns 400 DELETE_REQUIRES_CONFIRM", async () => {
+      const { id } = await createPrd("Unconfirmed Delete");
+
+      const req = jsonReq("DELETE", `/api/dashboard/docs/${id}`);
+      const url = makeUrl(`/api/dashboard/docs/${id}`);
+      const res = await handleDashboardRoute(req, url, app, COOKIE_ACTOR);
+      expect(res!.status).toBe(400);
+      const body = await parseRes(res!);
+      expect(body.ok).toBe(false);
+      const error = body.error as Record<string, unknown>;
+      expect(error.code).toBe("DELETE_REQUIRES_CONFIRM");
+    });
+
+    it("nonexistent doc id returns 404 DOC_NOT_FOUND", async () => {
+      const req = jsonReq("DELETE", "/api/dashboard/docs/nonexistent-id?confirm=true");
+      const url = makeUrl("/api/dashboard/docs/nonexistent-id?confirm=true");
+      const res = await handleDashboardRoute(req, url, app, COOKIE_ACTOR);
+      expect(res!.status).toBe(404);
+    });
+  });
+});
+
+describe("POST /api/dashboard/docs/:id/restore — version restore (SPEC-027 AC-DH-7)", () => {
+  describe("happy path", () => {
+    it("returns 200 with a new version N+1 carrying the target version's content", async () => {
+      const { id } = await createPrd("Restorable Doc");
+      // v1 content is the title-seeded default; bump to v2 with new content.
+      await app.corpusService.set(id, { content: "v2 content" });
+
+      const req = jsonReq("POST", `/api/dashboard/docs/${id}/restore`, { version: 1 });
+      const url = makeUrl(`/api/dashboard/docs/${id}/restore`);
+      const res = await handleDashboardRoute(req, url, app, COOKIE_ACTOR);
+      expect(res).not.toBeNull();
+      expect(res!.status).toBe(200);
+      const body = await parseRes(res!);
+      expect(body.ok).toBe(true);
+      const doc = (body.data as Record<string, unknown>).doc as Record<string, unknown>;
+      expect(doc.version).toBe(3); // v1 (create) -> v2 (set) -> v3 (restore, append-only)
+      expect(doc.status).toBe("draft"); // restore always resets to draft
+    });
+
+    it("restore is append-only — the pre-restore version log entry is untouched", async () => {
+      const { id } = await createPrd("Append-only Restore Doc");
+      await app.corpusService.set(id, { content: "v2 content" });
+
+      const req = jsonReq("POST", `/api/dashboard/docs/${id}/restore`, { version: 1 });
+      const url = makeUrl(`/api/dashboard/docs/${id}/restore`);
+      await handleDashboardRoute(req, url, app, COOKIE_ACTOR);
+
+      const logResult = await app.versionService.log(id, { limit: 50 });
+      if (!logResult.ok) throw new Error("expected version log to resolve");
+      // All three versions (create, set, restore) must still be present — history
+      // is never deleted or overwritten.
+      const versionNumbers = logResult.value.map((entry) => entry.version).sort();
+      expect(versionNumbers).toEqual([1, 2, 3]);
+    });
+  });
+
+  describe("negative", () => {
+    it("non-integer version returns 422 VALIDATION_ERROR", async () => {
+      const { id } = await createPrd("Bad Version Doc");
+      const req = jsonReq("POST", `/api/dashboard/docs/${id}/restore`, { version: 1.5 });
+      const url = makeUrl(`/api/dashboard/docs/${id}/restore`);
+      const res = await handleDashboardRoute(req, url, app, COOKIE_ACTOR);
+      expect(res!.status).toBe(422);
+      const body = await parseRes(res!);
+      const error = body.error as Record<string, unknown>;
+      expect(error.code).toBe("VALIDATION_ERROR");
+    });
+
+    it("missing version field returns 422 VALIDATION_ERROR", async () => {
+      const { id } = await createPrd("Missing Version Doc");
+      const req = jsonReq("POST", `/api/dashboard/docs/${id}/restore`, {});
+      const url = makeUrl(`/api/dashboard/docs/${id}/restore`);
+      const res = await handleDashboardRoute(req, url, app, COOKIE_ACTOR);
+      expect(res!.status).toBe(422);
+    });
+
+    it("restoring to a version that doesn't exist returns 404 DOC_NOT_FOUND", async () => {
+      const { id } = await createPrd("Nonexistent Version Doc");
+      const req = jsonReq("POST", `/api/dashboard/docs/${id}/restore`, { version: 99 });
+      const url = makeUrl(`/api/dashboard/docs/${id}/restore`);
+      const res = await handleDashboardRoute(req, url, app, COOKIE_ACTOR);
+      expect(res!.status).toBe(404);
+    });
+  });
+});
+
 describe("POST /api/dashboard/docs/:id/approve", () => {
   describe("happy path", () => {
     it("returns 200 with approved DocRecord after transitioning through in-review", async () => {

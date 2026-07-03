@@ -1,15 +1,21 @@
 /**
- * Dashboard write API — typed wrappers for the six /api/dashboard/* write endpoints.
- * Purpose: provide a typed, fetch-based client for the SPEC-022 write surface.
+ * Dashboard write API — typed wrappers for the /api/dashboard/* write endpoints.
+ * Purpose: provide a typed, fetch-based client for the SPEC-022 write surface
+ *   plus the SPEC-027 delete/restore surface (AC-DH-6, AC-DH-7).
  * Public surface: apiCreateDoc, apiPatchDoc, apiApproveDoc, apiRejectDoc,
- *   apiCreateLink, apiDeleteLink, ConflictError, DashboardApiError
+ *   apiCreateLink, apiDeleteLink, apiDeleteDoc, apiRestoreVersion,
+ *   ConflictError, DashboardApiError
  * Invariants:
  *   - All writes use credentials:"include" so the lore_sid cookie is sent.
  *   - 409 responses are thrown as ConflictError (caller handles conflict modal).
  *   - 401 / 403 responses are thrown as DashboardApiError with status.
  *   - Client-side Zod validation happens before HTTP submission (AC-DASH-WRITE-10).
+ *   - apiDeleteDoc always sends `?confirm=true` — the dashboard UI's own confirm
+ *     dialog (rendered by the caller before invoking this function) IS the
+ *     confirmation; the server's confirm gate is defense-in-depth, not a second
+ *     user-facing prompt.
  * Side-effect class: IO (fetch)
- * Source: SPEC-022 §9.3, §9.4
+ * Source: SPEC-022 §9.3, §9.4; SPEC-027 AC-DH-6, AC-DH-7
  */
 
 import type { DocRecord, LinkType } from "@lore/core";
@@ -89,6 +95,13 @@ export interface CreateLinkPayload {
 interface DocWriteResponse {
   ok: boolean;
   data: { doc: DocRecord };
+}
+
+/** Success payload from the soft-delete endpoint (no DocRecord — doc is gone). */
+export interface DeleteDocResult {
+  id: string;
+  /** ISO timestamp — the doc is recoverable via `lore restore`/version history until this date. */
+  recoverable_until: string;
 }
 
 /**
@@ -255,6 +268,42 @@ export async function apiRejectDoc(id: string, reason?: string): Promise<DocReco
     `/api/dashboard/docs/${encodeURIComponent(id)}/reject`,
     "POST",
     reason !== undefined ? { reason } : undefined,
+  );
+  return result.doc;
+}
+
+/**
+ * Soft-delete a document via DELETE /api/dashboard/docs/:id.
+ * Recoverable for 30 days (server-side `recoverable_until`, see `lore restore`).
+ * Always sends `?confirm=true` — the caller is expected to have already shown
+ * an explicit confirmation dialog before invoking this function (AC-DH-6).
+ *
+ * @param id - Document ULID or slug.
+ * @returns The deleted doc's id and the recoverable-until timestamp.
+ * @throws {DashboardApiError} On HTTP error (e.g. 404 if the doc doesn't exist).
+ */
+export async function apiDeleteDoc(id: string): Promise<DeleteDocResult> {
+  return writeFetch<DeleteDocResult>(
+    `/api/dashboard/docs/${encodeURIComponent(id)}?confirm=true`,
+    "DELETE",
+  );
+}
+
+/**
+ * Restore a document to a previous version via POST /api/dashboard/docs/:id/restore.
+ * Append-only — creates a new version N+1 with the target version's content
+ * rather than deleting any history (AC-DH-7).
+ *
+ * @param id - Document ULID or slug.
+ * @param version - The version number to restore content from.
+ * @returns The updated DocRecord (now at version N+1, status reset to draft).
+ * @throws {DashboardApiError} On HTTP error (e.g. 404 if the version doesn't exist).
+ */
+export async function apiRestoreVersion(id: string, version: number): Promise<DocRecord> {
+  const result = await writeFetch<{ doc: DocRecord }>(
+    `/api/dashboard/docs/${encodeURIComponent(id)}/restore`,
+    "POST",
+    { version },
   );
   return result.doc;
 }
