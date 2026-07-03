@@ -24,7 +24,7 @@ function TreePage(): React.ReactElement {
   });
 
   function handleNodeSelect(node: TreeNode): void {
-    void navigate({ to: "/docs/$id", params: { id: node.id } });
+    void navigate({ to: "/docs/$id", params: { id: node.doc.id } });
   }
 
   return (
@@ -50,7 +50,7 @@ function TreePage(): React.ReactElement {
 
       {data !== undefined && (
         <div className="border rounded-lg p-2">
-          <DocTree nodes={data} onSelect={handleNodeSelect} />
+          <DocTree root={data} onSelect={handleNodeSelect} />
         </div>
       )}
     </div>

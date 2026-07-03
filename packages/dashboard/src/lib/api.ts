@@ -66,17 +66,37 @@ export interface ListResponse {
   total: number;
 }
 
-export interface SearchResponse {
-  docs: DocSummary[];
-  total: number;
-}
-
-export interface TreeNode {
+/**
+ * A single full-text search hit. Mirrors `SearchHit`
+ * (`packages/lore/src/store/store-interface.ts`) exactly — `CorpusService.search`
+ * returns `Result<{ results: SearchHit[] }, LoreError>` with NO `total` field, so the
+ * result count on the search page is derived client-side as `results.length`. A past
+ * version of this type guessed a `{docs, total}` shape that the server never emits,
+ * which crashed `data.docs.map` at runtime (SPEC-031 read-path contract drift).
+ */
+export interface SearchHit {
   id: string;
   slug: string;
   title: string;
-  type: DocType;
-  status: DocStatus;
+  snippet: string;
+  score: number;
+}
+
+export interface SearchResponse {
+  results: SearchHit[];
+}
+
+/**
+ * A node in the corpus tree. Mirrors `TreeNode`
+ * (`packages/lore/src/service/corpus-service.ts`) exactly — `CorpusService.tree`
+ * returns `Result<TreeNode, LoreError>`, a SINGLE recursive root object, not an array
+ * of top-level nodes. Doc fields live under `.doc` (a `DocSummary`), not flattened
+ * onto the node itself. A past version of this type flattened `{id,slug,title,...}`
+ * directly onto the node, which crashed `nodes.map is not a function` at runtime
+ * (SPEC-031 read-path contract drift).
+ */
+export interface TreeNode {
+  doc: DocSummary;
   children: TreeNode[];
 }
 
@@ -211,12 +231,12 @@ export async function apiSearch(query: string, opts: SearchOpts = {}): Promise<S
  * Fetch the document tree rooted at an optional ID.
  *
  * @param opts - Optional root ID and depth.
- * @returns Tree of document nodes.
- * @throws {ApiError} On HTTP or network error.
+ * @returns The recursive root `TreeNode` (never a bare array — see `TreeNode` doc comment).
+ * @throws {ApiError} On HTTP or network error (e.g. no PRD exists to default to).
  */
-export async function apiTree(opts: TreeOpts = {}): Promise<TreeNode[]> {
+export async function apiTree(opts: TreeOpts = {}): Promise<TreeNode> {
   const qs = buildQueryString(opts as Record<string, string | number | undefined>);
-  return fetchJson<TreeNode[]>(`/api/tree${qs}`);
+  return fetchJson<TreeNode>(`/api/tree${qs}`);
 }
 
 /**

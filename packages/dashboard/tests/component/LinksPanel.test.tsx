@@ -49,7 +49,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { LinksPanel } from "../../src/components/LinksPanel";
 import type { LinkEntry } from "../../src/components/LinksPanel";
-import type { DocSummary } from "@lore/core";
+import type { SearchHit } from "../../src/lib/api";
 
 // reason: apiSearch is the only external IO boundary LinkAddSearch touches;
 // mocking it (rather than the whole @tanstack/react-query layer) keeps the
@@ -62,14 +62,17 @@ import { apiSearch } from "@/lib/api";
 
 const mockedApiSearch = vi.mocked(apiSearch);
 
-function makeHit(overrides: Partial<DocSummary> = {}): DocSummary {
+// reason: real-shape fixture — `CorpusService.search` returns `SearchHit`
+// (`{id, slug, title, snippet, score}`), NOT a `DocSummary` (no `type`/`status`/
+// `updated_at`). A prior version of this fixture fabricated those fields
+// (SPEC-031 read-path contract drift).
+function makeHit(overrides: Partial<SearchHit> = {}): SearchHit {
   return {
     id: "01HHIT00000000000000000001",
     slug: "spec-hit",
     title: "Candidate Doc",
-    type: "spec",
-    status: "active",
-    updated_at: "2024-01-01T00:00:00Z",
+    snippet: "...a matching snippet...",
+    score: 1.0,
     ...overrides,
   };
 }
@@ -93,7 +96,7 @@ async function typeAndAdvanceDebounce(
 
 beforeEach(() => {
   mockedApiSearch.mockReset();
-  mockedApiSearch.mockResolvedValue({ docs: [], total: 0 });
+  mockedApiSearch.mockResolvedValue({ results: [] });
 });
 
 describe("LinksPanel", () => {
@@ -157,7 +160,7 @@ describe("LinksPanel", () => {
 
     it("calls apiSearch only after the debounce window once the query reaches 2+ characters", async () => {
       const user = userEvent.setup();
-      mockedApiSearch.mockResolvedValue({ docs: [makeHit()], total: 1 });
+      mockedApiSearch.mockResolvedValue({ results: [makeHit()] });
       renderWithClient(<LinksPanel links={[]} onLinkAdd={vi.fn()} onLinkRemove={vi.fn()} />);
       const input = screen.getByLabelText("Search for a document to link");
 
@@ -171,7 +174,7 @@ describe("LinksPanel", () => {
     it("renders an inline error when onLinkAdd resolves with a non-null message", async () => {
       const user = userEvent.setup();
       const onLinkAdd = vi.fn().mockResolvedValue("LINK_CYCLE: would create a cycle");
-      mockedApiSearch.mockResolvedValue({ docs: [makeHit()], total: 1 });
+      mockedApiSearch.mockResolvedValue({ results: [makeHit()] });
       renderWithClient(<LinksPanel links={[]} onLinkAdd={onLinkAdd} onLinkRemove={vi.fn()} />);
       const input = screen.getByLabelText("Search for a document to link");
 
@@ -209,7 +212,7 @@ describe("LinksPanel", () => {
 
     it("passes the selected link type (not the default) through to onLinkAdd", async () => {
       const onLinkAdd = vi.fn().mockResolvedValue(null);
-      mockedApiSearch.mockResolvedValue({ docs: [makeHit()], total: 1 });
+      mockedApiSearch.mockResolvedValue({ results: [makeHit()] });
       renderWithClient(<LinksPanel links={[]} onLinkAdd={onLinkAdd} onLinkRemove={vi.fn()} />);
 
       const user = userEvent.setup();
@@ -229,7 +232,7 @@ describe("LinksPanel", () => {
     it("clears the search query after a successful add (no stale results lingering)", async () => {
       const user = userEvent.setup();
       const onLinkAdd = vi.fn().mockResolvedValue(null);
-      mockedApiSearch.mockResolvedValue({ docs: [makeHit()], total: 1 });
+      mockedApiSearch.mockResolvedValue({ results: [makeHit()] });
       renderWithClient(<LinksPanel links={[]} onLinkAdd={onLinkAdd} onLinkRemove={vi.fn()} />);
 
       const input = screen.getByLabelText("Search for a document to link") as HTMLInputElement;

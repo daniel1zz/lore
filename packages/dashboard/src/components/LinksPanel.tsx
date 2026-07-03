@@ -16,8 +16,9 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiSearch } from "@/lib/api";
+import type { SearchHit } from "@/lib/api";
 import { X, Plus, Loader2 } from "lucide-react";
-import type { DocStatus, DocType, LinkType } from "@lore/core";
+import type { LinkType } from "@lore/core";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -41,16 +42,12 @@ export interface LinksPanelProps {
   isPending?: boolean;
 }
 
-// ─── Combobox search result type ─────────────────────────────────────────────
-
-interface SearchHit {
-  id: string;
-  title: string;
-  type: DocType;
-  status: DocStatus;
-}
-
 // ─── LinkAddSearch — isolated write-mode sub-component ────────────────────────
+// reason: the combobox search result type is `SearchHit` (imported from
+// `@/lib/api`) — the real `CorpusService.search` envelope, `{id, slug, title,
+// snippet, score}`. A prior version fabricated a local `{id, title, type,
+// status}` shape the server never sends (SPEC-031 read-path contract drift);
+// `hit.type`/`hit.status` silently rendered `undefined`.
 
 interface LinkAddSearchProps {
   /** Called with the selected doc's id and the chosen link type. */
@@ -125,18 +122,18 @@ function LinkAddSearch({ onAdd, addError, isPending }: LinkAddSearchProps): Reac
 
       {searchResults !== undefined && debouncedQuery.trim().length >= 2 && (
         <ul className="border rounded divide-y max-h-40 overflow-auto">
-          {searchResults.docs.length === 0 && (
+          {searchResults.results.length === 0 && (
             <li className="px-2 py-1 text-xs text-muted-foreground">No results</li>
           )}
-          {searchResults.docs.map((hit) => (
+          {searchResults.results.map((hit) => (
             <li key={hit.id}>
               <button
                 className="w-full text-left px-2 py-1.5 text-sm hover:bg-muted flex items-center gap-2 disabled:opacity-50"
-                onClick={() => void handleAddHit(hit as SearchHit)}
+                onClick={() => void handleAddHit(hit)}
                 disabled={isPending}
                 type="button"
               >
-                <span className="text-xs text-muted-foreground shrink-0">{hit.type}</span>
+                <span className="text-xs text-muted-foreground shrink-0 font-mono">{hit.slug}</span>
                 <span className="truncate">{hit.title}</span>
                 <Plus className="h-3 w-3 ml-auto shrink-0 text-muted-foreground" />
               </button>

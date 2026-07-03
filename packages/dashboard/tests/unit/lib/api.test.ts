@@ -121,7 +121,7 @@ describe("apiSearch", () => {
       const calls: string[] = [];
       vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
         calls.push(url);
-        return Promise.resolve(new Response(JSON.stringify({ ok: true, data: { docs: [], total: 0 } }), {
+        return Promise.resolve(new Response(JSON.stringify({ ok: true, data: { results: [] } }), {
           status: 200, headers: { "Content-Type": "application/json" },
         }));
       }));
@@ -131,13 +131,17 @@ describe("apiSearch", () => {
       expect(calls[0]).toContain("q=hello+world");
     });
 
-    it("returns search results", async () => {
-      const mockData = { docs: [{ id: "02", slug: "spec-test", title: "Spec", type: "spec", status: "active", updated_at: "" }], total: 1 };
+    // reason: CorpusService.search returns { results: SearchHit[] } with NO server-side
+    // total — a past version of this test asserted a fabricated `data.docs`/`data.total`
+    // shape the server never emits (SPEC-031 read-path contract drift).
+    it("returns search results under `results`, matching the real server envelope", async () => {
+      const mockData = { results: [{ id: "02", slug: "spec-test", title: "Spec", snippet: "...match...", score: 1.5 }] };
       vi.stubGlobal("fetch", makeFetchMock({ ok: true, data: mockData }));
 
       const result = await apiSearch("test");
 
-      expect(result.total).toBe(1);
+      expect(result.results).toHaveLength(1);
+      expect(result.results[0]?.title).toBe("Spec");
     });
   });
 });
