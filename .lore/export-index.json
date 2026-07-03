@@ -436,6 +436,14 @@
     "01KWKY3VFEKVD8C6KJ2JAJ2CK1": {
       "human_id": "KN-019",
       "file_path": "docs/requirements/knowledge/KN-019-lore-as-sole-dev-context-output-contract-spec-kind.md"
+    },
+    "01KWM6FERBTNEEKW5YGZ4SYZEC": {
+      "human_id": "KN-020",
+      "file_path": "docs/requirements/knowledge/KN-020-spec-032-tech-review-revisions-needs-revision-appl.md"
+    },
+    "01KWM6ETFQD99W0FFHPWCE3BKW": {
+      "human_id": "SPEC-032",
+      "file_path": "docs/requirements/spec/SPEC-032-spec-032-output-contract-mechanization-spec-kind-t.md"
     }
   }
 }
