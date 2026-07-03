@@ -352,6 +352,34 @@
     "01KWK6WPNE1E8645ZGWNQ37D0E": {
       "human_id": "SPEC-028",
       "file_path": "docs/requirements/spec/SPEC-028-spec-028-assess-input-transparency-pre-flight-diff.md"
+    },
+    "01KWKC1T1SWXPJQMBQ8XG66116": {
+      "human_id": "KN-012",
+      "file_path": "docs/requirements/knowledge/KN-012-round-3-findings-judge-session-contamination-silen.md"
+    },
+    "01KWK9R46DGZXZJ806F7QR5D47": {
+      "human_id": "PLAN-009",
+      "file_path": "docs/requirements/plan/PLAN-009-spec-029-implementation-assess-reliability.md"
+    },
+    "01KWK9R5JTV7RVW5CMHCBA6WZ7": {
+      "human_id": "TASK-041",
+      "file_path": "docs/requirements/task/TASK-041-closeout-029-oracles-rebuild-self-assess-with-new.md"
+    },
+    "01KWKC05JKBGAPH3KGBNQA4Z92": {
+      "human_id": "KN-013",
+      "file_path": "docs/requirements/knowledge/KN-013-assessment-spec-029-implementation-assess-reliabil.md"
+    },
+    "01KWKBWSG7NGH473BB9FNG8RNZ": {
+      "human_id": "KN-014",
+      "file_path": "docs/requirements/knowledge/KN-014-assessment-spec-029-implementation-assess-reliabil.md"
+    },
+    "01KWK9R5790V4GW17W0F1NBWJY": {
+      "human_id": "TASK-042",
+      "file_path": "docs/requirements/task/TASK-042-implement-assess-reliability-prompt-limit-statemen.md"
+    },
+    "01KWK9R3V6PGCGHZ3QRKE2EKH6": {
+      "human_id": "SPEC-029",
+      "file_path": "docs/requirements/spec/SPEC-029-spec-029-assess-reliability-reasoning-length-resil.md"
     }
   }
 }
