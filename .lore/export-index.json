@@ -304,6 +304,10 @@
     "01KWK1C8AKXGN4YYK096PGK22J": {
       "human_id": "KN-007",
       "file_path": "docs/requirements/knowledge/KN-007-dogfood-retro-spec-027-self-hosted-via-plan-claim.md"
+    },
+    "01KWK4JJMT6G3FTA6XVCFKZSNB": {
+      "human_id": "KN-008",
+      "file_path": "docs/requirements/knowledge/KN-008-assessment-spec-027-implementation-dashboard-harde.md"
     }
   }
 }
