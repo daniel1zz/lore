@@ -14,8 +14,10 @@
  *     dialog (rendered by the caller before invoking this function) IS the
  *     confirmation; the server's confirm gate is defense-in-depth, not a second
  *     user-facing prompt.
+ *   - apiRestoreVersion always sends `?confirm=true` — same pattern (AC-DH-11):
+ *     the HistoryTab "restore" button click is the user-facing confirmation.
  * Side-effect class: IO (fetch)
- * Source: SPEC-022 §9.3, §9.4; SPEC-027 AC-DH-6, AC-DH-7
+ * Source: SPEC-022 §9.3, §9.4; SPEC-027 AC-DH-6, AC-DH-7, AC-DH-11
  */
 
 import type { DocRecord, LinkType } from "@lore/core";
@@ -293,6 +295,9 @@ export async function apiDeleteDoc(id: string): Promise<DeleteDocResult> {
  * Restore a document to a previous version via POST /api/dashboard/docs/:id/restore.
  * Append-only — creates a new version N+1 with the target version's content
  * rather than deleting any history (AC-DH-7).
+ * Always sends `?confirm=true` — the server requires it (AC-DH-11, mirroring
+ * `apiDeleteDoc`'s confirm gate); the HistoryTab's "restore" button click IS the
+ * user-facing confirmation, so no second dialog is added on the client.
  *
  * @param id - Document ULID or slug.
  * @param version - The version number to restore content from.
@@ -301,7 +306,7 @@ export async function apiDeleteDoc(id: string): Promise<DeleteDocResult> {
  */
 export async function apiRestoreVersion(id: string, version: number): Promise<DocRecord> {
   const result = await writeFetch<{ doc: DocRecord }>(
-    `/api/dashboard/docs/${encodeURIComponent(id)}/restore`,
+    `/api/dashboard/docs/${encodeURIComponent(id)}/restore?confirm=true`,
     "POST",
     { version },
   );

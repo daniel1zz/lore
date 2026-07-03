@@ -19,8 +19,23 @@
  *     server-side confirm gate stays as defense-in-depth (SPEC-027 AC-DH-6).
  *   - POST /api/dashboard/docs/:id/restore is append-only — reuses VersionService.restore,
  *     which creates a new version N+1 rather than mutating history (SPEC-027 AC-DH-7).
+ *     Requires `?confirm=true`, mirroring the DELETE route's query-param gate
+ *     (SPEC-027 AC-DH-11). `VersionService` has no confirm concept of its own — the
+ *     gate is checked in this route before the service is ever called, using a
+ *     route-local `RESTORE_REQUIRES_CONFIRM` code (400) rather than reusing
+ *     `DELETE_REQUIRES_CONFIRM`: the operation is a restore, not a delete, and that
+ *     LoreError variant lives in `@lore/core` (out of scope for this hardening
+ *     pass) — naming the code after the actual verb keeps a client's error-code
+ *     branch honest instead of overloading a delete-specific code.
+ *     Restoring a version number that does not exist is a DIFFERENT failure and is
+ *     NOT gated by confirm — it surfaces `VersionService.restore`'s own
+ *     `DOC_NOT_FOUND` (404, via loreErrorResponse), explicitly chosen over
+ *     `VALIDATION_ERROR`: the `version` argument already passed shape validation
+ *     (positive integer) by the time the service is called, so the failure is "this
+ *     specific historical snapshot isn't there" — the same class of failure as
+ *     looking up a doc id that doesn't exist — not a malformed request.
  * Side-effect class: IO (delegates to service layer)
- * Source: SPEC-022 §9.1, §9.3, §9.4, §9.5, §9.6; SPEC-027 AC-DH-6, AC-DH-7
+ * Source: SPEC-022 §9.1, §9.3, §9.4, §9.5, §9.6; SPEC-027 AC-DH-6, AC-DH-7, AC-DH-11
  */
 
 import type { App } from "../../app.js";
@@ -342,13 +357,25 @@ async function handleDashboardDelete(
  * POST /api/dashboard/docs/:id/restore — restore a document to a previous version.
  * Body: { version: number }. Reuses VersionService.restore — append-only, creates
  * a new version N+1 rather than mutating history (SPEC-027 AC-DH-7).
+ * Requires `?confirm=true` (SPEC-027 AC-DH-11), mirroring the DELETE route's gate —
+ * missing confirm → RESTORE_REQUIRES_CONFIRM (400). See module header for why this
+ * is a route-local code rather than the shared `DELETE_REQUIRES_CONFIRM`.
  * Returns 200 with { doc: DocRecord }. Invalid/missing version → VALIDATION_ERROR (422).
+ * A well-formed but nonexistent version → DOC_NOT_FOUND (404, see module header).
  */
 async function handleDashboardRestore(
   req: Request,
   id: string,
   app: App,
 ): Promise<Response> {
+  const confirm = new URL(req.url).searchParams.get("confirm") === "true";
+  if (!confirm) {
+    return jsonError(
+      { code: "RESTORE_REQUIRES_CONFIRM", id, message: "Restore requires ?confirm=true" },
+      400,
+    );
+  }
+
   const body = await parseJsonBody(req);
   if (body === null || typeof body !== "object") {
     return jsonError({ code: "VALIDATION_ERROR", field: "body", message: "Request body must be JSON with 'version'" }, 422);
@@ -359,6 +386,9 @@ async function handleDashboardRestore(
     return jsonError({ code: "VALIDATION_ERROR", field: "version", message: "'version' must be a positive integer" }, 422);
   }
 
+  // reason: a nonexistent version surfaces VersionService.restore's own DOC_NOT_FOUND
+  // (404) unmodified — see module header for why this is the correct contract and
+  // not VALIDATION_ERROR.
   const result = await app.versionService.restore(id, version);
   if (!result.ok) return loreErrorResponse(result.error);
 
