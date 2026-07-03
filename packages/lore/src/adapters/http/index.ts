@@ -6,7 +6,7 @@
 import type { App } from "../../app.js";
 import { authenticateRequest } from "./auth.js";
 import { handleApiRoute, handleLocalBootstrap } from "./routes.js";
-import { jsonError, corsPreflightResponse } from "./middleware.js";
+import { jsonError, corsPreflightResponse, applyCorsOrigin } from "./middleware.js";
 
 export interface HttpConfig {
   port?: number;
@@ -30,17 +30,24 @@ export function startHttpServer(app: App, config: HttpConfig = {}): ReturnType<t
     hostname,
     async fetch(req) {
       const url = new URL(req.url);
+      // reason: Origin header is read once here and threaded through applyCorsOrigin at every
+      // return path below — the single CORS-origin application point for the whole adapter
+      // (SPEC-027 AC-DH-5). Route handlers never see or need this value.
+      const origin = req.headers.get("Origin");
 
       // CORS preflight
       if (req.method === "OPTIONS") {
-        return corsPreflightResponse();
+        return corsPreflightResponse(origin);
       }
 
       // Health check — no auth required
       if (url.pathname === "/health") {
-        return new Response(JSON.stringify({ ok: true, status: "healthy" }), {
-          headers: { "Content-Type": "application/json" },
-        });
+        return applyCorsOrigin(
+          new Response(JSON.stringify({ ok: true, status: "healthy" }), {
+            headers: { "Content-Type": "application/json" },
+          }),
+          origin,
+        );
       }
 
       // All /api/* routes require authentication, EXCEPT /api/auth/local-bootstrap which has own auth.
@@ -49,25 +56,28 @@ export function startHttpServer(app: App, config: HttpConfig = {}): ReturnType<t
         // + Origin allowlist for its own auth. It must run BEFORE the bearer/cookie gate to avoid
         // a chicken-and-egg deadlock (no session yet → no auth → can't bootstrap). SPEC-016 §3.2.
         if (req.method === "POST" && url.pathname === "/api/auth/local-bootstrap") {
-          return handleLocalBootstrap(req, app);
+          return applyCorsOrigin(await handleLocalBootstrap(req, app), origin);
         }
 
         const authResult = await authenticateRequest(req, app.apiKeyStore, app.sessionStore);
         if (!authResult.ok) {
-          return jsonError({ code: "UNAUTHORIZED", message: "Invalid or missing API key" }, 401);
+          return applyCorsOrigin(jsonError({ code: "UNAUTHORIZED", message: "Invalid or missing API key" }, 401), origin);
         }
 
         const actor = authResult.value;
         const response = await handleApiRoute(req, url, app, actor);
 
         if (response === null) {
-          return jsonError({ code: "NOT_FOUND", message: `Route not found: ${req.method} ${url.pathname}` }, 404);
+          return applyCorsOrigin(
+            jsonError({ code: "NOT_FOUND", message: `Route not found: ${req.method} ${url.pathname}` }, 404),
+            origin,
+          );
         }
 
-        return response;
+        return applyCorsOrigin(response, origin);
       }
 
-      return jsonError({ code: "NOT_FOUND", message: "Not Found" }, 404);
+      return applyCorsOrigin(jsonError({ code: "NOT_FOUND", message: "Not Found" }, 404), origin);
     },
 
     error(err) {
