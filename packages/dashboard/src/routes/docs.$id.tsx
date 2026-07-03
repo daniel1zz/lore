@@ -74,5 +74,12 @@ function DocPage(): React.ReactElement {
 
   if (data === undefined) return <></>;
 
-  return <DocDetail docWithNav={data} onNavigate={handleNavigate} onMutated={handleMutated} />;
+  // reason: `key={data.doc.id}` forces React to unmount/remount DocDetail when
+  // navigating between documents. TanStack Query's 5-minute staleTime means a
+  // cache hit on doc B can resolve synchronously while DocDetail's internal
+  // edit state (isEditing/editContent/editorSeed) is still the instance that
+  // was mounted for doc A — without a fresh key, that state (and an in-flight
+  // unsaved edit) silently carries over and can be saved against the wrong
+  // document. See SPEC-027 AC-DH-1.
+  return <DocDetail key={data.doc.id} docWithNav={data} onNavigate={handleNavigate} onMutated={handleMutated} />;
 }

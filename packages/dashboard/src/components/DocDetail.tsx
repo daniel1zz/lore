@@ -7,7 +7,8 @@
  *   - Edit mode is toggled by the "Edit" button; shows CodeMirror editor.
  *   - Save triggers PATCH with If-Match (optimistic concurrency); 409 → ConflictModal.
  *   - Status transitions go through the appropriate dashboard endpoint
- *     (approve → /approve, reject → /reject, other → PATCH status field).
+ *     (approve → /approve, reject → /reject, other → PATCH status field with
+ *     If-Match; 409 → loud toast + onMutated() refresh, never a silent overwrite).
  *   - Links panel shows related docs with add/remove affordances.
  *   - History tab loads lazily when the "History" tab is clicked.
  *   - Draft content is restored from localStorage on mount if version matches.
@@ -20,8 +21,18 @@
  *     recreating the view mid-edit (loses focus, resets cursor to doc start,
  *     scrambles typed input). `editorSeed` is set only when a new edit session
  *     starts (Edit button click).
+ *   - The caller MUST mount DocDetail with `key={doc.id}` (see routes/docs.$id.tsx) —
+ *     without a per-document key, a TanStack Query cache hit while navigating
+ *     between documents reuses this component instance, and its edit state
+ *     (isEditing/editContent/editorSeed) would otherwise leak from the
+ *     previously viewed document into the next. SPEC-027 AC-DH-1.
+ *   - The pending debounced draft-autosave timer (`draftSaveTimerRef`) is
+ *     cleared on both Save and Cancel, not just on unmount — otherwise a timer
+ *     scheduled just before either action fires afterwards and rewrites
+ *     localStorage with content the user already saved or discarded.
+ *     SPEC-027 AC-DH-3.
  * Side-effect class: IO (fetch, localStorage)
- * Source: SPEC-015, SPEC-022 §9.2
+ * Source: SPEC-015, SPEC-022 §9.2, SPEC-027
  */
 
 import { useState, useCallback, useRef, useEffect } from "react";
@@ -165,6 +176,14 @@ export function DocDetail({ docWithNav, onNavigate, onMutated }: DocDetailProps)
     setIsSaving(true);
     try {
       const savedDoc = await apiPatchDoc(doc.id, { content: editContent }, { version: doc.version });
+      // reason: cancel any pending debounced draft-autosave before clearing — otherwise
+      // a timer scheduled just before Save fires up to DRAFT_SAVE_DEBOUNCE_MS later and
+      // rewrites localStorage with the pre-save content, resurrecting a draft the user
+      // already committed. See SPEC-027 AC-DH-3.
+      if (draftSaveTimerRef.current !== null) {
+        clearTimeout(draftSaveTimerRef.current);
+        draftSaveTimerRef.current = null;
+      }
       clearDraft(doc.id);
       onMutated?.();
       setIsEditing(false);
@@ -209,13 +228,30 @@ export function DocDetail({ docWithNav, onNavigate, onMutated }: DocDetailProps)
         await apiRejectDoc(doc.id, reason);
         toast.success("Document rejected");
       } else {
-        await apiPatchDoc(doc.id, { status: toStatus });
+        // reason: If-Match with the doc's known version closes the same concurrency
+        // hole handleSave guards against — without it, checkConcurrency on the
+        // server unconditionally allows the write, so two tabs racing a status
+        // transition silently clobber each other. See SPEC-027 AC-DH-2.
+        await apiPatchDoc(doc.id, { status: toStatus }, { version: doc.version });
         toast.success(`Status → ${toStatus}`);
       }
       onMutated?.();
     } catch (err) {
-      const message = err instanceof DashboardApiError ? err.message : "Transition failed";
-      toast.error(message);
+      if (err instanceof ConflictError) {
+        // reason: unlike content edits, a status transition has no natural
+        // "force overwrite over a diff" — the ConflictModal is content-diff shaped
+        // (myContent vs serverDoc.content) and doesn't map cleanly onto a status
+        // value. Refusing loudly and refreshing the cached doc (so the UI's next
+        // render carries the current version/status) is the safe, non-silent
+        // response; the user re-issues the transition once they see the fresh state.
+        toast.error(
+          `Status change failed — document is now at v${err.current.version} (status: ${err.current.status}). Refresh and retry.`,
+        );
+        onMutated?.();
+      } else {
+        const message = err instanceof DashboardApiError ? err.message : "Transition failed";
+        toast.error(message);
+      }
     } finally {
       setIsTransitioning(false);
     }
@@ -288,6 +324,15 @@ export function DocDetail({ docWithNav, onNavigate, onMutated }: DocDetailProps)
                 <button
                   className="text-sm px-3 py-1 border rounded hover:bg-muted"
                   onClick={() => {
+                    // reason: cancel the pending debounced draft-autosave before clearing
+                    // the draft — without this, a timer scheduled just before Cancel fires
+                    // up to DRAFT_SAVE_DEBOUNCE_MS later and rewrites localStorage with the
+                    // abandoned edit; since doc.version hasn't changed, isDraftStale() later
+                    // reads it back as fresh and resurrects discarded content. SPEC-027 AC-DH-3.
+                    if (draftSaveTimerRef.current !== null) {
+                      clearTimeout(draftSaveTimerRef.current);
+                      draftSaveTimerRef.current = null;
+                    }
                     setIsEditing(false);
                     setEditContent(doc.content);
                     clearDraft(doc.id);
