@@ -38,6 +38,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",
+    "@tailwindcss/typography": "^0.5.20",
     "@tailwindcss/vite": "^4.1.8",
     "@tanstack/router-cli": "^1.121.2",
     "@tanstack/router-devtools": "^1.121.2",
