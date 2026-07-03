@@ -16,7 +16,8 @@
  *   - All requests use credentials: "include" (cookie auth per SPEC-022 §9.5)
  *   - Empty title must fail before HTTP call (AC-DASH-WRITE-10)
  *   - apiDeleteDoc always appends ?confirm=true to the DELETE URL (AC-DH-6)
- *   - apiRestoreVersion sends POST with a JSON { version } body (AC-DH-7)
+ *   - apiRestoreVersion sends POST with a JSON { version } body and always appends
+ *     ?confirm=true to the restore URL (AC-DH-7, AC-DH-11)
  *
  * MOCK RISK: fetch is mocked globally. Real network/cookie behavior is not tested here.
  * Integration test (dashboard-routes.test.ts) covers server-side without mocks.
@@ -449,7 +450,7 @@ describe("apiRestoreVersion — happy path (AC-DH-7)", () => {
     expect(result).toStrictEqual(doc);
   });
 
-  it("sends POST with a JSON { version } body to the /restore endpoint", async () => {
+  it("sends POST with a JSON { version } body to the /restore endpoint, with ?confirm=true appended (AC-DH-11)", async () => {
     const doc = makeDocRecord({ version: 3 });
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
       mockJsonResponse({ ok: true, data: { doc } }),
@@ -458,7 +459,7 @@ describe("apiRestoreVersion — happy path (AC-DH-7)", () => {
     await apiRestoreVersion("01JTEST", 1);
 
     const call = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(call[0]).toBe("/api/dashboard/docs/01JTEST/restore");
+    expect(call[0]).toBe("/api/dashboard/docs/01JTEST/restore?confirm=true");
     expect(call[1]?.method).toBe("POST");
     expect(call[1]?.credentials).toBe("include");
     expect(JSON.parse(call[1]?.body as string)).toStrictEqual({ version: 1 });
@@ -474,6 +475,23 @@ describe("apiRestoreVersion — error path", () => {
     const err = await apiRestoreVersion("01JTEST", 99).catch((e) => e);
     expect(err).toBeInstanceOf(DashboardApiError);
     expect(err.status).toBe(404);
+  });
+
+  it("throws DashboardApiError with status 400 RESTORE_REQUIRES_CONFIRM if the server ever rejects the (always-sent) confirm gate (AC-DH-11)", async () => {
+    // BOUNDARY: apiRestoreVersion always sends confirm=true, so this exercises the
+    // client's error-surfacing path for the 400 response rather than proving the
+    // client can omit confirm (it can't — see the happy-path URL assertion above).
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      mockJsonResponse(
+        { ok: false, error: { code: "RESTORE_REQUIRES_CONFIRM", message: "Restore requires ?confirm=true" } },
+        400,
+      ),
+    );
+
+    const err = await apiRestoreVersion("01JTEST", 1).catch((e) => e);
+    expect(err).toBeInstanceOf(DashboardApiError);
+    expect(err.status).toBe(400);
+    expect(err.code).toBe("RESTORE_REQUIRES_CONFIRM");
   });
 });
 

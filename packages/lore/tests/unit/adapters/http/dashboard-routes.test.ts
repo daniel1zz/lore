@@ -243,15 +243,15 @@ describe("DELETE /api/dashboard/docs/:id — soft delete (SPEC-027 AC-DH-6)", ()
   });
 });
 
-describe("POST /api/dashboard/docs/:id/restore — version restore (SPEC-027 AC-DH-7)", () => {
+describe("POST /api/dashboard/docs/:id/restore — version restore (SPEC-027 AC-DH-7, AC-DH-11)", () => {
   describe("happy path", () => {
     it("returns 200 with a new version N+1 carrying the target version's content", async () => {
       const { id } = await createPrd("Restorable Doc");
       // v1 content is the title-seeded default; bump to v2 with new content.
       await app.corpusService.set(id, { content: "v2 content" });
 
-      const req = jsonReq("POST", `/api/dashboard/docs/${id}/restore`, { version: 1 });
-      const url = makeUrl(`/api/dashboard/docs/${id}/restore`);
+      const req = jsonReq("POST", `/api/dashboard/docs/${id}/restore?confirm=true`, { version: 1 });
+      const url = makeUrl(`/api/dashboard/docs/${id}/restore?confirm=true`);
       const res = await handleDashboardRoute(req, url, app, COOKIE_ACTOR);
       expect(res).not.toBeNull();
       expect(res!.status).toBe(200);
@@ -266,8 +266,8 @@ describe("POST /api/dashboard/docs/:id/restore — version restore (SPEC-027 AC-
       const { id } = await createPrd("Append-only Restore Doc");
       await app.corpusService.set(id, { content: "v2 content" });
 
-      const req = jsonReq("POST", `/api/dashboard/docs/${id}/restore`, { version: 1 });
-      const url = makeUrl(`/api/dashboard/docs/${id}/restore`);
+      const req = jsonReq("POST", `/api/dashboard/docs/${id}/restore?confirm=true`, { version: 1 });
+      const url = makeUrl(`/api/dashboard/docs/${id}/restore?confirm=true`);
       await handleDashboardRoute(req, url, app, COOKIE_ACTOR);
 
       const logResult = await app.versionService.log(id, { limit: 50 });
@@ -280,10 +280,37 @@ describe("POST /api/dashboard/docs/:id/restore — version restore (SPEC-027 AC-
   });
 
   describe("negative", () => {
-    it("non-integer version returns 422 VALIDATION_ERROR", async () => {
-      const { id } = await createPrd("Bad Version Doc");
-      const req = jsonReq("POST", `/api/dashboard/docs/${id}/restore`, { version: 1.5 });
+    it("without ?confirm=true returns 400 RESTORE_REQUIRES_CONFIRM (AC-DH-11)", async () => {
+      const { id } = await createPrd("Unconfirmed Restore Doc");
+      await app.corpusService.set(id, { content: "v2 content" });
+
+      const req = jsonReq("POST", `/api/dashboard/docs/${id}/restore`, { version: 1 });
       const url = makeUrl(`/api/dashboard/docs/${id}/restore`);
+      const res = await handleDashboardRoute(req, url, app, COOKIE_ACTOR);
+      expect(res!.status).toBe(400);
+      const body = await parseRes(res!);
+      expect(body.ok).toBe(false);
+      const error = body.error as Record<string, unknown>;
+      expect(error.code).toBe("RESTORE_REQUIRES_CONFIRM");
+    });
+
+    it("confirm=false (or any non-'true' value) is treated as missing confirm", async () => {
+      const { id } = await createPrd("Falsy Confirm Restore Doc");
+      await app.corpusService.set(id, { content: "v2 content" });
+
+      const req = jsonReq("POST", `/api/dashboard/docs/${id}/restore?confirm=false`, { version: 1 });
+      const url = makeUrl(`/api/dashboard/docs/${id}/restore?confirm=false`);
+      const res = await handleDashboardRoute(req, url, app, COOKIE_ACTOR);
+      expect(res!.status).toBe(400);
+      const body = await parseRes(res!);
+      const error = body.error as Record<string, unknown>;
+      expect(error.code).toBe("RESTORE_REQUIRES_CONFIRM");
+    });
+
+    it("non-integer version (with confirm=true) returns 422 VALIDATION_ERROR", async () => {
+      const { id } = await createPrd("Bad Version Doc");
+      const req = jsonReq("POST", `/api/dashboard/docs/${id}/restore?confirm=true`, { version: 1.5 });
+      const url = makeUrl(`/api/dashboard/docs/${id}/restore?confirm=true`);
       const res = await handleDashboardRoute(req, url, app, COOKIE_ACTOR);
       expect(res!.status).toBe(422);
       const body = await parseRes(res!);
@@ -291,20 +318,27 @@ describe("POST /api/dashboard/docs/:id/restore — version restore (SPEC-027 AC-
       expect(error.code).toBe("VALIDATION_ERROR");
     });
 
-    it("missing version field returns 422 VALIDATION_ERROR", async () => {
+    it("missing version field (with confirm=true) returns 422 VALIDATION_ERROR", async () => {
       const { id } = await createPrd("Missing Version Doc");
-      const req = jsonReq("POST", `/api/dashboard/docs/${id}/restore`, {});
-      const url = makeUrl(`/api/dashboard/docs/${id}/restore`);
+      const req = jsonReq("POST", `/api/dashboard/docs/${id}/restore?confirm=true`, {});
+      const url = makeUrl(`/api/dashboard/docs/${id}/restore?confirm=true`);
       const res = await handleDashboardRoute(req, url, app, COOKIE_ACTOR);
       expect(res!.status).toBe(422);
     });
 
-    it("restoring to a version that doesn't exist returns 404 DOC_NOT_FOUND", async () => {
+    it("restoring to a version that doesn't exist (with confirm=true) returns 404 DOC_NOT_FOUND — pinned error contract (AC-DH-11)", async () => {
+      // Explicit contract: a well-formed but nonexistent version is DOC_NOT_FOUND (404),
+      // never VALIDATION_ERROR and never an ambiguous 500 — see the route module header
+      // for the reasoning (shape-valid input, the historical snapshot itself is absent).
       const { id } = await createPrd("Nonexistent Version Doc");
-      const req = jsonReq("POST", `/api/dashboard/docs/${id}/restore`, { version: 99 });
-      const url = makeUrl(`/api/dashboard/docs/${id}/restore`);
+      const req = jsonReq("POST", `/api/dashboard/docs/${id}/restore?confirm=true`, { version: 99 });
+      const url = makeUrl(`/api/dashboard/docs/${id}/restore?confirm=true`);
       const res = await handleDashboardRoute(req, url, app, COOKIE_ACTOR);
       expect(res!.status).toBe(404);
+      const body = await parseRes(res!);
+      expect(body.ok).toBe(false);
+      const error = body.error as Record<string, unknown>;
+      expect(error.code).toBe("DOC_NOT_FOUND");
     });
   });
 });
@@ -571,5 +605,46 @@ describe("regression — response envelope shape", () => {
     const url = makeUrl("/api/dashboard/docs");
     const res = await handleDashboardRoute(req, url, app, COOKIE_ACTOR);
     expect(res!.status).toBe(422);
+  });
+});
+
+describe("regression — DELETE /api/dashboard/docs/:id without ?confirm=true is rejected (AC-DH-12)", () => {
+  // Defense-in-depth: the confirm gate must hold at the server even if a future
+  // change to the dashboard UI's confirm dialog is skipped or bypassed. This is a
+  // deliberate duplicate of the "negative" coverage above — pinned explicitly under
+  // the REGRESSION dimension per SPEC-027 AC-DH-12 (a server-side regression test
+  // independent of any UI confirmation dialog).
+  it("rejects with 400 DELETE_REQUIRES_CONFIRM and performs no deletion", async () => {
+    const { id } = await createPrd("AC-DH-12 Regression Doc");
+
+    const req = jsonReq("DELETE", `/api/dashboard/docs/${id}`);
+    const url = makeUrl(`/api/dashboard/docs/${id}`);
+    const res = await handleDashboardRoute(req, url, app, COOKIE_ACTOR);
+
+    expect(res).not.toBeNull();
+    expect(res!.status).toBe(400);
+    const body = await parseRes(res!);
+    expect(body.ok).toBe(false);
+    const error = body.error as Record<string, unknown>;
+    expect(error.code).toBe("DELETE_REQUIRES_CONFIRM");
+
+    // The doc must remain undeleted — confirm the gate actually blocked the write,
+    // not just that it returned an error code cosmetically.
+    const getResult = await app.corpusService.get(id);
+    if (!getResult.ok) throw new Error("expected doc to still exist and resolve");
+    expect(getResult.value.doc.deleted_at).toBeNull();
+  });
+
+  it("rejects with 400 even when ?confirm=false is explicitly passed (not just omitted)", async () => {
+    const { id } = await createPrd("AC-DH-12 Falsy Confirm Doc");
+
+    const req = jsonReq("DELETE", `/api/dashboard/docs/${id}?confirm=false`);
+    const url = makeUrl(`/api/dashboard/docs/${id}?confirm=false`);
+    const res = await handleDashboardRoute(req, url, app, COOKIE_ACTOR);
+
+    expect(res!.status).toBe(400);
+    const body = await parseRes(res!);
+    const error = body.error as Record<string, unknown>;
+    expect(error.code).toBe("DELETE_REQUIRES_CONFIRM");
   });
 });
