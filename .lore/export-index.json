@@ -260,6 +260,46 @@
     "01KWHDZJHF67GJN5KXE7XSDVVE": {
       "human_id": "KN-005",
       "file_path": "docs/requirements/knowledge/KN-005-assessment-spec-021-hardening-export-collision-fix.md"
+    },
+    "01KWJZDKFE1VFZTZ11YTQTBVVB": {
+      "human_id": "TASK-029",
+      "file_path": "docs/requirements/task/TASK-029-closeout-claude-md-sync-full-oracle-suite-assess-e.md"
+    },
+    "01KWK19ZS4BF13TEGX027F1Q9N": {
+      "human_id": "KN-006",
+      "file_path": "docs/requirements/knowledge/KN-006-assessment-spec-027-implementation-dashboard-harde.md"
+    },
+    "01KWJZDJS03SWX89VA9D41M8BA": {
+      "human_id": "TASK-030",
+      "file_path": "docs/requirements/task/TASK-030-dashboard-delete-restore-surface-cookie-routes-ui.md"
+    },
+    "01KWJZDK46ZPH4F9R348QN289F": {
+      "human_id": "TASK-031",
+      "file_path": "docs/requirements/task/TASK-031-component-tests-editor-newdocmodal-statuspill-link.md"
+    },
+    "01KWK0VKGSJF7R5VCE7JG95F4Y": {
+      "human_id": "TASK-032",
+      "file_path": "docs/requirements/task/TASK-032-fix-statuspill-pending-guard-pass-disabled-to-drop.md"
+    },
+    "01KWJZDJECN9P8JTVR4D0ZN0YH": {
+      "human_id": "TASK-033",
+      "file_path": "docs/requirements/task/TASK-033-cors-echo-allowed-origin-instead-of-wildcard-ac-dh.md"
+    },
+    "01KWJZDHRFG5ZE934HD60RKY16": {
+      "human_id": "TASK-034",
+      "file_path": "docs/requirements/task/TASK-034-fix-write-path-bugs-cross-doc-edit-leak-transition.md"
+    },
+    "01KWJZDJ3MKJZS7BA5BYSPX895": {
+      "human_id": "TASK-035",
+      "file_path": "docs/requirements/task/TASK-035-extract-shared-diffview-from-historytab-conflictmo.md"
+    },
+    "01KWJZCQJ28J7ESK85RYDPQEH5": {
+      "human_id": "PLAN-006",
+      "file_path": "docs/requirements/plan/PLAN-006-spec-027-implementation-dashboard-hardening.md"
+    },
+    "01KWJZCQ6CTRAJEGRKA111MJHV": {
+      "human_id": "SPEC-027",
+      "file_path": "docs/requirements/spec/SPEC-027-spec-027-dashboard-hardening-write-path-integrity.md"
     }
   }
 }
