@@ -11,9 +11,15 @@
  *   - Global config missing/malformed → warning to stderr; defaults fall back to {}
  *   - init command is exempt — it creates the DB before config exists (uses createApp directly)
  *   - sync command is exempt — manages TursoStore directly, not corpus operations
+ *   - SPEC-030 AC-HJ-3: a project config whose `ai` block fails schema validation is a
+ *     LOUD failure (exit code from `exitCode()`, formatted error to stderr) — it must NOT
+ *     silently fall back to `AiConfigSchema.parse({})` defaults. Every OTHER config parse
+ *     failure (malformed YAML, bad `sync`/`telemetry`/`workflow` section, unknown top-level
+ *     key, etc.) keeps the pre-existing silent fallback-to-undefined behaviour — this is a
+ *     documented non-goal of SPEC-030, not an oversight.
  *
  * Side-effect class: IO (file reads, process.exit(1) on missing DB or unknown ai.provider,
- *   console.error for warnings)
+ *   process.exit on invalid `ai` config block (AC-HJ-3), console.error for warnings)
  *
  * reason: Kept separate from utils.ts because utils.ts is imported by vitest tests
  * that cannot resolve bun:sqlite. This module imports app.ts (which imports bun:sqlite)
@@ -21,10 +27,11 @@
  *
  * Source: SPEC-012 §5 (K3 — full-CLI telemetry coverage, AC-K3-1), SPEC-003 §6.2 (global config)
  *         SPEC-017 §3.12 (AC-AI-11 — unknown ai.provider → exit 1 with STORE_ERROR message)
+ *         SPEC-030 §2 (AC-HJ-3 — fail-loud `ai` block config errors)
  */
 
 import { dirname } from "path";
-import { mergeDefaults } from "@lore/core";
+import { mergeDefaults, isAiConfigValidationError } from "@lore/core";
 import type { LoreConfig, LoreDefaults, CallerSurface } from "@lore/core";
 // reason: loadConfig/loadGlobalConfig/resolveGlobalConfigPath read the filesystem
 // via Node fs/path/os — only reachable via the @lore/core/node subpath
@@ -35,7 +42,7 @@ import {
   resolveGlobalConfigPath,
 } from "@lore/core/node";
 import { createApp, type App } from "../../app.js";
-import { findLoreDbPath, formatError } from "./utils.js";
+import { findLoreDbPath, formatError, exitCode } from "./utils.js";
 
 /**
  * Detect whether the current CLI invocation is by an AI agent or a human.
@@ -95,8 +102,9 @@ function detectCliSurface(): CallerSurface {
  *
  * @returns { app, dbPath, defaults } — App wired with telemetry; dbPath for commands
  *   that need it; defaults (editor/format/color) merged from global + project config.
- * @throws process.exit(1) if no .lore/lore.db found in directory tree, or if ai.provider
- *   references an unknown provider name (AC-AI-11)
+ * @throws process.exit if no .lore/lore.db found in directory tree (code 1), if
+ *   ai.provider references an unknown provider name (AC-AI-11, code 1), or if the `ai`
+ *   config block itself fails schema validation (SPEC-030 AC-HJ-3, code from exitCode())
  * @example
  *   const { app, defaults } = loadLoreApp();
  *   try { ... } finally { app.close(); }
@@ -110,11 +118,23 @@ export function loadLoreApp(): {
   // The .lore dir is always one level up from lore.db
   const loreDir = dirname(dbPath);
   const projectDir = dirname(loreDir);
-  // Config parse failures are silently ignored — fall back to NoOpTelemetry
   const configResult = loadConfig(projectDir);
-  const rawConfig: LoreConfig | undefined = configResult.ok
-    ? configResult.value
-    : undefined;
+  let rawConfig: LoreConfig | undefined;
+  if (configResult.ok) {
+    rawConfig = configResult.value;
+  } else if (isAiConfigValidationError(configResult.error)) {
+    // SPEC-030 AC-HJ-3: an invalid `ai` block MUST fail loud — silently falling back to
+    // AiConfigSchema.parse({}) defaults here previously masked typos (e.g. an unrecognized
+    // `ai.cli` key silently reverting BOTH `ai.assess.max_diff_chars` and every
+    // `ai.providers.<name>.timeout_ms` override to built-in defaults with zero warning).
+    console.error(formatError(configResult.error)); // CLI surface
+    process.exit(exitCode(configResult.error));
+  } else {
+    // reason: all OTHER config parse failures (malformed YAML, invalid sync/telemetry/
+    // workflow section, unknown top-level key) keep the historical silent fallback —
+    // documented SPEC-030 non-goal, not touched by this change.
+    rawConfig = undefined;
+  }
 
   // Strip sync section — reason: prevents createApp returning Result<App>.
   // Corpus-level commands never need TursoStore; they use local SQLiteStore + telemetry only.

@@ -6,6 +6,8 @@
  *   - GlobalLoreConfigSchema / GlobalLoreConfig — user-level global config (XDG path)
  *   - LoreDefaultsSchema / LoreDefaults — shared defaults section (editor, format, color)
  *   - parseConfig / loadConfigFromString — pure YAML/object → LoreConfig validation
+ *   - isAiConfigValidationError — type guard distinguishing `ai`-block violations from
+ *     other config-block violations (SPEC-030 AC-HJ-3 fail-loud path)
  *   - mergeDefaults — project defaults win over global defaults
  *   - resolveSyncCredentials — D-004 credential resolution (env-var NAME only; reads
  *     process.env, not the filesystem — safe to keep here)
@@ -13,6 +15,12 @@
  * Invariants:
  *   - D-004: auth_token_env is ALWAYS an env-var NAME — never the plaintext token
  *   - D-007: sync.enabled=true + remote_url MUST be present (TursoStore selection)
+ *   - SPEC-030 AC-HJ-3: an invalid `ai` block MUST be reported as a VALIDATION_ERROR whose
+ *     `field` names the offending key path (e.g. "ai.cli") — callers (loadLoreApp) use
+ *     isAiConfigValidationError() to decide fail-loud vs the (unchanged, non-goal) silent
+ *     fallback that still applies to other config blocks. A config with no `ai` key at all
+ *     remains valid (schema default applies) — this only fires when `ai:` IS present but
+ *     malformed.
  *   - This file MUST NOT import Node builtins (fs/path/os/child_process/...), even
  *     transitively — it is re-exported from the browser-safe `@lore/core` barrel
  *     (`index.ts`) and consumed by `@lore/dashboard`. File-IO helpers (`loadConfig`,
@@ -188,18 +196,88 @@ export function resolveClaimTtlMinutes(config: LoreConfig | undefined): number {
 // ─── Pure Parse Helpers ────────────────────────────────────────────────────
 
 /**
+ * Format a single Zod issue found while parsing LoreConfigSchema into a
+ * human-readable `{field, message}` pair.
+ *
+ * Special-cases `unrecognized_keys` issues raised by a `.strict()` object: Zod
+ * reports these with `path` pointing at the *container* object (e.g. `["ai"]`)
+ * and the offending key names in `issue.keys`, not in `path` — so the raw path
+ * alone would read as the unhelpfully generic "ai" rather than naming the typo
+ * (e.g. "ai.cli"). This reconstructs the full dotted key path per offending key.
+ *
+ * When the container is exactly the top-level `ai` block, appends a targeted
+ * hint pointing at `ai.providers.<name>` (SPEC-030 AC-HJ-3) — the most common
+ * real-world typo is misplacing a provider override directly under `ai` instead
+ * of nesting it under `ai.providers.<name>`.
+ *
+ * @param issue - a single Zod issue from `ZodError.issues`
+ * @returns `{field, message}` — field is a dotted path (e.g. "ai.cli" or "root")
+ * @example
+ *   // issue: {code: "unrecognized_keys", path: ["ai"], keys: ["cli"]}
+ *   describeConfigIssue(issue)
+ *   // → {field: "ai.cli", message: "ai.cli: unrecognized key — did you mean ai.providers.<name>?"}
+ */
+function describeConfigIssue(issue: z.ZodIssue): { field: string; message: string } {
+  const containerField = issue.path.join(".") || "root";
+  if (issue.code === z.ZodIssueCode.unrecognized_keys) {
+    const offendingPaths = issue.keys.map((key) => `${containerField}.${key}`);
+    const plural = issue.keys.length > 1 ? "s" : "";
+    const hint = containerField === "ai" ? " — did you mean ai.providers.<name>?" : "";
+    return {
+      field: offendingPaths[0] ?? containerField,
+      message: `${offendingPaths.join(", ")}: unrecognized key${plural}${hint}`,
+    };
+  }
+  return { field: containerField, message: `${containerField}: ${issue.message}` };
+}
+
+/**
+ * Type guard: does this LoreError originate from a schema violation inside the
+ * `ai` config block (as opposed to `project`/`sync`/`telemetry`/`workflow`/etc.)?
+ *
+ * Used by CLI/adapter callers (e.g. `loadLoreApp`) to decide whether a config
+ * parse failure must fail loud (SPEC-030 AC-HJ-3) or may keep the historical
+ * silent fallback-to-defaults behaviour that still applies to non-`ai` blocks
+ * (SPEC-030 non-goals — a broader fail-loud sweep across all config blocks is
+ * explicitly out of scope for this change).
+ *
+ * @param error - a LoreError, typically from `parseConfig`/`loadConfigFromString`/`loadConfig`
+ * @returns true iff `error.code === "VALIDATION_ERROR"` and `error.field` is `"ai"`
+ *   or starts with `"ai."`
+ * @example
+ *   isAiConfigValidationError({code: "VALIDATION_ERROR", field: "ai.cli", message: "..."}) // true
+ *   isAiConfigValidationError({code: "VALIDATION_ERROR", field: "sync.enabled", message: "..."}) // false
+ *   isAiConfigValidationError({code: "STORE_ERROR", message: "..."}) // false
+ */
+export function isAiConfigValidationError(
+  error: LoreError,
+): error is Extract<LoreError, { code: "VALIDATION_ERROR" }> {
+  return (
+    error.code === "VALIDATION_ERROR" &&
+    (error.field === "ai" || error.field.startsWith("ai."))
+  );
+}
+
+/**
  * Parse a raw (unknown) value through LoreConfigSchema.
  * Returns Result<LoreConfig, LoreError>; never throws.
+ *
+ * @invariant When multiple issues are present, an issue whose path is rooted at
+ *   `ai` is always chosen over issues in other sections — a lone typo in the
+ *   `ai` block must never be masked by ordering (SPEC-030 AC-HJ-3). This does NOT
+ *   change behaviour for configs with only one violation (the common case).
  */
 export function parseConfig(raw: unknown): Result<LoreConfig, LoreError> {
   const result = LoreConfigSchema.safeParse(raw);
   if (result.success) {
     return ok(result.data);
   }
-  const firstIssue = result.error.issues[0];
-  const field = firstIssue !== undefined ? firstIssue.path.join(".") || "root" : "root";
-  const message =
-    firstIssue !== undefined ? firstIssue.message : result.error.message;
+  const aiIssue = result.error.issues.find((issue) => issue.path[0] === "ai");
+  const chosenIssue = aiIssue ?? result.error.issues[0];
+  const { field, message } =
+    chosenIssue !== undefined
+      ? describeConfigIssue(chosenIssue)
+      : { field: "root", message: result.error.message };
   return err({
     code: "VALIDATION_ERROR",
     field,
