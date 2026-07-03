@@ -2,6 +2,10 @@
  * End-to-end tests for CORS origin-echo behavior against a real in-process Bun.Server.
  * Source: SPEC-027 AC-DH-5 — Access-Control-Allow-Origin must never be a wildcard; it must
  * echo the caller's Origin only when allowlisted (ALLOWED_ORIGINS, SPEC-016 §3.2).
+ * Source: SPEC-027 AC-DH-13 — disallowed-Origin requests must get NO CORS-origin headers at
+ * all (not merely "not a wildcard" — a fully absent Access-Control-Allow-Origin, verified with
+ * `toBeNull()`), across every surface (read, write, preflight), and must never leak
+ * Access-Control-Allow-Credentials or echo a look-alike/arbitrary Origin.
  *
  * Test plan (6-dimension):
  *   HAPPY:
@@ -10,10 +14,19 @@
  *     - OPTIONS preflight with allowlisted Origin → 204 + Allow-Origin echoes it
  *
  *   NEGATIVE:
- *     - GET /health with disallowed Origin → 200, no Allow-Origin header at all
- *     - OPTIONS preflight with disallowed Origin → 204, no Allow-Origin header
+ *     - GET /health with disallowed Origin → 200, no Allow-Origin header at all, no
+ *       Allow-Credentials header at all (AC-DH-13)
+ *     - OPTIONS preflight with disallowed Origin → 204, no Allow-Origin header, no
+ *       Allow-Credentials header (AC-DH-13)
  *     - GET /api/status with unauthenticated request + allowlisted Origin → 401, but Allow-Origin
  *       is still echoed (CORS applies uniformly regardless of route auth outcome)
+ *     - GET /api/docs (read surface) with disallowed Origin + valid bearer → 200, no Allow-Origin
+ *       header, no Allow-Credentials header (AC-DH-13)
+ *     - POST /api/dashboard/docs (write surface) with disallowed Origin + no auth → 401, no
+ *       Allow-Origin header, no Allow-Credentials header (AC-DH-13)
+ *     - GET /health with a look-alike Origin that merely contains/prefixes/suffixes an
+ *       allowlisted entry (not an exact match) → no Allow-Origin header at all — locks exact-match
+ *       semantics of isOriginAllowed against a future substring/prefix regression (AC-DH-13)
  *
  *   BOUNDARY:
  *     - GET /health with no Origin header (non-browser caller) → 200, no Allow-Origin header
@@ -30,6 +43,7 @@
  *       assertion across every case above)
  *
  * @spec_ref AC-DH-5
+ * @spec_ref AC-DH-13
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -140,19 +154,58 @@ describe("CORS Access-Control-Allow-Origin (SPEC-027 AC-DH-5)", () => {
     expect(res.headers.get("Access-Control-Allow-Origin")).toBe(ALLOWED_ORIGIN);
   });
 
-  it("does not echo a disallowed Origin on GET /health (negative)", async () => {
+  it("does not echo a disallowed Origin on GET /health (negative, AC-DH-13: exact toBeNull assertion)", async () => {
     const res = await fetch(`${ctx.baseUrl}/health`, { headers: { Origin: DISALLOWED_ORIGIN } });
     expect(res.status).toBe(200);
     expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+    // AC-DH-13: a disallowed Origin must not leak Allow-Credentials either.
+    expect(res.headers.get("Access-Control-Allow-Credentials")).toBeNull();
   });
 
-  it("does not echo a disallowed Origin on OPTIONS preflight (negative)", async () => {
+  it("does not echo a disallowed Origin on OPTIONS preflight (negative, AC-DH-13: exact toBeNull assertion)", async () => {
     const res = await fetch(`${ctx.baseUrl}/api/status`, {
       method: "OPTIONS",
       headers: { Origin: DISALLOWED_ORIGIN },
     });
     expect(res.status).toBe(204);
     expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+    // AC-DH-13: preflight for a disallowed Origin must not leak Allow-Credentials either.
+    expect(res.headers.get("Access-Control-Allow-Credentials")).toBeNull();
+  });
+
+  it("does not echo a disallowed Origin on GET /api/docs — read surface (negative, AC-DH-13)", async () => {
+    const res = await fetch(`${ctx.baseUrl}/api/docs`, {
+      headers: { Authorization: `Bearer ${ctx.rawKey}`, Origin: DISALLOWED_ORIGIN },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+    expect(res.headers.get("Access-Control-Allow-Credentials")).toBeNull();
+  });
+
+  it("does not echo a disallowed Origin on POST /api/dashboard/docs — write surface (negative, AC-DH-13)", async () => {
+    const res = await fetch(`${ctx.baseUrl}/api/dashboard/docs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: DISALLOWED_ORIGIN },
+      body: JSON.stringify({ type: "knowledge", title: "x" }),
+    });
+    // No cookie and no bearer token → unauthenticated, but CORS must still behave correctly
+    // regardless of the auth outcome (mirrors the existing 401-with-allowlisted-Origin case).
+    expect(res.status).toBe(401);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+    expect(res.headers.get("Access-Control-Allow-Credentials")).toBeNull();
+  });
+
+  it("does not echo a look-alike Origin that only contains/prefixes/suffixes an allowlisted entry (negative, AC-DH-13)", async () => {
+    const lookAlikes = [
+      `${ALLOWED_ORIGIN}.evil.example`, // suffix trick: allowlisted origin as a prefix
+      `http://evil.example?${ALLOWED_ORIGIN}`, // allowlisted origin embedded as a query string
+      `${ALLOWED_ORIGIN}/`, // trailing slash — must be an exact string match, not a startsWith
+    ];
+
+    for (const origin of lookAlikes) {
+      const res = await fetch(`${ctx.baseUrl}/health`, { headers: { Origin: origin } });
+      expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+    }
   });
 
   it("still echoes an allowlisted Origin on a 401 (auth failure) response (negative)", async () => {
