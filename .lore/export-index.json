@@ -380,6 +380,34 @@
     "01KWK9R3V6PGCGHZ3QRKE2EKH6": {
       "human_id": "SPEC-029",
       "file_path": "docs/requirements/spec/SPEC-029-spec-029-assess-reliability-reasoning-length-resil.md"
+    },
+    "01KWKDC4JTNX1SQEK2G5XSZQXP": {
+      "human_id": "PLAN-010",
+      "file_path": "docs/requirements/plan/PLAN-010-spec-030-implementation-hermetic-judge-fail-loud-c.md"
+    },
+    "01KWKDC6E3P9FEXWM604AM1NWQ": {
+      "human_id": "TASK-043",
+      "file_path": "docs/requirements/task/TASK-043-closeout-030-oracles-rebuild-no-workaround-self-as.md"
+    },
+    "01KWKEWQ2K3623A1VWMZDK22FS": {
+      "human_id": "KN-015",
+      "file_path": "docs/requirements/knowledge/KN-015-assessment-spec-030-implementation-hermetic-judge.md"
+    },
+    "01KWKERBNFXECCSWNQWREK1J4F": {
+      "human_id": "KN-016",
+      "file_path": "docs/requirements/knowledge/KN-016-assessment-spec-030-implementation-hermetic-judge.md"
+    },
+    "01KWKDC62289TNM8NQED455X9M": {
+      "human_id": "TASK-044",
+      "file_path": "docs/requirements/task/TASK-044-fail-loud-ai-config-parsing-r3-housekeeping-assert.md"
+    },
+    "01KWKDC5P5QEPANEFY1BWKBCSQ": {
+      "human_id": "TASK-045",
+      "file_path": "docs/requirements/task/TASK-045-hermetic-judge-spawn-timeout-error-guidance-ac-hj.md"
+    },
+    "01KWKDC46MX3AAH21DNPBV6V4Y": {
+      "human_id": "SPEC-030",
+      "file_path": "docs/requirements/spec/SPEC-030-spec-030-hermetic-judge-sessions-fail-loud-ai-conf.md"
     }
   }
 }
