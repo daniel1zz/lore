@@ -46,6 +46,9 @@ function makeApp(store?: InMemoryStore): App {
     // reason: SPEC-025 §9.1 — test does not exercise task-workflow commands; null-cast per
     // established pattern (see phaseService above) for satisfying newly-required App fields.
     taskWorkflowService: null as unknown as App["taskWorkflowService"],
+    // reason: SPEC-032 §3.4 — test does not exercise spec-kind audit; null-cast per
+    // established pattern (see phaseService above) for satisfying newly-required App fields.
+    specKindService: null as unknown as App["specKindService"],
     // reason: test does not exercise AI-default path; callerSurface required by App interface (SPEC-024).
     callerSurface: "cli" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),

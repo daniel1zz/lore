@@ -92,6 +92,9 @@ function makeApp(opts: {
     exportDocsService: null as unknown as App["exportDocsService"],
     phaseService: null as unknown as App["phaseService"],
     taskWorkflowService: new TaskWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: 120 }),
+    // reason: SPEC-032 §3.4 — test does not exercise spec-kind audit; null-cast per
+    // established pattern (see phaseService above) for satisfying newly-required App fields.
+    specKindService: null as unknown as App["specKindService"],
     callerSurface: "mcp" as const,
     resolveAiDefault: opts.resolveAiDefault ?? ((_explicit?: boolean) => ({ ai: false, source: "env" as const })),
     telemetry: new NoOpTelemetry(),

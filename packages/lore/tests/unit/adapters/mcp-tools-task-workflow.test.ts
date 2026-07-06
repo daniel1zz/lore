@@ -65,6 +65,9 @@ function makeApp(): App {
     // reason: unlike mcp-tools.test.ts, THIS suite exercises the task-workflow
     // tools, so taskWorkflowService must be a real instance (not null-cast).
     taskWorkflowService: new TaskWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: 120 }),
+    // reason: SPEC-032 §3.4 — test does not exercise spec-kind audit; null-cast per
+    // established pattern (see phaseService above) for satisfying newly-required App fields.
+    specKindService: null as unknown as App["specKindService"],
     callerSurface: "mcp" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),
     telemetry: new NoOpTelemetry(),

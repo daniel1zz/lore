@@ -99,6 +99,9 @@ async function makeTestServer(): Promise<TestContext> {
     exportDocsService: null as unknown as App["exportDocsService"],
     phaseService: null as unknown as App["phaseService"],
     taskWorkflowService: null as unknown as App["taskWorkflowService"],
+    // reason: SPEC-032 §3.4 — test does not exercise spec-kind audit; null-cast per
+    // established pattern (see phaseService above) for satisfying newly-required App fields.
+    specKindService: null as unknown as App["specKindService"],
     callerSurface: "cli" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),
     telemetry: new NoOpTelemetry(),

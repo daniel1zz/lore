@@ -5,6 +5,9 @@
  *   v1 --from <path>   Import a DocMan v1 corpus.
  *   phases [--dry-run] Promote legacy singular plan.extra.phase → extra.legacy_phase
  *                      across all plan rows in a single sweep. Idempotent. (SPEC-023 §4 AC-PHASE-10)
+ *   spec-kind [--dry-run] Heuristically flag `spec` docs whose title/content suggests
+ *                      tech/design but still carry the defaulted "feature" spec_kind.
+ *                      No AI — pure regex signal, reported transparently. Idempotent. (SPEC-032 §3.4)
  */
 
 import { defineCommand } from "citty";
@@ -14,12 +17,13 @@ import { exitCode, formatError } from "../utils.js";
 export default defineCommand({
   meta: {
     name: "migrate",
-    description: "Corpus migration: `v1 --from <path>` (v1 import) or `phases` (phase schema sweep)",
+    description:
+      "Corpus migration: `v1 --from <path>` (v1 import), `phases` (phase schema sweep), or `spec-kind` (spec_kind mistype audit)",
   },
   args: {
     version: {
       type: "positional",
-      description: "Migration action: v1 | phases",
+      description: "Migration action: v1 | phases | spec-kind",
       required: true,
     },
     from: {
@@ -45,9 +49,9 @@ export default defineCommand({
     },
   },
   async run({ args }) {
-    if (args.version !== "v1" && args.version !== "phases") {
+    if (args.version !== "v1" && args.version !== "phases" && args.version !== "spec-kind") {
       process.stderr.write(
-        `Error: Unknown migration action '${args.version}'. Supported: v1, phases.\n`,
+        `Error: Unknown migration action '${args.version}'. Supported: v1, phases, spec-kind.\n`,
       );
       process.exit(2);
     }
@@ -76,6 +80,47 @@ export default defineCommand({
         console.log("─".repeat(40));
         console.log(`Plans touched:  ${report.touched}`);
         console.log(`Plans skipped:  ${report.skipped}`);
+        if (dryRun) {
+          console.log("\nRe-run without --dry-run to apply changes.");
+        }
+      } finally {
+        app.close();
+      }
+      return;
+    }
+
+    // ── spec-kind action ──────────────────────────────────────────────────
+    if (args.version === "spec-kind") {
+      const dryRun = args["dry-run"] ?? false;
+      const { app } = loadLoreApp();
+      try {
+        const result = await app.specKindService.migrateSpecKind({ dryRun });
+
+        if (!result.ok) {
+          process.stderr.write(formatError(result.error) + "\n");
+          process.exitCode = exitCode(result.error);
+          return;
+        }
+
+        const report = result.value;
+        if (args.json) {
+          console.log(JSON.stringify({ ok: true, data: report }, null, 2));
+          return;
+        }
+
+        const label = dryRun ? "Spec-kind audit (dry-run)" : "Spec-kind audit complete";
+        console.log(label);
+        console.log("─".repeat(40));
+        console.log(`Specs touched:  ${report.touched}`);
+        console.log(`Specs skipped:  ${report.skipped}`);
+
+        if (report.candidates.length > 0) {
+          console.log("\nCandidates:");
+          for (const c of report.candidates) {
+            console.log(`  ${c.slug}  "${c.title}"`);
+            console.log(`    ${c.from} → ${c.to}  (signal: "${c.signal}" in ${c.matchedIn})`);
+          }
+        }
         if (dryRun) {
           console.log("\nRe-run without --dry-run to apply changes.");
         }
