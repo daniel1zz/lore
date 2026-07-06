@@ -3,7 +3,8 @@
  * Purpose: all API calls from the dashboard go through these helpers; they parse
  *   the server's { ok, data } envelope and normalize errors.
  * Public surface: apiList, apiSearch, apiTree, apiGetDoc, apiGetStatus,
- *   apiGetJudgments, apiGetAuditForDoc, apiGetAuditVerify, apiGetCalibrationStats
+ *   apiGetJudgments, apiGetAuditForDoc, apiGetAuditVerify, apiGetCalibrationStats,
+ *   apiGetPendingReview
  * Invariants: 5-second timeout via AbortSignal.timeout; never leaks raw Response objects.
  *   Throws ApiError on non-2xx or server-side { ok: false }.
  * Side-effect class: IO (fetch)
@@ -413,4 +414,46 @@ export async function apiGetCalibrationStats(
 ): Promise<CalibrationStatsRow[]> {
   const qs = buildQueryString({ doc_type: opts.docType, prompt_version: opts.promptVersion });
   return fetchJson<CalibrationStatsRow[]>(`/api/calibration/stats${qs}`);
+}
+
+// ─── SPEC-033 F2: pending-review queue (home page + triage panels) ──────────
+
+/**
+ * One pending (draft-status) document row. Mirrors `PendingDoc`
+ * (`packages/lore/src/service/review-service.ts`) exactly — `ReviewService.pending`
+ * returns `Result<PendingDoc[], LoreError>`; `GET /api/review/pending`
+ * (`routes.ts::handleReviewPending`) emits the bare array via `jsonOk(result.value)`,
+ * no `{docs,total}` wrapper — same bare-array precedent as `apiGetVersionLog`.
+ * Carries `version` (unlike `DocSummary`, which omits it) — required to detect a
+ * stale judgment via `judgment.doc_version < row.version` (`JudgmentBadge`).
+ */
+export interface PendingDocRow {
+  id: string;
+  type: DocType;
+  title: string;
+  status: "draft";
+  created_by: string;
+  updated_at: string;
+  version: number;
+  change_summary?: string;
+}
+
+/** Optional narrowing filters for {@link apiGetPendingReview}. Mirrors `PendingFilters`. */
+export interface PendingReviewOpts {
+  author?: string;
+  type?: DocType;
+  since?: string;
+}
+
+/**
+ * Fetch documents in draft status awaiting review.
+ *
+ * @param opts - Optional author/type/since filters.
+ * @returns Pending doc rows (server order — `ReviewService.pending`'s underlying
+ *   `findMany` query, not independently re-sorted here).
+ * @throws {ApiError} On HTTP or network error.
+ */
+export async function apiGetPendingReview(opts: PendingReviewOpts = {}): Promise<PendingDocRow[]> {
+  const qs = buildQueryString(opts as Record<string, string | undefined>);
+  return fetchJson<PendingDocRow[]>(`/api/review/pending${qs}`);
 }

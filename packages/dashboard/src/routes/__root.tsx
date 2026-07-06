@@ -41,7 +41,16 @@ function RootLayout(): React.ReactElement {
               className="text-sm text-muted-foreground hover:text-foreground transition-colors"
               activeProps={{ className: "text-foreground font-medium" }}
             >
-              Docs
+              Home
+            </Link>
+            {/* reason: SPEC-033 repurposed "/" as the resolved living PRD; the old
+                doc-browsing + create UX moved to /library (see routes/library.tsx). */}
+            <Link
+              to="/library"
+              className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+              activeProps={{ className: "text-foreground font-medium" }}
+            >
+              Library
             </Link>
             <Link
               to="/tree"
