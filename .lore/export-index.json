@@ -444,6 +444,42 @@
     "01KWM6ETFQD99W0FFHPWCE3BKW": {
       "human_id": "SPEC-032",
       "file_path": "docs/requirements/spec/SPEC-032-spec-032-output-contract-mechanization-spec-kind-t.md"
+    },
+    "01KWV8QF5X8F7QE8855B1XVJTE": {
+      "human_id": "PLAN-012",
+      "file_path": "docs/requirements/plan/PLAN-012-spec-032-implementation-output-contract-mechanizat.md"
+    },
+    "01KWVDBAGQQNANVH0RGAJMY3TE": {
+      "human_id": "KN-021",
+      "file_path": "docs/requirements/knowledge/KN-021-assessment-spec-032-implementation-output-contract.md"
+    },
+    "01KWV8RRHNRQ7Z52R7TNF3TYF9": {
+      "human_id": "TASK-048",
+      "file_path": "docs/requirements/task/TASK-048-t3-text-projection-splice-revive-resolve-mdx-rende.md"
+    },
+    "01KWV8RQVC8M0ASM2NWQPR35XV": {
+      "human_id": "TASK-049",
+      "file_path": "docs/requirements/task/TASK-049-t4-migrate-spec-kind-audit-dry-run-idempotent.md"
+    },
+    "01KWV8RR6EQT0SFRHMY1V6Z49R": {
+      "human_id": "TASK-050",
+      "file_path": "docs/requirements/task/TASK-050-t5-ready-upstream-unapproved-advisory.md"
+    },
+    "01KWV8RQGFHNR9ET4B3QDRGQWD": {
+      "human_id": "TASK-051",
+      "file_path": "docs/requirements/task/TASK-051-t2-lore-tree-yaml-blueprint-authoring-arming-negat.md"
+    },
+    "01KWV8RQ5AFW49080TT039WQJY": {
+      "human_id": "TASK-052",
+      "file_path": "docs/requirements/task/TASK-052-t1-spec-kind-enum-service-default-cli-kind.md"
+    },
+    "01KWV8EMN285ECV6QVFS7W39QE": {
+      "human_id": "SPEC-033",
+      "file_path": "docs/requirements/spec/SPEC-033-spec-035-audit-trail-calibration-data.md"
+    },
+    "01KWV8EM7X18JG4KKMF7MDX7E5": {
+      "human_id": "SPEC-034",
+      "file_path": "docs/requirements/spec/SPEC-034-spec-034-structured-review-judgment-triage-queue.md"
     }
   }
 }
