@@ -865,6 +865,164 @@ describe("lore create — state verification", () => {
     expect(taskData.data?.doc?.extra?.plan_id).toBe(planId);
     expect(taskData.data?.doc?.extra?.plan_id).toMatch(/^[0-9A-Z]{26}$/);
   });
+
+  // spec_kind taxonomy (SPEC-032 §3.1) — happy-path CLI wiring only; the exhaustive
+  // schema/service coverage lives in packages/lore/tests/unit/core/schemas.test.ts
+  // and corpus-service.test.ts's "spec_kind" describe block.
+  it("AC-SPECKIND.CLI-01: creating spec with no --kind → extra.spec_kind defaults to 'feature'", async () => {
+    await initLoreDb();
+    const cmd = await importCreateCommand();
+
+    // spec requires --parent (see "spec still requires --parent" regression test below)
+    const outPrd = captureOutput();
+    try {
+      await runCmd(cmd, { type: "prd", title: "Root PRD For Kind", ai: false });
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
+    } finally {
+      outPrd.restore();
+    }
+    const prdSlug = outPrd.stdout.find((l) => l.includes("prd-"))?.match(/prd-[\w-]+/)?.[0];
+    expect(prdSlug).toBeTruthy();
+
+    const out1 = captureOutput();
+    try {
+      await runCmd(cmd, { type: "spec", title: "Undeclared Kind Spec", parent: prdSlug, ai: false });
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
+    } finally {
+      out1.restore();
+    }
+
+    const slugLine = out1.stdout.find((l) => l.includes("Slug:"));
+    const slug = slugLine?.split(":")[1]?.trim();
+    expect(slug).toBeTruthy();
+
+    const getCmd = await importGetCommand();
+    const out2 = captureOutput();
+    try {
+      await runCmd(getCmd, { id: slug, json: true });
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
+    } finally {
+      out2.restore();
+    }
+
+    const doc = JSON.parse(out2.stdout.join("")) as {
+      data?: { doc?: { extra?: { spec_kind?: string } } };
+    };
+    expect(doc.data?.doc?.extra?.spec_kind).toBe("feature");
+  });
+
+  it("AC-SPECKIND.CLI-02: creating spec with --kind design → extra.spec_kind persists 'design'", async () => {
+    await initLoreDb();
+    const cmd = await importCreateCommand();
+
+    const outPrd = captureOutput();
+    try {
+      await runCmd(cmd, { type: "prd", title: "Root PRD For Design Kind", ai: false });
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
+    } finally {
+      outPrd.restore();
+    }
+    const prdSlug = outPrd.stdout.find((l) => l.includes("prd-"))?.match(/prd-[\w-]+/)?.[0];
+    expect(prdSlug).toBeTruthy();
+
+    const out1 = captureOutput();
+    try {
+      await runCmd(cmd, {
+        type: "spec",
+        title: "Design Kind Spec",
+        parent: prdSlug,
+        kind: "design",
+        ai: false,
+      });
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
+    } finally {
+      out1.restore();
+    }
+
+    const slugLine = out1.stdout.find((l) => l.includes("Slug:"));
+    const slug = slugLine?.split(":")[1]?.trim();
+    expect(slug).toBeTruthy();
+
+    const getCmd = await importGetCommand();
+    const out2 = captureOutput();
+    try {
+      await runCmd(getCmd, { id: slug, json: true });
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
+    } finally {
+      out2.restore();
+    }
+
+    const doc = JSON.parse(out2.stdout.join("")) as {
+      data?: { doc?: { extra?: { spec_kind?: string } } };
+    };
+    expect(doc.data?.doc?.extra?.spec_kind).toBe("design");
+  });
+
+  it("AC-SPECKIND.CLI-N01: --kind bogus flows through to schema validation → VALIDATION_ERROR (exit 4)", async () => {
+    await initLoreDb();
+    const cmd = await importCreateCommand();
+
+    const outPrd = captureOutput();
+    try {
+      await runCmd(cmd, { type: "prd", title: "Root PRD For Bogus Kind", ai: false });
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
+    } finally {
+      outPrd.restore();
+    }
+    const prdSlug = outPrd.stdout.find((l) => l.includes("prd-"))?.match(/prd-[\w-]+/)?.[0];
+    expect(prdSlug).toBeTruthy();
+
+    const output = captureOutput();
+    // reason: this is NOT a CLI usage-error pre-check (like --decision-status) — --kind is
+    // OPTIONAL, so an invalid value is deliberately passed through to createDocInputSchema's
+    // superRefine and surfaces as VALIDATION_ERROR mapped to exit 4 (SPEC-032 §3.1). --parent
+    // is supplied so PARENT_REQUIRED (also exit 4, but the wrong reason) cannot mask the
+    // assertion under test.
+    process.exitCode = 0;
+
+    try {
+      await runCmd(cmd, {
+        type: "spec",
+        title: "Bogus Kind Spec",
+        parent: prdSlug,
+        kind: "bogus",
+        ai: false,
+      });
+    } finally {
+      output.restore();
+    }
+
+    expect(process.exitCode).toBe(4);
+    expect(output.stderr.join("\n")).toMatch(/spec_kind|bogus/i);
+    process.exitCode = 0; // reset for subsequent tests
+  });
+
+  it("exits 2 when --kind is passed for prd (type-flag mismatch)", async () => {
+    await initLoreDb();
+    const cmd = await importCreateCommand();
+    const output = captureOutput();
+    const exit = captureExit();
+
+    try {
+      await runCmd(cmd, { type: "prd", title: "My PRD", kind: "feature" });
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
+    } finally {
+      output.restore();
+    }
+
+    expect(exit.code).toBe(2);
+    const errText = output.stderr.join("\n");
+    expect(errText).toContain("--kind");
+    expect(errText).toContain("spec");
+  });
 });
 
 // ─── REGRESSION guards ────────────────────────────────────────────────────────

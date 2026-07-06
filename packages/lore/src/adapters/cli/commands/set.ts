@@ -36,6 +36,16 @@
  * Approved→draft demotion (SPEC-019 AC-SET-AI-4, SPEC-022 AC-DASH-WRITE-5):
  *   AI-edited content passes through CorpusService.set, which auto-demotes approved→draft
  *   on any content change. No special handling needed here — the service layer owns this.
+ *
+ * --kind <feature|tech|design> (SPEC-032 §3.1):
+ *   Sets extra.spec_kind on a spec document. Valid only for type 'spec' — set operates on
+ *   an existing id/slug (not a --type flag like create.ts), so the type-scope check fetches
+ *   the doc first. Because CorpusService.set replaces `extra` wholesale (docPatch.extra =
+ *   parsedPatch.data.extra, not a merge), this command merges { ...existing.extra, spec_kind }
+ *   before patching so unrelated extra keys survive. docPatchSchema.extra is an untyped
+ *   z.record — there is no schema hook analogous to createDocInputSchema's superRefine on the
+ *   patch path — so an invalid value is validated here, in the CLI, against SPEC_KINDS before
+ *   ever reaching the service, and reported as exit 4 (VALIDATION_ERROR-equivalent).
  */
 
 import { readFileSync } from "node:fs";
@@ -43,7 +53,8 @@ import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
 import { openEditor } from "../editor.js";
-import type { DocStatus, Priority } from "@lore/core";
+import type { DocStatus, Priority, SpecKind } from "@lore/core";
+import { SPEC_KINDS } from "@lore/core";
 
 export default defineCommand({
   meta: {
@@ -80,6 +91,10 @@ export default defineCommand({
     tags: {
       type: "string",
       description: "Comma-separated tags (replaces existing)",
+    },
+    kind: {
+      type: "string",
+      description: `[spec only] Spec kind: ${SPEC_KINDS.join(" | ")}. Source: SPEC-032`,
     },
     json: {
       type: "boolean",
@@ -345,6 +360,44 @@ export default defineCommand({
       if (args.priority !== undefined) patch["priority"] = args.priority as Priority;
       if (args.tags !== undefined) {
         patch["tags"] = args.tags.split(",").map((t: string) => t.trim()).filter(Boolean);
+      }
+
+      // --kind (SPEC-032 §3.1): type-scoped to 'spec', and extra is patched wholesale by
+      // CorpusService.set (not merged) — fetch the existing doc so we can (a) reject
+      // non-spec targets and (b) merge spec_kind into the existing extra rather than
+      // clobbering unrelated extra keys.
+      if (args.kind !== undefined) {
+        const resolveForKind = await app.corpusService.resolve(args.id);
+        if (!resolveForKind.ok) {
+          process.stderr.write(formatError(resolveForKind.error) + "\n");
+          process.exitCode = exitCode(resolveForKind.error);
+          return;
+        }
+        const getForKind = await app.corpusService.get(resolveForKind.value);
+        if (!getForKind.ok) {
+          process.stderr.write(formatError(getForKind.error) + "\n");
+          process.exitCode = exitCode(getForKind.error);
+          return;
+        }
+        const targetDoc = getForKind.value.doc;
+
+        if (targetDoc.type !== "spec") {
+          process.stderr.write(
+            `Error: --kind is only valid for type 'spec' (got '${targetDoc.type}').\n`,
+          );
+          process.exit(2);
+        }
+
+        if (!SPEC_KINDS.includes(args.kind as SpecKind)) {
+          process.stderr.write(
+            `Error: Invalid --kind '${args.kind}'.\n` +
+              `  Valid values: ${SPEC_KINDS.join(" | ")}\n`,
+          );
+          process.exitCode = 4;
+          return;
+        }
+
+        patch["extra"] = { ...targetDoc.extra, spec_kind: args.kind };
       }
 
       if (Object.keys(patch).length === 0) {

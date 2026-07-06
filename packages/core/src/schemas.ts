@@ -7,6 +7,7 @@ import { z } from "zod";
 import type { DocStatus, DocType, Slug } from "./types.js";
 import { evidenceEntrySchema, taskClaimSchema } from "./task-workflow.js";
 import { assessmentResultSchema } from "./assessment.js";
+import { SPEC_KINDS } from "./spec-kind.js";
 
 // ─── Primitive Schemas ─────────────────────────────────────────────────────
 
@@ -207,7 +208,24 @@ export const planExtraSchema = z
   });
 
 export const prdExtraSchema = z.record(z.unknown());
-export const specExtraSchema = z.record(z.unknown());
+
+/**
+ * Extra fields for spec documents.
+ *
+ * @invariant `spec_kind` classifies what a spec primarily describes (SPEC-032 §3.1
+ *   taxonomy). The field is OPTIONAL here — Zod's `superRefine` cannot inject a
+ *   default (only `addIssue`), so this schema layer validates ONLY: an absent
+ *   field stays valid (100+ pre-SPEC-032 specs are unaffected), while an explicit
+ *   unknown value fails loud. The default-on-create ("feature" when absent) is
+ *   materialized by `CorpusService._createImpl` (packages/lore/src/service),
+ *   never here.
+ * Source: SPEC-032 §3.1
+ */
+export const specExtraSchema = z
+  .object({
+    spec_kind: z.enum(SPEC_KINDS).optional(),
+  })
+  .passthrough();
 
 // ─── CreateDocInput Schema ─────────────────────────────────────────────────
 
@@ -295,6 +313,24 @@ export const createDocInputSchema = baseCreateDocInputSchema.superRefine(
       const planResult = planExtraSchema.safeParse(extra);
       if (!planResult.success) {
         for (const issue of planResult.error.issues) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: issue.message,
+            path: ["extra", ...issue.path],
+          });
+        }
+      }
+    }
+
+    // spec: validate extra.spec_kind against the taxonomy, if present.
+    // reason: spec_kind is OPTIONAL (the service layer defaults it to "feature" on
+    // create when absent — CorpusService._createImpl) — only an EXPLICIT invalid
+    // value must fail loud. Same delegate-to-schema pattern as the plan branch above.
+    // Source: SPEC-032 §3.1
+    if (type === "spec" && extra !== undefined) {
+      const specResult = specExtraSchema.safeParse(extra);
+      if (!specResult.success) {
+        for (const issue of specResult.error.issues) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
             message: issue.message,

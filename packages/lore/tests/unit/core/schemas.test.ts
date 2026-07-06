@@ -11,6 +11,8 @@ import {
   docRoleSchema,
   prioritySchema,
   linkTypeSchema,
+  specExtraSchema,
+  SPEC_KINDS,
 } from "@lore/core";
 
 // Test plan for schemas module:
@@ -327,6 +329,92 @@ describe("createDocInputSchema (AC-CORE-002)", () => {
       extra: {},
     });
     expect(result.success).toBe(true);
+  });
+
+  // spec_kind taxonomy (SPEC-032 §3.1) — schema layer validates ONLY: absent stays
+  // valid (100+ pre-SPEC-032 specs unaffected), explicit invalid value fails loud.
+  // The "feature" default-on-create is materialized service-side, not by this schema.
+  it("AC-SPECKIND.01: spec input with no spec_kind in extra passes (regression: pre-existing specs)", () => {
+    const result = createDocInputSchema.safeParse({
+      type: "spec",
+      title: "Auth Service",
+      parent_id: "01J5X7KZRF4AXRHX9WKE6DVP6P",
+      extra: {},
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("AC-SPECKIND.02: spec input with spec_kind='design' passes", () => {
+    const result = createDocInputSchema.safeParse({
+      type: "spec",
+      title: "Design Spec",
+      parent_id: "01J5X7KZRF4AXRHX9WKE6DVP6P",
+      extra: { spec_kind: "design" },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("AC-SPECKIND.03: spec input with spec_kind='tech' passes", () => {
+    const result = createDocInputSchema.safeParse({
+      type: "spec",
+      title: "Tech Spec",
+      parent_id: "01J5X7KZRF4AXRHX9WKE6DVP6P",
+      extra: { spec_kind: "tech" },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("AC-SPECKIND.N01: spec input with spec_kind='bogus' fails loud", () => {
+    const result = createDocInputSchema.safeParse({
+      type: "spec",
+      title: "Auth Service",
+      parent_id: "01J5X7KZRF4AXRHX9WKE6DVP6P",
+      extra: { spec_kind: "bogus" },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("[negative] non-spec types are not affected by an invalid spec_kind-shaped extra key", () => {
+    // spec_kind is only meaningful (and validated) when type === 'spec'; a prd carrying
+    // the same key with a bogus value is untouched by the spec-only superRefine branch.
+    const result = createDocInputSchema.safeParse({
+      type: "prd",
+      title: "Lore PRD",
+      extra: { spec_kind: "bogus" },
+    });
+    expect(result.success).toBe(true);
+  });
+});
+
+describe("specExtraSchema (SPEC-032 §3.1)", () => {
+  it("accepts an empty object (field absent)", () => {
+    expect(specExtraSchema.safeParse({}).success).toBe(true);
+  });
+
+  it("accepts each declared spec kind", () => {
+    for (const kind of SPEC_KINDS) {
+      expect(specExtraSchema.safeParse({ spec_kind: kind }).success).toBe(true);
+    }
+  });
+
+  it("[negative] rejects an unknown spec_kind value", () => {
+    expect(specExtraSchema.safeParse({ spec_kind: "bogus" }).success).toBe(false);
+  });
+
+  it("preserves arbitrary passthrough keys alongside spec_kind", () => {
+    const result = specExtraSchema.safeParse({ spec_kind: "tech", custom_field: "value" });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data["custom_field"]).toBe("value");
+    }
+  });
+
+  it("[boundary] preserves passthrough keys when spec_kind is absent", () => {
+    const result = specExtraSchema.safeParse({ some_legacy_field: 42 });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data["some_legacy_field"]).toBe(42);
+    }
   });
 });
 
