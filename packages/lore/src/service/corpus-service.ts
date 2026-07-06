@@ -42,6 +42,20 @@ function isUlid(input: string): boolean {
   return ULID_RE.test(input);
 }
 
+/**
+ * @deprecated `resolve_mdx` is accepted for backward-compatibility with existing callers
+ * (CLI `get`, MCP `lore_get`) but is intentionally NOT read by `CorpusService.get()`.
+ * MDX placeholder splicing requires `OutlineService.resolve()`, and CorpusService must
+ * not import OutlineService (services never cross-import — see service/CLAUDE.md
+ * "Service per concern, no cross-service calls"). The seam lives at the adapter layer
+ * instead: CLI `get.ts`, HTTP `routes.ts` (`?resolveMdx=true`), and MCP `tools.ts`
+ * (`lore_get`) each call `app.outlineService.resolve(doc)` themselves, after calling
+ * `corpusService.get()`. CLI `get.ts` additionally feeds the result into
+ * `renderResolvedToMarkdown()` (outline-service.ts) to splice placeholders into the
+ * printed body (SPEC-032 §3.3 AC-3) — HTTP/MCP still return the raw resolvedComponents
+ * data alongside untouched `doc.content` (dashboard rendering is SPEC-033, out of
+ * scope here). Source: SPEC-032 §3.3 AC-7.
+ */
 export interface GetOpts {
   resolve_mdx?: boolean;
 }
@@ -54,9 +68,22 @@ export interface DocWithNavigation {
     children: DocSummary[];
     related: Array<DocSummary & { link_type: LinkType }>;
   };
+  /**
+   * @deprecated Never populated by CorpusService.get() — see GetOpts.resolve_mdx above.
+   * Kept only so the (already-dead) `ResolvedComponent` type below has a use site;
+   * do not start writing to this field. The live equivalent is each adapter's own
+   * `resolved_components` / `resolvedMdx.resolvedComponents` response field, built
+   * from `OutlineService.ResolvedComponent` (a different, actually-used shape).
+   */
   resolved_components?: ResolvedComponent[];
 }
 
+/**
+ * @deprecated Local, unused shape — do NOT confuse with `OutlineService`'s
+ * `ResolvedComponent` (`{name, props, data, position}`), which is the one every
+ * adapter actually produces and `renderResolvedToMarkdown` actually consumes.
+ * This one only exists to type the dead `resolved_components` field above.
+ */
 export interface ResolvedComponent {
   placeholder: string;
   docs: DocSummary[];

@@ -22,13 +22,13 @@ import { TursoStore } from "./store/turso-store.js";
 import { CorpusService } from "./service/corpus-service.js";
 import { ReviewService } from "./service/review-service.js";
 import { VersionService } from "./service/version-service.js";
-import { OutlineService } from "./service/outline-service.js";
+import { OutlineService, renderResolvedToMarkdown } from "./service/outline-service.js";
 import { MigrationService } from "./service/migration-service.js";
 import { TreeCheckService } from "./service/tree-check-service.js";
 import { ApiKeyStore } from "./adapters/http/auth.js";
 import { SessionStore } from "./adapters/http/sessions.js";
 import { resolveSyncCredentials, resolveClaimTtlMinutes, type LoreConfig, AiConfigSchema } from "@lore/core";
-import { err, type Result, type LoreError } from "@lore/core";
+import { err, ok, type Result, type LoreError } from "@lore/core";
 import type { CallerSurface, AiDefaultSource } from "@lore/core";
 import type { AiDefaultPerSurface } from "@lore/core";
 import { resolveAiDefault } from "./ai/resolve-ai.js";
@@ -73,8 +73,10 @@ export interface App {
   syncDocsService: SyncDocsService;
   /**
    * ExportDocsService — required; exports corpus docs to per-doc .md files.
-   * Inverse of SyncDocsService. Constructed from StoreInterface with no other state.
-   * Source: SPEC-021 §9.1
+   * Inverse of SyncDocsService. Constructed from StoreInterface plus a ResolveDocBody
+   * callback (this composition root wires OutlineService.resolve + renderResolvedToMarkdown
+   * behind it — SPEC-032 §3.3 AC-4 — without ExportDocsService importing OutlineService).
+   * Source: SPEC-021 §9.1, SPEC-032 §3.3
    */
   exportDocsService: ExportDocsService;
   /**
@@ -148,11 +150,12 @@ function buildAppFromSqlite(
   let _callerSurface: CallerSurface = "cli";
   const db = store.getDatabase();
   const corpusService = new CorpusService(store, telemetry);
+  const outlineService = new OutlineService(store);
   return {
     corpusService,
     reviewService: new ReviewService(store),
     versionService: new VersionService(store),
-    outlineService: new OutlineService(store),
+    outlineService,
     migrationService: new MigrationService(store),
     treeCheckService: new TreeCheckService(store),
     apiKeyStore: new ApiKeyStore(db),
@@ -162,8 +165,14 @@ function buildAppFromSqlite(
     aiProviderService,
     // reason: SyncDocsService depends only on CorpusService — no store access, no AI. SPEC-018 §3.6.
     syncDocsService: new SyncDocsService(corpusService),
-    // reason: ExportDocsService depends only on StoreInterface — no AI, no HTTP. SPEC-021 §9.1.
-    exportDocsService: new ExportDocsService(store),
+    // reason: ExportDocsService needs to splice MDX placeholders into the exported body
+    // (SPEC-032 §3.3 AC-4) — wired here as a narrow ResolveDocBody callback so
+    // ExportDocsService itself never imports OutlineService (services don't cross-import).
+    exportDocsService: new ExportDocsService(store, async (doc) => {
+      const resolved = await outlineService.resolve(doc);
+      if (!resolved.ok) return resolved;
+      return ok(renderResolvedToMarkdown(resolved.value));
+    }),
     // reason: PhaseService depends only on StoreInterface — stateless, no AI, no telemetry. SPEC-023 §9.1.
     phaseService: new PhaseService(store),
     // reason: own telemetry wiring restores parity with CorpusService (D8) — TaskWorkflowService
@@ -210,11 +219,12 @@ function buildAppFromTurso(
   let _callerSurface: CallerSurface = "cli";
   const apiKeyDb = new Database(dbPath);
   const corpusService = new CorpusService(store, telemetry);
+  const outlineService = new OutlineService(store);
   return {
     corpusService,
     reviewService: new ReviewService(store),
     versionService: new VersionService(store),
-    outlineService: new OutlineService(store),
+    outlineService,
     migrationService: new MigrationService(store),
     treeCheckService: new TreeCheckService(store),
     apiKeyStore: new ApiKeyStore(apiKeyDb),
@@ -225,8 +235,14 @@ function buildAppFromTurso(
     aiProviderService,
     // reason: SyncDocsService depends only on CorpusService — no store access, no AI. SPEC-018 §3.6.
     syncDocsService: new SyncDocsService(corpusService),
-    // reason: ExportDocsService depends only on StoreInterface — no AI, no HTTP. SPEC-021 §9.1.
-    exportDocsService: new ExportDocsService(store),
+    // reason: ExportDocsService needs to splice MDX placeholders into the exported body
+    // (SPEC-032 §3.3 AC-4) — wired here as a narrow ResolveDocBody callback so
+    // ExportDocsService itself never imports OutlineService (services don't cross-import).
+    exportDocsService: new ExportDocsService(store, async (doc) => {
+      const resolved = await outlineService.resolve(doc);
+      if (!resolved.ok) return resolved;
+      return ok(renderResolvedToMarkdown(resolved.value));
+    }),
     // reason: PhaseService depends only on StoreInterface — stateless, no AI, no telemetry. SPEC-023 §9.1.
     phaseService: new PhaseService(store),
     // reason: own telemetry wiring restores parity with CorpusService (D8) — TaskWorkflowService

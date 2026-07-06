@@ -29,10 +29,21 @@
  *     export run detects it, keeps exactly one canonical owner (content match, else earliest
  *     created_at), strips the losing mapping(s) so they get freshly reallocated, and reports
  *     what was repaired via ExportReport.repaired — never a silent skip or data loss.
+ *   - MDX placeholders are spliced into the written body via the injected `resolveDocBody`
+ *     callback (SPEC-032 §3.3 AC-4), NOT left as raw `<ChildrenOf />` tags in git.
+ *     reason: ExportDocsService must not import OutlineService (services never cross-import —
+ *     see service/CLAUDE.md "no cross-service calls"); app.ts (the composition root) wires
+ *     `resolveDocBody` as `(doc) => outlineService.resolve(doc).then(renderResolvedToMarkdown)`.
+ *     CRITICAL — the SAME resolveDocBody(doc) output is used for BOTH the drift comparison
+ *     AND the on-write body. Comparing raw doc.content against an on-disk file that was
+ *     written spliced (or vice versa) would make any doc with a whitelisted placeholder
+ *     report PERMANENT false drift every run — canonicaliseBody alone cannot catch this
+ *     because the two sides would never converge no matter how many times you export.
  *
- * Side-effect class: IO (readFileSync, writeFileSync, mkdirSync) + StoreInterface async calls.
+ * Side-effect class: IO (readFileSync, writeFileSync, mkdirSync) + StoreInterface async calls
+ *   + resolveDocBody (itself store-backed via OutlineService.resolve, injected not imported).
  *
- * Source: SPEC-021 §9
+ * Source: SPEC-021 §9, SPEC-032 §3.3
  */
 
 import {
@@ -106,6 +117,20 @@ export interface ExportReport {
   repaired: string[];
 }
 
+/**
+ * Resolves one document's exportable body — splicing MDX placeholders into
+ * deterministic markdown when present, or returning the content unchanged when not.
+ *
+ * Injected rather than imported: ExportDocsService must not import OutlineService
+ * directly (services never cross-import each other — service/CLAUDE.md). The
+ * composition root (app.ts) wires the real implementation as
+ * `(doc) => outlineService.resolve(doc).then(r => r.ok ? ok(renderResolvedToMarkdown(r.value)) : r)`.
+ *
+ * @param doc - Full DocRecord to resolve a body for.
+ * @returns ok(markdown body) or a propagated store error from resolution.
+ */
+export type ResolveDocBody = (doc: DocRecord) => Promise<Result<string, LoreError>>;
+
 // ─── Human-ID type prefixes ───────────────────────────────────────────────────
 
 /**
@@ -141,15 +166,21 @@ const TYPE_DIR: Record<DocType, string> = {
  * Maintains .lore/export-index.json for stable human-readable ID assignment.
  *
  * @example
- *   const service = new ExportDocsService(store);
+ *   const service = new ExportDocsService(store, resolveDocBody);
  *   const result = await service.exportDocs({ projectDir: "/project", dryRun: false });
  *   if (result.ok) console.log(result.value.created.length, "files created");
  */
 export class ExportDocsService {
   /**
    * @param store - StoreInterface for all corpus read operations.
+   * @param resolveDocBody - Splices MDX placeholders into a doc's body (SPEC-032 §3.3).
+   *   Injected by the composition root (app.ts) — see ResolveDocBody's JSDoc for why this
+   *   isn't a direct OutlineService import.
    */
-  constructor(private readonly store: StoreInterface) {}
+  constructor(
+    private readonly store: StoreInterface,
+    private readonly resolveDocBody: ResolveDocBody,
+  ) {}
 
   /**
    * Export all corpus docs to disk.
@@ -227,6 +258,17 @@ export class ExportDocsService {
         continue;
       }
 
+      // Splice MDX placeholders (SPEC-032 §3.3 AC-4) — the SAME resolved body is used
+      // below for BOTH the drift comparison and the on-write content. Using raw
+      // doc.content for one side and the spliced body for the other would make any
+      // placeholder-bearing doc report permanent false drift (see module header).
+      const bodyResult = await this.resolveDocBody(doc);
+      if (!bodyResult.ok) {
+        report.errors.push(`${doc.id}: MDX placeholder resolution failed — ${bodyResult.error.code}`);
+        continue;
+      }
+      const resolvedBody = bodyResult.value;
+
       const absFilePath = join(opts.projectDir, mapping.file_path);
       const dirPath = dirname(absFilePath);
 
@@ -256,7 +298,7 @@ export class ExportDocsService {
 
         const fileBody = extractBodyFromMd(fileMd);
         const fileNorm = canonicaliseBody(fileBody);
-        const corpusNorm = canonicaliseBody(doc.content);
+        const corpusNorm = canonicaliseBody(resolvedBody);
 
         if (fileNorm === corpusNorm) {
           report.skipped_clean.push(mapping.file_path);
@@ -282,8 +324,8 @@ export class ExportDocsService {
       // Build frontmatter string
       const fmStr = buildFrontmatterString(doc, mapping.human_id, outLinks, index);
 
-      // Canonicalise the corpus body and combine with frontmatter
-      const fileContent = fmStr + canonicaliseBody(doc.content);
+      // Canonicalise the (already MDX-spliced) body and combine with frontmatter
+      const fileContent = fmStr + canonicaliseBody(resolvedBody);
 
       // Write with O_EXCL semantics (fail if file appeared between check and write).
       // reason: concurrent exports could both see "file absent" and race to create.

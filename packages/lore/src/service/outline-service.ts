@@ -6,7 +6,13 @@
  * Design: regex-based component extractor (no remark/unified/mdx dependencies).
  * Phase 1 constraint: components are self-closing, props are simple key=value.
  *
- * Source: SPEC-004, SPEC-001 §3.4
+ * Also exports `renderResolvedToMarkdown` — the SSOT pure function that splices a
+ * resolve() result's structured component data back into the document's markdown
+ * body (text-projection). resolve() alone only ever emits data; it never touches
+ * `content`. Consumers (CLI `get`, `export-docs`) call resolve() then feed its
+ * output straight into renderResolvedToMarkdown() — see SPEC-032 §3.3.
+ *
+ * Source: SPEC-004, SPEC-001 §3.4, SPEC-032 §3.3
  */
 
 import type { DocRecord, DocSummary } from "@lore/core";
@@ -448,4 +454,155 @@ export class OutlineService {
         return err({ code: "STORE_ERROR", message: `Unhandled component: ${name}` });
     }
   }
+}
+
+// ─── Text Projection (renderResolvedToMarkdown) ────────────────────────────
+
+/** Render one `DocSummary` as a markdown bullet: `- [type] title (status)`. */
+function renderDocBullet(doc: DocSummary): string {
+  return `- [${doc.type}] ${doc.title} (${doc.status})`;
+}
+
+/** Render a list of `DocSummary` as bullets, or a labeled empty-state line. */
+function renderDocBulletList(docs: DocSummary[], emptyLabel: string): string {
+  return docs.length > 0 ? docs.map(renderDocBullet).join("\n") : `_(${emptyLabel})_`;
+}
+
+/**
+ * Pull a `DocSummary[]` out of resolver data at `key`, defensively.
+ * Resolver data is `unknown` by contract (see `ComponentData`) — malformed/missing
+ * shapes degrade to an empty array rather than throwing (graceful degradation,
+ * matching resolveEmbed's null-data precedent).
+ */
+function extractDocSummaries(data: unknown, key: string): DocSummary[] {
+  if (typeof data !== "object" || data === null) return [];
+  const value = (data as Record<string, unknown>)[key];
+  return Array.isArray(value) ? (value as DocSummary[]) : [];
+}
+
+/** `RelatedOf` resolver data shape: a DocSummary plus the link's type. */
+type RelatedDocSummary = DocSummary & { link_type: string };
+
+function extractRelatedDocs(data: unknown): RelatedDocSummary[] {
+  if (typeof data !== "object" || data === null) return [];
+  const value = (data as Record<string, unknown>)["related"];
+  return Array.isArray(value) ? (value as RelatedDocSummary[]) : [];
+}
+
+function renderRelatedList(related: RelatedDocSummary[]): string {
+  if (related.length === 0) return "_(no related docs)_";
+  return related
+    .map((r) => `- [${r.type}] ${r.title} (${r.status}) — ${r.link_type}`)
+    .join("\n");
+}
+
+/** Render one `ModuleTree` node + its children as a nested markdown list. */
+function renderModuleTreeNode(node: TreeNode, depth: number): string {
+  const indent = "  ".repeat(depth);
+  const line = `${indent}- [${node.doc.type}] ${node.doc.title} (${node.doc.status})`;
+  if (node.children.length === 0) return line;
+  return [line, ...node.children.map((child) => renderModuleTreeNode(child, depth + 1))].join("\n");
+}
+
+function renderModuleTree(data: unknown): string {
+  if (typeof data !== "object" || data === null) return "_(module tree unavailable)_";
+  const modules = (data as Record<string, unknown>)["modules"];
+  if (modules === null || modules === undefined) return "_(module tree root not found)_";
+  return renderModuleTreeNode(modules as TreeNode, 0);
+}
+
+/** Render `Embed` resolver data — degrades to a labeled line for every non-happy case. */
+function renderEmbed(data: unknown): string {
+  if (typeof data !== "object" || data === null) return "_(embed unavailable)_";
+  const record = data as Record<string, unknown>;
+  if (typeof record["error"] === "string") return `_(embed error: ${record["error"]})_`;
+  if (typeof record["notFound"] === "string") return `_(embed not found: ${record["notFound"]})_`;
+  const embedded = record["embedded"];
+  if (typeof embedded !== "object" || embedded === null) return "_(embed not found)_";
+  const e = embedded as Record<string, unknown>;
+  const title = typeof e["title"] === "string" ? e["title"] : "(untitled)";
+  const content = typeof e["content"] === "string" ? e["content"] : "";
+  return `**${title}**\n\n${content}`;
+}
+
+/** Render `HealthStats` resolver data as a markdown summary list. */
+function renderHealthStats(data: unknown): string {
+  if (typeof data !== "object" || data === null) return "_(health stats unavailable)_";
+  const stats = (data as Record<string, unknown>)["stats"];
+  if (typeof stats !== "object" || stats === null) return "_(health stats unavailable)_";
+  const s = stats as Record<string, unknown>;
+  const total = typeof s["total"] === "number" ? s["total"] : 0;
+  const stale = typeof s["stale"] === "number" ? s["stale"] : 0;
+  const orphans = typeof s["orphans"] === "number" ? s["orphans"] : 0;
+  const byType = typeof s["by_type"] === "object" && s["by_type"] !== null
+    ? (s["by_type"] as Record<string, number>)
+    : {};
+  const byStatus = typeof s["by_status"] === "object" && s["by_status"] !== null
+    ? (s["by_status"] as Record<string, number>)
+    : {};
+  const byTypeStr = Object.entries(byType).map(([k, v]) => `${k}: ${v}`).join(", ") || "(none)";
+  const byStatusStr = Object.entries(byStatus).map(([k, v]) => `${k}: ${v}`).join(", ") || "(none)";
+  return [
+    `- Total: ${total}`,
+    `- By type: ${byTypeStr}`,
+    `- By status: ${byStatusStr}`,
+    `- Stale (>30d): ${stale}`,
+    `- Orphans: ${orphans}`,
+  ].join("\n");
+}
+
+/**
+ * Dispatch one resolved component to its deterministic markdown rendering.
+ * `component.name` is guaranteed whitelisted by resolve() (only whitelisted
+ * components are ever pushed into `resolvedComponents`); the default branch is
+ * unreachable in practice but degrades to a labeled string rather than throwing.
+ */
+function renderComponentMarkdown(component: ResolvedComponent): string {
+  switch (component.name) {
+    case "ChildrenOf":
+      return renderDocBulletList(extractDocSummaries(component.data, "children"), "no children");
+    case "RecentDecisions":
+      return renderDocBulletList(extractDocSummaries(component.data, "decisions"), "no recent decisions");
+    case "ActivePlans":
+      return renderDocBulletList(extractDocSummaries(component.data, "plans"), "no active plans");
+    case "ModuleTree":
+      return renderModuleTree(component.data);
+    case "RelatedOf":
+      return renderRelatedList(extractRelatedDocs(component.data));
+    case "Embed":
+      return renderEmbed(component.data);
+    case "HealthStats":
+      return renderHealthStats(component.data);
+    default:
+      return `_(unknown component: ${component.name})_`;
+  }
+}
+
+/**
+ * Splice a resolve() result's structured component data back into the document's
+ * markdown body — the "text projection" step resolve() alone never performs.
+ *
+ * Walks `resolvedComponents` in DESCENDING `position.start` order. Byte offsets
+ * stay valid throughout because `resolve()`'s regex matches are non-overlapping
+ * (each is consumed once by `COMPONENT_REGEX.exec`'s advancing lastIndex) and a
+ * descending walk never mutates content before an offset it still needs to read.
+ * Pure — no store access, no IO; operates only on already-resolved data.
+ *
+ * @param resolved - Output of `OutlineService.resolve()` for one document.
+ * @returns Markdown with every whitelisted placeholder replaced by its rendering;
+ *   unchanged `resolved.content` when there are no resolved components.
+ * @example
+ *   const resolved = await outlineService.resolve(doc);
+ *   if (resolved.ok) console.log(renderResolvedToMarkdown(resolved.value));
+ */
+export function renderResolvedToMarkdown(resolved: ResolvedDoc): string {
+  let content = resolved.content;
+  const byPositionDescending = [...resolved.resolvedComponents].sort(
+    (a, b) => b.position.start - a.position.start,
+  );
+  for (const component of byPositionDescending) {
+    const rendering = renderComponentMarkdown(component);
+    content = content.slice(0, component.position.start) + rendering + content.slice(component.position.end);
+  }
+  return content;
 }
