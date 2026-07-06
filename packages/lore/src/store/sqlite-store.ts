@@ -613,6 +613,20 @@ export class SQLiteStore implements StoreInterface {
     }
   }
 
+  async listAllVersions(since?: string): Promise<Result<VersionRecord[], LoreError>> {
+    try {
+      const rows =
+        since !== undefined
+          ? (this.db
+              .prepare(`SELECT * FROM versions WHERE created_at >= ? ORDER BY created_at ASC`)
+              .all(since) as VersionRow[])
+          : (this.db.prepare(`SELECT * FROM versions ORDER BY created_at ASC`).all() as VersionRow[]);
+      return ok(rows.map(rowToVersionRecord));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
   // ── Audit ─────────────────────────────────────────────────────────────────
 
   async appendAuditEntry(entry: AuditEntry): Promise<Result<void, LoreError>> {

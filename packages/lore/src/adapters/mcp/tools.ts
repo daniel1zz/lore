@@ -1,6 +1,6 @@
 /**
- * MCP tool registrations — 21 lore_* tools (16 original + 4 SPEC-025 task-workflow tools
- * + 1 SPEC-026 assess tool).
+ * MCP tool registrations — 22 lore_* tools (16 original + 4 SPEC-025 task-workflow tools
+ * + 1 SPEC-026 assess tool + 1 SPEC-035 audit tool).
  *
  * Architecture: Tools with input use the `registerToolWithArgs` helper defined below, which:
  *   1. Calls `server.tool(name, desc, handler)` in 3-arg form (avoids ZodRawShapeCompat type bomb)
@@ -230,6 +230,23 @@ export const LoreAssessSchema = z.object({
   ai: z.boolean().optional(),
 });
 
+/**
+ * Input schema for lore_audit (SPEC-035 §2).
+ * Query mode (default): `id_or_slug`/`actor`/`action`/`since`/`limit` map to
+ * `AuditFilters` — all optional, combinable. Verify mode (`verify: true`): runs
+ * the versions⋈audit completeness oracle instead; `since` overrides the
+ * configured `audit.verify_since` watermark for this call only; the other query
+ * filters are ignored in this mode.
+ */
+export const LoreAuditSchema = z.object({
+  id_or_slug: z.string().optional(),
+  actor: z.string().optional(),
+  action: z.string().optional(),
+  since: z.string().optional(),
+  limit: z.number().int().positive().optional(),
+  verify: z.boolean().optional(),
+});
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /**
@@ -314,8 +331,9 @@ function registerToolWithArgs<T>(
 // ─── Tool Registrations ──────────────────────────────────────────────────────
 
 /**
- * Registers all 20 lore_* MCP tools on the given server (16 original + 4 SPEC-025
- * task-workflow tools: lore_claim, lore_release, lore_evidence_add, lore_ready).
+ * Registers all 22 lore_* MCP tools on the given server (16 original + 4 SPEC-025
+ * task-workflow tools: lore_claim, lore_release, lore_evidence_add, lore_ready;
+ * + lore_assess (SPEC-026); + lore_audit (SPEC-035)).
  *
  * Tools with input use `registerToolWithArgs` (avoids ZodRawShapeCompat type bomb).
  * Tools without input (`lore_schema`, `lore_status`) use plain `server.tool(name, desc, cb)`.
@@ -324,7 +342,7 @@ function registerToolWithArgs<T>(
  * @param app - The composition root providing access to all services
  */
 export function registerTools(server: McpServer, app: App): void {
-  const { corpusService, versionService, reviewService, outlineService, taskWorkflowService } = app;
+  const { corpusService, versionService, reviewService, outlineService, taskWorkflowService, auditService } = app;
 
   // lore_create
   registerToolWithArgs(server, "lore_create", "Create a new document in the Lore corpus", LoreCreateSchema, async (args) => {
@@ -634,6 +652,40 @@ export function registerTools(server: McpServer, app: App): void {
       if (!linkResult.ok) return errorContent(linkResult.error);
 
       return textContent({ assessment: createResult.value, result: assessResult.value });
+    },
+  );
+
+  // ── SPEC-035: audit read/verify surface ───────────────────────────────────
+
+  // lore_audit
+  registerToolWithArgs(
+    server,
+    "lore_audit",
+    "Query the audit trail, or verify its completeness against version history (versions⋈audit reconcile)",
+    LoreAuditSchema,
+    async (args) => {
+      if (args.verify === true) {
+        const result = await auditService.verify(args.since !== undefined ? { since: args.since } : undefined);
+        if (!result.ok) return errorContent(result.error);
+        return textContent(result.value);
+      }
+
+      let docId: string | undefined;
+      if (args.id_or_slug !== undefined) {
+        const resolveResult = await corpusService.resolve(args.id_or_slug);
+        if (!resolveResult.ok) return errorContent(resolveResult.error);
+        docId = resolveResult.value;
+      }
+
+      const result = await auditService.query({
+        ...(docId !== undefined ? { doc_id: docId } : {}),
+        ...(args.actor !== undefined ? { actor: args.actor } : {}),
+        ...(args.action !== undefined ? { action: args.action } : {}),
+        ...(args.since !== undefined ? { since: args.since } : {}),
+        ...(args.limit !== undefined ? { limit: args.limit } : {}),
+      });
+      if (!result.ok) return errorContent(result.error);
+      return textContent({ entries: result.value });
     },
   );
 }

@@ -230,7 +230,9 @@ export class VersionService {
       session_id: "restore",
       action: "restore",
       doc_id: docId,
-      details: { restored_from_version: version, new_version: nextVersion },
+      // reason: SPEC-035 §2 — `version` is the join key AuditService.verify matches
+      // against the versions row's own `version` field (nextVersion, inserted above).
+      details: { restored_from_version: version, new_version: nextVersion, version: nextVersion },
     });
     if (!auditResult.ok) return auditResult;
 

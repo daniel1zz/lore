@@ -196,6 +196,19 @@ export interface StoreInterface {
     opts?: { limit?: number; offset?: number },
   ): Promise<Result<VersionRecord[], LoreError>>;
 
+  /**
+   * Return version rows across ALL docs, optionally bounded by a `since` watermark
+   * (`created_at >= since`), unordered otherwise. This is the read path for
+   * {@link AuditService.verify}'s versions⋈audit reconcile walk (SPEC-035 §2 D5) —
+   * `findVersions` is per-doc only, and the completeness oracle needs every version
+   * row corpus-wide since the watermark, not one doc at a time.
+   *
+   * @param since - ISO 8601; omit for no lower bound (all versions ever, used only
+   *   by tests — production callers always pass the resolved `audit.verify_since`)
+   * @see PLAN task D (SPEC-035) — audit surface
+   */
+  listAllVersions(since?: string): Promise<Result<VersionRecord[], LoreError>>;
+
   // ── Audit ──────────────────────────────────────────────────────────────
 
   /** Append an immutable audit entry. */

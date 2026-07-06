@@ -43,6 +43,7 @@ const main = defineCommand({
     evidence: () => import("./commands/evidence.js").then((m) => m.default),
     ready: () => import("./commands/ready.js").then((m) => m.default),
     assess: () => import("./commands/assess.js").then((m) => m.default),
+    audit: () => import("./commands/audit.js").then((m) => m.default),
   },
 });
 

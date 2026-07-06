@@ -96,6 +96,7 @@ function makeApp(opts: {
     // established pattern (see phaseService above) for satisfying newly-required App fields.
     specKindService: null as unknown as App["specKindService"],
     judgmentService: null as unknown as App["judgmentService"],
+    auditService: null as unknown as App["auditService"],
     callerSurface: "mcp" as const,
     resolveAiDefault: opts.resolveAiDefault ?? ((_explicit?: boolean) => ({ ai: false, source: "env" as const })),
     telemetry: new NoOpTelemetry(),

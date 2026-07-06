@@ -20,6 +20,7 @@ Row mappers, FTS5 query escaping, and JSON helpers are shared in `store-shared.t
 - **`escapeFtsQuery` is mandatory before FTS5 MATCH** — see `store-shared.ts`. Wraps each whitespace piece in `"…"`, doubles internal `"`. Empty input → empty string; callers MUST short-circuit (FTS5 errors on empty MATCH). `InMemoryStore` does substring search and does not use this helper.
 - **Row mappers handle libsql `bigint`** — `rowToDocRecord` and `rowToVersionRecord` apply `Number()` to `version`. Direct row reads bypass this at the caller's risk.
 - **`findLinksByToIds(toIds, linkType)` is a batch link query** (SPEC-025 §3 D7) — `WHERE to_id IN (...) AND link_type = ?` in one round trip, avoiding an N+1 loop over `findLinks` when `TaskWorkflowService.ready()` computes readiness across a whole plan. Returns `ok([])` immediately for an empty `toIds` array (no query issued).
+- **`listAllVersions(since?)` is corpus-wide, unlike `findVersions` (per-doc)** (SPEC-035 §2 D5) — `WHERE created_at >= ? ORDER BY created_at ASC` with no `doc_id` filter. Sole consumer: `AuditService.verify`'s versions⋈audit completeness reconcile, which needs every version row since the watermark, not one doc's history at a time.
 
 ## Patterns
 

@@ -367,7 +367,10 @@ export class CorpusService {
       session_id: id,
       action: "create",
       doc_id: id,
-      details: { type: doc.type, slug: doc.slug },
+      // reason: SPEC-035 §2 — every audit writer stamps the version its action
+      // produced (`details.version`), so AuditService.verify can join versions⋈audit
+      // on an exact (doc_id, version) pair. Creation always produces version 1.
+      details: { type: doc.type, slug: doc.slug, version: 1 },
     });
     if (!auditResult.ok) return auditResult;
 
@@ -589,7 +592,10 @@ export class CorpusService {
       session_id: existing.id,
       action: "update",
       doc_id: existing.id,
-      details: { patch: parsedPatch.data, new_version: newVersion },
+      // reason: SPEC-035 §2 — `version` (not just the pre-existing `new_version`
+      // alias) is the join key AuditService.verify matches against the versions
+      // row's own `version` field.
+      details: { patch: parsedPatch.data, new_version: newVersion, version: newVersion },
     });
     if (!auditResult.ok) return auditResult;
 
@@ -642,7 +648,11 @@ export class CorpusService {
       session_id: id,
       action: "delete",
       doc_id: id,
-      details: { recoverable_until: recoverableUntil },
+      // reason: SPEC-035 §2 — additive for writer-coverage consistency, even though
+      // `delete` sits outside AuditService.verify's VERIFIABLE_VERSION_ACTIONS set
+      // (a soft-deleted doc's version-0 sentinel row isn't part of the reconcile
+      // walk). Matches the sentinel `version: 0` the versions row above carries.
+      details: { recoverable_until: recoverableUntil, version: 0 },
     });
     if (!auditResult.ok) return auditResult;
 
