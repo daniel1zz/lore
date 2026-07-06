@@ -51,6 +51,7 @@ import { Editor } from "@/components/Editor";
 import { StatusPill } from "@/components/StatusPill";
 import { LinksPanel } from "@/components/LinksPanel";
 import { HistoryTab } from "@/components/HistoryTab";
+import { AuditTab } from "@/components/AuditTab";
 import { ConflictModal } from "@/components/ConflictModal";
 import { saveDraft, loadDraft, clearDraft, isDraftStale } from "@/store/draft";
 import type { DocWithNavigation } from "@/lib/api";
@@ -147,7 +148,7 @@ export interface DocDetailProps {
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
 
-type ActiveTab = "content" | "history";
+type ActiveTab = "content" | "history" | "audit";
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -520,7 +521,7 @@ export function DocDetail({ docWithNav, onNavigate, onMutated, onDeleted }: DocD
 
       {/* Tab switcher */}
       <div className="flex gap-4 border-b">
-        {(["content", "history"] as ActiveTab[]).map((tab) => (
+        {(["content", "history", "audit"] as ActiveTab[]).map((tab) => (
           <button
             key={tab}
             type="button"
@@ -561,6 +562,13 @@ export function DocDetail({ docWithNav, onNavigate, onMutated, onDeleted }: DocD
               onMutated already triggers. Gated the same way as Edit/LinksPanel:
               absent in read-only contexts. SPEC-027 AC-DH-7. */}
           <HistoryTab docId={doc.id} {...(onMutated !== undefined ? { onRestored: onMutated } : {})} />
+        </section>
+      )}
+
+      {/* Audit tab (SPEC-033 F3) */}
+      {activeTab === "audit" && (
+        <section aria-label="Audit trail">
+          <AuditTab docId={doc.id} />
         </section>
       )}
 
