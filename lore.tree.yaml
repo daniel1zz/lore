@@ -1,0 +1,22 @@
+version: 1
+root:
+  type: prd
+  children:
+    - type: spec
+      min: 1
+      children:
+        - type: plan
+          min: 0
+          children:
+            - { type: task, min: 0 }
+            - { type: knowledge, min: 0 }   # SPEC-026 assessments, retros
+        - { type: adr, min: 0, children: [ { type: knowledge, min: 0 } ] }
+        - { type: knowledge, min: 0 }
+    - { type: adr, min: 0, children: [ { type: knowledge, min: 0 } ] }
+    - type: plan
+      min: 0
+      children:
+        - { type: task, min: 0 }
+        - { type: knowledge, min: 0 }
+    - { type: knowledge, min: 0 }
+# knowledge → knowledge deliberately unmodeled (unbounded recursion; see SPEC-032 §3.2 prose)
