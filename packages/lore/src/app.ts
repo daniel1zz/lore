@@ -27,7 +27,13 @@ import { MigrationService } from "./service/migration-service.js";
 import { TreeCheckService } from "./service/tree-check-service.js";
 import { ApiKeyStore } from "./adapters/http/auth.js";
 import { SessionStore } from "./adapters/http/sessions.js";
-import { resolveSyncCredentials, resolveClaimTtlMinutes, type LoreConfig, AiConfigSchema } from "@lore/core";
+import {
+  resolveSyncCredentials,
+  resolveClaimTtlMinutes,
+  resolveAuditVerifySince,
+  type LoreConfig,
+  AiConfigSchema,
+} from "@lore/core";
 import { err, ok, type Result, type LoreError } from "@lore/core";
 import type { CallerSurface, AiDefaultSource } from "@lore/core";
 import type { AiDefaultPerSurface } from "@lore/core";
@@ -44,6 +50,7 @@ import { PhaseService } from "./service/phase-service.js";
 import { TaskWorkflowService } from "./service/task-workflow-service.js";
 import { SpecKindService } from "./service/spec-kind-service.js";
 import { JudgmentService } from "./service/judgment-service.js";
+import { AuditService } from "./service/audit-service.js";
 
 export interface App {
   corpusService: CorpusService;
@@ -107,6 +114,13 @@ export interface App {
    */
   judgmentService: JudgmentService;
   /**
+   * AuditService — read/verify surface over the LIVE `audit` table (query +
+   * versions⋈audit completeness oracle). Store-only, no telemetry (mirrors
+   * VersionService) — audit reads are a CLI-invoked oracle, not a hot path.
+   * Source: SPEC-035 §2, §5, §9.1
+   */
+  auditService: AuditService;
+  /**
    * Telemetry sink — exposed for dashboard route handlers to emit source-tagged events.
    * Dashboard handlers record { service: "dashboard", source: "dashboard" } events after
    * successful writes so AC-DASH-WRITE-TEL-1 is satisfied without modifying service signatures.
@@ -143,6 +157,8 @@ export interface App {
  * @param aiProviderService - Wired AI service from buildProviderRegistry (always required)
  * @param aiDefaultPerSurface - Per-surface AI default overrides from config (SPEC-024)
  * @param claimTtlMinutes - Task claim lease TTL in minutes (SPEC-025 §3 D2; default 120)
+ * @param auditVerifySince - Audit-verify watermark, ISO 8601 (SPEC-035 §2 D5; default the
+ *   SPEC-035 deploy date)
  */
 function buildAppFromSqlite(
   store: SQLiteStore,
@@ -150,6 +166,7 @@ function buildAppFromSqlite(
   aiProviderService: AIProviderService,
   aiDefaultPerSurface?: AiDefaultPerSurface,
   claimTtlMinutes: number = 120,
+  auditVerifySince: string = "2026-07-06T00:00:00Z",
 ): App {
   // reason: SPEC-024 §9.1 — callerSurface must be mutable so adapters can set it at startup.
   // Using a let variable closed over by the getter/setter ensures reads always see the current
@@ -192,6 +209,10 @@ function buildAppFromSqlite(
     // reason: JudgmentService owns review_judgments + calibration_records — store + own
     // telemetry wiring, same DI shape as TaskWorkflowService (D8). SPEC-034 §5, §9.1.
     judgmentService: new JudgmentService(store, telemetry),
+    // reason: AuditService is store-only (no telemetry, mirrors VersionService) — takes
+    // the resolved watermark via constructor, same DI shape as TaskWorkflowService's
+    // claimTtlMinutes (D5). SPEC-035 §2, §5, §9.1.
+    auditService: new AuditService(store, { verifySince: auditVerifySince }),
     // reason: telemetry exposed on App so dashboard route handlers can emit source-tagged events
     // without requiring service-layer signature changes (SPEC-022 §9.6).
     telemetry,
@@ -217,6 +238,8 @@ function buildAppFromSqlite(
  * @param aiProviderService - Wired AI service from buildProviderRegistry (always required)
  * @param aiDefaultPerSurface - Per-surface AI default overrides from config (SPEC-024)
  * @param claimTtlMinutes - Task claim lease TTL in minutes (SPEC-025 §3 D2; default 120)
+ * @param auditVerifySince - Audit-verify watermark, ISO 8601 (SPEC-035 §2 D5; default the
+ *   SPEC-035 deploy date)
  */
 function buildAppFromTurso(
   store: TursoStore,
@@ -225,6 +248,7 @@ function buildAppFromTurso(
   aiProviderService: AIProviderService,
   aiDefaultPerSurface?: AiDefaultPerSurface,
   claimTtlMinutes: number = 120,
+  auditVerifySince: string = "2026-07-06T00:00:00Z",
 ): App {
   // reason: SPEC-024 §9.1 — same mutable callerSurface pattern as buildAppFromSqlite.
   let _callerSurface: CallerSurface = "cli";
@@ -265,6 +289,10 @@ function buildAppFromTurso(
     // reason: JudgmentService owns review_judgments + calibration_records — store + own
     // telemetry wiring, same DI shape as TaskWorkflowService (D8). SPEC-034 §5, §9.1.
     judgmentService: new JudgmentService(store, telemetry),
+    // reason: AuditService is store-only (no telemetry, mirrors VersionService) — takes
+    // the resolved watermark via constructor, same DI shape as TaskWorkflowService's
+    // claimTtlMinutes (D5). SPEC-035 §2, §5, §9.1.
+    auditService: new AuditService(store, { verifySince: auditVerifySince }),
     // reason: telemetry exposed on App so dashboard route handlers can emit source-tagged events
     // without requiring service-layer signature changes (SPEC-022 §9.6).
     telemetry,
@@ -336,13 +364,24 @@ export function createApp(
   // Task claim lease TTL (SPEC-025 §3 D2) — defaults to 120 when config/workflow section absent.
   const claimTtlMinutes = resolveClaimTtlMinutes(config);
 
+  // Audit-verify watermark (SPEC-035 §2 D5) — defaults to the SPEC-035 deploy date
+  // when config/audit section absent.
+  const auditVerifySince = resolveAuditVerifySince(config);
+
   // No config supplied or sync section absent / disabled → local-only SQLiteStore
   if (
     config === undefined ||
     config.sync === undefined ||
     !config.sync.enabled
   ) {
-    return buildAppFromSqlite(new SQLiteStore(dbPath), telemetry, aiProviderService, aiDefaultPerSurface, claimTtlMinutes);
+    return buildAppFromSqlite(
+      new SQLiteStore(dbPath),
+      telemetry,
+      aiProviderService,
+      aiDefaultPerSurface,
+      claimTtlMinutes,
+      auditVerifySince,
+    );
   }
 
   // Sync is enabled — resolve credentials (fail loud on missing/empty token, D-007)
@@ -367,7 +406,18 @@ export function createApp(
       authToken,
       syncInterval: config.sync.interval,
     });
-    return { ok: true, value: buildAppFromTurso(store, dbPath, telemetry, aiProviderService, aiDefaultPerSurface, claimTtlMinutes) };
+    return {
+      ok: true,
+      value: buildAppFromTurso(
+        store,
+        dbPath,
+        telemetry,
+        aiProviderService,
+        aiDefaultPerSurface,
+        claimTtlMinutes,
+        auditVerifySince,
+      ),
+    };
   } catch (e) {
     telemetry.close();
     const message =

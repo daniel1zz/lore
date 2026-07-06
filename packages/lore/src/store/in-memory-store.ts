@@ -343,6 +343,13 @@ export class InMemoryStore implements StoreInterface {
     return ok(matching.map((v) => ({ ...v })));
   }
 
+  async listAllVersions(since?: string): Promise<Result<VersionRecord[], LoreError>> {
+    const matching = this.versions
+      .filter((v) => since === undefined || v.created_at >= since)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at));
+    return ok(matching.map((v) => ({ ...v })));
+  }
+
   // ── Audit ─────────────────────────────────────────────────────────────────
 
   async appendAuditEntry(entry: AuditEntry): Promise<Result<void, LoreError>> {

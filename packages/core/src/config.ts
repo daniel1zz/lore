@@ -132,6 +132,30 @@ const WorkflowConfigSchema = z
 /** Task execution workflow config section. Source: SPEC-025 §3 D2. */
 export type WorkflowConfig = z.infer<typeof WorkflowConfigSchema>;
 
+// ─── Audit Section Schema ───────────────────────────────────────────────────
+
+/**
+ * Audit completeness-oracle configuration (SPEC-035 §2 D5).
+ * `verify_since` is the watermark `lore audit --verify` anchors its versions⋈audit
+ * reconcile walk to — versions rows older than this are known-historical holes
+ * (pre-SPEC-035 TaskWorkflow silence, v1-migration imports) and are never reported
+ * as misses, so the oracle is strict going forward without permanently failing on
+ * data that predates audit-writer coverage.
+ *
+ * @invariant Default is the SPEC-035 deploy date (2026-07-06) — every audit writer
+ *   upgraded by this spec is live from that point forward, so the default watermark
+ *   already makes `--verify` meaningful with zero config.
+ */
+const AuditConfigSchema = z
+  .object({
+    /** ISO 8601 — versions rows before this timestamp are excluded from --verify. */
+    verify_since: z.string().default("2026-07-06T00:00:00Z"),
+  })
+  .strict();
+
+/** Audit completeness-oracle config section. Source: SPEC-035 §2 D5. */
+export type AuditConfig = z.infer<typeof AuditConfigSchema>;
+
 // ─── Root Config Schema ────────────────────────────────────────────────────
 
 /**
@@ -172,6 +196,12 @@ export const LoreConfigSchema = z
      * When absent, createApp uses WorkflowConfigSchema.parse({}) defaults (120min TTL).
      */
     workflow: WorkflowConfigSchema.optional(),
+    /**
+     * Audit completeness-oracle configuration (SPEC-035).
+     * When absent, createApp uses AuditConfigSchema.parse({}) defaults
+     * (verify_since = SPEC-035 deploy date).
+     */
+    audit: AuditConfigSchema.optional(),
   })
   .strict();
 
@@ -191,6 +221,22 @@ export type LoreConfig = z.infer<typeof LoreConfigSchema>;
  */
 export function resolveClaimTtlMinutes(config: LoreConfig | undefined): number {
   return (config?.workflow ?? WorkflowConfigSchema.parse({})).claim_ttl_minutes;
+}
+
+/**
+ * Resolve the effective audit-verify watermark (ISO 8601 string) from an optional
+ * LoreConfig. Mirrors {@link resolveClaimTtlMinutes} — absence of the whole config
+ * or the audit section both fall back to the schema default (SPEC-035 deploy date).
+ *
+ * @param config - Parsed LoreConfig, or undefined when no config file was loaded
+ * @returns Effective audit.verify_since value
+ * @example
+ *   resolveAuditVerifySince(undefined) // => "2026-07-06T00:00:00Z"
+ *   resolveAuditVerifySince({ ..., audit: { verify_since: "2026-08-01T00:00:00Z" } })
+ *   // => "2026-08-01T00:00:00Z"
+ */
+export function resolveAuditVerifySince(config: LoreConfig | undefined): string {
+  return (config?.audit ?? AuditConfigSchema.parse({})).verify_since;
 }
 
 // ─── Pure Parse Helpers ────────────────────────────────────────────────────

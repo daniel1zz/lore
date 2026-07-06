@@ -793,6 +793,22 @@ export class TursoStore implements StoreInterface {
     }
   }
 
+  async listAllVersions(since?: string): Promise<Result<VersionRecord[], LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs =
+        since !== undefined
+          ? await this.client.execute({
+              sql: `SELECT * FROM versions WHERE created_at >= ? ORDER BY created_at ASC`,
+              args: [since] as InValue[],
+            })
+          : await this.client.execute(`SELECT * FROM versions ORDER BY created_at ASC`);
+      return ok(rs.rows.map((row) => rowToVersionRecord(libsqlRowToVersionRow(row))));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
   // ── Audit ─────────────────────────────────────────────────────────────
 
   async appendAuditEntry(entry: AuditEntry): Promise<Result<void, LoreError>> {

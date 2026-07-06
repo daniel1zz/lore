@@ -23,7 +23,9 @@ citty-based CLI adapter. 24 subcommands, each in its own `commands/<name>.ts`, l
 
 ## Subcommands
 
-`init` `create` `get` `set` `delete` `list` `search` `tree` `link` `unlink` `pending` `approve` `reject` `log` `diff` `restore` `migrate` `status` `serve` `agent` `sync` `eval` `dashboard` `sync-docs` `export-docs` `phase` `claim` `release` `evidence` `ready` `assess`
+`init` `create` `get` `set` `delete` `list` `search` `tree` `link` `unlink` `pending` `approve` `reject` `log` `diff` `restore` `migrate` `status` `serve` `agent` `sync` `eval` `dashboard` `sync-docs` `export-docs` `phase` `claim` `release` `evidence` `ready` `assess` `audit`
+
+`audit` (SPEC-035) — `lore audit [<doc>] [--actor] [--action] [--since] [--limit] [--json]` queries the audit table (filters map 1:1 to `AuditFilters`); `lore audit --verify [--since] [--json]` runs the versions⋈audit completeness oracle (exit 0 clean, exit 4 with itemized misses). AI-judge actors (`ai:{provider}:{model}:{prompt_version}`, SPEC-034 §2) are decoded via `parseAuditActor` for human-readable output.
 
 `sync-docs` (SPEC-018) scans a directory of `*.md` spec files, creates corpus rows for missing specs matched by title, and reports body drift without auto-applying. Flags: `--from <path>` (scan dir), `--dry-run` (no writes), `--json` (machine-readable SyncReport).
 

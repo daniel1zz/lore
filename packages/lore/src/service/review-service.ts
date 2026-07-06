@@ -138,7 +138,8 @@ export class ReviewService {
       session_id: `review-${doc.id}`,
       action: "approve",
       doc_id: doc.id,
-      details: { reviewer, from_status: doc.status, to_status: "approved" },
+      // reason: SPEC-035 §2 — join key for AuditService.verify's versions⋈audit walk.
+      details: { reviewer, from_status: doc.status, to_status: "approved", version: nextVersion },
     });
     if (!auditResult.ok) return auditResult;
 
@@ -193,6 +194,11 @@ export class ReviewService {
     if (reason !== undefined) {
       auditDetails["reason"] = reason;
     }
+    // reason: SPEC-035 §2 — additive for writer-coverage consistency. reject() never
+    // calls insertVersion (status stays 'draft', no version bump) so no versions row
+    // with action "reject" exists for AuditService.verify to require this against —
+    // this is purely for parity/future-proofing, not oracle-load-bearing.
+    auditDetails["version"] = doc.version;
 
     const auditResult = await this.store.appendAuditEntry({
       timestamp: now,

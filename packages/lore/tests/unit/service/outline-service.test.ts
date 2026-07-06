@@ -620,6 +620,9 @@ describe("OutlineService.resolve", () => {
         search: (q, f) => store.search(q, f),
         insertVersion: (v) => store.insertVersion(v),
         findVersions: (id, opts) => store.findVersions(id, opts),
+        // reason: SPEC-035 §2 — new required StoreInterface method; mechanical
+        // addition (same class of fix as every other explicit delegate above).
+        listAllVersions: (since) => store.listAllVersions(since),
         appendAuditEntry: (e) => store.appendAuditEntry(e),
         queryAudit: (f) => store.queryAudit(f),
         // reason: SPEC-034 §3 — new required StoreInterface methods; mechanical

@@ -54,6 +54,7 @@ function makeApp(): App {
     // established pattern (see phaseService above) for satisfying newly-required App fields.
     specKindService: null as unknown as App["specKindService"],
     judgmentService: null as unknown as App["judgmentService"],
+    auditService: null as unknown as App["auditService"],
     // reason: test does not exercise AI-default path; callerSurface required by App interface (SPEC-024).
     callerSurface: "cli" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),
@@ -507,7 +508,8 @@ describe("tool registration completeness", () => {
   // reason: SPEC-025 §4 AC-WF-10 added 4 task-workflow tools (lore_claim,
   // lore_release, lore_evidence_add, lore_ready), bringing the total from 16 to 20.
   // SPEC-026 §4 AC-ASSESS-10 adds lore_assess, bringing the total from 20 to 21.
-  it("registers all 21 expected tools", () => {
+  // SPEC-035 §2 adds lore_audit, bringing the total from 21 to 22.
+  it("registers all 22 expected tools", () => {
     const expectedTools = [
       "lore_create",
       "lore_get",
@@ -530,12 +532,13 @@ describe("tool registration completeness", () => {
       "lore_evidence_add",
       "lore_ready",
       "lore_assess",
+      "lore_audit",
     ];
 
     const internal = server as unknown as McpServerInternal;
     for (const name of expectedTools) {
       expect(internal._registeredTools[name]).toBeDefined();
     }
-    expect(Object.keys(internal._registeredTools)).toHaveLength(21);
+    expect(Object.keys(internal._registeredTools)).toHaveLength(22);
   });
 });

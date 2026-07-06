@@ -2,7 +2,7 @@
 
 ## Purpose
 
-MCP (Model Context Protocol) stdio adapter. Entered via `lore --mcp-server` (top-level flag intercepted in `packages/lore/src/index.ts`) or `lore agent`. Registers 21 `lore_*` tools (16 original + 4 SPEC-025 task-workflow tools + 1 SPEC-026 assess tool) and a small set of MCP resources against `@modelcontextprotocol/sdk`'s `McpServer` and connects over `StdioServerTransport`.
+MCP (Model Context Protocol) stdio adapter. Entered via `lore --mcp-server` (top-level flag intercepted in `packages/lore/src/index.ts`) or `lore agent`. Registers 22 `lore_*` tools (16 original + 4 SPEC-025 task-workflow tools + 1 SPEC-026 assess tool + 1 SPEC-035 audit tool) and a small set of MCP resources against `@modelcontextprotocol/sdk`'s `McpServer` and connects over `StdioServerTransport`.
 
 ## Key Invariants
 
@@ -16,7 +16,7 @@ MCP (Model Context Protocol) stdio adapter. Entered via `lore --mcp-server` (top
 
 - **App is the only dependency** — `registerTools(server, app)` and `registerResources(server, app)` receive the wired App; tools never touch a store or service constructor directly.
 - **`schema-info.ts` carries `CORPUS_SCHEMA_INFO`** — a static description of the corpus shape exposed as an MCP resource. Update it when adding a new doc type or required `extra` field.
-- **Tool naming convention: `lore_<verb>`** — `lore_create`, `lore_get`, `lore_set`, `lore_search`, `lore_list`, `lore_tree`, `lore_link`, `lore_pending`, `lore_approve`, etc. Mirrors the CLI subcommand surface. SPEC-025 adds `lore_claim`, `lore_release`, `lore_evidence_add`, `lore_ready` (`by` is a required arg on these — MCP callers pass actor identity explicitly, unlike the CLI's `$LORE_ACTOR`/OS-username fallback). SPEC-026 adds `lore_assess` (`plan_id_or_slug`, `diff_text?`, `ai?`) — unlike `lore_create`'s `ai` (default `false`, MCP is always-agent), assess has no non-AI mode: `ai: false` is a contradiction (always errors), and the mcp surface's built-in AI-off default does NOT brake it — only an explicit `ai.default_per_surface.mcp = false` config override does (`isAssessAiBraked` from `../../ai/resolve-ai.js`).
+- **Tool naming convention: `lore_<verb>`** — `lore_create`, `lore_get`, `lore_set`, `lore_search`, `lore_list`, `lore_tree`, `lore_link`, `lore_pending`, `lore_approve`, etc. Mirrors the CLI subcommand surface. SPEC-025 adds `lore_claim`, `lore_release`, `lore_evidence_add`, `lore_ready` (`by` is a required arg on these — MCP callers pass actor identity explicitly, unlike the CLI's `$LORE_ACTOR`/OS-username fallback). SPEC-026 adds `lore_assess` (`plan_id_or_slug`, `diff_text?`, `ai?`) — unlike `lore_create`'s `ai` (default `false`, MCP is always-agent), assess has no non-AI mode: `ai: false` is a contradiction (always errors), and the mcp surface's built-in AI-off default does NOT brake it — only an explicit `ai.default_per_surface.mcp = false` config override does (`isAssessAiBraked` from `../../ai/resolve-ai.js`). SPEC-035 adds `lore_audit` (`id_or_slug?`, `actor?`, `action?`, `since?`, `limit?`, `verify?`) — `verify: true` runs the versions⋈audit completeness oracle (ignores the other query filters); otherwise a filtered `AuditFilters` query, optionally scoped to one doc via `id_or_slug`.
 
 ## Files
 

@@ -210,6 +210,8 @@ export class TaskWorkflowService {
       nowIso,
       entry.recorded_by,
       `Evidence added: ${entry.oracle} ${entry.result}`,
+      "evidence",
+      { oracle: entry.oracle, command: entry.command, result: entry.result },
     );
   }
 
@@ -280,7 +282,11 @@ export class TaskWorkflowService {
         ? `Claimed by ${opts.by} (previous holder: ${existingClaim.by})`
         : `Claimed by ${opts.by}`;
 
-    return this.writeTaskExtra(task, newExtra, nowIso, opts.by, summary);
+    return this.writeTaskExtra(task, newExtra, nowIso, opts.by, summary, "claim", {
+      by: opts.by,
+      steal: opts.steal === true,
+      ...(existingClaim !== undefined ? { previous_holder: existingClaim.by } : {}),
+    });
   }
 
   // ── release ──────────────────────────────────────────────────────────────
@@ -347,7 +353,12 @@ export class TaskWorkflowService {
     const reasonNote = opts.reason !== undefined ? `: ${opts.reason}` : "";
     const summary = `Released by ${opts.by}${forcedNote}${reasonNote}`;
 
-    return this.writeTaskExtra(task, newExtra, nowIso, opts.by, summary);
+    return this.writeTaskExtra(task, newExtra, nowIso, opts.by, summary, "release", {
+      by: opts.by,
+      force: opts.force === true,
+      previous_holder: existingClaim.by,
+      ...(opts.reason !== undefined ? { reason: opts.reason } : {}),
+    });
   }
 
   // ── ready ────────────────────────────────────────────────────────────────
@@ -448,8 +459,19 @@ export class TaskWorkflowService {
 
   /**
    * Shared write path for addEvidence/claim/release: CAS-guarded store.update on
-   * `extra` only, followed by one insertVersion snapshot carrying `change_summary`.
-   * Never touches content/title/status (D8 bound).
+   * `extra` only, followed by one insertVersion snapshot carrying `change_summary`,
+   * followed by one audit entry (SPEC-035 §2 — closes the TaskWorkflowService audit
+   * coverage gap). Never touches content/title/status (D8 bound).
+   *
+   * `auditDetails` always gets `version: newVersion` merged in (SPEC-035 §2 — every
+   * audit writer stamps the version its action produced) — the caller only supplies
+   * the action-specific fields (oracle/command/result for evidence; by/steal/
+   * previous_holder for claim; by/force/previous_holder/reason for release). The
+   * resulting audit `action` string ("claim"/"release"/"evidence") intentionally
+   * does NOT equal the versions row's own `action` ("update", from the insertVersion
+   * call above) — `AuditService.verify`'s join key is `(doc_id, version)`, not a
+   * literal action-string match, precisely so this label divergence still satisfies
+   * the completeness oracle. See audit-service.ts's class-level @invariant.
    */
   private async writeTaskExtra(
     task: DocRecord,
@@ -457,6 +479,8 @@ export class TaskWorkflowService {
     nowIso: string,
     actor: string,
     changeSummary: string,
+    auditAction: "claim" | "release" | "evidence",
+    auditDetails: Record<string, unknown>,
   ): Promise<Result<DocRecord, LoreError>> {
     const newVersion = task.version + 1;
     const updateResult = await this.store.update(
@@ -479,6 +503,16 @@ export class TaskWorkflowService {
       change_summary: changeSummary,
     });
     if (!versionResult.ok) return versionResult;
+
+    const auditResult = await this.store.appendAuditEntry({
+      timestamp: nowIso,
+      actor,
+      session_id: `${auditAction}-${task.id}`,
+      action: auditAction,
+      doc_id: task.id,
+      details: { ...auditDetails, version: newVersion },
+    });
+    if (!auditResult.ok) return auditResult;
 
     return ok(updateResult.value);
   }
