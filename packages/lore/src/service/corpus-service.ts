@@ -12,6 +12,7 @@ import {
   createDocInputSchema,
   docPatchSchema,
   slugifyWithCollision,
+  specExtraSchema,
 } from "@lore/core";
 import type { CreateDocInput, DocPatch } from "@lore/core";
 import {
@@ -541,6 +542,26 @@ export class CorpusService {
             });
           }
         }
+      }
+    }
+
+    // Cross-cutting spec_kind validation when updating a spec's extra (AC-1, SPEC-032 §3.1).
+    // reason: docPatchSchema.extra is untyped z.record(z.unknown()) (docPatchSchema in
+    // @lore/core) — HTTP (`body as DocPatch`) and MCP callers bypass CLI's client-side
+    // --kind self-validation entirely, so an explicit unknown spec_kind would otherwise
+    // persist silently. set() is the single choke point shared by CLI/HTTP/MCP; mirror the
+    // task-phase cross-entity check above (same error shape). Validation only — do NOT
+    // inject the "feature" default here (defaults are create-only, _createImpl above).
+    if (existing.type === "spec" && parsedPatch.data.extra !== undefined) {
+      const specResult = specExtraSchema.safeParse(parsedPatch.data.extra);
+      if (!specResult.success) {
+        const issue = specResult.error.issues[0];
+        return err({
+          code: "VALIDATION_ERROR",
+          field: issue ? `extra.${String(issue.path.join("."))}` : "extra",
+          message: issue ? issue.message : "invalid spec extra",
+          value: parsedPatch.data.extra["spec_kind"],
+        });
       }
     }
 
