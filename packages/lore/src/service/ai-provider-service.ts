@@ -12,6 +12,7 @@
  *     - refineContent(doc, userPrompt, opts?) → Promise<Result<GenerateOutput, LoreError>>  (SPEC-019)
  *     - inferLinkType(from, to, opts?) → Promise<Result<{linkType: LinkType}, LoreError>>  (SPEC-019)
  *     - assessPlan(bundle, opts?) → Promise<Result<AssessmentResult, LoreError>>  (SPEC-026)
+ *     - judgeDoc(bundle, checks, opts?) → Promise<Result<NewReviewJudgment, LoreError>>  (SPEC-034)
  *
  * Invariants:
  *   - Stateless: every dependency is constructor-injected; no module-level state or globals
@@ -31,10 +32,18 @@
  *     (`clipOverlongReasoning`, SPEC-029 AC-AR-2) — a verbose-but-otherwise-valid judgment
  *     never burns the corrective retry on reasoning length alone; clipped AC ids surface
  *     as `judgment.reasoning_clipped` (AC-AR-3)
+ *   - judgeDoc gets ONE corrective retry when the judge's JSON is malformed/invalid
+ *     (SPEC-034 §4, same protocol as assessPlan/SPEC-026 §3 D2) — a second malformed
+ *     response → AI_PROVIDER_ERROR with a ≤500-char raw-output prefix and no judgment is
+ *     returned (the caller never calls JudgmentService.record on an err() Result)
+ *   - judgeDoc ALWAYS overwrites the model's own (optional) `checks` field with the
+ *     deterministic `checks` argument it was called with — the mechanical pre-checks
+ *     (computed BEFORE the LLM call, SPEC-034 §4 flow step 2) are the authoritative
+ *     record; the model is never trusted to self-report which checks passed
  *
  * Side-effect class: IO (delegates to AIProvider.generate and Telemetry.emit)
  *
- * Source: SPEC-017 §3.6, SPEC-019 §9.1, SPEC-026 §3 D1, D2; SPEC-029 AC-AR-2, AC-AR-3
+ * Source: SPEC-017 §3.6, SPEC-019 §9.1, SPEC-026 §3 D1, D2; SPEC-029 AC-AR-2, AC-AR-3; SPEC-034 §4
  */
 
 import { err, ok } from "@lore/core";
@@ -43,6 +52,8 @@ import type { AiDefaultSource, CallerSurface, Result } from "@lore/core";
 import { linkTypeSchema } from "@lore/core";
 import type { AssessmentResult, LlmAssessmentOutput, PlanBundle } from "@lore/core";
 import { clipOverlongReasoning, extractAssessmentJson, llmAssessmentOutputSchema } from "@lore/core";
+import type { CheckResult, LlmReviewOutput, NewReviewJudgment, ReviewBundle } from "@lore/core";
+import { llmReviewOutputSchema } from "@lore/core";
 import {
   BUILT_IN_TEMPLATES,
   LINK_INFERENCE_TEMPLATE,
@@ -55,6 +66,12 @@ import {
   buildAssessRetryPrompt,
   type AssessBudgets,
 } from "../ai/assess-template.js";
+import {
+  REVIEW_PROMPT_VERSION,
+  REVIEW_TEMPLATES,
+  buildReviewRetryPrompt,
+  type ReviewBudgets,
+} from "../ai/review-template.js";
 
 // ─── AIProviderService ────────────────────────────────────────────────────────
 
@@ -97,6 +114,15 @@ export class AIProviderService {
      * Source: SPEC-026 §3 D7
      */
     private readonly assessBudgets: AssessBudgets,
+    /**
+     * Character budgets for each material section in the review judge prompt.
+     * Sourced from config.ai.review.* (defaults: doc 12000, context 8000).
+     * Defaulted here (not required positionally) so pre-SPEC-034 call sites that construct
+     * AIProviderService directly (several test fixtures) don't all need updating for a
+     * feature they don't exercise.
+     * Source: SPEC-034 §6
+     */
+    private readonly reviewBudgets: ReviewBudgets = { max_doc_chars: 12000, max_context_chars: 8000 },
   ) {}
 
   /**
@@ -534,6 +560,112 @@ export class AIProviderService {
     return doubleFailure;
   }
 
+  // ─── SPEC-034: review ────────────────────────────────────────────────────────
+
+  /**
+   * Judge a single document against the mechanical pre-checks already computed for it.
+   * Used by `lore review <doc>`.
+   *
+   * Flow: build the judge prompt (materials truncated per config.ai.review.* budgets,
+   * deterministic `checks` embedded verbatim) → invoke the provider → extract JSON from the
+   * raw response → validate against llmReviewOutputSchema → on failure, ONE corrective
+   * retry with the parse error embedded in a follow-up prompt → on a second failure,
+   * AI_PROVIDER_ERROR with a ≤500-char raw-output prefix (no judgment is persisted — that
+   * is the caller's job via JudgmentService.record, and it never runs when this returns an
+   * error). Emits ai.generation telemetry (kind="review") on every terminal outcome exactly
+   * once, mirroring assessPlan's telemetry-exactly-once contract.
+   *
+   * @param bundle - {doc, parent?, links, brokenLinkTargets?, blueprint?} from
+   *   CorpusService.getReviewBundle
+   * @param checks - Deterministic pre-check results from `runDeterministicChecks(bundle)`,
+   *   computed by the caller BEFORE this call — always persisted verbatim onto the returned
+   *   judgment's `checks` field, regardless of what (if anything) the model itself reports
+   * @param opts.source - Caller surface, forwarded to telemetry as caller_surface
+   * @returns Result<NewReviewJudgment, LoreError> — never throws; the caller passes an ok()
+   *   value straight into JudgmentService.record to persist it
+   *
+   * @example
+   * const bundleResult = await app.corpusService.getReviewBundle("spec-my-feature", blueprint);
+   * if (!bundleResult.ok) { ... }
+   * const checks = runDeterministicChecks(bundleResult.value);
+   * const judgeResult = await svc.judgeDoc(bundleResult.value, checks, { source: app.callerSurface });
+   * if (!judgeResult.ok) { process.exitCode = 6; return; }
+   * await app.judgmentService.record(judgeResult.value);
+   *
+   * Source: SPEC-034 §2, §4
+   */
+  async judgeDoc(
+    bundle: ReviewBundle,
+    checks: CheckResult[],
+    opts?: {
+      // reason: explicit `| undefined` required by exactOptionalPropertyTypes.
+      source?: CallerSurface | undefined;
+    },
+  ): Promise<Result<NewReviewJudgment, LoreError>> {
+    const t0 = performance.now();
+    // reason: REVIEW_TEMPLATES always carries an entry for the currently active
+    // REVIEW_PROMPT_VERSION — the module co-locates the const with its own registry entry,
+    // so this lookup cannot miss in practice; the non-null assertion documents that guarantee
+    // rather than silently tolerating an impossible `undefined`.
+    const template = REVIEW_TEMPLATES[REVIEW_PROMPT_VERSION]!;
+    const { prompt, truncated: _truncated } = template(bundle, checks, this.reviewBudgets);
+
+    const emitReviewEvent = (
+      providerResult: Result<GenerateOutput, LoreError>,
+      decision?: NewReviewJudgment["decision"],
+      confidence?: number,
+    ): void => {
+      this._emitAiEvent(providerResult, Math.round(performance.now() - t0), {
+        doc_type: bundle.doc.type,
+        template_source: "built-in",
+        kind: "review",
+        target_doc_id: bundle.doc.id,
+        caller_surface: opts?.source,
+        ...(decision !== undefined ? { decision } : {}),
+        ...(confidence !== undefined ? { confidence } : {}),
+      });
+    };
+
+    // First attempt.
+    const first = await this._attemptJudgeDocParse(prompt, bundle);
+    if (!first.providerResult.ok) {
+      emitReviewEvent(first.providerResult);
+      return first.providerResult;
+    }
+    if (first.parsed !== undefined) {
+      const finalized = this._finalizeJudgment(first.parsed, bundle, checks);
+      emitReviewEvent(first.providerResult, finalized.decision, finalized.confidence);
+      return ok(finalized);
+    }
+
+    // Corrective retry (SPEC-034 §4, mirrors SPEC-026 §3 D2).
+    const retryPrompt = buildReviewRetryPrompt(prompt, first.parseErrorMessage ?? "unknown parse error");
+    const second = await this._attemptJudgeDocParse(retryPrompt, bundle);
+    if (!second.providerResult.ok) {
+      emitReviewEvent(second.providerResult);
+      return second.providerResult;
+    }
+    if (second.parsed !== undefined) {
+      const finalized = this._finalizeJudgment(second.parsed, bundle, checks);
+      emitReviewEvent(second.providerResult, finalized.decision, finalized.confidence);
+      return ok(finalized);
+    }
+
+    // Both attempts malformed → AI_PROVIDER_ERROR with a raw-output prefix.
+    // No judgment is returned — the caller (CLI/MCP) only calls JudgmentService.record
+    // after an ok() return.
+    const rawPrefix = (second.rawContent ?? "").slice(0, 500);
+    const doubleFailure = err({
+      code: "AI_PROVIDER_ERROR" as const,
+      provider: this.active,
+      message:
+        `AI judge response could not be parsed as valid review JSON after one ` +
+        `corrective retry: ${second.parseErrorMessage ?? "unknown error"}. Raw output prefix: ${rawPrefix}`,
+    });
+    emitReviewEvent(doubleFailure);
+    return doubleFailure;
+  }
+
   // ─── Private Helpers ────────────────────────────────────────────────────────
 
   /**
@@ -649,12 +781,102 @@ export class AIProviderService {
   }
 
   /**
+   * One round of the review judge protocol: invoke the provider with `prompt`, then try to
+   * extract + validate review JSON from its response. Sibling of `_attemptJudgeParse` for
+   * the SPEC-034 judgeDoc protocol — same shape, different schema (llmReviewOutputSchema
+   * instead of llmAssessmentOutputSchema), no reasoning-length clipping (reviewReasonSchema
+   * has no length cap, unlike acScoreSchema's `.max(300)`).
+   *
+   * @param prompt - Fully-assembled judge prompt (initial or corrective-retry variant)
+   * @param bundle - Review bundle, used only for the GenerateInput doc_type/title
+   * @returns providerResult (the raw provider call outcome); when providerResult.ok, exactly
+   *   one of `parsed` (validated LlmReviewOutput) or `parseErrorMessage` (+ `rawContent`)
+   *   is set — never both.
+   */
+  private async _attemptJudgeDocParse(
+    prompt: string,
+    bundle: ReviewBundle,
+  ): Promise<{
+    providerResult: Result<GenerateOutput, LoreError>;
+    parsed?: LlmReviewOutput;
+    parseErrorMessage?: string;
+    rawContent?: string;
+  }> {
+    const { result: providerResult } = await this._invokeProvider({
+      prompt,
+      doc_type: bundle.doc.type,
+      title: bundle.doc.title,
+    });
+
+    if (!providerResult.ok) {
+      return { providerResult };
+    }
+
+    const rawContent = providerResult.value.content;
+    const extracted = extractAssessmentJson(rawContent);
+    if (!extracted.ok) {
+      const message = "message" in extracted.error ? extracted.error.message : extracted.error.code;
+      return { providerResult, rawContent, parseErrorMessage: message };
+    }
+
+    const validated = llmReviewOutputSchema.safeParse(extracted.value);
+    if (!validated.success) {
+      const message = validated.error.issues
+        .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
+        .join("; ");
+      return { providerResult, rawContent, parseErrorMessage: message };
+    }
+
+    return { providerResult, rawContent, parsed: validated.data };
+  }
+
+  /**
+   * Assemble the final NewReviewJudgment from a validated judge output — layers the
+   * service-computed `judge` identity on top of what the model produced (the model is
+   * never asked to, and never does, produce its own identity), and OVERWRITES whatever
+   * `checks` the model may have echoed back with the deterministic `checks` this call was
+   * invoked with (SPEC-034 §4 — mechanical pre-checks are authoritative, never model-derived).
+   *
+   * @param parsed - Validated judge output (decision/confidence/reasons/blocking_questions)
+   * @param bundle - Review bundle — bundle.doc.id/version become doc_id/doc_version
+   * @param checks - Deterministic pre-check results, passed in by the caller of judgeDoc
+   */
+  private _finalizeJudgment(
+    parsed: LlmReviewOutput,
+    bundle: ReviewBundle,
+    checks: CheckResult[],
+  ): NewReviewJudgment {
+    return {
+      doc_id: bundle.doc.id,
+      doc_version: bundle.doc.version,
+      decision: parsed.decision,
+      confidence: parsed.confidence,
+      reasons: parsed.reasons,
+      checks,
+      blocking_questions: parsed.blocking_questions,
+      judge: {
+        provider: this.active,
+        // reason: the AIProvider interface (packages/core/src/ai.ts) exposes no resolved
+        // model id — ClaudeCliProvider spawns a CLI binary whose active model is not
+        // introspectable from this layer, and HttpAIProvider's model lives in per-provider
+        // config this service doesn't currently thread through. Until a provider-level
+        // model accessor exists, judge.model mirrors judge.provider — both satisfy
+        // judgeIdentitySchema's `.min(1)`, and this keeps the field honest (a real,
+        // non-empty identifier) rather than fabricating an unverified model string.
+        model: this.active,
+        prompt_version: REVIEW_PROMPT_VERSION,
+      },
+    };
+  }
+
+  /**
    * Emit an ai.generation telemetry event on both success and failure paths.
    * No-op when aiTelemetryEnabled is false (AC-AI-21).
    *
    * @param result - Provider result (ok or err)
    * @param duration_ms - Wall-clock milliseconds for the full round-trip
-   * @param meta - Event metadata: doc_type, template_source, kind, target_doc_id, surfaces
+   * @param meta - Event metadata: doc_type, template_source, kind, target_doc_id, surfaces,
+   *   and (kind="review" only) decision/confidence
    */
   private _emitAiEvent(
     result: Result<GenerateOutput, LoreError>,
@@ -662,13 +884,17 @@ export class AIProviderService {
     meta: {
       doc_type: DocType;
       template_source: "built-in" | "user-override";
-      kind: "create" | "regenerate" | "refine" | "infer" | "assess";
+      kind: "create" | "regenerate" | "refine" | "infer" | "assess" | "review";
       target_doc_id?: string | null | undefined;
       // reason: exactOptionalPropertyTypes=true requires explicit `| undefined` when callers pass
       // `opts?.field` (type `T | undefined`). Without it, TS rejects `prop: T | undefined`
       // assigned to `prop?: T` because the source always has the property present.
       caller_surface?: CallerSurface | undefined;
       ai_default_source?: AiDefaultSource | undefined;
+      /** SPEC-034: the judge's decision, kind="review" only, present iff a judgment was reached. */
+      decision?: NewReviewJudgment["decision"] | undefined;
+      /** SPEC-034: the judge's confidence, kind="review" only, present iff a judgment was reached. */
+      confidence?: number | undefined;
     },
   ): void {
     if (!this.aiTelemetryEnabled) return;
@@ -687,6 +913,8 @@ export class AIProviderService {
         : result.error.code === "AI_PROVIDER_ERROR"
           ? (result.error.exit_code ?? -1)
           : -1,
+      ...(meta.decision !== undefined ? { decision: meta.decision } : {}),
+      ...(meta.confidence !== undefined ? { confidence: meta.confidence } : {}),
       // reason: LoreError is a discriminated union — not all variants have a `message` field.
       // Only AI_PROVIDER_ERROR, STORE_ERROR, and VALIDATION_ERROR do. Use presence check to
       // extract a display string that works for any error code.

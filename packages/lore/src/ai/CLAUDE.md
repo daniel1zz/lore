@@ -12,6 +12,7 @@ Runtime AI provider implementations, registry builder, template engine, assess j
 - **InMemoryAIProvider ships in src/ not tests/** — so any test in any package (including `@lore/core` tests) can import it without path hacks.
 - **Never throw** — all public async methods return `Promise<Result<T, LoreError>>`. `ClaudeCliProvider.generate` wraps `Bun.spawn` in try/catch to map ENOENT to `AI_PROVIDER_ERROR`.
 - **assess judge prompt lives here, NOT in `@lore/core`** (SPEC-026 §3 D8) — `assess-template.ts` owns the prompt text and `ASSESS_PROMPT_VERSION`; `@lore/core`'s `assessment.ts` stays limited to schemas + pure data helpers (truncation, JSON extraction, content rendering), matching the `task-workflow.ts` precedent of "core = schemas + pure helpers, no prompt strings."
+- **review judge prompt (SPEC-034) lives here too, same split** — `review-template.ts` owns `REVIEW_PROMPT_VERSION` (string, e.g. `"v1"` — unlike assess's numeric `ASSESS_PROMPT_VERSION`, this one is a string because `judgeIdentitySchema.prompt_version` is `z.string()`) and a version-keyed `REVIEW_TEMPLATES: Record<string, ReviewTemplateFn>` registry (one entry today; a future prompt A/B spec adds a key rather than mutating the existing one). `@lore/core`'s `review-checks.ts` stays limited to the pure `runDeterministicChecks` fn — no prompt strings there either.
 - **`InMemoryAIProvider`'s `sequence` mode mutates its own `responses` array via `shift()`** (SPEC-026 D9) — FIFO, one scripted response consumed per `generate()` call. Exhausting the script (more calls than responses) returns `AI_PROVIDER_ERROR` rather than silently reusing the last response — a test that under-scripts its sequence is a test bug, and this fails loud instead of masking it.
 
 ## Patterns
@@ -33,6 +34,7 @@ Runtime AI provider implementations, registry builder, template engine, assess j
 | `templates.ts` | `BUILT_IN_TEMPLATES`, `REFINE_TEMPLATE`, `LINK_INFERENCE_TEMPLATE`, `renderTemplate(tpl, vars)` — minimal mustache-subset renderer |
 | `resolve-ai.ts` | `resolveAiDefault(explicit, surface, configDefaults?)` (SPEC-024), `isAssessAiBraked(resolved)` (SPEC-026 D5) |
 | `assess-template.ts` | `ASSESS_PROMPT_VERSION`, `buildAssessPrompt(bundle, diffText, budgets)`, `buildAssessRetryPrompt(prompt, parseError)` (SPEC-026) |
+| `review-template.ts` | `REVIEW_PROMPT_VERSION`, `REVIEW_TEMPLATES` registry, `buildReviewRetryPrompt(prompt, parseError)` (SPEC-034) |
 
 ## Links
 

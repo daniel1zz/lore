@@ -89,6 +89,7 @@ function makeApp(): { app: App; aiProvider: InMemoryAIProvider } {
     // reason: SPEC-032 §3.4 — test does not exercise spec-kind audit; null-cast per
     // established pattern (see phaseService above) for satisfying newly-required App fields.
     specKindService: null as unknown as App["specKindService"],
+    judgmentService: null as unknown as App["judgmentService"],
     // reason: SPEC-024 §9.2 — MCP surface is set at startup, before any tool call
     callerSurface: "mcp" as const,
     // reason: simplified resolveAiDefault for unit tests — mirrors mcp built-in (false)

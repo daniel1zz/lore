@@ -43,6 +43,7 @@ import { ExportDocsService } from "./service/export-docs-service.js";
 import { PhaseService } from "./service/phase-service.js";
 import { TaskWorkflowService } from "./service/task-workflow-service.js";
 import { SpecKindService } from "./service/spec-kind-service.js";
+import { JudgmentService } from "./service/judgment-service.js";
 
 export interface App {
   corpusService: CorpusService;
@@ -98,6 +99,13 @@ export interface App {
    * Source: SPEC-032 §3.4
    */
   specKindService: SpecKindService;
+  /**
+   * JudgmentService — persistence + audit for AI review judgments (review_judgments) and
+   * their human calibration outcomes (calibration_records). Owns the whole judgment/
+   * calibration data family (SPEC-034 D8) — never touches doc status.
+   * Source: SPEC-034 §5, §9.1
+   */
+  judgmentService: JudgmentService;
   /**
    * Telemetry sink — exposed for dashboard route handlers to emit source-tagged events.
    * Dashboard handlers record { service: "dashboard", source: "dashboard" } events after
@@ -181,6 +189,9 @@ function buildAppFromSqlite(
     // reason: SpecKindService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-032 §3.4.
     specKindService: new SpecKindService(store),
+    // reason: JudgmentService owns review_judgments + calibration_records — store + own
+    // telemetry wiring, same DI shape as TaskWorkflowService (D8). SPEC-034 §5, §9.1.
+    judgmentService: new JudgmentService(store, telemetry),
     // reason: telemetry exposed on App so dashboard route handlers can emit source-tagged events
     // without requiring service-layer signature changes (SPEC-022 §9.6).
     telemetry,
@@ -251,6 +262,9 @@ function buildAppFromTurso(
     // reason: SpecKindService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-032 §3.4.
     specKindService: new SpecKindService(store),
+    // reason: JudgmentService owns review_judgments + calibration_records — store + own
+    // telemetry wiring, same DI shape as TaskWorkflowService (D8). SPEC-034 §5, §9.1.
+    judgmentService: new JudgmentService(store, telemetry),
     // reason: telemetry exposed on App so dashboard route handlers can emit source-tagged events
     // without requiring service-layer signature changes (SPEC-022 §9.6).
     telemetry,
@@ -313,6 +327,7 @@ export function createApp(
     aiConfig.telemetry,
     aiConfig.refine.max_input_chars,
     aiConfig.assess,
+    aiConfig.review,
   );
 
   // Extract per-surface AI defaults from config (SPEC-024)
