@@ -8,18 +8,22 @@
 import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { MIGRATION_001_SQL } from "./migrations/migration-001.js";
 import { MIGRATION_002_SQL } from "./migrations/migration-002.js";
+import { MIGRATION_003_SQL } from "./migrations/migration-003.js";
 import type {
   AuditEntry,
+  CalibrationRecord,
   DocId,
   DocRecord,
   LinkRecord,
   LinkType,
+  ReviewJudgment,
   Slug,
   VersionRecord,
 } from "@lore/core";
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import type {
   AuditFilters,
+  CalibrationWindowFilter,
   SearchHit,
   StoreFilters,
   StoreInterface,
@@ -27,14 +31,18 @@ import type {
 } from "./store-interface.js";
 import {
   type AuditRow,
+  type CalibrationRow,
   type DocRow,
   type FtsRow,
+  type JudgmentRow,
   type LinkRow,
   type VersionRow,
   escapeFtsQuery,
   rowToAuditEntry,
+  rowToCalibrationRecord,
   rowToDocRecord,
   rowToLinkRecord,
+  rowToReviewJudgment,
   rowToVersionRecord,
   wrapStoreError,
 } from "./store-shared.js";
@@ -79,6 +87,10 @@ export class SQLiteStore implements StoreInterface {
 
     if (currentVersion < 2) {
       this.db.exec(MIGRATION_002_SQL);
+    }
+
+    if (currentVersion < 3) {
+      this.db.exec(MIGRATION_003_SQL);
     }
   }
 
@@ -654,6 +666,131 @@ export class SQLiteStore implements StoreInterface {
 
       const rows = this.db.prepare(sql).all(...params) as AuditRow[];
       return ok(rows.map(rowToAuditEntry));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  // ── Review Judgments ───────────────────────────────────────────────────────
+
+  async insertJudgment(judgment: ReviewJudgment): Promise<Result<void, LoreError>> {
+    try {
+      this.db
+        .prepare(
+          `INSERT INTO review_judgments
+             (id, doc_id, doc_version, decision, confidence, reasons, checks,
+              blocking_questions, judge_provider, judge_model, judge_prompt_version,
+              created_at, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          judgment.id,
+          judgment.doc_id,
+          judgment.doc_version,
+          judgment.decision,
+          judgment.confidence,
+          JSON.stringify(judgment.reasons),
+          JSON.stringify(judgment.checks),
+          JSON.stringify(judgment.blocking_questions),
+          judgment.judge.provider,
+          judgment.judge.model,
+          judgment.judge.prompt_version,
+          judgment.created_at,
+          judgment.created_by,
+        );
+      return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async findJudgments(docId: DocId): Promise<Result<ReviewJudgment[], LoreError>> {
+    try {
+      const rows = this.db
+        .prepare(
+          "SELECT * FROM review_judgments WHERE doc_id = ? ORDER BY created_at DESC",
+        )
+        .all(docId) as JudgmentRow[];
+      return ok(rows.map(rowToReviewJudgment));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async latestJudgment(docId: DocId): Promise<Result<ReviewJudgment | null, LoreError>> {
+    try {
+      const row = this.db
+        .prepare(
+          "SELECT * FROM review_judgments WHERE doc_id = ? ORDER BY created_at DESC LIMIT 1",
+        )
+        .get(docId) as JudgmentRow | null;
+      return ok(row ? rowToReviewJudgment(row) : null);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  // ── Calibration Records ─────────────────────────────────────────────────────
+
+  async insertCalibrationRecord(record: CalibrationRecord): Promise<Result<void, LoreError>> {
+    try {
+      this.db
+        .prepare(
+          `INSERT INTO calibration_records
+             (id, judgment_id, doc_id, doc_type, human_outcome, delta_reasons, actor, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          record.id,
+          record.judgment_id,
+          record.doc_id,
+          record.doc_type,
+          record.human_outcome,
+          JSON.stringify(record.delta_reasons),
+          record.actor,
+          record.created_at,
+        );
+      return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async queryCalibrationWindow(
+    filter: CalibrationWindowFilter,
+  ): Promise<Result<CalibrationRecord[], LoreError>> {
+    try {
+      // reason: prompt_version lives on review_judgments, not calibration_records —
+      // a single indexed JOIN keeps this a one-statement query instead of an N+1
+      // fan-out per calibration row. See SPEC-034 §3.
+      const clauses: string[] = [];
+      const params: SQLQueryBindings[] = [];
+
+      if (filter.doc_type !== undefined) {
+        clauses.push("c.doc_type = ?");
+        params.push(filter.doc_type);
+      }
+      if (filter.prompt_version !== undefined) {
+        clauses.push("j.judge_prompt_version = ?");
+        params.push(filter.prompt_version);
+      }
+
+      const needsJoin = filter.prompt_version !== undefined;
+      const joinClause = needsJoin
+        ? "JOIN review_judgments j ON j.id = c.judgment_id"
+        : "";
+      const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+      const sql = `
+        SELECT c.* FROM calibration_records c
+        ${joinClause}
+        ${whereClause}
+        ORDER BY c.created_at DESC
+        LIMIT ?
+      `;
+      params.push(filter.limit);
+
+      const rows = this.db.prepare(sql).all(...params) as CalibrationRow[];
+      return ok(rows.map(rowToCalibrationRecord));
     } catch (e) {
       return wrapStoreError(e);
     }

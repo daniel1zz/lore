@@ -8,16 +8,19 @@
 
 import type {
   AuditEntry,
+  CalibrationRecord,
   DocId,
   DocRecord,
   LinkRecord,
   LinkType,
+  ReviewJudgment,
   Slug,
   VersionRecord,
 } from "@lore/core";
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import type {
   AuditFilters,
+  CalibrationWindowFilter,
   SearchHit,
   StoreFilters,
   StoreInterface,
@@ -31,6 +34,8 @@ export class InMemoryStore implements StoreInterface {
   private links: LinkRecord[] = [];
   private readonly versions: VersionRecord[] = [];
   private readonly audit: AuditEntry[] = [];
+  private readonly judgments: ReviewJudgment[] = [];
+  private readonly calibrationRecords: CalibrationRecord[] = [];
 
   // ── Document CRUD ─────────────────────────────────────────────────────────
 
@@ -366,6 +371,59 @@ export class InMemoryStore implements StoreInterface {
     }
 
     return ok(results.map((e) => ({ ...e })));
+  }
+
+  // ── Review Judgments ─────────────────────────────────────────────────────────
+
+  async insertJudgment(judgment: ReviewJudgment): Promise<Result<void, LoreError>> {
+    this.judgments.push({ ...judgment });
+    return ok(undefined);
+  }
+
+  async findJudgments(docId: DocId): Promise<Result<ReviewJudgment[], LoreError>> {
+    const matching = this.judgments
+      .filter((j) => j.doc_id === docId)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+    return ok(matching.map((j) => ({ ...j })));
+  }
+
+  async latestJudgment(docId: DocId): Promise<Result<ReviewJudgment | null, LoreError>> {
+    const matchingResult = await this.findJudgments(docId);
+    if (!matchingResult.ok) return matchingResult;
+    return ok(matchingResult.value[0] ?? null);
+  }
+
+  // ── Calibration Records ──────────────────────────────────────────────────────
+
+  async insertCalibrationRecord(record: CalibrationRecord): Promise<Result<void, LoreError>> {
+    this.calibrationRecords.push({ ...record });
+    return ok(undefined);
+  }
+
+  async queryCalibrationWindow(
+    filter: CalibrationWindowFilter,
+  ): Promise<Result<CalibrationRecord[], LoreError>> {
+    // reason: prompt_version filters on the judgment a calibration record points
+    // at — mirrors the SQL JOIN in SQLiteStore/TursoStore, kept as an in-memory
+    // lookup here since there's no join operator on plain arrays.
+    const judgmentPromptVersionById = new Map(
+      this.judgments.map((j) => [j.id, j.judge.prompt_version]),
+    );
+
+    let results = this.calibrationRecords.filter((record) => {
+      if (filter.doc_type !== undefined && record.doc_type !== filter.doc_type) return false;
+      if (
+        filter.prompt_version !== undefined &&
+        judgmentPromptVersionById.get(record.judgment_id) !== filter.prompt_version
+      )
+        return false;
+      return true;
+    });
+
+    results = results.sort((a, b) => b.created_at.localeCompare(a.created_at));
+    results = results.slice(0, filter.limit);
+
+    return ok(results.map((r) => ({ ...r })));
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────

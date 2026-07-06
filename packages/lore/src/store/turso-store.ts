@@ -15,18 +15,23 @@
 import { createClient, type Client, type InValue, type Row } from "@libsql/client";
 import { MIGRATION_001_SQL } from "./migrations/migration-001.js";
 import { MIGRATION_002_SQL } from "./migrations/migration-002.js";
+import { MIGRATION_003_SQL } from "./migrations/migration-003.js";
 import type {
   AuditEntry,
+  CalibrationRecord,
   DocId,
   DocRecord,
+  DocType,
   LinkRecord,
   LinkType,
+  ReviewJudgment,
   Slug,
   VersionRecord,
 } from "@lore/core";
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import type {
   AuditFilters,
+  CalibrationWindowFilter,
   SearchHit,
   StoreFilters,
   StoreInterface,
@@ -35,13 +40,17 @@ import type {
 import {
   escapeFtsQuery,
   rowToAuditEntry,
+  rowToCalibrationRecord,
   rowToDocRecord,
   rowToLinkRecord,
+  rowToReviewJudgment,
   rowToVersionRecord,
   wrapStoreError,
   type AuditRow,
+  type CalibrationRow,
   type DocRow,
   type FtsRow,
+  type JudgmentRow,
   type LinkRow,
   type VersionRow,
 } from "./store-shared.js";
@@ -154,6 +163,37 @@ function libsqlRowToFtsRow(row: Row): FtsRow {
   };
 }
 
+function libsqlRowToJudgmentRow(row: Row): JudgmentRow {
+  return {
+    id: rowStr(row, "id"),
+    doc_id: rowStr(row, "doc_id"),
+    doc_version: rowNum(row, "doc_version"),
+    decision: rowStr(row, "decision"),
+    confidence: rowNum(row, "confidence"),
+    reasons: rowStr(row, "reasons") || "[]",
+    checks: rowStr(row, "checks") || "[]",
+    blocking_questions: rowStr(row, "blocking_questions") || "[]",
+    judge_provider: rowStr(row, "judge_provider"),
+    judge_model: rowStr(row, "judge_model"),
+    judge_prompt_version: rowStr(row, "judge_prompt_version"),
+    created_at: rowStr(row, "created_at"),
+    created_by: rowStr(row, "created_by"),
+  };
+}
+
+function libsqlRowToCalibrationRow(row: Row): CalibrationRow {
+  return {
+    id: rowStr(row, "id"),
+    judgment_id: rowStr(row, "judgment_id"),
+    doc_id: rowStr(row, "doc_id"),
+    doc_type: rowStr(row, "doc_type"),
+    human_outcome: rowStr(row, "human_outcome"),
+    delta_reasons: rowStr(row, "delta_reasons") || "[]",
+    actor: rowStr(row, "actor"),
+    created_at: rowStr(row, "created_at"),
+  };
+}
+
 // ─── TursoStore ────────────────────────────────────────────────────────────
 
 export class TursoStore implements StoreInterface {
@@ -207,6 +247,10 @@ export class TursoStore implements StoreInterface {
 
       if (currentVersion < 2) {
         await this.client.executeMultiple(MIGRATION_002_SQL);
+      }
+
+      if (currentVersion < 3) {
+        await this.client.executeMultiple(MIGRATION_003_SQL);
       }
     })();
 
@@ -803,6 +847,132 @@ export class TursoStore implements StoreInterface {
 
       const rs = await this.client.execute({ sql, args: params });
       return ok(rs.rows.map((row) => rowToAuditEntry(libsqlRowToAuditRow(row))));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  // ── Review Judgments ────────────────────────────────────────────────────
+
+  async insertJudgment(judgment: ReviewJudgment): Promise<Result<void, LoreError>> {
+    try {
+      await this.ensureReady();
+      await this.client.execute({
+        sql: `INSERT INTO review_judgments
+               (id, doc_id, doc_version, decision, confidence, reasons, checks,
+                blocking_questions, judge_provider, judge_model, judge_prompt_version,
+                created_at, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          judgment.id,
+          judgment.doc_id,
+          judgment.doc_version,
+          judgment.decision,
+          judgment.confidence,
+          JSON.stringify(judgment.reasons),
+          JSON.stringify(judgment.checks),
+          JSON.stringify(judgment.blocking_questions),
+          judgment.judge.provider,
+          judgment.judge.model,
+          judgment.judge.prompt_version,
+          judgment.created_at,
+          judgment.created_by,
+        ] as InValue[],
+      });
+      return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async findJudgments(docId: DocId): Promise<Result<ReviewJudgment[], LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute({
+        sql: "SELECT * FROM review_judgments WHERE doc_id = ? ORDER BY created_at DESC",
+        args: [docId],
+      });
+      return ok(rs.rows.map((row) => rowToReviewJudgment(libsqlRowToJudgmentRow(row))));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async latestJudgment(docId: DocId): Promise<Result<ReviewJudgment | null, LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute({
+        sql: "SELECT * FROM review_judgments WHERE doc_id = ? ORDER BY created_at DESC LIMIT 1",
+        args: [docId],
+      });
+      const row = rs.rows[0];
+      return ok(row ? rowToReviewJudgment(libsqlRowToJudgmentRow(row)) : null);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  // ── Calibration Records ──────────────────────────────────────────────────
+
+  async insertCalibrationRecord(record: CalibrationRecord): Promise<Result<void, LoreError>> {
+    try {
+      await this.ensureReady();
+      await this.client.execute({
+        sql: `INSERT INTO calibration_records
+               (id, judgment_id, doc_id, doc_type, human_outcome, delta_reasons, actor, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          record.id,
+          record.judgment_id,
+          record.doc_id,
+          record.doc_type,
+          record.human_outcome,
+          JSON.stringify(record.delta_reasons),
+          record.actor,
+          record.created_at,
+        ] as InValue[],
+      });
+      return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async queryCalibrationWindow(
+    filter: CalibrationWindowFilter,
+  ): Promise<Result<CalibrationRecord[], LoreError>> {
+    try {
+      await this.ensureReady();
+
+      // reason: prompt_version lives on review_judgments, not calibration_records —
+      // a single indexed JOIN keeps this a one-statement query instead of an N+1
+      // fan-out per calibration row. See SPEC-034 §3.
+      const clauses: string[] = [];
+      const params: InValue[] = [];
+
+      if (filter.doc_type !== undefined) {
+        clauses.push("c.doc_type = ?");
+        params.push(filter.doc_type);
+      }
+      if (filter.prompt_version !== undefined) {
+        clauses.push("j.judge_prompt_version = ?");
+        params.push(filter.prompt_version);
+      }
+
+      const needsJoin = filter.prompt_version !== undefined;
+      const joinClause = needsJoin ? "JOIN review_judgments j ON j.id = c.judgment_id" : "";
+      const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+      const sql = `
+        SELECT c.* FROM calibration_records c
+        ${joinClause}
+        ${whereClause}
+        ORDER BY c.created_at DESC
+        LIMIT ?
+      `;
+      params.push(filter.limit);
+
+      const rs = await this.client.execute({ sql, args: params });
+      return ok(rs.rows.map((row) => rowToCalibrationRecord(libsqlRowToCalibrationRow(row))));
     } catch (e) {
       return wrapStoreError(e);
     }

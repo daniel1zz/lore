@@ -622,6 +622,13 @@ describe("OutlineService.resolve", () => {
         findVersions: (id, opts) => store.findVersions(id, opts),
         appendAuditEntry: (e) => store.appendAuditEntry(e),
         queryAudit: (f) => store.queryAudit(f),
+        // reason: SPEC-034 §3 — new required StoreInterface methods; mechanical
+        // addition (same class of fix as every other explicit delegate above).
+        insertJudgment: (j) => store.insertJudgment(j),
+        findJudgments: (id) => store.findJudgments(id),
+        latestJudgment: (id) => store.latestJudgment(id),
+        insertCalibrationRecord: (r) => store.insertCalibrationRecord(r),
+        queryCalibrationWindow: (f) => store.queryCalibrationWindow(f),
         close: () => store.close(),
         dbSizeBytes: () => store.dbSizeBytes(),
       };
