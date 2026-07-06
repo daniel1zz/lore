@@ -22,9 +22,25 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
-import { ExportDocsService } from "../../../src/service/export-docs-service.js";
-import { canonicaliseBody, DOC_TYPE_ROLE_MAP } from "@lore/core";
+import { ExportDocsService, type ResolveDocBody } from "../../../src/service/export-docs-service.js";
+import { OutlineService, renderResolvedToMarkdown } from "../../../src/service/outline-service.js";
+import { canonicaliseBody, ok, DOC_TYPE_ROLE_MAP } from "@lore/core";
 import type { DocRecord, Slug } from "@lore/core";
+
+/**
+ * Build the real ResolveDocBody wiring (OutlineService.resolve + renderResolvedToMarkdown)
+ * against the given store — mirrors app.ts's composition exactly (SPEC-032 §3.3), so these
+ * tests exercise the actual splice behavior rather than a stub.
+ */
+function makeExportService(store: InMemoryStore): ExportDocsService {
+  const outlineService = new OutlineService(store);
+  const resolveDocBody: ResolveDocBody = async (doc) => {
+    const resolved = await outlineService.resolve(doc);
+    if (!resolved.ok) return resolved;
+    return ok(renderResolvedToMarkdown(resolved.value));
+  };
+  return new ExportDocsService(store, resolveDocBody);
+}
 
 // ─── Temp Directory Lifecycle ─────────────────────────────────────────────────
 
@@ -131,7 +147,7 @@ function parseFrontmatterScalars(mdContent: string): Record<string, string> {
 describe("HAPPY — empty store produces empty report (AC-EXPORT-1)", () => {
   it("returns ok(report) with all arrays empty", async () => {
     const store = new InMemoryStore();
-    const service = new ExportDocsService(store);
+    const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
     const result = await service.exportDocs({ projectDir, dryRun: false });
@@ -151,7 +167,7 @@ describe("HAPPY — empty store produces empty report (AC-EXPORT-1)", () => {
 describe("HAPPY — single spec doc exported with SPEC-001 human ID (AC-EXPORT-2)", () => {
   it("creates file at docs/requirements/spec/SPEC-001-<kebab>.md", async () => {
     const store = new InMemoryStore();
-    const service = new ExportDocsService(store);
+    const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
     await insertDoc(store, makeDoc({
@@ -177,7 +193,7 @@ describe("HAPPY — single spec doc exported with SPEC-001 human ID (AC-EXPORT-2
 
   it("frontmatter id field is the human ID SPEC-001, NOT the ULID", async () => {
     const store = new InMemoryStore();
-    const service = new ExportDocsService(store);
+    const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
     const docId = "01J000000000000000000000S1";
@@ -204,7 +220,7 @@ describe("HAPPY — single spec doc exported with SPEC-001 human ID (AC-EXPORT-2
 
   it("frontmatter type and role fields are correct", async () => {
     const store = new InMemoryStore();
-    const service = new ExportDocsService(store);
+    const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
     await insertDoc(store, makeDoc({
@@ -228,7 +244,7 @@ describe("HAPPY — single spec doc exported with SPEC-001 human ID (AC-EXPORT-2
 
   it("frontmatter title is double-quoted", async () => {
     const store = new InMemoryStore();
-    const service = new ExportDocsService(store);
+    const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
     await insertDoc(store, makeDoc({
@@ -250,7 +266,7 @@ describe("HAPPY — single spec doc exported with SPEC-001 human ID (AC-EXPORT-2
 
   it("frontmatter tags: [] is always present even when doc has no tags", async () => {
     const store = new InMemoryStore();
-    const service = new ExportDocsService(store);
+    const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
     await insertDoc(store, makeDoc({
@@ -277,7 +293,7 @@ describe("HAPPY — single spec doc exported with SPEC-001 human ID (AC-EXPORT-2
 describe("BOUNDARY — title with special YAML characters is escaped (AC-EXPORT-2)", () => {
   it("double quotes in title are backslash-escaped in frontmatter", async () => {
     const store = new InMemoryStore();
-    const service = new ExportDocsService(store);
+    const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
     await insertDoc(store, makeDoc({
@@ -299,7 +315,7 @@ describe("BOUNDARY — title with special YAML characters is escaped (AC-EXPORT-
 
   it("title with hyphens produces valid filename without double-hyphens", async () => {
     const store = new InMemoryStore();
-    const service = new ExportDocsService(store);
+    const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
     await insertDoc(store, makeDoc({
@@ -325,7 +341,7 @@ describe("BOUNDARY — title with special YAML characters is escaped (AC-EXPORT-
 describe("HAPPY — plan + task: task frontmatter references plan by human ID (AC-EXPORT-5)", () => {
   it("task frontmatter has parent: PLAN-001 and plan: PLAN-001", async () => {
     const store = new InMemoryStore();
-    const service = new ExportDocsService(store);
+    const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
     const planId = "01J000000000000000000000P1";
@@ -373,7 +389,7 @@ describe("HAPPY — plan + task: task frontmatter references plan by human ID (A
 describe("STATE — idempotency: second run produces skipped_clean, not created (AC-EXPORT-3)", () => {
   it("running export twice with unchanged corpus: second run reports all files as skipped_clean", async () => {
     const store = new InMemoryStore();
-    const service = new ExportDocsService(store);
+    const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
     await insertDoc(store, makeDoc({
@@ -408,7 +424,7 @@ describe("STATE — idempotency: second run produces skipped_clean, not created 
 describe("HAPPY — --type filter exports only matching doc type (AC-EXPORT-8)", () => {
   it("--type spec only exports spec docs; plan docs are not exported", async () => {
     const store = new InMemoryStore();
-    const service = new ExportDocsService(store);
+    const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
     await insertDoc(store, makeDoc({
@@ -445,7 +461,7 @@ describe("HAPPY — --type filter exports only matching doc type (AC-EXPORT-8)",
 describe("NEGATIVE — parent excluded by type filter: parent: field omitted silently (AC-EXPORT-8)", () => {
   it("spec child with plan parent: when plan excluded by type filter, parent: not in frontmatter", async () => {
     const store = new InMemoryStore();
-    const service = new ExportDocsService(store);
+    const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
     const planId = "01J000000000000000000000P1";
@@ -486,7 +502,7 @@ describe("NEGATIVE — parent excluded by type filter: parent: field omitted sil
 describe("NEGATIVE — force:true returns VALIDATION_ERROR, never ok(report) (AC-EXPORT-9)", () => {
   it("force: true returns err with VALIDATION_ERROR code", async () => {
     const store = new InMemoryStore();
-    const service = new ExportDocsService(store);
+    const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
     const result = await service.exportDocs({ projectDir, dryRun: false, force: true });
@@ -500,7 +516,7 @@ describe("NEGATIVE — force:true returns VALIDATION_ERROR, never ok(report) (AC
 
   it("force: true rejected even with empty corpus (not a silent no-op)", async () => {
     const store = new InMemoryStore();
-    const service = new ExportDocsService(store);
+    const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
     const result = await service.exportDocs({ projectDir, dryRun: false, force: true });
@@ -515,7 +531,7 @@ describe("NEGATIVE — force:true returns VALIDATION_ERROR, never ok(report) (AC
 
   it("force: true error specifically names 'force' as the invalid field", async () => {
     const store = new InMemoryStore();
-    const service = new ExportDocsService(store);
+    const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
     const result = await service.exportDocs({ projectDir, dryRun: false, force: true });
@@ -534,7 +550,7 @@ describe("NEGATIVE — force:true returns VALIDATION_ERROR, never ok(report) (AC
 describe("NEGATIVE — file on disk differs from corpus → drift[], file NOT overwritten (AC-EXPORT-4)", () => {
   it("pre-existing file with different body added to drift[], original file content preserved", async () => {
     const store = new InMemoryStore();
-    const service = new ExportDocsService(store);
+    const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
     const originalBody = "# My Spec\n\nThis is the canonical corpus version.";
@@ -581,7 +597,7 @@ describe("NEGATIVE — file on disk differs from corpus → drift[], file NOT ov
 
   it("drift check uses canonicalised comparison (CRLF on disk vs LF in corpus = no false drift)", async () => {
     const store = new InMemoryStore();
-    const service = new ExportDocsService(store);
+    const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
     const corpusBody = "# Spec\n\nBody with LF endings.";
@@ -621,7 +637,7 @@ describe("NEGATIVE — file on disk differs from corpus → drift[], file NOT ov
 describe("HAPPY — dryRun:true reports created[] but writes no files (AC-EXPORT-7)", () => {
   it("dryRun: true fills created[] but files do not exist on disk", async () => {
     const store = new InMemoryStore();
-    const service = new ExportDocsService(store);
+    const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
     await insertDoc(store, makeDoc({
@@ -644,7 +660,7 @@ describe("HAPPY — dryRun:true reports created[] but writes no files (AC-EXPORT
 
   it("dryRun: true with empty corpus returns empty created[] (no phantom entries)", async () => {
     const store = new InMemoryStore();
-    const service = new ExportDocsService(store);
+    const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
     const result = await service.exportDocs({ projectDir, dryRun: true });
@@ -657,7 +673,7 @@ describe("HAPPY — dryRun:true reports created[] but writes no files (AC-EXPORT
 
   it("dryRun: true does NOT write .lore/export-index.json", async () => {
     const store = new InMemoryStore();
-    const service = new ExportDocsService(store);
+    const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
     await insertDoc(store, makeDoc({
@@ -680,7 +696,7 @@ describe("HAPPY — dryRun:true reports created[] but writes no files (AC-EXPORT
 describe("BOUNDARY — human IDs are sequential and zero-padded to 3 digits (AC-EXPORT-2)", () => {
   it("two spec docs get SPEC-001 and SPEC-002 (not SPEC-1 or SPEC-2)", async () => {
     const store = new InMemoryStore();
-    const service = new ExportDocsService(store);
+    const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
     // newer updated_at → first in findMany DESC sort → SPEC-001
@@ -724,7 +740,7 @@ describe("BOUNDARY — human IDs are sequential and zero-padded to 3 digits (AC-
 
   it("different types have independent counters: first spec = SPEC-001, first plan = PLAN-001", async () => {
     const store = new InMemoryStore();
-    const service = new ExportDocsService(store);
+    const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
     await insertDoc(store, makeDoc({
@@ -763,7 +779,7 @@ describe("BOUNDARY — human IDs are sequential and zero-padded to 3 digits (AC-
 describe("BOUNDARY — export index is written to .lore/export-index.json (AC-EXPORT-6)", () => {
   it("after export, index file exists and contains the mapping entry", async () => {
     const store = new InMemoryStore();
-    const service = new ExportDocsService(store);
+    const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
     const docId = "01J000000000000000000000S1";
@@ -799,7 +815,7 @@ describe("BOUNDARY — export index is written to .lore/export-index.json (AC-EX
 describe("REGRESSION — file body equals canonicaliseBody(doc.content) (AC-EXPORT-4)", () => {
   it("body in written file matches canonicaliseBody of the original doc content", async () => {
     const store = new InMemoryStore();
-    const service = new ExportDocsService(store);
+    const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
     const originalContent = "# My Spec\n\nLine 1.\n\nLine 2.\n";
@@ -825,7 +841,7 @@ describe("REGRESSION — file body equals canonicaliseBody(doc.content) (AC-EXPO
 
   it("CRLF doc content is normalised to LF in the written file", async () => {
     const store = new InMemoryStore();
-    const service = new ExportDocsService(store);
+    const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
     const crlfContent = "# Spec\r\n\r\nBody with CRLF line endings.\r\n";
@@ -875,7 +891,7 @@ describe("REGRESSION — file body equals canonicaliseBody(doc.content) (AC-EXPO
 describe("ERROR — per-doc errors do not abort the run (AC-EXPORT-3)", () => {
   it("multiple independent docs all export; errors in one do not block others", async () => {
     const store = new InMemoryStore();
-    const service = new ExportDocsService(store);
+    const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
     // Two independent specs
@@ -902,6 +918,77 @@ describe("ERROR — per-doc errors do not abort the run (AC-EXPORT-3)", () => {
     // Both docs independently exported
     expect(result.value.created).toHaveLength(2);
     expect(result.value.errors).toHaveLength(0);
+  });
+});
+
+// ─── MDX placeholder splicing (SPEC-032 §3.3 AC-4) ────────────────────────────
+
+describe("HAPPY — exported body has MDX placeholders spliced, not raw tags (AC-4)", () => {
+  it("written file body contains the rendered child list, not the literal <ChildrenOf /> tag", async () => {
+    const store = new InMemoryStore();
+    const service = makeExportService(store);
+    const projectDir = makeTempProjectDir();
+
+    await insertDoc(store, makeDoc({
+      id: "01J0000000000000000000PRD",
+      type: "prd",
+      title: "Root PRD",
+      slug: "prd-root-prd",
+      content: "# Root PRD\n\n<ChildrenOf />\n",
+    }));
+    await insertDoc(store, makeDoc({
+      id: "01J000000000000000000000S1",
+      type: "spec",
+      title: "Child Spec",
+      slug: "spec-child-spec",
+      parent_id: "01J0000000000000000000PRD",
+    }));
+
+    const result = await service.exportDocs({ projectDir, dryRun: false });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const prdFilePath = result.value.created.find((p) => p.includes("PRD-"));
+    expect(prdFilePath).toBeDefined();
+    const fileContent = readFileSync(join(projectDir, prdFilePath!), "utf8");
+    const fileBody = extractBody(fileContent);
+
+    expect(fileBody).not.toContain("<ChildrenOf");
+    expect(fileBody).toContain("- [spec] Child Spec (draft)");
+  });
+});
+
+describe("STATE — re-exporting a placeholder-bearing doc reports clean, not permanent drift (AC-4)", () => {
+  it("second run on an unchanged corpus is skipped_clean — proves drift compares spliced-vs-spliced", async () => {
+    // Regression guard for the exact bug SPEC-032 §3.3 calls out: if drift compared raw
+    // doc.content against a file that was written spliced (or vice versa), a doc with any
+    // whitelisted placeholder would report drift on EVERY subsequent run, forever — no
+    // number of re-exports could ever converge. This test proves convergence.
+    const store = new InMemoryStore();
+    const service = makeExportService(store);
+    const projectDir = makeTempProjectDir();
+
+    await insertDoc(store, makeDoc({
+      id: "01J0000000000000000000PR2",
+      type: "prd",
+      title: "Stable PRD",
+      slug: "prd-stable-prd",
+      content: "# Stable PRD\n\n<HealthStats />\n",
+    }));
+
+    const first = await service.exportDocs({ projectDir, dryRun: false });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.value.created).toHaveLength(1);
+    expect(first.value.drift).toHaveLength(0);
+
+    const second = await service.exportDocs({ projectDir, dryRun: false });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+
+    expect(second.value.created).toHaveLength(0);
+    expect(second.value.drift).toHaveLength(0);
+    expect(second.value.skipped_clean).toHaveLength(1);
   });
 });
 

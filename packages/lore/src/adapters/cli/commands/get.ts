@@ -1,10 +1,20 @@
 /**
  * lore get <id-or-slug> — display a document with navigation footer.
+ *
+ * MDX placeholder splicing (SPEC-032 §3.3): unless --raw, this command calls
+ * OutlineService.resolve(doc) itself and feeds the result into
+ * renderResolvedToMarkdown() before printing — the same adapter-level thin-pipe
+ * pattern already used by the HTTP (`?resolveMdx=true`) and MCP (`lore_get`)
+ * surfaces. CorpusService.get() does NOT perform this resolution (see its
+ * GetOpts.resolve_mdx JSDoc) — services never cross-import, so the splice must
+ * happen here, not inside CorpusService.
  */
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatNavigation } from "../utils.js";
+import { renderResolvedToMarkdown } from "../../../service/outline-service.js";
+import type { ResolvedComponent } from "../../../service/outline-service.js";
 
 export default defineCommand({
   meta: {
@@ -29,7 +39,7 @@ export default defineCommand({
   async run({ args }) {
     const { app } = loadLoreApp();
     try {
-      const result = await app.corpusService.get(args.id, { resolve_mdx: !args.raw });
+      const result = await app.corpusService.get(args.id);
 
       if (!result.ok) {
         process.stderr.write(formatError(result.error) + "\n");
@@ -39,8 +49,24 @@ export default defineCommand({
 
       const { doc, navigation } = result.value;
 
+      // Splice MDX placeholders unless --raw. A resolution failure (store error)
+      // degrades to the raw body rather than aborting `get` — the doc + navigation
+      // are still valuable output even if placeholder data couldn't be fetched.
+      let displayBody = doc.content;
+      let resolvedComponents: ResolvedComponent[] | undefined;
+      if (!args.raw) {
+        const resolveResult = await app.outlineService.resolve(doc);
+        if (resolveResult.ok) {
+          resolvedComponents = resolveResult.value.resolvedComponents;
+          displayBody = renderResolvedToMarkdown(resolveResult.value);
+        }
+      }
+
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
+        const data = resolvedComponents !== undefined
+          ? { ...result.value, resolved_components: resolvedComponents }
+          : result.value;
+        console.log(JSON.stringify({ ok: true, data }, null, 2));
         return;
       }
 
@@ -57,7 +83,7 @@ export default defineCommand({
         console.log(`Tags: ${doc.tags.join(", ")}`);
       }
       console.log("");
-      console.log(doc.content || "(no content)");
+      console.log(displayBody || "(no content)");
       console.log("");
       console.log(formatNavigation(navigation));
     } finally {
