@@ -95,6 +95,14 @@ async function killAndWait(proc: ChildProcess): Promise<void> {
 export default async function globalSetup(_config: FullConfig): Promise<() => Promise<void>> {
   const tmpDir = mkdtempSync(join(tmpdir(), "lore-e2e-"));
 
+  // Publish the throwaway corpus's SQLite path via env var so spec files that need to
+  // seed data the UI cannot create (e.g. SPEC-034 review judgments — no UI writes
+  // `review_judgments` directly) can open the SAME db file with their own SQLiteStore
+  // instance. `globalSetup` runs in Playwright's main process BEFORE worker processes
+  // are forked, so a `process.env` write here is inherited by every worker (documented
+  // Playwright globalSetup pattern) — no IPC/tempfile plumbing needed.
+  process.env.LORE_E2E_DB_PATH = join(tmpDir, ".lore", "lore.db");
+
   // 1. Init a throwaway corpus — never the real team `.lore/`.
   execFileSync("bun", [LORE_ENTRY, "init", "--author", "e2e-runner"], {
     cwd: tmpDir,
