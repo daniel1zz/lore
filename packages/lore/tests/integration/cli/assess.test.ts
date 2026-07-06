@@ -10,6 +10,11 @@
  * needs a real SQLite DB opened in-process (bun:sqlite) to point config at a fake
  * provider script — see that file's header for why the split is necessary.
  *
+ * Hermeticity note: `runLore` prepends a fail-fast stub `claude` binary to PATH (see
+ * `beforeEach`). Without this shim, AC-ASSESS-8.CLI.N3 would resolve the REAL `claude`
+ * binary on any machine that has one on PATH — invoking a real AI call (slow, costs a
+ * real API request) instead of exercising the negative-space assertion it's meant to.
+ *
  * Coverage:
  *   NEGATIVE:   --no-ai always exits 2 (assess has no non-AI mode, AC-ASSESS-9);
  *               --ai and --no-ai together exits 2; zero-task plan exits 4 (AC-ASSESS-8)
@@ -25,7 +30,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "child_process";
-import { mkdirSync, rmSync } from "fs";
+import { mkdirSync, rmSync, writeFileSync, chmodSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -44,12 +49,21 @@ interface RunResult {
 
 /**
  * Spawn `bun run <INDEX_TS> ...args` in `cwd` with an isolated HOME dir.
- * MOCK RISK: none — this calls the real CLI binary path.
+ * MOCK RISK: none — this calls the real CLI binary path. PATH is shimmed to resolve
+ * `claude` to the fail-fast stub created in `beforeEach` (see stub-bin/claude), so the
+ * AI-provider spawn (`claude-cli-provider.ts`) always hits a deterministic exit-1
+ * failure instead of whatever `claude` happens to be installed on the host machine.
  */
 function runLore(args: string[], cwd: string): RunResult {
   const result = spawnSync("bun", ["run", INDEX_TS, ...args], {
     cwd,
-    env: { ...process.env, HOME: cwd, EDITOR: "true", CLAUDECODE: "1" },
+    env: {
+      ...process.env,
+      HOME: cwd,
+      EDITOR: "true",
+      CLAUDECODE: "1",
+      PATH: `${join(cwd, "stub-bin")}:${process.env.PATH ?? ""}`,
+    },
     encoding: "utf8",
   });
   return {
@@ -66,6 +80,16 @@ let tmpDir: string;
 beforeEach(() => {
   tmpDir = join(tmpdir(), `lore-assess-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(tmpDir, { recursive: true });
+
+  // Fail-fast `claude` stub: a real `claude` on the host PATH would otherwise get
+  // invoked by the AI-provider spawn — slow, and it burns a real API call. Any dev
+  // machine with the CLI installed (e.g. ~/.local/bin/claude) needs this shim for
+  // AC-ASSESS-8.CLI.N3 to deterministically hit the AI-provider-failure path.
+  const stubBinDir = join(tmpDir, "stub-bin");
+  mkdirSync(stubBinDir, { recursive: true });
+  const stubClaudePath = join(stubBinDir, "claude");
+  writeFileSync(stubClaudePath, '#!/bin/sh\necho "stub claude: refusing (hermetic test shim)" >&2\nexit 1\n');
+  chmodSync(stubClaudePath, 0o755);
 
   const init = runLore(["init"], tmpDir);
   if (init.exitCode !== 0) {
@@ -173,9 +197,9 @@ describe("lore assess — zero-task plan (AC-ASSESS-8)", () => {
     const planSlug = createPlan("Non-Empty Plan");
     createTask(planSlug, "A Task");
 
-    // The default "claude" binary is unlikely to exist / succeed in this sandboxed test
-    // env, so this should fail LATER (AI provider failure, exit 6) — NOT exit 4. This
-    // is the negative-space check that AC-ASSESS-8's gate is scoped to zero tasks only.
+    // `claude` resolves to the fail-fast stub on PATH (see beforeEach), so this fails
+    // LATER — AI provider failure, exit 6 — NOT exit 4. This is the negative-space
+    // check that AC-ASSESS-8's gate is scoped to zero tasks only.
     const result = runLore(["assess", planSlug], tmpDir);
     expect(result.exitCode).not.toBe(4);
   });
