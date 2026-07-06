@@ -7,12 +7,14 @@
 
 import type {
   AuditEntry,
+  CalibrationRecord,
   DocId,
   DocRecord,
   DocStatus,
   DocType,
   LinkRecord,
   LinkType,
+  ReviewJudgment,
   Slug,
   VersionRecord,
 } from "@lore/core";
@@ -69,6 +71,21 @@ export interface AuditFilters {
   /** ISO 8601 */
   since?: string;
   limit?: number;
+}
+
+/**
+ * Filter for {@link StoreInterface.queryCalibrationWindow}.
+ * `limit` is required — the window is always bounded (never an unbounded scan).
+ */
+export interface CalibrationWindowFilter {
+  doc_type?: DocType;
+  /**
+   * Filters by the prompt_version of the judgment each calibration record
+   * points at. Requires a join to `review_judgments` (kept as one indexed
+   * SQL statement — see SQLiteStore.queryCalibrationWindow).
+   */
+  prompt_version?: string;
+  limit: number;
 }
 
 // ─── Interface ─────────────────────────────────────────────────────────────
@@ -186,6 +203,40 @@ export interface StoreInterface {
 
   /** Query audit log with filters. */
   queryAudit(filters: AuditFilters): Promise<Result<AuditEntry[], LoreError>>;
+
+  // ── Review Judgments ───────────────────────────────────────────────────
+  // SPEC-034 §2, §3. Dual use: production write path for JudgmentService
+  // (not yet implemented — this task lands the data layer only) AND the test
+  // seeding path for calibration/triage scenarios, mirroring insertVersion's
+  // precedent of one write method serving both roles.
+
+  /**
+   * Insert a new review judgment row. The caller (JudgmentService) is
+   * responsible for Zod-validating the shape via `reviewJudgmentSchema`
+   * before calling — this method does not re-validate, matching `insert`'s
+   * contract for DocRecord.
+   */
+  insertJudgment(judgment: ReviewJudgment): Promise<Result<void, LoreError>>;
+
+  /** All judgments for a doc, newest first (`created_at DESC`). */
+  findJudgments(docId: DocId): Promise<Result<ReviewJudgment[], LoreError>>;
+
+  /** Most recent judgment for a doc, or `null` if none exists yet. */
+  latestJudgment(docId: DocId): Promise<Result<ReviewJudgment | null, LoreError>>;
+
+  // ── Calibration Records ────────────────────────────────────────────────
+
+  /** Insert a new calibration record (human confirm/override of a judgment). */
+  insertCalibrationRecord(record: CalibrationRecord): Promise<Result<void, LoreError>>;
+
+  /**
+   * Bounded, indexed window of calibration records, newest first
+   * (`created_at DESC`), optionally filtered by `doc_type` and/or the
+   * `prompt_version` of the judgment each record points at.
+   */
+  queryCalibrationWindow(
+    filter: CalibrationWindowFilter,
+  ): Promise<Result<CalibrationRecord[], LoreError>>;
 
   // ── Lifecycle ──────────────────────────────────────────────────────────
 

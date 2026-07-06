@@ -27,8 +27,10 @@ import { join } from "node:path";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import type {
   AuditEntry,
+  CalibrationRecord,
   DocRecord,
   LinkRecord,
+  ReviewJudgment,
   VersionRecord,
 } from "@lore/core";
 
@@ -101,6 +103,43 @@ function makeAuditEntry(docId: string): AuditEntry {
     action: "create",
     doc_id: docId,
     details: { field: "value" },
+  };
+}
+
+function makeJudgment(docId: string, overrides: Partial<ReviewJudgment> = {}): ReviewJudgment {
+  _counter += 1;
+  return {
+    id: `01HJUDGE${String(_counter).padStart(18, "0")}`,
+    doc_id: docId,
+    doc_version: 1,
+    decision: "approve",
+    confidence: 0.9,
+    reasons: [{ dimension: "completeness", finding: "All ACs covered." }],
+    checks: [{ check: "schema", outcome: "pass" }],
+    blocking_questions: [],
+    judge: { provider: "claude-cli", model: "claude-sonnet-5", prompt_version: "v1" },
+    created_at: "2026-06-08T10:00:00.000Z",
+    created_by: "ai:claude-cli:claude-sonnet-5:v1",
+    ...overrides,
+  };
+}
+
+function makeCalibrationRecord(
+  judgmentId: string,
+  docId: string,
+  overrides: Partial<CalibrationRecord> = {},
+): CalibrationRecord {
+  _counter += 1;
+  return {
+    id: `01HCALIB${String(_counter).padStart(18, "0")}`,
+    judgment_id: judgmentId,
+    doc_id: docId,
+    doc_type: "spec",
+    human_outcome: "confirmed",
+    delta_reasons: [],
+    actor: "alice",
+    created_at: "2026-06-08T10:00:00.000Z",
+    ...overrides,
   };
 }
 
@@ -1237,5 +1276,230 @@ describe("SQLiteStore.dbSizeBytes (AC-STORE-010)", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value).toBe(pageCount * pageSize);
+  });
+});
+
+// SPEC-034 §3: review_judgments + calibration_records store methods.
+// PRAGMA foreign_keys = ON is set in SQLiteStore.init() — every judgment/calibration
+// insert below first inserts a real parent doc (and, for calibration, a real judgment)
+// to satisfy the FOREIGN KEY REFERENCES docs(id) / review_judgments(id) constraints.
+describe("SQLiteStore — review judgments + calibration (SPEC-034)", () => {
+  let store: SQLiteStore;
+
+  beforeEach(() => {
+    _counter = 0;
+    store = new SQLiteStore(":memory:");
+  });
+
+  afterEach(() => {
+    store.close();
+  });
+
+  it("HAPPY: insertJudgment + findJudgments round-trip", async () => {
+    const doc = await store.insert(makeDoc({ slug: "spec-judgment-doc" }));
+    expect(doc.ok).toBe(true);
+    if (!doc.ok) return;
+
+    const judgment = makeJudgment(doc.value.id);
+    const insertResult = await store.insertJudgment(judgment);
+    expect(insertResult.ok).toBe(true);
+
+    const found = await store.findJudgments(doc.value.id);
+    expect(found.ok).toBe(true);
+    if (!found.ok) return;
+    expect(found.value).toHaveLength(1);
+    expect(found.value[0]).toEqual(judgment);
+  });
+
+  it("HAPPY: findJudgments orders newest first (created_at DESC)", async () => {
+    const doc = await store.insert(makeDoc({ slug: "spec-judgment-order" }));
+    expect(doc.ok).toBe(true);
+    if (!doc.ok) return;
+
+    const older = makeJudgment(doc.value.id, { created_at: "2026-06-01T00:00:00.000Z" });
+    const newer = makeJudgment(doc.value.id, { created_at: "2026-06-08T00:00:00.000Z" });
+    await store.insertJudgment(older);
+    await store.insertJudgment(newer);
+
+    const found = await store.findJudgments(doc.value.id);
+    expect(found.ok).toBe(true);
+    if (!found.ok) return;
+    expect(found.value.map((j) => j.id)).toEqual([newer.id, older.id]);
+  });
+
+  it("HAPPY: latestJudgment returns the most recent judgment", async () => {
+    const doc = await store.insert(makeDoc({ slug: "spec-latest-judgment" }));
+    expect(doc.ok).toBe(true);
+    if (!doc.ok) return;
+
+    const older = makeJudgment(doc.value.id, { created_at: "2026-06-01T00:00:00.000Z" });
+    const newer = makeJudgment(doc.value.id, { created_at: "2026-06-08T00:00:00.000Z" });
+    await store.insertJudgment(older);
+    await store.insertJudgment(newer);
+
+    const latest = await store.latestJudgment(doc.value.id);
+    expect(latest.ok).toBe(true);
+    if (!latest.ok) return;
+    expect(latest.value?.id).toBe(newer.id);
+  });
+
+  it("BOUNDARY: latestJudgment returns null when no judgment exists for the doc", async () => {
+    const doc = await store.insert(makeDoc({ slug: "spec-no-judgment" }));
+    expect(doc.ok).toBe(true);
+    if (!doc.ok) return;
+
+    const latest = await store.latestJudgment(doc.value.id);
+    expect(latest.ok).toBe(true);
+    if (!latest.ok) return;
+    expect(latest.value).toBeNull();
+  });
+
+  it("BOUNDARY: findJudgments returns an empty array for a doc with no judgments", async () => {
+    const doc = await store.insert(makeDoc({ slug: "spec-empty-judgments" }));
+    expect(doc.ok).toBe(true);
+    if (!doc.ok) return;
+
+    const found = await store.findJudgments(doc.value.id);
+    expect(found.ok).toBe(true);
+    if (!found.ok) return;
+    expect(found.value).toEqual([]);
+  });
+
+  it("ERROR: insertJudgment on a non-existent doc_id violates the foreign key and reports STORE_ERROR", async () => {
+    const judgment = makeJudgment("01HNOPE00000000000000001");
+    const result = await store.insertJudgment(judgment);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("STORE_ERROR");
+  });
+
+  it("STATE: escalate decision with blocking_questions round-trips through storage intact", async () => {
+    const doc = await store.insert(makeDoc({ slug: "spec-escalate-judgment" }));
+    expect(doc.ok).toBe(true);
+    if (!doc.ok) return;
+
+    const judgment = makeJudgment(doc.value.id, {
+      decision: "escalate",
+      blocking_questions: ["Is AC-7 in scope?"],
+    });
+    await store.insertJudgment(judgment);
+
+    const latest = await store.latestJudgment(doc.value.id);
+    expect(latest.ok).toBe(true);
+    if (!latest.ok) return;
+    expect(latest.value?.decision).toBe("escalate");
+    expect(latest.value?.blocking_questions).toEqual(["Is AC-7 in scope?"]);
+  });
+
+  it("HAPPY: insertCalibrationRecord + queryCalibrationWindow round-trip", async () => {
+    const doc = await store.insert(makeDoc({ slug: "spec-calibration-doc" }));
+    expect(doc.ok).toBe(true);
+    if (!doc.ok) return;
+
+    const judgment = makeJudgment(doc.value.id);
+    await store.insertJudgment(judgment);
+
+    const record = makeCalibrationRecord(judgment.id, doc.value.id);
+    const insertResult = await store.insertCalibrationRecord(record);
+    expect(insertResult.ok).toBe(true);
+
+    const found = await store.queryCalibrationWindow({ limit: 10 });
+    expect(found.ok).toBe(true);
+    if (!found.ok) return;
+    expect(found.value).toHaveLength(1);
+    expect(found.value[0]).toEqual(record);
+  });
+
+  it("HAPPY: queryCalibrationWindow filters by doc_type", async () => {
+    const specDoc = await store.insert(
+      makeDoc({ slug: "spec-calib-type-a", type: "spec", role: "spec" }),
+    );
+    const prdDoc = await store.insert(
+      makeDoc({ slug: "prd-calib-type-b", type: "prd", role: "intent" }),
+    );
+    expect(specDoc.ok && prdDoc.ok).toBe(true);
+    if (!specDoc.ok || !prdDoc.ok) return;
+
+    const specJudgment = makeJudgment(specDoc.value.id);
+    const prdJudgment = makeJudgment(prdDoc.value.id);
+    await store.insertJudgment(specJudgment);
+    await store.insertJudgment(prdJudgment);
+    await store.insertCalibrationRecord(
+      makeCalibrationRecord(specJudgment.id, specDoc.value.id, { doc_type: "spec" }),
+    );
+    await store.insertCalibrationRecord(
+      makeCalibrationRecord(prdJudgment.id, prdDoc.value.id, { doc_type: "prd" }),
+    );
+
+    const found = await store.queryCalibrationWindow({ doc_type: "spec", limit: 10 });
+    expect(found.ok).toBe(true);
+    if (!found.ok) return;
+    expect(found.value).toHaveLength(1);
+    expect(found.value[0]?.doc_type).toBe("spec");
+  });
+
+  it("HAPPY: queryCalibrationWindow filters by prompt_version via the review_judgments JOIN", async () => {
+    const doc = await store.insert(makeDoc({ slug: "spec-calib-prompt-version" }));
+    expect(doc.ok).toBe(true);
+    if (!doc.ok) return;
+
+    const judgmentV1 = makeJudgment(doc.value.id, {
+      judge: { provider: "claude-cli", model: "claude-sonnet-5", prompt_version: "v1" },
+    });
+    const judgmentV2 = makeJudgment(doc.value.id, {
+      judge: { provider: "claude-cli", model: "claude-sonnet-5", prompt_version: "v2" },
+    });
+    await store.insertJudgment(judgmentV1);
+    await store.insertJudgment(judgmentV2);
+    await store.insertCalibrationRecord(makeCalibrationRecord(judgmentV1.id, doc.value.id));
+    await store.insertCalibrationRecord(makeCalibrationRecord(judgmentV2.id, doc.value.id));
+
+    const found = await store.queryCalibrationWindow({ prompt_version: "v1", limit: 10 });
+    expect(found.ok).toBe(true);
+    if (!found.ok) return;
+    expect(found.value).toHaveLength(1);
+    expect(found.value[0]?.judgment_id).toBe(judgmentV1.id);
+  });
+
+  it("BOUNDARY: queryCalibrationWindow respects the limit bound, newest first", async () => {
+    const doc = await store.insert(makeDoc({ slug: "spec-calib-limit" }));
+    expect(doc.ok).toBe(true);
+    if (!doc.ok) return;
+
+    const judgment = makeJudgment(doc.value.id);
+    await store.insertJudgment(judgment);
+
+    for (let i = 0; i < 5; i += 1) {
+      await store.insertCalibrationRecord(
+        makeCalibrationRecord(judgment.id, doc.value.id, {
+          created_at: `2026-06-0${i + 1}T00:00:00.000Z`,
+        }),
+      );
+    }
+
+    const found = await store.queryCalibrationWindow({ limit: 2 });
+    expect(found.ok).toBe(true);
+    if (!found.ok) return;
+    expect(found.value).toHaveLength(2);
+    expect(found.value[0]?.created_at).toBe("2026-06-05T00:00:00.000Z");
+  });
+
+  it("BOUNDARY: queryCalibrationWindow returns an empty array when nothing matches", async () => {
+    const found = await store.queryCalibrationWindow({ limit: 10 });
+    expect(found.ok).toBe(true);
+    if (!found.ok) return;
+    expect(found.value).toEqual([]);
+  });
+
+  it("ERROR: insertCalibrationRecord on a non-existent judgment_id violates the foreign key and reports STORE_ERROR", async () => {
+    const doc = await store.insert(makeDoc({ slug: "spec-calib-bad-judgment" }));
+    expect(doc.ok).toBe(true);
+    if (!doc.ok) return;
+
+    const record = makeCalibrationRecord("01HNOPE00000000000000002", doc.value.id);
+    const result = await store.insertCalibrationRecord(record);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("STORE_ERROR");
   });
 });

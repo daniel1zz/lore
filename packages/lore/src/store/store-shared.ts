@@ -16,9 +16,14 @@
 
 import type {
   AuditEntry,
+  CalibrationRecord,
+  CheckResult,
   DocRecord,
+  DocType,
   LinkRecord,
   LinkType,
+  ReviewJudgment,
+  ReviewReason,
   VersionRecord,
 } from "@lore/core";
 import { err, type LoreError, type Result } from "@lore/core";
@@ -85,6 +90,39 @@ export interface FtsRow {
   title: string;
   snippet: string;
   rank: number | bigint;
+}
+
+/**
+ * Raw row from the `review_judgments` table (migration-003.ts, SPEC-034 §3).
+ * `judge_provider`/`judge_model`/`judge_prompt_version` are denormalized
+ * columns mirroring `ReviewJudgment.judge` — no separate judges table.
+ */
+export interface JudgmentRow {
+  id: string;
+  doc_id: string;
+  doc_version: number | bigint;
+  decision: string;
+  confidence: number;
+  reasons: string;
+  checks: string;
+  blocking_questions: string;
+  judge_provider: string;
+  judge_model: string;
+  judge_prompt_version: string;
+  created_at: string;
+  created_by: string;
+}
+
+/** Raw row from the `calibration_records` table (migration-003.ts, SPEC-034 §3). */
+export interface CalibrationRow {
+  id: string;
+  judgment_id: string;
+  doc_id: string;
+  doc_type: string;
+  human_outcome: string;
+  delta_reasons: string;
+  actor: string;
+  created_at: string;
 }
 
 // ─── JSON helpers ──────────────────────────────────────────────────────────
@@ -155,6 +193,41 @@ export function rowToAuditEntry(row: AuditRow): AuditEntry {
     action: row.action,
     ...(row.doc_id !== null ? { doc_id: row.doc_id } : {}),
     details: parseJson(row.details, {}),
+  };
+}
+
+/** Maps a raw `review_judgments` row to a ReviewJudgment. Reassembles `judge` from its 3 denormalized columns. */
+export function rowToReviewJudgment(row: JudgmentRow): ReviewJudgment {
+  return {
+    id: row.id,
+    doc_id: row.doc_id,
+    doc_version: Number(row.doc_version),
+    decision: row.decision as ReviewJudgment["decision"],
+    confidence: row.confidence,
+    reasons: parseJson<ReviewReason[]>(row.reasons, []),
+    checks: parseJson<CheckResult[]>(row.checks, []),
+    blocking_questions: parseJson<string[]>(row.blocking_questions, []),
+    judge: {
+      provider: row.judge_provider,
+      model: row.judge_model,
+      prompt_version: row.judge_prompt_version,
+    },
+    created_at: row.created_at,
+    created_by: row.created_by,
+  };
+}
+
+/** Maps a raw `calibration_records` row to a CalibrationRecord. */
+export function rowToCalibrationRecord(row: CalibrationRow): CalibrationRecord {
+  return {
+    id: row.id,
+    judgment_id: row.judgment_id,
+    doc_id: row.doc_id,
+    doc_type: row.doc_type as DocType,
+    human_outcome: row.human_outcome as CalibrationRecord["human_outcome"],
+    delta_reasons: parseJson<string[]>(row.delta_reasons, []),
+    actor: row.actor,
+    created_at: row.created_at,
   };
 }
 

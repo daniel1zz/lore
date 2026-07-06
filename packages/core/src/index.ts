@@ -37,3 +37,6 @@ export * from "./task-workflow.js";
 export * from "./assessment.js";
 export * from "./spec-kind.js";
 export * from "./spec-kind-audit.js";
+export * from "./review-judgment.js";
+export * from "./calibration.js";
+export * from "./audit-actor.js";
