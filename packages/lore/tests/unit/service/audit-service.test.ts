@@ -282,6 +282,40 @@ describe("REGRESSION — delete is excluded from the verifiable-action anchor se
   });
 });
 
+describe("REGRESSION — an unrelated action family (\"judge\") does not mask a missing audit entry", () => {
+  it("an update versions row satisfied ONLY by a same-version 'judge' audit entry is still reported as a MISS", async () => {
+    const { store, corpusService } = makeStore();
+    const auditService = new AuditService(store, { verifySince: FAR_PAST });
+
+    const planId = await createPlan(corpusService);
+
+    // A writer regression: an update versions row was inserted with NO accompanying
+    // create/update/approve/reject/restore-family audit entry...
+    await store.insertVersion(
+      baseVersionRow({ doc_id: planId, version: 2, action: "update", created_at: "2020-06-01T00:00:00.000Z" }),
+    );
+    // ...but an UNRELATED "judge" audit entry (SPEC-034 AI review judgment, which stamps
+    // the doc's CURRENT version but never bumps it) happens to carry the same version.
+    // Before the action-family fix, matching on version alone would let this incidentally
+    // satisfy the versions row — masking the writer regression. It must NOT.
+    await store.appendAuditEntry({
+      timestamp: "2020-06-01T00:00:00.000Z",
+      actor: "ai:claude-cli:claude-sonnet-5:v1",
+      session_id: `judge-${planId}`,
+      action: "judge",
+      doc_id: planId,
+      details: { judgment_ref: "01JUDGMENTFAKE00000000001", version: 2 },
+    });
+
+    const result = await auditService.verify({ since: FAR_PAST });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.clean).toBe(false);
+    expect(result.value.misses).toHaveLength(1);
+    expect(result.value.misses[0]).toMatchObject({ doc_id: planId, version: 2, action: "update" });
+  });
+});
+
 describe("REGRESSION — TaskWorkflowService's action-string divergence does not produce false misses", () => {
   it("claim → addEvidence → release all satisfy verify() despite versions:'update' vs audit:'claim'/'evidence'/'release'", async () => {
     const { store, corpusService } = makeStore();

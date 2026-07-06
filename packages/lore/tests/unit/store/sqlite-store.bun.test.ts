@@ -1407,7 +1407,12 @@ describe("SQLiteStore — review judgments + calibration (SPEC-034)", () => {
     expect(found.ok).toBe(true);
     if (!found.ok) return;
     expect(found.value).toHaveLength(1);
-    expect(found.value[0]).toEqual(record);
+    // reason: queryCalibrationWindow now unconditionally projects the judgment's
+    // judge_prompt_version onto the returned row — the plain CalibrationRecord
+    // fields still round-trip verbatim via toMatchObject, and the projected field
+    // is asserted separately against the judgment it was joined from.
+    expect(found.value[0]).toMatchObject(record);
+    expect(found.value[0]?.judge_prompt_version).toBe(judgment.judge.prompt_version);
   });
 
   it("HAPPY: queryCalibrationWindow filters by doc_type", async () => {
@@ -1459,6 +1464,33 @@ describe("SQLiteStore — review judgments + calibration (SPEC-034)", () => {
     if (!found.ok) return;
     expect(found.value).toHaveLength(1);
     expect(found.value[0]?.judgment_id).toBe(judgmentV1.id);
+  });
+
+  it("HAPPY: queryCalibrationWindow projects judge_prompt_version onto EVERY row, even fully unfiltered", async () => {
+    const doc = await store.insert(makeDoc({ slug: "spec-calib-projection" }));
+    expect(doc.ok).toBe(true);
+    if (!doc.ok) return;
+
+    const judgmentV1 = makeJudgment(doc.value.id, {
+      judge: { provider: "claude-cli", model: "claude-sonnet-5", prompt_version: "v1" },
+    });
+    const judgmentV2 = makeJudgment(doc.value.id, {
+      judge: { provider: "claude-cli", model: "claude-sonnet-5", prompt_version: "v2" },
+    });
+    await store.insertJudgment(judgmentV1);
+    await store.insertJudgment(judgmentV2);
+    await store.insertCalibrationRecord(makeCalibrationRecord(judgmentV1.id, doc.value.id));
+    await store.insertCalibrationRecord(makeCalibrationRecord(judgmentV2.id, doc.value.id));
+
+    // No prompt_version filter at all — the join must still run and project the
+    // REAL prompt_version onto each row (no "*" sentinel, no undefined field).
+    const found = await store.queryCalibrationWindow({ limit: 10 });
+    expect(found.ok).toBe(true);
+    if (!found.ok) return;
+    expect(found.value).toHaveLength(2);
+    const byJudgmentId = new Map(found.value.map((r) => [r.judgment_id, r.judge_prompt_version]));
+    expect(byJudgmentId.get(judgmentV1.id)).toBe("v1");
+    expect(byJudgmentId.get(judgmentV2.id)).toBe("v2");
   });
 
   it("BOUNDARY: queryCalibrationWindow respects the limit bound, newest first", async () => {

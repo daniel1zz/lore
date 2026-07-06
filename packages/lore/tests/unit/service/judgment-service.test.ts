@@ -15,10 +15,12 @@
  *   - recordCalibration() not_latest_judgment: version matches, but a NEWER judgment now
  *     exists for the same doc — the one being calibrated is no longer latestJudgment
  *   - recordCalibration() happy path persists a row retrievable via queryCalibrationWindow
- *   - computeCalibrationStats(): empty store → [] (not an error); grouped per doc_type;
- *     n/agreement_rate/wilson_lower_bound cross-checked against wilsonLowerBound() imported
- *     directly from @lore/core; window_limit === 200
- *   - prompt_version: "*" sentinel when unfiltered, filter value verbatim when pinned
+ *   - computeCalibrationStats(): empty store → [] (not an error); grouped per
+ *     (doc_type, prompt_version) pair; n/agreement_rate/wilson_lower_bound cross-checked
+ *     against wilsonLowerBound() imported directly from @lore/core; window_limit === 200
+ *   - prompt_version: the REAL judge_prompt_version is reported per group, even
+ *     unfiltered — a doc_type reviewed under two prompt versions produces two rows,
+ *     never a collapsed "*" sentinel
  *   - n=1 boundary: wilson_lower_bound < agreement_rate (small-sample penalty), except when
  *     agreement_rate is 0, where wilson_lower_bound is also 0
  *
@@ -373,16 +375,74 @@ describe("JudgmentService.computeCalibrationStats — HAPPY (grouped by doc_type
     expect(result.value[0]?.n).toBe(2);
   });
 
-  it("prompt_version defaults to the '*' sentinel when unfiltered", async () => {
+  it("prompt_version reports the REAL judge_prompt_version per group, even fully unfiltered", async () => {
     const { service } = makeService();
     await seedMixedCalibrationData(service);
 
     const result = await service.computeCalibrationStats();
     expect(result.ok).toBe(true);
     if (!result.ok) return;
+    // seedMixedCalibrationData only ever uses judge.prompt_version "v1" (makeNewJudgment's
+    // default) — every group must report the real value, never a collapsed sentinel.
     for (const stat of result.value) {
-      expect(stat.prompt_version).toBe("*");
+      expect(stat.prompt_version).toBe("v1");
     }
+  });
+
+  it("REGRESSION: two prompt versions for the SAME doc_type produce two SEPARATE stats rows, never collapsed", async () => {
+    const { service } = makeService();
+
+    // 2 "spec" calibration records under prompt_version v1: both confirmed.
+    for (let i = 0; i < 2; i += 1) {
+      const judgment = await service.record(
+        makeNewJudgment({
+          doc_id: `01ARZ3PVA000000000000${i}`,
+          judge: { provider: "test-provider", model: "test-provider", prompt_version: "v1" },
+        }),
+      );
+      if (!judgment.ok) throw new Error("record failed");
+      const calibrated = await service.recordCalibration({
+        judgment: judgment.value,
+        docType: "spec",
+        currentDocVersion: 1,
+        humanOutcome: "confirmed",
+        deltaReasons: [],
+        actor: "alice",
+      });
+      if (!calibrated.ok) throw new Error("recordCalibration failed");
+    }
+
+    // 1 "spec" calibration record under prompt_version v2: overridden.
+    const judgmentV2 = await service.record(
+      makeNewJudgment({
+        doc_id: "01ARZ3PVB0000000000000",
+        judge: { provider: "test-provider", model: "test-provider", prompt_version: "v2" },
+      }),
+    );
+    if (!judgmentV2.ok) throw new Error("record failed");
+    const calibratedV2 = await service.recordCalibration({
+      judgment: judgmentV2.value,
+      docType: "spec",
+      currentDocVersion: 1,
+      humanOutcome: "overridden",
+      deltaReasons: ["prompt v2 disagreement"],
+      actor: "bob",
+    });
+    if (!calibratedV2.ok) throw new Error("recordCalibration failed");
+
+    const result = await service.computeCalibrationStats({ doc_type: "spec" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value).toHaveLength(2);
+
+    const v1Stats = result.value.find((s) => s.prompt_version === "v1");
+    const v2Stats = result.value.find((s) => s.prompt_version === "v2");
+    expect(v1Stats).toBeDefined();
+    expect(v2Stats).toBeDefined();
+    expect(v1Stats?.n).toBe(2);
+    expect(v1Stats?.agreement_rate).toBe(1);
+    expect(v2Stats?.n).toBe(1);
+    expect(v2Stats?.agreement_rate).toBe(0);
   });
 
   it("prompt_version equals the filter value verbatim when pinned", async () => {

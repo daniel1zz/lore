@@ -125,6 +125,15 @@ export interface CalibrationRow {
   created_at: string;
 }
 
+/**
+ * A {@link CalibrationRow} augmented with `judge_prompt_version`, projected
+ * by `queryCalibrationWindow`'s UNCONDITIONAL join to `review_judgments`
+ * (see `StoreInterface.CalibrationRecordWithPromptVersion`).
+ */
+export interface CalibrationRowWithPromptVersion extends CalibrationRow {
+  judge_prompt_version: string;
+}
+
 // ─── JSON helpers ──────────────────────────────────────────────────────────
 
 export function parseJson<T>(raw: string, fallback: T): T {
@@ -228,6 +237,23 @@ export function rowToCalibrationRecord(row: CalibrationRow): CalibrationRecord {
     delta_reasons: parseJson<string[]>(row.delta_reasons, []),
     actor: row.actor,
     created_at: row.created_at,
+  };
+}
+
+/**
+ * Maps a raw `calibration_records` ⋈ `review_judgments` row (the projection
+ * `queryCalibrationWindow` now always selects) to a CalibrationRecord carrying
+ * the judgment's real `judge_prompt_version` — see
+ * `StoreInterface.CalibrationRecordWithPromptVersion`. This is what lets
+ * `JudgmentService.computeCalibrationStats` group by the actual
+ * (doc_type, prompt_version) pair instead of an unpinned `"*"` sentinel.
+ */
+export function rowToCalibrationRecordWithPromptVersion(
+  row: CalibrationRowWithPromptVersion,
+): CalibrationRecord & { judge_prompt_version: string } {
+  return {
+    ...rowToCalibrationRecord(row),
+    judge_prompt_version: row.judge_prompt_version,
   };
 }
 

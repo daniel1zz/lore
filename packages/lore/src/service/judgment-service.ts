@@ -51,7 +51,11 @@ import type {
   TelemetryEvent,
 } from "@lore/core";
 import { calibrationRecordSchema, formatJudgeActor, reviewJudgmentSchema, wilsonLowerBound } from "@lore/core";
-import type { CalibrationWindowFilter, StoreInterface } from "../store/store-interface.js";
+import type {
+  CalibrationRecordWithPromptVersion,
+  CalibrationWindowFilter,
+  StoreInterface,
+} from "../store/store-interface.js";
 
 // ─── Public Types ───────────────────────────────────────────────────────────
 
@@ -87,9 +91,10 @@ export type RecordCalibrationOutcome =
 export interface CalibrationStats {
   doc_type: DocType;
   /**
-   * The prompt_version this row's stats were computed against, OR the sentinel `"*"` when
-   * `filter.prompt_version` was left unpinned (see {@link JudgmentService.computeCalibrationStats}
-   * for why per-record prompt_version disaggregation isn't possible in that case).
+   * The real `judge_prompt_version` of the judgments this row's calibration records
+   * were derived from — every row is disaggregated by BOTH `doc_type` AND
+   * `prompt_version`, never collapsed across prompt versions (see
+   * {@link JudgmentService.computeCalibrationStats}).
    */
   prompt_version: string;
   n: number;
@@ -262,21 +267,22 @@ export class JudgmentService {
   }
 
   /**
-   * Aggregate calibration records into per-doc_type Wilson-bound stats, within a bounded
-   * window (`CALIBRATION_WINDOW_LIMIT`, newest-first).
+   * Aggregate calibration records into per-(doc_type, prompt_version) Wilson-bound
+   * stats, within a bounded window (`CALIBRATION_WINDOW_LIMIT`, newest-first).
    *
-   * @invariant `CalibrationRecord` carries `doc_type` but NOT `prompt_version` (only the
-   *   judgment it's FK'd to does) — the store's `queryCalibrationWindow` join FILTERS by
-   *   `filter.prompt_version` when given, but doesn't project it back onto each returned
-   *   row. When the caller pins `prompt_version`, every returned record is therefore
-   *   already guaranteed to share it, and the single output group safely reports it
-   *   verbatim. When `prompt_version` is left unpinned, stats aggregate across ALL prompt
-   *   versions and are reported under the `"*"` sentinel — a documented approximation, not
-   *   a silently wrong one.
+   * @invariant `CalibrationRecord` itself carries `doc_type` but NOT `prompt_version`
+   *   (only the judgment it's FK'd to does) — the store's `queryCalibrationWindow`
+   *   projects the judgment's real `judge_prompt_version` onto every returned row
+   *   (unconditional join, not just when `filter.prompt_version` is pinned), so
+   *   grouping here is always by the ACTUAL (doc_type, prompt_version) pair present in
+   *   the data — never collapsed into an unpinned "aggregate across all versions"
+   *   sentinel. A doc_type reviewed under two different prompt versions produces two
+   *   separate `CalibrationStats` rows.
    *
    * @param filter - Optional narrowing by doc_type and/or prompt_version
-   * @returns Result<CalibrationStats[], LoreError> — one entry per doc_type present in the
-   *   window; empty array when the window has zero matching records
+   * @returns Result<CalibrationStats[], LoreError> — one entry per distinct
+   *   (doc_type, prompt_version) pair present in the window; empty array when the
+   *   window has zero matching records
    */
   async computeCalibrationStats(filter?: {
     doc_type?: DocType;
@@ -292,22 +298,23 @@ export class JudgmentService {
     if (!windowResult.ok) return windowResult;
     const records = windowResult.value;
 
-    const promptVersionLabel = filter?.prompt_version ?? "*";
-
-    const groups = new Map<DocType, CalibrationRecord[]>();
+    // reason: group key is the REAL (doc_type, prompt_version) pair, never a
+    // caller-supplied/unpinned sentinel — see @invariant above.
+    const groups = new Map<string, { docType: DocType; promptVersion: string; bucket: CalibrationRecordWithPromptVersion[] }>();
     for (const record of records) {
-      const bucket = groups.get(record.doc_type) ?? [];
-      bucket.push(record);
-      groups.set(record.doc_type, bucket);
+      const key = `${record.doc_type}::${record.judge_prompt_version}`;
+      const group = groups.get(key) ?? { docType: record.doc_type, promptVersion: record.judge_prompt_version, bucket: [] };
+      group.bucket.push(record);
+      groups.set(key, group);
     }
 
     const stats: CalibrationStats[] = [];
-    for (const [docType, bucket] of groups) {
+    for (const { docType, promptVersion, bucket } of groups.values()) {
       const n = bucket.length;
       const successes = bucket.filter((r) => r.human_outcome === "confirmed").length;
       stats.push({
         doc_type: docType,
-        prompt_version: promptVersionLabel,
+        prompt_version: promptVersion,
         n,
         agreement_rate: n === 0 ? 0 : successes / n,
         wilson_lower_bound: wilsonLowerBound(successes, n),
