@@ -2,7 +2,7 @@
 
 ## Purpose
 
-citty-based CLI adapter. 24 subcommands, each in its own `commands/<name>.ts`, lazily imported by `index.ts`. Thin adapter only — no business logic; every command resolves args, calls a service via the App composition root, formats the result, and exits.
+citty-based CLI adapter. 25 subcommands, each in its own `commands/<name>.ts`, lazily imported by `index.ts`. Thin adapter only — no business logic; every command resolves args, calls a service via the App composition root, formats the result, and exits.
 
 ## Key Invariants
 
@@ -13,6 +13,7 @@ citty-based CLI adapter. 24 subcommands, each in its own `commands/<name>.ts`, l
 - **Telemetry must be wired (AC-K3-1)** — `loadLoreApp` always parses `.lore/config.yaml` (failures fall back to `NoOpTelemetry`) so user telemetry preferences apply to every command. Don't call `createApp(dbPath)` directly from a command.
 - **Exit codes per SPEC-003 §5** — mapping is centralised in `utils.ts::exitCode`. `1 = STORE_ERROR / unknown`, `3 = DOC_NOT_FOUND | SLUG_NOT_FOUND`, `4 = validation / lifecycle / link errors`, `5 = STALE_VERSION | CLAIM_CONFLICT`. The default branch uses an exhaustive `never` check; add new `LoreError` codes here too.
 - **Actor resolution for workflow commands (SPEC-025)** — `claim` / `release` / `evidence` resolve the acting identity via `utils.ts::resolveActor`: `--by` flag > `$LORE_ACTOR` env var > OS username. Never silently falls back to an empty string.
+- **Implicit calibration capture (SPEC-035 §3)** — `approve` / `reject` call the shared `../calibration-hook.ts::runCalibrationHook` after their `ReviewService` call succeeds. It is a byproduct, never a gate: a calibration write failure prints a stderr warning + records telemetry but never changes the command's exit code (still 0). `calibration-hook.ts` takes a narrowed `{judgmentService, telemetry}` dependency shape (not the full `App`) so it stays unit-testable without a real store.
 
 ## Patterns
 
@@ -23,7 +24,9 @@ citty-based CLI adapter. 24 subcommands, each in its own `commands/<name>.ts`, l
 
 ## Subcommands
 
-`init` `create` `get` `set` `delete` `list` `search` `tree` `link` `unlink` `pending` `approve` `reject` `log` `diff` `restore` `migrate` `status` `serve` `agent` `sync` `eval` `dashboard` `sync-docs` `export-docs` `phase` `claim` `release` `evidence` `ready` `assess`
+`init` `create` `get` `set` `delete` `list` `search` `tree` `link` `unlink` `pending` `approve` `reject` `log` `diff` `restore` `migrate` `status` `serve` `agent` `sync` `eval` `dashboard` `sync-docs` `export-docs` `phase` `claim` `release` `evidence` `ready` `assess` `calibration`
+
+`calibration` (SPEC-035 §4) — `lore calibration --stats [--doc-type <type>] [--prompt-version <v>] [--json]`: read-only table of `{n, agreement_rate, wilson_lower_bound, window_limit}` per (doc_type × prompt_version), thin pipe over `JudgmentService.computeCalibrationStats`. `--stats` is required (only mode currently); omitting it exits 2.
 
 `sync-docs` (SPEC-018) scans a directory of `*.md` spec files, creates corpus rows for missing specs matched by title, and reports body drift without auto-applying. Flags: `--from <path>` (scan dir), `--dry-run` (no writes), `--json` (machine-readable SyncReport).
 
