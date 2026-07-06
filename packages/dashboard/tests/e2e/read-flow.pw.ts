@@ -50,7 +50,7 @@ test.describe("SPEC-031 dashboard read flow", () => {
   // ── 1. Seed: create the root PRD ────────────────────────────────────────────
 
   test("seed: create a PRD doc via the New doc modal", async () => {
-    await page.goto("/");
+    await page.goto("/library");
     await expect(page.getByRole("heading", { name: "Documents" })).toBeVisible();
 
     await page.getByRole("button", { name: "New doc" }).click();
@@ -69,7 +69,7 @@ test.describe("SPEC-031 dashboard read flow", () => {
   // ── 2. Seed: create a second, uniquely-titled doc to search for ─────────────
 
   test("seed: create a second doc with a unique searchable title", async () => {
-    await page.goto("/");
+    await page.goto("/library");
     await page.getByRole("button", { name: "New doc" }).click();
     const dialog = page.getByRole("dialog", { name: "Create new document" });
     await expect(dialog).toBeVisible();

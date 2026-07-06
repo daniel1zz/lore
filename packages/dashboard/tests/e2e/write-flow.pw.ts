@@ -73,7 +73,7 @@ test.describe("SPEC-022 dashboard write flow", () => {
   // ── 1. Create ────────────────────────────────────────────────────────────────
 
   test("create: New doc button creates a doc and navigates to its detail page", async () => {
-    await page.goto("/");
+    await page.goto("/library");
     await expect(page.getByRole("heading", { name: "Documents" })).toBeVisible();
 
     await page.getByRole("button", { name: "New doc" }).click();
@@ -225,7 +225,8 @@ test.describe("SPEC-022 dashboard write flow", () => {
     await expect(page.getByText(/^Restored to v\d+$/)).toBeVisible();
 
     // Restore is append-only — it must produce version N+1, never reuse/overwrite.
-    expect(await readDisplayedVersion()).toBe(versionBeforeRestore + 1);
+    // Poll: the toast fires before the query cache repaints the version display.
+    await expect.poll(() => readDisplayedVersion()).toBe(versionBeforeRestore + 1);
     // VersionService.restore always resets status to draft (mirrors CLI/HTTP behavior).
     await expect(page.getByRole("button", { name: /^Status: draft/ })).toBeVisible();
 
@@ -250,7 +251,8 @@ test.describe("SPEC-022 dashboard write flow", () => {
     await expect(confirmDialog).not.toBeVisible();
 
     // onDeleted navigates away from the now-gone document's page (SPEC-027 AC-DH-6).
+    // Home is the resolved living PRD since SPEC-033 F2 — assert its panels, not the old doc list.
     await expect(page).toHaveURL("http://localhost:5173/");
-    await expect(page.getByRole("heading", { name: "Documents" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Pending Review" })).toBeVisible();
   });
 });

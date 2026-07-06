@@ -131,9 +131,10 @@ test.describe("SPEC-033 dashboard feedback-loop", () => {
       prdId = decodeURIComponent(match[1]);
     } else {
       expect(treeRes.ok()).toBe(true);
-      const body = (await treeRes.json()) as { ok: true; value: { doc: { id: string; title: string } } };
-      prdId = body.value.doc.id;
-      prdTitle = body.value.doc.title;
+      // HTTP envelope is { ok, data } (see src/lib/api.ts fetchJson), NOT { ok, value }.
+      const body = (await treeRes.json()) as { ok: true; data: { doc: { id: string; title: string } } };
+      prdId = body.data.doc.id;
+      prdTitle = body.data.doc.title;
     }
 
     // Create a child doc parented under the PRD (ChildrenOf's query is
