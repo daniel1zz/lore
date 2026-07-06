@@ -42,6 +42,7 @@ import { SyncDocsService } from "./service/sync-docs-service.js";
 import { ExportDocsService } from "./service/export-docs-service.js";
 import { PhaseService } from "./service/phase-service.js";
 import { TaskWorkflowService } from "./service/task-workflow-service.js";
+import { SpecKindService } from "./service/spec-kind-service.js";
 
 export interface App {
   corpusService: CorpusService;
@@ -88,6 +89,13 @@ export interface App {
    * Source: SPEC-025 §3 D5, §9.1
    */
   taskWorkflowService: TaskWorkflowService;
+  /**
+   * SpecKindService — one-shot heuristic audit that flags `spec` docs whose
+   * title/content suggests `tech`/`design` but still carry the defaulted
+   * `"feature"` spec_kind. Mirrors PhaseService.migratePhases structurally.
+   * Source: SPEC-032 §3.4
+   */
+  specKindService: SpecKindService;
   /**
    * Telemetry sink — exposed for dashboard route handlers to emit source-tagged events.
    * Dashboard handlers record { service: "dashboard", source: "dashboard" } events after
@@ -161,6 +169,9 @@ function buildAppFromSqlite(
     // reason: own telemetry wiring restores parity with CorpusService (D8) — TaskWorkflowService
     // never routes writes through CorpusService (cross-service calls forbidden). SPEC-025 §3 D5, D8.
     taskWorkflowService: new TaskWorkflowService(store, telemetry, { claimTtlMinutes }),
+    // reason: SpecKindService depends only on StoreInterface — stateless, no AI, no telemetry,
+    // same shape as PhaseService. SPEC-032 §3.4.
+    specKindService: new SpecKindService(store),
     // reason: telemetry exposed on App so dashboard route handlers can emit source-tagged events
     // without requiring service-layer signature changes (SPEC-022 §9.6).
     telemetry,
@@ -221,6 +232,9 @@ function buildAppFromTurso(
     // reason: own telemetry wiring restores parity with CorpusService (D8) — TaskWorkflowService
     // never routes writes through CorpusService (cross-service calls forbidden). SPEC-025 §3 D5, D8.
     taskWorkflowService: new TaskWorkflowService(store, telemetry, { claimTtlMinutes }),
+    // reason: SpecKindService depends only on StoreInterface — stateless, no AI, no telemetry,
+    // same shape as PhaseService. SPEC-032 §3.4.
+    specKindService: new SpecKindService(store),
     // reason: telemetry exposed on App so dashboard route handlers can emit source-tagged events
     // without requiring service-layer signature changes (SPEC-022 §9.6).
     telemetry,

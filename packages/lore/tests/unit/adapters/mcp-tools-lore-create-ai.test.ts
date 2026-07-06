@@ -86,6 +86,9 @@ function makeApp(): { app: App; aiProvider: InMemoryAIProvider } {
     // reason: SPEC-025 §9.1 — test does not exercise task-workflow commands; null-cast per
     // established pattern (see phaseService above) for satisfying newly-required App fields.
     taskWorkflowService: null as unknown as App["taskWorkflowService"],
+    // reason: SPEC-032 §3.4 — test does not exercise spec-kind audit; null-cast per
+    // established pattern (see phaseService above) for satisfying newly-required App fields.
+    specKindService: null as unknown as App["specKindService"],
     // reason: SPEC-024 §9.2 — MCP surface is set at startup, before any tool call
     callerSurface: "mcp" as const,
     // reason: simplified resolveAiDefault for unit tests — mirrors mcp built-in (false)

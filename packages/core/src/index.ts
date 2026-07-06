@@ -36,3 +36,4 @@ export * from "./text-normalise.js";
 export * from "./task-workflow.js";
 export * from "./assessment.js";
 export * from "./spec-kind.js";
+export * from "./spec-kind-audit.js";
