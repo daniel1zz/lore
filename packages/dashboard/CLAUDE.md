@@ -2,7 +2,9 @@
 
 ## Purpose
 
-Local-development web UI for browsing and editing the Lore corpus. Vite + React 19 + TypeScript + Tailwind v4 + shadcn/ui. Read views per SPEC-015 (list / search / tree / detail) plus the SPEC-022 write surface: create, in-place markdown editing (CodeMirror 6 + split preview), status transitions, link management, version history tab, optimistic-concurrency conflict resolution. SPEC-027 hardening added soft delete (confirmation-gated) and per-version restore (append-only), both cookie-gated. Auth is the SPEC-016 cookie bootstrap.
+Local-development web UI for browsing and editing the Lore corpus. Vite + React 19 + TypeScript + Tailwind v4 + shadcn/ui. Read views per SPEC-015 (search / tree / detail; list moved to `/library`, see below) plus the SPEC-022 write surface: create, in-place markdown editing (CodeMirror 6 + split preview), status transitions, link management, version history tab, optimistic-concurrency conflict resolution. SPEC-027 hardening added soft delete (confirmation-gated) and per-version restore (append-only), both cookie-gated. Auth is the SPEC-016 cookie bootstrap.
+
+**Home (`/`) is the resolved living PRD, not a doc list (SPEC-033 F2, PRD-001 §13.5).** The corpus's single PRD document is rendered via `ResolvedPrdBody` — its MDX placeholders (`ChildrenOf`/`RecentDecisions`/`ActivePlans`/`RelatedOf`/`ModuleTree`/`HealthStats`/`Embed`) are spliced in as typed React components (`splitContentByPlaceholders`, `src/lib/resolved-content.ts`), never as raw tag text or `dangerouslySetInnerHTML`. Side panels (`PendingPanel`, `ActivePlansPanel`, `LoopPanel`) surface the feedback loop: pending-review queue with AI judgment badges, active plans (a `/api/ready` HTTP route doesn't exist yet — this is a documented stand-in, see `ActivePlansPanel`'s header), and calibration stats + audit-verify status. The original SPEC-015 doc-browsing + create UX (type filter chips, `NewDocModal`) moved to `/library` (`routes/library.tsx`) — no functionality was dropped, only relocated off the PRD-projection surface SPEC-033 claims for `/`.
 
 ## Local-dev topology
 
@@ -29,7 +31,8 @@ Two-process model intentional. `vite.config.ts` sets `server.proxy: { "/api": "h
 
 ## Patterns
 
-- **`src/lib/api.ts`** — typed fetch wrapper returning `Result<T, ApiError>`. 5-second `AbortController` timeout. Normalises errors to `{ code, message }`. All route handlers call this; nothing else touches `fetch`.
+- **`src/lib/api.ts`** — typed fetch wrapper returning `Result<T, ApiError>`. 5-second `AbortController` timeout. Normalises errors to `{ code, message }`. All route handlers call this; nothing else touches `fetch`. SPEC-033 F1/F2 added `apiGetJudgments`, `apiGetAuditForDoc`, `apiGetAuditVerify`, `apiGetCalibrationStats`, `apiGetPendingReview` (feedback-loop reads; response shapes mirror their `packages/lore/src/service/*.ts` origin types exactly, documented inline per-function).
+- **`JudgmentBadge` (`src/components/judgment-badge.tsx`) is the single shared review-judgment badge** — consumed by F2's `PendingPanel` (home page) and F3's triage queue page. Renders `"{decision} {confidence.toFixed(2)}"` / `"escalate +NQ"` / `"unreviewed"`, with a `(stale)` suffix + outline-variant downgrade when `judgment.doc_version < docVersion`. Mirrors the CLI's `formatJudgmentBadge` (`packages/lore/src/adapters/cli/utils.ts`) semantics — don't reimplement the staleness/label rule a third way.
 - **TanStack Query hooks** — `useSuspenseQuery` + `<Suspense>` boundaries for loading; `<Skeleton/>` from shadcn for shimmer.
 - **Component primitives** — shadcn under `src/components/ui/` (button / card / input / table / badge / scroll-area / separator / skeleton / dropdown-menu / sonner). Compose into feature components (`DocCard`, `DocDetail`, etc.) under `src/components/`.
 - **Theme** — `useTheme()` reads localStorage `theme` and applies `dark` class to `documentElement`. Tri-state: light / dark / system.
@@ -50,14 +53,15 @@ Two-process model intentional. `vite.config.ts` sets `server.proxy: { "/api": "h
 - `src/main.tsx` — `createRoot` + `RouterProvider` + `QueryClientProvider` + `<ThemeProvider>` (theme hook bootstrap).
 - `src/index.css` — `@import "tailwindcss"` + shadcn CSS variables.
 - `src/lib/{api,query-client,theme,utils}.ts` — fetch wrapper / Query client / theme hook / shadcn `cn()`.
-- `src/routes/{__root,index,search,tree,docs.$id}.tsx` — TanStack Router files (`docs.$id` wires `onDeleted` → navigate home and keys `<DocDetail>` by doc id).
+- `src/routes/{__root,index,library,search,tree,docs.$id}.tsx` — TanStack Router files. `index.tsx` (`/`) is the resolved living PRD (SPEC-033 F2); `library.tsx` (`/library`) is the relocated SPEC-015 doc list + create UX; `docs.$id` wires `onDeleted` → navigate home and keys `<DocDetail>` by doc id.
 - `src/components/{DocCard,DocDetail,DocTree,SearchBar,ThemeToggle,Editor,ConflictModal,NewDocModal,StatusPill,LinksPanel,HistoryTab,DiffView}.tsx` — feature components. `DiffView` is the single shared unified-diff renderer (HistoryTab + ConflictModal both consume it — don't reimplement line coloring).
+- `src/components/{ResolvedPrdBody,judgment-badge,PendingPanel,ActivePlansPanel,LoopPanel}.tsx` — SPEC-033 F2 home-page components. `ResolvedPrdBody` splices MDX placeholders into typed React via `src/lib/resolved-content.ts::splitContentByPlaceholders` (pure, unit-tested independent of React). `judgment-badge.tsx` is shared with F3.
 - `src/api/mutations.ts` — write API client (`DashboardApiError` / `ConflictError`, eight endpoints incl. `apiDeleteDoc` / `apiRestoreVersion`).
 - `src/store/draft.ts` — localStorage draft shadow copy (server is authoritative; stale-judged by version).
 - `src/components/ui/` — shadcn primitives (10).
 - `tests/setup.ts` — testing-library matcher install.
-- `tests/unit/lib/{api,bootstrap,draft,mutations}.test.ts` — 6-dim unit coverage.
-- `tests/component/*.test.tsx` — behavioural component tests (one file per feature component; write-path splits: `DocDetail.write`, `DocDetail.delete`).
+- `tests/unit/lib/{api,bootstrap,draft,mutations,resolved-content}.test.ts` — 6-dim unit coverage.
+- `tests/component/*.test.tsx` — behavioural component tests (one file per feature component; write-path splits: `DocDetail.write`, `DocDetail.delete`; SPEC-033 F2 added `judgment-badge`, `ResolvedPrdBody`, `PendingPanel`, `ActivePlansPanel`, `LoopPanel`).
 - `tests/e2e/write-flow.pw.ts` — Playwright end-to-end write flow.
 
 ## Links
