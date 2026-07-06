@@ -94,6 +94,7 @@ async function makeTestServer(): Promise<TestContext> {
     // reason: SPEC-032 §3.4 — test does not exercise spec-kind audit; null-cast per
     // established pattern (see phaseService above) for satisfying newly-required App fields.
     specKindService: null as unknown as App["specKindService"],
+    judgmentService: null as unknown as App["judgmentService"],
     // reason: test does not exercise AI-default path; callerSurface required by App interface (SPEC-024).
     callerSurface: "cli" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),

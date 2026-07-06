@@ -308,6 +308,20 @@ export const AiConfigSchema = z
       })
       .strict()
       .default({}),
+    /**
+     * Document review operation configuration (SPEC-034).
+     * Character budgets for the two material sections embedded in the `lore review` judge
+     * prompt — mirrors the `ai.assess.*` budget precedent.
+     */
+    review: z
+      .object({
+        /** Max chars of the reviewed document's own content included in the prompt. Default: 12000. */
+        max_doc_chars: z.number().int().positive().default(12000),
+        /** Max chars of the parent document's content included as context. Default: 8000. */
+        max_context_chars: z.number().int().positive().default(8000),
+      })
+      .strict()
+      .default({}),
   })
   .strict()
   // Cross-field constraint: when provider === "http", ai.http is required (AC-HTTP-2).

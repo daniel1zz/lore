@@ -138,12 +138,13 @@ export const aiGenerationEventSchema = z.object({
    *   "refine"     — lore set --refine / --refine-stdin (SPEC-019)
    *   "infer"      — lore link --infer (SPEC-019)
    *   "assess"     — lore assess <plan> (SPEC-026)
+   *   "review"     — lore review <doc> (SPEC-034) — see `decision`/`confidence` below
    *
    * .default("create") so events emitted before SPEC-019 parse cleanly at schema validation
    * time — the field is optional in the INPUT to .parse() but required in the OUTPUT type.
-   * Source: SPEC-019 §8 Q6, AC-AI-TEL-1; SPEC-026 §3 D10
+   * Source: SPEC-019 §8 Q6, AC-AI-TEL-1; SPEC-026 §3 D10; SPEC-034 §6
    */
-  kind: z.enum(["create", "regenerate", "refine", "infer", "assess"]).default("create"),
+  kind: z.enum(["create", "regenerate", "refine", "infer", "assess", "review"]).default("create"),
   /**
    * ULID of the document that was mutated by the AI operation.
    *   null — for "create"/"assess" (doc does not exist yet at call time)
@@ -153,6 +154,17 @@ export const aiGenerationEventSchema = z.object({
    * Source: SPEC-019 AC-AI-TEL-1
    */
   target_doc_id: z.string().nullable().optional(),
+  /**
+   * The judge's decision — populated ONLY when kind="review" and a judgment was actually
+   * reached (absent on transport errors / double-malformed-JSON failures, same "success-only
+   * field" pattern as `usage`). SPEC-034 §6.
+   */
+  decision: z.enum(["approve", "reject", "escalate"]).optional(),
+  /**
+   * The judge's confidence [0,1] — populated ONLY alongside `decision` (both are set
+   * together, or both are absent). SPEC-034 §6.
+   */
+  confidence: z.number().min(0).max(1).optional(),
 }).strict();
 
 /** Derived type for an AI generation telemetry event. */

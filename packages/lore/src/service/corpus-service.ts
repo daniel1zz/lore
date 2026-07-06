@@ -32,6 +32,8 @@ import type {
 } from "../store/store-interface.js";
 import { NoOpTelemetry, type Telemetry, type TelemetryEvent } from "@lore/core";
 import type { PlanBundle } from "@lore/core";
+import type { ReviewBundle } from "@lore/core";
+import type { TreeBlueprint } from "@lore/core";
 
 // ─── Local types (mirror SPEC-001 §3.1 interfaces) ────────────────────────
 
@@ -797,6 +799,86 @@ export class CorpusService {
     if (!tasksResult.ok) return tasksResult;
 
     return ok({ plan, ...(spec !== undefined ? { spec } : {}), tasks: tasksResult.value });
+  }
+
+  /**
+   * Assemble a {@link ReviewBundle} for `lore review` — {doc, parent?, links,
+   * brokenLinkTargets?, blueprint?} — the read orchestration entry point for
+   * `runDeterministicChecks` and `AIProviderService.judgeDoc` (SPEC-034 §4), mirroring
+   * `getPlanBundle`'s role for `assessPlan`.
+   *
+   * `blueprint` is param-injected rather than read from disk here: CorpusService has no
+   * filesystem access (services stay store-only), so the CALLER (CLI `review.ts`) reads
+   * `lore.tree.yaml` via the same loader `lore status --check-tree` already uses and
+   * passes the parsed `TreeBlueprint` in. Passing `undefined` (the default) makes
+   * `tree_position` degrade to "skipped" — never a silent pass — exactly as it would if
+   * the file were genuinely absent from the repo.
+   *
+   * `brokenLinkTargets` is populated by resolving the "other side" of every link this doc
+   * participates in (in or out) against the store; any id that no longer resolves to a
+   * live doc is collected here rather than left for `link_integrity` to re-discover.
+   *
+   * @param idOrSlug - ULID or slug of the document to review
+   * @param blueprint - Optional pre-parsed lore.tree.yaml blueprint (adapter-injected)
+   * @returns Result<ReviewBundle, LoreError> — DOC_NOT_FOUND if idOrSlug doesn't resolve
+   *   to a live doc
+   *
+   * @example
+   * const bundleResult = await corpusService.getReviewBundle("spec-my-feature", blueprint);
+   * if (!bundleResult.ok) { ... }
+   * const checks = runDeterministicChecks(bundleResult.value);
+   *
+   * Source: SPEC-034 §1, §4
+   */
+  async getReviewBundle(
+    idOrSlug: string,
+    blueprint?: TreeBlueprint,
+  ): Promise<Result<ReviewBundle, LoreError>> {
+    const resolveResult = await this.resolve(idOrSlug);
+    if (!resolveResult.ok) return resolveResult;
+
+    const docResult = await this.store.find(resolveResult.value);
+    if (!docResult.ok) return docResult;
+    const doc = docResult.value;
+    if (doc === null || doc.deleted_at !== null) {
+      return err({ code: "DOC_NOT_FOUND", id: resolveResult.value });
+    }
+
+    let parent: DocRecord | undefined;
+    if (doc.parent_id !== null) {
+      const parentResult = await this.store.find(doc.parent_id);
+      if (!parentResult.ok) return parentResult;
+      if (parentResult.value !== null && parentResult.value.deleted_at === null) {
+        parent = parentResult.value;
+      }
+    }
+
+    const linksResult = await this.store.findLinks(doc.id, "both");
+    if (!linksResult.ok) return linksResult;
+    const links = linksResult.value;
+
+    // reason: resolve the "other side" of every link (the endpoint that isn't doc.id)
+    // against the store — any id that no longer resolves to a live doc is a broken link.
+    // One find() per link keeps this method simple and correct; getReviewBundle is a
+    // single-doc, CLI-invoked read (not a hot path), so per-link round trips are an
+    // acceptable trade against inventing a batch "find many by id" store method here.
+    const brokenLinkTargets: DocId[] = [];
+    for (const link of links) {
+      const otherId = link.from_id === doc.id ? link.to_id : link.from_id;
+      const otherResult = await this.store.find(otherId);
+      if (!otherResult.ok) return otherResult;
+      if (otherResult.value === null || otherResult.value.deleted_at !== null) {
+        brokenLinkTargets.push(otherId);
+      }
+    }
+
+    return ok({
+      doc,
+      ...(parent !== undefined ? { parent } : {}),
+      links,
+      ...(brokenLinkTargets.length > 0 ? { brokenLinkTargets } : {}),
+      ...(blueprint !== undefined ? { blueprint } : {}),
+    });
   }
 
   // ── Link ─────────────────────────────────────────────────────────────────

@@ -27,6 +27,7 @@ Business logic layer. Nine stateless services orchestrate `StoreInterface` calls
 - **Stable public types live next to the service that owns them** — `PendingDoc`, `ApproveOpts` in `review-service.ts`; `Diff`, `FieldChange` in `version-service.ts`; `MigrationReport`, `SecretWarning` in `migration-service.ts`; `TreeDrift`, `FixReport`, `ReconcileReport` in `tree-check-service.ts`. Don't move them to `core/types.ts`.
 - **TreeCheckService is the only service that may modify the link table directly** — it reconciles the `parent_id` column on `docs` against the parent links in the link table. Other services treat them as synchronised.
 - **`CorpusService.getPlanBundle` is the only cross-doc read-orchestration entry point for assessment** (SPEC-026 §3 D1) — it assembles `{plan, spec?, tasks[]}` for `AIProviderService.assessPlan`, the same way `tree()` assembles multi-doc reads for other callers. `AIProviderService` stays store-free (its four pre-existing methods take already-fetched `DocRecord`s); bundle assembly does NOT move into the adapters (CLI/MCP contract: thin pipes only).
+- **`CorpusService.getReviewBundle` mirrors `getPlanBundle` for the SPEC-034 review-judgment pipeline** — assembles `{doc, parent?, links, brokenLinkTargets?, blueprint?}` for `runDeterministicChecks` (pure fn, `@lore/core`) and `AIProviderService.judgeDoc`. `blueprint` is PARAM-INJECTED (`getReviewBundle(idOrSlug, blueprint?)`), never read from disk here — CorpusService has no filesystem access; the CLI adapter (task C) loads `lore.tree.yaml` the same way `lore status --check-tree` does and passes the parsed `TreeBlueprint` in. Omitting it makes the `tree_position` check degrade to `"skipped"`, never a silent pass.
 
 ## Service Map
 
@@ -43,6 +44,7 @@ Business logic layer. Nine stateless services orchestrate `StoreInterface` calls
 | `PhaseService` | addPhase / listPhases / removePhase / renamePhase / migratePhases on plan.extra.phases (SPEC-023) |
 | `TaskWorkflowService` | addEvidence / claim / release / ready — evidence log, advisory claim lease, computed readiness over `blocks` links (SPEC-025, own telemetry wiring) |
 | `ExportDocsService` | One-way corpus→file exporter; maintains `.lore/export-index.json` (collision-safe human_id/file_path allocation, self-heals corrupted mappings) (SPEC-021); splices MDX placeholders into the written body via injected `ResolveDocBody` (SPEC-032 §3.3) |
+| `JudgmentService` | record / latestFor / listFor for AI review judgments (`review_judgments`); recordCalibration (version-pinned human confirm/override) / computeCalibrationStats (Wilson-bound aggregation) for `calibration_records` — owns both tables as one judgment-derived family (SPEC-034, own telemetry wiring) |
 
 ## Links
 

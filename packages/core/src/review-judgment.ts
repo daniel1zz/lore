@@ -16,6 +16,8 @@
  *     parse, not by the model — mirrors assessment.ts's llmAssessmentOutputSchema split)
  *   - reviewJudgmentSchema / ReviewJudgment — full persisted shape (llm output + identity
  *     + judge metadata), stored one row per judgment in `review_judgments`
+ *   - NewReviewJudgment — ReviewJudgment minus {id, created_at, created_by}; the
+ *     AIProviderService.judgeDoc → JudgmentService.record hand-off shape (SPEC-034 §4)
  *
  * Invariants:
  *   - decision === "escalate" requires at least one blocking_questions entry; every other
@@ -205,3 +207,25 @@ export const reviewJudgmentSchema = reviewJudgmentBaseShape
 
 /** Derived TypeScript type for a full persisted review judgment. */
 export type ReviewJudgment = z.infer<typeof reviewJudgmentSchema>;
+
+// ─── Judge → Service Hand-off Shape ─────────────────────────────────────────
+
+/**
+ * The `AIProviderService.judgeDoc` → `JudgmentService.record` hand-off shape — everything
+ * needed to persist a judgment EXCEPT the three fields only `record()` is allowed to set:
+ * `id` (ULID, generated at persist time), `created_at` (wall clock, read at persist time),
+ * and `created_by` (derived from `judge` via `formatJudgeActor`, audit-actor.ts). Mirrors
+ * SPEC-026's `AssessmentResult` hand-off from `assessPlan` to its caller, one layer earlier:
+ * here the split lives in the type system (`Omit`) rather than in a second Zod schema,
+ * because unlike `AssessmentResult` this shape is never independently persisted or
+ * re-parsed from raw JSON — it exists only as an in-process argument.
+ *
+ * @example
+ * const newJudgment: NewReviewJudgment = {
+ *   doc_id: "01ARZ3...", doc_version: 2, decision: "approve", confidence: 0.9,
+ *   reasons: [{ dimension: "completeness", finding: "All ACs covered." }],
+ *   checks: [{ check: "schema", outcome: "pass" }], blocking_questions: [],
+ *   judge: { provider: "claude-cli", model: "claude-cli", prompt_version: "v1" },
+ * };
+ */
+export type NewReviewJudgment = Omit<ReviewJudgment, "id" | "created_at" | "created_by">;
