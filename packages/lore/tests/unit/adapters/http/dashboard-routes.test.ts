@@ -28,6 +28,7 @@ import { VersionService } from "../../../../src/service/version-service.js";
 import { OutlineService } from "../../../../src/service/outline-service.js";
 import { MigrationService } from "../../../../src/service/migration-service.js";
 import { TreeCheckService } from "../../../../src/service/tree-check-service.js";
+import { JudgmentService } from "../../../../src/service/judgment-service.js";
 import { NoOpTelemetry } from "@lore/core";
 import type { App } from "../../../../src/app.js";
 import type { ApiKeyStore, ActorContext } from "../../../../src/adapters/http/auth.js";
@@ -57,7 +58,14 @@ function makeApp(): App {
     // reason: SPEC-032 §3.4 — test does not exercise spec-kind audit; null-cast per
     // established pattern (see phaseService above) for satisfying newly-required App fields.
     specKindService: null as unknown as App["specKindService"],
-    judgmentService: null as unknown as App["judgmentService"],
+    // reason: SPEC-033 F1 — approve/reject now run the shared calibration hook, which
+    // calls `judgmentService.latestFor`. Unlike the other null-cast services above (never
+    // touched by the routes under test), this MUST be a real instance backed by the SAME
+    // `store` — a null cast here would throw on the very first approve/reject test. No
+    // judgment is ever seeded in these tests, so `latestFor` resolves `ok(null)` and the
+    // hook silently no-ops, exactly like the "no judgment exists" case in
+    // `tests/unit/flows/calibration-hook.test.ts`.
+    judgmentService: new JudgmentService(store, new NoOpTelemetry()),
     auditService: null as unknown as App["auditService"],
     callerSurface: "cli" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),

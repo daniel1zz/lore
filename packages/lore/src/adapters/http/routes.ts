@@ -1,7 +1,14 @@
 /**
  * HTTP API route handler — maps URL patterns to service calls.
  * Each route parses params/query/body, calls the service, and returns a JSON envelope.
- * Source: SPEC-011 §3; SPEC-016 §3.2 (auth routes: local-bootstrap, me, logout)
+ * Source: SPEC-011 §3; SPEC-016 §3.2 (auth routes: local-bootstrap, me, logout);
+ *   SPEC-033 F1 (feedback-loop read routes: judgments, audit, calibration stats)
+ *
+ * SPEC-033 F1 read routes (GET /api/judgments/:docId, GET /api/audit/:docId,
+ * GET /api/audit/verify, GET /api/calibration/stats) intentionally sit in THIS
+ * dispatcher, not `dashboard-routes.ts` — they are read-only and available to
+ * both bearer-token and cookie sessions (same auth duality as every other v1 GET
+ * route below), unlike the cookie-only `/api/dashboard/*` WRITE surface.
  */
 
 import type { App } from "../../app.js";
@@ -142,6 +149,17 @@ export async function handleApiRoute(
     return handleReviewPending(url, app);
   }
 
+  // GET /api/audit/verify — MUST be checked before the /api/audit/:docId pattern
+  // match below, or "verify" would be swallowed as a doc id.
+  if (method === "GET" && path === "/api/audit/verify") {
+    return handleAuditVerify(url, app);
+  }
+
+  // GET /api/calibration/stats
+  if (method === "GET" && path === "/api/calibration/stats") {
+    return handleCalibrationStats(url, app);
+  }
+
   // POST /api/links
   if (method === "POST" && path === "/api/links") {
     return handleCreateLink(req, app);
@@ -151,6 +169,18 @@ export async function handleApiRoute(
   const docsMatch = matchDocsPath(path);
   if (docsMatch !== null) {
     return handleDocRoute(req, method, docsMatch, url, app);
+  }
+
+  // GET /api/judgments/:docId
+  const judgmentsMatch = matchJudgmentsPath(path);
+  if (judgmentsMatch !== null && method === "GET") {
+    return handleGetJudgments(judgmentsMatch, app);
+  }
+
+  // GET /api/audit/:docId
+  const auditDocMatch = matchAuditDocPath(path);
+  if (auditDocMatch !== null && method === "GET") {
+    return handleGetAuditForDoc(auditDocMatch, app);
   }
 
   // DELETE /api/links/:from/:to
@@ -285,6 +315,72 @@ async function handleReviewPending(url: URL, app: App): Promise<Response> {
   return jsonOk(result.value);
 }
 
+// ─── SPEC-033 F1 feedback-loop read routes ──────────────────────────────────
+
+/**
+ * GET /api/judgments/:docId — the doc's latest AI review judgment plus its full
+ * history, newest first. Thin pipe over `JudgmentService`; a doc with no
+ * judgments yet returns `{ latest: null, history: [] }` (not a 404 — "no
+ * judgment exists" is a valid, non-exceptional outcome, not a doc lookup failure).
+ */
+async function handleGetJudgments(docId: string, app: App): Promise<Response> {
+  const latestResult = await app.judgmentService.latestFor(docId);
+  if (!latestResult.ok) return loreErrorResponse(latestResult.error);
+
+  const historyResult = await app.judgmentService.listFor(docId);
+  if (!historyResult.ok) return loreErrorResponse(historyResult.error);
+
+  return jsonOk({ latest: latestResult.value, history: historyResult.value });
+}
+
+/**
+ * GET /api/audit/:docId — the doc's audit trail, newest first. Thin pipe over
+ * `AuditService.query`. Actor strings are shipped RAW (e.g. `ai:claude-cli:...`
+ * for AI-judge entries) — decoding into a human-readable form via
+ * `parseAuditActor` is a client concern (browser-safe, `@lore/core`), not
+ * duplicated server-side.
+ */
+async function handleGetAuditForDoc(docId: string, app: App): Promise<Response> {
+  const result = await app.auditService.query({ doc_id: docId });
+  if (!result.ok) return loreErrorResponse(result.error);
+  return jsonOk(result.value);
+}
+
+/**
+ * GET /api/audit/verify[?since=<ISO8601>] — versions⋈audit completeness oracle.
+ * `since` overrides the configured `audit.verify_since` watermark for this call
+ * only (mirrors `lore audit --verify --since`); omitted, `AuditService.verify`
+ * falls back to its constructor-resolved watermark.
+ */
+async function handleAuditVerify(url: URL, app: App): Promise<Response> {
+  const since = url.searchParams.get("since");
+  const result = await app.auditService.verify(since !== null ? { since } : undefined);
+  if (!result.ok) return loreErrorResponse(result.error);
+  return jsonOk(result.value);
+}
+
+/**
+ * GET /api/calibration/stats[?doc_type=<type>][&prompt_version=<v>] — Wilson-bound
+ * calibration agreement stats per (doc_type, prompt_version). Thin pipe over
+ * `JudgmentService.computeCalibrationStats`; an empty filter object is never
+ * passed when both query params are absent (mirrors the service's own
+ * `filter?` optional-arg contract — `undefined`, not `{}`, means "no narrowing").
+ */
+async function handleCalibrationStats(url: URL, app: App): Promise<Response> {
+  const docType = url.searchParams.get("doc_type");
+  const promptVersion = url.searchParams.get("prompt_version");
+
+  const filter: { doc_type?: DocType; prompt_version?: string } = {};
+  if (docType !== null) filter.doc_type = docType as DocType;
+  if (promptVersion !== null) filter.prompt_version = promptVersion;
+
+  const result = await app.judgmentService.computeCalibrationStats(
+    Object.keys(filter).length > 0 ? filter : undefined,
+  );
+  if (!result.ok) return loreErrorResponse(result.error);
+  return jsonOk(result.value);
+}
+
 async function handleCreateLink(req: Request, app: App): Promise<Response> {
   const body = await parseJsonBody(req);
   if (body === null || typeof body !== "object") {
@@ -343,6 +439,23 @@ function matchDocsPath(path: string): DocsPathMatch | null {
   if (docMatch?.[1]) return { type: "doc", idOrSlug: decodeURIComponent(docMatch[1]) };
 
   return null;
+}
+
+/** Matches GET /api/judgments/:docId. */
+function matchJudgmentsPath(path: string): string | null {
+  const match = path.match(/^\/api\/judgments\/([^/]+)$/);
+  return match?.[1] !== undefined ? decodeURIComponent(match[1]) : null;
+}
+
+/**
+ * Matches GET /api/audit/:docId. Callers dispatch the static
+ * `/api/audit/verify` route BEFORE reaching this pattern (see
+ * `handleApiRoute`), so `verify` is never mistaken for a doc id here — this
+ * function itself has no special-case for it.
+ */
+function matchAuditDocPath(path: string): string | null {
+  const match = path.match(/^\/api\/audit\/([^/]+)$/);
+  return match?.[1] !== undefined ? decodeURIComponent(match[1]) : null;
 }
 
 function matchLinksDeletePath(path: string): { from: string; to: string } | null {

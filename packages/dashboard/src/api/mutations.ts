@@ -1,7 +1,8 @@
 /**
  * Dashboard write API — typed wrappers for the /api/dashboard/* write endpoints.
  * Purpose: provide a typed, fetch-based client for the SPEC-022 write surface
- *   plus the SPEC-027 delete/restore surface (AC-DH-6, AC-DH-7).
+ *   plus the SPEC-027 delete/restore surface (AC-DH-6, AC-DH-7) and the SPEC-033
+ *   F1 calibration feedback loop on approve/reject.
  * Public surface: apiCreateDoc, apiPatchDoc, apiApproveDoc, apiRejectDoc,
  *   apiCreateLink, apiDeleteLink, apiDeleteDoc, apiRestoreVersion,
  *   ConflictError, DashboardApiError
@@ -16,8 +17,14 @@
  *     user-facing prompt.
  *   - apiRestoreVersion always sends `?confirm=true` — same pattern (AC-DH-11):
  *     the HistoryTab "restore" button click is the user-facing confirmation.
+ *   - apiApproveDoc / apiRejectDoc (SPEC-033 F1) accept an optional
+ *     `calibrationNote` and resolve to `{ doc, warnings }` — `warnings` is a
+ *     stable, always-present `string[]` (never absent/undefined) populated ONLY
+ *     when the server's implicit calibration hook hit a genuine IO failure; the
+ *     approve/reject itself already succeeded by the time `warnings` could be
+ *     non-empty, so it is never a reason to treat the call as failed.
  * Side-effect class: IO (fetch)
- * Source: SPEC-022 §9.3, §9.4; SPEC-027 AC-DH-6, AC-DH-7, AC-DH-11
+ * Source: SPEC-022 §9.3, §9.4; SPEC-027 AC-DH-6, AC-DH-7, AC-DH-11; SPEC-033 F1
  */
 
 import type { DocRecord, LinkType } from "@lore/core";
@@ -97,6 +104,16 @@ export interface CreateLinkPayload {
 interface DocWriteResponse {
   ok: boolean;
   data: { doc: DocRecord };
+}
+
+/**
+ * Success payload from approve/reject (SPEC-033 F1). `warnings` is always a
+ * `string[]` (possibly empty) — see the module header's `apiApproveDoc` /
+ * `apiRejectDoc` invariant.
+ */
+export interface AdjudicateDocResult {
+  doc: DocRecord;
+  warnings: string[];
 }
 
 /** Success payload from the soft-delete endpoint (no DocRecord — doc is gone). */
@@ -244,34 +261,50 @@ export async function apiPatchDoc(
 /**
  * Approve a document via POST /api/dashboard/docs/:id/approve.
  * Session user becomes the reviewer (AC-DASH-WRITE-7).
+ * Runs the server's implicit calibration hook (SPEC-033 F1) — see
+ * {@link AdjudicateDocResult} for the `warnings` contract.
  *
  * @param id - Document ULID or slug.
- * @returns The approved DocRecord.
+ * @param opts.calibrationNote - Optional note → the calibration record's `delta_reasons[0]`.
+ * @returns `{ doc, warnings }` — the approved DocRecord plus any calibration warnings.
  * @throws {DashboardApiError} On HTTP error or invalid transition.
  */
-export async function apiApproveDoc(id: string): Promise<DocRecord> {
-  const result = await writeFetch<{ doc: DocRecord }>(
+export async function apiApproveDoc(
+  id: string,
+  opts: { calibrationNote?: string } = {},
+): Promise<AdjudicateDocResult> {
+  return writeFetch<AdjudicateDocResult>(
     `/api/dashboard/docs/${encodeURIComponent(id)}/approve`,
     "POST",
+    opts.calibrationNote !== undefined ? { calibration_note: opts.calibrationNote } : undefined,
   );
-  return result.doc;
 }
 
 /**
  * Reject a document via POST /api/dashboard/docs/:id/reject.
+ * Runs the server's implicit calibration hook (SPEC-033 F1) — see
+ * {@link AdjudicateDocResult} for the `warnings` contract.
  *
  * @param id - Document ULID or slug.
  * @param reason - Optional rejection reason.
- * @returns The rejected DocRecord.
+ * @param opts.calibrationNote - Optional note → the calibration record's `delta_reasons[0]`.
+ * @returns `{ doc, warnings }` — the rejected DocRecord plus any calibration warnings.
  * @throws {DashboardApiError} On HTTP error or invalid transition.
  */
-export async function apiRejectDoc(id: string, reason?: string): Promise<DocRecord> {
-  const result = await writeFetch<{ doc: DocRecord }>(
+export async function apiRejectDoc(
+  id: string,
+  reason?: string,
+  opts: { calibrationNote?: string } = {},
+): Promise<AdjudicateDocResult> {
+  const body: Record<string, string> = {};
+  if (reason !== undefined) body["reason"] = reason;
+  if (opts.calibrationNote !== undefined) body["calibration_note"] = opts.calibrationNote;
+
+  return writeFetch<AdjudicateDocResult>(
     `/api/dashboard/docs/${encodeURIComponent(id)}/reject`,
     "POST",
-    reason !== undefined ? { reason } : undefined,
+    Object.keys(body).length > 0 ? body : undefined,
   );
-  return result.doc;
 }
 
 /**

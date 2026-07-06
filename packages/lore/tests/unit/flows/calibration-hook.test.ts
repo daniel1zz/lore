@@ -40,9 +40,9 @@
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { runCalibrationHook } from "../../../../src/adapters/cli/calibration-hook.js";
-import { JudgmentService } from "../../../../src/service/judgment-service.js";
-import { InMemoryStore } from "../../../../src/store/in-memory-store.js";
+import { runCalibrationHook } from "../../../src/flows/calibration-hook.js";
+import { JudgmentService } from "../../../src/service/judgment-service.js";
+import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { err } from "@lore/core";
 import type {
   CalibrationRecord,

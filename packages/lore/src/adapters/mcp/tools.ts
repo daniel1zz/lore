@@ -40,6 +40,7 @@ import { parseTreeBlueprint, runDeterministicChecks } from "@lore/core";
 import { isAssessAiBraked } from "../../ai/resolve-ai.js";
 import { REVIEW_PROMPT_VERSION } from "../../ai/review-template.js";
 import { CORPUS_SCHEMA_INFO } from "./schema-info.js";
+import { runCalibrationHook } from "../../flows/calibration-hook.js";
 
 // ─── Schema Constants ────────────────────────────────────────────────────────
 // Each schema is a `z.object(...)` instance (AnySchema), NOT an inline ZodRawShape literal.
@@ -160,10 +161,15 @@ export const LorePendingSchema = z.object({
   include_judgments: z.boolean().optional(),
 });
 
-/** Input schema for lore_approve. */
+/**
+ * Input schema for lore_approve. `calibration_note` (SPEC-033 F1) plumbs through to
+ * the shared implicit calibration hook's `note` param (→ `delta_reasons[0]` on the
+ * persisted calibration row) — same field the CLI's `--calibration-note` flag feeds.
+ */
 export const LoreApproveSchema = z.object({
   id_or_slug: z.string(),
   reviewer: z.string().optional(),
+  calibration_note: z.string().optional(),
 });
 
 /** Input schema for lore_context_bundle. */
@@ -592,6 +598,27 @@ export function registerTools(server: McpServer, app: App): void {
     const opts = args.reviewer !== undefined ? { reviewer: args.reviewer } : {};
     const result = await reviewService.approve(args.id_or_slug, opts);
     if (!result.ok) return errorContent(result.error);
+
+    // reason: SPEC-033 F1 — MCP's lore_approve is an adjudication tool, same as CLI
+    // approve/HTTP dashboard approve; it MUST feed the same calibration loop, not a
+    // second-class copy. Mirrors `reviewer ?? "system"` — the exact default
+    // ReviewService.approve itself falls back to when `opts.reviewer` is omitted
+    // (review-service.ts) — so the hook's `actor` always matches who the approve
+    // was actually recorded under. actedOnVersion = result.value.version - 1 since
+    // approve() bumps the version (identical to CLI approve.ts / HTTP dashboard
+    // handleDashboardApprove's computation).
+    const reviewer = args.reviewer ?? "system";
+    await runCalibrationHook(
+      { judgmentService, telemetry: app.telemetry },
+      {
+        updatedDoc: result.value,
+        actedOnVersion: result.value.version - 1,
+        humanAction: "approve",
+        actor: reviewer,
+        ...(args.calibration_note !== undefined ? { note: args.calibration_note } : {}),
+      },
+    );
+
     return textContent({ doc: result.value });
   });
 
