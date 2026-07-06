@@ -23,6 +23,7 @@ import type {
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import type {
   AuditFilters,
+  CalibrationRecordWithPromptVersion,
   CalibrationWindowFilter,
   SearchHit,
   StoreFilters,
@@ -31,7 +32,7 @@ import type {
 } from "./store-interface.js";
 import {
   type AuditRow,
-  type CalibrationRow,
+  type CalibrationRowWithPromptVersion,
   type DocRow,
   type FtsRow,
   type JudgmentRow,
@@ -39,7 +40,7 @@ import {
   type VersionRow,
   escapeFtsQuery,
   rowToAuditEntry,
-  rowToCalibrationRecord,
+  rowToCalibrationRecordWithPromptVersion,
   rowToDocRecord,
   rowToLinkRecord,
   rowToReviewJudgment,
@@ -772,11 +773,14 @@ export class SQLiteStore implements StoreInterface {
 
   async queryCalibrationWindow(
     filter: CalibrationWindowFilter,
-  ): Promise<Result<CalibrationRecord[], LoreError>> {
+  ): Promise<Result<CalibrationRecordWithPromptVersion[], LoreError>> {
     try {
-      // reason: prompt_version lives on review_judgments, not calibration_records —
-      // a single indexed JOIN keeps this a one-statement query instead of an N+1
-      // fan-out per calibration row. See SPEC-034 §3.
+      // reason: the JOIN to review_judgments is now UNCONDITIONAL (not just when
+      // filter.prompt_version is pinned) — every returned record must carry the
+      // judgment's real judge_prompt_version so JudgmentService.computeCalibrationStats
+      // can group by the actual (doc_type, prompt_version) pair instead of falling back
+      // to an unpinned "*" sentinel. Still one indexed statement, not an N+1 fan-out.
+      // See SPEC-034 §3 / SPEC-035 calibration disaggregation follow-up.
       const clauses: string[] = [];
       const params: SQLQueryBindings[] = [];
 
@@ -789,22 +793,19 @@ export class SQLiteStore implements StoreInterface {
         params.push(filter.prompt_version);
       }
 
-      const needsJoin = filter.prompt_version !== undefined;
-      const joinClause = needsJoin
-        ? "JOIN review_judgments j ON j.id = c.judgment_id"
-        : "";
       const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
       const sql = `
-        SELECT c.* FROM calibration_records c
-        ${joinClause}
+        SELECT c.*, j.judge_prompt_version AS judge_prompt_version
+        FROM calibration_records c
+        JOIN review_judgments j ON j.id = c.judgment_id
         ${whereClause}
         ORDER BY c.created_at DESC
         LIMIT ?
       `;
       params.push(filter.limit);
 
-      const rows = this.db.prepare(sql).all(...params) as CalibrationRow[];
-      return ok(rows.map(rowToCalibrationRecord));
+      const rows = this.db.prepare(sql).all(...params) as CalibrationRowWithPromptVersion[];
+      return ok(rows.map(rowToCalibrationRecordWithPromptVersion));
     } catch (e) {
       return wrapStoreError(e);
     }

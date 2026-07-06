@@ -11,17 +11,24 @@
  * @invariant Stateless — holds only a StoreInterface. No telemetry (audit reads are
  *   a CLI-invoked oracle, not a hot instrumented path — mirrors VersionService, which
  *   is also un-instrumented).
- * @invariant verify()'s join key is `(doc_id, version)` — NOT a literal string-equality
- *   match on `audit.action === versions.action`. Every EXISTING writer (CorpusService,
- *   ReviewService, VersionService) already writes an audit action equal to its
- *   versions-row action by construction (both inserted in the same method), so this
- *   is a no-op distinction for them. TaskWorkflowService writes versions rows with
- *   action "update" (its shared `writeTaskExtra` helper) but audit entries with the
- *   more specific actions "claim"/"release"/"evidence" (SPEC-035 §2) — matching on
- *   version alone is what makes those entries satisfy the oracle despite the label
- *   mismatch. D9's "exact join" refers to replacing timestamp-tolerance fuzzy
- *   matching with an exact version number — not to requiring the audit action string
- *   to replicate the versions-row action string.
+ * @invariant verify()'s join key is `(doc_id, version)` PLUS an action-family check —
+ *   NOT a literal string-equality match on `audit.action === versions.action`, and NOT
+ *   "any audit entry carrying this version satisfies any versions row at that version"
+ *   either. A versions row with action X is satisfied only by an audit entry whose
+ *   action is in X's producing family (`VERSION_ACTION_AUDIT_FAMILY`): `create`→`create`;
+ *   `update`→{`update`,`claim`,`release`,`evidence`} (TaskWorkflowService's shared
+ *   `writeTaskExtra` helper writes versions rows under the generic action "update" but
+ *   audit entries under the more specific "claim"/"release"/"evidence" (SPEC-035 §2) —
+ *   this family membership is what lets those entries satisfy the oracle despite the
+ *   label divergence, a DELIBERATE tolerance, not a gap); `approve`→`approve`;
+ *   `reject`→`reject`; `restore`→`restore`. Critically, `judge` (SPEC-034's AI-judgment
+ *   audit action) is NOT in ANY family — judgments never bump a doc's version, so an
+ *   audit entry stamped `action: "judge"` must never be able to satisfy a missing
+ *   create/update/approve/reject/restore audit entry merely because it happens to carry
+ *   the same `details.version`. D9's "exact join" refers to replacing timestamp-tolerance
+ *   fuzzy matching with an exact version number — not to requiring the audit action
+ *   string to replicate the versions-row action string, but it does NOT mean "any action
+ *   at all" either.
  * @invariant verify() only considers versions rows whose `action` is one of
  *   create/update/approve/reject/restore (VERIFIABLE_VERSION_ACTIONS) — `delete`
  *   is excluded (SPEC-035 §2 lists it out of the anchor set) even though
@@ -55,6 +62,34 @@ const VERIFIABLE_VERSION_ACTIONS: ReadonlySet<VersionAction> = new Set([
   "reject",
   "restore",
 ]);
+
+/**
+ * Maps each {@link VERIFIABLE_VERSION_ACTIONS} entry to the set of audit `action`
+ * strings that may satisfy it (SPEC-035 §2, §5 D9 follow-up). A versions row is only
+ * "explained" by an audit entry whose action is a member of its family — an audit
+ * entry with an action OUTSIDE every family (e.g. `"judge"`, which stamps the doc's
+ * CURRENT version but never produces a versions row itself) must never incidentally
+ * satisfy a family it isn't part of, even if it happens to share `(doc_id, version)`.
+ *
+ * `update` intentionally maps to a 4-action family, not just `"update"` — this
+ * PRESERVES the intentional TaskWorkflowService divergence documented on
+ * {@link AuditService.verify}: its shared `writeTaskExtra` helper inserts every
+ * claim/release/evidence versions row under the generic action `"update"` but audits
+ * under the more specific `"claim"`/`"release"`/`"evidence"`.
+ *
+ * Keyed over the FULL `VersionAction` union (not just `VERIFIABLE_VERSION_ACTIONS`) so
+ * the lookup at the call site never needs an `as`-cast; `delete` maps to an empty set
+ * since it's excluded from the reconcile walk upstream and is never looked up in
+ * practice, but the type stays total rather than partial.
+ */
+const VERSION_ACTION_AUDIT_FAMILY: Readonly<Record<VersionAction, ReadonlySet<string>>> = {
+  create: new Set(["create"]),
+  update: new Set(["update", "claim", "release", "evidence"]),
+  approve: new Set(["approve"]),
+  reject: new Set(["reject"]),
+  restore: new Set(["restore"]),
+  delete: new Set(),
+};
 
 /** One versions row with no matching audit entry — itemized in {@link AuditVerifyResult}. */
 export interface AuditMiss {
@@ -120,8 +155,12 @@ export class AuditService {
   /**
    * Completeness oracle: for every `versions` row whose action is in
    * {@link VERIFIABLE_VERSION_ACTIONS} and whose `created_at >= opts.since`, demand
-   * at least one audit entry sharing `(doc_id, details.version)`. Order-independent
-   * — the join key is a version number, never a timestamp window (D9).
+   * at least one audit entry sharing `(doc_id, details.version)` WHOSE ACTION IS A
+   * MEMBER OF THE VERSIONS ROW'S ACTION FAMILY (`VERSION_ACTION_AUDIT_FAMILY` — see
+   * @invariant above). Order-independent — the join key is a version number, never a
+   * timestamp window (D9) — but it is action-family-aware, not action-agnostic: an
+   * audit entry from an unrelated action family (e.g. `"judge"`) sharing the same
+   * version never satisfies the oracle.
    *
    * @param opts - `{ since? }` — override watermark; defaults to `this.verifySince`
    * @returns Result<AuditVerifyResult, LoreError> — `clean: true` iff `misses` is empty
@@ -149,21 +188,29 @@ export class AuditService {
     const auditResult = await this.store.queryAudit({ since });
     if (!auditResult.ok) return auditResult;
 
-    // reason: build the (doc_id, version) match set once — O(audit) — rather than
-    // querying per-versions-row (O(versions * audit)). See @invariant above re: the
-    // join key being version-only, not action-equality.
-    const matchedPairs = new Set<string>();
+    // reason: build the (doc_id, version) -> {audit actions seen} index once —
+    // O(audit) — rather than querying per-versions-row (O(versions * audit)). See
+    // @invariant above re: the join key being (doc_id, version) PLUS an action-family
+    // check, never bare version-equality (which would let an unrelated action like
+    // "judge" incidentally satisfy a missing create/update/approve/reject/restore entry).
+    const auditActionsByPair = new Map<string, Set<string>>();
     for (const entry of auditResult.value) {
       if (entry.doc_id === undefined) continue;
       const detailVersion = entry.details?.["version"];
       if (typeof detailVersion === "number") {
-        matchedPairs.add(`${entry.doc_id}::${detailVersion}`);
+        const key = `${entry.doc_id}::${detailVersion}`;
+        const actions = auditActionsByPair.get(key) ?? new Set<string>();
+        actions.add(entry.action);
+        auditActionsByPair.set(key, actions);
       }
     }
 
     const misses: AuditMiss[] = [];
     for (const v of candidates) {
-      if (!matchedPairs.has(`${v.doc_id}::${v.version}`)) {
+      const family = VERSION_ACTION_AUDIT_FAMILY[v.action];
+      const seenActions = auditActionsByPair.get(`${v.doc_id}::${v.version}`);
+      const satisfied = seenActions !== undefined && [...family].some((a) => seenActions.has(a));
+      if (!satisfied) {
         misses.push({ doc_id: v.doc_id, version: v.version, action: v.action, created_at: v.created_at });
       }
     }

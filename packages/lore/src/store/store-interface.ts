@@ -88,6 +88,18 @@ export interface CalibrationWindowFilter {
   limit: number;
 }
 
+/**
+ * A {@link CalibrationRecord} augmented with `judge_prompt_version` — the
+ * `prompt_version` of the judgment it's FK'd to, projected onto the row by
+ * {@link StoreInterface.queryCalibrationWindow}'s join to `review_judgments`.
+ * `CalibrationRecord` itself (the `calibrationRecordSchema`-validated persisted
+ * shape) intentionally does NOT carry `prompt_version` — only the judgment
+ * does — so this is a store-layer read projection, not a schema change.
+ */
+export type CalibrationRecordWithPromptVersion = CalibrationRecord & {
+  judge_prompt_version: string;
+};
+
 // ─── Interface ─────────────────────────────────────────────────────────────
 
 /**
@@ -245,11 +257,16 @@ export interface StoreInterface {
   /**
    * Bounded, indexed window of calibration records, newest first
    * (`created_at DESC`), optionally filtered by `doc_type` and/or the
-   * `prompt_version` of the judgment each record points at.
+   * `prompt_version` of the judgment each record points at. The join to
+   * `review_judgments` is UNCONDITIONAL (not just when `filter.prompt_version`
+   * is pinned) — every returned record carries the judgment's real
+   * `judge_prompt_version`, so callers (`JudgmentService.computeCalibrationStats`)
+   * can group by the actual (doc_type, prompt_version) pair instead of an
+   * unpinned `"*"` sentinel.
    */
   queryCalibrationWindow(
     filter: CalibrationWindowFilter,
-  ): Promise<Result<CalibrationRecord[], LoreError>>;
+  ): Promise<Result<CalibrationRecordWithPromptVersion[], LoreError>>;
 
   // ── Lifecycle ──────────────────────────────────────────────────────────
 

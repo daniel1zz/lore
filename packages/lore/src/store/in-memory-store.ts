@@ -20,6 +20,7 @@ import type {
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import type {
   AuditFilters,
+  CalibrationRecordWithPromptVersion,
   CalibrationWindowFilter,
   SearchHit,
   StoreFilters,
@@ -409,10 +410,12 @@ export class InMemoryStore implements StoreInterface {
 
   async queryCalibrationWindow(
     filter: CalibrationWindowFilter,
-  ): Promise<Result<CalibrationRecord[], LoreError>> {
-    // reason: prompt_version filters on the judgment a calibration record points
-    // at — mirrors the SQL JOIN in SQLiteStore/TursoStore, kept as an in-memory
-    // lookup here since there's no join operator on plain arrays.
+  ): Promise<Result<CalibrationRecordWithPromptVersion[], LoreError>> {
+    // reason: prompt_version filters on (AND, now unconditionally, is projected from)
+    // the judgment a calibration record points at — mirrors the now-unconditional SQL
+    // JOIN in SQLiteStore/TursoStore, kept as an in-memory lookup here since there's no
+    // join operator on plain arrays. See SPEC-034 §3 / SPEC-035 calibration
+    // disaggregation follow-up.
     const judgmentPromptVersionById = new Map(
       this.judgments.map((j) => [j.id, j.judge.prompt_version]),
     );
@@ -430,7 +433,25 @@ export class InMemoryStore implements StoreInterface {
     results = results.sort((a, b) => b.created_at.localeCompare(a.created_at));
     results = results.slice(0, filter.limit);
 
-    return ok(results.map((r) => ({ ...r })));
+    const projected: CalibrationRecordWithPromptVersion[] = [];
+    for (const record of results) {
+      const judgePromptVersion = judgmentPromptVersionById.get(record.judgment_id);
+      if (judgePromptVersion === undefined) {
+        // reason: every calibration record is FK'd to a judgment by construction
+        // (JudgmentService.recordCalibration always reads the judgment before
+        // writing) — SQLiteStore/TursoStore enforce this at insert time via a DB
+        // foreign key constraint. InMemoryStore has no such constraint, so reaching
+        // this branch means a caller inserted an orphan record directly (test misuse,
+        // not a normal runtime state). Fail loud rather than defaulting the label.
+        return err({
+          code: "STORE_ERROR",
+          message: `queryCalibrationWindow: calibration record ${record.id} references unknown judgment_id ${record.judgment_id}`,
+        });
+      }
+      projected.push({ ...record, judge_prompt_version: judgePromptVersion });
+    }
+
+    return ok(projected);
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────

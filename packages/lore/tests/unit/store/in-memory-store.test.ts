@@ -1047,7 +1047,11 @@ describe("InMemoryStore", () => {
       expect(found.ok).toBe(true);
       if (!found.ok) return;
       expect(found.value).toHaveLength(1);
-      expect(found.value[0]).toEqual(record);
+      // reason: queryCalibrationWindow now unconditionally projects the judgment's
+      // judge_prompt_version onto the returned row — plain CalibrationRecord fields
+      // still round-trip verbatim via toMatchObject, projected field asserted separately.
+      expect(found.value[0]).toMatchObject(record);
+      expect(found.value[0]?.judge_prompt_version).toBe(judgment.judge.prompt_version);
     });
 
     it("HAPPY: queryCalibrationWindow filters by doc_type", async () => {
@@ -1095,6 +1099,47 @@ describe("InMemoryStore", () => {
       if (!found.ok) return;
       expect(found.value).toHaveLength(1);
       expect(found.value[0]?.judgment_id).toBe(judgmentV1.id);
+    });
+
+    it("HAPPY: queryCalibrationWindow projects judge_prompt_version onto EVERY row, even fully unfiltered", async () => {
+      const doc = await store.insert(makeDoc({ slug: "spec-calib-projection" }));
+      expect(doc.ok).toBe(true);
+      if (!doc.ok) return;
+
+      const judgmentV1 = makeJudgment(doc.value.id, {
+        judge: { provider: "claude-cli", model: "claude-sonnet-5", prompt_version: "v1" },
+      });
+      const judgmentV2 = makeJudgment(doc.value.id, {
+        judge: { provider: "claude-cli", model: "claude-sonnet-5", prompt_version: "v2" },
+      });
+      await store.insertJudgment(judgmentV1);
+      await store.insertJudgment(judgmentV2);
+      await store.insertCalibrationRecord(makeCalibrationRecord(judgmentV1.id, doc.value.id));
+      await store.insertCalibrationRecord(makeCalibrationRecord(judgmentV2.id, doc.value.id));
+
+      const found = await store.queryCalibrationWindow({ limit: 10 });
+      expect(found.ok).toBe(true);
+      if (!found.ok) return;
+      expect(found.value).toHaveLength(2);
+      const byJudgmentId = new Map(found.value.map((r) => [r.judgment_id, r.judge_prompt_version]));
+      expect(byJudgmentId.get(judgmentV1.id)).toBe("v1");
+      expect(byJudgmentId.get(judgmentV2.id)).toBe("v2");
+    });
+
+    it("ERROR: queryCalibrationWindow fails loud when a calibration record references an unknown judgment_id", async () => {
+      const doc = await store.insert(makeDoc({ slug: "spec-calib-orphan" }));
+      expect(doc.ok).toBe(true);
+      if (!doc.ok) return;
+
+      // No insertJudgment call — this record's judgment_id has no corresponding row.
+      // InMemoryStore has no FK constraint (unlike SQLiteStore/TursoStore), so this
+      // insert succeeds; the failure must surface at query time instead.
+      await store.insertCalibrationRecord(makeCalibrationRecord("01HNOPE00000000000000003", doc.value.id));
+
+      const found = await store.queryCalibrationWindow({ limit: 10 });
+      expect(found.ok).toBe(false);
+      if (found.ok) return;
+      expect(found.error.code).toBe("STORE_ERROR");
     });
 
     it("BOUNDARY: queryCalibrationWindow respects the limit bound", async () => {

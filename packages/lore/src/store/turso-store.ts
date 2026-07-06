@@ -31,6 +31,7 @@ import type {
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import type {
   AuditFilters,
+  CalibrationRecordWithPromptVersion,
   CalibrationWindowFilter,
   SearchHit,
   StoreFilters,
@@ -40,14 +41,14 @@ import type {
 import {
   escapeFtsQuery,
   rowToAuditEntry,
-  rowToCalibrationRecord,
+  rowToCalibrationRecordWithPromptVersion,
   rowToDocRecord,
   rowToLinkRecord,
   rowToReviewJudgment,
   rowToVersionRecord,
   wrapStoreError,
   type AuditRow,
-  type CalibrationRow,
+  type CalibrationRowWithPromptVersion,
   type DocRow,
   type FtsRow,
   type JudgmentRow,
@@ -181,7 +182,12 @@ function libsqlRowToJudgmentRow(row: Row): JudgmentRow {
   };
 }
 
-function libsqlRowToCalibrationRow(row: Row): CalibrationRow {
+/**
+ * Maps a `calibration_records` ⋈ `review_judgments` row (queryCalibrationWindow's
+ * now-unconditional join projects `judge_prompt_version` onto every row) to
+ * {@link CalibrationRowWithPromptVersion}.
+ */
+function libsqlRowToCalibrationRowWithPromptVersion(row: Row): CalibrationRowWithPromptVersion {
   return {
     id: rowStr(row, "id"),
     judgment_id: rowStr(row, "judgment_id"),
@@ -191,6 +197,7 @@ function libsqlRowToCalibrationRow(row: Row): CalibrationRow {
     delta_reasons: rowStr(row, "delta_reasons") || "[]",
     actor: rowStr(row, "actor"),
     created_at: rowStr(row, "created_at"),
+    judge_prompt_version: rowStr(row, "judge_prompt_version"),
   };
 }
 
@@ -956,13 +963,16 @@ export class TursoStore implements StoreInterface {
 
   async queryCalibrationWindow(
     filter: CalibrationWindowFilter,
-  ): Promise<Result<CalibrationRecord[], LoreError>> {
+  ): Promise<Result<CalibrationRecordWithPromptVersion[], LoreError>> {
     try {
       await this.ensureReady();
 
-      // reason: prompt_version lives on review_judgments, not calibration_records —
-      // a single indexed JOIN keeps this a one-statement query instead of an N+1
-      // fan-out per calibration row. See SPEC-034 §3.
+      // reason: the JOIN to review_judgments is now UNCONDITIONAL (not just when
+      // filter.prompt_version is pinned) — every returned record must carry the
+      // judgment's real judge_prompt_version so JudgmentService.computeCalibrationStats
+      // can group by the actual (doc_type, prompt_version) pair instead of falling back
+      // to an unpinned "*" sentinel. Still one indexed statement, not an N+1 fan-out.
+      // See SPEC-034 §3 / SPEC-035 calibration disaggregation follow-up.
       const clauses: string[] = [];
       const params: InValue[] = [];
 
@@ -975,12 +985,11 @@ export class TursoStore implements StoreInterface {
         params.push(filter.prompt_version);
       }
 
-      const needsJoin = filter.prompt_version !== undefined;
-      const joinClause = needsJoin ? "JOIN review_judgments j ON j.id = c.judgment_id" : "";
       const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
       const sql = `
-        SELECT c.* FROM calibration_records c
-        ${joinClause}
+        SELECT c.*, j.judge_prompt_version AS judge_prompt_version
+        FROM calibration_records c
+        JOIN review_judgments j ON j.id = c.judgment_id
         ${whereClause}
         ORDER BY c.created_at DESC
         LIMIT ?
@@ -988,7 +997,9 @@ export class TursoStore implements StoreInterface {
       params.push(filter.limit);
 
       const rs = await this.client.execute({ sql, args: params });
-      return ok(rs.rows.map((row) => rowToCalibrationRecord(libsqlRowToCalibrationRow(row))));
+      return ok(
+        rs.rows.map((row) => rowToCalibrationRecordWithPromptVersion(libsqlRowToCalibrationRowWithPromptVersion(row))),
+      );
     } catch (e) {
       return wrapStoreError(e);
     }
