@@ -10,10 +10,11 @@
  *   BOUNDARY:   isClaimStale at exactly TTL, TTL±1min; blocker link with no
  *               matching blockerStatuses entry (defensive fail-loud-by-omission)
  *   ERROR:      n/a at this layer (pure functions have no Result channel)
- *   STATE:      cycle A blocks B blocks A — both blocked & visible
+ *   STATE:      cycle A blocks B blocks A — both blocked & visible;
+ *               evaluateReadiness's new parentSpecStatus parameter (SPEC-032 §3.4)
  *   REGRESSION: evaluateReadiness never mutates its inputs; input order preserved
  *
- * @spec_ref AC-WF-3, AC-WF-4, AC-WF-7, AC-WF-8
+ * @spec_ref AC-WF-3, AC-WF-4, AC-WF-7, AC-WF-8, SPEC-032 §3.4
  */
 
 import { describe, it, expect } from "vitest";
@@ -257,6 +258,61 @@ describe("evaluateReadiness — evidence_count and latest_evidence", () => {
     expect(records[0]?.evidence_count).toBe(2);
     // Must be the SECOND (last) entry's result — a hardcoded-first-entry bug would report "fail"
     expect(records[0]?.latest_evidence).toEqual({ result: "pass", recorded_at: "2026-07-01T02:00:00.000Z" });
+  });
+});
+
+// ─── evaluateReadiness — parentSpecStatus advisory (SPEC-032 §3.4, AC-6) ──────
+
+describe("evaluateReadiness — parentSpecStatus advisory (SPEC-032 §3.4)", () => {
+  it("parentSpecStatus omitted (pre-existing 5-arg call sites) → upstream_unapproved absent", () => {
+    const task = makeTask({ status: "draft" });
+    const records = evaluateReadiness([task], [], new Map(), NOW, 120);
+    expect(records[0]?.upstream_unapproved).toBeUndefined();
+  });
+
+  it("parentSpecStatus null (plan has no spec parent — top-level or prd-parented) → absent, not an error", () => {
+    const task = makeTask({ status: "draft" });
+    const records = evaluateReadiness([task], [], new Map(), NOW, 120, null);
+    expect(records[0]?.upstream_unapproved).toBeUndefined();
+  });
+
+  it("parentSpecStatus 'approved' → upstream_unapproved absent (not false)", () => {
+    const task = makeTask({ status: "draft" });
+    const records = evaluateReadiness([task], [], new Map(), NOW, 120, "approved");
+    expect(records[0]?.upstream_unapproved).toBeUndefined();
+  });
+
+  it("parentSpecStatus 'draft' (unapproved) → every record carries upstream_unapproved: true", () => {
+    const taskA = makeTask({ status: "draft", title: "A" });
+    const taskB = makeTask({ status: "draft", title: "B" });
+    const records = evaluateReadiness([taskA, taskB], [], new Map(), NOW, 120, "draft");
+    expect(records[0]?.upstream_unapproved).toBe(true);
+    expect(records[1]?.upstream_unapproved).toBe(true);
+  });
+
+  it("parentSpecStatus 'in-review' (unapproved) → upstream_unapproved: true", () => {
+    const task = makeTask({ status: "draft" });
+    const records = evaluateReadiness([task], [], new Map(), NOW, 120, "in-review");
+    expect(records[0]?.upstream_unapproved).toBe(true);
+  });
+
+  it("unapproved parent spec NEVER flips readiness — an unblocked task stays ready", () => {
+    const task = makeTask({ status: "draft" });
+    const records = evaluateReadiness([task], [], new Map(), NOW, 120, "draft");
+    expect(records[0]?.ready).toBe(true);
+    expect(records[0]?.upstream_unapproved).toBe(true);
+  });
+
+  it("unapproved parent spec does not manufacture readiness for a blocked task either", () => {
+    const blocker = makeTask({ status: "in-review", title: "Blocker" });
+    const task = makeTask({ status: "draft" });
+    const links = [blocksLink(blocker.id, task.id)];
+    const statuses = new Map<DocId, BlockerInfo>([
+      [blocker.id, { slug: blocker.slug, status: "in-review" }],
+    ]);
+    const records = evaluateReadiness([task], links, statuses, NOW, 120, "draft");
+    expect(records[0]?.ready).toBe(false);
+    expect(records[0]?.upstream_unapproved).toBe(true);
   });
 });
 

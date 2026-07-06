@@ -115,6 +115,14 @@ export interface ReadyRecord {
   latest_evidence?: { result: "pass" | "fail"; recorded_at: string };
   /** Total number of verification_evidence entries recorded on the task. */
   evidence_count: number;
+  /**
+   * true iff the plan's parent doc is a spec whose status is not "approved"
+   * (SPEC-032 §3.4). Advisory only — never affects `ready`. Omitted (not `false`)
+   * when the plan has no spec parent (top-level or prd-parented) or the parent
+   * spec is approved, matching this module's "present-iff-true" convention for
+   * `claim`/`phase`.
+   */
+  upstream_unapproved?: boolean;
 }
 
 /**
@@ -179,6 +187,12 @@ function toDocSummary(doc: DocRecord): DocSummary {
  *   {@link BlockerInfo} for why this widens the §8.2 literal signature
  * @param nowIso - Caller-supplied current time (D10 — never Date.now() here)
  * @param ttlMinutes - Claim TTL in minutes, forwarded to {@link isClaimStale}
+ * @param parentSpecStatus - Status of the plan's parent spec, or `null` when the
+ *   plan has no spec parent (top-level plan, or parented under a prd instead).
+ *   Defaults to `null` so pre-existing call sites that don't care about the
+ *   spec-approval advisory keep compiling (SPEC-032 §3.4). When non-null and
+ *   not `"approved"`, every returned record carries `upstream_unapproved: true` —
+ *   this NEVER changes `ready` (advisory only, consistent with D3's no-daemon ethos).
  * @returns One ReadyRecord per input task, in input order
  *
  * @example
@@ -197,6 +211,7 @@ export function evaluateReadiness(
   blockerStatuses: ReadonlyMap<DocId, BlockerInfo>,
   nowIso: string,
   ttlMinutes: number,
+  parentSpecStatus: DocStatus | null = null,
 ): ReadyRecord[] {
   return tasks.map((task) => {
     const incomingBlockers = blocksLinks.filter((link) => link.to_id === task.id);
@@ -230,6 +245,10 @@ export function evaluateReadiness(
 
     if (typeof phase === "string") {
       record.phase = phase;
+    }
+
+    if (parentSpecStatus !== null && parentSpecStatus !== "approved") {
+      record.upstream_unapproved = true;
     }
 
     if (claim !== undefined) {
