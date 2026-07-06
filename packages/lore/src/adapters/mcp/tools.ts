@@ -1,6 +1,6 @@
 /**
- * MCP tool registrations — 22 lore_* tools (16 original + 4 SPEC-025 task-workflow tools
- * + 1 SPEC-026 assess tool + 1 SPEC-035 audit tool).
+ * MCP tool registrations — 23 lore_* tools (16 original + 4 SPEC-025 task-workflow tools
+ * + 1 SPEC-026 assess tool + 1 SPEC-035 audit tool + 1 SPEC-034 review tool).
  *
  * Architecture: Tools with input use the `registerToolWithArgs` helper defined below, which:
  *   1. Calls `server.tool(name, desc, handler)` in 3-arg form (avoids ZodRawShapeCompat type bomb)
@@ -26,6 +26,8 @@
  * Source: SPEC-008 §3
  */
 
+import { existsSync, readFileSync } from "fs";
+import { join } from "path";
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -33,7 +35,10 @@ import type { App } from "../../app.js";
 import type { LoreError } from "@lore/core";
 import type { LinkType } from "@lore/core";
 import { renderAssessmentContent } from "@lore/core";
+import type { NewReviewJudgment, ReviewJudgment, Result, TreeBlueprint } from "@lore/core";
+import { parseTreeBlueprint, runDeterministicChecks } from "@lore/core";
 import { isAssessAiBraked } from "../../ai/resolve-ai.js";
+import { REVIEW_PROMPT_VERSION } from "../../ai/review-template.js";
 import { CORPUS_SCHEMA_INFO } from "./schema-info.js";
 
 // ─── Schema Constants ────────────────────────────────────────────────────────
@@ -143,10 +148,16 @@ export const LoreDiffSchema = z.object({
   to: z.number().int().positive().optional(),
 });
 
-/** Input schema for lore_pending. */
+/**
+ * Input schema for lore_pending.
+ * `include_judgments` (SPEC-034 §6): when true, each returned doc gains a
+ * `judgment: ReviewJudgment | null` field (its latest review judgment, or `null` if
+ * never reviewed) — the MCP-surface equivalent of the CLI `lore pending` badge column.
+ */
 export const LorePendingSchema = z.object({
   author: z.string().optional(),
   type: DOC_TYPE_ENUM.optional(),
+  include_judgments: z.boolean().optional(),
 });
 
 /** Input schema for lore_approve. */
@@ -247,6 +258,20 @@ export const LoreAuditSchema = z.object({
   verify: z.boolean().optional(),
 });
 
+/**
+ * Input schema for lore_review (SPEC-034 §6).
+ * `by` is required (not defaulted) — same MCP precedent as lore_claim/lore_release/
+ * lore_evidence_add/lore_ready: MCP callers pass actor identity explicitly, unlike the
+ * CLI's $LORE_ACTOR/OS-username fallback. Same orchestration as the CLI's single-doc
+ * `lore review <doc>`: deterministic pre-checks first, AI judge only when they all
+ * pass/skip. No `ai` override field — the surface-brake check runs unconditionally
+ * (mirrors `lore review`'s CLI behavior: a braked surface cannot run review at all).
+ */
+export const LoreReviewSchema = z.object({
+  id_or_slug: z.string(),
+  by: z.string().min(1),
+});
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /**
@@ -328,12 +353,73 @@ function registerToolWithArgs<T>(
   }
 }
 
+// ─── SPEC-034 §4 review orchestration (lore_review) ─────────────────────────
+
+/**
+ * Load `lore.tree.yaml` from cwd if present — the MCP-surface equivalent of the CLI
+ * `lore review`'s blueprint loader. Returns `{ok: true, blueprint: undefined}` when the
+ * file is absent (the tree_position check degrades to "skipped", never a silent pass);
+ * a PRESENT-but-invalid blueprint is a config error, returned as an err() so the tool
+ * handler can respond with `isError: true` (an MCP tool must never call process.exit).
+ */
+function loadBlueprintForMcp(): Result<TreeBlueprint | undefined, LoreError> {
+  const blueprintPath = join(process.cwd(), "lore.tree.yaml");
+  if (!existsSync(blueprintPath)) return { ok: true, value: undefined };
+
+  const raw = readFileSync(blueprintPath, "utf8");
+  const parsed = parseTreeBlueprint(raw);
+  if (!parsed.ok) return parsed;
+  return { ok: true, value: parsed.value };
+}
+
+/**
+ * Review one document end-to-end for the lore_review MCP tool — deliberately mirrors
+ * (rather than imports) the CLI's `adapters/cli/commands/review.ts::reviewOneDoc`: each
+ * adapter is its own thin orchestration pipe over the same services (established
+ * precedent — compare `assess.ts` vs this file's `lore_assess` handler, which duplicate
+ * the same zero-task-gate + persist sequence rather than sharing a helper module).
+ */
+async function reviewDocViaMcp(
+  app: App,
+  idOrSlug: string,
+  blueprint: TreeBlueprint | undefined,
+): Promise<Result<ReviewJudgment, LoreError>> {
+  const bundleResult = await app.corpusService.getReviewBundle(idOrSlug, blueprint);
+  if (!bundleResult.ok) return bundleResult;
+  const bundle = bundleResult.value;
+
+  const checks = runDeterministicChecks(bundle);
+  const failedChecks = checks.filter((c) => c.outcome === "fail");
+
+  if (failedChecks.length > 0) {
+    const newJudgment: NewReviewJudgment = {
+      doc_id: bundle.doc.id,
+      doc_version: bundle.doc.version,
+      decision: "reject",
+      confidence: 1.0,
+      reasons: failedChecks.map((c) => ({
+        dimension: c.check,
+        finding: c.detail ?? `${c.check} check failed`,
+      })),
+      checks,
+      blocking_questions: [],
+      judge: { provider: "deterministic-checks", model: "n/a", prompt_version: REVIEW_PROMPT_VERSION },
+    };
+    return app.judgmentService.record(newJudgment);
+  }
+
+  const judgeResult = await app.aiProviderService.judgeDoc(bundle, checks, { source: app.callerSurface });
+  if (!judgeResult.ok) return judgeResult;
+
+  return app.judgmentService.record(judgeResult.value);
+}
+
 // ─── Tool Registrations ──────────────────────────────────────────────────────
 
 /**
- * Registers all 22 lore_* MCP tools on the given server (16 original + 4 SPEC-025
+ * Registers all 23 lore_* MCP tools on the given server (16 original + 4 SPEC-025
  * task-workflow tools: lore_claim, lore_release, lore_evidence_add, lore_ready;
- * + lore_assess (SPEC-026); + lore_audit (SPEC-035)).
+ * + lore_assess (SPEC-026); + lore_audit (SPEC-035); + lore_review (SPEC-034)).
  *
  * Tools with input use `registerToolWithArgs` (avoids ZodRawShapeCompat type bomb).
  * Tools without input (`lore_schema`, `lore_status`) use plain `server.tool(name, desc, cb)`.
@@ -342,7 +428,7 @@ function registerToolWithArgs<T>(
  * @param app - The composition root providing access to all services
  */
 export function registerTools(server: McpServer, app: App): void {
-  const { corpusService, versionService, reviewService, outlineService, taskWorkflowService, auditService } = app;
+  const { corpusService, versionService, reviewService, outlineService, taskWorkflowService, auditService, judgmentService } = app;
 
   // lore_create
   registerToolWithArgs(server, "lore_create", "Create a new document in the Lore corpus", LoreCreateSchema, async (args) => {
@@ -484,7 +570,20 @@ export function registerTools(server: McpServer, app: App): void {
     };
     const result = await reviewService.pending(filters);
     if (!result.ok) return errorContent(result.error);
-    return textContent({ docs: result.value });
+
+    // SPEC-034 §6: include_judgments enriches each doc with its latest review judgment
+    // (or null) — the MCP-surface equivalent of the CLI `lore pending` badge column.
+    if (args.include_judgments !== true) {
+      return textContent({ docs: result.value });
+    }
+
+    const docsWithJudgments: unknown[] = [];
+    for (const doc of result.value) {
+      const judgmentResult = await judgmentService.latestFor(doc.id);
+      if (!judgmentResult.ok) return errorContent(judgmentResult.error);
+      docsWithJudgments.push({ ...doc, judgment: judgmentResult.value });
+    }
+    return textContent({ docs: docsWithJudgments });
   });
 
   // lore_approve
@@ -686,6 +785,38 @@ export function registerTools(server: McpServer, app: App): void {
       });
       if (!result.ok) return errorContent(result.error);
       return textContent({ entries: result.value });
+    },
+  );
+
+  // ── SPEC-034: structured review judgment ──────────────────────────────────
+
+  // lore_review
+  registerToolWithArgs(
+    server,
+    "lore_review",
+    "Structured AI review judgment — deterministic pre-checks, then an LLM judge, recorded as a review judgment",
+    LoreReviewSchema,
+    async (args) => {
+      // reason: same unconditional surface-brake check as the CLI (`lore review`,
+      // SPEC-034 §4 mirrors assess §3 D5) — a braked surface cannot run review at all,
+      // even for a doc whose deterministic checks would short-circuit before any AI call.
+      // No `ai` override field on this tool (SPEC-034 §6) — only an explicit config
+      // override can brake it, and there is no MCP-level bypass for that override.
+      const resolved = app.resolveAiDefault(undefined);
+      if (isAssessAiBraked(resolved)) {
+        return errorContent({
+          code: "AI_PROVIDER_ERROR",
+          message: "AI is disabled for the mcp surface by config.ai.default_per_surface. lore_review has no override for this.",
+        });
+      }
+
+      const blueprintResult = loadBlueprintForMcp();
+      if (!blueprintResult.ok) return errorContent(blueprintResult.error);
+
+      const reviewResult = await reviewDocViaMcp(app, args.id_or_slug, blueprintResult.value);
+      if (!reviewResult.ok) return errorContent(reviewResult.error);
+
+      return textContent({ requested_by: args.by, judgment: reviewResult.value });
     },
   );
 }

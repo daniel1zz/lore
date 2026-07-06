@@ -2,7 +2,7 @@
 
 ## Purpose
 
-citty-based CLI adapter. 25 subcommands, each in its own `commands/<name>.ts`, lazily imported by `index.ts`. Thin adapter only — no business logic; every command resolves args, calls a service via the App composition root, formats the result, and exits.
+citty-based CLI adapter. 26 subcommands, each in its own `commands/<name>.ts`, lazily imported by `index.ts`. Thin adapter only — no business logic; every command resolves args, calls a service via the App composition root, formats the result, and exits.
 
 ## Key Invariants
 
@@ -24,7 +24,9 @@ citty-based CLI adapter. 25 subcommands, each in its own `commands/<name>.ts`, l
 
 ## Subcommands
 
-`init` `create` `get` `set` `delete` `list` `search` `tree` `link` `unlink` `pending` `approve` `reject` `log` `diff` `restore` `migrate` `status` `serve` `agent` `sync` `eval` `dashboard` `sync-docs` `export-docs` `phase` `claim` `release` `evidence` `ready` `assess` `audit` `calibration`
+`init` `create` `get` `set` `delete` `list` `search` `tree` `link` `unlink` `pending` `approve` `reject` `log` `diff` `restore` `migrate` `status` `serve` `agent` `sync` `eval` `dashboard` `sync-docs` `export-docs` `phase` `claim` `release` `evidence` `ready` `assess` `audit` `calibration` `review`
+
+`review` (SPEC-034 §4, §6) — `lore review <doc> [--by] [--ai|--no-ai] [--json]` / `lore review --pending [...]`: structured AI review judgment. Loads `lore.tree.yaml` if present (absence degrades the `tree_position` check to `"skipped"`, never fatal; a present-but-invalid blueprint IS fatal, mirrors `lore status --check-tree`), calls `corpusService.getReviewBundle` → `runDeterministicChecks` (pure fn, `@lore/core`) → any check `outcome: "fail"` records a judgment WITHOUT invoking the AI provider (`decision: "reject"`, `confidence: 1.0`, `judge.provider: "deterministic-checks"`) → otherwise `aiProviderService.judgeDoc` → `judgmentService.record`. Same AI-intent semantics as `lore assess` (SPEC-026 §3 D5, reused via `isAssessAiBraked`): `--no-ai` always exits 2; the surface's built-in AI-off default does NOT brake it, only an explicit `ai.default_per_surface.<surface> = false` config override does — and this brake check runs unconditionally BEFORE the deterministic checks, even for docs that would short-circuit before any AI call. Exit 0 on any recorded judgment (approve/reject/escalate all count as success); exit 6 on AI provider failure (no judgment row written); standard `LoreError` codes otherwise. `--pending` batches the same pipe over `reviewService.pending()`: per-doc failures are collected (not fatal), a summary table renders at the end, and the batch only exits 6 if EVERY doc failed. `lore pending` gained an "AI Judgment" badge column (`[AI: approve 0.93]` / `[AI: escalate ✋NQ]` / `[unreviewed]`, `(stale)` suffix when the judgment's `doc_version` trails the doc's current version) and a `--escalated` flag (fresh, non-stale escalations only, printing each doc's `blocking_questions` as indented bullets).
 
 `audit` (SPEC-035) — `lore audit [<doc>] [--actor] [--action] [--since] [--limit] [--json]` queries the audit table (filters map 1:1 to `AuditFilters`); `lore audit --verify [--since] [--json]` runs the versions⋈audit completeness oracle (exit 0 clean, exit 4 with itemized misses). AI-judge actors (`ai:{provider}:{model}:{prompt_version}`, SPEC-034 §2) are decoded via `parseAuditActor` for human-readable output.
 
