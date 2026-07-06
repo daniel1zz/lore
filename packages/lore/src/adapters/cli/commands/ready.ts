@@ -7,9 +7,13 @@
  * when the plan declares phases (D9 — the flat data shape is grouped here, at
  * the CLI presentation layer only).
  *
+ * When the plan's parent spec is not "approved" (SPEC-032 §3.4), every record
+ * carries `upstream_unapproved: true` — readiness/exit codes are unaffected; a
+ * single advisory warning line is printed once (human mode) after the task list.
+ *
  * Exit codes: 0 = success, 3 = DOC_NOT_FOUND, 4 = VALIDATION_ERROR (not a plan).
  *
- * Source: SPEC-025 §4 AC-WF-7, AC-WF-8
+ * Source: SPEC-025 §4 AC-WF-7, AC-WF-8; SPEC-032 §3.4
  */
 
 import { defineCommand } from "citty";
@@ -82,28 +86,31 @@ export default defineCommand({
       const hasPhases = records.some((r) => r.phase !== undefined);
       if (!hasPhases) {
         for (const record of records) console.log(formatReadyLine(record));
-        return;
-      }
+      } else {
+        const byPhase = new Map<string, ReadyRecord[]>();
+        const unphased: ReadyRecord[] = [];
+        for (const record of records) {
+          if (record.phase !== undefined) {
+            const group = byPhase.get(record.phase) ?? [];
+            group.push(record);
+            byPhase.set(record.phase, group);
+          } else {
+            unphased.push(record);
+          }
+        }
 
-      const byPhase = new Map<string, ReadyRecord[]>();
-      const unphased: ReadyRecord[] = [];
-      for (const record of records) {
-        if (record.phase !== undefined) {
-          const group = byPhase.get(record.phase) ?? [];
-          group.push(record);
-          byPhase.set(record.phase, group);
-        } else {
-          unphased.push(record);
+        for (const [phase, group] of byPhase) {
+          console.log(`Phase: ${phase}`);
+          for (const record of group) console.log(formatReadyLine(record));
+        }
+        if (unphased.length > 0) {
+          console.log("(unphased)");
+          for (const record of unphased) console.log(formatReadyLine(record));
         }
       }
 
-      for (const [phase, group] of byPhase) {
-        console.log(`Phase: ${phase}`);
-        for (const record of group) console.log(formatReadyLine(record));
-      }
-      if (unphased.length > 0) {
-        console.log("(unphased)");
-        for (const record of unphased) console.log(formatReadyLine(record));
+      if (records.some((r) => r.upstream_unapproved === true)) {
+        console.log("⚠ Parent spec is not approved — readiness above is advisory only.");
       }
     } finally {
       app.close();

@@ -39,7 +39,7 @@ import {
   type ReadyRecord,
   type BlockerInfo,
 } from "@lore/core";
-import type { DocId, DocRecord } from "@lore/core";
+import type { DocId, DocRecord, DocStatus } from "@lore/core";
 import { NoOpTelemetry, type Telemetry, type TelemetryEvent, type TaskWorkflowEventName } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
@@ -355,9 +355,11 @@ export class TaskWorkflowService {
   /**
    * Computed readiness report for every task under a plan. Zero writes (D3).
    *
-   * Fetches: (1) the plan's child tasks, (2) `blocks`-type links targeting those
-   * tasks in one batch query (D7), (3) statuses/slugs for the referenced blocker
-   * docs — then delegates to the pure `evaluateReadiness`.
+   * Fetches: (1) the plan's parent doc, once, to derive the SPEC-032 §3.4
+   * `upstream_unapproved` advisory (non-null iff the parent is a `spec`), (2) the
+   * plan's child tasks, (3) `blocks`-type links targeting those tasks in one batch
+   * query (D7), (4) statuses/slugs for the referenced blocker docs — then delegates
+   * to the pure `evaluateReadiness`.
    *
    * @param planIdOrSlug - Plan document ULID or slug
    * @param now - Time seam (D10) — drives claim staleness computation
@@ -379,6 +381,19 @@ export class TaskWorkflowService {
         message: `Expected a plan document; got type '${plan.type}'`,
         value: plan.type,
       });
+    }
+
+    // reason: SPEC-032 §3.4 — a task under a plan whose parent spec isn't approved
+    // is still computed-ready per blockers, but every record carries an advisory
+    // flag. `null` (not "draft") when the plan has no spec parent (top-level, or
+    // parented under a prd) — evaluateReadiness treats null as "nothing to warn about".
+    let parentSpecStatus: DocStatus | null = null;
+    if (plan.parent_id !== null) {
+      const parentResult = await this.store.find(plan.parent_id);
+      if (!parentResult.ok) return parentResult;
+      if (parentResult.value !== null && parentResult.value.type === "spec") {
+        parentSpecStatus = parentResult.value.status;
+      }
     }
 
     const tasksResult = await this.store.findMany({ parent_id: plan.id, type: "task" });
@@ -408,7 +423,9 @@ export class TaskWorkflowService {
       }
     }
 
-    return ok(evaluateReadiness(tasks, blocksLinks, blockerStatuses, now(), this.claimTtlMinutes));
+    return ok(
+      evaluateReadiness(tasks, blocksLinks, blockerStatuses, now(), this.claimTtlMinutes, parentSpecStatus),
+    );
   }
 
   // ── Private Helpers ──────────────────────────────────────────────────────

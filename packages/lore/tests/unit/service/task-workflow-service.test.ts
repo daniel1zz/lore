@@ -20,13 +20,15 @@
  *               call, simulating a concurrent writer without any timing
  *               flakiness.
  *   STATE:      claim → stale via `now` injection; ready flips when a blocker
- *               transitions to archived
+ *               transitions to archived; ready()'s upstream_unapproved advisory
+ *               over an unapproved/approved/prd-parented/top-level plan parent
+ *               (SPEC-032 §3.4, AC-6)
  *   REGRESSION: legacy `task_status` doc still validates (AC-WF-12); existing
  *               phase validation untouched; telemetry emits exactly one event
  *               per successful write (AC-WF-11) and zero on failure
  *
  * @spec_ref AC-WF-1 AC-WF-2 AC-WF-3 AC-WF-4 AC-WF-5 AC-WF-6 AC-WF-7 AC-WF-9
- *           AC-WF-11 AC-WF-12
+ *           AC-WF-11 AC-WF-12, SPEC-032 §3.4 AC-6
  */
 
 import { describe, it, expect } from "vitest";
@@ -468,6 +470,125 @@ describe("STATE — ready() flips when a blocker transitions to archived (AC-WF-
     const blockedAfter = after.value.find((r) => r.task.id === blockedId);
     expect(blockedAfter?.ready).toBe(true);
     expect(blockedAfter?.unmet_blockers).toEqual([]);
+  });
+});
+
+describe("STATE — ready() upstream_unapproved advisory (SPEC-032 §3.4, AC-6)", () => {
+  it("a plan parented under an unapproved (draft) spec → every record carries upstream_unapproved: true, readiness unaffected", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+
+    const prdResult = await corpusService.create({
+      type: "prd",
+      title: "Upstream Test PRD",
+      content: "root",
+    } as CreateDocInput);
+    if (!prdResult.ok) throw new Error("prd create failed");
+
+    const specResult = await corpusService.create({
+      type: "spec",
+      title: "Upstream Test Spec",
+      parent_id: prdResult.value.id,
+      content: "spec body",
+    } as CreateDocInput);
+    if (!specResult.ok) throw new Error("spec create failed");
+    expect(specResult.value.status).toBe("draft"); // sanity: not approved
+
+    const planResult = await corpusService.create({
+      type: "plan",
+      title: "Upstream Test Plan",
+      parent_id: specResult.value.id,
+      content: "plan body",
+    } as CreateDocInput);
+    if (!planResult.ok) throw new Error("plan create failed");
+    const planId = planResult.value.id;
+    const taskId = await createTask(corpusService, planId);
+
+    const report = await taskWorkflowService.ready(planId);
+    expect(report.ok).toBe(true);
+    if (!report.ok) return;
+    const record = report.value.find((r) => r.task.id === taskId);
+    expect(record?.upstream_unapproved).toBe(true);
+    expect(record?.ready).toBe(true); // never blocks — advisory only
+  });
+
+  it("once the parent spec is approved, upstream_unapproved is no longer set", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+
+    const prdResult = await corpusService.create({
+      type: "prd",
+      title: "Approved-Path PRD",
+      content: "root",
+    } as CreateDocInput);
+    if (!prdResult.ok) throw new Error("prd create failed");
+
+    const specResult = await corpusService.create({
+      type: "spec",
+      title: "Approved-Path Spec",
+      parent_id: prdResult.value.id,
+      content: "spec body",
+    } as CreateDocInput);
+    if (!specResult.ok) throw new Error("spec create failed");
+    const specId = specResult.value.id;
+
+    const planResult = await corpusService.create({
+      type: "plan",
+      title: "Approved-Path Plan",
+      parent_id: specId,
+      content: "plan body",
+    } as CreateDocInput);
+    if (!planResult.ok) throw new Error("plan create failed");
+    const planId = planResult.value.id;
+    const taskId = await createTask(corpusService, planId);
+
+    const beforeApproval = await taskWorkflowService.ready(planId);
+    expect(beforeApproval.ok).toBe(true);
+    if (!beforeApproval.ok) return;
+    expect(beforeApproval.value.find((r) => r.task.id === taskId)?.upstream_unapproved).toBe(true);
+
+    const approveResult = await corpusService.set(specId, { status: "approved" });
+    expect(approveResult.ok).toBe(true);
+
+    const afterApproval = await taskWorkflowService.ready(planId);
+    expect(afterApproval.ok).toBe(true);
+    if (!afterApproval.ok) return;
+    expect(afterApproval.value.find((r) => r.task.id === taskId)?.upstream_unapproved).toBeUndefined();
+  });
+
+  it("a plan parented directly under a prd (no spec) never carries upstream_unapproved", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+
+    const prdResult = await corpusService.create({
+      type: "prd",
+      title: "Prd-Parented PRD",
+      content: "root",
+    } as CreateDocInput);
+    if (!prdResult.ok) throw new Error("prd create failed");
+
+    const planResult = await corpusService.create({
+      type: "plan",
+      title: "Prd-Parented Plan",
+      parent_id: prdResult.value.id,
+      content: "plan body",
+    } as CreateDocInput);
+    if (!planResult.ok) throw new Error("plan create failed");
+    const planId = planResult.value.id;
+    const taskId = await createTask(corpusService, planId);
+
+    const report = await taskWorkflowService.ready(planId);
+    expect(report.ok).toBe(true);
+    if (!report.ok) return;
+    expect(report.value.find((r) => r.task.id === taskId)?.upstream_unapproved).toBeUndefined();
+  });
+
+  it("a top-level plan (no parent at all) never carries upstream_unapproved", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const report = await taskWorkflowService.ready(planId);
+    expect(report.ok).toBe(true);
+    if (!report.ok) return;
+    expect(report.value.find((r) => r.task.id === taskId)?.upstream_unapproved).toBeUndefined();
   });
 });
 
