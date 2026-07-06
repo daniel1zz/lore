@@ -284,6 +284,15 @@ export class CorpusService {
       return r.ok && r.value !== null;
     });
 
+    // Default extra.spec_kind = "feature" for spec docs when absent (SPEC-032 §3.1).
+    // reason: Zod superRefine can only addIssue, never inject a default — the schema
+    // layer (specExtraSchema) validates an explicit value, this service layer
+    // materializes the default. Immutable: derive a new object, never mutate data.extra.
+    const resolvedExtra: Record<string, unknown> =
+      data.type === "spec" && data.extra?.["spec_kind"] === undefined
+        ? { ...(data.extra ?? {}), spec_kind: "feature" }
+        : (data.extra ?? {});
+
     const doc: DocRecord = {
       id,
       slug,
@@ -303,7 +312,7 @@ export class CorpusService {
       version: 1,
       deleted_at: null,
       tags: data.tags ?? [],
-      extra: data.extra ?? {},
+      extra: resolvedExtra,
     };
 
     const insertResult = await this.store.insert(doc);

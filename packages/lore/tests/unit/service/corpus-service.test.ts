@@ -184,6 +184,83 @@ describe("create", () => {
     if (result.ok) return;
     expect(result.error.code).toBe("VALIDATION_ERROR");
   });
+
+  // spec_kind taxonomy default materialization (SPEC-032 §3.1) — Zod superRefine
+  // cannot inject a default (addIssue only), so CorpusService._createImpl is the
+  // sole place that materializes "feature" when the field is absent at creation.
+  describe("spec_kind (SPEC-032 §3.1)", () => {
+    it("AC-SPECKIND.SVC-01: spec created with no --kind → extra.spec_kind defaults to 'feature'", async () => {
+      const { service } = makeService();
+      const prdResult = await service.create(prdInput("Root PRD"));
+      expect(prdResult.ok).toBe(true);
+      if (!prdResult.ok) return;
+
+      const specResult = await service.create(specInput(prdResult.value.id, "Undeclared Kind Spec"));
+      expect(specResult.ok).toBe(true);
+      if (!specResult.ok) return;
+      expect(specResult.value.extra["spec_kind"]).toBe("feature");
+    });
+
+    it("AC-SPECKIND.SVC-02: spec created with extra.spec_kind='design' persists 'design' (no override)", async () => {
+      const { service } = makeService();
+      const prdResult = await service.create(prdInput("Root PRD"));
+      expect(prdResult.ok).toBe(true);
+      if (!prdResult.ok) return;
+
+      const specResult = await service.create({
+        type: "spec",
+        title: "Design Spec",
+        parent_id: prdResult.value.id,
+        extra: { spec_kind: "design" },
+      });
+      expect(specResult.ok).toBe(true);
+      if (!specResult.ok) return;
+      expect(specResult.value.extra["spec_kind"]).toBe("design");
+    });
+
+    it("AC-SPECKIND.SVC-N01: spec created with extra.spec_kind='bogus' → VALIDATION_ERROR", async () => {
+      const { service } = makeService();
+      const prdResult = await service.create(prdInput("Root PRD"));
+      expect(prdResult.ok).toBe(true);
+      if (!prdResult.ok) return;
+
+      const specResult = await service.create({
+        type: "spec",
+        title: "Bogus Kind Spec",
+        parent_id: prdResult.value.id,
+        extra: { spec_kind: "bogus" },
+      });
+      expect(specResult.ok).toBe(false);
+      if (specResult.ok) return;
+      expect(specResult.error.code).toBe("VALIDATION_ERROR");
+    });
+
+    it("[regression] non-spec types are never defaulted with spec_kind", async () => {
+      const { service } = makeService();
+      const prdResult = await service.create(prdInput("Plain PRD"));
+      expect(prdResult.ok).toBe(true);
+      if (!prdResult.ok) return;
+      expect(prdResult.value.extra["spec_kind"]).toBeUndefined();
+    });
+
+    it("[boundary] existing extra keys survive spec_kind default materialization", async () => {
+      const { service } = makeService();
+      const prdResult = await service.create(prdInput("Root PRD"));
+      expect(prdResult.ok).toBe(true);
+      if (!prdResult.ok) return;
+
+      const specResult = await service.create({
+        type: "spec",
+        title: "Spec With Other Extra",
+        parent_id: prdResult.value.id,
+        extra: { custom_field: "preserved" },
+      });
+      expect(specResult.ok).toBe(true);
+      if (!specResult.ok) return;
+      expect(specResult.value.extra["spec_kind"]).toBe("feature");
+      expect(specResult.value.extra["custom_field"]).toBe("preserved");
+    });
+  });
 });
 
 // ─── get ────────────────────────────────────────────────────────────────────

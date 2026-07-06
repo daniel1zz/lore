@@ -6,6 +6,14 @@
  *   knowledge → --sub-type (ideation|retro|research|reference)
  *   task      → --parent <plan-slug-or-id> AND --plan-id <plan-slug-or-id>
  *
+ * Type-specific OPTIONAL flags:
+ *   spec      → --kind (feature|tech|design); defaults to "feature" when omitted
+ *               (materialized by CorpusService._createImpl, not this command).
+ *               An invalid value flows through to createDocInputSchema and surfaces
+ *               as VALIDATION_ERROR (exit 4) — unlike --decision-status/--sub-type,
+ *               --kind is NOT pre-validated here since it is optional, not required.
+ *               Source: SPEC-032 §3.1
+ *
  * Content decision tree (SPEC-017 §3.11, amended by SPEC-024):
  *   --content-file <path> → read file, use its contents (skip AI and editor)
  *   --content "…" passed explicitly → use it (skip AI and editor)
@@ -34,6 +42,7 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
 import { openEditor } from "../editor.js";
 import type { DocType, Priority } from "@lore/core";
+import { SPEC_KINDS } from "@lore/core";
 
 const VALID_TYPES: DocType[] = ["prd", "spec", "adr", "plan", "knowledge", "task"];
 
@@ -55,6 +64,7 @@ const TYPE_SPECIFIC_FLAGS: Readonly<Record<string, readonly DocType[]>> = {
   "sub-type": ["knowledge"],
   "plan-id": ["task"],
   phase: ["task"],
+  kind: ["spec"],
 };
 
 export default defineCommand({
@@ -113,6 +123,10 @@ export default defineCommand({
     phase: {
       type: "string",
       description: "[task only] Phase name to assign this task to (must be declared on the parent plan). Source: SPEC-023",
+    },
+    kind: {
+      type: "string",
+      description: `[spec only] Spec kind: ${SPEC_KINDS.join(" | ")} (defaults to "feature" when omitted). Source: SPEC-032`,
     },
     ai: {
       type: "boolean",
@@ -356,6 +370,7 @@ export default defineCommand({
         args["sub-type"],
         resolvedPlanId,
         args.phase,
+        args.kind,
       );
 
       const result = await app.corpusService.create({
@@ -393,8 +408,13 @@ export default defineCommand({
 
 /**
  * Assemble the `extra` payload for types that require it.
- * Returns undefined for types that carry no type-specific extra fields (prd, spec, plan).
+ * Returns undefined for types that carry no type-specific extra fields (prd, plan).
  * For tasks: includes plan_id (required) and optionally phase (SPEC-023 AC-PHASE-2).
+ * For specs: includes spec_kind ONLY when --kind was passed explicitly — the "feature"
+ * default is materialized service-side (CorpusService._createImpl), not here, so an
+ * omitted --kind still returns undefined rather than pre-baking the default (SPEC-032 §3.1).
+ * An invalid --kind value is passed through unvalidated; createDocInputSchema's superRefine
+ * rejects it with VALIDATION_ERROR (exit 4) — see module header.
  */
 function buildExtra(
   docType: DocType,
@@ -402,6 +422,7 @@ function buildExtra(
   subType: string | undefined,
   planId: string | undefined,
   phase?: string,
+  specKind?: string,
 ): Record<string, unknown> | undefined {
   if (docType === "adr" && decisionStatus !== undefined) {
     return { decision_status: decisionStatus };
@@ -415,6 +436,9 @@ function buildExtra(
       extra["phase"] = phase.trim();
     }
     return extra;
+  }
+  if (docType === "spec" && specKind !== undefined) {
+    return { spec_kind: specKind };
   }
   return undefined;
 }
