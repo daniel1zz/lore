@@ -34,8 +34,20 @@
  *     (positive integer) by the time the service is called, so the failure is "this
  *     specific historical snapshot isn't there" — the same class of failure as
  *     looking up a doc id that doesn't exist — not a malformed request.
+ *   - Approve/reject run the SAME implicit calibration hook the CLI `approve`/`reject`
+ *     commands run (`../../flows/calibration-hook.ts::runCalibrationHook`, SPEC-033
+ *     F1) — calibration data must never be adapter-specific. The hook runs against
+ *     the PRE-action doc version (mirrors CLI semantics exactly: approve pairs
+ *     against `result.value.version - 1` since `ReviewService.approve` bumps the
+ *     version; reject pairs against `result.value.version` unchanged since
+ *     `ReviewService.reject` never bumps it). A hook failure is collected via the
+ *     hook's optional `onWarning` callback into the response's `warnings: string[]`
+ *     — it is NEVER a 5xx and NEVER rolls back the already-succeeded approve/reject
+ *     (the hook's own invariant: calibration is a byproduct, never a gate). An
+ *     optional `calibration_note` field in the request body flows through to the
+ *     hook's `note` param (→ `delta_reasons[0]` on the persisted calibration row).
  * Side-effect class: IO (delegates to service layer)
- * Source: SPEC-022 §9.1, §9.3, §9.4, §9.5, §9.6; SPEC-027 AC-DH-6, AC-DH-7, AC-DH-11
+ * Source: SPEC-022 §9.1, §9.3, §9.4, §9.5, §9.6; SPEC-027 AC-DH-6, AC-DH-7, AC-DH-11; SPEC-033 F1
  */
 
 import type { App } from "../../app.js";
@@ -44,6 +56,7 @@ import type { DocPatch, LinkType } from "@lore/core";
 import { createDocInputSchema } from "@lore/core";
 import { jsonOk, jsonError, loreErrorResponse, parseJsonBody } from "./middleware.js";
 import { checkConcurrency } from "./concurrency.js";
+import { runCalibrationHook } from "../../flows/calibration-hook.js";
 
 // ─── Cookie-auth guard ────────────────────────────────────────────────────────
 
@@ -244,11 +257,28 @@ async function handleDashboardPatch(
 }
 
 /**
+ * Extract an optional `calibration_note` string field from an already-parsed
+ * JSON body (or `undefined` when the body is absent/malformed/lacks the field).
+ * Shared by {@link handleDashboardApprove} and {@link handleDashboardReject} —
+ * both feed this straight into `runCalibrationHook`'s `note` param.
+ */
+function extractCalibrationNote(body: unknown): string | undefined {
+  if (body === null || typeof body !== "object" || !("calibration_note" in body)) return undefined;
+  const value = (body as Record<string, unknown>)["calibration_note"];
+  return typeof value === "string" ? value : undefined;
+}
+
+/**
  * POST /api/dashboard/docs/:id/approve — transition document to approved status.
  * Uses session actor's owner as the reviewer identity (AC-DASH-WRITE-7).
- * Returns 200 with the approved DocRecord.
+ * Runs the shared implicit calibration hook (SPEC-033 F1) against the
+ * PRE-action version (`result.value.version - 1` — approve bumps the version).
+ * Returns 200 with `{ doc, warnings }` — `warnings` is non-empty only when the
+ * calibration hook hit a genuine IO failure; the approve itself already
+ * succeeded and is never rolled back for a calibration failure.
  */
 async function handleDashboardApprove(
+  req: Request,
   id: string,
   app: App,
   actor: ActorContext,
@@ -257,17 +287,39 @@ async function handleDashboardApprove(
   // field (e.g. "admin" or the user's email if set at key creation). Fallback to actor.name
   // (api_key_name) when owner is absent to ensure reviewer is never empty.
   const reviewer = actor.owner ?? actor.name;
+  const body = await parseJsonBody(req);
+  const calibrationNote = extractCalibrationNote(body);
 
   const result = await app.reviewService.approve(id, { reviewer });
   if (!result.ok) return loreErrorResponse(result.error);
 
   emitDashboardTelemetry(app, "approve", { doc_id: result.value.id, reviewer });
-  return jsonOk({ doc: result.value });
+
+  const warnings: string[] = [];
+  // reason: ReviewService.approve() bumps doc.version by 1 as part of the draft →
+  // approved transition — the version the human was reviewing (and that a judgment
+  // would be pinned to) is one less than the returned doc's version. Mirrors CLI
+  // approve.ts's identical `doc.version - 1` computation exactly.
+  await runCalibrationHook(
+    { judgmentService: app.judgmentService, telemetry: app.telemetry, onWarning: (message: string) => warnings.push(message) },
+    {
+      updatedDoc: result.value,
+      actedOnVersion: result.value.version - 1,
+      humanAction: "approve",
+      actor: reviewer,
+      ...(calibrationNote !== undefined ? { note: calibrationNote } : {}),
+    },
+  );
+
+  return jsonOk({ doc: result.value, warnings });
 }
 
 /**
  * POST /api/dashboard/docs/:id/reject — transition document to draft status with reason.
- * Returns 200 with the rejected DocRecord.
+ * Runs the shared implicit calibration hook (SPEC-033 F1) against the doc's
+ * CURRENT version (reject never bumps version).
+ * Returns 200 with `{ doc, warnings }` — see {@link handleDashboardApprove} for the
+ * `warnings` contract.
  */
 async function handleDashboardReject(
   req: Request,
@@ -279,13 +331,30 @@ async function handleDashboardReject(
   const reason = (body !== null && typeof body === "object" && "reason" in body)
     ? String((body as Record<string, unknown>)["reason"])
     : undefined;
+  const calibrationNote = extractCalibrationNote(body);
 
   const reviewer = actor.owner ?? actor.name;
   const result = await app.reviewService.reject(id, { reviewer, ...(reason !== undefined ? { reason } : {}) });
   if (!result.ok) return loreErrorResponse(result.error);
 
   emitDashboardTelemetry(app, "reject", { doc_id: result.value.id, reviewer });
-  return jsonOk({ doc: result.value });
+
+  const warnings: string[] = [];
+  // reason: ReviewService.reject() never bumps doc.version (status stays 'draft') —
+  // the version the human was reviewing IS the returned doc's version. Mirrors CLI
+  // reject.ts's identical (unchanged) version computation exactly.
+  await runCalibrationHook(
+    { judgmentService: app.judgmentService, telemetry: app.telemetry, onWarning: (message: string) => warnings.push(message) },
+    {
+      updatedDoc: result.value,
+      actedOnVersion: result.value.version,
+      humanAction: "reject",
+      actor: reviewer,
+      ...(calibrationNote !== undefined ? { note: calibrationNote } : {}),
+    },
+  );
+
+  return jsonOk({ doc: result.value, warnings });
 }
 
 /**
@@ -435,7 +504,7 @@ export async function handleDashboardRoute(
     case "patch":
       return handleDashboardPatch(req, match.id, app, actor);
     case "approve":
-      return handleDashboardApprove(match.id, app, actor);
+      return handleDashboardApprove(req, match.id, app, actor);
     case "reject":
       return handleDashboardReject(req, match.id, app, actor);
     case "createLink":

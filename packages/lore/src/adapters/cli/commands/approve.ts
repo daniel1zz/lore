@@ -6,13 +6,13 @@
  * whose `doc_version` matches the version the human just acted on) and records
  * a `confirmed`/`overridden` calibration outcome. This is a byproduct, never a
  * gate — a calibration write failure warns to stderr and still exits 0 (see
- * `../calibration-hook.ts`).
+ * `../../../flows/calibration-hook.ts`).
  */
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
-import { runCalibrationHook } from "../calibration-hook.js";
+import { runCalibrationHook } from "../../../flows/calibration-hook.js";
 import type { DocId } from "@lore/core";
 
 export default defineCommand({
@@ -56,7 +56,7 @@ export default defineCommand({
       // reason: ReviewService.approve() bumps doc.version by 1 as part of the
       // draft → approved transition — the version the human was reviewing
       // (and that a judgment would be pinned to) is one less than the
-      // returned doc's version. See calibration-hook.ts's CalibrationHookParams.
+      // returned doc's version. See flows/calibration-hook.ts's CalibrationHookParams.
       await runCalibrationHook(app, {
         updatedDoc: doc,
         actedOnVersion: doc.version - 1,

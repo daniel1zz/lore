@@ -1,19 +1,35 @@
 /**
- * Implicit calibration capture hook — shared adapter-level logic invoked by the
- * `approve` and `reject` CLI commands immediately after `ReviewService.approve` /
- * `ReviewService.reject` returns ok (SPEC-035 §3, D3).
+ * Implicit calibration capture hook — surface-neutral shared calling-layer module
+ * invoked after a human's approve/reject decision succeeds, regardless of which
+ * adapter (CLI, HTTP dashboard, MCP) carried that decision (SPEC-035 §3 D3,
+ * SPEC-033 F1). Pairs the human decision against the doc's latest AI review
+ * judgment (if any whose `doc_version` matches the version the human just acted
+ * on) and records a `confirmed`/`overridden` calibration outcome via
+ * `JudgmentService.recordCalibration`.
  *
  * Public surface:
  *   runCalibrationHook(deps, params) — attempt to pair the human's approve/reject
  *     decision against the doc's latest AI review judgment and persist the
- *     outcome via `JudgmentService.recordCalibration`. Never throws, never
- *     returns a `Result` — every outcome (no-op, silent skip, success, failure)
- *     is handled internally per the partial-failure contract below.
+ *     outcome. Never throws, never returns a `Result` — every outcome (no-op,
+ *     silent skip, success, failure) is handled internally per the
+ *     partial-failure contract below.
  *
+ * @invariant Services still never cross-import (SPEC-001 §3 "no cross-service
+ *   calls"). This module is NOT a service — it lives in `flows/`, a thin
+ *   sequencing helper one level above the service layer, owned by no single
+ *   adapter. Every adapter that adjudicates documents (CLI `approve`/`reject`,
+ *   HTTP `/api/dashboard/docs/:id/approve|reject`, and any future MCP
+ *   adjudication tool) calls THIS SAME function with its own
+ *   `{judgmentService, telemetry}` — never a re-implementation, never a copy.
+ *   The product is human-friendly AND AI-friendly: adjudication on ANY surface
+ *   must feed the SAME calibration loop, or that surface silently starves the
+ *   Wilson-bound calibration stats of real data.
  * @invariant Calibration is a byproduct, never a gate: this function is called
  *   ONLY after the human's approve/reject has already succeeded, and nothing it
- *   does can undo that decision. It has no return value the caller can act on.
- * @invariant Silent no-op (no stderr output, no telemetry) when:
+ *   does can undo that decision. Its `Promise<void>` return carries no signal a
+ *   caller could use to reverse the decision.
+ * @invariant Silent no-op (no stderr output, no telemetry, no `onWarning` call)
+ *   when:
  *   (a) the doc has no judgment at all, or
  *   (b) the judgment's `doc_version` no longer matches the version the doc was
  *       at when the human made their decision (`actedOnVersion`) — the doc
@@ -22,17 +38,22 @@
  * @invariant A genuine IO failure (fetching the judgment OR writing the
  *   calibration record returns a LoreError) is NEVER silently dropped: it
  *   prints `warning: <approved|rejected>, but calibration record failed: <msg>`
- *   to stderr and records one telemetry event, while leaving the calling
- *   command's exit code untouched (still 0 — the human's decision stood).
+ *   to stderr, records one telemetry event, and (when the caller supplied one)
+ *   invokes `onWarning(message)` so an HTTP/MCP caller can surface it in its own
+ *   response shape (e.g. `{ warnings: string[] }`) — while leaving the calling
+ *   command's outcome (exit code / HTTP status) untouched. `onWarning` is
+ *   strictly additive: omitting it (every pre-SPEC-033 CLI call site) preserves
+ *   the exact prior stderr+telemetry-only behavior byte-for-byte.
  *
- * Side-effect class: IO (JudgmentService store calls, stderr write, telemetry.record)
+ * Side-effect class: IO (JudgmentService store calls, stderr write, telemetry.record,
+ *   optional onWarning callback)
  *
- * Source: SPEC-035 §3 D3
+ * Source: SPEC-035 §3 D3; SPEC-033 F1 (hoist to surface-neutral flows/)
  */
 
 import type { CalibrationOutcome, DocId, DocRecord, LoreError, ReviewDecision, Telemetry, TelemetryEvent } from "@lore/core";
-import type { JudgmentService } from "../../service/judgment-service.js";
-import { formatError } from "./utils.js";
+import type { JudgmentService } from "../service/judgment-service.js";
+import { formatError } from "../adapters/cli/utils.js";
 
 /** Which human action triggered the hook — maps 1:1 to the CLI command name. */
 export type HumanReviewAction = "approve" | "reject";
@@ -46,6 +67,14 @@ export type HumanReviewAction = "approve" | "reject";
 export interface CalibrationHookDeps {
   judgmentService: JudgmentService;
   telemetry: Telemetry;
+  /**
+   * Optional partial-failure observer (SPEC-033 F1) — called with the same
+   * human-readable message that is printed to stderr, ONLY on a genuine IO
+   * failure branch (never on a silent no-op/skip). Omit for CLI call sites
+   * (stderr is the sole channel there); HTTP/MCP adapters pass one to collect
+   * the message into their own response's `warnings: string[]`.
+   */
+  onWarning?: (message: string) => void;
 }
 
 export interface CalibrationHookParams {
@@ -62,7 +91,7 @@ export interface CalibrationHookParams {
   humanAction: HumanReviewAction;
   /** Resolved actor identity (same resolution the caller used for `--reviewer`). */
   actor: string;
-  /** Optional `--calibration-note` value → `delta_reasons[0]` when present. */
+  /** Optional `--calibration-note` / `calibration_note` value → `delta_reasons[0]` when present. */
   note?: string;
 }
 
@@ -101,7 +130,7 @@ export async function runCalibrationHook(
 
   const judgmentResult = await deps.judgmentService.latestFor(updatedDoc.id as DocId);
   if (!judgmentResult.ok) {
-    warnCalibrationFailure(deps.telemetry, humanAction, judgmentResult.error);
+    warnCalibrationFailure(deps, humanAction, judgmentResult.error);
     return;
   }
 
@@ -120,7 +149,7 @@ export async function runCalibrationHook(
   });
 
   if (!calibrationResult.ok) {
-    warnCalibrationFailure(deps.telemetry, humanAction, calibrationResult.error);
+    warnCalibrationFailure(deps, humanAction, calibrationResult.error);
     return;
   }
 
@@ -132,16 +161,22 @@ export async function runCalibrationHook(
 }
 
 /**
- * Print the partial-failure warning to stderr and record one telemetry event
- * — the shared tail of both failure branches in {@link runCalibrationHook}.
+ * Print the partial-failure warning to stderr, record one telemetry event, and
+ * (when supplied) invoke `deps.onWarning` — the shared tail of both failure
+ * branches in {@link runCalibrationHook}.
  */
 function warnCalibrationFailure(
-  telemetry: Telemetry,
+  deps: Pick<CalibrationHookDeps, "telemetry" | "onWarning">,
   humanAction: HumanReviewAction,
   error: LoreError,
 ): void {
   const verb = humanAction === "approve" ? "approved" : "rejected";
-  process.stderr.write(`warning: ${verb}, but calibration record failed: ${formatError(error)}\n`);
+  // reason: formatError lives in adapters/cli/utils.ts (the app-wide LoreError → string
+  // SSOT used by all 30+ CLI commands) — reused here rather than duplicated, even though
+  // this module lives outside adapters/cli, because it is a pure formatting function with
+  // no CLI-only side effects (no process.exit, no stdout write).
+  const message = `${verb}, but calibration record failed: ${formatError(error)}`;
+  process.stderr.write(`warning: ${message}\n`);
 
   const event: TelemetryEvent = {
     ts: new Date().toISOString(),
@@ -151,5 +186,7 @@ function warnCalibrationFailure(
     duration_ms: 0,
     error_code: error.code,
   };
-  telemetry.record(event);
+  deps.telemetry.record(event);
+
+  deps.onWarning?.(message);
 }

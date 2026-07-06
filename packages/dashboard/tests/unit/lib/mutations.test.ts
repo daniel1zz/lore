@@ -498,24 +498,51 @@ describe("apiRestoreVersion — error path", () => {
 // ─── REGRESSION ───────────────────────────────────────────────────────────────
 
 describe("regression — apiApproveDoc and apiRejectDoc", () => {
-  it("apiApproveDoc returns DocRecord from response", async () => {
+  it("apiApproveDoc returns { doc, warnings } from response", async () => {
     const doc = makeDocRecord({ status: "approved" });
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
-      mockJsonResponse({ ok: true, data: { doc } }),
+      mockJsonResponse({ ok: true, data: { doc, warnings: [] } }),
     );
 
     const result = await apiApproveDoc("01JTEST");
-    expect(result.status).toBe("approved");
+    expect(result.doc.status).toBe("approved");
+    expect(result.warnings).toEqual([]);
   });
 
-  it("apiRejectDoc returns DocRecord from response", async () => {
+  it("apiRejectDoc returns { doc, warnings } from response", async () => {
     const doc = makeDocRecord({ status: "draft" });
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
-      mockJsonResponse({ ok: true, data: { doc } }),
+      mockJsonResponse({ ok: true, data: { doc, warnings: [] } }),
     );
 
     const result = await apiRejectDoc("01JTEST", "Needs more work");
-    expect(result.status).toBe("draft");
+    expect(result.doc.status).toBe("draft");
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("apiApproveDoc surfaces non-empty warnings without throwing (SPEC-033 F1)", async () => {
+    const doc = makeDocRecord({ status: "approved" });
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      mockJsonResponse({ ok: true, data: { doc, warnings: ["approved, but calibration record failed: STORE_ERROR"] } }),
+    );
+
+    const result = await apiApproveDoc("01JTEST", { calibrationNote: "reviewer note" });
+    expect(result.doc.status).toBe("approved");
+    expect(result.warnings).toHaveLength(1);
+  });
+
+  it("apiRejectDoc sends calibration_note in the request body", async () => {
+    const doc = makeDocRecord({ status: "draft" });
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      mockJsonResponse({ ok: true, data: { doc, warnings: [] } }),
+    );
+
+    await apiRejectDoc("01JTEST", "Needs more work", { calibrationNote: "AI missed context" });
+
+    const [, options] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    const sentBody = JSON.parse(options.body as string) as Record<string, unknown>;
+    expect(sentBody.reason).toBe("Needs more work");
+    expect(sentBody.calibration_note).toBe("AI missed context");
   });
 
   it("apiCreateLink returns void (not DocRecord) — spec says 201 with {ok: true}", async () => {

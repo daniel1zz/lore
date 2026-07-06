@@ -26,6 +26,10 @@
  *     - GET /api/docs/:id/log → 200 with versions
  *     - GET /api/docs/:id/diff → 200 with diff
  *     - POST /api/docs/:id/restore → 200 with doc
+ *     - GET /api/judgments/:docId → 200 with { latest, history } (SPEC-033 F1)
+ *     - GET /api/audit/:docId → 200 with the doc's audit entries, raw actor strings (SPEC-033 F1)
+ *     - GET /api/audit/verify → 200 with { clean, misses, since } (SPEC-033 F1)
+ *     - GET /api/calibration/stats → 200 with CalibrationStats[] (SPEC-033 F1)
  *
  *   NEGATIVE / ERROR (LoreError → HTTP status per SPEC-011 §5):
  *     - GET /api/docs/:unknown → 404
@@ -62,10 +66,15 @@ import { VersionService } from "../../../../src/service/version-service.js";
 import { OutlineService } from "../../../../src/service/outline-service.js";
 import { MigrationService } from "../../../../src/service/migration-service.js";
 import { TreeCheckService } from "../../../../src/service/tree-check-service.js";
+import { JudgmentService } from "../../../../src/service/judgment-service.js";
+import { AuditService } from "../../../../src/service/audit-service.js";
 import { NoOpTelemetry } from "@lore/core";
 import type { App } from "../../../../src/app.js";
 import type { ApiKeyStore, ActorContext } from "../../../../src/adapters/http/auth.js";
 import { handleApiRoute } from "../../../../src/adapters/http/routes.js";
+
+/** Always before any doc/judgment/audit entry created during a test run (SPEC-033 F1 routes). */
+const FAR_PAST = "2000-01-01T00:00:00.000Z";
 
 // ─── Test Infrastructure ─────────────────────────────────────────────────────
 
@@ -96,8 +105,12 @@ function makeApp(): App {
     // reason: SPEC-032 §3.4 — test does not exercise spec-kind audit; null-cast per
     // established pattern (see phaseService above) for satisfying newly-required App fields.
     specKindService: null as unknown as App["specKindService"],
-    judgmentService: null as unknown as App["judgmentService"],
-    auditService: null as unknown as App["auditService"],
+    // reason: SPEC-033 F1 — GET /api/judgments/:docId and GET /api/calibration/stats
+    // exercise these directly (real instance backed by the SAME `store`, mirroring the
+    // dashboard-routes.test.ts fix for the same reason: approve/reject's calibration
+    // hook also depends on a real judgmentService).
+    judgmentService: new JudgmentService(store, new NoOpTelemetry()),
+    auditService: new AuditService(store, { verifySince: FAR_PAST }),
     // reason: test does not exercise AI-default path; callerSurface required by App interface (SPEC-024).
     callerSurface: "cli" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),
@@ -562,6 +575,209 @@ describe("GET /api/review/pending", () => {
       const body = await parseResponse(res!);
       expect(body.ok).toBe(true);
       expect(Array.isArray(body.data)).toBe(true);
+    });
+  });
+});
+
+// ─── GET /api/judgments/:docId (SPEC-033 F1) ────────────────────────────────
+
+describe("GET /api/judgments/:docId", () => {
+  describe("happy path", () => {
+    it("returns { latest: null, history: [] } for a doc with no judgment yet", async () => {
+      const { id } = await createPrd("Unjudged Doc");
+      const { req, url } = makeGetRequest(`/api/judgments/${id}`);
+      const res = await handleApiRoute(req, url, app, TEST_ACTOR);
+      expect(res).not.toBeNull();
+      expect(res!.status).toBe(200);
+      const body = await parseResponse(res!);
+      expect(body.ok).toBe(true);
+      const data = body.data as Record<string, unknown>;
+      expect(data.latest).toBeNull();
+      expect(data.history).toEqual([]);
+    });
+
+    it("returns the recorded judgment as both latest and the sole history entry", async () => {
+      const { id } = await createPrd("Judged Doc");
+      const recordResult = await app.judgmentService.record({
+        doc_id: id,
+        doc_version: 1,
+        decision: "approve",
+        confidence: 0.9,
+        reasons: [{ dimension: "completeness", finding: "Looks complete" }],
+        checks: [{ check: "schema", outcome: "pass" }],
+        blocking_questions: [],
+        judge: { provider: "test-provider", model: "test-provider", prompt_version: "v1" },
+      });
+      expect(recordResult.ok).toBe(true);
+
+      const { req, url } = makeGetRequest(`/api/judgments/${id}`);
+      const res = await handleApiRoute(req, url, app, TEST_ACTOR);
+      expect(res!.status).toBe(200);
+      const body = await parseResponse(res!);
+      const data = body.data as { latest: Record<string, unknown> | null; history: Record<string, unknown>[] };
+      expect(data.latest?.decision).toBe("approve");
+      expect(data.history).toHaveLength(1);
+      expect(data.history[0]?.doc_id).toBe(id);
+    });
+  });
+});
+
+// ─── GET /api/audit/:docId (SPEC-033 F1) ────────────────────────────────────
+
+describe("GET /api/audit/:docId", () => {
+  describe("happy path", () => {
+    it("returns the doc's audit trail including its create entry", async () => {
+      const { id } = await createPrd("Audited Doc");
+      const { req, url } = makeGetRequest(`/api/audit/${id}`);
+      const res = await handleApiRoute(req, url, app, TEST_ACTOR);
+      expect(res).not.toBeNull();
+      expect(res!.status).toBe(200);
+      const body = await parseResponse(res!);
+      expect(body.ok).toBe(true);
+      const entries = body.data as Array<Record<string, unknown>>;
+      expect(entries.length).toBeGreaterThan(0);
+      expect(entries.some((e) => e.action === "create")).toBe(true);
+    });
+
+    it("ships raw (undecoded) actor strings — client decodes via parseAuditActor", async () => {
+      const { id } = await createPrd("Raw Actor Doc");
+      await app.judgmentService.record({
+        doc_id: id,
+        doc_version: 1,
+        decision: "approve",
+        confidence: 0.8,
+        reasons: [{ dimension: "completeness", finding: "ok" }],
+        checks: [{ check: "schema", outcome: "pass" }],
+        blocking_questions: [],
+        judge: { provider: "claude-cli", model: "claude-sonnet-5", prompt_version: "v1" },
+      });
+
+      const { req, url } = makeGetRequest(`/api/audit/${id}`);
+      const res = await handleApiRoute(req, url, app, TEST_ACTOR);
+      const body = await parseResponse(res!);
+      const entries = body.data as Array<Record<string, unknown>>;
+      const judgeEntry = entries.find((e) => e.action === "judge");
+      expect(judgeEntry).toBeDefined();
+      // reason: server must NOT decode ai:provider:model:prompt_version into a
+      // human-readable form — that is parseAuditActor's job, client-side (@lore/core).
+      expect(typeof judgeEntry?.actor).toBe("string");
+      expect(String(judgeEntry?.actor)).toMatch(/^ai:/);
+    });
+  });
+});
+
+// ─── GET /api/audit/verify (SPEC-033 F1) ────────────────────────────────────
+
+describe("GET /api/audit/verify", () => {
+  describe("happy path", () => {
+    it("returns { clean: true, misses: [] } for a freshly-created corpus", async () => {
+      await createPrd("Clean Corpus Doc");
+      const { req, url } = makeGetRequest("/api/audit/verify");
+      const res = await handleApiRoute(req, url, app, TEST_ACTOR);
+      expect(res).not.toBeNull();
+      expect(res!.status).toBe(200);
+      const body = await parseResponse(res!);
+      expect(body.ok).toBe(true);
+      const data = body.data as { clean: boolean; misses: unknown[]; since: string };
+      expect(data.clean).toBe(true);
+      expect(data.misses).toEqual([]);
+      expect(typeof data.since).toBe("string");
+    });
+
+    it("accepts a ?since= override matching AuditService.verify's opts.since", async () => {
+      await createPrd("Since Override Doc");
+      const { req, url } = makeGetRequest("/api/audit/verify?since=2099-01-01T00:00:00.000Z");
+      const res = await handleApiRoute(req, url, app, TEST_ACTOR);
+      expect(res!.status).toBe(200);
+      const body = await parseResponse(res!);
+      const data = body.data as { clean: boolean; since: string };
+      // reason: a watermark in the far future excludes every real versions row from
+      // the reconcile walk — always reports clean (mirrors AuditService's own contract).
+      expect(data.clean).toBe(true);
+      expect(data.since).toBe("2099-01-01T00:00:00.000Z");
+    });
+  });
+});
+
+// ─── GET /api/calibration/stats (SPEC-033 F1) ───────────────────────────────
+
+describe("GET /api/calibration/stats", () => {
+  describe("happy path", () => {
+    it("returns an empty array when no calibration records exist", async () => {
+      const { req, url } = makeGetRequest("/api/calibration/stats");
+      const res = await handleApiRoute(req, url, app, TEST_ACTOR);
+      expect(res).not.toBeNull();
+      expect(res!.status).toBe(200);
+      const body = await parseResponse(res!);
+      expect(body.ok).toBe(true);
+      expect(body.data).toEqual([]);
+    });
+
+    it("returns Wilson-bound stats after a calibration record is written", async () => {
+      const { id } = await createPrd("Calibrated Doc");
+      const recordResult = await app.judgmentService.record({
+        doc_id: id,
+        doc_version: 1,
+        decision: "approve",
+        confidence: 0.9,
+        reasons: [{ dimension: "completeness", finding: "ok" }],
+        checks: [{ check: "schema", outcome: "pass" }],
+        blocking_questions: [],
+        judge: { provider: "test-provider", model: "test-provider", prompt_version: "v1" },
+      });
+      expect(recordResult.ok).toBe(true);
+      if (!recordResult.ok) return;
+
+      const calResult = await app.judgmentService.recordCalibration({
+        judgment: recordResult.value,
+        docType: "prd",
+        currentDocVersion: 1,
+        humanOutcome: "confirmed",
+        deltaReasons: [],
+        actor: "alice",
+      });
+      expect(calResult.ok).toBe(true);
+
+      const { req, url } = makeGetRequest("/api/calibration/stats");
+      const res = await handleApiRoute(req, url, app, TEST_ACTOR);
+      expect(res!.status).toBe(200);
+      const body = await parseResponse(res!);
+      const stats = body.data as Array<Record<string, unknown>>;
+      expect(stats).toHaveLength(1);
+      expect(stats[0]?.doc_type).toBe("prd");
+      expect(stats[0]?.n).toBe(1);
+      expect(stats[0]?.agreement_rate).toBe(1);
+    });
+
+    it("filters by doc_type via ?doc_type= query param", async () => {
+      const { id } = await createPrd("Filtered Doc");
+      const recordResult = await app.judgmentService.record({
+        doc_id: id,
+        doc_version: 1,
+        decision: "reject",
+        confidence: 0.7,
+        reasons: [{ dimension: "completeness", finding: "missing sections" }],
+        checks: [{ check: "schema", outcome: "fail" }],
+        blocking_questions: [],
+        judge: { provider: "test-provider", model: "test-provider", prompt_version: "v1" },
+      });
+      if (!recordResult.ok) throw new Error("expected judgment record to succeed");
+      await app.judgmentService.recordCalibration({
+        judgment: recordResult.value,
+        docType: "prd",
+        currentDocVersion: 1,
+        humanOutcome: "confirmed",
+        deltaReasons: [],
+        actor: "bob",
+      });
+
+      const { req, url } = makeGetRequest("/api/calibration/stats?doc_type=spec");
+      const res = await handleApiRoute(req, url, app, TEST_ACTOR);
+      const body = await parseResponse(res!);
+      // reason: no "spec"-typed calibration record was written — narrowing by an
+      // unmatched doc_type must return an empty array, not the "prd" row above,
+      // proving the filter actually reaches the store query (anti-hardcode).
+      expect(body.data).toEqual([]);
     });
   });
 });

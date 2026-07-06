@@ -2,13 +2,15 @@
  * Typed fetch wrapper for the Lore HTTP API.
  * Purpose: all API calls from the dashboard go through these helpers; they parse
  *   the server's { ok, data } envelope and normalize errors.
- * Public surface: apiList, apiSearch, apiTree, apiGetDoc, apiGetStatus
+ * Public surface: apiList, apiSearch, apiTree, apiGetDoc, apiGetStatus,
+ *   apiGetJudgments, apiGetAuditForDoc, apiGetAuditVerify, apiGetCalibrationStats
  * Invariants: 5-second timeout via AbortSignal.timeout; never leaks raw Response objects.
  *   Throws ApiError on non-2xx or server-side { ok: false }.
  * Side-effect class: IO (fetch)
+ * Source: SPEC-011 §3, §5; SPEC-015 §3; SPEC-033 F1 (feedback-loop read routes)
  */
 
-import type { DocRecord, DocSummary, DocType, DocStatus } from "@lore/core";
+import type { AuditEntry, DocRecord, DocSummary, DocType, DocStatus, ReviewJudgment } from "@lore/core";
 
 // ─── Error type ──────────────────────────────────────────────────────────────
 
@@ -310,4 +312,105 @@ export async function apiGetVersionDiff(
 ): Promise<VersionDiffResponse> {
   const qs = buildQueryString(opts as Record<string, number | undefined>);
   return fetchJson<VersionDiffResponse>(`/api/docs/${encodeURIComponent(idOrSlug)}/diff${qs}`);
+}
+
+// ─── SPEC-033 F1: feedback-loop reads (judgments, audit, calibration stats) ──
+
+/**
+ * A doc's latest AI review judgment plus its full history. Mirrors the shape
+ * `GET /api/judgments/:docId` returns (`routes.ts::handleGetJudgments`) — the
+ * server never wraps this further, so `history` includes `latest` as its
+ * first element when a judgment exists (never de-duplicated server-side).
+ */
+export interface JudgmentsResponse {
+  latest: ReviewJudgment | null;
+  history: ReviewJudgment[];
+}
+
+/**
+ * One versions row with no matching audit entry. Mirrors `AuditMiss`
+ * (`packages/lore/src/service/audit-service.ts`) exactly — that service type
+ * is the only source of truth for this shape.
+ */
+export interface AuditMissRow {
+  doc_id: string;
+  version: number;
+  action: string;
+  created_at: string;
+}
+
+/** Response shape of `GET /api/audit/verify`. Mirrors `AuditVerifyResult` (`audit-service.ts`). */
+export interface AuditVerifyResponse {
+  clean: boolean;
+  misses: AuditMissRow[];
+  since: string;
+}
+
+/**
+ * One aggregated calibration statistic row. Mirrors `CalibrationStats`
+ * (`packages/lore/src/service/judgment-service.ts`) exactly.
+ */
+export interface CalibrationStatsRow {
+  doc_type: DocType;
+  prompt_version: string;
+  n: number;
+  agreement_rate: number;
+  wilson_lower_bound: number;
+  window_limit: number;
+}
+
+/** Optional narrowing filters for {@link apiGetCalibrationStats}. */
+export interface CalibrationStatsOpts {
+  docType?: DocType;
+  promptVersion?: string;
+}
+
+/**
+ * Fetch a document's latest AI review judgment plus its full history.
+ *
+ * @param docId - Document ULID.
+ * @returns `{ latest, history }` — `latest` is `null` when the doc has never been judged.
+ * @throws {ApiError} On HTTP or network error.
+ */
+export async function apiGetJudgments(docId: string): Promise<JudgmentsResponse> {
+  return fetchJson<JudgmentsResponse>(`/api/judgments/${encodeURIComponent(docId)}`);
+}
+
+/**
+ * Fetch a document's audit trail (newest first). Actor strings are RAW —
+ * AI-judge entries look like `ai:claude-cli:claude-sonnet-5:v1`; decode them
+ * with `parseAuditActor` (browser-safe, `@lore/core`) for display, never here.
+ *
+ * @param docId - Document ULID.
+ * @returns Audit entries for the doc.
+ * @throws {ApiError} On HTTP or network error.
+ */
+export async function apiGetAuditForDoc(docId: string): Promise<AuditEntry[]> {
+  return fetchJson<AuditEntry[]>(`/api/audit/${encodeURIComponent(docId)}`);
+}
+
+/**
+ * Run the versions⋈audit completeness oracle across the whole corpus.
+ *
+ * @param opts.since - Optional ISO 8601 watermark override.
+ * @returns `{ clean, misses, since }`.
+ * @throws {ApiError} On HTTP or network error.
+ */
+export async function apiGetAuditVerify(opts: { since?: string } = {}): Promise<AuditVerifyResponse> {
+  const qs = buildQueryString(opts as Record<string, string | undefined>);
+  return fetchJson<AuditVerifyResponse>(`/api/audit/verify${qs}`);
+}
+
+/**
+ * Fetch Wilson-bound calibration agreement stats per (doc_type, prompt_version).
+ *
+ * @param opts - Optional doc_type/prompt_version narrowing.
+ * @returns One row per distinct (doc_type, prompt_version) pair present in the window.
+ * @throws {ApiError} On HTTP or network error.
+ */
+export async function apiGetCalibrationStats(
+  opts: CalibrationStatsOpts = {},
+): Promise<CalibrationStatsRow[]> {
+  const qs = buildQueryString({ doc_type: opts.docType, prompt_version: opts.promptVersion });
+  return fetchJson<CalibrationStatsRow[]>(`/api/calibration/stats${qs}`);
 }
