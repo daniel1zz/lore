@@ -30,9 +30,10 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "child_process";
-import { mkdirSync, rmSync, writeFileSync, chmodSync } from "fs";
+import { mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { installStubClaude, stubClaudeEnv } from "../../helpers/stub-claude.js";
 
 // ─── Path setup ───────────────────────────────────────────────────────────────
 
@@ -57,13 +58,7 @@ interface RunResult {
 function runLore(args: string[], cwd: string): RunResult {
   const result = spawnSync("bun", ["run", INDEX_TS, ...args], {
     cwd,
-    env: {
-      ...process.env,
-      HOME: cwd,
-      EDITOR: "true",
-      CLAUDECODE: "1",
-      PATH: `${join(cwd, "stub-bin")}:${process.env.PATH ?? ""}`,
-    },
+    env: stubClaudeEnv(cwd, join(cwd, "stub-bin")),
     encoding: "utf8",
   });
   return {
@@ -81,15 +76,11 @@ beforeEach(() => {
   tmpDir = join(tmpdir(), `lore-assess-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(tmpDir, { recursive: true });
 
-  // Fail-fast `claude` stub: a real `claude` on the host PATH would otherwise get
-  // invoked by the AI-provider spawn — slow, and it burns a real API call. Any dev
-  // machine with the CLI installed (e.g. ~/.local/bin/claude) needs this shim for
-  // AC-ASSESS-8.CLI.N3 to deterministically hit the AI-provider-failure path.
-  const stubBinDir = join(tmpDir, "stub-bin");
-  mkdirSync(stubBinDir, { recursive: true });
-  const stubClaudePath = join(stubBinDir, "claude");
-  writeFileSync(stubClaudePath, '#!/bin/sh\necho "stub claude: refusing (hermetic test shim)" >&2\nexit 1\n');
-  chmodSync(stubClaudePath, 0o755);
+  // Fail-fast `claude` stub (tests/helpers/stub-claude.ts): a real `claude` on the host
+  // PATH would otherwise get invoked by the AI-provider spawn — slow, and it burns a real
+  // API call. Any dev machine with the CLI installed (e.g. ~/.local/bin/claude) needs
+  // this shim for AC-ASSESS-8.CLI.N3 to deterministically hit the AI-provider-failure path.
+  installStubClaude(tmpDir);
 
   const init = runLore(["init"], tmpDir);
   if (init.exitCode !== 0) {

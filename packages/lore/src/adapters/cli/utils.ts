@@ -20,7 +20,7 @@ import { join, dirname } from "path";
 import { userInfo } from "os";
 import { z } from "zod";
 import { evidenceEntrySchema, taskClaimSchema, isClaimStale } from "@lore/core";
-import type { DocRecord, LoreError } from "@lore/core";
+import type { DocRecord, LoreError, ReviewJudgment } from "@lore/core";
 import type { TreeNode } from "../../service/corpus-service.js";
 import type { DocWithNavigation } from "../../service/corpus-service.js";
 
@@ -279,6 +279,37 @@ export function formatWorkflowBadge(doc: DocRecord, nowIso: string, ttlMinutes: 
   }
 
   return parts.length > 0 ? ` [${parts.join(" ")}]` : "";
+}
+
+// ─── Review Judgment Badges (SPEC-034 §4 triage rendering) ─────────────────
+
+/**
+ * Render a `[AI: <decision> <confidence>]`-style badge for a `lore pending` row.
+ * Pure presentation over an already-fetched `ReviewJudgment | null` — no store access
+ * here (the caller, `pending.ts`, does one `judgmentService.latestFor` call per doc).
+ *
+ * @param judgment - The doc's latest review judgment, or `null` if never reviewed
+ * @param docVersion - The doc's CURRENT version (`PendingDoc.version`) — compared
+ *   against `judgment.doc_version` to detect staleness (the doc changed since the
+ *   judgment was recorded)
+ * @returns `"[unreviewed]"` when `judgment` is `null`; otherwise `"[AI: approve 0.93]"` /
+ *   `"[AI: reject 0.87]"` / `"[AI: escalate ✋2Q]"` (Q-count = `blocking_questions.length`),
+ *   with `" (stale)"` appended when `judgment.doc_version < docVersion`
+ * @example
+ *   formatJudgmentBadge(null, 1)                                    // "[unreviewed]"
+ *   formatJudgmentBadge({decision: "approve", confidence: 0.93, doc_version: 2, ...}, 2)
+ *   // "[AI: approve 0.93]"
+ *   formatJudgmentBadge({decision: "escalate", blocking_questions: ["a", "b"], doc_version: 1, ...}, 2)
+ *   // "[AI: escalate ✋2Q] (stale)"
+ */
+export function formatJudgmentBadge(judgment: ReviewJudgment | null, docVersion: number): string {
+  if (judgment === null) return "[unreviewed]";
+
+  const stale = judgment.doc_version < docVersion ? " (stale)" : "";
+  if (judgment.decision === "escalate") {
+    return `[AI: escalate ✋${judgment.blocking_questions.length}Q]${stale}`;
+  }
+  return `[AI: ${judgment.decision} ${judgment.confidence.toFixed(2)}]${stale}`;
 }
 
 // ─── Table Output ───────────────────────────────────────────────────────────

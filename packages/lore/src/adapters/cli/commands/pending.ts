@@ -1,11 +1,25 @@
 /**
  * lore pending — list documents in draft status awaiting review.
+ *
+ * SPEC-034 §4 triage rendering: every pending doc gains an "AI Judgment" badge
+ * column (`judgmentService.latestFor(doc.id)`, one call per doc — CLI-scale
+ * read, N pending docs → N latestFor calls, same trade-off documented on
+ * `CorpusService.getReviewBundle`'s per-link find loop). `--escalated` narrows
+ * the list to docs whose LATEST judgment is a fresh (non-stale) escalation,
+ * and additionally prints each doc's `blocking_questions` as indented bullets.
  */
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, formatTable, relativeTime } from "../utils.js";
-import type { DocType } from "@lore/core";
+import { exitCode, formatError, formatJudgmentBadge, formatTable, relativeTime } from "../utils.js";
+import type { DocType, ReviewJudgment } from "@lore/core";
+import type { PendingDoc } from "../../../service/review-service.js";
+
+/** A fresh (non-stale) escalation: decision === "escalate" AND judgment.doc_version === doc.version. */
+function isFreshEscalation(judgment: ReviewJudgment | null, docVersion: number): boolean {
+  if (judgment === null) return false;
+  return judgment.decision === "escalate" && judgment.doc_version === docVersion;
+}
 
 export default defineCommand({
   meta: {
@@ -24,6 +38,10 @@ export default defineCommand({
     since: {
       type: "string",
       description: "ISO 8601 date — only docs updated at or after this time",
+    },
+    escalated: {
+      type: "boolean",
+      description: "Show only docs whose latest AI judgment is a fresh escalation, with blocking questions",
     },
     json: {
       type: "boolean",
@@ -46,30 +64,86 @@ export default defineCommand({
         return;
       }
 
-      const docs = result.value;
+      const docs: PendingDoc[] = result.value;
+
+      // reason: an empty queue skips the judgment-fetch loop entirely (nothing to fetch),
+      // but --json must still emit a valid empty envelope, not fall through to the
+      // human-readable message (regression guard: this branch runs BEFORE the --json
+      // check specifically so both output modes are handled here, symmetrically with the
+      // post-filter empty check below).
+      if (docs.length === 0) {
+        if (args.json) {
+          console.log(JSON.stringify({ ok: true, data: { docs: [], total: 0 } }, null, 2));
+        } else {
+          console.log("No pending documents.");
+        }
+        return;
+      }
+
+      // reason: one latestFor call per pending doc — acceptable at CLI scale (same
+      // trade-off as getReviewBundle's per-link find loop, corpus-service.ts).
+      const judgments = new Map<string, ReviewJudgment | null>();
+      for (const doc of docs) {
+        const judgmentResult = await app.judgmentService.latestFor(doc.id);
+        if (!judgmentResult.ok) {
+          process.stderr.write(formatError(judgmentResult.error) + "\n");
+          process.exitCode = exitCode(judgmentResult.error);
+          return;
+        }
+        judgments.set(doc.id, judgmentResult.value);
+      }
+
+      const visibleDocs = args.escalated
+        ? docs.filter((d) => isFreshEscalation(judgments.get(d.id) ?? null, d.version))
+        : docs;
 
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: { docs, total: docs.length } }, null, 2));
+        console.log(
+          JSON.stringify(
+            {
+              ok: true,
+              data: {
+                docs: visibleDocs.map((d) => ({ ...d, judgment: judgments.get(d.id) ?? null })),
+                total: visibleDocs.length,
+              },
+            },
+            null,
+            2,
+          ),
+        );
         return;
       }
 
-      if (docs.length === 0) {
-        console.log("No pending documents.");
+      if (visibleDocs.length === 0) {
+        console.log(args.escalated ? "No escalated documents." : "No pending documents.");
         return;
       }
 
-      const headers = ["ID", "Type", "Title", "Author", "Updated", "Ver"];
-      const rows = docs.map((d) => [
+      const headers = ["ID", "Type", "Title", "Author", "Updated", "Ver", "AI Judgment"];
+      const rows = visibleDocs.map((d) => [
         d.id.slice(0, 10),
         d.type,
         d.title.slice(0, 32),
         d.created_by,
         relativeTime(d.updated_at),
         String(d.version),
+        formatJudgmentBadge(judgments.get(d.id) ?? null, d.version),
       ]);
 
       console.log(formatTable(headers, rows));
-      console.log(`\n${docs.length} pending document${docs.length === 1 ? "" : "s"}`);
+      console.log(`\n${visibleDocs.length} ${args.escalated ? "escalated" : "pending"} document${visibleDocs.length === 1 ? "" : "s"}`);
+
+      if (args.escalated) {
+        for (const doc of visibleDocs) {
+          const judgment = judgments.get(doc.id);
+          if (judgment !== null && judgment !== undefined && judgment.blocking_questions.length > 0) {
+            console.log(`\n${doc.title}:`);
+            for (const question of judgment.blocking_questions) {
+              console.log(`  - ${question}`);
+            }
+          }
+        }
+      }
     } finally {
       app.close();
     }
