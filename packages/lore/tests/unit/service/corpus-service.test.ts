@@ -415,6 +415,77 @@ describe("set", () => {
     if (result.ok) return;
     expect(result.error.code).toBe("DOC_NOT_FOUND");
   });
+
+  // ─── AC-1 (SPEC-032 §3.1): spec_kind cross-cutting validation on the update path ──
+  // reason: docPatchSchema.extra is untyped z.record(z.unknown()) — HTTP/MCP callers
+  // bypass the CLI's client-side --kind self-validation. set() is the single choke
+  // point covering CLI/HTTP/MCP, so this is where the gap must close.
+
+  it("AC-SVC-004.06: set extra.spec_kind to an unknown value on a spec → VALIDATION_ERROR", async () => {
+    const { service } = makeService();
+    const parent = await service.create(prdInput("Spec Kind Parent"));
+    expect(parent.ok).toBe(true);
+    if (!parent.ok) return;
+    const spec = await service.create(specInput(parent.value.id, "Kind Target Spec"));
+    expect(spec.ok).toBe(true);
+    if (!spec.ok) return;
+
+    const result = await service.set(spec.value.slug, { extra: { spec_kind: "bogus" } });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (result.error.code === "VALIDATION_ERROR") {
+      expect(result.error.field).toBe("extra.spec_kind");
+    }
+  });
+
+  it("AC-SVC-004.07: set extra.spec_kind to a valid taxonomy value on a spec → ok", async () => {
+    const { service } = makeService();
+    const parent = await service.create(prdInput("Spec Kind Parent Valid"));
+    expect(parent.ok).toBe(true);
+    if (!parent.ok) return;
+    const spec = await service.create(specInput(parent.value.id, "Kind Target Spec Valid"));
+    expect(spec.ok).toBe(true);
+    if (!spec.ok) return;
+
+    const result = await service.set(spec.value.slug, { extra: { spec_kind: "tech" } });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.extra["spec_kind"]).toBe("tech");
+  });
+
+  it("AC-SVC-004.08: set extra on a spec with spec_kind absent → ok, no default forced", async () => {
+    const { service } = makeService();
+    const parent = await service.create(prdInput("Spec Kind Parent Absent"));
+    expect(parent.ok).toBe(true);
+    if (!parent.ok) return;
+    const spec = await service.create(specInput(parent.value.id, "Kind Target Spec Absent"));
+    expect(spec.ok).toBe(true);
+    if (!spec.ok) return;
+    // create() defaults spec_kind to "feature" when absent (SPEC-032 §3.1) — patch a
+    // different extra key without touching spec_kind, and confirm the create-time
+    // default is preserved (set() must not re-derive or strip it).
+    expect(spec.value.extra["spec_kind"]).toBe("feature");
+
+    const result = await service.set(spec.value.slug, { extra: { some_other_field: "x" } });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.extra["spec_kind"]).toBeUndefined();
+    expect(result.value.extra["some_other_field"]).toBe("x");
+  });
+
+  it("AC-SVC-004.09: set arbitrary extra on a non-spec doc → unaffected by spec_kind validation", async () => {
+    const { service } = makeService();
+    const r = await service.create(prdInput("Non-Spec Extra Doc"));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+
+    const result = await service.set(r.value.slug, { extra: { spec_kind: "bogus", note: "fine" } });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.extra["spec_kind"]).toBe("bogus");
+    expect(result.value.extra["note"]).toBe("fine");
+  });
 });
 
 // ─── delete ──────────────────────────────────────────────────────────────────
