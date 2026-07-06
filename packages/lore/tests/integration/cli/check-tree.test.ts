@@ -1,0 +1,224 @@
+/**
+ * Integration tests for `lore status --check-tree` (SPEC-032 T2) — proves the
+ * repo-root `lore.tree.yaml` blueprint actually arms the check-tree mechanism
+ * end-to-end through the real CLI (subprocess), not just at the service layer.
+ *
+ * Runs the real CLI via subprocess against an isolated temp SQLite DB, mirroring
+ * the pattern in tests/integration/cli/assess.test.ts. The blueprint file used
+ * in each fixture's cwd is a byte-for-byte copy of the actual repo-root
+ * lore.tree.yaml — NOT a hand-rolled stand-in — so a regression in the checked-in
+ * file (e.g. loosening spec's `min: 1` to `min: 0`) would silently break the
+ * HAPPY/BOUNDARY assertions below rather than being caught only by the unit
+ * tests in tree-blueprint-armed.test.ts.
+ *
+ * Six dimensions:
+ *   HAPPY:      conformant fixture corpus → exit 0
+ *   NEGATIVE:   n/a at CLI level (create/link hard-gate parent-type violations
+ *               before they ever reach the store — see AC-2.NEG in
+ *               tree-blueprint-armed.test.ts for the service-level oracle that
+ *               proves misplaced docs ARE caught once they exist)
+ *   BOUNDARY:   prd with zero specs (min:1 unmet) → `missing` drift, exit 3
+ *   ERROR:      lore.tree.yaml absent from cwd → exit 4, no crash
+ *   STATE:      --json envelope shape matches TreeReport (consistent + drifts[])
+ *   REGRESSION: --check-tree on a corpus that's ALREADY conformant twice in a
+ *               row still exits 0 (check-only path has no side effects)
+ *
+ * @spec_ref AC-2 (SPEC-032 T2)
+ */
+
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { spawnSync } from "child_process";
+import { mkdirSync, rmSync, copyFileSync, existsSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
+import { fileURLToPath } from "url";
+
+// ─── Path setup ───────────────────────────────────────────────────────────────
+
+const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
+const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
+const REPO_ROOT = join(
+  fileURLToPath(new URL(".", import.meta.url)),
+  "..",
+  "..",
+  "..",
+  "..",
+  "..",
+);
+const REPO_BLUEPRINT_PATH = join(REPO_ROOT, "lore.tree.yaml");
+
+// ─── RunResult type ───────────────────────────────────────────────────────────
+
+interface RunResult {
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly exitCode: number;
+}
+
+/**
+ * Spawn `bun run <INDEX_TS> ...args` in `cwd` with an isolated HOME dir.
+ * MOCK RISK: none — spawns the real CLI. `CLAUDECODE=1` puts the surface into
+ * "agent" mode (AI default off) so fixture creation via `lore create` never
+ * triggers an AI call; `status --check-tree` itself is not AI-intent.
+ */
+function runLore(args: string[], cwd: string): RunResult {
+  const result = spawnSync("bun", ["run", INDEX_TS, ...args], {
+    cwd,
+    env: {
+      ...process.env,
+      HOME: cwd,
+      EDITOR: "true",
+      CLAUDECODE: "1",
+    },
+    encoding: "utf8",
+  });
+  return {
+    stdout: result.stdout ?? "",
+    stderr: result.stderr ?? "",
+    exitCode: result.status ?? 1,
+  };
+}
+
+// ─── Fixture helpers ──────────────────────────────────────────────────────────
+
+let tmpDir: string;
+
+beforeEach(() => {
+  tmpDir = join(tmpdir(), `lore-check-tree-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  mkdirSync(tmpDir, { recursive: true });
+
+  const init = runLore(["init"], tmpDir);
+  if (init.exitCode !== 0) {
+    throw new Error(`lore init failed: ${init.stderr}`);
+  }
+});
+
+afterEach(() => {
+  try {
+    rmSync(tmpDir, { recursive: true, force: true });
+  } catch {
+    /* ignore cleanup errors */
+  }
+});
+
+/** Copy the ACTUAL repo-root lore.tree.yaml into the fixture's cwd. */
+function armBlueprint(): void {
+  expect(existsSync(REPO_BLUEPRINT_PATH)).toBe(true);
+  copyFileSync(REPO_BLUEPRINT_PATH, join(tmpDir, "lore.tree.yaml"));
+}
+
+function createDoc(type: string, extraArgs: string[]): string {
+  const r = runLore(
+    ["create", type, "--title", `${type} fixture`, "--no-ai", "--content", "body", ...extraArgs],
+    tmpDir,
+  );
+  if (r.exitCode !== 0) throw new Error(`create ${type} failed: ${r.stderr}`);
+  const m = r.stdout.match(/Slug:\s+(\S+)/);
+  const slug = m?.[1];
+  if (!slug) throw new Error(`Could not extract ${type} slug from: ${r.stdout}`);
+  return slug;
+}
+
+/** Build a minimally-conformant corpus: prd -> spec (satisfies the spec min:1 slot). */
+function buildConformantCorpus(): { prd: string; spec: string } {
+  const prd = createDoc("prd", []);
+  const spec = createDoc("spec", ["--parent", prd, "--kind", "feature"]);
+  return { prd, spec };
+}
+
+// ─── HAPPY ──────────────────────────────────────────────────────────────────
+
+describe("lore status --check-tree — HAPPY", () => {
+  it("AC-2.CLI.H1: minimal conformant corpus (prd + one spec) exits 0", () => {
+    armBlueprint();
+    buildConformantCorpus();
+
+    const result = runLore(["status", "--check-tree"], tmpDir);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("consistent");
+  });
+
+  it("AC-2.CLI.H2: deeply-nested conformant corpus (prd/spec/plan/task/knowledge/adr) exits 0 — different shape than H1 (defeats a hardcoded exit(0))", () => {
+    armBlueprint();
+    const { spec } = buildConformantCorpus();
+    const plan = createDoc("plan", ["--parent", spec]);
+    createDoc("task", ["--parent", plan, "--plan-id", plan]);
+    createDoc("knowledge", ["--parent", plan, "--sub-type", "retro"]);
+    const adr = createDoc("adr", ["--parent", spec, "--decision-status", "accepted"]);
+    createDoc("knowledge", ["--parent", adr, "--sub-type", "reference"]);
+
+    const result = runLore(["status", "--check-tree"], tmpDir);
+    expect(result.exitCode).toBe(0);
+  });
+});
+
+// ─── BOUNDARY (missing) ─────────────────────────────────────────────────────
+
+describe("lore status --check-tree — BOUNDARY (missing)", () => {
+  it("AC-2.CLI.B1: prd with ZERO specs → non-zero exit, `missing` drift reported", () => {
+    armBlueprint();
+    createDoc("prd", []); // no spec created — spec's min:1 slot is unmet
+
+    const result = runLore(["status", "--check-tree"], tmpDir);
+    expect(result.exitCode).toBe(3);
+    expect(result.stdout).toContain("missing");
+  });
+
+  it("AC-2.CLI.B2: --json envelope on the missing-spec corpus reports drifts[0].kind === 'missing' and type 'spec'", () => {
+    armBlueprint();
+    createDoc("prd", []);
+
+    const result = runLore(["status", "--check-tree", "--json"], tmpDir);
+    expect(result.exitCode).toBe(3);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.data.consistent).toBe(false);
+    const missing = parsed.data.drifts.filter((d: { kind: string }) => d.kind === "missing");
+    expect(missing.length).toBeGreaterThanOrEqual(1);
+    expect(missing[0].expected.type).toBe("spec");
+    expect(missing[0].expected.min).toBe(1);
+  });
+});
+
+// ─── ERROR ───────────────────────────────────────────────────────────────────
+
+describe("lore status --check-tree — ERROR (blueprint absent)", () => {
+  it("AC-2.CLI.E1: no lore.tree.yaml in cwd → exit 4, no crash", () => {
+    // Deliberately do NOT call armBlueprint().
+    createDoc("prd", []);
+
+    const result = runLore(["status", "--check-tree"], tmpDir);
+    expect(result.exitCode).toBe(4);
+    expect(result.stderr).toContain("lore.tree.yaml");
+  });
+});
+
+// ─── STATE ───────────────────────────────────────────────────────────────────
+
+describe("lore status --check-tree — STATE (--json shape)", () => {
+  it("AC-2.CLI.S1: --json on a consistent corpus reports { consistent: true, drifts: [] }", () => {
+    armBlueprint();
+    buildConformantCorpus();
+
+    const result = runLore(["status", "--check-tree", "--json"], tmpDir);
+    expect(result.exitCode).toBe(0);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.data.consistent).toBe(true);
+    expect(parsed.data.drifts).toEqual([]);
+  });
+});
+
+// ─── REGRESSION ─────────────────────────────────────────────────────────────
+
+describe("lore status --check-tree — REGRESSION (check-only has no side effects)", () => {
+  it("AC-2.CLI.R1: running --check-tree twice in a row on a conformant corpus exits 0 both times", () => {
+    armBlueprint();
+    buildConformantCorpus();
+
+    const first = runLore(["status", "--check-tree"], tmpDir);
+    const second = runLore(["status", "--check-tree"], tmpDir);
+    expect(first.exitCode).toBe(0);
+    expect(second.exitCode).toBe(0);
+  });
+});
