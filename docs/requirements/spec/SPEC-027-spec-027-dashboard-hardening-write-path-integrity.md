@@ -50,3 +50,10 @@ The SPEC-022 write surface shipped with three latent defects and a structural te
 - Cookie auth + If-Match optimistic concurrency are the SPEC-022 contract; new write routes follow the same `assertCookieActor` + telemetry (`source: "dashboard"`) pattern in `dashboard-routes.ts`.
 - Two test runners: component tests are vitest (`*.test.tsx`); nothing here may import `bun:sqlite` into vitest-reachable modules.
 - All fixes preserve fail-loud error handling (no silent fallback).
+
+
+## 5. Round-2 hardening ACs (from assessment KN-008 recommendations, 2026-07-03)
+
+- **AC-DH-11** The dashboard restore route requires an explicit `confirm=true` gate (mirroring delete). Restoring a version that does not exist returns a documented, tested error contract (VALIDATION_ERROR vs NOT_FOUND explicitly chosen and asserted) — never an ambiguous 500.
+- **AC-DH-12** A server-side regression test asserts that `DELETE /api/dashboard/docs/:id` WITHOUT `confirm=true` is rejected (defense-in-depth: UI confirmation dialog is not the only gate).
+- **AC-DH-13** `cors.bun.test.ts` locks the disallowed-origin behavior with explicit negative assertions: response carries NO `Access-Control-Allow-Origin` header at all (not `*`, not the origin) for non-allowlisted origins, on both read and write surfaces.

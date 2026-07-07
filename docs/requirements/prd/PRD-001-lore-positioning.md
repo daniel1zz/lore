@@ -5,40 +5,10 @@ role: intent
 title: "Lore — Internal-First AI Team Knowledge Platform"
 status: approved
 priority: critical
-version: "0.5"
 created: 2026-06-07
-updated: 2026-07-03
+updated: 2026-07-06
 tags: [product-overview, L0, lore, mvp, internal-first, ai-native, protocol-aware]
-audience: [founding-team, ai-agents]
-children:
-  - SPEC-001-service-layer
-  - SPEC-002-corpus-schema
-  - SPEC-003-cli-adapter
-  - SPEC-004-prd-as-living-root
-  - SPEC-005-review-workflow
-  - SPEC-006-version-history
-  - SPEC-007-migration-v1
-related:
-  - {id: IDEATION-001, type: informs}
-derived_from:
-  - DocMan v1 ARCH-01KPZ6GG4N4AXRHX9WKE6DVP6P
-  - DocMan v1 PRD-01KJ2MTE53XHNSPJY1W43YMRZQ
-  - IDEATION-001-v2-positioning-synthesis
-changelog:
-  - version: 0.4
-    date: 2026-06-08
-    summary: "Restructured to outline-level. Detail extracted into 7 child feature specs (SPEC-001 through SPEC-007). PRD is now the tree root; specs are leaves."
-  - version: 0.3
-    date: 2026-06-08
-    summary: "Phase 1 is CLI-only. MCP/HTTP/TUI are later adapters on service layer."
-  - version: 0.2
-    date: 2026-06-07
-    summary: "Phase 2 stakeholder review synthesis. 3-phase delivery, security architecture, protocol-aware constraints."
-  - version: 0.1
-    date: 2026-06-07
-    summary: "Initial draft from Phase 1 ideation synthesis."
 ---
-
 # Lore — Internal-First AI Team Knowledge Platform
 
 ## 1. Executive Summary
@@ -76,6 +46,7 @@ Lore is an AI-native shared knowledge / memory platform for AI-first founding te
 | G6 | HTTP API adapter | P2 |
 | G7 | Internal adoption: 3+ projects, 90%+ new docs in Lore | P2 |
 | G8 | Output contract live: `lore status --check-tree` reports 0 drift on this repo AND every closed plan since v0.5 carries all six stage outputs (§13.2) | P2+, checked at each plan closeout |
+| G9 | Autonomous feedback loop live (§14): R1 — every lifecycle transition audit-traced + ≥1 doc type at `assist`; R2 (data-gated) — human review load ↓≥70%, ≥1 doc type at `auto` on Wilson-bounded agreement data | P2+, R1 committed, R2/R3 contingent (§14.6) |
 
 ### Non-Goals (v1.0)
 
@@ -118,9 +89,85 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
-<ChildrenOf />
+- [knowledge] DocMan replacement assessment — Lore coverage map + two remaining gaps (draft)
+- [spec] SPEC-033 — Dashboard as living-PRD projection + human adjudication surface (approved)
+- [knowledge] Assess material-budget distortion on multi-task plan diffs (draft)
+- [spec] SPEC-035 — Audit trail + calibration data (approved)
+- [spec] SPEC-032 — Output-contract mechanization (spec_kind + tree blueprint + text-projection splice) (approved)
+- [spec] SPEC-034 — Structured review judgment + triage queue (approved)
+- [knowledge] Lore as sole dev context — output contract + spec_kind taxonomy + dashboard-as-PRD-projection (draft)
+- [spec] SPEC-031 — Dashboard read-path contract fixes + markdown typography (approved)
+- [spec] SPEC-030 — Hermetic judge sessions + fail-loud AI config (approved)
+- [spec] SPEC-029 — Assess reliability: reasoning-length resilience + surface-correct error hints (approved)
+- [spec] SPEC-028 — Assess input transparency: pre-flight diff budgeting + file-boundary truncation (approved)
+- [spec] SPEC-027 — Dashboard hardening: write-path integrity, delete/restore, component test coverage (approved)
+- [spec] lore assess — AI plan-outcome assessment (LLM-as-judge feedback loop) (approved)
+- [spec] Task execution workflow metadata (evidence / claim / ready) (approved)
+- [spec] Dashboard write UI (create / edit / approve / link) (approved)
+- [spec] HTTP API Adapter (approved)
+- [spec] Service Layer Architecture (approved)
+- [spec] Version History (approved)
+- [spec] PRD-as-Living-Root (approved)
+- [spec] Review Workflow (approved)
+- [spec] Auth & Agent Credentials (approved)
+- [spec] Migration v1 (approved)
+- [spec] Corpus Schema (approved)
+- [spec] MCP Server Adapter (approved)
+- [spec] lore export-docs — reverse sync from corpus to spec files (approved)
+- [spec] AI assistance in lore set and lore link (approved)
+- [spec] HTTP-backed AI provider (alongside claude-cli) (approved)
+- [spec] Default --no-ai for agent and MCP execution paths (approved)
+- [spec] plan.phases as a first-class grouping layer (approved)
+- [plan] CLI v3 Roadmap — State Alignment + New Surface (archived)
+- [spec] CLI Adapter (approved)
+- [spec] lore sync-docs — backfill new spec files into corpus (approved)
+- [spec] Built-in AI provider for lore create (approved)
+- [spec] Cookie Auth — CLI-managed local bootstrap (approved)
+- [spec] Dashboard — Read-only Skeleton (approved)
+- [spec] Monorepo Skeleton (Bun workspaces, P1 layout) (approved)
+- [spec] Eval Framework (active)
+- [spec] Telemetry Module (active)
+- [spec] Sync Engine (Turso) (approved)
 
-Text readers: run `lore tree <this-prd>` — the tree command splices the live children — or use the dashboard tree view. **Known limitation (accepted at v0.5, closed by SPEC-032)**: `OutlineService.resolve()` returns the placeholder data as a separate `resolvedComponents` array and leaves `content` verbatim (it does not splice rendered text back into the body). So every plain-text projection — `lore get --resolve-mdx` stdout AND the SPEC-021 `export-docs` `.md` snapshot — shows the raw `<ChildrenOf />` tag; only structured consumers (the dashboard) render it inline. SPEC-032 makes text projections splice placeholders so §5 reads as a tree everywhere.
+Text readers: run `lore tree <this-prd>` — the tree command splices the live children — or use the dashboard tree view. **Known limitation (accepted at v0.5, closed by SPEC-032)**: `OutlineService.resolve()` returns the placeholder data as a separate `resolvedComponents` array and leaves `content` verbatim (it does not splice rendered text back into the body). So every plain-text projection — `lore get --resolve-mdx` stdout AND the SPEC-021 `export-docs` `.md` snapshot — shows the raw `- [knowledge] DocMan replacement assessment — Lore coverage map + two remaining gaps (draft)
+- [spec] SPEC-033 — Dashboard as living-PRD projection + human adjudication surface (approved)
+- [knowledge] Assess material-budget distortion on multi-task plan diffs (draft)
+- [spec] SPEC-035 — Audit trail + calibration data (approved)
+- [spec] SPEC-032 — Output-contract mechanization (spec_kind + tree blueprint + text-projection splice) (approved)
+- [spec] SPEC-034 — Structured review judgment + triage queue (approved)
+- [knowledge] Lore as sole dev context — output contract + spec_kind taxonomy + dashboard-as-PRD-projection (draft)
+- [spec] SPEC-031 — Dashboard read-path contract fixes + markdown typography (approved)
+- [spec] SPEC-030 — Hermetic judge sessions + fail-loud AI config (approved)
+- [spec] SPEC-029 — Assess reliability: reasoning-length resilience + surface-correct error hints (approved)
+- [spec] SPEC-028 — Assess input transparency: pre-flight diff budgeting + file-boundary truncation (approved)
+- [spec] SPEC-027 — Dashboard hardening: write-path integrity, delete/restore, component test coverage (approved)
+- [spec] lore assess — AI plan-outcome assessment (LLM-as-judge feedback loop) (approved)
+- [spec] Task execution workflow metadata (evidence / claim / ready) (approved)
+- [spec] Dashboard write UI (create / edit / approve / link) (approved)
+- [spec] HTTP API Adapter (approved)
+- [spec] Service Layer Architecture (approved)
+- [spec] Version History (approved)
+- [spec] PRD-as-Living-Root (approved)
+- [spec] Review Workflow (approved)
+- [spec] Auth & Agent Credentials (approved)
+- [spec] Migration v1 (approved)
+- [spec] Corpus Schema (approved)
+- [spec] MCP Server Adapter (approved)
+- [spec] lore export-docs — reverse sync from corpus to spec files (approved)
+- [spec] AI assistance in lore set and lore link (approved)
+- [spec] HTTP-backed AI provider (alongside claude-cli) (approved)
+- [spec] Default --no-ai for agent and MCP execution paths (approved)
+- [spec] plan.phases as a first-class grouping layer (approved)
+- [plan] CLI v3 Roadmap — State Alignment + New Surface (archived)
+- [spec] CLI Adapter (approved)
+- [spec] lore sync-docs — backfill new spec files into corpus (approved)
+- [spec] Built-in AI provider for lore create (approved)
+- [spec] Cookie Auth — CLI-managed local bootstrap (approved)
+- [spec] Dashboard — Read-only Skeleton (approved)
+- [spec] Monorepo Skeleton (Bun workspaces, P1 layout) (approved)
+- [spec] Eval Framework (active)
+- [spec] Telemetry Module (active)
+- [spec] Sync Engine (Turso) (approved)` tag; only structured consumers (the dashboard) render it inline. SPEC-032 makes text projections splice placeholders so §5 reads as a tree everywhere.
 
 ## 6. Phased Delivery
 
@@ -178,6 +225,7 @@ Gated on Phase 2 metrics.
 | NFR-12 | Architecture | Service layer = single source of business logic. Adapters are thin. Protocol-ready interchange format. `src/service/`, `src/store/`, `src/adapters/{cli,mcp,http}/` |
 | NFR-13 | Backup (P2) | Turso managed backups. Soft-delete 30-day window. No permanent delete without human confirm |
 | NFR-14 | Rate limit (P2) | 60 writes/min per agent. Alert at 100/5min |
+| NFR-15 | AI judge calls (§14) | Per-doc prompt bounded by `ai.review.*` char budgets (SPEC-026 `ai.assess.*` precedent). Batch review = ≤N judge calls for N docs, no hidden fan-out. Judge call count + duration recorded in telemetry — cost is visible before it is optimized |
 
 ### Security (cross-cutting)
 
@@ -199,7 +247,7 @@ Gated on Phase 2 metrics.
 | Duplicate-decision docs | 0/month | Audit log |
 | Voluntary side-project use | ≥ 1 teammate | Self-report |
 
-**Kill criteria**: See §6 per-phase gates. Global: if Anthropic/Cursor ships multi-vendor shared memory → decision gate ADR. **Output-contract theater check**: if the contract is bypassed (`--force`, self-approval without review, or a stage skipped) in >30% of plans over any 4-week window → the gates add friction without compliance; trigger a decision-gate ADR to simplify or drop them.
+**Kill criteria**: See §6 per-phase gates. Global: if Anthropic/Cursor ships multi-vendor shared memory → decision gate ADR. **Output-contract theater check**: if the contract is bypassed (`--force`, self-approval without review, or a stage skipped) in >30% of plans over any 4-week window → the gates add friction without compliance; trigger a decision-gate ADR to simplify or drop them. **Feedback-loop calibration check (§14.5)**: 8 weeks of shadow with weekly judgment volume <10 or an unreachable Wilson bound → freeze at `assist`, decision-gate ADR, SPEC-036+ not built.
 
 ## 9. Risks
 
@@ -223,6 +271,7 @@ Gated on Phase 2 metrics.
 | A3 | PRD-as-living-root scales to 500 docs | M | P1 mockup with real v1 data |
 | A4 | Bun + libSQL/Turso stack works | H | M1 tech spike |
 | A5 | 3-phase delivery achievable solo + AI | M | Phase gates at M3 and M6 |
+| A6 | Weekly lifecycle-decision volume during active development is high enough (≥10/week) to calibrate §14 unlock gates in useful time | M | Measured in R1 shadow mode; §8 feedback-loop kill criterion is the guard |
 
 ## 11. Competitive Landscape (stub)
 
@@ -259,7 +308,7 @@ Cardinality: one required output doc per stage instance; multi-spec efforts repe
 
 1. **Create-time hard gate — LIVE**: `PARENT_TYPE_CONTRACT` (`@lore/core` doc-type-rules) already rejects illegal parent types at create/link time. Escape hatch: `knowledge` mounts anywhere — ad-hoc notes are never blocked.
 2. **Check-time soft gate — shipped, unarmed**: `lore status --check-tree` exists but the repo has no `lore.tree.yaml` blueprint yet. SPEC-032 authors the blueprint and arms the check.
-3. **Process convention (NOT a hard gate)**: a stage is complete iff its doc reaches `approved`. Anti-rubber-stamp rule: for design/tech specs the approver SHOULD differ from the author (agent-authored → human-approved). Candidate hardening (SPEC-032): `lore ready` warns when a plan's parent spec is not approved.
+3. **Process convention (NOT a hard gate)**: a stage is complete iff its doc reaches `approved`. Anti-rubber-stamp rule: for design/tech specs the approver SHOULD differ from the author (agent-authored → human-approved). Candidate hardening (SPEC-032): `lore ready` warns when a plan's parent spec is not approved. **§14 mechanizes this layer**: approver≠author becomes a hard invariant (I1), and the approve decision itself becomes AI-triaged with confidence-gated escalation.
 
 Remaining SPEC-032 scope: `lore.tree.yaml` authoring, `spec_kind` Zod enum + `migrate spec-kind` audit, text-projection placeholder splicing (both `lore get --resolve-mdx` stdout and `export-docs` `.md` — `OutlineService.resolve()` today emits `resolvedComponents` data but leaves `content` verbatim), ready-warning, CLAUDE.md duplication lint. SPEC-033 scope: dashboard home replaced by the resolved-PRD projection (today's home is an unrelated hardcoded doc-list — a page rewrite, not a tweak).
 
@@ -273,12 +322,99 @@ Remaining SPEC-032 scope: `lore.tree.yaml` authoring, `spec_kind` Zod enum + `mi
 
 Dashboard home = resolveMdx-rendered living PRD (SPEC-004 machinery: ChildrenOf / RecentDecisions / ActivePlans / HealthStats) + pending-review and ready-task panels. Product current shape = the resolved PRD; iteration history = version log + assessment timeline; decisions = RecentDecisions + adr filter. Full page rewrite specified in SPEC-033.
 
+## 14. Autonomous Feedback Loop (AI review, data-driven self-optimization)
+
+**Vision (owner, 2026-07-06)**: Lore closes its own quality loop. AI reviews every lifecycle decision with structured, data-backed feedback; humans are pulled in only when the AI cannot decide; every automated decision is log-traceable; the accumulated decision data drives self-optimization. End state: Lore is not just self-hosting (it already manages its own corpus) but self-running, self-feedback, self-optimizing.
+
+**Today's gap (measured 2026-07-06)**: the loop exists as disconnected parts. `lore pending` holds 12 docs, 100% awaiting manual approval regardless of how confident an AI reviewer would be; SPEC-026 assessments carry structured `gaps`/`recommendations` that no downstream consumer reads; SPEC-025 evidence and SPEC-012 telemetry record locally but aggregate nowhere; approve/reject reasons are free text — feedback is not comparable across time, so nothing can learn from it.
+
+### 14.1 Capability domains
+
+| ID | Domain | What it delivers |
+|---|---|---|
+| D1 | Structured review judgment | AI reviewer emits a Zod-typed `ReviewJudgment` per pending doc — never free text |
+| D2 | Confidence-gated triage | Judgment either auto-executes (whitelisted type, above threshold, in `auto` stage) or escalates to a human with structured blocking questions |
+| D3 | Audit trail | Every lifecycle transition (automated or human) emits an append-only `AuditEvent`; `lore audit <doc>` answers "who decided what, on which input, on what basis" |
+| D4 | Calibration data | Human confirm/override of AI judgments accumulates as labeled `CalibrationRecord`s; aggregated into per-doc-type × per-prompt-version agreement rates |
+| D5 | Self-optimization | L1: assessment `recommendations` feed forward into subsequent spec/plan generation context. L2: judge-prompt versions iterate, evaluated offline against calibration data. L3: thresholds/sampling rates self-tune within hard bounds |
+| D6 | Escalation surfaces | CLI triage queue (`lore pending` upgraded), dashboard panel (extends SPEC-033), push notification on escalation events |
+
+### 14.2 Data entities (Zod SSOT, all append-only)
+
+- **ReviewJudgment** — `{decision: approve|reject|escalate, confidence: 0-1, reasons[]: {dimension, finding, evidence_ref}, checks[]: deterministic pre-checks run (schema validity, check-tree, link integrity, evidence completeness), judge: {provider, model, prompt_version}}`. Judge identity is the exact `{provider, model, prompt_version}` tuple — this tuple is what I1 compares. An `escalate` decision MUST carry `blocking_questions[]` — the exact points the AI could not resolve become the human queue's display content. Deterministic checks run BEFORE the LLM: a doc failing schema/tree checks is rejected without burning a judge call (the `check-tree` pre-check depends on SPEC-032 arming the blueprint — declared dependency).
+- **AuditEvent** — `{actor: human id | ai judge identity, action, doc_id, doc_version, judgment_ref?, timestamp}` for every status transition. This is a NEW queryable surface (`lore audit <doc>` / `lore audit --verify`) — SPEC-012 telemetry is a write-only JSONL sink with no read path; storage may reuse that sink (NFR-7: audit separate from corpus storage) but the query surface is net-new build, not an extension. Completeness is an oracle: zero transitions without a matching event.
+- **CalibrationRecord** — `{judgment_ref, human_outcome: confirmed|overridden, delta_reasons[]}`. Written whenever a human acts on (or samples) an AI judgment. The aggregation over these records — agreement rate per doc type per prompt version — is the single data source for stage unlocks (14.3), circuit breakers, and L2 prompt selection. No unlock decision may cite AI self-reported confidence alone.
+
+**Ground-truth caveat (acknowledged, not solved)**: with a single human owner, "agreement" measures consistency with one person's decisions, not objective doc quality. For an internal tool this is definitionally acceptable — the owner's judgment IS the approval standard being automated — but it means agreement data cannot detect owner-correlated blind spots. Mitigations: I2 stratified sampling, L1 provenance tagging (14.6), and the §8 kill criterion. When the team grows past one reviewer, per-reviewer calibration becomes the upgrade path.
+
+**Trigger model (no daemon)**: judgments are computed on demand — `lore review <doc>` (single) and `lore review --pending` (batch) CLI/MCP verbs; optionally invoked by the create/set flows behind config. Consistent with SPEC-025's read-side-computation ethos: no background process, no heartbeat. Judge-call cost is bounded by SPEC-026-style char budgets; a batch run over N pending docs makes at most N judge calls, deterministic-check failures short-circuit for free.
+
+**Storage & testability**: Zod schemas live in `@lore/core`; judgments/calibration records persist in dedicated store tables (not doc `extra` — they are cross-doc data, §13.4 SSOT); 14.3 thresholds live in `LoreConfigSchema` following the `workflow.claim_ttl_minutes` precedent. The store MUST expose a seeding path for synthetic CalibrationRecords so 14.3 state transitions and circuit breakers are CI-testable without accumulating real judgments. Rolling-agreement aggregation reads a bounded, indexed window (last 50 records per type) — O(window) per recompute, never a full-table scan; NFR-2's query budget applies to it.
+
+### 14.3 Staged unlock state machine (per doc type, data-gated)
+
+Every doc type starts in **shadow** and advances only on measured data; ambition is capped by evidence, not by policy:
+
+| Stage | Behavior | Entry condition |
+|---|---|---|
+| shadow | AI judges every pending doc, judgment recorded + shown as advisory; human still decides everything (no load reduction — this stage buys calibration data, not time) | Day 1, all types |
+| assist | Human queue is triaged: AI-confident items pre-sorted with one-keystroke confirm; escalations flagged with blocking questions. Partial load reduction | ≥20 calibration records for the type |
+| auto | AI executes approve/reject itself above the confidence threshold; below threshold → escalate. Human sampling floor stays active. This stage delivers the ↓70% target | Wilson-score lower bound of rolling agreement ≥0.90 at n≥50 for the type (raw "95% over 50" has a confidence interval too wide to distinguish signal from noise — the gate is the interval bound, not the point estimate) |
+
+- Expected (not mandated) unlock order: knowledge → task → plan → spec/PRD — low blast radius accumulates data fastest. The data, not the roadmap, decides.
+- **Blast-radius-scaled strictness**: the `auto` bound is per-type config; defaults 0.90 for knowledge/task, 0.95 for plan/spec/PRD. High-stakes types demand tighter evidence, not just more of it.
+- **Honest expectation**: at this team's volume, spec/PRD types may never reach `auto` — that outcome is acceptable, not a failure. `assist`-level triage (pre-sorted queue, blocking questions) already delivers the owner's core ask for those types; G9-R2 is satisfiable by any type reaching `auto`, and unlocking only low-stakes types is the expected, honest reading.
+- **Rolling window**: agreement is computed over the most recent 50 judgments per type (config), recomputed on every new CalibrationRecord.
+- **Circuit breaker**: the Wilson lower bound drops below the unlock threshold → the type reverts to shadow automatically + push notification. Re-entry requires re-satisfying the full entry condition on NEW post-reversion data (no flapping: one reversion costs the type its accumulated streak).
+- All thresholds (bound, window sizes, sampling floor) live in config with the defaults above; L3 may tune them only within §14.4 bounds.
+
+### 14.4 Non-negotiable invariants
+
+| ID | Invariant | Rationale |
+|---|---|---|
+| I1 | Approver ≠ author, mechanized: the judge tuple `{provider, model, prompt_version}` that authored a doc cannot auto-approve it; reviews use an independent judge prompt (substrate: SPEC-030 hermetic judge sessions — LIVE). **Honest limit**: this is process independence, not statistical independence — same-model judges share correlated blind spots. Cross-provider judging is a config option, and the residual correlated-error risk is exactly what I2 sampling exists to catch | Blocks the AI-writes → AI-approves → feeds-AI self-reinforcement loop, to the extent prompt-lineage separation can |
+| I2 | Human sampling floor: even fully unlocked types route ≥10% of auto-decisions to human spot-check, **stratified** per doc type × judge prompt_version (flat random sampling has weak power against clustered failures, e.g. one bad L2 prompt iteration degrading one type); sampling is seeded/deterministic in tests. L3 may raise but never lower the floor, never to zero | LLM error rate is irreducible; unsampled automation lets errors compound silently |
+| I3 | Every automated decision is reversible: version history stays append-only; `lore audit` links decision → judgment → doc version for one-command rollback | Automation without cheap reversal is a ratchet |
+| I4 | AI-generated improvements are draft-first AND provenance-tagged: L1/L2 outputs (injected context, new prompt versions) never mutate approved docs directly; every L1 recommendation injected into a generation context carries its source `judgment_ref` so later audits can trace — and discount — self-reinforced context | Self-optimization must not pollute the SSOT it optimizes, visibly or invisibly |
+| I5 | Escalation is fail-loud default: any judgment outside whitelist/threshold/stage escalates; no silent fallback to auto | Extends D-007 fail-loud philosophy to decisions |
+
+### 14.5 Success metrics
+
+R1 exit (oracle-checkable in CI + corpus):
+
+| Metric | Baseline (2026-07-06) | Target | Measurement |
+|---|---|---|---|
+| Audit completeness | 0 (no audit surface) | 100% of transitions have an AuditEvent | `lore audit --verify` oracle |
+| Judgment coverage | 0 | 100% of pending docs carry a ReviewJudgment when reviewed | CLI queue render |
+| Calibration volume | 0 | ≥20 records on ≥2 doc types | store count |
+
+R2 exit (requires weeks of real usage — measured, not CI-asserted):
+
+| Metric | Baseline (2026-07-06) | Target | Measurement |
+|---|---|---|---|
+| Human review decisions/week | 100% of transitions manual (12-doc queue, 2+ day dwell) | ↓≥70% (denominator: measured R1 weekly decision volume, recorded before R2 starts) | AuditEvent aggregation |
+| Escalation precision | n/a (no triage) | ≥80% of escalated items genuinely needed the human (owner-relative by construction — it measures "AI escalates trivia" annoyance, not objective necessity) | CalibrationRecord on escalations |
+| Agreement (unlocked types) | n/a | Wilson lower bound ≥0.90 rolling | CalibrationRecord aggregation |
+| Median time to detect+rollback a wrong auto-decision | n/a | ≤7 days (I2 sampling + a weekly `lore audit` digest bound the detection window) | AuditEvent timestamps |
+
+**Kill criterion (§8 addition)**: if after 8 weeks of shadow mode any of — weekly judgment volume <10, or agreement so noisy the Wilson bound cannot reach 0.90 at any achievable n — then freeze the loop at `assist` permanently and record a decision-gate ADR; the calibration machinery (SPEC-036+) is not built.
+
+### 14.6 Delivery stages & spec split
+
+- **R1 — close the loop (shadow/assist)**: D1 judgment schema + on-demand review verbs, D3 audit events on every transition, D6 CLI triage queue, D4 records start accumulating. Shadow itself reduces no load (human still decides everything); the first relief arrives when types reach `assist` (pre-sorted queue, one-keystroke confirm).
+- **R2 — unlock self-decision** (contingent on R1 data volume passing the kill criterion): 14.3 state machine live; types unlock on data. D5-L1 feed-forward: assessment `recommendations` are injected at the AI-template context-assembly point (`AIProviderService` template render, the same seam SPEC-026 uses) when generating a child spec/plan under the assessed plan's lineage — each injected item provenance-tagged per I4. Dashboard panel (after SPEC-033) + push channel: a configurable exec hook (`notify.command` in config — shell command receiving the escalation event as JSON on stdin; no vendor-specific channel).
+- **R3 — self-optimization** (contingent on R2 exit metrics): D5-L2 prompt iteration (offline eval against calibration data, winner promoted), D5-L3 bounded threshold self-tuning.
+- **Stage-gate reviews are self-hosted**: each R-stage exit review runs through `lore assess` (SPEC-026) against this section's metrics and persists as an assessment doc under the stage's plan — the loop's own gates leave the same evidence trail the loop enforces on everything else. No stage may be declared passed from memory or chat; the assessment doc is the gate record.
+
+Committed landing specs (R1 only): **SPEC-034** structured review judgment + triage queue (D1, D2-triage, D6-CLI); **SPEC-035** audit trail + calibration data (D3, D4). Contingent (named for traceability, NOT committed — each requires a decision-gate ADR citing R1/R2 data before creation): SPEC-036 unlock state machine + auto-execution; SPEC-037 L1 feed-forward; SPEC-038 L2/L3 self-optimization. This staging exists because §9-R1 (second-system syndrome) applies to §14 itself — a 5-spec autonomous-review platform built ahead of its data is the failure §14 is designed to prevent. Declared dependencies: SPEC-034's check-tree pre-check needs SPEC-032 (blueprint arming); the dashboard escalation panel needs SPEC-033. Benchmark patterns to validate at design time: confidence-triaged AI code review (CodeRabbit / GitHub Copilot review), LLM-observability data models (Langfuse / LangSmith traces + scores + prompt versions), active-learning sampling loops (Label Studio-class systems).
+
 ## 12. Out of Scope
 
 - v2.1+: Agent-memory protocol RFC (extracted from v1.0 architecture)
 - v2.2+: Enterprise features (SSO, RBAC, audit retention)
 - v2.x: Field-level conflict resolution
 - v3.0: Real-time CRDT collab, mobile, vector search
+- §14 explicit exclusions: code-diff review (owner decision 2026-07-06 — the loop's object is corpus document lifecycle, not git diffs); external workflow-orchestration engines (the loop is built on Lore's own service layer + config, no new runtime dependency); removing the human from the loop entirely (I2 sampling floor is permanent at every autonomy level)
 
 ---
 
@@ -288,4 +424,43 @@ Dashboard home = resolveMdx-rendered living PRD (SPEC-004 machinery: ChildrenOf 
 - **Phase 2 review**: 6-role stakeholder review (2 APPROVE_WITH_CONDITIONS / 4 REQUEST_CHANGES). All conditions addressed in v0.2-0.3.
 - **Owner decisions**: A1 skip external validation; protocol-aware app; 3-phase delivery; Web UI → SHOULD; P1 CLI-only; service layer abstraction.
 - **v0.4**: PRD restructured to outline-level. Detail lives in 7 child feature specs.
-- **v0.5** (2026-07-03): Sole-context positioning (§1) + output contract & document taxonomy (§13: spec_kind feature/tech/design, stage→output→gate table, 3 enforcement layers, SSOT boundary, dashboard-as-PRD-projection) + G8 + §6/§8 governance hooks + §5 module map converted to live `<ChildrenOf />`. Owner-approved: taxonomy option C (spec_kind field, not a new first-class type); full-chain launch. 5-stakeholder review applied — enforcement-layer status corrected to as-built (Layers 1-2 already implemented in `@lore/core`), spec-under-spec mount rejected (contract stays `spec:["prd"]`), export-fidelity limitation documented, spec_kind write-time validation + migrate audit added, approver≠author convention added. Landing specs: SPEC-032 (contract mechanization) + SPEC-033 (dashboard projection). Input: `knowledge-lore-as-sole-dev-context-output-contract-spec-kind-tax`.
+- **v0.5** (2026-07-03): Sole-context positioning (§1) + output contract & document taxonomy (§13: spec_kind feature/tech/design, stage→output→gate table, 3 enforcement layers, SSOT boundary, dashboard-as-PRD-projection) + G8 + §6/§8 governance hooks + §5 module map converted to live `- [knowledge] DocMan replacement assessment — Lore coverage map + two remaining gaps (draft)
+- [spec] SPEC-033 — Dashboard as living-PRD projection + human adjudication surface (approved)
+- [knowledge] Assess material-budget distortion on multi-task plan diffs (draft)
+- [spec] SPEC-035 — Audit trail + calibration data (approved)
+- [spec] SPEC-032 — Output-contract mechanization (spec_kind + tree blueprint + text-projection splice) (approved)
+- [spec] SPEC-034 — Structured review judgment + triage queue (approved)
+- [knowledge] Lore as sole dev context — output contract + spec_kind taxonomy + dashboard-as-PRD-projection (draft)
+- [spec] SPEC-031 — Dashboard read-path contract fixes + markdown typography (approved)
+- [spec] SPEC-030 — Hermetic judge sessions + fail-loud AI config (approved)
+- [spec] SPEC-029 — Assess reliability: reasoning-length resilience + surface-correct error hints (approved)
+- [spec] SPEC-028 — Assess input transparency: pre-flight diff budgeting + file-boundary truncation (approved)
+- [spec] SPEC-027 — Dashboard hardening: write-path integrity, delete/restore, component test coverage (approved)
+- [spec] lore assess — AI plan-outcome assessment (LLM-as-judge feedback loop) (approved)
+- [spec] Task execution workflow metadata (evidence / claim / ready) (approved)
+- [spec] Dashboard write UI (create / edit / approve / link) (approved)
+- [spec] HTTP API Adapter (approved)
+- [spec] Service Layer Architecture (approved)
+- [spec] Version History (approved)
+- [spec] PRD-as-Living-Root (approved)
+- [spec] Review Workflow (approved)
+- [spec] Auth & Agent Credentials (approved)
+- [spec] Migration v1 (approved)
+- [spec] Corpus Schema (approved)
+- [spec] MCP Server Adapter (approved)
+- [spec] lore export-docs — reverse sync from corpus to spec files (approved)
+- [spec] AI assistance in lore set and lore link (approved)
+- [spec] HTTP-backed AI provider (alongside claude-cli) (approved)
+- [spec] Default --no-ai for agent and MCP execution paths (approved)
+- [spec] plan.phases as a first-class grouping layer (approved)
+- [plan] CLI v3 Roadmap — State Alignment + New Surface (archived)
+- [spec] CLI Adapter (approved)
+- [spec] lore sync-docs — backfill new spec files into corpus (approved)
+- [spec] Built-in AI provider for lore create (approved)
+- [spec] Cookie Auth — CLI-managed local bootstrap (approved)
+- [spec] Dashboard — Read-only Skeleton (approved)
+- [spec] Monorepo Skeleton (Bun workspaces, P1 layout) (approved)
+- [spec] Eval Framework (active)
+- [spec] Telemetry Module (active)
+- [spec] Sync Engine (Turso) (approved)`. Owner-approved: taxonomy option C (spec_kind field, not a new first-class type); full-chain launch. 5-stakeholder review applied — enforcement-layer status corrected to as-built (Layers 1-2 already implemented in `@lore/core`), spec-under-spec mount rejected (contract stays `spec:["prd"]`), export-fidelity limitation documented, spec_kind write-time validation + migrate audit added, approver≠author convention added. Landing specs: SPEC-032 (contract mechanization) + SPEC-033 (dashboard projection). Input: `knowledge-lore-as-sole-dev-context-output-contract-spec-kind-tax`.
+- **v0.6** (2026-07-06): Autonomous feedback loop (§14: D1-D6 capability domains, three data entities, shadow→assist→auto staged unlock, five invariants, R1-R3 delivery) + G9 + §13.3 layer-3 mechanization pointer + §12 exclusions + A6 + §8 feedback-loop kill criterion. Owner-confirmed boundaries: loop object = document lifecycle (not code diffs); self-decision whitelist = all types including spec/PRD (data-gated, not day-1); end-state autonomy = L3 within I2 sampling-floor bounds; escalation surfaces = CLI + dashboard + push. 5-stakeholder review applied (avg 5.6 → revisions): unlock gates rebased from point estimates to Wilson lower bounds; single-owner ground-truth limitation acknowledged with mitigations; I1 downgraded to honest process-independence claim + cross-provider option; I2 sampling stratified; L1 feed-forward provenance-tagged (I4) with named injection seam; trigger model pinned to on-demand verbs (no daemon); AuditEvent scoped as net-new query surface over SPEC-012's write-only sink; storage/config/fixture-seeding homes named; R1 load-drop misattribution fixed; spec commitment cut from 5 to 2 (SPEC-034/035), SPEC-036-038 ADR-gated on data; SPEC-032/033 dependencies declared. One reviewer claim rejected with evidence: SPEC-030 alleged nonexistent — it is landed (hermetic-spawn.ts, corpus doc 01KWKDC4). Second synthesis pass (same review inputs): bounded-window aggregation guard (NFR-2), NFR-15 judge-call cost visibility, blast-radius-scaled auto bounds (0.95 for plan/spec/PRD), honest spec/PRD-may-stay-assist expectation, self-hosted stage-gate reviews via `lore assess`. Committed landing specs: SPEC-034 (judgment + triage), SPEC-035 (audit + calibration).

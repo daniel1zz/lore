@@ -3,19 +3,17 @@ id: SPEC-004
 type: spec
 role: spec
 title: "PRD-as-Living-Root"
-status: draft
+status: approved
 priority: high
-phase: P1
 created: 2026-06-08
-updated: 2026-06-08
+updated: 2026-07-02
 tags: [mdx, living-root, navigation, core-differentiator, phase-1]
 parent: PRD-001
 links:
-  - {id: SPEC-001, type: implements, note: "OutlineService is part of service layer"}
-  - {id: SPEC-002, type: consumes, note: "Resolution queries use doc types and link types"}
-  - {id: SPEC-003, type: consumed-by, note: "CLI adapter renders resolved output"}
+  - {id: SPEC-001, type: implements}
+  - {id: SPEC-002, type: relates-to}
+  - {id: SPEC-003, type: relates-to}
 ---
-
 # SPEC-004: PRD-as-Living-Root
 
 ## 1. Purpose
@@ -30,13 +28,13 @@ A document's content can contain MDX-style placeholder components:
 # My Product PRD
 
 ## Feature Specs
-<ChildrenOf role="spec" />
+_(no children)_
 
 ## Recent Decisions
-<RecentDecisions limit={5} />
+_(no recent decisions)_
 
 ## Architecture
-<ModuleTree />
+- [spec] PRD-as-Living-Root (approved)
 ```
 
 When this document is read (via `lore get`, MCP `lore_get`, or web UI), the OutlineService **resolves** each component by querying the corpus and injecting live data. The document is always current — no manual updating.
