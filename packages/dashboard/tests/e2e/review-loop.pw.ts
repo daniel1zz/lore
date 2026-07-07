@@ -257,7 +257,7 @@ test.describe("SPEC-033 dashboard feedback-loop", () => {
     const row = page.locator("div.rounded-lg.border.p-3", { hasText: calibrateDocTitle });
     await expect(row.getByText("approve 0.91", { exact: true })).toBeVisible();
 
-    await row.getByRole("button", { name: "Adjudicate" }).click();
+    await row.getByRole("button", { name: "Review", exact: true }).click();
     await row.getByLabel(`Calibration note for ${calibrateDocTitle}`).fill("Matches AI judgment — confirming.");
     // exact: true — the row's own title button ("E2E Calibrate Approve <runId>")
     // otherwise substring-matches the "Approve" adjudicate button's accessible name.
