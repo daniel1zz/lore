@@ -556,6 +556,10 @@
     "01KWXKSV9269VM19X9Y6XM95DV": {
       "human_id": "SPEC-036",
       "file_path": "docs/requirements/spec/SPEC-036-spec-036-dashboard-browsing-ux-breadcrumb-tag-stat.md"
+    },
+    "01KWXQXPYHDWSG3RHAXNRN7VXF": {
+      "human_id": "KN-027",
+      "file_path": "docs/requirements/knowledge/KN-027-retro-e2e-corpus-pollution-incident-port-squatter.md"
     }
   }
 }
