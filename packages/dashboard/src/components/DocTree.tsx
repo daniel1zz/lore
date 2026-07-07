@@ -30,44 +30,67 @@ interface DocTreeNodeProps {
 
 /**
  * Single expandable tree node with optional children.
+ *
+ * @invariant The chevron and the title are two independently interactive elements.
+ *   The chevron button ONLY toggles expansion (stopPropagation, no `onSelect`); the
+ *   title area ONLY navigates (`onSelect`, never toggles). Before SPEC-037 D4 a single
+ *   click handler did both, so expanding a collapsed node always navigated away —
+ *   depth>=2 subtrees were effectively unreachable in the tree view. `aria-expanded`
+ *   lives on the chevron button (the element that actually owns expand/collapse state),
+ *   not on the row (which no longer claims expandable semantics since it navigates).
  */
 function DocTreeNode({ node, onSelect, depth }: DocTreeNodeProps): React.ReactElement {
   const [isExpanded, setIsExpanded] = useState(depth < 2);
   const hasChildren = node.children.length > 0;
 
+  const toggleExpanded = (e: { stopPropagation: () => void }): void => {
+    e.stopPropagation();
+    setIsExpanded((prev) => !prev);
+  };
+
   return (
     <li>
       <div
-        className={cn(
-          "flex items-center gap-1.5 py-1 px-2 rounded-md hover:bg-accent cursor-pointer",
-          "text-sm transition-colors",
-        )}
+        className={cn("flex items-center gap-1.5 py-1 px-2 rounded-md hover:bg-accent", "text-sm transition-colors")}
         style={{ paddingLeft: `${depth * 16 + 8}px` }}
-        role="button"
-        tabIndex={0}
-        aria-expanded={hasChildren ? isExpanded : undefined}
-        onClick={() => {
-          if (hasChildren) setIsExpanded((prev) => !prev);
-          onSelect?.(node);
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            if (hasChildren) setIsExpanded((prev) => !prev);
-            onSelect?.(node);
-          }
-        }}
       >
         {hasChildren ? (
-          isExpanded ? (
-            <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
-          ) : (
-            <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
-          )
+          <button
+            type="button"
+            className="shrink-0 flex items-center justify-center h-3 w-3 cursor-pointer"
+            aria-expanded={isExpanded}
+            aria-label={`${isExpanded ? "Collapse" : "Expand"} ${node.doc.title}`}
+            onClick={toggleExpanded}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                toggleExpanded(e);
+              }
+            }}
+          >
+            {isExpanded ? (
+              <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+            ) : (
+              <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+            )}
+          </button>
         ) : (
           <FileText className="h-3 w-3 shrink-0 text-muted-foreground" />
         )}
-        <span className="flex-1 truncate">{node.doc.title}</span>
+        <span
+          className="flex-1 truncate cursor-pointer"
+          role="button"
+          tabIndex={0}
+          onClick={() => onSelect?.(node)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              onSelect?.(node);
+            }
+          }}
+        >
+          {node.doc.title}
+        </span>
         <Badge variant="outline" className="text-xs shrink-0">
           {node.doc.type}
         </Badge>
