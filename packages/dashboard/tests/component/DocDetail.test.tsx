@@ -9,16 +9,27 @@
  *     - Renders markdown body content
  *     - Renders metadata table with ID, created date, updated date
  *     - Renders type and status badges
+ *     - Renders breadcrumb with Home + current title when doc has no ancestors (AC-36-3)
+ *     - Renders full ancestor chain as breadcrumb crumbs (AC-36-3)
+ *     - Renders type accent border class on the header (AC-36-9)
+ *     - Renders type meta row + notable priority badge under the title (AC-36-9)
  *
  *   NEGATIVE:
  *     - Renders without navigation footer when no parent/children
+ *     - Does not render a priority badge for default/low priority (noise budget)
+ *
+ *   BOUNDARY:
+ *     - Breadcrumb collapses ancestors >3 into a single "…" crumb, keeping root + direct parent (AC-36-4)
  *
  *   STATE:
  *     - onNavigate called when parent link is clicked
+ *     - onNavigate called when a breadcrumb ancestor crumb is clicked
+ *     - onNavigateHome called when the Home crumb is clicked
  *
  *   REGRESSION:
- *     - Tags section hidden when doc.tags is empty
+ *     - Tag chips hidden under the title when doc.tags is empty
  *     - Author row hidden when created_by is null
+ *     - Full tag list renders under the title when tags are present
  */
 
 import "@testing-library/jest-dom/vitest";
@@ -26,7 +37,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { DocDetail } from "../../src/components/DocDetail";
 import type { DocWithNavigation } from "../../src/lib/api";
-import type { DocRecord } from "@lore/core";
+import type { DocRecord, DocSummary } from "@lore/core";
 
 const mockDocRecord: DocRecord = {
   id: "01HTEST00000000000000000001",
@@ -34,6 +45,7 @@ const mockDocRecord: DocRecord = {
   title: "Test PRD",
   type: "prd",
   status: "active",
+  priority: "medium",
   content: "# Overview\n\nThis is a test PRD.",
   created_at: "2024-01-01T00:00:00Z",
   updated_at: "2024-06-01T00:00:00Z",
@@ -48,11 +60,25 @@ const mockDocWithNav: DocWithNavigation = {
   doc: mockDocRecord,
   navigation: {
     parent: null,
+    ancestors: [],
     siblings: [],
     children: [],
     related: [],
   },
 };
+
+function makeAncestor(id: string, title: string): DocSummary {
+  return {
+    id,
+    slug: `spec-${id.toLowerCase()}`,
+    title,
+    type: "spec",
+    status: "active",
+    updated_at: "2024-01-01T00:00:00Z",
+    tags: [],
+    priority: "medium",
+  };
+}
 
 describe("DocDetail", () => {
   describe("happy path", () => {
@@ -126,6 +152,11 @@ describe("DocDetail", () => {
       render(<DocDetail docWithNav={mockDocWithNav} />);
       expect(screen.queryByRole("contentinfo")).not.toBeInTheDocument();
     });
+
+    it("does not render a priority badge for default priority (noise budget)", () => {
+      render(<DocDetail docWithNav={mockDocWithNav} />);
+      expect(screen.queryByText("medium")).not.toBeInTheDocument();
+    });
   });
 
   describe("state", () => {
@@ -135,14 +166,7 @@ describe("DocDetail", () => {
         ...mockDocWithNav,
         navigation: {
           ...mockDocWithNav.navigation,
-          parent: {
-            id: "parent-001",
-            slug: "prd-parent",
-            title: "Parent PRD",
-            type: "prd",
-            status: "active",
-            updated_at: "2024-01-01T00:00:00Z",
-          },
+          parent: makeAncestor("parent-001", "Parent PRD"),
         },
       };
 
@@ -150,6 +174,103 @@ describe("DocDetail", () => {
 
       fireEvent.click(screen.getByText("Parent PRD"));
       expect(onNavigate).toHaveBeenCalledWith("parent-001");
+    });
+
+    it("calls onNavigate when a breadcrumb ancestor crumb is clicked", () => {
+      const onNavigate = vi.fn();
+      const docWithAncestors: DocWithNavigation = {
+        ...mockDocWithNav,
+        navigation: {
+          ...mockDocWithNav.navigation,
+          ancestors: [makeAncestor("root-001", "Root PRD")],
+        },
+      };
+
+      render(<DocDetail docWithNav={docWithAncestors} onNavigate={onNavigate} />);
+
+      fireEvent.click(screen.getByText("Root PRD"));
+      expect(onNavigate).toHaveBeenCalledWith("root-001");
+    });
+
+    it("calls onNavigateHome when the breadcrumb Home crumb is clicked", () => {
+      const onNavigateHome = vi.fn();
+      render(<DocDetail docWithNav={mockDocWithNav} onNavigateHome={onNavigateHome} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Home" }));
+      expect(onNavigateHome).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("boundary", () => {
+    it("collapses breadcrumb ancestors >3 into a single ellipsis crumb (AC-36-4)", () => {
+      const ancestors = [
+        makeAncestor("a1", "Root"),
+        makeAncestor("a2", "Mid One"),
+        makeAncestor("a3", "Mid Two"),
+        makeAncestor("a4", "Direct Parent"),
+      ];
+      const docWithManyAncestors: DocWithNavigation = {
+        ...mockDocWithNav,
+        navigation: { ...mockDocWithNav.navigation, ancestors },
+      };
+
+      render(<DocDetail docWithNav={docWithManyAncestors} />);
+
+      expect(screen.getByText("Root")).toBeInTheDocument();
+      expect(screen.getByText("Direct Parent")).toBeInTheDocument();
+      expect(screen.getByText("…")).toBeInTheDocument();
+      expect(screen.queryByText("Mid One")).not.toBeInTheDocument();
+      expect(screen.queryByText("Mid Two")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("breadcrumb", () => {
+    it("renders Home and the current title with aria-current when there are no ancestors (AC-36-3)", () => {
+      render(<DocDetail docWithNav={mockDocWithNav} />);
+      const nav = screen.getByRole("navigation", { name: "Breadcrumb" });
+      expect(nav).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Home" })).toBeInTheDocument();
+      const current = screen.getByText("Test PRD", { selector: '[aria-current="page"]' });
+      expect(current).toBeInTheDocument();
+    });
+
+    it("renders every ancestor as a crumb when there are 3 or fewer (no collapsing)", () => {
+      const ancestors = [makeAncestor("a1", "Root"), makeAncestor("a2", "Direct Parent")];
+      const docWithAncestors: DocWithNavigation = {
+        ...mockDocWithNav,
+        navigation: { ...mockDocWithNav.navigation, ancestors },
+      };
+      render(<DocDetail docWithNav={docWithAncestors} />);
+      expect(screen.getByText("Root")).toBeInTheDocument();
+      expect(screen.getByText("Direct Parent")).toBeInTheDocument();
+      expect(screen.queryByText("…")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("type accent + meta (AC-36-9)", () => {
+    it("applies the type accent border class to the header", () => {
+      const { container } = render(<DocDetail docWithNav={mockDocWithNav} />);
+      const header = container.querySelector("header");
+      expect(header).not.toBeNull();
+      expect(header).toHaveClass("border-l-4", "border-l-violet-600");
+    });
+
+    it("renders a spec kind meta badge for a spec doc", () => {
+      const specDoc: DocWithNavigation = {
+        ...mockDocWithNav,
+        doc: { ...mockDocRecord, type: "spec", extra: { spec_kind: "tech" } },
+      };
+      render(<DocDetail docWithNav={specDoc} />);
+      expect(screen.getByText("tech")).toBeInTheDocument();
+    });
+
+    it("renders a priority badge for critical/high priority", () => {
+      const criticalDoc: DocWithNavigation = {
+        ...mockDocWithNav,
+        doc: { ...mockDocRecord, priority: "critical" },
+      };
+      render(<DocDetail docWithNav={criticalDoc} />);
+      expect(screen.getByText("critical")).toBeInTheDocument();
     });
   });
 
@@ -159,12 +280,12 @@ describe("DocDetail", () => {
       expect(screen.queryByText("Author")).not.toBeInTheDocument();
     });
 
-    it("does not render tags row when tags array is empty", () => {
-      render(<DocDetail docWithNav={mockDocWithNav} />);
-      expect(screen.queryByText("Tags")).not.toBeInTheDocument();
+    it("does not render any tag chips under the title when tags array is empty", () => {
+      const { container } = render(<DocDetail docWithNav={mockDocWithNav} />);
+      expect(container.querySelector('[aria-label="Tags"]')).not.toBeInTheDocument();
     });
 
-    it("renders tags when present", () => {
+    it("renders the full tag list under the title when tags are present", () => {
       const docWithTags: DocWithNavigation = {
         ...mockDocWithNav,
         doc: { ...mockDocRecord, tags: ["v2", "core"] },

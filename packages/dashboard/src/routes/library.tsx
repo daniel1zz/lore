@@ -1,9 +1,13 @@
 /**
- * Library route — document list view with type filter chips and "New doc" button.
- * Path: /library
+ * Library route — document list view with type/status/tag filters and "New doc" button.
+ * Path: /library?type=<type>&status=<status>&tags=<a,b>
  * Purpose: the original SPEC-015/SPEC-022 doc-browsing + creation surface,
  *   relocated off "/" when SPEC-033 repurposed the home route as the resolved
  *   living PRD (PRD-001 §13.5) — no functionality was dropped, only moved.
+ *   SPEC-036 §1 D2 adds status + tag (AND) filters and moves ALL filter state
+ *   (type/status/tags) from `useState` into router search params, fixing the
+ *   module invariant "all client state is server state + URL state" — filters
+ *   now survive reload/back/forward (AC-36-5).
  * Write mode: "New doc" button opens NewDocModal for creating documents (SPEC-022).
  */
 
@@ -14,7 +18,10 @@ import { NewDocModal } from "@/components/NewDocModal";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiList } from "@/lib/api";
-import type { DocType } from "@lore/core";
+import { docTypeSchema, docStatusSchema } from "@lore/core";
+import type { DocType, DocStatus } from "@lore/core";
+import { librarySearchSchema, tagsFromParam, tagsToParam } from "@/lib/library-search";
+import { computeTagVocabulary } from "@/lib/tag-vocabulary";
 import { useState } from "react";
 import { toast } from "sonner";
 import { apiCreateDoc, DashboardApiError } from "@/api/mutations";
@@ -22,25 +29,77 @@ import type { CreateDocPayload } from "@/api/mutations";
 import { Plus } from "lucide-react";
 
 export const Route = createFileRoute("/library")({
+  validateSearch: (search) => librarySearchSchema.parse(search),
   component: LibraryPage,
 });
 
-const DOC_TYPES: DocType[] = ["prd", "spec", "adr", "plan", "knowledge", "task"];
+const DOC_TYPES: DocType[] = docTypeSchema.options;
+const DOC_STATUSES: DocStatus[] = docStatusSchema.options;
 
 function LibraryPage(): React.ReactElement {
-  const navigate = useNavigate();
+  const navigate = useNavigate({ from: "/library" });
   const queryClient = useQueryClient();
-  const [selectedType, setSelectedType] = useState<DocType | undefined>(undefined);
+  const search = Route.useSearch();
+  const selectedType = search.type;
+  const selectedStatus = search.status;
+  const selectedTags = tagsFromParam(search.tags);
+
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
-  const { data, isLoading, error } = useQuery({
-    queryKey: ["docs", "list", selectedType],
-    // reason: exactOptionalPropertyTypes forbids passing `undefined` for optional prop `type`;
-    // build opts conditionally to omit the key when no type is selected. SPEC-015 §4.
-    queryFn: () => apiList(selectedType !== undefined ? { type: selectedType } : {}),
+  // reason: the unfiltered list is the tag-vocabulary source (SPEC-036 §1 D2's
+  // documented zero-extra-request rationale). Its query key intentionally matches
+  // the filtered query below's key exactly when no filter is active, so TanStack
+  // Query dedupes them into ONE request rather than two identical fetches.
+  const { data: unfilteredData } = useQuery({
+    queryKey: ["docs", "list", undefined, undefined, undefined],
+    queryFn: () => apiList({}),
   });
+  const tagVocabulary = computeTagVocabulary(unfilteredData?.docs ?? []);
+
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["docs", "list", selectedType, selectedStatus, search.tags],
+    // reason: exactOptionalPropertyTypes forbids passing `undefined` for optional
+    // ListOpts fields; conditional spread omits each key entirely when unset. SPEC-015 §4.
+    queryFn: () =>
+      apiList({
+        ...(selectedType !== undefined ? { type: selectedType } : {}),
+        ...(selectedStatus !== undefined ? { status: selectedStatus } : {}),
+        ...(selectedTags.length > 0 ? { tags: selectedTags } : {}),
+      }),
+  });
+
+  function selectType(nextType: DocType | undefined): void {
+    void navigate({
+      search: (prev) => {
+        const { type: _drop, ...rest } = prev;
+        return nextType !== undefined ? { ...rest, type: nextType } : rest;
+      },
+    });
+  }
+
+  function selectStatus(nextStatus: DocStatus | undefined): void {
+    void navigate({
+      search: (prev) => {
+        const { status: _drop, ...rest } = prev;
+        return nextStatus !== undefined ? { ...rest, status: nextStatus } : rest;
+      },
+    });
+  }
+
+  function toggleTag(tag: string): void {
+    const next = selectedTags.includes(tag)
+      ? selectedTags.filter((t) => t !== tag)
+      : [...selectedTags, tag];
+    void navigate({
+      search: (prev) => {
+        const { tags: _drop, ...rest } = prev;
+        const param = tagsToParam(next);
+        return param !== undefined ? { ...rest, tags: param } : rest;
+      },
+    });
+  }
 
   async function handleCreate(payload: CreateDocPayload): Promise<void> {
     setIsCreating(true);
@@ -81,7 +140,7 @@ function LibraryPage(): React.ReactElement {
         <Badge
           variant={selectedType === undefined ? "default" : "outline"}
           className="cursor-pointer"
-          onClick={() => setSelectedType(undefined)}
+          onClick={() => selectType(undefined)}
         >
           All
         </Badge>
@@ -90,12 +149,50 @@ function LibraryPage(): React.ReactElement {
             key={type}
             variant={selectedType === type ? "default" : "outline"}
             className="cursor-pointer"
-            onClick={() => setSelectedType(type)}
+            onClick={() => selectType(type)}
           >
             {type}
           </Badge>
         ))}
       </div>
+
+      <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by status">
+        <Badge
+          variant={selectedStatus === undefined ? "default" : "outline"}
+          className="cursor-pointer"
+          onClick={() => selectStatus(undefined)}
+        >
+          All
+        </Badge>
+        {DOC_STATUSES.map((status) => (
+          <Badge
+            key={status}
+            variant={selectedStatus === status ? "default" : "outline"}
+            className="cursor-pointer"
+            onClick={() => selectStatus(status)}
+          >
+            {status}
+          </Badge>
+        ))}
+      </div>
+
+      {tagVocabulary.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Tags (all of)">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+            Tags (all of)
+          </span>
+          {tagVocabulary.map(({ tag, count }) => (
+            <Badge
+              key={tag}
+              variant={selectedTags.includes(tag) ? "default" : "outline"}
+              className="cursor-pointer"
+              onClick={() => toggleTag(tag)}
+            >
+              {tag} <span className="text-muted-foreground ml-1">{count}</span>
+            </Badge>
+          ))}
+        </div>
+      )}
 
       {isLoading && (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

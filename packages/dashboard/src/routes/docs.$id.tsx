@@ -97,6 +97,7 @@ function DocPage(): React.ReactElement {
       key={data.doc.id}
       docWithNav={data}
       onNavigate={handleNavigate}
+      onNavigateHome={() => void navigate({ to: "/" })}
       onMutated={handleMutated}
       onDeleted={handleDeleted}
     />

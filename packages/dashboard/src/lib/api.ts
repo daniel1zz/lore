@@ -34,6 +34,14 @@ export class ApiError extends Error {
 
 export interface DocNavigation {
   parent: DocSummary | null;
+  /**
+   * Root-first `parent_id` chain, excluding the current doc (SPEC-036 §1 D1,
+   * AC-36-1). Empty for root docs. `ancestors[0]` is the tree root;
+   * `ancestors[ancestors.length - 1]` equals `parent` when `parent` is
+   * non-null. Mirrors `CorpusService.get`'s `navigation.ancestors`
+   * (`packages/lore/src/service/corpus-service.ts`) exactly.
+   */
+  ancestors: DocSummary[];
   siblings: DocSummary[];
   children: DocSummary[];
   related: Array<DocSummary & { link_type: string }>;
@@ -116,6 +124,14 @@ export interface ListOpts {
   status?: DocStatus;
   parent_id?: string;
   since?: string;
+  /**
+   * Tag names to filter by — server semantics are AND (a doc must carry
+   * EVERY listed tag), matching `ListFilters.tags`'s existing in-memory
+   * `requiredTags.every(...)` filter (`packages/lore/src/store/sqlite-store.ts`).
+   * Joined into a single comma-separated `tags` query param by {@link apiList}
+   * (SPEC-036 §1 D2).
+   */
+  tags?: string[];
 }
 
 export interface SearchOpts {
@@ -213,7 +229,14 @@ export async function apiGetStatus(): Promise<StatusResponse> {
  * @throws {ApiError} On HTTP or network error.
  */
 export async function apiList(opts: ListOpts = {}): Promise<ListResponse> {
-  const qs = buildQueryString(opts as Record<string, string | undefined>);
+  // reason: `tags` is a string[] but buildQueryString only accepts scalar values —
+  // join it into the same comma-separated form the HTTP server already comma-splits
+  // (routes.ts) before building the rest of the query string from the scalar fields.
+  const { tags, ...scalarOpts } = opts;
+  const qs = buildQueryString({
+    ...(scalarOpts as Record<string, string | undefined>),
+    ...(tags !== undefined && tags.length > 0 ? { tags: tags.join(",") } : {}),
+  });
   return fetchJson<ListResponse>(`/api/docs${qs}`);
 }
 
