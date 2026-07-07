@@ -9,7 +9,7 @@
  *   HAPPY:
  *     - Renders root node title
  *     - Nested children visible when parent expanded (depth < 2)
- *     - Collapse/expand toggle works
+ *     - Collapse/expand toggle works via chevron button
  *
  *   NEGATIVE:
  *     - null root shows empty message
@@ -17,11 +17,15 @@
  *
  *   STATE:
  *     - Node starts expanded at depth 0/1; collapsed at depth 2+
- *     - Clicking a collapsed node expands it
- *     - Clicking an expanded node collapses it
+ *     - Clicking the chevron of a collapsed node expands it, without calling onSelect
+ *     - Clicking the chevron of an expanded node collapses it
+ *     - Enter on the chevron toggles expansion (keyboard)
  *
  *   REGRESSION:
- *     - onSelect called with the real-shape node (doc.id / doc.title) when clicked
+ *     - onSelect called with the real-shape node (doc.id / doc.title) when the title
+ *       is clicked, and does NOT toggle expansion (SPEC-037 D4 gesture split)
+ *     - Enter on the title navigates (onSelect) and does not toggle
+ *     - Leaf node (no children) click still navigates, and renders no chevron button
  *     - Multiple sibling child nodes render under the single root
  */
 
@@ -86,36 +90,87 @@ describe("DocTree", () => {
     });
   });
 
-  describe("state: collapse/expand", () => {
-    it("collapses children when parent node is clicked (toggle)", () => {
-      render(<DocTree root={parentNode} />);
+  describe("state: collapse/expand (chevron button)", () => {
+    it("collapses children when the chevron is clicked (toggle), without calling onSelect", () => {
+      const onSelect = vi.fn();
+      render(<DocTree root={parentNode} onSelect={onSelect} />);
 
       // Children visible initially (expanded at depth 0)
       expect(screen.getByText("Child Spec A")).toBeInTheDocument();
 
-      // Click parent to collapse
-      fireEvent.click(screen.getByText("Parent PRD"));
+      // Click the chevron (not the title) to collapse
+      fireEvent.click(screen.getByRole("button", { name: "Collapse Parent PRD" }));
 
       expect(screen.queryByText("Child Spec A")).not.toBeInTheDocument();
+      expect(onSelect).not.toHaveBeenCalled();
     });
 
-    it("expands children when collapsed parent is clicked again", () => {
-      render(<DocTree root={parentNode} />);
+    it("expands children when the chevron of a collapsed node is clicked again, without calling onSelect", () => {
+      const onSelect = vi.fn();
+      render(<DocTree root={parentNode} onSelect={onSelect} />);
 
       // Collapse first
-      fireEvent.click(screen.getByText("Parent PRD"));
+      fireEvent.click(screen.getByRole("button", { name: "Collapse Parent PRD" }));
       expect(screen.queryByText("Child Spec A")).not.toBeInTheDocument();
 
-      // Re-expand
-      fireEvent.click(screen.getByText("Parent PRD"));
+      // Re-expand via the (now relabeled) chevron button
+      fireEvent.click(screen.getByRole("button", { name: "Expand Parent PRD" }));
       expect(screen.getByText("Child Spec A")).toBeInTheDocument();
+      expect(onSelect).not.toHaveBeenCalled();
+    });
+
+    it("aria-expanded lives on the chevron button, reflecting current state", () => {
+      render(<DocTree root={parentNode} />);
+      const chevron = screen.getByRole("button", { name: "Collapse Parent PRD" });
+      expect(chevron).toHaveAttribute("aria-expanded", "true");
+
+      fireEvent.click(chevron);
+      expect(screen.getByRole("button", { name: "Expand Parent PRD" })).toHaveAttribute("aria-expanded", "false");
+    });
+
+    it("Enter on the chevron toggles expansion without navigating", () => {
+      const onSelect = vi.fn();
+      render(<DocTree root={parentNode} onSelect={onSelect} />);
+
+      const chevron = screen.getByRole("button", { name: "Collapse Parent PRD" });
+      fireEvent.keyDown(chevron, { key: "Enter" });
+
+      expect(screen.queryByText("Child Spec A")).not.toBeInTheDocument();
+      expect(onSelect).not.toHaveBeenCalled();
     });
   });
 
   describe("regression", () => {
-    it("calls onSelect with the real-shape node when clicked", () => {
+    it("calls onSelect with the real-shape node when the title is clicked, and does not toggle expansion", () => {
+      const onSelect = vi.fn();
+      render(<DocTree root={parentNode} onSelect={onSelect} />);
+
+      fireEvent.click(screen.getByText("Parent PRD"));
+
+      expect(onSelect).toHaveBeenCalledWith(
+        expect.objectContaining({ doc: expect.objectContaining({ id: "parent-1", title: "Parent PRD" }) }),
+      );
+      // Title click must not collapse the node's children.
+      expect(screen.getByText("Child Spec A")).toBeInTheDocument();
+    });
+
+    it("Enter on the title navigates via onSelect and does not toggle", () => {
+      const onSelect = vi.fn();
+      render(<DocTree root={parentNode} onSelect={onSelect} />);
+
+      fireEvent.keyDown(screen.getByText("Parent PRD"), { key: "Enter" });
+
+      expect(onSelect).toHaveBeenCalledWith(
+        expect.objectContaining({ doc: expect.objectContaining({ id: "parent-1", title: "Parent PRD" }) }),
+      );
+      expect(screen.getByText("Child Spec A")).toBeInTheDocument();
+    });
+
+    it("leaf node click still navigates and renders no chevron button", () => {
       const onSelect = vi.fn();
       render(<DocTree root={leafNode("leaf-x", "Leaf Node")} onSelect={onSelect} />);
+
+      expect(screen.queryByRole("button", { name: /Expand|Collapse/ })).not.toBeInTheDocument();
 
       fireEvent.click(screen.getByText("Leaf Node"));
 
