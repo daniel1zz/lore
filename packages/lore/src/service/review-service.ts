@@ -4,9 +4,9 @@
  * Source: SPEC-005 §3, SPEC-001 §3.2
  */
 
-import type { DocId, DocRecord, DocType } from "@lore/core";
+import type { DocId, DocRecord, DocType, DocTypeMeta } from "@lore/core";
 import { err, ok, type LoreError, type Result } from "@lore/core";
-import { getAllowedTransitions, isValidTransition } from "@lore/core";
+import { getAllowedTransitions, isValidTransition, deriveTypeMeta } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
 
@@ -15,6 +15,13 @@ import { resolveDoc } from "./resolve.js";
 /**
  * A document waiting for human review.
  * Subset of DocRecord with review-relevant fields.
+ *
+ * @invariant `meta` mirrors `DocSummary.meta` (SPEC-036 §2 D3) — derived by the
+ *   same single-derivation-point `deriveTypeMeta` fn used by
+ *   `CorpusService.toSummary`. Absent (never a fabricated default) for `prd`
+ *   docs or when the doc's type-specific `extra` fields are missing/malformed;
+ *   `task.claim_stale` is additionally absent whenever this service wasn't
+ *   constructed with `claimTtlMinutes`.
  */
 export interface PendingDoc {
   id: DocId;
@@ -25,6 +32,7 @@ export interface PendingDoc {
   updated_at: string;
   version: number;
   change_summary?: string;
+  meta?: DocTypeMeta;
 }
 
 export interface PendingFilters {
@@ -55,7 +63,20 @@ export interface RejectOpts {
  * All methods return Result<T, LoreError> — never throw.
  */
 export class ReviewService {
-  constructor(private readonly store: StoreInterface) {}
+  /**
+   * @param store - Storage abstraction (SQLiteStore, TursoStore, or InMemoryStore)
+   * @param claimTtlMinutes - Task claim lease TTL in minutes, forwarded to
+   *   `deriveTypeMeta` for `PendingDoc.meta`'s `task.claim_stale` computation
+   *   (SPEC-036 §2 D3, pending-queue extension). Same DI shape as
+   *   `CorpusService`/`TaskWorkflowService`/`AuditService`'s constructor-resolved
+   *   config values. Omitted (not defaulted to 120 here) when the caller doesn't
+   *   wire it — `deriveTypeMeta` then omits `claim_stale` entirely rather than
+   *   computing it against a value this service invented.
+   */
+  constructor(
+    private readonly store: StoreInterface,
+    private readonly claimTtlMinutes?: number,
+  ) {}
 
   private async resolveDoc(idOrSlug: string): Promise<Result<DocRecord, LoreError>> {
     return resolveDoc(this.store, idOrSlug);
@@ -77,7 +98,10 @@ export class ReviewService {
     if (!result.ok) return result;
 
     const pendingDocs: PendingDoc[] = result.value.map((doc) =>
-      toPendingDoc(doc),
+      toPendingDoc(
+        doc,
+        this.claimTtlMinutes !== undefined ? { claimTtlMinutes: this.claimTtlMinutes } : undefined,
+      ),
     );
 
     return ok(pendingDocs);
@@ -216,7 +240,17 @@ export class ReviewService {
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
-function toPendingDoc(doc: DocRecord): PendingDoc {
+/**
+ * Projects a full DocRecord to the {@link PendingDoc} row shape, wrapping
+ * `deriveTypeMeta` (`@lore/core`) for the `meta` field — mirrors
+ * `CorpusService.toSummary`'s DocSummary projection (SPEC-036 §2 D3).
+ *
+ * @param opts - `{ claimTtlMinutes? }` forwarded verbatim to `deriveTypeMeta`;
+ *   `undefined` when this service wasn't constructed with a TTL, in which case
+ *   `deriveTypeMeta` omits `task.claim_stale` rather than fabricating a value.
+ */
+function toPendingDoc(doc: DocRecord, opts?: { claimTtlMinutes?: number }): PendingDoc {
+  const meta = deriveTypeMeta(doc, opts);
   return {
     id: doc.id,
     type: doc.type,
@@ -225,5 +259,6 @@ function toPendingDoc(doc: DocRecord): PendingDoc {
     created_by: doc.created_by,
     updated_at: doc.updated_at,
     version: doc.version,
+    ...(meta !== undefined ? { meta } : {}),
   };
 }

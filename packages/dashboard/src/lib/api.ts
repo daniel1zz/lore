@@ -19,6 +19,7 @@ import type {
   DocRecord,
   DocSummary,
   DocType,
+  DocTypeMeta,
   DocStatus,
   ReadyRecord,
   ReviewJudgment,
@@ -466,6 +467,9 @@ export async function apiGetCalibrationStats(
  * no `{docs,total}` wrapper — same bare-array precedent as `apiGetVersionLog`.
  * Carries `version` (unlike `DocSummary`, which omits it) — required to detect a
  * stale judgment via `judgment.doc_version < row.version` (`JudgmentBadge`).
+ * `meta` mirrors `DocSummary.meta` (SPEC-036 §2 D3) — same `deriveTypeMeta`
+ * projection, server-side, now also applied to `PendingDoc` rows; absent for
+ * `prd` or when the doc's type-specific `extra` is missing/malformed.
  */
 export interface PendingDocRow {
   id: string;
@@ -476,6 +480,7 @@ export interface PendingDocRow {
   updated_at: string;
   version: number;
   change_summary?: string;
+  meta?: DocTypeMeta;
 }
 
 /** Optional narrowing filters for {@link apiGetPendingReview}. Mirrors `PendingFilters`. */

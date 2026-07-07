@@ -181,7 +181,10 @@ function buildAppFromSqlite(
   const outlineService = new OutlineService(store);
   return {
     corpusService,
-    reviewService: new ReviewService(store),
+    // reason: same resolved claimTtlMinutes as CorpusService above — one resolution
+    // path feeds PendingDoc.meta's task.claim_stale too (SPEC-036 §2 D3 pending-queue
+    // extension), not a second config read.
+    reviewService: new ReviewService(store, claimTtlMinutes),
     versionService: new VersionService(store),
     outlineService,
     migrationService: new MigrationService(store),
@@ -263,7 +266,10 @@ function buildAppFromTurso(
   const outlineService = new OutlineService(store);
   return {
     corpusService,
-    reviewService: new ReviewService(store),
+    // reason: same resolved claimTtlMinutes as CorpusService above — one resolution
+    // path feeds PendingDoc.meta's task.claim_stale too (SPEC-036 §2 D3 pending-queue
+    // extension), not a second config read.
+    reviewService: new ReviewService(store, claimTtlMinutes),
     versionService: new VersionService(store),
     outlineService,
     migrationService: new MigrationService(store),
