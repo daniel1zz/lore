@@ -18,28 +18,41 @@
  *     order (source > test > other) and reports exactly which files were dropped/head-cut,
  *     which are recorded as individual `"diff:<file-path>"` entries in `truncated[]`
  *     (AC-AE-3) instead of the old single opaque `"diff"` marker.
+ *   - **Truncation manifest (bugfix F3, see file header Source)**: when `truncateDiffByFile` reports any
+ *     `omittedFiles`, the prompt gains a "Truncation Manifest" section listing every one of
+ *     them (grouped source/test/other via the SAME `classifyDiffFilePriority` used to build
+ *     `truncated[]` — no second bookkeeping) plus a hard instruction not to treat an omitted
+ *     file as absent or penalize it for having no visible content. Root cause this fixes: the
+ *     judge could not distinguish "this file doesn't exist" from "this file was cut for
+ *     budget," so it systematically under-scored test-coverage ACs whose test files happened
+ *     to sort into the dropped set (observed on the SPEC-037 assessment — 4 false gaps, all
+ *     four in `truncated[]`). The manifest is diff-omission-only; spec/plan/task truncation
+ *     keeps its pre-existing bare `truncated[]`-only behaviour (those sections aren't split
+ *     by file, so there's no per-file list to manifest).
  *   - Prompt section order matches SPEC-026 §5: role → materials → rubric → output instruction.
  *   - The Output Instruction explicitly states the per-AC `reasoning` 300-char cap AND that
  *     exceeding it gets clipped server-side (SPEC-029 AC-AR-1) — present in BOTH the base
  *     prompt (here) and the corrective-retry prompt (which embeds this prompt verbatim, see
- *     {@link buildAssessRetryPrompt}). ASSESS_PROMPT_VERSION bumped 1 → 2 for this change.
+ *     {@link buildAssessRetryPrompt}). ASSESS_PROMPT_VERSION bumped 1 → 2 for this change,
+ *     and 2 → 3 for the truncation manifest (bugfix F3).
  *
  * Side-effect class: pure
  *
- * Source: SPEC-026 §3 D2, D7, D8; §5; SPEC-028 AC-AE-2, AC-AE-3, AC-AE-4; SPEC-029 AC-AR-1
+ * Source: SPEC-026 §3 D2, D7, D8; §5; SPEC-028 AC-AE-2, AC-AE-3, AC-AE-4; SPEC-029 AC-AR-1;
+ * bugfix F3 (`knowledge-assess-diff-truncation-systematically-hides-tests-from`)
  */
 
 import { truncateSection, type PlanBundle } from "@lore/core";
 import { evidenceEntrySchema } from "@lore/core";
 import { z } from "zod";
-import { truncateDiffByFile } from "./diff-truncation.js";
+import { truncateDiffByFile, classifyDiffFilePriority, type DiffFilePriority } from "./diff-truncation.js";
 
 /**
  * Judge prompt schema version. Bump whenever the prompt text, rubric anchors, or output
  * instruction changes in a way that could shift judge behaviour — persisted verbatim into
  * `judgment.prompt_version` on every assessment for audit (SPEC-026 §3 D6).
  */
-export const ASSESS_PROMPT_VERSION = 2;
+export const ASSESS_PROMPT_VERSION = 3;
 
 /** Character budgets for each prompt section, sourced from `config.ai.assess.*`. */
 export interface AssessBudgets {
@@ -76,6 +89,50 @@ function renderTaskEvidence(task: PlanBundle["tasks"][number]): string {
         (e.output_tail ? `\n      output_tail: ${e.output_tail.slice(0, 500)}` : ""),
     )
     .join("\n");
+}
+
+/**
+ * Render a "Truncation Manifest" prompt section for diff files dropped entirely by
+ * `truncateDiffByFile` (bugfix F3). Grouped by the same priority classification
+ * (`classifyDiffFilePriority`) `truncateDiffByFile` already used to decide what to keep —
+ * this is a presentation-only pass over `omittedFiles`, not a second source of truth.
+ *
+ * @param omittedFiles - File paths dropped from the diff section (from `TruncateDiffResult`)
+ * @returns The manifest section text, or `""` if `omittedFiles` is empty (no section emitted)
+ *
+ * @example
+ * buildTruncationManifest(["packages/lore/src/foo.test.ts"]);
+ * // => "# Truncation Manifest\n...\nTest files omitted (1):\n  - packages/lore/src/foo.test.ts\n\n"
+ */
+function buildTruncationManifest(omittedFiles: string[]): string {
+  if (omittedFiles.length === 0) return "";
+
+  const groups: Record<DiffFilePriority, string[]> = { source: [], test: [], other: [] };
+  for (const filePath of omittedFiles) {
+    groups[classifyDiffFilePriority(filePath)].push(filePath);
+  }
+
+  const lines: string[] = [
+    `# Truncation Manifest`,
+    `The following changed files exist in the diff but are omitted from the "Diff" section ` +
+      `above for budget reasons. Do NOT report them as missing, and do NOT lower coverage ` +
+      `scores solely because their contents are not shown. Treat them as present but unseen, ` +
+      `not absent.\n`,
+  ];
+  if (groups.source.length > 0) {
+    lines.push(`Production files omitted (${groups.source.length}):`);
+    for (const f of groups.source) lines.push(`  - ${f}`);
+  }
+  if (groups.test.length > 0) {
+    lines.push(`Test files omitted (${groups.test.length}):`);
+    for (const f of groups.test) lines.push(`  - ${f}`);
+  }
+  if (groups.other.length > 0) {
+    lines.push(`Other files omitted (${groups.other.length}):`);
+    for (const f of groups.other) lines.push(`  - ${f}`);
+  }
+
+  return `${lines.join("\n")}\n\n`;
 }
 
 /**
@@ -122,6 +179,7 @@ export function buildAssessPrompt(
   });
 
   let diffBlock = "(no diff provided)";
+  let truncationManifest = "";
   if (diffText !== undefined) {
     // reason: file-boundary truncation (SPEC-028 AC-AE-2) replaces the old blind tail cut
     // for the diff section only — every other section still uses truncateSection above.
@@ -131,6 +189,9 @@ export function buildAssessPrompt(
       if (diffResult.headTruncatedFile) truncated.push(`diff:${diffResult.headTruncatedFile.filePath}`);
     }
     diffBlock = diffResult.text;
+    // reason: bugfix F3 — built from `diffResult.omittedFiles`, the SAME array
+    // that feeds `truncated[]` above, so the manifest can never drift from what's recorded.
+    truncationManifest = buildTruncationManifest(diffResult.omittedFiles);
   }
 
   const prompt =
@@ -147,6 +208,7 @@ export function buildAssessPrompt(
     `${taskBlocks.join("\n\n")}\n\n` +
     `## Diff\n` +
     `${diffBlock}\n\n` +
+    truncationManifest +
     `# Rubric Anchors\n` +
     `Score each acceptance criterion 0-100:\n` +
     `- 90-100: AC fully evidenced\n` +
