@@ -24,6 +24,14 @@
  *     suffix, mirroring slugifyWithCollision), fail-loud after 999 attempts. A prior version of
  *     this file lacked the usedFilePaths guard, letting a same-titled doc silently inherit an
  *     unrelated doc's human_id + file_path (SPEC-021 export-collision incident).
+ *   - New-allocation human_ids honor a title-declared number before falling back to the
+ *     sequential counter (SPEC-021 Amendment A1). reason: a prior incident allocated a doc
+ *     titled "SPEC-035 — …" the id SPEC-033 because allocation ignored the number already
+ *     embedded in the title. `usedHumanIds` (mirrors usedFilePaths) tracks every id already
+ *     claimed — by an existing mapping or an earlier allocation this pass — so a title-claim
+ *     can never collide, and the sequential fallback skips any number the set already holds.
+ *     Title-match reconcile (the path above) and existing index mappings are untouched by
+ *     this amendment; it applies only to the new-allocation branch.
  *   - Corrupted indexes self-heal. If .lore/export-index.json already contains two doc ids
  *     mapped to the same file_path (e.g. written by the bug above, or hand-edited), the next
  *     export run detects it, keeps exactly one canonical owner (content match, else earliest
@@ -445,7 +453,7 @@ function maxNumberForPrefix(prefix: string, humanIds: string[]): number {
 /**
  * Build or extend the export index: allocate human IDs for new corpus docs.
  *
- * Algorithm (SPEC-021 §9.3, §9.4):
+ * Algorithm (SPEC-021 §9.3, §9.4; Amendment A1 for step 5b):
  *   1. Load existing index.
  *   2. Self-heal: repair any (human_id, file_path) collision between two different
  *      doc ids already in the index (see repairCollisions) — logged, never silent.
@@ -455,8 +463,13 @@ function maxNumberForPrefix(prefix: string, humanIds: string[]): number {
  *      a. Match by title to scanned file → inherit its ID + filePath, UNLESS that
  *         filePath is already claimed by a different doc id this pass (usedFilePaths) —
  *         titles are not unique across docs (only slug is), so this guard is required.
- *      b. Else: allocate next sequential number, compute new filePath, deduping against
- *         usedFilePaths with a -2/-3/... suffix (mirrors slugifyWithCollision).
+ *      b. Else: try the doc's self-declared number — `doc.title` matched against
+ *         `^{PREFIX}-(\d+)\b` where PREFIX is keyed to `doc.type` (Amendment A1). Adopt
+ *         the normalized `{PREFIX}-{NNN}` id iff not already held by an existing mapping
+ *         or an earlier allocation this pass (usedHumanIds); otherwise allocate the next
+ *         sequential number, skipping any already in usedHumanIds. Either way, compute a
+ *         new filePath deduped against usedFilePaths with a -2/-3/... suffix (mirrors
+ *         slugifyWithCollision).
  *   6. Return mutated index (caller must save it atomically) plus the repair log.
  *
  * @param indexPath - Absolute path to .lore/export-index.json.
@@ -484,6 +497,12 @@ function buildOrExtendIndex(
   // file_path values already claimed by a doc id in the index — the SSOT for collision
   // detection during both title-match and sequential allocation below.
   const usedFilePaths = new Set(Object.values(index.mappings).map((m) => m.file_path));
+
+  // human_id values already claimed by a doc id in the index, PLUS every id handed out
+  // during this pass (title-match inherits, title-declared claims, sequential fallbacks) —
+  // mirrors usedFilePaths so a title-declared number (SPEC-021 Amendment A1) can never
+  // collide with an existing mapping or an earlier allocation in the same pass.
+  const usedHumanIds = new Set<string>(existingHumanIds);
 
   // Per-type next-number counters — seeded from index.
   const typeCounters = new Map<DocType, number>();
@@ -527,15 +546,46 @@ function buildOrExtendIndex(
         file_path: fileMatch.filePath,
       };
       usedFilePaths.add(fileMatch.filePath);
+      usedHumanIds.add(fileMatch.humanId);
       continue;
     }
 
-    // Allocate next sequential number for this type.
+    // Allocate a human_id: title-declared number first (SPEC-021 Amendment A1), then
+    // sequential per-type counter fallback.
     const prefix = TYPE_PREFIX[doc.type];
-    const current = typeCounters.get(doc.type) ?? 0;
-    const next = current + 1;
-    typeCounters.set(doc.type, next);
-    const humanId = `${prefix}-${String(next).padStart(3, "0")}`;
+
+    // reason: a doc's title may self-declare its own number (e.g. a spec titled
+    // "SPEC-035 — Foo"); the prefix is keyed to doc.type, not string-sniffed out of the
+    // title, so a plan titled "SPEC-035 implementation — X" (prefix PLAN) can never claim
+    // a SPEC number. Adopt the claim only if no existing mapping or earlier allocation in
+    // this pass already holds it — otherwise fall through to the sequential counter, which
+    // must itself skip any number already claimed this way (see the while-loop below).
+    const titleClaimMatch = doc.title.match(new RegExp(`^\\s*${prefix}-(\\d+)\\b`));
+    // Normalize via the parsed number, not the raw captured digits — a title written as
+    // "SPEC-0007" must still canonicalize to "SPEC-007", not retain its own zero-padding.
+    const claimedNumber = titleClaimMatch ? parseInt(titleClaimMatch[1] ?? "0", 10) : undefined;
+    const titleClaimedId =
+      claimedNumber !== undefined ? `${prefix}-${String(claimedNumber).padStart(3, "0")}` : undefined;
+
+    let humanId: string;
+    if (titleClaimedId !== undefined && !usedHumanIds.has(titleClaimedId)) {
+      humanId = titleClaimedId;
+      // Advance the counter past the claimed number so a subsequent sequential allocation
+      // never re-derives it independently (it's already guarded by usedHumanIds too, but
+      // keeping the counter in step avoids the while-loop having to skip on every call).
+      const current = typeCounters.get(doc.type) ?? 0;
+      if ((claimedNumber ?? 0) > current) typeCounters.set(doc.type, claimedNumber ?? 0);
+    } else {
+      let next = (typeCounters.get(doc.type) ?? 0) + 1;
+      let candidate = `${prefix}-${String(next).padStart(3, "0")}`;
+      while (usedHumanIds.has(candidate)) {
+        next += 1;
+        candidate = `${prefix}-${String(next).padStart(3, "0")}`;
+      }
+      typeCounters.set(doc.type, next);
+      humanId = candidate;
+    }
+    usedHumanIds.add(humanId);
 
     // Compute file name from human ID + slugified title (minus type prefix).
     // reason: slugify() produces "{type}-{kebab}" — strip the type prefix to get

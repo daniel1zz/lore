@@ -1009,3 +1009,247 @@ describe("REGRESSION — ExportDocsService must not import or call AIProviderSer
     expect(content).not.toMatch(/\.generate\(|\.complete\(|buildProviderRegistry/);
   });
 });
+
+// ─── Amendment A1: title-declared numbering in export human_id allocation ────
+//
+// SPEC-021 Amendment A1 — buildOrExtendIndex's NEW-allocation path first tries a doc's
+// self-declared number (`^{PREFIX}-(\d+)\b` matched against doc.title, PREFIX keyed to
+// doc.type) before falling back to the sequential per-type counter. Fixes the incident
+// where a doc titled "SPEC-035 — …" was allocated human_id SPEC-033 by a pure max+1
+// counter that ignored the number already embedded in the title.
+
+type TestExportIndex = {
+  version: number;
+  mappings: Record<string, { human_id: string; file_path: string }>;
+};
+
+function readExportIndex(projectDir: string): TestExportIndex {
+  const indexPath = join(projectDir, ".lore", "export-index.json");
+  return JSON.parse(readFileSync(indexPath, "utf8")) as TestExportIndex;
+}
+
+function writeExportIndex(projectDir: string, index: TestExportIndex): void {
+  const indexPath = join(projectDir, ".lore", "export-index.json");
+  writeFileSync(indexPath, JSON.stringify(index, null, 2) + "\n", "utf8");
+}
+
+describe("HAPPY — title-declared number is adopted for an unmapped doc (AC-A1-1)", () => {
+  it("spec titled 'SPEC-040 — X' allocates human_id SPEC-040 / filename SPEC-040-...", async () => {
+    const store = new InMemoryStore();
+    const service = makeExportService(store);
+    const projectDir = makeTempProjectDir();
+
+    const docId = "01J0000000000000000000A11A";
+    await insertDoc(store, makeDoc({
+      id: docId,
+      type: "spec",
+      title: "SPEC-040 — Declared Number Feature",
+      slug: "spec-declared-number-feature",
+    }));
+
+    const result = await service.exportDocs({ projectDir, dryRun: false });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const index = readExportIndex(projectDir);
+    expect(index.mappings[docId]!.human_id).toBe("SPEC-040");
+    expect(index.mappings[docId]!.file_path).toMatch(/^docs\/requirements\/spec\/SPEC-040-/);
+  });
+});
+
+describe("BOUNDARY — two unmapped docs both title-claim the same number (AC-A1-2)", () => {
+  it("first in iteration order claims SPEC-040, second falls back to sequential — no duplicate", async () => {
+    const store = new InMemoryStore();
+    const service = makeExportService(store);
+    const projectDir = makeTempProjectDir();
+
+    // findMany sorts DESC by updated_at — newer updated_at iterates first.
+    const firstDocId = "01J0000000000000000000A12A";
+    const secondDocId = "01J0000000000000000000A12B";
+    await insertDoc(store, makeDoc({
+      id: firstDocId,
+      type: "spec",
+      title: "SPEC-040 — First Claimant",
+      slug: "spec-first-claimant",
+      updated_at: "2024-01-15T10:00:02.000Z",
+    }));
+    await insertDoc(store, makeDoc({
+      id: secondDocId,
+      type: "spec",
+      title: "SPEC-040 — Second Claimant",
+      slug: "spec-second-claimant",
+      updated_at: "2024-01-15T10:00:01.000Z",
+    }));
+
+    const result = await service.exportDocs({ projectDir, dryRun: false });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const index = readExportIndex(projectDir);
+    const firstHumanId = index.mappings[firstDocId]!.human_id;
+    const secondHumanId = index.mappings[secondDocId]!.human_id;
+
+    expect(firstHumanId).toBe("SPEC-040");
+    expect(secondHumanId).not.toBe("SPEC-040");
+    expect(secondHumanId).not.toBe(firstHumanId);
+  });
+});
+
+describe("NEGATIVE — title-declared number already claimed in the index (AC-A1-3)", () => {
+  it("falls back to sequential allocation when SPEC-040 is already mapped to a different doc", async () => {
+    const store = new InMemoryStore();
+    const service = makeExportService(store);
+    const projectDir = makeTempProjectDir();
+
+    // Pre-seed the index with an existing mapping claiming SPEC-040 for a doc id that
+    // is not part of this corpus reconcile pass (a harmless orphan entry per
+    // repairCollisions' documented semantics) — this is what "already claimed in the
+    // index" means for the new-allocation path.
+    writeExportIndex(projectDir, {
+      version: 1,
+      mappings: {
+        "orphan-doc-already-mapped": {
+          human_id: "SPEC-040",
+          file_path: "docs/requirements/spec/SPEC-040-orphan-doc.md",
+        },
+      },
+    });
+
+    const docId = "01J0000000000000000000A13A";
+    await insertDoc(store, makeDoc({
+      id: docId,
+      type: "spec",
+      title: "SPEC-040 — Late Claimant",
+      slug: "spec-late-claimant",
+    }));
+
+    const result = await service.exportDocs({ projectDir, dryRun: false });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const index = readExportIndex(projectDir);
+    expect(index.mappings[docId]!.human_id).not.toBe("SPEC-040");
+    // Sequential fallback: counter is seeded from the existing SPEC-040 mapping (max=40),
+    // so the freed number is the next one after it.
+    expect(index.mappings[docId]!.human_id).toBe("SPEC-041");
+  });
+});
+
+describe("BOUNDARY — sequential fallback skips a forward title-claimed number (AC-A1-4)", () => {
+  it("title-claim of SPEC-036 while counter sits at 035 → next sequential allocation is SPEC-037", async () => {
+    const store = new InMemoryStore();
+    const service = makeExportService(store);
+    const projectDir = makeTempProjectDir();
+
+    // Seed the counter to 035 via an orphan mapping (no corresponding corpus doc) —
+    // mirrors the pattern used by the export-docs-collision.test.ts fixtures.
+    writeExportIndex(projectDir, {
+      version: 1,
+      mappings: {
+        "orphan-doc-035": {
+          human_id: "SPEC-035",
+          file_path: "docs/requirements/spec/SPEC-035-orphan-doc.md",
+        },
+      },
+    });
+
+    // First in iteration order (newer updated_at): title-claims SPEC-036.
+    const claimDocId = "01J0000000000000000000A14A";
+    await insertDoc(store, makeDoc({
+      id: claimDocId,
+      type: "spec",
+      title: "SPEC-036 — Forward Claim",
+      slug: "spec-forward-claim",
+      updated_at: "2024-01-15T10:00:02.000Z",
+    }));
+
+    // Second in iteration order (older updated_at): no title-declared number, must
+    // fall through to the sequential counter, which the claim above has advanced.
+    const sequentialDocId = "01J0000000000000000000A14B";
+    await insertDoc(store, makeDoc({
+      id: sequentialDocId,
+      type: "spec",
+      title: "Plain Sequential Title",
+      slug: "spec-plain-sequential-title",
+      updated_at: "2024-01-15T10:00:01.000Z",
+    }));
+
+    const result = await service.exportDocs({ projectDir, dryRun: false });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const index = readExportIndex(projectDir);
+    expect(index.mappings[claimDocId]!.human_id).toBe("SPEC-036");
+    expect(index.mappings[sequentialDocId]!.human_id).toBe("SPEC-037");
+  });
+});
+
+describe("BOUNDARY — title-declared number normalizes to canonical padded form (AC-A1-5)", () => {
+  it("title 'SPEC-7 — X' normalizes to SPEC-007", async () => {
+    const store = new InMemoryStore();
+    const service = makeExportService(store);
+    const projectDir = makeTempProjectDir();
+
+    const docId = "01J0000000000000000000A15A";
+    await insertDoc(store, makeDoc({
+      id: docId,
+      type: "spec",
+      title: "SPEC-7 — Short Number",
+      slug: "spec-short-number",
+    }));
+
+    const result = await service.exportDocs({ projectDir, dryRun: false });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const index = readExportIndex(projectDir);
+    expect(index.mappings[docId]!.human_id).toBe("SPEC-007");
+  });
+});
+
+describe("REGRESSION — titles with no self-declared number or a foreign prefix stay pure sequential (AC-A1-6)", () => {
+  it("title with no leading {PREFIX}-{N} allocates the plain sequential number", async () => {
+    const store = new InMemoryStore();
+    const service = makeExportService(store);
+    const projectDir = makeTempProjectDir();
+
+    const docId = "01J0000000000000000000A16A";
+    await insertDoc(store, makeDoc({
+      id: docId,
+      type: "spec",
+      title: "My Plain Spec Title",
+      slug: "spec-my-plain-spec-title",
+    }));
+
+    const result = await service.exportDocs({ projectDir, dryRun: false });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const index = readExportIndex(projectDir);
+    expect(index.mappings[docId]!.human_id).toBe("SPEC-001");
+  });
+
+  it("a plan titled 'SPEC-035 implementation — X' can never claim a SPEC number (foreign prefix)", async () => {
+    const store = new InMemoryStore();
+    const service = makeExportService(store);
+    const projectDir = makeTempProjectDir();
+
+    const docId = "01J0000000000000000000A16B";
+    await insertDoc(store, makeDoc({
+      id: docId,
+      type: "plan",
+      title: "SPEC-035 implementation — Rollout Plan",
+      slug: "plan-spec-035-implementation-rollout-plan",
+    }));
+
+    const result = await service.exportDocs({ projectDir, dryRun: false });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const index = readExportIndex(projectDir);
+    // Prefix for type "plan" is PLAN, not SPEC — the title's "SPEC-035" text can never
+    // match `^PLAN-(\d+)\b`, so allocation falls through to the plain sequential counter.
+    expect(index.mappings[docId]!.human_id).toBe("PLAN-001");
+    expect(index.mappings[docId]!.human_id).not.toMatch(/^SPEC-/);
+  });
+});
