@@ -30,14 +30,35 @@
  *     - Tag chips hidden under the title when doc.tags is empty
  *     - Author row hidden when created_by is null
  *     - Full tag list renders under the title when tags are present
+ *
+ *   SPEC-037 additions:
+ *     - plan with zero task children keeps the flat children list (no Execution header)
+ *     - plan with >=1 task child renders the Execution section instead
+ *     - task with a claim/evidence renders the Execution section above the footer
+ *     - task with no claim/evidence renders no Execution section
+ *     - header meta badge is destructive when a task has evidence_fail > 0 (AC-37-6)
  */
 
 import "@testing-library/jest-dom/vitest";
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { DocDetail } from "../../src/components/DocDetail";
 import type { DocWithNavigation } from "../../src/lib/api";
 import type { DocRecord, DocSummary } from "@lore/core";
+
+vi.mock("@/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/lib/api")>();
+  return { ...actual, apiGetReady: vi.fn() };
+});
+
+import { apiGetReady } from "@/lib/api";
+const mockedApiGetReady = vi.mocked(apiGetReady);
+
+function renderWithClient(ui: React.ReactElement) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+}
 
 const mockDocRecord: DocRecord = {
   id: "01HTEST00000000000000000001",
@@ -293,6 +314,120 @@ describe("DocDetail", () => {
       render(<DocDetail docWithNav={docWithTags} />);
       expect(screen.getByText("v2")).toBeInTheDocument();
       expect(screen.getByText("core")).toBeInTheDocument();
+    });
+  });
+
+  describe("SPEC-037 D2: plan Execution section", () => {
+    function makeChildSummary(overrides: Partial<DocSummary> & { id: string; title: string }): DocSummary {
+      return {
+        slug: `doc-${overrides.id}`,
+        type: "task",
+        status: "draft",
+        updated_at: "2024-01-01T00:00:00Z",
+        tags: [],
+        priority: "medium",
+        ...overrides,
+      };
+    }
+
+    it("keeps the flat children list when a plan has zero task children", () => {
+      const knowledgeChild = makeChildSummary({ id: "k1", title: "Knowledge Child", type: "knowledge" });
+      const planDoc: DocWithNavigation = {
+        doc: { ...mockDocRecord, type: "plan" },
+        navigation: { ...mockDocWithNav.navigation, children: [knowledgeChild] },
+      };
+
+      render(<DocDetail docWithNav={planDoc} />);
+
+      expect(screen.getByText("Children")).toBeInTheDocument();
+      expect(screen.getByText("Knowledge Child")).toBeInTheDocument();
+      expect(screen.queryByText("Execution")).not.toBeInTheDocument();
+    });
+
+    it("renders the Execution section instead of the flat list when the plan has >=1 task child", async () => {
+      const taskChild = makeChildSummary({ id: "t1", title: "Task Child" });
+      const planDoc: DocWithNavigation = {
+        doc: { ...mockDocRecord, id: "01HPLANEXEC000000000000001", type: "plan" },
+        navigation: { ...mockDocWithNav.navigation, children: [taskChild] },
+      };
+      mockedApiGetReady.mockResolvedValue({ ok: true, value: [] });
+
+      renderWithClient(<DocDetail docWithNav={planDoc} />);
+
+      expect(await screen.findByText("Execution")).toBeInTheDocument();
+      expect(screen.getByText("Task Child")).toBeInTheDocument();
+      expect(screen.queryByText("Children")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("SPEC-037 D3: task Execution section", () => {
+    it("renders the Execution section above the footer when the task has a claim", () => {
+      const taskDoc: DocWithNavigation = {
+        doc: {
+          ...mockDocRecord,
+          type: "task",
+          extra: { claim: { by: "alice", at: "2026-01-01T00:00:00.000Z" } },
+        },
+        navigation: mockDocWithNav.navigation,
+      };
+
+      render(<DocDetail docWithNav={taskDoc} />);
+
+      expect(screen.getByLabelText("Execution")).toBeInTheDocument();
+      expect(screen.getByText("alice")).toBeInTheDocument();
+    });
+
+    it("renders no Execution section for a task with neither claim nor evidence", () => {
+      const taskDoc: DocWithNavigation = {
+        doc: { ...mockDocRecord, type: "task" },
+        navigation: mockDocWithNav.navigation,
+      };
+
+      render(<DocDetail docWithNav={taskDoc} />);
+
+      expect(screen.queryByLabelText("Execution")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("SPEC-037 AC-37-6: header meta badge danger color", () => {
+    it("renders the destructive badge variant when a task has evidence_fail > 0", () => {
+      const taskDoc: DocWithNavigation = {
+        doc: {
+          ...mockDocRecord,
+          type: "task",
+          extra: {
+            verification_evidence: [
+              { oracle: "tsc", command: "x", result: "fail", recorded_at: "2026-01-01T00:00:00.000Z", recorded_by: "alice" },
+            ],
+          },
+        },
+        navigation: mockDocWithNav.navigation,
+      };
+
+      render(<DocDetail docWithNav={taskDoc} />);
+
+      const badge = screen.getByText("✔0/✘1");
+      expect(badge).toHaveClass("text-destructive-foreground");
+    });
+
+    it("does not render the destructive variant when evidence_fail === 0", () => {
+      const taskDoc: DocWithNavigation = {
+        doc: {
+          ...mockDocRecord,
+          type: "task",
+          extra: {
+            verification_evidence: [
+              { oracle: "tsc", command: "x", result: "pass", recorded_at: "2026-01-01T00:00:00.000Z", recorded_by: "alice" },
+            ],
+          },
+        },
+        navigation: mockDocWithNav.navigation,
+      };
+
+      render(<DocDetail docWithNav={taskDoc} />);
+
+      const badge = screen.getByText("✔1/✘0");
+      expect(badge).not.toHaveClass("text-destructive-foreground");
     });
   });
 });

@@ -12,10 +12,12 @@
  *     - spec/adr/knowledge/plan each render their expected label
  *     - task: claimed (fresh) + evidence renders "claimed:X ✔p/✘f"
  *     - task: claimed + stale renders the "(stale)" suffix
+ *     - metaBadgeVariant: task with evidence_fail > 0 returns "destructive" (SPEC-037 AC-37-6)
  *
  *   NEGATIVE:
  *     - task: unclaimed with no evidence returns null (nothing to show)
  *     - isNotablePriority returns false for medium/low
+ *     - metaBadgeVariant: task with evidence_fail === 0 returns "outline", not "destructive"
  *
  *   BOUNDARY:
  *     - plan: phase_count === 1 uses singular "phase" (not "phases")
@@ -29,10 +31,11 @@
  *   REGRESSION:
  *     - task: claim_stale explicitly false does NOT render "(stale)"
  *     - isNotablePriority returns true for critical AND high
+ *     - metaBadgeVariant: non-task types always return "outline" regardless of shape
  */
 
 import { describe, it, expect } from "vitest";
-import { formatTypeMetaLabel, isNotablePriority } from "../../../src/lib/type-meta-label";
+import { formatTypeMetaLabel, isNotablePriority, metaBadgeVariant } from "../../../src/lib/type-meta-label";
 import type { DocTypeMeta } from "@lore/core";
 
 describe("formatTypeMetaLabel", () => {
@@ -142,6 +145,36 @@ describe("isNotablePriority", () => {
 
     it("returns false for low", () => {
       expect(isNotablePriority("low")).toBe(false);
+    });
+  });
+});
+
+describe("metaBadgeVariant", () => {
+  describe("happy path", () => {
+    it("returns 'destructive' for a task with evidence_fail > 0 (AC-37-6)", () => {
+      const meta: DocTypeMeta = { t: "task", evidence_pass: 1, evidence_fail: 2 };
+      expect(metaBadgeVariant(meta)).toBe("destructive");
+    });
+  });
+
+  describe("negative", () => {
+    it("returns 'outline' for a task with evidence_fail === 0", () => {
+      const meta: DocTypeMeta = { t: "task", evidence_pass: 3, evidence_fail: 0 };
+      expect(metaBadgeVariant(meta)).toBe("outline");
+    });
+
+    it("returns 'outline' for an unclaimed, unevidenced task", () => {
+      const meta: DocTypeMeta = { t: "task", evidence_pass: 0, evidence_fail: 0 };
+      expect(metaBadgeVariant(meta)).toBe("outline");
+    });
+  });
+
+  describe("regression", () => {
+    it("returns 'outline' for non-task types regardless of shape", () => {
+      expect(metaBadgeVariant({ t: "spec", kind: "tech" })).toBe("outline");
+      expect(metaBadgeVariant({ t: "adr", decision_status: "accepted" })).toBe("outline");
+      expect(metaBadgeVariant({ t: "knowledge", sub_type: "retro" })).toBe("outline");
+      expect(metaBadgeVariant({ t: "plan", phase_count: 4 })).toBe("outline");
     });
   });
 });

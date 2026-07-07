@@ -63,9 +63,11 @@ import { apiSearch } from "@/lib/api";
 const mockedApiSearch = vi.mocked(apiSearch);
 
 // reason: real-shape fixture — `CorpusService.search` returns `SearchHit`
-// (`{id, slug, title, snippet, score}`), NOT a `DocSummary` (no `type`/`status`/
-// `updated_at`). A prior version of this fixture fabricated those fields
-// (SPEC-031 read-path contract drift).
+// (`{id, slug, title, snippet, score, type, status}`, SPEC-037 §2 added the
+// last two), NOT a `DocSummary` (still no `updated_at`). A prior version of
+// this fixture fabricated fields the server never sent (SPEC-031 read-path
+// contract drift) — the lesson here is the opposite direction: `type`/`status`
+// are now genuinely part of the contract, so this fixture must supply them.
 function makeHit(overrides: Partial<SearchHit> = {}): SearchHit {
   return {
     id: "01HHIT00000000000000000001",
@@ -73,6 +75,8 @@ function makeHit(overrides: Partial<SearchHit> = {}): SearchHit {
     title: "Candidate Doc",
     snippet: "...a matching snippet...",
     score: 1.0,
+    type: "spec",
+    status: "active",
     ...overrides,
   };
 }

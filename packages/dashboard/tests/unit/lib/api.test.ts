@@ -12,20 +12,24 @@
  *     - apiSearch returns docs for a query
  *     - apiGetDoc returns DocWithNavigation
  *     - apiGetDoc with resolveMdx=true appends ?resolveMdx=true to path
+ *     - apiGetReady returns { ok: true, value: ReadyRecord[] } on success (SPEC-037 D1)
  *
  *   NEGATIVE:
  *     - Non-2xx response throws ApiError with HTTP status
  *     - Server { ok: false } envelope throws ApiError with server code
  *     - Unknown error code in envelope is preserved
+ *     - apiGetReady returns { ok: false, error } instead of throwing on a server error
  *
  *   BOUNDARY:
  *     - Empty docs array in response is returned as-is
  *     - apiSearch with empty query still builds URL (caller controls enabled)
  *     - apiList with an empty tags[] array omits the tags query param entirely
+ *     - apiGetReady against a plan with zero tasks returns an empty array (still ok:true)
  *
  *   ERROR:
  *     - Timeout (AbortSignal) throws ApiError with code NETWORK_ERROR
  *     - JSON parse failure throws ApiError with code PARSE_ERROR
+ *     - apiGetReady wraps a network failure into { ok: false, error } (never throws)
  *
  *   STATE:
  *     - Multiple sequential calls each get their own response (no shared state)
@@ -33,10 +37,12 @@
  *   REGRESSION:
  *     - Response without Content-Type header still parses (no Content-Type check)
  *     - apiGetDoc URL-encodes the idOrSlug parameter
+ *     - apiGetReady URL-encodes the planIdOrSlug parameter
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { apiGetStatus, apiList, apiSearch, apiGetDoc, ApiError } from "../../../src/lib/api";
+import { apiGetStatus, apiList, apiSearch, apiGetDoc, apiGetReady, ApiError } from "../../../src/lib/api";
+import type { ReadyRecord } from "@lore/core";
 
 // ─── Mock fetch ───────────────────────────────────────────────────────────────
 
@@ -182,13 +188,118 @@ describe("apiSearch", () => {
     // total — a past version of this test asserted a fabricated `data.docs`/`data.total`
     // shape the server never emits (SPEC-031 read-path contract drift).
     it("returns search results under `results`, matching the real server envelope", async () => {
-      const mockData = { results: [{ id: "02", slug: "spec-test", title: "Spec", snippet: "...match...", score: 1.5 }] };
+      const mockData = { results: [{ id: "02", slug: "spec-test", title: "Spec", snippet: "...match...", score: 1.5, type: "spec", status: "active" }] };
       vi.stubGlobal("fetch", makeFetchMock({ ok: true, data: mockData }));
 
       const result = await apiSearch("test");
 
       expect(result.results).toHaveLength(1);
       expect(result.results[0]?.title).toBe("Spec");
+    });
+
+    // reason: SPEC-037 §2 added `type`/`status` to SearchHit so result cards can
+    // render the same badges as DocCard without a second query — pin the passthrough.
+    it("passes through the SPEC-037 type/status fields on each hit", async () => {
+      const mockData = { results: [{ id: "03", slug: "task-x", title: "Task X", snippet: "", score: 0.8, type: "task", status: "draft" }] };
+      vi.stubGlobal("fetch", makeFetchMock({ ok: true, data: mockData }));
+
+      const result = await apiSearch("task");
+
+      expect(result.results[0]?.type).toBe("task");
+      expect(result.results[0]?.status).toBe("draft");
+    });
+  });
+});
+
+describe("apiGetReady", () => {
+  describe("happy path", () => {
+    it("returns { ok: true, value: ReadyRecord[] } on a successful fetch", async () => {
+      const record: ReadyRecord = {
+        task: {
+          id: "01HTASK0000000000000000001",
+          slug: "task-a",
+          type: "task",
+          title: "Task A",
+          status: "draft",
+          updated_at: "2026-07-01T00:00:00.000Z",
+          tags: [],
+          priority: "medium",
+        },
+        ready: true,
+        unmet_blockers: [],
+        evidence_count: 0,
+      };
+      vi.stubGlobal("fetch", makeFetchMock({ ok: true, data: [record] }));
+
+      const result = await apiGetReady("plan-a");
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toHaveLength(1);
+        expect(result.value[0]?.task.slug).toBe("task-a");
+      }
+    });
+  });
+
+  describe("boundary", () => {
+    it("returns an empty array (still ok:true) for a plan with zero tasks", async () => {
+      vi.stubGlobal("fetch", makeFetchMock({ ok: true, data: [] }));
+
+      const result = await apiGetReady("plan-empty");
+
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.value).toHaveLength(0);
+    });
+  });
+
+  describe("negative: server error", () => {
+    it("returns { ok: false, error } instead of throwing on a 422 (non-plan target)", async () => {
+      vi.stubGlobal(
+        "fetch",
+        makeFetchMock({ ok: false, error: { code: "VALIDATION_ERROR", message: "not a plan" } }, 422),
+      );
+
+      const result = await apiGetReady("spec-not-a-plan");
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error).toBeInstanceOf(ApiError);
+        expect(result.error.status).toBe(422);
+        expect(result.error.code).toBe("VALIDATION_ERROR");
+      }
+    });
+  });
+
+  describe("error: network failure", () => {
+    it("wraps a network failure into { ok: false, error } rather than throwing", async () => {
+      vi.stubGlobal("fetch", makeNetworkErrorMock());
+
+      const result = await apiGetReady("plan-a");
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.code).toBe("NETWORK_ERROR");
+    });
+  });
+
+  describe("regression: URL encoding", () => {
+    it("URL-encodes the planIdOrSlug parameter", async () => {
+      const calls: string[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockImplementation((url: string) => {
+          calls.push(url);
+          return Promise.resolve(
+            new Response(JSON.stringify({ ok: true, data: [] }), {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }),
+          );
+        }),
+      );
+
+      await apiGetReady("plan with spaces");
+
+      expect(calls[0]).toContain(encodeURIComponent("plan with spaces"));
     });
   });
 });

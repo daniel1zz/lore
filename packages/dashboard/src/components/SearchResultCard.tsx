@@ -1,19 +1,26 @@
 /**
  * SearchResultCard — compact card for a single full-text search hit.
- * Purpose: renders title, snippet, and slug for a `SearchHit` (search results carry a
- *   BM25 score + content snippet, NOT the full `DocSummary` shape — no `type`/`status`/
- *   `updated_at` — so this is deliberately a separate component from `DocCard`, which
- *   requires those fields. Reusing `DocCard` here would force fabricating fields the
- *   server never sends.
+ * Purpose: renders title, snippet, slug, and (SPEC-037 D5) type/status badges
+ *   for a `SearchHit` — the SPEC-037 §2 contract added `type`/`status` fields
+ *   to `SearchHit` specifically so this card can carry the same badges as
+ *   `DocCard` without a second query. Still a deliberately separate component
+ *   from `DocCard` (no `updated_at`, and the snippet needs mark-splitting
+ *   `DocCard` has no reason to do).
  * Public surface: SearchResultCard, SearchResultCardProps
- * Invariants: read-only; no mutations. Snippet is plain text (FTS5 `snippet()` wraps
- *   matches in `[` / `]`, not HTML) — safe to render as text, never via
- *   dangerouslySetInnerHTML.
+ * Invariants: read-only; no mutations. The snippet's matched spans are wrapped
+ *   in `SNIPPET_MARK_OPEN`/`SNIPPET_MARK_CLOSE` control-character sentinels
+ *   (never `[`/`]` — those collide with literal brackets in document bodies,
+ *   the pre-037 bug this replaces); `splitSnippetIntoSegments`
+ *   (`@/lib/search-snippet`) turns them into `<mark>` elements — never
+ *   `dangerouslySetInnerHTML`.
  * Side-effect class: pure (renders received data; navigation is caller's concern via onClick)
  */
 
 import type { SearchHit } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { getTypeBadgeVariant, getStatusBadgeVariant } from "@/lib/doc-badge-variants";
+import { splitSnippetIntoSegments } from "@/lib/search-snippet";
 
 export interface SearchResultCardProps {
   /** The search hit to render. */
@@ -23,12 +30,15 @@ export interface SearchResultCardProps {
 }
 
 /**
- * Compact search hit card. Renders title, snippet, and slug.
+ * Compact search hit card. Renders title, type/status badges, mark-highlighted
+ * snippet, and slug.
  *
  * @example
  * <SearchResultCard hit={searchHit} onClick={() => router.navigate({ to: '/docs/$id', params: { id: hit.id } })} />
  */
 export function SearchResultCard({ hit, onClick }: SearchResultCardProps): React.ReactElement {
+  const segments = splitSnippetIntoSegments(hit.snippet);
+
   return (
     <Card
       className="cursor-pointer hover:shadow-md transition-shadow"
@@ -44,10 +54,30 @@ export function SearchResultCard({ hit, onClick }: SearchResultCardProps): React
       }}
     >
       <CardHeader className="pb-2">
-        <CardTitle className="text-base leading-tight">{hit.title}</CardTitle>
+        <div className="flex items-start justify-between gap-2">
+          <CardTitle className="text-base leading-tight">{hit.title}</CardTitle>
+          <div className="flex gap-1 shrink-0">
+            <Badge variant={getTypeBadgeVariant(hit.type)} className="text-xs">
+              {hit.type}
+            </Badge>
+            <Badge variant={getStatusBadgeVariant(hit.status)} className="text-xs">
+              {hit.status}
+            </Badge>
+          </div>
+        </div>
       </CardHeader>
       <CardContent>
-        <p className="text-xs text-muted-foreground mb-1">{hit.snippet}</p>
+        <p className="text-xs text-muted-foreground mb-1">
+          {segments.map((segment, index) =>
+            segment.matched ? (
+              <mark key={index} className="bg-yellow-200 text-yellow-950 dark:bg-yellow-900 dark:text-yellow-100 rounded-sm px-0.5">
+                {segment.text}
+              </mark>
+            ) : (
+              <span key={index}>{segment.text}</span>
+            ),
+          )}
+        </p>
         <p className="text-xs text-muted-foreground">
           <span className="font-mono text-xs">{hit.slug}</span>
         </p>

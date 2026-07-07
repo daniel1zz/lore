@@ -221,4 +221,22 @@ describe("DocCard", () => {
       expect(screen.getByText("claimed:carol ✔2/✘1")).toBeInTheDocument();
     });
   });
+
+  describe("SPEC-037 AC-37-6: danger color", () => {
+    function taskDoc(meta: Extract<DocSummary["meta"], { t: "task" }>): DocSummary {
+      return { ...mockDoc, type: "task", meta };
+    }
+
+    it("renders the destructive badge variant when evidence_fail > 0", () => {
+      render(<DocCard doc={taskDoc({ t: "task", evidence_pass: 1, evidence_fail: 3 })} />);
+      const badge = screen.getByText("✔1/✘3");
+      expect(badge).toHaveClass("text-destructive-foreground");
+    });
+
+    it("does not render the destructive variant when evidence_fail === 0", () => {
+      render(<DocCard doc={taskDoc({ t: "task", evidence_pass: 2, evidence_fail: 0 })} />);
+      const badge = screen.getByText("✔2/✘0");
+      expect(badge).not.toHaveClass("text-destructive-foreground");
+    });
+  });
 });
