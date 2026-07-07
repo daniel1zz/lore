@@ -48,6 +48,7 @@ import { apiGetPendingReview, apiGetJudgments } from "@/lib/api";
 import type { PendingDocRow } from "@/lib/api";
 import type { ReviewJudgment } from "@lore/core";
 import { JudgmentBadge } from "@/components/judgment-badge";
+import { formatTypeMetaLabel, metaBadgeVariant } from "@/lib/type-meta-label";
 import { apiApproveDoc, apiRejectDoc, DashboardApiError } from "@/api/mutations";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
@@ -178,6 +179,7 @@ export function TriageQueue({ onNavigate }: TriageQueueProps): React.ReactElemen
             const isAdjudicating = adjudicatingId === doc.id;
             const isSubmitting = submittingId === doc.id;
             const blockingQuestions = judgment?.blocking_questions ?? [];
+            const metaLabel = doc.meta !== undefined ? formatTypeMetaLabel(doc.meta) : null;
 
             return (
               <div key={doc.id} className="rounded-lg border p-3 space-y-2">
@@ -186,6 +188,14 @@ export function TriageQueue({ onNavigate }: TriageQueueProps): React.ReactElemen
                     <Badge variant="outline" className="text-xs shrink-0">
                       {doc.type}
                     </Badge>
+                    {metaLabel !== null && (
+                      <Badge
+                        variant={doc.meta !== undefined ? metaBadgeVariant(doc.meta) : "outline"}
+                        className="text-xs shrink-0"
+                      >
+                        {metaLabel}
+                      </Badge>
+                    )}
                     <button
                       type="button"
                       className="text-left text-sm font-medium text-primary hover:underline truncate"

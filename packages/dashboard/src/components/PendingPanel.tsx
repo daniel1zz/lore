@@ -17,6 +17,10 @@
  *     typecheck here. A plain anchor works as normal same-origin navigation once
  *     F3's route lands (SPA history-fallback already serves index.html for
  *     unknown client paths).
+ *   - Each row's type badge + `formatTypeMetaLabel` meta badge (SPEC-036 §2 D3
+ *     pending-queue extension) sit in a `min-w-0` flex group ahead of the title
+ *     button, mirroring `TriageQueue`'s row layout, so the title's `truncate`
+ *     still has room to shrink instead of being pushed off by the badges.
  * Side-effect class: IO (fetch via TanStack Query)
  * Source: SPEC-033 §2.2
  */
@@ -26,6 +30,8 @@ import { apiGetPendingReview, apiGetJudgments } from "@/lib/api";
 import type { PendingDocRow } from "@/lib/api";
 import type { ReviewJudgment } from "@lore/core";
 import { JudgmentBadge } from "@/components/judgment-badge";
+import { formatTypeMetaLabel, metaBadgeVariant } from "@/lib/type-meta-label";
+import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const PENDING_PANEL_LIMIT = 8;
@@ -83,18 +89,34 @@ export function PendingPanel({ onNavigate }: PendingPanelProps): React.ReactElem
 
       {data !== undefined && data.length > 0 && (
         <ul className="space-y-2">
-          {data.map(({ doc, judgment }) => (
-            <li key={doc.id} className="flex items-center justify-between gap-2 text-sm">
-              <button
-                type="button"
-                className="text-left text-primary hover:underline truncate"
-                onClick={() => onNavigate?.(doc.id)}
-              >
-                {doc.title}
-              </button>
-              <JudgmentBadge judgment={judgment} docVersion={doc.version} />
-            </li>
-          ))}
+          {data.map(({ doc, judgment }) => {
+            const metaLabel = doc.meta !== undefined ? formatTypeMetaLabel(doc.meta) : null;
+            return (
+              <li key={doc.id} className="flex items-center justify-between gap-2 text-sm">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <Badge variant="outline" className="text-xs shrink-0">
+                    {doc.type}
+                  </Badge>
+                  {metaLabel !== null && (
+                    <Badge
+                      variant={doc.meta !== undefined ? metaBadgeVariant(doc.meta) : "outline"}
+                      className="text-xs shrink-0"
+                    >
+                      {metaLabel}
+                    </Badge>
+                  )}
+                  <button
+                    type="button"
+                    className="text-left text-primary hover:underline truncate"
+                    onClick={() => onNavigate?.(doc.id)}
+                  >
+                    {doc.title}
+                  </button>
+                </div>
+                <JudgmentBadge judgment={judgment} docVersion={doc.version} />
+              </li>
+            );
+          })}
         </ul>
       )}
     </section>
