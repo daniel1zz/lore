@@ -21,6 +21,7 @@ import type {
   CalibrationRecord,
   DocId,
   DocRecord,
+  DocStatus,
   DocType,
   LinkRecord,
   LinkType,
@@ -28,7 +29,14 @@ import type {
   Slug,
   VersionRecord,
 } from "@lore/core";
-import { err, ok, type LoreError, type Result } from "@lore/core";
+import {
+  err,
+  ok,
+  SNIPPET_MARK_CLOSE,
+  SNIPPET_MARK_OPEN,
+  type LoreError,
+  type Result,
+} from "@lore/core";
 import type {
   AuditFilters,
   CalibrationRecordWithPromptVersion,
@@ -161,6 +169,8 @@ function libsqlRowToFtsRow(row: Row): FtsRow {
     title: rowStr(row, "title"),
     snippet: rowStr(row, "snippet"),
     rank: rowNum(row, "rank"),
+    type: rowStr(row, "type"),
+    status: rowStr(row, "status"),
   };
 }
 
@@ -686,7 +696,7 @@ export class TursoStore implements StoreInterface {
 
       const excludeDeleted = filters?.exclude_deleted !== false;
       const docClauses: string[] = [];
-      const docParams: InValue[] = [safeQuery];
+      const docParams: InValue[] = [SNIPPET_MARK_OPEN, SNIPPET_MARK_CLOSE, safeQuery];
 
       if (excludeDeleted) {
         docClauses.push("d.deleted_at IS NULL");
@@ -707,8 +717,10 @@ export class TursoStore implements StoreInterface {
           d.id,
           d.slug,
           d.title,
-          snippet(docs_fts, 1, '[', ']', '...', 32) AS snippet,
-          f.rank
+          snippet(docs_fts, 1, ?, ?, '...', 32) AS snippet,
+          f.rank,
+          d.type,
+          d.status
         FROM docs_fts f
         JOIN docs d ON d.rowid = f.rowid
         WHERE docs_fts MATCH ?
@@ -725,6 +737,8 @@ export class TursoStore implements StoreInterface {
           title: ftsRow.title,
           snippet: ftsRow.snippet ?? "",
           score: Number(ftsRow.rank),
+          type: ftsRow.type as DocType,
+          status: ftsRow.status as DocStatus,
         };
       });
 

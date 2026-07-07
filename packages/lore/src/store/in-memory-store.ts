@@ -17,7 +17,14 @@ import type {
   Slug,
   VersionRecord,
 } from "@lore/core";
-import { err, ok, type LoreError, type Result } from "@lore/core";
+import {
+  err,
+  ok,
+  SNIPPET_MARK_CLOSE,
+  SNIPPET_MARK_OPEN,
+  type LoreError,
+  type Result,
+} from "@lore/core";
 import type {
   AuditFilters,
   CalibrationRecordWithPromptVersion,
@@ -315,6 +322,8 @@ export class InMemoryStore implements StoreInterface {
           title: doc.title,
           snippet,
           score: 0,
+          type: doc.type,
+          status: doc.status,
         });
       }
     }
@@ -484,6 +493,13 @@ export class InMemoryStore implements StoreInterface {
  * Extract a short snippet from content that includes the match context.
  * Returns at most 120 chars around the first match, or the first 120 chars
  * if the term appears near the start.
+ *
+ * The matched span is wrapped in {@link SNIPPET_MARK_OPEN}/
+ * {@link SNIPPET_MARK_CLOSE} (SPEC-037 §2 D5) — mirrors SQLiteStore/TursoStore's
+ * FTS5 `snippet()` delimiters so this in-memory fake is a faithful test
+ * double for the highlight contract. The sentinels are inserted around the
+ * matched substring only; any literal `[`/`]` characters already present in
+ * `content` pass through untouched and are never mistaken for highlights.
  */
 function buildSnippet(content: string, lowerQuery: string): string {
   const lowerContent = content.toLowerCase();
@@ -497,5 +513,16 @@ function buildSnippet(content: string, lowerQuery: string): string {
   const end = Math.min(content.length, idx + lowerQuery.length + 60);
   const prefix = start > 0 ? "..." : "";
   const suffix = end < content.length ? "..." : "";
-  return prefix + content.slice(start, end) + suffix;
+  const before = content.slice(start, idx);
+  const match = content.slice(idx, idx + lowerQuery.length);
+  const after = content.slice(idx + lowerQuery.length, end);
+  return (
+    prefix +
+    before +
+    SNIPPET_MARK_OPEN +
+    match +
+    SNIPPET_MARK_CLOSE +
+    after +
+    suffix
+  );
 }
