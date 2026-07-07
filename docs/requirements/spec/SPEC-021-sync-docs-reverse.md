@@ -154,7 +154,7 @@ SPEC-018 reads only `docs/requirements/spec/`. New types need new directories. P
 | Question | Ratified Answer |
 |---|---|
 | Q1 ID-numbering policy | **C: `.lore/export-index.json`** stores first-time assignment; future runs reuse per-doc-id → human-id mapping. Deterministic + human-eyeball-friendly. |
-| Q2 Drift resolution UX | **Warning-only in v1** — mirrors SPEC-018 §2.1 stance. `--force` writes corpus body over file; **deferred to v2** consistent with SPEC-018's `--force`. |
+| Q2 Drift resolution UX | **Warning-only in v1** — mirrors SPEC-018 §2.1 stance. `--force` writes corpus body over file; originally deferred to v2 consistent with SPEC-018's `--force`. **Superseded by Amendment A2 (2026-07-07): `--force` is now implemented** — see below. |
 | Q3 Auto-export after AI create | **Manual only in v1**. Config option `ai.auto_export: boolean` deferred to SPEC-021.1 follow-up. `lore create --ai` writes only to corpus; user runs `lore export-docs` afterwards. |
 | Q4 Frontmatter `parent:` shape | **Topological export — parents written first.** If a corpus-only parent has no exported file yet, export it implicitly before children. Human-ID resolution via `.lore/export-index.json`. |
 | Q5 task `extra.plan_id` resolution | **Same `.lore/export-index.json` table.** Resolve `plan_id` (ULID) → human ID (e.g. `PLAN-001`) at write time. |
@@ -247,7 +247,7 @@ For each corpus doc that already has an entry in `.lore/export-index.json`:
 1. Read the file at `mapping[doc_id].file_path`.
 2. Strip frontmatter, normalise whitespace.
 3. Compare against corpus `doc.content` (also whitespace-normalised).
-4. If differ → `⚠ drift: <file>` + add to `report.drift[]`, do NOT overwrite (unless `--force`, which is v2).
+4. If differ → `⚠ drift: <file>` + add to `report.drift[]`, do NOT overwrite unless `--force` is passed (implemented per Amendment A2), in which case the file is rewritten and reported in `report.overwritten[]` instead.
 
 Frontmatter itself is NOT compared (title/status/priority may legitimately differ if user edited via CLI between exports — body is the diff signal).
 
@@ -265,7 +265,7 @@ Frontmatter itself is NOT compared (title/status/priority may legitimately diffe
 
 ### 9.9 Out of §9 scope (still SPEC-021)
 
-- `--force` to overwrite drift (Q2 defers to v2).
+- ~~`--force` to overwrite drift (Q2 defers to v2)~~ — implemented, see Amendment A2.
 - `ai.auto_export` config option (Q3 defers to SPEC-021.1).
 - Version-history export (`lore export-versions` is a separate future SPEC).
 - MCP / HTTP surface for `export-docs`.
@@ -292,3 +292,28 @@ Frontmatter itself is NOT compared (title/status/priority may legitimately diffe
 - AC-A1-4: after a title-claim of `SPEC-036` while the counter sits at 035, the next sequential allocation skips to `SPEC-037`.
 - AC-A1-5: title "SPEC-7 — …" normalizes to `SPEC-007`.
 - AC-A1-6: titles with no leading `{PREFIX}-{N}` (or a foreign prefix) behave exactly as before (pure sequential) — regression: existing allocation tests stay green.
+
+## Amendment A2 (2026-07-07): `--force` implemented; drift-check basis clarified as SSOT-correct
+
+**Incident** (`KN — export-docs drift check false-positives on projected docs`): a report claimed two defects: (1) drift detection compares the on-disk file against the RAW corpus body while export writes a `renderResolvedToMarkdown` PROJECTION (SPEC-032 §3.3), so any placeholder-bearing doc would drift forever; (2) the drift warning recommends `--force`, but `--force` was rejected as "(v2, not yet implemented)".
+
+**Finding on (1)**: already fixed by SPEC-032 T3 (commit `5ff4902`) before this amendment — `ExportDocsService.resolveDocBody(doc)` is called ONCE per doc and its output (`resolvedBody`) is used for BOTH the drift comparison and the on-write content (see module header CRITICAL note in `export-docs-service.ts`). No further code change was needed for this half; two regression tests were added to `export-docs-service.test.ts` to lock it in:
+- an unchanged placeholder-bearing doc re-exports `skipped_clean` (already covered before this amendment),
+- a placeholder-bearing doc whose children/links CHANGE since the last export now correctly reports `drift` — this is a TRUE positive (the file is a stale projection of the CURRENT corpus state, not a comparison-basis bug) — newly covered by "STATE — corpus children change under a placeholder doc → drift IS reported".
+
+**Finding on (2) — resolved by implementing `--force` for real**, superseding §8 Q2's "deferred to v2" stance:
+
+1. `ExportDocsService.exportDocs({ force: true })` no longer rejects with `VALIDATION_ERROR`. When a doc's on-disk file differs from the current expected content (frontmatter + resolved body), the file is rewritten in place with fresh frontmatter and body — same construction path used for newly-created files (`buildFileContent`, factored out of the create-path so force-overwrite doesn't only patch the body while leaving stale frontmatter).
+2. Overwritten paths are reported in a new `ExportReport.overwritten: string[]` field, never in `drift`. `dryRun: true` + `force: true` reports `overwritten` without writing (mirrors `created`'s dry-run semantics).
+3. Files with no drift are unaffected by `force` (still `skipped_clean`) — force never touches a file that already matches.
+4. CLI (`export-docs.ts`): the early `--force` rejection is removed; `--help` text and the drift-warning copy no longer reference "(v2, not yet implemented)" — the warning now explains the file is either hand-edited or a stale projection, and that `--force` (or manual reconciliation) resolves it.
+
+**Why (a) over (b)** (the two options considered — implement `--force` for real, vs. drop it from the warning copy and document the delete+re-export workaround): the writer path (`buildFrontmatterString` + `canonicaliseBody(resolvedBody)` + a plain write) already existed for the create branch; force-overwrite only needed to reuse it for an existing path (no `O_EXCL`) instead of introducing a second, permanently-broken promise in the CLI's own help text and warning copy. Implementing it removes a standing "the tool describes a capability it does not have" inconsistency at comparable cost to rewording it away.
+
+**Acceptance criteria**:
+
+- AC-EXPORT-9 (re-scoped): `force: true` on a drifted file overwrites it with the current expected content, reported in `overwritten`, never in `drift`.
+- `force: true` on an already-clean file is a no-op (still `skipped_clean`, file bytes untouched).
+- `force: true, dryRun: true` reports `overwritten` without writing to disk.
+- After a force-overwrite, a subsequent plain (non-force) export converges to `skipped_clean` (proves the overwrite actually reset the comparison basis).
+- Raw-body (non-placeholder) doc drift behavior is unchanged when `force` is omitted — regression guard.
