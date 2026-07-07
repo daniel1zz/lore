@@ -548,6 +548,83 @@ describe("assessPlan — diff-section truncation is file-boundary-aware (SPEC-02
   });
 });
 
+// ─── bugfix F3: diff-omission truncation manifest ────────────────────────────
+//
+// Root cause (knowledge-assess-diff-truncation-systematically-hides-tests-from): the judge
+// could not distinguish "file doesn't exist" from "file cut for budget" — omitted diff
+// files simply vanished from the prompt, so the judge reported gaps for tests that DO
+// exist but sorted into the dropped set. Fix: buildAssessPrompt now appends a "Truncation
+// Manifest" section (grouped production/test/other) built from the SAME
+// `diffResult.omittedFiles` array that already feeds `judgment.truncated[]` — single
+// source, no second bookkeeping (spec ACs 3 + item 3 of the task).
+
+describe("buildAssessPrompt — diff-omission truncation manifest (bugfix F3)", () => {
+  const srcChunk =
+    `diff --git a/packages/lore/src/foo.ts b/packages/lore/src/foo.ts\nindex 1..2 100644\n` +
+    `--- a/packages/lore/src/foo.ts\n+++ b/packages/lore/src/foo.ts\n@@ -1,1 +1,1 @@\n${"+".repeat(50)}`;
+  const testChunk =
+    `diff --git a/packages/lore/tests/unit/foo.test.ts b/packages/lore/tests/unit/foo.test.ts\n` +
+    `index 1..2 100644\n--- a/packages/lore/tests/unit/foo.test.ts\n+++ b/packages/lore/tests/unit/foo.test.ts\n` +
+    `@@ -1,1 +1,1 @@\n${"+".repeat(50)}`;
+  const otherChunk =
+    `diff --git a/docs/readme.md b/docs/readme.md\nindex 1..2 100644\n--- a/docs/readme.md\n` +
+    `+++ b/docs/readme.md\n@@ -1,1 +1,1 @@\n${"+".repeat(50)}`;
+
+  it("an over-budget diff's prompt carries the manifest with every dropped file, grouped, plus the do-not-penalize instruction", async () => {
+    const store = new InMemoryStore();
+    const bundle = await makeBundle(store);
+    const diffText = `${srcChunk}\n${testChunk}\n${otherChunk}`;
+    // Budget fits only the highest-priority (source) chunk — test + other chunks are dropped.
+    const budgets = { ...DEFAULT_BUDGETS, max_diff_chars: srcChunk.length + 10 };
+    expect(diffText.length).toBeGreaterThan(budgets.max_diff_chars); // sanity: must actually truncate
+
+    const { prompt, truncated } = buildAssessPrompt(bundle, diffText, budgets);
+
+    expect(prompt).toContain("# Truncation Manifest");
+    expect(prompt).toContain("Test files omitted (1):");
+    expect(prompt).toContain("packages/lore/tests/unit/foo.test.ts");
+    expect(prompt).toContain("Other files omitted (1):");
+    expect(prompt).toContain("docs/readme.md");
+    expect(prompt).toContain("Do NOT report them as missing");
+    expect(prompt.toLowerCase()).toContain("not absent");
+
+    // Same data source as truncated[] — every manifest entry has a matching diff:<path> marker.
+    expect(truncated).toContain("diff:packages/lore/tests/unit/foo.test.ts");
+    expect(truncated).toContain("diff:docs/readme.md");
+    // The kept (source) file must NOT appear as omitted anywhere.
+    expect(prompt).not.toMatch(/Production files omitted.*foo\.ts/s);
+    expect(truncated).not.toContain("diff:packages/lore/src/foo.ts");
+  });
+
+  it("a within-budget diff's prompt carries NO manifest section at all", async () => {
+    const store = new InMemoryStore();
+    const bundle = await makeBundle(store);
+    const diffText = "diff --git a/foo.ts b/foo.ts\n+added line\n"; // well under default 24000 budget
+
+    const { prompt, truncated } = buildAssessPrompt(bundle, diffText, DEFAULT_BUDGETS);
+
+    expect(prompt).not.toContain("# Truncation Manifest");
+    expect(truncated).toEqual([]);
+  });
+
+  it("regression: judgment.truncated still records per-file diff:<path> markers unchanged by the manifest addition (SPEC-028 AC-AE-3)", async () => {
+    const store = new InMemoryStore();
+    const bundle = await makeBundle(store);
+    const diffText = `${srcChunk}\n${testChunk}\n${otherChunk}`;
+    const budgets = { ...DEFAULT_BUDGETS, max_diff_chars: srcChunk.length + 10 };
+
+    const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
+    const { service } = makeAssessService({ provider, budgets });
+
+    const result = await service.assessPlan(bundle, { diffText });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.judgment.truncated).toContain("diff:packages/lore/tests/unit/foo.test.ts");
+    expect(result.value.judgment.truncated).toContain("diff:docs/readme.md");
+    expect(result.value.judgment.truncated).not.toContain("diff"); // old bare marker never reappears
+  });
+});
+
 // ─── SPEC-029 AC-AR-1: both judge prompts state the 300-char reasoning limit ──
 
 describe("buildAssessPrompt / buildAssessRetryPrompt — reasoning-limit statement (SPEC-029 AC-AR-1)", () => {
