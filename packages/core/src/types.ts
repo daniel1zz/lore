@@ -235,6 +235,36 @@ export interface DocSummary {
   meta?: DocTypeMeta;
 }
 
+// ─── SPEC-037: Search Highlight Sentinels + SearchHit ──────────────────────
+
+/**
+ * Snippet highlight delimiters — SSOT for both the store layer (SQLite/Turso
+ * FTS5 `snippet()` calls + InMemoryStore's substring-search fake) and the
+ * dashboard's `SearchResultCard` renderer.
+ *
+ * C0 control characters cannot occur in authored markdown content, so they
+ * cannot collide with literal `[`/`]` characters a document's body might
+ * contain (SPEC-037 D5 — the previous `'['`/`']'` delimiters did collide).
+ *
+ * Source: SPEC-037 §2.
+ */
+export const SNIPPET_MARK_OPEN = "";
+export const SNIPPET_MARK_CLOSE = "";
+
+/** One full-text search result row (SPEC-037 §2 — extends the pre-037 shape
+ *  with `type`/`status` so result cards can render type/status badges without
+ *  a second query). `snippet` wraps matched spans in
+ *  {@link SNIPPET_MARK_OPEN}/{@link SNIPPET_MARK_CLOSE}. */
+export interface SearchHit {
+  id: DocId;
+  slug: Slug;
+  title: string;
+  snippet: string;
+  score: number;
+  type: DocType;
+  status: DocStatus;
+}
+
 // ─── SPEC-024: Caller Surface + AI Default Source ──────────────────────────
 
 /**

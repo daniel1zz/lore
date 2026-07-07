@@ -14,13 +14,22 @@ import type {
   CalibrationRecord,
   DocId,
   DocRecord,
+  DocStatus,
+  DocType,
   LinkRecord,
   LinkType,
   ReviewJudgment,
   Slug,
   VersionRecord,
 } from "@lore/core";
-import { err, ok, type LoreError, type Result } from "@lore/core";
+import {
+  err,
+  ok,
+  SNIPPET_MARK_CLOSE,
+  SNIPPET_MARK_OPEN,
+  type LoreError,
+  type Result,
+} from "@lore/core";
 import type {
   AuditFilters,
   CalibrationRecordWithPromptVersion,
@@ -519,8 +528,10 @@ export class SQLiteStore implements StoreInterface {
           d.id,
           d.slug,
           d.title,
-          snippet(docs_fts, 1, '[', ']', '...', 32) AS snippet,
-          f.rank
+          snippet(docs_fts, 1, ?, ?, '...', 32) AS snippet,
+          f.rank,
+          d.type,
+          d.status
         FROM docs_fts f
         JOIN docs d ON d.rowid = f.rowid
         WHERE docs_fts MATCH ?
@@ -530,7 +541,12 @@ export class SQLiteStore implements StoreInterface {
 
       const rows = this.db
         .prepare(sql)
-        .all(safeQuery, ...docParams) as FtsRow[];
+        .all(
+          SNIPPET_MARK_OPEN,
+          SNIPPET_MARK_CLOSE,
+          safeQuery,
+          ...docParams,
+        ) as FtsRow[];
 
       const hits: SearchHit[] = rows.map((row) => ({
         id: row.id,
@@ -540,6 +556,8 @@ export class SQLiteStore implements StoreInterface {
         // FTS5 rank is a BM25 float; bun:sqlite may return bigint for integer columns
         // but BM25 scores are fractional so Number() is safe here.
         score: typeof row.rank === "bigint" ? Number(row.rank) : row.rank,
+        type: row.type as DocType,
+        status: row.status as DocStatus,
       }));
 
       // Tags filter applied in-memory if needed

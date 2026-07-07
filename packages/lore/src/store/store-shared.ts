@@ -84,12 +84,19 @@ export interface AuditRow {
   details: string;
 }
 
+/**
+ * Raw row from the `docs_fts` search join.
+ * `type`/`status` are the docs-table columns joined in alongside id/slug/title
+ * (SPEC-037 §2 D5) so `SearchHit` can carry them with zero extra queries.
+ */
 export interface FtsRow {
   id: string;
   slug: string;
   title: string;
   snippet: string;
   rank: number | bigint;
+  type: string;
+  status: string;
 }
 
 /**

@@ -34,6 +34,7 @@ import type {
   ReviewJudgment,
   VersionRecord,
 } from "@lore/core";
+import { SNIPPET_MARK_CLOSE, SNIPPET_MARK_OPEN } from "@lore/core";
 
 // ─── Factories ───────────────────────────────────────────────────────────────
 
@@ -780,6 +781,74 @@ describe("InMemoryStore", () => {
       if (!result.ok) return;
       const ids = result.value.map((h) => h.id);
       expect(ids).toContain(doc.id);
+    });
+
+    // SPEC-037 D5 — snippet highlight sentinels replace literal '['/']'
+    it("AC-37-8: snippet wraps the matched term in the control-char sentinels, not literal brackets", async () => {
+      const doc = makeDoc({
+        slug: "prd-sentinel-match",
+        title: "Sentinel Match Test",
+        content:
+          "This document explains the retrogradation protocol used by the sync engine.",
+      });
+      await store.insert(doc);
+
+      const result = await store.search("retrogradation");
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      const hit = result.value.find((h) => h.id === doc.id);
+      expect(hit).toBeDefined();
+      expect(hit!.snippet).toBe(
+        `This document explains the ${SNIPPET_MARK_OPEN}retrogradation${SNIPPET_MARK_CLOSE} protocol used by the sync engine.`,
+      );
+      expect(hit!.snippet).not.toContain("[");
+      expect(hit!.snippet).not.toContain("]");
+    });
+
+    // A document whose body contains literal '[brackets]' must not have them
+    // misread as highlight markers — only the real substring match is wrapped.
+    it("AC-37-8: literal brackets in doc content are not treated as highlight markers", async () => {
+      const doc = makeDoc({
+        slug: "prd-literal-brackets",
+        title: "Literal Brackets Test",
+        content:
+          "See the flowchart [figure 3] for the full walkthrough of the system.",
+      });
+      await store.insert(doc);
+
+      const result = await store.search("walkthrough");
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      const hit = result.value.find((h) => h.id === doc.id);
+      expect(hit).toBeDefined();
+      // Literal brackets pass through untouched...
+      expect(hit!.snippet).toContain("[figure 3]");
+      // ...while only the real match is wrapped in sentinels.
+      expect(hit!.snippet).toContain(
+        `${SNIPPET_MARK_OPEN}walkthrough${SNIPPET_MARK_CLOSE}`,
+      );
+    });
+
+    // SPEC-037 §2 — SearchHit now carries type + status (no extra query needed
+    // in-memory since the doc is already fully materialized)
+    it("AC-37-8: hits carry the doc's type and status", async () => {
+      const doc = makeDoc({
+        slug: "spec-hit-meta",
+        title: "Hit Metadata Test",
+        content: "Covers the metadata propagation requirement end to end.",
+        type: "spec",
+        role: "spec",
+        status: "approved",
+      });
+      await store.insert(doc);
+
+      const result = await store.search("metadata");
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      const hit = result.value.find((h) => h.id === doc.id);
+      expect(hit).toBeDefined();
+      expect(hit!.type).toBe("spec");
+      expect(hit!.status).toBe("approved");
     });
 
     it("search excludes soft-deleted docs by default", async () => {

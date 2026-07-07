@@ -15,10 +15,20 @@ import type {
   LinkRecord,
   LinkType,
   ReviewJudgment,
+  SearchHit,
   Slug,
   VersionRecord,
 } from "@lore/core";
 import type { LoreError, Result } from "@lore/core";
+
+/**
+ * Re-exported for backward compatibility — every store + the service layer
+ * imports `SearchHit` from this module. `@lore/core` is the SSOT (SPEC-037
+ * §2): the dashboard also needs the type/status-carrying shape and can only
+ * import the browser-safe `@lore/core` barrel, never this Node-adjacent
+ * module.
+ */
+export type { SearchHit };
 
 // ─── Update Options ────────────────────────────────────────────────────────
 
@@ -54,14 +64,6 @@ export interface StoreFilters {
   tags?: string[];
   /** Default: true. When false, soft-deleted docs are included. */
   exclude_deleted?: boolean;
-}
-
-export interface SearchHit {
-  id: DocId;
-  slug: Slug;
-  title: string;
-  snippet: string;
-  score: number;
 }
 
 export interface AuditFilters {
