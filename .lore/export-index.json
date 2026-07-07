@@ -564,6 +564,30 @@
     "01KWXXMZJQ6HC0NMMYE6AT4H8V": {
       "human_id": "SPEC-037",
       "file_path": "docs/requirements/spec/SPEC-037-spec-037-dashboard-execution-tracking-surface-read.md"
+    },
+    "01KWXXX82EE9C565Q18RHJZ8NQ": {
+      "human_id": "PLAN-016",
+      "file_path": "docs/requirements/plan/PLAN-016-spec-037-implementation-execution-tracking-surface.md"
+    },
+    "01KWXXXPS1H9THVV97QEDR9ZE0": {
+      "human_id": "TASK-062",
+      "file_path": "docs/requirements/task/TASK-062-d6-copy-de-jargon-triagequeue-newdocmodal.md"
+    },
+    "01KWXXXPNVENWKMTCPZ7PW3Q3Z": {
+      "human_id": "TASK-063",
+      "file_path": "docs/requirements/task/TASK-063-d1-frontend-d2-d3-d5-frontend-execution-visibility.md"
+    },
+    "01KWXXXPJM9C9JDYPH39PM8J9B": {
+      "human_id": "TASK-064",
+      "file_path": "docs/requirements/task/TASK-064-d4-doctree-toggle-navigate-gesture-split.md"
+    },
+    "01KWXXXPF3HD8GF9A497VP4CRZ": {
+      "human_id": "TASK-065",
+      "file_path": "docs/requirements/task/TASK-065-d1-backend-get-api-ready-route.md"
+    },
+    "01KWXXXPBP0M0BBKRHZH9NWWSM": {
+      "human_id": "TASK-066",
+      "file_path": "docs/requirements/task/TASK-066-d5-backend-snippet-sentinels-searchhit-type-status.md"
     }
   }
 }
