@@ -525,6 +525,43 @@ describe("REGRESSION — skips soft-deleted docs", () => {
     expect(result.passed).toBe(true);
   });
 
+  it("tags inside fenced code blocks / inline code are not counted as unknown placeholders (2026-07-07 bugfix)", async () => {
+    // Regression: React/JSX code samples (e.g. SPEC-015/SPEC-016's
+    // <RouterProvider /> / <Outlet /> example blocks) previously flipped
+    // passed=false via spurious unknown_warnings — see outline-service.ts
+    // extractComponentMatches / computeCodeRanges.
+    const store = new InMemoryStore();
+    const doc = makeDoc({
+      type: "spec",
+      content: [
+        "# Dashboard bootstrap",
+        "",
+        "```jsx",
+        "function App() {",
+        "  return <RouterProvider />;",
+        "}",
+        "```",
+        "",
+        "Use `<Outlet />` inside your layout.",
+        "",
+        "<HealthStats />",
+      ].join("\n"),
+    });
+    await store.insert(doc);
+
+    const app = makeApp(store);
+    const result = await runPlaceholderParse(app);
+    app.close();
+
+    expect(result.passed).toBe(true);
+    expect(result.unknown_warnings).toBe(0);
+    expect(result.resolution_errors).toBe(0);
+    expect(result.docs_with_placeholders).toBe(1);
+    // Only the real placeholder outside code is counted/resolved
+    expect(result.total_placeholders_found).toBe(1);
+    expect(result.resolved_total).toBe(1);
+  });
+
   it("live docs are still scanned after a sibling doc is soft-deleted", async () => {
     // Regression: soft-delete of one doc must not block scanning of sibling docs
     const store = new InMemoryStore();

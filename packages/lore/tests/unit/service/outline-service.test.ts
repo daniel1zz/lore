@@ -752,4 +752,133 @@ describe("OutlineService.resolve", () => {
       expect(result2.value.resolvedComponents[0]?.name).toBe("HealthStats");
     });
   });
+
+  // ── Code-region Exclusion (fenced code blocks + inline code spans) ────────
+  // Regression for the 2026-07-07 bug: React/JSX code samples inside a doc's
+  // fenced code blocks (e.g. SPEC-015/SPEC-016's `<RouterProvider />` /
+  // `<Outlet />` examples) were mis-detected as unknown MDX components,
+  // failing `lore eval placeholders` on legitimate content.
+
+  describe("code-region exclusion", () => {
+    it("tag inside a fenced code block is ignored — no warning, not resolved", async () => {
+      const content = [
+        "# Doc",
+        "",
+        "```jsx",
+        "function App() {",
+        "  return <RouterProvider />;",
+        "}",
+        "```",
+        "",
+      ].join("\n");
+      const doc = makeDoc({ ...corpus.prd, content });
+
+      const result = await service.resolve(doc);
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+
+      expect(result.value.resolvedComponents).toHaveLength(0);
+      expect(result.value.warnings).toHaveLength(0);
+    });
+
+    it("tag inside an inline code span is ignored — no warning, not resolved", async () => {
+      const content = "Render the router with `<Outlet />` inside your layout.";
+      const doc = makeDoc({ ...corpus.prd, content });
+
+      const result = await service.resolve(doc);
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+
+      expect(result.value.resolvedComponents).toHaveLength(0);
+      expect(result.value.warnings).toHaveLength(0);
+    });
+
+    it("real placeholder outside code still resolves — regression", async () => {
+      const doc = makeDoc({ ...corpus.prd, content: "<HealthStats />" });
+
+      const result = await service.resolve(doc);
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+
+      expect(result.value.resolvedComponents).toHaveLength(1);
+      expect(result.value.resolvedComponents[0]?.name).toBe("HealthStats");
+      expect(result.value.warnings).toHaveLength(0);
+    });
+
+    it("mixed doc — code sample tag ignored, real placeholder outside code resolves", async () => {
+      const content = [
+        "# Dashboard routing",
+        "",
+        "```jsx",
+        "<RouterProvider />",
+        "```",
+        "",
+        "<HealthStats />",
+      ].join("\n");
+      const doc = makeDoc({ ...corpus.prd, content });
+
+      const result = await service.resolve(doc);
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+
+      expect(result.value.resolvedComponents).toHaveLength(1);
+      expect(result.value.resolvedComponents[0]?.name).toBe("HealthStats");
+      expect(result.value.warnings).toHaveLength(0);
+    });
+
+    it("unterminated fence — tail falls back to pre-fix behaviour (pinned choice)", async () => {
+      // AC-3: a fence that never closes before EOF is NOT treated as code —
+      // the tag inside it is still extracted and, since ScriptInjection is
+      // unknown, still produces a warning. This documents the deliberate
+      // choice NOT to swallow the rest of the document as "code" just
+      // because a fence marker was opened without ever being closed.
+      const content = [
+        "before the fence",
+        "```",
+        "<ScriptInjection />",
+      ].join("\n");
+      const doc = makeDoc({ ...corpus.prd, content });
+
+      const result = await service.resolve(doc);
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+
+      expect(result.value.resolvedComponents).toHaveLength(0);
+      expect(result.value.warnings).toHaveLength(1);
+      expect(result.value.warnings[0]?.component).toBe("ScriptInjection");
+    });
+
+    it("position offsets stay slice-accurate for a placeholder following a fenced block", async () => {
+      // Regression: renderResolvedToMarkdown depends on exact byte offsets —
+      // code-region filtering must not shift positions of matches after it.
+      const content = [
+        "```ts",
+        "const x = <NotAComponent />;",
+        "```",
+        "tail ",
+        "<HealthStats />",
+        " end",
+      ].join("\n");
+      const doc = makeDoc({ ...corpus.prd, content });
+
+      const result = await service.resolve(doc);
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+
+      expect(result.value.resolvedComponents).toHaveLength(1);
+      const component = result.value.resolvedComponents[0];
+      expect(component).toBeDefined();
+      if (!component) return;
+
+      expect(content.slice(component.position.start, component.position.end)).toBe(
+        "<HealthStats />",
+      );
+    });
+  });
 });
