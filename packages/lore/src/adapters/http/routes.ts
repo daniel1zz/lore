@@ -183,6 +183,12 @@ export async function handleApiRoute(
     return handleGetAuditForDoc(auditDocMatch, app);
   }
 
+  // GET /api/ready/:planIdOrSlug (SPEC-037 D1)
+  const readyMatch = matchReadyPath(path);
+  if (readyMatch !== null && method === "GET") {
+    return handleGetReady(readyMatch, app);
+  }
+
   // DELETE /api/links/:from/:to
   const linksDeleteMatch = matchLinksDeletePath(path);
   if (linksDeleteMatch !== null && method === "DELETE") {
@@ -347,6 +353,20 @@ async function handleGetAuditForDoc(docId: string, app: App): Promise<Response> 
 }
 
 /**
+ * GET /api/ready/:planIdOrSlug (SPEC-037 D1) — computed readiness report over a
+ * plan's tasks, thin pipe over `TaskWorkflowService.ready` (zero writes). A
+ * non-plan target surfaces the service's existing `VALIDATION_ERROR` (422 via
+ * `loreErrorResponse`); an unknown id surfaces `DOC_NOT_FOUND` (404). No new
+ * error codes, no per-route auth — rides the same central cookie/bearer gate
+ * as every other v1 GET route.
+ */
+async function handleGetReady(planIdOrSlug: string, app: App): Promise<Response> {
+  const result = await app.taskWorkflowService.ready(planIdOrSlug);
+  if (!result.ok) return loreErrorResponse(result.error);
+  return jsonOk(result.value);
+}
+
+/**
  * GET /api/audit/verify[?since=<ISO8601>] — versions⋈audit completeness oracle.
  * `since` overrides the configured `audit.verify_since` watermark for this call
  * only (mirrors `lore audit --verify --since`); omitted, `AuditService.verify`
@@ -455,6 +475,12 @@ function matchJudgmentsPath(path: string): string | null {
  */
 function matchAuditDocPath(path: string): string | null {
   const match = path.match(/^\/api\/audit\/([^/]+)$/);
+  return match?.[1] !== undefined ? decodeURIComponent(match[1]) : null;
+}
+
+/** Matches GET /api/ready/:planIdOrSlug (SPEC-037 D1). */
+function matchReadyPath(path: string): string | null {
+  const match = path.match(/^\/api\/ready\/([^/]+)$/);
   return match?.[1] !== undefined ? decodeURIComponent(match[1]) : null;
 }
 
