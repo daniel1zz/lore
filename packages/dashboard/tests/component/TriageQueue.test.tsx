@@ -29,7 +29,7 @@
  *   ERROR — apiApproveDoc rejecting surfaces a toast.error and leaves the
  *     adjudicate panel open (no premature close-on-failure).
  *   STATE — clicking "Show blocking questions" reveals the indented list;
- *     clicking "Adjudicate" reveals the note input + Approve/Reject buttons.
+ *     clicking "Review" reveals the note input + Approve/Reject buttons.
  *   REGRESSION — a non-empty `warnings` array on a successful approve fires
  *     toast.warning in addition to toast.success (SPEC-033 F1 calibration
  *     hook surfacing).
@@ -199,7 +199,7 @@ describe("TriageQueue", () => {
       await screen.findByText("Some Doc");
       expect(screen.queryByLabelText(`Calibration note for ${doc.title}`)).not.toBeInTheDocument();
 
-      await user.click(screen.getByText("Adjudicate"));
+      await user.click(screen.getByText("Review"));
 
       expect(screen.getByLabelText(`Calibration note for ${doc.title}`)).toBeInTheDocument();
       expect(screen.getByText("Approve")).toBeInTheDocument();
@@ -218,7 +218,7 @@ describe("TriageQueue", () => {
       renderWithClient(<TriageQueue />);
 
       await screen.findByText("Some Doc");
-      await user.click(screen.getByText("Adjudicate"));
+      await user.click(screen.getByText("Review"));
       await user.type(screen.getByLabelText(`Calibration note for ${doc.title}`), "  looks solid  ");
       await user.click(screen.getByText("Approve"));
 
@@ -235,7 +235,7 @@ describe("TriageQueue", () => {
       renderWithClient(<TriageQueue />);
 
       await screen.findByText("Some Doc");
-      await user.click(screen.getByText("Adjudicate"));
+      await user.click(screen.getByText("Review"));
       await user.click(screen.getByText("Reject"));
 
       await waitFor(() => expect(mockedReject).toHaveBeenCalledWith(doc.id, undefined, {}));
@@ -253,7 +253,7 @@ describe("TriageQueue", () => {
       renderWithClient(<TriageQueue />);
 
       await screen.findByText("Some Doc");
-      await user.click(screen.getByText("Adjudicate"));
+      await user.click(screen.getByText("Review"));
       await user.click(screen.getByText("Approve"));
 
       await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith("Document approved"));
@@ -272,7 +272,7 @@ describe("TriageQueue", () => {
       renderWithClient(<TriageQueue />);
 
       await screen.findByText("Some Doc");
-      await user.click(screen.getByText("Adjudicate"));
+      await user.click(screen.getByText("Review"));
       await user.click(screen.getByText("Approve"));
 
       await waitFor(() => expect(toastError).toHaveBeenCalled());

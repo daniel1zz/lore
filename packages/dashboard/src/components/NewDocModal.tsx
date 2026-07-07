@@ -16,6 +16,7 @@ import { X } from "lucide-react";
 import type { DocType, LinkType } from "@lore/core";
 import { createDocInputSchema } from "@lore/core";
 import type { CreateDocPayload } from "@/api/mutations";
+import type { z } from "zod";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -35,6 +36,23 @@ export interface NewDocModalProps {
 const DOC_TYPES: DocType[] = ["prd", "spec", "adr", "plan", "knowledge", "task"];
 
 const TYPES_REQUIRING_PARENT: DocType[] = ["spec", "task"];
+
+/**
+ * Maps a raw Zod validation issue to user-facing copy.
+ * Purpose: `createDocInputSchema`'s `parent_id is required for type '<type>'` message
+ *   (packages/core/src/schemas.ts) is a CLI/MCP contract string, not UI copy — it names
+ *   the internal field (`parent_id`) rather than explaining what the user needs to do.
+ *   This is the ONLY special-cased message; every other issue passes through verbatim
+ *   so server-side / other Zod errors keep their original text (D6, AC-37-9).
+ * @param issue - the first `ZodError.issues[]` entry from `createDocInputSchema.safeParse`.
+ * @param docType - the type currently selected in the form, spliced into the copy.
+ */
+function humanizeValidationIssue(issue: z.ZodIssue, docType: DocType): string {
+  if (issue.path[0] === "parent_id") {
+    return `Choose a parent document — every ${docType} lives under one.`;
+  }
+  return issue.message;
+}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -100,7 +118,7 @@ export function NewDocModal({ onCreate, isPending, error, onClose }: NewDocModal
     const result = createDocInputSchema.safeParse(payload);
     if (!result.success) {
       const issue = result.error.issues[0];
-      setValidationError(issue?.message ?? "Validation failed");
+      setValidationError(issue !== undefined ? humanizeValidationIssue(issue, docType) : "Validation failed");
       return;
     }
 

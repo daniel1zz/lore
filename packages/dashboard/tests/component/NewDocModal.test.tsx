@@ -106,7 +106,9 @@ describe("NewDocModal", () => {
       await user.type(screen.getByLabelText(/Title/), "Spec without parent");
       await user.click(screen.getByRole("button", { name: "Create" }));
 
-      expect(screen.getByText("parent_id is required for type 'spec'")).toBeInTheDocument();
+      expect(
+        screen.getByText("Choose a parent document — every spec lives under one."),
+      ).toBeInTheDocument();
       expect(onCreate).not.toHaveBeenCalled();
     });
 
@@ -121,6 +123,26 @@ describe("NewDocModal", () => {
       await user.click(screen.getByRole("button", { name: "Create" }));
 
       expect(screen.getByText("task requires extra.plan_id")).toBeInTheDocument();
+      expect(onCreate).not.toHaveBeenCalled();
+    });
+
+    it("passes a non-parent_id validation message through verbatim (D6 — only the parent_id issue is humanized)", async () => {
+      const user = userEvent.setup();
+      const { onCreate } = renderModal();
+
+      await selectType(user, "task");
+      await user.type(screen.getByLabelText(/Title/), "Task without plan, with parent");
+      await user.type(screen.getByLabelText(/Parent ID/), "01HPARENT000000000000000001");
+      // parent_id is filled in, so the only remaining issue is "task requires
+      // extra.plan_id" — its raw Zod message must render unchanged, proving the
+      // NewDocModal message mapping matches on parent_id specifically rather than
+      // rewriting every validation issue.
+      await user.click(screen.getByRole("button", { name: "Create" }));
+
+      expect(screen.getByText("task requires extra.plan_id")).toBeInTheDocument();
+      expect(
+        screen.queryByText("Choose a parent document — every task lives under one."),
+      ).not.toBeInTheDocument();
       expect(onCreate).not.toHaveBeenCalled();
     });
   });

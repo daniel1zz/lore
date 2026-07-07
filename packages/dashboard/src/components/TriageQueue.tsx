@@ -201,7 +201,7 @@ export function TriageQueue({ onNavigate }: TriageQueueProps): React.ReactElemen
                       className="text-xs px-2 py-1 border rounded hover:bg-muted"
                       onClick={() => (isAdjudicating ? closeAdjudicate() : openAdjudicate(doc.id))}
                     >
-                      {isAdjudicating ? "Cancel" : "Adjudicate"}
+                      {isAdjudicating ? "Cancel" : "Review"}
                     </button>
                   </div>
                 </div>
@@ -232,7 +232,7 @@ export function TriageQueue({ onNavigate }: TriageQueueProps): React.ReactElemen
                     <input
                       type="text"
                       className="flex-1 text-xs px-2 py-1 border rounded bg-background"
-                      placeholder="Optional calibration note…"
+                      placeholder="Why approve/reject? (optional — helps calibrate the AI reviewer)"
                       value={noteDraft}
                       onChange={(e) => setNoteDraft(e.target.value)}
                       aria-label={`Calibration note for ${doc.title}`}
