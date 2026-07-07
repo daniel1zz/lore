@@ -12,6 +12,19 @@
  * `content`. Consumers (CLI `get`, `export-docs`) call resolve() then feed its
  * output straight into renderResolvedToMarkdown() — see SPEC-032 §3.3.
  *
+ * Also exports `extractComponentMatches` — the single tag-extraction point
+ * (SPEC-004 amendment, 2026-07-07 bugfix). It is COMPONENT_REGEX plus a
+ * code-region filter: tags whose match starts inside a fenced code block
+ * (``` / ~~~) or an inline code span (`...`) are NOT extracted, so React/JSX
+ * code samples in doc bodies (e.g. `<RouterProvider />` in a SPEC's example
+ * block) no longer get misreported as unknown MDX components. `resolve()` and
+ * the `lore eval placeholders` scenario (`eval/scenarios/placeholder-parse.ts`)
+ * both call this one function so "what counts as a placeholder" never drifts
+ * between the two. An unterminated fence/code-span (opened but never closed
+ * before EOF) is NOT treated as code — its tail falls back to pre-fix
+ * behaviour (tags there are still extracted) rather than silently swallowing
+ * the rest of the document.
+ *
  * Source: SPEC-004, SPEC-001 §3.4, SPEC-032 §3.3
  */
 
@@ -81,6 +94,190 @@ const COMPONENT_REGEX = /<([A-Z][A-Za-z0-9]*)(\s[^>]*)?\s*\/>/g;
  * Supports: prop="string"  prop={number}  prop={true}
  */
 const PROP_REGEX = /(\w+)=(?:"([^"]*)"|\{([^}]*)\})/g;
+
+// ─── Code-region exclusion (fenced blocks + inline code spans) ─────────────
+
+/**
+ * A half-open `[start, end)` byte range in a doc's `content` that is code —
+ * either inside a fenced code block or an inline code span — and therefore
+ * MUST NOT be scanned for MDX placeholder tags.
+ */
+interface CodeRange {
+  start: number;
+  end: number;
+}
+
+/**
+ * Matches a fenced-code-block delimiter line: up to 3 leading spaces/tabs
+ * (covers a fence indented inside a list item), then a run of 3+ backticks
+ * or tildes, then anything (the info string, e.g. `jsx`/`ts`).
+ * Not a full CommonMark implementation — sufficient for placeholder extraction.
+ */
+const FENCE_LINE_REGEX = /^[ \t]{0,3}(`{3,}|~{3,})/;
+
+/** True iff `pos` falls inside any of `ranges`. */
+function isWithinAnyRange(pos: number, ranges: CodeRange[]): boolean {
+  return ranges.some((r) => pos >= r.start && pos < r.end);
+}
+
+/**
+ * Compute `[start, end)` ranges covered by well-formed fenced code blocks
+ * (an opening fence line AND a matching closing fence line, same delimiter
+ * character, closing run length >= opening run length).
+ *
+ * @invariant An unterminated fence (opened but never closed before EOF) is
+ * NOT reported as a code range — its content falls back to being scanned like
+ * ordinary markdown, matching pre-fix behaviour for the unterminated tail.
+ * See outline-service.test.ts "unterminated fence" regression case.
+ */
+function computeFencedCodeRanges(content: string): CodeRange[] {
+  const ranges: CodeRange[] = [];
+  const lines = content.split("\n");
+
+  // Byte offset each line starts at in the original `content` string.
+  const lineStarts: number[] = [];
+  let offset = 0;
+  for (const line of lines) {
+    lineStarts.push(offset);
+    offset += line.length + 1; // +1 accounts for the "\n" split separator
+  }
+
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const openMatch = line !== undefined ? FENCE_LINE_REGEX.exec(line) : null;
+    if (openMatch === null) {
+      i += 1;
+      continue;
+    }
+
+    const fenceRun = openMatch[1] ?? "";
+    const fenceChar = fenceRun[0] ?? "`";
+    const fenceLen = fenceRun.length;
+    const closeRegex = new RegExp(`^[ \\t]{0,3}\\${fenceChar}{${fenceLen},}[ \\t]*$`);
+
+    let closeIndex = -1;
+    for (let j = i + 1; j < lines.length; j += 1) {
+      const candidate = lines[j];
+      if (candidate !== undefined && closeRegex.test(candidate)) {
+        closeIndex = j;
+        break;
+      }
+    }
+
+    if (closeIndex === -1) {
+      // Unterminated fence — fall back to pre-fix behaviour for the tail (AC-3).
+      i += 1;
+      continue;
+    }
+
+    const start = lineStarts[i] ?? 0;
+    const closeLine = lines[closeIndex] ?? "";
+    const end = (lineStarts[closeIndex] ?? 0) + closeLine.length;
+    ranges.push({ start, end });
+    i = closeIndex + 1;
+  }
+
+  return ranges;
+}
+
+/**
+ * Compute `[start, end)` ranges covered by well-formed inline code spans
+ * (`` `...` ``, `` ``...`` ``, etc.) — a run of N backticks, isolated (not
+ * itself adjacent to more backticks), matched by a later isolated run of the
+ * same length N.
+ *
+ * @param content - Raw document content.
+ * @param exclude - Already-computed fenced-code ranges; an opening backtick
+ *   run starting inside one of these is skipped (its content is already code,
+ *   scanning it again for a "closing" run would be redundant, not incorrect —
+ *   this simply keeps the two passes independent and easy to reason about).
+ * @invariant An unterminated inline code span (opening run with no matching
+ * closing run before EOF) is NOT reported as a code range — same fallback
+ * rule as `computeFencedCodeRanges`.
+ */
+function computeInlineCodeRanges(content: string, exclude: CodeRange[]): CodeRange[] {
+  const ranges: CodeRange[] = [];
+  const backtickRun = /`+/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = backtickRun.exec(content)) !== null) {
+    const openStart = match.index;
+    const runLength = match[0].length;
+
+    if (isWithinAnyRange(openStart, exclude)) continue;
+
+    // Isolated run of exactly `runLength` backticks, not itself adjacent to
+    // another backtick — avoids matching a sub-run inside a longer/shorter run.
+    const closeRegex = new RegExp("(?<!`)`{" + String(runLength) + "}(?!`)", "g");
+    closeRegex.lastIndex = openStart + runLength;
+    const closeMatch = closeRegex.exec(content);
+
+    if (closeMatch === null) {
+      // Unterminated — fall back to pre-fix behaviour (AC-3).
+      continue;
+    }
+
+    const closeEnd = closeMatch.index + closeMatch[0].length;
+    ranges.push({ start: openStart, end: closeEnd });
+    backtickRun.lastIndex = closeEnd;
+  }
+
+  return ranges;
+}
+
+/** Compute every code-region range (fenced blocks, then inline spans) for `content`. */
+function computeCodeRanges(content: string): CodeRange[] {
+  const fenced = computeFencedCodeRanges(content);
+  const inline = computeInlineCodeRanges(content, fenced);
+  return [...fenced, ...inline];
+}
+
+/** One raw self-closing MDX component tag match, pre-whitelist-filtering. */
+interface ComponentMatch {
+  /** Component tag name, e.g. "ChildrenOf" */
+  name: string;
+  /** Raw props string captured after the component name (may be empty) */
+  propsStr: string;
+  /** Full matched tag text, e.g. `<ChildrenOf role="spec" />` */
+  fullMatch: string;
+  /** Byte offset the match starts at in the original content */
+  index: number;
+}
+
+/**
+ * Find every self-closing MDX component tag in `content`, EXCLUDING any tag
+ * whose match starts inside a fenced code block or inline code span. This is
+ * the single extraction point `OutlineService.resolve()` and the eval
+ * `placeholder-parse` scenario both call — see module header.
+ *
+ * @param content - Raw document content (never mutated — code is not
+ *   stripped from the string, only regex matches inside it are filtered).
+ */
+export function extractComponentMatches(content: string): ComponentMatch[] {
+  const codeRanges = computeCodeRanges(content);
+  const matches: ComponentMatch[] = [];
+
+  COMPONENT_REGEX.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = COMPONENT_REGEX.exec(content)) !== null) {
+    const fullMatch = match[0];
+    const name = match[1];
+    // group 0 and group 1 are always present when regex matches
+    if (fullMatch === undefined || name === undefined) continue;
+
+    if (isWithinAnyRange(match.index, codeRanges)) continue;
+
+    matches.push({
+      name,
+      propsStr: match[2] ?? "",
+      fullMatch,
+      index: match.index,
+    });
+  }
+
+  return matches;
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -395,18 +592,9 @@ export class OutlineService {
     const resolvedComponents: ResolvedComponent[] = [];
     const warnings: ResolutionWarning[] = [];
 
-    COMPONENT_REGEX.lastIndex = 0;
-    let match: RegExpExecArray | null;
-
-    while ((match = COMPONENT_REGEX.exec(doc.content)) !== null) {
-      const fullMatch = match[0];
-      const name = match[1];
-      const propsStr = match[2] ?? "";
-
-      // group 0 and group 1 are always present when regex matches
-      if (fullMatch === undefined || name === undefined) continue;
-
-      const position = { start: match.index, end: match.index + fullMatch.length };
+    for (const match of extractComponentMatches(doc.content)) {
+      const { name, propsStr, fullMatch, index } = match;
+      const position = { start: index, end: index + fullMatch.length };
 
       if (!WHITELISTED_COMPONENTS.has(name as typeof WHITELISTED_COMPONENTS extends Set<infer T> ? T : never)) {
         warnings.push({

@@ -38,19 +38,17 @@
 import { z } from "zod";
 import type { App } from "../../app.js";
 import type { LoreError } from "@lore/core";
+import { extractComponentMatches } from "../../service/outline-service.js";
 
-// ─── Placeholder Detection Regex ─────────────────────────────────────────────
-
-/**
- * Matches self-closing MDX component tags: <ComponentName prop="val" />
- * Mirrors the COMPONENT_REGEX used in OutlineService so detection is consistent.
- * Capture groups: [1] component name, [2] props string (unused here — count only)
- *
- * reason: must reset lastIndex=0 before each use because RegExp with /g flag is
- * stateful; sharing a single instance across doc iterations would produce skipped
- * matches after a non-exhausted iteration. See SPEC-013 §7.
- */
-const PLACEHOLDER_REGEX = /<([A-Z][A-Za-z0-9]*)(\s[^>]*)?\s*\/>/g;
+// ─── Placeholder Detection ───────────────────────────────────────────────────
+//
+// Detection now delegates to `extractComponentMatches` (OutlineService) — the
+// single tag-extraction point that also filters out tags inside fenced code
+// blocks / inline code spans (2026-07-07 bugfix: React/JSX code samples like
+// `<RouterProvider />` in a doc's example block were previously miscounted as
+// placeholders and reported as unknown components). Sharing the function
+// keeps "what counts as a placeholder" identical between this eval scenario
+// and OutlineService.resolve() — see outline-service.ts module header.
 
 // ─── Result Schema (Zod SSOT) ─────────────────────────────────────────────────
 
@@ -131,30 +129,23 @@ export type PlaceholderParseResult = z.infer<typeof PlaceholderParseResultSchema
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
- * Count all placeholder regex hits in a content string.
- * Resets lastIndex before scanning to avoid stale state from a prior iteration.
+ * Count all placeholder tag matches in a content string (code-region-excluded).
  *
  * @param content - Raw document content
  * @returns Number of self-closing MDX component tag matches
  */
 function countPlaceholderHits(content: string): number {
-  PLACEHOLDER_REGEX.lastIndex = 0;
-  let count = 0;
-  while (PLACEHOLDER_REGEX.exec(content) !== null) {
-    count += 1;
-  }
-  return count;
+  return extractComponentMatches(content).length;
 }
 
 /**
- * Return true if the content contains at least one MDX placeholder tag.
- * Resets lastIndex before testing to ensure consistent detection.
+ * Return true if the content contains at least one MDX placeholder tag
+ * (code-region-excluded).
  *
  * @param content - Raw document content
  */
 function hasMdxPlaceholders(content: string): boolean {
-  PLACEHOLDER_REGEX.lastIndex = 0;
-  return PLACEHOLDER_REGEX.test(content);
+  return extractComponentMatches(content).length > 0;
 }
 
 // ─── Error message extraction ────────────────────────────────────────────────
