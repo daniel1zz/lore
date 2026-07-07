@@ -560,6 +560,10 @@
     "01KWXQXPYHDWSG3RHAXNRN7VXF": {
       "human_id": "KN-027",
       "file_path": "docs/requirements/knowledge/KN-027-retro-e2e-corpus-pollution-incident-port-squatter.md"
+    },
+    "01KWXXMZJQ6HC0NMMYE6AT4H8V": {
+      "human_id": "SPEC-037",
+      "file_path": "docs/requirements/spec/SPEC-037-spec-037-dashboard-execution-tracking-surface-read.md"
     }
   }
 }
