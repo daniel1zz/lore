@@ -138,3 +138,15 @@ navigation: {
 
 - Six-dimension coverage on: `deriveTypeMeta` (core), ancestors assembly (service, incl. cycle/broken-ref), `apiList` opts (dashboard lib), library URL-state, Breadcrumb, DocCard meta rows.
 - Runners: core/service → vitest (InMemoryStore); dashboard → vitest jsdom component tests; e2e additions to the Playwright suite (breadcrumb navigation + filter roundtrip).
+
+## 7. Addendum — pending-queue extension (2026-07-07)
+
+The §2 D3 type-meta projection is extended beyond `CorpusService`/`DocSummary` to the review pending queue:
+
+- **D3-P1** `ReviewService` gains the same optional constructor param `claimTtlMinutes` (identical DI shape as `CorpusService`; both `app.ts` assembly points — SQLite and Turso — pass the one `resolveClaimTtlMinutes(config)` value). When absent, `deriveTypeMeta` omits `task.claim_stale` entirely — never a fabricated `false`.
+- **D3-P2** `PendingDoc` (returned by `ReviewService.pending`, served verbatim by `GET /api/review/pending`) gains optional `meta?: DocTypeMeta`, derived per row via the same `deriveTypeMeta` single derivation point. Docs whose type has no meta variant (prd) or whose required `extra` field is missing/malformed omit the key entirely (conditional spread; `exactOptionalPropertyTypes` semantics).
+- **D3-P3** Dashboard `PendingDocRow` mirrors the field; `TriageQueue` and the home `PendingPanel` render the badge via the existing shared `formatTypeMetaLabel` + `metaBadgeVariant` pair — same composition as `DocCard`, no hand-rolled projection. A `null` label (e.g. unclaimed task with no evidence) or absent `meta` renders no badge.
+
+Motivation: the pending queue is dominated by `knowledge` docs, where the bare type badge has zero discriminating power; `sub_type` (assessment vs ideation/research) is the primary triage signal (machine-generated vs human-authored).
+
+**ACs**: AC-36-11 pending rows carry `meta` per type with omission (not fabrication) on prd/malformed extra; AC-36-12 `claim_stale` appears in pending task meta only when `claimTtlMinutes` is wired; AC-36-13 TriageQueue/PendingPanel render the shared badge and stay crash-free when `meta` is absent or the label is `null`. Six-dimension coverage: `packages/lore/tests/unit/service/review-service.test.ts` (meta projection block), `packages/dashboard/tests/component/{TriageQueue,PendingPanel}.test.tsx`.
