@@ -30,6 +30,28 @@
  * are both hardcoded to these two ports — they are implementation source we must not
  * modify, so the harness matches them instead of trying to parameterize.
  *
+ * Incident (documented so the guard below is never "cleaned up" as dead code): a stale
+ * `lore dashboard` process serving the REAL team `.lore/` corpus was already squatting
+ * port 8787 when this suite ran. This harness's own `lore serve` child died on
+ * EADDRINUSE, but `waitFor200` doesn't care WHO answers — the squatter answered `/health`
+ * with 200 just fine, so the entire write-path e2e suite ran against the real team
+ * corpus, polluting it with 4 docs and corrupting `.lore/export-index.json` numbering.
+ * Two independent guards now prevent a repeat:
+ *   1. `assertPortFree` — probes both fixed ports with a raw TCP connect BEFORE spawning
+ *      anything. If either already accepts connections, we throw immediately. We never
+ *      kill the foreign process automatically — it may be someone's live corpus server,
+ *      exactly the thing this suite must never write into.
+ *   2. `assertServerIsOurs` — even a clean port-free start doesn't fully rule out a race
+ *      (something else binds the port between our probe and our spawn), so after our
+ *      own `lore serve` child starts and passes `/health`, we additionally authenticate
+ *      against it using the `dashboard-local` API key we JUST created against the
+ *      throwaway corpus. That raw key's SHA-256 hash exists in exactly one `api_keys`
+ *      table on the filesystem — the throwaway tmpdir's. A foreign server (backed by a
+ *      different `.lore/lore.db`) has never seen this hash and will answer `401`, not
+ *      `200`. This is cheaper than diffing doc counts (no seed-count coupling to
+ *      maintain) and strictly stronger than trusting `/health` (which is intentionally
+ *      unauthenticated and answers identically for every corpus).
+ *
  * Source: SPEC-022 §9.7, SPEC-016 §3.6-§3.9.
  */
 
@@ -38,6 +60,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createConnection } from "node:net";
 import type { FullConfig } from "@playwright/test";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -64,6 +87,82 @@ async function waitFor200(url: string, timeoutMs: number): Promise<void> {
     await new Promise<void>((r) => setTimeout(r, 250));
   }
   throw new Error(`Timed out waiting for ${url} to return 200: ${String(lastErr)}`);
+}
+
+/**
+ * Raw-TCP-connect probe: does anything already accept connections on `port`?
+ * Deliberately lower-level than an HTTP fetch — a squatter need not even speak HTTP
+ * for this to detect it, and it resolves in milliseconds instead of a request timeout.
+ */
+async function isPortOpen(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = createConnection({ port, host: "127.0.0.1" });
+    const finish = (result: boolean): void => {
+      socket.removeAllListeners();
+      socket.destroy();
+      resolve(result);
+    };
+    socket.once("connect", () => finish(true));
+    socket.once("error", () => finish(false));
+    // Safety bound: a hung connect attempt (e.g. firewalled port) must not stall setup.
+    socket.setTimeout(1000, () => finish(false));
+  });
+}
+
+/**
+ * Fail-loud pre-flight: BOTH fixed ports (8787 API, 5173 Vite) must be free before we
+ * spawn anything. See the incident writeup in this file's header comment — a squatting
+ * `lore serve` / `vite` process must stop this run immediately, not get raced against.
+ */
+async function assertPortFree(port: number, label: string): Promise<void> {
+  if (await isPortOpen(port)) {
+    throw new Error(
+      `e2e globalSetup: port ${port} (${label}) is already in use.\n` +
+        `Another lore serve / vite dev server is running on this port — stop it first ` +
+        `(lsof -i :${port}) before running the e2e suite. Refusing to proceed: a foreign ` +
+        `server there could be a real team corpus, and writing into it is exactly the ` +
+        `incident this guard exists to prevent.`,
+    );
+  }
+}
+
+/**
+ * Confirms the server now answering on API_PORT is OUR freshly-spawned `lore serve`
+ * against the throwaway corpus, not a squatter that raced our port-free probe.
+ *
+ * reason: `rawKey`'s SHA-256 hash was just inserted into the throwaway tmpdir's
+ * `api_keys` table by step 2 (`lore agent create`) and exists nowhere else. Bearer-
+ * authenticating `GET /api/auth/me` with it is the cheapest strong check available in
+ * the existing API surface: a foreign server (backed by a different `.lore/lore.db`)
+ * has never seen this hash and MUST answer 401, whereas our own server MUST answer 200
+ * with `name: "dashboard-local"`. This is strictly stronger than re-probing `/health`,
+ * which is intentionally unauthenticated (SPEC-016) and answers identically no matter
+ * whose corpus is behind it.
+ */
+async function assertServerIsOurs(apiUrl: string, rawKey: string): Promise<void> {
+  let body: { ok: boolean; data?: { name?: string } } | undefined;
+  try {
+    const res = await fetch(`${apiUrl}/api/auth/me`, {
+      headers: { Authorization: `Bearer ${rawKey}` },
+      signal: AbortSignal.timeout(3000),
+    });
+    body = (await res.json()) as typeof body;
+    if (res.ok && body?.ok === true && body.data?.name === "dashboard-local") return;
+  } catch (err) {
+    throw new Error(
+      `e2e globalSetup: server identity check against ${apiUrl}/api/auth/me failed to ` +
+        `complete: ${String(err)}. Refusing to proceed — cannot confirm this is our ` +
+        `throwaway corpus server, not a squatter.`,
+    );
+  }
+  throw new Error(
+    `e2e globalSetup: server identity check FAILED — ${apiUrl} did not accept our ` +
+      `freshly-created 'dashboard-local' API key (response: ${JSON.stringify(body)}). ` +
+      `This means something other than our own 'lore serve' child is answering on port ` +
+      `${API_PORT} — almost certainly a squatter serving a different corpus (see the ` +
+      `incident writeup in this file's header). Refusing to run the write-path suite ` +
+      `against it.`,
+  );
 }
 
 /** Extract the last JSON-parseable line from CLI stdout (skips warnings printed above it). */
@@ -93,6 +192,11 @@ async function killAndWait(proc: ChildProcess): Promise<void> {
 }
 
 export default async function globalSetup(_config: FullConfig): Promise<() => Promise<void>> {
+  // 0. Port guard — BEFORE spawning anything. Fail loud, never kill-and-retry: see the
+  //    incident writeup in this file's header comment.
+  await assertPortFree(API_PORT, "lore serve API");
+  await assertPortFree(DASH_PORT, "vite dev server");
+
   const tmpDir = mkdtempSync(join(tmpdir(), "lore-e2e-"));
 
   // Publish the throwaway corpus's SQLite path via env var so spec files that need to
@@ -139,6 +243,11 @@ export default async function globalSetup(_config: FullConfig): Promise<() => Pr
 
   try {
     await waitFor200(`${API_URL}/health`, 20_000);
+    // reason: /health alone cannot distinguish us from a squatter that raced our port
+    // probe (assertPortFree) between the check and this spawn — it's intentionally
+    // unauthenticated and answers identically for every corpus. assertServerIsOurs is
+    // the strong check: only OUR throwaway corpus's api_keys table has this hash.
+    await assertServerIsOurs(API_URL, rawKey);
   } catch (err) {
     await killAndWait(apiProc);
     rmSync(tmpDir, { recursive: true, force: true });
