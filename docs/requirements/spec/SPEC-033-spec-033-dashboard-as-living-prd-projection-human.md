@@ -46,7 +46,7 @@ Owner acceptance happens on the dashboard, but: (a) home is a hardcoded doc list
 
 - Dashboard imports `@lore/core` ONLY (browser-safety invariant); all data via HTTP routes; new routes registered in `routes.ts` following SPEC-022 auth patterns (cookie for dashboard paths, bearer parity where applicable).
 - API client fetchers + TS types land in the dashboard's existing api layer in the SAME task as the routes (single writer; UI tasks only consume).
-- Playwright e2e is the acceptance oracle: extend the existing suite with (1) home renders resolved PRD (ChildrenOf list visible, no raw `- [plan] SPEC-033 Implementation — dashboard projection + adjudication (archived)` text), (2) pending shows a seeded escalate badge + blocking questions, (3) dashboard approve on a judged doc creates a calibration record (assert via API), (4) audit tab shows create→judge→adjudicate chain.
+- Playwright e2e is the acceptance oracle: extend the existing suite with (1) home renders resolved PRD (ChildrenOf list visible, no raw `<ChildrenOf />` text), (2) pending shows a seeded escalate badge + blocking questions, (3) dashboard approve on a judged doc creates a calibration record (assert via API), (4) audit tab shows create→judge→adjudicate chain.
 
 ## 4. ACs
 

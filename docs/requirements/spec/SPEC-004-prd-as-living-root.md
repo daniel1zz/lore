@@ -28,13 +28,13 @@ A document's content can contain MDX-style placeholder components:
 # My Product PRD
 
 ## Feature Specs
-_(no children)_
+<ChildrenOf role="spec" />
 
 ## Recent Decisions
-_(no recent decisions)_
+<RecentDecisions limit={5} />
 
 ## Architecture
-- [spec] PRD-as-Living-Root (approved)
+<ModuleTree />
 ```
 
 When this document is read (via `lore get`, MCP `lore_get`, or web UI), the OutlineService **resolves** each component by querying the corpus and injecting live data. The document is always current — no manual updating.

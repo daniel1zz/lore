@@ -282,7 +282,7 @@ Scans every live doc for self-closing MDX placeholder tags (regex `/<([A-Z][A-Za
 ```
 unknown_warnings === 0 && resolution_errors === 0
 ```
-Read: every detected placeholder is in the OutlineService whitelist AND resolved without storage failure. "Resolved" includes graceful-degradation cases (e.g. `_(embed not found: MISSING)_` returns `null` data without raising a warning).
+Read: every detected placeholder is in the OutlineService whitelist AND resolved without storage failure. "Resolved" includes graceful-degradation cases (e.g. `<Embed id="MISSING" />` returns `null` data without raising a warning).
 
 **Result shape**:
 ```typescript

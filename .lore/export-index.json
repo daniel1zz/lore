@@ -588,6 +588,38 @@
     "01KWXXXPBP0M0BBKRHZH9NWWSM": {
       "human_id": "TASK-066",
       "file_path": "docs/requirements/task/TASK-066-d5-backend-snippet-sentinels-searchhit-type-status.md"
+    },
+    "01KWY5DSWM6EC1D9JDHCSDZX6K": {
+      "human_id": "PLAN-017",
+      "file_path": "docs/requirements/plan/PLAN-017-bugfix-eval-assess-export-findings-2026-07-07.md"
+    },
+    "01KWY5DT922SB71J8F28HDWAF7": {
+      "human_id": "TASK-067",
+      "file_path": "docs/requirements/task/TASK-067-f3-assess-prompt-carries-truncation-manifest-so-ju.md"
+    },
+    "01KWY5DT5FR2DV7J9MJX1XX6R9": {
+      "human_id": "TASK-068",
+      "file_path": "docs/requirements/task/TASK-068-f2-placeholder-extraction-skips-fenced-code-blocks.md"
+    },
+    "01KWY5DT1S8XFJ741XF89FM1T1": {
+      "human_id": "TASK-069",
+      "file_path": "docs/requirements/task/TASK-069-f1-export-docs-drift-check-compares-projection-fix.md"
+    },
+    "01KWY32XA2TV1W282Q186F93AZ": {
+      "human_id": "KN-028",
+      "file_path": "docs/requirements/knowledge/KN-028-export-docs-drift-check-false-positives-on-project.md"
+    },
+    "01KWY39986YN2P1WK0JWNMF03C": {
+      "human_id": "KN-029",
+      "file_path": "docs/requirements/knowledge/KN-029-mdx-placeholder-parser-flags-jsx-inside-fenced-cod.md"
+    },
+    "01KWY3E1947F9ZSN65THHRQ9YW": {
+      "human_id": "KN-030",
+      "file_path": "docs/requirements/knowledge/KN-030-assess-diff-truncation-systematically-hides-tests.md"
+    },
+    "01KWY3CD0DR2DS33S8Z4K6XH4Q": {
+      "human_id": "KN-031",
+      "file_path": "docs/requirements/knowledge/KN-031-assessment-spec-037-implementation-execution-track.md"
     }
   }
 }

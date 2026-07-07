@@ -87,8 +87,7 @@ Root cause: `resolve()` emits data but never splices. Add a pure function to Out
 ```typescript
 export function renderResolvedToMarkdown(resolved: ResolvedDoc): string
 ```
-It walks `resolvedComponents` by `position` (descending, to keep offsets stable — `resolve()` populates `position:{start,end}` from regex `match.index`; matches are non-overlapping, so descending splice is sound). Replaces each placeholder span in `content` with a deterministic markdown rendering (e.g. `- [plan] SPEC-032 Implementation — output-contract mechanization (archived)
-- [knowledge] SPEC-032 tech review + revisions (needs-revision → applied) (draft)` → a bulleted `- [type] title (status)` list; `RecentDecisions` → same shape).
+It walks `resolvedComponents` by `position` (descending, to keep offsets stable — `resolve()` populates `position:{start,end}` from regex `match.index`; matches are non-overlapping, so descending splice is sound). Replaces each placeholder span in `content` with a deterministic markdown rendering (e.g. `<ChildrenOf />` → a bulleted `- [type] title (status)` list; `RecentDecisions` → same shape).
 
 **Prerequisite (change site)**: `CorpusService.get()`'s `resolve_mdx` param is currently dead (`_opts`, never read; `resolved_components` never populated). Revive it: when `resolve_mdx` is set, call `OutlineService.resolve()` and populate `resolved_components` on the return. The splice consumers depend on this.
 
@@ -121,8 +120,7 @@ packages/lore/src/service/corpus-service.ts         ← spec_kind default-on-cre
 
 - **AC-1** `spec_kind` write-time validated: `create spec` with no `--kind` persists `extra.spec_kind="feature"`; `--kind design` persists `"design"`; `--kind bogus` exits VALIDATION_ERROR; all 108 existing specs still validate.
 - **AC-2** `lore.tree.yaml` authored covering all contract-legal parent positions (incl. knowledge-under-adr; knowledge-under-knowledge exempt per §3.2 — recursion unmodeled by design); `lore status --check-tree` exits 0 on the current corpus AND a negative regression test asserts a deliberately mis-parented doc raises `misplaced` (guards against pass-by-omission).
-- **AC-3** `renderResolvedToMarkdown` splices every whitelisted placeholder; `lore get <prd>` (non-raw) stdout shows §5 as a rendered child list, not `- [plan] SPEC-032 Implementation — output-contract mechanization (archived)
-- [knowledge] SPEC-032 tech review + revisions (needs-revision → applied) (draft)`; a regression test pins round-trip (raw tag in → rendered list out).
+- **AC-3** `renderResolvedToMarkdown` splices every whitelisted placeholder; `lore get <prd>` (non-raw) stdout shows §5 as a rendered child list, not `<ChildrenOf />`; a regression test pins round-trip (raw tag in → rendered list out).
 - **AC-4** `export-docs` writes the spliced body; the PRD `.md` in git shows the rendered tree (closes PRD §5 limitation). Export drift detection still clean.
 - **AC-5** `lore migrate spec-kind --dry-run` lists candidate mistyped specs without writing; re-run identical (idempotent).
 - **AC-6** `evaluateReadiness()` (pure fn) gains the parent-spec-status parameter and has a direct unit test; `ready()` sets `upstream_unapproved` when the plan's parent spec isn't approved; `lore ready` surfaces it; still never blocks.
