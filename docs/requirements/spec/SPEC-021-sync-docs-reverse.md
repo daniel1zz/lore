@@ -3,19 +3,13 @@ id: SPEC-021
 type: spec
 role: spec
 title: "lore export-docs — reverse sync from corpus to spec files"
-status: draft
+status: approved
 priority: medium
-phase: P10
 created: 2026-06-30
-updated: 2026-06-30
+updated: 2026-07-07
 tags: [cli, corpus, sync, export, drift, phase-10, stub]
 parent: PRD-001
-links:
-  - {id: SPEC-018, type: relates-to, note: "Inverse direction of lore sync-docs — note: lore link-type vocabulary lacks 'complements', using relates-to"}
-  - {id: SPEC-017, type: relates-to, note: "AI-created docs only live in corpus until exported"}
-  - {id: SPEC-022, type: relates-to, note: "Dashboard write UI needs roundtrip to git"}
 ---
-
 # SPEC-021: `lore export-docs` — reverse sync (corpus → file)
 
 > **Status: stub.** The forward sync exists (SPEC-018); the missing reverse direction is the SSOT gap.
@@ -277,3 +271,24 @@ Frontmatter itself is NOT compared (title/status/priority may legitimately diffe
 - MCP / HTTP surface for `export-docs`.
 - Watch mode (`--watch` for corpus changes).
 - Deletion sync (soft-deleted corpus rows leave files alone).
+
+## Amendment A1 (2026-07-07): title-declared numbering in human_id allocation
+
+**Incident**: `buildOrExtendIndex` allocates human_ids with a pure per-type sequential counter (max+1), ignoring series numbers embedded in doc titles. The corpus doc titled "SPEC-035 — Audit trail + calibration data" was exported while the doc titled "SPEC-033 — Dashboard as living-PRD projection" was not yet on disk, so it received human_id SPEC-033 — filename and frontmatter `id:` contradicted the title's self-declared number, and the real SPEC-033 was on track to be allocated SPEC-036. Repaired by hand-editing the index (commit 9b282d0); this amendment prevents recurrence.
+
+**Behavior change** (new-allocation path only; title-match reconcile and existing index mappings are untouched):
+
+1. When allocating a human_id for an unmapped doc, first try the doc's self-declared number: `doc.title` matched against `^\s*{PREFIX}-(\d+)\b` where `PREFIX = TYPE_PREFIX[doc.type]` (so a plan titled "SPEC-035 implementation — …" can never claim a SPEC number: its prefix is PLAN).
+2. Normalize the captured number to the canonical padded form `{PREFIX}-{NNN}` (`padStart(3, "0")`; numbers ≥ 1000 keep their natural width).
+3. Adopt the claimed id iff it is not already held by an existing mapping or by an earlier allocation in the same pass — tracked via a `usedHumanIds` set seeded from `index.mappings` (mirror of `usedFilePaths`). Otherwise fall back to the sequential counter.
+4. The sequential fallback must skip numbers present in `usedHumanIds` (increment until free) so a title-claimed forward number can never collide with a later counter allocation.
+5. Allocation stays deterministic: same corpus + same index ⇒ same result.
+
+**Acceptance criteria**:
+
+- AC-A1-1: unmapped spec titled "SPEC-040 — X" allocates human_id `SPEC-040` (filename `SPEC-040-…`).
+- AC-A1-2: two unmapped specs both titled "SPEC-040 — …" → first in iteration order gets `SPEC-040`, second falls back to sequential; human_ids never duplicate.
+- AC-A1-3: title-declared number already claimed in the index → sequential fallback.
+- AC-A1-4: after a title-claim of `SPEC-036` while the counter sits at 035, the next sequential allocation skips to `SPEC-037`.
+- AC-A1-5: title "SPEC-7 — …" normalizes to `SPEC-007`.
+- AC-A1-6: titles with no leading `{PREFIX}-{N}` (or a foreign prefix) behave exactly as before (pure sequential) — regression: existing allocation tests stay green.
