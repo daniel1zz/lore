@@ -10,6 +10,27 @@
  * NEGATIVE: approve already-approved, approve archived, reject approved, reject archived
  * ERROR:    approve non-existent id, reject non-existent id
  * REGRESSION: rejected doc version unchanged; approved doc absent from pending
+ *
+ * SPEC-036 addendum — PendingDoc.meta projection (source: task dispatch contract,
+ * "PendingDoc.meta 投影 + dashboard pending 徽章", cross-referencing SPEC-036 §2 D3
+ * `deriveTypeMeta`). Written BEFORE reading `pending()`'s / `toPendingDoc`'s bodies —
+ * only the public `PendingDoc`/`ReviewService` signatures (JSDoc + constructor) and
+ * the `@lore/core` `DocTypeMeta` union + enum SSOTs (`SPEC_KINDS`, `DECISION_STATUSES`,
+ * `KNOWLEDGE_SUB_TYPES`) were read.
+ * HAPPY:      knowledge (2 distinct sub_type values), spec kind, adr decision_status,
+ *             plan phase_count, task evidence counts (2 distinct value sets)
+ * NEGATIVE:   prd omits meta key entirely; illegal spec_kind/decision_status/sub_type
+ *             each omit meta entirely (not a fabricated default)
+ * BOUNDARY:   missing spec_kind defaults to "feature" (documented create-time default);
+ *             missing extra.phases -> phase_count 0; task with no claim/evidence omits
+ *             claimed_by and yields 0/0; claim_stale key absent entirely when the
+ *             service isn't constructed with claimTtlMinutes; claim_stale computed
+ *             true/false once claimTtlMinutes IS injected
+ * ERROR:      malformed extra (wrong types) does not throw through pending() — N/A for
+ *             store-level failure propagation, see inline note below
+ * STATE:      pending() reflects freshly-appended evidence on re-read (no caching)
+ * REGRESSION: original PendingDoc fields (id/type/title/status/created_by/updated_at/
+ *             version) are unaffected by meta projection on a non-prd doc
  */
 
 import { beforeEach, describe, expect, it } from "vitest";
@@ -202,6 +223,359 @@ describe("ReviewService", () => {
         expect(result.ok).toBe(true);
         if (!result.ok) return;
         expect(result.value).toHaveLength(0);
+      });
+    });
+
+    describe("meta projection (SPEC-036 / PendingDoc.meta)", () => {
+      describe("happy path", () => {
+        it("knowledge doc projects extra.sub_type='research' into meta", async () => {
+          const doc = makeDoc({ status: "draft", type: "knowledge", extra: { sub_type: "research" } });
+          await store.insert(doc);
+
+          const result = await service.pending();
+
+          expect(result.ok).toBe(true);
+          if (!result.ok) return;
+          expect(result.value[0]!.meta).toEqual({ t: "knowledge", sub_type: "research" });
+        });
+
+        // Distinct sub_type value from the case above — defeats a hardcoded/constant projection.
+        it("knowledge doc projects extra.sub_type='assessment' into meta", async () => {
+          const doc = makeDoc({ status: "draft", type: "knowledge", extra: { sub_type: "assessment" } });
+          await store.insert(doc);
+
+          const result = await service.pending();
+
+          expect(result.ok).toBe(true);
+          if (!result.ok) return;
+          expect(result.value[0]!.meta).toEqual({ t: "knowledge", sub_type: "assessment" });
+        });
+
+        it("spec doc projects extra.spec_kind into meta.kind", async () => {
+          const doc = makeDoc({ status: "draft", type: "spec", extra: { spec_kind: "tech" } });
+          await store.insert(doc);
+
+          const result = await service.pending();
+
+          expect(result.ok).toBe(true);
+          if (!result.ok) return;
+          expect(result.value[0]!.meta).toEqual({ t: "spec", kind: "tech" });
+        });
+
+        it("adr doc projects extra.decision_status into meta", async () => {
+          const doc = makeDoc({ status: "draft", type: "adr", extra: { decision_status: "accepted" } });
+          await store.insert(doc);
+
+          const result = await service.pending();
+
+          expect(result.ok).toBe(true);
+          if (!result.ok) return;
+          expect(result.value[0]!.meta).toEqual({ t: "adr", decision_status: "accepted" });
+        });
+
+        it("plan doc projects extra.phases.length into meta.phase_count", async () => {
+          const doc = makeDoc({
+            status: "draft",
+            type: "plan",
+            extra: { phases: [{ name: "P1" }, { name: "P2" }] },
+          });
+          await store.insert(doc);
+
+          const result = await service.pending();
+
+          expect(result.ok).toBe(true);
+          if (!result.ok) return;
+          expect(result.value[0]!.meta).toEqual({ t: "plan", phase_count: 2 });
+        });
+
+        it("task doc with 2 pass / 1 fail evidence entries projects those exact counts", async () => {
+          const doc = makeDoc({
+            status: "draft",
+            type: "task",
+            extra: {
+              plan_id: "01HPLAN000000000000000001",
+              verification_evidence: [
+                { oracle: "tsc", command: "bun run typecheck", result: "pass", recorded_at: "2026-07-01T00:00:00.000Z", recorded_by: "alice" },
+                { oracle: "test", command: "bun test", result: "pass", recorded_at: "2026-07-01T00:01:00.000Z", recorded_by: "alice" },
+                { oracle: "lint", command: "bun run lint", result: "fail", recorded_at: "2026-07-01T00:02:00.000Z", recorded_by: "alice" },
+              ],
+            },
+          });
+          await store.insert(doc);
+
+          const result = await service.pending();
+
+          expect(result.ok).toBe(true);
+          if (!result.ok) return;
+          const meta = result.value[0]!.meta;
+          expect(meta).toMatchObject({ t: "task", evidence_pass: 2, evidence_fail: 1 });
+        });
+
+        // Distinct evidence counts from the case above — defeats a hardcoded projection.
+        it("task doc with 0 pass / 3 fail evidence entries projects those exact counts", async () => {
+          const doc = makeDoc({
+            status: "draft",
+            type: "task",
+            extra: {
+              plan_id: "01HPLAN000000000000000001",
+              verification_evidence: [
+                { oracle: "test", command: "bun test a", result: "fail", recorded_at: "2026-07-01T00:00:00.000Z", recorded_by: "bob" },
+                { oracle: "test", command: "bun test b", result: "fail", recorded_at: "2026-07-01T00:01:00.000Z", recorded_by: "bob" },
+                { oracle: "test", command: "bun test c", result: "fail", recorded_at: "2026-07-01T00:02:00.000Z", recorded_by: "bob" },
+              ],
+            },
+          });
+          await store.insert(doc);
+
+          const result = await service.pending();
+
+          expect(result.ok).toBe(true);
+          if (!result.ok) return;
+          const meta = result.value[0]!.meta;
+          expect(meta).toMatchObject({ t: "task", evidence_pass: 0, evidence_fail: 3 });
+        });
+      });
+
+      describe("negative", () => {
+        it("prd doc omits the meta key entirely (not a fabricated undefined/empty object)", async () => {
+          const doc = makeDoc({ status: "draft", type: "prd" });
+          await store.insert(doc);
+
+          const result = await service.pending();
+
+          expect(result.ok).toBe(true);
+          if (!result.ok) return;
+          expect("meta" in result.value[0]!).toBe(false);
+        });
+
+        it("spec doc with an illegal spec_kind omits meta entirely (does not fall back to a default)", async () => {
+          const doc = makeDoc({ status: "draft", type: "spec", extra: { spec_kind: "not-a-real-kind" } });
+          await store.insert(doc);
+
+          const result = await service.pending();
+
+          expect(result.ok).toBe(true);
+          if (!result.ok) return;
+          expect("meta" in result.value[0]!).toBe(false);
+        });
+
+        it("adr doc with an illegal decision_status omits meta entirely", async () => {
+          const doc = makeDoc({ status: "draft", type: "adr", extra: { decision_status: "bogus" } });
+          await store.insert(doc);
+
+          const result = await service.pending();
+
+          expect(result.ok).toBe(true);
+          if (!result.ok) return;
+          expect("meta" in result.value[0]!).toBe(false);
+        });
+
+        it("knowledge doc with a missing sub_type omits meta entirely", async () => {
+          const doc = makeDoc({ status: "draft", type: "knowledge", extra: {} });
+          await store.insert(doc);
+
+          const result = await service.pending();
+
+          expect(result.ok).toBe(true);
+          if (!result.ok) return;
+          expect("meta" in result.value[0]!).toBe(false);
+        });
+
+        it("knowledge doc with an illegal sub_type omits meta entirely", async () => {
+          const doc = makeDoc({ status: "draft", type: "knowledge", extra: { sub_type: "not-a-real-subtype" } });
+          await store.insert(doc);
+
+          const result = await service.pending();
+
+          expect(result.ok).toBe(true);
+          if (!result.ok) return;
+          expect("meta" in result.value[0]!).toBe(false);
+        });
+      });
+
+      describe("boundary values", () => {
+        it("spec doc missing extra.spec_kind defaults meta.kind to 'feature' (documented create-time default)", async () => {
+          const doc = makeDoc({ status: "draft", type: "spec", extra: {} });
+          await store.insert(doc);
+
+          const result = await service.pending();
+
+          expect(result.ok).toBe(true);
+          if (!result.ok) return;
+          expect(result.value[0]!.meta).toEqual({ t: "spec", kind: "feature" });
+        });
+
+        it("plan doc missing extra.phases yields phase_count 0", async () => {
+          const doc = makeDoc({ status: "draft", type: "plan", extra: {} });
+          await store.insert(doc);
+
+          const result = await service.pending();
+
+          expect(result.ok).toBe(true);
+          if (!result.ok) return;
+          expect(result.value[0]!.meta).toEqual({ t: "plan", phase_count: 0 });
+        });
+
+        it("task doc with no claim and no evidence yields evidence_pass:0, evidence_fail:0 and omits claimed_by (not undefined)", async () => {
+          const doc = makeDoc({
+            status: "draft",
+            type: "task",
+            extra: { plan_id: "01HPLAN000000000000000001" },
+          });
+          await store.insert(doc);
+
+          const result = await service.pending();
+
+          expect(result.ok).toBe(true);
+          if (!result.ok) return;
+          const meta = result.value[0]!.meta;
+          expect(meta).toMatchObject({ t: "task", evidence_pass: 0, evidence_fail: 0 });
+          expect(meta && "claimed_by" in meta).toBe(false);
+        });
+
+        it("task claim_stale key is entirely absent when ReviewService is constructed WITHOUT claimTtlMinutes, even though the doc carries a fresh claim", async () => {
+          // `service` (beforeEach) is `new ReviewService(store)` — no claimTtlMinutes.
+          const doc = makeDoc({
+            status: "draft",
+            type: "task",
+            extra: {
+              plan_id: "01HPLAN000000000000000001",
+              claim: { by: "alice", at: new Date().toISOString() },
+            },
+          });
+          await store.insert(doc);
+
+          const result = await service.pending();
+
+          expect(result.ok).toBe(true);
+          if (!result.ok) return;
+          const meta = result.value[0]!.meta;
+          expect(meta && "claimed_by" in meta && meta.claimed_by).toBe("alice");
+          expect(meta && "claim_stale" in meta).toBe(false);
+        });
+
+        it("task claim_stale is computed false for a fresh claim and true for a stale claim once ReviewService IS constructed with claimTtlMinutes", async () => {
+          const ttlMinutes = 60;
+          const ttlService = new ReviewService(store, ttlMinutes);
+
+          const freshDoc = makeDoc({
+            slug: "task-fresh-claim",
+            status: "draft",
+            type: "task",
+            extra: {
+              plan_id: "01HPLAN000000000000000001",
+              claim: { by: "alice", at: new Date().toISOString() },
+            },
+          });
+          const staleDoc = makeDoc({
+            slug: "task-stale-claim",
+            status: "draft",
+            type: "task",
+            extra: {
+              plan_id: "01HPLAN000000000000000001",
+              // 2h ago, well past a 60-minute TTL.
+              claim: { by: "bob", at: new Date(Date.now() - 120 * 60_000).toISOString() },
+            },
+          });
+          await store.insert(freshDoc);
+          await store.insert(staleDoc);
+
+          const result = await ttlService.pending();
+
+          expect(result.ok).toBe(true);
+          if (!result.ok) return;
+          const fresh = result.value.find((d) => d.id === freshDoc.id)!;
+          const stale = result.value.find((d) => d.id === staleDoc.id)!;
+          expect(fresh.meta && "claim_stale" in fresh.meta ? (fresh.meta as { claim_stale?: boolean }).claim_stale : undefined).toBe(false);
+          expect(stale.meta && "claim_stale" in stale.meta ? (stale.meta as { claim_stale?: boolean }).claim_stale : undefined).toBe(true);
+        });
+      });
+
+      describe("error handling (resilience)", () => {
+        // N/A: store-level failure propagation for `pending()` — InMemoryStore.findMany
+        // (packages/lore/src/store/in-memory-store.ts:85) has no fault-injection surface
+        // and always returns ok(); no existing `pending()` test in this file covers a
+        // store-error path either (see the class-level test plan comment: ERROR dimension
+        // is only exercised for approve/reject's DOC_NOT_FOUND). deriveTypeMeta's own
+        // "never throws on arbitrary extra" contract (AC-36-10) has a dedicated fuzz suite
+        // at packages/core/src/doc-type-meta.test.ts; the test below pins that guarantee
+        // at THIS integration point (ReviewService.pending's map over toPendingDoc).
+        it("does not throw and still resolves ok() when a task doc's extra fields have the wrong shape", async () => {
+          const doc = makeDoc({
+            status: "draft",
+            type: "task",
+            extra: {
+              plan_id: "01HPLAN000000000000000001",
+              claim: "not-an-object",
+              verification_evidence: "not-an-array",
+            },
+          });
+          await store.insert(doc);
+
+          const result = await service.pending();
+
+          expect(result.ok).toBe(true);
+        });
+      });
+
+      describe("state", () => {
+        it("reflects freshly-appended evidence on re-read (no stale caching of the projection)", async () => {
+          const doc = makeDoc({
+            status: "draft",
+            type: "task",
+            extra: { plan_id: "01HPLAN000000000000000001", verification_evidence: [] },
+          });
+          await store.insert(doc);
+
+          const before = await service.pending();
+          expect(before.ok).toBe(true);
+          if (!before.ok) return;
+          expect(before.value[0]!.meta).toMatchObject({ evidence_pass: 0, evidence_fail: 0 });
+
+          const updateResult = await store.update(doc.id, {
+            extra: {
+              plan_id: "01HPLAN000000000000000001",
+              verification_evidence: [
+                { oracle: "tsc", command: "bun run typecheck", result: "pass", recorded_at: "2026-07-02T00:00:00.000Z", recorded_by: "alice" },
+              ],
+            },
+          });
+          expect(updateResult.ok).toBe(true);
+
+          const after = await service.pending();
+          expect(after.ok).toBe(true);
+          if (!after.ok) return;
+          expect(after.value[0]!.meta).toMatchObject({ evidence_pass: 1, evidence_fail: 0 });
+        });
+      });
+
+      describe("regression", () => {
+        it("original PendingDoc fields are unaffected by meta projection on a non-prd doc", async () => {
+          const doc = makeDoc({
+            status: "draft",
+            type: "adr",
+            title: "My ADR",
+            created_by: "dave",
+            version: 4,
+            updated_at: "2026-06-09T00:00:00.000Z",
+            extra: { decision_status: "proposed" },
+          });
+          await store.insert(doc);
+
+          const result = await service.pending();
+
+          expect(result.ok).toBe(true);
+          if (!result.ok) return;
+          const pending = result.value[0]!;
+          expect(pending.id).toBe(doc.id);
+          expect(pending.type).toBe("adr");
+          expect(pending.title).toBe("My ADR");
+          expect(pending.status).toBe("draft");
+          expect(pending.created_by).toBe("dave");
+          expect(pending.version).toBe(4);
+          expect(pending.updated_at).toBe("2026-06-09T00:00:00.000Z");
+          expect(pending.meta).toEqual({ t: "adr", decision_status: "proposed" });
+        });
       });
     });
   });
