@@ -3,6 +3,8 @@
  * All types derive from SPEC-002 §2 — do not modify without updating the spec.
  */
 
+import type { SpecKind } from "./spec-kind.js";
+
 // ─── Primitive Aliases ─────────────────────────────────────────────────────
 
 /** ULID-format string — 26 chars, e.g. 01J5X7KZRF4AXRHX9WKE6DVP6P */
@@ -135,6 +137,17 @@ export interface SpecExtra {
   [key: string]: unknown;
 }
 
+/**
+ * The four decision-status values an `adr` document's `extra.decision_status` may take.
+ * SSOT for the enum — `adrExtraSchema` (schemas.ts) validates against this exact tuple
+ * rather than re-declaring the literal list, mirroring the `SPEC_KINDS`/`SpecKind`
+ * precedent (spec-kind.ts).
+ */
+export const DECISION_STATUSES = ["proposed", "accepted", "deprecated", "superseded"] as const;
+
+/** Derived TypeScript union for an adr document's `extra.decision_status`. */
+export type DecisionStatus = (typeof DECISION_STATUSES)[number];
+
 /** Extra fields for adr documents */
 export interface AdrExtra {
   /** Required — current decision status */
@@ -150,6 +163,19 @@ export interface PlanExtra {
   phase?: string;
   [key: string]: unknown;
 }
+
+/**
+ * The five sub-classification values a `knowledge` document's `extra.sub_type` may take.
+ * SSOT for the enum — `knowledgeExtraSchema` (schemas.ts) validates against this exact
+ * tuple rather than re-declaring the literal list (same `SPEC_KINDS` precedent as
+ * {@link DECISION_STATUSES} above). Includes `"assessment"` (SPEC-026 §3 D4) — a
+ * superset of the local `KnowledgeExtra.sub_type` literal below, which predates SPEC-026
+ * and is left as-is (pre-existing, narrower interface; not read by any SPEC-036 code path).
+ */
+export const KNOWLEDGE_SUB_TYPES = ["ideation", "retro", "research", "reference", "assessment"] as const;
+
+/** Derived TypeScript union for a knowledge document's `extra.sub_type`. */
+export type KnowledgeSubType = (typeof KNOWLEDGE_SUB_TYPES)[number];
 
 /** Extra fields for knowledge documents */
 export interface KnowledgeExtra {
@@ -171,6 +197,27 @@ export interface TaskExtra {
 
 // ─── Derived / Summary Types ───────────────────────────────────────────────
 
+/**
+ * Type-differentiated presentation metadata for a {@link DocSummary} (SPEC-036 §2 D3).
+ * Derived by the pure fn `deriveTypeMeta` (`doc-type-meta.ts`) — single derivation
+ * point, never hand-rolled at a call site.
+ *
+ * @invariant `prd` has no variant — `deriveTypeMeta` returns `undefined` for prd docs,
+ *   and `DocSummary.meta` is correspondingly absent (never a fabricated empty object).
+ */
+export type DocTypeMeta =
+  | { t: "spec"; kind: SpecKind }
+  | { t: "adr"; decision_status: DecisionStatus }
+  | { t: "knowledge"; sub_type: KnowledgeSubType }
+  | { t: "plan"; phase_count: number }
+  | {
+      t: "task";
+      claimed_by?: string;
+      claim_stale?: boolean;
+      evidence_pass: number;
+      evidence_fail: number;
+    };
+
 /** Lightweight doc summary for listings, navigation, and trees */
 export interface DocSummary {
   id: DocId;
@@ -179,6 +226,13 @@ export interface DocSummary {
   title: string;
   status: DocStatus;
   updated_at: string;
+  /** Freeform tags — always present (may be empty). Mirrors DocRecord.tags. */
+  tags: string[];
+  /** Mirrors DocRecord.priority. */
+  priority: Priority;
+  /** Type-differentiated presentation data — absent for prd, or when the doc's
+   *  type-specific extra fields are missing/malformed (degrade by omission). */
+  meta?: DocTypeMeta;
 }
 
 // ─── SPEC-024: Caller Surface + AI Default Source ──────────────────────────

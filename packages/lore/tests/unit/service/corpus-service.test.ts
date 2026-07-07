@@ -333,6 +333,177 @@ describe("get", () => {
   });
 });
 
+// ─── get — ancestors (SPEC-036 §2 D1) ───────────────────────────────────────
+//
+// Six-dimension note: this block covers HAPPY (AC-36-1, full chain + root-doc
+// empty case) and REGRESSION (AC-36-2, cycle + broken-parent-ref termination —
+// "REGRESSION" because these are exactly the runaway/hang failure modes the
+// depth-cap + seen-set guards in `_getImpl` exist to prevent from ever
+// recurring). NEGATIVE/BOUNDARY/ERROR/STATE for `get()` itself are already
+// covered by the pre-existing "get" describe block above; this block is scoped
+// to the ancestors field specifically, per dispatch instructions.
+
+describe("get — ancestors (SPEC-036 §2 D1)", () => {
+  it("AC-36-1: 4-level chain prd→spec→plan→task → ancestors is [prd, spec, plan], root-first, self excluded", async () => {
+    const { service } = makeService();
+    const prd = await service.create(prdInput("Root PRD"));
+    expect(prd.ok).toBe(true);
+    if (!prd.ok) return;
+
+    const spec = await service.create(specInput(prd.value.id, "Mid Spec"));
+    expect(spec.ok).toBe(true);
+    if (!spec.ok) return;
+
+    const plan = await service.create({
+      type: "plan",
+      title: "The Plan",
+      parent_id: spec.value.id,
+    });
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+
+    const task = await service.create({
+      type: "task",
+      title: "The Task",
+      parent_id: plan.value.id,
+      extra: { plan_id: plan.value.id },
+    });
+    expect(task.ok).toBe(true);
+    if (!task.ok) return;
+
+    const getResult = await service.get(task.value.id);
+    expect(getResult.ok).toBe(true);
+    if (!getResult.ok) return;
+    expect(getResult.value.navigation.ancestors.map((a) => a.id)).toEqual([
+      prd.value.id,
+      spec.value.id,
+      plan.value.id,
+    ]);
+    // self is excluded from its own ancestor chain
+    expect(getResult.value.navigation.ancestors.some((a) => a.id === task.value.id)).toBe(false);
+  });
+
+  it("AC-36-1: a root doc (no parent) → ancestors is []", async () => {
+    const { service } = makeService();
+    const prd = await service.create(prdInput("Lonely Root"));
+    expect(prd.ok).toBe(true);
+    if (!prd.ok) return;
+
+    const getResult = await service.get(prd.value.id);
+    expect(getResult.ok).toBe(true);
+    if (!getResult.ok) return;
+    expect(getResult.value.navigation.ancestors).toEqual([]);
+  });
+
+  it("AC-36-2: a manufactured parent_id cycle (A→C→B→A) terminates with the bounded pre-cycle chain, not a hang or error", async () => {
+    const { service, store } = makeService();
+    const a = await service.create(prdInput("Node A"));
+    expect(a.ok).toBe(true);
+    if (!a.ok) return;
+
+    const b = await service.create(specInput(a.value.id, "Node B"));
+    expect(b.ok).toBe(true);
+    if (!b.ok) return;
+
+    const c = await service.create({ type: "plan", title: "Node C", parent_id: b.value.id });
+    expect(c.ok).toBe(true);
+    if (!c.ok) return;
+
+    // Manufacture the cycle A → C by bypassing CorpusService's normal create-time
+    // validation — this is exactly how a corrupted/legacy row could arise (the
+    // supported write path never lets a doc become its own descendant's parent).
+    const rewire = await store.update(a.value.id, { parent_id: c.value.id });
+    expect(rewire.ok).toBe(true);
+
+    const getResult = await service.get(a.value.id);
+    expect(getResult.ok).toBe(true);
+    if (!getResult.ok) return;
+
+    const ancestorIds = getResult.value.navigation.ancestors.map((x) => x.id);
+    // bounded: at most the 3 participants, never growing without limit
+    expect(ancestorIds.length).toBeLessThanOrEqual(3);
+    // no duplicate ids — the seen-set guard stops re-visiting a node
+    expect(new Set(ancestorIds).size).toBe(ancestorIds.length);
+
+    // also check from a different entry point in the same cycle
+    const getResultC = await service.get(c.value.id);
+    expect(getResultC.ok).toBe(true);
+    if (!getResultC.ok) return;
+    const ancestorIdsC = getResultC.value.navigation.ancestors.map((x) => x.id);
+    expect(ancestorIdsC.length).toBeLessThanOrEqual(3);
+    expect(new Set(ancestorIdsC).size).toBe(ancestorIdsC.length);
+  });
+
+  it("AC-36-2: a broken parent_id ref (points at a never-inserted ULID) → ok:true with ancestors: [], not an error", async () => {
+    const { service, store } = makeService();
+    const doc = await service.create(prdInput("Has A Broken Parent Later"));
+    expect(doc.ok).toBe(true);
+    if (!doc.ok) return;
+
+    const ghostId = "01HGHOSTPARENTDOESNOTEXIST";
+    const rewire = await store.update(doc.value.id, { parent_id: ghostId });
+    expect(rewire.ok).toBe(true);
+
+    const getResult = await service.get(doc.value.id);
+    expect(getResult.ok).toBe(true);
+    if (!getResult.ok) return;
+    expect(getResult.value.navigation.ancestors).toEqual([]);
+    expect(getResult.value.navigation.parent).toBeNull();
+  });
+});
+
+// ─── list / get — DocSummary type-differentiated meta (SPEC-036 §2 D3, AC-36-7) ─
+
+describe("list — DocSummary meta field (AC-36-7)", () => {
+  it("a freshly created task with no evidence/claim → meta is { t:'task', evidence_pass:0, evidence_fail:0 }, claimed_by absent; tags/priority present", async () => {
+    const { service } = makeService();
+    const plan = await service.create({ type: "plan", title: "Plan For Task Meta" });
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+
+    const task = await service.create({
+      type: "task",
+      title: "Fresh Task",
+      parent_id: plan.value.id,
+      extra: { plan_id: plan.value.id },
+    });
+    expect(task.ok).toBe(true);
+    if (!task.ok) return;
+
+    const listResult = await service.list({ type: "task" });
+    expect(listResult.ok).toBe(true);
+    if (!listResult.ok) return;
+
+    const summary = listResult.value.docs.find((d) => d.id === task.value.id);
+    expect(summary).toBeDefined();
+    if (!summary) return;
+    expect(Array.isArray(summary.tags)).toBe(true);
+    expect(summary.priority).toBeDefined();
+    expect(summary.meta).toEqual({ t: "task", evidence_pass: 0, evidence_fail: 0 });
+    expect(summary.meta && "claimed_by" in summary.meta).toBe(false);
+  });
+
+  it("a freshly created spec (no explicit spec_kind) → meta is { t:'spec', kind:'feature' } (create-time default)", async () => {
+    const { service } = makeService();
+    const prd = await service.create(prdInput("Parent For Spec Meta"));
+    expect(prd.ok).toBe(true);
+    if (!prd.ok) return;
+
+    const spec = await service.create(specInput(prd.value.id, "Spec With Default Kind"));
+    expect(spec.ok).toBe(true);
+    if (!spec.ok) return;
+
+    const listResult = await service.list({ type: "spec" });
+    expect(listResult.ok).toBe(true);
+    if (!listResult.ok) return;
+
+    const summary = listResult.value.docs.find((d) => d.id === spec.value.id);
+    expect(summary).toBeDefined();
+    if (!summary) return;
+    expect(summary.meta).toEqual({ t: "spec", kind: "feature" });
+  });
+});
+
 // ─── set ────────────────────────────────────────────────────────────────────
 
 describe("set", () => {

@@ -266,8 +266,39 @@ describe("DocSummary interface", () => {
       title: "Auth Service",
       status: "draft",
       updated_at: "2026-06-08T00:00:00Z",
+      tags: ["auth"],
+      priority: "high",
     };
     expect(summary.slug).toBe("spec-auth");
+  });
+
+  it("[boundary] meta is optional — absent for prd", () => {
+    const summary: DocSummary = {
+      id: "01J5" as DocId,
+      slug: "prd-lore" as Slug,
+      type: "prd",
+      title: "Lore PRD",
+      status: "approved",
+      updated_at: "2026-06-08T00:00:00Z",
+      tags: [],
+      priority: "medium",
+    };
+    expect(summary.meta).toBeUndefined();
+  });
+
+  it("accepts a type-differentiated meta variant", () => {
+    const summary: DocSummary = {
+      id: "01J5" as DocId,
+      slug: "spec-auth" as Slug,
+      type: "spec",
+      title: "Auth Service",
+      status: "draft",
+      updated_at: "2026-06-08T00:00:00Z",
+      tags: [],
+      priority: "medium",
+      meta: { t: "spec", kind: "feature" },
+    };
+    expect(summary.meta).toEqual({ t: "spec", kind: "feature" });
   });
 });
 

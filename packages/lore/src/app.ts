@@ -174,7 +174,10 @@ function buildAppFromSqlite(
   // immutable snapshot). Default "cli" is the safest: AI on, unchanged from SPEC-017 behavior.
   let _callerSurface: CallerSurface = "cli";
   const db = store.getDatabase();
-  const corpusService = new CorpusService(store, telemetry);
+  // reason: claimTtlMinutes flows into DocSummary.meta's task.claim_stale (SPEC-036 §2
+  // D3) — same resolved value TaskWorkflowService below uses, one resolution path
+  // (resolveClaimTtlMinutes at the bottom of this file).
+  const corpusService = new CorpusService(store, telemetry, claimTtlMinutes);
   const outlineService = new OutlineService(store);
   return {
     corpusService,
@@ -253,7 +256,10 @@ function buildAppFromTurso(
   // reason: SPEC-024 §9.1 — same mutable callerSurface pattern as buildAppFromSqlite.
   let _callerSurface: CallerSurface = "cli";
   const apiKeyDb = new Database(dbPath);
-  const corpusService = new CorpusService(store, telemetry);
+  // reason: claimTtlMinutes flows into DocSummary.meta's task.claim_stale (SPEC-036 §2
+  // D3) — same resolved value TaskWorkflowService below uses, one resolution path
+  // (resolveClaimTtlMinutes at the bottom of this file).
+  const corpusService = new CorpusService(store, telemetry, claimTtlMinutes);
   const outlineService = new OutlineService(store);
   return {
     corpusService,

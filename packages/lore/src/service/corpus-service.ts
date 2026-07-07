@@ -10,6 +10,7 @@ import type { LoreError } from "@lore/core";
 import {
   canonicaliseBody,
   createDocInputSchema,
+  deriveTypeMeta,
   docPatchSchema,
   slugifyWithCollision,
   specExtraSchema,
@@ -67,6 +68,13 @@ export interface DocWithNavigation {
   doc: DocRecord;
   navigation: {
     parent: DocSummary | null;
+    /**
+     * The `parent_id` chain from root to direct parent, root-first, EXCLUDING the
+     * current doc. Empty for root docs. See `_getImpl`'s ancestor walk for the
+     * cycle-guard / depth-cap / broken-parent-ref termination rules.
+     * Source: SPEC-036 §2 D1, AC-36-1, AC-36-2
+     */
+    ancestors: DocSummary[];
     siblings: DocSummary[];
     children: DocSummary[];
     related: Array<DocSummary & { link_type: LinkType }>;
@@ -132,12 +140,43 @@ export class CorpusService {
   /**
    * @param store - Storage abstraction (SQLiteStore, TursoStore, or InMemoryStore)
    * @param telemetry - Telemetry sink for instrumented methods (defaults to NoOp)
+   * @param claimTtlMinutes - Task claim lease TTL in minutes, forwarded to
+   *   `deriveTypeMeta` for `DocSummary.meta`'s `task.claim_stale` computation
+   *   (SPEC-036 §2 D3). Same DI shape as `TaskWorkflowService`/`AuditService`'s
+   *   constructor-resolved config values. Omitted (not defaulted to 120 here) when
+   *   the caller doesn't wire it — `deriveTypeMeta` then omits `claim_stale` entirely
+   *   rather than computing it against a value CorpusService invented.
    */
   constructor(
     private readonly store: StoreInterface,
     telemetry: Telemetry = new NoOpTelemetry(),
+    private readonly claimTtlMinutes?: number,
   ) {
     this.telemetry = telemetry;
+  }
+
+  /**
+   * Projects a full DocRecord to the lightweight DocSummary shape used by listings,
+   * navigation, and trees. The SOLE projection site in this service — every method
+   * that needs a DocSummary calls this instead of hand-rolling the shape (D3's
+   * "one private toSummary(doc)" requirement).
+   */
+  private toSummary(doc: DocRecord): DocSummary {
+    const meta = deriveTypeMeta(
+      doc,
+      this.claimTtlMinutes !== undefined ? { claimTtlMinutes: this.claimTtlMinutes } : undefined,
+    );
+    return {
+      id: doc.id,
+      slug: doc.slug,
+      type: doc.type,
+      title: doc.title,
+      status: doc.status,
+      updated_at: doc.updated_at,
+      tags: doc.tags,
+      priority: doc.priority,
+      ...(meta !== undefined ? { meta } : {}),
+    };
   }
 
   /**
@@ -403,13 +442,34 @@ export class CorpusService {
 
     const doc = findResult.value;
 
-    // Parent
+    // Parent + ancestors — one walk up the parent_id chain (AC-36-1). `parent` is the
+    // direct parent (chain[0]); `ancestors` is the full chain, root-first.
+    // reason: depth cap 20 is a runaway backstop, not a feature — the corpus's own
+    // tree contract caps depth at ≤5 (SPEC-036 §2 D1). A manufactured parent_id cycle
+    // (AC-36-2) is caught by the seen-set below and terminates the walk, returning the
+    // pre-cycle chain rather than looping forever.
+    const ANCESTOR_DEPTH_CAP = 20;
     let parent: DocSummary | null = null;
+    const ancestors: DocSummary[] = [];
     if (doc.parent_id !== null) {
-      const parentResult = await this.store.find(doc.parent_id);
-      if (parentResult.ok && parentResult.value !== null) {
-        parent = toDocSummary(parentResult.value);
+      const seen = new Set<DocId>([doc.id]);
+      const chain: DocSummary[] = [];
+      let currentParentId: DocId | null = doc.parent_id;
+      let depth = 0;
+      while (currentParentId !== null && depth < ANCESTOR_DEPTH_CAP) {
+        if (seen.has(currentParentId)) break; // reason: cycle guard (AC-36-2)
+        seen.add(currentParentId);
+        const nodeResult = await this.store.find(currentParentId);
+        // reason: a broken parent ref (find → null, or a store error) terminates the
+        // walk with whatever ancestors were already collected — the doc is still
+        // viewable; tree-integrity reporting is TreeCheckService's job, not get().
+        if (!nodeResult.ok || nodeResult.value === null) break;
+        chain.push(this.toSummary(nodeResult.value));
+        currentParentId = nodeResult.value.parent_id;
+        depth++;
       }
+      parent = chain[0] ?? null;
+      ancestors.push(...chain.slice().reverse());
     }
 
     // Siblings — same parent (excluding self)
@@ -419,14 +479,14 @@ export class CorpusService {
       if (siblingsResult.ok) {
         siblings = siblingsResult.value
           .filter((d) => d.id !== doc.id)
-          .map(toDocSummary);
+          .map((d) => this.toSummary(d));
       }
     }
 
     // Children — docs where parent_id = this doc's id
     const childrenResult = await this.store.findMany({ parent_id: doc.id });
     const children: DocSummary[] = childrenResult.ok
-      ? childrenResult.value.map(toDocSummary)
+      ? childrenResult.value.map((d) => this.toSummary(d))
       : [];
 
     // Related — non-parent outbound links
@@ -441,14 +501,14 @@ export class CorpusService {
         const otherId = link.from_id === doc.id ? link.to_id : link.from_id;
         const otherResult = await this.store.find(otherId);
         if (otherResult.ok && otherResult.value !== null) {
-          related.push({ ...toDocSummary(otherResult.value), link_type: link.link_type });
+          related.push({ ...this.toSummary(otherResult.value), link_type: link.link_type });
         }
       }
     }
 
     return ok({
       doc,
-      navigation: { parent, siblings, children, related },
+      navigation: { parent, ancestors, siblings, children, related },
     });
   }
 
@@ -673,7 +733,7 @@ export class CorpusService {
       return storeResult;
     }
 
-    const docs = storeResult.value.map(toDocSummary);
+    const docs = storeResult.value.map((d) => this.toSummary(d));
     const result = ok({ docs, total: docs.length });
     this.recordTelemetryEvent("list", startMs, result, { filter_type: filters.type, count: docs.length });
     return result;
@@ -1062,7 +1122,7 @@ export class CorpusService {
     doc: DocRecord,
     remainingDepth: number,
   ): Promise<Result<TreeNode, LoreError>> {
-    const summary = toDocSummary(doc);
+    const summary = this.toSummary(doc);
 
     if (remainingDepth <= 0) {
       return ok({ doc: summary, children: [] });
@@ -1108,17 +1168,4 @@ export class CorpusService {
       .map((d) => d.slug)
       .slice(0, 5);
   }
-}
-
-// ─── Helper functions ──────────────────────────────────────────────────────
-
-function toDocSummary(doc: DocRecord): DocSummary {
-  return {
-    id: doc.id,
-    slug: doc.slug,
-    type: doc.type,
-    title: doc.title,
-    status: doc.status,
-    updated_at: doc.updated_at,
-  };
 }

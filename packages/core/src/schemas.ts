@@ -5,6 +5,7 @@
 
 import { z } from "zod";
 import type { DocStatus, DocType, Slug } from "./types.js";
+import { DECISION_STATUSES, KNOWLEDGE_SUB_TYPES } from "./types.js";
 import { evidenceEntrySchema, taskClaimSchema } from "./task-workflow.js";
 import { assessmentResultSchema } from "./assessment.js";
 import { SPEC_KINDS } from "./spec-kind.js";
@@ -73,9 +74,15 @@ export const versionActionSchema = z.enum([
 
 // ─── Type-specific Extra Schemas ───────────────────────────────────────────
 
+/**
+ * Zod schema for an adr document's `extra.decision_status` — SSOT is
+ * `DECISION_STATUSES` (types.ts), mirroring the `SPEC_KINDS`/`specExtraSchema` precedent.
+ */
+export const decisionStatusSchema = z.enum(DECISION_STATUSES);
+
 export const adrExtraSchema = z
   .object({
-    decision_status: z.enum(["proposed", "accepted", "deprecated", "superseded"]),
+    decision_status: decisionStatusSchema,
     superseded_by: docIdSchema.optional(),
   })
   .passthrough();
@@ -90,9 +97,15 @@ export const adrExtraSchema = z
  *   assessment doc.
  * Source: SPEC-002 §2 (base sub_types), SPEC-026 §3 D4, D6 (assessment sub_type)
  */
+/**
+ * Zod schema for a knowledge document's `extra.sub_type` — SSOT is
+ * `KNOWLEDGE_SUB_TYPES` (types.ts), mirroring the `SPEC_KINDS`/`specExtraSchema` precedent.
+ */
+export const knowledgeSubTypeSchema = z.enum(KNOWLEDGE_SUB_TYPES);
+
 export const knowledgeExtraSchema = z
   .object({
-    sub_type: z.enum(["ideation", "retro", "research", "reference", "assessment"]),
+    sub_type: knowledgeSubTypeSchema,
     /** Present iff sub_type === "assessment" — the Zod-typed SSOT judge result. */
     assessment: assessmentResultSchema.optional(),
   })

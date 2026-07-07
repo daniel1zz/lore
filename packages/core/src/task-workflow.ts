@@ -140,11 +140,28 @@ export interface BlockerInfo {
 }
 
 /**
+ * Defensive `extra` accessor — `task.extra` is typed `Record<string, unknown>`, but a
+ * corrupted/legacy store row (or a fuzzed test fixture, AC-36-10) may hand this a
+ * `null`/non-object value at runtime. Indexing directly into that would throw before
+ * the array/type guards in {@link extractEvidence} / {@link extractClaim} ever run.
+ * Duplicated (not imported) from `doc-type-meta.ts`'s identical `safeExtra` helper to
+ * avoid a reverse dependency — `doc-type-meta.ts` already depends on this file.
+ */
+function safeTaskExtra(task: DocRecord): Record<string, unknown> {
+  const extra: unknown = task.extra;
+  return extra !== null && typeof extra === "object" && !Array.isArray(extra)
+    ? (extra as Record<string, unknown>)
+    : {};
+}
+
+/**
  * Extracts the verification_evidence array from a task's extra field.
  * Returns [] when absent or malformed (defensive — extra is untyped storage).
+ * Exported for reuse by `doc-type-meta.ts::deriveTypeMeta` (SPEC-036 §2 D3) — single
+ * extraction point, not re-derived at the call site.
  */
-function extractEvidence(task: DocRecord): EvidenceEntry[] {
-  const raw = task.extra["verification_evidence"];
+export function extractEvidence(task: DocRecord): EvidenceEntry[] {
+  const raw = safeTaskExtra(task)["verification_evidence"];
   if (!Array.isArray(raw)) return [];
   const parsed = z.array(evidenceEntrySchema).safeParse(raw);
   return parsed.success ? parsed.data : [];
@@ -153,15 +170,25 @@ function extractEvidence(task: DocRecord): EvidenceEntry[] {
 /**
  * Extracts and validates the claim from a task's extra field.
  * Returns undefined when absent or malformed (defensive — extra is untyped storage).
+ * Exported for reuse by `doc-type-meta.ts::deriveTypeMeta` (SPEC-036 §2 D3) — single
+ * extraction point, not re-derived at the call site.
  */
-function extractClaim(task: DocRecord): TaskClaim | undefined {
-  const raw = task.extra["claim"];
+export function extractClaim(task: DocRecord): TaskClaim | undefined {
+  const raw = safeTaskExtra(task)["claim"];
   if (raw === undefined || raw === null) return undefined;
   const parsed = taskClaimSchema.safeParse(raw);
   return parsed.success ? parsed.data : undefined;
 }
 
-/** Builds the lightweight DocSummary projection of a task DocRecord. */
+/**
+ * Builds the lightweight DocSummary projection of a task DocRecord.
+ *
+ * @invariant Deliberately omits `meta` — this projection backs `ReadyRecord.task`
+ *   (`lore ready`, SPEC-025), which has never rendered type-differentiated metadata.
+ *   Wiring `deriveTypeMeta` here is out of scope for SPEC-036 §2 D3 (CorpusService's
+ *   projection is the one this spec upgrades); `tags`/`priority` are added only to
+ *   satisfy DocSummary's now-required fields.
+ */
 function toDocSummary(doc: DocRecord): DocSummary {
   return {
     id: doc.id,
@@ -170,6 +197,8 @@ function toDocSummary(doc: DocRecord): DocSummary {
     title: doc.title,
     status: doc.status,
     updated_at: doc.updated_at,
+    tags: doc.tags,
+    priority: doc.priority,
   };
 }
 

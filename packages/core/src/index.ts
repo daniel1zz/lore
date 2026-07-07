@@ -41,3 +41,4 @@ export * from "./review-judgment.js";
 export * from "./review-checks.js";
 export * from "./calibration.js";
 export * from "./audit-actor.js";
+export * from "./doc-type-meta.js";
