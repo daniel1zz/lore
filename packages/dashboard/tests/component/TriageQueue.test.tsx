@@ -33,6 +33,31 @@
  *   REGRESSION — a non-empty `warnings` array on a successful approve fires
  *     toast.warning in addition to toast.success (SPEC-033 F1 calibration
  *     hook surfacing).
+ *
+ * SPEC-036 addendum — `row.meta` badge (source: task dispatch contract,
+ * "PendingDoc.meta 投影 + dashboard pending 徽章"). Written from the contract
+ * BEFORE reading TriageQueue.tsx's body: "row.meta present + formatTypeMetaLabel(meta)
+ * non-null -> render that label text next to the type badge; meta absent -> no meta
+ * badge, no crash." `formatTypeMetaLabel` itself is already unit-tested independently
+ * (tests/unit/lib/type-meta-label.test.ts) — these tests exercise the WIRING (does
+ * TriageQueue actually call it with the real row data and render the result), not the
+ * label-formatting rules themselves.
+ *   HAPPY — two rows with distinct, differently-typed meta values (knowledge/assessment,
+ *     task/claimed+evidence) both render their derived label text next to their type badge.
+ *   BOUNDARY — a task row whose meta is present but whose label is null (unclaimed, no
+ *     evidence) renders no meta badge — distinguishing "meta present, label null" from
+ *     "meta entirely absent" (two different upstream code paths, same visual outcome).
+ *   NEGATIVE — a row with no `meta` key renders only the type badge; no stray meta text,
+ *     no crash.
+ *   ERROR — N/A: meta rendering is synchronous over already-fetched row data (no separate
+ *     fetch/failure mode of its own); the existing "error" describe block below already
+ *     covers this component's one async failure surface (apiApproveDoc rejecting).
+ *   STATE — N/A: the meta badge is static per fetched row, no interactive state transition
+ *     of its own; existing "state" describe blocks cover unrelated toggles (blocking
+ *     questions expand, adjudicate panel).
+ *   REGRESSION — adding `meta` to a row used by the pre-existing "Escalated only" filter
+ *     scenario does not break that filter's row selection (meta badge doesn't interfere
+ *     with the escalation-matching logic).
  */
 
 import "@testing-library/jest-dom/vitest";
@@ -277,6 +302,111 @@ describe("TriageQueue", () => {
 
       await waitFor(() => expect(toastError).toHaveBeenCalled());
       expect(screen.getByLabelText(`Calibration note for ${doc.title}`)).toBeInTheDocument();
+    });
+  });
+
+  describe("meta badge (SPEC-036)", () => {
+    describe("happy path", () => {
+      it("renders distinct meta labels next to the type badge for two differently-typed rows", async () => {
+        const knowledgeDoc = makePendingDoc({
+          id: "01HDOC00000000000000000001",
+          type: "knowledge",
+          title: "Knowledge Row",
+          meta: { t: "knowledge", sub_type: "assessment" },
+        });
+        const taskDoc = makePendingDoc({
+          id: "01HDOC00000000000000000002",
+          type: "task",
+          title: "Task Row",
+          meta: { t: "task", claimed_by: "alice", claim_stale: false, evidence_pass: 2, evidence_fail: 1 },
+        });
+        mockedGetPending.mockResolvedValue([knowledgeDoc, taskDoc]);
+        mockedGetJudgments.mockResolvedValue({ latest: null, history: [] });
+
+        renderWithClient(<TriageQueue />);
+
+        await screen.findByText("Knowledge Row");
+        expect(screen.getByText("assessment")).toBeInTheDocument();
+        expect(screen.getByText("Task Row")).toBeInTheDocument();
+        expect(screen.getByText("claimed:alice ✔2/✘1")).toBeInTheDocument();
+      });
+    });
+
+    describe("boundary: meta present but label is null", () => {
+      it("renders no meta badge for an unclaimed task with no evidence, even though meta is present", async () => {
+        const doc = makePendingDoc({
+          id: "01HDOC00000000000000000001",
+          type: "task",
+          title: "Empty Task Meta",
+          meta: { t: "task", evidence_pass: 0, evidence_fail: 0 },
+        });
+        mockedGetPending.mockResolvedValue([doc]);
+        mockedGetJudgments.mockResolvedValue({ latest: null, history: [] });
+
+        renderWithClient(<TriageQueue />);
+
+        await screen.findByText("Empty Task Meta");
+        // The type badge "task" still renders; no claim/evidence text does.
+        expect(screen.getByText("task")).toBeInTheDocument();
+        expect(screen.queryByText(/claimed:/)).not.toBeInTheDocument();
+        expect(screen.queryByText(/✔/)).not.toBeInTheDocument();
+      });
+    });
+
+    describe("negative: meta absent", () => {
+      it("renders only the type badge and the title, without crashing, when meta is absent", async () => {
+        const doc = makePendingDoc({
+          id: "01HDOC00000000000000000001",
+          type: "spec",
+          title: "No Meta Row",
+        });
+        mockedGetPending.mockResolvedValue([doc]);
+        mockedGetJudgments.mockResolvedValue({ latest: null, history: [] });
+
+        renderWithClient(<TriageQueue />);
+
+        await screen.findByText("No Meta Row");
+        expect(screen.getByText("spec")).toBeInTheDocument();
+        expect(screen.queryByText("feature")).not.toBeInTheDocument();
+        expect(screen.queryByText("tech")).not.toBeInTheDocument();
+      });
+    });
+
+    describe("regression: coexists with the escalated-only filter", () => {
+      it("a meta-carrying fresh escalation is still correctly isolated by 'Escalated only'", async () => {
+        const freshEscalation = makePendingDoc({
+          id: "01HDOC00000000000000000001",
+          type: "plan",
+          title: "Escalated Plan",
+          version: 2,
+          meta: { t: "plan", phase_count: 4 },
+        });
+        const approved = makePendingDoc({
+          id: "01HDOC00000000000000000002",
+          type: "prd",
+          title: "Approved Doc",
+          version: 1,
+        });
+        mockedGetPending.mockResolvedValue([freshEscalation, approved]);
+        mockedGetJudgments.mockImplementation(async (docId: string) => {
+          if (docId === freshEscalation.id) {
+            return { latest: makeJudgment({ doc_version: 2, decision: "escalate" }), history: [] };
+          }
+          return { latest: makeJudgment({ doc_version: 1, decision: "approve" }), history: [] };
+        });
+
+        const user = userEvent.setup();
+        renderWithClient(<TriageQueue />);
+
+        await screen.findByText("Escalated Plan");
+        expect(screen.getByText("4 phases")).toBeInTheDocument();
+
+        await user.click(screen.getByLabelText("Escalated only"));
+
+        expect(screen.getByText("Escalated Plan")).toBeInTheDocument();
+        expect(screen.getByText("4 phases")).toBeInTheDocument();
+        expect(screen.queryByText("Approved Doc")).not.toBeInTheDocument();
+      });
     });
   });
 });

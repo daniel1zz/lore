@@ -26,6 +26,26 @@
  *   STATE — loading state shows skeletons before data resolves; clicking a
  *     title calls onNavigate with that doc's id.
  *   REGRESSION — n/a (no known prior regression to pin here).
+ *
+ * SPEC-036 addendum — `row.meta` badge (source: task dispatch contract,
+ * "PendingDoc.meta 投影 + dashboard pending 徽章"). Written from the contract
+ * BEFORE reading PendingPanel.tsx's body: "row.meta present -> render type badge +
+ * meta badge; row.meta absent -> only the type badge." `formatTypeMetaLabel` itself
+ * is independently unit-tested (tests/unit/lib/type-meta-label.test.ts); these tests
+ * exercise PendingPanel's WIRING to it, not the label rules.
+ *   HAPPY — two rows with distinct meta values (plan/phase_count, adr/decision_status)
+ *     both render their derived label text, alongside their existing judgment badge.
+ *   NEGATIVE — a row without `meta` renders only its type badge, no stray meta text,
+ *     and does not crash; title is still clickable (onNavigate still fires).
+ *   BOUNDARY — n/a beyond the two BOUNDARY blocks already covering panel fan-out limits
+ *     (unrelated to meta); N/A here because meta rendering has no size/count boundary
+ *     of its own distinct from the existing panel-limit boundary tests.
+ *   ERROR — N/A: meta rendering is synchronous over already-fetched row data; the
+ *     existing "error" describe block below covers this component's one async failure
+ *     surface (apiGetPendingReview rejecting).
+ *   STATE — n/a: the meta badge is static per fetched row, no interactive transition.
+ *   REGRESSION — a meta-carrying row remains clickable and still calls onNavigate with
+ *     the correct id (meta rendering doesn't swallow or shift the click target).
  */
 
 import "@testing-library/jest-dom/vitest";
@@ -176,6 +196,76 @@ describe("PendingPanel", () => {
       await user.click(title);
 
       expect(onNavigate).toHaveBeenCalledWith("01HDOC00000000000000000001");
+    });
+  });
+
+  describe("meta badge (SPEC-036)", () => {
+    describe("happy path", () => {
+      it("renders distinct meta labels for two differently-typed rows", async () => {
+        const planDoc = makePendingDoc({
+          id: "01HDOC00000000000000000001",
+          type: "plan",
+          title: "Plan Row",
+          meta: { t: "plan", phase_count: 3 },
+        });
+        const adrDoc = makePendingDoc({
+          id: "01HDOC00000000000000000002",
+          type: "adr",
+          title: "Adr Row",
+          meta: { t: "adr", decision_status: "accepted" },
+        });
+        mockedGetPending.mockResolvedValue([planDoc, adrDoc]);
+        mockedGetJudgments.mockResolvedValue({ latest: null, history: [] });
+
+        renderWithClient(<PendingPanel />);
+
+        await screen.findByText("Plan Row");
+        expect(screen.getByText("3 phases")).toBeInTheDocument();
+        expect(screen.getByText("Adr Row")).toBeInTheDocument();
+        expect(screen.getByText("accepted")).toBeInTheDocument();
+      });
+    });
+
+    describe("negative: meta absent", () => {
+      it("renders only the type badge and title, without crashing, when meta is absent", async () => {
+        const doc = makePendingDoc({
+          id: "01HDOC00000000000000000001",
+          type: "spec",
+          title: "No Meta Row",
+        });
+        mockedGetPending.mockResolvedValue([doc]);
+        mockedGetJudgments.mockResolvedValue({ latest: null, history: [] });
+
+        renderWithClient(<PendingPanel />);
+
+        await screen.findByText("No Meta Row");
+        expect(screen.getByText("spec")).toBeInTheDocument();
+        expect(screen.queryByText("feature")).not.toBeInTheDocument();
+        expect(screen.queryByText("tech")).not.toBeInTheDocument();
+      });
+    });
+
+    describe("regression: click target unaffected by meta rendering", () => {
+      it("a meta-carrying row is still clickable and calls onNavigate with its id", async () => {
+        const doc = makePendingDoc({
+          id: "01HDOC00000000000000000001",
+          type: "knowledge",
+          title: "Meta Row",
+          meta: { t: "knowledge", sub_type: "reference" },
+        });
+        mockedGetPending.mockResolvedValue([doc]);
+        mockedGetJudgments.mockResolvedValue({ latest: null, history: [] });
+        const onNavigate = vi.fn();
+        const user = userEvent.setup();
+
+        renderWithClient(<PendingPanel onNavigate={onNavigate} />);
+
+        const title = await screen.findByText("Meta Row");
+        expect(screen.getByText("reference")).toBeInTheDocument();
+        await user.click(title);
+
+        expect(onNavigate).toHaveBeenCalledWith("01HDOC00000000000000000001");
+      });
     });
   });
 });
