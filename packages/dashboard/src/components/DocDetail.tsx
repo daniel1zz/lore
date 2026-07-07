@@ -44,9 +44,16 @@
  *     task's `claim_stale` is always omitted on this page (never fabricated
  *     `false`) — a narrower, documented degradation vs. the list view, which
  *     gets the server-computed value. The breadcrumb (ancestor chain) mounts
- *     above this header.
+ *     above this header. The meta badge's variant is `metaBadgeVariant(typeMeta)`
+ *     (destructive when a task has `evidence_fail > 0`) — SPEC-037 AC-37-6.
+ *   - Plan docs with >=1 task child render `PlanExecution` (phase-grouped
+ *     progress + rollup) in place of the flat children list; plans with zero
+ *     task children keep the flat list (SPEC-037 D2). Task docs render
+ *     `TaskExecution` (claim card + evidence timeline) above the
+ *     parent/links footer, only when there's a claim or evidence to show
+ *     (SPEC-037 D3).
  * Side-effect class: IO (fetch, localStorage)
- * Source: SPEC-015, SPEC-022 §9.2, SPEC-027, SPEC-036 §1 D1/D3
+ * Source: SPEC-015, SPEC-022 §9.2, SPEC-027, SPEC-036 §1 D1/D3, SPEC-037 §1 D2/D3
  */
 
 import { useState, useCallback, useRef, useEffect } from "react";
@@ -63,13 +70,15 @@ import { HistoryTab } from "@/components/HistoryTab";
 import { AuditTab } from "@/components/AuditTab";
 import { ConflictModal } from "@/components/ConflictModal";
 import { Breadcrumb } from "@/components/Breadcrumb";
+import { PlanExecution } from "@/components/PlanExecution";
+import { TaskExecution } from "@/components/TaskExecution";
 import { saveDraft, loadDraft, clearDraft, isDraftStale } from "@/store/draft";
 import type { DocWithNavigation } from "@/lib/api";
 import type { DocStatus, LinkType } from "@lore/core";
-import { deriveTypeMeta } from "@lore/core";
+import { deriveTypeMeta, extractClaim, extractEvidence } from "@lore/core";
 import { cn } from "@/lib/utils";
 import { TYPE_ACCENT, TYPE_ACCENT_BORDER_CLASS } from "@/lib/type-accent";
-import { formatTypeMetaLabel, isNotablePriority } from "@/lib/type-meta-label";
+import { formatTypeMetaLabel, isNotablePriority, metaBadgeVariant } from "@/lib/type-meta-label";
 import {
   apiPatchDoc,
   apiApproveDoc,
@@ -197,7 +206,17 @@ export function DocDetail({
   // module doc comment.
   const typeMeta = deriveTypeMeta(doc);
   const metaLabel = typeMeta !== undefined ? formatTypeMetaLabel(typeMeta) : null;
+  const metaVariant = typeMeta !== undefined ? metaBadgeVariant(typeMeta) : "outline";
   const showPriority = isNotablePriority(doc.priority);
+  // reason: SPEC-037 D2 — only swap the flat children footer list for the phase-grouped
+  // PlanExecution view when there's at least one task child; a plan with zero tasks
+  // keeps the plain list (no empty rollup shell, per AC-37-3).
+  const hasTaskChildren = doc.type === "plan" && navigation.children.some((child) => child.type === "task");
+  // reason: mirrors TaskExecution's own "nothing to show" gate (extractClaim/
+  // extractEvidence, both safeParse-degrading) so the section's leading
+  // Separator isn't orphaned when TaskExecution would render `null`.
+  const hasTaskExecutionData =
+    doc.type === "task" && (extractClaim(doc) !== undefined || extractEvidence(doc).length > 0);
 
   // ── Edit state ──────────────────────────────────────────────────────────────
   const [isEditing, setIsEditing] = useState(false);
@@ -514,7 +533,7 @@ export function DocDetail({
         {(metaLabel !== null || showPriority) && (
           <div className="flex items-center gap-1.5 flex-wrap mt-2">
             {metaLabel !== null && (
-              <Badge variant="outline" className="text-xs">
+              <Badge variant={metaVariant} className="text-xs">
                 {metaLabel}
               </Badge>
             )}
@@ -624,6 +643,14 @@ export function DocDetail({
         </section>
       )}
 
+      {/* Task Execution section (SPEC-037 D3) — above PARENT/RELATED */}
+      {hasTaskExecutionData && (
+        <>
+          <Separator />
+          <TaskExecution task={doc} />
+        </>
+      )}
+
       {/* Navigation footer + Links panel */}
       {(navigation.parent !== null || navigation.siblings.length > 0 || navigation.children.length > 0 || linkEntries.length > 0) && (
         <>
@@ -643,19 +670,29 @@ export function DocDetail({
             )}
             {navigation.children.length > 0 && (
               <div>
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">Children</p>
-                <div className="flex flex-wrap gap-2">
-                  {navigation.children.map((child) => (
-                    <button
-                      key={child.id}
-                      className="text-sm text-primary hover:underline"
-                      onClick={() => onNavigate?.(child.id)}
-                      type="button"
-                    >
-                      {child.title}
-                    </button>
-                  ))}
-                </div>
+                {hasTaskChildren ? (
+                  <PlanExecution
+                    plan={doc}
+                    children={navigation.children}
+                    {...(onNavigate !== undefined ? { onNavigate } : {})}
+                  />
+                ) : (
+                  <>
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">Children</p>
+                    <div className="flex flex-wrap gap-2">
+                      {navigation.children.map((child) => (
+                        <button
+                          key={child.id}
+                          className="text-sm text-primary hover:underline"
+                          onClick={() => onNavigate?.(child.id)}
+                          type="button"
+                        >
+                          {child.title}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
             )}
 

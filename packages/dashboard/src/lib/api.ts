@@ -4,14 +4,28 @@
  *   the server's { ok, data } envelope and normalize errors.
  * Public surface: apiList, apiSearch, apiTree, apiGetDoc, apiGetStatus,
  *   apiGetJudgments, apiGetAuditForDoc, apiGetAuditVerify, apiGetCalibrationStats,
- *   apiGetPendingReview
+ *   apiGetPendingReview, apiGetReady
  * Invariants: 5-second timeout via AbortSignal.timeout; never leaks raw Response objects.
- *   Throws ApiError on non-2xx or server-side { ok: false }.
+ *   Throws ApiError on non-2xx or server-side { ok: false } — EXCEPT `apiGetReady`,
+ *   which returns `Result<ReadyRecord[], ApiError>` per its SPEC-037 §2 contract
+ *   (the only Result-returning function in this file; every other export throws).
  * Side-effect class: IO (fetch)
- * Source: SPEC-011 §3, §5; SPEC-015 §3; SPEC-033 F1 (feedback-loop read routes)
+ * Source: SPEC-011 §3, §5; SPEC-015 §3; SPEC-033 F1 (feedback-loop read routes);
+ *   SPEC-037 §2 (readiness route client)
  */
 
-import type { AuditEntry, DocRecord, DocSummary, DocType, DocStatus, ReviewJudgment } from "@lore/core";
+import type {
+  AuditEntry,
+  DocRecord,
+  DocSummary,
+  DocType,
+  DocStatus,
+  ReadyRecord,
+  ReviewJudgment,
+  Result,
+  SearchHit,
+} from "@lore/core";
+import { ok } from "@lore/core";
 
 // ─── Error type ──────────────────────────────────────────────────────────────
 
@@ -84,14 +98,17 @@ export interface ListResponse {
  * result count on the search page is derived client-side as `results.length`. A past
  * version of this type guessed a `{docs, total}` shape that the server never emits,
  * which crashed `data.docs.map` at runtime (SPEC-031 read-path contract drift).
+ *
+ * This is a direct re-export of `@lore/core`'s `SearchHit` (browser-safe, exported
+ * via the barrel) rather than a hand-duplicated interface — `SearchHit` already IS
+ * the SSOT shape the HTTP layer emits, so declaring a second copy here would be a
+ * driftable dual-source type for zero benefit (SPEC-037 §2 added `type`/`status`;
+ * re-exporting means this file can never fall out of sync with that addition).
+ * `snippet` wraps matched spans in `SNIPPET_MARK_OPEN`/`SNIPPET_MARK_CLOSE`
+ * (also re-exported below) — render with `<mark>`, never `dangerouslySetInnerHTML`.
  */
-export interface SearchHit {
-  id: string;
-  slug: string;
-  title: string;
-  snippet: string;
-  score: number;
-}
+export type { SearchHit } from "@lore/core";
+export { SNIPPET_MARK_OPEN, SNIPPET_MARK_CLOSE } from "@lore/core";
 
 export interface SearchResponse {
   results: SearchHit[];
@@ -479,4 +496,47 @@ export interface PendingReviewOpts {
 export async function apiGetPendingReview(opts: PendingReviewOpts = {}): Promise<PendingDocRow[]> {
   const qs = buildQueryString(opts as Record<string, string | undefined>);
   return fetchJson<PendingDocRow[]>(`/api/review/pending${qs}`);
+}
+
+// ─── SPEC-037 D1: computed readiness ─────────────────────────────────────────
+
+/**
+ * Per-task computed readiness record. Direct re-export of `ReadyRecord`
+ * (`packages/core/src/task-workflow.ts:104-126`) — that module is browser-safe
+ * and already exported via the `@lore/core` barrel, so re-exporting (rather
+ * than hand-copying the shape into a second interface, as the other response
+ * types in this file do for shapes that live server-side only) mirrors it
+ * EXACTLY with zero drift risk. `task` is a narrow `DocSummary` projection
+ * with NO `.meta` (server contract, SPEC-037 §0) — callers that need
+ * type-differentiated meta must join against `navigation.children` instead.
+ */
+export type { ReadyRecord } from "@lore/core";
+
+/**
+ * Fetch computed task readiness for a plan (SPEC-025 `TaskWorkflowService.ready`,
+ * exposed over HTTP by SPEC-037 D1). Unlike every other function in this file,
+ * this does NOT throw on failure — it returns `Result<ReadyRecord[], ApiError>`
+ * per the SPEC-037 §2 contract, so callers (e.g. `ActivePlansPanel`'s per-plan
+ * readiness query) can degrade a single row without needing TanStack Query's
+ * `isError`/`error` machinery to distinguish "no data yet" from "this plan's
+ * readiness fetch failed."
+ *
+ * @param planIdOrSlug - Plan document ULID or slug.
+ * @returns `{ok: true, value: ReadyRecord[]}` on success; `{ok: false, error: ApiError}`
+ *   on any HTTP/network/server error (422 for a non-plan target, 404 for unknown id).
+ */
+export async function apiGetReady(planIdOrSlug: string): Promise<Result<ReadyRecord[], ApiError>> {
+  try {
+    const data = await fetchJson<ReadyRecord[]>(`/api/ready/${encodeURIComponent(planIdOrSlug)}`);
+    return ok(data);
+  } catch (caught) {
+    // reason: `@lore/core`'s `err()` helper requires `E extends LoreError` — `ApiError`
+    // is a distinct client-side error class, so the failure branch is built directly
+    // rather than forcing it through a helper typed for the wrong error union.
+    const apiError =
+      caught instanceof ApiError
+        ? caught
+        : new ApiError(0, "NETWORK_ERROR", caught instanceof Error ? caught.message : "Unknown error");
+    return { ok: false, error: apiError };
+  }
 }

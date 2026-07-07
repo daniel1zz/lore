@@ -13,7 +13,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { TYPE_ACCENT, TYPE_ACCENT_BORDER_CLASS } from "@/lib/type-accent";
-import { formatTypeMetaLabel, isNotablePriority } from "@/lib/type-meta-label";
+import { formatTypeMetaLabel, isNotablePriority, metaBadgeVariant } from "@/lib/type-meta-label";
+import { formatRelativeTime } from "@/lib/format-relative-time";
+import { getTypeBadgeVariant, getStatusBadgeVariant } from "@/lib/doc-badge-variants";
 
 /** Tags beyond this count collapse into a single "+n" overflow chip (SPEC-036 §1 D3). */
 const TAG_DISPLAY_LIMIT = 3;
@@ -23,53 +25,6 @@ export interface DocCardProps {
   doc: DocSummary;
   /** Called when the card is clicked. Typically navigates to the doc detail page. */
   onClick?: () => void;
-}
-
-/** Map DocType to a badge variant for visual distinction. */
-function getTypeBadgeVariant(type: string): "default" | "secondary" | "outline" | "destructive" {
-  switch (type) {
-    case "prd":
-    case "spec":
-      return "default";
-    case "adr":
-    case "plan":
-      return "secondary";
-    default:
-      return "outline";
-  }
-}
-
-/** Map DocStatus to a badge variant. */
-function getStatusBadgeVariant(status: string): "default" | "secondary" | "outline" | "destructive" {
-  switch (status) {
-    case "active":
-    case "approved":
-      return "default";
-    case "draft":
-    case "in-review":
-      return "secondary";
-    case "archived":
-    case "deprecated":
-      return "outline";
-    default:
-      return "outline";
-  }
-}
-
-/**
- * Format an ISO timestamp as a human-readable relative time string.
- * @param iso - ISO 8601 date string.
- * @returns Relative time string like "2 days ago".
- */
-function formatRelativeTime(iso: string): string {
-  const diffMs = Date.now() - new Date(iso).getTime();
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-  if (diffDays === 0) return "today";
-  if (diffDays === 1) return "yesterday";
-  if (diffDays < 30) return `${diffDays} days ago`;
-  const diffMonths = Math.floor(diffDays / 30);
-  if (diffMonths < 12) return `${diffMonths} months ago`;
-  return `${Math.floor(diffMonths / 12)} years ago`;
 }
 
 /**
@@ -127,7 +82,7 @@ export function DocCard({ doc, onClick }: DocCardProps): React.ReactElement {
         {(metaLabel !== null || showPriority) && (
           <div className="flex items-center gap-1.5 flex-wrap">
             {metaLabel !== null && (
-              <Badge variant="outline" className="text-xs">
+              <Badge variant={doc.meta !== undefined ? metaBadgeVariant(doc.meta) : "outline"} className="text-xs">
                 {metaLabel}
               </Badge>
             )}
