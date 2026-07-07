@@ -270,6 +270,8 @@ describe("formatTree", () => {
       title,
       status: "draft",
       updated_at: new Date().toISOString(),
+      tags: [],
+      priority: "medium",
     },
     children,
   });
@@ -329,31 +331,33 @@ describe("formatNavigation", () => {
     title,
     status: "draft" as const,
     updated_at: new Date().toISOString(),
+    tags: [],
+    priority: "medium" as const,
   });
 
   it("shows (none) for all fields when navigation is empty", () => {
-    const nav = { parent: null, siblings: [], children: [], related: [] };
+    const nav = { parent: null, ancestors: [], siblings: [], children: [], related: [] };
     const output = formatNavigation(nav);
     expect(output).toContain("(none)");
   });
 
   it("shows parent title when parent is present", () => {
     const parent = makeSummary("PARENT00000000000000000001", "Parent Doc");
-    const nav = { parent, siblings: [], children: [], related: [] };
+    const nav = { parent, ancestors: [], siblings: [], children: [], related: [] };
     const output = formatNavigation(nav);
     expect(output).toContain("Parent Doc");
   });
 
   it("shows siblings list", () => {
     const sibling = makeSummary("SIB00000000000000000000001", "Sibling Doc");
-    const nav = { parent: null, siblings: [sibling], children: [], related: [] };
+    const nav = { parent: null, ancestors: [], siblings: [sibling], children: [], related: [] };
     const output = formatNavigation(nav);
     expect(output).toContain("Sibling Doc");
   });
 
   it("shows children list", () => {
     const child = makeSummary("CHILD000000000000000000001", "Child Doc");
-    const nav = { parent: null, siblings: [], children: [child], related: [] };
+    const nav = { parent: null, ancestors: [], siblings: [], children: [child], related: [] };
     const output = formatNavigation(nav);
     expect(output).toContain("Child Doc");
   });
@@ -363,7 +367,7 @@ describe("formatNavigation", () => {
       ...makeSummary("REL000000000000000000000001", "Related Doc"),
       link_type: "informs" as const,
     };
-    const nav = { parent: null, siblings: [], children: [], related: [related] };
+    const nav = { parent: null, ancestors: [], siblings: [], children: [], related: [related] };
     const output = formatNavigation(nav);
     expect(output).toContain("Related Doc");
     expect(output).toContain("informs");

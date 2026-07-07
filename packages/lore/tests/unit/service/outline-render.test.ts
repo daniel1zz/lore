@@ -30,6 +30,8 @@ function makeDocSummary(overrides: Partial<DocSummary> & { id: string; title: st
     title: overrides.title,
     status: overrides.status ?? "draft",
     updated_at: overrides.updated_at ?? "2026-06-08T00:00:00.000Z",
+    tags: overrides.tags ?? [],
+    priority: overrides.priority ?? "medium",
   };
 }
 

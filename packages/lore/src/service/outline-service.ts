@@ -116,7 +116,15 @@ function parseProps(propsStr: string): Record<string, unknown> {
   return result;
 }
 
-/** Convert a DocRecord to a lightweight DocSummary. */
+/**
+ * Convert a DocRecord to a lightweight DocSummary.
+ *
+ * @invariant Deliberately omits `meta` — MDX placeholder rendering
+ * (`renderDocBullet`/`renderDocBulletList`) only ever prints `- [type] title (status)`;
+ * wiring `deriveTypeMeta` here is out of scope for SPEC-036 §2 D3 (CorpusService's
+ * navigation/list projection is the one this spec upgrades). `tags`/`priority` are
+ * added only to satisfy DocSummary's now-required fields.
+ */
 function toSummary(doc: DocRecord): DocSummary {
   return {
     id: doc.id,
@@ -125,6 +133,8 @@ function toSummary(doc: DocRecord): DocSummary {
     title: doc.title,
     status: doc.status,
     updated_at: doc.updated_at,
+    tags: doc.tags,
+    priority: doc.priority,
   };
 }
 
