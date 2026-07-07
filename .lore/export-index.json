@@ -552,6 +552,10 @@
     "01KWVDGKZGX56SF7N8SP8972FM": {
       "human_id": "TASK-061",
       "file_path": "docs/requirements/task/TASK-061-a-core-schemas-migration-003-store-methods.md"
+    },
+    "01KWXKSV9269VM19X9Y6XM95DV": {
+      "human_id": "SPEC-036",
+      "file_path": "docs/requirements/spec/SPEC-036-spec-036-dashboard-browsing-ux-breadcrumb-tag-stat.md"
     }
   }
 }

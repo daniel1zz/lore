@@ -89,6 +89,7 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
+- [spec] SPEC-036 — Dashboard browsing UX: breadcrumb + tag/status filters + type-differentiated presentation (approved)
 - [spec] lore export-docs — reverse sync from corpus to spec files (approved)
 - [knowledge] DocMan replacement assessment — Lore coverage map + two remaining gaps (draft)
 - [spec] SPEC-033 — Dashboard as living-PRD projection + human adjudication surface (approved)
@@ -129,7 +130,8 @@ The module tree below is rendered live from the corpus (SPEC-004 placeholder res
 - [spec] Telemetry Module (active)
 - [spec] Sync Engine (Turso) (approved)
 
-Text readers: run `lore tree <this-prd>` — the tree command splices the live children — or use the dashboard tree view. **Known limitation (accepted at v0.5, closed by SPEC-032)**: `OutlineService.resolve()` returns the placeholder data as a separate `resolvedComponents` array and leaves `content` verbatim (it does not splice rendered text back into the body). So every plain-text projection — `lore get --resolve-mdx` stdout AND the SPEC-021 `export-docs` `.md` snapshot — shows the raw `- [spec] lore export-docs — reverse sync from corpus to spec files (approved)
+Text readers: run `lore tree <this-prd>` — the tree command splices the live children — or use the dashboard tree view. **Known limitation (accepted at v0.5, closed by SPEC-032)**: `OutlineService.resolve()` returns the placeholder data as a separate `resolvedComponents` array and leaves `content` verbatim (it does not splice rendered text back into the body). So every plain-text projection — `lore get --resolve-mdx` stdout AND the SPEC-021 `export-docs` `.md` snapshot — shows the raw `- [spec] SPEC-036 — Dashboard browsing UX: breadcrumb + tag/status filters + type-differentiated presentation (approved)
+- [spec] lore export-docs — reverse sync from corpus to spec files (approved)
 - [knowledge] DocMan replacement assessment — Lore coverage map + two remaining gaps (draft)
 - [spec] SPEC-033 — Dashboard as living-PRD projection + human adjudication surface (approved)
 - [knowledge] Assess material-budget distortion on multi-task plan diffs (draft)
@@ -424,7 +426,8 @@ Committed landing specs (R1 only): **SPEC-034** structured review judgment + tri
 - **Phase 2 review**: 6-role stakeholder review (2 APPROVE_WITH_CONDITIONS / 4 REQUEST_CHANGES). All conditions addressed in v0.2-0.3.
 - **Owner decisions**: A1 skip external validation; protocol-aware app; 3-phase delivery; Web UI → SHOULD; P1 CLI-only; service layer abstraction.
 - **v0.4**: PRD restructured to outline-level. Detail lives in 7 child feature specs.
-- **v0.5** (2026-07-03): Sole-context positioning (§1) + output contract & document taxonomy (§13: spec_kind feature/tech/design, stage→output→gate table, 3 enforcement layers, SSOT boundary, dashboard-as-PRD-projection) + G8 + §6/§8 governance hooks + §5 module map converted to live `- [spec] lore export-docs — reverse sync from corpus to spec files (approved)
+- **v0.5** (2026-07-03): Sole-context positioning (§1) + output contract & document taxonomy (§13: spec_kind feature/tech/design, stage→output→gate table, 3 enforcement layers, SSOT boundary, dashboard-as-PRD-projection) + G8 + §6/§8 governance hooks + §5 module map converted to live `- [spec] SPEC-036 — Dashboard browsing UX: breadcrumb + tag/status filters + type-differentiated presentation (approved)
+- [spec] lore export-docs — reverse sync from corpus to spec files (approved)
 - [knowledge] DocMan replacement assessment — Lore coverage map + two remaining gaps (draft)
 - [spec] SPEC-033 — Dashboard as living-PRD projection + human adjudication surface (approved)
 - [knowledge] Assess material-budget distortion on multi-task plan diffs (draft)
