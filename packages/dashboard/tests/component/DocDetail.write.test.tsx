@@ -123,7 +123,7 @@ function makeDoc(overrides: Partial<DocRecord> = {}): DocRecord {
 function makeDocWithNav(doc: DocRecord): DocWithNavigation {
   return {
     doc,
-    navigation: { parent: null, siblings: [], children: [], related: [] },
+    navigation: { parent: null, ancestors: [], siblings: [], children: [], related: [] },
   };
 }
 

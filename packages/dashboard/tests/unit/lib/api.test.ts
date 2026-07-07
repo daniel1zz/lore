@@ -7,6 +7,8 @@
  *   HAPPY:
  *     - apiGetStatus parses { ok: true, data: T } envelope correctly
  *     - apiList returns docs array from data field
+ *     - apiList joins a tags[] opt into a single comma-separated query param (SPEC-036 §1 D2)
+ *     - apiList combines type/status/tags into one query string
  *     - apiSearch returns docs for a query
  *     - apiGetDoc returns DocWithNavigation
  *     - apiGetDoc with resolveMdx=true appends ?resolveMdx=true to path
@@ -19,6 +21,7 @@
  *   BOUNDARY:
  *     - Empty docs array in response is returned as-is
  *     - apiSearch with empty query still builds URL (caller controls enabled)
+ *     - apiList with an empty tags[] array omits the tags query param entirely
  *
  *   ERROR:
  *     - Timeout (AbortSignal) throws ApiError with code NETWORK_ERROR
@@ -101,6 +104,36 @@ describe("apiList", () => {
 
       expect(calls[0]).toContain("type=prd");
     });
+
+    it("joins a tags[] opt into a single comma-separated query param", async () => {
+      const calls: string[] = [];
+      vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+        calls.push(url);
+        return Promise.resolve(new Response(JSON.stringify({ ok: true, data: { docs: [], total: 0 } }), {
+          status: 200, headers: { "Content-Type": "application/json" },
+        }));
+      }));
+
+      await apiList({ tags: ["a", "b"] });
+
+      expect(calls[0]).toContain(`tags=${encodeURIComponent("a,b")}`);
+    });
+
+    it("combines type/status/tags into one query string", async () => {
+      const calls: string[] = [];
+      vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+        calls.push(url);
+        return Promise.resolve(new Response(JSON.stringify({ ok: true, data: { docs: [], total: 0 } }), {
+          status: 200, headers: { "Content-Type": "application/json" },
+        }));
+      }));
+
+      await apiList({ type: "spec", status: "draft", tags: ["core"] });
+
+      expect(calls[0]).toContain("type=spec");
+      expect(calls[0]).toContain("status=draft");
+      expect(calls[0]).toContain("tags=core");
+    });
   });
 
   describe("boundary", () => {
@@ -111,6 +144,20 @@ describe("apiList", () => {
 
       expect(result.docs).toHaveLength(0);
       expect(result.total).toBe(0);
+    });
+
+    it("omits the tags query param entirely when tags[] is empty", async () => {
+      const calls: string[] = [];
+      vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+        calls.push(url);
+        return Promise.resolve(new Response(JSON.stringify({ ok: true, data: { docs: [], total: 0 } }), {
+          status: 200, headers: { "Content-Type": "application/json" },
+        }));
+      }));
+
+      await apiList({ tags: [] });
+
+      expect(calls[0]).not.toContain("tags=");
     });
   });
 });
@@ -159,6 +206,25 @@ describe("apiGetDoc", () => {
 
       expect(result.doc.id).toBe("01");
       expect(result.navigation.parent).toBeNull();
+    });
+
+    it("passes through navigation.ancestors (SPEC-036 §1 D1, AC-36-1)", async () => {
+      const mockDoc = {
+        doc: { id: "03", slug: "task-x", title: "Task X", type: "task", status: "draft", content: "", created_at: "", updated_at: "", created_by: null, parent_id: "02", tags: [], extra: {}, version: 1 },
+        navigation: {
+          parent: { id: "02", slug: "plan-a", title: "Plan A", type: "plan", status: "active", updated_at: "" },
+          ancestors: [{ id: "01", slug: "prd-root", title: "Root PRD", type: "prd", status: "active", updated_at: "" }],
+          siblings: [],
+          children: [],
+          related: [],
+        },
+      };
+      vi.stubGlobal("fetch", makeFetchMock({ ok: true, data: mockDoc }));
+
+      const result = await apiGetDoc("03");
+
+      expect(result.navigation.ancestors).toHaveLength(1);
+      expect(result.navigation.ancestors[0]?.title).toBe("Root PRD");
     });
 
     it("appends ?resolveMdx=true when resolveMdx option is set", async () => {

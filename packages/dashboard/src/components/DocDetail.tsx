@@ -36,8 +36,17 @@
  *     scheduled just before either action fires afterwards and rewrites
  *     localStorage with content the user already saved or discarded.
  *     SPEC-027 AC-DH-3.
+ *   - Header renders a type accent border + one meta row (SPEC-036 §1 D3),
+ *     computed client-side via `deriveTypeMeta(doc)` (`@lore/core`) — `doc`
+ *     here is the full `DocRecord` from `GET /api/docs/:id`, which has no
+ *     `.meta` field of its own (that projection only exists on `DocSummary`,
+ *     e.g. list rows). No `claimTtlMinutes` is available client-side, so a
+ *     task's `claim_stale` is always omitted on this page (never fabricated
+ *     `false`) — a narrower, documented degradation vs. the list view, which
+ *     gets the server-computed value. The breadcrumb (ancestor chain) mounts
+ *     above this header.
  * Side-effect class: IO (fetch, localStorage)
- * Source: SPEC-015, SPEC-022 §9.2, SPEC-027
+ * Source: SPEC-015, SPEC-022 §9.2, SPEC-027, SPEC-036 §1 D1/D3
  */
 
 import { useState, useCallback, useRef, useEffect } from "react";
@@ -53,9 +62,14 @@ import { LinksPanel } from "@/components/LinksPanel";
 import { HistoryTab } from "@/components/HistoryTab";
 import { AuditTab } from "@/components/AuditTab";
 import { ConflictModal } from "@/components/ConflictModal";
+import { Breadcrumb } from "@/components/Breadcrumb";
 import { saveDraft, loadDraft, clearDraft, isDraftStale } from "@/store/draft";
 import type { DocWithNavigation } from "@/lib/api";
 import type { DocStatus, LinkType } from "@lore/core";
+import { deriveTypeMeta } from "@lore/core";
+import { cn } from "@/lib/utils";
+import { TYPE_ACCENT, TYPE_ACCENT_BORDER_CLASS } from "@/lib/type-accent";
+import { formatTypeMetaLabel, isNotablePriority } from "@/lib/type-meta-label";
 import {
   apiPatchDoc,
   apiApproveDoc,
@@ -128,8 +142,10 @@ function DeleteConfirmDialog({ title, isPending, onConfirm, onCancel }: DeleteCo
 export interface DocDetailProps {
   /** Document with navigation context from the API. */
   docWithNav: DocWithNavigation;
-  /** Called when the user clicks on a sibling/related doc ID. */
+  /** Called when the user clicks on a sibling/related doc ID (also used by breadcrumb ancestor crumbs). */
   onNavigate?: (idOrSlug: string) => void;
+  /** Called when the breadcrumb's Home crumb is clicked (SPEC-036 §1 D1). */
+  onNavigateHome?: () => void;
   /**
    * Called after any successful write (save/approve/reject/link).
    * Caller should invalidate query cache for this doc and related lists.
@@ -161,12 +177,27 @@ type ActiveTab = "content" | "history" | "audit";
  * <DocDetail
  *   docWithNav={data}
  *   onNavigate={(id) => navigate({ to: '/docs/$id', params: { id } })}
+ *   onNavigateHome={() => navigate({ to: '/' })}
  *   onMutated={() => queryClient.invalidateQueries({ queryKey: ["doc", doc.id] })}
  *   onDeleted={() => navigate({ to: '/' })}
  * />
  */
-export function DocDetail({ docWithNav, onNavigate, onMutated, onDeleted }: DocDetailProps): React.ReactElement {
+export function DocDetail({
+  docWithNav,
+  onNavigate,
+  onNavigateHome,
+  onMutated,
+  onDeleted,
+}: DocDetailProps): React.ReactElement {
   const { doc, navigation } = docWithNav;
+  // reason: `doc` is the full DocRecord (GET /api/docs/:id), which carries no `.meta`
+  // projection of its own — deriveTypeMeta (browser-safe, @lore/core) computes it
+  // client-side from `type` + `extra` directly. No claimTtlMinutes is available here,
+  // so a task's `claim_stale` is always omitted (never fabricated `false`); see the
+  // module doc comment.
+  const typeMeta = deriveTypeMeta(doc);
+  const metaLabel = typeMeta !== undefined ? formatTypeMetaLabel(typeMeta) : null;
+  const showPriority = isNotablePriority(doc.priority);
 
   // ── Edit state ──────────────────────────────────────────────────────────────
   const [isEditing, setIsEditing] = useState(false);
@@ -394,8 +425,18 @@ export function DocDetail({ docWithNav, onNavigate, onMutated, onDeleted }: DocD
 
   return (
     <article className="max-w-4xl mx-auto space-y-6">
-      {/* Header */}
-      <header>
+      {/* Breadcrumb (SPEC-036 §1 D1). Conditional spread: exactOptionalPropertyTypes
+          forbids passing a possibly-undefined value for an optional prop (same
+          pattern as onMutated/onLinkAdd above). */}
+      <Breadcrumb
+        ancestors={navigation.ancestors}
+        currentTitle={doc.title}
+        {...(onNavigate !== undefined ? { onNavigate } : {})}
+        {...(onNavigateHome !== undefined ? { onHome: onNavigateHome } : {})}
+      />
+
+      {/* Header — type accent border (SPEC-036 §1 D3) */}
+      <header className={cn(TYPE_ACCENT_BORDER_CLASS, "pl-4", TYPE_ACCENT[doc.type])}>
         <div className="flex items-center gap-2 mb-2 flex-wrap">
           <Badge variant="secondary">{doc.type}</Badge>
           {/* reason: only enable status transitions and Edit when caller provides onMutated
@@ -469,6 +510,31 @@ export function DocDetail({ docWithNav, onNavigate, onMutated, onDeleted }: DocD
         </div>
         <h1 className="text-2xl font-bold tracking-tight">{doc.title}</h1>
         <p className="text-sm text-muted-foreground mt-1 font-mono">{doc.slug}</p>
+
+        {(metaLabel !== null || showPriority) && (
+          <div className="flex items-center gap-1.5 flex-wrap mt-2">
+            {metaLabel !== null && (
+              <Badge variant="outline" className="text-xs">
+                {metaLabel}
+              </Badge>
+            )}
+            {showPriority && (
+              <Badge variant={doc.priority === "critical" ? "destructive" : "secondary"} className="text-xs">
+                {doc.priority}
+              </Badge>
+            )}
+          </div>
+        )}
+
+        {doc.tags.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-2" aria-label="Tags">
+            {doc.tags.map((tag) => (
+              <Badge key={tag} variant="outline" className="text-xs">
+                {tag}
+              </Badge>
+            ))}
+          </div>
+        )}
       </header>
 
       <Separator />
@@ -497,20 +563,6 @@ export function DocDetail({ docWithNav, onNavigate, onMutated, onDeleted }: DocD
               <TableRow>
                 <TableCell className="font-medium">Author</TableCell>
                 <TableCell>{doc.created_by}</TableCell>
-              </TableRow>
-            )}
-            {doc.tags !== undefined && doc.tags.length > 0 && (
-              <TableRow>
-                <TableCell className="font-medium">Tags</TableCell>
-                <TableCell>
-                  <div className="flex flex-wrap gap-1">
-                    {doc.tags.map((tag) => (
-                      <Badge key={tag} variant="outline" className="text-xs">
-                        {tag}
-                      </Badge>
-                    ))}
-                  </div>
-                </TableCell>
               </TableRow>
             )}
           </TableBody>

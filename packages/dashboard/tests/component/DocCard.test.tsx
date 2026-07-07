@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /**
  * Tests for DocCard component.
- * Source: SPEC-015 §3.3 M5
+ * Source: SPEC-015 §3.3 M5; SPEC-036 §1 D3 (type accent, meta row, tag chips, priority)
  *
  * Test plan:
  *   HAPPY:
@@ -9,18 +9,26 @@
  *     - Renders type badge
  *     - Renders status badge
  *     - Renders slug in footer
+ *     - Renders the type accent border class (AC-36-9)
+ *     - Renders up to 3 tag chips
+ *     - Renders a priority badge for critical/high
  *
  *   NEGATIVE:
  *     - onClick not called when card is not interacted with
+ *     - Does not render a priority badge for default/low priority (noise budget)
+ *     - Does not render a meta row for a prd doc (no DocTypeMeta variant)
  *
  *   BOUNDARY:
  *     - Long title truncation
+ *     - >3 tags collapse into a "+n" overflow chip
  *
  *   STATE:
  *     - onClick is called exactly once on click
  *
  *   REGRESSION:
  *     - Card renders without crashing with minimal DocSummary
+ *     - Task meta parity with the CLI badge rule table (AC-36-8): unclaimed,
+ *       claimed fresh, claimed stale, with/without evidence
  */
 
 import "@testing-library/jest-dom/vitest";
@@ -36,6 +44,8 @@ const mockDoc: DocSummary = {
   type: "prd",
   status: "draft",
   updated_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+  tags: [],
+  priority: "medium",
 };
 
 describe("DocCard", () => {
@@ -65,6 +75,32 @@ describe("DocCard", () => {
       // The relative time should contain "days ago" for a 2-day-old doc
       expect(screen.getByText(/days ago|yesterday|today/)).toBeInTheDocument();
     });
+
+    it("renders the type accent border class (AC-36-9)", () => {
+      const { container } = render(<DocCard doc={mockDoc} />);
+      const card = container.firstElementChild;
+      expect(card).toHaveClass("border-l-4", "border-l-violet-600");
+    });
+
+    it("renders up to 3 tag chips", () => {
+      const docWithTags: DocSummary = { ...mockDoc, tags: ["a", "b", "c"] };
+      render(<DocCard doc={docWithTags} />);
+      expect(screen.getByText("a")).toBeInTheDocument();
+      expect(screen.getByText("b")).toBeInTheDocument();
+      expect(screen.getByText("c")).toBeInTheDocument();
+    });
+
+    it("renders a priority badge for critical priority", () => {
+      const criticalDoc: DocSummary = { ...mockDoc, priority: "critical" };
+      render(<DocCard doc={criticalDoc} />);
+      expect(screen.getByText("critical")).toBeInTheDocument();
+    });
+
+    it("renders a priority badge for high priority", () => {
+      const highDoc: DocSummary = { ...mockDoc, priority: "high" };
+      render(<DocCard doc={highDoc} />);
+      expect(screen.getByText("high")).toBeInTheDocument();
+    });
   });
 
   describe("state: click handler", () => {
@@ -91,6 +127,23 @@ describe("DocCard", () => {
       render(<DocCard doc={mockDoc} onClick={onClick} />);
       expect(onClick).not.toHaveBeenCalled();
     });
+
+    it("does not render a priority badge for medium priority (noise budget)", () => {
+      render(<DocCard doc={mockDoc} />);
+      expect(screen.queryByText("medium")).not.toBeInTheDocument();
+    });
+
+    it("does not render a priority badge for low priority (noise budget)", () => {
+      const lowDoc: DocSummary = { ...mockDoc, priority: "low" };
+      render(<DocCard doc={lowDoc} />);
+      expect(screen.queryByText("low")).not.toBeInTheDocument();
+    });
+
+    it("does not render a meta row for a prd doc (no DocTypeMeta variant)", () => {
+      render(<DocCard doc={mockDoc} />);
+      // prd never carries `.meta` — no extra outline badge beyond type/status.
+      expect(screen.queryByText("feature")).not.toBeInTheDocument();
+    });
   });
 
   describe("boundary", () => {
@@ -102,6 +155,8 @@ describe("DocCard", () => {
         type: "knowledge",
         status: "active",
         updated_at: new Date().toISOString(),
+        tags: [],
+        priority: "medium",
       };
       render(<DocCard doc={minimalDoc} />);
       expect(screen.getByText("X")).toBeInTheDocument();
@@ -114,6 +169,56 @@ describe("DocCard", () => {
       };
       render(<DocCard doc={docWithLongTitle} />);
       expect(screen.getByText("A".repeat(200))).toBeInTheDocument();
+    });
+
+    it("collapses tags beyond 3 into a single '+n' overflow chip", () => {
+      const docWithManyTags: DocSummary = { ...mockDoc, tags: ["a", "b", "c", "d", "e"] };
+      render(<DocCard doc={docWithManyTags} />);
+      expect(screen.getByText("a")).toBeInTheDocument();
+      expect(screen.getByText("b")).toBeInTheDocument();
+      expect(screen.getByText("c")).toBeInTheDocument();
+      expect(screen.queryByText("d")).not.toBeInTheDocument();
+      expect(screen.queryByText("e")).not.toBeInTheDocument();
+      expect(screen.getByText("+2")).toBeInTheDocument();
+    });
+  });
+
+  describe("regression: task meta parity with CLI badge rule table (AC-36-8)", () => {
+    function taskDoc(meta: Extract<DocSummary["meta"], { t: "task" }>): DocSummary {
+      return { ...mockDoc, type: "task", meta };
+    }
+
+    it("unclaimed, no evidence: renders no meta badge at all", () => {
+      render(<DocCard doc={taskDoc({ t: "task", evidence_pass: 0, evidence_fail: 0 })} />);
+      expect(screen.queryByText(/claimed:/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/✔/)).not.toBeInTheDocument();
+    });
+
+    it("claimed fresh, no evidence: renders 'claimed:X' with no stale suffix", () => {
+      render(
+        <DocCard
+          doc={taskDoc({ t: "task", claimed_by: "alice", claim_stale: false, evidence_pass: 0, evidence_fail: 0 })}
+        />,
+      );
+      expect(screen.getByText("claimed:alice")).toBeInTheDocument();
+    });
+
+    it("claimed stale: renders the '(stale)' suffix", () => {
+      render(
+        <DocCard
+          doc={taskDoc({ t: "task", claimed_by: "bob", claim_stale: true, evidence_pass: 1, evidence_fail: 0 })}
+        />,
+      );
+      expect(screen.getByText("claimed:bob (stale) ✔1/✘0")).toBeInTheDocument();
+    });
+
+    it("claimed with evidence renders both claim and pass/fail counts", () => {
+      render(
+        <DocCard
+          doc={taskDoc({ t: "task", claimed_by: "carol", claim_stale: false, evidence_pass: 2, evidence_fail: 1 })}
+        />,
+      );
+      expect(screen.getByText("claimed:carol ✔2/✘1")).toBeInTheDocument();
     });
   });
 });
