@@ -30,12 +30,16 @@
  *     - GET /api/audit/:docId → 200 with the doc's audit entries, raw actor strings (SPEC-033 F1)
  *     - GET /api/audit/verify → 200 with { clean, misses, since } (SPEC-033 F1)
  *     - GET /api/calibration/stats → 200 with CalibrationStats[] (SPEC-033 F1)
+ *     - GET /api/ready/:planIdOrSlug → 200 with ReadyRecord[] parity with the
+ *       direct TaskWorkflowService.ready() call (SPEC-037 D1, AC-37-1)
  *
  *   NEGATIVE / ERROR (LoreError → HTTP status per SPEC-011 §5):
  *     - GET /api/docs/:unknown → 404
  *     - POST /api/docs with non-JSON body → 422
  *     - POST /api/docs body missing required type → 422
  *     - GET /api/search without q → 422
+ *     - GET /api/ready/:unknownId → 404 (SPEC-037 D1)
+ *     - GET /api/ready/:nonPlanId → 422 VALIDATION_ERROR (SPEC-037 D1)
  *     - POST /api/links missing from/to/type → 422
  *     - DELETE /api/docs/:id without confirm=true → 400
  *     - POST /api/docs/:id/restore missing version → 422
@@ -68,7 +72,9 @@ import { MigrationService } from "../../../../src/service/migration-service.js";
 import { TreeCheckService } from "../../../../src/service/tree-check-service.js";
 import { JudgmentService } from "../../../../src/service/judgment-service.js";
 import { AuditService } from "../../../../src/service/audit-service.js";
+import { TaskWorkflowService } from "../../../../src/service/task-workflow-service.js";
 import { NoOpTelemetry } from "@lore/core";
+import type { CreateDocInput } from "@lore/core";
 import type { App } from "../../../../src/app.js";
 import type { ApiKeyStore, ActorContext } from "../../../../src/adapters/http/auth.js";
 import { handleApiRoute } from "../../../../src/adapters/http/routes.js";
@@ -99,9 +105,9 @@ function makeApp(): App {
     exportDocsService: null as unknown as App["exportDocsService"],
     // reason: test does not exercise phase commands; null-cast per pattern from SPEC-023 §9.1.
     phaseService: null as unknown as App["phaseService"],
-    // reason: SPEC-025 §9.1 — test does not exercise task-workflow commands; null-cast per
-    // established pattern (see phaseService above) for satisfying newly-required App fields.
-    taskWorkflowService: null as unknown as App["taskWorkflowService"],
+    // reason: SPEC-037 D1 — GET /api/ready/:planIdOrSlug exercises this directly (real
+    // instance backed by the SAME `store`, mirroring the judgmentService fix above).
+    taskWorkflowService: new TaskWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: 120 }),
     // reason: SPEC-032 §3.4 — test does not exercise spec-kind audit; null-cast per
     // established pattern (see phaseService above) for satisfying newly-required App fields.
     specKindService: null as unknown as App["specKindService"],
@@ -171,6 +177,25 @@ beforeEach(() => {
 async function createPrd(title: string): Promise<{ id: string; slug: string }> {
   const result = await app.corpusService.create({ type: "prd", title });
   if (!result.ok) throw new Error(`Failed to create PRD: ${JSON.stringify(result.error)}`);
+  return { id: result.value.id, slug: result.value.slug };
+}
+
+/** SPEC-037 D1 — fixture helpers for GET /api/ready/:planIdOrSlug tests. */
+async function createPlan(title: string): Promise<{ id: string; slug: string }> {
+  const result = await app.corpusService.create({ type: "plan", title, content: "body" } as CreateDocInput);
+  if (!result.ok) throw new Error(`Failed to create plan: ${JSON.stringify(result.error)}`);
+  return { id: result.value.id, slug: result.value.slug };
+}
+
+async function createTask(planId: string, title: string): Promise<{ id: string; slug: string }> {
+  const result = await app.corpusService.create({
+    type: "task",
+    title,
+    parent_id: planId,
+    content: "body",
+    extra: { plan_id: planId },
+  } as CreateDocInput);
+  if (!result.ok) throw new Error(`Failed to create task: ${JSON.stringify(result.error)}`);
   return { id: result.value.id, slug: result.value.slug };
 }
 
@@ -836,6 +861,76 @@ describe("POST /api/review/:id/reject", () => {
       expect(res!.status).toBe(200);
       const body = await parseResponse(res!);
       expect(body.ok).toBe(true);
+    });
+  });
+});
+
+// ─── GET /api/ready/:planIdOrSlug (SPEC-037 D1) ─────────────────────────────
+
+describe("GET /api/ready/:planIdOrSlug", () => {
+  describe("happy path", () => {
+    it("returns ReadyRecord[] parity with a direct TaskWorkflowService.ready() call", async () => {
+      const { id: planId } = await createPlan("Ready Parity Plan");
+      await createTask(planId, "Task A");
+      await createTask(planId, "Task B");
+
+      const { req, url } = makeGetRequest(`/api/ready/${planId}`);
+      const res = await handleApiRoute(req, url, app, TEST_ACTOR);
+      expect(res).not.toBeNull();
+      expect(res!.status).toBe(200);
+      const body = await parseResponse(res!);
+      expect(body.ok).toBe(true);
+
+      const direct = await app.taskWorkflowService.ready(planId);
+      expect(direct.ok).toBe(true);
+      if (!direct.ok) return;
+      expect(body.data).toEqual(direct.value);
+      expect((body.data as unknown[])).toHaveLength(2);
+    });
+
+    it("an empty plan (no tasks) returns 200 with an empty array, not an error", async () => {
+      const { id: planId } = await createPlan("Empty Ready Plan");
+
+      const { req, url } = makeGetRequest(`/api/ready/${planId}`);
+      const res = await handleApiRoute(req, url, app, TEST_ACTOR);
+      expect(res!.status).toBe(200);
+      const body = await parseResponse(res!);
+      expect(body.data).toEqual([]);
+    });
+
+    it("resolves by slug as well as by id", async () => {
+      const { slug: planSlug } = await createPlan("Slug Ready Plan");
+
+      const { req, url } = makeGetRequest(`/api/ready/${planSlug}`);
+      const res = await handleApiRoute(req, url, app, TEST_ACTOR);
+      expect(res!.status).toBe(200);
+    });
+  });
+
+  describe("negative cases", () => {
+    it("a non-plan target (e.g. a task id) → 422 VALIDATION_ERROR", async () => {
+      const { id: planId } = await createPlan("Non-Plan Target Plan");
+      const { id: taskId } = await createTask(planId, "Not A Plan");
+
+      const { req, url } = makeGetRequest(`/api/ready/${taskId}`);
+      const res = await handleApiRoute(req, url, app, TEST_ACTOR);
+      expect(res).not.toBeNull();
+      expect(res!.status).toBe(422);
+      const body = await parseResponse(res!);
+      expect(body.ok).toBe(false);
+      expect((body.error as { code: string }).code).toBe("VALIDATION_ERROR");
+    });
+  });
+
+  describe("error handling", () => {
+    it("an unknown plan id → 404 DOC_NOT_FOUND", async () => {
+      const { req, url } = makeGetRequest("/api/ready/does-not-exist");
+      const res = await handleApiRoute(req, url, app, TEST_ACTOR);
+      expect(res).not.toBeNull();
+      expect(res!.status).toBe(404);
+      const body = await parseResponse(res!);
+      expect(body.ok).toBe(false);
+      expect((body.error as { code: string }).code).toBe("DOC_NOT_FOUND");
     });
   });
 });
