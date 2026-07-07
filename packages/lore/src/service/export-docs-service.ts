@@ -7,7 +7,11 @@
  *
  * Invariants:
  *   - Stateless. The only dependency is StoreInterface (no AI, no HTTP).
- *   - Never overwrites a drifted file without --force (v2 deferred per SPEC-021 §8 Q2).
+ *   - Never overwrites a drifted file unless the caller passes `force: true` (SPEC-021
+ *     Amendment A2 — implemented; previously deferred to "v2" per SPEC-021 §8 Q2). With
+ *     `force: true`, a drifted file is rewritten with the CURRENT expected content
+ *     (frontmatter regenerated + the same resolved body used for the drift comparison)
+ *     and reported in `report.overwritten`, never in `report.drift`.
  *   - Idempotent — re-running on unchanged corpus produces 0 created, 0 drifted.
  *   - Topological order — parents always written before their children.
  *   - Per-doc errors do NOT abort the whole run; other docs still process.
@@ -47,6 +51,12 @@
  *     written spliced (or vice versa) would make any doc with a whitelisted placeholder
  *     report PERMANENT false drift every run — canonicaliseBody alone cannot catch this
  *     because the two sides would never converge no matter how many times you export.
+ *     This means drift on a placeholder-bearing doc is now always a TRUE positive: the
+ *     on-disk file is a STALE PROJECTION of the doc's CURRENT children/links (e.g. a child
+ *     was added since the last export) — never a phantom comparison-basis mismatch. It is
+ *     indistinguishable, from inside this service, from a hand-edited file; `force: true`
+ *     resolves either case the same way (overwrite with the current projection), which is
+ *     why it stays an explicit opt-in rather than an automatic refresh.
  *
  * Side-effect class: IO (readFileSync, writeFileSync, mkdirSync) + StoreInterface async calls
  *   + resolveDocBody (itself store-backed via OutlineService.resolve, injected not imported).
@@ -97,9 +107,13 @@ export interface ExportDocsOptions {
   /** Restrict export to one document type. When absent, all types are exported. */
   type?: DocType;
   /**
-   * (v2 placeholder) Overwrite drifted files with corpus body.
-   * Currently ALWAYS rejected with VALIDATION_ERROR.
-   * reason: SPEC-021 §8 Q2 defers --force to v2, mirroring SPEC-018 stance.
+   * Overwrite drifted files with the CURRENT expected content (regenerated frontmatter +
+   * the same resolved body used for the drift comparison). Files with no drift are
+   * unaffected (skipped_clean as usual); files that don't exist yet are still created
+   * normally. Overwritten paths are reported in `report.overwritten`, never `report.drift`.
+   * reason: SPEC-021 Amendment A2 — implements the flag `export-docs --help` already
+   * declared and the drift warning already promised, superseding the SPEC-021 §8 Q2 /
+   * SPEC-018-mirrored "deferred to v2" stance.
    */
   force?: boolean;
 }
@@ -113,8 +127,19 @@ export interface ExportReport {
   created: string[];
   /** File paths already present with body matching corpus — skipped cleanly. */
   skipped_clean: string[];
-  /** File paths where on-disk body differs from corpus — NOT overwritten (v1 behaviour). */
+  /**
+   * File paths where on-disk body differs from the current expected content and were
+   * NOT overwritten because `force` was not passed. Empty when `force: true` — those
+   * paths are reported in `overwritten` instead.
+   */
   drift: string[];
+  /**
+   * File paths that differed from the current expected content and WERE overwritten
+   * because the caller passed `force: true` (SPEC-021 Amendment A2). Empty unless
+   * `force: true`. Under `dryRun: true`, reports what would be overwritten without
+   * writing anything (mirrors `created`'s dry-run semantics).
+   */
+  overwritten: string[];
   /** Per-doc error messages that did not abort the overall run. */
   errors: string[];
   /**
@@ -204,24 +229,18 @@ export class ExportDocsService {
    *   Phase 2 — Write files (topological order):
    *     5. Sort docs so parents come before children (DFS on parent_id chain).
    *     6. For each doc:
-   *        a. If file exists at mapping.file_path → compare body (drift check); report/skip.
+   *        a. If file exists at mapping.file_path → compare body (drift check).
+   *           - Match → skipped_clean.
+   *           - Differ, no `opts.force` → drift (file untouched).
+   *           - Differ, `opts.force: true` → rebuild frontmatter + body, overwrite in
+   *             place, report in `overwritten` (SPEC-021 Amendment A2).
    *        b. If file absent → build frontmatter, write with O_EXCL; add to created.
    *
-   * @param opts - Project root, dry-run flag, optional type filter.
+   * @param opts - Project root, dry-run flag, optional type filter, optional force-overwrite.
    * @returns ok(ExportReport) always — per-doc errors are inside report.errors, not top-level err().
    * @throws Never — StoreInterface errors propagate as err(LoreError).
    */
   async exportDocs(opts: ExportDocsOptions): Promise<Result<ExportReport, LoreError>> {
-    // reason: SPEC-021 §8 Q2 defers --force to v2 (consistent with SPEC-018 stance).
-    // Rejecting early ensures callers get a clear message rather than silent no-op.
-    if (opts.force === true) {
-      return err({
-        code: "VALIDATION_ERROR",
-        field: "force",
-        message: "--force not yet implemented — v2 will overwrite corpus body over file",
-      });
-    }
-
     // ── Phase 1: Build / extend the export index ──────────────────────────────
     const indexPath = join(opts.projectDir, ".lore", "export-index.json");
     const docsBaseDir = join(opts.projectDir, "docs", "requirements");
@@ -254,8 +273,21 @@ export class ExportDocsService {
       created: [],
       skipped_clean: [],
       drift: [],
+      overwritten: [],
       errors: [],
       repaired,
+    };
+
+    // Builds the complete file content (frontmatter + spliced body) for a doc — shared by
+    // BOTH the "file absent → create" path and the "drift + force → overwrite" path, so a
+    // force-overwrite regenerates frontmatter (title/status/tags/links may also have
+    // changed) rather than only patching the body.
+    const buildFileContent = async (doc: DocRecord, resolvedBody: string): Promise<string> => {
+      const mapping = index.mappings[doc.id]!;
+      const linksResult = await this.store.findLinks(doc.id, "out");
+      const outLinks: LinkRecord[] = linksResult.ok ? linksResult.value : [];
+      const fmStr = buildFrontmatterString(doc, mapping.human_id, outLinks, index);
+      return fmStr + canonicaliseBody(resolvedBody);
     };
 
     for (const doc of sortedDocs) {
@@ -310,12 +342,34 @@ export class ExportDocsService {
 
         if (fileNorm === corpusNorm) {
           report.skipped_clean.push(mapping.file_path);
-        } else {
-          // reason: drift is reported but never auto-resolved in v1 — mirrors SPEC-018 §2.1.
-          // --force (v2) will overwrite; until then we preserve the existing file.
+          continue;
+        }
+
+        // Drift: on-disk body no longer matches the current expected content — either a
+        // hand edit, or (for placeholder-bearing docs) a stale projection now that
+        // referenced children/links changed (see module header). Without force, preserve
+        // the file untouched (reason: never auto-resolved without explicit opt-in).
+        if (!opts.force) {
           report.drift.push(mapping.file_path);
           process.stderr.write(`⚠ drift: ${mapping.file_path}\n`);
+          continue;
         }
+
+        // force: true — overwrite with the current expected content (SPEC-021 Amendment A2).
+        if (opts.dryRun) {
+          report.overwritten.push(mapping.file_path);
+          continue;
+        }
+        try {
+          const fileContent = await buildFileContent(doc, resolvedBody);
+          writeFileSync(absFilePath, fileContent, "utf8");
+        } catch (e) {
+          report.errors.push(
+            `${mapping.file_path}: force-overwrite failed — ${e instanceof Error ? e.message : String(e)}`,
+          );
+          continue;
+        }
+        report.overwritten.push(mapping.file_path);
         continue;
       }
 
@@ -325,15 +379,7 @@ export class ExportDocsService {
         continue;
       }
 
-      // Fetch outbound non-parent links for this doc.
-      const linksResult = await this.store.findLinks(doc.id, "out");
-      const outLinks: LinkRecord[] = linksResult.ok ? linksResult.value : [];
-
-      // Build frontmatter string
-      const fmStr = buildFrontmatterString(doc, mapping.human_id, outLinks, index);
-
-      // Canonicalise the (already MDX-spliced) body and combine with frontmatter
-      const fileContent = fmStr + canonicaliseBody(resolvedBody);
+      const fileContent = await buildFileContent(doc, resolvedBody);
 
       // Write with O_EXCL semantics (fail if file appeared between check and write).
       // reason: concurrent exports could both see "file absent" and race to create.

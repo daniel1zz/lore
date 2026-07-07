@@ -3,9 +3,10 @@
  *
  * Spec-first: expected behaviors defined from SPEC-021 §9 ACs BEFORE reading
  * implementation. Adversarial tests target known fallback patterns:
- *   - force:true → must be err(), not a silent no-op
+ *   - force:true on a drifted file → overwrites with the CURRENT expected content and
+ *     reports it in report.overwritten, never report.drift (SPEC-021 Amendment A2)
+ *   - force omitted/false → drift is reported but the file is NEVER overwritten
  *   - Human IDs must be sequential/zero-padded (SPEC-001, not SPEC-1)
- *   - Drift detection must not overwrite the existing file
  *   - Round-trip parity: file body = canonicaliseBody(doc.content)
  *   - Parent omission when type filter excludes parent doc
  *
@@ -497,51 +498,152 @@ describe("NEGATIVE — parent excluded by type filter: parent: field omitted sil
   });
 });
 
-// ─── NEGATIVE: force:true → err(VALIDATION_ERROR) not a report ───────────────
+// ─── force: true overwrites drift with the current expected content (Amendment A2) ──
 
-describe("NEGATIVE — force:true returns VALIDATION_ERROR, never ok(report) (AC-EXPORT-9)", () => {
-  it("force: true returns err with VALIDATION_ERROR code", async () => {
+describe("HAPPY — force: true overwrites a drifted (hand-edited) file (AC-EXPORT-9 / Amendment A2)", () => {
+  it("drifted file is overwritten, reported in overwritten[] not drift[], content matches corpus", async () => {
     const store = new InMemoryStore();
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
-    const result = await service.exportDocs({ projectDir, dryRun: false, force: true });
+    const originalBody = "# My Spec\n\nThis is the canonical corpus version.";
+    await insertDoc(store, makeDoc({
+      id: "01J000000000000000000000S1",
+      type: "spec",
+      title: "Force Overwrite Spec",
+      slug: "spec-force-overwrite-spec",
+      content: originalBody,
+    }));
 
-    // Must be an err() result — NEVER silently proceed as if force is ignored
-    expect(result.ok).toBe(false);
-    if (result.ok) return; // fail: should not reach here
+    const first = await service.exportDocs({ projectDir, dryRun: false });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const filePath = first.value.created[0]!;
+    const absPath = join(projectDir, filePath);
 
-    expect(result.error.code).toBe("VALIDATION_ERROR");
+    // Hand-edit the file (introduces drift)
+    const fileContent = readFileSync(absPath, "utf8");
+    const driftedContent = fileContent.replace(
+      "canonical corpus version",
+      "MANUALLY EDITED VERSION",
+    );
+    writeFileSync(absPath, driftedContent, "utf8");
+
+    // Export with force:true — should overwrite, not just report drift
+    const second = await service.exportDocs({ projectDir, dryRun: false, force: true });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+
+    expect(second.value.drift).toHaveLength(0);
+    expect(second.value.overwritten).toHaveLength(1);
+    expect(second.value.overwritten[0]).toBe(filePath);
+    expect(second.value.errors).toHaveLength(0);
+
+    // File now reflects the corpus body again, not the hand edit
+    const afterContent = readFileSync(absPath, "utf8");
+    expect(afterContent).toContain("canonical corpus version");
+    expect(afterContent).not.toContain("MANUALLY EDITED VERSION");
   });
 
-  it("force: true rejected even with empty corpus (not a silent no-op)", async () => {
+  it("after a force overwrite, a subsequent plain export reports skipped_clean (convergence)", async () => {
     const store = new InMemoryStore();
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
-    const result = await service.exportDocs({ projectDir, dryRun: false, force: true });
+    await insertDoc(store, makeDoc({
+      id: "01J000000000000000000000S2",
+      type: "spec",
+      title: "Convergence Spec",
+      slug: "spec-convergence-spec",
+      content: "# Convergence\n\nOriginal.",
+    }));
 
-    // Even with empty corpus, force must fail loudly — no silent passthrough
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error.code).toBe("VALIDATION_ERROR");
-    // Must not be a generic store error
-    expect(result.error.code).not.toBe("STORE_ERROR");
+    const first = await service.exportDocs({ projectDir, dryRun: false });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const filePath = first.value.created[0]!;
+    const absPath = join(projectDir, filePath);
+    writeFileSync(absPath, readFileSync(absPath, "utf8").replace("Original", "Edited"), "utf8");
+
+    const forced = await service.exportDocs({ projectDir, dryRun: false, force: true });
+    expect(forced.ok).toBe(true);
+    if (!forced.ok) return;
+    expect(forced.value.overwritten).toHaveLength(1);
+
+    // Plain (non-force) run afterwards must converge to clean, not drift again.
+    const third = await service.exportDocs({ projectDir, dryRun: false });
+    expect(third.ok).toBe(true);
+    if (!third.ok) return;
+    expect(third.value.drift).toHaveLength(0);
+    expect(third.value.overwritten).toHaveLength(0);
+    expect(third.value.skipped_clean).toHaveLength(1);
   });
+});
 
-  it("force: true error specifically names 'force' as the invalid field", async () => {
+describe("BOUNDARY — force: true on an already-clean file is a no-op (AC-EXPORT-9)", () => {
+  it("clean file stays skipped_clean, overwritten[] empty, file bytes untouched", async () => {
     const store = new InMemoryStore();
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
 
-    const result = await service.exportDocs({ projectDir, dryRun: false, force: true });
+    await insertDoc(store, makeDoc({
+      id: "01J000000000000000000000S3",
+      type: "spec",
+      title: "Clean Force Spec",
+      slug: "spec-clean-force-spec",
+      content: "# Clean\n\nNo drift here.",
+    }));
 
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    if (result.error.code === "VALIDATION_ERROR") {
-      // The error must clearly identify that 'force' is the rejected field
-      expect(result.error.field).toBe("force");
-    }
+    const first = await service.exportDocs({ projectDir, dryRun: false });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const filePath = first.value.created[0]!;
+    const absPath = join(projectDir, filePath);
+    const beforeBytes = readFileSync(absPath, "utf8");
+
+    const second = await service.exportDocs({ projectDir, dryRun: false, force: true });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+
+    expect(second.value.skipped_clean).toHaveLength(1);
+    expect(second.value.overwritten).toHaveLength(0);
+    expect(second.value.drift).toHaveLength(0);
+    expect(readFileSync(absPath, "utf8")).toBe(beforeBytes);
+  });
+});
+
+describe("STATE — force: true + dryRun: true reports overwritten[] but writes nothing (AC-EXPORT-7 x A2)", () => {
+  it("drifted file is left untouched on disk, but reported as would-be-overwritten", async () => {
+    const store = new InMemoryStore();
+    const service = makeExportService(store);
+    const projectDir = makeTempProjectDir();
+
+    await insertDoc(store, makeDoc({
+      id: "01J000000000000000000000S4",
+      type: "spec",
+      title: "Dry Force Spec",
+      slug: "spec-dry-force-spec",
+      content: "# Dry Force\n\nOriginal.",
+    }));
+
+    const first = await service.exportDocs({ projectDir, dryRun: false });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const filePath = first.value.created[0]!;
+    const absPath = join(projectDir, filePath);
+    const driftedContent = readFileSync(absPath, "utf8").replace("Original", "Edited");
+    writeFileSync(absPath, driftedContent, "utf8");
+
+    const dryForced = await service.exportDocs({ projectDir, dryRun: true, force: true });
+    expect(dryForced.ok).toBe(true);
+    if (!dryForced.ok) return;
+
+    expect(dryForced.value.overwritten).toHaveLength(1);
+    expect(dryForced.value.overwritten[0]).toBe(filePath);
+    expect(dryForced.value.drift).toHaveLength(0);
+
+    // Nothing was actually written — the hand edit is still on disk.
+    expect(readFileSync(absPath, "utf8")).toBe(driftedContent);
   });
 });
 
@@ -989,6 +1091,80 @@ describe("STATE — re-exporting a placeholder-bearing doc reports clean, not pe
     expect(second.value.created).toHaveLength(0);
     expect(second.value.drift).toHaveLength(0);
     expect(second.value.skipped_clean).toHaveLength(1);
+  });
+});
+
+describe("STATE — corpus children change under a placeholder doc → drift IS reported (AC-4 true positive)", () => {
+  it("adding a child after export makes the exported projection stale — reported as drift, not clean", async () => {
+    // Complement to the "STATE — re-exporting ... reports clean" test above: when the
+    // corpus actually changes (a new child is added, so <ChildrenOf /> would render
+    // differently), the on-disk file genuinely IS a stale projection of the CURRENT
+    // corpus state. This is a TRUE positive, not the permanent-false-positive bug —
+    // the file legitimately differs from what export would write today.
+    const store = new InMemoryStore();
+    const service = makeExportService(store);
+    const projectDir = makeTempProjectDir();
+
+    await insertDoc(store, makeDoc({
+      id: "01J0000000000000000000PR3",
+      type: "prd",
+      title: "Growing PRD",
+      slug: "prd-growing-prd",
+      content: "# Growing PRD\n\n<ChildrenOf />\n",
+    }));
+    await insertDoc(store, makeDoc({
+      id: "01J000000000000000000000C1",
+      type: "spec",
+      title: "First Child",
+      slug: "spec-first-child",
+      parent_id: "01J0000000000000000000PR3",
+    }));
+
+    const first = await service.exportDocs({ projectDir, dryRun: false });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.value.drift).toHaveLength(0);
+
+    const prdFilePath = first.value.created.find((p) => p.includes("PRD-"))!;
+    const absPath = join(projectDir, prdFilePath);
+    const beforeContent = readFileSync(absPath, "utf8");
+
+    // A second child is added — <ChildrenOf /> would now render an extra bullet line,
+    // so the on-disk file (from before this doc existed) is stale.
+    await insertDoc(store, makeDoc({
+      id: "01J000000000000000000000C2",
+      type: "spec",
+      title: "Second Child",
+      slug: "spec-second-child",
+      parent_id: "01J0000000000000000000PR3",
+    }));
+
+    const second = await service.exportDocs({ projectDir, dryRun: false });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+
+    // The PRD file is reported as drift (true positive), not skipped_clean.
+    expect(second.value.drift).toContain(prdFilePath);
+    expect(second.value.skipped_clean).not.toContain(prdFilePath);
+    // File on disk is untouched (no force) — still the pre-second-child projection.
+    expect(readFileSync(absPath, "utf8")).toBe(beforeContent);
+
+    // force:true refreshes it to the current projection (both children listed).
+    const forced = await service.exportDocs({ projectDir, dryRun: false, force: true });
+    expect(forced.ok).toBe(true);
+    if (!forced.ok) return;
+    expect(forced.value.overwritten).toContain(prdFilePath);
+
+    const afterForce = readFileSync(absPath, "utf8");
+    expect(afterForce).toContain("First Child");
+    expect(afterForce).toContain("Second Child");
+
+    // And now it converges: a plain re-export is clean again.
+    const third = await service.exportDocs({ projectDir, dryRun: false });
+    expect(third.ok).toBe(true);
+    if (!third.ok) return;
+    expect(third.value.drift).toHaveLength(0);
+    expect(third.value.skipped_clean).toContain(prdFilePath);
   });
 });
 

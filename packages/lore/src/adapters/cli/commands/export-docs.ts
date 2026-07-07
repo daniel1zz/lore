@@ -9,12 +9,13 @@
  * Flags:
  *   --dry-run       Report what would happen; write nothing (AC-EXPORT-7)
  *   --type <type>   Export only one doc type, e.g. --type spec (AC-EXPORT-8)
- *   --force         (v1: rejected — v2 will overwrite drifted files) (AC-EXPORT-9)
+ *   --force         Overwrite drifted files with the current corpus projection
+ *                   (SPEC-021 Amendment A2 — supersedes the earlier "v2" deferral)
  *   --json          Machine-readable ExportReport to stdout
  *
  * Exit codes (SPEC-003 §5):
- *   0 — success (including clean or drift-only results)
- *   2 — usage error (--force passed, invalid --type)
+ *   0 — success (including clean, drift-only, or force-overwritten results)
+ *   2 — usage error (invalid --type)
  *   4 — one or more per-doc errors
  *   6 — store/IO failure
  */
@@ -45,7 +46,7 @@ export default defineCommand({
     },
     force: {
       type: "boolean",
-      description: "(v2, not yet implemented) Overwrite drifted files with corpus body",
+      description: "Overwrite drifted files with the current corpus projection",
     },
     json: {
       type: "boolean",
@@ -57,15 +58,6 @@ export default defineCommand({
     const jsonMode = args.json ?? false;
     const typeArg = args.type;
     const forceArg = args.force ?? false;
-
-    // Validate --force (v1 always rejects) early so we give a clean usage error.
-    if (forceArg) {
-      process.stderr.write(
-        "Error: --force not yet implemented — v2 will overwrite corpus body over file.\n",
-      );
-      process.exitCode = 2;
-      return;
-    }
 
     // Validate --type if provided.
     let typeFilter: DocType | undefined;
@@ -93,7 +85,7 @@ export default defineCommand({
       const exportResult = await app.exportDocsService.exportDocs({
         projectDir,
         dryRun,
-        // force is rejected above so always false here — omit to keep optional property clean.
+        force: forceArg,
         ...(typeFilter !== undefined ? { type: typeFilter } : {}),
       });
 
@@ -128,6 +120,7 @@ export default defineCommand({
         report.created.length +
         report.skipped_clean.length +
         report.drift.length +
+        report.overwritten.length +
         report.errors.length;
 
       process.stdout.write(`Corpus docs scanned: ${totalDocs}\n`);
@@ -151,16 +144,30 @@ export default defineCommand({
         );
       }
 
+      if (report.overwritten.length > 0) {
+        const verb = dryRun ? "Would overwrite" : "Overwrote";
+        process.stdout.write(
+          `⚠ ${verb} ${report.overwritten.length} drifted file${report.overwritten.length === 1 ? "" : "s"} (--force):\n`,
+        );
+        for (const filePath of report.overwritten) {
+          const fileName = filePath.split("/").pop() ?? filePath;
+          process.stdout.write(`    ${fileName}\n`);
+        }
+      }
+
       if (report.drift.length > 0) {
         process.stdout.write(
-          `⚠ ${report.drift.length} file${report.drift.length === 1 ? "" : "s"} differ from corpus body (drift — not overwritten):\n`,
+          `⚠ ${report.drift.length} file${report.drift.length === 1 ? "" : "s"} differ from the current corpus projection (drift — not overwritten):\n`,
         );
         for (const filePath of report.drift) {
           const fileName = filePath.split("/").pop() ?? filePath;
           process.stdout.write(`    ${fileName}\n`);
         }
         process.stdout.write(
-          `  To push corpus → file, use --force (v2) or manually reconcile:\n` +
+          `  This file was either hand-edited, or (for docs with MDX placeholders) it is a\n` +
+          `  stale projection now that referenced content changed elsewhere in the corpus.\n` +
+          `  Re-run with --force to overwrite with the current corpus projection, or reconcile\n` +
+          `  manually:\n` +
           `    lore get <slug>  # view corpus content\n`,
         );
       }
