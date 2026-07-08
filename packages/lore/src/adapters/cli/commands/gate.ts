@@ -69,20 +69,20 @@ import type { AcService } from "../../../service/ac-service.js";
 import type { DocRecord, NewReviewJudgment } from "@lore/core";
 
 /**
- * Mirrors `scripts/seed-write-spec-rule.ts::WRITE_SPEC_RULE_TITLE` exactly.
- *
- * reason: cannot import it directly — `scripts/` lives outside this package's
- * `tsconfig.tests.json` `rootDir` (documented in that script's own test file,
- * `packages/lore/tests/unit/service/seed-write-spec-rule.bun.test.ts`), so a static
- * import here would fail `tsc --noEmit` with TS6059. If the seed title ever changes,
- * update both literals together.
+ * `applies_to` scope this gate discovers its feeding skill by — matches the
+ * `extra.skill.applies_to` value `scripts/seed-write-spec-rule.ts` seeds on the
+ * "Write-spec rules (gate feeding source)" doc. `CorpusService.findFeedingSkill`
+ * discovers ANY approved `knowledge/skill` doc declaring this scope, not just that
+ * specific seeded title — discovery is by declared scope, not a hardcoded title
+ * literal (IoC vertical-slice tech-spec §4.1/§11, P1 slice-2).
  */
-const WRITE_SPEC_RULE_TITLE = "Write-spec rules (gate feeding source)";
+const SPEC_CREATE_SKILL_APPLIES_TO = "spec";
 
-/** Fallback rule slice used when no approved doc titled `WRITE_SPEC_RULE_TITLE` exists yet. */
+/** Fallback rule slice used when no approved `knowledge/skill` doc declares `applies_to: "spec"` yet. */
 const RULE_DOC_MISSING_PLACEHOLDER =
   `(No approved rule doc found — run \`bun scripts/seed-write-spec-rule.ts\` to seed it. ` +
-  `Expected: type=knowledge, status=approved, title="${WRITE_SPEC_RULE_TITLE}".)`;
+  `Expected: type=knowledge, status=approved, extra.sub_type="skill", ` +
+  `extra.skill.applies_to="${SPEC_CREATE_SKILL_APPLIES_TO}".)`;
 
 /**
  * Candidate spec-creation payload, shaped after MCP `lore_create`'s input schema
@@ -220,7 +220,7 @@ async function runSpecCreateGate(app: App, input: GateSpecCreateInput): Promise<
     return;
   }
 
-  const rule = await findApprovedRuleDoc(app);
+  const rule = await findFeedingSkill(app, SPEC_CREATE_SKILL_APPLIES_TO);
   const parentMarkdown =
     parentDoc !== null ? await renderDocMarkdown(app, parentDoc) : undefined;
 
@@ -367,34 +367,33 @@ async function renderDocMarkdown(app: App, doc: DocRecord): Promise<string> {
 
 /** One rule-doc lookup outcome: where the slice came from, and the slice itself. */
 interface RuleDocLookup {
-  /** Slug of the rule doc (or `WRITE_SPEC_RULE_TITLE` itself when no doc was found — see caller). */
+  /** Slug of the discovered skill doc, or a descriptive placeholder label when none was found. */
   source: string;
   /** Markdown slice fed to `buildFeedingPack`; `RULE_DOC_MISSING_PLACEHOLDER` when absent. */
   markdown: string;
 }
 
 /**
- * Finds the APPROVED `knowledge` doc titled exactly `WRITE_SPEC_RULE_TITLE` and
- * returns its markdown (MDX-resolved, mirroring `renderDocMarkdown`).
+ * Discovers the approved `knowledge/skill` doc scoped to `appliesTo` via
+ * `CorpusService.findFeedingSkill` and returns its markdown (MDX-resolved, mirroring
+ * `renderDocMarkdown`) — the "active feeding" rule source for a gate's violation
+ * output. Supersedes the former hardcoded-title lookup (`findApprovedRuleDoc` /
+ * `WRITE_SPEC_RULE_TITLE`): any gate can now be fed by any approved skill doc that
+ * declares a matching `extra.skill.applies_to`, not only the one specific seeded title.
  *
- * @invariant Only ever considers `status=approved` docs (module contract: "只用
- *   status=approved 的") — a draft/in-review doc with a matching title is invisible
- *   to this lookup, same as if it didn't exist.
+ * @param appliesTo - Scope to discover by, e.g. `SPEC_CREATE_SKILL_APPLIES_TO`.
  * @returns A `RuleDocLookup` with `markdown = RULE_DOC_MISSING_PLACEHOLDER` when no
- *   matching approved doc exists, or the list/get/resolve calls fail — the gate still
- *   surfaces `missing` reasons even when the rule doc itself is unavailable.
+ *   matching approved skill doc exists, or the discovery/get calls fail — the gate
+ *   still surfaces `missing` reasons even when the rule doc itself is unavailable
+ *   (backward-compat with the pre-discovery placeholder behaviour).
  */
-async function findApprovedRuleDoc(app: App): Promise<RuleDocLookup> {
-  const listResult = await app.corpusService.list({ type: "knowledge", status: "approved" });
-  if (!listResult.ok) {
-    return { source: WRITE_SPEC_RULE_TITLE, markdown: RULE_DOC_MISSING_PLACEHOLDER };
+async function findFeedingSkill(app: App, appliesTo: string): Promise<RuleDocLookup> {
+  const discoveryResult = await app.corpusService.findFeedingSkill(appliesTo);
+  if (!discoveryResult.ok || discoveryResult.value === null) {
+    return { source: `applies_to:${appliesTo}`, markdown: RULE_DOC_MISSING_PLACEHOLDER };
   }
 
-  const match = listResult.value.docs.find((d) => d.title === WRITE_SPEC_RULE_TITLE);
-  if (match === undefined) {
-    return { source: WRITE_SPEC_RULE_TITLE, markdown: RULE_DOC_MISSING_PLACEHOLDER };
-  }
-
+  const match = discoveryResult.value;
   const getResult = await app.corpusService.get(match.id);
   if (!getResult.ok) {
     return { source: match.slug, markdown: RULE_DOC_MISSING_PLACEHOLDER };

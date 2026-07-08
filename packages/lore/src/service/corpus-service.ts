@@ -12,6 +12,7 @@ import {
   createDocInputSchema,
   deriveTypeMeta,
   docPatchSchema,
+  knowledgeExtraSchema,
   slugifyWithCollision,
   specAcceptanceCriteriaSchema,
   specExtraSchema,
@@ -927,6 +928,50 @@ export class CorpusService {
     if (!parsed.success) return ok(null);
 
     return ok(new Set(parsed.data.map((c) => c.id)));
+  }
+
+  // ── Feeding Skill Discovery (IoC vertical-slice tech-spec §4.1/§11, P1 slice-2) ──
+
+  /**
+   * Finds the most-recently-updated APPROVED `knowledge` doc with `sub_type: "skill"`
+   * whose `extra.skill.applies_to` matches `appliesTo`. Generalizes `lore gate`'s
+   * "active feeding" rule-doc lookup from a hardcoded title literal
+   * (`gate.ts`'s superseded `WRITE_SPEC_RULE_TITLE` + `findApprovedRuleDoc`) to a
+   * declared-scope discovery — any future gate can find its own feeding source by
+   * pointing a `knowledge/skill` doc's `extra.skill.applies_to` at the gate's name,
+   * with no new per-gate literal required.
+   *
+   * @invariant Only ever considers `status === "approved"` docs — a draft/in-review
+   *   skill doc with a matching `applies_to` is invisible to this lookup, mirroring
+   *   the review-gate convention used throughout this module (`getReviewBundle` and
+   *   the superseded `gate.ts::findApprovedRuleDoc` both apply the same restriction).
+   * @param appliesTo - Scope to match against `extra.skill.applies_to` (e.g. "spec").
+   * @returns `ok(doc)` for the matching doc with the latest `updated_at` when ≥1
+   *   approved `knowledge/skill` doc declares this scope; `ok(null)` when none do — a
+   *   fact, not an error, so callers degrade to a placeholder rather than hard-failing.
+   * @example
+   * const result = await corpusService.findFeedingSkill("spec");
+   * if (result.ok && result.value !== null) {
+   *   console.log(result.value.slug); // e.g. "knowledge-write-spec-rules"
+   * }
+   *
+   * Source: IoC vertical-slice tech-spec §4.1/§11 (P1 slice-2, applies_to discovery)
+   */
+  async findFeedingSkill(appliesTo: string): Promise<Result<DocRecord | null, LoreError>> {
+    const listResult = await this.store.findMany({ type: "knowledge", status: "approved" });
+    if (!listResult.ok) return listResult;
+
+    const matches = listResult.value.filter((doc) => {
+      const parsed = knowledgeExtraSchema.safeParse(doc.extra);
+      return (
+        parsed.success && parsed.data.sub_type === "skill" && parsed.data.skill?.applies_to === appliesTo
+      );
+    });
+
+    if (matches.length === 0) return ok(null);
+
+    const latest = matches.reduce((newest, doc) => (doc.updated_at > newest.updated_at ? doc : newest));
+    return ok(latest);
   }
 
   /**
