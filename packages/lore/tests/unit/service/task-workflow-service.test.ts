@@ -876,3 +876,231 @@ describe("STATE / REGRESSION — evidence without ac_ref never invokes the port 
   });
 });
 
+// ─── SPEC-039 §2 D2 — attestation is runner-issued only ─────────────────────
+//
+// addEvidence rejects any raw input object carrying an `attestation` key (even
+// smuggled past the type system via `as EvidenceInput`); recordVerifiedEvidence
+// is the SOLE method that may persist `attestation`. Both share the same append
+// implementation (cap check, schema validation, ac_ref cross-entity check), so
+// these blocks focus on what's NEW: the attestation gate itself, plus proving
+// the shared internals (cap, ac_ref, telemetry) behave identically for the new
+// method — not re-testing addEvidence's own already-covered behavior above.
+
+describe("NEGATIVE — attestation smuggled into addEvidence rejected at write time (SPEC-039 §2 D2)", () => {
+  it("an object carrying an attestation key (even via `as EvidenceInput` cast) fails VALIDATION_ERROR before any write", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const attestationPayload = {
+      runner: "lore-cli" as const,
+      exit_code: 0,
+      duration_ms: 1,
+      timed_out: false,
+    };
+    const smuggled = { ...evidence(), attestation: attestationPayload } as EvidenceInput;
+
+    const result = await taskWorkflowService.addEvidence(taskId, smuggled);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (result.error.code !== "VALIDATION_ERROR") return;
+    expect(result.error.field).toBe("attestation");
+    expect(result.error.message).toContain("lore verify");
+    expect(result.error.value).toEqual(attestationPayload);
+
+    // Doc must be completely unchanged — no version bump, no evidence array at all.
+    const after = await corpusService.get(taskId);
+    expect(after.ok).toBe(true);
+    if (!after.ok) return;
+    expect(after.value.doc.version).toBe(1);
+    expect(after.value.doc.extra["verification_evidence"]).toBeUndefined();
+  });
+});
+
+describe("HAPPY — recordVerifiedEvidence persists attestation verbatim (SPEC-039 §2 D2)", () => {
+  it("two calls with DIFFERENT attestation payloads land distinctly at their own array index (defeats a hardcoded-return stub)", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+    const nowIso = "2026-07-08T10:00:00.000Z";
+
+    const first = await taskWorkflowService.recordVerifiedEvidence(
+      taskId,
+      {
+        oracle: "test",
+        command: "bun test",
+        result: "pass",
+        recorded_by: "runner",
+        attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1234, timed_out: false },
+      },
+      nowIso,
+    );
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.value.version).toBe(2); // v1 create, v2 evidence write
+
+    const second = await taskWorkflowService.recordVerifiedEvidence(
+      taskId,
+      {
+        oracle: "lint",
+        command: "bun run lint",
+        result: "fail",
+        recorded_by: "runner",
+        attestation: { runner: "lore-cli", exit_code: 1, duration_ms: 5678, timed_out: false },
+      },
+      nowIso,
+    );
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.value.version).toBe(3);
+
+    const entries = second.value.extra["verification_evidence"] as Array<Record<string, unknown>>;
+    expect(entries).toHaveLength(2);
+    expect(entries[0]).toMatchObject({
+      oracle: "test",
+      result: "pass",
+      attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1234, timed_out: false },
+    });
+    expect(entries[1]).toMatchObject({
+      oracle: "lint",
+      result: "fail",
+      attestation: { runner: "lore-cli", exit_code: 1, duration_ms: 5678, timed_out: false },
+    });
+  });
+});
+
+describe("BOUNDARY — recordVerifiedEvidence enforces the identical 50-entry cap (SPEC-039 §2)", () => {
+  it("the 51st recordVerifiedEvidence call fails VALIDATION_ERROR without mutating the doc", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+    const nowIso = "2026-07-08T10:00:00.000Z";
+
+    for (let i = 0; i < 50; i++) {
+      const r = await taskWorkflowService.recordVerifiedEvidence(
+        taskId,
+        {
+          oracle: "test",
+          command: `run ${i}`,
+          result: "pass",
+          recorded_by: "runner",
+          attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false },
+        },
+        nowIso,
+      );
+      expect(r.ok).toBe(true);
+    }
+
+    const beforeGet = await corpusService.get(taskId);
+    expect(beforeGet.ok).toBe(true);
+    if (!beforeGet.ok) return;
+    const versionBefore = beforeGet.value.doc.version;
+    expect((beforeGet.value.doc.extra["verification_evidence"] as unknown[]).length).toBe(50);
+
+    const overflow = await taskWorkflowService.recordVerifiedEvidence(
+      taskId,
+      {
+        oracle: "test",
+        command: "run 50",
+        result: "pass",
+        recorded_by: "runner",
+        attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false },
+      },
+      nowIso,
+    );
+    expect(overflow.ok).toBe(false);
+    if (overflow.ok) return;
+    expect(overflow.error.code).toBe("VALIDATION_ERROR");
+
+    const afterGet = await corpusService.get(taskId);
+    expect(afterGet.ok).toBe(true);
+    if (!afterGet.ok) return;
+    expect(afterGet.value.doc.version).toBe(versionBefore); // unchanged
+    expect((afterGet.value.doc.extra["verification_evidence"] as unknown[]).length).toBe(50); // unchanged
+  }, 20_000);
+});
+
+describe("REGRESSION — recordVerifiedEvidence shares ac_ref cross-entity validation with addEvidence (SPEC-039 §2)", () => {
+  it("a declared ac_ref is accepted and written alongside the attestation", async () => {
+    const { corpusService, taskWorkflowService } = makeServicesWithAcPort(async () =>
+      ok(new Set(["AC-VRF-1"])),
+    );
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const result = await taskWorkflowService.recordVerifiedEvidence(
+      taskId,
+      {
+        oracle: "test",
+        command: "bun test",
+        result: "pass",
+        recorded_by: "runner",
+        ac_ref: "AC-VRF-1",
+        attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false },
+      },
+      "2026-07-08T10:00:00.000Z",
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const entries = result.value.extra["verification_evidence"] as Array<Record<string, unknown>>;
+    expect(entries[0]?.["ac_ref"]).toBe("AC-VRF-1");
+  });
+
+  it("an ac_ref absent from the declared set is rejected, doc unchanged", async () => {
+    const { corpusService, taskWorkflowService } = makeServicesWithAcPort(async () =>
+      ok(new Set(["AC-OTHER"])),
+    );
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const result = await taskWorkflowService.recordVerifiedEvidence(
+      taskId,
+      {
+        oracle: "test",
+        command: "bun test",
+        result: "pass",
+        recorded_by: "runner",
+        ac_ref: "AC-VRF-1",
+        attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false },
+      },
+      "2026-07-08T10:00:00.000Z",
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+
+    const after = await corpusService.get(taskId);
+    expect(after.ok).toBe(true);
+    if (!after.ok) return;
+    expect(after.value.doc.version).toBe(1);
+    expect(after.value.doc.extra["verification_evidence"]).toBeUndefined();
+  });
+});
+
+describe("REGRESSION — recordVerifiedEvidence telemetry emits meta.attested === true (SPEC-039 §2)", () => {
+  it("a successful call emits exactly one task.evidence_added event with attested: true", async () => {
+    const { corpusService, taskWorkflowService, telemetry } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const result = await taskWorkflowService.recordVerifiedEvidence(
+      taskId,
+      {
+        oracle: "test",
+        command: "bun test",
+        result: "pass",
+        recorded_by: "runner",
+        attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false },
+      },
+      "2026-07-08T10:00:00.000Z",
+    );
+    expect(result.ok).toBe(true);
+
+    expect(telemetry.events).toHaveLength(1);
+    expect(telemetry.last?.method).toBe("task.evidence_added");
+    expect(telemetry.last?.ok).toBe(true);
+    expect(telemetry.last?.meta).toMatchObject({ attested: true });
+  });
+});
+

@@ -8,7 +8,11 @@
  * here by construction). Own telemetry wiring restores parity with CorpusService.
  *
  * Public surface:
- *   addEvidence(idOrSlug, entry, now?)     → append one oracle verification record
+ *   addEvidence(idOrSlug, entry, now?)     → append one SELF-REPORTED oracle verification record
+ *   recordVerifiedEvidence(idOrSlug, entry, nowIso) → append a RUNNER-ATTESTED record —
+ *                                             the SOLE injection point for `attestation`
+ *                                             (SPEC-039 §2 D2); NOT registered on any
+ *                                             CLI/MCP surface, VerifyRunnerService-only
  *   claim(idOrSlug, opts, now?)            → acquire/refresh/steal the advisory lease
  *   release(idOrSlug, opts, now?)          → clear the advisory lease
  *   ready(planIdOrSlug, now?)              → computed readiness report (zero writes)
@@ -18,8 +22,8 @@
  *   expected_version) — a concurrent writer wins the race, the loser gets STALE_VERSION.
  * @invariant Every successful write bumps the task's version and appends one VersionRecord
  *   (action: "update") so `lore log` shows who claimed/released/added evidence and when.
- * @invariant addEvidence/claim/release touch ONLY extra.claim / extra.verification_evidence
- *   — never content, title, or status.
+ * @invariant addEvidence/claim/release/recordVerifiedEvidence touch ONLY extra.claim /
+ *   extra.verification_evidence — never content, title, or status.
  * @invariant ready() performs zero writes — readiness is computed, never stored (D3).
  * @invariant addEvidence's optional `ac_ref` is cross-entity validated via the
  *   constructor-injected `resolveDeclaredAcIds` port (CorpusService owns the actual
@@ -27,10 +31,24 @@
  *   SPEC-038 §7 D4). An `ac_ref` naming an id absent from the port's result (or a
  *   `null` result, meaning "parent spec has no structured AC") fails loud with
  *   VALIDATION_ERROR before any write. Evidence with no `ac_ref` never invokes the
- *   port — fully backward-compatible with pre-SPEC-038 callers.
+ *   port — fully backward-compatible with pre-SPEC-038 callers. The same cross-entity
+ *   check applies to `recordVerifiedEvidence` (shared implementation, see below).
+ * @invariant `attestation` is runner-issued ONLY (SPEC-039 §2 D2, anti-spoofing) — the
+ *   public `EvidenceInput` type (addEvidence) structurally EXCLUDES the field, but a
+ *   caller can still smuggle it past the type system with an `as EvidenceInput`
+ *   assertion on an untyped object (the exact shape `adapters/cli/commands/*.ts`
+ *   assembles candidate objects in). `addEvidence` therefore runs an EXPLICIT runtime
+ *   `hasOwnProperty` check on the raw input and fails loud with VALIDATION_ERROR — it
+ *   never silently strips the key. `recordVerifiedEvidence` is the only method that
+ *   accepts `attestation`, and it is never wired to a CLI/MCP surface (VerifyRunnerService
+ *   is its sole caller, bound in app.ts the same way `resolveDeclaredAcIds` is bound).
+ * @invariant addEvidence and recordVerifiedEvidence share ONE append implementation
+ *   (private `appendEvidenceEntry`) — cap check, schema validation, ac_ref cross-entity
+ *   validation, and the writeTaskExtra commit path are never duplicated between them.
  *
  * Side-effect class: IO (reads/writes via StoreInterface; emits telemetry).
- * Source: SPEC-025 §3 D2, D3, D5, D7, D8, D10; §4 AC-WF-1..11; §8.2, §8.3; SPEC-038 §4, §7 D4
+ * Source: SPEC-025 §3 D2, D3, D5, D7, D8, D10; §4 AC-WF-1..11; §8.2, §8.3; SPEC-038 §4, §7 D4;
+ *         SPEC-039 §2 D2, §4 AC-VRF-2
  */
 
 import { z } from "zod";
@@ -83,11 +101,25 @@ export interface ReleaseOpts {
   source?: string;
 }
 
-/** Evidence input for {@link TaskWorkflowService.addEvidence} — recorded_at is set by the service. */
-export type EvidenceInput = Omit<EvidenceEntry, "recorded_at"> & {
+/**
+ * Evidence input for {@link TaskWorkflowService.addEvidence} — recorded_at is set by the
+ * service. `attestation` is structurally EXCLUDED (SPEC-039 §2 D2, §4 AC-VRF-2) — it is
+ * runner-issued only, via {@link TaskWorkflowService.recordVerifiedEvidence}. addEvidence
+ * additionally runs a runtime check against the raw input object (not just this type) so
+ * an `as EvidenceInput` cast on an untyped candidate cannot smuggle the field past the
+ * type system — see the class-level @invariant.
+ */
+export type EvidenceInput = Omit<EvidenceEntry, "recorded_at" | "attestation"> & {
   /** See {@link ClaimOpts.source}. */
   source?: string;
 };
+
+/**
+ * Evidence input for {@link TaskWorkflowService.recordVerifiedEvidence} — the ONLY shape
+ * that may carry `attestation` (SPEC-039 §2 D2). Never exported to any CLI/MCP surface;
+ * `VerifyRunnerService.verifyPlan` is the sole production caller.
+ */
+export type VerifiedEvidenceInput = Omit<EvidenceEntry, "recorded_at">;
 
 // ─── Internal Helpers ──────────────────────────────────────────────────────
 
@@ -187,9 +219,90 @@ export class TaskWorkflowService {
     return result;
   }
 
+  /**
+   * SOLE injection point for `EvidenceEntry.attestation` (SPEC-039 §2 D2). NOT
+   * registered on any CLI/MCP surface — the only production caller is
+   * `VerifyRunnerService.verifyPlan`, bound in `app.ts` the same way
+   * `resolveDeclaredAcIds` is bound onto this service's own port. Shares
+   * `appendEvidenceEntry`'s cap-check / schema-validation / ac_ref cross-entity
+   * validation / writeTaskExtra commit path with {@link addEvidence} — no
+   * duplicated implementation (SPEC-039 task anchor: "share the impl internals,
+   * do not duplicate").
+   *
+   * @param idOrSlug - Task document ULID or slug
+   * @param entry - Full evidence fields INCLUDING attestation, minus recorded_at
+   * @param nowIso - Caller-supplied current time (D10) — a resolved ISO string, not a
+   *   `() => string` thunk, since `VerifyRunnerService.verifyPlan` resolves "now" once
+   *   per call, before looping over acceptance criteria.
+   * @returns The updated task DocRecord
+   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a task / cap reached / bad entry / bad ac_ref), STALE_VERSION
+   */
+  async recordVerifiedEvidence(
+    idOrSlug: string,
+    entry: VerifiedEvidenceInput,
+    nowIso: string,
+  ): Promise<Result<DocRecord, LoreError>> {
+    const startMs = Date.now();
+    // reason: appendEvidenceEntry takes a `now` THUNK (not a resolved string) so it can
+    // invoke it at the exact same point _addEvidenceImpl always has — after resolveTask
+    // + the cap check, immediately before building the candidate object (D10 time-seam
+    // ordering the STALE_VERSION sequential-CAS test recipe, SPEC-025 §7, depends on).
+    // recordVerifiedEvidence's own public contract stays a plain resolved `nowIso: string`
+    // (VerifyRunnerService resolves "now" once per verifyPlan() call) — trivially wrapped
+    // here rather than widening the public signature back to a thunk.
+    const result = await this.appendEvidenceEntry(idOrSlug, entry, entry.recorded_by, () => nowIso);
+    this.recordEvent("task.evidence_added", startMs, result, undefined, {
+      oracle: entry.oracle,
+      result: entry.result,
+      attested: entry.attestation !== undefined,
+    });
+    return result;
+  }
+
   private async _addEvidenceImpl(
     idOrSlug: string,
     entry: EvidenceInput,
+    now: () => string,
+  ): Promise<Result<DocRecord, LoreError>> {
+    // SPEC-039 §4 D2 — fail-loud, NOT a silent strip: any raw input object carrying
+    // an `attestation` key at all (regardless of value) is rejected before any other
+    // validation runs. `attestation` is runner-issued only; the sole injection point
+    // is `recordVerifiedEvidence`. A caller can force this key past EvidenceInput's
+    // compile-time exclusion with an `as EvidenceInput` cast on an untyped candidate
+    // object (the exact pattern CLI commands assemble flag-derived candidates with) —
+    // this runtime check is what actually stops it, not the type alone.
+    if (Object.prototype.hasOwnProperty.call(entry, "attestation")) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "attestation",
+        message: "attestation is runner-issued; use lore verify (not a valid addEvidence input field)",
+        value: (entry as Record<string, unknown>)["attestation"],
+      });
+    }
+
+    return this.appendEvidenceEntry(idOrSlug, entry, entry.recorded_by, now);
+  }
+
+  /**
+   * Shared append implementation for {@link addEvidence} (self-reported, never carries
+   * `attestation` by construction of its caller) and {@link recordVerifiedEvidence}
+   * (runner-attested, SPEC-039 §2 D2 sole injection point) — cap check, schema
+   * validation, ac_ref cross-entity validation, and the writeTaskExtra commit path all
+   * live here exactly once.
+   *
+   * @param now - Time seam thunk (D10), invoked HERE (after resolveTask + the cap
+   *   check, immediately before building the candidate) — NOT pre-resolved by the
+   *   caller. This exact ordering is load-bearing: the sequential-CAS STALE_VERSION
+   *   test recipe (SPEC-025 §7) simulates a concurrent writer via a side effect
+   *   inside the injected `now()` callback, which only works if `now()` fires AFTER
+   *   the version has been read (resolveTask) but BEFORE the write. `recordVerifiedEvidence`
+   *   wraps its already-resolved `nowIso` string in a trivial `() => nowIso` thunk to
+   *   satisfy this signature without changing its own public contract.
+   */
+  private async appendEvidenceEntry(
+    idOrSlug: string,
+    entry: VerifiedEvidenceInput,
+    actor: string,
     now: () => string,
   ): Promise<Result<DocRecord, LoreError>> {
     const taskResult = await this.resolveTask(idOrSlug);
@@ -215,6 +328,7 @@ export class TaskWorkflowService {
       recorded_by: entry.recorded_by,
       ...(entry.output_tail !== undefined ? { output_tail: entry.output_tail } : {}),
       ...(entry.ac_ref !== undefined ? { ac_ref: entry.ac_ref } : {}),
+      ...(entry.attestation !== undefined ? { attestation: entry.attestation } : {}),
     };
     const parsedEntry = evidenceEntrySchema.safeParse(candidate);
     if (!parsedEntry.success) {
@@ -264,7 +378,7 @@ export class TaskWorkflowService {
       task,
       newExtra,
       nowIso,
-      entry.recorded_by,
+      actor,
       `Evidence added: ${entry.oracle} ${entry.result}`,
       "evidence",
       { oracle: entry.oracle, command: entry.command, result: entry.result },

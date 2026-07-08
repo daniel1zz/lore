@@ -17,6 +17,7 @@
  */
 
 import { Database } from "bun:sqlite";
+import { dirname } from "node:path";
 import { SQLiteStore } from "./store/sqlite-store.js";
 import { TursoStore } from "./store/turso-store.js";
 import { CorpusService } from "./service/corpus-service.js";
@@ -31,6 +32,7 @@ import {
   resolveSyncCredentials,
   resolveClaimTtlMinutes,
   resolveAuditVerifySince,
+  resolveVerifyDefaultTimeoutMs,
   type LoreConfig,
   AiConfigSchema,
 } from "@lore/core";
@@ -52,6 +54,8 @@ import { SpecKindService } from "./service/spec-kind-service.js";
 import { JudgmentService } from "./service/judgment-service.js";
 import { AuditService } from "./service/audit-service.js";
 import { AcService } from "./service/ac-service.js";
+import { VerifyRunnerService } from "./service/verify-runner-service.js";
+import { executeVerifySpawnSpec } from "./service/verify-executor.js";
 
 export interface App {
   corpusService: CorpusService;
@@ -136,6 +140,20 @@ export interface App {
    */
   acService?: AcService;
   /**
+   * VerifyRunnerService — orchestrates `lore verify`'s trusted-runner spawn-and-attest
+   * flow (SPEC-039 §2). Constructor-injected with `corpusService.getPlanBundle` and
+   * `taskWorkflowService.recordVerifiedEvidence` (both bound, mirroring `acService`'s
+   * PhaseService-shaped DI) plus the real bun-only `executeVerifySpawnSpec` executor.
+   *
+   * Optional for the same reason `acService` is: pre-existing hand-built App test
+   * stubs (HTTP routes / MCP tools / eval scenarios — outside this task's file
+   * anchors) remain valid without a mechanical touch to every one of them. Always
+   * present in production — both `buildAppFromSqlite` and `buildAppFromTurso` wire it
+   * unconditionally.
+   * Source: SPEC-039 §2 D3, §9.1
+   */
+  verifyRunnerService?: VerifyRunnerService;
+  /**
    * Telemetry sink — exposed for dashboard route handlers to emit source-tagged events.
    * Dashboard handlers record { service: "dashboard", source: "dashboard" } events after
    * successful writes so AC-DASH-WRITE-TEL-1 is satisfied without modifying service signatures.
@@ -174,6 +192,11 @@ export interface App {
  * @param claimTtlMinutes - Task claim lease TTL in minutes (SPEC-025 §3 D2; default 120)
  * @param auditVerifySince - Audit-verify watermark, ISO 8601 (SPEC-035 §2 D5; default the
  *   SPEC-035 deploy date)
+ * @param verifyDefaultTimeoutMs - Trusted-runner default spawn timeout, ms (SPEC-039 §2 D9;
+ *   default 300000)
+ * @param repoRoot - Absolute project root `lore verify` spawns commands from (SPEC-039 §2;
+ *   derived by `createApp` as `dirname(dirname(dbPath))` since `dbPath` is always
+ *   `<repoRoot>/.lore/lore.db`)
  */
 function buildAppFromSqlite(
   store: SQLiteStore,
@@ -182,6 +205,8 @@ function buildAppFromSqlite(
   aiDefaultPerSurface?: AiDefaultPerSurface,
   claimTtlMinutes: number = 120,
   auditVerifySince: string = "2026-07-06T00:00:00Z",
+  verifyDefaultTimeoutMs: number = 300_000,
+  repoRoot: string = process.cwd(),
 ): App {
   // reason: SPEC-024 §9.1 — callerSurface must be mutable so adapters can set it at startup.
   // Using a let variable closed over by the getter/setter ensures reads always see the current
@@ -194,6 +219,19 @@ function buildAppFromSqlite(
   // (resolveClaimTtlMinutes at the bottom of this file).
   const corpusService = new CorpusService(store, telemetry, claimTtlMinutes);
   const outlineService = new OutlineService(store);
+  // reason: own telemetry wiring restores parity with CorpusService (D8) — TaskWorkflowService
+  // never routes writes through CorpusService (cross-service calls forbidden). SPEC-025 §3 D5, D8.
+  // 4th arg wires the SPEC-038 §7 D4 cross-entity port: resolveDeclaredAcIds is implemented
+  // by CorpusService (the sole plan→spec graph-walk locus) and bound here rather than
+  // imported — TaskWorkflowService never gains graph-walking responsibility of its own.
+  // Extracted to a local (not built inline in the return literal below, unlike most other
+  // services) because VerifyRunnerService needs to bind its recordVerifiedEvidence method.
+  const taskWorkflowService = new TaskWorkflowService(
+    store,
+    telemetry,
+    { claimTtlMinutes },
+    corpusService.resolveDeclaredAcIds.bind(corpusService),
+  );
   return {
     corpusService,
     // reason: same resolved claimTtlMinutes as CorpusService above — one resolution
@@ -221,18 +259,7 @@ function buildAppFromSqlite(
     }),
     // reason: PhaseService depends only on StoreInterface — stateless, no AI, no telemetry. SPEC-023 §9.1.
     phaseService: new PhaseService(store),
-    // reason: own telemetry wiring restores parity with CorpusService (D8) — TaskWorkflowService
-    // never routes writes through CorpusService (cross-service calls forbidden). SPEC-025 §3 D5, D8.
-    // 4th arg wires the SPEC-038 §7 D4 cross-entity port: resolveDeclaredAcIds is
-    // implemented by CorpusService (the sole plan→spec graph-walk locus) and bound
-    // here rather than imported — TaskWorkflowService never gains graph-walking
-    // responsibility of its own.
-    taskWorkflowService: new TaskWorkflowService(
-      store,
-      telemetry,
-      { claimTtlMinutes },
-      corpusService.resolveDeclaredAcIds.bind(corpusService),
-    ),
+    taskWorkflowService,
     // reason: SpecKindService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-032 §3.4.
     specKindService: new SpecKindService(store),
@@ -246,6 +273,16 @@ function buildAppFromSqlite(
     // reason: AcService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-038 §4, §6, §9.1.
     acService: new AcService(store),
+    // reason: VerifyRunnerService takes THREE injected ports (getPlanBundle,
+    // recordVerifiedEvidence, executor) plus scalar config — never imports
+    // CorpusService/TaskWorkflowService/the bun-only executor module directly
+    // (SPEC-039 §2 D3).
+    verifyRunnerService: new VerifyRunnerService(
+      corpusService.getPlanBundle.bind(corpusService),
+      taskWorkflowService.recordVerifiedEvidence.bind(taskWorkflowService),
+      executeVerifySpawnSpec,
+      { repoRoot, defaultTimeoutMs: verifyDefaultTimeoutMs, claimTtlMinutes },
+    ),
     // reason: telemetry exposed on App so dashboard route handlers can emit source-tagged events
     // without requiring service-layer signature changes (SPEC-022 §9.6).
     telemetry,
@@ -273,6 +310,11 @@ function buildAppFromSqlite(
  * @param claimTtlMinutes - Task claim lease TTL in minutes (SPEC-025 §3 D2; default 120)
  * @param auditVerifySince - Audit-verify watermark, ISO 8601 (SPEC-035 §2 D5; default the
  *   SPEC-035 deploy date)
+ * @param verifyDefaultTimeoutMs - Trusted-runner default spawn timeout, ms (SPEC-039 §2 D9;
+ *   default 300000)
+ * @param repoRoot - Absolute project root `lore verify` spawns commands from (SPEC-039 §2;
+ *   derived by `createApp` as `dirname(dirname(dbPath))` since `dbPath` is always
+ *   `<repoRoot>/.lore/lore.db`)
  */
 function buildAppFromTurso(
   store: TursoStore,
@@ -282,6 +324,8 @@ function buildAppFromTurso(
   aiDefaultPerSurface?: AiDefaultPerSurface,
   claimTtlMinutes: number = 120,
   auditVerifySince: string = "2026-07-06T00:00:00Z",
+  verifyDefaultTimeoutMs: number = 300_000,
+  repoRoot: string = process.cwd(),
 ): App {
   // reason: SPEC-024 §9.1 — same mutable callerSurface pattern as buildAppFromSqlite.
   let _callerSurface: CallerSurface = "cli";
@@ -291,6 +335,14 @@ function buildAppFromTurso(
   // (resolveClaimTtlMinutes at the bottom of this file).
   const corpusService = new CorpusService(store, telemetry, claimTtlMinutes);
   const outlineService = new OutlineService(store);
+  // reason: extracted to a local (see buildAppFromSqlite's identical comment) so
+  // VerifyRunnerService can bind its recordVerifiedEvidence method below.
+  const taskWorkflowService = new TaskWorkflowService(
+    store,
+    telemetry,
+    { claimTtlMinutes },
+    corpusService.resolveDeclaredAcIds.bind(corpusService),
+  );
   return {
     corpusService,
     // reason: same resolved claimTtlMinutes as CorpusService above — one resolution
@@ -319,18 +371,7 @@ function buildAppFromTurso(
     }),
     // reason: PhaseService depends only on StoreInterface — stateless, no AI, no telemetry. SPEC-023 §9.1.
     phaseService: new PhaseService(store),
-    // reason: own telemetry wiring restores parity with CorpusService (D8) — TaskWorkflowService
-    // never routes writes through CorpusService (cross-service calls forbidden). SPEC-025 §3 D5, D8.
-    // 4th arg wires the SPEC-038 §7 D4 cross-entity port: resolveDeclaredAcIds is
-    // implemented by CorpusService (the sole plan→spec graph-walk locus) and bound
-    // here rather than imported — TaskWorkflowService never gains graph-walking
-    // responsibility of its own.
-    taskWorkflowService: new TaskWorkflowService(
-      store,
-      telemetry,
-      { claimTtlMinutes },
-      corpusService.resolveDeclaredAcIds.bind(corpusService),
-    ),
+    taskWorkflowService,
     // reason: SpecKindService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-032 §3.4.
     specKindService: new SpecKindService(store),
@@ -344,6 +385,16 @@ function buildAppFromTurso(
     // reason: AcService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-038 §4, §6, §9.1.
     acService: new AcService(store),
+    // reason: VerifyRunnerService takes THREE injected ports (getPlanBundle,
+    // recordVerifiedEvidence, executor) plus scalar config — never imports
+    // CorpusService/TaskWorkflowService/the bun-only executor module directly
+    // (SPEC-039 §2 D3).
+    verifyRunnerService: new VerifyRunnerService(
+      corpusService.getPlanBundle.bind(corpusService),
+      taskWorkflowService.recordVerifiedEvidence.bind(taskWorkflowService),
+      executeVerifySpawnSpec,
+      { repoRoot, defaultTimeoutMs: verifyDefaultTimeoutMs, claimTtlMinutes },
+    ),
     // reason: telemetry exposed on App so dashboard route handlers can emit source-tagged events
     // without requiring service-layer signature changes (SPEC-022 §9.6).
     telemetry,
@@ -419,6 +470,17 @@ export function createApp(
   // when config/audit section absent.
   const auditVerifySince = resolveAuditVerifySince(config);
 
+  // Trusted-runner default spawn timeout (SPEC-039 §2 D9) — defaults to 300000ms
+  // when config/verify section absent.
+  const verifyDefaultTimeoutMs = resolveVerifyDefaultTimeoutMs(config);
+
+  // reason: dbPath is always "<repoRoot>/.lore/lore.db" (findLoreDbPath's contract,
+  // adapters/cli/utils.ts) — two levels up recovers the project root `lore verify`
+  // spawns commands from (SPEC-039 §2). Computed here rather than added as a new
+  // createApp parameter so this task's file anchors stay confined to app.ts's
+  // existing signature.
+  const repoRoot = dirname(dirname(dbPath));
+
   // No config supplied or sync section absent / disabled → local-only SQLiteStore
   if (
     config === undefined ||
@@ -432,6 +494,8 @@ export function createApp(
       aiDefaultPerSurface,
       claimTtlMinutes,
       auditVerifySince,
+      verifyDefaultTimeoutMs,
+      repoRoot,
     );
   }
 
@@ -467,6 +531,8 @@ export function createApp(
         aiDefaultPerSurface,
         claimTtlMinutes,
         auditVerifySince,
+        verifyDefaultTimeoutMs,
+        repoRoot,
       ),
     };
   } catch (e) {
