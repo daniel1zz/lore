@@ -9,6 +9,7 @@ import { DECISION_STATUSES, KNOWLEDGE_SUB_TYPES } from "./types.js";
 import { evidenceEntrySchema, taskClaimSchema } from "./task-workflow.js";
 import { assessmentResultSchema } from "./assessment.js";
 import { SPEC_KINDS } from "./spec-kind.js";
+import { specAcceptanceCriteriaSchema } from "./acceptance.js";
 
 // ─── Primitive Schemas ─────────────────────────────────────────────────────
 
@@ -232,11 +233,16 @@ export const prdExtraSchema = z.record(z.unknown());
  *   unknown value fails loud. The default-on-create ("feature" when absent) is
  *   materialized by `CorpusService._createImpl` (packages/lore/src/service),
  *   never here.
- * Source: SPEC-032 §3.1
+ * @invariant `acceptance_criteria` is OPTIONAL and, when present, delegates fully
+ *   to `specAcceptanceCriteriaSchema` (acceptance.ts) — max 50 entries, unique
+ *   `id`. Written exclusively via `lore ac add/rm` (`AcService`, SPEC-038 §6),
+ *   never here directly; this schema only gates the shape at create/set time.
+ * Source: SPEC-032 §3.1; SPEC-038 §3, §7 D1
  */
 export const specExtraSchema = z
   .object({
     spec_kind: z.enum(SPEC_KINDS).optional(),
+    acceptance_criteria: specAcceptanceCriteriaSchema.optional(),
   })
   .passthrough();
 
