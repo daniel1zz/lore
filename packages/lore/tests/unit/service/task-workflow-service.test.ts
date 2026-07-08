@@ -36,8 +36,8 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { PhaseService } from "../../../src/service/phase-service.js";
 import { TaskWorkflowService, type EvidenceInput } from "../../../src/service/task-workflow-service.js";
-import { taskExtraSchema } from "@lore/core";
-import type { Telemetry, TelemetryEvent, CreateDocInput } from "@lore/core";
+import { taskExtraSchema, ok, err } from "@lore/core";
+import type { Telemetry, TelemetryEvent, CreateDocInput, Result, LoreError } from "@lore/core";
 
 // ─── Capturing telemetry spy (mirrors corpus-service-telemetry.test.ts) ──────
 
@@ -69,6 +69,35 @@ function makeServices(ttl = 120) {
   const telemetry = new CapturingTelemetry();
   const taskWorkflowService = new TaskWorkflowService(store, telemetry, { claimTtlMinutes: ttl });
   return { store, corpusService, taskWorkflowService, telemetry };
+}
+
+/**
+ * SPEC-038 §7 D4 — constructs TaskWorkflowService with an injected
+ * `resolveDeclaredAcIds` stub port instead of a real CorpusService 3-hop
+ * (plan → spec → acceptance_criteria) fixture. The stub is wrapped so tests can
+ * assert how many times (if ever) it was actually invoked — proving the
+ * no-ac_ref backward-compatibility path never touches the port at all.
+ */
+function makeServicesWithAcPort(
+  resolveDeclaredAcIds: (planId: string) => Promise<Result<Set<string> | null, LoreError>>,
+  ttl = 120,
+) {
+  const store = new InMemoryStore();
+  const corpusService = new CorpusService(store);
+  const telemetry = new CapturingTelemetry();
+  let callCount = 0;
+  const spiedPort = async (planId: string): Promise<Result<Set<string> | null, LoreError>> => {
+    callCount++;
+    return resolveDeclaredAcIds(planId);
+  };
+  const taskWorkflowService = new TaskWorkflowService(store, telemetry, { claimTtlMinutes: ttl }, spiedPort);
+  return {
+    store,
+    corpusService,
+    taskWorkflowService,
+    telemetry,
+    getAcPortCallCount: () => callCount,
+  };
 }
 
 async function createPlan(cs: CorpusService, title = "Test Plan"): Promise<string> {
@@ -722,6 +751,128 @@ describe("REGRESSION — telemetry emits exactly one event per successful write,
 
     await taskWorkflowService.ready(planId);
     expect(telemetry.events).toHaveLength(0);
+  });
+});
+
+// ─── ac_ref cross-entity validation (SPEC-038 §4, §7 D4, AC-ACODE-3) ─────────
+//
+// These describe blocks construct TaskWorkflowService with an injected stub
+// port (makeServicesWithAcPort) instead of a real CorpusService.resolveDeclaredAcIds
+// 3-hop fixture — the port's CONTRACT (what addEvidence does with its Result) is
+// under test here, not CorpusService's own graph-walking logic (that lives in
+// corpus-service.test.ts / a dedicated resolveDeclaredAcIds suite).
+
+describe("HAPPY — addEvidence accepts an ac_ref declared by the port (AC-ACODE-3)", () => {
+  it("a declared ac_ref is written to extra.verification_evidence and bumps the doc version", async () => {
+    const { corpusService, taskWorkflowService } = makeServicesWithAcPort(async () =>
+      ok(new Set(["AC-X-1"])),
+    );
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const result = await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({ ac_ref: "AC-X-1" }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.version).toBe(2); // v1 create, v2 evidence write
+    const entries = result.value.extra["verification_evidence"] as Array<Record<string, unknown>>;
+    expect(entries[0]?.["ac_ref"]).toBe("AC-X-1");
+  });
+});
+
+describe("NEGATIVE — addEvidence rejects an ac_ref absent from the declared set (AC-ACODE-3)", () => {
+  it("an ac_ref not in the port's returned Set fails VALIDATION_ERROR, doc unchanged", async () => {
+    const { corpusService, taskWorkflowService } = makeServicesWithAcPort(async () =>
+      ok(new Set(["AC-OTHER"])),
+    );
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const result = await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({ ac_ref: "AC-X-1" }),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+
+    const after = await corpusService.get(taskId);
+    expect(after.ok).toBe(true);
+    if (!after.ok) return;
+    expect(after.value.doc.version).toBe(1); // unchanged — write never happened
+    expect(after.value.doc.extra["verification_evidence"]).toBeUndefined();
+  });
+
+  it("an ac_ref supplied when the port resolves ok(null) (no structured AC on parent spec) fails VALIDATION_ERROR", async () => {
+    const { corpusService, taskWorkflowService } = makeServicesWithAcPort(async () => ok(null));
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const result = await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({ ac_ref: "AC-X-1" }),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+  });
+});
+
+describe("ERROR — port failure propagates verbatim, not wrapped (AC-ACODE-3)", () => {
+  it("a LoreError from the port is returned as-is by addEvidence when an ac_ref is supplied", async () => {
+    const portError: LoreError = { code: "STORE_ERROR", message: "boom" };
+    const { corpusService, taskWorkflowService } = makeServicesWithAcPort(async () => err(portError));
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const result = await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({ ac_ref: "AC-X-1" }),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toEqual(portError);
+  });
+});
+
+describe("STATE / REGRESSION — evidence without ac_ref never invokes the port (backward compatibility)", () => {
+  it("addEvidence with no ac_ref succeeds even against a port that would reject any ac_ref, and never calls it", async () => {
+    const { corpusService, taskWorkflowService, getAcPortCallCount } = makeServicesWithAcPort(async () =>
+      err({ code: "STORE_ERROR", message: "should never be called" }),
+    );
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const result = await taskWorkflowService.addEvidence(taskId, evidence());
+    expect(result.ok).toBe(true);
+    expect(getAcPortCallCount()).toBe(0); // pre-SPEC-038 callers never touch the port
+  });
+
+  it("a task with parent_id forced to null + an ac_ref fails VALIDATION_ERROR mentioning the missing parent plan", async () => {
+    const { store, corpusService, taskWorkflowService, getAcPortCallCount } = makeServicesWithAcPort(async () =>
+      ok(new Set(["AC-X-1"])),
+    );
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    // Force parent_id: null directly via the store — createDocInputSchema normally
+    // requires parent_id for tasks, so this branch is only reachable via a raw
+    // post-creation mutation, not through the normal create path.
+    const forceResult = await store.update(taskId, { parent_id: null });
+    expect(forceResult.ok).toBe(true);
+
+    const result = await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({ ac_ref: "AC-X-1" }),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (result.error.code !== "VALIDATION_ERROR") return;
+    expect(result.error.message).toMatch(/parent plan/i);
+    expect(getAcPortCallCount()).toBe(0); // the null-parent check short-circuits before the port is ever consulted
   });
 });
 
