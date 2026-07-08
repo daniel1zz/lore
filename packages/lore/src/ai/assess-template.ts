@@ -44,7 +44,12 @@
 
 import { truncateSection, type PlanBundle, type DocRecord } from "@lore/core";
 import { evidenceEntrySchema } from "@lore/core";
-import { computeAcCoverage, specAcceptanceCriteriaSchema, type AcceptanceCriterion } from "@lore/core";
+import {
+  computeAcCoverage,
+  specAcceptanceCriteriaSchema,
+  type AcceptanceCriterion,
+  type AcCoverageFact,
+} from "@lore/core";
 import { z } from "zod";
 import { truncateDiffByFile, classifyDiffFilePriority, type DiffFilePriority } from "./diff-truncation.js";
 
@@ -63,8 +68,20 @@ import { truncateDiffByFile, classifyDiffFilePriority, type DiffFilePriority } f
  * changed, mirroring the v2→v3 bump for the diff-omission Truncation Manifest (bugfix F3,
  * see file header Source), which was likewise conditional on a materials shape (omitted
  * diff files) that isn't present in every run.
+ *
+ * **v4 → v5 (SPEC-039 §2 D8)**: the structured AC table's coverage column now annotates
+ * runner-attested evidence counts alongside the existing pass/fail totals — e.g.
+ * `2 pass (1 attested), 0 fail` — using `computeAcCoverage`'s `attested_pass`/
+ * `attested_fail` fields (`@lore/core`), so the judge can see when a pass/fail came from
+ * `lore verify`'s machine-executed command rather than a self-reported `lore evidence`
+ * call. The attested/self-reported split is derived exactly once, in `computeAcCoverage`
+ * (SPEC-039 §2 D8) — this module only formats it, never re-derives it (same discipline as
+ * the pass/fail counts themselves, SPEC-038 §7 D6). A spec with no structured ACs still
+ * falls through to the untouched verbatim prose section (D7 storage compat) — this bump,
+ * like v2→v3 and v3→v4 before it, is conditional on a materials shape (declared structured
+ * ACs with attested evidence) that isn't present in every run.
  */
-export const ASSESS_PROMPT_VERSION = 4;
+export const ASSESS_PROMPT_VERSION = 5;
 
 /** Character budgets for each prompt section, sourced from `config.ai.assess.*`. */
 export interface AssessBudgets {
@@ -198,12 +215,38 @@ function renderVerifyCell(criterion: AcceptanceCriterion): string {
 }
 
 /**
+ * Render one {@link AcCoverageFact}'s pass/fail counts as a coverage table cell,
+ * annotating the runner-attested subset when present (SPEC-039 §2 D8). Rendering ONLY —
+ * the attested/self-reported split is `computeAcCoverage`'s single derivation point
+ * (`@lore/core`); this function never recomputes or re-derives it.
+ *
+ * @param fact - The criterion's coverage fact, or `undefined` when `computeAcCoverage`
+ *   produced no matching row (never happens in practice — it returns one fact per input
+ *   criterion — but kept defensive to match the pre-existing lookup-by-id pattern)
+ * @returns A deterministic string like `"0 pass, 0 fail"` (no evidence yet),
+ *   `"2 pass, 1 fail"` (self-reported only), or `"2 pass (1 attested), 0 fail"` /
+ *   `"0 pass, 1 fail (1 attested)"` (attested evidence present on that side)
+ *
+ * @example
+ * renderCoverageCell({ ac_id: "AC-1", mode: "script", pass: 2, fail: 0,
+ *   refs: [], attested_pass: 1, attested_fail: 0 });
+ * // => "2 pass (1 attested), 0 fail"
+ */
+function renderCoverageCell(fact: AcCoverageFact | undefined): string {
+  if (fact === undefined) return "0 pass, 0 fail";
+  const passCell = fact.attested_pass > 0 ? `${fact.pass} pass (${fact.attested_pass} attested)` : `${fact.pass} pass`;
+  const failCell = fact.attested_fail > 0 ? `${fact.fail} fail (${fact.attested_fail} attested)` : `${fact.fail} fail`;
+  return `${passCell}, ${failCell}`;
+}
+
+/**
  * Render the deterministic structured AC table that replaces the "Spec Acceptance
  * Criteria (verbatim)" section when the spec declares `extra.acceptance_criteria`
  * (SPEC-038 §5 AC-ACODE-4). One row per declared criterion: id | statement | verify mode
- * | coverage (pass/fail evidence count from `computeAcCoverage`, @lore/core — this
- * function does NOT recompute coverage itself, per D6 "facts in core, rendering per
- * consumer"). No wall-clock reads, no randomness — same input always renders identically.
+ * | coverage (pass/fail(+attested) evidence count from `computeAcCoverage`, @lore/core —
+ * this function does NOT recompute coverage itself, per D6 "facts in core, rendering per
+ * consumer"; the attested annotation is {@link renderCoverageCell}, SPEC-039 §2 D8). No
+ * wall-clock reads, no randomness — same input always renders identically.
  *
  * @param criteria - The spec's declared acceptance criteria (non-empty; callers only
  *   invoke this when {@link extractDeclaredAcceptanceCriteria} returned a non-empty array)
@@ -217,7 +260,7 @@ function renderStructuredAcTable(criteria: AcceptanceCriterion[], tasks: DocReco
   const lines = ["| id | statement | verify | coverage |", "|---|---|---|---|"];
   for (const criterion of criteria) {
     const fact = coverageById.get(criterion.id);
-    const coverageCell = fact ? `${fact.pass} pass / ${fact.fail} fail` : "0 pass / 0 fail";
+    const coverageCell = renderCoverageCell(fact);
     const statementCell = criterion.statement.replace(/\|/g, "\\|");
     lines.push(`| ${criterion.id} | ${statementCell} | ${renderVerifyCell(criterion)} | ${coverageCell} |`);
   }
