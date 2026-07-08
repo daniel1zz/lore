@@ -156,23 +156,23 @@ export function computeAcCoverage(
 
 ## Acceptance Criteria (structured)
 
-- [·] [script] AC-ACODE-1: acceptanceCriterionSchema rejects duplicate ids, malformed id format, script without command, overlong rubric; legal script/ai/human inputs parse
+- [✔] [script] AC-ACODE-1: acceptanceCriterionSchema rejects duplicate ids, malformed id format, script without command, overlong rubric; legal script/ai/human inputs parse
   script: test — bunx vitest run packages/core/src/acceptance.test.ts
-- [·] [script] AC-ACODE-2: create and set paths both reject invalid acceptance_criteria with VALIDATION_ERROR; valid writes roundtrip
+- [✔] [script] AC-ACODE-2: create and set paths both reject invalid acceptance_criteria with VALIDATION_ERROR; valid writes roundtrip
   script: test — bunx vitest run packages/lore/tests/unit/service/ac-service.test.ts
-- [·] [script] AC-ACODE-3: evidence --ac with undeclared id fails VALIDATION_ERROR (exit 4); declared id records ac_ref and bumps version
+- [✔] [script] AC-ACODE-3: evidence --ac with undeclared id fails VALIDATION_ERROR (exit 4); declared id records ac_ref and bumps version
   script: test — bunx vitest run packages/lore/tests/integration/cli/task-workflow.test.ts
-- [·] [script] AC-ACODE-4: spec with structured ACs: assess prompt contains AC table (full id set, coverage rows) at ASSESS_PROMPT_VERSION 4; undeclared spec keeps verbatim section byte-identical
+- [✔] [script] AC-ACODE-4: spec with structured ACs: assess prompt contains AC table (full id set, coverage rows) at ASSESS_PROMPT_VERSION 4; undeclared spec keeps verbatim section byte-identical
   script: test — bunx vitest run packages/lore/tests/unit/service/ai-provider-service-assess.test.ts
-- [·] [script] AC-ACODE-5: judge output containing undeclared ac_id errors without creating a knowledge doc and without consuming the corrective retry
+- [✔] [script] AC-ACODE-5: judge output containing undeclared ac_id errors without creating a knowledge doc and without consuming the corrective retry
   script: test — bunx vitest run packages/lore/tests/unit/service/ai-provider-service-assess.test.ts
-- [·] [script] AC-ACODE-6: computeAcCoverage aggregates pass/fail per ac_ref; evidence without ac_ref excluded; empty task set yields all-zero facts
+- [✔] [script] AC-ACODE-6: computeAcCoverage aggregates pass/fail per ac_ref; evidence without ac_ref excluded; empty task set yields all-zero facts
   script: test — bunx vitest run packages/core/src/acceptance.test.ts
-- [·] [script] AC-ACODE-7: lore ac add/list/rm roundtrip; rm refused while evidence references the id; --force overrides leaving dangling ref visible in list
+- [✔] [script] AC-ACODE-7: lore ac add/list/rm roundtrip; rm refused while evidence references the id; --force overrides leaving dangling ref visible in list
   script: test — bunx vitest run packages/lore/tests/unit/service/ac-service.test.ts
 - [✔] [script] AC-ACODE-8: oracle enum kinds defined exactly once (task-workflow.ts ORACLE_KINDS); both adapters reference the SSOT
   script: other — test $(grep -rln 'z.enum(\[.tsc.,' packages/lore/src/adapters/ | wc -l) -eq 0
-- [·] [script] AC-ACODE-9: text projection renders structured AC checklist in get non-raw and export-docs body; raw output untouched
+- [✔] [script] AC-ACODE-9: text projection renders structured AC checklist in get non-raw and export-docs body; raw output untouched
   script: test — bunx vitest run packages/lore/tests/unit/service/outline-render.test.ts packages/lore/tests/unit/service/outline-service.test.ts
 - [✔] [script] AC-ACODE-10: full existing suites pass on both runners (enum extraction + evidenceEntrySchema blast radius)
   script: test — bun run test

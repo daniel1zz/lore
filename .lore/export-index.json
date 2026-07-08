@@ -660,6 +660,10 @@
     "01KWZRM5X5BKVEMRJKS7JHCKHY": {
       "human_id": "KN-032",
       "file_path": "docs/requirements/knowledge/KN-032-anthropic-official-agent-loop-engineering-research.md"
+    },
+    "01KWZVSQ0XWGPCCMCP9B1G68FN": {
+      "human_id": "KN-033",
+      "file_path": "docs/requirements/knowledge/KN-033-assessment-spec-038-implementation-ac-as-code-2026.md"
     }
   }
 }
