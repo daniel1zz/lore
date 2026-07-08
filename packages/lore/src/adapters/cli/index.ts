@@ -48,6 +48,7 @@ const main = defineCommand({
     review: () => import("./commands/review.js").then((m) => m.default),
     ac: () => import("./commands/ac.js").then((m) => m.default),
     verify: () => import("./commands/verify.js").then((m) => m.default),
+    gate: () => import("./commands/gate.js").then((m) => m.default),
   },
 });
 
