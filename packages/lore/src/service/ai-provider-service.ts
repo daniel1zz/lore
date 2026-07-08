@@ -32,6 +32,13 @@
  *     (`clipOverlongReasoning`, SPEC-029 AC-AR-2) — a verbose-but-otherwise-valid judgment
  *     never burns the corrective retry on reasoning length alone; clipped AC ids surface
  *     as `judgment.reasoning_clipped` (AC-AR-3)
+ *   - assessPlan validates `ac_scores[].ac_id` containment against the spec's declared
+ *     structured acceptance criteria (`validateAcIdContainment`, SPEC-038 §5 D5) — runs
+ *     AFTER `llmAssessmentOutputSchema` parses successfully, ONLY when the linked spec
+ *     declared `extra.acceptance_criteria` at all; a violation is `VALIDATION_ERROR`
+ *     returned directly (no document created), and it does NOT consume the one corrective
+ *     retry — that budget stays reserved for genuine JSON parse/schema failures (SPEC-026
+ *     §3 D2's single-axis retry semantics are unchanged by this addition)
  *   - judgeDoc gets ONE corrective retry when the judge's JSON is malformed/invalid
  *     (SPEC-034 §4, same protocol as assessPlan/SPEC-026 §3 D2) — a second malformed
  *     response → AI_PROVIDER_ERROR with a ≤500-char raw-output prefix and no judgment is
@@ -43,7 +50,8 @@
  *
  * Side-effect class: IO (delegates to AIProvider.generate and Telemetry.emit)
  *
- * Source: SPEC-017 §3.6, SPEC-019 §9.1, SPEC-026 §3 D1, D2; SPEC-029 AC-AR-2, AC-AR-3; SPEC-034 §4
+ * Source: SPEC-017 §3.6, SPEC-019 §9.1, SPEC-026 §3 D1, D2; SPEC-029 AC-AR-2, AC-AR-3; SPEC-034 §4;
+ * SPEC-038 §5, §7 D5
  */
 
 import { err, ok } from "@lore/core";
@@ -72,6 +80,49 @@ import {
   buildReviewRetryPrompt,
   type ReviewBudgets,
 } from "../ai/review-template.js";
+
+/**
+ * Validates that every `ac_scores[].ac_id` the judge emitted belongs to the spec's
+ * declared structured acceptance criteria (SPEC-038 §5, §7 D5). `assessPlan` calls this
+ * right after `llmAssessmentOutputSchema` parses successfully and BEFORE `scope`/`judgment`
+ * are assembled — and ONLY when `declaredIds` is non-empty (a spec with no structured ACs
+ * declared has no containment universe to check against; the judge stays free to invent
+ * ids from the verbatim prose, exactly as it did before SPEC-038 — D7 storage compat).
+ *
+ * A containment violation is schema-adjacent but distinct from a malformed/invalid JSON
+ * response: it does NOT consume the one corrective retry (SPEC-026 §3 D2's retry budget
+ * stays single-axis — JSON parse/schema failures only, per SPEC-038 §7 D5's explicit
+ * "err; retry 单轴不动" resolution). `assessPlan` returns this error directly without a
+ * second provider call, and never creates a document.
+ *
+ * @param output - The judge's output, ALREADY validated by llmAssessmentOutputSchema
+ * @param declaredIds - The spec's declared acceptance_criteria ids (assumed non-empty —
+ *   callers only invoke this when the linked spec has structured ACs at all)
+ * @returns ok(undefined) when every ac_scores[].ac_id is a member of declaredIds;
+ *   err(VALIDATION_ERROR) naming every offending id plus the full declared set otherwise
+ *
+ * @example
+ * validateAcIdContainment(
+ *   { verdict: "met", overall_score: 90, gaps: [], recommendations: [],
+ *     ac_scores: [{ ac_id: "AC-X-1", score: 90, reasoning: "ok", evidence_refs: [] }] },
+ *   new Set(["AC-X-1", "AC-X-2"]),
+ * ); // → { ok: true, value: undefined }
+ */
+export function validateAcIdContainment(
+  output: LlmAssessmentOutput,
+  declaredIds: Set<string>,
+): Result<void, LoreError> {
+  const offending = output.ac_scores.map((score) => score.ac_id).filter((id) => !declaredIds.has(id));
+  if (offending.length === 0) return ok(undefined);
+
+  return err({
+    code: "VALIDATION_ERROR",
+    field: "ac_scores[].ac_id",
+    message:
+      `AI judge returned ac_id(s) not in the spec's declared acceptance criteria: ` +
+      `${offending.join(", ")}. Declared ids: ${Array.from(declaredIds).join(", ")}.`,
+  });
+}
 
 // ─── AIProviderService ────────────────────────────────────────────────────────
 
@@ -455,13 +506,17 @@ export class AIProviderService {
    * Judge a plan's outcome against its spec's ACs and its tasks' evidence trails.
    * Used by `lore assess <plan>`.
    *
-   * Flow: build the judge prompt (materials truncated per config.ai.assess.* budgets) →
-   * invoke the provider → extract JSON from the raw response → validate against
-   * llmAssessmentOutputSchema → on failure, ONE corrective retry with the parse error
-   * embedded in a follow-up prompt → on a second failure, AI_PROVIDER_ERROR with a
-   * ≤500-char raw-output prefix (no document is created — that is the caller's job, and
-   * it never runs when this returns an error). Emits ai.generation telemetry
-   * (kind="assess") on every terminal outcome exactly once.
+   * Flow: build the judge prompt (materials truncated per config.ai.assess.* budgets;
+   * SPEC-038 §5 — a spec with declared structured ACs gets a deterministic AC table instead
+   * of the verbatim prose section) → invoke the provider → extract JSON from the raw
+   * response → validate against llmAssessmentOutputSchema → on failure, ONE corrective
+   * retry with the parse error embedded in a follow-up prompt → on a second failure,
+   * AI_PROVIDER_ERROR with a ≤500-char raw-output prefix (no document is created — that is
+   * the caller's job, and it never runs when this returns an error). When the spec declared
+   * structured ACs, a schema-valid response is ALSO checked for `ac_id` containment
+   * (`validateAcIdContainment`, SPEC-038 §5 D5) — a violation is a VALIDATION_ERROR returned
+   * immediately, without spending the corrective retry and without creating a document.
+   * Emits ai.generation telemetry (kind="assess") on every terminal outcome exactly once.
    *
    * @param bundle - {plan, spec?, tasks[]} from CorpusService.getPlanBundle
    * @param opts.diffText - Optional diff text (already acquired by the CLI layer)
@@ -475,7 +530,8 @@ export class AIProviderService {
    * if (!assessResult.ok) { process.exitCode = exitCode(assessResult.error); return; }
    * console.log(assessResult.value.verdict, assessResult.value.overall_score);
    *
-   * Source: SPEC-026 §3 D1, D2; §4 AC-ASSESS-1, AC-ASSESS-3, AC-ASSESS-4, AC-ASSESS-5
+   * Source: SPEC-026 §3 D1, D2; §4 AC-ASSESS-1, AC-ASSESS-3, AC-ASSESS-4, AC-ASSESS-5;
+   * SPEC-038 §5 AC-ACODE-4, AC-ACODE-5
    */
   async assessPlan(
     bundle: PlanBundle,
@@ -486,7 +542,12 @@ export class AIProviderService {
     },
   ): Promise<Result<AssessmentResult, LoreError>> {
     const t0 = performance.now();
-    const { prompt, truncated } = buildAssessPrompt(bundle, opts?.diffText, this.assessBudgets);
+    const { prompt, truncated, declaredAcIds } = buildAssessPrompt(bundle, opts?.diffText, this.assessBudgets);
+    // reason: same extraction buildAssessPrompt used to render the AC table — reusing its
+    // returned list (rather than re-deriving from bundle.spec here) guarantees the prompt's
+    // declared-id universe and the containment check's universe can never drift apart
+    // (SPEC-038 §5 D5). Empty when the spec has no structured ACs (verbatim fallback).
+    const declaredAcIdSet = new Set(declaredAcIds);
 
     // reason: telemetry meta is identical across every terminal branch below (only the
     // provider Result and elapsed duration differ) — factored out to keep each branch
@@ -508,6 +569,16 @@ export class AIProviderService {
       return first.providerResult;
     }
     if (first.parsed !== undefined) {
+      // reason: containment (SPEC-038 §5 AC-ACODE-5, D5) runs AFTER schema validation but
+      // BEFORE scope/judgment assembly, and only when the spec declared structured ACs at
+      // all — see validateAcIdContainment's JSDoc for why this does not spend the retry.
+      if (declaredAcIdSet.size > 0) {
+        const containment = validateAcIdContainment(first.parsed, declaredAcIdSet);
+        if (!containment.ok) {
+          emitAssessEvent(containment);
+          return containment;
+        }
+      }
       emitAssessEvent(first.providerResult);
       return ok(
         this._finalizeAssessment(
@@ -529,6 +600,16 @@ export class AIProviderService {
       return second.providerResult;
     }
     if (second.parsed !== undefined) {
+      // reason: same containment gate as the first-attempt success branch above — a
+      // corrective retry that comes back schema-valid but still names an undeclared ac_id
+      // is still a containment failure, and there is no third attempt to fall back to.
+      if (declaredAcIdSet.size > 0) {
+        const containment = validateAcIdContainment(second.parsed, declaredAcIdSet);
+        if (!containment.ok) {
+          emitAssessEvent(containment);
+          return containment;
+        }
+      }
       emitAssessEvent(second.providerResult);
       return ok(
         this._finalizeAssessment(

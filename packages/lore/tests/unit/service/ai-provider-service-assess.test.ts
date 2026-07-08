@@ -36,7 +36,7 @@ import { AIProviderService } from "../../../src/service/ai-provider-service.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { InMemoryAIProvider } from "../../../src/ai/in-memory-provider.js";
-import { buildAssessPrompt, buildAssessRetryPrompt } from "../../../src/ai/assess-template.js";
+import { ASSESS_PROMPT_VERSION, buildAssessPrompt, buildAssessRetryPrompt } from "../../../src/ai/assess-template.js";
 import type { Telemetry, TelemetryEvent, AiGenerationEvent, CreateDocInput, PlanBundle } from "@lore/core";
 import { renderAssessmentContent } from "@lore/core";
 
@@ -127,6 +127,78 @@ async function makeBundle(store: InMemoryStore): Promise<PlanBundle> {
           result: "pass",
           recorded_at: "2026-07-01T00:00:00.000Z",
           recorded_by: "alice",
+        },
+      ],
+    },
+  } as CreateDocInput);
+  if (!taskResult.ok) throw new Error("task create failed");
+
+  const bundleResult = await corpusService.getPlanBundle(planResult.value.id);
+  if (!bundleResult.ok) throw new Error("getPlanBundle failed");
+  return bundleResult.value;
+}
+
+/**
+ * Builds a PlanBundle whose linked spec declares SPEC-038 structured `extra.acceptance_criteria`
+ * (two criteria: one script-mode, one ai-mode) — the fixture for every structured-AC test below.
+ * Mirrors makeBundle's construction path (real CorpusService + InMemoryStore) but adds the
+ * `extra.acceptance_criteria` array on the spec's CreateDocInput.
+ */
+async function makeStructuredAcBundle(store: InMemoryStore): Promise<PlanBundle> {
+  const corpusService = new CorpusService(store);
+
+  const prdResult = await corpusService.create({
+    type: "prd",
+    title: "Structured AC Test PRD",
+    content: "Root PRD for structured-AC assess tests.",
+  } as CreateDocInput);
+  if (!prdResult.ok) throw new Error("prd create failed");
+
+  const specResult = await corpusService.create({
+    type: "spec",
+    title: "Structured AC Test Spec",
+    parent_id: prdResult.value.id,
+    content: "Spec body prose (unused when structured ACs are declared — the table replaces it).",
+    extra: {
+      acceptance_criteria: [
+        {
+          id: "AC-X-1",
+          statement: "The widget renders without throwing.",
+          verify: { mode: "script", oracle: "test", command: "bun test widget.test.ts" },
+        },
+        {
+          id: "AC-X-2",
+          statement: "The widget meets WCAG AA contrast requirements.",
+          verify: { mode: "ai", rubric: "Check contrast ratios against WCAG AA thresholds." },
+        },
+      ],
+    },
+  } as CreateDocInput);
+  if (!specResult.ok) throw new Error("spec create failed");
+
+  const planResult = await corpusService.create({
+    type: "plan",
+    title: "Structured AC Test Plan",
+    parent_id: specResult.value.id,
+    content: "Plan goals for the structured-AC widget feature.",
+  } as CreateDocInput);
+  if (!planResult.ok) throw new Error("plan create failed");
+
+  const taskResult = await corpusService.create({
+    type: "task",
+    title: "Implement the widget",
+    parent_id: planResult.value.id,
+    content: "Task body describing the widget work.",
+    extra: {
+      plan_id: planResult.value.id,
+      verification_evidence: [
+        {
+          oracle: "test",
+          command: "bun test widget.test.ts",
+          result: "pass",
+          recorded_at: "2026-07-08T00:00:00.000Z",
+          recorded_by: "carol",
+          ac_ref: "AC-X-1",
         },
       ],
     },
@@ -761,5 +833,165 @@ describe("assessPlan — overlong-but-valid reasoning is clipped without a corre
     const content = renderAssessmentContent(result.value);
 
     expect(content).not.toContain("Reasoning clipped");
+  });
+});
+
+// ─── SPEC-038 §5: structured acceptance criteria in the assess judge prompt ──
+
+describe("buildAssessPrompt — structured acceptance criteria table (SPEC-038 AC-ACODE-4)", () => {
+  it("a spec with declared extra.acceptance_criteria renders the structured table with both AC ids and a closed ac_id instruction", async () => {
+    const store = new InMemoryStore();
+    const bundle = await makeStructuredAcBundle(store);
+
+    const result = buildAssessPrompt(bundle, undefined, DEFAULT_BUDGETS);
+
+    expect(result.prompt).toContain("## Spec Acceptance Criteria (structured)");
+    expect(result.prompt).toContain("AC-X-1");
+    expect(result.prompt).toContain("AC-X-2");
+    expect(result.prompt).toContain("ac_id MUST be one of:");
+    expect(result.prompt).toContain("script-mode ACs:");
+    expect(result.declaredAcIds).toEqual(["AC-X-1", "AC-X-2"]);
+  });
+
+  it("ASSESS_PROMPT_VERSION is 4 (bumped for the structured-AC table addition)", () => {
+    expect(ASSESS_PROMPT_VERSION).toBe(4);
+  });
+
+  it("a full assessPlan() call against the structured-AC bundle carries prompt_version 4 in the persisted judgment", async () => {
+    const store = new InMemoryStore();
+    const bundle = await makeStructuredAcBundle(store);
+    const scriptedJson = JSON.stringify({
+      verdict: "met",
+      overall_score: 90,
+      ac_scores: [
+        { ac_id: "AC-X-1", score: 90, reasoning: "Covered by passing test evidence.", evidence_refs: [] },
+        { ac_id: "AC-X-2", score: 85, reasoning: "Contrast checked manually.", evidence_refs: [] },
+      ],
+      gaps: [],
+      recommendations: [],
+    });
+    const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: scriptedJson });
+    const { service } = makeAssessService({ provider });
+
+    const result = await service.assessPlan(bundle, {});
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.judgment.prompt_version).toBe(4);
+  });
+});
+
+describe("assessPlan — ac_id containment against declared structured criteria (SPEC-038 AC-ACODE-5)", () => {
+  it("a judge response whose ac_scores[].ac_id are all within the declared set succeeds (ok)", async () => {
+    const store = new InMemoryStore();
+    const bundle = await makeStructuredAcBundle(store);
+    const scriptedJson = JSON.stringify({
+      verdict: "met",
+      overall_score: 90,
+      ac_scores: [
+        { ac_id: "AC-X-1", score: 90, reasoning: "Covered by passing test evidence.", evidence_refs: [] },
+        { ac_id: "AC-X-2", score: 85, reasoning: "Contrast checked manually.", evidence_refs: [] },
+      ],
+      gaps: [],
+      recommendations: [],
+    });
+    const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: scriptedJson });
+    const { service } = makeAssessService({ provider });
+
+    const result = await service.assessPlan(bundle, {});
+    expect(result.ok).toBe(true);
+  });
+
+  it("a judge response with an ac_id NOT in the declared set fails with VALIDATION_ERROR naming the offending id", async () => {
+    const store = new InMemoryStore();
+    const bundle = await makeStructuredAcBundle(store);
+    const scriptedJson = JSON.stringify({
+      verdict: "met",
+      overall_score: 90,
+      ac_scores: [{ ac_id: "AC-BOGUS-1", score: 90, reasoning: "Invented id.", evidence_refs: [] }],
+      gaps: [],
+      recommendations: [],
+    });
+    const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: scriptedJson });
+    const { service, emitCalls } = makeAssessService({ provider });
+
+    const result = await service.assessPlan(bundle, {});
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    expect("message" in result.error ? result.error.message : "").toContain("AC-BOGUS-1");
+
+    // The containment failure must not consume the corrective retry — only one provider call.
+    expect(provider.calls).toHaveLength(1);
+    // Telemetry still emits exactly once on this terminal branch, same as every other outcome.
+    expect(emitCalls).toHaveLength(1);
+  });
+
+  it("a containment failure creates no store side effect — doc count is unchanged before/after", async () => {
+    const store = new InMemoryStore();
+    const bundle = await makeStructuredAcBundle(store);
+    const beforeResult = await store.findMany({});
+    if (!beforeResult.ok) throw new Error("findMany failed");
+    const beforeCount = beforeResult.value.length;
+
+    const scriptedJson = JSON.stringify({
+      verdict: "met",
+      overall_score: 90,
+      ac_scores: [{ ac_id: "AC-BOGUS-1", score: 90, reasoning: "Invented id.", evidence_refs: [] }],
+      gaps: [],
+      recommendations: [],
+    });
+    const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: scriptedJson });
+    const { service } = makeAssessService({ provider });
+    await service.assessPlan(bundle, {});
+
+    const afterResult = await store.findMany({});
+    if (!afterResult.ok) throw new Error("findMany failed");
+    expect(afterResult.value.length).toBe(beforeCount);
+  });
+});
+
+describe("buildAssessPrompt — legacy verbatim path is byte-identical for specs with no structured ACs (REGRESSION)", () => {
+  it("the plain-prose makeBundle fixture renders the verbatim heading, the open-ended ac_id instruction, and an empty declaredAcIds", async () => {
+    const store = new InMemoryStore();
+    const bundle = await makeBundle(store);
+
+    const result = buildAssessPrompt(bundle, undefined, DEFAULT_BUDGETS);
+
+    expect(result.prompt).toContain("## Spec Acceptance Criteria (verbatim)");
+    expect(result.prompt).not.toContain("## Spec Acceptance Criteria (structured)");
+    expect(result.prompt).not.toContain("ac_id MUST be one of:");
+    expect(result.prompt).toContain(
+      "Use the exact AC identifiers found in the spec's Acceptance Criteria section above for ac_id.",
+    );
+    expect(result.declaredAcIds).toEqual([]);
+  });
+
+  it("a full assessPlan() call against the legacy (no structured ACs) bundle also carries prompt_version 4 end-to-end", async () => {
+    const store = new InMemoryStore();
+    const bundle = await makeBundle(store);
+    const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
+    const { service } = makeAssessService({ provider });
+
+    const result = await service.assessPlan(bundle, {});
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.judgment.prompt_version).toBe(4);
+  });
+});
+
+describe("buildAssessPrompt — structured AC table truncation (BOUNDARY, SPEC-038)", () => {
+  it("a structured-AC spec section over a tiny max_spec_chars budget is truncated and 'spec' appears in truncated[]", async () => {
+    const store = new InMemoryStore();
+    const bundle = await makeStructuredAcBundle(store);
+    const tightBudgets = { ...DEFAULT_BUDGETS, max_spec_chars: 50 };
+
+    const fullResult = buildAssessPrompt(bundle, undefined, DEFAULT_BUDGETS);
+    const truncatedResult = buildAssessPrompt(bundle, undefined, tightBudgets);
+
+    expect(truncatedResult.truncated).toContain("spec");
+    // Sanity: truncation actually shrank the rendered spec section vs. the untruncated prompt.
+    expect(truncatedResult.prompt.length).toBeLessThan(fullResult.prompt.length);
+    // The table is still headed "(structured)" even when truncated — only its body is cut.
+    expect(truncatedResult.prompt).toContain("## Spec Acceptance Criteria (structured)");
   });
 });
