@@ -4,8 +4,12 @@
  *
  * Public surface:
  *   - evidenceEntrySchema / EvidenceEntry — one oracle verification record
+ *   - ATTESTATION_RUNNERS / AttestationRunner — enum of trusted runners allowed to
+ *     write `EvidenceEntry.attestation` (SPEC-039 §2 D1)
  *   - taskClaimSchema / TaskClaim — advisory execution lease {by, at, branch?}
  *   - isClaimStale(claim, nowIso, ttlMinutes) — pure staleness check
+ *   - resolveTargetTask(tasks, opts) — pure host-task resolution for `lore verify`:
+ *     explicit override > sole fresh claim > ambiguity error (SPEC-039 §2 D4)
  *   - evaluateReadiness(...) — computed readiness report over blocks-links + statuses
  *   - ReadyRecord — flat per-task readiness record (D9: flat array, no phase grouping here)
  *
@@ -18,10 +22,12 @@
  *
  * Side-effect class: pure
  *
- * Source: SPEC-025 §3 D1-D3, D9, D10; §8.2, §8.3
+ * Source: SPEC-025 §3 D1-D3, D9, D10; §8.2, §8.3; SPEC-039 §2 D1, D4
  */
 
 import { z } from "zod";
+import { ok, err } from "./errors.js";
+import type { Result, LoreError } from "./errors.js";
 import type { DocId, DocRecord, DocStatus, DocSummary, LinkRecord } from "./types.js";
 
 // ─── Evidence Schema ───────────────────────────────────────────────────────
@@ -41,6 +47,18 @@ export const ORACLE_KINDS = ["tsc", "test", "lint", "build", "e2e", "manual", "o
 export type OracleKind = (typeof ORACLE_KINDS)[number];
 
 /**
+ * Trusted-runner identities allowed to write {@link EvidenceEntry.attestation}
+ * (SPEC-039 §2 D1). A tuple enum — not a bare `z.literal("lore-cli")` — mirroring
+ * {@link ORACLE_KINDS}'s shape so a future remote/CI runner can be added here
+ * without repeating the three-independent-copies mistake ORACLE_KINDS itself
+ * consolidated away (SPEC-038 §7 D3).
+ */
+export const ATTESTATION_RUNNERS = ["lore-cli"] as const;
+
+/** Derived TypeScript union for {@link EvidenceEntry.attestation}'s `runner` field. */
+export type AttestationRunner = (typeof ATTESTATION_RUNNERS)[number];
+
+/**
  * One oracle verification record, appended to task.extra.verification_evidence.
  * Append-only — entries are never edited or removed, only added (up to the 50-entry cap
  * enforced by taskExtraSchema in schemas.ts).
@@ -51,6 +69,14 @@ export type OracleKind = (typeof ORACLE_KINDS)[number];
  * @invariant ac_ref is unconstrained format here (a free string) — validating that it
  *   names a *declared* acceptance criterion id is cross-entity and belongs to
  *   `TaskWorkflowService.addEvidence` (SPEC-038 §4 D4), not this schema layer.
+ * @invariant `attestation` is runner-issued ONLY — public write paths (CLI `lore evidence`,
+ *   MCP `lore_evidence_add`) reject any input carrying this field with VALIDATION_ERROR
+ *   (SPEC-039 §4 D2); `TaskWorkflowService.recordVerifiedEvidence` is the sole injection
+ *   point. Staying `.optional()` here is load-bearing, not a style choice: {@link extractEvidence}
+ *   parses the WHOLE `verification_evidence` array in one `z.array(evidenceEntrySchema)`
+ *   call — making `attestation` required would fail-close every array containing a
+ *   pre-SPEC-039 legacy entry, silently zeroing out all existing evidence for that task
+ *   (SPEC-039 §9, evidence-based correction of the original draft).
  *
  * @example
  * evidenceEntrySchema.parse({
@@ -63,6 +89,14 @@ export type OracleKind = (typeof ORACLE_KINDS)[number];
  *   oracle: "test", command: "bunx vitest run packages/core", result: "pass",
  *   recorded_at: "2026-07-02T10:00:00.000Z", recorded_by: "alice", ac_ref: "AC-ACODE-1",
  * });
+ *
+ * @example
+ * // runner-issued (SPEC-039) — never constructed by CLI/MCP input directly
+ * evidenceEntrySchema.parse({
+ *   oracle: "test", command: "bun test", result: "pass",
+ *   recorded_at: "2026-07-08T10:00:00.000Z", recorded_by: "alice",
+ *   attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1234, timed_out: false },
+ * });
  */
 export const evidenceEntrySchema = z.object({
   oracle: z.enum(ORACLE_KINDS),
@@ -73,6 +107,15 @@ export const evidenceEntrySchema = z.object({
   recorded_by: z.string().min(1),
   /** Optional pointer to a declared acceptance criterion id (SPEC-038 §4). */
   ac_ref: z.string().optional(),
+  /** Runner-issued attestation metadata (SPEC-039 §2 D1) — see the field-level invariant above. */
+  attestation: z
+    .object({
+      runner: z.enum(ATTESTATION_RUNNERS),
+      exit_code: z.number().int(),
+      duration_ms: z.number().int().min(0),
+      timed_out: z.boolean(),
+    })
+    .optional(),
 });
 
 /** Derived TypeScript type for one verification evidence entry. */
@@ -203,6 +246,81 @@ export function extractClaim(task: DocRecord): TaskClaim | undefined {
   if (raw === undefined || raw === null) return undefined;
   const parsed = taskClaimSchema.safeParse(raw);
   return parsed.success ? parsed.data : undefined;
+}
+
+// ─── Target Task Resolution (SPEC-039 §2 D4) ───────────────────────────────
+
+/**
+ * Resolves which task `lore verify` should record evidence against, out of a
+ * plan's task set. Pure — takes all state as parameters, performs no IO, reads
+ * no wall clock.
+ *
+ * Resolution order:
+ *   1. `opts.explicitTaskIdOrSlug` is set → match it by `id` or `slug` among
+ *      `tasks`; no match → `VALIDATION_ERROR` (an explicit override never falls
+ *      through to claim-based heuristics, even if it would resolve ambiguity).
+ *   2. Otherwise, filter `tasks` down to those holding a fresh (non-stale) claim
+ *      via {@link extractClaim} + {@link isClaimStale}. Exactly one fresh claim →
+ *      that task. Zero or more-than-one → `VALIDATION_ERROR` listing the
+ *      candidate slugs (or, when zero, prompting for `--task`) — ambiguity is
+ *      fail-loud, never a silent first-match guess (SPEC-039 §3).
+ *
+ * @param tasks - Candidate tasks (typically a plan's children via getPlanBundle)
+ * @param opts.explicitTaskIdOrSlug - `--task` CLI flag / MCP `task` param, when given
+ * @param opts.nowIso - Caller-supplied current time (D10 time seam — never Date.now() here)
+ * @param opts.ttlMinutes - Claim TTL in minutes, forwarded to {@link isClaimStale}
+ * @returns `ok(task)` on unambiguous resolution; `err(VALIDATION_ERROR)` otherwise
+ *
+ * @example
+ * resolveTargetTask([taskA, taskB], { nowIso: "2026-07-08T10:00:00.000Z", ttlMinutes: 120 })
+ * // taskA holds the sole fresh claim → ok(taskA)
+ *
+ * @example
+ * resolveTargetTask([taskA, taskB], {
+ *   explicitTaskIdOrSlug: "task-b-slug", nowIso: "2026-07-08T10:00:00.000Z", ttlMinutes: 120,
+ * })
+ * // explicit override wins regardless of claim state → ok(taskB)
+ */
+export function resolveTargetTask(
+  tasks: DocRecord[],
+  opts: { explicitTaskIdOrSlug?: string; nowIso: string; ttlMinutes: number },
+): Result<DocRecord, LoreError> {
+  const { explicitTaskIdOrSlug, nowIso, ttlMinutes } = opts;
+
+  if (explicitTaskIdOrSlug !== undefined) {
+    const match = tasks.find(
+      (task) => task.id === explicitTaskIdOrSlug || task.slug === explicitTaskIdOrSlug,
+    );
+    if (match === undefined) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "task",
+        message: `no task matching "${explicitTaskIdOrSlug}" among this plan's tasks`,
+        value: explicitTaskIdOrSlug,
+      });
+    }
+    return ok(match);
+  }
+
+  const freshlyClaimed = tasks.filter((task) => {
+    const claim = extractClaim(task);
+    return claim !== undefined && !isClaimStale(claim, nowIso, ttlMinutes);
+  });
+
+  if (freshlyClaimed.length === 1) {
+    // reason: array access after an exact-length-1 filter check is always defined;
+    // non-null assertion documents that invariant rather than widening the return
+    // type to `DocRecord | undefined` for a case TypeScript cannot narrow on its own.
+    return ok(freshlyClaimed[0]!);
+  }
+
+  const candidateSlugs = freshlyClaimed.map((task) => task.slug);
+  const message =
+    freshlyClaimed.length === 0
+      ? "no task in this plan has a fresh claim — pass --task to select one explicitly"
+      : `ambiguous target task — ${freshlyClaimed.length} tasks have a fresh claim (${candidateSlugs.join(", ")}); pass --task to disambiguate`;
+
+  return err({ code: "VALIDATION_ERROR", field: "task", message, value: candidateSlugs });
 }
 
 /**

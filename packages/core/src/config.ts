@@ -156,6 +156,27 @@ const AuditConfigSchema = z
 /** Audit completeness-oracle config section. Source: SPEC-035 §2 D5. */
 export type AuditConfig = z.infer<typeof AuditConfigSchema>;
 
+// ─── Verify Section Schema ──────────────────────────────────────────────────
+
+/**
+ * Trusted-runner (`lore verify`) configuration (SPEC-039 §2 D9).
+ * Independent `verify.*` section, mirroring the `audit.*` precedent above rather
+ * than nesting under `workflow` — the two features (claim leases vs. spawn-and-
+ * attest) share no config fields today and evolve independently.
+ *
+ * @invariant `default_timeout_ms` is consulted ONLY when a script-mode AC's own
+ *   `verify.timeout_ms` (acceptance.ts) is absent — the AC-level field always wins.
+ */
+const VerifyConfigSchema = z
+  .object({
+    /** Default spawn timeout in ms, used when an AC's verify.script omits timeout_ms. */
+    default_timeout_ms: z.number().int().positive().default(300_000),
+  })
+  .strict();
+
+/** Trusted-runner verify config section. Source: SPEC-039 §2 D9. */
+export type VerifyConfig = z.infer<typeof VerifyConfigSchema>;
+
 // ─── Root Config Schema ────────────────────────────────────────────────────
 
 /**
@@ -202,6 +223,12 @@ export const LoreConfigSchema = z
      * (verify_since = SPEC-035 deploy date).
      */
     audit: AuditConfigSchema.optional(),
+    /**
+     * Trusted-runner (`lore verify`) configuration (SPEC-039).
+     * When absent, createApp uses VerifyConfigSchema.parse({}) defaults
+     * (default_timeout_ms = 300000).
+     */
+    verify: VerifyConfigSchema.optional(),
   })
   .strict();
 
@@ -237,6 +264,21 @@ export function resolveClaimTtlMinutes(config: LoreConfig | undefined): number {
  */
 export function resolveAuditVerifySince(config: LoreConfig | undefined): string {
   return (config?.audit ?? AuditConfigSchema.parse({})).verify_since;
+}
+
+/**
+ * Resolve the effective trusted-runner default spawn timeout (ms) from an optional
+ * LoreConfig. Mirrors {@link resolveAuditVerifySince} — absence of the whole config
+ * or the verify section both fall back to the schema default (300000ms).
+ *
+ * @param config - Parsed LoreConfig, or undefined when no config file was loaded
+ * @returns Effective verify.default_timeout_ms value
+ * @example
+ *   resolveVerifyDefaultTimeoutMs(undefined) // => 300000
+ *   resolveVerifyDefaultTimeoutMs({ ..., verify: { default_timeout_ms: 60000 } }) // => 60000
+ */
+export function resolveVerifyDefaultTimeoutMs(config: LoreConfig | undefined): number {
+  return (config?.verify ?? VerifyConfigSchema.parse({})).default_timeout_ms;
 }
 
 // ─── Pure Parse Helpers ────────────────────────────────────────────────────
