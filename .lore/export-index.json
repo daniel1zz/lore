@@ -700,6 +700,10 @@
     "01KX075YRYWV0DF0MPRNX9MC2T": {
       "human_id": "KN-035",
       "file_path": "docs/requirements/knowledge/KN-035-retro-spec-038-spec-039-double-delivery-multi-agen.md"
+    },
+    "01KX081PDXQP6VY9SGHJ57QD55": {
+      "human_id": "KN-036",
+      "file_path": "docs/requirements/knowledge/KN-036-assessment-spec-035-implementation-audit-trail-cal.md"
     }
   }
 }
