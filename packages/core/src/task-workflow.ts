@@ -27,6 +27,20 @@ import type { DocId, DocRecord, DocStatus, DocSummary, LinkRecord } from "./type
 // ─── Evidence Schema ───────────────────────────────────────────────────────
 
 /**
+ * Oracle kinds an evidence entry may record. SSOT for this enum — the taxonomy
+ * previously lived as three independent literal-array copies (this file,
+ * `adapters/mcp/tools.ts`, `adapters/cli/commands/evidence.ts`); all now import
+ * this tuple instead of redeclaring it (SPEC-038 §7 D3, AC-ACODE-8).
+ *
+ * @invariant `acceptance.ts`'s `SCRIPT_ORACLES` is a type-checked subset of this
+ *   tuple (every kind except `"manual"`) — see that file's exhaustiveness gate.
+ */
+export const ORACLE_KINDS = ["tsc", "test", "lint", "build", "e2e", "manual", "other"] as const;
+
+/** Derived TypeScript union for {@link EvidenceEntry.oracle}. */
+export type OracleKind = (typeof ORACLE_KINDS)[number];
+
+/**
  * One oracle verification record, appended to task.extra.verification_evidence.
  * Append-only — entries are never edited or removed, only added (up to the 50-entry cap
  * enforced by taskExtraSchema in schemas.ts).
@@ -34,20 +48,31 @@ import type { DocId, DocRecord, DocStatus, DocSummary, LinkRecord } from "./type
  * @invariant output_tail is capped at 4000 chars — bounds document growth (SPEC-025 §5 risk table).
  * @invariant recorded_at is an ISO 8601 string set by the caller's time seam (D10), never
  *   generated inside this schema.
+ * @invariant ac_ref is unconstrained format here (a free string) — validating that it
+ *   names a *declared* acceptance criterion id is cross-entity and belongs to
+ *   `TaskWorkflowService.addEvidence` (SPEC-038 §4 D4), not this schema layer.
  *
  * @example
  * evidenceEntrySchema.parse({
  *   oracle: "tsc", command: "bun run typecheck", result: "pass",
  *   recorded_at: "2026-07-02T10:00:00.000Z", recorded_by: "alice",
  * });
+ *
+ * @example
+ * evidenceEntrySchema.parse({
+ *   oracle: "test", command: "bunx vitest run packages/core", result: "pass",
+ *   recorded_at: "2026-07-02T10:00:00.000Z", recorded_by: "alice", ac_ref: "AC-ACODE-1",
+ * });
  */
 export const evidenceEntrySchema = z.object({
-  oracle: z.enum(["tsc", "test", "lint", "build", "e2e", "manual", "other"]),
+  oracle: z.enum(ORACLE_KINDS),
   command: z.string().min(1),
   result: z.enum(["pass", "fail"]),
   output_tail: z.string().max(4000).optional(),
   recorded_at: z.string(),
   recorded_by: z.string().min(1),
+  /** Optional pointer to a declared acceptance criterion id (SPEC-038 §4). */
+  ac_ref: z.string().optional(),
 });
 
 /** Derived TypeScript type for one verification evidence entry. */
