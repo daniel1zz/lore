@@ -51,6 +51,7 @@ import { TaskWorkflowService } from "./service/task-workflow-service.js";
 import { SpecKindService } from "./service/spec-kind-service.js";
 import { JudgmentService } from "./service/judgment-service.js";
 import { AuditService } from "./service/audit-service.js";
+import { AcService } from "./service/ac-service.js";
 
 export interface App {
   corpusService: CorpusService;
@@ -120,6 +121,20 @@ export interface App {
    * Source: SPEC-035 §2, §5, §9.1
    */
   auditService: AuditService;
+  /**
+   * AcService — add/list/rm on spec.extra.acceptance_criteria (structured AC-as-code).
+   * Store-only, no telemetry, same DI shape as PhaseService — AC declarations ride
+   * the parent spec's own version log rather than needing their own event stream.
+   *
+   * Optional so pre-existing hand-built App test stubs across the codebase (HTTP
+   * routes / MCP tools / eval scenarios — outside this task's file anchors) remain
+   * valid without a mechanical touch to every one of them, mirroring `sessionStore?`'s
+   * documented precedent above. Always present in production — both `buildAppFromSqlite`
+   * and `buildAppFromTurso` wire it unconditionally; `lore ac` asserts non-null since
+   * the CLI only ever receives a fully-wired App from `createApp`.
+   * Source: SPEC-038 §4, §6, §9.1
+   */
+  acService?: AcService;
   /**
    * Telemetry sink — exposed for dashboard route handlers to emit source-tagged events.
    * Dashboard handlers record { service: "dashboard", source: "dashboard" } events after
@@ -208,7 +223,16 @@ function buildAppFromSqlite(
     phaseService: new PhaseService(store),
     // reason: own telemetry wiring restores parity with CorpusService (D8) — TaskWorkflowService
     // never routes writes through CorpusService (cross-service calls forbidden). SPEC-025 §3 D5, D8.
-    taskWorkflowService: new TaskWorkflowService(store, telemetry, { claimTtlMinutes }),
+    // 4th arg wires the SPEC-038 §7 D4 cross-entity port: resolveDeclaredAcIds is
+    // implemented by CorpusService (the sole plan→spec graph-walk locus) and bound
+    // here rather than imported — TaskWorkflowService never gains graph-walking
+    // responsibility of its own.
+    taskWorkflowService: new TaskWorkflowService(
+      store,
+      telemetry,
+      { claimTtlMinutes },
+      corpusService.resolveDeclaredAcIds.bind(corpusService),
+    ),
     // reason: SpecKindService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-032 §3.4.
     specKindService: new SpecKindService(store),
@@ -219,6 +243,9 @@ function buildAppFromSqlite(
     // the resolved watermark via constructor, same DI shape as TaskWorkflowService's
     // claimTtlMinutes (D5). SPEC-035 §2, §5, §9.1.
     auditService: new AuditService(store, { verifySince: auditVerifySince }),
+    // reason: AcService depends only on StoreInterface — stateless, no AI, no telemetry,
+    // same shape as PhaseService. SPEC-038 §4, §6, §9.1.
+    acService: new AcService(store),
     // reason: telemetry exposed on App so dashboard route handlers can emit source-tagged events
     // without requiring service-layer signature changes (SPEC-022 §9.6).
     telemetry,
@@ -294,7 +321,16 @@ function buildAppFromTurso(
     phaseService: new PhaseService(store),
     // reason: own telemetry wiring restores parity with CorpusService (D8) — TaskWorkflowService
     // never routes writes through CorpusService (cross-service calls forbidden). SPEC-025 §3 D5, D8.
-    taskWorkflowService: new TaskWorkflowService(store, telemetry, { claimTtlMinutes }),
+    // 4th arg wires the SPEC-038 §7 D4 cross-entity port: resolveDeclaredAcIds is
+    // implemented by CorpusService (the sole plan→spec graph-walk locus) and bound
+    // here rather than imported — TaskWorkflowService never gains graph-walking
+    // responsibility of its own.
+    taskWorkflowService: new TaskWorkflowService(
+      store,
+      telemetry,
+      { claimTtlMinutes },
+      corpusService.resolveDeclaredAcIds.bind(corpusService),
+    ),
     // reason: SpecKindService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-032 §3.4.
     specKindService: new SpecKindService(store),
@@ -305,6 +341,9 @@ function buildAppFromTurso(
     // the resolved watermark via constructor, same DI shape as TaskWorkflowService's
     // claimTtlMinutes (D5). SPEC-035 §2, §5, §9.1.
     auditService: new AuditService(store, { verifySince: auditVerifySince }),
+    // reason: AcService depends only on StoreInterface — stateless, no AI, no telemetry,
+    // same shape as PhaseService. SPEC-038 §4, §6, §9.1.
+    acService: new AcService(store),
     // reason: telemetry exposed on App so dashboard route handlers can emit source-tagged events
     // without requiring service-layer signature changes (SPEC-022 §9.6).
     telemetry,
