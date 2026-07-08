@@ -3,10 +3,10 @@ id: PRD-001
 type: prd
 role: intent
 title: "Lore — Internal-First AI Team Knowledge Platform"
-status: approved
+status: draft
 priority: critical
 created: 2026-06-07
-updated: 2026-07-06
+updated: 2026-07-08
 tags: [product-overview, L0, lore, mvp, internal-first, ai-native, protocol-aware]
 ---
 # Lore — Internal-First AI Team Knowledge Platform
@@ -89,13 +89,16 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
+- [spec] SPEC-038 — AC-as-code: structured acceptance criteria + oracle binding (draft)
+- [adr] AC-as-code — 验收标准作为类型化 oracle 绑定数据 (draft)
+- [knowledge] Anthropic Official Agent-Loop Engineering — Research Digest (draft)
+- [spec] SPEC-036 — Dashboard browsing UX: breadcrumb + tag/status filters + type-differentiated presentation (approved)
 - [spec] lore export-docs — reverse sync from corpus to spec files (approved)
 - [plan] Bugfix — eval/assess/export findings 2026-07-07 (archived)
 - [knowledge] MDX placeholder parser flags JSX inside fenced code blocks (draft)
 - [knowledge] assess diff truncation systematically hides tests from the judge (draft)
 - [knowledge] Retro — e2e corpus-pollution incident (port-squatter absorbed write suite) (approved)
 - [spec] SPEC-037 — Dashboard execution-tracking surface: readiness route + plan progress + evidence viewer (approved)
-- [spec] SPEC-036 — Dashboard browsing UX: breadcrumb + tag/status filters + type-differentiated presentation (approved)
 - [knowledge] DocMan replacement assessment — Lore coverage map + two remaining gaps (draft)
 - [spec] SPEC-033 — Dashboard as living-PRD projection + human adjudication surface (approved)
 - [knowledge] Assess material-budget distortion on multi-task plan diffs (draft)
@@ -374,7 +377,7 @@ R2 exit (requires weeks of real usage — measured, not CI-asserted):
 - **R3 — self-optimization** (contingent on R2 exit metrics): D5-L2 prompt iteration (offline eval against calibration data, winner promoted), D5-L3 bounded threshold self-tuning.
 - **Stage-gate reviews are self-hosted**: each R-stage exit review runs through `lore assess` (SPEC-026) against this section's metrics and persists as an assessment doc under the stage's plan — the loop's own gates leave the same evidence trail the loop enforces on everything else. No stage may be declared passed from memory or chat; the assessment doc is the gate record.
 
-Committed landing specs (R1 only): **SPEC-034** structured review judgment + triage queue (D1, D2-triage, D6-CLI); **SPEC-035** audit trail + calibration data (D3, D4). Contingent (named for traceability, NOT committed — each requires a decision-gate ADR citing R1/R2 data before creation): SPEC-036 unlock state machine + auto-execution; SPEC-037 L1 feed-forward; SPEC-038 L2/L3 self-optimization. This staging exists because §9-R1 (second-system syndrome) applies to §14 itself — a 5-spec autonomous-review platform built ahead of its data is the failure §14 is designed to prevent. Declared dependencies: SPEC-034's check-tree pre-check needs SPEC-032 (blueprint arming); the dashboard escalation panel needs SPEC-033. Benchmark patterns to validate at design time: confidence-triaged AI code review (CodeRabbit / GitHub Copilot review), LLM-observability data models (Langfuse / LangSmith traces + scores + prompt versions), active-learning sampling loops (Label Studio-class systems).
+Committed landing specs (R1 only): **SPEC-034** structured review judgment + triage queue (D1, D2-triage, D6-CLI); **SPEC-035** audit trail + calibration data (D3, D4). Input-quality hardening serving every R stage (committed 2026-07-08, NOT an R2 unlock): **SPEC-038** AC-as-code — structured, oracle-bound acceptance criteria on specs (`extra.acceptance_criteria`, script/ai/human verify modes, evidence `ac_ref`, assess judges against the declared AC set; see ADR "AC-as-code"). Contingent (named by capability for traceability, NOT committed — each requires a decision-gate ADR citing R1/R2 data before creation; the spec numbers originally reserved here as SPEC-036–038 have since been consumed by other landed specs — refer by capability name): unlock state machine + auto-execution; L1 feed-forward; L2/L3 self-optimization. This staging exists because §9-R1 (second-system syndrome) applies to §14 itself — a 5-spec autonomous-review platform built ahead of its data is the failure §14 is designed to prevent. Declared dependencies: SPEC-034's check-tree pre-check needs SPEC-032 (blueprint arming); the dashboard escalation panel needs SPEC-033. Benchmark patterns to validate at design time: confidence-triaged AI code review (CodeRabbit / GitHub Copilot review), LLM-observability data models (Langfuse / LangSmith traces + scores + prompt versions), active-learning sampling loops (Label Studio-class systems).
 
 ## 12. Out of Scope
 
@@ -394,3 +397,4 @@ Committed landing specs (R1 only): **SPEC-034** structured review judgment + tri
 - **v0.4**: PRD restructured to outline-level. Detail lives in 7 child feature specs.
 - **v0.5** (2026-07-03): Sole-context positioning (§1) + output contract & document taxonomy (§13: spec_kind feature/tech/design, stage→output→gate table, 3 enforcement layers, SSOT boundary, dashboard-as-PRD-projection) + G8 + §6/§8 governance hooks + §5 module map converted to live `<ChildrenOf />`. Owner-approved: taxonomy option C (spec_kind field, not a new first-class type); full-chain launch. 5-stakeholder review applied — enforcement-layer status corrected to as-built (Layers 1-2 already implemented in `@lore/core`), spec-under-spec mount rejected (contract stays `spec:["prd"]`), export-fidelity limitation documented, spec_kind write-time validation + migrate audit added, approver≠author convention added. Landing specs: SPEC-032 (contract mechanization) + SPEC-033 (dashboard projection). Input: `knowledge-lore-as-sole-dev-context-output-contract-spec-kind-tax`.
 - **v0.6** (2026-07-06): Autonomous feedback loop (§14: D1-D6 capability domains, three data entities, shadow→assist→auto staged unlock, five invariants, R1-R3 delivery) + G9 + §13.3 layer-3 mechanization pointer + §12 exclusions + A6 + §8 feedback-loop kill criterion. Owner-confirmed boundaries: loop object = document lifecycle (not code diffs); self-decision whitelist = all types including spec/PRD (data-gated, not day-1); end-state autonomy = L3 within I2 sampling-floor bounds; escalation surfaces = CLI + dashboard + push. 5-stakeholder review applied (avg 5.6 → revisions): unlock gates rebased from point estimates to Wilson lower bounds; single-owner ground-truth limitation acknowledged with mitigations; I1 downgraded to honest process-independence claim + cross-provider option; I2 sampling stratified; L1 feed-forward provenance-tagged (I4) with named injection seam; trigger model pinned to on-demand verbs (no daemon); AuditEvent scoped as net-new query surface over SPEC-012's write-only sink; storage/config/fixture-seeding homes named; R1 load-drop misattribution fixed; spec commitment cut from 5 to 2 (SPEC-034/035), SPEC-036-038 ADR-gated on data; SPEC-032/033 dependencies declared. One reviewer claim rejected with evidence: SPEC-030 alleged nonexistent — it is landed (hermetic-spawn.ts, corpus doc 01KWKDC4). Second synthesis pass (same review inputs): bounded-window aggregation guard (NFR-2), NFR-15 judge-call cost visibility, blast-radius-scaled auto bounds (0.95 for plan/spec/PRD), honest spec/PRD-may-stay-assist expectation, self-hosted stage-gate reviews via `lore assess`. Committed landing specs: SPEC-034 (judgment + triage), SPEC-035 (audit + calibration).
+- **v0.7** (2026-07-08): AC-as-code committed as §14 input-quality hardening (SPEC-038: structured `extra.acceptance_criteria` with script/ai/human verify modes, oracle-enum SSOT consolidation, evidence `ac_ref`, assess judges against the declared AC set — serves R1+ judge-input quality; NOT an R2 unlock, §14 staging untouched). §14 contingent-spec references renamed from stale reserved numbers (SPEC-036–038, since consumed by landed specs) to capability names. Origin: Anthropic official loop-engineering research (knowledge doc) + ADR "AC-as-code" (4-perspective design review applied). Loop framing: feedback × feedback-trustworthiness × loop-closure; this delivers the standardized feedback supply side. Deferred by decision: trusted runner (SPEC-039 candidate), assess-gap auto-task + calibration-gated autonomy (§14 R2, data-gated as before).

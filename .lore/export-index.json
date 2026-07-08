@@ -620,6 +620,46 @@
     "01KWY3CD0DR2DS33S8Z4K6XH4Q": {
       "human_id": "KN-031",
       "file_path": "docs/requirements/knowledge/KN-031-assessment-spec-037-implementation-execution-track.md"
+    },
+    "01KWZRYGFD9H65TJ9HBTZZ0GJ5": {
+      "human_id": "TASK-070",
+      "file_path": "docs/requirements/task/TASK-070-t6-verify-dogfood-full-oracles-structured-ac-conve.md"
+    },
+    "01KWZRYGBSBG2H4S6R8RN7K3PD": {
+      "human_id": "TASK-071",
+      "file_path": "docs/requirements/task/TASK-071-t5-projection-ac-checklist-in-get-non-raw-export-d.md"
+    },
+    "01KWZRYG8P5XMF5NXHXTQG4N37": {
+      "human_id": "TASK-072",
+      "file_path": "docs/requirements/task/TASK-072-t4-assess-structured-ac-prompt-ac-id-containment.md"
+    },
+    "01KWZRXNCFKHAZKR6HG6XHCSS0": {
+      "human_id": "TASK-073",
+      "file_path": "docs/requirements/task/TASK-073-t3-service-acservice-ac-verbs-resolvedeclaredacids.md"
+    },
+    "01KWZRXN9APK1XJA0RZ6TNQKKH": {
+      "human_id": "TASK-074",
+      "file_path": "docs/requirements/task/TASK-074-t2-adapters-oracle-enum-consolidation-evidence-ac.md"
+    },
+    "01KWZRWZCVKZ9Q5B00G8YC8J2M": {
+      "human_id": "TASK-075",
+      "file_path": "docs/requirements/task/TASK-075-t1-core-acceptance-schema-oracle-kinds-ssot-ac-ref.md"
+    },
+    "01KWZRW2XZ3CDEKX118JDMJ1Z8": {
+      "human_id": "PLAN-018",
+      "file_path": "docs/requirements/plan/PLAN-018-spec-038-implementation-ac-as-code.md"
+    },
+    "01KWZRMZNPZ8WKBY0BEW3KTTCK": {
+      "human_id": "SPEC-038",
+      "file_path": "docs/requirements/spec/SPEC-038-spec-038-ac-as-code-structured-acceptance-criteria.md"
+    },
+    "01KWZRMQ5ZC41F847ZR5ZSXTV2": {
+      "human_id": "ADR-001",
+      "file_path": "docs/requirements/adr/ADR-001-ac-as-code-oracle.md"
+    },
+    "01KWZRM5X5BKVEMRJKS7JHCKHY": {
+      "human_id": "KN-032",
+      "file_path": "docs/requirements/knowledge/KN-032-anthropic-official-agent-loop-engineering-research.md"
     }
   }
 }
