@@ -664,6 +664,34 @@
     "01KWZVSQ0XWGPCCMCP9B1G68FN": {
       "human_id": "KN-033",
       "file_path": "docs/requirements/knowledge/KN-033-assessment-spec-038-implementation-ac-as-code-2026.md"
+    },
+    "01KX01PSE4KZ5TNZ6092QQEW4S": {
+      "human_id": "TASK-076",
+      "file_path": "docs/requirements/task/TASK-076-v5-verify-dogfood-full-oracles-lore-verify-self-ac.md"
+    },
+    "01KX01PSAWFY4P6WM0FZHT02HG": {
+      "human_id": "TASK-077",
+      "file_path": "docs/requirements/task/TASK-077-v4-render-assess-v5-attested-annotation-ac-list-at.md"
+    },
+    "01KX01PS7NXF59CEKZW6TD574B": {
+      "human_id": "TASK-078",
+      "file_path": "docs/requirements/task/TASK-078-v3-surfaces-lore-verify-cli-lore-verify-mcp.md"
+    },
+    "01KX01NP5QZCF6MA4GS5AJ4429": {
+      "human_id": "TASK-079",
+      "file_path": "docs/requirements/task/TASK-079-v2-runner-recordverifiedevidence-verifyrunnerservi.md"
+    },
+    "01KX01NP2KRFKPPNTMN647P3BE": {
+      "human_id": "TASK-080",
+      "file_path": "docs/requirements/task/TASK-080-v1-core-attestation-schema-resolvetargettask-attes.md"
+    },
+    "01KX01MJJX85F3TZWV5MN1QY93": {
+      "human_id": "PLAN-019",
+      "file_path": "docs/requirements/plan/PLAN-019-spec-039-implementation-trusted-runner.md"
+    },
+    "01KX01KEVSQFFF8GH31GD3RE9J": {
+      "human_id": "SPEC-039",
+      "file_path": "docs/requirements/spec/SPEC-039-spec-039-trusted-runner-attested-evidence-for-scri.md"
     }
   }
 }
