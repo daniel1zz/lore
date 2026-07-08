@@ -8,6 +8,8 @@
  *          human:  --note <text>  (optional)
  *   list <spec> [--json]           List declared criteria (+ per-AC coverage when
  *                                   the spec has a child plan; dangling ac_ref ids).
+ *                                   An attested-pass criterion renders `⚑✔` (SPEC-039
+ *                                   §2 D8) and either badge appends "(n attested)".
  *   rm   <spec> <id> [--force]     Remove a criterion (exit 4 if evidence still
  *                                   references it, unless --force).
  *
@@ -19,7 +21,7 @@
  *       id on rm, evidence blocking rm without --force)
  *   5 = STALE_VERSION
  *
- * Source: SPEC-038 §4, §6 AC-ACODE-7
+ * Source: SPEC-038 §4, §6 AC-ACODE-7; SPEC-039 §2 D8 (attested coverage annotation)
  */
 
 import { defineCommand } from "citty";
@@ -262,8 +264,9 @@ function buildCriterionCandidate(args: Record<string, unknown>): unknown {
 
 /**
  * Render a numbered list of acceptance criteria to stdout, with a coverage badge
- * prefix when `coverage` is present (✔ all-pass, ✘ any-fail, · no evidence yet) and
- * a trailing "dangling" note when evidence references undeclared ids.
+ * prefix when `coverage` is present (✔ all-pass, ✘ any-fail, · no evidence yet — an
+ * attested-pass criterion renders `⚑✔` instead of `✔`, SPEC-039 §2 D8) and a trailing
+ * "dangling" note when evidence references undeclared ids.
  */
 function renderCriteriaList(result: AcListResult): void {
   for (const criterion of result.criteria) {
@@ -288,10 +291,28 @@ function describeVerify(verify: AcceptanceCriterion["verify"]): string {
   }
 }
 
-function coverageBadge(coverage: AcListResult["coverage"], acId: string): string {
+/**
+ * Coverage badge for one criterion: `✔`/`✘`/`·` per the pre-existing pass/fail/none
+ * convention, PLUS an attested annotation (SPEC-039 §2 D8) — an attested-pass criterion
+ * renders the `⚑✔` prefix variant instead of plain `✔`, and either badge appends
+ * `(n attested)` to its count parenthetical when the corresponding attested count is
+ * `> 0`. Rendering ONLY: `fact.attested_pass`/`fact.attested_fail` come straight from
+ * `computeAcCoverage` (`@lore/core`) — this function never re-derives "was this attested".
+ *
+ * Exported (unlike this file's other render helpers) so its deterministic formatting is
+ * directly vitest-unit-testable without spawning the CLI or a real store (SPEC-039 §6).
+ */
+export function coverageBadge(coverage: AcListResult["coverage"], acId: string): string {
   const fact = coverage?.find((f) => f.ac_id === acId);
   if (fact === undefined) return "·";
-  if (fact.fail > 0) return `✘(${fact.pass}/${fact.fail})`;
-  if (fact.pass > 0) return `✔(${fact.pass}/${fact.fail})`;
+  if (fact.fail > 0) {
+    const attestedNote = fact.attested_fail > 0 ? `, ${fact.attested_fail} attested` : "";
+    return `✘(${fact.pass}/${fact.fail}${attestedNote})`;
+  }
+  if (fact.pass > 0) {
+    const prefix = fact.attested_pass > 0 ? "⚑✔" : "✔";
+    const attestedNote = fact.attested_pass > 0 ? `, ${fact.attested_pass} attested` : "";
+    return `${prefix}(${fact.pass}/${fact.fail}${attestedNote})`;
+  }
   return "·";
 }

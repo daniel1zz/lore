@@ -210,6 +210,103 @@ async function makeStructuredAcBundle(store: InMemoryStore): Promise<PlanBundle>
   return bundleResult.value;
 }
 
+/**
+ * Builds a PlanBundle whose structured ACs carry a MIX of runner-attested and
+ * self-reported evidence (SPEC-039 §2 D8, AC-VRF-9) — the fixture for the attested-
+ * annotation prompt tests below. AC-X-1 gets two `pass` entries (one attestation-bearing
+ * "lore-cli" runner record, one plain self-report — deliberately zero fail entries so the
+ * rendered cell matches the spec's own worked example verbatim: "2 pass (1 attested), 0
+ * fail"); AC-X-2 gets a single self-reported pass with no attestation at all, so the same
+ * table also exercises the "no annotation when attested count is zero" branch — this is
+ * the "attested/unattested mix" the task calls for, in one bundle.
+ */
+async function makeAttestedStructuredAcBundle(store: InMemoryStore): Promise<PlanBundle> {
+  const corpusService = new CorpusService(store);
+
+  const prdResult = await corpusService.create({
+    type: "prd",
+    title: "Attested Coverage Test PRD",
+    content: "Root PRD for attested-coverage assess tests.",
+  } as CreateDocInput);
+  if (!prdResult.ok) throw new Error("prd create failed");
+
+  const specResult = await corpusService.create({
+    type: "spec",
+    title: "Attested Coverage Test Spec",
+    parent_id: prdResult.value.id,
+    content: "Spec body prose (unused — structured ACs replace it).",
+    extra: {
+      acceptance_criteria: [
+        {
+          id: "AC-X-1",
+          statement: "The widget renders without throwing.",
+          verify: { mode: "script", oracle: "test", command: "bun test widget.test.ts" },
+        },
+        {
+          id: "AC-X-2",
+          statement: "The widget meets WCAG AA contrast requirements.",
+          verify: { mode: "ai", rubric: "Check contrast ratios against WCAG AA thresholds." },
+        },
+      ],
+    },
+  } as CreateDocInput);
+  if (!specResult.ok) throw new Error("spec create failed");
+
+  const planResult = await corpusService.create({
+    type: "plan",
+    title: "Attested Coverage Test Plan",
+    parent_id: specResult.value.id,
+    content: "Plan goals for the attested-coverage widget feature.",
+  } as CreateDocInput);
+  if (!planResult.ok) throw new Error("plan create failed");
+
+  const taskResult = await corpusService.create({
+    type: "task",
+    title: "Implement the widget",
+    parent_id: planResult.value.id,
+    content: "Task body describing the widget work.",
+    extra: {
+      plan_id: planResult.value.id,
+      verification_evidence: [
+        // AC-X-1: runner-attested pass (via `lore verify`, SPEC-039)
+        {
+          oracle: "test",
+          command: "bun test widget.test.ts",
+          result: "pass",
+          recorded_at: "2026-07-08T00:00:00.000Z",
+          recorded_by: "lore-cli",
+          ac_ref: "AC-X-1",
+          attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 420, timed_out: false },
+        },
+        // AC-X-1: self-reported pass (no attestation) — same criterion, mixed evidence
+        {
+          oracle: "test",
+          command: "bun test widget.test.ts",
+          result: "pass",
+          recorded_at: "2026-07-08T00:05:00.000Z",
+          recorded_by: "carol",
+          ac_ref: "AC-X-1",
+        },
+        // AC-X-2: self-reported pass only — zero attested, proves the annotation is
+        // conditional per-AC, not a table-wide flag
+        {
+          oracle: "other",
+          command: "manual contrast check",
+          result: "pass",
+          recorded_at: "2026-07-08T00:10:00.000Z",
+          recorded_by: "carol",
+          ac_ref: "AC-X-2",
+        },
+      ],
+    },
+  } as CreateDocInput);
+  if (!taskResult.ok) throw new Error("task create failed");
+
+  const bundleResult = await corpusService.getPlanBundle(planResult.value.id);
+  if (!bundleResult.ok) throw new Error("getPlanBundle failed");
+  return bundleResult.value;
+}
+
 // ─── AC-ASSESS-3: corrective retry success ────────────────────────────────────
 
 describe("assessPlan — corrective retry success (AC-ASSESS-3, D9)", () => {
@@ -853,11 +950,11 @@ describe("buildAssessPrompt — structured acceptance criteria table (SPEC-038 A
     expect(result.declaredAcIds).toEqual(["AC-X-1", "AC-X-2"]);
   });
 
-  it("ASSESS_PROMPT_VERSION is 4 (bumped for the structured-AC table addition)", () => {
-    expect(ASSESS_PROMPT_VERSION).toBe(4);
+  it("ASSESS_PROMPT_VERSION is 5 (bumped for the attested-coverage annotation, SPEC-039 §2 D8)", () => {
+    expect(ASSESS_PROMPT_VERSION).toBe(5);
   });
 
-  it("a full assessPlan() call against the structured-AC bundle carries prompt_version 4 in the persisted judgment", async () => {
+  it("a full assessPlan() call against the structured-AC bundle carries prompt_version 5 in the persisted judgment", async () => {
     const store = new InMemoryStore();
     const bundle = await makeStructuredAcBundle(store);
     const scriptedJson = JSON.stringify({
@@ -876,7 +973,34 @@ describe("buildAssessPrompt — structured acceptance criteria table (SPEC-038 A
     const result = await service.assessPlan(bundle, {});
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.judgment.prompt_version).toBe(4);
+    expect(result.value.judgment.prompt_version).toBe(5);
+  });
+});
+
+describe("buildAssessPrompt — attested coverage annotation (SPEC-039 §2 D8, AC-VRF-9)", () => {
+  it("a structured AC table with a mix of attested and self-reported evidence annotates only the attested side, per criterion", async () => {
+    const store = new InMemoryStore();
+    const bundle = await makeAttestedStructuredAcBundle(store);
+
+    const result = buildAssessPrompt(bundle, undefined, DEFAULT_BUDGETS);
+
+    // AC-X-1: 2 pass total, 1 of them runner-attested, 0 fail — matches the spec's own
+    // worked example verbatim ("2 pass (1 attested), 0 fail").
+    expect(result.prompt).toContain("2 pass (1 attested), 0 fail");
+    // AC-X-2: 1 self-reported pass, zero attested — no parenthetical annotation at all.
+    expect(result.prompt).toContain("1 pass, 0 fail");
+    // The unattested cell must not itself contain the word "attested" anywhere near it —
+    // guards against a bug that always appends "(0 attested)" instead of omitting it.
+    expect(result.prompt).not.toContain("(0 attested)");
+  });
+
+  it("a criterion with zero evidence still renders the bare '0 pass, 0 fail' cell, no annotation", async () => {
+    const store = new InMemoryStore();
+    const bundle = await makeStructuredAcBundle(store);
+    // makeStructuredAcBundle's AC-X-2 has no evidence referencing it at all.
+    const result = buildAssessPrompt(bundle, undefined, DEFAULT_BUDGETS);
+
+    expect(result.prompt).toContain("0 pass, 0 fail");
   });
 });
 
@@ -966,7 +1090,7 @@ describe("buildAssessPrompt — legacy verbatim path is byte-identical for specs
     expect(result.declaredAcIds).toEqual([]);
   });
 
-  it("a full assessPlan() call against the legacy (no structured ACs) bundle also carries prompt_version 4 end-to-end", async () => {
+  it("a full assessPlan() call against the legacy (no structured ACs) bundle also carries prompt_version 5 end-to-end", async () => {
     const store = new InMemoryStore();
     const bundle = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
@@ -975,7 +1099,7 @@ describe("buildAssessPrompt — legacy verbatim path is byte-identical for specs
     const result = await service.assessPlan(bundle, {});
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.judgment.prompt_version).toBe(4);
+    expect(result.value.judgment.prompt_version).toBe(5);
   });
 });
 
