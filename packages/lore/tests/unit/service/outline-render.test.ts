@@ -329,7 +329,7 @@ function scriptAc(id: string, overrides: Partial<AcceptanceCriterion> = {}): Acc
 }
 
 function fact(ac_id: string, pass: number, fail: number): AcCoverageFact {
-  return { ac_id, mode: "script", pass, fail, refs: [] };
+  return { ac_id, mode: "script", pass, fail, refs: [], attested_pass: 0, attested_fail: 0 };
 }
 
 describe("renderResolvedToMarkdown — acceptance criteria checklist (SPEC-038 §6)", () => {
