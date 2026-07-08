@@ -1,9 +1,8 @@
 /**
  * lore gate — corpus-governed creation-time interception commands (IoC vertical-slice
  * tech-spec §4.1/§11). One "deterministic zone" gate per governed doc-creation flow;
- * `spec-create` is the first (a future `spec-promote` gate is expected to join this
- * command group, hence the group/subcommand shape rather than a flat `gate-spec-create`
- * command name).
+ * `spec-create` and `spec-promote` are its two subcommands (hence the group/subcommand
+ * shape rather than flat `gate-spec-create` / `gate-spec-promote` command names).
  *
  * `lore gate spec-create --input-json '<json>'` runs the three pure predicates from
  * `../../../service/gate-predicates.js` against a CANDIDATE spec-creation payload
@@ -13,12 +12,32 @@
  *   - any fail → prints a `gate-feeding.js::renderFeedingPack` block (rule doc slice +
  *     parent doc slice + machine-readable `missing` reasons) to stdout, exit 4.
  *
- * `LORE_GATE_BYPASS=1` short-circuits to exit 0 before ANY parsing or checking — an
- * escape hatch for callers that must not be blocked (documented, not silent: every
- * invocation under bypass still goes through the CLI, so it is audit-log-visible at
- * the shell/process level even though this command itself performs no corpus writes).
+ * `lore gate spec-promote --spec <id-or-slug>` gates an ALREADY-CREATED spec ahead of
+ * approval — the deterministic zone here is narrower than spec-create's: does the spec
+ * declare ≥1 structured acceptance criterion (`spec.extra.acceptance_criteria`, SPEC-038,
+ * counted via `AcService.listCriteria` — the same SSOT `lore ac list` reads)?
+ *   - 0 declared → exit 4, "no acceptance criteria" message (deterministic, hard block).
+ *   - ≥1 declared → "gate: pass", exit 0, ALWAYS (the AC-count check is the only thing
+ *     that can fail this gate).
+ * After a pass, the command makes a SECOND, PURELY ADVISORY attempt: it runs the
+ * SPEC-034 AI judge (`CorpusService.getReviewBundle` → `runDeterministicChecks` →
+ * `AIProviderService.judgeDoc`, same call shape `lore review` uses) and prints a
+ * decision/confidence/blocking-questions summary to STDERR. This is the "probabilistic
+ * zone" half of the deterministic/probabilistic split (IoC tech-spec §4.1 INV2): the
+ * judge's verdict — or its outright unavailability (no configured/reachable provider,
+ * malformed response, etc.) — is NEVER allowed to change the exit code that the
+ * deterministic AC-count check already settled. A judge failure degrades to a one-line
+ * "judge advisory unavailable" stderr note, not a silent skip and not a hard failure.
+ * No `review_judgments` row is persisted by this command — `lore review` remains the
+ * sole persistence path for judgments; this is a disposable, in-band advisory only.
  *
- * Exit codes:
+ * `LORE_GATE_BYPASS=1` short-circuits to exit 0 before ANY parsing or checking, for
+ * BOTH subcommands — an escape hatch for callers that must not be blocked (documented,
+ * not silent: every invocation under bypass still goes through the CLI, so it is
+ * audit-log-visible at the shell/process level even though this command itself
+ * performs no corpus writes).
+ *
+ * Exit codes (spec-create):
  *   0 = all predicates passed, OR LORE_GATE_BYPASS=1
  *   2 = --input-json missing / malformed JSON / does not match the expected shape
  *       (CLI-usage error, not a `LoreError` — mirrors evidence.ts's mutually-exclusive-
@@ -26,17 +45,28 @@
  *   4 = at least one gate predicate failed (VALIDATION_ERROR family, utils.ts::exitCode)
  *   1 = corpus read failure while resolving the parent doc or the rule doc (STORE_ERROR)
  *
- * Source: IoC vertical-slice tech-spec §4.1/§11 ("deterministic zone" + "active feeding")
+ * Exit codes (spec-promote):
+ *   0 = ≥1 acceptance criterion declared, OR LORE_GATE_BYPASS=1 — the judge advisory
+ *       (present or absent, approve/reject/escalate) never changes this
+ *   3 = spec does not resolve (DOC_NOT_FOUND / SLUG_NOT_FOUND, utils.ts::exitCode)
+ *   4 = resolves but is not a spec (VALIDATION_ERROR), OR resolves as a spec with zero
+ *       declared acceptance criteria
+ *
+ * Source: IoC vertical-slice tech-spec §4.1/§11 ("deterministic zone" + "active feeding"
+ * + INV2 "probabilistic zone is advisory-only")
  */
 
 import { defineCommand } from "citty";
 import { z } from "zod";
 import { loadLoreApp } from "../loader.js";
+import { exitCode, formatError } from "../utils.js";
 import { renderResolvedToMarkdown } from "../../../service/outline-service.js";
 import { parentLegal, specKindValid, hasSkeleton } from "../../../service/gate-predicates.js";
 import { buildFeedingPack, renderFeedingPack } from "../../../service/gate-feeding.js";
+import { runDeterministicChecks } from "@lore/core";
 import type { App } from "../../../app.js";
-import type { DocRecord } from "@lore/core";
+import type { AcService } from "../../../service/ac-service.js";
+import type { DocRecord, NewReviewJudgment } from "@lore/core";
 
 /**
  * Mirrors `scripts/seed-write-spec-rule.ts::WRITE_SPEC_RULE_TITLE` exactly.
@@ -130,6 +160,37 @@ export default defineCommand({
         }
       },
     }),
+
+    "spec-promote": defineCommand({
+      meta: {
+        name: "spec-promote",
+        description:
+          "Deterministic pre-approve gate for a spec: requires ≥1 structured acceptance " +
+          "criterion; a probabilistic-zone AI judge summary is printed to stderr as an " +
+          "advisory that never changes the exit code (INV2)",
+      },
+      args: {
+        spec: {
+          type: "string",
+          description: "Spec document ID or slug to gate",
+          required: true,
+        },
+      },
+      async run({ args }) {
+        // LORE_GATE_BYPASS=1: exit 0 before ANY parsing or checking (module header).
+        if (process.env["LORE_GATE_BYPASS"] === "1") {
+          process.exitCode = 0;
+          return;
+        }
+
+        const { app } = loadLoreApp();
+        try {
+          await runSpecPromoteGate(app, args.spec as string);
+        } finally {
+          app.close();
+        }
+      },
+    }),
   },
 });
 
@@ -172,6 +233,99 @@ async function runSpecCreateGate(app: App, input: GateSpecCreateInput): Promise<
 
   console.log(renderFeedingPack(pack));
   process.exitCode = 4;
+}
+
+/**
+ * `App.acService` is typed optional only to keep pre-existing hand-built App test
+ * stubs (outside this task's file anchors) compiling — mirrors `ac.ts`'s identically
+ * named helper. `loadLoreApp()` (this adapter's only App source) always returns a
+ * fully-wired App from `createApp`, so this assertion never actually fires in the CLI.
+ */
+function requireAcService(app: App): AcService {
+  if (app.acService === undefined) {
+    throw new Error("Internal error: AcService not wired on App");
+  }
+  return app.acService;
+}
+
+/**
+ * Runs the `spec-promote` deterministic zone (≥1 declared acceptance criterion) against
+ * an already-created spec, then makes a best-effort, exit-code-inert judge advisory
+ * attempt (module header, INV2). The deterministic outcome is settled and printed
+ * BEFORE the advisory attempt runs, so a slow/unreachable AI provider can never delay
+ * or flip the gate's verdict — it can only add a trailing stderr note.
+ *
+ * @param app - Wired `App` (from `loadLoreApp()`).
+ * @param specIdOrSlug - Spec document ULID or slug to gate.
+ */
+async function runSpecPromoteGate(app: App, specIdOrSlug: string): Promise<void> {
+  const listResult = await requireAcService(app).listCriteria(specIdOrSlug);
+  if (!listResult.ok) {
+    process.stderr.write(formatError(listResult.error) + "\n");
+    process.exitCode = exitCode(listResult.error);
+    return;
+  }
+
+  const { criteria } = listResult.value;
+  if (criteria.length === 0) {
+    process.stderr.write(
+      `Error: spec "${specIdOrSlug}" has no structured acceptance criteria — ` +
+        "add via `lore ac add`.\n",
+    );
+    process.exitCode = 4;
+    return;
+  }
+
+  console.log(`gate: pass (${criteria.length} acceptance criteria declared)`);
+  process.exitCode = 0;
+
+  // reason: the deterministic verdict above is final — everything from here on is the
+  // probabilistic-zone advisory (INV2). It writes only to stderr and never touches
+  // process.exitCode, regardless of outcome.
+  await emitJudgeAdvisory(app, specIdOrSlug);
+}
+
+/**
+ * Best-effort SPEC-034 judge advisory: assembles the same `ReviewBundle` +
+ * `runDeterministicChecks` inputs `lore review` uses, invokes `AIProviderService.judgeDoc`,
+ * and prints a one-block summary to stderr. Any failure along the way (bundle assembly,
+ * unreachable/misconfigured provider, malformed judge output after `judgeDoc`'s own
+ * corrective retry) degrades to a one-line "judge advisory unavailable" stderr note —
+ * never an exception, never a process.exitCode write (module header INV2). No
+ * `review_judgments` row is persisted; this is a disposable in-band advisory, not a
+ * `lore review` invocation.
+ */
+async function emitJudgeAdvisory(app: App, specIdOrSlug: string): Promise<void> {
+  const bundleResult = await app.corpusService.getReviewBundle(specIdOrSlug);
+  if (!bundleResult.ok) {
+    process.stderr.write(`gate: judge advisory unavailable — ${formatError(bundleResult.error)}\n`);
+    return;
+  }
+
+  const checks = runDeterministicChecks(bundleResult.value);
+  const judgeResult = await app.aiProviderService.judgeDoc(bundleResult.value, checks, {
+    source: app.callerSurface,
+  });
+  if (!judgeResult.ok) {
+    process.stderr.write(
+      `gate: judge advisory unavailable — ${formatError(judgeResult.error, { aiHasNoFallback: true })}\n`,
+    );
+    return;
+  }
+
+  process.stderr.write(formatJudgeAdvisory(judgeResult.value) + "\n");
+}
+
+/** Renders a `NewReviewJudgment` as a compact, greppable stderr advisory block. */
+function formatJudgeAdvisory(judgment: NewReviewJudgment): string {
+  const lines = [
+    `gate: judge advisory — decision=${judgment.decision} confidence=${judgment.confidence.toFixed(2)}`,
+  ];
+  if (judgment.decision === "escalate" && judgment.blocking_questions.length > 0) {
+    lines.push("  blocking questions:");
+    for (const q of judgment.blocking_questions) lines.push(`    - ${q}`);
+  }
+  return lines.join("\n");
 }
 
 /**
