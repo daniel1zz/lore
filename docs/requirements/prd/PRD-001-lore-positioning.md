@@ -3,7 +3,7 @@ id: PRD-001
 type: prd
 role: intent
 title: "Lore — Internal-First AI Team Knowledge Platform"
-status: draft
+status: approved
 priority: critical
 created: 2026-06-07
 updated: 2026-07-08
@@ -89,9 +89,9 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
-- [spec] SPEC-038 — AC-as-code: structured acceptance criteria + oracle binding (draft)
-- [adr] AC-as-code — 验收标准作为类型化 oracle 绑定数据 (draft)
-- [knowledge] Anthropic Official Agent-Loop Engineering — Research Digest (draft)
+- [spec] SPEC-038 — AC-as-code: structured acceptance criteria + oracle binding (approved)
+- [knowledge] Anthropic Official Agent-Loop Engineering — Research Digest (approved)
+- [adr] AC-as-code — 验收标准作为类型化 oracle 绑定数据 (approved)
 - [spec] SPEC-036 — Dashboard browsing UX: breadcrumb + tag/status filters + type-differentiated presentation (approved)
 - [spec] lore export-docs — reverse sync from corpus to spec files (approved)
 - [plan] Bugfix — eval/assess/export findings 2026-07-07 (archived)
