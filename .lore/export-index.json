@@ -696,6 +696,10 @@
     "01KX06JYF4A800B0PW99YS6QBW": {
       "human_id": "KN-034",
       "file_path": "docs/requirements/knowledge/KN-034-assessment-spec-039-implementation-trusted-runner.md"
+    },
+    "01KX075YRYWV0DF0MPRNX9MC2T": {
+      "human_id": "KN-035",
+      "file_path": "docs/requirements/knowledge/KN-035-retro-spec-038-spec-039-double-delivery-multi-agen.md"
     }
   }
 }

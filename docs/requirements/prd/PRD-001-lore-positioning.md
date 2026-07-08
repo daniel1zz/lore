@@ -89,6 +89,7 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
+- [knowledge] Retro — SPEC-038 + SPEC-039 double delivery (multi-agent orchestration learnings) (approved)
 - [spec] SPEC-039 — Trusted runner: attested evidence for script-mode ACs (approved)
 - [spec] SPEC-038 — AC-as-code: structured acceptance criteria + oracle binding (approved)
 - [knowledge] Anthropic Official Agent-Loop Engineering — Research Digest (approved)
