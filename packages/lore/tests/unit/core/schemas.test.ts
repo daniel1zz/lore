@@ -13,6 +13,7 @@ import {
   linkTypeSchema,
   specExtraSchema,
   SPEC_KINDS,
+  knowledgeExtraSchema,
 } from "@lore/core";
 
 // Test plan for schemas module:
@@ -276,6 +277,108 @@ describe("createDocInputSchema (AC-CORE-002)", () => {
       extra: {},
     });
     expect(result.success).toBe(false);
+  });
+
+  describe("knowledge sub_type=prompt / sub_type=skill (AC-P1-1)", () => {
+    // HAPPY: sub_type + full extra.prompt/extra.skill payload validates.
+    it("[happy] sub_type=prompt with extra.prompt={variables:[...]} passes", () => {
+      const result = createDocInputSchema.safeParse({
+        type: "knowledge",
+        title: "Refine Prompt",
+        extra: { sub_type: "prompt", prompt: { variables: ["x"] } },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("[happy] sub_type=skill with extra.skill={applies_to:...} passes", () => {
+      const result = createDocInputSchema.safeParse({
+        type: "knowledge",
+        title: "Refine Skill",
+        extra: { sub_type: "skill", skill: { applies_to: "spec" } },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    // HAPPY: nested extra.prompt / extra.skill are both optional — sub_type alone passes.
+    it("[happy] sub_type=prompt with extra.prompt omitted passes", () => {
+      const result = createDocInputSchema.safeParse({
+        type: "knowledge",
+        title: "Refine Prompt",
+        extra: { sub_type: "prompt" },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("[happy] sub_type=skill with extra.skill omitted passes", () => {
+      const result = createDocInputSchema.safeParse({
+        type: "knowledge",
+        title: "Refine Skill",
+        extra: { sub_type: "skill" },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    // NEGATIVE: wrong-typed nested fields fail loud (VALIDATION_ERROR-mapped upstream).
+    it("[negative] extra.prompt.variables as a non-array string fails", () => {
+      const result = createDocInputSchema.safeParse({
+        type: "knowledge",
+        title: "Refine Prompt",
+        extra: { sub_type: "prompt", prompt: { variables: "notarray" } },
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("[negative] extra.skill.applies_to as a number fails", () => {
+      const result = createDocInputSchema.safeParse({
+        type: "knowledge",
+        title: "Refine Skill",
+        extra: { sub_type: "skill", skill: { applies_to: 123 } },
+      });
+      expect(result.success).toBe(false);
+    });
+
+    // NEGATIVE: same two checks against knowledgeExtraSchema directly (unit-level, no
+    // createDocInputSchema wrapper) — confirms the nested schemas reject bad shapes on
+    // their own, not merely because the wrapper's other checks also fail.
+    it("[negative] knowledgeExtraSchema rejects extra.prompt.variables as a string", () => {
+      const result = knowledgeExtraSchema.safeParse({
+        sub_type: "prompt",
+        prompt: { variables: "notarray" },
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("[negative] knowledgeExtraSchema rejects extra.skill.applies_to as a number", () => {
+      const result = knowledgeExtraSchema.safeParse({
+        sub_type: "skill",
+        skill: { applies_to: 123 },
+      });
+      expect(result.success).toBe(false);
+    });
+
+    // BOUNDARY: sub_type missing still fails regardless of a well-formed nested payload —
+    // the pre-existing requirement (AC-CORE-002.N04) is unaffected by adding prompt/skill.
+    it("[boundary] sub_type missing fails even with a well-formed extra.prompt", () => {
+      const result = createDocInputSchema.safeParse({
+        type: "knowledge",
+        title: "Refine Prompt",
+        extra: { prompt: { variables: ["x"] } },
+      });
+      expect(result.success).toBe(false);
+    });
+
+    // REGRESSION: pre-existing sub_types still validate unaffected by the new branches.
+    it.each(["ideation", "retro", "research", "reference"] as const)(
+      "[regression] sub_type=%s (pre-existing) still passes",
+      (subType) => {
+        const result = createDocInputSchema.safeParse({
+          type: "knowledge",
+          title: "Pre-existing sub_type",
+          extra: { sub_type: subType },
+        });
+        expect(result.success).toBe(true);
+      },
+    );
   });
 
   it("[negative] task without parent_id fails", () => {

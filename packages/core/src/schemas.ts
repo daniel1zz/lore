@@ -104,11 +104,48 @@ export const adrExtraSchema = z
  */
 export const knowledgeSubTypeSchema = z.enum(KNOWLEDGE_SUB_TYPES);
 
+/**
+ * Extra fields for a `knowledge` doc with `sub_type: "prompt"` — a reusable prompt
+ * artifact riding knowledge's existing review/version/calibration machinery (upstream
+ * asset consolidation; no new top-level doc type). Both fields are OPTIONAL — a
+ * `sub_type: "prompt"` doc with no nested `extra.prompt` at all is still valid (unlike
+ * `sub_type: "assessment"`, which hard-requires `extra.assessment` — prompts have no
+ * analogous cross-field requirement).
+ */
+export const promptExtraSchema = z.object({
+  /** Named placeholders the prompt template expects at render time, e.g. `["topic"]`. */
+  variables: z.array(z.string()).optional(),
+  /** Free-text label for where this prompt is consumed, e.g. "claude-code-slash-command". */
+  target_surface: z.string().optional(),
+});
+
+/** Derived TypeScript type for `extra.prompt` on a `sub_type: "prompt"` knowledge doc. */
+export type PromptExtra = z.infer<typeof promptExtraSchema>;
+
+/**
+ * Extra fields for a `knowledge` doc with `sub_type: "skill"` — a reusable skill
+ * artifact, same upstream-asset rationale as {@link promptExtraSchema}. Both fields
+ * optional for the same reason.
+ */
+export const skillExtraSchema = z.object({
+  /** Free-text scope this skill applies to, e.g. "spec" or "task". */
+  applies_to: z.string().optional(),
+  /** Free-text description of when the skill should be invoked. */
+  trigger: z.string().optional(),
+});
+
+/** Derived TypeScript type for `extra.skill` on a `sub_type: "skill"` knowledge doc. */
+export type SkillExtra = z.infer<typeof skillExtraSchema>;
+
 export const knowledgeExtraSchema = z
   .object({
     sub_type: knowledgeSubTypeSchema,
     /** Present iff sub_type === "assessment" — the Zod-typed SSOT judge result. */
     assessment: assessmentResultSchema.optional(),
+    /** Present only for sub_type === "prompt"; optional even then (see schema JSDoc). */
+    prompt: promptExtraSchema.optional(),
+    /** Present only for sub_type === "skill"; optional even then (see schema JSDoc). */
+    skill: skillExtraSchema.optional(),
   })
   .passthrough()
   .superRefine((data, ctx) => {
@@ -122,6 +159,10 @@ export const knowledgeExtraSchema = z
         path: ["assessment"],
       });
     }
+    // Note: sub_type "prompt" / "skill" deliberately have NO analogous presence check —
+    // extra.prompt / extra.skill are optional even under their matching sub_type; the
+    // `prompt`/`skill` schema keys above already validate shape when present, via the
+    // base object's own field parsing (no dispatch needed here).
   });
 
 /**
@@ -304,7 +345,7 @@ export const createDocInputSchema = baseCreateDocInputSchema.superRefine(
             code: z.ZodIssueCode.custom,
             message:
               issue.path[0] === "sub_type"
-                ? "knowledge requires extra.sub_type (ideation|retro|research|reference|assessment)"
+                ? "knowledge requires extra.sub_type (ideation|retro|research|reference|assessment|prompt|skill)"
                 : issue.message,
             path: ["extra", ...issue.path],
           });
