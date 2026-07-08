@@ -39,17 +39,19 @@ const SCRIPT_PATH: string = join(
   "seed-write-spec-rule.ts",
 );
 
+type SeedOutcome = "created" | "upgraded" | "skipped";
+
 interface SeedResult {
   slug: string;
-  created: boolean;
+  outcome: SeedOutcome;
 }
 
 interface SeedWriteSpecRuleModule {
   seedWriteSpecRule: (app: App) => Promise<SeedResult>;
   SeedWriteSpecRuleError: new (
-    operation: "list" | "create" | "approve",
+    operation: "list" | "create" | "approve" | "upgrade",
     loreError: unknown,
-  ) => Error & { operation: "list" | "create" | "approve"; loreError: unknown };
+  ) => Error & { operation: "list" | "create" | "approve" | "upgrade"; loreError: unknown };
   WRITE_SPEC_RULE_TITLE: string;
 }
 
@@ -81,9 +83,9 @@ afterEach(() => {
 
 describe("seedWriteSpecRule", () => {
   // HAPPY
-  it("creates exactly one approved knowledge/reference doc on first run", async () => {
+  it("creates exactly one approved knowledge/skill doc on first run", async () => {
     const result = await seedWriteSpecRule(app);
-    expect(result.created).toBe(true);
+    expect(result.outcome).toBe("created");
     expect(typeof result.slug).toBe("string");
     expect(result.slug.length).toBeGreaterThan(0);
 
@@ -99,22 +101,70 @@ describe("seedWriteSpecRule", () => {
     const fullResult = await app.corpusService.listFull({ type: "knowledge" });
     expect(fullResult.ok).toBe(true);
     if (!fullResult.ok) throw new Error("unreachable");
-    expect(fullResult.value.docs[0]?.extra["sub_type"]).toBe("reference");
+    const extra = fullResult.value.docs[0]?.extra ?? {};
+    expect(extra["sub_type"]).toBe("skill");
+    expect((extra["skill"] as { applies_to?: string } | undefined)?.applies_to).toBe("spec");
   });
 
   // STATE — idempotency: second run does not duplicate
-  it("is idempotent — a second run against the same corpus yields no duplicate", async () => {
+  it("is idempotent — a second run (already skill) skips and yields no duplicate", async () => {
     const first = await seedWriteSpecRule(app);
     const second = await seedWriteSpecRule(app);
 
-    expect(first.created).toBe(true);
-    expect(second.created).toBe(false);
+    expect(first.outcome).toBe("created");
+    expect(second.outcome).toBe("skipped");
     expect(second.slug).toBe(first.slug);
 
     const listResult = await app.corpusService.list({ type: "knowledge" });
     expect(listResult.ok).toBe(true);
     if (!listResult.ok) throw new Error("unreachable");
     expect(listResult.value.docs.length).toBe(1);
+  });
+
+  // STATE — upgrade path: a pre-existing sub_type="reference" doc is upgraded in place
+  it("upgrades an existing approved sub_type=reference doc to skill in place, without creating a duplicate", async () => {
+    const manual = await app.corpusService.create({
+      type: "knowledge",
+      title: WRITE_SPEC_RULE_TITLE,
+      content: "legacy reference content",
+      extra: { sub_type: "reference" },
+    });
+    expect(manual.ok).toBe(true);
+    if (!manual.ok) throw new Error("unreachable");
+    const approveManual = await app.corpusService.set(manual.value.id, { status: "approved" });
+    expect(approveManual.ok).toBe(true);
+    if (!approveManual.ok) throw new Error("unreachable");
+    expect(approveManual.value.status).toBe("approved");
+
+    const result = await seedWriteSpecRule(app);
+    expect(result.outcome).toBe("upgraded");
+    expect(result.slug).toBe(approveManual.value.slug);
+
+    // exactly one knowledge doc — the existing doc was upgraded in place, not duplicated
+    const listResult = await app.corpusService.list({ type: "knowledge" });
+    expect(listResult.ok).toBe(true);
+    if (!listResult.ok) throw new Error("unreachable");
+    expect(listResult.value.docs.length).toBe(1);
+
+    const fullResult = await app.corpusService.listFull({ type: "knowledge" });
+    expect(fullResult.ok).toBe(true);
+    if (!fullResult.ok) throw new Error("unreachable");
+    const upgradedDoc = fullResult.value.docs[0];
+    expect(upgradedDoc?.id).toBe(manual.value.id);
+    expect(upgradedDoc?.status).toBe("approved");
+    expect(upgradedDoc?.extra["sub_type"]).toBe("skill");
+    expect((upgradedDoc?.extra["skill"] as { applies_to?: string } | undefined)?.applies_to).toBe(
+      "spec",
+    );
+
+    // a further run on the now-upgraded doc is a no-op skip, not a re-upgrade
+    const third = await seedWriteSpecRule(app);
+    expect(third.outcome).toBe("skipped");
+    expect(third.slug).toBe(result.slug);
+    const finalList = await app.corpusService.list({ type: "knowledge" });
+    expect(finalList.ok).toBe(true);
+    if (!finalList.ok) throw new Error("unreachable");
+    expect(finalList.value.docs.length).toBe(1);
   });
 
   // STATE — three runs still yields exactly one doc
@@ -140,7 +190,7 @@ describe("seedWriteSpecRule", () => {
     expect(unrelated.ok).toBe(true);
 
     const result = await seedWriteSpecRule(app);
-    expect(result.created).toBe(true);
+    expect(result.outcome).toBe("created");
 
     const listResult = await app.corpusService.list({ type: "knowledge" });
     expect(listResult.ok).toBe(true);
