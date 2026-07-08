@@ -36,7 +36,7 @@ import type { LoreError } from "@lore/core";
 import type { LinkType } from "@lore/core";
 import { renderAssessmentContent } from "@lore/core";
 import type { NewReviewJudgment, ReviewJudgment, Result, TreeBlueprint } from "@lore/core";
-import { parseTreeBlueprint, runDeterministicChecks } from "@lore/core";
+import { ORACLE_KINDS, parseTreeBlueprint, runDeterministicChecks } from "@lore/core";
 import { isAssessAiBraked } from "../../ai/resolve-ai.js";
 import { REVIEW_PROMPT_VERSION } from "../../ai/review-template.js";
 import { CORPUS_SCHEMA_INFO } from "./schema-info.js";
@@ -190,8 +190,12 @@ export const LoreBatchSchema = z.object({
   ),
 });
 
-/** Oracle kinds accepted by lore_evidence_add (SPEC-025 §4 AC-WF-1). */
-const EVIDENCE_ORACLE_ENUM = z.enum(["tsc", "test", "lint", "build", "e2e", "manual", "other"]);
+/**
+ * Oracle kinds accepted by lore_evidence_add (SPEC-025 §4 AC-WF-1). Sourced from
+ * `@lore/core`'s `ORACLE_KINDS` SSOT tuple (SPEC-038 §7 D3, AC-ACODE-8) rather
+ * than a redeclared literal.
+ */
+const EVIDENCE_ORACLE_ENUM = z.enum(ORACLE_KINDS);
 
 /** Oracle outcomes accepted by lore_evidence_add. */
 const EVIDENCE_RESULT_ENUM = z.enum(["pass", "fail"]);
@@ -217,7 +221,13 @@ export const LoreReleaseSchema = z.object({
   force: z.boolean().optional(),
 });
 
-/** Input schema for lore_evidence_add. */
+/**
+ * Input schema for lore_evidence_add.
+ * `ac_ref` — optional pointer to a structured AC id declared on the plan's parent
+ * spec (SPEC-038 §4). Passed through untouched; cross-entity validation that it
+ * names a *declared* AC lives in `TaskWorkflowService.addEvidence` (SPEC-038 §4 D4),
+ * not this schema.
+ */
 export const LoreEvidenceAddSchema = z.object({
   id_or_slug: z.string(),
   oracle: EVIDENCE_ORACLE_ENUM,
@@ -225,6 +235,7 @@ export const LoreEvidenceAddSchema = z.object({
   result: EVIDENCE_RESULT_ENUM,
   output_tail: z.string().max(4000).optional(),
   recorded_by: z.string().min(1),
+  ac_ref: z.string().optional(),
 });
 
 /** Input schema for lore_ready. */
@@ -705,6 +716,7 @@ export function registerTools(server: McpServer, app: App): void {
       recorded_by: args.recorded_by,
       source: "mcp",
       ...(args.output_tail !== undefined ? { output_tail: args.output_tail } : {}),
+      ...(args.ac_ref !== undefined ? { ac_ref: args.ac_ref } : {}),
     });
     if (!result.ok) return errorContent(result.error);
     return textContent({ doc: result.value });
