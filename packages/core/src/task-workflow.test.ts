@@ -1,24 +1,48 @@
 /**
- * Tests for @lore/core task-workflow — isClaimStale, evaluateReadiness.
+ * Tests for @lore/core task-workflow — isClaimStale, evaluateReadiness,
+ * evidenceEntrySchema.attestation, resolveTargetTask.
  * Pure functions, no IO. Spec-first: assertions come from SPEC-025 §3 D2/D3,
- * §4 AC-WF-3/4/7/8, §8.2/§8.3, and §7 test guidance — not from reading the
- * implementation body first.
+ * §4 AC-WF-3/4/7/8, §8.2/§8.3, §7 test guidance, and SPEC-039 §2 D1, D4 —
+ * not from reading the implementation body first.
  *
  * Six-dimension coverage for this file:
- *   HAPPY:      readiness of an unblocked task; claim annotation on a fresh claim
- *   NEGATIVE:   non-archived blocker keeps a task unready
+ *   HAPPY:      readiness of an unblocked task; claim annotation on a fresh claim;
+ *               evidenceEntrySchema parses with/without attestation;
+ *               resolveTargetTask resolves the sole fresh claim, and resolves an
+ *               explicit id/slug override regardless of claim state
+ *   NEGATIVE:   non-archived blocker keeps a task unready; ambiguous fresh-claim
+ *               set is a fail-loud error listing candidate slugs; an explicit
+ *               task ref absent from the plan errors instead of falling back
  *   BOUNDARY:   isClaimStale at exactly TTL, TTL±1min; blocker link with no
- *               matching blockerStatuses entry (defensive fail-loud-by-omission)
- *   ERROR:      n/a at this layer (pure functions have no Result channel)
+ *               matching blockerStatuses entry (defensive fail-loud-by-omission);
+ *               attestation.duration_ms at 0/-1, exit_code negative, runner
+ *               outside ATTESTATION_RUNNERS; zero fresh claims; a stale claim
+ *               excluded from candidacy; empty tasks array
+ *   ERROR:      n/a at this layer (pure functions have no Result channel) —
+ *               resolveTargetTask uses Result, covered under NEGATIVE/BOUNDARY
  *   STATE:      cycle A blocks B blocks A — both blocked & visible;
  *               evaluateReadiness's new parentSpecStatus parameter (SPEC-032 §3.4)
- *   REGRESSION: evaluateReadiness never mutates its inputs; input order preserved
+ *   REGRESSION: evaluateReadiness never mutates its inputs; input order preserved;
+ *               ATTESTATION_RUNNERS is locked to exactly ["lore-cli"]; a MIXED
+ *               evidence array (legacy entry without attestation + new entry
+ *               with it) parses as a whole and extractEvidence returns both;
+ *               resolveTargetTask never mutates its tasks input
  *
- * @spec_ref AC-WF-3, AC-WF-4, AC-WF-7, AC-WF-8, SPEC-032 §3.4
+ * @spec_ref AC-WF-3, AC-WF-4, AC-WF-7, AC-WF-8, SPEC-032 §3.4; SPEC-039 §2 D1, D4;
+ *   AC-VRF-1, AC-VRF-7
  */
 
 import { describe, it, expect } from "vitest";
-import { isClaimStale, evaluateReadiness, type BlockerInfo } from "./task-workflow.js";
+import { z } from "zod";
+import {
+  isClaimStale,
+  evaluateReadiness,
+  evidenceEntrySchema,
+  extractEvidence,
+  ATTESTATION_RUNNERS,
+  resolveTargetTask,
+  type BlockerInfo,
+} from "./task-workflow.js";
 import type { DocId, DocRecord, LinkRecord } from "./types.js";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -340,5 +364,292 @@ describe("evaluateReadiness — REGRESSION (purity + ordering)", () => {
     const records = evaluateReadiness([withPhase, withoutPhase], [], new Map(), NOW, 120);
     expect(records[0]?.phase).toBe("Foundation");
     expect(records[1]?.phase).toBeUndefined();
+  });
+});
+
+// ─── evidenceEntrySchema.attestation (SPEC-039 §2 D1, AC-VRF-1) ───────────────
+
+describe("evidenceEntrySchema.attestation", () => {
+  it("HAPPY: parses an entry WITH a full valid attestation object", () => {
+    const result = evidenceEntrySchema.safeParse({
+      oracle: "test",
+      command: "bun test",
+      result: "pass",
+      recorded_at: "2026-07-08T10:00:00.000Z",
+      recorded_by: "lore-cli",
+      attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1234, timed_out: false },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("HAPPY: parses an entry WITHOUT attestation (legacy shape, field stays optional)", () => {
+    const result = evidenceEntrySchema.safeParse({
+      oracle: "test",
+      command: "bun test",
+      result: "pass",
+      recorded_at: "2026-07-08T10:00:00.000Z",
+      recorded_by: "alice",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("REGRESSION: a MIXED array (one legacy entry without attestation, one new entry with it) " +
+    "parses as a WHOLE via z.array(evidenceEntrySchema).safeParse — the optional field must not " +
+    "fail-close the entire array (SPEC-039 §9)", () => {
+    const mixedArray = [
+      {
+        oracle: "tsc", command: "bun run typecheck", result: "pass",
+        recorded_at: "2026-07-01T00:00:00.000Z", recorded_by: "alice",
+      },
+      {
+        oracle: "test", command: "bun test", result: "pass",
+        recorded_at: "2026-07-08T10:00:00.000Z", recorded_by: "lore-cli",
+        attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 500, timed_out: false },
+      },
+    ];
+
+    const parsed = z.array(evidenceEntrySchema).safeParse(mixedArray);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data).toHaveLength(2);
+    }
+
+    const task = makeTask({
+      extra: { plan_id: "01HPLANAAAAAAAAAAAAAAAAAAA", verification_evidence: mixedArray },
+    });
+    const extracted = extractEvidence(task);
+    expect(extracted).toHaveLength(2);
+    expect(extracted[0]?.attestation).toBeUndefined();
+    expect(extracted[1]?.attestation).toBeDefined();
+    expect(extracted[1]?.attestation?.runner).toBe("lore-cli");
+  });
+});
+
+// ─── evidenceEntrySchema.attestation — BOUNDARY ───────────────────────────────
+
+describe("evidenceEntrySchema.attestation — BOUNDARY on the attestation object", () => {
+  function baseEntry(attestation: Record<string, unknown>) {
+    return {
+      oracle: "test",
+      command: "bun test",
+      result: "pass",
+      recorded_at: "2026-07-08T10:00:00.000Z",
+      recorded_by: "lore-cli",
+      attestation,
+    };
+  }
+
+  it("BOUNDARY: duration_ms of -1 is rejected (min(0))", () => {
+    const result = evidenceEntrySchema.safeParse(
+      baseEntry({ runner: "lore-cli", exit_code: 0, duration_ms: -1, timed_out: false }),
+    );
+    expect(result.success).toBe(false);
+  });
+
+  it("BOUNDARY: duration_ms of 0 is accepted", () => {
+    const result = evidenceEntrySchema.safeParse(
+      baseEntry({ runner: "lore-cli", exit_code: 0, duration_ms: 0, timed_out: false }),
+    );
+    expect(result.success).toBe(true);
+  });
+
+  it("BOUNDARY: exit_code accepts negative integers (killed process signal encoding) — no min bound", () => {
+    const result = evidenceEntrySchema.safeParse(
+      baseEntry({ runner: "lore-cli", exit_code: -1, duration_ms: 100, timed_out: true }),
+    );
+    expect(result.success).toBe(true);
+  });
+
+  it("BOUNDARY: runner outside ATTESTATION_RUNNERS is rejected", () => {
+    const result = evidenceEntrySchema.safeParse(
+      baseEntry({ runner: "some-other-runner", exit_code: 0, duration_ms: 100, timed_out: false }),
+    );
+    expect(result.success).toBe(false);
+  });
+});
+
+// ─── ATTESTATION_RUNNERS — REGRESSION ─────────────────────────────────────────
+
+describe("ATTESTATION_RUNNERS — REGRESSION (locked enum)", () => {
+  it("is exactly ['lore-cli'] — adding/removing a runner without reviewing this test must fail loud", () => {
+    expect(ATTESTATION_RUNNERS).toEqual(["lore-cli"]);
+    expect(ATTESTATION_RUNNERS.length).toBe(1);
+  });
+});
+
+// ─── resolveTargetTask (SPEC-039 §2 D4, AC-VRF-7) ─────────────────────────────
+
+describe("resolveTargetTask — HAPPY (sole fresh claim)", () => {
+  it("resolves to the one task with a fresh claim among several with none", () => {
+    const claimed = makeTask({
+      title: "Claimed",
+      extra: { plan_id: "p", claim: { by: "alice", at: NOW } },
+    });
+    const unclaimedA = makeTask({ title: "UnclaimedA" });
+    const unclaimedB = makeTask({ title: "UnclaimedB" });
+
+    const result = resolveTargetTask([unclaimedA, claimed, unclaimedB], {
+      nowIso: NOW,
+      ttlMinutes: 120,
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.id).toBe(claimed.id);
+    }
+  });
+});
+
+describe("resolveTargetTask — NEGATIVE/BOUNDARY (zero fresh claims)", () => {
+  it("zero tasks with a fresh claim → err with field 'task', message mentions --task", () => {
+    const a = makeTask({ title: "A" });
+    const b = makeTask({ title: "B" });
+
+    const result = resolveTargetTask([a, b], { nowIso: NOW, ttlMinutes: 120 });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("VALIDATION_ERROR");
+      if (result.error.code === "VALIDATION_ERROR") {
+        expect(result.error.field).toBe("task");
+        expect(result.error.message).toContain("--task");
+      }
+    }
+  });
+
+  it("empty tasks array with no explicit id → err (zero candidates), does not throw", () => {
+    expect(() => resolveTargetTask([], { nowIso: NOW, ttlMinutes: 120 })).not.toThrow();
+    const result = resolveTargetTask([], { nowIso: NOW, ttlMinutes: 120 });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("VALIDATION_ERROR");
+    }
+  });
+});
+
+describe("resolveTargetTask — NEGATIVE (ambiguous fresh claims)", () => {
+  it("two-plus tasks with fresh claims → err, message contains both slugs, value is candidate slug array", () => {
+    const claimedA = makeTask({
+      title: "ClaimedA",
+      extra: { plan_id: "p", claim: { by: "alice", at: NOW } },
+    });
+    const claimedB = makeTask({
+      title: "ClaimedB",
+      extra: { plan_id: "p", claim: { by: "bob", at: NOW } },
+    });
+
+    const result = resolveTargetTask([claimedA, claimedB], { nowIso: NOW, ttlMinutes: 120 });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("VALIDATION_ERROR");
+      if (result.error.code === "VALIDATION_ERROR") {
+        expect(result.error.message).toContain(claimedA.slug);
+        expect(result.error.message).toContain(claimedB.slug);
+        expect(result.error.value).toEqual([claimedA.slug, claimedB.slug]);
+      }
+    }
+  });
+});
+
+describe("resolveTargetTask — BOUNDARY (stale claim excluded from candidacy)", () => {
+  it("a stale claim is excluded — one fresh + one stale claim resolves to the fresh one, not an ambiguity error", () => {
+    const fresh = makeTask({
+      title: "Fresh",
+      extra: { plan_id: "p", claim: { by: "alice", at: NOW } },
+    });
+    const stale = makeTask({
+      title: "Stale",
+      // 200 minutes before NOW, ttl=120 → stale
+      extra: { plan_id: "p", claim: { by: "bob", at: "2026-07-02T06:40:00.000Z" } },
+    });
+
+    const result = resolveTargetTask([fresh, stale], { nowIso: NOW, ttlMinutes: 120 });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.id).toBe(fresh.id);
+    }
+  });
+});
+
+describe("resolveTargetTask — HAPPY (explicit override wins)", () => {
+  it("matches by .id — wins even when claim-based resolution would be ambiguous", () => {
+    const claimedA = makeTask({
+      title: "ClaimedA",
+      extra: { plan_id: "p", claim: { by: "alice", at: NOW } },
+    });
+    const claimedB = makeTask({
+      title: "ClaimedB",
+      extra: { plan_id: "p", claim: { by: "bob", at: NOW } },
+    });
+
+    const result = resolveTargetTask([claimedA, claimedB], {
+      explicitTaskIdOrSlug: claimedB.id,
+      nowIso: NOW,
+      ttlMinutes: 120,
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.id).toBe(claimedB.id);
+    }
+  });
+
+  it("matches by .slug — wins even when claim-based resolution would be empty", () => {
+    const a = makeTask({ title: "A" });
+    const b = makeTask({ title: "B" });
+
+    const result = resolveTargetTask([a, b], {
+      explicitTaskIdOrSlug: b.slug,
+      nowIso: NOW,
+      ttlMinutes: 120,
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.id).toBe(b.id);
+    }
+  });
+});
+
+describe("resolveTargetTask — NEGATIVE (explicit ref not found)", () => {
+  it("an explicit task ref naming something NOT in tasks → err(VALIDATION_ERROR), no fallback to claim resolution", () => {
+    const claimed = makeTask({
+      title: "Claimed",
+      extra: { plan_id: "p", claim: { by: "alice", at: NOW } },
+    });
+
+    const result = resolveTargetTask([claimed], {
+      explicitTaskIdOrSlug: "does-not-exist-anywhere",
+      nowIso: NOW,
+      ttlMinutes: 120,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("VALIDATION_ERROR");
+      if (result.error.code === "VALIDATION_ERROR") {
+        expect(result.error.field).toBe("task");
+        expect(result.error.value).toBe("does-not-exist-anywhere");
+      }
+    }
+  });
+});
+
+describe("resolveTargetTask — REGRESSION (purity)", () => {
+  it("does not mutate its tasks input", () => {
+    const a = makeTask({
+      title: "A",
+      extra: { plan_id: "p", claim: { by: "alice", at: NOW } },
+    });
+    const b = makeTask({ title: "B" });
+    const snapshotA = JSON.parse(JSON.stringify(a));
+    const snapshotB = JSON.parse(JSON.stringify(b));
+
+    resolveTargetTask([a, b], { nowIso: NOW, ttlMinutes: 120 });
+
+    expect(a).toEqual(snapshotA);
+    expect(b).toEqual(snapshotB);
   });
 });
