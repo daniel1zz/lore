@@ -42,8 +42,9 @@
  * bugfix F3 (`knowledge-assess-diff-truncation-systematically-hides-tests-from`)
  */
 
-import { truncateSection, type PlanBundle } from "@lore/core";
+import { truncateSection, type PlanBundle, type DocRecord } from "@lore/core";
 import { evidenceEntrySchema } from "@lore/core";
+import { computeAcCoverage, specAcceptanceCriteriaSchema, type AcceptanceCriterion } from "@lore/core";
 import { z } from "zod";
 import { truncateDiffByFile, classifyDiffFilePriority, type DiffFilePriority } from "./diff-truncation.js";
 
@@ -51,8 +52,19 @@ import { truncateDiffByFile, classifyDiffFilePriority, type DiffFilePriority } f
  * Judge prompt schema version. Bump whenever the prompt text, rubric anchors, or output
  * instruction changes in a way that could shift judge behaviour — persisted verbatim into
  * `judgment.prompt_version` on every assessment for audit (SPEC-026 §3 D6).
+ *
+ * **v3 → v4 (SPEC-038 §5 AC-ACODE-4)**: when the linked spec declares structured
+ * `extra.acceptance_criteria`, the "Spec Acceptance Criteria (verbatim)" prose section is
+ * replaced by a deterministic AC table (id | statement | verify | coverage, the coverage
+ * column from `computeAcCoverage`) and the output instruction is tightened to `ac_id MUST
+ * be one of: <declared id list>` plus a script-mode evidence-priority note. A spec with NO
+ * declared criteria still renders byte-identical to v3 (verbatim fallback, D7 storage
+ * compat) — the version bump exists purely because the *possible* judge-facing prompt text
+ * changed, mirroring the v2→v3 bump for the diff-omission Truncation Manifest (bugfix F3,
+ * see file header Source), which was likewise conditional on a materials shape (omitted
+ * diff files) that isn't present in every run.
  */
-export const ASSESS_PROMPT_VERSION = 3;
+export const ASSESS_PROMPT_VERSION = 4;
 
 /** Character budgets for each prompt section, sourced from `config.ai.assess.*`. */
 export interface AssessBudgets {
@@ -66,6 +78,15 @@ export interface AssessBudgets {
 export interface BuildAssessPromptResult {
   prompt: string;
   truncated: string[];
+  /**
+   * The spec's declared `extra.acceptance_criteria` ids, in schema order — empty when the
+   * spec has none declared (legacy verbatim path, SPEC-038 §7 D7). This is the SAME
+   * extraction `AIProviderService.assessPlan` uses to build its containment check's
+   * `declaredIds` set (SPEC-038 §5 D5) — computed once here, not re-derived at the call
+   * site, so the prompt's AC table and the post-hoc containment check can never drift
+   * apart on what "declared" means.
+   */
+  declaredAcIds: string[];
 }
 
 const evidenceArraySchema = z.array(evidenceEntrySchema);
@@ -135,6 +156,74 @@ function buildTruncationManifest(omittedFiles: string[]): string {
   return `${lines.join("\n")}\n\n`;
 }
 
+// ─── Structured Acceptance Criteria (SPEC-038 §5) ──────────────────────────
+
+/**
+ * Extract a spec's declared structured acceptance criteria (SPEC-038 §3), if any.
+ * A spec created before SPEC-038, or one that never ran `lore ac add`, has no
+ * `extra.acceptance_criteria` at all — that is the normal, expected case, not an error.
+ * A malformed/hand-edited `extra.acceptance_criteria` (fails `specAcceptanceCriteriaSchema`)
+ * degrades the same way: treated as absent, never thrown. Either case falls through to the
+ * pre-existing verbatim-prose prompt section (D7 storage compat).
+ *
+ * @param spec - The plan's linked spec, or undefined when the plan hangs off a PRD directly
+ * @returns Declared criteria in schema order, or `[]` when none are declared/valid
+ *
+ * @example
+ * extractDeclaredAcceptanceCriteria(specWithAcs); // → [{ id: "AC-X-1", ... }, ...]
+ * extractDeclaredAcceptanceCriteria(undefined); // → []
+ */
+export function extractDeclaredAcceptanceCriteria(spec: DocRecord | undefined): AcceptanceCriterion[] {
+  if (spec === undefined) return [];
+  const extra: unknown = spec.extra;
+  if (extra === null || typeof extra !== "object" || Array.isArray(extra)) return [];
+
+  const raw = (extra as Record<string, unknown>)["acceptance_criteria"];
+  if (raw === undefined) return [];
+
+  const parsed = specAcceptanceCriteriaSchema.safeParse(raw);
+  return parsed.success ? parsed.data : [];
+}
+
+/** Render one criterion's `verify` union member as a single prompt-table cell. */
+function renderVerifyCell(criterion: AcceptanceCriterion): string {
+  switch (criterion.verify.mode) {
+    case "script":
+      return `script: ${criterion.verify.oracle} — \`${criterion.verify.command}\``;
+    case "ai":
+      return `ai rubric: ${criterion.verify.rubric}`;
+    case "human":
+      return criterion.verify.note ? `human: ${criterion.verify.note}` : "human";
+  }
+}
+
+/**
+ * Render the deterministic structured AC table that replaces the "Spec Acceptance
+ * Criteria (verbatim)" section when the spec declares `extra.acceptance_criteria`
+ * (SPEC-038 §5 AC-ACODE-4). One row per declared criterion: id | statement | verify mode
+ * | coverage (pass/fail evidence count from `computeAcCoverage`, @lore/core — this
+ * function does NOT recompute coverage itself, per D6 "facts in core, rendering per
+ * consumer"). No wall-clock reads, no randomness — same input always renders identically.
+ *
+ * @param criteria - The spec's declared acceptance criteria (non-empty; callers only
+ *   invoke this when {@link extractDeclaredAcceptanceCriteria} returned a non-empty array)
+ * @param tasks - The plan's tasks, whose evidence entries' `ac_ref` feed coverage counts
+ * @returns Markdown table text (header + one row per criterion, in input order)
+ */
+function renderStructuredAcTable(criteria: AcceptanceCriterion[], tasks: DocRecord[]): string {
+  const coverage = computeAcCoverage(criteria, tasks);
+  const coverageById = new Map(coverage.map((fact) => [fact.ac_id, fact]));
+
+  const lines = ["| id | statement | verify | coverage |", "|---|---|---|---|"];
+  for (const criterion of criteria) {
+    const fact = coverageById.get(criterion.id);
+    const coverageCell = fact ? `${fact.pass} pass / ${fact.fail} fail` : "0 pass / 0 fail";
+    const statementCell = criterion.statement.replace(/\|/g, "\\|");
+    lines.push(`| ${criterion.id} | ${statementCell} | ${renderVerifyCell(criterion)} | ${coverageCell} |`);
+  }
+  return lines.join("\n");
+}
+
 /**
  * Assemble the initial judge prompt for `lore assess`, per the SPEC-026 §5 contract:
  * role → materials (plan, spec ACs, per-task evidence, optional diff) → rubric anchors →
@@ -144,7 +233,10 @@ function buildTruncationManifest(omittedFiles: string[]): string {
  * @param bundle - {plan, spec?, tasks[]} from CorpusService.getPlanBundle
  * @param diffText - Optional git diff / diff-file content (already read by the CLI layer)
  * @param budgets - Character budgets from config.ai.assess.*
- * @returns { prompt, truncated } — the prompt to send to the AI provider
+ * @returns { prompt, truncated, declaredAcIds } — the prompt to send to the AI provider;
+ *   `declaredAcIds` is the spec's declared structured AC id list (SPEC-038 §5), empty for
+ *   a spec with no structured ACs (or no linked spec at all) — the caller
+ *   (`AIProviderService.assessPlan`) uses it to build the containment-check `Set` (D5)
  *
  * @example
  * const { prompt, truncated } = buildAssessPrompt(bundle, undefined, {
@@ -161,8 +253,22 @@ export function buildAssessPrompt(
   const planSection = truncateSection(bundle.plan.content, budgets.max_plan_chars);
   if (planSection.truncated) truncated.push("plan");
 
+  // reason: structured ACs (SPEC-038 §5 AC-ACODE-4) replace the verbatim prose section with
+  // a deterministic table when the spec declares `extra.acceptance_criteria`; a spec with
+  // none declared (or none linked at all) falls through unchanged to the pre-existing
+  // verbatim path (D7 storage compat, REGRESSION-tested byte-for-byte).
+  const declaredCriteria = extractDeclaredAcceptanceCriteria(bundle.spec);
+  const hasStructuredAc = declaredCriteria.length > 0;
+
+  let specHeading = "## Spec Acceptance Criteria (verbatim)";
   let specBlock = "(plan has no linked spec — it is parented directly under a PRD; there are no verbatim ACs to judge against beyond the plan's own goals)";
-  if (bundle.spec) {
+  if (hasStructuredAc) {
+    specHeading = "## Spec Acceptance Criteria (structured)";
+    const acTable = renderStructuredAcTable(declaredCriteria, bundle.tasks);
+    const acTableSection = truncateSection(acTable, budgets.max_spec_chars);
+    if (acTableSection.truncated) truncated.push("spec");
+    specBlock = acTableSection.text;
+  } else if (bundle.spec) {
     const specSection = truncateSection(bundle.spec.content, budgets.max_spec_chars);
     if (specSection.truncated) truncated.push("spec");
     specBlock = specSection.text;
@@ -202,7 +308,7 @@ export function buildAssessPrompt(
     `# Materials\n\n` +
     `## Plan: ${bundle.plan.title} (${bundle.plan.slug})\n` +
     `${planSection.text}\n\n` +
-    `## Spec Acceptance Criteria (verbatim)\n` +
+    `${specHeading}\n` +
     `${specBlock}\n\n` +
     `## Tasks and Evidence\n` +
     `${taskBlocks.join("\n\n")}\n\n` +
@@ -232,12 +338,20 @@ export function buildAssessPrompt(
     `  "gaps": ["<string>", ...],\n` +
     `  "recommendations": ["<string>", ...]\n` +
     `}\n` +
-    `Use the exact AC identifiers found in the spec's Acceptance Criteria section above for ac_id.\n` +
+    // reason: SPEC-038 §5 AC-ACODE-4 — a spec with declared structured ACs gets a closed
+    // instruction (ac_id MUST be one of the declared set) instead of the open-ended
+    // "use the exact identifiers you find in the prose" instruction, which is exactly what
+    // let the judge invent free-text ids (e.g. "D1", "D2-triage") that couldn't be aligned
+    // across runs. The verbatim path's instruction text is untouched (REGRESSION).
+    (hasStructuredAc
+      ? `ac_id MUST be one of: ${declaredCriteria.map((c) => c.id).join(", ")}.\n` +
+        `script-mode ACs: judge primarily from the evidence records, not the statement text alone.\n`
+      : `Use the exact AC identifiers found in the spec's Acceptance Criteria section above for ac_id.\n`) +
     `IMPORTANT: each ac_scores[].reasoning MUST be 300 characters or fewer. If you exceed 300 ` +
     `characters, it will be silently clipped (with a trailing "…") before scoring is recorded — ` +
     `write terse, evidence-focused reasoning instead of relying on the clip.\n`;
 
-  return { prompt, truncated };
+  return { prompt, truncated, declaredAcIds: declaredCriteria.map((c) => c.id) };
 }
 
 /**
