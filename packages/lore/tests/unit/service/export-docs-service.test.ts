@@ -420,6 +420,92 @@ describe("STATE — idempotency: second run produces skipped_clean, not created 
   });
 });
 
+// ─── REGRESSION: SPEC-038 §6 — AC checklist projection is drift-stable ─────────
+
+describe("REGRESSION — a spec with declared acceptance criteria exports without drift false positives (SPEC-038 AC-ACODE-9)", () => {
+  it("two consecutive exports of an unchanged AC-bearing spec both report skipped_clean, never drift", async () => {
+    // Guards against the 2026-07-07 "export-docs drift-check false positives" incident
+    // class: the AC checklist appended by renderResolvedToMarkdown (SPEC-038 §6) must be
+    // a pure function of (doc.extra.acceptance_criteria, plan/task evidence state) — if it
+    // were non-deterministic (e.g. Map iteration order, wall-clock), a second run against
+    // the SAME corpus state would report false drift.
+    const store = new InMemoryStore();
+    const service = makeExportService(store);
+    const projectDir = makeTempProjectDir();
+
+    const spec = makeDoc({
+      id: "01J000000000000000000000AC",
+      type: "spec",
+      title: "AC-Bearing Spec",
+      slug: "spec-ac-bearing-spec",
+      content: "# AC-Bearing Spec\n\nBody text.",
+      extra: {
+        acceptance_criteria: [
+          { id: "AC-1", statement: "First criterion", verify: { mode: "script", oracle: "test", command: "bun test" } },
+          { id: "AC-2", statement: "Second criterion", verify: { mode: "ai", rubric: "Judge on correctness" } },
+        ],
+      },
+    });
+    await insertDoc(store, spec);
+
+    const plan = makeDoc({
+      id: "01J000000000000000000000PL",
+      type: "plan",
+      title: "AC Plan",
+      slug: "plan-ac-plan",
+      parent_id: spec.id,
+    });
+    await insertDoc(store, plan);
+
+    const task = makeDoc({
+      id: "01J000000000000000000000TK",
+      type: "task",
+      title: "AC Task",
+      slug: "task-ac-task",
+      parent_id: plan.id,
+      extra: {
+        plan_id: plan.id,
+        verification_evidence: [
+          {
+            oracle: "test",
+            command: "bun test",
+            result: "pass",
+            recorded_at: "2026-07-08T00:00:00.000Z",
+            recorded_by: "alice",
+            ac_ref: "AC-1",
+          },
+        ],
+      },
+    });
+    await insertDoc(store, task);
+
+    const first = await service.exportDocs({ projectDir, dryRun: false });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.value.created.length).toBeGreaterThan(0);
+    expect(first.value.drift).toHaveLength(0);
+
+    const specFilePath = first.value.created.find((p) => p.includes("/spec/"));
+    expect(specFilePath).toBeDefined();
+    if (specFilePath === undefined) return;
+    const firstBody = readFileSync(join(projectDir, specFilePath), "utf8");
+    expect(firstBody).toContain("## Acceptance Criteria (structured)");
+    expect(firstBody).toContain("- [✔] [script] AC-1: First criterion");
+    expect(firstBody).toContain("- [·] [ai] AC-2: Second criterion");
+
+    // Second export against the SAME unchanged corpus state — must be clean.
+    const second = await service.exportDocs({ projectDir, dryRun: false });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.value.drift).toHaveLength(0);
+    expect(second.value.errors).toHaveLength(0);
+    expect(second.value.skipped_clean.length).toBeGreaterThan(0);
+
+    const secondBody = readFileSync(join(projectDir, specFilePath), "utf8");
+    expect(secondBody).toBe(firstBody);
+  });
+});
+
 // ─── HAPPY: --type filter exports only matching type ─────────────────────────
 
 describe("HAPPY — --type filter exports only matching doc type (AC-EXPORT-8)", () => {

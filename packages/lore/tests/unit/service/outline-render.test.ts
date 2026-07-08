@@ -18,7 +18,7 @@
 import { describe, expect, it } from "vitest";
 import { renderResolvedToMarkdown } from "../../../src/service/outline-service.js";
 import type { ResolvedComponent, ResolvedDoc } from "../../../src/service/outline-service.js";
-import type { DocSummary } from "@lore/core";
+import type { DocSummary, AcceptanceCriterion, AcCoverageFact } from "@lore/core";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -314,5 +314,185 @@ describe("renderResolvedToMarkdown — unreachable component name (defensive)", 
 
     expect(() => renderResolvedToMarkdown(resolved)).not.toThrow();
     expect(renderResolvedToMarkdown(resolved)).toBe("_(unknown component: Bogus)_");
+  });
+});
+
+// ─── SPEC-038 §6: Structured Acceptance Criteria checklist ─────────────────
+
+function scriptAc(id: string, overrides: Partial<AcceptanceCriterion> = {}): AcceptanceCriterion {
+  return {
+    id,
+    statement: `Statement for ${id}`,
+    verify: { mode: "script", oracle: "test", command: "bun test" },
+    ...overrides,
+  };
+}
+
+function fact(ac_id: string, pass: number, fail: number): AcCoverageFact {
+  return { ac_id, mode: "script", pass, fail, refs: [] };
+}
+
+describe("renderResolvedToMarkdown — acceptance criteria checklist (SPEC-038 §6)", () => {
+  it("REGRESSION: no acceptanceCriteria field — output is byte-identical to pre-SPEC-038 behaviour", () => {
+    const resolved = makeResolvedDoc("# Plain spec\n\nNo AC declared.", []);
+    expect(renderResolvedToMarkdown(resolved)).toBe(resolved.content);
+  });
+
+  it("HAPPY: renders one bullet per criterion with coverage prefix, mode, id, statement", () => {
+    const resolved: ResolvedDoc = {
+      content: "# Spec Body",
+      resolvedComponents: [],
+      warnings: [],
+      acceptanceCriteria: {
+        criteria: [scriptAc("AC-1")],
+        coverage: [fact("AC-1", 1, 0)],
+      },
+    };
+
+    expect(renderResolvedToMarkdown(resolved)).toBe(
+      "# Spec Body\n\n## Acceptance Criteria (structured)\n\n" +
+        "- [✔] [script] AC-1: Statement for AC-1\n  script: test — bun test",
+    );
+  });
+
+  it("HAPPY: fail>0 renders ✘ even when pass also >0 (fail takes priority)", () => {
+    const resolved: ResolvedDoc = {
+      content: "Body",
+      resolvedComponents: [],
+      warnings: [],
+      acceptanceCriteria: { criteria: [scriptAc("AC-1")], coverage: [fact("AC-1", 3, 1)] },
+    };
+
+    expect(renderResolvedToMarkdown(resolved)).toContain("- [✘] [script] AC-1:");
+  });
+
+  it("BOUNDARY: no evidence at all (pass=0, fail=0) renders the undetermined · prefix", () => {
+    const resolved: ResolvedDoc = {
+      content: "Body",
+      resolvedComponents: [],
+      warnings: [],
+      acceptanceCriteria: { criteria: [scriptAc("AC-1")], coverage: [fact("AC-1", 0, 0)] },
+    };
+
+    expect(renderResolvedToMarkdown(resolved)).toContain("- [·] [script] AC-1:");
+  });
+
+  it("BOUNDARY: no plan under the spec (empty coverage array) renders · for every criterion", () => {
+    const resolved: ResolvedDoc = {
+      content: "Body",
+      resolvedComponents: [],
+      warnings: [],
+      acceptanceCriteria: { criteria: [scriptAc("AC-1"), scriptAc("AC-2")], coverage: [] },
+    };
+
+    const rendered = renderResolvedToMarkdown(resolved);
+    expect(rendered).toContain("- [·] [script] AC-1:");
+    expect(rendered).toContain("- [·] [script] AC-2:");
+  });
+
+  it("HAPPY: ai-mode verify line shows the rubric truncated to its first 120 characters", () => {
+    const longRubric = "x".repeat(200);
+    const criterion: AcceptanceCriterion = {
+      id: "AC-AI-1",
+      statement: "AI-judged criterion",
+      verify: { mode: "ai", rubric: longRubric },
+    };
+    const resolved: ResolvedDoc = {
+      content: "Body",
+      resolvedComponents: [],
+      warnings: [],
+      acceptanceCriteria: { criteria: [criterion], coverage: [] },
+    };
+
+    const rendered = renderResolvedToMarkdown(resolved);
+    expect(rendered).toContain(`  ai: ${"x".repeat(120)}`);
+    expect(rendered).not.toContain("x".repeat(121));
+  });
+
+  it("HAPPY: human-mode verify line shows the note when present", () => {
+    const criterion: AcceptanceCriterion = {
+      id: "AC-HUMAN-1",
+      statement: "Human-judged criterion",
+      verify: { mode: "human", note: "Manually confirmed by reviewer" },
+    };
+    const resolved: ResolvedDoc = {
+      content: "Body",
+      resolvedComponents: [],
+      warnings: [],
+      acceptanceCriteria: { criteria: [criterion], coverage: [] },
+    };
+
+    expect(renderResolvedToMarkdown(resolved)).toContain(
+      "  human: Manually confirmed by reviewer",
+    );
+  });
+
+  it("BOUNDARY: human-mode verify line is omitted entirely when no note was declared", () => {
+    const criterion: AcceptanceCriterion = {
+      id: "AC-HUMAN-2",
+      statement: "Human-judged criterion, no note",
+      verify: { mode: "human" },
+    };
+    const resolved: ResolvedDoc = {
+      content: "Body",
+      resolvedComponents: [],
+      warnings: [],
+      acceptanceCriteria: { criteria: [criterion], coverage: [] },
+    };
+
+    const rendered = renderResolvedToMarkdown(resolved);
+    expect(rendered).toBe(
+      "Body\n\n## Acceptance Criteria (structured)\n\n- [·] [human] AC-HUMAN-2: Human-judged criterion, no note",
+    );
+    expect(rendered).not.toContain("human:");
+  });
+
+  it("BOUNDARY: empty criteria array renders no block at all (defensive — resolve() never emits this)", () => {
+    const resolved: ResolvedDoc = {
+      content: "Body only",
+      resolvedComponents: [],
+      warnings: [],
+      acceptanceCriteria: { criteria: [], coverage: [] },
+    };
+
+    expect(renderResolvedToMarkdown(resolved)).toBe("Body only");
+  });
+
+  it("STATE: multiple criteria each render their own coverage prefix independently", () => {
+    const resolved: ResolvedDoc = {
+      content: "Body",
+      resolvedComponents: [],
+      warnings: [],
+      acceptanceCriteria: {
+        criteria: [scriptAc("AC-1"), scriptAc("AC-2"), scriptAc("AC-3")],
+        coverage: [fact("AC-1", 1, 0), fact("AC-2", 0, 1), fact("AC-3", 0, 0)],
+      },
+    };
+
+    const rendered = renderResolvedToMarkdown(resolved);
+    expect(rendered).toContain("- [✔] [script] AC-1:");
+    expect(rendered).toContain("- [✘] [script] AC-2:");
+    expect(rendered).toContain("- [·] [script] AC-3:");
+  });
+
+  it("REGRESSION: MDX placeholder splicing still happens when acceptanceCriteria is also present", () => {
+    const content = "<ChildrenOf />";
+    const children = [
+      { id: "s1", slug: "s1-slug", type: "spec" as const, title: "Spec One", status: "draft" as const, updated_at: "2026-06-08T00:00:00.000Z", tags: [], priority: "medium" as const },
+    ];
+    const resolved: ResolvedDoc = {
+      content,
+      resolvedComponents: [
+        componentAt(content, "<ChildrenOf />", "ChildrenOf", { children }),
+      ],
+      warnings: [],
+      acceptanceCriteria: { criteria: [scriptAc("AC-1")], coverage: [fact("AC-1", 1, 0)] },
+    };
+
+    const rendered = renderResolvedToMarkdown(resolved);
+    expect(rendered).toBe(
+      "- [spec] Spec One (draft)\n\n## Acceptance Criteria (structured)\n\n" +
+        "- [✔] [script] AC-1: Statement for AC-1\n  script: test — bun test",
+    );
   });
 });
