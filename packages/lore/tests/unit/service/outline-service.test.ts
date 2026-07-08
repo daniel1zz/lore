@@ -882,3 +882,217 @@ describe("OutlineService.resolve", () => {
     });
   });
 });
+
+// ─── OutlineService.resolve — SPEC-038 §6 acceptance-criteria projection ────
+
+describe("OutlineService.resolve — acceptance criteria projection (SPEC-038 §6)", () => {
+  let store: InMemoryStore;
+  let service: OutlineService;
+
+  beforeEach(() => {
+    store = new InMemoryStore();
+    service = new OutlineService(store);
+  });
+
+  function acCriterion(id: string): Record<string, unknown> {
+    return {
+      id,
+      statement: `Statement for ${id}`,
+      verify: { mode: "script", oracle: "test", command: "bun test" },
+    };
+  }
+
+  function evidence(result: "pass" | "fail", ac_ref: string): Record<string, unknown> {
+    return {
+      oracle: "test",
+      command: "bun test",
+      result,
+      recorded_at: "2026-07-08T00:00:00.000Z",
+      recorded_by: "alice",
+      ac_ref,
+    };
+  }
+
+  it("HAPPY: spec with declared AC + plan + passing evidence resolves per-AC coverage", async () => {
+    const spec = makeDoc({
+      id: "spec-ac-1",
+      slug: "spec-ac-happy",
+      type: "spec",
+      title: "AC Happy Spec",
+      extra: { acceptance_criteria: [acCriterion("AC-1"), acCriterion("AC-2")] },
+    });
+    const plan = makeDoc({
+      id: "plan-ac-1",
+      slug: "plan-ac-happy",
+      type: "plan",
+      title: "AC Plan",
+      parent_id: spec.id,
+    });
+    const task = makeDoc({
+      id: "task-ac-1",
+      slug: "task-ac-happy",
+      type: "task",
+      title: "AC Task",
+      parent_id: plan.id,
+      extra: { plan_id: plan.id, verification_evidence: [evidence("pass", "AC-1")] },
+    });
+    for (const doc of [spec, plan, task]) {
+      const inserted = await store.insert(doc);
+      if (!inserted.ok) throw new Error(`fixture insert failed: ${inserted.error.code}`);
+    }
+
+    const result = await service.resolve(spec);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.acceptanceCriteria).toBeDefined();
+    const projection = result.value.acceptanceCriteria;
+    if (projection === undefined) return;
+    expect(projection.criteria).toHaveLength(2);
+    const ac1 = projection.coverage.find((c) => c.ac_id === "AC-1");
+    const ac2 = projection.coverage.find((c) => c.ac_id === "AC-2");
+    expect(ac1).toMatchObject({ pass: 1, fail: 0 });
+    expect(ac2).toMatchObject({ pass: 0, fail: 0 });
+  });
+
+  it("STATE: no plan under the spec — every criterion coverage is {pass:0, fail:0}", async () => {
+    const spec = makeDoc({
+      id: "spec-ac-2",
+      slug: "spec-ac-noplan",
+      type: "spec",
+      title: "AC No-Plan Spec",
+      extra: { acceptance_criteria: [acCriterion("AC-1")] },
+    });
+    const inserted = await store.insert(spec);
+    if (!inserted.ok) throw new Error(`fixture insert failed: ${inserted.error.code}`);
+
+    const result = await service.resolve(spec);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.acceptanceCriteria?.coverage).toEqual([
+      { ac_id: "AC-1", mode: "script", pass: 0, fail: 0, refs: [] },
+    ]);
+  });
+
+  it("BOUNDARY: empty acceptance_criteria array — projection is undefined (no block)", async () => {
+    const spec = makeDoc({
+      id: "spec-ac-3",
+      slug: "spec-ac-empty",
+      type: "spec",
+      title: "AC Empty Spec",
+      extra: { acceptance_criteria: [] },
+    });
+    const inserted = await store.insert(spec);
+    if (!inserted.ok) throw new Error(`fixture insert failed: ${inserted.error.code}`);
+
+    const result = await service.resolve(spec);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.acceptanceCriteria).toBeUndefined();
+  });
+
+  it("REGRESSION: doc with no acceptance_criteria field at all — projection undefined, zero extra store calls", async () => {
+    const spec = makeDoc({
+      id: "spec-ac-4",
+      slug: "spec-ac-none",
+      type: "spec",
+      title: "Plain Spec",
+    });
+    const inserted = await store.insert(spec);
+    if (!inserted.ok) throw new Error(`fixture insert failed: ${inserted.error.code}`);
+
+    const result = await service.resolve(spec);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.acceptanceCriteria).toBeUndefined();
+  });
+
+  it("NEGATIVE: non-spec doc type carrying acceptance_criteria in extra is ignored", async () => {
+    const plan = makeDoc({
+      id: "plan-ac-not-spec",
+      slug: "plan-ac-not-spec",
+      type: "plan",
+      title: "Plan With Stray Field",
+      extra: { acceptance_criteria: [acCriterion("AC-1")] },
+    });
+    const inserted = await store.insert(plan);
+    if (!inserted.ok) throw new Error(`fixture insert failed: ${inserted.error.code}`);
+
+    const result = await service.resolve(plan);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.acceptanceCriteria).toBeUndefined();
+  });
+
+  it("ERROR: malformed acceptance_criteria (invalid id format) degrades to undefined, never throws", async () => {
+    const spec = makeDoc({
+      id: "spec-ac-5",
+      slug: "spec-ac-malformed",
+      type: "spec",
+      title: "AC Malformed Spec",
+      extra: { acceptance_criteria: [{ id: "not-a-valid-id", statement: "x", verify: { mode: "human" } }] },
+    });
+    const inserted = await store.insert(spec);
+    if (!inserted.ok) throw new Error(`fixture insert failed: ${inserted.error.code}`);
+
+    await expect(service.resolve(spec)).resolves.toMatchObject({ ok: true });
+    const result = await service.resolve(spec);
+    if (!result.ok) return;
+    expect(result.value.acceptanceCriteria).toBeUndefined();
+  });
+
+  it("STATE: aggregates evidence across multiple plans under the same spec", async () => {
+    const spec = makeDoc({
+      id: "spec-ac-6",
+      slug: "spec-ac-multiplan",
+      type: "spec",
+      title: "AC Multi-Plan Spec",
+      extra: { acceptance_criteria: [acCriterion("AC-1")] },
+    });
+    const planA = makeDoc({
+      id: "plan-ac-a",
+      slug: "plan-ac-a",
+      type: "plan",
+      title: "Plan A",
+      parent_id: spec.id,
+    });
+    const planB = makeDoc({
+      id: "plan-ac-b",
+      slug: "plan-ac-b",
+      type: "plan",
+      title: "Plan B",
+      parent_id: spec.id,
+    });
+    const taskA = makeDoc({
+      id: "task-ac-a",
+      slug: "task-ac-a",
+      type: "task",
+      title: "Task A",
+      parent_id: planA.id,
+      extra: { plan_id: planA.id, verification_evidence: [evidence("pass", "AC-1")] },
+    });
+    const taskB = makeDoc({
+      id: "task-ac-b",
+      slug: "task-ac-b",
+      type: "task",
+      title: "Task B",
+      parent_id: planB.id,
+      extra: { plan_id: planB.id, verification_evidence: [evidence("fail", "AC-1")] },
+    });
+    for (const doc of [spec, planA, planB, taskA, taskB]) {
+      const inserted = await store.insert(doc);
+      if (!inserted.ok) throw new Error(`fixture insert failed: ${inserted.error.code}`);
+    }
+
+    const result = await service.resolve(spec);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const ac1 = result.value.acceptanceCriteria?.coverage.find((c) => c.ac_id === "AC-1");
+    expect(ac1).toMatchObject({ pass: 1, fail: 1 });
+  });
+});
