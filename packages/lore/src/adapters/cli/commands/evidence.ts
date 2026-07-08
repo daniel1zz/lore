@@ -1,7 +1,7 @@
 /**
  * lore evidence <task> --oracle <tsc|test|lint|build|e2e|manual|other>
  *   --command "<cmd>" --result <pass|fail>
- *   [--output-tail <text> | --output-tail-file <path>] [--by <name>]
+ *   [--output-tail <text> | --output-tail-file <path>] [--by <name>] [--ac <id>]
  *
  * Appends one oracle verification record to task.extra.verification_evidence
  * (append-only, capped at 50 entries). Bumps the doc version — visible via
@@ -16,19 +16,24 @@
  * recording *final* oracle runs (e.g. `bun run typecheck` exit output), not
  * per-keystroke CI logs — keep the file small.
  *
+ * --ac references a structured AC id declared on the plan's parent spec
+ * (SPEC-038 §4). This adapter passes the raw string through untouched — the
+ * cross-entity validation that it names a *declared* AC lives in
+ * TaskWorkflowService.addEvidence (SPEC-038 §4 D4), not here.
+ *
  * Exit codes: 0 = success, 2 = argument error (both/neither output-tail flags
  *   given inconsistently), 3 = DOC_NOT_FOUND, 4 = VALIDATION_ERROR (not a task,
  *   50-entry cap reached, bad oracle/result value), 5 = STALE_VERSION.
  *
- * Source: SPEC-025 §4 AC-WF-1, AC-WF-2
+ * Source: SPEC-025 §4 AC-WF-1, AC-WF-2; SPEC-038 §4, §7 D3
  */
 
 import { readFileSync } from "fs";
 import { defineCommand } from "citty";
+import { ORACLE_KINDS, type OracleKind } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 
-const VALID_ORACLES = ["tsc", "test", "lint", "build", "e2e", "manual", "other"] as const;
 const VALID_RESULTS = ["pass", "fail"] as const;
 
 /** Truncate to the last N chars — keeps the most recent (most relevant) output. */
@@ -49,7 +54,7 @@ export default defineCommand({
     },
     oracle: {
       type: "string",
-      description: `Oracle kind: ${VALID_ORACLES.join(" | ")}`,
+      description: `Oracle kind: ${ORACLE_KINDS.join(" | ")}`,
       required: true,
     },
     command: {
@@ -73,6 +78,11 @@ export default defineCommand({
     by: {
       type: "string",
       description: "Actor identity; defaults to $LORE_ACTOR env var, then OS username",
+    },
+    ac: {
+      type: "string",
+      description:
+        "References a structured AC id declared on the plan's parent spec (SPEC-038)",
     },
     json: {
       type: "boolean",
@@ -109,12 +119,13 @@ export default defineCommand({
         // reason: cast — CLI arg strings are validated by evidenceEntrySchema server-side;
         // an invalid oracle/result value fails loud with VALIDATION_ERROR rather than
         // silently coercing, matching every other CLI command's string→enum handoff.
-        oracle: args.oracle as (typeof VALID_ORACLES)[number],
+        oracle: args.oracle as OracleKind,
         command: args.command as string,
         result: args.result as (typeof VALID_RESULTS)[number],
         recorded_by: by,
         source: app.callerSurface,
         ...(outputTail !== undefined ? { output_tail: outputTail } : {}),
+        ...(typeof args.ac === "string" ? { ac_ref: args.ac } : {}),
       });
 
       if (!result.ok) {
