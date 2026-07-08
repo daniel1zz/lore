@@ -1,0 +1,344 @@
+/**
+ * @spec_ref IoC vertical-slice tech-spec §9 AC6 — end-to-end closed-loop proof that the
+ * spec-production inversion-of-control slice actually works together: a non-compliant
+ * spec-creation candidate is intercepted BEFORE creation (`lore gate spec-create`), a
+ * corrected candidate passes and is actually created, the resulting spec is blocked from
+ * promotion until it carries a structured acceptance criterion (`lore gate spec-promote`),
+ * and adding one AC flips the promotion gate to pass.
+ *
+ * bun test (not vitest): drives the real `gate.ts` command module in-process against a
+ * real `SQLiteStore` (`createApp()`), the SAME in-process idiom
+ * `gate-spec-promote.bun.test.ts` establishes (chdir into a throwaway temp corpus, import
+ * the command module directly, call its `run()`, capture stdout/stderr/exitCode) — chosen
+ * over subprocess spawn for speed and determinism, exactly as that file's header explains.
+ *
+ * ⛔ Never touches the repo's own `.lore/` corpus (project CLAUDE.md hard rule) — every
+ * test operates inside its own `mkdtempSync` directory, and the outer suite asserts
+ * `git status --short .lore` is empty both before and after the full run.
+ *
+ * Closed loop under test (tech-spec §9 AC6), six steps:
+ *   1. gate spec-create on a no-parent candidate           → exit 4, feeding pack.
+ *   2. gate spec-create on the corrected candidate         → exit 0.
+ *   3. actually create that spec via CorpusService.create  → specId obtained.
+ *   4. gate spec-promote on the fresh spec (0 AC)          → exit 4.
+ *   5. add one structured AC via AcService.addCriterion.
+ *   6. gate spec-promote again (1 AC)                      → exit 0.
+ *
+ * Coverage dimensions: HAPPY (steps 2/3/5/6, the compliant path) / NEGATIVE (steps 1/4,
+ * two independent blocks) / BOUNDARY (step 6 — exactly one AC is enough) / ERROR (no
+ * seeded rule doc still reports "Missing:" reasons) / STATE (create's before/after effect
+ * on the promote gate) / REGRESSION (LORE_GATE_BYPASS=1 skips the entire chain).
+ */
+
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { mkdtempSync, mkdirSync, rmSync } from "fs";
+import { join, resolve, dirname } from "path";
+import { tmpdir } from "os";
+import { fileURLToPath } from "url";
+import { execSync } from "child_process";
+import { createApp, type App } from "../../src/app.js";
+import { saveConfig } from "@lore/core/node";
+import type { CreateDocInput } from "@lore/core";
+
+/**
+ * `scripts/` lives outside `packages/lore/tsconfig.tests.json`'s `rootDir` (scoped to
+ * the `@lore/lore` workspace package), so a static `import` of the seed script would
+ * fail `tsc --noEmit` with TS6059 even though bun's runtime resolver handles the
+ * relative path fine. Building the specifier as a runtime `string` (not a string-literal
+ * syntax form) makes TypeScript treat the dynamic `import()` as `Promise<any>` and skip
+ * static module resolution — the same escape hatch
+ * `tests/unit/service/seed-write-spec-rule.bun.test.ts` documents and uses.
+ */
+const SEED_SCRIPT_PATH: string = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+  "..",
+  "..",
+  "scripts",
+  "seed-write-spec-rule.ts",
+);
+
+interface SeedWriteSpecRuleModule {
+  seedWriteSpecRule: (app: App) => Promise<{ slug: string; created: boolean }>;
+}
+
+const { seedWriteSpecRule } = (await import(SEED_SCRIPT_PATH)) as unknown as SeedWriteSpecRuleModule;
+
+// ─── Command type + importer (mirrors gate-spec-promote.bun.test.ts) ─────────
+
+type RunnableCommand = { run: (ctx: { args: Record<string, unknown> }) => Promise<void> };
+
+async function importGateCommand(
+  sub: "spec-create" | "spec-promote",
+): Promise<RunnableCommand> {
+  const mod = await import("../../src/adapters/cli/commands/gate.js");
+  const group = (mod as { default?: { subCommands?: Record<string, unknown> } }).default;
+  const cmd = group?.subCommands?.[sub] as { run?: RunnableCommand["run"] } | undefined;
+  if (!cmd?.run) throw new Error(`gate ${sub} command not exported`);
+  return cmd as RunnableCommand;
+}
+
+// ─── Output / exit capture (mirrors gate-spec-promote.bun.test.ts) ───────────
+
+function captureOutput() {
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  const origStderrWrite = process.stderr.write.bind(process.stderr);
+  const origConsoleLog = console.log.bind(console);
+
+  (process.stderr as unknown as { write: (chunk: unknown) => boolean }).write = (chunk: unknown) => {
+    stderr.push(String(chunk));
+    return true;
+  };
+  console.log = (...args: unknown[]) => {
+    stdout.push(args.join(" "));
+  };
+
+  return {
+    stdout,
+    stderr,
+    restore: () => {
+      (process.stderr as unknown as { write: typeof origStderrWrite }).write = origStderrWrite;
+      console.log = origConsoleLog;
+    },
+  };
+}
+
+// ─── Project setup ────────────────────────────────────────────────────────────
+
+// Repo root (two levels above packages/lore) — where the team's real `.lore/` corpus
+// lives; the pollution guard below checks THIS path, not packages/lore's own root.
+const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
+
+let tmpDir: string;
+let dbPath: string;
+let originalCwd: string;
+let originalEnv: string | undefined;
+
+beforeEach(() => {
+  process.exitCode = 0;
+  originalEnv = process.env["LORE_GATE_BYPASS"];
+  delete process.env["LORE_GATE_BYPASS"];
+
+  tmpDir = resolve(mkdtempSync(join(tmpdir(), "lore-spec-loop-e2e-test-")));
+  const loreDir = join(tmpDir, ".lore");
+  mkdirSync(loreDir, { recursive: true });
+  dbPath = join(loreDir, "lore.db");
+
+  const app = createApp(dbPath);
+  app.close();
+
+  originalCwd = process.cwd();
+  process.chdir(tmpDir);
+});
+
+afterEach(() => {
+  process.exitCode = 0;
+  if (originalEnv === undefined) delete process.env["LORE_GATE_BYPASS"];
+  else process.env["LORE_GATE_BYPASS"] = originalEnv;
+  process.chdir(originalCwd);
+  try {
+    rmSync(tmpDir, { recursive: true, force: true });
+  } catch {
+    // best-effort
+  }
+});
+
+// ─── Fixture helpers ──────────────────────────────────────────────────────────
+
+const COMPLIANT_CONTENT =
+  "## Overview\n\nSome text.\n\n## Scope\n\nIn scope.\n\n## Acceptance Criteria\n\n- AC1\n";
+
+/** Create a PRD (legal spec parent), returning its slug. */
+async function createPrd(title: string): Promise<string> {
+  const app = createApp(dbPath);
+  try {
+    const result = await app.corpusService.create({
+      type: "prd",
+      title,
+      content: "PRD body for spec-loop e2e test.",
+    } as CreateDocInput);
+    if (!result.ok) throw new Error(`prd create failed: ${JSON.stringify(result.error)}`);
+    return result.value.slug;
+  } finally {
+    app.close();
+  }
+}
+
+function noParentPayload(): Record<string, unknown> {
+  return {
+    type: "spec",
+    title: "A well-formed spec",
+    content: COMPLIANT_CONTENT,
+    extra: { spec_kind: "tech" },
+  };
+}
+
+function compliantPayload(parentSlug: string): Record<string, unknown> {
+  return {
+    type: "spec",
+    title: "A well-formed spec",
+    parent_id: parentSlug,
+    content: COMPLIANT_CONTENT,
+    extra: { spec_kind: "tech" },
+  };
+}
+
+async function runGateSpecCreate(payload: Record<string, unknown>) {
+  const cmd = await importGateCommand("spec-create");
+  const output = captureOutput();
+  try {
+    await cmd.run({ args: { "input-json": JSON.stringify(payload) } });
+  } finally {
+    output.restore();
+  }
+  return { exitCode: process.exitCode, stdout: output.stdout.join("\n"), stderr: output.stderr.join("") };
+}
+
+async function runGateSpecPromote(specIdOrSlug: string) {
+  const cmd = await importGateCommand("spec-promote");
+  const output = captureOutput();
+  try {
+    await cmd.run({ args: { spec: specIdOrSlug } });
+  } finally {
+    output.restore();
+  }
+  return { exitCode: process.exitCode, stdout: output.stdout.join("\n"), stderr: output.stderr.join("") };
+}
+
+/** Actually create the spec (step 3 of the loop — not a gate call, the real creation). */
+async function createSpec(parentSlug: string): Promise<{ specId: string; specSlug: string }> {
+  const app = createApp(dbPath);
+  try {
+    const result = await app.corpusService.create(compliantPayload(parentSlug) as CreateDocInput);
+    if (!result.ok) throw new Error(`spec create failed: ${JSON.stringify(result.error)}`);
+    return { specId: result.value.id, specSlug: result.value.slug };
+  } finally {
+    app.close();
+  }
+}
+
+async function addAcceptanceCriterion(specId: string): Promise<void> {
+  const app = createApp(dbPath);
+  try {
+    if (app.acService === undefined) throw new Error("AcService not wired");
+    const result = await app.acService.addCriterion(specId, {
+      id: "AC-LOOP-1",
+      statement: "The closed loop actually completes end to end.",
+      verify: { mode: "human" },
+    });
+    if (!result.ok) throw new Error(`addCriterion failed: ${JSON.stringify(result.error)}`);
+  } finally {
+    app.close();
+  }
+}
+
+/**
+ * Points `ai.provider` at a definitely-nonexistent binary so `gate spec-promote`'s
+ * best-effort judge advisory (INV2, disposable and stderr-only) fails fast with a
+ * deterministic ENOENT instead of hanging on a real `claude` binary that might be
+ * reachable on this sandbox's $PATH and block waiting on stdin — the same AC-AI-5
+ * idiom `gate-spec-promote.bun.test.ts` documents and relies on.
+ */
+function suppressJudgeAdvisory(): void {
+  saveConfig(tmpDir, {
+    project: { name: "spec-loop-e2e-test", author: "tester" },
+    ai: {
+      provider: "claude-cli",
+      providers: { "claude-cli": { command: "ghost-ai-binary-not-installed-xyz", args: [], timeout_ms: 5000 } },
+      templates: {},
+      telemetry: false,
+    },
+  } as never);
+}
+
+async function countDocs(): Promise<number> {
+  const app = createApp(dbPath);
+  try {
+    const result = await app.corpusService.list({ type: "spec" });
+    if (!result.ok) throw new Error(`list failed: ${JSON.stringify(result.error)}`);
+    return result.value.docs.length;
+  } finally {
+    app.close();
+  }
+}
+
+// ─── The closed loop (AC6) ─────────────────────────────────────────────────────
+
+describe("spec-production IoC closed loop (tech-spec §9 AC6)", () => {
+  it("gate-blocked create -> corrected create -> gate-blocked promote -> AC added -> gate-passed promote", async () => {
+    // ── setup: seed the write-spec rule doc + a legal PRD parent ──
+    const app = createApp(dbPath);
+    await seedWriteSpecRule(app);
+    app.close();
+    const prdSlug = await createPrd("spec-loop-e2e PRD");
+    suppressJudgeAdvisory();
+
+    // ── STATE: before any spec exists, corpus has zero specs ──
+    expect(await countDocs()).toBe(0);
+
+    // ── step 1 (NEGATIVE): no-parent candidate is intercepted, never reaches creation ──
+    const step1 = await runGateSpecCreate(noParentPayload());
+    expect(step1.exitCode).toBe(4);
+    expect(step1.stdout).toContain("[source:");
+    expect(step1.stdout).toContain("Missing:");
+    expect(step1.stdout).toContain("PARENT_REQUIRED");
+
+    // ── step 2 (HAPPY): corrected candidate (legal parent) passes the pre-flight gate ──
+    const step2 = await runGateSpecCreate(compliantPayload(prdSlug));
+    expect(step2.exitCode).toBe(0);
+    expect(step2.stdout).toContain("gate: pass");
+
+    // ── step 3 (HAPPY / STATE): actually create the spec now that the gate passed ──
+    const { specId, specSlug } = await createSpec(prdSlug);
+    expect(specId).toBeTruthy();
+    expect(await countDocs()).toBe(1); // STATE: create() changed corpus state
+
+    // ── step 4 (NEGATIVE): promotion is blocked — the fresh spec carries zero ACs ──
+    const step4 = await runGateSpecPromote(specSlug);
+    expect(step4.exitCode).toBe(4);
+    expect(step4.stderr).toContain("no structured acceptance criteria");
+    expect(step4.stderr).toContain("lore ac add");
+
+    // ── step 5: add exactly one structured AC (BOUNDARY setup — one is the minimum) ──
+    await addAcceptanceCriterion(specId);
+
+    // ── step 6 (HAPPY / BOUNDARY): one AC is enough to flip the promotion gate to pass ──
+    const step6 = await runGateSpecPromote(specSlug);
+    expect(step6.exitCode).toBe(0);
+    expect(step6.stdout).toContain("gate: pass");
+    expect(step6.stdout).toContain("1 acceptance criteria");
+  });
+
+  // ── ERROR: feeding pack still reports Missing: reasons even with no seeded rule doc ──
+  it("ERROR: gate spec-create still exits 4 with Missing: reasons when the rule doc was never seeded", async () => {
+    // Deliberately skip seedWriteSpecRule — no PRD parent either, so the deterministic
+    // gate has no way to pass regardless of the rule doc's presence.
+    const result = await runGateSpecCreate(noParentPayload());
+    expect(result.exitCode).toBe(4);
+    expect(result.stdout).toContain("Missing:");
+    expect(result.stdout).toContain("PARENT_REQUIRED");
+    expect(result.stdout.toLowerCase()).toContain("seed-write-spec-rule");
+  });
+
+  // ── REGRESSION: LORE_GATE_BYPASS=1 short-circuits every step of the chain ──
+  it("REGRESSION: LORE_GATE_BYPASS=1 skips both gates entirely, even for maximally non-compliant input", async () => {
+    process.env["LORE_GATE_BYPASS"] = "1";
+
+    const createGateResult = await runGateSpecCreate(noParentPayload());
+    expect(createGateResult.exitCode).toBe(0);
+
+    const promoteGateResult = await runGateSpecPromote("totally-nonexistent-spec-slug");
+    expect(promoteGateResult.exitCode).toBe(0);
+  });
+});
+
+// ─── Zero-pollution guard on the repo's own .lore/ corpus ─────────────────────
+
+describe("spec-loop-e2e.bun.test.ts: repo corpus pollution guard", () => {
+  it("`git status --short .lore` is empty in the repo root before and after this suite ran", () => {
+    const output = execSync("git status --short .lore", { cwd: REPO_ROOT }).toString();
+    expect(output.trim()).toBe("");
+  });
+});
