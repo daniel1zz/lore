@@ -5,9 +5,12 @@
  * Public surface:
  *   - AC_VERIFY_MODES / AcVerifyMode — the three verify-union discriminants
  *   - SCRIPT_ORACLES / ScriptOracle — oracle kinds usable when verify.mode === "script"
- *   - acceptanceCriterionSchema / AcceptanceCriterion — one AC declaration
+ *   - acceptanceCriterionSchema / AcceptanceCriterion — one AC declaration (script mode
+ *     carries an optional `timeout_ms`, consumed by `lore verify`'s spawn executor —
+ *     SPEC-039 §2 D9)
  *   - specAcceptanceCriteriaSchema — spec.extra.acceptance_criteria array (max 50, unique id)
- *   - computeAcCoverage(criteria, tasks) — pure pass/fail aggregation over tasks' evidence
+ *   - computeAcCoverage(criteria, tasks) — pure pass/fail(+attested) aggregation over
+ *     tasks' evidence
  *   - AcCoverageFact / EvidenceRefLite — computeAcCoverage's output row shapes
  *
  * Invariants:
@@ -22,10 +25,13 @@
  *     silently excluded from every AcCoverageFact (cross-entity validation that an
  *     ac_ref points at a *declared* id is T3's job — TaskWorkflowService.addEvidence
  *     — not this pure aggregator's).
+ *   - `attested` / `attested_pass` / `attested_fail` are derived in exactly ONE
+ *     place — this function's body — from `entry.attestation` presence (SPEC-039
+ *     §2 D8); no other module re-derives "was this evidence runner-attested".
  *
  * Side-effect class: pure
  *
- * Source: SPEC-038 §3 (schema), §7 D1-D3, D6
+ * Source: SPEC-038 §3 (schema), §7 D1-D3, D6; SPEC-039 §2 D8, D9
  */
 
 import { z } from "zod";
@@ -83,6 +89,15 @@ void _scriptOraclesCoverAllButManual;
  *   statement: "acceptanceCriterionSchema rejects malformed input",
  *   verify: { mode: "script", oracle: "test", command: "bunx vitest run packages/core" },
  * });
+ *
+ * @example
+ * // script mode with an explicit spawn timeout (SPEC-039 §2 D9) — omitted means
+ * // `lore verify` falls back to config's `verify.default_timeout_ms`
+ * acceptanceCriterionSchema.parse({
+ *   id: "AC-VRF-3",
+ *   statement: "lore verify produces attested pass evidence on exit 0",
+ *   verify: { mode: "script", oracle: "test", command: "bun test", timeout_ms: 60000 },
+ * });
  */
 export const acceptanceCriterionSchema = z.object({
   id: z.string().regex(
@@ -95,6 +110,13 @@ export const acceptanceCriterionSchema = z.object({
       mode: z.literal("script"),
       oracle: z.enum(SCRIPT_ORACLES),
       command: z.string().min(1).max(1000),
+      /**
+       * Per-AC spawn timeout in ms, consumed by `lore verify`'s executor
+       * (SPEC-039 §2 D9). Optional — absence falls back to config's
+       * `verify.default_timeout_ms` (300000 by default). `cwd`/`env` overrides
+       * remain out of scope for this reservation (SPEC-039 §2).
+       */
+      timeout_ms: z.number().int().positive().optional(),
     }),
     z.object({
       mode: z.literal("ai"),
@@ -138,15 +160,23 @@ export const specAcceptanceCriteriaSchema = z
 
 // ─── AC Coverage ────────────────────────────────────────────────────────────
 
-/** One evidence reference contributing to an {@link AcCoverageFact}. */
+/**
+ * One evidence reference contributing to an {@link AcCoverageFact}.
+ *
+ * @invariant `attested` follows this module's "present-iff-true" convention
+ *   (mirroring `ReadyRecord.claim`/`.phase` in task-workflow.ts) — set to `true`
+ *   only when the source evidence entry carries `attestation`; omitted (not
+ *   `false`) for self-reported entries, including all pre-SPEC-039 legacy data.
+ */
 export interface EvidenceRefLite {
   task_id: string;
   result: "pass" | "fail";
+  attested?: boolean;
 }
 
 /**
- * Pure pass/fail coverage facts for one declared acceptance criterion, aggregated
- * over a set of tasks' `verification_evidence[].ac_ref`. No presentation
+ * Pure pass/fail(+attested) coverage facts for one declared acceptance criterion,
+ * aggregated over a set of tasks' `verification_evidence[].ac_ref`. No presentation
  * pre-aggregation (badges, checkmarks) — renderers live with each consumer (D6).
  */
 export interface AcCoverageFact {
@@ -155,27 +185,34 @@ export interface AcCoverageFact {
   pass: number;
   fail: number;
   refs: EvidenceRefLite[];
+  /** Subset of `pass` whose evidence carries runner attestation (SPEC-039 §2 D8). */
+  attested_pass: number;
+  /** Subset of `fail` whose evidence carries runner attestation (SPEC-039 §2 D8). */
+  attested_fail: number;
 }
 
 /**
  * Computes per-AC evidence coverage: for each declared criterion, counts how many
  * evidence entries (across all given tasks) reference it via `ac_ref`, split by
- * pass/fail.
+ * pass/fail, and further split by whether the evidence was runner-attested
+ * (SPEC-039 `lore verify`) versus self-reported.
  *
  * @param criteria - Declared acceptance criteria (typically a spec's
  *   `extra.acceptance_criteria`)
  * @param tasks - Task documents whose `extra.verification_evidence[]` may carry
  *   `ac_ref` pointers into `criteria` (typically a plan's child tasks)
  * @returns One {@link AcCoverageFact} per input criterion, in input order. An empty
- *   `tasks` array yields `{pass: 0, fail: 0, refs: []}` for every criterion — never
- *   throws, never omits a declared criterion.
+ *   `tasks` array yields `{pass: 0, fail: 0, refs: [], attested_pass: 0, attested_fail: 0}`
+ *   for every criterion — never throws, never omits a declared criterion.
  *
  * @example
  * computeAcCoverage(
  *   [{ id: "AC-1", statement: "...", verify: { mode: "script", oracle: "test", command: "bun test" } }],
- *   [taskWithEvidence],
+ *   [taskWithAttestedEvidence],
  * );
- * // => [{ ac_id: "AC-1", mode: "script", pass: 1, fail: 0, refs: [{ task_id: "...", result: "pass" }] }]
+ * // => [{ ac_id: "AC-1", mode: "script", pass: 1, fail: 0,
+ * //      refs: [{ task_id: "...", result: "pass", attested: true }],
+ * //      attested_pass: 1, attested_fail: 0 }]
  */
 export function computeAcCoverage(
   criteria: AcceptanceCriterion[],
@@ -186,7 +223,11 @@ export function computeAcCoverage(
     for (const task of tasks) {
       for (const entry of extractEvidence(task)) {
         if (entry.ac_ref === criterion.id) {
-          refs.push({ task_id: task.id, result: entry.result });
+          const ref: EvidenceRefLite = { task_id: task.id, result: entry.result };
+          if (entry.attestation !== undefined) {
+            ref.attested = true;
+          }
+          refs.push(ref);
         }
       }
     }
@@ -196,6 +237,8 @@ export function computeAcCoverage(
       pass: refs.filter((r) => r.result === "pass").length,
       fail: refs.filter((r) => r.result === "fail").length,
       refs,
+      attested_pass: refs.filter((r) => r.result === "pass" && r.attested === true).length,
+      attested_fail: refs.filter((r) => r.result === "fail" && r.attested === true).length,
     };
   });
 }

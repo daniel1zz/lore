@@ -5,18 +5,24 @@
  *
  * Six-dimension coverage for this file:
  *   HAPPY:      all three verify modes parse; computeAcCoverage aggregates
- *               pass/fail correctly over a mixed evidence set
+ *               pass/fail(+attested) correctly over a mixed evidence set;
+ *               verify.script.timeout_ms accepted when present or omitted
  *   NEGATIVE:   AC-ACODE-1 rejection paths — duplicate id, malformed id,
- *               script missing command, rubric over length
+ *               script missing command, rubric over length; timeout_ms
+ *               rejects zero/negative/non-integer
  *   BOUNDARY:   50-entry cap on the array, 2000/1000/500-char field limits,
- *               empty criteria array, empty task set
+ *               empty criteria array, empty task set (attested_pass/fail
+ *               always present as 0, never omitted)
  *   ERROR:      malformed extra.verification_evidence (non-array, non-object
  *               entries) does not throw — extractEvidence defensively drops it
- *   STATE:      one ac_id accumulating both pass and fail evidence across tasks
+ *   STATE:      one ac_id accumulating both pass and fail evidence across tasks,
+ *               split further by attested vs self-reported (SPEC-039 §2 D8)
  *   REGRESSION: evidenceEntrySchema parses with and without ac_ref; ORACLE_KINDS
- *               (task-workflow.ts) matches the original inline literal exactly
+ *               (task-workflow.ts) matches the original inline literal exactly;
+ *               omitted timeout_ms still parses (pre-SPEC-039 fixtures unaffected)
  *
- * @spec_ref SPEC-038 §3, §4, §7 D1-D3; AC-ACODE-1, AC-ACODE-2, AC-ACODE-6
+ * @spec_ref SPEC-038 §3, §4, §7 D1-D3; AC-ACODE-1, AC-ACODE-2, AC-ACODE-6;
+ *   SPEC-039 §2 D8, D9; AC-VRF-8
  */
 
 import { describe, it, expect } from "vitest";
@@ -213,6 +219,55 @@ describe("acceptanceCriterionSchema", () => {
   });
 });
 
+// ─── acceptanceCriterionSchema verify.script.timeout_ms (SPEC-039 §2 D9) ─────
+
+describe("acceptanceCriterionSchema — verify.script.timeout_ms", () => {
+  it("HAPPY: a valid positive integer timeout_ms is accepted", () => {
+    const result = acceptanceCriterionSchema.safeParse({
+      id: "AC-VRF-1",
+      statement: "s",
+      verify: { mode: "script", oracle: "test", command: "bun test", timeout_ms: 60000 },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("REGRESSION: omitted timeout_ms is valid — existing script ACs without it still parse", () => {
+    const result = acceptanceCriterionSchema.safeParse({
+      id: "AC-VRF-1",
+      statement: "s",
+      verify: { mode: "script", oracle: "test", command: "bun test" },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("BOUNDARY: timeout_ms of 0 is rejected (must be positive)", () => {
+    const result = acceptanceCriterionSchema.safeParse({
+      id: "AC-VRF-1",
+      statement: "s",
+      verify: { mode: "script", oracle: "test", command: "bun test", timeout_ms: 0 },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("BOUNDARY: a negative timeout_ms is rejected", () => {
+    const result = acceptanceCriterionSchema.safeParse({
+      id: "AC-VRF-1",
+      statement: "s",
+      verify: { mode: "script", oracle: "test", command: "bun test", timeout_ms: -1 },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("BOUNDARY: a non-integer timeout_ms (1.5) is rejected", () => {
+    const result = acceptanceCriterionSchema.safeParse({
+      id: "AC-VRF-1",
+      statement: "s",
+      verify: { mode: "script", oracle: "test", command: "bun test", timeout_ms: 1.5 },
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
 // ─── specAcceptanceCriteriaSchema ────────────────────────────────────────────
 
 describe("specAcceptanceCriteriaSchema", () => {
@@ -325,15 +380,17 @@ describe("computeAcCoverage", () => {
     });
 
     const coverage = computeAcCoverage(criteria, [task]);
-    expect(coverage).toEqual([{ ac_id: "AC-1", mode: "script", pass: 0, fail: 0, refs: [] }]);
+    expect(coverage).toEqual([
+      { ac_id: "AC-1", mode: "script", pass: 0, fail: 0, refs: [], attested_pass: 0, attested_fail: 0 },
+    ]);
   });
 
   it("BOUNDARY: empty task set yields {pass:0, fail:0, refs:[]} for every criterion", () => {
     const criteria = [scriptAc("AC-1"), scriptAc("AC-2")];
     const coverage = computeAcCoverage(criteria, []);
     expect(coverage).toEqual([
-      { ac_id: "AC-1", mode: "script", pass: 0, fail: 0, refs: [] },
-      { ac_id: "AC-2", mode: "script", pass: 0, fail: 0, refs: [] },
+      { ac_id: "AC-1", mode: "script", pass: 0, fail: 0, refs: [], attested_pass: 0, attested_fail: 0 },
+      { ac_id: "AC-2", mode: "script", pass: 0, fail: 0, refs: [], attested_pass: 0, attested_fail: 0 },
     ]);
   });
 
@@ -356,7 +413,7 @@ describe("computeAcCoverage", () => {
 
     expect(() => computeAcCoverage(criteria, [malformedArray, malformedExtra])).not.toThrow();
     expect(computeAcCoverage(criteria, [malformedArray, malformedExtra])).toEqual([
-      { ac_id: "AC-1", mode: "script", pass: 0, fail: 0, refs: [] },
+      { ac_id: "AC-1", mode: "script", pass: 0, fail: 0, refs: [], attested_pass: 0, attested_fail: 0 },
     ]);
   });
 
@@ -374,6 +431,56 @@ describe("computeAcCoverage", () => {
 
     const coverage = computeAcCoverage(criteria, [task]);
     expect(coverage[0]).toMatchObject({ pass: 1, fail: 1 });
+  });
+
+  it("STATE: attested_pass/attested_fail split runner-attested evidence from self-reported (AC-VRF-8)", () => {
+    const criteria = [scriptAc("AC-1")];
+    const task = makeTask({
+      extra: {
+        plan_id: "p",
+        verification_evidence: [
+          // (a) attested pass
+          {
+            oracle: "test", command: "bun test", result: "pass",
+            recorded_at: "t1", recorded_by: "lore-cli", ac_ref: "AC-1",
+            attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 500, timed_out: false },
+          },
+          // (b) self-reported pass (no attestation)
+          {
+            oracle: "test", command: "bun test", result: "pass",
+            recorded_at: "t2", recorded_by: "alice", ac_ref: "AC-1",
+          },
+          // (c) attested fail
+          {
+            oracle: "test", command: "bun test", result: "fail",
+            recorded_at: "t3", recorded_by: "lore-cli", ac_ref: "AC-1",
+            attestation: { runner: "lore-cli", exit_code: 1, duration_ms: 900, timed_out: false },
+          },
+        ],
+      },
+    });
+
+    const coverage = computeAcCoverage(criteria, [task]);
+    expect(coverage).toHaveLength(1);
+    const fact = coverage[0]!;
+    expect(fact.pass).toBe(2);
+    expect(fact.fail).toBe(1);
+    expect(fact.attested_pass).toBe(1);
+    expect(fact.attested_fail).toBe(1);
+
+    const attestedPassRefs = fact.refs.filter((r) => r.result === "pass" && r.attested === true);
+    const attestedFailRefs = fact.refs.filter((r) => r.result === "fail" && r.attested === true);
+    expect(attestedPassRefs).toHaveLength(1);
+    expect(attestedFailRefs).toHaveLength(1);
+
+    // present-iff-true convention: the self-reported pass ref must OMIT `attested`,
+    // not carry `attested: false` (mirrors ReadyRecord.claim/.phase elsewhere).
+    const selfReportedPassRef = fact.refs.find(
+      (r) => r.result === "pass" && r.attested !== true,
+    );
+    expect(selfReportedPassRef).toBeDefined();
+    expect(selfReportedPassRef?.attested).toBeUndefined();
+    expect("attested" in (selfReportedPassRef as object)).toBe(false);
   });
 });
 
