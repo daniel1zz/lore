@@ -81,13 +81,65 @@ afterEach(() => {
   }
 });
 
-function createPlan(title: string): string {
-  const r = runLore(["create", "plan", "--title", title, "--no-ai", "--content", "body"], tmpDir);
+function createPlan(title: string, parentSlug?: string): string {
+  const args = ["create", "plan", "--title", title, "--no-ai", "--content", "body"];
+  if (parentSlug !== undefined) args.push("--parent", parentSlug);
+  const r = runLore(args, tmpDir);
   if (r.exitCode !== 0) throw new Error(`create plan failed: ${r.stderr}`);
   const m = r.stdout.match(/Slug:\s+(\S+)/);
   const slug = m?.[1];
   if (!slug) throw new Error(`Could not extract plan slug from: ${r.stdout}`);
   return slug;
+}
+
+/** Create a root PRD and return its slug (specs require a prd parent). */
+function createPrd(title: string): string {
+  const r = runLore(["create", "prd", "--title", title, "--no-ai", "--content", "body"], tmpDir);
+  if (r.exitCode !== 0) throw new Error(`create prd failed: ${r.stderr}`);
+  const m = r.stdout.match(/Slug:\s+(\S+)/);
+  const slug = m?.[1];
+  if (!slug) throw new Error(`Could not extract prd slug from: ${r.stdout}`);
+  return slug;
+}
+
+/** Create a spec under the given prd parent and return its slug. */
+function createSpec(title: string, parentSlug: string): string {
+  const r = runLore(
+    ["create", "spec", "--title", title, "--parent", parentSlug, "--no-ai", "--content", "body"],
+    tmpDir,
+  );
+  if (r.exitCode !== 0) throw new Error(`create spec failed: ${r.stderr}`);
+  const m = r.stdout.match(/Slug:\s+(\S+)/);
+  const slug = m?.[1];
+  if (!slug) throw new Error(`Could not extract spec slug from: ${r.stdout}`);
+  return slug;
+}
+
+/**
+ * Declare a script-mode acceptance criterion on a spec via `lore ac add` (SPEC-038 §4).
+ * Required so `lore evidence --ac <id>` on a task under a plan parented by this spec
+ * resolves against a non-empty declared-id set (TaskWorkflowService.addEvidence's
+ * cross-entity ac_ref validation, SPEC-038 §7 D4) instead of being fail-loud rejected.
+ */
+function declareAc(specSlug: string, acId: string): void {
+  const r = runLore(
+    [
+      "ac",
+      "add",
+      specSlug,
+      acId,
+      "--statement",
+      "The CLI accepts and threads --ac through to evidence.",
+      "--mode",
+      "script",
+      "--oracle",
+      "tsc",
+      "--command",
+      "bun run typecheck",
+    ],
+    tmpDir,
+  );
+  if (r.exitCode !== 0) throw new Error(`lore ac add failed: ${r.stderr}`);
 }
 
 function createTask(planSlug: string, title: string): string {
@@ -261,7 +313,13 @@ describe("lore evidence", () => {
   // the flag is accepted without an argument-parsing error (exit 0).
 
   it("AC-ACODE-3.CLI.H1: --ac <id> is accepted alongside the other required flags (exit 0)", () => {
-    const planSlug = createPlan("Evidence AC Plan");
+    // The task's parent plan must itself be parented by a spec that has
+    // declared the AC id (SPEC-038 §7 D4 cross-entity validation) — otherwise
+    // TaskWorkflowService.addEvidence fail-loud rejects the ac_ref.
+    const prdSlug = createPrd("Evidence AC PRD");
+    const specSlug = createSpec("Evidence AC Spec", prdSlug);
+    declareAc(specSlug, "AC-ACODE-8");
+    const planSlug = createPlan("Evidence AC Plan", specSlug);
     const taskSlug = createTask(planSlug, "AC-Referencing Task");
 
     const result = runLore(
@@ -282,6 +340,37 @@ describe("lore evidence", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("tsc");
+  });
+
+  it("AC-ACODE-3.CLI.N4: --ac <undeclared-id> → exit 4 (VALIDATION_ERROR), no evidence written", () => {
+    // Sibling NEGATIVE case to H1 above: same plan/spec chain, but the id
+    // passed to --ac was never declared via `lore ac add` — must fail loud
+    // rather than silently accepting an unverifiable ac_ref.
+    const prdSlug = createPrd("Evidence AC Undeclared PRD");
+    const specSlug = createSpec("Evidence AC Undeclared Spec", prdSlug);
+    declareAc(specSlug, "AC-ACODE-8");
+    const planSlug = createPlan("Evidence AC Undeclared Plan", specSlug);
+    const taskSlug = createTask(planSlug, "AC-Undeclared-Referencing Task");
+
+    const result = runLore(
+      [
+        "evidence",
+        taskSlug,
+        "--oracle",
+        "tsc",
+        "--command",
+        "bun run typecheck",
+        "--result",
+        "pass",
+        "--ac",
+        "AC-DOES-NOT-EXIST",
+      ],
+      tmpDir,
+    );
+
+    expect(result.exitCode).toBe(4);
+    expect(result.stderr).toContain("ac_ref");
+    expect(result.stderr).toContain("not declared on the parent spec");
   });
 
   it("AC-ACODE-3.CLI.REG1: omitting --ac leaves ac_ref absent (existing no-flag behavior unchanged)", () => {

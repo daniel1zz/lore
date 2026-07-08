@@ -38,7 +38,7 @@ import { MigrationService } from "../../../src/service/migration-service.js";
 import { TreeCheckService } from "../../../src/service/tree-check-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import type { EvidenceInput } from "../../../src/service/task-workflow-service.js";
-import { NoOpTelemetry } from "@lore/core";
+import { NoOpTelemetry, ok } from "@lore/core";
 import type { App } from "../../../src/app.js";
 import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
 import { registerTools } from "../../../src/adapters/mcp/tools.js";
@@ -69,7 +69,19 @@ function makeApp(): App {
     phaseService: null as unknown as App["phaseService"],
     // reason: unlike mcp-tools.test.ts, THIS suite exercises the task-workflow
     // tools, so taskWorkflowService must be a real instance (not null-cast).
-    taskWorkflowService: new TaskWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: 120 }),
+    // The 4th ctor arg stubs SPEC-038 §7 D4's resolveDeclaredAcIds port — this
+    // suite's fixtures (createPlan/createTask below) build plans directly via
+    // CorpusService with no parent spec, so the production port would always
+    // resolve `null` and fail-loud reject any ac_ref. Per the port's own JSDoc
+    // ("Tests can inject a stub without a 3-hop CorpusService fixture" —
+    // task-workflow-service.ts), stub a fixed declared-id set covering the
+    // "AC-ACODE-8" id the ac_ref describe block below exercises.
+    taskWorkflowService: new TaskWorkflowService(
+      store,
+      new NoOpTelemetry(),
+      { claimTtlMinutes: 120 },
+      async () => ok(new Set(["AC-ACODE-8"])),
+    ),
     // reason: SPEC-032 §3.4 — test does not exercise spec-kind audit; null-cast per
     // established pattern (see phaseService above) for satisfying newly-required App fields.
     specKindService: null as unknown as App["specKindService"],
