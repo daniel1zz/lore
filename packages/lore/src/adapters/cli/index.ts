@@ -46,6 +46,7 @@ const main = defineCommand({
     audit: () => import("./commands/audit.js").then((m) => m.default),
     calibration: () => import("./commands/calibration.js").then((m) => m.default),
     review: () => import("./commands/review.js").then((m) => m.default),
+    ac: () => import("./commands/ac.js").then((m) => m.default),
   },
 });
 

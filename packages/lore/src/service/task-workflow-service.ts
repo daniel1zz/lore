@@ -21,9 +21,16 @@
  * @invariant addEvidence/claim/release touch ONLY extra.claim / extra.verification_evidence
  *   — never content, title, or status.
  * @invariant ready() performs zero writes — readiness is computed, never stored (D3).
+ * @invariant addEvidence's optional `ac_ref` is cross-entity validated via the
+ *   constructor-injected `resolveDeclaredAcIds` port (CorpusService owns the actual
+ *   plan→spec graph walk — this service never gains that responsibility itself,
+ *   SPEC-038 §7 D4). An `ac_ref` naming an id absent from the port's result (or a
+ *   `null` result, meaning "parent spec has no structured AC") fails loud with
+ *   VALIDATION_ERROR before any write. Evidence with no `ac_ref` never invokes the
+ *   port — fully backward-compatible with pre-SPEC-038 callers.
  *
  * Side-effect class: IO (reads/writes via StoreInterface; emits telemetry).
- * Source: SPEC-025 §3 D2, D3, D5, D7, D8, D10; §4 AC-WF-1..11; §8.2, §8.3
+ * Source: SPEC-025 §3 D2, D3, D5, D7, D8, D10; §4 AC-WF-1..11; §8.2, §8.3; SPEC-038 §4, §7 D4
  */
 
 import { z } from "zod";
@@ -120,17 +127,37 @@ export class TaskWorkflowService {
   readonly claimTtlMinutes: number;
 
   /**
+   * Narrow port resolving the AC ids declared on a plan's parent spec — implemented
+   * by `CorpusService.resolveDeclaredAcIds` and injected here (never imported
+   * directly: services don't cross-import — SPEC-038 §7 D4). Defaults to a stub that
+   * always resolves `null` ("nothing declared") so every pre-SPEC-038 caller that
+   * constructs this service without the 4th arg keeps compiling and behaving
+   * identically — the default is only ever consulted when an `ac_ref` is actually
+   * supplied to addEvidence, which no pre-SPEC-038 caller does.
+   */
+  private readonly resolveDeclaredAcIds: (
+    planId: string,
+  ) => Promise<Result<Set<string> | null, LoreError>>;
+
+  /**
    * @param store - Storage abstraction (same instance passed to CorpusService)
    * @param telemetry - Telemetry sink (own wiring — D8; defaults to NoOp)
    * @param config - `{ claimTtlMinutes }` — see resolveClaimTtlMinutes in @lore/core
+   * @param resolveDeclaredAcIds - SPEC-038 §7 D4 cross-entity port; production wiring
+   *   is `corpusService.resolveDeclaredAcIds.bind(corpusService)` (app.ts). Tests can
+   *   inject a stub without a 3-hop CorpusService fixture.
    */
   constructor(
     private readonly store: StoreInterface,
     telemetry: Telemetry = new NoOpTelemetry(),
     config: { claimTtlMinutes: number },
+    resolveDeclaredAcIds: (
+      planId: string,
+    ) => Promise<Result<Set<string> | null, LoreError>> = async () => ok(null),
   ) {
     this.telemetry = telemetry;
     this.claimTtlMinutes = config.claimTtlMinutes;
+    this.resolveDeclaredAcIds = resolveDeclaredAcIds;
   }
 
   // ── addEvidence ───────────────────────────────────────────────────────────
@@ -187,6 +214,7 @@ export class TaskWorkflowService {
       recorded_at: nowIso,
       recorded_by: entry.recorded_by,
       ...(entry.output_tail !== undefined ? { output_tail: entry.output_tail } : {}),
+      ...(entry.ac_ref !== undefined ? { ac_ref: entry.ac_ref } : {}),
     };
     const parsedEntry = evidenceEntrySchema.safeParse(candidate);
     if (!parsedEntry.success) {
@@ -197,6 +225,34 @@ export class TaskWorkflowService {
         message: issue !== undefined ? issue.message : "Invalid evidence entry",
         value: candidate,
       });
+    }
+
+    // Cross-entity ac_ref validation (SPEC-038 §4, §7 D4) — only when an ac_ref was
+    // actually supplied. Pre-SPEC-038 evidence (no ac_ref) never reaches this branch.
+    if (parsedEntry.data.ac_ref !== undefined) {
+      if (task.parent_id === null) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "ac_ref",
+          message: `ac_ref "${parsedEntry.data.ac_ref}" cannot be validated — task has no parent plan`,
+          value: parsedEntry.data.ac_ref,
+        });
+      }
+      const declaredResult = await this.resolveDeclaredAcIds(task.parent_id);
+      if (!declaredResult.ok) return declaredResult;
+      const declared = declaredResult.value;
+      if (declared === null || !declared.has(parsedEntry.data.ac_ref)) {
+        const available =
+          declared !== null && declared.size > 0
+            ? Array.from(declared).sort().join(", ")
+            : "(none — parent spec has no structured acceptance_criteria)";
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "ac_ref",
+          message: `ac_ref "${parsedEntry.data.ac_ref}" is not declared on the parent spec. Available ids: ${available}`,
+          value: parsedEntry.data.ac_ref,
+        });
+      }
     }
 
     const newExtra: Record<string, unknown> = {

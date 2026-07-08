@@ -13,6 +13,7 @@ import {
   deriveTypeMeta,
   docPatchSchema,
   slugifyWithCollision,
+  specAcceptanceCriteriaSchema,
   specExtraSchema,
 } from "@lore/core";
 import type { CreateDocInput, DocPatch } from "@lore/core";
@@ -869,6 +870,63 @@ export class CorpusService {
     if (!tasksResult.ok) return tasksResult;
 
     return ok({ plan, ...(spec !== undefined ? { spec } : {}), tasks: tasksResult.value });
+  }
+
+  // ── Declared AC Ids (SPEC-038 §4, §7 D4) ────────────────────────────────
+
+  /**
+   * Resolve the set of acceptance-criterion ids declared on a plan's parent spec —
+   * the single cross-entity traversal locus for `ac_ref` validation, same family as
+   * `getPlanBundle` (plan → parent spec). CorpusService owns this walk because
+   * services never cross-import (service/CLAUDE.md "no cross-service calls");
+   * `TaskWorkflowService.addEvidence` consumes it via a narrow injected port
+   * (`resolveDeclaredAcIds.bind(corpusService)`, wired in `app.ts`) rather than
+   * gaining graph-walking responsibility itself (SPEC-038 §7 D4).
+   *
+   * @param planIdOrSlug - Plan document ULID or slug (typically a task's `parent_id`)
+   * @returns `Set<string>` of declared `AC-*` ids when the plan is parented under a
+   *   spec that has a schema-valid `extra.acceptance_criteria` array; `null` when the
+   *   plan has no parent, the parent isn't a spec, or the parent spec has no
+   *   structured AC (absent or fails `specAcceptanceCriteriaSchema`) — `null` is a
+   *   fact ("nothing declared"), never a thrown error for this class of absence.
+   * @throws DOC_NOT_FOUND when planIdOrSlug does not resolve at all; VALIDATION_ERROR
+   *   when the resolved doc is not a plan
+   *
+   * @example
+   * const idsResult = await corpusService.resolveDeclaredAcIds("plan-my-feature");
+   * if (idsResult.ok && idsResult.value?.has("AC-ACODE-1")) { ... }
+   *
+   * Source: SPEC-038 §4, §7 D4
+   */
+  async resolveDeclaredAcIds(planIdOrSlug: string): Promise<Result<Set<string> | null, LoreError>> {
+    const resolveResult = await this.resolve(planIdOrSlug);
+    if (!resolveResult.ok) return resolveResult;
+
+    const planResult = await this.store.find(resolveResult.value);
+    if (!planResult.ok) return planResult;
+    const plan = planResult.value;
+    if (plan === null || plan.deleted_at !== null) {
+      return err({ code: "DOC_NOT_FOUND", id: resolveResult.value });
+    }
+    if (plan.type !== "plan") {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "type",
+        message: `Expected a plan document; got type '${plan.type}'`,
+        value: plan.type,
+      });
+    }
+
+    if (plan.parent_id === null) return ok(null);
+    const parentResult = await this.store.find(plan.parent_id);
+    if (!parentResult.ok) return parentResult;
+    const parent = parentResult.value;
+    if (parent === null || parent.type !== "spec") return ok(null);
+
+    const parsed = specAcceptanceCriteriaSchema.safeParse(parent.extra["acceptance_criteria"]);
+    if (!parsed.success) return ok(null);
+
+    return ok(new Set(parsed.data.map((c) => c.id)));
   }
 
   /**
