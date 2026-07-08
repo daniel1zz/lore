@@ -25,12 +25,31 @@
  * behaviour (tags there are still extracted) rather than silently swallowing
  * the rest of the document.
  *
- * Source: SPEC-004, SPEC-001 §3.4, SPEC-032 §3.3
+ * Also splices SPEC-038's structured acceptance criteria (spec.extra.acceptance_criteria)
+ * onto the SAME text-projection seam: `resolve()` — when called on a `spec` doc that
+ * declares a non-empty criteria array — additionally queries plans/tasks parented under
+ * that spec (read-only, via the already-injected `StoreInterface`; no new cross-service
+ * call) to compute per-AC evidence coverage (`computeAcCoverage`, `@lore/core`), and
+ * `renderResolvedToMarkdown()` appends a `## Acceptance Criteria (structured)` checklist
+ * after the spliced body. A spec with no declared criteria takes neither code path —
+ * `resolve()` issues zero extra store calls and `renderResolvedToMarkdown()`'s output is
+ * byte-identical to pre-SPEC-038 behaviour (REGRESSION, AC-ACODE-9). This keeps the
+ * app.ts-wired `(doc) => outlineService.resolve(doc).then(renderResolvedToMarkdown)`
+ * callback (CLI `get`, `ExportDocsService`'s injected `ResolveDocBody`) unchanged — the
+ * new capability lives entirely inside this seam's two functions.
+ *
+ * Source: SPEC-004, SPEC-001 §3.4, SPEC-032 §3.3, SPEC-038 §6
  */
 
 import type { DocRecord, DocSummary } from "@lore/core";
 import { ok, err, type Result } from "@lore/core";
 import type { LoreError } from "@lore/core";
+import {
+  specAcceptanceCriteriaSchema,
+  computeAcCoverage,
+  type AcceptanceCriterion,
+  type AcCoverageFact,
+} from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 
 // ─── Public Types ───────────────────────────────────────────────────────────
@@ -54,6 +73,20 @@ export interface ResolutionWarning {
   position: { start: number; end: number };
 }
 
+/**
+ * SPEC-038 §6 text-projection input: a spec's declared structured acceptance criteria
+ * plus their computed evidence coverage. Only ever populated by `resolve()` for a
+ * `spec` doc whose `extra.acceptance_criteria` validates to a non-empty array — see
+ * `renderResolvedToMarkdown`'s AC-ACODE-9 checklist rendering.
+ */
+export interface AcceptanceProjection {
+  criteria: AcceptanceCriterion[];
+  /** One {@link AcCoverageFact} per criterion, in the same order — empty tasks (no
+   *  plan found under the spec) yield `{pass: 0, fail: 0}` for every entry, which
+   *  renders as the "undetermined" `·` prefix. */
+  coverage: AcCoverageFact[];
+}
+
 /** Result of resolving a document's MDX placeholders. */
 export interface ResolvedDoc {
   /** Original unmodified content */
@@ -62,6 +95,8 @@ export interface ResolvedDoc {
   resolvedComponents: ResolvedComponent[];
   /** Non-fatal warnings (stripped unknown components, missing embeds, etc.) */
   warnings: ResolutionWarning[];
+  /** SPEC-038 §6 — present only for a spec doc with declared acceptance criteria. */
+  acceptanceCriteria?: AcceptanceProjection;
 }
 
 export interface ResolveOpts {
@@ -584,6 +619,10 @@ export class OutlineService {
    * Unknown components are stripped with a warning.
    * Store errors propagate as Result errors.
    * Missing embeds degrade gracefully (null data + warning).
+   *
+   * Also resolves SPEC-038 §6's structured-AC projection (see
+   * `resolveAcceptanceProjection`'s JSDoc) — a no-op (zero extra store calls) for any
+   * doc that isn't a `spec` with a non-empty declared `acceptance_criteria` array.
    */
   async resolve(
     doc: DocRecord,
@@ -620,11 +659,62 @@ export class OutlineService {
       });
     }
 
+    const acceptanceResult = await this.resolveAcceptanceProjection(doc);
+    if (!acceptanceResult.ok) {
+      return acceptanceResult;
+    }
+
     return ok({
       content: doc.content,
       resolvedComponents,
       warnings,
+      ...(acceptanceResult.value !== undefined ? { acceptanceCriteria: acceptanceResult.value } : {}),
     });
+  }
+
+  /**
+   * SPEC-038 §6 — computes the {@link AcceptanceProjection} for a `spec` doc's declared
+   * `extra.acceptance_criteria`, or `undefined` when there's nothing to project (not a
+   * spec, field absent, or it fails `specAcceptanceCriteriaSchema` / parses to an empty
+   * array). `extra` is defensively narrowed the same way `doc-type-meta.ts::safeExtra`
+   * does — a corrupted/legacy row's non-object `extra` degrades to "nothing to project"
+   * rather than throwing.
+   *
+   * Coverage is computed over EVERY task under EVERY plan parented directly under this
+   * spec (`store.findMany({type:"plan", parent_id: doc.id})`, then per-plan
+   * `{type:"task", parent_id: plan.id}`) — a spec with no plan yields an empty task set,
+   * which `computeAcCoverage` turns into `{pass:0, fail:0}` for every criterion (renders
+   * as the "·" undetermined prefix, matching AC-ACODE-9's "无 plan 时全部 ·" rule without
+   * a separate branch). All store errors propagate immediately (same policy as
+   * `resolveComponent`'s call sites above).
+   */
+  private async resolveAcceptanceProjection(
+    doc: DocRecord,
+  ): Promise<Result<AcceptanceProjection | undefined, LoreError>> {
+    if (doc.type !== "spec") return ok(undefined);
+
+    const extra: unknown = doc.extra;
+    const rawCriteria =
+      extra !== null && typeof extra === "object" && !Array.isArray(extra)
+        ? (extra as Record<string, unknown>)["acceptance_criteria"]
+        : undefined;
+    if (rawCriteria === undefined) return ok(undefined);
+
+    const parsed = specAcceptanceCriteriaSchema.safeParse(rawCriteria);
+    if (!parsed.success || parsed.data.length === 0) return ok(undefined);
+    const criteria = parsed.data;
+
+    const plansResult = await this.store.findMany({ type: "plan", parent_id: doc.id });
+    if (!plansResult.ok) return plansResult;
+
+    const tasks: DocRecord[] = [];
+    for (const plan of plansResult.value) {
+      const tasksResult = await this.store.findMany({ type: "task", parent_id: plan.id });
+      if (!tasksResult.ok) return tasksResult;
+      tasks.push(...tasksResult.value);
+    }
+
+    return ok({ criteria, coverage: computeAcCoverage(criteria, tasks) });
   }
 
   private async resolveComponent(
@@ -776,6 +866,67 @@ function renderComponentMarkdown(component: ResolvedComponent): string {
   }
 }
 
+// ─── SPEC-038 §6: Structured Acceptance Criteria Checklist ─────────────────
+
+/**
+ * Coverage badge for one AC: `✔` (evidenced pass, no fail), `✘` (any fail — takes
+ * priority over pass), `·` (undetermined — no plan under the spec, or a plan with
+ * no matching evidence yet). Mirrors AC-ACODE-9's coverage-prefix rule exactly.
+ */
+function acCoveragePrefix(fact: AcCoverageFact | undefined): "✔" | "✘" | "·" {
+  if (fact === undefined) return "·";
+  if (fact.fail > 0) return "✘";
+  if (fact.pass > 0) return "✔";
+  return "·";
+}
+
+/**
+ * The indented verify-binding line under one AC bullet — one rendering per
+ * `AcVerifyMode` (AC-ACODE-9): `script` shows `oracle — command`; `ai` shows the
+ * rubric's first 120 characters (long rubrics are truncated, never wrapped);
+ * `human` shows the optional note, or is omitted entirely when no note was
+ * declared (never renders an empty `human:` line).
+ */
+function renderAcVerifyLine(criterion: AcceptanceCriterion): string | undefined {
+  const { verify } = criterion;
+  switch (verify.mode) {
+    case "script":
+      return `  script: ${verify.oracle} — ${verify.command}`;
+    case "ai":
+      return `  ai: ${verify.rubric.slice(0, 120)}`;
+    case "human":
+      return verify.note !== undefined ? `  human: ${verify.note}` : undefined;
+    default: {
+      // Unreachable — acceptanceCriterionSchema's discriminated union covers all
+      // three modes; degrades to a labeled line rather than throwing.
+      const _exhaustive: never = verify;
+      return `  (unknown verify mode: ${JSON.stringify(_exhaustive)})`;
+    }
+  }
+}
+
+/**
+ * Renders the `## Acceptance Criteria (structured)` checklist block appended after a
+ * spec's projected body (AC-ACODE-9). Pure, deterministic — same `criteria` + `coverage`
+ * input always produces the identical string (no wall-clock, no randomness), which is
+ * what keeps `export-docs`'s drift comparison from false-positiving on a spec that
+ * hasn't actually changed (SPEC-021 drift-check precedent).
+ *
+ * @param criteria - Declared acceptance criteria, in declaration order.
+ * @param coverage - One {@link AcCoverageFact} per criterion (same order), or `[]`
+ *   when the spec has no plan (every entry renders with the "·" prefix).
+ */
+function renderAcceptanceCriteriaBlock(criteria: AcceptanceCriterion[], coverage: AcCoverageFact[]): string {
+  const coverageByAcId = new Map(coverage.map((fact) => [fact.ac_id, fact]));
+  const lines = criteria.flatMap((criterion) => {
+    const prefix = acCoveragePrefix(coverageByAcId.get(criterion.id));
+    const bullet = `- [${prefix}] [${criterion.verify.mode}] ${criterion.id}: ${criterion.statement}`;
+    const verifyLine = renderAcVerifyLine(criterion);
+    return verifyLine !== undefined ? [bullet, verifyLine] : [bullet];
+  });
+  return `\n\n## Acceptance Criteria (structured)\n\n${lines.join("\n")}`;
+}
+
 /**
  * Splice a resolve() result's structured component data back into the document's
  * markdown body — the "text projection" step resolve() alone never performs.
@@ -786,9 +937,16 @@ function renderComponentMarkdown(component: ResolvedComponent): string {
  * descending walk never mutates content before an offset it still needs to read.
  * Pure — no store access, no IO; operates only on already-resolved data.
  *
+ * Additionally appends SPEC-038 §6's structured-AC checklist (see
+ * `renderAcceptanceCriteriaBlock`) after the spliced body when `resolved` carries an
+ * `acceptanceCriteria` projection (only ever set for a spec with declared, non-empty
+ * `acceptance_criteria` — see `resolve()`). Every other doc's output is byte-identical
+ * to pre-SPEC-038 behaviour (AC-ACODE-9 REGRESSION).
+ *
  * @param resolved - Output of `OutlineService.resolve()` for one document.
- * @returns Markdown with every whitelisted placeholder replaced by its rendering;
- *   unchanged `resolved.content` when there are no resolved components.
+ * @returns Markdown with every whitelisted placeholder replaced by its rendering,
+ *   plus the AC checklist when declared; unchanged `resolved.content` when there are
+ *   no resolved components and no declared acceptance criteria.
  * @example
  *   const resolved = await outlineService.resolve(doc);
  *   if (resolved.ok) console.log(renderResolvedToMarkdown(resolved.value));
@@ -801,6 +959,12 @@ export function renderResolvedToMarkdown(resolved: ResolvedDoc): string {
   for (const component of byPositionDescending) {
     const rendering = renderComponentMarkdown(component);
     content = content.slice(0, component.position.start) + rendering + content.slice(component.position.end);
+  }
+  if (resolved.acceptanceCriteria !== undefined && resolved.acceptanceCriteria.criteria.length > 0) {
+    content += renderAcceptanceCriteriaBlock(
+      resolved.acceptanceCriteria.criteria,
+      resolved.acceptanceCriteria.coverage,
+    );
   }
   return content;
 }
