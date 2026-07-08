@@ -1,6 +1,7 @@
 /**
- * MCP tool registrations — 23 lore_* tools (16 original + 4 SPEC-025 task-workflow tools
- * + 1 SPEC-026 assess tool + 1 SPEC-035 audit tool + 1 SPEC-034 review tool).
+ * MCP tool registrations — 24 lore_* tools (16 original + 4 SPEC-025 task-workflow tools
+ * + 1 SPEC-026 assess tool + 1 SPEC-035 audit tool + 1 SPEC-034 review tool
+ * + 1 SPEC-039 verify tool).
  *
  * Architecture: Tools with input use the `registerToolWithArgs` helper defined below, which:
  *   1. Calls `server.tool(name, desc, handler)` in 3-arg form (avoids ZodRawShapeCompat type bomb)
@@ -289,6 +290,23 @@ export const LoreReviewSchema = z.object({
   by: z.string().min(1),
 });
 
+/**
+ * Input schema for lore_verify (SPEC-039 §2, §4 AC-VRF-10).
+ * `ac` — optional subset of declared AC ids to run (omitted = every declared
+ * script-mode AC on the plan's parent spec). `task` — optional explicit target
+ * task override (wins over claim-based resolution, `resolveTargetTask` in
+ * `@lore/core`). `by` is required (not defaulted) — same MCP actor-identity
+ * precedent as lore_claim/lore_release/lore_evidence_add/lore_ready: MCP
+ * callers pass actor identity explicitly, unlike the CLI's
+ * $LORE_ACTOR/OS-username fallback.
+ */
+export const LoreVerifySchema = z.object({
+  plan: z.string(),
+  ac: z.array(z.string()).optional(),
+  task: z.string().optional(),
+  by: z.string().min(1),
+});
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /**
@@ -434,9 +452,10 @@ async function reviewDocViaMcp(
 // ─── Tool Registrations ──────────────────────────────────────────────────────
 
 /**
- * Registers all 23 lore_* MCP tools on the given server (16 original + 4 SPEC-025
+ * Registers all 24 lore_* MCP tools on the given server (16 original + 4 SPEC-025
  * task-workflow tools: lore_claim, lore_release, lore_evidence_add, lore_ready;
- * + lore_assess (SPEC-026); + lore_audit (SPEC-035); + lore_review (SPEC-034)).
+ * + lore_assess (SPEC-026); + lore_audit (SPEC-035); + lore_review (SPEC-034);
+ * + lore_verify (SPEC-039)).
  *
  * Tools with input use `registerToolWithArgs` (avoids ZodRawShapeCompat type bomb).
  * Tools without input (`lore_schema`, `lore_status`) use plain `server.tool(name, desc, cb)`.
@@ -856,6 +875,37 @@ export function registerTools(server: McpServer, app: App): void {
       if (!reviewResult.ok) return errorContent(reviewResult.error);
 
       return textContent({ requested_by: args.by, judgment: reviewResult.value });
+    },
+  );
+
+  // ── SPEC-039: trusted runner ──────────────────────────────────────────────
+
+  // lore_verify
+  registerToolWithArgs(
+    server,
+    "lore_verify",
+    "Trusted runner — actually execute a plan's declared script-mode acceptance criteria and record the outcome as runner-attested evidence (result derived from the command's exit code, not a caller assertion)",
+    LoreVerifySchema,
+    async (args) => {
+      // reason: App.verifyRunnerService is typed optional only to keep pre-existing
+      // hand-built App test stubs (outside this task's file anchors) compiling — see
+      // its JSDoc in app.ts. Every production App (createApp) always wires it.
+      if (app.verifyRunnerService === undefined) {
+        return errorContent({
+          code: "STORE_ERROR",
+          message: "Internal error: VerifyRunnerService not wired on App",
+        });
+      }
+
+      const result = await app.verifyRunnerService.verifyPlan(args.plan, {
+        ...(args.ac !== undefined ? { acIds: args.ac } : {}),
+        ...(args.task !== undefined ? { explicitTaskIdOrSlug: args.task } : {}),
+        by: args.by,
+        nowIso: new Date().toISOString(),
+      });
+      if (!result.ok) return errorContent(result.error);
+
+      return textContent(result.value);
     },
   );
 }
