@@ -1,5 +1,22 @@
 {
   "env": {
     "CLAUDE_AC_TRACE_BYPASS": "1"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "$CLAUDE_PROJECT_DIR/hooks/g1-spec-create.sh" },
+          { "type": "command", "command": "$CLAUDE_PROJECT_DIR/hooks/g2-spec-promote.sh" }
+        ]
+      },
+      {
+        "matcher": "mcp__.*lore_create.*",
+        "hooks": [
+          { "type": "command", "command": "$CLAUDE_PROJECT_DIR/hooks/g1-spec-create.sh" }
+        ]
+      }
+    ]
   }
 }

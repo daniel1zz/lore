@@ -1,0 +1,480 @@
+/**
+ * @spec_ref IoC vertical-slice tech-spec §4.1/§11 — Claude Code PreToolUse hook bridge for
+ * `lore gate spec-create` / `lore gate spec-promote` (`hooks/g1-spec-create.sh` +
+ * `hooks/g2-spec-promote.sh`).
+ *
+ * bun test (not vitest): every scenario spawns the real shim scripts (`Bun.spawnSync`) with a
+ * mocked PreToolUse hook payload piped to stdin, against a throwaway corpus (mkdtemp'd temp
+ * dir + `dist/lore init`), mirroring `gate-spec-create.bun.test.ts`'s harness. ⛔ Never touches
+ * the repo's own `.lore/` corpus (project CLAUDE.md hard rule).
+ *
+ * Scenarios under test:
+ *   G1 — Bash `lore create spec` with no parent → shim denies, reason carries `[source:`.
+ *   G1 — Bash `lore create spec` fully compliant → shim allows.
+ *   G1 — unrelated Bash command → allowed (fail-open scope: not a spec-creation call).
+ *   G2 — Bash `lore approve <spec-with-no-AC>` → shim denies.
+ *   G2 — unrelated Bash command → allowed.
+ *   Parse/gate anomalies (malformed stdin, missing binary) → allow, never throw.
+ *   `.claude/settings.json` parses as valid JSON, retains `env.CLAUDE_AC_TRACE_BYPASS`, and
+ *   declares both PreToolUse hook entries.
+ *
+ * Coverage dimensions: HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE / REGRESSION.
+ */
+
+import { describe, expect, it, beforeAll, afterAll } from "bun:test";
+import { mkdirSync, rmSync, readFileSync, existsSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
+
+// ─── Paths ──────────────────────────────────────────────────────────────────
+
+// tests/integration/ → packages/lore/ → packages/ → repo root (4 levels up).
+const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
+const LORE_BIN = join(REPO_ROOT, "dist", "lore");
+const G1_SHIM = join(REPO_ROOT, "hooks", "g1-spec-create.sh");
+const G2_SHIM = join(REPO_ROOT, "hooks", "g2-spec-promote.sh");
+const SEED_SCRIPT = join(REPO_ROOT, "scripts", "seed-write-spec-rule.ts");
+const SETTINGS_JSON = join(REPO_ROOT, ".claude", "settings.json");
+
+interface RunResult {
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly exitCode: number;
+}
+
+interface HookPayload {
+  readonly tool_name: string;
+  readonly tool_input: Record<string, unknown>;
+  readonly cwd: string;
+  readonly hook_event_name?: string;
+}
+
+/** Run the compiled `dist/lore` binary directly (mirrors what the shims themselves invoke). */
+function runLore(args: string[], cwd: string, extraEnv: Record<string, string> = {}): RunResult {
+  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+    cwd,
+    env: { ...process.env, HOME: cwd, ...extraEnv },
+  });
+  return {
+    stdout: proc.stdout.toString(),
+    stderr: proc.stderr.toString(),
+    exitCode: proc.exitCode ?? 1,
+  };
+}
+
+/** Spawn a shim script with a mocked hook payload piped to stdin. */
+function runShim(
+  shimPath: string,
+  payload: HookPayload,
+  extraEnv: Record<string, string> = {},
+): RunResult {
+  const proc = Bun.spawnSync([shimPath], {
+    stdin: Buffer.from(JSON.stringify(payload)),
+    env: { ...process.env, HOME: payload.cwd, CLAUDE_PROJECT_DIR: REPO_ROOT, ...extraEnv },
+  });
+  return {
+    stdout: proc.stdout.toString(),
+    stderr: proc.stderr.toString(),
+    exitCode: proc.exitCode ?? 1,
+  };
+}
+
+function makeTempDir(label: string): string {
+  const dir = join(
+    tmpdir(),
+    `lore-gate-hooks-${label}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  );
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function cleanupDir(dir: string): void {
+  try {
+    rmSync(dir, { recursive: true, force: true });
+  } catch {
+    // best-effort
+  }
+}
+
+function initCorpus(tmpDir: string): void {
+  const result = runLore(["init"], tmpDir);
+  if (result.exitCode !== 0) {
+    throw new Error(`lore init failed: ${result.stderr}`);
+  }
+}
+
+function seedRuleDoc(tmpDir: string): void {
+  const proc = Bun.spawnSync(["bun", "run", SEED_SCRIPT], {
+    cwd: tmpDir,
+    env: { ...process.env, HOME: tmpDir },
+  });
+  if (proc.exitCode !== 0) {
+    throw new Error(`seed-write-spec-rule failed: ${proc.stderr.toString()}`);
+  }
+}
+
+function createPrd(tmpDir: string, title: string): string {
+  const result = runLore(["create", "prd", "--title", title, "--no-ai"], tmpDir);
+  const match = result.stdout.match(/Slug:\s+(\S+)/);
+  const slug = match?.[1];
+  if (slug === undefined) {
+    throw new Error(`could not parse PRD slug from create output: ${result.stdout}`);
+  }
+  return slug;
+}
+
+const COMPLIANT_CONTENT =
+  "## Overview\n\nSome text.\n\n## Scope\n\nIn scope.\n\n## Acceptance Criteria\n\n- AC1\n";
+
+/** Create a compliant spec (legal parent, spec_kind, skeleton) and return its slug. */
+function createSpec(tmpDir: string, parentSlug: string, title: string): string {
+  const result = runLore(
+    [
+      "create",
+      "spec",
+      "--title",
+      title,
+      "--parent",
+      parentSlug,
+      "--kind",
+      "tech",
+      "--content",
+      COMPLIANT_CONTENT,
+      "--no-ai",
+    ],
+    tmpDir,
+  );
+  const match = result.stdout.match(/Slug:\s+(\S+)/);
+  const slug = match?.[1];
+  if (slug === undefined) {
+    throw new Error(`could not parse spec slug from create output: ${result.stdout}`);
+  }
+  return slug;
+}
+
+function addAcceptanceCriterion(tmpDir: string, specSlug: string, id: string): void {
+  const result = runLore(
+    ["ac", "add", specSlug, id, "--statement", "It works.", "--mode", "human"],
+    tmpDir,
+  );
+  if (result.exitCode !== 0) {
+    throw new Error(`ac add failed: ${result.stderr}`);
+  }
+}
+
+function parseHookOutput(stdout: string): { permissionDecision: string; permissionDecisionReason?: string } {
+  const parsed = JSON.parse(stdout.trim()) as {
+    hookSpecificOutput: { permissionDecision: string; permissionDecisionReason?: string };
+  };
+  return parsed.hookSpecificOutput;
+}
+
+// ─── Suite: binaries exist ──────────────────────────────────────────────────
+
+beforeAll(() => {
+  if (!existsSync(LORE_BIN)) {
+    throw new Error(`dist/lore binary not found at ${LORE_BIN} — run \`bun run build\` first`);
+  }
+});
+
+// ─── Suite: G1 (spec-create) ────────────────────────────────────────────────
+
+describe("hooks/g1-spec-create.sh", () => {
+  let tmpDir: string;
+  let prdSlug: string;
+
+  beforeAll(() => {
+    tmpDir = makeTempDir("g1");
+    initCorpus(tmpDir);
+    seedRuleDoc(tmpDir);
+    prdSlug = createPrd(tmpDir, "g1-prd");
+  });
+
+  afterAll(() => cleanupDir(tmpDir));
+
+  // NEGATIVE — non-compliant Bash spec-create (no parent) → deny with feeding pack.
+  it("denies a non-compliant `lore create spec` Bash command, reason carries [source:", () => {
+    const result = runShim(G1_SHIM, {
+      tool_name: "Bash",
+      tool_input: { command: `${LORE_BIN} create spec --title "Bad Spec"` },
+      cwd: tmpDir,
+    });
+    expect(result.exitCode).toBe(0); // the shim itself always exits 0 — verdict is in the JSON
+    const hook = parseHookOutput(result.stdout);
+    expect(hook.permissionDecision).toBe("deny");
+    expect(hook.permissionDecisionReason ?? "").toContain("[source:");
+    expect(hook.permissionDecisionReason ?? "").toContain("PARENT_REQUIRED");
+  });
+
+  // HAPPY — fully compliant Bash spec-create → allow.
+  it("allows a compliant `lore create spec` Bash command", () => {
+    const command =
+      `${LORE_BIN} create spec --title "Good Spec" --parent ${prdSlug} --kind tech ` +
+      `--content "${COMPLIANT_CONTENT.replace(/\n/g, "\\n")}"`;
+    const result = runShim(G1_SHIM, {
+      tool_name: "Bash",
+      tool_input: { command },
+      cwd: tmpDir,
+    });
+    const hook = parseHookOutput(result.stdout);
+    expect(hook.permissionDecision).toBe("allow");
+  });
+
+  // NEGATIVE — non-compliant MCP lore_create call (type=spec) → deny.
+  it("denies a non-compliant MCP lore_create call for type=spec", () => {
+    const result = runShim(G1_SHIM, {
+      tool_name: "mcp__lore__lore_create",
+      tool_input: { type: "spec", title: "MCP bad spec", content: "no headings at all" },
+      cwd: tmpDir,
+    });
+    const hook = parseHookOutput(result.stdout);
+    expect(hook.permissionDecision).toBe("deny");
+    expect(hook.permissionDecisionReason ?? "").toContain("MISSING_SKELETON");
+  });
+
+  // NEGATIVE — MCP lore_create call for a non-spec type → out of scope, allow untouched.
+  it("allows an MCP lore_create call whose type is not spec", () => {
+    const result = runShim(G1_SHIM, {
+      tool_name: "mcp__lore__lore_create",
+      tool_input: { type: "knowledge", title: "Some note", extra: { sub_type: "reference" } },
+      cwd: tmpDir,
+    });
+    const hook = parseHookOutput(result.stdout);
+    expect(hook.permissionDecision).toBe("allow");
+  });
+
+  // BOUNDARY / fail-open scope — unrelated Bash command → allow without any gate invocation.
+  it("allows an unrelated Bash command (fail-open scope: not a spec-creation call)", () => {
+    const result = runShim(G1_SHIM, {
+      tool_name: "Bash",
+      tool_input: { command: "ls -la" },
+      cwd: tmpDir,
+    });
+    const hook = parseHookOutput(result.stdout);
+    expect(hook.permissionDecision).toBe("allow");
+  });
+
+  // STATE — LORE_GATE_BYPASS=1 short-circuits even a non-compliant candidate.
+  it("STATE: LORE_GATE_BYPASS=1 allows even a non-compliant candidate", () => {
+    const result = runShim(
+      G1_SHIM,
+      {
+        tool_name: "Bash",
+        tool_input: { command: `${LORE_BIN} create spec --title "Bad Spec"` },
+        cwd: tmpDir,
+      },
+      { LORE_GATE_BYPASS: "1" },
+    );
+    const hook = parseHookOutput(result.stdout);
+    expect(hook.permissionDecision).toBe("allow");
+  });
+
+  // ERROR — malformed stdin JSON → fail open, never throws / never crashes.
+  it("ERROR: malformed stdin JSON fails open (allow) without throwing", () => {
+    const proc = Bun.spawnSync([G1_SHIM], {
+      stdin: Buffer.from("{not valid json"),
+      env: { ...process.env, CLAUDE_PROJECT_DIR: REPO_ROOT },
+    });
+    expect(proc.exitCode).toBe(0);
+    const hook = parseHookOutput(proc.stdout.toString());
+    expect(hook.permissionDecision).toBe("allow");
+  });
+
+  // ERROR — missing/non-executable lore binary → fail open.
+  it("ERROR: missing lore binary fails open (allow) without throwing", () => {
+    const bogusRoot = makeTempDir("g1-no-binary");
+    try {
+      const result = runShim(
+        G1_SHIM,
+        {
+          tool_name: "Bash",
+          tool_input: { command: `${LORE_BIN} create spec --title "Bad Spec"` },
+          cwd: tmpDir,
+        },
+        { CLAUDE_PROJECT_DIR: bogusRoot },
+      );
+      expect(result.exitCode).toBe(0);
+      const hook = parseHookOutput(result.stdout);
+      expect(hook.permissionDecision).toBe("allow");
+    } finally {
+      cleanupDir(bogusRoot);
+    }
+  });
+
+  // REGRESSION — the shim is read-only: it must never create/mutate corpus documents.
+  it("REGRESSION: never creates any corpus documents, allow or deny path", () => {
+    const before = runLore(["status", "--json"], tmpDir);
+    const beforeTotal = (JSON.parse(before.stdout) as { data: { total_docs: number } }).data
+      .total_docs;
+
+    runShim(G1_SHIM, {
+      tool_name: "Bash",
+      tool_input: { command: `${LORE_BIN} create spec --title "Bad Spec"` },
+      cwd: tmpDir,
+    });
+    runShim(G1_SHIM, {
+      tool_name: "Bash",
+      tool_input: {
+        command: `${LORE_BIN} create spec --title "Good Spec 2" --parent ${prdSlug} --kind tech --content "${COMPLIANT_CONTENT.replace(/\n/g, "\\n")}"`,
+      },
+      cwd: tmpDir,
+    });
+
+    const after = runLore(["status", "--json"], tmpDir);
+    const afterTotal = (JSON.parse(after.stdout) as { data: { total_docs: number } }).data
+      .total_docs;
+    expect(afterTotal).toBe(beforeTotal);
+  });
+});
+
+// ─── Suite: G2 (spec-promote) ───────────────────────────────────────────────
+
+describe("hooks/g2-spec-promote.sh", () => {
+  let tmpDir: string;
+  let prdSlug: string;
+  let noAcSpecSlug: string;
+  let withAcSpecSlug: string;
+
+  beforeAll(() => {
+    tmpDir = makeTempDir("g2");
+    initCorpus(tmpDir);
+    prdSlug = createPrd(tmpDir, "g2-prd");
+    noAcSpecSlug = createSpec(tmpDir, prdSlug, "No AC Spec");
+    withAcSpecSlug = createSpec(tmpDir, prdSlug, "With AC Spec");
+    addAcceptanceCriterion(tmpDir, withAcSpecSlug, "AC-1");
+  });
+
+  afterAll(() => cleanupDir(tmpDir));
+
+  // NEGATIVE — approving a spec with 0 declared ACs → deny.
+  it("denies `lore approve <spec-with-no-AC>`", () => {
+    const result = runShim(G2_SHIM, {
+      tool_name: "Bash",
+      tool_input: { command: `${LORE_BIN} approve ${noAcSpecSlug}` },
+      cwd: tmpDir,
+    });
+    const hook = parseHookOutput(result.stdout);
+    expect(hook.permissionDecision).toBe("deny");
+    expect(hook.permissionDecisionReason ?? "").toContain("no structured acceptance criteria");
+  });
+
+  // HAPPY — approving a spec with ≥1 declared AC → allow.
+  it("allows `lore approve <spec-with-AC>`", () => {
+    const result = runShim(G2_SHIM, {
+      tool_name: "Bash",
+      tool_input: { command: `${LORE_BIN} approve ${withAcSpecSlug}` },
+      cwd: tmpDir,
+    });
+    const hook = parseHookOutput(result.stdout);
+    expect(hook.permissionDecision).toBe("allow");
+  });
+
+  // NEGATIVE — `lore set <spec> --status approved` on a 0-AC spec → deny.
+  it("denies `lore set <spec-with-no-AC> --status approved`", () => {
+    const result = runShim(G2_SHIM, {
+      tool_name: "Bash",
+      tool_input: { command: `${LORE_BIN} set ${noAcSpecSlug} --status approved` },
+      cwd: tmpDir,
+    });
+    const hook = parseHookOutput(result.stdout);
+    expect(hook.permissionDecision).toBe("deny");
+  });
+
+  // BOUNDARY — approving a non-spec doc (PRD) → out of scope, allow (no false-positive block).
+  it("allows `lore approve <prd>` — non-spec docs are out of this gate's scope", () => {
+    const result = runShim(G2_SHIM, {
+      tool_name: "Bash",
+      tool_input: { command: `${LORE_BIN} approve ${prdSlug}` },
+      cwd: tmpDir,
+    });
+    const hook = parseHookOutput(result.stdout);
+    expect(hook.permissionDecision).toBe("allow");
+  });
+
+  // BOUNDARY / fail-open scope — unrelated Bash command → allow.
+  it("allows an unrelated Bash command", () => {
+    const result = runShim(G2_SHIM, {
+      tool_name: "Bash",
+      tool_input: { command: "git status" },
+      cwd: tmpDir,
+    });
+    const hook = parseHookOutput(result.stdout);
+    expect(hook.permissionDecision).toBe("allow");
+  });
+
+  // STATE — LORE_GATE_BYPASS=1 short-circuits a 0-AC spec approve.
+  it("STATE: LORE_GATE_BYPASS=1 allows approving a 0-AC spec", () => {
+    const result = runShim(
+      G2_SHIM,
+      {
+        tool_name: "Bash",
+        tool_input: { command: `${LORE_BIN} approve ${noAcSpecSlug}` },
+        cwd: tmpDir,
+      },
+      { LORE_GATE_BYPASS: "1" },
+    );
+    const hook = parseHookOutput(result.stdout);
+    expect(hook.permissionDecision).toBe("allow");
+  });
+
+  // ERROR — malformed stdin JSON → fail open, never throws.
+  it("ERROR: malformed stdin JSON fails open (allow) without throwing", () => {
+    const proc = Bun.spawnSync([G2_SHIM], {
+      stdin: Buffer.from("not json at all {{{"),
+      env: { ...process.env, CLAUDE_PROJECT_DIR: REPO_ROOT },
+    });
+    expect(proc.exitCode).toBe(0);
+    const hook = parseHookOutput(proc.stdout.toString());
+    expect(hook.permissionDecision).toBe("allow");
+  });
+
+  // ERROR — approve targeting a doc id that does not resolve → fail open (lore get fails).
+  it("ERROR: unresolvable doc id fails open (allow)", () => {
+    const result = runShim(G2_SHIM, {
+      tool_name: "Bash",
+      tool_input: { command: `${LORE_BIN} approve does-not-exist-slug` },
+      cwd: tmpDir,
+    });
+    const hook = parseHookOutput(result.stdout);
+    expect(hook.permissionDecision).toBe("allow");
+  });
+
+  // REGRESSION — the shim is read-only: it must never mutate the target doc's status.
+  it("REGRESSION: never changes doc status, allow or deny path", () => {
+    const before = runLore(["get", noAcSpecSlug, "--json"], tmpDir);
+    const beforeStatus = (JSON.parse(before.stdout) as { data: { doc: { status: string } } }).data
+      .doc.status;
+
+    runShim(G2_SHIM, {
+      tool_name: "Bash",
+      tool_input: { command: `${LORE_BIN} approve ${noAcSpecSlug}` },
+      cwd: tmpDir,
+    });
+
+    const after = runLore(["get", noAcSpecSlug, "--json"], tmpDir);
+    const afterStatus = (JSON.parse(after.stdout) as { data: { doc: { status: string } } }).data
+      .doc.status;
+    expect(afterStatus).toBe(beforeStatus);
+  });
+});
+
+// ─── Suite: .claude/settings.json wiring ────────────────────────────────────
+
+describe(".claude/settings.json PreToolUse hook wiring", () => {
+  it("parses as valid JSON, keeps env.CLAUDE_AC_TRACE_BYPASS, and declares both hooks", () => {
+    const raw = readFileSync(SETTINGS_JSON, "utf-8");
+    const settings = JSON.parse(raw) as {
+      env?: Record<string, string>;
+      hooks?: { PreToolUse?: Array<{ matcher: string; hooks: Array<{ type: string; command: string }> }> };
+    };
+
+    expect(settings.env?.["CLAUDE_AC_TRACE_BYPASS"]).toBe("1");
+
+    const preToolUse = settings.hooks?.PreToolUse ?? [];
+    expect(preToolUse.length).toBeGreaterThan(0);
+
+    const allCommands = preToolUse.flatMap((entry) => entry.hooks.map((h) => h.command));
+    expect(allCommands.some((c) => c.includes("g1-spec-create.sh"))).toBe(true);
+    expect(allCommands.some((c) => c.includes("g2-spec-promote.sh"))).toBe(true);
+  });
+});
