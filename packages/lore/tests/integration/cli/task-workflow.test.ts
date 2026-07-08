@@ -251,6 +251,57 @@ describe("lore evidence", () => {
 
     expect(result.exitCode).toBe(4);
   });
+
+  // ── SPEC-038 §4/§7 D3 — --ac flag threads ac_ref through to the service ──────
+  // NOTE: this suite spawns the CLI as a subprocess, so the service call args
+  // cannot be spied on from here. The adapter-boundary assertion (--ac parses
+  // and lands on the EvidenceInput passed to TaskWorkflowService.addEvidence)
+  // lives in tests/unit/adapters/cli-evidence-ac-ref.bun.test.ts (in-process,
+  // same file as the rest of the flag-parsing tests). This test only confirms
+  // the flag is accepted without an argument-parsing error (exit 0).
+
+  it("AC-ACODE-3.CLI.H1: --ac <id> is accepted alongside the other required flags (exit 0)", () => {
+    const planSlug = createPlan("Evidence AC Plan");
+    const taskSlug = createTask(planSlug, "AC-Referencing Task");
+
+    const result = runLore(
+      [
+        "evidence",
+        taskSlug,
+        "--oracle",
+        "tsc",
+        "--command",
+        "bun run typecheck",
+        "--result",
+        "pass",
+        "--ac",
+        "AC-ACODE-8",
+      ],
+      tmpDir,
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("tsc");
+  });
+
+  it("AC-ACODE-3.CLI.REG1: omitting --ac leaves ac_ref absent (existing no-flag behavior unchanged)", () => {
+    const planSlug = createPlan("Evidence No-AC Plan");
+    const taskSlug = createTask(planSlug, "No-AC Task");
+
+    const result = runLore(
+      ["evidence", taskSlug, "--oracle", "tsc", "--command", "cmd", "--result", "pass", "--json"],
+      tmpDir,
+    );
+
+    expect(result.exitCode).toBe(0);
+    const parsed = JSON.parse(result.stdout) as {
+      ok: boolean;
+      data?: { doc?: { extra?: { verification_evidence?: Array<{ ac_ref?: string }> } } };
+    };
+    const entries = parsed.data?.doc?.extra?.verification_evidence ?? [];
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.ac_ref).toBeUndefined();
+  });
 });
 
 // ─── lore ready — BOUNDARY (flat JSON shape, AC-WF-8/D9) ─────────────────────

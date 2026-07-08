@@ -12,15 +12,19 @@
  * extract handlers from the internal _registeredTools map, invoke directly.
  *
  * Coverage:
- *   HAPPY:      each of the 4 tools succeeds and returns { doc } / { ready }
+ *   HAPPY:      each of the 4 tools succeeds and returns { doc } / { ready };
+ *               lore_evidence_add's optional ac_ref (SPEC-038 §4) is threaded
+ *               through to the EvidenceInput passed to the service (adapter
+ *               boundary only — see the "ac_ref" describe block below for why)
  *   NEGATIVE:   lore_claim conflict envelope; lore_ready on a non-plan doc
  *   BOUNDARY:   lore_ready on an empty plan → { ready: [] }
  *   ERROR:      isError=true + LoreError JSON on failure (all 4 tools)
  *   STATE:      claim → release → re-claim state machine round-trip via MCP
  *   REGRESSION: `by` is required (schema rejects/omits — MCP callers always pass
- *               it explicitly, unlike the CLI's env/OS-username fallback)
+ *               it explicitly, unlike the CLI's env/OS-username fallback);
+ *               omitting ac_ref leaves it absent from the service call arg
  *
- * @spec_ref AC-WF-10
+ * @spec_ref AC-WF-10 AC-ACODE-3 AC-ACODE-8
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
@@ -33,6 +37,7 @@ import { OutlineService } from "../../../src/service/outline-service.js";
 import { MigrationService } from "../../../src/service/migration-service.js";
 import { TreeCheckService } from "../../../src/service/tree-check-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
+import type { EvidenceInput } from "../../../src/service/task-workflow-service.js";
 import { NoOpTelemetry } from "@lore/core";
 import type { App } from "../../../src/app.js";
 import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
@@ -278,6 +283,74 @@ describe("lore_evidence_add", () => {
       expect(result.isError).toBe(true);
       const error = parseResult(result) as { code: string };
       expect(error.code).toBe("DOC_NOT_FOUND");
+    });
+  });
+
+  // ── SPEC-038 §4/§7 D3 — optional ac_ref pass-through ─────────────────────────
+  // Scope note: this suite is adapter-only (SPEC-038 §7 D3 T2). Whether
+  // TaskWorkflowService.addEvidence *persists* ac_ref onto the stored entry is
+  // T3's responsibility (SPEC-038 §4 D4) and is not yet landed on this branch —
+  // so these tests assert on the argument the tool handler passes to the
+  // service (an instance-level spy wrapping the real addEvidence, which still
+  // delegates to it so the round trip itself is unaffected), not on the
+  // persisted DocRecord.
+  describe("ac_ref (SPEC-038) — adapter → service call arg", () => {
+    function spyOnAddEvidence(): { captured: () => EvidenceInput | undefined; restore: () => void } {
+      const original = app.taskWorkflowService.addEvidence.bind(app.taskWorkflowService);
+      let capturedEntry: EvidenceInput | undefined;
+      app.taskWorkflowService.addEvidence = ((idOrSlug: string, entry: EvidenceInput, now?: () => string) => {
+        capturedEntry = entry;
+        return original(idOrSlug, entry, now);
+      }) as typeof app.taskWorkflowService.addEvidence;
+      return {
+        captured: () => capturedEntry,
+        restore: () => {
+          app.taskWorkflowService.addEvidence = original;
+        },
+      };
+    }
+
+    it("HAPPY: ac_ref is threaded through to the EvidenceInput passed to the service", async () => {
+      const planId = await createPlan();
+      const taskId = await createTask(planId);
+      const spy = spyOnAddEvidence();
+
+      try {
+        const result = await call()({
+          id_or_slug: taskId,
+          oracle: "tsc",
+          command: "bun run typecheck",
+          result: "pass",
+          recorded_by: "alice",
+          ac_ref: "AC-ACODE-8",
+        });
+        expect(result.isError).toBeFalsy();
+        expect(spy.captured()?.ac_ref).toBe("AC-ACODE-8");
+      } finally {
+        spy.restore();
+      }
+    });
+
+    it("REGRESSION: omitting ac_ref leaves it absent from the EvidenceInput (schema field is optional)", async () => {
+      const planId = await createPlan();
+      const taskId = await createTask(planId);
+      const spy = spyOnAddEvidence();
+
+      try {
+        const result = await call()({
+          id_or_slug: taskId,
+          oracle: "tsc",
+          command: "cmd",
+          result: "pass",
+          recorded_by: "alice",
+        });
+        expect(result.isError).toBeFalsy();
+        const entry = spy.captured();
+        expect(entry).toBeDefined();
+        expect(entry && "ac_ref" in entry).toBe(false);
+      } finally {
+        spy.restore();
+      }
     });
   });
 });
