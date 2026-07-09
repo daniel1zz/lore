@@ -116,20 +116,45 @@ const SyncConfigSchema = z
 // ─── Workflow Section Schema ───────────────────────────────────────────────
 
 /**
- * Task execution workflow configuration (SPEC-025).
- * Controls the advisory claim-lease TTL consumed by TaskWorkflowService.
+ * Per-checkpoint override for `lore gate` (IoC vertical-slice tech-spec §4.1/§11).
+ * `enabled` is OPTIONAL — its absence (and the absence of the whole `gates` map, and
+ * the absence of the whole `workflow` section) all mean "enabled", which is what keeps
+ * a pre-existing `.lore/config.yaml` with no `workflow.gates` key gating exactly as it
+ * did before this field existed (no breaking change).
+ */
+const GateCheckpointConfigSchema = z
+  .object({
+    /** `false` disables this checkpoint entirely; absent or `true` leaves it enabled. */
+    enabled: z.boolean().optional(),
+  })
+  .strict();
+
+/**
+ * Task execution workflow configuration (SPEC-025) + gate enable/disable overrides.
+ * Controls the advisory claim-lease TTL consumed by TaskWorkflowService, and (per
+ * checkpoint) whether `lore gate` even runs its predicates.
  *
  * @invariant claim_ttl_minutes defaults to 120 — an order of magnitude above
  *   realistic clock skew between machines (SPEC-025 §5 risk table).
+ * @invariant `gates` is keyed by `GateCheckpoint` id (`"spec-create" | "spec-promote" |
+ *   "plan-promote" | "task-claim"`, `packages/lore/src/service/checkpoint-registry.ts`)
+ *   but typed here as a generic `Record<string, ...>` — this module MUST NOT import
+ *   from `packages/lore` (leaf-of-dependency-graph invariant, `packages/core/src/CLAUDE.md`).
+ *   An unknown key here is NOT a Zod validation error — it is inert (no checkpoint reads
+ *   it) — only the four real checkpoint ids have any effect. This mirrors `sync`/`ai`
+ *   sections in that unrecognized *nested* keys inside `gates.<key>` are still rejected
+ *   by `.strict()`, but the checkpoint-id key itself is intentionally permissive.
  */
 const WorkflowConfigSchema = z
   .object({
     /** Minutes after which an unrefreshed claim becomes stale and reclaimable. */
     claim_ttl_minutes: z.number().int().positive().default(120),
+    /** Per-checkpoint `lore gate` enable/disable overrides. Absent → all enabled. */
+    gates: z.record(z.string(), GateCheckpointConfigSchema).optional(),
   })
   .strict();
 
-/** Task execution workflow config section. Source: SPEC-025 §3 D2. */
+/** Task execution workflow config section. Source: SPEC-025 §3 D2; `gates` added for gate on/off overrides. */
 export type WorkflowConfig = z.infer<typeof WorkflowConfigSchema>;
 
 // ─── Audit Section Schema ───────────────────────────────────────────────────
@@ -248,6 +273,35 @@ export type LoreConfig = z.infer<typeof LoreConfigSchema>;
  */
 export function resolveClaimTtlMinutes(config: LoreConfig | undefined): number {
   return (config?.workflow ?? WorkflowConfigSchema.parse({})).claim_ttl_minutes;
+}
+
+/**
+ * Resolve whether a given `lore gate` checkpoint is enabled, per
+ * `workflow.gates.<checkpoint>.enabled`. Absence of the whole config, the `workflow`
+ * section, the `gates` map, or the per-checkpoint entry ALL mean "enabled" — only an
+ * EXPLICIT `enabled: false` disables a checkpoint. This keeps every pre-existing
+ * `.lore/config.yaml` (written before this field existed) gating exactly as before.
+ *
+ * @param config - Parsed LoreConfig, or undefined when no config file was loaded
+ * @param checkpoint - Gate checkpoint id (e.g. `"task-claim"`). Typed as a plain
+ *   `string` because `@lore/core` does not import `GateCheckpoint` from
+ *   `packages/lore/src/service/checkpoint-registry.ts` (leaf-of-dependency-graph
+ *   invariant) — callers pass their own `GateCheckpoint` value, which structurally
+ *   satisfies `string`.
+ * @returns `false` iff `workflow.gates.<checkpoint>.enabled === false`; `true` otherwise
+ * @example
+ *   resolveGateEnabled(undefined, "task-claim") // => true
+ *   resolveGateEnabled({ project, workflow: {} }, "task-claim") // => true (no gates map)
+ *   resolveGateEnabled(
+ *     { project, workflow: { gates: { "task-claim": { enabled: false } } } },
+ *     "task-claim",
+ *   ) // => false
+ */
+export function resolveGateEnabled(
+  config: LoreConfig | undefined,
+  checkpoint: string,
+): boolean {
+  return config?.workflow?.gates?.[checkpoint]?.enabled !== false;
 }
 
 /**

@@ -51,6 +51,17 @@
  * so it is audit-log-visible at the shell/process level even though this command
  * itself performs no corpus writes).
  *
+ * `.lore/config.yaml`'s `workflow.gates.<checkpoint>.enabled` (SPEC-0XX, `@lore/core`
+ * `resolveGateEnabled`) is a SECOND, narrower escape hatch — it disables exactly ONE
+ * checkpoint rather than all four, and only when explicitly set to `false` (absence of
+ * the whole config, `workflow`, `gates`, or the per-checkpoint entry all mean "enabled" —
+ * backward compatible with every config written before this field existed). Precedence,
+ * highest first: (1) `LORE_GATE_BYPASS=1` — checked before config is even loaded; (2)
+ * per-checkpoint `enabled: false` — checked immediately after `loadLoreApp()`, before any
+ * predicate runs; (3) the checkpoint's own deterministic predicates. A disabled checkpoint
+ * prints a one-line stderr note (`gate: <checkpoint> disabled by config`) and exits 0 —
+ * see each subcommand's `run()`.
+ *
  * Exit codes (plan-promote / task-claim):
  *   0 = no spec-tier ancestor (vacuous pass), OR ancestor spec passes its checkpoint's
  *       predicates, OR LORE_GATE_BYPASS=1
@@ -98,10 +109,10 @@ import {
   type GateCheckpoint,
   type GateContext,
 } from "../../../service/checkpoint-registry.js";
-import { runDeterministicChecks } from "@lore/core";
+import { runDeterministicChecks, resolveGateEnabled } from "@lore/core";
 import type { App } from "../../../app.js";
 import type { AcService } from "../../../service/ac-service.js";
-import type { DocRecord, LoreError, NewReviewJudgment } from "@lore/core";
+import type { DocRecord, LoreConfig, LoreError, NewReviewJudgment } from "@lore/core";
 
 /**
  * `applies_to` scope this gate discovers its feeding skill by — matches the
@@ -187,8 +198,9 @@ export default defineCommand({
           return;
         }
 
-        const { app } = loadLoreApp();
+        const { app, config } = loadLoreApp();
         try {
+          if (isGateDisabledByConfig("spec-create", config)) return;
           await runSpecCreateGate(app, parsed.data);
         } finally {
           app.close();
@@ -218,8 +230,9 @@ export default defineCommand({
           return;
         }
 
-        const { app } = loadLoreApp();
+        const { app, config } = loadLoreApp();
         try {
+          if (isGateDisabledByConfig("spec-promote", config)) return;
           await runSpecPromoteGate(app, args.spec as string);
         } finally {
           app.close();
@@ -249,8 +262,9 @@ export default defineCommand({
           return;
         }
 
-        const { app } = loadLoreApp();
+        const { app, config } = loadLoreApp();
         try {
+          if (isGateDisabledByConfig("plan-promote", config)) return;
           await runPlanPromoteGate(app, args.plan as string);
         } finally {
           app.close();
@@ -280,8 +294,9 @@ export default defineCommand({
           return;
         }
 
-        const { app } = loadLoreApp();
+        const { app, config } = loadLoreApp();
         try {
+          if (isGateDisabledByConfig("task-claim", config)) return;
           await runTaskClaimGate(app, args.task as string);
         } finally {
           app.close();
@@ -290,6 +305,30 @@ export default defineCommand({
     }),
   },
 });
+
+/**
+ * Checks `workflow.gates.<checkpoint>.enabled` (`@lore/core::resolveGateEnabled`) before
+ * a checkpoint's predicates run. Precedence (module header): `LORE_GATE_BYPASS=1` (already
+ * checked, before `config` was even loaded) ≥ this per-checkpoint disable ≥ the checkpoint's
+ * own predicates. When explicitly disabled, writes the one-line stderr note and sets exit
+ * code 0 — callers `return` immediately afterward without invoking their `runXGate` helper.
+ *
+ * @param checkpoint - Checkpoint id this `run()` belongs to.
+ * @param config - `loadLoreApp()`'s resolved project config (may be `undefined`).
+ * @returns `true` iff the checkpoint is disabled (caller must return without gating);
+ *   `false` iff the caller should proceed to run the checkpoint normally.
+ */
+function isGateDisabledByConfig(
+  checkpoint: GateCheckpoint,
+  config: LoreConfig | undefined,
+): boolean {
+  if (resolveGateEnabled(config, checkpoint)) {
+    return false;
+  }
+  process.stderr.write(`gate: ${checkpoint} disabled by config\n`);
+  process.exitCode = 0;
+  return true;
+}
 
 /**
  * Runs the three `gate-predicates.js` checks against `input`, printing either a pass

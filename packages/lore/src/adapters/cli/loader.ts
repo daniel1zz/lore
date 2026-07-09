@@ -100,19 +100,25 @@ function detectCliSurface(): CallerSurface {
  * reason: Adding defaults to the return type (not to App) keeps App composition-root
  * pure — defaults are CLI display preferences, not domain state. (SPEC-003 §6.2)
  *
- * @returns { app, dbPath, defaults } — App wired with telemetry; dbPath for commands
- *   that need it; defaults (editor/format/color) merged from global + project config.
+ * @returns { app, dbPath, defaults, config } — App wired with telemetry; dbPath for
+ *   commands that need it; defaults (editor/format/color) merged from global + project
+ *   config; config is the parsed project `.lore/config.yaml` (sync section stripped,
+ *   same value passed to `createApp`), or `undefined` when no config file was found or
+ *   it failed to parse (matching the historical silent-fallback for non-`ai` sections —
+ *   see this function's header). Callers that need e.g. `workflow.gates` read `config`
+ *   directly; it is intentionally the raw parsed shape, not yet another resolved helper.
  * @throws process.exit if no .lore/lore.db found in directory tree (code 1), if
  *   ai.provider references an unknown provider name (AC-AI-11, code 1), or if the `ai`
  *   config block itself fails schema validation (SPEC-030 AC-HJ-3, code from exitCode())
  * @example
- *   const { app, defaults } = loadLoreApp();
+ *   const { app, defaults, config } = loadLoreApp();
  *   try { ... } finally { app.close(); }
  */
 export function loadLoreApp(): {
   app: App;
   dbPath: string;
   defaults: LoreDefaults;
+  config: LoreConfig | undefined;
 } {
   const dbPath = findLoreDbPath();
   // The .lore dir is always one level up from lore.db
@@ -195,5 +201,5 @@ export function loadLoreApp(): {
   // resolves per-request in ActorContext — see SPEC-024 §9.2.
   app.callerSurface = detectCliSurface();
 
-  return { app, dbPath, defaults };
+  return { app, dbPath, defaults, config: telemetryOnlyConfig };
 }
