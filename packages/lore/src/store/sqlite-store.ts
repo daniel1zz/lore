@@ -86,6 +86,24 @@ export class SQLiteStore implements StoreInterface {
     this.runMigrations();
   }
 
+  /**
+   * Applies every pending migration in order, gated by `PRAGMA user_version`.
+   *
+   * @invariant migration-004 is wrapped in its own `BEGIN IMMEDIATE; ... COMMIT;`
+   *   (see `migrations/migration-004.ts`'s module JSDoc) — this is the FIRST
+   *   migration in the file that needs it (001-003 are pure additive `CREATE
+   *   TABLE/INDEX IF NOT EXISTS`, safe to re-run statement-by-statement even
+   *   half-applied). bun:sqlite's `db.exec()` (`Database.exec = Database.run`)
+   *   does NOT auto-rollback when a statement inside a multi-statement string
+   *   throws — reproduced empirically: after a caught `exec()` error mid an
+   *   explicit `BEGIN`, `db.inTransaction` stays `true` until something issues
+   *   `ROLLBACK`. Left unhandled, that would wedge this connection in an open
+   *   transaction for the rest of the process's lifetime (every subsequent
+   *   statement — migrations 1-3 included, and all later CRUD — would silently
+   *   execute inside that dangling transaction instead of autocommitting). The
+   *   catch below issues an explicit `ROLLBACK` before re-throwing so a failed
+   *   migration-004 leaves the connection exactly as unmigrated as it found it.
+   */
   private runMigrations(): void {
     const currentVersion = (
       this.db.query("PRAGMA user_version").get() as { user_version: number }
@@ -105,7 +123,20 @@ export class SQLiteStore implements StoreInterface {
     }
 
     if (currentVersion < 4) {
-      this.db.exec(MIGRATION_004_SQL);
+      try {
+        this.db.exec(MIGRATION_004_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: ROLLBACK itself throws only when there is no open
+          // transaction to roll back (e.g. the migration's own `BEGIN
+          // IMMEDIATE` never ran because the syntax error was in the BEGIN
+          // statement itself) — safe to ignore; `error` below is what the
+          // caller needs to see.
+        }
+        throw error;
+      }
     }
   }
 

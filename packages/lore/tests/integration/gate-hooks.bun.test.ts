@@ -14,9 +14,19 @@
  *   G1 — unrelated Bash command → allowed (fail-open scope: not a spec-creation call).
  *   G2 — Bash `lore approve <spec-with-no-AC>` → shim denies.
  *   G2 — unrelated Bash command → allowed.
+ *   G3 — MCP `lore_approve` / `lore_set` on a plan whose ancestor spec is unapproved →
+ *        shim denies (adversarial-review FIX 2: MCP is the SPEC-024 DEFAULT agent
+ *        surface, so g3 must gate it exactly like the Bash `lore approve`/`lore set
+ *        --status` shapes — a Bash-only shim would let an MCP-driven agent bypass
+ *        plan-promote entirely).
+ *   G3 — MCP `lore_approve` on the same plan once its ancestor spec is approved with
+ *        ≥1 declared AC → shim allows.
+ *   G3 — MCP `lore_set` without a `status` field, or targeting a non-plan doc → out of
+ *        scope, allowed.
  *   Parse/gate anomalies (malformed stdin, missing binary) → allow, never throw.
  *   `.claude/settings.json` parses as valid JSON, retains `env.CLAUDE_AC_TRACE_BYPASS`, and
- *   declares both PreToolUse hook entries.
+ *   declares both PreToolUse hook entries (including the new MCP `lore_approve`/`lore_set`
+ *   matchers wired to g2 + g3).
  *
  * Coverage dimensions: HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE / REGRESSION.
  */
@@ -33,6 +43,7 @@ const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$
 const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 const G1_SHIM = join(REPO_ROOT, "hooks", "g1-spec-create.sh");
 const G2_SHIM = join(REPO_ROOT, "hooks", "g2-spec-promote.sh");
+const G3_SHIM = join(REPO_ROOT, "hooks", "g3-plan-promote.sh");
 const SEED_SCRIPT = join(REPO_ROOT, "scripts", "seed-write-spec-rule.ts");
 const SETTINGS_JSON = join(REPO_ROOT, ".claude", "settings.json");
 
@@ -159,6 +170,28 @@ function addAcceptanceCriterion(tmpDir: string, specSlug: string, id: string): v
   );
   if (result.exitCode !== 0) {
     throw new Error(`ac add failed: ${result.stderr}`);
+  }
+}
+
+/** Create a plan parented under `parentSlug` (a spec or PRD) and return its slug. */
+function createPlan(tmpDir: string, parentSlug: string, title: string): string {
+  const result = runLore(
+    ["create", "plan", "--title", title, "--parent", parentSlug, "--content", "Plan body.", "--no-ai"],
+    tmpDir,
+  );
+  const match = result.stdout.match(/Slug:\s+(\S+)/);
+  const slug = match?.[1];
+  if (slug === undefined) {
+    throw new Error(`could not parse plan slug from create output: ${result.stdout}`);
+  }
+  return slug;
+}
+
+/** Fast-tracks a doc from draft straight to approved via the real CLI (not the shim). */
+function approveViaCli(tmpDir: string, idOrSlug: string): void {
+  const result = runLore(["approve", idOrSlug], tmpDir);
+  if (result.exitCode !== 0) {
+    throw new Error(`approve failed: ${result.stderr}`);
   }
 }
 
@@ -458,6 +491,115 @@ describe("hooks/g2-spec-promote.sh", () => {
   });
 });
 
+// ─── Suite: G3 (plan-promote) — adversarial-review FIX 2 (MCP bypass) ───────
+
+describe("hooks/g3-plan-promote.sh", () => {
+  let tmpDir: string;
+  let prdSlug: string;
+  let specSlug: string;
+  let planSlug: string;
+
+  beforeAll(() => {
+    tmpDir = makeTempDir("g3");
+    initCorpus(tmpDir);
+    prdSlug = createPrd(tmpDir, "g3-prd");
+    specSlug = createSpec(tmpDir, prdSlug, "G3 Target Spec");
+    planSlug = createPlan(tmpDir, specSlug, "G3 Plan");
+  });
+
+  afterAll(() => cleanupDir(tmpDir));
+
+  // NEGATIVE — MCP lore_approve on a plan whose ancestor spec is still draft → deny.
+  // This is the exact gap FIX 2 closes: before the fix, g3 only had a "Bash" matcher
+  // and `[ "$TOOL_NAME" != "Bash" ]` short-circuited every MCP call straight to allow.
+  it("MCP: denies lore_approve on a plan whose ancestor spec is draft (unapproved)", () => {
+    const result = runShim(G3_SHIM, {
+      tool_name: "mcp__lore__lore_approve",
+      tool_input: { id_or_slug: planSlug },
+      cwd: tmpDir,
+    });
+    const hook = parseHookOutput(result.stdout);
+    expect(hook.permissionDecision).toBe("deny");
+    expect(hook.permissionDecisionReason ?? "").toContain("UPSTREAM_NOT_APPROVED");
+  });
+
+  // NEGATIVE — MCP lore_set with status=approved on the same plan → deny (mirrors the
+  // Bash `--status (in-review|approved)` filter).
+  it("MCP: denies lore_set with status=approved on a plan whose ancestor spec is draft", () => {
+    const result = runShim(G3_SHIM, {
+      tool_name: "mcp__lore__lore_set",
+      tool_input: { id_or_slug: planSlug, status: "approved" },
+      cwd: tmpDir,
+    });
+    const hook = parseHookOutput(result.stdout);
+    expect(hook.permissionDecision).toBe("deny");
+  });
+
+  // BOUNDARY — MCP lore_set with no `status` field at all → out of scope (not a
+  // status-changing call), allowed without invoking the gate.
+  it("MCP: allows lore_set on the same plan when status is omitted (not a status-changing call)", () => {
+    const result = runShim(G3_SHIM, {
+      tool_name: "mcp__lore__lore_set",
+      tool_input: { id_or_slug: planSlug, title: "Renamed via MCP" },
+      cwd: tmpDir,
+    });
+    const hook = parseHookOutput(result.stdout);
+    expect(hook.permissionDecision).toBe("allow");
+  });
+
+  // BOUNDARY — MCP lore_approve targeting a non-plan doc (the spec itself) → out of
+  // scope, allowed (mirrors the Bash doc-type pre-check).
+  it("MCP: allows lore_approve on a non-plan doc (the spec itself) — out of scope", () => {
+    const result = runShim(G3_SHIM, {
+      tool_name: "mcp__lore__lore_approve",
+      tool_input: { id_or_slug: specSlug },
+      cwd: tmpDir,
+    });
+    const hook = parseHookOutput(result.stdout);
+    expect(hook.permissionDecision).toBe("allow");
+  });
+
+  // BOUNDARY / fail-open scope — an unrelated MCP tool call → allowed.
+  it("MCP: allows an unrelated MCP tool call (fail-open scope)", () => {
+    const result = runShim(G3_SHIM, {
+      tool_name: "mcp__lore__lore_get",
+      tool_input: { id_or_slug: planSlug },
+      cwd: tmpDir,
+    });
+    const hook = parseHookOutput(result.stdout);
+    expect(hook.permissionDecision).toBe("allow");
+  });
+
+  // HAPPY — once the ancestor spec is approved with ≥1 declared AC, MCP lore_approve
+  // on the plan allows. This deliberately mutates shared fixture state (approves
+  // `specSlug` via the real CLI, not the shim) — every test AFTER this one in this
+  // describe block runs against the now-approved spec.
+  it("MCP: allows lore_approve on the plan once its ancestor spec is approved with ≥1 AC", () => {
+    addAcceptanceCriterion(tmpDir, specSlug, "AC-G3-1");
+    approveViaCli(tmpDir, specSlug);
+
+    const result = runShim(G3_SHIM, {
+      tool_name: "mcp__lore__lore_approve",
+      tool_input: { id_or_slug: planSlug },
+      cwd: tmpDir,
+    });
+    const hook = parseHookOutput(result.stdout);
+    expect(hook.permissionDecision).toBe("allow");
+  });
+
+  // REGRESSION — the pre-existing Bash `lore approve <plan>` shape still works after
+  // the MCP-branch refactor (the ancestor spec is approved+AC from the test above).
+  it("Bash: still handles the pre-existing Bash `lore approve <plan>` shape after the MCP-branch refactor", () => {
+    const result = runShim(G3_SHIM, {
+      tool_name: "Bash",
+      tool_input: { command: `${LORE_BIN} approve ${planSlug}` },
+      cwd: tmpDir,
+    });
+    const hook = parseHookOutput(result.stdout);
+    expect(hook.permissionDecision).toBe("allow");
+  });
+});
+
 // ─── Suite: .claude/settings.json wiring ────────────────────────────────────
 
 describe(".claude/settings.json PreToolUse hook wiring", () => {
@@ -476,5 +618,22 @@ describe(".claude/settings.json PreToolUse hook wiring", () => {
     const allCommands = preToolUse.flatMap((entry) => entry.hooks.map((h) => h.command));
     expect(allCommands.some((c) => c.includes("g1-spec-create.sh"))).toBe(true);
     expect(allCommands.some((c) => c.includes("g2-spec-promote.sh"))).toBe(true);
+    expect(allCommands.some((c) => c.includes("g3-plan-promote.sh"))).toBe(true);
+
+    // FIX 2 (adversarial-review) — MCP lore_approve/lore_set matchers must exist and
+    // must fan out to BOTH g2 and g3 (mirroring the pre-existing Bash matcher, which
+    // always ran both).
+    const mcpApproveEntry = preToolUse.find((entry) => entry.matcher.includes("lore_approve"));
+    const mcpSetEntry = preToolUse.find(
+      (entry) => entry.matcher.includes("lore_set") && !entry.matcher.includes("lore_settings"),
+    );
+    expect(mcpApproveEntry).toBeDefined();
+    expect(mcpSetEntry).toBeDefined();
+    const approveCommands = mcpApproveEntry?.hooks.map((h) => h.command) ?? [];
+    const setCommands = mcpSetEntry?.hooks.map((h) => h.command) ?? [];
+    expect(approveCommands.some((c) => c.includes("g2-spec-promote.sh"))).toBe(true);
+    expect(approveCommands.some((c) => c.includes("g3-plan-promote.sh"))).toBe(true);
+    expect(setCommands.some((c) => c.includes("g2-spec-promote.sh"))).toBe(true);
+    expect(setCommands.some((c) => c.includes("g3-plan-promote.sh"))).toBe(true);
   });
 });

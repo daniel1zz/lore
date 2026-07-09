@@ -133,28 +133,43 @@ const UPSTREAM_APPROVED_STATUSES: ReadonlySet<string> = new Set(["approved"]);
  * Checks whether `upstream` is a legal, sufficiently-approved upstream document for
  * a gated write (e.g. a plan/task being promoted against its parent spec).
  *
- * @param upstream - The candidate upstream doc's `{type, status}`, or `null`/
- *   `undefined` when no upstream was resolved (e.g. the caller's parent-lookup
- *   found nothing).
+ * @param upstream - The candidate upstream doc's `{type, status, deleted_at}`, or
+ *   `null`/`undefined` when no upstream was resolved (e.g. the caller's
+ *   parent-lookup found nothing). `deleted_at` is the doc's soft-delete
+ *   timestamp (non-`null` iff `CorpusService.delete`/`softDelete` was ever
+ *   called on it) — callers that don't track soft-delete state may omit the
+ *   field entirely, which this predicate treats as "not deleted" (`undefined`
+ *   and `null` are equivalent here, matching `DocRecord.deleted_at`'s own
+ *   `string | null` shape).
  * @param expectedType - The `DocType` (as a string) the caller requires `upstream`
  *   to be — e.g. `"spec"` when gating a plan against its parent spec.
- * @returns `{ok: true}` when `upstream.type === expectedType` AND
- *   `upstream.status` is in {@link UPSTREAM_APPROVED_STATUSES};
- *   `{ok: false, reason: "UPSTREAM_MISSING"}` when `upstream` is absent;
- *   `{ok: false, reason: "UPSTREAM_WRONG_TYPE"}` when `upstream.type` mismatches;
- *   `{ok: false, reason: "UPSTREAM_NOT_APPROVED"}` when the type matches but the
- *   status isn't approved-enough (see the const's JSDoc for why `"active"` still
- *   fails this check).
+ * @returns `{ok: true}` when `upstream.type === expectedType` AND `upstream` is
+ *   not soft-deleted AND `upstream.status` is in
+ *   {@link UPSTREAM_APPROVED_STATUSES}; `{ok: false, reason: "UPSTREAM_MISSING"}`
+ *   when `upstream` is absent; `{ok: false, reason: "UPSTREAM_WRONG_TYPE"}` when
+ *   `upstream.type` mismatches; `{ok: false, reason: "UPSTREAM_DELETED"}` when
+ *   the type matches but `upstream.deleted_at` is non-`null` — a soft-deleted
+ *   upstream spec is a WITHDRAWN upstream, not a vacuous "no spec tier" case
+ *   (`softDelete` never touches `status`, so without this check a soft-deleted
+ *   `approved` spec would silently keep passing this gate forever); `{ok:
+ *   false, reason: "UPSTREAM_NOT_APPROVED"}` when the type matches, the doc is
+ *   not deleted, but the status isn't approved-enough (see the const's JSDoc
+ *   for why `"active"` still fails this check).
  * @example
- * upstreamApproved({ type: "spec", status: "approved" }, "spec"); // => { ok: true }
- * upstreamApproved({ type: "spec", status: "draft" }, "spec");
+ * upstreamApproved({ type: "spec", status: "approved", deleted_at: null }, "spec");
+ *   // => { ok: true }
+ * upstreamApproved({ type: "spec", status: "draft", deleted_at: null }, "spec");
  *   // => { ok: false, reason: "UPSTREAM_NOT_APPROVED" }
  * upstreamApproved(null, "spec"); // => { ok: false, reason: "UPSTREAM_MISSING" }
- * upstreamApproved({ type: "prd", status: "approved" }, "spec");
+ * upstreamApproved({ type: "prd", status: "approved", deleted_at: null }, "spec");
  *   // => { ok: false, reason: "UPSTREAM_WRONG_TYPE" }
+ * upstreamApproved(
+ *   { type: "spec", status: "approved", deleted_at: "2026-07-09T00:00:00.000Z" },
+ *   "spec",
+ * ); // => { ok: false, reason: "UPSTREAM_DELETED" } — status still says "approved"!
  */
 export function upstreamApproved(
-  upstream: { type: string; status: string } | null | undefined,
+  upstream: { type: string; status: string; deleted_at?: string | null } | null | undefined,
   expectedType: string,
 ): PredicateResult {
   if (upstream === null || upstream === undefined) {
@@ -162,6 +177,9 @@ export function upstreamApproved(
   }
   if (upstream.type !== expectedType) {
     return { ok: false, reason: "UPSTREAM_WRONG_TYPE" };
+  }
+  if (upstream.deleted_at !== undefined && upstream.deleted_at !== null) {
+    return { ok: false, reason: "UPSTREAM_DELETED" };
   }
   if (!UPSTREAM_APPROVED_STATUSES.has(upstream.status)) {
     return { ok: false, reason: "UPSTREAM_NOT_APPROVED" };

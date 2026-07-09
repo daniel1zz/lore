@@ -19,6 +19,13 @@
  *   AC-P2-5 — task-claim, plan's parent spec unapproved → exit 4; spec approved → exit 0.
  *   AC-P2-6 — plan parented under a "prd" (no spec tier) → plan-promote exit 0; a task
  *             under such a plan → task-claim exit 0.
+ *   AC-P2-SOFTDEL (adversarial-review FIX 3) — the ancestor spec is APPROVED with ≥1 AC
+ *             (i.e. would otherwise PASS both gates) but has been soft-deleted
+ *             (`lore delete --confirm`, which never touches `status`) → plan-promote
+ *             AND task-claim must both BLOCK (exit 4, reason UPSTREAM_DELETED), never
+ *             silently pass. A soft-deleted upstream is a WITHDRAWN spec-tier
+ *             ancestor, not the "no spec tier at all" vacuous-pass case (AC-P2-6) —
+ *             `hasSpecParent` must still be `true`.
  *
  * Coverage dimensions: HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE / REGRESSION.
  */
@@ -202,6 +209,22 @@ async function approveDoc(id: string): Promise<void> {
   try {
     const result = await app.reviewService.approve(id);
     if (!result.ok) throw new Error(`approve failed: ${JSON.stringify(result.error)}`);
+  } finally {
+    app.close();
+  }
+}
+
+/**
+ * Soft-deletes a doc via `CorpusService.delete` (confirm=true) — `softDelete` never
+ * touches `status`, which is exactly the false-allow FIX 3 closes: a soft-deleted
+ * `approved` spec must still block `plan-promote`/`task-claim`, not silently pass
+ * because its `status` column still reads "approved".
+ */
+async function softDeleteDoc(id: string): Promise<void> {
+  const app = createApp(dbPath());
+  try {
+    const result = await app.corpusService.delete(id, true);
+    if (!result.ok) throw new Error(`delete failed: ${JSON.stringify(result.error)}`);
   } finally {
     app.close();
   }
@@ -456,6 +479,92 @@ describe("lore gate plan-promote / task-claim — STATE: LORE_GATE_BYPASS=1", ()
     }
 
     expect(process.exitCode).toBe(0);
+  });
+});
+
+// ─── AC-P2-SOFTDEL (NEGATIVE): soft-deleted ancestor spec blocks both gates ───
+
+describe("lore gate plan-promote / task-claim — AC-P2-SOFTDEL: soft-deleted ancestor spec", () => {
+  it("plan-promote exits 4 (UPSTREAM_DELETED) when the approved+AC ancestor spec was soft-deleted", async () => {
+    const { specId, planSlug } = await createSpecParentedPlan();
+    await approveDoc(specId);
+    await addAcceptanceCriterion(specId);
+
+    // Sanity: before the soft-delete, this exact plan would PASS (same fixture
+    // shape as AC-P2-4). Confirms the block below is caused by deletion, not by
+    // some other unrelated fixture mistake.
+    const preCmd = await importGateSubCommand("plan-promote");
+    let output = captureOutput();
+    try {
+      await preCmd.run({ args: { plan: planSlug } });
+    } finally {
+      output.restore();
+    }
+    expect(process.exitCode).toBe(0);
+
+    await softDeleteDoc(specId);
+
+    const cmd = await importGateSubCommand("plan-promote");
+    output = captureOutput();
+    try {
+      await cmd.run({ args: { plan: planSlug } });
+    } finally {
+      output.restore();
+    }
+
+    expect(process.exitCode).toBe(4);
+    const stdoutText = output.stdout.join("\n");
+    expect(stdoutText).toContain("UPSTREAM_DELETED");
+  });
+
+  it("task-claim exits 4 (UPSTREAM_DELETED) when the plan's approved+AC ancestor spec was soft-deleted", async () => {
+    const { specId, planId } = await createSpecParentedPlan();
+    await approveDoc(specId);
+    await addAcceptanceCriterion(specId);
+    const { taskSlug } = await createTask(planId);
+
+    const preCmd = await importGateSubCommand("task-claim");
+    let output = captureOutput();
+    try {
+      await preCmd.run({ args: { task: taskSlug } });
+    } finally {
+      output.restore();
+    }
+    expect(process.exitCode).toBe(0);
+
+    await softDeleteDoc(specId);
+
+    const cmd = await importGateSubCommand("task-claim");
+    output = captureOutput();
+    try {
+      await cmd.run({ args: { task: taskSlug } });
+    } finally {
+      output.restore();
+    }
+
+    expect(process.exitCode).toBe(4);
+    const stdoutText = output.stdout.join("\n");
+    expect(stdoutText).toContain("UPSTREAM_DELETED");
+  });
+
+  it("BOUNDARY: a soft-deleted spec is NOT treated as 'no spec tier' — it still blocks, it does not vacuously pass", async () => {
+    // Regression guard for the correct-semantics requirement in the fix task: a
+    // soft-deleted upstream must not fall through to AC-P2-6's vacuous-pass path.
+    const { specId, planSlug } = await createSpecParentedPlan();
+    await approveDoc(specId);
+    await addAcceptanceCriterion(specId);
+    await softDeleteDoc(specId);
+
+    const cmd = await importGateSubCommand("plan-promote");
+    const output = captureOutput();
+    try {
+      await cmd.run({ args: { plan: planSlug } });
+    } finally {
+      output.restore();
+    }
+
+    expect(process.exitCode).not.toBe(0);
+    expect(process.exitCode).toBe(4);
   });
 });
 

@@ -594,6 +594,7 @@ const VALID_LINK_TYPES = new Set<LinkType>([
   "supersedes",
   "relates-to",
   "blocks",
+  "governs",
 ]);
 
 /**

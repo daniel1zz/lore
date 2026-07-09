@@ -7,9 +7,19 @@
 # tool call (feeding back the gate's stderr message as the deny reason) or lets
 # it through unmodified.
 #
-# Fires on Bash tool calls whose `command` is either:
-#   - `lore approve <id> ...`                              (any path prefix)
-#   - `lore set <id> ... --status (in-review|approved) ...`
+# Fires on two call shapes (mirrors g4-task-claim.sh's Bash/MCP split — SPEC-024:
+# MCP is the DEFAULT agent surface, so a Bash-only hook here would let an MCP-driven
+# agent bypass this gate entirely by calling `lore_approve`/`lore_set` instead of the
+# CLI):
+#   - Bash tool calls whose `command` is either `lore approve <id> ...` (any path
+#     prefix) or `lore set <id> ... --status (in-review|approved) ...`.
+#   - MCP `lore_approve` / `lore_set` tool calls (tool_name containing "lore_approve"
+#     / "lore_set") — the doc id is `tool_input.id_or_slug` (the field name of
+#     `LoreApproveSchema` / `LoreSetSchema`, packages/lore/src/adapters/mcp/tools.ts).
+#     `lore_set` additionally requires `tool_input.status` to be "in-review" or
+#     "approved" — mirroring the Bash shape's `--status` filter — so an MCP `lore_set`
+#     call that only touches title/content/tags/extra (not status) is out of scope,
+#     same as the Bash `lore set` shape without a matching `--status` flag.
 # AND whose <id> resolves to a doc of type "spec" (checked via `lore get --json`
 # BEFORE invoking the gate — see the note below on why this pre-check is
 # mandatory, not optional). Every other tool call — including approve/set-status
@@ -81,22 +91,36 @@ if [ ! -x "$LORE_BIN" ]; then
   allow
 fi
 
-if [ "$TOOL_NAME" != "Bash" ]; then
-  allow
-fi
-
-COMMAND="$(printf '%s' "$STDIN_JSON" | jq -r '.tool_input.command // empty')"
-
 DOC_ID=""
 
-if printf '%s' "$COMMAND" | grep -Eq '(^|[/[:space:]])lore[[:space:]]+approve[[:space:]]+[^[:space:]]+'; then
-  DOC_ID="$(printf '%s' "$COMMAND" | sed -nE 's/.*lore[[:space:]]+approve[[:space:]]+([^[:space:]]+).*/\1/p')"
-elif printf '%s' "$COMMAND" | grep -Eq '(^|[/[:space:]])lore[[:space:]]+set[[:space:]]+[^[:space:]]+' \
-  && printf '%s' "$COMMAND" | grep -Eq -- '--status[[:space:]]+(in-review|approved)([[:space:]]|$)'; then
-  DOC_ID="$(printf '%s' "$COMMAND" | sed -nE 's/.*lore[[:space:]]+set[[:space:]]+([^[:space:]]+).*/\1/p')"
-else
-  allow
-fi
+case "$TOOL_NAME" in
+  Bash)
+    COMMAND="$(printf '%s' "$STDIN_JSON" | jq -r '.tool_input.command // empty')"
+
+    if printf '%s' "$COMMAND" | grep -Eq '(^|[/[:space:]])lore[[:space:]]+approve[[:space:]]+[^[:space:]]+'; then
+      DOC_ID="$(printf '%s' "$COMMAND" | sed -nE 's/.*lore[[:space:]]+approve[[:space:]]+([^[:space:]]+).*/\1/p')"
+    elif printf '%s' "$COMMAND" | grep -Eq '(^|[/[:space:]])lore[[:space:]]+set[[:space:]]+[^[:space:]]+' \
+      && printf '%s' "$COMMAND" | grep -Eq -- '--status[[:space:]]+(in-review|approved)([[:space:]]|$)'; then
+      DOC_ID="$(printf '%s' "$COMMAND" | sed -nE 's/.*lore[[:space:]]+set[[:space:]]+([^[:space:]]+).*/\1/p')"
+    else
+      allow
+    fi
+    ;;
+  *lore_approve*)
+    DOC_ID="$(printf '%s' "$STDIN_JSON" | jq -r '.tool_input.id_or_slug // empty')"
+    ;;
+  *lore_set*)
+    MCP_STATUS="$(printf '%s' "$STDIN_JSON" | jq -r '.tool_input.status // empty')"
+    if [ "$MCP_STATUS" = "in-review" ] || [ "$MCP_STATUS" = "approved" ]; then
+      DOC_ID="$(printf '%s' "$STDIN_JSON" | jq -r '.tool_input.id_or_slug // empty')"
+    else
+      allow
+    fi
+    ;;
+  *)
+    allow
+    ;;
+esac
 
 if [ -z "$DOC_ID" ]; then
   log "matched an approve/set-status command shape but could not extract the doc id — failing open"

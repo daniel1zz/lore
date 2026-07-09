@@ -185,6 +185,7 @@ describe("checkpointRegistry", () => {
         type: "spec",
         status: "approved",
         extra: { acceptance_criteria: [{ id: "AC-1", statement: "x", verify: { mode: "human" } }] },
+        deleted_at: null,
       },
       parentSpecPointer: { slug: "spec-x", title: "Spec X", status: "approved" },
     };
@@ -218,11 +219,25 @@ describe("checkpointRegistry", () => {
       expect(failures.some((f) => f.reason === "UPSTREAM_NOT_APPROVED")).toBe(true);
     });
 
+    // NEGATIVE (adversarial-review FIX 3) — a soft-deleted ancestor spec blocks EVEN
+    // THOUGH it's approved with ≥1 declared AC (softDelete never touches status).
+    it("check() fails with UPSTREAM_DELETED when the approved+AC ancestor spec is soft-deleted", () => {
+      const ctx: GateContext = {
+        ...approvedSpecWithAc,
+        parentSpec: {
+          ...approvedSpecWithAc.parentSpec!,
+          deleted_at: "2026-07-09T00:00:00.000Z",
+        },
+      };
+      const failures = selectFailures(checkpoint.check(ctx));
+      expect(failures.some((f) => f.reason === "UPSTREAM_DELETED")).toBe(true);
+    });
+
     // NEGATIVE
     it("check() fails with UPSTREAM_NO_AC when the approved ancestor spec has zero declared AC", () => {
       const ctx: GateContext = {
         ...approvedSpecWithAc,
-        parentSpec: { type: "spec", status: "approved", extra: {} },
+        parentSpec: { type: "spec", status: "approved", extra: {}, deleted_at: null },
       };
       const failures = selectFailures(checkpoint.check(ctx));
       expect(failures.some((f) => f.reason === "UPSTREAM_NO_AC")).toBe(true);
@@ -254,7 +269,7 @@ describe("checkpointRegistry", () => {
     const checkpoint = checkpointRegistry["task-claim"]!;
     const approvedSpec: GateContext = {
       hasSpecParent: true,
-      parentSpec: { type: "spec", status: "approved", extra: {} },
+      parentSpec: { type: "spec", status: "approved", extra: {}, deleted_at: null },
       parentSpecPointer: { slug: "spec-y", title: "Spec Y", status: "approved" },
     };
 
@@ -275,6 +290,16 @@ describe("checkpointRegistry", () => {
       const ctx: GateContext = { ...approvedSpec, parentSpec: { ...approvedSpec.parentSpec!, status: "in-review" } };
       const failures = selectFailures(checkpoint.check(ctx));
       expect(failures).toEqual([{ ok: false, reason: "UPSTREAM_NOT_APPROVED" }]);
+    });
+
+    // NEGATIVE (adversarial-review FIX 3) — soft-deleted approved ancestor spec blocks.
+    it("check() fails with UPSTREAM_DELETED when the approved ancestor spec is soft-deleted", () => {
+      const ctx: GateContext = {
+        ...approvedSpec,
+        parentSpec: { ...approvedSpec.parentSpec!, deleted_at: "2026-07-09T00:00:00.000Z" },
+      };
+      const failures = selectFailures(checkpoint.check(ctx));
+      expect(failures).toEqual([{ ok: false, reason: "UPSTREAM_DELETED" }]);
     });
 
     // HAPPY — feed() renders a pointers-not-dump feeding pack, distinct requirement sentence

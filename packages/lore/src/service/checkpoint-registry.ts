@@ -101,12 +101,22 @@ export interface GateContext {
    */
   readonly hasSpecParent?: boolean;
   /**
-   * The resolved ancestor spec's `{type, status, extra}`, present iff `hasSpecParent`
-   * is `true`. Shaped to satisfy BOTH `upstreamApproved` (`{type, status}`) and
-   * `upstreamHasAcceptanceCriteria` (`{extra}`) without the caller building two
-   * separate projections of the same doc.
+   * The resolved ancestor spec's `{type, status, extra, deleted_at}`, present iff
+   * `hasSpecParent` is `true`. Shaped to satisfy BOTH `upstreamApproved`
+   * (`{type, status, deleted_at}`) and `upstreamHasAcceptanceCriteria` (`{extra}`)
+   * without the caller building two separate projections of the same doc.
+   * `deleted_at` (SPEC-... soft-deleted-upstream fix) is threaded straight from
+   * `CorpusService.getPlanBundle`'s `DocRecord` — `softDelete` never touches
+   * `status`, so a soft-deleted `approved` spec would otherwise silently keep
+   * passing `upstreamApproved` forever; `deleted_at` is what lets that predicate
+   * tell the two apart.
    */
-  readonly parentSpec?: { type: string; status: string; extra: Record<string, unknown> };
+  readonly parentSpec?: {
+    type: string;
+    status: string;
+    extra: Record<string, unknown>;
+    deleted_at: string | null;
+  };
 
   // -- plan-promote / task-claim: feed() --
   /**

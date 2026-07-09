@@ -437,6 +437,14 @@ function requireCheckpoint(cp: GateCheckpoint): CheckpointDef {
  * when the plan has no spec-tier ancestor). Shared by both gates so the "no spec
  * ancestor ⇒ vacuous pass" ctx shape is assembled in exactly one place.
  *
+ * `spec.deleted_at` is threaded straight into `parentSpec.deleted_at`, even when
+ * non-`null` — `getPlanBundle` populates `.spec` regardless of soft-delete state
+ * (a soft-deleted upstream still IS a spec-tier ancestor; only `upstreamApproved`'s
+ * pure predicate decides whether that's disqualifying, via the `UPSTREAM_DELETED`
+ * reason). This function must never itself treat a deleted spec as "no spec
+ * parent" — that would wrongly fall through to `hasSpecParent: false`'s vacuous
+ * pass instead of blocking the gate.
+ *
  * @param spec - The resolved ancestor spec, or `undefined` when `getPlanBundle` found
  *   none (prd-parented or unparented plan).
  */
@@ -446,7 +454,12 @@ function buildUpstreamSpecContext(spec: DocRecord | undefined): GateContext {
   }
   return {
     hasSpecParent: true,
-    parentSpec: { type: spec.type, status: spec.status, extra: spec.extra },
+    parentSpec: {
+      type: spec.type,
+      status: spec.status,
+      extra: spec.extra,
+      deleted_at: spec.deleted_at,
+    },
     parentSpecPointer: { slug: spec.slug, title: spec.title, status: spec.status },
   };
 }

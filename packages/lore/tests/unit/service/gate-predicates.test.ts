@@ -174,6 +174,59 @@ describe("gate-predicates", () => {
       });
       expect(upstreamApproved(approvedUpstream, "spec")).toEqual({ ok: true });
     });
+
+    // BOUNDARY — deleted_at omitted or explicitly null are equivalent to "not deleted".
+    it("passes when deleted_at is omitted (backward-compatible default)", () => {
+      expect(upstreamApproved({ type: "spec", status: "approved" }, "spec")).toEqual({
+        ok: true,
+      });
+    });
+
+    it("passes when deleted_at is explicitly null", () => {
+      expect(
+        upstreamApproved({ type: "spec", status: "approved", deleted_at: null }, "spec"),
+      ).toEqual({ ok: true });
+    });
+
+    // NEGATIVE (adversarial-review FIX 3) — a soft-deleted upstream fails EVEN THOUGH
+    // its status still reads "approved". `softDelete` never touches `status`, so
+    // without this check a soft-deleted approved spec would silently keep passing
+    // this gate forever.
+    it("fails with UPSTREAM_DELETED when deleted_at is set, even though status is 'approved'", () => {
+      expect(
+        upstreamApproved(
+          { type: "spec", status: "approved", deleted_at: "2026-07-09T00:00:00.000Z" },
+          "spec",
+        ),
+      ).toEqual({ ok: false, reason: "UPSTREAM_DELETED" });
+    });
+
+    // BOUNDARY — deleted_at is checked AFTER the type check: a wrong-type upstream
+    // still reports UPSTREAM_WRONG_TYPE even if it happens to carry a deleted_at.
+    it("still reports UPSTREAM_WRONG_TYPE (not UPSTREAM_DELETED) when type mismatches and deleted_at is set", () => {
+      expect(
+        upstreamApproved(
+          { type: "prd", status: "approved", deleted_at: "2026-07-09T00:00:00.000Z" },
+          "spec",
+        ),
+      ).toEqual({ ok: false, reason: "UPSTREAM_WRONG_TYPE" });
+    });
+
+    // STATE — soft-deleting an otherwise-passing upstream flips the verdict from ok
+    // to UPSTREAM_DELETED, mirroring the draft->approved transition test above.
+    it("flips from ok to UPSTREAM_DELETED as the same upstream transitions to soft-deleted", () => {
+      const liveUpstream = { type: "spec", status: "approved", deleted_at: null };
+      const deletedUpstream = {
+        type: "spec",
+        status: "approved",
+        deleted_at: "2026-07-09T00:00:00.000Z",
+      };
+      expect(upstreamApproved(liveUpstream, "spec")).toEqual({ ok: true });
+      expect(upstreamApproved(deletedUpstream, "spec")).toEqual({
+        ok: false,
+        reason: "UPSTREAM_DELETED",
+      });
+    });
   });
 
   describe("upstreamHasAcceptanceCriteria", () => {
