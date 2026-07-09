@@ -511,7 +511,8 @@ describe("tool registration completeness", () => {
   // SPEC-035 §2 adds lore_audit, bringing the total from 21 to 22.
   // SPEC-034 §6 adds lore_review, bringing the total from 22 to 23.
   // SPEC-039 §2 adds lore_verify, bringing the total from 23 to 24.
-  it("registers all 24 expected tools", () => {
+  // IoC vertical-slice tech-spec §4.1/§11 P4 adds lore_feed, bringing the total from 24 to 25.
+  it("registers all 25 expected tools", () => {
     const expectedTools = [
       "lore_create",
       "lore_get",
@@ -537,12 +538,13 @@ describe("tool registration completeness", () => {
       "lore_audit",
       "lore_review",
       "lore_verify",
+      "lore_feed",
     ];
 
     const internal = server as unknown as McpServerInternal;
     for (const name of expectedTools) {
       expect(internal._registeredTools[name]).toBeDefined();
     }
-    expect(Object.keys(internal._registeredTools)).toHaveLength(24);
+    expect(Object.keys(internal._registeredTools)).toHaveLength(25);
   });
 });

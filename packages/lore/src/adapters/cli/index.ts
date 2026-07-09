@@ -49,6 +49,7 @@ const main = defineCommand({
     ac: () => import("./commands/ac.js").then((m) => m.default),
     verify: () => import("./commands/verify.js").then((m) => m.default),
     gate: () => import("./commands/gate.js").then((m) => m.default),
+    feed: () => import("./commands/feed.js").then((m) => m.default),
   },
 });
 

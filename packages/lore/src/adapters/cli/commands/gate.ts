@@ -91,6 +91,10 @@
  * `AcService.listCriteria`) and dispatches through the registry's `check`/`feed`
  * callbacks. This is a pure refactor: exit codes, stdout feeding-pack text, and stderr
  * judge advisory are all UNCHANGED from the pre-registry inline-predicate shape.
+ * `renderDocMarkdown` and `resolveParentDoc` now live in `../../../flows/feed-flow.js`
+ * (moved out, unchanged) so `lore feed`'s advisory PULL and this gate's violation PUSH
+ * share exactly one MDX-rendering and parent-resolution implementation — see that
+ * module's header for the P4 slice this enables.
  *
  * Source: IoC vertical-slice tech-spec §4.1/§5.1/§11 ("deterministic zone" +
  * "active feeding" + INV2 "probabilistic zone is advisory-only")
@@ -100,7 +104,6 @@ import { defineCommand } from "citty";
 import { z } from "zod";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
-import { renderResolvedToMarkdown } from "../../../service/outline-service.js";
 import {
   checkpointRegistry,
   isCheckpointBlocked,
@@ -113,6 +116,7 @@ import { runDeterministicChecks, resolveGateEnabled } from "@lore/core";
 import type { App } from "../../../app.js";
 import type { AcService } from "../../../service/ac-service.js";
 import type { DocRecord, LoreConfig, LoreError, NewReviewJudgment } from "@lore/core";
+import { renderDocMarkdown, resolveParentDoc } from "../../../flows/feed-flow.js";
 
 /**
  * `applies_to` scope this gate discovers its feeding skill by — matches the
@@ -598,43 +602,6 @@ function formatJudgeAdvisory(judgment: NewReviewJudgment): string {
     for (const q of judgment.blocking_questions) lines.push(`    - ${q}`);
   }
   return lines.join("\n");
-}
-
-/**
- * Resolves `parentIdOrSlug` to a full `DocRecord` via `corpusService.get`.
- *
- * @returns `null` when `parentIdOrSlug` is absent/blank OR fails to resolve (unknown
- *   id/slug, store error) — the gate's `parentLegal` predicate treats "could not
- *   resolve a parent" the same as "no parent supplied" (both fail with
- *   `PARENT_REQUIRED`), matching the bundle contract: "缺失或解析失败 → parentDoc=null".
- */
-async function resolveParentDoc(
-  app: App,
-  parentIdOrSlug: string | undefined,
-): Promise<DocRecord | null> {
-  if (parentIdOrSlug === undefined || parentIdOrSlug.trim() === "") {
-    return null;
-  }
-  const result = await app.corpusService.get(parentIdOrSlug);
-  if (!result.ok) {
-    return null;
-  }
-  return result.value.doc;
-}
-
-/**
- * Renders `doc.content` with MDX placeholders spliced in, mirroring `get.ts`'s
- * `--raw`-off pattern (`outlineService.resolve` → `renderResolvedToMarkdown`). A
- * resolution failure degrades to the raw, unspliced body rather than aborting the
- * gate — the feeding pack is advisory context, not a hard dependency on placeholder
- * resolution succeeding.
- */
-async function renderDocMarkdown(app: App, doc: DocRecord): Promise<string> {
-  const resolveResult = await app.outlineService.resolve(doc);
-  if (!resolveResult.ok) {
-    return doc.content;
-  }
-  return renderResolvedToMarkdown(resolveResult.value);
 }
 
 /** One rule-doc lookup outcome: where the slice came from, and the slice itself. */

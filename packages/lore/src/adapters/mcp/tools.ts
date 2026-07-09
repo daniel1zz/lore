@@ -1,7 +1,7 @@
 /**
- * MCP tool registrations — 24 lore_* tools (16 original + 4 SPEC-025 task-workflow tools
+ * MCP tool registrations — 25 lore_* tools (16 original + 4 SPEC-025 task-workflow tools
  * + 1 SPEC-026 assess tool + 1 SPEC-035 audit tool + 1 SPEC-034 review tool
- * + 1 SPEC-039 verify tool).
+ * + 1 SPEC-039 verify tool + 1 IoC vertical-slice tech-spec §4.1/§11 P4 feed tool).
  *
  * Architecture: Tools with input use the `registerToolWithArgs` helper defined below, which:
  *   1. Calls `server.tool(name, desc, handler)` in 3-arg form (avoids ZodRawShapeCompat type bomb)
@@ -42,6 +42,7 @@ import { isAssessAiBraked } from "../../ai/resolve-ai.js";
 import { REVIEW_PROMPT_VERSION } from "../../ai/review-template.js";
 import { CORPUS_SCHEMA_INFO } from "./schema-info.js";
 import { runCalibrationHook } from "../../flows/calibration-hook.js";
+import { buildFeed } from "../../flows/feed-flow.js";
 
 // ─── Schema Constants ────────────────────────────────────────────────────────
 // Each schema is a `z.object(...)` instance (AnySchema), NOT an inline ZodRawShape literal.
@@ -315,6 +316,18 @@ export const LoreVerifySchema = z.object({
   by: z.string().min(1),
 });
 
+/**
+ * Input schema for lore_feed (IoC vertical-slice tech-spec §4.1/§11, P4 slice).
+ * `checkpoint` — e.g. `"spec-create"`, mapped to a produced-type via
+ * `CHECKPOINT_PRODUCED_TYPE` (`../../flows/feed-flow.js`). `parent_id_or_slug` —
+ * optional intended-parent doc whose MDX-resolved summary is included in the feed
+ * when supplied, mirroring the CLI's `--parent`.
+ */
+export const LoreFeedSchema = z.object({
+  checkpoint: z.string(),
+  parent_id_or_slug: z.string().optional(),
+});
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /**
@@ -460,10 +473,10 @@ async function reviewDocViaMcp(
 // ─── Tool Registrations ──────────────────────────────────────────────────────
 
 /**
- * Registers all 24 lore_* MCP tools on the given server (16 original + 4 SPEC-025
+ * Registers all 25 lore_* MCP tools on the given server (16 original + 4 SPEC-025
  * task-workflow tools: lore_claim, lore_release, lore_evidence_add, lore_ready;
  * + lore_assess (SPEC-026); + lore_audit (SPEC-035); + lore_review (SPEC-034);
- * + lore_verify (SPEC-039)).
+ * + lore_verify (SPEC-039); + lore_feed (IoC vertical-slice tech-spec §4.1/§11 P4)).
  *
  * Tools with input use `registerToolWithArgs` (avoids ZodRawShapeCompat type bomb).
  * Tools without input (`lore_schema`, `lore_status`) use plain `server.tool(name, desc, cb)`.
@@ -914,6 +927,20 @@ export function registerTools(server: McpServer, app: App): void {
       if (!result.ok) return errorContent(result.error);
 
       return textContent(result.value);
+    },
+  );
+
+  // ── IoC vertical-slice tech-spec §4.1/§11 P4: feed-before-produce PULL ────
+
+  // lore_feed
+  registerToolWithArgs(
+    server,
+    "lore_feed",
+    "Feed-before-produce PULL: return the governing skill's rule slice for a checkpoint ahead of writing (advisory only, never a gate — always succeeds)",
+    LoreFeedSchema,
+    async (args) => {
+      const outcome = await buildFeed(app, args.checkpoint, args.parent_id_or_slug);
+      return textContent(outcome);
     },
   );
 }
