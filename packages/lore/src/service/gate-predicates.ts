@@ -17,9 +17,23 @@
  *   literal union. `undefined` is explicitly PASS (not a failure): `CorpusService.
  *   _createImpl` defaults an absent `spec_kind` to `"feature"` at creation time, so
  *   a gate that rejected `undefined` would block the normal create path.
+ * @invariant `upstreamApproved`'s notion of "approved enough" is deliberately
+ *   IDENTICAL to `evaluateReadiness`'s `upstream_unapproved` advisory
+ *   (`@lore/core`, task-workflow.ts, `parentSpecStatus !== "approved"`) — only
+ *   `"approved"` clears the check, `"active"` does NOT. These are two independent
+ *   corpus-fact expressions of the same rule (readiness is a read-side advisory,
+ *   this is a write-path gate) and must not silently diverge. See `upstreamApproved`'s
+ *   own JSDoc for the full justification of why `"active"` was excluded.
+ * @invariant `upstreamHasAcceptanceCriteria`'s notion of "declared acceptance
+ *   criteria" is sourced exclusively from `specAcceptanceCriteriaSchema`
+ *   (`@lore/core`, acceptance.ts) via a schema-based `safeParse` — the exact same
+ *   extraction `AcService`'s private `extractCriteria` helper uses to count a
+ *   spec's own acceptance criteria for `lore gate spec-promote`'s
+ *   `checkSpecPromote` predicate (`ac-service.ts` / `checkpoint-registry.ts`).
+ *   Never a hand-rolled `Array.isArray(extra.acceptance_criteria)` duck-type check.
  */
 
-import { PARENT_TYPE_CONTRACT, SPEC_KINDS, type DocType } from "@lore/core";
+import { PARENT_TYPE_CONTRACT, SPEC_KINDS, specAcceptanceCriteriaSchema, type DocType } from "@lore/core";
 
 /** Result of a single gate predicate: either a pass, or a fail carrying a machine-readable reason. */
 export type PredicateResult = { ok: true } | { ok: false; reason: string };
@@ -92,4 +106,103 @@ export function hasSkeleton(content: string): PredicateResult {
     return { ok: true };
   }
   return { ok: false, reason: "MISSING_SKELETON" };
+}
+
+/**
+ * Statuses that count as "approved enough" for `upstreamApproved`.
+ *
+ * @invariant Deliberately `["approved"]` ONLY — `"active"` is NOT included, even
+ *   though an `active` doc has moved past `approved` in the SPEC-002 lifecycle
+ *   (`draft → in-review → approved → active → archived`). This mirrors
+ *   `evaluateReadiness`'s `upstream_unapproved` advisory (`@lore/core`,
+ *   task-workflow.ts ~L423: `parentSpecStatus !== "approved"`) EXACTLY, per this
+ *   module's SSOT invariant above. Rationale for excluding `active`: readiness is
+ *   the pre-existing, already-shipped read-side expression of "is my upstream spec
+ *   good enough" for this exact relationship (task ← parent spec), and a
+ *   write-path gate silently accepting a broader status set than the advisory it's
+ *   supposed to agree with would let a gate pass while the corresponding readiness
+ *   report still flags `upstream_unapproved: true` — a user-visible contradiction
+ *   between "the gate let this through" and "the dashboard/CLI still warns about
+ *   it." If a future caller needs `active` to also clear THIS gate, that is a new,
+ *   deliberate product decision requiring its own spec amendment — not a default to
+ *   fall into here.
+ */
+const UPSTREAM_APPROVED_STATUSES: ReadonlySet<string> = new Set(["approved"]);
+
+/**
+ * Checks whether `upstream` is a legal, sufficiently-approved upstream document for
+ * a gated write (e.g. a plan/task being promoted against its parent spec).
+ *
+ * @param upstream - The candidate upstream doc's `{type, status}`, or `null`/
+ *   `undefined` when no upstream was resolved (e.g. the caller's parent-lookup
+ *   found nothing).
+ * @param expectedType - The `DocType` (as a string) the caller requires `upstream`
+ *   to be — e.g. `"spec"` when gating a plan against its parent spec.
+ * @returns `{ok: true}` when `upstream.type === expectedType` AND
+ *   `upstream.status` is in {@link UPSTREAM_APPROVED_STATUSES};
+ *   `{ok: false, reason: "UPSTREAM_MISSING"}` when `upstream` is absent;
+ *   `{ok: false, reason: "UPSTREAM_WRONG_TYPE"}` when `upstream.type` mismatches;
+ *   `{ok: false, reason: "UPSTREAM_NOT_APPROVED"}` when the type matches but the
+ *   status isn't approved-enough (see the const's JSDoc for why `"active"` still
+ *   fails this check).
+ * @example
+ * upstreamApproved({ type: "spec", status: "approved" }, "spec"); // => { ok: true }
+ * upstreamApproved({ type: "spec", status: "draft" }, "spec");
+ *   // => { ok: false, reason: "UPSTREAM_NOT_APPROVED" }
+ * upstreamApproved(null, "spec"); // => { ok: false, reason: "UPSTREAM_MISSING" }
+ * upstreamApproved({ type: "prd", status: "approved" }, "spec");
+ *   // => { ok: false, reason: "UPSTREAM_WRONG_TYPE" }
+ */
+export function upstreamApproved(
+  upstream: { type: string; status: string } | null | undefined,
+  expectedType: string,
+): PredicateResult {
+  if (upstream === null || upstream === undefined) {
+    return { ok: false, reason: "UPSTREAM_MISSING" };
+  }
+  if (upstream.type !== expectedType) {
+    return { ok: false, reason: "UPSTREAM_WRONG_TYPE" };
+  }
+  if (!UPSTREAM_APPROVED_STATUSES.has(upstream.status)) {
+    return { ok: false, reason: "UPSTREAM_NOT_APPROVED" };
+  }
+  return { ok: true };
+}
+
+/**
+ * Checks whether an upstream `spec` doc has at least one structured acceptance
+ * criterion declared in `extra.acceptance_criteria` — the same "does this spec
+ * have declared AC" fact `lore gate spec-promote` checks about a spec ON ITSELF
+ * (`checkSpecPromote` in `checkpoint-registry.ts`), here re-expressed for the
+ * "gate a downstream doc against its upstream spec's AC" relationship.
+ *
+ * @param upstreamSpec - The candidate upstream spec (a full `DocRecord`, or any
+ *   object exposing just `{extra: Record<string, unknown>}`), or `null`/`undefined`
+ *   when no upstream spec was resolved.
+ * @returns `{ok: true}` when `upstreamSpec.extra.acceptance_criteria` parses via
+ *   `specAcceptanceCriteriaSchema` to a non-empty array; `{ok: false, reason:
+ *   "UPSTREAM_NO_AC"}` when `upstreamSpec` is missing, `extra.acceptance_criteria`
+ *   is absent, or it fails schema validation, or it parses to an empty array —
+ *   all four are the same "no usable declared AC" fact, matching `AcService`'s
+ *   private `extractCriteria` (which returns `[]` for the same absent/invalid
+ *   cases, never throws).
+ * @example
+ * upstreamHasAcceptanceCriteria({
+ *   extra: { acceptance_criteria: [{ id: "AC-1", statement: "x", verify: { mode: "human" } }] },
+ * }); // => { ok: true }
+ * upstreamHasAcceptanceCriteria({ extra: {} }); // => { ok: false, reason: "UPSTREAM_NO_AC" }
+ * upstreamHasAcceptanceCriteria(null);          // => { ok: false, reason: "UPSTREAM_NO_AC" }
+ */
+export function upstreamHasAcceptanceCriteria(
+  upstreamSpec: { extra: Record<string, unknown> } | null | undefined,
+): PredicateResult {
+  if (upstreamSpec === null || upstreamSpec === undefined) {
+    return { ok: false, reason: "UPSTREAM_NO_AC" };
+  }
+  const parsed = specAcceptanceCriteriaSchema.safeParse(upstreamSpec.extra["acceptance_criteria"]);
+  const count = parsed.success ? parsed.data.length : 0;
+  if (count > 0) {
+    return { ok: true };
+  }
+  return { ok: false, reason: "UPSTREAM_NO_AC" };
 }

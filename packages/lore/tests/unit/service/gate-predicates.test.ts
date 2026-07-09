@@ -15,7 +15,13 @@
 
 import { describe, it, expect } from "vitest";
 import { SPEC_KINDS } from "@lore/core";
-import { parentLegal, specKindValid, hasSkeleton } from "../../../src/service/gate-predicates.js";
+import {
+  parentLegal,
+  specKindValid,
+  hasSkeleton,
+  upstreamApproved,
+  upstreamHasAcceptanceCriteria,
+} from "../../../src/service/gate-predicates.js";
 
 describe("gate-predicates", () => {
   describe("parentLegal", () => {
@@ -103,7 +109,170 @@ describe("gate-predicates", () => {
     });
   });
 
-  // STATE dimension: N/A. All three predicates are pure functions of their arguments —
-  // no persisted state, no store, no lifecycle transition to exercise. Exempt per
-  // ~/.claude/skills/test/ (pure-function modules carry no STATE dimension).
+  describe("upstreamApproved", () => {
+    // HAPPY
+    it("passes when upstream.type matches expectedType and status is 'approved'", () => {
+      expect(upstreamApproved({ type: "spec", status: "approved" }, "spec")).toEqual({
+        ok: true,
+      });
+    });
+
+    // NEGATIVE — draft and in-review both fail, same reason
+    it("fails with UPSTREAM_NOT_APPROVED when status is 'draft'", () => {
+      expect(upstreamApproved({ type: "spec", status: "draft" }, "spec")).toEqual({
+        ok: false,
+        reason: "UPSTREAM_NOT_APPROVED",
+      });
+    });
+
+    it("fails with UPSTREAM_NOT_APPROVED when status is 'in-review'", () => {
+      expect(upstreamApproved({ type: "spec", status: "in-review" }, "spec")).toEqual({
+        ok: false,
+        reason: "UPSTREAM_NOT_APPROVED",
+      });
+    });
+
+    // BOUNDARY — the key decision this task made: "active" is a status further along
+    // the lifecycle than "approved" but does NOT clear this gate, to stay identical to
+    // evaluateReadiness's upstream_unapproved advisory (parentSpecStatus !== "approved").
+    it("fails with UPSTREAM_NOT_APPROVED when status is 'active' (deliberately NOT accepted — matches evaluateReadiness)", () => {
+      expect(upstreamApproved({ type: "spec", status: "active" }, "spec")).toEqual({
+        ok: false,
+        reason: "UPSTREAM_NOT_APPROVED",
+      });
+    });
+
+    // ERROR — wrong type
+    it("fails with UPSTREAM_WRONG_TYPE when upstream.type does not match expectedType", () => {
+      expect(upstreamApproved({ type: "prd", status: "approved" }, "spec")).toEqual({
+        ok: false,
+        reason: "UPSTREAM_WRONG_TYPE",
+      });
+    });
+
+    // BOUNDARY/ERROR — missing upstream
+    it("fails with UPSTREAM_MISSING when upstream is null", () => {
+      expect(upstreamApproved(null, "spec")).toEqual({ ok: false, reason: "UPSTREAM_MISSING" });
+    });
+
+    it("fails with UPSTREAM_MISSING when upstream is undefined", () => {
+      expect(upstreamApproved(undefined, "spec")).toEqual({
+        ok: false,
+        reason: "UPSTREAM_MISSING",
+      });
+    });
+
+    // STATE — same upstream doc transitioning draft -> approved flips the verdict,
+    // exercising the predicate as a state-transition oracle even though the function
+    // itself is pure (no mutation, just re-invoked with the "next" state).
+    it("flips from NOT_APPROVED to ok as the same upstream's status transitions draft -> approved", () => {
+      const draftUpstream = { type: "spec", status: "draft" };
+      const approvedUpstream = { type: "spec", status: "approved" };
+      expect(upstreamApproved(draftUpstream, "spec")).toEqual({
+        ok: false,
+        reason: "UPSTREAM_NOT_APPROVED",
+      });
+      expect(upstreamApproved(approvedUpstream, "spec")).toEqual({ ok: true });
+    });
+  });
+
+  describe("upstreamHasAcceptanceCriteria", () => {
+    // HAPPY
+    it("passes when extra.acceptance_criteria has >= 1 valid entry", () => {
+      expect(
+        upstreamHasAcceptanceCriteria({
+          extra: {
+            acceptance_criteria: [
+              {
+                id: "AC-GATE-1",
+                statement: "upstream spec has at least one declared AC",
+                verify: { mode: "human" },
+              },
+            ],
+          },
+        }),
+      ).toEqual({ ok: true });
+    });
+
+    // NEGATIVE — declared but empty array
+    it("fails with UPSTREAM_NO_AC when extra.acceptance_criteria is an empty array", () => {
+      expect(upstreamHasAcceptanceCriteria({ extra: { acceptance_criteria: [] } })).toEqual({
+        ok: false,
+        reason: "UPSTREAM_NO_AC",
+      });
+    });
+
+    // BOUNDARY — field entirely absent from extra
+    it("fails with UPSTREAM_NO_AC when extra.acceptance_criteria is absent", () => {
+      expect(upstreamHasAcceptanceCriteria({ extra: {} })).toEqual({
+        ok: false,
+        reason: "UPSTREAM_NO_AC",
+      });
+    });
+
+    // ERROR — malformed shape fails schema validation, must not throw
+    it("fails with UPSTREAM_NO_AC when extra.acceptance_criteria fails schema validation (not an array)", () => {
+      expect(
+        upstreamHasAcceptanceCriteria({ extra: { acceptance_criteria: "not-an-array" } }),
+      ).toEqual({ ok: false, reason: "UPSTREAM_NO_AC" });
+    });
+
+    // BOUNDARY/ERROR — missing upstream spec entirely (no doc resolved at all)
+    it("fails with UPSTREAM_NO_AC when upstreamSpec is null", () => {
+      expect(upstreamHasAcceptanceCriteria(null)).toEqual({
+        ok: false,
+        reason: "UPSTREAM_NO_AC",
+      });
+    });
+
+    it("fails with UPSTREAM_NO_AC when upstreamSpec is undefined", () => {
+      expect(upstreamHasAcceptanceCriteria(undefined)).toEqual({
+        ok: false,
+        reason: "UPSTREAM_NO_AC",
+      });
+    });
+
+    // STATE — same spec transitioning from 0 AC to 1 declared AC flips the verdict
+    it("flips from UPSTREAM_NO_AC to ok as the same spec's declared AC count goes 0 -> 1", () => {
+      const specWithNoAc = { extra: { acceptance_criteria: [] } };
+      const specWithOneAc = {
+        extra: {
+          acceptance_criteria: [
+            { id: "AC-GATE-2", statement: "x", verify: { mode: "human" } },
+          ],
+        },
+      };
+      expect(upstreamHasAcceptanceCriteria(specWithNoAc)).toEqual({
+        ok: false,
+        reason: "UPSTREAM_NO_AC",
+      });
+      expect(upstreamHasAcceptanceCriteria(specWithOneAc)).toEqual({ ok: true });
+    });
+
+    // REGRESSION — stays SSOT with AcService's extractCriteria: a spec whose
+    // acceptance_criteria entries are individually well-formed per
+    // acceptanceCriterionSchema (script mode) is recognized identically to human mode.
+    it("passes for a script-mode AC entry, matching AcService's own AC counting", () => {
+      expect(
+        upstreamHasAcceptanceCriteria({
+          extra: {
+            acceptance_criteria: [
+              {
+                id: "AC-GATE-3",
+                statement: "script mode AC",
+                verify: { mode: "script", oracle: "test", command: "bunx vitest run x" },
+              },
+            ],
+          },
+        }),
+      ).toEqual({ ok: true });
+    });
+  });
+
+  // STATE dimension (parentLegal / specKindValid / hasSkeleton): N/A. Those three
+  // predicates are pure functions of their arguments with no persisted or mutable
+  // state to transition. Exempt per ~/.claude/skills/test/ (pure-function modules
+  // carry no STATE dimension). upstreamApproved / upstreamHasAcceptanceCriteria DO
+  // get STATE-dimension coverage above (same upstream doc re-checked across a
+  // status/AC-count transition), since they gate a corpus doc's own lifecycle.
 });
