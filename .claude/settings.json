@@ -8,13 +8,21 @@
         "matcher": "Bash",
         "hooks": [
           { "type": "command", "command": "$CLAUDE_PROJECT_DIR/hooks/g1-spec-create.sh" },
-          { "type": "command", "command": "$CLAUDE_PROJECT_DIR/hooks/g2-spec-promote.sh" }
+          { "type": "command", "command": "$CLAUDE_PROJECT_DIR/hooks/g2-spec-promote.sh" },
+          { "type": "command", "command": "$CLAUDE_PROJECT_DIR/hooks/g3-plan-promote.sh" },
+          { "type": "command", "command": "$CLAUDE_PROJECT_DIR/hooks/g4-task-claim.sh" }
         ]
       },
       {
         "matcher": "mcp__.*lore_create.*",
         "hooks": [
           { "type": "command", "command": "$CLAUDE_PROJECT_DIR/hooks/g1-spec-create.sh" }
+        ]
+      },
+      {
+        "matcher": "mcp__.*lore_claim.*",
+        "hooks": [
+          { "type": "command", "command": "$CLAUDE_PROJECT_DIR/hooks/g4-task-claim.sh" }
         ]
       }
     ]
