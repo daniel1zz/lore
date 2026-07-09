@@ -18,6 +18,7 @@ import { VersionService } from "../../../src/service/version-service.js";
 import { OutlineService } from "../../../src/service/outline-service.js";
 import { MigrationService } from "../../../src/service/migration-service.js";
 import { TreeCheckService } from "../../../src/service/tree-check-service.js";
+import { JudgmentService } from "../../../src/service/judgment-service.js";
 import { NoOpTelemetry } from "@lore/core";
 import type { App } from "../../../src/app.js";
 import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
@@ -53,7 +54,11 @@ function makeApp(): App {
     // reason: SPEC-032 §3.4 — test does not exercise spec-kind audit; null-cast per
     // established pattern (see phaseService above) for satisfying newly-required App fields.
     specKindService: null as unknown as App["specKindService"],
-    judgmentService: null as unknown as App["judgmentService"],
+    // reason: lore_approve's post-approve calibration hook (SPEC-033 F1) needs a real
+    // JudgmentService.latestFor — the prior null-cast only worked because no earlier
+    // test in this file exercised lore_approve. Wired against the same InMemoryStore
+    // instance so calibration data lands in the same corpus the test observes.
+    judgmentService: new JudgmentService(store, new NoOpTelemetry()),
     auditService: null as unknown as App["auditService"],
     // reason: test does not exercise AI-default path; callerSurface required by App interface (SPEC-024).
     callerSurface: "cli" as const,
@@ -285,6 +290,76 @@ describe("lore_list", () => {
   // NEGATIVE: N/A — list accepts empty filters without error
   // ERROR: N/A — InMemoryStore does not fail
   // STATE: N/A — stateless read
+  // REGRESSION: N/A
+});
+
+// ─── lore_list — governed_by (IoC vertical-slice tech-spec §4.1 P4) ──────────
+
+describe("lore_list governed_by", () => {
+  describe("happy path", () => {
+    it("short-circuits to listGovernedBy and returns the doc the feeding skill governs", async () => {
+      const cc = getToolHandler(server, "lore_create");
+      const ca = getToolHandler(server, "lore_approve");
+
+      const skillResult = await cc({
+        type: "knowledge",
+        title: "Write-spec rules",
+        content: "## Rule\n\nBody.",
+        extra: { sub_type: "skill", skill: { applies_to: "spec" } },
+      });
+      expect(skillResult.isError).toBeFalsy();
+      const skill = parseResult(skillResult) as { id: string; slug: string };
+      const approveResult = await ca({ id_or_slug: skill.id });
+      expect(approveResult.isError).toBeFalsy();
+
+      const prdResult = await cc({ type: "prd", title: "Root PRD" });
+      const prd = parseResult(prdResult) as { id: string };
+      const specResult = await cc({ type: "spec", title: "Governed Spec", parent_id: prd.id, content: "body" });
+      expect(specResult.isError).toBeFalsy();
+      const spec = parseResult(specResult) as { id: string };
+
+      const result = await getToolHandler(server, "lore_list")({ governed_by: skill.id });
+      expect(result.isError).toBeFalsy();
+      const data = parseResult(result) as { docs: Array<{ id: string }>; total: number };
+      expect(data.total).toBe(1);
+      expect(data.docs.some((d) => d.id === spec.id)).toBe(true);
+    });
+  });
+
+  describe("negative cases", () => {
+    it("a skill with no governs links returns an empty docs array, not an error", async () => {
+      const cc = getToolHandler(server, "lore_create");
+      const ca = getToolHandler(server, "lore_approve");
+
+      const skillResult = await cc({
+        type: "knowledge",
+        title: "Lonely skill",
+        content: "body",
+        extra: { sub_type: "skill", skill: { applies_to: "spec" } },
+      });
+      const skill = parseResult(skillResult) as { id: string };
+      await ca({ id_or_slug: skill.id });
+
+      const result = await getToolHandler(server, "lore_list")({ governed_by: skill.id });
+      expect(result.isError).toBeFalsy();
+      const data = parseResult(result) as { docs: unknown[]; total: number };
+      expect(data.docs).toHaveLength(0);
+      expect(data.total).toBe(0);
+    });
+  });
+
+  describe("error handling", () => {
+    it("an unresolvable governed_by id/slug returns isError=true", async () => {
+      const result = await getToolHandler(server, "lore_list")({ governed_by: "knowledge-nonexistent-slug" });
+      expect(result.isError).toBe(true);
+      const error = parseResult(result) as { code: string };
+      expect(error.code).toBe("DOC_NOT_FOUND");
+    });
+  });
+
+  // BOUNDARY: N/A — limit/offset slicing over governed_by results mirrors the
+  // normal path's slice, already covered generically above for the filters path.
+  // STATE: N/A — read-only
   // REGRESSION: N/A
 });
 

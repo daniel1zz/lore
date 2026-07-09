@@ -415,7 +415,115 @@ export class CorpusService {
     });
     if (!auditResult.ok) return auditResult;
 
+    // Provenance auto-write (IoC vertical-slice tech-spec §4.1 P4, "governs" edge from
+    // the feeding skill to the artifact it fed) — fail-soft by construction, see
+    // writeProvenanceLink's JSDoc. The created doc is already durably persisted above;
+    // this is metadata layered on top and must never turn a successful create into an
+    // error.
+    await this.writeProvenanceLink(insertResult.value);
+
     return ok(insertResult.value);
+  }
+
+  /**
+   * Write the `skill --governs--> newDoc` provenance link discovered via
+   * {@link findFeedingSkill}, if an approved feeding skill exists for `newDoc.type`.
+   *
+   * Fire-and-forget by design: the just-created doc is the create path's SSOT, and
+   * this link is provenance metadata about how the doc came to exist, not a
+   * correctness dependency of the create itself. Every failure mode — the feeding-skill
+   * lookup erroring, the link write erroring, or an unexpected throw from either — is
+   * caught here and recorded via telemetry; none of them are ever re-thrown or turned
+   * into an `err()` for the caller.
+   *
+   * Idempotent: before writing, checks the candidate skill's existing outbound
+   * `governs` links for one already pointing at `newDoc.id`, skipping the write if
+   * found — so re-running this step for the same (skill, doc) pair never duplicates
+   * the edge. `store.addLink` independently rejects exact `(from, to, link_type)`
+   * duplicates with `DUPLICATE_LINK`, which this treats as "already provisioned"
+   * rather than a failure — a second line of defence against a race between the
+   * pre-check and the write, not the primary idempotency mechanism.
+   *
+   * @param newDoc - The doc just persisted by `_createImpl` (row + version + audit
+   *   entry already committed before this is called)
+   * @invariant Never throws. Never returns a value the caller must inspect — this
+   *   method exists purely for its side effect and its own failure is not the
+   *   caller's concern.
+   */
+  private async writeProvenanceLink(newDoc: DocRecord): Promise<void> {
+    try {
+      const skillResult = await this.findFeedingSkill(newDoc.type);
+      if (!skillResult.ok) {
+        this.recordProvenanceFailure("find_feeding_skill", skillResult.error.code, newDoc);
+        return;
+      }
+
+      const skill = skillResult.value;
+      // reason: ok(null) is a fact ("no approved feeding skill declares this scope"),
+      // not a failure — most doc types have none, this is the common case.
+      if (skill === null) return;
+
+      const existingLinksResult = await this.store.findLinks(skill.id, "out");
+      if (existingLinksResult.ok) {
+        const alreadyGoverns = existingLinksResult.value.some(
+          (link) => link.link_type === "governs" && link.to_id === newDoc.id,
+        );
+        if (alreadyGoverns) return; // idempotent — edge already provisioned
+      }
+      // reason: if the existence check itself failed, still attempt the write below —
+      // store.addLink's own DUPLICATE_LINK rejection is the fallback dedup guard.
+
+      const linkResult = await this.store.addLink({
+        from_id: skill.id,
+        to_id: newDoc.id,
+        link_type: "governs",
+        created_at: new Date().toISOString(),
+        created_by: "system",
+      });
+
+      if (!linkResult.ok && linkResult.error.code !== "DUPLICATE_LINK") {
+        this.recordProvenanceFailure("add_link", linkResult.error.code, newDoc, skill.id);
+      }
+    } catch (error) {
+      this.recordProvenanceFailure(
+        "unexpected_throw",
+        error instanceof Error ? error.message : String(error),
+        newDoc,
+      );
+    }
+  }
+
+  /**
+   * Record a provenance-write failure via telemetry (never console, never a thrown
+   * error) — the structured logging surface this codebase uses in place of a
+   * console-based logger (mirrors {@link recordTelemetryEvent}'s `Telemetry.record`
+   * call, which is documented to never throw even if the underlying sink fails).
+   *
+   * @param stage - Which step of {@link writeProvenanceLink} failed
+   * @param errorCode - The `LoreError.code` (or a caught throw's message) for context
+   * @param newDoc - The doc the provenance write was attempted for
+   * @param skillId - The feeding skill's id, when the failure happened after it was resolved
+   */
+  private recordProvenanceFailure(
+    stage: "find_feeding_skill" | "add_link" | "unexpected_throw",
+    errorCode: string,
+    newDoc: DocRecord,
+    skillId?: DocId,
+  ): void {
+    this.telemetry.record({
+      ts: new Date().toISOString(),
+      service: "CorpusService",
+      method: "provenance",
+      ok: false,
+      duration_ms: 0,
+      error_code: errorCode,
+      meta: {
+        stage,
+        doc_id: newDoc.id,
+        doc_type: newDoc.type,
+        ...(skillId !== undefined ? { skill_id: skillId } : {}),
+      },
+    });
   }
 
   // ── Get ──────────────────────────────────────────────────────────────────
@@ -753,6 +861,56 @@ export class CorpusService {
     const storeResult = await this.store.findMany(filters);
     if (!storeResult.ok) return storeResult;
     return ok({ docs: storeResult.value, total: storeResult.value.length });
+  }
+
+  /**
+   * List the artifacts a skill governs — the reverse-query counterpart to
+   * {@link writeProvenanceLink}'s auto-written `skill --governs--> artifact` edges
+   * (IoC vertical-slice tech-spec §4.1 P4). Resolves `skillIdOrSlug`, reads its
+   * outbound `governs` links, and fetches each target doc.
+   *
+   * This is a link-table traversal, not a column filter — {@link StoreFilters} has no
+   * "id in link targets" predicate, so it cannot be expressed as an addition to
+   * {@link list}'s filter object (same reasoning as the `--phase` client-side filter
+   * in the CLI `list` command). A soft-deleted or otherwise missing target doc is
+   * silently excluded from the result rather than erroring the whole query — a single
+   * dangling link must not make the entire governed-artifact list unusable.
+   *
+   * @param skillIdOrSlug - ID or slug of the governing skill doc
+   * @returns `ok({docs, total})` — empty when the skill has no `governs` links, or
+   *   `skillIdOrSlug` doesn't resolve → `DOC_NOT_FOUND`
+   * @example
+   * const result = await corpusService.listGovernedBy("knowledge-write-spec-rules");
+   * if (result.ok) console.log(result.value.docs.map((d) => d.slug));
+   */
+  async listGovernedBy(
+    skillIdOrSlug: string,
+  ): Promise<Result<{ docs: DocSummary[]; total: number }, LoreError>> {
+    const startMs = Date.now();
+    const resolveResult = await this.resolve(skillIdOrSlug);
+    if (!resolveResult.ok) return resolveResult;
+
+    const linksResult = await this.store.findLinks(resolveResult.value, "out");
+    if (!linksResult.ok) return linksResult;
+
+    const governedIds = linksResult.value
+      .filter((link) => link.link_type === "governs")
+      .map((link) => link.to_id);
+
+    const docs: DocSummary[] = [];
+    for (const docId of governedIds) {
+      const docResult = await this.store.find(docId);
+      if (docResult.ok && docResult.value !== null && docResult.value.deleted_at === null) {
+        docs.push(this.toSummary(docResult.value));
+      }
+    }
+
+    const result = ok({ docs, total: docs.length });
+    this.recordTelemetryEvent("list", startMs, result, {
+      governed_by: skillIdOrSlug,
+      count: docs.length,
+    });
+    return result;
   }
 
   // ── Search ───────────────────────────────────────────────────────────────

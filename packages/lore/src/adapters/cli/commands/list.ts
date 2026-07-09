@@ -47,6 +47,10 @@ export default defineCommand({
       type: "string",
       description: "Filter tasks by phase name (extra.phase). Combine with --type task and --plan-id. Source: SPEC-023",
     },
+    "governed-by": {
+      type: "string",
+      description: "List artifacts governed by a skill (ID or slug) via its 'governs' links. Exclusive of other filters.",
+    },
     json: {
       type: "boolean",
       description: "Output as JSON",
@@ -55,6 +59,40 @@ export default defineCommand({
   async run({ args }) {
     const { app } = loadLoreApp();
     try {
+      // --governed-by is a link-table reverse query (skill --governs--> artifact),
+      // not a StoreFilters column predicate — it short-circuits to its own dedicated
+      // service method (CorpusService.listGovernedBy) rather than joining the
+      // filters object below. Source: IoC vertical-slice tech-spec §4.1 P4.
+      if (args["governed-by"] !== undefined) {
+        const governedResult = await app.corpusService.listGovernedBy(args["governed-by"]);
+        if (!governedResult.ok) {
+          process.stderr.write(formatError(governedResult.error) + "\n");
+          process.exitCode = exitCode(governedResult.error);
+          return;
+        }
+        const { docs, total } = governedResult.value;
+
+        if (args.json) {
+          console.log(JSON.stringify({ ok: true, data: { docs, total } }, null, 2));
+          return;
+        }
+        if (total === 0) {
+          console.log(`No documents governed by "${args["governed-by"]}".`);
+          return;
+        }
+        const headers = ["ID", "Type", "Title", "Status", "Updated"];
+        const rows = docs.map((d) => [
+          d.id.slice(0, 10),
+          d.type,
+          d.title.slice(0, 35),
+          d.status,
+          relativeTime(d.updated_at),
+        ]);
+        console.log(formatTable(headers, rows));
+        console.log(`\n${total} document${total === 1 ? "" : "s"} (filter: --governed-by ${args["governed-by"]})`);
+        return;
+      }
+
       const filters: Record<string, unknown> = {};
       if (args.type !== undefined) filters["type"] = args.type as DocType;
       if (args.status !== undefined) filters["status"] = args.status as DocStatus;

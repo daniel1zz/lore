@@ -113,6 +113,13 @@ export const LoreListSchema = z.object({
   tag: z.string().optional(),
   limit: z.number().int().positive().optional(),
   offset: z.number().int().min(0).optional(),
+  /**
+   * ID or slug of a skill doc — when set, lists the artifacts it governs (its
+   * outbound `governs` links) via `CorpusService.listGovernedBy`, ignoring every
+   * other filter field (mirrors the CLI `--governed-by` short-circuit). SPEC IoC
+   * vertical-slice tech-spec §4.1 P4.
+   */
+  governed_by: z.string().optional(),
 });
 
 /** Input schema for lore_search. */
@@ -552,7 +559,19 @@ export function registerTools(server: McpServer, app: App): void {
 
   // lore_list
   registerToolWithArgs(server, "lore_list", "List documents matching optional filters", LoreListSchema, async (args) => {
-    const { type, status, since, author, tag, limit, offset } = args;
+    const { type, status, since, author, tag, limit, offset, governed_by } = args;
+
+    // governed_by is a link-table reverse query, not a StoreFilters column predicate —
+    // short-circuits to its own service method, same as the CLI's --governed-by branch.
+    if (governed_by !== undefined) {
+      const governedResult = await corpusService.listGovernedBy(governed_by);
+      if (!governedResult.ok) return errorContent(governedResult.error);
+      const docs = limit !== undefined
+        ? governedResult.value.docs.slice(offset ?? 0, (offset ?? 0) + limit)
+        : governedResult.value.docs;
+      return textContent({ docs, total: governedResult.value.total });
+    }
+
     const filters = {
       ...(type !== undefined ? { type } : {}),
       ...(status !== undefined ? { status } : {}),
