@@ -353,6 +353,34 @@ async function runSpecCreateGate(app: App, input: GateSpecCreateInput): Promise<
   };
   const results = checkpoint.check(ctx);
 
+  // reason (§5.4 research finding, P4 T4): a best-effort PUSH of the governing skill
+  // on this ALLOW branch (so an agent gets it proactively even on a clean pass, not
+  // only after a violation) was investigated and rejected as infeasible at the
+  // transport this gate is actually consumed through. `lore gate spec-create` is
+  // invoked by `hooks/g1-spec-create.sh`, a Claude Code PreToolUse hook shim — and
+  // PreToolUse's `hookSpecificOutput` schema is documented (Tier S: official Claude
+  // Code docs, code.claude.com/docs/en/hooks, "Decision control" table, fetched
+  // 2026-07-09) as EXACTLY `{hookEventName, permissionDecision, permissionDecisionReason}`
+  // on an allow verdict — no `additionalContext` field. `additionalContext` is
+  // documented there for `SessionStart` / `Setup` / `SubagentStart` / `Stop` /
+  // `SubagentStop` / `PostToolUse`, but explicitly NOT for `PreToolUse` (a second,
+  // independently-cached community reference, ~/.cc-switch/skills/claude-code-config/
+  // references/hooks-reference.md, agrees: it scopes "Context Addition" to
+  // `UserPromptSubmit`/`SessionStart` only and gives PreToolUse's allow/deny schema
+  // as `{permissionDecision, updatedInput, reason}` with no context field). Two
+  // independent sources agree — CONFIDENCE: HIGH. Since the shim can only pass
+  // `permissionDecision`/`permissionDecisionReason` back to the model, there is no
+  // channel on THIS allow branch to push the feeding pack through even if this
+  // command computed one — g1-spec-create.sh would have nowhere to put it. `lore
+  // feed spec-create` (P4 T2, `flows/feed-flow.ts::buildFeed`) therefore remains the
+  // ONE guaranteed feed-before-produce surface: an agent PULLS the governing skill
+  // ahead of writing rather than receiving it pushed on an allow. This is a
+  // documented design constraint, not a gap — see the identical note in
+  // `../../../../../hooks/g1-spec-create.sh`. NON-AC-blocking: this comment changes
+  // no predicate, no branch, no exit code — "gate: pass" + exit 0 below is BYTE-
+  // IDENTICAL to its pre-existing contract (regression-pinned by
+  // `tests/integration/gate-spec-create.bun.test.ts` and this task's own
+  // `tests/integration/p4-e2e-feed-provenance-loop.bun.test.ts`).
   if (!isCheckpointBlocked(results)) {
     console.log("gate: pass");
     process.exitCode = 0;

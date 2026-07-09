@@ -30,6 +30,21 @@
 #
 # Honors LORE_GATE_BYPASS=1 (same escape hatch `lore gate` itself reads) —
 # short-circuits to allow before touching stdin at all.
+#
+# ⛔ Allow-path is PULL-ONLY, not push (§5.4 research finding, P4 T4): on the "allow"
+# verdict this shim only ever emits {hookEventName, permissionDecision:"allow"} — it
+# does NOT (and structurally cannot) attach the governing skill's rule slice as
+# `hookSpecificOutput.additionalContext`. Official Claude Code docs (Tier S:
+# code.claude.com/docs/en/hooks, "Decision control" table, fetched 2026-07-09) scope
+# PreToolUse's hookSpecificOutput to exactly `{permissionDecision,
+# permissionDecisionReason}` — additionalContext is documented there for
+# SessionStart/Setup/SubagentStart/Stop/SubagentStop/PostToolUse, explicitly NOT for
+# PreToolUse. A second, independently-cached reference agrees (identical note in
+# `../packages/lore/src/adapters/cli/commands/gate.ts::runSpecCreateGate`). So there
+# is no transport for a proactive push on a clean pass here, by design — `lore feed
+# spec-create` (P4 T2) is the ONE guaranteed feed-before-produce surface: an agent
+# PULLS the governing skill ahead of writing rather than the gate pushing it on
+# allow. This does not change the allow verdict this shim already emits.
 
 set -u # deliberately NOT `set -e`: every failure path below must fall through to allow
 
