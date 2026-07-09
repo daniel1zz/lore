@@ -86,7 +86,7 @@ export const LINK_INFERENCE_TEMPLATE =
   `DOC A: "{{from_title}}"\n<body_head>\n{{from_body_head}}\n</body_head>\n\n` +
   `DOC B: "{{to_title}}"\n<body_head>\n{{to_body_head}}\n</body_head>\n\n` +
   `Choose EXACTLY ONE relationship type from this list:\n` +
-  `- parent\n- implements\n- informs\n- supersedes\n- relates-to\n- blocks\n\n` +
+  `- parent\n- implements\n- informs\n- supersedes\n- relates-to\n- blocks\n- governs\n\n` +
   `Respond with only the single word — no explanation.`;
 
 // ─── Template Renderer ────────────────────────────────────────────────────────

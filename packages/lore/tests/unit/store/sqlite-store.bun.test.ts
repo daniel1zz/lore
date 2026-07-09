@@ -286,6 +286,22 @@ describe("SQLiteStore", () => {
       expect(result.value.link_type).toBe("relates-to");
     });
 
+    it("AC-STORE-005.09 (regression, migration-004): addLink accepts link_type='governs'", async () => {
+      // reason: links.link_type is enforced by a SQLite CHECK constraint
+      // (migration-001), not just Zod — this is the store-level oracle proving
+      // migration-004's widened CHECK actually applies to a freshly-created DB.
+      const skill = makeDoc({ slug: "knowledge-governs-skill" });
+      const artifact = makeDoc({ slug: "spec-governs-artifact" });
+      await store.insert(skill);
+      await store.insert(artifact);
+
+      const link = makeLink(skill.id, artifact.id, "governs");
+      const result = await store.addLink(link);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.link_type).toBe("governs");
+    });
+
     it("AC-STORE-005.06: findLinks(out) returns outbound links", async () => {
       const a = makeDoc({ slug: "prd-fl-a" });
       const b = makeDoc({ slug: "prd-fl-b" });

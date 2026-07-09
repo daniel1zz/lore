@@ -3,7 +3,7 @@
  *
  * Manual mode (default):
  *   Requires --type <link_type>. Valid types: parent | implements | informs |
- *   supersedes | relates-to | blocks. Defaults to "relates-to" when omitted.
+ *   supersedes | relates-to | blocks | governs. Defaults to "relates-to" when omitted.
  *
  * AI inference mode (SPEC-019 AC-LINK-AI-1):
  *   --infer: ask the AI provider to pick the link type from both documents' titles
@@ -26,6 +26,7 @@ const VALID_LINK_TYPES: LinkType[] = [
   "supersedes",
   "relates-to",
   "blocks",
+  "governs",
 ];
 
 export default defineCommand({

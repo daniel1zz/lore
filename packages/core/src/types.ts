@@ -35,7 +35,11 @@ export type LinkType =
   | "informs"
   | "supersedes"
   | "relates-to"
-  | "blocks";
+  | "blocks"
+  /** from = skill, to = artifact — the skill governed/fed that artifact's
+   * production (P4 provenance). Plain typed edge, no lifecycle or
+   * validation coupling beyond the generic link rules. */
+  | "governs";
 
 export type VersionAction =
   | "create"

@@ -4,7 +4,8 @@
  * cleanly on a fresh DB and on an existing pre-migration-003 DB, idempotently.
  *
  * Six-dimension coverage for this file:
- *   HAPPY:      fresh DB migrates straight to user_version 3 with both new tables
+ *   HAPPY:      fresh DB migrates straight to the current user_version (4, once
+ *               migration-004 landed — see note below) with both new tables
  *               and their indexes present
  *   NEGATIVE:   n/a — migration SQL has no invalid-input surface (no user input)
  *   BOUNDARY:   a db already at user_version 2 (pre-migration-003) is the exact
@@ -12,8 +13,16 @@
  *   ERROR:      n/a — migration failures would throw at construction time, not
  *               reach a Result channel; this suite instead proves it never throws
  *   STATE:      existing docs/rows survive the 2→3 upgrade untouched
- *   REGRESSION: reopening an already-migrated (v3) db a second time is idempotent
+ *   REGRESSION: reopening an already-migrated db a second time is idempotent
  *               — CREATE TABLE/INDEX IF NOT EXISTS means no throw on re-run
+ *
+ * NOTE: this suite asserts the CURRENT `PRAGMA user_version` a fresh SQLiteStore
+ * lands on, which by construction tracks whatever the newest migration constant
+ * sets it to (currently 4, migration-004 — see migrations/migration-004.ts). It
+ * is not re-scoped to "exactly migration-003's effects"; it deliberately doubles
+ * as the store's "opening a brand-new DB never throws and lands on the latest
+ * schema version" regression oracle. Update the literal version number here
+ * when a new migration ships, same as this task did going 3 -> 4.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -38,14 +47,14 @@ describe("migration-003 (review_judgments + calibration_records)", () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("HAPPY: a fresh :memory: DB migrates straight to user_version 3 with both new tables + indexes", () => {
+  it("HAPPY: a fresh :memory: DB migrates straight to the current user_version with both new tables + indexes", () => {
     const store = new SQLiteStore(":memory:");
     const db = store.getDatabase();
 
     const { user_version: userVersion } = db.query("PRAGMA user_version").get() as {
       user_version: number;
     };
-    expect(userVersion).toBe(3);
+    expect(userVersion).toBe(4);
 
     const tableNames = db
       .query("SELECT name FROM sqlite_master WHERE type = 'table'")
@@ -107,14 +116,15 @@ describe("migration-003 (review_judgments + calibration_records)", () => {
     rawDb.close();
 
     // Reopening via SQLiteStore should detect currentVersion (2) < 3 and apply
-    // migration-003 — never throw, never touch the pre-existing docs row.
+    // migration-003 (then also migration-004, since currentVersion (2) < 4 too)
+    // — never throw, never touch the pre-existing docs row.
     const store = new SQLiteStore(dbPath);
     const db = store.getDatabase();
 
     const { user_version: postUpgradeVersion } = db.query("PRAGMA user_version").get() as {
       user_version: number;
     };
-    expect(postUpgradeVersion).toBe(3);
+    expect(postUpgradeVersion).toBe(4);
 
     const tableNames = db
       .query("SELECT name FROM sqlite_master WHERE type = 'table'")
@@ -130,7 +140,7 @@ describe("migration-003 (review_judgments + calibration_records)", () => {
     store.close();
   });
 
-  it("REGRESSION: reopening an already-migrated (v3) file-backed DB a second time is idempotent — no throw, schema unchanged", () => {
+  it("REGRESSION: reopening an already-migrated (latest version) file-backed DB a second time is idempotent — no throw, schema unchanged", () => {
     const firstOpen = new SQLiteStore(dbPath);
     firstOpen.close();
 
@@ -140,7 +150,7 @@ describe("migration-003 (review_judgments + calibration_records)", () => {
       const { user_version: userVersion } = db.query("PRAGMA user_version").get() as {
         user_version: number;
       };
-      expect(userVersion).toBe(3);
+      expect(userVersion).toBe(4);
       secondOpen.close();
     }).not.toThrow();
   });

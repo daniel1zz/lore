@@ -12,6 +12,7 @@ export const CORPUS_SCHEMA_INFO = {
     "supersedes",
     "relates-to",
     "blocks",
+    "governs",
   ] as const,
   status_values: [
     "draft",

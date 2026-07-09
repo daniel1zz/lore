@@ -9,6 +9,7 @@ import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { MIGRATION_001_SQL } from "./migrations/migration-001.js";
 import { MIGRATION_002_SQL } from "./migrations/migration-002.js";
 import { MIGRATION_003_SQL } from "./migrations/migration-003.js";
+import { MIGRATION_004_SQL } from "./migrations/migration-004.js";
 import type {
   AuditEntry,
   CalibrationRecord,
@@ -101,6 +102,10 @@ export class SQLiteStore implements StoreInterface {
 
     if (currentVersion < 3) {
       this.db.exec(MIGRATION_003_SQL);
+    }
+
+    if (currentVersion < 4) {
+      this.db.exec(MIGRATION_004_SQL);
     }
   }
 

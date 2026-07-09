@@ -141,7 +141,7 @@ describe("Enum schemas", () => {
     }
   });
 
-  it("linkTypeSchema accepts all 6 link types", () => {
+  it("linkTypeSchema accepts all 7 link types", () => {
     for (const lt of [
       "parent",
       "implements",
@@ -149,9 +149,14 @@ describe("Enum schemas", () => {
       "supersedes",
       "relates-to",
       "blocks",
+      "governs",
     ]) {
       expect(linkTypeSchema.safeParse(lt).success).toBe(true);
     }
+  });
+
+  it("[negative] linkTypeSchema rejects unknown link type", () => {
+    expect(linkTypeSchema.safeParse("consumes").success).toBe(false);
   });
 });
 

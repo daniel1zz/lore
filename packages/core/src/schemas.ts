@@ -62,6 +62,10 @@ export const linkTypeSchema = z.enum([
   "supersedes",
   "relates-to",
   "blocks",
+  // "governs": from = skill, to = artifact — the skill governed/fed that
+  // artifact's production (P4 provenance). Plain typed edge, no lifecycle
+  // or validation coupling beyond the generic link rules above.
+  "governs",
 ]);
 
 export const versionActionSchema = z.enum([

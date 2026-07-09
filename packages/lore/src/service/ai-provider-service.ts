@@ -475,7 +475,7 @@ export class AIProviderService {
           exit_code: 0,
           message:
             `AI returned invalid link type "${rawOutput}". ` +
-            `Expected one of: parent, implements, informs, supersedes, relates-to, blocks.`,
+            `Expected one of: parent, implements, informs, supersedes, relates-to, blocks, governs.`,
         },
       };
       this._emitAiEvent(validationError, duration_ms, {

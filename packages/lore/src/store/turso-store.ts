@@ -16,6 +16,7 @@ import { createClient, type Client, type InValue, type Row } from "@libsql/clien
 import { MIGRATION_001_SQL } from "./migrations/migration-001.js";
 import { MIGRATION_002_SQL } from "./migrations/migration-002.js";
 import { MIGRATION_003_SQL } from "./migrations/migration-003.js";
+import { MIGRATION_004_SQL } from "./migrations/migration-004.js";
 import type {
   AuditEntry,
   CalibrationRecord,
@@ -268,6 +269,10 @@ export class TursoStore implements StoreInterface {
 
       if (currentVersion < 3) {
         await this.client.executeMultiple(MIGRATION_003_SQL);
+      }
+
+      if (currentVersion < 4) {
+        await this.client.executeMultiple(MIGRATION_004_SQL);
       }
     })();
 

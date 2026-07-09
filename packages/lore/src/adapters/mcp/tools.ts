@@ -132,7 +132,15 @@ export const LoreLinkSchema = z.object({
   from: z.string(),
   to: z.string(),
   type: z
-    .enum(["parent", "implements", "informs", "supersedes", "relates-to", "blocks"])
+    .enum([
+      "parent",
+      "implements",
+      "informs",
+      "supersedes",
+      "relates-to",
+      "blocks",
+      "governs",
+    ])
     .optional()
     .default("relates-to"),
 });
