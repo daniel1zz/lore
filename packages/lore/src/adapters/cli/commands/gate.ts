@@ -31,11 +31,32 @@
  * No `review_judgments` row is persisted by this command — `lore review` remains the
  * sole persistence path for judgments; this is a disposable, in-band advisory only.
  *
+ * `lore gate plan-promote --plan <id-or-slug>` and `lore gate task-claim --task
+ * <id-or-slug>` are the two "commit-time cross-tier gates": they gate an
+ * ALREADY-CREATED plan (ahead of promotion) / task (ahead of being claimed) against
+ * its ANCESTOR spec's approval + AC status, walking the SAME task→plan→ancestor-spec
+ * chain `evaluateReadiness`'s `upstream_unapproved` advisory uses
+ * (`CorpusService.getPlanBundle`, `@lore/core` task-workflow.ts) — the plan/task's
+ * OWN status is never inspected, only its ancestor spec's. When the plan/task has no
+ * spec-tier ancestor at all (parented directly under a `prd`, or unparented) there is
+ * no upstream edge to gate, so both checkpoints PASS vacuously (never a failure) —
+ * see `checkpoint-registry.js`'s third module invariant.
+ *   - `plan-promote`: ancestor spec must be `approved` AND declare ≥1 structured
+ *     acceptance criterion (`upstreamApproved` + `upstreamHasAcceptanceCriteria`).
+ *   - `task-claim`: ancestor spec must be `approved` (`upstreamApproved` only).
+ *
  * `LORE_GATE_BYPASS=1` short-circuits to exit 0 before ANY parsing or checking, for
- * BOTH subcommands — an escape hatch for callers that must not be blocked (documented,
- * not silent: every invocation under bypass still goes through the CLI, so it is
- * audit-log-visible at the shell/process level even though this command itself
- * performs no corpus writes).
+ * ALL FOUR subcommands — an escape hatch for callers that must not be blocked
+ * (documented, not silent: every invocation under bypass still goes through the CLI,
+ * so it is audit-log-visible at the shell/process level even though this command
+ * itself performs no corpus writes).
+ *
+ * Exit codes (plan-promote / task-claim):
+ *   0 = no spec-tier ancestor (vacuous pass), OR ancestor spec passes its checkpoint's
+ *       predicates, OR LORE_GATE_BYPASS=1
+ *   3 = the target plan/task does not resolve (DOC_NOT_FOUND / SLUG_NOT_FOUND)
+ *   4 = target resolves but is the wrong doc type (VALIDATION_ERROR), OR a spec-tier
+ *       ancestor exists but fails its checkpoint's predicates
  *
  * Exit codes (spec-create):
  *   0 = all predicates passed, OR LORE_GATE_BYPASS=1
@@ -80,7 +101,7 @@ import {
 import { runDeterministicChecks } from "@lore/core";
 import type { App } from "../../../app.js";
 import type { AcService } from "../../../service/ac-service.js";
-import type { DocRecord, NewReviewJudgment } from "@lore/core";
+import type { DocRecord, LoreError, NewReviewJudgment } from "@lore/core";
 
 /**
  * `applies_to` scope this gate discovers its feeding skill by — matches the
@@ -205,6 +226,68 @@ export default defineCommand({
         }
       },
     }),
+
+    "plan-promote": defineCommand({
+      meta: {
+        name: "plan-promote",
+        description:
+          "Deterministic commit-time gate for promoting a plan: when the plan has a " +
+          "spec-tier ancestor, it must be approved and declare ≥1 acceptance criterion; " +
+          "a plan with no spec-tier ancestor passes vacuously",
+      },
+      args: {
+        plan: {
+          type: "string",
+          description: "Plan document ID or slug to gate",
+          required: true,
+        },
+      },
+      async run({ args }) {
+        // LORE_GATE_BYPASS=1: exit 0 before ANY parsing or checking (module header).
+        if (process.env["LORE_GATE_BYPASS"] === "1") {
+          process.exitCode = 0;
+          return;
+        }
+
+        const { app } = loadLoreApp();
+        try {
+          await runPlanPromoteGate(app, args.plan as string);
+        } finally {
+          app.close();
+        }
+      },
+    }),
+
+    "task-claim": defineCommand({
+      meta: {
+        name: "task-claim",
+        description:
+          "Deterministic commit-time gate for claiming a task: when the task's plan " +
+          "has a spec-tier ancestor, it must be approved; a plan with no spec-tier " +
+          "ancestor passes vacuously",
+      },
+      args: {
+        task: {
+          type: "string",
+          description: "Task document ID or slug to gate",
+          required: true,
+        },
+      },
+      async run({ args }) {
+        // LORE_GATE_BYPASS=1: exit 0 before ANY parsing or checking (module header).
+        if (process.env["LORE_GATE_BYPASS"] === "1") {
+          process.exitCode = 0;
+          return;
+        }
+
+        const { app } = loadLoreApp();
+        try {
+          await runTaskClaimGate(app, args.task as string);
+        } finally {
+          app.close();
+        }
+      },
+    }),
   },
 });
 
@@ -274,6 +357,127 @@ function requireCheckpoint(cp: GateCheckpoint): CheckpointDef {
     throw new Error(`Internal error: gate checkpoint "${cp}" not registered`);
   }
   return checkpoint;
+}
+
+/**
+ * Builds the `hasSpecParent` / `parentSpec` / `parentSpecPointer` trio
+ * `plan-promote` and `task-claim`'s `check`/`feed` consume, from an optional resolved
+ * ancestor spec `DocRecord` (`CorpusService.getPlanBundle`'s `.spec` field — `undefined`
+ * when the plan has no spec-tier ancestor). Shared by both gates so the "no spec
+ * ancestor ⇒ vacuous pass" ctx shape is assembled in exactly one place.
+ *
+ * @param spec - The resolved ancestor spec, or `undefined` when `getPlanBundle` found
+ *   none (prd-parented or unparented plan).
+ */
+function buildUpstreamSpecContext(spec: DocRecord | undefined): GateContext {
+  if (spec === undefined) {
+    return { hasSpecParent: false };
+  }
+  return {
+    hasSpecParent: true,
+    parentSpec: { type: spec.type, status: spec.status, extra: spec.extra },
+    parentSpecPointer: { slug: spec.slug, title: spec.title, status: spec.status },
+  };
+}
+
+/**
+ * Runs the `plan-promote` checkpoint against an already-created plan: resolves the
+ * plan's ancestor spec via `CorpusService.getPlanBundle` (the SAME plan→parent-spec
+ * traversal `TaskWorkflowService.ready()` uses to compute `upstream_unapproved`), then
+ * dispatches through `checkpointRegistry["plan-promote"]`.
+ *
+ * @param app - Wired `App` (from `loadLoreApp()`).
+ * @param planIdOrSlug - Plan document ULID or slug to gate.
+ */
+async function runPlanPromoteGate(app: App, planIdOrSlug: string): Promise<void> {
+  const bundleResult = await app.corpusService.getPlanBundle(planIdOrSlug);
+  if (!bundleResult.ok) {
+    process.stderr.write(formatError(bundleResult.error) + "\n");
+    process.exitCode = exitCode(bundleResult.error);
+    return;
+  }
+
+  const checkpoint = requireCheckpoint("plan-promote");
+  const ctx: GateContext = {
+    ...buildUpstreamSpecContext(bundleResult.value.spec),
+    targetIdOrSlug: planIdOrSlug,
+  };
+  const results = checkpoint.check(ctx);
+
+  if (isCheckpointBlocked(results)) {
+    console.log(checkpoint.feed(ctx, selectFailures(results)));
+    process.exitCode = 4;
+    return;
+  }
+
+  console.log("gate: pass");
+  process.exitCode = 0;
+}
+
+/**
+ * Runs the `task-claim` checkpoint against an already-created task: resolves the task,
+ * validates its type, then — via its `parent_id` (the task's plan, per SPEC-025's
+ * `parent_id` + `extra.plan_id` creation contract) — resolves that plan's ancestor
+ * spec via the SAME `CorpusService.getPlanBundle` traversal `runPlanPromoteGate` and
+ * `TaskWorkflowService.ready()` both use, then dispatches through
+ * `checkpointRegistry["task-claim"]`.
+ *
+ * @param app - Wired `App` (from `loadLoreApp()`).
+ * @param taskIdOrSlug - Task document ULID or slug to gate.
+ */
+async function runTaskClaimGate(app: App, taskIdOrSlug: string): Promise<void> {
+  const taskResult = await app.corpusService.get(taskIdOrSlug);
+  if (!taskResult.ok) {
+    process.stderr.write(formatError(taskResult.error) + "\n");
+    process.exitCode = exitCode(taskResult.error);
+    return;
+  }
+
+  const task = taskResult.value.doc;
+  if (task.type !== "task") {
+    const error: LoreError = {
+      code: "VALIDATION_ERROR",
+      field: "type",
+      message: `Expected a task document; got type '${task.type}'`,
+      value: task.type,
+    };
+    process.stderr.write(formatError(error) + "\n");
+    process.exitCode = exitCode(error);
+    return;
+  }
+
+  // reason: a task's parent_id is schema-required to be its plan (createDocInputSchema
+  // superRefine, @lore/core/schemas.ts) — a null parent_id here can only happen on a
+  // legacy/corrupted row. Treated the same as "no spec-tier ancestor" (vacuous pass):
+  // there is no plan to walk, hence no upstream edge to gate against.
+  if (task.parent_id === null) {
+    console.log("gate: pass");
+    process.exitCode = 0;
+    return;
+  }
+
+  const bundleResult = await app.corpusService.getPlanBundle(task.parent_id);
+  if (!bundleResult.ok) {
+    process.stderr.write(formatError(bundleResult.error) + "\n");
+    process.exitCode = exitCode(bundleResult.error);
+    return;
+  }
+
+  const checkpoint = requireCheckpoint("task-claim");
+  const ctx: GateContext = {
+    ...buildUpstreamSpecContext(bundleResult.value.spec),
+    targetIdOrSlug: taskIdOrSlug,
+  };
+  const results = checkpoint.check(ctx);
+
+  if (isCheckpointBlocked(results)) {
+    console.log(checkpoint.feed(ctx, selectFailures(results)));
+    process.exitCode = 4;
+    return;
+  }
+
+  console.log("gate: pass");
+  process.exitCode = 0;
 }
 
 /**

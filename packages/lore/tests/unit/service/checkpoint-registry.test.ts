@@ -19,18 +19,18 @@ import {
 } from "../../../src/service/checkpoint-registry.js";
 
 describe("checkpointRegistry", () => {
-  // HAPPY — registry shape
-  it("has entries for spec-create and spec-promote", () => {
+  // HAPPY — registry shape: all four GateCheckpoint members are now populated
+  // (plan-promote / task-claim joined spec-create / spec-promote — the two
+  // commit-time cross-tier gates).
+  it("has entries for spec-create, spec-promote, plan-promote, and task-claim", () => {
     expect(checkpointRegistry["spec-create"]).toBeDefined();
     expect(checkpointRegistry["spec-promote"]).toBeDefined();
+    expect(checkpointRegistry["plan-promote"]).toBeDefined();
+    expect(checkpointRegistry["task-claim"]).toBeDefined();
     expect(checkpointRegistry["spec-create"]?.id).toBe("spec-create");
     expect(checkpointRegistry["spec-promote"]?.id).toBe("spec-promote");
-  });
-
-  // NEGATIVE — scope boundary: plan-promote / task-claim are OUT of this task
-  it("has no entries yet for plan-promote or task-claim", () => {
-    expect(checkpointRegistry["plan-promote"]).toBeUndefined();
-    expect(checkpointRegistry["task-claim"]).toBeUndefined();
+    expect(checkpointRegistry["plan-promote"]?.id).toBe("plan-promote");
+    expect(checkpointRegistry["task-claim"]?.id).toBe("task-claim");
   });
 
   describe("spec-create checkpoint", () => {
@@ -174,6 +174,117 @@ describe("checkpointRegistry", () => {
       expect(text).toContain('spec "spec-x"');
       expect(text).toContain("no structured acceptance criteria");
       expect(text).toContain("lore ac add");
+    });
+  });
+
+  describe("plan-promote checkpoint", () => {
+    const checkpoint = checkpointRegistry["plan-promote"]!;
+    const approvedSpecWithAc: GateContext = {
+      hasSpecParent: true,
+      parentSpec: {
+        type: "spec",
+        status: "approved",
+        extra: { acceptance_criteria: [{ id: "AC-1", statement: "x", verify: { mode: "human" } }] },
+      },
+      parentSpecPointer: { slug: "spec-x", title: "Spec X", status: "approved" },
+    };
+
+    // HAPPY
+    it("check() passes when the ancestor spec is approved and has ≥1 declared AC", () => {
+      const results = checkpoint.check(approvedSpecWithAc);
+      expect(isCheckpointBlocked(results)).toBe(false);
+    });
+
+    // BOUNDARY — no spec-tier ancestor at all ⇒ vacuous pass (module invariant)
+    it("check() returns [] (vacuous pass) when hasSpecParent is false", () => {
+      const results = checkpoint.check({ hasSpecParent: false });
+      expect(results).toEqual([]);
+      expect(isCheckpointBlocked(results)).toBe(false);
+    });
+
+    // BOUNDARY — hasSpecParent omitted entirely defaults to the same vacuous-pass path
+    it("check() returns [] (vacuous pass) when hasSpecParent is omitted", () => {
+      const results = checkpoint.check({});
+      expect(results).toEqual([]);
+    });
+
+    // NEGATIVE
+    it("check() fails with UPSTREAM_NOT_APPROVED when the ancestor spec is draft", () => {
+      const ctx: GateContext = {
+        ...approvedSpecWithAc,
+        parentSpec: { ...approvedSpecWithAc.parentSpec!, status: "draft" },
+      };
+      const failures = selectFailures(checkpoint.check(ctx));
+      expect(failures.some((f) => f.reason === "UPSTREAM_NOT_APPROVED")).toBe(true);
+    });
+
+    // NEGATIVE
+    it("check() fails with UPSTREAM_NO_AC when the approved ancestor spec has zero declared AC", () => {
+      const ctx: GateContext = {
+        ...approvedSpecWithAc,
+        parentSpec: { type: "spec", status: "approved", extra: {} },
+      };
+      const failures = selectFailures(checkpoint.check(ctx));
+      expect(failures.some((f) => f.reason === "UPSTREAM_NO_AC")).toBe(true);
+    });
+
+    // HAPPY — verdict purity
+    it("check() is a pure function of GateContext", () => {
+      const ctx: GateContext = { ...approvedSpecWithAc, parentSpec: { ...approvedSpecWithAc.parentSpec!, status: "draft" } };
+      expect(checkpoint.check(ctx)).toEqual(checkpoint.check(ctx));
+    });
+
+    // HAPPY — feed() renders a pointers-not-dump feeding pack
+    it("feed() renders the ancestor spec pointer, missing reasons, and a provenance header", () => {
+      const ctx: GateContext = {
+        ...approvedSpecWithAc,
+        parentSpec: { ...approvedSpecWithAc.parentSpec!, status: "draft" },
+      };
+      const results = checkpoint.check(ctx);
+      const text = checkpoint.feed(ctx, selectFailures(results));
+      expect(text).toContain("[source: corpus spec-x, trust: team-authored]");
+      expect(text).toContain("- UPSTREAM_NOT_APPROVED");
+      expect(text).toContain("spec-x");
+      expect(text).toContain("Spec X");
+      expect(text.toLowerCase()).toContain("approved");
+    });
+  });
+
+  describe("task-claim checkpoint", () => {
+    const checkpoint = checkpointRegistry["task-claim"]!;
+    const approvedSpec: GateContext = {
+      hasSpecParent: true,
+      parentSpec: { type: "spec", status: "approved", extra: {} },
+      parentSpecPointer: { slug: "spec-y", title: "Spec Y", status: "approved" },
+    };
+
+    // HAPPY
+    it("check() passes when the ancestor spec is approved (AC count irrelevant to this gate)", () => {
+      const results = checkpoint.check(approvedSpec);
+      expect(isCheckpointBlocked(results)).toBe(false);
+    });
+
+    // BOUNDARY — no spec-tier ancestor ⇒ vacuous pass
+    it("check() returns [] (vacuous pass) when hasSpecParent is false", () => {
+      const results = checkpoint.check({ hasSpecParent: false });
+      expect(results).toEqual([]);
+    });
+
+    // NEGATIVE
+    it("check() fails with UPSTREAM_NOT_APPROVED when the ancestor spec is in-review", () => {
+      const ctx: GateContext = { ...approvedSpec, parentSpec: { ...approvedSpec.parentSpec!, status: "in-review" } };
+      const failures = selectFailures(checkpoint.check(ctx));
+      expect(failures).toEqual([{ ok: false, reason: "UPSTREAM_NOT_APPROVED" }]);
+    });
+
+    // HAPPY — feed() renders a pointers-not-dump feeding pack, distinct requirement sentence
+    it("feed() renders the ancestor spec pointer and a task-claim-specific requirement", () => {
+      const ctx: GateContext = { ...approvedSpec, parentSpec: { ...approvedSpec.parentSpec!, status: "draft" } };
+      const results = checkpoint.check(ctx);
+      const text = checkpoint.feed(ctx, selectFailures(results));
+      expect(text).toContain("[source: corpus spec-y, trust: team-authored]");
+      expect(text).toContain("- UPSTREAM_NOT_APPROVED");
+      expect(text).toContain("task-claim");
     });
   });
 
