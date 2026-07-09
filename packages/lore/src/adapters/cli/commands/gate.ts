@@ -52,8 +52,16 @@
  *   4 = resolves but is not a spec (VALIDATION_ERROR), OR resolves as a spec with zero
  *       declared acceptance criteria
  *
- * Source: IoC vertical-slice tech-spec §4.1/§11 ("deterministic zone" + "active feeding"
- * + INV2 "probabilistic zone is advisory-only")
+ * Both subcommands' deterministic decision logic (the predicate checks themselves,
+ * plus the failure feeding-pack / message rendering) now lives behind
+ * `../../../service/checkpoint-registry.js::checkpointRegistry` — this file only
+ * performs the store/IO reads (`resolveParentDoc`, `findFeedingSkill`,
+ * `AcService.listCriteria`) and dispatches through the registry's `check`/`feed`
+ * callbacks. This is a pure refactor: exit codes, stdout feeding-pack text, and stderr
+ * judge advisory are all UNCHANGED from the pre-registry inline-predicate shape.
+ *
+ * Source: IoC vertical-slice tech-spec §4.1/§5.1/§11 ("deterministic zone" +
+ * "active feeding" + INV2 "probabilistic zone is advisory-only")
  */
 
 import { defineCommand } from "citty";
@@ -61,8 +69,14 @@ import { z } from "zod";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
 import { renderResolvedToMarkdown } from "../../../service/outline-service.js";
-import { parentLegal, specKindValid, hasSkeleton } from "../../../service/gate-predicates.js";
-import { buildFeedingPack, renderFeedingPack } from "../../../service/gate-feeding.js";
+import {
+  checkpointRegistry,
+  isCheckpointBlocked,
+  selectFailures,
+  type CheckpointDef,
+  type GateCheckpoint,
+  type GateContext,
+} from "../../../service/checkpoint-registry.js";
 import { runDeterministicChecks } from "@lore/core";
 import type { App } from "../../../app.js";
 import type { AcService } from "../../../service/ac-service.js";
@@ -204,17 +218,16 @@ export default defineCommand({
  */
 async function runSpecCreateGate(app: App, input: GateSpecCreateInput): Promise<void> {
   const parentDoc = await resolveParentDoc(app, input.parent_id);
+  const checkpoint = requireCheckpoint("spec-create");
 
-  const checks = [
-    parentLegal(parentDoc !== null ? { type: parentDoc.type } : null),
-    specKindValid(input.extra?.spec_kind),
-    hasSkeleton(input.content ?? ""),
-  ];
-  const missing = checks
-    .filter((c): c is { ok: false; reason: string } => !c.ok)
-    .map((c) => c.reason);
+  const ctx: GateContext = {
+    parentType: parentDoc !== null ? parentDoc.type : null,
+    ...(input.extra?.spec_kind !== undefined ? { specKind: input.extra.spec_kind } : {}),
+    content: input.content ?? "",
+  };
+  const results = checkpoint.check(ctx);
 
-  if (missing.length === 0) {
+  if (!isCheckpointBlocked(results)) {
     console.log("gate: pass");
     process.exitCode = 0;
     return;
@@ -224,14 +237,14 @@ async function runSpecCreateGate(app: App, input: GateSpecCreateInput): Promise<
   const parentMarkdown =
     parentDoc !== null ? await renderDocMarkdown(app, parentDoc) : undefined;
 
-  const pack = buildFeedingPack({
+  const feedCtx: GateContext = {
+    ...ctx,
     ruleSource: rule.source,
     ruleMarkdown: rule.markdown,
     ...(parentMarkdown !== undefined ? { parentMarkdown } : {}),
-    missing,
-  });
+  };
 
-  console.log(renderFeedingPack(pack));
+  console.log(checkpoint.feed(feedCtx, selectFailures(results)));
   process.exitCode = 4;
 }
 
@@ -246,6 +259,21 @@ function requireAcService(app: App): AcService {
     throw new Error("Internal error: AcService not wired on App");
   }
   return app.acService;
+}
+
+/**
+ * Looks up `cp` in `checkpointRegistry`, throwing if absent. Both call sites in this
+ * file (`"spec-create"`, `"spec-promote"`) are compile-time-known to always be
+ * registered — this can only fire if a future edit removes an entry
+ * `checkpointRegistry` currently guarantees, mirroring `requireAcService`'s identical
+ * "can't happen in production" internal-invariant pattern in this same file.
+ */
+function requireCheckpoint(cp: GateCheckpoint): CheckpointDef {
+  const checkpoint = checkpointRegistry[cp];
+  if (checkpoint === undefined) {
+    throw new Error(`Internal error: gate checkpoint "${cp}" not registered`);
+  }
+  return checkpoint;
 }
 
 /**
@@ -267,11 +295,12 @@ async function runSpecPromoteGate(app: App, specIdOrSlug: string): Promise<void>
   }
 
   const { criteria } = listResult.value;
-  if (criteria.length === 0) {
-    process.stderr.write(
-      `Error: spec "${specIdOrSlug}" has no structured acceptance criteria — ` +
-        "add via `lore ac add`.\n",
-    );
+  const checkpoint = requireCheckpoint("spec-promote");
+  const ctx: GateContext = { acceptanceCriteriaCount: criteria.length, specIdOrSlug };
+  const results = checkpoint.check(ctx);
+
+  if (isCheckpointBlocked(results)) {
+    process.stderr.write(checkpoint.feed(ctx, selectFailures(results)));
     process.exitCode = 4;
     return;
   }
