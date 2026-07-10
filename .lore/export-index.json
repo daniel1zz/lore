@@ -884,6 +884,22 @@
     "01KX0CR1AFJAGD9HPM1N2R4J8K": {
       "human_id": "TASK-107",
       "file_path": "docs/requirements/task/TASK-107-t1-test-gate-predicates-unit-tests-red.md"
+    },
+    "01KX70GHVVVSXEGR2VKATYSMGF": {
+      "human_id": "TASK-108",
+      "file_path": "docs/requirements/task/TASK-108-t1-core-sessionservice-schemas-guard-bootstrap-han.md"
+    },
+    "01KX70GHYXT0RCA10S8R32T7TR": {
+      "human_id": "TASK-109",
+      "file_path": "docs/requirements/task/TASK-109-t2-adapters-feed-resume-branch-cli-bootstrap-hando.md"
+    },
+    "01KX70GHRFKQA5TBAHPZN4X36J": {
+      "human_id": "PLAN-025",
+      "file_path": "docs/requirements/plan/PLAN-025-spec-041-implementation-session-bootstrap-lossless.md"
+    },
+    "01KX704CSP1KQRJG0CW53RGJZJ": {
+      "human_id": "SPEC-045",
+      "file_path": "docs/requirements/spec/SPEC-045-spec-041-session-layer-part-1-bootstrap-pointer-se.md"
     }
   }
 }

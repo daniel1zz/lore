@@ -920,7 +920,9 @@ function buildFrontmatterString(
   fm += `status: ${doc.status}\n`;
   fm += `priority: ${doc.priority}\n`;
   if (phaseStr !== undefined) {
-    fm += `phase: ${phaseStr}\n`;
+    // reason: phase names may contain YAML-significant chars (": " broke 4 exported task
+    // files, migration-coverage regression 2026-07-11) — quote like title above.
+    fm += `phase: "${escapeYamlString(phaseStr)}"\n`;
   }
   fm += `created: ${created}\n`;
   fm += `updated: ${updated}\n`;

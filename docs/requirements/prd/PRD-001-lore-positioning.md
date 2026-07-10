@@ -91,6 +91,7 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
+- [spec] SPEC-041 — Session layer part 1: bootstrap pointer-set + lossless handoff (S1+S2) (approved)
 - [knowledge] Decision-score log — instrument-first bootstrap session (2026-07-10) (draft)
 - [spec] SPEC-040 — Assessment dimension framework v2: facts/judgment split + typed findings (approved)
 - [spec] P4 — Upstream-downstream linkage + feed-before-produce protocol (approved)
