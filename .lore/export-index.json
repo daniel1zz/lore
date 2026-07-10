@@ -900,6 +900,14 @@
     "01KX704CSP1KQRJG0CW53RGJZJ": {
       "human_id": "SPEC-045",
       "file_path": "docs/requirements/spec/SPEC-045-spec-041-session-layer-part-1-bootstrap-pointer-se.md"
+    },
+    "01KX74ZKEP4FYE27GPD03FY6QS": {
+      "human_id": "KN-044",
+      "file_path": "docs/requirements/knowledge/KN-044-retro-spec-041-session-layer-s1-s2-3-lens-review-d.md"
+    },
+    "01KX74YKZTXGNRBF429MDXTQQ5": {
+      "human_id": "KN-045",
+      "file_path": "docs/requirements/knowledge/KN-045-assessment-spec-041-implementation-session-bootstr.md"
     }
   }
 }
