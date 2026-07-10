@@ -297,7 +297,7 @@ describe("GateEnforcer — plan-promote (via ReviewService.approve, default conf
 describe("GateEnforcer — task-claim (via TaskWorkflowService.claim, default config ON)", () => {
   async function createSpecParentedTask(
     app: App,
-  ): Promise<{ specId: string; taskId: string }> {
+  ): Promise<{ specId: string; planId: string; taskId: string }> {
     const prd = await app.corpusService.create({ type: "prd", title: "Root PRD", content: "PRD body" } as CreateDocInput);
     if (!prd.ok) throw new Error(`prd create failed: ${JSON.stringify(prd.error)}`);
     const spec = await app.corpusService.create({
@@ -322,7 +322,7 @@ describe("GateEnforcer — task-claim (via TaskWorkflowService.claim, default co
       extra: { plan_id: plan.value.id },
     } as CreateDocInput);
     if (!task.ok) throw new Error(`task create failed: ${JSON.stringify(task.error)}`);
-    return { specId: spec.value.id, taskId: task.value.id };
+    return { specId: spec.value.id, planId: plan.value.id, taskId: task.value.id };
   }
 
   it("NEGATIVE: claiming a task whose plan's ancestor spec is still draft is BLOCKED", async () => {
@@ -368,6 +368,46 @@ describe("GateEnforcer — task-claim (via TaskWorkflowService.claim, default co
       const { taskId } = await createSpecParentedTask(app);
       const result = await app.taskWorkflowService.claim(taskId, { by: "alice" });
       expect(result.ok).toBe(true);
+    } finally {
+      app.close();
+    }
+  });
+
+  // ── Adversarial-review regression: disabled gate must short-circuit BEFORE the
+  // getPlanBundle IO, not after (review-fix, retro item 8 follow-up) ──────────
+  //
+  // Pre-fix, `enforceClaimGate` ran `getPlanBundle(task.parent_id)` UNCONDITIONALLY,
+  // only checking `resolveGateEnabled` inside `enforce()` — AFTER that IO already ran.
+  // A soft-deleted parent plan makes `getPlanBundle` return `DOC_NOT_FOUND` regardless
+  // of the enabled flag, so a disabled task-claim gate was NOT byte-identical to
+  // pre-GateEnforcer behavior: claim failed with a confusing plan-id DOC_NOT_FOUND
+  // instead of succeeding. This test fails red without the `isEnabled` early-out in
+  // `enforceClaimGate` (task-workflow-service.ts) and passes green with it.
+  it("REGRESSION: disabled task-claim gate SKIPS getPlanBundle IO — claim succeeds even if the parent plan is soft-deleted", async () => {
+    const app = openApp(ALL_GATES_DISABLED_CONFIG);
+    try {
+      const { taskId, planId } = await createSpecParentedTask(app);
+
+      const deleteResult = await app.corpusService.delete(planId, true);
+      expect(deleteResult.ok).toBe(true);
+
+      const result = await app.taskWorkflowService.claim(taskId, { by: "tester" });
+      expect(result.ok).toBe(true);
+    } finally {
+      app.close();
+    }
+  });
+
+  it("STATE contrast: with the gate ENABLED (default), claiming a task under a soft-deleted parent plan is NOT ok (proves the bypass is disable-only)", async () => {
+    const app = openApp();
+    try {
+      const { taskId, planId } = await createSpecParentedTask(app);
+
+      const deleteResult = await app.corpusService.delete(planId, true);
+      expect(deleteResult.ok).toBe(true);
+
+      const result = await app.taskWorkflowService.claim(taskId, { by: "tester" });
+      expect(result.ok).toBe(false);
     } finally {
       app.close();
     }

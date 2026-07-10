@@ -660,6 +660,15 @@ export class TaskWorkflowService {
       return ok(undefined);
     }
 
+    // reason: check disable BEFORE the getPlanBundle IO below — mirrors gate.ts's
+    // isGateDisabledByConfig-before-runTaskClaimGate order. Without this early-out, a
+    // disabled task-claim gate could still be blocked by a broken ancestor-spec lookup
+    // (e.g. a soft-deleted parent plan), violating "disabled === byte-identical to
+    // pre-GateEnforcer behavior" (adversarial review, retro item 8 follow-up).
+    if (!this.gate.enforcer.isEnabled("task-claim")) {
+      return ok(undefined);
+    }
+
     let ctx: ReturnType<typeof buildUpstreamSpecContext>;
     if (task.parent_id === null) {
       ctx = buildUpstreamSpecContext(undefined);
