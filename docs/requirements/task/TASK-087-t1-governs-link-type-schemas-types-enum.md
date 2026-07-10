@@ -5,7 +5,7 @@ role: plan
 title: "T1: governs link type (schemas + types enum)"
 status: archived
 priority: high
-phase: Core: governs + feed
+phase: "Core: governs + feed"
 created: 2026-07-09
 updated: 2026-07-09
 tags: []

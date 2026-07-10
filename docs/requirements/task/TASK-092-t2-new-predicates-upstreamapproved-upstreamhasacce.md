@@ -5,7 +5,7 @@ role: plan
 title: "T2: new predicates upstreamApproved + upstreamHasAcceptanceCriteria"
 status: archived
 priority: high
-phase: Core: registry + predicates
+phase: "Core: registry + predicates"
 created: 2026-07-09
 updated: 2026-07-09
 tags: []
