@@ -152,7 +152,16 @@ describe("lore set --kind (SPEC-032 §3.1)", () => {
     // Create a spec that already defaults to spec_kind="feature" (no --kind at create time)
     const outSpec = captureOutput();
     try {
-      await runCmd(createCmd, { type: "spec", title: "My Spec", parent: prdSlug, ai: false });
+      // reason: spec-create's GateEnforcer checkpoint (retro follow-up item 8) requires
+      // a `## ` skeleton heading — bun test's own stdin isn't a TTY, so the in-process
+      // fake-editor script never actually runs and content would otherwise stay "".
+      await runCmd(createCmd, {
+        type: "spec",
+        title: "My Spec",
+        parent: prdSlug,
+        content: "## Overview\n\nbody",
+        ai: false,
+      });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {

@@ -135,7 +135,10 @@ describe("lore create --content-file — HAPPY path", () => {
 
   it("stores file content verbatim for spec (requires --parent)", () => {
     const contentFile = join(tmpDir, "spec-body.md");
-    const expectedContent = "---\nstatus: proposed\n---\n\n# Spec content with dashes";
+    // reason: `## ` (not `# `) — spec-create's GateEnforcer checkpoint (retro
+    // follow-up item 8) requires a level-2 skeleton heading; the verbatim-storage
+    // assertion below is unaffected by which heading level the body uses.
+    const expectedContent = "---\nstatus: proposed\n---\n\n## Spec content with dashes";
     writeFileSync(contentFile, expectedContent, "utf8");
 
     const createResult = runLore(

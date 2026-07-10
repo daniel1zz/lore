@@ -20,7 +20,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "child_process";
-import { mkdirSync, rmSync } from "fs";
+import { mkdirSync, rmSync, appendFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -76,6 +76,36 @@ function createSpec(title: string, parentSlug: string, content: string, cwd: str
   return slug;
 }
 
+/**
+ * Disables all four `lore gate` service-layer checkpoints for this fixture's corpus
+ * (retro follow-up item 8 test-fallout reconciliation — GateEnforcer is now wired ON
+ * by default in every production `createApp`, which every subprocess-spawned `lore`
+ * command in this file goes through). None of this file's ACs exercise spec-create
+ * gating — every `createSpec` call here passes filler content ("n/a" or a one-line
+ * sentence, never a `## ` heading) purely to exercise `SpecKindService`'s
+ * title-signal heuristic, which is orthogonal to spec-create's skeleton predicate.
+ * Mirrors the config shape `tests/integration/gate-config-disable.bun.test.ts`
+ * establishes (`workflow.gates.<checkpoint>.enabled`, `@lore/core::resolveGateEnabled`).
+ */
+function disableAllGates(dir: string): void {
+  appendFileSync(
+    join(dir, ".lore", "config.yaml"),
+    [
+      "workflow:",
+      "  gates:",
+      "    spec-create:",
+      "      enabled: false",
+      "    spec-promote:",
+      "      enabled: false",
+      "    plan-promote:",
+      "      enabled: false",
+      "    task-claim:",
+      "      enabled: false",
+      "",
+    ].join("\n"),
+  );
+}
+
 // ─── Fixture ─────────────────────────────────────────────────────────────────
 
 let tmpDir: string;
@@ -92,6 +122,7 @@ beforeEach(() => {
   if (init.exitCode !== 0) {
     throw new Error(`lore init failed: ${init.stderr}`);
   }
+  disableAllGates(tmpDir);
   prdSlug = createPrd("Root PRD", tmpDir);
 });
 

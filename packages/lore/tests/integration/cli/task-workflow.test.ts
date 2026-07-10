@@ -22,7 +22,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "child_process";
-import { mkdirSync, rmSync } from "fs";
+import { mkdirSync, rmSync, appendFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -56,6 +56,39 @@ function runLore(args: string[], cwd: string): RunResult {
   };
 }
 
+/**
+ * Disables all four `lore gate` service-layer checkpoints for this fixture's corpus
+ * (retro follow-up item 8 test-fallout reconciliation — GateEnforcer is now wired ON
+ * by default in every production `createApp`, which every subprocess-spawned `lore`
+ * command in this file goes through). None of this file's ACs exercise spec-create/
+ * task-claim gating itself — the AC-ACODE-3 evidence tests need `createSpec`'s fixed
+ * "body" content to succeed as pure scaffolding for the plan→spec `ac_ref` chain, and
+ * several claim/release tests deliberately need `claim` to succeed on an UNAPPROVED
+ * spec-parented plan chain (translation-only scope per this file's own header —
+ * business rules like task-claim upstream-approval are exhaustively covered at the
+ * service/CLI-gate layers elsewhere, not re-tested here). Mirrors the config shape
+ * `tests/integration/gate-config-disable.bun.test.ts` establishes
+ * (`workflow.gates.<checkpoint>.enabled`, `@lore/core::resolveGateEnabled`).
+ */
+function disableAllGates(dir: string): void {
+  appendFileSync(
+    join(dir, ".lore", "config.yaml"),
+    [
+      "workflow:",
+      "  gates:",
+      "    spec-create:",
+      "      enabled: false",
+      "    spec-promote:",
+      "      enabled: false",
+      "    plan-promote:",
+      "      enabled: false",
+      "    task-claim:",
+      "      enabled: false",
+      "",
+    ].join("\n"),
+  );
+}
+
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 
 let tmpDir: string;
@@ -71,6 +104,7 @@ beforeEach(() => {
   if (init.exitCode !== 0) {
     throw new Error(`lore init failed: ${init.stderr}`);
   }
+  disableAllGates(tmpDir);
 });
 
 afterEach(() => {

@@ -37,6 +37,8 @@ import { NoOpTelemetry, type Telemetry, type TelemetryEvent } from "@lore/core";
 import type { PlanBundle } from "@lore/core";
 import type { ReviewBundle } from "@lore/core";
 import type { TreeBlueprint } from "@lore/core";
+import type { GateEnforcer } from "./gate-enforcer.js";
+import type { GateContext } from "./checkpoint-registry.js";
 
 // ─── Local types (mirror SPEC-001 §3.1 interfaces) ────────────────────────
 
@@ -148,11 +150,20 @@ export class CorpusService {
    *   constructor-resolved config values. Omitted (not defaulted to 120 here) when
    *   the caller doesn't wire it — `deriveTypeMeta` then omits `claim_stale` entirely
    *   rather than computing it against a value CorpusService invented.
+   * @param gateEnforcer - OPTIONAL service-layer gate enforcement (retro follow-up item
+   *   8, defense-in-depth) — when present, `_createImpl` runs the `spec-create`
+   *   checkpoint and `set` runs the `spec-promote` checkpoint on a spec's draft→approved
+   *   transition, both via `GateEnforcer.enforce` (`./gate-enforcer.js`), the SAME
+   *   `checkpointRegistry` decision logic `lore gate` dispatches through. Absent (the
+   *   default) → ungated, byte-identical to pre-GateEnforcer behavior — this is what
+   *   keeps every bare `new CorpusService(store)` unit test construction green. Only
+   *   `app.ts`'s production composition root wires a real instance.
    */
   constructor(
     private readonly store: StoreInterface,
     telemetry: Telemetry = new NoOpTelemetry(),
     private readonly claimTtlMinutes?: number,
+    private readonly gateEnforcer?: GateEnforcer,
   ) {
     this.telemetry = telemetry;
   }
@@ -281,6 +292,12 @@ export class CorpusService {
 
     // Resolve parent if provided
     let resolvedParentId: DocId | null = null;
+    // reason: captured alongside resolvedParentId so the spec-create gate below (and
+    // ONLY that gate) can see the parent's type without a second store.find call —
+    // null both when there's no parent_id at all and when parent_id was supplied (the
+    // gate's own parentLegal predicate distinguishes those cases identically, via
+    // GateContext.parentType: null).
+    let resolvedParentType: string | null = null;
     if (data.parent_id) {
       const parentResult = await this.resolve(data.parent_id);
       if (!parentResult.ok) return parentResult;
@@ -301,6 +318,7 @@ export class CorpusService {
           allowed: [...PARENT_TYPE_CONTRACT[data.type]],
         });
       }
+      resolvedParentType = parentDoc.type;
     }
 
     // Cross-entity phase validation for tasks with extra.phase (AC-PHASE-3, SPEC-023 §4).
@@ -363,6 +381,29 @@ export class CorpusService {
       data.type === "spec" && data.extra?.["spec_kind"] === undefined
         ? { ...(data.extra ?? {}), spec_kind: "feature" }
         : (data.extra ?? {});
+
+    // Gate `spec-create` (retro follow-up item 8, defense-in-depth): the SAME
+    // deterministic checkpoint `lore gate spec-create` runs as a pre-flight hook
+    // shell-out, now also enforced HERE so MCP `lore_create` / HTTP dashboard create /
+    // any direct-service caller can't bypass it by skipping the CLI hook. Only fires
+    // for `type === "spec"` (the checkpoint's produced type) and only when this
+    // service was constructed with a `gateEnforcer` (absent in every bare unit-test
+    // construction — see constructor JSDoc). Runs against the EFFECTIVE spec_kind
+    // (post-default, `resolvedExtra["spec_kind"]`) and the same `data.content ?? ""`
+    // the CLI's `lore gate spec-create --input-json` candidate payload uses — this is
+    // still a pre-write check (the doc row below doesn't exist yet), so failing here
+    // returns BEFORE any store.insert.
+    if (data.type === "spec" && this.gateEnforcer) {
+      const gateCtx: GateContext = {
+        parentType: resolvedParentType,
+        ...(typeof resolvedExtra["spec_kind"] === "string"
+          ? { specKind: resolvedExtra["spec_kind"] }
+          : {}),
+        content: data.content ?? "",
+      };
+      const gateResult = this.gateEnforcer.enforce("spec-create", gateCtx);
+      if (!gateResult.ok) return gateResult;
+    }
 
     const doc: DocRecord = {
       id,
@@ -738,6 +779,33 @@ export class CorpusService {
           value: parsedPatch.data.extra["spec_kind"],
         });
       }
+    }
+
+    // Gate `spec-promote` on a spec's draft→approved TRANSITION reached via `set`
+    // (retro follow-up item 8, defense-in-depth) — `set` is a SECOND write path
+    // (besides `ReviewService.approve`) that can push a spec straight to "approved"
+    // (`docPatch.status`, exposed as `lore set --status approved` / HTTP `PATCH` /
+    // MCP `lore_set`); without this check that path bypasses spec-promote's ≥1
+    // declared-acceptance-criterion gate entirely. Only fires on an ACTUAL promotion
+    // (`existing.status !== "approved"`) — re-patching an already-approved spec with
+    // `status: "approved"` again is a no-op transition, not a new promotion event, and
+    // must not re-block on it. `effectiveExtra` mirrors the value `docPatch.extra`
+    // will actually persist (patch.extra REPLACES existing.extra wholesale, per this
+    // method's own docPatch assembly above — never merged).
+    if (
+      existing.type === "spec" &&
+      newStatus === "approved" &&
+      existing.status !== "approved" &&
+      this.gateEnforcer
+    ) {
+      const effectiveExtra = parsedPatch.data.extra !== undefined ? parsedPatch.data.extra : existing.extra;
+      const parsed = specAcceptanceCriteriaSchema.safeParse(effectiveExtra["acceptance_criteria"]);
+      const acceptanceCriteriaCount = parsed.success ? parsed.data.length : 0;
+      const gateResult = this.gateEnforcer.enforce("spec-promote", {
+        acceptanceCriteriaCount,
+        specIdOrSlug: existing.slug,
+      });
+      if (!gateResult.ok) return gateResult;
     }
 
     const updateResult = await this.store.update(existing.id, docPatch, { expected_version: existing.version });

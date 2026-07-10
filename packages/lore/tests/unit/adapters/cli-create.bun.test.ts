@@ -887,7 +887,17 @@ describe("lore create — state verification", () => {
 
     const out1 = captureOutput();
     try {
-      await runCmd(cmd, { type: "spec", title: "Undeclared Kind Spec", parent: prdSlug, ai: false });
+      // reason: spec-create's GateEnforcer checkpoint (retro follow-up item 8) requires
+      // a `## ` skeleton heading — the in-process fake-editor script never actually runs
+      // (bun test's own stdin isn't a TTY, so openEditor's non-interactive branch wins
+      // and content stays ""), so this must pass --content explicitly.
+      await runCmd(cmd, {
+        type: "spec",
+        title: "Undeclared Kind Spec",
+        parent: prdSlug,
+        content: "## Overview\n\nbody",
+        ai: false,
+      });
     } catch (e: unknown) {
       if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
     } finally {
@@ -931,11 +941,14 @@ describe("lore create — state verification", () => {
 
     const out1 = captureOutput();
     try {
+      // reason: spec-create's GateEnforcer checkpoint (retro follow-up item 8) requires
+      // a `## ` skeleton heading — see the identical comment on CLI-01 above.
       await runCmd(cmd, {
         type: "spec",
         title: "Design Kind Spec",
         parent: prdSlug,
         kind: "design",
+        content: "## Overview\n\nbody",
         ai: false,
       });
     } catch (e: unknown) {

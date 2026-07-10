@@ -56,6 +56,7 @@ import { AuditService } from "./service/audit-service.js";
 import { AcService } from "./service/ac-service.js";
 import { VerifyRunnerService } from "./service/verify-runner-service.js";
 import { executeVerifySpawnSpec } from "./service/verify-executor.js";
+import { GateEnforcer } from "./service/gate-enforcer.js";
 
 export interface App {
   corpusService: CorpusService;
@@ -197,6 +198,11 @@ export interface App {
  * @param repoRoot - Absolute project root `lore verify` spawns commands from (SPEC-039 §2;
  *   derived by `createApp` as `dirname(dirname(dbPath))` since `dbPath` is always
  *   `<repoRoot>/.lore/lore.db`)
+ * @param gateEnforcer - Service-layer gate enforcement (retro follow-up item 8,
+ *   defense-in-depth) — constructed once in `createApp` (mirrors `aiProviderService`,
+ *   an already-built instance rather than raw config passed down) and wired into
+ *   `CorpusService`/`ReviewService`/`TaskWorkflowService`, all three of which treat it
+ *   as OPTIONAL DI (see each service's constructor JSDoc).
  */
 function buildAppFromSqlite(
   store: SQLiteStore,
@@ -207,6 +213,7 @@ function buildAppFromSqlite(
   auditVerifySince: string = "2026-07-06T00:00:00Z",
   verifyDefaultTimeoutMs: number = 300_000,
   repoRoot: string = process.cwd(),
+  gateEnforcer: GateEnforcer = new GateEnforcer(undefined),
 ): App {
   // reason: SPEC-024 §9.1 — callerSurface must be mutable so adapters can set it at startup.
   // Using a let variable closed over by the getter/setter ensures reads always see the current
@@ -217,27 +224,40 @@ function buildAppFromSqlite(
   // reason: claimTtlMinutes flows into DocSummary.meta's task.claim_stale (SPEC-036 §2
   // D3) — same resolved value TaskWorkflowService below uses, one resolution path
   // (resolveClaimTtlMinutes at the bottom of this file).
-  const corpusService = new CorpusService(store, telemetry, claimTtlMinutes);
+  // reason: 4th arg wires GateEnforcer (retro follow-up item 8, defense-in-depth) —
+  // CorpusService gates spec-create (_createImpl) and spec-promote reached via `set`.
+  const corpusService = new CorpusService(store, telemetry, claimTtlMinutes, gateEnforcer);
   const outlineService = new OutlineService(store);
   // reason: own telemetry wiring restores parity with CorpusService (D8) — TaskWorkflowService
   // never routes writes through CorpusService (cross-service calls forbidden). SPEC-025 §3 D5, D8.
   // 4th arg wires the SPEC-038 §7 D4 cross-entity port: resolveDeclaredAcIds is implemented
   // by CorpusService (the sole plan→spec graph-walk locus) and bound here rather than
   // imported — TaskWorkflowService never gains graph-walking responsibility of its own.
-  // Extracted to a local (not built inline in the return literal below, unlike most other
-  // services) because VerifyRunnerService needs to bind its recordVerifiedEvidence method.
+  // 5th arg wires GateEnforcer's `{enforcer, getPlanBundle}` bundle (retro follow-up
+  // item 8) — task-claim needs the SAME plan→ancestor-spec walk as resolveDeclaredAcIds,
+  // hence the same corpusService.getPlanBundle port, bound alongside the enforcer rather
+  // than as a second independent constructor arg (GateDependencies JSDoc explains why
+  // they're bundled). Extracted to a local (not built inline in the return literal
+  // below, unlike most other services) because VerifyRunnerService needs to bind its
+  // recordVerifiedEvidence method.
   const taskWorkflowService = new TaskWorkflowService(
     store,
     telemetry,
     { claimTtlMinutes },
     corpusService.resolveDeclaredAcIds.bind(corpusService),
+    { enforcer: gateEnforcer, getPlanBundle: corpusService.getPlanBundle.bind(corpusService) },
   );
   return {
     corpusService,
     // reason: same resolved claimTtlMinutes as CorpusService above — one resolution
     // path feeds PendingDoc.meta's task.claim_stale too (SPEC-036 §2 D3 pending-queue
-    // extension), not a second config read.
-    reviewService: new ReviewService(store, claimTtlMinutes),
+    // extension), not a second config read. 3rd arg wires GateEnforcer (retro follow-up
+    // item 8) — approve() gates spec-promote (spec docs) and plan-promote (plan docs,
+    // via the same corpusService.getPlanBundle port TaskWorkflowService above uses).
+    reviewService: new ReviewService(store, claimTtlMinutes, {
+      enforcer: gateEnforcer,
+      getPlanBundle: corpusService.getPlanBundle.bind(corpusService),
+    }),
     versionService: new VersionService(store),
     outlineService,
     migrationService: new MigrationService(store),
@@ -315,6 +335,8 @@ function buildAppFromSqlite(
  * @param repoRoot - Absolute project root `lore verify` spawns commands from (SPEC-039 §2;
  *   derived by `createApp` as `dirname(dirname(dbPath))` since `dbPath` is always
  *   `<repoRoot>/.lore/lore.db`)
+ * @param gateEnforcer - Service-layer gate enforcement (retro follow-up item 8,
+ *   defense-in-depth) — see `buildAppFromSqlite`'s identical parameter JSDoc.
  */
 function buildAppFromTurso(
   store: TursoStore,
@@ -326,6 +348,7 @@ function buildAppFromTurso(
   auditVerifySince: string = "2026-07-06T00:00:00Z",
   verifyDefaultTimeoutMs: number = 300_000,
   repoRoot: string = process.cwd(),
+  gateEnforcer: GateEnforcer = new GateEnforcer(undefined),
 ): App {
   // reason: SPEC-024 §9.1 — same mutable callerSurface pattern as buildAppFromSqlite.
   let _callerSurface: CallerSurface = "cli";
@@ -333,22 +356,31 @@ function buildAppFromTurso(
   // reason: claimTtlMinutes flows into DocSummary.meta's task.claim_stale (SPEC-036 §2
   // D3) — same resolved value TaskWorkflowService below uses, one resolution path
   // (resolveClaimTtlMinutes at the bottom of this file).
-  const corpusService = new CorpusService(store, telemetry, claimTtlMinutes);
+  // reason: 4th arg wires GateEnforcer (retro follow-up item 8) — see buildAppFromSqlite's
+  // identical comment.
+  const corpusService = new CorpusService(store, telemetry, claimTtlMinutes, gateEnforcer);
   const outlineService = new OutlineService(store);
   // reason: extracted to a local (see buildAppFromSqlite's identical comment) so
-  // VerifyRunnerService can bind its recordVerifiedEvidence method below.
+  // VerifyRunnerService can bind its recordVerifiedEvidence method below. 5th arg
+  // wires GateEnforcer's {enforcer, getPlanBundle} bundle — see buildAppFromSqlite's
+  // identical comment.
   const taskWorkflowService = new TaskWorkflowService(
     store,
     telemetry,
     { claimTtlMinutes },
     corpusService.resolveDeclaredAcIds.bind(corpusService),
+    { enforcer: gateEnforcer, getPlanBundle: corpusService.getPlanBundle.bind(corpusService) },
   );
   return {
     corpusService,
     // reason: same resolved claimTtlMinutes as CorpusService above — one resolution
     // path feeds PendingDoc.meta's task.claim_stale too (SPEC-036 §2 D3 pending-queue
-    // extension), not a second config read.
-    reviewService: new ReviewService(store, claimTtlMinutes),
+    // extension), not a second config read. 3rd arg wires GateEnforcer — see
+    // buildAppFromSqlite's identical comment.
+    reviewService: new ReviewService(store, claimTtlMinutes, {
+      enforcer: gateEnforcer,
+      getPlanBundle: corpusService.getPlanBundle.bind(corpusService),
+    }),
     versionService: new VersionService(store),
     outlineService,
     migrationService: new MigrationService(store),
@@ -481,6 +513,19 @@ export function createApp(
   // existing signature.
   const repoRoot = dirname(dirname(dbPath));
 
+  // Service-layer gate enforcement (retro follow-up item 8, defense-in-depth) —
+  // enforces the four IoC vertical-slice checkpoints (spec-create/spec-promote/
+  // plan-promote/task-claim) for EVERY caller of the gated service methods, not only
+  // ones that shell out to `lore gate` first (MCP/HTTP/direct-service callers used to
+  // bypass every checkpoint). Constructed once here (mirrors aiProviderService —
+  // an already-built instance, not raw config, flows down to build*) with the
+  // resolved LoreConfig itself: `GateEnforcer.enforce` re-derives per-checkpoint
+  // enablement from it on every call via `resolveGateEnabled`, the SAME config knob
+  // `lore gate` already honors (`workflow.gates.<checkpoint>.enabled`). Enforcement is
+  // ON by default — a corpus opts a specific checkpoint OUT via config, never the
+  // reverse.
+  const gateEnforcer = new GateEnforcer(config);
+
   // No config supplied or sync section absent / disabled → local-only SQLiteStore
   if (
     config === undefined ||
@@ -496,6 +541,7 @@ export function createApp(
       auditVerifySince,
       verifyDefaultTimeoutMs,
       repoRoot,
+      gateEnforcer,
     );
   }
 
@@ -533,6 +579,7 @@ export function createApp(
         auditVerifySince,
         verifyDefaultTimeoutMs,
         repoRoot,
+        gateEnforcer,
       ),
     };
   } catch (e) {

@@ -34,8 +34,45 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync } from "fs";
 import { join, resolve } from "path";
 import { tmpdir } from "os";
-import { createApp } from "../../src/app.js";
-import type { CreateDocInput } from "@lore/core";
+import { createApp, type App } from "../../src/app.js";
+import type { CreateDocInput, LoreConfig } from "@lore/core";
+
+/**
+ * Constructs a fixture-only App with ALL FOUR `lore gate` service-layer checkpoints
+ * disabled (retro follow-up item 8 test-fallout reconciliation). This file's fixture
+ * helpers (`createSpecParentedPlan`, `approveDoc`, etc.) intentionally construct docs
+ * in states the checkpoints themselves would now reject at write time — e.g. AC-P2-3
+ * needs to approve a spec with ZERO declared acceptance criteria, to prove
+ * `plan-promote`'s OWN downstream AC check (not spec-promote's) is what blocks the
+ * plan. GateEnforcer being wired ON by default in `createApp` would otherwise make
+ * that "approved, 0 AC" state unreachable via `reviewService.approve` here.
+ *
+ * This does NOT weaken what this file actually tests: `lore gate plan-promote` /
+ * `lore gate task-claim` (the CLI commands under test, invoked via
+ * `importGateSubCommand`) resolve their OWN config through `loadLoreApp()` reading
+ * `.lore/config.yaml` from disk — a config this file never writes, so those commands'
+ * checkpoints stay fully enabled. Only the IN-PROCESS fixture-construction App
+ * (`corpusService.create` / `reviewService.approve` / etc., used purely to build doc
+ * state before the CLI command under test runs) is gate-disabled here.
+ *
+ * `sync` is absent, so `createApp` always returns a bare `App` (never `Result<App>`)
+ * for this config — see `createApp`'s own JSDoc branch table in `app.ts`.
+ */
+function createFixtureApp(path: string): App {
+  const config = {
+    project: { name: "gate-p2-cross-tier-fixture", author: "tester" },
+    workflow: {
+      claim_ttl_minutes: 120,
+      gates: {
+        "spec-create": { enabled: false },
+        "spec-promote": { enabled: false },
+        "plan-promote": { enabled: false },
+        "task-claim": { enabled: false },
+      },
+    },
+  } as unknown as LoreConfig;
+  return createApp(path, config) as App;
+}
 
 // ─── Command type (mirrors gate-spec-promote.bun.test.ts) ────────────────────
 
@@ -124,7 +161,7 @@ async function createSpecParentedPlan(): Promise<{
   planId: string;
   planSlug: string;
 }> {
-  const app = createApp(dbPath());
+  const app = createFixtureApp(dbPath());
   try {
     const prdResult = await app.corpusService.create({
       type: "prd",
@@ -162,7 +199,7 @@ async function createSpecParentedPlan(): Promise<{
 
 /** Creates a plan parented directly under a PRD (no spec tier). */
 async function createPrdParentedPlan(): Promise<{ planId: string; planSlug: string }> {
-  const app = createApp(dbPath());
+  const app = createFixtureApp(dbPath());
   try {
     const prdResult = await app.corpusService.create({
       type: "prd",
@@ -187,7 +224,7 @@ async function createPrdParentedPlan(): Promise<{ planId: string; planSlug: stri
 
 /** Creates a task under `planId`, per SPEC-025's parent_id + extra.plan_id contract. */
 async function createTask(planId: string): Promise<{ taskId: string; taskSlug: string }> {
-  const app = createApp(dbPath());
+  const app = createFixtureApp(dbPath());
   try {
     const taskResult = await app.corpusService.create({
       type: "task",
@@ -205,7 +242,7 @@ async function createTask(planId: string): Promise<{ taskId: string; taskSlug: s
 
 /** Fast-tracks a doc from draft straight to approved (SPEC-002 §3 valid transition). */
 async function approveDoc(id: string): Promise<void> {
-  const app = createApp(dbPath());
+  const app = createFixtureApp(dbPath());
   try {
     const result = await app.reviewService.approve(id);
     if (!result.ok) throw new Error(`approve failed: ${JSON.stringify(result.error)}`);
@@ -221,7 +258,7 @@ async function approveDoc(id: string): Promise<void> {
  * because its `status` column still reads "approved".
  */
 async function softDeleteDoc(id: string): Promise<void> {
-  const app = createApp(dbPath());
+  const app = createFixtureApp(dbPath());
   try {
     const result = await app.corpusService.delete(id, true);
     if (!result.ok) throw new Error(`delete failed: ${JSON.stringify(result.error)}`);
@@ -232,7 +269,7 @@ async function softDeleteDoc(id: string): Promise<void> {
 
 /** Adds one structured acceptance criterion (verify.mode=human — simplest valid shape). */
 async function addAcceptanceCriterion(specId: string, id = "AC-P2-1"): Promise<void> {
-  const app = createApp(dbPath());
+  const app = createFixtureApp(dbPath());
   try {
     if (app.acService === undefined) throw new Error("AcService not wired");
     const result = await app.acService.addCriterion(specId, {

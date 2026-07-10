@@ -257,10 +257,13 @@ describe("loadLoreApp — REGRESSION (all telemetry-instrumented corpus operatio
       if (!createPrd.ok) return;
       const prd = createPrd.value;
 
+      // reason: spec-create's GateEnforcer checkpoint (retro follow-up item 8) requires
+      // a `## ` skeleton heading.
       const createSpec = await app.corpusService.create({
         type: "spec",
         title: "Test Spec",
         parent_id: prd.id,
+        content: "## Overview\n\nbody",
       });
       expect(createSpec.ok).toBe(true);
       if (!createSpec.ok) return;

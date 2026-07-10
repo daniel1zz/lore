@@ -34,7 +34,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "child_process";
-import { mkdirSync, rmSync } from "fs";
+import { mkdirSync, rmSync, appendFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -68,6 +68,39 @@ function runLore(args: string[], cwd: string): RunResult {
   };
 }
 
+/**
+ * Disables all four `lore gate` service-layer checkpoints for this fixture's corpus
+ * (retro follow-up item 8 test-fallout reconciliation — GateEnforcer is now wired ON
+ * by default in every production `createApp`, which every subprocess-spawned `lore`
+ * command in this file goes through). None of this file's ACs exercise spec-create/
+ * task-claim gating itself: `createSpec`'s fixed "body" content is pure scaffolding
+ * for the trusted-runner flow under test, and AC-VRF-10.N1/S1 deliberately keep the
+ * fixture spec in "draft" (never approved) to exercise `lore verify`'s OWN advisory/
+ * ambiguous-claim-resolution behavior — task-claim's upstream-approval requirement
+ * would otherwise block the `lore claim` calls those two tests use as setup, which is
+ * not what they're testing. Mirrors the config shape
+ * `tests/integration/gate-config-disable.bun.test.ts` establishes
+ * (`workflow.gates.<checkpoint>.enabled`, `@lore/core::resolveGateEnabled`).
+ */
+function disableAllGates(dir: string): void {
+  appendFileSync(
+    join(dir, ".lore", "config.yaml"),
+    [
+      "workflow:",
+      "  gates:",
+      "    spec-create:",
+      "      enabled: false",
+      "    spec-promote:",
+      "      enabled: false",
+      "    plan-promote:",
+      "      enabled: false",
+      "    task-claim:",
+      "      enabled: false",
+      "",
+    ].join("\n"),
+  );
+}
+
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 
 let tmpDir: string;
@@ -83,6 +116,7 @@ beforeEach(() => {
   if (init.exitCode !== 0) {
     throw new Error(`lore init failed: ${init.stderr}`);
   }
+  disableAllGates(tmpDir);
 });
 
 afterEach(() => {

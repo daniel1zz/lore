@@ -15,8 +15,10 @@ import {
   checkpointRegistry,
   isCheckpointBlocked,
   selectFailures,
+  buildUpstreamSpecContext,
   type GateContext,
 } from "../../../src/service/checkpoint-registry.js";
+import type { DocRecord } from "@lore/core";
 
 describe("checkpointRegistry", () => {
   // HAPPY — registry shape: all four GateCheckpoint members are now populated
@@ -361,4 +363,60 @@ describe("checkpointRegistry", () => {
   // STATE dimension: N/A. All exported functions are pure functions of their
   // arguments — no persisted state, no store, no lifecycle transition to exercise.
   // Exempt per ~/.claude/skills/test/ (pure-function modules carry no STATE dimension).
+
+  // buildUpstreamSpecContext — relocated (retro follow-up item 8, defense-in-depth)
+  // from the CLI adapter's former local gate.ts::buildUpstreamSpecContext so both
+  // `lore gate plan-promote`/`task-claim` AND the service-layer GateEnforcer build
+  // the identical ctx shape from the identical resolved-spec input. Direct unit
+  // coverage was previously only indirect (via gate.ts's CLI integration tests) —
+  // now exercised directly at its new SSOT location.
+  describe("buildUpstreamSpecContext", () => {
+    // HAPPY
+    it("returns hasSpecParent=false for an undefined spec (no spec-tier ancestor)", () => {
+      expect(buildUpstreamSpecContext(undefined)).toEqual({ hasSpecParent: false });
+    });
+
+    // HAPPY
+    it("returns hasSpecParent=true + parentSpec + parentSpecPointer for a resolved spec", () => {
+      const spec = {
+        id: "01ABCDEFGHJKMNPQRSTVWXYZ00",
+        slug: "spec-example",
+        title: "Example Spec",
+        type: "spec",
+        status: "approved",
+        extra: { acceptance_criteria: [] },
+        deleted_at: null,
+      } as unknown as DocRecord;
+
+      expect(buildUpstreamSpecContext(spec)).toEqual({
+        hasSpecParent: true,
+        parentSpec: {
+          type: "spec",
+          status: "approved",
+          extra: { acceptance_criteria: [] },
+          deleted_at: null,
+        },
+        parentSpecPointer: { slug: "spec-example", title: "Example Spec", status: "approved" },
+      });
+    });
+
+    // REGRESSION — soft-deleted upstream spec must still be reported hasSpecParent:true
+    // (a WITHDRAWN ancestor, never the vacuous "no spec tier" case; `upstreamApproved`'s
+    // own predicate — not this ctx builder — decides UPSTREAM_DELETED disqualifies it).
+    it("threads a non-null deleted_at through parentSpec even though status still reads approved", () => {
+      const spec = {
+        id: "01ABCDEFGHJKMNPQRSTVWXYZ00",
+        slug: "spec-deleted",
+        title: "Soft-Deleted Spec",
+        type: "spec",
+        status: "approved",
+        extra: {},
+        deleted_at: "2026-07-09T00:00:00.000Z",
+      } as unknown as DocRecord;
+
+      const ctx = buildUpstreamSpecContext(spec);
+      expect(ctx.hasSpecParent).toBe(true);
+      expect(ctx.parentSpec?.deleted_at).toBe("2026-07-09T00:00:00.000Z");
+    });
+  });
 });

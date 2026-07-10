@@ -11,7 +11,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, rmSync, writeFileSync, appendFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -68,6 +68,36 @@ function writeSpecFile(
   writeFileSync(join(dir, filename), fm.join("\n") + "\n" + body, "utf8");
 }
 
+/**
+ * Disables all four `lore gate` service-layer checkpoints for this fixture's corpus
+ * (retro follow-up item 8 test-fallout reconciliation — GateEnforcer is now wired ON
+ * by default in every production `createApp`, which `SyncDocsService` reaches through
+ * `CorpusService.create`). `writeSpecFile`'s default body template (`# ${title}\n\n...`)
+ * is an H1 heading, not spec-create's required `## ` (H2) skeleton — none of this
+ * file's ACs (SPEC-018 §3.5/§5 file→corpus reconciliation) exercise spec-create
+ * gating itself. Mirrors the config shape
+ * `tests/integration/gate-config-disable.bun.test.ts` establishes
+ * (`workflow.gates.<checkpoint>.enabled`, `@lore/core::resolveGateEnabled`).
+ */
+function disableAllGates(dir: string): void {
+  appendFileSync(
+    join(dir, ".lore", "config.yaml"),
+    [
+      "workflow:",
+      "  gates:",
+      "    spec-create:",
+      "      enabled: false",
+      "    spec-promote:",
+      "      enabled: false",
+      "    plan-promote:",
+      "      enabled: false",
+      "    task-claim:",
+      "      enabled: false",
+      "",
+    ].join("\n"),
+  );
+}
+
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
 let tmpDir: string;
@@ -80,6 +110,7 @@ beforeEach(() => {
   if (initResult.exitCode !== 0) {
     throw new Error(`lore init failed: ${initResult.stderr}`);
   }
+  disableAllGates(tmpDir);
   // Create a PRD so specs have a parent.
   // reason: --no-ai skips the AI generation step (AC-AI-2) and uses a blank document,
   // which is sufficient for testing the sync-docs parent resolution logic.

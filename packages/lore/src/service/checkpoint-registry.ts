@@ -44,6 +44,7 @@
  * Source: IoC vertical-slice tech-spec §4.1/§5.1/§11.
  */
 
+import type { DocRecord } from "@lore/core";
 import {
   parentLegal,
   specKindValid,
@@ -307,6 +308,45 @@ function feedTaskClaim(ctx: GateContext, failures: PredicateResult[]): string {
     failures,
     'Required for task-claim: the ancestor spec must be "approved".',
   );
+}
+
+/**
+ * Builds the `hasSpecParent` / `parentSpec` / `parentSpecPointer` trio `plan-promote`
+ * and `task-claim` both consume, from an optional resolved ancestor spec `DocRecord`
+ * (`CorpusService.getPlanBundle`'s `.spec` field — `undefined` when the plan has no
+ * spec-tier ancestor). SSOT relocated here (retro follow-up item 8, defense-in-depth)
+ * from the CLI adapter's former local `gate.ts::buildUpstreamSpecContext` so BOTH the
+ * CLI (`lore gate plan-promote`/`task-claim`) and the service-layer `GateEnforcer`
+ * (real `corpusService.create`/`reviewService.approve`/`taskWorkflowService.claim`
+ * callers — MCP, HTTP, direct-service) build the identical ctx shape from the
+ * identical resolved-spec input, rather than two independently-maintained copies.
+ * `gate.ts` now imports this function instead of defining its own.
+ *
+ * `spec.deleted_at` is threaded straight into `parentSpec.deleted_at`, even when
+ * non-`null` — `getPlanBundle` populates `.spec` regardless of soft-delete state
+ * (a soft-deleted upstream still IS a spec-tier ancestor; only `upstreamApproved`'s
+ * pure predicate decides whether that's disqualifying, via the `UPSTREAM_DELETED`
+ * reason). This function must never itself treat a deleted spec as "no spec
+ * parent" — that would wrongly fall through to `hasSpecParent: false`'s vacuous
+ * pass instead of blocking the gate.
+ *
+ * @param spec - The resolved ancestor spec, or `undefined` when `getPlanBundle` found
+ *   none (prd-parented or unparented plan).
+ */
+export function buildUpstreamSpecContext(spec: DocRecord | undefined): GateContext {
+  if (spec === undefined) {
+    return { hasSpecParent: false };
+  }
+  return {
+    hasSpecParent: true,
+    parentSpec: {
+      type: spec.type,
+      status: spec.status,
+      extra: spec.extra,
+      deleted_at: spec.deleted_at,
+    },
+    parentSpecPointer: { slug: spec.slug, title: spec.title, status: spec.status },
+  };
 }
 
 /**
