@@ -166,6 +166,26 @@ export function isClaimStale(claim: TaskClaim, nowIso: string, ttlMinutes: numbe
 // ─── Readiness ─────────────────────────────────────────────────────────────
 
 /**
+ * Upstream spec statuses that count as "approved enough" to clear an upstream gate.
+ * SSOT for BOTH this module's `evaluateReadiness` (`upstream_unapproved` advisory)
+ * AND `packages/lore/src/service/gate-predicates.ts`'s `upstreamApproved` write-path
+ * gate — previously two independent `new Set(["approved"])` literals kept in sync
+ * only by a comment cross-referencing each other (a duplication that could silently
+ * drift). `gate-predicates.ts` cannot define this itself and have `@lore/core` import
+ * it back — `@lore/core` is the leaf of the dependency graph and must not depend on
+ * `@lore/lore` — so the shared fact lives here and the service layer imports it.
+ *
+ * @invariant Deliberately `["approved"]` ONLY — `"active"` is NOT included, even
+ *   though an `active` doc has moved past `approved` in the SPEC-002 lifecycle
+ *   (`draft → in-review → approved → active → archived`). A spec can be
+ *   `active`-but-being-revised; only `approved` is stable enough to clear an
+ *   upstream gate. If a future caller needs `active` to also clear a gate, that is
+ *   a new, deliberate product decision requiring its own spec amendment — not a
+ *   default to fall into here.
+ */
+export const UPSTREAM_APPROVED_STATUSES: ReadonlySet<string> = new Set(["approved"]);
+
+/**
  * Flat per-task readiness record (D9 — grouping by phase is a CLI presentation
  * concern, not part of this data shape).
  */
@@ -419,7 +439,7 @@ export function evaluateReadiness(
       record.phase = phase;
     }
 
-    if (parentSpecStatus !== null && parentSpecStatus !== "approved") {
+    if (parentSpecStatus !== null && !UPSTREAM_APPROVED_STATUSES.has(parentSpecStatus)) {
       record.upstream_unapproved = true;
     }
 

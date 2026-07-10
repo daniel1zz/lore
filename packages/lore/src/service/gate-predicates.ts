@@ -17,13 +17,15 @@
  *   literal union. `undefined` is explicitly PASS (not a failure): `CorpusService.
  *   _createImpl` defaults an absent `spec_kind` to `"feature"` at creation time, so
  *   a gate that rejected `undefined` would block the normal create path.
- * @invariant `upstreamApproved`'s notion of "approved enough" is deliberately
- *   IDENTICAL to `evaluateReadiness`'s `upstream_unapproved` advisory
- *   (`@lore/core`, task-workflow.ts, `parentSpecStatus !== "approved"`) — only
- *   `"approved"` clears the check, `"active"` does NOT. These are two independent
- *   corpus-fact expressions of the same rule (readiness is a read-side advisory,
- *   this is a write-path gate) and must not silently diverge. See `upstreamApproved`'s
- *   own JSDoc for the full justification of why `"active"` was excluded.
+ * @invariant `upstreamApproved`'s notion of "approved enough" is sourced exclusively
+ *   from `UPSTREAM_APPROVED_STATUSES` (`@lore/core`, task-workflow.ts) — the SAME
+ *   constant `evaluateReadiness`'s `upstream_unapproved` advisory consumes. Only
+ *   `"approved"` clears the check, `"active"` does NOT. Readiness (a read-side
+ *   advisory) and this predicate (a write-path gate) are two independent corpus-fact
+ *   expressions of the same rule; they used to each hardcode their own identical
+ *   single-entry approved-status set, kept in sync only by a comment — now both
+ *   import the one definition, so they cannot silently diverge. See the constant's own JSDoc (in
+ *   `@lore/core`) for the full justification of why `"active"` was excluded.
  * @invariant `upstreamHasAcceptanceCriteria`'s notion of "declared acceptance
  *   criteria" is sourced exclusively from `specAcceptanceCriteriaSchema`
  *   (`@lore/core`, acceptance.ts) via a schema-based `safeParse` — the exact same
@@ -33,7 +35,13 @@
  *   Never a hand-rolled `Array.isArray(extra.acceptance_criteria)` duck-type check.
  */
 
-import { PARENT_TYPE_CONTRACT, SPEC_KINDS, specAcceptanceCriteriaSchema, type DocType } from "@lore/core";
+import {
+  PARENT_TYPE_CONTRACT,
+  SPEC_KINDS,
+  specAcceptanceCriteriaSchema,
+  UPSTREAM_APPROVED_STATUSES,
+  type DocType,
+} from "@lore/core";
 
 /** Result of a single gate predicate: either a pass, or a fail carrying a machine-readable reason. */
 export type PredicateResult = { ok: true } | { ok: false; reason: string };
@@ -109,27 +117,6 @@ export function hasSkeleton(content: string): PredicateResult {
 }
 
 /**
- * Statuses that count as "approved enough" for `upstreamApproved`.
- *
- * @invariant Deliberately `["approved"]` ONLY — `"active"` is NOT included, even
- *   though an `active` doc has moved past `approved` in the SPEC-002 lifecycle
- *   (`draft → in-review → approved → active → archived`). This mirrors
- *   `evaluateReadiness`'s `upstream_unapproved` advisory (`@lore/core`,
- *   task-workflow.ts ~L423: `parentSpecStatus !== "approved"`) EXACTLY, per this
- *   module's SSOT invariant above. Rationale for excluding `active`: readiness is
- *   the pre-existing, already-shipped read-side expression of "is my upstream spec
- *   good enough" for this exact relationship (task ← parent spec), and a
- *   write-path gate silently accepting a broader status set than the advisory it's
- *   supposed to agree with would let a gate pass while the corresponding readiness
- *   report still flags `upstream_unapproved: true` — a user-visible contradiction
- *   between "the gate let this through" and "the dashboard/CLI still warns about
- *   it." If a future caller needs `active` to also clear THIS gate, that is a new,
- *   deliberate product decision requiring its own spec amendment — not a default to
- *   fall into here.
- */
-const UPSTREAM_APPROVED_STATUSES: ReadonlySet<string> = new Set(["approved"]);
-
-/**
  * Checks whether `upstream` is a legal, sufficiently-approved upstream document for
  * a gated write (e.g. a plan/task being promoted against its parent spec).
  *
@@ -153,8 +140,9 @@ const UPSTREAM_APPROVED_STATUSES: ReadonlySet<string> = new Set(["approved"]);
  *   (`softDelete` never touches `status`, so without this check a soft-deleted
  *   `approved` spec would silently keep passing this gate forever); `{ok:
  *   false, reason: "UPSTREAM_NOT_APPROVED"}` when the type matches, the doc is
- *   not deleted, but the status isn't approved-enough (see the const's JSDoc
- *   for why `"active"` still fails this check).
+ *   not deleted, but the status isn't approved-enough (see
+ *   `UPSTREAM_APPROVED_STATUSES`'s JSDoc, `@lore/core`, for why `"active"` still
+ *   fails this check).
  * @example
  * upstreamApproved({ type: "spec", status: "approved", deleted_at: null }, "spec");
  *   // => { ok: true }

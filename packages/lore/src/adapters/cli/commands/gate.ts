@@ -116,7 +116,32 @@ import { runDeterministicChecks, resolveGateEnabled } from "@lore/core";
 import type { App } from "../../../app.js";
 import type { AcService } from "../../../service/ac-service.js";
 import type { DocRecord, LoreConfig, LoreError, NewReviewJudgment } from "@lore/core";
-import { renderDocMarkdown, resolveParentDoc } from "../../../flows/feed-flow.js";
+import {
+  renderDocMarkdown,
+  resolveParentDoc,
+  CHECKPOINT_PRODUCED_TYPE,
+} from "../../../flows/feed-flow.js";
+
+/**
+ * Looks up `checkpoint` in `flows/feed-flow.ts::CHECKPOINT_PRODUCED_TYPE` — the SINGLE
+ * definition site for "which doc type does this checkpoint produce" — throwing if
+ * absent. This used to be a second, independently-hardcoded `"spec"` literal
+ * constant in this file that could silently desync from the map; deriving it here
+ * instead means there is exactly one place that fact can be edited.
+ * Fail-loud (no `?? "spec"` fallback): every call site in this file passes a
+ * compile-time-known checkpoint id, so this can only fire if a future edit removes an
+ * entry the map currently guarantees — the same "can't happen in production, but must
+ * never silently default" shape as `requireCheckpoint` below.
+ */
+function requireCheckpointProducedType(checkpoint: string): string {
+  const type = CHECKPOINT_PRODUCED_TYPE[checkpoint];
+  if (type === undefined) {
+    throw new Error(
+      `Internal error: checkpoint "${checkpoint}" has no entry in CHECKPOINT_PRODUCED_TYPE`,
+    );
+  }
+  return type;
+}
 
 /**
  * `applies_to` scope this gate discovers its feeding skill by — matches the
@@ -124,15 +149,16 @@ import { renderDocMarkdown, resolveParentDoc } from "../../../flows/feed-flow.js
  * "Write-spec rules (gate feeding source)" doc. `CorpusService.findFeedingSkill`
  * discovers ANY approved `knowledge/skill` doc declaring this scope, not just that
  * specific seeded title — discovery is by declared scope, not a hardcoded title
- * literal (IoC vertical-slice tech-spec §4.1/§11, P1 slice-2).
+ * literal (IoC vertical-slice tech-spec §4.1/§11, P1 slice-2). Derived from the SSOT
+ * map (see `requireCheckpointProducedType`) rather than a second hardcoded literal.
  */
-const SPEC_CREATE_SKILL_APPLIES_TO = "spec";
+const SPEC_CREATE_PRODUCED_TYPE = requireCheckpointProducedType("spec-create");
 
 /** Fallback rule slice used when no approved `knowledge/skill` doc declares `applies_to: "spec"` yet. */
 const RULE_DOC_MISSING_PLACEHOLDER =
   `(No approved rule doc found — run \`bun scripts/seed-write-spec-rule.ts\` to seed it. ` +
   `Expected: type=knowledge, status=approved, extra.sub_type="skill", ` +
-  `extra.skill.applies_to="${SPEC_CREATE_SKILL_APPLIES_TO}".)`;
+  `extra.skill.applies_to="${SPEC_CREATE_PRODUCED_TYPE}".)`;
 
 /**
  * Candidate spec-creation payload, shaped after MCP `lore_create`'s input schema
@@ -387,7 +413,7 @@ async function runSpecCreateGate(app: App, input: GateSpecCreateInput): Promise<
     return;
   }
 
-  const rule = await findFeedingSkill(app, SPEC_CREATE_SKILL_APPLIES_TO);
+  const rule = await findFeedingSkill(app, SPEC_CREATE_PRODUCED_TYPE);
   const parentMarkdown =
     parentDoc !== null ? await renderDocMarkdown(app, parentDoc) : undefined;
 
@@ -530,28 +556,32 @@ async function runTaskClaimGate(app: App, taskIdOrSlug: string): Promise<void> {
     return;
   }
 
+  const checkpoint = requireCheckpoint("task-claim");
+
   // reason: a task's parent_id is schema-required to be its plan (createDocInputSchema
   // superRefine, @lore/core/schemas.ts) — a null parent_id here can only happen on a
-  // legacy/corrupted row. Treated the same as "no spec-tier ancestor" (vacuous pass):
-  // there is no plan to walk, hence no upstream edge to gate against.
+  // legacy/corrupted row. Routed through the SAME checkpoint as every other task,
+  // via a synthetic "no spec parent" context (`buildUpstreamSpecContext(undefined)`)
+  // rather than a second hardcoded pass shape: there is no plan to walk, hence no
+  // upstream edge to gate against, and `checkTaskClaim`'s `hasSpecParent !== true`
+  // short-circuit already returns `[]` (vacuous pass) for exactly this ctx — see
+  // checkpoint-registry.ts's third module invariant. This keeps "gate: pass" printed
+  // from exactly ONE call site below, instead of a duplicated literal on this
+  // early-return path.
+  let upstreamCtx: GateContext;
   if (task.parent_id === null) {
-    console.log("gate: pass");
-    process.exitCode = 0;
-    return;
+    upstreamCtx = buildUpstreamSpecContext(undefined);
+  } else {
+    const bundleResult = await app.corpusService.getPlanBundle(task.parent_id);
+    if (!bundleResult.ok) {
+      process.stderr.write(formatError(bundleResult.error) + "\n");
+      process.exitCode = exitCode(bundleResult.error);
+      return;
+    }
+    upstreamCtx = buildUpstreamSpecContext(bundleResult.value.spec);
   }
 
-  const bundleResult = await app.corpusService.getPlanBundle(task.parent_id);
-  if (!bundleResult.ok) {
-    process.stderr.write(formatError(bundleResult.error) + "\n");
-    process.exitCode = exitCode(bundleResult.error);
-    return;
-  }
-
-  const checkpoint = requireCheckpoint("task-claim");
-  const ctx: GateContext = {
-    ...buildUpstreamSpecContext(bundleResult.value.spec),
-    targetIdOrSlug: taskIdOrSlug,
-  };
+  const ctx: GateContext = { ...upstreamCtx, targetIdOrSlug: taskIdOrSlug };
   const results = checkpoint.check(ctx);
 
   if (isCheckpointBlocked(results)) {
@@ -661,7 +691,7 @@ interface RuleDocLookup {
  * `WRITE_SPEC_RULE_TITLE`): any gate can now be fed by any approved skill doc that
  * declares a matching `extra.skill.applies_to`, not only the one specific seeded title.
  *
- * @param appliesTo - Scope to discover by, e.g. `SPEC_CREATE_SKILL_APPLIES_TO`.
+ * @param appliesTo - Scope to discover by, e.g. `SPEC_CREATE_PRODUCED_TYPE`.
  * @returns A `RuleDocLookup` with `markdown = RULE_DOC_MISSING_PLACEHOLDER` when no
  *   matching approved skill doc exists, or the discovery/get calls fail — the gate
  *   still surfaces `missing` reasons even when the rule doc itself is unavailable
