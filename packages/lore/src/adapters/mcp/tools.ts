@@ -43,6 +43,7 @@ import { REVIEW_PROMPT_VERSION } from "../../ai/review-template.js";
 import { CORPUS_SCHEMA_INFO } from "./schema-info.js";
 import { runCalibrationHook } from "../../flows/calibration-hook.js";
 import { buildFeed } from "../../flows/feed-flow.js";
+import { buildAssessSummaryText } from "./assess-render.js";
 
 // ─── Schema Constants ────────────────────────────────────────────────────────
 // Each schema is a `z.object(...)` instance (AnySchema), NOT an inline ZodRawShape literal.
@@ -848,7 +849,15 @@ export function registerTools(server: McpServer, app: App): void {
       const linkResult = await corpusService.link(createResult.value.id, bundle.plan.id, "informs");
       if (!linkResult.ok) return errorContent(linkResult.error);
 
-      return textContent({ assessment: createResult.value, result: assessResult.value });
+      // reason: SPEC-040 §T3 D3 — `summary` is additive to the pre-existing
+      // `assessment`/`result` envelope fields (which already carry the full typed
+      // AssessmentResult verbatim); it gives an agent reading MCP text content a
+      // scannable digest without re-deriving one from the nested JSON.
+      return textContent({
+        assessment: createResult.value,
+        result: assessResult.value,
+        summary: buildAssessSummaryText(assessResult.value),
+      });
     },
   );
 

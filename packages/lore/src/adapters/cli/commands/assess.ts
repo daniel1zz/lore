@@ -27,47 +27,10 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, formatTable } from "../utils.js";
+import { exitCode, formatError } from "../utils.js";
 import { isAssessAiBraked } from "../../../ai/resolve-ai.js";
-import { renderAssessmentContent, type AssessmentResult } from "@lore/core";
-
-/** Human-readable verdict + AC score table rendering for terminal output. */
-function formatAssessmentSummary(result: AssessmentResult): string {
-  const lines: string[] = [];
-  lines.push(`Verdict: ${result.verdict} (score: ${result.overall_score}/100)`);
-  lines.push("");
-
-  if (result.ac_scores.length > 0) {
-    lines.push(
-      formatTable(
-        ["AC", "Score", "Reasoning"],
-        result.ac_scores.map((ac) => [ac.ac_id, String(ac.score), ac.reasoning]),
-      ),
-    );
-    lines.push("");
-  }
-
-  if (result.gaps.length > 0) {
-    lines.push("Gaps:");
-    for (const g of result.gaps) lines.push(`  - ${g}`);
-    lines.push("");
-  }
-
-  if (result.recommendations.length > 0) {
-    lines.push("Recommendations:");
-    for (const r of result.recommendations) lines.push(`  - ${r}`);
-    lines.push("");
-  }
-
-  lines.push(
-    `Judge: ${result.judgment.provider} (prompt v${result.judgment.prompt_version}, ` +
-      `${result.judgment.duration_ms}ms, retried: ${result.judgment.retried}` +
-      (result.judgment.truncated.length > 0 ? `, truncated: ${result.judgment.truncated.join(", ")}` : "") +
-      `)`,
-  );
-
-  return lines.join("\n");
-}
+import { renderAssessmentContent } from "@lore/core";
+import { formatAssessmentSummary } from "../assess-render.js";
 
 export default defineCommand({
   meta: {
