@@ -259,7 +259,7 @@ describe("P4 e2e: feed-before-produce + provenance closed loop (AC-P4-7)", () =>
 
       // ── Step 5: `lore list --governed-by <skill>` lists the spec ──
       const listResult = await runListGovernedBy(skill.id);
-      expect(listResult.exitCode === 0 || listResult.exitCode === undefined).toBe(true);
+      expect(listResult.exitCode ?? 0).toBe(0);
       const parsedList = JSON.parse(listResult.stdout) as {
         ok: boolean;
         data: { docs: Array<{ id: string; title: string }>; total: number };

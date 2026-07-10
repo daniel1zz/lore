@@ -36,10 +36,11 @@
  * ancestor spec is re-queried by both gates before and after approval and must agree).
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { assertFreshBinary } from "./helpers/assert-fresh-binary";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -156,6 +157,17 @@ function disableGateInConfig(dir: string, checkpoint: string): void {
 // ─── Project-level state ──────────────────────────────────────────────────────
 
 let tmpDir: string;
+
+// Fails loud (throws) if dist/lore is missing or older than the newest .ts source under
+// packages/{lore,core}/src — this suite spawns the COMPILED binary directly (see `runLore`
+// above), so a stale artifact would otherwise let the test silently validate old logic
+// against new source. Computed once for the whole suite (AC3), not per-test.
+beforeAll(() => {
+  assertFreshBinary(LORE_BIN, [
+    join(PROJECT_ROOT, "packages", "lore", "src"),
+    join(PROJECT_ROOT, "packages", "core", "src"),
+  ]);
+});
 
 beforeEach(() => {
   tmpDir = mkdtempSync(join(tmpdir(), "lore-p2-e2e-closed-loop-"));

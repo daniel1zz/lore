@@ -32,9 +32,10 @@
  */
 
 import { describe, expect, it, beforeAll, afterAll } from "bun:test";
-import { mkdirSync, rmSync, readFileSync, existsSync } from "fs";
+import { mkdirSync, rmSync, readFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { assertFreshBinary } from "./helpers/assert-fresh-binary";
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
 
@@ -202,12 +203,18 @@ function parseHookOutput(stdout: string): { permissionDecision: string; permissi
   return parsed.hookSpecificOutput;
 }
 
-// ─── Suite: binaries exist ──────────────────────────────────────────────────
+// ─── Suite: binaries exist AND are fresh ────────────────────────────────────
 
+// Fails loud (throws) if dist/lore is missing OR older than the newest .ts source under
+// packages/{lore,core}/src — this suite spawns the COMPILED binary directly via `runLore`
+// (and the shim scripts under test invoke it too), so a stale artifact would otherwise let
+// the test silently validate old logic against new source. Computed once for the whole
+// suite, not per-test.
 beforeAll(() => {
-  if (!existsSync(LORE_BIN)) {
-    throw new Error(`dist/lore binary not found at ${LORE_BIN} — run \`bun run build\` first`);
-  }
+  assertFreshBinary(LORE_BIN, [
+    join(REPO_ROOT, "packages", "lore", "src"),
+    join(REPO_ROOT, "packages", "core", "src"),
+  ]);
 });
 
 // ─── Suite: G1 (spec-create) ────────────────────────────────────────────────
