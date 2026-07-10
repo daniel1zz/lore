@@ -1,7 +1,9 @@
 /**
- * MCP tool registrations — 25 lore_* tools (16 original + 4 SPEC-025 task-workflow tools
+ * MCP tool registrations — 27 lore_* tools (16 original + 4 SPEC-025 task-workflow tools
  * + 1 SPEC-026 assess tool + 1 SPEC-035 audit tool + 1 SPEC-034 review tool
- * + 1 SPEC-039 verify tool + 1 IoC vertical-slice tech-spec §4.1/§11 P4 feed tool).
+ * + 1 SPEC-039 verify tool + 1 IoC vertical-slice tech-spec §4.1/§11 P4 feed tool
+ * + 2 SPEC-041 session tools: lore_bootstrap, lore_handoff; lore_feed additionally
+ * gains a session-resume dispatch branch, SPEC-041 §3 D5).
  *
  * Architecture: Tools with input use the `registerToolWithArgs` helper defined below, which:
  *   1. Calls `server.tool(name, desc, handler)` in 3-arg form (avoids ZodRawShapeCompat type bomb)
@@ -38,11 +40,13 @@ import type { LinkType } from "@lore/core";
 import { renderAssessmentContent } from "@lore/core";
 import type { NewReviewJudgment, ReviewJudgment, Result, TreeBlueprint } from "@lore/core";
 import { ORACLE_KINDS, parseTreeBlueprint, runDeterministicChecks } from "@lore/core";
+import { handoffExtraSchema } from "@lore/core";
+import type { HandoffExtra } from "@lore/core";
 import { isAssessAiBraked } from "../../ai/resolve-ai.js";
 import { REVIEW_PROMPT_VERSION } from "../../ai/review-template.js";
 import { CORPUS_SCHEMA_INFO } from "./schema-info.js";
 import { runCalibrationHook } from "../../flows/calibration-hook.js";
-import { buildFeed } from "../../flows/feed-flow.js";
+import { buildFeed, buildResumeFeed, SESSION_RESUME_CHECKPOINT } from "../../flows/feed-flow.js";
 import { buildAssessSummaryText } from "./assess-render.js";
 
 // ─── Schema Constants ────────────────────────────────────────────────────────
@@ -325,16 +329,44 @@ export const LoreVerifySchema = z.object({
 });
 
 /**
- * Input schema for lore_feed (IoC vertical-slice tech-spec §4.1/§11, P4 slice).
+ * Input schema for lore_feed (IoC vertical-slice tech-spec §4.1/§11, P4 slice;
+ * extended by SPEC-041 §3 D5 for the session-resume dispatch).
  * `checkpoint` — e.g. `"spec-create"`, mapped to a produced-type via
  * `CHECKPOINT_PRODUCED_TYPE` (`../../flows/feed-flow.js`). `parent_id_or_slug` —
  * optional intended-parent doc whose MDX-resolved summary is included in the feed
- * when supplied, mirroring the CLI's `--parent`.
+ * when supplied, mirroring the CLI's `--parent`. `plan`/`handoff`/`by` are only
+ * meaningful when `checkpoint === "session-resume"` — forwarded verbatim to
+ * `SessionService.resume` via `buildResumeFeed`, mirroring the CLI's
+ * `--plan`/`--handoff`/`--by`.
  */
 export const LoreFeedSchema = z.object({
   checkpoint: z.string(),
   parent_id_or_slug: z.string().optional(),
+  plan: z.string().optional(),
+  handoff: z.string().optional(),
+  by: z.string().optional(),
 });
+
+/**
+ * Input schema for lore_bootstrap (SPEC-041 §3 D2) — the S1 volatile session
+ * pointer-set. `by` is required (not defaulted) — same MCP actor-identity
+ * precedent as lore_claim/lore_release/lore_evidence_add/lore_ready/lore_review/
+ * lore_verify: MCP callers pass actor identity explicitly, unlike the CLI's
+ * $LORE_ACTOR/OS-username fallback. Only filters `my_claims`; every other field
+ * is corpus-wide regardless of `by`.
+ */
+export const LoreBootstrapSchema = z.object({
+  by: z.string().min(1),
+});
+
+/**
+ * Input schema for lore_handoff (SPEC-041 §3 D3, D6) — reuses `handoffExtraSchema`
+ * directly (SSOT; no redeclaration) since the MCP tool's typed fields ARE
+ * `extra.handoff` verbatim (D6: "MCP lore_handoff takes the typed fields
+ * directly"). `by` is already required by `handoffExtraSchema` (`min(1)`), same
+ * MCP actor-identity precedent as the other task-workflow/session tools.
+ */
+export const LoreHandoffSchema = handoffExtraSchema;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -394,12 +426,20 @@ type McpToolRegistry = {
  * reason: ADR-01KVYFJ5G8EVB6S5NMD3PNY5KA §"Fast Path" Pattern 1 (post-registration patch)
  * fence: do NOT change to 4-arg form or registerTool(inputSchema: z.object(...)) —
  *   those trigger ShapeOutput<ZodRawShapeCompat> which OOMs tsc at 4 GB heap.
+ * reason: `schema`'s 3rd generic (Input) is pinned to `unknown` rather than left to
+ *   default to `T` — a schema with `.default(...)` fields (e.g. `handoffExtraSchema`,
+ *   SPEC-041) has an Input type narrower than its Output type (defaulted fields are
+ *   optional pre-parse, required post-parse); `z.ZodType<T>`'s implicit `Input = T`
+ *   default rejected such schemas even though `T` (the Output/parsed type, what the
+ *   handler actually receives) inferred correctly. Widening Input to `unknown` only
+ *   loosens the constraint — every pre-existing call site (Input === Output) still
+ *   satisfies it trivially, and `T` inference (driven by the Output position) is unaffected.
  */
 function registerToolWithArgs<T>(
   server: McpServer,
   name: string,
   desc: string,
-  schema: z.ZodType<T>,
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>,
   handler: (args: T) => Promise<CallToolResult>,
 ): void {
   // Step 1: 3-arg registration — avoids ZodRawShapeCompat inference entirely
@@ -481,10 +521,12 @@ async function reviewDocViaMcp(
 // ─── Tool Registrations ──────────────────────────────────────────────────────
 
 /**
- * Registers all 25 lore_* MCP tools on the given server (16 original + 4 SPEC-025
+ * Registers all 27 lore_* MCP tools on the given server (16 original + 4 SPEC-025
  * task-workflow tools: lore_claim, lore_release, lore_evidence_add, lore_ready;
  * + lore_assess (SPEC-026); + lore_audit (SPEC-035); + lore_review (SPEC-034);
- * + lore_verify (SPEC-039); + lore_feed (IoC vertical-slice tech-spec §4.1/§11 P4)).
+ * + lore_verify (SPEC-039); + lore_feed (IoC vertical-slice tech-spec §4.1/§11 P4);
+ * + lore_bootstrap, lore_handoff (SPEC-041 §3 D2, D3, D6) — lore_feed additionally
+ * gains a session-resume dispatch branch (SPEC-041 §3 D5)).
  *
  * Tools with input use `registerToolWithArgs` (avoids ZodRawShapeCompat type bomb).
  * Tools without input (`lore_schema`, `lore_status`) use plain `server.tool(name, desc, cb)`.
@@ -959,16 +1001,61 @@ export function registerTools(server: McpServer, app: App): void {
   );
 
   // ── IoC vertical-slice tech-spec §4.1/§11 P4: feed-before-produce PULL ────
+  // (extended by SPEC-041 §3 D5 for the session-resume dispatch)
 
   // lore_feed
   registerToolWithArgs(
     server,
     "lore_feed",
-    "Feed-before-produce PULL: return the governing skill's rule slice for a checkpoint ahead of writing (advisory only, never a gate — always succeeds)",
+    'Feed-before-produce PULL: return the governing skill\'s rule slice for a checkpoint ahead of writing (advisory only, never a gate — always succeeds); checkpoint "session-resume" dispatches to SPEC-041 S2 resume instead (can fail on an unresolvable plan/handoff target)',
     LoreFeedSchema,
     async (args) => {
+      if (args.checkpoint === SESSION_RESUME_CHECKPOINT) {
+        const result = await buildResumeFeed(app, {
+          ...(args.plan !== undefined ? { plan: args.plan } : {}),
+          ...(args.handoff !== undefined ? { handoff: args.handoff } : {}),
+          ...(args.by !== undefined ? { by: args.by } : {}),
+        });
+        if (!result.ok) return errorContent(result.error);
+        return textContent(result.value);
+      }
+
       const outcome = await buildFeed(app, args.checkpoint, args.parent_id_or_slug);
       return textContent(outcome);
+    },
+  );
+
+  // ── SPEC-041 §3 D2, D3, D6: session bootstrap + lossless handoff ──────────
+
+  // lore_bootstrap
+  registerToolWithArgs(
+    server,
+    "lore_bootstrap",
+    "SPEC-041 S1 volatile session pointer-set (active plans, pending reviews, your claims, armed gates, latest handoffs, resume hint) — read-only, zero store mutations",
+    LoreBootstrapSchema,
+    async (args) => {
+      if (app.sessionService === undefined) {
+        return errorContent({ code: "STORE_ERROR", message: "Internal error: SessionService not wired on App" });
+      }
+      const result = await app.sessionService.bootstrap(args.by);
+      if (!result.ok) return errorContent(result.error);
+      return textContent({ report: result.value });
+    },
+  );
+
+  // lore_handoff
+  registerToolWithArgs(
+    server,
+    "lore_handoff",
+    "Write a lossless session-continuity handoff document (knowledge/handoff) — the sole write path besides `lore handoff` (writer-identity guard, SPEC-041 §3 D4)",
+    LoreHandoffSchema,
+    async (args) => {
+      if (app.sessionService === undefined) {
+        return errorContent({ code: "STORE_ERROR", message: "Internal error: SessionService not wired on App" });
+      }
+      const result = await app.sessionService.writeHandoff(args);
+      if (!result.ok) return errorContent(result.error);
+      return textContent({ doc: result.value });
     },
   );
 }

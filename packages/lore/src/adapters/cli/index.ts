@@ -50,6 +50,8 @@ const main = defineCommand({
     verify: () => import("./commands/verify.js").then((m) => m.default),
     gate: () => import("./commands/gate.js").then((m) => m.default),
     feed: () => import("./commands/feed.js").then((m) => m.default),
+    bootstrap: () => import("./commands/bootstrap.js").then((m) => m.default),
+    handoff: () => import("./commands/handoff.js").then((m) => m.default),
   },
 });
 

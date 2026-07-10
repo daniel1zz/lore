@@ -2,7 +2,7 @@
 
 ## Purpose
 
-MCP (Model Context Protocol) stdio adapter. Entered via `lore --mcp-server` (top-level flag intercepted in `packages/lore/src/index.ts`) or `lore agent`. Registers 24 `lore_*` tools (16 original + 4 SPEC-025 task-workflow tools + 1 SPEC-026 assess tool + 1 SPEC-035 audit tool + 1 SPEC-034 review tool + 1 SPEC-039 verify tool) and a small set of MCP resources against `@modelcontextprotocol/sdk`'s `McpServer` and connects over `StdioServerTransport`.
+MCP (Model Context Protocol) stdio adapter. Entered via `lore --mcp-server` (top-level flag intercepted in `packages/lore/src/index.ts`) or `lore agent`. Registers 27 `lore_*` tools (16 original + 4 SPEC-025 task-workflow tools + 1 SPEC-026 assess tool + 1 SPEC-035 audit tool + 1 SPEC-034 review tool + 1 SPEC-039 verify tool + 1 IoC vertical-slice tech-spec §4.1/§11 P4 feed tool + 2 SPEC-041 session tools: `lore_bootstrap`, `lore_handoff`) and a small set of MCP resources against `@modelcontextprotocol/sdk`'s `McpServer` and connects over `StdioServerTransport`.
 
 ## Key Invariants
 
@@ -20,10 +20,17 @@ MCP (Model Context Protocol) stdio adapter. Entered via `lore --mcp-server` (top
 
 SPEC-040 §T3 D3: `lore_assess`'s response envelope gains an additive `summary: string` field (alongside the pre-existing `assessment`/`result`) — a compact Markdown digest built by `assess-render.ts::buildAssessSummaryText`, extracted into its own module (kept out of `tools.ts`, the tsc-hotspot file) so it's unit-testable without registering a full MCP server. It renders the same legacy shape (verdict/AC table/gaps/recommendations/judge line) as the CLI's `formatAssessmentSummary`, additively extended with SPEC-040 typed-field tables (dimension scores, typed gaps, typed recommendations, rubric warnings) — Markdown pipe tables (not the CLI's Unicode box-drawing), escaped for `|` characters in judge-authored text via a local `escapeCell` helper.
 
+IoC vertical-slice tech-spec §4.1/§11 P4 adds `lore_feed` (`checkpoint`, `parent_id_or_slug?`) — the MCP counterpart to `lore feed`, always succeeding for the gate-checkpoint branch (`buildFeed`, `../../flows/feed-flow.ts`): an unknown checkpoint, no approved skill, or an unresolvable parent all degrade to an advisory note in the response, never `isError`.
+
+**SPEC-041 §3 D2, D3, D5, D6 (session bootstrap + lossless handoff)** extends `lore_feed` and adds two new tools:
+- `lore_feed` gains `plan?`/`handoff?`/`by?` fields; `checkpoint === "session-resume"` is a SEPARATE dispatch (`buildResumeFeed`/`SessionService.resume`, D5) consulted BEFORE the `CHECKPOINT_PRODUCED_TYPE` lookup — deliberately NOT a `CHECKPOINT_PRODUCED_TYPE` entry. Unlike the gate-checkpoint branch (never fails), this dispatch CAN return `isError` — an unresolvable `plan`/`handoff` is `SessionService.resume`'s own documented input error, not an advisory-degrade case. Response shape: `{checkpoint: "session-resume", resume: ResumeResult, feed: string}`.
+- `lore_bootstrap` (`by` — required, same MCP actor-identity precedent as `lore_claim`/`lore_release`/`lore_evidence_add`/`lore_ready`/`lore_review`/`lore_verify`) — the S1 volatile session pointer-set, thin pipe over `SessionService.bootstrap`. Response: `{report: BootstrapReport}`. Read-only — zero store mutations.
+- `lore_handoff` (`by` — required; every other field is `handoffExtraSchema`'s typed shape verbatim — `LoreHandoffSchema` REUSES `handoffExtraSchema` directly rather than redeclaring it, SSOT) — the sole write path for a `knowledge`/`sub_type: "handoff"` doc besides `lore handoff` (writer-identity guard, D4). Response: `{doc: DocRecord}`. `registerToolWithArgs`'s `schema` parameter type had to widen its Input generic to `unknown` (from the implicit `Input = T` default) to accept `handoffExtraSchema`'s `.default([])`-bearing array fields, whose Input type (pre-default, optional) differs from its Output type (post-default, required) — see that function's JSDoc in `tools.ts` for the full mechanism; every pre-existing schema (Input === Output) is unaffected.
+
 ## Files
 
 - `index.ts` — `startMcpServer(app)`; wires `McpServer` + `StdioServerTransport`.
-- `tools.ts` — 23 tool registrations, schema constants, Zod input shapes.
+- `tools.ts` — 27 tool registrations, schema constants, Zod input shapes.
 - `assess-render.ts` — `buildAssessSummaryText(result)` (SPEC-040 §T3 D3) — Markdown digest for `lore_assess`'s `summary` envelope field.
 - `resources.ts` — MCP resource registrations (corpus snapshots, etc.).
 - `schema-info.ts` — `CORPUS_SCHEMA_INFO` constant describing doc types and `extra` requirements (knowledge `sub_type` includes `"assessment"`, SPEC-026).
