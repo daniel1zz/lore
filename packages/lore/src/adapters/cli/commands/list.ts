@@ -6,6 +6,11 @@
  *   --phase <name>       Filter tasks by extra.phase name (requires --type task or --plan-id).
  *                        Client-side filter — applied after store fetch since StoreFilters
  *                        has no extra-field index. Only useful with --type task.
+ *
+ * --governed-by is exclusive of every other filter flag (--type/--status/--author/
+ * --since/--tag/--plan-id/--phase): combining them fails loud (exit 2, naming the
+ * conflicting flags) rather than silently running --governed-by alone and dropping
+ * the rest. --json is a rendering mode, not a filter, and may combine freely.
  */
 
 import { defineCommand } from "citty";
@@ -64,6 +69,20 @@ export default defineCommand({
       // service method (CorpusService.listGovernedBy) rather than joining the
       // filters object below. Source: IoC vertical-slice tech-spec §4.1 P4.
       if (args["governed-by"] !== undefined) {
+        // Fail loud instead of silently dropping the other filters: --governed-by
+        // short-circuits to listGovernedBy above and never reaches the filters
+        // block below, so any other filter flag passed alongside it would
+        // otherwise be silently ignored. Source: no-silent-fallback project norm.
+        const otherFilterKeys = ["type", "status", "author", "since", "tag", "plan-id", "phase"] as const;
+        const conflicting = otherFilterKeys.filter((k) => args[k] !== undefined);
+        if (conflicting.length > 0) {
+          process.stderr.write(
+            `Error: --governed-by cannot be combined with ${conflicting.map((k) => `--${k}`).join(", ")}.\n`,
+          );
+          process.exitCode = 2;
+          return;
+        }
+
         const governedResult = await app.corpusService.listGovernedBy(args["governed-by"]);
         if (!governedResult.ok) {
           process.stderr.write(formatError(governedResult.error) + "\n");

@@ -14,7 +14,8 @@
  *               governed doc (table mode: title appears; --json: docs[] contains it)
  *   NEGATIVE:   a skill scoped to a different applies_to governs nothing -> "No
  *               documents governed by ..." message, not an error
- *   BOUNDARY:   --governed-by ignores other filters passed alongside it (short-circuit)
+ *   BOUNDARY:   --governed-by combined with any other filter flag fails loud (exit 2,
+ *               naming the conflicting flag) instead of silently ignoring it
  *   ERROR:      unresolvable skill id/slug -> nonzero exit, stderr populated
  *   STATE:      n/a beyond HAPPY — the "second create doesn't duplicate" invariant is
  *               a store-level guarantee already covered at the service-unit level
@@ -153,7 +154,7 @@ describe("lore list --governed-by — HAPPY", () => {
       output.restore();
     }
 
-    expect(process.exitCode === 0 || process.exitCode === undefined).toBe(true);
+    expect(process.exitCode ?? 0).toBe(0);
     const parsed = JSON.parse(output.stdout.join("\n")) as {
       ok: boolean;
       data: { docs: Array<{ id: string }>; total: number };
@@ -205,21 +206,58 @@ describe("lore list --governed-by — NEGATIVE", () => {
 // ─── BOUNDARY ──────────────────────────────────────────────────────────────────
 
 describe("lore list --governed-by — BOUNDARY", () => {
-  it("short-circuits: an unrelated --type filter passed alongside --governed-by is ignored", async () => {
+  it("fails loud (exit 2) when combined with --type instead of silently ignoring it", async () => {
     const loreDir = join(tmpDir, ".lore");
     const skill = await seedApprovedSkill(loreDir, { title: "Write-spec rules", appliesTo: "spec" });
-    const { specId } = await seedGovernedSpec(loreDir, "Governed Spec Ignoring Filters");
+    await seedGovernedSpec(loreDir, "Governed Spec Conflicting Filters");
 
     const cmd = await importListCommand();
     const output = captureOutput();
     try {
-      // --type task would normally filter to zero results under the standard path;
-      // --governed-by must short-circuit before that filter is ever consulted.
       await cmd.run({ args: { "governed-by": skill.id, type: "task", json: true } });
     } finally {
       output.restore();
     }
 
+    expect(process.exitCode).toBe(2);
+    expect(output.stdout.join("\n")).toBe(""); // no silent success output
+    const stderr = output.stderr.join("\n");
+    expect(stderr).toContain("--governed-by cannot be combined with");
+    expect(stderr).toContain("--type");
+  });
+
+  it("fails loud (exit 2) when combined with multiple other filters, naming all of them", async () => {
+    const loreDir = join(tmpDir, ".lore");
+    const skill = await seedApprovedSkill(loreDir, { title: "Write-spec rules", appliesTo: "spec" });
+
+    const cmd = await importListCommand();
+    const output = captureOutput();
+    try {
+      await cmd.run({ args: { "governed-by": skill.id, status: "active", tag: "foo" } });
+    } finally {
+      output.restore();
+    }
+
+    expect(process.exitCode).toBe(2);
+    const stderr = output.stderr.join("\n");
+    expect(stderr).toContain("--status");
+    expect(stderr).toContain("--tag");
+  });
+
+  it("--json alongside --governed-by alone is NOT a conflict (json is output format, not a filter)", async () => {
+    const loreDir = join(tmpDir, ".lore");
+    const skill = await seedApprovedSkill(loreDir, { title: "Write-spec rules", appliesTo: "spec" });
+    const { specId } = await seedGovernedSpec(loreDir, "Governed Spec Alone With Json");
+
+    const cmd = await importListCommand();
+    const output = captureOutput();
+    try {
+      await cmd.run({ args: { "governed-by": skill.id, json: true } });
+    } finally {
+      output.restore();
+    }
+
+    expect(process.exitCode ?? 0).toBe(0);
     const parsed = JSON.parse(output.stdout.join("\n")) as { data: { docs: Array<{ id: string }> } };
     expect(parsed.data.docs.some((d) => d.id === specId)).toBe(true);
   });
@@ -239,5 +277,26 @@ describe("lore list --governed-by — ERROR", () => {
 
     expect(process.exitCode).not.toBe(0);
     expect(output.stderr.join("\n").length).toBeGreaterThan(0);
+  });
+});
+
+// ─── REGRESSION ────────────────────────────────────────────────────────────────
+// Plain filters with no --governed-by present must remain entirely unaffected by
+// the conflict check added to the --governed-by branch — it never runs when
+// --governed-by is absent.
+
+describe("lore list — REGRESSION (no --governed-by)", () => {
+  it("plain --type task (no --governed-by) still lists normally, exit 0", async () => {
+    const cmd = await importListCommand();
+    const output = captureOutput();
+    try {
+      await cmd.run({ args: { type: "task", json: true } });
+    } finally {
+      output.restore();
+    }
+
+    expect(process.exitCode ?? 0).toBe(0);
+    const parsed = JSON.parse(output.stdout.join("\n")) as { data: { docs: unknown[]; total: number } };
+    expect(parsed.data.total).toBe(0); // no tasks seeded in this corpus
   });
 });
