@@ -169,15 +169,18 @@ export interface PlanExtra {
 }
 
 /**
- * The seven sub-classification values a `knowledge` document's `extra.sub_type` may take.
+ * The eight sub-classification values a `knowledge` document's `extra.sub_type` may take.
  * SSOT for the enum — `knowledgeExtraSchema` (schemas.ts) validates against this exact
  * tuple rather than re-declaring the literal list (same `SPEC_KINDS` precedent as
- * {@link DECISION_STATUSES} above). Includes `"assessment"` (SPEC-026 §3 D4) and
+ * {@link DECISION_STATUSES} above). Includes `"assessment"` (SPEC-026 §3 D4),
  * `"prompt"` / `"skill"` (upstream-asset sub_types — reusable prompt/skill artifacts
  * riding the existing knowledge review/version/calibration machinery instead of a new
- * top-level doc type; see `promptExtraSchema` / `skillExtraSchema` in schemas.ts) — a
- * superset of the local `KnowledgeExtra.sub_type` literal below, which predates SPEC-026
- * and is left as-is (pre-existing, narrower interface; not read by any SPEC-036 code path).
+ * top-level doc type; see `promptExtraSchema` / `skillExtraSchema` in schemas.ts), and
+ * `"handoff"` (SPEC-041 §3 D3 — lossless session-continuity record; write-path
+ * exclusivity is enforced in `CorpusService._createImpl`, NOT here — see that method's
+ * "lore handoff" rejection block) — a superset of the local `KnowledgeExtra.sub_type`
+ * literal below, which predates SPEC-026 and is left as-is (pre-existing, narrower
+ * interface; not read by any SPEC-036 code path).
  */
 export const KNOWLEDGE_SUB_TYPES = [
   "ideation",
@@ -187,6 +190,7 @@ export const KNOWLEDGE_SUB_TYPES = [
   "assessment",
   "prompt",
   "skill",
+  "handoff",
 ] as const;
 
 /** Derived TypeScript union for a knowledge document's `extra.sub_type`. */

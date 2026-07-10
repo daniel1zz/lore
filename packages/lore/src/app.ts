@@ -31,6 +31,7 @@ import { SessionStore } from "./adapters/http/sessions.js";
 import {
   resolveSyncCredentials,
   resolveClaimTtlMinutes,
+  resolveHandoffTtlMinutes,
   resolveAuditVerifySince,
   resolveVerifyDefaultTimeoutMs,
   type LoreConfig,
@@ -57,6 +58,7 @@ import { AcService } from "./service/ac-service.js";
 import { VerifyRunnerService } from "./service/verify-runner-service.js";
 import { executeVerifySpawnSpec } from "./service/verify-executor.js";
 import { GateEnforcer } from "./service/gate-enforcer.js";
+import { SessionService } from "./service/session-service.js";
 
 export interface App {
   corpusService: CorpusService;
@@ -155,6 +157,22 @@ export interface App {
    */
   verifyRunnerService?: VerifyRunnerService;
   /**
+   * SessionService — SPEC-041 S1 (bootstrap pointer-set) + S2 (lossless handoff) +
+   * resume. Constructor-injected with `corpusService.createHandoffDoc` (bound — the
+   * SOLE legitimate write path for `knowledge` docs with `extra.sub_type: "handoff"`,
+   * mirroring `acService`'s PhaseService-shaped DI) and `gateEnforcer.isEnabled`
+   * (bound — `bootstrap`'s armed-gate resolution reuses `GateEnforcer`'s OWN
+   * enablement decision rather than re-deriving it from a second config reference).
+   *
+   * Optional for the same reason `acService`/`verifyRunnerService` are: pre-existing
+   * hand-built App test stubs (HTTP routes / MCP tools / eval scenarios — outside
+   * this task's file anchors) remain valid without a mechanical touch to every one of
+   * them. Always present in production — both `buildAppFromSqlite` and
+   * `buildAppFromTurso` wire it unconditionally.
+   * Source: SPEC-041 §3 D1, §9.1
+   */
+  sessionService?: SessionService;
+  /**
    * Telemetry sink — exposed for dashboard route handlers to emit source-tagged events.
    * Dashboard handlers record { service: "dashboard", source: "dashboard" } events after
    * successful writes so AC-DASH-WRITE-TEL-1 is satisfied without modifying service signatures.
@@ -191,6 +209,8 @@ export interface App {
  * @param aiProviderService - Wired AI service from buildProviderRegistry (always required)
  * @param aiDefaultPerSurface - Per-surface AI default overrides from config (SPEC-024)
  * @param claimTtlMinutes - Task claim lease TTL in minutes (SPEC-025 §3 D2; default 120)
+ * @param handoffTtlMinutes - Handoff staleness TTL in minutes (SPEC-041 §3 D5; default
+ *   10080 = 7 days) — feeds `SessionService.resume`'s `ttl_warning` threshold
  * @param auditVerifySince - Audit-verify watermark, ISO 8601 (SPEC-035 §2 D5; default the
  *   SPEC-035 deploy date)
  * @param verifyDefaultTimeoutMs - Trusted-runner default spawn timeout, ms (SPEC-039 §2 D9;
@@ -202,7 +222,8 @@ export interface App {
  *   defense-in-depth) — constructed once in `createApp` (mirrors `aiProviderService`,
  *   an already-built instance rather than raw config passed down) and wired into
  *   `CorpusService`/`ReviewService`/`TaskWorkflowService`, all three of which treat it
- *   as OPTIONAL DI (see each service's constructor JSDoc).
+ *   as OPTIONAL DI (see each service's constructor JSDoc). Also bound into
+ *   `SessionService` (`isEnabled`) — SPEC-041's `bootstrap` armed-gate resolution.
  */
 function buildAppFromSqlite(
   store: SQLiteStore,
@@ -210,6 +231,7 @@ function buildAppFromSqlite(
   aiProviderService: AIProviderService,
   aiDefaultPerSurface?: AiDefaultPerSurface,
   claimTtlMinutes: number = 120,
+  handoffTtlMinutes: number = 10_080,
   auditVerifySince: string = "2026-07-06T00:00:00Z",
   verifyDefaultTimeoutMs: number = 300_000,
   repoRoot: string = process.cwd(),
@@ -247,6 +269,17 @@ function buildAppFromSqlite(
     corpusService.resolveDeclaredAcIds.bind(corpusService),
     { enforcer: gateEnforcer, getPlanBundle: corpusService.getPlanBundle.bind(corpusService) },
   );
+  // reason: SessionService (SPEC-041 §3 D1) — createHandoffDoc is CorpusService's
+  // internal creation seam (the SOLE legitimate write path for knowledge/handoff
+  // docs, bound rather than imported — services don't cross-import). isCheckpointEnabled
+  // reuses GateEnforcer's OWN per-checkpoint decision for bootstrap's armed_gates,
+  // rather than re-deriving workflow.gates.* from a second raw config reference.
+  const sessionService = new SessionService(store, {
+    claimTtlMinutes,
+    handoffTtlMinutes,
+    createHandoffDoc: corpusService.createHandoffDoc.bind(corpusService),
+    isCheckpointEnabled: gateEnforcer.isEnabled.bind(gateEnforcer),
+  });
   return {
     corpusService,
     // reason: same resolved claimTtlMinutes as CorpusService above — one resolution
@@ -280,6 +313,7 @@ function buildAppFromSqlite(
     // reason: PhaseService depends only on StoreInterface — stateless, no AI, no telemetry. SPEC-023 §9.1.
     phaseService: new PhaseService(store),
     taskWorkflowService,
+    sessionService,
     // reason: SpecKindService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-032 §3.4.
     specKindService: new SpecKindService(store),
@@ -328,6 +362,8 @@ function buildAppFromSqlite(
  * @param aiProviderService - Wired AI service from buildProviderRegistry (always required)
  * @param aiDefaultPerSurface - Per-surface AI default overrides from config (SPEC-024)
  * @param claimTtlMinutes - Task claim lease TTL in minutes (SPEC-025 §3 D2; default 120)
+ * @param handoffTtlMinutes - Handoff staleness TTL in minutes (SPEC-041 §3 D5; default
+ *   10080 = 7 days) — see `buildAppFromSqlite`'s identical parameter JSDoc.
  * @param auditVerifySince - Audit-verify watermark, ISO 8601 (SPEC-035 §2 D5; default the
  *   SPEC-035 deploy date)
  * @param verifyDefaultTimeoutMs - Trusted-runner default spawn timeout, ms (SPEC-039 §2 D9;
@@ -345,6 +381,7 @@ function buildAppFromTurso(
   aiProviderService: AIProviderService,
   aiDefaultPerSurface?: AiDefaultPerSurface,
   claimTtlMinutes: number = 120,
+  handoffTtlMinutes: number = 10_080,
   auditVerifySince: string = "2026-07-06T00:00:00Z",
   verifyDefaultTimeoutMs: number = 300_000,
   repoRoot: string = process.cwd(),
@@ -371,6 +408,17 @@ function buildAppFromTurso(
     corpusService.resolveDeclaredAcIds.bind(corpusService),
     { enforcer: gateEnforcer, getPlanBundle: corpusService.getPlanBundle.bind(corpusService) },
   );
+  // reason: SessionService (SPEC-041 §3 D1) — createHandoffDoc is CorpusService's
+  // internal creation seam (the SOLE legitimate write path for knowledge/handoff
+  // docs, bound rather than imported — services don't cross-import). isCheckpointEnabled
+  // reuses GateEnforcer's OWN per-checkpoint decision for bootstrap's armed_gates,
+  // rather than re-deriving workflow.gates.* from a second raw config reference.
+  const sessionService = new SessionService(store, {
+    claimTtlMinutes,
+    handoffTtlMinutes,
+    createHandoffDoc: corpusService.createHandoffDoc.bind(corpusService),
+    isCheckpointEnabled: gateEnforcer.isEnabled.bind(gateEnforcer),
+  });
   return {
     corpusService,
     // reason: same resolved claimTtlMinutes as CorpusService above — one resolution
@@ -404,6 +452,7 @@ function buildAppFromTurso(
     // reason: PhaseService depends only on StoreInterface — stateless, no AI, no telemetry. SPEC-023 §9.1.
     phaseService: new PhaseService(store),
     taskWorkflowService,
+    sessionService,
     // reason: SpecKindService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-032 §3.4.
     specKindService: new SpecKindService(store),
@@ -498,6 +547,10 @@ export function createApp(
   // Task claim lease TTL (SPEC-025 §3 D2) — defaults to 120 when config/workflow section absent.
   const claimTtlMinutes = resolveClaimTtlMinutes(config);
 
+  // Handoff staleness TTL (SPEC-041 §3 D5) — defaults to 10080 (7 days) when
+  // config/workflow section absent. Feeds SessionService.resume's ttl_warning.
+  const handoffTtlMinutes = resolveHandoffTtlMinutes(config);
+
   // Audit-verify watermark (SPEC-035 §2 D5) — defaults to the SPEC-035 deploy date
   // when config/audit section absent.
   const auditVerifySince = resolveAuditVerifySince(config);
@@ -538,6 +591,7 @@ export function createApp(
       aiProviderService,
       aiDefaultPerSurface,
       claimTtlMinutes,
+      handoffTtlMinutes,
       auditVerifySince,
       verifyDefaultTimeoutMs,
       repoRoot,
@@ -576,6 +630,7 @@ export function createApp(
         aiProviderService,
         aiDefaultPerSurface,
         claimTtlMinutes,
+        handoffTtlMinutes,
         auditVerifySince,
         verifyDefaultTimeoutMs,
         repoRoot,

@@ -10,6 +10,7 @@ import { evidenceEntrySchema, taskClaimSchema } from "./task-workflow.js";
 import { assessmentResultSchema } from "./assessment.js";
 import { SPEC_KINDS } from "./spec-kind.js";
 import { specAcceptanceCriteriaSchema } from "./acceptance.js";
+import { handoffExtraSchema } from "./session.js";
 
 // ─── Primitive Schemas ─────────────────────────────────────────────────────
 
@@ -150,6 +151,8 @@ export const knowledgeExtraSchema = z
     prompt: promptExtraSchema.optional(),
     /** Present only for sub_type === "skill"; optional even then (see schema JSDoc). */
     skill: skillExtraSchema.optional(),
+    /** Present iff sub_type === "handoff" — the Zod-typed SSOT lossless-handoff payload. */
+    handoff: handoffExtraSchema.optional(),
   })
   .passthrough()
   .superRefine((data, ctx) => {
@@ -161,6 +164,19 @@ export const knowledgeExtraSchema = z
         code: z.ZodIssueCode.custom,
         message: "knowledge sub_type 'assessment' requires a Zod-valid extra.assessment",
         path: ["assessment"],
+      });
+    }
+    // reason: same cross-field pattern as "assessment" above — sub_type "handoff"
+    // requires a Zod-valid extra.handoff. This is a PRESENCE/SHAPE check only; WHO is
+    // allowed to write sub_type "handoff" at all is a separate, forgeable-if-done-here
+    // concern (extra.handoff is user-supplied data, unlike an LLM-generated assessment
+    // blob) enforced by `CorpusService._createImpl`'s writer-identity guard, not Zod.
+    // Source: SPEC-041 §3 D3, D4.
+    if (data.sub_type === "handoff" && data.handoff === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "knowledge sub_type 'handoff' requires a Zod-valid extra.handoff",
+        path: ["handoff"],
       });
     }
     // Note: sub_type "prompt" / "skill" deliberately have NO analogous presence check —
@@ -368,7 +384,7 @@ export const createDocInputSchema = baseCreateDocInputSchema.superRefine(
             code: z.ZodIssueCode.custom,
             message:
               issue.path[0] === "sub_type"
-                ? "knowledge requires extra.sub_type (ideation|retro|research|reference|assessment|prompt|skill)"
+                ? "knowledge requires extra.sub_type (ideation|retro|research|reference|assessment|prompt|skill|handoff)"
                 : issue.message,
             path: ["extra", ...issue.path],
           });

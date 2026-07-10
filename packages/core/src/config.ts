@@ -136,6 +136,11 @@ const GateCheckpointConfigSchema = z
  *
  * @invariant claim_ttl_minutes defaults to 120 — an order of magnitude above
  *   realistic clock skew between machines (SPEC-025 §5 risk table).
+ * @invariant handoff_ttl_minutes defaults to 10080 (7 days) — a SPEC-041 §3 D5 handoff
+ *   is a session-continuity artifact, not a work lease; a week-old handoff is still
+ *   likely useful context but `SessionService.resume` surfaces a `ttl_warning` past
+ *   this threshold so a stale handoff is never silently treated as current. Mirrors
+ *   `claim_ttl_minutes`'s "computed read-side, no daemon" shape (D3 no-daemon ethos).
  * @invariant `gates` is keyed by `GateCheckpoint` id (`"spec-create" | "spec-promote" |
  *   "plan-promote" | "task-claim"`, `packages/lore/src/service/checkpoint-registry.ts`)
  *   but typed here as a generic `Record<string, ...>` — this module MUST NOT import
@@ -149,6 +154,8 @@ const WorkflowConfigSchema = z
   .object({
     /** Minutes after which an unrefreshed claim becomes stale and reclaimable. */
     claim_ttl_minutes: z.number().int().positive().default(120),
+    /** Minutes after which a handoff doc is flagged stale by `SessionService.resume`. */
+    handoff_ttl_minutes: z.number().int().positive().default(10080),
     /** Per-checkpoint `lore gate` enable/disable overrides. Absent → all enabled. */
     gates: z.record(z.string(), GateCheckpointConfigSchema).optional(),
   })
@@ -273,6 +280,21 @@ export type LoreConfig = z.infer<typeof LoreConfigSchema>;
  */
 export function resolveClaimTtlMinutes(config: LoreConfig | undefined): number {
   return (config?.workflow ?? WorkflowConfigSchema.parse({})).claim_ttl_minutes;
+}
+
+/**
+ * Resolve the effective handoff TTL in minutes from an optional LoreConfig. Mirrors
+ * {@link resolveClaimTtlMinutes} exactly — absence of the whole config or the
+ * `workflow` section both fall back to the schema default (10080 = 7 days).
+ *
+ * @param config - Parsed LoreConfig, or undefined when no config file was loaded
+ * @returns Effective handoff_ttl_minutes value
+ * @example
+ *   resolveHandoffTtlMinutes(undefined) // => 10080
+ *   resolveHandoffTtlMinutes({ ..., workflow: { handoff_ttl_minutes: 1440 } }) // => 1440
+ */
+export function resolveHandoffTtlMinutes(config: LoreConfig | undefined): number {
+  return (config?.workflow ?? WorkflowConfigSchema.parse({})).handoff_ttl_minutes;
 }
 
 /**
