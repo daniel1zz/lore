@@ -126,6 +126,26 @@ describe("LinksPanel", () => {
       expect(screen.getByLabelText("Search for a document to link")).toBeInTheDocument();
       expect(screen.getByLabelText("Link type")).toBeInTheDocument();
     });
+
+    it("offers exactly the canonical LinkType set (mirrors @lore/core's linkTypeSchema, no stale 'extends')", () => {
+      renderWithClient(
+        <LinksPanel links={[]} onLinkAdd={vi.fn()} onLinkRemove={vi.fn()} />,
+      );
+
+      const select = screen.getByLabelText("Link type") as HTMLSelectElement;
+      const optionValues = Array.from(select.options).map((o) => o.value);
+
+      expect(optionValues).toEqual([
+        "parent",
+        "implements",
+        "informs",
+        "supersedes",
+        "relates-to",
+        "blocks",
+        "governs",
+      ]);
+      expect(optionValues).not.toContain("extends");
+    });
   });
 
   describe("negative", () => {

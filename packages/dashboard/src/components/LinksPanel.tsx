@@ -18,7 +18,14 @@ import { useQuery } from "@tanstack/react-query";
 import { apiSearch } from "@/lib/api";
 import type { SearchHit } from "@/lib/api";
 import { X, Plus, Loader2 } from "lucide-react";
-import type { LinkType } from "@lore/core";
+import { linkTypeSchema, type LinkType } from "@lore/core";
+
+// `linkTypeSchema.options` (Zod enum → runtime array) is the SSOT for the
+// canonical link-type set — mirrors the `LinkType` union in
+// `packages/core/src/schemas.ts` at runtime so this list can never drift
+// from it (a hardcoded copy here previously omitted `parent`/`governs` and
+// included an invalid `extends`).
+const LINK_TYPES: readonly LinkType[] = linkTypeSchema.options;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -111,12 +118,9 @@ function LinkAddSearch({ onAdd, addError, isPending }: LinkAddSearchProps): Reac
           onChange={(e) => setSelectedLinkType(e.target.value as LinkType)}
           aria-label="Link type"
         >
-          <option value="relates-to">relates-to</option>
-          <option value="extends">extends</option>
-          <option value="informs">informs</option>
-          <option value="blocks">blocks</option>
-          <option value="implements">implements</option>
-          <option value="supersedes">supersedes</option>
+          {LINK_TYPES.map((t) => (
+            <option key={t} value={t}>{t}</option>
+          ))}
         </select>
       </div>
 
