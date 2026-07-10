@@ -22,6 +22,10 @@ export default defineConfig({
       "packages/lore/tests/**/*.test.ts",
       "packages/lore/src/**/*.test.ts",
       "packages/core/src/**/*.test.ts",
+      // reason: SPEC-040 T1 introduces a dedicated packages/core/tests/ directory
+      // (existing convention colocates *.test.ts next to source in src/) — both
+      // layouts are valid; this glob just adds the new directory. SPEC-040 §T1.
+      "packages/core/tests/**/*.test.ts",
       "packages/dashboard/tests/**/*.test.ts",
       "packages/dashboard/tests/**/*.test.tsx",
       "packages/dashboard/src/**/*.test.ts",
