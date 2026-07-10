@@ -6,9 +6,11 @@
 
 import type { DocId, DocRecord, DocType, DocTypeMeta } from "@lore/core";
 import { err, ok, type LoreError, type Result } from "@lore/core";
-import { getAllowedTransitions, isValidTransition, deriveTypeMeta } from "@lore/core";
+import { getAllowedTransitions, isValidTransition, deriveTypeMeta, specAcceptanceCriteriaSchema } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
+import { buildUpstreamSpecContext } from "./checkpoint-registry.js";
+import type { GateDependencies } from "./gate-enforcer.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────
 
@@ -72,14 +74,56 @@ export class ReviewService {
    *   config values. Omitted (not defaulted to 120 here) when the caller doesn't
    *   wire it — `deriveTypeMeta` then omits `claim_stale` entirely rather than
    *   computing it against a value this service invented.
+   * @param gate - OPTIONAL gate-enforcement dependency bundle (retro follow-up item 8,
+   *   defense-in-depth) — `{enforcer, getPlanBundle}`, see `GateDependencies` JSDoc
+   *   (`./gate-enforcer.js`) for why both are bundled as one. When present, `approve`
+   *   runs the `spec-promote` checkpoint for a `spec` doc (declared acceptance
+   *   criteria count) or the `plan-promote` checkpoint for a `plan` doc (ancestor
+   *   spec's approval + AC status, via `getPlanBundle`) before writing the transition.
+   *   Absent (the default) → ungated, byte-identical to pre-GateEnforcer behavior —
+   *   keeps every bare `new ReviewService(store)` unit test construction green.
    */
   constructor(
     private readonly store: StoreInterface,
     private readonly claimTtlMinutes?: number,
+    private readonly gate?: GateDependencies,
   ) {}
 
   private async resolveDoc(idOrSlug: string): Promise<Result<DocRecord, LoreError>> {
     return resolveDoc(this.store, idOrSlug);
+  }
+
+  /**
+   * Gates `doc`'s draft→approved TRANSITION (retro follow-up item 8, defense-in-depth) —
+   * `spec-promote` for a `spec` doc, `plan-promote` for a `plan` doc. Any other doc
+   * type has no registered promote-time checkpoint and passes through untouched. A
+   * no-op (`ok(undefined)`) when this service wasn't constructed with a `gate`
+   * dependency (see constructor JSDoc).
+   *
+   * @param doc - The doc `approve()` is about to transition to "approved".
+   */
+  private async enforceApprovalGate(doc: DocRecord): Promise<Result<void, LoreError>> {
+    if (this.gate === undefined) {
+      return ok(undefined);
+    }
+
+    if (doc.type === "spec") {
+      const parsed = specAcceptanceCriteriaSchema.safeParse(doc.extra["acceptance_criteria"]);
+      const acceptanceCriteriaCount = parsed.success ? parsed.data.length : 0;
+      return this.gate.enforcer.enforce("spec-promote", {
+        acceptanceCriteriaCount,
+        specIdOrSlug: doc.slug,
+      });
+    }
+
+    if (doc.type === "plan") {
+      const bundleResult = await this.gate.getPlanBundle(doc.id);
+      if (!bundleResult.ok) return bundleResult;
+      const ctx = buildUpstreamSpecContext(bundleResult.value.spec);
+      return this.gate.enforcer.enforce("plan-promote", { ...ctx, targetIdOrSlug: doc.slug });
+    }
+
+    return ok(undefined);
   }
 
   /**
@@ -129,6 +173,9 @@ export class ReviewService {
         allowed: getAllowedTransitions(doc.status),
       });
     }
+
+    const gateResult = await this.enforceApprovalGate(doc);
+    if (!gateResult.ok) return gateResult;
 
     const reviewer = opts?.reviewer ?? "system";
     const now = new Date().toISOString();

@@ -34,7 +34,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, rmSync, writeFileSync, appendFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -80,8 +80,40 @@ function cleanupDir(dir: string): void {
   try { rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
 }
 
+/**
+ * Disables all four `lore gate` service-layer checkpoints for this fixture's corpus
+ * (retro follow-up item 8 test-fallout reconciliation — GateEnforcer is now wired ON
+ * by default in every production `createApp`, which every subprocess-spawned `lore`
+ * command in this file goes through). This file's `createSpec`/`createPrd` helpers
+ * create docs WITHOUT `--content` (relying on the non-interactive editor fallback,
+ * which resolves to an empty body — `openEditor`'s `!process.stdin.isTTY` branch) —
+ * none of this file's ACs exercise spec-create's skeleton predicate, they exercise
+ * `lore status --check-tree` / `--fix` tree-drift detection. Mirrors the config shape
+ * `tests/integration/gate-config-disable.bun.test.ts` establishes
+ * (`workflow.gates.<checkpoint>.enabled`, `@lore/core::resolveGateEnabled`).
+ */
+function disableAllGates(tmpDir: string): void {
+  appendFileSync(
+    join(tmpDir, ".lore", "config.yaml"),
+    [
+      "workflow:",
+      "  gates:",
+      "    spec-create:",
+      "      enabled: false",
+      "    spec-promote:",
+      "      enabled: false",
+      "    plan-promote:",
+      "      enabled: false",
+      "    task-claim:",
+      "      enabled: false",
+      "",
+    ].join("\n"),
+  );
+}
+
 function initCorpus(tmpDir: string): void {
   runLore(["init"], tmpDir);
+  disableAllGates(tmpDir);
 }
 
 /** Extract slug from `lore create` output. */

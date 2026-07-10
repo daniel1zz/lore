@@ -68,6 +68,8 @@ import type { DocId, DocRecord, DocStatus } from "@lore/core";
 import { NoOpTelemetry, type Telemetry, type TelemetryEvent, type TaskWorkflowEventName } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
+import { buildUpstreamSpecContext } from "./checkpoint-registry.js";
+import type { GateDependencies } from "./gate-enforcer.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────
 
@@ -178,6 +180,13 @@ export class TaskWorkflowService {
    * @param resolveDeclaredAcIds - SPEC-038 §7 D4 cross-entity port; production wiring
    *   is `corpusService.resolveDeclaredAcIds.bind(corpusService)` (app.ts). Tests can
    *   inject a stub without a 3-hop CorpusService fixture.
+   * @param gate - OPTIONAL gate-enforcement dependency bundle (retro follow-up item 8,
+   *   defense-in-depth) — `{enforcer, getPlanBundle}`, see `GateDependencies` JSDoc
+   *   (`./gate-enforcer.js`) for why both are bundled as one. When present, `claim`
+   *   runs the `task-claim` checkpoint (the task's plan's ancestor spec must be
+   *   approved) before writing the lease. Absent (the default) → ungated,
+   *   byte-identical to pre-GateEnforcer behavior — keeps every bare
+   *   `new TaskWorkflowService(store, telemetry, config)` unit test construction green.
    */
   constructor(
     private readonly store: StoreInterface,
@@ -186,6 +195,7 @@ export class TaskWorkflowService {
     resolveDeclaredAcIds: (
       planId: string,
     ) => Promise<Result<Set<string> | null, LoreError>> = async () => ok(null),
+    private readonly gate?: GateDependencies,
   ) {
     this.telemetry = telemetry;
     this.claimTtlMinutes = config.claimTtlMinutes;
@@ -424,6 +434,9 @@ export class TaskWorkflowService {
     if (!taskResult.ok) return taskResult;
     const task = taskResult.value;
 
+    const gateResult = await this.enforceClaimGate(task);
+    if (!gateResult.ok) return gateResult;
+
     const nowIso = now();
     const existingClaim = readClaim(task);
 
@@ -625,6 +638,38 @@ export class TaskWorkflowService {
       });
     }
     return ok(doc);
+  }
+
+  /**
+   * Gates `task`'s claim (retro follow-up item 8, defense-in-depth) — resolves the
+   * task's parent plan's ancestor spec via the injected `getPlanBundle` port (the SAME
+   * plan→parent-spec traversal `ready()`'s `upstream_unapproved` advisory and
+   * `lore gate task-claim` both use) and enforces the `task-claim` checkpoint. A
+   * `parent_id === null` task (schema-illegal for a real task — SPEC-025's
+   * `createDocInputSchema` requires `parent_id` — but tolerated here for legacy/
+   * corrupted rows) is routed through the SAME checkpoint via a synthetic "no spec
+   * parent" context rather than a second hardcoded pass, mirroring `gate.ts`'s
+   * `runTaskClaimGate` identical handling of this edge case. A no-op (`ok(undefined)`)
+   * when this service wasn't constructed with a `gate` dependency (see constructor
+   * JSDoc).
+   *
+   * @param task - The task `claim()` is about to write a lease onto.
+   */
+  private async enforceClaimGate(task: DocRecord): Promise<Result<void, LoreError>> {
+    if (this.gate === undefined) {
+      return ok(undefined);
+    }
+
+    let ctx: ReturnType<typeof buildUpstreamSpecContext>;
+    if (task.parent_id === null) {
+      ctx = buildUpstreamSpecContext(undefined);
+    } else {
+      const bundleResult = await this.gate.getPlanBundle(task.parent_id);
+      if (!bundleResult.ok) return bundleResult;
+      ctx = buildUpstreamSpecContext(bundleResult.value.spec);
+    }
+
+    return this.gate.enforcer.enforce("task-claim", { ...ctx, targetIdOrSlug: task.slug });
   }
 
   /**

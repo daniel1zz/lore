@@ -129,7 +129,9 @@ async function seedGovernedSpec(loreDir: string, specTitle: string): Promise<{ s
       type: "spec",
       title: specTitle,
       parent_id: prd.value.id,
-      content: "body",
+      // reason: spec-create's GateEnforcer checkpoint (retro follow-up item 8) requires
+      // a `## ` skeleton heading — this file predates that gate and used bare "body".
+      content: "## Overview\n\nbody",
     } as CreateDocInput);
     if (!spec.ok) throw new Error(`create spec failed: ${JSON.stringify(spec.error)}`);
     return { specId: spec.value.id, specSlug: spec.value.slug };

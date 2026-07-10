@@ -22,7 +22,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdirSync, rmSync, existsSync, writeFileSync } from "fs";
+import { mkdirSync, rmSync, existsSync, writeFileSync, appendFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -76,6 +76,40 @@ function runLore(args: string[], cwd: string): RunResult {
     stderr: proc.stderr.toString(),
     exitCode: proc.exitCode ?? 1,
   };
+}
+
+/**
+ * Disables all four `lore gate` service-layer checkpoints for this fixture's corpus
+ * (retro follow-up item 8 test-fallout reconciliation — GateEnforcer is now wired ON
+ * by default in every production `createApp`, which every subprocess-spawned `lore`
+ * command in this file goes through). Every `lore create spec` call in this file
+ * omits `--content` — under `Bun.spawnSync` stdin is never a TTY, so `openEditor`'s
+ * non-interactive branch resolves to an EMPTY body regardless of the fake-editor
+ * script above, tripping spec-create's skeleton predicate. None of this file's ACs
+ * (SPEC-003 §7.2 end-to-end CRUD/discovery/lifecycle) exercise gate semantics
+ * themselves. Mirrors the config shape
+ * `tests/integration/gate-config-disable.bun.test.ts` establishes
+ * (`workflow.gates.<checkpoint>.enabled`, `@lore/core::resolveGateEnabled`). Safe to
+ * call even for tests that only exercise `lore init` itself — it only appends to the
+ * config file `init` already wrote, never touches `init`'s own exit code/output.
+ */
+function disableAllGates(dir: string): void {
+  appendFileSync(
+    join(dir, ".lore", "config.yaml"),
+    [
+      "workflow:",
+      "  gates:",
+      "    spec-create:",
+      "      enabled: false",
+      "    spec-promote:",
+      "      enabled: false",
+      "    plan-promote:",
+      "      enabled: false",
+      "    task-claim:",
+      "      enabled: false",
+      "",
+    ].join("\n"),
+  );
 }
 
 /** Parse stdout as a JSON envelope, throwing with context on failure. */
@@ -169,6 +203,7 @@ describe("Scenario 2: full CRUD lifecycle", () => {
   beforeEach(() => {
     tmpDir = makeTempDir("crud");
     runLore(["init"], tmpDir);
+    disableAllGates(tmpDir);
   });
 
   afterEach(() => {
@@ -296,6 +331,7 @@ describe("Scenario 3: spec with parent and tree hierarchy", () => {
   beforeEach(() => {
     tmpDir = makeTempDir("parent");
     runLore(["init"], tmpDir);
+    disableAllGates(tmpDir);
   });
 
   afterEach(() => {
@@ -346,6 +382,7 @@ describe("Scenario 4: discovery (list + search)", () => {
   beforeEach(() => {
     tmpDir = makeTempDir("discovery");
     runLore(["init"], tmpDir);
+    disableAllGates(tmpDir);
 
     // Seed 3 docs of different types (prd, spec, plan — no extra fields required)
     const prdResult = runLore(["create", "prd", "--title", "My PRD", "--json", "--no-ai"], tmpDir);
@@ -435,6 +472,7 @@ describe("Scenario 5: review workflow (pending → approve)", () => {
   beforeEach(() => {
     tmpDir = makeTempDir("review");
     runLore(["init"], tmpDir);
+    disableAllGates(tmpDir);
   });
 
   afterEach(() => {
@@ -502,6 +540,7 @@ describe("Scenario 6: version history (log + diff)", () => {
   beforeEach(() => {
     tmpDir = makeTempDir("version");
     runLore(["init"], tmpDir);
+    disableAllGates(tmpDir);
 
     // Create doc (v1) then update (v2)
     const createResult = runLore(["create", "prd", "--title", "Version Test", "--json", "--no-ai"], tmpDir);
@@ -561,6 +600,7 @@ describe("Scenario 7: error handling and exit codes", () => {
   beforeEach(() => {
     tmpDir = makeTempDir("errors");
     runLore(["init"], tmpDir);
+    disableAllGates(tmpDir);
   });
 
   afterEach(() => {
@@ -610,6 +650,7 @@ describe("Scenario 8: JSON output composability", () => {
   beforeEach(() => {
     tmpDir = makeTempDir("json");
     runLore(["init"], tmpDir);
+    disableAllGates(tmpDir);
     runLore(["create", "prd", "--title", "JSON PRD", "--no-ai"], tmpDir);
     // plan requires no extra fields (knowledge/adr require extra.sub_type/decision_status)
     runLore(["create", "plan", "--title", "JSON Plan", "--no-ai"], tmpDir);
@@ -692,6 +733,7 @@ describe("Scenario 9: status command", () => {
   beforeEach(() => {
     tmpDir = makeTempDir("status");
     runLore(["init"], tmpDir);
+    disableAllGates(tmpDir);
   });
 
   afterEach(() => {
