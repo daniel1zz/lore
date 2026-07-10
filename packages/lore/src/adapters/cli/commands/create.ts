@@ -41,22 +41,29 @@ import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
 import { openEditor } from "../editor.js";
-import type { DocType, Priority } from "@lore/core";
-import { SPEC_KINDS } from "@lore/core";
+import type { DocType, KnowledgeSubType, Priority } from "@lore/core";
+import { KNOWLEDGE_SUB_TYPES, SPEC_KINDS } from "@lore/core";
 
 const VALID_TYPES: DocType[] = ["prd", "spec", "adr", "plan", "knowledge", "task"];
 
 const ADR_DECISION_STATUSES = ["proposed", "accepted", "deprecated", "superseded"] as const;
 type AdrDecisionStatus = (typeof ADR_DECISION_STATUSES)[number];
 
-// reason: "assessment" (SPEC-026) is listed for --help discoverability, but is not
-// manually completable via this command — knowledgeExtraSchema's superRefine requires a
-// Zod-valid extra.assessment payload that `lore create` has no flag to supply. Attempting
-// `lore create knowledge --sub-type assessment` fails loud with a clear validation error
-// rather than silently accepting a half-formed assessment doc; only `lore assess` writes
-// sub_type="assessment" docs.
-const KNOWLEDGE_SUB_TYPES = ["ideation", "retro", "research", "reference", "assessment"] as const;
-type KnowledgeSubType = (typeof KNOWLEDGE_SUB_TYPES)[number];
+// reason: SPEC-041 §3 D4 drive-by SSOT repair — this list used to be a hand-copied
+// literal that had already drifted from `@lore/core`'s `KNOWLEDGE_SUB_TYPES` (missing
+// "prompt"/"skill"). Now imported directly so CLI validation can never diverge again.
+// "assessment"/"handoff" are listed for --help discoverability but are NOT manually
+// completable via this command:
+//   - "assessment" — knowledgeExtraSchema's superRefine requires a Zod-valid
+//     extra.assessment payload that `lore create` has no flag to supply; only
+//     `lore assess` writes sub_type="assessment" docs.
+//   - "handoff" — CorpusService._createImpl's writer-identity guard (SPEC-041 §3 D4)
+//     rejects `type: "knowledge"` + `extra.sub_type: "handoff"` on this command's
+//     write path with a VALIDATION_ERROR naming `lore handoff` as the sole legitimate
+//     writer; this command intentionally does NOT pre-empt that rejection — the CLI
+//     forwards --sub-type handoff through to the service seam so the service's own
+//     naming message is what the user sees (module header content decision tree).
+
 
 /** Flags that are only meaningful for specific types. Used to detect mismatches. */
 const TYPE_SPECIFIC_FLAGS: Readonly<Record<string, readonly DocType[]>> = {

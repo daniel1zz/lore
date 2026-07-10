@@ -1,6 +1,8 @@
 /**
- * lore feed <checkpoint> [--parent <id-or-slug>] [--json] — the deterministic
- * feed-before-produce PULL surface (IoC vertical-slice tech-spec §4.1/§11, P4 slice).
+ * lore feed <checkpoint> [--parent <id-or-slug>] [--plan <id-or-slug>]
+ *   [--handoff <id-or-slug>] [--by <name>] [--json] — the deterministic
+ * feed-before-produce PULL surface (IoC vertical-slice tech-spec §4.1/§11, P4 slice)
+ * PLUS the SPEC-041 S2 session-resume dispatch (D5).
  *
  * Where `lore gate <checkpoint>` PUSHES a feeding pack back to the caller only AFTER a
  * violation, `lore feed <checkpoint>` lets a caller PULL the same governing rule ahead
@@ -18,40 +20,84 @@
  * its rule slice (plus the `--parent` doc's MDX-resolved summary, when supplied) is
  * printed. No approved skill → a clear one-line note, NOT an error.
  *
- * Exit code is ALWAYS 0 — feed is advisory context, never a gate (module header,
- * task objective). There is no failure mode this command can report via exit code.
+ * `--checkpoint session-resume` is a SEPARATE dispatch (SPEC-041 §3 D5) —
+ * `flows/feed-flow.ts::buildResumeFeed` (`SessionService.resume`), consulted BEFORE
+ * the `CHECKPOINT_PRODUCED_TYPE` lookup above. `--plan`/`--handoff`/`--by` are only
+ * meaningful for this checkpoint. Unlike the gate-checkpoint path, this dispatch CAN
+ * fail (an unresolvable `--plan`/`--handoff` target) — see the exit-code note below.
  *
- * Source: IoC vertical-slice tech-spec §4.1/§11, P4 slice
+ * Exit code: for every OTHER checkpoint, ALWAYS 0 — feed is advisory context, never a
+ * gate (module header, task objective). For `session-resume`, 0 on success (including
+ * the "(no handoff recorded)" fact) — a resolution failure maps through the normal
+ * `exitCode()`/`formatError()` pipeline (VALIDATION_ERROR → 4), since an unresolvable
+ * `--plan`/`--handoff` is a caller input error, not an advisory-degrade case.
+ *
+ * Source: IoC vertical-slice tech-spec §4.1/§11, P4 slice; SPEC-041 §3 D5
  */
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { buildFeed } from "../../../flows/feed-flow.js";
+import { buildFeed, buildResumeFeed, SESSION_RESUME_CHECKPOINT } from "../../../flows/feed-flow.js";
+import { exitCode, formatError } from "../utils.js";
 
 export default defineCommand({
   meta: {
     name: "feed",
     description:
-      "Feed-before-produce PULL: print the governing skill's rule slice for a checkpoint ahead of writing (advisory only, never a gate)",
+      'Feed-before-produce PULL: print the governing skill\'s rule slice for a checkpoint ahead of writing (advisory only, never a gate); "session-resume" dispatches to SPEC-041 S2 resume instead',
   },
   args: {
     checkpoint: {
       type: "positional",
-      description: 'Checkpoint to feed, e.g. "spec-create"',
+      description: 'Checkpoint to feed, e.g. "spec-create", or "session-resume" (SPEC-041 S2)',
       required: true,
     },
     parent: {
       type: "string",
       description: "Intended parent doc id/slug — its MDX-resolved summary is included when supplied",
     },
+    plan: {
+      type: "string",
+      description: "[session-resume only] Plan doc id/slug to scope resume to (newest-wins)",
+    },
+    handoff: {
+      type: "string",
+      description: "[session-resume only] Direct handoff doc id/slug — skips derivation entirely",
+    },
+    by: {
+      type: "string",
+      description: "[session-resume only] Actor identity filter",
+    },
     json: {
       type: "boolean",
-      description: "Output as JSON: { checkpoint, type, skill, feed }",
+      description: "Output as JSON",
     },
   },
   async run({ args }) {
     const { app } = loadLoreApp();
     try {
+      if (args.checkpoint === SESSION_RESUME_CHECKPOINT) {
+        const result = await buildResumeFeed(app, {
+          ...(typeof args.plan === "string" ? { plan: args.plan } : {}),
+          ...(typeof args.handoff === "string" ? { handoff: args.handoff } : {}),
+          ...(typeof args.by === "string" ? { by: args.by } : {}),
+        });
+
+        if (!result.ok) {
+          process.stderr.write(formatError(result.error) + "\n");
+          process.exitCode = exitCode(result.error);
+          return;
+        }
+
+        if (args.json) {
+          console.log(JSON.stringify(result.value, null, 2));
+        } else {
+          console.log(result.value.feed);
+        }
+        process.exitCode = 0;
+        return;
+      }
+
       const outcome = await buildFeed(
         app,
         args.checkpoint as string,
