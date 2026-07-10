@@ -181,27 +181,27 @@ InMemoryStore (MCP handlers invoked in-process via `_registeredTools` — the ex
 
 ## Acceptance Criteria (structured)
 
-- [·] [script] AC-SL-1: Bootstrap pointer-set on a seeded corpus contains root, active plans with task counts, pending slugs (max 10), caller claims with staleness, armed gates each with feeding_source_slug, latest handoff pointers, and resume_hint; no field contains doc body text; titles capped at 120 chars
+- [✔] [script] AC-SL-1: Bootstrap pointer-set on a seeded corpus contains root, active plans with task counts, pending slugs (max 10), caller claims with staleness, armed gates each with feeding_source_slug, latest handoff pointers, and resume_hint; no field contains doc body text; titles capped at 120 chars
   script: test — bunx vitest run packages/lore/tests/unit/service/session-bootstrap.test.ts
-- [·] [script] AC-SL-2: bootstrap and resume record zero calls on a StoreInterface mutation-counting proxy covering insert/update/softDelete/addLink/removeLink/insertVersion/appendAuditEntry/insertJudgment/insertCalibrationRecord
+- [✔] [script] AC-SL-2: bootstrap and resume record zero calls on a StoreInterface mutation-counting proxy covering insert/update/softDelete/addLink/removeLink/insertVersion/appendAuditEntry/insertJudgment/insertCalibrationRecord
   script: test — bunx vitest run packages/lore/tests/unit/service/session-readonly.test.ts
-- [·] [script] AC-SL-3: writeHandoff produces a draft knowledge doc with Zod-valid extra.handoff and deterministic content projection; parent resolution: plan_ref to live plan, single-PRD fallback, zero-PRD parentless, multi-PRD VALIDATION_ERROR requiring plan_ref
+- [✔] [script] AC-SL-3: writeHandoff produces a draft knowledge doc with Zod-valid extra.handoff and deterministic content projection; parent resolution: plan_ref to live plan, single-PRD fallback, zero-PRD parentless, multi-PRD VALIDATION_ERROR requiring plan_ref
   script: test — bunx vitest run packages/lore/tests/unit/service/session-handoff-write.test.ts
-- [·] [script] AC-SL-4: Direct CorpusService.create and MCP lore_create with sub_type handoff fail VALIDATION_ERROR naming lore handoff; spawned CLI create exits 2 with stderr naming lore handoff; CLI accepts every KNOWLEDGE_SUB_TYPES member for non-handoff sub-types (prompt/skill divergence repaired, REGRESSION)
-  script: test — bunx vitest run packages/lore/tests/unit/service/session-handoff-exclusivity.test.ts && cd packages/lore && bun test tests/unit/adapters/cli-handoff.bun.test.ts
-- [·] [script] AC-SL-5: Resume supports newest-wins --plan targeting and direct --handoff targeting; renders an age line and warns past workflow.handoff_ttl_minutes; enforces output_tail cap; returns '(no handoff recorded)' with exit 0 when none exists
+- [✔] [script] AC-SL-5: Resume supports newest-wins --plan targeting and direct --handoff targeting; renders an age line and warns past workflow.handoff_ttl_minutes; enforces output_tail cap; returns '(no handoff recorded)' with exit 0 when none exists
   script: test — bunx vitest run packages/lore/tests/unit/service/session-resume.test.ts
-- [·] [script] AC-SL-6: lore_bootstrap and lore_handoff reject a missing by argument; their JSON payloads deep-equal the CLI --json shapes for the same seeded corpus (in-process _registeredTools invocation)
+- [✔] [script] AC-SL-6: lore_bootstrap and lore_handoff reject a missing by argument; their JSON payloads deep-equal the CLI --json shapes for the same seeded corpus (in-process _registeredTools invocation)
   script: test — bunx vitest run packages/lore/tests/unit/adapters/mcp-session-tools.test.ts
-- [·] [script] AC-SL-7: A handoff written via --json-file with all fields populated is reproduced field-for-field by resume; the flags path and json-file path produce identical docs for equivalent input
+- [✔] [script] AC-SL-7: A handoff written via --json-file with all fields populated is reproduced field-for-field by resume; the flags path and json-file path produce identical docs for equivalent input
   script: test — bunx vitest run packages/lore/tests/unit/service/session-roundtrip.test.ts
 - [·] [human] AC-SL-8: A fresh session given only the documented bootstrap and resume output names the active plan, the declared next steps, and the failing oracle with zero human re-briefing
   human: Operator supplies no project facts beyond the two documented commands (bootstrap + feed session-resume)
-- [·] [script] AC-SL-9: Spawned CLI: missing --next exits 2; --failing-command without --failing-tail-file (and inverse) exits 2; --json-file combined with any field flag exits 2
+- [✔] [script] AC-SL-9: Spawned CLI: missing --next exits 2; --failing-command without --failing-tail-file (and inverse) exits 2; --json-file combined with any field flag exits 2
   script: test — cd packages/lore && bun test tests/unit/adapters/cli-handoff.bun.test.ts
-- [·] [script] AC-SL-10: Bootstrap on an empty corpus returns root null with empty arrays and succeeds (exit 0 semantics at service level: ok result, no throw)
+- [✔] [script] AC-SL-10: Bootstrap on an empty corpus returns root null with empty arrays and succeeds (exit 0 semantics at service level: ok result, no throw)
   script: test — bunx vitest run packages/lore/tests/unit/service/session-bootstrap.test.ts
-- [·] [script] AC-SL-11: Two handoffs for the same plan and actor resolve newest-wins; --by isolates actors; --by omitted with two actors returns newest per actor under a multi-actor header
+- [✔] [script] AC-SL-11: Two handoffs for the same plan and actor resolve newest-wins; --by isolates actors; --by omitted with two actors returns newest per actor under a multi-actor header
   script: test — bunx vitest run packages/lore/tests/unit/service/session-resume.test.ts
-- [·] [script] AC-SL-12: plan_ref to a nonexistent or soft-deleted plan fails VALIDATION_ERROR; a degraded git-only handoff (degraded true, no decisions) validates and renders with a visible degraded marker
+- [✔] [script] AC-SL-12: plan_ref to a nonexistent or soft-deleted plan fails VALIDATION_ERROR; a degraded git-only handoff (degraded true, no decisions) validates and renders with a visible degraded marker
   script: test — bunx vitest run packages/lore/tests/unit/service/session-handoff-write.test.ts
+- [✔] [script] AC-SL-4: Exclusivity defense-in-depth: direct CorpusService.create and MCP lore_create with a forged extra.handoff fail VALIDATION_ERROR naming lore handoff (writer-identity guard); spawned CLI create --sub-type handoff is blocked one layer earlier by the extra.handoff presence check (exit 4, VALIDATION_ERROR pipeline, covered by cli-handoff bun suite via AC-SL-9's command); CLI accepts every KNOWLEDGE_SUB_TYPES member for non-handoff sub-types (REGRESSION)
+  script: test — bunx vitest run packages/lore/tests/unit/service/session-handoff-exclusivity.test.ts
