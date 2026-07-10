@@ -6,7 +6,7 @@ title: "Lore — Internal-First AI Team Knowledge Platform"
 status: approved
 priority: critical
 created: 2026-06-07
-updated: 2026-07-08
+updated: 2026-07-10
 tags: [product-overview, L0, lore, mvp, internal-first, ai-native, protocol-aware]
 ---
 # Lore — Internal-First AI Team Knowledge Platform
@@ -47,6 +47,8 @@ Lore is an AI-native shared knowledge / memory platform for AI-first founding te
 | G7 | Internal adoption: 3+ projects, 90%+ new docs in Lore | P2 |
 | G8 | Output contract live: `lore status --check-tree` reports 0 drift on this repo AND every closed plan since v0.5 carries all six stage outputs (§13.2) | P2+, checked at each plan closeout |
 | G9 | Autonomous feedback loop live (§14): R1 — every lifecycle transition audit-traced + ≥1 doc type at `assist`; R2 (data-gated) — human review load ↓≥70%, ≥1 doc type at `auto` on Wilson-bounded agreement data | P2+, R1 committed, R2/R3 contingent (§14.6) |
+| G10 | Session layer live (§15): bootstrap pointer-set + lossless handoff (`/clear` → resume with zero human re-briefing) + session registry with file-anchor claim safety | P2+, committed v0.8 |
+| G11 | Memory hygiene live (§16): bi-temporal invalidation + staleness probes + `lore status --check-drift` with 0 false-negatives on a seeded drift fixture | P2+, committed v0.8 |
 
 ### Non-Goals (v1.0)
 
@@ -89,6 +91,12 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
+- [knowledge] Decision-score log — instrument-first bootstrap session (2026-07-10) (draft)
+- [spec] SPEC-040 — Assessment dimension framework v2: facts/judgment split + typed findings (approved)
+- [spec] P4 — Upstream-downstream linkage + feed-before-produce protocol (approved)
+- [spec] P2 — Workflow state machine: checkpoint registry + cross-tier production-chain gates (approved)
+- [spec] Upstream asset-ization — prompt & skill as first-class knowledge sub-types (approved)
+- [spec] Corpus-governed spec-production loop — IoC vertical slice (approved)
 - [knowledge] Lore as sole dev context — output contract + spec_kind taxonomy + dashboard-as-PRD-projection (approved)
 - [knowledge] Assess material-budget distortion on multi-task plan diffs (approved)
 - [knowledge] DocMan replacement assessment — Lore coverage map + two remaining gaps (approved)
@@ -381,6 +389,39 @@ R2 exit (requires weeks of real usage — measured, not CI-asserted):
 
 Committed landing specs (R1 only): **SPEC-034** structured review judgment + triage queue (D1, D2-triage, D6-CLI); **SPEC-035** audit trail + calibration data (D3, D4). Input-quality hardening serving every R stage (committed 2026-07-08, NOT an R2 unlock): **SPEC-038** AC-as-code — structured, oracle-bound acceptance criteria on specs (`extra.acceptance_criteria`, script/ai/human verify modes, evidence `ac_ref`, assess judges against the declared AC set; see ADR "AC-as-code"). Contingent (named by capability for traceability, NOT committed — each requires a decision-gate ADR citing R1/R2 data before creation; the spec numbers originally reserved here as SPEC-036–038 have since been consumed by other landed specs — refer by capability name): unlock state machine + auto-execution; L1 feed-forward; L2/L3 self-optimization. This staging exists because §9-R1 (second-system syndrome) applies to §14 itself — a 5-spec autonomous-review platform built ahead of its data is the failure §14 is designed to prevent. Declared dependencies: SPEC-034's check-tree pre-check needs SPEC-032 (blueprint arming); the dashboard escalation panel needs SPEC-033. Benchmark patterns to validate at design time: confidence-triaged AI code review (CodeRabbit / GitHub Copilot review), LLM-observability data models (Langfuse / LangSmith traces + scores + prompt versions), active-learning sampling loops (Label Studio-class systems).
 
+### 14.7 Assessment dimension framework v2 (input-quality hardening, committed 2026-07-10)
+
+The v1 assess rubric is one-dimensional (per-AC evidencing) and its `gaps`/`recommendations` are free-text — the measured §14 gap "recommendations that no downstream consumer reads" is structural: untyped output cannot be programmatically consumed. Committed upgrade (landing spec: SPEC-040), serving every R stage like SPEC-038; NOT an R2 unlock, §14 staging untouched:
+
+- **Two-layer split**: deterministic facts are computed in code and FED to the judge (AC coverage incl. attested ratio — already live; per-task evidence completeness; scope-match between plan-declared scope and spec AC surface; gate/process compliance), while judgment dimensions are reserved for what has no executable oracle. The judge never re-derives what code can compute (IoC ADR boundary 1).
+- **Typed multi-dimension rubric**: `outcome` (AC satisfaction — v1 carried over), `evidence_integrity` (claims backed by attested vs self-reported evidence), `scope_fidelity` (delivered = planned; creep/cut named explicitly). Per-dimension score + advisory-only judge confidence + `based_on: evidence|absence` grounding declaration. `regression_risk` and `knowledge_capture` are NOT judge dimensions — SPEC-040's 3-lens design review found them ungrounded in bundle-visible material (fabrication invitation); both are demoted to deterministic facts (tests-touched/attested-ratio signals; knowledge-link counts).
+- **Typed findings**: `gaps[]` → `{dimension, severity, ac_ref?, statement}`; `recommendations[]` → `{target: spec|plan|prompt|skill|process, action, rationale}` carrying provenance (I4). This is the D5-L1 consumer-side unblock: R2 feed-forward injection requires typed recommendations to exist first.
+- **Judge self-declared uncertainty**: `unverifiable[]` names materials the judge could not see (complements the diff Truncation Manifest); scoring an unseen material down without a matching `unverifiable` entry is a mechanically detectable rubric violation.
+- **Scope-fit fix**: a narrow plan hanging off a broad spec is judged against the plan-declared AC subset (evidence: `knowledge-assess-usage-patterns` #1 — 63/100 despite complete in-scope delivery).
+- **Golden-set regression gate (the L2 harness arrives early)**: promoting a new assess prompt/rubric version requires non-inferiority on replayed historical assessments labeled by human outcomes (the existing assessment docs + SPEC-035 calibration overrides are the seed corpus). The same data discipline §14.3 applies to autonomy applies to the instrument itself — no rubric version ships on vibes.
+
+Baseline instrument-defect evidence: `knowledge-assess-material-budget-distortion` (3× systematic under-scoring, 30-50 points), `knowledge-assess-usage-patterns` (#1 scope mismatch, #9 ±2 score noise), `knowledge-round-3-findings` (judge session contamination — since fixed by SPEC-030), §14 intro's unconsumed-recommendations gap.
+
+## 15. Session Layer (multi-session collaboration & context continuity)
+
+**Vision (owner, 2026-07-10)**: sessions become governed, first-class work units. Today Lore governs artifacts (docs) and their production functions (prompt/skill — IoC P1), but not the unit that produces them: an agent session. Cross-session amnesia, context-drift-vs-`/clear`-loss, and multi-session write conflicts are the three highest-ranked unsolved pain points in the 2026-07-10 strategic review. Three capabilities, all read-side computed (SPEC-025 ethos — no daemon, no heartbeat):
+
+- **S1 Session bootstrap** — a `lore_bootstrap` MCP tool / CLI verb emitting the pointer-set (tree roots, active plans, pending queue, caller's fresh claims, armed gates) for SessionStart hook injection. Replaces the DocMan bootstrap dependency (gap recorded in `knowledge-docman-replacement-assessment`). Pointers + summaries, never full dump (IoC ADR boundary 2).
+- **S2 Session handoff** — `lore handoff` persists a typed session digest (knowledge `sub_type: handoff`: modified files, active plan/task ids, key decisions with confidence scores, failing oracle output) and `lore feed session-resume` replays it at the next session's start. Makes `/clear` lossless: the cure for context drift stops costing the context. Handoff docs enter the same review/judge loop as every other doc — an unreviewed handoff is advisory, never authoritative.
+- **S3 Session registry & write-conflict safety** — lightweight session records (actor, machine, worktree, branch, held claims) surfaced in `lore ready` / `lore tree`; a file-anchor overlap predicate at the task-claim gate upgrades the worktree-mutex *convention* (CLAUDE.md) into a corpus-enforced *predicate* — the same convention→predicate move P2 made for upstream approval.
+
+Non-goals: no live message bus between sessions (the corpus is the medium); no daemon (freshness TTL-computed like claims).
+
+## 16. Memory Hygiene (knowledge trustworthiness over time)
+
+**Vision (owner, 2026-07-10)**: the corpus must not silently rot. Landscape evidence (2026-07-10 tier-tagged research): bi-temporal invalidation (Zep/Graphiti, arXiv 2501.13956) is the strongest known explicit-signal mechanism; *silent* staleness (a fact changes with no contradicting signal) is an industry-open problem — and Lore has already been bitten (`knowledge-retro-stale-claude-md`: a stale doc produced a false 'SPEC-022 unimplemented' judgment). Three capabilities:
+
+- **H1 Bi-temporal invalidation** — knowledge/ADR docs gain `valid_at`/`invalid_at` semantics; superseding marks the old doc invalid (never deletes — version history stays append-only); default queries/feeds filter invalidated knowledge; an `--include-invalid` escape shows history.
+- **H2 Staleness probes** — `lore review --staleness` re-judges high-in-degree knowledge/ADR docs ("does this still hold?") on demand; result is escalation, never auto-invalidation (probabilistic zone, IoC ADR boundary 1). Probe priority: link in-degree × age.
+- **H3 Doc-code drift oracle** — specs may declare code anchors (file paths / exported symbols); `lore status --check-drift` verifies anchor existence — deterministic, CI-runnable, zero LLM calls.
+
+Non-goals: no vector store (NG8 unchanged — H1-H3 are metadata + FTS5 + judge verbs); no automatic deletion, ever.
+
 ## 12. Out of Scope
 
 - v2.1+: Agent-memory protocol RFC (extracted from v1.0 architecture)
@@ -400,3 +441,4 @@ Committed landing specs (R1 only): **SPEC-034** structured review judgment + tri
 - **v0.5** (2026-07-03): Sole-context positioning (§1) + output contract & document taxonomy (§13: spec_kind feature/tech/design, stage→output→gate table, 3 enforcement layers, SSOT boundary, dashboard-as-PRD-projection) + G8 + §6/§8 governance hooks + §5 module map converted to live `<ChildrenOf />`. Owner-approved: taxonomy option C (spec_kind field, not a new first-class type); full-chain launch. 5-stakeholder review applied — enforcement-layer status corrected to as-built (Layers 1-2 already implemented in `@lore/core`), spec-under-spec mount rejected (contract stays `spec:["prd"]`), export-fidelity limitation documented, spec_kind write-time validation + migrate audit added, approver≠author convention added. Landing specs: SPEC-032 (contract mechanization) + SPEC-033 (dashboard projection). Input: `knowledge-lore-as-sole-dev-context-output-contract-spec-kind-tax`.
 - **v0.6** (2026-07-06): Autonomous feedback loop (§14: D1-D6 capability domains, three data entities, shadow→assist→auto staged unlock, five invariants, R1-R3 delivery) + G9 + §13.3 layer-3 mechanization pointer + §12 exclusions + A6 + §8 feedback-loop kill criterion. Owner-confirmed boundaries: loop object = document lifecycle (not code diffs); self-decision whitelist = all types including spec/PRD (data-gated, not day-1); end-state autonomy = L3 within I2 sampling-floor bounds; escalation surfaces = CLI + dashboard + push. 5-stakeholder review applied (avg 5.6 → revisions): unlock gates rebased from point estimates to Wilson lower bounds; single-owner ground-truth limitation acknowledged with mitigations; I1 downgraded to honest process-independence claim + cross-provider option; I2 sampling stratified; L1 feed-forward provenance-tagged (I4) with named injection seam; trigger model pinned to on-demand verbs (no daemon); AuditEvent scoped as net-new query surface over SPEC-012's write-only sink; storage/config/fixture-seeding homes named; R1 load-drop misattribution fixed; spec commitment cut from 5 to 2 (SPEC-034/035), SPEC-036-038 ADR-gated on data; SPEC-032/033 dependencies declared. One reviewer claim rejected with evidence: SPEC-030 alleged nonexistent — it is landed (hermetic-spawn.ts, corpus doc 01KWKDC4). Second synthesis pass (same review inputs): bounded-window aggregation guard (NFR-2), NFR-15 judge-call cost visibility, blast-radius-scaled auto bounds (0.95 for plan/spec/PRD), honest spec/PRD-may-stay-assist expectation, self-hosted stage-gate reviews via `lore assess`. Committed landing specs: SPEC-034 (judgment + triage), SPEC-035 (audit + calibration).
 - **v0.7** (2026-07-08): AC-as-code committed as §14 input-quality hardening (SPEC-038: structured `extra.acceptance_criteria` with script/ai/human verify modes, oracle-enum SSOT consolidation, evidence `ac_ref`, assess judges against the declared AC set — serves R1+ judge-input quality; NOT an R2 unlock, §14 staging untouched). §14 contingent-spec references renamed from stale reserved numbers (SPEC-036–038, since consumed by landed specs) to capability names. Origin: Anthropic official loop-engineering research (knowledge doc) + ADR "AC-as-code" (4-perspective design review applied). Loop framing: feedback × feedback-trustworthiness × loop-closure; this delivers the standardized feedback supply side. Deferred by decision: trusted runner (SPEC-039 candidate), assess-gap auto-task + calibration-gated autonomy (§14 R2, data-gated as before).
+- **v0.8** (2026-07-10): Strategic review applied (full corpus audit + tier-tagged competitive research: spec-kit/Kiro/GSD/superpowers/beads confirmed red-ocean on spec/plan/orchestration; outcome-verification loops, production-grade self-evolution, and memory hygiene confirmed open gaps that Lore's SPEC-025/026/034/035/038/039 line already sits on). Owner directives: all subsequent development fully self-hosted on Lore; score-gated autonomy (human pulled in only below confidence threshold); every plan closes with a self-assessment — **instrument first**: assessment dimension framework v2 committed as §14.7 (landing spec SPEC-040) BEFORE new capability work, so early autonomous cycles do not accumulate mis-calibrated data. New sections: §15 session layer (S1 bootstrap / S2 handoff / S3 registry+write-safety, G10), §16 memory hygiene (H1 bi-temporal invalidation / H2 staleness probes / H3 drift oracle, G11) — capability-named landing specs to follow, each through the §13 output contract. §14 R2/R3 data-gating and the §8 kill criterion untouched.

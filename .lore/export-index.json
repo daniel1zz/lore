@@ -704,6 +704,186 @@
     "01KX081PDXQP6VY9SGHJ57QD55": {
       "human_id": "KN-036",
       "file_path": "docs/requirements/knowledge/KN-036-assessment-spec-035-implementation-audit-trail-cal.md"
+    },
+    "01KX63PQTHNY7VRFYFVM6AYY5G": {
+      "human_id": "PLAN-020",
+      "file_path": "docs/requirements/plan/PLAN-020-spec-040-implementation-assessment-dimension-frame.md"
+    },
+    "01KX63PR7DBKGPY95X2SF2P49H": {
+      "human_id": "TASK-081",
+      "file_path": "docs/requirements/task/TASK-081-t3-surfaces-golden-harness-render-sites-assess-gol.md"
+    },
+    "01KX638415E66BTMJ92TQZPFM0": {
+      "human_id": "KN-037",
+      "file_path": "docs/requirements/knowledge/KN-037-decision-score-log-instrument-first-bootstrap-sess.md"
+    },
+    "01KX6A89V2R6GS2DFZTF0TZGM0": {
+      "human_id": "KN-038",
+      "file_path": "docs/requirements/knowledge/KN-038-retro-spec-040-instrument-first-bootstrap-prd-v0-8.md"
+    },
+    "01KX63PR3X6EV4H1X4ACJH5MNF": {
+      "human_id": "TASK-082",
+      "file_path": "docs/requirements/task/TASK-082-t2-prompt-service-layer-v6-template-registry-groun.md"
+    },
+    "01KX63PQYZAGMR5TS8JTA0YBZ7": {
+      "human_id": "TASK-083",
+      "file_path": "docs/requirements/task/TASK-083-t1-core-layer-assessment-schemas-facts-derivation.md"
+    },
+    "01KX6A6CS97BWJAHX71V8YP46E": {
+      "human_id": "KN-039",
+      "file_path": "docs/requirements/knowledge/KN-039-assessment-spec-040-implementation-assessment-dime.md"
+    },
+    "01KX634Z5SYYMQG37EN2Q65KFS": {
+      "human_id": "SPEC-040",
+      "file_path": "docs/requirements/spec/SPEC-040-spec-040-assessment-dimension-framework-v2-facts-j.md"
+    },
+    "01KX3E9GCJFMHVGBR5CQ7ZACJ8": {
+      "human_id": "KN-040",
+      "file_path": "docs/requirements/knowledge/KN-040-retro-ioc-p2-p4-build-under-score-gated-autonomy-a.md"
+    },
+    "01KX2XW42YPASYBCD79VJ0MQXF": {
+      "human_id": "KN-041",
+      "file_path": "docs/requirements/knowledge/KN-041-p2-decision-score-log-score-gated-autonomy.md"
+    },
+    "01KX31ERQSSZ9CECRBC4MY3KZT": {
+      "human_id": "PLAN-021",
+      "file_path": "docs/requirements/plan/PLAN-021-implementation-p4-feed-before-produce-provenance-l.md"
+    },
+    "01KX31GSVJWW92NP3MGTBEKFY6": {
+      "human_id": "TASK-084",
+      "file_path": "docs/requirements/task/TASK-084-t4-best-effort-gate-push-e2e-closed-loop-full-swee.md"
+    },
+    "01KX31GSGHCQ24T1KF9AJZSB8A": {
+      "human_id": "TASK-085",
+      "file_path": "docs/requirements/task/TASK-085-t3-provenance-auto-write-at-createimpl-fail-soft-g.md"
+    },
+    "01KX31GS5NCVEYDDH29X7DSD18": {
+      "human_id": "TASK-086",
+      "file_path": "docs/requirements/task/TASK-086-t2-lore-feed-command-lore-feed-mcp-pull-ssot-with.md"
+    },
+    "01KX31GQF4HDFN7AE20H0QCFCG": {
+      "human_id": "TASK-087",
+      "file_path": "docs/requirements/task/TASK-087-t1-governs-link-type-schemas-types-enum.md"
+    },
+    "01KX31CCC3CH9THP58BXBWDP0J": {
+      "human_id": "SPEC-041",
+      "file_path": "docs/requirements/spec/SPEC-041-p4-upstream-downstream-linkage-feed-before-produce.md"
+    },
+    "01KX2XMYF2010FYK5PK6AYPK9C": {
+      "human_id": "PLAN-022",
+      "file_path": "docs/requirements/plan/PLAN-022-implementation-p2-workflow-state-machine-checkpoin.md"
+    },
+    "01KX2XS0WJ5B22NK0K645DAW50": {
+      "human_id": "TASK-088",
+      "file_path": "docs/requirements/task/TASK-088-t6-e2e-closed-loop-ac-p2-8-full-oracle-sweep-attes.md"
+    },
+    "01KX2XS0J3HSSM39GM926R3VZ2": {
+      "human_id": "TASK-089",
+      "file_path": "docs/requirements/task/TASK-089-t5-hook-shims-g3-plan-promote-g4-task-claim-settin.md"
+    },
+    "01KX2XS077KWANH17WP05BHPQF": {
+      "human_id": "TASK-090",
+      "file_path": "docs/requirements/task/TASK-090-t4-workflow-gates-checkpoint-enabled-config-per-ch.md"
+    },
+    "01KX2XRZWTFJKS54KTG43BQMSH": {
+      "human_id": "TASK-091",
+      "file_path": "docs/requirements/task/TASK-091-t3-wire-plan-promote-task-claim-gates-registry-ent.md"
+    },
+    "01KX2XRZJBC45MEZT12DQY8XZ3": {
+      "human_id": "TASK-092",
+      "file_path": "docs/requirements/task/TASK-092-t2-new-predicates-upstreamapproved-upstreamhasacce.md"
+    },
+    "01KX2XRZ7T1TKJVHT519CG9CRX": {
+      "human_id": "TASK-093",
+      "file_path": "docs/requirements/task/TASK-093-t1-checkpoint-registry-ts-refactor-spec-checkpoint.md"
+    },
+    "01KX2PFSB95061N61DVASAG3E9": {
+      "human_id": "SPEC-042",
+      "file_path": "docs/requirements/spec/SPEC-042-p2-workflow-state-machine-checkpoint-registry-cros.md"
+    },
+    "01KX0THBR7RKJSP7SX165PZE5S": {
+      "human_id": "PLAN-023",
+      "file_path": "docs/requirements/plan/PLAN-023-implementation-p1-upstream-asset-ization-prompt-sk.md"
+    },
+    "01KX0TH150RJPAD8KFD6YWZ3F1": {
+      "human_id": "SPEC-043",
+      "file_path": "docs/requirements/spec/SPEC-043-upstream-asset-ization-prompt-skill-as-first-class.md"
+    },
+    "01KX0TJKZG29A3CGYN1ZXPWMTW": {
+      "human_id": "TASK-094",
+      "file_path": "docs/requirements/task/TASK-094-p1-t1-knowledge-sub-type-prompt-skill-extra-schema.md"
+    },
+    "01KX0TJMN55K2HPX33FD7EXHZC": {
+      "human_id": "TASK-095",
+      "file_path": "docs/requirements/task/TASK-095-p1-t3-gate-feeding-discovery-by-skill-applies-to.md"
+    },
+    "01KX0SMS1A52W6GQ9E8NQ7FVMT": {
+      "human_id": "KN-042",
+      "file_path": "docs/requirements/knowledge/KN-042-write-spec-rules-gate-feeding-source.md"
+    },
+    "01KX0TJN0M5P5T4YZCPZEBHV9C": {
+      "human_id": "TASK-096",
+      "file_path": "docs/requirements/task/TASK-096-p1-t4-e2e-asset-discovery-feeding.md"
+    },
+    "01KX0TJMA3214F6RSCWGABTCZG": {
+      "human_id": "TASK-097",
+      "file_path": "docs/requirements/task/TASK-097-p1-t2-migrate-seed-rule-doc-reference-skill-applie.md"
+    },
+    "01KX0BA07RFXWDRGAQBB5674YW": {
+      "human_id": "ADR-002",
+      "file_path": "docs/requirements/adr/ADR-002-corpus-governed-active-ai-workflow-inversion-of-co.md"
+    },
+    "01KX0CNZFF3BSRK6NEA9ST0W9N": {
+      "human_id": "PLAN-024",
+      "file_path": "docs/requirements/plan/PLAN-024-implementation-corpus-governed-spec-production-loo.md"
+    },
+    "01KX0CF2WVB4BQWAY52MFYQJE2": {
+      "human_id": "SPEC-044",
+      "file_path": "docs/requirements/spec/SPEC-044-corpus-governed-spec-production-loop-ioc-vertical.md"
+    },
+    "01KX0HR8SPGWDW72NEG54944GQ": {
+      "human_id": "KN-043",
+      "file_path": "docs/requirements/knowledge/KN-043-retro-ioc-spec-production-slice-full-chain-dogfood.md"
+    },
+    "01KX0CRQJKFWK588FGHG5P03AE": {
+      "human_id": "TASK-098",
+      "file_path": "docs/requirements/task/TASK-098-t4-seed-write-spec-rule-doc-minimal-slice-trimming.md"
+    },
+    "01KX0CR1MZQ3CGBGMFFED7FAPE": {
+      "human_id": "TASK-099",
+      "file_path": "docs/requirements/task/TASK-099-t1-gate-predicates-ts-pure-predicates.md"
+    },
+    "01KX0CRR8FF1S8NRP0E1R7V1Z3": {
+      "human_id": "TASK-100",
+      "file_path": "docs/requirements/task/TASK-100-t6-e2e-closed-loop-verify-dogfood.md"
+    },
+    "01KX0CRQX6EP4F9YZYYGHQTE0N": {
+      "human_id": "TASK-101",
+      "file_path": "docs/requirements/task/TASK-101-t5-hook-shims-g1-g2-claude-settings-json-wiring.md"
+    },
+    "01KX0CR2ZZB327AZD91KAGJBAC": {
+      "human_id": "TASK-102",
+      "file_path": "docs/requirements/task/TASK-102-t3-gate-spec-promote-command.md"
+    },
+    "01KX0CR2MWFDHD85G839K9SCAR": {
+      "human_id": "TASK-103",
+      "file_path": "docs/requirements/task/TASK-103-t3-test-gate-spec-promote-gate-judge-advisory-red.md"
+    },
+    "01KX0CR29VBZD2W57BK77DJQME": {
+      "human_id": "TASK-104",
+      "file_path": "docs/requirements/task/TASK-104-t2-gate-spec-create-command-feeding-pack-assembly.md"
+    },
+    "01KX0CR1Z8BC56QK870XM1MCC4": {
+      "human_id": "TASK-105",
+      "file_path": "docs/requirements/task/TASK-105-t2-test-gate-spec-create-exit-code-stdout-contract.md"
+    },
+    "01KX0CRQ7ZKXX6PJKNR43QH796": {
+      "human_id": "TASK-106",
+      "file_path": "docs/requirements/task/TASK-106-t4-test-feeding-pack-minimal-slice-trimming-red.md"
+    },
+    "01KX0CR1AFJAGD9HPM1N2R4J8K": {
+      "human_id": "TASK-107",
+      "file_path": "docs/requirements/task/TASK-107-t1-test-gate-predicates-unit-tests-red.md"
     }
   }
 }
