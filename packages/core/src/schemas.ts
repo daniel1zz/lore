@@ -220,13 +220,30 @@ export const planPhaseSchema = z.object({
 export type PlanPhase = z.infer<typeof planPhaseSchema>;
 
 /**
+ * `plan.extra.ac_scope` — the subset of the parent spec's declared `AC-*` ids this plan
+ * claims to address. Non-empty array of non-empty strings; `.min(1)` on BOTH the array
+ * and each element catches the "empty array" and "empty-string id" shapes at the Zod
+ * layer. Cross-entity membership (every id must actually be declared on the parent spec,
+ * and the plan must actually HAVE a spec parent) cannot be expressed in Zod — that check
+ * lives in `CorpusService._createImpl`/`set` (SPEC-040 D5), mirroring the
+ * `phases[].name`-vs-task-`extra.phase` cross-entity pattern already established for
+ * plan phases in this same file.
+ *
+ * Source: SPEC-040 §T2 D5
+ */
+export const planAcScopeSchema = z.array(z.string().min(1)).min(1);
+
+/**
  * Extra fields for plan documents.
  *
  * @invariant phases[].name is unique within the array (enforced via superRefine).
  * @invariant phases is capped at 30 entries (soft-limit: SPEC-023 §6 risk table).
  * @invariant legacy_phase holds the original extra.phase string after `lore migrate phases` runs.
+ * @invariant ac_scope, when present, is a non-empty array of non-empty AC-id strings
+ *   (shape only — see {@link planAcScopeSchema} — cross-entity membership validation is
+ *   CorpusService's job, SPEC-040 D5).
  *
- * Source: SPEC-023 §4 AC-PHASE-1, §8 Q2
+ * Source: SPEC-023 §4 AC-PHASE-1, §8 Q2; SPEC-040 §T2 D5
  */
 export const planExtraSchema = z
   .object({
@@ -243,6 +260,8 @@ export const planExtraSchema = z
     phases: z.array(planPhaseSchema).max(30).optional(),
     /** Populated by `lore migrate phases` from the former singular extra.phase. */
     legacy_phase: z.string().optional(),
+    /** SPEC-040 D5 — see {@link planAcScopeSchema}. */
+    ac_scope: planAcScopeSchema.optional(),
   })
   .passthrough()
   .superRefine((data, ctx) => {

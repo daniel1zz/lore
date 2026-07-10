@@ -13,6 +13,7 @@ import {
   deriveTypeMeta,
   docPatchSchema,
   knowledgeExtraSchema,
+  planAcScopeSchema,
   slugifyWithCollision,
   specAcceptanceCriteriaSchema,
   specExtraSchema,
@@ -359,6 +360,44 @@ export class CorpusService {
               value: taskPhase,
             });
           }
+        }
+      }
+    }
+
+    // Cross-entity ac_scope validation for plans (SPEC-040 §T2 D5).
+    // reason: planAcScopeSchema (schemas.ts, invoked by createDocInputSchema's superRefine
+    // for type==="plan") already guarantees a non-empty array of non-empty AC-id strings
+    // when extra.ac_scope is present at all — this block adds the cross-DOCUMENT membership
+    // check Zod cannot express: every scoped id must be declared on the plan's parent spec,
+    // and the plan must actually HAVE a spec parent with declared criteria at all. Mirrors
+    // the task extra.phase cross-entity pattern immediately above.
+    if (data.type === "plan") {
+      const acScope = data.extra?.["ac_scope"];
+      if (Array.isArray(acScope) && acScope.length > 0) {
+        const declaredResult = await this._resolveDeclaredAcIdsForParent(resolvedParentId);
+        if (!declaredResult.ok) return declaredResult;
+        const declared = declaredResult.value;
+        if (declared === null) {
+          return err({
+            code: "VALIDATION_ERROR",
+            field: "extra.ac_scope",
+            message:
+              "plan declares extra.ac_scope but its parent is not a spec with declared acceptance criteria",
+            value: acScope,
+          });
+        }
+        const unknownIds = (acScope as unknown[]).filter(
+          (id) => typeof id !== "string" || !declared.has(id),
+        );
+        if (unknownIds.length > 0) {
+          return err({
+            code: "VALIDATION_ERROR",
+            field: "extra.ac_scope",
+            message:
+              `plan extra.ac_scope references id(s) not declared on parent spec: ` +
+              `${unknownIds.join(", ")}. Declared ids: ${Array.from(declared).join(", ")}.`,
+            value: unknownIds,
+          });
         }
       }
     }
@@ -761,6 +800,49 @@ export class CorpusService {
       }
     }
 
+    // Cross-entity ac_scope validation when updating a plan's extra.ac_scope (SPEC-040 §T2 D5).
+    // reason: docPatchSchema.extra is untyped z.record(z.unknown()) — unlike _createImpl,
+    // set() never routes through createDocInputSchema's superRefine, so the shape check
+    // (non-empty array of non-empty strings, planAcScopeSchema) AND the cross-document
+    // membership check both live here, mirroring the spec_kind validation immediately below.
+    if (existing.type === "plan" && parsedPatch.data.extra !== undefined) {
+      const acScopeCandidate = parsedPatch.data.extra["ac_scope"];
+      if (acScopeCandidate !== undefined) {
+        const acScopeParsed = planAcScopeSchema.safeParse(acScopeCandidate);
+        if (!acScopeParsed.success) {
+          return err({
+            code: "VALIDATION_ERROR",
+            field: "extra.ac_scope",
+            message: "extra.ac_scope must be a non-empty array of non-empty AC-id strings",
+            value: acScopeCandidate,
+          });
+        }
+        const declaredResult = await this._resolveDeclaredAcIdsForParent(existing.parent_id);
+        if (!declaredResult.ok) return declaredResult;
+        const declared = declaredResult.value;
+        if (declared === null) {
+          return err({
+            code: "VALIDATION_ERROR",
+            field: "extra.ac_scope",
+            message:
+              "plan declares extra.ac_scope but its parent is not a spec with declared acceptance criteria",
+            value: acScopeCandidate,
+          });
+        }
+        const unknownIds = acScopeParsed.data.filter((id) => !declared.has(id));
+        if (unknownIds.length > 0) {
+          return err({
+            code: "VALIDATION_ERROR",
+            field: "extra.ac_scope",
+            message:
+              `plan extra.ac_scope references id(s) not declared on parent spec: ` +
+              `${unknownIds.join(", ")}. Declared ids: ${Array.from(declared).join(", ")}.`,
+            value: unknownIds,
+          });
+        }
+      }
+    }
+
     // Cross-cutting spec_kind validation when updating a spec's extra (AC-1, SPEC-032 §3.1).
     // reason: docPatchSchema.extra is untyped z.record(z.unknown()) (docPatchSchema in
     // @lore/core) — HTTP (`body as DocPatch`) and MCP callers bypass CLI's client-side
@@ -1057,9 +1139,9 @@ export class CorpusService {
    * @example
    * const bundleResult = await corpusService.getPlanBundle("plan-my-feature");
    * if (!bundleResult.ok) { ... }
-   * const { plan, spec, tasks } = bundleResult.value; // spec is undefined for PRD-parented plans
+   * const { plan, spec, tasks, knowledge_links } = bundleResult.value; // spec is undefined for PRD-parented plans
    *
-   * Source: SPEC-026 §4 AC-ASSESS-12
+   * Source: SPEC-026 §4 AC-ASSESS-12; SPEC-040 §T2 (knowledge_links)
    */
   async getPlanBundle(planIdOrSlug: string): Promise<Result<PlanBundle, LoreError>> {
     const resolveResult = await this.resolve(planIdOrSlug);
@@ -1096,7 +1178,35 @@ export class CorpusService {
     const tasksResult = await this.store.findMany({ parent_id: plan.id, type: "task" });
     if (!tasksResult.ok) return tasksResult;
 
-    return ok({ plan, ...(spec !== undefined ? { spec } : {}), tasks: tasksResult.value });
+    // reason: SPEC-040 §T2 — knowledge_links is a POINTER list only ({slug, sub_type,
+    // title}), never content, of `knowledge` docs linked to the plan via `informs` or
+    // `relates-to`. Always populated (possibly []) — never omitted — so
+    // computeAssessmentFacts (@lore/core) can distinguish "we checked, there are none"
+    // (source: "bundle") from "this bundle predates knowledge_links" (source: "unavailable",
+    // only possible for a bundle NOT built by this method).
+    const linksResult = await this.store.findLinks(plan.id, "both");
+    if (!linksResult.ok) return linksResult;
+    const knowledgeLinkCandidates = linksResult.value.filter(
+      (link) => link.link_type === "informs" || link.link_type === "relates-to",
+    );
+    const knowledgeLinks: NonNullable<PlanBundle["knowledge_links"]> = [];
+    for (const link of knowledgeLinkCandidates) {
+      const otherId = link.from_id === plan.id ? link.to_id : link.from_id;
+      const otherResult = await this.store.find(otherId);
+      if (!otherResult.ok) return otherResult;
+      const other = otherResult.value;
+      if (other === null || other.deleted_at !== null || other.type !== "knowledge") continue;
+      const parsedKnowledge = knowledgeExtraSchema.safeParse(other.extra);
+      const subType = parsedKnowledge.success ? parsedKnowledge.data.sub_type : "unknown";
+      knowledgeLinks.push({ slug: other.slug, sub_type: subType, title: other.title });
+    }
+
+    return ok({
+      plan,
+      ...(spec !== undefined ? { spec } : {}),
+      tasks: tasksResult.value,
+      knowledge_links: knowledgeLinks,
+    });
   }
 
   // ── Declared AC Ids (SPEC-038 §4, §7 D4) ────────────────────────────────
@@ -1144,8 +1254,26 @@ export class CorpusService {
       });
     }
 
-    if (plan.parent_id === null) return ok(null);
-    const parentResult = await this.store.find(plan.parent_id);
+    return this._resolveDeclaredAcIdsForParent(plan.parent_id);
+  }
+
+  /**
+   * The "parent → declared AC id set" half of {@link resolveDeclaredAcIds}, factored out
+   * so `_createImpl`/`set`'s SPEC-040 §T2 D5 `extra.ac_scope` cross-entity validation can
+   * reuse the identical parent-spec walk WITHOUT first resolving a plan that, at create
+   * time, doesn't exist as a persisted doc yet (`resolveDeclaredAcIds` itself always takes
+   * an id/slug and re-fetches the plan row first — not usable mid-`_createImpl`).
+   *
+   * @param parentId - A plan's `parent_id` (already resolved by the caller)
+   * @returns Same contract as `resolveDeclaredAcIds`: `Set<string>` when `parentId` points
+   *   at a live spec with schema-valid `extra.acceptance_criteria`; `null` (a fact, never
+   *   an error) for a null parentId, a non-spec parent, or a spec with no valid declared AC
+   */
+  private async _resolveDeclaredAcIdsForParent(
+    parentId: DocId | null,
+  ): Promise<Result<Set<string> | null, LoreError>> {
+    if (parentId === null) return ok(null);
+    const parentResult = await this.store.find(parentId);
     if (!parentResult.ok) return parentResult;
     const parent = parentResult.value;
     if (parent === null || parent.type !== "spec") return ok(null);

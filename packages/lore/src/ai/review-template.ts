@@ -21,10 +21,19 @@
  *     (escalate REQUIRES blocking_questions; every other decision REQUIRES it empty) —
  *     the same invariant llmReviewOutputSchema enforces at parse time, so a judge that
  *     follows the prompt can never produce a response Zod would reject on that axis alone.
+ *   - **Truncation notice (SPEC-040 D8)** — when the document BODY itself (not the parent
+ *     context) is truncated for budget, the prompt gains a "# Truncation Notice" section
+ *     instructing the judge to treat the full document as present-but-unseen beyond what's
+ *     shown, and to cite the notice explicitly if it escalates on "unseen" grounds rather
+ *     than silently inferring absence. `BuildReviewPromptResult.docTruncated` carries this
+ *     boolean out to `AIProviderService.judgeDoc`, which stamps it onto the persisted
+ *     judgment's `truncated` field — a STRUCTURAL signal (this field), not a string-match
+ *     against `truncated.includes("doc")`, so callers never have to know the "doc" section
+ *     name is the doc-body marker.
  *
  * Side-effect class: pure
  *
- * Source: SPEC-034 §2, §4
+ * Source: SPEC-034 §2, §4; SPEC-040 §T2 D8
  */
 
 import { truncateSection } from "@lore/core";
@@ -47,6 +56,14 @@ export interface ReviewBudgets {
 export interface BuildReviewPromptResult {
   prompt: string;
   truncated: string[];
+  /**
+   * True iff the document body itself (not parent context) was truncated to fit
+   * `budgets.max_doc_chars` (SPEC-040 D8) — the trigger for both the prompt's
+   * "Truncation Notice" section and the persisted judgment's `truncated` flag.
+   * Deliberately a separate structural field rather than `truncated.includes("doc")`
+   * at the call site — see module header.
+   */
+  docTruncated: boolean;
 }
 
 /** Shape every entry in {@link REVIEW_TEMPLATES} must satisfy. */
@@ -89,6 +106,18 @@ function buildReviewPromptV1(
       contextSection.text;
   }
 
+  // reason: SPEC-040 D8 — the doc-body-only truncation notice. Parent-context truncation
+  // is a different, lower-stakes concern (supplementary context, not the artifact under
+  // review) and deliberately does NOT trigger this section — see module header.
+  const truncationNotice = docSection.truncated
+    ? `# Truncation Notice\n` +
+      `The document body above was truncated to fit this prompt's character budget. Treat ` +
+      `the FULL document as present but unseen beyond what is shown — do NOT conclude a ` +
+      `section is missing, incomplete, or absent merely because it isn't visible here. Any ` +
+      `escalation or finding about "unseen" or "missing" content MUST cite this notice ` +
+      `explicitly, not silence alone.\n\n`
+    : "";
+
   const prompt =
     `# Role\n` +
     `You are an independent document reviewer. Judge ONLY from the materials provided below ` +
@@ -98,6 +127,7 @@ function buildReviewPromptV1(
     `# Document Under Review\n` +
     `## ${bundle.doc.title} (${bundle.doc.slug}, type=${bundle.doc.type}, status=${bundle.doc.status})\n` +
     `${docSection.text}\n\n` +
+    truncationNotice +
     `# Parent Context\n` +
     `${contextBlock}\n\n` +
     `# Deterministic Pre-Checks (already run — use as input, do not re-derive)\n` +
@@ -123,7 +153,7 @@ function buildReviewPromptV1(
     `  or "escalate", not "approve".\n` +
     `- reasons MUST have at least one entry.\n`;
 
-  return { prompt, truncated };
+  return { prompt, truncated, docTruncated: docSection.truncated };
 }
 
 /**
