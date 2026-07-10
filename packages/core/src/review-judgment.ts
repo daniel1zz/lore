@@ -30,10 +30,13 @@
  *     tree_position/link_integrity/evidence_completeness) are frequently computed by the
  *     reviewing service rather than the model; reviewJudgmentSchema requires checks once
  *     persisted (the service always layers them on before writing the row).
+ *   - `truncated` (SPEC-040 D8) is optional on BOTH schemas (unlike `checks`, it stays
+ *     optional even once persisted) — additive-only, absent means "not truncated" /
+ *     "predates SPEC-040", never an unknown state.
  *
  * Side-effect class: pure
  *
- * Source: SPEC-034 §2, §3
+ * Source: SPEC-034 §2, §3; SPEC-040 §T2 D8
  */
 
 import { z } from "zod";
@@ -125,6 +128,19 @@ const reviewJudgmentBaseShape = z.object({
   reasons: z.array(reviewReasonSchema).min(1),
   checks: z.array(checkResultSchema).optional(),
   blocking_questions: z.array(z.string()),
+  /**
+   * True iff the document body had to be truncated to fit the judge prompt's
+   * character budget (SPEC-040 D8). Optional here (the model may omit or echo it
+   * back; NEVER trusted) — `AIProviderService.judgeDoc` ALWAYS overwrites this with
+   * the deterministic truncation state it computed BEFORE invoking the judge,
+   * mirroring `checks`' "service is authoritative, model is never trusted to
+   * self-report" precedent (SPEC-034 §4). Additive-only and stays OPTIONAL on the
+   * persisted schema too (unlike `checks`, which was required from SPEC-034's
+   * inception) — every judgment persisted before SPEC-040 has no `truncated` key at
+   * all and must keep validating; its absence means "not truncated" for those rows,
+   * not an unknown state.
+   */
+  truncated: z.boolean().optional(),
 });
 
 /**

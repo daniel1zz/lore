@@ -128,6 +128,27 @@ function parseDiffIntoChunks(diffText: string): DiffFileChunk[] {
 }
 
 /**
+ * List every file path touched by a unified diff, in order of first appearance — the
+ * SAME `diff --git a/... b/...` header parse `truncateDiffByFile` uses internally,
+ * exposed as a standalone helper (SPEC-040 §T2) so callers that need "which files does
+ * this diff touch" (e.g. the assess v6 prompt's `DiffMeta` regression signal) don't
+ * re-implement header parsing a second time. Falls back to a single `"(unparsed diff)"`
+ * entry when no `diff --git` headers are found — same documented passthrough as
+ * {@link truncateDiffByFile} (module header ERROR-handling choice).
+ *
+ * @param diffText - Raw unified diff text
+ * @returns File paths in first-appearance order (never deduplicated — a diff never
+ *   repeats a file header, so this is naturally unique in practice)
+ *
+ * @example
+ * listDiffFiles("diff --git a/src/foo.ts b/src/foo.ts\n...");
+ * // => ["src/foo.ts"]
+ */
+export function listDiffFiles(diffText: string): string[] {
+  return parseDiffIntoChunks(diffText).map((chunk) => chunk.filePath);
+}
+
+/**
  * Truncate a unified diff to `maxChars`, preferring whole files in priority order
  * (production source, then tests, then everything else) over a blind tail cut. See the
  * module header for the no-op and single-huge-file fallback rules.

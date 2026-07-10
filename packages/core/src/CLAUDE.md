@@ -36,6 +36,8 @@ Foundational types, error model, runtime validation, lifecycle rules, config, an
 
 `AiConfigSchema.assess` (`ai.ts`) holds the four character budgets (`max_plan_chars: 8000`, `max_spec_chars: 12000`, `max_task_chars: 4000`, `max_diff_chars: 24000`), mirroring the `ai.refine.max_input_chars` precedent.
 
+**SPEC-040 additions (assessment.ts, T1+T2)**: `assessmentResultSchema` gained OPTIONAL `facts: assessmentFactsSchema` and `source_versions: sourceVersionRefSchema[]` — both service-computed and persisted VERBATIM by `AIProviderService.assessPlan`, never judge-writable. `llmAssessmentOutputSchema` gained OPTIONAL `dimension_scores` (three-dimension rubric: `outcome`/`evidence_integrity`/`scope_fidelity`), `typed_gaps`/`typed_recommendations` (structured findings, additive to the legacy `gaps`/`recommendations` string arrays — `deriveLegacyFindings` projects the former onto the latter at persist time, `AIProviderService._finalizeAssessment`), `unverifiable` (materials the judge couldn't verify), and `rubric_warning` (advisory strings — the service's `computeGroundingWarnings`, `packages/lore/src/service/ai-provider-service.ts`, D4 grounding cross-check, appends here too). `computeAssessmentFacts(bundle, declaredCriteria, diffMeta?)` is the D1 pure facts aggregator (AC coverage, task evidence completeness, `scope.dangling[]` drift, knowledge-capture, regression signals) — the prompt builder (`buildAssessPromptV6`, `packages/lore/src/ai/assess-template.ts`) renders it, never recomputes it. `ASSESS_TEMPLATES`/`getAssessTemplate` (same file) is the version-keyed prompt registry (SPEC-040 D6, `ASSESS_PROMPT_VERSION` now 6).
+
 ### Plan Phases Schema Invariants (SPEC-023)
 
 `planExtraSchema` (in `schemas.ts`) governs plan extra fields:
@@ -46,6 +48,8 @@ Foundational types, error model, runtime validation, lifecycle rules, config, an
 - `legacy_phase?: string` — set by migration only. Informational. Not consumed by runtime code.
 
 `taskExtraSchema` adds `phase?: string` — validated against parent plan's `extra.phases[].name` by `CorpusService` (not Zod, since it's cross-entity). Tasks without `extra.phase` are always valid regardless of plan phase declarations.
+
+`planExtraSchema` also adds `ac_scope?: string[]` (`planAcScopeSchema` — non-empty array of non-empty AC-id strings, SPEC-040 §T2 D5). Shape only; cross-entity membership against the parent spec's declared `acceptance_criteria` is `CorpusService`'s job (`_createImpl`/`set`), same division of labor as `phase` above. Consumed by `computeAssessmentFacts` (`assessment.ts`) to compute `scope.scoped_ids`/`scope.dangling` and by `buildAssessPromptV6` (`packages/lore/src/ai/assess-template.ts`) to mark out-of-scope AC-table rows.
 - **Parent-type contract** — `doc-type-rules.ts::PARENT_TYPE_CONTRACT` and `isValidParentType(child, parent)` are imported by `CorpusService` and `TreeCheckService`. Adding a new doc type requires updating this contract.
 - **Graph helpers stay pure** — `graph-utils.ts::ancestorChainWalk` and `tree-blueprint.ts` operate on plain data; they don't take a `StoreInterface`. Callers fetch the data and pass it in.
 - **Config side effects isolated to `loadConfig` / `saveConfig`** (now in `config-node.ts`, `@lore/core/node` subpath) — `parseConfig` and `loadConfigFromString` (in `config.ts`, default barrel) are pure and Result-returning; tests pass YAML strings, not file paths.

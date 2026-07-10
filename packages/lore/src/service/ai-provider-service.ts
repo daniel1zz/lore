@@ -11,8 +11,10 @@
  *     - regenerateContent(doc, opts?) → Promise<Result<GenerateOutput, LoreError>>  (SPEC-019)
  *     - refineContent(doc, userPrompt, opts?) → Promise<Result<GenerateOutput, LoreError>>  (SPEC-019)
  *     - inferLinkType(from, to, opts?) → Promise<Result<{linkType: LinkType}, LoreError>>  (SPEC-019)
- *     - assessPlan(bundle, opts?) → Promise<Result<AssessmentResult, LoreError>>  (SPEC-026)
- *     - judgeDoc(bundle, checks, opts?) → Promise<Result<NewReviewJudgment, LoreError>>  (SPEC-034)
+ *     - assessPlan(bundle, opts?) → Promise<Result<AssessmentResult, LoreError>>  (SPEC-026, v6 SPEC-040)
+ *     - judgeDoc(bundle, checks, opts?) → Promise<Result<NewReviewJudgment, LoreError>>  (SPEC-034, SPEC-040 D8)
+ *   - validateAcIdContainment(output, declaredIds) → Result<void, LoreError>  (SPEC-038 §5 D5)
+ *   - computeGroundingWarnings(output, truncatedSections) → string[]  (SPEC-040 §T2 D4, pure, exported for direct testing)
  *
  * Invariants:
  *   - Stateless: every dependency is constructor-injected; no module-level state or globals
@@ -47,19 +49,38 @@
  *     deterministic `checks` argument it was called with — the mechanical pre-checks
  *     (computed BEFORE the LLM call, SPEC-034 §4 flow step 2) are the authoritative
  *     record; the model is never trusted to self-report which checks passed
+ *   - judgeDoc ALWAYS stamps `truncated: true` on the returned judgment when the review
+ *     template reports `docTruncated` (SPEC-040 D8) — additive-only field, mirrors the
+ *     `checks` override precedent (service-computed, model output never consulted for it)
+ *   - assessPlan (SPEC-040 §T2) computes `AssessmentFacts` and `source_versions` EXACTLY
+ *     ONCE per call, from the full untruncated bundle, BEFORE prompt truncation — the same
+ *     objects are handed to the (registry-selected) prompt template AND persisted verbatim
+ *     into the returned `AssessmentResult.facts`/`source_versions` (D1, D2); a judge's
+ *     output can never overwrite them. `gaps`/`recommendations` are overwritten with
+ *     `deriveLegacyFindings`'s projection ONLY when the corresponding typed array
+ *     (`typed_gaps`/`typed_recommendations`) is present (D3). `computeGroundingWarnings`
+ *     (D4) appends ungrounded absence-based dimension-score warnings to `rubric_warning`,
+ *     never fatal. The active prompt template is resolved via `getAssessTemplate`
+ *     (SPEC-040 D6) rather than calling `buildAssessPrompt` directly.
  *
  * Side-effect class: IO (delegates to AIProvider.generate and Telemetry.emit)
  *
  * Source: SPEC-017 §3.6, SPEC-019 §9.1, SPEC-026 §3 D1, D2; SPEC-029 AC-AR-2, AC-AR-3; SPEC-034 §4;
- * SPEC-038 §5, §7 D5
+ * SPEC-038 §5, §7 D5; SPEC-040 §T2 D1-D6, D8
  */
 
 import { err, ok } from "@lore/core";
 import type { AIProvider, DocRecord, DocType, GenerateInput, GenerateOutput, LinkType, LoreError, Telemetry } from "@lore/core";
 import type { AiDefaultSource, CallerSurface, Result } from "@lore/core";
 import { linkTypeSchema } from "@lore/core";
-import type { AssessmentResult, LlmAssessmentOutput, PlanBundle } from "@lore/core";
-import { clipOverlongReasoning, extractAssessmentJson, llmAssessmentOutputSchema } from "@lore/core";
+import type { AssessmentFacts, AssessmentResult, LlmAssessmentOutput, PlanBundle, SourceVersionRef } from "@lore/core";
+import {
+  clipOverlongReasoning,
+  computeAssessmentFacts,
+  deriveLegacyFindings,
+  extractAssessmentJson,
+  llmAssessmentOutputSchema,
+} from "@lore/core";
 import type { CheckResult, LlmReviewOutput, NewReviewJudgment, ReviewBundle } from "@lore/core";
 import { llmReviewOutputSchema } from "@lore/core";
 import {
@@ -70,8 +91,10 @@ import {
 } from "../ai/templates.js";
 import {
   ASSESS_PROMPT_VERSION,
-  buildAssessPrompt,
+  buildAssessDiffMeta,
   buildAssessRetryPrompt,
+  extractDeclaredAcceptanceCriteria,
+  getAssessTemplate,
   type AssessBudgets,
 } from "../ai/assess-template.js";
 import {
@@ -122,6 +145,61 @@ export function validateAcIdContainment(
       `AI judge returned ac_id(s) not in the spec's declared acceptance criteria: ` +
       `${offending.join(", ")}. Declared ids: ${Array.from(declaredIds).join(", ")}.`,
   });
+}
+
+/**
+ * D4 grounding cross-check (SPEC-040 §T2) — pure, zero-NLP, post-parse. Flags a
+ * `dimension_scores` entry that claims `based_on: "absence"` without citing WHY the
+ * evidence is absent: the dimension key does not appear (case-insensitive substring) in
+ * any `unverifiable[].material` or in `judgment.truncated[]`. `ac_scores[]` entries have
+ * no `based_on` field at all (only `dimension_scores` does) so this loop naturally never
+ * matches them — the function name says "ac_scores[]/dimension_scores" only because the
+ * schema MAY grow `based_on` on `ac_scores[]` in a future revision; today it is a no-op
+ * pass-through for that half.
+ *
+ * @invariant Deliberately a substring-containment heuristic, NOT semantic matching — the
+ *   judge is expected to reference the dimension by name (in `unverifiable[].material` or
+ *   implicitly via a truncated section) when explaining an absence-based score. This is a
+ *   documented, coarse heuristic, not a claim of NLP-grade linkage.
+ * @invariant Never fails the run — only appends human-readable warning strings.
+ *
+ * @param output - Validated judge output (post `llmAssessmentOutputSchema` parse)
+ * @param truncatedSections - `judgment.truncated[]` — section names truncated for budget
+ * @returns One warning string per ungrounded absence-based dimension score; `[]` when
+ *   every absence-based score cites a matching subject, or when there is no
+ *   `dimension_scores` at all
+ *
+ * @example
+ * computeGroundingWarnings(
+ *   { ...output, dimension_scores: { scope_fidelity: { score: 40, confidence: 0.5, based_on: "absence", reasoning: "no data" } } },
+ *   [],
+ * );
+ * // → ['Dimension "scope_fidelity" scored based_on="absence" but no matching entry was found in unverifiable[] or judgment.truncated[] — the absence claim is ungrounded.']
+ */
+export function computeGroundingWarnings(
+  output: LlmAssessmentOutput,
+  truncatedSections: string[],
+): string[] {
+  if (!output.dimension_scores) return [];
+
+  const unverifiableMaterials = (output.unverifiable ?? []).map((u) => u.material.toLowerCase());
+  const truncatedLower = truncatedSections.map((t) => t.toLowerCase());
+  const warnings: string[] = [];
+
+  for (const [dimensionKey, entry] of Object.entries(output.dimension_scores)) {
+    if (entry.based_on !== "absence") continue;
+    const key = dimensionKey.toLowerCase();
+    const grounded =
+      unverifiableMaterials.some((m) => m.includes(key)) || truncatedLower.some((t) => t.includes(key));
+    if (!grounded) {
+      warnings.push(
+        `Dimension "${dimensionKey}" scored based_on="absence" but no matching entry was found in ` +
+          `unverifiable[] or judgment.truncated[] — the absence claim is ungrounded.`,
+      );
+    }
+  }
+
+  return warnings;
 }
 
 // ─── AIProviderService ────────────────────────────────────────────────────────
@@ -542,11 +620,30 @@ export class AIProviderService {
     },
   ): Promise<Result<AssessmentResult, LoreError>> {
     const t0 = performance.now();
-    const { prompt, truncated, declaredAcIds } = buildAssessPrompt(bundle, opts?.diffText, this.assessBudgets);
-    // reason: same extraction buildAssessPrompt used to render the AC table — reusing its
+
+    // reason: SPEC-040 D1/D2 — facts are computed EXACTLY ONCE here, from the full
+    // untruncated bundle, BEFORE any prompt-budget truncation happens. The SAME facts
+    // object is (a) handed to the template builder for the "# Deterministic Facts"
+    // section and (b) persisted verbatim into extra.assessment.facts — a judge's output
+    // can never overwrite what facts.ac_coverage/task_evidence/scope/etc. actually say.
+    const declaredCriteriaForFacts = extractDeclaredAcceptanceCriteria(bundle.spec);
+    const facts = computeAssessmentFacts(bundle, declaredCriteriaForFacts, buildAssessDiffMeta(opts?.diffText));
+    const sourceVersions = this._buildSourceVersions(bundle);
+
+    const templateResult = getAssessTemplate(ASSESS_PROMPT_VERSION);
+    if (!templateResult.ok) return templateResult;
+    const { prompt, truncated, declaredAcIds } = templateResult.value(
+      bundle,
+      opts?.diffText,
+      this.assessBudgets,
+      facts,
+    );
+    // reason: same extraction the template used to render the AC table — reusing its
     // returned list (rather than re-deriving from bundle.spec here) guarantees the prompt's
     // declared-id universe and the containment check's universe can never drift apart
     // (SPEC-038 §5 D5). Empty when the spec has no structured ACs (verbatim fallback).
+    // On v6 with a plan-declared extra.ac_scope (SPEC-040 D5), this is the SCOPE-RESTRICTED
+    // subset, not the spec's full declared set — see buildAssessPromptV6's JSDoc.
     const declaredAcIdSet = new Set(declaredAcIds);
 
     // reason: telemetry meta is identical across every terminal branch below (only the
@@ -588,6 +685,8 @@ export class AIProviderService {
           false,
           truncated,
           first.clippedAcIds ?? [],
+          facts,
+          sourceVersions,
         ),
       );
     }
@@ -619,6 +718,8 @@ export class AIProviderService {
           true,
           truncated,
           second.clippedAcIds ?? [],
+          facts,
+          sourceVersions,
         ),
       );
     }
@@ -689,7 +790,7 @@ export class AIProviderService {
     // so this lookup cannot miss in practice; the non-null assertion documents that guarantee
     // rather than silently tolerating an impossible `undefined`.
     const template = REVIEW_TEMPLATES[REVIEW_PROMPT_VERSION]!;
-    const { prompt, truncated: _truncated } = template(bundle, checks, this.reviewBudgets);
+    const { prompt, docTruncated } = template(bundle, checks, this.reviewBudgets);
 
     const emitReviewEvent = (
       providerResult: Result<GenerateOutput, LoreError>,
@@ -714,7 +815,7 @@ export class AIProviderService {
       return first.providerResult;
     }
     if (first.parsed !== undefined) {
-      const finalized = this._finalizeJudgment(first.parsed, bundle, checks);
+      const finalized = this._finalizeJudgment(first.parsed, bundle, checks, docTruncated);
       emitReviewEvent(first.providerResult, finalized.decision, finalized.confidence);
       return ok(finalized);
     }
@@ -727,7 +828,7 @@ export class AIProviderService {
       return second.providerResult;
     }
     if (second.parsed !== undefined) {
-      const finalized = this._finalizeJudgment(second.parsed, bundle, checks);
+      const finalized = this._finalizeJudgment(second.parsed, bundle, checks, docTruncated);
       emitReviewEvent(second.providerResult, finalized.decision, finalized.confidence);
       return ok(finalized);
     }
@@ -826,9 +927,33 @@ export class AIProviderService {
   }
 
   /**
+   * Builds the `source_versions` pins (SPEC-040 §T2 D2) — `{doc_id, version}` for the
+   * plan, its spec (when linked), and every task, recorded at assess time so a later
+   * reader can tell exactly which doc version the judge saw even after the docs change.
+   */
+  private _buildSourceVersions(bundle: PlanBundle): SourceVersionRef[] {
+    return [
+      { doc_id: bundle.plan.id, version: bundle.plan.version },
+      ...(bundle.spec !== undefined ? [{ doc_id: bundle.spec.id, version: bundle.spec.version }] : []),
+      ...bundle.tasks.map((task) => ({ doc_id: task.id, version: task.version })),
+    ];
+  }
+
+  /**
    * Assemble the final persisted AssessmentResult from a validated judge output — layers
    * the service-computed `scope` and `judgment` fields on top of what the model produced
    * (the model is never asked to, and never does, produce those two fields itself).
+   *
+   * SPEC-040 §T2 additions:
+   *   - `facts`/`source_versions` are persisted VERBATIM from what was computed/built once
+   *     in `assessPlan`, BEFORE this method ever sees the judge's output — the judge
+   *     cannot overwrite them (D1, D2).
+   *   - `gaps`/`recommendations` are overwritten with `deriveLegacyFindings`'s projection
+   *     ONLY when the judge emitted the corresponding typed array (`typed_gaps`/
+   *     `typed_recommendations`) — a v6 response carrying ONLY the legacy string arrays
+   *     (no typed findings at all) persists those as-is, unmodified (D3).
+   *   - `rubric_warning` accumulates the judge's own (optional) warnings plus this
+   *     method's D4 grounding cross-check (`computeGroundingWarnings`) — never fatal.
    *
    * @param parsed - Validated judge output (verdict/overall_score/ac_scores/gaps/recommendations)
    * @param bundle - Plan bundle — bundle.plan.id becomes scope.id
@@ -838,6 +963,8 @@ export class AIProviderService {
    * @param clippedAcIds - AC ids whose reasoning was clipped before validation (SPEC-029
    *   AC-AR-2); empty when nothing needed clipping — `judgment.reasoning_clipped` is only
    *   set (additive-only field, AC-AR-3) when this is non-empty
+   * @param facts - Pre-computed AssessmentFacts (SPEC-040 D1) — persisted unchanged
+   * @param sourceVersions - Pre-built source-version pins (SPEC-040 D2) — persisted unchanged
    */
   private _finalizeAssessment(
     parsed: LlmAssessmentOutput,
@@ -846,9 +973,27 @@ export class AIProviderService {
     retried: boolean,
     truncated: string[],
     clippedAcIds: string[],
+    facts: AssessmentFacts,
+    sourceVersions: SourceVersionRef[],
   ): AssessmentResult {
+    // reason: SPEC-040 D3 — only substitute the legacy string arrays when the judge
+    // actually emitted the corresponding typed array; a typed_gaps-less response leaves
+    // parsed.gaps untouched (independently keyed per array, not an all-or-nothing swap).
+    const legacy = deriveLegacyFindings(parsed.typed_gaps, parsed.typed_recommendations);
+    const gaps = parsed.typed_gaps !== undefined ? legacy.gaps : parsed.gaps;
+    const recommendations =
+      parsed.typed_recommendations !== undefined ? legacy.recommendations : parsed.recommendations;
+
+    // reason: SPEC-040 D4 — grounding cross-check runs on the validated-but-not-yet-final
+    // output; warnings are advisory-only and never fail the run.
+    const groundingWarnings = computeGroundingWarnings(parsed, truncated);
+    const rubricWarning = [...(parsed.rubric_warning ?? []), ...groundingWarnings];
+
     return {
       ...parsed,
+      gaps,
+      recommendations,
+      ...(rubricWarning.length > 0 ? { rubric_warning: rubricWarning } : {}),
       scope: { type: "plan", id: bundle.plan.id },
       judgment: {
         provider: this.active,
@@ -858,6 +1003,8 @@ export class AIProviderService {
         truncated,
         ...(clippedAcIds.length > 0 ? { reasoning_clipped: clippedAcIds } : {}),
       },
+      facts,
+      source_versions: sourceVersions,
     };
   }
 
@@ -921,11 +1068,16 @@ export class AIProviderService {
    * @param parsed - Validated judge output (decision/confidence/reasons/blocking_questions)
    * @param bundle - Review bundle — bundle.doc.id/version become doc_id/doc_version
    * @param checks - Deterministic pre-check results, passed in by the caller of judgeDoc
+   * @param docTruncated - SPEC-040 D8: whether the document body was truncated for the
+   *   prompt budget (`BuildReviewPromptResult.docTruncated`) — set additive-only (only
+   *   `truncated: true` when true; omitted, never `false`, otherwise), mirroring
+   *   `judgment.reasoning_clipped`'s additive-only convention in assessment.ts
    */
   private _finalizeJudgment(
     parsed: LlmReviewOutput,
     bundle: ReviewBundle,
     checks: CheckResult[],
+    docTruncated: boolean,
   ): NewReviewJudgment {
     return {
       doc_id: bundle.doc.id,
@@ -935,6 +1087,7 @@ export class AIProviderService {
       reasons: parsed.reasons,
       checks,
       blocking_questions: parsed.blocking_questions,
+      ...(docTruncated ? { truncated: true } : {}),
       judge: {
         provider: this.active,
         // reason: the AIProvider interface (packages/core/src/ai.ts) exposes no resolved
