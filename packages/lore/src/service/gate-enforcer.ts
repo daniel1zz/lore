@@ -144,4 +144,25 @@ export class GateEnforcer {
       value: reasons,
     });
   }
+
+  /**
+   * Whether `checkpoint` is enabled in config (the SAME `resolveGateEnabled` knob
+   * `enforce()` consults internally). Exposed so a caller that must perform gate-context
+   * IO (`getPlanBundle` for `plan-promote`/`task-claim`) can short-circuit BEFORE that IO
+   * when the checkpoint is disabled — mirroring `gate.ts`'s
+   * `isGateDisabledByConfig`-before-`runXGate` order, so a disabled gate stays
+   * byte-identical to pre-`GateEnforcer` behavior even when the upstream-spec lookup
+   * would itself fail (e.g. a soft-deleted parent plan). `enforce()` STILL re-checks
+   * this internally (SSOT / the authority) — this is an early-out, not a replacement.
+   *
+   * @param checkpoint - Which of the four registered checkpoints to query.
+   * @returns `false` when `workflow.gates.<checkpoint>.enabled === false`; `true`
+   *   otherwise (checkpoint enabled or no config loaded — same default `resolveGateEnabled`
+   *   already applies).
+   * @example
+   * enforcer.isEnabled("task-claim"); // => false when config sets it disabled
+   */
+  isEnabled(checkpoint: GateCheckpoint): boolean {
+    return resolveGateEnabled(this.config, checkpoint);
+  }
 }

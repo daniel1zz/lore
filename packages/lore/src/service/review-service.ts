@@ -117,6 +117,15 @@ export class ReviewService {
     }
 
     if (doc.type === "plan") {
+      // reason: check disable BEFORE the getPlanBundle IO below — mirrors gate.ts's
+      // isGateDisabledByConfig-before-runPlanPromoteGate order. Without this early-out,
+      // a disabled plan-promote gate could still be blocked by a broken ancestor-spec
+      // lookup, violating "disabled === byte-identical to pre-GateEnforcer behavior"
+      // (adversarial review, retro item 8 follow-up).
+      if (!this.gate.enforcer.isEnabled("plan-promote")) {
+        return ok(undefined);
+      }
+
       const bundleResult = await this.gate.getPlanBundle(doc.id);
       if (!bundleResult.ok) return bundleResult;
       const ctx = buildUpstreamSpecContext(bundleResult.value.spec);
