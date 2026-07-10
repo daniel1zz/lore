@@ -252,6 +252,10 @@ export class CorpusService {
    * Validates via createDocInputSchema, generates ULID + slug, resolves parent,
    * inserts doc + version record + audit entry.
    * Telemetry: records one event with doc type and resulting id/slug on success.
+   *
+   * @invariant Rejects `type: "knowledge"` + `extra.sub_type: "handoff"` with
+   *   `VALIDATION_ERROR` — see {@link createHandoffDoc} for the sole legitimate
+   *   creation path for that sub_type (SPEC-041 §3 D4).
    */
   async create(input: CreateDocInput): Promise<Result<DocRecord, LoreError>> {
     const startMs = Date.now();
@@ -260,7 +264,36 @@ export class CorpusService {
     return result;
   }
 
-  private async _createImpl(input: CreateDocInput): Promise<Result<DocRecord, LoreError>> {
+  /**
+   * Internal creation seam for SPEC-041 S2 handoff docs — the SOLE way a `knowledge`
+   * doc with `extra.sub_type: "handoff"` may be created. Mirrors
+   * `TaskWorkflowService.recordVerifiedEvidence`'s sole-injection-site pattern
+   * (SPEC-039 §2 D2): runs the IDENTICAL `_createImpl` pipeline `create()` does, with
+   * ONLY the handoff writer-identity rejection skipped (`opts.allowHandoff: true`).
+   * Never registered on any CLI/MCP/HTTP adapter — its only production caller is
+   * `SessionService.writeHandoff`, bound in `app.ts` as
+   * `corpusService.createHandoffDoc.bind(corpusService)` the same way
+   * `resolveDeclaredAcIds`/`recordVerifiedEvidence` are bound. Callers passing a
+   * non-handoff `input` (any other type/sub_type) are still fully validated —
+   * `allowHandoff` only widens the ONE rejection above, nothing else in the pipeline
+   * changes.
+   *
+   * @param input - Same shape `create()` accepts; expected (not enforced here) to be a
+   *   `type: "knowledge"`, `extra.sub_type: "handoff"` payload — `SessionService`
+   *   builds this from a Zod-valid `HandoffExtra` before calling.
+   * @returns Same `Result<DocRecord, LoreError>` contract as `create()`.
+   */
+  async createHandoffDoc(input: CreateDocInput): Promise<Result<DocRecord, LoreError>> {
+    const startMs = Date.now();
+    const result = await this._createImpl(input, { allowHandoff: true });
+    this.recordTelemetryEvent("create", startMs, result, { type: input.type });
+    return result;
+  }
+
+  private async _createImpl(
+    input: CreateDocInput,
+    opts?: { allowHandoff?: boolean },
+  ): Promise<Result<DocRecord, LoreError>> {
     const parsed = createDocInputSchema.safeParse(input);
     if (!parsed.success) {
       const issue = parsed.error.issues[0];
@@ -290,6 +323,32 @@ export class CorpusService {
     }
 
     const data = parsed.data;
+
+    // Write-path exclusivity for knowledge sub_type "handoff" (SPEC-041 §3 D4).
+    // reason: a Zod superRefine presence check (knowledgeExtraSchema, schemas.ts) can
+    // only verify extra.handoff is SHAPE-valid — it cannot see WHO is calling create(),
+    // so it cannot enforce "only `lore handoff` may write this sub_type." extra.handoff
+    // is user-supplied data (unlike an LLM-generated assessment blob), so a presence
+    // check alone is forgeable: any caller could hand-assemble a valid extra.handoff
+    // payload and call `lore create` directly. This writer-identity guard mirrors the
+    // SPEC-039 D2 attestation precedent (recordVerifiedEvidence's sole-injection-site
+    // pattern), not the SPEC-026 assessment precedent. `opts.allowHandoff` is the
+    // internal bypass flag ONLY `createHandoffDoc` (below) sets — never exposed on the
+    // public `create()` overload, so no adapter (CLI/MCP/HTTP) can pass it through.
+    if (
+      data.type === "knowledge" &&
+      (data.extra?.["sub_type"] as unknown) === "handoff" &&
+      opts?.allowHandoff !== true
+    ) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "extra.sub_type",
+        message:
+          'knowledge sub_type "handoff" may only be created via `lore handoff` — ' +
+          "direct creation through `lore create` / `lore_create` is not permitted",
+        value: "handoff",
+      });
+    }
 
     // Resolve parent if provided
     let resolvedParentId: DocId | null = null;
