@@ -59,6 +59,7 @@ import { VerifyRunnerService } from "./service/verify-runner-service.js";
 import { executeVerifySpawnSpec } from "./service/verify-executor.js";
 import { GateEnforcer } from "./service/gate-enforcer.js";
 import { SessionService } from "./service/session-service.js";
+import { ValidityService } from "./service/validity-service.js";
 
 export interface App {
   corpusService: CorpusService;
@@ -172,6 +173,19 @@ export interface App {
    * Source: SPEC-041 §3 D1, §9.1
    */
   sessionService?: SessionService;
+  /**
+   * ValidityService — the SOLE write path for `knowledge`/`adr` bi-temporal validity
+   * metadata (`extra.validity`, `lore invalidate`). Store + own telemetry wiring, same
+   * DI shape as `TaskWorkflowService`/`JudgmentService` (SPEC-043 §Design Decisions D2).
+   *
+   * Optional for the same reason `acService`/`verifyRunnerService`/`sessionService`
+   * are: pre-existing hand-built App test stubs (HTTP routes / MCP tools / eval
+   * scenarios — outside this task's file anchors) remain valid without a mechanical
+   * touch to every one of them. Always present in production — both
+   * `buildAppFromSqlite` and `buildAppFromTurso` wire it unconditionally.
+   * Source: SPEC-043 §Design Decisions D2, §Scope
+   */
+  validityService?: ValidityService;
   /**
    * Telemetry sink — exposed for dashboard route handlers to emit source-tagged events.
    * Dashboard handlers record { service: "dashboard", source: "dashboard" } events after
@@ -314,6 +328,10 @@ function buildAppFromSqlite(
     phaseService: new PhaseService(store),
     taskWorkflowService,
     sessionService,
+    // reason: ValidityService owns extra.validity (bi-temporal invalidation) — store +
+    // own telemetry wiring, same DI shape as TaskWorkflowService/JudgmentService.
+    // SPEC-043 §Design Decisions D2.
+    validityService: new ValidityService(store, telemetry),
     // reason: SpecKindService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-032 §3.4.
     specKindService: new SpecKindService(store),
@@ -453,6 +471,10 @@ function buildAppFromTurso(
     phaseService: new PhaseService(store),
     taskWorkflowService,
     sessionService,
+    // reason: ValidityService owns extra.validity (bi-temporal invalidation) — store +
+    // own telemetry wiring, same DI shape as TaskWorkflowService/JudgmentService.
+    // SPEC-043 §Design Decisions D2.
+    validityService: new ValidityService(store, telemetry),
     // reason: SpecKindService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-032 §3.4.
     specKindService: new SpecKindService(store),

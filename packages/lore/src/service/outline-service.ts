@@ -47,10 +47,16 @@ import type { LoreError } from "@lore/core";
 import {
   specAcceptanceCriteriaSchema,
   computeAcCoverage,
+  extractValidity,
+  isInvalidated,
+  renderValidityBanner,
   type AcceptanceCriterion,
   type AcCoverageFact,
 } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
+
+/** Time seam (D3 convention) — never `Date.now()` read directly in method bodies. */
+const defaultNow = (): string => new Date().toISOString();
 
 // ─── Public Types ───────────────────────────────────────────────────────────
 
@@ -370,6 +376,49 @@ function toSummary(doc: DocRecord): DocSummary {
   };
 }
 
+// ─── Validity Banner (SPEC-043 D4) ─────────────────────────────────────────
+
+/**
+ * Resolves + renders the SPEC-043 D4 invalidation banner for `doc`, or `undefined`
+ * when `doc` is not currently invalidated. The SOLE shared banner renderer — CLI
+ * `get` (non-raw), `ExportDocsService`'s written body, and
+ * `flows/feed-flow.ts::renderDocMarkdown` (the `lore feed` pack) all call this SAME
+ * function (directly, or via {@link OutlineService.resolveValidityBanner}) so the
+ * three D4 wiring sites can never drift on banner format. Resolves `invalidated_by`
+ * to a slug (+ soft-delete state) via one `store.find` call — `renderValidityBanner`
+ * (`@lore/core`) itself stays pure/format-only and never touches the store.
+ *
+ * @param store - Storage abstraction, used only to resolve invalidated_by → slug.
+ * @param doc - The document to check.
+ * @param nowIso - Caller-supplied current time (D3 seam).
+ * @returns The banner markdown line, or `undefined` when `doc` is currently valid.
+ */
+export async function resolveValidityBanner(
+  store: StoreInterface,
+  doc: DocRecord,
+  nowIso: string,
+): Promise<string | undefined> {
+  if (!isInvalidated(doc, nowIso)) return undefined;
+  const validity = extractValidity(doc);
+
+  let successorSlug: string | undefined;
+  let successorDeleted: boolean | undefined;
+  if (validity?.invalidated_by !== undefined) {
+    const successorResult = await store.find(validity.invalidated_by);
+    if (successorResult.ok && successorResult.value !== null) {
+      successorSlug = successorResult.value.slug;
+      successorDeleted = successorResult.value.deleted_at !== null;
+    }
+  }
+
+  return renderValidityBanner({
+    invalid_at: validity?.invalid_at ?? nowIso,
+    ...(successorSlug !== undefined ? { successor_slug: successorSlug } : {}),
+    ...(successorDeleted === true ? { successor_deleted: true } : {}),
+    ...(validity?.reason !== undefined ? { reason: validity.reason } : {}),
+  });
+}
+
 // ─── Component Resolver Functions ───────────────────────────────────────────
 
 type ComponentData = unknown;
@@ -395,8 +444,10 @@ async function resolveChildrenOf(
 async function resolveRecentDecisions(
   props: Record<string, unknown>,
   store: StoreInterface,
+  nowIso: string,
 ): Promise<Result<ComponentData, LoreError>> {
   const limit = typeof props["limit"] === "number" ? props["limit"] : 5;
+  const includeInvalid = props["includeInvalid"] === true;
   const filters = {
     type: "adr" as import("@lore/core").DocType,
     ...(typeof props["status"] === "string" ? { status: props["status"] as import("@lore/core").DocStatus } : {}),
@@ -405,8 +456,12 @@ async function resolveRecentDecisions(
   const result = await store.findMany(filters);
   if (!result.ok) return result;
 
-  // findMany already returns sorted by updated_at DESC
-  const decisions = result.value.slice(0, limit).map(toSummary);
+  // SPEC-043 D3/S6 — filter BEFORE slice so the next-most-recent valid decision
+  // backfills the limit (findMany already returns sorted by updated_at DESC).
+  const candidates = includeInvalid
+    ? result.value
+    : result.value.filter((d) => !isInvalidated(d, nowIso));
+  const decisions = candidates.slice(0, limit).map(toSummary);
   return ok({ decisions });
 }
 
@@ -481,6 +536,7 @@ async function resolveRelatedOf(
   doc: DocRecord,
   props: Record<string, unknown>,
   store: StoreInterface,
+  nowIso: string,
 ): Promise<Result<ComponentData, LoreError>> {
   const direction = (typeof props["direction"] === "string"
     ? props["direction"]
@@ -490,6 +546,7 @@ async function resolveRelatedOf(
   if (!linksResult.ok) return linksResult;
 
   const typeFilter = typeof props["type"] === "string" ? props["type"] : null;
+  const includeInvalid = props["includeInvalid"] === true;
 
   const filteredLinks = linksResult.value.filter((link) => {
     if (typeFilter !== null && link.link_type !== typeFilter) return false;
@@ -503,6 +560,8 @@ async function resolveRelatedOf(
     const docResult = await store.find(otherId);
     if (!docResult.ok) return docResult;
     if (docResult.value !== null) {
+      // SPEC-043 D3 — RelatedOf skips invalidated targets by default (includeInvalid restores).
+      if (!includeInvalid && isInvalidated(docResult.value, nowIso)) continue;
       related.push({ ...toSummary(docResult.value), link_type: link.link_type });
     }
   }
@@ -513,6 +572,7 @@ async function resolveRelatedOf(
 async function resolveEmbed(
   props: Record<string, unknown>,
   store: StoreInterface,
+  nowIso: string,
 ): Promise<Result<ComponentData, LoreError>> {
   const id = typeof props["id"] === "string" ? props["id"] : null;
 
@@ -528,10 +588,26 @@ async function resolveEmbed(
     return ok({ embedded: null, notFound: id });
   }
 
+  const includeInvalid = props["includeInvalid"] === true;
+  const invalidated = isInvalidated(docResult.value, nowIso);
+
+  // SPEC-043 D9 — Embed degrades to a skip-note instead of splicing stale content
+  // verbatim; includeInvalid embeds anyway, WITH an inline banner line prepended.
+  if (invalidated && !includeInvalid) {
+    const validity = extractValidity(docResult.value);
+    return ok({
+      embedded: null,
+      invalidatedSkip: `${docResult.value.slug} invalidated ${validity?.invalid_at ?? nowIso} — ` +
+        `lore get ${docResult.value.slug} to read it, includeInvalid to embed anyway`,
+    });
+  }
+
   const section = typeof props["section"] === "string" ? props["section"] : null;
-  const content = section !== null
+  const rawContent = section !== null
     ? extractSection(docResult.value.content, section)
     : docResult.value.content;
+  const banner = invalidated ? await resolveValidityBanner(store, docResult.value, nowIso) : undefined;
+  const content = banner !== undefined ? `${banner}\n\n${rawContent}` : rawContent;
 
   return ok({
     embedded: {
@@ -623,13 +699,19 @@ export class OutlineService {
    * Also resolves SPEC-038 §6's structured-AC projection (see
    * `resolveAcceptanceProjection`'s JSDoc) — a no-op (zero extra store calls) for any
    * doc that isn't a `spec` with a non-empty declared `acceptance_criteria` array.
+   *
+   * @param now - Time seam (SPEC-043 D3) — drives the default RecentDecisions/
+   *   RelatedOf/Embed invalidated-doc filtering; defaults to
+   *   `() => new Date().toISOString()`.
    */
   async resolve(
     doc: DocRecord,
     opts?: ResolveOpts,
+    now: () => string = defaultNow,
   ): Promise<Result<ResolvedDoc, LoreError>> {
     const resolvedComponents: ResolvedComponent[] = [];
     const warnings: ResolutionWarning[] = [];
+    const nowIso = now();
 
     for (const match of extractComponentMatches(doc.content)) {
       const { name, propsStr, fullMatch, index } = match;
@@ -645,7 +727,7 @@ export class OutlineService {
       }
 
       const props = parseProps(propsStr);
-      const dataResult = await this.resolveComponent(name, doc, props);
+      const dataResult = await this.resolveComponent(name, doc, props, nowIso);
 
       if (!dataResult.ok) {
         return dataResult;
@@ -721,26 +803,37 @@ export class OutlineService {
     name: string,
     doc: DocRecord,
     props: Record<string, unknown>,
+    nowIso: string,
   ): Promise<Result<ComponentData, LoreError>> {
     switch (name) {
       case "ChildrenOf":
         return resolveChildrenOf(doc, props, this.store);
       case "RecentDecisions":
-        return resolveRecentDecisions(props, this.store);
+        return resolveRecentDecisions(props, this.store, nowIso);
       case "ActivePlans":
         return resolveActivePlans(props, this.store);
       case "ModuleTree":
         return resolveModuleTree(doc, props, this.store);
       case "RelatedOf":
-        return resolveRelatedOf(doc, props, this.store);
+        return resolveRelatedOf(doc, props, this.store, nowIso);
       case "Embed":
-        return resolveEmbed(props, this.store);
+        return resolveEmbed(props, this.store, nowIso);
       case "HealthStats":
         return resolveHealthStats(this.store);
       default:
         // Unreachable — whitelist check happens before this call
         return err({ code: "STORE_ERROR", message: `Unhandled component: ${name}` });
     }
+  }
+
+  /**
+   * Convenience wrapper around the standalone {@link resolveValidityBanner} bound to
+   * this service's own `store` — the seam `flows/feed-flow.ts::renderDocMarkdown` (and
+   * CLI `get`/`export-docs`, T2) call rather than reaching into a service's private
+   * store field.
+   */
+  async resolveValidityBanner(doc: DocRecord, now: () => string = defaultNow): Promise<string | undefined> {
+    return resolveValidityBanner(this.store, doc, now());
   }
 }
 
@@ -805,6 +898,9 @@ function renderEmbed(data: unknown): string {
   const record = data as Record<string, unknown>;
   if (typeof record["error"] === "string") return `_(embed error: ${record["error"]})_`;
   if (typeof record["notFound"] === "string") return `_(embed not found: ${record["notFound"]})_`;
+  // SPEC-043 D9 — the invalidated-skip degrade note (Embed never splices stale
+  // content verbatim without includeInvalid).
+  if (typeof record["invalidatedSkip"] === "string") return `_(embed skipped: ${record["invalidatedSkip"]})_`;
   const embedded = record["embedded"];
   if (typeof embedded !== "object" || embedded === null) return "_(embed not found)_";
   const e = embedded as Record<string, unknown>;

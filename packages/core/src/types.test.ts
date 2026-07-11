@@ -56,6 +56,7 @@ describe("REGRESSION — SearchHit shape carries type/status (SPEC-037 §2)", ()
       score: 1.5,
       type: "spec",
       status: "approved",
+      created_at: "2026-07-01T00:00:00.000Z",
     };
     expect(hit.type).toBe("spec");
     expect(hit.status).toBe("approved");

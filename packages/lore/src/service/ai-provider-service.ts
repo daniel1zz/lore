@@ -790,7 +790,11 @@ export class AIProviderService {
     // so this lookup cannot miss in practice; the non-null assertion documents that guarantee
     // rather than silently tolerating an impossible `undefined`.
     const template = REVIEW_TEMPLATES[REVIEW_PROMPT_VERSION]!;
-    const { prompt, docTruncated } = template(bundle, checks, this.reviewBudgets);
+    // reason: SPEC-043 §Design Decisions D9 — nowIso drives the prompt's "# Staleness
+    // Notice" section (bundle.doc/bundle.parent invalidated-state check). judgeDoc is
+    // the sole production caller of this template — resolving "now" here, once, keeps
+    // review-template.ts itself wall-clock-free (its own module invariant).
+    const { prompt, docTruncated } = template(bundle, checks, this.reviewBudgets, new Date().toISOString());
 
     const emitReviewEvent = (
       providerResult: Result<GenerateOutput, LoreError>,

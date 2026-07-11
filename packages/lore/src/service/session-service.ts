@@ -50,33 +50,9 @@ import type {
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
 import type { GateCheckpoint } from "./checkpoint-registry.js";
+import { computeArmedGates } from "./checkpoint-registry.js";
 
 const defaultNow = (): string => new Date().toISOString();
-
-/** All four IoC vertical-slice gate checkpoints, in the fixed order `bootstrap` renders them. */
-const GATE_CHECKPOINTS: readonly GateCheckpoint[] = [
-  "spec-create",
-  "spec-promote",
-  "plan-promote",
-  "task-claim",
-];
-
-/**
- * checkpoint → discoverable feeding-skill scope (`knowledgeExtraSchema.skill.applies_to`),
- * consumed by {@link SessionService.bootstrap}'s `armed_gates[].feeding_source_slug`. A
- * LOCAL, narrower mirror of `flows/feed-flow.ts::CHECKPOINT_PRODUCED_TYPE` — services
- * must not import from `flows/`/`adapters/` (service/CLAUDE.md "no cross-service
- * calls" / composition lives in app.ts), so this module cannot import that map
- * directly. Only `"spec-create"` has a discoverable feeding SKILL wired in production
- * today (mirrors `CHECKPOINT_PRODUCED_TYPE`'s current single entry) — the other three
- * checkpoints source their feeding message from the TARGET doc's resolved ancestor
- * spec (`checkpoint-registry.ts::feedUpstreamSpecCheckpoint`), not a skill-doc lookup,
- * so they have no single corpus-wide "the feeding source" a bootstrap snapshot could
- * point at; their `feeding_source_slug` is `null`.
- */
-const CHECKPOINT_APPLIES_TO: Partial<Record<GateCheckpoint, string>> = {
-  "spec-create": "spec",
-};
 
 /** Truncates `title` to at most `maxChars`, appending an ellipsis marker when cut. */
 function truncateTitle(title: string, maxChars = 120): string {
@@ -260,31 +236,23 @@ export class SessionService {
       });
     }
 
-    // Armed gates — enabled checkpoints + discoverable feeding-skill source.
-    const approvedSkills = allDocs.filter((d) => {
-      if (d.type !== "knowledge" || d.status !== "approved") return false;
-      const parsed = knowledgeExtraSchema.safeParse(d.extra);
-      return parsed.success && parsed.data.sub_type === "skill";
-    });
+    // Armed gates — enabled checkpoints + discoverable feeding-skill source. Reuses
+    // the SAME computeArmedGates SSOT `CorpusService.status`'s SPEC-043 D8
+    // invalidated-feeding-source warning also calls — never a second derivation.
+    const approvedSkillDocs = allDocs
+      .filter((d) => d.type === "knowledge" && d.status === "approved")
+      .map((d) => ({ doc: d, parsed: knowledgeExtraSchema.safeParse(d.extra) }))
+      .filter(({ parsed }) => parsed.success && parsed.data.sub_type === "skill")
+      .map(({ doc, parsed }) => ({
+        slug: doc.slug,
+        updated_at: doc.updated_at,
+        appliesTo: parsed.success ? parsed.data.skill?.applies_to : undefined,
+      }));
     const isCheckpointEnabled = this.deps.isCheckpointEnabled ?? (() => true);
-    const armedGates: BootstrapReport["armed_gates"] = [];
-    for (const checkpoint of GATE_CHECKPOINTS) {
-      if (!isCheckpointEnabled(checkpoint)) continue;
-      const appliesTo = CHECKPOINT_APPLIES_TO[checkpoint];
-      let feedingSourceSlug: string | null = null;
-      if (appliesTo !== undefined) {
-        const matches = approvedSkills.filter((d) => {
-          const parsed = knowledgeExtraSchema.safeParse(d.extra);
-          return parsed.success && parsed.data.skill?.applies_to === appliesTo;
-        });
-        const latest =
-          matches.length > 0
-            ? matches.reduce((newest, d) => (d.updated_at > newest.updated_at ? d : newest))
-            : undefined;
-        feedingSourceSlug = latest?.slug ?? null;
-      }
-      armedGates.push({ checkpoint, feeding_source_slug: feedingSourceSlug });
-    }
+    const armedGates: BootstrapReport["armed_gates"] = computeArmedGates(
+      approvedSkillDocs,
+      isCheckpointEnabled,
+    );
 
     // Latest handoff per plan grouping (null group = parentless or PRD-parented) + a
     // corpus-wide resume hint (the single newest handoff overall).

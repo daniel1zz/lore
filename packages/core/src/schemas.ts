@@ -11,6 +11,7 @@ import { assessmentResultSchema } from "./assessment.js";
 import { SPEC_KINDS } from "./spec-kind.js";
 import { specAcceptanceCriteriaSchema } from "./acceptance.js";
 import { handoffExtraSchema } from "./session.js";
+import { validitySchema } from "./validity.js";
 
 // ─── Primitive Schemas ─────────────────────────────────────────────────────
 
@@ -90,6 +91,9 @@ export const adrExtraSchema = z
   .object({
     decision_status: decisionStatusSchema,
     superseded_by: docIdSchema.optional(),
+    /** Bi-temporal validity metadata (SPEC-043 D1) — written exclusively via
+     *  `ValidityService.invalidate` (`lore invalidate`), never `lore set` (D10). */
+    validity: validitySchema.optional(),
   })
   .passthrough();
 
@@ -153,6 +157,9 @@ export const knowledgeExtraSchema = z
     skill: skillExtraSchema.optional(),
     /** Present iff sub_type === "handoff" — the Zod-typed SSOT lossless-handoff payload. */
     handoff: handoffExtraSchema.optional(),
+    /** Bi-temporal validity metadata (SPEC-043 D1) — written exclusively via
+     *  `ValidityService.invalidate` (`lore invalidate`), never `lore set` (D10). */
+    validity: validitySchema.optional(),
   })
   .passthrough()
   .superRefine((data, ctx) => {
@@ -386,15 +393,25 @@ export const createDocInputSchema = baseCreateDocInputSchema.superRefine(
       });
     }
 
-    // adr requires extra.decision_status
+    // adr requires extra.decision_status (and, when extra.validity is present, a
+    // schema-valid one — SPEC-043 D10/S1). reason: forward adrExtraSchema's own issues
+    // (mirroring the knowledge branch below) instead of collapsing every failure into
+    // the single decision_status message — a valid decision_status with a malformed
+    // extra.validity must report the REAL validity issue, not a misleading
+    // "requires extra.decision_status" message (SPEC-042 T1 bug class, twice-paid).
     if (type === "adr") {
       const adrResult = adrExtraSchema.safeParse(extra ?? {});
       if (!adrResult.success) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "adr requires extra.decision_status (proposed|accepted|deprecated|superseded)",
-          path: ["extra", "decision_status"],
-        });
+        for (const issue of adrResult.error.issues) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message:
+              issue.path[0] === "decision_status"
+                ? "adr requires extra.decision_status (proposed|accepted|deprecated|superseded)"
+                : issue.message,
+            path: ["extra", ...issue.path],
+          });
+        }
       }
     }
 

@@ -4,6 +4,7 @@
  */
 
 import type { SpecKind } from "./spec-kind.js";
+import type { Validity } from "./validity.js";
 
 // ─── Primitive Aliases ─────────────────────────────────────────────────────
 
@@ -282,6 +283,19 @@ export interface SearchHit {
   score: number;
   type: DocType;
   status: DocStatus;
+  /**
+   * ISO 8601 `docs.created_at` — SPEC-043 D3 (review S3). Needed alongside `validity`
+   * so `CorpusService.search`'s default-invalidated-filter can compute
+   * `isInvalidated(hit, now)` directly on the hit, with zero N+1 per-hit fetches.
+   */
+  created_at: string;
+  /**
+   * Narrow bi-temporal validity projection (SPEC-043 D3, review S3) — present iff
+   * `docs.extra.validity` parses to a schema-valid {@link Validity}. Populated by both
+   * SQLiteStore and TursoStore's search SQL (joined `docs.extra` column, parsed) and by
+   * InMemoryStore directly from the in-memory `DocRecord`.
+   */
+  validity?: Validity;
 }
 
 // ─── SPEC-024: Caller Surface + AI Default Source ──────────────────────────

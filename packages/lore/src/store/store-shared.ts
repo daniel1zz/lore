@@ -19,14 +19,16 @@ import type {
   CalibrationRecord,
   CheckResult,
   DocRecord,
+  DocStatus,
   DocType,
   LinkRecord,
   LinkType,
   ReviewJudgment,
   ReviewReason,
+  SearchHit,
   VersionRecord,
 } from "@lore/core";
-import { err, type LoreError, type Result } from "@lore/core";
+import { err, extractValidity, type LoreError, type Result } from "@lore/core";
 
 // ─── Raw DB row types ──────────────────────────────────────────────────────
 
@@ -88,6 +90,8 @@ export interface AuditRow {
  * Raw row from the `docs_fts` search join.
  * `type`/`status` are the docs-table columns joined in alongside id/slug/title
  * (SPEC-037 §2 D5) so `SearchHit` can carry them with zero extra queries.
+ * `created_at`/`extra` are the SAME joined-in `docs` columns, added SPEC-043 D3 so
+ * `SearchHit.validity` can be computed with zero N+1 per-hit fetches (review S3).
  */
 export interface FtsRow {
   id: string;
@@ -97,6 +101,8 @@ export interface FtsRow {
   rank: number | bigint;
   type: string;
   status: string;
+  created_at: string;
+  extra: string;
 }
 
 /**
@@ -152,6 +158,29 @@ export function parseJson<T>(raw: string, fallback: T): T {
 }
 
 // ─── Row mappers ───────────────────────────────────────────────────────────
+
+/**
+ * Maps a raw {@link FtsRow} (the `docs_fts ⋈ docs` search join row) to a
+ * {@link SearchHit}, including the SPEC-043 D3 narrow `validity` projection —
+ * parsed from the SAME joined `extra` JSON column, never a per-hit `store.find`
+ * (review S3's "no N+1" constraint). Shared by SQLiteStore and TursoStore so this
+ * projection logic exists exactly once.
+ */
+export function rowToSearchHit(row: FtsRow): SearchHit {
+  const extra = parseJson<Record<string, unknown>>(row.extra, {});
+  const validity = extractValidity({ extra });
+  return {
+    id: row.id,
+    slug: row.slug,
+    title: row.title,
+    snippet: row.snippet ?? "",
+    score: typeof row.rank === "bigint" ? Number(row.rank) : row.rank,
+    type: row.type as DocType,
+    status: row.status as DocStatus,
+    created_at: row.created_at,
+    ...(validity !== undefined ? { validity } : {}),
+  };
+}
 
 export function rowToDocRecord(row: DocRow): DocRecord {
   return {

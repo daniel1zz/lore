@@ -15,8 +15,6 @@ import type {
   CalibrationRecord,
   DocId,
   DocRecord,
-  DocStatus,
-  DocType,
   LinkRecord,
   LinkType,
   ReviewJudgment,
@@ -54,6 +52,7 @@ import {
   rowToDocRecord,
   rowToLinkRecord,
   rowToReviewJudgment,
+  rowToSearchHit,
   rowToVersionRecord,
   wrapStoreError,
 } from "./store-shared.js";
@@ -567,7 +566,9 @@ export class SQLiteStore implements StoreInterface {
           snippet(docs_fts, 1, ?, ?, '...', 32) AS snippet,
           f.rank,
           d.type,
-          d.status
+          d.status,
+          d.created_at,
+          d.extra
         FROM docs_fts f
         JOIN docs d ON d.rowid = f.rowid
         WHERE docs_fts MATCH ?
@@ -584,17 +585,9 @@ export class SQLiteStore implements StoreInterface {
           ...docParams,
         ) as FtsRow[];
 
-      const hits: SearchHit[] = rows.map((row) => ({
-        id: row.id,
-        slug: row.slug,
-        title: row.title,
-        snippet: row.snippet ?? "",
-        // FTS5 rank is a BM25 float; bun:sqlite may return bigint for integer columns
-        // but BM25 scores are fractional so Number() is safe here.
-        score: typeof row.rank === "bigint" ? Number(row.rank) : row.rank,
-        type: row.type as DocType,
-        status: row.status as DocStatus,
-      }));
+      // SPEC-043 D3 — rowToSearchHit also populates created_at + the narrow
+      // validity projection (review S3, zero N+1 per-hit fetches).
+      const hits: SearchHit[] = rows.map(rowToSearchHit);
 
       // Tags filter applied in-memory if needed
       if (filters?.tags && filters.tags.length > 0) {

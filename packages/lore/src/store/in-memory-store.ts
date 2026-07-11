@@ -19,6 +19,7 @@ import type {
 } from "@lore/core";
 import {
   err,
+  extractValidity,
   ok,
   SNIPPET_MARK_CLOSE,
   SNIPPET_MARK_OPEN,
@@ -316,6 +317,7 @@ export class InMemoryStore implements StoreInterface {
 
       if (titleMatch || contentMatch || tagMatch) {
         const snippet = buildSnippet(doc.content, lower);
+        const validity = extractValidity(doc);
         hits.push({
           id: doc.id,
           slug: doc.slug,
@@ -324,6 +326,10 @@ export class InMemoryStore implements StoreInterface {
           score: 0,
           type: doc.type,
           status: doc.status,
+          // SPEC-043 D3 — created_at + the narrow validity projection, straight from
+          // the already-in-hand DocRecord (no extra lookup needed for InMemoryStore).
+          created_at: doc.created_at,
+          ...(validity !== undefined ? { validity } : {}),
         });
       }
     }
