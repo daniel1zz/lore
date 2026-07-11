@@ -254,7 +254,9 @@ describe("lore verify — HAPPY", () => {
 // ─── NEGATIVE ─────────────────────────────────────────────────────────────────
 
 describe("lore verify — NEGATIVE", () => {
-  it("AC-VRF-10.N1: ambiguous target task (>1 fresh claim, no --task) → exit 4, message lists candidates", () => {
+  // reason: 15s budget — heaviest spawn count in this file (9 CLI subprocesses); at
+  // vitest's 5s default it sits at ~7s under full-suite parallel load (2026-07-11).
+  it("AC-VRF-10.N1: ambiguous target task (>1 fresh claim, no --task) → exit 4, message lists candidates", { timeout: 15_000 }, () => {
     const prdSlug = createPrd("Ambiguous PRD");
     const specSlug = createSpec("Ambiguous Spec", prdSlug);
     declareScriptAc(specSlug, "AC-VRF-AMB", "true");
