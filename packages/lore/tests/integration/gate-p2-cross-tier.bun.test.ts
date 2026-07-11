@@ -240,6 +240,62 @@ async function createTask(planId: string): Promise<{ taskId: string; taskSlug: s
   }
 }
 
+/**
+ * Creates a task under `planId` declaring `file_anchors` (SPEC-042 §Design
+ * Decisions D3) — used by the AC-P2-ANCHOR suite below to set up a sibling-claim
+ * anchor-overlap scenario. `title` is caller-supplied (not the fixed "Gate P2
+ * Task" literal `createTask` above uses) so two tasks under the same plan get
+ * distinguishable slugs.
+ */
+async function createTaskWithAnchors(
+  planId: string,
+  title: string,
+  anchors: string[],
+): Promise<{ taskId: string; taskSlug: string }> {
+  const app = createFixtureApp(dbPath());
+  try {
+    const taskResult = await app.corpusService.create({
+      type: "task",
+      title,
+      parent_id: planId,
+      content: "Task body.",
+      extra: { plan_id: planId, file_anchors: anchors },
+    } as CreateDocInput);
+    if (!taskResult.ok) throw new Error(`task create failed: ${JSON.stringify(taskResult.error)}`);
+    return { taskId: taskResult.value.id, taskSlug: taskResult.value.slug };
+  } finally {
+    app.close();
+  }
+}
+
+/**
+ * Claims `taskId` as `by` directly via `TaskWorkflowService.claim` against the
+ * fixture app (all four checkpoints disabled — see `createFixtureApp`'s JSDoc).
+ * This suite is about `lore gate task-claim`'s PRE-FLIGHT verdict, not the real
+ * `lore claim` write path, so fixture claims bypass gating entirely — the same
+ * fixture-construction convention `approveDoc`/`softDeleteDoc` already use.
+ */
+async function claimTask(taskId: string, by: string): Promise<void> {
+  const app = createFixtureApp(dbPath());
+  try {
+    const result = await app.taskWorkflowService.claim(taskId, { by });
+    if (!result.ok) throw new Error(`claim failed: ${JSON.stringify(result.error)}`);
+  } finally {
+    app.close();
+  }
+}
+
+/** Releases `taskId`'s claim as `by` (fixture app, gates disabled — see `claimTask`). */
+async function releaseTask(taskId: string, by: string): Promise<void> {
+  const app = createFixtureApp(dbPath());
+  try {
+    const result = await app.taskWorkflowService.release(taskId, { by });
+    if (!result.ok) throw new Error(`release failed: ${JSON.stringify(result.error)}`);
+  } finally {
+    app.close();
+  }
+}
+
 /** Fast-tracks a doc from draft straight to approved (SPEC-002 §3 valid transition). */
 async function approveDoc(id: string): Promise<void> {
   const app = createFixtureApp(dbPath());
@@ -650,6 +706,157 @@ describe("lore gate — REGRESSION: plan-promote and task-claim agree on the sam
     } finally {
       output.restore();
     }
+    expect(process.exitCode).toBe(0);
+  });
+});
+
+// ─── AC-P2-ANCHOR: `lore gate task-claim` / `lore claim` PARITY on anchor overlap ──
+//
+// Live-UAT regression fix (2026-07-11): `runTaskClaimGate` used to build ONLY
+// `buildUpstreamSpecContext(...)`, never `buildAnchorGateContext(...)` — so
+// `candidateBy`/`candidateAnchors`/`siblingClaims` were always `undefined` and
+// `noAnchorOverlap` vacuously passed here, even while the SAME scenario correctly
+// blocked at `TaskWorkflowService.claim` (the `lore claim` write path, exercised at
+// `tests/unit/adapters/cli-claim-anchors.bun.test.ts`). This suite pins the two
+// surfaces AGREEING — the exact drift retro-item-8's SSOT relocation was meant to
+// prevent — using `createPrdParentedPlan` (no spec-tier ancestor) so the
+// anchor-overlap predicate's own UNCONDITIONAL-evaluation contract (SPEC-042 D5 —
+// NOT gated by `hasSpecParent`, unlike `upstreamApproved`) is exercised in isolation.
+
+describe("lore gate task-claim — AC-P2-ANCHOR: anchor-overlap parity with `lore claim` (SPEC-042 D5)", () => {
+  it("NEGATIVE: a fresh foreign sibling claim with overlapping anchors → exit 4, feed names the conflicting task/holder/paths + the literal recovery command", async () => {
+    const { planId } = await createPrdParentedPlan(); // no spec-tier ancestor — isolates the anchor predicate
+    const { taskId: taskAId, taskSlug: taskASlug } = await createTaskWithAnchors(
+      planId,
+      "Anchor Gate Task A",
+      ["src/shared.ts"],
+    );
+    const { taskSlug: taskBSlug } = await createTaskWithAnchors(planId, "Anchor Gate Task B", [
+      "src/shared.ts",
+    ]);
+
+    await claimTask(taskAId, "agent:a");
+
+    const cmd = await importGateSubCommand("task-claim");
+    const output = captureOutput();
+    try {
+      await cmd.run({ args: { task: taskBSlug, by: "agent:b" } });
+    } finally {
+      output.restore();
+    }
+
+    expect(process.exitCode).toBe(4);
+    const stdoutText = output.stdout.join("\n");
+    expect(stdoutText).toContain("ANCHOR_OVERLAP");
+    expect(stdoutText).toContain(taskASlug);
+    expect(stdoutText).toContain("agent:a");
+    expect(stdoutText).toContain("src/shared.ts");
+    expect(stdoutText).toContain(`lore release ${taskASlug} --by agent:a --force`);
+  });
+
+  it("HAPPY: after releasing the conflicting claim, the SAME gate call passes", async () => {
+    const { planId } = await createPrdParentedPlan();
+    const { taskId: taskAId } = await createTaskWithAnchors(planId, "Anchor Gate Release Task A", [
+      "src/shared.ts",
+    ]);
+    const { taskSlug: taskBSlug } = await createTaskWithAnchors(planId, "Anchor Gate Release Task B", [
+      "src/shared.ts",
+    ]);
+
+    await claimTask(taskAId, "agent:a");
+
+    const cmd = await importGateSubCommand("task-claim");
+
+    // -- blocked while task A's claim is live --
+    let output = captureOutput();
+    try {
+      await cmd.run({ args: { task: taskBSlug, by: "agent:b" } });
+    } finally {
+      output.restore();
+    }
+    expect(process.exitCode).toBe(4);
+
+    // -- release task A's claim --
+    await releaseTask(taskAId, "agent:a");
+
+    // -- the SAME gate call now passes --
+    output = captureOutput();
+    try {
+      await cmd.run({ args: { task: taskBSlug, by: "agent:b" } });
+    } finally {
+      output.restore();
+    }
+    expect(process.exitCode).toBe(0);
+    expect(output.stdout.join("\n")).toContain("gate: pass");
+    expect(process.exitCode).not.toBe(4);
+  });
+
+  it("REGRESSION: a fresh claim by the SAME actor does not conflict, even with overlapping anchors", async () => {
+    const { planId } = await createPrdParentedPlan();
+    const { taskId: taskAId } = await createTaskWithAnchors(planId, "Anchor Gate Same-Actor Task A", [
+      "src/shared.ts",
+    ]);
+    const { taskSlug: taskBSlug } = await createTaskWithAnchors(planId, "Anchor Gate Same-Actor Task B", [
+      "src/shared.ts",
+    ]);
+
+    await claimTask(taskAId, "agent:a");
+
+    const cmd = await importGateSubCommand("task-claim");
+    const output = captureOutput();
+    try {
+      await cmd.run({ args: { task: taskBSlug, by: "agent:a" } });
+    } finally {
+      output.restore();
+    }
+
+    expect(process.exitCode).toBe(0);
+    expect(output.stdout.join("\n")).toContain("gate: pass");
+  });
+
+  it("BOUNDARY: disjoint anchors between fresh siblings → gate: pass", async () => {
+    const { planId } = await createPrdParentedPlan();
+    const { taskId: taskAId } = await createTaskWithAnchors(planId, "Anchor Gate Disjoint Task A", [
+      "src/a.ts",
+    ]);
+    const { taskSlug: taskBSlug } = await createTaskWithAnchors(planId, "Anchor Gate Disjoint Task B", [
+      "src/b.ts",
+    ]);
+
+    await claimTask(taskAId, "agent:a");
+
+    const cmd = await importGateSubCommand("task-claim");
+    const output = captureOutput();
+    try {
+      await cmd.run({ args: { task: taskBSlug, by: "agent:b" } });
+    } finally {
+      output.restore();
+    }
+
+    expect(process.exitCode).toBe(0);
+  });
+
+  it("STATE: candidate task itself declares no anchors → vacuous pass regardless of a conflicting-looking sibling", async () => {
+    const { planId } = await createPrdParentedPlan();
+    const { taskId: taskAId } = await createTaskWithAnchors(planId, "Anchor Gate Anchorless Task A", [
+      "src/shared.ts",
+    ]);
+    const { taskSlug: taskBSlug } = await createTaskWithAnchors(
+      planId,
+      "Anchor Gate Anchorless Task B",
+      [], // candidate declares NO anchors — noAnchorOverlap short-circuits to pass
+    );
+
+    await claimTask(taskAId, "agent:a");
+
+    const cmd = await importGateSubCommand("task-claim");
+    const output = captureOutput();
+    try {
+      await cmd.run({ args: { task: taskBSlug, by: "agent:b" } });
+    } finally {
+      output.restore();
+    }
+
     expect(process.exitCode).toBe(0);
   });
 });

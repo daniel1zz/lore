@@ -233,3 +233,101 @@ describe("AC-P2-7: workflow.gates.task-claim.enabled=false disables only task-cl
     expect(result.exitCode).toBe(4);
   });
 });
+
+// ─── SPEC-042 §Design Decisions D6: workflow.gates.task-claim.anchor_overlap.enabled ──
+//
+// Config-gating parity check between `lore claim` (service-layer GateEnforcer path,
+// pinned at tests/unit/service/claim-anchor-gate.test.ts's identically-named STATE
+// case) and `lore gate task-claim` (this pre-flight CLI command) — both must honor
+// the SAME narrower sub-key, distinct from the whole-checkpoint
+// `workflow.gates.task-claim.enabled` above.
+
+/** Creates a top-level plan (no parent at all — no spec tier) plus two tasks under it declaring overlapping `--anchor` paths. */
+function createTopLevelPlanWithOverlappingAnchorTasks(tmpDir: string): {
+  planSlug: string;
+  taskASlug: string;
+  taskBSlug: string;
+} {
+  const planSlug = parseSlug(
+    runLore(["create", "plan", "--title", "Anchor Overlap Config Plan", "--content", "Plan body.", "--no-ai"], tmpDir)
+      .stdout,
+  );
+  const taskASlug = parseSlug(
+    runLore(
+      [
+        "create",
+        "task",
+        "--title",
+        "Anchor Overlap Config Task A",
+        "--parent",
+        planSlug,
+        "--plan-id",
+        planSlug,
+        "--anchor",
+        "src/shared.ts",
+        "--content",
+        "Task body.",
+        "--no-ai",
+      ],
+      tmpDir,
+    ).stdout,
+  );
+  const taskBSlug = parseSlug(
+    runLore(
+      [
+        "create",
+        "task",
+        "--title",
+        "Anchor Overlap Config Task B",
+        "--parent",
+        planSlug,
+        "--plan-id",
+        planSlug,
+        "--anchor",
+        "src/shared.ts",
+        "--content",
+        "Task body.",
+        "--no-ai",
+      ],
+      tmpDir,
+    ).stdout,
+  );
+  return { planSlug, taskASlug, taskBSlug };
+}
+
+describe("SPEC-042 D6: workflow.gates.'task-claim'.anchor_overlap.enabled=false disables ONLY the anchor predicate, at the `lore gate task-claim` CLI seam", () => {
+  it("NEGATIVE baseline: with the sub-key absent (default enabled), a fresh foreign overlapping sibling claim blocks — exit 4, ANCHOR_OVERLAP", () => {
+    const { taskASlug, taskBSlug } = createTopLevelPlanWithOverlappingAnchorTasks(tmpDir);
+    const claimResult = runLore(["claim", taskASlug, "--by", "agent:a"], tmpDir);
+    expect(claimResult.exitCode).toBe(0);
+
+    const result = runLore(["gate", "task-claim", "--task", taskBSlug, "--by", "agent:b"], tmpDir);
+    expect(result.exitCode).toBe(4);
+    expect(result.stdout).toContain("ANCHOR_OVERLAP");
+  });
+
+  it("HAPPY: with the sub-key explicitly disabled, the SAME conflicting scenario passes — exit 0, gate: pass", () => {
+    const { taskASlug, taskBSlug } = createTopLevelPlanWithOverlappingAnchorTasks(tmpDir);
+    const claimResult = runLore(["claim", taskASlug, "--by", "agent:a"], tmpDir);
+    expect(claimResult.exitCode).toBe(0);
+
+    writeGatesConfig(tmpDir, '    "task-claim":\n      anchor_overlap:\n        enabled: false');
+
+    const result = runLore(["gate", "task-claim", "--task", taskBSlug, "--by", "agent:b"], tmpDir);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("gate: pass");
+  });
+
+  it("REGRESSION: disabling ONLY anchor_overlap does not also disable the whole-checkpoint upstream-approval check", () => {
+    const { taskSlug } = createSpecParentedPlanAndTask(tmpDir); // unapproved ancestor spec
+    writeGatesConfig(tmpDir, '    "task-claim":\n      anchor_overlap:\n        enabled: false');
+
+    const result = runLore(["gate", "task-claim", "--task", taskSlug, "--by", "agent:a"], tmpDir);
+    // reason: the task declares no anchors and has no sibling claims at all — the
+    // anchor predicate would vacuously pass regardless of the sub-key. This assertion
+    // is about upstreamApproved still firing (exit 4) even with anchor_overlap
+    // disabled — the two predicates are independently gated (D6), not coupled.
+    expect(result.exitCode).toBe(4);
+    expect(result.stdout).toContain("UPSTREAM_NOT_APPROVED");
+  });
+});
