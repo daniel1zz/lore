@@ -8,16 +8,20 @@ import { ulid } from "ulidx";
 import { err, ok, type Result } from "@lore/core";
 import type { LoreError } from "@lore/core";
 import {
+  adrExtraSchema,
   canonicaliseBody,
   createDocInputSchema,
   deriveTypeMeta,
   docPatchSchema,
+  extractValidity,
+  isInvalidated,
   knowledgeExtraSchema,
   planAcScopeSchema,
   slugifyWithCollision,
   specAcceptanceCriteriaSchema,
   specExtraSchema,
   normalizeFileAnchors,
+  validityEqual,
 } from "@lore/core";
 import type { CreateDocInput, DocPatch } from "@lore/core";
 import {
@@ -41,6 +45,7 @@ import type { ReviewBundle } from "@lore/core";
 import type { TreeBlueprint } from "@lore/core";
 import type { GateEnforcer } from "./gate-enforcer.js";
 import type { GateContext } from "./checkpoint-registry.js";
+import { computeArmedGates } from "./checkpoint-registry.js";
 
 // ─── Local types (mirror SPEC-001 §3.1 interfaces) ────────────────────────
 
@@ -51,6 +56,9 @@ const ULID_RE = /^[0-9A-Z]{26}$/;
 function isUlid(input: string): boolean {
   return ULID_RE.test(input);
 }
+
+/** Time seam (D3/D10 convention) — never `Date.now()` read directly in method bodies. */
+const defaultNow = (): string => new Date().toISOString();
 
 /**
  * @deprecated `resolve_mdx` is accepted for backward-compatibility with existing callers
@@ -113,12 +121,20 @@ export interface ListFilters {
   created_by?: string;
   since?: string;
   tags?: string[];
+  /**
+   * SPEC-043 D3 escape — when `true`, invalidated `knowledge`/`adr` docs are included
+   * (the pre-SPEC-043 default: none are ever excluded). Stripped before the filter
+   * object is forwarded to `StoreInterface.findMany` (not a store-level filter).
+   */
+  include_invalid?: boolean;
 }
 
 export interface SearchFilters {
   type?: DocType;
   status?: DocStatus;
   tags?: string[];
+  /** See {@link ListFilters.include_invalid} — same escape, same strip-before-store rule. */
+  include_invalid?: boolean;
 }
 
 export interface TreeOpts {
@@ -136,6 +152,14 @@ export interface CorpusStatus {
   by_status: Record<string, number>;
   last_updated: string;
   db_size_bytes: number;
+  /**
+   * SPEC-043 D8 — one human-readable warning per ARMED gate checkpoint whose
+   * discovered feeding-skill source doc is currently invalidated. Computed via the
+   * SAME `computeArmedGates` helper `SessionService.bootstrap`'s `armed_gates[]` uses
+   * (never a second derivation of "which gates are armed / what feeds them").
+   * Empty when nothing is invalidated (never omitted — always a fact, not absent data).
+   */
+  invalidated_feeding_source_warnings: string[];
 }
 
 // ─── CorpusService ─────────────────────────────────────────────────────────
@@ -961,6 +985,42 @@ export class CorpusService {
       }
     }
 
+    // knowledge/adr extra re-validation + D10 writer-identity guard (SPEC-043 §Design
+    // Decisions D10) — closes the "set() was an unguarded second write path onto
+    // extra.validity" hole (review S2). Two checks, in this order:
+    //   1. Shape: re-parse the incoming extra against its type-specific schema (the
+    //      SAME schema _createImpl's superRefine delegates to) so a malformed
+    //      extra.validity is rejected with the REAL issue — even when
+    //      extra.decision_status is otherwise valid (D10/S1 regression: the ADR
+    //      create-path issue-collapse bug, now fixed at both write paths).
+    //   2. Writer guard: once shape-valid, a patch whose extra.validity DIFFERS from
+    //      the doc's CURRENT extra.validity is rejected — `lore invalidate`
+    //      (ValidityService) is the sole path allowed to change it.
+    if ((existing.type === "adr" || existing.type === "knowledge") && parsedPatch.data.extra !== undefined) {
+      const extraSchema = existing.type === "adr" ? adrExtraSchema : knowledgeExtraSchema;
+      const extraResult = extraSchema.safeParse(parsedPatch.data.extra);
+      if (!extraResult.success) {
+        const issue = extraResult.error.issues[0];
+        return err({
+          code: "VALIDATION_ERROR",
+          field: issue ? `extra.${String(issue.path.join("."))}` : "extra",
+          message: issue ? issue.message : `invalid ${existing.type} extra`,
+          value: parsedPatch.data.extra,
+        });
+      }
+
+      const incomingValidity = extractValidity({ extra: parsedPatch.data.extra });
+      const currentValidity = extractValidity(existing);
+      if (!validityEqual(incomingValidity, currentValidity)) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "extra.validity",
+          message: "extra.validity cannot be changed via `lore set` — use `lore invalidate` instead",
+          value: parsedPatch.data.extra["validity"],
+        });
+      }
+    }
+
     // Gate `spec-promote` on a spec's draft→approved TRANSITION reached via `set`
     // (retro follow-up item 8, defense-in-depth) — `set` is a SECOND write path
     // (besides `ReviewService.approve`) that can push a spec straight to "approved"
@@ -1082,16 +1142,33 @@ export class CorpusService {
   /**
    * List documents matching filters. Returns DocSummary[] with total count.
    * Telemetry: records one event with filter type (if any) and result count.
+   *
+   * @param filters - Standard filters plus SPEC-043 D3's `include_invalid` escape.
+   * @param now - Time seam (D3) — drives the default invalidated-knowledge/adr
+   *   exclusion; defaults to `() => new Date().toISOString()`.
    */
-  async list(filters: ListFilters): Promise<Result<{ docs: DocSummary[]; total: number }, LoreError>> {
+  async list(
+    filters: ListFilters,
+    now: () => string = defaultNow,
+  ): Promise<Result<{ docs: DocSummary[]; total: number }, LoreError>> {
     const startMs = Date.now();
-    const storeResult = await this.store.findMany(filters);
+    const { include_invalid, ...storeFilters } = filters;
+    const storeResult = await this.store.findMany(storeFilters);
     if (!storeResult.ok) {
       this.recordTelemetryEvent("list", startMs, storeResult, { filter_type: filters.type });
       return storeResult;
     }
 
-    const docs = storeResult.value.map((d) => this.toSummary(d));
+    // SPEC-043 D3 — invalidated knowledge/adr docs are excluded by default from this
+    // list-shaped read; isInvalidated is a no-op for every other doc type (they never
+    // carry extra.validity), so this filter naturally scopes itself.
+    const nowIso = now();
+    const visibleDocs =
+      include_invalid === true
+        ? storeResult.value
+        : storeResult.value.filter((d) => !isInvalidated(d, nowIso));
+
+    const docs = visibleDocs.map((d) => this.toSummary(d));
     const result = ok({ docs, total: docs.length });
     this.recordTelemetryEvent("list", startMs, result, { filter_type: filters.type, count: docs.length });
     return result;
@@ -1166,19 +1243,36 @@ export class CorpusService {
   /**
    * Full-text search delegated to store.
    * Telemetry: records one event with query length and result count.
+   *
+   * @param filters - Standard filters plus SPEC-043 D3's `include_invalid` escape.
+   * @param now - Time seam (D3) — drives the default invalidated-knowledge/adr
+   *   exclusion; defaults to `() => new Date().toISOString()`.
    */
   async search(
     query: string,
     filters?: SearchFilters,
+    now: () => string = defaultNow,
   ): Promise<Result<{ results: SearchHit[] }, LoreError>> {
     const startMs = Date.now();
-    const storeResult = await this.store.search(query, filters);
+    const { include_invalid, ...storeFilters } = filters ?? {};
+    const storeResult = await this.store.search(query, storeFilters);
     if (!storeResult.ok) {
       this.recordTelemetryEvent("search", startMs, storeResult, { query_length: query.length });
       return storeResult;
     }
-    const result = ok({ results: storeResult.value });
-    this.recordTelemetryEvent("search", startMs, result, { query_length: query.length, hits: storeResult.value.length });
+
+    // SPEC-043 D3 — invalidated knowledge/adr hits are excluded by default. The
+    // narrow SearchHit.validity projection (SPEC-037/SPEC-043) makes this computable
+    // with ZERO extra store reads (review S3's "no N+1 per-hit fetch") — order of
+    // surviving hits is preserved either way (AC-MH-5's order-preservation oracle).
+    const nowIso = now();
+    const visibleHits =
+      include_invalid === true
+        ? storeResult.value
+        : storeResult.value.filter((hit) => !isInvalidated(hit, nowIso));
+
+    const result = ok({ results: visibleHits });
+    this.recordTelemetryEvent("search", startMs, result, { query_length: query.length, hits: visibleHits.length });
     return result;
   }
 
@@ -1635,8 +1729,13 @@ export class CorpusService {
 
   // ── Status ───────────────────────────────────────────────────────────────
 
-  /** Aggregate corpus statistics. */
-  async status(): Promise<Result<CorpusStatus, LoreError>> {
+  /**
+   * Aggregate corpus statistics.
+   *
+   * @param now - Time seam (D8/D3 convention) — drives the invalidated-feeding-source
+   *   warning below; defaults to `() => new Date().toISOString()`.
+   */
+  async status(now: () => string = defaultNow): Promise<Result<CorpusStatus, LoreError>> {
     const allDocsResult = await this.store.findMany({ exclude_deleted: false });
     if (!allDocsResult.ok) return allDocsResult;
 
@@ -1662,12 +1761,45 @@ export class CorpusService {
     const dbSizeResult = await this.store.dbSizeBytes();
     if (!dbSizeResult.ok) return dbSizeResult;
 
+    // SPEC-043 D8 — invalidated-feeding-source warning, computed via the SAME
+    // computeArmedGates helper SessionService.bootstrap's armed_gates[] uses (never a
+    // second derivation of "which gates are armed / what feeds them"). Reuses THIS
+    // service's own optional gateEnforcer for per-checkpoint enablement, when wired —
+    // absent (bare unit-test construction) degrades to "everything enabled", the same
+    // default GateEnforcer/SessionService already apply.
+    const nowIso = now();
+    const bySlug = new Map(activeDocs.map((d) => [d.slug, d] as const));
+    const approvedSkillDocs = activeDocs
+      .filter((d) => d.type === "knowledge" && d.status === "approved")
+      .map((d) => ({ doc: d, parsed: knowledgeExtraSchema.safeParse(d.extra) }))
+      .filter(({ parsed }) => parsed.success && parsed.data.sub_type === "skill")
+      .map(({ doc, parsed }) => ({
+        slug: doc.slug,
+        updated_at: doc.updated_at,
+        appliesTo: parsed.success ? parsed.data.skill?.applies_to : undefined,
+      }));
+    const isCheckpointEnabled = this.gateEnforcer
+      ? this.gateEnforcer.isEnabled.bind(this.gateEnforcer)
+      : () => true;
+    const armedGates = computeArmedGates(approvedSkillDocs, isCheckpointEnabled);
+    const invalidatedFeedingSourceWarnings: string[] = [];
+    for (const gate of armedGates) {
+      if (gate.feeding_source_slug === null) continue;
+      const skillDoc = bySlug.get(gate.feeding_source_slug);
+      if (skillDoc !== undefined && isInvalidated(skillDoc, nowIso)) {
+        invalidatedFeedingSourceWarnings.push(
+          `gate "${gate.checkpoint}" feeding source "${gate.feeding_source_slug}" is invalidated`,
+        );
+      }
+    }
+
     return ok({
       total_docs: activeDocs.length,
       by_type,
       by_status,
       last_updated: lastUpdated,
       db_size_bytes: dbSizeResult.value,
+      invalidated_feeding_source_warnings: invalidatedFeedingSourceWarnings,
     });
   }
 

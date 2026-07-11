@@ -22,8 +22,6 @@ import type {
   CalibrationRecord,
   DocId,
   DocRecord,
-  DocStatus,
-  DocType,
   LinkRecord,
   LinkType,
   ReviewJudgment,
@@ -54,6 +52,7 @@ import {
   rowToDocRecord,
   rowToLinkRecord,
   rowToReviewJudgment,
+  rowToSearchHit,
   rowToVersionRecord,
   wrapStoreError,
   type AuditRow,
@@ -172,6 +171,8 @@ function libsqlRowToFtsRow(row: Row): FtsRow {
     rank: rowNum(row, "rank"),
     type: rowStr(row, "type"),
     status: rowStr(row, "status"),
+    created_at: rowStr(row, "created_at"),
+    extra: rowStr(row, "extra") || "{}",
   };
 }
 
@@ -725,7 +726,9 @@ export class TursoStore implements StoreInterface {
           snippet(docs_fts, 1, ?, ?, '...', 32) AS snippet,
           f.rank,
           d.type,
-          d.status
+          d.status,
+          d.created_at,
+          d.extra
         FROM docs_fts f
         JOIN docs d ON d.rowid = f.rowid
         WHERE docs_fts MATCH ?
@@ -734,18 +737,9 @@ export class TursoStore implements StoreInterface {
       `;
 
       const rs = await this.client.execute({ sql, args: docParams });
-      const hits: SearchHit[] = rs.rows.map((row) => {
-        const ftsRow = libsqlRowToFtsRow(row);
-        return {
-          id: ftsRow.id,
-          slug: ftsRow.slug,
-          title: ftsRow.title,
-          snippet: ftsRow.snippet ?? "",
-          score: Number(ftsRow.rank),
-          type: ftsRow.type as DocType,
-          status: ftsRow.status as DocStatus,
-        };
-      });
+      // SPEC-043 D3 — rowToSearchHit also populates created_at + the narrow
+      // validity projection (review S3, zero N+1 per-hit fetches).
+      const hits: SearchHit[] = rs.rows.map((row) => rowToSearchHit(libsqlRowToFtsRow(row)));
 
       // Tags filter applied in-memory if needed
       if (filters?.tags && filters.tags.length > 0) {

@@ -36,7 +36,7 @@
  * Source: SPEC-034 §2, §4; SPEC-040 §T2 D8
  */
 
-import { truncateSection } from "@lore/core";
+import { truncateSection, isInvalidated } from "@lore/core";
 import type { CheckResult, ReviewBundle } from "@lore/core";
 
 /**
@@ -71,6 +71,14 @@ export type ReviewTemplateFn = (
   bundle: ReviewBundle,
   checks: CheckResult[],
   budgets: ReviewBudgets,
+  /**
+   * Caller-supplied current time (SPEC-043 §Design Decisions D9) — drives the
+   * "# Staleness Notice" section below. OPTIONAL and purity-preserving: when omitted,
+   * no staleness check is performed at all (matching pre-SPEC-043 behavior byte-for-
+   * byte) — this module stays pure (no internal `Date.now()`/`new Date()` call);
+   * `AIProviderService.judgeDoc` is the sole production caller and always supplies it.
+   */
+  nowIso?: string,
 ) => BuildReviewPromptResult;
 
 /** Render the deterministic pre-check results as a compact text block for the prompt. */
@@ -91,6 +99,7 @@ function buildReviewPromptV1(
   bundle: ReviewBundle,
   checks: CheckResult[],
   budgets: ReviewBudgets,
+  nowIso?: string,
 ): BuildReviewPromptResult {
   const truncated: string[] = [];
 
@@ -118,6 +127,32 @@ function buildReviewPromptV1(
       `explicitly, not silence alone.\n\n`
     : "";
 
+  // reason: SPEC-043 §Design Decisions D9 — when the bundle's own doc or its parent is
+  // currently invalidated (bi-temporal validity metadata), tell the judge to discount
+  // currency claims rather than silently letting stale content read as authoritative.
+  // Filtering the parent outright would remove structural context the judge still
+  // needs (parent_contract/tree_position checks reference it), so this is a NOTICE,
+  // never an omission. Computed ONLY when `nowIso` is supplied (purity, see
+  // ReviewTemplateFn's JSDoc) — the module never reads a wall clock itself.
+  const stalenessLines: string[] = [];
+  if (nowIso !== undefined) {
+    if (isInvalidated(bundle.doc, nowIso)) {
+      stalenessLines.push(
+        "- The document UNDER REVIEW is marked INVALIDATED (bi-temporal validity " +
+          "metadata) — treat any currency/still-true claims in its body with skepticism; " +
+          "the corpus considers it superseded or obsolete.",
+      );
+    }
+    if (bundle.parent !== undefined && isInvalidated(bundle.parent, nowIso)) {
+      stalenessLines.push(
+        "- The PARENT document providing context is marked INVALIDATED — treat any " +
+          "currency claims it makes with skepticism too.",
+      );
+    }
+  }
+  const stalenessNotice =
+    stalenessLines.length > 0 ? `# Staleness Notice\n${stalenessLines.join("\n")}\n\n` : "";
+
   const prompt =
     `# Role\n` +
     `You are an independent document reviewer. Judge ONLY from the materials provided below ` +
@@ -128,6 +163,7 @@ function buildReviewPromptV1(
     `## ${bundle.doc.title} (${bundle.doc.slug}, type=${bundle.doc.type}, status=${bundle.doc.status})\n` +
     `${docSection.text}\n\n` +
     truncationNotice +
+    stalenessNotice +
     `# Parent Context\n` +
     `${contextBlock}\n\n` +
     `# Deterministic Pre-Checks (already run — use as input, do not re-derive)\n` +

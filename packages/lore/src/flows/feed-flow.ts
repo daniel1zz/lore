@@ -62,6 +62,9 @@ import { renderResolvedToMarkdown } from "../service/outline-service.js";
 import type { ResumeHandoffRecord, ResumeResult } from "../service/session-service.js";
 import { formatError } from "../adapters/cli/utils.js";
 
+/** Time seam (SPEC-043 D3/D4 convention) — never `Date.now()` read directly. */
+const defaultNow = (): string => new Date().toISOString();
+
 /**
  * Renders `doc.content` with MDX placeholders spliced in (`OutlineService.resolve` →
  * `renderResolvedToMarkdown`), mirroring `get.ts`'s `--raw`-off pattern. A resolution
@@ -70,16 +73,28 @@ import { formatError } from "../adapters/cli/utils.js";
  * treats the fed content as advisory context, not a hard dependency on placeholder
  * resolution succeeding.
  *
+ * Prepends the SPEC-043 D4 invalidation banner (via
+ * `OutlineService.resolveValidityBanner`, the SAME shared renderer CLI `get`/
+ * `export-docs` use, T2) when `doc` is currently invalidated — the THIRD D4 wiring
+ * site (AC-MH-12): `lore feed <checkpoint>`'s discovered feeding-skill doc, when
+ * invalidated, must never be handed to a caller as an unmarked feeding pack.
+ *
  * @param app - Wired `App` providing `outlineService`.
  * @param doc - The document whose content should be MDX-resolved.
- * @returns The MDX-spliced markdown body, or `doc.content` unchanged on any resolution failure.
+ * @param now - Time seam (D3) — defaults to `() => new Date().toISOString()`.
+ * @returns The MDX-spliced markdown body (banner-prefixed when invalidated), or
+ *   `doc.content` unchanged (banner still prefixed) on any resolution failure.
  */
-export async function renderDocMarkdown(app: App, doc: DocRecord): Promise<string> {
+export async function renderDocMarkdown(
+  app: App,
+  doc: DocRecord,
+  now: () => string = defaultNow,
+): Promise<string> {
+  const nowIso = now();
   const resolveResult = await app.outlineService.resolve(doc);
-  if (!resolveResult.ok) {
-    return doc.content;
-  }
-  return renderResolvedToMarkdown(resolveResult.value);
+  const body = resolveResult.ok ? renderResolvedToMarkdown(resolveResult.value) : doc.content;
+  const banner = await app.outlineService.resolveValidityBanner(doc, () => nowIso);
+  return banner !== undefined ? `${banner}\n\n${body}` : body;
 }
 
 /**

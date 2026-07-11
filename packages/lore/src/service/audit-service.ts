@@ -71,13 +71,15 @@ const VERIFIABLE_VERSION_ACTIONS: ReadonlySet<VersionAction> = new Set([
  * CURRENT version but never produces a versions row itself) must never incidentally
  * satisfy a family it isn't part of, even if it happens to share `(doc_id, version)`.
  *
- * `update` intentionally maps to a 5-action family, not just `"update"` — this
- * PRESERVES the intentional TaskWorkflowService divergence documented on
- * {@link AuditService.verify}: its shared `writeTaskExtra` helper inserts every
- * claim/release/evidence/anchors versions row under the generic action `"update"`
- * but audits under the more specific `"claim"`/`"release"`/`"evidence"`/`"anchors"`
- * (`"anchors"` added SPEC-042 D3 for the new anchor-mutation verbs, same shared
- * `writeTaskExtra` path).
+ * `update` intentionally maps to a 6-action family, not just `"update"` — this
+ * PRESERVES the intentional TaskWorkflowService/ValidityService divergence documented
+ * on {@link AuditService.verify}: `TaskWorkflowService`'s shared `writeTaskExtra`
+ * helper inserts every claim/release/evidence/anchors versions row under the generic
+ * action `"update"` but audits under the more specific
+ * `"claim"`/`"release"`/`"evidence"`/`"anchors"` (`"anchors"` added SPEC-042 D3);
+ * `ValidityService.invalidate`'s `commitValidityExtra` mirrors the SAME pattern —
+ * versions row `action: "update"`, audit entry `action: "invalidate"` (`"invalidate"`
+ * added SPEC-043 D7, same shared-helper precedent).
  *
  * Keyed over the FULL `VersionAction` union (not just `VERIFIABLE_VERSION_ACTIONS`) so
  * the lookup at the call site never needs an `as`-cast; `delete` maps to an empty set
@@ -86,7 +88,7 @@ const VERIFIABLE_VERSION_ACTIONS: ReadonlySet<VersionAction> = new Set([
  */
 const VERSION_ACTION_AUDIT_FAMILY: Readonly<Record<VersionAction, ReadonlySet<string>>> = {
   create: new Set(["create"]),
-  update: new Set(["update", "claim", "release", "evidence", "anchors"]),
+  update: new Set(["update", "claim", "release", "evidence", "anchors", "invalidate"]),
   approve: new Set(["approve"]),
   reject: new Set(["reject"]),
   restore: new Set(["restore"]),

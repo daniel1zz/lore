@@ -1,0 +1,473 @@
+/**
+ * Six-dimension tests for ValidityService.invalidate + CorpusService's D10
+ * knowledge/adr writer guard (SPEC-043 §Design Decisions D2, D10).
+ * Uses InMemoryStore — no file I/O, no SQLite.
+ *
+ * Dimension mapping:
+ *   HAPPY:      invalidate writes invalid_at/reason, preserves sibling extra keys,
+ *               bumps version, audits with details.version; supersededBy resolves a
+ *               slug to a ULID; ADR convergence (superseded/deprecated); undo clears
+ *               invalid_at/invalidated_by/reason
+ *   NEGATIVE:   future invalid_at rejected at the service seam; undo on a
+ *               never-invalidated doc; malformed validity rejected with the REAL
+ *               issue (not a misleading generic message), both via `set` and via ADR
+ *               `create`
+ *   BOUNDARY:   re-invalidating keeps the ORIGINAL invalid_at while refreshing
+ *               reason/invalidated_by (first signal wins)
+ *   ERROR:      nonexistent target → DOC_NOT_FOUND; unresolvable supersededBy →
+ *               DOC_NOT_FOUND naming the bad ref; non-knowledge/adr target →
+ *               VALIDATION_ERROR naming allowed types
+ *   STATE:      partial-failure recovery — a forced link-write failure still commits
+ *               the doc half; re-running the SAME invalidate call repairs the
+ *               missing link (idempotent)
+ *   REGRESSION: a legacy doc with no validity round-trips `set`/`get` untouched (no
+ *               phantom validity key introduced); D10 guard rejects a `set` patch
+ *               that changes extra.validity, naming `lore invalidate`, while an
+ *               identical (unchanged) validity patch is NOT rejected
+ *
+ * @spec_ref SPEC-043 AC-MH-2, AC-MH-3, AC-MH-4, AC-MH-10
+ */
+
+import { describe, it, expect } from "vitest";
+import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { CorpusService } from "../../../src/service/corpus-service.js";
+import { ValidityService } from "../../../src/service/validity-service.js";
+import { err } from "@lore/core";
+import type { CreateDocInput, DocRecord, LinkRecord, LoreError, Result } from "@lore/core";
+
+// ─── Fixtures ───────────────────────────────────────────────────────────────
+
+function makeServices() {
+  const store = new InMemoryStore();
+  const corpusService = new CorpusService(store);
+  const validityService = new ValidityService(store);
+  return { store, corpusService, validityService };
+}
+
+async function createKnowledge(
+  cs: CorpusService,
+  title: string,
+  extra: Record<string, unknown> = {},
+): Promise<DocRecord> {
+  const result = await cs.create({
+    type: "knowledge",
+    title,
+    content: "body",
+    extra: { sub_type: "ideation", ...extra },
+  } as CreateDocInput);
+  if (!result.ok) throw new Error(`Failed to create knowledge doc: ${JSON.stringify(result.error)}`);
+  return result.value;
+}
+
+async function createAdr(
+  cs: CorpusService,
+  title: string,
+  extra: Record<string, unknown> = {},
+): Promise<DocRecord> {
+  const result = await cs.create({
+    type: "adr",
+    title,
+    content: "body",
+    extra: { decision_status: "accepted", ...extra },
+  } as CreateDocInput);
+  if (!result.ok) throw new Error(`Failed to create adr doc: ${JSON.stringify(result.error)}`);
+  return result.value;
+}
+
+async function createPlan(cs: CorpusService, title = "Test Plan"): Promise<string> {
+  const result = await cs.create({ type: "plan", title, content: "body" } as CreateDocInput);
+  if (!result.ok) throw new Error(`Failed to create plan: ${JSON.stringify(result.error)}`);
+  return result.value.id;
+}
+
+async function createTask(cs: CorpusService, planId: string, title = "Test Task"): Promise<string> {
+  const result = await cs.create({
+    type: "task",
+    title,
+    parent_id: planId,
+    content: "body",
+    extra: { plan_id: planId },
+  } as CreateDocInput);
+  if (!result.ok) throw new Error(`Failed to create task: ${JSON.stringify(result.error)}`);
+  return result.value.id;
+}
+
+/** Wraps InMemoryStore, forcing `addLink` to fail its first N invocations (D2 partial-failure recipe). */
+class FlakyLinkStore extends InMemoryStore {
+  private addLinkCallCount = 0;
+  constructor(private readonly failFirstN: number) {
+    super();
+  }
+  override async addLink(link: LinkRecord): Promise<Result<LinkRecord, LoreError>> {
+    this.addLinkCallCount += 1;
+    if (this.addLinkCallCount <= this.failFirstN) {
+      return err({ code: "STORE_ERROR", message: "forced addLink failure (test)" });
+    }
+    return super.addLink(link);
+  }
+}
+
+// ─── HAPPY — invalidate ─────────────────────────────────────────────────────
+
+describe("HAPPY — ValidityService.invalidate", () => {
+  it("writes invalid_at/reason, preserves sibling extra keys, bumps version, audits with details.version", async () => {
+    const { corpusService, validityService, store } = makeServices();
+    const k1 = await createKnowledge(corpusService, "K1", { sub_type: "retro" });
+    const nowIso = "2026-06-01T00:00:00.000Z";
+
+    const result = await validityService.invalidate(k1.id, { by: "alice", reason: "obsolete" }, () => nowIso);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.doc.extra["validity"]).toMatchObject({ invalid_at: nowIso, reason: "obsolete" });
+    // sibling extra key preserved verbatim
+    expect(result.value.doc.extra["sub_type"]).toBe("retro");
+    expect(result.value.doc.version).toBe(k1.version + 1);
+
+    const auditResult = await store.queryAudit({ doc_id: k1.id, action: "invalidate" });
+    expect(auditResult.ok).toBe(true);
+    if (!auditResult.ok) return;
+    expect(auditResult.value.length).toBe(1);
+    expect(auditResult.value[0]?.details?.["version"]).toBe(k1.version + 1);
+  });
+
+  it("resolves a slug-supplied supersededBy to its ULID (never persists the raw slug)", async () => {
+    const { corpusService, validityService } = makeServices();
+    const k1 = await createKnowledge(corpusService, "K1 old");
+    const k2 = await createKnowledge(corpusService, "K2 new");
+
+    const result = await validityService.invalidate(k1.id, { by: "alice", supersededBy: k2.slug });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const validity = result.value.doc.extra["validity"] as { invalidated_by?: string };
+    expect(validity.invalidated_by).toBe(k2.id);
+    expect(validity.invalidated_by).not.toBe(k2.slug);
+  });
+
+  it("ADR convergence WITH supersededBy: superseded + superseded_by + supersedes link", async () => {
+    const { corpusService, validityService, store } = makeServices();
+    const a1 = await createAdr(corpusService, "A1 old");
+    const a2 = await createAdr(corpusService, "A2 new");
+
+    const result = await validityService.invalidate(a1.id, { by: "alice", supersededBy: a2.slug });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.doc.extra["decision_status"]).toBe("superseded");
+    expect(result.value.doc.extra["superseded_by"]).toBe(a2.id);
+
+    const linksResult = await store.findLinks(a2.id, "out");
+    expect(linksResult.ok).toBe(true);
+    if (!linksResult.ok) return;
+    expect(linksResult.value.some((l) => l.link_type === "supersedes" && l.to_id === a1.id)).toBe(true);
+  });
+
+  it("ADR convergence WITHOUT supersededBy: deprecated, no link", async () => {
+    const { corpusService, validityService, store } = makeServices();
+    const a3 = await createAdr(corpusService, "A3");
+
+    const result = await validityService.invalidate(a3.id, { by: "alice", reason: "no longer relevant" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.doc.extra["decision_status"]).toBe("deprecated");
+    expect(result.value.doc.extra["superseded_by"]).toBeUndefined();
+
+    const allLinksResult = await store.findLinks(a3.id, "in");
+    expect(allLinksResult.ok).toBe(true);
+    if (!allLinksResult.ok) return;
+    expect(allLinksResult.value.some((l) => l.link_type === "supersedes")).toBe(false);
+  });
+
+  it("undo clears invalid_at/invalidated_by/reason and bumps version", async () => {
+    const { corpusService, validityService } = makeServices();
+    const k1 = await createKnowledge(corpusService, "K1");
+    const invalidated = await validityService.invalidate(k1.id, { by: "alice", reason: "obsolete" });
+    expect(invalidated.ok).toBe(true);
+    if (!invalidated.ok) return;
+
+    const undone = await validityService.invalidate(k1.id, { by: "alice", undo: true });
+    expect(undone.ok).toBe(true);
+    if (!undone.ok) return;
+    const validity = undone.value.doc.extra["validity"] as Record<string, unknown> | undefined;
+    expect(validity?.["invalid_at"]).toBeUndefined();
+    expect(validity?.["invalidated_by"]).toBeUndefined();
+    expect(validity?.["reason"]).toBeUndefined();
+    expect(undone.value.doc.version).toBe(invalidated.value.doc.version + 1);
+  });
+
+  it("undo on an ADR keeps decision_status='superseded' AND surfaces decision_status_unchanged", async () => {
+    const { corpusService, validityService } = makeServices();
+    const a1 = await createAdr(corpusService, "A1");
+    const a2 = await createAdr(corpusService, "A2");
+    const invalidated = await validityService.invalidate(a1.id, { by: "alice", supersededBy: a2.slug });
+    expect(invalidated.ok).toBe(true);
+    if (!invalidated.ok) return;
+
+    const undone = await validityService.invalidate(a1.id, { by: "alice", undo: true });
+    expect(undone.ok).toBe(true);
+    if (!undone.ok) return;
+    expect(undone.value.doc.extra["decision_status"]).toBe("superseded");
+    expect(undone.value.decision_status_unchanged).toBe("superseded");
+  });
+});
+
+// ─── NEGATIVE ───────────────────────────────────────────────────────────────
+
+describe("NEGATIVE — ValidityService.invalidate", () => {
+  it("rejects a future invalid_at at the service seam", async () => {
+    const { corpusService, validityService } = makeServices();
+    const k1 = await createKnowledge(corpusService, "K1");
+    const nowIso = "2026-06-01T00:00:00.000Z";
+    const futureInvalidAt = "2026-12-01T00:00:00.000Z";
+
+    const result = await validityService.invalidate(
+      k1.id,
+      { by: "alice", invalidAt: futureInvalidAt },
+      () => nowIso,
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (result.error.code !== "VALIDATION_ERROR") return;
+    expect(result.error.field).toBe("invalid_at");
+  });
+
+  it("undo on a never-invalidated doc → VALIDATION_ERROR", async () => {
+    const { corpusService, validityService } = makeServices();
+    const k1 = await createKnowledge(corpusService, "K1");
+
+    const result = await validityService.invalidate(k1.id, { by: "alice", undo: true });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+  });
+});
+
+// ─── BOUNDARY — first signal wins ───────────────────────────────────────────
+
+describe("BOUNDARY — re-invalidate keeps ORIGINAL invalid_at, refreshes reason/invalidated_by", () => {
+  it("first signal wins for invalid_at; reason/invalidated_by refresh on re-invalidate", async () => {
+    const { corpusService, validityService } = makeServices();
+    const k1 = await createKnowledge(corpusService, "K1");
+    const succ1 = await createKnowledge(corpusService, "Successor 1");
+    const succ2 = await createKnowledge(corpusService, "Successor 2");
+    const firstNow = "2026-06-01T00:00:00.000Z";
+    const secondNow = "2026-07-01T00:00:00.000Z";
+
+    const first = await validityService.invalidate(
+      k1.id,
+      { by: "alice", supersededBy: succ1.slug, reason: "first" },
+      () => firstNow,
+    );
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+
+    const second = await validityService.invalidate(
+      k1.id,
+      { by: "bob", supersededBy: succ2.slug, reason: "second" },
+      () => secondNow,
+    );
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+
+    const validity = second.value.doc.extra["validity"] as Record<string, unknown>;
+    expect(validity["invalid_at"]).toBe(firstNow); // original wins
+    expect(validity["reason"]).toBe("second"); // refreshed
+    expect(validity["invalidated_by"]).toBe(succ2.id); // refreshed
+  });
+});
+
+// ─── ERROR ──────────────────────────────────────────────────────────────────
+
+describe("ERROR — ValidityService.invalidate", () => {
+  it("nonexistent target → DOC_NOT_FOUND", async () => {
+    const { validityService } = makeServices();
+    const result = await validityService.invalidate("01HNONEXISTENTID0000000000", { by: "alice" });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("DOC_NOT_FOUND");
+  });
+
+  it("unresolvable supersededBy → DOC_NOT_FOUND naming the bad ref", async () => {
+    const { corpusService, validityService } = makeServices();
+    const k1 = await createKnowledge(corpusService, "K1");
+    const result = await validityService.invalidate(k1.id, {
+      by: "alice",
+      supersededBy: "knowledge-does-not-exist",
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("DOC_NOT_FOUND");
+    if (result.error.code !== "DOC_NOT_FOUND") return;
+    expect(result.error.id).toBe("knowledge-does-not-exist");
+  });
+
+  it("non-knowledge/adr target → VALIDATION_ERROR naming allowed types", async () => {
+    const { corpusService, validityService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const result = await validityService.invalidate(taskId, { by: "alice" });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (result.error.code !== "VALIDATION_ERROR") return;
+    expect(result.error.message).toMatch(/knowledge/);
+    expect(result.error.message).toMatch(/adr/);
+  });
+});
+
+// ─── STATE — partial-failure recovery (D2 idempotent link repair) ──────────
+
+describe("STATE — partial-failure recovery: doc half committed, re-run repairs the missing link", () => {
+  it("a forced addLink failure still commits the doc half; re-running the SAME invalidate repairs the link", async () => {
+    const store = new FlakyLinkStore(1);
+    const corpusService = new CorpusService(store);
+    const validityService = new ValidityService(store);
+
+    const a1CreateResult = await corpusService.create({
+      type: "adr",
+      title: "A1 old",
+      content: "body",
+      extra: { decision_status: "accepted" },
+    } as CreateDocInput);
+    if (!a1CreateResult.ok) throw new Error("setup failed");
+    const a1 = a1CreateResult.value;
+    const a2CreateResult = await corpusService.create({
+      type: "adr",
+      title: "A2 new",
+      content: "body",
+      extra: { decision_status: "accepted" },
+    } as CreateDocInput);
+    if (!a2CreateResult.ok) throw new Error("setup failed");
+    const a2 = a2CreateResult.value;
+
+    const nowIso = "2026-06-01T00:00:00.000Z";
+    const firstAttempt = await validityService.invalidate(
+      a1.id,
+      { by: "alice", supersededBy: a2.slug },
+      () => nowIso,
+    );
+    // The link write was forced to fail — the overall call reports the error...
+    expect(firstAttempt.ok).toBe(false);
+
+    // ...but the doc half (validity + decision_status) is ALREADY committed.
+    const afterFirstAttempt = await store.find(a1.id);
+    expect(afterFirstAttempt.ok).toBe(true);
+    if (!afterFirstAttempt.ok || afterFirstAttempt.value === null) return;
+    expect(afterFirstAttempt.value.extra["decision_status"]).toBe("superseded");
+    expect((afterFirstAttempt.value.extra["validity"] as Record<string, unknown>)["invalid_at"]).toBe(nowIso);
+
+    // No link exists yet.
+    const linksAfterFirst = await store.findLinks(a2.id, "out");
+    expect(linksAfterFirst.ok).toBe(true);
+    if (linksAfterFirst.ok) {
+      expect(linksAfterFirst.value.some((l) => l.link_type === "supersedes")).toBe(false);
+    }
+
+    // Re-running the SAME invalidate call repairs the missing link (idempotent) — the
+    // invalid_at instant is unchanged (first signal wins) even under a later "now".
+    const laterNow = "2026-08-01T00:00:00.000Z";
+    const secondAttempt = await validityService.invalidate(
+      a1.id,
+      { by: "alice", supersededBy: a2.slug },
+      () => laterNow,
+    );
+    expect(secondAttempt.ok).toBe(true);
+    if (!secondAttempt.ok) return;
+    expect((secondAttempt.value.doc.extra["validity"] as Record<string, unknown>)["invalid_at"]).toBe(nowIso);
+
+    const linksAfterSecond = await store.findLinks(a2.id, "out");
+    expect(linksAfterSecond.ok).toBe(true);
+    if (!linksAfterSecond.ok) return;
+    expect(linksAfterSecond.value.some((l) => l.link_type === "supersedes" && l.to_id === a1.id)).toBe(true);
+  });
+});
+
+// ─── REGRESSION — legacy round-trip + D10 writer guard ─────────────────────
+
+describe("REGRESSION — legacy doc round-trips untouched; D10 CorpusService.set writer guard", () => {
+  it("a legacy doc with no validity round-trips set/get with no phantom validity key introduced", async () => {
+    const { corpusService } = makeServices();
+    const k1 = await createKnowledge(corpusService, "K1");
+    expect(k1.extra["validity"]).toBeUndefined();
+
+    const setResult = await corpusService.set(k1.id, { title: "K1 renamed" });
+    expect(setResult.ok).toBe(true);
+    if (!setResult.ok) return;
+    expect(setResult.value.extra["validity"]).toBeUndefined();
+
+    const getResult = await corpusService.get(k1.id);
+    expect(getResult.ok).toBe(true);
+    if (!getResult.ok) return;
+    expect(getResult.value.doc.extra["validity"]).toBeUndefined();
+  });
+
+  it("D10 guard: a set patch CHANGING extra.validity is rejected, naming `lore invalidate`", async () => {
+    const { corpusService, validityService } = makeServices();
+    const k1 = await createKnowledge(corpusService, "K1");
+    const invalidated = await validityService.invalidate(k1.id, { by: "alice", reason: "obsolete" });
+    expect(invalidated.ok).toBe(true);
+    if (!invalidated.ok) return;
+    const doc = invalidated.value.doc;
+
+    const changedExtra = {
+      ...doc.extra,
+      validity: { ...(doc.extra["validity"] as Record<string, unknown>), reason: "changed via set" },
+    };
+    const result = await corpusService.set(k1.id, { extra: changedExtra });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (result.error.code !== "VALIDATION_ERROR") return;
+    expect(result.error.field).toBe("extra.validity");
+    expect(result.error.message).toMatch(/lore invalidate/);
+  });
+
+  it("D10 guard does NOT reject a set patch whose extra.validity is UNCHANGED", async () => {
+    const { corpusService, validityService } = makeServices();
+    const k1 = await createKnowledge(corpusService, "K1");
+    const invalidated = await validityService.invalidate(k1.id, { by: "alice", reason: "obsolete" });
+    expect(invalidated.ok).toBe(true);
+    if (!invalidated.ok) return;
+    const doc = invalidated.value.doc;
+
+    // Same extra (including the SAME validity object) — only a title change intent,
+    // but set() replaces extra wholesale so the caller must resupply it unchanged.
+    const result = await corpusService.set(k1.id, { title: "K1 renamed again", extra: doc.extra });
+    expect(result.ok).toBe(true);
+  });
+
+  it("malformed validity via set is rejected with the REAL issue message (not the guard message)", async () => {
+    const { corpusService } = makeServices();
+    const k1 = await createKnowledge(corpusService, "K1");
+
+    const result = await corpusService.set(k1.id, {
+      extra: { ...k1.extra, validity: { valid_at: "2026-06-01T00:00:00.000Z", invalid_at: "2020-01-01T00:00:00.000Z" } },
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (result.error.code !== "VALIDATION_ERROR") return;
+    expect(result.error.message).toMatch(/invalid_at/);
+    expect(result.error.message).not.toMatch(/lore invalidate/);
+  });
+
+  it("D10/S1 REGRESSION: ADR create with valid decision_status + malformed validity reports the validity issue", async () => {
+    const { corpusService } = makeServices();
+    const result = await corpusService.create({
+      type: "adr",
+      title: "Bad validity ADR",
+      content: "body",
+      extra: {
+        decision_status: "accepted",
+        validity: { valid_at: "2026-06-01T00:00:00.000Z", invalid_at: "2020-01-01T00:00:00.000Z" },
+      },
+    } as CreateDocInput);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (result.error.code !== "VALIDATION_ERROR") return;
+    expect(result.error.message).toMatch(/invalid_at/);
+    expect(result.error.message).not.toMatch(/requires extra\.decision_status/);
+  });
+});

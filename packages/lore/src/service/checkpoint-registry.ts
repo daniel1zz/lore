@@ -491,3 +491,67 @@ export const checkpointRegistry: Partial<Record<GateCheckpoint, CheckpointDef>> 
   "plan-promote": { id: "plan-promote", check: checkPlanPromote, feed: feedPlanPromote },
   "task-claim": { id: "task-claim", check: checkTaskClaim, feed: feedTaskClaim },
 };
+
+// ─── Armed Gates (SPEC-041 §3 bootstrap; SPEC-043 §Design Decisions D8) ────
+
+/** All four checkpoints, in the fixed order both `SessionService.bootstrap` and
+ *  `CorpusService.status`'s SPEC-043 warning render/scan them. */
+export const ALL_GATE_CHECKPOINTS: readonly GateCheckpoint[] = [
+  "spec-create",
+  "spec-promote",
+  "plan-promote",
+  "task-claim",
+];
+
+/**
+ * checkpoint → discoverable feeding-skill scope (`knowledgeExtraSchema.skill.applies_to`).
+ * A LOCAL mirror of `flows/feed-flow.ts::CHECKPOINT_PRODUCED_TYPE` — services must not
+ * import from `flows/`/`adapters/` (composition lives in app.ts), so this module cannot
+ * import that map directly. Only `"spec-create"` has a discoverable feeding SKILL wired
+ * in production today; the other three checkpoints source their feeding message from
+ * the TARGET doc's resolved ancestor spec, not a skill-doc lookup, so they have no
+ * single corpus-wide "the feeding source" this computation could point at.
+ */
+export const CHECKPOINT_APPLIES_TO: Partial<Record<GateCheckpoint, string>> = {
+  "spec-create": "spec",
+};
+
+/** One enabled gate checkpoint + its discoverable feeding-skill source slug, when one exists. */
+export interface ArmedGate {
+  checkpoint: GateCheckpoint;
+  feeding_source_slug: string | null;
+}
+
+/**
+ * Computes the enabled gate checkpoints + each's discoverable feeding-skill source
+ * slug — the SSOT derivation shared by `SessionService.bootstrap` (`armed_gates[]`,
+ * SPEC-041 §3) and `CorpusService.status`'s invalidated-feeding-source warning
+ * (SPEC-043 D8) — so "which gates are armed / what feeds them" is never independently
+ * re-derived a second time (the 2026-07-11 gate-ctx SSOT-drift incident class). Pure
+ * over already-fetched `approvedSkillDocs` — no store IO of its own.
+ *
+ * @param approvedSkillDocs - Every APPROVED `knowledge/skill` doc's `{slug, updated_at,
+ *   appliesTo}` (appliesTo undefined when `extra.skill.applies_to` is absent/malformed).
+ * @param isCheckpointEnabled - Per-checkpoint enablement predicate — `GateEnforcer
+ *   .isEnabled.bind(gateEnforcer)` in production; defaults callers may pass `() => true`.
+ * @returns One {@link ArmedGate} per ENABLED checkpoint, in {@link ALL_GATE_CHECKPOINTS} order.
+ */
+export function computeArmedGates(
+  approvedSkillDocs: ReadonlyArray<{ slug: string; updated_at: string; appliesTo: string | undefined }>,
+  isCheckpointEnabled: (checkpoint: GateCheckpoint) => boolean,
+): ArmedGate[] {
+  const armedGates: ArmedGate[] = [];
+  for (const checkpoint of ALL_GATE_CHECKPOINTS) {
+    if (!isCheckpointEnabled(checkpoint)) continue;
+    const appliesTo = CHECKPOINT_APPLIES_TO[checkpoint];
+    let feedingSourceSlug: string | null = null;
+    if (appliesTo !== undefined) {
+      const matches = approvedSkillDocs.filter((d) => d.appliesTo === appliesTo);
+      const latest =
+        matches.length > 0 ? matches.reduce((n, d) => (d.updated_at > n.updated_at ? d : n)) : undefined;
+      feedingSourceSlug = latest?.slug ?? null;
+    }
+    armedGates.push({ checkpoint, feeding_source_slug: feedingSourceSlug });
+  }
+  return armedGates;
+}
