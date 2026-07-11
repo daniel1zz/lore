@@ -908,6 +908,34 @@
     "01KX74YKZTXGNRBF429MDXTQQ5": {
       "human_id": "KN-045",
       "file_path": "docs/requirements/knowledge/KN-045-assessment-spec-041-implementation-session-bootstr.md"
+    },
+    "01KX7G3V3AQFSGJ4WFVNR55PZG": {
+      "human_id": "PLAN-026",
+      "file_path": "docs/requirements/plan/PLAN-026-spec-042-implementation-session-registry-file-anch.md"
+    },
+    "01KX7R41642ESGYEVNBXRFT98B": {
+      "human_id": "KN-046",
+      "file_path": "docs/requirements/knowledge/KN-046-retro-spec-042-session-layer-s3-single-session-ful.md"
+    },
+    "01KX7R2W9C27401TG58ZBTFS2C": {
+      "human_id": "KN-047",
+      "file_path": "docs/requirements/knowledge/KN-047-assessment-spec-042-implementation-session-registr.md"
+    },
+    "01KX7G4GDNY3P0622HBHM4Z91R": {
+      "human_id": "TASK-110",
+      "file_path": "docs/requirements/task/TASK-110-t2-adapters-docs-cli-anchor-verbs-claim-capture-re.md"
+    },
+    "01KX7CC5PQRTD7ZHKQJWHYFCYM": {
+      "human_id": "SPEC-046",
+      "file_path": "docs/requirements/spec/SPEC-046-spec-042-session-layer-part-2-session-registry-fil.md"
+    },
+    "01KX7G4GA44M4DH87N0MMRN599": {
+      "human_id": "TASK-111",
+      "file_path": "docs/requirements/task/TASK-111-t1-core-services-anchors-overlap-pure-fns-claim-sc.md"
+    },
+    "01KX77WYS0GX95S3HR3AR8KRG5": {
+      "human_id": "KN-048",
+      "file_path": "docs/requirements/knowledge/KN-048-handoff-agent-main-orchestrator.md"
     }
   }
 }

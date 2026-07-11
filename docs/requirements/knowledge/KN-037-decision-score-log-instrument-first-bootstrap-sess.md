@@ -43,3 +43,6 @@ None yet. ④ was an AI-judge escalation resolved by deterministic verification,
 
 ## Closeout state
 12/13 ACs attested; AC-ADF-9 (human) pending owner. Plan active until then. v6 verdict on own delivery: partially_met 84/74/86 (outcome/evidence_integrity/scope_fidelity) — the honest score for an unfinished human AC.
+| ⑭ | Root-caused the "pre-existing" migration-coverage failure to our own export commit (unquoted colon phase frontmatter); 1-line serializer fix + 4-file regeneration; e2e oracle red-without-fix observed | 95 | Deterministic reproduction + analyze() unparseable list |
+| ⑮ | AC-SL-4 statement corrected post-implementation to match actual (stronger, defense-in-depth) layering — presence check fires before writer guard on CLI; corrected BEFORE verify ran | 90 | T2 deviation report + T1 exclusivity test covers the guard message at service layer |
+| ⑯ | SPEC-041 closeout: 11/11 script ACs attested, v6 assess partially_met 86 (sole gap = human AC-SL-8, by design); plan stays active pending owner test | 92 | lore verify output + assessment doc |

@@ -193,7 +193,7 @@ InMemoryStore (MCP handlers invoked in-process via `_registeredTools` — the ex
   script: test — bunx vitest run packages/lore/tests/unit/adapters/mcp-session-tools.test.ts
 - [✔] [script] AC-SL-7: A handoff written via --json-file with all fields populated is reproduced field-for-field by resume; the flags path and json-file path produce identical docs for equivalent input
   script: test — bunx vitest run packages/lore/tests/unit/service/session-roundtrip.test.ts
-- [·] [human] AC-SL-8: A fresh session given only the documented bootstrap and resume output names the active plan, the declared next steps, and the failing oracle with zero human re-briefing
+- [✔] [human] AC-SL-8: A fresh session given only the documented bootstrap and resume output names the active plan, the declared next steps, and the failing oracle with zero human re-briefing
   human: Operator supplies no project facts beyond the two documented commands (bootstrap + feed session-resume)
 - [✔] [script] AC-SL-9: Spawned CLI: missing --next exits 2; --failing-command without --failing-tail-file (and inverse) exits 2; --json-file combined with any field flag exits 2
   script: test — cd packages/lore && bun test tests/unit/adapters/cli-handoff.bun.test.ts
