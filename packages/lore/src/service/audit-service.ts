@@ -71,11 +71,13 @@ const VERIFIABLE_VERSION_ACTIONS: ReadonlySet<VersionAction> = new Set([
  * CURRENT version but never produces a versions row itself) must never incidentally
  * satisfy a family it isn't part of, even if it happens to share `(doc_id, version)`.
  *
- * `update` intentionally maps to a 4-action family, not just `"update"` — this
+ * `update` intentionally maps to a 5-action family, not just `"update"` — this
  * PRESERVES the intentional TaskWorkflowService divergence documented on
  * {@link AuditService.verify}: its shared `writeTaskExtra` helper inserts every
- * claim/release/evidence versions row under the generic action `"update"` but audits
- * under the more specific `"claim"`/`"release"`/`"evidence"`.
+ * claim/release/evidence/anchors versions row under the generic action `"update"`
+ * but audits under the more specific `"claim"`/`"release"`/`"evidence"`/`"anchors"`
+ * (`"anchors"` added SPEC-042 D3 for the new anchor-mutation verbs, same shared
+ * `writeTaskExtra` path).
  *
  * Keyed over the FULL `VersionAction` union (not just `VERIFIABLE_VERSION_ACTIONS`) so
  * the lookup at the call site never needs an `as`-cast; `delete` maps to an empty set
@@ -84,7 +86,7 @@ const VERIFIABLE_VERSION_ACTIONS: ReadonlySet<VersionAction> = new Set([
  */
 const VERSION_ACTION_AUDIT_FAMILY: Readonly<Record<VersionAction, ReadonlySet<string>>> = {
   create: new Set(["create"]),
-  update: new Set(["update", "claim", "release", "evidence"]),
+  update: new Set(["update", "claim", "release", "evidence", "anchors"]),
   approve: new Set(["approve"]),
   reject: new Set(["reject"]),
   restore: new Set(["restore"]),

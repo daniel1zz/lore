@@ -126,15 +126,23 @@ describe("GET /api/ready/:planIdOrSlug — auth boundary + wiring smoke (SPEC-03
   });
 
   describe("happy path — valid bearer token", () => {
-    it("GET /api/ready/:planId → 200 with a one-entry ReadyRecord[]", async () => {
+    // reason: SPEC-042 D7 — TaskWorkflowService.ready's return shape gained
+    // `sessions[]`/`anchor_conflicts[]` alongside the pre-existing flat
+    // records array (now `.records`); `handleGetReady` (routes.ts) is an
+    // unmodified thin pipe (`jsonOk(result.value)`), so this is a mechanical
+    // shape update, not a design decision about the HTTP route itself.
+    it("GET /api/ready/:planId → 200 with a one-entry ReadyReport.records", async () => {
       const res = await fetch(`${ctx.baseUrl}/api/ready/${ctx.planId}`, {
         headers: { Authorization: `Bearer ${ctx.rawKey}` },
       });
       expect(res.status).toBe(200);
-      const body = await res.json() as { ok: boolean; data: Array<{ ready: boolean }> };
+      const body = (await res.json()) as {
+        ok: boolean;
+        data: { records: Array<{ ready: boolean }>; sessions: unknown[]; anchor_conflicts: unknown[] };
+      };
       expect(body.ok).toBe(true);
-      expect(Array.isArray(body.data)).toBe(true);
-      expect(body.data).toHaveLength(1);
+      expect(Array.isArray(body.data.records)).toBe(true);
+      expect(body.data.records).toHaveLength(1);
     });
   });
 

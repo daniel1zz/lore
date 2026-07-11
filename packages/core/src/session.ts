@@ -1,8 +1,10 @@
 /**
- * Session layer — bootstrap pointer-set + lossless handoff schemas (SPEC-041 S1+S2).
- * Pure, browser-safe module: no IO, no Date.now()/Math.random() calls — every field
- * that depends on wall-clock time (staleness, ages) is computed by the SERVICE layer
- * (`packages/lore/src/service/session-service.ts`) and handed in as plain data.
+ * Session layer — bootstrap pointer-set + lossless handoff schemas (SPEC-041 S1+S2)
+ * + the derived session-registry projection (SPEC-042 S3 D1). Pure, browser-safe
+ * module: no IO, no Date.now()/Math.random() calls — every field that depends on
+ * wall-clock time (staleness, ages) is computed by the SERVICE layer
+ * (`packages/lore/src/service/session-service.ts` /
+ * `packages/lore/src/service/task-workflow-service.ts`) and handed in as plain data.
  *
  * Public surface:
  *   - handoffKeyDecisionSchema / HandoffKeyDecision — one scored decision inside a handoff
@@ -16,6 +18,10 @@
  *   - bootstrapReportSchema / BootstrapReport — the S1 pointer-set `SessionService.bootstrap`
  *     returns (SPEC-041 §3 D2) — every field is a slug/title/count/timestamp pointer,
  *     NEVER doc body content (IoC ADR boundary 2: pointers + summaries, never full dump)
+ *   - readySessionSchema / ReadySession — one derived session grouping (SPEC-042 D1)
+ *   - deriveSessions(tasks, nowIso, ttlMinutes) — groups FRESH claims by
+ *     `(by, machine, worktree)`; the pure computation behind both `lore ready`'s
+ *     per-plan `sessions[]` and `lore bootstrap`'s corpus-wide `active_sessions`
  *
  * Invariants:
  *   - No IO, no wall-clock reads, no randomness — `renderHandoffContent` is deterministic:
@@ -27,11 +33,18 @@
  *     never a doc's `content`. Titles are truncated to ≤120 chars by the SERVICE layer
  *     before being placed into a `BootstrapReport` (this schema does not itself enforce
  *     that truncation — it validates shape, not provenance).
+ *   - `deriveSessions` NEVER STORES anything (SPEC-042 D1 — sessions are derived,
+ *     never stored, no daemon, no open/close lifecycle). Staleness is computed by
+ *     the CALLER (a `nowIso` + `ttlMinutes` pair is passed in, mirroring
+ *     `evaluateReadiness`'s identical D10 time-seam discipline) — this module never
+ *     reads a wall clock itself.
  *
- * Source: SPEC-041 §3 D2, D3.
+ * Source: SPEC-041 §3 D2, D3; SPEC-042 §Design Decisions D1.
  */
 
 import { z } from "zod";
+import { extractClaim, isClaimStale } from "./task-workflow.js";
+import type { DocRecord } from "./types.js";
 
 // ─── Handoff Extra Schema (S2, SPEC-041 §3 D3) ─────────────────────────────
 
@@ -281,6 +294,117 @@ export const bootstrapCorpusStatsSchema = z.object({
  * @invariant Empty corpus is legal: `root: null`, every array `[]`,
  *   `pending_reviews: {count: 0, slugs: []}`, `corpus.last_updated: null`.
  */
+/**
+ * One derived session — the group of FRESH claims sharing the composite key
+ * `(by, machine, worktree)` (SPEC-042 D1). An absent `machine`/`worktree` is a
+ * valid, stable grouping key equal to itself — legacy machine-less claims by one
+ * actor group into ONE session, distinguishable from captured values only by the
+ * field's absence (review S7).
+ */
+export const readySessionSchema = z.object({
+  by: z.string(),
+  machine: z.string().optional(),
+  worktree: z.string().optional(),
+  /** Distinct `branch` values across this session's member claims, insertion order. */
+  branches: z.array(z.string()),
+  /** Task slugs this session currently holds a fresh claim on, insertion order. */
+  task_slugs: z.array(z.string()),
+  /** The most recent `claim.at` among this session's member claims. */
+  newest_at: z.string(),
+});
+
+/** Derived TypeScript type for one session grouping (SPEC-042 D1). */
+export type ReadySession = z.infer<typeof readySessionSchema>;
+
+/**
+ * Groups `tasks`' FRESH (non-stale) claims into sessions by the composite key
+ * `(by, machine, worktree)` (SPEC-042 D1). Pure — no IO, no wall-clock reads;
+ * staleness is computed against the caller-supplied `nowIso`/`ttlMinutes`, the
+ * same D10 time-seam discipline `evaluateReadiness` (task-workflow.ts) uses.
+ *
+ * All-stale input (every task's claim, if any, has aged past `ttlMinutes`)
+ * produces `[]` — a stale claim contributes NO session row (SPEC-042 AC-S3-6
+ * NEGATIVE case, review T5).
+ *
+ * @param tasks - Candidate tasks (a plan's children for `lore ready`'s per-plan
+ *   scope; every active plan's children, concatenated, for `lore bootstrap`'s
+ *   corpus-wide scope).
+ * @param nowIso - Caller-supplied current time (D10 — never Date.now() here).
+ * @param ttlMinutes - Claim TTL in minutes, forwarded to `isClaimStale`.
+ * @returns One `ReadySession` per distinct `(by, machine, worktree)` key present
+ *   among `tasks`' fresh claims, in first-seen order.
+ *
+ * @example
+ * deriveSessions(
+ *   [taskA, taskB], // taskA: claim{by:"agent:t1", machine:"hostA", worktree:"/w1"}
+ *                    // taskB: claim{by:"agent:t2", machine:"hostA", worktree:"/w2"}
+ *   "2026-07-11T10:00:00.000Z", 120,
+ * );
+ * // => two sessions — same machine, distinct worktree still discriminates (D1)
+ */
+export function deriveSessions(tasks: DocRecord[], nowIso: string, ttlMinutes: number): ReadySession[] {
+  interface MutableGroup {
+    by: string;
+    machine?: string;
+    worktree?: string;
+    branches: string[];
+    branchSeen: Set<string>;
+    task_slugs: string[];
+    newest_at: string;
+  }
+
+  const groups = new Map<string, MutableGroup>();
+  const order: string[] = [];
+
+  for (const task of tasks) {
+    const claim = extractClaim(task);
+    if (claim === undefined) continue;
+    if (isClaimStale(claim, nowIso, ttlMinutes)) continue;
+
+    // reason: `null` is used as the absent-field placeholder (never a legal
+    // machine/worktree value) so JSON.stringify produces a stable, distinct key
+    // per (by, machine, worktree) triple — including the "both absent" case,
+    // which must equal itself across different tasks/claims (review S7).
+    const key = JSON.stringify([claim.by, claim.machine ?? null, claim.worktree ?? null]);
+
+    let group = groups.get(key);
+    if (group === undefined) {
+      group = {
+        by: claim.by,
+        ...(claim.machine !== undefined ? { machine: claim.machine } : {}),
+        ...(claim.worktree !== undefined ? { worktree: claim.worktree } : {}),
+        branches: [],
+        branchSeen: new Set<string>(),
+        task_slugs: [],
+        newest_at: claim.at,
+      };
+      groups.set(key, group);
+      order.push(key);
+    }
+
+    if (claim.branch !== undefined && !group.branchSeen.has(claim.branch)) {
+      group.branchSeen.add(claim.branch);
+      group.branches.push(claim.branch);
+    }
+    group.task_slugs.push(task.slug);
+    if (claim.at > group.newest_at) group.newest_at = claim.at;
+  }
+
+  return order.map((key) => {
+    // reason: `order` is built exclusively from keys just inserted into `groups`
+    // in the loop above — this lookup cannot miss.
+    const g = groups.get(key)!;
+    return {
+      by: g.by,
+      ...(g.machine !== undefined ? { machine: g.machine } : {}),
+      ...(g.worktree !== undefined ? { worktree: g.worktree } : {}),
+      branches: g.branches,
+      task_slugs: g.task_slugs,
+      newest_at: g.newest_at,
+    };
+  });
+}
+
 export const bootstrapReportSchema = z.object({
   root: bootstrapRootSchema.nullable(),
   active_plans: z.array(bootstrapActivePlanSchema),
@@ -290,6 +414,20 @@ export const bootstrapReportSchema = z.object({
   latest_handoffs: z.array(bootstrapLatestHandoffSchema),
   resume_hint: bootstrapResumeHintSchema.nullable(),
   corpus: bootstrapCorpusStatsSchema,
+  /**
+   * Corpus-wide derived sessions over every ACTIVE (non-archived/deprecated)
+   * plan's tasks (SPEC-042 D8) — a fresh session learns who else is working
+   * BEFORE it claims. Empty corpus / no fresh claims anywhere → `[]`.
+   *
+   * @invariant This field is declared on the SCHEMA itself (not just the
+   *   `BootstrapReport` TS literal) — a plain `z.object` silently STRIPS
+   *   unrecognized keys on `.parse()`, so a caller that forgot to also update
+   *   this schema would have `active_sessions` silently vanish at the exact
+   *   `bootstrapReportSchema.parse(report)` self-consistency check
+   *   `SessionService.bootstrap` runs before returning (review S6). A
+   *   dedicated round-trip regression test pins this.
+   */
+  active_sessions: z.array(readySessionSchema),
 });
 
 /** Derived TypeScript type for the S1 bootstrap pointer-set. */

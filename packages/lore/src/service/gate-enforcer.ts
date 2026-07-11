@@ -48,7 +48,15 @@
  * Source: retro follow-up item 8; IoC vertical-slice tech-spec §4.1/§5.1/§11.
  */
 
-import { err, ok, resolveGateEnabled, type LoreConfig, type LoreError, type Result } from "@lore/core";
+import {
+  err,
+  ok,
+  resolveGateEnabled,
+  resolveAnchorOverlapGateEnabled,
+  type LoreConfig,
+  type LoreError,
+  type Result,
+} from "@lore/core";
 import type { PlanBundle } from "@lore/core";
 import {
   checkpointRegistry,
@@ -136,10 +144,21 @@ export class GateEnforcer {
       return ok(undefined);
     }
 
-    const reasons = selectFailures(results).map((f) => f.reason);
+    const failures = selectFailures(results);
+    const reasons = failures.map((f) => f.reason);
+    // reason: SPEC-042 §Design Decisions D5 (review U4) — a failure carrying an
+    // explicit `field` sub-discriminator (e.g. task-claim's anchor-overlap
+    // predicate) renders as `gate:<checkpoint>:<field>` instead of the base
+    // `gate:<checkpoint>`, so a scripted caller can tell apart two different
+    // failure classes on the SAME checkpoint (e.g. "release the sibling claim"
+    // vs. "wait for spec approval") without parsing `message` prose. Absent on
+    // every pre-SPEC-042 predicate — falls back to the original base field,
+    // byte-identical to pre-SPEC-042 behavior.
+    const fieldSuffix = failures.find((f) => f.field !== undefined)?.field;
+    const field = fieldSuffix !== undefined ? `gate:${checkpoint}:${fieldSuffix}` : `gate:${checkpoint}`;
     return err({
       code: "VALIDATION_ERROR",
-      field: `gate:${checkpoint}`,
+      field,
       message: `Gate "${checkpoint}" blocked: ${reasons.join(", ")}`,
       value: reasons,
     });
@@ -164,5 +183,21 @@ export class GateEnforcer {
    */
   isEnabled(checkpoint: GateCheckpoint): boolean {
     return resolveGateEnabled(this.config, checkpoint);
+  }
+
+  /**
+   * Whether `task-claim`'s anchor-overlap sub-predicate specifically is enabled
+   * (`workflow.gates."task-claim".anchor_overlap.enabled`, SPEC-042 §Design
+   * Decisions D6) — NARROWER than `isEnabled("task-claim")`, which governs the
+   * WHOLE checkpoint (anchor-overlap AND upstream-approval together). A caller
+   * building `GateContext.anchorOverlapEnabled` (`TaskWorkflowService.
+   * enforceClaimGate`) consults this, not `isEnabled`.
+   *
+   * @returns `false` when the sub-key is explicitly disabled; `true` otherwise.
+   * @example
+   * enforcer.isTaskClaimAnchorOverlapEnabled(); // => false when config disables it
+   */
+  isTaskClaimAnchorOverlapEnabled(): boolean {
+    return resolveAnchorOverlapGateEnabled(this.config);
   }
 }

@@ -198,6 +198,27 @@ export const knowledgeExtraSchema = z
  *   append fails loud with VALIDATION_ERROR before any write (SPEC-025 §4 AC-WF-2).
  * @invariant `claim` is an advisory execution lease; expiry is computed read-side via
  *   `isClaimStale`, never stored (SPEC-025 §3 D2).
+ * @invariant `file_anchors` is DELIBERATELY UNBOUNDED here (a bare array of
+ *   strings, no `.max()`/per-entry length caps) — every bound (≤50 entries,
+ *   ≤512 chars each) and every normalization rule (no leading "/", no "..", no
+ *   "\", trailing-slash directory-scope semantics, dedup) lives EXCLUSIVELY in
+ *   the shared pure `normalizeFileAnchors` (`file-anchors.ts`), called at every
+ *   write seam (create-time `--anchor`, `TaskWorkflowService.setAnchors`/
+ *   `addAnchors`/`removeAnchors`) — never re-derived here (SPEC-042 §3 D3).
+ *   DO NOT add a `.max()`/length cap to this field: `createDocInputSchema`'s
+ *   superRefine re-parses the WHOLE `extra` object against this schema to
+ *   detect a missing `plan_id` (`taskExtraSchema.safeParse(extra ?? {})`,
+ *   below) — if THIS field fails for any other reason (e.g. a too-long anchor
+ *   entry), that re-parse fails too, and the superRefine reports the
+ *   misleading `"task requires extra.plan_id"` message even though `plan_id`
+ *   is present and the real problem is `file_anchors`. Keeping this field
+ *   permissive at the Zod layer means `createDocInputSchema.safeParse` always
+ *   SUCCEEDS on a shape-valid task, letting `CorpusService._createImpl`'s
+ *   dedicated `normalizeFileAnchors` call (which runs AFTER that top-level
+ *   parse) be the one place that reports the real, field-specific error.
+ *   Written exclusively via the sanctioned seams; never through
+ *   `CorpusService.set` (D3 — a wholesale-extra replace flag was deliberately
+ *   not built for anchors).
  */
 export const taskExtraSchema = z
   .object({
@@ -219,6 +240,11 @@ export const taskExtraSchema = z
      * Source: SPEC-025 §3 D2
      */
     claim: taskClaimSchema.optional(),
+    /**
+     * Declared file/directory scopes this task touches — the worktree-mutex
+     * safety net's SSOT (SPEC-042 §3 D3). See this schema's own @invariant above.
+     */
+    file_anchors: z.array(z.string()).optional(),
   })
   .passthrough();
 

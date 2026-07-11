@@ -281,10 +281,35 @@ describe("checkpointRegistry", () => {
       expect(isCheckpointBlocked(results)).toBe(false);
     });
 
-    // BOUNDARY — no spec-tier ancestor ⇒ vacuous pass
-    it("check() returns [] (vacuous pass) when hasSpecParent is false", () => {
+    // BOUNDARY — no spec-tier ancestor ⇒ upstreamApproved is skipped, but
+    // noAnchorOverlap STILL runs (SPEC-042 D5 — this checkpoint no longer
+    // short-circuits BOTH predicates on hasSpecParent:false, only the
+    // upstream one; with no candidateAnchors/siblingClaims supplied here,
+    // noAnchorOverlap vacuously passes, so the overall result is still an
+    // unblocked pass — just no longer a literal empty array).
+    it("check() runs noAnchorOverlap unconditionally even when hasSpecParent is false (SPEC-042 D5)", () => {
       const results = checkpoint.check({ hasSpecParent: false });
-      expect(results).toEqual([]);
+      expect(isCheckpointBlocked(results)).toBe(false);
+      expect(results).toEqual([{ ok: true }]);
+    });
+
+    // REGRESSION (SPEC-042 D5, AC-S3-3) — the hole two adversarial-review lenses
+    // independently flagged: a plan with NO spec ancestor whose sibling task holds
+    // a fresh, foreign, anchor-overlapping claim must STILL be blocked.
+    it("check() BLOCKS on an anchor overlap even when hasSpecParent is false", () => {
+      const ctx: GateContext = {
+        hasSpecParent: false,
+        candidateBy: "agent:t2",
+        candidateAnchors: ["src/a"],
+        siblingClaims: [
+          { slug: "task-1", title: "T1", by: "agent:t1", at: "T0", stale: false, anchors: ["src/a/"] },
+        ],
+      };
+      const results = checkpoint.check(ctx);
+      expect(isCheckpointBlocked(results)).toBe(true);
+      const failures = selectFailures(results);
+      expect(failures).toHaveLength(1);
+      expect(failures[0]?.field).toBe("anchor-overlap");
     });
 
     // NEGATIVE
