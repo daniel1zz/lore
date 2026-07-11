@@ -936,6 +936,34 @@
     "01KX77WYS0GX95S3HR3AR8KRG5": {
       "human_id": "KN-048",
       "file_path": "docs/requirements/knowledge/KN-048-handoff-agent-main-orchestrator.md"
+    },
+    "01KX8316C3DRPS2K9888BRDY95": {
+      "human_id": "KN-049",
+      "file_path": "docs/requirements/knowledge/KN-049-retro-spec-043-memory-hygiene-h1-3-lens-review-pat.md"
+    },
+    "01KX8307D4H0QWDAVNVD6N7NS8": {
+      "human_id": "KN-050",
+      "file_path": "docs/requirements/knowledge/KN-050-assessment-spec-043-implementation-bi-temporal-inv.md"
+    },
+    "01KX7XDMR4J3SJFD8W1GRC2RBB": {
+      "human_id": "TASK-112",
+      "file_path": "docs/requirements/task/TASK-112-t2-adapters-docs-cli-invalidate-create-supersedes.md"
+    },
+    "01KX7XDMJTM698T47QDG882BCM": {
+      "human_id": "TASK-113",
+      "file_path": "docs/requirements/task/TASK-113-t1-core-services-validity-schema-predicates-validi.md"
+    },
+    "01KX7XD8PV51PHNKCAQYC03QXF": {
+      "human_id": "PLAN-027",
+      "file_path": "docs/requirements/plan/PLAN-027-spec-043-implementation-bi-temporal-invalidation.md"
+    },
+    "01KX7WM8WEYCXZ7KGJ65A66BA8": {
+      "human_id": "SPEC-047",
+      "file_path": "docs/requirements/spec/SPEC-047-spec-043-memory-hygiene-part-1-bi-temporal-invalid.md"
+    },
+    "01KX7RP24EQP23FZCDR9RCQBZE": {
+      "human_id": "KN-051",
+      "file_path": "docs/requirements/knowledge/KN-051-handoff-agent-main-orchestrator.md"
     }
   }
 }
