@@ -1,9 +1,11 @@
 /**
- * MCP tool registrations — 27 lore_* tools (16 original + 4 SPEC-025 task-workflow tools
+ * MCP tool registrations — 28 lore_* tools (16 original + 4 SPEC-025 task-workflow tools
  * + 1 SPEC-026 assess tool + 1 SPEC-035 audit tool + 1 SPEC-034 review tool
  * + 1 SPEC-039 verify tool + 1 IoC vertical-slice tech-spec §4.1/§11 P4 feed tool
  * + 2 SPEC-041 session tools: lore_bootstrap, lore_handoff; lore_feed additionally
- * gains a session-resume dispatch branch, SPEC-041 §3 D5).
+ * gains a session-resume dispatch branch, SPEC-041 §3 D5
+ * + 1 SPEC-042 tool: lore_anchor_set; lore_claim gains machine/worktree, lore_create
+ * gains file_anchors, SPEC-042 §Design Decisions D9).
  *
  * Architecture: Tools with input use the `registerToolWithArgs` helper defined below, which:
  *   1. Calls `server.tool(name, desc, handler)` in 3-arg form (avoids ZodRawShapeCompat type bomb)
@@ -83,6 +85,15 @@ export const LoreCreateSchema = z.object({
    * SPEC-024 AC-NOAI-4 / AC-NOAI-5; also documented in SPEC-008 §3 lore_create row.
    */
   ai: z.boolean().default(false),
+  /**
+   * [task branch only] Candidate `file_anchors` entries (SPEC-042 §Design
+   * Decisions D3, D9) — merged into `extra.file_anchors` before the call
+   * reaches `CorpusService.create`, which is the single validation +
+   * normalization gate (`normalizeFileAnchors`, `@lore/core`). Raw, unvalidated
+   * strings — a malformed entry fails loud with VALIDATION_ERROR, same as the
+   * CLI's repeatable `--anchor` flag.
+   */
+  file_anchors: z.array(z.string()).optional(),
 });
 
 /** Input schema for lore_get. */
@@ -227,11 +238,18 @@ const EVIDENCE_RESULT_ENUM = z.enum(["pass", "fail"]);
  * `by` is required (not defaulted) — MCP callers pass actor identity explicitly
  * (SPEC-025 §8.3 "MCP callers pass `by` explicitly"), unlike the CLI which falls
  * back to $LORE_ACTOR / OS username.
+ * `machine`/`worktree` (SPEC-042 §Design Decisions D2, D9) — BOTH explicit-only
+ * on this surface (no ambient auto-capture server-side; the server process's own
+ * hostname/cwd would describe the MCP server, not the caller's session). The
+ * CLI auto-captures `machine` as `os.hostname()`; MCP callers must pass it
+ * themselves if they want it recorded.
  */
 export const LoreClaimSchema = z.object({
   id_or_slug: z.string(),
   by: z.string().min(1),
   branch: z.string().optional(),
+  machine: z.string().optional(),
+  worktree: z.string().optional(),
   steal: z.boolean().optional(),
 });
 
@@ -263,6 +281,21 @@ export const LoreEvidenceAddSchema = z.object({
 /** Input schema for lore_ready. */
 export const LoreReadySchema = z.object({
   plan_id_or_slug: z.string(),
+});
+
+/**
+ * Input schema for lore_anchor_set (SPEC-042 §Design Decisions D9) —
+ * declarative REPLACE of a task's `file_anchors`, the MCP-facing counterpart
+ * to `TaskWorkflowService.setAnchors`. Read-modify-write on `extra` (preserves
+ * `extra.claim`/`extra.verification_evidence` untouched, AC-S3-5) — NOT routed
+ * through `lore_set`'s wholesale-`extra` replace (D3: that would silently
+ * delete those other services' owned state). `by` is required, same MCP
+ * actor-identity precedent as `lore_claim`/`lore_release`/`lore_evidence_add`.
+ */
+export const LoreAnchorSetSchema = z.object({
+  id_or_slug: z.string(),
+  anchors: z.array(z.string()),
+  by: z.string().min(1),
 });
 
 /**
@@ -521,12 +554,14 @@ async function reviewDocViaMcp(
 // ─── Tool Registrations ──────────────────────────────────────────────────────
 
 /**
- * Registers all 27 lore_* MCP tools on the given server (16 original + 4 SPEC-025
+ * Registers all 28 lore_* MCP tools on the given server (16 original + 4 SPEC-025
  * task-workflow tools: lore_claim, lore_release, lore_evidence_add, lore_ready;
  * + lore_assess (SPEC-026); + lore_audit (SPEC-035); + lore_review (SPEC-034);
  * + lore_verify (SPEC-039); + lore_feed (IoC vertical-slice tech-spec §4.1/§11 P4);
  * + lore_bootstrap, lore_handoff (SPEC-041 §3 D2, D3, D6) — lore_feed additionally
- * gains a session-resume dispatch branch (SPEC-041 §3 D5)).
+ * gains a session-resume dispatch branch (SPEC-041 §3 D5)
+ * + lore_anchor_set (SPEC-042 §Design Decisions D9) — lore_claim gains machine/
+ * worktree, lore_create gains file_anchors).
  *
  * Tools with input use `registerToolWithArgs` (avoids ZodRawShapeCompat type bomb).
  * Tools without input (`lore_schema`, `lore_status`) use plain `server.tool(name, desc, cb)`.
@@ -555,9 +590,20 @@ export function registerTools(server: McpServer, app: App): void {
       resolvedContent = aiResult.value.content;
     }
 
-    // Strip the `ai` field before passing to corpusService.create — it is not a corpus field.
-    const { ai: _ai, ...createInput } = args;
-    const result = await corpusService.create({ ...createInput, content: resolvedContent });
+    // Strip the `ai`/`file_anchors` fields before passing to corpusService.create —
+    // neither is a corpus field; file_anchors (SPEC-042 D9) is folded into `extra`
+    // here so CorpusService._createImpl's single validation gate sees it the same
+    // way it would from a raw extra.file_anchors payload.
+    const { ai: _ai, file_anchors: fileAnchors, ...createInput } = args;
+    const mergedExtra =
+      fileAnchors !== undefined
+        ? { ...(createInput.extra ?? {}), file_anchors: fileAnchors }
+        : createInput.extra;
+    const result = await corpusService.create({
+      ...createInput,
+      content: resolvedContent,
+      ...(mergedExtra !== undefined ? { extra: mergedExtra } : {}),
+    });
     if (!result.ok) return errorContent(result.error);
     const { id, slug, type, status, version } = result.value;
     return textContent({ id, slug, type, status, version });
@@ -788,6 +834,8 @@ export function registerTools(server: McpServer, app: App): void {
     const result = await taskWorkflowService.claim(args.id_or_slug, {
       by: args.by,
       ...(args.branch !== undefined ? { branch: args.branch } : {}),
+      ...(args.machine !== undefined ? { machine: args.machine } : {}),
+      ...(args.worktree !== undefined ? { worktree: args.worktree } : {}),
       steal: args.steal === true,
       // reason: MCP callers are always agents (SPEC-024) — the caller-surface discriminator
       // for AC-WF-11 telemetry is hardcoded here rather than threaded through args.
@@ -830,6 +878,22 @@ export function registerTools(server: McpServer, app: App): void {
     if (!result.ok) return errorContent(result.error);
     return textContent({ ready: result.value });
   });
+
+  // lore_anchor_set
+  registerToolWithArgs(
+    server,
+    "lore_anchor_set",
+    "Declaratively replace a task's file_anchors (read-modify-write — preserves claim/evidence, SPEC-042 D9)",
+    LoreAnchorSetSchema,
+    async (args) => {
+      const result = await taskWorkflowService.setAnchors(args.id_or_slug, args.anchors, {
+        by: args.by,
+        source: "mcp",
+      });
+      if (!result.ok) return errorContent(result.error);
+      return textContent({ doc: result.value });
+    },
+  );
 
   // ── SPEC-026: AI plan-outcome assessment ──────────────────────────────────
 

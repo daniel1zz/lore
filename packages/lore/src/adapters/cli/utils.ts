@@ -240,11 +240,17 @@ export function resolveActor(explicit?: string): string {
 // ─── Task Workflow Badges (SPEC-025 AC-WF-9) ────────────────────────────────
 
 /**
- * Render a `[claimed:by(stale) ✔n]`-style badge for a task row in `lore list` /
- * `lore tree`. Reads task.extra.claim / task.extra.verification_evidence directly
- * (no service round trip — this is presentation, not a domain query) and validates
- * each via the same Zod schemas the store enforces, so malformed extra silently
- * renders no badge rather than throwing.
+ * Render a `[claimed:by@branch(stale) ✔n]`-style badge for a task row in
+ * `lore list` / `lore tree`. Reads task.extra.claim / task.extra.
+ * verification_evidence directly (no service round trip — this is
+ * presentation, not a domain query) and validates each via the same Zod
+ * schemas the store enforces, so malformed extra silently renders no badge
+ * rather than throwing.
+ *
+ * `@branch` is appended when `claim.branch` is present (SPEC-042 D7, review
+ * U9) — branch, not machine, is the discriminating field on a single-machine
+ * team; machine/worktree stay JSON-only surfaces (`lore ready --json` /
+ * `lore_ready`), never rendered in this compact text badge.
  *
  * @param doc - Full task DocRecord (must include `extra` — DocSummary lacks it)
  * @param nowIso - Current time (ISO 8601) for claim staleness computation
@@ -253,7 +259,7 @@ export function resolveActor(explicit?: string): string {
  *   bracketed badge string with a leading space, ready to append to a row label
  * @example
  *   formatWorkflowBadge(task, new Date().toISOString(), 120)
- *   // " [claimed:alice ✔3]" or " [claimed:bob (stale) ✘1]" or ""
+ *   // " [claimed:alice@b1 ✔3]" or " [claimed:bob (stale) ✘1]" or ""
  */
 export function formatWorkflowBadge(doc: DocRecord, nowIso: string, ttlMinutes: number): string {
   const parts: string[] = [];
@@ -263,7 +269,8 @@ export function formatWorkflowBadge(doc: DocRecord, nowIso: string, ttlMinutes: 
     const parsedClaim = taskClaimSchema.safeParse(claimRaw);
     if (parsedClaim.success) {
       const stale = isClaimStale(parsedClaim.data, nowIso, ttlMinutes);
-      parts.push(`claimed:${parsedClaim.data.by}${stale ? " (stale)" : ""}`);
+      const branchPart = parsedClaim.data.branch !== undefined ? `@${parsedClaim.data.branch}` : "";
+      parts.push(`claimed:${parsedClaim.data.by}${branchPart}${stale ? " (stale)" : ""}`);
     }
   }
 

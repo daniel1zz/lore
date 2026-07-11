@@ -72,7 +72,15 @@ const TYPE_SPECIFIC_FLAGS: Readonly<Record<string, readonly DocType[]>> = {
   "plan-id": ["task"],
   phase: ["task"],
   kind: ["spec"],
+  anchor: ["task"],
 };
+
+/** citty/mri yields a single string for one occurrence of a repeatable flag, an array for ≥2, or `undefined` for zero. Normalizes to a string array. */
+function normalizeRepeatable(value: unknown): string[] {
+  if (value === undefined) return [];
+  if (Array.isArray(value)) return value.map(String);
+  return [String(value)];
+}
 
 export default defineCommand({
   meta: {
@@ -134,6 +142,11 @@ export default defineCommand({
     kind: {
       type: "string",
       description: `[spec only] Spec kind: ${SPEC_KINDS.join(" | ")} (defaults to "feature" when omitted). Source: SPEC-032`,
+    },
+    anchor: {
+      type: "string",
+      description:
+        "[task only, repeatable] Declare a file_anchors entry (repo-relative POSIX path; trailing '/' = directory scope). Validated + normalized by CorpusService (SPEC-042 D3).",
     },
     ai: {
       type: "boolean",
@@ -378,6 +391,7 @@ export default defineCommand({
         resolvedPlanId,
         args.phase,
         args.kind,
+        normalizeRepeatable(args.anchor),
       );
 
       const result = await app.corpusService.create({
@@ -416,7 +430,10 @@ export default defineCommand({
 /**
  * Assemble the `extra` payload for types that require it.
  * Returns undefined for types that carry no type-specific extra fields (prd, plan).
- * For tasks: includes plan_id (required) and optionally phase (SPEC-023 AC-PHASE-2).
+ * For tasks: includes plan_id (required), optionally phase (SPEC-023 AC-PHASE-2),
+ * and optionally file_anchors (SPEC-042 D3 — the RAW `--anchor` strings are passed
+ * through untouched here; validation + normalization happens in
+ * `CorpusService._createImpl`, the single enforcement gate — never re-derived here).
  * For specs: includes spec_kind ONLY when --kind was passed explicitly — the "feature"
  * default is materialized service-side (CorpusService._createImpl), not here, so an
  * omitted --kind still returns undefined rather than pre-baking the default (SPEC-032 §3.1).
@@ -430,6 +447,7 @@ function buildExtra(
   planId: string | undefined,
   phase?: string,
   specKind?: string,
+  anchors?: string[],
 ): Record<string, unknown> | undefined {
   if (docType === "adr" && decisionStatus !== undefined) {
     return { decision_status: decisionStatus };
@@ -441,6 +459,9 @@ function buildExtra(
     const extra: Record<string, unknown> = { plan_id: planId };
     if (phase !== undefined) {
       extra["phase"] = phase.trim();
+    }
+    if (anchors !== undefined && anchors.length > 0) {
+      extra["file_anchors"] = anchors;
     }
     return extra;
   }

@@ -430,7 +430,7 @@ describe("lore evidence", () => {
 // ─── lore ready — BOUNDARY (flat JSON shape, AC-WF-8/D9) ─────────────────────
 
 describe("lore ready — JSON shape", () => {
-  it("AC-WF-8.CLI.J1: --json produces a flat array under data.ready (D9 — no phase nesting)", () => {
+  it("AC-WF-8.CLI.J1: --json produces the full ReadyReport under data.ready, records is a flat array (D9 — no phase nesting; SPEC-042 D7 wraps records/sessions/anchor_conflicts)", () => {
     const planSlug = createPlan("Ready JSON Plan");
     createTask(planSlug, "Task One");
     createTask(planSlug, "Task Two");
@@ -440,28 +440,39 @@ describe("lore ready — JSON shape", () => {
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.stdout) as {
       ok: boolean;
-      data?: { ready?: Array<{ task?: { slug?: string }; ready?: boolean; unmet_blockers?: unknown[] }> };
+      data?: {
+        ready?: {
+          records?: Array<{ task?: { slug?: string }; ready?: boolean; unmet_blockers?: unknown[] }>;
+          sessions?: unknown[];
+          anchor_conflicts?: unknown[];
+        };
+      };
     };
     expect(parsed.ok).toBe(true);
-    expect(Array.isArray(parsed.data?.ready)).toBe(true);
-    expect(parsed.data?.ready).toHaveLength(2);
+    expect(Array.isArray(parsed.data?.ready?.records)).toBe(true);
+    expect(parsed.data?.ready?.records).toHaveLength(2);
+    expect(Array.isArray(parsed.data?.ready?.sessions)).toBe(true);
+    expect(Array.isArray(parsed.data?.ready?.anchor_conflicts)).toBe(true);
     // Flat shape: each record is a plain object with `task`, not grouped under a phase key.
-    for (const record of parsed.data?.ready ?? []) {
+    for (const record of parsed.data?.ready?.records ?? []) {
       expect(typeof record.task?.slug).toBe("string");
       expect(typeof record.ready).toBe("boolean");
       expect(Array.isArray(record.unmet_blockers)).toBe(true);
     }
   });
 
-  it("AC-WF-7.CLI.J2: empty plan (no tasks) → data.ready is an empty array, exit 0", () => {
+  it("AC-WF-7.CLI.J2: empty plan (no tasks) → data.ready is an empty ReadyReport, exit 0", () => {
     const planSlug = createPlan("Empty Ready Plan");
 
     const result = runLore(["ready", planSlug, "--json"], tmpDir);
 
     expect(result.exitCode).toBe(0);
-    const parsed = JSON.parse(result.stdout) as { ok: boolean; data?: { ready?: unknown[] } };
+    const parsed = JSON.parse(result.stdout) as {
+      ok: boolean;
+      data?: { ready?: { records?: unknown[]; sessions?: unknown[]; anchor_conflicts?: unknown[] } };
+    };
     expect(parsed.ok).toBe(true);
-    expect(parsed.data?.ready).toEqual([]);
+    expect(parsed.data?.ready).toEqual({ records: [], sessions: [], anchor_conflicts: [] });
   });
 
   it("AC-WF-7.CLI.N1: ready against a non-plan doc → exit 4 (VALIDATION_ERROR)", () => {

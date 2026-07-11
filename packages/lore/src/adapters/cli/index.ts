@@ -52,6 +52,7 @@ const main = defineCommand({
     feed: () => import("./commands/feed.js").then((m) => m.default),
     bootstrap: () => import("./commands/bootstrap.js").then((m) => m.default),
     handoff: () => import("./commands/handoff.js").then((m) => m.default),
+    anchor: () => import("./commands/anchor.js").then((m) => m.default),
   },
 });
 
