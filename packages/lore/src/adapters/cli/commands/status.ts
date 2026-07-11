@@ -226,6 +226,15 @@ export default defineCommand({
         }
       }
 
+      // SPEC-043 D8 — invalidated-feeding-source warning (computed via the SAME
+      // armed-gate helper SessionService.bootstrap uses; see CorpusService.status).
+      if (status.invalidated_feeding_source_warnings.length > 0) {
+        console.log("\n⚠ Invalidated feeding sources:");
+        for (const warning of status.invalidated_feeding_source_warnings) {
+          console.log(`  - ${warning}`);
+        }
+      }
+
       // SPEC-024 AC-NOAI-10: show resolved per-surface AI defaults
       console.log("\nAI defaults (per surface):");
       for (const [surface, aiOn] of Object.entries(aiDefaults)) {

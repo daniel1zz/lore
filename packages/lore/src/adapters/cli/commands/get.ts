@@ -2,19 +2,25 @@
  * lore get <id-or-slug> — display a document with navigation footer.
  *
  * MDX placeholder splicing (SPEC-032 §3.3): unless --raw, this command calls
- * OutlineService.resolve(doc) itself and feeds the result into
- * renderResolvedToMarkdown() before printing — the same adapter-level thin-pipe
- * pattern already used by the HTTP (`?resolveMdx=true`) and MCP (`lore_get`)
- * surfaces. CorpusService.get() does NOT perform this resolution (see its
- * GetOpts.resolve_mdx JSDoc) — services never cross-import, so the splice must
- * happen here, not inside CorpusService.
+ * OutlineService.resolve(doc) itself (kept for `resolved_components` on the JSON
+ * path) — the same adapter-level thin-pipe pattern already used by the HTTP
+ * (`?resolveMdx=true`) and MCP (`lore_get`) surfaces. CorpusService.get() does NOT
+ * perform this resolution (see its GetOpts.resolve_mdx JSDoc) — services never
+ * cross-import, so the splice must happen here, not inside CorpusService.
+ *
+ * Invalidation banner (SPEC-043 D4): the displayed body itself is produced by
+ * `renderDocMarkdown` (`../../../flows/feed-flow.js`) — the SAME shared function
+ * `lore feed`'s pack uses — rather than a second `renderResolvedToMarkdown` call
+ * here, so the banner format (and its wiring) can never drift between the two
+ * sites. `--raw` skips this branch entirely — raw output is always the stored
+ * bytes, banner never included (REGRESSION).
  */
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatNavigation } from "../utils.js";
-import { renderResolvedToMarkdown } from "../../../service/outline-service.js";
 import type { ResolvedComponent } from "../../../service/outline-service.js";
+import { renderDocMarkdown } from "../../../flows/feed-flow.js";
 
 export default defineCommand({
   meta: {
@@ -58,8 +64,12 @@ export default defineCommand({
         const resolveResult = await app.outlineService.resolve(doc);
         if (resolveResult.ok) {
           resolvedComponents = resolveResult.value.resolvedComponents;
-          displayBody = renderResolvedToMarkdown(resolveResult.value);
         }
+        // SPEC-043 D4 — banner-prefixed, MDX-spliced body via the SAME shared
+        // renderDocMarkdown `lore feed`'s pack uses (T2 wiring site 1/3) — never a
+        // second banner-format implementation. --raw NEVER carries the banner
+        // (raw = stored bytes, REGRESSION).
+        displayBody = await renderDocMarkdown(app, doc);
       }
 
       if (args.json) {

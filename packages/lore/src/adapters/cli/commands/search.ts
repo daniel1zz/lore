@@ -4,7 +4,7 @@
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, formatTable } from "../utils.js";
+import { exitCode, formatError, formatTable, formatValidityBadge } from "../utils.js";
 import type { DocType } from "@lore/core";
 
 export default defineCommand({
@@ -31,12 +31,17 @@ export default defineCommand({
       type: "boolean",
       description: "Output as JSON",
     },
+    "include-invalid": {
+      type: "boolean",
+      description: "Include invalidated knowledge/adr docs (excluded by default). Source: SPEC-043 D3.",
+    },
   },
   async run({ args }) {
     const { app } = loadLoreApp();
     try {
       const filters: Record<string, unknown> = {};
       if (args.type !== undefined) filters["type"] = args.type as DocType;
+      if (args["include-invalid"] === true) filters["include_invalid"] = true;
 
       const result = await app.corpusService.search(args.query, filters);
 
@@ -59,10 +64,14 @@ export default defineCommand({
         return;
       }
 
+      // SPEC-043 D3/D4 — [invalid] badge on rows surfaced only via --include-invalid
+      // (the default search already excludes them, so this is a no-op unless that
+      // flag was passed).
+      const nowIso = new Date().toISOString();
       const headers = ["ID", "Title", "Snippet", "Score"];
       const rows = results.map((r) => [
         r.id.slice(0, 10),
-        r.title.slice(0, 30),
+        `${r.title.slice(0, 30)}${formatValidityBadge(r, nowIso)}`,
         (r.snippet ?? "").slice(0, 40),
         r.score.toFixed(2),
       ]);

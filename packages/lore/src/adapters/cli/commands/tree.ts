@@ -16,7 +16,7 @@
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, formatTree, formatWorkflowBadge } from "../utils.js";
+import { exitCode, formatError, formatTree, formatValidityBadge, formatWorkflowBadge } from "../utils.js";
 import type { TreeBlueprint, PlanPhase, DocRecord } from "@lore/core";
 
 // ─── Phase Grouping Helpers ───────────────────────────────────────────────────
@@ -107,6 +107,33 @@ const ORPHAN_DETECTION_BLUEPRINT: TreeBlueprint = {
   version: 1,
   root: { type: "prd", min: 0, max: null, children: [] },
 };
+
+/**
+ * Builds a DocId → " [invalid]" badge map covering every invalidated knowledge/adr
+ * doc in the corpus (SPEC-043 D3/D4 — `lore tree` never filters invalidated docs,
+ * but must always mark them, unlike search/list which filter by default). Two
+ * `listFull` calls (knowledge + adr) regardless of the tree's root type — cheap
+ * relative to store round trips this command already makes, and correct for any
+ * root (a knowledge/adr node can appear anywhere in the tree, not only under a plan).
+ */
+async function buildValidityBadges(
+  app: ReturnType<typeof loadLoreApp>["app"],
+  nowIso: string,
+): Promise<Map<string, string>> {
+  const badges = new Map<string, string>();
+  const [knowledgeResult, adrResult] = await Promise.all([
+    app.corpusService.listFull({ type: "knowledge" }),
+    app.corpusService.listFull({ type: "adr" }),
+  ]);
+  for (const listResult of [knowledgeResult, adrResult]) {
+    if (!listResult.ok) continue;
+    for (const doc of listResult.value.docs) {
+      const badge = formatValidityBadge(doc, nowIso);
+      if (badge !== "") badges.set(doc.id, badge);
+    }
+  }
+  return badges;
+}
 
 export default defineCommand({
   meta: {
@@ -216,6 +243,8 @@ export default defineCommand({
       // separately; this is one extra O(1) store read, acceptable for a CLI command.
       const nowIso = new Date().toISOString();
       const ttlMinutes = app.taskWorkflowService.claimTtlMinutes;
+      // SPEC-043 D4 — always-shown [invalid] badges, merged into every badges map below.
+      const validityBadges = await buildValidityBadges(app, nowIso);
 
       if (args.root) {
         const fullPlanResult = await app.corpusService.get(args.root);
@@ -267,10 +296,10 @@ export default defineCommand({
           if (!args.json && allTasks.length > 0) {
             // No declared phases — fall through to the flat formatTree renderer,
             // but still annotate task rows with claim/evidence badges (AC-WF-9).
-            const badges = new Map<string, string>();
+            const badges = new Map<string, string>(validityBadges);
             for (const task of allTasks) {
               const badge = formatWorkflowBadge(task, nowIso, ttlMinutes);
-              if (badge !== "") badges.set(task.id, badge);
+              if (badge !== "") badges.set(task.id, (badges.get(task.id) ?? "") + badge);
             }
             console.log(formatTree(result.value, "", badges));
             return;
@@ -283,7 +312,7 @@ export default defineCommand({
         return;
       }
 
-      console.log(formatTree(result.value));
+      console.log(formatTree(result.value, "", validityBadges));
     } finally {
       app.close();
     }
