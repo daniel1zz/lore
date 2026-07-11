@@ -869,7 +869,7 @@ describe("POST /api/review/:id/reject", () => {
 
 describe("GET /api/ready/:planIdOrSlug", () => {
   describe("happy path", () => {
-    it("returns ReadyRecord[] parity with a direct TaskWorkflowService.ready() call", async () => {
+    it("returns ReadyReport parity with a direct TaskWorkflowService.ready() call (SPEC-042 report-shape change)", async () => {
       const { id: planId } = await createPlan("Ready Parity Plan");
       await createTask(planId, "Task A");
       await createTask(planId, "Task B");
@@ -885,17 +885,17 @@ describe("GET /api/ready/:planIdOrSlug", () => {
       expect(direct.ok).toBe(true);
       if (!direct.ok) return;
       expect(body.data).toEqual(direct.value);
-      expect((body.data as unknown[])).toHaveLength(2);
+      expect((body.data as { records: unknown[] }).records).toHaveLength(2);
     });
 
-    it("an empty plan (no tasks) returns 200 with an empty array, not an error", async () => {
+    it("an empty plan (no tasks) returns 200 with an empty ReadyReport, not an error", async () => {
       const { id: planId } = await createPlan("Empty Ready Plan");
 
       const { req, url } = makeGetRequest(`/api/ready/${planId}`);
       const res = await handleApiRoute(req, url, app, TEST_ACTOR);
       expect(res!.status).toBe(200);
       const body = await parseResponse(res!);
-      expect(body.data).toEqual([]);
+      expect(body.data).toEqual({ records: [], sessions: [], anchor_conflicts: [] });
     });
 
     it("resolves by slug as well as by id", async () => {

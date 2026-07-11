@@ -68,7 +68,11 @@ export type TelemetryEvent = z.infer<typeof TelemetryEventSchema>;
  * exhaustively checked at compile time.
  * Source: SPEC-025 §4 AC-WF-11, §8.1
  */
-export type TaskWorkflowEventName = "task.claimed" | "task.released" | "task.evidence_added";
+export type TaskWorkflowEventName =
+  | "task.claimed"
+  | "task.released"
+  | "task.evidence_added"
+  | "task.anchors_updated";
 
 // ─── AI Generation Event Schema ──────────────────────────────────────────────
 

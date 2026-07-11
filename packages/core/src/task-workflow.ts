@@ -128,17 +128,100 @@ export type EvidenceEntry = z.infer<typeof evidenceEntrySchema>;
  * Expiry is computed read-side via {@link isClaimStale} against a config TTL —
  * there is no daemon, no heartbeat (D2).
  *
+ * @invariant `machine`/`worktree` are ADDITIVE fields (SPEC-042 §Design Decisions
+ *   D2) — explicit-only, never auto-captured from `process.cwd()`/ambient state
+ *   by this schema or by {@link buildTaskClaim}. An honest absent field beats a
+ *   confidently-wrong captured value (review U2). Legacy claims written before
+ *   this field existed remain valid (both optional).
+ *
  * @example
- * taskClaimSchema.parse({ by: "alice", at: "2026-07-02T10:00:00.000Z", branch: "feat/x" });
+ * taskClaimSchema.parse({
+ *   by: "alice", at: "2026-07-02T10:00:00.000Z", branch: "feat/x",
+ *   machine: "alices-mbp", worktree: "/repo/.worktrees/t1",
+ * });
  */
 export const taskClaimSchema = z.object({
   by: z.string().min(1),
   at: z.string(),
   branch: z.string().optional(),
+  /** Auto-captured by the CLI as `os.hostname()`; explicit-only over MCP (SPEC-042 D2). */
+  machine: z.string().optional(),
+  /** ALWAYS explicit — never auto-captured from `process.cwd()` (SPEC-042 D2, review U2). */
+  worktree: z.string().optional(),
 });
 
 /** Derived TypeScript type for a task claim lease. */
 export type TaskClaim = z.infer<typeof taskClaimSchema>;
+
+/** Caller-supplied fields for {@link buildTaskClaim} — one claim-capture attempt. */
+export interface ClaimCaptureInput {
+  by: string;
+  at: string;
+  branch?: string;
+  machine?: string;
+  worktree?: string;
+}
+
+/**
+ * Builds the {@link TaskClaim} a `claim()` write should persist, applying
+ * SPEC-042 D2's carry-forward refresh rule.
+ *
+ * On a SAME-HOLDER FRESH refresh (`carryForward: true`), `branch`/`machine`/
+ * `worktree` MERGE FORWARD from `previous` — an omitted field in `input`
+ * inherits `previous`'s value; an explicitly re-passed field overrides it. On
+ * any other transition (first acquire, steal, stale takeover, or a different
+ * holder) — `carryForward: false` — the result carries ONLY the fields present
+ * in `input`; nothing is inherited from `previous`, even when
+ * `previous.by === input.by` (a stale takeover by the same actor still starts
+ * fresh, SPEC-042 D2 — staleness breaks session continuity by design).
+ *
+ * Callers decide `carryForward` (typically
+ * `existing !== undefined && !isClaimStale(existing, nowIso, ttl) && existing.by === input.by`)
+ * — this function has no wall-clock access and cannot compute staleness itself
+ * (module invariant: no IO, no wall-clock reads).
+ *
+ * @param previous - The task's current claim, or `undefined` if none.
+ * @param input - The new claim-capture attempt.
+ * @param carryForward - Whether to merge `previous`'s branch/machine/worktree
+ *   forward when `input` omits them.
+ * @returns The `TaskClaim` to persist.
+ *
+ * @example
+ * // same-holder fresh refresh — branch/machine/worktree inherited
+ * buildTaskClaim(
+ *   { by: "alice", at: "T0", branch: "b1", machine: "A", worktree: "/w" },
+ *   { by: "alice", at: "T1" },
+ *   true,
+ * );
+ * // => { by: "alice", at: "T1", branch: "b1", machine: "A", worktree: "/w" }
+ *
+ * @example
+ * // stale takeover by the SAME actor — starts fresh, nothing inherited
+ * buildTaskClaim(
+ *   { by: "alice", at: "T0", branch: "b1", machine: "A", worktree: "/w" },
+ *   { by: "alice", at: "T1" },
+ *   false,
+ * );
+ * // => { by: "alice", at: "T1" }
+ */
+export function buildTaskClaim(
+  previous: TaskClaim | undefined,
+  input: ClaimCaptureInput,
+  carryForward: boolean,
+): TaskClaim {
+  const base = carryForward ? previous : undefined;
+  const branch = input.branch ?? base?.branch;
+  const machine = input.machine ?? base?.machine;
+  const worktree = input.worktree ?? base?.worktree;
+
+  return {
+    by: input.by,
+    at: input.at,
+    ...(branch !== undefined ? { branch } : {}),
+    ...(machine !== undefined ? { machine } : {}),
+    ...(worktree !== undefined ? { worktree } : {}),
+  };
+}
 
 // ─── Claim Staleness ───────────────────────────────────────────────────────
 
@@ -211,6 +294,19 @@ export interface ReadyRecord {
    * `claim`/`phase`.
    */
   upstream_unapproved?: boolean;
+  /**
+   * true iff this task holds a FRESH claim, declares NO `file_anchors` itself,
+   * AND at least one sibling task in the same plan DOES declare non-empty
+   * anchors (SPEC-042 D7, review U7). Advisory only — never affects `ready`.
+   * Omitted (not `false`) when the condition doesn't hold, matching this
+   * module's "present-iff-true" convention for `claim`/`phase`/
+   * `upstream_unapproved`. A zero-adoption plan (no task anywhere declares
+   * anchors) produces NO marker on any record — partial adoption is the risk
+   * this advisory targets, not the absence of the feature entirely.
+   * Computed by `TaskWorkflowService.ready` (not this pure module — it needs
+   * plan-wide anchor comparison `evaluateReadiness` doesn't otherwise do).
+   */
+  anchorless?: boolean;
 }
 
 /**

@@ -373,26 +373,32 @@ describe("lore_ready", () => {
   const call = () => getToolHandler(server, "lore_ready");
 
   describe("happy path", () => {
-    it("returns { ready: [...] } — a flat array, one record per task", async () => {
+    // reason: SPEC-042 D7 — TaskWorkflowService.ready's return shape gained
+    // `sessions[]`/`anchor_conflicts[]` alongside the pre-existing flat
+    // records array (now `.records`, not the top-level value); `lore_ready`
+    // (tools.ts) is an unmodified pass-through (`textContent({ ready:
+    // result.value })`), so this is a mechanical shape update, not a design
+    // decision about the MCP tool itself.
+    it("returns { ready: { records: [...], sessions, anchor_conflicts } } — records is a flat array, one per task", async () => {
       const planId = await createPlan();
       await createTask(planId, "Task A");
       await createTask(planId, "Task B");
 
       const result = await call()({ plan_id_or_slug: planId });
       expect(result.isError).toBeFalsy();
-      const data = parseResult(result) as { ready: Array<{ ready: boolean }> };
-      expect(Array.isArray(data.ready)).toBe(true);
-      expect(data.ready).toHaveLength(2);
+      const data = parseResult(result) as { ready: { records: Array<{ ready: boolean }> } };
+      expect(Array.isArray(data.ready.records)).toBe(true);
+      expect(data.ready.records).toHaveLength(2);
     });
   });
 
   describe("boundary values", () => {
-    it("an empty plan (no tasks) returns { ready: [] }, not an error", async () => {
+    it("an empty plan (no tasks) returns { ready: { records: [], sessions: [], anchor_conflicts: [] } }, not an error", async () => {
       const planId = await createPlan("Empty Plan");
       const result = await call()({ plan_id_or_slug: planId });
       expect(result.isError).toBeFalsy();
-      const data = parseResult(result) as { ready: unknown[] };
-      expect(data.ready).toEqual([]);
+      const data = parseResult(result) as { ready: { records: unknown[]; sessions: unknown[]; anchor_conflicts: unknown[] } };
+      expect(data.ready).toEqual({ records: [], sessions: [], anchor_conflicts: [] });
     });
   });
 

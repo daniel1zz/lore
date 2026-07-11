@@ -35,6 +35,7 @@ import {
   handoffExtraSchema,
   renderHandoffContent,
   bootstrapReportSchema,
+  deriveSessions,
 } from "@lore/core";
 import type {
   BootstrapReport,
@@ -214,14 +215,26 @@ export class SessionService {
 
     // Active (non-terminal) plans + per-plan task readiness counts.
     const plans = allDocs.filter((d) => d.type === "plan");
+    const activePlanIds = new Set<DocId>();
     const activePlans: BootstrapReport["active_plans"] = [];
     for (const plan of plans) {
       if (plan.status === "archived" || plan.status === "deprecated") continue;
+      activePlanIds.add(plan.id);
       const tasks = allDocs.filter((d) => d.type === "task" && d.parent_id === plan.id);
       const countsResult = await this.computeTaskCounts(tasks, allDocs, nowIso);
       if (!countsResult.ok) return countsResult;
       activePlans.push({ slug: plan.slug, title: truncateTitle(plan.title), task_counts: countsResult.value });
     }
+
+    // Corpus-wide derived sessions over every ACTIVE plan's tasks (SPEC-042 D8) —
+    // a fresh session learns who else is working BEFORE it claims. Reuses the
+    // SAME `deriveSessions` pure fn `TaskWorkflowService.ready`'s plan-scoped
+    // `sessions[]` uses, just over the union of every active plan's children
+    // instead of one plan's.
+    const activeTasks = allDocs.filter(
+      (d) => d.type === "task" && d.parent_id !== null && activePlanIds.has(d.parent_id),
+    );
+    const activeSessions = deriveSessions(activeTasks, nowIso, this.deps.claimTtlMinutes);
 
     // Pending review queue — same `status: "draft"` filter ReviewService.pending uses.
     const pendingDrafts = allDocs.filter((d) => d.status === "draft").sort(byCreatedAtAsc);
@@ -333,6 +346,7 @@ export class SessionService {
       latest_handoffs: latestHandoffs,
       resume_hint: resumeHint,
       corpus: { total_docs: allDocs.length, last_updated: lastUpdated },
+      active_sessions: activeSessions,
     };
 
     // reason: self-consistency assertion, not user-input validation —

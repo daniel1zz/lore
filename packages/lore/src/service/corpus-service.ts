@@ -17,6 +17,7 @@ import {
   slugifyWithCollision,
   specAcceptanceCriteriaSchema,
   specExtraSchema,
+  normalizeFileAnchors,
 } from "@lore/core";
 import type { CreateDocInput, DocPatch } from "@lore/core";
 import {
@@ -461,6 +462,35 @@ export class CorpusService {
       }
     }
 
+    // Create-time file_anchors validation + normalization for tasks (SPEC-042
+    // §Design Decisions D3). reason: taskExtraSchema only shape-checks
+    // file_anchors (bounded array of bounded strings) — the deeper
+    // normalization rules (no leading "/", no "..", no "\", trailing-slash
+    // directory-scope semantics, dedup) live in the shared pure
+    // `normalizeFileAnchors` (@lore/core, file-anchors.ts), so create-time and
+    // TaskWorkflowService's anchor-mutation verbs enforce identically — never
+    // re-derived here. No cross-DOCUMENT component (unlike phase/ac_scope
+    // above) — colocated in this method only because CreateDocInput's `extra`
+    // bag is only available here; the NORMALIZED result is folded into
+    // resolvedExtra below (raw, un-normalized input is never persisted).
+    let normalizedFileAnchors: string[] | undefined;
+    if (data.type === "task") {
+      const rawAnchors = data.extra?.["file_anchors"];
+      if (rawAnchors !== undefined) {
+        if (!Array.isArray(rawAnchors) || !rawAnchors.every((a) => typeof a === "string")) {
+          return err({
+            code: "VALIDATION_ERROR",
+            field: "extra.file_anchors",
+            message: "extra.file_anchors must be an array of strings",
+            value: rawAnchors,
+          });
+        }
+        const normalizedResult = normalizeFileAnchors(rawAnchors as string[]);
+        if (!normalizedResult.ok) return normalizedResult;
+        normalizedFileAnchors = normalizedResult.value;
+      }
+    }
+
     const id = ulid() as DocId;
     const now = new Date().toISOString();
     const role = DOC_TYPE_ROLE_MAP[data.type];
@@ -475,10 +505,19 @@ export class CorpusService {
     // reason: Zod superRefine can only addIssue, never inject a default — the schema
     // layer (specExtraSchema) validates an explicit value, this service layer
     // materializes the default. Immutable: derive a new object, never mutate data.extra.
-    const resolvedExtra: Record<string, unknown> =
+    const specKindDefaultedExtra: Record<string, unknown> =
       data.type === "spec" && data.extra?.["spec_kind"] === undefined
         ? { ...(data.extra ?? {}), spec_kind: "feature" }
         : (data.extra ?? {});
+
+    // Overlay the normalized file_anchors (if any were validated above) on top
+    // of the spec_kind-defaulted extra — the two defaults are independent
+    // (never both apply to the same doc type) but composed this way so a
+    // future third create-time extra transform can chain the same way.
+    const resolvedExtra: Record<string, unknown> =
+      normalizedFileAnchors !== undefined
+        ? { ...specKindDefaultedExtra, file_anchors: normalizedFileAnchors }
+        : specKindDefaultedExtra;
 
     // Gate `spec-create` (retro follow-up item 8, defense-in-depth): the SAME
     // deterministic checkpoint `lore gate spec-create` runs as a pre-flight hook

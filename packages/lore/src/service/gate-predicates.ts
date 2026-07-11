@@ -40,11 +40,22 @@ import {
   SPEC_KINDS,
   specAcceptanceCriteriaSchema,
   UPSTREAM_APPROVED_STATUSES,
+  anchorsOverlap,
   type DocType,
 } from "@lore/core";
 
-/** Result of a single gate predicate: either a pass, or a fail carrying a machine-readable reason. */
-export type PredicateResult = { ok: true } | { ok: false; reason: string };
+/**
+ * Result of a single gate predicate: either a pass, or a fail carrying a
+ * machine-readable reason and an OPTIONAL `field` sub-discriminator (SPEC-042
+ * §Design Decisions D5, review U4) — when present, `GateEnforcer.enforce`
+ * renders the caller-facing `LoreError.field` as `gate:<checkpoint>:<field>`
+ * instead of the base `gate:<checkpoint>`, so a scripted caller can tell TWO
+ * different failure classes on the SAME checkpoint apart (e.g. task-claim's
+ * anchor-overlap failure vs. its upstream-approval failure) without parsing
+ * prose. Absent on every pre-SPEC-042 predicate — additive, not a breaking
+ * change to this type's existing consumers.
+ */
+export type PredicateResult = { ok: true } | { ok: false; reason: string; field?: string };
 
 const SPEC_LEGAL_PARENT_TYPES: readonly DocType[] = PARENT_TYPE_CONTRACT.spec;
 
@@ -211,4 +222,71 @@ export function upstreamHasAcceptanceCriteria(
     return { ok: true };
   }
   return { ok: false, reason: "UPSTREAM_NO_AC" };
+}
+
+/**
+ * One sibling task's claim snapshot, precomputed by the CALLER (SPEC-042 §Design
+ * Decisions D5 seam pinning) — `stale` is derived from the SAME `nowIso` +
+ * `claimTtlMinutes` `_claimImpl` uses for the target claim's own conflict check,
+ * so this predicate itself never reads a wall clock (module invariant: no store,
+ * no IO, no wall-clock reads).
+ */
+export interface SiblingClaimInfo {
+  slug: string;
+  title: string;
+  by: string;
+  at: string;
+  stale: boolean;
+  anchors: string[];
+}
+
+/** `noAnchorOverlap`'s single machine-readable failure reason. */
+export const ANCHOR_OVERLAP_REASON = "ANCHOR_OVERLAP";
+
+/** The `PredicateResult.field` value `noAnchorOverlap`'s failure carries (SPEC-042 D5, review U4). */
+export const ANCHOR_OVERLAP_FIELD = "anchor-overlap";
+
+/**
+ * `task-claim`'s worktree-mutex predicate (SPEC-042 §Design Decisions D5): the
+ * candidate claim's declared `file_anchors` must not overlap a FRESH sibling
+ * claim held by a DIFFERENT actor, within the same plan.
+ *
+ * Vacuous pass (no ERROR path — `anchorsOverlap`'s precondition-only contract
+ * extends to this predicate) when: the candidate declares no anchors, a sibling
+ * is stale, a sibling is held by the SAME actor as the candidate, a sibling
+ * declares no anchors itself, or no sibling's anchors overlap the candidate's.
+ *
+ * @param candidateBy - The actor attempting the claim.
+ * @param candidateAnchors - The target task's own declared (normalized) anchors.
+ * @param siblingClaims - Every OTHER task in the same plan holding a claim
+ *   (fresh or stale — staleness is filtered HERE, not by the caller).
+ * @returns `{ok: true}` when no fresh, foreign, overlapping sibling exists;
+ *   `{ok: false, reason: "ANCHOR_OVERLAP", field: "anchor-overlap"}` otherwise.
+ * @example
+ * noAnchorOverlap("agent:t2", ["src/a"], [
+ *   { slug: "task-1", title: "T1", by: "agent:t1", at: "T0", stale: false, anchors: ["src/a/"] },
+ * ]); // => { ok: false, reason: "ANCHOR_OVERLAP", field: "anchor-overlap" }
+ * @example
+ * noAnchorOverlap("agent:t1", ["src/a"], [
+ *   { slug: "task-1", title: "T1", by: "agent:t1", at: "T0", stale: false, anchors: ["src/a"] },
+ * ]); // => { ok: true } — same actor, not a conflict
+ */
+export function noAnchorOverlap(
+  candidateBy: string | undefined,
+  candidateAnchors: string[] | undefined,
+  siblingClaims: readonly SiblingClaimInfo[] | undefined,
+): PredicateResult {
+  const anchors = candidateAnchors ?? [];
+  if (anchors.length === 0) {
+    return { ok: true };
+  }
+  for (const sibling of siblingClaims ?? []) {
+    if (sibling.stale) continue;
+    if (sibling.by === candidateBy) continue;
+    if (sibling.anchors.length === 0) continue;
+    if (anchorsOverlap(anchors, sibling.anchors).overlaps) {
+      return { ok: false, reason: ANCHOR_OVERLAP_REASON, field: ANCHOR_OVERLAP_FIELD };
+    }
+  }
+  return { ok: true };
 }

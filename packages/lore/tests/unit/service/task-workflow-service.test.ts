@@ -164,8 +164,8 @@ describe("HAPPY — claim → evidence → release → ready round-trip (AC-WF-1
     const readyResult = await taskWorkflowService.ready(planId);
     expect(readyResult.ok).toBe(true);
     if (!readyResult.ok) return;
-    expect(readyResult.value).toHaveLength(1);
-    const record = readyResult.value[0];
+    expect(readyResult.value.records).toHaveLength(1);
+    const record = readyResult.value.records[0];
     expect(record?.ready).toBe(true);
     expect(record?.claim).toBeUndefined();
     expect(record?.evidence_count).toBe(1);
@@ -464,12 +464,12 @@ describe("STATE — claim → stale transition via now injection (AC-WF-4, D10)"
     const freshReport = await taskWorkflowService.ready(planId, () => "2026-07-02T09:00:00.000Z"); // 60 min later
     expect(freshReport.ok).toBe(true);
     if (!freshReport.ok) return;
-    expect(freshReport.value[0]?.claim?.stale).toBe(false);
+    expect(freshReport.value.records[0]?.claim?.stale).toBe(false);
 
     const staleReport = await taskWorkflowService.ready(planId, () => "2026-07-02T11:00:00.000Z"); // 180 min later
     expect(staleReport.ok).toBe(true);
     if (!staleReport.ok) return;
-    expect(staleReport.value[0]?.claim?.stale).toBe(true);
+    expect(staleReport.value.records[0]?.claim?.stale).toBe(true);
   });
 });
 
@@ -486,7 +486,7 @@ describe("STATE — ready() flips when a blocker transitions to archived (AC-WF-
     const before = await taskWorkflowService.ready(planId);
     expect(before.ok).toBe(true);
     if (!before.ok) return;
-    const blockedBefore = before.value.find((r) => r.task.id === blockedId);
+    const blockedBefore = before.value.records.find((r) => r.task.id === blockedId);
     expect(blockedBefore?.ready).toBe(false);
     expect(blockedBefore?.unmet_blockers.map((b) => b.id)).toContain(blockerId);
 
@@ -496,7 +496,7 @@ describe("STATE — ready() flips when a blocker transitions to archived (AC-WF-
     const after = await taskWorkflowService.ready(planId);
     expect(after.ok).toBe(true);
     if (!after.ok) return;
-    const blockedAfter = after.value.find((r) => r.task.id === blockedId);
+    const blockedAfter = after.value.records.find((r) => r.task.id === blockedId);
     expect(blockedAfter?.ready).toBe(true);
     expect(blockedAfter?.unmet_blockers).toEqual([]);
   });
@@ -535,7 +535,7 @@ describe("STATE — ready() upstream_unapproved advisory (SPEC-032 §3.4, AC-6)"
     const report = await taskWorkflowService.ready(planId);
     expect(report.ok).toBe(true);
     if (!report.ok) return;
-    const record = report.value.find((r) => r.task.id === taskId);
+    const record = report.value.records.find((r) => r.task.id === taskId);
     expect(record?.upstream_unapproved).toBe(true);
     expect(record?.ready).toBe(true); // never blocks — advisory only
   });
@@ -572,7 +572,7 @@ describe("STATE — ready() upstream_unapproved advisory (SPEC-032 §3.4, AC-6)"
     const beforeApproval = await taskWorkflowService.ready(planId);
     expect(beforeApproval.ok).toBe(true);
     if (!beforeApproval.ok) return;
-    expect(beforeApproval.value.find((r) => r.task.id === taskId)?.upstream_unapproved).toBe(true);
+    expect(beforeApproval.value.records.find((r) => r.task.id === taskId)?.upstream_unapproved).toBe(true);
 
     const approveResult = await corpusService.set(specId, { status: "approved" });
     expect(approveResult.ok).toBe(true);
@@ -580,7 +580,7 @@ describe("STATE — ready() upstream_unapproved advisory (SPEC-032 §3.4, AC-6)"
     const afterApproval = await taskWorkflowService.ready(planId);
     expect(afterApproval.ok).toBe(true);
     if (!afterApproval.ok) return;
-    expect(afterApproval.value.find((r) => r.task.id === taskId)?.upstream_unapproved).toBeUndefined();
+    expect(afterApproval.value.records.find((r) => r.task.id === taskId)?.upstream_unapproved).toBeUndefined();
   });
 
   it("a plan parented directly under a prd (no spec) never carries upstream_unapproved", async () => {
@@ -606,7 +606,7 @@ describe("STATE — ready() upstream_unapproved advisory (SPEC-032 §3.4, AC-6)"
     const report = await taskWorkflowService.ready(planId);
     expect(report.ok).toBe(true);
     if (!report.ok) return;
-    expect(report.value.find((r) => r.task.id === taskId)?.upstream_unapproved).toBeUndefined();
+    expect(report.value.records.find((r) => r.task.id === taskId)?.upstream_unapproved).toBeUndefined();
   });
 
   it("a top-level plan (no parent at all) never carries upstream_unapproved", async () => {
@@ -617,7 +617,7 @@ describe("STATE — ready() upstream_unapproved advisory (SPEC-032 §3.4, AC-6)"
     const report = await taskWorkflowService.ready(planId);
     expect(report.ok).toBe(true);
     if (!report.ok) return;
-    expect(report.value.find((r) => r.task.id === taskId)?.upstream_unapproved).toBeUndefined();
+    expect(report.value.records.find((r) => r.task.id === taskId)?.upstream_unapproved).toBeUndefined();
   });
 });
 

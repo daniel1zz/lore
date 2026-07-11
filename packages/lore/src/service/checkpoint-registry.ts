@@ -30,28 +30,41 @@
  *   `checkpointRegistry[cp] !== undefined` (or use `requireCheckpoint`-style lookups
  *   only where compile-time-known to already be populated) rather than assuming the
  *   partiality can never return.
- * @invariant `plan-promote` and `task-claim` both encode "no spec-tier ancestor ⇒
- *   PASS" the SAME way: `ctx.hasSpecParent === false` short-circuits `check()` to an
- *   empty `PredicateResult[]` BEFORE either predicate runs — `isCheckpointBlocked([])`
- *   is vacuously `false` (see that function's own doc). This covers a plan parented
+ * @invariant `plan-promote` encodes "no spec-tier ancestor ⇒ PASS" via
+ *   `ctx.hasSpecParent === false` short-circuiting `check()` to an empty
+ *   `PredicateResult[]` BEFORE its predicate runs — `isCheckpointBlocked([])` is
+ *   vacuously `false` (see that function's own doc). This covers a plan parented
  *   directly under a `prd` (no spec in the chain at all) and a top-level, unparented
  *   plan identically: there is no upstream spec edge to gate against, so the write is
  *   never blocked by this checkpoint. Do NOT call `upstreamApproved(undefined, "spec")`
  *   for this case — that predicate treats a missing upstream as a FAILURE
  *   (`UPSTREAM_MISSING`), which is the correct behavior when a spec parent WAS
  *   expected but didn't resolve, not when no spec tier exists in the chain at all.
+ * @invariant `task-claim` (SPEC-042 §Design Decisions D5, reviews S1+T2) does
+ *   NOT apply that same short-circuit to its `noAnchorOverlap` predicate — ONLY
+ *   `upstreamApproved` is gated by `ctx.hasSpecParent === true`. `noAnchorOverlap`
+ *   runs for EVERY task whose plan bundle resolved, spec ancestor or not (a
+ *   top-level/prd-parented plan is the common case where orchestrator discipline
+ *   was previously the ONLY protection). The original draft short-circuited BOTH
+ *   predicates identically to `plan-promote`'s shape — that was a hole two
+ *   independent adversarial-review lenses (schema-seams and testability) each
+ *   flagged separately; see AC-S3-3's "plan with NO spec ancestor + fresh foreign
+ *   overlap → still blocked" regression scenario.
  *
- * Source: IoC vertical-slice tech-spec §4.1/§5.1/§11.
+ * Source: IoC vertical-slice tech-spec §4.1/§5.1/§11; SPEC-042 §Design Decisions D5.
  */
 
-import type { DocRecord } from "@lore/core";
+import { anchorsOverlap, extractClaim, extractFileAnchors, isClaimStale, type DocRecord } from "@lore/core";
 import {
   parentLegal,
   specKindValid,
   hasSkeleton,
   upstreamApproved,
   upstreamHasAcceptanceCriteria,
+  noAnchorOverlap,
+  ANCHOR_OVERLAP_FIELD,
   type PredicateResult,
+  type SiblingClaimInfo,
 } from "./gate-predicates.js";
 import { buildFeedingPack, renderFeedingPack } from "./gate-feeding.js";
 
@@ -128,6 +141,27 @@ export interface GateContext {
   readonly parentSpecPointer?: { slug: string; title: string; status: string };
   /** Target plan/task's id/slug, as the caller supplied it — used only in `feed()`'s message. */
   readonly targetIdOrSlug?: string;
+
+  // -- task-claim: check() + feed() (SPEC-042 §Design Decisions D5) --
+  /** The actor attempting the claim — populated UNCONDITIONALLY (see this module's fourth invariant). */
+  readonly candidateBy?: string;
+  /** The target task's own declared (normalized) `file_anchors` — populated UNCONDITIONALLY. */
+  readonly candidateAnchors?: string[];
+  /**
+   * Every OTHER task in the same plan holding a claim (fresh or stale — staleness
+   * is precomputed HERE by the caller from the SAME `nowIso` the target claim's
+   * own conflict check uses, D5 seam pinning) — populated UNCONDITIONALLY
+   * whenever a plan bundle resolved, regardless of `hasSpecParent` (fourth
+   * module invariant).
+   */
+  readonly siblingClaims?: SiblingClaimInfo[];
+  /**
+   * `workflow.gates."task-claim".anchor_overlap.enabled` resolved by the CALLER
+   * (SPEC-042 D6) — `false` skips `noAnchorOverlap` entirely, leaving
+   * `upstreamApproved` untouched. Absent means enabled (same default philosophy
+   * as every other gate config knob).
+   */
+  readonly anchorOverlapEnabled?: boolean;
 }
 
 /**
@@ -177,8 +211,8 @@ export function isCheckpointBlocked(results: PredicateResult[]): boolean {
  */
 export function selectFailures(
   results: PredicateResult[],
-): Array<{ ok: false; reason: string }> {
-  return results.filter((r): r is { ok: false; reason: string } => !r.ok);
+): Array<{ ok: false; reason: string; field?: string }> {
+  return results.filter((r): r is { ok: false; reason: string; field?: string } => !r.ok);
 }
 
 /**
@@ -252,16 +286,23 @@ function checkPlanPromote(ctx: GateContext): PredicateResult[] {
 }
 
 /**
- * `task-claim`'s single predicate: the task's parent plan's ancestor spec must be
- * `approved` (`upstreamApproved` only — task-claim does not care whether the spec has
- * declared AC, unlike `plan-promote`). Same "no spec tier ⇒ vacuous pass" short-circuit
- * as `checkPlanPromote`.
+ * `task-claim`'s predicates (SPEC-042 §Design Decisions D5): `noAnchorOverlap`
+ * runs UNCONDITIONALLY (subject only to `ctx.anchorOverlapEnabled`, D6's
+ * per-predicate config knob) — NOT gated by `hasSpecParent`, unlike
+ * `upstreamApproved`, which keeps the "no spec tier ⇒ vacuous pass"
+ * short-circuit `checkPlanPromote` also uses. See this module's fourth
+ * invariant for why these two predicates deliberately do NOT share one
+ * short-circuit.
  */
 function checkTaskClaim(ctx: GateContext): PredicateResult[] {
-  if (ctx.hasSpecParent !== true) {
-    return [];
+  const results: PredicateResult[] = [];
+  if (ctx.anchorOverlapEnabled !== false) {
+    results.push(noAnchorOverlap(ctx.candidateBy, ctx.candidateAnchors, ctx.siblingClaims));
   }
-  return [upstreamApproved(ctx.parentSpec, "spec")];
+  if (ctx.hasSpecParent === true) {
+    results.push(upstreamApproved(ctx.parentSpec, "spec"));
+  }
+  return results;
 }
 
 /**
@@ -301,8 +342,51 @@ function feedPlanPromote(ctx: GateContext, failures: PredicateResult[]): string 
   );
 }
 
-/** `task-claim`'s feeding message — human-readable requirement + machine-readable `missing` reasons. */
+/**
+ * Renders the anchor-overlap-specific feeding pack (SPEC-042 §Design Decisions
+ * D5, review U6) — names the conflicting sibling task's slug, holder, staleness
+ * age is implicit (only FRESH siblings can conflict, by construction of
+ * `noAnchorOverlap`), the overlapping path pairs, AND a literal copy-pasteable
+ * recovery command. Pointers only — never the sibling task's body content.
+ */
+function feedAnchorOverlap(ctx: GateContext, failures: PredicateResult[]): string {
+  const candidateAnchors = ctx.candidateAnchors ?? [];
+  let conflictLine = "(no specific conflicting sibling could be identified)";
+  for (const sibling of ctx.siblingClaims ?? []) {
+    if (sibling.stale) continue;
+    if (sibling.by === ctx.candidateBy) continue;
+    if (sibling.anchors.length === 0) continue;
+    const overlap = anchorsOverlap(candidateAnchors, sibling.anchors);
+    if (overlap.overlaps) {
+      const pathsStr = overlap.pairs.map(([a, b]) => `${a} × ${b}`).join(", ");
+      conflictLine =
+        `Conflicting task: ${sibling.slug} — "${sibling.title}" — held by ${sibling.by}. ` +
+        `Overlapping paths: ${pathsStr}. ` +
+        `Recovery: \`lore release ${sibling.slug} --by ${sibling.by} --force\``;
+      break;
+    }
+  }
+  const pack = buildFeedingPack({
+    ruleSource: "corpus (sibling task claims)",
+    ruleMarkdown:
+      "Required for task-claim: declared file_anchors must not overlap a FRESH claim held " +
+      `by a different actor on another task in the same plan. ${conflictLine}`,
+    missing: selectFailures(failures).map((f) => f.reason),
+  });
+  return renderFeedingPack(pack);
+}
+
+/**
+ * `task-claim`'s feeding message — dispatches to {@link feedAnchorOverlap} when
+ * the anchor-overlap predicate failed (SPEC-042 D5 — its own dedicated,
+ * conflict-detail-bearing message), else falls back to the pre-existing
+ * upstream-spec-approval message (unchanged from before SPEC-042).
+ */
 function feedTaskClaim(ctx: GateContext, failures: PredicateResult[]): string {
+  const anchorFailed = failures.some((f) => !f.ok && f.field === ANCHOR_OVERLAP_FIELD);
+  if (anchorFailed) {
+    return feedAnchorOverlap(ctx, failures);
+  }
   return feedUpstreamSpecCheckpoint(
     ctx,
     failures,
@@ -347,6 +431,53 @@ export function buildUpstreamSpecContext(spec: DocRecord | undefined): GateConte
     },
     parentSpecPointer: { slug: spec.slug, title: spec.title, status: spec.status },
   };
+}
+
+/**
+ * Builds the `candidateBy` / `candidateAnchors` / `siblingClaims` trio
+ * `task-claim`'s `noAnchorOverlap` predicate consumes (SPEC-042 §Design
+ * Decisions D5) — co-located with {@link buildUpstreamSpecContext} per the
+ * same "SSOT ctx-builder both `lore gate task-claim` and the service-layer
+ * `GateEnforcer` caller build from" rationale. Populated from a plan bundle's
+ * `tasks[]` (`CorpusService.getPlanBundle`, already includes every sibling —
+ * zero extra IO), UNCONDITIONALLY (never gated by whether a spec ancestor
+ * resolved — see this module's fourth invariant).
+ *
+ * `siblingClaims[].stale` is precomputed HERE from the caller-supplied
+ * `nowIso` + `ttlMinutes` — the SAME values `_claimImpl`'s own target-claim
+ * conflict check uses within one `claim()` call, so this builder (and the
+ * `GateEnforcer.enforce` it feeds) never reads a wall clock itself.
+ *
+ * @param candidateBy - The actor attempting the claim.
+ * @param candidateTask - The task being claimed.
+ * @param siblingTasks - The candidate task's plan siblings (bundle.tasks,
+ *   including `candidateTask` itself — filtered out below).
+ * @param nowIso - Caller-supplied current time (D10 — never Date.now() here).
+ * @param ttlMinutes - Claim TTL in minutes, forwarded to `isClaimStale`.
+ */
+export function buildAnchorGateContext(
+  candidateBy: string,
+  candidateTask: DocRecord,
+  siblingTasks: DocRecord[],
+  nowIso: string,
+  ttlMinutes: number,
+): Pick<GateContext, "candidateBy" | "candidateAnchors" | "siblingClaims"> {
+  const candidateAnchors = extractFileAnchors(candidateTask);
+  const siblingClaims: SiblingClaimInfo[] = [];
+  for (const sibling of siblingTasks) {
+    if (sibling.id === candidateTask.id) continue;
+    const claim = extractClaim(sibling);
+    if (claim === undefined) continue;
+    siblingClaims.push({
+      slug: sibling.slug,
+      title: sibling.title,
+      by: claim.by,
+      at: claim.at,
+      stale: isClaimStale(claim, nowIso, ttlMinutes),
+      anchors: extractFileAnchors(sibling),
+    });
+  }
+  return { candidateBy, candidateAnchors, siblingClaims };
 }
 
 /**

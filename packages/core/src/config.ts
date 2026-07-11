@@ -126,6 +126,15 @@ const GateCheckpointConfigSchema = z
   .object({
     /** `false` disables this checkpoint entirely; absent or `true` leaves it enabled. */
     enabled: z.boolean().optional(),
+    /**
+     * `task-claim`-ONLY sub-predicate override (SPEC-042 §Design Decisions D6) —
+     * `false` disables JUST the anchor-overlap predicate, leaving upstream-approval
+     * (and every other checkpoint's own `enabled` key) untouched. Inert on
+     * `spec-create`/`spec-promote`/`plan-promote` (no checkpoint reads it there) —
+     * a narrower blast radius than the whole-checkpoint `enabled` key above, which
+     * would also take upstream-approval gating down with it.
+     */
+    anchor_overlap: z.object({ enabled: z.boolean().optional() }).strict().optional(),
   })
   .strict();
 
@@ -324,6 +333,27 @@ export function resolveGateEnabled(
   checkpoint: string,
 ): boolean {
   return config?.workflow?.gates?.[checkpoint]?.enabled !== false;
+}
+
+/**
+ * Resolve whether `task-claim`'s anchor-overlap sub-predicate specifically is
+ * enabled, per `workflow.gates."task-claim".anchor_overlap.enabled` (SPEC-042 D6).
+ * Narrower than {@link resolveGateEnabled}`(config, "task-claim")`, which governs
+ * the WHOLE checkpoint (anchor-overlap AND upstream-approval together). Absence
+ * of the whole config, the `workflow` section, the `gates` map, the `task-claim`
+ * entry, or the nested `anchor_overlap` key ALL mean "enabled" — only an EXPLICIT
+ * `anchor_overlap.enabled: false` disables just this predicate.
+ *
+ * @param config - Parsed LoreConfig, or undefined when no config file was loaded
+ * @returns `false` iff `workflow.gates."task-claim".anchor_overlap.enabled === false`; `true` otherwise
+ * @example
+ *   resolveAnchorOverlapGateEnabled(undefined) // => true
+ *   resolveAnchorOverlapGateEnabled({
+ *     project, workflow: { gates: { "task-claim": { anchor_overlap: { enabled: false } } } },
+ *   }) // => false
+ */
+export function resolveAnchorOverlapGateEnabled(config: LoreConfig | undefined): boolean {
+  return config?.workflow?.gates?.["task-claim"]?.anchor_overlap?.enabled !== false;
 }
 
 /**

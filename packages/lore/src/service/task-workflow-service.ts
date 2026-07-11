@@ -59,16 +59,22 @@ import {
   taskClaimSchema,
   isClaimStale,
   evaluateReadiness,
+  buildTaskClaim,
+  deriveSessions,
+  normalizeFileAnchors,
+  extractFileAnchors,
+  anchorsOverlap,
   type EvidenceEntry,
   type TaskClaim,
   type ReadyRecord,
   type BlockerInfo,
+  type ReadySession,
 } from "@lore/core";
 import type { DocId, DocRecord, DocStatus } from "@lore/core";
 import { NoOpTelemetry, type Telemetry, type TelemetryEvent, type TaskWorkflowEventName } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
-import { buildUpstreamSpecContext } from "./checkpoint-registry.js";
+import { buildUpstreamSpecContext, buildAnchorGateContext } from "./checkpoint-registry.js";
 import type { GateDependencies } from "./gate-enforcer.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────
@@ -79,6 +85,18 @@ export interface ClaimOpts {
   by: string;
   /** Optional git branch where the work is happening (SPEC-025 non-goal: no worktree paths). */
   branch?: string;
+  /**
+   * Optional machine identity (SPEC-042 D2) — CLI auto-captures `os.hostname()`;
+   * MCP callers pass it explicitly. Feeds the D1 session-grouping key.
+   */
+  machine?: string;
+  /**
+   * Optional worktree path (SPEC-042 D2) — ALWAYS explicit, never auto-captured
+   * from `process.cwd()` (review U2: an orchestrator's cwd would describe the
+   * dispatcher, not the worktree the work happens in). Feeds the D1
+   * session-grouping key.
+   */
+  worktree?: string;
   /** Override even a fresh (non-stale) claim held by someone else. */
   steal?: boolean;
   /**
@@ -122,6 +140,44 @@ export type EvidenceInput = Omit<EvidenceEntry, "recorded_at" | "attestation"> &
  * `VerifyRunnerService.verifyPlan` is the sole production caller.
  */
 export type VerifiedEvidenceInput = Omit<EvidenceEntry, "recorded_at">;
+
+/** Options for {@link TaskWorkflowService.setAnchors}/`addAnchors`/`removeAnchors` (SPEC-042 D3). */
+export interface AnchorMutationOpts {
+  /** Resolved actor identity — recorded in version history + audit, same shape as {@link ClaimOpts.by}. */
+  by: string;
+  /** See {@link ClaimOpts.source}. */
+  source?: string;
+}
+
+/**
+ * One anchor-overlap advisory entry in {@link ReadyReport.anchor_conflicts}
+ * (SPEC-042 D7) — `task_slug` is the task IN THIS REPORT the conflict applies
+ * to; `holder`/`paths` describe the fresh foreign sibling claim it collides
+ * with. Pointers only, never task body content.
+ */
+export interface AnchorConflict {
+  task_slug: string;
+  holder: string;
+  paths: string[];
+}
+
+/**
+ * `TaskWorkflowService.ready`'s return shape (SPEC-042 D7) — the pre-SPEC-042
+ * flat `ReadyRecord[]` becomes `.records` (D7's "keep ReadyRecord flat-array
+ * contract intact" is about EACH record staying flat/non-nested, not about the
+ * top-level return type — see this method's own JSDoc for why a genuine
+ * wrapper object was chosen over bolting extra properties onto an array:
+ * `JSON.stringify` on an array silently DROPS non-index properties, which
+ * would have silently broken `lore ready --json` / `lore_ready`'s promise to
+ * surface `sessions`/`anchor_conflicts`). `sessions`/`anchor_conflicts` are
+ * PLAN-SCOPED (this plan's tasks only) — contrast with `SessionService.
+ * bootstrap`'s `active_sessions`, which is corpus-wide over every active plan.
+ */
+export interface ReadyReport {
+  records: ReadyRecord[];
+  sessions: ReadySession[];
+  anchor_conflicts: AnchorConflict[];
+}
 
 // ─── Internal Helpers ──────────────────────────────────────────────────────
 
@@ -434,11 +490,17 @@ export class TaskWorkflowService {
     if (!taskResult.ok) return taskResult;
     const task = taskResult.value;
 
-    const gateResult = await this.enforceClaimGate(task);
+    // reason: SPEC-042 D5 seam pinning — nowIso is resolved BEFORE the gate call
+    // (was previously resolved AFTER) so the anchor-overlap predicate's sibling
+    // staleness and this method's OWN existing-claim staleness check below share
+    // the exact same "now", within one claim() call.
+    const nowIso = now();
+
+    const gateResult = await this.enforceClaimGate(task, opts.by, nowIso);
     if (!gateResult.ok) return gateResult;
 
-    const nowIso = now();
     const existingClaim = readClaim(task);
+    let carryForward = false;
 
     if (existingClaim !== undefined) {
       const stale = isClaimStale(existingClaim, nowIso, this.claimTtlMinutes);
@@ -451,13 +513,24 @@ export class TaskWorkflowService {
           age_minutes: ageMinutesBetween(nowIso, existingClaim.at),
         });
       }
+      // reason: SPEC-042 D2 — carry-forward applies ONLY to a same-holder FRESH
+      // refresh. A stale takeover (even by the SAME `by`) or a different holder
+      // (first acquire, steal) starts fresh with no inherited branch/machine/
+      // worktree — staleness deliberately breaks session continuity.
+      carryForward = !stale && sameHolder;
     }
 
-    const newClaim: TaskClaim = {
-      by: opts.by,
-      at: nowIso,
-      ...(opts.branch !== undefined ? { branch: opts.branch } : {}),
-    };
+    const newClaim: TaskClaim = buildTaskClaim(
+      existingClaim,
+      {
+        by: opts.by,
+        at: nowIso,
+        ...(opts.branch !== undefined ? { branch: opts.branch } : {}),
+        ...(opts.machine !== undefined ? { machine: opts.machine } : {}),
+        ...(opts.worktree !== undefined ? { worktree: opts.worktree } : {}),
+      },
+      carryForward,
+    );
     const newExtra: Record<string, unknown> = { ...task.extra, claim: newClaim };
 
     const summary =
@@ -544,6 +617,164 @@ export class TaskWorkflowService {
     });
   }
 
+  // ── Anchor Mutations (SPEC-042 D3) ──────────────────────────────────────────
+
+  /**
+   * Declaratively REPLACES a task's `file_anchors` (the `lore_anchor_set` MCP
+   * shape, SPEC-042 D9). Read-modify-write via {@link writeTaskExtra} —
+   * `extra.claim`/`extra.verification_evidence` are preserved untouched
+   * (AC-S3-5 regression), never routed through `CorpusService.set` (D3 — a
+   * wholesale-`extra` replace would silently delete those other services' owned
+   * state).
+   *
+   * @param idOrSlug - Task document ULID or slug
+   * @param anchors - Candidate raw anchor strings — validated + normalized via
+   *   `normalizeFileAnchors` (`@lore/core`); a validation failure aborts the
+   *   write before any store call.
+   * @param opts - `{ by, source? }`
+   * @param now - Time seam (D10)
+   * @returns The updated task DocRecord
+   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a task / bad anchor entry), STALE_VERSION
+   */
+  async setAnchors(
+    idOrSlug: string,
+    anchors: string[],
+    opts: AnchorMutationOpts,
+    now: () => string = defaultNow,
+  ): Promise<Result<DocRecord, LoreError>> {
+    const startMs = Date.now();
+    const result = await this._setAnchorsImpl(idOrSlug, anchors, opts.by, now);
+    this.recordEvent("task.anchors_updated", startMs, result, opts.source, { count: anchors.length });
+    return result;
+  }
+
+  private async _setAnchorsImpl(
+    idOrSlug: string,
+    anchors: string[],
+    by: string,
+    now: () => string,
+  ): Promise<Result<DocRecord, LoreError>> {
+    const taskResult = await this.resolveTask(idOrSlug);
+    if (!taskResult.ok) return taskResult;
+    const task = taskResult.value;
+
+    const normalizedResult = normalizeFileAnchors(anchors);
+    if (!normalizedResult.ok) return normalizedResult;
+
+    return this.commitAnchors(task, normalizedResult.value, by, now);
+  }
+
+  /**
+   * Read-modify-write UNION: appends `anchors` to the task's existing
+   * `file_anchors`, validated + normalized + deduplicated together (the
+   * `lore anchor add` command, D3).
+   *
+   * @param idOrSlug - Task document ULID or slug
+   * @param anchors - Candidate raw anchor strings to add.
+   * @param opts - `{ by, source? }`
+   * @param now - Time seam (D10)
+   * @returns The updated task DocRecord
+   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a task / bad anchor entry / >50 total), STALE_VERSION
+   */
+  async addAnchors(
+    idOrSlug: string,
+    anchors: string[],
+    opts: AnchorMutationOpts,
+    now: () => string = defaultNow,
+  ): Promise<Result<DocRecord, LoreError>> {
+    const startMs = Date.now();
+    const result = await this._addAnchorsImpl(idOrSlug, anchors, opts.by, now);
+    this.recordEvent("task.anchors_updated", startMs, result, opts.source, { count: anchors.length });
+    return result;
+  }
+
+  private async _addAnchorsImpl(
+    idOrSlug: string,
+    anchors: string[],
+    by: string,
+    now: () => string,
+  ): Promise<Result<DocRecord, LoreError>> {
+    const taskResult = await this.resolveTask(idOrSlug);
+    if (!taskResult.ok) return taskResult;
+    const task = taskResult.value;
+
+    const existing = extractFileAnchors(task);
+    const normalizedResult = normalizeFileAnchors([...existing, ...anchors]);
+    if (!normalizedResult.ok) return normalizedResult;
+
+    return this.commitAnchors(task, normalizedResult.value, by, now);
+  }
+
+  /**
+   * Read-modify-write DIFFERENCE: removes `anchors` from the task's existing
+   * `file_anchors` (the `lore anchor rm` command, D3). `anchors` is itself
+   * normalized before comparison (so `"./src/a"` matches a stored `"src/a"`) —
+   * a malformed removal candidate fails loud the same way an add/set would,
+   * rather than silently matching nothing.
+   *
+   * @param idOrSlug - Task document ULID or slug
+   * @param anchors - Candidate raw anchor strings to remove.
+   * @param opts - `{ by, source? }`
+   * @param now - Time seam (D10)
+   * @returns The updated task DocRecord
+   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a task / bad anchor entry), STALE_VERSION
+   */
+  async removeAnchors(
+    idOrSlug: string,
+    anchors: string[],
+    opts: AnchorMutationOpts,
+    now: () => string = defaultNow,
+  ): Promise<Result<DocRecord, LoreError>> {
+    const startMs = Date.now();
+    const result = await this._removeAnchorsImpl(idOrSlug, anchors, opts.by, now);
+    this.recordEvent("task.anchors_updated", startMs, result, opts.source, { count: anchors.length });
+    return result;
+  }
+
+  private async _removeAnchorsImpl(
+    idOrSlug: string,
+    anchors: string[],
+    by: string,
+    now: () => string,
+  ): Promise<Result<DocRecord, LoreError>> {
+    const taskResult = await this.resolveTask(idOrSlug);
+    if (!taskResult.ok) return taskResult;
+    const task = taskResult.value;
+
+    const normalizedRemovalResult = normalizeFileAnchors(anchors);
+    if (!normalizedRemovalResult.ok) return normalizedRemovalResult;
+    const toRemove = new Set(normalizedRemovalResult.value);
+
+    const existing = extractFileAnchors(task);
+    const remaining = existing.filter((a) => !toRemove.has(a));
+
+    return this.commitAnchors(task, remaining, by, now);
+  }
+
+  /**
+   * Shared commit path for the three anchor-mutation verbs above — writes
+   * `extra.file_anchors` via {@link writeTaskExtra}, preserving every other
+   * `extra` key (`claim`/`verification_evidence`) untouched (AC-S3-5 regression).
+   */
+  private async commitAnchors(
+    task: DocRecord,
+    newAnchors: string[],
+    by: string,
+    now: () => string,
+  ): Promise<Result<DocRecord, LoreError>> {
+    const nowIso = now();
+    const newExtra: Record<string, unknown> = { ...task.extra, file_anchors: newAnchors };
+    return this.writeTaskExtra(
+      task,
+      newExtra,
+      nowIso,
+      by,
+      `File anchors updated by ${by} (${newAnchors.length} entries)`,
+      "anchors",
+      { by, count: newAnchors.length },
+    );
+  }
+
   // ── ready ────────────────────────────────────────────────────────────────
 
   /**
@@ -553,17 +784,21 @@ export class TaskWorkflowService {
    * `upstream_unapproved` advisory (non-null iff the parent is a `spec`), (2) the
    * plan's child tasks, (3) `blocks`-type links targeting those tasks in one batch
    * query (D7), (4) statuses/slugs for the referenced blocker docs — then delegates
-   * to the pure `evaluateReadiness`.
+   * to the pure `evaluateReadiness`. SPEC-042 D7 additionally derives `sessions`
+   * (this plan's FRESH claims grouped by `deriveSessions`) and `anchor_conflicts`
+   * (fresh, foreign, anchor-overlapping sibling pairs) — both PLAN-SCOPED, zero
+   * extra store IO (reuses the SAME `tasks` array already fetched below).
    *
    * @param planIdOrSlug - Plan document ULID or slug
    * @param now - Time seam (D10) — drives claim staleness computation
-   * @returns Flat ReadyRecord[] (D9), one per child task
+   * @returns `ReadyReport` — `{records, sessions, anchor_conflicts}` (see that
+   *   type's JSDoc for why the pre-SPEC-042 flat array became `.records`)
    * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a plan)
    */
   async ready(
     planIdOrSlug: string,
     now: () => string = defaultNow,
-  ): Promise<Result<ReadyRecord[], LoreError>> {
+  ): Promise<Result<ReadyReport, LoreError>> {
     const planResult = await resolveDoc(this.store, planIdOrSlug);
     if (!planResult.ok) return planResult;
     const plan = planResult.value;
@@ -594,7 +829,9 @@ export class TaskWorkflowService {
     if (!tasksResult.ok) return tasksResult;
     const tasks = tasksResult.value;
 
-    if (tasks.length === 0) return ok([]);
+    if (tasks.length === 0) return ok({ records: [], sessions: [], anchor_conflicts: [] });
+
+    const nowIso = now();
 
     const taskIds = tasks.map((t) => t.id);
     const linksResult = await this.store.findLinksByToIds(taskIds, "blocks");
@@ -617,9 +854,85 @@ export class TaskWorkflowService {
       }
     }
 
-    return ok(
-      evaluateReadiness(tasks, blocksLinks, blockerStatuses, now(), this.claimTtlMinutes, parentSpecStatus),
+    const records = evaluateReadiness(
+      tasks,
+      blocksLinks,
+      blockerStatuses,
+      nowIso,
+      this.claimTtlMinutes,
+      parentSpecStatus,
     );
+
+    const { anchorConflicts, anchorlessSlugs } = this.computeAnchorAdvisories(tasks, nowIso);
+    const recordsWithAnchorless = records.map((r) =>
+      anchorlessSlugs.has(r.task.slug) ? { ...r, anchorless: true } : r,
+    );
+
+    return ok({
+      records: recordsWithAnchorless,
+      sessions: deriveSessions(tasks, nowIso, this.claimTtlMinutes),
+      anchor_conflicts: anchorConflicts,
+    });
+  }
+
+  /**
+   * Computes SPEC-042 D7's `anchor_conflicts` + `anchorless` advisories over a
+   * plan's tasks. Pure computation over already-fetched data (no extra store
+   * IO) — a private helper rather than a `@lore/core` export because it's used
+   * ONLY by `ready()`'s plan-scoped report, unlike `deriveSessions` (shared with
+   * `SessionService.bootstrap`'s corpus-wide scope).
+   *
+   * `anchor_conflicts`: for each task declaring ≥1 anchor, every OTHER task in
+   * `tasks` holding a FRESH claim by a DIFFERENT actor (different from the
+   * declaring task's OWN current holder, when it has one) whose anchors overlap.
+   *
+   * `anchorless`: the SET of task slugs that hold a FRESH claim, declare NO
+   * anchors themselves, while at least one OTHER task in `tasks` declares
+   * non-empty anchors (D7, review U7 — silent on zero-adoption plans).
+   */
+  private computeAnchorAdvisories(
+    tasks: DocRecord[],
+    nowIso: string,
+  ): { anchorConflicts: AnchorConflict[]; anchorlessSlugs: Set<string> } {
+    const anyoneDeclaresAnchors = tasks.some((t) => extractFileAnchors(t).length > 0);
+    const anchorConflicts: AnchorConflict[] = [];
+    const anchorlessSlugs = new Set<string>();
+
+    for (const task of tasks) {
+      const taskAnchors = extractFileAnchors(task);
+      const taskClaim = readClaim(task);
+
+      if (taskAnchors.length > 0) {
+        for (const other of tasks) {
+          if (other.id === task.id) continue;
+          const otherClaim = readClaim(other);
+          if (otherClaim === undefined) continue;
+          if (isClaimStale(otherClaim, nowIso, this.claimTtlMinutes)) continue;
+          if (taskClaim !== undefined && taskClaim.by === otherClaim.by) continue;
+          const otherAnchors = extractFileAnchors(other);
+          if (otherAnchors.length === 0) continue;
+          const overlap = anchorsOverlap(taskAnchors, otherAnchors);
+          if (overlap.overlaps) {
+            anchorConflicts.push({
+              task_slug: task.slug,
+              holder: otherClaim.by,
+              paths: overlap.pairs.map(([a]) => a),
+            });
+          }
+        }
+      }
+
+      if (
+        anyoneDeclaresAnchors &&
+        taskAnchors.length === 0 &&
+        taskClaim !== undefined &&
+        !isClaimStale(taskClaim, nowIso, this.claimTtlMinutes)
+      ) {
+        anchorlessSlugs.add(task.slug);
+      }
+    }
+
+    return { anchorConflicts, anchorlessSlugs };
   }
 
   // ── Private Helpers ──────────────────────────────────────────────────────
@@ -641,21 +954,31 @@ export class TaskWorkflowService {
   }
 
   /**
-   * Gates `task`'s claim (retro follow-up item 8, defense-in-depth) — resolves the
-   * task's parent plan's ancestor spec via the injected `getPlanBundle` port (the SAME
+   * Gates `task`'s claim (retro follow-up item 8, defense-in-depth; SPEC-042 D5
+   * anchor-overlap extension) — resolves the task's parent plan's ancestor spec
+   * AND sibling claims via the injected `getPlanBundle` port (the SAME
    * plan→parent-spec traversal `ready()`'s `upstream_unapproved` advisory and
-   * `lore gate task-claim` both use) and enforces the `task-claim` checkpoint. A
+   * `lore gate task-claim` both use — `bundle.tasks` already returns every
+   * sibling, zero extra IO) and enforces the `task-claim` checkpoint. A
    * `parent_id === null` task (schema-illegal for a real task — SPEC-025's
    * `createDocInputSchema` requires `parent_id` — but tolerated here for legacy/
-   * corrupted rows) is routed through the SAME checkpoint via a synthetic "no spec
-   * parent" context rather than a second hardcoded pass, mirroring `gate.ts`'s
-   * `runTaskClaimGate` identical handling of this edge case. A no-op (`ok(undefined)`)
-   * when this service wasn't constructed with a `gate` dependency (see constructor
-   * JSDoc).
+   * corrupted rows) is routed through the SAME checkpoint via a synthetic "no
+   * spec parent, no siblings" context rather than a second hardcoded pass,
+   * mirroring `gate.ts`'s `runTaskClaimGate` identical handling of this edge
+   * case. A no-op (`ok(undefined)`) when this service wasn't constructed with a
+   * `gate` dependency (see constructor JSDoc).
    *
    * @param task - The task `claim()` is about to write a lease onto.
+   * @param by - The actor attempting the claim (SPEC-042 D5 — feeds
+   *   `noAnchorOverlap`'s "different actor" test; unrelated to gating).
+   * @param nowIso - The SAME "now" `_claimImpl` resolved before calling this
+   *   (D5 seam pinning) — drives sibling claim staleness, never re-resolved here.
    */
-  private async enforceClaimGate(task: DocRecord): Promise<Result<void, LoreError>> {
+  private async enforceClaimGate(
+    task: DocRecord,
+    by: string,
+    nowIso: string,
+  ): Promise<Result<void, LoreError>> {
     if (this.gate === undefined) {
       return ok(undefined);
     }
@@ -669,16 +992,22 @@ export class TaskWorkflowService {
       return ok(undefined);
     }
 
-    let ctx: ReturnType<typeof buildUpstreamSpecContext>;
+    let ctx: ReturnType<typeof buildUpstreamSpecContext> &
+      Partial<ReturnType<typeof buildAnchorGateContext>>;
     if (task.parent_id === null) {
-      ctx = buildUpstreamSpecContext(undefined);
+      ctx = { ...buildUpstreamSpecContext(undefined), candidateBy: by, candidateAnchors: extractFileAnchors(task), siblingClaims: [] };
     } else {
       const bundleResult = await this.gate.getPlanBundle(task.parent_id);
       if (!bundleResult.ok) return bundleResult;
-      ctx = buildUpstreamSpecContext(bundleResult.value.spec);
+      const anchorCtx = buildAnchorGateContext(by, task, bundleResult.value.tasks, nowIso, this.claimTtlMinutes);
+      ctx = { ...buildUpstreamSpecContext(bundleResult.value.spec), ...anchorCtx };
     }
 
-    return this.gate.enforcer.enforce("task-claim", { ...ctx, targetIdOrSlug: task.slug });
+    return this.gate.enforcer.enforce("task-claim", {
+      ...ctx,
+      targetIdOrSlug: task.slug,
+      anchorOverlapEnabled: this.gate.enforcer.isTaskClaimAnchorOverlapEnabled(),
+    });
   }
 
   /**
@@ -703,7 +1032,7 @@ export class TaskWorkflowService {
     nowIso: string,
     actor: string,
     changeSummary: string,
-    auditAction: "claim" | "release" | "evidence",
+    auditAction: "claim" | "release" | "evidence" | "anchors",
     auditDetails: Record<string, unknown>,
   ): Promise<Result<DocRecord, LoreError>> {
     const newVersion = task.version + 1;
