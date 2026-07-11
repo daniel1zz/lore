@@ -15,7 +15,7 @@
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, formatTable, formatWorkflowBadge, relativeTime } from "../utils.js";
+import { exitCode, formatError, formatTable, formatValidityBadge, formatWorkflowBadge, relativeTime } from "../utils.js";
 import type { DocType, DocStatus } from "@lore/core";
 
 export default defineCommand({
@@ -55,6 +55,10 @@ export default defineCommand({
     "governed-by": {
       type: "string",
       description: "List artifacts governed by a skill (ID or slug) via its 'governs' links. Exclusive of other filters.",
+    },
+    "include-invalid": {
+      type: "boolean",
+      description: "Include invalidated knowledge/adr docs (excluded by default). Source: SPEC-043 D3.",
     },
     json: {
       type: "boolean",
@@ -118,6 +122,8 @@ export default defineCommand({
       if (args.author !== undefined) filters["created_by"] = args.author;
       if (args.since !== undefined) filters["since"] = args.since;
       if (args.tag !== undefined) filters["tags"] = [args.tag];
+      const includeInvalid = args["include-invalid"] === true;
+      if (includeInvalid) filters["include_invalid"] = true;
 
       // Resolve --plan-id slug or ULID → parent_id ULID filter.
       if (args["plan-id"] !== undefined) {
@@ -206,6 +212,42 @@ export default defineCommand({
         ]);
         console.log(formatTable(headers, rows));
         console.log(`\n${fullTotal} document${fullTotal === 1 ? "" : "s"} (filter: --type task)`);
+        return;
+      }
+
+      // reason: DocSummary (list()'s return shape) carries no validity signal — when
+      // --include-invalid is passed we need full DocRecords to compute the [invalid]
+      // badge, mirroring the --phase/--type task branches' listFull usage above.
+      // Source: SPEC-043 D3/D4.
+      if (includeInvalid) {
+        const fullResult = await app.corpusService.listFull(filters);
+        if (!fullResult.ok) {
+          process.stderr.write(formatError(fullResult.error) + "\n");
+          process.exitCode = exitCode(fullResult.error);
+          return;
+        }
+        const { docs: fullDocs, total: fullTotal } = fullResult.value;
+
+        if (args.json) {
+          console.log(JSON.stringify({ ok: true, data: { docs: fullDocs, total: fullTotal } }, null, 2));
+          return;
+        }
+        if (fullTotal === 0) {
+          console.log("No documents found.");
+          return;
+        }
+
+        const nowIso = new Date().toISOString();
+        const headers = ["ID", "Type", "Title", "Status", "Updated"];
+        const rows = fullDocs.map((d) => [
+          d.id.slice(0, 10),
+          d.type,
+          `${d.title.slice(0, 35)}${formatValidityBadge(d, nowIso)}`,
+          d.status,
+          relativeTime(d.updated_at),
+        ]);
+        console.log(formatTable(headers, rows));
+        console.log(`\n${fullTotal} document${fullTotal === 1 ? "" : "s"} (filter: --include-invalid)`);
         return;
       }
 

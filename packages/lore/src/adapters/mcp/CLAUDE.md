@@ -2,7 +2,7 @@
 
 ## Purpose
 
-MCP (Model Context Protocol) stdio adapter. Entered via `lore --mcp-server` (top-level flag intercepted in `packages/lore/src/index.ts`) or `lore agent`. Registers 28 `lore_*` tools (16 original + 4 SPEC-025 task-workflow tools + 1 SPEC-026 assess tool + 1 SPEC-035 audit tool + 1 SPEC-034 review tool + 1 SPEC-039 verify tool + 1 IoC vertical-slice tech-spec §4.1/§11 P4 feed tool + 2 SPEC-041 session tools: `lore_bootstrap`, `lore_handoff` + 1 SPEC-042 session tool: `lore_anchor_set`) and a small set of MCP resources against `@modelcontextprotocol/sdk`'s `McpServer` and connects over `StdioServerTransport`.
+MCP (Model Context Protocol) stdio adapter. Entered via `lore --mcp-server` (top-level flag intercepted in `packages/lore/src/index.ts`) or `lore agent`. Registers 29 `lore_*` tools (16 original + 4 SPEC-025 task-workflow tools + 1 SPEC-026 assess tool + 1 SPEC-035 audit tool + 1 SPEC-034 review tool + 1 SPEC-039 verify tool + 1 IoC vertical-slice tech-spec §4.1/§11 P4 feed tool + 2 SPEC-041 session tools: `lore_bootstrap`, `lore_handoff` + 1 SPEC-042 session tool: `lore_anchor_set` + 1 SPEC-043 tool: `lore_invalidate`) and a small set of MCP resources against `@modelcontextprotocol/sdk`'s `McpServer` and connects over `StdioServerTransport`.
 
 ## Key Invariants
 
@@ -33,10 +33,16 @@ IoC vertical-slice tech-spec §4.1/§11 P4 adds `lore_feed` (`checkpoint`, `pare
 - `lore_anchor_set` (`id_or_slug`, `anchors: string[]`, `by` — required, same MCP actor-identity precedent as `lore_claim`/`lore_release`) — declarative REPLACE of a task's `file_anchors` via `TaskWorkflowService.setAnchors`, read-modify-write (preserves `extra.claim`/`extra.verification_evidence` untouched, AC-S3-5) — deliberately NOT routed through `lore_set`'s wholesale-`extra` replace (D3).
 - `lore_ready`'s response (`{ready: ReadyReport}`) is now the FULL `ReadyReport` object (`{records, sessions, anchor_conflicts}`) — `TaskWorkflowService.ready`'s return type changed from a flat `ReadyRecord[]` to this wrapper (D7); the handler needed no code change (it already passed `result.value` through verbatim), only this documented shape change. `lore_bootstrap`'s `BootstrapReport.active_sessions` (same `ReadySession[]` shape, corpus-wide scope) was already wired by the SPEC-042 T1 slice.
 
+**SPEC-043 §Design Decisions D2, D6, D11 (bi-temporal invalidation, T2)**:
+- `lore_invalidate` (`id_or_slug`, `by` — required, same MCP actor-identity precedent as `lore_claim`/`lore_release`; `superseded_by?`, `reason?`, `undo?`) — the SOLE MCP write path for a `knowledge`/`adr` doc's `extra.validity`, thin pipe over `ValidityService.invalidate`. Response `{doc, decision_status_unchanged?}` — the SAME shape `lore invalidate --json`'s `data` field carries (structural parity, not a spawned-CLI comparison; both call sites invoke `ValidityService.invalidate` with identical opts).
+- `lore_get` gains a computed `validity_state: {invalidated, invalid_at?, invalidated_by_slug?, reason?}` field on every response (`computeValidityState`, `../../flows/validity-state.js` — shared with the HTTP doc route, review U3: MCP agents parse JSON, never markdown banners). `invalidated_by_slug` is resolved via one `corpusService.get` call, which applies no `deleted_at` filter — a soft-deleted successor still resolves (the "(deleted)" text marker is a CLI/export-docs projection-only concern, not part of this structured field).
+- `lore_create` gains optional `supersedes`/`by` (SPEC-043 D11) — when `supersedes` is set, composes `corpusService.create` THEN `ValidityService.invalidate` via the SAME `createWithSupersedes` orchestration (`../../flows/supersede-flow.js`) the CLI's `lore create --supersedes` uses. `by` is then required (runtime-checked, not schema-level, since it's only meaningful in this branch) — omitting it is a `VALIDATION_ERROR`. Half-failure (create ok, invalidate fails) still returns success (the doc is real) with an additive `supersede_error`/`supersede_repair_command` field — loud orphan, never silent, mirroring the CLI's nonzero-exit + stderr repair line.
+- `lore_search`/`lore_list` gain optional `include_invalid?: boolean` (excluded by default, mirrors the CLI's `--include-invalid`).
+
 ## Files
 
 - `index.ts` — `startMcpServer(app)`; wires `McpServer` + `StdioServerTransport`.
-- `tools.ts` — 28 tool registrations, schema constants, Zod input shapes.
+- `tools.ts` — 29 tool registrations, schema constants, Zod input shapes.
 - `assess-render.ts` — `buildAssessSummaryText(result)` (SPEC-040 §T3 D3) — Markdown digest for `lore_assess`'s `summary` envelope field.
 - `resources.ts` — MCP resource registrations (corpus snapshots, etc.).
 - `schema-info.ts` — `CORPUS_SCHEMA_INFO` constant describing doc types and `extra` requirements (knowledge `sub_type` includes `"assessment"`, SPEC-026).

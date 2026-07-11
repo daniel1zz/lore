@@ -20,6 +20,7 @@ import type { ListFilters, SearchFilters } from "../../service/corpus-service.js
 import type { PendingFilters } from "../../service/review-service.js";
 import type { CreateDocInput, DocPatch } from "@lore/core";
 import type { DocStatus, DocType, LinkType } from "@lore/core";
+import { computeValidityState } from "../../flows/validity-state.js";
 
 // ─── Auth route handlers (SPEC-016) ────────────────────────────────────────────
 
@@ -526,16 +527,21 @@ async function handleSingleDoc(req: Request, method: string, idOrSlug: string, a
     const result = await app.corpusService.get(idOrSlug);
     if (!result.ok) return loreErrorResponse(result.error);
 
+    // SPEC-043 §Design Decisions D6 — computed validity_state on every doc payload
+    // (not gated behind resolveMdx — agents reading this route need the signal
+    // regardless of whether they also asked for MDX resolution).
+    const validityState = await computeValidityState(app, result.value.doc);
+
     // reason: AC-D-B1 — ?resolveMdx=true triggers OutlineService placeholder resolution;
     // response extends DocWithNavigation with a resolvedMdx field. AC-D-B2 guarantees
     // that without the flag the raw content is returned unchanged. See SPEC-015 §3.5.
     if (resolveMdx) {
       const resolveResult = await app.outlineService.resolve(result.value.doc);
       if (!resolveResult.ok) return loreErrorResponse(resolveResult.error);
-      return jsonOk({ ...result.value, resolvedMdx: resolveResult.value });
+      return jsonOk({ ...result.value, resolvedMdx: resolveResult.value, validity_state: validityState });
     }
 
-    return jsonOk(result.value);
+    return jsonOk({ ...result.value, validity_state: validityState });
   }
 
   if (method === "PATCH") {

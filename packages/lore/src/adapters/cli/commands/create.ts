@@ -39,10 +39,11 @@
 import { readFileSync } from "node:fs";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError } from "../utils.js";
+import { exitCode, formatError, resolveActor } from "../utils.js";
 import { openEditor } from "../editor.js";
-import type { DocType, KnowledgeSubType, Priority } from "@lore/core";
+import type { DocType, KnowledgeSubType, LoreError, Priority } from "@lore/core";
 import { KNOWLEDGE_SUB_TYPES, SPEC_KINDS } from "@lore/core";
+import { createWithSupersedes, renderSupersedeRepairMessage } from "../../../flows/supersede-flow.js";
 
 const VALID_TYPES: DocType[] = ["prd", "spec", "adr", "plan", "knowledge", "task"];
 
@@ -147,6 +148,16 @@ export default defineCommand({
       type: "string",
       description:
         "[task only, repeatable] Declare a file_anchors entry (repo-relative POSIX path; trailing '/' = directory scope). Validated + normalized by CorpusService (SPEC-042 D3).",
+    },
+    supersedes: {
+      type: "string",
+      description:
+        "ID or slug of an existing knowledge/adr doc this new doc supersedes — creates then invalidates the old doc in one command (SPEC-043 D11). Half-failure (create ok, invalidate fails) reports a nonzero exit naming the exact repair command; the new doc is still created.",
+    },
+    by: {
+      type: "string",
+      description:
+        "[only meaningful with --supersedes] Actor identity for the invalidate step; defaults to $LORE_ACTOR env var, then OS username.",
     },
     ai: {
       type: "boolean",
@@ -394,7 +405,7 @@ export default defineCommand({
         normalizeRepeatable(args.anchor),
       );
 
-      const result = await app.corpusService.create({
+      const createInput = {
         type: docType,
         title: args.title,
         ...(args.parent !== undefined ? { parent_id: args.parent } : {}),
@@ -402,17 +413,57 @@ export default defineCommand({
         priority: (args.priority as Priority) ?? "medium",
         ...(tags.length > 0 ? { tags } : {}),
         ...(extra !== undefined ? { extra } : {}),
-      });
+      };
 
-      if (!result.ok) {
-        process.stderr.write(formatError(result.error) + "\n");
-        process.exitCode = exitCode(result.error);
-        return;
+      // SPEC-043 D11: --supersedes composes create() THEN ValidityService.invalidate()
+      // via the shared createWithSupersedes orchestration (flows/supersede-flow.ts) —
+      // the SAME function MCP lore_create.supersedes uses, so the two surfaces can
+      // never diverge on half-failure behavior.
+      let doc;
+      let supersedeError: LoreError | undefined;
+
+      if (args.supersedes !== undefined) {
+        if (app.validityService === undefined) {
+          process.stderr.write("Error: ValidityService not wired on this App instance.\n");
+          process.exitCode = 1;
+          return;
+        }
+        const orchResult = await createWithSupersedes(
+          {
+            create: app.corpusService.create.bind(app.corpusService),
+            invalidate: app.validityService.invalidate.bind(app.validityService),
+          },
+          createInput,
+          args.supersedes,
+          resolveActor(args.by),
+        );
+        if (!orchResult.ok) {
+          process.stderr.write(formatError(orchResult.error) + "\n");
+          process.exitCode = exitCode(orchResult.error);
+          return;
+        }
+        doc = orchResult.value.doc;
+        supersedeError = orchResult.value.supersedeError;
+      } else {
+        const result = await app.corpusService.create(createInput);
+        if (!result.ok) {
+          process.stderr.write(formatError(result.error) + "\n");
+          process.exitCode = exitCode(result.error);
+          return;
+        }
+        doc = result.value;
       }
 
-      const doc = result.value;
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: doc }, null, 2));
+        const data =
+          supersedeError !== undefined
+            ? {
+                ...doc,
+                supersede_error: supersedeError,
+                supersede_repair_command: renderSupersedeRepairMessage(args.supersedes!, doc.slug),
+              }
+            : doc;
+        console.log(JSON.stringify({ ok: true, data }, null, 2));
       } else {
         console.log(`Created ${doc.type} document`);
         console.log(`  ID:     ${doc.id}`);
@@ -420,6 +471,15 @@ export default defineCommand({
         console.log(`  Title:  ${doc.title}`);
         console.log(`  Status: ${doc.status} (v${doc.version})`);
         console.log(`\nRun \`lore get ${doc.slug}\` to view the document.`);
+      }
+
+      // Loud orphan (D11, never silent) — create succeeded but the follow-up
+      // invalidate() failed. The new doc is real (already printed above); report a
+      // nonzero exit naming the EXACT repair command.
+      if (supersedeError !== undefined) {
+        const repairMsg = renderSupersedeRepairMessage(args.supersedes!, doc.slug);
+        process.stderr.write(`Error: ${repairMsg}\n  (invalidate failed: ${formatError(supersedeError)})\n`);
+        process.exitCode = exitCode(supersedeError);
       }
     } finally {
       app.close();

@@ -19,8 +19,8 @@ import { existsSync } from "fs";
 import { join, dirname } from "path";
 import { userInfo } from "os";
 import { z } from "zod";
-import { evidenceEntrySchema, taskClaimSchema, isClaimStale } from "@lore/core";
-import type { DocRecord, LoreError, ReviewJudgment } from "@lore/core";
+import { evidenceEntrySchema, taskClaimSchema, isClaimStale, isInvalidated } from "@lore/core";
+import type { DocRecord, LoreError, ReviewJudgment, ValidityCarrier } from "@lore/core";
 import type { TreeNode } from "../../service/corpus-service.js";
 import type { DocWithNavigation } from "../../service/corpus-service.js";
 
@@ -286,6 +286,25 @@ export function formatWorkflowBadge(doc: DocRecord, nowIso: string, ttlMinutes: 
   }
 
   return parts.length > 0 ? ` [${parts.join(" ")}]` : "";
+}
+
+// ─── Validity Badges (SPEC-043 D3/D4 — search/list/tree row marking) ───────
+
+/**
+ * Render a ` [invalid]`-style badge for a row whose doc is currently invalidated
+ * (SPEC-043 §Design Decisions D3, D4). Presentation-only wrapper over the SSOT
+ * predicate `isInvalidated` (`@lore/core`) — never a second derivation of
+ * "invalidated" logic.
+ *
+ * @param doc - Any `isInvalidated`-compatible carrier (a full DocRecord, or a
+ *   SearchHit — both accepted structurally, same union `isInvalidated` itself takes).
+ * @param nowIso - Current time (ISO 8601), same seam convention as formatWorkflowBadge.
+ * @returns `" [invalid]"` when invalidated, else `""`.
+ * @example
+ *   formatValidityBadge(knowledgeDoc, new Date().toISOString()) // " [invalid]" or ""
+ */
+export function formatValidityBadge(doc: ValidityCarrier, nowIso: string): string {
+  return isInvalidated(doc, nowIso) ? " [invalid]" : "";
 }
 
 // ─── Review Judgment Badges (SPEC-034 §4 triage rendering) ─────────────────

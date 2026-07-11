@@ -1,11 +1,14 @@
 /**
- * MCP tool registrations — 28 lore_* tools (16 original + 4 SPEC-025 task-workflow tools
+ * MCP tool registrations — 29 lore_* tools (16 original + 4 SPEC-025 task-workflow tools
  * + 1 SPEC-026 assess tool + 1 SPEC-035 audit tool + 1 SPEC-034 review tool
  * + 1 SPEC-039 verify tool + 1 IoC vertical-slice tech-spec §4.1/§11 P4 feed tool
  * + 2 SPEC-041 session tools: lore_bootstrap, lore_handoff; lore_feed additionally
  * gains a session-resume dispatch branch, SPEC-041 §3 D5
  * + 1 SPEC-042 tool: lore_anchor_set; lore_claim gains machine/worktree, lore_create
- * gains file_anchors, SPEC-042 §Design Decisions D9).
+ * gains file_anchors, SPEC-042 §Design Decisions D9
+ * + 1 SPEC-043 tool: lore_invalidate; lore_get gains computed validity_state,
+ * lore_create gains supersedes/by, lore_search/lore_list gain include_invalid,
+ * SPEC-043 §Design Decisions D6).
  *
  * Architecture: Tools with input use the `registerToolWithArgs` helper defined below, which:
  *   1. Calls `server.tool(name, desc, handler)` in 3-arg form (avoids ZodRawShapeCompat type bomb)
@@ -49,6 +52,8 @@ import { REVIEW_PROMPT_VERSION } from "../../ai/review-template.js";
 import { CORPUS_SCHEMA_INFO } from "./schema-info.js";
 import { runCalibrationHook } from "../../flows/calibration-hook.js";
 import { buildFeed, buildResumeFeed, SESSION_RESUME_CHECKPOINT } from "../../flows/feed-flow.js";
+import { createWithSupersedes, renderSupersedeRepairMessage } from "../../flows/supersede-flow.js";
+import { computeValidityState } from "../../flows/validity-state.js";
 import { buildAssessSummaryText } from "./assess-render.js";
 
 // ─── Schema Constants ────────────────────────────────────────────────────────
@@ -94,6 +99,22 @@ export const LoreCreateSchema = z.object({
    * CLI's repeatable `--anchor` flag.
    */
   file_anchors: z.array(z.string()).optional(),
+  /**
+   * ID or slug of an existing knowledge/adr doc this new doc supersedes
+   * (SPEC-043 §Design Decisions D11) — composes `CorpusService.create` THEN
+   * `ValidityService.invalidate(supersedes, {supersededBy: newDoc.id, by})` via
+   * the shared `createWithSupersedes` orchestration (`flows/supersede-flow.ts`),
+   * the SAME function the CLI's `lore create --supersedes` uses. Requires `by`
+   * (below) — omitting `by` while `supersedes` is set is a VALIDATION_ERROR.
+   */
+  supersedes: z.string().optional(),
+  /**
+   * Actor identity for the invalidate step when `supersedes` is set (SPEC-043
+   * §Design Decisions D11) — MCP callers pass this explicitly, same actor-identity
+   * precedent as `lore_claim`/`lore_release`/`lore_evidence_add`. Meaningless
+   * (ignored) when `supersedes` is omitted.
+   */
+  by: z.string().optional(),
 });
 
 /** Input schema for lore_get. */
@@ -136,6 +157,8 @@ export const LoreListSchema = z.object({
    * vertical-slice tech-spec §4.1 P4.
    */
   governed_by: z.string().optional(),
+  /** See {@link LoreSearchSchema.include_invalid} — same escape, CLI `--include-invalid` mirror. */
+  include_invalid: z.boolean().optional(),
 });
 
 /** Input schema for lore_search. */
@@ -143,6 +166,12 @@ export const LoreSearchSchema = z.object({
   query: z.string().min(1),
   type: DOC_TYPE_ENUM.optional(),
   limit: z.number().int().positive().optional(),
+  /**
+   * SPEC-043 §Design Decisions D3 escape — when `true`, invalidated `knowledge`/`adr`
+   * docs are included in results (excluded by default). Mirrors the CLI's
+   * `--include-invalid` flag.
+   */
+  include_invalid: z.boolean().optional(),
 });
 
 /** Input schema for lore_tree. */
@@ -393,6 +422,24 @@ export const LoreBootstrapSchema = z.object({
 });
 
 /**
+ * Input schema for lore_invalidate (SPEC-043 §Design Decisions D2, D6) — the SOLE MCP
+ * write path for a `knowledge`/`adr` doc's bi-temporal `extra.validity`. `by` is
+ * required (not defaulted) — same MCP actor-identity precedent as `lore_claim`/
+ * `lore_release`/`lore_evidence_add`. `superseded_by` is resolved and PERSISTED as its
+ * ULID (never the raw id-or-slug). `undo` clears a prior invalidation instead of
+ * setting one; `decision_status_unchanged` surfaces structurally on the response when
+ * an ADR's `decision_status: "superseded"` is NOT auto-reverted by `undo` (review U7 —
+ * MCP agents never read CLI help text).
+ */
+export const LoreInvalidateSchema = z.object({
+  id_or_slug: z.string(),
+  by: z.string().min(1),
+  superseded_by: z.string().optional(),
+  reason: z.string().max(500).optional(),
+  undo: z.boolean().optional(),
+});
+
+/**
  * Input schema for lore_handoff (SPEC-041 §3 D3, D6) — reuses `handoffExtraSchema`
  * directly (SSOT; no redeclaration) since the MCP tool's typed fields ARE
  * `extra.handoff` verbatim (D6: "MCP lore_handoff takes the typed fields
@@ -554,14 +601,17 @@ async function reviewDocViaMcp(
 // ─── Tool Registrations ──────────────────────────────────────────────────────
 
 /**
- * Registers all 28 lore_* MCP tools on the given server (16 original + 4 SPEC-025
+ * Registers all 29 lore_* MCP tools on the given server (16 original + 4 SPEC-025
  * task-workflow tools: lore_claim, lore_release, lore_evidence_add, lore_ready;
  * + lore_assess (SPEC-026); + lore_audit (SPEC-035); + lore_review (SPEC-034);
  * + lore_verify (SPEC-039); + lore_feed (IoC vertical-slice tech-spec §4.1/§11 P4);
  * + lore_bootstrap, lore_handoff (SPEC-041 §3 D2, D3, D6) — lore_feed additionally
  * gains a session-resume dispatch branch (SPEC-041 §3 D5)
  * + lore_anchor_set (SPEC-042 §Design Decisions D9) — lore_claim gains machine/
- * worktree, lore_create gains file_anchors).
+ * worktree, lore_create gains file_anchors
+ * + lore_invalidate (SPEC-043 §Design Decisions D6) — lore_get gains computed
+ * validity_state, lore_create gains supersedes/by, lore_search/lore_list gain
+ * include_invalid).
  *
  * Tools with input use `registerToolWithArgs` (avoids ZodRawShapeCompat type bomb).
  * Tools without input (`lore_schema`, `lore_status`) use plain `server.tool(name, desc, cb)`.
@@ -590,20 +640,58 @@ export function registerTools(server: McpServer, app: App): void {
       resolvedContent = aiResult.value.content;
     }
 
-    // Strip the `ai`/`file_anchors` fields before passing to corpusService.create —
-    // neither is a corpus field; file_anchors (SPEC-042 D9) is folded into `extra`
-    // here so CorpusService._createImpl's single validation gate sees it the same
-    // way it would from a raw extra.file_anchors payload.
-    const { ai: _ai, file_anchors: fileAnchors, ...createInput } = args;
+    // Strip the `ai`/`file_anchors`/`supersedes`/`by` fields before passing to
+    // corpusService.create — none is a corpus field; file_anchors (SPEC-042 D9) is
+    // folded into `extra` here so CorpusService._createImpl's single validation gate
+    // sees it the same way it would from a raw extra.file_anchors payload.
+    const { ai: _ai, file_anchors: fileAnchors, supersedes, by, ...createInput } = args;
     const mergedExtra =
       fileAnchors !== undefined
         ? { ...(createInput.extra ?? {}), file_anchors: fileAnchors }
         : createInput.extra;
-    const result = await corpusService.create({
+    const resolvedCreateInput = {
       ...createInput,
       content: resolvedContent,
       ...(mergedExtra !== undefined ? { extra: mergedExtra } : {}),
-    });
+    };
+
+    // SPEC-043 §Design Decisions D11 — `supersedes` composes create() THEN
+    // ValidityService.invalidate() via the SAME shared orchestration the CLI's
+    // `lore create --supersedes` uses (flows/supersede-flow.ts) — never a second,
+    // divergent implementation of the half-failure handling.
+    if (supersedes !== undefined) {
+      if (by === undefined || by.trim() === "") {
+        return errorContent({
+          code: "VALIDATION_ERROR",
+          field: "by",
+          message: "`by` is required when `supersedes` is set.",
+          value: by,
+        });
+      }
+      if (app.validityService === undefined) {
+        return errorContent({ code: "STORE_ERROR", message: "Internal error: ValidityService not wired on App" });
+      }
+      const orchResult = await createWithSupersedes(
+        {
+          create: corpusService.create.bind(corpusService),
+          invalidate: app.validityService.invalidate.bind(app.validityService),
+        },
+        resolvedCreateInput,
+        supersedes,
+        by,
+      );
+      if (!orchResult.ok) return errorContent(orchResult.error);
+      const { id, slug, type, status, version } = orchResult.value.doc;
+      const payload: Record<string, unknown> = { id, slug, type, status, version };
+      // Loud orphan (D11, never silent) — create succeeded but invalidate() failed.
+      if (orchResult.value.supersedeError !== undefined) {
+        payload["supersede_error"] = orchResult.value.supersedeError;
+        payload["supersede_repair_command"] = renderSupersedeRepairMessage(supersedes, slug);
+      }
+      return textContent(payload);
+    }
+
+    const result = await corpusService.create(resolvedCreateInput);
     if (!result.ok) return errorContent(result.error);
     const { id, slug, type, status, version } = result.value;
     return textContent({ id, slug, type, status, version });
@@ -628,6 +716,10 @@ export function registerTools(server: McpServer, app: App): void {
         payload["resolved_components"] = resolveResult.value.resolvedComponents;
       }
     }
+    // SPEC-043 §Design Decisions D6 — computed validity_state; MCP agents parse JSON,
+    // never markdown banners (review U3). `lore_get` is the one MCP surface every
+    // agent actually reads, so this is the load-bearing wiring site.
+    payload["validity_state"] = await computeValidityState(app, result.value.doc);
     return textContent(payload);
   });
 
@@ -648,7 +740,7 @@ export function registerTools(server: McpServer, app: App): void {
 
   // lore_list
   registerToolWithArgs(server, "lore_list", "List documents matching optional filters", LoreListSchema, async (args) => {
-    const { type, status, since, author, tag, limit, offset, governed_by } = args;
+    const { type, status, since, author, tag, limit, offset, governed_by, include_invalid } = args;
 
     // governed_by is a link-table reverse query, not a StoreFilters column predicate —
     // short-circuits to its own service method, same as the CLI's --governed-by branch.
@@ -667,6 +759,8 @@ export function registerTools(server: McpServer, app: App): void {
       ...(since !== undefined ? { since } : {}),
       ...(author !== undefined ? { created_by: author } : {}),
       ...(tag !== undefined ? { tags: [tag] } : {}),
+      // SPEC-043 D3 — mirrors the CLI's --include-invalid flag.
+      ...(include_invalid === true ? { include_invalid: true } : {}),
     };
     const result = await corpusService.list(filters);
     if (!result.ok) return errorContent(result.error);
@@ -678,8 +772,12 @@ export function registerTools(server: McpServer, app: App): void {
 
   // lore_search
   registerToolWithArgs(server, "lore_search", "Full-text search across the corpus", LoreSearchSchema, async (args) => {
-    const { query, type, limit } = args;
-    const filters = type !== undefined ? { type } : {};
+    const { query, type, limit, include_invalid } = args;
+    const filters = {
+      ...(type !== undefined ? { type } : {}),
+      // SPEC-043 D3 — mirrors the CLI's --include-invalid flag.
+      ...(include_invalid === true ? { include_invalid: true } : {}),
+    };
     const result = await corpusService.search(query, filters);
     if (!result.ok) return errorContent(result.error);
     const results = limit !== undefined ? result.value.results.slice(0, limit) : result.value.results;
@@ -1120,6 +1218,34 @@ export function registerTools(server: McpServer, app: App): void {
       const result = await app.sessionService.writeHandoff(args);
       if (!result.ok) return errorContent(result.error);
       return textContent({ doc: result.value });
+    },
+  );
+
+  // ── SPEC-043: bi-temporal invalidation ────────────────────────────────────
+
+  // lore_invalidate
+  registerToolWithArgs(
+    server,
+    "lore_invalidate",
+    "Mark a knowledge/adr document invalid (or undo a prior invalidation) — the SOLE MCP write path for extra.validity",
+    LoreInvalidateSchema,
+    async (args) => {
+      if (app.validityService === undefined) {
+        return errorContent({ code: "STORE_ERROR", message: "Internal error: ValidityService not wired on App" });
+      }
+      const opts: Parameters<typeof app.validityService.invalidate>[1] = { by: args.by };
+      if (args.superseded_by !== undefined) opts.supersededBy = args.superseded_by;
+      if (args.reason !== undefined) opts.reason = args.reason;
+      if (args.undo === true) opts.undo = true;
+
+      const result = await app.validityService.invalidate(args.id_or_slug, opts);
+      if (!result.ok) return errorContent(result.error);
+
+      const payload: Record<string, unknown> = { doc: result.value.doc };
+      if (result.value.decision_status_unchanged !== undefined) {
+        payload["decision_status_unchanged"] = result.value.decision_status_unchanged;
+      }
+      return textContent(payload);
     },
   );
 }

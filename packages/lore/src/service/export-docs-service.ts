@@ -57,6 +57,16 @@
  *     indistinguishable, from inside this service, from a hand-edited file; `force: true`
  *     resolves either case the same way (overwrite with the current projection), which is
  *     why it stays an explicit opt-in rather than an automatic refresh.
+ *   - The SPEC-043 D4 invalidation banner is prepended to `resolveDocBody`'s output
+ *     directly in THIS file (`resolveValidityBanner`, imported as a standalone
+ *     function from `./outline-service.js` — NOT the `OutlineService` class; T1's own
+ *     JSDoc on that function names "ExportDocsService's written body" as a sanctioned
+ *     direct caller, same tier as CLI `get`). This does NOT reopen the `ResolveDocBody`
+ *     injection seam above — `this.store` is already a constructor dependency of this
+ *     service, so no new dependency is introduced. The banner is folded into
+ *     `resolvedBody` ONCE, before both the drift comparison and the on-write content,
+ *     preserving the "same value both sides" invariant this module already enforces
+ *     for MDX splicing.
  *
  * Side-effect class: IO (readFileSync, writeFileSync, mkdirSync) + StoreInterface async calls
  *   + resolveDocBody (itself store-backed via OutlineService.resolve, injected not imported).
@@ -87,6 +97,10 @@ import type {
 } from "@lore/core";
 import type { ExportIndex } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
+import { resolveValidityBanner } from "./outline-service.js";
+
+/** Time seam (SPEC-043 D3/D4 convention) — never `Date.now()` read directly. */
+const defaultNow = (): string => new Date().toISOString();
 
 // ─── Public Types ──────────────────────────────────────────────────────────────
 
@@ -237,10 +251,15 @@ export class ExportDocsService {
    *        b. If file absent → build frontmatter, write with O_EXCL; add to created.
    *
    * @param opts - Project root, dry-run flag, optional type filter, optional force-overwrite.
+   * @param now - Time seam (SPEC-043 D3/D4 convention) — drives the invalidation banner
+   *   prepended to knowledge/adr bodies below; defaults to `() => new Date().toISOString()`.
    * @returns ok(ExportReport) always — per-doc errors are inside report.errors, not top-level err().
    * @throws Never — StoreInterface errors propagate as err(LoreError).
    */
-  async exportDocs(opts: ExportDocsOptions): Promise<Result<ExportReport, LoreError>> {
+  async exportDocs(
+    opts: ExportDocsOptions,
+    now: () => string = defaultNow,
+  ): Promise<Result<ExportReport, LoreError>> {
     // ── Phase 1: Build / extend the export index ──────────────────────────────
     const indexPath = join(opts.projectDir, ".lore", "export-index.json");
     const docsBaseDir = join(opts.projectDir, "docs", "requirements");
@@ -290,6 +309,8 @@ export class ExportDocsService {
       return fmStr + canonicaliseBody(resolvedBody);
     };
 
+    const nowIso = now();
+
     for (const doc of sortedDocs) {
       const mapping = index.mappings[doc.id];
       if (!mapping) {
@@ -307,7 +328,13 @@ export class ExportDocsService {
         report.errors.push(`${doc.id}: MDX placeholder resolution failed — ${bodyResult.error.code}`);
         continue;
       }
-      const resolvedBody = bodyResult.value;
+      // SPEC-043 D4 — prepend the invalidation banner when `doc` is currently
+      // invalidated (the SAME shared renderer CLI `get`/`lore feed` call, T2 wiring
+      // site 2/3). Computed ONCE here and folded into `resolvedBody` BEFORE both the
+      // drift comparison below and the on-write content — never a second, divergent
+      // computation for either side (same critical invariant as the MDX splice above).
+      const banner = await resolveValidityBanner(this.store, doc, nowIso);
+      const resolvedBody = banner !== undefined ? `${banner}\n\n${bodyResult.value}` : bodyResult.value;
 
       const absFilePath = join(opts.projectDir, mapping.file_path);
       const dirPath = dirname(absFilePath);
