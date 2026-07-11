@@ -43,7 +43,16 @@
  * see `checkpoint-registry.js`'s third module invariant.
  *   - `plan-promote`: ancestor spec must be `approved` AND declare ≥1 structured
  *     acceptance criterion (`upstreamApproved` + `upstreamHasAcceptanceCriteria`).
- *   - `task-claim`: ancestor spec must be `approved` (`upstreamApproved` only).
+ *   - `task-claim`: ancestor spec must be `approved` (`upstreamApproved`); ADDITIONALLY
+ *     (SPEC-042 §Design Decisions D5) a fresh sibling claim in the same plan whose
+ *     declared `file_anchors` overlap this task's own also blocks
+ *     (`noAnchorOverlap`) — evaluated UNCONDITIONALLY, not gated by whether a
+ *     spec-tier ancestor exists (unlike `upstreamApproved`). `--by` (or
+ *     `$LORE_ACTOR`/OS username) supplies the candidate actor identity the overlap
+ *     predicate's "different actor" test needs; this pre-flight check reaches the
+ *     IDENTICAL verdict `lore claim` itself would for the same task/actor —
+ *     `buildAnchorGateContext` (`checkpoint-registry.js`) is the shared ctx-builder
+ *     both this command and `TaskWorkflowService.claim`'s `GateEnforcer` path use.
  *
  * `LORE_GATE_BYPASS=1` short-circuits to exit 0 before ANY parsing or checking, for
  * ALL FOUR subcommands — an escape hatch for callers that must not be blocked
@@ -103,17 +112,18 @@
 import { defineCommand } from "citty";
 import { z } from "zod";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError } from "../utils.js";
+import { exitCode, formatError, resolveActor } from "../utils.js";
 import {
   checkpointRegistry,
   isCheckpointBlocked,
   selectFailures,
   buildUpstreamSpecContext,
+  buildAnchorGateContext,
   type CheckpointDef,
   type GateCheckpoint,
   type GateContext,
 } from "../../../service/checkpoint-registry.js";
-import { runDeterministicChecks, resolveGateEnabled } from "@lore/core";
+import { runDeterministicChecks, resolveGateEnabled, resolveAnchorOverlapGateEnabled } from "@lore/core";
 import type { App } from "../../../app.js";
 import type { AcService } from "../../../service/ac-service.js";
 import type { LoreConfig, LoreError, NewReviewJudgment } from "@lore/core";
@@ -308,14 +318,23 @@ export default defineCommand({
         name: "task-claim",
         description:
           "Deterministic commit-time gate for claiming a task: when the task's plan " +
-          "has a spec-tier ancestor, it must be approved; a plan with no spec-tier " +
-          "ancestor passes vacuously",
+          "has a spec-tier ancestor, it must be approved; a fresh sibling claim in " +
+          "the same plan whose declared file_anchors overlap this task's own also " +
+          "blocks (SPEC-042 D5); a plan with no spec-tier ancestor and no siblings " +
+          "with overlapping anchors passes vacuously",
       },
       args: {
         task: {
           type: "string",
           description: "Task document ID or slug to gate",
           required: true,
+        },
+        by: {
+          type: "string",
+          description:
+            "Actor identity attempting the claim (feeds the anchor-overlap 'different " +
+            "actor' test, SPEC-042 D5); defaults to $LORE_ACTOR env var, then OS username " +
+            "— same resolution order as `lore claim`",
         },
       },
       async run({ args }) {
@@ -328,7 +347,8 @@ export default defineCommand({
         const { app, config } = loadLoreApp();
         try {
           if (isGateDisabledByConfig("task-claim", config)) return;
-          await runTaskClaimGate(app, args.task as string);
+          const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
+          await runTaskClaimGate(app, args.task as string, by, config);
         } finally {
           app.close();
         }
@@ -495,14 +515,43 @@ async function runPlanPromoteGate(app: App, planIdOrSlug: string): Promise<void>
  * Runs the `task-claim` checkpoint against an already-created task: resolves the task,
  * validates its type, then — via its `parent_id` (the task's plan, per SPEC-025's
  * `parent_id` + `extra.plan_id` creation contract) — resolves that plan's ancestor
- * spec via the SAME `CorpusService.getPlanBundle` traversal `runPlanPromoteGate` and
- * `TaskWorkflowService.ready()` both use, then dispatches through
- * `checkpointRegistry["task-claim"]`.
+ * spec AND sibling tasks via the SAME `CorpusService.getPlanBundle` traversal
+ * `runPlanPromoteGate` and `TaskWorkflowService.ready()`/`enforceClaimGate` all use,
+ * then dispatches through `checkpointRegistry["task-claim"]`.
+ *
+ * Anchor-overlap parity (SPEC-042 §Design Decisions D5, drift fix): this pre-flight
+ * CLI gate must reach the IDENTICAL verdict `TaskWorkflowService.claim`'s
+ * `GateEnforcer` path reaches for the same task/actor — that means feeding
+ * `checkTaskClaim` a POPULATED `candidateBy`/`candidateAnchors`/`siblingClaims` ctx
+ * via `buildAnchorGateContext` (`checkpoint-registry.js`), NOT just the upstream-spec
+ * ctx. Before this fix, this function built ONLY `buildUpstreamSpecContext(...)` — the
+ * anchor fields were always `undefined`, so `noAnchorOverlap` vacuously passed here
+ * even while a real conflict blocked `lore claim` itself (the two surfaces disagreed,
+ * exactly the drift retro-item-8's SSOT relocation was meant to prevent). `nowIso` is
+ * resolved HERE (a CLI adapter may read the wall clock; `checkpoint-registry.ts`'s
+ * pure `check`/`feed` callbacks and `GateEnforcer.enforce` may not) and `ttlMinutes`
+ * is read from `app.taskWorkflowService.claimTtlMinutes` — the SAME already-resolved
+ * value `lore tree`/`lore list`'s claim badges use (`resolveClaimTtlMinutes(config)`,
+ * resolved ONCE in `app.ts`) — never re-derived a second time here.
  *
  * @param app - Wired `App` (from `loadLoreApp()`).
  * @param taskIdOrSlug - Task document ULID or slug to gate.
+ * @param by - The actor attempting the claim (feeds `noAnchorOverlap`'s "different
+ *   actor" test) — resolved by the caller via `resolveActor` (--by > $LORE_ACTOR > OS
+ *   username), same precedent as `lore claim`.
+ * @param config - `loadLoreApp()`'s resolved project config — forwarded to
+ *   `resolveAnchorOverlapGateEnabled` so this gate honors the SAME
+ *   `workflow.gates."task-claim".anchor_overlap.enabled` sub-key
+ *   `GateEnforcer.isTaskClaimAnchorOverlapEnabled()` reads (SPEC-042 D6) — both call
+ *   sites share the one `@lore/core` pure function; no second, independently-drifting
+ *   config read was introduced.
  */
-async function runTaskClaimGate(app: App, taskIdOrSlug: string): Promise<void> {
+async function runTaskClaimGate(
+  app: App,
+  taskIdOrSlug: string,
+  by: string,
+  config: LoreConfig | undefined,
+): Promise<void> {
   const taskResult = await app.corpusService.get(taskIdOrSlug);
   if (!taskResult.ok) {
     process.stderr.write(formatError(taskResult.error) + "\n");
@@ -524,20 +573,31 @@ async function runTaskClaimGate(app: App, taskIdOrSlug: string): Promise<void> {
   }
 
   const checkpoint = requireCheckpoint("task-claim");
+  const nowIso = new Date().toISOString();
+  const ttlMinutes = app.taskWorkflowService.claimTtlMinutes;
+  const anchorOverlapEnabled = resolveAnchorOverlapGateEnabled(config);
 
   // reason: a task's parent_id is schema-required to be its plan (createDocInputSchema
   // superRefine, @lore/core/schemas.ts) — a null parent_id here can only happen on a
-  // legacy/corrupted row. Routed through the SAME checkpoint as every other task,
-  // via a synthetic "no spec parent" context (`buildUpstreamSpecContext(undefined)`)
-  // rather than a second hardcoded pass shape: there is no plan to walk, hence no
-  // upstream edge to gate against, and `checkTaskClaim`'s `hasSpecParent !== true`
-  // short-circuit already returns `[]` (vacuous pass) for exactly this ctx — see
-  // checkpoint-registry.ts's third module invariant. This keeps "gate: pass" printed
-  // from exactly ONE call site below, instead of a duplicated literal on this
+  // legacy/corrupted row. Routed through the SAME checkpoint as every other task, via
+  // a synthetic "no spec parent, no siblings" context rather than a second hardcoded
+  // pass shape: there is no plan to walk, hence no upstream edge to gate against AND
+  // no sibling claims to compare anchors with — `buildAnchorGateContext(by, task, [],
+  // nowIso, ttlMinutes)` correctly reduces to `{candidateBy: by, candidateAnchors:
+  // extractFileAnchors(task), siblingClaims: []}` when passed an empty sibling list
+  // (the SAME synthetic shape `TaskWorkflowService.enforceClaimGate` builds for this
+  // identical edge case), which vacuously passes `noAnchorOverlap` — see
+  // checkpoint-registry.ts's third/fourth module invariants. This keeps "gate: pass"
+  // printed from exactly ONE call site below, instead of a duplicated literal on this
   // early-return path.
-  let upstreamCtx: GateContext;
+  let ctx: GateContext;
   if (task.parent_id === null) {
-    upstreamCtx = buildUpstreamSpecContext(undefined);
+    ctx = {
+      ...buildUpstreamSpecContext(undefined),
+      ...buildAnchorGateContext(by, task, [], nowIso, ttlMinutes),
+      targetIdOrSlug: taskIdOrSlug,
+      anchorOverlapEnabled,
+    };
   } else {
     const bundleResult = await app.corpusService.getPlanBundle(task.parent_id);
     if (!bundleResult.ok) {
@@ -545,10 +605,14 @@ async function runTaskClaimGate(app: App, taskIdOrSlug: string): Promise<void> {
       process.exitCode = exitCode(bundleResult.error);
       return;
     }
-    upstreamCtx = buildUpstreamSpecContext(bundleResult.value.spec);
+    ctx = {
+      ...buildUpstreamSpecContext(bundleResult.value.spec),
+      ...buildAnchorGateContext(by, task, bundleResult.value.tasks, nowIso, ttlMinutes),
+      targetIdOrSlug: taskIdOrSlug,
+      anchorOverlapEnabled,
+    };
   }
 
-  const ctx: GateContext = { ...upstreamCtx, targetIdOrSlug: taskIdOrSlug };
   const results = checkpoint.check(ctx);
 
   if (isCheckpointBlocked(results)) {
