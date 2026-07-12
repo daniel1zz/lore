@@ -53,6 +53,7 @@ import { PhaseService } from "./service/phase-service.js";
 import { TaskWorkflowService } from "./service/task-workflow-service.js";
 import { SpecKindService } from "./service/spec-kind-service.js";
 import { JudgmentService } from "./service/judgment-service.js";
+import { StalenessProbeService } from "./service/staleness-probe-service.js";
 import { AuditService } from "./service/audit-service.js";
 import { AcService } from "./service/ac-service.js";
 import { VerifyRunnerService } from "./service/verify-runner-service.js";
@@ -122,6 +123,22 @@ export interface App {
    * Source: SPEC-034 §5, §9.1
    */
   judgmentService: JudgmentService;
+  /**
+   * StalenessProbeService — batch/single-doc orchestration for `lore review --staleness`
+   * (SPEC-044 §Design Decisions D4): assembles candidates via the pure selection layer,
+   * probes each via `aiProviderService.probeStaleness`, and persists via
+   * `judgmentService.record` (audit action `staleness_probe`, actor = the commissioning
+   * `by`). Store + two injected ports — never imports AIProviderService/JudgmentService
+   * directly (services don't cross-import).
+   *
+   * Optional for the same reason `acService`/`verifyRunnerService`/`sessionService`/
+   * `validityService` are: pre-existing hand-built App test stubs (HTTP routes / MCP
+   * tools / eval scenarios — outside this task's file anchors) remain valid without a
+   * mechanical touch to every one of them. Always present in production — both
+   * `buildAppFromSqlite` and `buildAppFromTurso` wire it unconditionally.
+   * Source: SPEC-044 §Design Decisions D4, §Scope
+   */
+  stalenessProbeService?: StalenessProbeService;
   /**
    * AuditService — read/verify surface over the LIVE `audit` table (query +
    * versions⋈audit completeness oracle). Store-only, no telemetry (mirrors
@@ -294,6 +311,11 @@ function buildAppFromSqlite(
     createHandoffDoc: corpusService.createHandoffDoc.bind(corpusService),
     isCheckpointEnabled: gateEnforcer.isEnabled.bind(gateEnforcer),
   });
+  // reason: extracted to a local (mirrors taskWorkflowService/sessionService above) so
+  // both the `judgmentService:` field AND `validityService`'s SPEC-044 D12 calibration
+  // port AND `stalenessProbeService`'s recordJudgment port can bind to the SAME instance
+  // — never three separately-constructed JudgmentServices.
+  const judgmentService = new JudgmentService(store, telemetry);
   return {
     corpusService,
     // reason: same resolved claimTtlMinutes as CorpusService above — one resolution
@@ -330,14 +352,30 @@ function buildAppFromSqlite(
     sessionService,
     // reason: ValidityService owns extra.validity (bi-temporal invalidation) — store +
     // own telemetry wiring, same DI shape as TaskWorkflowService/JudgmentService.
-    // SPEC-043 §Design Decisions D2.
-    validityService: new ValidityService(store, telemetry),
+    // SPEC-043 §Design Decisions D2. 3rd arg wires the SPEC-044 D12 OPTIONAL calibration
+    // port — a stale_candidate probe that a human later confirms via `lore invalidate`
+    // writes exactly one calibration record FK'd to that judgment; bound to the SAME
+    // judgmentService instance the `judgmentService:`/`stalenessProbeService:` fields use.
+    validityService: new ValidityService(store, telemetry, {
+      latestStalenessJudgment: (docId) => judgmentService.latestFor(docId, "staleness"),
+      recordCalibration: judgmentService.recordCalibration.bind(judgmentService),
+    }),
     // reason: SpecKindService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-032 §3.4.
     specKindService: new SpecKindService(store),
     // reason: JudgmentService owns review_judgments + calibration_records — store + own
     // telemetry wiring, same DI shape as TaskWorkflowService (D8). SPEC-034 §5, §9.1.
-    judgmentService: new JudgmentService(store, telemetry),
+    judgmentService,
+    // reason: StalenessProbeService takes two injected ports — probeStaleness (bound to
+    // aiProviderService, the same instance createApp() already constructed) and
+    // recordJudgment (bound to the SAME judgmentService instance above, never a second
+    // JudgmentService) — never imports either service directly (services don't
+    // cross-import). SPEC-044 §Design Decisions D4.
+    stalenessProbeService: new StalenessProbeService(
+      store,
+      aiProviderService.probeStaleness.bind(aiProviderService),
+      judgmentService.record.bind(judgmentService),
+    ),
     // reason: AuditService is store-only (no telemetry, mirrors VersionService) — takes
     // the resolved watermark via constructor, same DI shape as TaskWorkflowService's
     // claimTtlMinutes (D5). SPEC-035 §2, §5, §9.1.
@@ -437,6 +475,10 @@ function buildAppFromTurso(
     createHandoffDoc: corpusService.createHandoffDoc.bind(corpusService),
     isCheckpointEnabled: gateEnforcer.isEnabled.bind(gateEnforcer),
   });
+  // reason: extracted to a local (mirrors buildAppFromSqlite's identical comment) so both
+  // the `judgmentService:` field AND `validityService`'s SPEC-044 D12 calibration port
+  // AND `stalenessProbeService`'s recordJudgment port can bind to the SAME instance.
+  const judgmentService = new JudgmentService(store, telemetry);
   return {
     corpusService,
     // reason: same resolved claimTtlMinutes as CorpusService above — one resolution
@@ -473,14 +515,25 @@ function buildAppFromTurso(
     sessionService,
     // reason: ValidityService owns extra.validity (bi-temporal invalidation) — store +
     // own telemetry wiring, same DI shape as TaskWorkflowService/JudgmentService.
-    // SPEC-043 §Design Decisions D2.
-    validityService: new ValidityService(store, telemetry),
+    // SPEC-043 §Design Decisions D2. 3rd arg wires the SPEC-044 D12 OPTIONAL calibration
+    // port — see buildAppFromSqlite's identical comment.
+    validityService: new ValidityService(store, telemetry, {
+      latestStalenessJudgment: (docId) => judgmentService.latestFor(docId, "staleness"),
+      recordCalibration: judgmentService.recordCalibration.bind(judgmentService),
+    }),
     // reason: SpecKindService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-032 §3.4.
     specKindService: new SpecKindService(store),
     // reason: JudgmentService owns review_judgments + calibration_records — store + own
     // telemetry wiring, same DI shape as TaskWorkflowService (D8). SPEC-034 §5, §9.1.
-    judgmentService: new JudgmentService(store, telemetry),
+    judgmentService,
+    // reason: StalenessProbeService — see buildAppFromSqlite's identical comment.
+    // SPEC-044 §Design Decisions D4.
+    stalenessProbeService: new StalenessProbeService(
+      store,
+      aiProviderService.probeStaleness.bind(aiProviderService),
+      judgmentService.record.bind(judgmentService),
+    ),
     // reason: AuditService is store-only (no telemetry, mirrors VersionService) — takes
     // the resolved watermark via constructor, same DI shape as TaskWorkflowService's
     // claimTtlMinutes (D5). SPEC-035 §2, §5, §9.1.
@@ -561,6 +614,11 @@ export function createApp(
     aiConfig.refine.max_input_chars,
     aiConfig.assess,
     aiConfig.review,
+    // reason: SPEC-044 §Design Decisions D8 — wires config.ai.staleness.* (max_doc_chars/
+    // neighbor_limit) into the staleness-probe judge prompt budgets; without this the
+    // constructor's own hardcoded default would silently ignore a corpus's configured
+    // override (mirrors aiConfig.review's identical wiring one line above).
+    aiConfig.staleness,
   );
 
   // Extract per-surface AI defaults from config (SPEC-024)

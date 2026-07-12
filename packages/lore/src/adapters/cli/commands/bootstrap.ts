@@ -23,17 +23,30 @@ import { defineCommand } from "citty";
 import type { BootstrapReport } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
+import { buildStalenessFlowDeps, listFreshStalenessEscalates } from "../../../flows/staleness-flow.js";
+
+/**
+ * `BootstrapReport` widened with the SPEC-044 §Design Decisions D14 count — computed
+ * OUTSIDE `SessionService.bootstrap` (a service file outside this task's file anchors)
+ * via the SAME `listFreshStalenessEscalates` derivation `lore review --staleness --list`
+ * uses, then spliced onto the report's `corpus` block by this adapter before rendering.
+ */
+type BootstrapReportWithStaleness = BootstrapReport & {
+  corpus: BootstrapReport["corpus"] & { open_stale_candidates: number };
+};
 
 /**
  * Compact human-readable rendering of a `BootstrapReport` — pointers only, never
  * doc body content (module header). Pure — no IO, no wall-clock reads (every
  * time-derived field is already computed by `SessionService.bootstrap`).
  *
- * @param report - A `BootstrapReport` from `SessionService.bootstrap`.
+ * @param report - A `BootstrapReport` from `SessionService.bootstrap`, widened with
+ *   `corpus.open_stale_candidates` (SPEC-044 §Design Decisions D14) by this command's
+ *   `run()` before rendering.
  * @param by - The actor identity `bootstrap` was called with (for the header line).
  * @returns Multi-line text block ready for `console.log`.
  */
-export function formatBootstrapReport(report: BootstrapReport, by: string): string {
+export function formatBootstrapReport(report: BootstrapReportWithStaleness, by: string): string {
   const lines: string[] = [];
 
   lines.push(`── lore bootstrap (${by}) ──`);
@@ -107,7 +120,10 @@ export function formatBootstrapReport(report: BootstrapReport, by: string): stri
       : "Resume hint: (none)",
   );
   lines.push(
-    `Corpus: ${report.corpus.total_docs} docs, last updated ${report.corpus.last_updated ?? "(never)"}`,
+    `Corpus: ${report.corpus.total_docs} docs, last updated ${report.corpus.last_updated ?? "(never)"}` +
+      (report.corpus.open_stale_candidates > 0
+        ? `, ${report.corpus.open_stale_candidates} open stale candidate(s)`
+        : ""),
   );
 
   return lines.join("\n");
@@ -146,10 +162,26 @@ export default defineCommand({
         return;
       }
 
+      // SPEC-044 §Design Decisions D14 — open_stale_candidates, computed by the SAME
+      // query `lore review --staleness --list` uses (one derivation site,
+      // `flows/staleness-flow.ts::listFreshStalenessEscalates`), spliced onto the
+      // report's corpus summary here rather than inside SessionService.bootstrap (a
+      // service file outside this task's file anchors).
+      const staleListResult = await listFreshStalenessEscalates(buildStalenessFlowDeps(app));
+      if (!staleListResult.ok) {
+        process.stderr.write(formatError(staleListResult.error) + "\n");
+        process.exitCode = exitCode(staleListResult.error);
+        return;
+      }
+      const reportWithStaleness: BootstrapReportWithStaleness = {
+        ...result.value,
+        corpus: { ...result.value.corpus, open_stale_candidates: staleListResult.value.length },
+      };
+
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
+        console.log(JSON.stringify({ ok: true, data: reportWithStaleness }, null, 2));
       } else {
-        console.log(formatBootstrapReport(result.value, by));
+        console.log(formatBootstrapReport(reportWithStaleness, by));
       }
     } finally {
       app.close();
