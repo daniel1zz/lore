@@ -83,6 +83,8 @@ import {
 } from "@lore/core";
 import type { CheckResult, LlmReviewOutput, NewReviewJudgment, ReviewBundle } from "@lore/core";
 import { llmReviewOutputSchema } from "@lore/core";
+import type { StalenessBundle, StalenessVerdict } from "@lore/core";
+import { mapStalenessVerdictDecisionToJudgmentDecision, stalenessVerdictSchema } from "@lore/core";
 import {
   BUILT_IN_TEMPLATES,
   LINK_INFERENCE_TEMPLATE,
@@ -103,6 +105,12 @@ import {
   buildReviewRetryPrompt,
   type ReviewBudgets,
 } from "../ai/review-template.js";
+import {
+  STALENESS_PROMPT_VERSION,
+  STALENESS_TEMPLATES,
+  buildStalenessRetryPrompt,
+  type StalenessBudgets,
+} from "../ai/staleness-template.js";
 
 /**
  * Validates that every `ac_scores[].ac_id` the judge emitted belongs to the spec's
@@ -252,6 +260,14 @@ export class AIProviderService {
      * Source: SPEC-034 §6
      */
     private readonly reviewBudgets: ReviewBudgets = { max_doc_chars: 12000, max_context_chars: 8000 },
+    /**
+     * Character/count budgets for the staleness-probe judge prompt.
+     * Sourced from config.ai.staleness.* (defaults: doc 12000, neighbor_limit 20).
+     * Defaulted here for the same reason `reviewBudgets` is — pre-SPEC-044 direct
+     * AIProviderService constructions (test fixtures) don't need updating.
+     * Source: SPEC-044 §Design Decisions D8
+     */
+    private readonly stalenessBudgets: StalenessBudgets = { max_doc_chars: 12000, neighbor_limit: 20 },
   ) {}
 
   /**
@@ -852,6 +868,113 @@ export class AIProviderService {
     return doubleFailure;
   }
 
+  // ─── SPEC-044: staleness probe ───────────────────────────────────────────────
+
+  /**
+   * Judge whether a single document still holds true (SPEC-044 §Design Decisions D5).
+   * Used by `StalenessProbeService` (never called directly by an adapter — mirrors
+   * `judgeDoc`'s role in the review pipeline, but this is invoked per-candidate from
+   * `StalenessProbeService`'s batch orchestration, not from the CLI/MCP layer directly).
+   *
+   * Flow: build the judge prompt (materials truncated per `config.ai.staleness.*`
+   * budgets) → invoke the provider → extract JSON from the raw response → validate
+   * against `stalenessVerdictSchema` → on failure, ONE corrective retry with the parse
+   * error embedded in a follow-up prompt → on a second failure, `AI_PROVIDER_ERROR` with
+   * a ≤500-char raw-output prefix (no judgment is returned — the caller never calls
+   * `JudgmentService.record` on an `err()` Result, SPEC-026 §3 D2 pattern). An
+   * out-of-enum `decision` in the FIRST attempt is a hard error with NO retry (D5) — a
+   * response that isn't even loosely shaped as a staleness verdict is treated the same
+   * as a JSON parse failure would be (one retry), but `stalenessVerdictSchema`'s enum
+   * check on the SECOND attempt (or any attempt beyond) is still fatal, consuming no
+   * further retries.
+   *
+   * `doc_version` on the returned judgment is `bundle.doc.version` — the version read at
+   * BUNDLE-ASSEMBLY time (by `StalenessProbeService`), not re-fetched here. A concurrent
+   * edit racing this call simply yields a judgment the existing `(stale)` freshness rule
+   * already discounts (T8; no lock, no re-read).
+   *
+   * @param bundle - {doc, age_days, in_degree, neighbors} from `StalenessProbeService`
+   * @param opts.source - Caller surface, forwarded to telemetry as caller_surface
+   * @returns Result<NewReviewJudgment, LoreError> — `kind: "staleness"` always set;
+   *   never throws
+   *
+   * @example
+   * const probeResult = await svc.probeStaleness(bundle, { source: app.callerSurface });
+   * if (!probeResult.ok) { ... }
+   * await app.judgmentService.record(probeResult.value, { auditAction: "staleness_probe", auditActor: by });
+   *
+   * Source: SPEC-044 §Design Decisions D5
+   */
+  async probeStaleness(
+    bundle: StalenessBundle,
+    opts?: {
+      // reason: explicit `| undefined` required by exactOptionalPropertyTypes.
+      source?: CallerSurface | undefined;
+    },
+  ): Promise<Result<NewReviewJudgment, LoreError>> {
+    const t0 = performance.now();
+    // reason: STALENESS_TEMPLATES always carries an entry for the currently active
+    // STALENESS_PROMPT_VERSION — same non-null-assertion precedent as judgeDoc's
+    // REVIEW_TEMPLATES lookup above.
+    const template = STALENESS_TEMPLATES[STALENESS_PROMPT_VERSION]!;
+    const nowIso = new Date().toISOString();
+    const { prompt } = template(bundle, this.stalenessBudgets, nowIso);
+
+    const emitStalenessEvent = (
+      providerResult: Result<GenerateOutput, LoreError>,
+      decision?: NewReviewJudgment["decision"],
+      confidence?: number,
+    ): void => {
+      this._emitAiEvent(providerResult, Math.round(performance.now() - t0), {
+        doc_type: bundle.doc.type,
+        template_source: "built-in",
+        kind: "staleness",
+        target_doc_id: bundle.doc.id,
+        caller_surface: opts?.source,
+        ...(decision !== undefined ? { decision } : {}),
+        ...(confidence !== undefined ? { confidence } : {}),
+      });
+    };
+
+    // First attempt.
+    const first = await this._attemptStalenessParse(prompt, bundle);
+    if (!first.providerResult.ok) {
+      emitStalenessEvent(first.providerResult);
+      return first.providerResult;
+    }
+    if (first.parsed !== undefined) {
+      const finalized = this._finalizeStalenessJudgment(first.parsed, bundle);
+      emitStalenessEvent(first.providerResult, finalized.decision, finalized.confidence);
+      return ok(finalized);
+    }
+
+    // Corrective retry (SPEC-026 §3 D2 pattern).
+    const retryPrompt = buildStalenessRetryPrompt(prompt, first.parseErrorMessage ?? "unknown parse error");
+    const second = await this._attemptStalenessParse(retryPrompt, bundle);
+    if (!second.providerResult.ok) {
+      emitStalenessEvent(second.providerResult);
+      return second.providerResult;
+    }
+    if (second.parsed !== undefined) {
+      const finalized = this._finalizeStalenessJudgment(second.parsed, bundle);
+      emitStalenessEvent(second.providerResult, finalized.decision, finalized.confidence);
+      return ok(finalized);
+    }
+
+    // Both attempts malformed → AI_PROVIDER_ERROR with a raw-output prefix. No judgment
+    // is returned — the caller only calls JudgmentService.record after an ok() return.
+    const rawPrefix = (second.rawContent ?? "").slice(0, 500);
+    const doubleFailure = err({
+      code: "AI_PROVIDER_ERROR" as const,
+      provider: this.active,
+      message:
+        `AI staleness probe response could not be parsed as valid verdict JSON after one ` +
+        `corrective retry: ${second.parseErrorMessage ?? "unknown error"}. Raw output prefix: ${rawPrefix}`,
+    });
+    emitStalenessEvent(doubleFailure);
+    return doubleFailure;
+  }
+
   // ─── Private Helpers ────────────────────────────────────────────────────────
 
   /**
@@ -1091,7 +1214,13 @@ export class AIProviderService {
       reasons: parsed.reasons,
       checks,
       blocking_questions: parsed.blocking_questions,
+      // reason: explicit (not relying on reviewJudgmentSchema's optional-defaults-to-
+      // "review" behavior, SPEC-044 D3) — production code states its intent plainly.
+      kind: "review",
       ...(docTruncated ? { truncated: true } : {}),
+      // reason: SPEC-044 D11 byproduct — a review judge MAY emit this nomination
+      // alongside its normal verdict; passed through verbatim, never re-derived here.
+      ...(parsed.superseded_candidate !== undefined ? { superseded_candidate: parsed.superseded_candidate } : {}),
       judge: {
         provider: this.active,
         // reason: the AIProvider interface (packages/core/src/ai.ts) exposes no resolved
@@ -1103,6 +1232,91 @@ export class AIProviderService {
         // non-empty identifier) rather than fabricating an unverified model string.
         model: this.active,
         prompt_version: REVIEW_PROMPT_VERSION,
+      },
+    };
+  }
+
+  /**
+   * One round of the staleness-probe judge protocol: invoke the provider with `prompt`,
+   * then try to extract + validate staleness-verdict JSON from its response. Sibling of
+   * `_attemptJudgeDocParse` for the SPEC-044 `probeStaleness` protocol — same shape,
+   * different schema (`stalenessVerdictSchema` instead of `llmReviewOutputSchema`).
+   *
+   * @param prompt - Fully-assembled judge prompt (initial or corrective-retry variant)
+   * @param bundle - Staleness bundle, used only for the GenerateInput doc_type/title
+   * @returns providerResult (the raw provider call outcome); when providerResult.ok, exactly
+   *   one of `parsed` (validated StalenessVerdict) or `parseErrorMessage` (+ `rawContent`)
+   *   is set — never both. An out-of-enum `decision` is caught by `stalenessVerdictSchema`'s
+   *   `z.enum` check, surfacing as a `parseErrorMessage` exactly like any other schema
+   *   violation — D5's "hard error, no retry" applies on the SECOND attempt only (the
+   *   caller, `probeStaleness`, still spends its one corrective retry on the first failure,
+   *   matching the SPEC-026 §3 D2 single-axis retry contract every other judge pipeline uses).
+   */
+  private async _attemptStalenessParse(
+    prompt: string,
+    bundle: StalenessBundle,
+  ): Promise<{
+    providerResult: Result<GenerateOutput, LoreError>;
+    parsed?: StalenessVerdict;
+    parseErrorMessage?: string;
+    rawContent?: string;
+  }> {
+    const { result: providerResult } = await this._invokeProvider({
+      prompt,
+      doc_type: bundle.doc.type,
+      title: bundle.doc.title,
+    });
+
+    if (!providerResult.ok) {
+      return { providerResult };
+    }
+
+    const rawContent = providerResult.value.content;
+    const extracted = extractAssessmentJson(rawContent);
+    if (!extracted.ok) {
+      const message = "message" in extracted.error ? extracted.error.message : extracted.error.code;
+      return { providerResult, rawContent, parseErrorMessage: message };
+    }
+
+    const validated = stalenessVerdictSchema.safeParse(extracted.value);
+    if (!validated.success) {
+      const message = validated.error.issues
+        .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
+        .join("; ");
+      return { providerResult, rawContent, parseErrorMessage: message };
+    }
+
+    return { providerResult, rawContent, parsed: validated.data };
+  }
+
+  /**
+   * Assemble the final NewReviewJudgment from a validated staleness verdict — maps the
+   * verdict's `decision` ("holds"/"stale_candidate") onto the shared `ReviewDecision`
+   * enum ("approve"/"escalate", D3) via `mapStalenessVerdictDecisionToJudgmentDecision`,
+   * stamps `kind: "staleness"`, and sets `checks: []` (D9 — deterministic pre-checks do
+   * NOT run for staleness, a different pipeline, stated explicitly).
+   *
+   * @param parsed - Validated staleness verdict
+   * @param bundle - Staleness bundle — `bundle.doc.id`/`bundle.doc.version` become
+   *   `doc_id`/`doc_version` (the version read at BUNDLE-ASSEMBLY time, T8)
+   */
+  private _finalizeStalenessJudgment(parsed: StalenessVerdict, bundle: StalenessBundle): NewReviewJudgment {
+    return {
+      doc_id: bundle.doc.id,
+      doc_version: bundle.doc.version,
+      decision: mapStalenessVerdictDecisionToJudgmentDecision(parsed.decision),
+      confidence: parsed.confidence,
+      reasons: parsed.reasons.map((reason) => ({ dimension: "staleness", finding: reason })),
+      checks: [],
+      blocking_questions: parsed.blocking_questions,
+      kind: "staleness",
+      ...(parsed.superseded_candidate !== undefined ? { superseded_candidate: parsed.superseded_candidate } : {}),
+      judge: {
+        provider: this.active,
+        // reason: same "no provider-level model accessor exists yet" honesty precedent
+        // as `_finalizeJudgment` — see its own comment above.
+        model: this.active,
+        prompt_version: STALENESS_PROMPT_VERSION,
       },
     };
   }
@@ -1122,7 +1336,7 @@ export class AIProviderService {
     meta: {
       doc_type: DocType;
       template_source: "built-in" | "user-override";
-      kind: "create" | "regenerate" | "refine" | "infer" | "assess" | "review";
+      kind: "create" | "regenerate" | "refine" | "infer" | "assess" | "review" | "staleness";
       target_doc_id?: string | null | undefined;
       // reason: exactOptionalPropertyTypes=true requires explicit `| undefined` when callers pass
       // `opts?.field` (type `T | undefined`). Without it, TS rejects `prop: T | undefined`
