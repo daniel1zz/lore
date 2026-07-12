@@ -21,6 +21,7 @@ import {
   specAcceptanceCriteriaSchema,
   specExtraSchema,
   normalizeFileAnchors,
+  parseCodeAnchor,
   validityEqual,
 } from "@lore/core";
 import type { CreateDocInput, DocPatch } from "@lore/core";
@@ -515,6 +516,34 @@ export class CorpusService {
       }
     }
 
+    // Create-time code_anchors GRAMMAR validation for specs (SPEC-045 §Design
+    // Decisions D6a). reason: specExtraSchema only shape-checks code_anchors
+    // (bare array of strings) — the per-entry `path[#Symbol]` grammar lives in
+    // the shared pure `parseCodeAnchor` (@lore/core, code-anchors.ts), run
+    // per-entry on the FULL raw string (never batch-normalized — SPEC-045
+    // review S3). Mirrors the task file_anchors branch immediately above, but
+    // this is VALIDATION ONLY — unlike file_anchors, code_anchors entries are
+    // NOT rewritten/normalized here ("they just must PARSE", D6a) — a
+    // grammar-valid raw string persists verbatim. Filesystem verification is
+    // `lore status --check-drift`'s job, never a write-time check.
+    if (data.type === "spec") {
+      const rawCodeAnchors = data.extra?.["code_anchors"];
+      if (rawCodeAnchors !== undefined) {
+        if (!Array.isArray(rawCodeAnchors) || !rawCodeAnchors.every((a) => typeof a === "string")) {
+          return err({
+            code: "VALIDATION_ERROR",
+            field: "extra.code_anchors",
+            message: "extra.code_anchors must be an array of strings",
+            value: rawCodeAnchors,
+          });
+        }
+        for (const raw of rawCodeAnchors as string[]) {
+          const parsedResult = parseCodeAnchor(raw);
+          if (!parsedResult.ok) return parsedResult;
+        }
+      }
+    }
+
     const id = ulid() as DocId;
     const now = new Date().toISOString();
     const role = DOC_TYPE_ROLE_MAP[data.type];
@@ -982,6 +1011,35 @@ export class CorpusService {
           message: issue ? issue.message : "invalid spec extra",
           value: parsedPatch.data.extra["spec_kind"],
         });
+      }
+    }
+
+    // code_anchors GRAMMAR re-validation when updating a spec's extra (SPEC-045
+    // §Design Decisions D6a). reason: specExtraSchema (just re-parsed above) only
+    // shape-checks code_anchors (bare array of strings) — the per-entry
+    // `path[#Symbol]` grammar is a SEPARATE check via the shared pure
+    // `parseCodeAnchor` (@lore/core), run here so `lore set` / HTTP PATCH / MCP
+    // `lore_set` can't smuggle a malformed anchor past the shape-only Zod gate
+    // (mirrors D6a's "no side doors" requirement, same shape as the ac_scope/
+    // spec_kind cross-cutting checks immediately above/below). Validation only —
+    // a grammar-valid incoming array persists verbatim, no rewrite ("they just
+    // must PARSE", D6a); the RMW verbs (DriftCheckService.addCodeAnchors/
+    // removeCodeAnchors) remain the sanctioned normalize-on-write path.
+    if (existing.type === "spec" && parsedPatch.data.extra !== undefined) {
+      const rawCodeAnchors = parsedPatch.data.extra["code_anchors"];
+      if (rawCodeAnchors !== undefined) {
+        if (!Array.isArray(rawCodeAnchors) || !rawCodeAnchors.every((a) => typeof a === "string")) {
+          return err({
+            code: "VALIDATION_ERROR",
+            field: "extra.code_anchors",
+            message: "extra.code_anchors must be an array of strings",
+            value: rawCodeAnchors,
+          });
+        }
+        for (const raw of rawCodeAnchors as string[]) {
+          const parsedResult = parseCodeAnchor(raw);
+          if (!parsedResult.ok) return parsedResult;
+        }
       }
     }
 
