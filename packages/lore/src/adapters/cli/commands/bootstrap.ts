@@ -24,15 +24,20 @@ import type { BootstrapReport } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 import { buildStalenessFlowDeps, listFreshStalenessEscalates } from "../../../flows/staleness-flow.js";
+import { buildListSpecs, countArmedSpecs } from "../../../flows/drift-flow.js";
 
 /**
- * `BootstrapReport` widened with the SPEC-044 §Design Decisions D14 count — computed
- * OUTSIDE `SessionService.bootstrap` (a service file outside this task's file anchors)
- * via the SAME `listFreshStalenessEscalates` derivation `lore review --staleness --list`
- * uses, then spliced onto the report's `corpus` block by this adapter before rendering.
+ * `BootstrapReport` widened with the SPEC-044 §Design Decisions D14
+ * `open_stale_candidates` count AND the SPEC-045 §Design Decisions D5, D7
+ * `code_anchor_specs` count — both computed OUTSIDE `SessionService.bootstrap` (a
+ * service file outside this task's file anchors) via the SAME derivation helpers
+ * `lore review --staleness --list` / `lore status`'s plain-text branch use, then
+ * spliced onto the report's `corpus` block by this adapter before rendering.
+ * `code_anchor_specs` is a store-only declared-anchor count — ZERO filesystem
+ * probing, unlike `lore status --check-drift`.
  */
 type BootstrapReportWithStaleness = BootstrapReport & {
-  corpus: BootstrapReport["corpus"] & { open_stale_candidates: number };
+  corpus: BootstrapReport["corpus"] & { open_stale_candidates: number; code_anchor_specs: number };
 };
 
 /**
@@ -41,8 +46,9 @@ type BootstrapReportWithStaleness = BootstrapReport & {
  * time-derived field is already computed by `SessionService.bootstrap`).
  *
  * @param report - A `BootstrapReport` from `SessionService.bootstrap`, widened with
- *   `corpus.open_stale_candidates` (SPEC-044 §Design Decisions D14) by this command's
- *   `run()` before rendering.
+ *   `corpus.open_stale_candidates` (SPEC-044 §Design Decisions D14) and
+ *   `corpus.code_anchor_specs` (SPEC-045 §Design Decisions D5, D7) by this
+ *   command's `run()` before rendering.
  * @param by - The actor identity `bootstrap` was called with (for the header line).
  * @returns Multi-line text block ready for `console.log`.
  */
@@ -123,6 +129,9 @@ export function formatBootstrapReport(report: BootstrapReportWithStaleness, by: 
     `Corpus: ${report.corpus.total_docs} docs, last updated ${report.corpus.last_updated ?? "(never)"}` +
       (report.corpus.open_stale_candidates > 0
         ? `, ${report.corpus.open_stale_candidates} open stale candidate(s)`
+        : "") +
+      (report.corpus.code_anchor_specs > 0
+        ? `, ${report.corpus.code_anchor_specs} spec(s) declare code anchors`
         : ""),
   );
 
@@ -173,9 +182,24 @@ export default defineCommand({
         process.exitCode = exitCode(staleListResult.error);
         return;
       }
+
+      // SPEC-045 §Design Decisions D5, D7 — store-only "declared code_anchors" count,
+      // ZERO filesystem probing (same shared helper `lore status`'s plain-text
+      // branch uses).
+      const armedSpecsResult = await countArmedSpecs(buildListSpecs(app));
+      if (!armedSpecsResult.ok) {
+        process.stderr.write(formatError(armedSpecsResult.error) + "\n");
+        process.exitCode = exitCode(armedSpecsResult.error);
+        return;
+      }
+
       const reportWithStaleness: BootstrapReportWithStaleness = {
         ...result.value,
-        corpus: { ...result.value.corpus, open_stale_candidates: staleListResult.value.length },
+        corpus: {
+          ...result.value.corpus,
+          open_stale_candidates: staleListResult.value.length,
+          code_anchor_specs: armedSpecsResult.value,
+        },
       };
 
       if (args.json) {
