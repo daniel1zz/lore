@@ -964,6 +964,34 @@
     "01KX7RP24EQP23FZCDR9RCQBZE": {
       "human_id": "KN-051",
       "file_path": "docs/requirements/knowledge/KN-051-handoff-agent-main-orchestrator.md"
+    },
+    "01KXAK50QPQ8SXN9D1YFXHNVKW": {
+      "human_id": "PLAN-028",
+      "file_path": "docs/requirements/plan/PLAN-028-spec-044-implementation-staleness-probes.md"
+    },
+    "01KXAWDBHCPZ3T5GVAHZ42ZR9N": {
+      "human_id": "KN-052",
+      "file_path": "docs/requirements/knowledge/KN-052-retro-spec-044-staleness-probes-h2-watchdog-stall.md"
+    },
+    "01KXAWBZDD6PZT9MM7JRZXK6FR": {
+      "human_id": "KN-053",
+      "file_path": "docs/requirements/knowledge/KN-053-assessment-spec-044-implementation-staleness-probe.md"
+    },
+    "01KXAK65CGFFTGKVNAF01RDB6J": {
+      "human_id": "TASK-114",
+      "file_path": "docs/requirements/task/TASK-114-t2-adapters-docs-cli-review-staleness-list-fail-on.md"
+    },
+    "01KXAK5KQRA52KGPM176AJF188": {
+      "human_id": "TASK-115",
+      "file_path": "docs/requirements/task/TASK-115-t1-core-store-services-staleness-pure-layer-migrat.md"
+    },
+    "01KXAJ9Z74AB87WMX307VCB5WQ": {
+      "human_id": "SPEC-048",
+      "file_path": "docs/requirements/spec/SPEC-048-spec-044-memory-hygiene-part-2-staleness-probes-h2.md"
+    },
+    "01KX832FK5YZR6P2768YSEXDN3": {
+      "human_id": "KN-054",
+      "file_path": "docs/requirements/knowledge/KN-054-handoff-agent-main-orchestrator.md"
     }
   }
 }
