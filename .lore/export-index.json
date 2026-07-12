@@ -992,6 +992,30 @@
     "01KX832FK5YZR6P2768YSEXDN3": {
       "human_id": "KN-054",
       "file_path": "docs/requirements/knowledge/KN-054-handoff-agent-main-orchestrator.md"
+    },
+    "01KXB0WEW6EPXQP6YT9GZJB2T1": {
+      "human_id": "PLAN-029",
+      "file_path": "docs/requirements/plan/PLAN-029-spec-045-implementation-doc-code-drift-oracle.md"
+    },
+    "01KXB7QXKBJEHQGWVGHZ5HHJGA": {
+      "human_id": "KN-055",
+      "file_path": "docs/requirements/knowledge/KN-055-retro-spec-045-drift-oracle-h3-memory-hygiene-tril.md"
+    },
+    "01KXB7JF3W999CE7AZ5YN59P5G": {
+      "human_id": "KN-056",
+      "file_path": "docs/requirements/knowledge/KN-056-assessment-spec-045-implementation-doc-code-drift.md"
+    },
+    "01KXB10VZQNF9HMEXE66NW1JCP": {
+      "human_id": "TASK-116",
+      "file_path": "docs/requirements/task/TASK-116-t2-adapters-docs-status-ts-restructure-with-check.md"
+    },
+    "01KXB0X3VMNE4VZKK1AS34TTMP": {
+      "human_id": "TASK-117",
+      "file_path": "docs/requirements/task/TASK-117-t1-core-service-code-anchors-pure-layer-six-drift.md"
+    },
+    "01KXB08CEE6EQB9CGQMQN5QFTA": {
+      "human_id": "SPEC-049",
+      "file_path": "docs/requirements/spec/SPEC-049-spec-045-memory-hygiene-part-3-doc-code-drift-orac.md"
     }
   }
 }

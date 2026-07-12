@@ -91,6 +91,7 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
+- [spec] SPEC-045 — Memory hygiene part 3: doc-code drift oracle (H3) (approved)
 - [spec] SPEC-044 — Memory hygiene part 2: staleness probes (H2) (approved)
 - [spec] SPEC-043 — Memory hygiene part 1: bi-temporal invalidation (H1) (approved)
 - [spec] SPEC-042 — Session layer part 2: session registry + file-anchor claim safety (S3) (approved)

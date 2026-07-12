@@ -6,10 +6,15 @@ title: "Write-spec rules (gate feeding source)"
 status: approved
 priority: medium
 created: 2026-07-08
-updated: 2026-07-08
+updated: 2026-07-12
 tags: []
 links:
   - {id: SPEC-040, type: governs}
+  - {id: SPEC-045, type: governs}
+  - {id: SPEC-046, type: governs}
+  - {id: SPEC-047, type: governs}
+  - {id: SPEC-048, type: governs}
+  - {id: SPEC-049, type: governs}
 ---
 ## Overview
 
@@ -35,6 +40,9 @@ these rules.
    acceptance criteria with `lore ac add <spec> <id> --statement <s> --mode <script|ai|human>`
    rather than only prose under `## Acceptance Criteria` — structured ACs are what
    `lore verify` / `lore assess` can actually execute and score against.
+6. **Optional code anchors.** Specs MAY declare code anchors —
+   `lore create spec --code-anchor <path[#Symbol]>` / `lore anchor add <spec>` —
+   verified by `lore status --check-drift` (SPEC-045).
 
 ## Scope
 
