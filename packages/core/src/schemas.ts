@@ -350,12 +350,23 @@ export const prdExtraSchema = z.record(z.unknown());
  *   to `specAcceptanceCriteriaSchema` (acceptance.ts) — max 50 entries, unique
  *   `id`. Written exclusively via `lore ac add/rm` (`AcService`, SPEC-038 §6),
  *   never here directly; this schema only gates the shape at create/set time.
- * Source: SPEC-032 §3.1; SPEC-038 §3, §7 D1
+ * @invariant `code_anchors` is SHAPE-ONLY here (a bare array of strings, no
+ *   `.max()`/per-entry grammar) — the per-entry `path[#Symbol]` grammar
+ *   (SPEC-045 §Design Decisions D1) lives EXCLUSIVELY in the shared pure
+ *   `parseCodeAnchor` (`@lore/core`, code-anchors.ts), run at every write seam
+ *   (`CorpusService._createImpl`/`set`, `DriftCheckService.addCodeAnchors/
+ *   removeCodeAnchors/setCodeAnchors`) — never re-derived here. Same
+ *   permissive-shape rationale as `taskExtraSchema.file_anchors` above: keeping
+ *   this field unbounded at the Zod layer means a grammar-invalid entry is
+ *   reported by the dedicated per-entry check (which names the offending
+ *   anchor), not collapsed into a generic top-level parse failure.
+ * Source: SPEC-032 §3.1; SPEC-038 §3, §7 D1; SPEC-045 §Design Decisions D1, D6a
  */
 export const specExtraSchema = z
   .object({
     spec_kind: z.enum(SPEC_KINDS).optional(),
     acceptance_criteria: specAcceptanceCriteriaSchema.optional(),
+    code_anchors: z.array(z.string()).optional(),
   })
   .passthrough();
 

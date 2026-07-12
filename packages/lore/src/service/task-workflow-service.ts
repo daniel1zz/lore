@@ -204,6 +204,34 @@ function ageMinutesBetween(nowIso: string, atIso: string): number {
   return Math.floor((new Date(nowIso).getTime() - new Date(atIso).getTime()) / 60_000);
 }
 
+/**
+ * Rejects any candidate task anchor containing `#` — the SPEC code-anchor grammar's
+ * delimiter (`path[#Symbol]`, SPEC-045 §Design Decisions D1/D6) is not valid on a
+ * TASK's `file_anchors`, which is always a plain repo-relative path/dir scope.
+ * Applied at the task-anchor AUTHORING seams that can introduce NEW state
+ * (`setAnchors`/`addAnchors` — CLI `--anchor` at create time is validated by
+ * `CorpusService._createImpl`'s existing file_anchors branch, which has no `#`
+ * either since `normalizeFileAnchors` never special-cases it; this guard is the
+ * dedicated check named by SPEC-045 D6 for the two RMW mutation verbs). Deliberately
+ * NOT applied to `removeAnchors` — a removal candidate never creates new stored
+ * state, and a stored legacy `#`-carrying entry (however it got there) must stay
+ * removable.
+ */
+function rejectHashInTaskAnchors(anchors: string[]): Result<void, LoreError> {
+  const offending = anchors.find((a) => a.includes("#"));
+  if (offending !== undefined) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "file_anchors",
+      message:
+        `task file_anchors must not contain "#" — that is the SPEC code-anchor grammar ` +
+        `(path[#Symbol], SPEC-045), not valid on a task's file_anchors: "${offending}"`,
+      value: offending,
+    });
+  }
+  return ok(undefined);
+}
+
 // ─── TaskWorkflowService ───────────────────────────────────────────────────
 
 export class TaskWorkflowService {
@@ -658,6 +686,9 @@ export class TaskWorkflowService {
     if (!taskResult.ok) return taskResult;
     const task = taskResult.value;
 
+    const hashRejectResult = rejectHashInTaskAnchors(anchors);
+    if (!hashRejectResult.ok) return hashRejectResult;
+
     const normalizedResult = normalizeFileAnchors(anchors);
     if (!normalizedResult.ok) return normalizedResult;
 
@@ -697,6 +728,9 @@ export class TaskWorkflowService {
     const taskResult = await this.resolveTask(idOrSlug);
     if (!taskResult.ok) return taskResult;
     const task = taskResult.value;
+
+    const hashRejectResult = rejectHashInTaskAnchors(anchors);
+    if (!hashRejectResult.ok) return hashRejectResult;
 
     const existing = extractFileAnchors(task);
     const normalizedResult = normalizeFileAnchors([...existing, ...anchors]);
