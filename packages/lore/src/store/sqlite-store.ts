@@ -10,6 +10,7 @@ import { MIGRATION_001_SQL } from "./migrations/migration-001.js";
 import { MIGRATION_002_SQL } from "./migrations/migration-002.js";
 import { MIGRATION_003_SQL } from "./migrations/migration-003.js";
 import { MIGRATION_004_SQL } from "./migrations/migration-004.js";
+import { MIGRATION_005_SQL } from "./migrations/migration-005.js";
 import type {
   AuditEntry,
   CalibrationRecord,
@@ -18,6 +19,7 @@ import type {
   LinkRecord,
   LinkType,
   ReviewJudgment,
+  ReviewJudgmentKind,
   Slug,
   VersionRecord,
 } from "@lore/core";
@@ -133,6 +135,23 @@ export class SQLiteStore implements StoreInterface {
           // IMMEDIATE` never ran because the syntax error was in the BEGIN
           // statement itself) — safe to ignore; `error` below is what the
           // caller needs to see.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 5) {
+      // reason: mirrors migration-004's catch/ROLLBACK wrapper (see migration-005.ts's
+      // own JSDoc @invariant) — this migration is also multiple DDL statements wrapped
+      // in one BEGIN/COMMIT, and bun:sqlite's db.exec() does not auto-rollback a caught
+      // mid-string throw.
+      try {
+        this.db.exec(MIGRATION_005_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-004 — safe to ignore, see above.
         }
         throw error;
       }
@@ -524,6 +543,25 @@ export class SQLiteStore implements StoreInterface {
     }
   }
 
+  async countLinksByToIds(toIds: DocId[]): Promise<Result<Map<DocId, number>, LoreError>> {
+    const counts = new Map<DocId, number>();
+    if (toIds.length === 0) return ok(counts);
+    try {
+      const placeholders = toIds.map(() => "?").join(", ");
+      const rows = this.db
+        .prepare(
+          `SELECT to_id, COUNT(*) AS cnt FROM links WHERE to_id IN (${placeholders}) GROUP BY to_id`,
+        )
+        .all(...(toIds as SQLQueryBindings[])) as { to_id: string; cnt: number | bigint }[];
+      for (const row of rows) {
+        counts.set(row.to_id, Number(row.cnt));
+      }
+      return ok(counts);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
   // ── Search ────────────────────────────────────────────────────────────────
 
   async search(
@@ -742,8 +780,8 @@ export class SQLiteStore implements StoreInterface {
           `INSERT INTO review_judgments
              (id, doc_id, doc_version, decision, confidence, reasons, checks,
               blocking_questions, judge_provider, judge_model, judge_prompt_version,
-              created_at, created_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              kind, superseded_candidate, created_at, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           judgment.id,
@@ -757,6 +795,8 @@ export class SQLiteStore implements StoreInterface {
           judgment.judge.provider,
           judgment.judge.model,
           judgment.judge.prompt_version,
+          judgment.kind ?? "review",
+          judgment.superseded_candidate !== undefined ? JSON.stringify(judgment.superseded_candidate) : null,
           judgment.created_at,
           judgment.created_by,
         );
@@ -766,27 +806,67 @@ export class SQLiteStore implements StoreInterface {
     }
   }
 
-  async findJudgments(docId: DocId): Promise<Result<ReviewJudgment[], LoreError>> {
+  async findJudgments(docId: DocId, kind?: ReviewJudgmentKind): Promise<Result<ReviewJudgment[], LoreError>> {
     try {
-      const rows = this.db
-        .prepare(
-          "SELECT * FROM review_judgments WHERE doc_id = ? ORDER BY created_at DESC",
-        )
-        .all(docId) as JudgmentRow[];
+      const rows = (
+        kind !== undefined
+          ? this.db
+              .prepare("SELECT * FROM review_judgments WHERE doc_id = ? AND kind = ? ORDER BY created_at DESC")
+              .all(docId, kind)
+          : this.db
+              .prepare("SELECT * FROM review_judgments WHERE doc_id = ? ORDER BY created_at DESC")
+              .all(docId)
+      ) as JudgmentRow[];
       return ok(rows.map(rowToReviewJudgment));
     } catch (e) {
       return wrapStoreError(e);
     }
   }
 
-  async latestJudgment(docId: DocId): Promise<Result<ReviewJudgment | null, LoreError>> {
+  async latestJudgment(docId: DocId, kind?: ReviewJudgmentKind): Promise<Result<ReviewJudgment | null, LoreError>> {
     try {
-      const row = this.db
-        .prepare(
-          "SELECT * FROM review_judgments WHERE doc_id = ? ORDER BY created_at DESC LIMIT 1",
-        )
-        .get(docId) as JudgmentRow | null;
+      const row = (
+        kind !== undefined
+          ? this.db
+              .prepare(
+                "SELECT * FROM review_judgments WHERE doc_id = ? AND kind = ? ORDER BY created_at DESC LIMIT 1",
+              )
+              .get(docId, kind)
+          : this.db
+              .prepare("SELECT * FROM review_judgments WHERE doc_id = ? ORDER BY created_at DESC LIMIT 1")
+              .get(docId)
+      ) as JudgmentRow | null;
       return ok(row ? rowToReviewJudgment(row) : null);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async latestJudgmentsByDocIds(
+    docIds: DocId[],
+    kind: ReviewJudgmentKind,
+  ): Promise<Result<Map<DocId, ReviewJudgment>, LoreError>> {
+    const result = new Map<DocId, ReviewJudgment>();
+    if (docIds.length === 0) return ok(result);
+    try {
+      const placeholders = docIds.map(() => "?").join(", ");
+      const rows = this.db
+        .prepare(
+          `SELECT rj.* FROM review_judgments rj
+           INNER JOIN (
+             SELECT doc_id, MAX(created_at) AS max_created_at
+             FROM review_judgments
+             WHERE doc_id IN (${placeholders}) AND kind = ?
+             GROUP BY doc_id
+           ) latest ON rj.doc_id = latest.doc_id AND rj.created_at = latest.max_created_at
+           WHERE rj.kind = ?`,
+        )
+        .all(...(docIds as SQLQueryBindings[]), kind, kind) as JudgmentRow[];
+      for (const row of rows) {
+        const judgment = rowToReviewJudgment(row);
+        if (!result.has(judgment.doc_id)) result.set(judgment.doc_id, judgment);
+      }
+      return ok(result);
     } catch (e) {
       return wrapStoreError(e);
     }
@@ -842,7 +922,7 @@ export class SQLiteStore implements StoreInterface {
 
       const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
       const sql = `
-        SELECT c.*, j.judge_prompt_version AS judge_prompt_version
+        SELECT c.*, j.judge_prompt_version AS judge_prompt_version, j.kind AS judge_kind
         FROM calibration_records c
         JOIN review_judgments j ON j.id = c.judgment_id
         ${whereClause}

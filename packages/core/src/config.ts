@@ -167,6 +167,23 @@ const WorkflowConfigSchema = z
     handoff_ttl_minutes: z.number().int().positive().default(10080),
     /** Per-checkpoint `lore gate` enable/disable overrides. Absent → all enabled. */
     gates: z.record(z.string(), GateCheckpointConfigSchema).optional(),
+    /**
+     * Staleness-probe behavioral knobs (SPEC-044 §Design Decisions D8) — the DEFAULT
+     * batch size and minimum-age threshold `lore review --staleness` applies when the
+     * corresponding CLI flags (`--limit`/`--min-age-days`) are omitted. Nested under
+     * `workflow` (not `ai`) because these gate CANDIDATE SELECTION (a corpus-shape
+     * concern, like `claim_ttl_minutes`), not prompt content — mirrors the `ai.staleness.*`
+     * / `workflow.staleness.*` split named explicitly in D8.
+     */
+    staleness: z
+      .object({
+        /** Default `--limit` when omitted. Default: 5. */
+        default_limit: z.number().int().positive().default(5),
+        /** Default `--min-age-days` when omitted (INCLUSIVE boundary, D1). Default: 14. */
+        min_age_days: z.number().int().nonnegative().default(14),
+      })
+      .strict()
+      .default({}),
   })
   .strict();
 
@@ -385,6 +402,26 @@ export function resolveAuditVerifySince(config: LoreConfig | undefined): string 
  */
 export function resolveVerifyDefaultTimeoutMs(config: LoreConfig | undefined): number {
   return (config?.verify ?? VerifyConfigSchema.parse({})).default_timeout_ms;
+}
+
+/**
+ * Resolve the effective staleness-probe defaults (`{default_limit, min_age_days}`) from
+ * an optional LoreConfig. Mirrors {@link resolveClaimTtlMinutes} — absence of the whole
+ * config or the `workflow` section (or `workflow.staleness` specifically) falls back to
+ * the schema defaults (5 / 14).
+ *
+ * @param config - Parsed LoreConfig, or undefined when no config file was loaded
+ * @returns `{default_limit, min_age_days}` — CLI `--limit`/`--min-age-days` override
+ *   these per-invocation only; this function never reads the CLI flags itself
+ * @example
+ *   resolveStalenessDefaults(undefined) // => { default_limit: 5, min_age_days: 14 }
+ *   resolveStalenessDefaults({ ..., workflow: { staleness: { min_age_days: 30 } } })
+ *   // => { default_limit: 5, min_age_days: 30 }
+ */
+export function resolveStalenessDefaults(
+  config: LoreConfig | undefined,
+): { default_limit: number; min_age_days: number } {
+  return (config?.workflow ?? WorkflowConfigSchema.parse({})).staleness;
 }
 
 // ─── Pure Parse Helpers ────────────────────────────────────────────────────

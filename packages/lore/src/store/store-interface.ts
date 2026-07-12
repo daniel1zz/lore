@@ -15,6 +15,7 @@ import type {
   LinkRecord,
   LinkType,
   ReviewJudgment,
+  ReviewJudgmentKind,
   SearchHit,
   Slug,
   VersionRecord,
@@ -100,6 +101,14 @@ export interface CalibrationWindowFilter {
  */
 export type CalibrationRecordWithPromptVersion = CalibrationRecord & {
   judge_prompt_version: string;
+  /**
+   * `kind` of the judgment this calibration record is FK'd to (SPEC-044 D12/AC-SP-11) —
+   * projected by the SAME unconditional join that already projects `judge_prompt_version`.
+   * `JudgmentService.computeCalibrationStats` groups by `(doc_type, judge_prompt_version,
+   * judge_kind)` so review and staleness calibrations never pool into one Wilson bound
+   * even when both prompt versions are the literal `"v1"` (review S5).
+   */
+  judge_kind: ReviewJudgmentKind;
 };
 
 // ─── Interface ─────────────────────────────────────────────────────────────
@@ -190,6 +199,20 @@ export interface StoreInterface {
     linkType: LinkType,
   ): Promise<Result<LinkRecord[], LoreError>>;
 
+  /**
+   * Batch-count ALL incoming link rows (every link type — unlike {@link findLinksByToIds},
+   * which is single-`linkType`-scoped and cannot express this) whose `to_id` is in `toIds`,
+   * in ONE round trip. The staleness-probe pure layer's `in_degree` input (SPEC-044 D1;
+   * `findLinksByToIds` cannot express an all-link-types count — review S1).
+   *
+   * @param toIds - Target doc ids to count incoming links for
+   * @returns Map keyed by doc id; a doc id with ZERO incoming links of any type is
+   *   ABSENT from the map (never present with value 0) — callers default via `?? 0`.
+   *   `ok(new Map())` immediately when `toIds` is empty (no query issued).
+   * @see SPEC-044 §Design Decisions D1
+   */
+  countLinksByToIds(toIds: DocId[]): Promise<Result<Map<DocId, number>, LoreError>>;
+
   // ── Search ─────────────────────────────────────────────────────────────
 
   /**
@@ -245,11 +268,47 @@ export interface StoreInterface {
    */
   insertJudgment(judgment: ReviewJudgment): Promise<Result<void, LoreError>>;
 
-  /** All judgments for a doc, newest first (`created_at DESC`). */
-  findJudgments(docId: DocId): Promise<Result<ReviewJudgment[], LoreError>>;
+  /**
+   * All judgments for a doc, newest first (`created_at DESC`).
+   *
+   * @param kind - When provided, only rows whose `kind` matches (SPEC-044 D3) —
+   *   omitted rows read as `'review'` via `??`, never strict equality (S10). When
+   *   OMITTED entirely, returns judgments of ANY kind (the pre-SPEC-044 behavior) —
+   *   `JudgmentService.listFor` is what defaults this to `'review'` for every existing
+   *   caller (D3); the store layer itself applies no default.
+   */
+  findJudgments(docId: DocId, kind?: ReviewJudgmentKind): Promise<Result<ReviewJudgment[], LoreError>>;
 
-  /** Most recent judgment for a doc, or `null` if none exists yet. */
-  latestJudgment(docId: DocId): Promise<Result<ReviewJudgment | null, LoreError>>;
+  /**
+   * Most recent judgment for a doc, or `null` if none exists yet.
+   *
+   * @param kind - Same optional kind filter as {@link findJudgments} — omitted means
+   *   "any kind" at the store layer; `JudgmentService.latestFor` defaults it to
+   *   `'review'`. Without this filter, a staleness "holds" row (persisted
+   *   `decision: 'approve'`) could become a doc's latest judgment and masquerade as a
+   *   real review approval in `lore pending` (review S2).
+   */
+  latestJudgment(docId: DocId, kind?: ReviewJudgmentKind): Promise<Result<ReviewJudgment | null, LoreError>>;
+
+  /**
+   * Batch-fetch each doc's LATEST judgment of a given kind, in ONE round trip — the
+   * staleness-probe pure layer's `latest_holds_probe_at` input needs this per candidate
+   * (SPEC-044 D2); an N+1 per-candidate `latestJudgment` call is explicitly rejected
+   * (review T6).
+   *
+   * @param docIds - Doc ids to fetch the latest matching-kind judgment for
+   * @param kind - REQUIRED (unlike the single-doc methods above) — every real caller
+   *   (StalenessProbeService) always wants ONE specific kind for this batch shape;
+   *   there is no legitimate "any kind" batch use case today
+   * @returns Map keyed by doc id; a doc with NO judgment of that kind is ABSENT from
+   *   the map (never present with `null`). `ok(new Map())` immediately when `docIds`
+   *   is empty (no query issued).
+   * @see SPEC-044 §Design Decisions D2
+   */
+  latestJudgmentsByDocIds(
+    docIds: DocId[],
+    kind: ReviewJudgmentKind,
+  ): Promise<Result<Map<DocId, ReviewJudgment>, LoreError>>;
 
   // ── Calibration Records ────────────────────────────────────────────────
 

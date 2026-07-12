@@ -17,6 +17,7 @@ import { MIGRATION_001_SQL } from "./migrations/migration-001.js";
 import { MIGRATION_002_SQL } from "./migrations/migration-002.js";
 import { MIGRATION_003_SQL } from "./migrations/migration-003.js";
 import { MIGRATION_004_SQL } from "./migrations/migration-004.js";
+import { MIGRATION_005_SQL } from "./migrations/migration-005.js";
 import type {
   AuditEntry,
   CalibrationRecord,
@@ -25,6 +26,7 @@ import type {
   LinkRecord,
   LinkType,
   ReviewJudgment,
+  ReviewJudgmentKind,
   Slug,
   VersionRecord,
 } from "@lore/core";
@@ -189,6 +191,8 @@ function libsqlRowToJudgmentRow(row: Row): JudgmentRow {
     judge_provider: rowStr(row, "judge_provider"),
     judge_model: rowStr(row, "judge_model"),
     judge_prompt_version: rowStr(row, "judge_prompt_version"),
+    kind: rowStr(row, "kind") || "review",
+    superseded_candidate: rowStrOrNull(row, "superseded_candidate"),
     created_at: rowStr(row, "created_at"),
     created_by: rowStr(row, "created_by"),
   };
@@ -196,8 +200,8 @@ function libsqlRowToJudgmentRow(row: Row): JudgmentRow {
 
 /**
  * Maps a `calibration_records` ⋈ `review_judgments` row (queryCalibrationWindow's
- * now-unconditional join projects `judge_prompt_version` onto every row) to
- * {@link CalibrationRowWithPromptVersion}.
+ * now-unconditional join projects `judge_prompt_version` AND `judge_kind` onto every
+ * row, SPEC-044 D12/AC-SP-11) to {@link CalibrationRowWithPromptVersion}.
  */
 function libsqlRowToCalibrationRowWithPromptVersion(row: Row): CalibrationRowWithPromptVersion {
   return {
@@ -210,6 +214,7 @@ function libsqlRowToCalibrationRowWithPromptVersion(row: Row): CalibrationRowWit
     actor: rowStr(row, "actor"),
     created_at: rowStr(row, "created_at"),
     judge_prompt_version: rowStr(row, "judge_prompt_version"),
+    judge_kind: rowStr(row, "judge_kind") || "review",
   };
 }
 
@@ -274,6 +279,10 @@ export class TursoStore implements StoreInterface {
 
       if (currentVersion < 4) {
         await this.client.executeMultiple(MIGRATION_004_SQL);
+      }
+
+      if (currentVersion < 5) {
+        await this.client.executeMultiple(MIGRATION_005_SQL);
       }
     })();
 
@@ -685,6 +694,25 @@ export class TursoStore implements StoreInterface {
     }
   }
 
+  async countLinksByToIds(toIds: DocId[]): Promise<Result<Map<DocId, number>, LoreError>> {
+    const counts = new Map<DocId, number>();
+    if (toIds.length === 0) return ok(counts);
+    try {
+      await this.ensureReady();
+      const placeholders = toIds.map(() => "?").join(", ");
+      const rs = await this.client.execute({
+        sql: `SELECT to_id, COUNT(*) AS cnt FROM links WHERE to_id IN (${placeholders}) GROUP BY to_id`,
+        args: [...(toIds as InValue[])],
+      });
+      for (const row of rs.rows) {
+        counts.set(rowStr(row, "to_id"), rowNum(row, "cnt"));
+      }
+      return ok(counts);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
   // ── Search ────────────────────────────────────────────────────────────
 
   async search(
@@ -897,8 +925,8 @@ export class TursoStore implements StoreInterface {
         sql: `INSERT INTO review_judgments
                (id, doc_id, doc_version, decision, confidence, reasons, checks,
                 blocking_questions, judge_provider, judge_model, judge_prompt_version,
-                created_at, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                kind, superseded_candidate, created_at, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [
           judgment.id,
           judgment.doc_id,
@@ -911,6 +939,8 @@ export class TursoStore implements StoreInterface {
           judgment.judge.provider,
           judgment.judge.model,
           judgment.judge.prompt_version,
+          judgment.kind ?? "review",
+          judgment.superseded_candidate !== undefined ? JSON.stringify(judgment.superseded_candidate) : null,
           judgment.created_at,
           judgment.created_by,
         ] as InValue[],
@@ -921,28 +951,73 @@ export class TursoStore implements StoreInterface {
     }
   }
 
-  async findJudgments(docId: DocId): Promise<Result<ReviewJudgment[], LoreError>> {
+  async findJudgments(docId: DocId, kind?: ReviewJudgmentKind): Promise<Result<ReviewJudgment[], LoreError>> {
     try {
       await this.ensureReady();
-      const rs = await this.client.execute({
-        sql: "SELECT * FROM review_judgments WHERE doc_id = ? ORDER BY created_at DESC",
-        args: [docId],
-      });
+      const rs =
+        kind !== undefined
+          ? await this.client.execute({
+              sql: "SELECT * FROM review_judgments WHERE doc_id = ? AND kind = ? ORDER BY created_at DESC",
+              args: [docId, kind],
+            })
+          : await this.client.execute({
+              sql: "SELECT * FROM review_judgments WHERE doc_id = ? ORDER BY created_at DESC",
+              args: [docId],
+            });
       return ok(rs.rows.map((row) => rowToReviewJudgment(libsqlRowToJudgmentRow(row))));
     } catch (e) {
       return wrapStoreError(e);
     }
   }
 
-  async latestJudgment(docId: DocId): Promise<Result<ReviewJudgment | null, LoreError>> {
+  async latestJudgment(
+    docId: DocId,
+    kind?: ReviewJudgmentKind,
+  ): Promise<Result<ReviewJudgment | null, LoreError>> {
     try {
       await this.ensureReady();
-      const rs = await this.client.execute({
-        sql: "SELECT * FROM review_judgments WHERE doc_id = ? ORDER BY created_at DESC LIMIT 1",
-        args: [docId],
-      });
+      const rs =
+        kind !== undefined
+          ? await this.client.execute({
+              sql: "SELECT * FROM review_judgments WHERE doc_id = ? AND kind = ? ORDER BY created_at DESC LIMIT 1",
+              args: [docId, kind],
+            })
+          : await this.client.execute({
+              sql: "SELECT * FROM review_judgments WHERE doc_id = ? ORDER BY created_at DESC LIMIT 1",
+              args: [docId],
+            });
       const row = rs.rows[0];
       return ok(row ? rowToReviewJudgment(libsqlRowToJudgmentRow(row)) : null);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async latestJudgmentsByDocIds(
+    docIds: DocId[],
+    kind: ReviewJudgmentKind,
+  ): Promise<Result<Map<DocId, ReviewJudgment>, LoreError>> {
+    const result = new Map<DocId, ReviewJudgment>();
+    if (docIds.length === 0) return ok(result);
+    try {
+      await this.ensureReady();
+      const placeholders = docIds.map(() => "?").join(", ");
+      const rs = await this.client.execute({
+        sql: `SELECT rj.* FROM review_judgments rj
+              INNER JOIN (
+                SELECT doc_id, MAX(created_at) AS max_created_at
+                FROM review_judgments
+                WHERE doc_id IN (${placeholders}) AND kind = ?
+                GROUP BY doc_id
+              ) latest ON rj.doc_id = latest.doc_id AND rj.created_at = latest.max_created_at
+              WHERE rj.kind = ?`,
+        args: [...(docIds as InValue[]), kind, kind],
+      });
+      for (const row of rs.rows) {
+        const judgment = rowToReviewJudgment(libsqlRowToJudgmentRow(row));
+        if (!result.has(judgment.doc_id)) result.set(judgment.doc_id, judgment);
+      }
+      return ok(result);
     } catch (e) {
       return wrapStoreError(e);
     }
@@ -1000,7 +1075,7 @@ export class TursoStore implements StoreInterface {
 
       const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
       const sql = `
-        SELECT c.*, j.judge_prompt_version AS judge_prompt_version
+        SELECT c.*, j.judge_prompt_version AS judge_prompt_version, j.kind AS judge_kind
         FROM calibration_records c
         JOIN review_judgments j ON j.id = c.judgment_id
         ${whereClause}
