@@ -166,6 +166,10 @@ export class JudgmentService {
     const createdAt = new Date().toISOString();
     const candidate = {
       ...newJudgment,
+      // reason: reviewJudgmentSchema keeps `kind` OPTIONAL (not `.default()`, see
+      // review-judgment.ts's module @invariant) so this is the ONE place that resolves
+      // "no kind" -> "review" explicitly, before persisting (SPEC-044 D3).
+      kind: newJudgment.kind ?? "review",
       id: ulid(),
       created_at: createdAt,
       created_by: formatJudgeActor(newJudgment.judge),
@@ -174,8 +178,7 @@ export class JudgmentService {
     // reason: defensive re-validation — judgeDoc's/probeStaleness's output is already
     // schema-shaped, but record() is the ONLY method with permission to write
     // review_judgments, so it never trusts a caller-assembled candidate without
-    // re-checking it against the SSOT schema. A candidate with no `kind` at all still
-    // validates (schema `.default("review")`, SPEC-044 D3).
+    // re-checking it against the SSOT schema.
     const parsed = reviewJudgmentSchema.safeParse(candidate);
     if (!parsed.success) {
       const issue = parsed.error.issues[0];

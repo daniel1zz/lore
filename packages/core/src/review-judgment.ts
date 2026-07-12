@@ -39,14 +39,14 @@
  *   - `superseded_candidate` (SPEC-044 D5/D11) is optional on BOTH schemas too — the SAME
  *     field name/shape a regular review judge MAY emit (D11 byproduct) and a staleness
  *     probe's persisted judgment carries (D5) — one concept, one name (review S7).
- *   - `kind` (SPEC-044 D3) is `.default("review")` on `reviewJudgmentSchema` — a candidate
- *     object missing `kind` entirely still validates and persists as `kind: "review"`,
- *     which is what keeps every PRE-SPEC-044 caller (`_finalizeJudgment`, every existing
- *     test fixture building a `NewReviewJudgment`) byte-identical with ZERO required
- *     changes (AC-SP-2 REGRESSION). Because `z.infer` of a `.default()` field is always
- *     non-optional in the OUTPUT type, `NewReviewJudgment` explicitly re-widens `kind`
- *     back to optional (`Omit<..., "kind"> & {kind?: ReviewJudgmentKind}`) rather than
- *     inheriting `ReviewJudgment`'s post-parse-guaranteed-present shape verbatim.
+ *   - `kind` (SPEC-044 D3) is `.optional()` (deliberately NOT `.default()`) on
+ *     `reviewJudgmentSchema` — a candidate object missing `kind` entirely still
+ *     validates, and `ReviewJudgment.kind` stays optional in `z.infer`'s OUTPUT type too
+ *     (a `.default()` would make it REQUIRED in the output type, breaking every
+ *     PRE-SPEC-044 fixture that hand-constructs a `ReviewJudgment`-typed object for a
+ *     direct `store.insertJudgment` bypass call). Every reader treats an absent `kind`
+ *     as `"review"` via `?? "review"` (S10); `JudgmentService._recordImpl` is the ONE
+ *     place that resolves this default explicitly before persisting (AC-SP-2 REGRESSION).
  *   - The kind-conditioned "staleness rows cannot decision='reject'" refinement
  *     (`validateKindDecisionInvariant`) runs BEFORE `validateEscalateInvariant` on
  *     `reviewJudgmentSchema`'s chain — a candidate that violates BOTH (kind='staleness',
@@ -248,10 +248,10 @@ function validateEscalateInvariant(
  *   non-empty blocking_questions) surfaces THIS message as `issues[0]` (review S6).
  */
 function validateKindDecisionInvariant(
-  data: { kind: ReviewJudgmentKind; decision: ReviewDecision },
+  data: { kind?: ReviewJudgmentKind | undefined; decision: ReviewDecision },
   ctx: z.RefinementCtx,
 ): void {
-  if (data.kind === "staleness" && data.decision === "reject") {
+  if ((data.kind ?? "review") === "staleness" && data.decision === "reject") {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       message:
@@ -310,10 +310,17 @@ export const reviewJudgmentSchema = reviewJudgmentBaseShape
     judge: judgeIdentitySchema,
     /**
      * Discriminates a SPEC-034 review judgment from a SPEC-044 staleness-probe verdict.
-     * `.default("review")` — a candidate missing this key entirely still validates and
-     * persists as `kind: "review"` (see module @invariant re: REGRESSION safety).
+     * OPTIONAL (not `.default()`) — a candidate/row missing this key entirely still
+     * validates; every reader treats an absent value as `"review"` via `?? "review"`
+     * (never strict equality, S10). Kept optional (rather than defaulted, which would
+     * make `z.infer`'s OUTPUT type require it) so the pre-existing pattern of
+     * hand-constructing a `ReviewJudgment`-typed fixture object for a direct
+     * `store.insertJudgment` bypass call (skipping this schema entirely) keeps
+     * compiling with zero changes — see module @invariant re: REGRESSION safety.
+     * `JudgmentService._recordImpl` is the ONE place that resolves the default
+     * explicitly (`newJudgment.kind ?? "review"`) before this schema ever sees it.
      */
-    kind: z.enum(REVIEW_JUDGMENT_KINDS).default("review"),
+    kind: z.enum(REVIEW_JUDGMENT_KINDS).optional(),
     created_at: z.string(),
     created_by: z.string(),
   })
@@ -345,12 +352,4 @@ export type ReviewJudgment = z.infer<typeof reviewJudgmentSchema>;
  *   judge: { provider: "claude-cli", model: "claude-cli", prompt_version: "v1" },
  * };
  */
-export type NewReviewJudgment = Omit<ReviewJudgment, "id" | "created_at" | "created_by" | "kind"> & {
-  /**
-   * Optional here (unlike the persisted `ReviewJudgment.kind`, which `z.infer` always
-   * makes non-optional in the OUTPUT type once a `.default()` is involved) — omitting it
-   * relies on `reviewJudgmentSchema`'s `.default("review")` at `JudgmentService.record`'s
-   * defensive re-validation step. See this module's header @invariant.
-   */
-  kind?: ReviewJudgmentKind;
-};
+export type NewReviewJudgment = Omit<ReviewJudgment, "id" | "created_at" | "created_by">;
