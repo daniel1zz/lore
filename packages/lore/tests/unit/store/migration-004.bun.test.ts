@@ -96,7 +96,11 @@ describe("migration-004 (widen links.link_type CHECK to accept 'governs') — at
     const store = new SQLiteStore(":memory:");
     const db = store.getDatabase();
 
-    expect(userVersion(db)).toBe(4);
+    // reason: SPEC-044 T1 added migration-005 (review_judgments.kind +
+    // superseded_candidate) — a FRESH store now runs every migration up to the current
+    // head, so user_version is 5, not 4. migration-004's own concern (the widened
+    // links.link_type CHECK) is asserted below via the 'governs' insert, unaffected.
+    expect(userVersion(db)).toBe(5);
 
     insertDoc(db, "01HGOVERNSSKILL00000001", "skill-doc");
     insertDoc(db, "01HGOVERNSARTIFACT00001", "artifact-doc");

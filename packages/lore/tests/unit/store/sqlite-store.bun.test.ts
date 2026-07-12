@@ -118,6 +118,11 @@ function makeJudgment(docId: string, overrides: Partial<ReviewJudgment> = {}): R
     checks: [{ check: "schema", outcome: "pass" }],
     blocking_questions: [],
     judge: { provider: "claude-cli", model: "claude-sonnet-5", prompt_version: "v1" },
+    // reason: SPEC-044 D3 — explicit here (not omitted-then-`?? "review"`-defaulted) so
+    // this fixture's round-trip through insertJudgment/findJudgments/rowToReviewJudgment
+    // stays byte-identical (the store layer always persists a concrete "review"/
+    // "staleness" string, never leaves the column conceptually "absent").
+    kind: "review",
     created_at: "2026-06-08T10:00:00.000Z",
     created_by: "ai:claude-cli:claude-sonnet-5:v1",
     ...overrides,
