@@ -61,6 +61,7 @@ import { executeVerifySpawnSpec } from "./service/verify-executor.js";
 import { GateEnforcer } from "./service/gate-enforcer.js";
 import { SessionService } from "./service/session-service.js";
 import { ValidityService } from "./service/validity-service.js";
+import { DriftCheckService } from "./service/drift-check-service.js";
 
 export interface App {
   corpusService: CorpusService;
@@ -203,6 +204,22 @@ export interface App {
    * Source: SPEC-043 §Design Decisions D2, §Scope
    */
   validityService?: ValidityService;
+  /**
+   * DriftCheckService — the doc-code drift oracle (`lore status --check-drift`,
+   * `lore anchor add/rm/list` spec-target dispatch, `lore create spec --code-anchor`
+   * grammar consumer at read time). Store-only, no telemetry, no config, same DI
+   * shape as `PhaseService`/`AcService` (SPEC-045 §Design Decisions D4, D6).
+   *
+   * Optional for the same reason `acService`/`verifyRunnerService`/`sessionService`/
+   * `validityService`/`stalenessProbeService` are: pre-existing hand-built App test
+   * stubs (HTTP routes / MCP tools / eval scenarios — outside this task's file
+   * anchors) remain valid without a mechanical touch to every one of them. Always
+   * present in production — both `buildAppFromSqlite` and `buildAppFromTurso` wire
+   * it unconditionally; adapters guard `app.driftCheckService === undefined` before
+   * use (mirrors `lore_bootstrap`'s `app.sessionService === undefined` guard).
+   * Source: SPEC-045 §Design Decisions D4, §Scope
+   */
+  driftCheckService?: DriftCheckService;
   /**
    * Telemetry sink — exposed for dashboard route handlers to emit source-tagged events.
    * Dashboard handlers record { service: "dashboard", source: "dashboard" } events after
@@ -360,6 +377,9 @@ function buildAppFromSqlite(
       latestStalenessJudgment: (docId) => judgmentService.latestFor(docId, "staleness"),
       recordCalibration: judgmentService.recordCalibration.bind(judgmentService),
     }),
+    // reason: DriftCheckService depends only on StoreInterface — stateless, no AI, no
+    // telemetry, same shape as PhaseService/AcService. SPEC-045 §Design Decisions D4.
+    driftCheckService: new DriftCheckService(store),
     // reason: SpecKindService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-032 §3.4.
     specKindService: new SpecKindService(store),
@@ -521,6 +541,9 @@ function buildAppFromTurso(
       latestStalenessJudgment: (docId) => judgmentService.latestFor(docId, "staleness"),
       recordCalibration: judgmentService.recordCalibration.bind(judgmentService),
     }),
+    // reason: DriftCheckService depends only on StoreInterface — stateless, no AI, no
+    // telemetry, same shape as PhaseService/AcService. SPEC-045 §Design Decisions D4.
+    driftCheckService: new DriftCheckService(store),
     // reason: SpecKindService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-032 §3.4.
     specKindService: new SpecKindService(store),

@@ -74,6 +74,7 @@ const TYPE_SPECIFIC_FLAGS: Readonly<Record<string, readonly DocType[]>> = {
   phase: ["task"],
   kind: ["spec"],
   anchor: ["task"],
+  "code-anchor": ["spec"],
 };
 
 /** citty/mri yields a single string for one occurrence of a repeatable flag, an array for ≥2, or `undefined` for zero. Normalizes to a string array. */
@@ -148,6 +149,11 @@ export default defineCommand({
       type: "string",
       description:
         "[task only, repeatable] Declare a file_anchors entry (repo-relative POSIX path; trailing '/' = directory scope). Validated + normalized by CorpusService (SPEC-042 D3).",
+    },
+    "code-anchor": {
+      type: "string",
+      description:
+        "[spec only, repeatable] Declare a code_anchors entry (path[#Symbol] — repo-relative POSIX path, optional #ExportedSymbol). Distinct grammar from task --anchor. Verified by `lore status --check-drift` (SPEC-045).",
     },
     supersedes: {
       type: "string",
@@ -403,6 +409,7 @@ export default defineCommand({
         args.phase,
         args.kind,
         normalizeRepeatable(args.anchor),
+        normalizeRepeatable(args["code-anchor"]),
       );
 
       const createInput = {
@@ -498,7 +505,11 @@ export default defineCommand({
  * default is materialized service-side (CorpusService._createImpl), not here, so an
  * omitted --kind still returns undefined rather than pre-baking the default (SPEC-032 §3.1).
  * An invalid --kind value is passed through unvalidated; createDocInputSchema's superRefine
- * rejects it with VALIDATION_ERROR (exit 4) — see module header.
+ * rejects it with VALIDATION_ERROR (exit 4) — see module header. Also includes
+ * code_anchors ONLY when --code-anchor was passed (repeatable, `path[#Symbol]`
+ * grammar — SPEC-045 D1/D6, a DISTINCT flag from task's `--anchor`); the RAW
+ * strings pass through untouched here too — `CorpusService._createImpl`'s D6a
+ * grammar branch is the single enforcement gate.
  */
 function buildExtra(
   docType: DocType,
@@ -508,6 +519,7 @@ function buildExtra(
   phase?: string,
   specKind?: string,
   anchors?: string[],
+  codeAnchors?: string[],
 ): Record<string, unknown> | undefined {
   if (docType === "adr" && decisionStatus !== undefined) {
     return { decision_status: decisionStatus };
@@ -525,8 +537,11 @@ function buildExtra(
     }
     return extra;
   }
-  if (docType === "spec" && specKind !== undefined) {
-    return { spec_kind: specKind };
+  if (docType === "spec") {
+    const extra: Record<string, unknown> = {};
+    if (specKind !== undefined) extra["spec_kind"] = specKind;
+    if (codeAnchors !== undefined && codeAnchors.length > 0) extra["code_anchors"] = codeAnchors;
+    return Object.keys(extra).length > 0 ? extra : undefined;
   }
   return undefined;
 }

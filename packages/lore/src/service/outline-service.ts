@@ -38,7 +38,16 @@
  * callback (CLI `get`, `ExportDocsService`'s injected `ResolveDocBody`) unchanged — the
  * new capability lives entirely inside this seam's two functions.
  *
- * Source: SPEC-004, SPEC-001 §3.4, SPEC-032 §3.3, SPEC-038 §6
+ * Also splices SPEC-045's declared `spec.extra.code_anchors` list onto the SAME
+ * text-projection seam (§Design Decisions D10): `resolve()` — when called on a
+ * `spec` doc that declares a non-empty `code_anchors` array — synchronously reads
+ * it (no store calls, no filesystem probing; verifying it is `lore status
+ * --check-drift`'s job, never a read verb's), and `renderResolvedToMarkdown()`
+ * appends a `## Code anchors` list after the spliced body. A spec with no
+ * declared anchors takes neither code path — output stays byte-identical to
+ * pre-SPEC-045 behaviour (REGRESSION, AC-DR-6).
+ *
+ * Source: SPEC-004, SPEC-001 §3.4, SPEC-032 §3.3, SPEC-038 §6, SPEC-045 §Design Decisions D10
  */
 
 import type { DocRecord, DocSummary } from "@lore/core";
@@ -103,6 +112,15 @@ export interface ResolvedDoc {
   warnings: ResolutionWarning[];
   /** SPEC-038 §6 — present only for a spec doc with declared acceptance criteria. */
   acceptanceCriteria?: AcceptanceProjection;
+  /**
+   * SPEC-045 §Design Decisions D10 — present only for a `spec` doc with a
+   * non-empty declared `extra.code_anchors` array. Computed synchronously from
+   * `doc.extra` alone (no store calls, no filesystem probing — a live drift
+   * check does NOT belong on a read verb, D10) — a spec with no declared
+   * anchors takes neither this field nor a `renderResolvedToMarkdown` rendering
+   * branch, keeping output byte-identical to pre-SPEC-045 behaviour (REGRESSION).
+   */
+  codeAnchors?: string[];
 }
 
 export interface ResolveOpts {
@@ -746,11 +764,15 @@ export class OutlineService {
       return acceptanceResult;
     }
 
+    // SPEC-045 §Design Decisions D10 — synchronous, no store calls, no fs probing.
+    const codeAnchors = extractCodeAnchorsForProjection(doc);
+
     return ok({
       content: doc.content,
       resolvedComponents,
       warnings,
       ...(acceptanceResult.value !== undefined ? { acceptanceCriteria: acceptanceResult.value } : {}),
+      ...(codeAnchors !== undefined ? { codeAnchors } : {}),
     });
   }
 
@@ -1002,6 +1024,38 @@ function renderAcVerifyLine(criterion: AcceptanceCriterion): string | undefined 
 }
 
 /**
+ * Extracts a `spec` doc's declared `extra.code_anchors` for the D10 text-projection
+ * seam — `undefined` for any non-spec doc, a malformed/absent `extra.code_anchors`,
+ * or an empty array (so `renderResolvedToMarkdown` takes no rendering branch at all
+ * in those cases, keeping output byte-identical to pre-SPEC-045 behaviour).
+ * Synchronous, pure — no store calls, no filesystem probing (D10: a live drift
+ * check does not belong on a read verb).
+ */
+function extractCodeAnchorsForProjection(doc: DocRecord): string[] | undefined {
+  if (doc.type !== "spec") return undefined;
+  const raw = doc.extra["code_anchors"];
+  if (!Array.isArray(raw)) return undefined;
+  const anchors = raw.filter((a): a is string => typeof a === "string");
+  return anchors.length > 0 ? anchors : undefined;
+}
+
+/**
+ * Renders the `## Code anchors` list block appended after a spec's projected body
+ * (SPEC-045 §Design Decisions D10) — a flat bullet list of the spec's declared
+ * `extra.code_anchors` entries, verbatim (no verification, no drift status — that
+ * is `lore status --check-drift`'s job, never this read-only projection's). Pure,
+ * deterministic — same `anchors` input always produces the identical string (keeps
+ * `export-docs`'s drift comparison stable, mirroring `renderAcceptanceCriteriaBlock`'s
+ * precedent immediately below).
+ *
+ * @param anchors - Declared code_anchors, in declaration order.
+ */
+function renderCodeAnchorsBlock(anchors: string[]): string {
+  const lines = anchors.map((anchor) => `- ${anchor}`);
+  return `\n\n## Code anchors\n\n${lines.join("\n")}`;
+}
+
+/**
  * Renders the `## Acceptance Criteria (structured)` checklist block appended after a
  * spec's projected body (AC-ACODE-9). Pure, deterministic — same `criteria` + `coverage`
  * input always produces the identical string (no wall-clock, no randomness), which is
@@ -1039,10 +1093,18 @@ function renderAcceptanceCriteriaBlock(criteria: AcceptanceCriterion[], coverage
  * `acceptance_criteria` — see `resolve()`). Every other doc's output is byte-identical
  * to pre-SPEC-038 behaviour (AC-ACODE-9 REGRESSION).
  *
+ * Additionally appends SPEC-045 §Design Decisions D10's `## Code anchors` list (see
+ * `renderCodeAnchorsBlock`) after that, when `resolved` carries a non-empty
+ * `codeAnchors` array (only ever set for a spec with declared `extra.code_anchors`
+ * — see `resolve()`). Zero fs probing here — this is a pure text splice, never a
+ * live drift check. A spec with no declared anchors is byte-identical to
+ * pre-SPEC-045 behaviour (AC-DR-6 REGRESSION).
+ *
  * @param resolved - Output of `OutlineService.resolve()` for one document.
  * @returns Markdown with every whitelisted placeholder replaced by its rendering,
- *   plus the AC checklist when declared; unchanged `resolved.content` when there are
- *   no resolved components and no declared acceptance criteria.
+ *   plus the AC checklist and/or Code anchors list when declared; unchanged
+ *   `resolved.content` when there are no resolved components and no declared
+ *   acceptance criteria / code anchors.
  * @example
  *   const resolved = await outlineService.resolve(doc);
  *   if (resolved.ok) console.log(renderResolvedToMarkdown(resolved.value));
@@ -1061,6 +1123,12 @@ export function renderResolvedToMarkdown(resolved: ResolvedDoc): string {
       resolved.acceptanceCriteria.criteria,
       resolved.acceptanceCriteria.coverage,
     );
+  }
+  // SPEC-045 §Design Decisions D10 — Code anchors list, spliced the SAME way the
+  // AC checklist above is: absent/empty codeAnchors takes no branch at all, so a
+  // spec without declared code_anchors renders byte-identically (REGRESSION).
+  if (resolved.codeAnchors !== undefined && resolved.codeAnchors.length > 0) {
+    content += renderCodeAnchorsBlock(resolved.codeAnchors);
   }
   return content;
 }

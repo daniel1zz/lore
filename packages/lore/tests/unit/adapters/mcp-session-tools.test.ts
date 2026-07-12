@@ -204,7 +204,14 @@ describe("lore_bootstrap", () => {
       // open_stale_candidates count onto SessionService.bootstrap's raw corpus summary
       // (the underlying service is untouched, outside this task's file anchors); an
       // empty corpus has zero knowledge/adr docs to probe, so the count is 0.
-      expect(data.report.corpus).toEqual({ total_docs: 0, last_updated: null, open_stale_candidates: 0 });
+      // SPEC-045 §Design Decisions D7 — code_anchor_specs is the SAME store-only,
+      // zero-fs-probing splice (an empty corpus has zero specs, so 0).
+      expect(data.report.corpus).toEqual({
+        total_docs: 0,
+        last_updated: null,
+        open_stale_candidates: 0,
+        code_anchor_specs: 0,
+      });
     });
   });
 
@@ -227,9 +234,12 @@ describe("lore_bootstrap", () => {
       // splice for this identical seeded corpus.
       const cliShapeResult = await sessionService.bootstrap("alice");
       if (!cliShapeResult.ok) throw new Error(JSON.stringify(cliShapeResult.error));
+      // SPEC-045 §Design Decisions D7 — code_anchor_specs is the SAME kind of
+      // store-only splice as open_stale_candidates (this fixture seeds only plans,
+      // no specs, so the count is always 0 here).
       const cliShapeWithStaleness = {
         ...cliShapeResult.value,
-        corpus: { ...cliShapeResult.value.corpus, open_stale_candidates: 0 },
+        corpus: { ...cliShapeResult.value.corpus, open_stale_candidates: 0, code_anchor_specs: 0 },
       };
 
       expect(mcpData.report).toEqual(cliShapeWithStaleness);

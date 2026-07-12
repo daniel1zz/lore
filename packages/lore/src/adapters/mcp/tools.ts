@@ -10,7 +10,10 @@
  * lore_create gains supersedes/by, lore_search/lore_list gain include_invalid,
  * SPEC-043 §Design Decisions D6
  * + 1 SPEC-044 tool: lore_staleness_probe (batch/single-doc/list); lore_status and
- * lore_bootstrap gain computed open_stale_candidates, SPEC-044 §Design Decisions D10, D14).
+ * lore_bootstrap gain computed open_stale_candidates, SPEC-044 §Design Decisions D10, D14
+ * + no new tool for SPEC-045 (doc-code drift oracle): lore_status gains check_drift?
+ * (migrated off the argless 3-arg form), lore_anchor_set gains spec-target declarative
+ * REPLACE, lore_bootstrap gains computed code_anchor_specs, SPEC-045 §Design Decisions D7).
  *
  * Architecture: Tools with input use the `registerToolWithArgs` helper defined below, which:
  *   1. Calls `server.tool(name, desc, handler)` in 3-arg form (avoids ZodRawShapeCompat type bomb)
@@ -63,6 +66,8 @@ import {
   buildStalenessSingleJsonPayload,
   listFreshStalenessEscalates,
 } from "../../flows/staleness-flow.js";
+import { buildDriftFlowDeps, buildListSpecs, countArmedSpecs, runDrift } from "../../flows/drift-flow.js";
+import { buildRealFsProbe } from "../real-fs-probe.js";
 import { buildAssessSummaryText } from "./assess-render.js";
 
 // ─── Schema Constants ────────────────────────────────────────────────────────
@@ -249,6 +254,19 @@ export const LoreContextBundleSchema = z.object({
   max_depth: z.number().int().positive().optional(),
 });
 
+/**
+ * Input schema for lore_status (SPEC-045 §Design Decisions D7) — this tool's
+ * FIRST input schema; it was registered argless (3-arg form, no schema patch)
+ * before this. `check_drift` is OPTIONAL — an omitted/`false` value keeps the
+ * response byte-identical to the pre-SPEC-045 shape (REGRESSION, AC-DR-5); when
+ * `true`, the response gains a `code_drift` field (`CodeDriftPayload`,
+ * `../../flows/drift-flow.js`, the SAME shape CLI `lore status --check-drift
+ * --json`'s `data.code_drift` carries).
+ */
+export const LoreStatusSchema = z.object({
+  check_drift: z.boolean().optional(),
+});
+
 /** Input schema for lore_batch. */
 export const LoreBatchSchema = z.object({
   // reason: op uses z.string() (not enum) so unknown ops reach executeBatchOp's default
@@ -322,13 +340,25 @@ export const LoreReadySchema = z.object({
 });
 
 /**
- * Input schema for lore_anchor_set (SPEC-042 §Design Decisions D9) —
- * declarative REPLACE of a task's `file_anchors`, the MCP-facing counterpart
- * to `TaskWorkflowService.setAnchors`. Read-modify-write on `extra` (preserves
- * `extra.claim`/`extra.verification_evidence` untouched, AC-S3-5) — NOT routed
- * through `lore_set`'s wholesale-`extra` replace (D3: that would silently
- * delete those other services' owned state). `by` is required, same MCP
- * actor-identity precedent as `lore_claim`/`lore_release`/`lore_evidence_add`.
+ * Input schema for lore_anchor_set (SPEC-042 §Design Decisions D9; extended by
+ * SPEC-045 §Design Decisions D7 to dispatch by target doc type) — resolves
+ * `id_or_slug` FIRST, then dispatches:
+ *   - task target → declarative REPLACE of `file_anchors` via
+ *     `TaskWorkflowService.setAnchors`, read-modify-write on `extra` (preserves
+ *     `extra.claim`/`extra.verification_evidence` untouched, AC-S3-5) — NOT
+ *     routed through `lore_set`'s wholesale-`extra` replace (D3: that would
+ *     silently delete those other services' owned state); a `#`-carrying entry
+ *     is rejected loud (byte-identical to the pre-SPEC-045 behavior, naming the
+ *     spec code-anchor grammar).
+ *   - **spec target → ALSO declarative REPLACE (`DriftCheckService.setCodeAnchors`)
+ *     — but this DIVERGES from the CLI's `lore anchor add`/`rm`, which are
+ *     INCREMENTAL (union/difference). This tool always OVERWRITES the entire
+ *     `code_anchors` array with `anchors` — use the CLI for incremental edits.**
+ *     `by` is accepted for schema uniformity but NOT consumed on this branch
+ *     (spec anchor writes are attributed to "system", mirroring `AcService`).
+ *   - any other type → `VALIDATION_ERROR`, naming "task or spec".
+ * `by` is required, same MCP actor-identity precedent as
+ * `lore_claim`/`lore_release`/`lore_evidence_add`.
  */
 export const LoreAnchorSetSchema = z.object({
   id_or_slug: z.string(),
@@ -640,10 +670,15 @@ async function reviewDocViaMcp(
  * validity_state, lore_create gains supersedes/by, lore_search/lore_list gain
  * include_invalid
  * + lore_staleness_probe (SPEC-044 §Design Decisions D10) — lore_status/lore_bootstrap
- * gain computed open_stale_candidates (D14)).
+ * gain computed open_stale_candidates (D14)
+ * + lore_status gains `check_drift?: boolean` — migrated OFF the argless 3-arg
+ * registration form onto `registerToolWithArgs` (its FIRST input schema; argless
+ * calls stay byte-identical, REGRESSION); lore_anchor_set gains spec-target
+ * declarative REPLACE dispatch; lore_bootstrap gains computed `code_anchor_specs`
+ * (SPEC-045 §Design Decisions D7)).
  *
  * Tools with input use `registerToolWithArgs` (avoids ZodRawShapeCompat type bomb).
- * Tools without input (`lore_schema`, `lore_status`) use plain `server.tool(name, desc, cb)`.
+ * Tools without input (`lore_schema`) use plain `server.tool(name, desc, cb)`.
  *
  * @param server - The McpServer instance to register tools on
  * @param app - The composition root providing access to all services
@@ -942,12 +977,16 @@ export function registerTools(server: McpServer, app: App): void {
     return textContent({ results });
   });
 
-  // lore_status — no input parameters; 3-arg form (correct for 0-arg tools)
-  // reason: aggregate query tool, no arguments needed
-  server.tool(
+  // lore_status (SPEC-045 §Design Decisions D7 — migrated OFF the argless 3-arg
+  // form onto registerToolWithArgs; this is the tool's FIRST input schema. An
+  // argless call `{}` (check_drift omitted/false) returns the byte-identical
+  // pre-SPEC-045 shape — REGRESSION, AC-DR-5.)
+  registerToolWithArgs(
+    server,
     "lore_status",
-    "Get corpus statistics (total docs, by type, by status)",
-    async () => {
+    "Get corpus statistics (total docs, by type, by status); check_drift:true additionally verifies spec-declared code_anchors against the working tree (SPEC-045)",
+    LoreStatusSchema,
+    async (args) => {
       const result = await corpusService.status();
       if (!result.ok) return errorContent(result.error);
       // SPEC-044 §Design Decisions D14 — open_stale_candidates, computed by the SAME
@@ -955,7 +994,28 @@ export function registerTools(server: McpServer, app: App): void {
       // flows/staleness-flow.ts::listFreshStalenessEscalates).
       const staleListResult = await listFreshStalenessEscalates(buildStalenessFlowDeps(app));
       if (!staleListResult.ok) return errorContent(staleListResult.error);
-      return textContent({ ...result.value, open_stale_candidates: staleListResult.value.length });
+
+      const payload: Record<string, unknown> = {
+        ...result.value,
+        open_stale_candidates: staleListResult.value.length,
+      };
+
+      if (args.check_drift === true) {
+        if (app.driftCheckService === undefined) {
+          return errorContent({ code: "STORE_ERROR", message: "Internal error: DriftCheckService not wired on App" });
+        }
+        // reason: SPEC-045 §Design Decisions D7 — App carries no parsed LoreConfig
+        // (same limitation lore_staleness_probe's limit/min_age_days fallback
+        // documents), so `workflow.drift.enabled` cannot be honored from this
+        // surface; MCP always runs the check (enabled) when check_drift is true.
+        const deps = buildDriftFlowDeps(app, app.driftCheckService);
+        const probe = buildRealFsProbe(process.cwd());
+        const driftResult = await runDrift(deps, probe);
+        if (!driftResult.ok) return errorContent(driftResult.error);
+        payload["code_drift"] = driftResult.value;
+      }
+
+      return textContent(payload);
     },
   );
 
@@ -1011,19 +1071,43 @@ export function registerTools(server: McpServer, app: App): void {
     return textContent({ ready: result.value });
   });
 
-  // lore_anchor_set
+  // lore_anchor_set (SPEC-042 §Design Decisions D9; extended by SPEC-045
+  // §Design Decisions D7 to resolve-then-dispatch by target doc type — see
+  // LoreAnchorSetSchema's JSDoc for the task-vs-spec REPLACE-semantics note)
   registerToolWithArgs(
     server,
     "lore_anchor_set",
-    "Declaratively replace a task's file_anchors (read-modify-write — preserves claim/evidence, SPEC-042 D9)",
+    "Declaratively REPLACE a task's file_anchors or a spec's code_anchors (read-modify-write — preserves claim/evidence on a task target, SPEC-042 D9; on a spec target this OVERWRITES the full code_anchors array — CLI `lore anchor add`/`rm` are incremental instead, SPEC-045 D7)",
     LoreAnchorSetSchema,
     async (args) => {
-      const result = await taskWorkflowService.setAnchors(args.id_or_slug, args.anchors, {
-        by: args.by,
-        source: "mcp",
+      const targetResult = await corpusService.get(args.id_or_slug);
+      if (!targetResult.ok) return errorContent(targetResult.error);
+      const target = targetResult.value.doc;
+
+      if (target.type === "task") {
+        const result = await taskWorkflowService.setAnchors(args.id_or_slug, args.anchors, {
+          by: args.by,
+          source: "mcp",
+        });
+        if (!result.ok) return errorContent(result.error);
+        return textContent({ doc: result.value });
+      }
+
+      if (target.type === "spec") {
+        if (app.driftCheckService === undefined) {
+          return errorContent({ code: "STORE_ERROR", message: "Internal error: DriftCheckService not wired on App" });
+        }
+        const result = await app.driftCheckService.setCodeAnchors(args.id_or_slug, args.anchors);
+        if (!result.ok) return errorContent(result.error);
+        return textContent({ anchors: result.value });
+      }
+
+      return errorContent({
+        code: "VALIDATION_ERROR",
+        field: "type",
+        message: `Expected a task or spec document; got type '${target.type}'`,
+        value: target.type,
       });
-      if (!result.ok) return errorContent(result.error);
-      return textContent({ doc: result.value });
     },
   );
 
@@ -1311,9 +1395,18 @@ export function registerTools(server: McpServer, app: App): void {
       // service file outside this task's file anchors).
       const staleListResult = await listFreshStalenessEscalates(buildStalenessFlowDeps(app));
       if (!staleListResult.ok) return errorContent(staleListResult.error);
+      // SPEC-045 §Design Decisions D5, D7 — store-only "declared code_anchors" count,
+      // ZERO filesystem probing (same shared helper `lore status`'s plain-text branch
+      // uses, flows/drift-flow.ts::countArmedSpecs) — never fs-probing bootstrap.
+      const armedSpecsResult = await countArmedSpecs(buildListSpecs(app));
+      if (!armedSpecsResult.ok) return errorContent(armedSpecsResult.error);
       const report = {
         ...result.value,
-        corpus: { ...result.value.corpus, open_stale_candidates: staleListResult.value.length },
+        corpus: {
+          ...result.value.corpus,
+          open_stale_candidates: staleListResult.value.length,
+          code_anchor_specs: armedSpecsResult.value,
+        },
       };
       return textContent({ report });
     },

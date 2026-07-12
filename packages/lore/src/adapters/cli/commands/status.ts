@@ -2,10 +2,23 @@
  * lore status — corpus stats and health check.
  * With --check-tree: validate corpus against lore.tree.yaml blueprint.
  * With --check-tree --fix: auto-fix orphan/misplaced drift.
- * With --check-tree --json: output check result as JSON envelope.
+ * With --check-drift: verify spec-declared code_anchors against the working tree
+ *   (SPEC-045 §Design Decisions D5) — deterministic, zero LLM calls.
+ * With --json: output check result(s) as a JSON envelope.
  *
- * Exit codes for --check-tree:
- *   0 = consistent, 3 = inconsistent, 4 = blueprint missing/invalid
+ * --check-tree and --check-drift COMPOSE (SPEC-045 D5 restructure — neither check
+ * early-exits the process anymore; both are value-returning, combined at the end):
+ *
+ * Exit-code precedence when either flag is passed:
+ *   any drift found (either check)                          → 3
+ *   else blueprint missing/invalid (--check-tree requested)  → 4
+ *   else                                                      → 0
+ *
+ * Both requested reports always print/emit fully — a real code drift is never
+ * masked by a missing lore.tree.yaml, and vice versa. Worked example: drift
+ * disabled (workflow.drift.enabled=false) + an inconsistent tree → the drift
+ * section prints its explicit "disabled" note, the tree section prints its
+ * drifts, exit 3 (tree drift alone already wins).
  */
 
 import { existsSync, readFileSync } from "fs";
@@ -14,7 +27,18 @@ import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
 import { buildStalenessFlowDeps, listFreshStalenessEscalates } from "../../../flows/staleness-flow.js";
-import { parseTreeBlueprint } from "@lore/core";
+import {
+  buildDriftFlowDeps,
+  buildListSpecs,
+  countArmedSpecs,
+  disabledCodeDriftPayload,
+  renderDriftRepairHint,
+  runDrift,
+  SYMBOL_MISSING_FOOTNOTE,
+  type CodeDriftPayload,
+} from "../../../flows/drift-flow.js";
+import { buildRealFsProbe } from "../../real-fs-probe.js";
+import { parseTreeBlueprint, resolveDriftEnabled } from "@lore/core";
 import type { CallerSurface } from "@lore/core";
 
 /** All CallerSurface values in a stable display order. */
@@ -45,6 +69,33 @@ function computeAiDefaults(app: ReturnType<typeof loadLoreApp>["app"]): Record<s
   return result;
 }
 
+/**
+ * Text rendering for the `--check-drift` section (D5) — used regardless of
+ * whether `--check-tree` was ALSO requested (both sections always print fully).
+ */
+function renderDriftSection(payload: CodeDriftPayload): void {
+  if (!payload.enabled) {
+    console.log("Code drift: disabled (workflow.drift.enabled=false)");
+    return;
+  }
+  if (!payload.armed) {
+    console.log("Code drift: armed=false (no spec declares code_anchors)");
+    return;
+  }
+  if (payload.consistent) {
+    console.log(`Code drift: consistent (${payload.specs_checked} spec(s) checked)`);
+    return;
+  }
+  console.log(`Code drift: ${payload.drifts.length} drift(s) (${payload.specs_checked} spec(s) checked)`);
+  for (const row of payload.drifts) {
+    console.log(`  - ${row.spec_slug} → ${row.anchor} (${row.kind})`);
+    console.log(`    ${renderDriftRepairHint(row)}`);
+  }
+  if (payload.drifts.some((d) => d.kind === "symbol_missing")) {
+    console.log(`  ${SYMBOL_MISSING_FOOTNOTE}`);
+  }
+}
+
 export default defineCommand({
   meta: {
     name: "status",
@@ -63,120 +114,174 @@ export default defineCommand({
       type: "boolean",
       description: "Apply --check-tree fixes for orphan/misplaced drift",
     },
+    "check-drift": {
+      type: "boolean",
+      description:
+        "Verify spec-declared code_anchors against the working tree (SPEC-045). Composes with --check-tree.",
+    },
   },
   async run({ args }) {
-    // ── check-tree branch ────────────────────────────────────────────────────
-    if (args["check-tree"]) {
-      const blueprintPath = join(process.cwd(), "lore.tree.yaml");
+    const checkTreeRequested = args["check-tree"] === true;
+    const checkDriftRequested = args["check-drift"] === true;
 
-      if (!existsSync(blueprintPath)) {
-        process.stderr.write(
-          `No lore.tree.yaml blueprint found at ${blueprintPath}\n`,
-        );
-        process.exit(4);
-      }
-
-      const raw = readFileSync(blueprintPath, "utf8");
-      const parsedBlueprint = parseTreeBlueprint(raw);
-
-      if (!parsedBlueprint.ok) {
-        process.stderr.write(formatError(parsedBlueprint.error) + "\n");
-        process.exit(4);
-      }
-
-      // Normalize root min to 1: a declared blueprint root is always required (min 1).
-      // This ensures an empty corpus is detected as inconsistent if root is required.
-      const blueprint = {
-        ...parsedBlueprint.value,
-        root: {
-          ...parsedBlueprint.value.root,
-          min: Math.max(parsedBlueprint.value.root.min, 1),
-        },
-      };
-      const { app } = loadLoreApp();
-
+    // ── check-tree / check-drift branch (D5 restructure) ────────────────────
+    if (checkTreeRequested || checkDriftRequested) {
+      const { app, config } = loadLoreApp();
       try {
-        if (args.fix) {
-          // Run fix first, then re-check
-          const fixR = await app.treeCheckService.fix(blueprint);
-          if (!fixR.ok) {
-            process.stderr.write(formatError(fixR.error) + "\n");
-            process.exitCode = exitCode(fixR.error);
-            return;
-          }
+        // ---- Tree section — value-returning, no early process.exit (D5) ----
+        let treeData: Record<string, unknown> = {};
+        let treeInconsistent = false;
+        let blueprintUnarmable = false;
+        const treeRenderLines: string[] = [];
+        const treeErrorLines: string[] = [];
 
-          const checkR = await app.treeCheckService.checkTree(blueprint);
-          if (!checkR.ok) {
-            process.stderr.write(formatError(checkR.error) + "\n");
-            process.exitCode = exitCode(checkR.error);
-            return;
-          }
+        if (checkTreeRequested) {
+          const blueprintPath = join(process.cwd(), "lore.tree.yaml");
 
-          const report = { fix: fixR.value, check: checkR.value };
-
-          // Exit code for --fix:
-          //   0 = fix ran without skips AND at most 1 non-fixable (missing) drift remains
-          //       (single missing requirement treated as "fix did its best")
-          //   3 = fix had explicit skips OR ≥2 non-fixable missing drifts remain
-          //       (multiple missing requirements indicate "partial / cannot fully satisfy")
-          const postFixDrifts = checkR.value.drifts;
-          const hasMultipleMissingDrifts = postFixDrifts.filter(
-            (d) => d.kind === "missing" || d.kind === "extra",
-          ).length > 1;
-          const fixSucceeded = !fixR.value.stillInconsistent &&
-            !postFixDrifts.some(
-              (d) => d.kind === "orphan" || d.kind === "misplaced" || d.kind === "cycle",
-            ) &&
-            !hasMultipleMissingDrifts;
-
-          if (args.json) {
-            console.log(JSON.stringify({ ok: true, data: report }, null, 2));
+          if (!existsSync(blueprintPath)) {
+            blueprintUnarmable = true;
+            treeErrorLines.push(`No lore.tree.yaml blueprint found at ${blueprintPath}`);
           } else {
-            console.log(
-              `Fixed ${fixR.value.fixed.length}, Skipped ${fixR.value.skipped.length}`,
-            );
-            if (fixSucceeded) {
-              console.log("Tree is consistent with lore.tree.yaml blueprint.");
+            const raw = readFileSync(blueprintPath, "utf8");
+            const parsedBlueprint = parseTreeBlueprint(raw);
+
+            if (!parsedBlueprint.ok) {
+              blueprintUnarmable = true;
+              treeErrorLines.push(formatError(parsedBlueprint.error));
             } else {
-              const residualDrifts = checkR.value.drifts;
-              console.log(
-                `Tree inconsistent: ${residualDrifts.length} drift(s) remain`,
-              );
-              for (const d of residualDrifts) {
-                console.log(`  - ${d.kind}: ${d.detail}`);
+              // Normalize root min to 1: a declared blueprint root is always required
+              // (min 1). Ensures an empty corpus is detected as inconsistent if root
+              // is required.
+              const blueprint = {
+                ...parsedBlueprint.value,
+                root: {
+                  ...parsedBlueprint.value.root,
+                  min: Math.max(parsedBlueprint.value.root.min, 1),
+                },
+              };
+
+              if (args.fix) {
+                // Run fix first, then re-check
+                const fixR = await app.treeCheckService.fix(blueprint);
+                if (!fixR.ok) {
+                  process.stderr.write(formatError(fixR.error) + "\n");
+                  process.exitCode = exitCode(fixR.error);
+                  return;
+                }
+
+                const checkR = await app.treeCheckService.checkTree(blueprint);
+                if (!checkR.ok) {
+                  process.stderr.write(formatError(checkR.error) + "\n");
+                  process.exitCode = exitCode(checkR.error);
+                  return;
+                }
+
+                treeData = { fix: fixR.value, check: checkR.value };
+
+                // Exit code for --fix:
+                //   0 = fix ran without skips AND at most 1 non-fixable (missing) drift remains
+                //       (single missing requirement treated as "fix did its best")
+                //   3 = fix had explicit skips OR ≥2 non-fixable missing drifts remain
+                //       (multiple missing requirements indicate "partial / cannot fully satisfy")
+                const postFixDrifts = checkR.value.drifts;
+                const hasMultipleMissingDrifts = postFixDrifts.filter(
+                  (d) => d.kind === "missing" || d.kind === "extra",
+                ).length > 1;
+                const fixSucceeded = !fixR.value.stillInconsistent &&
+                  !postFixDrifts.some(
+                    (d) => d.kind === "orphan" || d.kind === "misplaced" || d.kind === "cycle",
+                  ) &&
+                  !hasMultipleMissingDrifts;
+                treeInconsistent = !fixSucceeded;
+
+                treeRenderLines.push(`Fixed ${fixR.value.fixed.length}, Skipped ${fixR.value.skipped.length}`);
+                if (fixSucceeded) {
+                  treeRenderLines.push("Tree is consistent with lore.tree.yaml blueprint.");
+                } else {
+                  const residualDrifts = checkR.value.drifts;
+                  treeRenderLines.push(`Tree inconsistent: ${residualDrifts.length} drift(s) remain`);
+                  for (const d of residualDrifts) {
+                    treeRenderLines.push(`  - ${d.kind}: ${d.detail}`);
+                  }
+                }
+              } else {
+                // Check-only
+                const checkR = await app.treeCheckService.checkTree(blueprint);
+                if (!checkR.ok) {
+                  process.stderr.write(formatError(checkR.error) + "\n");
+                  process.exitCode = exitCode(checkR.error);
+                  return;
+                }
+
+                treeData = checkR.value as unknown as Record<string, unknown>;
+                treeInconsistent = !checkR.value.consistent;
+
+                if (checkR.value.consistent) {
+                  treeRenderLines.push("Tree is consistent with lore.tree.yaml blueprint.");
+                } else {
+                  treeRenderLines.push(`Tree inconsistent: ${checkR.value.drifts.length} drift(s)`);
+                  for (const d of checkR.value.drifts) {
+                    treeRenderLines.push(`  - ${d.kind}: ${d.detail}`);
+                  }
+                }
               }
             }
           }
-
-          process.exitCode = fixSucceeded ? 0 : 3;
-          return;
-        } else {
-          // Check-only
-          const checkR = await app.treeCheckService.checkTree(blueprint);
-          if (!checkR.ok) {
-            process.stderr.write(formatError(checkR.error) + "\n");
-            process.exitCode = exitCode(checkR.error);
-            return;
-          }
-
-          if (args.json) {
-            console.log(
-              JSON.stringify({ ok: true, data: checkR.value }, null, 2),
-            );
-          } else if (checkR.value.consistent) {
-            console.log("Tree is consistent with lore.tree.yaml blueprint.");
-          } else {
-            console.log(
-              `Tree inconsistent: ${checkR.value.drifts.length} drift(s)`,
-            );
-            for (const d of checkR.value.drifts) {
-              console.log(`  - ${d.kind}: ${d.detail}`);
-            }
-          }
-
-          process.exitCode = checkR.value.consistent ? 0 : 3;
-          return;
         }
+
+        // ---- Drift section (SPEC-045 D5) ----
+        let driftPayload: CodeDriftPayload | undefined;
+        if (checkDriftRequested) {
+          const driftEnabled = resolveDriftEnabled(config);
+          if (!driftEnabled) {
+            driftPayload = disabledCodeDriftPayload();
+          } else if (app.driftCheckService === undefined) {
+            process.stderr.write("Error: DriftCheckService not wired on this App instance.\n");
+            process.exitCode = 1;
+            return;
+          } else {
+            const deps = buildDriftFlowDeps(app, app.driftCheckService);
+            const probe = buildRealFsProbe(process.cwd());
+            const driftResult = await runDrift(deps, probe);
+            if (!driftResult.ok) {
+              process.stderr.write(formatError(driftResult.error) + "\n");
+              process.exitCode = exitCode(driftResult.error);
+              return;
+            }
+            driftPayload = driftResult.value;
+          }
+        }
+
+        const driftInconsistent = driftPayload !== undefined && driftPayload.enabled && !driftPayload.consistent;
+
+        // ---- Exit precedence (D5, pinned) ----
+        let finalExit: number;
+        if (treeInconsistent || driftInconsistent) {
+          finalExit = 3;
+        } else if (blueprintUnarmable) {
+          finalExit = 4;
+        } else {
+          finalExit = 0;
+        }
+
+        // ---- Render — both requested sections always print/emit fully ----
+        // reason: blueprint-missing/invalid stderr lines are written UNCONDITIONALLY
+        // (regardless of --json) — matches the pre-D5-restructure behavior, which
+        // wrote this message before --json was ever consulted (it used to
+        // process.exit(4) immediately on a missing/invalid blueprint).
+        for (const line of treeErrorLines) process.stderr.write(line + "\n");
+
+        if (args.json) {
+          const data: Record<string, unknown> = { ...treeData };
+          if (driftPayload !== undefined) data["code_drift"] = driftPayload;
+          console.log(JSON.stringify({ ok: true, data }, null, 2));
+        } else {
+          for (const line of treeRenderLines) console.log(line);
+          if (driftPayload !== undefined) renderDriftSection(driftPayload);
+        }
+
+        process.exitCode = finalExit;
+        return;
       } finally {
         app.close();
       }
@@ -209,10 +314,29 @@ export default defineCommand({
       }
       const openStaleCandidates = staleListResult.value.length;
 
+      // SPEC-045 §Design Decisions D5 — store-only "declared code_anchors" count,
+      // ZERO filesystem probing (unlike --check-drift). Shared helper `lore
+      // bootstrap` also splices in (flows/drift-flow.ts::countArmedSpecs).
+      const armedSpecsResult = await countArmedSpecs(buildListSpecs(app));
+      if (!armedSpecsResult.ok) {
+        process.stderr.write(formatError(armedSpecsResult.error) + "\n");
+        process.exitCode = exitCode(armedSpecsResult.error);
+        return;
+      }
+      const codeAnchorSpecs = armedSpecsResult.value;
+
       if (args.json) {
         console.log(
           JSON.stringify(
-            { ok: true, data: { ...status, ai_defaults: aiDefaults, open_stale_candidates: openStaleCandidates } },
+            {
+              ok: true,
+              data: {
+                ...status,
+                ai_defaults: aiDefaults,
+                open_stale_candidates: openStaleCandidates,
+                code_anchor_specs: codeAnchorSpecs,
+              },
+            },
             null,
             2,
           ),
@@ -250,6 +374,14 @@ export default defineCommand({
       if (openStaleCandidates > 0) {
         console.log(
           `\nOpen stale candidates: ${openStaleCandidates} (run \`lore review --staleness --list\` to see them)`,
+        );
+      }
+
+      // SPEC-045 §Design Decisions D5 — same "only when > 0" discipline as
+      // open_stale_candidates above.
+      if (codeAnchorSpecs > 0) {
+        console.log(
+          `\nCode anchors declared: ${codeAnchorSpecs} specs (run \`lore status --check-drift\` to verify)`,
         );
       }
 
