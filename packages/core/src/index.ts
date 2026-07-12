@@ -47,3 +47,4 @@ export * from "./session.js";
 export * from "./file-anchors.js";
 export * from "./validity.js";
 export * from "./staleness.js";
+export * from "./code-anchors.js";
