@@ -94,6 +94,8 @@ export interface DriftCheckResult {
   drifts: DriftRow[];
 }
 
+const defaultNow = (): string => new Date().toISOString();
+
 // ─── DriftCheckService ───────────────────────────────────────────────────────
 
 export class DriftCheckService {
@@ -151,10 +153,17 @@ export class DriftCheckService {
    *
    * @param specIdOrSlug - Spec document ULID or slug
    * @param anchors - Candidate raw anchor strings to add
+   * @param now - Time seam (mirrors `TaskWorkflowService`'s `now: () => string`
+   *   convention) — lets a test deterministically inject a concurrent writer
+   *   between the read and the CAS write (SPEC-025 §7 sequential-CAS recipe).
    * @returns Updated `code_anchors` array after the union
    * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a spec / bad anchor entry), STALE_VERSION
    */
-  async addCodeAnchors(specIdOrSlug: string, anchors: string[]): Promise<Result<string[], LoreError>> {
+  async addCodeAnchors(
+    specIdOrSlug: string,
+    anchors: string[],
+    now: () => string = defaultNow,
+  ): Promise<Result<string[], LoreError>> {
     const specResult = await this.resolveSpec(specIdOrSlug);
     if (!specResult.ok) return specResult;
     const spec = specResult.value;
@@ -163,7 +172,7 @@ export class DriftCheckService {
     const normalizedResult = normalizeCodeAnchorEntries([...existing, ...anchors]);
     if (!normalizedResult.ok) return normalizedResult;
 
-    return this.writeCodeAnchors(spec, normalizedResult.value, "add");
+    return this.writeCodeAnchors(spec, normalizedResult.value, "add", now);
   }
 
   /**
@@ -172,10 +181,15 @@ export class DriftCheckService {
    *
    * @param specIdOrSlug - Spec document ULID or slug
    * @param anchors - Candidate raw anchor strings to remove
+   * @param now - Time seam (see {@link addCodeAnchors}).
    * @returns Updated `code_anchors` array after removal
    * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a spec / bad anchor entry), STALE_VERSION
    */
-  async removeCodeAnchors(specIdOrSlug: string, anchors: string[]): Promise<Result<string[], LoreError>> {
+  async removeCodeAnchors(
+    specIdOrSlug: string,
+    anchors: string[],
+    now: () => string = defaultNow,
+  ): Promise<Result<string[], LoreError>> {
     const specResult = await this.resolveSpec(specIdOrSlug);
     if (!specResult.ok) return specResult;
     const spec = specResult.value;
@@ -187,7 +201,7 @@ export class DriftCheckService {
     const existing = extractCodeAnchorStrings(spec);
     const remaining = existing.filter((a) => !toRemove.has(a));
 
-    return this.writeCodeAnchors(spec, remaining, "remove");
+    return this.writeCodeAnchors(spec, remaining, "remove", now);
   }
 
   /**
@@ -197,10 +211,15 @@ export class DriftCheckService {
    *
    * @param specIdOrSlug - Spec document ULID or slug
    * @param anchors - The FULL replacement anchor list
+   * @param now - Time seam (see {@link addCodeAnchors}).
    * @returns The new `code_anchors` array
    * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a spec / bad anchor entry), STALE_VERSION
    */
-  async setCodeAnchors(specIdOrSlug: string, anchors: string[]): Promise<Result<string[], LoreError>> {
+  async setCodeAnchors(
+    specIdOrSlug: string,
+    anchors: string[],
+    now: () => string = defaultNow,
+  ): Promise<Result<string[], LoreError>> {
     const specResult = await this.resolveSpec(specIdOrSlug);
     if (!specResult.ok) return specResult;
     const spec = specResult.value;
@@ -208,7 +227,7 @@ export class DriftCheckService {
     const normalizedResult = normalizeCodeAnchorEntries(anchors);
     if (!normalizedResult.ok) return normalizedResult;
 
-    return this.writeCodeAnchors(spec, normalizedResult.value, "set");
+    return this.writeCodeAnchors(spec, normalizedResult.value, "set", now);
   }
 
   // ── Private Helpers ───────────────────────────────────────────────────────
@@ -239,14 +258,15 @@ export class DriftCheckService {
     spec: DocRecord,
     anchors: string[],
     operation: "add" | "remove" | "set",
+    now: () => string,
   ): Promise<Result<string[], LoreError>> {
-    const now = new Date().toISOString();
+    const nowIso = now();
     const newVersion = spec.version + 1;
     const newExtra: Record<string, unknown> = { ...spec.extra, code_anchors: anchors };
 
     const updateResult = await this.store.update(
       spec.id,
-      { extra: newExtra, updated_at: now, version: newVersion },
+      { extra: newExtra, updated_at: nowIso, version: newVersion },
       { expected_version: spec.version },
     );
     if (!updateResult.ok) return updateResult;
@@ -260,14 +280,14 @@ export class DriftCheckService {
       status: updateResult.value.status,
       title: updateResult.value.title,
       action: "update",
-      created_at: now,
+      created_at: nowIso,
       created_by: "system",
       change_summary: `Code anchors ${changeVerb} — ${anchors.length} entries`,
     });
     if (!versionResult.ok) return versionResult;
 
     const auditResult = await this.store.appendAuditEntry({
-      timestamp: now,
+      timestamp: nowIso,
       actor: "system",
       session_id: spec.id,
       action: "update",
