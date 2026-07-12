@@ -28,12 +28,12 @@
  * @spec_ref SPEC-043 AC-MH-2, AC-MH-3, AC-MH-4, AC-MH-10
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
-import { ValidityService } from "../../../src/service/validity-service.js";
-import { err } from "@lore/core";
-import type { CreateDocInput, DocRecord, LinkRecord, LoreError, Result } from "@lore/core";
+import { ValidityService, type StalenessCalibrationPort } from "../../../src/service/validity-service.js";
+import { err, ok } from "@lore/core";
+import type { CreateDocInput, DocRecord, LinkRecord, LoreError, ReviewJudgment, Result } from "@lore/core";
 
 // ─── Fixtures ───────────────────────────────────────────────────────────────
 
@@ -469,5 +469,139 @@ describe("REGRESSION — legacy doc round-trips untouched; D10 CorpusService.set
     if (result.error.code !== "VALIDATION_ERROR") return;
     expect(result.error.message).toMatch(/invalid_at/);
     expect(result.error.message).not.toMatch(/requires extra\.decision_status/);
+  });
+});
+
+// ─── AC-SP-9 — SPEC-044 D12: optional stalenessCalibration port ────────────
+//
+// Six-dimension coverage for this block:
+//   HAPPY:      a wired port + a latest 'escalate' (stale_candidate) staleness
+//               judgment -> invalidate writes ONE calibration record FK'd to that
+//               judgment, humanOutcome='confirmed'
+//   NEGATIVE:   n/a beyond the "no prior probe" / "holds never" skip cases (STATE below)
+//   BOUNDARY:   n/a — the port is a boolean present/absent DI switch, no numeric edges
+//   ERROR:      n/a — the fake port here never returns err(); a real store failure
+//               would propagate via the same Result-chain every other write does
+//               (already covered generically elsewhere in this file)
+//   STATE:      no prior probe (latestStalenessJudgment returns null) -> zero calls;
+//               a 'holds' (decision='approve') latest staleness judgment -> zero calls
+//               (D12 — "no observable outcome for holds"); --undo never triggers a
+//               calibration write even when a wired port + an escalate judgment exist
+//   REGRESSION: bare `new ValidityService(store)` (no port) writes NONE and does not
+//               error — invalidate succeeds exactly as it did before SPEC-044
+
+describe("AC-SP-9 — ValidityService optional stalenessCalibration port (SPEC-044 D12)", () => {
+  function makeStalenessJudgment(overrides: Partial<ReviewJudgment> = {}): ReviewJudgment {
+    return {
+      id: "01ARZ3STALEJUDGMENT0001",
+      doc_id: "01ARZ3DOCUNDERPROBE0001",
+      doc_version: 1,
+      decision: "escalate",
+      confidence: 0.7,
+      reasons: [{ dimension: "staleness", finding: "linked API changed" }],
+      checks: [],
+      blocking_questions: ["still true?"],
+      kind: "staleness",
+      judge: { provider: "p", model: "m", prompt_version: "v1" },
+      created_at: "2026-07-01T00:00:00.000Z",
+      created_by: "ai:p:m:v1",
+      ...overrides,
+    };
+  }
+
+  function makeFakePort(judgment: ReviewJudgment | null): {
+    port: StalenessCalibrationPort;
+    recordCalibrationCalls: unknown[];
+  } {
+    const recordCalibrationCalls: unknown[] = [];
+    const port: StalenessCalibrationPort = {
+      latestStalenessJudgment: vi.fn(async () => ok(judgment)),
+      recordCalibration: vi.fn(async (input) => {
+        recordCalibrationCalls.push(input);
+        return ok({ recorded: true });
+      }),
+    };
+    return { port, recordCalibrationCalls };
+  }
+
+  it("HAPPY: wired port + latest 'escalate' staleness judgment -> invalidate writes ONE calibration record FK'd to that judgment", async () => {
+    const store = new InMemoryStore();
+    const corpusService = new CorpusService(store);
+    const k1 = await createKnowledge(corpusService, "K1 staleness-flagged");
+    const judgment = makeStalenessJudgment({ doc_id: k1.id, doc_version: k1.version });
+    const { port, recordCalibrationCalls } = makeFakePort(judgment);
+    const validityService = new ValidityService(store, undefined, port);
+
+    const result = await validityService.invalidate(k1.id, { by: "alice", reason: "confirmed stale" });
+    expect(result.ok).toBe(true);
+
+    expect(recordCalibrationCalls).toHaveLength(1);
+    const call = recordCalibrationCalls[0] as {
+      judgment: ReviewJudgment;
+      docType: string;
+      humanOutcome: string;
+      actor: string;
+    };
+    expect(call.judgment.id).toBe(judgment.id);
+    expect(call.docType).toBe("knowledge");
+    expect(call.humanOutcome).toBe("confirmed");
+    expect(call.actor).toBe("alice");
+  });
+
+  it("STATE: no prior probe (latestStalenessJudgment returns null) -> recordCalibration is never called", async () => {
+    const store = new InMemoryStore();
+    const corpusService = new CorpusService(store);
+    const k1 = await createKnowledge(corpusService, "K1 never probed");
+    const { port, recordCalibrationCalls } = makeFakePort(null);
+    const validityService = new ValidityService(store, undefined, port);
+
+    const result = await validityService.invalidate(k1.id, { by: "alice", reason: "just because" });
+    expect(result.ok).toBe(true);
+    expect(recordCalibrationCalls).toHaveLength(0);
+  });
+
+  it("STATE: a 'holds' (decision='approve') latest staleness judgment -> recordCalibration is never called (D12 — no observable outcome for holds)", async () => {
+    const store = new InMemoryStore();
+    const corpusService = new CorpusService(store);
+    const k1 = await createKnowledge(corpusService, "K1 holds verdict");
+    const holdsJudgment = makeStalenessJudgment({ doc_id: k1.id, doc_version: k1.version, decision: "approve" });
+    const { port, recordCalibrationCalls } = makeFakePort(holdsJudgment);
+    const validityService = new ValidityService(store, undefined, port);
+
+    const result = await validityService.invalidate(k1.id, { by: "alice", reason: "invalidating anyway" });
+    expect(result.ok).toBe(true);
+    expect(recordCalibrationCalls).toHaveLength(0);
+  });
+
+  it("STATE: --undo never triggers a calibration write, even with a wired port + an escalate judgment", async () => {
+    const store = new InMemoryStore();
+    const corpusService = new CorpusService(store);
+    const k1 = await createKnowledge(corpusService, "K1 undo case");
+
+    // First invalidate (no port wired) to set up an undo-able state.
+    const bareValidityService = new ValidityService(store);
+    const invalidated = await bareValidityService.invalidate(k1.id, { by: "alice", reason: "temp" });
+    expect(invalidated.ok).toBe(true);
+    if (!invalidated.ok) return;
+
+    const judgment = makeStalenessJudgment({ doc_id: k1.id, doc_version: invalidated.value.doc.version });
+    const { port, recordCalibrationCalls } = makeFakePort(judgment);
+    const wiredValidityService = new ValidityService(store, undefined, port);
+
+    const undoResult = await wiredValidityService.invalidate(k1.id, { by: "alice", undo: true });
+    expect(undoResult.ok).toBe(true);
+    expect(recordCalibrationCalls).toHaveLength(0);
+  });
+
+  it("REGRESSION: bare `new ValidityService(store)` (no port) writes NONE and does not error", async () => {
+    const store = new InMemoryStore();
+    const corpusService = new CorpusService(store);
+    const k1 = await createKnowledge(corpusService, "K1 bare construction");
+    const validityService = new ValidityService(store); // no telemetry, no port — mirrors every pre-SPEC-044 test in this file
+
+    const result = await validityService.invalidate(k1.id, { by: "alice", reason: "no port wired" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.doc.extra["validity"]).toMatchObject({ reason: "no port wired" });
   });
 });
