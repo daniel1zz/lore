@@ -84,7 +84,11 @@ import {
 import type { CheckResult, LlmReviewOutput, NewReviewJudgment, ReviewBundle } from "@lore/core";
 import { llmReviewOutputSchema } from "@lore/core";
 import type { StalenessBundle, StalenessVerdict } from "@lore/core";
-import { mapStalenessVerdictDecisionToJudgmentDecision, stalenessVerdictSchema } from "@lore/core";
+import {
+  mapStalenessVerdictDecisionToJudgmentDecision,
+  STALENESS_VERDICT_DECISIONS,
+  stalenessVerdictSchema,
+} from "@lore/core";
 import {
   BUILT_IN_TEMPLATES,
   LINK_INFERENCE_TEMPLATE,
@@ -947,8 +951,25 @@ export class AIProviderService {
       emitStalenessEvent(first.providerResult, finalized.decision, finalized.confidence);
       return ok(finalized);
     }
+    // reason: D5 — an out-of-enum `decision` is a HARD error with NO retry, distinct
+    // from a genuine malformed/unparseable response (which DOES get the one corrective
+    // retry below). A model that returns syntactically valid JSON with a nonsense
+    // decision value isn't going to self-correct via a "fix your JSON" retry prompt —
+    // burning the retry budget on it only delays the inevitable AI_PROVIDER_ERROR.
+    if (first.outOfEnumDecision) {
+      const rawPrefix = (first.rawContent ?? "").slice(0, 500);
+      const hardFailure = err({
+        code: "AI_PROVIDER_ERROR" as const,
+        provider: this.active,
+        message:
+          `AI staleness probe returned an out-of-enum decision (must be "holds" or ` +
+          `"stale_candidate"): ${first.parseErrorMessage ?? "invalid decision"}. Raw output prefix: ${rawPrefix}`,
+      });
+      emitStalenessEvent(hardFailure);
+      return hardFailure;
+    }
 
-    // Corrective retry (SPEC-026 §3 D2 pattern).
+    // Corrective retry (SPEC-026 §3 D2 pattern) — genuine malformed/unparseable JSON only.
     const retryPrompt = buildStalenessRetryPrompt(prompt, first.parseErrorMessage ?? "unknown parse error");
     const second = await this._attemptStalenessParse(retryPrompt, bundle);
     if (!second.providerResult.ok) {
@@ -1246,11 +1267,12 @@ export class AIProviderService {
    * @param bundle - Staleness bundle, used only for the GenerateInput doc_type/title
    * @returns providerResult (the raw provider call outcome); when providerResult.ok, exactly
    *   one of `parsed` (validated StalenessVerdict) or `parseErrorMessage` (+ `rawContent`)
-   *   is set — never both. An out-of-enum `decision` is caught by `stalenessVerdictSchema`'s
-   *   `z.enum` check, surfacing as a `parseErrorMessage` exactly like any other schema
-   *   violation — D5's "hard error, no retry" applies on the SECOND attempt only (the
-   *   caller, `probeStaleness`, still spends its one corrective retry on the first failure,
-   *   matching the SPEC-026 §3 D2 single-axis retry contract every other judge pipeline uses).
+   *   is set — never both. `outOfEnumDecision` is a SEPARATE, additive signal (D5) —
+   *   true iff the response was syntactically valid JSON carrying a `decision` string
+   *   that is NOT `"holds"`/`"stale_candidate"`; `probeStaleness` checks this flag on the
+   *   FIRST attempt to short-circuit straight to a hard failure, skipping the corrective
+   *   retry entirely (a nonsense-but-well-formed decision won't be fixed by a "your JSON
+   *   was malformed" retry prompt).
    */
   private async _attemptStalenessParse(
     prompt: string,
@@ -1260,6 +1282,7 @@ export class AIProviderService {
     parsed?: StalenessVerdict;
     parseErrorMessage?: string;
     rawContent?: string;
+    outOfEnumDecision?: boolean;
   }> {
     const { result: providerResult } = await this._invokeProvider({
       prompt,
@@ -1278,12 +1301,23 @@ export class AIProviderService {
       return { providerResult, rawContent, parseErrorMessage: message };
     }
 
+    // reason: D5 — detect an out-of-enum `decision` BEFORE full schema validation, so
+    // the caller can distinguish "syntactically valid JSON, nonsense decision value"
+    // (hard error, no retry) from every other schema violation (missing/malformed
+    // fields — genuine "malformed", gets the one corrective retry).
+    const rawDecision =
+      typeof extracted.value === "object" && extracted.value !== null && !Array.isArray(extracted.value)
+        ? (extracted.value as Record<string, unknown>)["decision"]
+        : undefined;
+    const outOfEnumDecision =
+      typeof rawDecision === "string" && !STALENESS_VERDICT_DECISIONS.includes(rawDecision as never);
+
     const validated = stalenessVerdictSchema.safeParse(extracted.value);
     if (!validated.success) {
       const message = validated.error.issues
         .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
         .join("; ");
-      return { providerResult, rawContent, parseErrorMessage: message };
+      return { providerResult, rawContent, parseErrorMessage: message, ...(outOfEnumDecision ? { outOfEnumDecision: true } : {}) };
     }
 
     return { providerResult, rawContent, parsed: validated.data };
