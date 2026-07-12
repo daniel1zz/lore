@@ -14,12 +14,12 @@
  *   removeCodeAnchors(specIdOrSlug, anchors)   → incremental CAS RMW difference
  *   setCodeAnchors(specIdOrSlug, anchors)      → declarative CAS REPLACE (MCP shape)
  *
- * @invariant This module NEVER imports `node:fs` (or any Node builtin) — every probe
+ * @invariant This module NEVER imports the Node filesystem builtin — every probe
  *   call goes through the caller-injected `FsProbe` port (D4). `checkDrift`'s `probe`
  *   parameter is supplied PER CALL by the adapter layer (T2), never constructor-bound
- *   — mirrors D4's "built in the adapter and passed per call" placement. Verifiable
- *   via a source-text grep oracle (`sync-docs-service.test.ts` precedent): `grep -n
- *   'from "node:fs"\|from "fs"' drift-check-service.ts` → 0 hits.
+ *   — mirrors D4's "built in the adapter and passed per call" placement. Verified by
+ *   a source-text grep oracle in this service's test file (`sync-docs-service.test.ts`
+ *   precedent) — 0 hits expected against this file's own import statements.
  * @invariant EVERY probe call (`stat`/`listDir`/`readFile`) is individually wrapped in
  *   its own try/catch — a THROWN error becomes a `probe_error` drift row for every
  *   anchor sharing that path, and the scan CONTINUES for every other path (D4, G11 —
