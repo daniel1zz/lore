@@ -184,6 +184,20 @@ const WorkflowConfigSchema = z
       })
       .strict()
       .default({}),
+    /**
+     * Doc-code drift oracle config brake (SPEC-045 §Design Decisions D8) — when
+     * `false`, `lore status --check-drift` exits 0 with an explicit `disabled` note
+     * (LOUD skip, never a silent no-op) instead of probing the filesystem. Absence
+     * of the whole `workflow` section, or of `drift` within it, both mean enabled —
+     * same "absence = default-on" shape as every other `workflow.*` sub-section.
+     */
+    drift: z
+      .object({
+        /** `false` disables `--check-drift` filesystem probing entirely. Default: true. */
+        enabled: z.boolean().default(true),
+      })
+      .strict()
+      .default({}),
   })
   .strict();
 
@@ -422,6 +436,22 @@ export function resolveStalenessDefaults(
   config: LoreConfig | undefined,
 ): { default_limit: number; min_age_days: number } {
   return (config?.workflow ?? WorkflowConfigSchema.parse({})).staleness;
+}
+
+/**
+ * Resolve the effective `workflow.drift.enabled` config brake (SPEC-045 §Design
+ * Decisions D8) from an optional LoreConfig. Mirrors {@link resolveStalenessDefaults}
+ * — absence of the whole config, the `workflow` section, or `workflow.drift`
+ * specifically all fall back to the schema default (`true`).
+ *
+ * @param config - Parsed LoreConfig, or undefined when no config file was loaded
+ * @returns Effective `workflow.drift.enabled` value
+ * @example
+ *   resolveDriftEnabled(undefined) // => true
+ *   resolveDriftEnabled({ ..., workflow: { drift: { enabled: false } } }) // => false
+ */
+export function resolveDriftEnabled(config: LoreConfig | undefined): boolean {
+  return (config?.workflow ?? WorkflowConfigSchema.parse({})).drift.enabled;
 }
 
 // ─── Pure Parse Helpers ────────────────────────────────────────────────────
