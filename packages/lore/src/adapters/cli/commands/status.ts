@@ -13,6 +13,7 @@ import { join } from "path";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
+import { buildStalenessFlowDeps, listFreshStalenessEscalates } from "../../../flows/staleness-flow.js";
 import { parseTreeBlueprint } from "@lore/core";
 import type { CallerSurface } from "@lore/core";
 
@@ -196,8 +197,26 @@ export default defineCommand({
       // SPEC-024 AC-NOAI-10: resolved per-surface AI defaults.
       const aiDefaults = computeAiDefaults(app);
 
+      // SPEC-044 §Design Decisions D14 — open_stale_candidates, computed by the SAME
+      // query `lore review --staleness --list` uses (one derivation site,
+      // `flows/staleness-flow.ts::listFreshStalenessEscalates` — mirrors SPEC-043's
+      // computeArmedGates precedent).
+      const staleListResult = await listFreshStalenessEscalates(buildStalenessFlowDeps(app));
+      if (!staleListResult.ok) {
+        process.stderr.write(formatError(staleListResult.error) + "\n");
+        process.exitCode = exitCode(staleListResult.error);
+        return;
+      }
+      const openStaleCandidates = staleListResult.value.length;
+
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: { ...status, ai_defaults: aiDefaults } }, null, 2));
+        console.log(
+          JSON.stringify(
+            { ok: true, data: { ...status, ai_defaults: aiDefaults, open_stale_candidates: openStaleCandidates } },
+            null,
+            2,
+          ),
+        );
         return;
       }
 
@@ -224,6 +243,14 @@ export default defineCommand({
         for (const [s, count] of Object.entries(status.by_status)) {
           console.log(`  ${s.padEnd(12)} ${count}`);
         }
+      }
+
+      // SPEC-044 §Design Decisions D14 — text line only when count > 0 (never a silent
+      // zero-line noise addition to every `lore status` invocation).
+      if (openStaleCandidates > 0) {
+        console.log(
+          `\nOpen stale candidates: ${openStaleCandidates} (run \`lore review --staleness --list\` to see them)`,
+        );
       }
 
       // SPEC-043 D8 — invalidated-feeding-source warning (computed via the SAME

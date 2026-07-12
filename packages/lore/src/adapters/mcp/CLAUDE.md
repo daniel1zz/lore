@@ -2,7 +2,7 @@
 
 ## Purpose
 
-MCP (Model Context Protocol) stdio adapter. Entered via `lore --mcp-server` (top-level flag intercepted in `packages/lore/src/index.ts`) or `lore agent`. Registers 29 `lore_*` tools (16 original + 4 SPEC-025 task-workflow tools + 1 SPEC-026 assess tool + 1 SPEC-035 audit tool + 1 SPEC-034 review tool + 1 SPEC-039 verify tool + 1 IoC vertical-slice tech-spec §4.1/§11 P4 feed tool + 2 SPEC-041 session tools: `lore_bootstrap`, `lore_handoff` + 1 SPEC-042 session tool: `lore_anchor_set` + 1 SPEC-043 tool: `lore_invalidate`) and a small set of MCP resources against `@modelcontextprotocol/sdk`'s `McpServer` and connects over `StdioServerTransport`.
+MCP (Model Context Protocol) stdio adapter. Entered via `lore --mcp-server` (top-level flag intercepted in `packages/lore/src/index.ts`) or `lore agent`. Registers 30 `lore_*` tools (16 original + 4 SPEC-025 task-workflow tools + 1 SPEC-026 assess tool + 1 SPEC-035 audit tool + 1 SPEC-034 review tool + 1 SPEC-039 verify tool + 1 IoC vertical-slice tech-spec §4.1/§11 P4 feed tool + 2 SPEC-041 session tools: `lore_bootstrap`, `lore_handoff` + 1 SPEC-042 session tool: `lore_anchor_set` + 1 SPEC-043 tool: `lore_invalidate` + 1 SPEC-044 tool: `lore_staleness_probe`) and a small set of MCP resources against `@modelcontextprotocol/sdk`'s `McpServer` and connects over `StdioServerTransport`.
 
 ## Key Invariants
 
@@ -39,10 +39,14 @@ IoC vertical-slice tech-spec §4.1/§11 P4 adds `lore_feed` (`checkpoint`, `pare
 - `lore_create` gains optional `supersedes`/`by` (SPEC-043 D11) — when `supersedes` is set, composes `corpusService.create` THEN `ValidityService.invalidate` via the SAME `createWithSupersedes` orchestration (`../../flows/supersede-flow.js`) the CLI's `lore create --supersedes` uses. `by` is then required (runtime-checked, not schema-level, since it's only meaningful in this branch) — omitting it is a `VALIDATION_ERROR`. Half-failure (create ok, invalidate fails) still returns success (the doc is real) with an additive `supersede_error`/`supersede_repair_command` field — loud orphan, never silent, mirroring the CLI's nonzero-exit + stderr repair line.
 - `lore_search`/`lore_list` gain optional `include_invalid?: boolean` (excluded by default, mirrors the CLI's `--include-invalid`).
 
+**SPEC-044 §Design Decisions D10, D14 (staleness probes)**:
+- `lore_staleness_probe` (`limit?`, `min_age_days?`, `id_or_slug?`, `list?`, `by` — required, same MCP actor-identity precedent as `lore_claim`/`lore_release`/`lore_review`; ALSO load-bearing here as the audit-row actor for every probe the call commissions, D4) — batch (`limit`/`min_age_days` override `workflow.staleness.*` config for this call only; `App` carries no parsed `LoreConfig`, so the OMITTED-arg fallback is a literal `5`/`14` mirroring the config schema's own defaults, same "hardcoded default mirrors the schema" precedent `AIProviderService`'s `stalenessBudgets` constructor default uses) / single-doc (`id_or_slug` set, bypasses selection filters, still refuses an already-invalidated target) / list (`list: true`, a pure read — ZERO provider calls, exempt from the AI surface-brake check). The `{probes, skipped, total_candidates, excluded_by_limit}` (batch/single) and `{docs, total}` (list) response shapes are built by `../../flows/staleness-flow.js`'s `buildStalenessBatchJsonPayload`/`buildStalenessSingleJsonPayload`/`buildStalenessListJsonPayload` — the SAME functions the CLI's `lore review --staleness --json` calls, so the two surfaces' payloads are identical BY CONSTRUCTION (never two independently-authored JSON envelopes to keep in sync).
+- `lore_status`/`lore_bootstrap` gain a computed `open_stale_candidates` count (D14), spliced in by the tool handler itself via `../../flows/staleness-flow.js::listFreshStalenessEscalates` — the SAME query `lore_staleness_probe {list: true}` runs (one derivation site) — rather than inside `CorpusService.status`/`SessionService.bootstrap` (service files outside this feature's adapter-layer scope).
+
 ## Files
 
 - `index.ts` — `startMcpServer(app)`; wires `McpServer` + `StdioServerTransport`.
-- `tools.ts` — 29 tool registrations, schema constants, Zod input shapes.
+- `tools.ts` — 30 tool registrations, schema constants, Zod input shapes.
 - `assess-render.ts` — `buildAssessSummaryText(result)` (SPEC-040 §T3 D3) — Markdown digest for `lore_assess`'s `summary` envelope field.
 - `resources.ts` — MCP resource registrations (corpus snapshots, etc.).
 - `schema-info.ts` — `CORPUS_SCHEMA_INFO` constant describing doc types and `extra` requirements (knowledge `sub_type` includes `"assessment"`, SPEC-026).

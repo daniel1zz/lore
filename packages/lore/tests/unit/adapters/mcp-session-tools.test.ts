@@ -200,12 +200,16 @@ describe("lore_bootstrap", () => {
       expect(data.report.active_plans).toEqual([]);
       expect(data.report.my_claims).toEqual([]);
       expect(data.report.pending_reviews).toEqual({ count: 0, slugs: [] });
-      expect(data.report.corpus).toEqual({ total_docs: 0, last_updated: null });
+      // reason: SPEC-044 §Design Decisions D14 — the MCP tool splices a computed
+      // open_stale_candidates count onto SessionService.bootstrap's raw corpus summary
+      // (the underlying service is untouched, outside this task's file anchors); an
+      // empty corpus has zero knowledge/adr docs to probe, so the count is 0.
+      expect(data.report.corpus).toEqual({ total_docs: 0, last_updated: null, open_stale_candidates: 0 });
     });
   });
 
   describe("regression", () => {
-    it("MCP payload deep-equals the CLI --json shape (sessionService.bootstrap(by) called directly) for the same seeded corpus", async () => {
+    it("MCP payload deep-equals the CLI --json shape (sessionService.bootstrap(by) PLUS the D14 open_stale_candidates splice) for the same seeded corpus", async () => {
       await createPlan("Plan A");
       await createPlan("Plan B");
 
@@ -213,12 +217,22 @@ describe("lore_bootstrap", () => {
       const mcpResult = await call({ by: "alice" });
       const mcpData = parseResult(mcpResult) as { report: BootstrapReport };
 
-      // reason: this IS the CLI's --json shape's data field (commands/bootstrap.ts's
-      // `run()` prints `{ok: true, data: result.value}` where `result` is this exact call).
+      // reason: pre-SPEC-044 this WAS `sessionService.bootstrap(by)`'s raw output
+      // verbatim (`commands/bootstrap.ts`'s `run()` used to print `{ok: true, data:
+      // result.value}` unmodified). SPEC-044 §Design Decisions D14 makes BOTH the CLI
+      // and the MCP tool splice the SAME open_stale_candidates count onto
+      // `.corpus` afterward (computed by `flows/staleness-flow.ts::listFreshStalenessEscalates`,
+      // the single derivation site `--list` also uses) — this fixture seeds only plans
+      // (no knowledge/adr docs), so the count is always 0 here, same as the CLI would
+      // splice for this identical seeded corpus.
       const cliShapeResult = await sessionService.bootstrap("alice");
       if (!cliShapeResult.ok) throw new Error(JSON.stringify(cliShapeResult.error));
+      const cliShapeWithStaleness = {
+        ...cliShapeResult.value,
+        corpus: { ...cliShapeResult.value.corpus, open_stale_candidates: 0 },
+      };
 
-      expect(mcpData.report).toEqual(cliShapeResult.value);
+      expect(mcpData.report).toEqual(cliShapeWithStaleness);
     });
   });
 });

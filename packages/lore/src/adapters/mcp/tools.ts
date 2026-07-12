@@ -1,5 +1,5 @@
 /**
- * MCP tool registrations — 29 lore_* tools (16 original + 4 SPEC-025 task-workflow tools
+ * MCP tool registrations — 30 lore_* tools (16 original + 4 SPEC-025 task-workflow tools
  * + 1 SPEC-026 assess tool + 1 SPEC-035 audit tool + 1 SPEC-034 review tool
  * + 1 SPEC-039 verify tool + 1 IoC vertical-slice tech-spec §4.1/§11 P4 feed tool
  * + 2 SPEC-041 session tools: lore_bootstrap, lore_handoff; lore_feed additionally
@@ -8,7 +8,9 @@
  * gains file_anchors, SPEC-042 §Design Decisions D9
  * + 1 SPEC-043 tool: lore_invalidate; lore_get gains computed validity_state,
  * lore_create gains supersedes/by, lore_search/lore_list gain include_invalid,
- * SPEC-043 §Design Decisions D6).
+ * SPEC-043 §Design Decisions D6
+ * + 1 SPEC-044 tool: lore_staleness_probe (batch/single-doc/list); lore_status and
+ * lore_bootstrap gain computed open_stale_candidates, SPEC-044 §Design Decisions D10, D14).
  *
  * Architecture: Tools with input use the `registerToolWithArgs` helper defined below, which:
  *   1. Calls `server.tool(name, desc, handler)` in 3-arg form (avoids ZodRawShapeCompat type bomb)
@@ -54,6 +56,13 @@ import { runCalibrationHook } from "../../flows/calibration-hook.js";
 import { buildFeed, buildResumeFeed, SESSION_RESUME_CHECKPOINT } from "../../flows/feed-flow.js";
 import { createWithSupersedes, renderSupersedeRepairMessage } from "../../flows/supersede-flow.js";
 import { computeValidityState } from "../../flows/validity-state.js";
+import {
+  buildStalenessBatchJsonPayload,
+  buildStalenessFlowDeps,
+  buildStalenessListJsonPayload,
+  buildStalenessSingleJsonPayload,
+  listFreshStalenessEscalates,
+} from "../../flows/staleness-flow.js";
 import { buildAssessSummaryText } from "./assess-render.js";
 
 // ─── Schema Constants ────────────────────────────────────────────────────────
@@ -374,6 +383,24 @@ export const LoreReviewSchema = z.object({
 });
 
 /**
+ * Input schema for lore_staleness_probe (SPEC-044 §Design Decisions D10) — the MCP
+ * counterpart to `lore review --staleness`. `by` is required (not defaulted) — same
+ * MCP actor-identity precedent as `lore_claim`/`lore_release`/`lore_review`/`lore_verify`;
+ * it is ALSO the audit-row actor for every probe this call commissions (D4), load-bearing.
+ * `list: true` is a pure read (no provider call, D7/D9) — `id_or_slug` set switches to
+ * single-doc mode (bypasses candidate selection filters, still refuses an already-
+ * invalidated target); otherwise batch mode, `limit`/`min_age_days` overriding
+ * `workflow.staleness.*` config defaults for this invocation only.
+ */
+export const LoreStalenessProbeSchema = z.object({
+  limit: z.number().int().positive().optional(),
+  min_age_days: z.number().int().nonnegative().optional(),
+  id_or_slug: z.string().optional(),
+  list: z.boolean().optional(),
+  by: z.string().min(1),
+});
+
+/**
  * Input schema for lore_verify (SPEC-039 §2, §4 AC-VRF-10).
  * `ac` — optional subset of declared AC ids to run (omitted = every declared
  * script-mode AC on the plan's parent spec). `task` — optional explicit target
@@ -601,7 +628,7 @@ async function reviewDocViaMcp(
 // ─── Tool Registrations ──────────────────────────────────────────────────────
 
 /**
- * Registers all 29 lore_* MCP tools on the given server (16 original + 4 SPEC-025
+ * Registers all 30 lore_* MCP tools on the given server (16 original + 4 SPEC-025
  * task-workflow tools: lore_claim, lore_release, lore_evidence_add, lore_ready;
  * + lore_assess (SPEC-026); + lore_audit (SPEC-035); + lore_review (SPEC-034);
  * + lore_verify (SPEC-039); + lore_feed (IoC vertical-slice tech-spec §4.1/§11 P4);
@@ -611,7 +638,9 @@ async function reviewDocViaMcp(
  * worktree, lore_create gains file_anchors
  * + lore_invalidate (SPEC-043 §Design Decisions D6) — lore_get gains computed
  * validity_state, lore_create gains supersedes/by, lore_search/lore_list gain
- * include_invalid).
+ * include_invalid
+ * + lore_staleness_probe (SPEC-044 §Design Decisions D10) — lore_status/lore_bootstrap
+ * gain computed open_stale_candidates (D14)).
  *
  * Tools with input use `registerToolWithArgs` (avoids ZodRawShapeCompat type bomb).
  * Tools without input (`lore_schema`, `lore_status`) use plain `server.tool(name, desc, cb)`.
@@ -921,7 +950,12 @@ export function registerTools(server: McpServer, app: App): void {
     async () => {
       const result = await corpusService.status();
       if (!result.ok) return errorContent(result.error);
-      return textContent(result.value);
+      // SPEC-044 §Design Decisions D14 — open_stale_candidates, computed by the SAME
+      // query lore_staleness_probe's list mode uses (one derivation site,
+      // flows/staleness-flow.ts::listFreshStalenessEscalates).
+      const staleListResult = await listFreshStalenessEscalates(buildStalenessFlowDeps(app));
+      if (!staleListResult.ok) return errorContent(staleListResult.error);
+      return textContent({ ...result.value, open_stale_candidates: staleListResult.value.length });
     },
   );
 
@@ -1131,6 +1165,76 @@ export function registerTools(server: McpServer, app: App): void {
     },
   );
 
+  // ── SPEC-044: staleness probing ───────────────────────────────────────────
+
+  // lore_staleness_probe
+  registerToolWithArgs(
+    server,
+    "lore_staleness_probe",
+    "Probe high-value knowledge/adr documents for silent staleness (escalation only, never auto-invalidation) — batch (priority-sorted candidates), single-doc, or a read-only fresh-escalate list (list:true, no AI call)",
+    LoreStalenessProbeSchema,
+    async (args) => {
+      const flowDeps = buildStalenessFlowDeps(app);
+      const isListMode = args.list === true;
+
+      // ── list mode: read-only, NO provider call (D7/D9) ──────────────────
+      if (isListMode) {
+        const listResult = await listFreshStalenessEscalates(flowDeps);
+        if (!listResult.ok) return errorContent(listResult.error);
+        return textContent(buildStalenessListJsonPayload(listResult.value));
+      }
+
+      // reason: same unconditional surface-brake check as lore_review (SPEC-034 §4
+      // mirrors assess §3 D5, D7) — a braked surface cannot probe at all. Exempted
+      // above for list mode (no provider call).
+      const resolved = app.resolveAiDefault(undefined);
+      if (isAssessAiBraked(resolved)) {
+        return errorContent({
+          code: "AI_PROVIDER_ERROR",
+          message:
+            "AI is disabled for the mcp surface by config.ai.default_per_surface. lore_staleness_probe has no override for this.",
+        });
+      }
+
+      if (app.stalenessProbeService === undefined) {
+        return errorContent({ code: "STORE_ERROR", message: "Internal error: StalenessProbeService not wired on App" });
+      }
+
+      // ── single-doc mode ───────────────────────────────────────────────────
+      if (args.id_or_slug !== undefined) {
+        const outcomeResult = await app.stalenessProbeService.probeOne(args.id_or_slug, {
+          by: args.by,
+          source: app.callerSurface,
+        });
+        if (!outcomeResult.ok) return errorContent(outcomeResult.error);
+        const payload = await buildStalenessSingleJsonPayload(flowDeps, outcomeResult.value);
+        return textContent(payload);
+      }
+
+      // ── batch mode ─────────────────────────────────────────────────────────
+      // reason: MCP's `App` does not carry the parsed LoreConfig (unlike the CLI's
+      // loadLoreApp(), which returns {app, config} separately) — these literals mirror
+      // WorkflowConfigSchema's own staleness.default_limit/min_age_days DEFAULTS
+      // (packages/core/src/config.ts), the same "hardcoded default mirroring the schema"
+      // precedent AIProviderService's own stalenessBudgets constructor default uses.
+      // Explicit args.limit/args.min_age_days always override a corpus's real config
+      // either way — only the OMITTED case falls back to these literals instead of the
+      // corpus-configured default.
+      const DEFAULT_STALENESS_LIMIT = 5;
+      const DEFAULT_STALENESS_MIN_AGE_DAYS = 14;
+      const batchResult = await app.stalenessProbeService.probeBatch({
+        by: args.by,
+        limit: args.limit ?? DEFAULT_STALENESS_LIMIT,
+        minAgeDays: args.min_age_days ?? DEFAULT_STALENESS_MIN_AGE_DAYS,
+        source: app.callerSurface,
+      });
+      if (!batchResult.ok) return errorContent(batchResult.error);
+
+      const payload = await buildStalenessBatchJsonPayload(flowDeps, batchResult.value);
+      return textContent(payload);
+    },
+  );
+
   // ── SPEC-039: trusted runner ──────────────────────────────────────────────
 
   // lore_verify
@@ -1201,7 +1305,17 @@ export function registerTools(server: McpServer, app: App): void {
       }
       const result = await app.sessionService.bootstrap(args.by);
       if (!result.ok) return errorContent(result.error);
-      return textContent({ report: result.value });
+      // SPEC-044 §Design Decisions D14 — open_stale_candidates, computed by the SAME
+      // query lore_staleness_probe's list mode uses (one derivation site), spliced onto
+      // the report's corpus summary here rather than inside SessionService.bootstrap (a
+      // service file outside this task's file anchors).
+      const staleListResult = await listFreshStalenessEscalates(buildStalenessFlowDeps(app));
+      if (!staleListResult.ok) return errorContent(staleListResult.error);
+      const report = {
+        ...result.value,
+        corpus: { ...result.value.corpus, open_stale_candidates: staleListResult.value.length },
+      };
+      return textContent({ report });
     },
   );
 

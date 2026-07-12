@@ -590,7 +590,8 @@ describe("tool registration completeness", () => {
   // SPEC-041 §3 D8 adds lore_bootstrap + lore_handoff, bringing the total from 25 to 27.
   // SPEC-042 §Design Decisions D9 adds lore_anchor_set, bringing the total from 27 to 28.
   // SPEC-043 §Design Decisions D6 adds lore_invalidate, bringing the total from 28 to 29.
-  it("registers all 29 expected tools", () => {
+  // SPEC-044 §Design Decisions D10 adds lore_staleness_probe, bringing the total from 29 to 30.
+  it("registers all 30 expected tools", () => {
     const expectedTools = [
       "lore_create",
       "lore_get",
@@ -621,12 +622,13 @@ describe("tool registration completeness", () => {
       "lore_handoff",
       "lore_anchor_set",
       "lore_invalidate",
+      "lore_staleness_probe",
     ];
 
     const internal = server as unknown as McpServerInternal;
     for (const name of expectedTools) {
       expect(internal._registeredTools[name]).toBeDefined();
     }
-    expect(Object.keys(internal._registeredTools)).toHaveLength(29);
+    expect(Object.keys(internal._registeredTools)).toHaveLength(30);
   });
 });

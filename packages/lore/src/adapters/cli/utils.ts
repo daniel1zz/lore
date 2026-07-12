@@ -338,6 +338,23 @@ export function formatJudgmentBadge(judgment: ReviewJudgment | null, docVersion:
   return `[AI: ${judgment.decision} ${judgment.confidence.toFixed(2)}]${stale}`;
 }
 
+/**
+ * Render a `[stale? <confidence> ✋<n>Q]`-style badge for a `lore review --staleness
+ * --list` row (SPEC-044 §Design Decisions D6/D9) — mirrors {@link formatJudgmentBadge}'s
+ * shape but with the staleness-specific `stale?` marker. Never renders `[unreviewed]` or
+ * a `(stale)` suffix — `--list` only ever surfaces FRESH `escalate` judgments by
+ * construction (`listFreshStalenessEscalates`, `flows/staleness-flow.ts`), so both of
+ * `formatJudgmentBadge`'s other branches are structurally unreachable here.
+ *
+ * @param judgment - A fresh `kind="staleness"`, `decision="escalate"` judgment
+ * @returns `"[stale? 0.87 ✋2Q]"`
+ * @example
+ *   formatStalenessBadge({confidence: 0.87, blocking_questions: ["a", "b"], ...}) // "[stale? 0.87 ✋2Q]"
+ */
+export function formatStalenessBadge(judgment: ReviewJudgment): string {
+  return `[stale? ${judgment.confidence.toFixed(2)} ✋${judgment.blocking_questions.length}Q]`;
+}
+
 // ─── Table Output ───────────────────────────────────────────────────────────
 
 /**
