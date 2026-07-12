@@ -617,6 +617,9 @@ describe("OutlineService.resolve", () => {
         // reason: SPEC-025 §3 D7 — new required StoreInterface method; mechanical
         // addition (same class of fix as every other explicit delegate above).
         findLinksByToIds: (toIds, linkType) => store.findLinksByToIds(toIds, linkType),
+        // reason: SPEC-044 D1 — new required StoreInterface method; mechanical
+        // addition (same class of fix as every other explicit delegate above).
+        countLinksByToIds: (toIds) => store.countLinksByToIds(toIds),
         search: (q, f) => store.search(q, f),
         insertVersion: (v) => store.insertVersion(v),
         findVersions: (id, opts) => store.findVersions(id, opts),
@@ -628,8 +631,11 @@ describe("OutlineService.resolve", () => {
         // reason: SPEC-034 §3 — new required StoreInterface methods; mechanical
         // addition (same class of fix as every other explicit delegate above).
         insertJudgment: (j) => store.insertJudgment(j),
-        findJudgments: (id) => store.findJudgments(id),
-        latestJudgment: (id) => store.latestJudgment(id),
+        findJudgments: (id, kind) => store.findJudgments(id, kind),
+        latestJudgment: (id, kind) => store.latestJudgment(id, kind),
+        // reason: SPEC-044 D2 — new required StoreInterface method; mechanical
+        // addition (same class of fix as every other explicit delegate above).
+        latestJudgmentsByDocIds: (docIds, kind) => store.latestJudgmentsByDocIds(docIds, kind),
         insertCalibrationRecord: (r) => store.insertCalibrationRecord(r),
         queryCalibrationWindow: (f) => store.queryCalibrationWindow(f),
         close: () => store.close(),

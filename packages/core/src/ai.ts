@@ -322,6 +322,22 @@ export const AiConfigSchema = z
       })
       .strict()
       .default({}),
+    /**
+     * Staleness-probe operation configuration (SPEC-044 §Design Decisions D8).
+     * Character/count budgets for the `lore review --staleness` judge prompt — mirrors
+     * the `ai.review.*` precedent (D8 explicitly rejects a new top-level `review.*`
+     * config block; this section stays under `ai.*` like every other prompt-shaping
+     * budget).
+     */
+    staleness: z
+      .object({
+        /** Max chars of the probed document's own content included in the prompt. Default: 12000. */
+        max_doc_chars: z.number().int().positive().default(12000),
+        /** Max incoming-link neighbors shown to the judge before a loud "+n more" tail. Default: 20. */
+        neighbor_limit: z.number().int().positive().default(20),
+      })
+      .strict()
+      .default({}),
   })
   .strict()
   // Cross-field constraint: when provider === "http", ai.http is required (AC-HTTP-2).

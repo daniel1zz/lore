@@ -24,8 +24,10 @@ import type {
   LinkRecord,
   LinkType,
   ReviewJudgment,
+  ReviewJudgmentKind,
   ReviewReason,
   SearchHit,
+  SupersededCandidate,
   VersionRecord,
 } from "@lore/core";
 import { err, extractValidity, type LoreError, type Result } from "@lore/core";
@@ -122,6 +124,10 @@ export interface JudgmentRow {
   judge_provider: string;
   judge_model: string;
   judge_prompt_version: string;
+  /** `'review' | 'staleness'` — NOT NULL DEFAULT 'review' since migration-005.ts (SPEC-044 D3). */
+  kind: string;
+  /** JSON `SupersededCandidate` or NULL — nullable column since migration-005.ts (SPEC-044 D5/D11). */
+  superseded_candidate: string | null;
   created_at: string;
   created_by: string;
 }
@@ -139,12 +145,16 @@ export interface CalibrationRow {
 }
 
 /**
- * A {@link CalibrationRow} augmented with `judge_prompt_version`, projected
- * by `queryCalibrationWindow`'s UNCONDITIONAL join to `review_judgments`
- * (see `StoreInterface.CalibrationRecordWithPromptVersion`).
+ * A {@link CalibrationRow} augmented with `judge_prompt_version` AND `judge_kind`,
+ * projected by `queryCalibrationWindow`'s UNCONDITIONAL join to `review_judgments`
+ * (see `StoreInterface.CalibrationRecordWithPromptVersion`). `judge_kind` was added
+ * SPEC-044 D12/AC-SP-11 — `computeCalibrationStats`'s group key joins on it so review
+ * and staleness calibrations never pool into one Wilson bound even under the same
+ * `(doc_type, prompt_version)` pair.
  */
 export interface CalibrationRowWithPromptVersion extends CalibrationRow {
   judge_prompt_version: string;
+  judge_kind: string;
 }
 
 // ─── JSON helpers ──────────────────────────────────────────────────────────
@@ -154,6 +164,21 @@ export function parseJson<T>(raw: string, fallback: T): T {
     return JSON.parse(raw) as T;
   } catch {
     return fallback;
+  }
+}
+
+/**
+ * Like {@link parseJson} but for an OPTIONAL nullable column (e.g.
+ * `review_judgments.superseded_candidate`) — `null`/`undefined`/malformed JSON all
+ * degrade to `undefined` rather than a fallback value, matching `extractValidity`'s
+ * "absence is not an error" contract.
+ */
+export function parseJsonOptional<T>(raw: string | null | undefined): T | undefined {
+  if (raw === null || raw === undefined) return undefined;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return undefined;
   }
 }
 
@@ -241,8 +266,17 @@ export function rowToAuditEntry(row: AuditRow): AuditEntry {
   };
 }
 
-/** Maps a raw `review_judgments` row to a ReviewJudgment. Reassembles `judge` from its 3 denormalized columns. */
+/**
+ * Maps a raw `review_judgments` row to a ReviewJudgment. Reassembles `judge` from its 3
+ * denormalized columns. `kind` reads as `'review'` via `??` when the stored value is
+ * undefined (SPEC-044 D3/review S10 — a direct-`insertJudgment` legacy/test fixture that
+ * bypasses `reviewJudgmentSchema`'s own `.default("review")`), NEVER a strict-equality
+ * check against `'review'` — the DB column itself is `NOT NULL DEFAULT 'review'` post
+ * migration-005.ts, so this `??` is defense-in-depth for InMemoryStore/direct-insert
+ * paths, not something the SQL layer can actually produce `undefined`/`null` for.
+ */
 export function rowToReviewJudgment(row: JudgmentRow): ReviewJudgment {
+  const supersededCandidate = parseJsonOptional<SupersededCandidate>(row.superseded_candidate);
   return {
     id: row.id,
     doc_id: row.doc_id,
@@ -257,6 +291,8 @@ export function rowToReviewJudgment(row: JudgmentRow): ReviewJudgment {
       model: row.judge_model,
       prompt_version: row.judge_prompt_version,
     },
+    kind: (row.kind as ReviewJudgmentKind | undefined) ?? "review",
+    ...(supersededCandidate !== undefined ? { superseded_candidate: supersededCandidate } : {}),
     created_at: row.created_at,
     created_by: row.created_by,
   };
@@ -286,10 +322,12 @@ export function rowToCalibrationRecord(row: CalibrationRow): CalibrationRecord {
  */
 export function rowToCalibrationRecordWithPromptVersion(
   row: CalibrationRowWithPromptVersion,
-): CalibrationRecord & { judge_prompt_version: string } {
+): CalibrationRecord & { judge_prompt_version: string; judge_kind: ReviewJudgmentKind } {
   return {
     ...rowToCalibrationRecord(row),
     judge_prompt_version: row.judge_prompt_version,
+    // reason: same `?? 'review'` defense-in-depth as rowToReviewJudgment (SPEC-044 D12/S10).
+    judge_kind: (row.judge_kind as ReviewJudgmentKind | undefined) ?? "review",
   };
 }
 

@@ -29,10 +29,16 @@
  *   (review S7).
  * @invariant Doc `status` (the workflow lifecycle field) is NEVER touched by this
  *   service (D5 — temporal validity ⊥ workflow status).
+ * @invariant Calibration write THIRD, optional (SPEC-044 §Design Decisions D12) — when
+ *   the OPTIONAL `stalenessCalibration` port is wired (app.ts, T2) and this doc's latest
+ *   `kind="staleness"` judgment is a `stale_candidate` escalate, `invalidate` writes ONE
+ *   calibration record confirming the probe (`maybeRecordStalenessCalibration`). Bare
+ *   `new ValidityService(store)` (no port) writes NONE and never errors — same
+ *   optional-DI shape as `GateEnforcer`/`resolveDeclaredAcIds` elsewhere in this codebase.
  *
  * Side-effect class: IO (reads/writes via StoreInterface; emits telemetry).
  * Source: SPEC-043 §Design Decisions D1, D2, D5; §Acceptance Criteria AC-MH-2, AC-MH-3,
- *         AC-MH-4, AC-MH-10
+ *         AC-MH-4, AC-MH-10; SPEC-044 §Design Decisions D12, §Acceptance Criteria AC-SP-9
  */
 
 import {
@@ -43,6 +49,7 @@ import {
   type DocRecord,
   type LoreError,
   type Result,
+  type ReviewJudgment,
   type Telemetry,
   type TelemetryEvent,
 } from "@lore/core";
@@ -88,12 +95,46 @@ export interface InvalidateResult {
   decision_status_unchanged?: "superseded";
 }
 
+/**
+ * Narrow, ValidityService-local port for wiring into `JudgmentService`'s calibration
+ * capability (SPEC-044 §Design Decisions D12) WITHOUT importing `JudgmentService`
+ * directly — services don't call each other (`packages/lore/src/service/CLAUDE.md`).
+ * Structurally compatible with `judgmentService.latestFor.bind(judgmentService)`
+ * (partially applied to `kind: "staleness"` by the app.ts wiring) and
+ * `judgmentService.recordCalibration.bind(judgmentService)` — the production
+ * composition root (T2) binds the real implementations; bare unit-test construction of
+ * `ValidityService` simply omits this argument (OPTIONAL DI, mirrors `GateEnforcer`/
+ * `resolveDeclaredAcIds`'s precedent).
+ */
+export interface StalenessCalibrationPort {
+  /** The doc's LATEST `kind="staleness"` judgment, or `null`. Bind to
+   *  `(docId) => judgmentService.latestFor(docId, "staleness")`. */
+  latestStalenessJudgment(docId: string): Promise<Result<ReviewJudgment | null, LoreError>>;
+  /** Bind directly to `judgmentService.recordCalibration.bind(judgmentService)`. */
+  recordCalibration(input: {
+    judgment: ReviewJudgment;
+    docType: DocRecord["type"];
+    currentDocVersion: number;
+    humanOutcome: "confirmed" | "overridden";
+    deltaReasons: string[];
+    actor: string;
+  }): Promise<Result<{ recorded: boolean }, LoreError>>;
+}
+
 export class ValidityService {
   private readonly telemetry: Telemetry;
 
   constructor(
     private readonly store: StoreInterface,
     telemetry: Telemetry = new NoOpTelemetry(),
+    /**
+     * OPTIONAL calibration port (SPEC-044 D12) — when absent (every bare
+     * `new ValidityService(store)` unit-test construction), `invalidate` writes NO
+     * calibration record and never errors; when wired (app.ts, T2), a stale_candidate
+     * probe that a human then confirms via `invalidate` writes exactly ONE calibration
+     * record FK'd to that judgment (AC-SP-9).
+     */
+    private readonly stalenessCalibration?: StalenessCalibrationPort,
   ) {
     this.telemetry = telemetry;
   }
@@ -283,7 +324,47 @@ export class ValidityService {
       if (!linkResult.ok) return linkResult;
     }
 
+    // Calibration write THIRD (SPEC-044 D12) — only when the port is wired; uses the
+    // ORIGINAL (pre-commit) `doc.version` as the version-pin, since that's the version
+    // the staleness judgment (if any) was made against.
+    const calibrationResult = await this.maybeRecordStalenessCalibration(doc, opts.by);
+    if (!calibrationResult.ok) return calibrationResult;
+
     return ok({ doc: updatedDoc });
+  }
+
+  /**
+   * D12 calibration join: when `stalenessCalibration` is wired AND the doc's latest
+   * `kind="staleness"` judgment is a `stale_candidate` (`decision: "escalate"`) verdict,
+   * writes ONE calibration record (`human_outcome: "confirmed"` — invalidating a doc a
+   * probe flagged stale IS the human confirming the probe was right; there is no
+   * observable outcome for a `holds` verdict, D12) FK'd to that judgment. No-ops
+   * (returns `ok(undefined)`, never an error) when: the port is absent (bare
+   * construction); no staleness judgment exists yet for this doc; or the latest
+   * staleness judgment's decision is `"approve"` (holds).
+   */
+  private async maybeRecordStalenessCalibration(
+    originalDoc: DocRecord,
+    by: string,
+  ): Promise<Result<void, LoreError>> {
+    if (this.stalenessCalibration === undefined) return ok(undefined);
+
+    const latestResult = await this.stalenessCalibration.latestStalenessJudgment(originalDoc.id);
+    if (!latestResult.ok) return latestResult;
+    const judgment = latestResult.value;
+    if (judgment === null || judgment.decision !== "escalate") return ok(undefined);
+
+    const outcomeResult = await this.stalenessCalibration.recordCalibration({
+      judgment,
+      docType: originalDoc.type,
+      currentDocVersion: originalDoc.version,
+      humanOutcome: "confirmed",
+      deltaReasons: [],
+      actor: by,
+    });
+    if (!outcomeResult.ok) return outcomeResult;
+
+    return ok(undefined);
   }
 
   /**

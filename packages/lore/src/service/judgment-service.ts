@@ -5,35 +5,46 @@
  * one owner for the family rather than splitting into a second service (SPEC-034 D8).
  *
  * Public surface:
- *   record(newJudgment)         → persist one AI-authored judgment + audit entry
- *   latestFor(docId)            → most recent judgment for a doc, or null
- *   listFor(docId)              → all judgments for a doc, newest first
+ *   record(newJudgment, opts?)  → persist one AI-authored judgment + audit entry
+ *   latestFor(docId, kind?)     → most recent judgment of a kind for a doc, or null
+ *   listFor(docId, kind?)       → all judgments of a kind for a doc, newest first
  *   recordCalibration(input)    → persist a human confirm/override outcome, version-pinned
- *   computeCalibrationStats(filter?) → per-doc_type aggregated Wilson-bound stats
+ *   computeCalibrationStats(filter?) → per-(doc_type, prompt_version, kind) aggregated Wilson-bound stats
  *
  * @invariant Stateless: only StoreInterface + Telemetry are held; all durable state lives
- *   in review_judgments / calibration_records (migration-003.ts).
+ *   in review_judgments / calibration_records (migration-003.ts, kind/superseded_candidate
+ *   columns added migration-005.ts, SPEC-044 D3).
  * @invariant record() generates `id` (ULID), `created_at` (wall clock), and `created_by`
  *   (`formatJudgeActor(newJudgment.judge)` — every judgment in R1 is AI-authored, SPEC-034
- *   D1) itself; the caller (`AIProviderService.judgeDoc`) never sets these three fields.
+ *   D1) itself; the caller (`AIProviderService.judgeDoc`/`probeStaleness`) never sets these
+ *   three fields. `opts.auditAction`/`opts.auditActor` (SPEC-044 D4) override the DEFAULT
+ *   audit entry this method writes (`action: "judge"`, `actor: created_by`) — used by
+ *   `StalenessProbeService` to write `action: "staleness_probe"` with the COMMISSIONING
+ *   actor instead of the synthetic AI judge string, while still going through this SAME
+ *   sole persistence method (never a second, bypassing write path).
  * @invariant record() re-validates the fully-assembled row via `reviewJudgmentSchema`
  *   before `insertJudgment` — a defensive re-check even though judgeDoc's output is
  *   already schema-shaped, because record() is the ONLY method with permission to persist.
  * @invariant recordCalibration() is version-pinned: a calibration row may only attach to
- *   the doc's LATEST judgment, AND only when the caller-supplied `currentDocVersion`
- *   still matches that judgment's `doc_version`. Either mismatch is a deliberate skip
+ *   the doc's LATEST judgment OF THE SAME KIND (`input.judgment.kind ?? "review"`, SPEC-044
+ *   D3/AC-SP-2 — calibrating a review judgment ignores staleness rows entirely and vice
+ *   versa), AND only when the caller-supplied `currentDocVersion` still matches that
+ *   judgment's `doc_version`. Either mismatch is a deliberate skip
  *   (`{recorded: false, reason: "version_mismatch" | "not_latest_judgment"}`), never a
  *   thrown error or a silently-accepted stale calibration — "the doc moved on since this
  *   judgment" is an expected, non-exceptional race, not a failure.
  * @invariant computeCalibrationStats is the SINGLE aggregation owner (SPEC-034 §5) — any
  *   future consumer (e.g. `lore calibration --stats`, an auto-execution circuit breaker)
- *   calls this same method, never recomputes the Wilson bound inline.
+ *   calls this same method, never recomputes the Wilson bound inline. The group key is
+ *   `(doc_type, judge_prompt_version, judge_kind)` (SPEC-044 D12/AC-SP-11) — review and
+ *   staleness calibrations never pool into one Wilson bound even under the literal SAME
+ *   "v1" prompt-version string (review S5).
  * @invariant Never touches doc status — judgments and calibration are observational only
  *   in R1 (SPEC-034 D7); execution/auto-approve is a future, ADR-gated spec.
  *
  * Side-effect class: IO (delegates to StoreInterface + Telemetry)
  *
- * Source: SPEC-034 §5
+ * Source: SPEC-034 §5; SPEC-044 §Design Decisions D3, D4, D12
  */
 
 import { ulid } from "ulidx";
@@ -47,6 +58,7 @@ import type {
   NewReviewJudgment,
   Result,
   ReviewJudgment,
+  ReviewJudgmentKind,
   Telemetry,
   TelemetryEvent,
 } from "@lore/core";
@@ -97,6 +109,13 @@ export interface CalibrationStats {
    * {@link JudgmentService.computeCalibrationStats}).
    */
   prompt_version: string;
+  /**
+   * The joined `kind` ('review'|'staleness') of the judgments this row's calibration
+   * records were derived from (SPEC-044 D12/AC-SP-11) — every row is disaggregated by
+   * `(doc_type, prompt_version, kind)`, never pooled across kinds even when both kinds
+   * happen to share the literal same prompt-version string (review S5).
+   */
+  kind: ReviewJudgmentKind;
   n: number;
   agreement_rate: number;
   wilson_lower_bound: number;
@@ -127,9 +146,12 @@ export class JudgmentService {
    * if (!judgeResult.ok) { ... }
    * const recordResult = await judgmentService.record(judgeResult.value);
    */
-  async record(newJudgment: NewReviewJudgment): Promise<Result<ReviewJudgment, LoreError>> {
+  async record(
+    newJudgment: NewReviewJudgment,
+    opts?: { auditAction?: string; auditActor?: string },
+  ): Promise<Result<ReviewJudgment, LoreError>> {
     const startMs = Date.now();
-    const result = await this._recordImpl(newJudgment);
+    const result = await this._recordImpl(newJudgment, opts);
     this._recordTelemetryEvent("record", startMs, result, {
       doc_id: newJudgment.doc_id,
       decision: newJudgment.decision,
@@ -137,18 +159,26 @@ export class JudgmentService {
     return result;
   }
 
-  private async _recordImpl(newJudgment: NewReviewJudgment): Promise<Result<ReviewJudgment, LoreError>> {
+  private async _recordImpl(
+    newJudgment: NewReviewJudgment,
+    opts?: { auditAction?: string; auditActor?: string },
+  ): Promise<Result<ReviewJudgment, LoreError>> {
     const createdAt = new Date().toISOString();
     const candidate = {
       ...newJudgment,
+      // reason: reviewJudgmentSchema keeps `kind` OPTIONAL (not `.default()`, see
+      // review-judgment.ts's module @invariant) so this is the ONE place that resolves
+      // "no kind" -> "review" explicitly, before persisting (SPEC-044 D3).
+      kind: newJudgment.kind ?? "review",
       id: ulid(),
       created_at: createdAt,
       created_by: formatJudgeActor(newJudgment.judge),
     };
 
-    // reason: defensive re-validation — judgeDoc's output is already schema-shaped, but
-    // record() is the ONLY method with permission to write review_judgments, so it never
-    // trusts a caller-assembled candidate without re-checking it against the SSOT schema.
+    // reason: defensive re-validation — judgeDoc's/probeStaleness's output is already
+    // schema-shaped, but record() is the ONLY method with permission to write
+    // review_judgments, so it never trusts a caller-assembled candidate without
+    // re-checking it against the SSOT schema.
     const parsed = reviewJudgmentSchema.safeParse(candidate);
     if (!parsed.success) {
       const issue = parsed.error.issues[0];
@@ -162,11 +192,16 @@ export class JudgmentService {
     const insertResult = await this.store.insertJudgment(parsed.data);
     if (!insertResult.ok) return insertResult;
 
+    // reason: SPEC-044 D4 — StalenessProbeService overrides BOTH the audit action
+    // ("staleness_probe" instead of "judge") and the actor (the COMMISSIONING `by`
+    // instead of the synthetic AI judge string) because a probe is a discretionary,
+    // cost-incurring action someone chose to run — the judgment row's own `judge` field
+    // still carries the real provider/model/prompt-version regardless of this override.
     const auditResult = await this.store.appendAuditEntry({
       timestamp: parsed.data.created_at,
-      actor: parsed.data.created_by,
+      actor: opts?.auditActor ?? parsed.data.created_by,
       session_id: `judge-${parsed.data.doc_id}`,
-      action: "judge",
+      action: opts?.auditAction ?? "judge",
       doc_id: parsed.data.doc_id,
       details: { judgment_ref: parsed.data.id, version: parsed.data.doc_version },
     });
@@ -179,18 +214,29 @@ export class JudgmentService {
    * Most recent judgment for a doc, or `null` if none exists yet.
    *
    * @param docId - Document ULID
+   * @param kind - Which kind of judgment to look for (SPEC-044 D3). Defaults to
+   *   `"review"` so every pre-SPEC-044 caller (`lore pending` triage badges, review
+   *   freshness) stays byte-identical — a staleness "holds" row can never masquerade as
+   *   a real review approval (review S2).
    */
-  async latestFor(docId: DocId): Promise<Result<ReviewJudgment | null, LoreError>> {
-    return this.store.latestJudgment(docId);
+  async latestFor(
+    docId: DocId,
+    kind: ReviewJudgmentKind = "review",
+  ): Promise<Result<ReviewJudgment | null, LoreError>> {
+    return this.store.latestJudgment(docId, kind);
   }
 
   /**
    * All judgments for a doc, newest first.
    *
    * @param docId - Document ULID
+   * @param kind - Same default-to-"review" contract as {@link latestFor} (SPEC-044 D3).
    */
-  async listFor(docId: DocId): Promise<Result<ReviewJudgment[], LoreError>> {
-    return this.store.findJudgments(docId);
+  async listFor(
+    docId: DocId,
+    kind: ReviewJudgmentKind = "review",
+  ): Promise<Result<ReviewJudgment[], LoreError>> {
+    return this.store.findJudgments(docId, kind);
   }
 
   /**
@@ -231,9 +277,13 @@ export class JudgmentService {
       return ok({ recorded: false, reason: "version_mismatch" });
     }
 
-    // Only the LATEST judgment for the doc may be calibrated — an older judgment being
-    // confirmed/overridden after a newer one exists would misattribute the outcome.
-    const latestResult = await this.store.latestJudgment(input.judgment.doc_id);
+    // Only the LATEST judgment OF THE SAME KIND for the doc may be calibrated — an older
+    // judgment being confirmed/overridden after a newer one exists would misattribute the
+    // outcome. Scoping by `input.judgment.kind` (SPEC-044 D3/AC-SP-2) means calibrating a
+    // review judgment ignores staleness rows entirely (and vice versa) — a fresher
+    // staleness "holds" probe must never make an older-but-still-latest REVIEW judgment
+    // look stale to this check.
+    const latestResult = await this.store.latestJudgment(input.judgment.doc_id, input.judgment.kind ?? "review");
     if (!latestResult.ok) return latestResult;
     if (latestResult.value === null || latestResult.value.id !== input.judgment.id) {
       return ok({ recorded: false, reason: "not_latest_judgment" });
@@ -267,22 +317,25 @@ export class JudgmentService {
   }
 
   /**
-   * Aggregate calibration records into per-(doc_type, prompt_version) Wilson-bound
+   * Aggregate calibration records into per-(doc_type, prompt_version, kind) Wilson-bound
    * stats, within a bounded window (`CALIBRATION_WINDOW_LIMIT`, newest-first).
    *
-   * @invariant `CalibrationRecord` itself carries `doc_type` but NOT `prompt_version`
-   *   (only the judgment it's FK'd to does) — the store's `queryCalibrationWindow`
-   *   projects the judgment's real `judge_prompt_version` onto every returned row
-   *   (unconditional join, not just when `filter.prompt_version` is pinned), so
-   *   grouping here is always by the ACTUAL (doc_type, prompt_version) pair present in
-   *   the data — never collapsed into an unpinned "aggregate across all versions"
-   *   sentinel. A doc_type reviewed under two different prompt versions produces two
-   *   separate `CalibrationStats` rows.
+   * @invariant `CalibrationRecord` itself carries `doc_type` but NOT `prompt_version`/
+   *   `kind` (only the judgment it's FK'd to does) — the store's `queryCalibrationWindow`
+   *   projects the judgment's real `judge_prompt_version` AND `judge_kind` onto every
+   *   returned row (unconditional join, not just when `filter.prompt_version` is
+   *   pinned), so grouping here is always by the ACTUAL (doc_type, prompt_version, kind)
+   *   triple present in the data — never collapsed into an unpinned "aggregate across
+   *   all versions/kinds" sentinel. A doc_type reviewed under two different prompt
+   *   versions produces two separate `CalibrationStats` rows; a doc_type calibrated
+   *   under BOTH `kind: "review"` and `kind: "staleness"` — even under the literal SAME
+   *   `"v1"` prompt-version string — produces two separate rows too (SPEC-044 D12/
+   *   AC-SP-11/review S5), never one pooled Wilson bound.
    *
    * @param filter - Optional narrowing by doc_type and/or prompt_version
    * @returns Result<CalibrationStats[], LoreError> — one entry per distinct
-   *   (doc_type, prompt_version) pair present in the window; empty array when the
-   *   window has zero matching records
+   *   (doc_type, prompt_version, kind) triple present in the window; empty array when
+   *   the window has zero matching records
    */
   async computeCalibrationStats(filter?: {
     doc_type?: DocType;
@@ -298,23 +351,29 @@ export class JudgmentService {
     if (!windowResult.ok) return windowResult;
     const records = windowResult.value;
 
-    // reason: group key is the REAL (doc_type, prompt_version) pair, never a
+    // reason: group key is the REAL (doc_type, prompt_version, kind) triple, never a
     // caller-supplied/unpinned sentinel — see @invariant above.
-    const groups = new Map<string, { docType: DocType; promptVersion: string; bucket: CalibrationRecordWithPromptVersion[] }>();
+    const groups = new Map<
+      string,
+      { docType: DocType; promptVersion: string; kind: ReviewJudgmentKind; bucket: CalibrationRecordWithPromptVersion[] }
+    >();
     for (const record of records) {
-      const key = `${record.doc_type}::${record.judge_prompt_version}`;
-      const group = groups.get(key) ?? { docType: record.doc_type, promptVersion: record.judge_prompt_version, bucket: [] };
+      const key = `${record.doc_type}::${record.judge_prompt_version}::${record.judge_kind}`;
+      const group =
+        groups.get(key) ??
+        { docType: record.doc_type, promptVersion: record.judge_prompt_version, kind: record.judge_kind, bucket: [] };
       group.bucket.push(record);
       groups.set(key, group);
     }
 
     const stats: CalibrationStats[] = [];
-    for (const { docType, promptVersion, bucket } of groups.values()) {
+    for (const { docType, promptVersion, kind, bucket } of groups.values()) {
       const n = bucket.length;
       const successes = bucket.filter((r) => r.human_outcome === "confirmed").length;
       stats.push({
         doc_type: docType,
         prompt_version: promptVersion,
+        kind,
         n,
         agreement_rate: n === 0 ? 0 : successes / n,
         wilson_lower_bound: wilsonLowerBound(successes, n),

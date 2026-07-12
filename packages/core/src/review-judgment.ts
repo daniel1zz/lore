@@ -7,17 +7,20 @@
  *
  * Public surface:
  *   - REVIEW_DECISIONS / ReviewDecision — the three verdicts a review judgment can reach
+ *   - REVIEW_JUDGMENT_KINDS / ReviewJudgmentKind — "review" | "staleness" (SPEC-044 D3)
  *   - judgeIdentitySchema / JudgeIdentity — which model+prompt produced a judgment
  *   - checkResultSchema / CheckResult — one mechanical (non-LLM) validation outcome
  *   - reviewReasonSchema / ReviewReason — one human-readable justification entry
+ *   - supersededCandidateSchema / SupersededCandidate — {ref, reason<=200} (SPEC-044 D5/D11)
  *   - llmReviewOutputSchema / LlmReviewOutput — the shape the AI judge must emit
  *     (decision/confidence/reasons/checks?/blocking_questions — no id/doc_id/doc_version/
  *     judge/created_*: those are filled in by the reviewing service after a successful
  *     parse, not by the model — mirrors assessment.ts's llmAssessmentOutputSchema split)
  *   - reviewJudgmentSchema / ReviewJudgment — full persisted shape (llm output + identity
- *     + judge metadata), stored one row per judgment in `review_judgments`
- *   - NewReviewJudgment — ReviewJudgment minus {id, created_at, created_by}; the
- *     AIProviderService.judgeDoc → JudgmentService.record hand-off shape (SPEC-034 §4)
+ *     + judge metadata + kind), stored one row per judgment in `review_judgments`
+ *   - NewReviewJudgment — ReviewJudgment minus {id, created_at, created_by}, with `kind`
+ *     made OPTIONAL again (see @invariant below); the AIProviderService.judgeDoc/
+ *     probeStaleness → JudgmentService.record hand-off shape (SPEC-034 §4, SPEC-044 D3/D4)
  *
  * Invariants:
  *   - decision === "escalate" requires at least one blocking_questions entry; every other
@@ -33,10 +36,26 @@
  *   - `truncated` (SPEC-040 D8) is optional on BOTH schemas (unlike `checks`, it stays
  *     optional even once persisted) — additive-only, absent means "not truncated" /
  *     "predates SPEC-040", never an unknown state.
+ *   - `superseded_candidate` (SPEC-044 D5/D11) is optional on BOTH schemas too — the SAME
+ *     field name/shape a regular review judge MAY emit (D11 byproduct) and a staleness
+ *     probe's persisted judgment carries (D5) — one concept, one name (review S7).
+ *   - `kind` (SPEC-044 D3) is `.optional()` (deliberately NOT `.default()`) on
+ *     `reviewJudgmentSchema` — a candidate object missing `kind` entirely still
+ *     validates, and `ReviewJudgment.kind` stays optional in `z.infer`'s OUTPUT type too
+ *     (a `.default()` would make it REQUIRED in the output type, breaking every
+ *     PRE-SPEC-044 fixture that hand-constructs a `ReviewJudgment`-typed object for a
+ *     direct `store.insertJudgment` bypass call). Every reader treats an absent `kind`
+ *     as `"review"` via `?? "review"` (S10); `JudgmentService._recordImpl` is the ONE
+ *     place that resolves this default explicitly before persisting (AC-SP-2 REGRESSION).
+ *   - The kind-conditioned "staleness rows cannot decision='reject'" refinement
+ *     (`validateKindDecisionInvariant`) runs BEFORE `validateEscalateInvariant` on
+ *     `reviewJudgmentSchema`'s chain — a candidate that violates BOTH (kind='staleness',
+ *     decision='reject', non-empty blocking_questions) surfaces the kind-decision message
+ *     as `issues[0]` (SPEC-044 review S6, AC-SP-2 dual-fire case).
  *
  * Side-effect class: pure
  *
- * Source: SPEC-034 §2, §3; SPEC-040 §T2 D8
+ * Source: SPEC-034 §2, §3; SPEC-040 §T2 D8; SPEC-044 §Design Decisions D3, D5, D11
  */
 
 import { z } from "zod";
@@ -48,6 +67,18 @@ export const REVIEW_DECISIONS = ["approve", "reject", "escalate"] as const;
 
 /** Derived TypeScript type for a review decision. */
 export type ReviewDecision = (typeof REVIEW_DECISIONS)[number];
+
+/**
+ * The two kinds of judgment persisted in `review_judgments` (SPEC-044 §Design Decisions
+ * D3) — "review" is the pre-existing SPEC-034 document-review judgment; "staleness" is a
+ * new SPEC-044 probe verdict. The store-level `kind` filter on `latestJudgment`/
+ * `findJudgments` is what stops a staleness "holds" row (persisted `decision: "approve"`)
+ * from masquerading as a real review approval in `lore pending` (review S2).
+ */
+export const REVIEW_JUDGMENT_KINDS = ["review", "staleness"] as const;
+
+/** Derived TypeScript type for a review-judgment kind. */
+export type ReviewJudgmentKind = (typeof REVIEW_JUDGMENT_KINDS)[number];
 
 // ─── Judge Identity ─────────────────────────────────────────────────────────
 
@@ -114,6 +145,32 @@ export const reviewReasonSchema = z.object({
 /** Derived TypeScript type for one review reason entry. */
 export type ReviewReason = z.infer<typeof reviewReasonSchema>;
 
+// ─── Superseded Candidate (SPEC-044 D5/D11) ─────────────────────────────────
+
+/**
+ * A judge's nomination that some OTHER document is superseded by the one under
+ * judgment/probe — the economic nudge that keeps SPEC-043's `lore invalidate` verb
+ * alive without automation. ONE canonical shape shared by a SPEC-044 staleness probe's
+ * `stale_candidate` verdict (D5) and a SPEC-034 review judge's byproduct nomination
+ * (D11) — never two names for the same concept (review S7).
+ *
+ * @example
+ * supersededCandidateSchema.parse({ ref: "knowledge-old-retro", reason: "superseded by this doc's findings" });
+ */
+export const supersededCandidateSchema = z.object({
+  /** id-or-slug of the document the judge believes is superseded. Resolved against the
+   *  corpus by the RENDERING layer (CLI/MCP), never here — this schema stays a bare
+   *  string, matching `invalidated_by`'s precedent in validity.ts. */
+  ref: z.string().min(1),
+  /** Free-text justification, capped at 200 chars — mirrors validity.ts's `reason` cap
+   *  being SHORTER here (200 vs 500) since this is a terse judge-emitted nomination,
+   *  not a human-authored narrative. */
+  reason: z.string().max(200),
+});
+
+/** Derived TypeScript type for a superseded-candidate nomination. */
+export type SupersededCandidate = z.infer<typeof supersededCandidateSchema>;
+
 // ─── Shared Shape + Escalate Invariant ──────────────────────────────────────
 
 /**
@@ -141,6 +198,14 @@ const reviewJudgmentBaseShape = z.object({
    * not an unknown state.
    */
   truncated: z.boolean().optional(),
+  /**
+   * A judge's optional nomination that some OTHER document is superseded by this one
+   * (SPEC-044 D5/D11). Present on the shared base shape (not just the persisted schema)
+   * because BOTH the raw LLM output (a review judge emitting this as a byproduct, D11)
+   * and a staleness probe's verdict (D5) may carry it — `AIProviderService.judgeDoc`/
+   * `probeStaleness` pass it through verbatim, never re-deriving it.
+   */
+  superseded_candidate: supersededCandidateSchema.optional(),
 });
 
 /**
@@ -165,6 +230,33 @@ function validateEscalateInvariant(
       code: z.ZodIssueCode.custom,
       message: "blocking_questions must be empty unless decision is 'escalate'",
       path: ["blocking_questions"],
+    });
+  }
+}
+
+// ─── Kind-Conditioned Decision Invariant (SPEC-044 D3) ─────────────────────
+
+/**
+ * Cross-field invariant applying ONLY to the persisted `reviewJudgmentSchema` (never
+ * `llmReviewOutputSchema`, which has no `kind` field at all — the model never emits it,
+ * the reviewing/probing SERVICE decides which prompt/pipeline produced the row): a
+ * `kind: "staleness"` judgment's `decision` MUST be `"approve"` (holds) or `"escalate"`
+ * (stale_candidate) — `"reject"` is structurally impossible for a probe (SPEC-044 D3).
+ *
+ * @invariant Registered BEFORE `validateEscalateInvariant` in `reviewJudgmentSchema`'s
+ *   refinement chain — a doubly-malformed candidate (kind="staleness", decision="reject",
+ *   non-empty blocking_questions) surfaces THIS message as `issues[0]` (review S6).
+ */
+function validateKindDecisionInvariant(
+  data: { kind?: ReviewJudgmentKind | undefined; decision: ReviewDecision },
+  ctx: z.RefinementCtx,
+): void {
+  if ((data.kind ?? "review") === "staleness" && data.decision === "reject") {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message:
+        "kind 'staleness' judgments cannot have decision 'reject' — only 'approve' (holds) or 'escalate' (stale_candidate) are valid",
+      path: ["decision"],
     });
   }
 }
@@ -216,9 +308,25 @@ export const reviewJudgmentSchema = reviewJudgmentBaseShape
     /** Required once persisted — the service always layers mechanical checks on before writing. */
     checks: z.array(checkResultSchema),
     judge: judgeIdentitySchema,
+    /**
+     * Discriminates a SPEC-034 review judgment from a SPEC-044 staleness-probe verdict.
+     * OPTIONAL (not `.default()`) — a candidate/row missing this key entirely still
+     * validates; every reader treats an absent value as `"review"` via `?? "review"`
+     * (never strict equality, S10). Kept optional (rather than defaulted, which would
+     * make `z.infer`'s OUTPUT type require it) so the pre-existing pattern of
+     * hand-constructing a `ReviewJudgment`-typed fixture object for a direct
+     * `store.insertJudgment` bypass call (skipping this schema entirely) keeps
+     * compiling with zero changes — see module @invariant re: REGRESSION safety.
+     * `JudgmentService._recordImpl` is the ONE place that resolves the default
+     * explicitly (`newJudgment.kind ?? "review"`) before this schema ever sees it.
+     */
+    kind: z.enum(REVIEW_JUDGMENT_KINDS).optional(),
     created_at: z.string(),
     created_by: z.string(),
   })
+  // reason: kind-conditioned check FIRST — see validateKindDecisionInvariant's own
+  // @invariant for why ordering (not just presence) matters (review S6 dual-fire case).
+  .superRefine(validateKindDecisionInvariant)
   .superRefine(validateEscalateInvariant);
 
 /** Derived TypeScript type for a full persisted review judgment. */

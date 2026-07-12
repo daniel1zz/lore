@@ -14,6 +14,7 @@ import type {
   LinkRecord,
   LinkType,
   ReviewJudgment,
+  ReviewJudgmentKind,
   Slug,
   VersionRecord,
 } from "@lore/core";
@@ -276,6 +277,18 @@ export class InMemoryStore implements StoreInterface {
     return ok(found.map((l) => ({ ...l })));
   }
 
+  async countLinksByToIds(toIds: DocId[]): Promise<Result<Map<DocId, number>, LoreError>> {
+    const counts = new Map<DocId, number>();
+    if (toIds.length === 0) return ok(counts);
+    const idSet = new Set(toIds);
+    for (const link of this.links) {
+      if (idSet.has(link.to_id)) {
+        counts.set(link.to_id, (counts.get(link.to_id) ?? 0) + 1);
+      }
+    }
+    return ok(counts);
+  }
+
   // ── Search ────────────────────────────────────────────────────────────────
 
   /**
@@ -403,17 +416,38 @@ export class InMemoryStore implements StoreInterface {
     return ok(undefined);
   }
 
-  async findJudgments(docId: DocId): Promise<Result<ReviewJudgment[], LoreError>> {
+  async findJudgments(docId: DocId, kind?: ReviewJudgmentKind): Promise<Result<ReviewJudgment[], LoreError>> {
     const matching = this.judgments
-      .filter((j) => j.doc_id === docId)
+      .filter((j) => j.doc_id === docId && (kind === undefined || (j.kind ?? "review") === kind))
       .sort((a, b) => b.created_at.localeCompare(a.created_at));
     return ok(matching.map((j) => ({ ...j })));
   }
 
-  async latestJudgment(docId: DocId): Promise<Result<ReviewJudgment | null, LoreError>> {
-    const matchingResult = await this.findJudgments(docId);
+  async latestJudgment(
+    docId: DocId,
+    kind?: ReviewJudgmentKind,
+  ): Promise<Result<ReviewJudgment | null, LoreError>> {
+    const matchingResult = await this.findJudgments(docId, kind);
     if (!matchingResult.ok) return matchingResult;
     return ok(matchingResult.value[0] ?? null);
+  }
+
+  async latestJudgmentsByDocIds(
+    docIds: DocId[],
+    kind: ReviewJudgmentKind,
+  ): Promise<Result<Map<DocId, ReviewJudgment>, LoreError>> {
+    const result = new Map<DocId, ReviewJudgment>();
+    if (docIds.length === 0) return ok(result);
+    const idSet = new Set(docIds);
+    const matching = this.judgments
+      .filter((j) => idSet.has(j.doc_id) && (j.kind ?? "review") === kind)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+    for (const j of matching) {
+      if (!result.has(j.doc_id)) {
+        result.set(j.doc_id, { ...j });
+      }
+    }
+    return ok(result);
   }
 
   // ── Calibration Records ──────────────────────────────────────────────────────
@@ -433,6 +467,11 @@ export class InMemoryStore implements StoreInterface {
     // disaggregation follow-up.
     const judgmentPromptVersionById = new Map(
       this.judgments.map((j) => [j.id, j.judge.prompt_version]),
+    );
+    // reason: judge_kind is projected the SAME way (SPEC-044 D12/AC-SP-11) — same
+    // unconditional in-memory lookup, mirroring the SQL join's added `j.kind` column.
+    const judgmentKindById = new Map(
+      this.judgments.map((j) => [j.id, j.kind ?? "review"] as const),
     );
 
     let results = this.calibrationRecords.filter((record) => {
@@ -463,7 +502,8 @@ export class InMemoryStore implements StoreInterface {
           message: `queryCalibrationWindow: calibration record ${record.id} references unknown judgment_id ${record.judgment_id}`,
         });
       }
-      projected.push({ ...record, judge_prompt_version: judgePromptVersion });
+      const judgeKind = judgmentKindById.get(record.judgment_id) ?? "review";
+      projected.push({ ...record, judge_prompt_version: judgePromptVersion, judge_kind: judgeKind });
     }
 
     return ok(projected);

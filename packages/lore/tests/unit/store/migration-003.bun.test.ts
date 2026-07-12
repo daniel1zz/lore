@@ -54,7 +54,9 @@ describe("migration-003 (review_judgments + calibration_records)", () => {
     const { user_version: userVersion } = db.query("PRAGMA user_version").get() as {
       user_version: number;
     };
-    expect(userVersion).toBe(4);
+    // reason: SPEC-044 T1 added migration-005 — a fresh store now runs every migration
+    // up to the current head (5), not just through migration-003/004.
+    expect(userVersion).toBe(5);
 
     const tableNames = db
       .query("SELECT name FROM sqlite_master WHERE type = 'table'")
@@ -116,15 +118,17 @@ describe("migration-003 (review_judgments + calibration_records)", () => {
     rawDb.close();
 
     // Reopening via SQLiteStore should detect currentVersion (2) < 3 and apply
-    // migration-003 (then also migration-004, since currentVersion (2) < 4 too)
-    // — never throw, never touch the pre-existing docs row.
+    // migration-003 (then also migration-004/005, since currentVersion (2) is below
+    // every later migration's threshold too) — never throw, never touch the
+    // pre-existing docs row.
     const store = new SQLiteStore(dbPath);
     const db = store.getDatabase();
 
     const { user_version: postUpgradeVersion } = db.query("PRAGMA user_version").get() as {
       user_version: number;
     };
-    expect(postUpgradeVersion).toBe(4);
+    // reason: SPEC-044 T1 added migration-005 — see HAPPY test's comment above.
+    expect(postUpgradeVersion).toBe(5);
 
     const tableNames = db
       .query("SELECT name FROM sqlite_master WHERE type = 'table'")
@@ -150,7 +154,8 @@ describe("migration-003 (review_judgments + calibration_records)", () => {
       const { user_version: userVersion } = db.query("PRAGMA user_version").get() as {
         user_version: number;
       };
-      expect(userVersion).toBe(4);
+      // reason: SPEC-044 T1 added migration-005 — see HAPPY test's comment above.
+      expect(userVersion).toBe(5);
       secondOpen.close();
     }).not.toThrow();
   });
