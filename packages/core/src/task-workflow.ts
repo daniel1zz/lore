@@ -10,6 +10,8 @@
  *   - isClaimStale(claim, nowIso, ttlMinutes) — pure staleness check
  *   - resolveTargetTask(tasks, opts) — pure host-task resolution for `lore verify`:
  *     explicit override > sole fresh claim > ambiguity error (SPEC-039 §2 D4)
+ *   - isApprovedVerifyCommand(task, command) — pure command-provenance check: has this
+ *     exact command been recorded before on this task's evidence history? (SPEC-039 §M2)
  *   - evaluateReadiness(...) — computed readiness report over blocks-links + statuses
  *   - ReadyRecord — flat per-task readiness record (D9: flat array, no phase grouping here)
  *
@@ -22,7 +24,7 @@
  *
  * Side-effect class: pure
  *
- * Source: SPEC-025 §3 D1-D3, D9, D10; §8.2, §8.3; SPEC-039 §2 D1, D4
+ * Source: SPEC-025 §3 D1-D3, D9, D10; §8.2, §8.3; SPEC-039 §2 D1, D4; SPEC-039 §M2
  */
 
 import { z } from "zod";
@@ -77,6 +79,11 @@ export type AttestationRunner = (typeof ATTESTATION_RUNNERS)[number];
  *   call — making `attestation` required would fail-close every array containing a
  *   pre-SPEC-039 legacy entry, silently zeroing out all existing evidence for that task
  *   (SPEC-039 §9, evidence-based correction of the original draft).
+ * @invariant `attestation.first_seen` (SPEC-039 §M2, command-provenance annotation) is
+ *   set `true` by `VerifyRunnerService` iff {@link isApprovedVerifyCommand} returned
+ *   `false` for this command at execution time — i.e. this run was the first time (or
+ *   the first time after a change) this exact command string was executed for this
+ *   task. Omitted (never `false`) for a previously-seen command.
  *
  * @example
  * evidenceEntrySchema.parse({
@@ -114,6 +121,15 @@ export const evidenceEntrySchema = z.object({
       exit_code: z.number().int(),
       duration_ms: z.number().int().min(0),
       timed_out: z.boolean(),
+      /**
+       * true iff this command was NEW/CHANGED relative to the task's evidence
+       * history at the time it ran — i.e. it required command-provenance
+       * approval (SPEC-039 §M2). OPTIONAL and OMITTED (never `false`) for a
+       * previously-seen command — mirrors this module's "present-iff-true"
+       * convention for `ReadyRecord.upstream_unapproved`/`anchorless`. Absent
+       * on every pre-M2 attestation (additive field, REGRESSION-safe).
+       */
+      first_seen: z.boolean().optional(),
     })
     .optional(),
 });
@@ -362,6 +378,38 @@ export function extractClaim(task: DocRecord): TaskClaim | undefined {
   if (raw === undefined || raw === null) return undefined;
   const parsed = taskClaimSchema.safeParse(raw);
   return parsed.success ? parsed.data : undefined;
+}
+
+// ─── Command Provenance (SPEC-039 M2 trust-hardening) ──────────────────────
+
+/**
+ * Checks whether `command` already appears verbatim in a task's recorded
+ * evidence history — the "known/accepted" ledger the `lore verify` command-
+ * provenance approval gate consults before executing a script-mode AC's
+ * command for real. A command absent from this history is "new or changed"
+ * and requires explicit approval (interactive confirmation or an explicit
+ * override flag) before the runner will execute it.
+ *
+ * @invariant Compares the command string EXACTLY (no normalization/trimming)
+ *   — a single changed character (e.g. a flag added to a test command) makes
+ *   the command "new" by design; silent fuzzy-matching would defeat the
+ *   point of the gate.
+ * @invariant Reads whatever evidence snapshot `task` carries at call time.
+ *   `VerifyRunnerService` calls this once per AC against the SAME
+ *   plan-bundle task snapshot fetched at the start of a `verifyPlan` run —
+ *   two ACs sharing an identical, genuinely-new command within one run both
+ *   evaluate as "new" (the snapshot is not updated mid-run); this is a
+ *   documented, deliberate simplification, not a bug (SPEC-039 §M2).
+ *
+ * @param task - Full task DocRecord (its extra.verification_evidence is read via {@link extractEvidence})
+ * @param command - The exact command string about to be executed (criterion.verify.command)
+ * @returns true iff some prior evidence entry on this task recorded this EXACT command string
+ *
+ * @example
+ * isApprovedVerifyCommand(task, "bun test") // true iff a prior evidence entry's command === "bun test"
+ */
+export function isApprovedVerifyCommand(task: DocRecord, command: string): boolean {
+  return extractEvidence(task).some((entry) => entry.command === command);
 }
 
 // ─── Target Task Resolution (SPEC-039 §2 D4) ───────────────────────────────

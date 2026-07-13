@@ -4,7 +4,7 @@
  * Source: SPEC-001 §5
  */
 
-/** Discriminated union of all service-layer errors. 13 error codes total (15 with AI_PROVIDER_ERROR + CLAIM_CONFLICT). */
+/** Discriminated union of all service-layer errors. 13 error codes total (16 with AI_PROVIDER_ERROR + CLAIM_CONFLICT + NEEDS_APPROVAL). */
 export type LoreError =
   | { code: "DOC_NOT_FOUND"; id: string; suggestions?: string[] }
   | { code: "SLUG_NOT_FOUND"; slug: string; suggestions?: string[] }
@@ -49,6 +49,24 @@ export type LoreError =
       holder: string;
       /** Current claim age in minutes at the time of the conflicting request */
       age_minutes: number;
+    }
+  /**
+   * `lore verify` refused to execute a script-mode AC's command because it is NEW or
+   * CHANGED relative to the target task's recorded evidence history (SPEC-039 M2
+   * trust-hardening, command-provenance approval gate) and neither an interactive
+   * confirmation nor `--allow-new-commands` / `allow_new_commands` approved it.
+   * CLI exit code: 7 (distinct from every other bucket — this is neither a store
+   * failure nor a generic validation error, it's "the runner refused to trust an
+   * unreviewed command").
+   * Source: SPEC-039 §M2 (env allowlist + command-provenance approval hardening)
+   */
+  | {
+      code: "NEEDS_APPROVAL";
+      message: string;
+      /** The exact command string that was rejected. */
+      command: string;
+      /** The acceptance criterion id the rejected command belongs to. */
+      ac_id: string;
     };
 
 /** Result type — success or failure. Use ok()/err() helpers to construct. */

@@ -231,22 +231,56 @@ export type AuditConfig = z.infer<typeof AuditConfigSchema>;
 // ─── Verify Section Schema ──────────────────────────────────────────────────
 
 /**
- * Trusted-runner (`lore verify`) configuration (SPEC-039 §2 D9).
+ * Trusted-runner env-passthrough configuration (SPEC-039 §M2 trust-hardening,
+ * env allowlist). Default behavior (this section absent, or present with its
+ * own defaults) is HARDENED: only an allowlisted set of env vars reaches a
+ * spawned verify command (`DEFAULT_VERIFY_ENV_ALLOWLIST` in
+ * `packages/lore/src/service/verify-spawn.ts`) — secrets like
+ * `LORE_SYNC_TOKEN`/`LORE_API_KEY` do NOT reach the command by default.
+ *
+ * @invariant `allowlist` is ADDITIVE — entries are appended to (never replace)
+ *   the built-in default allowlist.
+ * @invariant `passthrough_all: true` is the escape hatch that restores the
+ *   pre-hardening behavior (full `process.env` passthrough, unfiltered) — when
+ *   set, `allowlist` is not consulted at all.
+ */
+const VerifyEnvConfigSchema = z
+  .object({
+    /** Additional env var names allowed through, appended to the built-in default set. */
+    allowlist: z.array(z.string()).default([]),
+    /** true restores full env passthrough (pre-M2-hardening behavior) — bypasses the allowlist entirely. */
+    passthrough_all: z.boolean().default(false),
+  })
+  .strict();
+
+/** Trusted-runner env-passthrough config section. Source: SPEC-039 §M2. */
+export type VerifyEnvConfig = z.infer<typeof VerifyEnvConfigSchema>;
+
+/**
+ * Trusted-runner (`lore verify`) configuration (SPEC-039 §2 D9; §M2 trust-hardening).
  * Independent `verify.*` section, mirroring the `audit.*` precedent above rather
  * than nesting under `workflow` — the two features (claim leases vs. spawn-and-
  * attest) share no config fields today and evolve independently.
  *
  * @invariant `default_timeout_ms` is consulted ONLY when a script-mode AC's own
  *   `verify.timeout_ms` (acceptance.ts) is absent — the AC-level field always wins.
+ * @invariant `require_command_approval` (SPEC-039 §M2, default `true`) is the
+ *   command-provenance approval gate's on/off switch. `false` restores the
+ *   pre-M2-hardening behavior (any declared command runs without approval,
+ *   same as before this hardening pass).
  */
 const VerifyConfigSchema = z
   .object({
     /** Default spawn timeout in ms, used when an AC's verify.script omits timeout_ms. */
     default_timeout_ms: z.number().int().positive().default(300_000),
+    /** Env-passthrough allowlist configuration (SPEC-039 §M2). */
+    env: VerifyEnvConfigSchema.default({}),
+    /** Command-provenance approval gate on/off (SPEC-039 §M2). Default true (hardened). */
+    require_command_approval: z.boolean().default(true),
   })
   .strict();
 
-/** Trusted-runner verify config section. Source: SPEC-039 §2 D9. */
+/** Trusted-runner verify config section. Source: SPEC-039 §2 D9; §M2. */
 export type VerifyConfig = z.infer<typeof VerifyConfigSchema>;
 
 // ─── Root Config Schema ────────────────────────────────────────────────────
@@ -416,6 +450,40 @@ export function resolveAuditVerifySince(config: LoreConfig | undefined): string 
  */
 export function resolveVerifyDefaultTimeoutMs(config: LoreConfig | undefined): number {
   return (config?.verify ?? VerifyConfigSchema.parse({})).default_timeout_ms;
+}
+
+/**
+ * Resolve the effective trusted-runner env-passthrough config from an optional
+ * LoreConfig (SPEC-039 §M2). Mirrors {@link resolveVerifyDefaultTimeoutMs} —
+ * absence of the whole config or the `verify`/`verify.env` sections all fall
+ * back to the hardened schema defaults (`allowlist: []`, `passthrough_all: false`).
+ *
+ * @param config - Parsed LoreConfig, or undefined when no config file was loaded
+ * @returns Effective `verify.env` value
+ * @example
+ *   resolveVerifyEnvConfig(undefined) // => { allowlist: [], passthrough_all: false }
+ *   resolveVerifyEnvConfig({ ..., verify: { env: { passthrough_all: true } } })
+ *   // => { allowlist: [], passthrough_all: true }
+ */
+export function resolveVerifyEnvConfig(config: LoreConfig | undefined): VerifyEnvConfig {
+  return (config?.verify ?? VerifyConfigSchema.parse({})).env;
+}
+
+/**
+ * Resolve whether the command-provenance approval gate is enabled (SPEC-039 §M2)
+ * from an optional LoreConfig. Mirrors {@link resolveVerifyDefaultTimeoutMs} —
+ * absence of the whole config or the `verify` section falls back to the hardened
+ * schema default (`true`).
+ *
+ * @param config - Parsed LoreConfig, or undefined when no config file was loaded
+ * @returns Effective `verify.require_command_approval` value
+ * @example
+ *   resolveVerifyRequireCommandApproval(undefined) // => true
+ *   resolveVerifyRequireCommandApproval({ ..., verify: { require_command_approval: false } })
+ *   // => false
+ */
+export function resolveVerifyRequireCommandApproval(config: LoreConfig | undefined): boolean {
+  return (config?.verify ?? VerifyConfigSchema.parse({})).require_command_approval;
 }
 
 /**

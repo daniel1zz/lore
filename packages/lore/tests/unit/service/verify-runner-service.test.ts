@@ -1,5 +1,7 @@
 /**
- * Six-dimension tests for VerifyRunnerService (SPEC-039 §2 D2, D3, D4, D6, D9).
+ * Six-dimension tests for VerifyRunnerService (SPEC-039 §2 D2, D3, D4, D6, D9; §M2
+ * trust-hardening: command-provenance approval gate + env-allowlist threading +
+ * first_seen annotation).
  *
  * This is orchestration logic over three injected ports (`getPlanBundle`,
  * `recordVerifiedEvidence`, `executor`) — tested entirely with HAND-WRITTEN test
@@ -10,27 +12,42 @@
  * logic, not this file's). `resolveTargetTask` is the one exception — it's a REAL
  * pure function imported from `@lore/core`, not a double, since it's cheap to
  * exercise directly and doing so proves the actual claim/staleness contract this
- * service relies on.
+ * service relies on. `isApprovedVerifyCommand` (§M2) is likewise real — its own
+ * unit coverage lives in `packages/core/src/task-workflow.test.ts`; here only the
+ * ORCHESTRATION around its result (gate/prompt/allow/reject/annotate) is under test.
  *
  * Dimension mapping:
  *   HAPPY:      two script-mode ACs both pass, distinct commands/exit-codes
- *               recorded individually (defeats a hardcoded-return stub)
+ *               recorded individually (defeats a hardcoded-return stub); §M2 —
+ *               a brand-new command approved via `allowNewCommands: true` runs and
+ *               its evidence carries `attestation.first_seen: true`
  *   NEGATIVE:   undeclared acIds; plan bundle with no parent spec; spec with no
- *               (or empty) acceptance_criteria — executor never called in any case
+ *               (or empty) acceptance_criteria — executor never called in any case;
+ *               §M2 — a brand-new command with `allowNewCommands` unset and no
+ *               `confirmUnapprovedCommand` callback is rejected NEEDS_APPROVAL
+ *               non-interactively, executor never called
  *   BOUNDARY:   a spec whose declared criteria are ALL ai/human mode is valid
  *               (not an error) — ok() with empty results, full skipped list
  *   ERROR:      executor launch-failure on the 2nd of 3 ACs aborts immediately
  *               (message names both the aborting AC and the one already
  *               recorded); resolveTargetTask ambiguity (0 or >1 fresh claims)
- *               propagates verbatim
+ *               propagates verbatim; §M2 — `confirmUnapprovedCommand` resolving
+ *               `false` aborts with NEEDS_APPROVAL naming the AC/command
  *   STATE:      spec.status advisory warning (draft vs approved) never gates
- *               execution; explicitTaskIdOrSlug wins over claim-based resolution
+ *               execution; explicitTaskIdOrSlug wins over claim-based resolution;
+ *               §M2 — a command ALREADY in the task's evidence history runs WITHOUT
+ *               approval (no prompt, no first_seen) even though the gate is
+ *               enabled — REGRESSION-critical: don't re-prompt for known commands;
+ *               §M2 — the resolved env (via resolveVerifyEnv) is threaded onto every
+ *               executor call's spawn spec, computed exactly once per run
  *   REGRESSION: a recordVerifiedEvidence failure (STALE_VERSION-shaped) on the
  *               first AC propagates verbatim and aborts before the second AC's
  *               executor runs — same abort-on-write-failure semantics as
- *               abort-on-launch-failure
+ *               abort-on-launch-failure; §M2 — `requireCommandApproval: false`
+ *               disables the gate entirely (a brand-new command runs with zero
+ *               prompt/callback and no first_seen annotation)
  *
- * @spec_ref AC-VRF-3
+ * @spec_ref AC-VRF-3; SPEC-039 §M2
  */
 
 import { describe, it, expect } from "vitest";
@@ -145,13 +162,47 @@ function makeRecordVerifiedEvidence(results: Array<Result<DocRecord, LoreError>>
   };
 }
 
-const config = { repoRoot: "/repo", defaultTimeoutMs: 300000, claimTtlMinutes: 120 };
+const config = {
+  repoRoot: "/repo",
+  defaultTimeoutMs: 300000,
+  claimTtlMinutes: 120,
+  // SPEC-039 §M2 — the gate is OFF for the pre-existing test suite above (it predates
+  // the approval gate and every fixture task carries no evidence history, which would
+  // make every command "new" under the hardened default and break every existing
+  // assertion that expects the executor to run unconditionally). New §M2-specific
+  // describe blocks below construct their OWN config with requireCommandApproval: true.
+  requireCommandApproval: false,
+  envAllowlist: [],
+  envPassthroughAll: true,
+  processEnv: {},
+};
 const NOW = "2026-07-08T10:00:00.000Z";
 const FRESH_CLAIM_AT = "2026-07-08T09:59:00.000Z"; // 1 minute before NOW — well within the 120min TTL
 
 function taskWithFreshClaim(id: string, by = "alice"): DocRecord {
   return makeTask(id, { extra: { claim: { by, at: FRESH_CLAIM_AT } } });
 }
+
+/** SPEC-039 §M2 — a fresh-claimed task whose evidence history already contains `command`. */
+function taskWithFreshClaimAndEvidence(id: string, command: string, by = "alice"): DocRecord {
+  return makeTask(id, {
+    extra: {
+      claim: { by, at: FRESH_CLAIM_AT },
+      verification_evidence: [
+        {
+          oracle: "test",
+          command,
+          result: "pass",
+          recorded_at: FRESH_CLAIM_AT,
+          recorded_by: by,
+        },
+      ],
+    },
+  });
+}
+
+/** SPEC-039 §M2 — config with the command-provenance approval gate ENABLED. */
+const gatedConfig = { ...config, requireCommandApproval: true, envPassthroughAll: true };
 
 // ─── HAPPY ────────────────────────────────────────────────────────────────────
 
@@ -485,5 +536,221 @@ describe("REGRESSION — a recordVerifiedEvidence failure aborts the run and pro
 
     expect(executor.callCount).toBe(1); // the second AC's executor never runs — abort is immediate
     expect(recorder.callCount).toBe(1);
+  });
+});
+
+// ─── SPEC-039 §M2 — command-provenance approval gate ──────────────────────────
+
+describe("§M2 NEGATIVE — a brand-new command is rejected non-interactively (no flag, no callback)", () => {
+  it("err NEEDS_APPROVAL naming the AC id and command; executor and recorder never called", async () => {
+    const spec = makeSpec([scriptAc("AC-1", "bun test")]);
+    const plan = makePlan();
+    const task = taskWithFreshClaim("task-1"); // zero evidence — every command is "new"
+    const bundle: PlanBundle = { plan, spec, tasks: [task] };
+    const { fn: getPlanBundle } = makeGetPlanBundle(bundle);
+    const executor = makeExecutor([]);
+    const recorder = makeRecordVerifiedEvidence([]);
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, gatedConfig);
+
+    const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("NEEDS_APPROVAL");
+    if (result.error.code !== "NEEDS_APPROVAL") return;
+    expect(result.error.ac_id).toBe("AC-1");
+    expect(result.error.command).toBe("bun test");
+    expect(executor.callCount).toBe(0);
+    expect(recorder.callCount).toBe(0);
+  });
+});
+
+describe("§M2 HAPPY — allowNewCommands: true approves a brand-new command automatically", () => {
+  it("executes the command, records evidence with attestation.first_seen: true, and the top-level result carries first_seen too", async () => {
+    const spec = makeSpec([scriptAc("AC-1", "bun test")]);
+    const plan = makePlan();
+    const task = taskWithFreshClaim("task-1"); // zero evidence
+    const bundle: PlanBundle = { plan, spec, tasks: [task] };
+    const { fn: getPlanBundle } = makeGetPlanBundle(bundle);
+    const executor = makeExecutor([ok({ exitCode: 0, outputTail: "", durationMs: 5, timedOut: false })]);
+    const recorder = makeRecordVerifiedEvidence([ok(makeTask("task-1", { version: 2 }))]);
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, gatedConfig);
+
+    const result = await service.verifyPlan("plan-1", {
+      by: "runner",
+      nowIso: NOW,
+      allowNewCommands: true,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(executor.callCount).toBe(1);
+    expect(recorder.callCount).toBe(1);
+    expect(recorder.calls[0]?.entry.attestation?.first_seen).toBe(true);
+    expect(result.value.results[0]?.first_seen).toBe(true);
+  });
+});
+
+describe("§M2 REGRESSION — a command already in the task's evidence history runs WITHOUT approval", () => {
+  it("no prompt/callback invoked, executor runs immediately, no first_seen annotation", async () => {
+    const spec = makeSpec([scriptAc("AC-1", "bun test")]);
+    const plan = makePlan();
+    const task = taskWithFreshClaimAndEvidence("task-1", "bun test"); // ALREADY seen
+    const bundle: PlanBundle = { plan, spec, tasks: [task] };
+    const { fn: getPlanBundle } = makeGetPlanBundle(bundle);
+    const executor = makeExecutor([ok({ exitCode: 0, outputTail: "", durationMs: 5, timedOut: false })]);
+    const recorder = makeRecordVerifiedEvidence([ok(makeTask("task-1", { version: 2 }))]);
+    let confirmCallCount = 0;
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, gatedConfig);
+
+    const result = await service.verifyPlan("plan-1", {
+      by: "runner",
+      nowIso: NOW,
+      confirmUnapprovedCommand: async () => {
+        confirmCallCount += 1;
+        return true;
+      },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(confirmCallCount).toBe(0); // never prompted — the command was already known
+    expect(executor.callCount).toBe(1);
+    expect(recorder.calls[0]?.entry.attestation?.first_seen).toBeUndefined();
+    expect(result.value.results[0]?.first_seen).toBeUndefined();
+  });
+});
+
+describe("§M2 ERROR — confirmUnapprovedCommand resolving false aborts with NEEDS_APPROVAL", () => {
+  it("the callback is invoked with the exact ac_id/command; abort names them; executor never called", async () => {
+    const spec = makeSpec([scriptAc("AC-1", "rm -rf /tmp/whatever")]);
+    const plan = makePlan();
+    const task = taskWithFreshClaim("task-1"); // zero evidence
+    const bundle: PlanBundle = { plan, spec, tasks: [task] };
+    const { fn: getPlanBundle } = makeGetPlanBundle(bundle);
+    const executor = makeExecutor([]);
+    const recorder = makeRecordVerifiedEvidence([]);
+    const calls: Array<{ ac_id: string; command: string }> = [];
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, gatedConfig);
+
+    const result = await service.verifyPlan("plan-1", {
+      by: "runner",
+      nowIso: NOW,
+      confirmUnapprovedCommand: async (info) => {
+        calls.push(info);
+        return false;
+      },
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("NEEDS_APPROVAL");
+    if (result.error.code !== "NEEDS_APPROVAL") return;
+    expect(calls).toEqual([{ ac_id: "AC-1", command: "rm -rf /tmp/whatever" }]);
+    expect(result.error.ac_id).toBe("AC-1");
+    expect(result.error.command).toBe("rm -rf /tmp/whatever");
+    expect(executor.callCount).toBe(0);
+  });
+
+  it("confirmUnapprovedCommand resolving true executes the command and marks first_seen", async () => {
+    const spec = makeSpec([scriptAc("AC-1", "bun test")]);
+    const plan = makePlan();
+    const task = taskWithFreshClaim("task-1");
+    const bundle: PlanBundle = { plan, spec, tasks: [task] };
+    const { fn: getPlanBundle } = makeGetPlanBundle(bundle);
+    const executor = makeExecutor([ok({ exitCode: 0, outputTail: "", durationMs: 5, timedOut: false })]);
+    const recorder = makeRecordVerifiedEvidence([ok(makeTask("task-1", { version: 2 }))]);
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, gatedConfig);
+
+    const result = await service.verifyPlan("plan-1", {
+      by: "runner",
+      nowIso: NOW,
+      confirmUnapprovedCommand: async () => true,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(executor.callCount).toBe(1);
+    expect(recorder.calls[0]?.entry.attestation?.first_seen).toBe(true);
+  });
+});
+
+describe("§M2 ESCAPE — requireCommandApproval: false disables the gate entirely", () => {
+  it("a brand-new command runs with zero prompt/callback and no first_seen annotation", async () => {
+    const spec = makeSpec([scriptAc("AC-1", "bun test")]);
+    const plan = makePlan();
+    const task = taskWithFreshClaim("task-1"); // zero evidence — would be "new" if gate were on
+    const bundle: PlanBundle = { plan, spec, tasks: [task] };
+    const { fn: getPlanBundle } = makeGetPlanBundle(bundle);
+    const executor = makeExecutor([ok({ exitCode: 0, outputTail: "", durationMs: 5, timedOut: false })]);
+    const recorder = makeRecordVerifiedEvidence([ok(makeTask("task-1", { version: 2 }))]);
+    const ungatedConfig = { ...gatedConfig, requireCommandApproval: false };
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, ungatedConfig);
+
+    const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(executor.callCount).toBe(1);
+    // reason: first_seen is computed independently of the gate (SPEC-039 §M2
+    // annotation is always accurate), so it's still true here even with the gate
+    // disabled — the gate being off only means no approval was REQUIRED to run it.
+    expect(recorder.calls[0]?.entry.attestation?.first_seen).toBe(true);
+  });
+});
+
+// ─── SPEC-039 §M2 — env-allowlist threading ────────────────────────────────────
+
+describe("§M2 STATE — resolved env is threaded onto every executor call's spawn spec", () => {
+  it("computed once per run via resolveVerifyEnv, applied identically across multiple ACs", async () => {
+    const ac1 = scriptAc("AC-1", "cmd-1");
+    const ac2 = scriptAc("AC-2", "cmd-2");
+    const spec = makeSpec([ac1, ac2]);
+    const plan = makePlan();
+    const task = taskWithFreshClaimAndEvidence("task-1", "cmd-1"); // cmd-1 known, cmd-2 new
+    const bundle: PlanBundle = { plan, spec, tasks: [task] };
+    const { fn: getPlanBundle } = makeGetPlanBundle(bundle);
+    const executor = makeExecutor([
+      ok({ exitCode: 0, outputTail: "", durationMs: 1, timedOut: false }),
+      ok({ exitCode: 0, outputTail: "", durationMs: 1, timedOut: false }),
+    ]);
+    const recorder = makeRecordVerifiedEvidence([
+      ok(makeTask("task-1", { version: 2 })),
+      ok(makeTask("task-1", { version: 3 })),
+    ]);
+    const envConfig = {
+      ...config,
+      requireCommandApproval: true,
+      envAllowlist: ["CI_TOKEN"],
+      envPassthroughAll: false,
+      processEnv: { PATH: "/bin", CI_TOKEN: "abc", LORE_SYNC_TOKEN: "secret" },
+    };
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, envConfig);
+
+    const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW, allowNewCommands: true });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(executor.callCount).toBe(2);
+    const expectedEnv = { PATH: "/bin", CI_TOKEN: "abc" };
+    expect(executor.calls[0]?.env).toEqual(expectedEnv);
+    expect(executor.calls[1]?.env).toEqual(expectedEnv);
+    // LORE_SYNC_TOKEN never reaches either spawn spec.
+    expect(executor.calls[0]?.env?.["LORE_SYNC_TOKEN"]).toBeUndefined();
+  });
+
+  it("passthroughAll: true omits the env key entirely on every spawn spec (full inherit)", async () => {
+    const spec = makeSpec([scriptAc("AC-1", "cmd-1")]);
+    const plan = makePlan();
+    const task = taskWithFreshClaim("task-1");
+    const bundle: PlanBundle = { plan, spec, tasks: [task] };
+    const { fn: getPlanBundle } = makeGetPlanBundle(bundle);
+    const executor = makeExecutor([ok({ exitCode: 0, outputTail: "", durationMs: 1, timedOut: false })]);
+    const recorder = makeRecordVerifiedEvidence([ok(makeTask("task-1", { version: 2 }))]);
+    const passthroughConfig = {
+      ...config,
+      requireCommandApproval: false,
+      envPassthroughAll: true,
+      processEnv: { PATH: "/bin", LORE_SYNC_TOKEN: "secret" },
+    };
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, passthroughConfig);
+
+    const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(executor.calls[0]?.env).toBeUndefined();
   });
 });

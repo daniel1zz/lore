@@ -50,10 +50,14 @@
  *     re-implemented locally rather than imported, since services must not import
  *     from adapters/).
  *   - Never throws. Every path returns `Result<VerifyExecutionResult, LoreError>`.
+ *   - `spec.env` (SPEC-039 §M2, when present) REPLACES the spawned process's
+ *     environment entirely — `Bun.spawn({ env })` does not merge with `process.env`.
+ *     Absent `spec.env` inherits the full parent env (pre-M2-hardening behavior /
+ *     `verify.env.passthrough_all: true`).
  *
  * Side-effect class: IO (Bun.spawn, process.kill, stdin/stdout/stderr pipes)
  *
- * Source: SPEC-039 §2 D6; §3; §4 AC-VRF-5, AC-VRF-6
+ * Source: SPEC-039 §2 D6; §3; §4 AC-VRF-5, AC-VRF-6; §M2 (env allowlist)
  */
 
 import { err, ok } from "@lore/core";
@@ -108,6 +112,16 @@ export async function executeVerifySpawnSpec(
       detached: true,
       stdout: "pipe",
       stderr: "pipe",
+      // reason: SPEC-039 §M2 env-allowlist hardening — `spec.env` (when present) is
+      // an already-filtered map (`resolveVerifyEnv`, verify-spawn.ts) that REPLACES
+      // (never merges with) the child's environment; Bun.spawn does NOT inherit
+      // process.env when `env` is explicitly passed (verified empirically against
+      // Bun 1.3.10 — an unlisted var reads back empty in the child). `spec.env`
+      // absent (undefined) means "inherit the full parent env" — the pre-hardening
+      // behavior, reached via `verify.env.passthrough_all: true` or a hand-built
+      // VerifySpawnSpec that omits the field entirely (e.g. this file's own
+      // .bun.test.ts fixtures).
+      ...(spec.env !== undefined ? { env: spec.env } : {}),
     });
   } catch (e) {
     return err({

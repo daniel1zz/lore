@@ -192,6 +192,8 @@ function loreErrorMessage(error: LoreError): string {
       return `AI provider error: ${error.message}`;
     case "CLAIM_CONFLICT":
       return `claim conflict: held by ${error.holder} (${error.age_minutes}m ago)`;
+    case "NEEDS_APPROVAL":
+      return `needs approval: ${error.ac_id} command "${error.command}" not approved`;
   }
 }
 

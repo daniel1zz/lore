@@ -61,7 +61,7 @@ export function findLoreDbPath(): string {
  * Map a LoreError code to a CLI exit code per SPEC-003 §5.
  *
  * @param error - LoreError from a service call
- * @returns numeric exit code (1 | 3 | 4 | 5)
+ * @returns numeric exit code (1 | 3 | 4 | 5 | 6 | 7)
  */
 export function exitCode(error: LoreError): number {
   switch (error.code) {
@@ -88,6 +88,11 @@ export function exitCode(error: LoreError): number {
       // reason: exit 6 reserved for AI provider failures — distinct from generic store/validation
       // errors so callers can detect AI-specific failures without parsing stderr (SPEC-017 §3.4)
       return 6;
+    case "NEEDS_APPROVAL":
+      // reason: exit 7 reserved for the SPEC-039 M2 command-provenance approval gate —
+      // distinct from validation (4) and AI (6) errors so a CI wrapper can detect
+      // "a verify command needs review" without parsing stderr.
+      return 7;
     case "STORE_ERROR":
       return 1;
     default: {
@@ -206,6 +211,13 @@ export function formatError(error: LoreError, opts?: { aiHasNoFallback?: boolean
       return (
         `Error: Task ${error.id} is claimed by '${error.holder}' (claimed ${error.age_minutes}m ago).\n` +
         "  Pass --steal (claim) or --force (release) to override, or wait for the lease to expire."
+      );
+    case "NEEDS_APPROVAL":
+      return (
+        `Error: ${error.message}\n` +
+        `  AC: ${error.ac_id}\n` +
+        `  Command: ${error.command}\n` +
+        "  Pass --allow-new-commands to approve automatically, or run interactively (TTY, no --json) to confirm."
       );
     default: {
       const _exhaustive: never = error;

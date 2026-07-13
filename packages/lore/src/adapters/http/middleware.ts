@@ -67,6 +67,11 @@ export function loreErrorToStatus(error: LoreError): number {
     case "PARENT_REQUIRED":
     case "INVALID_PARENT_TYPE":
       return 422;
+    // reason: NEEDS_APPROVAL (SPEC-039 M2) has no HTTP route today (`lore verify` is
+    // CLI/MCP-only) — mapped alongside the other request-rejected-as-invalid codes for
+    // when/if a verify route is added. Source: SPEC-039 §M2.
+    case "NEEDS_APPROVAL":
+      return 422;
     default: {
       const _exhaustive: never = error;
       void _exhaustive;

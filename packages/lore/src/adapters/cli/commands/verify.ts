@@ -1,5 +1,6 @@
 /**
  * lore verify <plan> [--ac <id> repeatable] [--task <t>] [--json] [--by]
+ *   [--allow-new-commands|--yes]
  *
  * Trusted runner (SPEC-039): actually EXECUTES a plan's declared script-mode
  * acceptance criteria (via `VerifyRunnerService.verifyPlan`) and records the
@@ -16,6 +17,24 @@
  * task on the plan holds a fresh claim (ambiguous → VALIDATION_ERROR, exit 4,
  * message lists every candidate slug).
  *
+ * SPEC-039 §M2 trust-hardening — command-provenance approval: a script AC's
+ * command that is NEW or CHANGED relative to the target task's evidence
+ * history requires explicit approval before it runs (`verify.
+ * require_command_approval` config, default true). This CLI surface resolves
+ * that approval in one of three ways:
+ *   1. `--allow-new-commands` (alias `--yes`) — approve every new/changed
+ *      command for this run without prompting (also the required escape for
+ *      non-interactive/CI invocations).
+ *   2. Interactive TTY (no `--json`, `process.stdin.isTTY`) — prompt
+ *      `Run new/changed verify command "<cmd>"? [y/N]` per unapproved AC via
+ *      `promptYesNo`; a non-"y"/"yes" answer aborts the run at that AC.
+ *   3. Neither of the above (non-interactive, no flag) — the run aborts at the
+ *      first unapproved AC with `NEEDS_APPROVAL` (exit 7), naming the exact
+ *      `--allow-new-commands` flag in the error message.
+ * A command already present in the task's evidence history never triggers any
+ * of the above (SPEC-039 §M2 — "don't re-prompt for known commands"). Disable
+ * the whole gate via `verify.require_command_approval: false` in config.
+ *
  * Exit codes (SPEC-003 §5 `exitCode()` SSOT covers the LoreError branch; the
  * "some AC failed" branch below is NOT a LoreError — it's a business outcome,
  * mapped independently):
@@ -27,9 +46,10 @@
  *       "ran fine, an assertion failed", the SAME bucket `exitCode()` already
  *       reserves for STORE_ERROR/generic failure (SPEC-003 §5's CLAUDE.md:
  *       "1 = STORE_ERROR / unknown"); mirrors how `tsc`/`vitest`/`grep -c`
- *       distinguish "invocation was invalid" (2/3/4/5/6, see below) from "the
- *       thing I ran reported failure" (1) — chosen so a CI wrapper's single
- *       `$? -ne 0` check covers both a launch abort and a failed AC uniformly
+ *       distinguish "invocation was invalid" (2/3/4/5/6/7, see below) from
+ *       "the thing I ran reported failure" (1) — chosen so a CI wrapper's
+ *       single `$? -ne 0` check covers both a launch abort and a failed AC
+ *       uniformly
  *   3 = DOC_NOT_FOUND (plan or explicit --task not found)
  *   4 = VALIDATION_ERROR (plan has no parent spec / spec has no structured ACs
  *       / unknown --ac id / ambiguous target task)
@@ -38,10 +58,14 @@
  *       aborts; distinct from an executed-but-failing command, but shares the
  *       same exit code per the SSOT table — the message names every AC
  *       already recorded before the abort)
+ *   7 = NEEDS_APPROVAL (SPEC-039 §M2 — a new/changed command was rejected by
+ *       the command-provenance approval gate; the message names the exact
+ *       `--allow-new-commands` recovery flag)
  *
- * Source: SPEC-039 §2, §3, §4 AC-VRF-10
+ * Source: SPEC-039 §2, §3, §4 AC-VRF-10; §M2
  */
 
+import { createInterface } from "node:readline/promises";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
@@ -78,7 +102,26 @@ function normalizeRepeatableFlag(raw: unknown): string[] | undefined {
 function formatAcResultLine(result: VerifyPlanResult["results"][number]): string {
   const mark = result.result === "pass" ? "✔" : "✘";
   const timedOutSuffix = result.timed_out ? " [TIMED OUT]" : "";
-  return `  ${mark} ${result.ac_id} ${result.result} (${result.duration_ms}ms, exit ${result.exit_code})${timedOutSuffix}`;
+  // SPEC-039 §M2 command-provenance annotation — surfaced so a human reviewing
+  // `lore verify` output can see which commands were newly approved this run.
+  const firstSeenSuffix = result.first_seen === true ? " [new]" : "";
+  return `  ${mark} ${result.ac_id} ${result.result} (${result.duration_ms}ms, exit ${result.exit_code})${timedOutSuffix}${firstSeenSuffix}`;
+}
+
+/**
+ * Interactive y/N confirmation prompt (SPEC-039 §M2) — used ONLY when
+ * `process.stdin.isTTY` and `--json` was not passed (see `run` below). Any
+ * answer other than a case-insensitive "y"/"yes" is treated as "no".
+ */
+async function promptYesNo(question: string): Promise<boolean> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = await rl.question(question);
+    const normalized = answer.trim().toLowerCase();
+    return normalized === "y" || normalized === "yes";
+  } finally {
+    rl.close();
+  }
 }
 
 export default defineCommand({
@@ -108,32 +151,58 @@ export default defineCommand({
       type: "boolean",
       description: "Output result as JSON",
     },
+    "allow-new-commands": {
+      type: "boolean",
+      alias: "yes",
+      description:
+        "Approve every new/changed verify command for this run without prompting (SPEC-039 §M2 " +
+        "command-provenance approval gate) — required for non-interactive/CI invocations",
+    },
   },
   async run({ args }) {
     const { app } = loadLoreApp();
     try {
       const acIds = normalizeRepeatableFlag(args.ac);
       const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
+      const allowNewCommands = args["allow-new-commands"] === true;
 
-      // reason: M2 trust-boundary advisory (SPEC-039's documented "npm-scripts trust
-      // level, full env passthrough, no sandbox" design) — `lore verify` shells out to
+      // reason: SPEC-039 §M2 trust-hardening advisory — `lore verify` shells out to
       // caller-declared commands (`spec.extra.acceptance_criteria[].verify.script.command`),
-      // so a one-time notice belongs on this CLI surface before those commands run.
-      // Deliberately NOT a per-command line (would be noise for a multi-AC plan) and
-      // NEVER written to stdout — `--json`'s stdout stays a clean, parseable envelope,
-      // same split the pre-existing `warnings` loop below already uses. Sandboxing /
-      // env-scrubbing / a confirmation prompt were explicitly out of scope for this fix
-      // (would break legitimate CI usage of a trusted-runner command); signing or an
-      // allowlist mechanism remains an open product decision, not addressed here.
+      // so a one-time notice belongs on this CLI surface before those commands run. The
+      // DEFAULT posture is now hardened (this replaces the pre-§M2 "full env passthrough,
+      // no sandbox, no approval" warning): only an ALLOWLISTED subset of the local
+      // environment reaches the spawned command (`verify.env.allowlist`/`passthrough_all`
+      // escape hatch), and a command NEW/CHANGED relative to the target task's evidence
+      // history requires explicit approval (`--allow-new-commands`, an interactive TTY
+      // prompt, or `verify.require_command_approval: false` to disable the gate). Still no
+      // sandbox: an ALREADY-APPROVED command runs with the same shell privileges as the
+      // invoking user (npm-scripts trust tier, SPEC-039 §1). Deliberately NOT a per-command
+      // line (would be noise for a multi-AC plan) and NEVER written to stdout — `--json`'s
+      // stdout stays a clean, parseable envelope, same split the pre-existing `warnings`
+      // loop below already uses.
       process.stderr.write(
-        "Warning: lore verify executes this plan's declared script-mode acceptance-criteria commands with the full local environment (npm-scripts trust level — no sandbox, no env scrubbing; see SPEC-039).\n",
+        "Warning: lore verify executes this plan's declared script-mode acceptance-criteria " +
+          "commands (npm-scripts trust tier, no sandbox). Env passthrough is allowlisted by " +
+          "default and new/changed commands require approval — see SPEC-039 §M2.\n",
       );
+
+      // SPEC-039 §M2 — interactive TTY confirm hook, ONLY when a human can actually see
+      // and answer the prompt (no --json: that surface's stdout must stay clean JSON, and
+      // a prompt reading stdin while the caller expects a machine-parseable envelope would
+      // hang or corrupt output).
+      const confirmUnapprovedCommand =
+        process.stdin.isTTY && args.json !== true
+          ? async (info: { ac_id: string; command: string }): Promise<boolean> =>
+              promptYesNo(`Run new/changed verify command "${info.command}" for ${info.ac_id}? [y/N] `)
+          : undefined;
 
       const result = await requireVerifyRunnerService(app).verifyPlan(args.plan as string, {
         ...(acIds !== undefined ? { acIds } : {}),
         ...(typeof args.task === "string" ? { explicitTaskIdOrSlug: args.task } : {}),
         by,
         nowIso: new Date().toISOString(),
+        ...(allowNewCommands ? { allowNewCommands: true } : {}),
+        ...(confirmUnapprovedCommand !== undefined ? { confirmUnapprovedCommand } : {}),
       });
 
       if (!result.ok) {
