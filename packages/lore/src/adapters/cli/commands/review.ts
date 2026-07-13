@@ -58,8 +58,6 @@
  * Source: SPEC-034 §1, §4, §6; SPEC-044 §Design Decisions D6, D7, D9, D11
  */
 
-import { existsSync, readFileSync } from "fs";
-import { join } from "path";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatStalenessBadge, formatTable, resolveActor } from "../utils.js";
@@ -75,7 +73,8 @@ import {
   renderStalenessRepairCommand,
   type StalenessFlowDeps,
 } from "../../../flows/staleness-flow.js";
-import { ok, parseTreeBlueprint, resolveStalenessDefaults, runDeterministicChecks } from "@lore/core";
+import { loadTreeBlueprint } from "../../../flows/blueprint-flow.js";
+import { ok, resolveStalenessDefaults, runDeterministicChecks } from "@lore/core";
 import type {
   CheckResult,
   LoreError,
@@ -99,16 +98,13 @@ type App = ReturnType<typeof loadLoreApp>["app"];
  * parse failure as fatal (mirrors `lore status --check-tree`).
  */
 function loadBlueprintOrExit(): TreeBlueprint | undefined {
-  const blueprintPath = join(process.cwd(), "lore.tree.yaml");
-  if (!existsSync(blueprintPath)) return undefined;
-
-  const raw = readFileSync(blueprintPath, "utf8");
-  const parsed = parseTreeBlueprint(raw);
-  if (!parsed.ok) {
-    process.stderr.write(formatError(parsed.error) + "\n");
+  const loaded = loadTreeBlueprint(process.cwd());
+  if (loaded.status === "missing") return undefined;
+  if (loaded.status === "invalid") {
+    process.stderr.write(formatError(loaded.error) + "\n");
     process.exit(4);
   }
-  return parsed.value;
+  return loaded.blueprint;
 }
 
 /** Build the deterministic-only judgment for a doc that failed at least one mechanical check. */

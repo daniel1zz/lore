@@ -44,8 +44,6 @@
  * Source: SPEC-008 §3
  */
 
-import { existsSync, readFileSync } from "fs";
-import { join } from "path";
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -54,7 +52,7 @@ import type { LoreError } from "@lore/core";
 import type { LinkType } from "@lore/core";
 import { renderAssessmentContent } from "@lore/core";
 import type { NewReviewJudgment, ReviewJudgment, Result, TreeBlueprint } from "@lore/core";
-import { ORACLE_KINDS, parseTreeBlueprint, runDeterministicChecks } from "@lore/core";
+import { ORACLE_KINDS, runDeterministicChecks } from "@lore/core";
 import { handoffExtraSchema } from "@lore/core";
 import type { HandoffExtra } from "@lore/core";
 import { isAssessAiBraked } from "../../ai/resolve-ai.js";
@@ -72,6 +70,7 @@ import {
   listFreshStalenessEscalates,
 } from "../../flows/staleness-flow.js";
 import { buildDriftFlowDeps, buildListSpecs, countArmedSpecs, runDrift } from "../../flows/drift-flow.js";
+import { loadTreeBlueprint } from "../../flows/blueprint-flow.js";
 import { buildRealFsProbe } from "../real-fs-probe.js";
 import { buildAssessSummaryText } from "./assess-render.js";
 
@@ -637,13 +636,10 @@ function registerToolWithArgs<T>(
  * handler can respond with `isError: true` (an MCP tool must never call process.exit).
  */
 function loadBlueprintForMcp(): Result<TreeBlueprint | undefined, LoreError> {
-  const blueprintPath = join(process.cwd(), "lore.tree.yaml");
-  if (!existsSync(blueprintPath)) return { ok: true, value: undefined };
-
-  const raw = readFileSync(blueprintPath, "utf8");
-  const parsed = parseTreeBlueprint(raw);
-  if (!parsed.ok) return parsed;
-  return { ok: true, value: parsed.value };
+  const loaded = loadTreeBlueprint(process.cwd());
+  if (loaded.status === "missing") return { ok: true, value: undefined };
+  if (loaded.status === "invalid") return { ok: false, error: loaded.error };
+  return { ok: true, value: loaded.blueprint };
 }
 
 /**

@@ -21,12 +21,11 @@
  * drifts, exit 3 (tree drift alone already wins).
  */
 
-import { existsSync, readFileSync } from "fs";
-import { join } from "path";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
 import { buildStalenessFlowDeps, listFreshStalenessEscalates } from "../../../flows/staleness-flow.js";
+import { loadTreeBlueprint } from "../../../flows/blueprint-flow.js";
 import {
   buildDriftFlowDeps,
   buildListSpecs,
@@ -38,7 +37,7 @@ import {
   type CodeDriftPayload,
 } from "../../../flows/drift-flow.js";
 import { buildRealFsProbe } from "../../real-fs-probe.js";
-import { parseTreeBlueprint, resolveDriftEnabled } from "@lore/core";
+import { resolveDriftEnabled } from "@lore/core";
 import type { CallerSurface } from "@lore/core";
 
 /** All CallerSurface values in a stable display order. */
@@ -136,93 +135,88 @@ export default defineCommand({
         const treeErrorLines: string[] = [];
 
         if (checkTreeRequested) {
-          const blueprintPath = join(process.cwd(), "lore.tree.yaml");
+          const loaded = loadTreeBlueprint(process.cwd());
 
-          if (!existsSync(blueprintPath)) {
+          if (loaded.status === "missing") {
             blueprintUnarmable = true;
-            treeErrorLines.push(`No lore.tree.yaml blueprint found at ${blueprintPath}`);
+            treeErrorLines.push(`No lore.tree.yaml blueprint found at ${loaded.path}`);
+          } else if (loaded.status === "invalid") {
+            blueprintUnarmable = true;
+            treeErrorLines.push(formatError(loaded.error));
           } else {
-            const raw = readFileSync(blueprintPath, "utf8");
-            const parsedBlueprint = parseTreeBlueprint(raw);
+            // Normalize root min to 1: a declared blueprint root is always required
+            // (min 1). Ensures an empty corpus is detected as inconsistent if root
+            // is required.
+            const blueprint = {
+              ...loaded.blueprint,
+              root: {
+                ...loaded.blueprint.root,
+                min: Math.max(loaded.blueprint.root.min, 1),
+              },
+            };
 
-            if (!parsedBlueprint.ok) {
-              blueprintUnarmable = true;
-              treeErrorLines.push(formatError(parsedBlueprint.error));
-            } else {
-              // Normalize root min to 1: a declared blueprint root is always required
-              // (min 1). Ensures an empty corpus is detected as inconsistent if root
-              // is required.
-              const blueprint = {
-                ...parsedBlueprint.value,
-                root: {
-                  ...parsedBlueprint.value.root,
-                  min: Math.max(parsedBlueprint.value.root.min, 1),
-                },
-              };
+            if (args.fix) {
+              // Run fix first, then re-check
+              const fixR = await app.treeCheckService.fix(blueprint);
+              if (!fixR.ok) {
+                process.stderr.write(formatError(fixR.error) + "\n");
+                process.exitCode = exitCode(fixR.error);
+                return;
+              }
 
-              if (args.fix) {
-                // Run fix first, then re-check
-                const fixR = await app.treeCheckService.fix(blueprint);
-                if (!fixR.ok) {
-                  process.stderr.write(formatError(fixR.error) + "\n");
-                  process.exitCode = exitCode(fixR.error);
-                  return;
-                }
+              const checkR = await app.treeCheckService.checkTree(blueprint);
+              if (!checkR.ok) {
+                process.stderr.write(formatError(checkR.error) + "\n");
+                process.exitCode = exitCode(checkR.error);
+                return;
+              }
 
-                const checkR = await app.treeCheckService.checkTree(blueprint);
-                if (!checkR.ok) {
-                  process.stderr.write(formatError(checkR.error) + "\n");
-                  process.exitCode = exitCode(checkR.error);
-                  return;
-                }
+              treeData = { fix: fixR.value, check: checkR.value };
 
-                treeData = { fix: fixR.value, check: checkR.value };
+              // Exit code for --fix:
+              //   0 = fix ran without skips AND at most 1 non-fixable (missing) drift remains
+              //       (single missing requirement treated as "fix did its best")
+              //   3 = fix had explicit skips OR ≥2 non-fixable missing drifts remain
+              //       (multiple missing requirements indicate "partial / cannot fully satisfy")
+              const postFixDrifts = checkR.value.drifts;
+              const hasMultipleMissingDrifts = postFixDrifts.filter(
+                (d) => d.kind === "missing" || d.kind === "extra",
+              ).length > 1;
+              const fixSucceeded = !fixR.value.stillInconsistent &&
+                !postFixDrifts.some(
+                  (d) => d.kind === "orphan" || d.kind === "misplaced" || d.kind === "cycle",
+                ) &&
+                !hasMultipleMissingDrifts;
+              treeInconsistent = !fixSucceeded;
 
-                // Exit code for --fix:
-                //   0 = fix ran without skips AND at most 1 non-fixable (missing) drift remains
-                //       (single missing requirement treated as "fix did its best")
-                //   3 = fix had explicit skips OR ≥2 non-fixable missing drifts remain
-                //       (multiple missing requirements indicate "partial / cannot fully satisfy")
-                const postFixDrifts = checkR.value.drifts;
-                const hasMultipleMissingDrifts = postFixDrifts.filter(
-                  (d) => d.kind === "missing" || d.kind === "extra",
-                ).length > 1;
-                const fixSucceeded = !fixR.value.stillInconsistent &&
-                  !postFixDrifts.some(
-                    (d) => d.kind === "orphan" || d.kind === "misplaced" || d.kind === "cycle",
-                  ) &&
-                  !hasMultipleMissingDrifts;
-                treeInconsistent = !fixSucceeded;
-
-                treeRenderLines.push(`Fixed ${fixR.value.fixed.length}, Skipped ${fixR.value.skipped.length}`);
-                if (fixSucceeded) {
-                  treeRenderLines.push("Tree is consistent with lore.tree.yaml blueprint.");
-                } else {
-                  const residualDrifts = checkR.value.drifts;
-                  treeRenderLines.push(`Tree inconsistent: ${residualDrifts.length} drift(s) remain`);
-                  for (const d of residualDrifts) {
-                    treeRenderLines.push(`  - ${d.kind}: ${d.detail}`);
-                  }
-                }
+              treeRenderLines.push(`Fixed ${fixR.value.fixed.length}, Skipped ${fixR.value.skipped.length}`);
+              if (fixSucceeded) {
+                treeRenderLines.push("Tree is consistent with lore.tree.yaml blueprint.");
               } else {
-                // Check-only
-                const checkR = await app.treeCheckService.checkTree(blueprint);
-                if (!checkR.ok) {
-                  process.stderr.write(formatError(checkR.error) + "\n");
-                  process.exitCode = exitCode(checkR.error);
-                  return;
+                const residualDrifts = checkR.value.drifts;
+                treeRenderLines.push(`Tree inconsistent: ${residualDrifts.length} drift(s) remain`);
+                for (const d of residualDrifts) {
+                  treeRenderLines.push(`  - ${d.kind}: ${d.detail}`);
                 }
+              }
+            } else {
+              // Check-only
+              const checkR = await app.treeCheckService.checkTree(blueprint);
+              if (!checkR.ok) {
+                process.stderr.write(formatError(checkR.error) + "\n");
+                process.exitCode = exitCode(checkR.error);
+                return;
+              }
 
-                treeData = checkR.value as unknown as Record<string, unknown>;
-                treeInconsistent = !checkR.value.consistent;
+              treeData = checkR.value as unknown as Record<string, unknown>;
+              treeInconsistent = !checkR.value.consistent;
 
-                if (checkR.value.consistent) {
-                  treeRenderLines.push("Tree is consistent with lore.tree.yaml blueprint.");
-                } else {
-                  treeRenderLines.push(`Tree inconsistent: ${checkR.value.drifts.length} drift(s)`);
-                  for (const d of checkR.value.drifts) {
-                    treeRenderLines.push(`  - ${d.kind}: ${d.detail}`);
-                  }
+              if (checkR.value.consistent) {
+                treeRenderLines.push("Tree is consistent with lore.tree.yaml blueprint.");
+              } else {
+                treeRenderLines.push(`Tree inconsistent: ${checkR.value.drifts.length} drift(s)`);
+                for (const d of checkR.value.drifts) {
+                  treeRenderLines.push(`  - ${d.kind}: ${d.detail}`);
                 }
               }
             }
