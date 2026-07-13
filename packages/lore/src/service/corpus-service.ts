@@ -14,7 +14,9 @@ import {
   deriveTypeMeta,
   docPatchSchema,
   extractValidity,
+  getAllowedTransitions,
   isInvalidated,
+  isValidTransition,
   knowledgeExtraSchema,
   planAcScopeSchema,
   slugifyWithCollision,
@@ -887,8 +889,37 @@ export class CorpusService {
     let newStatus = parsedPatch.data.status ?? existing.status;
     const contentOrTitleChanged =
       parsedPatch.data.content !== undefined || parsedPatch.data.title !== undefined;
-    if (existing.status === "approved" && contentOrTitleChanged) {
+    // reason: this is an INTERNAL lifecycle invariant (SPEC-002 §3), not a
+    // user-requested transition — approved→draft is deliberately absent from
+    // VALID_TRANSITIONS (only active/archived/deprecated follow "approved"),
+    // so the isValidTransition check below must not see this as the user's
+    // ask. It also unconditionally OVERRIDES any status the caller requested
+    // in the same patch, matching the pre-existing behavior this block always
+    // had (a content/title edit on an approved doc always demotes to draft).
+    const isApprovedAutoResetToDraft = existing.status === "approved" && contentOrTitleChanged;
+    if (isApprovedAutoResetToDraft) {
       newStatus = "draft";
+    }
+
+    // Reject illegal USER-requested lifecycle transitions (B1 blocker fix) —
+    // pre-fix, set() never consulted VALID_TRANSITIONS at all (only
+    // ReviewService.approve/reject did), so `lore set --status`, the HTTP
+    // dashboard PATCH route, and MCP `lore_set` could all force an illegal
+    // jump (archived→active, approved→draft, draft→archived — the last skips
+    // every workflow gate, since GateEnforcer's spec-promote check only fires
+    // on a →approved transition). The auto-reset above is exempted: it is not
+    // a user-requested transition, it's a sanctioned internal side effect.
+    if (
+      !isApprovedAutoResetToDraft &&
+      newStatus !== existing.status &&
+      !isValidTransition(existing.status, newStatus)
+    ) {
+      return err({
+        code: "INVALID_TRANSITION",
+        from: existing.status,
+        to: newStatus,
+        allowed: getAllowedTransitions(existing.status),
+      });
     }
 
     const newVersion = existing.version + 1;

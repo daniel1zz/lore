@@ -23,6 +23,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { VersionService } from "../../../src/service/version-service.js";
+import { err } from "@lore/core";
 import type { DocRecord, VersionRecord } from "@lore/core";
 
 // ─── Factories ────────────────────────────────────────────────────────────────
@@ -592,4 +593,134 @@ describe("VersionService.restore", () => {
 
   // error handling: N/A — InMemoryStore never fails on valid operations; propagation tested via negative cases
   // regression: N/A — no known regressions
+});
+
+// ─── VersionService.restore — atomic CAS write ordering (M4 blocker fix) ──────
+// reason: pre-fix, restore() ran insertVersion + appendAuditEntry UNCONDITIONALLY
+// before the CAS-guarded store.update call. If a concurrent writer bumped the
+// doc's version between the find() read and the update() write, the CAS failed
+// with STALE_VERSION — but the versions/audit tables already permanently held a
+// "restore" entry for a version number the live doc never reached, a phantom
+// history entry lore log/diff would surface forever. Fix: update first, only
+// insertVersion + appendAuditEntry on its success.
+
+describe("VersionService.restore — atomic CAS write ordering (M4)", () => {
+  /**
+   * Test double that fails the NEXT `update` call with STALE_VERSION exactly
+   * once — simulating a concurrent writer bumping the doc's version between
+   * VersionService.restore's find() and its CAS update() — and counts
+   * insertVersion/appendAuditEntry invocations so the test can assert neither
+   * ran when the CAS write failed.
+   */
+  class StaleOnceStore extends InMemoryStore {
+    insertVersionCalls = 0;
+    appendAuditEntryCalls = 0;
+    private failNextUpdate = false;
+
+    triggerStaleUpdateOnNextCall(): void {
+      this.failNextUpdate = true;
+    }
+
+    override async update(
+      id: Parameters<InMemoryStore["update"]>[0],
+      patch: Parameters<InMemoryStore["update"]>[1],
+      opts?: Parameters<InMemoryStore["update"]>[2],
+    ): ReturnType<InMemoryStore["update"]> {
+      if (this.failNextUpdate) {
+        this.failNextUpdate = false;
+        const expected = opts?.expected_version ?? 0;
+        return err({
+          code: "STALE_VERSION",
+          id,
+          expected,
+          actual: expected + 1,
+        });
+      }
+      return super.update(id, patch, opts);
+    }
+
+    override async insertVersion(
+      record: Parameters<InMemoryStore["insertVersion"]>[0],
+    ): ReturnType<InMemoryStore["insertVersion"]> {
+      this.insertVersionCalls += 1;
+      return super.insertVersion(record);
+    }
+
+    override async appendAuditEntry(
+      entry: Parameters<InMemoryStore["appendAuditEntry"]>[0],
+    ): ReturnType<InMemoryStore["appendAuditEntry"]> {
+      this.appendAuditEntryCalls += 1;
+      return super.appendAuditEntry(entry);
+    }
+  }
+
+  it("ERROR/STATE: concurrent version bump → CAS update fails with STALE_VERSION, NO versions/audit rows written", async () => {
+    const staleStore = new StaleOnceStore();
+    const staleService = new VersionService(staleStore);
+
+    const doc = makeDoc({ version: 2 });
+    await staleStore.insert(doc);
+    await staleStore.insertVersion(makeVersionRecord(doc.id, 1, { content: "v1" }));
+    await staleStore.insertVersion(makeVersionRecord(doc.id, 2, { content: "v2" }));
+
+    // reason: reset the call counters AFTER setup — the two insertVersion
+    // calls above are test fixture writes, not part of the restore() flow
+    // under test. Only calls made by restore() itself must count.
+    staleStore.insertVersionCalls = 0;
+    staleStore.appendAuditEntryCalls = 0;
+
+    staleStore.triggerStaleUpdateOnNextCall();
+
+    const result = await staleService.restore(doc.id, 1);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("STALE_VERSION");
+
+    // Neither insertVersion nor appendAuditEntry ran — the CAS failure aborted
+    // the restore before either write, leaving no phantom history entry.
+    expect(staleStore.insertVersionCalls).toBe(0);
+    expect(staleStore.appendAuditEntryCalls).toBe(0);
+
+    // The versions table for this doc still holds exactly the pre-restore 2
+    // entries — no v3 "restore" row was ever inserted.
+    const versionsResult = await staleStore.findVersions(doc.id);
+    expect(versionsResult.ok).toBe(true);
+    if (!versionsResult.ok) return;
+    expect(versionsResult.value).toHaveLength(2);
+
+    // The live doc record is untouched — still at version 2.
+    const docResult = await staleStore.find(doc.id);
+    expect(docResult.ok).toBe(true);
+    if (!docResult.ok) return;
+    expect(docResult.value?.version).toBe(2);
+  });
+
+  it("REGRESSION: happy-path restore still lands doc update + version snapshot + audit entry, all joined on the SAME nextVersion", async () => {
+    const doc = makeDoc({ version: 2 });
+    await store.insert(doc);
+    await store.insertVersion(makeVersionRecord(doc.id, 1, { content: "v1" }));
+    await store.insertVersion(makeVersionRecord(doc.id, 2, { content: "v2" }));
+
+    const result = await service.restore(doc.id, 1);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.version).toBe(3);
+
+    const versionsResult = await store.findVersions(doc.id);
+    expect(versionsResult.ok).toBe(true);
+    if (!versionsResult.ok) return;
+    const v3 = versionsResult.value.find((v) => v.version === 3);
+    expect(v3).toBeDefined();
+    expect(v3!.action).toBe("restore");
+
+    const auditResult = await store.queryAudit({ doc_id: doc.id });
+    expect(auditResult.ok).toBe(true);
+    if (!auditResult.ok) return;
+    const restoreAudit = auditResult.value.find(
+      (a) => a.action === "restore" && a.doc_id === doc.id,
+    );
+    expect(restoreAudit).toBeDefined();
+    expect((restoreAudit!.details as { version?: number })["version"]).toBe(3);
+  });
 });
