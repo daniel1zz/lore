@@ -130,6 +130,25 @@ export interface ListFilters {
    * object is forwarded to `StoreInterface.findMany` (not a store-level filter).
    */
   include_invalid?: boolean;
+  /**
+   * Forwarded verbatim to {@link StoreInterface.findMany} — see
+   * {@link StoreFilters.limit} for the full contract (omitted → unbounded,
+   * byte-identical to pre-pagination behavior).
+   *
+   * `list()`'s `total` field is (and always was, even before pagination)
+   * "count of docs actually returned by this call", never "count of all rows
+   * matching the filter in the corpus" — so paging composes without a
+   * separate unpaged count query. When BOTH `limit`/`offset` AND
+   * `include_invalid` (default `false`) are combined on a `knowledge`/`adr`
+   * listing, the store-level page is taken FIRST and the invalidated-doc
+   * filter is applied to that page afterward — a page may legitimately
+   * return fewer than `limit` docs when some of its rows are invalidated.
+   * Widen the page (`limit`) or pass `include_invalid: true` if an exact
+   * page size is required for that case.
+   */
+  limit?: number;
+  /** See {@link ListFilters.limit}. */
+  offset?: number;
 }
 
 export interface SearchFilters {
@@ -1242,7 +1261,11 @@ export class CorpusService {
    * List documents matching filters. Returns DocSummary[] with total count.
    * Telemetry: records one event with filter type (if any) and result count.
    *
-   * @param filters - Standard filters plus SPEC-043 D3's `include_invalid` escape.
+   * @param filters - Standard filters plus SPEC-043 D3's `include_invalid` escape
+   *   and optional `limit`/`offset` paging (forwarded to `StoreInterface.findMany`
+   *   — see {@link ListFilters.limit} for the paging + `include_invalid`
+   *   interaction). Omitted `limit`/`offset` → unbounded, byte-identical to
+   *   pre-pagination behavior.
    * @param now - Time seam (D3) — drives the default invalidated-knowledge/adr
    *   exclusion; defaults to `() => new Date().toISOString()`.
    */
@@ -1278,7 +1301,10 @@ export class CorpusService {
    * Use this when extra fields are needed (e.g. phase grouping in tree, phase filter in list).
    * Callers that only need display fields should use list() to avoid carrying extra payload.
    *
-   * @param filters - Same filter set as list()
+   * @param filters - Same filter set as list(), including optional `limit`/`offset`
+   *   paging (forwarded to `StoreInterface.findMany` verbatim — unlike list(), there
+   *   is no `include_invalid` post-filter step here, so a paged result is always
+   *   exactly `limit` rows, never fewer, short of the store legitimately running out).
    * @returns Full DocRecord array (not stripped to DocSummary)
    */
   async listFull(filters: ListFilters): Promise<Result<{ docs: DocRecord[]; total: number }, LoreError>> {

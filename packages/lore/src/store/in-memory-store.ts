@@ -126,8 +126,22 @@ export class InMemoryStore implements StoreInterface {
       );
     }
 
-    // Sort by updated_at DESC to match SQLiteStore order
-    results.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+    // Sort by updated_at DESC, id ASC to match SQLiteStore/TursoStore's
+    // stable tiebreaker order — required for deterministic limit/offset
+    // paging when multiple docs share the same updated_at.
+    results.sort(
+      (a, b) => b.updated_at.localeCompare(a.updated_at) || a.id.localeCompare(b.id),
+    );
+
+    // limit/offset — see StoreFilters.limit/offset for the contract (omitted
+    // → no truncation, byte-identical to pre-pagination behavior).
+    if (filters.limit !== undefined || filters.offset !== undefined) {
+      const offset = filters.offset ?? 0;
+      results =
+        filters.limit !== undefined
+          ? results.slice(offset, offset + filters.limit)
+          : results.slice(offset);
+    }
 
     return ok(results.map((doc) => ({ ...doc })));
   }

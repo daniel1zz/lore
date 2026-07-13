@@ -14,6 +14,11 @@
  * + no new tool for SPEC-045 (doc-code drift oracle): lore_status gains check_drift?
  * (migrated off the argless 3-arg form), lore_anchor_set gains spec-target declarative
  * REPLACE, lore_bootstrap gains computed code_anchor_specs, SPEC-045 §Design Decisions D7).
+ * + no new tool for pagination hardening (unbounded-payload review): lore_list's
+ * limit/offset are now pushed into a store-level LIMIT/OFFSET (were previously an
+ * in-memory .slice() over an unbounded fetch); an omitted limit defaults to
+ * MCP_LIST_DEFAULT_LIMIT (this surface only — the CLI stays fully unbounded by
+ * default) and every response carries `truncated: boolean`, never a silent cap.
  *
  * Architecture: Tools with input use the `registerToolWithArgs` helper defined below, which:
  *   1. Calls `server.tool(name, desc, handler)` in 3-arg form (avoids ZodRawShapeCompat type bomb)
@@ -89,6 +94,17 @@ const DOC_STATUS_ENUM = z.enum([
   "deprecated",
 ]);
 
+/**
+ * Default page size applied to `lore_list` when the caller omits `limit`
+ * (pagination hardening, unbounded-payload review). MCP callers are always
+ * agents (SPEC-024) — an unpaged corpus scan is exactly the unbounded-payload
+ * growth this default exists to bound. See {@link LoreListSchema}'s JSDoc for
+ * the full "never a silent cap" contract (`returned`/`truncated` on every
+ * response). The CLI's `lore list` has NO equivalent default — human terminal
+ * usage stays fully unbounded unless `--limit` is passed explicitly.
+ */
+const MCP_LIST_DEFAULT_LIMIT = 100;
+
 /** Input schema for lore_create. */
 export const LoreCreateSchema = z.object({
   type: DOC_TYPE_ENUM,
@@ -155,7 +171,19 @@ export const LoreDeleteSchema = z.object({
   confirm: z.literal(true),
 });
 
-/** Input schema for lore_list. */
+/**
+ * Input schema for lore_list.
+ *
+ * `limit`/`offset` (pagination hardening, unbounded-payload review): unlike the CLI's
+ * `--limit`/`--offset` (which default to fully unbounded — human terminal usage), an
+ * OMITTED `limit` on THIS surface defaults to {@link MCP_LIST_DEFAULT_LIMIT} — MCP
+ * callers are always agents, and an unbounded corpus scan is the exact unbounded-payload
+ * risk this pagination work exists to close. The cap is never silent: the response
+ * always carries `returned`/`truncated` so a capped call is distinguishable from a
+ * complete one (never a silent cap — no-silent-fallback project norm). Passing an
+ * EXPLICIT `limit` (any value, including one larger than the default) always wins over
+ * the default and is honored verbatim.
+ */
 export const LoreListSchema = z.object({
   type: DOC_TYPE_ENUM.optional(),
   status: DOC_STATUS_ENUM.optional(),
@@ -806,15 +834,25 @@ export function registerTools(server: McpServer, app: App): void {
   registerToolWithArgs(server, "lore_list", "List documents matching optional filters", LoreListSchema, async (args) => {
     const { type, status, since, author, tag, limit, offset, governed_by, include_invalid } = args;
 
+    // reason: pagination hardening (unbounded-payload review) — an omitted `limit`
+    // defaults to MCP_LIST_DEFAULT_LIMIT (never an unpaged corpus-wide fetch on this
+    // agent-facing surface, unlike the CLI). `probeLimit` fetches ONE row past the
+    // effective page so `truncated` can be derived WITHOUT a separate corpus-wide
+    // COUNT query — never a silent cap, see LoreListSchema's JSDoc.
+    const effectiveLimit = limit ?? MCP_LIST_DEFAULT_LIMIT;
+    const probeLimit = effectiveLimit + 1;
+
     // governed_by is a link-table reverse query, not a StoreFilters column predicate —
     // short-circuits to its own service method, same as the CLI's --governed-by branch.
+    // listGovernedBy has no store-level limit/offset param, so paging (incl. the
+    // truncation probe) is applied in-memory to its already-fetched result.
     if (governed_by !== undefined) {
       const governedResult = await corpusService.listGovernedBy(governed_by);
       if (!governedResult.ok) return errorContent(governedResult.error);
-      const docs = limit !== undefined
-        ? governedResult.value.docs.slice(offset ?? 0, (offset ?? 0) + limit)
-        : governedResult.value.docs;
-      return textContent({ docs, total: governedResult.value.total });
+      const windowed = governedResult.value.docs.slice(offset ?? 0, (offset ?? 0) + probeLimit);
+      const truncated = windowed.length > effectiveLimit;
+      const docs = truncated ? windowed.slice(0, effectiveLimit) : windowed;
+      return textContent({ docs, total: docs.length, truncated });
     }
 
     const filters = {
@@ -825,13 +863,15 @@ export function registerTools(server: McpServer, app: App): void {
       ...(tag !== undefined ? { tags: [tag] } : {}),
       // SPEC-043 D3 — mirrors the CLI's --include-invalid flag.
       ...(include_invalid === true ? { include_invalid: true } : {}),
+      // pagination hardening — store-level LIMIT/OFFSET, never an unpaged fetch.
+      limit: probeLimit,
+      ...(offset !== undefined ? { offset } : {}),
     };
     const result = await corpusService.list(filters);
     if (!result.ok) return errorContent(result.error);
-    const docs = limit !== undefined
-      ? result.value.docs.slice(offset ?? 0, (offset ?? 0) + limit)
-      : result.value.docs;
-    return textContent({ docs, total: result.value.total });
+    const truncated = result.value.docs.length > effectiveLimit;
+    const docs = truncated ? result.value.docs.slice(0, effectiveLimit) : result.value.docs;
+    return textContent({ docs, total: docs.length, truncated });
   });
 
   // lore_search

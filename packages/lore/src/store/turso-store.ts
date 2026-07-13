@@ -395,6 +395,7 @@ export class TursoStore implements StoreInterface {
       const clauses: string[] = [];
       const params: InValue[] = [];
       const excludeDeleted = filters.exclude_deleted !== false;
+      const hasTagsFilter = filters.tags !== undefined && filters.tags.length > 0;
 
       if (excludeDeleted) {
         clauses.push("deleted_at IS NULL");
@@ -421,17 +422,50 @@ export class TursoStore implements StoreInterface {
       }
 
       const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
-      const sql = `SELECT * FROM docs ${whereClause} ORDER BY updated_at DESC`;
+
+      // reason: mirrors SQLiteStore.findMany's identical `hasTagsFilter` guard
+      // — `tags` is filtered IN-MEMORY below (JSON-stored column, no SQL
+      // index), so pushing LIMIT/OFFSET into SQL while a tags filter is
+      // active would apply the page boundary BEFORE the tags filter narrows
+      // the row set. Only push LIMIT/OFFSET into SQL when the WHERE clause
+      // alone determines row membership.
+      const limitParts: string[] = [];
+      if (!hasTagsFilter) {
+        if (filters.limit !== undefined) {
+          limitParts.push("LIMIT ?");
+          params.push(filters.limit);
+        } else if (filters.offset !== undefined) {
+          // reason: SQLite/libsql requires a LIMIT to use OFFSET; -1 means
+          // "no limit" (offset-only paging).
+          limitParts.push("LIMIT -1");
+        }
+        if (filters.offset !== undefined) {
+          limitParts.push("OFFSET ?");
+          params.push(filters.offset);
+        }
+      }
+      const limitClause = limitParts.join(" ");
+
+      const sql = `SELECT * FROM docs ${whereClause} ORDER BY updated_at DESC, id ASC ${limitClause}`;
 
       const rs = await this.client.execute({ sql, args: params });
       let records = rs.rows.map((row) => rowToDocRecord(libsqlRowToDocRow(row)));
 
       // tags filter applied in-memory (JSON stored as string)
-      if (filters.tags && filters.tags.length > 0) {
-        const requiredTags = filters.tags;
+      if (hasTagsFilter) {
+        const requiredTags = filters.tags as string[];
         records = records.filter((doc) =>
           requiredTags.every((tag) => doc.tags.includes(tag)),
         );
+        // Paging deferred until after the tags filter narrows the set (see
+        // the `hasTagsFilter` reason: comment above).
+        if (filters.limit !== undefined || filters.offset !== undefined) {
+          const offset = filters.offset ?? 0;
+          records =
+            filters.limit !== undefined
+              ? records.slice(offset, offset + filters.limit)
+              : records.slice(offset);
+        }
       }
 
       return ok(records);

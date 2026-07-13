@@ -861,6 +861,119 @@ describe("list", () => {
   });
 });
 
+// ─── list — limit/offset paging ────────────────────────────────────────────
+
+describe("list — limit/offset paging", () => {
+  it("STATE (REGRESSION) — absent limit/offset returns ALL matching docs, unpaged", async () => {
+    const { service } = makeService();
+    await service.create(prdInput("Doc 1"));
+    await service.create(prdInput("Doc 2"));
+    await service.create(prdInput("Doc 3"));
+
+    const result = await service.list({ type: "prd" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.docs).toHaveLength(3);
+    expect(result.value.total).toBe(3);
+  });
+
+  it("HAPPY — limit truncates the returned page and total reflects the page size", async () => {
+    const { service } = makeService();
+    await service.create(prdInput("Doc 1"));
+    await service.create(prdInput("Doc 2"));
+    await service.create(prdInput("Doc 3"));
+
+    const result = await service.list({ type: "prd", limit: 2 });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.docs).toHaveLength(2);
+    expect(result.value.total).toBe(2);
+  });
+
+  it("HAPPY — limit + offset page through the full set without overlap", async () => {
+    const { service } = makeService();
+    const created = await Promise.all([
+      service.create(prdInput("Doc 1")),
+      service.create(prdInput("Doc 2")),
+      service.create(prdInput("Doc 3")),
+    ]);
+    expect(created.every((r) => r.ok)).toBe(true);
+
+    const page1 = await service.list({ type: "prd", limit: 2, offset: 0 });
+    const page2 = await service.list({ type: "prd", limit: 2, offset: 2 });
+    expect(page1.ok && page2.ok).toBe(true);
+    if (!page1.ok || !page2.ok) return;
+
+    expect(page1.value.docs).toHaveLength(2);
+    expect(page2.value.docs).toHaveLength(1);
+    const page1Ids = new Set(page1.value.docs.map((d) => d.id));
+    const page2Ids = new Set(page2.value.docs.map((d) => d.id));
+    expect([...page1Ids].some((id) => page2Ids.has(id))).toBe(false);
+  });
+
+  it("BOUNDARY — limit 0 returns an empty page, no error", async () => {
+    const { service } = makeService();
+    await service.create(prdInput("Doc 1"));
+
+    const result = await service.list({ type: "prd", limit: 0 });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.docs).toEqual([]);
+    expect(result.value.total).toBe(0);
+  });
+
+  it("BOUNDARY — offset beyond the matching row count returns an empty page, no error", async () => {
+    const { service } = makeService();
+    await service.create(prdInput("Doc 1"));
+
+    const result = await service.list({ type: "prd", limit: 10, offset: 100 });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.docs).toEqual([]);
+  });
+});
+
+// ─── listFull — limit/offset paging ────────────────────────────────────────
+
+describe("listFull — limit/offset paging", () => {
+  it("STATE (REGRESSION) — absent limit/offset returns ALL matching docs, unpaged", async () => {
+    const { service } = makeService();
+    await service.create(prdInput("Doc 1"));
+    await service.create(prdInput("Doc 2"));
+
+    const result = await service.listFull({ type: "prd" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.docs).toHaveLength(2);
+    expect(result.value.total).toBe(2);
+  });
+
+  it("HAPPY — limit/offset page a full-DocRecord listing exactly like list()", async () => {
+    const { service } = makeService();
+    await service.create(prdInput("Doc 1"));
+    await service.create(prdInput("Doc 2"));
+    await service.create(prdInput("Doc 3"));
+
+    const result = await service.listFull({ type: "prd", limit: 2, offset: 1 });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.docs).toHaveLength(2);
+    // full DocRecord rows carry `extra`/`content` — not stripped like list()'s DocSummary.
+    expect(result.value.docs[0]).toHaveProperty("content");
+  });
+
+  it("BOUNDARY — limit 0 returns an empty page, no error", async () => {
+    const { service } = makeService();
+    await service.create(prdInput("Doc 1"));
+
+    const result = await service.listFull({ type: "prd", limit: 0 });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.docs).toEqual([]);
+    expect(result.value.total).toBe(0);
+  });
+});
+
 // ─── search ──────────────────────────────────────────────────────────────────
 
 describe("search", () => {

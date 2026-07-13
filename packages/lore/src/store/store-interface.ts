@@ -65,6 +65,27 @@ export interface StoreFilters {
   tags?: string[];
   /** Default: true. When false, soft-deleted docs are included. */
   exclude_deleted?: boolean;
+  /**
+   * Maximum number of rows {@link StoreInterface.findMany} returns, bound via
+   * `LIMIT ?` (never string-interpolated — same non-negotiable bind-protocol
+   * rule {@link AuditFilters.limit}'s `reason:` comment documents). Omitted
+   * (the default) → no `LIMIT` clause, ALL matching rows returned —
+   * byte-identical to pre-pagination behavior. `0` is a valid value (returns
+   * `[]`, not an error). Paging correctness depends on `findMany`'s stable
+   * `ORDER BY updated_at DESC, id ASC` — the `id` tiebreaker is what keeps
+   * offset pages non-overlapping when multiple docs share the same
+   * `updated_at`.
+   */
+  limit?: number;
+  /**
+   * Rows to skip before returning results, bound via `OFFSET ?`. Works with or
+   * without `limit` — an `offset` with no `limit` is still bounded via a
+   * `LIMIT -1` (SQLite/libsql "unlimited") sentinel so the two stay
+   * independently combinable, matching {@link StoreInterface.findVersions}'s
+   * existing `limit?`/`offset?` pairing. Omitted → no `OFFSET` clause (skip
+   * nothing).
+   */
+  offset?: number;
 }
 
 export interface AuditFilters {
@@ -151,7 +172,9 @@ export interface StoreInterface {
   findByIds(ids: DocId[]): Promise<Result<Map<DocId, DocRecord>, LoreError>>;
 
   /**
-   * Find multiple docs matching filters.
+   * Find multiple docs matching filters, ordered `updated_at DESC, id ASC`
+   * (a stable secondary tiebreaker — required for deterministic `limit`/
+   * `offset` paging, see {@link StoreFilters.limit}).
    * By default excludes soft-deleted docs (exclude_deleted defaults to true).
    */
   findMany(filters: StoreFilters): Promise<Result<DocRecord[], LoreError>>;

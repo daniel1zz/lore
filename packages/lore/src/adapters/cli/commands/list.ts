@@ -11,6 +11,18 @@
  * --since/--tag/--plan-id/--phase): combining them fails loud (exit 2, naming the
  * conflicting flags) rather than silently running --governed-by alone and dropping
  * the rest. --json is a rendering mode, not a filter, and may combine freely.
+ *
+ * --limit <n> / --offset <n> — optional paging (pagination hardening, unbounded-payload
+ * review). BOTH omitted → current unbounded behavior, byte-identical (backward-compatible
+ * default for human CLI usage). Every branch below sources its own list from ONE of two
+ * stances: (a) branches whose result set is exactly what the store returned (default,
+ * --type task, --include-invalid) push `limit`/`offset` straight into the `StoreFilters`
+ * object via `withPaging()`, so the DB itself bounds the row count; (b) branches that
+ * ALREADY narrow the store's result set client-side (--phase's extra.phase filter,
+ * --governed-by's link-table result) apply `limit`/`offset` via `.slice()` AFTER that
+ * narrowing — pushing paging into the store call there would apply the page boundary
+ * BEFORE the narrowing filter runs, silently truncating or misaligning pages (same
+ * class of bug `StoreInterface.findMany`'s own `tags`-filter-vs-paging guard avoids).
  */
 
 import { defineCommand } from "citty";
@@ -60,6 +72,14 @@ export default defineCommand({
       type: "boolean",
       description: "Include invalidated knowledge/adr docs (excluded by default). Source: SPEC-043 D3.",
     },
+    limit: {
+      type: "string",
+      description: "Max documents to return. Omitted → unbounded (current default behavior).",
+    },
+    offset: {
+      type: "string",
+      description: "Number of matching documents to skip before returning results. Requires a deterministic sort — always paired with the store's stable updated_at DESC, id ASC ordering.",
+    },
     json: {
       type: "boolean",
       description: "Output as JSON",
@@ -68,6 +88,23 @@ export default defineCommand({
   async run({ args }) {
     const { app } = loadLoreApp();
     try {
+      const limit = args.limit !== undefined ? parseInt(args.limit, 10) : undefined;
+      const offset = args.offset !== undefined ? parseInt(args.offset, 10) : undefined;
+      // reason: store-level paging is safe to apply directly to `StoreFilters` ONLY
+      // when nothing narrows the result set client-side after the fetch — see this
+      // file's header comment for the (a)/(b) branch split.
+      const withPaging = (base: Record<string, unknown>): Record<string, unknown> => ({
+        ...base,
+        ...(limit !== undefined ? { limit } : {}),
+        ...(offset !== undefined ? { offset } : {}),
+      });
+      // reason: client-side slice for branches that ALREADY narrowed the store's
+      // result set in-memory (--phase, --governed-by) — see header comment.
+      function pageInMemory<T>(docs: T[]): T[] {
+        if (limit === undefined && offset === undefined) return docs;
+        const start = offset ?? 0;
+        return limit !== undefined ? docs.slice(start, start + limit) : docs.slice(start);
+      }
       // --governed-by is a link-table reverse query (skill --governs--> artifact),
       // not a StoreFilters column predicate — it short-circuits to its own dedicated
       // service method (CorpusService.listGovernedBy) rather than joining the
@@ -93,7 +130,10 @@ export default defineCommand({
           process.exitCode = exitCode(governedResult.error);
           return;
         }
-        const { docs, total } = governedResult.value;
+        // reason: listGovernedBy has no store-level limit/offset param — page the
+        // already-fetched result in-memory (see header comment's (b) stance).
+        const docs = pageInMemory(governedResult.value.docs);
+        const total = docs.length;
 
         if (args.json) {
           console.log(JSON.stringify({ ok: true, data: { docs, total } }, null, 2));
@@ -147,8 +187,10 @@ export default defineCommand({
           process.exitCode = exitCode(fullResult.error);
           return;
         }
-        const filtered = fullResult.value.docs.filter(
-          (doc) => doc.extra["phase"] === phaseFilter,
+        // reason: extra.phase is a client-side filter (see file header) — paging must
+        // apply AFTER it narrows the set, never before (header comment's (b) stance).
+        const filtered = pageInMemory(
+          fullResult.value.docs.filter((doc) => doc.extra["phase"] === phaseFilter),
         );
         const total = filtered.length;
 
@@ -183,7 +225,7 @@ export default defineCommand({
       // (AC-WF-9). This requires the full DocRecord (extra.claim / extra.verification_evidence
       // are not in DocSummary) — mirrors the --phase branch's listFull usage above.
       if (filters["type"] === "task") {
-        const fullResult = await app.corpusService.listFull(filters);
+        const fullResult = await app.corpusService.listFull(withPaging(filters));
         if (!fullResult.ok) {
           process.stderr.write(formatError(fullResult.error) + "\n");
           process.exitCode = exitCode(fullResult.error);
@@ -220,7 +262,7 @@ export default defineCommand({
       // badge, mirroring the --phase/--type task branches' listFull usage above.
       // Source: SPEC-043 D3/D4.
       if (includeInvalid) {
-        const fullResult = await app.corpusService.listFull(filters);
+        const fullResult = await app.corpusService.listFull(withPaging(filters));
         if (!fullResult.ok) {
           process.stderr.write(formatError(fullResult.error) + "\n");
           process.exitCode = exitCode(fullResult.error);
@@ -251,7 +293,7 @@ export default defineCommand({
         return;
       }
 
-      const result = await app.corpusService.list(filters);
+      const result = await app.corpusService.list(withPaging(filters));
 
       if (!result.ok) {
         process.stderr.write(formatError(result.error) + "\n");
