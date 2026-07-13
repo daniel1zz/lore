@@ -12,6 +12,32 @@ export default defineConfig({
   test: {
     environment: "node",
     globals: false,
+    // reason: packages/lore/tests/integration/cli/*.test.ts spawn the CLI as a real
+    // `bun run src/index.ts` subprocess per case. Under full-suite CPU contention
+    // (vitest's threads pool defaults to one worker per available CPU, so N
+    // subprocess-heavy integration files can land on separate workers simultaneously,
+    // each spawning its own bun subprocess) individual cases were observed taking
+    // 6000-6500ms — already past the vitest default 5000ms testTimeout/hookTimeout —
+    // producing intermittent subprocess-timeout failures that pass 29/29 in isolation.
+    // 30000ms gives ~4.5x headroom over the observed 6.5s worst case, comfortably
+    // covering additional contention (more worktrees, slower CI runners) without
+    // masking a genuinely hung process. Do not lower this back toward 5000ms without
+    // re-measuring worst-case subprocess latency under full-suite contention first.
+    testTimeout: 30000,
+    hookTimeout: 30000,
+    // reason: same contention as above — capping thread-pool workers below the 8
+    // available CPUs leaves headroom for each worker's spawned `bun run` subprocess
+    // to get CPU time instead of every worker's subprocess fighting every other
+    // worker's subprocess 1:1 for the same 8 cores. 4 halves the worst-case
+    // subprocess-spawning parallelism (the 10 CLI integration test files) while still
+    // running 4 files concurrently, so unit-test wall-clock (174 files, most with zero
+    // subprocess spawns) is not materially regressed — this is not a global
+    // serialization (fileParallelism stays true, maxThreads=1 would 10x wall-clock).
+    poolOptions: {
+      threads: {
+        maxThreads: 4,
+      },
+    },
     setupFiles: [
       // reason: dashboard component tests need jest-dom matchers + React cleanup wired before
       // each test. vitest globals:false prevents @testing-library/react auto-detecting afterEach,
