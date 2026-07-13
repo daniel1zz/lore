@@ -832,19 +832,29 @@ export class CorpusService {
       ? childrenResult.value.map((d) => this.toSummary(d))
       : [];
 
-    // Related — non-parent outbound links
+    // Related — non-parent outbound links. Batch the "other side" doc fetch into
+    // ONE findByIds call instead of one store.find per link (SPEC review M6) —
+    // gather the distinct other-side ids first, then resolve from the returned map.
     const linksResult = await this.store.findLinks(doc.id, "both");
     const related: Array<DocSummary & { link_type: LinkType }> = [];
 
     if (linksResult.ok) {
-      for (const link of linksResult.value) {
-        if (link.link_type === "parent") continue;
-
-        // Determine the "other" side of the link
-        const otherId = link.from_id === doc.id ? link.to_id : link.from_id;
-        const otherResult = await this.store.find(otherId);
-        if (otherResult.ok && otherResult.value !== null) {
-          related.push({ ...this.toSummary(otherResult.value), link_type: link.link_type });
+      const nonParentLinks = linksResult.value.filter((l) => l.link_type !== "parent");
+      const otherIds = Array.from(
+        new Set(nonParentLinks.map((link) => (link.from_id === doc.id ? link.to_id : link.from_id))),
+      );
+      // reason: skip the round trip entirely when there's nothing to batch — a doc
+      // with zero non-parent links (or only a parent link) has no otherIds, so
+      // findByIds([]) would be a pointless call even though the store short-circuits
+      // it before touching SQL.
+      const othersResult = otherIds.length > 0 ? await this.store.findByIds(otherIds) : ok(new Map<DocId, DocRecord>());
+      if (othersResult.ok) {
+        for (const link of nonParentLinks) {
+          const otherId = link.from_id === doc.id ? link.to_id : link.from_id;
+          const other = othersResult.value.get(otherId);
+          if (other !== undefined) {
+            related.push({ ...this.toSummary(other), link_type: link.link_type });
+          }
         }
       }
     }

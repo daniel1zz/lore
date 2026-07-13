@@ -608,6 +608,9 @@ describe("OutlineService.resolve", () => {
         }),
         find: (id) => store.find(id),
         findBySlug: (slug) => store.findBySlug(slug),
+        // reason: N+1 batch fix — new required StoreInterface method; mechanical
+        // addition (same class of fix as every other explicit delegate above).
+        findByIds: (ids) => store.findByIds(ids),
         insert: (doc) => store.insert(doc),
         update: (id, patch) => store.update(id, patch),
         softDelete: (id) => store.softDelete(id),
@@ -620,6 +623,9 @@ describe("OutlineService.resolve", () => {
         // reason: SPEC-044 D1 — new required StoreInterface method; mechanical
         // addition (same class of fix as every other explicit delegate above).
         countLinksByToIds: (toIds) => store.countLinksByToIds(toIds),
+        // reason: N+1 batch fix — new required StoreInterface method; mechanical
+        // addition (same class of fix as every other explicit delegate above).
+        findLinksByFromIds: (fromIds, direction) => store.findLinksByFromIds(fromIds, direction),
         search: (q, f) => store.search(q, f),
         insertVersion: (v) => store.insertVersion(v),
         findVersions: (id, opts) => store.findVersions(id, opts),

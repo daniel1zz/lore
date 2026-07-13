@@ -241,13 +241,19 @@ export class TreeCheckService {
     if (allR.ok === false) return allR;
     const allDocs = allR.value;
 
+    // Batch: ONE findLinksByFromIds over every doc's id instead of one
+    // findLinks(doc.id, "out") call per doc (SPEC review M7).
+    const allDocIds = allDocs.map((doc) => doc.id);
+    const linksByFromIdR = await this.store.findLinksByFromIds(allDocIds, "out");
+    if (linksByFromIdR.ok === false) return linksByFromIdR;
+    const linksByFromId = linksByFromIdR.value;
+
     const inconsistencies: ReconcileInconsistency[] = [];
 
     for (const doc of allDocs) {
-      const linksR = await this.store.findLinks(doc.id, "out");
-      if (linksR.ok === false) return linksR;
+      const outLinks = linksByFromId.get(doc.id) ?? [];
 
-      const parentLinks = linksR.value.filter((l) => l.link_type === "parent");
+      const parentLinks = outLinks.filter((l) => l.link_type === "parent");
       const linkParent = parentLinks.length > 0 ? (parentLinks[0]!.to_id as DocId) : null;
 
       if (doc.parent_id !== null && linkParent === null) {

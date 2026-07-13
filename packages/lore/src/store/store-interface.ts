@@ -132,6 +132,25 @@ export interface StoreInterface {
   findBySlug(slug: Slug): Promise<Result<DocRecord | null, LoreError>>;
 
   /**
+   * Batch-find docs by id, in ONE round trip. `WHERE id IN (...)` — avoids the N+1
+   * pattern of calling {@link find} once per "other side of a link" id, e.g.
+   * `CorpusService`'s `related` resolution over a doc's non-parent links.
+   *
+   * Applies the SAME soft-delete default as {@link find} — i.e. NONE: a
+   * soft-deleted doc is still returned if its id is requested (find/findByIds
+   * are direct-address lookups, not list-shaped reads; `exclude_deleted`
+   * filtering is `findMany`'s concern only).
+   *
+   * @param ids - Doc ids to fetch
+   * @returns Map keyed by doc id; an id with no matching doc is ABSENT from the
+   *   map (never present with `null` or `undefined`) — mirrors
+   *   {@link findLinksByToIds}'s "absent means none" convention. `ok(new Map())`
+   *   immediately when `ids` is empty (no query issued, never a malformed
+   *   `WHERE id IN ()`).
+   */
+  findByIds(ids: DocId[]): Promise<Result<Map<DocId, DocRecord>, LoreError>>;
+
+  /**
    * Find multiple docs matching filters.
    * By default excludes soft-deleted docs (exclude_deleted defaults to true).
    */
@@ -212,6 +231,37 @@ export interface StoreInterface {
    * @see SPEC-044 §Design Decisions D1
    */
   countLinksByToIds(toIds: DocId[]): Promise<Result<Map<DocId, number>, LoreError>>;
+
+  /**
+   * Batch-find OUTGOING links grouped by `from_id`, in ONE round trip — the
+   * outgoing-link analog of {@link findLinksByToIds}, keyed the opposite
+   * direction. `WHERE from_id IN (...)`, grouped in the returned Map so
+   * callers never need a manual per-doc slice pass.
+   *
+   * Mirrors {@link findLinks}'s `"out"` direction EXACTLY — no `link_type`
+   * filter is applied (unlike {@link findLinksByToIds}, which IS
+   * `linkType`-scoped): every outgoing link row is returned, of any type.
+   * This makes `findLinksByFromIds(ids)` behavior-identical to calling
+   * `findLinks(id, "out")` once per id and grouping the results yourself —
+   * the N+1 pattern this method exists to replace
+   * (`TreeCheckService.reconcile`, SPEC review M7).
+   *
+   * @param fromIds - Source doc ids to match on the `from_id` side of the link
+   * @param direction - Reserved for signature symmetry with {@link findLinks};
+   *   currently the ONLY supported value is `"out"` (the default) — grouping by
+   *   `from_id` is inherently an outgoing-link concept, so no other direction
+   *   has a well-defined meaning here. Typed as the single literal rather than
+   *   the `"in" | "out" | "both"` union to make that a compile-time fact, not
+   *   a runtime one.
+   * @returns Map keyed by `from_id`; a doc id with zero outgoing links is
+   *   ABSENT from the map (never present with `[]`) — same "absent means
+   *   none" convention as {@link countLinksByToIds}. `ok(new Map())`
+   *   immediately when `fromIds` is empty (no query issued).
+   */
+  findLinksByFromIds(
+    fromIds: DocId[],
+    direction?: "out",
+  ): Promise<Result<Map<DocId, LinkRecord[]>, LoreError>>;
 
   // ── Search ─────────────────────────────────────────────────────────────
 
