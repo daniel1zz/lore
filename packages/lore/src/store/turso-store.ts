@@ -368,6 +368,26 @@ export class TursoStore implements StoreInterface {
     }
   }
 
+  async findByIds(ids: DocId[]): Promise<Result<Map<DocId, DocRecord>, LoreError>> {
+    const byId = new Map<DocId, DocRecord>();
+    if (ids.length === 0) return ok(byId);
+    try {
+      await this.ensureReady();
+      const placeholders = ids.map(() => "?").join(", ");
+      const rs = await this.client.execute({
+        sql: `SELECT * FROM docs WHERE id IN (${placeholders})`,
+        args: [...(ids as InValue[])],
+      });
+      for (const row of rs.rows) {
+        const doc = rowToDocRecord(libsqlRowToDocRow(row));
+        byId.set(doc.id, doc);
+      }
+      return ok(byId);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
   async findMany(filters: StoreFilters): Promise<Result<DocRecord[], LoreError>> {
     try {
       await this.ensureReady();
@@ -721,6 +741,34 @@ export class TursoStore implements StoreInterface {
     }
   }
 
+  async findLinksByFromIds(
+    fromIds: DocId[],
+    _direction: "out" = "out",
+  ): Promise<Result<Map<DocId, LinkRecord[]>, LoreError>> {
+    const byFromId = new Map<DocId, LinkRecord[]>();
+    if (fromIds.length === 0) return ok(byFromId);
+    try {
+      await this.ensureReady();
+      const placeholders = fromIds.map(() => "?").join(", ");
+      const rs = await this.client.execute({
+        sql: `SELECT * FROM links WHERE from_id IN (${placeholders})`,
+        args: [...(fromIds as InValue[])],
+      });
+      for (const row of rs.rows) {
+        const link = rowToLinkRecord(libsqlRowToLinkRow(row));
+        const bucket = byFromId.get(link.from_id);
+        if (bucket === undefined) {
+          byFromId.set(link.from_id, [link]);
+        } else {
+          bucket.push(link);
+        }
+      }
+      return ok(byFromId);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
   // ── Search ────────────────────────────────────────────────────────────
 
   async search(
@@ -914,7 +962,14 @@ export class TursoStore implements StoreInterface {
       }
 
       const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
-      const limitClause = filters.limit !== undefined ? `LIMIT ${filters.limit}` : "";
+      // reason: LIMIT is parameter-bound (never string-interpolated) even
+      // though `filters.limit` is a caller-controlled number, not raw user
+      // text — the bind protocol is the only non-negotiable boundary for
+      // the value entering the SQL string.
+      const limitClause = filters.limit !== undefined ? "LIMIT ?" : "";
+      if (filters.limit !== undefined) {
+        params.push(filters.limit);
+      }
       const sql = `SELECT * FROM audit ${whereClause} ORDER BY timestamp DESC ${limitClause}`;
 
       const rs = await this.client.execute({ sql, args: params });

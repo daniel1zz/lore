@@ -44,6 +44,7 @@ import type {
   DocId,
   DocRecord,
   HandoffExtra,
+  LinkRecord,
   LoreError,
   Result,
 } from "@lore/core";
@@ -189,15 +190,34 @@ export class SessionService {
     const firstPrd = prds[0];
     const root = firstPrd !== undefined ? { slug: firstPrd.slug, title: truncateTitle(firstPrd.title) } : null;
 
-    // Active (non-terminal) plans + per-plan task readiness counts.
+    // Active (non-terminal) plans + per-plan task readiness counts. Batched: ONE
+    // findLinksByToIds across every active plan's tasks (below) instead of the
+    // per-plan N+1 this loop used to issue via computeTaskCounts's own fetch
+    // (SPEC review M5) — evaluateReadiness already filters its `blocksLinks`
+    // input per-task internally, so passing the full cross-plan batch to each
+    // plan's computeTaskCounts call is safe; no manual per-plan slice needed.
     const plans = allDocs.filter((d) => d.type === "plan");
     const activePlanIds = new Set<DocId>();
-    const activePlans: BootstrapReport["active_plans"] = [];
+    const activePlanEntries: Array<{ plan: DocRecord; tasks: DocRecord[] }> = [];
     for (const plan of plans) {
       if (plan.status === "archived" || plan.status === "deprecated") continue;
       activePlanIds.add(plan.id);
       const tasks = allDocs.filter((d) => d.type === "task" && d.parent_id === plan.id);
-      const countsResult = await this.computeTaskCounts(tasks, allDocs, nowIso);
+      activePlanEntries.push({ plan, tasks });
+    }
+
+    const allActiveTaskIds = activePlanEntries.flatMap(({ tasks }) => tasks.map((t) => t.id));
+    const activeBlocksLinksResult = await this.store.findLinksByToIds(allActiveTaskIds, "blocks");
+    if (!activeBlocksLinksResult.ok) return activeBlocksLinksResult;
+
+    const activePlans: BootstrapReport["active_plans"] = [];
+    for (const { plan, tasks } of activePlanEntries) {
+      const countsResult = await this.computeTaskCounts(
+        tasks,
+        allDocs,
+        nowIso,
+        activeBlocksLinksResult.value,
+      );
       if (!countsResult.ok) return countsResult;
       activePlans.push({ slug: plan.slug, title: truncateTitle(plan.title), task_counts: countsResult.value });
     }
@@ -583,17 +603,32 @@ export class SessionService {
    * @param allDocs - Every doc in the corpus (already loaded by the caller) — used to
    *   build the blocker-status map without a second `findMany({})` round trip.
    * @param nowIso - Current time, ISO 8601.
+   * @param prefetchedBlocksLinks - Optional pre-fetched `"blocks"` links, already
+   *   batched across possibly MORE than just `tasks` (e.g. `bootstrap`'s single
+   *   cross-plan `findLinksByToIds` call, SPEC review M5). When provided, this
+   *   method issues NO store call — `evaluateReadiness` filters its `blocksLinks`
+   *   input per-task internally (`link.to_id === task.id`), so passing a superset
+   *   of links belonging to other plans' tasks is safe and requires no manual
+   *   slice. When omitted, fetches `taskIds`-scoped links itself (the
+   *   `computeReadinessPointer` single-plan call site).
    */
   private async computeTaskCounts(
     tasks: DocRecord[],
     allDocs: DocRecord[],
     nowIso: string,
+    prefetchedBlocksLinks?: LinkRecord[],
   ): Promise<Result<{ ready: number; claimed: number; done: number }, LoreError>> {
     if (tasks.length === 0) return ok({ ready: 0, claimed: 0, done: 0 });
 
-    const taskIds = tasks.map((t) => t.id);
-    const linksResult = await this.store.findLinksByToIds(taskIds, "blocks");
-    if (!linksResult.ok) return linksResult;
+    let blocksLinks: LinkRecord[];
+    if (prefetchedBlocksLinks !== undefined) {
+      blocksLinks = prefetchedBlocksLinks;
+    } else {
+      const taskIds = tasks.map((t) => t.id);
+      const linksResult = await this.store.findLinksByToIds(taskIds, "blocks");
+      if (!linksResult.ok) return linksResult;
+      blocksLinks = linksResult.value;
+    }
 
     const blockerStatuses = new Map<DocId, BlockerInfo>();
     for (const doc of allDocs) {
@@ -602,7 +637,7 @@ export class SessionService {
 
     const records = evaluateReadiness(
       tasks,
-      linksResult.value,
+      blocksLinks,
       blockerStatuses,
       nowIso,
       this.deps.claimTtlMinutes,

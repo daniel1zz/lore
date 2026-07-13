@@ -84,6 +84,18 @@ export class InMemoryStore implements StoreInterface {
     return ok(null);
   }
 
+  async findByIds(ids: DocId[]): Promise<Result<Map<DocId, DocRecord>, LoreError>> {
+    const byId = new Map<DocId, DocRecord>();
+    if (ids.length === 0) return ok(byId);
+    for (const id of ids) {
+      const record = this.docs.get(id);
+      if (record !== undefined) {
+        byId.set(id, { ...record });
+      }
+    }
+    return ok(byId);
+  }
+
   async findMany(filters: StoreFilters): Promise<Result<DocRecord[], LoreError>> {
     const excludeDeleted = filters.exclude_deleted !== false;
 
@@ -275,6 +287,26 @@ export class InMemoryStore implements StoreInterface {
       (l) => l.link_type === linkType && idSet.has(l.to_id),
     );
     return ok(found.map((l) => ({ ...l })));
+  }
+
+  async findLinksByFromIds(
+    fromIds: DocId[],
+    _direction: "out" = "out",
+  ): Promise<Result<Map<DocId, LinkRecord[]>, LoreError>> {
+    const byFromId = new Map<DocId, LinkRecord[]>();
+    if (fromIds.length === 0) return ok(byFromId);
+    const idSet = new Set(fromIds);
+    for (const link of this.links) {
+      if (idSet.has(link.from_id)) {
+        const bucket = byFromId.get(link.from_id);
+        if (bucket === undefined) {
+          byFromId.set(link.from_id, [{ ...link }]);
+        } else {
+          bucket.push({ ...link });
+        }
+      }
+    }
+    return ok(byFromId);
   }
 
   async countLinksByToIds(toIds: DocId[]): Promise<Result<Map<DocId, number>, LoreError>> {
