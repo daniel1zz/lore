@@ -13,6 +13,8 @@
  *   NEGATIVE:
  *     - resolve() returns null for unknown session_id
  *     - resolve() returns null for a row that was deleted
+ *     - resolve() returns null (fail-closed) when api_key_name has no matching api_keys row
+ *       (hardening fix — see session-revocation.bun.test.ts for the revoked-key suite)
  *     - touch() on unknown session is a no-op (no error thrown)
  *     - delete() on unknown session is a no-op (no error thrown)
  *
@@ -20,7 +22,6 @@
  *     - create() generates unique session IDs (two consecutive calls produce different IDs)
  *     - sessions table created automatically on construction (no prior DDL)
  *     - pruneExpired() with no expired rows is a no-op
- *     - owner falls back to "admin" when api_key_name has no matching api_keys row
  *
  *   ERROR:
  *     - n/a: bun:sqlite in-memory does not simulate connection failure
@@ -143,18 +144,24 @@ describe("SessionStore.resolve", () => {
       expect(typeof session!.expires_at).toBe("string");
     });
 
-    it("owner defaults to 'admin' when api_keys row is missing", () => {
-      const db = makeDb();
-      const store = new SessionStore(db);
-      // No matching api_keys row for "orphan-key" — LEFT JOIN returns null owner
-      const { session_id } = store.create("orphan-key");
-      const session = store.resolve(session_id);
-      expect(session).not.toBeNull();
-      expect(session!.owner).toBe("admin");
-    });
   });
 
   describe("negative cases", () => {
+    // reason: hardening fix — resolve() switched from a LEFT JOIN (tolerating a missing
+    // api_keys row via an "admin" owner fallback) to an INNER JOIN + `k.revoked_at IS NULL`
+    // (see auth.ts ApiKeyStore.revoke() cascade + module header). A session with no matching,
+    // non-revoked api_keys row is now UNAUTHENTICATED, not merely owner-less — closes the gap
+    // where a revoked-and-purged key's session kept resolving. See session-revocation.bun.test.ts
+    // for the full revoked-key test suite.
+    it("returns null (not an 'admin'-owner fallback) when api_keys row is missing", () => {
+      const db = makeDb();
+      const store = new SessionStore(db);
+      // No matching api_keys row for "orphan-key" — INNER JOIN produces no row.
+      const { session_id } = store.create("orphan-key");
+      const session = store.resolve(session_id);
+      expect(session).toBeNull();
+    });
+
     it("returns null for an unknown session_id", () => {
       const db = makeDb();
       const store = new SessionStore(db);
@@ -173,6 +180,17 @@ describe("SessionStore.resolve", () => {
   describe("regression", () => {
     it("resolving one session does not return another session's data", () => {
       const db = makeDb();
+      const now = new Date().toISOString();
+      const keyHash = "b".repeat(64);
+      // reason: resolve() now requires a matching, non-revoked api_keys row (hardening fix,
+      // see session-revocation.bun.test.ts) — insert rows for both agents so this test still
+      // exercises cross-session isolation rather than the (now-rejected) no-matching-key path.
+      db.prepare(
+        "INSERT INTO api_keys (key_hash, name, owner, rate_limit, created_at) VALUES (?, ?, ?, 60, ?)",
+      ).run(keyHash, "agent-a", "admin", now);
+      db.prepare(
+        "INSERT INTO api_keys (key_hash, name, owner, rate_limit, created_at) VALUES (?, ?, ?, 60, ?)",
+      ).run("c".repeat(64), "agent-b", "admin", now);
       const store = new SessionStore(db);
       const { session_id: sid1 } = store.create("agent-a");
       store.create("agent-b");
@@ -187,7 +205,9 @@ describe("SessionStore.resolve", () => {
 describe("SessionStore.touch", () => {
   describe("happy path", () => {
     it("extends expires_at by approximately 30 days", () => {
-      const db = makeDb();
+      // reason: resolve() (called below to check state) now requires a matching, non-revoked
+      // api_keys row — see session-revocation.bun.test.ts.
+      const { db } = makeDbWithKey();
       const store = new SessionStore(db);
       const { session_id, expires_at: original } = store.create("dashboard-local");
       // Simulate time passing by waiting a tick, then touch
@@ -215,7 +235,9 @@ describe("SessionStore.touch", () => {
 
   describe("state transitions (AC-A-B10)", () => {
     it("after touch, expires_at is later than original expires_at", async () => {
-      const db = makeDb();
+      // reason: resolve() (called below to check state) now requires a matching, non-revoked
+      // api_keys row — see session-revocation.bun.test.ts.
+      const { db } = makeDbWithKey();
       const store = new SessionStore(db);
       const { session_id, expires_at: original } = store.create("dashboard-local");
 
@@ -270,7 +292,11 @@ describe("SessionStore.delete", () => {
 describe("SessionStore.pruneExpired", () => {
   describe("happy path", () => {
     it("removes sessions whose expires_at is in the past", () => {
-      const db = makeDb();
+      // reason: resolve() (called below to check state) now requires a matching, non-revoked
+      // api_keys row — see session-revocation.bun.test.ts. The expired row deliberately keeps
+      // its own non-matching "test-key" name — pruneExpired() operates on expires_at alone and
+      // must not require a matching api_keys row to prune a row.
+      const { db } = makeDbWithKey();
       const store = new SessionStore(db);
 
       // Insert an already-expired session directly via SQL
@@ -289,7 +315,9 @@ describe("SessionStore.pruneExpired", () => {
     });
 
     it("pruneExpired with no expired rows is a no-op", () => {
-      const db = makeDb();
+      // reason: resolve() (called below to check state) now requires a matching, non-revoked
+      // api_keys row — see session-revocation.bun.test.ts.
+      const { db } = makeDbWithKey();
       const store = new SessionStore(db);
       const { session_id } = store.create("dashboard-local");
       expect(() => store.pruneExpired()).not.toThrow();

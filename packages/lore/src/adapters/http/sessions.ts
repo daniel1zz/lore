@@ -7,6 +7,13 @@
  *   - Sessions expire after 30 days (sliding renewal on each use).
  *   - Constructor auto-creates the sessions table and prunes expired rows.
  *   - api_key_name references api_keys.name (soft link, no FK constraint).
+ *   - resolve() and touch() only recognize a session whose backing api_keys row EXISTS and
+ *     has revoked_at IS NULL — a session minted from a since-revoked (or purged) key is
+ *     treated identically to an expired/absent session (returns null / no-ops). This closes
+ *     the "stolen cookie survives `lore agent revoke`" gap: ApiKeyStore.revoke() additionally
+ *     cascade-deletes the revoked key's session rows (defense in depth, same Database handle,
+ *     see auth.ts) but resolve()/touch() enforce this independently so the read path is safe
+ *     even if the cascade is ever skipped or races a concurrent request.
  * Side-effect class: IO (bun:sqlite)
  * Source: SPEC-016 §3.4, §3.5
  */
@@ -46,7 +53,10 @@ export interface ResolvedSession {
 interface SessionRow {
   api_key_name: string;
   expires_at: string;
-  owner: string | null;
+  // reason: owner is NOT NULL DEFAULT 'admin' on api_keys (migration-002) and resolve()'s
+  // query now requires a matching, non-revoked api_keys row to produce a row at all — so
+  // when a row is returned, owner is always a real string (never a LEFT-JOIN-null fallback).
+  owner: string;
 }
 
 // ─── SessionStore ───────────────────────────────────────────────────────────────
@@ -94,33 +104,37 @@ export class SessionStore {
   /**
    * Resolve a session_id to its owner context.
    * Joins with api_keys to get the owner field.
-   * Returns null if the session does not exist (not found or expired+pruned).
+   * Returns null if the session does not exist, OR if its backing api_keys row is missing
+   * or revoked (`revoked_at IS NOT NULL`) — a session minted from a since-revoked key is
+   * UNAUTHENTICATED, not merely owner-less. See module header.
    *
    * @param sessionId - 32-hex session ID from the lore_sid cookie.
-   * @returns ResolvedSession or null if the session row does not exist.
+   * @returns ResolvedSession or null if the session row does not exist / its key is revoked.
    */
   resolve(sessionId: string): ResolvedSession | null {
     const row = this.db.prepare(
       `SELECT s.api_key_name, s.expires_at, k.owner
        FROM sessions s
-       LEFT JOIN api_keys k ON s.api_key_name = k.name
-       WHERE s.session_id = ?`,
+       JOIN api_keys k ON s.api_key_name = k.name
+       WHERE s.session_id = ? AND k.revoked_at IS NULL`,
     ).get(sessionId) as SessionRow | null;
 
     if (row === null) return null;
 
     return {
       name: row.api_key_name,
-      // reason: api_keys.owner may be missing if key was revoked+purged but session row remains;
-      // fallback to "admin" is safe for a local single-user tool (SPEC-016 §2.2 non-goal: multi-user).
-      owner: row.owner ?? "admin",
+      owner: row.owner,
       expires_at: row.expires_at,
     };
   }
 
   /**
    * Slide the session expiry by +30 days from now and update last_used_at.
-   * No-ops if the session does not exist.
+   * No-ops if the session does not exist OR its backing api_keys row is missing/revoked
+   * (mirrors resolve()'s revoked-key rejection — defense in depth: in the normal
+   * authenticateRequest flow, resolve() already rejects a revoked-key session BEFORE
+   * touch() is ever called, but this guard keeps touch() itself from reviving/extending
+   * a revoked session's lease if it is ever invoked directly).
    *
    * @param sessionId - 32-hex session ID to renew.
    */
@@ -128,7 +142,10 @@ export class SessionStore {
     const now = new Date().toISOString();
     const expires_at = new Date(Date.now() + SESSION_TTL_MS).toISOString();
     this.db.prepare(
-      `UPDATE sessions SET last_used_at = ?, expires_at = ? WHERE session_id = ?`,
+      `UPDATE sessions
+       SET last_used_at = ?, expires_at = ?
+       WHERE session_id = ?
+         AND api_key_name IN (SELECT name FROM api_keys WHERE revoked_at IS NULL)`,
     ).run(now, expires_at, sessionId);
   }
 

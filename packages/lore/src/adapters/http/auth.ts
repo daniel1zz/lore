@@ -8,8 +8,11 @@
  *     else if Bearer token present → existing API key validation path; else UNAUTHORIZED.
  *   - Expired sessions are deleted inline and return an auth failure.
  *   - Valid sessions are sliding-renewed (touch) on every authenticated request.
- *   - ALLOWED_ORIGINS is the allowlist for POST /api/auth/local-bootstrap Origin checks.
+ *   - ALLOWED_ORIGINS is the allowlist for POST /api/auth/local-bootstrap Origin checks
+ *     (also reused by dashboard-routes.ts's CSRF Origin check via middleware.ts::isOriginAllowed).
  *   - API keys are SHA-256 hashed at rest. Raw key = "lore_ak_" + 64 hex chars.
+ *   - ApiKeyStore.revoke() cascade-deletes the revoked key's cookie sessions (same `db`
+ *     handle as SessionStore) — a revoked key invalidates every session it ever minted.
  * Side-effect class: IO (bun:sqlite reads/writes, crypto)
  * Source: SPEC-010 §3.2, §3.3; SPEC-016 §3.3
  */
@@ -145,7 +148,14 @@ export class ApiKeyStore {
     }
   }
 
-  /** Revoke an API key by name. */
+  /**
+   * Revoke an API key by name. Cascade-deletes any cookie sessions minted from this key
+   * (SessionStore shares this same `db` handle — see sessions.ts module header) so an
+   * already-issued `lore_sid` cookie dies with the key instead of continuing to
+   * authenticate (and self-renew) for up to another 30 days. This is defense in depth
+   * alongside sessions.ts `resolve()`/`touch()`'s own revoked-key rejection, which closes
+   * the gap independently at read time even if this cascade is ever skipped.
+   */
   revoke(name: string): Result<void, LoreError> {
     const row = this.db.prepare("SELECT key_hash FROM api_keys WHERE name = ?").get(name) as { key_hash: string } | null;
     if (row === null) {
@@ -155,6 +165,19 @@ export class ApiKeyStore {
     try {
       const now = new Date().toISOString();
       this.db.prepare("UPDATE api_keys SET revoked_at = ? WHERE name = ?").run(now, name);
+
+      // reason: ApiKeyStore may be constructed standalone (unit tests, or any future caller
+      // that never mints cookie sessions) — SessionStore's `CREATE TABLE IF NOT EXISTS
+      // sessions` may not have run yet on this Database handle. Guard with an existence
+      // check rather than a try/catch-and-swallow so a genuine DELETE failure (not "table
+      // missing") still surfaces via the outer catch below.
+      const sessionsTableExists = this.db.prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sessions'",
+      ).get() !== null;
+      if (sessionsTableExists) {
+        this.db.prepare("DELETE FROM sessions WHERE api_key_name = ?").run(name);
+      }
+
       return ok(undefined);
     } catch (e) {
       const message = e instanceof Error ? e.message : "Unknown error";

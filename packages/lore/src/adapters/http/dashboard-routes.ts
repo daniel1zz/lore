@@ -6,6 +6,11 @@
  *   Telemetry: emits source:"dashboard" events per AC-DASH-WRITE-TEL-1.
  * Public surface: handleDashboardRoute
  * Invariants:
+ *   - CSRF: an `Origin` header present but not in `ALLOWED_ORIGINS` (auth.ts, checked via
+ *     `middleware.ts::isOriginAllowed` — the SAME allowlist `POST /api/auth/local-bootstrap`
+ *     uses, never a second one) → 403 on any write endpoint, checked BEFORE the cookie-actor
+ *     guard. A MISSING Origin header is NOT rejected (see `assertAllowedOrigin` doc comment) —
+ *     defense-in-depth alongside SameSite=Strict, not a replacement for it.
  *   - Bearer-token actor (callerSurface="http_token") → 403 on any write endpoint.
  *   - PATCH /api/dashboard/docs/:id checks If-Match header for optimistic concurrency.
  *   - X-Force-Overwrite: 1 bypasses the version check (force write).
@@ -54,9 +59,39 @@ import type { App } from "../../app.js";
 import type { ActorContext } from "./auth.js";
 import type { DocPatch, LinkType } from "@lore/core";
 import { createDocInputSchema } from "@lore/core";
-import { jsonOk, jsonError, loreErrorResponse, parseJsonBody } from "./middleware.js";
+import { jsonOk, jsonError, loreErrorResponse, parseJsonBody, isOriginAllowed } from "./middleware.js";
 import { checkConcurrency } from "./concurrency.js";
 import { runCalibrationHook } from "../../flows/calibration-hook.js";
+
+// ─── CSRF Origin guard ────────────────────────────────────────────────────────
+
+/**
+ * Reject a state-changing dashboard request whose `Origin` header is present but not in
+ * the SPEC-016 allowlist (`ALLOWED_ORIGINS`, checked via the shared `isOriginAllowed` —
+ * no second allowlist). Defense-in-depth alongside `SameSite=Strict` + `assertCookieActor`:
+ * SameSite blocks cross-site cookie attachment in modern browsers, but this catches
+ * browsers/proxies that don't fully honor it.
+ *
+ * A request with NO `Origin` header is intentionally NOT rejected here — same-origin GETs
+ * and non-browser cookie-bearing clients routinely omit it, and CORS/Origin checking is a
+ * browser-enforced mechanism that non-browser callers never evaluate anyway (the same
+ * "absent Origin ⇒ non-browser, not a CSRF vector" convention `middleware.ts`'s
+ * `applyCorsOrigin` already documents). Only a present-and-disallowed Origin is evidence of
+ * an actual cross-site browser request.
+ *
+ * @param req - Incoming request.
+ * @returns 403 Response when Origin is present and disallowed, null otherwise.
+ */
+function assertAllowedOrigin(req: Request): Response | null {
+  const origin = req.headers.get("Origin");
+  if (origin !== null && !isOriginAllowed(origin)) {
+    return jsonError(
+      { code: "VALIDATION_ERROR", field: "Origin", message: `Origin not in allowlist: ${origin}` },
+      403,
+    );
+  }
+  return null;
+}
 
 // ─── Cookie-auth guard ────────────────────────────────────────────────────────
 
@@ -493,6 +528,11 @@ export async function handleDashboardRoute(
 
   const match = matchDashboardPath(method, path);
   if (match === null) return null;
+
+  // CSRF Origin guard — applies to ALL dashboard write endpoints, checked BEFORE the
+  // cookie-actor guard (fail on the cheaper, header-only check first).
+  const originGuardResponse = assertAllowedOrigin(req);
+  if (originGuardResponse !== null) return originGuardResponse;
 
   // Cookie-only guard (AC-DASH-WRITE-9) — applies to ALL dashboard write endpoints.
   const guardResponse = assertCookieActor(actor);
