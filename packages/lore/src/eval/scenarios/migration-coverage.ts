@@ -24,9 +24,9 @@
  */
 
 import { z } from "zod";
-import { existsSync, readdirSync, statSync } from "fs";
-import { join } from "path";
+import { existsSync } from "fs";
 import type { App } from "../../app.js";
+import { walkFiles } from "../../service/fs-walk.js";
 
 // ─── Result Schema (Zod SSOT) ─────────────────────────────────────────────────
 
@@ -73,22 +73,10 @@ export type MigrationCoverageResult = z.infer<typeof MigrationCoverageResultSche
  */
 function countMarkdownFiles(dir: string): number {
   if (!existsSync(dir)) return 0;
-  let count = 0;
-  try {
-    const entries = readdirSync(dir);
-    for (const entry of entries) {
-      const fullPath = join(dir, entry);
-      const stat = statSync(fullPath);
-      if (stat.isDirectory()) {
-        count += countMarkdownFiles(fullPath);
-      } else if (entry.endsWith(".md")) {
-        count += 1;
-      }
-    }
-  } catch {
-    // IO errors are swallowed — reason: eval must not throw (SPEC-013 §3)
-  }
-  return count;
+  // reason: onError "skip" mirrors the original's per-subdirectory try/catch swallow —
+  // an unreadable subtree contributes 0 to the count without aborting sibling subtrees
+  // (eval must never throw, SPEC-013 §3).
+  return walkFiles(dir, { extensions: [".md"], onError: "skip" }).length;
 }
 
 // ─── Main Eval Function ───────────────────────────────────────────────────────

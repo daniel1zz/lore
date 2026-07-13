@@ -79,15 +79,22 @@ import {
   writeFileSync,
   existsSync,
   mkdirSync,
-  readdirSync,
   openSync,
   writeSync,
   closeSync,
   renameSync,
 } from "fs";
-import { join, dirname } from "path";
+import { join, dirname, basename } from "path";
 import { parse as parseYaml } from "yaml";
-import { err, ok, canonicaliseBody, exportIndexSchema, slugify, DOC_TYPE_ROLE_MAP } from "@lore/core";
+import {
+  err,
+  ok,
+  canonicaliseBody,
+  exportIndexSchema,
+  slugify,
+  DOC_TYPE_ROLE_MAP,
+  splitFrontmatter,
+} from "@lore/core";
 import type {
   LoreError,
   Result,
@@ -98,6 +105,7 @@ import type {
 import type { ExportIndex } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveValidityBanner } from "./outline-service.js";
+import { walkFiles } from "./fs-walk.js";
 
 /** Time seam (SPEC-043 D3/D4 convention) — never `Date.now()` read directly. */
 const defaultNow = (): string => new Date().toISOString();
@@ -470,23 +478,23 @@ function scanTypeDirectory(
   const result = new Map<string, { humanId: string; filePath: string }>();
   if (!existsSync(typeDir)) return result;
 
-  let names: string[];
+  let absPaths: string[];
   try {
-    // reason: readdirSync without withFileTypes returns string[] per SPEC-018 pattern.
-    names = readdirSync(typeDir) as string[];
+    // reason: non-recursive — SPEC-018 scans one type directory, not its subtree.
+    // "skip" mirrors the original's catch-and-return-empty on an unreadable typeDir.
+    absPaths = walkFiles(typeDir, { extensions: [".md"], recursive: false, onError: "skip" });
   } catch {
     return result;
   }
 
-  for (const name of names) {
-    if (typeof name !== "string" || !name.endsWith(".md")) continue;
-    const absPath = join(typeDir, name);
+  for (const absPath of absPaths) {
+    const name = basename(absPath);
     try {
       const raw = readFileSync(absPath, "utf8");
       const normalized = raw.replace(/\r\n/g, "\n");
-      const match = normalized.match(/^---\n([\s\S]*?)\n---\n/);
-      if (!match) continue;
-      const fm = parseYaml(match[1] ?? "") as unknown;
+      const split = splitFrontmatter(normalized, "strict");
+      if (!split.ok) continue;
+      const fm = parseYaml(split.frontmatter) as unknown;
       if (!fm || typeof fm !== "object") continue;
       const record = fm as Record<string, unknown>;
       const title = typeof record["title"] === "string" ? record["title"].trim() : "";
@@ -883,8 +891,8 @@ function topoSortDocs(docs: DocRecord[]): { sorted: DocRecord[]; cycles: string[
  */
 function extractBodyFromMd(mdContent: string): string {
   const normalized = mdContent.replace(/\r\n/g, "\n");
-  const match = normalized.match(/^---\n[\s\S]*?\n---\n([\s\S]*)$/);
-  return match ? (match[1] ?? "") : normalized;
+  const split = splitFrontmatter(normalized, "strict");
+  return split.ok ? split.body : normalized;
 }
 
 /**

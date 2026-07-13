@@ -20,7 +20,7 @@ Read-only evaluation scenarios that measure corpus health and search quality. Si
 
 ## Scenarios
 
-- `runMigrationCoverage` — confirms `imported + already_existed === source files` after a v1 import (SPEC-013 §3.1).
+- `runMigrationCoverage` — confirms `imported + already_existed === source files` after a v1 import (SPEC-013 §3.1). `countMarkdownFiles` delegates its recursive `.md` count to `../../service/fs-walk.ts::walkFiles(dir, {extensions: [".md"], onError: "skip"})` — the shared dir-walker (refactored out of three independent hand-rolled copies, see `service/CLAUDE.md`); `onError: "skip"` preserves this scenario's "never throws" invariant per-subdirectory, not just at the top level.
 - `runTreeConsistency` — runs `TreeCheckService.check` against the blueprint and reports drift count (§3.2).
 - `runLinkIntegrity` — every `LinkRecord.from_id` / `to_id` resolves to a live doc (§3.3).
 - `runTypeDistribution` — actual doc-type counts fall within `DEFAULT_THRESHOLDS` ranges (§3.4).
