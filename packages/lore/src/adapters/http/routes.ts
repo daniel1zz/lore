@@ -25,6 +25,42 @@ import { computeValidityState } from "../../flows/validity-state.js";
 // ─── Auth route handlers (SPEC-016) ────────────────────────────────────────────
 
 /**
+ * Hostnames treated as guaranteed local dev — never crosses an untrusted network hop.
+ * `URL#hostname` serializes an IPv6 host WITH brackets (e.g. `[::1]`, not `::1`) per the
+ * WHATWG URL spec — both forms are listed defensively in case a future caller normalizes
+ * the value before this check runs.
+ */
+const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+
+/**
+ * Decide whether the current request is in a "secure" context — i.e. whether it is safe
+ * to mark the response cookie `Secure` without breaking plain-http local dev.
+ *
+ * `Secure` is added when EITHER of these holds (OR, not priority-ordered — a non-loopback
+ * host gets `Secure` even if a proxy explicitly signals plain http, since we cannot verify
+ * that signal and the conservative/non-breaking default is to harden):
+ *   - HTTPS: `X-Forwarded-Proto: https` (reverse-proxy TLS termination — this adapter's own
+ *     `Bun.serve` call in index.ts never configures TLS, so `req.url`'s scheme is always
+ *     "http" even when a proxy in front of it terminates HTTPS) OR `req.url`'s own scheme
+ *     is "https:" (in case a future deployment terminates TLS in-process).
+ *   - Non-loopback: the request's hostname is not `localhost` / `127.0.0.1` / `::1`.
+ * `Secure` is omitted only when NEITHER holds — plain-http loopback, i.e. local dev
+ * (`lore dashboard` on localhost) — since browsers silently drop `Secure` cookies sent over
+ * plain http, which would break that flow.
+ *
+ * @param req - Incoming request (POST /api/auth/local-bootstrap).
+ * @returns true iff the Set-Cookie response should carry the `Secure` attribute.
+ */
+function isSecureRequestContext(req: Request): boolean {
+  const forwardedProto = req.headers.get("X-Forwarded-Proto");
+  const url = new URL(req.url);
+  const isHttps = forwardedProto !== null ? forwardedProto.toLowerCase() === "https" : url.protocol === "https:";
+  if (isHttps) return true;
+
+  return !LOOPBACK_HOSTNAMES.has(url.hostname);
+}
+
+/**
  * POST /api/auth/local-bootstrap — trade raw API key for an HttpOnly session cookie.
  * Verifies Origin against ALLOWED_ORIGINS and X-Lore-Token against api_keys.
  * Called BEFORE authenticateRequest in index.ts (no prior auth required).
@@ -69,7 +105,12 @@ export async function handleLocalBootstrap(req: Request, app: App): Promise<Resp
   // reason: Set-Cookie must be in the Response headers, not in CORS headers.
   // Max-Age=2592000 = 30 days in seconds. Path=/api keeps the cookie scoped to API routes
   // only — Vite's / routes never see it, reducing exposure. SPEC-016 §3.2.
-  const cookieValue = `lore_sid=${session_id}; HttpOnly; SameSite=Strict; Path=/api; Max-Age=2592000`;
+  // `Secure` is conditional on isSecureRequestContext (see its doc comment) — omitted for
+  // loopback plain-http local dev (Secure cookies are silently dropped by browsers over
+  // plain http, which would break `lore dashboard` on localhost), added for every other
+  // (non-loopback / HTTPS / reverse-proxied) context as hardening.
+  const secureFlag = isSecureRequestContext(req) ? "; Secure" : "";
+  const cookieValue = `lore_sid=${session_id}; HttpOnly; SameSite=Strict; Path=/api; Max-Age=2592000${secureFlag}`;
   const headers = new Headers(corsHeaders({ "Content-Type": "application/json" }));
   headers.set("Set-Cookie", cookieValue);
 

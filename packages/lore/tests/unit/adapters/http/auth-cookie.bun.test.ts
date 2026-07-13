@@ -132,6 +132,10 @@ describe("authenticateRequest — cookie-first path", () => {
 
   describe("happy path (AC-A-B5)", () => {
     it("returns ActorContext with name/session_id/owner/expires_at for valid cookie", async () => {
+      // reason: resolve() now requires a matching, non-revoked api_keys row (hardening fix,
+      // see session-revocation.bun.test.ts) — mint the backing key before the session.
+      const createResult = await keyStore.create("dashboard-local", "owner");
+      if (!createResult.ok) throw new Error("expected ok");
       const { session_id } = sessionStore.create("dashboard-local");
       const req = makeReqWithCookie(session_id);
       const result = await authenticateRequest(req, keyStore, sessionStore);
@@ -155,7 +159,14 @@ describe("authenticateRequest — cookie-first path", () => {
       expect(result.error.field).toBe("Cookie");
     });
 
-    it("returns VALIDATION_ERROR and deletes row for expired session (AC-A-B6)", () => {
+    it("returns VALIDATION_ERROR and deletes row for expired session (AC-A-B6)", async () => {
+      // reason: resolve() must succeed (so authenticateRequest reaches its OWN expiry check
+      // and deletes the row) — needs a matching, non-revoked api_keys row, see
+      // session-revocation.bun.test.ts. Without it, resolve() would reject for "no matching
+      // key" instead, and the explicit expiry-delete branch under test would never run.
+      const createResult = await keyStore.create("dashboard-local", "owner");
+      if (!createResult.ok) throw new Error("expected ok");
+
       // Insert session with past expires_at directly
       const db = (sessionStore as unknown as { db: Database }).db;
       const past = new Date(Date.now() - 1000).toISOString();
@@ -229,6 +240,10 @@ describe("authenticateRequest — cookie-first path", () => {
 
   describe("state transitions (AC-A-B10)", () => {
     it("touch is called on valid cookie — expires_at is updated", async () => {
+      // reason: resolve()/touch() now require a matching, non-revoked api_keys row
+      // (hardening fix, see session-revocation.bun.test.ts).
+      const createResult = await keyStore.create("dashboard-local", "owner");
+      if (!createResult.ok) throw new Error("expected ok");
       const { session_id, expires_at: original } = sessionStore.create("dashboard-local");
       const req = makeReqWithCookie(session_id);
 
