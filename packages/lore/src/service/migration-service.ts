@@ -6,11 +6,10 @@
  * inserts via StoreInterface. Detects potential secrets before import.
  */
 
-import { readFileSync, readdirSync, statSync } from "fs";
-import { join, extname } from "path";
+import { readFileSync } from "fs";
 import { parse as parseYaml } from "yaml";
 import { ulid } from "ulidx";
-import { err, ok } from "@lore/core";
+import { err, ok, splitFrontmatter } from "@lore/core";
 import { slugify, slugifyWithCollision } from "@lore/core";
 import type { LoreError, Result } from "@lore/core";
 import type {
@@ -24,6 +23,7 @@ import type {
   Priority,
 } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
+import { walkFiles } from "./fs-walk.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────
 
@@ -477,26 +477,15 @@ export class MigrationService {
 
 function collectMdFiles(dirPath: string): Result<string[], LoreError> {
   try {
-    const files: string[] = [];
-    walkDir(dirPath, files);
-    return ok(files);
+    // reason: onError defaults to "throw" — a single failure anywhere in the walk
+    // propagates to this catch, matching the original walkDir's un-caught-internally
+    // recursion (the whole walk aborted together, converted to one STORE_ERROR here).
+    return ok(walkFiles(dirPath, { extensions: [".md"] }));
   } catch (e) {
     const storeErr: LoreError = e instanceof Error
       ? { code: "STORE_ERROR", message: `Cannot read source directory "${dirPath}": ${e.message}`, cause: e }
       : { code: "STORE_ERROR", message: `Cannot read source directory "${dirPath}": ${String(e)}` };
     return err(storeErr);
-  }
-}
-
-function walkDir(dir: string, acc: string[]): void {
-  const entries = readdirSync(dir, { withFileTypes: true });
-  for (const entry of entries) {
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      walkDir(full, acc);
-    } else if (entry.isFile() && extname(entry.name) === ".md") {
-      acc.push(full);
-    }
   }
 }
 
@@ -568,24 +557,18 @@ function parseV1File(filePath: string): Result<ParsedV1Doc, { message: string }>
 function extractFrontmatter(
   raw: string,
 ): Result<{ frontmatter: string; body: string }, { message: string }> {
+  // reason: BOM-stripping stays here (splitFrontmatter is delimiter-splitting only —
+  // pre-processing is each caller's job, see packages/core/src/frontmatter.ts header).
   const stripped = raw.startsWith("﻿") ? raw.slice(1) : raw;
 
-  if (!stripped.startsWith("---")) {
-    return { ok: false, error: { message: "No YAML frontmatter found (must start with ---)" } };
-  }
-
-  const afterOpen = stripped.slice(3);
-  const closeIdx = afterOpen.indexOf("\n---");
-  if (closeIdx === -1) {
-    return { ok: false, error: { message: "Unclosed YAML frontmatter (missing closing ---)" } };
+  const split = splitFrontmatter(stripped, "loose");
+  if (!split.ok) {
+    return { ok: false, error: { message: split.error } };
   }
 
   return {
     ok: true,
-    value: {
-      frontmatter: afterOpen.slice(0, closeIdx).trim(),
-      body: afterOpen.slice(closeIdx + 4).trim(),
-    },
+    value: { frontmatter: split.frontmatter, body: split.body },
   };
 }
 
