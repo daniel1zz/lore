@@ -1,35 +1,57 @@
 /**
- * Integration tests for `lore verify` (SPEC-039 §2, §3, §4 AC-VRF-10). Runs the
- * real CLI via subprocess against an isolated throwaway corpus — same pattern
- * as `tests/integration/cli/task-workflow.test.ts`. Fixture script-mode ACs use
- * `--oracle other --command "true"` / `"false"` — instantaneous, real spawns
- * (no sleep, no long-running commands).
+ * Integration tests for `lore verify` (SPEC-039 §2, §3, §4 AC-VRF-10; §M2
+ * trust-hardening). Runs the real CLI via subprocess against an isolated
+ * throwaway corpus — same pattern as `tests/integration/cli/task-workflow.test.ts`.
+ * Fixture script-mode ACs use `--oracle other --command "true"` / `"false"` —
+ * instantaneous, real spawns (no sleep, no long-running commands).
  *
  * Scope: adapter translation-only (args → VerifyRunnerService.verifyPlan call →
  * exit code / stdout / stderr rendering). Business rules (attestation
- * derivation, timeout escalation, resolveTargetTask's matrix) are exhaustively
- * covered at the service/core layers (verify-runner-service.test.ts,
- * verify-spawn.test.ts, task-workflow.test.ts in @lore/core) — this file does
- * not re-test them.
+ * derivation, timeout escalation, resolveTargetTask's matrix, the approval-gate
+ * decision itself, resolveVerifyEnv's filtering logic) are exhaustively covered
+ * at the service/core layers (verify-runner-service.test.ts, verify-spawn.test.ts,
+ * task-workflow.test.ts in @lore/core) — this file does not re-test them, EXCEPT
+ * where a real subprocess is the only way to observe the effect (an actual child
+ * process's real environment, §M2 ENV dimension below).
+ *
+ * §M2 NOTE — every pre-existing test below that reaches
+ * VerifyRunnerService's per-AC execution loop now passes `--allow-new-commands`
+ * (every fixture task starts with zero evidence history, so its first script AC
+ * command is always "new" under the hardened default `verify.
+ * require_command_approval: true` — without the flag these subprocess runs are
+ * non-interactive with no TTY and would abort NEEDS_APPROVAL, exit 7). Tests
+ * that never reach the loop (ambiguous-task/unknown-ac/not-found/human-only
+ * short-circuits) are unaffected and keep their original invocation.
  *
  * Coverage:
  *   HAPPY:      all-pass run → exit 0, per-AC pass line with duration; --ac
- *               filter restricts the run to a subset of declared ACs
+ *               filter restricts the run to a subset of declared ACs; §M2 —
+ *               a brand-new command's first run marks `[new]`/`first_seen: true`
  *   NEGATIVE:   ambiguous target task (>1 fresh claim, no --task) → exit 4
  *               listing candidate slugs; unknown --ac id → exit 4; a failing
- *               AC's command → exit 1
+ *               AC's command → exit 1; §M2 — a brand-new command with NO
+ *               `--allow-new-commands` (non-interactive subprocess, no TTY) →
+ *               exit 7 (NEEDS_APPROVAL), message names the flag
  *   BOUNDARY:   spec with only ai/human-mode ACs declared → exit 0 with an
  *               explicit "nothing to run" notice (never silently a no-op)
  *   STATE:      draft (unapproved) spec → advisory warning line on stderr,
- *               passthrough from VerifyRunnerService.warnings, never a hard gate
+ *               passthrough from VerifyRunnerService.warnings, never a hard gate;
+ *               §M2 ENV — the default env allowlist empties `$LORE_SYNC_TOKEN`
+ *               inside the spawned command, but `verify.env.passthrough_all: true`
+ *               restores it; a PATH-dependent command (`node --version`) still
+ *               works under the default allowlist
  *   REGRESSION: forged `--attestation` flag on `lore evidence` (AC-VRF-2
  *               adapter half) is silently ignored — evidence.ts's args schema
  *               never declares that flag and its run() builds the service
  *               input object from named fields only, so nothing is smuggled
  *               through even though citty's non-strict parser accepts the
- *               unknown flag without erroring
+ *               unknown flag without erroring; §M2 — re-verifying a command
+ *               already in the task's evidence history needs NO
+ *               `--allow-new-commands` (no re-prompt for known commands),
+ *               and `verify.require_command_approval: false` disables the
+ *               gate entirely (a brand-new command runs without the flag)
  *
- * @spec_ref AC-VRF-10 AC-VRF-2
+ * @spec_ref AC-VRF-10 AC-VRF-2; SPEC-039 §M2
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -54,11 +76,16 @@ interface RunResult {
 /**
  * Spawn `bun run <INDEX_TS> ...args` in `cwd` with an isolated HOME dir.
  * MOCK RISK: none — this calls the real CLI binary path.
+ *
+ * @param envOverrides - SPEC-039 §M2 ENV dimension only — additional env vars
+ *   merged onto the subprocess's own environment (which `VerifyRunnerService`
+ *   captures as `process.env` INSIDE that subprocess, per-call, at `app.ts`
+ *   composition time). Every other test omits this.
  */
-function runLore(args: string[], cwd: string): RunResult {
+function runLore(args: string[], cwd: string, envOverrides: Record<string, string> = {}): RunResult {
   const result = spawnSync("bun", ["run", INDEX_TS, ...args], {
     cwd,
-    env: { ...process.env, HOME: cwd, EDITOR: "true", CLAUDECODE: "1" },
+    env: { ...process.env, HOME: cwd, EDITOR: "true", CLAUDECODE: "1", ...envOverrides },
     encoding: "utf8",
   });
   return {
@@ -99,6 +126,24 @@ function disableAllGates(dir: string): void {
       "",
     ].join("\n"),
   );
+}
+
+/**
+ * Appends a `verify:` config block (SPEC-039 §M2) to the fixture corpus's
+ * config.yaml — same append-only pattern as {@link disableAllGates}. Only the
+ * REGRESSION/ESCAPE tests below call this; every other test relies on the
+ * hardened schema defaults (allowlist env, require_command_approval: true).
+ */
+function writeVerifyConfig(dir: string, opts: { requireCommandApproval?: boolean; passthroughAll?: boolean }): void {
+  const lines = ["verify:"];
+  if (opts.passthroughAll !== undefined) {
+    lines.push("  env:", `    passthrough_all: ${String(opts.passthroughAll)}`);
+  }
+  if (opts.requireCommandApproval !== undefined) {
+    lines.push(`  require_command_approval: ${String(opts.requireCommandApproval)}`);
+  }
+  lines.push("");
+  appendFileSync(join(dir, ".lore", "config.yaml"), lines.join("\n"));
 }
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
@@ -204,7 +249,7 @@ describe("lore verify — HAPPY", () => {
   it("AC-VRF-10.H1: all-pass run → exit 0, per-AC pass line with duration_ms", () => {
     const { planSlug, taskSlug } = buildFixture("Happy", [{ id: "AC-VRF-H1", command: "true" }]);
 
-    const result = runLore(["verify", planSlug, "--task", taskSlug], tmpDir);
+    const result = runLore(["verify", planSlug, "--task", taskSlug, "--allow-new-commands"], tmpDir);
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("AC-VRF-H1");
@@ -216,7 +261,7 @@ describe("lore verify — HAPPY", () => {
   it("AC-VRF-10.H2: --json envelope carries task/results/skipped/warnings", () => {
     const { planSlug, taskSlug } = buildFixture("HappyJson", [{ id: "AC-VRF-H2", command: "true" }]);
 
-    const result = runLore(["verify", planSlug, "--task", taskSlug, "--json"], tmpDir);
+    const result = runLore(["verify", planSlug, "--task", taskSlug, "--json", "--allow-new-commands"], tmpDir);
 
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.stdout) as {
@@ -242,7 +287,7 @@ describe("lore verify — HAPPY", () => {
       { id: "AC-VRF-F2", command: "true" },
     ]);
 
-    const result = runLore(["verify", planSlug, "--task", taskSlug, "--ac", "AC-VRF-F1", "--json"], tmpDir);
+    const result = runLore(["verify", planSlug, "--task", taskSlug, "--ac", "AC-VRF-F1", "--json", "--allow-new-commands"], tmpDir);
 
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.stdout) as { data?: { results?: Array<{ ac_id: string }> } };
@@ -285,7 +330,7 @@ describe("lore verify — NEGATIVE", () => {
   it("AC-VRF-10.N3: a failing AC's command → exit 1, ✘ line rendered", () => {
     const { planSlug, taskSlug } = buildFixture("Failing", [{ id: "AC-VRF-FAIL", command: "false" }]);
 
-    const result = runLore(["verify", planSlug, "--task", taskSlug], tmpDir);
+    const result = runLore(["verify", planSlug, "--task", taskSlug, "--allow-new-commands"], tmpDir);
 
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain("AC-VRF-FAIL");
@@ -325,7 +370,7 @@ describe("lore verify — STATE (draft-spec advisory)", () => {
     // approved in this fixture, so VerifyRunnerService's advisory fires.
     const { planSlug, taskSlug } = buildFixture("DraftWarn", [{ id: "AC-VRF-DRAFT", command: "true" }]);
 
-    const result = runLore(["verify", planSlug, "--task", taskSlug], tmpDir);
+    const result = runLore(["verify", planSlug, "--task", taskSlug, "--allow-new-commands"], tmpDir);
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toContain("not approved/active");
@@ -334,34 +379,157 @@ describe("lore verify — STATE (draft-spec advisory)", () => {
   });
 });
 
-// ─── M2 — trust-boundary advisory (script commands run with full local env) ──
+// ─── M2 — trust-boundary advisory (script commands run under the hardened §M2 defaults) ──
 
-describe("lore verify — M2 trust-boundary advisory (SPEC-039 npm-scripts trust level)", () => {
+describe("lore verify — M2 trust-boundary advisory (SPEC-039 §M2 hardened defaults)", () => {
   it("M2.1: prints a one-time trust-boundary warning to stderr before executing script ACs", () => {
     const { planSlug, taskSlug } = buildFixture("TrustWarnText", [{ id: "AC-VRF-TW1", command: "true" }]);
 
-    const result = runLore(["verify", planSlug, "--task", taskSlug], tmpDir);
+    const result = runLore(["verify", planSlug, "--task", taskSlug, "--allow-new-commands"], tmpDir);
 
     expect(result.exitCode).toBe(0);
-    expect(result.stderr).toContain("full local environment");
-    expect(result.stderr).toContain("npm-scripts trust level");
+    expect(result.stderr).toContain("npm-scripts trust tier");
+    expect(result.stderr).toContain("allowlisted by default");
     // reason: exactly one advisory line — not per-command noise.
-    const warningLines = result.stderr.split("\n").filter((l) => l.includes("npm-scripts trust level"));
+    const warningLines = result.stderr.split("\n").filter((l) => l.includes("npm-scripts trust tier"));
     expect(warningLines).toHaveLength(1);
   });
 
   it("M2.2: --json mode keeps stdout pure JSON — the warning goes to stderr only", () => {
     const { planSlug, taskSlug } = buildFixture("TrustWarnJson", [{ id: "AC-VRF-TW2", command: "true" }]);
 
-    const result = runLore(["verify", planSlug, "--task", taskSlug, "--json"], tmpDir);
+    const result = runLore(["verify", planSlug, "--task", taskSlug, "--json", "--allow-new-commands"], tmpDir);
 
     expect(result.exitCode).toBe(0);
-    expect(result.stderr).toContain("npm-scripts trust level");
-    expect(result.stdout).not.toContain("npm-scripts trust level");
+    expect(result.stderr).toContain("npm-scripts trust tier");
+    expect(result.stdout).not.toContain("npm-scripts trust tier");
     // stdout must parse as a single clean JSON envelope, nothing prepended/appended.
     expect(() => JSON.parse(result.stdout)).not.toThrow();
     const parsed = JSON.parse(result.stdout) as { ok: boolean };
     expect(parsed.ok).toBe(true);
+  });
+});
+
+// ─── §M2 — command-provenance approval gate ──────────────────────────────────
+
+describe("lore verify — §M2 command-provenance approval (NEGATIVE)", () => {
+  it("a brand-new command with NO --allow-new-commands (non-interactive, no TTY) → exit 7, message names the flag", () => {
+    const { planSlug, taskSlug } = buildFixture("NeedsApproval", [{ id: "AC-VRF-NA1", command: "true" }]);
+
+    const result = runLore(["verify", planSlug, "--task", taskSlug], tmpDir);
+
+    expect(result.exitCode).toBe(7);
+    expect(result.stderr).toContain("AC-VRF-NA1");
+    expect(result.stderr).toContain("--allow-new-commands");
+  });
+});
+
+describe("lore verify — §M2 command-provenance approval (HAPPY)", () => {
+  it("--allow-new-commands approves a brand-new command; output marks it [new]; --json carries first_seen: true", () => {
+    const { planSlug, taskSlug } = buildFixture("Approved", [{ id: "AC-VRF-AP1", command: "true" }]);
+
+    const result = runLore(["verify", planSlug, "--task", taskSlug, "--allow-new-commands"], tmpDir);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("[new]");
+
+    const jsonResult = runLore(
+      ["verify", planSlug, "--task", taskSlug, "--ac", "AC-VRF-AP1", "--json", "--allow-new-commands"],
+      tmpDir,
+    );
+    const parsed = JSON.parse(jsonResult.stdout) as {
+      data?: { results?: Array<{ ac_id: string; first_seen?: boolean }> };
+    };
+    // reason: this SECOND invocation re-runs the SAME command — already in evidence
+    // history after the first `runLore` call above, so first_seen is correctly absent
+    // here (see the REGRESSION test below for the dedicated single-invocation proof).
+    expect(parsed.data?.results?.[0]?.ac_id).toBe("AC-VRF-AP1");
+  });
+});
+
+describe("lore verify — §M2 command-provenance approval (REGRESSION — no re-prompt for known commands)", () => {
+  it("re-verifying a command already in the task's evidence history needs NO --allow-new-commands", () => {
+    const { planSlug, taskSlug } = buildFixture("KnownCommand", [{ id: "AC-VRF-KC1", command: "true" }]);
+
+    // First run: approve the brand-new command explicitly.
+    const first = runLore(["verify", planSlug, "--task", taskSlug, "--json", "--allow-new-commands"], tmpDir);
+    expect(first.exitCode).toBe(0);
+    const firstParsed = JSON.parse(first.stdout) as {
+      data?: { results?: Array<{ first_seen?: boolean }> };
+    };
+    expect(firstParsed.data?.results?.[0]?.first_seen).toBe(true);
+
+    // Second run: SAME command, NO --allow-new-commands — must succeed without a prompt
+    // because "true" is now in the task's evidence history.
+    const second = runLore(["verify", planSlug, "--task", taskSlug, "--json"], tmpDir);
+    expect(second.exitCode).toBe(0);
+    const secondParsed = JSON.parse(second.stdout) as {
+      data?: { results?: Array<{ first_seen?: boolean }> };
+    };
+    expect(secondParsed.data?.results?.[0]?.first_seen).toBeUndefined();
+  });
+});
+
+describe("lore verify — §M2 command-provenance approval (ESCAPE — require_command_approval: false)", () => {
+  it("a brand-new command runs without --allow-new-commands when the gate is disabled via config", () => {
+    const { planSlug, taskSlug } = buildFixture("GateDisabled", [{ id: "AC-VRF-GD1", command: "true" }]);
+    writeVerifyConfig(tmpDir, { requireCommandApproval: false });
+
+    const result = runLore(["verify", planSlug, "--task", taskSlug], tmpDir);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("AC-VRF-GD1");
+  });
+});
+
+// ─── §M2 — env-allowlist hardening ─────────────────────────────────────────────
+
+describe("lore verify — §M2 env allowlist (STATE)", () => {
+  it("the default allowlist empties $LORE_SYNC_TOKEN inside the spawned command", () => {
+    const { planSlug, taskSlug } = buildFixture("EnvDefault", [
+      { id: "AC-VRF-ENV1", command: 'test -z "$LORE_SYNC_TOKEN"' },
+    ]);
+
+    const result = runLore(
+      ["verify", planSlug, "--task", taskSlug, "--allow-new-commands"],
+      tmpDir,
+      { LORE_SYNC_TOKEN: "super-secret-value" },
+    );
+
+    // test -z exits 0 iff the var is EMPTY — proves the default allowlist scrubbed it.
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("pass");
+  });
+
+  it("verify.env.passthrough_all: true restores $LORE_SYNC_TOKEN inside the spawned command (ESCAPE)", () => {
+    const { planSlug, taskSlug } = buildFixture("EnvPassthrough", [
+      { id: "AC-VRF-ENV2", command: 'test -n "$LORE_SYNC_TOKEN"' },
+    ]);
+    writeVerifyConfig(tmpDir, { passthroughAll: true });
+
+    const result = runLore(
+      ["verify", planSlug, "--task", taskSlug, "--allow-new-commands"],
+      tmpDir,
+      { LORE_SYNC_TOKEN: "super-secret-value" },
+    );
+
+    // test -n exits 0 iff the var is NON-empty — proves passthrough_all restored it.
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("pass");
+  });
+
+  it("a PATH-dependent command (bun --version) still works under the default allowlist (REGRESSION)", () => {
+    // reason: `bun` (not `node`) is the guaranteed-available PATH-resolved binary in
+    // this project's dev/CI environment (it's literally what spawns the CLI subprocess
+    // itself, `runLore`'s `spawnSync("bun", ...)` above) — avoids depending on `node`
+    // being separately installed everywhere this suite runs.
+    const { planSlug, taskSlug } = buildFixture("EnvPath", [
+      { id: "AC-VRF-ENV3", command: "bun --version" },
+    ]);
+
+    const result = runLore(["verify", planSlug, "--task", taskSlug, "--allow-new-commands"], tmpDir);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("pass");
   });
 });
 

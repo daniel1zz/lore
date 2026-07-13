@@ -4,21 +4,25 @@
  *
  * Scope: translation-only (args → VerifyRunnerService.verifyPlan call → MCP
  * envelope shape). VerifyRunnerService's own orchestration logic (four-step
- * pipeline, launch-failure abort, draft-spec advisory) is exhaustively covered
- * at the service layer (verify-runner-service.test.ts) — per the
- * mcp-tools-task-workflow.test.ts precedent ("do not re-test business rules at
- * three layers"), `lore_verify`'s `verifyPlan` port is a hand-written spy here,
- * not a real service instance.
+ * pipeline, launch-failure abort, draft-spec advisory, the §M2 approval-gate
+ * decision itself) is exhaustively covered at the service layer
+ * (verify-runner-service.test.ts) — per the mcp-tools-task-workflow.test.ts
+ * precedent ("do not re-test business rules at three layers"), `lore_verify`'s
+ * `verifyPlan` port is a hand-written spy here, not a real service instance.
  *
  * Strategy mirrors mcp-tools-task-workflow.test.ts: register real tools against
  * a McpServer, extract handlers from the internal _registeredTools map, invoke
  * directly.
  *
  * Coverage:
- *   HAPPY:      lore_verify schema roundtrip (valid shapes, ac/task optional);
- *               handler threads plan/ac/task/by + a fresh nowIso through to
- *               verifyPlan's opts, returning its Result value verbatim
- *   NEGATIVE:   verifyPlan err() → isError + LoreError JSON passthrough
+ *   HAPPY:      lore_verify schema roundtrip (valid shapes, ac/task/
+ *               allow_new_commands optional); handler threads plan/ac/task/by +
+ *               a fresh nowIso through to verifyPlan's opts, returning its
+ *               Result value verbatim; allow_new_commands: true threads
+ *               opts.allowNewCommands: true
+ *   NEGATIVE:   verifyPlan err() → isError + LoreError JSON passthrough,
+ *               including a NEEDS_APPROVAL-shaped error; allow_new_commands
+ *               omitted (or false) never threads opts.allowNewCommands
  *   BOUNDARY:   omitting ac/task leaves those keys ABSENT from the opts object
  *               passed to verifyPlan (not present-but-undefined)
  *   ERROR:      App.verifyRunnerService === undefined (optional-typed test-stub
@@ -29,9 +33,10 @@
  *               `attestation` key before the handler ever sees it, AND the
  *               handler's explicit-field construction never forwards it to
  *               TaskWorkflowService.addEvidence even when a raw untyped object
- *               smuggles the key past the schema layer
+ *               smuggles the key past the schema layer; the handler NEVER
+ *               supplies `confirmUnapprovedCommand` (MCP is non-interactive)
  *
- * @spec_ref AC-VRF-10 AC-VRF-2
+ * @spec_ref AC-VRF-10 AC-VRF-2; SPEC-039 §M2
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
@@ -196,6 +201,22 @@ describe("LoreVerifySchema — roundtrip", () => {
     const parsed = LoreVerifySchema.safeParse({ plan: "plan-1", by: "" });
     expect(parsed.success).toBe(false);
   });
+
+  it("HAPPY: allow_new_commands: true parses (SPEC-039 §M2)", () => {
+    const parsed = LoreVerifySchema.safeParse({ plan: "plan-1", by: "alice", allow_new_commands: true });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.allow_new_commands).toBe(true);
+    }
+  });
+
+  it("HAPPY: allow_new_commands omitted parses (optional field)", () => {
+    const parsed = LoreVerifySchema.safeParse({ plan: "plan-1", by: "alice" });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.allow_new_commands).toBeUndefined();
+    }
+  });
 });
 
 // ─── lore_verify — handler arg threading ─────────────────────────────────────
@@ -257,6 +278,79 @@ describe("lore_verify", () => {
       const error = parseResult(result) as { code: string; message?: string };
       expect(error.code).toBe("VALIDATION_ERROR");
       expect(error.message).toContain("ambiguous");
+    });
+
+    it("SPEC-039 §M2: verifyPlan NEEDS_APPROVAL err() → isError=true, JSON passthrough naming the AC/command", async () => {
+      const { app } = makeApp({
+        verifyPlanImpl: async () =>
+          err({
+            code: "NEEDS_APPROVAL",
+            message: "command is new/changed and was not approved",
+            ac_id: "AC-1",
+            command: "rm -rf /tmp/x",
+          }),
+      });
+      const server = new McpServer({ name: "test", version: "0.0.0" });
+      registerTools(server, app);
+      const call = getToolHandler(server, "lore_verify");
+
+      const result = await call({ plan: "plan-1", by: "alice" });
+
+      expect(result.isError).toBe(true);
+      const error = parseResult(result) as { code: string; ac_id?: string; command?: string };
+      expect(error.code).toBe("NEEDS_APPROVAL");
+      expect(error.ac_id).toBe("AC-1");
+      expect(error.command).toBe("rm -rf /tmp/x");
+    });
+  });
+
+  describe("§M2 command-provenance approval — allow_new_commands threading", () => {
+    it("HAPPY: allow_new_commands: true threads opts.allowNewCommands: true", async () => {
+      const { app, calls } = makeApp();
+      const server = new McpServer({ name: "test", version: "0.0.0" });
+      registerTools(server, app);
+      const call = getToolHandler(server, "lore_verify");
+
+      await call({ plan: "plan-1", by: "alice", allow_new_commands: true });
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.opts.allowNewCommands).toBe(true);
+    });
+
+    it("NEGATIVE: allow_new_commands omitted never threads opts.allowNewCommands", async () => {
+      const { app, calls } = makeApp();
+      const server = new McpServer({ name: "test", version: "0.0.0" });
+      registerTools(server, app);
+      const call = getToolHandler(server, "lore_verify");
+
+      await call({ plan: "plan-1", by: "alice" });
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.opts && "allowNewCommands" in calls[0].opts).toBe(false);
+    });
+
+    it("NEGATIVE: allow_new_commands: false never threads opts.allowNewCommands (false is not forwarded)", async () => {
+      const { app, calls } = makeApp();
+      const server = new McpServer({ name: "test", version: "0.0.0" });
+      registerTools(server, app);
+      const call = getToolHandler(server, "lore_verify");
+
+      await call({ plan: "plan-1", by: "alice", allow_new_commands: false });
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.opts && "allowNewCommands" in calls[0].opts).toBe(false);
+    });
+
+    it("REGRESSION: the handler NEVER supplies confirmUnapprovedCommand (MCP is non-interactive)", async () => {
+      const { app, calls } = makeApp();
+      const server = new McpServer({ name: "test", version: "0.0.0" });
+      registerTools(server, app);
+      const call = getToolHandler(server, "lore_verify");
+
+      await call({ plan: "plan-1", by: "alice" });
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.opts.confirmUnapprovedCommand).toBeUndefined();
     });
   });
 

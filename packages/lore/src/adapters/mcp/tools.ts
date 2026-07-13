@@ -459,20 +459,25 @@ export const LoreStalenessProbeSchema = z.object({
 });
 
 /**
- * Input schema for lore_verify (SPEC-039 §2, §4 AC-VRF-10).
+ * Input schema for lore_verify (SPEC-039 §2, §4 AC-VRF-10; §M2 trust-hardening).
  * `ac` — optional subset of declared AC ids to run (omitted = every declared
  * script-mode AC on the plan's parent spec). `task` — optional explicit target
  * task override (wins over claim-based resolution, `resolveTargetTask` in
  * `@lore/core`). `by` is required (not defaulted) — same MCP actor-identity
  * precedent as lore_claim/lore_release/lore_evidence_add/lore_ready: MCP
  * callers pass actor identity explicitly, unlike the CLI's
- * $LORE_ACTOR/OS-username fallback.
+ * $LORE_ACTOR/OS-username fallback. `allow_new_commands` (SPEC-039 §M2,
+ * default `false`) — approve every new/changed script-AC command for this
+ * call without a prompt (MCP is non-interactive by design: unlike the CLI,
+ * there is no TTY-confirm fallback here — an unapproved command with
+ * `allow_new_commands: false` always returns `isError` naming this field).
  */
 export const LoreVerifySchema = z.object({
   plan: z.string(),
   ac: z.array(z.string()).optional(),
   task: z.string().optional(),
   by: z.string().min(1),
+  allow_new_commands: z.boolean().optional(),
 });
 
 /**
@@ -1383,6 +1388,11 @@ export function registerTools(server: McpServer, app: App): void {
         ...(args.task !== undefined ? { explicitTaskIdOrSlug: args.task } : {}),
         by: args.by,
         nowIso: new Date().toISOString(),
+        // reason: SPEC-039 §M2 — MCP is non-interactive by design (no TTY-confirm
+        // fallback, contrast the CLI); `confirmUnapprovedCommand` is deliberately
+        // NEVER supplied here, so an unapproved command always falls through to
+        // NEEDS_APPROVAL unless the caller explicitly passes allow_new_commands: true.
+        ...(args.allow_new_commands === true ? { allowNewCommands: true } : {}),
       });
       if (!result.ok) return errorContent(result.error);
 

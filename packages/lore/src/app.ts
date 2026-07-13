@@ -34,7 +34,10 @@ import {
   resolveHandoffTtlMinutes,
   resolveAuditVerifySince,
   resolveVerifyDefaultTimeoutMs,
+  resolveVerifyEnvConfig,
+  resolveVerifyRequireCommandApproval,
   type LoreConfig,
+  type VerifyEnvConfig,
   AiConfigSchema,
 } from "@lore/core";
 import { err, ok, type Result, type LoreError } from "@lore/core";
@@ -263,6 +266,10 @@ export interface App {
  *   SPEC-035 deploy date)
  * @param verifyDefaultTimeoutMs - Trusted-runner default spawn timeout, ms (SPEC-039 §2 D9;
  *   default 300000)
+ * @param verifyEnvConfig - Trusted-runner env-passthrough allowlist config (SPEC-039 §M2;
+ *   default `{allowlist: [], passthrough_all: false}` — the hardened default)
+ * @param verifyRequireCommandApproval - Trusted-runner command-provenance approval gate
+ *   on/off (SPEC-039 §M2; default `true` — the hardened default)
  * @param repoRoot - Absolute project root `lore verify` spawns commands from (SPEC-039 §2;
  *   derived by `createApp` as `dirname(dirname(dbPath))` since `dbPath` is always
  *   `<repoRoot>/.lore/lore.db`)
@@ -282,6 +289,8 @@ function buildAppFromSqlite(
   handoffTtlMinutes: number = 10_080,
   auditVerifySince: string = "2026-07-06T00:00:00Z",
   verifyDefaultTimeoutMs: number = 300_000,
+  verifyEnvConfig: VerifyEnvConfig = { allowlist: [], passthrough_all: false },
+  verifyRequireCommandApproval: boolean = true,
   repoRoot: string = process.cwd(),
   gateEnforcer: GateEnforcer = new GateEnforcer(undefined),
 ): App {
@@ -406,12 +415,23 @@ function buildAppFromSqlite(
     // reason: VerifyRunnerService takes THREE injected ports (getPlanBundle,
     // recordVerifiedEvidence, executor) plus scalar config — never imports
     // CorpusService/TaskWorkflowService/the bun-only executor module directly
-    // (SPEC-039 §2 D3).
+    // (SPEC-039 §2 D3). SPEC-039 §M2 additions: requireCommandApproval/envAllowlist/
+    // envPassthroughAll (resolved config) + processEnv (a `process.env` snapshot
+    // captured HERE at composition time, mirroring how `repoRoot` is captured from
+    // `process.cwd()` — VerifyRunnerService itself never reads `process.env`).
     verifyRunnerService: new VerifyRunnerService(
       corpusService.getPlanBundle.bind(corpusService),
       taskWorkflowService.recordVerifiedEvidence.bind(taskWorkflowService),
       executeVerifySpawnSpec,
-      { repoRoot, defaultTimeoutMs: verifyDefaultTimeoutMs, claimTtlMinutes },
+      {
+        repoRoot,
+        defaultTimeoutMs: verifyDefaultTimeoutMs,
+        claimTtlMinutes,
+        requireCommandApproval: verifyRequireCommandApproval,
+        envAllowlist: verifyEnvConfig.allowlist,
+        envPassthroughAll: verifyEnvConfig.passthrough_all,
+        processEnv: process.env,
+      },
     ),
     // reason: telemetry exposed on App so dashboard route handlers can emit source-tagged events
     // without requiring service-layer signature changes (SPEC-022 §9.6).
@@ -444,6 +464,12 @@ function buildAppFromSqlite(
  *   SPEC-035 deploy date)
  * @param verifyDefaultTimeoutMs - Trusted-runner default spawn timeout, ms (SPEC-039 §2 D9;
  *   default 300000)
+ * @param verifyEnvConfig - Trusted-runner env-passthrough allowlist config (SPEC-039 §M2;
+ *   default `{allowlist: [], passthrough_all: false}` — the hardened default) — see
+ *   `buildAppFromSqlite`'s identical parameter JSDoc.
+ * @param verifyRequireCommandApproval - Trusted-runner command-provenance approval gate
+ *   on/off (SPEC-039 §M2; default `true` — the hardened default) — see
+ *   `buildAppFromSqlite`'s identical parameter JSDoc.
  * @param repoRoot - Absolute project root `lore verify` spawns commands from (SPEC-039 §2;
  *   derived by `createApp` as `dirname(dirname(dbPath))` since `dbPath` is always
  *   `<repoRoot>/.lore/lore.db`)
@@ -460,6 +486,8 @@ function buildAppFromTurso(
   handoffTtlMinutes: number = 10_080,
   auditVerifySince: string = "2026-07-06T00:00:00Z",
   verifyDefaultTimeoutMs: number = 300_000,
+  verifyEnvConfig: VerifyEnvConfig = { allowlist: [], passthrough_all: false },
+  verifyRequireCommandApproval: boolean = true,
   repoRoot: string = process.cwd(),
   gateEnforcer: GateEnforcer = new GateEnforcer(undefined),
 ): App {
@@ -567,12 +595,21 @@ function buildAppFromTurso(
     // reason: VerifyRunnerService takes THREE injected ports (getPlanBundle,
     // recordVerifiedEvidence, executor) plus scalar config — never imports
     // CorpusService/TaskWorkflowService/the bun-only executor module directly
-    // (SPEC-039 §2 D3).
+    // (SPEC-039 §2 D3). SPEC-039 §M2 additions — see `buildAppFromSqlite`'s
+    // identical comment.
     verifyRunnerService: new VerifyRunnerService(
       corpusService.getPlanBundle.bind(corpusService),
       taskWorkflowService.recordVerifiedEvidence.bind(taskWorkflowService),
       executeVerifySpawnSpec,
-      { repoRoot, defaultTimeoutMs: verifyDefaultTimeoutMs, claimTtlMinutes },
+      {
+        repoRoot,
+        defaultTimeoutMs: verifyDefaultTimeoutMs,
+        claimTtlMinutes,
+        requireCommandApproval: verifyRequireCommandApproval,
+        envAllowlist: verifyEnvConfig.allowlist,
+        envPassthroughAll: verifyEnvConfig.passthrough_all,
+        processEnv: process.env,
+      },
     ),
     // reason: telemetry exposed on App so dashboard route handlers can emit source-tagged events
     // without requiring service-layer signature changes (SPEC-022 §9.6).
@@ -662,6 +699,15 @@ export function createApp(
   // when config/verify section absent.
   const verifyDefaultTimeoutMs = resolveVerifyDefaultTimeoutMs(config);
 
+  // Trusted-runner env-passthrough allowlist config (SPEC-039 §M2) — defaults to the
+  // HARDENED default ({allowlist: [], passthrough_all: false}) when config/verify
+  // section absent.
+  const verifyEnvConfig = resolveVerifyEnvConfig(config);
+
+  // Trusted-runner command-provenance approval gate on/off (SPEC-039 §M2) — defaults
+  // to the HARDENED default (true) when config/verify section absent.
+  const verifyRequireCommandApproval = resolveVerifyRequireCommandApproval(config);
+
   // reason: dbPath is always "<repoRoot>/.lore/lore.db" (findLoreDbPath's contract,
   // adapters/cli/utils.ts) — two levels up recovers the project root `lore verify`
   // spawns commands from (SPEC-039 §2). Computed here rather than added as a new
@@ -697,6 +743,8 @@ export function createApp(
       handoffTtlMinutes,
       auditVerifySince,
       verifyDefaultTimeoutMs,
+      verifyEnvConfig,
+      verifyRequireCommandApproval,
       repoRoot,
       gateEnforcer,
     );
@@ -736,6 +784,8 @@ export function createApp(
         handoffTtlMinutes,
         auditVerifySince,
         verifyDefaultTimeoutMs,
+        verifyEnvConfig,
+        verifyRequireCommandApproval,
         repoRoot,
         gateEnforcer,
       ),

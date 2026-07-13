@@ -1,23 +1,27 @@
 /**
  * Tests for @lore/core task-workflow — isClaimStale, evaluateReadiness,
- * evidenceEntrySchema.attestation, resolveTargetTask.
+ * evidenceEntrySchema.attestation, resolveTargetTask, isApprovedVerifyCommand.
  * Pure functions, no IO. Spec-first: assertions come from SPEC-025 §3 D2/D3,
- * §4 AC-WF-3/4/7/8, §8.2/§8.3, §7 test guidance, and SPEC-039 §2 D1, D4 —
+ * §4 AC-WF-3/4/7/8, §8.2/§8.3, §7 test guidance, and SPEC-039 §2 D1, D4, §M2 —
  * not from reading the implementation body first.
  *
  * Six-dimension coverage for this file:
  *   HAPPY:      readiness of an unblocked task; claim annotation on a fresh claim;
  *               evidenceEntrySchema parses with/without attestation;
  *               resolveTargetTask resolves the sole fresh claim, and resolves an
- *               explicit id/slug override regardless of claim state
+ *               explicit id/slug override regardless of claim state;
+ *               isApprovedVerifyCommand true for a command present in evidence history
  *   NEGATIVE:   non-archived blocker keeps a task unready; ambiguous fresh-claim
  *               set is a fail-loud error listing candidate slugs; an explicit
- *               task ref absent from the plan errors instead of falling back
+ *               task ref absent from the plan errors instead of falling back;
+ *               isApprovedVerifyCommand false for a task with zero evidence
  *   BOUNDARY:   isClaimStale at exactly TTL, TTL±1min; blocker link with no
  *               matching blockerStatuses entry (defensive fail-loud-by-omission);
  *               attestation.duration_ms at 0/-1, exit_code negative, runner
  *               outside ATTESTATION_RUNNERS; zero fresh claims; a stale claim
- *               excluded from candidacy; empty tasks array
+ *               excluded from candidacy; empty tasks array; attestation.first_seen
+ *               true/false/absent all parse; isApprovedVerifyCommand is an EXACT
+ *               string match (a single trailing-space difference is "new")
  *   ERROR:      n/a at this layer (pure functions have no Result channel) —
  *               resolveTargetTask uses Result, covered under NEGATIVE/BOUNDARY
  *   STATE:      cycle A blocks B blocks A — both blocked & visible;
@@ -26,10 +30,11 @@
  *               ATTESTATION_RUNNERS is locked to exactly ["lore-cli"]; a MIXED
  *               evidence array (legacy entry without attestation + new entry
  *               with it) parses as a whole and extractEvidence returns both;
- *               resolveTargetTask never mutates its tasks input
+ *               resolveTargetTask never mutates its tasks input; a legacy
+ *               attestation object with no first_seen field still parses
  *
  * @spec_ref AC-WF-3, AC-WF-4, AC-WF-7, AC-WF-8, SPEC-032 §3.4; SPEC-039 §2 D1, D4;
- *   AC-VRF-1, AC-VRF-7
+ *   AC-VRF-1, AC-VRF-7; SPEC-039 §M2
  */
 
 import { describe, it, expect } from "vitest";
@@ -41,6 +46,7 @@ import {
   extractEvidence,
   ATTESTATION_RUNNERS,
   resolveTargetTask,
+  isApprovedVerifyCommand,
   type BlockerInfo,
 } from "./task-workflow.js";
 import type { DocId, DocRecord, LinkRecord } from "./types.js";
@@ -651,5 +657,114 @@ describe("resolveTargetTask — REGRESSION (purity)", () => {
 
     expect(a).toEqual(snapshotA);
     expect(b).toEqual(snapshotB);
+  });
+});
+
+// ─── isApprovedVerifyCommand (SPEC-039 §M2 command-provenance approval) ───────
+
+function evidenceEntry(command: string, overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    oracle: "test" as const,
+    command,
+    result: "pass" as const,
+    recorded_at: NOW,
+    recorded_by: "alice",
+    ...overrides,
+  };
+}
+
+describe("isApprovedVerifyCommand — HAPPY", () => {
+  it("true when a prior evidence entry recorded this EXACT command string", () => {
+    const task = makeTask({
+      extra: { plan_id: "p", verification_evidence: [evidenceEntry("bun test")] },
+    });
+    expect(isApprovedVerifyCommand(task, "bun test")).toBe(true);
+  });
+
+  it("true when the match is one of several prior entries, order-independent", () => {
+    const task = makeTask({
+      extra: {
+        plan_id: "p",
+        verification_evidence: [
+          evidenceEntry("bun run typecheck"),
+          evidenceEntry("bun test"),
+          evidenceEntry("bun run lint"),
+        ],
+      },
+    });
+    expect(isApprovedVerifyCommand(task, "bun test")).toBe(true);
+  });
+});
+
+describe("isApprovedVerifyCommand — NEGATIVE", () => {
+  it("false when the task has zero evidence entries", () => {
+    const task = makeTask({ extra: { plan_id: "p" } });
+    expect(isApprovedVerifyCommand(task, "bun test")).toBe(false);
+  });
+
+  it("false when evidence exists but never recorded this command", () => {
+    const task = makeTask({
+      extra: { plan_id: "p", verification_evidence: [evidenceEntry("bun run typecheck")] },
+    });
+    expect(isApprovedVerifyCommand(task, "bun test")).toBe(false);
+  });
+});
+
+describe("isApprovedVerifyCommand — BOUNDARY (exact-match only, no fuzzy normalization)", () => {
+  it("a single trailing-space difference is treated as a NEW command", () => {
+    const task = makeTask({
+      extra: { plan_id: "p", verification_evidence: [evidenceEntry("bun test ")] },
+    });
+    expect(isApprovedVerifyCommand(task, "bun test")).toBe(false);
+  });
+
+  it("a changed flag on an otherwise-identical command is treated as NEW", () => {
+    const task = makeTask({
+      extra: { plan_id: "p", verification_evidence: [evidenceEntry("bun test --timeout 1000")] },
+    });
+    expect(isApprovedVerifyCommand(task, "bun test --timeout 2000")).toBe(false);
+  });
+
+  it("malformed verification_evidence (not an array) degrades to false, never throws", () => {
+    const task = makeTask({ extra: { plan_id: "p", verification_evidence: "not-an-array" } });
+    expect(() => isApprovedVerifyCommand(task, "bun test")).not.toThrow();
+    expect(isApprovedVerifyCommand(task, "bun test")).toBe(false);
+  });
+});
+
+// ─── evidenceEntrySchema.attestation.first_seen (SPEC-039 §M2 annotation) ─────
+
+describe("evidenceEntrySchema.attestation.first_seen — BOUNDARY", () => {
+  it("parses with first_seen: true", () => {
+    const parsed = evidenceEntrySchema.safeParse(
+      evidenceEntry("bun test", {
+        attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false, first_seen: true },
+      }),
+    );
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(parsed.data.attestation?.first_seen).toBe(true);
+  });
+
+  it("parses with first_seen absent (previously-seen command) — field is undefined, not false", () => {
+    const parsed = evidenceEntrySchema.safeParse(
+      evidenceEntry("bun test", {
+        attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false },
+      }),
+    );
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(parsed.data.attestation?.first_seen).toBeUndefined();
+  });
+});
+
+describe("evidenceEntrySchema.attestation.first_seen — REGRESSION", () => {
+  it("a legacy attestation object (pre-M2, no first_seen field) still parses", () => {
+    const parsed = evidenceEntrySchema.safeParse(
+      evidenceEntry("bun test", {
+        attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1234, timed_out: false },
+      }),
+    );
+    expect(parsed.success).toBe(true);
   });
 });
