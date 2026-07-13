@@ -245,11 +245,10 @@ export class MigrationService {
       }
     }
 
-    const { imported, already_existed, warnings, v1IdToNewId } = await this.importDocs(
-      parsedDocs,
-      opts,
-      importErrors,
-    );
+    const importResult = await this.importDocs(parsedDocs, opts, importErrors);
+    if (!importResult.ok) return importResult;
+
+    const { imported, already_existed, warnings, v1IdToNewId } = importResult.value;
 
     await this.resolveParents(parsedDocs, v1IdToNewId, warnings);
     const linkResolution = await this.resolveLinks(parsedDocs, v1IdToNewId);
@@ -270,12 +269,17 @@ export class MigrationService {
     parsedDocs: ParsedV1Doc[],
     opts: MigrateOpts,
     importErrors: FileError[],
-  ): Promise<{
-    imported: number;
-    already_existed: number;
-    warnings: string[];
-    v1IdToNewId: Map<string, DocId>;
-  }> {
+  ): Promise<
+    Result<
+      {
+        imported: number;
+        already_existed: number;
+        warnings: string[];
+        v1IdToNewId: Map<string, DocId>;
+      },
+      LoreError
+    >
+  > {
     let imported = 0;
     // reason: "already_existed" tracks docs that are idempotently skipped (already in store).
     // This is separate from parse-error skips (which land in importErrors). Eval scenarios use
@@ -284,8 +288,13 @@ export class MigrationService {
     const warnings: string[] = [];
     const v1IdToNewId = new Map<string, DocId>();
 
-    // Build a set of existing v1 original IDs to detect re-runs
-    const existingV1Ids = await this.collectExistingV1Ids();
+    // Build a set of existing v1 original IDs to detect re-runs. A STORE_ERROR here
+    // MUST abort the whole import — silently treating it as "no existing docs" would
+    // re-import every already-migrated doc as new (mass duplication with zero error
+    // signal), violating the repo's no-silent-fallback convention.
+    const existingV1IdsResult = await this.collectExistingV1Ids();
+    if (!existingV1IdsResult.ok) return existingV1IdsResult;
+    const existingV1Ids = existingV1IdsResult.value;
 
     for (const doc of parsedDocs) {
       // Skip already-imported docs (idempotency) — count as already_existed, not skipped
@@ -365,12 +374,24 @@ export class MigrationService {
       imported += 1;
     }
 
-    return { imported, already_existed, warnings, v1IdToNewId };
+    return ok({ imported, already_existed, warnings, v1IdToNewId });
   }
 
-  private async collectExistingV1Ids(): Promise<Set<string>> {
-    const result = await this.store.findMany({});
-    if (!result.ok) return new Set();
+  /**
+   * Collects the set of `v1_original_id` values already present in the store, used by
+   * `importDocs` to detect a re-run and skip already-migrated docs (idempotency guard).
+   *
+   * @invariant passes `exclude_deleted: false` — a previously-migrated doc that was
+   *   later soft-deleted MUST still count as "already imported", otherwise a re-run
+   *   would resurrect it as a brand-new duplicate (the doc's `deleted_at` says nothing
+   *   about whether v1 already produced it once).
+   * @invariant propagates a STORE_ERROR instead of degrading to an empty set — an
+   *   empty set here would make every already-migrated doc look new, re-importing the
+   *   entire corpus as duplicates with no error surfaced to the caller.
+   */
+  private async collectExistingV1Ids(): Promise<Result<Set<string>, LoreError>> {
+    const result = await this.store.findMany({ exclude_deleted: false });
+    if (!result.ok) return result;
 
     const ids = new Set<string>();
     for (const doc of result.value) {
@@ -379,7 +400,7 @@ export class MigrationService {
         ids.add(v1Id);
       }
     }
-    return ids;
+    return ok(ids);
   }
 
   private async resolveLinks(

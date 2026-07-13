@@ -5,7 +5,7 @@
 -- ─── Tables ────────────────────────────────────────────────────────────────
 
 -- Core document table
-CREATE TABLE docs (
+CREATE TABLE IF NOT EXISTS docs (
   id          TEXT PRIMARY KEY,            -- ULID
   slug        TEXT NOT NULL UNIQUE,        -- human-readable alias
   type        TEXT NOT NULL CHECK(type IN ('prd','spec','adr','plan','knowledge','task')),
@@ -27,7 +27,7 @@ CREATE TABLE docs (
 );
 
 -- Graph links between documents
-CREATE TABLE links (
+CREATE TABLE IF NOT EXISTS links (
   from_id     TEXT NOT NULL REFERENCES docs(id),
   to_id       TEXT NOT NULL REFERENCES docs(id),
   link_type   TEXT NOT NULL CHECK(link_type IN ('parent','implements','informs','supersedes','relates-to','blocks')),
@@ -37,7 +37,7 @@ CREATE TABLE links (
 );
 
 -- Version history (full snapshots)
-CREATE TABLE versions (
+CREATE TABLE IF NOT EXISTS versions (
   doc_id      TEXT NOT NULL REFERENCES docs(id),
   version     INTEGER NOT NULL,
   content     TEXT NOT NULL,
@@ -52,7 +52,7 @@ CREATE TABLE versions (
 );
 
 -- Audit log (append-only)
-CREATE TABLE audit (
+CREATE TABLE IF NOT EXISTS audit (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   timestamp   TEXT NOT NULL,
   actor       TEXT NOT NULL,              -- user name or agent_id
@@ -63,7 +63,7 @@ CREATE TABLE audit (
 );
 
 -- Full-text search virtual table
-CREATE VIRTUAL TABLE docs_fts USING fts5(
+CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
   title,
   content,
   tags,
@@ -73,36 +73,36 @@ CREATE VIRTUAL TABLE docs_fts USING fts5(
 
 -- ─── Indexes ───────────────────────────────────────────────────────────────
 
-CREATE INDEX idx_docs_type       ON docs(type)       WHERE deleted_at IS NULL;
-CREATE INDEX idx_docs_status     ON docs(status)     WHERE deleted_at IS NULL;
-CREATE INDEX idx_docs_parent     ON docs(parent_id)  WHERE deleted_at IS NULL;
-CREATE INDEX idx_docs_created_by ON docs(created_by) WHERE deleted_at IS NULL;
-CREATE INDEX idx_docs_updated    ON docs(updated_at DESC) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_docs_type       ON docs(type)       WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_docs_status     ON docs(status)     WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_docs_parent     ON docs(parent_id)  WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_docs_created_by ON docs(created_by) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_docs_updated    ON docs(updated_at DESC) WHERE deleted_at IS NULL;
 
-CREATE INDEX idx_links_from      ON links(from_id);
-CREATE INDEX idx_links_to        ON links(to_id);
-CREATE INDEX idx_links_type      ON links(link_type);
+CREATE INDEX IF NOT EXISTS idx_links_from      ON links(from_id);
+CREATE INDEX IF NOT EXISTS idx_links_to        ON links(to_id);
+CREATE INDEX IF NOT EXISTS idx_links_type      ON links(link_type);
 
-CREATE INDEX idx_versions_doc    ON versions(doc_id, version DESC);
+CREATE INDEX IF NOT EXISTS idx_versions_doc    ON versions(doc_id, version DESC);
 
-CREATE INDEX idx_audit_doc       ON audit(doc_id)   WHERE doc_id IS NOT NULL;
-CREATE INDEX idx_audit_actor     ON audit(actor);
-CREATE INDEX idx_audit_timestamp ON audit(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_doc       ON audit(doc_id)   WHERE doc_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_audit_actor     ON audit(actor);
+CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit(timestamp DESC);
 
 -- ─── FTS5 Sync Triggers ────────────────────────────────────────────────────
 
 -- Keep FTS index in sync with docs table
-CREATE TRIGGER docs_ai AFTER INSERT ON docs BEGIN
+CREATE TRIGGER IF NOT EXISTS docs_ai AFTER INSERT ON docs BEGIN
   INSERT INTO docs_fts(rowid, title, content, tags)
   VALUES (new.rowid, new.title, new.content, new.tags);
 END;
 
-CREATE TRIGGER docs_ad AFTER DELETE ON docs BEGIN
+CREATE TRIGGER IF NOT EXISTS docs_ad AFTER DELETE ON docs BEGIN
   INSERT INTO docs_fts(docs_fts, rowid, title, content, tags)
   VALUES ('delete', old.rowid, old.title, old.content, old.tags);
 END;
 
-CREATE TRIGGER docs_au AFTER UPDATE ON docs BEGIN
+CREATE TRIGGER IF NOT EXISTS docs_au AFTER UPDATE ON docs BEGIN
   INSERT INTO docs_fts(docs_fts, rowid, title, content, tags)
   VALUES ('delete', old.rowid, old.title, old.content, old.tags);
   INSERT INTO docs_fts(rowid, title, content, tags)
