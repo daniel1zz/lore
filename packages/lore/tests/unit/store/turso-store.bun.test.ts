@@ -700,6 +700,20 @@ describe("TursoStore", () => {
       expect(result.error.code).toBe("LINK_CYCLE");
     });
 
+    it("AC-STORE-005.10: self-referencing parent link A→A rejected with LINK_CYCLE", async () => {
+      const a = makeDoc({ slug: "prd-turso-self-cyc-a" });
+      await store.insert(a);
+
+      // a's parent = a → self-cycle, must be rejected even with no
+      // pre-existing outgoing parent link on a.
+      const result = await store.addLink(makeLink(a.id, a.id, "parent"));
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error.code).toBe("LINK_CYCLE");
+      if (result.error.code !== "LINK_CYCLE") return;
+      expect(result.error.path).toEqual([a.id]);
+    });
+
     it("AC-STORE-005.E01: non-parent links do NOT trigger cycle detection", async () => {
       const a = makeDoc({ slug: "prd-turso-no-cyc-a" });
       const b = makeDoc({ slug: "prd-turso-no-cyc-b" });
