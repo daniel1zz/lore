@@ -206,6 +206,25 @@ export class VersionService {
     const nextVersion = currentDoc.version + 1;
     const now = new Date().toISOString();
 
+    // reason: M4 blocker fix — the CAS-guarded doc update MUST land FIRST.
+    // Previously insertVersion + appendAuditEntry ran unconditionally before
+    // this write; if a concurrent writer bumped currentDoc.version between the
+    // find() above and this update, the CAS failed with STALE_VERSION but the
+    // versions/audit tables already permanently held a "restore" entry for a
+    // nextVersion the live doc never reached — a phantom history entry
+    // lore log/diff would surface forever. Update doc record to match
+    // restored version first; only insert the version snapshot + audit entry
+    // once that succeeds.
+    const updateResult = await this.store.update(docId, {
+      content: targetRecord.content,
+      extra: { ...targetRecord.extra },
+      title: targetRecord.title,
+      status: "draft",
+      version: nextVersion,
+      updated_at: now,
+    }, { expected_version: currentDoc.version });
+    if (!updateResult.ok) return updateResult;
+
     // Create new version snapshot (N+1) with target version's content
     const newVersionRecord = {
       doc_id: docId,
@@ -236,17 +255,7 @@ export class VersionService {
     });
     if (!auditResult.ok) return auditResult;
 
-    // Update doc record to match restored version
-    const updateResult = await this.store.update(docId, {
-      content: targetRecord.content,
-      extra: { ...targetRecord.extra },
-      title: targetRecord.title,
-      status: "draft",
-      version: nextVersion,
-      updated_at: now,
-    }, { expected_version: currentDoc.version });
-
-    return updateResult;
+    return ok(updateResult.value);
   }
 }
 

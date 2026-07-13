@@ -490,6 +490,12 @@ describe("STATE — ready() flips when a blocker transitions to archived (AC-WF-
     expect(blockedBefore?.ready).toBe(false);
     expect(blockedBefore?.unmet_blockers.map((b) => b.id)).toContain(blockerId);
 
+    // reason: SPEC-002 §3 lifecycle only allows archived via approved (draft→
+    // archived is illegal, enforced by CorpusService.set's INVALID_TRANSITION
+    // check, B1 blocker fix) — route through the legal draft→approved→archived
+    // chain rather than a direct (previously bug-permitted) jump.
+    const approveResult = await corpusService.set(blockerId, { status: "approved" });
+    expect(approveResult.ok).toBe(true);
     const archiveResult = await corpusService.set(blockerId, { status: "archived" });
     expect(archiveResult.ok).toBe(true);
 

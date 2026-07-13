@@ -659,6 +659,110 @@ describe("set", () => {
   });
 });
 
+// ─── set — status transition validation (B1 blocker fix) ────────────────────
+// reason: pre-fix, CorpusService.set() never consulted VALID_TRANSITIONS —
+// only ReviewService.approve/reject did. Any caller (lore set --status, the
+// HTTP dashboard PATCH route, MCP lore_set) could force an illegal jump
+// (archived→active, approved→draft, draft→archived — the last skips every
+// spec-promote gate since GateEnforcer only fires on a →approved transition).
+
+describe("set — status transition validation (B1)", () => {
+  it("AC-SVC-004.10: user-requested archived→active → INVALID_TRANSITION", async () => {
+    const { service } = makeService();
+    const r = await service.create(prdInput("Archived Doc"));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+
+    // draft → approved (fast-track) → archived, both legal per VALID_TRANSITIONS.
+    const approved = await service.set(r.value.slug, { status: "approved" });
+    expect(approved.ok).toBe(true);
+    if (!approved.ok) return;
+    const archived = await service.set(r.value.slug, { status: "archived" });
+    expect(archived.ok).toBe(true);
+    if (!archived.ok) return;
+    expect(archived.value.status).toBe("archived");
+
+    const result = await service.set(r.value.slug, { status: "active" });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("INVALID_TRANSITION");
+    if (result.error.code === "INVALID_TRANSITION") {
+      expect(result.error.from).toBe("archived");
+      expect(result.error.to).toBe("active");
+      expect(result.error.allowed).toEqual([]);
+    }
+  });
+
+  it("AC-SVC-004.11: user-requested approved→draft (explicit --status, no content change) → INVALID_TRANSITION", async () => {
+    const { service } = makeService();
+    const r = await service.create(prdInput("Explicit Draft Doc"));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+
+    const approved = await service.set(r.value.slug, { status: "approved" });
+    expect(approved.ok).toBe(true);
+    if (!approved.ok) return;
+
+    // No content/title in this patch — this must NOT be conflated with the
+    // auto-reset-on-edit invariant (AC-SVC-004.02/.03), which is a distinct,
+    // internal, sanctioned path.
+    const result = await service.set(r.value.slug, { status: "draft" });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("INVALID_TRANSITION");
+    if (result.error.code === "INVALID_TRANSITION") {
+      expect(result.error.from).toBe("approved");
+      expect(result.error.to).toBe("draft");
+      expect(result.error.allowed.sort()).toEqual(["active", "archived", "deprecated"]);
+    }
+  });
+
+  it("AC-SVC-004.12: user-requested draft→archived → INVALID_TRANSITION (skips every workflow gate otherwise)", async () => {
+    const { service } = makeService();
+    const r = await service.create(prdInput("Skip Gate Doc"));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+
+    const result = await service.set(r.value.slug, { status: "archived" });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("INVALID_TRANSITION");
+    if (result.error.code === "INVALID_TRANSITION") {
+      expect(result.error.from).toBe("draft");
+      expect(result.error.to).toBe("archived");
+      expect(result.error.allowed.sort()).toEqual(["approved", "in-review"]);
+    }
+  });
+
+  it("AC-SVC-004.13 (REGRESSION): editing content on an approved doc still auto-resets to draft, unaffected by the new check", async () => {
+    const { service } = makeService();
+    const r = await service.create(prdInput("Regression Auto Reset Doc"));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+
+    const approved = await service.set(r.value.slug, { status: "approved" });
+    expect(approved.ok).toBe(true);
+    if (!approved.ok) return;
+
+    const result = await service.set(r.value.slug, { content: "Edited content triggers auto-reset" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.status).toBe("draft");
+  });
+
+  it("AC-SVC-004.14 (REGRESSION): legal user-requested transition (draft→in-review) still succeeds", async () => {
+    const { service } = makeService();
+    const r = await service.create(prdInput("In Review Doc"));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+
+    const result = await service.set(r.value.slug, { status: "in-review" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.status).toBe("in-review");
+  });
+});
+
 // ─── delete ──────────────────────────────────────────────────────────────────
 
 describe("delete", () => {

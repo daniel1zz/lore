@@ -297,6 +297,12 @@ describe("SessionService.bootstrap — active_sessions (SPEC-042 D8)", () => {
     const taskId = await createTask(corpusService, planId, "Task");
     await taskWorkflowService.claim(taskId, { by: "agent:t1" });
 
+    // reason: SPEC-002 §3 lifecycle only allows archived via approved (draft→
+    // archived is illegal, enforced by CorpusService.set's INVALID_TRANSITION
+    // check, B1 blocker fix) — route through the legal draft→approved→archived
+    // chain rather than a direct (previously bug-permitted) jump.
+    const approveResult = await corpusService.set(planId, { status: "approved" });
+    expect(approveResult.ok).toBe(true);
     const archiveResult = await corpusService.set(planId, { status: "archived" });
     expect(archiveResult.ok).toBe(true);
 
