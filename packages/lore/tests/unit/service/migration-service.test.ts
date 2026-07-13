@@ -23,8 +23,30 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { err } from "@lore/core";
+import type { DocRecord, LoreError, Result } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import type { StoreFilters } from "../../../src/store/store-interface.js";
 import { MigrationService } from "../../../src/service/migration-service.js";
+
+/**
+ * Wraps InMemoryStore's `findMany` to always fail — used to test M3's ERROR-dimension
+ * requirement: a STORE_ERROR from `collectExistingV1Ids` must propagate as an err
+ * Result and abort the import, never silently degrade to "no existing docs" (which
+ * would re-import every already-migrated doc as a duplicate with zero error signal).
+ */
+class FailingFindManyStore extends InMemoryStore {
+  insertCallCount = 0;
+
+  override async findMany(_filters: StoreFilters): Promise<Result<DocRecord[], LoreError>> {
+    return err({ code: "STORE_ERROR", message: "simulated transient store failure" });
+  }
+
+  override async insert(doc: DocRecord): Promise<Result<DocRecord, LoreError>> {
+    this.insertCallCount += 1;
+    return super.insert(doc);
+  }
+}
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -716,6 +738,90 @@ Example key AKIAIOSFODNN7EXAMPLE was changed to [REDACTED].
         expect(second.value.imported).toBe(1);
         expect(second.value.already_existed).toBe(2);
         expect(second.value.imported + second.value.already_existed).toBe(3);
+      });
+    });
+
+    // ─── M3 fix: collectExistingV1Ids soundness ───────────────────────────────
+    describe("idempotency guard soundness (M3 fix)", () => {
+      // BOUNDARY: a previously-migrated doc that was later soft-deleted must still
+      // count as "already imported" on re-run — findMany's default exclude_deleted:
+      // true would otherwise drop it from the guard set, resurrecting a duplicate.
+      it("BOUNDARY: soft-deleted previously-migrated doc is still recognized as already_existed on re-run, not resurrected as a duplicate", async () => {
+        writeFileSync(join(tempDir, "prd.md"), makePrdFile("PRD-001", "My PRD"));
+        writeFileSync(join(tempDir, "spec.md"), makeSpecFile("SPEC-001", "Auth Spec", "PRD-001"));
+
+        // First run — imports 2 docs
+        const first = await service.execute(tempDir, defaultOpts);
+        expect(first.ok).toBe(true);
+        if (!first.ok) return;
+        expect(first.value.imported).toBe(2);
+
+        // Soft-delete the imported PRD doc, simulating "someone archived it" between runs
+        const allDocs = await store.findMany({});
+        expect(allDocs.ok).toBe(true);
+        if (!allDocs.ok) return;
+        const prdDoc = allDocs.value.find((d) => d.extra["v1_original_id"] === "PRD-001");
+        expect(prdDoc).toBeDefined();
+        if (!prdDoc) return;
+        const softDeleteResult = await store.softDelete(prdDoc.id);
+        expect(softDeleteResult.ok).toBe(true);
+
+        // Second run on the same corpus — the soft-deleted doc's v1_original_id must
+        // STILL be recognized as already_existed (not re-imported as a fresh duplicate)
+        const second = await service.execute(tempDir, defaultOpts);
+        expect(second.ok).toBe(true);
+        if (!second.ok) return;
+        expect(second.value.imported).toBe(0);
+        expect(second.value.already_existed).toBe(2);
+
+        // Only ONE doc in the store carries v1_original_id: "PRD-001" — no duplicate
+        // was created for the soft-deleted doc.
+        const allDocsAfter = await store.findMany({ exclude_deleted: false });
+        expect(allDocsAfter.ok).toBe(true);
+        if (!allDocsAfter.ok) return;
+        const prdMatches = allDocsAfter.value.filter(
+          (d) => d.extra["v1_original_id"] === "PRD-001",
+        );
+        expect(prdMatches).toHaveLength(1);
+      });
+
+      // ERROR: a STORE_ERROR from collectExistingV1Ids must propagate as an err Result,
+      // aborting the import — never silently degrade to "no existing docs" (which would
+      // re-import every already-migrated doc as a duplicate with zero error signal).
+      it("ERROR: a store failure while checking existing docs propagates as err Result and aborts import (no silent mass re-import)", async () => {
+        writeFileSync(join(tempDir, "prd.md"), makePrdFile("PRD-001", "My PRD"));
+        writeFileSync(join(tempDir, "spec.md"), makeSpecFile("SPEC-001", "Auth Spec", "PRD-001"));
+
+        const failingStore = new FailingFindManyStore();
+        const failingService = new MigrationService(failingStore);
+
+        const result = await failingService.execute(tempDir, defaultOpts);
+
+        expect(result.ok).toBe(false);
+        if (result.ok) return;
+        expect(result.error.code).toBe("STORE_ERROR");
+
+        // No doc was inserted — the failure aborted BEFORE any writes, not after a
+        // partial (and now ambiguous) mass re-import.
+        expect(failingStore.insertCallCount).toBe(0);
+      });
+
+      // REGRESSION: existing plain-happy-path idempotency (no soft-delete, no store
+      // failure) is unaffected by the exclude_deleted:false + Result-propagation change.
+      it("REGRESSION: plain re-run without soft-deletes still reports already_existed correctly", async () => {
+        writeFileSync(join(tempDir, "prd.md"), makePrdFile("PRD-001", "My PRD"));
+
+        const first = await service.execute(tempDir, defaultOpts);
+        expect(first.ok).toBe(true);
+        if (!first.ok) return;
+        expect(first.value.imported).toBe(1);
+        expect(first.value.already_existed).toBe(0);
+
+        const second = await service.execute(tempDir, defaultOpts);
+        expect(second.ok).toBe(true);
+        if (!second.ok) return;
+        expect(second.value.imported).toBe(0);
+        expect(second.value.already_existed).toBe(1);
       });
     });
 

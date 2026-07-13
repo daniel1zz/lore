@@ -92,9 +92,14 @@ export class SQLiteStore implements StoreInterface {
    *
    * @invariant migration-004 is wrapped in its own `BEGIN IMMEDIATE; ... COMMIT;`
    *   (see `migrations/migration-004.ts`'s module JSDoc) — this is the FIRST
-   *   migration in the file that needs it (001-003 are pure additive `CREATE
-   *   TABLE/INDEX IF NOT EXISTS`, safe to re-run statement-by-statement even
-   *   half-applied). bun:sqlite's `db.exec()` (`Database.exec = Database.run`)
+   *   migration in the file that needs a transaction wrapper (001-003 are pure
+   *   additive `CREATE TABLE/INDEX/VIRTUAL TABLE/TRIGGER IF NOT EXISTS`, safe to
+   *   re-run statement-by-statement even half-applied — migration-001 itself was
+   *   NOT idempotent before it gained these `IF NOT EXISTS` guards: a process
+   *   kill between `db.exec(MIGRATION_001_SQL)` completing its DDL and the
+   *   trailing `PRAGMA user_version = 1` landing left `user_version` at 0, so the
+   *   next startup re-ran the identical unguarded SQL and threw "table docs
+   *   already exists", permanently bricking the corpus). bun:sqlite's `db.exec()` (`Database.exec = Database.run`)
    *   does NOT auto-rollback when a statement inside a multi-statement string
    *   throws — reproduced empirically: after a caught `exec()` error mid an
    *   explicit `BEGIN`, `db.inTransaction` stays `true` until something issues
