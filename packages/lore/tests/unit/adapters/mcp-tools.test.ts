@@ -543,12 +543,93 @@ describe("lore_batch", () => {
       const data = parseResult(result) as { results: Array<{ ok: boolean }> };
       expect(data.results[0]?.ok).toBe(false);
     });
+
+    // Fix1 (MCP batch-op dispatcher validation, MAJOR): create/set/link previously
+    // cast caller-supplied args straight to the service param type with only ad-hoc
+    // typeof checks (create had NO guard at all). A malformed op must now surface a
+    // structured VALIDATION_ERROR entry — never crash executeBatchOp's cast, never
+    // silently pass through with fields coerced to undefined.
+
+    it("captures VALIDATION_ERROR for a create op missing the required title", async () => {
+      const result = await getToolHandler(server, "lore_batch")({
+        operations: [{ op: "create", args: { type: "prd" } }],
+      });
+      expect(result.isError).toBeFalsy();
+      const data = parseResult(result) as { results: Array<{ ok: boolean; error?: { code: string; field: string } }> };
+      expect(data.results[0]?.ok).toBe(false);
+      expect(data.results[0]?.error?.code).toBe("VALIDATION_ERROR");
+      expect(data.results[0]?.error?.field).toBe("title");
+    });
+
+    it("captures VALIDATION_ERROR for a create op with an invalid doc type", async () => {
+      const result = await getToolHandler(server, "lore_batch")({
+        operations: [{ op: "create", args: { type: "not_a_real_type", title: "X" } }],
+      });
+      expect(result.isError).toBeFalsy();
+      const data = parseResult(result) as { results: Array<{ ok: boolean; error?: { code: string } }> };
+      expect(data.results[0]?.ok).toBe(false);
+      expect(data.results[0]?.error?.code).toBe("VALIDATION_ERROR");
+    });
+
+    it("captures VALIDATION_ERROR for a set op missing id_or_slug", async () => {
+      const result = await getToolHandler(server, "lore_batch")({
+        operations: [{ op: "set", args: { title: "New Title" } }],
+      });
+      expect(result.isError).toBeFalsy();
+      const data = parseResult(result) as { results: Array<{ ok: boolean; error?: { code: string; field: string } }> };
+      expect(data.results[0]?.ok).toBe(false);
+      expect(data.results[0]?.error?.code).toBe("VALIDATION_ERROR");
+      expect(data.results[0]?.error?.field).toBe("id_or_slug");
+    });
+
+    it("captures VALIDATION_ERROR for a link op missing from/to", async () => {
+      const result = await getToolHandler(server, "lore_batch")({
+        operations: [{ op: "link", args: { to: "some-doc" } }],
+      });
+      expect(result.isError).toBeFalsy();
+      const data = parseResult(result) as { results: Array<{ ok: boolean; error?: { code: string; field: string } }> };
+      expect(data.results[0]?.ok).toBe(false);
+      expect(data.results[0]?.error?.code).toBe("VALIDATION_ERROR");
+      expect(data.results[0]?.error?.field).toBe("from");
+    });
+  });
+
+  describe("regression — well-formed ops still succeed", () => {
+    it("create/set/link ops with valid args all succeed within one batch", async () => {
+      const createResult = await getToolHandler(server, "lore_batch")({
+        operations: [{ op: "create", args: { type: "prd", title: "Batch Regression PRD" } }],
+      });
+      const createData = parseResult(createResult) as { results: Array<{ ok: boolean; value?: { id: string; slug: string } }> };
+      expect(createData.results[0]?.ok).toBe(true);
+      const created = createData.results[0]?.value;
+      expect(created?.id).toBeDefined();
+
+      const followUp = await getToolHandler(server, "lore_batch")({
+        operations: [
+          { op: "set", args: { id_or_slug: created?.id, title: "Batch Regression PRD (renamed)" } },
+          { op: "create", args: { type: "prd", title: "Batch Regression PRD 2" } },
+        ],
+      });
+      const followUpData = parseResult(followUp) as {
+        results: Array<{ ok: boolean; value?: { id?: string; slug?: string; version?: number } }>;
+      };
+      expect(followUpData.results[0]?.ok).toBe(true);
+      expect(followUpData.results[1]?.ok).toBe(true);
+      const secondPrdId = followUpData.results[1]?.value?.id;
+      expect(secondPrdId).toBeDefined();
+
+      const linkResult = await getToolHandler(server, "lore_batch")({
+        operations: [{ op: "link", args: { from: created?.id, to: secondPrdId, type: "relates-to" } }],
+      });
+      const linkData = parseResult(linkResult) as { results: Array<{ ok: boolean }> };
+      expect(linkData.results[0]?.ok).toBe(true);
+    });
   });
 
   // BOUNDARY: N/A — array size handled by Zod
   // ERROR: N/A — individual op failures captured in result array
   // STATE: N/A — sequential execution
-  // REGRESSION: N/A
+  // REGRESSION: covered above (well-formed ops still succeed)
 });
 
 // ─── lore_pending ─────────────────────────────────────────────────────────────

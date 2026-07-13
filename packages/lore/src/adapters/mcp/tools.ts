@@ -1460,8 +1460,45 @@ export function registerTools(server: McpServer, app: App): void {
 // ─── Batch Operation Executor ────────────────────────────────────────────────
 
 /**
+ * Converts the first Zod validation issue on a batch op's `args` into a
+ * `LoreError` `VALIDATION_ERROR`, matching the shape `CorpusService._createImpl`
+ * uses for its own `createDocInputSchema` failures (`{code, field, message}`) —
+ * so a malformed batch `create`/`set`/`link` op surfaces the SAME error contract
+ * a direct `lore_create`/`lore_set`/`lore_link` call would, rather than either
+ * crashing on an unvalidated cast or silently coercing missing fields to
+ * `undefined`.
+ *
+ * @param error - The ZodError from a failed `schema.safeParse(args)`
+ * @param opName - Batch op name, used as the `field` fallback when the error
+ *   carries no issue path (defensive — ZodError always has ≥1 issue in practice)
+ * @returns A `VALIDATION_ERROR`-coded LoreError
+ */
+function zodIssueToLoreError(error: z.ZodError, opName: string): LoreError {
+  const issue = error.issues[0];
+  if (!issue) {
+    return { code: "VALIDATION_ERROR", field: opName, message: "Invalid input" };
+  }
+  return {
+    code: "VALIDATION_ERROR",
+    field: issue.path.length > 0 ? issue.path.join(".") : opName,
+    message: issue.message,
+  };
+}
+
+/**
  * Executes a single named operation within a lore_batch call.
  * Returns a structured `{ ok, value }` or `{ ok, error }` result object.
+ *
+ * `create`/`set`/`link` validate `args` against the SAME Zod input schema the
+ * corresponding single-op tool (`lore_create`/`lore_set`/`lore_link`) uses
+ * BEFORE touching `corpusService` — every other lore_* tool is SDK-validated
+ * against its schema pre-handler (see `registerToolWithArgs`); `executeBatchOp`
+ * previously cast caller-supplied `args` straight to the service param type with
+ * only ad-hoc presence checks (or, for `create`, no check at all), so a malformed
+ * batch op could reach the service layer un-typechecked. A validation failure
+ * now produces the same per-op `{ ok: false, error }` entry every other failure
+ * mode already uses — the batch itself still succeeds (`isError` stays false);
+ * only that one op's result entry reports the failure.
  *
  * @param op - Operation name (create | get | set | delete | list | search | link)
  * @param args - Raw arguments from the batch operation entry
@@ -1477,7 +1514,26 @@ async function executeBatchOp(
 
   switch (op) {
     case "create": {
-      const r = await corpusService.create(args as Parameters<typeof corpusService.create>[0]);
+      const parsed = LoreCreateSchema.safeParse(args);
+      if (!parsed.success) return { ok: false, error: zodIssueToLoreError(parsed.error, "create") };
+      // reason: strip MCP-schema-only fields (ai/file_anchors/supersedes/by) — the
+      // batch executor never invokes AI generation or the supersedes orchestration
+      // (out of scope for lore_batch); file_anchors still folds into extra the same
+      // way the single-op lore_create handler does, so a batch-created task's
+      // declared anchors aren't silently dropped.
+      const { ai: _ai, file_anchors: fileAnchors, supersedes: _supersedes, by: _by, ...createInput } = parsed.data;
+      void _ai;
+      void _supersedes;
+      void _by;
+      const mergedExtra =
+        fileAnchors !== undefined
+          ? { ...(createInput.extra ?? {}), file_anchors: fileAnchors }
+          : createInput.extra;
+      const resolvedCreateInput = {
+        ...createInput,
+        ...(mergedExtra !== undefined ? { extra: mergedExtra } : {}),
+      };
+      const r = await corpusService.create(resolvedCreateInput);
       return r.ok ? { ok: true, value: r.value } : { ok: false, error: r.error };
     }
     case "get": {
@@ -1487,10 +1543,9 @@ async function executeBatchOp(
       return r.ok ? { ok: true, value: r.value } : { ok: false, error: r.error };
     }
     case "set": {
-      const idOrSlug = args["id_or_slug"];
-      if (typeof idOrSlug !== "string") return { ok: false, error: "id_or_slug required" };
-      const { id_or_slug: _id, ...patch } = args;
-      void _id;
+      const parsed = LoreSetSchema.safeParse(args);
+      if (!parsed.success) return { ok: false, error: zodIssueToLoreError(parsed.error, "set") };
+      const { id_or_slug: idOrSlug, ...patch } = parsed.data;
       const r = await corpusService.set(idOrSlug, patch);
       return r.ok ? { ok: true, value: r.value } : { ok: false, error: r.error };
     }
@@ -1511,12 +1566,9 @@ async function executeBatchOp(
       return r.ok ? { ok: true, value: r.value } : { ok: false, error: r.error };
     }
     case "link": {
-      const from = args["from"];
-      const to = args["to"];
-      if (typeof from !== "string" || typeof to !== "string") {
-        return { ok: false, error: "from and to required" };
-      }
-      const type = typeof args["type"] === "string" ? args["type"] : "relates-to";
+      const parsed = LoreLinkSchema.safeParse(args);
+      if (!parsed.success) return { ok: false, error: zodIssueToLoreError(parsed.error, "link") };
+      const { from, to, type } = parsed.data;
       const r = await corpusService.link(from, to, type as Parameters<typeof corpusService.link>[2]);
       return r.ok ? { ok: true, value: r.value } : { ok: false, error: r.error };
     }

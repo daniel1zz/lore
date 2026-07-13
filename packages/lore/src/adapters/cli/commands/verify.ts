@@ -115,6 +115,20 @@ export default defineCommand({
       const acIds = normalizeRepeatableFlag(args.ac);
       const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
 
+      // reason: M2 trust-boundary advisory (SPEC-039's documented "npm-scripts trust
+      // level, full env passthrough, no sandbox" design) — `lore verify` shells out to
+      // caller-declared commands (`spec.extra.acceptance_criteria[].verify.script.command`),
+      // so a one-time notice belongs on this CLI surface before those commands run.
+      // Deliberately NOT a per-command line (would be noise for a multi-AC plan) and
+      // NEVER written to stdout — `--json`'s stdout stays a clean, parseable envelope,
+      // same split the pre-existing `warnings` loop below already uses. Sandboxing /
+      // env-scrubbing / a confirmation prompt were explicitly out of scope for this fix
+      // (would break legitimate CI usage of a trusted-runner command); signing or an
+      // allowlist mechanism remains an open product decision, not addressed here.
+      process.stderr.write(
+        "Warning: lore verify executes this plan's declared script-mode acceptance-criteria commands with the full local environment (npm-scripts trust level — no sandbox, no env scrubbing; see SPEC-039).\n",
+      );
+
       const result = await requireVerifyRunnerService(app).verifyPlan(args.plan as string, {
         ...(acIds !== undefined ? { acIds } : {}),
         ...(typeof args.task === "string" ? { explicitTaskIdOrSlug: args.task } : {}),
