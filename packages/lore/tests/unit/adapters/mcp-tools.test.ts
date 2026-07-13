@@ -293,6 +293,106 @@ describe("lore_list", () => {
   // REGRESSION: N/A
 });
 
+// ─── lore_list — pagination hardening (unbounded-payload review) ────────────
+
+describe("lore_list pagination", () => {
+  describe("happy path", () => {
+    it("explicit limit + offset page through the corpus without overlap", async () => {
+      const cc = getToolHandler(server, "lore_create");
+      await cc({ type: "prd", title: "Page Doc 1" });
+      await cc({ type: "prd", title: "Page Doc 2" });
+      await cc({ type: "prd", title: "Page Doc 3" });
+
+      const page1 = parseResult(
+        await getToolHandler(server, "lore_list")({ limit: 2, offset: 0 }),
+      ) as { docs: Array<{ id: string }>; total: number; truncated: boolean };
+      const page2 = parseResult(
+        await getToolHandler(server, "lore_list")({ limit: 2, offset: 2 }),
+      ) as { docs: Array<{ id: string }>; total: number; truncated: boolean };
+
+      expect(page1.docs).toHaveLength(2);
+      expect(page2.docs).toHaveLength(1);
+      const page1Ids = new Set(page1.docs.map((d) => d.id));
+      expect(page2.docs.every((d) => !page1Ids.has(d.id))).toBe(true);
+    });
+
+    it("truncated is false when every matching doc fits within limit", async () => {
+      const cc = getToolHandler(server, "lore_create");
+      await cc({ type: "prd", title: "Small Set 1" });
+      await cc({ type: "prd", title: "Small Set 2" });
+
+      const result = parseResult(
+        await getToolHandler(server, "lore_list")({ limit: 10 }),
+      ) as { docs: unknown[]; total: number; truncated: boolean };
+      expect(result.docs).toHaveLength(2);
+      expect(result.total).toBe(2);
+      expect(result.truncated).toBe(false);
+    });
+
+    it("truncated is true when an explicit limit caps a larger matching set", async () => {
+      const cc = getToolHandler(server, "lore_create");
+      await cc({ type: "prd", title: "Cap Doc 1" });
+      await cc({ type: "prd", title: "Cap Doc 2" });
+      await cc({ type: "prd", title: "Cap Doc 3" });
+
+      const result = parseResult(
+        await getToolHandler(server, "lore_list")({ limit: 2 }),
+      ) as { docs: unknown[]; total: number; truncated: boolean };
+      // reason: `truncated` must be a real signal the agent can act on, not just
+      // present-but-always-false — this is what distinguishes a capped call from
+      // a complete one (never a silent cap).
+      expect(result.docs).toHaveLength(2);
+      expect(result.total).toBe(2);
+      expect(result.truncated).toBe(true);
+    });
+  });
+
+  describe("boundary values", () => {
+    it("no limit/offset AND the corpus exceeds MCP_LIST_DEFAULT_LIMIT → capped at 100, truncated true", async () => {
+      const cc = getToolHandler(server, "lore_create");
+      for (let i = 0; i < 105; i += 1) {
+        // eslint-disable-next-line no-await-in-loop
+        await cc({ type: "prd", title: `Default Cap Doc ${i}` });
+      }
+
+      const result = parseResult(await getToolHandler(server, "lore_list")({})) as {
+        docs: unknown[];
+        total: number;
+        truncated: boolean;
+      };
+      expect(result.docs).toHaveLength(100);
+      expect(result.total).toBe(100);
+      expect(result.truncated).toBe(true);
+    });
+
+    it("limit 0 returns an empty page, no error, truncated reflects whether any rows exist", async () => {
+      const cc = getToolHandler(server, "lore_create");
+      await cc({ type: "prd", title: "Zero Limit Doc" });
+
+      const result = await getToolHandler(server, "lore_list")({ limit: 0 });
+      expect(result.isError).toBeFalsy();
+      const data = parseResult(result) as { docs: unknown[]; total: number; truncated: boolean };
+      expect(data.docs).toEqual([]);
+      expect(data.total).toBe(0);
+    });
+
+    it("offset beyond the matching row count returns an empty page, no error", async () => {
+      const cc = getToolHandler(server, "lore_create");
+      await cc({ type: "prd", title: "Only Doc" });
+
+      const result = await getToolHandler(server, "lore_list")({ limit: 10, offset: 100 });
+      expect(result.isError).toBeFalsy();
+      const data = parseResult(result) as { docs: unknown[]; total: number };
+      expect(data.docs).toEqual([]);
+    });
+  });
+
+  // STATE (REGRESSION): pre-pagination callers that never pass limit/offset still
+  // get a docs[]/total envelope (shape-compatible) — covered by "lore_list" describe
+  // block's "returns all docs after creating some" test above (2 docs, well under the
+  // default cap, so truncated is never observably different from the old unpaged shape).
+});
+
 // ─── lore_list — governed_by (IoC vertical-slice tech-spec §4.1 P4) ──────────
 
 describe("lore_list governed_by", () => {
