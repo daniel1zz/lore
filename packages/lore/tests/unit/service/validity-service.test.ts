@@ -177,6 +177,34 @@ describe("HAPPY — ValidityService.invalidate", () => {
     expect(allLinksResult.value.some((l) => l.link_type === "supersedes")).toBe(false);
   });
 
+  // Fix2 (decision_status/invalidated_by consistency, MINOR): a reason-only
+  // re-invalidate call must NOT flip decision_status to "deprecated" while
+  // invalidated_by is still "first signal wins"-preserved at a prior call's
+  // successor — that combination made the persisted document self-contradict
+  // (banner says "superseded by X", decision_status says "deprecated").
+  it("ADR convergence stays consistent across calls: call2 (reason-only) keeps decision_status='superseded' set by call1's supersededBy", async () => {
+    const { corpusService, validityService } = makeServices();
+    const a1 = await createAdr(corpusService, "A1 old");
+    const a2 = await createAdr(corpusService, "A2 new");
+
+    const call1 = await validityService.invalidate(a1.id, { by: "alice", supersededBy: a2.slug });
+    expect(call1.ok).toBe(true);
+    if (!call1.ok) return;
+    expect(call1.value.doc.extra["decision_status"]).toBe("superseded");
+    expect(call1.value.doc.extra["superseded_by"]).toBe(a2.id);
+
+    const call2 = await validityService.invalidate(a1.id, { by: "bob", reason: "confirmed still stale" });
+    expect(call2.ok).toBe(true);
+    if (!call2.ok) return;
+
+    // The banner (lore get / export-docs / feed) renders off extra.validity.invalidated_by
+    // alone — it must stay in lockstep with decision_status, never contradict it.
+    const validity = call2.value.doc.extra["validity"] as Record<string, unknown> | undefined;
+    expect(validity?.["invalidated_by"]).toBe(a2.id);
+    expect(call2.value.doc.extra["decision_status"]).toBe("superseded");
+    expect(call2.value.doc.extra["superseded_by"]).toBe(a2.id);
+  });
+
   it("undo clears invalid_at/invalidated_by/reason and bumps version", async () => {
     const { corpusService, validityService } = makeServices();
     const k1 = await createKnowledge(corpusService, "K1");

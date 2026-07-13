@@ -334,6 +334,37 @@ describe("lore verify — STATE (draft-spec advisory)", () => {
   });
 });
 
+// ─── M2 — trust-boundary advisory (script commands run with full local env) ──
+
+describe("lore verify — M2 trust-boundary advisory (SPEC-039 npm-scripts trust level)", () => {
+  it("M2.1: prints a one-time trust-boundary warning to stderr before executing script ACs", () => {
+    const { planSlug, taskSlug } = buildFixture("TrustWarnText", [{ id: "AC-VRF-TW1", command: "true" }]);
+
+    const result = runLore(["verify", planSlug, "--task", taskSlug], tmpDir);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toContain("full local environment");
+    expect(result.stderr).toContain("npm-scripts trust level");
+    // reason: exactly one advisory line — not per-command noise.
+    const warningLines = result.stderr.split("\n").filter((l) => l.includes("npm-scripts trust level"));
+    expect(warningLines).toHaveLength(1);
+  });
+
+  it("M2.2: --json mode keeps stdout pure JSON — the warning goes to stderr only", () => {
+    const { planSlug, taskSlug } = buildFixture("TrustWarnJson", [{ id: "AC-VRF-TW2", command: "true" }]);
+
+    const result = runLore(["verify", planSlug, "--task", taskSlug, "--json"], tmpDir);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toContain("npm-scripts trust level");
+    expect(result.stdout).not.toContain("npm-scripts trust level");
+    // stdout must parse as a single clean JSON envelope, nothing prepended/appended.
+    expect(() => JSON.parse(result.stdout)).not.toThrow();
+    const parsed = JSON.parse(result.stdout) as { ok: boolean };
+    expect(parsed.ok).toBe(true);
+  });
+});
+
 // ─── REGRESSION — AC-VRF-2 adapter half: forged --attestation is inert ───────
 
 describe("lore evidence — forged --attestation is silently inert (AC-VRF-2 adapter half)", () => {

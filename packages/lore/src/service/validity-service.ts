@@ -289,15 +289,23 @@ export class ValidityService {
 
     const newExtra: Record<string, unknown> = { ...doc.extra, validity: parsedValidity.data };
 
-    // ADR convergence (AC-MH-3, D2): decision_status/superseded_by track the SAME
-    // supersede/deprecate distinction as this CALL's own opts.supersededBy — never the
-    // merged/effective value, so a re-invalidate that omits supersededBy this time
-    // deliberately falls back to "deprecated" (matching the AC's literal wording).
+    // ADR convergence (AC-MH-3, D2, fixed post-review B4): decision_status/superseded_by
+    // track the SAME merged `effectiveInvalidatedBy` value persisted to
+    // `extra.validity.invalidated_by` above — NOT `opts.supersededBy !== undefined` for
+    // just this call. Keying decision_status off the current call alone let a
+    // reason-only re-invalidate (call 2, no supersededBy) flip decision_status to
+    // "deprecated" while `invalidated_by` stayed "first signal wins"-preserved at the
+    // prior call's successor — the persisted document then contradicted itself: the
+    // validity banner (`lore get`/export-docs/feed, which renders off `invalidated_by`
+    // alone) says "superseded by X" while `decision_status` says "deprecated". Deriving
+    // both from the SAME `effectiveInvalidatedBy` keeps them in lockstep across any
+    // number of calls; a reason-only invalidate on a doc with no prior supersededBy
+    // still yields "deprecated" (effectiveInvalidatedBy is undefined in that case).
     if (doc.type === "adr") {
       delete newExtra["superseded_by"];
-      if (opts.supersededBy !== undefined) {
+      if (effectiveInvalidatedBy !== undefined) {
         newExtra["decision_status"] = "superseded";
-        newExtra["superseded_by"] = resolvedSupersededById;
+        newExtra["superseded_by"] = effectiveInvalidatedBy;
       } else {
         newExtra["decision_status"] = "deprecated";
       }
