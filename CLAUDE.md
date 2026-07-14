@@ -27,6 +27,8 @@ cd packages/lore && bun test tests/unit/store/sqlite-store.bun.test.ts
 
 **Test file convention**: Files ending in `.bun.test.ts` run under `bun test` only (they use `bun:sqlite`). All other `.test.ts` files run under vitest. Do not mix runners.
 
+**Pre-push corpus gate**: `hooks/pre-push` runs `lore status --check-tree --check-drift` before every push (fail-open when `lore`/`.lore/` absent; bypass with `--no-verify`). After clone, activate with `git config core.hooksPath hooks`.
+
 **⛔ Never write to the repo's own `.lore/` corpus from tests or smoke checks.** The repo corpus is the team's live knowledge base. Any manual smoke test or e2e run that creates/edits docs MUST use a throwaway corpus (`mkdtemp` + `lore init`, cwd inside it) — see `packages/dashboard/tests/e2e/global-setup.ts` for the canonical pattern. Also never assume a server answering on port 8787 is yours: a stale `lore dashboard` serving the real corpus once absorbed an e2e write suite (2026-07-07 pollution incident — 6 foreign docs, corrupted export numbering).
 
 ## Architecture
