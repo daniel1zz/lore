@@ -70,6 +70,31 @@
  *     processed, then the manifest itself is deleted LAST (mirrors install's
  *     manifest-last discipline in reverse — the manifest stays valid/authoritative
  *     until every other reversal has succeeded).
+ *   - `uninstall` additionally prunes now-EMPTY directories it created
+ *     (AC-046-F finding — a reversible install must return `targetDir` to its
+ *     true pre-install state, not leave empty directory skeletons like
+ *     `skills/`/`agents/` behind). Candidate directories are every ANCESTOR
+ *     (up to but excluding `targetDir`) of every entry that was REMOVED
+ *     outright this run (i.e. `removedPaths` — entries restored FROM a backup
+ *     never contribute, since their parent dir predates this install and is
+ *     never "ours" to prune). Candidates are deduped and swept DEEPEST-FIRST
+ *     (longest path first) via `SetupFsWriter.removeDirIfEmpty`, which is
+ *     empty-only and NEVER force-removes — a directory with any remaining
+ *     content (including a sibling lore-tracked file, or unrelated
+ *     user content) is left untouched, and the sweep naturally cascades
+ *     upward (`skills/lore/` empties out and is removed, which may then make
+ *     `skills/` itself empty and removable next).
+ *     **Known simplification (documented, not a bug)**: this rule has no
+ *     directory-provenance tracking — it cannot distinguish "this directory
+ *     was created BY this install" from "this directory pre-existed and
+ *     happened to become empty once our files were removed from it" (e.g. a
+ *     user's own empty `skills/` dir that install put lore's files into,
+ *     later left empty by uninstall). Both are pruned identically. This is
+ *     considered acceptable: the only way to preserve a pre-existing empty
+ *     directory would be recording directory ownership in the manifest
+ *     (a real design, out of scope for this fix) — the guarantee this fix
+ *     DOES make is unconditional: a directory with ANY remaining content,
+ *     lore-tracked or foreign, is never removed.
  *   - No manifest at `targetDir` → `uninstall` fails loud (`VALIDATION_ERROR`,
  *     "nothing to uninstall") rather than silently no-op'ing.
  *   - MCP registration/de-registration failure is NEVER thrown and never
@@ -153,6 +178,16 @@ export interface SetupFsWriter {
   backup(src: string, destDir: string): Promise<void>;
   /** Removes the file OR directory (recursively) at an ABSOLUTE path. A missing target is NOT an error. */
   remove(path: string): Promise<void>;
+  /**
+   * Removes the directory at ABSOLUTE `path` IFF it is currently empty — NEVER
+   * force/recursive (unlike {@link remove}). A path that still has entries, or
+   * that does not exist at all, is a silent no-op — NOT an error — so a caller
+   * can sweep a whole candidate ancestor-directory set without pre-checking
+   * emptiness itself (see `SetupService.uninstall`'s post-reversal directory
+   * cleanup, SPEC-046 AC-046-F). Any OTHER failure (e.g. permission denied) is
+   * surfaced by throwing.
+   */
+  removeDirIfEmpty(path: string): Promise<void>;
 }
 
 /**
@@ -517,6 +552,12 @@ export class SetupService {
       }
 
       await this.writer.remove(path.join(opts.targetDir, BACKUPS_DIRNAME));
+
+      // AC-046-F: prune now-empty directories our removed entries leave behind — see
+      // module doc's uninstall bullet for the ancestor-derivation + empty-only contract.
+      for (const dir of computeAncestorDirsDeepestFirst(opts.targetDir, removedPaths)) {
+        await this.writer.removeDirIfEmpty(dir);
+      }
     } catch (cause) {
       return err(describeWriterFailure("uninstall", cause, { restoredPaths, removedPaths }));
     }
@@ -577,6 +618,32 @@ function describeWriterFailure(
       `The manifest was NOT ${phase === "install" ? "written" : "removed"} — this run's changes are NOT yet authoritative.`,
     ...(cause instanceof Error ? { cause } : {}),
   };
+}
+
+/**
+ * Derives every ANCESTOR directory (up to but EXCLUDING `targetDir`) of each
+ * `removedPaths` entry (repo-relative, POSIX-joined per `SetupEntry.path`),
+ * deduped, sorted DEEPEST-FIRST (most path segments first) so a leaf
+ * directory is always swept before its parent — letting a parent directory
+ * that only contained now-removed subdirectories become empty and removable
+ * in the SAME `uninstall` pass. `SetupService.uninstall`'s sole caller; see
+ * the module doc's uninstall bullet for the "known simplification" this
+ * cleanup pass documents (no directory-provenance tracking — a pre-existing
+ * user directory that becomes empty solely because our files were removed
+ * from it is pruned identically to one this install created).
+ */
+function computeAncestorDirsDeepestFirst(targetDir: string, removedPaths: string[]): string[] {
+  const dirs = new Set<string>();
+  for (const relPath of removedPaths) {
+    let dir = path.dirname(relPath);
+    while (dir !== "." && dir !== path.sep) {
+      dirs.add(path.join(targetDir, dir));
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  }
+  return [...dirs].sort((a, b) => b.split(path.sep).length - a.split(path.sep).length);
 }
 
 /**

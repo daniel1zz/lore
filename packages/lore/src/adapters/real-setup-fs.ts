@@ -47,6 +47,12 @@
  *     resurrect a non-executable hook.
  *   - `RealSetupFsWriter.remove` treats a missing target as a no-op (per the
  *     port's contract) — `rmSync(path, {recursive: true, force: true})`.
+ *   - `RealSetupFsWriter.removeDirIfEmpty` is `rmdirSync(path)` (NEVER
+ *     `recursive`/`force`) — `ENOTEMPTY` (still has entries) and `ENOENT`
+ *     (already gone) are both swallowed as the port's documented silent
+ *     no-op; any OTHER errno (e.g. `EACCES`, or `ENOTDIR` if handed a file by
+ *     mistake) is re-thrown, since those indicate something genuinely
+ *     unexpected rather than "nothing to clean up here" (SPEC-046 AC-046-F).
  *
  * Side-effect class: IO (synchronous node:fs reads AND writes).
  * Source: SPEC-046 §Design; atomicity/backup precedent: `SetupService`'s own
@@ -62,6 +68,7 @@ import {
   openSync,
   readFileSync,
   renameSync,
+  rmdirSync,
   rmSync,
   statSync,
   writeSync,
@@ -144,6 +151,15 @@ export class RealSetupFsWriter implements SetupFsWriter {
   async remove(path: string): Promise<void> {
     if (!existsSync(path)) return;
     rmSync(path, { recursive: true, force: true });
+  }
+
+  async removeDirIfEmpty(path: string): Promise<void> {
+    try {
+      rmdirSync(path);
+    } catch (cause) {
+      if (isErrnoException(cause) && (cause.code === "ENOTEMPTY" || cause.code === "ENOENT")) return;
+      throw cause;
+    }
   }
 }
 
