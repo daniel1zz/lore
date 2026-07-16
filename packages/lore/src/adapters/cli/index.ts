@@ -54,6 +54,7 @@ const main = defineCommand({
     handoff: () => import("./commands/handoff.js").then((m) => m.default),
     anchor: () => import("./commands/anchor.js").then((m) => m.default),
     invalidate: () => import("./commands/invalidate.js").then((m) => m.default),
+    setup: () => import("./commands/setup.js").then((m) => m.default),
   },
 });
 

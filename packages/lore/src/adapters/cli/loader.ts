@@ -11,6 +11,10 @@
  *   - Global config missing/malformed → warning to stderr; defaults fall back to {}
  *   - init command is exempt — it creates the DB before config exists (uses createApp directly)
  *   - sync command is exempt — manages TursoStore directly, not corpus operations
+ *   - setup command is exempt — the global install path (SetupService) targets ~/.claude,
+ *     unrelated to any .lore/ corpus; the --project path bootstraps ITS OWN .lore/ via an
+ *     injected initCorpus thunk (flows/init-corpus.ts), never via loadLoreApp() (which
+ *     requires a .lore/lore.db to already exist — the opposite of what --project scaffolds)
  *   - SPEC-030 AC-HJ-3: a project config whose `ai` block fails schema validation is a
  *     LOUD failure (exit code from `exitCode()`, formatted error to stderr) — it must NOT
  *     silently fall back to `AiConfigSchema.parse({})` defaults. Every OTHER config parse
