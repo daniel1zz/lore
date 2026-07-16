@@ -129,6 +129,18 @@ class MapFs implements SetupFsReader, SetupFsWriter {
       if (key === p || key.startsWith(prefix)) this.store.delete(key);
     }
   }
+
+  /**
+   * `MapFs` never models directories as first-class entries (only file
+   * paths are keys) — there is no "is this directory empty" question to ask
+   * against this fake's storage model, so this just records the call for
+   * assertion purposes (mirroring `mkdir`'s no-op-but-recorded shape). The
+   * STATE/REGRESSION dimension exercises the REAL empty-only contract via
+   * `makeRealFsPorts` below, against an actual mkdtemp filesystem.
+   */
+  async removeDirIfEmpty(p: string): Promise<void> {
+    this.writerCalls.push(`removeDirIfEmpty:${p}`);
+  }
 }
 
 /** Every method throws — a runtime proof that a caller never invoked the writer port (invariant I4). */
@@ -144,6 +156,9 @@ class PoisonedWriter implements SetupFsWriter {
   }
   async remove(): Promise<void> {
     throw new Error("PoisonedWriter.remove must never be called");
+  }
+  async removeDirIfEmpty(): Promise<void> {
+    throw new Error("PoisonedWriter.removeDirIfEmpty must never be called");
   }
 }
 
@@ -222,6 +237,15 @@ function makeRealFsPorts(): { reader: SetupFsReader; writer: SetupFsWriter } {
     },
     async remove(p: string): Promise<void> {
       await fsp.rm(p, { recursive: true, force: true });
+    },
+    async removeDirIfEmpty(p: string): Promise<void> {
+      try {
+        await fsp.rmdir(p);
+      } catch (cause) {
+        const errno = cause as NodeJS.ErrnoException;
+        if (errno.code === "ENOTEMPTY" || errno.code === "ENOENT") return;
+        throw cause;
+      }
     },
   };
 
@@ -453,12 +477,36 @@ describe("STATE", () => {
       await expect(fsp.access(path.join(targetDir, "agents", "lore-explorer.md"))).rejects.toThrow();
       await expect(fsp.access(path.join(targetDir, "hooks", "stop-doc-sync.mjs"))).rejects.toThrow();
       await expect(fsp.access(path.join(targetDir, "governance", "corpus-workflow.md"))).rejects.toThrow();
-      // NOTE: this does not additionally assert the top-level directory listing is exactly
-      // pre-install — removing a nested file (e.g. skills/lore/SKILL.md) can leave an now-empty
-      // parent directory (skills/) behind, since SetupFsWriter.remove is documented as removing
-      // the given path, not pruning now-empty ancestors. That pruning is out of this service's
-      // contract; the manifest/backups/file-content assertions above are the invariant this
-      // task actually specifies ("manifest absent").
+      // AC-046-F: the now-empty directories our removed files leave behind (skills/,
+      // skills/lore/, agents/, hooks/, governance/) are pruned too — the ONLY thing
+      // left in targetDir is the restored (foreign, pre-existing) settings.json.
+      await expect(fsp.access(path.join(targetDir, "skills"))).rejects.toThrow();
+      await expect(fsp.access(path.join(targetDir, "agents"))).rejects.toThrow();
+      await expect(fsp.access(path.join(targetDir, "hooks"))).rejects.toThrow();
+      await expect(fsp.access(path.join(targetDir, "governance"))).rejects.toThrow();
+      const topLevelEntries = await fsp.readdir(targetDir);
+      expect(topLevelEntries).toEqual(["settings.json"]);
+    } finally {
+      await fsp.rm(targetDir, { recursive: true, force: true });
+    }
+  });
+
+  it("AC-046-F: install() into a fully empty dir then uninstall() leaves ZERO entries behind (no empty directory skeletons)", async () => {
+    const targetDir = await makeTempDir();
+    try {
+      const { reader, writer } = makeRealFsPorts();
+      const service = new SetupService(new FixedAssetSource(buildPayload()), reader, writer, new OkMcpRegistrar());
+
+      const installResult = await service.install({ targetDir, binPath: "/usr/local/bin/lore" });
+      expect(installResult.ok).toBe(true);
+      // Nothing pre-existed, so settings.json itself was a fresh write (no backup) too.
+      if (installResult.ok) expect(installResult.value.backups).toHaveLength(0);
+
+      const uninstallResult = await service.uninstall({ targetDir });
+      expect(uninstallResult.ok).toBe(true);
+
+      const remaining = await fsp.readdir(targetDir, { recursive: true });
+      expect(remaining).toHaveLength(0);
     } finally {
       await fsp.rm(targetDir, { recursive: true, force: true });
     }
@@ -504,6 +552,32 @@ describe("REGRESSION", () => {
 
       const restored = await fsp.readFile(path.join(targetDir, "settings.json"), "utf8");
       expect(restored).toBe(original);
+    } finally {
+      await fsp.rm(targetDir, { recursive: true, force: true });
+    }
+  });
+
+  it("AC-046-F: a pre-existing user file inside skills/ (untracked by any manifest entry) survives uninstall, AND its directory is left intact", async () => {
+    const targetDir = await makeTempDir();
+    try {
+      await fsp.mkdir(path.join(targetDir, "skills"), { recursive: true });
+      await fsp.writeFile(path.join(targetDir, "skills", "my-user-skill.md"), "# my own skill\n", "utf8");
+
+      const { reader, writer } = makeRealFsPorts();
+      const service = new SetupService(new FixedAssetSource(buildPayload()), reader, writer, new OkMcpRegistrar());
+
+      const installResult = await service.install({ targetDir, binPath: "/usr/local/bin/lore" });
+      expect(installResult.ok).toBe(true);
+      await expect(fsp.access(path.join(targetDir, "skills", "lore", "SKILL.md"))).resolves.toBeUndefined();
+
+      const uninstallResult = await service.uninstall({ targetDir });
+      expect(uninstallResult.ok).toBe(true);
+
+      // Our tracked entry is gone, and its now-empty parent (skills/lore/) is pruned...
+      await expect(fsp.access(path.join(targetDir, "skills", "lore"))).rejects.toThrow();
+      // ...but the user's OWN file, and skills/ itself (non-empty because of it), survive untouched.
+      const userContent = await fsp.readFile(path.join(targetDir, "skills", "my-user-skill.md"), "utf8");
+      expect(userContent).toBe("# my own skill\n");
     } finally {
       await fsp.rm(targetDir, { recursive: true, force: true });
     }
