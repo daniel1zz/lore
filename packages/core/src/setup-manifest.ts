@@ -113,6 +113,19 @@ export const assetFileSchema = z.object({
    * present only so `AssetPayload` has one uniform row shape.
    */
   sha256: z.string().min(1),
+  /**
+   * OPTIONAL — the source file's on-disk owner-execute bit, as read by an
+   * `AssetSource` implementation (e.g. `RealAssetSource`,
+   * `packages/lore/src/adapters/real-asset-source.ts`). Present (`true`) only
+   * when the bit is set — omitted rather than `false`, so a legacy/synthetic
+   * `AssetFile` with no opinion on executability still validates. Declared
+   * here as a minimal, additive (REGRESSION-safe) field: `SetupService.install`
+   * does not yet consume it (it independently hardcodes `executable: true`
+   * for every `kind: "hook"` write — see that module's doc comment) — this
+   * field exists so a real asset source can report the fact without the
+   * schema rejecting it, ahead of `SetupService` being wired to read it.
+   */
+  executable: z.boolean().optional(),
 });
 
 /** Derived TypeScript type for one asset payload file. */
