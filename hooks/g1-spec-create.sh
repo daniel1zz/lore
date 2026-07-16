@@ -133,6 +133,17 @@ case "$TOOL_NAME" in
         CONTENT="$(cat "$TARGET_CWD/$CONTENT_FILE" 2>/dev/null || true)"
       elif [ -r "$CONTENT_FILE" ]; then
         CONTENT="$(cat "$CONTENT_FILE" 2>/dev/null || true)"
+      else
+        # UNRESOLVED_CONTENT_FILE (fail-honest > fail-confusing): the command
+        # declared a --content-file this shim cannot read — typically the path
+        # contains an unexpanded shell variable (the hook sees the raw command
+        # string, never the shell's expansion). Running the gate with empty
+        # content would emit a misleading MISSING_SKELETON deny against a
+        # possibly fully-conformant spec. Fail open instead: the service-layer
+        # GateEnforcer re-runs the SAME predicates on the REAL resolved
+        # content, so nothing goes ungated.
+        log "UNRESOLVED_CONTENT_FILE: cannot read --content-file '$CONTENT_FILE' (unexpanded shell variable in the path?) — failing open; service-layer GateEnforcer still gates the real content"
+        allow
       fi
     fi
 
