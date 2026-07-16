@@ -1,19 +1,28 @@
 /**
  * Real `McpRegistrar` (SPEC-046 §Design, P1 port implementation) — shells the
  * `claude` CLI to register/de-register the `lore` MCP server at user scope,
- * via `Bun.spawn` and `@lore/core`'s pure argv builders
+ * via `node:child_process.spawn` and `@lore/core`'s pure argv builders
  * (`buildMcpAddArgs`/`buildMcpRemoveArgs`, `register-mcp.ts`).
  *
  * Public surface:
- *   - RealMcpRegistrar implements McpRegistrar — constructor() (no params;
- *     the `claude` command is resolved via PATH, mirroring `ClaudeCliProvider`)
+ *   - RealMcpRegistrar implements McpRegistrar — constructor(env?) (`env`
+ *     optional, defaults to `process.env`; the `claude` command is resolved
+ *     via `env.PATH`, mirroring `ClaudeCliProvider`)
  *
  * Invariants:
+ *   - `node:child_process.spawn`, NOT `Bun.spawn` — the global `Bun` object is
+ *     absent inside vitest's worker-thread pool (verified empirically: this
+ *     module's own dedicated suite, `real-setup-ports.test.ts`, is a `bunx
+ *     vitest` oracle, mirroring `packages/lore/tests/integration/cli/*.test.ts`'s
+ *     established `node:child_process` precedent for CLI-integration tests
+ *     that must run under vitest, not `.bun.test.ts`). Do not "simplify" this
+ *     back to `Bun.spawn` — it would make this port's own test suite silently
+ *     untestable under its declared oracle.
  *   - Never throws — `add`/`remove` always resolve to a `Result`, mirroring
  *     `SetupService`'s own "MCP registration failure is NEVER thrown, records
  *     mcp: 'failed'" contract (the CALLER decides how to react; this port
  *     itself never aborts a process).
- *   - `claude` not on `PATH` (Bun.spawn throws ENOENT-shaped) →
+ *   - `claude` not on `PATH` (spawn emits an `"error"` event, ENOENT) →
  *     `err(VALIDATION_ERROR)` naming the EXACT manual command an operator can
  *     run themselves (`claude mcp add -s user lore -- <binPath> --mcp-server`
  *     / `claude mcp remove -s user lore`) — never a bare "command not found",
@@ -26,10 +35,18 @@
  *   - argv is built EXCLUSIVELY via `buildMcpAddArgs`/`buildMcpRemoveArgs` —
  *     this class never inlines `["mcp", "add", ...]` itself, so the argv
  *     contract stays defined in exactly one (pure, vitest-tested) place.
+ *   - `env` is constructor-injected (default `process.env`) rather than read
+ *     ad hoc inside `add`/`remove` — the test suite overrides `PATH` per
+ *     scenario (a recording shim directory, or an empty string to force
+ *     ENOENT) without ever mutating the real, process-global `process.env`
+ *     (a mutate/restore-in-test pattern would race concurrently-running
+ *     vitest worker threads in the SAME process).
  *
- * Side-effect class: IO (Bun.spawn subprocess).
+ * Side-effect class: IO (child_process subprocess).
  * Source: SPEC-046 §Design ("Global MCP registration via `claude mcp add`").
  */
+
+import { spawn } from "node:child_process";
 
 import { buildMcpAddArgs, buildMcpRemoveArgs, err, ok } from "@lore/core";
 import type { Result, LoreError } from "@lore/core";
@@ -54,50 +71,81 @@ function manualRemoveCommand(): string {
  * Shared by `add`/`remove` — the only difference between the two public
  * methods is which argv builder + manual-command renderer they pass in.
  */
-async function runClaudeMcpCommand(args: string[], manualCommand: string): Promise<Result<void, LoreError>> {
-  let proc: ReturnType<typeof Bun.spawn>;
-  try {
-    proc = Bun.spawn([CLAUDE_COMMAND, ...args], { stdout: "pipe", stderr: "pipe" });
-  } catch {
-    return err({
-      code: "VALIDATION_ERROR",
-      field: "claude",
-      message:
-        `"claude" CLI not found on PATH — could not run the MCP registration step. ` +
-        `Run it manually: ${manualCommand}`,
-      value: CLAUDE_COMMAND,
+function runClaudeMcpCommand(
+  args: string[],
+  manualCommand: string,
+  env: NodeJS.ProcessEnv,
+): Promise<Result<void, LoreError>> {
+  return new Promise((resolve) => {
+    const child = spawn(CLAUDE_COMMAND, args, { stdio: ["ignore", "pipe", "pipe"], env });
+
+    let stderr = "";
+    let settled = false;
+
+    child.stderr?.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf8");
     });
-  }
 
-  const [stderr, exitCode] = await Promise.all([
-    new Response(proc.stderr as ReadableStream<Uint8Array>).text(),
-    proc.exited,
-  ]);
-
-  if (exitCode !== 0) {
-    return err({
-      code: "VALIDATION_ERROR",
-      field: "claude",
-      message:
-        `"claude ${args.join(" ")}" exited ${exitCode}: ${stderr.slice(0, STDERR_TAIL_MAX_CHARS)}. ` +
-        `Run it manually: ${manualCommand}`,
-      value: exitCode,
+    child.once("error", (cause) => {
+      if (settled) return;
+      settled = true;
+      resolve(
+        err({
+          code: "VALIDATION_ERROR",
+          field: "claude",
+          message:
+            `"claude" CLI not found on PATH — could not run the MCP registration step ` +
+            `(${cause instanceof Error ? cause.message : String(cause)}). ` +
+            `Run it manually: ${manualCommand}`,
+          value: CLAUDE_COMMAND,
+        }),
+      );
     });
-  }
 
-  return ok(undefined);
+    child.once("close", (exitCode) => {
+      if (settled) return;
+      settled = true;
+      if (exitCode !== 0) {
+        resolve(
+          err({
+            code: "VALIDATION_ERROR",
+            field: "claude",
+            message:
+              `"claude ${args.join(" ")}" exited ${exitCode}: ${stderr.slice(0, STDERR_TAIL_MAX_CHARS)}. ` +
+              `Run it manually: ${manualCommand}`,
+            value: exitCode,
+          }),
+        );
+        return;
+      }
+      resolve(ok(undefined));
+    });
+  });
 }
 
 /**
- * `Bun.spawn`-backed {@link McpRegistrar}. See module doc for the
+ * `node:child_process`-backed {@link McpRegistrar}. See module doc for the
  * ENOENT/nonzero-exit contract.
  */
 export class RealMcpRegistrar implements McpRegistrar {
+  /**
+   * @param env - Environment passed to the spawned `claude` process.
+   *   Defaults to the current process's own env (production use — `claude`
+   *   is resolved off the invoking user's real `PATH`). Overridable for
+   *   deterministic testing (`real-setup-ports.test.ts` injects a `PATH`
+   *   pointing at a recording shim, or an EMPTY `PATH` to force the ENOENT
+   *   path) WITHOUT mutating the global `process.env` — vitest's worker
+   *   pool can run other test files concurrently in the same process, and
+   *   `process.env` is process-global, so a test-local mutate/restore of it
+   *   would be a real cross-file race.
+   */
+  constructor(private readonly env: NodeJS.ProcessEnv = process.env) {}
+
   async add(binPath: string): Promise<Result<void, LoreError>> {
-    return runClaudeMcpCommand(buildMcpAddArgs(binPath), manualAddCommand(binPath));
+    return runClaudeMcpCommand(buildMcpAddArgs(binPath), manualAddCommand(binPath), this.env);
   }
 
   async remove(): Promise<Result<void, LoreError>> {
-    return runClaudeMcpCommand(buildMcpRemoveArgs(), manualRemoveCommand());
+    return runClaudeMcpCommand(buildMcpRemoveArgs(), manualRemoveCommand(), this.env);
   }
 }
