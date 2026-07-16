@@ -3,7 +3,12 @@
  * session-start-resume.mjs — SessionStart hook.
  *
  * Phase C: workflow-core (global-instructions.md) + subagent roster
- * Phase E: lore bootstrap injection (corpus pointer set, when cwd has .lore/)
+ * Phase D: linked-worktree seat detection (SPEC-047) — auto-injects the
+ *          seat-briefing.md discipline block for sessions opened inside a
+ *          linked git worktree of a lore-governed repo
+ * Phase E: lore bootstrap injection (corpus pointer set, when the resolved
+ *          corpus root — main checkout for a linked worktree, cwd otherwise —
+ *          has .lore/)
  * Phase F: test health check (silent, non-blocking)
  *
  * Bootstrap is hook-injected (was lazy-loaded by AI). Rationale: SessionStart
@@ -12,12 +17,16 @@
  *
  * Graceful degradation — a missing lore binary or corpus must never block
  * session start. Projects without .lore/ simply get no bootstrap block.
+ * Phase D follows the same rule: any git/fs error there must never block
+ * session start — it silently produces no seat block and the rest of the
+ * hook runs exactly as if this were a main-checkout session (g1-hook
+ * fail-open precedent).
  */
 
 import {
   existsSync, readFileSync, readdirSync, rmSync, statSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { resolveSessionId } from './lib/turn-state.mjs';
@@ -90,13 +99,91 @@ ${roster.join('\n')}\n`;
   }
 }
 
+// ── Phase D: linked-worktree seat detection (SPEC-047) ─────────────
+// A linked worktree's `.git` is a file pointing at a per-worktree gitdir
+// under the MAIN checkout's `.git/worktrees/<name>`; `--git-common-dir`
+// always resolves to the main checkout's real `.git` directory while
+// `--git-dir` resolves to the per-worktree one — they differ iff cwd is a
+// linked worktree (identical in the main checkout, and in a non-worktree
+// repo). Detection is pure environment inference: no new state, no config,
+// mirrors SPEC-042's "derived, never stored" session ethos.
+let seatBlock = '';
+let bootstrapCwd = process.cwd();
+try {
+  const commonDirRaw = spawnSync('git', ['rev-parse', '--git-common-dir'], {
+    cwd: process.cwd(), encoding: 'utf8', timeout: 5000,
+  });
+  const gitDirRaw = spawnSync('git', ['rev-parse', '--git-dir'], {
+    cwd: process.cwd(), encoding: 'utf8', timeout: 5000,
+  });
+  if (commonDirRaw.status === 0 && gitDirRaw.status === 0
+      && commonDirRaw.stdout && gitDirRaw.stdout) {
+    const commonDirAbs = resolve(process.cwd(), commonDirRaw.stdout.trim());
+    const gitDirAbs = resolve(process.cwd(), gitDirRaw.stdout.trim());
+    if (commonDirAbs !== gitDirAbs) {
+      // Linked worktree. The main checkout is the common gitdir's parent.
+      const mainCheckout = dirname(commonDirAbs);
+      if (existsSync(join(mainCheckout, '.lore'))) {
+        bootstrapCwd = mainCheckout; // corpus lives at the main checkout, not here
+
+        let branch = '';
+        const branchRaw = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+          cwd: process.cwd(), encoding: 'utf8', timeout: 5000,
+        });
+        if (branchRaw.status === 0 && branchRaw.stdout) branch = branchRaw.stdout.trim();
+        if (!branch || branch === 'HEAD') {
+          // Detached HEAD (or resolution failure) — fall back to a short-sha slug.
+          const shaRaw = spawnSync('git', ['rev-parse', '--short', 'HEAD'], {
+            cwd: process.cwd(), encoding: 'utf8', timeout: 5000,
+          });
+          const shortSha = shaRaw.status === 0 && shaRaw.stdout ? shaRaw.stdout.trim() : 'unknown';
+          branch = `worktree-${shortSha}`;
+        }
+
+        const actorSlug = branch
+          .toLowerCase()
+          .replace(/[^a-z0-9-]/g, '-')
+          .replace(/-+/g, '-')
+          .replace(/^-|-$/g, '');
+        const actor = `agent:${actorSlug}`;
+
+        // "claude-dir" per the hook's existing home-resolution convention:
+        // AGENTS_DIR is always <claude-dir>/agents (default or override), so
+        // its dirname is <claude-dir> under either default or test override.
+        const claudeDir = dirname(AGENTS_DIR);
+        const briefingCandidates = [
+          join(claudeDir, 'governance', 'seat-briefing.md'),
+          join(mainCheckout, 'assets', 'governance', 'seat-briefing.md'),
+        ];
+        const briefingPath = briefingCandidates.find((p) => existsSync(p));
+        if (briefingPath) {
+          const template = readFileSync(briefingPath, 'utf8');
+          seatBlock = template
+            .split('{{ACTOR}}').join(actor)
+            .split('{{BRANCH}}').join(branch)
+            .split('{{MAIN_CHECKOUT}}').join(mainCheckout);
+        } else {
+          process.stderr.write(
+            'session-start-resume: linked worktree detected but no seat-briefing.md found '
+            + `(checked ${briefingCandidates.join(', ')}); skipping seat injection\n`,
+          );
+        }
+      }
+    }
+  }
+} catch {
+  // Fail-open — any git/fs error here must never block session start.
+}
+
 // ── Phase E: lore bootstrap injection ──────────────────────────────
 // Corpus pointer set (root doc, active plans + task counts, pending
-// reviews, active sessions, stale candidates). Only when cwd has .lore/.
+// reviews, active sessions, stale candidates). Only when the resolved
+// corpus root (main checkout for a linked worktree, cwd otherwise) has
+// .lore/.
 let bootstrapBlock = '';
-if (existsSync(join(process.cwd(), '.lore'))) {
+if (existsSync(join(bootstrapCwd, '.lore'))) {
   const r = spawnSync('lore', ['bootstrap', '--json'], {
-    cwd: process.cwd(),
+    cwd: bootstrapCwd,
     encoding: 'utf8',
     timeout: 10000,
     env: { ...process.env, CLAUDECODE: '1' }, // agent surface → AI defaults off (SPEC-024)
@@ -192,6 +279,6 @@ ${items}
 Action: Check installation. Non-critical features (agent roster, test health) are unaffected.`;
 }
 
-// ── Compose (order: workflow → agents → bootstrap → degradation → testHealth) ─
-const parts = [workflowBlock, agentBlock, bootstrapBlock, degradationBlock, testHealthBlock].filter(Boolean);
+// ── Compose (order: workflow → seat → agents → bootstrap → degradation → testHealth) ─
+const parts = [workflowBlock, seatBlock, agentBlock, bootstrapBlock, degradationBlock, testHealthBlock].filter(Boolean);
 emit(parts.join('\n\n'));

@@ -83,7 +83,9 @@ const DECLARED_FILES_IN_SCOPE = [
   "hooks/lore-gate-g2-spec-promote.sh",
   "hooks/lore-gate-g3-plan-promote.sh",
   "hooks/lore-gate-g4-task-claim.sh",
+  "hooks/lib/turn-state.mjs",
   "governance/corpus-workflow.md",
+  "governance/seat-briefing.md",
 ].sort();
 
 const DECLARED_EXECUTABLE_PATHS = new Set([
