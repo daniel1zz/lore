@@ -67,7 +67,7 @@ const DECLARED_FILES = [
   "agents/lore-planner.md",
   "agents/lore-implementer.md",
   "agents/lore-reviewer.md",
-  // hooks (5 .mjs + 4 .sh gates)
+  // hooks (5 .mjs + 4 .sh gates + 1 shared lib module)
   "hooks/session-start-resume.mjs",
   "hooks/stop-doc-sync.mjs",
   "hooks/subagent-context.mjs",
@@ -77,6 +77,7 @@ const DECLARED_FILES = [
   "hooks/lore-gate-g2-spec-promote.sh",
   "hooks/lore-gate-g3-plan-promote.sh",
   "hooks/lore-gate-g4-task-claim.sh",
+  "hooks/lib/turn-state.mjs",
   // project (4 .sh gates + pre-push + tree.yaml template)
   "project/g1-spec-create.sh",
   "project/g2-spec-promote.sh",
@@ -86,6 +87,7 @@ const DECLARED_FILES = [
   "project/lore.tree.yaml.template",
   // governance
   "governance/corpus-workflow.md",
+  "governance/seat-briefing.md",
 ] as const;
 
 const SKILL_MD_FILES = DECLARED_FILES.filter((f) => f.endsWith("SKILL.md"));
@@ -96,6 +98,10 @@ const DECLARED_TOP_LEVEL_DIRS = ["skills", "agents", "hooks", "project", "govern
 
 const GOVERNANCE_REL = "governance/corpus-workflow.md";
 const GOVERNANCE_PATH = join(ASSETS_ROOT, GOVERNANCE_REL);
+
+const SEAT_BRIEFING_REL = "governance/seat-briefing.md";
+const SEAT_BRIEFING_PATH = join(ASSETS_ROOT, SEAT_BRIEFING_REL);
+const SEAT_BRIEFING_PLACEHOLDERS = ["{{ACTOR}}", "{{BRANCH}}", "{{MAIN_CHECKOUT}}"] as const;
 
 const PERSONAL_MARKERS = ["/Users/", "agent-browser", "zheng@", "humanity.org"];
 const CJK_RANGE = /[一-鿿]/;
@@ -233,6 +239,36 @@ describe("assets-ssot — BOUNDARY", () => {
       expect(files.length).toBeGreaterThan(0);
     });
   }
+});
+
+// ─── BOUNDARY — seat-briefing.md tag pairing + placeholder set (SPEC-047) ─────
+
+describe("assets-ssot — BOUNDARY (seat-briefing.md, SPEC-047)", () => {
+  it("seat-briefing.md contains exactly one <session-seat> open tag", () => {
+    const content = readRequiredFile(SEAT_BRIEFING_PATH);
+    const opens = content.match(/<session-seat>/g) ?? [];
+    expect(opens.length).toBe(1);
+  });
+
+  it("seat-briefing.md contains exactly one </session-seat> close tag", () => {
+    const content = readRequiredFile(SEAT_BRIEFING_PATH);
+    const closes = content.match(/<\/session-seat>/g) ?? [];
+    expect(closes.length).toBe(1);
+  });
+
+  it("the <session-seat> open tag appears before the </session-seat> close tag", () => {
+    const content = readRequiredFile(SEAT_BRIEFING_PATH);
+    const openIdx = content.indexOf("<session-seat>");
+    const closeIdx = content.indexOf("</session-seat>");
+    expect(openIdx).toBeGreaterThanOrEqual(0);
+    expect(closeIdx).toBeGreaterThan(openIdx);
+  });
+
+  it.each(SEAT_BRIEFING_PLACEHOLDERS)("seat-briefing.md references the %s placeholder at least once", (placeholder) => {
+    const content = readRequiredFile(SEAT_BRIEFING_PATH);
+    const count = content.split(placeholder).length - 1;
+    expect(count).toBeGreaterThanOrEqual(1);
+  });
 });
 
 // ─── ERROR — read failures surface, never swallowed ───────────────────────────
