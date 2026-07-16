@@ -1,0 +1,711 @@
+/**
+ * SetupService — global-machine installer for `lore setup` (SPEC-046 §Design,
+ * §Scope "P1 installer"). Wires the vendored `assets/` SSOT tree (skills,
+ * agents, hooks, governance snippet) plus a `settings.json` hook merge and a
+ * `claude mcp` registration into an existing Claude Code install directory
+ * ("target dir", conventionally `~/.claude` in production — NEVER read from
+ * `homedir()`/env by this module, see invariants below).
+ *
+ * Public surface:
+ *   - SetupService — stateless, constructor-injected ports (AssetSource,
+ *     SetupFsReader, SetupFsWriter, McpRegistrar)
+ *       .planInstall(opts)  — dry-run; reader-only, zero writer-port calls
+ *       .install(opts, now?) — materializes the payload, manifest-authoritative
+ *       .uninstall(opts, now?) — reverses STRICTLY via the manifest
+ *   - AssetSource / SetupFsReader / SetupFsWriter / McpRegistrar — the four
+ *     injected ports (real implementations are a DOWNSTREAM task; this module
+ *     only depends on the interfaces + whatever fakes its own test suite builds)
+ *   - SetupReceipt — the outcome shape returned by both `install` and `uninstall`
+ *   - assertSafeTargetDir(targetDir) — the test-pollution safety guard
+ *
+ * Invariants:
+ *   - `targetDir` is a RESOLVED string parameter on every method — this module
+ *     NEVER calls `os.homedir()` or reads `process.env.CLAUDE_CONFIG_DIR`
+ *     itself; that resolution (`--claude-dir` > `$CLAUDE_CONFIG_DIR` >
+ *     `homedir()`) lives in the CLI adapter (SPEC-046 §Design).
+ *   - `assertSafeTargetDir` REFUSES a `targetDir` that is or is inside the
+ *     REAL `os.homedir()/.claude` unless `process.env.LORE_SETUP_ALLOW_REAL
+ *     === "1"` (the production escape hatch — a real `lore setup` run DOES
+ *     target `~/.claude`). Every public method calls this FIRST, before any
+ *     port call — this is this task's dedicated test-pollution guard (mirrors
+ *     the 2026-07-07 "never write to the repo's own corpus from a test" rule
+ *     for this service's own real-world target).
+ *   - `planInstall` holds `this.writer` on the SAME instance as `install`/
+ *     `uninstall` (one constructor, four ports — the ports are NOT split
+ *     across separate classes) — the "planInstall receives reader only"
+ *     guarantee is an IMPLEMENTATION DISCIPLINE (planInstall's body never
+ *     references `this.writer`/`this.mcpRegistrar`), verified at runtime by
+ *     this module's own test suite via a poisoned writer fake that throws on
+ *     any method call (SPEC-046 invariant I4).
+ *   - `install` plans the ENTIRE run (asset load, settings.json merge,
+ *     manifest read, on-disk sha probing, the pure `planInstall` decision)
+ *     BEFORE issuing a single `SetupFsWriter` call — a `mergeSettings` failure
+ *     (malformed existing `settings.json`) aborts with ZERO writer calls
+ *     (invariant I1). The manifest is written LAST, and only when its
+ *     computed content differs from the on-disk manifest (a fully
+ *     byte-identical re-run therefore issues ZERO writer calls at all —
+ *     invariant I2).
+ *   - Every `SetupEntry.sha256` is computed by THIS service over the FINAL
+ *     content string handed to `SetupFsWriter.write` (post-merge for a
+ *     `settings-hook` entry) — never trusted from the raw `AssetPayload`
+ *     (invariant I5). `sha256Hex` (`node:crypto`) is fine to use here — only
+ *     `@lore/core` must stay browser-safe, not this service package.
+ *   - Fault injection: the backup+write+removal loop is wrapped in ONE
+ *     try/catch. A thrown `SetupFsWriter` call (e.g. write #2 of 3) stops the
+ *     loop immediately (later entries are NEVER attempted) and aborts with
+ *     `STORE_ERROR` naming exactly what committed before the failure — the
+ *     manifest is provably never reached in this path (manifest-last
+ *     ordering). A subsequent `install()` call against the same target
+ *     re-plans from the current (partial) on-disk state and converges
+ *     (invariant I2's general form).
+ *   - `uninstall` reverses STRICTLY via the manifest (no other source of
+ *     truth) — for each tracked non-mcp entry it looks for a backup at
+ *     `<targetDir>/.lore-backups/<entry.written_at>/<entry.path>` (the
+ *     `written_at` timestamp doubles as the backup-run directory key, since
+ *     `install` uses ONE `now()` value for both the backup directory name and
+ *     every entry it writes that run — no separate index/listing needed).
+ *     A found backup is restored byte-identically; its absence means the
+ *     entry was created fresh by lore (nothing to restore), so it is simply
+ *     removed. The whole `.lore-backups` tree is removed once every entry is
+ *     processed, then the manifest itself is deleted LAST (mirrors install's
+ *     manifest-last discipline in reverse — the manifest stays valid/authoritative
+ *     until every other reversal has succeeded).
+ *   - No manifest at `targetDir` → `uninstall` fails loud (`VALIDATION_ERROR`,
+ *     "nothing to uninstall") rather than silently no-op'ing.
+ *   - MCP registration/de-registration failure is NEVER thrown and never
+ *     aborts the run — `SetupReceipt.mcp` records `"failed"` and the CALLER
+ *     (CLI adapter) is responsible for mapping that to a non-zero exit code;
+ *     every file-asset write still completes.
+ *
+ * Side-effect class: IO (delegates ALL of it to the four injected ports —
+ *   this class itself makes no direct `fs`/`child_process` calls).
+ *
+ * Source: SPEC-046 §Design ("`service/setup-service.ts`"), §Scope, invariants I1–I5.
+ */
+
+import { createHash } from "node:crypto";
+import path from "node:path";
+import os from "node:os";
+
+import { err, ok } from "@lore/core";
+import type { Result, LoreError } from "@lore/core";
+import {
+  planInstall as computeInstallPlan,
+  setupManifestSchema,
+  mergeSettings,
+} from "@lore/core";
+import type {
+  AssetFile,
+  AssetPayload,
+  InstallPlan,
+  SetupEntry,
+  SetupManifest,
+  SettingsHookEntry,
+} from "@lore/core";
+
+// ─── Ports ───────────────────────────────────────────────────────────────────
+
+/**
+ * Loads the in-memory asset set a `lore setup` run intends to install. The P1
+ * production implementation reads the repo's vendored `assets/` tree
+ * (downstream task); a P3 implementation could swap to a binary-embedded
+ * payload WITHOUT this service changing at all.
+ *
+ * @invariant For a `kind: "settings-hook"` entry, `content` is a
+ *   JSON-serialized `SettingsHookEntry[]` (the desired lore-managed hook
+ *   registrations) — NOT the raw `settings.json` text. `SetupService` parses
+ *   this and merges it against the ON-DISK `settings.json` via `mergeSettings`;
+ *   see {@link SetupService}'s module doc.
+ */
+export interface AssetSource {
+  load(): Promise<Result<AssetPayload, LoreError>>;
+}
+
+/**
+ * Read-only filesystem view. `planInstall` is constructed to use ONLY this
+ * port (see {@link SetupService} module invariants) — it structurally cannot
+ * write, by discipline plus a runtime-verified test double.
+ */
+export interface SetupFsReader {
+  /** Reads full file content at an ABSOLUTE path. Returns `null` when the file does not exist. */
+  read(path: string): Promise<string | null>;
+  /**
+   * Classifies an ABSOLUTE path. `sha256` MUST be present whenever
+   * `exists: true` — a caller that cannot compute it should NOT report
+   * `exists: true` (`SetupService` fails loud rather than guessing when this
+   * contract is violated).
+   */
+  stat(path: string): Promise<{ exists: boolean; sha256?: string }>;
+}
+
+/**
+ * Write-side filesystem port. Only `install`/`uninstall` hold a reference to
+ * this — `planInstall` never does (see module invariants). The REAL
+ * implementation (a downstream task) owns write ATOMICITY (tmp file + rename)
+ * — this interface makes no atomicity guarantee itself.
+ */
+export interface SetupFsWriter {
+  /** Writes `content` to an ABSOLUTE path, creating/replacing it. */
+  write(path: string, content: string, opts?: { executable?: boolean }): Promise<void>;
+  /** Creates a directory (and any missing parents) at an ABSOLUTE path. Idempotent. */
+  mkdir(path: string): Promise<void>;
+  /** Copies the file currently at ABSOLUTE `src` into ABSOLUTE directory `destDir`, preserving its basename. */
+  backup(src: string, destDir: string): Promise<void>;
+  /** Removes the file OR directory (recursively) at an ABSOLUTE path. A missing target is NOT an error. */
+  remove(path: string): Promise<void>;
+}
+
+/**
+ * Registers/de-registers the `lore` MCP server with the `claude` CLI at user
+ * scope. The production implementation shells `claude mcp add`/`claude mcp
+ * remove` (argv built by `@lore/core`'s `buildMcpAddArgs`/`buildMcpRemoveArgs`)
+ * — a downstream task, not this one.
+ */
+export interface McpRegistrar {
+  add(binPath: string): Promise<Result<void, LoreError>>;
+  remove(): Promise<Result<void, LoreError>>;
+}
+
+// ─── Public Types ────────────────────────────────────────────────────────────
+
+/**
+ * Outcome of one {@link SetupService.install} or {@link SetupService.uninstall}
+ * call. The SAME shape serves both directions with slightly different field
+ * meanings (documented per-field below) — a deliberate reuse per SPEC-046's
+ * pinned contract, rather than two near-identical result types.
+ */
+export interface SetupReceipt {
+  /**
+   * install(): manifest entries actually written this run (excludes the mcp
+   * entry — see `mcp` below). uninstall(): always `[]` (nothing is "written"
+   * in the asset sense during a reversal).
+   */
+  written: SetupEntry[];
+  /**
+   * install(): paths already byte-identical to their intended final content —
+   * no write needed. uninstall(): paths removed outright because no backup
+   * existed for them (they were created fresh by a prior `install`, so there
+   * was nothing to restore).
+   */
+  skipped: string[];
+  /**
+   * install(): paths backed up before being overwritten, this run.
+   * uninstall(): paths successfully restored FROM a backup.
+   */
+  backups: string[];
+  /**
+   * Outcome of the MCP registrar step this run: `"registered"` — the add/remove
+   * call succeeded; `"failed"` — it was attempted and threw/returned `err`
+   * (file-asset work still completed; the CLI adapter maps this to a non-zero
+   * exit); `"skipped"` — uninstall found no tracked `mcp` manifest entry, so no
+   * de-registration was attempted.
+   */
+  mcp: "registered" | "skipped" | "failed";
+  /** Absolute path to `.lore-setup-manifest.json` under the target dir. */
+  manifestPath: string;
+}
+
+// ─── Constants ───────────────────────────────────────────────────────────────
+
+const MANIFEST_FILENAME = ".lore-setup-manifest.json";
+const MANIFEST_VERSION = "1";
+const BACKUPS_DIRNAME = ".lore-backups";
+/** Synthetic manifest path for the `mcp` kind entry — there is no real file behind it. */
+const MCP_ENTRY_PATH = "mcp:lore";
+
+const defaultNow = (): string => new Date().toISOString();
+
+// ─── Test-pollution safety guard ────────────────────────────────────────────
+
+/**
+ * Refuses a `targetDir` that is (or is nested inside) the REAL
+ * `os.homedir()/.claude` directory of the executing user, unless
+ * `process.env.LORE_SETUP_ALLOW_REAL === "1"` (the production escape hatch —
+ * a genuine `lore setup` run targets exactly this directory). Every
+ * {@link SetupService} public method calls this first.
+ *
+ * @param targetDir - Candidate target directory (resolved, per this module's
+ *   "targetDir is a RESOLVED string param" invariant).
+ * @returns `ok(undefined)` when safe to proceed, else `err(VALIDATION_ERROR)`.
+ * @throws Never.
+ *
+ * @example
+ * assertSafeTargetDir("/tmp/some-mkdtemp-dir"); // => ok(undefined)
+ * assertSafeTargetDir(`${os.homedir()}/.claude`); // => err({code: "VALIDATION_ERROR", ...})
+ */
+export function assertSafeTargetDir(targetDir: string): Result<void, LoreError> {
+  if (process.env["LORE_SETUP_ALLOW_REAL"] === "1") return ok(undefined);
+
+  const realClaudeDir = path.resolve(os.homedir(), ".claude");
+  const resolved = path.resolve(targetDir);
+  const isRealOrNested = resolved === realClaudeDir || resolved.startsWith(`${realClaudeDir}${path.sep}`);
+
+  if (isRealOrNested) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "targetDir",
+      message:
+        `refusing to target the real "${realClaudeDir}" — this looks like a test/dev run. ` +
+        `Set LORE_SETUP_ALLOW_REAL=1 to perform a genuine install against the real Claude Code config dir.`,
+      value: targetDir,
+    });
+  }
+
+  return ok(undefined);
+}
+
+/** Hex sha256 of a UTF-8 string — the single hashing site every `SetupEntry.sha256` in this service flows through. */
+function sha256Hex(content: string): string {
+  return createHash("sha256").update(content, "utf8").digest("hex");
+}
+
+// ─── SetupService ────────────────────────────────────────────────────────────
+
+/**
+ * Global-machine installer service — see the module-level doc comment at the
+ * top of this file for the full contract, invariants, and invariant-to-test
+ * mapping (I1-I5). Four constructor-injected ports, three public methods
+ * (`planInstall`/`install`/`uninstall`), zero direct `fs`/`child_process` use.
+ */
+export class SetupService {
+  constructor(
+    private readonly assetSource: AssetSource,
+    private readonly reader: SetupFsReader,
+    private readonly writer: SetupFsWriter,
+    private readonly mcpRegistrar: McpRegistrar,
+  ) {}
+
+  /**
+   * Dry-run planner — computes what `install()` WOULD do, touching only
+   * `this.assetSource` and `this.reader` (never `this.writer`/`this.mcpRegistrar`
+   * — invariant I4).
+   *
+   * @param opts - `{targetDir}` (resolved, absolute).
+   * @returns The pure `InstallPlan` (`@lore/core`'s `writes`/`skips`/`backups`/`removals`).
+   * @throws VALIDATION_ERROR (unsafe targetDir / malformed settings.json / malformed manifest)
+   */
+  async planInstall(opts: { targetDir: string }): Promise<Result<InstallPlan, LoreError>> {
+    const guard = assertSafeTargetDir(opts.targetDir);
+    if (!guard.ok) return guard;
+
+    const payloadResult = await this.assetSource.load();
+    if (!payloadResult.ok) return payloadResult;
+
+    const resolvedResult = await resolvePayload(opts.targetDir, payloadResult.value, this.reader);
+    if (!resolvedResult.ok) return resolvedResult;
+
+    const manifestPath = path.join(opts.targetDir, MANIFEST_FILENAME);
+    const manifestRaw = await this.reader.read(manifestPath);
+    const currentResult = parseManifestRaw(manifestRaw);
+    if (!currentResult.ok) return currentResult;
+
+    const existingFilesResult = await buildExistingFilesMap(opts.targetDir, resolvedResult.value, this.reader);
+    if (!existingFilesResult.ok) return existingFilesResult;
+
+    return ok(
+      computeInstallPlan(stripMcpEntries(currentResult.value), resolvedResult.value, existingFilesResult.value),
+    );
+  }
+
+  /**
+   * Materializes the asset payload into `targetDir`: plans the ENTIRE run
+   * first (zero writer calls yet), then backs up + writes + removes via
+   * `this.writer`, registers the MCP server, and — only if its content
+   * actually differs from what's on disk — writes the authoritative manifest
+   * LAST.
+   *
+   * @param opts - `{targetDir, binPath}` — `binPath` is passed straight to
+   *   `McpRegistrar.add`.
+   * @param now - Time seam (mirrors the codebase-wide `now: () => string`
+   *   convention, e.g. `DriftCheckService`/`PhaseService`) — resolved ONCE per
+   *   call; also doubles as the backup-run directory key `uninstall` later
+   *   derives from each entry's `written_at` (see module invariants).
+   * @returns `SetupReceipt` on success (a partial one is NEVER returned — a
+   *   mid-write failure is always an `err`, see below).
+   * @throws VALIDATION_ERROR (unsafe targetDir / malformed settings.json /
+   *   malformed manifest / computed manifest fails its own schema),
+   *   STORE_ERROR (asset load failure; a writer-port call threw mid-run — the
+   *   message names every path committed before the failure and confirms the
+   *   manifest was NOT written; the manifest write itself failed)
+   */
+  async install(
+    opts: { targetDir: string; binPath: string },
+    now: () => string = defaultNow,
+  ): Promise<Result<SetupReceipt, LoreError>> {
+    const guard = assertSafeTargetDir(opts.targetDir);
+    if (!guard.ok) return guard;
+
+    const nowIso = now();
+
+    // ── Plan the ENTIRE run before the first writer-port call ──────────────
+    const payloadResult = await this.assetSource.load();
+    if (!payloadResult.ok) return payloadResult;
+
+    const resolvedResult = await resolvePayload(opts.targetDir, payloadResult.value, this.reader);
+    if (!resolvedResult.ok) return resolvedResult;
+    const resolvedPayload = resolvedResult.value;
+
+    const manifestPath = path.join(opts.targetDir, MANIFEST_FILENAME);
+    const manifestRaw = await this.reader.read(manifestPath);
+    const currentResult = parseManifestRaw(manifestRaw);
+    if (!currentResult.ok) return currentResult;
+    const current = currentResult.value;
+
+    const existingFilesResult = await buildExistingFilesMap(opts.targetDir, resolvedPayload, this.reader);
+    if (!existingFilesResult.ok) return existingFilesResult;
+
+    const plan = computeInstallPlan(stripMcpEntries(current), resolvedPayload, existingFilesResult.value);
+
+    // ── Write phase — the first point ANY SetupFsWriter call may occur ─────
+    const committedBackups: string[] = [];
+    const committedWrites: string[] = [];
+    const committedRemovals: string[] = [];
+
+    try {
+      for (const backupPath of plan.backups) {
+        const srcFull = path.join(opts.targetDir, backupPath);
+        const backupDir = path.dirname(path.join(opts.targetDir, BACKUPS_DIRNAME, nowIso, backupPath));
+        await this.writer.mkdir(backupDir);
+        await this.writer.backup(srcFull, backupDir);
+        committedBackups.push(backupPath);
+      }
+
+      for (const write of plan.writes) {
+        const fullPath = path.join(opts.targetDir, write.path);
+        await this.writer.mkdir(path.dirname(fullPath));
+        await this.writer.write(fullPath, write.content, write.kind === "hook" ? { executable: true } : undefined);
+        committedWrites.push(write.path);
+      }
+
+      for (const removedPath of plan.removals) {
+        await this.writer.remove(path.join(opts.targetDir, removedPath));
+        committedRemovals.push(removedPath);
+      }
+    } catch (cause) {
+      return err(describeWriterFailure("install", cause, { committedBackups, committedWrites, committedRemovals }));
+    }
+
+    // ── MCP registration (never aborts the run — see module invariants) ────
+    const previousMcpEntry = current?.entries.find((e) => e.kind === "mcp");
+    const mcpResult = await this.mcpRegistrar.add(opts.binPath);
+    let mcp: SetupReceipt["mcp"];
+    let mcpEntry: SetupEntry | undefined;
+    if (mcpResult.ok) {
+      mcp = "registered";
+      const shaOfBin = sha256Hex(opts.binPath);
+      const writtenAt = previousMcpEntry?.sha256 === shaOfBin ? previousMcpEntry.written_at : nowIso;
+      mcpEntry = { path: MCP_ENTRY_PATH, kind: "mcp", sha256: shaOfBin, written_at: writtenAt };
+    } else {
+      mcp = "failed";
+      mcpEntry = previousMcpEntry;
+    }
+
+    // ── Manifest — authoritative, written LAST, and only if it changed ─────
+    const previousEntryByPath = new Map((current?.entries ?? []).map((e) => [e.path, e] as const));
+    const writeByPath = new Map(plan.writes.map((w) => [w.path, w] as const));
+
+    const fileEntries: SetupEntry[] = resolvedPayload.files.map((file) => {
+      const write = writeByPath.get(file.path);
+      if (write !== undefined) {
+        return { path: file.path, kind: file.kind, sha256: write.sha256, written_at: nowIso };
+      }
+      const prev = previousEntryByPath.get(file.path);
+      return { path: file.path, kind: file.kind, sha256: file.sha256, written_at: prev?.written_at ?? nowIso };
+    });
+
+    const manifestEntries = mcpEntry !== undefined ? [...fileEntries, mcpEntry] : fileEntries;
+    const manifest: SetupManifest = { version: MANIFEST_VERSION, claude_dir: opts.targetDir, entries: manifestEntries };
+
+    const manifestValidation = setupManifestSchema.safeParse(manifest);
+    if (!manifestValidation.success) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "manifest",
+        message: `computed manifest failed schema validation: ${manifestValidation.error.message}`,
+        value: manifest,
+      });
+    }
+
+    const manifestContent = `${JSON.stringify(manifest, null, 2)}\n`;
+    if (manifestContent !== (manifestRaw ?? "")) {
+      try {
+        await this.writer.mkdir(path.dirname(manifestPath));
+        await this.writer.write(manifestPath, manifestContent);
+      } catch (cause) {
+        const reason = describeCaught(cause);
+        return err({
+          code: "STORE_ERROR",
+          message:
+            `lore setup install: all ${committedWrites.length} planned asset write(s) succeeded, but writing ` +
+            `the manifest at "${manifestPath}" failed: ${reason}. The install is NOT yet authoritative — re-run to retry.`,
+          ...(cause instanceof Error ? { cause } : {}),
+        });
+      }
+    }
+
+    return ok({
+      written: fileEntries.filter((e) => writeByPath.has(e.path)),
+      skipped: plan.skips.map((s) => s.path),
+      backups: committedBackups,
+      mcp,
+      manifestPath,
+    });
+  }
+
+  /**
+   * Reverses a prior `install()` STRICTLY via the manifest — no other source
+   * of truth is consulted. See module invariants for the backup-lookup
+   * derivation (`entry.written_at` as the backup-run directory key) and the
+   * manifest-deleted-last ordering.
+   *
+   * @param opts - `{targetDir}`.
+   * @param _now - Time seam (unused directly by uninstall's own logic today —
+   *   accepted for signature symmetry with `install` and future extension;
+   *   documented rather than silently dropped).
+   * @returns `SetupReceipt` (see per-field uninstall semantics on
+   *   {@link SetupReceipt}).
+   * @throws VALIDATION_ERROR (unsafe targetDir; no manifest found — nothing to
+   *   uninstall; malformed manifest), STORE_ERROR (a writer-port call threw
+   *   mid-run, before the manifest was reached; the final manifest-delete call
+   *   itself threw)
+   */
+  async uninstall(
+    opts: { targetDir: string },
+    _now: () => string = defaultNow,
+  ): Promise<Result<SetupReceipt, LoreError>> {
+    const guard = assertSafeTargetDir(opts.targetDir);
+    if (!guard.ok) return guard;
+
+    const manifestPath = path.join(opts.targetDir, MANIFEST_FILENAME);
+    const manifestRaw = await this.reader.read(manifestPath);
+    if (manifestRaw === null) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "manifest",
+        message: `no setup manifest found at "${manifestPath}" — nothing to uninstall`,
+        value: manifestPath,
+      });
+    }
+
+    const currentResult = parseManifestRaw(manifestRaw);
+    if (!currentResult.ok) return currentResult;
+    // manifestRaw !== null guarantees parseManifestRaw attempted a real parse, never the null->null shortcut.
+    const current = currentResult.value as SetupManifest;
+
+    const restoredPaths: string[] = [];
+    const removedPaths: string[] = [];
+
+    try {
+      for (const entry of current.entries) {
+        if (entry.kind === "mcp") continue; // handled separately below — no file behind this entry
+        const fullPath = path.join(opts.targetDir, entry.path);
+        const backupPath = path.join(opts.targetDir, BACKUPS_DIRNAME, entry.written_at, entry.path);
+        const backupStat = await this.reader.stat(backupPath);
+
+        if (backupStat.exists) {
+          const backupContent = await this.reader.read(backupPath);
+          if (backupContent === null) {
+            throw new Error(`backup at "${backupPath}" reported exists but could not be read`);
+          }
+          await this.writer.mkdir(path.dirname(fullPath));
+          await this.writer.write(fullPath, backupContent);
+          restoredPaths.push(entry.path);
+        } else {
+          await this.writer.remove(fullPath);
+          removedPaths.push(entry.path);
+        }
+      }
+
+      await this.writer.remove(path.join(opts.targetDir, BACKUPS_DIRNAME));
+    } catch (cause) {
+      return err(describeWriterFailure("uninstall", cause, { restoredPaths, removedPaths }));
+    }
+
+    const mcpEntry = current.entries.find((e) => e.kind === "mcp");
+    let mcp: SetupReceipt["mcp"];
+    if (mcpEntry === undefined) {
+      mcp = "skipped";
+    } else {
+      const mcpResult = await this.mcpRegistrar.remove();
+      mcp = mcpResult.ok ? "registered" : "failed";
+    }
+
+    try {
+      await this.writer.remove(manifestPath);
+    } catch (cause) {
+      const reason = describeCaught(cause);
+      return err({
+        code: "STORE_ERROR",
+        message:
+          `lore setup uninstall: file/mcp reversal completed, but removing the manifest at "${manifestPath}" ` +
+          `failed: ${reason}. Re-run --uninstall to retry manifest removal.`,
+        ...(cause instanceof Error ? { cause } : {}),
+      });
+    }
+
+    return ok({
+      written: [],
+      skipped: removedPaths,
+      backups: restoredPaths,
+      mcp,
+      manifestPath,
+    });
+  }
+}
+
+// ─── Module-scope Helpers ────────────────────────────────────────────────────
+
+/** Renders any thrown value as a diagnostic string (never re-throws). Mirrors `drift-check-service.ts`'s `describeCaught`. */
+function describeCaught(caught: unknown): string {
+  return caught instanceof Error ? caught.message : String(caught);
+}
+
+/** Builds the `STORE_ERROR` for a mid-run writer-port throw, naming exactly what committed before the failure. */
+function describeWriterFailure(
+  phase: "install" | "uninstall",
+  cause: unknown,
+  committed: Record<string, string[]>,
+): LoreError {
+  const reason = describeCaught(cause);
+  const parts = Object.entries(committed)
+    .map(([label, paths]) => `${label}: [${paths.join(", ")}]`)
+    .join("; ");
+  return {
+    code: "STORE_ERROR",
+    message:
+      `lore setup ${phase} aborted mid-run: ${reason}. Committed before failure — ${parts}. ` +
+      `The manifest was NOT ${phase === "install" ? "written" : "removed"} — this run's changes are NOT yet authoritative.`,
+    ...(cause instanceof Error ? { cause } : {}),
+  };
+}
+
+/**
+ * Resolves the FINAL content + sha256 for every payload file: a `kind:
+ * "settings-hook"` entry's `content` is parsed as `SettingsHookEntry[]` and
+ * merged (via `@lore/core`'s `mergeSettings`) against the target's ON-DISK
+ * `settings.json` (read through `reader`); every other kind's `content` is
+ * used verbatim. `sha256` is ALWAYS recomputed here over the resulting
+ * content (invariant I5) — the raw `AssetPayload`'s own `sha256` field is
+ * never trusted.
+ */
+async function resolvePayload(
+  targetDir: string,
+  payload: AssetPayload,
+  reader: SetupFsReader,
+): Promise<Result<AssetPayload, LoreError>> {
+  const resolvedFiles: AssetFile[] = [];
+
+  for (const file of payload.files) {
+    if (file.kind === "settings-hook") {
+      let loreEntries: SettingsHookEntry[];
+      try {
+        loreEntries = JSON.parse(file.content) as SettingsHookEntry[];
+      } catch (cause) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: `asset:${file.path}`,
+          message: `settings-hook asset "${file.path}" content is not a valid JSON hook-entry array: ${describeCaught(cause)}`,
+          value: file.content.slice(0, 200),
+        });
+      }
+
+      const existingRaw = await reader.read(path.join(targetDir, file.path));
+      const mergeResult = mergeSettings({ existingRaw, loreEntries });
+      if (!mergeResult.ok) return mergeResult;
+
+      const mergedContent = `${JSON.stringify(mergeResult.value.merged, null, 2)}\n`;
+      resolvedFiles.push({
+        path: file.path,
+        kind: file.kind,
+        content: mergedContent,
+        sha256: sha256Hex(mergedContent),
+      });
+      continue;
+    }
+
+    resolvedFiles.push({ ...file, sha256: sha256Hex(file.content) });
+  }
+
+  return ok({ files: resolvedFiles });
+}
+
+/**
+ * Strips the synthetic `kind: "mcp"` manifest entry (if any) before handing a
+ * manifest to `@lore/core`'s `computeInstallPlan`. That pure function's
+ * `removals` computation is "tracked in `current` but absent from `payload`" —
+ * the mcp entry is ALWAYS absent from `AssetPayload.files` (it isn't a file at
+ * all), so passing it through unfiltered would make every install() run
+ * spuriously call `writer.remove("mcp:lore")`, breaking invariant I2 (a
+ * byte-identical re-run must fire ZERO writer calls). The mcp entry's own
+ * lifecycle is handled entirely separately, in `install`/`uninstall`.
+ */
+function stripMcpEntries(manifest: SetupManifest | null): SetupManifest | null {
+  if (manifest === null) return null;
+  return { ...manifest, entries: manifest.entries.filter((e) => e.kind !== "mcp") };
+}
+
+/**
+ * Parses+validates a manifest raw string (or the "no manifest yet" `null`
+ * shortcut) into `SetupManifest | null`. Shared by `planInstall`/`install`
+ * (where `null` on-disk means "first-ever install") and re-derived
+ * independently by `uninstall` (which has already ruled out `null` by that
+ * point, but reuses this for the malformed-JSON/schema-violation path).
+ */
+function parseManifestRaw(manifestRaw: string | null): Result<SetupManifest | null, LoreError> {
+  if (manifestRaw === null) return ok(null);
+
+  let parsedJson: unknown;
+  try {
+    parsedJson = JSON.parse(manifestRaw);
+  } catch (cause) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "manifest",
+      message: `existing setup manifest is not valid JSON: ${describeCaught(cause)}`,
+      value: manifestRaw.slice(0, 200),
+    });
+  }
+
+  const parsed = setupManifestSchema.safeParse(parsedJson);
+  if (!parsed.success) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "manifest",
+      message: `existing setup manifest failed schema validation: ${parsed.error.message}`,
+      value: parsedJson,
+    });
+  }
+
+  return ok(parsed.data);
+}
+
+/**
+ * Builds the `path → on-disk sha256` map `@lore/core`'s pure `planInstall`
+ * needs, via `reader.stat` — one call per resolved payload file. A path
+ * reported `exists: true` with no `sha256` is a `SetupFsReader` contract
+ * violation; this fails loud rather than guessing (guessing "not on disk"
+ * would silently skip backing up a REAL file before overwriting it).
+ */
+async function buildExistingFilesMap(
+  targetDir: string,
+  payload: AssetPayload,
+  reader: SetupFsReader,
+): Promise<Result<Map<string, string>, LoreError>> {
+  const existingFiles = new Map<string, string>();
+
+  for (const file of payload.files) {
+    const statResult = await reader.stat(path.join(targetDir, file.path));
+    if (!statResult.exists) continue;
+    if (statResult.sha256 === undefined) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: `stat:${file.path}`,
+        message: `SetupFsReader.stat reported exists:true for "${file.path}" with no sha256 — contract violation`,
+        value: statResult,
+      });
+    }
+    existingFiles.set(file.path, statResult.sha256);
+  }
+
+  return ok(existingFiles);
+}
