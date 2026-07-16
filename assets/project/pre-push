@@ -1,0 +1,15 @@
+#!/bin/sh
+# Corpus conformance gate (lore-doctor recurrence prevention, 2026-07-14).
+# Blocks push when tree structure or code anchors drift from the corpus blueprint.
+# Fail-open contract (same as g1-g4 gate shims): no lore binary / no .lore -> allow.
+# Bypass: git push --no-verify
+command -v lore >/dev/null 2>&1 || exit 0
+[ -d "$(git rev-parse --show-toplevel)/.lore" ] || exit 0
+export CLAUDECODE=1
+lore status --check-tree --check-drift
+code=$?
+if [ "$code" -ne 0 ]; then
+  echo "pre-push: lore corpus check failed (exit $code) — fix drift (lore status --check-tree --check-drift) or push with --no-verify" >&2
+  exit 1
+fi
+exit 0
