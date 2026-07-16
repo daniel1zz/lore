@@ -2,14 +2,14 @@
 
 ## Purpose
 
-citty-based CLI adapter. 30 subcommands, each in its own `commands/<name>.ts`, lazily imported by `index.ts`. Thin adapter only — no business logic; every command resolves args, calls a service via the App composition root, formats the result, and exits.
+citty-based CLI adapter. 31 subcommands, each in its own `commands/<name>.ts`, lazily imported by `index.ts`. Thin adapter only — no business logic; every command resolves args, calls a service via the App composition root, formats the result, and exits.
 
 ## Key Invariants
 
 - **No business logic.** Commands resolve args → call `app.<service>.<method>()` → render output → map error to exit code. New rules belong in `packages/lore/src/service`, not here.
 - **DB discovery + App construction live in `loader.ts`, not `utils.ts`.** `loader.ts` imports `bun:sqlite` (via `app.ts`); `utils.ts` is vitest-reachable and must stay sqlite-free. Commands that need an App import `loadLoreApp` from `loader.ts`; commands that only format errors import from `utils.ts`.
 - **`loadLoreApp()` always returns `App` (never `Result<App>`).** It strips `config.sync` before passing to `createApp`, so corpus-level commands never hit the TursoStore-failure path. Sync-aware commands (`lore sync ...`) manage TursoStore themselves.
-- **`init` and `sync` commands bypass `loadLoreApp`** — `init` runs before a DB exists; `sync` manages TursoStore directly. Document the exemption when adding a new bootstrap-stage command.
+- **`init`, `sync`, and `setup` commands bypass `loadLoreApp`** — `init` runs before a DB exists; `sync` manages TursoStore directly; `setup` (SPEC-046) targets `~/.claude`/a repo BEFORE any corpus exists (its `--project` path bootstraps the corpus itself via `flows/init-corpus.ts`). Document the exemption when adding a new bootstrap-stage command.
 - **Telemetry must be wired (AC-K3-1)** — `loadLoreApp` always parses `.lore/config.yaml` (failures fall back to `NoOpTelemetry`) so user telemetry preferences apply to every command. Don't call `createApp(dbPath)` directly from a command.
 - **Exit codes per SPEC-003 §5** — mapping is centralised in `utils.ts::exitCode`. `1 = STORE_ERROR / unknown`, `3 = DOC_NOT_FOUND | SLUG_NOT_FOUND`, `4 = validation / lifecycle / link errors`, `5 = STALE_VERSION | CLAIM_CONFLICT`, `6 = AI_PROVIDER_ERROR`, `7 = NEEDS_APPROVAL` (SPEC-039 §M2 — the `lore verify` command-provenance approval gate). The default branch uses an exhaustive `never` check; add new `LoreError` codes here too. `verify` (SPEC-039) additionally maps a NON-`LoreError` business outcome — "the service call succeeded but at least one executed AC's command exited non-zero" — to exit `1` too (the same "ran fine, an assertion failed" bucket `STORE_ERROR` already occupies), independently of `exitCode()`; see `verify.ts`'s header comment for the full rationale.
 - **Actor resolution for workflow commands (SPEC-025)** — `claim` / `release` / `evidence` resolve the acting identity via `utils.ts::resolveActor`: `--by` flag > `$LORE_ACTOR` env var > OS username. Never silently falls back to an empty string.
