@@ -156,10 +156,23 @@ export class GateEnforcer {
     // byte-identical to pre-SPEC-042 behavior.
     const fieldSuffix = failures.find((f) => f.field !== undefined)?.field;
     const field = fieldSuffix !== undefined ? `gate:${checkpoint}:${fieldSuffix}` : `gate:${checkpoint}`;
+    // reason: SPEC-049 D1 — a service-layer denial previously carried ONLY the
+    // machine discriminator (`Gate "task-claim" blocked: ANCHOR_OVERLAP`), while
+    // the SAME state probed via `lore gate <checkpoint>` renders the full
+    // feeding pack (conflicting task/holder/paths, a literal recovery command,
+    // the rule-doc slice) — so MCP/HTTP/direct-service callers got a bare
+    // discriminator with no recovery guidance, and only the PreToolUse-hook path
+    // (which shells out to `lore gate` separately) got the real pack. `feed` is
+    // the SAME pure callback `checkpointRegistry`/`lore gate` already calls —
+    // reusing it here means a service-layer denial and a `lore gate` denial for
+    // the identical `ctx` render byte-identical pack text, by construction, not
+    // by convention. A trailing newline (spec-promote's `feed` ends with one) is
+    // trimmed so the `\n\n`-separated pack block never grows a blank third line.
+    const feedText = checkpointDef.feed(ctx, failures).replace(/\n+$/, "");
     return err({
       code: "VALIDATION_ERROR",
       field,
-      message: `Gate "${checkpoint}" blocked: ${reasons.join(", ")}`,
+      message: `Gate "${checkpoint}" blocked: ${reasons.join(", ")}\n\n${feedText}`,
       value: reasons,
     });
   }
