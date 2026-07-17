@@ -54,11 +54,40 @@
  *     swap to a binary-embedded payload"). `RealAssetSource.load()` already
  *     fails loud (`err(STORE_ERROR)` naming the unreadable path) when
  *     `assetsRoot` doesn't exist — this module does not duplicate that check.
+ *   - **npm bin-symlink layout (SPEC-048 §Design D8)**: `resolveBinPath`/
+ *     `resolveAssetsRoot` realpath-resolve `ctx.execPath` (via
+ *     `resolveRealExecPath`, below) BEFORE deriving either path, in compiled
+ *     mode only. npm's `node_modules/.bin/<name>` bin-link entry is a
+ *     SYMLINK pointing into the package's own `node_modules/<pkg>/dist/lore`
+ *     (npm's documented `bin`-linking behavior) — deriving `assetsRoot` from
+ *     the UNRESOLVED symlink path would compute
+ *     `node_modules/.bin/../assets`, which does not exist; only the REAL
+ *     package directory (`node_modules/<pkg>/dist/../assets` →
+ *     `node_modules/<pkg>/assets`) has one. This is the ONE controlled `fs`
+ *     read in this otherwise-pure module (`resolveRealExecPath` is a
+ *     read-only `realpathSync` probe, try/catch-wrapped — a failure, e.g. a
+ *     dangling symlink or permission error, falls back to the ORIGINAL
+ *     unresolved `execPath`, i.e. the pre-hardening behavior, rather than
+ *     throwing; a resulting nonexistent `assetsRoot` is still caught loud by
+ *     `RealAssetSource.load()` as above, so the fallback never SILENTLY masks
+ *     a missing assets tree — it only defers to that pre-existing check).
+ *     This ONLY resolves a symlink chain rooted in the binary's own real
+ *     package directory — a compiled binary physically COPIED (not
+ *     symlinked) away from its package dir (e.g. `cp dist/lore
+ *     /usr/local/bin/lore`) still resolves `realpath` to that copied
+ *     location itself (there is no symlink to follow), whose sibling
+ *     `assets/` won't exist either; this generalizes the "copied away from
+ *     its repo checkout" bullet above to cover ANY out-of-package-tree copy,
+ *     symlinked or hard-copied, and remains unsupported until a P3
+ *     binary-embedded-assets payload.
  *
  * Source: SPEC-046 §Design ("targetDir resolution ... in the ADAPTER";
- *   "binPath resolution ... document your choice"), task AC-046-E.
+ *   "binPath resolution ... document your choice"), task AC-046-E;
+ *   SPEC-048 §Design D8 (npm bin-symlink realpath hardening), task
+ *   AC-048 setup-args realpath hardening.
  */
 
+import { realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 // ─── Flag validation ─────────────────────────────────────────────────────────
@@ -190,29 +219,65 @@ export interface SetupPathContext {
 }
 
 /**
+ * Realpath-resolves a compiled binary's `execPath` — npm's
+ * `node_modules/.bin/<name>` entry is a SYMLINK into the package's own
+ * `node_modules/<pkg>/dist/lore`, so the UNRESOLVED path derives a sibling
+ * `assets/` next to the `.bin/` directory (nonexistent) instead of next to
+ * the real package's `dist/` (SPEC-048 §Design D8). This is the ONE
+ * controlled `fs` read in this module — read-only, and try/catch-wrapped: on
+ * ANY failure (dangling symlink, permission error, ...) it falls back to the
+ * ORIGINAL unresolved `execPath` (the pre-hardening behavior) rather than
+ * throwing. This never masks a genuinely missing assets tree — a resulting
+ * nonexistent `assetsRoot` is still caught loud by `RealAssetSource.load()`
+ * (`err(STORE_ERROR)`), same as before this function existed.
+ *
+ * @param execPath - `process.execPath`, possibly a symlink (npm bin-link
+ *   layout) or already a real path (dev mode, or a directly-invoked binary).
+ * @returns The realpath-resolved absolute path, or `execPath` unchanged if
+ *   resolution fails.
+ * @throws Never.
+ */
+function resolveRealExecPath(execPath: string): string {
+  try {
+    return realpathSync(execPath);
+  } catch {
+    return execPath;
+  }
+}
+
+/**
  * Resolves the `binPath` registered with `claude mcp add` / passed to
- * `McpRegistrar.add`: the compiled binary's own path when running compiled,
- * else the repo's (possibly not-yet-built) `dist/lore` path in dev mode.
+ * `McpRegistrar.add`: the compiled binary's own REALPATH-resolved path when
+ * running compiled (see {@link resolveRealExecPath} — follows an npm
+ * bin-symlink through to the real package's binary), else the repo's
+ * (possibly not-yet-built) `dist/lore` path in dev mode.
  *
  * @param ctx - `{repoRoot, isCompiled, execPath}`.
  * @returns An absolute path.
  * @throws Never.
  */
 export function resolveBinPath(ctx: SetupPathContext): string {
-  return ctx.isCompiled ? ctx.execPath : join(ctx.repoRoot, "dist", "lore");
+  return ctx.isCompiled ? resolveRealExecPath(ctx.execPath) : join(ctx.repoRoot, "dist", "lore");
 }
 
 /**
  * Resolves the `assets/` tree root `RealAssetSource` reads from: in compiled
- * mode, the sibling of the compiled binary's parent directory (the P1
- * "`assets/` ships next to `dist/` at the repo root" convention); in dev
- * mode, `repoRoot`'s own `assets/` subdirectory.
+ * mode, the sibling of the REALPATH-resolved compiled binary's parent
+ * directory (see {@link resolveRealExecPath} — an npm `.bin/` symlink is
+ * followed through to the real package dir first, so this derives
+ * `<realpkgdir>/dist/../assets`, NOT `<.bin>/../assets`, SPEC-048 §Design
+ * D8); in dev mode, `repoRoot`'s own `assets/` subdirectory.
  *
  * @param ctx - `{repoRoot, isCompiled, execPath}`.
  * @returns An absolute path — may not exist on disk; `RealAssetSource.load()`
- *   fails loud in that case, this function does not probe the filesystem.
+ *   fails loud in that case, this function does not probe for existence
+ *   (only `resolveRealExecPath`'s internal realpath call touches the
+ *   filesystem, and only to follow a symlink chain, not to check existence
+ *   of the final `assetsRoot`).
  * @throws Never.
  */
 export function resolveAssetsRoot(ctx: SetupPathContext): string {
-  return ctx.isCompiled ? join(dirname(ctx.execPath), "..", "assets") : join(ctx.repoRoot, "assets");
+  return ctx.isCompiled
+    ? join(dirname(resolveRealExecPath(ctx.execPath)), "..", "assets")
+    : join(ctx.repoRoot, "assets");
 }
