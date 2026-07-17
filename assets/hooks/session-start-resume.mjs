@@ -2,14 +2,18 @@
 /**
  * session-start-resume.mjs — SessionStart hook.
  *
- * Phase C: workflow-core (global-instructions.md) — static-discipline
- *          injection for machines whose CLAUDE.md does not carry it; on a
- *          machine where the content was folded into ~/.claude/CLAUDE.md
- *          (2026-07-17 unification) the file is absent and this phase
- *          fail-opens to nothing. The former subagent-roster block was
- *          REMOVED the same day: the Claude Code harness now natively lists
- *          custom agents from ~/.claude/agents in the system prompt, so the
- *          hook copy was pure duplication (~1KB/session).
+ * Phase C: corpus-workflow governance injection — reads the `lore setup`-
+ *          installed snippet at <claude-dir>/governance/corpus-workflow.md
+ *          and injects it ONLY when the session's resolved corpus root has
+ *          .lore/ (computed after Phase D, which may redirect the root to a
+ *          worktree's main checkout). Unified 2026-07-17: the previous
+ *          source (prompt/global-instructions.md) was NEVER written by
+ *          `lore setup` (it installs under governance/) — the phase was a
+ *          reader without a writer, product-wide dead code. A machine whose
+ *          personal CLAUDE.md already carries the discipline simply has no
+ *          governance file installed → fail-open skip, no double injection.
+ *          The former subagent-roster block was REMOVED the same day: the
+ *          harness natively lists custom agents from ~/.claude/agents.
  * Phase D: linked-worktree seat detection (SPEC-047) — auto-injects the
  *          seat-briefing.md discipline block for sessions opened inside a
  *          linked git worktree of a lore-governed repo
@@ -38,8 +42,6 @@ import { homedir } from 'node:os';
 import { spawn, spawnSync } from 'node:child_process';
 import { resolveSessionId } from './lib/turn-state.mjs';
 
-const GLOBAL_PROMPT = process.env.CLAUDE_GLOBAL_PROMPT_OVERRIDE
-  || join(homedir(), '.claude', 'prompt', 'global-instructions.md');
 // No longer read for a roster (removed 2026-07-17 — harness lists agents
 // natively); retained because Phase D derives <claude-dir> as its dirname,
 // and CLAUDE_AGENTS_DIR_OVERRIDE keeps tests hermetic.
@@ -87,11 +89,10 @@ try {
 // ── Degradation tracker — critical component failures only ────────
 const degradations = [];
 
-// ── Phase C: workflow-core ─────────────────────────────────────────
+// Phase C is computed AFTER Phase D (it needs the resolved corpus root);
+// see "Phase C: corpus-workflow governance" below. Declared here so the
+// compose order (workflow first) is unaffected.
 let workflowBlock = '';
-if (existsSync(GLOBAL_PROMPT)) {
-  workflowBlock = readFileSync(GLOBAL_PROMPT, 'utf8');
-}
 
 // ── Phase D: linked-worktree seat detection (SPEC-047) ─────────────
 // A linked worktree's `.git` is a file pointing at a per-worktree gitdir
@@ -168,6 +169,19 @@ try {
 } catch {
   // Fail-open — any git/fs error here must never block session start.
 }
+
+// ── Phase C: corpus-workflow governance (lore-governed sessions) ───
+// Source path = what `lore setup` actually installs. Injection is gated on
+// the RESOLVED corpus root (Phase D may have redirected it to a worktree's
+// main checkout) having .lore/ — non-lore projects get nothing.
+try {
+  if (existsSync(join(bootstrapCwd, '.lore'))) {
+    const governancePath = join(dirname(AGENTS_DIR), 'governance', 'corpus-workflow.md');
+    if (existsSync(governancePath)) {
+      workflowBlock = readFileSync(governancePath, 'utf8');
+    }
+  }
+} catch { /* fail-open — governance injection must never block session start */ }
 
 // ── Phase E: lore bootstrap injection ──────────────────────────────
 // Corpus pointer set (root doc, active plans + task counts, pending

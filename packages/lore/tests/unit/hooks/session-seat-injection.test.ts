@@ -105,7 +105,6 @@ function runHook({ cwd, extraEnv = {} }: RunOpts) {
       ...process.env,
       CLAUDE_SESSION_ID: `seat-test-${Math.random().toString(36).slice(2)}`,
       CLAUDE_STATE_BASE_OVERRIDE: stateBase,
-      CLAUDE_GLOBAL_PROMPT_OVERRIDE: join(stateBase, "does-not-exist-global.md"),
       ...extraEnv,
     },
   });
