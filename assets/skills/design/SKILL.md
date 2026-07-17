@@ -1,0 +1,206 @@
+---
+name: design
+description: "Use when making architecture decisions, defining APIs, designing data models, planning module structure, or creating UI/UX specifications. Any task requiring design before implementation."
+---
+
+# Design — Skill (Level 0, self-executing)
+
+Self-executing skill. Reads mode reference, runs all phases directly (including parallel agent dispatch described in mode files).
+No named agent needed — all modes share the same tool requirements.
+
+## Mode: $0
+
+⛔ **Validate the mode BEFORE any file read.** `$0` must be EXACTLY one of: `architecture | api | database | system | module`. If `$0` is empty, a prose sentence, or any other word (a natural-language task string makes `$0` its first token, e.g. "Produce" → `mode-Produce.md` 404) → do NOT read `references/mode-$0.md` — use AskUserQuestion to pick a mode from the table below. When invoking this skill, pass the mode name as the FIRST token (e.g. `/design module <context>`), never a prose sentence.
+
+Only after validation passes: Read `references/mode-$0.md`.
+
+| Mode | Reference | Focus |
+|------|-----------|-------|
+| `architecture` | `references/mode-architecture.md` | Layered, clean, DDD, C4 diagrams |
+| `api` | `references/mode-api.md` | REST, GraphQL, gRPC patterns |
+| `database` | `references/mode-database.md` | Schema, indexing, migrations |
+| `system` | `references/mode-system.md` | Scalability, reliability, caching |
+| `module` | `references/mode-module.md` | Decomposition, boundaries |
+
+UI/UX design is NOT a mode of this skill — there is no `references/mode-ui.md`. For visual direction, component specs, design tokens, prototypes → use the dedicated `design-ui` skill. (The UI-specific gates/sections further down this file apply only when the design-ui flow delegates back here.)
+
+## Pre-Design Steps (all modes)
+
+1. **Upstream check**: Search the lore corpus for PRD/requirements -> extract as design constraints
+   ```
+   lore search "<topic>" --type spec --json / lore get <prd-slug> -> look for spec (--kind feature), PRD
+   ```
+2. **Existing design check**: `lore search "<topic>" --type spec --json` for an existing spec on same topic -> update or extend
+3. **Benchmark study**: Identify top 1-3 benchmark products in the same domain/scenario -> study their design patterns, interaction flows, and feature implementations -> borrow proven designs as baseline. Never design from scratch when market-validated references exist.
+4. **Analyze existing system**: Use Serena for codebase understanding before designing
+
+## Workflow
+
+- Follow mode-specific reference for design methodology (phases, parallel agent dispatch, scoring)
+- >= 3 options or multi-dimension tradeoffs -> use Sequential Thinking (`mcp__sequential-thinking__sequentialthinking`)
+- Query official docs (context7/deepwiki) before proposing any technology choice
+
+## Quality Gates (HARD BLOCK — all modes)
+
+**REFUSE to finalize** design output unless ALL required gates for the mode pass.
+Report gate status as a checklist in the design document footer.
+
+| Mode | Required Gates |
+|------|---------------|
+| `architecture` | (1) Every NFR has architectural response with measurable target (2) All tension points have decision + rationale (3) High-severity risks have mitigations (4) Migration phases defined with rollback |
+| `api` | (1) Every endpoint has error responses documented (2) Auth matrix: every endpoint has auth requirement (3) All security issues resolved or accepted with rationale (4) Pagination + rate limiting specified |
+| `database` | (1) All FKs indexed (2) Every table has access pattern justification (3) Zero-downtime migration strategy for every schema change (4) Data type rules followed (no float for money, tz on timestamps) |
+| `system` | (1) SLA targets defined (throughput, p99 latency, availability %) (2) No unmitigated single points of failure (3) Every component has failure mode + degradation strategy (4) Capacity plan at 1x/10x/100x |
+| `module` | (1) No circular dependencies (2) Every module has single clear responsibility (3) Public API sufficient for black-box testing (4) Dependencies injectable |
+| `ui` | (1) Design doc check passed — REFUSE if missing (2) Live HTML preview generated and verified (not markdown-only) (3) Responsive verified at 375/768/1024/1440px via viewport switcher (4) Dark mode works via `html.dark` toggle (5) Contrast ratios WCAG AA (4.5:1 body, 3:1 large) (6) Touch targets >= 44px (7) Product prototype covers ALL major screens from PRD (multi-screen products only) (8) Cross-screen consistency verified (nav, tokens, typography, spacing) |
+
+## Exit Criteria (Definition of Done)
+
+| Mode | Required Sections | Optional |
+|------|------------------|----------|
+| `architecture` | Overview, C4 diagram, Components, Trade-off Decisions, Risk Registry, Migration Plan | ADR per decision, quality attribute utility tree |
+| `api` | Endpoints (all with req/res/errors), Design Decisions, Auth matrix, Error format, Pagination | OpenAPI spec file, SDK examples |
+| `database` | ER diagram, Schema (Prisma/DDL), Index plan, Migration strategy, Access patterns | Capacity estimates, partitioning strategy |
+| `system` | Overview, Requirements table (SLA), Architecture diagram, Technology choices, Failure modes, Capacity plan | Cost analysis, runbook drafts |
+| `module` | Module boundary (public/internal/deps), Structure (file tree), Public interface (TS types), Dependency graph, Design decisions | Perspective tension log |
+| `ui` | Design system compliance check, Component specs, Responsive behavior, A11y checklist, State patterns (loading/empty/error), **Product prototype** (all major screens with shared nav) | Animation specs, dark mode mapping, interaction flow diagram |
+
+## Cross-Cutting Concerns (apply to ALL modes)
+
+Evaluate these for EVERY design. Skip only with explicit justification.
+
+| Concern | Trigger | Action |
+|---------|---------|--------|
+| Security | Any user input, auth, data storage, external API | STRIDE-lite threat analysis on data flow -> document threats + mitigations |
+| Performance | Latency-sensitive path, large data, real-time | Define performance budget (target latency, throughput) -> verify design meets it |
+| Observability | Any new component or service | Define metrics, logs, traces -> specify what to instrument |
+| Data Privacy | PII, user data, analytics | Classify data sensitivity -> encryption at rest/transit, retention policy, audit trail |
+
+## Downstream Handoff Protocol
+
+Design output MUST include these contracts for consuming skills:
+
+| Consumer | Contract |
+|----------|----------|
+| `implement` | (1) All interfaces as TypeScript types (2) Dependency list with versions (3) File structure recommendation (4) Any non-obvious implementation notes (5) **UI mode**: Product prototype HTML files as pixel-level reference for each screen |
+| `test` | (1) Invariants to verify (2) Error scenarios (3) Performance targets (4) Edge cases |
+| `deploy` | (1) Infrastructure requirements (2) Environment variables (3) Migration ordering (4) Health check endpoints |
+
+## HTML Preview (all modes)
+
+After completing the design (post-synthesis, pre-approval), generate a browser preview. The preview server starts via HTTP so ESM imports work reliably.
+
+### Doc modes (architecture, api, database, system, module)
+
+1. Write design markdown to `/tmp/design-preview.md`
+2. Run:
+   ```bash
+   python3 $HOME/.claude/skills/design/scripts/preview.py /tmp/design-preview.md \
+     --title "<title>" --mode "<mode>"
+   ```
+3. Browser opens with: rendered **Mermaid diagrams**, styled **tables**, syntax-highlighted **code**, auto **TOC** with scroll spy, mode-specific **accent color** (architecture=indigo, api=emerald, database=amber, system=blue, module=violet, ui=rose).
+
+### UI mode — Multi-Option Visual Comparison
+
+UI designs MUST present ≥3 **visually distinct** design options as live HTML. Each variant MUST be **anchored to a real benchmark product** (e.g., Apple Health / Linear / Duolingo) from **≥2 different design lineages** (see mode-ui.md Style Differentiation Rules). Name variants by benchmark product, not layout:
+
+1. Write design markdown to `/tmp/design-preview.md`
+2. Select ≥3 benchmark products from different design lineages → fill the **benchmark decomposition table** (mode-ui.md) using screenshots/research — REFUSE to proceed on memory alone
+3. Dispatch ≥3 **parallel `ui-variant-builder` subagents** (Sonnet) — one per variant, each receives its decomposition row + UI requirements + output path. Send ALL in a single message for parallel execution
+4. After all subagents return, run with `--variant` for each option:
+   ```bash
+   python3 $HOME/.claude/skills/design/scripts/preview.py /tmp/design-preview.md \
+     --variant "Apple Health 风格:/tmp/option-a.html" \
+     --variant "Linear 风格:/tmp/option-b.html" \
+     --variant "Duolingo 风格:/tmp/option-c.html" \
+     --title "<title>" --mode ui
+   ```
+5. Browser opens with:
+   - **Tab bar**: Switch between design options (A/B/C...)
+   - **Preview area**: Live UI in iframe with viewport controls (375/768/1024/1440px), dark mode, fullscreen
+   - **Below**: Design spec document
+6. User compares options visually, annotates feedback, selects preferred direction
+7. Iterate on selected option only (use `--ui-html` for single-file mode after selection)
+
+For single-option iteration after user selection:
+```bash
+python3 $HOME/.claude/skills/design/scripts/preview.py /tmp/design-preview.md \
+  --ui-html /tmp/selected-option.html --title "<title>" --mode ui
+```
+
+### Token Crystallization (after variant selection)
+
+After user selects a variant, extract its concrete design tokens and persist as the project's design system:
+
+1. **First UI design** (no `ui-standards.md` exists): Fill `~/.claude/skills/design/templates/ui-standards-template.md` with tokens extracted from the selected variant HTML → write to `docs/design-system/ui-standards.md`
+2. **Subsequent UI designs** (`ui-standards.md` exists): Verify selected variant complies with existing system → add new tokens if needed → flag conflicts for user decision
+
+This ensures all future UI work is constrained by the same visual language — the Mandatory Design Document Check at workflow step 1 enforces compliance on every invocation. See mode-ui.md "Token Crystallization" for the full extraction table.
+
+### Product Prototype Generation (after Token Crystallization)
+
+Once style is confirmed and tokens crystallized, the skill MUST directly produce a full product prototype covering ALL major screens — not just the single comparison page. See mode-ui.md "Product Prototype Generation" for the full process.
+
+1. Extract all screens from PRD/requirements → confirm scope with user
+2. Extract shared navigation component from selected variant
+3. Dispatch **parallel `ui-variant-builder` subagents** (Sonnet) — one per screen, each receives the crystallized design tokens + screen-specific requirements + shared nav. ALL in a single message for parallel execution
+4. After all subagents return, launch preview with screen tabs:
+   ```bash
+   python3 $HOME/.claude/skills/design/scripts/preview.py /tmp/design-preview.md \
+     --variant "Dashboard:/tmp/prototype-dashboard.html" \
+     --variant "Detail:/tmp/prototype-detail.html" \
+     --variant "Settings:/tmp/prototype-settings.html" \
+     --title "<product> Prototype" --mode ui
+   ```
+5. Cross-screen consistency check (nav, tokens, typography, spacing, dark mode)
+6. User reviews full product experience → iterate or approve
+
+**Skip conditions**: Single-page product or user says "just this page" → selected variant IS the prototype.
+
+### Annotation Workflow
+
+The preview page has a built-in annotation tool. Users can mark up the design directly:
+
+1. Click **"Annotate"** button (top-right) or press **`A`** to enter annotation mode
+2. **Click anywhere** on the page to place numbered pins with comments
+3. Press **`Esc`** to exit annotation mode
+4. Click **"Export annotations.json"** in the side panel to download
+
+Annotations are **per-variant** — switching tabs automatically saves/restores each variant's pins. The panel title shows which variant's annotations are active.
+
+When the user says "check my annotations" or provides `annotations.json`:
+1. Read the JSON — it's organized by variant: `{ variants: { "a": { label, pins }, "b": { label, pins } } }`
+2. Process each variant's annotations separately — address feedback for each design direction
+3. Take screenshots via `npx playwright screenshot` to see pin positions visually
+4. Update the relevant variant(s), regenerate preview
+5. User re-annotates if needed → iterate
+
+### Cleanup
+
+The preview starts a Vite dev server (HMR-enabled). It auto-replaces previous instances. To stop manually: `kill $(cat ~/.claude/design/.dev-server.pid)`
+
+> Headless: add `--no-open`, provide the file path to user.
+
+## User Approval Gate (HARD GATE — Two-Stage for UI mode)
+
+### Stage 1: Style Approval (UI mode only, after Multi-Option Visual Comparison)
+
+Already embedded in Multi-Option Visual Comparison: user selects a variant → Token Crystallization proceeds → Product Prototype Generation proceeds automatically. No extra gate needed — the variant selection IS the style approval.
+
+### Stage 2: Prototype / Design Approval (all modes)
+
+Before persisting, you MUST present the final design to the user and get explicit approval:
+
+1. **Preview**: Generate the HTML preview (for UI mode: the full product prototype with all screens) so the user can visually inspect
+2. **Summarize**: Present a concise design summary in chat — key decisions, trade-offs, screen coverage (for UI: list all prototype screens)
+3. **Confirm**: Call `AskUserQuestion` with:
+   - Question: "设计方案确认 (HTML preview has been opened in your browser)" — present the design summary and ask if approved
+   - Options: "批准，进入实现" / "需要调整" / "重新设计"
+4. **Gate**: Only proceed to Persist if user selects "批准". If "需要调整", iterate on specific screens/components and regenerate preview. If "重新设计", restart from Phase 1 (Multi-Option Visual Comparison).
+
+⛔ Do NOT persist design artifacts or create tasks/plans until user has explicitly approved the design.
+
+## Persist
+
+- Create design output via `lore create spec --title ... --parent <prd> --kind design --content ...` (run `lore feed spec-create --parent <prd>` first) or `lore create adr --title ... --decision-status proposed --content ...` for decision records
+- Link to upstream PRD and related ADRs via `lore link <from> <to> --type=relates-to|implements|informs`

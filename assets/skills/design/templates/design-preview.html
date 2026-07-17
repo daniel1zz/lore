@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en" data-mode="__DESIGN_MODE__" data-has-ui="__HAS_UI_PREVIEW__">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>__DESIGN_TITLE__</title>
+  <style>
+    :root {
+      --accent: #3b82f6; --accent-light: #eff6ff;
+      --bg: #f7f8fa; --surface: #fff; --text: #1e293b; --text2: #64748b; --border: #e2e8f0;
+      --code-bg: #f1f5f9; --header-h: 56px; --sidebar-w: 260px;
+      --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      --mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+    }
+    [data-mode="architecture"] { --accent: #4f46e5; --accent-light: #eef2ff; }
+    [data-mode="api"]          { --accent: #059669; --accent-light: #ecfdf5; }
+    [data-mode="database"]     { --accent: #d97706; --accent-light: #fffbeb; }
+    [data-mode="system"]       { --accent: #2563eb; --accent-light: #eff6ff; }
+    [data-mode="module"]       { --accent: #7c3aed; --accent-light: #f5f3ff; }
+    [data-mode="ui"]           { --accent: #e11d48; --accent-light: #fff1f2; }
+
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: var(--font); background: var(--bg); color: var(--text); line-height: 1.75; font-size: 15px; }
+
+    .header {
+      position: fixed; top: 0; left: 0; right: 0; height: var(--header-h);
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; padding: 0 24px; z-index: 100;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+    .header-inner { display: flex; align-items: center; width: 100%; gap: 16px; }
+    .header-title { font-size: 16px; font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .badge {
+      display: inline-flex; align-items: center; padding: 3px 12px; border-radius: 12px;
+      font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+      background: var(--accent-light); color: var(--accent);
+    }
+    .header-date { color: var(--text2); font-size: 13px; white-space: nowrap; }
+    .hdr-btn {
+      background: none; border: 1px solid var(--border); border-radius: 6px;
+      padding: 4px 12px; font-size: 13px; color: var(--text2); cursor: pointer; transition: all .15s;
+    }
+    .hdr-btn:hover { background: var(--bg); color: var(--text); }
+
+    /* --- UI Preview Panel --- */
+    .preview-panel { display: none; margin-top: var(--header-h); background: #1a1a2e; }
+    .preview-toolbar {
+      display: flex; align-items: center; gap: 12px; padding: 8px 16px;
+      background: #252540; border-bottom: 1px solid rgba(255,255,255,.08);
+    }
+    .preview-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: rgba(255,255,255,.45); }
+    .vp-group { display: flex; gap: 4px; flex: 1; justify-content: center; }
+    .vp-btn {
+      background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1); border-radius: 6px;
+      padding: 4px 14px; color: rgba(255,255,255,.45); font-size: 12px; font-family: var(--mono);
+      cursor: pointer; transition: all .15s;
+    }
+    .vp-btn:hover { background: rgba(255,255,255,.1); color: rgba(255,255,255,.8); }
+    .vp-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .preview-actions { display: flex; gap: 6px; }
+    .preview-actions button {
+      background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1); border-radius: 6px;
+      padding: 4px 10px; color: rgba(255,255,255,.45); font-size: 12px; cursor: pointer; transition: all .15s;
+    }
+    .preview-actions button:hover { color: rgba(255,255,255,.8); background: rgba(255,255,255,.12); }
+    .preview-viewport {
+      display: flex; justify-content: center; align-items: flex-start; padding: 24px; min-height: 360px;
+      background: repeating-conic-gradient(#2a2a3e 0% 25%, #222236 0% 50%) 50% / 16px 16px;
+      position: relative; overflow: auto;
+    }
+    .preview-viewport iframe {
+      background: #fff; border: none; border-radius: 8px;
+      box-shadow: 0 8px 32px rgba(0,0,0,.3); width: 1024px; min-height: 300px;
+      transition: width .3s ease;
+    }
+    .width-indicator {
+      position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
+      background: rgba(0,0,0,.7); color: #fff; padding: 2px 10px; border-radius: 4px;
+      font-size: 11px; font-family: var(--mono); opacity: 0; transition: opacity .2s;
+    }
+    .width-indicator.show { opacity: 1; }
+    .preview-panel.fullscreen {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 200; margin-top: 0;
+    }
+    .preview-panel.fullscreen .preview-viewport { height: calc(100vh - 44px); }
+    .preview-panel.fullscreen .preview-viewport iframe { height: calc(100vh - 92px); border-radius: 0; }
+
+    /* --- Accent line --- */
+    .accent-line {
+      position: fixed; top: var(--header-h); left: 0; right: 0; height: 3px;
+      background: var(--accent); z-index: 99;
+    }
+    [data-has-ui="true"] .accent-line { display: none; }
+
+    /* --- Layout --- */
+    .doc-section { display: flex; margin-top: var(--header-h); min-height: calc(100vh - var(--header-h)); }
+    [data-has-ui="true"] .doc-section { margin-top: 0; }
+    .sidebar {
+      position: sticky; top: calc(var(--header-h) + 3px); align-self: flex-start;
+      width: var(--sidebar-w); min-width: var(--sidebar-w); height: calc(100vh - var(--header-h) - 3px);
+      overflow-y: auto; background: var(--surface); border-right: 1px solid var(--border); padding: 24px 0;
+    }
+    .sidebar::-webkit-scrollbar { width: 4px; }
+    .sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    .toc-heading { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.2px; color: var(--text2); padding: 0 20px 16px; }
+    .toc-list { list-style: none; }
+    .toc-item a {
+      display: block; padding: 5px 20px; color: var(--text2); text-decoration: none;
+      font-size: 13px; line-height: 1.5; border-left: 2px solid transparent; transition: all .15s;
+    }
+    .toc-item a:hover { color: var(--text); background: var(--bg); }
+    .toc-item a.active { color: var(--accent); border-left-color: var(--accent); background: var(--accent-light); font-weight: 500; }
+    .toc-h3 a { padding-left: 36px; font-size: 12px; }
+    .main { flex: 1; padding: 40px 56px; max-width: 960px; }
+
+    /* --- Typography --- */
+    .main h1 { font-size: 32px; font-weight: 700; color: #0f172a; margin: 0 0 8px; line-height: 1.3; }
+    .main > p:first-of-type { font-size: 16px; color: var(--text2); margin-bottom: 32px; }
+    .main h2 {
+      font-size: 22px; font-weight: 600; color: #0f172a; margin: 48px 0 16px;
+      padding-bottom: 10px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 10px;
+    }
+    .main h2::before { content: ''; width: 4px; height: 22px; background: var(--accent); border-radius: 2px; flex-shrink: 0; }
+    .main h3 { font-size: 17px; font-weight: 600; margin: 32px 0 12px; }
+    .main h4 { font-size: 15px; font-weight: 600; color: #334155; margin: 24px 0 8px; }
+    .main p { margin: 0 0 16px; }
+    .main ul, .main ol { margin: 0 0 16px; padding-left: 24px; }
+    .main li { margin: 4px 0; }
+    .main a { color: var(--accent); text-decoration: none; }
+    .main a:hover { text-decoration: underline; }
+    .main hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
+    .main img { max-width: 100%; border-radius: 8px; }
+    .main blockquote {
+      border-left: 3px solid var(--accent); background: var(--accent-light);
+      padding: 12px 16px; margin: 16px 0; border-radius: 0 8px 8px 0;
+    }
+    .main blockquote p:last-child { margin-bottom: 0; }
+
+    /* --- Tables --- */
+    .main table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px; }
+    .main th { background: var(--bg); font-weight: 600; font-size: 13px; text-align: left; padding: 10px 14px; border: 1px solid var(--border); }
+    .main td { padding: 10px 14px; border: 1px solid var(--border); vertical-align: top; }
+    .main tr:nth-child(even) td { background: #fafbfc; }
+    .main tr:hover td { background: var(--accent-light); }
+
+    /* --- Code (inline hljs styles) --- */
+    .main code { font-family: var(--mono); font-size: .875em; background: var(--code-bg); padding: 2px 6px; border-radius: 4px; }
+    .main pre { background: var(--code-bg); padding: 16px 20px; border-radius: 8px; overflow-x: auto; margin: 16px 0; border: 1px solid var(--border); line-height: 1.5; }
+    .main pre code { background: none; padding: 0; font-size: 13px; }
+    .hljs { color: #24292e; }
+    .hljs-keyword, .hljs-selector-tag, .hljs-type { color: #d73a49; }
+    .hljs-string, .hljs-addition { color: #032f62; }
+    .hljs-comment, .hljs-quote { color: #6a737d; font-style: italic; }
+    .hljs-function .hljs-title, .hljs-title.function_ { color: #6f42c1; }
+    .hljs-number, .hljs-literal { color: #005cc5; }
+    .hljs-built_in { color: #e36209; }
+    .hljs-attr, .hljs-attribute { color: #005cc5; }
+    .hljs-deletion { color: #b31d28; background: #ffeef0; }
+    .hljs-section, .hljs-name { color: #005cc5; }
+    .hljs-variable, .hljs-template-variable { color: #e36209; }
+
+    /* --- Mermaid --- */
+    .mermaid-wrapper { text-align: center; margin: 24px 0; padding: 24px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+    .mermaid-error { border-color: #fca5a5; background: #fef2f2; color: #b91c1c; font-size: 13px; text-align: left; }
+
+    /* --- Back to top --- */
+    .back-to-top {
+      position: fixed; bottom: 24px; right: 24px; width: 40px; height: 40px;
+      border-radius: 50%; border: 1px solid var(--border); background: var(--surface);
+      font-size: 18px; cursor: pointer; opacity: 0; visibility: hidden; transition: all .2s;
+      box-shadow: 0 2px 8px rgba(0,0,0,.08); color: var(--text2);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .back-to-top:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .back-to-top.visible { opacity: 1; visibility: visible; }
+
+    /* --- Loading --- */
+    .loading { display: flex; align-items: center; justify-content: center; padding: 80px 20px; color: var(--text2); }
+    .loading::after { content: ''; width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .6s linear infinite; margin-left: 12px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .load-error { padding: 60px 20px; text-align: center; color: #b91c1c; }
+    .load-error h2 { margin-bottom: 8px; }
+    .load-error p { color: var(--text2); font-size: 13px; }
+
+    @media print {
+      .header, .sidebar, .back-to-top, .accent-line, .hdr-btn, .preview-panel { display: none !important; }
+      .main { margin: 0; padding: 20px; max-width: none; }
+      .doc-section { margin-top: 0; }
+      .mermaid-wrapper, table { break-inside: avoid; }
+      body { background: #fff; }
+    }
+    @media (max-width: 860px) {
+      .sidebar { display: none; }
+      .main { margin-left: 0; padding: 24px 20px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="header-inner">
+      <h1 class="header-title">__DESIGN_TITLE__</h1>
+      <div style="display:flex;align-items:center;gap:12px">
+        <span class="badge">__DESIGN_MODE__</span>
+        <span class="header-date">__DESIGN_DATE__</span>
+        <button class="hdr-btn" onclick="window.print()">Print</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="accent-line"></div>
+
+  <!-- UI Live Preview (shown only when UI HTML is provided) -->
+  <section class="preview-panel" id="preview-panel">
+    <div class="preview-toolbar">
+      <span class="preview-label">Live Preview</span>
+      <div class="vp-group">
+        <button class="vp-btn" data-width="375">375</button>
+        <button class="vp-btn" data-width="768">768</button>
+        <button class="vp-btn active" data-width="1024">1024</button>
+        <button class="vp-btn" data-width="1440">1440</button>
+      </div>
+      <div class="preview-actions">
+        <button id="theme-toggle" title="Toggle dark mode">Dark</button>
+        <button id="fullscreen-toggle" title="Toggle fullscreen">Full</button>
+      </div>
+    </div>
+    <div class="preview-viewport">
+      <div class="width-indicator" id="width-indicator">1024px</div>
+      <iframe id="preview-frame" sandbox="allow-scripts allow-same-origin"></iframe>
+    </div>
+  </section>
+
+  <!-- Design Document -->
+  <div class="doc-section">
+    <nav class="sidebar">
+      <div class="toc-heading">Contents</div>
+      <ul class="toc-list" id="toc-list"></ul>
+    </nav>
+    <main class="main" id="content">
+      <div class="loading">Loading preview</div>
+    </main>
+  </div>
+
+  <button class="back-to-top" id="back-to-top" aria-label="Back to top">&uarr;</button>
+
+  <div id="doc-data" style="display:none">__DESIGN_CONTENT_B64__</div>
+  <div id="ui-data" style="display:none">__UI_CONTENT_B64__</div>
+
+  <script type="module">
+    function decodeB64(b64) {
+      const bin = atob(b64);
+      const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+      return new TextDecoder().decode(bytes);
+    }
+
+    async function init() {
+      const [{ marked }, { default: mermaid }, { default: hljs }] = await Promise.all([
+        import('https://esm.sh/marked@14'),
+        import('https://esm.sh/mermaid@11'),
+        import('https://esm.sh/highlight.js@11/lib/common'),
+      ]);
+
+      mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+
+      marked.use({
+        renderer: {
+          code(token) {
+            if (token.lang === 'mermaid') {
+              return '<div class="mermaid-wrapper"><div class="mermaid">' + token.text + '</div></div>';
+            }
+            let out;
+            try {
+              out = (token.lang && hljs.getLanguage(token.lang))
+                ? hljs.highlight(token.text, { language: token.lang }).value
+                : hljs.highlightAuto(token.text).value;
+            } catch { out = token.text; }
+            const cls = token.lang ? ' language-' + token.lang : '';
+            return '<pre><code class="hljs' + cls + '">' + out + '</code></pre>';
+          }
+        }
+      });
+
+      const docB64 = document.getElementById('doc-data').textContent.trim();
+      const md = decodeB64(docB64);
+      const content = document.getElementById('content');
+      content.innerHTML = marked.parse(md);
+
+      try { await mermaid.run({ querySelector: '.mermaid' }); } catch (e) {
+        document.querySelectorAll('.mermaid').forEach(el => {
+          if (!el.querySelector('svg')) {
+            el.parentElement.classList.add('mermaid-error');
+            el.textContent = 'Diagram error: ' + (e.message || 'syntax error');
+          }
+        });
+      }
+
+      buildTOC(content);
+      scrollSpy(content);
+
+      const btn = document.getElementById('back-to-top');
+      window.addEventListener('scroll', () => btn.classList.toggle('visible', window.scrollY > 400));
+      btn.onclick = () => window.scrollTo({ top: 0, behavior: 'smooth' });
+
+      if (document.documentElement.dataset.hasUi === 'true') {
+        const uiB64 = document.getElementById('ui-data').textContent.trim();
+        if (uiB64) initUIPreview(decodeB64(uiB64));
+      }
+    }
+
+    function buildTOC(root) {
+      const list = document.getElementById('toc-list');
+      root.querySelectorAll('h2, h3').forEach((h, i) => {
+        h.id = 's-' + i;
+        const li = document.createElement('li');
+        li.className = 'toc-item toc-' + h.tagName.toLowerCase();
+        const a = document.createElement('a');
+        a.href = '#s-' + i;
+        a.textContent = h.textContent;
+        a.onclick = e => { e.preventDefault(); h.scrollIntoView({ behavior: 'smooth' }); };
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+    }
+
+    function scrollSpy(root) {
+      const obs = new IntersectionObserver(entries => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            document.querySelectorAll('.toc-item a').forEach(a =>
+              a.classList.toggle('active', a.getAttribute('href') === '#' + entry.target.id)
+            );
+          }
+        });
+      }, { rootMargin: '-80px 0px -70% 0px' });
+      root.querySelectorAll('h2, h3').forEach(h => obs.observe(h));
+    }
+
+    function initUIPreview(uiHtml) {
+      const panel = document.getElementById('preview-panel');
+      panel.style.display = 'block';
+
+      const frame = document.getElementById('preview-frame');
+      frame.srcdoc = uiHtml;
+
+      frame.addEventListener('load', () => {
+        try {
+          const h = frame.contentDocument.body.scrollHeight;
+          frame.style.height = Math.min(Math.max(h + 32, 300), window.innerHeight * 0.75) + 'px';
+        } catch {}
+      });
+
+      const indicator = document.getElementById('width-indicator');
+      document.querySelectorAll('.vp-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          frame.style.width = btn.dataset.width + 'px';
+          document.querySelectorAll('.vp-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          indicator.textContent = btn.dataset.width + 'px';
+          indicator.classList.add('show');
+          setTimeout(() => indicator.classList.remove('show'), 1200);
+        });
+      });
+
+      document.getElementById('theme-toggle').addEventListener('click', function () {
+        try {
+          const doc = frame.contentDocument.documentElement;
+          const isDark = doc.classList.toggle('dark');
+          doc.style.colorScheme = isDark ? 'dark' : 'light';
+          this.textContent = isDark ? 'Light' : 'Dark';
+        } catch {}
+      });
+
+      document.getElementById('fullscreen-toggle').addEventListener('click', () => {
+        panel.classList.toggle('fullscreen');
+      });
+    }
+
+    init().catch(e => {
+      document.getElementById('content').innerHTML =
+        '<div class="load-error"><h2>Failed to load preview</h2><p>' + e.message + '</p></div>';
+    });
+  </script>
+</body>
+</html>

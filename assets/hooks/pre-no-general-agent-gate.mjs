@@ -33,7 +33,6 @@ or quality gate. Use a specialized subagent instead:
   Custom:
     - lore-explorer    : read-only codebase + lore corpus exploration
     - lore-implementer : implement lore tasks (code + tests + oracle evidence)
-    - lore-planner     : decompose goals into lore plan phases + tasks
     - lore-reviewer    : read-only code review against lore spec ACs
     - researcher       : SDK / pattern / benchmark evaluation (ADR output)
 

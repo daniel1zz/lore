@@ -97,8 +97,10 @@ DIRECTIVES['general-purpose'] = DIRECTIVES.executor;
 DIRECTIVES['lore-implementer'] = DIRECTIVES.executor;
 DIRECTIVES['tester'] = DIRECTIVES.executor;
 DIRECTIVES['lore-explorer'] = DIRECTIVES.Explore;
-DIRECTIVES['lore-planner'] = DIRECTIVES.Plan;
 DIRECTIVES['lore-reviewer'] = DIRECTIVES.reviewer;
+// lore-planner RETIRED 2026-07-17: planning runs in the main agent via the
+// plan skill (AskUserQuestion needs the user-facing channel); the built-in
+// Plan agent type keeps DIRECTIVES.Plan for isolated read-heavy planning.
 
 // ── Compose ───────────────────────────────────────
 const directive = DIRECTIVES[agentType] || '';
