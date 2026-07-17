@@ -164,6 +164,8 @@ const DECLARED_FILES = [
   "skills/lore-uat/references/uiux-production-bar.md",
   "skills/lore-uat/templates/acceptance-report.md",
   "skills/lore-uat/templates/journey.yaml",
+  // skills/shared (cross-skill reference library — verification-family convergence, 2026-07-17)
+  "skills/shared/verification-discipline.md",
   // agents
   "agents/lore-explorer.md",
   "agents/lore-implementer.md",

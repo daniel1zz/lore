@@ -1,6 +1,6 @@
 ---
 name: lore-review
-description: "Use when reviewing code changes, PRs, diffs, or assessing code quality. Also use for 'find bugs', 'check this code', 'is this safe', 'review my implementation', 'what could go wrong', or any request to evaluate code correctness/security/quality."
+description: "One-shot structured review of code changes, PRs, or diffs against spec/ACs across six quality dimensions. Use when user says 'review', 'check this code', 'is this safe', 'review my implementation', or wants code correctness/security/quality assessed once. NOT for proactive whole-codebase defect scanning (use bug-hunt), NOT for automated review→fix loops (use iterative-review), NOT for runtime exploration (use dogfood)."
 ---
 
 # Review — Skill (Level 1, inline specialist dispatch)
@@ -29,7 +29,7 @@ This skill owns deep verification of these dimensions. Output `[DIMENSION CHECK]
 |-----------|----------|
 | **D-FUNC** | Behavioral correctness vs spec/AC, state transitions, invariants, edge cases |
 | **D-CODE** | Naming, abstractions, DRY, error handling patterns |
-| **D-TEST** | Test existence, 6-dimension coverage, test design quality, mocking appropriateness |
+| **D-TEST** | Test existence, 6-dimension coverage, test design quality, mocking appropriateness. **Happy-path-only test evidence is a BLOCKER finding**: if the diff's tests exercise no rejection/error/boundary behavior, or an added error path has no test that proves it fires, flag D-TEST blocker (shared discipline `../shared/verification-discipline.md`, rules 1–3: mandated failures enumerated, oracle seen red, negative controls paired) |
 | **D-PERF** | No N+1 queries, no unnecessary re-renders, bundle size impact, lazy loading |
 | **D-SEC** | Input validation, auth/authz checks, OWASP top 10, secrets exposure |
 | **D-BIZ** | Prompt design, output validation, domain logic correctness (conditional — auto-append only) |
