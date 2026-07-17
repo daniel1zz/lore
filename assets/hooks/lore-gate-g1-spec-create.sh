@@ -68,6 +68,53 @@ deny_with_reason() {
   allow
 }
 
+# ─── SPEC-050 D1: leading `cd <path> &&`/`cd <path> ;` prefix parsing ───────
+# The gate must check the corpus a Bash command will ACTUALLY execute
+# against, not the harness's ambient cwd — `cd <other-project> && lore ...`
+# issued from a session anchored elsewhere was gate-checked against the WRONG
+# corpus (false PARENT_REQUIRED denies observed live). Extracts a LEADING
+# `cd <path>` — optionally preceded by simple `VAR=value` env assignments —
+# from the raw Bash command string. Accepted <path> forms: double-quoted,
+# single-quoted, bare token (checked in that priority order, mirroring
+# extract_flag's convention below); a `$` anywhere in the extracted token
+# (variable / command substitution, unresolvable by this static shim)
+# disqualifies the match. Only the FIRST leading cd is honored — chained
+# `cd a && cd b && ...` beyond the first is out of scope, covered by the
+# surrounding fail-open contract, not by this parser.
+extract_cd_prefix_target() {
+  local cmd="$1" candidate=""
+  candidate="$(printf '%s' "$cmd" | sed -nE \
+    's/^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*cd[[:space:]]+"([^"]*)"[[:space:]]*(&&|;).*/\2/p')"
+  if [ -z "$candidate" ]; then
+    candidate="$(printf '%s' "$cmd" | sed -nE \
+      "s/^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*cd[[:space:]]+'([^']*)'[[:space:]]*(&&|;).*/\\2/p")"
+  fi
+  if [ -z "$candidate" ]; then
+    candidate="$(printf '%s' "$cmd" | sed -nE \
+      's/^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*cd[[:space:]]+([^[:space:]&;]+)[[:space:]]*(&&|;).*/\2/p')"
+  fi
+  case "$candidate" in
+    *'$'*) return ;; # disqualified: variable/command substitution in the path
+  esac
+  printf '%s' "$candidate"
+}
+
+# ─── SPEC-050 D4: command-position trigger matching ─────────────────────────
+# A trigger phrase must sit at a COMMAND position — start of the raw string,
+# or immediately after &&, ||, ;, |, $( or a backtick — never inside a quoted
+# argument (observed false deny: a --statement VALUE that merely mentioned a
+# gate's trigger phrase tripped the old anywhere-in-string grep). Pragmatic
+# approximation, not a full shell parser: separator tokens are normalized to
+# newlines WITHOUT quote-awareness, then each resulting segment is grepped
+# anchored at its own start (after optional leading whitespace and simple
+# `VAR=value` env assignments).
+is_command_position_match() {
+  local cmd="$1" pattern="$2"
+  printf '%s' "$cmd" \
+    | sed -E 's/(\&\&|\|\||;|\||\$\(|`)/\n/g' \
+    | grep -Eq "^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*${pattern}"
+}
+
 [ "${LORE_GATE_BYPASS:-}" = "1" ] && allow
 
 # Project-vendored dedupe (2026-07-17): when the active project mounts its own
@@ -93,10 +140,14 @@ fi
 
 TOOL_NAME="$(printf '%s' "$STDIN_JSON" | jq -r '.tool_name // empty')"
 HOOK_CWD="$(printf '%s' "$STDIN_JSON" | jq -r '.cwd // empty')"
+RAW_COMMAND=""
+[ "$TOOL_NAME" = "Bash" ] && RAW_COMMAND="$(printf '%s' "$STDIN_JSON" | jq -r '.tool_input.command // empty')"
 
 # Globalized shim (synced from <lore-repo>/hooks/): lore resolved from PATH,
 # and any project WITHOUT a .lore/ corpus at the call cwd is allowed untouched.
 TARGET_CWD="${HOOK_CWD:-$PWD}"
+CD_PREFIX_TARGET="$(extract_cd_prefix_target "$RAW_COMMAND")"
+[ -n "$CD_PREFIX_TARGET" ] && [ -d "$CD_PREFIX_TARGET" ] && TARGET_CWD="$CD_PREFIX_TARGET"
 LORE_BIN="$(command -v lore || true)"
 [ -d "$TARGET_CWD/.lore" ] || allow
 
@@ -109,11 +160,14 @@ PAYLOAD=""
 
 case "$TOOL_NAME" in
   Bash)
-    COMMAND="$(printf '%s' "$STDIN_JSON" | jq -r '.tool_input.command // empty')"
+    COMMAND="$RAW_COMMAND"
 
-    # Word-boundary check: "lore" preceded by start-of-string/slash/space, followed
-    # by "create spec" as its own tokens. Avoids matching e.g. "explore create spec".
-    if ! printf '%s' "$COMMAND" | grep -Eq '(^|[/[:space:]])lore[[:space:]]+create[[:space:]]+spec([[:space:]]|$)'; then
+    # SPEC-050 D4: command-position check (is_command_position_match above) —
+    # "lore" preceded by start-of-segment/whitespace/path-prefix, followed by
+    # "create spec" as its own tokens. Avoids matching e.g. "explore create
+    # spec" AND avoids matching the phrase when it merely appears inside a
+    # quoted argument value elsewhere in the command.
+    if ! is_command_position_match "$COMMAND" '([^[:space:]]*/)?lore[[:space:]]+create[[:space:]]+spec([[:space:]]|$)'; then
       allow
     fi
 
@@ -190,7 +244,22 @@ GATE_EXIT=$?
 
 case "$GATE_EXIT" in
   0) allow ;;
-  4) deny_with_reason "$GATE_OUTPUT" ;;
+  4)
+    # SPEC-050 D2: a declared parent the gate could not RESOLVE in
+    # TARGET_CWD's corpus is a lookup anomaly, not a confirmed violation —
+    # the command may be running against a DIFFERENT corpus than this shim
+    # resolved (wrong TARGET_CWD, or a transient read). Fail open; the
+    # service-layer GateEnforcer re-runs the SAME predicate against the REAL
+    # resolved corpus at write time, so nothing goes ungated. A command that
+    # declared NO parent at all keeps the deny — that PARENT_REQUIRED is a
+    # real violation, resolvable without any corpus read.
+    DECLARED_PARENT="$(printf '%s' "$PAYLOAD" | jq -r '.parent_id // empty' 2>/dev/null)"
+    if [ -n "$DECLARED_PARENT" ] && printf '%s' "$GATE_OUTPUT" | grep -q 'PARENT_REQUIRED'; then
+      log "UNRESOLVED_PARENT: declared parent '$DECLARED_PARENT' did not resolve against $TARGET_CWD's corpus — failing open; service-layer GateEnforcer still gates the real write"
+      allow
+    fi
+    deny_with_reason "$GATE_OUTPUT"
+    ;;
   *)
     log "lore gate spec-create exited $GATE_EXIT (undocumented verdict) — failing open"
     allow
