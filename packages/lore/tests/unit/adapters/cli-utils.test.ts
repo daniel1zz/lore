@@ -1,7 +1,8 @@
 /**
- * @spec_ref AC-CLI-001
+ * @spec_ref AC-CLI-001 SPEC-051
  * Tests for CLI adapter utilities.
- * Covers formatError, exitCode, formatTable, formatTree, formatNavigation, relativeTime.
+ * Covers formatError, exitCode, formatTable, formatTree, formatNavigation,
+ * relativeTime, resolveActorAlias (SPEC-051 D2).
  */
 
 import { describe, it, expect } from "vitest";
@@ -12,6 +13,7 @@ import {
   formatTree,
   formatNavigation,
   relativeTime,
+  resolveActorAlias,
 } from "../../../src/adapters/cli/utils.js";
 import type { LoreError } from "@lore/core";
 import type { TreeNode } from "../../../src/service/corpus-service.js";
@@ -395,5 +397,35 @@ describe("relativeTime", () => {
   it("formats months for dates over 30 days ago", () => {
     const twoMonthsAgo = new Date(Date.now() - 65 * 24 * 60 * 60 * 1000).toISOString();
     expect(relativeTime(twoMonthsAgo)).toBe("2mo ago");
+  });
+});
+
+// ─── resolveActorAlias (SPEC-051 D2) ────────────────────────────────────────
+
+describe("resolveActorAlias", () => {
+  it("HAPPY: --by only resolves to that value", () => {
+    expect(resolveActorAlias("daniel", undefined)).toEqual({ ok: true, value: "daniel" });
+  });
+
+  it("HAPPY: --reviewer only resolves to that value", () => {
+    expect(resolveActorAlias(undefined, "daniel")).toEqual({ ok: true, value: "daniel" });
+  });
+
+  it("HAPPY: matching values on both flags is not a conflict", () => {
+    expect(resolveActorAlias("daniel", "daniel")).toEqual({ ok: true, value: "daniel" });
+  });
+
+  it("BOUNDARY: neither flag passed resolves to undefined (falls through to resolveActor)", () => {
+    expect(resolveActorAlias(undefined, undefined)).toEqual({ ok: true, value: undefined });
+  });
+
+  it("ERROR: conflicting values on both flags fails with a descriptive error", () => {
+    const result = resolveActorAlias("daniel", "alice");
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain("--by and --reviewer");
+      expect(result.error).toContain("daniel");
+      expect(result.error).toContain("alice");
+    }
   });
 });
