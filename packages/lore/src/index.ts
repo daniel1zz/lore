@@ -12,6 +12,16 @@ if (process.argv.includes("--mcp-server")) {
   const { app } = loadLoreApp();
   await startMcpServer(app);
 } else {
+  // reason: CLI branch ONLY — installSyncStdio replaces console.log/info/warn/
+  // error/debug with a writeAllSync-backed implementation immune to the
+  // non-blocking-fd1 stdout truncation defect (see stdio-sync.ts's module
+  // header for the full empirical root-cause chain + verified repro). MUST
+  // run BEFORE citty/consola are imported (consola's own process.stdout
+  // access is what triggers Bun's non-blocking-fd1 side effect) and MUST
+  // NEVER run on the --mcp-server branch above — stdout there IS the MCP
+  // JSON-RPC protocol channel, not free-form CLI output.
+  const { installSyncStdio } = await import("./adapters/cli/stdio-sync.js");
+  installSyncStdio();
   const { runMain } = await import("citty");
   const { default: main } = await import("./adapters/cli/index.js");
   runMain(main);
