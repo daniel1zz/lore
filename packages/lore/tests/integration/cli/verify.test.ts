@@ -41,13 +41,13 @@
  *               restores it; a PATH-dependent command (`node --version`) still
  *               works under the default allowlist
  *   REGRESSION: forged `--attestation` flag on `lore evidence` (AC-VRF-2
- *               adapter half) is silently ignored — evidence.ts's args schema
- *               never declares that flag and its run() builds the service
- *               input object from named fields only, so nothing is smuggled
- *               through even though citty's non-strict parser accepts the
- *               unknown flag without erroring; §M2 — re-verifying a command
- *               already in the task's evidence history needs NO
- *               `--allow-new-commands` (no re-prompt for known commands),
+ *               adapter half) is REJECTED OUTRIGHT (exit 2, SPEC-051 D1 strict
+ *               unknown-flag rejection) — evidence.ts's args schema never
+ *               declares that flag, so no evidence entry is ever written for
+ *               the invocation (strictly stronger than the pre-SPEC-051
+ *               "silently accepted by citty but never read" guarantee); §M2 —
+ *               re-verifying a command already in the task's evidence history
+ *               needs NO `--allow-new-commands` (no re-prompt for known commands),
  *               and `verify.require_command_approval: false` disables the
  *               gate entirely (a brand-new command runs without the flag)
  *
@@ -534,9 +534,20 @@ describe("lore verify — §M2 env allowlist (STATE)", () => {
 });
 
 // ─── REGRESSION — AC-VRF-2 adapter half: forged --attestation is inert ───────
+//
+// Pre-SPEC-051, this test proved a forged --attestation flag could never reach
+// a persisted evidence entry because citty's non-strict parser silently
+// accepted the undeclared flag as a raw key that evidence.ts's run() simply
+// never read (evidence.ts builds EvidenceInput from named fields only).
+// SPEC-051 D1's strict unknown-flag rejection now catches this EARLIER and
+// MORE STRONGLY: the whole `lore evidence` invocation is rejected (exit 2)
+// before any evidence write happens at all, so the assertion moves from
+// "the field never lands on a written entry" to "no entry is EVER written
+// for this invocation" — a strictly stronger guarantee, same underlying
+// SPEC-039 §M2 security property (attestation is un-forgeable via the CLI).
 
-describe("lore evidence — forged --attestation is silently inert (AC-VRF-2 adapter half)", () => {
-  it("REG1: an unrecognized --attestation flag does not reach the persisted evidence entry", () => {
+describe("lore evidence — forged --attestation is rejected outright (SPEC-051 D1, formerly silently inert)", () => {
+  it("REG1: an unrecognized --attestation flag exits 2 and writes NO evidence entry", () => {
     const { planSlug, taskSlug } = buildFixture("ForgedAttestation", []);
     void planSlug;
 
@@ -551,9 +562,8 @@ describe("lore evidence — forged --attestation is silently inert (AC-VRF-2 ada
         "--result",
         "pass",
         // reason: evidence.ts's `args` schema never declares an --attestation flag —
-        // citty's non-strict parser still accepts it as a raw key, but evidence.ts's
-        // run() builds the EvidenceInput object from named fields only, so this can
-        // never reach TaskWorkflowService.addEvidence regardless of what's passed here.
+        // SPEC-051 D1's strict-flag check rejects it before evidence.ts's run() (and
+        // thus TaskWorkflowService.addEvidence) is ever reached.
         "--attestation",
         JSON.stringify({ runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false }),
         "--json",
@@ -561,13 +571,14 @@ describe("lore evidence — forged --attestation is silently inert (AC-VRF-2 ada
       tmpDir,
     );
 
-    expect(result.exitCode).toBe(0);
-    const parsed = JSON.parse(result.stdout) as {
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain("Unknown option: --attestation");
+
+    const got = runLore(["get", taskSlug, "--json"], tmpDir);
+    expect(got.exitCode).toBe(0);
+    const parsed = JSON.parse(got.stdout) as {
       data?: { doc?: { extra?: { verification_evidence?: Array<Record<string, unknown>> } } };
     };
-    const entries = parsed.data?.doc?.extra?.verification_evidence ?? [];
-    expect(entries).toHaveLength(1);
-    expect(entries[0]).toBeDefined();
-    expect("attestation" in (entries[0] ?? {})).toBe(false);
+    expect(parsed.data?.doc?.extra?.verification_evidence ?? []).toHaveLength(0);
   });
 });

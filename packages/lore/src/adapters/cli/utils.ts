@@ -249,6 +249,58 @@ export function resolveActor(explicit?: string): string {
   return userInfo().username;
 }
 
+// ─── Actor Flag Alias Resolution (SPEC-051 D2) ─────────────────────────────
+
+/**
+ * Result of reconciling two possibly-aliased CLI actor flags into the ONE
+ * value {@link resolveActor} should receive as its `explicit` argument.
+ * Discriminated on `ok` rather than a boolean-flag pair — the two branches
+ * carry genuinely different payloads (a value vs. an error message), so a
+ * union is the correct shape here (not `{value?, error?}`).
+ */
+export type ActorAliasResolution =
+  | { readonly ok: true; readonly value: string | undefined }
+  | { readonly ok: false; readonly error: string };
+
+/**
+ * Reconcile `--by` (canonical) and `--reviewer` (accepted alias) for
+ * `approve`/`reject` (SPEC-051 D2). `approve`/`reject` deliberately declare
+ * `by` and `reviewer` as TWO INDEPENDENT citty args (no citty-level `alias`
+ * link between them) — citty's own bidirectional alias merge silently picks
+ * whichever value was inserted first into the parsed-args object when two
+ * differently-aliased flags collide (an insertion-order-dependent citty
+ * internal, not a documented contract), which would make a `--by X
+ * --reviewer Y` conflict resolve unpredictably rather than fail loud. This
+ * function is the explicit, deterministic reconciliation the command's own
+ * `run` calls instead.
+ *
+ * @param byFlag - value of `--by`, if the caller passed one
+ * @param reviewerFlag - value of `--reviewer`, if the caller passed one
+ * @returns `{ok: true, value}` — `value` is whichever single flag was
+ *   passed (or `undefined` if neither was; both branches feed straight into
+ *   {@link resolveActor}) — or `{ok: false, error}` when BOTH were passed
+ *   with DIFFERING values (same value on both is not a conflict)
+ * @example
+ *   resolveActorAlias("daniel", undefined) // {ok: true, value: "daniel"}
+ *   resolveActorAlias(undefined, "daniel") // {ok: true, value: "daniel"}
+ *   resolveActorAlias("daniel", "daniel")  // {ok: true, value: "daniel"}
+ *   resolveActorAlias("daniel", "alice")   // {ok: false, error: "..."}
+ */
+export function resolveActorAlias(
+  byFlag: string | undefined,
+  reviewerFlag: string | undefined,
+): ActorAliasResolution {
+  if (byFlag !== undefined && reviewerFlag !== undefined && byFlag !== reviewerFlag) {
+    return {
+      ok: false,
+      error:
+        `--by and --reviewer were both provided with different values ` +
+        `('${byFlag}' vs '${reviewerFlag}'). Pass only one, or use matching values.`,
+    };
+  }
+  return { ok: true, value: byFlag ?? reviewerFlag };
+}
+
 // ─── Task Workflow Badges (SPEC-025 AC-WF-9) ────────────────────────────────
 
 /**
