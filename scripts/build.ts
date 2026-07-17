@@ -18,27 +18,11 @@
 import { join } from "path";
 import { existsSync } from "fs";
 import type { BunPlugin, PluginBuilder, OnLoadArgs } from "bun";
+import { resolvePlatform } from "./platform-map.js";
 
 const root = join(import.meta.dir, "..");
 const entrypoint = join(root, "packages", "lore", "src", "index.ts");
 const outfile = join(root, "dist", "lore");
-
-/** Maps process.platform + process.arch (+ libc on linux) to the libsql target name. */
-function resolveLibsqlTarget(): string {
-  const platform = process.platform;
-  const arch = process.arch;
-
-  if (platform === "darwin" && arch === "arm64") return "darwin-arm64";
-  if (platform === "darwin" && arch === "x64") return "darwin-x64";
-  if (platform === "linux" && arch === "x64") return "linux-x64-gnu";
-  if (platform === "linux" && arch === "arm64") return "linux-arm64-gnu";
-  if (platform === "win32" && arch === "x64") return "win32-x64-msvc";
-
-  throw new Error(
-    `[build] Unsupported platform/arch combination: ${platform}/${arch}. ` +
-      `Add it to the platform map in scripts/build.ts.`
-  );
-}
 
 /** Resolves the absolute path to the native .node file for the current platform. */
 function resolveNativeNodePath(nativePkg: string): string {
@@ -122,7 +106,7 @@ console.log(`Building lore binary...`);
 console.log(`  Entry:  ${entrypoint}`);
 console.log(`  Output: ${outfile}`);
 
-const nativePkg = `@libsql/${resolveLibsqlTarget()}`;
+const nativePkg = `@libsql/${resolvePlatform().libsqlTarget}`;
 const nativeNodePath = resolveNativeNodePath(nativePkg);
 
 console.log(`  Native: ${nativeNodePath}`);
