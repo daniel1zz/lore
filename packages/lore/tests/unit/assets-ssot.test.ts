@@ -480,6 +480,43 @@ describe("assets-ssot — NEGATIVE", () => {
 
 // ─── BOUNDARY — tag pairing, frontmatter, non-empty directories ───────────────
 
+describe("assets-ssot — BOUNDARY (skill-name grammar)", () => {
+  // Owner naming rule (ADR adr-retire-lore-planner-...): everything `lore setup`
+  // ships under assets/skills/ is `lore-*` namespaced. The ONE exemption is
+  // `shared/` — a non-invokable references library (no SKILL.md) that sibling
+  // skills reach via relative `../shared/` paths, so it must keep its bare name.
+  const skillDirs = [
+    ...new Set(
+      DECLARED_FILES.filter((f) => f.startsWith("skills/")).map((f) => f.split("/")[1]),
+    ),
+  ];
+  const SKILL_NAME_EXEMPT = new Set(["shared"]);
+
+  it.each(skillDirs.filter((d) => !SKILL_NAME_EXEMPT.has(d)))(
+    "skill directory %s is lore-namespaced (bare `lore` root or `lore-*`)",
+    (dir) => {
+      expect(dir).toMatch(/^lore(-[a-z0-9-]+)?$/);
+    },
+  );
+
+  it("shared/ is the only non-lore-namespaced skill directory (library exemption)", () => {
+    const nonNamespaced = skillDirs.filter((d) => !/^lore/.test(d));
+    expect(nonNamespaced).toEqual(["shared"]);
+  });
+
+  it.each(skillDirs.filter((d) => !SKILL_NAME_EXEMPT.has(d)))(
+    "skill %s frontmatter name matches its directory",
+    (dir) => {
+      const content = readRequiredFile(join(ASSETS_ROOT, "skills", dir, "SKILL.md"));
+      const frontmatterEnd = content.indexOf("---", 3);
+      const frontmatter = content.slice(0, frontmatterEnd);
+      const nameLine = frontmatter.split("\n").find((l) => /^name:/.test(l)) ?? "";
+      const name = nameLine.replace(/^name:\s*/, "").replace(/["']/g, "").trim();
+      expect(name).toBe(dir);
+    },
+  );
+});
+
 describe("assets-ssot — BOUNDARY", () => {
   it("corpus-workflow.md contains exactly one <corpus-workflow> open tag", () => {
     const content = readRequiredFile(GOVERNANCE_PATH);
