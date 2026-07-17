@@ -14,3 +14,6 @@ docs/.docman/
 packages/*/node_modules
 packages/*/dist
 .lore/local-key
+
+# SPEC-048: npm publish pipeline staging + artifact output — never committed.
+dist-npm/
