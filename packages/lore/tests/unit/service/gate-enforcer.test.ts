@@ -43,9 +43,13 @@ describe("GateEnforcer", () => {
       if (!result.ok) {
         expect(result.error.code).toBe("VALIDATION_ERROR");
         expect((result.error as { field?: string }).field).toBe("gate:spec-create");
-        expect((result.error as { message?: string }).message).toBe(
-          'Gate "spec-create" blocked: MISSING_SKELETON',
-        );
+        // reason: SPEC-049 D1 — the discriminator line is still the message's FIRST
+        // line (byte-identical prefix, REGRESSION), but the message now grows a
+        // `\n\n`-separated feeding-pack block below it (see the dedicated
+        // "embeds the feeding pack" describe block below for full pack-content
+        // coverage) — so this stays a `toContain` on the prefix, not a `toBe`.
+        const message = (result.error as { message?: string }).message ?? "";
+        expect(message.startsWith('Gate "spec-create" blocked: MISSING_SKELETON')).toBe(true);
         expect((result.error as { value?: unknown }).value).toEqual(["MISSING_SKELETON"]);
       }
     });
@@ -167,6 +171,135 @@ describe("GateEnforcer", () => {
           {},
         ),
       ).toThrow(/not registered/);
+    });
+  });
+
+  // SPEC-049 D1 — a blocked verdict now embeds the SAME feeding pack `lore gate
+  // <checkpoint>` would print for the identical `ctx` (`checkpointDef.feed`, the
+  // pure callback both callers share). One `it` per checkpoint, covering the
+  // pack's checkpoint-specific content; `field`/`value` stay byte-identical
+  // (REGRESSION) across every case here.
+  describe("enforce — embeds the feeding pack on a blocked verdict (SPEC-049 D1)", () => {
+    // NEGATIVE + REGRESSION (field/value unchanged)
+    it("spec-create: message carries the pack's [source: ...] provenance header and missing list", () => {
+      const enforcer = new GateEnforcer(undefined);
+      const result = enforcer.enforce("spec-create", {
+        parentType: "prd",
+        specKind: "feature",
+        content: "no heading here",
+        ruleSource: "knowledge-write-spec-rules",
+        ruleMarkdown: "## Rule\n\nEvery spec needs a heading.",
+      });
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect((result.error as { field?: string }).field).toBe("gate:spec-create");
+      expect((result.error as { value?: unknown }).value).toEqual(["MISSING_SKELETON"]);
+      const message = (result.error as { message?: string }).message ?? "";
+      expect(message).toContain('Gate "spec-create" blocked: MISSING_SKELETON');
+      expect(message).toContain("[source: knowledge-write-spec-rules, trust: team-authored]");
+      expect(message).toContain("Missing:");
+      expect(message).toContain("MISSING_SKELETON");
+      expect(message).toContain("Every spec needs a heading.");
+      // No trailing newline left over from the feed callback's own text.
+      expect(message.endsWith("\n")).toBe(false);
+    });
+
+    // NEGATIVE — spec-promote's pack names the exact recovery command.
+    it("spec-promote: message contains the `lore ac add` recovery hint", () => {
+      const enforcer = new GateEnforcer(undefined);
+      const result = enforcer.enforce("spec-promote", {
+        acceptanceCriteriaCount: 0,
+        specIdOrSlug: "spec-no-ac",
+      });
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect((result.error as { field?: string }).field).toBe("gate:spec-promote");
+      expect((result.error as { value?: unknown }).value).toEqual(["NO_ACCEPTANCE_CRITERIA"]);
+      const message = (result.error as { message?: string }).message ?? "";
+      expect(message).toContain('Gate "spec-promote" blocked: NO_ACCEPTANCE_CRITERIA');
+      expect(message).toContain("spec-no-ac");
+      expect(message).toContain("lore ac add");
+      expect(message.endsWith("\n")).toBe(false);
+    });
+
+    // NEGATIVE — plan-promote's pack names the ancestor spec pointer (slug/title/status).
+    it("plan-promote: message contains the parent spec pointer line", () => {
+      const enforcer = new GateEnforcer(undefined);
+      const result = enforcer.enforce("plan-promote", {
+        hasSpecParent: true,
+        parentSpec: { type: "spec", status: "draft", extra: {}, deleted_at: null },
+        parentSpecPointer: { slug: "spec-parent", title: "The Parent Spec", status: "draft" },
+        targetIdOrSlug: "plan-x",
+      });
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect((result.error as { field?: string }).field).toBe("gate:plan-promote");
+      const message = (result.error as { message?: string }).message ?? "";
+      expect(message).toContain('Gate "plan-promote" blocked:');
+      expect(message).toContain("spec-parent");
+      expect(message).toContain("The Parent Spec");
+      expect(message).toContain("status: draft");
+      expect(message).toContain("must be");
+      expect(message.endsWith("\n")).toBe(false);
+    });
+
+    // NEGATIVE — task-claim / upstream-approval branch (no anchor conflict): still
+    // names the ancestor spec pointer, mirroring plan-promote's pack shape.
+    it("task-claim (upstream-approval failure): message contains the parent spec pointer line", () => {
+      const enforcer = new GateEnforcer(undefined);
+      const result = enforcer.enforce("task-claim", {
+        hasSpecParent: true,
+        parentSpec: { type: "spec", status: "draft", extra: {}, deleted_at: null },
+        parentSpecPointer: { slug: "spec-parent", title: "The Parent Spec", status: "draft" },
+        candidateBy: "agent:solo",
+        candidateAnchors: [],
+        siblingClaims: [],
+      });
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect((result.error as { field?: string }).field).toBe("gate:task-claim");
+      const message = (result.error as { message?: string }).message ?? "";
+      expect(message).toContain('Gate "task-claim" blocked:');
+      expect(message).toContain("spec-parent");
+      expect(message).toContain("The Parent Spec");
+      expect(message.endsWith("\n")).toBe(false);
+    });
+
+    // NEGATIVE — the headline scenario SPEC-049 exists to fix: an anchor-overlap
+    // denial's message must name the conflicting sibling task's slug, its holder,
+    // and a literal copy-pasteable `lore release <slug> --by <holder> --force`
+    // recovery command — none of which the pre-SPEC-049 bare discriminator
+    // (`Gate "task-claim" blocked: ANCHOR_OVERLAP`) carried.
+    it("task-claim (anchor-overlap): message names the conflicting sibling, its holder, and the literal recovery command", () => {
+      const enforcer = new GateEnforcer(undefined);
+      const result = enforcer.enforce("task-claim", {
+        hasSpecParent: false,
+        candidateBy: "agent:new-claimant",
+        candidateAnchors: ["src/service/foo.ts"],
+        siblingClaims: [
+          {
+            slug: "task-sibling-in-flight",
+            title: "Sibling task already claimed",
+            by: "agent:sibling-holder",
+            at: "2026-07-17T00:00:00.000Z",
+            stale: false,
+            anchors: ["src/service/foo.ts"],
+          },
+        ],
+      });
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      // field carries the SPEC-042 D5 anchor-overlap sub-discriminator, unchanged.
+      expect((result.error as { field?: string }).field).toBe("gate:task-claim:anchor-overlap");
+      expect((result.error as { value?: unknown }).value).toEqual(["ANCHOR_OVERLAP"]);
+      const message = (result.error as { message?: string }).message ?? "";
+      expect(message).toContain('Gate "task-claim" blocked: ANCHOR_OVERLAP');
+      expect(message).toContain("task-sibling-in-flight");
+      expect(message).toContain("agent:sibling-holder");
+      expect(message).toContain(
+        "lore release task-sibling-in-flight --by agent:sibling-holder --force",
+      );
+      expect(message.endsWith("\n")).toBe(false);
     });
   });
 });

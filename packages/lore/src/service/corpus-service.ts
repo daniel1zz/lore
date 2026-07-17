@@ -50,6 +50,20 @@ import type { GateEnforcer } from "./gate-enforcer.js";
 import type { GateContext } from "./checkpoint-registry.js";
 import { computeArmedGates } from "./checkpoint-registry.js";
 
+/**
+ * `checkpointRegistry`'s `"spec-create"` checkpoint always produces a `"spec"` doc
+ * (`flows/feed-flow.ts::CHECKPOINT_PRODUCED_TYPE` is the SSOT map for this fact,
+ * mirrored by `gate.ts::SPEC_CREATE_PRODUCED_TYPE`) — reproduced here as a local
+ * literal rather than importing from `flows/`, since services never import from the
+ * adapter-composition layer (service/CLAUDE.md "no cross-service calls" /
+ * `../../CLAUDE.md` layer-stack invariant). Safe because the ONLY call site
+ * (`_createImpl`'s spec-create gate context enrichment, SPEC-049 §Design Decisions
+ * D3) already runs inside a `data.type === "spec"` branch — this constant just
+ * documents WHY `"spec"` is the right `findFeedingSkill` scope there, it is not a
+ * second independently-drifting derivation of the checkpoint→type mapping.
+ */
+const SPEC_CREATE_FEEDING_SCOPE = "spec";
+
 // ─── Local types (mirror SPEC-001 §3.1 interfaces) ────────────────────────
 
 /** ULID regex — 26 uppercase/digit chars */
@@ -405,6 +419,15 @@ export class CorpusService {
     // gate's own parentLegal predicate distinguishes those cases identically, via
     // GateContext.parentType: null).
     let resolvedParentType: string | null = null;
+    // reason: SPEC-049 §Design Decisions D3 — captured alongside resolvedParentType
+    // so the spec-create gate below can thread `GateContext.parentMarkdown` without
+    // a second `store.find` call. Unlike `gate.ts::runSpecCreateGate`'s
+    // `renderDocMarkdown` (which MDX-splices via `OutlineService.resolve`), this is
+    // the RAW `parentDoc.content` — CorpusService must not import OutlineService
+    // (no cross-service calls, service/CLAUDE.md), so the feeding pack's parent
+    // slice here is unresolved markdown, same as every other GateContext field this
+    // service already builds without adapter-layer help.
+    let resolvedParentMarkdown: string | null = null;
     if (data.parent_id) {
       const parentResult = await this.resolve(data.parent_id);
       if (!parentResult.ok) return parentResult;
@@ -426,6 +449,7 @@ export class CorpusService {
         });
       }
       resolvedParentType = parentDoc.type;
+      resolvedParentMarkdown = parentDoc.content;
     }
 
     // Cross-entity phase validation for tasks with extra.phase (AC-PHASE-3, SPEC-023 §4).
@@ -605,12 +629,36 @@ export class CorpusService {
     // still a pre-write check (the doc row below doesn't exist yet), so failing here
     // returns BEFORE any store.insert.
     if (data.type === "spec" && this.gateEnforcer) {
+      // reason: SPEC-049 §Design Decisions D3 — a blocked verdict now embeds the
+      // full feeding pack (GateEnforcer D1), and spec-create's pack quotes the
+      // governing rule doc (`ruleSource`/`ruleMarkdown`). Pre-fetching it here is
+      // the ONE extra store read `gate.ts::runSpecCreateGate` already pays for the
+      // identical lookup — skipped entirely when the checkpoint is disabled
+      // (`isEnabled` short-circuits BEFORE the read, mirroring `gate.ts`'s own
+      // isGateDisabledByConfig-before-runXGate order) so a disabled checkpoint
+      // stays byte-identical to pre-D3 behavior (zero extra IO). A missing/failed
+      // lookup leaves `ruleSource`/`ruleMarkdown` absent — the pack degrades to
+      // `[source: unknown]` (never a second, differently-shaped error; mirrors
+      // `writeProvenanceLink`'s fail-soft posture elsewhere in this file) — still
+      // strictly more information than the pre-D3 bare discriminator.
+      let ruleEnrichment: Pick<GateContext, "ruleSource" | "ruleMarkdown"> = {};
+      if (this.gateEnforcer.isEnabled("spec-create")) {
+        const feedingSkillResult = await this.findFeedingSkill(SPEC_CREATE_FEEDING_SCOPE);
+        if (feedingSkillResult.ok && feedingSkillResult.value !== null) {
+          ruleEnrichment = {
+            ruleSource: feedingSkillResult.value.slug,
+            ruleMarkdown: feedingSkillResult.value.content,
+          };
+        }
+      }
       const gateCtx: GateContext = {
         parentType: resolvedParentType,
         ...(typeof resolvedExtra["spec_kind"] === "string"
           ? { specKind: resolvedExtra["spec_kind"] }
           : {}),
         content: data.content ?? "",
+        ...ruleEnrichment,
+        ...(resolvedParentMarkdown !== null ? { parentMarkdown: resolvedParentMarkdown } : {}),
       };
       const gateResult = this.gateEnforcer.enforce("spec-create", gateCtx);
       if (!gateResult.ok) return gateResult;
