@@ -9,7 +9,7 @@
     "dev": "bun run packages/lore/src/index.ts",
     "build": "bun run scripts/build.ts",
     "test": "bun run test:vitest && bun run test:bun",
-    "test:vitest": "bunx vitest run",
+    "test:vitest": "NODE_OPTIONS=--max-old-space-size=2048 bunx vitest run",
     "test:bun": "cd packages/lore && bun test --timeout 30000 .bun.test",
     "test:watch": "bunx vitest",
     "typecheck": "bun run typecheck:core && bun run typecheck:lore && bun run typecheck:lore-tests && bun run typecheck:scripts && bun run typecheck:dashboard",

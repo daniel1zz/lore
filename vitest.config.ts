@@ -25,17 +25,29 @@ export default defineConfig({
     // re-measuring worst-case subprocess latency under full-suite contention first.
     testTimeout: 30000,
     hookTimeout: 30000,
-    // reason: same contention as above — capping thread-pool workers below the 8
-    // available CPUs leaves headroom for each worker's spawned `bun run` subprocess
-    // to get CPU time instead of every worker's subprocess fighting every other
-    // worker's subprocess 1:1 for the same 8 cores. 4 halves the worst-case
-    // subprocess-spawning parallelism (the 10 CLI integration test files) while still
-    // running 4 files concurrently, so unit-test wall-clock (174 files, most with zero
-    // subprocess spawns) is not materially regressed — this is not a global
-    // serialization (fileParallelism stays true, maxThreads=1 would 10x wall-clock).
+    // reason: same contention as above — capping workers below the 8 available
+    // CPUs leaves headroom for each worker's spawned `bun run` subprocess to get
+    // CPU time. 4 halves the worst-case subprocess-spawning parallelism while
+    // still running 4 files concurrently (this is not a global serialization —
+    // fileParallelism stays true, maxWorkers=1 would 10x wall-clock).
+    // MUST be the pool-agnostic top-level `maxWorkers`: vitest 2+ defaults
+    // `pool` to 'forks' (resolveConfig: `resolved.pool ??= 'forks'`), so a cap
+    // written under poolOptions.threads.maxThreads silently never applies —
+    // every full run spawned one fork process per CPU (~200-300MB RSS each),
+    // and overlapping suite runs exhausted machine memory (2026-07-17).
+    // Overridable per-run via the VITEST_MAX_WORKERS env var.
+    maxWorkers: 4,
+    // reason: maxWorkers caps process COUNT, not per-process memory — without
+    // an explicit heap cap each fork can balloon to Node's 64-bit default
+    // (~4GB old-space) before GC pressure kicks in, so 4 workers could still
+    // claim ~16GB. isolate defaults to true (fork restarted per test file),
+    // so 1.5GB is a generous per-FILE budget; a file exceeding it crashes
+    // loud with a heap-OOM naming the culprit instead of silently swelling.
+    // The MAIN vitest process is not covered by execArgv — it is capped via
+    // NODE_OPTIONS in the `test:vitest` script (package.json).
     poolOptions: {
-      threads: {
-        maxThreads: 4,
+      forks: {
+        execArgv: ["--max-old-space-size=1536"],
       },
     },
     setupFiles: [
