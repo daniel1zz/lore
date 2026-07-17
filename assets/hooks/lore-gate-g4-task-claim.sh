@@ -54,6 +54,15 @@ deny_with_reason() {
 
 [ "${LORE_GATE_BYPASS:-}" = "1" ] && allow
 
+# Project-vendored dedupe (2026-07-17): when the active project mounts its own
+# copy of this gate (repo hooks/g4-task-claim.sh via .claude/settings.json, the
+# SPEC-046 project flavor), this global mount would run the SAME deterministic
+# gate a SECOND time on every matching tool call — pure duplicate latency.
+# Coverage is preserved by the project copy AND the service-layer GateEnforcer
+# (the authoritative backstop). Sessions outside such a project fall through
+# unchanged (CLAUDE_PROJECT_DIR unset, or no vendored copy present).
+[ -n "${CLAUDE_PROJECT_DIR:-}" ] && [ -x "${CLAUDE_PROJECT_DIR}/hooks/g4-task-claim.sh" ] && allow
+
 if ! command -v jq >/dev/null 2>&1; then
   log "jq not found on PATH — cannot parse hook payload, failing open"
   allow

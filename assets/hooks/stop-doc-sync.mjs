@@ -50,6 +50,39 @@ if (payload.stop_hook_active === true) process.exit(0);
 const turnId = getCurrentTurnId();
 if (turnId && !existsSync(join(getTurnDir(), 'edited.flag'))) process.exit(0);
 
+// ── 2b. already compliant → pass silently ─────────
+// If the turn's final assistant message ALREADY carries the required
+// **[DOC_SYNC]** line, blocking would only force the model to re-emit it —
+// one wasted full model round-trip per editing turn (observed 2026-07-17:
+// three consecutive compliant turns each blocked once anyway).
+// AUTHORITATIVE source: payload.last_assistant_message (probe-verified field,
+// 2026-07-17). The transcript file is only a FALLBACK for harnesses lacking
+// the field — at Stop time the final text block may not be flushed to the
+// transcript yet (observed flush race caused a false block), so when the
+// payload field exists its verdict is final either way.
+let lamText = '';
+try {
+  const lam = payload.last_assistant_message;
+  lamText = typeof lam === 'string' ? lam : lam ? JSON.stringify(lam) : '';
+  if (lamText.includes('[DOC_SYNC]')) process.exit(0);
+} catch { /* fall through */ }
+try {
+  if (!lamText && payload.transcript_path && existsSync(payload.transcript_path)) {
+    const lines = readFileSync(payload.transcript_path, 'utf8').split('\n').filter(Boolean);
+    for (let i = lines.length - 1; i >= 0; i--) {
+      let entry;
+      try { entry = JSON.parse(lines[i]); } catch { continue; }
+      if (entry?.type !== 'assistant') continue;
+      const content = entry?.message?.content;
+      const text = Array.isArray(content)
+        ? content.filter(c => c?.type === 'text').map(c => c.text).join('\n')
+        : typeof content === 'string' ? content : '';
+      if (text.includes('[DOC_SYNC]')) process.exit(0);
+      break; // last assistant message lacks the line → fall through to block
+    }
+  }
+} catch { /* fall through to block */ }
+
 // ── 3. inject the doc-sync check ──────────────────
 function getChangedFiles() {
   const turnDir = getTurnDir();

@@ -90,10 +90,22 @@ const DIRECTIVES = {
 };
 // Alias: general-purpose behaves as executor
 DIRECTIVES['general-purpose'] = DIRECTIVES.executor;
+// FIX (2026-07-17 hook review): the original keys (executor/reviewer) are the
+// RETIRED docman-era roster — no current agent type matched them, so the
+// per-type directive and lore project context silently never injected for the
+// live roster. Map the current agent types onto the intended directives.
+DIRECTIVES['lore-implementer'] = DIRECTIVES.executor;
+DIRECTIVES['tester'] = DIRECTIVES.executor;
+DIRECTIVES['lore-explorer'] = DIRECTIVES.Explore;
+DIRECTIVES['lore-planner'] = DIRECTIVES.Plan;
+DIRECTIVES['lore-reviewer'] = DIRECTIVES.reviewer;
 
 // ── Compose ───────────────────────────────────────
 const directive = DIRECTIVES[agentType] || '';
-const CONTEXT_TYPES = new Set(['executor', 'general-purpose']);
+const CONTEXT_TYPES = new Set([
+  'executor', 'general-purpose',
+  'lore-implementer', 'tester', // current write-capable roster gets lore pointers
+]);
 const projectCtx = CONTEXT_TYPES.has(agentType) ? buildProjectContext() : '';
 
 const sections = [UNIVERSAL, directive, projectCtx].filter(Boolean);

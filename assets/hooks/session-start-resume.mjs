@@ -2,7 +2,14 @@
 /**
  * session-start-resume.mjs — SessionStart hook.
  *
- * Phase C: workflow-core (global-instructions.md) + subagent roster
+ * Phase C: workflow-core (global-instructions.md) — static-discipline
+ *          injection for machines whose CLAUDE.md does not carry it; on a
+ *          machine where the content was folded into ~/.claude/CLAUDE.md
+ *          (2026-07-17 unification) the file is absent and this phase
+ *          fail-opens to nothing. The former subagent-roster block was
+ *          REMOVED the same day: the Claude Code harness now natively lists
+ *          custom agents from ~/.claude/agents in the system prompt, so the
+ *          hook copy was pure duplication (~1KB/session).
  * Phase D: linked-worktree seat detection (SPEC-047) — auto-injects the
  *          seat-briefing.md discipline block for sessions opened inside a
  *          linked git worktree of a lore-governed repo
@@ -28,11 +35,14 @@ import {
 } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { resolveSessionId } from './lib/turn-state.mjs';
 
 const GLOBAL_PROMPT = process.env.CLAUDE_GLOBAL_PROMPT_OVERRIDE
   || join(homedir(), '.claude', 'prompt', 'global-instructions.md');
+// No longer read for a roster (removed 2026-07-17 — harness lists agents
+// natively); retained because Phase D derives <claude-dir> as its dirname,
+// and CLAUDE_AGENTS_DIR_OVERRIDE keeps tests hermetic.
 const AGENTS_DIR = process.env.CLAUDE_AGENTS_DIR_OVERRIDE
   || join(homedir(), '.claude', 'agents');
 const SESSION_STATE_BASE = process.env.CLAUDE_STATE_BASE_OVERRIDE
@@ -55,48 +65,32 @@ const sessionId = resolveSessionId();
 const lockFile = join(SESSION_STATE_BASE, 'sessions', sessionId, 'autopilot.lock');
 try { if (existsSync(lockFile)) rmSync(lockFile); } catch {}
 
+// ── GC: sweep session-state dirs idle > 14 days ────────────────────
+// Turn-state marks (read/edit jsonl + per-turn dirs) accumulate one dir per
+// turn with NO other reclaimer (observed 2026-07-17: 37MB / 1146 dirs).
+// Old sessions are worthless — sweep at session start, fail-silent, never
+// touching the CURRENT session's dir.
+try {
+  const sessionsRoot = join(SESSION_STATE_BASE, 'sessions');
+  if (existsSync(sessionsRoot)) {
+    const cutoff = Date.now() - 14 * 24 * 60 * 60 * 1000;
+    for (const name of readdirSync(sessionsRoot)) {
+      if (name === sessionId) continue;
+      const dir = join(sessionsRoot, name);
+      try {
+        if (statSync(dir).mtimeMs < cutoff) rmSync(dir, { recursive: true, force: true });
+      } catch { /* skip entry */ }
+    }
+  }
+} catch { /* GC is best-effort — must never block session start */ }
+
 // ── Degradation tracker — critical component failures only ────────
 const degradations = [];
 
-// ── Phase C: workflow-core + subagent roster ───────────────────────
+// ── Phase C: workflow-core ─────────────────────────────────────────
 let workflowBlock = '';
 if (existsSync(GLOBAL_PROMPT)) {
   workflowBlock = readFileSync(GLOBAL_PROMPT, 'utf8');
-}
-
-// Minimal YAML-frontmatter reader (name/description only) — avoids an
-// external gray-matter dependency for two scalar fields.
-function parseFrontmatter(content) {
-  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(content);
-  if (!m) return {};
-  const out = {};
-  for (const line of m[1].split('\n')) {
-    const kv = /^(name|description):\s*(.*)$/.exec(line.trim());
-    if (kv) out[kv[1]] = kv[2].replace(/^["']|["']$/g, '').trim();
-  }
-  return out;
-}
-
-let agentBlock = '';
-if (existsSync(AGENTS_DIR)) {
-  const entries = readdirSync(AGENTS_DIR).filter(f => f.endsWith('.md'));
-  const roster = [];
-  for (const fname of entries) {
-    const full = join(AGENTS_DIR, fname);
-    try {
-      if (!statSync(full).isFile()) continue;
-      const { name, description } = parseFrontmatter(readFileSync(full, 'utf8'));
-      if (!name) continue;
-      roster.push(description ? `- **${name}** — ${description}` : `- **${name}**`);
-    } catch {}
-  }
-  if (roster.length > 0) {
-    agentBlock = `## Available Custom Subagents (~/.claude/agents/)
-
-Dispatch via Agent(subagent_type=<name>) when the task matches. Built-in types (general-purpose, Explore, Plan, etc.) are listed in the system prompt.
-
-${roster.join('\n')}\n`;
-  }
 }
 
 // ── Phase D: linked-worktree seat detection (SPEC-047) ─────────────
@@ -213,6 +207,47 @@ ${json}
 }
 
 // ── Phase F: Test health check (silent, non-blocking) ─────────────
+
+/**
+ * Run a command in its own detached process group, with a hard timeout that
+ * SIGKILLs the WHOLE group. spawnSync's `timeout` only signals the direct
+ * child (bash), orphaning every grandchild — a vitest run forks one worker
+ * per CPU, and each orphaned fork keeps burning CPU/memory indefinitely
+ * (observed 2026-07-17: 11 orphaned `node (vitest N)` workers at full CPU
+ * for ~1h, machine-wide memory exhaustion). detached + kill(-pid) closes
+ * that leak: the kill reaches bash, the test runner, AND its forks.
+ */
+function runInKillableGroup(cmd, args, { cwd, env, timeoutMs }) {
+  return new Promise((resolvePromise) => {
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
+    let child;
+    try {
+      child = spawn(cmd, args, {
+        cwd, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch {
+      resolvePromise({ status: null, signal: null, timedOut, stdout, stderr });
+      return;
+    }
+    child.stdout.on('data', (d) => { stdout += d; });
+    child.stderr.on('data', (d) => { stderr += d; });
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try { process.kill(-child.pid, 'SIGKILL'); } catch { /* group already gone */ }
+    }, timeoutMs);
+    child.on('error', () => {
+      clearTimeout(timer);
+      resolvePromise({ status: null, signal: null, timedOut, stdout, stderr });
+    });
+    child.on('close', (status, signal) => {
+      clearTimeout(timer);
+      resolvePromise({ status, signal, timedOut, stdout, stderr });
+    });
+  });
+}
+
 let testHealthBlock = '';
 {
   const projectDir = process.cwd();
@@ -234,11 +269,32 @@ let testHealthBlock = '';
         else if (deps.jest) testCmd = 'npx jest --forceExit 2>&1';
         else if (/\bvitest\b/.test(String(scripts.test || ''))) testCmd = 'npm test -- --run 2>&1';
 
-        const result = spawnSync('bash', ['-c', testCmd], {
-          cwd: projectDir, encoding: 'utf8', timeout: 30000,
+        // VITEST_MAX_WORKERS bounds fork count during the health-check window
+        // (vitest reads it in resolveConfig, overriding config maxWorkers);
+        // harmless for non-vitest runners. Full-CPU forking here amplified
+        // machine-wide memory pressure when sessions started concurrently.
+        // CLAUDE_TEST_HEALTH_TIMEOUT_MS is a test-only override (regression
+        // tests exercise the timeout path without waiting 30s).
+        const timeoutMs = Number(process.env.CLAUDE_TEST_HEALTH_TIMEOUT_MS || 30000);
+        const result = await runInKillableGroup('bash', ['-c', testCmd], {
+          cwd: projectDir,
+          // NODE_OPTIONS caps the runner's MAIN process heap too (workers are
+          // additionally capped by the project's own vitest execArgv config);
+          // without it each health-check run could balloon toward Node's
+          // ~4GB default old-space ceiling.
+          env: {
+            ...process.env,
+            VITEST_MAX_WORKERS: '2',
+            NODE_OPTIONS: '--max-old-space-size=2048',
+          },
+          timeoutMs,
         });
 
-        if (result.status !== 0 && !result.signal) {
+        if (result.timedOut) {
+          testHealthBlock = `## ⚠️ Test Health Alert
+
+Test suite timed out (${Math.round(timeoutMs / 1000)}s). May indicate hanging tests or missing test teardown.`;
+        } else if (result.status !== 0 && !result.signal) {
           const output = (result.stdout || '') + (result.stderr || '');
           const lastLines = output.split('\n').filter(Boolean).slice(-15).join('\n');
           testHealthBlock = `## ⚠️ Test Health Alert
@@ -250,10 +306,6 @@ ${lastLines}
 \`\`\`
 
 Action: Run \`npm test\` / \`npx vitest --run\` to see full output. Prioritize fixing existing failures.`;
-        } else if (result.signal === 'SIGTERM') {
-          testHealthBlock = `## ⚠️ Test Health Alert
-
-Test suite timed out (30s). May indicate hanging tests or missing test teardown.`;
         }
       }
     } catch { /* fail-silent — test health is advisory */ }
@@ -279,6 +331,6 @@ ${items}
 Action: Check installation. Non-critical features (agent roster, test health) are unaffected.`;
 }
 
-// ── Compose (order: workflow → seat → agents → bootstrap → degradation → testHealth) ─
-const parts = [workflowBlock, seatBlock, agentBlock, bootstrapBlock, degradationBlock, testHealthBlock].filter(Boolean);
+// ── Compose (order: workflow → seat → bootstrap → degradation → testHealth) ─
+const parts = [workflowBlock, seatBlock, bootstrapBlock, degradationBlock, testHealthBlock].filter(Boolean);
 emit(parts.join('\n\n'));
