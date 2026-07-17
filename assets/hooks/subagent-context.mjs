@@ -64,7 +64,7 @@ const DIRECTIVES = {
   executor: [
     '## Executor',
     '- Task packet 含 spec 引用 → `lore get <spec-slug>` 加载规格（`lore ac list <spec>` 看结构化 AC）',
-    '- 类型→Skill：refactor→refactor / bug|perf→diagnose / tests→test',
+    '- 类型→Skill：refactor→lore-refactor / bug|perf→lore-diagnose / tests→lore-test',
     '- ⛔ research-first：新文件/新依赖前搜 npm/PyPI/GitHub SDK + 官方文档',
   ].join('\n'),
 
@@ -76,7 +76,7 @@ const DIRECTIVES = {
 
   Plan: [
     '## Plan',
-    '- 方案评估调 `Skill(research)` 加载方法论',
+    '- 方案评估调 `Skill(lore-research)` 加载方法论',
     '- 每个 implement task 的 Approach 必须注明 Source（搜索/文档出处）',
     '- ≥2 方案对比，列出 trade-offs',
   ].join('\n'),

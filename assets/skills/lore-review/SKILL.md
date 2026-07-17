@@ -1,6 +1,6 @@
 ---
 name: lore-review
-description: "One-shot structured review of code changes, PRs, or diffs against spec/ACs across six quality dimensions. Use when user says 'review', 'check this code', 'is this safe', 'review my implementation', or wants code correctness/security/quality assessed once. NOT for proactive whole-codebase defect scanning (use bug-hunt), NOT for automated review→fix loops (use iterative-review), NOT for runtime exploration (use dogfood)."
+description: "One-shot structured review of code changes, PRs, or diffs against spec/ACs across six quality dimensions. Use when user says 'review', 'check this code', 'is this safe', 'review my implementation', or wants code correctness/security/quality assessed once. NOT for proactive whole-codebase defect scanning (use lore-bug-hunt), NOT for automated review→fix loops (use lore-iterative-review), NOT for runtime exploration (use lore-dogfood)."
 ---
 
 # Review — Skill (Level 1, inline specialist dispatch)
