@@ -1,0 +1,39 @@
+# Journey definition — source of truth for one acceptance journey.
+# Compiled Playwright specs derive from this file, never the reverse.
+id: J-001
+slug: first-time-buyer-checkout
+priority: P0                # P0 core value | P1 supporting | P2 edge
+status: active              # active | retired
+spec_ref:                   # R-## ids from journeys/requirements.yaml (the coverage matrix joins on these)
+  - "R-01"                  # R-01 = PRD §2.1 One-tap checkout
+scenario: first-time        # session: happy | first-time | error-recovery | abandon-return | messy-input
+                            # lifecycle: return-user | accumulated-state | sunset
+seed: null                  # accumulated-state only: how the main agent seeds aged data BEFORE dispatch
+                            # e.g. "scripts/seed.ts --records 40 --spread 30d" — never seeded by the executor
+
+persona:
+  name: "Xiao Wang, first-time buyer"
+  knows: >                  # WHITELIST — the executor may use nothing beyond this
+    Heard from a friend that this site sells refurbished laptops cheaply.
+    Has never seen the site before.
+  wants: "Buy a laptop under ¥3000 and know when it will arrive."
+  context: "Phone-sized window, in a hurry."
+  attempt_budget: "5 confusion events OR 8 distinct failed attempts, then stop"  # countable, not wall-clock
+  credentials: null         # or account ref if the persona would realistically have one
+
+entry_point: "https://staging.example.com/"   # what a real user of this persona starts from
+
+success_criteria:           # business OUTCOMES, never UI states. "X is visible" is a UI state — forbidden.
+  - desc: "An order exists containing the chosen laptop, total ≤ ¥3000, with Xiao Wang's address"
+    oracle: api             # ui | api | artifact  (P0 must be api or artifact — ui cannot satisfy a P0 H2)
+    probe: "GET /api/orders?user=<test-account> — assert items, total, address"
+  - desc: "The order's delivery-date field is populated and shown on the order-detail page after purchase"
+    oracle: ui              # ui = verify the business FACT on a surface OTHER than the one that announced success
+    probe: "open the order-detail page (not the toast); assert a concrete delivery date is present"
+
+coverage_notes: ""          # deliberate matrix collapses, so the next run knows they were intentional
+
+# Filled by the pipeline:
+last_run: null              # ISO date of last semantic execution
+last_verdict: null          # pass | fail | null
+compiled_spec: null         # regression/J-001-first-time-buyer-checkout.spec.ts, if eligible

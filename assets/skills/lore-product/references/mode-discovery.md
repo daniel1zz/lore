@@ -82,7 +82,7 @@ If mature existing solutions found → recommend adoption over building. Hard ga
 ## Phase 4: Recommendation
 
 Based on synthesis, output one of:
-- **Go → PRD** (`/product prd`) — strong signal across roles, risks manageable
+- **Go → PRD** (`/lore-product prd`) — strong signal across roles, risks manageable
 - **Validate first** — specific experiments needed before committing (list them)
 - **Pivot** — core idea has issues but adjacent opportunity identified
 - **No-go** — multiple red flags, recommend parking or killing

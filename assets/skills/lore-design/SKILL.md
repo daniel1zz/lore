@@ -1,5 +1,5 @@
 ---
-name: design
+name: lore-design
 description: "Use when making architecture decisions, defining APIs, designing data models, planning module structure, or creating UI/UX specifications. Any task requiring design before implementation."
 ---
 
@@ -10,7 +10,7 @@ No named agent needed — all modes share the same tool requirements.
 
 ## Mode: $0
 
-⛔ **Validate the mode BEFORE any file read.** `$0` must be EXACTLY one of: `architecture | api | database | system | module`. If `$0` is empty, a prose sentence, or any other word (a natural-language task string makes `$0` its first token, e.g. "Produce" → `mode-Produce.md` 404) → do NOT read `references/mode-$0.md` — use AskUserQuestion to pick a mode from the table below. When invoking this skill, pass the mode name as the FIRST token (e.g. `/design module <context>`), never a prose sentence.
+⛔ **Validate the mode BEFORE any file read.** `$0` must be EXACTLY one of: `architecture | api | database | system | module`. If `$0` is empty, a prose sentence, or any other word (a natural-language task string makes `$0` its first token, e.g. "Produce" → `mode-Produce.md` 404) → do NOT read `references/mode-$0.md` — use AskUserQuestion to pick a mode from the table below. When invoking this skill, pass the mode name as the FIRST token (e.g. `/lore-design module <context>`), never a prose sentence.
 
 Only after validation passes: Read `references/mode-$0.md`.
 
@@ -95,7 +95,7 @@ After completing the design (post-synthesis, pre-approval), generate a browser p
 1. Write design markdown to `/tmp/design-preview.md`
 2. Run:
    ```bash
-   python3 $HOME/.claude/skills/design/scripts/preview.py /tmp/design-preview.md \
+   python3 $HOME/.claude/skills/lore-design/scripts/preview.py /tmp/design-preview.md \
      --title "<title>" --mode "<mode>"
    ```
 3. Browser opens with: rendered **Mermaid diagrams**, styled **tables**, syntax-highlighted **code**, auto **TOC** with scroll spy, mode-specific **accent color** (architecture=indigo, api=emerald, database=amber, system=blue, module=violet, ui=rose).
@@ -109,7 +109,7 @@ UI designs MUST present ≥3 **visually distinct** design options as live HTML. 
 3. Dispatch ≥3 **parallel `ui-variant-builder` subagents** (Sonnet) — one per variant, each receives its decomposition row + UI requirements + output path. Send ALL in a single message for parallel execution
 4. After all subagents return, run with `--variant` for each option:
    ```bash
-   python3 $HOME/.claude/skills/design/scripts/preview.py /tmp/design-preview.md \
+   python3 $HOME/.claude/skills/lore-design/scripts/preview.py /tmp/design-preview.md \
      --variant "Apple Health 风格:/tmp/option-a.html" \
      --variant "Linear 风格:/tmp/option-b.html" \
      --variant "Duolingo 风格:/tmp/option-c.html" \
@@ -124,7 +124,7 @@ UI designs MUST present ≥3 **visually distinct** design options as live HTML. 
 
 For single-option iteration after user selection:
 ```bash
-python3 $HOME/.claude/skills/design/scripts/preview.py /tmp/design-preview.md \
+python3 $HOME/.claude/skills/lore-design/scripts/preview.py /tmp/design-preview.md \
   --ui-html /tmp/selected-option.html --title "<title>" --mode ui
 ```
 
@@ -132,7 +132,7 @@ python3 $HOME/.claude/skills/design/scripts/preview.py /tmp/design-preview.md \
 
 After user selects a variant, extract its concrete design tokens and persist as the project's design system:
 
-1. **First UI design** (no `ui-standards.md` exists): Fill `~/.claude/skills/design/templates/ui-standards-template.md` with tokens extracted from the selected variant HTML → write to `docs/design-system/ui-standards.md`
+1. **First UI design** (no `ui-standards.md` exists): Fill `~/.claude/skills/lore-design/templates/ui-standards-template.md` with tokens extracted from the selected variant HTML → write to `docs/design-system/ui-standards.md`
 2. **Subsequent UI designs** (`ui-standards.md` exists): Verify selected variant complies with existing system → add new tokens if needed → flag conflicts for user decision
 
 This ensures all future UI work is constrained by the same visual language — the Mandatory Design Document Check at workflow step 1 enforces compliance on every invocation. See mode-ui.md "Token Crystallization" for the full extraction table.
@@ -146,7 +146,7 @@ Once style is confirmed and tokens crystallized, the skill MUST directly produce
 3. Dispatch **parallel `ui-variant-builder` subagents** (Sonnet) — one per screen, each receives the crystallized design tokens + screen-specific requirements + shared nav. ALL in a single message for parallel execution
 4. After all subagents return, launch preview with screen tabs:
    ```bash
-   python3 $HOME/.claude/skills/design/scripts/preview.py /tmp/design-preview.md \
+   python3 $HOME/.claude/skills/lore-design/scripts/preview.py /tmp/design-preview.md \
      --variant "Dashboard:/tmp/prototype-dashboard.html" \
      --variant "Detail:/tmp/prototype-detail.html" \
      --variant "Settings:/tmp/prototype-settings.html" \

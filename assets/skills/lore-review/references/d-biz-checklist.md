@@ -18,7 +18,7 @@ D-BIZ auto-appends to `mode-code` review when ANY of:
 4. **Spec signal**: Feature-spec ACs contain quality keywords:
    - `relevant`, `accurate`, `quality`, `faithful`, `complete`, `coherent`
 5. **Config signal**: Project contains `promptfooconfig.yaml`
-6. **Explicit request**: User runs `/review code` on output-producing feature
+6. **Explicit request**: User runs `/lore-review code` on output-producing feature
 
 ## Checklist
 

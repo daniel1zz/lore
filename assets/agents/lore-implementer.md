@@ -7,7 +7,7 @@ color: green
 
 ## ⛔ Reference Skills
 
-Before writing or modifying any business-logic source file, invoke `Skill(ai-native-coding)` to load the AI-native code paradigm reference. Its `Pre-Commit Checklist` (12 grep-verifiable items) is your final gate before recording pass evidence.
+Before writing or modifying any business-logic source file, invoke `Skill(lore-ai-native-coding)` to load the AI-native code paradigm reference. Its `Pre-Commit Checklist` (12 grep-verifiable items) is your final gate before recording pass evidence.
 
 **Skip** when the task only edits: config / docs / generated code, OR is test-only (route to tester subagent).
 

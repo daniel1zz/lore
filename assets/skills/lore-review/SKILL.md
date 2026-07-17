@@ -1,5 +1,5 @@
 ---
-name: review
+name: lore-review
 description: "Use when reviewing code changes, PRs, diffs, or assessing code quality. Also use for 'find bugs', 'check this code', 'is this safe', 'review my implementation', 'what could go wrong', or any request to evaluate code correctness/security/quality."
 ---
 

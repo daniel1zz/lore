@@ -98,7 +98,7 @@ plan-tooling-upgrade
 │   ├── task-upgrade-hook-x   (--anchor hooks/pre-batch.mjs)
 │   └── task-upgrade-hook-y   (--anchor hooks/pre-status.mjs, blocked by task-upgrade-hook-x)
 ├── [Phase B: Skill Rules]        ← no blocks edge into Phase A: runs in parallel
-│   └── task-update-skill-z   (--anchor skills/plan/)
+│   └── task-update-skill-z   (--anchor skills/lore-plan/)
 └── [Phase C: Integration]
     └── task-e2e-validation   (blocked by task-upgrade-hook-y AND task-update-skill-z)
 ```

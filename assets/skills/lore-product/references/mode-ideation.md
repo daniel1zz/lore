@@ -75,7 +75,7 @@ After all 6 agents return, synthesize into a structured report:
 ## Phase 4: Next Steps
 
 Based on synthesis, recommend one of:
-- **Proceed to Discovery** (`/product discovery`) — idea has enough signal, validate assumptions
+- **Proceed to Discovery** (`/lore-product discovery`) — idea has enough signal, validate assumptions
 - **Pivot & Re-brainstorm** — fundamental issues found, re-run with adjusted brief
 - **Park** — timing/market/feasibility issues, save for future re-evaluation
 - **Kill** — fatal flaws identified, not worth pursuing

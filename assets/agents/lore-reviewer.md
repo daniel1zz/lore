@@ -42,9 +42,9 @@ Priority:
 ## How to work
 
 1. **Read shared methodology FIRST** (MUST — do not skip):
-   - `~/.claude/skills/review/references/mode-code.md` — code review checklist
-   - `~/.claude/skills/review/references/mode-architecture.md` — cross-module changes
-   - `~/.claude/skills/review/references/mode-security.md` — auth / crypto / input handling
+   - `~/.claude/skills/lore-review/references/mode-code.md` — code review checklist
+   - `~/.claude/skills/lore-review/references/mode-architecture.md` — cross-module changes
+   - `~/.claude/skills/lore-review/references/mode-security.md` — auth / crypto / input handling
 2. **Load context**: task + spec + ACs via lore (above), evidence trail via `lore get <task>` (verification_evidence)
 3. **Read the changed files**: `Read` / `Grep` / `Glob`
 4. **Evaluate against each AC**: cite `file:line` for every assessment

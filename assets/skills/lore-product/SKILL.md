@@ -1,5 +1,5 @@
 ---
-name: product
+name: lore-product
 description: "Use when user says 'write a PRD', 'product requirements', 'roadmap', 'user research', 'ideation', 'feature discovery', 'tech assessment', '写需求', '产品规划', or when creating product-level documentation before design/implementation."
 ---
 
