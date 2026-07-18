@@ -21,6 +21,13 @@
  *   Non-spec doc type / nonexistent doc → 4 / 3 respectively (ERROR/NEGATIVE).
  *   Judge unavailable (no configured provider) never flips the exit code (REGRESSION).
  *
+ * Also covers the AC-Quantifiability Gate spec's CLI-preflight parity fix (task
+ * `task-hook-parity-g1-g2-ai-advisory-on-review`): `lore gate spec-promote` threads
+ * the spec's declared `extra.acceptance_criteria` (via `AcService.listCriteria`, the
+ * same SSOT `lore ac list` reads) into the SAME `GateContext` the service-layer
+ * `GateEnforcer` already lints on a draft→approved transition (`CorpusService.set` /
+ * `ReviewService.approve`) — see "AC-Quantifiability Gate CLI parity" below.
+ *
  * Coverage dimensions: HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE / REGRESSION.
  */
 
@@ -207,6 +214,59 @@ function writeAiConfig(command: string) {
   } as never);
 }
 
+/**
+ * Write config.yaml disabling spec-promote's ac_quantifiable sub-predicate, ALSO
+ * pointing ai.provider at a definitely-nonexistent binary (same "ghost binary"
+ * idiom the AC4 suite uses) so the post-pass judge-advisory attempt fails fast
+ * instead of hanging on a real reachable `claude` binary. A single `saveConfig`
+ * call — `saveConfig` REPLACES the whole file, so `workflow` and `ai` must be
+ * set together here rather than via two sequential helper calls.
+ */
+function writeAcQuantifiableDisabledConfig() {
+  saveConfig(tmpDir, {
+    project: { name: "gate-spec-promote-test", author: "tester" },
+    workflow: { gates: { "spec-promote": { ac_quantifiable: { enabled: false } } } },
+    ai: {
+      provider: "claude-cli",
+      providers: {
+        "claude-cli": { command: "ghost-ai-binary-not-installed-xyz", args: [], timeout_ms: 5000 },
+      },
+      templates: {},
+      telemetry: false,
+    },
+  } as never);
+}
+
+/**
+ * Directly patches a spec's `extra.acceptance_criteria` via `CorpusService.set`
+ * (no status transition) — bypasses BOTH `AcService.addCriterion`'s immediate
+ * lint AND the spec-create gate (the spec already exists), the exact "predates
+ * the gate" scenario `acQuantifiable`'s spec-promote wiring is the BACKSTOP for.
+ * Mirrors `ac-quantifiable-gate.test.ts`'s `insertRawSpec` helper, but goes
+ * through the public `CorpusService.set` API (available here) rather than a
+ * bare `store.insert` (not available through this file's `createApp()` shape).
+ */
+async function setAcceptanceCriteriaDirectly(specId: string, criteria: unknown[]): Promise<void> {
+  const app = createApp(join(tmpDir, ".lore", "lore.db"));
+  try {
+    const getResult = await app.corpusService.get(specId);
+    if (!getResult.ok) throw new Error(`get failed: ${JSON.stringify(getResult.error)}`);
+    const setResult = await app.corpusService.set(specId, {
+      extra: { ...getResult.value.doc.extra, acceptance_criteria: criteria },
+    });
+    if (!setResult.ok) throw new Error(`set failed: ${JSON.stringify(setResult.error)}`);
+  } finally {
+    app.close();
+  }
+}
+
+/** An AC whose statement carries an abstract-quality word with no measurable anchor. */
+const UNQUANTIFIED_AC = {
+  id: "AC-BAD-1",
+  statement: "the dashboard loads fast",
+  verify: { mode: "human" as const },
+};
+
 // ─── AC3 (NEGATIVE): 0 declared AC → exit 4 ──────────────────────────────────
 
 describe("lore gate spec-promote — AC3: no acceptance criteria (deterministic gate)", () => {
@@ -350,6 +410,89 @@ describe("lore gate spec-promote — AC4: acceptance criteria present (exit 0) +
     expect(process.exitCode).toBe(0);
     const stderrText = output.stderr.join("");
     expect(stderrText).toContain("gate: judge advisory unavailable");
+  });
+});
+
+// ─── AC-Quantifiability Gate CLI parity (task-hook-parity-g1-g2) ────────────
+
+describe("lore gate spec-promote — AC-Quantifiability Gate CLI parity", () => {
+  // NEGATIVE — an unquantified AC that predates the gate (patched in directly, bypassing
+  // AcService.addCriterion's own immediate lint) blocks spec-promote, naming the AC id + word.
+  it("NEGATIVE: exits 4 and names the offending AC id + word for an unquantified declared AC", async () => {
+    const { specSlug, specId } = await createSpec();
+    await setAcceptanceCriteriaDirectly(specId, [UNQUANTIFIED_AC]);
+
+    const cmd = await importGateSpecPromoteCommand();
+    const output = captureOutput();
+    try {
+      await cmd.run({ args: { spec: specSlug } });
+    } finally {
+      output.restore();
+    }
+
+    expect(process.exitCode).toBe(4);
+    const stderrText = output.stderr.join("");
+    expect(stderrText).toContain("unquantified acceptance criterion");
+    expect(stderrText).toContain("AC-BAD-1");
+    expect(stderrText).toContain("fast");
+  });
+
+  // HAPPY — every declared AC is quantified (via the normal AcService.addCriterion path) → exit 0.
+  it("HAPPY: exits 0 with no AC_NOT_QUANTIFIABLE mention when every declared AC is quantified", async () => {
+    const { specSlug, specId } = await createSpec();
+    await addAcceptanceCriterion(specId, "AC-GOOD-1");
+    writeAiConfig("ghost-ai-binary-not-installed-xyz"); // reason: see AC4 suite's identical comment
+
+    const cmd = await importGateSpecPromoteCommand();
+    const output = captureOutput();
+    try {
+      await cmd.run({ args: { spec: specSlug } });
+    } finally {
+      output.restore();
+    }
+
+    expect(process.exitCode).toBe(0);
+    const stdoutText = output.stdout.join("\n");
+    expect(stdoutText).toContain("gate: pass");
+    expect(stdoutText).not.toContain("AC_NOT_QUANTIFIABLE");
+  });
+
+  // STATE — config escape: workflow.gates.spec-promote.ac_quantifiable.enabled=false lets
+  // an unquantified-AC spec approve.
+  it("STATE: workflow.gates.spec-promote.ac_quantifiable.enabled=false lets an unquantified-AC spec pass", async () => {
+    const { specSlug, specId } = await createSpec();
+    await setAcceptanceCriteriaDirectly(specId, [UNQUANTIFIED_AC]);
+    writeAcQuantifiableDisabledConfig();
+
+    const cmd = await importGateSpecPromoteCommand();
+    const output = captureOutput();
+    try {
+      await cmd.run({ args: { spec: specSlug } });
+    } finally {
+      output.restore();
+    }
+
+    expect(process.exitCode).toBe(0);
+    const stdoutText = output.stdout.join("\n");
+    expect(stdoutText).toContain("gate: pass");
+  });
+
+  // REGRESSION — LORE_GATE_BYPASS=1 still short-circuits an unquantified-AC spec.
+  it("REGRESSION: LORE_GATE_BYPASS=1 exits 0 even for an unquantified-AC spec", async () => {
+    const { specSlug, specId } = await createSpec();
+    await setAcceptanceCriteriaDirectly(specId, [UNQUANTIFIED_AC]);
+    process.env["LORE_GATE_BYPASS"] = "1";
+
+    const cmd = await importGateSpecPromoteCommand();
+    const output = captureOutput();
+    try {
+      await cmd.run({ args: { spec: specSlug } });
+    } finally {
+      output.restore();
+      delete process.env["LORE_GATE_BYPASS"];
+    }
+
+    expect(process.exitCode).toBe(0);
   });
 });
 

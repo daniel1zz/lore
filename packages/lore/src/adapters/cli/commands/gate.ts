@@ -123,7 +123,13 @@ import {
   type GateCheckpoint,
   type GateContext,
 } from "../../../service/checkpoint-registry.js";
-import { runDeterministicChecks, resolveGateEnabled, resolveAnchorOverlapGateEnabled } from "@lore/core";
+import {
+  runDeterministicChecks,
+  resolveGateEnabled,
+  resolveAnchorOverlapGateEnabled,
+  resolveAcQuantifiableGateEnabled,
+  specAcceptanceCriteriaSchema,
+} from "@lore/core";
 import type { App } from "../../../app.js";
 import type { AcService } from "../../../service/ac-service.js";
 import type { LoreConfig, LoreError, NewReviewJudgment } from "@lore/core";
@@ -173,11 +179,19 @@ const RULE_DOC_MISSING_PLACEHOLDER =
 
 /**
  * Candidate spec-creation payload, shaped after MCP `lore_create`'s input schema
- * (`../../mcp/tools.js::LoreCreateSchema`) but scoped to only the fields the three
- * gate predicates consume. `.passthrough()` so callers may pass the FULL `lore_create`
- * payload (e.g. `tags`, `ai`) without this schema rejecting the extra keys — this gate
- * only reads a subset, it does not re-validate the whole create contract (that is
- * `createDocInputSchema`'s job, at actual creation time).
+ * (`../../mcp/tools.js::LoreCreateSchema`) but scoped to only the fields the gate
+ * predicates consume — including `acQuantifiable` (AC-Quantifiability Gate spec
+ * §Design), the CLI-preflight parity fix that threads `extra.acceptance_criteria`
+ * into the same `GateContext` the service-layer `GateEnforcer` already builds
+ * (`CorpusService._createImpl`). `extra.acceptance_criteria` is typed `z.unknown()`
+ * here — this schema only gates SHAPE-of-envelope, not AC content; the actual
+ * `specAcceptanceCriteriaSchema.safeParse` (in `runSpecCreateGate`) is the real
+ * validation, and a malformed/absent array degrades to `acceptanceCriteria`
+ * undefined — `acQuantifiable`'s vacuous-pass semantics treat that identically to
+ * "no ACs declared yet". `.passthrough()` so callers may pass the FULL
+ * `lore_create` payload (e.g. `tags`, `ai`) without this schema rejecting the
+ * extra keys — this gate only reads a subset, it does not re-validate the whole
+ * create contract (that is `createDocInputSchema`'s job, at actual creation time).
  */
 const gateSpecCreateInputSchema = z
   .object({
@@ -185,7 +199,10 @@ const gateSpecCreateInputSchema = z
     title: z.string(),
     parent_id: z.string().optional(),
     content: z.string().optional(),
-    extra: z.object({ spec_kind: z.string().optional() }).passthrough().optional(),
+    extra: z
+      .object({ spec_kind: z.string().optional(), acceptance_criteria: z.unknown().optional() })
+      .passthrough()
+      .optional(),
   })
   .passthrough();
 
@@ -242,7 +259,7 @@ export default defineCommand({
         const { app, config } = loadLoreApp();
         try {
           if (isGateDisabledByConfig("spec-create", config)) return;
-          await runSpecCreateGate(app, parsed.data);
+          await runSpecCreateGate(app, parsed.data, config);
         } finally {
           app.close();
         }
@@ -274,7 +291,7 @@ export default defineCommand({
         const { app, config } = loadLoreApp();
         try {
           if (isGateDisabledByConfig("spec-promote", config)) return;
-          await runSpecPromoteGate(app, args.spec as string);
+          await runSpecPromoteGate(app, args.spec as string, config);
         } finally {
           app.close();
         }
@@ -382,21 +399,48 @@ function isGateDisabledByConfig(
 }
 
 /**
- * Runs the three `gate-predicates.js` checks against `input`, printing either a pass
- * marker (exit 0) or a `renderFeedingPack` violation block (exit 4) to stdout.
+ * Runs the `gate-predicates.js` checks against `input` (`parentLegal` / `specKindValid`
+ * / `hasSkeleton` / `acQuantifiable`), printing either a pass marker (exit 0) or a
+ * `renderFeedingPack` violation block (exit 4) to stdout.
+ *
+ * `acQuantifiable` (AC-Quantifiability Gate spec §Design, CLI-preflight parity fix)
+ * consumes `input.extra.acceptance_criteria` — the SAME field
+ * `CorpusService._createImpl`'s service-layer `GateEnforcer` path already lints for
+ * a real `lore create spec` / `lore_create` call. Parsing it here (rather than
+ * trusting the untyped `.passthrough()` value) means a candidate whose ACs don't
+ * even match `specAcceptanceCriteriaSchema`'s shape degrades to `acceptanceCriteria`
+ * undefined — `acQuantifiable`'s vacuous-pass semantics, not a second validation
+ * error this gate was never designed to surface (the real create-time write still
+ * enforces AC shape via `createDocInputSchema`).
  *
  * @param app - Wired `App` (from `loadLoreApp()`), used to resolve the candidate's
  *   parent doc and the approved rule doc — read-only, no corpus writes.
  * @param input - Validated candidate spec-creation payload.
+ * @param config - `loadLoreApp()`'s resolved project config — forwarded to
+ *   `resolveAcQuantifiableGateEnabled` so this pre-flight gate honors the SAME
+ *   `workflow.gates."spec-create".ac_quantifiable.enabled` sub-key
+ *   `GateEnforcer.isAcQuantifiableEnabled()` reads; no second, independently-drifting
+ *   config read.
  */
-async function runSpecCreateGate(app: App, input: GateSpecCreateInput): Promise<void> {
+async function runSpecCreateGate(
+  app: App,
+  input: GateSpecCreateInput,
+  config: LoreConfig | undefined,
+): Promise<void> {
   const parentDoc = await resolveParentDoc(app, input.parent_id);
   const checkpoint = requireCheckpoint("spec-create");
 
+  const acceptanceCriteriaParsed = specAcceptanceCriteriaSchema.safeParse(
+    input.extra?.acceptance_criteria,
+  );
   const ctx: GateContext = {
     parentType: parentDoc !== null ? parentDoc.type : null,
     ...(input.extra?.spec_kind !== undefined ? { specKind: input.extra.spec_kind } : {}),
     content: input.content ?? "",
+    ...(acceptanceCriteriaParsed.success
+      ? { acceptanceCriteria: acceptanceCriteriaParsed.data }
+      : {}),
+    acQuantifiableEnabled: resolveAcQuantifiableGateEnabled(config, "spec-create"),
   };
   const results = checkpoint.check(ctx);
 
@@ -626,16 +670,32 @@ async function runTaskClaimGate(
 }
 
 /**
- * Runs the `spec-promote` deterministic zone (≥1 declared acceptance criterion) against
- * an already-created spec, then makes a best-effort, exit-code-inert judge advisory
- * attempt (module header, INV2). The deterministic outcome is settled and printed
- * BEFORE the advisory attempt runs, so a slow/unreachable AI provider can never delay
- * or flip the gate's verdict — it can only add a trailing stderr note.
+ * Runs the `spec-promote` deterministic zone (≥1 declared acceptance criterion, AND —
+ * CLI-preflight parity fix, AC-Quantifiability Gate spec §Design — every declared
+ * criterion must pass `acQuantifiable`) against an already-created spec, then makes a
+ * best-effort, exit-code-inert judge advisory attempt (module header, INV2). The
+ * deterministic outcome is settled and printed BEFORE the advisory attempt runs, so a
+ * slow/unreachable AI provider can never delay or flip the gate's verdict — it can
+ * only add a trailing stderr note.
+ *
+ * `criteria` (from `AcService.listCriteria`, the SAME SSOT `lore ac list` reads) is
+ * already the exact `AcceptanceCriterion[]` shape `GateContext.acceptanceCriteria`
+ * needs — no re-parse required here, unlike `runSpecCreateGate`'s untyped candidate
+ * JSON.
  *
  * @param app - Wired `App` (from `loadLoreApp()`).
  * @param specIdOrSlug - Spec document ULID or slug to gate.
+ * @param config - `loadLoreApp()`'s resolved project config — forwarded to
+ *   `resolveAcQuantifiableGateEnabled` so this pre-flight gate honors the SAME
+ *   `workflow.gates."spec-promote".ac_quantifiable.enabled` sub-key
+ *   `GateEnforcer.isAcQuantifiableEnabled()` reads; no second, independently-drifting
+ *   config read.
  */
-async function runSpecPromoteGate(app: App, specIdOrSlug: string): Promise<void> {
+async function runSpecPromoteGate(
+  app: App,
+  specIdOrSlug: string,
+  config: LoreConfig | undefined,
+): Promise<void> {
   const listResult = await requireAcService(app).listCriteria(specIdOrSlug);
   if (!listResult.ok) {
     process.stderr.write(formatError(listResult.error) + "\n");
@@ -645,7 +705,12 @@ async function runSpecPromoteGate(app: App, specIdOrSlug: string): Promise<void>
 
   const { criteria } = listResult.value;
   const checkpoint = requireCheckpoint("spec-promote");
-  const ctx: GateContext = { acceptanceCriteriaCount: criteria.length, specIdOrSlug };
+  const ctx: GateContext = {
+    acceptanceCriteriaCount: criteria.length,
+    specIdOrSlug,
+    acceptanceCriteria: criteria,
+    acQuantifiableEnabled: resolveAcQuantifiableGateEnabled(config, "spec-promote"),
+  };
   const results = checkpoint.check(ctx);
 
   if (isCheckpointBlocked(results)) {

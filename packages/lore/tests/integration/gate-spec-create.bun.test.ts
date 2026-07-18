@@ -14,11 +14,17 @@
  *   AC5 — LORE_GATE_BYPASS=1 short-circuits ANY input (even non-compliant) to exit 0.
  *   Plus: bad spec_kind → exit 4 with INVALID_SPEC_KIND in the missing list.
  *
+ * Also covers the AC-Quantifiability Gate spec's CLI-preflight parity fix (task
+ * `task-hook-parity-g1-g2-ai-advisory-on-review`): `lore gate spec-create --input-json`
+ * threads a candidate's `extra.acceptance_criteria` into the SAME `GateContext` the
+ * service-layer `GateEnforcer` already lints via `CorpusService._createImpl` — see
+ * "AC-Quantifiability Gate CLI parity" below.
+ *
  * Coverage dimensions: HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE / REGRESSION.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdirSync, rmSync } from "fs";
+import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -237,6 +243,94 @@ describe("lore gate spec-create", () => {
     const afterTotal = (JSON.parse(after.stdout) as { data: { total_docs: number } }).data.total_docs;
 
     expect(afterTotal).toBe(beforeTotal);
+  });
+});
+
+// ─── Suite: AC-Quantifiability Gate CLI parity (task-hook-parity-g1-g2) ────
+
+/** An AC whose statement carries an abstract-quality word with no measurable anchor. */
+const UNQUANTIFIED_AC = {
+  id: "AC-1",
+  statement: "the dashboard loads fast",
+  verify: { mode: "human" },
+};
+
+/** The same claim, restated with a numeric threshold — passes the lint. */
+const QUANTIFIED_AC = {
+  id: "AC-1",
+  statement: "the dashboard P95 load time is < 200ms",
+  verify: { mode: "human" },
+};
+
+/** Overwrites `.lore/config.yaml` with a project block plus the given `workflow.gates` map. */
+function writeGatesConfig(tmpDir: string, gatesYaml: string): void {
+  const config = [
+    "project:",
+    "  name: gate-spec-create-acq-test",
+    "  author: tester",
+    "workflow:",
+    "  gates:",
+    gatesYaml,
+  ].join("\n");
+  writeFileSync(join(tmpDir, ".lore", "config.yaml"), config + "\n", "utf8");
+}
+
+describe("lore gate spec-create — AC-Quantifiability Gate CLI parity", () => {
+  let tmpDir: string;
+  let prdSlug: string;
+
+  beforeEach(() => {
+    tmpDir = makeTempDir("acq");
+    initCorpus(tmpDir);
+    seedRuleDoc(tmpDir);
+    prdSlug = createPrd(tmpDir, "acq-prd");
+  });
+
+  afterEach(() => cleanupDir(tmpDir));
+
+  // HAPPY — a candidate whose declared AC is fully quantified passes.
+  it("HAPPY: exits 0 for a candidate whose declared acceptance_criteria are all quantified", () => {
+    const payload = compliantPayload(prdSlug);
+    payload["extra"] = { spec_kind: "tech", acceptance_criteria: [QUANTIFIED_AC] };
+    const result = runGate(tmpDir, payload);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("gate: pass");
+  });
+
+  // NEGATIVE — an unquantified abstract-word AC blocks, naming the AC id and the word.
+  it("NEGATIVE: exits 4 and names the offending AC id + word for an unquantified acceptance_criteria entry", () => {
+    const payload = compliantPayload(prdSlug);
+    payload["extra"] = { spec_kind: "tech", acceptance_criteria: [UNQUANTIFIED_AC] };
+    const result = runGate(tmpDir, payload);
+    expect(result.exitCode).toBe(4);
+    expect(result.stdout).toContain("AC_NOT_QUANTIFIABLE");
+    expect(result.stdout).toContain("AC-1");
+    expect(result.stdout).toContain("fast");
+  });
+
+  // BOUNDARY — no acceptance_criteria field at all → vacuous pass (identical to pre-fix behavior).
+  it("BOUNDARY: a candidate declaring no acceptance_criteria at all still passes (vacuous)", () => {
+    const result = runGate(tmpDir, compliantPayload(prdSlug));
+    expect(result.exitCode).toBe(0);
+  });
+
+  // STATE — config escape: workflow.gates.spec-create.ac_quantifiable.enabled=false lets an
+  // unquantified candidate through.
+  it("STATE: workflow.gates.spec-create.ac_quantifiable.enabled=false lets an unquantified candidate pass", () => {
+    writeGatesConfig(tmpDir, ["    spec-create:", "      ac_quantifiable:", "        enabled: false"].join("\n"));
+    const payload = compliantPayload(prdSlug);
+    payload["extra"] = { spec_kind: "tech", acceptance_criteria: [UNQUANTIFIED_AC] };
+    const result = runGate(tmpDir, payload);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("gate: pass");
+  });
+
+  // REGRESSION — LORE_GATE_BYPASS=1 still short-circuits an unquantified-AC candidate.
+  it("REGRESSION: LORE_GATE_BYPASS=1 exits 0 even for an unquantified-AC candidate", () => {
+    const payload = compliantPayload(prdSlug);
+    payload["extra"] = { spec_kind: "tech", acceptance_criteria: [UNQUANTIFIED_AC] };
+    const result = runGate(tmpDir, payload, { LORE_GATE_BYPASS: "1" });
+    expect(result.exitCode).toBe(0);
   });
 });
 
