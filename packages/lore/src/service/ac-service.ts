@@ -20,6 +20,13 @@
  *   id) simultaneously. Mirrors `CorpusService.set`'s single-shot spec-extra validation
  *   (schemas.ts's `spec_kind` superRefine precedent) rather than re-deriving per-field
  *   checks here.
+ * @invariant `addCriterion` ALSO rejects an unquantified abstract-quality claim in the
+ *   new entry's `statement` (AC-Quantifiability Gate spec §Design) — the deterministic,
+ *   zero-LLM `lintAcQuantifiability` lint (`@lore/core`, ac-quality.ts) runs AFTER shape
+ *   validation succeeds and BEFORE the CAS write, so a `lore ac add` with an
+ *   unquantified AC never reaches the store. This is the immediate-feedback layer; the
+ *   `acQuantifiable` gate predicate (`gate-predicates.ts`, wired into `spec-create`/
+ *   `spec-promote`) is the backstop for ACs added through any other path.
  * @invariant `removeCriterion` fails loud (VALIDATION_ERROR) when any task under a
  *   child plan of the spec has `verification_evidence[].ac_ref === acId`, UNLESS
  *   `opts.force` is true. A forced removal never touches task evidence — those
@@ -41,6 +48,7 @@ import {
   specAcceptanceCriteriaSchema,
   computeAcCoverage,
   extractEvidence,
+  lintAcQuantifiability,
   type AcceptanceCriterion,
   type AcCoverageFact,
 } from "@lore/core";
@@ -124,6 +132,29 @@ export class AcService {
         message: issue !== undefined ? issue.message : "Invalid acceptance criterion",
         value: criterion,
       });
+    }
+
+    // reason: AC-Quantifiability Gate spec §Design — this is the PRIMARY, immediate
+    // enforcement point (the spec-create/spec-promote gate predicate, `acQuantifiable`
+    // in `gate-predicates.ts`, is the BACKSTOP that re-lints the whole declared set).
+    // Lint ONLY the newly-appended entry — `existing` entries were already accepted
+    // through this same check (or predate the gate; the backstop catches those at
+    // spec-promote) — via the SAME zero-LLM `lintAcQuantifiability` lint, never a
+    // second wordlist/heuristic. `parsed.data`'s last element is the validated form
+    // of `criterion` (Zod array parsing preserves element order — `candidate` never
+    // reorders `existing`).
+    const newCriterion = parsed.data[parsed.data.length - 1];
+    if (newCriterion !== undefined) {
+      const findings = lintAcQuantifiability([newCriterion]).filter((f) => f.severity === "block");
+      const finding = findings[0];
+      if (finding !== undefined) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: `acceptance_criteria.${finding.ac_id}`,
+          message: finding.message,
+          value: criterion,
+        });
+      }
     }
 
     const writeResult = await this.writeCriteria(spec, parsed.data, "add");

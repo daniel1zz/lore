@@ -53,6 +53,7 @@ import {
   ok,
   resolveGateEnabled,
   resolveAnchorOverlapGateEnabled,
+  resolveAcQuantifiableGateEnabled,
   type LoreConfig,
   type LoreError,
   type Result,
@@ -212,5 +213,25 @@ export class GateEnforcer {
    */
   isTaskClaimAnchorOverlapEnabled(): boolean {
     return resolveAnchorOverlapGateEnabled(this.config);
+  }
+
+  /**
+   * Whether `checkpoint`'s `acQuantifiable` sub-predicate specifically is enabled
+   * (`workflow.gates.<checkpoint>.ac_quantifiable.enabled`, AC-Quantifiability Gate
+   * spec §Design) — NARROWER than `isEnabled(checkpoint)`, which governs the WHOLE
+   * checkpoint. A caller building `GateContext.acQuantifiableEnabled`
+   * (`CorpusService._createImpl`/`set`, `ReviewService.enforceApprovalGate`)
+   * consults this, not `isEnabled`. Mirrors `isTaskClaimAnchorOverlapEnabled`'s
+   * shape, parameterized by checkpoint since this sub-predicate is wired on TWO
+   * checkpoints (`spec-create` and `spec-promote`), unlike anchor-overlap's single
+   * `task-claim` wiring.
+   *
+   * @param checkpoint - Which checkpoint's `ac_quantifiable` sub-knob to query.
+   * @returns `false` when the sub-key is explicitly disabled; `true` otherwise.
+   * @example
+   * enforcer.isAcQuantifiableEnabled("spec-create"); // => false when config disables it
+   */
+  isAcQuantifiableEnabled(checkpoint: GateCheckpoint): boolean {
+    return resolveAcQuantifiableGateEnabled(this.config, checkpoint);
   }
 }

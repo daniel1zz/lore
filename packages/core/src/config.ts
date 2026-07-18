@@ -135,6 +135,15 @@ const GateCheckpointConfigSchema = z
      * would also take upstream-approval gating down with it.
      */
     anchor_overlap: z.object({ enabled: z.boolean().optional() }).strict().optional(),
+    /**
+     * `spec-create`/`spec-promote` sub-predicate override (AC-Quantifiability Gate
+     * spec §Design) — `false` disables JUST the `acQuantifiable` predicate on the
+     * checkpoint it's nested under, leaving that checkpoint's other predicates
+     * (skeleton/parent/spec_kind on spec-create; declared-AC-count on spec-promote)
+     * untouched. Inert on `plan-promote`/`task-claim` (neither checkpoint reads it) —
+     * same narrower-blast-radius shape as `anchor_overlap` above.
+     */
+    ac_quantifiable: z.object({ enabled: z.boolean().optional() }).strict().optional(),
   })
   .strict();
 
@@ -419,6 +428,36 @@ export function resolveGateEnabled(
  */
 export function resolveAnchorOverlapGateEnabled(config: LoreConfig | undefined): boolean {
   return config?.workflow?.gates?.["task-claim"]?.anchor_overlap?.enabled !== false;
+}
+
+/**
+ * Resolve whether `checkpoint`'s `acQuantifiable` sub-predicate specifically is
+ * enabled, per `workflow.gates.<checkpoint>.ac_quantifiable.enabled` (AC-Quantifiability
+ * Gate spec §Design). Narrower than {@link resolveGateEnabled}`(config, checkpoint)`,
+ * which governs the WHOLE checkpoint. Unlike {@link resolveAnchorOverlapGateEnabled}
+ * (hardcoded to `"task-claim"`), this predicate is wired on TWO checkpoints
+ * (`spec-create` and `spec-promote`), so `checkpoint` is a parameter here rather than
+ * baked in. Absence of the whole config, the `workflow` section, the `gates` map, the
+ * per-checkpoint entry, or the nested `ac_quantifiable` key ALL mean "enabled" — only
+ * an EXPLICIT `ac_quantifiable.enabled: false` disables just this predicate.
+ *
+ * @param config - Parsed LoreConfig, or undefined when no config file was loaded
+ * @param checkpoint - Gate checkpoint id (e.g. `"spec-create"`). Typed as a plain
+ *   `string` for the same leaf-of-dependency-graph reason {@link resolveGateEnabled}
+ *   documents.
+ * @returns `false` iff `workflow.gates.<checkpoint>.ac_quantifiable.enabled === false`;
+ *   `true` otherwise
+ * @example
+ *   resolveAcQuantifiableGateEnabled(undefined, "spec-create") // => true
+ *   resolveAcQuantifiableGateEnabled({
+ *     project, workflow: { gates: { "spec-create": { ac_quantifiable: { enabled: false } } } },
+ *   }, "spec-create") // => false
+ */
+export function resolveAcQuantifiableGateEnabled(
+  config: LoreConfig | undefined,
+  checkpoint: string,
+): boolean {
+  return config?.workflow?.gates?.[checkpoint]?.ac_quantifiable?.enabled !== false;
 }
 
 /**

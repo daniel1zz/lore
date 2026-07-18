@@ -651,6 +651,15 @@ export class CorpusService {
           };
         }
       }
+      // reason: AC-Quantifiability Gate spec §Design — a spec created with INLINE
+      // `extra.acceptance_criteria` (the service-layer create path; `lore ac add`
+      // is the more common post-create path and has its own immediate lint in
+      // `AcService.addCriterion`) must not slip an unquantified abstract-quality
+      // AC past spec-create. `undefined` when absent/malformed — `acQuantifiable`'s
+      // vacuous-pass semantics treat that identically to "no ACs declared yet".
+      const acceptanceCriteriaParsed = specAcceptanceCriteriaSchema.safeParse(
+        resolvedExtra["acceptance_criteria"],
+      );
       const gateCtx: GateContext = {
         parentType: resolvedParentType,
         ...(typeof resolvedExtra["spec_kind"] === "string"
@@ -659,6 +668,8 @@ export class CorpusService {
         content: data.content ?? "",
         ...ruleEnrichment,
         ...(resolvedParentMarkdown !== null ? { parentMarkdown: resolvedParentMarkdown } : {}),
+        ...(acceptanceCriteriaParsed.success ? { acceptanceCriteria: acceptanceCriteriaParsed.data } : {}),
+        acQuantifiableEnabled: this.gateEnforcer.isAcQuantifiableEnabled("spec-create"),
       };
       const gateResult = this.gateEnforcer.enforce("spec-create", gateCtx);
       if (!gateResult.ok) return gateResult;
@@ -1210,6 +1221,8 @@ export class CorpusService {
       const gateResult = this.gateEnforcer.enforce("spec-promote", {
         acceptanceCriteriaCount,
         specIdOrSlug: existing.slug,
+        ...(parsed.success ? { acceptanceCriteria: parsed.data } : {}),
+        acQuantifiableEnabled: this.gateEnforcer.isAcQuantifiableEnabled("spec-promote"),
       });
       if (!gateResult.ok) return gateResult;
     }
