@@ -146,7 +146,12 @@ interface RunResult {
 }
 
 function run(bin: string, args: string[], cwd: string, env: Record<string, string>): RunResult {
-  const result = spawnSync(bin, args, { cwd, env, encoding: "utf8", timeout: 570_000 });
+  // reason: `spawnSync`'s default maxBuffer is 1 MiB — `lore setup --dry-run --json`'s
+  // asset-manifest payload is ~1.76 MB (grows with the vendored skill/hook tree), so the
+  // default silently truncated stdout at ~1 MB and the downstream JSON.parse threw
+  // "Unterminated string". Raise to 64 MiB so the whole payload is captured (the binary
+  // itself emits valid JSON — verified directly; this was purely a test-harness capture cap).
+  const result = spawnSync(bin, args, { cwd, env, encoding: "utf8", timeout: 570_000, maxBuffer: 64 * 1024 * 1024 });
   return {
     stdout: result.stdout ?? "",
     stderr: result.stderr ?? "",
