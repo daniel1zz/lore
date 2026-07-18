@@ -89,6 +89,10 @@ export default defineCommand({
           type: "string",
           description: "human mode only: optional free-text note",
         },
+        covers: {
+          type: "string",
+          description: "[repeatable] PRD requirement id this AC covers, e.g. R-1 (SPEC-055)",
+        },
         json: {
           type: "boolean",
           description: "Output result as JSON",
@@ -253,10 +257,18 @@ function buildCriterionCandidate(args: Record<string, unknown>): unknown {
     verify = { mode };
   }
 
+  // reason: SPEC-055 — citty yields a string for one --covers, an array for ≥2, undefined for
+  // zero. Normalize to a string array; omit the key entirely when none (so a criterion with no
+  // --covers stays byte-identical to pre-SPEC-055, matching the schema's optional field).
+  const coversRaw = args.covers;
+  const requirement_refs =
+    typeof coversRaw === "string" ? [coversRaw] : Array.isArray(coversRaw) ? (coversRaw as string[]) : undefined;
+
   return {
     id: args.id as string,
     statement: args.statement as string,
     verify,
+    ...(requirement_refs !== undefined ? { requirement_refs } : {}),
   };
 }
 

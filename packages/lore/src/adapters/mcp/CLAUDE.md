@@ -2,7 +2,7 @@
 
 ## Purpose
 
-MCP (Model Context Protocol) stdio adapter. Entered via `lore --mcp-server` (top-level flag intercepted in `packages/lore/src/index.ts`) or `lore agent`. Registers 31 `lore_*` tools (SPEC-054 adds `lore_uat_record` — the sole MCP write path for a structured UAT verdict; `plan` + `by` + `verdict` reusing `uatVerdictSchema`, thin pipe over `UatService.record`) (16 original + 4 SPEC-025 task-workflow tools + 1 SPEC-026 assess tool + 1 SPEC-035 audit tool + 1 SPEC-034 review tool + 1 SPEC-039 verify tool + 1 IoC vertical-slice tech-spec §4.1/§11 P4 feed tool + 2 SPEC-041 session tools: `lore_bootstrap`, `lore_handoff` + 1 SPEC-042 session tool: `lore_anchor_set` + 1 SPEC-043 tool: `lore_invalidate` + 1 SPEC-044 tool: `lore_staleness_probe`) and a small set of MCP resources against `@modelcontextprotocol/sdk`'s `McpServer` and connects over `StdioServerTransport`.
+MCP (Model Context Protocol) stdio adapter. Entered via `lore --mcp-server` (top-level flag intercepted in `packages/lore/src/index.ts`) or `lore agent`. Registers 32 `lore_*` tools (SPEC-054 adds `lore_uat_record`; SPEC-055 adds `lore_requirement_add` — the sole MCP write path for a PRD requirement, `prd`+`id`+`statement`+`priority`, thin pipe over `RequirementService.addRequirement`) (16 original + 4 SPEC-025 task-workflow tools + 1 SPEC-026 assess tool + 1 SPEC-035 audit tool + 1 SPEC-034 review tool + 1 SPEC-039 verify tool + 1 IoC vertical-slice tech-spec §4.1/§11 P4 feed tool + 2 SPEC-041 session tools: `lore_bootstrap`, `lore_handoff` + 1 SPEC-042 session tool: `lore_anchor_set` + 1 SPEC-043 tool: `lore_invalidate` + 1 SPEC-044 tool: `lore_staleness_probe`) and a small set of MCP resources against `@modelcontextprotocol/sdk`'s `McpServer` and connects over `StdioServerTransport`.
 
 ## Key Invariants
 
@@ -49,12 +49,12 @@ IoC vertical-slice tech-spec §4.1/§11 P4 adds `lore_feed` (`checkpoint`, `pare
 - `lore_status` MIGRATED off its argless 3-arg `server.tool()` registration onto `registerToolWithArgs` — its FIRST input schema, `LoreStatusSchema = {check_drift?: boolean}`. Omitted/`false` → the response is byte-identical to pre-SPEC-045 (REGRESSION); `true` → the response additionally gains `code_drift: CodeDriftPayload` (`../../flows/drift-flow.js::runDrift` against `buildDriftFlowDeps(app, app.driftCheckService)` + the real `../real-fs-probe.js::buildRealFsProbe(process.cwd())` — the SAME `code_drift` shape CLI `lore status --check-drift --json`'s `data.code_drift` carries, one shared payload builder). MCP carries no parsed `LoreConfig` (same limitation `lore_staleness_probe`'s `limit`/`min_age_days` fallback documents) — `workflow.drift.enabled` cannot be honored from this surface, so MCP always runs the check (enabled) when `check_drift: true` is passed.
 - `lore_anchor_set` gains resolve-then-dispatch by target doc type (mirrors the CLI's `lore anchor`): task target stays byte-identical (declarative REPLACE via `TaskWorkflowService.setAnchors`, incl. loud `#` rejection, REGRESSION); spec target is ALSO declarative REPLACE but via `DriftCheckService.setCodeAnchors` — **this DIVERGES from the CLI's `lore anchor add`/`rm`, which are INCREMENTAL** (union/difference) — the tool's description states this explicitly, and `by` is accepted for schema uniformity but not consumed on the spec branch (spec anchor writes are attributed to `"system"`, mirroring `AcService`); any other target type → `isError: true`, naming "task or spec".
 - `lore_bootstrap` gains a computed `code_anchor_specs` count (store-only, ZERO fs probing — `../../flows/drift-flow.js::countArmedSpecs`), spliced onto `report.corpus` alongside the pre-existing `open_stale_candidates`, same "one shared derivation site, computed by the adapter handler itself" pattern as D14 above.
-- Tool count stayed 30 through SPEC-045 (`expectedTools` in `packages/lore/tests/unit/adapters/mcp-tools.test.ts`); SPEC-054 later added `lore_uat_record`, bringing it to 31.
+- Tool count stayed 30 through SPEC-045 (`expectedTools` in `packages/lore/tests/unit/adapters/mcp-tools.test.ts`); SPEC-054 added `lore_uat_record` (31); SPEC-055 added `lore_requirement_add` (32).
 
 ## Files
 
 - `index.ts` — `startMcpServer(app)`; wires `McpServer` + `StdioServerTransport`.
-- `tools.ts` — 31 tool registrations, schema constants, Zod input shapes.
+- `tools.ts` — 32 tool registrations, schema constants, Zod input shapes.
 - `assess-render.ts` — `buildAssessSummaryText(result)` (SPEC-040 §T3 D3) — Markdown digest for `lore_assess`'s `summary` envelope field.
 - `resources.ts` — MCP resource registrations (corpus snapshots, etc.).
 - `schema-info.ts` — `CORPUS_SCHEMA_INFO` constant describing doc types and `extra` requirements (knowledge `sub_type` includes `"assessment"`, SPEC-026).

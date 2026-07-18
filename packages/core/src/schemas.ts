@@ -9,6 +9,7 @@ import { DECISION_STATUSES, KNOWLEDGE_SUB_TYPES } from "./types.js";
 import { evidenceEntrySchema, taskClaimSchema } from "./task-workflow.js";
 import { assessmentResultSchema } from "./assessment.js";
 import { uatVerdictSchema } from "./uat.js";
+import { prdRequirementsSchema } from "./requirement.js";
 import { SPEC_KINDS } from "./spec-kind.js";
 import { specAcceptanceCriteriaSchema } from "./acceptance.js";
 import { handoffExtraSchema } from "./session.js";
@@ -355,7 +356,17 @@ export const planExtraSchema = z
     }
   });
 
-export const prdExtraSchema = z.record(z.unknown());
+export const prdExtraSchema = z
+  .object({
+    /**
+     * SPEC-055 — the structured requirement inventory. Typed array of numbered `R-##`
+     * requirements, written exclusively via `lore requirement add/rm` (`RequirementService`);
+     * consumed by the `lore status --check-requirements` completeness oracle. Optional +
+     * `.passthrough()` → every pre-SPEC-055 PRD (no requirements) stays valid.
+     */
+    requirements: prdRequirementsSchema.optional(),
+  })
+  .passthrough();
 
 /**
  * Extra fields for spec documents.

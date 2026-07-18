@@ -53,7 +53,7 @@ import type { LinkType } from "@lore/core";
 import { renderAssessmentContent } from "@lore/core";
 import type { NewReviewJudgment, ReviewJudgment, Result, TreeBlueprint } from "@lore/core";
 import { ORACLE_KINDS, runDeterministicChecks } from "@lore/core";
-import { handoffExtraSchema, uatVerdictSchema } from "@lore/core";
+import { handoffExtraSchema, uatVerdictSchema, REQUIREMENT_PRIORITIES } from "@lore/core";
 import type { HandoffExtra } from "@lore/core";
 import { isAssessAiBraked } from "../../ai/resolve-ai.js";
 import { REVIEW_PROMPT_VERSION } from "../../ai/review-template.js";
@@ -547,6 +547,19 @@ export const LoreUatRecordSchema = z.object({
   plan: z.string().min(1),
   by: z.string().min(1),
   verdict: uatVerdictSchema,
+});
+
+/**
+ * Input schema for lore_requirement_add (SPEC-055) — the SOLE MCP write path for a PRD's
+ * structured requirement inventory, thin pipe over `RequirementService.addRequirement`.
+ * The candidate is validated fully by `prdRequirementsSchema` inside the service; this
+ * schema pins the shape at the MCP boundary (`priority` from `REQUIREMENT_PRIORITIES` SSOT).
+ */
+export const LoreRequirementAddSchema = z.object({
+  prd: z.string().min(1),
+  id: z.string().min(1),
+  statement: z.string().min(1),
+  priority: z.enum(REQUIREMENT_PRIORITIES),
 });
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -1501,6 +1514,28 @@ export function registerTools(server: McpServer, app: App): void {
       const result = await app.uatService.record(args.plan, args.verdict, { by: args.by });
       if (!result.ok) return errorContent(result.error);
       return textContent({ doc: result.value.doc });
+    },
+  );
+
+  // ── SPEC-055: requirement inventory ────────────────────────────────────────
+
+  // lore_requirement_add
+  registerToolWithArgs(
+    server,
+    "lore_requirement_add",
+    "Add a numbered requirement to a PRD's structured inventory (SPEC-055) — the sole MCP write path; `lore status --check-requirements` audits coverage against descendant spec ACs",
+    LoreRequirementAddSchema,
+    async (args) => {
+      if (app.requirementService === undefined) {
+        return errorContent({ code: "STORE_ERROR", message: "Internal error: RequirementService not wired on App" });
+      }
+      const result = await app.requirementService.addRequirement(args.prd, {
+        id: args.id,
+        statement: args.statement,
+        priority: args.priority,
+      });
+      if (!result.ok) return errorContent(result.error);
+      return textContent({ requirements: result.value });
     },
   );
 

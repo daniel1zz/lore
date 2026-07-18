@@ -118,13 +118,19 @@ export default defineCommand({
       description:
         "Verify spec-declared code_anchors against the working tree (SPEC-045). Composes with --check-tree.",
     },
+    "check-requirements": {
+      type: "boolean",
+      description:
+        "Verify every PRD requirement is covered by a descendant spec AC (SPEC-055). Uncovered P0 → exit 3. Composes with --check-tree/--check-drift.",
+    },
   },
   async run({ args }) {
     const checkTreeRequested = args["check-tree"] === true;
     const checkDriftRequested = args["check-drift"] === true;
+    const checkRequirementsRequested = args["check-requirements"] === true;
 
-    // ── check-tree / check-drift branch (D5 restructure) ────────────────────
-    if (checkTreeRequested || checkDriftRequested) {
+    // ── check-tree / check-drift / check-requirements branch (D5 restructure) ────
+    if (checkTreeRequested || checkDriftRequested || checkRequirementsRequested) {
       const { app, config } = loadLoreApp();
       try {
         // ---- Tree section — value-returning, no early process.exit (D5) ----
@@ -248,9 +254,44 @@ export default defineCommand({
 
         const driftInconsistent = driftPayload !== undefined && driftPayload.enabled && !driftPayload.consistent;
 
-        // ---- Exit precedence (D5, pinned) ----
+        // ---- Requirements section (SPEC-055) ----
+        // reason: computeRequirementCoverageForPrd is per-PRD; a corpus can carry >1 PRD, so
+        // aggregate across every PRD. A P0 requirement uncovered by any descendant spec AC
+        // drives exit 3 (same CI-gate posture as a code drift), folded into the pinned
+        // precedence below. Store-only, zero-LLM, zero fs probing.
+        let requirementsPayload:
+          | { checked: number; consistent: boolean; prds: Array<{ slug: string; total: number; uncovered: string[]; uncovered_p0: string[] }> }
+          | undefined;
+        let requirementsInconsistent = false;
+        if (checkRequirementsRequested) {
+          const prdsResult = await app.corpusService.list({ type: "prd" });
+          if (!prdsResult.ok) {
+            process.stderr.write(formatError(prdsResult.error) + "\n");
+            process.exitCode = exitCode(prdsResult.error);
+            return;
+          }
+          const prds: Array<{ slug: string; total: number; uncovered: string[]; uncovered_p0: string[] }> = [];
+          for (const prd of prdsResult.value.docs) {
+            const covResult = await app.corpusService.computeRequirementCoverageForPrd(prd.id);
+            if (!covResult.ok) {
+              process.stderr.write(formatError(covResult.error) + "\n");
+              process.exitCode = exitCode(covResult.error);
+              return;
+            }
+            const cov = covResult.value;
+            prds.push({ slug: prd.slug, total: cov.total, uncovered: cov.uncovered, uncovered_p0: cov.uncovered_p0 });
+            if (cov.uncovered_p0.length > 0) requirementsInconsistent = true;
+          }
+          requirementsPayload = {
+            checked: prds.length,
+            consistent: !requirementsInconsistent,
+            prds,
+          };
+        }
+
+        // ---- Exit precedence (D5, pinned; SPEC-055 folds requirements into the drift tier) ----
         let finalExit: number;
-        if (treeInconsistent || driftInconsistent) {
+        if (treeInconsistent || driftInconsistent || requirementsInconsistent) {
           finalExit = 3;
         } else if (blueprintUnarmable) {
           finalExit = 4;
@@ -268,10 +309,23 @@ export default defineCommand({
         if (args.json) {
           const data: Record<string, unknown> = { ...treeData };
           if (driftPayload !== undefined) data["code_drift"] = driftPayload;
+          if (requirementsPayload !== undefined) data["requirement_coverage"] = requirementsPayload;
           console.log(JSON.stringify({ ok: true, data }, null, 2));
         } else {
           for (const line of treeRenderLines) console.log(line);
           if (driftPayload !== undefined) renderDriftSection(driftPayload);
+          if (requirementsPayload !== undefined) {
+            if (requirementsPayload.consistent) {
+              console.log(`Requirement coverage: all P0 requirements covered (${requirementsPayload.checked} PRD(s) checked).`);
+            } else {
+              console.log(`Requirement coverage: UNCOVERED P0 requirements (${requirementsPayload.checked} PRD(s) checked):`);
+              for (const prd of requirementsPayload.prds) {
+                if (prd.uncovered_p0.length > 0) {
+                  console.log(`  - ${prd.slug}: ${prd.uncovered_p0.join(", ")} (fix: add a spec AC with --covers <R-id>)`);
+                }
+              }
+            }
+          }
         }
 
         process.exitCode = finalExit;

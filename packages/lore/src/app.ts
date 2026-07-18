@@ -59,6 +59,7 @@ import { JudgmentService } from "./service/judgment-service.js";
 import { StalenessProbeService } from "./service/staleness-probe-service.js";
 import { AuditService } from "./service/audit-service.js";
 import { AcService } from "./service/ac-service.js";
+import { RequirementService } from "./service/requirement-service.js";
 import { UatService } from "./service/uat-service.js";
 import { VerifyRunnerService } from "./service/verify-runner-service.js";
 import { executeVerifySpawnSpec } from "./service/verify-executor.js";
@@ -232,6 +233,12 @@ export interface App {
    * wired in production.
    */
   uatService?: UatService;
+  /**
+   * RequirementService — the sole structured writer for a PRD's requirement inventory
+   * (`lore requirement add/list/rm`, SPEC-055). Store-only, same optional-DI shape as
+   * `acService`; always wired in production.
+   */
+  requirementService?: RequirementService;
   /**
    * Telemetry sink — exposed for dashboard route handlers to emit source-tagged events.
    * Dashboard handlers record { service: "dashboard", source: "dashboard" } events after
@@ -421,6 +428,8 @@ function buildAppFromSqlite(
     // reason: AcService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-038 §4, §6, §9.1.
     acService: new AcService(store),
+    // reason: RequirementService is store-only, same shape as AcService (SPEC-055).
+    requirementService: new RequirementService(store),
     // reason: UatService takes narrow injected ports (SPEC-054) — the guarded
     // createUatDoc seam, resolve, and store.addLink — never the full CorpusService.
     uatService: new UatService({
@@ -609,6 +618,8 @@ function buildAppFromTurso(
     // reason: AcService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-038 §4, §6, §9.1.
     acService: new AcService(store),
+    // reason: RequirementService is store-only, same shape as AcService (SPEC-055).
+    requirementService: new RequirementService(store),
     // reason: UatService takes narrow injected ports (SPEC-054) — the guarded
     // createUatDoc seam, resolve, and store.addLink — never the full CorpusService.
     uatService: new UatService({

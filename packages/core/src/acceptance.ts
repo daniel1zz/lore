@@ -127,6 +127,16 @@ export const acceptanceCriterionSchema = z.object({
       note: z.string().max(500).optional(),
     }),
   ]),
+  /**
+   * SPEC-055 — the PRD requirement ids this criterion covers (`R-##`). Optional and
+   * additive: a criterion with no `requirement_refs` is valid (REGRESSION — every
+   * pre-SPEC-055 AC parses unchanged). Authored via `lore ac add --covers <R-id>`
+   * (repeatable); consumed by the `lore status --check-requirements` completeness oracle,
+   * which gathers these across a PRD's descendant specs. Format-unconstrained here (the
+   * requirement inventory is the authority on which ids exist — an unknown ref simply
+   * covers nothing).
+   */
+  requirement_refs: z.array(z.string()).optional(),
 });
 
 /** Derived TypeScript type for one acceptance criterion declaration. */

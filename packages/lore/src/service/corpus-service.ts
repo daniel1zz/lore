@@ -27,8 +27,10 @@ import {
   validityEqual,
   uatVerdictSchema,
   isP0Accepted,
+  prdRequirementsSchema,
+  computeRequirementCoverage,
 } from "@lore/core";
-import type { CreateDocInput, DocPatch, UatVerdict } from "@lore/core";
+import type { CreateDocInput, DocPatch, UatVerdict, RequirementCoverage } from "@lore/core";
 import {
   DOC_TYPE_ROLE_MAP,
   type DocId,
@@ -1707,6 +1709,55 @@ export class CorpusService {
       verdict: latest.verdict,
       docSlug: latest.doc.slug,
     });
+  }
+
+  /**
+   * Computes requirement→AC coverage for a PRD (SPEC-055) — the read behind
+   * `lore status --check-requirements`. Resolves the PRD, reads its declared requirement
+   * inventory, gathers every `requirement_refs` id across its descendant specs' acceptance
+   * criteria, and partitions the inventory via the pure `computeRequirementCoverage`
+   * (`@lore/core`) — a requirement covered IFF some descendant AC references its id.
+   *
+   * @param prdIdOrSlug - The PRD whose requirement coverage to compute.
+   * @returns `ok(RequirementCoverage)` — all-empty for a PRD with no declared requirements
+   *   (vacuous). `err` on an unresolvable target or a non-`prd` type.
+   */
+  async computeRequirementCoverageForPrd(
+    prdIdOrSlug: string,
+  ): Promise<Result<RequirementCoverage, LoreError>> {
+    const resolveResult = await this.resolve(prdIdOrSlug);
+    if (!resolveResult.ok) return resolveResult;
+
+    const prdResult = await this.store.find(resolveResult.value);
+    if (!prdResult.ok) return prdResult;
+    const prd = prdResult.value;
+    if (prd === null || prd.deleted_at !== null) {
+      return err({ code: "DOC_NOT_FOUND", id: resolveResult.value });
+    }
+    if (prd.type !== "prd") {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "type",
+        message: `Expected a prd document; got type '${prd.type}'`,
+        value: prd.type,
+      });
+    }
+
+    const parsedReqs = prdRequirementsSchema.safeParse(prd.extra["requirements"]);
+    const requirements = parsedReqs.success ? parsedReqs.data : [];
+
+    const specsResult = await this.store.findMany({ parent_id: prd.id, type: "spec" });
+    if (!specsResult.ok) return specsResult;
+    const refs: string[] = [];
+    for (const spec of specsResult.value) {
+      const parsedAcs = specAcceptanceCriteriaSchema.safeParse(spec.extra["acceptance_criteria"]);
+      if (!parsedAcs.success) continue;
+      for (const ac of parsedAcs.data) {
+        for (const ref of ac.requirement_refs ?? []) refs.push(ref);
+      }
+    }
+
+    return ok(computeRequirementCoverage(requirements, refs));
   }
 
   // ── Declared AC Ids (SPEC-038 §4, §7 D4) ────────────────────────────────
