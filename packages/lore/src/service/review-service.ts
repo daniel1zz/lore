@@ -113,6 +113,8 @@ export class ReviewService {
       return this.gate.enforcer.enforce("spec-promote", {
         acceptanceCriteriaCount,
         specIdOrSlug: doc.slug,
+        ...(parsed.success ? { acceptanceCriteria: parsed.data } : {}),
+        acQuantifiableEnabled: this.gate.enforcer.isAcQuantifiableEnabled("spec-promote"),
       });
     }
 

@@ -33,6 +33,12 @@
  *   spec's own acceptance criteria for `lore gate spec-promote`'s
  *   `checkSpecPromote` predicate (`ac-service.ts` / `checkpoint-registry.ts`).
  *   Never a hand-rolled `Array.isArray(extra.acceptance_criteria)` duck-type check.
+ * @invariant `acQuantifiable`'s notion of "unquantified abstract quality claim" is
+ *   sourced exclusively from `lintAcQuantifiability` (`@lore/core`, ac-quality.ts) —
+ *   the SAME deterministic, zero-LLM lint `AcService.addCriterion` runs against a
+ *   single incoming criterion at `lore ac add` time. This predicate re-lints the
+ *   WHOLE declared set as the gate-layer backstop; the two enforcement points never
+ *   maintain independent wordlists or measurable-token heuristics.
  */
 
 import {
@@ -41,6 +47,8 @@ import {
   specAcceptanceCriteriaSchema,
   UPSTREAM_APPROVED_STATUSES,
   anchorsOverlap,
+  lintAcQuantifiability,
+  type AcceptanceCriterion,
   type DocType,
 } from "@lore/core";
 
@@ -289,4 +297,58 @@ export function noAnchorOverlap(
     }
   }
   return { ok: true };
+}
+
+/** `acQuantifiable`'s single machine-readable failure reason. */
+export const AC_NOT_QUANTIFIABLE_REASON = "AC_NOT_QUANTIFIABLE";
+
+/** The `PredicateResult.field` value `acQuantifiable`'s failure carries. */
+export const AC_QUANTIFIABLE_FIELD = "ac-quantifiable";
+
+/**
+ * `spec-create`/`spec-promote`'s deterministic AC-quantifiability predicate
+ * (AC-Quantifiability Gate spec §Design): a candidate spec's declared acceptance
+ * criteria must not contain an unquantified abstract-quality claim, per the
+ * zero-LLM `lintAcQuantifiability` lint (`@lore/core`, `ac-quality.ts`).
+ *
+ * This predicate is the gate half of a two-layer enforcement design — the OTHER
+ * layer is `AcService.addCriterion`, which runs the identical lint against a
+ * single incoming criterion at `lore ac add` time (immediate feedback, before
+ * the spec ever reaches spec-promote). This predicate is the BACKSTOP: it
+ * re-lints the WHOLE declared set so an AC added through any other path (a
+ * pre-gate legacy doc, a direct store write, an inline `extra.acceptance_criteria`
+ * on `lore create spec`) can't slip past spec-create/spec-promote unexamined.
+ *
+ * Deliberately takes the already-resolved criteria array (never a store lookup,
+ * never an AI provider call — module invariant: no store, no IO, no bun:sqlite)
+ * so the caller (`checkSpecCreate`/`checkSpecPromote` in `checkpoint-registry.ts`)
+ * stays the sole IO-performing layer, consistent with every other predicate in
+ * this module.
+ *
+ * @param criteria - The candidate/target spec's declared acceptance criteria, or
+ *   `undefined` when the caller resolved none (a spec with no structured ACs yet
+ *   — the common `lore create spec` case, since ACs are usually added afterward
+ *   via `lore ac add`). Vacuous pass: `lintAcQuantifiability([])` always yields
+ *   zero findings.
+ * @returns `{ok: true}` when `lintAcQuantifiability(criteria ?? [])` yields zero
+ *   `block` findings; `{ok: false, reason: "AC_NOT_QUANTIFIABLE", field:
+ *   "ac-quantifiable"}` when it yields at least one.
+ * @example
+ * acQuantifiable([
+ *   { id: "AC-1", statement: "the dashboard loads fast", verify: { mode: "human" } },
+ * ]); // => { ok: false, reason: "AC_NOT_QUANTIFIABLE", field: "ac-quantifiable" }
+ * @example
+ * acQuantifiable([
+ *   { id: "AC-1", statement: "the dashboard P95 load < 200ms", verify: { mode: "human" } },
+ * ]); // => { ok: true }
+ * @example
+ * acQuantifiable(undefined); // => { ok: true } — no declared ACs, vacuous pass
+ */
+export function acQuantifiable(criteria: AcceptanceCriterion[] | undefined): PredicateResult {
+  const findings = lintAcQuantifiability(criteria ?? []);
+  const blocked = findings.some((f) => f.severity === "block");
+  if (!blocked) {
+    return { ok: true };
+  }
+  return { ok: false, reason: AC_NOT_QUANTIFIABLE_REASON, field: AC_QUANTIFIABLE_FIELD };
 }

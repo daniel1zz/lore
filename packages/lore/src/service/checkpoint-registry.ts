@@ -54,7 +54,15 @@
  * Source: IoC vertical-slice tech-spec §4.1/§5.1/§11; SPEC-042 §Design Decisions D5.
  */
 
-import { anchorsOverlap, extractClaim, extractFileAnchors, isClaimStale, type DocRecord } from "@lore/core";
+import {
+  anchorsOverlap,
+  extractClaim,
+  extractFileAnchors,
+  isClaimStale,
+  lintAcQuantifiability,
+  type AcceptanceCriterion,
+  type DocRecord,
+} from "@lore/core";
 import {
   parentLegal,
   specKindValid,
@@ -62,7 +70,9 @@ import {
   upstreamApproved,
   upstreamHasAcceptanceCriteria,
   noAnchorOverlap,
+  acQuantifiable,
   ANCHOR_OVERLAP_FIELD,
+  AC_QUANTIFIABLE_FIELD,
   type PredicateResult,
   type SiblingClaimInfo,
 } from "./gate-predicates.js";
@@ -103,6 +113,25 @@ export interface GateContext {
   readonly acceptanceCriteriaCount?: number;
   /** Target spec's id/slug, as the caller supplied it — used only in `feed()`'s message. */
   readonly specIdOrSlug?: string;
+
+  // -- spec-create / spec-promote: check() + feed() (AC-Quantifiability Gate spec) --
+  /**
+   * The candidate/target spec's own declared acceptance criteria — `resolvedExtra
+   * .acceptance_criteria` (spec-create) or the target doc's existing/patched
+   * `extra.acceptance_criteria` (spec-promote), already schema-validated by the
+   * caller (`specAcceptanceCriteriaSchema.safeParse`). `undefined` means "none
+   * declared / failed validation", which `acQuantifiable`'s vacuous-pass semantics
+   * treat identically to an empty array — never a second error path here.
+   */
+  readonly acceptanceCriteria?: AcceptanceCriterion[];
+  /**
+   * `workflow.gates.<checkpoint>.ac_quantifiable.enabled` resolved by the CALLER
+   * (mirrors `anchorOverlapEnabled`'s per-predicate config-knob shape) — `false`
+   * skips `acQuantifiable` entirely, leaving every other predicate on the same
+   * checkpoint untouched. Absent means enabled (same default philosophy as every
+   * other gate config knob).
+   */
+  readonly acQuantifiableEnabled?: boolean;
 
   // -- plan-promote / task-claim: check() --
   /**
@@ -223,7 +252,29 @@ export function selectFailures(
 function checkSpecCreate(ctx: GateContext): PredicateResult[] {
   const parent =
     ctx.parentType !== undefined && ctx.parentType !== null ? { type: ctx.parentType } : null;
-  return [parentLegal(parent), specKindValid(ctx.specKind), hasSkeleton(ctx.content ?? "")];
+  const results = [parentLegal(parent), specKindValid(ctx.specKind), hasSkeleton(ctx.content ?? "")];
+  if (ctx.acQuantifiableEnabled !== false) {
+    results.push(acQuantifiable(ctx.acceptanceCriteria));
+  }
+  return results;
+}
+
+/**
+ * Renders the per-AC detail lines for an `acQuantifiable` predicate failure — one
+ * `AcQualityFinding.message` per offending `block` finding (already names the AC id,
+ * the offending word, and the fix — see `lintAcQuantifiability`'s own JSDoc). Returns
+ * `[]` when the predicate didn't fail (so callers can unconditionally spread the
+ * result into a `missing` list with no extra branching). Shared by `feedSpecCreate`
+ * and `feedSpecPromote` — both checkpoints render the SAME per-AC detail shape.
+ */
+function acQuantifiableDetailLines(ctx: GateContext, failures: PredicateResult[]): string[] {
+  const failed = failures.some((f) => !f.ok && f.field === AC_QUANTIFIABLE_FIELD);
+  if (!failed) {
+    return [];
+  }
+  return lintAcQuantifiability(ctx.acceptanceCriteria ?? [])
+    .filter((finding) => finding.severity === "block")
+    .map((finding) => finding.message);
 }
 
 /**
@@ -236,7 +287,7 @@ function feedSpecCreate(ctx: GateContext, failures: PredicateResult[]): string {
     ruleSource: ctx.ruleSource ?? "unknown",
     ruleMarkdown: ctx.ruleMarkdown ?? "",
     ...(ctx.parentMarkdown !== undefined ? { parentMarkdown: ctx.parentMarkdown } : {}),
-    missing: selectFailures(failures).map((f) => f.reason),
+    missing: [...selectFailures(failures).map((f) => f.reason), ...acQuantifiableDetailLines(ctx, failures)],
   });
   return renderFeedingPack(pack);
 }
@@ -252,22 +303,37 @@ const NO_ACCEPTANCE_CRITERIA_REASON = "NO_ACCEPTANCE_CRITERIA";
  */
 function checkSpecPromote(ctx: GateContext): PredicateResult[] {
   const count = ctx.acceptanceCriteriaCount ?? 0;
-  if (count > 0) {
-    return [{ ok: true }];
+  const results: PredicateResult[] =
+    count > 0 ? [{ ok: true }] : [{ ok: false, reason: NO_ACCEPTANCE_CRITERIA_REASON }];
+  if (ctx.acQuantifiableEnabled !== false) {
+    results.push(acQuantifiable(ctx.acceptanceCriteria));
   }
-  return [{ ok: false, reason: NO_ACCEPTANCE_CRITERIA_REASON }];
+  return results;
 }
 
 /**
- * spec-promote's feeding message — identical text to `gate.ts`'s former inline
- * stderr message (trailing newline included), so the refactor is byte-for-byte
- * behavior-preserving on this path.
+ * spec-promote's feeding message. The base "no structured acceptance criteria"
+ * text is identical to `gate.ts`'s former inline stderr message (trailing newline
+ * included) whenever that's the only failure — byte-for-byte behavior-preserving on
+ * that path. When `acQuantifiable` also (or instead) failed, appends the per-AC
+ * detail lines (`acQuantifiableDetailLines`) naming every offending AC id, its
+ * abstract word, and the fix.
  */
-function feedSpecPromote(ctx: GateContext, _failures: PredicateResult[]): string {
-  return (
-    `Error: spec "${ctx.specIdOrSlug ?? "unknown"}" has no structured acceptance criteria — ` +
-    "add via `lore ac add`.\n"
-  );
+function feedSpecPromote(ctx: GateContext, failures: PredicateResult[]): string {
+  const base = `Error: spec "${ctx.specIdOrSlug ?? "unknown"}" has no structured acceptance criteria — add via \`lore ac add\`.\n`;
+  const acLines = acQuantifiableDetailLines(ctx, failures);
+  const noAcceptanceCriteriaFailed = failures.some((f) => !f.ok && f.reason === NO_ACCEPTANCE_CRITERIA_REASON);
+
+  if (acLines.length === 0) {
+    return noAcceptanceCriteriaFailed
+      ? base
+      : "Error: spec has an unquantified acceptance criterion.\n";
+  }
+
+  const acBlock = acLines.map((line) => `- ${line}`).join("\n");
+  return noAcceptanceCriteriaFailed
+    ? `${base}\nAlso:\n${acBlock}\n`
+    : `Error: spec "${ctx.specIdOrSlug ?? "unknown"}" has an unquantified acceptance criterion:\n${acBlock}\n`;
 }
 
 /**
