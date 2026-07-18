@@ -10,7 +10,7 @@
  *     new key, don't mutate this one) whenever the prompt text or output contract changes
  *     materially
  *   - ReviewTemplateFn — the shape every registry entry must satisfy
- *   - REVIEW_TEMPLATES — version-keyed registry; exactly one entry today
+ *   - REVIEW_TEMPLATES — version-keyed registry; v1 (frozen, SPEC-034) + v2 (SPEC-053)
  *   - buildReviewRetryPrompt(originalPrompt, parseErrorMessage) — one corrective retry prompt
  *
  * Invariants:
@@ -36,15 +36,31 @@
  * Source: SPEC-034 §2, §4; SPEC-040 §T2 D8
  */
 
-import { truncateSection, isInvalidated } from "@lore/core";
-import type { CheckResult, ReviewBundle } from "@lore/core";
+import {
+  truncateSection,
+  isInvalidated,
+  lintAcQuantifiability,
+  specAcceptanceCriteriaSchema,
+} from "@lore/core";
+import type { CheckResult, ReviewBundle, AcceptanceCriterion } from "@lore/core";
 
 /**
  * Judge prompt schema version — the active key into {@link REVIEW_TEMPLATES}. Persisted
  * verbatim into `judge.prompt_version` on every review judgment (SPEC-034 §2) so calibration
  * queries can filter/aggregate per prompt version without a join.
  */
-export const REVIEW_PROMPT_VERSION = "v1";
+export const REVIEW_PROMPT_VERSION = "v2";
+
+/**
+ * The exact advisory-only clause the v2 prompt embeds (SPEC-053 AC-053-4). Exported so a
+ * test can assert its presence byte-for-byte rather than duplicating the string literal.
+ * States the SPEC-053 D1 contract: advisory findings NEVER by themselves force a reject —
+ * the deterministic AC-quantifiability lint (SPEC-052) is the sole hard gate.
+ */
+export const ADVISORY_ONLY_CLAUSE =
+  "advisory findings are ADVISORY ONLY. They MUST NOT by themselves cause you to set " +
+  'decision="reject" — the deterministic lint is the sole hard gate. Use them to inform ' +
+  "a reviewer, not to block.";
 
 /** Character budgets for each prompt section, sourced from `config.ai.review.*`. */
 export interface ReviewBudgets {
@@ -90,16 +106,69 @@ function renderChecksBlock(checks: CheckResult[]): string {
 }
 
 /**
- * Assemble the v1 judge prompt for `lore review`: role → document → parent context →
- * deterministic pre-check results → output instruction. Each material section is
- * truncated to its configured budget; any section that gets cut has its name appended to
- * the returned `truncated[]` list.
+ * Extract a spec's declared acceptance criteria from a review bundle (SPEC-053). Returns
+ * `[]` for any non-spec doc, a spec with no `extra.acceptance_criteria`, or a malformed
+ * declaration — the caller renders the advisory section ONLY for a non-empty result, so a
+ * non-spec / no-AC doc produces a v2 prompt byte-identical to v1 on the advisory axis.
  */
-function buildReviewPromptV1(
+function extractSpecAcceptanceCriteria(bundle: ReviewBundle): AcceptanceCriterion[] {
+  if (bundle.doc.type !== "spec") return [];
+  const extra = bundle.doc.extra;
+  if (extra === null || typeof extra !== "object") return [];
+  const raw = (extra as Record<string, unknown>)["acceptance_criteria"];
+  if (raw === undefined) return [];
+  const parsed = specAcceptanceCriteriaSchema.safeParse(raw);
+  return parsed.success ? parsed.data : [];
+}
+
+/**
+ * Render the SPEC-053 advisory MATERIAL section — the AC list + the deterministic
+ * `lintAcQuantifiability` verdict (a count, so the judge does not re-derive the lexical
+ * result) + the advisory-only framing. Returned as a block ready to splice before the
+ * "# Parent Context" section. Precondition: `criteria` is non-empty (the caller guards).
+ */
+function renderAcAdvisorySection(criteria: AcceptanceCriterion[]): string {
+  const lintFindings = lintAcQuantifiability(criteria);
+  const flaggedIds = new Set(lintFindings.map((f) => f.ac_id));
+  const acLines = criteria
+    .map((c) => {
+      const verdict = flaggedIds.has(c.id) ? "flagged" : "clean";
+      return `- ${c.id}: ${c.statement}  [lexical lint: ${verdict}]`;
+    })
+    .join("\n");
+
+  return (
+    `# AC Quantifiability (advisory)\n` +
+    `The document under review is a spec with ${criteria.length} declared acceptance ` +
+    `criteria. A deterministic lexical lint (SPEC-052) has ALREADY run and found ` +
+    `${lintFindings.length} blocking issue(s) — treat that as ground truth, do NOT ` +
+    `re-derive it. Your ADVISORY task: flag any acceptance criterion that passes the ` +
+    `lexical lint yet is SEMANTICALLY un-measurable — it declares no threshold, metric, ` +
+    `or oracle a reader could check (e.g. "returns quickly enough", "handles reasonable ` +
+    `load"). Report each in the "advisory" output array with kind "ac_quantifiability".\n` +
+    `Declared acceptance criteria:\n` +
+    `${acLines}\n` +
+    `IMPORTANT: ${ADVISORY_ONLY_CLAUSE}\n\n`
+  );
+}
+
+/**
+ * Shared review-prompt assembler for BOTH v1 and v2 (SPEC-053). v1 passes empty advisory
+ * parameters, producing byte-identical output to the pre-SPEC-053 monolithic builder (the
+ * frozen `review-prompt-v1.txt` fixture + AC-053-6 lock this). v2 passes a rendered
+ * advisory material section (spliced before "# Parent Context") and an advisory JSON field
+ * + rule extending the output contract — every insertion collapses to `""` for v1.
+ *
+ * Assembly: role → document → parent context → deterministic pre-check results → output
+ * instruction. Each material section is truncated to its configured budget; any section
+ * that gets cut has its name appended to the returned `truncated[]` list.
+ */
+function assembleReviewPrompt(
   bundle: ReviewBundle,
   checks: CheckResult[],
   budgets: ReviewBudgets,
-  nowIso?: string,
+  nowIso: string | undefined,
+  advisory: { section: string; jsonField: string; rule: string },
 ): BuildReviewPromptResult {
   const truncated: string[] = [];
 
@@ -164,6 +233,7 @@ function buildReviewPromptV1(
     `${docSection.text}\n\n` +
     truncationNotice +
     stalenessNotice +
+    advisory.section +
     `# Parent Context\n` +
     `${contextBlock}\n\n` +
     `# Deterministic Pre-Checks (already run — use as input, do not re-derive)\n` +
@@ -178,7 +248,7 @@ function buildReviewPromptV1(
     `    { "dimension": "<e.g. completeness, consistency, contract>", "finding": "<what you found>",\n` +
     `      "evidence_ref": "<optional pointer>" }\n` +
     `  ],\n` +
-    `  "blocking_questions": ["<string>", ...]\n` +
+    `  "blocking_questions": ["<string>", ...]` + advisory.jsonField + `\n` +
     `}\n` +
     `RULES:\n` +
     `- decision "escalate" REQUIRES at least one entry in blocking_questions.\n` +
@@ -187,18 +257,72 @@ function buildReviewPromptV1(
     `  a wrong confident answer is worse than an honest escalation.\n` +
     `- If ANY pre-check above has outcome "fail", you should almost always decision="reject"\n` +
     `  or "escalate", not "approve".\n` +
-    `- reasons MUST have at least one entry.\n`;
+    `- reasons MUST have at least one entry.\n` +
+    advisory.rule;
 
   return { prompt, truncated, docTruncated: docSection.truncated };
 }
 
+// ─── Empty advisory (v1) ─────────────────────────────────────────────────────
+
+/** The no-advisory parameter bundle — every field `""`, so `assembleReviewPrompt`
+ *  reproduces the pre-SPEC-053 v1 output byte-for-byte (AC-053-6). */
+const NO_ADVISORY = { section: "", jsonField: "", rule: "" } as const;
+
 /**
- * Version-keyed registry of review judge prompt builders. Exactly one entry today
- * (`REVIEW_PROMPT_VERSION`); a future prompt A/B spec adds a new key here rather than
- * mutating this one, so historical judgments' `judge.prompt_version` stays meaningful.
+ * v1 review judge prompt (SPEC-034) — FROZEN. Delegates to `assembleReviewPrompt` with
+ * empty advisory parameters; the `review-prompt-v1.txt` fixture + AC-053-6 REGRESSION test
+ * prove this stays byte-identical to the pre-SPEC-053 monolithic builder.
+ */
+function buildReviewPromptV1(
+  bundle: ReviewBundle,
+  checks: CheckResult[],
+  budgets: ReviewBudgets,
+  nowIso?: string,
+): BuildReviewPromptResult {
+  return assembleReviewPrompt(bundle, checks, budgets, nowIso, NO_ADVISORY);
+}
+
+/**
+ * v2 review judge prompt (SPEC-053) — v1 plus a non-blocking AC-quantifiability advisory
+ * dimension, rendered ONLY when the reviewed doc is a spec with ≥1 declared acceptance
+ * criterion. For every other doc (non-spec, or a spec with no declared ACs) the advisory
+ * parameters collapse to empty and the output is byte-identical to v1.
+ */
+function buildReviewPromptV2(
+  bundle: ReviewBundle,
+  checks: CheckResult[],
+  budgets: ReviewBudgets,
+  nowIso?: string,
+): BuildReviewPromptResult {
+  const criteria = extractSpecAcceptanceCriteria(bundle);
+  if (criteria.length === 0) {
+    return assembleReviewPrompt(bundle, checks, budgets, nowIso, NO_ADVISORY);
+  }
+  const advisory = {
+    section: renderAcAdvisorySection(criteria),
+    jsonField:
+      `,\n` +
+      `  "advisory": [\n` +
+      `    { "kind": "ac_quantifiability", "ac_id": "<optional AC id>", "finding": "<what is semantically unmeasurable>" }\n` +
+      `  ]`,
+    rule:
+      `- OPTIONAL "advisory": zero or more non-blocking AC-quantifiability findings; ` +
+      `omit the key or use [] when none. ${ADVISORY_ONLY_CLAUSE}\n`,
+  };
+  return assembleReviewPrompt(bundle, checks, budgets, nowIso, advisory);
+}
+
+/**
+ * Version-keyed registry of review judge prompt builders. `v1` (SPEC-034, frozen —
+ * byte-identical to its original output, locked by the `review-prompt-v1.txt` fixture) and
+ * `v2` (SPEC-053, adds the non-blocking AC-quantifiability advisory dimension). The active
+ * key is `REVIEW_PROMPT_VERSION`. A future prompt spec adds a NEW key here rather than
+ * mutating an existing one, so historical judgments' `judge.prompt_version` stays meaningful.
  */
 export const REVIEW_TEMPLATES: Record<string, ReviewTemplateFn> = {
-  [REVIEW_PROMPT_VERSION]: buildReviewPromptV1,
+  v1: buildReviewPromptV1,
+  v2: buildReviewPromptV2,
 };
 
 /**

@@ -63,7 +63,11 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatStalenessBadge, formatTable, resolveActor } from "../utils.js";
 import { isAssessAiBraked } from "../../../ai/resolve-ai.js";
 import { REVIEW_PROMPT_VERSION } from "../../../ai/review-template.js";
-import { formatJudgmentSummary, renderSupersededCandidateNudgeBlock } from "../review-render.js";
+import {
+  formatJudgmentSummary,
+  renderSupersededCandidateNudgeBlock,
+  renderAdvisoryBlock,
+} from "../review-render.js";
 import {
   buildStalenessBatchJsonPayload,
   buildStalenessFlowDeps,
@@ -503,7 +507,7 @@ export default defineCommand({
       }
 
       const nudgeBlock = await renderSupersededCandidateNudgeBlock(buildStalenessFlowDeps(app), docSlug, judgment);
-      console.log(formatJudgmentSummary(judgment) + nudgeBlock);
+      console.log(formatJudgmentSummary(judgment) + renderAdvisoryBlock(judgment) + nudgeBlock);
     } finally {
       app.close();
     }

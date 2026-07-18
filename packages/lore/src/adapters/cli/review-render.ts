@@ -15,6 +15,9 @@
  *     `""` when `judgment.superseded_candidate` is absent (so appending this to
  *     `formatJudgmentSummary`'s output is a no-op, REGRESSION-safe concatenation); else the
  *     resolved `lore invalidate <old> --superseded-by <X>` nudge or an unresolved-ref note.
+ *   renderAdvisoryBlock(judgment) — SPEC-053: `""` when `judgment.advisory` is absent/empty
+ *     (REGRESSION-safe no-op concatenation); else a labelled, explicitly non-blocking list
+ *     of the AC-quantifiability advisory findings. Pure (no injected deps).
  *
  * @invariant `renderSupersededCandidateNudgeBlock` never mutates `formatJudgmentSummary`'s
  *   own output — the two are separately callable and always CONCATENATED by the caller
@@ -95,4 +98,25 @@ export async function renderSupersededCandidateNudgeBlock(
 
   const nudge = await renderSupersededCandidateNudge(deps, judgedDocSlug, judgment.superseded_candidate);
   return nudge.resolved ? `\n\nSuggested: ${nudge.command}` : `\n\nNote: ${nudge.note}`;
+}
+
+/**
+ * SPEC-053 — the non-blocking AC-quantifiability advisory block appended after
+ * {@link formatJudgmentSummary}'s output. Pure (no injected deps, unlike the superseded
+ * nudge). `""` (no-op) when `judgment.advisory` is absent or empty — the REGRESSION
+ * guarantee: `formatJudgmentSummary(judgment) + renderAdvisoryBlock(judgment)` is
+ * byte-identical to `formatJudgmentSummary(judgment)` alone for every pre-SPEC-053 judgment
+ * (and for any v2 judgment where the judge emitted no advisory findings). Rendered as a
+ * labelled list so a reviewer sees each finding without parsing JSON; deliberately framed
+ * as advisory (never a blocker) to match the field's SPEC-053 D1 contract.
+ */
+export function renderAdvisoryBlock(judgment: ReviewJudgment): string {
+  const advisory = judgment.advisory;
+  if (advisory === undefined || advisory.length === 0) return "";
+
+  const lines = advisory.map((a) => {
+    const target = a.ac_id !== undefined ? `${a.ac_id}: ` : "";
+    return `  - [${a.kind}] ${target}${a.finding}`;
+  });
+  return `\n\nAdvisory (non-blocking):\n${lines.join("\n")}`;
 }

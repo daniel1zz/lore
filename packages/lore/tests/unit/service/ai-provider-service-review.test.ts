@@ -19,7 +19,7 @@
  *     judgeDoc verbatim — even when the model's own JSON response includes its own `checks`
  *     field (llmReviewOutputSchema allows but ignores it), the deterministic pre-checks win
  *   - judge.provider === judge.model === activeProviderName (documented limitation);
- *     judge.prompt_version === REVIEW_PROMPT_VERSION ("v1")
+ *     judge.prompt_version === REVIEW_PROMPT_VERSION ("v2" since SPEC-053)
  *
  * Adversarial angles:
  *   - A hardcoded-return service (`return ok({..., checks: someFixedArray})`) would defeat a
@@ -153,7 +153,7 @@ describe("judgeDoc — HAPPY (single-attempt success)", () => {
     expect(result.value.doc_version).toBe(bundle.doc.version);
   });
 
-  it("judge identity: provider === model === activeProviderName, prompt_version === 'v1'", async () => {
+  it("judge identity: provider === model === activeProviderName, prompt_version === 'v2'", async () => {
     const store = new InMemoryStore();
     const { bundle, checks } = await makeBundle(store);
     const provider = new InMemoryAIProvider("my-custom-provider", { kind: "ok", content: VALID_JSON });
@@ -165,7 +165,9 @@ describe("judgeDoc — HAPPY (single-attempt success)", () => {
     expect(result.value.judge).toEqual({
       provider: "my-custom-provider",
       model: "my-custom-provider",
-      prompt_version: "v1",
+      // reason: SPEC-053 bumped the active REVIEW_PROMPT_VERSION v1 → v2; judgeDoc stamps
+      // the currently-active version, so a real judge run now records "v2".
+      prompt_version: "v2",
     });
   });
 
