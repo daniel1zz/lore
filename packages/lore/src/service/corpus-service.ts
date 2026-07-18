@@ -25,8 +25,10 @@ import {
   normalizeFileAnchors,
   parseCodeAnchor,
   validityEqual,
+  uatVerdictSchema,
+  isP0Accepted,
 } from "@lore/core";
-import type { CreateDocInput, DocPatch } from "@lore/core";
+import type { CreateDocInput, DocPatch, UatVerdict } from "@lore/core";
 import {
   DOC_TYPE_ROLE_MAP,
   type DocId,
@@ -351,9 +353,24 @@ export class CorpusService {
     return result;
   }
 
+  /**
+   * Internal creation seam for SPEC-054 UAT verdict docs — the SOLE way a `knowledge`
+   * doc with `extra.sub_type: "uat"` may be created. Mirrors {@link createHandoffDoc}:
+   * runs the full `_createImpl` pipeline with ONLY the uat writer-identity rejection
+   * skipped (`opts.allowUat: true`). The public `create()` / `lore create` path keeps
+   * rejecting sub_type "uat" so the typed `extra.uat` payload can never be hand-forged.
+   * `UatService.record` is its production caller (bound in `app.ts`).
+   */
+  async createUatDoc(input: CreateDocInput): Promise<Result<DocRecord, LoreError>> {
+    const startMs = Date.now();
+    const result = await this._createImpl(input, { allowUat: true });
+    this.recordTelemetryEvent("create", startMs, result, { type: input.type });
+    return result;
+  }
+
   private async _createImpl(
     input: CreateDocInput,
-    opts?: { allowHandoff?: boolean },
+    opts?: { allowHandoff?: boolean; allowUat?: boolean },
   ): Promise<Result<DocRecord, LoreError>> {
     const parsed = createDocInputSchema.safeParse(input);
     if (!parsed.success) {
@@ -408,6 +425,26 @@ export class CorpusService {
           'knowledge sub_type "handoff" may only be created via `lore handoff` — ' +
           "direct creation through `lore create` / `lore_create` is not permitted",
         value: "handoff",
+      });
+    }
+
+    // Write-path exclusivity for knowledge sub_type "uat" (SPEC-054) — same
+    // writer-identity guard as "handoff" above: extra.uat is user-supplied data, so a Zod
+    // presence check alone (knowledgeExtraSchema) cannot enforce "only `lore uat record`
+    // may write this sub_type." `opts.allowUat` is the internal bypass ONLY
+    // `createUatDoc` sets — never exposed on the public `create()` overload.
+    if (
+      data.type === "knowledge" &&
+      (data.extra?.["sub_type"] as unknown) === "uat" &&
+      opts?.allowUat !== true
+    ) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "extra.sub_type",
+        message:
+          'knowledge sub_type "uat" may only be created via `lore uat record` — ' +
+          "direct creation through `lore create` / `lore_create` is not permitted",
+        value: "uat",
       });
     }
 
@@ -1227,6 +1264,36 @@ export class CorpusService {
       if (!gateResult.ok) return gateResult;
     }
 
+    // Gate `plan-close` on a plan's → archived TRANSITION reached via `set` (SPEC-054).
+    // `archived` is the lifecycle terminal — "closing" a plan. Only fires for an ACTUAL
+    // close (`existing.status !== "archived"`, so re-archiving is a no-op that never
+    // re-blocks) of a plan that OPTED IN (`extra.requires_uat === true`). An opt-out plan
+    // (no `requires_uat`) archives unchanged (D2). When enabled + opted-in, the plan's
+    // latest linked UAT verdict must show P0 acceptance — resolved here (the ONE extra
+    // read this gate pays for), fed to the pure `plan-close` predicate.
+    if (
+      existing.type === "plan" &&
+      newStatus === "archived" &&
+      existing.status !== "archived" &&
+      this.gateEnforcer &&
+      this.gateEnforcer.isEnabled("plan-close")
+    ) {
+      const effectiveExtra = parsedPatch.data.extra !== undefined ? parsedPatch.data.extra : existing.extra;
+      const requiresUat = (effectiveExtra as Record<string, unknown>)["requires_uat"] === true;
+      if (requiresUat) {
+        const uatResult = await this.getLatestUatVerdict(existing.id);
+        if (!uatResult.ok) return uatResult;
+        const gateResult = this.gateEnforcer.enforce("plan-close", {
+          requiresUat: true,
+          uatVerdictPresent: uatResult.value.present,
+          uatP0Accepted: uatResult.value.p0Accepted,
+          uatUncoveredP0: uatResult.value.uncoveredP0,
+          targetIdOrSlug: existing.slug,
+        });
+        if (!gateResult.ok) return gateResult;
+      }
+    }
+
     const updateResult = await this.store.update(existing.id, docPatch, { expected_version: existing.version });
     if (!updateResult.ok) return updateResult;
 
@@ -1584,6 +1651,61 @@ export class CorpusService {
       ...(spec !== undefined ? { spec } : {}),
       tasks: tasksResult.value,
       knowledge_links: knowledgeLinks,
+    });
+  }
+
+  /**
+   * Resolves a plan's LATEST linked UAT verdict (SPEC-054) — the SINGLE read the
+   * `plan-close` gate (`set`, below) and `lore uat show` both consume. Walks the plan's
+   * INCOMING `informs` links, fetches each source doc, keeps only `knowledge` docs whose
+   * `extra.sub_type === "uat"` with a Zod-valid `extra.uat`, and returns the most-recent
+   * one by `created_at` (the verdict authored last wins — a re-run supersedes a prior one).
+   *
+   * @param planIdOrSlug - The plan whose latest UAT verdict to resolve.
+   * @returns `ok({present, p0Accepted, uncoveredP0, verdict?, docSlug?})` — `present:false`
+   *   with the other fields at their empty defaults when no UAT verdict is linked (a FACT,
+   *   never an error); `p0Accepted` is `isP0Accepted(latest)` (SPEC-054 D4). Only a genuine
+   *   resolve/store failure returns `err`.
+   */
+  async getLatestUatVerdict(planIdOrSlug: string): Promise<
+    Result<
+      { present: boolean; p0Accepted: boolean; uncoveredP0: string[]; verdict?: UatVerdict; docSlug?: string },
+      LoreError
+    >
+  > {
+    const resolveResult = await this.resolve(planIdOrSlug);
+    if (!resolveResult.ok) return resolveResult;
+
+    const linksResult = await this.store.findLinks(resolveResult.value, "in");
+    if (!linksResult.ok) return linksResult;
+    const informsSources = linksResult.value
+      .filter((link) => link.link_type === "informs" && link.to_id === resolveResult.value)
+      .map((link) => link.from_id);
+
+    let latest: { doc: DocRecord; verdict: UatVerdict } | undefined;
+    for (const sourceId of informsSources) {
+      const docResult = await this.store.find(sourceId);
+      if (!docResult.ok) return docResult;
+      const doc = docResult.value;
+      if (doc === null || doc.deleted_at !== null || doc.type !== "knowledge") continue;
+      const parsedExtra = knowledgeExtraSchema.safeParse(doc.extra);
+      if (!parsedExtra.success || parsedExtra.data.sub_type !== "uat") continue;
+      const parsedVerdict = uatVerdictSchema.safeParse(parsedExtra.data.uat);
+      if (!parsedVerdict.success) continue;
+      if (latest === undefined || doc.created_at > latest.doc.created_at) {
+        latest = { doc, verdict: parsedVerdict.data };
+      }
+    }
+
+    if (latest === undefined) {
+      return ok({ present: false, p0Accepted: false, uncoveredP0: [] });
+    }
+    return ok({
+      present: true,
+      p0Accepted: isP0Accepted(latest.verdict),
+      uncoveredP0: latest.verdict.requirement_coverage.uncovered_p0,
+      verdict: latest.verdict,
+      docSlug: latest.doc.slug,
     });
   }
 

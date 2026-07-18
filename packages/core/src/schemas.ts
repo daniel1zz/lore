@@ -8,6 +8,7 @@ import type { DocStatus, DocType, Slug } from "./types.js";
 import { DECISION_STATUSES, KNOWLEDGE_SUB_TYPES } from "./types.js";
 import { evidenceEntrySchema, taskClaimSchema } from "./task-workflow.js";
 import { assessmentResultSchema } from "./assessment.js";
+import { uatVerdictSchema } from "./uat.js";
 import { SPEC_KINDS } from "./spec-kind.js";
 import { specAcceptanceCriteriaSchema } from "./acceptance.js";
 import { handoffExtraSchema } from "./session.js";
@@ -157,6 +158,8 @@ export const knowledgeExtraSchema = z
     skill: skillExtraSchema.optional(),
     /** Present iff sub_type === "handoff" — the Zod-typed SSOT lossless-handoff payload. */
     handoff: handoffExtraSchema.optional(),
+    /** Present iff sub_type === "uat" — the Zod-typed SSOT UAT verdict (SPEC-054). */
+    uat: uatVerdictSchema.optional(),
     /** Bi-temporal validity metadata (SPEC-043 D1) — written exclusively via
      *  `ValidityService.invalidate` (`lore invalidate`), never `lore set` (D10). */
     validity: validitySchema.optional(),
@@ -184,6 +187,17 @@ export const knowledgeExtraSchema = z
         code: z.ZodIssueCode.custom,
         message: "knowledge sub_type 'handoff' requires a Zod-valid extra.handoff",
         path: ["handoff"],
+      });
+    }
+    // reason: same cross-field pattern — sub_type "uat" requires a Zod-valid extra.uat
+    // (SPEC-054). Presence/shape check only; WHO may write sub_type "uat" is enforced by
+    // `CorpusService._createImpl`'s writer-identity guard (mirrors "handoff"), since
+    // extra.uat is user-supplied data that a bare presence check cannot make unforgeable.
+    if (data.sub_type === "uat" && data.uat === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "knowledge sub_type 'uat' requires a Zod-valid extra.uat",
+        path: ["uat"],
       });
     }
     // Note: sub_type "prompt" / "skill" deliberately have NO analogous presence check —
@@ -311,6 +325,13 @@ export const planExtraSchema = z
     legacy_phase: z.string().optional(),
     /** SPEC-040 D5 — see {@link planAcScopeSchema}. */
     ac_scope: planAcScopeSchema.optional(),
+    /**
+     * SPEC-054 — opt-in to the `plan-close` UAT gate. When `true`, this plan may only be
+     * archived (closed) after a linked UAT verdict shows P0 acceptance
+     * (`CorpusService.getLatestUatVerdict` + the `plan-close` checkpoint). Absent/false →
+     * the plan archives unchanged (opt-out, non-breaking).
+     */
+    requires_uat: z.boolean().optional(),
   })
   .passthrough()
   .superRefine((data, ctx) => {

@@ -151,10 +151,12 @@ describe("SessionService.bootstrap — HAPPY (AC-SL-1)", () => {
     if (!notMine.ok) throw new Error("unexpected error");
     expect(notMine.value.my_claims).toEqual([]);
 
-    // armed_gates — all 4 checkpoints present, spec-create carries the skill slug
-    expect(report.armed_gates).toHaveLength(4);
+    // armed_gates — all 5 checkpoints present (SPEC-054 added plan-close), spec-create carries the skill slug
+    expect(report.armed_gates).toHaveLength(5);
     const checkpoints = report.armed_gates.map((g) => g.checkpoint).sort();
-    expect(checkpoints).toEqual(["plan-promote", "spec-create", "spec-promote", "task-claim"].sort());
+    expect(checkpoints).toEqual(
+      ["plan-close", "plan-promote", "spec-create", "spec-promote", "task-claim"].sort(),
+    );
     for (const gate of report.armed_gates) {
       if (gate.checkpoint === "spec-create") {
         expect(gate.feeding_source_slug).toBe(skillDoc.slug);
@@ -213,7 +215,7 @@ describe("SessionService.bootstrap — BOUNDARY (AC-SL-10)", () => {
     expect(report.active_plans).toEqual([]);
     expect(report.pending_reviews).toEqual({ count: 0, slugs: [] });
     expect(report.my_claims).toEqual([]);
-    expect(report.armed_gates).toHaveLength(4);
+    expect(report.armed_gates).toHaveLength(5);
     for (const gate of report.armed_gates) {
       expect(gate.feeding_source_slug).toBeNull();
     }
@@ -248,7 +250,7 @@ describe("SessionService.bootstrap — STATE: multi-PRD root + gate config disab
     const result = await sessionService.bootstrap("alice");
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.armed_gates).toHaveLength(3);
+    expect(result.value.armed_gates).toHaveLength(4);
     expect(result.value.armed_gates.some((g) => g.checkpoint === "task-claim")).toBe(false);
   });
 });

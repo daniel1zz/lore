@@ -1,6 +1,6 @@
 /**
- * GateEnforcer — service-layer enforcement of the four IoC vertical-slice gate
- * checkpoints (`spec-create` / `spec-promote` / `plan-promote` / `task-claim`).
+ * GateEnforcer — service-layer enforcement of the five gate
+ * checkpoints (`spec-create` / `spec-promote` / `plan-promote` / `task-claim` / `plan-close`).
  *
  * Retro follow-up item 8 ("[arch] defense-in-depth"): before this module, the four
  * checkpoints existed ONLY behind `lore gate <checkpoint>` — a separate CLI command an
@@ -101,7 +101,7 @@ export class GateEnforcer {
    *   `.lore/config.yaml` was loaded — forwarded verbatim to `resolveGateEnabled` on
    *   every `enforce()` call, exactly as `gate.ts`'s `isGateDisabledByConfig` already
    *   does. Not pre-resolved into per-checkpoint booleans at construction time: a
-   *   single stored config reference lets one `GateEnforcer` instance serve all four
+   *   single stored config reference lets one `GateEnforcer` instance serve all five
    *   checkpoints without re-deriving anything at construction.
    */
   constructor(private readonly config: LoreConfig | undefined) {}
@@ -130,7 +130,7 @@ export class GateEnforcer {
 
     const checkpointDef = checkpointRegistry[checkpoint];
     if (checkpointDef === undefined) {
-      // reason: all four GateCheckpoint members are registered in checkpointRegistry
+      // reason: all five GateCheckpoint members are registered in checkpointRegistry
       // (checkpoint-registry.ts's second module invariant) — this can only fire if a
       // future edit removes an entry the registry currently guarantees. Mirrors
       // gate.ts::requireCheckpoint's identical "can't happen in production" shape;

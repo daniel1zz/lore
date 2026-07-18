@@ -192,6 +192,7 @@ export const KNOWLEDGE_SUB_TYPES = [
   "prompt",
   "skill",
   "handoff",
+  "uat",
 ] as const;
 
 /** Derived TypeScript union for a knowledge document's `extra.sub_type`. */

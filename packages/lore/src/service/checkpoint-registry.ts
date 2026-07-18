@@ -24,7 +24,7 @@
  *   markdown, counting a spec's declared acceptance criteria, walking a plan/task's
  *   ancestor-spec chain via `CorpusService.getPlanBundle`) stays in `gate.ts` — this
  *   module only consumes data the adapter already fetched.
- * @invariant `checkpointRegistry` now covers all four `GateCheckpoint` members. It
+ * @invariant `checkpointRegistry` now covers all five `GateCheckpoint` members. It
  *   remains typed `Partial<Record<...>>` (not `Record<...>`) so a FUTURE checkpoint
  *   addition doesn't have to touch this type — callers still SHOULD branch on
  *   `checkpointRegistry[cp] !== undefined` (or use `requireCheckpoint`-style lookups
@@ -71,6 +71,7 @@ import {
   upstreamHasAcceptanceCriteria,
   noAnchorOverlap,
   acQuantifiable,
+  uatP0Accepted,
   ANCHOR_OVERLAP_FIELD,
   AC_QUANTIFIABLE_FIELD,
   type PredicateResult,
@@ -79,14 +80,19 @@ import {
 import { buildFeedingPack, renderFeedingPack } from "./gate-feeding.js";
 
 /**
- * The four IoC vertical-slice gate checkpoints (tech-spec §5.1). Not every member has
+ * The five gate checkpoints (four IoC vertical-slice tech-spec §5.1 + plan-close, SPEC-054). Not every member has
  * a `checkpointRegistry` entry yet — see this module's second invariant.
  */
-export type GateCheckpoint = "spec-create" | "spec-promote" | "plan-promote" | "task-claim";
+export type GateCheckpoint =
+  | "spec-create"
+  | "spec-promote"
+  | "plan-promote"
+  | "task-claim"
+  | "plan-close";
 
 /**
  * Pre-fetched, checkpoint-agnostic input to a `CheckpointDef`'s `check` / `feed`
- * callbacks. A single `GateContext` shape is shared across all four `GateCheckpoint`s
+ * callbacks. A single `GateContext` shape is shared across all five `GateCheckpoint`s
  * (tech-spec §5.1 design contract) — every field is optional because a given
  * checkpoint's `check`/`feed` only ever reads the subset it declares in its own JSDoc.
  * Fields are grouped by the checkpoint (and callback) that consumes them.
@@ -191,6 +197,24 @@ export interface GateContext {
    * as every other gate config knob).
    */
   readonly anchorOverlapEnabled?: boolean;
+
+  // -- plan-close: check() + feed() (SPEC-054) --
+  /**
+   * Whether the plan being closed opted IN to the UAT gate (`plan.extra.requires_uat
+   * === true`). `false`/absent short-circuits `checkPlanClose` to `[]` (vacuous pass)
+   * BEFORE its predicate runs — the same "no upstream ⇒ vacuous pass" shape
+   * `plan-promote` uses for `hasSpecParent`. Only a plan that explicitly demands
+   * acceptance is gated; every existing plan archives unchanged (SPEC-054 D2).
+   */
+  readonly requiresUat?: boolean;
+  /** Whether ANY UAT verdict is linked (`informs`) to the plan — resolved by the caller
+   *  (`CorpusService.getLatestUatVerdict`). */
+  readonly uatVerdictPresent?: boolean;
+  /** `isP0Accepted` of the LATEST linked UAT verdict (SPEC-054 D4) — resolved by the caller;
+   *  meaningless when `uatVerdictPresent` is false. */
+  readonly uatP0Accepted?: boolean;
+  /** The latest verdict's uncovered P0 requirement ids, for the feeding-pack message only. */
+  readonly uatUncoveredP0?: string[];
 }
 
 /**
@@ -461,6 +485,46 @@ function feedTaskClaim(ctx: GateContext, failures: PredicateResult[]): string {
 }
 
 /**
+ * `plan-close`'s single predicate (SPEC-054): a plan that OPTED IN to UAT
+ * (`ctx.requiresUat === true`) may close only when its latest linked UAT verdict is
+ * P0-accepted. `ctx.requiresUat !== true` short-circuits to `[]` (vacuous pass) BEFORE
+ * the predicate runs — same "opt-out ⇒ no gate" shape `checkPlanPromote` uses for
+ * `hasSpecParent` (third module invariant). By the time `uatP0Accepted` runs, the plan
+ * has opted in, so a missing/rejected verdict is a genuine block.
+ */
+function checkPlanClose(ctx: GateContext): PredicateResult[] {
+  if (ctx.requiresUat !== true) {
+    return [];
+  }
+  return [uatP0Accepted(ctx.uatVerdictPresent === true, ctx.uatP0Accepted === true)];
+}
+
+/**
+ * `plan-close`'s feeding message — names the literal `lore uat record` recovery command
+ * (and, when a verdict exists but left P0 requirements uncovered, lists them) so a blocked
+ * caller knows exactly how to unblock: run acceptance (`/lore-uat`) and record its verdict.
+ * Pointers only — never a doc body dump (`gate-feeding.ts` provenance convention).
+ */
+function feedPlanClose(ctx: GateContext, failures: PredicateResult[]): string {
+  const uncovered = ctx.uatUncoveredP0 ?? [];
+  const detail =
+    uncovered.length > 0
+      ? ` Uncovered P0 requirements: ${uncovered.join(", ")}.`
+      : "";
+  const pack = buildFeedingPack({
+    ruleSource: "corpus (UAT verdict)",
+    ruleMarkdown:
+      `Required for plan-close: a plan declaring \`extra.requires_uat: true\` may only be ` +
+      `archived after a linked UAT verdict shows P0 acceptance (verdict not "reject", no ` +
+      `rejected P0 journey, no uncovered P0 requirement, no UIUX blocker).${detail} ` +
+      `Recovery: run acceptance (\`/lore-uat\`) then \`lore uat record ` +
+      `${ctx.targetIdOrSlug ?? "<plan>"} --json-file <verdict.json>\`.`,
+    missing: selectFailures(failures).map((f) => f.reason),
+  });
+  return renderFeedingPack(pack);
+}
+
+/**
  * Builds the `hasSpecParent` / `parentSpec` / `parentSpecPointer` trio `plan-promote`
  * and `task-claim` both consume, from an optional resolved ancestor spec `DocRecord`
  * (`CorpusService.getPlanBundle`'s `.spec` field — `undefined` when the plan has no
@@ -548,7 +612,7 @@ export function buildAnchorGateContext(
 
 /**
  * The gate checkpoint registry — see module invariants for why this stays
- * `Partial<Record<...>>` even though all four `GateCheckpoint` members are now
+ * `Partial<Record<...>>` even though all five `GateCheckpoint` members are now
  * populated.
  */
 export const checkpointRegistry: Partial<Record<GateCheckpoint, CheckpointDef>> = {
@@ -556,17 +620,19 @@ export const checkpointRegistry: Partial<Record<GateCheckpoint, CheckpointDef>> 
   "spec-promote": { id: "spec-promote", check: checkSpecPromote, feed: feedSpecPromote },
   "plan-promote": { id: "plan-promote", check: checkPlanPromote, feed: feedPlanPromote },
   "task-claim": { id: "task-claim", check: checkTaskClaim, feed: feedTaskClaim },
+  "plan-close": { id: "plan-close", check: checkPlanClose, feed: feedPlanClose },
 };
 
 // ─── Armed Gates (SPEC-041 §3 bootstrap; SPEC-043 §Design Decisions D8) ────
 
-/** All four checkpoints, in the fixed order both `SessionService.bootstrap` and
+/** All five checkpoints, in the fixed order both `SessionService.bootstrap` and
  *  `CorpusService.status`'s SPEC-043 warning render/scan them. */
 export const ALL_GATE_CHECKPOINTS: readonly GateCheckpoint[] = [
   "spec-create",
   "spec-promote",
   "plan-promote",
   "task-claim",
+  "plan-close",
 ];
 
 /**

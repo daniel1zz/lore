@@ -352,3 +352,40 @@ export function acQuantifiable(criteria: AcceptanceCriterion[] | undefined): Pre
   }
   return { ok: false, reason: AC_NOT_QUANTIFIABLE_REASON, field: AC_QUANTIFIABLE_FIELD };
 }
+
+/** `uatP0Accepted`'s failure reason when no UAT verdict is linked to the plan at all. */
+export const UAT_MISSING_REASON = "UAT_MISSING";
+
+/** `uatP0Accepted`'s failure reason when a verdict exists but is not P0-accepted. */
+export const UAT_P0_NOT_ACCEPTED_REASON = "UAT_P0_NOT_ACCEPTED";
+
+/** The `PredicateResult.field` value the `plan-close` gate's failures carry (SPEC-054). */
+export const PLAN_CLOSE_FIELD = "uat";
+
+/**
+ * `plan-close`'s single predicate (SPEC-054): a plan that requires UAT may close only when
+ * its latest linked UAT verdict is P0-accepted. Both inputs are pre-computed by the CALLER
+ * (`CorpusService.getLatestUatVerdict` + `isP0Accepted`, `@lore/core`) — this predicate
+ * never resolves links or reads `extra.uat` itself (module invariant: no store, no IO).
+ * The `requires_uat`-opt-in short-circuit lives in `checkPlanClose` (the checkpoint runs
+ * ZERO predicates for an opt-out plan), so by the time this runs the plan HAS opted in.
+ *
+ * @param present - Whether any UAT verdict is linked to the plan (`informs`).
+ * @param p0Accepted - `isP0Accepted` of the LATEST linked verdict (ignored when `!present`).
+ * @returns `{ok: true}` when a verdict exists and is P0-accepted; `{ok: false, reason:
+ *   "UAT_MISSING", field: "uat"}` when none is linked; `{ok: false, reason:
+ *   "UAT_P0_NOT_ACCEPTED", field: "uat"}` when the latest verdict is not P0-accepted.
+ * @example
+ * uatP0Accepted(true, true);   // => { ok: true }
+ * uatP0Accepted(false, false); // => { ok: false, reason: "UAT_MISSING", field: "uat" }
+ * uatP0Accepted(true, false);  // => { ok: false, reason: "UAT_P0_NOT_ACCEPTED", field: "uat" }
+ */
+export function uatP0Accepted(present: boolean, p0Accepted: boolean): PredicateResult {
+  if (!present) {
+    return { ok: false, reason: UAT_MISSING_REASON, field: PLAN_CLOSE_FIELD };
+  }
+  if (!p0Accepted) {
+    return { ok: false, reason: UAT_P0_NOT_ACCEPTED_REASON, field: PLAN_CLOSE_FIELD };
+  }
+  return { ok: true };
+}

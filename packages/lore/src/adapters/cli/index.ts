@@ -74,6 +74,7 @@ const main = defineCommand({
     feed: () => import("./commands/feed.js").then(wrapDefault("feed")),
     bootstrap: () => import("./commands/bootstrap.js").then(wrapDefault("bootstrap")),
     handoff: () => import("./commands/handoff.js").then(wrapDefault("handoff")),
+    uat: () => import("./commands/uat.js").then(wrapDefault("uat")),
     anchor: () => import("./commands/anchor.js").then(wrapDefault("anchor")),
     invalidate: () => import("./commands/invalidate.js").then(wrapDefault("invalidate")),
     setup: () => import("./commands/setup.js").then(wrapDefault("setup")),

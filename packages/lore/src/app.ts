@@ -59,6 +59,7 @@ import { JudgmentService } from "./service/judgment-service.js";
 import { StalenessProbeService } from "./service/staleness-probe-service.js";
 import { AuditService } from "./service/audit-service.js";
 import { AcService } from "./service/ac-service.js";
+import { UatService } from "./service/uat-service.js";
 import { VerifyRunnerService } from "./service/verify-runner-service.js";
 import { executeVerifySpawnSpec } from "./service/verify-executor.js";
 import { GateEnforcer } from "./service/gate-enforcer.js";
@@ -223,6 +224,14 @@ export interface App {
    * Source: SPEC-045 §Design Decisions D4, §Scope
    */
   driftCheckService?: DriftCheckService;
+  /**
+   * UatService — the sole write orchestrator for a structured UAT verdict
+   * (`lore uat record`, SPEC-054). Narrow injected ports (`corpusService.createUatDoc` /
+   * `corpusService.resolve` / `store.addLink`), same optional-DI shape as `acService`.
+   * Optional for the same "pre-existing hand-built App stubs stay valid" reason; always
+   * wired in production.
+   */
+  uatService?: UatService;
   /**
    * Telemetry sink — exposed for dashboard route handlers to emit source-tagged events.
    * Dashboard handlers record { service: "dashboard", source: "dashboard" } events after
@@ -412,6 +421,14 @@ function buildAppFromSqlite(
     // reason: AcService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-038 §4, §6, §9.1.
     acService: new AcService(store),
+    // reason: UatService takes narrow injected ports (SPEC-054) — the guarded
+    // createUatDoc seam, resolve, and store.addLink — never the full CorpusService.
+    uatService: new UatService({
+      createUatDoc: corpusService.createUatDoc.bind(corpusService),
+      resolveDocId: corpusService.resolve.bind(corpusService),
+      addLink: store.addLink.bind(store),
+      now: () => new Date().toISOString(),
+    }),
     // reason: VerifyRunnerService takes THREE injected ports (getPlanBundle,
     // recordVerifiedEvidence, executor) plus scalar config — never imports
     // CorpusService/TaskWorkflowService/the bun-only executor module directly
@@ -592,6 +609,14 @@ function buildAppFromTurso(
     // reason: AcService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-038 §4, §6, §9.1.
     acService: new AcService(store),
+    // reason: UatService takes narrow injected ports (SPEC-054) — the guarded
+    // createUatDoc seam, resolve, and store.addLink — never the full CorpusService.
+    uatService: new UatService({
+      createUatDoc: corpusService.createUatDoc.bind(corpusService),
+      resolveDocId: corpusService.resolve.bind(corpusService),
+      addLink: store.addLink.bind(store),
+      now: () => new Date().toISOString(),
+    }),
     // reason: VerifyRunnerService takes THREE injected ports (getPlanBundle,
     // recordVerifiedEvidence, executor) plus scalar config — never imports
     // CorpusService/TaskWorkflowService/the bun-only executor module directly

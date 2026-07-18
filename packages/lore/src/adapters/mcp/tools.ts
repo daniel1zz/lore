@@ -53,7 +53,7 @@ import type { LinkType } from "@lore/core";
 import { renderAssessmentContent } from "@lore/core";
 import type { NewReviewJudgment, ReviewJudgment, Result, TreeBlueprint } from "@lore/core";
 import { ORACLE_KINDS, runDeterministicChecks } from "@lore/core";
-import { handoffExtraSchema } from "@lore/core";
+import { handoffExtraSchema, uatVerdictSchema } from "@lore/core";
 import type { HandoffExtra } from "@lore/core";
 import { isAssessAiBraked } from "../../ai/resolve-ai.js";
 import { REVIEW_PROMPT_VERSION } from "../../ai/review-template.js";
@@ -536,6 +536,18 @@ export const LoreInvalidateSchema = z.object({
  * MCP actor-identity precedent as the other task-workflow/session tools.
  */
 export const LoreHandoffSchema = handoffExtraSchema;
+
+/**
+ * Input schema for lore_uat_record (SPEC-054) — the SOLE MCP write path for a structured
+ * UAT verdict (`knowledge`/`uat`), thin pipe over `UatService.record`. `verdict` REUSES
+ * `uatVerdictSchema` directly (SSOT; the tool's payload IS `extra.uat` verbatim). `by` is
+ * required — same MCP actor-identity precedent as `lore_handoff`/`lore_invalidate`.
+ */
+export const LoreUatRecordSchema = z.object({
+  plan: z.string().min(1),
+  by: z.string().min(1),
+  verdict: uatVerdictSchema,
+});
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -1471,6 +1483,24 @@ export function registerTools(server: McpServer, app: App): void {
       const result = await app.sessionService.writeHandoff(args);
       if (!result.ok) return errorContent(result.error);
       return textContent({ doc: result.value });
+    },
+  );
+
+  // ── SPEC-054: UAT verdict ─────────────────────────────────────────────────
+
+  // lore_uat_record
+  registerToolWithArgs(
+    server,
+    "lore_uat_record",
+    "Record a structured UAT verdict for a plan (knowledge/uat) — the sole MCP write path besides `lore uat record`; the plan-close gate reads it (SPEC-054)",
+    LoreUatRecordSchema,
+    async (args) => {
+      if (app.uatService === undefined) {
+        return errorContent({ code: "STORE_ERROR", message: "Internal error: UatService not wired on App" });
+      }
+      const result = await app.uatService.record(args.plan, args.verdict, { by: args.by });
+      if (!result.ok) return errorContent(result.error);
+      return textContent({ doc: result.value.doc });
     },
   );
 
