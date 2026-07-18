@@ -487,7 +487,9 @@ describe("assets-ssot — BOUNDARY (skill-name grammar)", () => {
   // skills reach via relative `../shared/` paths, so it must keep its bare name.
   const skillDirs = [
     ...new Set(
-      DECLARED_FILES.filter((f) => f.startsWith("skills/")).map((f) => f.split("/")[1]),
+      DECLARED_FILES.filter((f) => f.startsWith("skills/"))
+        .map((f) => f.split("/")[1])
+        .filter((d): d is string => d !== undefined),
     ),
   ];
   const SKILL_NAME_EXEMPT = new Set(["shared"]);
