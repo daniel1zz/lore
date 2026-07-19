@@ -71,6 +71,13 @@ export type AttestationRunner = (typeof ATTESTATION_RUNNERS)[number];
  * @invariant ac_ref is unconstrained format here (a free string) — validating that it
  *   names a *declared* acceptance criterion id is cross-entity and belongs to
  *   `TaskWorkflowService.addEvidence` (SPEC-038 §4 D4), not this schema layer.
+ * @invariant `checklist_ref` (SPEC-056 §Design Decisions D8) is the phase-doc-typed
+ *   sibling of `ac_ref` — an optional pointer to a `phase.extra.checklist[].id`
+ *   instead of a spec-declared AC id. Also unconstrained format at this layer;
+ *   cross-entity validation that it names an existing checklist item on the TARGET
+ *   phase belongs to `PhaseWorkflowService`'s shared evidence-append path, mirroring
+ *   `ac_ref`'s division of labor. ADDITIVE field — every pre-SPEC-056 evidence entry
+ *   (which never carries it) still parses unchanged (REGRESSION).
  * @invariant `attestation` is runner-issued ONLY — public write paths (CLI `lore evidence`,
  *   MCP `lore_evidence_add`) reject any input carrying this field with VALIDATION_ERROR
  *   (SPEC-039 §4 D2); `TaskWorkflowService.recordVerifiedEvidence` is the sole injection
@@ -114,6 +121,8 @@ export const evidenceEntrySchema = z.object({
   recorded_by: z.string().min(1),
   /** Optional pointer to a declared acceptance criterion id (SPEC-038 §4). */
   ac_ref: z.string().optional(),
+  /** Optional pointer to a phase checklist item id (SPEC-056 §Design Decisions D8) — see the field-level invariant above. */
+  checklist_ref: z.string().optional(),
   /** Runner-issued attestation metadata (SPEC-039 §2 D1) — see the field-level invariant above. */
   attestation: z
     .object({

@@ -3,6 +3,9 @@
  * tech-spec §4.1/§11). One "deterministic zone" gate per governed doc-creation flow;
  * `spec-create` and `spec-promote` are its two subcommands (hence the group/subcommand
  * shape rather than flat `gate-spec-create` / `gate-spec-promote` command names).
+ * `plan-promote` / `task-claim` / `phase-claim` (SPEC-056 D2/D7 — task-skill-implement-
+ * cli-mcp-surfaces-checklist-ref-evidence) join the same command group as
+ * "commit-time cross-tier gates" — see the dedicated paragraph below.
  *
  * `lore gate spec-create --input-json '<json>'` runs the three pure predicates from
  * `../../../service/gate-predicates.js` against a CANDIDATE spec-creation payload
@@ -31,31 +34,37 @@
  * No `review_judgments` row is persisted by this command — `lore review` remains the
  * sole persistence path for judgments; this is a disposable, in-band advisory only.
  *
- * `lore gate plan-promote --plan <id-or-slug>` and `lore gate task-claim --task
- * <id-or-slug>` are the two "commit-time cross-tier gates": they gate an
- * ALREADY-CREATED plan (ahead of promotion) / task (ahead of being claimed) against
- * its ANCESTOR spec's approval + AC status, walking the SAME task→plan→ancestor-spec
- * chain `evaluateReadiness`'s `upstream_unapproved` advisory uses
- * (`CorpusService.getPlanBundle`, `@lore/core` task-workflow.ts) — the plan/task's
- * OWN status is never inspected, only its ancestor spec's. When the plan/task has no
- * spec-tier ancestor at all (parented directly under a `prd`, or unparented) there is
- * no upstream edge to gate, so both checkpoints PASS vacuously (never a failure) —
- * see `checkpoint-registry.js`'s third module invariant.
+ * `lore gate plan-promote --plan <id-or-slug>`, `lore gate task-claim --task
+ * <id-or-slug>`, and `lore gate phase-claim --phase <id-or-slug>` (SPEC-056 D2/D7) are
+ * the "commit-time cross-tier gates": they gate an ALREADY-CREATED plan (ahead of
+ * promotion) / task or phase (ahead of being claimed) against its ANCESTOR spec's
+ * approval + AC status, walking the SAME task→plan→ancestor-spec chain
+ * `evaluateReadiness`'s `upstream_unapproved` advisory uses
+ * (`CorpusService.getPlanBundle`, `@lore/core` task-workflow.ts) — the plan/task/
+ * phase's OWN status is never inspected, only its ancestor spec's. When the target has
+ * no spec-tier ancestor at all (parented directly under a `prd`, or unparented) there
+ * is no upstream edge to gate, so all three checkpoints PASS vacuously (never a
+ * failure) — see `checkpoint-registry.js`'s third module invariant.
  *   - `plan-promote`: ancestor spec must be `approved` AND declare ≥1 structured
  *     acceptance criterion (`upstreamApproved` + `upstreamHasAcceptanceCriteria`).
- *   - `task-claim`: ancestor spec must be `approved` (`upstreamApproved`); ADDITIONALLY
- *     (SPEC-042 §Design Decisions D5) a fresh sibling claim in the same plan whose
- *     declared `file_anchors` overlap this task's own also blocks
- *     (`noAnchorOverlap`) — evaluated UNCONDITIONALLY, not gated by whether a
- *     spec-tier ancestor exists (unlike `upstreamApproved`). `--by` (or
- *     `$LORE_ACTOR`/OS username) supplies the candidate actor identity the overlap
- *     predicate's "different actor" test needs; this pre-flight check reaches the
- *     IDENTICAL verdict `lore claim` itself would for the same task/actor —
- *     `buildAnchorGateContext` (`checkpoint-registry.js`) is the shared ctx-builder
- *     both this command and `TaskWorkflowService.claim`'s `GateEnforcer` path use.
+ *   - `task-claim` / `phase-claim`: ancestor spec must be `approved`
+ *     (`upstreamApproved`); ADDITIONALLY (SPEC-042 §Design Decisions D5) a fresh
+ *     sibling claim in the same plan whose declared `file_anchors` overlap this
+ *     target's own also blocks (`noAnchorOverlap`) — evaluated UNCONDITIONALLY, not
+ *     gated by whether a spec-tier ancestor exists (unlike `upstreamApproved`).
+ *     `phase-claim` reuses `checkTaskClaim` VERBATIM (`checkpoint-registry.ts`'s D2/D7
+ *     module invariant — the predicate is doc-type-agnostic) and the SAME
+ *     `workflow.gates."task-claim".anchor_overlap.enabled` knob (no dedicated
+ *     phase-claim sub-knob exists yet, mirroring `PhaseWorkflowService.
+ *     enforceClaimGate`'s identical interim choice). `--by` (or `$LORE_ACTOR`/OS
+ *     username) supplies the candidate actor identity the overlap predicate's
+ *     "different actor" test needs; this pre-flight check reaches the IDENTICAL
+ *     verdict `lore claim`/`PhaseWorkflowService.claim` themselves would for the same
+ *     target/actor — `buildAnchorGateContext` (`checkpoint-registry.js`) is the shared
+ *     ctx-builder every one of these call sites uses.
  *
  * `LORE_GATE_BYPASS=1` short-circuits to exit 0 before ANY parsing or checking, for
- * ALL FOUR subcommands — an escape hatch for callers that must not be blocked
+ * ALL FIVE subcommands — an escape hatch for callers that must not be blocked
  * (documented, not silent: every invocation under bypass still goes through the CLI,
  * so it is audit-log-visible at the shell/process level even though this command
  * itself performs no corpus writes).
@@ -71,7 +80,7 @@
  * prints a one-line stderr note (`gate: <checkpoint> disabled by config`) and exits 0 —
  * see each subcommand's `run()`.
  *
- * Exit codes (plan-promote / task-claim):
+ * Exit codes (plan-promote / task-claim / phase-claim):
  *   0 = no spec-tier ancestor (vacuous pass), OR ancestor spec passes its checkpoint's
  *       predicates, OR LORE_GATE_BYPASS=1
  *   3 = the target plan/task does not resolve (DOC_NOT_FOUND / SLUG_NOT_FOUND)
@@ -138,6 +147,7 @@ import {
   resolveParentDoc,
   CHECKPOINT_PRODUCED_TYPE,
 } from "../../../flows/feed-flow.js";
+import { requirePhaseWorkflowService } from "../phase-wiring.js";
 
 /**
  * Looks up `checkpoint` in `flows/feed-flow.ts::CHECKPOINT_PRODUCED_TYPE` — the SINGLE
@@ -366,6 +376,49 @@ export default defineCommand({
           if (isGateDisabledByConfig("task-claim", config)) return;
           const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
           await runTaskClaimGate(app, args.task as string, by, config);
+        } finally {
+          app.close();
+        }
+      },
+    }),
+
+    "phase-claim": defineCommand({
+      meta: {
+        name: "phase-claim",
+        description:
+          "Deterministic commit-time gate for claiming a phase document (SPEC-056 D2/D7 " +
+          "— the phase-doc-typed sibling of task-claim, reusing the SAME checkTaskClaim " +
+          "predicate): when the phase's plan has a spec-tier ancestor, it must be " +
+          "approved; a fresh sibling claim in the same plan whose declared file_anchors " +
+          "overlap this phase's own also blocks; a plan with no spec-tier ancestor and " +
+          "no siblings with overlapping anchors passes vacuously",
+      },
+      args: {
+        phase: {
+          type: "string",
+          description: "Phase document ID or slug to gate",
+          required: true,
+        },
+        by: {
+          type: "string",
+          description:
+            "Actor identity attempting the claim (feeds the anchor-overlap 'different " +
+            "actor' test); defaults to $LORE_ACTOR env var, then OS username — same " +
+            "resolution order as `lore claim`",
+        },
+      },
+      async run({ args }) {
+        // LORE_GATE_BYPASS=1: exit 0 before ANY parsing or checking (module header).
+        if (process.env["LORE_GATE_BYPASS"] === "1") {
+          process.exitCode = 0;
+          return;
+        }
+
+        const { app, config } = loadLoreApp();
+        try {
+          if (isGateDisabledByConfig("phase-claim", config)) return;
+          const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
+          await runPhaseClaimGate(app, args.phase as string, by, config);
         } finally {
           app.close();
         }
@@ -653,6 +706,97 @@ async function runTaskClaimGate(
       ...buildUpstreamSpecContext(bundleResult.value.spec),
       ...buildAnchorGateContext(by, task, bundleResult.value.tasks, nowIso, ttlMinutes),
       targetIdOrSlug: taskIdOrSlug,
+      anchorOverlapEnabled,
+    };
+  }
+
+  const results = checkpoint.check(ctx);
+
+  if (isCheckpointBlocked(results)) {
+    console.log(checkpoint.feed(ctx, selectFailures(results)));
+    process.exitCode = 4;
+    return;
+  }
+
+  console.log("gate: pass");
+  process.exitCode = 0;
+}
+
+/**
+ * Runs the `phase-claim` checkpoint against an already-created phase document
+ * (SPEC-056 D2/D7) — mirrors `runTaskClaimGate` exactly, substituting `phase` doc-type
+ * validation and `requirePhaseWorkflowService(app).claimTtlMinutes` for
+ * `app.taskWorkflowService.claimTtlMinutes` (the checkpoint predicates themselves are
+ * IDENTICAL — `checkTaskClaim`, reused verbatim by `checkpointRegistry["phase-claim"]`,
+ * `service/checkpoint-registry.ts`'s own D2/D7 module invariant). `resolveAnchorOverlapGateEnabled`
+ * is called WITHOUT a checkpoint argument (it only reads the `task-claim` knob) —
+ * `PhaseWorkflowService.enforceClaimGate` documents this SAME interim choice: no
+ * phase-claim-scoped `anchor_overlap.enabled` sub-knob exists yet, so this pre-flight
+ * CLI gate reuses the identical `workflow.gates."task-claim".anchor_overlap.enabled`
+ * value the service-layer path already reads, keeping the two surfaces' verdicts in sync.
+ *
+ * @param app - Wired `App` (from `loadLoreApp()`).
+ * @param phaseIdOrSlug - Phase document ULID or slug to gate.
+ * @param by - The actor attempting the claim (feeds `noAnchorOverlap`'s "different
+ *   actor" test) — resolved by the caller via `resolveActor`, same precedent as
+ *   `lore claim`/`runTaskClaimGate`.
+ * @param config - `loadLoreApp()`'s resolved project config — forwarded to
+ *   `resolveAnchorOverlapGateEnabled` (see above).
+ */
+async function runPhaseClaimGate(
+  app: App,
+  phaseIdOrSlug: string,
+  by: string,
+  config: LoreConfig | undefined,
+): Promise<void> {
+  const phaseResult = await app.corpusService.get(phaseIdOrSlug);
+  if (!phaseResult.ok) {
+    process.stderr.write(formatError(phaseResult.error) + "\n");
+    process.exitCode = exitCode(phaseResult.error);
+    return;
+  }
+
+  const phase = phaseResult.value.doc;
+  if (phase.type !== "phase") {
+    const error: LoreError = {
+      code: "VALIDATION_ERROR",
+      field: "type",
+      message: `Expected a phase document; got type '${phase.type}'`,
+      value: phase.type,
+    };
+    process.stderr.write(formatError(error) + "\n");
+    process.exitCode = exitCode(error);
+    return;
+  }
+
+  const checkpoint = requireCheckpoint("phase-claim");
+  const nowIso = new Date().toISOString();
+  const ttlMinutes = requirePhaseWorkflowService(app).claimTtlMinutes;
+  const anchorOverlapEnabled = resolveAnchorOverlapGateEnabled(config);
+
+  // reason: mirrors runTaskClaimGate's identical null-parent_id edge case (a phase's
+  // parent_id is schema-required to be its plan — a null here can only happen on a
+  // legacy/corrupted row); see that function's identical comment for the full
+  // rationale of the synthetic "no spec parent, no siblings" context.
+  let ctx: GateContext;
+  if (phase.parent_id === null) {
+    ctx = {
+      ...buildUpstreamSpecContext(undefined),
+      ...buildAnchorGateContext(by, phase, [], nowIso, ttlMinutes),
+      targetIdOrSlug: phaseIdOrSlug,
+      anchorOverlapEnabled,
+    };
+  } else {
+    const bundleResult = await app.corpusService.getPlanBundle(phase.parent_id);
+    if (!bundleResult.ok) {
+      process.stderr.write(formatError(bundleResult.error) + "\n");
+      process.exitCode = exitCode(bundleResult.error);
+      return;
+    }
+    ctx = {
+      ...buildUpstreamSpecContext(bundleResult.value.spec),
+      ...buildAnchorGateContext(by, phase, bundleResult.value.tasks, nowIso, ttlMinutes),
+      targetIdOrSlug: phaseIdOrSlug,
       anchorOverlapEnabled,
     };
   }

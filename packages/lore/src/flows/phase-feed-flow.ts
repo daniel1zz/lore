@@ -123,6 +123,20 @@ export const DEFAULT_PHASE_START_BUDGETS: PhaseStartBudgets = {
 /** Cap on how many linked-knowledge pointers are requested per pack assembly. */
 const KNOWLEDGE_POINTER_LIMIT = 20;
 
+/**
+ * The `"phase-start"` checkpoint literal — mirrors `feed-flow.ts`'s
+ * `SESSION_RESUME_CHECKPOINT` export shape so `commands/feed.ts` and (a future)
+ * `tools.ts` `lore_feed` handler compare against ONE exported constant rather than
+ * a second hand-typed string literal (task-skill-implement-cli-mcp-surfaces-
+ * checklist-ref-evidence). This is a DIFFERENT dispatch shape from
+ * `SESSION_RESUME_CHECKPOINT`'s (which is consulted BEFORE the
+ * `CHECKPOINT_PRODUCED_TYPE` lookup) — `"phase-start"` IS a `CHECKPOINT_PRODUCED_TYPE`
+ * entry (`feed-flow.ts`), so `commands/feed.ts` special-cases it to call
+ * `buildPhaseStartPack` directly instead of the generic `buildFeed` composition
+ * (which has no notion of a phase-scoped bundle).
+ */
+export const PHASE_START_CHECKPOINT = "phase-start";
+
 /** The assembled phase-start pack — the shape both CLI `lore feed phase-start` and MCP `lore_feed` render/return. */
 export interface PhaseStartPack {
   readonly phase_id: string;

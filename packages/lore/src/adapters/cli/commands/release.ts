@@ -1,6 +1,13 @@
 /**
  * lore release <task> [--by <name>] [--reason <text>] [--force] — clear the
- * advisory execution lease on a task.
+ * advisory execution lease on a task OR phase document.
+ *
+ * Target-type dispatch (SPEC-056 task-skill-implement-cli-mcp-surfaces-checklist-ref-
+ * evidence): `TaskWorkflowService.release` is ALWAYS tried FIRST, UNCHANGED — a
+ * successful call, a DOC_NOT_FOUND, or any other error stays byte-identical to
+ * pre-SPEC-056 behavior (REGRESSION). ONLY when that call fails with its own
+ * `VALIDATION_ERROR {field: "type", value: "phase"}` does this adapter retry via
+ * `PhaseWorkflowService.release` — same dispatch shape `commands/evidence.ts` uses.
  *
  * Actor resolution (--by flag > $LORE_ACTOR env var > OS username) — see
  * utils.ts::resolveActor.
@@ -9,15 +16,16 @@
  * requires --force. `--reason` (e.g. a failure summary) lands in the version
  * history entry — visible via `lore log <task>`.
  *
- * Exit codes: 0 = success, 3 = DOC_NOT_FOUND, 4 = VALIDATION_ERROR (not a task /
+ * Exit codes: 0 = success, 3 = DOC_NOT_FOUND, 4 = VALIDATION_ERROR (not a task/phase /
  *   no active claim), 5 = CLAIM_CONFLICT | STALE_VERSION.
  *
- * Source: SPEC-025 §4 AC-WF-6
+ * Source: SPEC-025 §4 AC-WF-6; SPEC-056 §Design Decisions D2
  */
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
+import { requirePhaseWorkflowService } from "../phase-wiring.js";
 
 export default defineCommand({
   meta: {
@@ -51,12 +59,22 @@ export default defineCommand({
     const { app } = loadLoreApp();
     try {
       const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
-      const result = await app.taskWorkflowService.release(args.task as string, {
+      const releaseOpts = {
         by,
         ...(typeof args.reason === "string" ? { reason: args.reason } : {}),
         force: args.force === true,
         source: app.callerSurface,
-      });
+      };
+
+      let result = await app.taskWorkflowService.release(args.task as string, releaseOpts);
+      if (
+        !result.ok &&
+        result.error.code === "VALIDATION_ERROR" &&
+        result.error.field === "type" &&
+        result.error.value === "phase"
+      ) {
+        result = await requirePhaseWorkflowService(app).release(args.task as string, releaseOpts);
+      }
 
       if (!result.ok) {
         process.stderr.write(formatError(result.error) + "\n");

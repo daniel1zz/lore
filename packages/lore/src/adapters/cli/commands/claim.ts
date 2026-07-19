@@ -1,6 +1,17 @@
 /**
  * lore claim <task> [--by <name>] [--branch <branch>] [--machine <name>]
- *   [--worktree <path>] [--steal] — acquire an advisory execution lease on a task.
+ *   [--worktree <path>] [--steal] — acquire an advisory execution lease on a task OR
+ *   phase document.
+ *
+ * Target-type dispatch (SPEC-056 task-skill-implement-cli-mcp-surfaces-checklist-ref-
+ * evidence): `TaskWorkflowService.claim` is ALWAYS tried FIRST, UNCHANGED — a
+ * successful call, a DOC_NOT_FOUND, or any other error stays byte-identical to
+ * pre-SPEC-056 behavior (REGRESSION). `resolveTask`'s doc-type check runs BEFORE the
+ * `task-claim` gate (verified in `task-workflow-service.ts`), so a phase target is
+ * rejected before any gate side effect — ONLY on that specific `VALIDATION_ERROR
+ * {field: "type", value: "phase"}` rejection does this adapter retry via
+ * `PhaseWorkflowService.claim` (which itself runs the `phase-claim` gate) — same
+ * dispatch shape `commands/evidence.ts`/`commands/release.ts` use.
  *
  * Actor resolution (--by flag > $LORE_ACTOR env var > OS username) — see
  * utils.ts::resolveActor.
@@ -28,17 +39,19 @@
  *     conflicting task and a recovery command (SPEC-042 D5; --steal does NOT
  *     bypass this — it only overrides a fresh claim on THIS task).
  *
- * Exit codes: 0 = success, 3 = DOC_NOT_FOUND, 4 = VALIDATION_ERROR (not a task,
- *   or the task-claim gate blocked the claim — e.g. anchor overlap / upstream
- *   spec not approved), 5 = CLAIM_CONFLICT | STALE_VERSION.
+ * Exit codes: 0 = success, 3 = DOC_NOT_FOUND, 4 = VALIDATION_ERROR (not a task/phase,
+ *   or the task-claim/phase-claim gate blocked the claim — e.g. anchor overlap /
+ *   upstream spec not approved), 5 = CLAIM_CONFLICT | STALE_VERSION.
  *
- * Source: SPEC-025 §4 AC-WF-3, AC-WF-4, AC-WF-5; SPEC-042 §Design Decisions D2, D5
+ * Source: SPEC-025 §4 AC-WF-3, AC-WF-4, AC-WF-5; SPEC-042 §Design Decisions D2, D5;
+ *   SPEC-056 §Design Decisions D2, D7
  */
 
 import { hostname } from "os";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
+import { requirePhaseWorkflowService } from "../phase-wiring.js";
 
 export default defineCommand({
   meta: {
@@ -81,14 +94,24 @@ export default defineCommand({
     try {
       const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
       const machine = typeof args.machine === "string" ? args.machine : hostname();
-      const result = await app.taskWorkflowService.claim(args.task as string, {
+      const claimOpts = {
         by,
         ...(typeof args.branch === "string" ? { branch: args.branch } : {}),
         machine,
         ...(typeof args.worktree === "string" ? { worktree: args.worktree } : {}),
         steal: args.steal === true,
         source: app.callerSurface,
-      });
+      };
+
+      let result = await app.taskWorkflowService.claim(args.task as string, claimOpts);
+      if (
+        !result.ok &&
+        result.error.code === "VALIDATION_ERROR" &&
+        result.error.field === "type" &&
+        result.error.value === "phase"
+      ) {
+        result = await requirePhaseWorkflowService(app).claim(args.task as string, claimOpts);
+      }
 
       if (!result.ok) {
         process.stderr.write(formatError(result.error) + "\n");

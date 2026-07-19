@@ -2,7 +2,7 @@
 
 ## Purpose
 
-MCP (Model Context Protocol) stdio adapter. Entered via `lore --mcp-server` (top-level flag intercepted in `packages/lore/src/index.ts`) or `lore agent`. Registers 32 `lore_*` tools (SPEC-054 adds `lore_uat_record`; SPEC-055 adds `lore_requirement_add` — the sole MCP write path for a PRD requirement, `prd`+`id`+`statement`+`priority`, thin pipe over `RequirementService.addRequirement`) (16 original + 4 SPEC-025 task-workflow tools + 1 SPEC-026 assess tool + 1 SPEC-035 audit tool + 1 SPEC-034 review tool + 1 SPEC-039 verify tool + 1 IoC vertical-slice tech-spec §4.1/§11 P4 feed tool + 2 SPEC-041 session tools: `lore_bootstrap`, `lore_handoff` + 1 SPEC-042 session tool: `lore_anchor_set` + 1 SPEC-043 tool: `lore_invalidate` + 1 SPEC-044 tool: `lore_staleness_probe`) and a small set of MCP resources against `@modelcontextprotocol/sdk`'s `McpServer` and connects over `StdioServerTransport`.
+MCP (Model Context Protocol) stdio adapter. Entered via `lore --mcp-server` (top-level flag intercepted in `packages/lore/src/index.ts`) or `lore agent`. Registers 33 `lore_*` tools (SPEC-054 adds `lore_uat_record`; SPEC-055 adds `lore_requirement_add` — the sole MCP write path for a PRD requirement, `prd`+`id`+`statement`+`priority`, thin pipe over `RequirementService.addRequirement`; SPEC-056 adds `lore_phase_status` — computed phase completion scorecard, thin pipe over `../cli/phase-wiring.js::getPhaseStatus`, the SAME construction the CLI `lore phase status` command calls) (16 original + 4 SPEC-025 task-workflow tools + 1 SPEC-026 assess tool + 1 SPEC-035 audit tool + 1 SPEC-034 review tool + 1 SPEC-039 verify tool + 1 IoC vertical-slice tech-spec §4.1/§11 P4 feed tool + 2 SPEC-041 session tools: `lore_bootstrap`, `lore_handoff` + 1 SPEC-042 session tool: `lore_anchor_set` + 1 SPEC-043 tool: `lore_invalidate` + 1 SPEC-044 tool: `lore_staleness_probe` + 1 SPEC-056 tool: `lore_phase_status`) and a small set of MCP resources against `@modelcontextprotocol/sdk`'s `McpServer` and connects over `StdioServerTransport`. `lore_evidence_add` gains optional `checklist_ref` (SPEC-056 §Design Decisions D8, the phase-doc-typed sibling of `ac_ref`) plus TARGET-TYPE DISPATCH: `taskWorkflowService.addEvidence` is tried FIRST, UNCHANGED — only on its own `{field: "type", value: "phase"}` rejection does the handler retry via `requirePhaseWorkflowService(app).addEvidence` (mirrors the CLI's identical retry-dispatch, `../cli/commands/evidence.ts`).
 
 ## Key Invariants
 
@@ -54,7 +54,7 @@ IoC vertical-slice tech-spec §4.1/§11 P4 adds `lore_feed` (`checkpoint`, `pare
 ## Files
 
 - `index.ts` — `startMcpServer(app)`; wires `McpServer` + `StdioServerTransport`.
-- `tools.ts` — 32 tool registrations, schema constants, Zod input shapes.
+- `tools.ts` — 33 tool registrations, schema constants, Zod input shapes.
 - `assess-render.ts` — `buildAssessSummaryText(result)` (SPEC-040 §T3 D3) — Markdown digest for `lore_assess`'s `summary` envelope field.
 - `resources.ts` — MCP resource registrations (corpus snapshots, etc.).
 - `schema-info.ts` — `CORPUS_SCHEMA_INFO` constant describing doc types and `extra` requirements (knowledge `sub_type` includes `"assessment"`, SPEC-026).
