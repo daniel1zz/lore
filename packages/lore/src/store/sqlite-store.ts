@@ -11,6 +11,7 @@ import { MIGRATION_002_SQL } from "./migrations/migration-002.js";
 import { MIGRATION_003_SQL } from "./migrations/migration-003.js";
 import { MIGRATION_004_SQL } from "./migrations/migration-004.js";
 import { MIGRATION_005_SQL } from "./migrations/migration-005.js";
+import { MIGRATION_006_SQL } from "./migrations/migration-006.js";
 import type {
   AuditEntry,
   CalibrationRecord,
@@ -157,6 +158,22 @@ export class SQLiteStore implements StoreInterface {
           this.db.exec("ROLLBACK;");
         } catch {
           // reason: same as migration-004 — safe to ignore, see above.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 6) {
+      // reason: mirrors migration-004/005's catch/ROLLBACK wrapper (see
+      // migration-006.ts's own JSDoc @invariant) — a `docs` table-recreate,
+      // also multiple DDL statements wrapped in one BEGIN/COMMIT.
+      try {
+        this.db.exec(MIGRATION_006_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-004/005 — safe to ignore, see above.
         }
         throw error;
       }

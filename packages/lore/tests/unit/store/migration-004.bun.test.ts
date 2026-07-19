@@ -97,10 +97,11 @@ describe("migration-004 (widen links.link_type CHECK to accept 'governs') — at
     const db = store.getDatabase();
 
     // reason: SPEC-044 T1 added migration-005 (review_judgments.kind +
-    // superseded_candidate) — a FRESH store now runs every migration up to the current
-    // head, so user_version is 5, not 4. migration-004's own concern (the widened
+    // superseded_candidate); SPEC-056 added migration-006 (docs.type CHECK
+    // widening) — a FRESH store now runs every migration up to the current
+    // head, so user_version is 6, not 4. migration-004's own concern (the widened
     // links.link_type CHECK) is asserted below via the 'governs' insert, unaffected.
-    expect(userVersion(db)).toBe(5);
+    expect(userVersion(db)).toBe(6);
 
     insertDoc(db, "01HGOVERNSSKILL00000001", "skill-doc");
     insertDoc(db, "01HGOVERNSARTIFACT00001", "artifact-doc");

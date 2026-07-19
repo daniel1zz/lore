@@ -54,9 +54,10 @@ describe("migration-003 (review_judgments + calibration_records)", () => {
     const { user_version: userVersion } = db.query("PRAGMA user_version").get() as {
       user_version: number;
     };
-    // reason: SPEC-044 T1 added migration-005 — a fresh store now runs every migration
-    // up to the current head (5), not just through migration-003/004.
-    expect(userVersion).toBe(5);
+    // reason: SPEC-044 T1 added migration-005; SPEC-056 added migration-006 (docs.type
+    // CHECK widening) — a fresh store now runs every migration up to the current head
+    // (6), not just through migration-003/004.
+    expect(userVersion).toBe(6);
 
     const tableNames = db
       .query("SELECT name FROM sqlite_master WHERE type = 'table'")
@@ -127,8 +128,9 @@ describe("migration-003 (review_judgments + calibration_records)", () => {
     const { user_version: postUpgradeVersion } = db.query("PRAGMA user_version").get() as {
       user_version: number;
     };
-    // reason: SPEC-044 T1 added migration-005 — see HAPPY test's comment above.
-    expect(postUpgradeVersion).toBe(5);
+    // reason: SPEC-044 T1 added migration-005; SPEC-056 added migration-006 — see HAPPY
+    // test's comment above.
+    expect(postUpgradeVersion).toBe(6);
 
     const tableNames = db
       .query("SELECT name FROM sqlite_master WHERE type = 'table'")
@@ -154,8 +156,9 @@ describe("migration-003 (review_judgments + calibration_records)", () => {
       const { user_version: userVersion } = db.query("PRAGMA user_version").get() as {
         user_version: number;
       };
-      // reason: SPEC-044 T1 added migration-005 — see HAPPY test's comment above.
-      expect(userVersion).toBe(5);
+      // reason: SPEC-044 T1 added migration-005; SPEC-056 added migration-006 — see HAPPY
+      // test's comment above.
+      expect(userVersion).toBe(6);
       secondOpen.close();
     }).not.toThrow();
   });
