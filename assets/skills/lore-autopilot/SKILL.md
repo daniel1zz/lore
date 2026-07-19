@@ -87,6 +87,8 @@ anchor-overlap gate goes blind):
 export LORE_ACTOR=agent:<task-slug>
 ```
 
+⛔ **First command inside a fresh worktree: `bun install`** — a fresh worktree has no local `node_modules/@lore/*` workspace symlinks; module resolution silently walks UP into the main checkout's node_modules, so every oracle tests STALE `@lore/core`/`@lore/lore` source (live finding 2026-07-19). Install before claiming, before any oracle.
+
 **The implementer claims from INSIDE its worktree** — `lore claim <task> --by $LORE_ACTOR --worktree <branch>` — never pre-claimed by the orchestrator. It then implements, runs oracles, records `lore evidence` (result from the oracle's exit status, never self-asserted), and `lore release`.
 
 ### Claim-conflict handling (exit 5 / `CLAIM_CONFLICT`)
