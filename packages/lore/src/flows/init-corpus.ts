@@ -9,8 +9,10 @@
  *
  * Public surface:
  *   initCorpusAt(repoDir, opts?) — directory + `.gitignore` + `config.yaml`
- *     (via `saveConfig`) + a migrated SQLite DB (via `createApp`, immediately
- *     closed).
+ *     (via `saveConfig`, optionally merged with the recommended
+ *     `assets/project/lore-config-template.yaml` overlay — SPEC-058
+ *     §Design Decisions D6) + a migrated SQLite DB (via `createApp`,
+ *     immediately closed).
  *
  * Invariants:
  *   - Does NOT check whether `.lore` already exists — that idempotency check
@@ -32,21 +34,33 @@
  *     which never applies to a fresh `.lore/` directory with no config beyond
  *     what `saveConfig` just wrote (mirrors `commands/init.ts`'s own
  *     one-argument `createApp(dbPath)` call).
+ *   - `opts.configTemplateYaml` is entirely OPTIONAL — this module never reads
+ *     `assets/project/lore-config-template.yaml` itself (asset-root
+ *     resolution is an ADAPTER concern, per `setup-args.ts`'s own module
+ *     doc); a caller that has already read the shipped template passes its
+ *     raw text here, merged via `./config-template.js::mergeConfigWithOverlay`
+ *     BEFORE `saveConfig` is called. Omitted → byte-identical to
+ *     pre-SPEC-058 behaviour (REGRESSION-safe). A malformed (but present)
+ *     overlay is a LOUD stderr warning, never a fatal `initCorpusAt` failure
+ *     — the corpus still gets a valid `config.yaml`, just without the
+ *     recommended block (D1's "non-breaking" ethos extends to "a corrupted
+ *     shipped asset must not brick corpus creation").
  *
  * Side-effect class: IO (fs writes + SQLite migration run)
  * Source: SPEC-046 §Design ("the SAME logic commands/init.ts runs"), task
- *   AC-046-E.
+ *   AC-046-E; SPEC-058 §Design Decisions D6 (`configTemplateYaml` seeding).
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { err, ok } from "@lore/core";
-import type { LoreError, Result } from "@lore/core";
+import type { LoreConfig, LoreError, Result } from "@lore/core";
 // reason: saveConfig writes .lore/config.yaml via Node fs — only reachable via
 // the @lore/core/node subpath (browser-safety split, packages/core/src/CLAUDE.md).
 import { saveConfig } from "@lore/core/node";
 import { createApp } from "../app.js";
+import { describeConfigTemplateError, mergeConfigWithOverlay, parseConfigTemplateOverlay } from "./config-template.js";
 
 /** Optional overrides for {@link initCorpusAt} — both default to `commands/init.ts`'s own defaults. */
 export interface InitCorpusOptions {
@@ -54,6 +68,15 @@ export interface InitCorpusOptions {
   name?: string;
   /** Default author identity recorded in `config.yaml`. */
   author?: string;
+  /**
+   * Raw YAML content of `assets/project/lore-config-template.yaml`, when the
+   * caller has already read it — merged into the freshly-written
+   * `config.yaml` as a recommended starting point (SPEC-058 §Design
+   * Decisions D6). Omitted, or present-but-malformed, both leave
+   * `config.yaml` exactly as it would have been written before this option
+   * existed — see this module's invariants above.
+   */
+  configTemplateYaml?: string;
 }
 
 /** Renders a thrown value as a diagnostic string. Never re-throws. Mirrors `setup-service.ts`'s `describeCaught`. */
@@ -96,7 +119,23 @@ export async function initCorpusAt(
   const projectName = opts.name ?? repoDir.split("/").filter(Boolean).pop() ?? "lore";
   const author = opts.author ?? "owner";
 
-  const saveResult = saveConfig(repoDir, { project: { name: projectName, author } });
+  const baseConfig = { project: { name: projectName, author } };
+  let configToSave: unknown = baseConfig;
+  if (opts.configTemplateYaml !== undefined) {
+    const overlayResult = parseConfigTemplateOverlay(opts.configTemplateYaml);
+    if (overlayResult.ok) {
+      configToSave = mergeConfigWithOverlay(baseConfig, overlayResult.value);
+    } else {
+      // reason: a malformed shipped template is a packaging defect, not a reason to
+      // fail `lore init`/`lore setup --project` outright (see this module's own
+      // invariants above, SPEC-058 D1's "non-breaking" ethos).
+      process.stderr.write(
+        `Warning: ignoring malformed config template overlay: ${describeConfigTemplateError(overlayResult.error)}\n`,
+      );
+    }
+  }
+
+  const saveResult = saveConfig(repoDir, configToSave as LoreConfig);
   if (!saveResult.ok) return saveResult;
 
   try {

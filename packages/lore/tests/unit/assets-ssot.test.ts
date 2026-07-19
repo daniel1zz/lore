@@ -371,13 +371,14 @@ const DECLARED_FILES = [
   "hooks/lore-gate-g3-plan-promote.sh",
   "hooks/lore-gate-g4-task-claim.sh",
   "hooks/lib/turn-state.mjs",
-  // project (4 .sh gates + pre-push + tree.yaml template)
+  // project (4 .sh gates + pre-push + tree.yaml template + verification-profile config template, SPEC-058 D6)
   "project/g1-spec-create.sh",
   "project/g2-spec-promote.sh",
   "project/g3-plan-promote.sh",
   "project/g4-task-claim.sh",
   "project/pre-push",
   "project/lore.tree.yaml.template",
+  "project/lore-config-template.yaml",
   // governance
   "governance/corpus-workflow.md",
   "governance/seat-briefing.md",

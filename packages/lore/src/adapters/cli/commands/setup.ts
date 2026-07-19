@@ -292,6 +292,15 @@ function makeRealProjectAssetSource(projectAssetsDir: string): ProjectAssetSourc
 
 // ─── Mode handlers ────────────────────────────────────────────────────────────
 
+/**
+ * The recommended verification-profile overlay asset name (SPEC-058 §Design
+ * Decisions D6) — sits alongside `TREE_TEMPLATE_ASSET_NAME`'s equivalent role
+ * in `setup-project-flow.ts`, but is read HERE (not as a `scaffoldProject`
+ * step) because it seeds `initCorpusAt`'s `configTemplateYaml` option rather
+ * than being copied verbatim to a target path.
+ */
+const CONFIG_TEMPLATE_ASSET_NAME = "lore-config-template.yaml";
+
 async function runProjectScaffold(opts: { json: boolean; yes: boolean; assetsRoot: string }): Promise<void> {
   const repoDir = process.cwd();
 
@@ -305,11 +314,25 @@ async function runProjectScaffold(opts: { json: boolean; yes: boolean; assetsRoo
   });
   if (!proceed) return;
 
+  const projectAssets = makeRealProjectAssetSource(join(opts.assetsRoot, "project"));
+
   const service = new ProjectSetupService({
     fs: makeRealProjectFs(),
     exec: makeRealProjectExec(),
-    initCorpus: initCorpusAt,
-    assets: makeRealProjectAssetSource(join(opts.assetsRoot, "project")),
+    // reason: initCorpusAt itself never reads assets/project/ (asset-root resolution is
+    // an ADAPTER concern, per setup-args.ts's own module doc) — this closure reads the
+    // recommended config-template overlay via the SAME asset source the hooks/tree.yaml
+    // steps already use, then forwards it as initCorpusAt's configTemplateYaml option.
+    // A missing/unreadable template degrades to a plain initCorpusAt(repoDir) call
+    // (byte-identical to pre-SPEC-058 behaviour) rather than failing the whole scaffold.
+    initCorpus: async (targetRepoDir: string) => {
+      const templateResult = await projectAssets.readAsset(CONFIG_TEMPLATE_ASSET_NAME);
+      return initCorpusAt(
+        targetRepoDir,
+        templateResult.ok ? { configTemplateYaml: templateResult.value } : {},
+      );
+    },
+    assets: projectAssets,
   });
 
   const result = await service.scaffold(repoDir);
