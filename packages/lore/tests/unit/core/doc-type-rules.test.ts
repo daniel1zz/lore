@@ -151,7 +151,7 @@ describe("PARENT_TYPE_CONTRACT — boundary values (AC-DOCTYPE-BOUNDARY)", () =>
     expect(allowed).toContain("knowledge");
   });
 
-  it("PARENT_TYPE_CONTRACT covers all 6 DocType keys", () => {
+  it("PARENT_TYPE_CONTRACT covers all 7 DocType keys (SPEC-056 T4 added 'phase')", () => {
     const keys = Object.keys(PARENT_TYPE_CONTRACT);
     expect(keys).toContain("prd");
     expect(keys).toContain("spec");
@@ -159,7 +159,17 @@ describe("PARENT_TYPE_CONTRACT — boundary values (AC-DOCTYPE-BOUNDARY)", () =>
     expect(keys).toContain("plan");
     expect(keys).toContain("task");
     expect(keys).toContain("knowledge");
-    expect(keys).toHaveLength(6);
+    expect(keys).toContain("phase");
+    expect(keys).toHaveLength(7);
+  });
+
+  it("phase → plan is a valid parent relationship (SPEC-056 D1)", () => {
+    expect(isValidParentType("phase", "plan")).toBe(true);
+  });
+
+  it("PARENT_TYPE_CONTRACT.phase contains exactly one entry: 'plan'", () => {
+    expect(PARENT_TYPE_CONTRACT.phase).toHaveLength(1);
+    expect(Array.from(PARENT_TYPE_CONTRACT.phase)).toContain("plan");
   });
 
   it("knowledge → adr is valid (adr is within knowledge's allowed set)", () => {

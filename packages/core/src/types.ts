@@ -16,7 +16,7 @@ export type Slug = string;
 
 // ─── Enum-like Unions ──────────────────────────────────────────────────────
 
-export type DocType = "prd" | "spec" | "adr" | "plan" | "knowledge" | "task";
+export type DocType = "prd" | "spec" | "adr" | "plan" | "knowledge" | "task" | "phase";
 
 export type DocRole = "intent" | "spec" | "decision" | "plan" | "knowledge";
 
@@ -329,7 +329,14 @@ export type AiDefaultSource = "explicit_arg" | "config" | "env" | "cli_flag";
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 
-/** Maps each DocType to its canonical DocRole. Immutable SSOT. */
+/**
+ * Maps each DocType to its canonical DocRole. Immutable SSOT.
+ *
+ * @invariant `phase` maps to `"plan"` — same role as `task` (SPEC-056 D1): a
+ *   phase is an execution-tier document under a plan, mirroring the task doc
+ *   type it generalizes/supersedes. Registered by SPEC-056's PhaseWorkflowService
+ *   rename task (T2 deferral — see `phase.ts`'s module header).
+ */
 export const DOC_TYPE_ROLE_MAP: Record<DocType, DocRole> = {
   prd: "intent",
   spec: "spec",
@@ -337,4 +344,5 @@ export const DOC_TYPE_ROLE_MAP: Record<DocType, DocRole> = {
   plan: "plan",
   knowledge: "knowledge",
   task: "plan",
+  phase: "plan",
 } as const;

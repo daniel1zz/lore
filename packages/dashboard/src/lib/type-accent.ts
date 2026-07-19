@@ -43,4 +43,9 @@ export const TYPE_ACCENT: Record<DocType, string> = {
   plan: "border-l-emerald-600 dark:border-l-emerald-500",
   knowledge: "border-l-fuchsia-600 dark:border-l-fuchsia-500",
   task: "border-l-orange-600 dark:border-l-orange-500",
+  // SPEC-056 T4 — "phase" registered as a real DocType (compile-forced entry —
+  // TYPE_ACCENT is a fully-typed Record<DocType, string>). Distinct hue from
+  // every other entry above (WCAG pairing convention unverified for this new
+  // hue; dashboard phase-doc rendering is a later task's scope).
+  phase: "border-l-teal-600 dark:border-l-teal-500",
 };

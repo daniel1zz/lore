@@ -39,6 +39,7 @@ import {
   specExtraSchema,
   taskExtraSchema,
 } from "./schemas.js";
+import { phaseExtraSchema } from "./phase.js";
 
 // ─── Review Bundle ──────────────────────────────────────────────────────────
 
@@ -98,6 +99,14 @@ function safeParseExtraForType(doc: DocRecord): { success: boolean; issues: { pa
     }
     case "knowledge": {
       const r = knowledgeExtraSchema.safeParse(doc.extra);
+      return { success: r.success, issues: r.success ? [] : r.error.issues };
+    }
+    // reason: SPEC-056 T4 — "phase" registered as a real DocType (types.ts);
+    // this switch was exhaustive over the pre-SPEC-056 6-member union, so
+    // adding a 7th member without a case fails `tsc --noEmit` here (no
+    // `default` branch). Mirrors the `task` case's shape/intent exactly.
+    case "phase": {
+      const r = phaseExtraSchema.safeParse(doc.extra);
       return { success: r.success, issues: r.success ? [] : r.error.issues };
     }
   }

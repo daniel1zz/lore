@@ -14,6 +14,7 @@ import { SPEC_KINDS } from "./spec-kind.js";
 import { specAcceptanceCriteriaSchema } from "./acceptance.js";
 import { handoffExtraSchema } from "./session.js";
 import { validitySchema } from "./validity.js";
+import { phaseExtraSchema } from "./phase.js";
 
 // ─── Primitive Schemas ─────────────────────────────────────────────────────
 
@@ -38,6 +39,7 @@ export const docTypeSchema = z.enum([
   "plan",
   "knowledge",
   "task",
+  "phase",
 ]);
 
 export const docRoleSchema = z.enum([
@@ -427,8 +429,8 @@ export const createDocInputSchema = baseCreateDocInputSchema.superRefine(
   (data, ctx) => {
     const { type, parent_id, extra } = data;
 
-    // spec and task require parent_id
-    if ((type === "spec" || type === "task") && !parent_id) {
+    // spec, task, and phase require parent_id (phase: SPEC-056 D1 — always a plan)
+    if ((type === "spec" || type === "task" || type === "phase") && !parent_id) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: `parent_id is required for type '${type}'`,
@@ -485,6 +487,19 @@ export const createDocInputSchema = baseCreateDocInputSchema.superRefine(
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           message: "task requires extra.plan_id",
+          path: ["extra", "plan_id"],
+        });
+      }
+    }
+
+    // phase requires extra.plan_id (SPEC-056 D1 — mirrors the task branch above;
+    // phase generalizes/supersedes task at the plan-execution tier)
+    if (type === "phase") {
+      const phaseResult = phaseExtraSchema.safeParse(extra ?? {});
+      if (!phaseResult.success) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "phase requires extra.plan_id",
           path: ["extra", "plan_id"],
         });
       }

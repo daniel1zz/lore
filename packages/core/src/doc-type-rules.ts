@@ -17,6 +17,9 @@ export const PARENT_TYPE_CONTRACT = {
   plan:      ["prd", "spec"],
   task:      ["plan"],
   knowledge: ["prd", "spec", "adr", "plan", "knowledge"],
+  // reason: phase's parent is always a plan (SPEC-056 §Design Decisions D1) —
+  // registered by SPEC-056's PhaseWorkflowService rename task.
+  phase:     ["plan"],
 } as const satisfies Record<DocType, readonly DocType[]>;
 
 /**
