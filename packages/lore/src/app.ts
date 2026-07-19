@@ -54,8 +54,6 @@ import { SyncDocsService } from "./service/sync-docs-service.js";
 import { ExportDocsService } from "./service/export-docs-service.js";
 import { PhaseService } from "./service/phase-service.js";
 import { TaskWorkflowService } from "./service/task-workflow-service.js";
-import { PhaseWorkflowService } from "./service/phase-workflow-service.js";
-import { PhaseChecklistService } from "./service/phase-checklist-service.js";
 import { SpecKindService } from "./service/spec-kind-service.js";
 import { JudgmentService } from "./service/judgment-service.js";
 import { StalenessProbeService } from "./service/staleness-probe-service.js";
@@ -133,13 +131,17 @@ export interface App {
    * Same optional-gate constructor shape as `taskWorkflowService` (own telemetry
    * wiring, `resolveDeclaredAcIds` port, `{enforcer, getPlanBundle}` gate bundle
    * gating the additive `phase-claim` checkpoint rather than `task-claim`).
+   * Scoped to claim/release/evidence/ready ONLY — checklist/track mechanics are
+   * `phaseChecklistService`, below. Constructed in
+   * `adapters/cli/phase-wiring.ts::buildPhaseServices` (kept out of this file's own
+   * composition bodies — see that module's header).
    *
    * Optional for the same reason `acService`/`driftCheckService`/`sessionService`
    * are: pre-existing hand-built App test stubs (HTTP routes / MCP tools / eval
    * scenarios — outside this task's file anchors) remain valid without a
    * mechanical touch to every one of them. Always present in production — both
    * `buildAppFromSqlite` and `buildAppFromTurso` wire it unconditionally.
-   * Source: SPEC-056 §Module Boundary, §Design Decisions D2/D7.
+   * Source: SPEC-056 §Module Boundary, §Design Decisions D1/D2/D7.
    */
   phaseWorkflowService?: PhaseWorkflowService;
   /**
@@ -149,12 +151,14 @@ export interface App {
    * telemetry, no gate — checklist/track mutation is not itself a gated
    * checkpoint (script-mode checklist items execute through the SPEC-039
    * trusted runner via a separate injected port, not through this service).
+   * Constructed alongside `phaseWorkflowService` in
+   * `adapters/cli/phase-wiring.ts::buildPhaseServices`.
    *
    * Optional for the same reason `phaseWorkflowService`/`acService` are:
    * pre-existing hand-built App test stubs remain valid without a mechanical
    * touch to every one of them. Always present in production — both
    * `buildAppFromSqlite` and `buildAppFromTurso` wire it unconditionally.
-   * Source: SPEC-056 §Module Boundary.
+   * Source: SPEC-056 §Module Boundary, §Design Decisions D2.
    */
   phaseChecklistService?: PhaseChecklistService;
   /**
@@ -294,29 +298,6 @@ export interface App {
    */
   seatService?: SeatService;
   /**
-   * PhaseWorkflowService — evidence, claim lease, and computed readiness for `phase`
-   * docs (SPEC-056 §Design Decisions D1/D2). The phase-doc generalization of
-   * `taskWorkflowService`, scoped to claim/release/evidence/ready ONLY — checklist/
-   * track mechanics are `phaseChecklistService`, below. Constructed in
-   * `adapters/cli/phase-wiring.ts::buildPhaseServices` (kept out of this file's own
-   * composition bodies — see that module's header).
-   *
-   * Optional for the same "pre-existing hand-built App test stubs stay valid" reason
-   * as `acService`/`driftCheckService`/`sessionService`; always wired in production.
-   * Source: SPEC-056 §Module Boundary, §Design Decisions D1, D2.
-   */
-  phaseWorkflowService?: PhaseWorkflowService;
-  /**
-   * PhaseChecklistService — checklist/track verbs on a phase document's
-   * `extra.checklist`/`extra.track` arrays (SPEC-056 §Module Boundary D2). Store-only,
-   * no telemetry, same DI shape as `acService`/`phaseService`. Constructed alongside
-   * `phaseWorkflowService` in `adapters/cli/phase-wiring.ts::buildPhaseServices`.
-   *
-   * Optional for the same reason `phaseWorkflowService` is; always wired in production.
-   * Source: SPEC-056 §Module Boundary, §Design Decisions D2.
-   */
-  phaseChecklistService?: PhaseChecklistService;
-  /**
    * Telemetry sink — exposed for dashboard route handlers to emit source-tagged events.
    * Dashboard handlers record { service: "dashboard", source: "dashboard" } events after
    * successful writes so AC-DASH-WRITE-TEL-1 is satisfied without modifying service signatures.
@@ -419,20 +400,6 @@ function buildAppFromSqlite(
     corpusService.resolveDeclaredAcIds.bind(corpusService),
     { enforcer: gateEnforcer, getPlanBundle: corpusService.getPlanBundle.bind(corpusService) },
   );
-  // reason: PhaseWorkflowService (SPEC-056 D2, T4) — the `phase` doc-type
-  // generalization of taskWorkflowService above, same optional-gate DI shape
-  // (own telemetry, resolveDeclaredAcIds port, {enforcer, getPlanBundle} gate
-  // bundle) but gating claim() on the ADDITIVE "phase-claim" checkpoint rather
-  // than "task-claim" — task-workflow-service.ts stays untouched and live for
-  // legacy task docs; the two services coexist as parallel instances, not a
-  // migration in place.
-  const phaseWorkflowService = new PhaseWorkflowService(
-    store,
-    telemetry,
-    { claimTtlMinutes },
-    corpusService.resolveDeclaredAcIds.bind(corpusService),
-    { enforcer: gateEnforcer, getPlanBundle: corpusService.getPlanBundle.bind(corpusService) },
-  );
   // reason: SessionService (SPEC-041 §3 D1) — createHandoffDoc is CorpusService's
   // internal creation seam (the SOLE legitimate write path for knowledge/handoff
   // docs, bound rather than imported — services don't cross-import). isCheckpointEnabled
@@ -449,8 +416,11 @@ function buildAppFromSqlite(
   // port AND `stalenessProbeService`'s recordJudgment port can bind to the SAME instance
   // — never three separately-constructed JudgmentServices.
   const judgmentService = new JudgmentService(store, telemetry);
-  // reason: SPEC-056 phase execution model — DI construction lives in phase-wiring.ts
-  // (see that module's header for why this is ONE call here rather than inline).
+  // reason: SPEC-056 phase execution model (PhaseWorkflowService + PhaseChecklistService)
+  // — DI construction lives in phase-wiring.ts's buildPhaseServices (same optional-gate
+  // DI shape as taskWorkflowService: own telemetry, resolveDeclaredAcIds port,
+  // {enforcer, getPlanBundle} gate bundle gating "phase-claim" rather than "task-claim")
+  // so this file's own composition bodies stay minimal — see that module's header.
   const phaseServices = buildPhaseServices(store, telemetry, claimTtlMinutes, gateEnforcer, corpusService);
   return {
     corpusService,
@@ -486,14 +456,6 @@ function buildAppFromSqlite(
     // reason: PhaseService depends only on StoreInterface — stateless, no AI, no telemetry. SPEC-023 §9.1.
     phaseService: new PhaseService(store),
     taskWorkflowService,
-    // reason: phaseWorkflowService is the extracted local built just above (mirrors
-    // taskWorkflowService) — never a second, independently-constructed instance.
-    // SPEC-056 D2, T4.
-    phaseWorkflowService,
-    // reason: PhaseChecklistService depends only on StoreInterface — stateless, no
-    // AI, no telemetry, same shape as PhaseService/AcService. SPEC-056 §Module
-    // Boundary.
-    phaseChecklistService: new PhaseChecklistService(store),
     sessionService,
     // reason: ValidityService owns extra.validity (bi-temporal invalidation) — store +
     // own telemetry wiring, same DI shape as TaskWorkflowService/JudgmentService.
@@ -652,16 +614,6 @@ function buildAppFromTurso(
     corpusService.resolveDeclaredAcIds.bind(corpusService),
     { enforcer: gateEnforcer, getPlanBundle: corpusService.getPlanBundle.bind(corpusService) },
   );
-  // reason: PhaseWorkflowService (SPEC-056 D2, T4) — see buildAppFromSqlite's
-  // identical comment; same optional-gate DI shape as taskWorkflowService above,
-  // gating claim() on the ADDITIVE "phase-claim" checkpoint.
-  const phaseWorkflowService = new PhaseWorkflowService(
-    store,
-    telemetry,
-    { claimTtlMinutes },
-    corpusService.resolveDeclaredAcIds.bind(corpusService),
-    { enforcer: gateEnforcer, getPlanBundle: corpusService.getPlanBundle.bind(corpusService) },
-  );
   // reason: SessionService (SPEC-041 §3 D1) — createHandoffDoc is CorpusService's
   // internal creation seam (the SOLE legitimate write path for knowledge/handoff
   // docs, bound rather than imported — services don't cross-import). isCheckpointEnabled
@@ -677,7 +629,8 @@ function buildAppFromTurso(
   // the `judgmentService:` field AND `validityService`'s SPEC-044 D12 calibration port
   // AND `stalenessProbeService`'s recordJudgment port can bind to the SAME instance.
   const judgmentService = new JudgmentService(store, telemetry);
-  // reason: SPEC-056 phase execution model — see buildAppFromSqlite's identical comment.
+  // reason: SPEC-056 phase execution model (PhaseWorkflowService + PhaseChecklistService)
+  // — see buildAppFromSqlite's identical comment.
   const phaseServices = buildPhaseServices(store, telemetry, claimTtlMinutes, gateEnforcer, corpusService);
   return {
     corpusService,
@@ -713,14 +666,6 @@ function buildAppFromTurso(
     // reason: PhaseService depends only on StoreInterface — stateless, no AI, no telemetry. SPEC-023 §9.1.
     phaseService: new PhaseService(store),
     taskWorkflowService,
-    // reason: phaseWorkflowService is the extracted local built just above (mirrors
-    // taskWorkflowService) — never a second, independently-constructed instance.
-    // SPEC-056 D2, T4.
-    phaseWorkflowService,
-    // reason: PhaseChecklistService depends only on StoreInterface — stateless, no
-    // AI, no telemetry, same shape as PhaseService/AcService. SPEC-056 §Module
-    // Boundary.
-    phaseChecklistService: new PhaseChecklistService(store),
     sessionService,
     // reason: ValidityService owns extra.validity (bi-temporal invalidation) — store +
     // own telemetry wiring, same DI shape as TaskWorkflowService/JudgmentService.
