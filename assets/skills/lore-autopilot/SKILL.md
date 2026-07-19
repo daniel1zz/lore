@@ -104,7 +104,7 @@ retry the claim. ⛔ NEVER set `LORE_GATE_BYPASS=1` — gate escape is user-only
 
 On each implementer return:
 
-1. **Merge immediately** — `git merge <branch> --no-ff`; never batch merges. Conflict → dispatch a fresh subagent to resolve. After merge confirmed (`git branch --merged main`): `git worktree remove <path>` + `git branch -d <branch>`.
+1. **Merge immediately** — `git merge <branch> --no-ff`; never batch merges. ⛔ GATE every downstream step (archive, readiness re-check, next dispatch) on the merge's EXIT CODE — an `&&`-chain or explicit check, never an unconditional command sequence (live incident 2026-07-19: 'strategy ort failed' on untracked-file collision + unconditional archive chain → task archived while its code was NOT on main). Untracked-file collision → diff the copies first; identical → remove the stale untracked copy and re-merge. Conflict → dispatch a fresh subagent to resolve. After merge confirmed (`git branch --merged main`): `git worktree remove <path>` + `git branch -d <branch>`.
 2. **Check evidence** — `lore get <task> --json` → `extra.verification_evidence` must carry passing oracle entries for the task's ACs. Missing/failing evidence → failure loop below.
 3. **Attested verification** — after merging, run the trusted runner on main:
    ```
