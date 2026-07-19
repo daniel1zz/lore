@@ -48,6 +48,7 @@ export * from "./calibration.js";
 export * from "./audit-actor.js";
 export * from "./doc-type-meta.js";
 export * from "./session.js";
+export * from "./seat.js";
 export * from "./file-anchors.js";
 export * from "./validity.js";
 export * from "./staleness.js";
