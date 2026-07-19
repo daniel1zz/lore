@@ -25,6 +25,12 @@
  *   release(idOrSlug, opts, now?)          → clear the advisory lease (phase docs only)
  *   addEvidence(idOrSlug, entry, now?)     → append one SELF-REPORTED oracle
  *                                             verification record (phase docs only)
+ *   recordChecklistVerifiedEvidence(idOrSlug, entry, nowIso) → append a RUNNER-ATTESTED
+ *                                             record carrying a REQUIRED checklist_ref
+ *                                             (SPEC-056 §Design Decisions D8) — the
+ *                                             phase-doc-typed sibling of
+ *                                             TaskWorkflowService.recordVerifiedEvidence;
+ *                                             NOT registered on any CLI/MCP surface
  *   ready(planIdOrSlug, now?)              → computed readiness report (zero writes) —
  *                                             renders BOTH phase and legacy task children
  *
@@ -65,6 +71,7 @@ import type { LoreError } from "@lore/core";
 import {
   evidenceEntrySchema,
   taskClaimSchema,
+  checklistItemSchema,
   isClaimStale,
   evaluateReadiness,
   buildTaskClaim,
@@ -73,6 +80,7 @@ import {
   anchorsOverlap,
   type EvidenceEntry,
   type TaskClaim,
+  type ChecklistItem,
   type BlockerInfo,
 } from "@lore/core";
 import type { DocId, DocRecord, DocStatus } from "@lore/core";
@@ -85,6 +93,7 @@ import type {
   ClaimOpts,
   ReleaseOpts,
   EvidenceInput,
+  VerifiedEvidenceInput,
   AnchorConflict,
   ReadyReport,
 } from "./task-workflow-service.js";
@@ -94,7 +103,7 @@ import type {
  * redeclared here. See each type's own JSDoc in that module for the full contract;
  * this file's methods below consume them structurally unchanged.
  */
-export type { ClaimOpts, ReleaseOpts, EvidenceInput, AnchorConflict, ReadyReport };
+export type { ClaimOpts, ReleaseOpts, EvidenceInput, VerifiedEvidenceInput, AnchorConflict, ReadyReport };
 
 // ─── Internal Helpers ──────────────────────────────────────────────────────
 // Small, pure, module-private — duplicated from task-workflow-service.ts rather than
@@ -117,6 +126,18 @@ function readEvidence(doc: DocRecord): EvidenceEntry[] {
   const raw = doc.extra["verification_evidence"];
   if (!Array.isArray(raw)) return [];
   const parsed = z.array(evidenceEntrySchema).safeParse(raw);
+  return parsed.success ? parsed.data : [];
+}
+
+/**
+ * Reads and validates phase.extra.checklist. Returns [] when absent or malformed —
+ * feeds `appendEvidenceEntry`'s `checklist_ref` cross-validation (SPEC-056 §Design
+ * Decisions D8, mirrors `readEvidence`'s own "extract, tolerate malformed" shape).
+ */
+function readChecklist(doc: DocRecord): ChecklistItem[] {
+  const raw = doc.extra["checklist"];
+  if (!Array.isArray(raw)) return [];
+  const parsed = z.array(checklistItemSchema).safeParse(raw);
   return parsed.success ? parsed.data : [];
 }
 
@@ -195,10 +216,10 @@ export class PhaseWorkflowService {
     now: () => string,
   ): Promise<Result<DocRecord, LoreError>> {
     // reason: SPEC-039 §4 D2 parity — attestation is runner-issued only; addEvidence
-    // rejects a raw input carrying the key rather than silently stripping it. This
-    // service has no recordVerifiedEvidence counterpart yet (out of this task's scope —
-    // no RED test/AC calls for it), so the check exists purely to keep the same fail-loud
-    // posture TaskWorkflowService's addEvidence has, in case a future caller smuggles it.
+    // rejects a raw input carrying the key rather than silently stripping it. The sole
+    // injection point for `attestation` on a phase doc is `recordChecklistVerifiedEvidence`
+    // below (SPEC-056 §Design Decisions D8), mirroring TaskWorkflowService's
+    // addEvidence/recordVerifiedEvidence split exactly.
     if (Object.prototype.hasOwnProperty.call(entry, "attestation")) {
       return err({
         code: "VALIDATION_ERROR",
@@ -208,6 +229,78 @@ export class PhaseWorkflowService {
       });
     }
 
+    return this.appendEvidenceEntry(idOrSlug, entry, entry.recorded_by, now);
+  }
+
+  // ── recordChecklistVerifiedEvidence ─────────────────────────────────────
+
+  /**
+   * SOLE injection point for `EvidenceEntry.attestation` on a phase doc (SPEC-056
+   * §Design Decisions D8 — the phase-doc-typed sibling of
+   * `TaskWorkflowService.recordVerifiedEvidence`, SPEC-039 §2 D2). NOT registered on
+   * any CLI/MCP surface — the intended production caller is a future checklist-script
+   * runner wiring (out of THIS task's scope; this port exists so that wiring has
+   * somewhere to land without a second executor or a cross-service import, per the
+   * spec's D8 rationale). Requires `entry.checklist_ref` to be set (unlike `ac_ref` on
+   * `addEvidence`/`appendEvidenceEntry`, which stays optional) — this port exists
+   * SPECIFICALLY to attest a checklist item's script run, so a call with no
+   * `checklist_ref` at all is a caller error, checked BEFORE the shared append path
+   * (which still re-validates the id exists on this specific phase).
+   *
+   * @param idOrSlug - Phase document ULID or slug
+   * @param entry - Full evidence fields INCLUDING attestation, minus recorded_at;
+   *   `checklist_ref` is REQUIRED (checked here, not by the type alone)
+   * @param nowIso - Caller-supplied current time (D10) — a resolved ISO string
+   * @returns The updated phase DocRecord
+   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a phase / missing checklist_ref /
+   *   unknown checklist_ref / cap reached / bad entry / bad ac_ref), STALE_VERSION
+   */
+  async recordChecklistVerifiedEvidence(
+    idOrSlug: string,
+    entry: VerifiedEvidenceInput,
+    nowIso: string,
+  ): Promise<Result<DocRecord, LoreError>> {
+    const startMs = Date.now();
+
+    if (entry.checklist_ref === undefined) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "checklist_ref",
+        message: "recordChecklistVerifiedEvidence requires entry.checklist_ref",
+        value: entry.checklist_ref,
+      });
+    }
+
+    // reason: same time-seam wrapping trick TaskWorkflowService.recordVerifiedEvidence
+    // uses — appendEvidenceEntry takes a `now` THUNK so its cap-check-then-build
+    // ordering stays identical to addEvidence's; this method's own public contract
+    // stays a plain resolved `nowIso: string` (its intended caller resolves "now" once
+    // per run, not per evidence entry).
+    const result = await this.appendEvidenceEntry(idOrSlug, entry, entry.recorded_by, () => nowIso);
+    this.recordEvent("task.evidence_added", startMs, result, undefined, {
+      oracle: entry.oracle,
+      result: entry.result,
+      attested: entry.attestation !== undefined,
+    });
+    return result;
+  }
+
+  /**
+   * Shared append implementation for {@link addEvidence} (self-reported, never carries
+   * `attestation` by construction of its caller) and
+   * {@link recordChecklistVerifiedEvidence} (runner-attested, SPEC-056 §Design
+   * Decisions D8 sole injection point) — cap check, schema validation, `ac_ref` AND
+   * `checklist_ref` cross-entity validation, and the writePhaseExtra commit path all
+   * live here exactly once. Mirrors `TaskWorkflowService.appendEvidenceEntry`'s
+   * time-seam ordering (`now` invoked AFTER resolvePhase + the cap check, immediately
+   * before building the candidate) for the same STALE_VERSION test-recipe reason.
+   */
+  private async appendEvidenceEntry(
+    idOrSlug: string,
+    entry: VerifiedEvidenceInput,
+    actor: string,
+    now: () => string,
+  ): Promise<Result<DocRecord, LoreError>> {
     const phaseResult = await this.resolvePhase(idOrSlug);
     if (!phaseResult.ok) return phaseResult;
     const phase = phaseResult.value;
@@ -231,6 +324,8 @@ export class PhaseWorkflowService {
       recorded_by: entry.recorded_by,
       ...(entry.output_tail !== undefined ? { output_tail: entry.output_tail } : {}),
       ...(entry.ac_ref !== undefined ? { ac_ref: entry.ac_ref } : {}),
+      ...(entry.checklist_ref !== undefined ? { checklist_ref: entry.checklist_ref } : {}),
+      ...(entry.attestation !== undefined ? { attestation: entry.attestation } : {}),
     };
     const parsedEntry = evidenceEntrySchema.safeParse(candidate);
     if (!parsedEntry.success) {
@@ -269,6 +364,26 @@ export class PhaseWorkflowService {
       }
     }
 
+    // reason: checklist_ref cross-entity validation (SPEC-056 §Design Decisions D8) —
+    // unlike ac_ref (which points at a SIBLING doc's declared set, needing the injected
+    // resolveDeclaredAcIds port), a checklist item lives on THIS SAME phase doc, already
+    // in hand — no extra IO or injected port needed.
+    if (parsedEntry.data.checklist_ref !== undefined) {
+      const declaredChecklistIds = new Set(readChecklist(phase).map((item) => item.id));
+      if (!declaredChecklistIds.has(parsedEntry.data.checklist_ref)) {
+        const available =
+          declaredChecklistIds.size > 0
+            ? Array.from(declaredChecklistIds).sort().join(", ")
+            : "(none — phase has no declared checklist items)";
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "checklist_ref",
+          message: `checklist_ref "${parsedEntry.data.checklist_ref}" is not declared on this phase's checklist. Available ids: ${available}`,
+          value: parsedEntry.data.checklist_ref,
+        });
+      }
+    }
+
     const newExtra: Record<string, unknown> = {
       ...phase.extra,
       verification_evidence: [...existing, parsedEntry.data],
@@ -278,7 +393,7 @@ export class PhaseWorkflowService {
       phase,
       newExtra,
       nowIso,
-      entry.recorded_by,
+      actor,
       `Evidence added: ${entry.oracle} ${entry.result}`,
       "evidence",
       { oracle: entry.oracle, command: entry.command, result: entry.result },

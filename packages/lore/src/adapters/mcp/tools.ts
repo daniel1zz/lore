@@ -19,6 +19,12 @@
  * in-memory .slice() over an unbounded fetch); an omitted limit defaults to
  * MCP_LIST_DEFAULT_LIMIT (this surface only — the CLI stays fully unbounded by
  * default) and every response carries `truncated: boolean`, never a silent cap.
+ * + 1 SPEC-054 tool: lore_uat_record; + 1 SPEC-055 tool: lore_requirement_add
+ * + 1 SPEC-056 tool: lore_phase_status (task-skill-implement-cli-mcp-surfaces-
+ * checklist-ref-evidence) — computed phase completion scorecard, thin pipe over
+ * `../cli/phase-wiring.js::getPhaseStatus`. lore_evidence_add gains optional
+ * checklist_ref and target-type dispatch (task vs phase, mirrors the CLI's
+ * `lore evidence` retry-based dispatch).
  *
  * Architecture: Tools with input use the `registerToolWithArgs` helper defined below, which:
  *   1. Calls `server.tool(name, desc, handler)` in 3-arg form (avoids ZodRawShapeCompat type bomb)
@@ -73,6 +79,7 @@ import { buildDriftFlowDeps, buildListSpecs, countArmedSpecs, runDrift } from ".
 import { loadTreeBlueprint } from "../../flows/blueprint-flow.js";
 import { buildRealFsProbe } from "../real-fs-probe.js";
 import { buildAssessSummaryText } from "./assess-render.js";
+import { requirePhaseWorkflowService, getPhaseStatus } from "../cli/phase-wiring.js";
 
 // ─── Schema Constants ────────────────────────────────────────────────────────
 // Each schema is a `z.object(...)` instance (AnySchema), NOT an inline ZodRawShape literal.
@@ -350,6 +357,11 @@ export const LoreReleaseSchema = z.object({
  * spec (SPEC-038 §4). Passed through untouched; cross-entity validation that it
  * names a *declared* AC lives in `TaskWorkflowService.addEvidence` (SPEC-038 §4 D4),
  * not this schema.
+ * `checklist_ref` (SPEC-056 §Design Decisions D8) — the phase-doc-typed sibling of
+ * `ac_ref`: an optional pointer to a checklist item id declared on a PHASE target's
+ * own `extra.checklist`. Also passed through untouched; cross-entity validation lives
+ * in `PhaseWorkflowService`'s shared evidence-append path. Meaningful only when
+ * `id_or_slug` resolves to a phase doc — harmless-but-unvalidated on a task target.
  */
 export const LoreEvidenceAddSchema = z.object({
   id_or_slug: z.string(),
@@ -359,6 +371,12 @@ export const LoreEvidenceAddSchema = z.object({
   output_tail: z.string().max(4000).optional(),
   recorded_by: z.string().min(1),
   ac_ref: z.string().optional(),
+  checklist_ref: z.string().optional(),
+});
+
+/** Input schema for lore_phase_status (SPEC-056 task-skill-implement-cli-mcp-surfaces-checklist-ref-evidence). */
+export const LorePhaseStatusSchema = z.object({
+  id_or_slug: z.string(),
 });
 
 /** Input schema for lore_ready. */
@@ -712,7 +730,7 @@ async function reviewDocViaMcp(
 // ─── Tool Registrations ──────────────────────────────────────────────────────
 
 /**
- * Registers all 30 lore_* MCP tools on the given server (16 original + 4 SPEC-025
+ * Registers all 33 lore_* MCP tools on the given server (16 original + 4 SPEC-025
  * task-workflow tools: lore_claim, lore_release, lore_evidence_add, lore_ready;
  * + lore_assess (SPEC-026); + lore_audit (SPEC-035); + lore_review (SPEC-034);
  * + lore_verify (SPEC-039); + lore_feed (IoC vertical-slice tech-spec §4.1/§11 P4);
@@ -1116,8 +1134,13 @@ export function registerTools(server: McpServer, app: App): void {
   });
 
   // lore_evidence_add
-  registerToolWithArgs(server, "lore_evidence_add", "Append an oracle verification record to a task", LoreEvidenceAddSchema, async (args) => {
-    const result = await taskWorkflowService.addEvidence(args.id_or_slug, {
+  // reason: SPEC-056 target-type dispatch (task-skill-implement-cli-mcp-surfaces-
+  // checklist-ref-evidence) — mirrors the CLI `lore evidence` command's dispatch
+  // exactly: try taskWorkflowService FIRST, UNCHANGED (byte-identical for every
+  // non-phase target, REGRESSION); retry via phaseWorkflowService ONLY on its own
+  // {field: "type", value: "phase"} rejection.
+  registerToolWithArgs(server, "lore_evidence_add", "Append an oracle verification record to a task or phase", LoreEvidenceAddSchema, async (args) => {
+    const evidenceInput = {
       oracle: args.oracle,
       command: args.command,
       result: args.result,
@@ -1125,10 +1148,35 @@ export function registerTools(server: McpServer, app: App): void {
       source: "mcp",
       ...(args.output_tail !== undefined ? { output_tail: args.output_tail } : {}),
       ...(args.ac_ref !== undefined ? { ac_ref: args.ac_ref } : {}),
-    });
+      ...(args.checklist_ref !== undefined ? { checklist_ref: args.checklist_ref } : {}),
+    };
+
+    let result = await taskWorkflowService.addEvidence(args.id_or_slug, evidenceInput);
+    if (
+      !result.ok &&
+      result.error.code === "VALIDATION_ERROR" &&
+      result.error.field === "type" &&
+      result.error.value === "phase"
+    ) {
+      result = await requirePhaseWorkflowService(app).addEvidence(args.id_or_slug, evidenceInput);
+    }
+
     if (!result.ok) return errorContent(result.error);
     return textContent({ doc: result.value });
   });
+
+  // lore_phase_status (SPEC-056 task-skill-implement-cli-mcp-surfaces-checklist-ref-evidence)
+  registerToolWithArgs(
+    server,
+    "lore_phase_status",
+    "Computed completion scorecard for a phase document (SPEC-056) — the SAME payload the CLI `lore phase status` command renders",
+    LorePhaseStatusSchema,
+    async (args) => {
+      const result = await getPhaseStatus(app, args.id_or_slug, new Date().toISOString());
+      if (!result.ok) return errorContent(result.error);
+      return textContent(result.value);
+    },
+  );
 
   // lore_ready
   registerToolWithArgs(server, "lore_ready", "Computed readiness report over a plan's tasks (never stored)", LoreReadySchema, async (args) => {

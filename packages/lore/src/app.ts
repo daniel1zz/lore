@@ -71,6 +71,12 @@ import { ValidityService } from "./service/validity-service.js";
 import { DriftCheckService } from "./service/drift-check-service.js";
 import { SeatService } from "./service/seat-service.js";
 import { RealGitPort } from "./adapters/real-git-port.js";
+// reason: SPEC-056 phase execution model DI — construction lives in phase-wiring.ts,
+// NOT inline here, to minimize this file's diff surface against the concurrently-
+// dispatched app.ts-wiring task (see phase-wiring.ts's module header).
+import { buildPhaseServices } from "./adapters/cli/phase-wiring.js";
+import type { PhaseWorkflowService } from "./service/phase-workflow-service.js";
+import type { PhaseChecklistService } from "./service/phase-checklist-service.js";
 
 export interface App {
   corpusService: CorpusService;
@@ -288,6 +294,29 @@ export interface App {
    */
   seatService?: SeatService;
   /**
+   * PhaseWorkflowService — evidence, claim lease, and computed readiness for `phase`
+   * docs (SPEC-056 §Design Decisions D1/D2). The phase-doc generalization of
+   * `taskWorkflowService`, scoped to claim/release/evidence/ready ONLY — checklist/
+   * track mechanics are `phaseChecklistService`, below. Constructed in
+   * `adapters/cli/phase-wiring.ts::buildPhaseServices` (kept out of this file's own
+   * composition bodies — see that module's header).
+   *
+   * Optional for the same "pre-existing hand-built App test stubs stay valid" reason
+   * as `acService`/`driftCheckService`/`sessionService`; always wired in production.
+   * Source: SPEC-056 §Module Boundary, §Design Decisions D1, D2.
+   */
+  phaseWorkflowService?: PhaseWorkflowService;
+  /**
+   * PhaseChecklistService — checklist/track verbs on a phase document's
+   * `extra.checklist`/`extra.track` arrays (SPEC-056 §Module Boundary D2). Store-only,
+   * no telemetry, same DI shape as `acService`/`phaseService`. Constructed alongside
+   * `phaseWorkflowService` in `adapters/cli/phase-wiring.ts::buildPhaseServices`.
+   *
+   * Optional for the same reason `phaseWorkflowService` is; always wired in production.
+   * Source: SPEC-056 §Module Boundary, §Design Decisions D2.
+   */
+  phaseChecklistService?: PhaseChecklistService;
+  /**
    * Telemetry sink — exposed for dashboard route handlers to emit source-tagged events.
    * Dashboard handlers record { service: "dashboard", source: "dashboard" } events after
    * successful writes so AC-DASH-WRITE-TEL-1 is satisfied without modifying service signatures.
@@ -420,8 +449,12 @@ function buildAppFromSqlite(
   // port AND `stalenessProbeService`'s recordJudgment port can bind to the SAME instance
   // — never three separately-constructed JudgmentServices.
   const judgmentService = new JudgmentService(store, telemetry);
+  // reason: SPEC-056 phase execution model — DI construction lives in phase-wiring.ts
+  // (see that module's header for why this is ONE call here rather than inline).
+  const phaseServices = buildPhaseServices(store, telemetry, claimTtlMinutes, gateEnforcer, corpusService);
   return {
     corpusService,
+    ...phaseServices,
     // reason: same resolved claimTtlMinutes as CorpusService above — one resolution
     // path feeds PendingDoc.meta's task.claim_stale too (SPEC-036 §2 D3 pending-queue
     // extension), not a second config read. 3rd arg wires GateEnforcer (retro follow-up
@@ -644,8 +677,11 @@ function buildAppFromTurso(
   // the `judgmentService:` field AND `validityService`'s SPEC-044 D12 calibration port
   // AND `stalenessProbeService`'s recordJudgment port can bind to the SAME instance.
   const judgmentService = new JudgmentService(store, telemetry);
+  // reason: SPEC-056 phase execution model — see buildAppFromSqlite's identical comment.
+  const phaseServices = buildPhaseServices(store, telemetry, claimTtlMinutes, gateEnforcer, corpusService);
   return {
     corpusService,
+    ...phaseServices,
     // reason: same resolved claimTtlMinutes as CorpusService above — one resolution
     // path feeds PendingDoc.meta's task.claim_stale too (SPEC-036 §2 D3 pending-queue
     // extension), not a second config read. 3rd arg wires GateEnforcer — see

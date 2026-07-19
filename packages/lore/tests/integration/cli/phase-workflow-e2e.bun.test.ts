@@ -1,0 +1,193 @@
+/**
+ * Real-CLI-subprocess integration test for the SPEC-056 phase-execution-model CLI
+ * surfaces (task-skill-implement-cli-mcp-surfaces-checklist-ref-evidence).
+ *
+ * KNOWN CROSS-TASK BLOCKER (discovered while authoring this file — documented here,
+ * not silently worked around): the `docs` table's SQLite CHECK constraint
+ * (`migration-001.ts`: `CHECK(type IN ('prd','spec','adr','plan','knowledge','task'))`)
+ * has NOT been widened to accept `'phase'` — a raw `store.insert()` of a `type:
+ * "phase"` doc against a REAL `SQLiteStore` fails loud with a `SQLITE_CONSTRAINT_CHECK`
+ * error (verified empirically: `CHECK constraint failed: type IN (...)`). This means
+ * NO real (SQLite-backed) corpus can hold a phase doc today — not this test, and not
+ * `PhaseMigrationService`'s own production "D6a raw store.insert bypass" write path
+ * either, once it lands. Widening a CHECK constraint has no SQLite `ALTER` syntax
+ * (migration-004.ts's own header documents the table-recreate dance this requires),
+ * and `docs` is FTS5-content-linked via `docs_fts(content=docs, content_rowid=rowid)`
+ * — a naive recreate would desync the FTS rowid mapping, needing an explicit
+ * `INSERT INTO docs_fts(docs_fts) VALUES('rebuild')` afterward. This is a real,
+ * nontrivial, foundational migration — `packages/lore/src/store/migrations/` is
+ * OUTSIDE this task's anchors, and `task-skill-implement-phasemigrationservice` (T10,
+ * whose own "D6a raw store.insert bypass" needs this identical capability for its OWN
+ * bun tests against real SQLite) is the natural owner. Flagging here rather than
+ * bundling a high-blast-radius docs-table migration into a CLI-surfaces task.
+ *
+ * Consequence for THIS file's scope: every test below exercises what genuinely IS
+ * provable against a REAL (SQLite-backed, `lore init`-bootstrapped) corpus today —
+ * resolution/error paths that don't require a live phase ROW to exist (DOC_NOT_FOUND,
+ * wrong-type rejection using an EXISTING plan doc as the "wrong type" target) — PLUS
+ * proof that `lore gate phase-claim` is now a REAL registered subcommand returning a
+ * genuine verdict (not citty's "unknown command" usage error, which is what it
+ * produced before this task). The FULL claim → checklist → evidence → status "done"
+ * loop (this task's own Integration AC) is exhaustively proven instead against
+ * `InMemoryStore` (which has no SQL CHECK-constraint layer at all) in
+ * `mcp-tools-phase.test.ts` (service-level, via the MCP adapter) and
+ * `phase-status-flow.test.ts` (pure scorecard assembly) — both call the EXACT SAME
+ * `PhaseWorkflowService`/`PhaseChecklistService`/`buildPhaseStatusPayload` the CLI
+ * adapter (`commands/phase.ts`, thin pipes only, per this module's own architecture
+ * convention) calls, so business-logic coverage is NOT weakened by this file's
+ * narrower real-corpus scope — only the "does SQLite accept a live phase row" concern
+ * is left for T10 to close.
+ *
+ * Coverage:
+ *   HAPPY:      `lore gate phase-claim` against an existing (wrong-type) doc returns
+ *               a real VALIDATION_ERROR verdict — proves real dispatch, not
+ *               "unknown command"
+ *   NEGATIVE:   n/a (see BOUNDARY/ERROR below — this file is resolution-path-only)
+ *   BOUNDARY:   `lore evidence`/`lore claim` against a wrong-type (plan) target stay
+ *               byte-identical to pre-SPEC-056 "Expected a task document" (REGRESSION)
+ *               — the retry-dispatch only fires on a genuine `value: "phase"`
+ *               rejection, never a generic wrong-type one
+ *   ERROR:      `lore phase status` / `lore feed phase-start` / `lore gate
+ *               phase-claim` against a non-existent id all exit 3 (DOC_NOT_FOUND)
+ *   STATE:      n/a (see mcp-tools-phase.test.ts for the claim/checklist/evidence
+ *               state-machine round trip)
+ *   REGRESSION: `lore feed phase-start` with no `<phase>` positional → exit 2
+ *               (argument error, not a crash)
+ *
+ * @spec_ref spec-spec-056-phase-execution-model-phase-doc-type-computed-comp
+ *   task-skill-implement-cli-mcp-surfaces-checklist-ref-evidence
+ */
+
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { spawnSync } from "child_process";
+import { mkdirSync, rmSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
+
+// ─── Path setup ───────────────────────────────────────────────────────────────
+
+const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
+const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
+
+interface RunResult {
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly exitCode: number;
+}
+
+/** Spawn `bun run <INDEX_TS> ...args` in `cwd` — mirrors task-workflow.test.ts's identical helper. */
+function runLore(args: string[], cwd: string): RunResult {
+  const result = spawnSync("bun", ["run", INDEX_TS, ...args], {
+    cwd,
+    env: { ...process.env, HOME: cwd, EDITOR: "true", CLAUDECODE: "1" },
+    encoding: "utf8",
+  });
+  return {
+    stdout: result.stdout ?? "",
+    stderr: result.stderr ?? "",
+    exitCode: result.status ?? 1,
+  };
+}
+
+// ─── Fixtures ───────────────────────────────────────────────────────────────
+
+let tmpDir: string;
+
+beforeEach(() => {
+  tmpDir = join(tmpdir(), `lore-phase-wf-e2e-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  mkdirSync(tmpDir, { recursive: true });
+
+  const init = runLore(["init"], tmpDir);
+  if (init.exitCode !== 0) throw new Error(`lore init failed: ${init.stderr}`);
+});
+
+afterEach(() => {
+  try {
+    rmSync(tmpDir, { recursive: true, force: true });
+  } catch {
+    /* ignore cleanup errors */
+  }
+});
+
+function createPlan(title: string): string {
+  const r = runLore(["create", "plan", "--title", title, "--no-ai", "--content", "body"], tmpDir);
+  if (r.exitCode !== 0) throw new Error(`create plan failed: ${r.stderr}`);
+  const m = r.stdout.match(/Slug:\s+(\S+)/);
+  const slug = m?.[1];
+  if (!slug) throw new Error(`Could not extract plan slug from: ${r.stdout}`);
+  return slug;
+}
+
+// ─── ERROR: resolution failures (no live phase row required) ──────────────
+
+describe("SPEC-056 CLI phase surfaces — ERROR (non-existent target)", () => {
+  it("lore phase status <nonexistent> → exit 3 (DOC_NOT_FOUND)", () => {
+    const result = runLore(["phase", "status", "phase-does-not-exist"], tmpDir);
+    expect(result.exitCode).toBe(3);
+    expect(result.stderr).toContain("not found");
+  });
+
+  it("lore gate phase-claim --phase <nonexistent> → exit 3 (DOC_NOT_FOUND)", () => {
+    const result = runLore(["gate", "phase-claim", "--phase", "phase-does-not-exist", "--by", "tester"], tmpDir);
+    expect(result.exitCode).toBe(3);
+  });
+
+  it("lore feed phase-start <nonexistent> → exit 3 (DOC_NOT_FOUND)", () => {
+    const result = runLore(["feed", "phase-start", "phase-does-not-exist"], tmpDir);
+    expect(result.exitCode).toBe(3);
+  });
+});
+
+// ─── REGRESSION: missing positional argument ───────────────────────────────
+
+describe("SPEC-056 CLI phase surfaces — REGRESSION (argument errors)", () => {
+  it("lore feed phase-start with no <phase> positional → exit 2, not a crash", () => {
+    const result = runLore(["feed", "phase-start"], tmpDir);
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain("requires a phase document ID or slug");
+  });
+});
+
+// ─── HAPPY + BOUNDARY: real dispatch against an existing wrong-type doc ────
+
+describe("SPEC-056 CLI phase surfaces — dispatch against an existing wrong-type doc", () => {
+  it("HAPPY: lore gate phase-claim against a PLAN doc returns a real verdict, not 'unknown command'", () => {
+    const planSlug = createPlan("Gate Verdict Plan");
+
+    const result = runLore(["gate", "phase-claim", "--phase", planSlug, "--by", "tester"], tmpDir);
+    // reason: a citty "unknown command"/usage error would exit differently and never
+    // mention the doc-type validation message below — this proves the phase-claim
+    // subcommand is genuinely registered and dispatched, not silently absorbed.
+    expect(result.exitCode).toBe(4);
+    expect(result.stderr).toContain("Expected a phase document");
+    expect(result.stderr).toContain("'plan'");
+  });
+
+  it("BOUNDARY/REGRESSION: lore evidence against a PLAN doc stays 'Expected a task document' (never retries into phase dispatch)", () => {
+    const planSlug = createPlan("Evidence Regression Plan");
+
+    const result = runLore(
+      ["evidence", planSlug, "--oracle", "test", "--command", "x", "--result", "pass", "--by", "tester"],
+      tmpDir,
+    );
+    expect(result.exitCode).toBe(4);
+    expect(result.stderr).toContain("Expected a task document");
+    expect(result.stderr).not.toContain("Expected a phase document");
+  });
+
+  it("BOUNDARY/REGRESSION: lore claim against a PLAN doc stays 'Expected a task document' (never retries into phase dispatch)", () => {
+    const planSlug = createPlan("Claim Regression Plan");
+
+    const result = runLore(["claim", planSlug, "--by", "tester"], tmpDir);
+    expect(result.exitCode).toBe(4);
+    expect(result.stderr).toContain("Expected a task document");
+  });
+
+  it("BOUNDARY/REGRESSION: lore release against a PLAN doc stays 'Expected a task document' (never retries into phase dispatch)", () => {
+    const planSlug = createPlan("Release Regression Plan");
+
+    const result = runLore(["release", planSlug, "--by", "tester"], tmpDir);
+    expect(result.exitCode).toBe(4);
+    expect(result.stderr).toContain("Expected a task document");
+  });
+});

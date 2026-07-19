@@ -773,8 +773,9 @@ describe("tool registration completeness", () => {
   // SPEC-043 §Design Decisions D6 adds lore_invalidate, bringing the total from 28 to 29.
   // SPEC-044 §Design Decisions D10 adds lore_staleness_probe, bringing the total from 29 to 30.
   // SPEC-054 adds lore_uat_record, bringing the total from 30 to 31.
-  // SPEC-055 adds lore_requirement_add, bringing the total from 31 to 32.
-  it("registers all 32 expected tools", () => {
+  // SPEC-055 adds lore_requirement_add (31 to 32); SPEC-056 adds lore_phase_status
+  // (32 to 33, task-skill-implement-cli-mcp-surfaces-checklist-ref-evidence).
+  it("registers all 33 expected tools", () => {
     const expectedTools = [
       "lore_create",
       "lore_get",
@@ -808,12 +809,13 @@ describe("tool registration completeness", () => {
       "lore_staleness_probe",
       "lore_uat_record",
       "lore_requirement_add",
+      "lore_phase_status",
     ];
 
     const internal = server as unknown as McpServerInternal;
     for (const name of expectedTools) {
       expect(internal._registeredTools[name]).toBeDefined();
     }
-    expect(Object.keys(internal._registeredTools)).toHaveLength(32);
+    expect(Object.keys(internal._registeredTools)).toHaveLength(33);
   });
 });
