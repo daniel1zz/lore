@@ -44,7 +44,7 @@ AI judges are advisory only. Never bypass a gate (`LORE_GATE_BYPASS=1`) without 
 
 - Each concurrent agent gets a distinct `LORE_ACTOR=agent:<branch-or-slug>` (exported in the dispatch bundle).
 - Claims are made BY the implementer from INSIDE its worktree (`--worktree` explicit) — never pre-claimed by the orchestrator.
-- Tasks declare `--anchor <path>` file anchors; overlapping fresh claims by different actors are REJECTED at `lore claim` (`gate:task-claim:anchor-overlap`).
+- Tasks declare `--anchor <path>` file anchors; overlapping fresh claims by different actors are REJECTED at `lore claim` (`gate:task-claim:anchor-overlap`). Legacy alias (SPEC-056 D7): the checkpoint that gates a `phase` doc's claim is `phase-claim` (same anchor-overlap predicate) — `task-claim` still gates legacy `task` docs unchanged until migration; a config still keyed under `workflow.gates."task-claim"` is honored for `phase-claim` too (one deprecation warning per process).
 - Before dispatch: `lore ready <plan> --json` → check `sessions[]` / `anchor_conflicts[]`.
 
 ## Exit codes worth branching on

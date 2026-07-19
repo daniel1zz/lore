@@ -1,25 +1,38 @@
 #!/usr/bin/env bash
 #
 # g4-task-claim.sh — Claude Code PreToolUse hook bridging `lore gate task-claim`
-# (IoC vertical-slice tech-spec §4.1/§11, commit-time cross-tier gate) into a real
-# session: fires whenever the AI is ABOUT TO claim an ALREADY-CREATED task doc,
-# runs the deterministic upstream-spec gate, and either denies the tool call
-# (feeding back the gate's stdout message as the deny reason) or lets it through
-# unmodified.
+# / `lore gate phase-claim` (IoC vertical-slice tech-spec §4.1/§11, commit-time
+# cross-tier gate; SPEC-056 D2/D7 phase-claim is the ADDITIVE generalization of
+# task-claim onto the new `phase` doc type — task-claim keeps gating legacy
+# `task` docs unchanged during the migration window) into a real session: fires
+# whenever the AI is ABOUT TO claim an ALREADY-CREATED task OR phase doc, runs
+# the matching deterministic upstream-spec gate, and either denies the tool
+# call (feeding back the gate's stdout message as the deny reason) or lets it
+# through unmodified.
+#
+# Filename kept as `g4-task-claim.sh` (not renamed to a generic `g4-claim.sh`)
+# on landing phase-claim support — a rename would churn every installer
+# manifest entry (assets-ssot.test.ts / real-setup-ports.test.ts /
+# project-setup-service.test.ts) and the `.lore-setup-manifest.json` uninstall
+# reverse-path for zero behavioral gain; in-place extension was chosen instead
+# (SPEC-056 "Assets resync" task decision).
 #
 # Fires on two call shapes (mirrors g1-spec-create.sh's Bash/MCP split):
-#   - Bash tool calls whose `command` contains `lore claim <task> ...` (any path
-#     prefix in front of the `lore` binary name) — the task id is the FIRST
-#     positional token after the `claim` subcommand.
-#   - MCP `lore_claim` tool calls (tool_name containing "lore_claim") — the task
+#   - Bash tool calls whose `command` contains `lore claim <doc> ...` (any path
+#     prefix in front of the `lore` binary name) — the doc id is the FIRST
+#     positional token after the `claim` subcommand. `lore claim` is ONE CLI
+#     verb for both task and phase docs — the doc-type resolution below (not
+#     the command text) decides which checkpoint applies.
+#   - MCP `lore_claim` tool calls (tool_name containing "lore_claim") — the doc
 #     id is `tool_input.id_or_slug` (the field name of `LoreClaimSchema`,
 #     packages/lore/src/adapters/mcp/tools.ts: `{id_or_slug, by, branch?, steal?}`).
-# AND whose id resolves to a doc of type "task" (checked via `lore get --json`
-# BEFORE invoking the gate — same mandatory pre-check rationale as g2/g3:
-# `lore gate task-claim` exits 4 for BOTH "ancestor spec unapproved" AND "resolves
-# but is not a task" (gate.ts header). Every other tool call — including `claim`
-# on a non-task doc, or any other MCP tool — is out of scope and allowed without
-# further inspection.
+# AND whose id resolves to a doc of type "task" or "phase" (checked via
+# `lore get --json` BEFORE invoking the gate — same mandatory pre-check
+# rationale as g2/g3: `lore gate task-claim`/`phase-claim` exits 4 for BOTH
+# "ancestor spec unapproved" AND "resolves but is not a task/phase" (gate.ts
+# header). Every other tool call — including `claim` on a doc of any other
+# type, or any other MCP tool — is out of scope and allowed without further
+# inspection.
 #
 # Protocol (Claude Code PreToolUse hooks): reads the hook payload JSON
 # ({tool_name, tool_input, cwd, ...}) from stdin, writes ONE JSON object to
@@ -28,7 +41,11 @@
 # ⛔ FAIL-OPEN CONTRACT (project CLAUDE.md 边界③ / R2): identical to the other
 # three shims — any parsing/lookup/gate-command anomaly allows the call through
 # and logs one stderr line. Only an ACTUAL upstream-spec-check failure on an
-# ACTUAL task resolved from an ACTUAL claim-shaped command denies.
+# ACTUAL task/phase resolved from an ACTUAL claim-shaped command denies. This
+# also covers the transitional window before a `lore gate phase-claim` CLI
+# subcommand exists: an unrecognized checkpoint name falls into the
+# "undocumented verdict" branch below and fails open, so this hook is safe to
+# ship ahead of (or behind) that CLI surface landing.
 #
 # Honors LORE_GATE_BYPASS=1 — short-circuits to allow before touching stdin.
 
@@ -41,7 +58,7 @@ allow() {
   exit 0
 }
 
-# $1 = reason text (verbatim `lore gate task-claim` stdout message).
+# $1 = reason text (verbatim `lore gate task-claim`/`lore gate phase-claim` stdout message).
 deny_with_reason() {
   if command -v jq >/dev/null 2>&1; then
     jq -n --arg reason "$1" \
@@ -172,18 +189,25 @@ fi
 
 DOC_TYPE="$(printf '%s' "$GET_OUTPUT" | jq -r '.data.doc.type // empty' 2>/dev/null)"
 
-if [ "$DOC_TYPE" != "task" ]; then
-  allow
-fi
+# SPEC-056 D2/D7: dispatch to the checkpoint matching the resolved doc type —
+# legacy `task` docs still gate on `task-claim`; new `phase` docs gate on the
+# additive `phase-claim` checkpoint (same checkpoint-agnostic predicates,
+# reused verbatim server-side per checkpoint-registry.ts). Any other doc type
+# is out of scope for this hook.
+case "$DOC_TYPE" in
+  task) CHECKPOINT="task-claim" ;;
+  phase) CHECKPOINT="phase-claim" ;;
+  *) allow ;;
+esac
 
-GATE_STDOUT="$(cd "$TARGET_CWD" 2>/dev/null && "$LORE_BIN" gate task-claim --task "$DOC_ID" 2>/dev/null)"
+GATE_STDOUT="$(cd "$TARGET_CWD" 2>/dev/null && "$LORE_BIN" gate "$CHECKPOINT" --task "$DOC_ID" 2>/dev/null)"
 GATE_EXIT=$?
 
 case "$GATE_EXIT" in
   0) allow ;;
   4) deny_with_reason "$GATE_STDOUT" ;;
   *)
-    log "lore gate task-claim exited $GATE_EXIT (undocumented verdict) — failing open"
+    log "lore gate $CHECKPOINT exited $GATE_EXIT (undocumented verdict) — failing open"
     allow
     ;;
 esac
