@@ -1,5 +1,25 @@
 /**
  * lore init — create .lore/ directory, config.yaml, and SQLite DB.
+ *
+ * SPEC-058 §Design Decisions D6 note: the recommended verification-profile
+ * config-template block is DELIBERATELY NOT seeded here. `lore init`'s
+ * `config.yaml` is a load-bearing "project: only, nothing else" contract for
+ * a wide swath of existing test fixtures (`check-tree.test.ts`,
+ * `migrate-spec-kind.test.ts`, `task-workflow.test.ts`, `verify.test.ts`,
+ * `get-mdx-render.test.ts`, `sync-docs-cli.bun.test.ts`,
+ * `tree-consistency.bun.test.ts`, `cli-drift.bun.test.ts`,
+ * `e2e/cli.bun.test.ts`) that `appendFileSync` a SECOND top-level `workflow:`
+ * block onto the freshly-`lore init`'d config.yaml (e.g. to disable gates for
+ * their own fixture corpus) rather than parsing+merging it — a raw append
+ * assumes `workflow:` is not already present; seeding one here was verified
+ * (empirically, via this task's own dogfood run) to silently break EVERY one
+ * of those fixtures' `workflow.gates.*` overrides (the earlier of the two
+ * duplicate `workflow:` YAML mapping keys wins, discarding the appended
+ * `gates` block). Seeding is scoped to `lore setup --project`
+ * (`commands/setup.ts::runProjectScaffold`) instead — a newer surface with no
+ * such append-based fixture depending on an empty `workflow:` key. See
+ * `flows/init-corpus.ts`'s own module doc for the shared merge machinery this
+ * command deliberately does NOT invoke.
  */
 
 import { defineCommand } from "citty";

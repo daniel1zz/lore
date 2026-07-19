@@ -1,0 +1,35 @@
+# Recommended verification-profile block (SPEC-058) — per-spec_kind
+# oracle-coverage floors consumed by the `spec-promote` gate's
+# `oracleCoverage` predicate and the `plan-promote` gate's `requiresUat`
+# predicate (`workflow.gates."spec-promote"` / `workflow.gates."plan-promote"`).
+#
+# Seeded verbatim into a freshly-scaffolded corpus's `.lore/config.yaml` by
+# `lore init` / `lore setup --project` (SPEC-058 §Design Decisions D6) — an
+# EXISTING corpus's config.yaml is never touched by this template (opt-in,
+# non-breaking, D1: an unconfigured corpus is a vacuous pass, not a failure).
+#
+# An oracle kind counts as "covered" for a spec_kind's floor iff at least one
+# of that spec's declared acceptance criteria binds `verify.mode: script` to
+# that oracle (`verify.oracle`) — ai/human-mode criteria never satisfy a floor
+# (SPEC-058 §Design Decisions D3: the floor exists precisely to demand
+# deterministic verification, not rubric-only judgment).
+#
+# Customize freely: edit `required_oracles` per spec_kind, delete a spec_kind
+# entry to opt it out of the floor, or delete this whole `verification_profiles`
+# key to disable the feature for this corpus entirely (an absent/null profile
+# resolves to a vacuous pass for every spec_kind).
+workflow:
+  verification_profiles:
+    design:
+      required_oracles:
+        - e2e
+      # design-kind specs are UI/UX-facing — pairs with the SPEC-054
+      # plan-close gate (a plan under a design spec must record a passing
+      # UAT verdict before it can archive).
+      required_uat: true
+    feature:
+      required_oracles:
+        - test
+    tech:
+      required_oracles:
+        - test
