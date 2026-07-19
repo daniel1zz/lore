@@ -8,22 +8,28 @@
  *   spec-kind [--dry-run] Heuristically flag `spec` docs whose title/content suggests
  *                      tech/design but still carry the defaulted "feature" spec_kind.
  *                      No AI — pure regex signal, reported transparently. Idempotent. (SPEC-032 §3.4)
+ *   tasks-to-phases [--dry-run] One-shot sweep converting every plan's `task` docs into
+ *                      `phase` docs (grouped by extra.phase / extra.legacy_phase / one-per-task
+ *                      fallback), merging evidence/claims/anchors. Idempotent — a second run
+ *                      performs zero new writes. Thin pipe over `PhaseMigrationService.migrateTasks`.
+ *                      (SPEC-056 §Design Decisions D6/D6a, AC-P-5)
  */
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
+import { requirePhaseMigrationService } from "../phase-wiring.js";
 
 export default defineCommand({
   meta: {
     name: "migrate",
     description:
-      "Corpus migration: `v1 --from <path>` (v1 import), `phases` (phase schema sweep), or `spec-kind` (spec_kind mistype audit)",
+      "Corpus migration: `v1 --from <path>` (v1 import), `phases` (phase schema sweep), `spec-kind` (spec_kind mistype audit), or `tasks-to-phases` (task→phase doc-type sweep)",
   },
   args: {
     version: {
       type: "positional",
-      description: "Migration action: v1 | phases | spec-kind",
+      description: "Migration action: v1 | phases | spec-kind | tasks-to-phases",
       required: true,
     },
     from: {
@@ -49,11 +55,58 @@ export default defineCommand({
     },
   },
   async run({ args }) {
-    if (args.version !== "v1" && args.version !== "phases" && args.version !== "spec-kind") {
+    if (
+      args.version !== "v1" &&
+      args.version !== "phases" &&
+      args.version !== "spec-kind" &&
+      args.version !== "tasks-to-phases"
+    ) {
       process.stderr.write(
-        `Error: Unknown migration action '${args.version}'. Supported: v1, phases, spec-kind.\n`,
+        `Error: Unknown migration action '${args.version}'. Supported: v1, phases, spec-kind, tasks-to-phases.\n`,
       );
       process.exit(2);
+    }
+
+    // ── tasks-to-phases action ────────────────────────────────────────────
+    if (args.version === "tasks-to-phases") {
+      const dryRun = args["dry-run"] ?? false;
+      const { app } = loadLoreApp();
+      try {
+        const service = requirePhaseMigrationService(app);
+        const result = await service.migrateTasks({ dryRun });
+
+        if (!result.ok) {
+          process.stderr.write(formatError(result.error) + "\n");
+          process.exitCode = exitCode(result.error);
+          return;
+        }
+
+        const report = result.value;
+        if (args.json) {
+          console.log(JSON.stringify({ ok: true, data: report }, null, 2));
+          return;
+        }
+
+        const label = dryRun ? "Task→phase migration (dry-run)" : "Task→phase migration complete";
+        console.log(label);
+        console.log("─".repeat(40));
+        console.log(`Phases created:  ${report.phases_created}`);
+        console.log(`Tasks archived:  ${report.tasks_archived}`);
+        console.log(`Evidence merged: ${report.evidence_merged}`);
+
+        if (report.warnings.length > 0) {
+          console.log("\nWarnings:");
+          for (const w of report.warnings) {
+            console.log(`  ${w}`);
+          }
+        }
+        if (dryRun) {
+          console.log("\nRe-run without --dry-run to apply changes.");
+        }
+      } finally {
+        app.close();
+      }
+      return;
     }
 
     // ── phases action ─────────────────────────────────────────────────────

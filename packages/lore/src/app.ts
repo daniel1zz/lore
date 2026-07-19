@@ -75,6 +75,7 @@ import { RealGitPort } from "./adapters/real-git-port.js";
 import { buildPhaseServices } from "./adapters/cli/phase-wiring.js";
 import type { PhaseWorkflowService } from "./service/phase-workflow-service.js";
 import type { PhaseChecklistService } from "./service/phase-checklist-service.js";
+import type { PhaseMigrationService } from "./service/phase-migration-service.js";
 
 export interface App {
   corpusService: CorpusService;
@@ -161,6 +162,21 @@ export interface App {
    * Source: SPEC-056 §Module Boundary, §Design Decisions D2.
    */
   phaseChecklistService?: PhaseChecklistService;
+  /**
+   * PhaseMigrationService — one-shot idempotent task→phase sweep (SPEC-056 §Design
+   * Decisions D6/D6a) driving `lore migrate tasks-to-phases`. Store-only, no
+   * telemetry, no gate (a one-shot migration path, not a steady-state write — same
+   * rationale `MigrationService`/`PhaseService.migratePhases` document). Constructed
+   * alongside `phaseWorkflowService`/`phaseChecklistService` in
+   * `adapters/cli/phase-wiring.ts::buildPhaseServices`.
+   *
+   * Optional for the same reason `phaseWorkflowService`/`phaseChecklistService` are:
+   * pre-existing hand-built App test stubs remain valid without a mechanical touch to
+   * every one of them. Always present in production — both `buildAppFromSqlite` and
+   * `buildAppFromTurso` wire it unconditionally.
+   * Source: SPEC-056 §Module Boundary, §Acceptance Criteria AC-P-5.
+   */
+  phaseMigrationService?: PhaseMigrationService;
   /**
    * SpecKindService — one-shot heuristic audit that flags `spec` docs whose
    * title/content suggests `tech`/`design` but still carry the defaulted
