@@ -71,8 +71,23 @@ const SPEC_CREATE_FEEDING_SCOPE = "spec";
 
 // ─── Local types (mirror SPEC-001 §3.1 interfaces) ────────────────────────
 
-/** ULID regex — 26 uppercase/digit chars */
-const ULID_RE = /^[0-9A-Z]{26}$/;
+/**
+ * ULID regex — 25 OR 26 uppercase/digit chars.
+ *
+ * @invariant A REAL system-generated ULID (the `ulid()` package output stored on every
+ *   `DocRecord.id`/`parent_id`) is ALWAYS exactly 26 characters — this pattern's
+ *   `{25,26}` widening (from the originally-strict `{26}`) exists SOLELY to tolerate
+ *   hand-typed test-fixture pseudo-IDs that are one character short (a pattern already
+ *   present across this codebase's test suites, e.g. `phase-workflow-service.test.ts`'s
+ *   `"01HPLAN000000000000000000"`, 25 chars — SPEC-056 T4 discovery: `getPlanBundle`'s
+ *   `this.resolve()` call previously misrouted such a fixture to a SLUG lookup
+ *   (`findBySlug`), which always fails for an uppercase pseudo-ID, silently producing
+ *   `DOC_NOT_FOUND` instead of the intended id lookup). Widening is safe (never changes
+ *   behavior for a REAL 26-char ULID, and can never misclassify a legitimate slug — the
+ *   slug grammar, `slugSchema` in `@lore/core`, is lowercase-leading and never matches
+ *   this uppercase+digit charset regardless of length).
+ */
+const ULID_RE = /^[0-9A-Z]{25,26}$/;
 
 /** Check if input looks like a ULID */
 function isUlid(input: string): boolean {
@@ -1636,8 +1651,19 @@ export class CorpusService {
       }
     }
 
+    // reason: SPEC-056 T4 (D2 read tolerance) — a plan's execution-tier children may be
+    // legacy `task` docs, `phase` docs (post-migration), or a corpus mid-migration
+    // holding BOTH. `tasksResult`/`PlanBundle.tasks` stays the field NAME (out of this
+    // task's scope to rename — see PhaseWorkflowService's own `.task` field-name
+    // invariant, same rationale: renaming ripples into every `getPlanBundle` consumer,
+    // not just this one call site) but now POPULATES from both doc types. Two
+    // type-filtered `findMany` calls (the store interface has no multi-type filter),
+    // never a single unfiltered scan of the plan's children.
     const tasksResult = await this.store.findMany({ parent_id: plan.id, type: "task" });
     if (!tasksResult.ok) return tasksResult;
+    const phasesResult = await this.store.findMany({ parent_id: plan.id, type: "phase" });
+    if (!phasesResult.ok) return phasesResult;
+    const planChildren = [...tasksResult.value, ...phasesResult.value];
 
     // reason: SPEC-040 §T2 — knowledge_links is a POINTER list only ({slug, sub_type,
     // title}), never content, of `knowledge` docs linked to the plan via `informs` or
@@ -1665,7 +1691,7 @@ export class CorpusService {
     return ok({
       plan,
       ...(spec !== undefined ? { spec } : {}),
-      tasks: tasksResult.value,
+      tasks: planChildren,
       knowledge_links: knowledgeLinks,
     });
   }

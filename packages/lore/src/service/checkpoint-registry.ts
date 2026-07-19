@@ -107,7 +107,17 @@ export type GateCheckpoint =
   | "spec-promote"
   | "plan-promote"
   | "task-claim"
-  | "plan-close";
+  | "plan-close"
+  /**
+   * SPEC-056 §Design Decisions D2/D7 — the `phase` doc-type generalization of
+   * `task-claim`, registered ADDITIVELY (not a rename/removal): `task-claim`
+   * stays live and unchanged for legacy task docs (AC-P-6 read tolerance) while
+   * `phase-claim` gates `PhaseWorkflowService.claim` on phase docs. Both keys
+   * point at the SAME checkpoint-agnostic predicate functions (`checkTaskClaim`/
+   * `feedTaskOrPhaseClaim` below) — see this module's fourth invariant and
+   * `checkpointRegistry`'s registration for why no logic is duplicated.
+   */
+  | "phase-claim";
 
 /**
  * Pre-fetched, checkpoint-agnostic input to a `CheckpointDef`'s `check` / `feed`
@@ -568,8 +578,16 @@ function feedPlanPromote(ctx: GateContext, failures: PredicateResult[]): string 
  * age is implicit (only FRESH siblings can conflict, by construction of
  * `noAnchorOverlap`), the overlapping path pairs, AND a literal copy-pasteable
  * recovery command. Pointers only — never the sibling task's body content.
+ *
+ * @param checkpointLabel - The checkpoint id driving this render (`"task-claim"`
+ *   or `"phase-claim"`, SPEC-056 D2/D7) — threaded through so the SAME function
+ *   renders the correct checkpoint name for either caller (no duplicated logic).
  */
-function feedAnchorOverlap(ctx: GateContext, failures: PredicateResult[]): string {
+function feedAnchorOverlap(
+  ctx: GateContext,
+  failures: PredicateResult[],
+  checkpointLabel: string,
+): string {
   const candidateAnchors = ctx.candidateAnchors ?? [];
   let conflictLine = "(no specific conflicting sibling could be identified)";
   for (const sibling of ctx.siblingClaims ?? []) {
@@ -589,7 +607,7 @@ function feedAnchorOverlap(ctx: GateContext, failures: PredicateResult[]): strin
   const pack = buildFeedingPack({
     ruleSource: "corpus (sibling task claims)",
     ruleMarkdown:
-      "Required for task-claim: declared file_anchors must not overlap a FRESH claim held " +
+      `Required for ${checkpointLabel}: declared file_anchors must not overlap a FRESH claim held ` +
       `by a different actor on another task in the same plan. ${conflictLine}`,
     missing: selectFailures(failures).map((f) => f.reason),
   });
@@ -597,21 +615,42 @@ function feedAnchorOverlap(ctx: GateContext, failures: PredicateResult[]): strin
 }
 
 /**
- * `task-claim`'s feeding message — dispatches to {@link feedAnchorOverlap} when
- * the anchor-overlap predicate failed (SPEC-042 D5 — its own dedicated,
- * conflict-detail-bearing message), else falls back to the pre-existing
- * upstream-spec-approval message (unchanged from before SPEC-042).
+ * `task-claim`'s (and, since SPEC-056 D2/D7, `phase-claim`'s) feeding message —
+ * dispatches to {@link feedAnchorOverlap} when the anchor-overlap predicate
+ * failed (SPEC-042 D5 — its own dedicated, conflict-detail-bearing message),
+ * else falls back to the upstream-spec-approval message. Checkpoint-agnostic
+ * (`checkpointLabel` threaded through) so `feedTaskClaim`/`feedPhaseClaim`
+ * below are both thin one-line wrappers over this shared implementation —
+ * SPEC-056's CONTRACT NOTE §2 ("ONE-LINE registry addition, not a
+ * reimplementation") extended to the `feed()` half, not just `check()`.
  */
-function feedTaskClaim(ctx: GateContext, failures: PredicateResult[]): string {
+function feedTaskOrPhaseClaim(
+  ctx: GateContext,
+  failures: PredicateResult[],
+  checkpointLabel: string,
+): string {
   const anchorFailed = failures.some((f) => !f.ok && f.field === ANCHOR_OVERLAP_FIELD);
   if (anchorFailed) {
-    return feedAnchorOverlap(ctx, failures);
+    return feedAnchorOverlap(ctx, failures, checkpointLabel);
   }
   return feedUpstreamSpecCheckpoint(
     ctx,
     failures,
-    'Required for task-claim: the ancestor spec must be "approved".',
+    `Required for ${checkpointLabel}: the ancestor spec must be "approved".`,
   );
+}
+
+/** `task-claim`'s feeding message — see {@link feedTaskOrPhaseClaim}. */
+function feedTaskClaim(ctx: GateContext, failures: PredicateResult[]): string {
+  return feedTaskOrPhaseClaim(ctx, failures, "task-claim");
+}
+
+/**
+ * `phase-claim`'s feeding message (SPEC-056 D2/D7) — see
+ * {@link feedTaskOrPhaseClaim}.
+ */
+function feedPhaseClaim(ctx: GateContext, failures: PredicateResult[]): string {
+  return feedTaskOrPhaseClaim(ctx, failures, "phase-claim");
 }
 
 /**
@@ -751,6 +790,12 @@ export const checkpointRegistry: Partial<Record<GateCheckpoint, CheckpointDef>> 
   "plan-promote": { id: "plan-promote", check: checkPlanPromote, feed: feedPlanPromote },
   "task-claim": { id: "task-claim", check: checkTaskClaim, feed: feedTaskClaim },
   "plan-close": { id: "plan-close", check: checkPlanClose, feed: feedPlanClose },
+  // reason: SPEC-056 D2/D7 — "phase-claim" reuses `checkTaskClaim` VERBATIM
+  // (checkpoint-agnostic by construction, this module's fourth invariant) and
+  // `feedPhaseClaim` (a thin label wrapper over the SAME `feedTaskOrPhaseClaim`
+  // impl `feedTaskClaim` uses) — the "ONE-LINE registry addition" the RED
+  // suite's CONTRACT NOTE §2 calls for.
+  "phase-claim": { id: "phase-claim", check: checkTaskClaim, feed: feedPhaseClaim },
 };
 
 // ─── Armed Gates (SPEC-041 §3 bootstrap; SPEC-043 §Design Decisions D8) ────

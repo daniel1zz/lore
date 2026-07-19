@@ -51,6 +51,10 @@ export const BUILT_IN_TEMPLATES: Record<DocType, string> = {
     'Write a knowledge note titled "{{title}}". Concise, no preamble. Output GitHub-flavoured Markdown.',
   task:
     'Write a task description titled "{{title}}"{{#parent_title}} for plan "{{parent_title}}"{{/parent_title}}. Sections: Acceptance Criteria, File Anchors, Test Plan. Output GitHub-flavoured Markdown.',
+  // SPEC-056 T4 — "phase" registered as a real DocType; mirrors the task
+  // template (phase generalizes/supersedes task at the plan-execution tier).
+  phase:
+    'Write a phase description titled "{{title}}"{{#parent_title}} for plan "{{parent_title}}"{{/parent_title}}. Sections: Checklist, Acceptance Criteria, File Anchors, Test Plan. Output GitHub-flavoured Markdown.',
 };
 
 // ─── Refine Template (SPEC-019 §9.2) ─────────────────────────────────────────

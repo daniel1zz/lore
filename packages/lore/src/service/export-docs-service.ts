@@ -199,6 +199,9 @@ const TYPE_PREFIX: Record<DocType, string> = {
   plan: "PLAN",
   task: "TASK",
   knowledge: "KN",
+  // SPEC-056 T4 — "phase" registered as a real DocType (compile-forced entry;
+  // export-docs support for phase docs is a later task's scope).
+  phase: "PHASE",
 } as const;
 
 /**
@@ -212,6 +215,8 @@ const TYPE_DIR: Record<DocType, string> = {
   plan: "plan",
   task: "task",
   knowledge: "knowledge",
+  // SPEC-056 T4 — see TYPE_PREFIX's phase entry above for the same rationale.
+  phase: "phase",
 } as const;
 
 // ─── ExportDocsService ────────────────────────────────────────────────────────

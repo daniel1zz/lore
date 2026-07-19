@@ -396,7 +396,11 @@ describe("DOC_TYPE_ROLE_MAP (AC-CORE-001.05)", () => {
     expect(DOC_TYPE_ROLE_MAP.task).toBe("plan");
   });
 
-  it("covers all 6 DocType values", () => {
+  it("maps phase to plan (SPEC-056 T4)", () => {
+    expect(DOC_TYPE_ROLE_MAP.phase).toBe("plan");
+  });
+
+  it("covers all 7 DocType values", () => {
     const allTypes: DocType[] = [
       "prd",
       "spec",
@@ -404,6 +408,7 @@ describe("DOC_TYPE_ROLE_MAP (AC-CORE-001.05)", () => {
       "plan",
       "knowledge",
       "task",
+      "phase",
     ];
     for (const t of allTypes) {
       expect(DOC_TYPE_ROLE_MAP[t]).toBeDefined();
@@ -412,7 +417,7 @@ describe("DOC_TYPE_ROLE_MAP (AC-CORE-001.05)", () => {
 
   it("[negative/AC-CORE-001.N02] does not include invalid types", () => {
     const validTypes = Object.keys(DOC_TYPE_ROLE_MAP);
-    expect(validTypes).toHaveLength(6);
+    expect(validTypes).toHaveLength(7);
     expect(validTypes).not.toContain("unknown");
   });
 });

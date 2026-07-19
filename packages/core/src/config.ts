@@ -431,11 +431,54 @@ export function resolveHandoffTtlMinutes(config: LoreConfig | undefined): number
  *     "task-claim",
  *   ) // => false
  */
+/**
+ * Module-level "have we already warned about THIS legacy config object" set
+ * for the `phase-claim` legacy-key alias (SPEC-056 §Design Decisions D7) —
+ * deliberately NOT a per-call flag (repeated calls resolving the SAME legacy
+ * config object emit the deprecation notice only once), but also NOT a single
+ * eternal boolean (a DIFFERENT legacy config object — e.g. a distinct
+ * `.lore/config.yaml` load, or a distinct test fixture — gets its own one-time
+ * warning; a process/test file that legitimately resolves several distinct
+ * legacy configs is not silently muted after the very first one). Keyed on
+ * the resolved `gates."task-claim"` sub-object's REFERENCE (not a structural
+ * hash) — the cheapest identity that's stable across repeated calls with the
+ * same config, keyed via `WeakSet` so it never leaks memory for a config
+ * object no longer referenced elsewhere. This is `resolveGateEnabled`'s ONE
+ * narrow, deliberate exception to this module's otherwise side-effect-free
+ * contract (see that function's own JSDoc) — the alternative (threading a
+ * warning collector through every one of its ~6 unrelated call sites) is the
+ * "scattered" shape D7 explicitly rejects.
+ */
+const phaseClaimAliasWarned = new WeakSet<object>();
+
 export function resolveGateEnabled(
   config: LoreConfig | undefined,
   checkpoint: string,
 ): boolean {
-  return config?.workflow?.gates?.[checkpoint]?.enabled !== false;
+  const gates = config?.workflow?.gates;
+  // SPEC-056 §Design Decisions D7 — "the ONE dual-read site": a "phase-claim"
+  // lookup with NO explicit "phase-claim" entry falls back to the legacy
+  // "task-claim" entry when ONE IS present, logging a one-time (per legacy
+  // config object) deprecation notice. An explicit "phase-claim" entry always
+  // wins outright (never consults the legacy key at all, even when both are
+  // present) — checked FIRST below via the untouched generic path.
+  if (checkpoint === "phase-claim" && gates?.["phase-claim"] === undefined) {
+    const legacy = gates?.["task-claim"];
+    if (legacy !== undefined) {
+      if (!phaseClaimAliasWarned.has(legacy)) {
+        phaseClaimAliasWarned.add(legacy);
+        // reason: side-effect explicitly documented on `phaseClaimAliasWarned`'s
+        // own JSDoc above — this is the ONE dual-read site D7 calls for, not a
+        // pattern to replicate elsewhere in this module.
+        console.warn(
+          'lore: workflow.gates."task-claim" is deprecated for the phase doc type — ' +
+            'rename to workflow.gates."phase-claim" in .lore/config.yaml (SPEC-056).',
+        );
+      }
+      return legacy.enabled !== false;
+    }
+  }
+  return gates?.[checkpoint]?.enabled !== false;
 }
 
 /**

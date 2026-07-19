@@ -34,20 +34,23 @@
  *     least one `evidence[].ac_ref` blocks the edit; a purely additive edit
  *     (every prev id retained) is always allowed regardless of evidence.
  *
- * @invariant `phaseExtraSchema`/`checklistItemSchema`/`trackItemSchema` are
- *   defined here as standalone, PASSTHROUGH-shaped Zod schemas but are
- *   deliberately NOT wired into `schemas.ts`'s `docTypeSchema` enum or
- *   `createDocInputSchema`'s superRefine dispatch in this task. Doing so
- *   would require `type: "phase"` to typecheck against `DOC_TYPE_ROLE_MAP`
- *   (`Record<DocType, DocRole>`, `types.ts`) and
- *   `PARENT_TYPE_CONTRACT` (`doc-type-rules.ts`) — both outside this task's
- *   declared file anchors (`phase.ts` / `phase-completion.ts` / `schemas.ts`
- *   only) — and would fail `bun run typecheck` at
- *   `corpus-service.ts`'s `DOC_TYPE_ROLE_MAP[data.type]` lookup, a file this
- *   task does not touch. Full doc-type activation (types.ts DocType,
- *   DOC_TYPE_ROLE_MAP, doc-type-rules.ts PARENT_TYPE_CONTRACT,
- *   corpus-service.ts) is deferred to the Phase 2/3 tasks in this plan whose
- *   anchors cover those files (SPEC-056 §Design Decisions D1).
+ * @invariant `phaseExtraSchema`/`checklistItemSchema`/`trackItemSchema` were
+ *   ORIGINALLY defined here as standalone, PASSTHROUGH-shaped Zod schemas
+ *   deliberately NOT wired into `schemas.ts` (T1's own declared anchors —
+ *   `phase.ts` / `phase-completion.ts` / `schemas.ts` only — excluded
+ *   `types.ts`/`doc-type-rules.ts`, so wiring then would have failed
+ *   `bun run typecheck` at `corpus-service.ts`'s `DOC_TYPE_ROLE_MAP[data.type]`
+ *   lookup). **UPDATE (SPEC-056 T4, PhaseWorkflowService rename task)**: the
+ *   doc type is now REGISTERED — `types.ts` DocType gained `"phase"` (+
+ *   `DOC_TYPE_ROLE_MAP.phase = "plan"`), `doc-type-rules.ts` gained
+ *   `PARENT_TYPE_CONTRACT.phase = ["plan"]`, and `schemas.ts`'s
+ *   `docTypeSchema`/`createDocInputSchema` superRefine now dispatch to
+ *   `phaseExtraSchema` (mirroring the `task` branch: parent_id + extra.plan_id
+ *   required). `CorpusService`/CLI/MCP still do NOT expose `lore create phase`
+ *   — direct construction stays `store.insert(...)` (raw) until the CLI/MCP
+ *   surfaces task in this same plan wires it; this update only makes the TYPE
+ *   itself real (so services can compare `doc.type === "phase"` without a
+ *   `TS2367` cast), not a new create-path.
  *
  * Side-effect class: pure
  *
