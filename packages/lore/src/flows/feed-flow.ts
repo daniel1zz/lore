@@ -123,12 +123,18 @@ export async function resolveParentDoc(
 /**
  * Maps a `lore feed <checkpoint>` argument to the corpus doc `type` its governing
  * skill is scoped by (`extra.skill.applies_to`, `CorpusService.findFeedingSkill`).
- * This slice only wires `spec-create` (the sole checkpoint the task objective
- * requires) — add new entries here as future checkpoints gain a feed; no other code
- * in {@link buildFeed} needs to change to support them.
+ * Add new entries here as future checkpoints gain a feed; no other code in
+ * {@link buildFeed} needs to change to support them.
+ *
+ * `"phase-start"` (SPEC-056 §Design Decisions D5) is registered here as the SSOT
+ * entry point — never a parallel dispatch path — even though its actual assembly
+ * (`phase-feed-flow.ts::buildPhaseStartPack`) is a phase-specific composition
+ * distinct from `buildFeed`'s generic skill-discovery pull; wiring the dispatch
+ * branch that calls it is a separate task, out of this map's own scope.
  */
 export const CHECKPOINT_PRODUCED_TYPE: Readonly<Record<string, string>> = {
   "spec-create": "spec",
+  "phase-start": "phase",
 };
 
 /** Pointer to the discovered governing skill doc — slug/title only, never its full body. */
