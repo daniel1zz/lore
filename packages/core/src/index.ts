@@ -52,6 +52,8 @@ export * from "./file-anchors.js";
 export * from "./validity.js";
 export * from "./staleness.js";
 export * from "./code-anchors.js";
+export * from "./phase.js";
+export * from "./phase-completion.js";
 export * from "./frontmatter.js";
 export * from "./setup-manifest.js";
 export * from "./merge-settings.js";
