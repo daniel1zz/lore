@@ -48,8 +48,10 @@ import {
   UPSTREAM_APPROVED_STATUSES,
   anchorsOverlap,
   lintAcQuantifiability,
+  checkOracleCoverage,
   type AcceptanceCriterion,
   type DocType,
+  type VerificationProfile,
 } from "@lore/core";
 
 /**
@@ -388,4 +390,105 @@ export function uatP0Accepted(present: boolean, p0Accepted: boolean): PredicateR
     return { ok: false, reason: UAT_P0_NOT_ACCEPTED_REASON, field: PLAN_CLOSE_FIELD };
   }
   return { ok: true };
+}
+
+/** `oracleCoverage`'s single machine-readable failure reason. */
+export const ORACLE_COVERAGE_REASON = "ORACLE_COVERAGE_INSUFFICIENT";
+
+/** The `PredicateResult.field` value `oracleCoverage`'s failure carries (SPEC-058). */
+export const ORACLE_COVERAGE_FIELD = "oracle-coverage";
+
+/**
+ * `spec-promote`'s per-spec_kind oracle-coverage floor predicate (SPEC-058
+ * §Design Decisions D2/D3): a candidate spec's declared acceptance criteria must
+ * satisfy every oracle kind its `spec_kind`'s CONFIGURED verification profile
+ * requires — per the SAME `checkOracleCoverage` pure fn (`@lore/core`,
+ * `verification-profile.ts`) both `lore gate spec-promote` and this predicate
+ * consult, never a locally re-derived coverage rule.
+ *
+ * Deliberately takes the already-resolved profile (never a config read itself —
+ * module invariant: no store, no IO, no config access) so the caller
+ * (`checkSpecPromote` here, fed by `CorpusService.set` / `ReviewService.
+ * enforceApprovalGate` via `GateEnforcer.resolveVerificationProfile`) stays the
+ * sole IO-performing layer, consistent with every other predicate in this module.
+ *
+ * @param criteria - The candidate/target spec's declared acceptance criteria, or
+ *   `undefined` when none resolved.
+ * @param profile - The target spec's OWN `spec_kind`'s resolved verification
+ *   profile, or `null`/`undefined` when unconfigured for that spec_kind
+ *   (SPEC-058 §Design Decisions D1) — vacuous pass, distinct from a configured
+ *   profile whose floor the declared criteria fail to satisfy.
+ * @returns `{ok: true}` when `profile` is absent OR `checkOracleCoverage`
+ *   (`@lore/core`) yields zero findings; `{ok: false, reason:
+ *   "ORACLE_COVERAGE_INSUFFICIENT", field: "oracle-coverage"}` when at least one
+ *   required oracle kind is uncovered.
+ * @example
+ * oracleCoverage(undefined, null); // => { ok: true } — no profile configured
+ * @example
+ * oracleCoverage(
+ *   [{ id: "AC-1", statement: "x", verify: { mode: "human" } }],
+ *   { required_oracles: ["e2e"] },
+ * ); // => { ok: false, reason: "ORACLE_COVERAGE_INSUFFICIENT", field: "oracle-coverage" }
+ */
+export function oracleCoverage(
+  criteria: AcceptanceCriterion[] | undefined,
+  profile: VerificationProfile | null | undefined,
+): PredicateResult {
+  if (profile === null || profile === undefined) {
+    return { ok: true };
+  }
+  const findings = checkOracleCoverage(criteria ?? [], profile);
+  if (findings.length === 0) {
+    return { ok: true };
+  }
+  return { ok: false, reason: ORACLE_COVERAGE_REASON, field: ORACLE_COVERAGE_FIELD };
+}
+
+/** `requiresUatDeclared`'s single machine-readable failure reason. */
+export const REQUIRES_UAT_NOT_DECLARED_REASON = "REQUIRES_UAT_NOT_DECLARED";
+
+/** The `PredicateResult.field` value `requiresUatDeclared`'s failure carries (SPEC-058). */
+export const REQUIRES_UAT_FIELD = "requires-uat";
+
+/**
+ * `plan-promote`'s `requires_uat`-must-be-declared predicate (SPEC-058 §Design
+ * Decisions D4): a plan whose ancestor spec resolves to a `spec_kind` whose
+ * CONFIGURED verification profile declares `required_uat: true` must itself
+ * declare `extra.requires_uat === true` before it may be promoted. Composes
+ * with — but is distinct from — SPEC-054's PRE-EXISTING `plan-close`
+ * `uatP0Accepted` predicate: this one gates that the flag is SET at promote
+ * time; `uatP0Accepted` gates that an ACTUAL P0-accepted verdict exists at
+ * close time, reading the SAME flag `CorpusService.set` resolves independently
+ * for each checkpoint.
+ *
+ * @param profile - The plan's ancestor spec's resolved verification profile, or
+ *   `null`/`undefined` when unconfigured for that spec_kind — vacuous pass
+ *   (no UAT requirement declared at all, regardless of `planRequiresUat`).
+ * @param planRequiresUat - Whether the candidate plan itself declares
+ *   `extra.requires_uat === true`. An explicit `false` is treated identically
+ *   to absent (BOUNDARY) — only a literal `true` satisfies this predicate.
+ * @returns `{ok: true}` when `profile.required_uat` isn't `true`, OR
+ *   `planRequiresUat` is `true`; `{ok: false, reason:
+ *   "REQUIRES_UAT_NOT_DECLARED", field: "requires-uat"}` when the profile
+ *   demands UAT but the plan hasn't declared it.
+ * @example
+ * requiresUatDeclared({ required_oracles: ["e2e"], required_uat: true }, false);
+ *   // => { ok: false, reason: "REQUIRES_UAT_NOT_DECLARED", field: "requires-uat" }
+ * @example
+ * requiresUatDeclared({ required_oracles: ["e2e"], required_uat: true }, true);
+ *   // => { ok: true }
+ * @example
+ * requiresUatDeclared(null, false); // => { ok: true } — no profile, no requirement
+ */
+export function requiresUatDeclared(
+  profile: VerificationProfile | null | undefined,
+  planRequiresUat: boolean,
+): PredicateResult {
+  if (profile === null || profile === undefined || profile.required_uat !== true) {
+    return { ok: true };
+  }
+  if (planRequiresUat) {
+    return { ok: true };
+  }
+  return { ok: false, reason: REQUIRES_UAT_NOT_DECLARED_REASON, field: REQUIRES_UAT_FIELD };
 }

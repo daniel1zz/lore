@@ -54,9 +54,14 @@ import {
   resolveGateEnabled,
   resolveAnchorOverlapGateEnabled,
   resolveAcQuantifiableGateEnabled,
+  resolveOracleCoverageGateEnabled,
+  resolveRequiresUatGateEnabled,
+  resolveVerificationProfile,
   type LoreConfig,
   type LoreError,
   type Result,
+  type SpecKind,
+  type VerificationProfile,
 } from "@lore/core";
 import type { PlanBundle } from "@lore/core";
 import {
@@ -233,5 +238,60 @@ export class GateEnforcer {
    */
   isAcQuantifiableEnabled(checkpoint: GateCheckpoint): boolean {
     return resolveAcQuantifiableGateEnabled(this.config, checkpoint);
+  }
+
+  /**
+   * Whether `spec-promote`'s `oracleCoverage` sub-predicate specifically is
+   * enabled (`workflow.gates."spec-promote".oracle_coverage.enabled`, SPEC-058
+   * §Design Decisions D5) — NARROWER than `isEnabled("spec-promote")`, which
+   * governs the WHOLE checkpoint. A caller building `GateContext.
+   * oracleCoverageEnabled` (`CorpusService.set`, `ReviewService.
+   * enforceApprovalGate`) consults this, not `isEnabled`. Hardcoded to
+   * `"spec-promote"` — SPEC-058 wires this predicate on exactly one checkpoint
+   * (§Design Decisions D2).
+   *
+   * @returns `false` when the sub-key is explicitly disabled; `true` otherwise.
+   * @example
+   * enforcer.isOracleCoverageEnabled(); // => false when config disables it
+   */
+  isOracleCoverageEnabled(): boolean {
+    return resolveOracleCoverageGateEnabled(this.config);
+  }
+
+  /**
+   * Whether `plan-promote`'s `requiresUat` sub-predicate specifically is
+   * enabled (`workflow.gates."plan-promote".requires_uat.enabled`, SPEC-058
+   * §Design Decisions D5) — NARROWER than `isEnabled("plan-promote")`, which
+   * governs the WHOLE checkpoint. A caller building `GateContext.
+   * requiresUatEnabled` (`ReviewService.enforceApprovalGate`) consults this,
+   * not `isEnabled`.
+   *
+   * @returns `false` when the sub-key is explicitly disabled; `true` otherwise.
+   * @example
+   * enforcer.isRequiresUatEnabled(); // => false when config disables it
+   */
+  isRequiresUatEnabled(): boolean {
+    return resolveRequiresUatGateEnabled(this.config);
+  }
+
+  /**
+   * Resolves `specKind`'s configured verification profile (SPEC-058) against
+   * this enforcer's own `LoreConfig` — the single config-reading seam a caller
+   * building `GateContext.verificationProfile` (`CorpusService.set`,
+   * `ReviewService.enforceApprovalGate`) consults, mirroring `isEnabled`/
+   * `isAcQuantifiableEnabled`'s "GateEnforcer owns the one config reference"
+   * shape rather than each caller re-threading a raw `LoreConfig`.
+   *
+   * @param specKind - Which spec_kind's profile to resolve — for `spec-promote`
+   *   the CANDIDATE spec's own kind; for `plan-promote` the plan's ANCESTOR
+   *   spec's kind.
+   * @returns The declared profile, or `null` when unconfigured for `specKind`
+   *   (SPEC-058 §Design Decisions D1 vacuous-pass posture).
+   * @example
+   * enforcer.resolveVerificationProfile("design");
+   *   // => { required_oracles: ["e2e"] } when configured, else null
+   */
+  resolveVerificationProfile(specKind: SpecKind): VerificationProfile | null {
+    return resolveVerificationProfile(this.config, specKind);
   }
 }

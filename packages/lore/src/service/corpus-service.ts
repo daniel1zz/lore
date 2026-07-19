@@ -29,8 +29,9 @@ import {
   isP0Accepted,
   prdRequirementsSchema,
   computeRequirementCoverage,
+  SPEC_KINDS,
 } from "@lore/core";
-import type { CreateDocInput, DocPatch, UatVerdict, RequirementCoverage } from "@lore/core";
+import type { CreateDocInput, DocPatch, UatVerdict, RequirementCoverage, SpecKind } from "@lore/core";
 import {
   DOC_TYPE_ROLE_MAP,
   type DocId,
@@ -1257,11 +1258,24 @@ export class CorpusService {
       const effectiveExtra = parsedPatch.data.extra !== undefined ? parsedPatch.data.extra : existing.extra;
       const parsed = specAcceptanceCriteriaSchema.safeParse(effectiveExtra["acceptance_criteria"]);
       const acceptanceCriteriaCount = parsed.success ? parsed.data.length : 0;
+      // reason: SPEC-058 D2 — oracleCoverage judges the spec against ITS OWN
+      // spec_kind's configured profile. `effectiveExtra["spec_kind"]` mirrors the
+      // value docPatch will actually persist (see this block's own comment above);
+      // an absent/invalid value falls back to "feature" — the same create-time
+      // default `_createImpl` already applies, never a second divergent default.
+      const effectiveSpecKindRaw = effectiveExtra["spec_kind"];
+      const effectiveSpecKind: SpecKind =
+        typeof effectiveSpecKindRaw === "string" &&
+        (SPEC_KINDS as readonly string[]).includes(effectiveSpecKindRaw)
+          ? (effectiveSpecKindRaw as SpecKind)
+          : "feature";
       const gateResult = this.gateEnforcer.enforce("spec-promote", {
         acceptanceCriteriaCount,
         specIdOrSlug: existing.slug,
         ...(parsed.success ? { acceptanceCriteria: parsed.data } : {}),
         acQuantifiableEnabled: this.gateEnforcer.isAcQuantifiableEnabled("spec-promote"),
+        verificationProfile: this.gateEnforcer.resolveVerificationProfile(effectiveSpecKind),
+        oracleCoverageEnabled: this.gateEnforcer.isOracleCoverageEnabled(),
       });
       if (!gateResult.ok) return gateResult;
     }
