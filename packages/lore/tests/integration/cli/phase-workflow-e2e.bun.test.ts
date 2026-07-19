@@ -2,24 +2,36 @@
  * Real-CLI-subprocess integration test for the SPEC-056 phase-execution-model CLI
  * surfaces (task-skill-implement-cli-mcp-surfaces-checklist-ref-evidence).
  *
- * KNOWN CROSS-TASK BLOCKER (discovered while authoring this file — documented here,
- * not silently worked around): the `docs` table's SQLite CHECK constraint
- * (`migration-001.ts`: `CHECK(type IN ('prd','spec','adr','plan','knowledge','task'))`)
- * has NOT been widened to accept `'phase'` — a raw `store.insert()` of a `type:
- * "phase"` doc against a REAL `SQLiteStore` fails loud with a `SQLITE_CONSTRAINT_CHECK`
- * error (verified empirically: `CHECK constraint failed: type IN (...)`). This means
- * NO real (SQLite-backed) corpus can hold a phase doc today — not this test, and not
- * `PhaseMigrationService`'s own production "D6a raw store.insert bypass" write path
- * either, once it lands. Widening a CHECK constraint has no SQLite `ALTER` syntax
- * (migration-004.ts's own header documents the table-recreate dance this requires),
- * and `docs` is FTS5-content-linked via `docs_fts(content=docs, content_rowid=rowid)`
- * — a naive recreate would desync the FTS rowid mapping, needing an explicit
- * `INSERT INTO docs_fts(docs_fts) VALUES('rebuild')` afterward. This is a real,
- * nontrivial, foundational migration — `packages/lore/src/store/migrations/` is
- * OUTSIDE this task's anchors, and `task-skill-implement-phasemigrationservice` (T10,
- * whose own "D6a raw store.insert bypass" needs this identical capability for its OWN
- * bun tests against real SQLite) is the natural owner. Flagging here rather than
- * bundling a high-blast-radius docs-table migration into a CLI-surfaces task.
+ * UPDATE (merge-integration fix, T11×T12 app.ts contention resolution — not a new
+ * lore-tracked task): `migration-006.ts` has SINCE LANDED and widens the `docs.type`
+ * CHECK constraint to accept `'phase'` (`CHECK(type IN (...,'phase'))`, wired into
+ * both `sqlite-store.ts::runMigrations` and `turso-store.ts::initSchema`) — the
+ * SQLite-layer blocker described below is RESOLVED. `PhaseMigrationService`
+ * (`service/phase-migration-service.ts`, D6a's raw `store.insert` bypass) can now
+ * write a real `type: "phase"` row against a live `SQLiteStore`.
+ *
+ * The real-SQLite phase-write path in THIS file is still not trivially enable-able,
+ * however: `commands/create.ts`'s `VALID_TYPES` deliberately excludes `"phase"` from
+ * `lore create` (by design — D6a: phase docs are migration-created only, there is no
+ * `phase-create` checkpoint to gate a direct-create path against), and no CLI
+ * subcommand yet drives `PhaseMigrationService.migrateTasks` (the `migrate phases`
+ * action in `commands/migrate.ts` is the UNRELATED SPEC-023 legacy singular-phase
+ * sweep, `PhaseService.migratePhases`). Producing a live phase row for this
+ * subprocess-CLI suite therefore needs new CLI wiring, which is outside this
+ * merge-fix's scope — that wiring (and this file's real-corpus enablement) belongs to
+ * the next phase-migration CLI task (T13).
+ *
+ * ORIGINAL FINDING (discovered while authoring this file — kept for context): the
+ * `docs` table's SQLite CHECK constraint (`migration-001.ts`:
+ * `CHECK(type IN ('prd','spec','adr','plan','knowledge','task'))`) had NOT been
+ * widened to accept `'phase'` — a raw `store.insert()` of a `type: "phase"` doc
+ * against a REAL `SQLiteStore` failed loud with a `SQLITE_CONSTRAINT_CHECK` error
+ * (verified empirically: `CHECK constraint failed: type IN (...)`). Widening a CHECK
+ * constraint has no SQLite `ALTER` syntax (migration-004.ts's own header documents
+ * the table-recreate dance this requires), and `docs` is FTS5-content-linked via
+ * `docs_fts(content=docs, content_rowid=rowid)` — a naive recreate would desync the
+ * FTS rowid mapping, needing an explicit `INSERT INTO docs_fts(docs_fts)
+ * VALUES('rebuild')` afterward. `migration-006.ts` is exactly this migration.
  *
  * Consequence for THIS file's scope: every test below exercises what genuinely IS
  * provable against a REAL (SQLite-backed, `lore init`-bootstrapped) corpus today —
