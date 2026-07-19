@@ -36,6 +36,8 @@ import {
   renderHandoffContent,
   bootstrapReportSchema,
   deriveSessions,
+  deriveResumeHint,
+  parseSeatBranch,
 } from "@lore/core";
 import type {
   BootstrapReport,
@@ -44,6 +46,7 @@ import type {
   DocId,
   DocRecord,
   HandoffExtra,
+  HandoffPointer,
   LinkRecord,
   LoreError,
   Result,
@@ -95,6 +98,24 @@ function extractHandoffExtra(doc: DocRecord): HandoffExtra | null {
  *   OWN enablement decision rather than re-deriving `workflow.gates.*` from a second
  *   raw `LoreConfig` reference, so the two can never drift.
  */
+/**
+ * SPEC-057 §Design Decisions D2 — the seat signal `bootstrap` accepts when the
+ * calling session opened inside a resolvable seat/task-under-seat worktree
+ * (supplied by the SessionStart hook via `lore bootstrap --seat-branch
+ * --seat-worktree`, or by an in-process caller).
+ *
+ * @invariant `worktree` is currently UNCONSULTED by `bootstrap`'s own
+ *   resolution — ancestry walking from a nested task-worktree up to its
+ *   PARENT seat's branch is the hook/CLI layer's job, done BEFORE this method
+ *   is ever called (module-level binding note); `branch` arriving here is
+ *   ALREADY the resolved seat branch. Kept on the signal for completeness/
+ *   future extension rather than dropped from the shape entirely.
+ */
+export interface BootstrapSeatSignal {
+  readonly branch: string;
+  readonly worktree: string;
+}
+
 export interface SessionServiceDeps {
   /** Task claim lease TTL in minutes — forwarded to `isClaimStale`/`evaluateReadiness`. */
   readonly claimTtlMinutes: number;
@@ -158,21 +179,35 @@ export class SessionService {
   /**
    * Assembles the S1 volatile pointer-set for a fresh session: root PRD, active
    * plans + task readiness, the pending-review queue, the caller's own claims, armed
-   * gate checkpoints, latest handoffs per plan, and a corpus-wide resume hint.
-   * READ-ONLY — see module invariants.
+   * gate checkpoints, latest handoffs per plan, and a resume hint — corpus-wide by
+   * default, or SEAT-SCOPED when `seat` is given (SPEC-057 §Design Decisions D2/D3).
+   * READ-ONLY — see module invariants. Still git-free: `seat` is caller-resolved data,
+   * never derived here (SessionService's documented git-free invariant, D6).
    *
    * @param by - The requesting actor's identity — filters `my_claims` to this actor.
    * @param now - Caller-supplied current-time seam (never `Date.now()` directly),
    *   mirroring `TaskWorkflowService.ready`'s `now` parameter shape.
+   * @param seat - Optional seat signal (SPEC-057 D2). Absent → `resume_hint` is the
+   *   corpus-global newest handoff, BYTE-IDENTICAL to pre-SPEC-057 behavior
+   *   (REGRESSION-anchored to `session-service.test.ts`'s frozen-baseline suite).
+   *   Present and `seat.branch` resolves to a live plan → `resume_hint` scopes to that
+   *   plan's own newest handoff (`null` when it has none — never a silent corpus-global
+   *   fallback). Present but unresolvable (not a seat-branch pattern, or no matching
+   *   plan) → degrades to the corpus-global newest handoff AND sets
+   *   `seat_unresolved: true` on the returned report.
    * @returns `ok(BootstrapReport)` — always a fact, never an error; an empty corpus
    *   produces `root: null` + empty arrays, not a failure (AC-SL-10).
    * @example
    * const result = await sessionService.bootstrap("alice");
    * if (result.ok) console.log(result.value.active_plans.length);
+   * @example
+   * // Seat-scoped resume hint:
+   * await sessionService.bootstrap("alice", undefined, { branch: "plan/plan-a", worktree: "/repo-seat-plan-a" });
    */
   async bootstrap(
     by: string,
     now: () => string = defaultNow,
+    seat?: BootstrapSeatSignal,
   ): Promise<Result<BootstrapReport, LoreError>> {
     const nowIso = now();
 
@@ -304,20 +339,43 @@ export class SessionService {
     }
     latestHandoffs.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
 
-    const overallNewest =
-      handoffPairs.length > 0
-        ? handoffPairs.reduce((n, p) => (p.doc.created_at > n.doc.created_at ? p : n))
-        : undefined;
-    const resumeHint =
-      overallNewest !== undefined
-        ? {
-            plan_slug:
-              overallNewest.doc.parent_id !== null && planIds.has(overallNewest.doc.parent_id)
-                ? (slugById.get(overallNewest.doc.parent_id) ?? null)
-                : null,
-            handoff_slug: overallNewest.doc.slug,
-          }
-        : null;
+    // reason: `handoffPointers` mirrors `handoffPairs` 1:1 (same order, same `at`
+    // field) so `deriveResumeHint`'s corpus-global scan (no `seatPlanId`) stays
+    // BYTE-IDENTICAL to the pre-SPEC-057 `overallNewest` reduce it replaces — the
+    // frozen-baseline REGRESSION suite (session-service.test.ts) pins this.
+    const handoffPointers: HandoffPointer[] = handoffPairs.map((pair) => {
+      const planId =
+        pair.doc.parent_id !== null && planIds.has(pair.doc.parent_id) ? pair.doc.parent_id : null;
+      return {
+        handoff_slug: pair.doc.slug,
+        plan_id: planId,
+        plan_slug: planId !== null ? (slugById.get(planId) ?? null) : null,
+        at: pair.doc.created_at,
+      };
+    });
+
+    // Resume hint — corpus-global by default; seat-scoped when `seat` resolves to a
+    // live plan (SPEC-057 D3). `seatUnresolved` is the "degraded to corpus-global"
+    // signal spliced onto `report` below (present-iff-true).
+    let resumeHint: BootstrapReport["resume_hint"];
+    let seatUnresolved = false;
+    if (seat !== undefined) {
+      // reason: parseSeatBranch recovers the plan-slug remainder; the matching-plan
+      // scan mirrors `SeatService`'s private `deriveShortPlanSlug` inverse (services
+      // never cross-import — service/CLAUDE.md — so this small lookup is duplicated
+      // here rather than imported from seat-service.ts).
+      const shortSlug = parseSeatBranch(seat.branch);
+      const matchedPlan =
+        shortSlug !== null ? plans.find((p) => p.slug.replace(/^plan-/, "") === shortSlug) : undefined;
+      if (matchedPlan !== undefined) {
+        resumeHint = deriveResumeHint(handoffPointers, matchedPlan.id);
+      } else {
+        resumeHint = deriveResumeHint(handoffPointers);
+        seatUnresolved = true;
+      }
+    } else {
+      resumeHint = deriveResumeHint(handoffPointers);
+    }
 
     // Corpus-wide size + freshness snapshot.
     const lastUpdated =
@@ -333,6 +391,10 @@ export class SessionService {
       armed_gates: armedGates,
       latest_handoffs: latestHandoffs,
       resume_hint: resumeHint,
+      // reason: present-iff-true (SPEC-057 D3) — omitted entirely rather than set
+      // `false`, mirroring `attestation.first_seen`'s convention, so a pre-SPEC-057
+      // caller's report shape stays byte-identical when no seat signal was given.
+      ...(seatUnresolved ? { seat_unresolved: true as const } : {}),
       corpus: { total_docs: allDocs.length, last_updated: lastUpdated },
       active_sessions: activeSessions,
     };

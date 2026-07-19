@@ -79,6 +79,7 @@ const main = defineCommand({
     anchor: () => import("./commands/anchor.js").then(wrapDefault("anchor")),
     invalidate: () => import("./commands/invalidate.js").then(wrapDefault("invalidate")),
     setup: () => import("./commands/setup.js").then(wrapDefault("setup")),
+    seat: () => import("./commands/seat.js").then(wrapDefault("seat")),
   },
 });
 

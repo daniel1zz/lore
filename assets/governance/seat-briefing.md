@@ -24,6 +24,7 @@ This session opened inside a linked git worktree of a lore-governed repo. The co
 ## Commit + merge discipline
 
 - Commit only on `{{BRANCH}}`. Merge authority stays with the main-checkout session — do not merge or push to shared branches from here.
+- Commit frequently, at each logical checkpoint — do not let uncommitted work accumulate across turns. A dirty MAIN checkout blocks the NEXT `lore seat <plan>` entry (`isDirty` refuses to rebase over uncommitted changes) — this is a main-checkout-side check, not this seat's own tree, but it means work landing back on main via merge should happen promptly rather than piling up.
 
 ## On exit or interruption
 

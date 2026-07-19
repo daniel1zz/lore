@@ -104,6 +104,12 @@ let workflowBlock = '';
 // mirrors SPEC-042's "derived, never stored" session ethos.
 let seatBlock = '';
 let bootstrapCwd = process.cwd();
+// SPEC-057 AC-S-4 — the resolved seat/worktree branch, threaded onto Phase E's
+// `lore bootstrap` spawn as `--seat-branch <branch>` so SessionService can scope
+// resume_hint to this worktree's seat plan. Stays `null` for a main-checkout
+// session (bootstrapCwd never redirects) — Phase E's spawn args stay
+// byte-unchanged in that case (REGRESSION, AC-S-4).
+let seatBranchForBootstrap = null;
 try {
   const commonDirRaw = spawnSync('git', ['rev-parse', '--git-common-dir'], {
     cwd: process.cwd(), encoding: 'utf8', timeout: 5000,
@@ -134,6 +140,14 @@ try {
           const shortSha = shaRaw.status === 0 && shaRaw.stdout ? shaRaw.stdout.trim() : 'unknown';
           branch = `worktree-${shortSha}`;
         }
+
+        // SPEC-057 AC-S-4 — threaded onto Phase E's `lore bootstrap --seat-branch`
+        // below. Set for EVERY linked-worktree session with a resolved corpus root,
+        // including the detached-HEAD synthetic `worktree-<shortsha>` label —
+        // SessionService.bootstrap's own `parseSeatBranch` resolves that as
+        // unresolvable and degrades to corpus-global + `seat_unresolved: true`,
+        // never this hook's job to pre-filter.
+        seatBranchForBootstrap = branch;
 
         const actorSlug = branch
           .toLowerCase()
@@ -190,7 +204,14 @@ try {
 // .lore/.
 let bootstrapBlock = '';
 if (existsSync(join(bootstrapCwd, '.lore'))) {
-  const r = spawnSync('lore', ['bootstrap', '--json'], {
+  // SPEC-057 AC-S-4 — `--seat-branch <branch>` is appended ONLY for a linked-worktree
+  // session with a resolved corpus root (`seatBranchForBootstrap` non-null); a
+  // main-checkout session's spawn args stay byte-unchanged (REGRESSION).
+  const bootstrapArgs = ['bootstrap', '--json'];
+  if (seatBranchForBootstrap !== null) {
+    bootstrapArgs.push('--seat-branch', seatBranchForBootstrap);
+  }
+  const r = spawnSync('lore', bootstrapArgs, {
     cwd: bootstrapCwd,
     encoding: 'utf8',
     timeout: 10000,

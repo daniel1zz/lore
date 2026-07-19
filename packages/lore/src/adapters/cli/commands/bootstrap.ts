@@ -122,7 +122,8 @@ export function formatBootstrapReport(report: BootstrapReportWithStaleness, by: 
 
   lines.push(
     report.resume_hint !== null
-      ? `Resume hint: ${report.resume_hint.plan_slug ?? "(no plan)"} / ${report.resume_hint.handoff_slug}`
+      ? `Resume hint: ${report.resume_hint.plan_slug ?? "(no plan)"} / ${report.resume_hint.handoff_slug}` +
+          (report.seat_unresolved === true ? " (seat unresolved — corpus-global fallback)" : "")
       : "Resume hint: (none)",
   );
   lines.push(
@@ -152,6 +153,21 @@ export default defineCommand({
       type: "boolean",
       description: "Output the raw BootstrapReport as JSON",
     },
+    "seat-branch": {
+      type: "string",
+      description:
+        "SPEC-057 D2 — the caller's resolved seat/worktree branch (the SessionStart hook's Phase D " +
+        "detection, or a manual invocation). When given, resume_hint scopes to the matching plan's own " +
+        "newest handoff; an unresolvable branch degrades to the corpus-global newest handoff and sets " +
+        "seat_unresolved: true.",
+    },
+    "seat-worktree": {
+      type: "string",
+      description:
+        "SPEC-057 D2 — the caller's worktree path, paired with --seat-branch. Currently unconsulted by " +
+        "resolution (kept for signature completeness); defaults to the current working directory when " +
+        "--seat-branch is given but this is omitted.",
+    },
   },
   async run({ args }) {
     const { app } = loadLoreApp();
@@ -163,7 +179,15 @@ export default defineCommand({
       }
 
       const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
-      const result = await app.sessionService.bootstrap(by);
+      const seatBranch = typeof args["seat-branch"] === "string" ? args["seat-branch"] : undefined;
+      const seat =
+        seatBranch !== undefined
+          ? {
+              branch: seatBranch,
+              worktree: typeof args["seat-worktree"] === "string" ? args["seat-worktree"] : process.cwd(),
+            }
+          : undefined;
+      const result = await app.sessionService.bootstrap(by, undefined, seat);
 
       if (!result.ok) {
         process.stderr.write(formatError(result.error) + "\n");
