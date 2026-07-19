@@ -94,10 +94,11 @@ describe("migration-001 (initial schema) — crash-safety / idempotency (Blocker
     const db = store.getDatabase();
 
     // reason: mirrors migration-004.bun.test.ts's own comment — a fresh store
-    // now runs every migration up to the current head (5, as of SPEC-044).
+    // now runs every migration up to the current head (6, as of SPEC-056's
+    // docs.type CHECK widening, migration-006).
     // migration-001's own concern (idempotent CREATEs) is what BOUNDARY below
     // asserts directly; this test just confirms the happy path still lands.
-    expect(userVersion(db)).toBe(5);
+    expect(userVersion(db)).toBe(6);
     expect(tableNames(db)).toEqual(
       expect.arrayContaining(["docs", "links", "versions", "audit", "docs_fts"]),
     );

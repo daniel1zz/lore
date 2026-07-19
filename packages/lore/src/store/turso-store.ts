@@ -18,6 +18,7 @@ import { MIGRATION_002_SQL } from "./migrations/migration-002.js";
 import { MIGRATION_003_SQL } from "./migrations/migration-003.js";
 import { MIGRATION_004_SQL } from "./migrations/migration-004.js";
 import { MIGRATION_005_SQL } from "./migrations/migration-005.js";
+import { MIGRATION_006_SQL } from "./migrations/migration-006.js";
 import type {
   AuditEntry,
   CalibrationRecord,
@@ -283,6 +284,10 @@ export class TursoStore implements StoreInterface {
 
       if (currentVersion < 5) {
         await this.client.executeMultiple(MIGRATION_005_SQL);
+      }
+
+      if (currentVersion < 6) {
+        await this.client.executeMultiple(MIGRATION_006_SQL);
       }
     })();
 
