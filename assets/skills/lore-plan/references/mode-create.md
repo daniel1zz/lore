@@ -240,7 +240,7 @@ For each implement task, determine approach source:
 **Rule**: implement task without Approach = not ready for execution. The lore-reviewer audit (8.3) will flag it.
 
 # 4. Create plan document
-- lore feed plan-promote                       # feed-before-produce: pull the governing rules the promote gate will enforce
+- # NOTE: `lore feed` supports artifact checkpoints only (spec-create etc.) — there is NO plan-promote feed checkpoint (verified 2026-07-19: `unknown checkpoint`). The plan-promote gate's rules are enforced at `lore approve` (step 8.6); nothing to pre-pull here.
 - Write plan content to a temp file (Overview, Invariants, Risk Register, Estimation
   Summary, Critical Path placeholder, Exit Criteria, Phase Descriptions,
   Governance Mode, Decisions Log — see plan-file-format.md)
