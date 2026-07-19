@@ -75,3 +75,7 @@ Priority (exhaust tier N before N+1):
 ## Output
 
 `STATUS: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT` + evidence summary (oracle, command, result, ac refs) + modified-file list.
+
+## Termination discipline (added 2026-07-20, three live stall incidents)
+
+⛔ You are the TERMINAL EXECUTOR of your task — no notification, orchestrator, or background event will ever "continue" your work for you. Never end your turn with phrases like "I'll wait for the notification" or "waiting for the background run": that stalls the whole autopilot until the orchestrator manually recalls you (observed 3× in one day: SPEC-058 V2, SPEC-056 T9, SPEC-056 T12). Rules: (1) run oracles in the FOREGROUND with an adequate timeout — if you started one in the background, Read its output file before ending your turn; (2) your FINAL message is always the completion report (files, oracle commands + observed exit-derived results, evidence versions, release confirmation) or an explicit blocked-report naming what only the orchestrator can unblock; (3) an ended turn without one of those two is a protocol violation.
