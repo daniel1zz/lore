@@ -1,0 +1,51 @@
+{
+  "_comment": "READ-ONLY census captured 2026-07-19 from a temp COPY of the live corpus's .lore/lore.db (never the live file itself \u2014 copied + WAL-checkpointed to a scratch dir, queried via sqlite3, then discarded). Source: SPEC-056 migration-shape-spike task. Drives packages/lore/tests/fixtures/phase-migration/seed.json's realistic baseline shapes. This file is a point-in-time snapshot, not live data \u2014 it will drift as the corpus grows; treat it as provenance for the fixture, not as ground truth for future migration runs.",
+  "corpus_totals": {
+    "total_docs_all_types": 374,
+    "task_docs_total_rows": 169,
+    "task_docs_active_non_deleted": 167,
+    "soft_deleted_task_docs": 2,
+    "plan_docs_active_non_deleted": 42
+  },
+  "task_status_breakdown": {
+    "archived": 147,
+    "approved": 3,
+    "draft": 17
+  },
+  "distinct_plan_ids_referenced_by_tasks": 42,
+  "tasks_with_fresh_claim_at_scan_time": 3,
+  "tasks_with_evidence": 130,
+  "tasks_without_evidence": 37,
+  "evidence_array_size_stats": {
+    "min": 1,
+    "max": 16,
+    "sum_all_entries": 457,
+    "note": "max observed is 16 \u2014 NO live task exceeds (or nears) the 50-entry cap; the near-cap (49) and over-cap-when-merged (55) scenarios in seed.json are SYNTHESIZED, not observed."
+  },
+  "tasks_with_file_anchors": 53,
+  "tasks_without_file_anchors": 114,
+  "tasks_with_directory_scope_anchor_entry": 13,
+  "tasks_with_extra_phase": 119,
+  "tasks_with_extra_legacy_phase": 0,
+  "note_legacy_phase": "0 live tasks carry extra.legacy_phase \u2014 the SPEC-023 migration residue scenario required by SPEC-056 AC-P-5 does not exist in the current corpus and is SYNTHESIZED in seed.json.",
+  "tasks_with_neither_phase_nor_legacy_phase": 48,
+  "evidence_entries_with_ac_ref": 233,
+  "evidence_entries_with_attestation": 151,
+  "evidence_entries_with_attestation_first_seen_true": 42,
+  "evidence_entries_with_origin_field": 0,
+  "note_origin": "0 \u2014 the `origin` field does not exist pre-SPEC-056; it is the migration's OWN annotation, added by PhaseMigrationService when merging source-task evidence into a phase doc. seed.json deliberately omits it too (pre-migration state).",
+  "plans_with_declared_phases_array": 25,
+  "plans_with_at_least_one_unused_declared_phase": 0,
+  "note_empty_declared_phase": "0 live plans have a declared phase with zero referencing tasks \u2014 the empty-declared-phase scenario required by SPEC-056 P7 does not exist in the current corpus and is SYNTHESIZED (twice, independently) in seed.json.",
+  "distinct_task_extra_key_signatures_observed": 8,
+  "task_extra_key_signature_counts": {
+    "phase + plan_id + verification_evidence": 70,
+    "file_anchors + phase + plan_id + verification_evidence": 27,
+    "plan_id + verification_evidence": 23,
+    "plan_id": 15,
+    "file_anchors + phase + plan_id": 13,
+    "file_anchors + plan_id + verification_evidence": 10,
+    "phase + plan_id": 6,
+    "claim + file_anchors + phase + plan_id": 3
+  }
+}

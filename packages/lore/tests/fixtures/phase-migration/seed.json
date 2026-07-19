@@ -1,0 +1,1599 @@
+{
+  "_comment": "Migration shape spike fixture seed (SPEC-056 D6/D6a/P7 edge rules, task task-skill-research-migration-shape-spike-read-only-corpus-copy, plan plan-implementation-spec-056-phase-execution-model-strategy-a, captured 2026-07-19). READ-ONLY analysis of a temp COPY of the live corpus's 167 task docs (see live-corpus-census.json in this directory for the raw census) seeded this fixture's REALISTIC baseline shapes; the edge-case scenarios required by SPEC-056 AC-P-5 (legacy_phase residue, multi-claim collapse, >50-merged-evidence, empty declared phase) do NOT occur in the current live corpus (0/167 tasks carry legacy_phase; max single-task evidence count is 16; no plan has an unreferenced declared phase) and are therefore SYNTHESIZED here, deliberately combined with the live-observed shapes so the future PhaseMigrationService test suite (SPEC-056 P2/P3) has one self-contained fixture covering every distinct extra-key shape plus every P7 edge rule in a single 3-plan/10-task corpus. DocRecord-shaped (id/slug/type/role/title/status/priority/content/parent_id/extra/tags/version/created_at/updated_at/created_by/deleted_at) \u2014 insert directly into an InMemoryStore or a throwaway SQLite copy for a migration dry-run test. Deterministic fixed timestamps throughout (July 2026) \u2014 never Date.now().",
+  "shared_fake_parent_spec_id": "01PHMIGSPEC000000000FAKE1",
+  "scenario_index": [
+    {
+      "task_slug": "task-alpha-build-holder-displaced",
+      "plan_slug": "plan-alpha-legacy-and-multiclaim",
+      "edge_rule": "P7 multi-claim collapse (displaced/older holder)",
+      "expect": "claim is DROPPED from the merged phase doc's `claim` field; recorded as a `track` note naming the displaced holder+branch+at"
+    },
+    {
+      "task_slug": "task-alpha-build-holder-winner",
+      "plan_slug": "plan-alpha-legacy-and-multiclaim",
+      "edge_rule": "P7 multi-claim collapse (winning/newer holder) + D6 >50-entry merged evidence cap",
+      "expect": "claim SURVIVES on the merged phase doc; merged evidence = 20(A1)+35(A2) = 55 entries, ALL present with `origin` set to their source task id, NEVER truncated"
+    },
+    {
+      "task_slug": "task-alpha-legacy-phase-residue",
+      "plan_slug": "plan-alpha-legacy-and-multiclaim",
+      "edge_rule": "D6/P7 legacy_phase grouping fallback",
+      "expect": "grouped under a phase named from `legacy_phase` ('old-build-track'), since `phase` is absent"
+    },
+    {
+      "task_slug": "task-alpha-docs-bare",
+      "plan_slug": "plan-alpha-legacy-and-multiclaim",
+      "edge_rule": "baseline \u2014 grouped under declared 'docs' phase, minimal fields",
+      "expect": "phase doc with no claim, no evidence, no anchors"
+    },
+    {
+      "task_slug": null,
+      "plan_slug": "plan-alpha-legacy-and-multiclaim",
+      "edge_rule": "P7 empty declared phase ('ghost' \u2014 zero referencing tasks)",
+      "expect": "an EMPTY phase doc is still created for 'ghost' (declared intent is data, not noise)"
+    },
+    {
+      "task_slug": "task-beta-core-mixed-anchors",
+      "plan_slug": "plan-beta-anchors-and-scale",
+      "edge_rule": "baseline \u2014 mixed file+dir-scope anchors, mixed ac_ref/attestation/legacy-bare evidence",
+      "expect": "anchor list byte-equal after migration; evidence entries preserve ac_ref/attestation exactly, each gains `origin`"
+    },
+    {
+      "task_slug": "task-beta-core-untouched",
+      "plan_slug": "plan-beta-anchors-and-scale",
+      "edge_rule": "baseline \u2014 untouched draft task",
+      "expect": "merges into 'core' phase doc contributing nothing but its existence"
+    },
+    {
+      "task_slug": "task-beta-no-phase-field-at-all",
+      "plan_slug": "plan-beta-anchors-and-scale",
+      "edge_rule": "P7 one-phase-per-task fallback (no phase, no legacy_phase at all)",
+      "expect": "becomes its OWN phase doc (not grouped with any other task)"
+    },
+    {
+      "task_slug": "task-beta-core-archived-first-seen",
+      "plan_slug": "plan-beta-anchors-and-scale",
+      "edge_rule": "SPEC-039 \u00a7M2 attestation.first_seen shape preserved through merge",
+      "expect": "the single evidence entry's `attestation.first_seen: true` survives byte-identical, plus gains `origin`"
+    },
+    {
+      "task_slug": "task-gamma-solo-near-cap-evidence",
+      "plan_slug": "plan-gamma-boundary-and-empty",
+      "edge_rule": "D6 boundary \u2014 49 entries, SOLO (no merge partner), stays under the 50-cap",
+      "expect": "all 49 entries present with `origin` set; distinct from the Alpha OVER-cap merged case"
+    },
+    {
+      "task_slug": "task-gamma-untouched-draft",
+      "plan_slug": "plan-gamma-boundary-and-empty",
+      "edge_rule": "baseline \u2014 simplest possible task shape `(plan_id,)`",
+      "expect": "becomes its own phase doc (no phase field -> one-phase-per-task fallback)"
+    },
+    {
+      "task_slug": null,
+      "plan_slug": "plan-gamma-boundary-and-empty",
+      "edge_rule": "P7 empty declared phase, SECOND independent instance ('orphan')",
+      "expect": "empty phase doc created; proves the empty-declared-phase rule generalizes across plans"
+    },
+    {
+      "task_slug": "task-gamma-evidence-no-phase-no-anchors",
+      "plan_slug": "plan-gamma-boundary-and-empty",
+      "edge_rule": "P7 one-phase-per-task fallback (live-census signature #4: plan_id+verification_evidence only)",
+      "expect": "becomes its own phase doc; evidence entries gain `origin`"
+    },
+    {
+      "task_slug": "task-gamma-freshly-claimed-no-evidence",
+      "plan_slug": "plan-gamma-boundary-and-empty",
+      "edge_rule": "baseline \u2014 live-census signature #7 (claim+file_anchors+phase, no evidence yet)",
+      "expect": "claim carries straight through (no collapse partner in 'solo'); anchor list byte-equal"
+    },
+    {
+      "task_slug": "task-gamma-anchors-declared-not-started",
+      "plan_slug": "plan-gamma-boundary-and-empty",
+      "edge_rule": "baseline \u2014 live-census signature #8 (file_anchors+phase, no claim, no evidence)",
+      "expect": "merges into 'solo' phase doc contributing only its anchor list"
+    }
+  ],
+  "plans": [
+    {
+      "id": "01PHMIGPLANA0000000000A1",
+      "slug": "plan-alpha-legacy-and-multiclaim",
+      "type": "plan",
+      "role": "plan",
+      "title": "Fixture Plan Alpha \u2014 legacy_phase residue + multi-claim + evidence-cap",
+      "status": "approved",
+      "priority": "medium",
+      "content": "Fixture-only plan doc. Declares 3 phases; 'ghost' is deliberately never referenced by any task (P7 empty-declared-phase edge rule).",
+      "parent_id": "01PHMIGSPEC000000000FAKE1",
+      "extra": {
+        "phases": [
+          {
+            "name": "build",
+            "description": "core build phase \u2014 2 tasks collapse into this group (multi-claim scenario)"
+          },
+          {
+            "name": "docs",
+            "description": "docs phase \u2014 single bare task"
+          },
+          {
+            "name": "ghost",
+            "description": "declared but never referenced by any task \u2014 must migrate to an EMPTY phase doc, not be dropped"
+          }
+        ]
+      },
+      "tags": [],
+      "version": 1,
+      "created_at": "2026-07-01T00:00:00.000Z",
+      "updated_at": "2026-07-01T00:00:00.000Z",
+      "created_by": "phase-migration-fixture",
+      "deleted_at": null
+    },
+    {
+      "id": "01PHMIGPLANB0000000000B1",
+      "slug": "plan-beta-anchors-and-scale",
+      "type": "plan",
+      "role": "plan",
+      "title": "Fixture Plan Beta \u2014 anchor variety + no-phase-field vintage task",
+      "status": "approved",
+      "priority": "medium",
+      "content": "Fixture-only plan doc. Single declared phase 'core'; one task (B3) predates SPEC-023 entirely and carries neither `phase` nor `legacy_phase` \u2014 one-phase-per-task migration fallback.",
+      "parent_id": "01PHMIGSPEC000000000FAKE1",
+      "extra": {
+        "phases": [
+          {
+            "name": "core",
+            "description": "core implementation phase"
+          }
+        ]
+      },
+      "tags": [],
+      "version": 1,
+      "created_at": "2026-07-01T00:00:00.000Z",
+      "updated_at": "2026-07-01T00:00:00.000Z",
+      "created_by": "phase-migration-fixture",
+      "deleted_at": null
+    },
+    {
+      "id": "01PHMIGPLANC0000000000C1",
+      "slug": "plan-gamma-boundary-and-empty",
+      "type": "plan",
+      "role": "plan",
+      "title": "Fixture Plan Gamma \u2014 near-cap solo evidence + second empty-declared-phase instance",
+      "status": "approved",
+      "priority": "medium",
+      "content": "Fixture-only plan doc. 'orphan' phase declared but never referenced (second independent empty-declared-phase instance, distinct plan from Alpha's 'ghost') \u2014 proves the rule generalizes, not a one-off.",
+      "parent_id": "01PHMIGSPEC000000000FAKE1",
+      "extra": {
+        "phases": [
+          {
+            "name": "solo",
+            "description": "solo phase \u2014 EXACTLY one task, evidence near the 50 cap but SOLO so no merge-overflow"
+          },
+          {
+            "name": "extra",
+            "description": "second non-empty phase \u2014 freshly-claimed + not-started signature coverage"
+          },
+          {
+            "name": "orphan",
+            "description": "declared, zero referencing tasks \u2014 must still migrate to an empty phase doc"
+          }
+        ]
+      },
+      "tags": [],
+      "version": 1,
+      "created_at": "2026-07-01T00:00:00.000Z",
+      "updated_at": "2026-07-01T00:00:00.000Z",
+      "created_by": "phase-migration-fixture",
+      "deleted_at": null
+    }
+  ],
+  "tasks": [
+    {
+      "id": "01PHMIGTASKA10000000B01",
+      "slug": "task-alpha-build-holder-displaced",
+      "type": "task",
+      "role": "plan",
+      "title": "Alpha/build \u2014 displaced claim holder (older fresh claim, loses to A2)",
+      "status": "approved",
+      "priority": "medium",
+      "content": "Fixture task. Holds an OLDER fresh claim than task-alpha-build-holder-winner (A2) on the SAME plan+phase group. Per SPEC-056 P7: when multiple fresh claims collapse into one phase-group, the NEWEST fresh claim wins the phase claim and displaced holders are recorded as `track` notes (loud in the migration report).",
+      "parent_id": "01PHMIGPLANA0000000000A1",
+      "extra": {
+        "plan_id": "01PHMIGPLANA0000000000A1",
+        "phase": "build",
+        "claim": {
+          "by": "agent:alpha-old-holder",
+          "at": "2026-07-10T08:00:00.000Z",
+          "branch": "feat/alpha-old",
+          "machine": "host-alpha-1",
+          "worktree": "wt-alpha-old"
+        },
+        "file_anchors": [
+          "packages/core/src/phase.ts",
+          "packages/core/src/phase-completion.ts"
+        ],
+        "verification_evidence": [
+          {
+            "oracle": "tsc",
+            "command": "cmd-A1-0",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:00:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-A1-1",
+            "attestation": {
+              "runner": "lore-cli",
+              "exit_code": 0,
+              "duration_ms": 500,
+              "timed_out": false
+            }
+          },
+          {
+            "oracle": "test",
+            "command": "cmd-A1-1",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:01:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "lint",
+            "command": "cmd-A1-2",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:02:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-A1-2"
+          },
+          {
+            "oracle": "build",
+            "command": "cmd-A1-3",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:03:00.000Z",
+            "recorded_by": "fixture-agent",
+            "attestation": {
+              "runner": "lore-cli",
+              "exit_code": 0,
+              "duration_ms": 503,
+              "timed_out": false
+            }
+          },
+          {
+            "oracle": "e2e",
+            "command": "cmd-A1-4",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:04:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-A1-3"
+          },
+          {
+            "oracle": "manual",
+            "command": "cmd-A1-5",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:05:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "other",
+            "command": "cmd-A1-6",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:06:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-A1-4",
+            "attestation": {
+              "runner": "lore-cli",
+              "exit_code": 0,
+              "duration_ms": 506,
+              "timed_out": false
+            }
+          },
+          {
+            "oracle": "tsc",
+            "command": "cmd-A1-7",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:07:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "test",
+            "command": "cmd-A1-8",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:08:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-A1-5"
+          },
+          {
+            "oracle": "lint",
+            "command": "cmd-A1-9",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:09:00.000Z",
+            "recorded_by": "fixture-agent",
+            "attestation": {
+              "runner": "lore-cli",
+              "exit_code": 0,
+              "duration_ms": 509,
+              "timed_out": false
+            }
+          },
+          {
+            "oracle": "build",
+            "command": "cmd-A1-10",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:10:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-A1-6"
+          },
+          {
+            "oracle": "e2e",
+            "command": "cmd-A1-11",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:11:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "manual",
+            "command": "cmd-A1-12",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:12:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-A1-7",
+            "attestation": {
+              "runner": "lore-cli",
+              "exit_code": 0,
+              "duration_ms": 512,
+              "timed_out": false
+            }
+          },
+          {
+            "oracle": "other",
+            "command": "cmd-A1-13",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:13:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "tsc",
+            "command": "cmd-A1-14",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:14:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-A1-8"
+          },
+          {
+            "oracle": "test",
+            "command": "cmd-A1-15",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:15:00.000Z",
+            "recorded_by": "fixture-agent",
+            "attestation": {
+              "runner": "lore-cli",
+              "exit_code": 0,
+              "duration_ms": 515,
+              "timed_out": false
+            }
+          },
+          {
+            "oracle": "lint",
+            "command": "cmd-A1-16",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:16:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-A1-9"
+          },
+          {
+            "oracle": "build",
+            "command": "cmd-A1-17",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:17:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "e2e",
+            "command": "cmd-A1-18",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:18:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-A1-10",
+            "attestation": {
+              "runner": "lore-cli",
+              "exit_code": 0,
+              "duration_ms": 518,
+              "timed_out": false
+            }
+          },
+          {
+            "oracle": "manual",
+            "command": "cmd-A1-19",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:19:00.000Z",
+            "recorded_by": "fixture-agent"
+          }
+        ]
+      },
+      "tags": [],
+      "version": 4,
+      "created_at": "2026-07-01T00:00:00.000Z",
+      "updated_at": "2026-07-01T00:00:00.000Z",
+      "created_by": "phase-migration-fixture",
+      "deleted_at": null
+    },
+    {
+      "id": "01PHMIGTASKA20000000B02",
+      "slug": "task-alpha-build-holder-winner",
+      "type": "task",
+      "role": "plan",
+      "title": "Alpha/build \u2014 winning claim holder (newer fresh claim); merged evidence exceeds 50-cap",
+      "status": "draft",
+      "priority": "medium",
+      "content": "Fixture task. Holds a NEWER fresh claim than A1 in the same plan+phase group \u2014 wins the merged phase claim per P7. Its 35 evidence entries + A1's 20 = 55 total when merged, exceeding the per-doc 50-entry cap. Per SPEC-056 D6: the cap is PER-SOURCE-TASK preserved via an evidence `origin` marker on each entry \u2014 merged entries are NEVER truncated to fit under 50 on the destination phase doc.",
+      "parent_id": "01PHMIGPLANA0000000000A1",
+      "extra": {
+        "plan_id": "01PHMIGPLANA0000000000A1",
+        "phase": "build",
+        "claim": {
+          "by": "agent:alpha-new-holder",
+          "at": "2026-07-15T09:30:00.000Z",
+          "worktree": "wt-alpha-new"
+        },
+        "file_anchors": [
+          "packages/lore/src/service/phase-workflow-service.ts",
+          "packages/lore/src/service/"
+        ],
+        "verification_evidence": [
+          {
+            "oracle": "tsc",
+            "command": "cmd-A2-0",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:00:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-A2-1",
+            "attestation": {
+              "runner": "lore-cli",
+              "exit_code": 0,
+              "duration_ms": 500,
+              "timed_out": false
+            }
+          },
+          {
+            "oracle": "test",
+            "command": "cmd-A2-1",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:01:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "lint",
+            "command": "cmd-A2-2",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:02:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-A2-2"
+          },
+          {
+            "oracle": "build",
+            "command": "cmd-A2-3",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:03:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "e2e",
+            "command": "cmd-A2-4",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:04:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-A2-3",
+            "attestation": {
+              "runner": "lore-cli",
+              "exit_code": 0,
+              "duration_ms": 504,
+              "timed_out": false
+            }
+          },
+          {
+            "oracle": "manual",
+            "command": "cmd-A2-5",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:05:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "other",
+            "command": "cmd-A2-6",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:06:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-A2-4"
+          },
+          {
+            "oracle": "tsc",
+            "command": "cmd-A2-7",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:07:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "test",
+            "command": "cmd-A2-8",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:08:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-A2-5",
+            "attestation": {
+              "runner": "lore-cli",
+              "exit_code": 0,
+              "duration_ms": 508,
+              "timed_out": false
+            }
+          },
+          {
+            "oracle": "lint",
+            "command": "cmd-A2-9",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:09:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "build",
+            "command": "cmd-A2-10",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:10:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-A2-6"
+          },
+          {
+            "oracle": "e2e",
+            "command": "cmd-A2-11",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:11:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "manual",
+            "command": "cmd-A2-12",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:12:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-A2-7",
+            "attestation": {
+              "runner": "lore-cli",
+              "exit_code": 0,
+              "duration_ms": 512,
+              "timed_out": false
+            }
+          },
+          {
+            "oracle": "other",
+            "command": "cmd-A2-13",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:13:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "tsc",
+            "command": "cmd-A2-14",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:14:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-A2-8"
+          },
+          {
+            "oracle": "test",
+            "command": "cmd-A2-15",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:15:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "lint",
+            "command": "cmd-A2-16",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:16:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-A2-9",
+            "attestation": {
+              "runner": "lore-cli",
+              "exit_code": 0,
+              "duration_ms": 516,
+              "timed_out": false
+            }
+          },
+          {
+            "oracle": "build",
+            "command": "cmd-A2-17",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:17:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "e2e",
+            "command": "cmd-A2-18",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:18:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-A2-10"
+          },
+          {
+            "oracle": "manual",
+            "command": "cmd-A2-19",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:19:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "other",
+            "command": "cmd-A2-20",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:20:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-A2-11",
+            "attestation": {
+              "runner": "lore-cli",
+              "exit_code": 0,
+              "duration_ms": 520,
+              "timed_out": false
+            }
+          },
+          {
+            "oracle": "tsc",
+            "command": "cmd-A2-21",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:21:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "test",
+            "command": "cmd-A2-22",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:22:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-A2-12"
+          },
+          {
+            "oracle": "lint",
+            "command": "cmd-A2-23",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:23:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "build",
+            "command": "cmd-A2-24",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:24:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-A2-13",
+            "attestation": {
+              "runner": "lore-cli",
+              "exit_code": 0,
+              "duration_ms": 524,
+              "timed_out": false
+            }
+          },
+          {
+            "oracle": "e2e",
+            "command": "cmd-A2-25",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:25:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "manual",
+            "command": "cmd-A2-26",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:26:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-A2-14"
+          },
+          {
+            "oracle": "other",
+            "command": "cmd-A2-27",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:27:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "tsc",
+            "command": "cmd-A2-28",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:28:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-A2-15",
+            "attestation": {
+              "runner": "lore-cli",
+              "exit_code": 0,
+              "duration_ms": 528,
+              "timed_out": false
+            }
+          },
+          {
+            "oracle": "test",
+            "command": "cmd-A2-29",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:29:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "lint",
+            "command": "cmd-A2-30",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:30:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-A2-16"
+          },
+          {
+            "oracle": "build",
+            "command": "cmd-A2-31",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:31:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "e2e",
+            "command": "cmd-A2-32",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:32:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-A2-17",
+            "attestation": {
+              "runner": "lore-cli",
+              "exit_code": 0,
+              "duration_ms": 532,
+              "timed_out": false
+            }
+          },
+          {
+            "oracle": "manual",
+            "command": "cmd-A2-33",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:33:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "other",
+            "command": "cmd-A2-34",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:34:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-A2-18"
+          }
+        ]
+      },
+      "tags": [],
+      "version": 9,
+      "created_at": "2026-07-01T00:00:00.000Z",
+      "updated_at": "2026-07-01T00:00:00.000Z",
+      "created_by": "phase-migration-fixture",
+      "deleted_at": null
+    },
+    {
+      "id": "01PHMIGTASKA30000000B03",
+      "slug": "task-alpha-legacy-phase-residue",
+      "type": "task",
+      "role": "plan",
+      "title": "Alpha \u2014 legacy_phase residue (pre-SPEC-023 vintage, no extra.phase)",
+      "status": "archived",
+      "priority": "medium",
+      "content": "Fixture task. Carries ONLY `extra.legacy_phase` (SPEC-023 `lore migrate phases` residue) \u2014 NO `extra.phase`. Per SPEC-056 D6/P7: `legacy_phase` is honored as a grouping-key FALLBACK when `phase` is absent.",
+      "parent_id": "01PHMIGPLANA0000000000A1",
+      "extra": {
+        "plan_id": "01PHMIGPLANA0000000000A1",
+        "legacy_phase": "old-build-track",
+        "verification_evidence": [
+          {
+            "oracle": "tsc",
+            "command": "cmd-A3-0",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:00:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "test",
+            "command": "cmd-A3-1",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:01:00.000Z",
+            "recorded_by": "fixture-agent"
+          }
+        ]
+      },
+      "tags": [],
+      "version": 3,
+      "created_at": "2026-07-01T00:00:00.000Z",
+      "updated_at": "2026-07-01T00:00:00.000Z",
+      "created_by": "phase-migration-fixture",
+      "deleted_at": null
+    },
+    {
+      "id": "01PHMIGTASKA40000000B04",
+      "slug": "task-alpha-docs-bare",
+      "type": "task",
+      "role": "plan",
+      "title": "Alpha/docs \u2014 bare task (no claim, no evidence, no anchors)",
+      "status": "draft",
+      "priority": "medium",
+      "content": "Fixture task. Minimal shape: only `plan_id`+`phase`. Represents the large no-claim/no-evidence/no-anchor population found live (114/167 tasks have no anchors; 37/167 have no evidence).",
+      "parent_id": "01PHMIGPLANA0000000000A1",
+      "extra": {
+        "plan_id": "01PHMIGPLANA0000000000A1",
+        "phase": "docs"
+      },
+      "tags": [],
+      "version": 1,
+      "created_at": "2026-07-01T00:00:00.000Z",
+      "updated_at": "2026-07-01T00:00:00.000Z",
+      "created_by": "phase-migration-fixture",
+      "deleted_at": null
+    },
+    {
+      "id": "01PHMIGTASKB10000000C01",
+      "slug": "task-beta-core-mixed-anchors",
+      "type": "task",
+      "role": "plan",
+      "title": "Beta/core \u2014 mixed file+directory-scope anchors, mixed oracle evidence",
+      "status": "archived",
+      "priority": "medium",
+      "content": "Fixture task. `file_anchors` mixes a file-level path and a directory-scope path (trailing `/`, SPEC-042 grammar). Evidence mixes ac_ref-bound, attestation-bound, and one legacy bare (no ac_ref/no attestation) entry \u2014 realistic pre/post-SPEC-038/039 mix as seen live.",
+      "parent_id": "01PHMIGPLANB0000000000B1",
+      "extra": {
+        "plan_id": "01PHMIGPLANB0000000000B1",
+        "phase": "core",
+        "file_anchors": [
+          "packages/lore/src/adapters/cli/commands/phase.ts",
+          "packages/lore/tests/unit/service/"
+        ],
+        "verification_evidence": [
+          {
+            "oracle": "tsc",
+            "command": "bunx vitest run fixture-suite-0.test.ts",
+            "result": "pass",
+            "recorded_at": "2026-07-03T10:00:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-B1-1"
+          },
+          {
+            "oracle": "test",
+            "command": "bunx vitest run fixture-suite-1.test.ts",
+            "result": "pass",
+            "recorded_at": "2026-07-03T10:05:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-B1-1",
+            "attestation": {
+              "runner": "lore-cli",
+              "exit_code": 0,
+              "duration_ms": 812,
+              "timed_out": false
+            }
+          },
+          {
+            "oracle": "build",
+            "command": "bunx vitest run fixture-suite-2.test.ts",
+            "result": "pass",
+            "recorded_at": "2026-07-03T10:10:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "manual",
+            "command": "bunx vitest run fixture-suite-3.test.ts",
+            "result": "pass",
+            "recorded_at": "2026-07-03T10:15:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-B1-2"
+          },
+          {
+            "oracle": "e2e",
+            "command": "bunx vitest run fixture-suite-4.test.ts",
+            "result": "pass",
+            "recorded_at": "2026-07-03T10:20:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-B1-2",
+            "attestation": {
+              "runner": "lore-cli",
+              "exit_code": 0,
+              "duration_ms": 4210,
+              "timed_out": false,
+              "first_seen": true
+            }
+          },
+          {
+            "oracle": "other",
+            "command": "bunx vitest run fixture-suite-5.test.ts",
+            "result": "pass",
+            "recorded_at": "2026-07-03T10:25:00.000Z",
+            "recorded_by": "fixture-agent"
+          }
+        ]
+      },
+      "tags": [],
+      "version": 7,
+      "created_at": "2026-07-01T00:00:00.000Z",
+      "updated_at": "2026-07-01T00:00:00.000Z",
+      "created_by": "phase-migration-fixture",
+      "deleted_at": null
+    },
+    {
+      "id": "01PHMIGTASKB20000000C02",
+      "slug": "task-beta-core-untouched",
+      "type": "task",
+      "role": "plan",
+      "title": "Beta/core \u2014 untouched draft (no anchors, no evidence, no claim)",
+      "status": "draft",
+      "priority": "medium",
+      "content": "Fixture task. Never worked: bare `plan_id`+`phase` only, status draft.",
+      "parent_id": "01PHMIGPLANB0000000000B1",
+      "extra": {
+        "plan_id": "01PHMIGPLANB0000000000B1",
+        "phase": "core"
+      },
+      "tags": [],
+      "version": 1,
+      "created_at": "2026-07-01T00:00:00.000Z",
+      "updated_at": "2026-07-01T00:00:00.000Z",
+      "created_by": "phase-migration-fixture",
+      "deleted_at": null
+    },
+    {
+      "id": "01PHMIGTASKB30000000C03",
+      "slug": "task-beta-no-phase-field-at-all",
+      "type": "task",
+      "role": "plan",
+      "title": "Beta \u2014 pre-SPEC-023 vintage task (neither phase nor legacy_phase)",
+      "status": "archived",
+      "priority": "medium",
+      "content": "Fixture task. Carries `plan_id` + evidence + anchors but NO `phase` and NO `legacy_phase` at all \u2014 predates the SPEC-023 phase field entirely. Per SPEC-056 P7 grouping rule: 'grouped by extra.phase where declared, ELSE ONE PHASE PER TASK'.",
+      "parent_id": "01PHMIGPLANB0000000000B1",
+      "extra": {
+        "plan_id": "01PHMIGPLANB0000000000B1",
+        "file_anchors": [
+          "packages/core/src/session.ts"
+        ],
+        "verification_evidence": [
+          {
+            "oracle": "tsc",
+            "command": "cmd-B3-0",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:00:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-B3-1",
+            "attestation": {
+              "runner": "lore-cli",
+              "exit_code": 0,
+              "duration_ms": 500,
+              "timed_out": false
+            }
+          },
+          {
+            "oracle": "test",
+            "command": "cmd-B3-1",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:01:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "lint",
+            "command": "cmd-B3-2",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:02:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-B3-2",
+            "attestation": {
+              "runner": "lore-cli",
+              "exit_code": 0,
+              "duration_ms": 502,
+              "timed_out": false
+            }
+          },
+          {
+            "oracle": "build",
+            "command": "cmd-B3-3",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:03:00.000Z",
+            "recorded_by": "fixture-agent"
+          }
+        ]
+      },
+      "tags": [],
+      "version": 5,
+      "created_at": "2026-07-01T00:00:00.000Z",
+      "updated_at": "2026-07-01T00:00:00.000Z",
+      "created_by": "phase-migration-fixture",
+      "deleted_at": null
+    },
+    {
+      "id": "01PHMIGTASKB40000000C04",
+      "slug": "task-beta-core-archived-first-seen",
+      "type": "task",
+      "role": "plan",
+      "title": "Beta/core \u2014 single evidence entry with attestation.first_seen=true",
+      "status": "archived",
+      "priority": "medium",
+      "content": "Fixture task. Exactly one evidence entry, carrying `attestation.first_seen: true` (SPEC-039 \u00a7M2 command-provenance annotation) \u2014 isolates the first_seen shape from the larger mixed blocks above.",
+      "parent_id": "01PHMIGPLANB0000000000B1",
+      "extra": {
+        "plan_id": "01PHMIGPLANB0000000000B1",
+        "phase": "core",
+        "verification_evidence": [
+          {
+            "oracle": "test",
+            "command": "bunx vitest run fixture-suite-0.test.ts",
+            "result": "pass",
+            "recorded_at": "2026-07-07T11:00:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-B4-1",
+            "attestation": {
+              "runner": "lore-cli",
+              "exit_code": 0,
+              "duration_ms": 2262,
+              "timed_out": false,
+              "first_seen": true
+            }
+          }
+        ]
+      },
+      "tags": [],
+      "version": 2,
+      "created_at": "2026-07-01T00:00:00.000Z",
+      "updated_at": "2026-07-01T00:00:00.000Z",
+      "created_by": "phase-migration-fixture",
+      "deleted_at": null
+    },
+    {
+      "id": "01PHMIGTASKC10000000D01",
+      "slug": "task-gamma-solo-near-cap-evidence",
+      "type": "task",
+      "role": "plan",
+      "title": "Gamma/solo \u2014 49 evidence entries (near the 50-cap, SOLO in its phase group)",
+      "status": "archived",
+      "priority": "medium",
+      "content": "Fixture task. Sole task in the 'solo' phase group \u2014 its 49 evidence entries stay under the 50-cap after migration (no merge partner), distinct from Plan Alpha's OVER-cap MERGED scenario (A1+A2=55).",
+      "parent_id": "01PHMIGPLANC0000000000C1",
+      "extra": {
+        "plan_id": "01PHMIGPLANC0000000000C1",
+        "phase": "solo",
+        "file_anchors": [
+          "packages/lore/src/service/phase-migration-service.ts"
+        ],
+        "verification_evidence": [
+          {
+            "oracle": "tsc",
+            "command": "cmd-C1-0",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:00:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-C1-1",
+            "attestation": {
+              "runner": "lore-cli",
+              "exit_code": 0,
+              "duration_ms": 500,
+              "timed_out": false
+            }
+          },
+          {
+            "oracle": "test",
+            "command": "cmd-C1-1",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:01:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "lint",
+            "command": "cmd-C1-2",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:02:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "build",
+            "command": "cmd-C1-3",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:03:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-C1-2"
+          },
+          {
+            "oracle": "e2e",
+            "command": "cmd-C1-4",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:04:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "manual",
+            "command": "cmd-C1-5",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:05:00.000Z",
+            "recorded_by": "fixture-agent",
+            "attestation": {
+              "runner": "lore-cli",
+              "exit_code": 0,
+              "duration_ms": 505,
+              "timed_out": false
+            }
+          },
+          {
+            "oracle": "other",
+            "command": "cmd-C1-6",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:06:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-C1-3"
+          },
+          {
+            "oracle": "tsc",
+            "command": "cmd-C1-7",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:07:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "test",
+            "command": "cmd-C1-8",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:08:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "lint",
+            "command": "cmd-C1-9",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:09:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-C1-4"
+          },
+          {
+            "oracle": "build",
+            "command": "cmd-C1-10",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:10:00.000Z",
+            "recorded_by": "fixture-agent",
+            "attestation": {
+              "runner": "lore-cli",
+              "exit_code": 0,
+              "duration_ms": 510,
+              "timed_out": false
+            }
+          },
+          {
+            "oracle": "e2e",
+            "command": "cmd-C1-11",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:11:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "manual",
+            "command": "cmd-C1-12",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:12:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-C1-5"
+          },
+          {
+            "oracle": "other",
+            "command": "cmd-C1-13",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:13:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "tsc",
+            "command": "cmd-C1-14",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:14:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "test",
+            "command": "cmd-C1-15",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:15:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-C1-6",
+            "attestation": {
+              "runner": "lore-cli",
+              "exit_code": 0,
+              "duration_ms": 515,
+              "timed_out": false
+            }
+          },
+          {
+            "oracle": "lint",
+            "command": "cmd-C1-16",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:16:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "build",
+            "command": "cmd-C1-17",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:17:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "e2e",
+            "command": "cmd-C1-18",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:18:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-C1-7"
+          },
+          {
+            "oracle": "manual",
+            "command": "cmd-C1-19",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:19:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "other",
+            "command": "cmd-C1-20",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:20:00.000Z",
+            "recorded_by": "fixture-agent",
+            "attestation": {
+              "runner": "lore-cli",
+              "exit_code": 0,
+              "duration_ms": 520,
+              "timed_out": false
+            }
+          },
+          {
+            "oracle": "tsc",
+            "command": "cmd-C1-21",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:21:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-C1-8"
+          },
+          {
+            "oracle": "test",
+            "command": "cmd-C1-22",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:22:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "lint",
+            "command": "cmd-C1-23",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:23:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "build",
+            "command": "cmd-C1-24",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:24:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-C1-9"
+          },
+          {
+            "oracle": "e2e",
+            "command": "cmd-C1-25",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:25:00.000Z",
+            "recorded_by": "fixture-agent",
+            "attestation": {
+              "runner": "lore-cli",
+              "exit_code": 0,
+              "duration_ms": 525,
+              "timed_out": false
+            }
+          },
+          {
+            "oracle": "manual",
+            "command": "cmd-C1-26",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:26:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "other",
+            "command": "cmd-C1-27",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:27:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-C1-10"
+          },
+          {
+            "oracle": "tsc",
+            "command": "cmd-C1-28",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:28:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "test",
+            "command": "cmd-C1-29",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:29:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "lint",
+            "command": "cmd-C1-30",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:30:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-C1-11",
+            "attestation": {
+              "runner": "lore-cli",
+              "exit_code": 0,
+              "duration_ms": 530,
+              "timed_out": false
+            }
+          },
+          {
+            "oracle": "build",
+            "command": "cmd-C1-31",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:31:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "e2e",
+            "command": "cmd-C1-32",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:32:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "manual",
+            "command": "cmd-C1-33",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:33:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-C1-12"
+          },
+          {
+            "oracle": "other",
+            "command": "cmd-C1-34",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:34:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "tsc",
+            "command": "cmd-C1-35",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:35:00.000Z",
+            "recorded_by": "fixture-agent",
+            "attestation": {
+              "runner": "lore-cli",
+              "exit_code": 0,
+              "duration_ms": 535,
+              "timed_out": false
+            }
+          },
+          {
+            "oracle": "test",
+            "command": "cmd-C1-36",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:36:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-C1-13"
+          },
+          {
+            "oracle": "lint",
+            "command": "cmd-C1-37",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:37:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "build",
+            "command": "cmd-C1-38",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:38:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "e2e",
+            "command": "cmd-C1-39",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:39:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-C1-14"
+          },
+          {
+            "oracle": "manual",
+            "command": "cmd-C1-40",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:40:00.000Z",
+            "recorded_by": "fixture-agent",
+            "attestation": {
+              "runner": "lore-cli",
+              "exit_code": 0,
+              "duration_ms": 540,
+              "timed_out": false
+            }
+          },
+          {
+            "oracle": "other",
+            "command": "cmd-C1-41",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:41:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "tsc",
+            "command": "cmd-C1-42",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:42:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-C1-15"
+          },
+          {
+            "oracle": "test",
+            "command": "cmd-C1-43",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:43:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "lint",
+            "command": "cmd-C1-44",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:44:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "build",
+            "command": "cmd-C1-45",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:45:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-C1-16",
+            "attestation": {
+              "runner": "lore-cli",
+              "exit_code": 0,
+              "duration_ms": 545,
+              "timed_out": false
+            }
+          },
+          {
+            "oracle": "e2e",
+            "command": "cmd-C1-46",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:46:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "manual",
+            "command": "cmd-C1-47",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:47:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "other",
+            "command": "cmd-C1-48",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:48:00.000Z",
+            "recorded_by": "fixture-agent",
+            "ac_ref": "AC-C1-17"
+          }
+        ]
+      },
+      "tags": [],
+      "version": 12,
+      "created_at": "2026-07-01T00:00:00.000Z",
+      "updated_at": "2026-07-01T00:00:00.000Z",
+      "created_by": "phase-migration-fixture",
+      "deleted_at": null
+    },
+    {
+      "id": "01PHMIGTASKC20000000D02",
+      "slug": "task-gamma-untouched-draft",
+      "type": "task",
+      "role": "plan",
+      "title": "Gamma \u2014 untouched draft, no phase field, no evidence, no anchors, no claim",
+      "status": "draft",
+      "priority": "medium",
+      "content": "Fixture task. Minimal possible shape: only `plan_id`. Matches the live census's simplest signature `(plan_id,)`.",
+      "parent_id": "01PHMIGPLANC0000000000C1",
+      "extra": {
+        "plan_id": "01PHMIGPLANC0000000000C1"
+      },
+      "tags": [],
+      "version": 1,
+      "created_at": "2026-07-01T00:00:00.000Z",
+      "updated_at": "2026-07-01T00:00:00.000Z",
+      "created_by": "phase-migration-fixture",
+      "deleted_at": null
+    },
+    {
+      "id": "01PHMIGTASKC30000000D03",
+      "slug": "task-gamma-evidence-no-phase-no-anchors",
+      "type": "task",
+      "role": "plan",
+      "title": "Gamma \u2014 evidence but no phase field and no anchors",
+      "status": "archived",
+      "priority": "medium",
+      "content": "Fixture task. `(plan_id, verification_evidence)` shape \u2014 live-census signature #4 (e.g. task-fix-export-human-id-file-path-collision-repair-index): a task worked and evidenced before it was ever assigned a declared phase.",
+      "parent_id": "01PHMIGPLANC0000000000C1",
+      "extra": {
+        "plan_id": "01PHMIGPLANC0000000000C1",
+        "verification_evidence": [
+          {
+            "oracle": "tsc",
+            "command": "cmd-C3-0",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:00:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "test",
+            "command": "cmd-C3-1",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:01:00.000Z",
+            "recorded_by": "fixture-agent"
+          },
+          {
+            "oracle": "lint",
+            "command": "cmd-C3-2",
+            "result": "pass",
+            "recorded_at": "2026-07-01T00:02:00.000Z",
+            "recorded_by": "fixture-agent"
+          }
+        ]
+      },
+      "tags": [],
+      "version": 4,
+      "created_at": "2026-07-01T00:00:00.000Z",
+      "updated_at": "2026-07-01T00:00:00.000Z",
+      "created_by": "phase-migration-fixture",
+      "deleted_at": null
+    },
+    {
+      "id": "01PHMIGTASKC40000000D04",
+      "slug": "task-gamma-freshly-claimed-no-evidence",
+      "type": "task",
+      "role": "plan",
+      "title": "Gamma/solo \u2014 freshly claimed, anchors declared, no evidence yet",
+      "status": "draft",
+      "priority": "medium",
+      "content": "Fixture task. `(claim, file_anchors, phase, plan_id)` shape \u2014 live-census signature #7 (e.g. task-skill-test-core-contracts-red-scenarios): work just started, claim+anchors declared, no oracle evidence recorded yet. FRESH claim, no collapse partner in this phase group.",
+      "parent_id": "01PHMIGPLANC0000000000C1",
+      "extra": {
+        "plan_id": "01PHMIGPLANC0000000000C1",
+        "phase": "extra",
+        "file_anchors": [
+          "packages/lore/tests/fixtures/phase-migration/seed.json"
+        ],
+        "claim": {
+          "by": "agent:gamma-solo-worker",
+          "at": "2026-07-21T12:00:00.000Z",
+          "machine": "host-gamma-1",
+          "worktree": "wt-gamma-solo"
+        }
+      },
+      "tags": [],
+      "version": 2,
+      "created_at": "2026-07-01T00:00:00.000Z",
+      "updated_at": "2026-07-01T00:00:00.000Z",
+      "created_by": "phase-migration-fixture",
+      "deleted_at": null
+    },
+    {
+      "id": "01PHMIGTASKC50000000D05",
+      "slug": "task-gamma-anchors-declared-not-started",
+      "type": "task",
+      "role": "plan",
+      "title": "Gamma/orphan-adjacent \u2014 anchors + phase declared, not yet started (no evidence, no claim)",
+      "status": "draft",
+      "priority": "medium",
+      "content": "Fixture task. `(file_anchors, phase, plan_id)` shape \u2014 live-census signature #8: anchors and a phase assignment exist (declared scope) but no claim was ever taken and no evidence recorded.",
+      "parent_id": "01PHMIGPLANC0000000000C1",
+      "extra": {
+        "plan_id": "01PHMIGPLANC0000000000C1",
+        "phase": "extra",
+        "file_anchors": [
+          "packages/lore/src/service/phase-checklist-service.ts"
+        ]
+      },
+      "tags": [],
+      "version": 1,
+      "created_at": "2026-07-01T00:00:00.000Z",
+      "updated_at": "2026-07-01T00:00:00.000Z",
+      "created_by": "phase-migration-fixture",
+      "deleted_at": null
+    }
+  ]
+}
