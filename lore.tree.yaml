@@ -9,6 +9,7 @@ root:
           min: 0
           children:
             - { type: task, min: 0 }
+            - { type: phase, min: 0 }   # SPEC-056 migration-created task->phase sweep
             - { type: knowledge, min: 0 }   # SPEC-026 assessments, retros
         - { type: adr, min: 0, children: [ { type: knowledge, min: 0 } ] }
         - { type: knowledge, min: 0 }
@@ -17,6 +18,7 @@ root:
       min: 0
       children:
         - { type: task, min: 0 }
+        - { type: phase, min: 0 }   # SPEC-056 migration-created task->phase sweep
         - { type: knowledge, min: 0 }
     - { type: knowledge, min: 0 }
 # knowledge → knowledge deliberately unmodeled (unbounded recursion; see SPEC-032 §3.2 prose)

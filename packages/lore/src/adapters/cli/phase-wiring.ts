@@ -29,6 +29,7 @@ import { ok, err, computeAcCoverage, computePhaseCompletion, phaseExtraSchema, i
 import type { Telemetry, DocRecord, AcceptanceCriterion } from "@lore/core";
 import { PhaseWorkflowService } from "../../service/phase-workflow-service.js";
 import { PhaseChecklistService } from "../../service/phase-checklist-service.js";
+import { PhaseMigrationService } from "../../service/phase-migration-service.js";
 import type { StoreInterface } from "../../store/store-interface.js";
 import type { CorpusService } from "../../service/corpus-service.js";
 import type { GateEnforcer } from "../../service/gate-enforcer.js";
@@ -53,19 +54,21 @@ import type {
 } from "../../flows/phase-feed-flow.js";
 import type { Result, LoreError } from "@lore/core";
 
-/** The two phase-execution-model services constructed for `App` (SPEC-056 D2). */
+/** The three phase-execution-model services constructed for `App` (SPEC-056 D2). */
 export interface PhaseServiceBundle {
   phaseWorkflowService: PhaseWorkflowService;
   phaseChecklistService: PhaseChecklistService;
+  phaseMigrationService: PhaseMigrationService;
 }
 
 /**
- * Constructs `PhaseWorkflowService`/`PhaseChecklistService` for the composition root.
- * Mirrors the SAME DI shape `app.ts` already uses for `TaskWorkflowService`
- * (own telemetry wiring, `resolveDeclaredAcIds` bound to `corpusService`,
- * `GateDependencies` bundle sharing the SAME `getPlanBundle` port) — this function
- * exists purely to keep that construction OUT of `app.ts`'s own body (see module
- * header).
+ * Constructs `PhaseWorkflowService`/`PhaseChecklistService`/`PhaseMigrationService`
+ * for the composition root. Mirrors the SAME DI shape `app.ts` already uses for
+ * `TaskWorkflowService` (own telemetry wiring, `resolveDeclaredAcIds` bound to
+ * `corpusService`, `GateDependencies` bundle sharing the SAME `getPlanBundle` port)
+ * — this function exists purely to keep that construction OUT of `app.ts`'s own body
+ * (see module header). `PhaseMigrationService` needs only `store` — no telemetry, no
+ * gate (see its own module header for why).
  *
  * @param store - Storage abstraction (same instance passed to CorpusService)
  * @param telemetry - Telemetry sink (own wiring, mirrors TaskWorkflowService's D8)
@@ -91,7 +94,16 @@ export function buildPhaseServices(
     { enforcer: gateEnforcer, getPlanBundle: corpusService.getPlanBundle.bind(corpusService) },
   );
   const phaseChecklistService = new PhaseChecklistService(store);
-  return { phaseWorkflowService, phaseChecklistService };
+  const phaseMigrationService = new PhaseMigrationService(store);
+  return { phaseWorkflowService, phaseChecklistService, phaseMigrationService };
+}
+
+/** Guard function for `App.phaseMigrationService`'s optional typing — see `requirePhaseWorkflowService`'s JSDoc. */
+export function requirePhaseMigrationService(app: App): PhaseMigrationService {
+  if (app.phaseMigrationService === undefined) {
+    throw new Error("Internal error: PhaseMigrationService not wired on App");
+  }
+  return app.phaseMigrationService;
 }
 
 /**

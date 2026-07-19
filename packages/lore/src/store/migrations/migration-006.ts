@@ -35,18 +35,40 @@
  *   `docs_fts` itself needs no DROP/CREATE here — its configuration binds to
  *   the table NAME `"docs"` (restored by the trailing `RENAME TO docs`), not
  *   to any of the pre-recreate row identities.
- * @invariant `DROP TABLE docs` is empirically SAFE under
- *   `PRAGMA foreign_keys = ON` even though `links.from_id`/`links.to_id`,
- *   `versions.doc_id`, `review_judgments.doc_id`,
- *   `calibration_records.doc_id`, and `docs.parent_id` itself all declare
- *   `REFERENCES docs(id)` — verified empirically against bun:sqlite (not
- *   merely assumed): `DROP TABLE` does not perform SQLite's parent-row
- *   FK-child-existence check (that check only fires on `DELETE`/`UPDATE` of
- *   individual parent rows, never on dropping the whole table). The
- *   immediately following `CREATE TABLE docs_new` + copy + rename restores
- *   the identical table name and PK column before any other statement can
- *   observe the gap — and the whole sequence is one transaction (see next
- *   invariant), so no other connection ever sees `docs` absent.
+ * @invariant `DROP TABLE docs` requires `PRAGMA foreign_keys = OFF` around the
+ *   ENTIRE migration (both the toggle-off and toggle-on sit OUTSIDE the
+ *   `BEGIN IMMEDIATE ... COMMIT` block — SQLite silently no-ops a
+ *   `foreign_keys` pragma toggle attempted INSIDE a pending transaction, per
+ *   sqlite.org/pragma.html#pragma_foreign_keys). This CORRECTS an earlier
+ *   claim in this file (pre-2026-07-20) that `DROP TABLE docs` was
+ *   "empirically safe" under `PRAGMA foreign_keys = ON` — that claim held
+ *   only against the SYNTHETIC fixtures this migration was authored/tested
+ *   against, which lacked real child rows in `links`/`versions`/
+ *   `review_judgments`/`calibration_records` referencing `docs(id)` (plus
+ *   `docs.parent_id`'s own self-reference). Reproduced empirically against a
+ *   COPY of the team's live 356-doc corpus (SPEC-056 closure task
+ *   `task-skill-review-cutover-verification-docs-code-anchors`, AC-P-2's
+ *   "R2 trigger check: live-shape coverage"): with FK enforcement ON, SQLite's
+ *   documented DROP TABLE behavior (sqlite.org/foreignkeys.html §7 "Schema
+ *   modifications" — DROP TABLE performs an implicit DELETE FROM first,
+ *   firing FK actions for every real child row) raises
+ *   `FOREIGN KEY constraint failed` on the DROP, and — because bun:sqlite's
+ *   `db.exec()` does not abort a multi-statement string on that failure (see
+ *   this file's OWN neighboring invariant on `sqlite-store.ts`'s
+ *   `runMigrations` re: no-auto-rollback) — execution falls through into the
+ *   subsequent `CREATE INDEX`/`CREATE TRIGGER` statements, which then fail
+ *   with the CONFUSING secondary error "already another table or index with
+ *   this name: docs" (the ORIGINAL `docs` table, never actually dropped).
+ *   `PRAGMA defer_foreign_keys = ON` INSIDE the transaction was tried and
+ *   REJECTED — it defers the check to COMMIT, but SQLite's deferred-FK
+ *   mechanism is a per-transaction VIOLATION COUNTER incremented by the
+ *   implicit delete-then-reinsert dance, not a fresh full-state re-scan; the
+ *   COMMIT still failed even though `PRAGMA foreign_key_check` mid-transaction
+ *   reported zero violations. Toggling the CONNECTION-LEVEL pragma OFF/ON
+ *   around the whole migration is SQLite's own documented recipe for this
+ *   exact scenario (sqlite.org/lang_altertable.html "Making Other Kinds Of
+ *   Table Schema Changes", steps 1 and 12) and is the only approach verified
+ *   to leave `PRAGMA foreign_key_check` clean AFTER commit.
  * @invariant Wrapped in one `BEGIN IMMEDIATE; ... COMMIT;` (mirrors
  *   `migration-004.ts`'s reasoning verbatim) — `sqlite-store.ts`'s
  *   `runMigrations()` / `turso-store.ts`'s `initSchema()` both wrap this
@@ -65,6 +87,12 @@ export const MIGRATION_006_SQL = `-- Migration: 006-phase-doc-type
 -- Widens docs.type CHECK to accept 'phase' (SPEC-056 D1, D6a). See
 -- migration-006.ts's module JSDoc for the rowid-preservation + FK-drop
 -- safety invariants this depends on.
+
+-- PRAGMA foreign_keys is a no-op inside a pending transaction (SQLite docs),
+-- so this toggle MUST sit outside BEGIN/COMMIT — see this file's module
+-- JSDoc invariant (2026-07-20 correction) for why DROP TABLE docs requires
+-- it under real production data.
+PRAGMA foreign_keys = OFF;
 
 BEGIN IMMEDIATE;
 
@@ -130,4 +158,9 @@ END;
 PRAGMA user_version = 6;
 
 COMMIT;
+
+-- Restore FK enforcement now that the transaction (and thus the schema
+-- change) is settled — this pragma is a no-op inside a transaction, so it
+-- MUST run after COMMIT, mirroring the OFF toggle above.
+PRAGMA foreign_keys = ON;
 `;

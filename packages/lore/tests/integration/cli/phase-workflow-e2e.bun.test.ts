@@ -130,6 +130,74 @@ function createPlan(title: string): string {
   return slug;
 }
 
+function createTask(planSlug: string, title: string): string {
+  const r = runLore(
+    ["create", "task", "--title", title, "--parent", planSlug, "--plan-id", planSlug, "--no-ai", "--content", "body"],
+    tmpDir,
+  );
+  if (r.exitCode !== 0) throw new Error(`create task failed: ${r.stderr}`);
+  const m = r.stdout.match(/Slug:\s+(\S+)/);
+  const slug = m?.[1];
+  if (!slug) throw new Error(`Could not extract task slug from: ${r.stdout}`);
+  return slug;
+}
+
+// ─── `lore migrate tasks-to-phases` — real corpus sweep (T13 CLI wiring) ───
+
+describe("SPEC-056 CLI `lore migrate tasks-to-phases` — real corpus sweep", () => {
+  it("HAPPY: --dry-run reports the sweep without writing; a real run then creates the phase doc; a second run is a no-op (idempotent)", () => {
+    const planSlug = createPlan("Migrate Sweep Plan");
+    const taskSlug = createTask(planSlug, "Solo Task For Migration");
+
+    // --dry-run: reports the would-be sweep, writes nothing.
+    const dryRun = runLore(["migrate", "tasks-to-phases", "--dry-run", "--json"], tmpDir);
+    expect(dryRun.exitCode).toBe(0);
+    const dryReport = JSON.parse(dryRun.stdout).data;
+    expect(dryReport.dry_run).toBe(true);
+    expect(dryReport.phases_created).toBe(1);
+    expect(dryReport.tasks_archived).toBe(1);
+
+    // Dry-run must not have written anything — no phase doc exists yet.
+    const listBeforeReal = runLore(["list", "--type", "phase", "--json"], tmpDir);
+    expect(listBeforeReal.exitCode).toBe(0);
+    expect(JSON.parse(listBeforeReal.stdout).data.total).toBe(0);
+
+    // Real run: performs the sweep.
+    const realRun = runLore(["migrate", "tasks-to-phases", "--json"], tmpDir);
+    expect(realRun.exitCode).toBe(0);
+    const realReport = JSON.parse(realRun.stdout).data;
+    expect(realReport.dry_run).toBe(false);
+    expect(realReport.phases_created).toBe(1);
+    expect(realReport.tasks_archived).toBe(1);
+
+    // A real `type: "phase"` row now exists in the live SQLite corpus.
+    const listAfterReal = runLore(["list", "--type", "phase", "--json"], tmpDir);
+    expect(listAfterReal.exitCode).toBe(0);
+    const afterData = JSON.parse(listAfterReal.stdout).data;
+    expect(afterData.total).toBe(1);
+    expect(afterData.docs[0].title).toBe("Solo Task For Migration");
+
+    // The source task is archived and no longer resolvable as a fresh task.
+    const taskGet = runLore(["get", taskSlug, "--json"], tmpDir);
+    expect(taskGet.exitCode).toBe(0);
+    expect(JSON.parse(taskGet.stdout).data.doc.status).toBe("archived");
+
+    // STATE: a second run performs zero new writes (idempotency marker #1).
+    const secondRun = runLore(["migrate", "tasks-to-phases", "--json"], tmpDir);
+    expect(secondRun.exitCode).toBe(0);
+    const secondReport = JSON.parse(secondRun.stdout).data;
+    expect(secondReport.phases_created).toBe(0);
+    expect(secondReport.tasks_archived).toBe(0);
+    expect(secondReport.evidence_merged).toBe(0);
+  });
+
+  it("REGRESSION: `lore migrate bogus-action` still exits 2 (unknown-action guard unaffected by the new branch)", () => {
+    const result = runLore(["migrate", "bogus-action"], tmpDir);
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain("Unknown migration action");
+  });
+});
+
 // ─── ERROR: resolution failures (no live phase row required) ──────────────
 
 describe("SPEC-056 CLI phase surfaces — ERROR (non-existent target)", () => {
