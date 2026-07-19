@@ -1,0 +1,8 @@
+{
+  "_comment": "Frozen REGRESSION fixture for SPEC-058 AC-V-2 — captured 2026-07-19 from CURRENT (pre-SPEC-058) `CorpusService.set(spec.id, {status: 'approved'})` behavior, running against a fully UNCONFIGURED corpus (no `workflow.verification_profiles` in config at all). Scenario: a `design`-kind spec with a single quantified `verify.mode: 'script', verify.oracle: 'test'` acceptance criterion (deliberately NOT e2e-bound) is promoted draft -> approved. Captured via a live run of packages/lore/src/service/corpus-service.ts::set through packages/lore/src/service/gate-enforcer.ts::GateEnforcer.enforce('spec-promote', ...) — see this repo's SPEC-058 RED task for the exact capture script. SPEC-058 D1 requires this exact outcome to remain byte-identical after the oracleCoverage predicate is wired: an UNCONFIGURED corpus (no matching workflow.verification_profiles entry, so resolveVerificationProfile returns null) is a VACUOUS PASS regardless of which oracle kinds the spec's ACs are bound to. This fixture is the oracle-coverage-gate.test.ts REGRESSION test's comparison target — do not hand-edit; only regenerate via a fresh capture run if this scenario's setup genuinely changes.",
+  "scenario": "spec-promote (CorpusService.set draft->approved transition), design-kind spec, single script/test AC (not e2e-bound), zero workflow.verification_profiles configured",
+  "outcome": {
+    "blocked": false,
+    "reasons": []
+  }
+}
