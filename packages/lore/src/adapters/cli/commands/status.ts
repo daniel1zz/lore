@@ -37,8 +37,8 @@ import {
   type CodeDriftPayload,
 } from "../../../flows/drift-flow.js";
 import { buildRealFsProbe } from "../../real-fs-probe.js";
-import { resolveDriftEnabled } from "@lore/core";
-import type { CallerSurface } from "@lore/core";
+import { resolveDriftEnabled, SPEC_KINDS } from "@lore/core";
+import type { CallerSurface, LoreConfig } from "@lore/core";
 
 /** All CallerSurface values in a stable display order. */
 const ALL_SURFACES: ReadonlyArray<CallerSurface> = [
@@ -66,6 +66,26 @@ function computeAiDefaults(app: ReturnType<typeof loadLoreApp>["app"]): Record<s
   }
   app.callerSurface = saved;
   return result;
+}
+
+/**
+ * Computes the SPEC-058 discoverability summary for `workflow.
+ * verification_profiles` — a store-only, zero-fs-probing, zero-store-read
+ * derivation (unlike `--check-drift`) since the data lives entirely in the
+ * already-loaded config object. Mirrors the SPEC-044/045 "print an armed-count
+ * one-liner, only when there's something to say" precedent (`open_stale_
+ * candidates` / `code_anchor_specs` above): an unconfigured corpus prints
+ * nothing extra — discoverability for corpora that HAVE opted in, never noise
+ * for ones that haven't.
+ *
+ * @param config - The resolved LoreConfig, or `undefined` when no
+ *   `.lore/config.yaml` was loaded (`resolveVerificationProfile`'s own
+ *   "absence means unconfigured" contract).
+ * @returns The configured spec_kinds, in {@link SPEC_KINDS} order, or `[]` when
+ *   none are configured.
+ */
+function configuredVerificationProfileKinds(config: LoreConfig | undefined): string[] {
+  return SPEC_KINDS.filter((kind) => config?.workflow?.verification_profiles?.[kind] !== undefined);
 }
 
 /**
@@ -336,7 +356,7 @@ export default defineCommand({
     }
 
     // ── normal status branch ─────────────────────────────────────────────────
-    const { app } = loadLoreApp();
+    const { app, config } = loadLoreApp();
     try {
       const result = await app.corpusService.status();
 
@@ -373,6 +393,9 @@ export default defineCommand({
       }
       const codeAnchorSpecs = armedSpecsResult.value;
 
+      // SPEC-058 §Scope — discoverability for existing corpora (config-only, no IO).
+      const verificationProfileKinds = configuredVerificationProfileKinds(config);
+
       if (args.json) {
         console.log(
           JSON.stringify(
@@ -383,6 +406,10 @@ export default defineCommand({
                 ai_defaults: aiDefaults,
                 open_stale_candidates: openStaleCandidates,
                 code_anchor_specs: codeAnchorSpecs,
+                verification_profiles: {
+                  configured: verificationProfileKinds.length > 0,
+                  kinds: verificationProfileKinds,
+                },
               },
             },
             null,
@@ -432,6 +459,15 @@ export default defineCommand({
           `\nCode anchors declared: ${codeAnchorSpecs} specs (run \`lore status --check-drift\` to verify)`,
         );
       }
+
+      // SPEC-058 §Scope — one-line discoverability note (SPEC-044/045 armed-count
+      // precedent): says WHETHER the corpus opted in, and into which spec_kinds,
+      // never dumping the profiles' full oracle-requirement content.
+      console.log(
+        verificationProfileKinds.length > 0
+          ? `\nVerification profiles: configured (kinds: ${verificationProfileKinds.join(", ")})`
+          : "\nVerification profiles: not configured",
+      );
 
       // SPEC-043 D8 — invalidated-feeding-source warning (computed via the SAME
       // armed-gate helper SessionService.bootstrap uses; see CorpusService.status).

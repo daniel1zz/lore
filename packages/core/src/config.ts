@@ -41,6 +41,8 @@ import { ok, err } from "./errors.js";
 import type { Result, LoreError } from "./errors.js";
 import { TelemetryConfigSchema } from "./telemetry.js";
 import { AiConfigSchema } from "./ai.js";
+import { verificationProfileSchema } from "./verification-profile.js";
+import { SPEC_KINDS } from "./spec-kind.js";
 
 // ─── Shared Defaults Schema ───────────────────────────────────────────────────
 
@@ -144,6 +146,21 @@ const GateCheckpointConfigSchema = z
      * same narrower-blast-radius shape as `anchor_overlap` above.
      */
     ac_quantifiable: z.object({ enabled: z.boolean().optional() }).strict().optional(),
+    /**
+     * `spec-promote`-ONLY sub-predicate override (SPEC-058 §Design Decisions D5) —
+     * `false` disables JUST the `oracleCoverage` predicate (per-spec_kind oracle-
+     * coverage floor), leaving spec-promote's declared-AC-count and
+     * `ac_quantifiable` checks untouched. Inert on every other checkpoint.
+     */
+    oracle_coverage: z.object({ enabled: z.boolean().optional() }).strict().optional(),
+    /**
+     * `plan-promote`-ONLY sub-predicate override (SPEC-058 §Design Decisions D5) —
+     * `false` disables JUST the `requiresUat` predicate (a plan under a spec_kind
+     * whose profile declares `required_uat: true` must itself declare
+     * `extra.requires_uat: true`), leaving upstream-approval/AC-declared gating
+     * untouched. Inert on every other checkpoint.
+     */
+    requires_uat: z.object({ enabled: z.boolean().optional() }).strict().optional(),
   })
   .strict();
 
@@ -207,6 +224,18 @@ const WorkflowConfigSchema = z
       })
       .strict()
       .default({}),
+    /**
+     * Per-`spec_kind` verification-profile floors (SPEC-058 §Design Decisions D1) —
+     * each entry declares the oracle-coverage requirement (spec-promote's
+     * `oracleCoverage` predicate) and/or UAT requirement (plan-promote's
+     * `requiresUat` predicate) that `spec_kind` demands. Absence of the whole
+     * `workflow` section, or of `verification_profiles` within it, or of a
+     * specific `spec_kind`'s entry, ALL mean "unconfigured" for that spec_kind —
+     * both predicates vacuous-pass (non-breaking for every existing corpus,
+     * `resolveVerificationProfile` returns `null`). Only an EXPLICIT profile
+     * entry activates either predicate for that spec_kind.
+     */
+    verification_profiles: z.record(z.enum(SPEC_KINDS), verificationProfileSchema).optional(),
   })
   .strict();
 
@@ -458,6 +487,47 @@ export function resolveAcQuantifiableGateEnabled(
   checkpoint: string,
 ): boolean {
   return config?.workflow?.gates?.[checkpoint]?.ac_quantifiable?.enabled !== false;
+}
+
+/**
+ * Resolve whether `spec-promote`'s `oracleCoverage` sub-predicate specifically is
+ * enabled, per `workflow.gates."spec-promote".oracle_coverage.enabled` (SPEC-058
+ * §Design Decisions D5). Narrower than {@link resolveGateEnabled}`(config,
+ * "spec-promote")`, which governs the WHOLE checkpoint. Hardcoded to
+ * `"spec-promote"` (mirrors {@link resolveAnchorOverlapGateEnabled}'s single-
+ * checkpoint shape) — SPEC-058 wires this predicate on exactly one checkpoint
+ * (§Design Decisions D2: spec-promote, not spec-create).
+ *
+ * @param config - Parsed LoreConfig, or undefined when no config file was loaded
+ * @returns `false` iff `workflow.gates."spec-promote".oracle_coverage.enabled === false`; `true` otherwise
+ * @example
+ *   resolveOracleCoverageGateEnabled(undefined) // => true
+ *   resolveOracleCoverageGateEnabled({
+ *     project, workflow: { gates: { "spec-promote": { oracle_coverage: { enabled: false } } } },
+ *   }) // => false
+ */
+export function resolveOracleCoverageGateEnabled(config: LoreConfig | undefined): boolean {
+  return config?.workflow?.gates?.["spec-promote"]?.oracle_coverage?.enabled !== false;
+}
+
+/**
+ * Resolve whether `plan-promote`'s `requiresUat` sub-predicate specifically is
+ * enabled, per `workflow.gates."plan-promote".requires_uat.enabled` (SPEC-058
+ * §Design Decisions D5). Narrower than {@link resolveGateEnabled}`(config,
+ * "plan-promote")`, which governs the WHOLE checkpoint (`requiresUat` AND
+ * upstream-approval/AC-declared gating together). Hardcoded to `"plan-promote"`
+ * (mirrors {@link resolveAnchorOverlapGateEnabled}'s single-checkpoint shape).
+ *
+ * @param config - Parsed LoreConfig, or undefined when no config file was loaded
+ * @returns `false` iff `workflow.gates."plan-promote".requires_uat.enabled === false`; `true` otherwise
+ * @example
+ *   resolveRequiresUatGateEnabled(undefined) // => true
+ *   resolveRequiresUatGateEnabled({
+ *     project, workflow: { gates: { "plan-promote": { requires_uat: { enabled: false } } } },
+ *   }) // => false
+ */
+export function resolveRequiresUatGateEnabled(config: LoreConfig | undefined): boolean {
+  return config?.workflow?.gates?.["plan-promote"]?.requires_uat?.enabled !== false;
 }
 
 /**

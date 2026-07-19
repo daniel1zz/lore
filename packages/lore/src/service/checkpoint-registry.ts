@@ -51,7 +51,20 @@
  *   flagged separately; see AC-S3-3's "plan with NO spec ancestor + fresh foreign
  *   overlap → still blocked" regression scenario.
  *
- * Source: IoC vertical-slice tech-spec §4.1/§5.1/§11; SPEC-042 §Design Decisions D5.
+ * @invariant SPEC-058's two new predicates share ONE resolved-profile field
+ *   (`ctx.verificationProfile`) across TWO checkpoints, populated by the caller
+ *   from TWO DIFFERENT spec_kinds: `spec-promote`'s `oracleCoverage` resolves
+ *   the CANDIDATE spec's OWN spec_kind (checking its declared ACs against its
+ *   own floor); `plan-promote`'s `requiresUatDeclared` resolves the plan's
+ *   ANCESTOR spec's spec_kind (checking whether the plan itself opted in).
+ *   Both predicates treat a `null`/`undefined` profile identically — vacuous
+ *   pass (§Design Decisions D1) — never a second "unconfigured" error path.
+ *   Config-reading (which the module's first invariant forbids here) is
+ *   delegated to `GateEnforcer.resolveVerificationProfile`/`isOracleCoverage
+ *   Enabled`/`isRequiresUatEnabled`, called by the caller BEFORE building ctx.
+ *
+ * Source: IoC vertical-slice tech-spec §4.1/§5.1/§11; SPEC-042 §Design Decisions D5;
+ *   SPEC-058 §Module Boundary, §Design Decisions D2-D5.
  */
 
 import {
@@ -60,8 +73,10 @@ import {
   extractFileAnchors,
   isClaimStale,
   lintAcQuantifiability,
+  checkOracleCoverage,
   type AcceptanceCriterion,
   type DocRecord,
+  type VerificationProfile,
 } from "@lore/core";
 import {
   parentLegal,
@@ -72,8 +87,12 @@ import {
   noAnchorOverlap,
   acQuantifiable,
   uatP0Accepted,
+  oracleCoverage,
+  requiresUatDeclared,
   ANCHOR_OVERLAP_FIELD,
   AC_QUANTIFIABLE_FIELD,
+  ORACLE_COVERAGE_FIELD,
+  REQUIRES_UAT_FIELD,
   type PredicateResult,
   type SiblingClaimInfo,
 } from "./gate-predicates.js";
@@ -138,6 +157,40 @@ export interface GateContext {
    * other gate config knob).
    */
   readonly acQuantifiableEnabled?: boolean;
+
+  // -- spec-promote / plan-promote: check() + feed() (SPEC-058 verification profiles) --
+  /**
+   * The relevant `spec_kind`'s resolved verification profile (SPEC-058) — for
+   * `spec-promote`, the CANDIDATE/TARGET spec's own `spec_kind` profile
+   * (consumed by `oracleCoverage`); for `plan-promote`, the plan's ANCESTOR
+   * spec's `spec_kind` profile (consumed by `requiresUatDeclared`). `null`/
+   * `undefined` means unconfigured for that spec_kind — both predicates
+   * vacuous-pass (§Design Decisions D1). Resolved by the CALLER via
+   * `GateEnforcer.resolveVerificationProfile` (module invariant: no config
+   * access here) — never re-derived from a raw `LoreConfig` in this module.
+   */
+  readonly verificationProfile?: VerificationProfile | null;
+  /**
+   * `workflow.gates."spec-promote".oracle_coverage.enabled` resolved by the
+   * CALLER (SPEC-058 §Design Decisions D5, mirrors `acQuantifiableEnabled`'s
+   * per-predicate config-knob shape) — `false` skips `oracleCoverage` entirely,
+   * leaving spec-promote's other predicates untouched. Absent means enabled.
+   */
+  readonly oracleCoverageEnabled?: boolean;
+  /**
+   * Whether the checkpoint's plan itself declares `extra.requires_uat === true`
+   * (SPEC-058 §Design Decisions D4) — consumed by `plan-promote`'s
+   * `requiresUatDeclared` predicate. An explicit `false` and an absent field
+   * are equivalent (BOUNDARY — only literal `true` satisfies the predicate).
+   */
+  readonly planRequiresUat?: boolean;
+  /**
+   * `workflow.gates."plan-promote".requires_uat.enabled` resolved by the
+   * CALLER (SPEC-058 §Design Decisions D5) — `false` skips
+   * `requiresUatDeclared` entirely, leaving upstream-approval/AC-declared
+   * gating untouched. Absent means enabled.
+   */
+  readonly requiresUatEnabled?: boolean;
 
   // -- plan-promote / task-claim: check() --
   /**
@@ -302,6 +355,25 @@ function acQuantifiableDetailLines(ctx: GateContext, failures: PredicateResult[]
 }
 
 /**
+ * Renders the per-missing-oracle detail lines for an `oracleCoverage` predicate
+ * failure (SPEC-058) — one line per `checkOracleCoverage` finding, naming the
+ * missing oracle kind and its repair hint. Returns `[]` when the predicate
+ * didn't fail, OR no profile was resolved (both make `checkOracleCoverage`
+ * moot) — mirrors `acQuantifiableDetailLines`'s "safe to unconditionally
+ * spread" contract. Shared by `feedSpecPromote` only (oracleCoverage is
+ * spec-promote-exclusive, §Design Decisions D2).
+ */
+function oracleCoverageDetailLines(ctx: GateContext, failures: PredicateResult[]): string[] {
+  const failed = failures.some((f) => !f.ok && f.field === ORACLE_COVERAGE_FIELD);
+  if (!failed || ctx.verificationProfile === null || ctx.verificationProfile === undefined) {
+    return [];
+  }
+  return checkOracleCoverage(ctx.acceptanceCriteria ?? [], ctx.verificationProfile).map(
+    (finding) => `missing oracle "${finding.missing_oracle}" — ${finding.hint}`,
+  );
+}
+
+/**
  * spec-create's feeding-pack renderer — a thin `buildFeedingPack` + `renderFeedingPack`
  * pipe (both already pure); this function adds no IO, it only supplies the pre-fetched
  * `ctx` fields those functions expect, mirroring `gate.ts`'s former inline assembly.
@@ -332,6 +404,9 @@ function checkSpecPromote(ctx: GateContext): PredicateResult[] {
   if (ctx.acQuantifiableEnabled !== false) {
     results.push(acQuantifiable(ctx.acceptanceCriteria));
   }
+  if (ctx.oracleCoverageEnabled !== false) {
+    results.push(oracleCoverage(ctx.acceptanceCriteria, ctx.verificationProfile));
+  }
   return results;
 }
 
@@ -346,18 +421,33 @@ function checkSpecPromote(ctx: GateContext): PredicateResult[] {
 function feedSpecPromote(ctx: GateContext, failures: PredicateResult[]): string {
   const base = `Error: spec "${ctx.specIdOrSlug ?? "unknown"}" has no structured acceptance criteria — add via \`lore ac add\`.\n`;
   const acLines = acQuantifiableDetailLines(ctx, failures);
+  const oracleLines = oracleCoverageDetailLines(ctx, failures);
+  const detailLines = [...acLines, ...oracleLines];
   const noAcceptanceCriteriaFailed = failures.some((f) => !f.ok && f.reason === NO_ACCEPTANCE_CRITERIA_REASON);
 
-  if (acLines.length === 0) {
+  if (detailLines.length === 0) {
     return noAcceptanceCriteriaFailed
       ? base
       : "Error: spec has an unquantified acceptance criterion.\n";
   }
 
-  const acBlock = acLines.map((line) => `- ${line}`).join("\n");
+  // reason: SPEC-058 REGRESSION guard — an ac_quantifiable-ONLY failure (no
+  // oracle-coverage findings) keeps the EXACT pre-SPEC-058 wording byte-for-byte
+  // (pinned by the pre-existing gate-spec-promote.bun.test.ts NEGATIVE case,
+  // which asserts the literal substring "unquantified acceptance criterion").
+  // A mixed or oracle-only failure gets the new, more general wording below —
+  // there is no pre-existing test pinning THAT branch's exact text.
+  if (oracleLines.length === 0) {
+    const acBlock = acLines.map((line) => `- ${line}`).join("\n");
+    return noAcceptanceCriteriaFailed
+      ? `${base}\nAlso:\n${acBlock}\n`
+      : `Error: spec "${ctx.specIdOrSlug ?? "unknown"}" has an unquantified acceptance criterion:\n${acBlock}\n`;
+  }
+
+  const detailBlock = detailLines.map((line) => `- ${line}`).join("\n");
   return noAcceptanceCriteriaFailed
-    ? `${base}\nAlso:\n${acBlock}\n`
-    : `Error: spec "${ctx.specIdOrSlug ?? "unknown"}" has an unquantified acceptance criterion:\n${acBlock}\n`;
+    ? `${base}\nAlso:\n${detailBlock}\n`
+    : `Error: spec "${ctx.specIdOrSlug ?? "unknown"}" failed spec-promote quality checks:\n${detailBlock}\n`;
 }
 
 /**
@@ -372,7 +462,14 @@ function checkPlanPromote(ctx: GateContext): PredicateResult[] {
   if (ctx.hasSpecParent !== true) {
     return [];
   }
-  return [upstreamApproved(ctx.parentSpec, "spec"), upstreamHasAcceptanceCriteria(ctx.parentSpec)];
+  const results: PredicateResult[] = [
+    upstreamApproved(ctx.parentSpec, "spec"),
+    upstreamHasAcceptanceCriteria(ctx.parentSpec),
+  ];
+  if (ctx.requiresUatEnabled !== false) {
+    results.push(requiresUatDeclared(ctx.verificationProfile, ctx.planRequiresUat === true));
+  }
+  return results;
 }
 
 /**
@@ -422,8 +519,41 @@ function feedUpstreamSpecCheckpoint(
   return renderFeedingPack(pack);
 }
 
-/** `plan-promote`'s feeding message — human-readable requirement + machine-readable `missing` reasons. */
+/**
+ * Renders the `requires_uat`-specific feeding pack (SPEC-058 §Design Decisions
+ * D4) — names the concrete requirement (the ancestor spec's configured
+ * verification profile demands UAT) and the honest recovery path: `lore set`
+ * (CLI) has no dedicated flag for an arbitrary `extra` key yet, so the pack
+ * points at the MCP `lore_set` tool's generic `extra` passthrough instead of
+ * fabricating a non-existent CLI flag (this codebase's "never a broken
+ * recovery command" discipline — SPEC-050's lesson).
+ */
+function feedRequiresUat(ctx: GateContext, failures: PredicateResult[]): string {
+  const pack = buildFeedingPack({
+    ruleSource: "corpus (verification profile)",
+    ruleMarkdown:
+      "Required for plan-promote: the ancestor spec's configured verification profile " +
+      'requires UAT — this plan must declare `extra.requires_uat: true` before it may be ' +
+      "promoted. Recovery: set it via the MCP `lore_set` tool " +
+      `(\`extra: {"requires_uat": true}\`) on ${ctx.targetIdOrSlug ?? "<plan>"} — ` +
+      "`lore set` (CLI) has no dedicated flag for this field yet.",
+    missing: selectFailures(failures).map((f) => f.reason),
+  });
+  return renderFeedingPack(pack);
+}
+
+/**
+ * `plan-promote`'s feeding message — dispatches to {@link feedRequiresUat} when
+ * the requires-uat predicate failed (SPEC-058, its own dedicated, recovery-
+ * bearing message), else falls back to the pre-existing upstream-spec-approval
+ * message (unchanged from before SPEC-058) — mirrors `feedTaskClaim`'s
+ * per-field dispatch shape.
+ */
 function feedPlanPromote(ctx: GateContext, failures: PredicateResult[]): string {
+  const requiresUatFailed = failures.some((f) => !f.ok && f.field === REQUIRES_UAT_FIELD);
+  if (requiresUatFailed) {
+    return feedRequiresUat(ctx, failures);
+  }
   return feedUpstreamSpecCheckpoint(
     ctx,
     failures,

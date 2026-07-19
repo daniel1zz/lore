@@ -4,9 +4,15 @@
  * Source: SPEC-005 §3, SPEC-001 §3.2
  */
 
-import type { DocId, DocRecord, DocType, DocTypeMeta } from "@lore/core";
+import type { DocId, DocRecord, DocType, DocTypeMeta, SpecKind } from "@lore/core";
 import { err, ok, type LoreError, type Result } from "@lore/core";
-import { getAllowedTransitions, isValidTransition, deriveTypeMeta, specAcceptanceCriteriaSchema } from "@lore/core";
+import {
+  getAllowedTransitions,
+  isValidTransition,
+  deriveTypeMeta,
+  specAcceptanceCriteriaSchema,
+  SPEC_KINDS,
+} from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
 import { buildUpstreamSpecContext } from "./checkpoint-registry.js";
@@ -110,11 +116,17 @@ export class ReviewService {
     if (doc.type === "spec") {
       const parsed = specAcceptanceCriteriaSchema.safeParse(doc.extra["acceptance_criteria"]);
       const acceptanceCriteriaCount = parsed.success ? parsed.data.length : 0;
+      // reason: SPEC-058 D2 — oracleCoverage judges the spec against ITS OWN
+      // spec_kind's configured profile; an absent/invalid value falls back to
+      // "feature", the same create-time default `_createImpl` applies.
+      const specKind = resolveSpecKindOrDefault(doc.extra["spec_kind"]);
       return this.gate.enforcer.enforce("spec-promote", {
         acceptanceCriteriaCount,
         specIdOrSlug: doc.slug,
         ...(parsed.success ? { acceptanceCriteria: parsed.data } : {}),
         acQuantifiableEnabled: this.gate.enforcer.isAcQuantifiableEnabled("spec-promote"),
+        verificationProfile: this.gate.enforcer.resolveVerificationProfile(specKind),
+        oracleCoverageEnabled: this.gate.enforcer.isOracleCoverageEnabled(),
       });
     }
 
@@ -130,8 +142,25 @@ export class ReviewService {
 
       const bundleResult = await this.gate.getPlanBundle(doc.id);
       if (!bundleResult.ok) return bundleResult;
-      const ctx = buildUpstreamSpecContext(bundleResult.value.spec);
-      return this.gate.enforcer.enforce("plan-promote", { ...ctx, targetIdOrSlug: doc.slug });
+      const parentSpec = bundleResult.value.spec;
+      const ctx = buildUpstreamSpecContext(parentSpec);
+      // reason: SPEC-058 D4 — requiresUatDeclared judges the plan against its
+      // ANCESTOR spec's spec_kind profile, not the plan's own (plans carry no
+      // spec_kind). `hasSpecParent === false` already short-circuits
+      // checkPlanPromote before this field is ever consulted, so resolving
+      // `null` when there's no parent spec is a safe, unread default.
+      const verificationProfile =
+        parentSpec !== undefined
+          ? this.gate.enforcer.resolveVerificationProfile(resolveSpecKindOrDefault(parentSpec.extra["spec_kind"]))
+          : null;
+      const planRequiresUat = doc.extra["requires_uat"] === true;
+      return this.gate.enforcer.enforce("plan-promote", {
+        ...ctx,
+        targetIdOrSlug: doc.slug,
+        verificationProfile,
+        planRequiresUat,
+        requiresUatEnabled: this.gate.enforcer.isRequiresUatEnabled(),
+      });
     }
 
     return ok(undefined);
@@ -297,6 +326,22 @@ export class ReviewService {
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
+
+/**
+ * Coerces a raw `extra.spec_kind` value to a valid {@link SpecKind}, falling
+ * back to `"feature"` (SPEC-058 D2) — the SAME default `CorpusService.
+ * _createImpl` applies at spec-creation time when the field is absent, never a
+ * second, independently-invented default. A malformed value (wrong type, or a
+ * string outside {@link SPEC_KINDS}) is treated identically to absent — this
+ * helper never throws or returns an error; it's a read-side coercion for gate
+ * ctx-building only, not a validator (write-time validation already happened
+ * in `CorpusService._createImpl`/`set`).
+ */
+function resolveSpecKindOrDefault(raw: unknown): SpecKind {
+  return typeof raw === "string" && (SPEC_KINDS as readonly string[]).includes(raw)
+    ? (raw as SpecKind)
+    : "feature";
+}
 
 /**
  * Projects a full DocRecord to the {@link PendingDoc} row shape, wrapping

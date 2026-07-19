@@ -36,6 +36,7 @@ export * from "./text-normalise.js";
 export * from "./task-workflow.js";
 export * from "./acceptance.js";
 export * from "./ac-quality.js";
+export * from "./verification-profile.js";
 export * from "./uat.js";
 export * from "./requirement.js";
 export * from "./assessment.js";
