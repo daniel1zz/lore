@@ -314,7 +314,10 @@ If an implement task lacks a known approach (no spec coverage, no existing patte
   - **--anchor** (mandatory for any task intended for parallel dispatch): repo-relative
     POSIX paths this task will touch; trailing `/` declares a directory scope. The
     `task-claim` gate rejects overlapping fresh claims by different actors — but it can
-    only see what is DECLARED. Undeclared conflicts are invisible to it.
+    only see what is DECLARED. Undeclared conflicts are invisible to it. (Legacy alias,
+    SPEC-056 D7: a `phase` doc's claim gates on the additive `phase-claim` checkpoint —
+    same anchor-overlap predicate; `task-claim` keeps gating legacy `task` docs
+    unchanged until migration.)
   - **--priority**: based on urgency + critical path position (step 6)
 
 ## 5.3. Parallel/Serial Judgment — 3-Layer Model

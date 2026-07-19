@@ -292,6 +292,8 @@ lore ready plan-user-authentication --json
 # (gate:task-claim:anchor-overlap, exit 5-adjacent gate fail) — the feeding pack names
 # the conflicting task/holder/paths. Planner's job: such pairs get a blocks link at
 # plan time so this never fires at dispatch time.
+# (Legacy alias, SPEC-056 D7: a `phase` doc's claim would instead surface
+# gate:phase-claim:anchor-overlap — same predicate, additive checkpoint.)
 ```
 
 ## Example: Autopilot Integration
