@@ -413,6 +413,20 @@ export const bootstrapReportSchema = z.object({
   armed_gates: z.array(bootstrapArmedGateSchema),
   latest_handoffs: z.array(bootstrapLatestHandoffSchema),
   resume_hint: bootstrapResumeHintSchema.nullable(),
+  /**
+   * Present (`true`) iff `SessionService.bootstrap` was called with a `seat`
+   * signal whose `branch` did NOT resolve to a live plan doc — either the
+   * branch isn't a well-formed seat branch (`parseSeatBranch` returns `null`)
+   * or it parses but no plan's slug matches the recovered remainder (SPEC-057
+   * §Design Decisions D3). `resume_hint` still degrades gracefully to the
+   * corpus-global newest handoff in this case — this field is the caller's
+   * signal that the degrade happened, mirroring the SPEC-043/044 warning-field
+   * pattern (`invalidated_feeding_source_warnings`, `open_stale_candidates`).
+   * ABSENT (not `false`) when no `seat` signal was given, or when it resolved
+   * cleanly — present-iff-true, same convention as `attestation.first_seen`
+   * (`task-workflow.ts`), so a pre-SPEC-057 caller's report stays byte-identical.
+   */
+  seat_unresolved: z.boolean().optional(),
   corpus: bootstrapCorpusStatsSchema,
   /**
    * Corpus-wide derived sessions over every ACTIVE (non-archived/deprecated)

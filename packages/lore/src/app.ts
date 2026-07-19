@@ -67,6 +67,8 @@ import { GateEnforcer } from "./service/gate-enforcer.js";
 import { SessionService } from "./service/session-service.js";
 import { ValidityService } from "./service/validity-service.js";
 import { DriftCheckService } from "./service/drift-check-service.js";
+import { SeatService } from "./service/seat-service.js";
+import { RealGitPort } from "./adapters/real-git-port.js";
 
 export interface App {
   corpusService: CorpusService;
@@ -240,6 +242,18 @@ export interface App {
    */
   requirementService?: RequirementService;
   /**
+   * SeatService — thin `GitPort` orchestration for the `lore seat` verb family
+   * (`enter`/`list`/`resume`/`remove`, SPEC-057). Wired here with the REAL `GitPort`
+   * (`RealGitPort(repoRoot)`, the same `repoRoot` `VerifyRunnerService` already
+   * receives) and a `getReadyReport` thunk bound to `taskWorkflowService.ready` (fail-
+   * open to `{anchor_conflicts: []}` on a `ready()` error — `GetReadyReport`'s type has
+   * no `Result` wrapper to propagate a failure through, SPEC-057 §Public Interface).
+   * Optional for the same "pre-existing hand-built App test stubs stay valid" reason as
+   * `acService`/`driftCheckService`/`sessionService`; always wired in production.
+   * Source: SPEC-057 §Module Boundary, §Design Decisions D1.
+   */
+  seatService?: SeatService;
+  /**
    * Telemetry sink — exposed for dashboard route handlers to emit source-tagged events.
    * Dashboard handlers record { service: "dashboard", source: "dashboard" } events after
    * successful writes so AC-DASH-WRITE-TEL-1 is satisfied without modifying service signatures.
@@ -405,6 +419,17 @@ function buildAppFromSqlite(
     // reason: DriftCheckService depends only on StoreInterface — stateless, no AI, no
     // telemetry, same shape as PhaseService/AcService. SPEC-045 §Design Decisions D4.
     driftCheckService: new DriftCheckService(store),
+    // reason: SeatService (SPEC-057) — real GitPort over the SAME repoRoot
+    // VerifyRunnerService already receives (captured at composition time, never a
+    // second `process.cwd()` read); getReadyReport is bound to
+    // `taskWorkflowService.ready`, fail-open to `{anchor_conflicts: []}` on a
+    // `ready()` error (GetReadyReport's type carries no Result to propagate a
+    // failure through — SeatService.enter's own readiness check would otherwise be
+    // unreachable on a plan-resolution hiccup that isn't itself the plan's fault).
+    seatService: new SeatService(store, new RealGitPort(repoRoot), async (planId) => {
+      const readyResult = await taskWorkflowService.ready(planId);
+      return readyResult.ok ? { anchor_conflicts: readyResult.value.anchor_conflicts } : { anchor_conflicts: [] };
+    }),
     // reason: SpecKindService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-032 §3.4.
     specKindService: new SpecKindService(store),
@@ -598,6 +623,17 @@ function buildAppFromTurso(
     // reason: DriftCheckService depends only on StoreInterface — stateless, no AI, no
     // telemetry, same shape as PhaseService/AcService. SPEC-045 §Design Decisions D4.
     driftCheckService: new DriftCheckService(store),
+    // reason: SeatService (SPEC-057) — real GitPort over the SAME repoRoot
+    // VerifyRunnerService already receives (captured at composition time, never a
+    // second `process.cwd()` read); getReadyReport is bound to
+    // `taskWorkflowService.ready`, fail-open to `{anchor_conflicts: []}` on a
+    // `ready()` error (GetReadyReport's type carries no Result to propagate a
+    // failure through — SeatService.enter's own readiness check would otherwise be
+    // unreachable on a plan-resolution hiccup that isn't itself the plan's fault).
+    seatService: new SeatService(store, new RealGitPort(repoRoot), async (planId) => {
+      const readyResult = await taskWorkflowService.ready(planId);
+      return readyResult.ok ? { anchor_conflicts: readyResult.value.anchor_conflicts } : { anchor_conflicts: [] };
+    }),
     // reason: SpecKindService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-032 §3.4.
     specKindService: new SpecKindService(store),
