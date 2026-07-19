@@ -1,0 +1,16 @@
+{
+  "_comment": "SPEC-057 §Structure cross-language sanitizer-parity fixture — input->expected pairs for the branch-segment sanitizer. The sanitizer exists in TWO hand-maintained forms: assets/hooks/session-start-resume.mjs:138-142 (inline regex chain, derives an actor slug from a linked worktree's branch name) and packages/core/src/seat.ts (TS `sanitizeBranchSegment`, used by `seatBranchName` to build `plan/<sanitized-slug>`). Both MUST produce byte-identical output for every pair below — divergence between the two hand-maintained copies breaks a test here, not production (SPEC-057 Structure section rationale). The rule both implement: lowercase, collapse every run of characters outside [a-z0-9-] to a single '-', then strip leading/trailing '-'. Every `input` value is also a LEGAL git branch name (no leading '-', no '..', no trailing '.', no spaces) so the hook suite can create a real `git worktree add -b <input>` fixture from it.",
+  "rule": "input.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')",
+  "pairs": [
+    { "input": "feat/x_y", "expected": "feat-x-y" },
+    { "input": "Feature_ABC", "expected": "feature-abc" },
+    { "input": "release/2.0.1", "expected": "release-2-0-1" },
+    { "input": "multi___under___score", "expected": "multi-under-score" },
+    { "input": "UPPER-MIX_case", "expected": "upper-mix-case" },
+    { "input": "plain123", "expected": "plain123" },
+    { "input": "a.b.c", "expected": "a-b-c" },
+    { "input": "x__y__z", "expected": "x-y-z" },
+    { "input": "_leading", "expected": "leading" },
+    { "input": "trailing_", "expected": "trailing" }
+  ]
+}

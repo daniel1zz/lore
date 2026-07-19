@@ -362,3 +362,115 @@ describe("session-seat-injection — REGRESSION", () => {
     expect(ctx).not.toContain("<session-seat>");
   });
 });
+
+// ─── SPEC-057 additions ────────────────────────────────────────────────────────
+//
+// RED task (task-skill-test-seat-suites-red), AC-S-4 + the hook half of AC-S-5.
+// AC-S-4 is a genuinely NEW behavior — the hook's Phase E `lore bootstrap`
+// invocation (session-start-resume.mjs line ~193, `spawnSync('lore', ['bootstrap',
+// '--json'], ...)`) does not pass a `--seat-branch` flag today, so the first
+// describe block below is RED until the paired implementation task adds it. The
+// second describe block (golden-fixture sanitizer parity) exercises the hook's
+// PRE-EXISTING actor-sanitization regex (session-start-resume.mjs:138-142, live
+// since SPEC-047) against the shared golden fixture — that half is expected to
+// already be GREEN today (only the CORE side of AC-S-5, seat.test.ts, is RED),
+// per this task's own "pre-existing cases green" pass criterion.
+//
+// Source: spec-spec-057-two-tier-worktree-seat-model-lore-seat-verb-seat-a
+//   §Design Decisions D2, §Structure, §Acceptance Criteria AC-S-4, AC-S-5.
+
+interface GoldenPair {
+  input: string;
+  expected: string;
+}
+
+function loadGoldenPairs(): GoldenPair[] {
+  const fixturePath = join(REPO_ROOT, "packages", "lore", "tests", "fixtures", "seat-branch-sanitize.golden.json");
+  const raw = JSON.parse(readFileSync(fixturePath, "utf8")) as { pairs: GoldenPair[] };
+  return raw.pairs;
+}
+
+/** Sets up a linked worktree on `branch` with a claude-dir briefing present, runs
+ *  the hook, and returns `{ctx, bootstrapCall}` — the same fixture shape the HAPPY
+ *  block above uses, factored out for reuse across many golden-pair cases. */
+function runHookInSeatWorktree(branch: string): { ctx: string; bootstrapCall: string | undefined } {
+  const mainRepo = mkScratchDir("seat-main-");
+  initGitRepo(mainRepo);
+  mkdirSync(join(mainRepo, ".lore"));
+
+  const worktreeDir = join(mkScratchDir("seat-wt-parent-"), "wt");
+  execFileSync("git", ["worktree", "add", "-b", branch, worktreeDir], { cwd: mainRepo, stdio: "pipe" });
+
+  const claudeDir = mkScratchDir("seat-claude-dir-");
+  mkdirSync(join(claudeDir, "governance"), { recursive: true });
+  const template = readFileSync(join(REPO_ROOT, "assets", "governance", "seat-briefing.md"), "utf8");
+  writeFileSync(join(claudeDir, "governance", "seat-briefing.md"), template);
+
+  const logPath = join(mkScratchDir("seat-log-"), "lore-calls.log");
+  const stubDir = makeLoreStub(logPath);
+
+  const result = runHook({
+    cwd: worktreeDir,
+    extraEnv: {
+      PATH: `${stubDir}:${process.env.PATH}`,
+      CLAUDE_AGENTS_DIR_OVERRIDE: join(claudeDir, "agents"),
+    },
+  });
+
+  expect(result.status).toBe(0);
+  const ctx = parseAdditionalContext(result.stdout!);
+  const log = readFileSync(logPath, "utf8").trim().split("\n");
+  const bootstrapCall = log.find((line) => line.includes("bootstrap"));
+  return { ctx, bootstrapCall };
+}
+
+describe("session-seat-injection — SPEC-057 seat signal on lore bootstrap (AC-S-4)", () => {
+  it("a linked-worktree session's lore bootstrap invocation includes --seat-branch with the branch value", () => {
+    const { bootstrapCall } = runHookInSeatWorktree("feat/x_y");
+    expect(bootstrapCall).toBeDefined();
+    expect(bootstrapCall).toContain("--seat-branch feat/x_y");
+  });
+
+  it("a main-checkout (non-worktree) session's lore bootstrap invocation has NO --seat-branch flag — byte-unchanged", () => {
+    const mainRepo = mkScratchDir("seat-main-");
+    initGitRepo(mainRepo);
+    mkdirSync(join(mainRepo, ".lore"));
+
+    const claudeDir = mkScratchDir("seat-claude-dir-");
+    mkdirSync(join(claudeDir, "governance"), { recursive: true });
+    const template = readFileSync(join(REPO_ROOT, "assets", "governance", "seat-briefing.md"), "utf8");
+    writeFileSync(join(claudeDir, "governance", "seat-briefing.md"), template);
+
+    const logPath = join(mkScratchDir("seat-log-"), "lore-calls.log");
+    const stubDir = makeLoreStub(logPath);
+
+    const result = runHook({
+      cwd: mainRepo,
+      extraEnv: {
+        PATH: `${stubDir}:${process.env.PATH}`,
+        CLAUDE_AGENTS_DIR_OVERRIDE: join(claudeDir, "agents"),
+      },
+    });
+
+    expect(result.status).toBe(0);
+    const log = readFileSync(logPath, "utf8").trim().split("\n");
+    const bootstrapCall = log.find((line) => line.includes("bootstrap"));
+    expect(bootstrapCall).toBeDefined();
+    expect(bootstrapCall).not.toContain("--seat-branch");
+  });
+});
+
+describe("session-seat-injection — sanitizer golden-fixture parity (AC-S-5, hook side)", () => {
+  const pairs = loadGoldenPairs();
+
+  it("loaded golden fixture has at least 10 pairs", () => {
+    expect(pairs.length).toBeGreaterThanOrEqual(10);
+  });
+
+  for (const { input, expected } of pairs) {
+    it(`branch "${input}" sanitizes to actor agent:${expected} in the injected seat block`, () => {
+      const { ctx } = runHookInSeatWorktree(input);
+      expect(ctx).toContain(`agent:${expected}`);
+    });
+  }
+});
