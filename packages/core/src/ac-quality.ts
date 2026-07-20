@@ -9,13 +9,25 @@
  *     (en + zh) that read as unverifiable prose unless paired with a measurable
  *     anchor.
  *   - AcQualityFinding — one lint finding: {ac_id, word, severity, message}.
- *   - lintAcQuantifiability(criteria) — scans each criterion's `statement` for an
- *     `AC_ABSTRACT_WORDS` member with no accompanying measurable token and returns
- *     a `block` finding per offending word.
+ *   - lintStatement(text) — the shared per-statement lint PRIMITIVE (SPEC-059):
+ *     scans ANY free-text string for an `AC_ABSTRACT_WORDS` member with no
+ *     accompanying measurable token, returning a `block` finding per offending
+ *     word with `ac_id: ""` (the caller stamps the real id — see its own JSDoc).
+ *     `lintAcQuantifiability` (below) delegates to it per-criterion; so does
+ *     `RequirementService.addRequirement`
+ *     (`packages/lore/src/service/requirement-service.ts`) at the PRD-requirement
+ *     layer one tier up — one wordlist, one measurable-token heuristic, reused
+ *     rather than re-implemented at each write site.
+ *   - lintAcQuantifiability(criteria) — thin per-criterion map over
+ *     `lintStatement`: skips `script`-mode criteria (oracle-bound by
+ *     construction) and applies the `ai`-mode rubric escape hatch, then stamps
+ *     each finding's `ac_id` from the owning criterion. Kept BEHAVIOR-IDENTICAL
+ *     to its pre-SPEC-059 direct implementation (regression-frozen — same
+ *     fixtures, same output, SPEC-059 AC-RQ-2).
  *
  * Invariants:
- *   - Referentially transparent: same `AcceptanceCriterion[]` in → same
- *     `AcQualityFinding[]` out, always. No hidden state, no side effects.
+ *   - Referentially transparent: same input in → same `AcQualityFinding[]` out,
+ *     always. No hidden state, no side effects.
  *   - `verify.mode === "script"` criteria are NEVER blocked by this lint — an
  *     oracle command is already bound, so the AC is measurable by construction
  *     (SPEC AC-Quantifiability Gate §Design). `verify.mode === "ai"` criteria are
@@ -180,11 +192,70 @@ function findAbstractWordMatches(statement: string): string[] {
   return hits.map((hit) => hit.word);
 }
 
+// ─── Shared per-statement primitive (SPEC-059) ─────────────────────────────
+
+/**
+ * Lints ANY free-text string for unquantified abstract quality claims — the
+ * shared per-statement PRIMITIVE both {@link lintAcQuantifiability} (AC layer)
+ * and `RequirementService.addRequirement` (PRD-requirement layer, one tier up)
+ * delegate to. Scans `text` for every {@link AC_ABSTRACT_WORDS} member; each hit
+ * with no accompanying measurable token (digit run, comparison operator,
+ * percentile marker, or unit-ish token — see {@link hasMeasurableToken})
+ * escalates to a `block` finding.
+ *
+ * Every returned finding carries `ac_id: ""` — this primitive has no notion of
+ * "which criterion/requirement" the text belongs to; the caller stamps the real
+ * id onto each finding it keeps (see {@link lintAcQuantifiability}'s
+ * `ac_id: criterion.id` reassignment below, or `RequirementService`'s
+ * `R-id: <word> → ...` message construction).
+ *
+ * @param text - Free-text statement to lint (an AC's `statement`, a
+ *   requirement's `statement`, or any equivalent prose claim)
+ * @returns Zero or more {@link AcQualityFinding}s (`ac_id: ""`), in
+ *   first-occurrence word order. Never throws — a non-string/empty `text`
+ *   yields no findings.
+ *
+ * @example
+ * lintStatement("the dashboard loads fast");
+ * // => [{ ac_id: "", word: "fast", severity: "block", message: "..." }]
+ *
+ * @example
+ * lintStatement("the dashboard P95 load < 200ms");
+ * // => []
+ */
+export function lintStatement(text: string): AcQualityFinding[] {
+  const statement = typeof text === "string" ? text : "";
+  if (statement.length === 0) {
+    return [];
+  }
+
+  const matches = findAbstractWordMatches(statement);
+  if (matches.length === 0) {
+    return [];
+  }
+
+  if (hasMeasurableToken(statement)) {
+    return [];
+  }
+
+  return matches.map((word) => ({
+    ac_id: "",
+    word,
+    severity: "block" as const,
+    message: `abstract word "${word}" has no measurable anchor — add a threshold (e.g. "P95 < 200ms"), bind a script oracle, or restate measurably`,
+  }));
+}
+
 // ─── Public entry point ─────────────────────────────────────────────────────
 
 /**
  * Lints a spec's declared acceptance criteria for unquantified abstract quality
  * claims — the deterministic (zero-LLM) heart of the AC-Quantifiability Gate.
+ * Thin per-criterion map over {@link lintStatement} (SPEC-059): skips
+ * `script`-mode criteria (oracle-bound by construction) and criteria whose
+ * `ai`-mode rubric independently carries a measurable token, BEFORE delegating
+ * the statement text to `lintStatement`, then re-stamps `ac_id` and the
+ * criterion-scoped message onto each surviving finding.
  *
  * For each criterion, scans `statement` for any {@link AC_ABSTRACT_WORDS}
  * member. A hit is escalated to a `block` finding UNLESS one of:
@@ -232,17 +303,10 @@ export function lintAcQuantifiability(criteria: AcceptanceCriterion[]): AcQualit
       continue;
     }
 
-    const matches = findAbstractWordMatches(statement);
-    if (matches.length === 0) {
-      continue;
-    }
-
-    // Oracle-bound by construction — never a block from the wordlist.
+    // Oracle-bound by construction — never a block from the wordlist. Checked
+    // BEFORE delegating to lintStatement so a script-mode AC never even runs
+    // the wordlist scan (byte-identical short-circuit to the pre-SPEC-059 code).
     if (criterion.verify?.mode === "script") {
-      continue;
-    }
-
-    if (hasMeasurableToken(statement)) {
       continue;
     }
 
@@ -250,12 +314,11 @@ export function lintAcQuantifiability(criteria: AcceptanceCriterion[]): AcQualit
       continue;
     }
 
-    for (const word of matches) {
+    for (const finding of lintStatement(statement)) {
       findings.push({
+        ...finding,
         ac_id: criterion.id,
-        word,
-        severity: "block",
-        message: `${criterion.id}: abstract word "${word}" has no measurable anchor — add a threshold (e.g. "P95 < 200ms"), bind a script oracle, or restate measurably`,
+        message: `${criterion.id}: ${finding.message}`,
       });
     }
   }

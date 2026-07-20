@@ -15,10 +15,10 @@ import { RequirementService } from "../../../src/service/requirement-service.js"
 import { AcService } from "../../../src/service/ac-service.js";
 import type { CreateDocInput, DocRecord } from "@lore/core";
 
-function harness() {
+function harness(requirementQuantifiableEnabled = true) {
   const store = new InMemoryStore();
   const corpusService = new CorpusService(store);
-  const requirementService = new RequirementService(store);
+  const requirementService = new RequirementService(store, requirementQuantifiableEnabled);
   const acService = new AcService(store);
   return { store, corpusService, requirementService, acService };
 }
@@ -154,5 +154,95 @@ describe("SPEC-055 AC-055-6 — CorpusService.computeRequirementCoverageForPrd",
     expect(cov.ok).toBe(true);
     if (!cov.ok) return;
     expect(cov.value).toEqual({ total: 0, covered: [], uncovered: [], uncovered_p0: [] });
+  });
+});
+
+// ─── SPEC-059 AC-RQ-3/AC-RQ-5 — requirement-layer quantifiability lint ──────
+
+describe("SPEC-059 AC-RQ-3/AC-RQ-5 — addRequirement quantifiability lint", () => {
+  it("HAPPY: a quantified statement is accepted", async () => {
+    const { corpusService, requirementService } = harness();
+    const prd = await makePrd(corpusService);
+    const add = await requirementService.addRequirement(prd.id, {
+      id: "R-1",
+      statement: "P95 page load stays < 200ms",
+      priority: "P0",
+    });
+    expect(add.ok).toBe(true);
+  });
+
+  it("NEGATIVE: a vague statement (abstract word, no measurable token) is rejected VALIDATION_ERROR", async () => {
+    const { corpusService, requirementService } = harness();
+    const prd = await makePrd(corpusService);
+    const add = await requirementService.addRequirement(prd.id, {
+      id: "R-1",
+      statement: "首页要高质量",
+      priority: "P0",
+    });
+    expect(add.ok).toBe(false);
+    if (add.ok) return;
+    expect(add.error.code).toBe("VALIDATION_ERROR");
+
+    // negative regression check: the requirement must NOT have been persisted
+    const list = await requirementService.listRequirements(prd.id);
+    expect(list.ok && list.value).toEqual([]);
+  });
+
+  it("ERROR: the rejection message names the requirement id and the offending word", async () => {
+    const { corpusService, requirementService } = harness();
+    const prd = await makePrd(corpusService);
+    const add = await requirementService.addRequirement(prd.id, {
+      id: "R-9",
+      statement: "the homepage must be high-quality",
+      priority: "P1",
+    });
+    expect(add.ok).toBe(false);
+    if (add.ok) return;
+    expect(add.error.code).toBe("VALIDATION_ERROR");
+    if (add.error.code !== "VALIDATION_ERROR") return;
+    expect(add.error.message).toContain("R-9");
+    expect(add.error.message).toContain("high-quality");
+    expect(add.error.message).toMatch(/measurable token|benchmark anchor/i);
+  });
+
+  it("BOUNDARY: workflow.requirement_quantifiable.enabled=false accepts a vague statement", async () => {
+    const { corpusService, requirementService } = harness(false);
+    const prd = await makePrd(corpusService);
+    const add = await requirementService.addRequirement(prd.id, {
+      id: "R-1",
+      statement: "首页要高质量",
+      priority: "P0",
+    });
+    expect(add.ok).toBe(true);
+  });
+
+  it("STATE: a pre-existing vague requirement (added while disabled) is NOT retroactively blocked by a later quantified add", async () => {
+    const { store, corpusService, requirementService: disabledService } = harness(false);
+    const prd = await makePrd(corpusService);
+
+    // Added while the lint is disabled — a vague requirement lands in the corpus.
+    const first = await disabledService.addRequirement(prd.id, {
+      id: "R-1",
+      statement: "首页要高质量",
+      priority: "P0",
+    });
+    expect(first.ok).toBe(true);
+
+    // A second RequirementService instance, pointed at the SAME store, with the
+    // lint ENABLED, adds a second, quantified requirement — the pre-existing vague
+    // R-1 must survive unchanged (only the newly-appended entry is ever linted).
+    const enabledService = new RequirementService(store, true);
+    const second = await enabledService.addRequirement(prd.id, {
+      id: "R-2",
+      statement: "P95 export time stays < 5s",
+      priority: "P1",
+    });
+    expect(second.ok).toBe(true);
+
+    const list = await enabledService.listRequirements(prd.id);
+    expect(list.ok).toBe(true);
+    if (!list.ok) return;
+    expect(list.value.map((r) => r.id).sort()).toEqual(["R-1", "R-2"]);
+    expect(list.value.find((r) => r.id === "R-1")?.statement).toBe("首页要高质量");
   });
 });

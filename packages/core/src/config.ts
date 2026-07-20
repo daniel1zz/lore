@@ -236,6 +236,24 @@ const WorkflowConfigSchema = z
      * entry activates either predicate for that spec_kind.
      */
     verification_profiles: z.record(z.enum(SPEC_KINDS), verificationProfileSchema).optional(),
+    /**
+     * Requirement-layer quantifiability lint config brake (SPEC-059 §Scope) — when
+     * `false`, `RequirementService.addRequirement` skips the `lintStatement` lint
+     * entirely and a vague requirement statement is accepted (pre-SPEC-059
+     * behavior). Absence of the whole `workflow` section, or of
+     * `requirement_quantifiable` within it, both mean enabled — same
+     * "absence = default-on" shape as `drift`/`ac_quantifiable` above. NOT a
+     * `lore gate` checkpoint sub-predicate (there is no `requirement-create`
+     * checkpoint, §Design Option B rejected) — a standalone top-level section,
+     * mirroring `drift`'s shape rather than `gates.<checkpoint>.*`.
+     */
+    requirement_quantifiable: z
+      .object({
+        /** `false` disables the requirement-statement quantifiability lint entirely. Default: true. */
+        enabled: z.boolean().default(true),
+      })
+      .strict()
+      .default({}),
   })
   .strict();
 
@@ -672,6 +690,36 @@ export function resolveStalenessDefaults(
  */
 export function resolveDriftEnabled(config: LoreConfig | undefined): boolean {
   return (config?.workflow ?? WorkflowConfigSchema.parse({})).drift.enabled;
+}
+
+/**
+ * Resolve the effective `workflow.requirement_quantifiable.enabled` config brake
+ * (SPEC-059 §Scope) from an optional LoreConfig. Absence of the whole config, the
+ * `workflow` section, `workflow.requirement_quantifiable`, or its `enabled` key ALL
+ * mean "enabled" — only an EXPLICIT `enabled: false` disables the lint. Uses FULL
+ * optional chaining (mirrors {@link resolveGateEnabled}/{@link
+ * resolveAcQuantifiableGateEnabled}'s `!== false` style) rather than {@link
+ * resolveDriftEnabled}'s "assume the whole `workflow` object is Zod-shaped" shortcut
+ * — this resolver is called UNCONDITIONALLY inside `createApp` (unlike
+ * `resolveDriftEnabled`/`resolveStalenessDefaults`, which are only ever reached via
+ * `loadLoreApp()`'s fully-Zod-parsed config), so it must also tolerate a raw,
+ * hand-built `LoreConfig` object a test fixture constructs without running it
+ * through `LoreConfigSchema.parse` (e.g. `{workflow: {gates: {...}}} as unknown as
+ * LoreConfig`, several `.bun.test.ts` fixtures across this codebase) — such an
+ * object's `workflow` key is present but omits `requirement_quantifiable` entirely,
+ * which would throw `Cannot read properties of undefined` under the "assume
+ * Zod-shaped" pattern instead of correctly defaulting to enabled.
+ *
+ * @param config - Parsed LoreConfig, or undefined when no config file was loaded
+ * @returns `false` iff `workflow.requirement_quantifiable.enabled === false`; `true` otherwise
+ * @example
+ *   resolveRequirementQuantifiableEnabled(undefined) // => true
+ *   resolveRequirementQuantifiableEnabled({
+ *     ..., workflow: { requirement_quantifiable: { enabled: false } },
+ *   }) // => false
+ */
+export function resolveRequirementQuantifiableEnabled(config: LoreConfig | undefined): boolean {
+  return config?.workflow?.requirement_quantifiable?.enabled !== false;
 }
 
 // ─── Pure Parse Helpers ────────────────────────────────────────────────────

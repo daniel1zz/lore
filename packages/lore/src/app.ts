@@ -36,6 +36,7 @@ import {
   resolveVerifyDefaultTimeoutMs,
   resolveVerifyEnvConfig,
   resolveVerifyRequireCommandApproval,
+  resolveRequirementQuantifiableEnabled,
   type LoreConfig,
   type VerifyEnvConfig,
   AiConfigSchema,
@@ -383,6 +384,7 @@ function buildAppFromSqlite(
   verifyRequireCommandApproval: boolean = true,
   repoRoot: string = process.cwd(),
   gateEnforcer: GateEnforcer = new GateEnforcer(undefined),
+  requirementQuantifiableEnabled: boolean = true,
 ): App {
   // reason: SPEC-024 §9.1 — callerSurface must be mutable so adapters can set it at startup.
   // Using a let variable closed over by the getter/setter ensures reads always see the current
@@ -521,7 +523,10 @@ function buildAppFromSqlite(
     // same shape as PhaseService. SPEC-038 §4, §6, §9.1.
     acService: new AcService(store),
     // reason: RequirementService is store-only, same shape as AcService (SPEC-055).
-    requirementService: new RequirementService(store),
+    // 2nd arg wires the resolved workflow.requirement_quantifiable.enabled config
+    // brake (SPEC-059 §Scope) — one resolution path (resolveRequirementQuantifiableEnabled
+    // at createApp), mirroring claimTtlMinutes's identical "resolve once, thread down" shape.
+    requirementService: new RequirementService(store, requirementQuantifiableEnabled),
     // reason: UatService takes narrow injected ports (SPEC-054) — the guarded
     // createUatDoc seam, resolve, and store.addLink — never the full CorpusService.
     uatService: new UatService({
@@ -608,6 +613,7 @@ function buildAppFromTurso(
   verifyRequireCommandApproval: boolean = true,
   repoRoot: string = process.cwd(),
   gateEnforcer: GateEnforcer = new GateEnforcer(undefined),
+  requirementQuantifiableEnabled: boolean = true,
 ): App {
   // reason: SPEC-024 §9.1 — same mutable callerSurface pattern as buildAppFromSqlite.
   let _callerSurface: CallerSurface = "cli";
@@ -726,7 +732,10 @@ function buildAppFromTurso(
     // same shape as PhaseService. SPEC-038 §4, §6, §9.1.
     acService: new AcService(store),
     // reason: RequirementService is store-only, same shape as AcService (SPEC-055).
-    requirementService: new RequirementService(store),
+    // 2nd arg wires the resolved workflow.requirement_quantifiable.enabled config
+    // brake (SPEC-059 §Scope) — one resolution path (resolveRequirementQuantifiableEnabled
+    // at createApp), mirroring claimTtlMinutes's identical "resolve once, thread down" shape.
+    requirementService: new RequirementService(store, requirementQuantifiableEnabled),
     // reason: UatService takes narrow injected ports (SPEC-054) — the guarded
     // createUatDoc seam, resolve, and store.addLink — never the full CorpusService.
     uatService: new UatService({
@@ -851,6 +860,10 @@ export function createApp(
   // to the HARDENED default (true) when config/verify section absent.
   const verifyRequireCommandApproval = resolveVerifyRequireCommandApproval(config);
 
+  // Requirement-layer quantifiability lint config brake (SPEC-059 §Scope) — defaults
+  // to enabled (true) when config/workflow section absent.
+  const requirementQuantifiableEnabled = resolveRequirementQuantifiableEnabled(config);
+
   // reason: dbPath is always "<repoRoot>/.lore/lore.db" (findLoreDbPath's contract,
   // adapters/cli/utils.ts) — two levels up recovers the project root `lore verify`
   // spawns commands from (SPEC-039 §2). Computed here rather than added as a new
@@ -890,6 +903,7 @@ export function createApp(
       verifyRequireCommandApproval,
       repoRoot,
       gateEnforcer,
+      requirementQuantifiableEnabled,
     );
   }
 
@@ -931,6 +945,7 @@ export function createApp(
         verifyRequireCommandApproval,
         repoRoot,
         gateEnforcer,
+        requirementQuantifiableEnabled,
       ),
     };
   } catch (e) {
