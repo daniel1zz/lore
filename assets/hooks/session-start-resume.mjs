@@ -20,7 +20,6 @@
  * Phase E: lore bootstrap injection (corpus pointer set, when the resolved
  *          corpus root — main checkout for a linked worktree, cwd otherwise —
  *          has .lore/)
- * Phase F: test health check (silent, non-blocking)
  *
  * Bootstrap is hook-injected (was lazy-loaded by AI). Rationale: SessionStart
  * is low-frequency, `lore bootstrap` is a slim progressive-disclosure pointer
@@ -39,7 +38,7 @@ import {
 } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { resolveSessionId } from './lib/turn-state.mjs';
 
 // No longer read for a roster (removed 2026-07-17 — harness lists agents
@@ -241,112 +240,6 @@ ${json}
   }
 }
 
-// ── Phase F: Test health check (silent, non-blocking) ─────────────
-
-/**
- * Run a command in its own detached process group, with a hard timeout that
- * SIGKILLs the WHOLE group. spawnSync's `timeout` only signals the direct
- * child (bash), orphaning every grandchild — a vitest run forks one worker
- * per CPU, and each orphaned fork keeps burning CPU/memory indefinitely
- * (observed 2026-07-17: 11 orphaned `node (vitest N)` workers at full CPU
- * for ~1h, machine-wide memory exhaustion). detached + kill(-pid) closes
- * that leak: the kill reaches bash, the test runner, AND its forks.
- */
-function runInKillableGroup(cmd, args, { cwd, env, timeoutMs }) {
-  return new Promise((resolvePromise) => {
-    let stdout = '';
-    let stderr = '';
-    let timedOut = false;
-    let child;
-    try {
-      child = spawn(cmd, args, {
-        cwd, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'],
-      });
-    } catch {
-      resolvePromise({ status: null, signal: null, timedOut, stdout, stderr });
-      return;
-    }
-    child.stdout.on('data', (d) => { stdout += d; });
-    child.stderr.on('data', (d) => { stderr += d; });
-    const timer = setTimeout(() => {
-      timedOut = true;
-      try { process.kill(-child.pid, 'SIGKILL'); } catch { /* group already gone */ }
-    }, timeoutMs);
-    child.on('error', () => {
-      clearTimeout(timer);
-      resolvePromise({ status: null, signal: null, timedOut, stdout, stderr });
-    });
-    child.on('close', (status, signal) => {
-      clearTimeout(timer);
-      resolvePromise({ status, signal, timedOut, stdout, stderr });
-    });
-  });
-}
-
-let testHealthBlock = '';
-{
-  const projectDir = process.cwd();
-  const pkgPath = join(projectDir, 'package.json');
-  if (existsSync(pkgPath) && projectDir !== join(homedir(), '.claude')
-      && !projectDir.startsWith(join(homedir(), '.claude') + '/')) {
-    try {
-      const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
-      const scripts = pkg.scripts || {};
-      const deps = { ...(pkg.devDependencies || {}), ...(pkg.dependencies || {}) };
-      const hasTestRunner = deps.vitest || deps.jest || deps.mocha || scripts.test;
-
-      if (hasTestRunner) {
-        // `--run` is a vitest-only flag (disables watch mode); appending it to
-        // arbitrary test scripts breaks non-vitest runners (e.g. `turbo run test`
-        // rejects it with a CLI usage error → false FAILING alert).
-        let testCmd = 'npm test 2>&1';
-        if (deps.vitest) testCmd = 'npx vitest --run --reporter=verbose 2>&1';
-        else if (deps.jest) testCmd = 'npx jest --forceExit 2>&1';
-        else if (/\bvitest\b/.test(String(scripts.test || ''))) testCmd = 'npm test -- --run 2>&1';
-
-        // VITEST_MAX_WORKERS bounds fork count during the health-check window
-        // (vitest reads it in resolveConfig, overriding config maxWorkers);
-        // harmless for non-vitest runners. Full-CPU forking here amplified
-        // machine-wide memory pressure when sessions started concurrently.
-        // CLAUDE_TEST_HEALTH_TIMEOUT_MS is a test-only override (regression
-        // tests exercise the timeout path without waiting 30s).
-        const timeoutMs = Number(process.env.CLAUDE_TEST_HEALTH_TIMEOUT_MS || 30000);
-        const result = await runInKillableGroup('bash', ['-c', testCmd], {
-          cwd: projectDir,
-          // NODE_OPTIONS caps the runner's MAIN process heap too (workers are
-          // additionally capped by the project's own vitest execArgv config);
-          // without it each health-check run could balloon toward Node's
-          // ~4GB default old-space ceiling.
-          env: {
-            ...process.env,
-            VITEST_MAX_WORKERS: '2',
-            NODE_OPTIONS: '--max-old-space-size=2048',
-          },
-          timeoutMs,
-        });
-
-        if (result.timedOut) {
-          testHealthBlock = `## ⚠️ Test Health Alert
-
-Test suite timed out (${Math.round(timeoutMs / 1000)}s). May indicate hanging tests or missing test teardown.`;
-        } else if (result.status !== 0 && !result.signal) {
-          const output = (result.stdout || '') + (result.stderr || '');
-          const lastLines = output.split('\n').filter(Boolean).slice(-15).join('\n');
-          testHealthBlock = `## ⚠️ Test Health Alert
-
-Tests are currently FAILING in this project. Fix before adding new features.
-
-\`\`\`
-${lastLines}
-\`\`\`
-
-Action: Run \`npm test\` / \`npx vitest --run\` to see full output. Prioritize fixing existing failures.`;
-        }
-      }
-    } catch { /* fail-silent — test health is advisory */ }
-  }
-}
-
 // ── Degradation report — only for critical component failures ─────
 let degradationBlock = '';
 if (degradations.length > 0) {
@@ -363,9 +256,9 @@ Critical hook component(s) unavailable this session. Some workflow features may 
 
 ${items}
 
-Action: Check installation. Non-critical features (agent roster, test health) are unaffected.`;
+Action: Check installation. Non-critical features are unaffected.`;
 }
 
-// ── Compose (order: workflow → seat → bootstrap → degradation → testHealth) ─
-const parts = [workflowBlock, seatBlock, bootstrapBlock, degradationBlock, testHealthBlock].filter(Boolean);
+// ── Compose (order: workflow → seat → bootstrap → degradation) ─
+const parts = [workflowBlock, seatBlock, bootstrapBlock, degradationBlock].filter(Boolean);
 emit(parts.join('\n\n'));
