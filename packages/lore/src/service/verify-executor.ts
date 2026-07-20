@@ -45,10 +45,10 @@
  *     `migration-service.ts`'s "cannot read source directory" precedent) — no
  *     SPEC-039-specific LoreError variant exists (core is out of this task's scope).
  *   - `outputTail` is stdout+stderr CONCATENATED then tail-truncated to the last 4000
- *     chars (matches `evidenceEntrySchema.output_tail`'s cap and `adapters/cli/
- *     commands/evidence.ts`'s `tailChars` "keep the most recent output" convention —
- *     re-implemented locally rather than imported, since services must not import
- *     from adapters/).
+ *     chars (matches `evidenceEntrySchema.output_tail`'s cap) via `@lore/core`'s
+ *     code-point-safe `tailChars` (BUG-001 fix, `packages/core/src/truncate.ts`) — the
+ *     SAME helper `adapters/cli/commands/evidence.ts` and `commands/handoff.ts` use,
+ *     never a locally re-implemented copy.
  *   - Never throws. Every path returns `Result<VerifyExecutionResult, LoreError>`.
  *   - `spec.env` (SPEC-039 §M2, when present) REPLACES the spawned process's
  *     environment entirely — `Bun.spawn({ env })` does not merge with `process.env`.
@@ -60,7 +60,7 @@
  * Source: SPEC-039 §2 D6; §3; §4 AC-VRF-5, AC-VRF-6; §M2 (env allowlist)
  */
 
-import { err, ok } from "@lore/core";
+import { err, ok, tailChars } from "@lore/core";
 import type { LoreError, Result } from "@lore/core";
 import type { VerifySpawnSpec, VerifyExecutionResult } from "./verify-spawn.js";
 
@@ -68,11 +68,6 @@ export type { VerifyExecutionResult } from "./verify-spawn.js";
 
 /** Truncate to the last N chars — keeps the most recent (most relevant) output. */
 const OUTPUT_TAIL_MAX_CHARS = 4000;
-
-/** Mirrors adapters/cli/commands/evidence.ts's `tailChars` convention (not imported — layering). */
-function tailChars(text: string, max: number): string {
-  return text.length > max ? text.slice(text.length - max) : text;
-}
 
 /**
  * Best-effort signal to the WHOLE process group led by `pid` (SPEC-039 §2 D6).
