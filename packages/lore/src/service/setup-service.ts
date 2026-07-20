@@ -647,13 +647,30 @@ function computeAncestorDirsDeepestFirst(targetDir: string, removedPaths: string
 }
 
 /**
+ * Placeholder token a `kind: "settings-hook"` asset's entry `command` strings
+ * may carry in place of the real target dir (emitted by `RealAssetSource`,
+ * which has no knowledge of the eventual install target — see
+ * `@lore/core`'s `distribution-hooks.ts` doc comment). Substituted for the
+ * real `targetDir` HERE, after JSON-parsing and BEFORE `mergeSettings` — so
+ * the merged `command` strings (`mergeSettings`' identity key) are stable
+ * across install/uninstall for a given `targetDir`.
+ */
+const CLAUDE_DIR_PLACEHOLDER = "{{CLAUDE_DIR}}";
+
+/** Replaces every occurrence of {@link CLAUDE_DIR_PLACEHOLDER} in `command` with `targetDir`. A no-op when the placeholder is absent. */
+function resolveClaudeDirPlaceholder(command: string, targetDir: string): string {
+  return command.split(CLAUDE_DIR_PLACEHOLDER).join(targetDir);
+}
+
+/**
  * Resolves the FINAL content + sha256 for every payload file: a `kind:
- * "settings-hook"` entry's `content` is parsed as `SettingsHookEntry[]` and
- * merged (via `@lore/core`'s `mergeSettings`) against the target's ON-DISK
- * `settings.json` (read through `reader`); every other kind's `content` is
- * used verbatim. `sha256` is ALWAYS recomputed here over the resulting
- * content (invariant I5) — the raw `AssetPayload`'s own `sha256` field is
- * never trusted.
+ * "settings-hook"` entry's `content` is parsed as `SettingsHookEntry[]`,
+ * each entry's `command` has {@link CLAUDE_DIR_PLACEHOLDER} substituted for
+ * the real `targetDir`, and the result is merged (via `@lore/core`'s
+ * `mergeSettings`) against the target's ON-DISK `settings.json` (read
+ * through `reader`); every other kind's `content` is used verbatim. `sha256`
+ * is ALWAYS recomputed here over the resulting content (invariant I5) — the
+ * raw `AssetPayload`'s own `sha256` field is never trusted.
  */
 async function resolvePayload(
   targetDir: string,
@@ -675,6 +692,11 @@ async function resolvePayload(
           value: file.content.slice(0, 200),
         });
       }
+
+      loreEntries = loreEntries.map((entry) => ({
+        ...entry,
+        command: resolveClaudeDirPlaceholder(entry.command, targetDir),
+      }));
 
       const existingRaw = await reader.read(path.join(targetDir, file.path));
       const mergeResult = mergeSettings({ existingRaw, loreEntries });

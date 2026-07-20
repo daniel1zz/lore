@@ -18,6 +18,18 @@
  *     is a separate distribution concern (per-repo project scaffold),
  *     vendored by `ProjectSetupService`/`setup-project-flow.ts`, not this
  *     global-machine installer.
+ *   - After walking the four directories, `load()` APPENDS exactly ONE
+ *     synthetic `kind: "settings-hook"` entry (`path: "settings.json"`) built
+ *     from `@lore/core`'s `buildHookSettingsEntries("{{CLAUDE_DIR}}")` —
+ *     this port has no knowledge of the eventual install target, so the
+ *     hook commands it emits carry the literal `"{{CLAUDE_DIR}}"` placeholder
+ *     token; `SetupService.resolvePayload` substitutes the real `targetDir`
+ *     before merging (see that module's doc comment, and
+ *     `distribution-hooks.ts`'s "does NOT know or care" invariant). This is
+ *     NOT a real file on disk under `assets/` — there is no `settings.json`
+ *     in the walked tree — so it is exempt from `assets-ssot.test.ts`'s
+ *     `DECLARED_FILES` (a real-file manifest); `real-setup-ports.test.ts`
+ *     tracks it directly against this port's own output instead.
  *   - `AssetFile.path` is POSIX-joined and relative to `assetsRoot` (e.g.
  *     `skills/lore/SKILL.md`) — this becomes the path under the INSTALL
  *     target dir (e.g. `~/.claude/skills/lore/SKILL.md`), never absolute.
@@ -48,9 +60,12 @@ import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-import { err, ok } from "@lore/core";
+import { err, ok, buildHookSettingsEntries } from "@lore/core";
 import type { Result, LoreError } from "@lore/core";
 import type { AssetFile, AssetPayload, SetupEntryKind } from "@lore/core";
+
+/** Placeholder token substituted for the real target dir by `SetupService.resolvePayload`. */
+const CLAUDE_DIR_PLACEHOLDER = "{{CLAUDE_DIR}}";
 
 import type { AssetSource } from "../service/setup-service.js";
 
@@ -141,6 +156,14 @@ export class RealAssetSource implements AssetSource {
         });
       }
     }
+
+    const settingsHookContent = JSON.stringify(buildHookSettingsEntries(CLAUDE_DIR_PLACEHOLDER), null, 2);
+    files.push({
+      path: "settings.json",
+      kind: "settings-hook",
+      content: settingsHookContent,
+      sha256: sha256Hex(settingsHookContent),
+    });
 
     return ok({ files });
   }

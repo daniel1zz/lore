@@ -429,7 +429,16 @@ async function realAssemble(): Promise<Result<PublishPlan, LoreError>> {
   const assetSource = new RealAssetSource(join(REPO_ROOT, "assets"));
   const loaded = await assetSource.load();
   if (!loaded.ok) return loaded;
-  const assetFiles = loaded.value.files.map((file) => `assets/${file.path}`);
+  // `RealAssetSource.load()` appends one SYNTHETIC `kind: "settings-hook"`
+  // entry (`settings.json`, the lore-setup hook-registration payload,
+  // SPEC-046 2026-07-20 amendment) that has no corresponding real file on
+  // disk under `assets/` — it is install-time-COMPUTED policy content
+  // (`@lore/core`'s `buildHookSettingsEntries`), not a packageable asset
+  // file. Filter it out before mapping to `copyFileSync` source paths, or
+  // staging fails loud with ENOENT on `assets/settings.json`.
+  const assetFiles = loaded.value.files
+    .filter((file) => file.kind !== "settings-hook")
+    .map((file) => `assets/${file.path}`);
 
   const planResult = buildPublishPlan({
     version: versionResult.value,

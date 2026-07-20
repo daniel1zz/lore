@@ -383,6 +383,13 @@ const DECLARED_FILES_IN_SCOPE = [
   "hooks/lib/turn-state.mjs",
   "governance/corpus-workflow.md",
   "governance/seat-briefing.md",
+  // settings.json — SYNTHETIC settings-hook entry (no real file on disk under
+  // assets/), appended by RealAssetSource.load() from
+  // buildHookSettingsEntries("{{CLAUDE_DIR}}") (settings.json auto-registration
+  // amendment, 2026-07-20). Not tracked by assets-ssot.test.ts's DECLARED_FILES
+  // (a real-file manifest) — this suite is the sole place this synthetic entry
+  // is asserted against RealAssetSource's own output.
+  "settings.json",
 ].sort();
 
 const DECLARED_EXECUTABLE_PATHS = new Set([
@@ -470,16 +477,40 @@ describe("RealAssetSource — HAPPY (real repo assets/)", () => {
     expect(actualPaths).toEqual(DECLARED_FILES_IN_SCOPE);
   });
 
-  it("assigns the correct kind per top-level directory", async () => {
+  it("assigns the correct kind per top-level directory (carve-out: the synthetic settings.json entry has no top-level directory)", async () => {
     const source = new RealAssetSource(REPO_ASSETS_ROOT);
     const result = await source.load();
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
     for (const file of result.value.files) {
+      if (file.path === "settings.json") {
+        expect(file.kind).toBe("settings-hook");
+        continue;
+      }
       const topDir = file.path.split("/")[0] as string;
       expect(file.kind).toBe(KIND_BY_TOP_DIR[topDir]);
     }
+  });
+
+  it("appends exactly one synthetic settings.json entry whose content is the {{CLAUDE_DIR}}-placeholder hook-entry array", async () => {
+    const source = new RealAssetSource(REPO_ASSETS_ROOT);
+    const result = await source.load();
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const settingsFiles = result.value.files.filter((f) => f.path === "settings.json");
+    expect(settingsFiles).toHaveLength(1);
+    const settingsFile = settingsFiles[0] as (typeof result.value.files)[number];
+    expect(settingsFile.kind).toBe("settings-hook");
+    expect(settingsFile.executable).toBeUndefined();
+
+    const parsed = JSON.parse(settingsFile.content) as Array<{ event: string; matcher?: string; command: string }>;
+    expect(parsed.length).toBeGreaterThan(0);
+    for (const entry of parsed) {
+      expect(entry.command).toContain("{{CLAUDE_DIR}}/hooks/");
+    }
+    expect(settingsFile.sha256).toBe(sha256Hex(settingsFile.content));
   });
 
   it("marks exactly the declared .sh gate hooks + executable .mjs hooks as executable:true", async () => {
@@ -531,7 +562,9 @@ describe("RealAssetSource — HAPPY (synthetic tree, path mapping)", () => {
 
     const byPath = new Map(result.value.files.map((f) => [f.path, f] as const));
     expect([...byPath.keys()].sort()).toEqual(
-      ["skills/foo/SKILL.md", "agents/bar.md", "hooks/baz.sh", "hooks/qux.mjs", "governance/gov.md"].sort(),
+      // load() unconditionally appends the synthetic settings.json entry
+      // (see the top-level describe block for its own dedicated assertions).
+      ["skills/foo/SKILL.md", "agents/bar.md", "hooks/baz.sh", "hooks/qux.mjs", "governance/gov.md", "settings.json"].sort(),
     );
 
     const skillFile = byPath.get("skills/foo/SKILL.md");
@@ -558,7 +591,7 @@ describe("RealAssetSource — HAPPY (synthetic tree, path mapping)", () => {
 // ─── RealAssetSource — BOUNDARY (empty subdir) ─────────────────────────────
 
 describe("RealAssetSource — BOUNDARY (empty declared subdirectory)", () => {
-  it("returns zero files for an empty subdirectory, without error", async () => {
+  it("returns zero WALKED files for an empty subdirectory (plus the always-appended synthetic settings.json entry), without error", async () => {
     const root = makeScratchDir("asset-source-empty-subdir-");
     mkdirSync(join(root, "skills"), { recursive: true }); // empty — no files inside
     mkdirSync(join(root, "agents"), { recursive: true });
@@ -571,7 +604,7 @@ describe("RealAssetSource — BOUNDARY (empty declared subdirectory)", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    expect(result.value.files.map((f) => f.path)).toEqual(["agents/only.md"]);
+    expect(result.value.files.map((f) => f.path).sort()).toEqual(["agents/only.md", "settings.json"].sort());
   });
 });
 
