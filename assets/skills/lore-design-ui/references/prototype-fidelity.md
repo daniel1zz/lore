@@ -54,7 +54,7 @@ Every UI implementation task MUST carry these as AC (each runnable, not vague):
 | **A11y** | `axe-core --severity serious+` at the real route | 0 violations |
 | **Markup parity** (for canonical components) | `grep -F "<canonical markup>" <impl-file>` | matches the SSOT block from `ui-standards.md §11.x` |
 
-All four MUST appear as separate AC lines in the implementation task — `~/.claude/skills/plan/references/ac-quality.md` banned-verbs check applies.
+All four MUST appear as separate AC lines in the implementation task — `~/.claude/skills/lore-plan/references/ac-quality.md` banned-verbs check applies.
 
 ### 4. Prototype-parity-check terminal task per surface
 
@@ -62,7 +62,7 @@ For each surface that has a prototype file, the leaf-task chain extends from 3 t
 ```
 test → impl → wire → prototype-parity-check
 ```
-See `~/.claude/skills/plan/references/phase-decomposition.md` Integration Task Mandate. The 4th task's sole job is the visual-parity oracle above; it runs AFTER integration so the screenshot reflects the real production route.
+See `~/.claude/skills/lore-plan/references/phase-decomposition.md` Integration Task Mandate. The 4th task's sole job is the visual-parity oracle above; it runs AFTER integration so the screenshot reflects the real production route.
 
 ### 5. Subagent prompt requirement
 
