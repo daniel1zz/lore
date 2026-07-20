@@ -1,5 +1,5 @@
 /**
- * Tests for @lore/core ac-quality — lintAcQuantifiability, AC_ABSTRACT_WORDS.
+ * Tests for @lore/core ac-quality — lintAcQuantifiability, lintStatement, AC_ABSTRACT_WORDS.
  * Pure function, no IO.
  *
  * Six-dimension coverage for this file:
@@ -7,7 +7,8 @@
  *               the same statement rewritten with a numeric threshold clears;
  *               script-mode ACs are never blocked (oracle-bound by
  *               construction); ai-mode ACs are cleared when the rubric (not
- *               the statement) carries the threshold
+ *               the statement) carries the threshold; lintStatement(text)
+ *               (SPEC-059 AC-RQ-1) mirrors the same behavior on bare text
  *   NEGATIVE:   ai-mode AC blocked when BOTH statement and rubric lack a
  *               measurable token
  *   BOUNDARY:   abstract word appearing only as a substring of a larger word
@@ -19,14 +20,22 @@
  *   REGRESSION: dogfood-self-application (AC-ACQ-6) and false-positive-bound
  *               (AC-ACQ-7) — this lint must never flag its own governing
  *               spec's ACs, nor representative oracle-bound/quantified ACs
- *               drawn from the corpus's existing conventions
+ *               drawn from the corpus's existing conventions; this file's
+ *               pre-SPEC-059 assertions are the byte-identical regression
+ *               fixture for `lintAcQuantifiability`'s SPEC-059 refactor onto
+ *               `lintStatement` (AC-RQ-2) — unchanged and still green proves it
  *
  * @spec_ref SPEC AC-Quantifiability Gate §Scope, §Acceptance Criteria
- *   AC-ACQ-1, AC-ACQ-6, AC-ACQ-7
+ *   AC-ACQ-1, AC-ACQ-6, AC-ACQ-7; SPEC-059 §Acceptance Criteria AC-RQ-1, AC-RQ-2
  */
 
 import { describe, it, expect } from "vitest";
-import { lintAcQuantifiability, AC_ABSTRACT_WORDS, type AcQualityFinding } from "../../src/ac-quality.js";
+import {
+  lintAcQuantifiability,
+  lintStatement,
+  AC_ABSTRACT_WORDS,
+  type AcQualityFinding,
+} from "../../src/ac-quality.js";
 import type { AcceptanceCriterion } from "../../src/acceptance.js";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -214,6 +223,40 @@ describe("lintAcQuantifiability — false-positive-bound", () => {
     const findings = lintAcQuantifiability(representativeCorpusAcs);
     const blocks: AcQualityFinding[] = findings.filter((f) => f.severity === "block");
     expect(blocks).toHaveLength(0);
+  });
+});
+
+// ─── SPEC-059 AC-RQ-1: lintStatement primitive ──────────────────────────────
+
+describe("lintStatement — shared per-statement primitive (AC-RQ-1)", () => {
+  it("returns >=1 finding for an abstract word with no measurable token", () => {
+    const findings = lintStatement("首页要高质量");
+    expect(findings.length).toBeGreaterThanOrEqual(1);
+    expect(findings.some((f) => f.word === "高质量" && f.severity === "block")).toBe(true);
+  });
+
+  it("returns 0 findings for a quantified string", () => {
+    const findings = lintStatement("the dashboard P95 load < 200ms");
+    expect(findings).toEqual([]);
+  });
+
+  it("stamps ac_id as the empty string — the caller supplies the real id", () => {
+    const findings = lintStatement("keep the onboarding flow simple");
+    expect(findings[0]?.ac_id).toBe("");
+  });
+
+  it("never throws on a non-string/empty input", () => {
+    expect(() => lintStatement("")).not.toThrow();
+    expect(lintStatement("")).toEqual([]);
+    // @ts-expect-error — deliberately passing a non-string to prove no throw
+    expect(() => lintStatement(undefined)).not.toThrow();
+  });
+
+  it("lintAcQuantifiability's per-criterion findings are consistent with lintStatement on the same text", () => {
+    const statement = "the export completes fast and stays simple";
+    const viaAc = lintAcQuantifiability([human("AC-X", statement)]);
+    const viaStatement = lintStatement(statement);
+    expect(viaAc.map((f) => f.word)).toEqual(viaStatement.map((f) => f.word));
   });
 });
 

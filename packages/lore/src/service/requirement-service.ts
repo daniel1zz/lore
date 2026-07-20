@@ -16,13 +16,25 @@
  * @invariant `addRequirement` validates the FULL candidate array (existing + new) via
  *   `prdRequirementsSchema` in one `safeParse` — covers id grammar, priority enum, the
  *   100-entry cap AND array-level unique-id, simultaneously (mirrors `AcService.addCriterion`).
+ * @invariant `addRequirement` ALSO rejects an unquantified abstract-quality claim in the
+ *   NEWLY-ADDED requirement's `statement` (SPEC-059 §Design, Option A: service-layer lint,
+ *   no new gate) — the deterministic, zero-LLM `lintStatement` primitive (`@lore/core`,
+ *   ac-quality.ts — the SAME primitive `AcService.addCriterion`'s `lintAcQuantifiability`
+ *   delegates to) runs AFTER shape validation succeeds and BEFORE the CAS write, so a
+ *   `lore requirement add` with an unquantified statement never reaches the store. Only the
+ *   newly-appended entry is linted — a pre-existing vague requirement (added before this
+ *   check existed, or written while `workflow.requirement_quantifiable.enabled: false`) is
+ *   NEVER retroactively blocked, mirroring `AcService.addCriterion`'s identical "lint only
+ *   the new entry" scoping. `workflow.requirement_quantifiable.enabled: false`
+ *   (`resolveRequirementQuantifiableEnabled`, `@lore/core`) disables this check entirely —
+ *   the write then proceeds exactly as it did pre-SPEC-059.
  * @invariant `removeRequirement` fails loud when a descendant spec AC still lists the id in
  *   its `requirement_refs`, UNLESS `opts.force` — a forced removal leaves those refs dangling
  *   (they simply cover nothing) rather than silently rewriting AC declarations.
  * @invariant Writes are CAS-guarded and produce exactly one insertVersion + one audit entry.
  *
  * Side-effect class: IO (reads and writes via StoreInterface).
- * Source: SPEC-055 §Scope, §Design D2.
+ * Source: SPEC-055 §Scope, §Design D2; SPEC-059 §Scope, §Design (requirement-layer lint).
  */
 
 import {
@@ -30,6 +42,7 @@ import {
   ok,
   prdRequirementsSchema,
   specAcceptanceCriteriaSchema,
+  lintStatement,
   type Requirement,
   type Result,
   type LoreError,
@@ -46,7 +59,18 @@ export interface RemoveRequirementOpts {
 }
 
 export class RequirementService {
-  constructor(private readonly store: StoreInterface) {}
+  /**
+   * @param store - Storage abstraction (same instance passed to AcService)
+   * @param requirementQuantifiableEnabled - Resolved `workflow.requirement_quantifiable.enabled`
+   *   (SPEC-059 §Scope) — `false` disables `addRequirement`'s quantifiability lint entirely.
+   *   Defaults to `true` (the schema default, `resolveRequirementQuantifiableEnabled(undefined)`)
+   *   so a bare `new RequirementService(store)` unit-test construction stays gated ON, matching
+   *   production's default-on behavior; `app.ts` wires the resolved config value explicitly.
+   */
+  constructor(
+    private readonly store: StoreInterface,
+    private readonly requirementQuantifiableEnabled: boolean = true,
+  ) {}
 
   // ── addRequirement ──────────────────────────────────────────────────────────
 
@@ -78,6 +102,34 @@ export class RequirementService {
         message: issue !== undefined ? issue.message : "Invalid requirement",
         value: requirement,
       });
+    }
+
+    // reason: SPEC-059 §Design — service-layer lint (Option A), the requirement-layer
+    // mirror of AcService.addCriterion's SPEC-052 wiring. Lint ONLY the newly-appended
+    // entry (`parsed.data`'s last element — Zod array parsing preserves element order,
+    // `candidate` never reorders `existing`) via the SAME zero-LLM `lintStatement`
+    // primitive `lintAcQuantifiability` delegates to, never a second wordlist/heuristic.
+    // A pre-existing vague requirement is NEVER retroactively blocked. Skipped entirely
+    // when `workflow.requirement_quantifiable.enabled: false`. Enumerates ONE
+    // `R-id: <word> → add a measurable token or benchmark anchor` line per offending
+    // word (SPEC-059 §Design "enumerating ... per finding") — a statement carrying
+    // multiple abstract words fails with every offender named, not just the first.
+    if (this.requirementQuantifiableEnabled) {
+      const newRequirement = parsed.data[parsed.data.length - 1];
+      if (newRequirement !== undefined) {
+        const findings = lintStatement(newRequirement.statement);
+        if (findings.length > 0) {
+          const message = findings
+            .map((f) => `${newRequirement.id}: ${f.word} → add a measurable token or benchmark anchor`)
+            .join("; ");
+          return err({
+            code: "VALIDATION_ERROR",
+            field: `requirements.${newRequirement.id}`,
+            message,
+            value: requirement,
+          });
+        }
+      }
     }
 
     const writeResult = await this.writeRequirements(prd, parsed.data, "add");
