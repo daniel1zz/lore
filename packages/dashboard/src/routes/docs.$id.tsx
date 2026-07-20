@@ -3,8 +3,17 @@
  * Path: /docs/$id
  * Write mode: wires onMutated callback so DocDetail can invalidate the query
  *   cache after saves/status-transitions/link changes (SPEC-022).
+ * Concurrency: tracks DocDetail's edit-session state (via onEditingChange) and
+ *   disables refetchOnWindowFocus/refetchOnReconnect on this doc's query while
+ *   an edit session is open — ASYNC2D-001 defense in depth. This does NOT
+ *   change non-editing refetch behavior (both flip back to the query-client
+ *   default `true` the moment editing ends); the primary guarantee against a
+ *   background refetch corrupting a Save's If-Match version is DocDetail's own
+ *   `editBaseVersion` freeze (src/lib/edit-session.ts), which holds even if
+ *   this route were to stop wiring the callback.
  */
 
+import { useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DocDetail } from "@/components/DocDetail";
@@ -19,11 +28,14 @@ function DocPage(): React.ReactElement {
   const { id } = Route.useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [isEditingDoc, setIsEditingDoc] = useState(false);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["doc", id],
     queryFn: () => apiGetDoc(id, { resolveMdx: true }),
     enabled: id.length > 0,
+    refetchOnWindowFocus: !isEditingDoc,
+    refetchOnReconnect: !isEditingDoc,
   });
 
   function handleNavigate(targetId: string): void {
@@ -100,6 +112,7 @@ function DocPage(): React.ReactElement {
       onNavigateHome={() => void navigate({ to: "/" })}
       onMutated={handleMutated}
       onDeleted={handleDeleted}
+      onEditingChange={setIsEditingDoc}
     />
   );
 }

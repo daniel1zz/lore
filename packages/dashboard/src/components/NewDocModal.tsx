@@ -7,6 +7,15 @@
  *   - type-specific fields shown/hidden based on selected type.
  *   - Disabled when isPending; success closes modal and calls onSuccess.
  *   - Pressing Escape or clicking backdrop closes modal.
+ *   - handleSubmit guards on `isPending` FIRST, before any validation or
+ *     payload work (mirrors StatusPill.handleTransitionClick's pattern) —
+ *     ASYNC2D-002. The Create button's `disabled` attribute alone is not
+ *     sufficient: a form's native "submit" event (which Enter in a focused
+ *     text field dispatches) reaches handleSubmit independently of any one
+ *     button's disabled state, so without this guard a stray Enter while a
+ *     create is already in flight could fire a second, duplicate
+ *     `apiCreateDoc` racing the first. The title input is ALSO disabled while
+ *     pending, narrowing (not replacing) that surface.
  * Side-effect class: IO (calls onCreate callback)
  * Source: SPEC-022 §9.2, AC-DASH-WRITE-10
  */
@@ -111,6 +120,11 @@ export function NewDocModal({ onCreate, isPending, error, onClose }: NewDocModal
 
   async function handleSubmit(e: React.FormEvent): Promise<void> {
     e.preventDefault();
+    // reason: ASYNC2D-002 — block a duplicate submission (e.g. a stray Enter
+    // in the title field, which fires the form's native "submit" event
+    // independent of the Create button's own disabled attribute) while the
+    // first create is already in flight. See module doc comment.
+    if (isPending) return;
     setValidationError(null);
 
     const payload = buildPayload();
@@ -173,6 +187,7 @@ export function NewDocModal({ onCreate, isPending, error, onClose }: NewDocModal
             onChange={(e) => setTitle(e.target.value)}
             required
             autoFocus
+            disabled={isPending}
           />
         </div>
 

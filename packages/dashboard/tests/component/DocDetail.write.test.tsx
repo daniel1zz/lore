@@ -352,3 +352,96 @@ describe("AC-DH-3: debounced draft-autosave timer is cancelled on Cancel and Sav
     expect(loadDraft(doc.id)).toBeNull();
   });
 });
+
+// ─── ASYNC2D-001 — If-Match version freeze survives a mid-edit refetch ────────
+
+describe("ASYNC2D-001: If-Match version is frozen at edit-session start, not read live from props", () => {
+  /**
+   * Harness that lets a test simulate what TanStack Query's default
+   * refetchOnWindowFocus/refetchOnReconnect does: the parent re-renders
+   * DocDetail with a fresh `doc.version` in props WITHOUT remounting it
+   * (no key change — same as docs.$id.tsx's single query-driven prop).
+   */
+  function RefetchHarness({ initial }: { initial: DocWithNavigation }): React.ReactElement {
+    const [current, setCurrent] = useState(initial);
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() =>
+            setCurrent((prev) => ({
+              ...prev,
+              doc: { ...prev.doc, version: prev.doc.version + 1 },
+            }))
+          }
+        >
+          simulate background refetch
+        </button>
+        <DocDetail docWithNav={current} onMutated={() => {}} />
+      </>
+    );
+  }
+
+  it("sends the version captured at Edit click, not a version refetched mid-edit-session", async () => {
+    const user = userEvent.setup();
+    const doc = makeDoc({ version: 5 });
+    mockedApiPatchDoc.mockResolvedValueOnce({ ...doc, content: "edited more", version: 6 });
+
+    renderWithClient(<RefetchHarness initial={makeDocWithNav(doc)} />);
+
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    await user.type(screen.getByLabelText("Markdown editor"), " more");
+
+    // A background refetch (e.g. window focus after staleTime) lands while
+    // the edit session is still open — doc.version advances to 6 in props,
+    // but the editor's local content does not change to match it.
+    await user.click(screen.getByRole("button", { name: "simulate background refetch" }));
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(mockedApiPatchDoc).toHaveBeenCalledWith(
+      doc.id,
+      { content: expect.stringContaining("more") },
+      { version: 5 },
+    );
+  });
+
+  it("surfaces the ConflictModal (409) instead of silently overwriting when the frozen base genuinely trails the server", async () => {
+    const user = userEvent.setup();
+    const doc = makeDoc({ version: 5 });
+    const serverDoc = { ...doc, version: 6, content: "someone else's edit" };
+    mockedApiPatchDoc.mockRejectedValueOnce(
+      new ConflictError(serverDoc, JSON.stringify({ content: "edited" }), ""),
+    );
+
+    renderWithClient(<RefetchHarness initial={makeDocWithNav(doc)} />);
+
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    await user.type(screen.getByLabelText("Markdown editor"), " more");
+    await user.click(screen.getByRole("button", { name: "simulate background refetch" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    // Must never report success — a real conflict exists and must be surfaced.
+    expect(toastSuccess).not.toHaveBeenCalled();
+    expect(await screen.findByRole("dialog", { name: "Edit conflict" })).toBeInTheDocument();
+  });
+
+  it("regression: a status transition outside an edit session still uses the live server version (freeze must not go global)", async () => {
+    const user = userEvent.setup();
+    const doc = makeDoc({ status: "active", version: 5 });
+    mockedApiPatchDoc.mockResolvedValueOnce({ ...doc, status: "archived", version: 7 });
+
+    renderWithClient(<RefetchHarness initial={makeDocWithNav(doc)} />);
+
+    // No Edit click at all — bump the version the way a live (non-editing)
+    // refetch would, then issue a transition; it must carry the FRESH
+    // version, proving the freeze only pins during an actual edit session.
+    await user.click(screen.getByRole("button", { name: "simulate background refetch" }));
+
+    await user.click(screen.getByRole("button", { name: /^Status: active/ }));
+    const menu = await screen.findByRole("menu");
+    await user.click(within(menu).getByText("Archive"));
+
+    expect(mockedApiPatchDoc).toHaveBeenCalledWith(doc.id, { status: "archived" }, { version: 6 });
+  });
+});

@@ -102,6 +102,12 @@ function LibraryPage(): React.ReactElement {
   }
 
   async function handleCreate(payload: CreateDocPayload): Promise<void> {
+    // reason: ASYNC2D-002 defense in depth — NewDocModal's own isPending guard
+    // (handleSubmit) is the primary defense against a duplicate submission;
+    // this early-return protects the case where handleCreate is invoked
+    // directly (e.g. a future caller bypassing the modal's own guard) while a
+    // prior create for this page is still in flight.
+    if (isCreating) return;
     setIsCreating(true);
     setCreateError(null);
     try {

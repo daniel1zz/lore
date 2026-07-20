@@ -26,6 +26,22 @@
  *     recreating the view mid-edit (loses focus, resets cursor to doc start,
  *     scrambles typed input). `editorSeed` is set only when a new edit session
  *     starts (Edit button click).
+ *   - `editBaseVersion` (not `doc.version`) is the If-Match value sent by both
+ *     handleSave and handleTransition's generic branch — same freeze problem
+ *     as editorSeed, one tier up. TanStack Query's default
+ *     refetchOnWindowFocus/refetchOnReconnect can land a fresher `doc.version`
+ *     in props mid-edit (e.g. an alt-tab after staleTime) without the editor's
+ *     local content catching up; sending that fresh version as If-Match would
+ *     make the CAS check pass against content the editor never showed,
+ *     silently overwriting whatever changed server-side instead of raising a
+ *     409 -> ConflictModal. `resolveEditBaseVersion` (`@/lib/edit-session`)
+ *     pins `editBaseVersion` while `isEditing` and re-syncs it to the live
+ *     `doc.version` otherwise, so status transitions issued outside an edit
+ *     session (the common case) are unaffected — see ASYNC2D-001. The caller
+ *     also SHOULD disable refetchOnWindowFocus/refetchOnReconnect on this
+ *     doc's query while editing (routes/docs.$id.tsx does, via
+ *     `onEditingChange`) as defense in depth — the version freeze is the
+ *     primary guarantee and holds even if that hardening is skipped.
  *   - The caller MUST mount DocDetail with `key={doc.id}` (see routes/docs.$id.tsx) —
  *     without a per-document key, a TanStack Query cache hit while navigating
  *     between documents reuses this component instance, and its edit state
@@ -73,6 +89,7 @@ import { Breadcrumb } from "@/components/Breadcrumb";
 import { PlanExecution } from "@/components/PlanExecution";
 import { TaskExecution } from "@/components/TaskExecution";
 import { saveDraft, loadDraft, clearDraft, isDraftStale } from "@/store/draft";
+import { resolveEditBaseVersion } from "@/lib/edit-session";
 import type { DocWithNavigation } from "@/lib/api";
 import type { DocStatus, LinkType } from "@lore/core";
 import { deriveTypeMeta, extractClaim, extractEvidence } from "@lore/core";
@@ -169,6 +186,15 @@ export interface DocDetailProps {
    * affordances. SPEC-027 AC-DH-6.
    */
   onDeleted?: () => void;
+  /**
+   * Called with the current `isEditing` state whenever it changes.
+   * Optional (read-only/unit-test contexts never pass it, same convention as
+   * `onMutated`). The caller SHOULD use this to disable refetchOnWindowFocus/
+   * refetchOnReconnect on this doc's query while true (ASYNC2D-001 defense in
+   * depth — see routes/docs.$id.tsx) — DocDetail's own `editBaseVersion`
+   * freeze is the primary guarantee and does not depend on this being wired.
+   */
+  onEditingChange?: (isEditing: boolean) => void;
 }
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
@@ -197,6 +223,7 @@ export function DocDetail({
   onNavigateHome,
   onMutated,
   onDeleted,
+  onEditingChange,
 }: DocDetailProps): React.ReactElement {
   const { doc, navigation } = docWithNav;
   // reason: `doc` is the full DocRecord (GET /api/docs/:id), which carries no `.meta`
@@ -240,6 +267,29 @@ export function DocDetail({
   // Save / draft-autosave.
   const [editorSeed, setEditorSeed] = useState<string>(editContent);
   const [isSaving, setIsSaving] = useState(false);
+
+  // reason: ASYNC2D-001 — the If-Match version used by handleSave/handleTransition.
+  // Pinned while isEditing (mirrors editorSeed's freeze one tier up); re-synced to
+  // the live doc.version whenever NOT editing, so status transitions outside an
+  // edit session keep seeing fresh versions (no regression to that existing,
+  // correct behavior). See module doc comment and src/lib/edit-session.ts.
+  const [editBaseVersion, setEditBaseVersion] = useState<number>(doc.version);
+  useEffect(() => {
+    setEditBaseVersion((prev) =>
+      resolveEditBaseVersion({ isEditing, latestServerVersion: doc.version, currentBaseVersion: prev }),
+    );
+  }, [doc.version, isEditing]);
+
+  // reason: ASYNC2D-001 defense in depth — let the caller (routes/docs.$id.tsx)
+  // disable refetchOnWindowFocus/refetchOnReconnect on this doc's query while an
+  // edit session is open, reducing how often a stale-content-vs-fresh-version
+  // window can even occur. Optional/no-op when the caller doesn't wire it
+  // (read-only / unit-test contexts) — the editBaseVersion freeze above is the
+  // primary guarantee and does not depend on this callback existing.
+  useEffect(() => {
+    onEditingChange?.(isEditing);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEditing]);
 
   // ── Conflict modal state ────────────────────────────────────────────────────
   const [conflictError, setConflictError] = useState<ConflictError | null>(null);
@@ -301,7 +351,9 @@ export function DocDetail({
   async function handleSave(): Promise<void> {
     setIsSaving(true);
     try {
-      const savedDoc = await apiPatchDoc(doc.id, { content: editContent }, { version: doc.version });
+      // reason: ASYNC2D-001 — editBaseVersion, not the live doc.version prop.
+      // See module doc comment + src/lib/edit-session.ts.
+      const savedDoc = await apiPatchDoc(doc.id, { content: editContent }, { version: editBaseVersion });
       // reason: cancel any pending debounced draft-autosave before clearing — otherwise
       // a timer scheduled just before Save fires up to DRAFT_SAVE_DEBOUNCE_MS later and
       // rewrites localStorage with the pre-save content, resurrecting a draft the user
@@ -358,7 +410,11 @@ export function DocDetail({
         // hole handleSave guards against — without it, checkConcurrency on the
         // server unconditionally allows the write, so two tabs racing a status
         // transition silently clobber each other. See SPEC-027 AC-DH-2.
-        await apiPatchDoc(doc.id, { status: toStatus }, { version: doc.version });
+        // editBaseVersion (not the live doc.version prop) — ASYNC2D-001: while an
+        // edit session is open this stays pinned to the session's start version;
+        // outside one it tracks doc.version live, so this is unchanged behavior
+        // for the common (non-editing) transition case.
+        await apiPatchDoc(doc.id, { status: toStatus }, { version: editBaseVersion });
         toast.success(`Status → ${toStatus}`);
       }
       onMutated?.();
@@ -486,6 +542,11 @@ export function DocDetail({
                 onClick={() => {
                   setEditContent(doc.content);
                   setEditorSeed(doc.content);
+                  // reason: ASYNC2D-001 — capture the session-start version
+                  // explicitly here (same timing as editorSeed), in addition to
+                  // the sync effect above; belt-and-suspenders against any
+                  // effect-ordering edge case.
+                  setEditBaseVersion(doc.version);
                   setIsEditing(true);
                 }}
                 type="button"
