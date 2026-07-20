@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { checkConcurrency } from "../../../../src/adapters/http/concurrency.js";
+import { checkConcurrency, resolveExpectedVersion, buildConflictPayload } from "../../../../src/adapters/http/concurrency.js";
 import type { DocRecord } from "@lore/core";
 import type { ConflictPayload } from "../../../../src/adapters/http/concurrency.js";
 
@@ -216,5 +216,112 @@ describe("checkConcurrency — REGRESSION", () => {
 
     expect(checkConcurrency(matchReq, doc, "content")).toBeNull();
     expect(checkConcurrency(mismatchReq, doc, "content")).not.toBeNull();
+  });
+});
+
+// ─── resolveExpectedVersion (BUG-003 audit finding fix) ────────────────────────
+
+describe("resolveExpectedVersion — BUG-003 CAS-guard derivation", () => {
+  describe("HAPPY", () => {
+    it("returns the parsed integer when If-Match is present and numeric", () => {
+      const req = makeReq({ "If-Match": "7" });
+      expect(resolveExpectedVersion(req)).toBe(7);
+    });
+
+    it("returns a different value for a different If-Match header (anti-hardcode)", () => {
+      expect(resolveExpectedVersion(makeReq({ "If-Match": "1" }))).toBe(1);
+      expect(resolveExpectedVersion(makeReq({ "If-Match": "42" }))).toBe(42);
+    });
+  });
+
+  describe("NEGATIVE", () => {
+    it("returns undefined when If-Match is absent (legacy unconditional-write path, unchanged)", () => {
+      const req = makeReq({});
+      expect(resolveExpectedVersion(req)).toBeUndefined();
+    });
+
+    it("returns undefined when If-Match is non-numeric", () => {
+      const req = makeReq({ "If-Match": "garbage" });
+      expect(resolveExpectedVersion(req)).toBeUndefined();
+    });
+  });
+
+  describe("BOUNDARY", () => {
+    it("If-Match: 0 returns 0, not undefined (0 is a valid version, not a falsy no-op)", () => {
+      const req = makeReq({ "If-Match": "0" });
+      expect(resolveExpectedVersion(req)).toBe(0);
+    });
+  });
+
+  describe("STATE — X-Force-Overwrite interaction", () => {
+    it("X-Force-Overwrite: 1 returns undefined even when If-Match is present and numeric (force bypasses the CAS guard entirely)", () => {
+      const req = makeReq({ "If-Match": "5", "X-Force-Overwrite": "1" });
+      expect(resolveExpectedVersion(req)).toBeUndefined();
+    });
+
+    it("X-Force-Overwrite: 0 (not '1') does NOT bypass — If-Match value is still returned", () => {
+      const req = makeReq({ "If-Match": "5", "X-Force-Overwrite": "0" });
+      expect(resolveExpectedVersion(req)).toBe(5);
+    });
+  });
+
+  describe("REGRESSION — mirrors checkConcurrency's own header-reading contract", () => {
+    it("the SAME request that checkConcurrency treats as a legacy no-op (no If-Match) also yields undefined here", () => {
+      const req = makeReq({});
+      const doc: DocRecord = makeDoc(3);
+      expect(checkConcurrency(req, doc, "x")).toBeNull();
+      expect(resolveExpectedVersion(req)).toBeUndefined();
+    });
+
+    it("the SAME request that checkConcurrency force-bypasses also yields undefined here", () => {
+      const req = makeReq({ "If-Match": "1", "X-Force-Overwrite": "1" });
+      const doc: DocRecord = makeDoc(99);
+      expect(checkConcurrency(req, doc, "x")).toBeNull();
+      expect(resolveExpectedVersion(req)).toBeUndefined();
+    });
+  });
+});
+
+// ─── buildConflictPayload (shared diff-rendering, BUG-003 fix) ─────────────────
+
+describe("buildConflictPayload — shared ConflictPayload construction", () => {
+  describe("HAPPY", () => {
+    it("returns {current, mine, diff} with current/mine passed through verbatim", () => {
+      const doc = makeDoc(4, "server content");
+      const payload = buildConflictPayload(doc, "client content");
+      expect(payload.current).toBe(doc);
+      expect(payload.mine).toBe("client content");
+      expect(typeof payload.diff).toBe("string");
+    });
+  });
+
+  describe("BOUNDARY", () => {
+    it("identical current/client content still produces a well-formed payload with a (possibly empty-diff) string", () => {
+      const doc = makeDoc(1, "same content");
+      const payload = buildConflictPayload(doc, "same content");
+      expect(payload.current).toBe(doc);
+      expect(payload.mine).toBe("same content");
+      expect(typeof payload.diff).toBe("string");
+    });
+  });
+
+  describe("REGRESSION — identical shape/labels to checkConcurrency's own stale-path output", () => {
+    it("buildConflictPayload output for a given (doc, content) pair matches checkConcurrency's output for the equivalent stale request", () => {
+      const doc = makeDoc(2, "server v2 content");
+      const req = makeReq({ "If-Match": "1" }); // stale relative to doc.version=2
+      const viaCheckConcurrency = checkConcurrency(req, doc, "my draft") as ConflictPayload;
+      const viaBuildConflictPayload = buildConflictPayload(doc, "my draft");
+
+      expect(viaBuildConflictPayload.current).toBe(viaCheckConcurrency.current);
+      expect(viaBuildConflictPayload.mine).toBe(viaCheckConcurrency.mine);
+      expect(viaBuildConflictPayload.diff).toBe(viaCheckConcurrency.diff);
+    });
+
+    it("diff contains 'yours'/'theirs' labels — the SAME contract checkConcurrency's diff carries", () => {
+      const doc = makeDoc(2, "server version");
+      const payload = buildConflictPayload(doc, "client draft");
+      expect(payload.diff).toContain("yours");
+      expect(payload.diff).toContain("theirs");
+    });
   });
 });
