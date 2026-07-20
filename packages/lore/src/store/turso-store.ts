@@ -624,6 +624,341 @@ export class TursoStore implements StoreInterface {
     }
   }
 
+  // ── Provenance-atomic composite writes (BUG-002) ─────────────────────────
+  //
+  // Unlike SQLiteStore (BEGIN IMMEDIATE/COMMIT/ROLLBACK strings run through
+  // db.exec), @libsql/client exposes a real interactive Transaction object
+  // (`client.transaction("write")` → BEGIN IMMEDIATE under the hood — see
+  // @libsql/core's transactionModeToBegin) with its own execute/commit/
+  // rollback/close — no @libsql/client version gap or missing-API fallback
+  // was needed; researched against the installed 0.17.3 client's
+  // lib-esm/sqlite3.d.ts + sqlite3.js before choosing this approach over a
+  // "loud-partial" degrade (BUG-002 AC-1's escape hatch, not needed here).
+  // `tx.close()` is idempotent (a no-op once `commit`/`rollback` already ran
+  // — verified against the client's own `close()` impl, which checks
+  // `database.inTransaction`), so it is always safe in a `finally`.
+
+  /**
+   * @see StoreInterface.insertWithProvenance
+   */
+  async insertWithProvenance(
+    doc: DocRecord,
+    version: VersionRecord,
+    audit: AuditEntry,
+  ): Promise<Result<DocRecord, LoreError>> {
+    await this.ensureReady();
+    const tx = await this.client.transaction("write");
+    try {
+      await tx.execute({
+        sql: `INSERT INTO docs
+               (id, slug, type, role, title, status, priority, content,
+                parent_id, extra, tags, version, created_at, updated_at,
+                created_by, deleted_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          doc.id,
+          doc.slug,
+          doc.type,
+          doc.role,
+          doc.title,
+          doc.status,
+          doc.priority,
+          doc.content,
+          doc.parent_id ?? null,
+          JSON.stringify(doc.extra),
+          JSON.stringify(doc.tags),
+          doc.version,
+          doc.created_at,
+          doc.updated_at,
+          doc.created_by,
+          doc.deleted_at ?? null,
+        ] as InValue[],
+      });
+
+      await tx.execute({
+        sql: `INSERT INTO versions
+               (doc_id, version, content, extra, status, title,
+                action, created_at, created_by, change_summary)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          version.doc_id,
+          version.version,
+          version.content,
+          JSON.stringify(version.extra),
+          version.status,
+          version.title,
+          version.action,
+          version.created_at,
+          version.created_by,
+          version.change_summary ?? null,
+        ] as InValue[],
+      });
+
+      await tx.execute({
+        sql: `INSERT INTO audit
+               (timestamp, actor, session_id, action, doc_id, details)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+        args: [
+          audit.timestamp,
+          audit.actor,
+          audit.session_id,
+          audit.action,
+          audit.doc_id ?? null,
+          JSON.stringify(audit.details ?? {}),
+        ] as InValue[],
+      });
+
+      await tx.commit();
+      return ok(doc);
+    } catch (e) {
+      try {
+        await tx.rollback();
+      } catch {
+        // reason: rollback throws only when the transaction is already
+        // closed (e.g. a prior commit/rollback already ran) — safe to
+        // ignore, `e` below is what the caller needs.
+      }
+      const msg = e instanceof Error ? e.message : "";
+      if (msg.includes("UNIQUE constraint failed: docs.slug")) {
+        return err({ code: "DUPLICATE_SLUG", slug: doc.slug, existing_id: doc.id });
+      }
+      return wrapStoreError(e);
+    } finally {
+      tx.close();
+    }
+  }
+
+  /**
+   * @see StoreInterface.updateWithProvenance
+   */
+  async updateWithProvenance(
+    id: DocId,
+    patch: Partial<DocRecord>,
+    opts: UpdateOpts | undefined,
+    version: VersionRecord,
+    audit: AuditEntry,
+  ): Promise<Result<DocRecord, LoreError>> {
+    await this.ensureReady();
+    const tx = await this.client.transaction("write");
+    try {
+      const existingRs = await tx.execute({
+        sql: "SELECT * FROM docs WHERE id = ?",
+        args: [id],
+      });
+      const existingRow = existingRs.rows[0];
+
+      if (!existingRow) {
+        await tx.rollback();
+        return err({ code: "DOC_NOT_FOUND", id });
+      }
+
+      const current = rowToDocRecord(libsqlRowToDocRow(existingRow));
+      const updated: DocRecord = {
+        ...current,
+        ...patch,
+        id: current.id, // id is immutable
+      };
+
+      if (opts?.expected_version !== undefined) {
+        const updateRs = await tx.execute({
+          sql: `UPDATE docs SET
+                 slug = ?, type = ?, role = ?, title = ?, status = ?,
+                 priority = ?, content = ?, parent_id = ?, extra = ?,
+                 tags = ?, version = ?, created_at = ?, updated_at = ?,
+                 created_by = ?, deleted_at = ?
+               WHERE id = ? AND version = ?`,
+          args: [
+            updated.slug,
+            updated.type,
+            updated.role,
+            updated.title,
+            updated.status,
+            updated.priority,
+            updated.content,
+            updated.parent_id ?? null,
+            JSON.stringify(updated.extra),
+            JSON.stringify(updated.tags),
+            updated.version,
+            updated.created_at,
+            updated.updated_at,
+            updated.created_by,
+            updated.deleted_at ?? null,
+            id,
+            opts.expected_version,
+          ] as InValue[],
+        });
+
+        if (updateRs.rowsAffected === 0) {
+          const actualRs = await tx.execute({
+            sql: "SELECT version FROM docs WHERE id = ?",
+            args: [id],
+          });
+          const actualRow = actualRs.rows[0];
+          await tx.rollback();
+
+          if (!actualRow) {
+            // Deleted between our SELECT and UPDATE (race)
+            return err({ code: "DOC_NOT_FOUND", id });
+          }
+
+          return err({
+            code: "STALE_VERSION",
+            id,
+            expected: opts.expected_version,
+            actual: rowNum(actualRow, "version"),
+          });
+        }
+      } else {
+        // Unconditional UPDATE — backward-compatible path
+        await tx.execute({
+          sql: `UPDATE docs SET
+                 slug = ?, type = ?, role = ?, title = ?, status = ?,
+                 priority = ?, content = ?, parent_id = ?, extra = ?,
+                 tags = ?, version = ?, created_at = ?, updated_at = ?,
+                 created_by = ?, deleted_at = ?
+               WHERE id = ?`,
+          args: [
+            updated.slug,
+            updated.type,
+            updated.role,
+            updated.title,
+            updated.status,
+            updated.priority,
+            updated.content,
+            updated.parent_id ?? null,
+            JSON.stringify(updated.extra),
+            JSON.stringify(updated.tags),
+            updated.version,
+            updated.created_at,
+            updated.updated_at,
+            updated.created_by,
+            updated.deleted_at ?? null,
+            id,
+          ] as InValue[],
+        });
+      }
+
+      await tx.execute({
+        sql: `INSERT INTO versions
+               (doc_id, version, content, extra, status, title,
+                action, created_at, created_by, change_summary)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          version.doc_id,
+          version.version,
+          version.content,
+          JSON.stringify(version.extra),
+          version.status,
+          version.title,
+          version.action,
+          version.created_at,
+          version.created_by,
+          version.change_summary ?? null,
+        ] as InValue[],
+      });
+
+      await tx.execute({
+        sql: `INSERT INTO audit
+               (timestamp, actor, session_id, action, doc_id, details)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+        args: [
+          audit.timestamp,
+          audit.actor,
+          audit.session_id,
+          audit.action,
+          audit.doc_id ?? null,
+          JSON.stringify(audit.details ?? {}),
+        ] as InValue[],
+      });
+
+      await tx.commit();
+      return ok(updated);
+    } catch (e) {
+      try {
+        await tx.rollback();
+      } catch {
+        // reason: same as insertWithProvenance — safe to ignore, see above.
+      }
+      return wrapStoreError(e);
+    } finally {
+      tx.close();
+    }
+  }
+
+  /**
+   * @see StoreInterface.softDeleteWithProvenance
+   */
+  async softDeleteWithProvenance(
+    id: DocId,
+    version: VersionRecord,
+    audit: AuditEntry,
+  ): Promise<Result<void, LoreError>> {
+    await this.ensureReady();
+    const tx = await this.client.transaction("write");
+    try {
+      const existingRs = await tx.execute({
+        sql: "SELECT id FROM docs WHERE id = ?",
+        args: [id],
+      });
+
+      if (!existingRs.rows[0]) {
+        await tx.rollback();
+        return err({ code: "DOC_NOT_FOUND", id });
+      }
+
+      const now = new Date().toISOString();
+      await tx.execute({
+        sql: "UPDATE docs SET deleted_at = ? WHERE id = ?",
+        args: [now, id],
+      });
+
+      await tx.execute({
+        sql: `INSERT INTO versions
+               (doc_id, version, content, extra, status, title,
+                action, created_at, created_by, change_summary)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          version.doc_id,
+          version.version,
+          version.content,
+          JSON.stringify(version.extra),
+          version.status,
+          version.title,
+          version.action,
+          version.created_at,
+          version.created_by,
+          version.change_summary ?? null,
+        ] as InValue[],
+      });
+
+      await tx.execute({
+        sql: `INSERT INTO audit
+               (timestamp, actor, session_id, action, doc_id, details)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+        args: [
+          audit.timestamp,
+          audit.actor,
+          audit.session_id,
+          audit.action,
+          audit.doc_id ?? null,
+          JSON.stringify(audit.details ?? {}),
+        ] as InValue[],
+      });
+
+      await tx.commit();
+      return ok(undefined);
+    } catch (e) {
+      try {
+        await tx.rollback();
+      } catch {
+        // reason: same as insertWithProvenance — safe to ignore, see above.
+      }
+      return wrapStoreError(e);
+    } finally {
+      tx.close();
+    }
+  }
+
   // ── Links ─────────────────────────────────────────────────────────────
 
   async addLink(link: LinkRecord): Promise<Result<LinkRecord, LoreError>> {

@@ -175,6 +175,30 @@ export class SQLiteStore implements StoreInterface {
         } catch {
           // reason: same as migration-004/005 — safe to ignore, see above.
         }
+        // reason: BUG-010 (audit finding) — migration-006's OWN SQL toggles
+        // `PRAGMA foreign_keys = OFF` as its FIRST statement, OUTSIDE the
+        // `BEGIN IMMEDIATE`/`COMMIT` block it wraps (required for `DROP TABLE
+        // docs` to succeed under real FK-referencing data — see
+        // migration-006.ts's module JSDoc). That toggle is a CONNECTION-level
+        // setting, not part of the transaction, so `ROLLBACK` above does NOT
+        // undo it. If the migration throws AFTER the OFF toggle ran but
+        // BEFORE reaching its own trailing `PRAGMA foreign_keys = ON;`
+        // statement (which sits after `COMMIT` in the SQL string and is thus
+        // never reached on any failure inside the transaction), this
+        // connection would silently run FK-unenforced for the rest of the
+        // process's lifetime — every subsequent INSERT/UPDATE/DELETE on this
+        // handle skips foreign-key validation with no error, no log, nothing.
+        // Restore it explicitly here so a partially-failed migration-006
+        // leaves FK enforcement exactly as it found it (`init()` already set
+        // `PRAGMA foreign_keys = ON` before `runMigrations()` ran).
+        try {
+          this.db.exec("PRAGMA foreign_keys = ON");
+        } catch {
+          // reason: a PRAGMA toggle only throws on a closed/broken
+          // connection — at that point the process is already going to
+          // surface `error` below and this connection is unusable regardless
+          // of FK state; safe to ignore.
+        }
         throw error;
       }
     }
@@ -182,7 +206,16 @@ export class SQLiteStore implements StoreInterface {
 
   // ── Document CRUD ─────────────────────────────────────────────────────────
 
-  async insert(doc: DocRecord): Promise<Result<DocRecord, LoreError>> {
+  /**
+   * Synchronous core of {@link insert} — a single raw `INSERT` statement, no
+   * transaction management. Extracted so {@link insertWithProvenance} can run
+   * it inside its OWN `BEGIN IMMEDIATE`/`COMMIT` block without duplicating the
+   * SQL literal (bun:sqlite is synchronous internally regardless of the async
+   * public method signature, so a private sync helper composes cleanly with
+   * either "no wrapper" (`insert`) or "wrapped in a bigger transaction"
+   * (`insertWithProvenance`) callers).
+   */
+  private insertDocSync(doc: DocRecord): Result<DocRecord, LoreError> {
     try {
       this.db
         .prepare(
@@ -222,6 +255,10 @@ export class SQLiteStore implements StoreInterface {
       }
       return wrapStoreError(e);
     }
+  }
+
+  async insert(doc: DocRecord): Promise<Result<DocRecord, LoreError>> {
+    return this.insertDocSync(doc);
   }
 
   async find(id: DocId): Promise<Result<DocRecord | null, LoreError>> {
@@ -350,6 +387,11 @@ export class SQLiteStore implements StoreInterface {
   }
 
   /**
+   * Synchronous core of {@link update} — see {@link insertDocSync}'s JSDoc for
+   * why this split exists ({@link updateWithProvenance} reuses it inside a
+   * transaction). Behavior is otherwise byte-identical to the pre-split
+   * `update` body.
+   *
    * Apply a partial patch to an existing doc.
    * When opts.expected_version is provided, the UPDATE includes AND version = ?
    * (conditional CAS). If zero rows are affected:
@@ -358,11 +400,11 @@ export class SQLiteStore implements StoreInterface {
    * When opts is omitted or expected_version is not set, unconditional update.
    * @see UpdateOpts for full contract.
    */
-  async update(
+  private updateDocSync(
     id: DocId,
     patch: Partial<DocRecord>,
     opts?: UpdateOpts,
-  ): Promise<Result<DocRecord, LoreError>> {
+  ): Result<DocRecord, LoreError> {
     try {
       const existingRow = this.db
         .prepare("SELECT * FROM docs WHERE id = ?")
@@ -467,7 +509,20 @@ export class SQLiteStore implements StoreInterface {
     }
   }
 
-  async softDelete(id: DocId): Promise<Result<void, LoreError>> {
+  async update(
+    id: DocId,
+    patch: Partial<DocRecord>,
+    opts?: UpdateOpts,
+  ): Promise<Result<DocRecord, LoreError>> {
+    return this.updateDocSync(id, patch, opts);
+  }
+
+  /**
+   * Synchronous core of {@link softDelete} — see {@link insertDocSync}'s
+   * JSDoc for why this split exists ({@link softDeleteWithProvenance} reuses
+   * it inside a transaction).
+   */
+  private softDeleteDocSync(id: DocId): Result<void, LoreError> {
     try {
       const existing = this.db
         .prepare("SELECT id FROM docs WHERE id = ?")
@@ -486,6 +541,10 @@ export class SQLiteStore implements StoreInterface {
     } catch (e) {
       return wrapStoreError(e);
     }
+  }
+
+  async softDelete(id: DocId): Promise<Result<void, LoreError>> {
+    return this.softDeleteDocSync(id);
   }
 
   // ── Links ─────────────────────────────────────────────────────────────────
@@ -760,7 +819,12 @@ export class SQLiteStore implements StoreInterface {
 
   // ── Versions ──────────────────────────────────────────────────────────────
 
-  async insertVersion(version: VersionRecord): Promise<Result<VersionRecord, LoreError>> {
+  /**
+   * Synchronous core of {@link insertVersion} — see {@link insertDocSync}'s
+   * JSDoc for why this split exists (both composite provenance methods reuse
+   * it inside a transaction).
+   */
+  private insertVersionSync(version: VersionRecord): Result<VersionRecord, LoreError> {
     try {
       this.db
         .prepare(
@@ -785,6 +849,10 @@ export class SQLiteStore implements StoreInterface {
     } catch (e) {
       return wrapStoreError(e);
     }
+  }
+
+  async insertVersion(version: VersionRecord): Promise<Result<VersionRecord, LoreError>> {
+    return this.insertVersionSync(version);
   }
 
   async findVersions(
@@ -824,7 +892,12 @@ export class SQLiteStore implements StoreInterface {
 
   // ── Audit ─────────────────────────────────────────────────────────────────
 
-  async appendAuditEntry(entry: AuditEntry): Promise<Result<void, LoreError>> {
+  /**
+   * Synchronous core of {@link appendAuditEntry} — see {@link insertDocSync}'s
+   * JSDoc for why this split exists (both composite provenance methods reuse
+   * it inside a transaction).
+   */
+  private appendAuditEntrySync(entry: AuditEntry): Result<void, LoreError> {
     try {
       this.db
         .prepare(
@@ -842,6 +915,139 @@ export class SQLiteStore implements StoreInterface {
         );
       return ok(undefined);
     } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async appendAuditEntry(entry: AuditEntry): Promise<Result<void, LoreError>> {
+    return this.appendAuditEntrySync(entry);
+  }
+
+  // ── Provenance-atomic composite writes (BUG-002) ──────────────────────────
+
+  /**
+   * @see StoreInterface.insertWithProvenance
+   */
+  async insertWithProvenance(
+    doc: DocRecord,
+    version: VersionRecord,
+    audit: AuditEntry,
+  ): Promise<Result<DocRecord, LoreError>> {
+    this.db.run("BEGIN IMMEDIATE");
+    try {
+      const insertResult = this.insertDocSync(doc);
+      if (!insertResult.ok) {
+        this.db.run("ROLLBACK");
+        return insertResult;
+      }
+
+      const versionResult = this.insertVersionSync(version);
+      if (!versionResult.ok) {
+        this.db.run("ROLLBACK");
+        return versionResult;
+      }
+
+      const auditResult = this.appendAuditEntrySync(audit);
+      if (!auditResult.ok) {
+        this.db.run("ROLLBACK");
+        return auditResult;
+      }
+
+      this.db.run("COMMIT");
+      return ok(insertResult.value);
+    } catch (e) {
+      try {
+        this.db.run("ROLLBACK");
+      } catch {
+        // reason: ROLLBACK itself throws only when there is no open
+        // transaction to roll back — safe to ignore, `e` below is what the
+        // caller needs. Mirrors runMigrations' identical catch/ROLLBACK guard.
+      }
+      return wrapStoreError(e);
+    }
+  }
+
+  /**
+   * @see StoreInterface.updateWithProvenance
+   */
+  async updateWithProvenance(
+    id: DocId,
+    patch: Partial<DocRecord>,
+    opts: UpdateOpts | undefined,
+    version: VersionRecord,
+    audit: AuditEntry,
+  ): Promise<Result<DocRecord, LoreError>> {
+    this.db.run("BEGIN IMMEDIATE");
+    try {
+      const updateResult = this.updateDocSync(id, patch, opts);
+      if (!updateResult.ok) {
+        // reason: DOC_NOT_FOUND / STALE_VERSION — the doc write touched zero
+        // rows, so there is nothing to roll back beyond releasing the
+        // transaction started above.
+        this.db.run("ROLLBACK");
+        return updateResult;
+      }
+
+      const versionResult = this.insertVersionSync(version);
+      if (!versionResult.ok) {
+        this.db.run("ROLLBACK");
+        return versionResult;
+      }
+
+      const auditResult = this.appendAuditEntrySync(audit);
+      if (!auditResult.ok) {
+        this.db.run("ROLLBACK");
+        return auditResult;
+      }
+
+      this.db.run("COMMIT");
+      return ok(updateResult.value);
+    } catch (e) {
+      try {
+        this.db.run("ROLLBACK");
+      } catch {
+        // reason: same as insertWithProvenance — safe to ignore, see above.
+      }
+      return wrapStoreError(e);
+    }
+  }
+
+  /**
+   * @see StoreInterface.softDeleteWithProvenance
+   */
+  async softDeleteWithProvenance(
+    id: DocId,
+    version: VersionRecord,
+    audit: AuditEntry,
+  ): Promise<Result<void, LoreError>> {
+    this.db.run("BEGIN IMMEDIATE");
+    try {
+      const deleteResult = this.softDeleteDocSync(id);
+      if (!deleteResult.ok) {
+        this.db.run("ROLLBACK");
+        return deleteResult;
+      }
+
+      const versionResult = this.insertVersionSync(version);
+      if (!versionResult.ok) {
+        this.db.run("ROLLBACK");
+        return versionResult;
+      }
+
+      const auditResult = this.appendAuditEntrySync(audit);
+      if (!auditResult.ok) {
+        this.db.run("ROLLBACK");
+        return auditResult;
+      }
+
+      this.db.run("COMMIT");
+      return ok(undefined);
+    } catch (e) {
+      try {
+        this.db.run("ROLLBACK");
+      } catch {
+        // reason: same as insertWithProvenance — safe to ignore, see above.
+      }
       return wrapStoreError(e);
     }
   }

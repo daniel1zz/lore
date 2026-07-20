@@ -204,6 +204,91 @@ export interface StoreInterface {
    */
   softDelete(id: DocId): Promise<Result<void, LoreError>>;
 
+  // ── Provenance-atomic composite writes (BUG-002) ───────────────────────
+
+  /**
+   * Atomically insert a new doc together with its creation {@link VersionRecord}
+   * and {@link AuditEntry}. Replaces the pre-existing three-independent-`await`
+   * sequence (`insert` → `insertVersion` → `appendAuditEntry`) `CorpusService`
+   * used to run — a failure on step 2 or 3 left the doc PERSISTED with zero
+   * version/audit rows and no signal to the caller that partial state landed.
+   * All three writes commit or roll back together: on any failure the doc row
+   * (and any version/audit row already written by this call) MUST NOT be
+   * observable afterward — `find(doc.id)` returns `null`.
+   *
+   * `insert`/`insertVersion`/`appendAuditEntry` remain independently callable
+   * (unchanged contracts) for callers that don't need the composite guarantee
+   * (e.g. `MigrationService`'s intentionally-ungated raw `insert` bypass).
+   *
+   * @param doc - The doc row to insert (same contract as {@link insert})
+   * @param version - The version-1 snapshot (same contract as {@link insertVersion})
+   * @param audit - The `action: "create"` audit entry (same contract as {@link appendAuditEntry})
+   * @returns `ok(doc)` on success (mirrors `insert`'s return shape); on failure,
+   *   the SAME error `insert`/`insertVersion`/`appendAuditEntry` would have
+   *   individually returned for the step that failed (`DUPLICATE_SLUG` from
+   *   step 1, `STORE_ERROR`/schema violations from steps 2-3) — never a new
+   *   error shape.
+   * @see BUG-002 (audit finding) — corpus-service.ts `_createImpl`
+   */
+  insertWithProvenance(
+    doc: DocRecord,
+    version: VersionRecord,
+    audit: AuditEntry,
+  ): Promise<Result<DocRecord, LoreError>>;
+
+  /**
+   * Atomically apply a patch to an existing doc together with its update
+   * {@link VersionRecord} and {@link AuditEntry} — the composite analog of
+   * {@link update} for `CorpusService.set`'s write path (BUG-002).
+   *
+   * `opts` carries the SAME `UpdateOpts` contract as {@link update} — when
+   * `opts.expected_version` is set, the doc write is a conditional CAS UPDATE;
+   * zero affected rows (version mismatch) returns `STALE_VERSION` and the
+   * version/audit inserts never run (nothing to roll back — the doc write
+   * itself is the first statement and it never touched a row). When the doc
+   * CAS/write succeeds but EITHER the version or audit insert fails, ALL
+   * THREE writes roll back together — the doc row reverts to its
+   * pre-call state, observable via a subsequent `find`.
+   *
+   * @param id - Doc id to update (same contract as {@link update})
+   * @param patch - Partial patch (same contract as {@link update})
+   * @param opts - Same {@link UpdateOpts} contract as {@link update}
+   * @param version - The post-patch version snapshot (same contract as {@link insertVersion})
+   * @param audit - The audit entry for this update (same contract as {@link appendAuditEntry})
+   * @returns `ok(updatedDoc)` on success (mirrors `update`'s return shape);
+   *   `DOC_NOT_FOUND` / `STALE_VERSION` from the doc write step, or the
+   *   version/audit step's own error, on failure — never a new error shape.
+   * @see BUG-002 (audit finding) — corpus-service.ts `set`
+   */
+  updateWithProvenance(
+    id: DocId,
+    patch: Partial<DocRecord>,
+    opts: UpdateOpts | undefined,
+    version: VersionRecord,
+    audit: AuditEntry,
+  ): Promise<Result<DocRecord, LoreError>>;
+
+  /**
+   * Atomically soft-delete a doc together with its `action: "delete"`
+   * {@link VersionRecord} sentinel and {@link AuditEntry} — the composite
+   * analog of {@link softDelete} for `CorpusService.delete`'s write path
+   * (BUG-002). Same all-or-nothing guarantee as {@link updateWithProvenance}:
+   * a version/audit failure rolls back the soft-delete (`deleted_at` reverts
+   * to `null`).
+   *
+   * @param id - Doc id to soft-delete (same contract as {@link softDelete})
+   * @param version - The `version: 0` delete sentinel (same contract as {@link insertVersion})
+   * @param audit - The `action: "delete"` audit entry (same contract as {@link appendAuditEntry})
+   * @returns `ok(undefined)` on success; `DOC_NOT_FOUND` from the soft-delete
+   *   step, or the version/audit step's own error, on failure.
+   * @see BUG-002 (audit finding) — corpus-service.ts `delete`
+   */
+  softDeleteWithProvenance(
+    id: DocId,
+    version: VersionRecord,
+    audit: AuditEntry,
+  ): Promise<Result<void, LoreError>>;
+
   // ── Links ──────────────────────────────────────────────────────────────
 
   /**

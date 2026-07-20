@@ -31,7 +31,15 @@ import {
   computeRequirementCoverage,
   SPEC_KINDS,
 } from "@lore/core";
-import type { CreateDocInput, DocPatch, UatVerdict, RequirementCoverage, SpecKind } from "@lore/core";
+import type {
+  CreateDocInput,
+  DocPatch,
+  UatVerdict,
+  RequirementCoverage,
+  SpecKind,
+  VersionRecord,
+  AuditEntry,
+} from "@lore/core";
 import {
   DOC_TYPE_ROLE_MAP,
   type DocId,
@@ -752,34 +760,41 @@ export class CorpusService {
       extra: resolvedExtra,
     };
 
-    const insertResult = await this.store.insert(doc);
+    // BUG-002 (audit finding) — insert + version-1 snapshot + create audit entry
+    // as ONE atomic composite write (StoreInterface.insertWithProvenance): the
+    // pre-fix code ran these as three independent `await`s, so a version/audit
+    // failure after a successful insert left a PERMANENTLY orphaned doc (zero
+    // version history, zero audit trail, no signal to the caller that partial
+    // state landed). All three writes now commit or roll back together — see
+    // insertWithProvenance's JSDoc on StoreInterface for the per-store atomicity
+    // mechanism (SQLite: BEGIN IMMEDIATE/COMMIT/ROLLBACK; Turso: a real
+    // client.transaction(); InMemory: manual undo-on-failure).
+    const insertResult = await this.store.insertWithProvenance(
+      doc,
+      {
+        doc_id: id,
+        version: 1,
+        content: doc.content,
+        extra: doc.extra,
+        status: doc.status,
+        title: doc.title,
+        action: "create",
+        created_at: now,
+        created_by: doc.created_by,
+      },
+      {
+        timestamp: now,
+        actor: "system",
+        session_id: id,
+        action: "create",
+        doc_id: id,
+        // reason: SPEC-035 §2 — every audit writer stamps the version its action
+        // produced (`details.version`), so AuditService.verify can join versions⋈audit
+        // on an exact (doc_id, version) pair. Creation always produces version 1.
+        details: { type: doc.type, slug: doc.slug, version: 1 },
+      },
+    );
     if (!insertResult.ok) return insertResult;
-
-    const versionResult = await this.store.insertVersion({
-      doc_id: id,
-      version: 1,
-      content: doc.content,
-      extra: doc.extra,
-      status: doc.status,
-      title: doc.title,
-      action: "create",
-      created_at: now,
-      created_by: doc.created_by,
-    });
-    if (!versionResult.ok) return versionResult;
-
-    const auditResult = await this.store.appendAuditEntry({
-      timestamp: now,
-      actor: "system",
-      session_id: id,
-      action: "create",
-      doc_id: id,
-      // reason: SPEC-035 §2 — every audit writer stamps the version its action
-      // produced (`details.version`), so AuditService.verify can join versions⋈audit
-      // on an exact (doc_id, version) pair. Creation always produces version 1.
-      details: { type: doc.type, slug: doc.slug, version: 1 },
-    });
-    if (!auditResult.ok) return auditResult;
 
     // Provenance auto-write (IoC vertical-slice tech-spec §4.1 P4, "governs" edge from
     // the feeding skill to the artifact it fed) — fail-soft by construction, see
@@ -1004,8 +1019,30 @@ export class CorpusService {
    * Patch a document.
    * If patching content or title on an 'approved' doc, resets status to 'draft'.
    * Increments version and creates a version record.
+   *
+   * @param opts.expectedVersion - BUG-003 (audit finding) fix. When supplied, this
+   *   is the version the CALLER's own optimistic-concurrency check (e.g. the
+   *   dashboard's `If-Match` header) was made against, and it is threaded straight
+   *   through as the store's CAS `expected_version` guard — REPLACING this method's
+   *   own internal fresh-read of `existing.version`. Pre-fix, `set()` always CAS'd
+   *   against its OWN just-resolved `existing.version`, making a route-level
+   *   precheck (`checkConcurrency`) purely advisory: two callers who both read the
+   *   doc at v5 and both pass their own precheck could BOTH reach `set()`, and the
+   *   second one's fresh internal read would already see v6 (the first one's
+   *   commit) — CAS'ing against ITS OWN fresh v6 read instead of the v5 the caller
+   *   actually validated against, silently overwriting the first writer's commit
+   *   with no conflict ever surfacing (a classic lost update). Passing
+   *   `expectedVersion` closes that gap: the second caller's declared v5 no longer
+   *   matches the row's true current version (6) by the time the write executes,
+   *   so the store's CAS correctly returns `STALE_VERSION` instead of silently
+   *   succeeding. Omitted (the pre-existing default) → behavior is BYTE-IDENTICAL
+   *   to before this fix (CAS against this call's own fresh `existing.version`).
    */
-  async set(idOrSlug: string, patch: DocPatch): Promise<Result<DocRecord, LoreError>> {
+  async set(
+    idOrSlug: string,
+    patch: DocPatch,
+    opts?: { expectedVersion?: number },
+  ): Promise<Result<DocRecord, LoreError>> {
     const parsedPatch = docPatchSchema.safeParse(patch);
     if (!parsedPatch.success) {
       const issue = parsedPatch.error.issues[0];
@@ -1325,34 +1362,47 @@ export class CorpusService {
       }
     }
 
-    const updateResult = await this.store.update(existing.id, docPatch, { expected_version: existing.version });
-    if (!updateResult.ok) return updateResult;
-
-    const versionResult = await this.store.insertVersion({
+    // BUG-002 (audit finding) — update + version snapshot + update audit entry as
+    // ONE atomic composite write (StoreInterface.updateWithProvenance), mirroring
+    // _createImpl's fix above. The version snapshot's content/extra/status/title
+    // are derived from `docPatch` merged over `existing` — EXACTLY the same merge
+    // `store.update`/`updateWithProvenance` perform internally (`{...current,
+    // ...patch}`) — so this stays correct WITHOUT needing the store's return value
+    // first (a chicken-and-egg the single composite call would otherwise create).
+    //
+    // BUG-003 (audit finding) fix: `expected_version` is `opts?.expectedVersion ??
+    // existing.version` — see this method's own JSDoc `@param opts.expectedVersion`
+    // for the full race this closes.
+    const versionRecord: VersionRecord = {
       doc_id: existing.id,
       version: newVersion,
-      content: updateResult.value.content,
-      extra: updateResult.value.extra,
-      status: updateResult.value.status,
-      title: updateResult.value.title,
+      content: docPatch.content ?? existing.content,
+      extra: docPatch.extra ?? existing.extra,
+      status: docPatch.status ?? existing.status,
+      title: docPatch.title ?? existing.title,
       action: "update",
       created_at: now,
       created_by: "system",
-    });
-    if (!versionResult.ok) return versionResult;
+    };
 
-    const auditResult = await this.store.appendAuditEntry({
-      timestamp: now,
-      actor: "system",
-      session_id: existing.id,
-      action: "update",
-      doc_id: existing.id,
-      // reason: SPEC-035 §2 — `version` (not just the pre-existing `new_version`
-      // alias) is the join key AuditService.verify matches against the versions
-      // row's own `version` field.
-      details: { patch: parsedPatch.data, new_version: newVersion, version: newVersion },
-    });
-    if (!auditResult.ok) return auditResult;
+    const updateResult = await this.store.updateWithProvenance(
+      existing.id,
+      docPatch,
+      { expected_version: opts?.expectedVersion ?? existing.version },
+      versionRecord,
+      {
+        timestamp: now,
+        actor: "system",
+        session_id: existing.id,
+        action: "update",
+        doc_id: existing.id,
+        // reason: SPEC-035 §2 — `version` (not just the pre-existing `new_version`
+        // alias) is the join key AuditService.verify matches against the versions
+        // row's own `version` field.
+        details: { patch: parsedPatch.data, new_version: newVersion, version: newVersion },
+      },
+    );
+    if (!updateResult.ok) return updateResult;
 
     return ok(updateResult.value);
   }
@@ -1378,13 +1428,13 @@ export class CorpusService {
     if (!resolveResult.ok) return resolveResult;
 
     const id = resolveResult.value;
-    const deleteResult = await this.store.softDelete(id);
-    if (!deleteResult.ok) return deleteResult;
-
     const now = new Date().toISOString();
     const recoverableUntil = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
 
-    const versionResult = await this.store.insertVersion({
+    // BUG-002 (audit finding) — soft-delete + version-0 sentinel + delete audit
+    // entry as ONE atomic composite write (StoreInterface.softDeleteWithProvenance),
+    // mirroring _createImpl's/set's fix above.
+    const versionRecord: VersionRecord = {
       doc_id: id,
       version: 0,
       content: "",
@@ -1394,10 +1444,8 @@ export class CorpusService {
       action: "delete",
       created_at: now,
       created_by: "system",
-    });
-    if (!versionResult.ok) return versionResult;
-
-    const auditResult = await this.store.appendAuditEntry({
+    };
+    const auditEntry: AuditEntry = {
       timestamp: now,
       actor: "system",
       session_id: id,
@@ -1408,8 +1456,10 @@ export class CorpusService {
       // (a soft-deleted doc's version-0 sentinel row isn't part of the reconcile
       // walk). Matches the sentinel `version: 0` the versions row above carries.
       details: { recoverable_until: recoverableUntil, version: 0 },
-    });
-    if (!auditResult.ok) return auditResult;
+    };
+
+    const deleteResult = await this.store.softDeleteWithProvenance(id, versionRecord, auditEntry);
+    if (!deleteResult.ok) return deleteResult;
 
     return ok({ id, recoverable_until: recoverableUntil });
   }
@@ -2204,13 +2254,41 @@ export class CorpusService {
 
   // ── Private Helpers ───────────────────────────────────────────────────────
 
+  /**
+   * BUG-008 (audit finding) hard backstop — independent of the caller-supplied
+   * `TreeOpts.depth` (see `tree()`, `remainingDepth` below). Mirrors `_getImpl`'s
+   * `ANCESTOR_DEPTH_CAP` guard (same class of "bound recursion against untrusted
+   * tree shape" hardening, applied to the DESCENDANT walk instead of the
+   * ancestor walk). Guards two failure modes `remainingDepth <= 0` alone cannot
+   * catch:
+   *   1. A `depth` value that bypasses the termination check entirely — `NaN <=
+   *      0` and `Infinity <= 0` are both `false` in JS, so a NaN/Infinity/huge
+   *      `TreeOpts.depth` would recurse without bound (CLI-side numeric
+   *      validation of `--depth` is a SEPARATE, already-covered concern — this
+   *      is the service-layer backstop for every OTHER caller: MCP, HTTP,
+   *      direct service consumers).
+   *   2. A manufactured multi-hop `parent_id` cycle (A→B→C→A) in stored data —
+   *      `addLink`'s `detectParentCycle` blocks a NEW cycling link at write
+   *      time, but does not retroactively validate the whole corpus, so a
+   *      direct store write or a migration defect could still leave one on
+   *      disk; combined with an unbounded `depth`, that cycle would recurse
+   *      forever.
+   */
+  private static readonly TREE_NODE_DEPTH_CAP = 20;
+
   private async buildTreeNode(
     doc: DocRecord,
     remainingDepth: number,
+    hardDepthBudget: number = CorpusService.TREE_NODE_DEPTH_CAP,
   ): Promise<Result<TreeNode, LoreError>> {
     const summary = this.toSummary(doc);
 
-    if (remainingDepth <= 0) {
+    // reason: hardDepthBudget is decremented on EVERY recursive call regardless
+    // of remainingDepth's validity, so a NaN/Infinity/absurd remainingDepth
+    // (which never satisfies `remainingDepth <= 0`) still terminates within
+    // TREE_NODE_DEPTH_CAP levels — the subtree is truncated rather than
+    // recursing without bound (BUG-008).
+    if (remainingDepth <= 0 || hardDepthBudget <= 0) {
       return ok({ doc: summary, children: [] });
     }
 
@@ -2219,7 +2297,7 @@ export class CorpusService {
 
     const children: TreeNode[] = [];
     for (const child of childrenResult.value) {
-      const childNodeResult = await this.buildTreeNode(child, remainingDepth - 1);
+      const childNodeResult = await this.buildTreeNode(child, remainingDepth - 1, hardDepthBudget - 1);
       if (!childNodeResult.ok) return childNodeResult;
       children.push(childNodeResult.value);
     }

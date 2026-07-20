@@ -195,6 +195,129 @@ export class InMemoryStore implements StoreInterface {
     return ok(undefined);
   }
 
+  // ── Provenance-atomic composite writes (BUG-002) ────────────────────────
+  //
+  // InMemoryStore has no real transaction primitive (plain Map/Array
+  // mutation, no I/O to roll back) — atomicity is implemented as explicit
+  // manual undo of every step already applied when a LATER step fails. Each
+  // composite method calls through `this.<method>(...)` (not a private raw
+  // helper) so a test double that SUBCLASSES InMemoryStore and overrides
+  // e.g. `insertVersion` to force a failure is honored by polymorphic
+  // dispatch — the documented failure-injection technique for this store
+  // (see BUG-002 AC-1 / the paired `provenance-writes` test suite).
+
+  /**
+   * Remove the single version row inserted by a just-failed composite call.
+   * Matched on `(doc_id, version)` — the versions table's real PK, mirrored
+   * here since InMemoryStore has no unique-index enforcement of its own.
+   */
+  private removeVersionEntry(version: VersionRecord): void {
+    const idx = this.versions.findIndex(
+      (v) => v.doc_id === version.doc_id && v.version === version.version,
+    );
+    if (idx !== -1) this.versions.splice(idx, 1);
+  }
+
+  /**
+   * Restore `this.docs.get(id)` to its pre-call snapshot — `undefined` means
+   * the doc did not exist before this call (so the rollback is a delete),
+   * otherwise the snapshot is written back verbatim.
+   */
+  private restoreDocSnapshot(id: DocId, before: DocRecord | undefined): void {
+    if (before === undefined) {
+      this.docs.delete(id);
+    } else {
+      this.docs.set(id, { ...before });
+    }
+  }
+
+  /**
+   * @see StoreInterface.insertWithProvenance
+   */
+  async insertWithProvenance(
+    doc: DocRecord,
+    version: VersionRecord,
+    audit: AuditEntry,
+  ): Promise<Result<DocRecord, LoreError>> {
+    const insertResult = await this.insert(doc);
+    if (!insertResult.ok) return insertResult;
+
+    const versionResult = await this.insertVersion(version);
+    if (!versionResult.ok) {
+      this.docs.delete(doc.id);
+      return versionResult;
+    }
+
+    const auditResult = await this.appendAuditEntry(audit);
+    if (!auditResult.ok) {
+      this.docs.delete(doc.id);
+      this.removeVersionEntry(version);
+      return auditResult;
+    }
+
+    return ok(insertResult.value);
+  }
+
+  /**
+   * @see StoreInterface.updateWithProvenance
+   */
+  async updateWithProvenance(
+    id: DocId,
+    patch: Partial<DocRecord>,
+    opts: UpdateOpts | undefined,
+    version: VersionRecord,
+    audit: AuditEntry,
+  ): Promise<Result<DocRecord, LoreError>> {
+    const before = this.docs.get(id);
+
+    const updateResult = await this.update(id, patch, opts);
+    if (!updateResult.ok) return updateResult;
+
+    const versionResult = await this.insertVersion(version);
+    if (!versionResult.ok) {
+      this.restoreDocSnapshot(id, before);
+      return versionResult;
+    }
+
+    const auditResult = await this.appendAuditEntry(audit);
+    if (!auditResult.ok) {
+      this.restoreDocSnapshot(id, before);
+      this.removeVersionEntry(version);
+      return auditResult;
+    }
+
+    return ok(updateResult.value);
+  }
+
+  /**
+   * @see StoreInterface.softDeleteWithProvenance
+   */
+  async softDeleteWithProvenance(
+    id: DocId,
+    version: VersionRecord,
+    audit: AuditEntry,
+  ): Promise<Result<void, LoreError>> {
+    const before = this.docs.get(id);
+
+    const deleteResult = await this.softDelete(id);
+    if (!deleteResult.ok) return deleteResult;
+
+    const versionResult = await this.insertVersion(version);
+    if (!versionResult.ok) {
+      this.restoreDocSnapshot(id, before);
+      return versionResult;
+    }
+
+    const auditResult = await this.appendAuditEntry(audit);
+    if (!auditResult.ok) {
+      this.restoreDocSnapshot(id, before);
+      this.removeVersionEntry(version);
+      return auditResult;
+    }
+
+    return ok(undefined);
+  }
+
   // ── Links ─────────────────────────────────────────────────────────────────
 
   async addLink(link: LinkRecord): Promise<Result<LinkRecord, LoreError>> {

@@ -657,6 +657,81 @@ describe("set", () => {
     expect(result.value.extra["spec_kind"]).toBe("bogus");
     expect(result.value.extra["note"]).toBe("fine");
   });
+
+  // ─── BUG-003 (audit finding): opts.expectedVersion closes the lost-update race ──
+  // reason: pre-fix, set()'s CAS ALWAYS used its own fresh-read `existing.version`,
+  // making a caller's own optimistic-concurrency precheck (e.g. dashboard's
+  // If-Match header) purely advisory — two concurrent writers who both read v1
+  // could BOTH reach set(), and the second one's fresh internal read would
+  // already see v2 (the first writer's commit), CAS'ing against ITS OWN fresh
+  // read instead of the v1 it actually validated against — silently overwriting
+  // the first writer's commit with no conflict ever surfacing (classic lost
+  // update). `opts.expectedVersion` closes this: it REPLACES the internal
+  // fresh-read with the CALLER's declared version.
+
+  it("BUG-003: two writers both declaring expectedVersion=1 (a simulated A/B race) — A wins, B receives STALE_VERSION instead of a silent lost update", async () => {
+    const { service } = makeService();
+    const created = await service.create(prdInput("Race Doc"));
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    expect(created.value.version).toBe(1);
+
+    // Writer A and writer B both read version 1 (simulated: both declare
+    // expectedVersion: 1, the version they believe is current).
+    const writerA = await service.set(created.value.id, { title: "Committed by A" }, { expectedVersion: 1 });
+    expect(writerA.ok).toBe(true);
+    if (!writerA.ok) return;
+    expect(writerA.value.version).toBe(2);
+    expect(writerA.value.title).toBe("Committed by A");
+
+    // Writer B's set() call happens AFTER A's commit — by the time B's OWN
+    // internal find() runs, the row is already at v2, but B still declares its
+    // ORIGINAL v1 belief via expectedVersion. Pre-fix, set() would have CAS'd
+    // against its own fresh internal read (v2) and silently overwritten A's
+    // commit. Fixed: B's declared v1 no longer matches the row's TRUE current
+    // version (2), so the CAS correctly rejects it.
+    const writerB = await service.set(created.value.id, { title: "Committed by B" }, { expectedVersion: 1 });
+    expect(writerB.ok).toBe(false);
+    if (writerB.ok) return;
+    expect(writerB.error.code).toBe("STALE_VERSION");
+    if (writerB.error.code !== "STALE_VERSION") return;
+    expect(writerB.error.expected).toBe(1);
+    expect(writerB.error.actual).toBe(2);
+
+    // STATE: A's commit survives untouched — no lost update.
+    const finalGet = await service.get(created.value.id);
+    expect(finalGet.ok).toBe(true);
+    if (!finalGet.ok) return;
+    expect(finalGet.value.doc.title).toBe("Committed by A");
+    expect(finalGet.value.doc.version).toBe(2);
+  });
+
+  it("REGRESSION: omitting opts (no expectedVersion) preserves the pre-fix byte-identical CAS-against-fresh-read behavior", async () => {
+    const { service } = makeService();
+    const created = await service.create(prdInput("No Opts Doc"));
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+
+    // No opts passed at all — set() falls back to CAS'ing against its own
+    // fresh existing.version, exactly like every pre-BUG-003-fix caller.
+    const result = await service.set(created.value.id, { title: "Updated" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.version).toBe(2);
+    expect(result.value.title).toBe("Updated");
+  });
+
+  it("BOUNDARY: expectedVersion matching the doc's true current version succeeds normally", async () => {
+    const { service } = makeService();
+    const created = await service.create(prdInput("Matching Version Doc"));
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+
+    const result = await service.set(created.value.id, { title: "Matched" }, { expectedVersion: 1 });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.version).toBe(2);
+  });
 });
 
 // ─── set — status transition validation (B1 blocker fix) ────────────────────
@@ -1067,6 +1142,86 @@ describe("tree", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe("DOC_NOT_FOUND");
+  });
+
+  // ─── BUG-008 (audit finding): buildTreeNode hard recursion-depth backstop ──
+  // reason: `remainingDepth <= 0` never terminates for a NaN/Infinity `depth`
+  // (both comparisons are `false` in JS) — combined with a manufactured
+  // parent_id cycle (a store-level defect `addLink`'s cycle guard cannot see,
+  // since it only guards the SEPARATE `links` table, not the `parent_id`
+  // column `buildTreeNode` actually walks), this would recurse without bound.
+
+  function treeDepth(node: { children: { children: unknown[] }[] }): number {
+    if (node.children.length === 0) return 1;
+    return 1 + Math.max(...node.children.map((c) => treeDepth(c as typeof node)));
+  }
+
+  it("BUG-008: NaN depth + a manufactured parent_id cycle terminates within the hard cap instead of recursing forever", async () => {
+    const { service, store } = makeService();
+    // reason: PARENT_TYPE_CONTRACT only allows spec←prd (not spec←spec) — use
+    // the prd→spec→plan chain (all valid parent-type pairs) for a 3-node cycle.
+    const a = await service.create(prdInput("Cycle A"));
+    expect(a.ok).toBe(true);
+    if (!a.ok) return;
+    const b = await service.create(specInput(a.value.id, "Cycle B"));
+    expect(b.ok).toBe(true);
+    if (!b.ok) return;
+    const c = await service.create({ type: "plan", title: "Cycle C", parent_id: b.value.id });
+    expect(c.ok).toBe(true);
+    if (!c.ok) return;
+
+    // Manufacture the cycle DIRECTLY on the store — bypasses `addLink`'s
+    // cycle guard entirely (that guard only protects the `links` table;
+    // `buildTreeNode` walks children purely via the `parent_id` COLUMN, which
+    // `store.update` never cycle-checks). A → B → C → A, forever, without a
+    // hard cap.
+    const cycleUpdate = await store.update(a.value.id, { parent_id: c.value.id });
+    expect(cycleUpdate.ok).toBe(true);
+
+    const treeResult = await service.tree(a.value.id, { depth: NaN });
+    expect(treeResult.ok).toBe(true);
+    if (!treeResult.ok) return;
+
+    // Terminates (no stack overflow, no hang) AND is bounded — NOT the full
+    // unbounded cycle depth. hardDepthBudget starts at TREE_NODE_DEPTH_CAP
+    // (20) and is checked with `<= 0`, so the root itself (budget=20) plus
+    // 20 further descents (budget 19..0) is the true ceiling: 21 node-levels.
+    expect(treeDepth(treeResult.value)).toBeLessThanOrEqual(21);
+  });
+
+  it("BUG-008: Infinity depth on a normal (non-cyclic) tree still terminates within the hard cap", async () => {
+    const { service } = makeService();
+    const prd = await service.create(prdInput("Infinity Depth PRD"));
+    expect(prd.ok).toBe(true);
+    if (!prd.ok) return;
+    await service.create(specInput(prd.value.id, "Only Child"));
+
+    const treeResult = await service.tree(prd.value.id, { depth: Infinity });
+    expect(treeResult.ok).toBe(true);
+    if (!treeResult.ok) return;
+
+    // REGRESSION: a normal, shallow, non-cyclic tree is completely unaffected
+    // by the hard cap — both levels are still present.
+    expect(treeResult.value.children).toHaveLength(1);
+    expect(treeDepth(treeResult.value)).toBeLessThanOrEqual(20);
+  });
+
+  it("REGRESSION: a sane finite depth (well under the hard cap) is completely unaffected by TREE_NODE_DEPTH_CAP", async () => {
+    const { service } = makeService();
+    const prd = await service.create(prdInput("Sane Depth PRD"));
+    expect(prd.ok).toBe(true);
+    if (!prd.ok) return;
+    const spec = await service.create(specInput(prd.value.id, "Sane Child"));
+    expect(spec.ok).toBe(true);
+    if (!spec.ok) return;
+    const grandchild = await service.create({ type: "plan", title: "Sane Grandchild", parent_id: spec.value.id });
+    expect(grandchild.ok).toBe(true);
+
+    const treeResult = await service.tree(prd.value.id, { depth: 3 });
+    expect(treeResult.ok).toBe(true);
+    if (!treeResult.ok) return;
+    expect(treeResult.value.children).toHaveLength(1);
+    expect(treeResult.value.children[0]?.children).toHaveLength(1);
   });
 });
 

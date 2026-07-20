@@ -513,6 +513,69 @@ describe("PATCH with stale If-Match → 409 conflict (AC-DASH-WRITE-3)", () => {
     expect(current.content).toBe("the server content that beat you\n"); // canonicaliseBody appends \n (SPEC-021 FU)
     expect(error.mine).toBe("client attempt");
   });
+
+  // ─── BUG-003 (audit finding): a race the route-level precheck alone cannot see ──
+  // reason: `checkConcurrency`'s precheck compares against a SINGLE snapshot read
+  // at the top of handleDashboardPatch. It cannot detect a second writer
+  // committing BETWEEN that snapshot read and the route's later
+  // `CorpusService.set` call — both writers' snapshot reads can land BEFORE
+  // either commits. This is reproduced here by wrapping `app.corpusService.get`
+  // (the route's precheck read) to inject a hidden concurrent commit the FIRST
+  // time it's called, simulating writer B's precheck racing writer A's commit.
+  it("BUG-003: set()'s own CAS catches a race the route-level If-Match precheck alone cannot see (a second writer commits between the precheck read and set())", async () => {
+    const { id, version } = await createPrd("Race Doc");
+
+    const realGet = app.corpusService.get.bind(app.corpusService);
+    let getCallCount = 0;
+    // reason: monkeypatch a single property on the App-held CorpusService
+    // instance for THIS test only — App fields are plain (non-readonly)
+    // object properties, and this simulates the true race: the route's OWN
+    // precheck snapshot read (this wrapped `get`) is stale by the time the
+    // route's LATER `set()` call actually executes, because another writer
+    // commits in between — exactly the interleaving a single-request,
+    // single-threaded test cannot otherwise reproduce sequentially.
+    app.corpusService.get = (async (idOrSlug: string) => {
+      getCallCount += 1;
+      const result = await realGet(idOrSlug);
+      if (getCallCount === 1 && result.ok) {
+        await app.corpusService.set(
+          id,
+          { title: "Committed by concurrent writer B" },
+          { expectedVersion: version },
+        );
+      }
+      return result;
+    }) as typeof app.corpusService.get;
+
+    try {
+      const req = jsonReq(
+        "PATCH",
+        `/api/dashboard/docs/${id}`,
+        { title: "My edit (writer A)" },
+        { "If-Match": String(version) }, // writer A's own precheck-time belief
+      );
+      const url = makeUrl(`/api/dashboard/docs/${id}`);
+      const res = await handleDashboardRoute(req, url, app, COOKIE_ACTOR);
+
+      // The route's OWN precheck (checkConcurrency) saw a doc still at
+      // `version` (the wrapped get() above returns the PRE-bump snapshot) and
+      // would have let writer A through — but set()'s CAS (guarded by
+      // resolveExpectedVersion(req), independent of that stale snapshot)
+      // catches the real race.
+      expect(res!.status).toBe(409);
+      const body = await parseRes(res!);
+      expect(body.ok).toBe(false);
+      const error = body.error as Record<string, unknown>;
+      expect(error.current).toBeDefined();
+      expect(error.mine).toBeDefined();
+      expect(error.diff).toBeDefined();
+      const current = error.current as Record<string, unknown>;
+      expect(current.title).toBe("Committed by concurrent writer B");
+      expect(error.mine).toBe(""); // no content field in the title-only patch → currentDoc.content fallback is empty
+    } finally {
+      app.corpusService.get = realGet;
+    }
+  });
 });
 
 describe("PATCH with X-Force-Overwrite: 1 — bypass stale conflict", () => {

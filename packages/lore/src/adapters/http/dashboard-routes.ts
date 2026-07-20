@@ -60,7 +60,7 @@ import type { ActorContext } from "./auth.js";
 import type { DocPatch, LinkType } from "@lore/core";
 import { createDocInputSchema } from "@lore/core";
 import { jsonOk, jsonError, loreErrorResponse, parseJsonBody, isOriginAllowed } from "./middleware.js";
-import { checkConcurrency } from "./concurrency.js";
+import { checkConcurrency, resolveExpectedVersion, buildConflictPayload } from "./concurrency.js";
 import { runCalibrationHook } from "../../flows/calibration-hook.js";
 
 // ─── CSRF Origin guard ────────────────────────────────────────────────────────
@@ -254,6 +254,21 @@ async function handleDashboardCreate(
  * Checks If-Match header for optimistic concurrency.
  * Stale version → 409 with { current, mine, diff }.
  * Returns 200 with updated DocRecord. Status auto-reset if approved doc is edited.
+ *
+ * BUG-003 (audit finding) fix — TWO independent conflict-detection layers, not one:
+ *   1. `checkConcurrency` (unchanged) — an advisory PRECHECK against the single
+ *      `currentDoc` snapshot read below. Fast-rejects the common case, but cannot see
+ *      a second writer committing BETWEEN this read and step 2's `set()` call.
+ *   2. `app.corpusService.set(..., {expectedVersion})` — the REAL race-safe guard.
+ *      The client's declared `If-Match` version (via `resolveExpectedVersion`, the
+ *      SAME headers `checkConcurrency` reads) is threaded straight into `set`'s CAS,
+ *      REPLACING `set`'s own pre-fix internal fresh-read-based guard. A race that
+ *      slips past layer 1 (both writers' precheck reads land before either commits)
+ *      is now caught here: `set` returns `STALE_VERSION`, rendered as the SAME
+ *      `{current, mine, diff}` ConflictPayload shape via `buildConflictPayload` (a
+ *      fresh read of the doc, since `currentDoc` above is now stale) — the frontend's
+ *      existing `mutations.ts` STALE_VERSION handling (built for exactly this shape)
+ *      renders the ConflictModal instead of a generic error toast.
  */
 async function handleDashboardPatch(
   req: Request,
@@ -273,15 +288,34 @@ async function handleDashboardPatch(
   if (!currentResult.ok) return loreErrorResponse(currentResult.error);
   const currentDoc = currentResult.value.doc;
 
-  // Optimistic concurrency check (SPEC-022 §9.4).
+  // Optimistic concurrency check (SPEC-022 §9.4) — layer 1, see this function's JSDoc.
   const clientContent = typeof patch.content === "string" ? patch.content : currentDoc.content;
   const conflict = checkConcurrency(req, currentDoc, clientContent);
   if (conflict !== null) {
     return jsonError(conflict, 409);
   }
 
-  const result = await app.corpusService.set(id, patch);
-  if (!result.ok) return loreErrorResponse(result.error);
+  // Layer 2 — see this function's JSDoc. `expectedVersion` is derived from the
+  // request's own headers, independent of the (possibly already-stale-by-now)
+  // `currentDoc` snapshot above.
+  const expectedVersion = resolveExpectedVersion(req);
+  const result = await app.corpusService.set(
+    id,
+    patch,
+    expectedVersion !== undefined ? { expectedVersion } : undefined,
+  );
+  if (!result.ok) {
+    if (result.error.code === "STALE_VERSION") {
+      const latestResult = await app.corpusService.get(id);
+      if (latestResult.ok) {
+        return jsonError(buildConflictPayload(latestResult.value.doc, clientContent), 409);
+      }
+      // reason: the doc vanished between the failed CAS and this re-read (e.g. a
+      // concurrent delete) — fall through to the generic STALE_VERSION error below,
+      // still a 409 (loreErrorToStatus), just without the rich diff payload.
+    }
+    return loreErrorResponse(result.error);
+  }
 
   emitDashboardTelemetry(app, "update", {
     doc_id: result.value.id,
