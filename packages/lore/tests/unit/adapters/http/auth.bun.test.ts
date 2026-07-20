@@ -292,6 +292,86 @@ describe("ApiKeyStore", () => {
         if (result.error.code !== "VALIDATION_ERROR") throw new Error("wrong code");
         expect(result.error.message).toContain("duplicate-agent");
       });
+
+      // ASYNC2-001 (backend static-audit finding, low severity): `create()` is
+      // check-then-act — the `SELECT ... WHERE name = ?` precheck and the `INSERT`
+      // are separated by `await hashApiKey(rawKey)`. A second writer's `INSERT` for
+      // the SAME name landing in that async gap passes the precheck (no row exists
+      // yet) but then collides with `api_keys.name`'s UNIQUE constraint at THIS
+      // call's own INSERT. Before the fix, that constraint violation fell through
+      // to the generic STORE_ERROR catch-all; after the fix it maps to the SAME
+      // VALIDATION_ERROR{field:"name"} shape/message the precheck already returns.
+      //
+      // Forced deterministically (no timing-dependent Promise racing) by
+      // monkeypatching the global `crypto.subtle.digest` — the one `await` point
+      // inside `hashApiKey` — so the FIRST call performs a raw, precheck-bypassing
+      // INSERT for the colliding name before resolving. This reproduces the exact
+      // "second writer wins the precheck, loses the INSERT" ordering without any
+      // second `store.create()` call actually racing in real time.
+      it("maps a UNIQUE(api_keys.name) violation surfaced only after the async hash gap to the SAME VALIDATION_ERROR the precheck returns", async () => {
+        const originalDigest = crypto.subtle.digest.bind(crypto.subtle);
+        let intercepted = false;
+        // reason: test-only monkeypatch of a global crypto method to force a
+        // concurrent writer's INSERT into the exact async gap `create()` leaves open.
+        crypto.subtle.digest = async (...args: Parameters<typeof originalDigest>) => {
+          if (!intercepted) {
+            intercepted = true;
+            db.prepare(
+              "INSERT INTO api_keys (key_hash, name, owner, rate_limit, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, NULL)",
+            ).run(
+              "deadbeef".repeat(8),
+              "race-name",
+              "concurrent-writer",
+              60,
+              new Date().toISOString(),
+            );
+          }
+          return originalDigest(...args);
+        };
+
+        try {
+          const result = await store.create("race-name", "owner1");
+
+          expect(result.ok).toBe(false);
+          if (result.ok) throw new Error("expected error");
+          expect(result.error.code).toBe("VALIDATION_ERROR");
+          if (result.error.code !== "VALIDATION_ERROR") throw new Error("wrong code");
+          expect(result.error.field).toBe("name");
+          expect(result.error.message).toBe("Agent name 'race-name' already exists");
+        } finally {
+          crypto.subtle.digest = originalDigest;
+        }
+      });
+
+      // Matched pair (regression guard): the new catch-block branch pattern-matches
+      // ONLY "UNIQUE constraint failed: api_keys.name" — a DIFFERENT constraint
+      // violation on the same INSERT (here: the `key_hash` PRIMARY KEY, forced by
+      // patching `crypto.getRandomValues` to hand back identical bytes twice, so
+      // both calls compute the identical SHA-256 hash) must still fall through to
+      // the generic STORE_ERROR path, never get misreported as "name already
+      // exists" for an agent name that is, in fact, unique.
+      it("does NOT reclassify an unrelated key_hash PRIMARY KEY collision as VALIDATION_ERROR (matched pair)", async () => {
+        const fixedBytes = new Uint8Array(32).fill(7);
+        const originalGetRandomValues = crypto.getRandomValues.bind(crypto);
+        // @ts-expect-error - test-only monkeypatch forcing two calls to derive the
+        // identical raw key (and therefore identical key_hash primary key).
+        crypto.getRandomValues = (arr: Uint8Array) => {
+          arr.set(fixedBytes.slice(0, arr.length));
+          return arr;
+        };
+
+        try {
+          const first = await store.create("agent-one", "owner1");
+          expect(first.ok).toBe(true);
+
+          const second = await store.create("agent-two", "owner2");
+          expect(second.ok).toBe(false);
+          if (second.ok) throw new Error("expected error");
+          expect(second.error.code).toBe("STORE_ERROR");
+        } finally {
+          crypto.getRandomValues = originalGetRandomValues;
+        }
+      });
     });
 
     describe("boundary values", () => {
