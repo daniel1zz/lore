@@ -60,3 +60,4 @@ export * from "./frontmatter.js";
 export * from "./setup-manifest.js";
 export * from "./merge-settings.js";
 export * from "./register-mcp.js";
+export * from "./distribution-hooks.js";

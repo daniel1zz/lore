@@ -45,7 +45,7 @@ import os from "node:os";
 import path from "node:path";
 import fsp from "node:fs/promises";
 import { describe, it, expect } from "vitest";
-import { ok, err } from "@lore/core";
+import { ok, err, buildHookSettingsEntries } from "@lore/core";
 import type { Result, LoreError, AssetPayload, SettingsHookEntry } from "@lore/core";
 import {
   SetupService,
@@ -664,5 +664,163 @@ describe("I6 — test-pollution safety guard", () => {
     if (result.ok) throw new Error("expected err");
     expect(result.error.code).toBe("VALIDATION_ERROR");
     expect(fs.writerCalls).toHaveLength(0);
+  });
+});
+
+// ─── {{CLAUDE_DIR}} settings-hook placeholder resolution ────────────────────
+//
+// Proves the real-distribution shape end-to-end: a `settings-hook` asset
+// carrying `buildHookSettingsEntries("{{CLAUDE_DIR}}")`-shaped content (what
+// `RealAssetSource` actually emits) gets its placeholder resolved to the real
+// `targetDir` BEFORE merging, so the on-disk `settings.json` carries real
+// absolute hook commands and `mergeSettings`' command-identity key stays
+// stable across repeated installs/uninstalls for a given targetDir.
+//
+// This whole describe block is a RED->GREEN proof: before this task's
+// `resolveClaudeDirPlaceholder` wiring in `SetupService.resolvePayload`, the
+// FIRST test below would have found the literal `{{CLAUDE_DIR}}` token
+// verbatim in the on-disk settings.json instead of `TARGET_DIR`.
+
+/** Builds a settings-hook-only payload using the SAME builder RealAssetSource calls, so these tests exercise the real distribution shape. */
+function buildPlaceholderHookPayload(): AssetPayload {
+  return {
+    files: [
+      {
+        path: "settings.json",
+        kind: "settings-hook",
+        content: JSON.stringify(buildHookSettingsEntries("{{CLAUDE_DIR}}")),
+        sha256: "placeholder",
+      },
+    ],
+  };
+}
+
+describe("{{CLAUDE_DIR}} settings-hook placeholder resolution", () => {
+  it("resolves {{CLAUDE_DIR}} to the real targetDir in every registered hook command, all 8 hook files registered, matchers/events correct, existing foreign hook preserved", async () => {
+    const fs = new MapFs();
+    fs.seed(
+      path.join(TARGET_DIR, "settings.json"),
+      `${JSON.stringify(
+        { hooks: { SomeForeignEvent: [{ hooks: [{ type: "command", command: "foreign-user-hook.sh" }] }] } },
+        null,
+        2,
+      )}\n`,
+    );
+    const mcp = new OkMcpRegistrar();
+    const service = new SetupService(new FixedAssetSource(buildPlaceholderHookPayload()), fs, fs, mcp);
+
+    const result = await service.install({ targetDir: TARGET_DIR, binPath: "/usr/local/bin/lore" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected ok");
+
+    const onDisk = fs.store.get(path.join(TARGET_DIR, "settings.json")) as string;
+    expect(onDisk).toBeDefined();
+
+    // No unresolved placeholder token survives onto disk.
+    expect(onDisk).not.toContain("{{CLAUDE_DIR}}");
+
+    const parsed = JSON.parse(onDisk) as { hooks: Record<string, Array<{ matcher?: string; hooks: Array<{ command: string }> }>> };
+
+    // Every registered command now carries the real targetDir prefix.
+    const allCommands = Object.values(parsed.hooks)
+      .flat()
+      .flatMap((group) => group.hooks.map((h) => h.command));
+    const loreCommands = allCommands.filter((c) => c !== "foreign-user-hook.sh");
+    expect(loreCommands.length).toBeGreaterThan(0);
+    for (const command of loreCommands) {
+      expect(command.startsWith(`node ${TARGET_DIR}/hooks/`) || command.startsWith(`bash ${TARGET_DIR}/hooks/`)).toBe(
+        true,
+      );
+    }
+
+    // All 8 distinct hook files are present in the merged command set.
+    const distinctFiles = new Set(loreCommands.map((c) => c.split("/hooks/")[1]));
+    expect([...distinctFiles].sort()).toEqual(
+      [
+        "pre-bash-git-safety-gate.mjs",
+        "lore-gate-g1-spec-create.sh",
+        "lore-gate-g2-spec-promote.sh",
+        "lore-gate-g3-plan-promote.sh",
+        "lore-gate-g4-task-claim.sh",
+        "session-start-resume.mjs",
+        "stop-doc-sync.mjs",
+        "subagent-context.mjs",
+      ].sort(),
+    );
+
+    // event/matcher wiring spot-checks.
+    expect(parsed.hooks["SessionStart"]?.some((g) => g.hooks.some((h) => h.command.includes("session-start-resume.mjs")))).toBe(true);
+    const preToolUseBash = parsed.hooks["PreToolUse"]?.find((g) => g.matcher === "Bash");
+    expect(preToolUseBash?.hooks.some((h) => h.command.includes("pre-bash-git-safety-gate.mjs"))).toBe(true);
+
+    // The pre-existing FOREIGN hook under an unrelated event is untouched.
+    expect(parsed.hooks["SomeForeignEvent"]).toEqual([{ hooks: [{ type: "command", command: "foreign-user-hook.sh" }] }]);
+  });
+
+  it("is idempotent — a byte-identical re-run against the same targetDir fires ZERO writer calls (I2, extended to the placeholder-carrying payload)", async () => {
+    const fs = new MapFs();
+    const mcp = new OkMcpRegistrar();
+    const service = new SetupService(new FixedAssetSource(buildPlaceholderHookPayload()), fs, fs, mcp);
+
+    const first = await service.install(
+      { targetDir: TARGET_DIR, binPath: "/usr/local/bin/lore" },
+      () => "2026-07-20T00:00:00.000Z",
+    );
+    expect(first.ok).toBe(true);
+
+    fs.writerCalls.length = 0; // reset the call log, keep the on-disk state
+
+    const second = await service.install(
+      { targetDir: TARGET_DIR, binPath: "/usr/local/bin/lore" },
+      () => "2026-07-20T01:00:00.000Z",
+    );
+
+    expect(second.ok).toBe(true);
+    if (!second.ok) throw new Error("expected ok");
+    expect(second.value.written).toHaveLength(0);
+    expect(second.value.skipped).toEqual(["settings.json"]);
+    expect(fs.writerCalls).toHaveLength(0);
+  });
+
+  it("resolves to a DIFFERENT targetDir's commands for a different install location (command identity is per-targetDir, not global)", async () => {
+    const fsA = new MapFs();
+    const serviceA = new SetupService(new FixedAssetSource(buildPlaceholderHookPayload()), fsA, fsA, new OkMcpRegistrar());
+    await serviceA.install({ targetDir: "/fake-target/dir-a", binPath: "/usr/local/bin/lore" });
+    const onDiskA = fsA.store.get("/fake-target/dir-a/settings.json") as string;
+    expect(onDiskA).toContain("/fake-target/dir-a/hooks/");
+    expect(onDiskA).not.toContain("/fake-target/dir-b/hooks/");
+
+    const fsB = new MapFs();
+    const serviceB = new SetupService(new FixedAssetSource(buildPlaceholderHookPayload()), fsB, fsB, new OkMcpRegistrar());
+    await serviceB.install({ targetDir: "/fake-target/dir-b", binPath: "/usr/local/bin/lore" });
+    const onDiskB = fsB.store.get("/fake-target/dir-b/settings.json") as string;
+    expect(onDiskB).toContain("/fake-target/dir-b/hooks/");
+    expect(onDiskB).not.toContain("/fake-target/dir-a/hooks/");
+  });
+
+  it("install() then uninstall() over a real mkdtemp dir restores a pre-existing settings.json byte-identically, with resolved (not placeholder) hook commands landing during install", async () => {
+    const targetDir = await makeTempDir();
+    try {
+      const preExisting = `${JSON.stringify({ theme: "dark" }, null, 2)}\n`;
+      await fsp.writeFile(path.join(targetDir, "settings.json"), preExisting, "utf8");
+
+      const { reader, writer } = makeRealFsPorts();
+      const service = new SetupService(new FixedAssetSource(buildPlaceholderHookPayload()), reader, writer, new OkMcpRegistrar());
+
+      const installResult = await service.install({ targetDir, binPath: "/usr/local/bin/lore" });
+      expect(installResult.ok).toBe(true);
+
+      const mergedRaw = await fsp.readFile(path.join(targetDir, "settings.json"), "utf8");
+      expect(mergedRaw).not.toContain("{{CLAUDE_DIR}}");
+      expect(mergedRaw).toContain(`${targetDir}/hooks/session-start-resume.mjs`);
+
+      const uninstallResult = await service.uninstall({ targetDir });
+      expect(uninstallResult.ok).toBe(true);
+
+      const restored = await fsp.readFile(path.join(targetDir, "settings.json"), "utf8");
+      expect(restored).toBe(preExisting); // byte-identical restore
+    } finally {
+      await fsp.rm(targetDir, { recursive: true, force: true });
+    }
   });
 });
