@@ -375,6 +375,7 @@ const DECLARED_FILES_IN_SCOPE = [
   "hooks/subagent-context.mjs",
   "hooks/pre-subagent-gate.mjs",
   "hooks/pre-no-general-agent-gate.mjs",
+  "hooks/pre-bash-git-safety-gate.mjs",
   "hooks/lore-gate-g1-spec-create.sh",
   "hooks/lore-gate-g2-spec-promote.sh",
   "hooks/lore-gate-g3-plan-promote.sh",
