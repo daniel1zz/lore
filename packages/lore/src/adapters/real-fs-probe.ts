@@ -11,27 +11,69 @@
  *   buildRealFsProbe(repoRoot?) — constructs an `FsProbe` rooted at `repoRoot`
  *     (default `process.cwd()`).
  *
- * @invariant `stat()` NEVER throws — every failure (ENOENT, EACCES, a symlink
- *   resolving to neither a file nor a directory, etc.) collapses to `"missing"`.
- *   This is deliberate, not a shortcut: `computeDrift` (`@lore/core`) classifies
- *   `stat === "missing"` as `file_missing`/`dir_missing` — a REAL drift row, not a
- *   silently-swallowed "consistent". Collapsing every stat failure into "missing"
- *   is therefore the SAFE direction for G11 (zero false negatives) — a genuinely
+ * @invariant `stat()` NEVER throws for a GENUINE stat failure — every ordinary
+ *   failure (ENOENT, EACCES, a symlink resolving to neither a file nor a
+ *   directory, etc.) collapses to `"missing"`. This is deliberate, not a
+ *   shortcut: `computeDrift` (`@lore/core`) classifies `stat === "missing"` as
+ *   `file_missing`/`dir_missing` — a REAL drift row, not a silently-swallowed
+ *   "consistent". Collapsing every ordinary stat failure into "missing" is
+ *   therefore the SAFE direction for G11 (zero false negatives) — a genuinely
  *   deleted anchor (the seeded-drift-fixture's core scenario, SPEC-045 AC-DR-4)
- *   MUST classify as `file_missing`, never `probe_error`, which is why this
- *   method does not rethrow on unexpected errors the way `readFile`/`listDir` do.
- * @invariant `readFile()`/`listDir()` return `null` on failure (never throw) —
- *   `DriftCheckService.collectProbes` turns an explicit `null` into a
+ *   MUST classify as `file_missing`, never `probe_error`.
+ * @invariant SYMLINK-ESCAPE GUARD (BUG-015, distinct failure class from the
+ *   invariant above) — every probe call first `realpathSync`-resolves the
+ *   joined path and rejects it if the RESOLVED location falls outside
+ *   `repoRoot`'s own realpath. A repo-internal symlink pointing OUTSIDE the
+ *   repo (accidental or malicious) previously probed successfully — `statSync`
+ *   follows symlinks by default, so an escaping anchor would report a
+ *   perfectly valid "file"/"dir" (or real content/listing) sourced from
+ *   OUTSIDE the repository, defeating the whole point of a repo-scoped drift
+ *   oracle. Unlike an ordinary stat failure, an escape is NOT collapsed to
+ *   "missing" — it is a DISTINCT throw (`stat`) / `null` (`readFile`/
+ *   `listDir`) that `DriftCheckService.collectProbes` turns into a
+ *   `probe_error` row (G11's OTHER safe direction: a probe that cannot
+ *   affirmatively verify — here, refuses to look outside the repo — must never
+ *   silently report "consistent" either). A path that genuinely doesn't exist
+ *   (realpath itself throws ENOENT) is UNCHANGED by this guard — that's still
+ *   the ordinary "missing" collapse, since containment is only checked once a
+ *   real, resolvable location is known.
+ * @invariant `readFile()`/`listDir()` return `null` on ordinary failure (never
+ *   throw) — `DriftCheckService.collectProbes` turns an explicit `null` into a
  *   `probe_error` drift row for that anchor, same effect as a caught throw
- *   (`FsProbe`'s own contract documents both as legal failure signals).
+ *   (`FsProbe`'s own contract documents both as legal failure signals). The
+ *   escape guard above additionally makes them return `null` on a detected
+ *   escape (same "probe_error, not silently missing" reasoning as `stat`'s
+ *   throw — a `null` and a throw are the two FsProbe-contract-legal failure
+ *   signals, so each method uses whichever its OWN pre-existing failure
+ *   convention already is).
  *
  * Side-effect class: IO (synchronous node:fs reads only — never writes)
- * Source: SPEC-045 §Design Decisions D4
+ * Source: SPEC-045 §Design Decisions D4; BUG-015 (symlink-escape hardening)
  */
 
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { join, sep } from "node:path";
 import type { FsProbe } from "../service/drift-check-service.js";
+
+/**
+ * Resolves `path` (repo-relative) against `repoRoot` and returns its REAL
+ * (symlink-followed) absolute location, or `undefined` when it genuinely
+ * doesn't exist / can't be resolved (ENOENT, EACCES, etc. — the caller's
+ * existing "missing"/`null` collapse applies to this case, unchanged by
+ * BUG-015).
+ */
+function tryResolveReal(repoRoot: string, path: string): string | undefined {
+  try {
+    return realpathSync(join(repoRoot, path));
+  } catch {
+    return undefined;
+  }
+}
+
+/** `true` iff `resolved` is `realRepoRoot` itself or a descendant of it. */
+function isWithinRoot(realRepoRoot: string, resolved: string): boolean {
+  return resolved === realRepoRoot || resolved.startsWith(realRepoRoot + sep);
+}
 
 /**
  * Constructs a real, `node:fs`-backed {@link FsProbe} rooted at `repoRoot`.
@@ -45,10 +87,37 @@ import type { FsProbe } from "../service/drift-check-service.js";
  * const result = await app.driftCheckService.checkDrift(probe);
  */
 export function buildRealFsProbe(repoRoot: string = process.cwd()): FsProbe {
+  // reason: realpath the root ONCE, at construction — comparing a realpath'd
+  // anchor resolution against a NON-realpath'd repoRoot would false-positive
+  // "escape" every single anchor whenever the root itself sits behind a
+  // symlink (e.g. macOS `/tmp` -> `/private/tmp`, `mkdtempSync`'s default
+  // base). A root that can't be realpath'd at all (repoRoot doesn't exist) is
+  // a caller bug — process.cwd() always exists — so this degrades to the raw
+  // repoRoot string rather than throwing at construction time; every probe
+  // call's own realpath attempt on the JOINED path still fails safely
+  // (collapses to "missing"/null) in that scenario.
+  const realRepoRoot = (() => {
+    try {
+      return realpathSync(repoRoot);
+    } catch {
+      return repoRoot;
+    }
+  })();
+
   return {
     stat(path: string): "file" | "dir" | "missing" {
+      const resolved = tryResolveReal(repoRoot, path);
+      if (resolved === undefined) return "missing";
+      if (!isWithinRoot(realRepoRoot, resolved)) {
+        // BUG-015: an escape is NOT "missing" — throw so collectProbes turns
+        // it into a probe_error row instead of silently reporting "consistent"
+        // or (worse) affirmatively verifying content sourced outside the repo.
+        throw new Error(
+          `anchor path "${path}" resolves to "${resolved}", outside repo root "${realRepoRoot}" — refusing to probe a symlink escape`,
+        );
+      }
       try {
-        const st = statSync(join(repoRoot, path));
+        const st = statSync(resolved);
         if (st.isDirectory()) return "dir";
         if (st.isFile()) return "file";
         // reason: neither a plain file nor a directory (e.g. a socket, a dangling
@@ -60,15 +129,21 @@ export function buildRealFsProbe(repoRoot: string = process.cwd()): FsProbe {
       }
     },
     readFile(path: string): string | null {
+      const resolved = tryResolveReal(repoRoot, path);
+      if (resolved === undefined) return null;
+      if (!isWithinRoot(realRepoRoot, resolved)) return null; // BUG-015 escape guard
       try {
-        return readFileSync(join(repoRoot, path), "utf8");
+        return readFileSync(resolved, "utf8");
       } catch {
         return null;
       }
     },
     listDir(path: string): string[] | null {
+      const resolved = tryResolveReal(repoRoot, path);
+      if (resolved === undefined) return null;
+      if (!isWithinRoot(realRepoRoot, resolved)) return null; // BUG-015 escape guard
       try {
-        return readdirSync(join(repoRoot, path));
+        return readdirSync(resolved);
       } catch {
         return null;
       }

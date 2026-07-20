@@ -102,6 +102,37 @@ export interface MigrateTasksOpts {
   dryRun: boolean;
 }
 
+/**
+ * Progress durably committed to the store BEFORE a mid-run store failure
+ * aborted {@link PhaseMigrationService.migrateTasks} (BUG-009 fix). Every count
+ * here reflects docs that ACTUALLY exist post-failure — the accumulator
+ * variables backing this shape are only ever incremented AFTER
+ * `persistGroup`/each early lookup resolves `ok`, so a failure never double-
+ * counts a group that didn't fully commit.
+ */
+export interface PhaseMigrationPartialProgress {
+  phases_created: number;
+  tasks_archived: number;
+  evidence_merged: number;
+}
+
+/**
+ * Error returned by {@link PhaseMigrationService.migrateTasks} on a mid-run
+ * store failure (BUG-009 fix). Distinct from a bare `LoreError` so the caller
+ * (CLI `lore migrate tasks-to-phases`) can report BOTH the underlying failure
+ * AND how much progress already landed — critical because a caller seeing only
+ * "STORE_ERROR: ..." with no partial-progress figure has no way to know the run
+ * is SAFE TO RE-RUN (migrateTasks is idempotent — see this module's header
+ * invariants #1/#2 — a retry skips every already-migrated task/phase and only
+ * processes the remainder).
+ */
+export interface PhaseMigrationError {
+  /** The underlying store failure that aborted the run. */
+  cause: LoreError;
+  /** Progress already committed before `cause` occurred — see {@link PhaseMigrationPartialProgress}. */
+  partial: PhaseMigrationPartialProgress;
+}
+
 // ─── Internal Types ─────────────────────────────────────────────────────────
 
 /** `"phase"` cast through `DocType` — see this module's header invariant. */
@@ -137,6 +168,22 @@ function readSourceExtra(task: DocRecord): SourceTaskExtra {
   return task.extra as SourceTaskExtra;
 }
 
+/**
+ * Constructs a failed {@link PhaseMigrationReport} result carrying `cause` +
+ * `partial` progress (BUG-009 fix). `@lore/core`'s `err<E extends LoreError>`
+ * cannot be reused here — `PhaseMigrationError` deliberately is NOT a
+ * `LoreError` itself (it WRAPS one alongside partial-progress counts), so it
+ * fails that generic's `extends LoreError` constraint. This is the sole
+ * construction site for this module's `err` branch, mirroring `ok`/`err`'s
+ * own shape without importing a mismatched generic.
+ */
+function migrationErr(
+  cause: LoreError,
+  partial: PhaseMigrationPartialProgress,
+): Result<PhaseMigrationReport, PhaseMigrationError> {
+  return { ok: false, error: { cause, partial } };
+}
+
 // ─── Service ────────────────────────────────────────────────────────────────
 
 /**
@@ -151,17 +198,31 @@ function readSourceExtra(task: DocRecord): SourceTaskExtra {
 export class PhaseMigrationService {
   constructor(private readonly store: StoreInterface) {}
 
-  async migrateTasks(opts: MigrateTasksOpts): Promise<Result<PhaseMigrationReport, LoreError>> {
+  async migrateTasks(opts: MigrateTasksOpts): Promise<Result<PhaseMigrationReport, PhaseMigrationError>> {
     const dryRun = opts.dryRun;
+
+    // BUG-009 fix: these accumulators are declared BEFORE the try block (and
+    // before the FIRST store call) so `partial()` can report `{0,0,0}` even on
+    // the very first lookup's failure, and so the catch block (a thrown, not
+    // Result-returned, store failure) can report accurately too. Every
+    // increment site is UNCHANGED from pre-fix — only incremented AFTER
+    // `persistGroup` resolves ok, so a failing group's write is never
+    // double-counted into `partial`.
+    let phasesCreated = 0;
+    let tasksArchived = 0;
+    let evidenceMerged = 0;
+    const warnings: string[] = [];
+
+    const partial = (): PhaseMigrationPartialProgress => ({
+      phases_created: phasesCreated,
+      tasks_archived: tasksArchived,
+      evidence_merged: evidenceMerged,
+    });
 
     try {
       const plansResult = await this.store.findMany({ type: "plan" });
-      if (!plansResult.ok) return err(plansResult.error);
+      if (!plansResult.ok) return migrationErr(plansResult.error, partial());
 
-      let phasesCreated = 0;
-      let tasksArchived = 0;
-      let evidenceMerged = 0;
-      const warnings: string[] = [];
       const nowIso = new Date().toISOString();
 
       for (const plan of plansResult.value) {
@@ -169,7 +230,7 @@ export class PhaseMigrationService {
           parent_id: plan.id,
           type: "task",
         });
-        if (!tasksResult.ok) return err(tasksResult.error);
+        if (!tasksResult.ok) return migrationErr(tasksResult.error, partial());
 
         // (1) idempotency marker #1 — a task already carrying migrated_to was
         // processed by a prior run; excluding it here is what drives a second
@@ -182,7 +243,7 @@ export class PhaseMigrationService {
           parent_id: plan.id,
           type: PHASE_DOC_TYPE,
         });
-        if (!existingPhasesResult.ok) return err(existingPhasesResult.error);
+        if (!existingPhasesResult.ok) return migrationErr(existingPhasesResult.error, partial());
         // (2) idempotency marker #2 — a declared phase name already present
         // among this plan's existing phase doc titles (empty OR merged) is
         // never recreated by the empty-declared-phase fallback below.
@@ -221,7 +282,7 @@ export class PhaseMigrationService {
 
           if (!dryRun) {
             const writeResult = await this.persistGroup(phaseDoc, group, nowIso);
-            if (!writeResult.ok) return err(writeResult.error);
+            if (!writeResult.ok) return migrationErr(writeResult.error, partial());
           }
 
           phasesCreated += 1;
@@ -238,10 +299,13 @@ export class PhaseMigrationService {
         warnings,
       });
     } catch (error) {
-      return err({
-        code: "STORE_ERROR",
-        message: error instanceof Error ? error.message : String(error),
-      });
+      return migrationErr(
+        {
+          code: "STORE_ERROR",
+          message: error instanceof Error ? error.message : String(error),
+        },
+        partial(),
+      );
     }
   }
 
