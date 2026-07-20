@@ -7,6 +7,8 @@ description: "Session reflection and knowledge persistence orchestrator. Capture
 
 All persistence flows through the **lore CLI** (`lore <cmd> --json`). Keep `CLAUDECODE=1` exported so lore's AI-assist defaults OFF (agent surface). Project has no `.lore/` → skip persistence entirely and tell the user (`lore init` once per project if they want it).
 
+> **Sibling skill — `lore-session-review`**: this skill captures WHAT the session learned (knowledge posture). It does NOT judge HOW the session executed the workflow (claim/evidence discipline, worktree hygiene, gate compliance). For a complex or multi-agent session — especially one with incidents — run `lore-session-review` FIRST (it produces process-violation findings you can reference in the retro), then this skill to persist. The two are complementary, not substitutes.
+
 ## Workflow
 
 ```

@@ -1,0 +1,74 @@
+# Invariant Catalog — lore-governed session process quality
+
+Each invariant states WHY it exists (the failure it prevents), what counts as evidence, and known false-positive traps. Verdicts: `PASS` (evidence of compliance), `VIOLATION` (evidence of breach), `N/A` (not exercised this session — say why). Never grade on vibes; every verdict cites evidence.
+
+## I1 — feed-before-produce
+Before producing a governed artifact (spec/plan/task), the checkpoint feed (`lore feed <checkpoint>`) or equivalent upstream reading happened. **Why**: gates catch violations at write time, but feeding first avoids the deny-retry churn and produces upstream-consistent artifacts.
+- Evidence: transcript shows feed/search/get calls before `lore create`; or gate denials followed by correction.
+- N/A when: session produced no governed artifacts.
+
+## I2 — claim-before-work
+Implementation work on lore-tracked scope was claimed (`lore claim`, by the implementer, from its own worktree, with distinct actor identity) before code was written. **Why**: unclaimed work is invisible to the session registry and the anchor-overlap gate — concurrent sessions can silently collide (the gate only protects declared work).
+- Evidence: claim audit rows matching the session's actors; `--worktree` declared; distinct `LORE_ACTOR` per concurrent agent.
+- VIOLATION pattern (real incident 2026-07-20): an entire multi-agent fix batch ran with zero claims — the orchestrator hand-partitioned files instead. Functional, but every safety mechanism was voluntarily dark.
+- N/A when: no lore corpus, or work was outside lore-tracked scope (say which).
+
+## I3 — evidence-before-done / external-oracle-only
+Every "done" claim is backed by an external oracle (command + exit code: tsc/test/lint/build/e2e), recorded (`lore evidence` when a task exists; the completion report otherwise). LLM self-assessment is NOT an oracle. **Why**: Self-Verification Paradox — the author's own judgment of the author's work has correlated blind spots.
+- VIOLATION patterns: evidence entry reading "reviewed the code and it looks correct"; a report claiming tests pass with no command/exit code; oracle run in the WRONG directory (worktree work verified against the main checkout — real incident class: missing `bun install` makes worktree tests silently test stale main-checkout source).
+- Red-flag to check: exit codes measured through pipes (`cmd | tail` then `$?` — measures tail).
+- **Provenance sub-check**: the evidence row must be written by the actor that RAN the oracle, from where the work happened — not transcribed by the orchestrator from a subagent's prose report ("evidence-by-proxy"). An orchestrator relabeling an implementer's self-narration into a corpus evidence row launders unverified claims through the audit trail, even when the oracle KIND looks legitimate. Evidence: the `--by` actor on the evidence row matches the claim's holder and the worktree the oracle ran in.
+
+## I4 — commit-before-done
+A subagent's completion report on file-modifying work includes the commit hash, and the work IS committed. **Why (real incident 2026-07-20)**: an implementer reported STATUS: DONE with full oracle evidence but never committed; the worktree was later cleaned and the tree destroyed (recovered only via `git fsck` stash archaeology).
+- Evidence: completion reports carry `git log --oneline -1` output; branches non-empty at merge time.
+
+## I5 — merge-verify-before-cleanup
+Before merging an agent branch and removing its worktree, the orchestrator verified the branch actually carries the commits ("Already up to date" on a supposedly-work-carrying branch = STOP). `--force` worktree removal on an unmerged/unverified tree is a violation by itself. **Why (same 2026-07-20 incident)**: the blind `merge → cleanup` sequence is what turned a missing commit into data loss.
+- Evidence: transcript shows `git log <branch>` before merge, or merge diffstats consistent with the reported work.
+
+## I6 — red-before-green (failure-first verification)
+New tests demonstrably failed against pre-fix code before passing (stash/revert isolation or equivalent), and fix verification included the negative direction. **Why**: a test that never failed proves nothing about the fix; "为通过而验证 = 未验证".
+- Evidence: reports describe the red run with the failure text; matched-pair tests for behavioral boundaries.
+- N/A when: session had no code fixes/tests.
+
+## I7 — gate compliance
+Gate denials were handled by correcting the input (per feeding pack), never by bypass (`LORE_GATE_BYPASS`, `--no-verify`, `CLAUDE_SUBAGENT_GATE_BYPASS`) without explicit user authorization IN THE TRANSCRIPT. Safety-gate blocks (e.g. a blocked `git branch -D`) were respected — deferred to the user, not chained around. **Why**: gates are the corpus's mechanized discipline; silent bypass converts every downstream guarantee into an assumption.
+
+## I8 — doc-sync honesty
+Session-end doc-sync claims match reality: docs listed as updated were updated; "no update needed" reasons are true; knowledge the session DISPROVED was invalidated or corrected, not left standing. **Why (real incident)**: a CLAUDE.md row claimed a fix landed in "BOTH copies" when the SSOT copy still carried the defect — an unverifiable claim that survived 205 green conformance tests for two days.
+- VIOLATION pattern: stating "fixed in both copies"/"synced" without a diff/hash oracle backing it.
+
+## I9 — handoff on unfinished work
+Session ended with unfinished lore-tracked work → a handoff doc exists (`lore handoff` / knowledge sub-type handoff) naming the WIP, or the final message explicitly enumerates the unfinished state. **Why**: Cross-Session Amnesia — un-handed-off WIP is rediscovered at full cost or silently dropped.
+- N/A when: everything closed.
+
+## I10 — orchestration hygiene
+Concurrent dispatch respected: rebase/HEAD-freshness before worktree creation; file-anchor mutex between parallel agents (declared anchors, or explicit disjoint partitions when working outside lore tasks); `bun install` (or ecosystem equivalent) as first command in fresh worktrees; dispatch bundles carried objective/AC/anchors; stalled agents recalled rather than abandoned; retry ≤2 then re-dispatch with failure summary.
+- Evidence: dispatch prompts, merge order, recall messages.
+
+## I11 — CLOSE-phase hygiene
+When work LANDED (spec implemented, plan finished, knowledge disproven), the CLOSE-phase steps ran — these are the most-skipped discipline because the session "feels done" once code is merged and tests are green, so the feedback-loop/memory-hygiene steps get dropped silently. **Why**: an un-armed drift oracle, a stale spec status, and un-invalidated wrong knowledge each rot the corpus for every future session, invisibly. This invariant is the one most likely to be MISSED by a reviewer mechanically checking I1–I10 and stopping — a clean execution can still have a dirty close.
+- Sub-checks (each PASS/VIOLATION/N/A on its own):
+  - **spec landed → `lore anchor add <spec> <impl-path[#Symbol]>`** declared, arming the doc-code drift oracle (a merged spec impl with no anchor add is a VIOLATION, not N/A).
+  - **spec implemented → its status/`## Specs` entry updated** to reflect the landing (living-snapshot discipline).
+  - **plan fully done → `lore assess <plan>`** ran (LLM-as-judge feedback loop closed).
+  - **knowledge the session DISPROVED → `lore invalidate`d** (not left standing to mislead) — overlaps I8's honesty axis but I11 is about the corpus-hygiene ACTION, not the doc-sync claim.
+- Evidence: `lore anchor list`, `lore assess` audit row, spec doc version bump, `lore invalidate` audit row.
+- N/A when: nothing landed this session (pure research/review/planning with no implementation to close out).
+
+---
+
+## Deterministic checks — interpretation guidance
+
+- **D1 (empty-branch merge)**: A merge of a branch with 0 commits is only a FAIL if that branch was SUPPOSED to carry work (an agent's completion report exists). An intentionally-empty merge (e.g. already-cherry-picked) needs transcript support to pass.
+- **D2 (worktree remnants)**: A live in-progress agent's worktree is not a remnant. An orphan worktree whose branch IS an ancestor of main (verify `git merge-base --is-ancestor`) is cleanup debt (low severity); an orphan with unmerged content is high severity.
+- **D3 (dangling)**: `git stash`-shaped dangling commits (`WIP on`/`On <branch>`) from red-green isolation are NORMAL if the final work merged; they only matter when they are the ONLY surviving copy of reported work.
+- **D4 (corpus chain)**: Check against what the session actually did — a pure-research session legitimately has no claims. The FAIL case is file-modifying implementation with zero claims/evidence in a lore-governed repo.
+- **D5 (oracle quality)**: `--oracle manual` is legal for genuinely-manual verification (a human looked at a screen); it is a FAIL only when the "manual" text is an LLM's own opinion of its own code.
+- **D6 (bypass)**: Absence of bypass strings in audit/transcript is a PASS signal, not proof — note the confidence limit.
+- **D7 (dirty end-state)**: Scratchpad/temp files outside the repo don't count. Untracked files INSIDE the repo that tests depend on (fixture pollution) are a real FAIL (real incident: a foreign sync process deposited an excluded personal fixture into `assets/`, breaking 3 manifest tests — surfaced only because a full suite ran).
+
+## Severity ordering for the report
+
+critical = violation that caused or nearly caused irreversible loss (data loss, silent overwrite, unauthorized bypass) · high = a safety mechanism was dark for real work (no claims, no commit verification) · medium = discipline skipped with recovery available (missing red-run, missing handoff) · low = hygiene debt (remnants, stale docs).
