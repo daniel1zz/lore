@@ -60,7 +60,14 @@
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, formatStalenessBadge, formatTable, resolveActor } from "../utils.js";
+import {
+  exitCode,
+  formatError,
+  formatStalenessBadge,
+  formatTable,
+  parsePositiveIntArg,
+  resolveActor,
+} from "../utils.js";
 import { isAssessAiBraked } from "../../../ai/resolve-ai.js";
 import { REVIEW_PROMPT_VERSION } from "../../../ai/review-template.js";
 import {
@@ -354,9 +361,32 @@ export default defineCommand({
         }
 
         const defaults = resolveStalenessDefaults(config);
-        const limit = args.limit !== undefined ? parseInt(args.limit, 10) : defaults.default_limit;
-        const minAgeDays =
-          args["min-age-days"] !== undefined ? parseInt(args["min-age-days"], 10) : defaults.min_age_days;
+
+        // BUG-012 audit: an unvalidated --limit (esp. a negative value, e.g. -1)
+        // reaches `selectProbeCandidates`'s `.slice(0, limit)` and silently drops
+        // candidates from the tail instead of erroring — validate before the call.
+        let limit = defaults.default_limit;
+        if (args.limit !== undefined) {
+          const limitResult = parsePositiveIntArg(args.limit, "--limit", { min: 1 });
+          if (!limitResult.ok) {
+            process.stderr.write(limitResult.message + "\n");
+            process.exitCode = 2;
+            return;
+          }
+          limit = limitResult.value;
+        }
+
+        let minAgeDays = defaults.min_age_days;
+        if (args["min-age-days"] !== undefined) {
+          const minAgeDaysResult = parsePositiveIntArg(args["min-age-days"], "--min-age-days", { min: 0 });
+          if (!minAgeDaysResult.ok) {
+            process.stderr.write(minAgeDaysResult.message + "\n");
+            process.exitCode = 2;
+            return;
+          }
+          minAgeDays = minAgeDaysResult.value;
+        }
+
         const failOnCandidate = args["fail-on-candidate"] === true;
 
         // ── single-doc mode: lore review <doc> --staleness ───────────────────

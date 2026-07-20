@@ -23,7 +23,7 @@
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, formatTable } from "../utils.js";
+import { exitCode, formatError, formatTable, parsePositiveIntArg } from "../utils.js";
 import { parseAuditActor, type AuditEntry } from "@lore/core";
 import type { AuditFilters } from "../../../store/store-interface.js";
 import type { AuditMiss } from "../../../service/audit-service.js";
@@ -114,11 +114,24 @@ export default defineCommand({
       }
 
       // ── query branch ─────────────────────────────────────────────────────
+      // BUG-007 audit: an unvalidated NaN --limit reaches the store's `LIMIT ?`
+      // bind and throws a bare bun:sqlite "datatype mismatch" — validate first.
+      let limitValue: number | undefined;
+      if (args.limit !== undefined) {
+        const limitResult = parsePositiveIntArg(args.limit, "--limit", { min: 1 });
+        if (!limitResult.ok) {
+          process.stderr.write(limitResult.message + "\n");
+          process.exitCode = 2;
+          return;
+        }
+        limitValue = limitResult.value;
+      }
+
       const filters: AuditFilters = {
         ...(args.actor !== undefined ? { actor: args.actor } : {}),
         ...(args.action !== undefined ? { action: args.action } : {}),
         ...(args.since !== undefined ? { since: args.since } : {}),
-        ...(args.limit !== undefined ? { limit: parseInt(args.limit, 10) } : {}),
+        ...(limitValue !== undefined ? { limit: limitValue } : {}),
       };
 
       if (args.doc !== undefined) {

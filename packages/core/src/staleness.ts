@@ -14,6 +14,8 @@
  *   - mapStalenessVerdictDecisionToJudgmentDecision — holds->approve, stale_candidate->escalate
  *   - StalenessNeighbor / StalenessBundle — the AIProviderService.probeStaleness input
  *     shape, assembled by StalenessProbeService, mirroring ReviewBundle's role for judgeDoc
+ *   - InvalidStalenessLimitError — thrown by selectProbeCandidates on an illegal
+ *     opts.limit (BUG-012 audit fail-loud fix, see its own doc comment)
  *
  * @invariant selectProbeCandidates filters, in order: type not in {knowledge, adr}
  *   (silently excluded, not counted — the caller's store query is expected to already
@@ -33,6 +35,14 @@
  *   tiebreak `id` ASC (lexicographic) — deterministic for any input, always.
  * @invariant `opts.limit` is applied AFTER the full sort; `limit >= pool size` returns
  *   the whole pool with `excluded_by_limit: 0` (T12 boundary).
+ * @invariant `opts.limit` MUST be a non-negative integer — `selectProbeCandidates`
+ *   THROWS {@link InvalidStalenessLimitError} for a `NaN`/negative/non-integer value
+ *   instead of silently clamping (BUG-012 audit finding, no-silent-fallback
+ *   discipline): `Array.prototype.slice(0, limit)` treats a negative `limit` as
+ *   "drop the last `|limit|` candidates from the tail" and `NaN` as "return zero
+ *   candidates" — either would silently discard real candidates or mask the caller's
+ *   own upstream validation bug. `limit === 0` is a legal, non-throwing value (an
+ *   explicit "assemble the pool, return no candidates" request).
  *
  * Side-effect class: pure
  *
@@ -102,6 +112,26 @@ export interface SelectProbeCandidatesResult {
 const STALENESS_ELIGIBLE_TYPES: ReadonlySet<DocType> = new Set(["knowledge", "adr"]);
 
 /**
+ * Thrown by {@link selectProbeCandidates} when `opts.limit` is not a valid
+ * candidate count (BUG-012 audit finding). Fed unchecked, a `NaN`/negative
+ * `limit` reaches `Array.prototype.slice(0, limit)` and silently drops
+ * candidates from the tail (or returns none at all) instead of erroring —
+ * this fails loud at the boundary instead, per the project's no-silent-fallback
+ * discipline. Carries the offending `limit` as a typed `context` payload
+ * (never just a message string) so a catching layer can render it without
+ * re-parsing the error text.
+ */
+export class InvalidStalenessLimitError extends Error {
+  readonly context: { limit: number };
+
+  constructor(limit: number) {
+    super(`selectProbeCandidates: opts.limit must be a non-negative integer, got ${String(limit)}`);
+    this.name = "InvalidStalenessLimitError";
+    this.context = { limit };
+  }
+}
+
+/**
  * `in_degree * age_days` — the probe-priority multiplier (D2). A pure one-liner, exported
  * so callers/tests never hand-roll the formula.
  *
@@ -147,6 +177,13 @@ export function selectProbeCandidates(
   nowIso: string,
   opts: SelectProbeCandidatesOpts,
 ): SelectProbeCandidatesResult {
+  // BUG-012 audit: fail loud on an illegal limit BEFORE it ever reaches
+  // `.slice(0, opts.limit)` — see this function's @invariant + the thrown
+  // error class's own doc comment for why a silent clamp is the wrong call here.
+  if (!Number.isInteger(opts.limit) || opts.limit < 0) {
+    throw new InvalidStalenessLimitError(opts.limit);
+  }
+
   let skippedInvalidated = 0;
   let skippedTooYoung = 0;
 

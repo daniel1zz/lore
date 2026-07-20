@@ -16,7 +16,14 @@
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, formatTree, formatValidityBadge, formatWorkflowBadge } from "../utils.js";
+import {
+  exitCode,
+  formatError,
+  formatTree,
+  formatValidityBadge,
+  formatWorkflowBadge,
+  parsePositiveIntArg,
+} from "../utils.js";
 import type { TreeBlueprint, PlanPhase, DocRecord } from "@lore/core";
 
 // ─── Phase Grouping Helpers ───────────────────────────────────────────────────
@@ -213,8 +220,16 @@ export default defineCommand({
       }
 
       // ── normal tree branch ────────────────────────────────────────────────
-      const depth = parseInt(args.depth ?? "3", 10);
-      const result = await app.corpusService.tree(args.root, { depth });
+      // BUG-008 audit: an unvalidated NaN --depth makes `remainingDepth <= 0`
+      // (corpus-service.ts's recursion guard) evaluate to false forever — the
+      // depth cap silently never triggers. Validate before it reaches the service.
+      const depthResult = parsePositiveIntArg(args.depth ?? "3", "--depth", { min: 1 });
+      if (!depthResult.ok) {
+        process.stderr.write(depthResult.message + "\n");
+        process.exitCode = 2;
+        return;
+      }
+      const result = await app.corpusService.tree(args.root, { depth: depthResult.value });
 
       if (!result.ok) {
         // Special-case: no root argument + no PRDs in corpus → actionable message.

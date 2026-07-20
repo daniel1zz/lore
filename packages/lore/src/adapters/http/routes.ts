@@ -338,10 +338,72 @@ async function handleSearch(url: URL, app: App): Promise<Response> {
   return jsonOk(result.value);
 }
 
+// ─── Numeric query-param validation (BUG-006/007 audit) ────────────────────
+
+/**
+ * Result of validating an optional numeric query parameter via
+ * {@link parseOptionalIntParam}. Discriminated on `ok` — the failure branch
+ * carries a ready-to-return `422 VALIDATION_ERROR` Response, so a caller never
+ * needs to hand-build its own error envelope for a malformed numeric param.
+ */
+type ParsedIntParam =
+  | { readonly ok: true; readonly value: number | undefined }
+  | { readonly ok: false; readonly response: Response };
+
+/**
+ * Validate an optional numeric query parameter's raw string value as a bounded
+ * integer, mirroring the CLI's `adapters/cli/utils.ts::parsePositiveIntArg`
+ * (same three rejected classes: non-numeric, fractional, out-of-bound/NaN) but
+ * returning a ready-to-return `422` `Response` instead of a CLI exit code —
+ * before this validation, a malformed `?limit=abc`/`?depth=abc` reached
+ * `parseInt` unguarded and either silently no-opted the filter (`NaN` fails
+ * every comparison) or propagated into a `bun:sqlite` `LIMIT ?` bind, surfacing
+ * as a raw, unmapped `500` "datatype mismatch" (BUG-006/007 audit).
+ *
+ * @param raw - `url.searchParams.get(paramName)` — `null` means the param is absent
+ * @param paramName - Query parameter name, used as both the error `field` and message
+ * @param opts.min - Inclusive lower bound (default `1`); pass `0` for params like
+ *   `offset` where zero is legal
+ * @returns `{ok: true, value: undefined}` when `raw` is `null` (param omitted —
+ *   NOT a validation failure); `{ok: true, value}` on a valid integer; `{ok:
+ *   false, response}` — a `422` Response the caller returns immediately
+ */
+function parseOptionalIntParam(raw: string | null, paramName: string, opts?: { min?: number }): ParsedIntParam {
+  if (raw === null) return { ok: true, value: undefined };
+
+  const min = opts?.min ?? 1;
+  const trimmed = raw.trim();
+  if (!/^-?\d+$/.test(trimmed)) {
+    return {
+      ok: false,
+      response: jsonError(
+        { code: "VALIDATION_ERROR", field: paramName, message: `'${paramName}' must be an integer, got '${raw}'` },
+        422,
+      ),
+    };
+  }
+  const value = Number.parseInt(trimmed, 10);
+  if (!Number.isSafeInteger(value) || value < min) {
+    return {
+      ok: false,
+      response: jsonError(
+        {
+          code: "VALIDATION_ERROR",
+          field: paramName,
+          message: `'${paramName}' must be an integer >= ${min}, got '${raw}'`,
+        },
+        422,
+      ),
+    };
+  }
+  return { ok: true, value };
+}
+
 async function handleTree(url: URL, app: App): Promise<Response> {
   const root = url.searchParams.get("root") ?? undefined;
-  const depthStr = url.searchParams.get("depth");
-  const depth = depthStr !== null ? parseInt(depthStr, 10) : undefined;
+  const depthParam = parseOptionalIntParam(url.searchParams.get("depth"), "depth", { min: 1 });
+  if (!depthParam.ok) return depthParam.response;
+  const depth = depthParam.value;
 
   const result = await app.corpusService.tree(root, depth !== undefined ? { depth } : undefined);
   if (!result.ok) return loreErrorResponse(result.error);
@@ -607,11 +669,14 @@ async function handleSingleDoc(req: Request, method: string, idOrSlug: string, a
 }
 
 async function handleVersionLog(idOrSlug: string, url: URL, app: App): Promise<Response> {
-  const limitStr = url.searchParams.get("limit");
-  const offsetStr = url.searchParams.get("offset");
+  const limitParam = parseOptionalIntParam(url.searchParams.get("limit"), "limit", { min: 1 });
+  if (!limitParam.ok) return limitParam.response;
+  const offsetParam = parseOptionalIntParam(url.searchParams.get("offset"), "offset", { min: 0 });
+  if (!offsetParam.ok) return offsetParam.response;
+
   const opts = {
-    ...(limitStr !== null ? { limit: parseInt(limitStr, 10) } : {}),
-    ...(offsetStr !== null ? { offset: parseInt(offsetStr, 10) } : {}),
+    ...(limitParam.value !== undefined ? { limit: limitParam.value } : {}),
+    ...(offsetParam.value !== undefined ? { offset: offsetParam.value } : {}),
   };
   const result = await app.versionService.log(idOrSlug, opts);
   if (!result.ok) return loreErrorResponse(result.error);
@@ -619,11 +684,14 @@ async function handleVersionLog(idOrSlug: string, url: URL, app: App): Promise<R
 }
 
 async function handleVersionDiff(idOrSlug: string, url: URL, app: App): Promise<Response> {
-  const fromStr = url.searchParams.get("from");
-  const toStr = url.searchParams.get("to");
+  const fromParam = parseOptionalIntParam(url.searchParams.get("from"), "from", { min: 1 });
+  if (!fromParam.ok) return fromParam.response;
+  const toParam = parseOptionalIntParam(url.searchParams.get("to"), "to", { min: 1 });
+  if (!toParam.ok) return toParam.response;
+
   const opts = {
-    ...(fromStr !== null ? { from: parseInt(fromStr, 10) } : {}),
-    ...(toStr !== null ? { to: parseInt(toStr, 10) } : {}),
+    ...(fromParam.value !== undefined ? { from: fromParam.value } : {}),
+    ...(toParam.value !== undefined ? { to: toParam.value } : {}),
   };
   const result = await app.versionService.diff(idOrSlug, opts);
   if (!result.ok) return loreErrorResponse(result.error);

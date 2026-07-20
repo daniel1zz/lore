@@ -4,7 +4,7 @@
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError } from "../utils.js";
+import { exitCode, formatError, parsePositiveIntArg } from "../utils.js";
 import type { DocId } from "@lore/core";
 
 export default defineCommand({
@@ -34,9 +34,27 @@ export default defineCommand({
   async run({ args }) {
     const { app } = loadLoreApp();
     try {
+      // BUG-007 audit: an unvalidated NaN --from/--to reaches the store's version
+      // lookup and throws a bare bun:sqlite "datatype mismatch" — validate first.
       const opts: { from?: number; to?: number } = {};
-      if (args.from !== undefined) opts.from = parseInt(args.from, 10);
-      if (args.to !== undefined) opts.to = parseInt(args.to, 10);
+      if (args.from !== undefined) {
+        const fromResult = parsePositiveIntArg(args.from, "--from", { min: 1 });
+        if (!fromResult.ok) {
+          process.stderr.write(fromResult.message + "\n");
+          process.exitCode = 2;
+          return;
+        }
+        opts.from = fromResult.value;
+      }
+      if (args.to !== undefined) {
+        const toResult = parsePositiveIntArg(args.to, "--to", { min: 1 });
+        if (!toResult.ok) {
+          process.stderr.write(toResult.message + "\n");
+          process.exitCode = 2;
+          return;
+        }
+        opts.to = toResult.value;
+      }
 
       const result = await app.versionService.diff(args.id as DocId, opts);
 

@@ -27,7 +27,15 @@
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, formatTable, formatValidityBadge, formatWorkflowBadge, relativeTime } from "../utils.js";
+import {
+  exitCode,
+  formatError,
+  formatTable,
+  formatValidityBadge,
+  formatWorkflowBadge,
+  parsePositiveIntArg,
+  relativeTime,
+} from "../utils.js";
 import type { DocType, DocStatus } from "@lore/core";
 
 export default defineCommand({
@@ -88,8 +96,34 @@ export default defineCommand({
   async run({ args }) {
     const { app } = loadLoreApp();
     try {
-      const limit = args.limit !== undefined ? parseInt(args.limit, 10) : undefined;
-      const offset = args.offset !== undefined ? parseInt(args.offset, 10) : undefined;
+      // BUG-006/007 audit: a NaN --limit/--offset used to reach `.slice(0, NaN)`
+      // (silently empty results) or a store-level `LIMIT ?`/`OFFSET ?` bind (a
+      // bare bun:sqlite "datatype mismatch" throw) — validate both up front.
+      // reason: `--limit 0` is a LEGAL "zero-row page" request here (pre-existing,
+      // REGRESSION-tested behavior in list-paging.test.ts) — min is 0, not 1,
+      // unlike search/log/audit's --limit (which are result-COUNT caps, never a
+      // page-size negotiation).
+      let limit: number | undefined;
+      if (args.limit !== undefined) {
+        const limitResult = parsePositiveIntArg(args.limit, "--limit", { min: 0 });
+        if (!limitResult.ok) {
+          process.stderr.write(limitResult.message + "\n");
+          process.exitCode = 2;
+          return;
+        }
+        limit = limitResult.value;
+      }
+
+      let offset: number | undefined;
+      if (args.offset !== undefined) {
+        const offsetResult = parsePositiveIntArg(args.offset, "--offset", { min: 0 });
+        if (!offsetResult.ok) {
+          process.stderr.write(offsetResult.message + "\n");
+          process.exitCode = 2;
+          return;
+        }
+        offset = offsetResult.value;
+      }
       // reason: store-level paging is safe to apply directly to `StoreFilters` ONLY
       // when nothing narrows the result set client-side after the fetch — see this
       // file's header comment for the (a)/(b) branch split.
