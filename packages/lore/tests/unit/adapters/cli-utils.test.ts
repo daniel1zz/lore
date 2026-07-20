@@ -12,6 +12,7 @@ import {
   formatTable,
   formatTree,
   formatNavigation,
+  parsePositiveIntArg,
   relativeTime,
   resolveActorAlias,
 } from "../../../src/adapters/cli/utils.js";
@@ -427,5 +428,101 @@ describe("resolveActorAlias", () => {
       expect(result.error).toContain("daniel");
       expect(result.error).toContain("alice");
     }
+  });
+});
+
+// ─── parsePositiveIntArg (BUG-006/007/008/012 audit) ────────────────────────
+
+describe("parsePositiveIntArg", () => {
+  describe("HAPPY", () => {
+    it("parses a plain positive integer string", () => {
+      expect(parsePositiveIntArg("10", "--limit")).toEqual({ ok: true, value: 10 });
+    });
+
+    it("parses a value with surrounding whitespace", () => {
+      expect(parsePositiveIntArg("  7  ", "--limit")).toEqual({ ok: true, value: 7 });
+    });
+  });
+
+  describe("NEGATIVE — non-numeric input (BUG-006/007/008 root cause: parseInt('abc') → NaN)", () => {
+    it("rejects a non-numeric string", () => {
+      const result = parsePositiveIntArg("abc", "--limit");
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.message).toContain("--limit");
+        expect(result.message).toContain("integer");
+        expect(result.message).toContain("abc");
+      }
+    });
+
+    it("rejects an empty string", () => {
+      const result = parsePositiveIntArg("", "--depth");
+      expect(result.ok).toBe(false);
+    });
+
+    it("rejects a fractional string instead of silently truncating (parseInt('3.5') → 3)", () => {
+      const result = parsePositiveIntArg("3.5", "--limit");
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.message).toContain("3.5");
+      }
+    });
+
+    it("rejects a value with trailing garbage that parseInt would silently accept", () => {
+      // reason: parseInt("10abc", 10) === 10 — the exact silent-coercion class this
+      // helper exists to close off (parseInt stops at the first non-digit character).
+      const result = parsePositiveIntArg("10abc", "--limit");
+      expect(result.ok).toBe(false);
+    });
+  });
+
+  describe("BOUNDARY", () => {
+    it("accepts exactly the min value (default min:1)", () => {
+      expect(parsePositiveIntArg("1", "--limit")).toEqual({ ok: true, value: 1 });
+    });
+
+    it("rejects zero when min:1 (default)", () => {
+      const result = parsePositiveIntArg("0", "--limit");
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.message).toContain(">= 1");
+      }
+    });
+
+    it("accepts zero when min:0 is explicitly passed (e.g. --offset)", () => {
+      expect(parsePositiveIntArg("0", "--offset", { min: 0 })).toEqual({ ok: true, value: 0 });
+    });
+
+    it("rejects -1 when min:0 (BUG-012 root cause: a negative limit silently drops tail entries via .slice(0, -1))", () => {
+      const result = parsePositiveIntArg("-1", "--offset", { min: 0 });
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.message).toContain(">= 0");
+      }
+    });
+
+    it("rejects a negative value even when it parses as a valid integer", () => {
+      const result = parsePositiveIntArg("-5", "--limit");
+      expect(result.ok).toBe(false);
+    });
+
+    it("rejects a value beyond Number.isSafeInteger range", () => {
+      // 2^53 is the first unsafe integer.
+      const result = parsePositiveIntArg("9007199254740993", "--limit");
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.message).toContain("out of range");
+      }
+    });
+  });
+
+  describe("ERROR — message content is actionable", () => {
+    it("names the offending flag in every failure message", () => {
+      const result = parsePositiveIntArg("abc", "--min-age-days");
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.message).toMatch(/--min-age-days/);
+      }
+    });
   });
 });

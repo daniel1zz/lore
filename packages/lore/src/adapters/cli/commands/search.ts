@@ -4,7 +4,7 @@
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, formatTable, formatValidityBadge } from "../utils.js";
+import { exitCode, formatError, formatTable, formatValidityBadge, parsePositiveIntArg } from "../utils.js";
 import type { DocType } from "@lore/core";
 
 export default defineCommand({
@@ -39,6 +39,15 @@ export default defineCommand({
   async run({ args }) {
     const { app } = loadLoreApp();
     try {
+      // BUG-006 audit: validate --limit BEFORE it can silently drive
+      // `.slice(0, NaN)` → an always-empty result set masquerading as "no matches".
+      const limitResult = parsePositiveIntArg(args.limit ?? "10", "--limit", { min: 1 });
+      if (!limitResult.ok) {
+        process.stderr.write(limitResult.message + "\n");
+        process.exitCode = 2;
+        return;
+      }
+
       const filters: Record<string, unknown> = {};
       if (args.type !== undefined) filters["type"] = args.type as DocType;
       if (args["include-invalid"] === true) filters["include_invalid"] = true;
@@ -51,8 +60,7 @@ export default defineCommand({
         return;
       }
 
-      const limit = parseInt(args.limit ?? "10", 10);
-      const results = result.value.results.slice(0, limit);
+      const results = result.value.results.slice(0, limitResult.value);
 
       if (args.json) {
         console.log(JSON.stringify({ ok: true, data: { results, total: results.length } }, null, 2));

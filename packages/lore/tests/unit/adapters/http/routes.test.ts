@@ -585,6 +585,50 @@ describe("GET /api/tree", () => {
       expect(res).not.toBeNull();
       expect(res!.status).toBe(404);
     });
+
+    // BUG-006/007 audit: a malformed ?depth used to reach `parseInt` unguarded —
+    // NaN either silently defeated corpus-service.ts's `remainingDepth <= 0`
+    // recursion guard (BUG-008's root cause) or, worse, propagated further.
+    // The HTTP layer must reject it as a 422 VALIDATION_ERROR, never a 500.
+    it("returns 422 VALIDATION_ERROR when ?depth is non-numeric", async () => {
+      await createPrd("Depth Guard PRD");
+      const { req, url } = makeGetRequest("/api/tree?depth=abc");
+      const res = await handleApiRoute(req, url, app, TEST_ACTOR);
+      expect(res).not.toBeNull();
+      expect(res!.status).toBe(422);
+      const body = await parseResponse(res!);
+      expect(body.ok).toBe(false);
+      const error = body.error as Record<string, unknown>;
+      expect(error.code).toBe("VALIDATION_ERROR");
+      expect(error.field).toBe("depth");
+    });
+
+    it("returns 422 VALIDATION_ERROR when ?depth is 0 (below the min:1 floor)", async () => {
+      await createPrd("Depth Zero PRD");
+      const { req, url } = makeGetRequest("/api/tree?depth=0");
+      const res = await handleApiRoute(req, url, app, TEST_ACTOR);
+      expect(res!.status).toBe(422);
+      const body = await parseResponse(res!);
+      expect(body.ok).toBe(false);
+    });
+
+    it("returns 422 VALIDATION_ERROR when ?depth is negative", async () => {
+      await createPrd("Depth Negative PRD");
+      const { req, url } = makeGetRequest("/api/tree?depth=-1");
+      const res = await handleApiRoute(req, url, app, TEST_ACTOR);
+      expect(res!.status).toBe(422);
+    });
+  });
+
+  describe("boundary — valid ?depth is unaffected (REGRESSION)", () => {
+    it("?depth=1 still returns 200 with a tree", async () => {
+      await createPrd("Depth One PRD");
+      const { req, url } = makeGetRequest("/api/tree?depth=1");
+      const res = await handleApiRoute(req, url, app, TEST_ACTOR);
+      expect(res!.status).toBe(200);
+      const body = await parseResponse(res!);
+      expect(body.ok).toBe(true);
+    });
   });
 });
 
@@ -1042,6 +1086,58 @@ describe("GET /api/docs/:id/log", () => {
       // Should have at least version 1 (created)
       expect((body.data as unknown[]).length).toBeGreaterThanOrEqual(1);
     });
+
+    // BOUNDARY (REGRESSION) — valid ?limit/?offset combos still work.
+    it("?limit=1&offset=0 still returns 200", async () => {
+      const { id } = await createPrd("Versioned Doc Paged");
+      const { req, url } = makeGetRequest(`/api/docs/${id}/log?limit=1&offset=0`);
+      const res = await handleApiRoute(req, url, app, TEST_ACTOR);
+      expect(res!.status).toBe(200);
+      const body = await parseResponse(res!);
+      expect(body.ok).toBe(true);
+    });
+  });
+
+  describe("negative cases (BUG-006/007 audit)", () => {
+    // A malformed ?limit/?offset used to reach `parseInt` unguarded — NaN
+    // propagated into the store's `LIMIT ?`/`OFFSET ?` bind and surfaced as an
+    // unmapped 500 "datatype mismatch" instead of a clean 422.
+    it("returns 422 VALIDATION_ERROR when ?limit is non-numeric", async () => {
+      const { id } = await createPrd("Log Limit NaN Doc");
+      const { req, url } = makeGetRequest(`/api/docs/${id}/log?limit=abc`);
+      const res = await handleApiRoute(req, url, app, TEST_ACTOR);
+      expect(res).not.toBeNull();
+      expect(res!.status).toBe(422);
+      const body = await parseResponse(res!);
+      expect(body.ok).toBe(false);
+      const error = body.error as Record<string, unknown>;
+      expect(error.code).toBe("VALIDATION_ERROR");
+      expect(error.field).toBe("limit");
+    });
+
+    it("returns 422 VALIDATION_ERROR when ?limit is 0 (below the min:1 floor)", async () => {
+      const { id } = await createPrd("Log Limit Zero Doc");
+      const { req, url } = makeGetRequest(`/api/docs/${id}/log?limit=0`);
+      const res = await handleApiRoute(req, url, app, TEST_ACTOR);
+      expect(res!.status).toBe(422);
+    });
+
+    it("returns 422 VALIDATION_ERROR when ?offset is negative", async () => {
+      const { id } = await createPrd("Log Offset Negative Doc");
+      const { req, url } = makeGetRequest(`/api/docs/${id}/log?offset=-1`);
+      const res = await handleApiRoute(req, url, app, TEST_ACTOR);
+      expect(res!.status).toBe(422);
+      const body = await parseResponse(res!);
+      const error = body.error as Record<string, unknown>;
+      expect(error.field).toBe("offset");
+    });
+
+    it("?offset=0 is legal (BOUNDARY — zero is a valid offset, not rejected)", async () => {
+      const { id } = await createPrd("Log Offset Zero Doc");
+      const { req, url } = makeGetRequest(`/api/docs/${id}/log?offset=0`);
+      const res = await handleApiRoute(req, url, app, TEST_ACTOR);
+      expect(res!.status).toBe(200);
+    });
   });
 });
 
@@ -1060,6 +1156,33 @@ describe("GET /api/docs/:id/diff", () => {
       expect(res!.status).toBe(200);
       const body = await parseResponse(res!);
       expect(body.ok).toBe(true);
+    });
+  });
+
+  describe("negative cases (BUG-006/007 audit)", () => {
+    it("returns 422 VALIDATION_ERROR when ?from is non-numeric", async () => {
+      const { id } = await createPrd("Diff From NaN Doc");
+      await app.corpusService.set(id, { content: "v2" });
+      const { req, url } = makeGetRequest(`/api/docs/${id}/diff?from=abc`);
+      const res = await handleApiRoute(req, url, app, TEST_ACTOR);
+      expect(res).not.toBeNull();
+      expect(res!.status).toBe(422);
+      const body = await parseResponse(res!);
+      expect(body.ok).toBe(false);
+      const error = body.error as Record<string, unknown>;
+      expect(error.code).toBe("VALIDATION_ERROR");
+      expect(error.field).toBe("from");
+    });
+
+    it("returns 422 VALIDATION_ERROR when ?to is 0 (version numbers start at 1)", async () => {
+      const { id } = await createPrd("Diff To Zero Doc");
+      await app.corpusService.set(id, { content: "v2" });
+      const { req, url } = makeGetRequest(`/api/docs/${id}/diff?to=0`);
+      const res = await handleApiRoute(req, url, app, TEST_ACTOR);
+      expect(res!.status).toBe(422);
+      const body = await parseResponse(res!);
+      const error = body.error as Record<string, unknown>;
+      expect(error.field).toBe("to");
     });
   });
 });

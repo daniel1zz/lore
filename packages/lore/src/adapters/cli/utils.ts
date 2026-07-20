@@ -301,6 +301,71 @@ export function resolveActorAlias(
   return { ok: true, value: byFlag ?? reviewerFlag };
 }
 
+// ─── Numeric Flag Validation (BUG-006/007/008/012 audit) ───────────────────
+
+/**
+ * Result of validating a numeric CLI flag via {@link parsePositiveIntArg}.
+ * Discriminated on `ok` — the failure branch carries a ready-to-print stderr
+ * message naming the offending flag and raw value, never a bare `NaN`/negative
+ * number that silently propagates into `Array.prototype.slice()` (yielding an
+ * always-empty or tail-truncated result, BUG-006/012) or a `bun:sqlite`
+ * `LIMIT ?` bind (a raw "datatype mismatch" throw, BUG-007).
+ */
+export type ParsedIntArg =
+  | { readonly ok: true; readonly value: number }
+  | { readonly ok: false; readonly message: string };
+
+/**
+ * Validate a numeric CLI flag's raw string value as a bounded integer.
+ *
+ * Rejects — never silently coerces — three failure classes `parseInt` alone
+ * lets through: non-numeric strings (`parseInt("abc", 10)` → `NaN`, which then
+ * satisfies neither `<= 0` nor `> 0` comparisons and passes every naive guard
+ * silently), fractional strings (`parseInt("3.5", 10)` truncates to `3` with no
+ * signal to the caller), and out-of-bound integers (below `opts.min`, or beyond
+ * `Number.isSafeInteger` range).
+ *
+ * Call this only once `raw` is known to be present — this function has no
+ * opinion on "flag omitted → use a default"; callers resolve their own default
+ * (often a citty `args.<flag>` declared `default`) before reaching here.
+ *
+ * @param raw - The flag's raw string value (e.g. citty `args.limit`)
+ * @param flagName - The flag's display name for the error message, e.g. `"--limit"`
+ * @param opts.min - Inclusive lower bound (default `1` — "positive"; pass `0` for
+ *   flags like `--offset`/`--min-age-days` where zero is a legal value)
+ * @returns `{ok: true, value}` on success, or `{ok: false, message}` — the
+ *   caller prints `message` to stderr and sets `process.exitCode = 2` (this
+ *   codebase's CLI usage-error convention, SPEC-051)
+ * @example
+ *   parsePositiveIntArg("10", "--limit")            // {ok: true, value: 10}
+ *   parsePositiveIntArg("abc", "--limit")            // {ok: false, message: "..."}
+ *   parsePositiveIntArg("3.5", "--limit")            // {ok: false, message: "..."}
+ *   parsePositiveIntArg("-1", "--offset", {min: 0})  // {ok: false, message: "..."}
+ *   parsePositiveIntArg("0", "--offset", {min: 0})   // {ok: true, value: 0}
+ */
+export function parsePositiveIntArg(
+  raw: string,
+  flagName: string,
+  opts?: { min?: number },
+): ParsedIntArg {
+  const min = opts?.min ?? 1;
+  const trimmed = raw.trim();
+  // reason: a strict integer-literal regex rejects "abc" (NaN) AND "3.5" (parseInt
+  // silently truncates fractional strings to their integer prefix) in one check,
+  // before parseInt ever runs on the value.
+  if (!/^-?\d+$/.test(trimmed)) {
+    return { ok: false, message: `Error: ${flagName} must be an integer, got '${raw}'.` };
+  }
+  const value = Number.parseInt(trimmed, 10);
+  if (!Number.isSafeInteger(value)) {
+    return { ok: false, message: `Error: ${flagName} is out of range, got '${raw}'.` };
+  }
+  if (value < min) {
+    return { ok: false, message: `Error: ${flagName} must be >= ${min}, got '${raw}'.` };
+  }
+  return { ok: true, value };
+}
+
 // ─── Task Workflow Badges (SPEC-025 AC-WF-9) ────────────────────────────────
 
 /**

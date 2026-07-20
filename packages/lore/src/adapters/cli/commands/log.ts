@@ -4,7 +4,7 @@
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, formatTable } from "../utils.js";
+import { exitCode, formatError, formatTable, parsePositiveIntArg } from "../utils.js";
 import type { DocId } from "@lore/core";
 
 export default defineCommand({
@@ -31,8 +31,15 @@ export default defineCommand({
   async run({ args }) {
     const { app } = loadLoreApp();
     try {
-      const limit = parseInt(args.limit ?? "20", 10);
-      const result = await app.versionService.log(args.id as DocId, { limit });
+      // BUG-007 audit: an unvalidated NaN --limit reaches the store's `LIMIT ?`
+      // bind and throws a bare bun:sqlite "datatype mismatch" — validate first.
+      const limitResult = parsePositiveIntArg(args.limit ?? "20", "--limit", { min: 1 });
+      if (!limitResult.ok) {
+        process.stderr.write(limitResult.message + "\n");
+        process.exitCode = 2;
+        return;
+      }
+      const result = await app.versionService.log(args.id as DocId, { limit: limitResult.value });
 
       if (!result.ok) {
         process.stderr.write(formatError(result.error) + "\n");
