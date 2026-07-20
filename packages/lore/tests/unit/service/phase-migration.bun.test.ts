@@ -106,9 +106,31 @@ interface PhaseMigrationReport {
   warnings: string[];
 }
 
+/**
+ * Progress durably committed to the store BEFORE a mid-run store failure
+ * aborted `migrateTasks` (BUG-009 fix) — this suite's own local contract for
+ * the real module's `PhaseMigrationPartialProgress`, same "pin the contract"
+ * practice as `PhaseMigrationReport` above.
+ */
+interface PhaseMigrationPartialProgressLike {
+  phases_created: number;
+  tasks_archived: number;
+  evidence_merged: number;
+}
+
+/**
+ * Local contract for the real module's `PhaseMigrationError` (BUG-009 fix) —
+ * distinct from a bare `LoreError` so a mid-run failure's caller can report
+ * BOTH the underlying cause AND how much progress already landed.
+ */
+interface PhaseMigrationErrorLike {
+  cause: LoreError;
+  partial: PhaseMigrationPartialProgressLike;
+}
+
 interface PhaseMigrationServiceCtor {
   new (store: StoreInterface): {
-    migrateTasks(opts: { dryRun: boolean }): Promise<Result<PhaseMigrationReport, LoreError>>;
+    migrateTasks(opts: { dryRun: boolean }): Promise<Result<PhaseMigrationReport, PhaseMigrationErrorLike>>;
   };
 }
 
@@ -693,5 +715,123 @@ describe("PhaseMigrationService.migrateTasks — idempotent second run (AC-P-5 R
     expect(afterSnapshot).toEqual(beforeSnapshot);
 
     store.close();
+  });
+});
+
+// ─── STATE: mid-loop store failure reports partial progress (BUG-009) ─────────
+
+/**
+ * Wraps a real `SQLiteStore` so its `insert()` fails with a synthetic
+ * `STORE_ERROR` on the Nth call whose argument is a `phase`-typed doc — every
+ * other call (task/version/audit inserts, `findMany`, `update`, etc.) passes
+ * through unmodified via `target.<method>(...)` / a bound `Reflect.get`.
+ * Simulates a genuine mid-migration store failure (e.g. disk full, a
+ * constraint violation on one specific row) without touching the real
+ * `SQLiteStore` implementation.
+ */
+function wrapStoreFailingNthPhaseInsert(store: SQLiteStore, failOnCount: number): StoreInterface {
+  let phaseInsertCount = 0;
+  return new Proxy(store, {
+    get(target, prop, receiver) {
+      if (prop === "insert") {
+        return async (doc: DocRecord) => {
+          if ((doc.type as unknown as string) === "phase") {
+            phaseInsertCount += 1;
+            if (phaseInsertCount === failOnCount) {
+              return {
+                ok: false,
+                error: {
+                  code: "STORE_ERROR",
+                  message: `synthetic failure: phase-doc insert #${failOnCount}`,
+                },
+              };
+            }
+          }
+          return target.insert(doc);
+        };
+      }
+      const value = Reflect.get(target, prop, receiver);
+      return typeof value === "function" ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+    },
+  }) as unknown as StoreInterface;
+}
+
+describe("PhaseMigrationService.migrateTasks — mid-loop store failure reports partial progress (BUG-009 STATE)", () => {
+  it("returns err.partial matching independently-derived store state, and a retry with a healthy store reaches the fixture's known total", async () => {
+    const { store: rawStore, fixture } = await freshSeededStore();
+    const FAIL_ON_COUNT = 4; // < 11 total phase groups (see the HAPPY suite above) — a genuine MID-loop failure
+    const wrappedStore = wrapStoreFailingNthPhaseInsert(rawStore, FAIL_ON_COUNT);
+
+    const PhaseMigrationService = await loadPhaseMigrationServiceCtor();
+    const failingService = new PhaseMigrationService(wrappedStore);
+    const result = await failingService.migrateTasks({ dryRun: false });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected migrateTasks to fail on the 4th phase-doc insert");
+
+    expect(result.error.cause.code).toBe("STORE_ERROR");
+
+    // Independently re-derive "what actually landed" from raw store state —
+    // NEVER trust the service's own accumulators as ground truth for this
+    // assertion. `extra.migrated_to` (not bare `status === "archived"`) is the
+    // correct completion marker: some fixture tasks are ALREADY archived
+    // pre-migration (see the "source task disposition" suite above), so a
+    // bare status check would over-count tasks the migration never touched.
+    const allDocsAfterFailure = await mustFindMany(rawStore, {});
+    const phaseDocsAfterFailure = allDocsAfterFailure.filter(isPhaseDoc);
+    const tasksArchivedAfterFailure = allDocsAfterFailure.filter(
+      (d) => rawType(d) === "task" && (d.extra as { migrated_to?: unknown }).migrated_to !== undefined,
+    );
+    const evidenceMergedAfterFailure = phaseDocsAfterFailure.reduce(
+      (sum, doc) => sum + (phaseExtraOf(doc).verification_evidence ?? []).length,
+      0,
+    );
+
+    // Exactly FAIL_ON_COUNT - 1 phase docs fully committed before the failing
+    // insert — the failing group's doc was never persisted, so it contributes
+    // nothing to phase doc count, task archival, or evidence merge.
+    expect(phaseDocsAfterFailure).toHaveLength(FAIL_ON_COUNT - 1);
+
+    expect(result.error.partial).toEqual({
+      phases_created: phaseDocsAfterFailure.length,
+      tasks_archived: tasksArchivedAfterFailure.length,
+      evidence_merged: evidenceMergedAfterFailure,
+    });
+
+    // Sanity: the partial progress is a STRICT subset of the fixture's known
+    // full totals (11 phases / 13 tasks / 120 evidence entries) — a failure
+    // this early in the loop cannot have already reached completion.
+    expect(phaseDocsAfterFailure.length).toBeLessThan(11);
+    expect(tasksArchivedAfterFailure.length).toBeLessThan(13);
+    expect(evidenceMergedAfterFailure).toBeLessThan(120);
+
+    // Retry with a healthy (unwrapped) store's NEW service instance — the
+    // migration must be idempotent-retryable: it skips every already-migrated
+    // group/task and completes the remainder, reaching the SAME full totals
+    // the uninterrupted HAPPY-path run reaches.
+    const healthyService = new PhaseMigrationService(rawStore);
+    const retryResult = await healthyService.migrateTasks({ dryRun: false });
+    if (!retryResult.ok) {
+      throw new Error(`retry migrateTasks failed: ${JSON.stringify(retryResult.error)}`);
+    }
+
+    const allDocsAfterRetry = await mustFindMany(rawStore, {});
+    const phaseDocsAfterRetry = allDocsAfterRetry.filter(isPhaseDoc);
+    expect(phaseDocsAfterRetry).toHaveLength(11);
+
+    const totalEvidenceAfterRetry = phaseDocsAfterRetry.reduce(
+      (sum, doc) => sum + (phaseExtraOf(doc).verification_evidence ?? []).length,
+      0,
+    );
+    expect(totalEvidenceAfterRetry).toBe(120);
+
+    for (const seededTask of fixture.tasks) {
+      const findResult = await rawStore.find(seededTask.id);
+      if (!findResult.ok) throw new Error(`find failed: ${JSON.stringify(findResult.error)}`);
+      expect(findResult.value?.status).toBe("archived");
+      expect((findResult.value?.extra as { migrated_to?: unknown } | undefined)?.migrated_to).toBeDefined();
+    }
+
+    rawStore.close();
   });
 });

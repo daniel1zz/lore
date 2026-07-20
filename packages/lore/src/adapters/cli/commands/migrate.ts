@@ -76,8 +76,19 @@ export default defineCommand({
         const result = await service.migrateTasks({ dryRun });
 
         if (!result.ok) {
-          process.stderr.write(formatError(result.error) + "\n");
-          process.exitCode = exitCode(result.error);
+          // BUG-009 fix: a mid-run store failure now carries BOTH the underlying
+          // cause AND the progress already committed before it — printing only
+          // the cause (as before) left an operator with zero visibility into
+          // whether ANY work landed, or whether it's safe to just re-run
+          // (migrateTasks IS idempotent — see phase-migration-service.ts's own
+          // module header invariants #1/#2).
+          const { cause, partial } = result.error;
+          process.stderr.write(formatError(cause) + "\n");
+          process.stderr.write(
+            `${partial.phases_created} phases created / ${partial.tasks_archived} tasks archived / ` +
+              `${partial.evidence_merged} evidence merged before failure — safe to re-run (idempotent)\n`,
+          );
+          process.exitCode = exitCode(cause);
           return;
         }
 

@@ -134,6 +134,20 @@ function createSpec(tmpDir: string, title: string, parentSlug: string): string {
   return match?.[1] ?? "";
 }
 
+/**
+ * Seed an ADR document with NO parent (parent_id null) — an orphan, since
+ * "adr" is not a ROOT_TYPES member. Used by the BUG-005 residual-drift
+ * scenario below to construct a genuinely FIXABLE orphan.
+ */
+function createOrphanAdr(tmpDir: string, title: string): string {
+  const result = runLore(
+    ["create", "adr", "--title", title, "--decision-status", "accepted", "--no-ai"],
+    tmpDir,
+  );
+  const match = result.stdout.match(/Slug:\s+(\S+)/);
+  return match?.[1] ?? "";
+}
+
 // ─── Scenario 1: Consistent tree + blueprint → exit 0 ──────────────────────
 //
 // ANTI-TAUTOLOGY NOTE: The current code (ignoring --check-tree) ALSO exits 0,
@@ -519,3 +533,100 @@ describe("lore tree --orphans: boundary — empty corpus", () => {
 // N/A: no prior regressions. Annotation required per testing.md.
 // The inverse is covered: once --check-tree is wired, running `lore status`
 // (without --check-tree) must still work. Not tested here as it's not this flag's contract.
+
+// ─── Scenario 9: exactly 1 residual missing drift after fixing an orphan (BUG-005) ─
+//
+// Pre-fix bug: `status.ts`'s "fix did its best" exemption (≤1 residual
+// missing/extra drift after --fix stays exit 0 — a deliberate, documented
+// Chesterton's-Fence decision, UNCHANGED by this fix) printed a bare "Tree is
+// consistent with lore.tree.yaml blueprint." line whenever `fixSucceeded` was
+// true, EVEN WHEN a real residual "missing" drift still existed — silently
+// swallowing it from the human/agent-facing text output (though `--json`'s
+// `data.check.drifts` always carried it correctly; this was a TEXT-RENDERING
+// bug only, never a data bug).
+//
+// Fixture: an orphan ADR (parent_id null — genuinely FIXABLE: `fix()`
+// reattaches it to the PRD root) + a blueprint also requiring ≥1 `spec` child,
+// which the corpus never satisfies (fix() only relinks EXISTING orphan/
+// misplaced docs, it never fabricates new ones — see tree-check-service.ts's
+// own `fix()` header). After --fix: the orphan ADR is genuinely reattached
+// (fixed.length === 1, proving real work happened, not the Scenario-5 no-op
+// case where fixableDrifts was empty from the start) AND exactly one residual
+// "missing" drift remains for the still-absent spec — the exact ≤1 exemption
+// boundary.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("lore status --check-tree --fix: exactly 1 residual missing drift after fixing an orphan (BUG-005)", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = makeTempDir("bug-005-residual");
+    initCorpus(tmpDir);
+    createPrd(tmpDir, "main-prd");
+    createOrphanAdr(tmpDir, "orphan-decision");
+
+    // Blueprint: root PRD requires >=1 adr child (satisfied ONLY after the
+    // orphan ADR is reattached) AND >=1 spec child (NEVER satisfied — fix()
+    // cannot fabricate a spec doc out of nothing).
+    const yaml = [
+      "version: 1",
+      "root:",
+      "  type: prd",
+      "  slug: prd-main-prd",
+      "  children:",
+      "    - type: adr",
+      "      min: 1",
+      "    - type: spec",
+      "      min: 1",
+    ].join("\n");
+    writeFileSync(join(tmpDir, "lore.tree.yaml"), yaml + "\n");
+  });
+
+  afterEach(() => cleanupDir(tmpDir));
+
+  it("pre-condition: the tree is genuinely inconsistent before --fix (orphan adr + missing spec)", () => {
+    const before = runLore(["status", "--check-tree"], tmpDir);
+    expect(before.exitCode).toBe(3);
+  });
+
+  it("exits 0 after --fix (unchanged exit-code semantics: <=1 residual missing/extra drift is 'fix did its best')", () => {
+    const result = runLore(["status", "--check-tree", "--fix"], tmpDir);
+    expect(result.exitCode).toBe(0);
+  });
+
+  it("--fix genuinely reattaches the orphan ADR (Fixed 1, Skipped 0) — proves real work happened, not a no-op", () => {
+    const result = runLore(["status", "--check-tree", "--fix"], tmpDir);
+    expect(result.stdout).toMatch(/Fixed 1, Skipped 0/);
+  });
+
+  it("BUG-005 fix: stdout ALWAYS prints the residual missing-spec drift text, never swallowed by the bare 'consistent' line", () => {
+    const result = runLore(["status", "--check-tree", "--fix"], tmpDir);
+
+    // The pre-existing "Tree is consistent..." line must still print — exit
+    // 0's user-facing summary is UNCHANGED by this fix.
+    expect(result.stdout).toMatch(/Tree is consistent with lore\.tree\.yaml blueprint\./);
+
+    // BUG-005: the residual drift (kind + detail) must ALSO print — this is
+    // the discriminating assertion. Pre-fix, only the line above printed and
+    // this assertion failed (the residual was invisible in text output).
+    expect(result.stdout).toMatch(/residual drift/i);
+    expect(result.stdout.toLowerCase()).toMatch(/missing/);
+    expect(result.stdout.toLowerCase()).toMatch(/spec/);
+  });
+
+  it("--json's data.check.drifts carries the residual missing-spec drift both BEFORE and AFTER this fix (data layer was always correct)", () => {
+    const result = runLore(["status", "--check-tree", "--fix", "--json"], tmpDir);
+    expect(result.exitCode).toBe(0);
+
+    const envelope = JSON.parse(result.stdout) as {
+      ok: boolean;
+      data: { check: { consistent: boolean; drifts: Array<{ kind: string; detail: string }> } };
+    };
+
+    expect(envelope.ok).toBe(true);
+    expect(envelope.data.check.consistent).toBe(false);
+    expect(envelope.data.check.drifts).toHaveLength(1);
+    expect(envelope.data.check.drifts[0]?.kind).toBe("missing");
+    expect(envelope.data.check.drifts[0]?.detail.toLowerCase()).toContain("spec");
+  });
+});

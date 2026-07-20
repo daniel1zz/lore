@@ -216,10 +216,28 @@ export default defineCommand({
               treeInconsistent = !fixSucceeded;
 
               treeRenderLines.push(`Fixed ${fixR.value.fixed.length}, Skipped ${fixR.value.skipped.length}`);
+              const residualDrifts = checkR.value.drifts;
               if (fixSucceeded) {
+                // BUG-005 fix: exit-code semantics are UNCHANGED — a single residual
+                // missing/extra drift is still "fix did its best" and stays exit 0
+                // (see the `hasMultipleMissingDrifts`/`fixSucceeded` computation
+                // above, Chesterton's Fence, left as-is). What was broken is the
+                // TEXT rendering: the bare "Tree is consistent" line previously
+                // swallowed that ≤1 residual drift entirely, making a real,
+                // reported (`checkR.value.drifts`, and always correct in `--json`)
+                // residual invisible in the default text output — a false-green
+                // read for a human/agent scanning stdout only. The residual list
+                // (kind+detail) MUST always print here, never be silently dropped.
                 treeRenderLines.push("Tree is consistent with lore.tree.yaml blueprint.");
+                if (residualDrifts.length > 0) {
+                  treeRenderLines.push(
+                    `  ${residualDrifts.length} residual drift(s) remain (not blocking, exit 0):`,
+                  );
+                  for (const d of residualDrifts) {
+                    treeRenderLines.push(`  - ${d.kind}: ${d.detail}`);
+                  }
+                }
               } else {
-                const residualDrifts = checkR.value.drifts;
                 treeRenderLines.push(`Tree inconsistent: ${residualDrifts.length} drift(s) remain`);
                 for (const d of residualDrifts) {
                   treeRenderLines.push(`  - ${d.kind}: ${d.detail}`);

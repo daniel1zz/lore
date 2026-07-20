@@ -4,6 +4,8 @@
  *
  * Public surface:
  *   - ClaudeCliProvider — implements AIProvider via Bun.spawn (bun-only, not vitest-reachable)
+ *   - writePromptToStdin — pure stdin write+close+catch helper (BUG-013), vitest-reachable
+ *     (takes a structural `StdinSink`, not a real `Bun.FileSink`)
  *
  * Invariants:
  *   - Imports AIProvider from @lore/core (cross-package via package name), NOT via relative path (AC-AI-13)
@@ -15,8 +17,11 @@
  *     `--setting-sources ""` isolation flag. See hermetic-spawn.ts module header for the full
  *     rationale and the `--bare` alternative that was probed and rejected.
  *   - SIGTERM is sent after timeout_ms via clearTimeout-safe watchdog
- *   - All failure paths (spawn error, non-zero exit, empty stdout, timeout) return Result errors
- *   - Never throws — all errors are wrapped in err({ code: "AI_PROVIDER_ERROR", ... })
+ *   - All failure paths (spawn error, non-zero exit, empty stdout, timeout, stdin write) return
+ *     Result errors
+ *   - Never throws — all errors are wrapped in err({ code: "AI_PROVIDER_ERROR", ... }), INCLUDING
+ *     a synchronous stdin-write failure (BUG-013 fix — `writePromptToStdin` is the sole stdin
+ *     write site, catching what used to propagate uncaught on an EPIPE)
  *
  * Side-effect class: IO (Bun.spawn, stdin/stdout/stderr pipes)
  *
@@ -45,6 +50,52 @@ import { buildHermeticSpawnSpec } from "./hermetic-spawn.js";
  * });
  * const result = await provider.generate({ prompt: "Write a PRD...", doc_type: "prd", title: "X" });
  */
+/**
+ * Minimal structural surface this module needs from a spawned process's stdin
+ * pipe — matches `Bun.FileSink`'s `write`/`end` shape without requiring the
+ * real Bun type, so {@link writePromptToStdin} is plain-TS testable (vitest, no
+ * real subprocess) instead of only reachable via a live `Bun.spawn` (BUG-013
+ * regression coverage).
+ */
+export interface StdinSink {
+  write(data: string): number | Promise<number>;
+  end(): number | Promise<number> | void;
+}
+
+/**
+ * Writes `prompt` to `sink` and closes it (EOF signal) — the ONE stdin
+ * interaction {@link ClaudeCliProvider.generate} performs. Wraps both calls in
+ * try/catch: a synchronous EPIPE (the spawned process crashed or closed its
+ * stdin before the write finished — e.g. the configured command fails
+ * immediately) previously propagated straight past `generate()`, contradicting
+ * this module's own "Never throws" contract (BUG-013).
+ *
+ * @param sink - The spawned process's stdin (a `Bun.FileSink` in production).
+ * @param prompt - Prompt text to write.
+ * @param providerName - Registry key, echoed into the error for diagnosis.
+ * @returns `ok(undefined)` on success, `err(AI_PROVIDER_ERROR)` naming the
+ *   provider and the underlying write failure otherwise. Never throws.
+ */
+export function writePromptToStdin(
+  sink: StdinSink,
+  prompt: string,
+  providerName: string,
+): Result<void, LoreError> {
+  try {
+    sink.write(prompt);
+    sink.end();
+    return ok(undefined);
+  } catch (error) {
+    return err({
+      code: "AI_PROVIDER_ERROR",
+      provider: providerName,
+      message: `provider "${providerName}" stdin write failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    });
+  }
+}
+
 export class ClaudeCliProvider implements AIProvider {
   constructor(
     /** Registry key for this provider — returned in GenerateOutput.provider_name */
@@ -107,8 +158,17 @@ export class ClaudeCliProvider implements AIProvider {
     // but the generic SubProcess type is `number | FileSink | undefined`. Type assertion
     // is safe here because we always pass stdin: "pipe" in the spawn options above.
     const procStdin = proc.stdin as import("bun").FileSink;
-    procStdin.write(input.prompt);
-    procStdin.end();
+    const stdinResult = writePromptToStdin(procStdin, input.prompt, this.name);
+    if (!stdinResult.ok) {
+      // BUG-013: a synchronous stdin-write failure (e.g. EPIPE — the process
+      // already exited/closed stdin) previously propagated uncaught past this
+      // method. Clear the watchdog and best-effort-kill the process so no
+      // orphaned child or stale timer survives a caught write failure, same
+      // cleanup the timeout/non-zero-exit paths below already perform.
+      clearTimeout(killer);
+      proc.kill("SIGTERM");
+      return stdinResult;
+    }
 
     // Capture stdout + stderr concurrently with process exit code.
     // reason: Bun.spawn option `stdout/stderr: "pipe"` guarantees ReadableStream,
