@@ -247,4 +247,51 @@ describe("NewDocModal", () => {
       expect(onCreate.mock.calls[0]?.[0].extra).toEqual({ plan_id: "01HPLAN0000000000000000001" });
     });
   });
+
+  // ─── ASYNC2D-002 — double-submit guard ──────────────────────────────────────
+  describe("ASYNC2D-002: exactly one create fires while a submission is pending", () => {
+    /**
+     * Reproduces the finding directly: the Create BUTTON is `disabled` while
+     * pending, but the title <input> is not (pre-fix) — and a form's native
+     * "submit" event (which Enter-in-a-text-field dispatches) does not route
+     * through any specific button's disabled attribute, so it reaches
+     * handleSubmit regardless. Firing `submit` on the <form> directly is the
+     * environment-agnostic way to exercise that exact path without depending
+     * on jsdom/browser implicit-submission nuances.
+     */
+    it("ignores a stray form submit (e.g. Enter in the title field) while a create is already in flight", async () => {
+      const user = userEvent.setup();
+      // Type a VALID title first so the guard under test — isPending, not the
+      // pre-existing empty-title validation — is what blocks this submission.
+      const { rerender } = render(
+        <NewDocModal onCreate={vi.fn()} isPending={false} error={null} onClose={vi.fn()} />,
+      );
+      // "prd" needs no parent_id/extra — isolates the pending guard under test
+      // from the pre-existing (and separately tested) schema-validation path.
+      await selectType(user, "prd");
+      await user.type(screen.getByLabelText(/Title/), "A valid title");
+
+      // Simulate the parent having already flagged pending (e.g. from the
+      // first, legitimate submit) by re-rendering with isPending: true and a
+      // fresh onCreate spy, then firing a second, stray form submission.
+      const onCreate = vi.fn().mockResolvedValue(undefined);
+      rerender(<NewDocModal onCreate={onCreate} isPending={true} error={null} onClose={vi.fn()} />);
+
+      const form = screen.getByRole("button", { name: "Creating..." }).closest("form");
+      expect(form).not.toBeNull();
+      fireEvent.submit(form as HTMLFormElement);
+
+      expect(onCreate).not.toHaveBeenCalled();
+    });
+
+    it("disables the title input while a create is in flight (not just the Create button)", () => {
+      renderModal({ isPending: true });
+      expect(screen.getByLabelText(/Title/)).toBeDisabled();
+    });
+
+    it("does not disable the title input when idle (no regression to normal editing)", () => {
+      renderModal({ isPending: false });
+      expect(screen.getByLabelText(/Title/)).not.toBeDisabled();
+    });
+  });
 });
