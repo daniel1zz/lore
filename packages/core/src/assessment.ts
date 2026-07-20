@@ -91,6 +91,7 @@ import type { LoreError } from "./errors.js";
 import { err, ok, type Result } from "./errors.js";
 import { AC_VERIFY_MODES, computeAcCoverage, type AcceptanceCriterion } from "./acceptance.js";
 import { ORACLE_KINDS, extractEvidence } from "./task-workflow.js";
+import { headChars } from "./truncate.js";
 
 // ─── Evidence Ref / AC Score / Judgment / Scope ────────────────────────────
 
@@ -760,9 +761,14 @@ export interface TruncationResult {
  * Truncate a single prompt section to a character budget.
  * Boundary semantics: text.length === maxChars is NOT truncated (strict `>` comparison).
  *
+ * Uses `headChars` (BUG-001 fix, `./truncate.js`) rather than a bare `text.slice(0,
+ * maxChars)` — the naive slice can land mid-surrogate-pair on astral-plane input (e.g.
+ * emoji in a plan/task body or diff), producing a lone unpaired surrogate that
+ * `bun:sqlite` silently accepts on write but does not round-trip on read.
+ *
  * @param text - Section text (e.g. a plan's content, a task's content, a diff)
  * @param maxChars - Budget from `ai.assess.*` config (SPEC-026 §3 D7)
- * @returns { text, truncated } — text is sliced to maxChars when over budget
+ * @returns { text, truncated } — text is clipped to at most maxChars when over budget
  *
  * @example
  * truncateSection("hello world", 5); // → { text: "hello", truncated: true }
@@ -770,7 +776,7 @@ export interface TruncationResult {
  */
 export function truncateSection(text: string, maxChars: number): TruncationResult {
   if (text.length <= maxChars) return { text, truncated: false };
-  return { text: text.slice(0, maxChars), truncated: true };
+  return { text: headChars(text, maxChars), truncated: true };
 }
 
 // ─── Reasoning-Length Resilience (SPEC-029) ────────────────────────────────

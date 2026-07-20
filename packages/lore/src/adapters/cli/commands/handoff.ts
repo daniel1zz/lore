@@ -33,7 +33,7 @@
 
 import { readFileSync } from "fs";
 import { defineCommand } from "citty";
-import { handoffExtraSchema } from "@lore/core";
+import { handoffExtraSchema, tailChars } from "@lore/core";
 import type { HandoffExtra } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
@@ -41,11 +41,6 @@ import { assembleHandoffInput, parseHandoffJsonFile } from "../handoff-input.js"
 
 /** Field flags mutually exclusive with `--json-file` (D6) — `--plan`/`--by` are NOT in this list; they work with both paths. */
 const FIELD_FLAGS = ["file", "decision", "next", "failing-command", "failing-tail-file"] as const;
-
-/** Truncates `text` to the LAST `max` chars (most-recent-output convention, mirrors `evidence.ts`'s `tailChars`). */
-function tailChars(text: string, max: number): string {
-  return text.length > max ? text.slice(text.length - max) : text;
-}
 
 /** citty/mri yields a single string for one occurrence of a repeatable flag, an array for ≥2, or `undefined` for zero. Normalizes to a string array. */
 function normalizeRepeatable(value: unknown): string[] {

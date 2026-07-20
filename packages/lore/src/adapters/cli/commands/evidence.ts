@@ -50,17 +50,12 @@
 
 import { readFileSync } from "fs";
 import { defineCommand } from "citty";
-import { ORACLE_KINDS, type OracleKind } from "@lore/core";
+import { ORACLE_KINDS, tailChars, type OracleKind } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 import { requirePhaseWorkflowService } from "../phase-wiring.js";
 
 const VALID_RESULTS = ["pass", "fail"] as const;
-
-/** Truncate to the last N chars — keeps the most recent (most relevant) output. */
-function tailChars(text: string, max: number): string {
-  return text.length > max ? text.slice(text.length - max) : text;
-}
 
 export default defineCommand({
   meta: {
