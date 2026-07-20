@@ -58,11 +58,18 @@
  *   `TaskWorkflowService.claim` on task docs) — this service instead runs the ADDITIVE
  *   `phase-claim` checkpoint (SPEC-056 D2/D7), registered in `checkpoint-registry.ts`
  *   reusing the SAME checkpoint-agnostic predicate functions `task-claim` uses.
+ * @invariant `claim()` is write-then-verify, not just gate-then-write (BUG-011 TOCTOU
+ *   hardening, mirrors `TaskWorkflowService.claim`'s identical fix) — a post-write
+ *   re-check of the SAME gate against a fresh sibling-claim read self-rolls-back
+ *   (`rollbackClaim`, CAS-guarded) a claim that a concurrent write raced into an
+ *   anchor-overlap conflict during the pre-write gate check's now-stale snapshot. No
+ *   lock table / daemon / mutex row was added — see that method's JSDoc for the full
+ *   race analysis and the accepted double-rollback residual.
  *
  * Side-effect class: IO (reads/writes via StoreInterface; emits telemetry).
  * Source: SPEC-056 §Design Decisions D1, D2, D5, D7; §Public Interface; SPEC-025 §3 D2,
  *   D3, D5, D7, D8, D10 (inherited); SPEC-042 §Design Decisions D5 (inherited, checkpoint
- *   renamed).
+ *   renamed); BUG-011 (anchor-overlap gate TOCTOU hardening)
  */
 
 import { z } from "zod";
@@ -483,11 +490,70 @@ export class PhaseWorkflowService {
         ? `Claimed by ${opts.by} (previous holder: ${existingClaim.by})`
         : `Claimed by ${opts.by}`;
 
-    return this.writePhaseExtra(phase, newExtra, nowIso, opts.by, summary, "claim", {
+    const writeResult = await this.writePhaseExtra(phase, newExtra, nowIso, opts.by, summary, "claim", {
       by: opts.by,
       steal: opts.steal === true,
       ...(existingClaim !== undefined ? { previous_holder: existingClaim.by } : {}),
     });
+    if (!writeResult.ok) return writeResult;
+
+    // reason: BUG-011 TOCTOU hardening (write-then-verify, no new lock infra) — the
+    // phase-doc-typed sibling of `TaskWorkflowService.claim`'s IDENTICAL fix; see that
+    // method's own JSDoc/inline comment for the full race analysis (single-writer-store
+    // serialization ⇒ the LATER committer's post-write re-check always observes the
+    // earlier committer's already-persisted claim ⇒ at least one side always
+    // self-rolls-back; both may roll back on close timing — accepted, loud, retriable).
+    const postWriteGateResult = await this.enforceClaimGate(phase, opts.by, nowIso);
+    if (!postWriteGateResult.ok) {
+      const rollbackResult = await this.rollbackClaim(writeResult.value, existingClaim, opts.by, now);
+      if (!rollbackResult.ok) {
+        // reason: never swallow a rollback failure — see TaskWorkflowService's
+        // identical branch for the full rationale (a THIRD concurrent write racing the
+        // rollback itself is surfaced loud, never silently retried).
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "gate:phase-claim:anchor-overlap",
+          message:
+            `Post-write anchor-overlap conflict detected on phase "${phase.slug}" AND the ` +
+            `automatic self-rollback failed (${rollbackResult.error.code}) — its claim was ` +
+            `left in the conflicting state. Manually inspect/release "${phase.slug}".`,
+          value: { conflict: postWriteGateResult.error, rollback_error: rollbackResult.error },
+        });
+      }
+      return postWriteGateResult;
+    }
+
+    return writeResult;
+  }
+
+  /**
+   * BUG-011 self-rollback — the phase-doc-typed sibling of
+   * `TaskWorkflowService.rollbackClaim`; see that method's JSDoc for the full rationale
+   * (including why a deterministic tiebreak was evaluated and rejected). Restores
+   * `extra.claim` to its value immediately BEFORE the just-committed write, CAS-guarded
+   * via {@link writePhaseExtra}'s own CAS against `written.version`.
+   */
+  private async rollbackClaim(
+    written: DocRecord,
+    preClaim: TaskClaim | undefined,
+    by: string,
+    now: () => string,
+  ): Promise<Result<DocRecord, LoreError>> {
+    const rollbackExtra: Record<string, unknown> = { ...written.extra };
+    if (preClaim !== undefined) {
+      rollbackExtra["claim"] = preClaim;
+    } else {
+      delete rollbackExtra["claim"];
+    }
+    return this.writePhaseExtra(
+      written,
+      rollbackExtra,
+      now(),
+      by,
+      `Self-rollback by ${by}: anchor-overlap conflict detected after write (BUG-011 TOCTOU guard)`,
+      "release",
+      { by, rollback: true },
+    );
   }
 
   // ── release ──────────────────────────────────────────────────────────────

@@ -45,10 +45,20 @@
  * @invariant addEvidence and recordVerifiedEvidence share ONE append implementation
  *   (private `appendEvidenceEntry`) — cap check, schema validation, ac_ref cross-entity
  *   validation, and the writeTaskExtra commit path are never duplicated between them.
+ * @invariant `claim()` is write-then-verify, not just gate-then-write (BUG-011 TOCTOU
+ *   hardening) — the pre-write `enforceClaimGate` call's sibling-claim snapshot can go
+ *   stale in the gap before this method's own CAS write commits (per-doc CAS alone
+ *   cannot protect a CROSS-row invariant like "no two anchor-overlapping siblings both
+ *   hold a fresh claim"). After a successful write, `claim()` re-runs the identical
+ *   gate check against a FRESH read; a conflict now detected self-rolls-back the just-
+ *   written claim (`rollbackClaim`, CAS-guarded) and returns the same anchor-overlap
+ *   gate error a pre-write rejection would have. Two racing claims may both roll back
+ *   (accepted residual — loud, retriable; see `rollbackClaim`'s JSDoc for why a
+ *   deterministic tiebreak was rejected). No lock table / daemon / mutex row was added.
  *
  * Side-effect class: IO (reads/writes via StoreInterface; emits telemetry).
  * Source: SPEC-025 §3 D2, D3, D5, D7, D8, D10; §4 AC-WF-1..11; §8.2, §8.3; SPEC-038 §4, §7 D4;
- *         SPEC-039 §2 D2, §4 AC-VRF-2
+ *         SPEC-039 §2 D2, §4 AC-VRF-2; BUG-011 (anchor-overlap gate TOCTOU hardening)
  */
 
 import { z } from "zod";
@@ -566,11 +576,102 @@ export class TaskWorkflowService {
         ? `Claimed by ${opts.by} (previous holder: ${existingClaim.by})`
         : `Claimed by ${opts.by}`;
 
-    return this.writeTaskExtra(task, newExtra, nowIso, opts.by, summary, "claim", {
+    const writeResult = await this.writeTaskExtra(task, newExtra, nowIso, opts.by, summary, "claim", {
       by: opts.by,
       steal: opts.steal === true,
       ...(existingClaim !== undefined ? { previous_holder: existingClaim.by } : {}),
     });
+    if (!writeResult.ok) return writeResult;
+
+    // reason: BUG-011 TOCTOU hardening (write-then-verify, no new lock infra) —
+    // `enforceClaimGate` above reads sibling claims via a FRESH `getPlanBundle` snapshot
+    // taken BEFORE this method's own CAS write, so that snapshot can go stale in the
+    // read-write gap: a concurrent claim on an anchor-overlapping sibling task can land
+    // in that exact gap, and NEITHER writer's pre-write check would ever observe the
+    // other (per-doc CAS only serializes writes to the SAME row — it says nothing about
+    // the cross-row "no two anchor-overlapping siblings both hold a fresh claim"
+    // invariant SPEC-042 established). Re-running the IDENTICAL gate check immediately
+    // after our own write commits closes this: the store serializes all writes on one
+    // connection, so whichever of two racing claims commits SECOND will, in this
+    // post-write re-check's fresh read, always observe the FIRST writer's claim already
+    // persisted (a read strictly after your own write is ordered after every write that
+    // preceded it) — so the later committer always detects the conflict here and
+    // self-rolls-back below. The earlier committer's own post-write check may or may not
+    // observe the later write depending on exact timing; if it does, BOTH sides roll
+    // back. That double-rollback is an ACCEPTED residual (loud VALIDATION_ERROR,
+    // trivially retriable by either side) — see `rollbackClaim`'s own JSDoc for why a
+    // deterministic tiebreak was evaluated and rejected in favor of this simpler,
+    // symmetric design. A narrow window still remains AFTER this post-write check
+    // returns clean (a third claim landing in the instant between this read and the
+    // caller observing success) — documented, not eliminated: closing it fully would
+    // need a corpus-level lock/daemon, explicitly out of scope (task anchor: "⛔
+    // 不引入 daemon/锁表/mutex 行").
+    const postWriteGateResult = await this.enforceClaimGate(task, opts.by, nowIso);
+    if (!postWriteGateResult.ok) {
+      const rollbackResult = await this.rollbackClaim(writeResult.value, existingClaim, opts.by, now);
+      if (!rollbackResult.ok) {
+        // reason: never swallow a rollback failure — the caller must be told the doc was
+        // left in the CONFLICTING (not rolled back) claim state and needs to inspect/
+        // release it manually. A STALE_VERSION here means a THIRD write (e.g. a release,
+        // or an evidence append by the holder) landed between our own write and this
+        // rollback attempt — a genuinely rare double-race with no automatic retry policy
+        // anywhere in this service; surfaced loud rather than retried silently.
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "gate:task-claim:anchor-overlap",
+          message:
+            `Post-write anchor-overlap conflict detected on task "${task.slug}" AND the ` +
+            `automatic self-rollback failed (${rollbackResult.error.code}) — its claim was ` +
+            `left in the conflicting state. Manually inspect/release "${task.slug}".`,
+          value: { conflict: postWriteGateResult.error, rollback_error: rollbackResult.error },
+        });
+      }
+      return postWriteGateResult;
+    }
+
+    return writeResult;
+  }
+
+  /**
+   * BUG-011 self-rollback: restores `extra.claim` to its value immediately BEFORE the
+   * just-committed write — `preClaim` (the same-holder claim being refreshed, or a
+   * stale/foreign claim being taken over) when one existed, or removed entirely when
+   * this was a fresh acquire. CAS-guarded against `written.version` (the version the
+   * just-committed claim write produced) via {@link writeTaskExtra}'s own CAS, so a
+   * THIRD concurrent write landing in this narrow window fails loud (`STALE_VERSION`)
+   * rather than silently clobbering it — see `_claimImpl`'s caller for how that failure
+   * is surfaced.
+   *
+   * A deterministic tiebreak (e.g. "lowest doc id always wins, so only the loser ever
+   * rolls back") was considered and rejected for this task: it would require the
+   * WINNING side to also re-verify post-write (to confirm it's still the winner after
+   * whatever else may have changed), which is the identical IO cost this write-then-
+   * verify design already pays — the only thing a tiebreak would save is the rare
+   * double-rollback case, at the cost of a second comparison axis (id ordering) that
+   * has no other role in this module. Both losers retrying their own `lore claim` is
+   * simpler, loud, and already the documented accepted residual.
+   */
+  private async rollbackClaim(
+    written: DocRecord,
+    preClaim: TaskClaim | undefined,
+    by: string,
+    now: () => string,
+  ): Promise<Result<DocRecord, LoreError>> {
+    const rollbackExtra: Record<string, unknown> = { ...written.extra };
+    if (preClaim !== undefined) {
+      rollbackExtra["claim"] = preClaim;
+    } else {
+      delete rollbackExtra["claim"];
+    }
+    return this.writeTaskExtra(
+      written,
+      rollbackExtra,
+      now(),
+      by,
+      `Self-rollback by ${by}: anchor-overlap conflict detected after write (BUG-011 TOCTOU guard)`,
+      "release",
+      { by, rollback: true },
+    );
   }
 
   // ── release ──────────────────────────────────────────────────────────────
