@@ -1,13 +1,17 @@
 ---
 name: lore-session-review
-description: "Session PROCESS-quality review for lore-governed work — judges how a session executed the workflow (claim/evidence discipline, subagent protocol, git worktree hygiene, gate compliance, oracle usage), not the code it produced. Runs deterministic artifact checks (corpus + git) plus an independent-judge pass over an invariant catalog, and persists findings as a knowledge retro. Use when the user says 'review this session', 'session 质量', '复盘这次会话的过程', 'audit the agent's behavior', 'how disciplined was this run', after an autopilot run finishes, or after any session with multi-agent orchestration or incidents. NOT for persisting session learnings/decisions (that is lore-session) and NOT for reviewing code changes (that is lore-review)."
+description: "Reviews how a session performed against the LORE-governed workflow — corpus-chain discipline (feed / claim / evidence / gate / handoff / CLOSE) plus lore's own prescribed worktree-dispatch protocol (actor identity, anchor mutex, merge-verify). Judges Lore-workflow adherence ONLY — not code quality or general engineering hygiene (red-green TDD, style, non-dispatch git habits belong to lore-review / lore-test / lore-tdd). Runs deterministic corpus+git artifact checks plus an independent-judge pass over the Lore-discipline invariant catalog, and persists findings — EACH carrying a root cause and a mechanization fix, not a symptom-level command — as a knowledge retro. Use when the user says 'review this session', 'session 质量', '复盘这次会话的过程', 'audit the agent's behavior', 'how disciplined was this run', after an autopilot run finishes, or after any session with multi-agent orchestration or incidents. NOT for persisting session learnings/decisions (that is lore-session-capture) and NOT for reviewing code changes (that is lore-review)."
 ---
 
-# Session Process-Quality Review
+# Lore-Governed Session Performance Review
 
-Judge the session's **process**, not its product. A session can ship green code while violating every discipline that makes the next session safe (unclaimed work, unverified merges, self-judged evidence). Those violations are invisible to code review and to `lore assess` (which needs a plan's evidence chain — precisely what an undisciplined session fails to produce). This skill closes that gap.
+Judge how the session performed against the **Lore-governed workflow** — the corpus chain (feed → claim → evidence → release → assess → invalidate → handoff), the gates, and lore's own prescribed worktree-dispatch protocol (SPEC-042 + CLAUDE.md 主 Agent 分发制 / Worktree 并发安全). A session can ship green code while violating every discipline that makes the NEXT session safe (unclaimed work, unverified merges, self-judged evidence). Those violations are invisible to code review and to `lore assess` (which needs a plan's evidence chain — precisely what an undisciplined session fails to produce). This skill closes that gap.
 
-Complementary skills: `lore-session` persists knowledge (capture posture); this skill finds violations (adversarial posture). Run this BEFORE lore-session's handoff step so the retro can reference the findings.
+**Scope — Lore performance ONLY.** This review judges adherence to Lore's governance model, nothing else. The worktree/dispatch invariants (I4/I5/I10, D1–D3) look like generic git discipline but are IN scope because they ARE lore's prescribed operational protocol — the execution half of the corpus model. But code quality, style, and general test-design discipline (red-before-green TDD) are OUT: if you observe one, note it inline as `[out-of-scope → lore-review / lore-test / lore-tdd]` and do NOT fold it into a Lore-discipline verdict. A finding that cannot be traced to a lore rule (a CLI verb, a corpus mechanism, a gate, or the dispatch protocol) does not belong in this report.
+
+**Every finding reaches root cause — no symptom patches.** A violation is not resolved by "run this command next time" (symptom-level, and against CLAUDE.md 根因优先于表象). Each finding MUST name the ROOT cause — the missing mechanism / ambiguous prompt / absent gate that ALLOWED the breach — and propose the mechanization that prevents the whole class (this project's pattern: prompt discipline → deterministic gate/hook/CLI/config change). This applies on FIRST occurrence; root-cause analysis is never deferred to a repeat.
+
+Complementary skills: `lore-session-capture` persists knowledge (capture posture); this skill finds Lore-discipline violations (adversarial posture). Run this BEFORE lore-session-capture's handoff step so the retro can reference the findings.
 
 ## Inputs
 
@@ -37,16 +41,16 @@ Dispatch a **read-only reviewer subagent** (e.g. `lore-reviewer`) as the judge �
 
 Give the judge: (a) a factual session summary you write (what was asked, what was dispatched, what merged — facts, not self-assessment), (b) Phase 1 results, (c) the invariant catalog `references/invariants.md`. The judge returns one verdict per invariant: `PASS | VIOLATION | N/A` + a one-line evidence quote. An invariant without evidence either way is `N/A (not exercised)`, never a silent PASS.
 
-The catalog (I1–I11, full definitions in the reference file): feed-before-produce · claim-before-work · evidence-before-done · commit-before-done · merge-verify-before-cleanup · red-before-green · gate compliance · doc-sync honesty · handoff on unfinished work · orchestration hygiene (actor identity, anchor mutex, watermarks) · CLOSE-phase hygiene (anchor add, spec status, assess, invalidate).
+The catalog (full definitions in the reference file), all Lore-governance invariants: I1 feed-before-produce · I2 claim-before-work · I3 evidence-before-done (external-oracle-only) · I4 commit-before-done · I5 merge-verify-before-cleanup · I7 gate compliance · I8 doc-sync honesty · I9 handoff on unfinished work · I10 orchestration hygiene (actor identity, anchor mutex, watermarks) · I11 CLOSE-phase hygiene (anchor add, spec status, assess, invalidate). (I6 red-before-green was RETIRED 2026-07-20 — general TDD discipline, not Lore-governance; the ID is kept as a tombstone so prior retros' "I6" references don't silently re-map.)
 
-**The catalog is a floor, not a ceiling.** After judging every listed invariant, ask explicitly: "what discipline problem does THIS session have that the catalog does not name?" A structured checklist creates tunnel vision — a reviewer who checks I1–I11 and stops will pass a session that violated something uncatalogued. CLOSE-phase omissions (I11) and anything downstream of a green merge are the usual blind spots, because the session looks finished. Report an uncatalogued finding as `V? [uncatalogued] — <title>` with the same evidence/consequence/correction shape, and note that the catalog may need a new invariant (a real gap found this way is more valuable than any checklist verdict).
+**The catalog is a floor, not a ceiling — within the Lore-performance axis.** After judging every listed invariant, ask explicitly: "what LORE-discipline problem does THIS session have that the catalog does not name?" A structured checklist creates tunnel vision — a reviewer who checks the list and stops will pass a session that violated something uncatalogued. CLOSE-phase omissions (I11) and anything downstream of a green merge are the usual blind spots, because the session looks finished. Report an uncatalogued finding as `V? [uncatalogued] — <title>` with the same evidence / consequence / root-cause / mechanization shape, and note that the catalog may need a new invariant (a real gap found this way is more valuable than any checklist verdict). This floor-not-ceiling license is bounded by scope: an uncatalogued *Lore*-discipline gap is in; a general code/engineering issue is still `[out-of-scope]`, not a new invariant.
 
 ## Phase 3 — Report
 
 ALWAYS use this exact structure:
 
 ```markdown
-# Session Process Review — <date> <short session descriptor>
+# Lore-Governed Session Performance Review — <date> <short session descriptor>
 **Mode**: live | dossier   **Judge**: independent (<agent type>) | self-graded (low confidence)
 
 ## Verdict summary
@@ -55,23 +59,27 @@ ALWAYS use this exact structure:
 ## Violations (most severe first)
 ### V1 [<invariant or check id>] — <title>
 - **Evidence**: <quote/command output>
-- **Consequence**: <what this made unsafe>
-- **Correction**: <the literal command or protocol change>
+- **Consequence**: <what this made unsafe for the next session>
+- **Root cause**: <WHY the breach was possible — the absent gate / ambiguous prompt / missing mechanism / voluntarily-dark safety net. NOT the surface action ("forgot to claim" is the symptom; "claim is prompt-only discipline with no pre-work enforcement" is the root).>
+- **Fix**: <immediate corrective command> → **Mechanization**: <the systemic change that prevents the whole CLASS — prompt discipline → deterministic gate/hook/CLI/config; or, if the mechanism already exists, name it and mark this "bypass of existing mechanism", which is a heavier finding>
 
 ## Deterministic check table
 | ID | Result | Evidence |
 
+## Out-of-scope observations (non-Lore, optional)
+<any code-quality / general-engineering issues noticed but NOT judged here — one line each with the skill that owns it (lore-review / lore-test / lore-tdd). Omit the section if none.>
+
 ## What went well
-<2-4 bullets — disciplined behaviors worth reinforcing, only if genuinely observed>
+<2-4 bullets — disciplined Lore behaviors worth reinforcing, only if genuinely observed>
 
 ## N/A invariants
 <list with one-line reasons>
 ```
 
-No violations found is a valid outcome — report it plainly; never manufacture findings.
+No violations found is a valid outcome — report it plainly; never manufacture findings. But every violation that IS reported must carry both Root cause and Mechanization — a violation block with only a corrective command is incomplete.
 
 ## Phase 4 — Persist
 
 If the project has `.lore/`: write the report as `lore create knowledge --sub-type retro --title "Session process review — <date> <descriptor>" --content-file <report>` and `lore link` it to the session's plan (if one exists, kind `informs`). Export `CLAUDECODE=1` so AI-assist stays off. No `.lore/` → offer the report as a file and suggest `lore init`.
 
-If the same violation class appears in a PRIOR session-review retro (search: `lore search "session process review" --json`), say so — a repeat finding is a systemic gap that belongs in CLAUDE.md or a hook/gate, not just another retro. Recommend the mechanization explicitly (this project's pattern: prompt discipline → deterministic gate).
+Every finding already carries its own Mechanization (Phase 3). Cross-check prior retros (`lore search "session process review" --json` / `lore search "session performance review" --json`): if a finding's mechanization was ALREADY recommended in an earlier retro and STILL not built, escalate its severity by one level and say so — a twice-recommended, un-built gate is itself a Lore-governance failure (the corpus flagged the class and nothing mechanized it). That escalation is the signal to stop writing retros about the class and actually land the gate/hook/CLAUDE.md change this session.

@@ -2,6 +2,8 @@
 
 Each invariant states WHY it exists (the failure it prevents), what counts as evidence, and known false-positive traps. Verdicts: `PASS` (evidence of compliance), `VIOLATION` (evidence of breach), `N/A` (not exercised this session — say why). Never grade on vibes; every verdict cites evidence.
 
+**Scope — Lore-governance only.** This catalog judges adherence to Lore's workflow, not general engineering quality. I4/I5/I10 (commit / merge-verify / orchestration) read like generic git discipline but are IN scope because they are lore's own prescribed worktree-dispatch protocol (SPEC-042 + CLAUDE.md 主 Agent 分发制 / Worktree 并发安全) — the operational half of the corpus model. Genuinely general discipline is NOT here: I6 red-before-green was retired for exactly that reason (below). Every VIOLATION must, in the report, reach a **root cause + a mechanization proposal** (prompt → gate/hook/CLI); a corrective command alone is symptom-level and against CLAUDE.md 根因优先于表象.
+
 ## I1 — feed-before-produce
 Before producing a governed artifact (spec/plan/task), the checkpoint feed (`lore feed <checkpoint>`) or equivalent upstream reading happened. **Why**: gates catch violations at write time, but feeding first avoids the deny-retry churn and produces upstream-consistent artifacts.
 - Evidence: transcript shows feed/search/get calls before `lore create`; or gate denials followed by correction.
@@ -27,10 +29,8 @@ A subagent's completion report on file-modifying work includes the commit hash, 
 Before merging an agent branch and removing its worktree, the orchestrator verified the branch actually carries the commits ("Already up to date" on a supposedly-work-carrying branch = STOP). `--force` worktree removal on an unmerged/unverified tree is a violation by itself. **Why (same 2026-07-20 incident)**: the blind `merge → cleanup` sequence is what turned a missing commit into data loss.
 - Evidence: transcript shows `git log <branch>` before merge, or merge diffstats consistent with the reported work.
 
-## I6 — red-before-green (failure-first verification)
-New tests demonstrably failed against pre-fix code before passing (stash/revert isolation or equivalent), and fix verification included the negative direction. **Why**: a test that never failed proves nothing about the fix; "为通过而验证 = 未验证".
-- Evidence: reports describe the red run with the failure text; matched-pair tests for behavioral boundaries.
-- N/A when: session had no code fixes/tests.
+## I6 — RETIRED (2026-07-20)
+Was "red-before-green (failure-first verification)". Retired from THIS catalog: it is general test-design discipline, not Lore-governance — it invokes no lore CLI verb, corpus mechanism, or gate. Test-validity review belongs to `lore-test` / `lore-tdd` (methodology) and `~/.claude/skills/shared/verification-discipline.md`. The ID is kept as a tombstone so prior retros referencing "I6" don't silently re-map to a different invariant. Do NOT judge test-design here — if a red-green gap is glaring, record it in the report's **Out-of-scope observations** section as `[out-of-scope → lore-tdd]`, never as a Lore-discipline VIOLATION.
 
 ## I7 — gate compliance
 Gate denials were handled by correcting the input (per feeding pack), never by bypass (`LORE_GATE_BYPASS`, `--no-verify`, `CLAUDE_SUBAGENT_GATE_BYPASS`) without explicit user authorization IN THE TRANSCRIPT. Safety-gate blocks (e.g. a blocked `git branch -D`) were respected — deferred to the user, not chained around. **Why**: gates are the corpus's mechanized discipline; silent bypass converts every downstream guarantee into an assumption.

@@ -58,8 +58,8 @@ const DECLARED_FILES = [
   // skills
   "skills/lore/SKILL.md",
   "skills/lore-kickoff/SKILL.md",
-  "skills/lore-session/SKILL.md",
-  "skills/lore-session/references/knowledge-types.md",
+  "skills/lore-session-capture/SKILL.md",
+  "skills/lore-session-capture/references/knowledge-types.md",
   // skills/lore-session-review (session PROCESS-quality review, 2026-07-20)
   "skills/lore-session-review/SKILL.md",
   "skills/lore-session-review/references/invariants.md",
