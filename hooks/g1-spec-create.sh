@@ -115,6 +115,63 @@ is_command_position_match() {
     | grep -Eq "^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*${pattern}"
 }
 
+# ─── BUG-014 fix: constrain --content-file to safe path prefixes ────────────
+# extract_flag (below) returns the RAW --content-file value from the Bash
+# command string with zero shell-quoting/escaping awareness. Without a path
+# constraint, an agent coaxed into e.g. `lore create spec --content-file
+# ~/.ssh/id_rsa` would have this shim `cat` an arbitrary readable file into
+# the gate payload BEFORE the real write — and on a gate deny, that content
+# is echoed back verbatim in the deny reason. Legitimate usage (CLAUDE.md
+# dogfood discipline: "pass literal absolute paths") only ever needs paths
+# inside the target corpus (TARGET_CWD) or a scratch dir (/tmp,
+# /private/tmp, $TMPDIR — macOS resolves /var/folders/... to
+# /private/var/folders/... under realpath; both forms are checked). A path
+# that resolves outside every allowed prefix is NOT treated as a confirmed
+# attack — many false positives are just wrong-corpus/relative-path corner
+# cases — so this follows the file's existing fail-OPEN posture: log
+# UNRESOLVED_CONTENT_FILE and let the service-layer GateEnforcer gate the
+# REAL resolved content at write time, exactly like the pre-existing
+# unreadable-path branch below. Symlinks are covered because `realpath`
+# follows them: a repo-internal symlink pointing outside every allowed
+# prefix resolves to its (disallowed) target before the prefix check runs.
+resolve_realpath() {
+  local p="$1"
+  if command -v realpath >/dev/null 2>&1; then
+    realpath "$p" 2>/dev/null
+    return
+  fi
+  # No `realpath` on PATH (unexpected on Linux/macOS, kept as a portable
+  # fallback): resolve via `cd` into the real directory + `pwd -P`, which
+  # also collapses symlinked directory components.
+  if [ -d "$p" ]; then
+    (cd "$p" 2>/dev/null && pwd -P)
+    return
+  fi
+  local dir base
+  dir="$(dirname "$p")"
+  base="$(basename "$p")"
+  if [ -d "$dir" ]; then
+    printf '%s/%s\n' "$(cd "$dir" 2>/dev/null && pwd -P)" "$base"
+  fi
+}
+
+# $1 = a path already resolved via resolve_realpath (absolute, symlink-free).
+# Returns success iff it falls under TARGET_CWD, /tmp, /private/tmp, or
+# $TMPDIR (each independently realpath'd — a raw string-prefix compare would
+# miss the /var/folders → /private/var/folders macOS TMPDIR alias).
+is_content_file_path_allowed() {
+  local resolved="$1" allowed_root
+  for allowed_root in "$TARGET_CWD" /tmp /private/tmp "${TMPDIR:-}"; do
+    [ -z "$allowed_root" ] && continue
+    allowed_root="$(resolve_realpath "$allowed_root")"
+    [ -z "$allowed_root" ] && continue
+    case "$resolved" in
+      "$allowed_root"/*|"$allowed_root") return 0 ;;
+    esac
+  done
+  return 1
+}
+
 [ "${LORE_GATE_BYPASS:-}" = "1" ] && allow
 
 if ! command -v jq >/dev/null 2>&1; then
@@ -183,20 +240,30 @@ case "$TOOL_NAME" in
     CONTENT_FILE="$(extract_flag content-file)"
 
     if [ -z "$CONTENT" ] && [ -n "$CONTENT_FILE" ]; then
+      RESOLVED_CONTENT_FILE=""
       if [ -r "$TARGET_CWD/$CONTENT_FILE" ]; then
-        CONTENT="$(cat "$TARGET_CWD/$CONTENT_FILE" 2>/dev/null || true)"
+        RESOLVED_CONTENT_FILE="$(resolve_realpath "$TARGET_CWD/$CONTENT_FILE")"
       elif [ -r "$CONTENT_FILE" ]; then
-        CONTENT="$(cat "$CONTENT_FILE" 2>/dev/null || true)"
+        RESOLVED_CONTENT_FILE="$(resolve_realpath "$CONTENT_FILE")"
+      fi
+
+      if [ -n "$RESOLVED_CONTENT_FILE" ] && is_content_file_path_allowed "$RESOLVED_CONTENT_FILE"; then
+        CONTENT="$(cat "$RESOLVED_CONTENT_FILE" 2>/dev/null || true)"
       else
         # UNRESOLVED_CONTENT_FILE (fail-honest > fail-confusing): the command
-        # declared a --content-file this shim cannot read — typically the path
+        # declared a --content-file this shim cannot read — either the path
         # contains an unexpanded shell variable (the hook sees the raw command
-        # string, never the shell's expansion). Running the gate with empty
-        # content would emit a misleading MISSING_SKELETON deny against a
-        # possibly fully-conformant spec. Fail open instead: the service-layer
+        # string, never the shell's expansion), OR it resolved to a path
+        # outside every allowed prefix (BUG-014: TARGET_CWD / /tmp /
+        # /private/tmp / $TMPDIR only — see is_content_file_path_allowed
+        # above). Running the gate with empty content would emit a misleading
+        # MISSING_SKELETON deny against a possibly fully-conformant spec, and
+        # (for the disallowed-prefix case) reading the file at all risks
+        # leaking its content into the gate's deny-reason echo. Fail open
+        # instead, without ever populating CONTENT: the service-layer
         # GateEnforcer re-runs the SAME predicates on the REAL resolved
-        # content, so nothing goes ungated.
-        log "UNRESOLVED_CONTENT_FILE: cannot read --content-file '$CONTENT_FILE' (unexpanded shell variable in the path?) — failing open; service-layer GateEnforcer still gates the real content"
+        # content at write time, so nothing goes ungated.
+        log "UNRESOLVED_CONTENT_FILE: cannot read --content-file '$CONTENT_FILE' (unexpanded shell variable, unreadable, or outside allowed path prefixes: \$TARGET_CWD, /tmp, /private/tmp, \$TMPDIR) — failing open; service-layer GateEnforcer still gates the real content"
         allow
       fi
     fi

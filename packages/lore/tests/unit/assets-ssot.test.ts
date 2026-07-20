@@ -658,3 +658,61 @@ describe("assets-ssot — REGRESSION", () => {
     expect(mode & 0o100).not.toBe(0);
   });
 });
+
+// ─── REGRESSION (BUG-004): session-start-resume.mjs never re-blocks on tests ──
+//
+// The 2026-07-18 CLAUDE.md dogfood log records TWO removals of session-start
+// Phase F ("test health"): a full vitest run on every session start that
+// `await`ed before `emit`, blocking session open, then orphaning worker
+// processes on timeout (OOM incident). The prior manifest-level assets-ssot
+// suite (205/205 green) never asserted anything about FILE CONTENT, so a
+// re-introduced Phase F block in the `assets/` SSOT copy specifically (while
+// the installed `~/.claude/hooks/` copy stayed fixed) would have passed
+// every existing check silently — the exact "writer without a content-level
+// reader" class of incident this repo's CLAUDE.md log calls out repeatedly.
+// These assertions run directly against the file's TEXT, closing that gap.
+
+describe("assets-ssot — REGRESSION (BUG-004: no test-runner blocking in session-start hook)", () => {
+  const SESSION_START_HOOK = join(ASSETS_ROOT, "hooks", "session-start-resume.mjs");
+  const FORBIDDEN_MARKERS = [
+    "runInKillableGroup",
+    "testHealthBlock",
+    "npx vitest --run",
+    "bunx vitest --run",
+    "npm test",
+    "npm run test",
+  ] as const;
+
+  it.each(FORBIDDEN_MARKERS)(
+    "the vendored session-start-resume.mjs SSOT does not contain %j (2026-07-18 removal)",
+    (marker) => {
+      const content = readFileSync(SESSION_START_HOOK, "utf8");
+      expect(content).not.toContain(marker);
+    },
+  );
+
+  it("imports ONLY spawnSync from node:child_process — a bare `spawn` re-import is exactly what a re-added background test-runner block would need", () => {
+    const content = readFileSync(SESSION_START_HOOK, "utf8");
+    const importMatch = content.match(/import\s*\{([^}]*)\}\s*from\s*['"]node:child_process['"]/);
+    expect(importMatch).not.toBeNull();
+    const capturedNames = (importMatch as RegExpMatchArray)[1];
+    if (capturedNames === undefined) {
+      throw new Error("node:child_process import regex matched but its capture group is undefined — regex bug");
+    }
+    const importedNames = capturedNames.split(",").map((s) => s.trim());
+    expect(importedNames).toContain("spawnSync");
+    expect(importedNames).not.toContain("spawn");
+  });
+
+  it("REGRESSION control: the marker scan is not vacuously true — a synthetic fixture carrying a forbidden marker IS flagged", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "bug-004-regression-"));
+    try {
+      const tmpFile = join(tmpDir, "fixture-session-start.mjs");
+      writeFileSync(tmpFile, "// reintroduced by mistake\nfunction runInKillableGroup() {}\n");
+      const content = readFileSync(tmpFile, "utf8");
+      expect(FORBIDDEN_MARKERS.some((marker) => content.includes(marker))).toBe(true);
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
