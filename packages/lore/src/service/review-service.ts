@@ -194,6 +194,30 @@ export class ReviewService {
   /**
    * Approve a document — transition status to 'approved'.
    * Creates a version snapshot and audit entry.
+   *
+   * @invariant For a `plan` doc, this is write-then-verify, not just gate-then-write
+   *   (ASYNC2-002 TOCTOU hardening, BUG-011 precedent — see
+   *   `task-workflow-service.ts`'s `claim()`/`rollbackClaim` for the sibling
+   *   implementation this mirrors). `enforceApprovalGate`'s `plan-promote` branch
+   *   reads the plan's ANCESTOR spec — a DIFFERENT row than the one this method's own
+   *   CAS write protects — so a concurrent edit to that spec (e.g. an AC removal, or
+   *   the spec being un-approved) landing in the gap between the pre-write gate check
+   *   and the CAS commit is invisible to `expected_version: doc.version` (that guard
+   *   only serializes writes to the PLAN row). After the CAS write commits, `approve`
+   *   re-runs the IDENTICAL gate check against a FRESH ancestor-spec read; a failure
+   *   now self-rolls-back the just-committed approval (`rollbackApproval`, itself
+   *   CAS-guarded) and returns the SAME gate error a pre-write rejection would have —
+   *   never leaves the plan "approved" against an invalidated prerequisite. A `spec`
+   *   doc's own `spec-promote` gate does NOT need this: every field
+   *   `enforceApprovalGate`'s spec branch reads (`extra.acceptance_criteria`,
+   *   `extra.spec_kind`) lives on the SAME row this method's CAS write already
+   *   protects — a genuine concurrent edit there already fails the CAS itself as
+   *   `STALE_VERSION` (the `expected_version` won't match), so re-checking would be
+   *   redundant, not a real gap. The residual window AFTER this post-write re-check
+   *   returns clean (a third concurrent edit landing in the instant between this read
+   *   and the caller observing success) is an ACCEPTED residual — closing it fully
+   *   would need a corpus-level lock/daemon, out of scope (same accepted-residual
+   *   shape `task-workflow-service.ts`'s `claim()` documents).
    * Source: SPEC-005 §3, §4, AC rows 2, 6.
    */
   async approve(
@@ -251,6 +275,101 @@ export class ReviewService {
       doc_id: doc.id,
       // reason: SPEC-035 §2 — join key for AuditService.verify's versions⋈audit walk.
       details: { reviewer, from_status: doc.status, to_status: "approved", version: nextVersion },
+    });
+    if (!auditResult.ok) return auditResult;
+
+    // reason: ASYNC2-002 — plan-only post-write re-check, see the JSDoc @invariant
+    // above. Only runs when a gate dependency is wired AND the just-approved doc is a
+    // plan (enforceApprovalGate is a no-op for every other combination, but the
+    // explicit `doc.type === "plan"` guard here keeps a spec approval's cost/behavior
+    // byte-identical — zero extra store round trip, not merely a zero-op call).
+    if (this.gate !== undefined && doc.type === "plan") {
+      const postGateResult = await this.enforceApprovalGate(updatedDoc);
+      if (!postGateResult.ok) {
+        const rollbackResult = await this.rollbackApproval(updatedDoc, doc.status, reviewer);
+        if (!rollbackResult.ok) {
+          return err({
+            code: "VALIDATION_ERROR",
+            field: "gate:plan-promote",
+            message:
+              `Plan "${updatedDoc.slug}" was approved but its ancestor spec's approval ` +
+              `prerequisites failed a post-write re-check, AND automatic self-rollback ` +
+              `failed (${rollbackResult.error.code}) — it was left APPROVED despite the ` +
+              `invalidated prerequisite. Manually inspect/re-set its status.`,
+            value: { conflict: postGateResult.error, rollback_error: rollbackResult.error },
+          });
+        }
+        return postGateResult;
+      }
+    }
+
+    return ok(updatedDoc);
+  }
+
+  /**
+   * ASYNC2-002 self-rollback — reverts a just-committed plan approval back to
+   * `fromStatus` (the plan's status immediately before this `approve()` call), CAS-
+   * guarded against the approval write's OWN version (`approved.version`): a THIRD
+   * concurrent write landing in this narrow window fails loud (`STALE_VERSION`,
+   * surfaced to the caller by `approve` above) rather than silently clobbering it.
+   * Mirrors `TaskWorkflowService.rollbackClaim` (BUG-011). Writes a `"reject"`-family
+   * version + audit entry — there is no dedicated "un-approve" `VersionAction`, and
+   * `reject` is the closest existing semantic (status reverts to its pre-approval
+   * value) that keeps `AuditService.verify`'s versions⋈audit walk satisfied.
+   *
+   * @param approved - The DocRecord as returned by this `approve()` call's own CAS
+   *   write (i.e. already status "approved" at `approved.version`).
+   * @param fromStatus - The plan's status before this `approve()` call ran.
+   * @param reviewer - Same actor identity `approve()` resolved (`opts?.reviewer ??
+   *   "system"`) — the rollback is an automatic consequence of that reviewer's own
+   *   approve call, not a distinct actor.
+   */
+  private async rollbackApproval(
+    approved: DocRecord,
+    fromStatus: DocRecord["status"],
+    reviewer: string,
+  ): Promise<Result<DocRecord, LoreError>> {
+    const now = new Date().toISOString();
+    const rollbackVersion = approved.version + 1;
+
+    const updateResult = await this.store.update(approved.id, {
+      status: fromStatus,
+      version: rollbackVersion,
+      updated_at: now,
+    }, { expected_version: approved.version });
+    if (!updateResult.ok) return updateResult;
+
+    const updatedDoc = updateResult.value;
+
+    const versionResult = await this.store.insertVersion({
+      doc_id: approved.id,
+      version: rollbackVersion,
+      content: updatedDoc.content,
+      extra: updatedDoc.extra,
+      status: fromStatus,
+      title: updatedDoc.title,
+      action: "reject",
+      created_at: now,
+      created_by: reviewer,
+      change_summary:
+        "Self-rollback: ancestor spec's approval prerequisites failed a post-write " +
+        "re-check (ASYNC2-002 TOCTOU guard)",
+    });
+    if (!versionResult.ok) return versionResult;
+
+    const auditResult = await this.store.appendAuditEntry({
+      timestamp: now,
+      actor: reviewer,
+      session_id: `review-${approved.id}`,
+      action: "reject",
+      doc_id: approved.id,
+      details: {
+        reviewer,
+        from_status: "approved",
+        to_status: fromStatus,
+        version: rollbackVersion,
+        rollback: true,
+      },
     });
     if (!auditResult.ok) return auditResult;
 

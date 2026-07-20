@@ -13,6 +13,9 @@
  *   - API keys are SHA-256 hashed at rest. Raw key = "lore_ak_" + 64 hex chars.
  *   - ApiKeyStore.revoke() cascade-deletes the revoked key's cookie sessions (same `db`
  *     handle as SessionStore) — a revoked key invalidates every session it ever minted.
+ *   - ApiKeyStore.create()'s `api_keys.name` UNIQUE-constraint race (ASYNC2-001) maps to
+ *     the SAME VALIDATION_ERROR the pre-insert existence check already returns — see the
+ *     method's own JSDoc.
  * Side-effect class: IO (bun:sqlite reads/writes, crypto)
  * Source: SPEC-010 §3.2, §3.3; SPEC-016 §3.3
  */
@@ -111,7 +114,22 @@ export async function hashApiKey(rawKey: string): Promise<string> {
 export class ApiKeyStore {
   constructor(private readonly db: Database) {}
 
-  /** Create a new API key. Returns the raw key (only time it is available). */
+  /**
+   * Create a new API key. Returns the raw key (only time it is available).
+   *
+   * @invariant This is check-then-act, not compare-and-swap — the `SELECT ... WHERE
+   *   name = ?` precheck below and the `INSERT` are separated by an `await
+   *   hashApiKey(rawKey)` (async — cedes the event loop). A second `create(name, ...)`
+   *   call for the SAME `name` landing in that gap (ASYNC2-001) passes the precheck
+   *   too, then loses the race at `INSERT` against `api_keys.name`'s `UNIQUE`
+   *   constraint (`migration-002.ts`). The catch block below pattern-matches that
+   *   specific constraint violation (mirrors `sqlite-store.ts`'s `insert()` matching
+   *   `"UNIQUE constraint failed: docs.slug"` for the identical race on doc slugs) and
+   *   maps it to the SAME `VALIDATION_ERROR` shape/message the precheck already
+   *   returns — the caller never learns whether it lost the precheck or the DB-level
+   *   race, only that the name is taken. Any other constraint/IO failure still falls
+   *   through to the generic `STORE_ERROR` catch-all, unchanged.
+   */
   async create(name: string, owner: string): Promise<Result<{ rawKey: string; record: ApiKeyRecord }, LoreError>> {
     const existing = this.db.prepare("SELECT key_hash FROM api_keys WHERE name = ?").get(name) as { key_hash: string } | null;
     if (existing !== null) {
@@ -128,6 +146,9 @@ export class ApiKeyStore {
       ).run(keyHash, name, owner, 60, now);
     } catch (e) {
       const message = e instanceof Error ? e.message : "Unknown error";
+      if (message.includes("UNIQUE constraint failed: api_keys.name")) {
+        return err({ code: "VALIDATION_ERROR", field: "name", message: `Agent name '${name}' already exists` });
+      }
       return err({ code: "STORE_ERROR", message, ...(e instanceof Error ? { cause: e } : {}) });
     }
 
