@@ -357,8 +357,15 @@ const CLAUDE_MD_TARGET_NAME = "CLAUDE.md";
  * literal a second time.
  */
 export const PROJECT_MANIFEST_RELATIVE_PATH = ".lore/.lore-project-manifest.json";
-/** Repo-relative directory backups land under, one `<iso>` subdirectory per write-seam run that performed at least one backup. */
-const PROJECT_BACKUPS_RELATIVE_DIRNAME = ".lore/.lore-backups";
+/**
+ * Repo-relative directory backups land under, one `<iso>` subdirectory per
+ * write-seam run that performed at least one backup. Exported (SPEC-060 T5
+ * follow-up) so `flows/setup-project-uninstall.ts` reconstructs backup paths
+ * from this SAME literal instead of maintaining its own duplicate — the two
+ * flows read/write the identical `.lore/.lore-backups/<iso>/<path>` layout
+ * and must never drift.
+ */
+export const PROJECT_BACKUPS_RELATIVE_DIRNAME = ".lore/.lore-backups";
 /** Ledger schema version — opaque string, bumped only on a breaking shape change (mirrors `SetupService.MANIFEST_VERSION`). */
 const PROJECT_MANIFEST_VERSION = "1";
 

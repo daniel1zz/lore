@@ -50,7 +50,8 @@
 
 import { describe, it, expect, afterEach } from "vitest";
 import { execSync, spawnSync } from "child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "fs";
+import { createHash } from "crypto";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -131,6 +132,37 @@ afterEach(() => {
     }
   }
 });
+
+/**
+ * Recursively snapshots every regular file under `dir` as a
+ * `repo-relative-path -> sha256Hex` map — `.git/` is always excluded (real
+ * `git` commands mutate it as an intentional, already-documented side effect
+ * of `--project` scaffolding — e.g. `core.hooksPath`, asserted separately
+ * below — not a ledger-tracked path this snapshot needs to prove reverted).
+ * Used by the real install→uninstall round-trip test (SPEC-060 T5
+ * follow-up) to prove byte-identical restoration without depending on any
+ * fake `ProjectFsPort` — every prior uninstall test used fakes; this is the
+ * first assertion against a real filesystem + real CLI subprocess.
+ */
+function snapshotFiles(dir: string, base: string = dir): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const name of readdirSync(dir)) {
+    if (name === ".git") continue;
+    const full = join(dir, name);
+    const stat = statSync(full);
+    if (stat.isDirectory()) {
+      Object.assign(out, snapshotFiles(full, base));
+    } else if (stat.isFile()) {
+      const rel = full.slice(base.length + 1);
+      out[rel] = createHash("sha256").update(readFileSync(full)).digest("hex");
+    }
+  }
+  return out;
+}
+
+function sha256Of(content: string): string {
+  return createHash("sha256").update(content).digest("hex");
+}
 
 // ─── HAPPY ────────────────────────────────────────────────────────────────────
 
@@ -327,6 +359,117 @@ describe("lore setup — STATE", () => {
     expect(existsSync(join(targetDir, ".lore-setup-manifest.json"))).toBe(false);
     expect(existsSync(join(targetDir, "skills", "lore", "SKILL.md"))).toBe(false);
   });
+
+  it(
+    "AC-060-T5.S2: real --project (--yes) install then --project --uninstall (--yes) round-trip " +
+      "against a real mkdtemp git repo + real fs — proves D1/D2's ledger+backup design end-to-end for " +
+      "the FIRST time (every prior uninstall coverage used a fake ProjectFsPort)",
+    () => {
+      const repoDir = makeScratchDir("lore-setup-project-roundtrip-");
+      spawnSync("git", ["init"], { cwd: repoDir, encoding: "utf8" });
+      spawnSync("git", ["config", "user.email", "test@example.com"], { cwd: repoDir, encoding: "utf8" });
+      spawnSync("git", ["config", "user.name", "Test"], { cwd: repoDir, encoding: "utf8" });
+
+      // Pre-seed .gitignore/CLAUDE.md with PRE-EXISTING content so the scaffold's
+      // D3 (append-to-existing) / D4 (backup-then-overwrite) branches actually
+      // exercise the BACKUP + RESTORE path, not just the simpler create-then-
+      // remove path a from-scratch repo would only exercise.
+      const preGitignore = "node_modules/\n*.log\n";
+      const preClaudeMd = "# Pre-existing project notes\n\nDo not lose me.\n";
+      writeFileSync(join(repoDir, ".gitignore"), preGitignore);
+      writeFileSync(join(repoDir, "CLAUDE.md"), preClaudeMd);
+
+      // 1. Snapshot pre-scaffold state.
+      const before = snapshotFiles(repoDir);
+      expect(before[".gitignore"]).toBe(sha256Of(preGitignore));
+      expect(before["CLAUDE.md"]).toBe(sha256Of(preClaudeMd));
+
+      // 2. Real scaffold.
+      const installResult = runSetup(["--project", "--yes"], repoDir);
+      expect(installResult.exitCode).toBe(0);
+
+      // 3. Manifest exists + parses; .gitignore/CLAUDE.md were generated (modified).
+      const manifestAbsPath = join(repoDir, ".lore", ".lore-project-manifest.json");
+      expect(existsSync(manifestAbsPath)).toBe(true);
+      const manifest = JSON.parse(readFileSync(manifestAbsPath, "utf-8")) as {
+        version: string;
+        entries: Array<{ path: string }>;
+      };
+      expect(typeof manifest.version).toBe("string");
+      expect(Array.isArray(manifest.entries)).toBe(true);
+      expect(manifest.entries.length).toBeGreaterThan(0);
+      // The manifest tracks exactly the ledger-owned paths this test cares about.
+      const trackedPaths = manifest.entries.map((e) => e.path).sort();
+      expect(trackedPaths).toContain(".gitignore");
+      expect(trackedPaths).toContain("CLAUDE.md");
+      expect(trackedPaths).toContain("lore.tree.yaml");
+      expect(trackedPaths.some((p) => p.startsWith("hooks/"))).toBe(true);
+
+      expect(existsSync(join(repoDir, ".gitignore"))).toBe(true);
+      expect(readFileSync(join(repoDir, ".gitignore"), "utf-8")).toContain("# --- lore ---");
+      expect(existsSync(join(repoDir, "CLAUDE.md"))).toBe(true);
+      // D4: CLAUDE.md is unconditionally overwritten by the shipped template.
+      expect(readFileSync(join(repoDir, "CLAUDE.md"), "utf-8")).not.toBe(preClaudeMd);
+
+      const hooksPathAfterInstall = spawnSync("git", ["config", "--get", "core.hooksPath"], {
+        cwd: repoDir,
+        encoding: "utf8",
+      });
+      expect(hooksPathAfterInstall.stdout.trim()).toBe("hooks");
+
+      // 4. Real uninstall.
+      const uninstallResult = runSetup(["--project", "--uninstall", "--yes"], repoDir);
+      expect(uninstallResult.exitCode).toBe(0);
+
+      // 5. Assert the directory returns to step-1 state FOR EVERY LEDGER-TRACKED
+      // PATH — the manifest + backups tree are gone, and the two backed-up files
+      // are restored BYTE-IDENTICALLY (proves the backup/restore path, not just
+      // create-then-delete).
+      expect(existsSync(manifestAbsPath)).toBe(false);
+      expect(existsSync(join(repoDir, ".lore", ".lore-backups"))).toBe(false);
+      expect(existsSync(join(repoDir, "lore.tree.yaml"))).toBe(false);
+      for (const hookName of ["g1-spec-create.sh", "g2-spec-promote.sh", "g3-plan-promote.sh", "g4-task-claim.sh"]) {
+        expect(existsSync(join(repoDir, "hooks", hookName))).toBe(false);
+      }
+      expect(readFileSync(join(repoDir, ".gitignore"), "utf-8")).toBe(preGitignore);
+      expect(readFileSync(join(repoDir, "CLAUDE.md"), "utf-8")).toBe(preClaudeMd);
+      const afterGitignoreSha = sha256Of(readFileSync(join(repoDir, ".gitignore"), "utf-8"));
+      const afterClaudeMdSha = sha256Of(readFileSync(join(repoDir, "CLAUDE.md"), "utf-8"));
+      expect(afterGitignoreSha).toBe(before[".gitignore"]);
+      expect(afterClaudeMdSha).toBe(before["CLAUDE.md"]);
+
+      // 6. HONEST, EXPLICITLY-ASSERTED design-scoped residuals — the ledger's
+      // reversal contract (this module's own doc comment + the CLI preview
+      // text: "restoring or removing every file tracked by its install
+      // ledger") never claimed these two. Documented here rather than silently
+      // ignored, per this task's own instruction not to weaken assertions to
+      // force a pass:
+      //   (a) `.lore/` corpus data (config.yaml, lore.db, its own internal
+      //       .gitignore) is written by `initCorpusAt`, a SEPARATE step run
+      //       BEFORE the manifest-tracked candidates and never itself
+      //       ledger-tracked — a repo's knowledge base is intentionally NOT
+      //       destroyed by reversing the scaffold tooling around it.
+      //   (b) `git config core.hooksPath` is a git-config mutation, not a
+      //       filesystem path the `SetupEntry` ledger schema has any field
+      //       for — `uninstallProject` never touches git config at all.
+      expect(existsSync(join(repoDir, ".lore", "config.yaml"))).toBe(true);
+      expect(existsSync(join(repoDir, ".lore", "lore.db"))).toBe(true);
+      const hooksPathAfterUninstall = spawnSync("git", ["config", "--get", "core.hooksPath"], {
+        cwd: repoDir,
+        encoding: "utf8",
+      });
+      expect(hooksPathAfterUninstall.stdout.trim()).toBe("hooks");
+
+      // (c) the `hooks/` DIRECTORY itself is left behind, now empty —
+      // `uninstallProject` removes exactly the manifest-tracked FILE paths
+      // (e.g. "hooks/g1-spec-create.sh"), never the containing directory
+      // (a defensible choice: a user may have added their own unrelated files
+      // under hooks/ that this reversal must not touch either way).
+      if (existsSync(join(repoDir, "hooks"))) {
+        expect(readdirSync(join(repoDir, "hooks"))).toEqual([]);
+      }
+    },
+  );
 });
 
 // ─── REGRESSION ───────────────────────────────────────────────────────────────
