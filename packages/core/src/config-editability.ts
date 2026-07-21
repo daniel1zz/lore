@@ -26,7 +26,11 @@
  *     else (`workflow.*`, `audit.*`, `verify.*`, `defaults.*`, ...) is re-read
  *     on every call and therefore takes effect immediately.
  *   - findDeniedConfigKeys(patch) — walks an untrusted config PATCH object and
- *     returns every leaf dotted-path that matches a `CONFIG_DENY_KEYS` pattern.
+ *     returns every leaf dotted-path that EITHER matches a `CONFIG_DENY_KEYS`
+ *     pattern exactly OR is a proper ancestor of one (see @invariant re:
+ *     subtree-root denial) — a whole-subtree replacement (`{ai: null}`,
+ *     `{ai: {providers: {}}}`) is denied exactly like a narrow leaf-targeted
+ *     patch would be.
  *   - redactConfigValues(config) — deep-clones a config-shaped object, replacing
  *     every leaf value at a `CONFIG_REDACT_KEYS`-matching path with a fixed
  *     redaction marker string. Never mutates its input.
@@ -40,14 +44,30 @@
  *     data transforms only. Re-exported from the browser-safe `@lore/core`
  *     barrel (`index.ts`); a Node import here blanks the `@lore/dashboard` SPA
  *     at module-load time (see that file's own header for the full mechanism).
- *   - `CONFIG_DENY_KEYS`/`CONFIG_REDACT_KEYS` wildcard matching is EXACT-LENGTH:
- *     a `*` segment matches exactly one path segment, never zero or many — a
- *     pattern with N dot-separated segments only ever matches a leaf path with
- *     exactly N segments. This assumes provider names (`ai.providers.<name>`)
- *     and header names (`ai.http.headers.<name>`) never themselves contain a
- *     literal `.` — true of every real-world provider/header name in this
- *     codebase's schemas (`ai.ts`'s provider registry keys, HTTP header
- *     tokens), and documented here rather than silently assumed.
+ *   - `CONFIG_DENY_KEYS`/`CONFIG_REDACT_KEYS` EXACT-match wildcard matching is
+ *     EXACT-LENGTH: a `*` segment matches exactly one path segment, never
+ *     zero or many — a pattern with N dot-separated segments only ever
+ *     exact-matches a leaf path with exactly N segments. This assumes
+ *     provider names (`ai.providers.<name>`) and header names
+ *     (`ai.http.headers.<name>`) never themselves contain a literal `.` —
+ *     true of every real-world provider/header name in this codebase's
+ *     schemas (`ai.ts`'s provider registry keys, HTTP header tokens), and
+ *     documented here rather than silently assumed.
+ *   - `findDeniedConfigKeys` ADDITIONALLY denies a leaf path that is a PROPER
+ *     ANCESTOR of a `CONFIG_DENY_KEYS` pattern — strictly SHORTER than the
+ *     pattern, with every one of its own segments matching the pattern's
+ *     corresponding segment (wildcard-aware). This closes the subtree-root
+ *     replacement hole: `{ai: {providers: null}}` / `{ai: {providers: {}}}`
+ *     / `{ai: {providers: []}}` all flatten to the single leaf
+ *     `"ai.providers"` (shorter than `ai.providers.*.command`'s 4 segments)
+ *     and would otherwise slip past an exact-length-only check. Deliberate
+ *     consequence: `{ai: null}` and `{verify: null}` are now denied too —
+ *     wholesale replacement of those subtrees would destroy/override a
+ *     protected key, so it is treated identically to a narrow attack. This
+ *     ancestor rule applies ONLY to deny-key matching (`findDeniedConfigKeys`)
+ *     — `CONFIG_REDACT_KEYS` matching (`redactConfigValues`) stays exact-length
+ *     only, since redacting an ancestor node has no well-defined single
+ *     replacement value.
  *   - `findDeniedConfigKeys`/`flattenConfigLeafPaths` treat arrays as LEAVES,
  *     never descending into array elements — `ai.providers.<name>.args` is a
  *     `string[]`, and the deny check must catch the WHOLE array being set in
@@ -173,6 +193,26 @@ function matchesAnyPattern(pathSegments: readonly string[], patterns: readonly s
 }
 
 /**
+ * `true` iff `pathSegments` is a PROPER ancestor of `pattern` — strictly
+ * fewer segments than `pattern`, with every one of `pathSegments`'
+ * own segments matching the pattern's corresponding segment (wildcard `*`
+ * matches any single segment). Used only by {@link findDeniedConfigKeys}'s
+ * subtree-root widening (see module @invariant) — deliberately NOT reused by
+ * {@link redactConfigValues}, which has no ancestor-redaction semantics.
+ */
+function isProperAncestorOfPattern(pathSegments: readonly string[], pattern: string): boolean {
+  const patternSegments = pattern.split(".");
+  if (pathSegments.length >= patternSegments.length) return false;
+  return pathSegments.every((seg, i) => patternSegments[i] === "*" || patternSegments[i] === seg);
+}
+
+function matchesOrAncestorOfAnyPattern(pathSegments: readonly string[], patterns: readonly string[]): boolean {
+  return patterns.some(
+    (pattern) => segmentsMatchPattern(pathSegments, pattern) || isProperAncestorOfPattern(pathSegments, pattern),
+  );
+}
+
+/**
  * Collects every leaf dotted-path reachable from `value` — plain objects are
  * descended into key-by-key, arrays and primitives are leaves (see module
  * @invariant re: arrays-as-leaves), `null`/`undefined` are leaves. Recursion
@@ -217,12 +257,16 @@ export function flattenConfigLeafPaths(value: unknown): string[] {
 
 /**
  * Walks an untrusted config PATCH object and returns every leaf dotted-path
- * that matches a {@link CONFIG_DENY_KEYS} pattern — the check
+ * that EITHER matches a {@link CONFIG_DENY_KEYS} pattern exactly OR is a
+ * proper ancestor of one (see module @invariant) — the check
  * `ConfigService.update` runs BEFORE touching disk (D2). A patch that
- * replaces a whole ancestor object (e.g. `{ ai: { providers: { foo: {
- * command: "evil" } } } }`) is caught because {@link flattenConfigLeafPaths}
- * descends fully into nested plain objects, reaching the same
- * `ai.providers.foo.command` leaf a narrower, path-targeted patch would.
+ * replaces a whole ancestor object with FURTHER nested content (e.g.
+ * `{ ai: { providers: { foo: { command: "evil" } } } }`) is caught because
+ * {@link flattenConfigLeafPaths} descends fully into nested plain objects,
+ * reaching the same `ai.providers.foo.command` leaf a narrower,
+ * path-targeted patch would; a patch that replaces the ancestor with a
+ * LEAF-LESS value (`null` / `{}` / `[]`) is caught by the proper-ancestor
+ * check instead, since it never reaches that deep leaf.
  *
  * @param patch - Untrusted candidate patch (typically an HTTP request body)
  * @returns Sorted, deduplicated array of denied dotted-paths — empty when the
@@ -230,12 +274,14 @@ export function flattenConfigLeafPaths(value: unknown): string[] {
  * @example
  *   findDeniedConfigKeys({ verify: { env: { passthrough_all: true } } })
  *   // => ["verify.env.passthrough_all"]
+ *   findDeniedConfigKeys({ ai: { providers: null } })
+ *   // => ["ai.providers"] (proper ancestor of "ai.providers.*.command"/".args")
  *   findDeniedConfigKeys({ workflow: { claim_ttl_minutes: 30 } })
  *   // => []
  */
 export function findDeniedConfigKeys(patch: unknown): string[] {
   return flattenConfigLeafPaths(patch).filter((path) =>
-    matchesAnyPattern(path.split("."), CONFIG_DENY_KEYS),
+    matchesOrAncestorOfAnyPattern(path.split("."), CONFIG_DENY_KEYS),
   );
 }
 
