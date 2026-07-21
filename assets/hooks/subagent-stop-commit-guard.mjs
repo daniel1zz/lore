@@ -198,14 +198,23 @@ if (
   allow();
 }
 
-const DEFERRAL_PATTERNS = [
-  /\b(?:I(?:'ve| have)?\s+)?(?:kicked off|started|launched|set up)\b[^.]{0,80}\b(?:background|monitor)\b/i,
-  /\bwill\s+(?:pick (?:this|it) back up|continue|resume|finalize|report back)\b[^.]{0,60}\b(?:once|when|after)\b/i,
-  /\b(?:waiting|wait) for\b[^.]{0,60}\b(?:it|that|the run|the monitor|notification|to (?:finish|complete))\b/i,
-  /\bI'll\s+(?:continue|finish|report|update)\b[^.]{0,60}\b(?:once|when|after)\b/i,
-];
+// Single-keyword signals, NOT multi-word phrases. An earlier version enumerated
+// exact phrasings ("waiting for the monitor", "I'll continue once…") and was
+// defeated within hours by "Waiting for the bun test monitor to report back" —
+// two words inserted between `the` and `monitor` broke the contiguity the regex
+// assumed. That is the same contiguous-substring trap that made a `-t
+// 'caller-supplied inconclusive'` filter match zero tests when the describe
+// title read `caller-supplied result: "inconclusive"`.
+//
+// So: match on lone words that a *finished* report has no reason to contain,
+// and rely on the two negative conditions already established above (message is
+// short AND carries no report structure) to keep the false-positive rate down.
+// Any one of these words, in a sub-600-char message with no results in it, means
+// the agent is describing what it is about to do rather than what it did.
+const DEFERRAL_SIGNALS =
+  /\b(?:monitor|background|waiting|notification|notified|finaliz\w*|resume|meanwhile|shortly|afterwards?)\b/i;
 
-if (DEFERRAL_PATTERNS.some((re) => re.test(head))) {
+if (DEFERRAL_SIGNALS.test(head)) {
   block(
     `BLOCKED: ${agentLabel} is ending its turn on a deferred continuation.\n` +
       `Worktree: ${cwd}\n\n` +
