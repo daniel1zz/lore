@@ -38,11 +38,25 @@
  *   {@link flattenConfigLeafPaths}'s "arrays are leaves" convention exactly,
  *   so the set of keys `flattenConfigLeafPaths(patch)` reports as "touched" is
  *   always consistent with what the merge actually replaced.
+ * @invariant `update`'s OPTIONAL `opts.expectedHash` (SPEC-062 T3) is the
+ *   AUTHORITATIVE staleness CAS — closes the TOCTOU T2 shipped with (its
+ *   HTTP route ran a precheck comparison ONLY, then called `update` with no
+ *   way to re-validate against a concurrent writer landing between that
+ *   precheck's read and this method's own write). When supplied, `update`
+ *   re-derives the CURRENT hash itself (via {@link computeConfigHash} over a
+ *   FRESH `redactConfigValues(current)` read — NEVER trusting the caller's
+ *   own precheck) and rejects on a mismatch BEFORE any merge/validation/save,
+ *   mirroring the deny-key check's "reject before touching anything" shape —
+ *   zero bytes written, zero audit rows. Mirrors `CorpusService.set`'s
+ *   `opts.expectedVersion` precedent EXACTLY: omitted (the default) → no
+ *   staleness check at all, behavior byte-identical to pre-T3. The hash is
+ *   computed over the REDACTED view (the same view `read()`/`GET /api/config`
+ *   expose), NOT raw YAML bytes — see {@link computeConfigHash}'s own doc.
  *
  * Side-effect class: IO (config file read/write via `@lore/core/node`; one
  *   audit-table write via the injected port)
  *
- * Source: SPEC-062 §Scope D1, D2, D5, D6
+ * Source: SPEC-062 §Scope D1, D2, D5, D6; §Acceptance Criteria AC-062-11 (T3)
  */
 
 import { createHash } from "node:crypto";
@@ -96,6 +110,17 @@ export interface ConfigReadResult {
 export interface ConfigUpdateOpts {
   /** Actor recorded on the D6 audit row — the writer's identity, not a doc lifecycle actor. */
   actor: string;
+  /**
+   * SPEC-062 T3 — optional CAS guard: the sha256 hash (via
+   * {@link computeConfigHash} over the REDACTED config) the caller last
+   * observed (e.g. an HTTP client's `If-Match` header value). When supplied,
+   * `update` re-derives the CURRENT hash itself and rejects with
+   * `VALIDATION_ERROR{field: "expectedHash"}` on a mismatch, BEFORE any
+   * merge/validation/write. OMITTED (the default) → no staleness check at
+   * all, IDENTICAL to pre-T3 behavior — mirrors `CorpusService.set`'s
+   * `opts.expectedVersion` precedent exactly (see class @invariant above).
+   */
+  expectedHash?: string;
 }
 
 /** Result shape of a successful {@link ConfigService.update}. */
@@ -150,6 +175,50 @@ function hashConfig(config: LoreConfig): string {
   return createHash("sha256").update(yaml.stringify(config), "utf8").digest("hex");
 }
 
+/**
+ * Deterministic, key-order-independent JSON serialization — object keys are
+ * sorted recursively so two structurally-equal configs always serialize
+ * identically regardless of construction order (YAML parse order,
+ * object-spread order, etc.). Arrays keep their original element order
+ * (semantically meaningful, unlike object keys). Private helper behind
+ * {@link computeConfigHash} — not a public export, mirrors
+ * `adapters/http/config-routes.ts`'s pre-T3 local copy (now retired in favor
+ * of importing this module's version — see that module's header).
+ */
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => stableStringify(entry)).join(",")}]`;
+  }
+  if (value !== null && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const keys = Object.keys(record).sort();
+    const entries = keys.map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`);
+    return `{${entries.join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+/**
+ * Hex sha256 of `config`'s stable-stringified form — the SPEC-062 T3
+ * `expectedHash` CAS value, and ALSO the value the HTTP route exposes to
+ * clients as their `If-Match` hash (`adapters/http/config-routes.ts`
+ * re-exports this exact function rather than keeping its own copy — a
+ * hand-maintained twin here would be the same "divergence class" incident
+ * this codebase has hit before with cross-file sanitizer/algorithm pairs).
+ * Distinct from the private {@link hashConfig} above: `hashConfig` hashes the
+ * canonical YAML serialization of a (typically non-redacted) config for the
+ * D6 audit trail's before/after fields; `computeConfigHash` hashes the
+ * REDACTED config's stable JSON for optimistic concurrency. Never conflate
+ * the two — they intentionally use different algorithms over different
+ * inputs for different purposes.
+ *
+ * @param config - A config object, expected to ALREADY be redacted (this
+ *   function does not redact — every call site redacts first).
+ */
+export function computeConfigHash(config: LoreConfig): string {
+  return createHash("sha256").update(stableStringify(config), "utf8").digest("hex");
+}
+
 /** Builds the per-key effect map `read()`/`update()` both return. */
 function buildEffectsMap(config: LoreConfig): Record<string, ConfigEffect> {
   const effects: Record<string, ConfigEffect> = {};
@@ -197,17 +266,23 @@ export class ConfigService {
    *   1. Reject a non-object patch outright.
    *   2. Reject any patch touching a {@link CONFIG_DENY_KEYS} key — ZERO disk
    *      access before this point.
-   *   3. Load the current config, deep-merge the patch onto it, validate the
-   *      merged candidate against `LoreConfigSchema` — reject on schema
-   *      violation with the on-disk file still untouched.
-   *   4. `saveConfig` the validated merged config.
-   *   5. Write exactly one audit row (D6).
+   *   3. Load the current config.
+   *   3.5. If `opts.expectedHash` was supplied, re-derive the CURRENT hash
+   *      (redact + {@link computeConfigHash}) and reject on a mismatch —
+   *      SPEC-062 T3's CAS, closing the TOCTOU a route-level precheck alone
+   *      cannot. Skipped entirely when `opts.expectedHash` is omitted.
+   *   4. Deep-merge the patch onto the current config, validate the merged
+   *      candidate against `LoreConfigSchema` — reject on schema violation
+   *      with the on-disk file still untouched.
+   *   5. `saveConfig` the validated merged config.
+   *   6. Write exactly one audit row (D6).
    *
    * @param patch - Untrusted candidate patch (e.g. an HTTP request body)
-   * @param opts - `{ actor }` — the audit-row actor
+   * @param opts - `{ actor, expectedHash? }` — the audit-row actor, plus an
+   *   optional CAS guard (see {@link ConfigUpdateOpts.expectedHash})
    * @returns `{config, effects, updated, restart_required}` on success. A
-   *   rejection at any of steps 1-3 returns before any write and produces
-   *   zero audit rows; a `saveConfig`/`appendAuditEntry` failure at steps 4-5
+   *   rejection at any of steps 1-4 returns before any write and produces
+   *   zero audit rows; a `saveConfig`/`appendAuditEntry` failure at steps 5-6
    *   propagates that error verbatim.
    */
   async update(
@@ -242,6 +317,24 @@ export class ConfigService {
     const currentResult = loadConfig(this.corpusDir);
     if (!currentResult.ok) return currentResult;
     const current = currentResult.value;
+
+    // SPEC-062 T3 — expectedHash CAS. Re-derives the CURRENT hash from a
+    // FRESH read (never the caller's own precheck) and rejects on mismatch
+    // BEFORE any merge/validation/write — zero bytes written, zero audit
+    // rows, mirroring the deny-key check's shape above. Skipped entirely
+    // when the caller omits `expectedHash` (see @invariant / opts doc).
+    if (opts.expectedHash !== undefined) {
+      const currentRedacted = redactConfigValues(current) as LoreConfig;
+      const currentHash = computeConfigHash(currentRedacted);
+      if (currentHash !== opts.expectedHash) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "expectedHash",
+          message: "Config has changed since expectedHash was read — reread and retry",
+          value: { expected: opts.expectedHash, current: currentHash },
+        });
+      }
+    }
 
     const merged = deepMergeConfigPatch(
       current as unknown as Record<string, unknown>,
