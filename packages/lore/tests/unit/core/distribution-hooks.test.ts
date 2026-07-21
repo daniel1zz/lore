@@ -6,7 +6,7 @@
  * Dimension mapping:
  *   HAPPY:      buildHookSettingsEntries produces the correct
  *               command/event/matcher shape for a real claudeDir
- *   BOUNDARY:   HOOK_REGISTRATIONS is exactly the declared 8-hook / 15-entry
+ *   BOUNDARY:   HOOK_REGISTRATIONS is exactly the declared 9-hook / 15-entry
  *               (all matchers expanded) set; a trailing slash on claudeDir
  *               does not double up in the command string
  *   NEGATIVE:   pre-subagent-gate.mjs / pre-no-general-agent-gate.mjs are
@@ -31,6 +31,7 @@ const EXPECTED_FILES = [
   "session-start-resume.mjs",
   "stop-doc-sync.mjs",
   "subagent-context.mjs",
+  "subagent-stop-commit-guard.mjs",
 ];
 
 describe("HAPPY: buildHookSettingsEntries", () => {
@@ -64,14 +65,14 @@ describe("HAPPY: buildHookSettingsEntries", () => {
 });
 
 describe("BOUNDARY: HOOK_REGISTRATIONS shape", () => {
-  it("declares exactly the 8 core-governance-and-security hook files", () => {
+  it("declares exactly the 9 core-governance-and-security hook files", () => {
     const files = [...new Set(HOOK_REGISTRATIONS.map((r) => r.file))].sort();
     expect(files).toEqual([...EXPECTED_FILES].sort());
   });
 
-  it("expands to exactly 15 entries (8 hooks, per-matcher expansion for the 4 gate hooks)", () => {
-    // pre-bash-git-safety-gate: 1, g1: 2, g2: 3, g3: 3, g4: 2, session-start: 1, stop-doc-sync: 1, subagent-context: 1 = 14
-    expect(HOOK_REGISTRATIONS).toHaveLength(14);
+  it("expands to exactly 15 entries (9 hooks, per-matcher expansion for the 4 gate hooks)", () => {
+    // pre-bash-git-safety-gate: 1, g1: 2, g2: 3, g3: 3, g4: 2, session-start: 1, stop-doc-sync: 1, subagent-context: 1, subagent-stop-commit-guard: 1 = 15
+    expect(HOOK_REGISTRATIONS).toHaveLength(15);
   });
 
   it("tolerates a trailing slash on claudeDir without a double slash in the command", () => {

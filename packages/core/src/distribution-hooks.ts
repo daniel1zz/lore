@@ -10,13 +10,28 @@
  * copied hook file actually RUN was left to the human, an inert-until-wired
  * gap noted in the root CLAUDE.md's SPEC-046 dogfood-log entry for
  * `pre-bash-git-safety-gate.mjs`. This module is the declared list that
- * closes that gap: eight hooks classified "core governance + security" are
+ * closes that gap: nine hooks classified "core governance + security" are
  * auto-registered; two orchestration-POLICY hooks
  * (`pre-subagent-gate.mjs`, `pre-no-general-agent-gate.mjs`) are deliberately
  * EXCLUDED — they encode this specific team's subagent-dispatch discipline,
  * not a safety/governance invariant every `lore setup` consumer should
  * inherit unasked; a team that wants them can still hand-wire the copied
  * files (`lore setup` still ships them under `hooks/`, unregistered).
+ *
+ * `subagent-stop-commit-guard.mjs` (added 2026-07-21, SPEC-046 amendment)
+ * joins the governance/safety set on the same reasoning: it prevents a
+ * worktree-isolated subagent from terminating while its work exists ONLY as
+ * uncommitted files in a worktree — a data-loss shape any team dispatching
+ * worktree subagents can hit (this repo did, twice in two days), not a
+ * decision about HOW or WHEN to dispatch subagents. That distinction is what
+ * separates it from the excluded orchestration-policy pair above: those two
+ * hooks encode this team's own subagent-*routing* rules (which agent type is
+ * allowed to run at all); this hook encodes a *data-safety backstop* that
+ * applies regardless of routing policy — a team with an entirely different
+ * dispatch discipline still loses work identically if a subagent stops with
+ * an uncommitted, unpushed worktree. It is fail-open by construction (see the
+ * hook's own module header) so a mis-registration cannot itself wedge a
+ * session, matching the risk profile of the other eight.
  *
  * Public surface:
  *   - HookRunner — the closed `"node" | "bash"` interpreter set
@@ -74,8 +89,9 @@ export interface HookRegistration {
 
 /**
  * The full declared "core governance + security" hook set (owner decision,
- * 2026-07-20) — already matcher-expanded, one entry per distinct
- * `(event, matcher)` pair. Deliberately EXCLUDES `pre-subagent-gate.mjs` and
+ * 2026-07-20; `subagent-stop-commit-guard.mjs` added 2026-07-21) — already
+ * matcher-expanded, one entry per distinct `(event, matcher)` pair.
+ * Deliberately EXCLUDES `pre-subagent-gate.mjs` and
  * `pre-no-general-agent-gate.mjs` (orchestration-policy hooks, not
  * governance/security — see module doc).
  */
@@ -109,6 +125,9 @@ export const HOOK_REGISTRATIONS: readonly HookRegistration[] = [
 
   // subagent-context.mjs — per-agent-type directive + lore project context injection.
   { file: "subagent-context.mjs", runner: "node", event: "SubagentStart" },
+
+  // subagent-stop-commit-guard.mjs — blocks a worktree subagent from terminating with unpersisted (uncommitted or unbranched) work.
+  { file: "subagent-stop-commit-guard.mjs", runner: "node", event: "SubagentStop" },
 ] as const;
 
 /** Strips exactly one trailing `/` (never more — a caller-malformed `claudeDir` with repeated trailing slashes is out of scope). */
