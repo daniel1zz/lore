@@ -9,6 +9,14 @@
  * SPEC-046 wiring task, connecting every previously-merged service/port/
  * renderer into a reachable CLI verb (SPEC-046 §Design, task AC-046-E).
  *
+ * `--project --uninstall` (SPEC-060 §Design D2) is a FIFTH mode
+ * (`"project-uninstall"`, `../setup-args.js::SetupMode`) reversing a prior
+ * `--project` scaffold via its OWN repo-level install ledger
+ * (`.lore/.lore-project-manifest.json`) — a thin pipe over
+ * `../../../flows/setup-project-uninstall.js::uninstallProject`, never
+ * `SetupService` (that class's own `--uninstall`, without `--project`,
+ * reverses the SEPARATE global `~/.claude` installer).
+ *
  * Deliberately does NOT go through `loadLoreApp()` (unlike almost every other
  * command in this directory) — mirrors `commands/init.ts`'s bootstrap-stage
  * exemption (`loader.ts`'s own header doc). The global install path has
@@ -39,7 +47,7 @@
  *
  * Confirm prompt (mirrors `commands/verify.ts`'s SPEC-039 §M2 y/N precedent):
  *   `--dry-run` never prompts (non-mutating). Every mutating mode
- *   (install/uninstall/`--project`) prompts when interactive
+ *   (install/uninstall/`--project`/`--project --uninstall`) prompts when interactive
  *   (`process.stdin.isTTY`, no `--json`) and `--yes` was not passed; a
  *   non-`y`/`yes` answer aborts with exit 0 ("no changes made" — a
  *   deliberate, valid user choice, not a failure). Non-interactive without
@@ -64,7 +72,7 @@
  * Source: SPEC-046 §Design, §Scope; task AC-046-E.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import { createInterface } from "node:readline/promises";
@@ -78,6 +86,11 @@ import type { LoreError, Result } from "@lore/core";
 import { SetupService, type McpRegistrar, type SetupReceipt } from "../../../service/setup-service.js";
 import { ProjectSetupService } from "../../../service/project-setup-service.js";
 import type { ExecPort, ProjectFsPort, ProjectAssetSource, ProjectScaffoldReport } from "../../../flows/setup-project-flow.js";
+import {
+  uninstallProject,
+  type ProjectFsRemovePort,
+  type ProjectUninstallReport,
+} from "../../../flows/setup-project-uninstall.js";
 import { initCorpusAt } from "../../../flows/init-corpus.js";
 import { RealAssetSource } from "../../real-asset-source.js";
 import { RealSetupFsReader, RealSetupFsWriter } from "../../real-setup-fs.js";
@@ -236,6 +249,21 @@ function scaffoldReportFailed(report: ProjectScaffoldReport): boolean {
   );
 }
 
+/** Renders a {@link ProjectUninstallReport} — mirrors `renderScaffoldReport`'s plain-text shape. */
+function renderProjectUninstallReport(repoDir: string, report: ProjectUninstallReport): string {
+  const lines: string[] = [];
+  lines.push(`✓ lore project scaffold uninstalled → ${repoDir}`);
+  lines.push("");
+  lines.push(`Restored from backup (${report.restored.length}):`);
+  for (const path of report.restored) lines.push(`  ${path}`);
+  lines.push("");
+  lines.push(`Removed, no backup (${report.removed.length}):`);
+  for (const path of report.removed) lines.push(`  ${path}`);
+  lines.push("");
+  lines.push(`Manifest removed: ${report.manifestPath}`);
+  return lines.join("\n");
+}
+
 // ─── Real project-scaffold ports (mirrors project-setup-service.test.ts's real port builders) ──
 
 function makeRealProjectFs(): ProjectFsPort {
@@ -255,6 +283,24 @@ function makeRealProjectFs(): ProjectFsPort {
     },
     mkdir(path: string): void {
       mkdirSync(path, { recursive: true });
+    },
+  };
+}
+
+/**
+ * Real {@link ProjectFsRemovePort} — `makeRealProjectFs()`'s four methods
+ * plus `remove` (SPEC-060 §Design D2, `--project --uninstall`'s ONLY new fs
+ * capability; see `flows/setup-project-uninstall.ts`'s module header for why
+ * this is a local port extension rather than a `ProjectFsPort` edit).
+ * `rmSync(..., {recursive: true, force: true})` matches the port contract's
+ * "a missing target is NOT an error" rule — `force: true` is what makes that
+ * true for `rmSync` (its default throws ENOENT on a missing path).
+ */
+function makeRealProjectRemoveFs(): ProjectFsRemovePort {
+  return {
+    ...makeRealProjectFs(),
+    remove(path: string): void {
+      rmSync(path, { recursive: true, force: true });
     },
   };
 }
@@ -348,6 +394,41 @@ async function runProjectScaffold(opts: { json: boolean; yes: boolean; assetsRoo
     console.log(renderScaffoldReport(repoDir, result.value));
   }
   process.exitCode = scaffoldReportFailed(result.value) ? 1 : 0;
+}
+
+/**
+ * `lore setup --project --uninstall` (SPEC-060 §Design D2) — reverses a prior
+ * `--project` scaffold strictly via its OWN repo-level install ledger
+ * (`.lore/.lore-project-manifest.json`), never through `SetupService` (the
+ * SEPARATE global `~/.claude` installer `lore setup --uninstall` alone
+ * targets). Thin pipe over `flows/setup-project-uninstall.ts::uninstallProject`.
+ */
+async function runProjectUninstall(opts: { json: boolean; yes: boolean }): Promise<void> {
+  const repoDir = process.cwd();
+
+  const proceed = await confirmOrReport({
+    yes: opts.yes,
+    json: opts.json,
+    verb: "uninstall",
+    preview: () =>
+      `This will uninstall the Lore project scaffold from ${repoDir}, restoring or removing every ` +
+      `file tracked by its install ledger (.lore/.lore-project-manifest.json).`,
+  });
+  if (!proceed) return;
+
+  const result = await uninstallProject(makeRealProjectRemoveFs(), { repoDir });
+  if (!result.ok) {
+    process.stderr.write(formatError(result.error) + "\n");
+    process.exitCode = exitCode(result.error);
+    return;
+  }
+
+  if (opts.json) {
+    console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
+  } else {
+    console.log(renderProjectUninstallReport(repoDir, result.value));
+  }
+  process.exitCode = 0;
 }
 
 async function runDryRun(service: SetupService, targetDir: string, binPath: string, json: boolean): Promise<void> {
@@ -518,6 +599,10 @@ export default defineCommand({
 
     if (validated.mode === "project") {
       await runProjectScaffold({ json, yes: args.yes === true, assetsRoot });
+      return;
+    }
+    if (validated.mode === "project-uninstall") {
+      await runProjectUninstall({ json, yes: args.yes === true });
       return;
     }
 

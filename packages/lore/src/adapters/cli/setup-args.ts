@@ -10,7 +10,11 @@
  *
  * Public surface:
  *   - SetupMode / SetupFlagInput / validateSetupFlags(input) — flag-conflict
- *     validation, resolving to exactly one run mode
+ *     validation, resolving to exactly one run mode. `"project-uninstall"`
+ *     (SPEC-060 §Design D2, `--project --uninstall`) is a DISTINCT mode from
+ *     both `"project"` and `"uninstall"` — see {@link validateSetupFlags}'s
+ *     doc comment for why `--project` is no longer unconditionally exclusive
+ *     with `--uninstall`.
  *   - resolveTargetDir(opts) — `--claude-dir` > `$CLAUDE_CONFIG_DIR` >
  *     `join(homeDir, ".claude")`
  *   - SetupPathContext / resolveBinPath(ctx) / resolveAssetsRoot(ctx) —
@@ -92,8 +96,13 @@ import { dirname, join, resolve } from "node:path";
 
 // ─── Flag validation ─────────────────────────────────────────────────────────
 
-/** The one run mode `lore setup`'s flag combination resolves to. */
-export type SetupMode = "install" | "dry-run" | "uninstall" | "project";
+/**
+ * The one run mode `lore setup`'s flag combination resolves to.
+ * `"project-uninstall"` (SPEC-060 D2) reverses a prior `--project` scaffold
+ * via its own repo-level install ledger — a SEPARATE mode from `"uninstall"`
+ * (which reverses the GLOBAL `~/.claude` installer via `SetupService`).
+ */
+export type SetupMode = "install" | "dry-run" | "uninstall" | "project" | "project-uninstall";
 
 /** Raw boolean/string flags as parsed off `citty`'s `args` object. */
 export interface SetupFlagInput {
@@ -116,18 +125,25 @@ export type SetupFlagResult = { ok: true; mode: SetupMode } | SetupFlagRejection
 /**
  * Resolves `lore setup`'s flag combination to exactly one {@link SetupMode},
  * or a rejection naming the conflicting flags. `--project` scaffolds a git
- * repo via `ProjectSetupService` and is mutually exclusive with every
- * global-installer-only flag (`--dry-run`, `--uninstall`, `--claude-dir`) —
- * those target `~/.claude` via `SetupService`, a different service entirely.
- * `--dry-run` and `--uninstall` are mutually exclusive with each other too:
- * `SetupService` has no `planUninstall` — there is no dry-run preview for a
- * reversal.
+ * repo via `ProjectSetupService` and stays mutually exclusive with the two
+ * global-installer-only flags that make no sense at repo scope: `--dry-run`
+ * (project scaffolding has no plan-only preview mode) and `--claude-dir`
+ * (project scaffolding targets the current repository, not a Claude Code
+ * config directory). `--project + --uninstall` is NO LONGER rejected
+ * (SPEC-060 §Design D2) — it resolves to the DISTINCT `"project-uninstall"`
+ * mode, which reverses a prior `--project` scaffold via its OWN repo-level
+ * install ledger (`flows/setup-project-uninstall.ts::uninstallProject`),
+ * never through `SetupService` (the global `~/.claude` installer `--uninstall`
+ * alone still targets). `--dry-run` and `--uninstall` (both WITHOUT
+ * `--project`) remain mutually exclusive with each other: `SetupService` has
+ * no `planUninstall` — there is no dry-run preview for a global reversal.
  *
  * @param input - The four mode-selecting flags.
  * @returns `{ok: true, mode}` on a valid combination, else `{ok: false, message}`.
  * @throws Never.
  * @example
  * validateSetupFlags({ dryRun: true, uninstall: false, project: false }); // => {ok: true, mode: "dry-run"}
+ * validateSetupFlags({ dryRun: false, uninstall: true, project: true });  // => {ok: true, mode: "project-uninstall"}
  * validateSetupFlags({ dryRun: true, uninstall: true, project: false });  // => {ok: false, message: "..."}
  */
 export function validateSetupFlags(input: SetupFlagInput): SetupFlagResult {
@@ -138,14 +154,6 @@ export function validateSetupFlags(input: SetupFlagInput): SetupFlagResult {
         message: "--project cannot be combined with --dry-run — project scaffolding has no plan-only preview mode.",
       };
     }
-    if (input.uninstall) {
-      return {
-        ok: false,
-        message:
-          "--project cannot be combined with --uninstall — they target different services " +
-          "(ProjectSetupService vs. the global SetupService's --uninstall reversal).",
-      };
-    }
     if (input.claudeDir !== undefined) {
       return {
         ok: false,
@@ -154,6 +162,7 @@ export function validateSetupFlags(input: SetupFlagInput): SetupFlagResult {
           "repository, not a Claude Code config directory.",
       };
     }
+    if (input.uninstall) return { ok: true, mode: "project-uninstall" };
     return { ok: true, mode: "project" };
   }
 

@@ -8,19 +8,20 @@
  * `tests/integration/cli/setup.test.ts`.
  *
  * Coverage:
- *   HAPPY:      every one of the four flag combinations resolves to its
- *               correct SetupMode; --claude-dir / $CLAUDE_CONFIG_DIR /
- *               homedir() default precedence resolves correctly;
+ *   HAPPY:      every one of the FIVE flag combinations resolves to its
+ *               correct SetupMode, incl. `--project --uninstall` ->
+ *               `"project-uninstall"` (SPEC-060 §Design D2 — no longer
+ *               rejected); --claude-dir / $CLAUDE_CONFIG_DIR / homedir()
+ *               default precedence resolves correctly;
  *               resolveBinPath/resolveAssetsRoot's compiled-vs-dev branches;
  *               (SPEC-048 D8) a REAL symlink chain (mirroring npm's
  *               `node_modules/.bin/<name>` bin-link layout) resolves
  *               binPath/assetsRoot through to the real package dir, not the
  *               `.bin` dir — proven with an actual tmpdir symlink, not a
  *               string fixture
- *   NEGATIVE:   every rejected flag combination (--project+--dry-run,
- *               --project+--uninstall, --project+--claude-dir,
- *               --dry-run+--uninstall) is rejected with a message naming the
- *               conflicting flag
+ *   NEGATIVE:   every STILL-rejected flag combination (--project+--dry-run,
+ *               --project+--claude-dir, --dry-run+--uninstall) is rejected
+ *               with a message naming the conflicting flag
  *   BOUNDARY:   an empty-string / whitespace-only --claude-dir flag is
  *               treated as absent (falls through to the next precedence
  *               tier); (SPEC-048 D8) an execPath that is already a REAL path
@@ -76,6 +77,11 @@ describe("validateSetupFlags — HAPPY", () => {
     const result = validateSetupFlags({ dryRun: false, uninstall: false, project: true });
     expect(result).toEqual({ ok: true, mode: "project" });
   });
+
+  it("--project + --uninstall -> project-uninstall (SPEC-060 D2, no longer rejected)", () => {
+    const result = validateSetupFlags({ dryRun: false, uninstall: true, project: true });
+    expect(result).toEqual({ ok: true, mode: "project-uninstall" });
+  });
 });
 
 // ─── validateSetupFlags — NEGATIVE ───────────────────────────────────────────
@@ -85,12 +91,6 @@ describe("validateSetupFlags — NEGATIVE", () => {
     const result = validateSetupFlags({ dryRun: true, uninstall: false, project: true });
     expect(result.ok).toBe(false);
     expect(!result.ok && result.message).toContain("--dry-run");
-  });
-
-  it("--project + --uninstall is rejected", () => {
-    const result = validateSetupFlags({ dryRun: false, uninstall: true, project: true });
-    expect(result.ok).toBe(false);
-    expect(!result.ok && result.message).toContain("--uninstall");
   });
 
   it("--project + --claude-dir is rejected", () => {
