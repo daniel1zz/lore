@@ -138,6 +138,16 @@ export type AttestationRunner = (typeof ATTESTATION_RUNNERS)[number];
  *   to pre-SPEC-061 attestation objects (REGRESSION). `executed_files` is additionally
  *   present-iff-PARSED — a `completeness: "unknown_runner"` verdict (the runner's stdout
  *   carried no recognised summary line) never has an `executed_files` count to report.
+ * @invariant `attestation.execution_root`/`attestation.execution_mode` (SPEC-063 §Design
+ *   Decisions D3) are the directory `lore verify` actually spawned the command in and
+ *   which of `verify-execution-root.ts::resolveVerifyExecutionRoot`'s two resolution
+ *   paths produced it — closing the false-attestation vector where a linked git
+ *   worktree's `lore verify` silently executed AC commands against the MAIN checkout
+ *   instead of the worktree's own tree. Both optional and present-iff-computed: an
+ *   evidence entry recorded before this change carries neither field and still parses
+ *   (REGRESSION, AC-063-5); a run under this change always sets both together, on
+ *   EVERY resolution (including `"corpus_root"`), so the field's mere absence always
+ *   means "recorded before SPEC-063," never "this run happened to use the corpus root."
  *
  * @example
  * evidenceEntrySchema.parse({
@@ -199,6 +209,24 @@ export const evidenceEntrySchema = z.object({
        * whenever `completeness` is `"unknown_runner"` or unset entirely.
        */
       executed_files: z.number().int().min(0).optional(),
+      /**
+       * The directory `lore verify` actually spawned this command in
+       * (SPEC-063 §Design Decisions D3) — the `root` half of
+       * `verify-execution-root.ts::resolveVerifyExecutionRoot`'s result,
+       * always threaded onto every attestation `VerifyRunnerService` records
+       * under SPEC-063 (both `corpus_root` and `worktree` resolutions), so a
+       * past record can be audited for which tree it measured. OPTIONAL and
+       * present-iff-computed — an evidence entry recorded before this change
+       * carries neither field and still parses (REGRESSION, AC-063-5).
+       */
+      execution_root: z.string().min(1).optional(),
+      /**
+       * Which resolution path produced {@link execution_root} — see
+       * `verify-execution-root.ts::VerifyExecutionMode`. Always present
+       * alongside `execution_root` (never one without the other) on evidence
+       * recorded under SPEC-063.
+       */
+      execution_mode: z.enum(["corpus_root", "worktree"]).optional(),
     })
     .optional(),
 });

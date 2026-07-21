@@ -328,6 +328,26 @@ export interface App {
    */
   configService?: ConfigService;
   /**
+   * The corpus root — `dirname(dirname(dbPath))` (`dbPath` is always
+   * `<repoRoot>/.lore/lore.db`), the SAME value threaded into
+   * `VerifyRunnerService`'s `config.repoRoot` (SPEC-039 §2) and
+   * `RealGitPort(repoRoot)` (SPEC-057). Exposed on `App` (SPEC-063 §Design
+   * Decisions D1/D2) so the CLI adapter can pass it as `corpusRoot` to
+   * `resolveVerifyExecutionRoot(...)` BEFORE calling `verifyPlan` — this is
+   * the ONLY consumer that needed a public read of it; every other caller
+   * (`VerifyRunnerService`/`SeatService`) already receives it via constructor
+   * injection and does not read this field.
+   *
+   * Optional for the same reason `verifyRunnerService`/`acService` are:
+   * pre-existing hand-built App test stubs (HTTP routes / MCP tools / eval
+   * scenarios — outside this task's file anchors) remain valid without a
+   * mechanical touch to every one of them. Always present in production —
+   * both `buildAppFromSqlite` and `buildAppFromTurso` wire it unconditionally;
+   * the CLI only ever receives a fully-wired App from `createApp`.
+   * Source: SPEC-063 §Design Decisions D1.
+   */
+  repoRoot?: string;
+  /**
    * Telemetry sink — exposed for dashboard route handlers to emit source-tagged events.
    * Dashboard handlers record { service: "dashboard", source: "dashboard" } events after
    * successful writes so AC-DASH-WRITE-TEL-1 is satisfied without modifying service signatures.
@@ -574,6 +594,10 @@ function buildAppFromSqlite(
     // "<repoRoot>/.lore/config.yaml"), not a store; the narrow appendAuditEntry
     // port is bound directly to the store for the D6 audit row.
     configService: new ConfigService(repoRoot, store.appendAuditEntry.bind(store)),
+    // reason: SPEC-063 §Design Decisions D1 — exposed so the CLI adapter can read
+    // the corpus root as `resolveVerifyExecutionRoot`'s `corpusRoot` input, the
+    // SAME value already threaded into VerifyRunnerService's config.repoRoot below.
+    repoRoot,
     // reason: telemetry exposed on App so dashboard route handlers can emit source-tagged events
     // without requiring service-layer signature changes (SPEC-022 §9.6).
     telemetry,
@@ -783,6 +807,10 @@ function buildAppFromTurso(
     ),
     // reason: ConfigService (SPEC-062 D1) — see buildAppFromSqlite's identical comment.
     configService: new ConfigService(repoRoot, store.appendAuditEntry.bind(store)),
+    // reason: SPEC-063 §Design Decisions D1 — exposed so the CLI adapter can read
+    // the corpus root as `resolveVerifyExecutionRoot`'s `corpusRoot` input, the
+    // SAME value already threaded into VerifyRunnerService's config.repoRoot below.
+    repoRoot,
     // reason: telemetry exposed on App so dashboard route handlers can emit source-tagged events
     // without requiring service-layer signature changes (SPEC-022 §9.6).
     telemetry,

@@ -33,8 +33,20 @@
  *   ④ injected `recordVerifiedEvidence` — the SOLE attestation injection point (bound
  *      to `taskWorkflowService.recordVerifiedEvidence`); the recorded attestation
  *      carries `first_seen: true` when step ②.5 found the command new/changed (M2
- *      command-provenance annotation), and `completeness`/`executed_files` when step
- *      ③.5 ran (SPEC-061)
+ *      command-provenance annotation), `completeness`/`executed_files` when step
+ *      ③.5 ran (SPEC-061), and ALWAYS `execution_root`/`execution_mode` (SPEC-063
+ *      §Design Decisions D2/D3 — see `opts.executionRoot` below)
+ *
+ * SPEC-063 execution-root correctness — `opts.executionRoot` (optional) is the
+ * CLI adapter's pre-resolved `resolveVerifyExecutionRoot(...)` result (core, pure);
+ * this service never probes git itself (stays free of git/process probing, per
+ * the pre-existing invariant below). When omitted (MCP callers, which do no
+ * worktree-aware resolution) this service falls back to `{root: config.repoRoot,
+ * mode: "corpus_root"}` — byte-identical to pre-SPEC-063 behavior. Every AC's
+ * command spawns from the resolved `root` (not unconditionally `config.repoRoot`
+ * any more), and every recorded attestation carries `execution_root`/
+ * `execution_mode` from the SAME resolution — closing the vector where a linked
+ * git worktree's `lore verify` silently executed against the main checkout.
  *
  * Invariants:
  *   - Never imports `verify-executor.ts` (bun-only) — the executor is a constructor
@@ -61,7 +73,8 @@
  * Side-effect class: IO (delegates all IO to injected ports; this class itself has none)
  *
  * Source: SPEC-039 §2 D2, D3, D4, D6, D9; §3; §4 AC-VRF-3; §M2 (trust-hardening: env
- *   allowlist + command-provenance approval + annotation); SPEC-061 §Scope D3
+ *   allowlist + command-provenance approval + annotation); SPEC-061 §Scope D3;
+ *   SPEC-063 §Design Decisions D2, D3
  */
 
 import { err, ok } from "@lore/core";
@@ -75,6 +88,7 @@ import {
   judgeCompleteness,
   type AcVerifyMode,
   type CompletenessVerdict,
+  type VerifyExecutionRootResolution,
 } from "@lore/core";
 import {
   buildVerifySpawnSpec,
@@ -116,6 +130,18 @@ export interface VerifyPlanOpts {
    * at that AC with `NEEDS_APPROVAL`.
    */
   confirmUnapprovedCommand?: (info: { ac_id: string; command: string }) => Promise<boolean>;
+  /**
+   * Pre-resolved execution root (SPEC-063 §Design Decisions D2) — the CLI
+   * adapter's own `resolveVerifyExecutionRoot(...)` result (or its `--execution-root`
+   * override composition), computed BEFORE calling `verifyPlan` since this
+   * service never probes git/process state itself. Every AC's command spawns
+   * from `executionRoot.root` (not unconditionally `config.repoRoot`), and
+   * every recorded attestation carries `execution_root`/`execution_mode` from
+   * this SAME value. Omitted (e.g. by MCP, which does no worktree-aware
+   * resolution) falls back to `{root: config.repoRoot, mode: "corpus_root"}` —
+   * byte-identical to pre-SPEC-063 behavior (REGRESSION, AC-063-3).
+   */
+  executionRoot?: VerifyExecutionRootResolution;
 }
 
 /** One executed script-mode AC's outcome. */
@@ -329,6 +355,21 @@ export class VerifyRunnerService {
       );
     }
 
+    // SPEC-063 §Design Decisions D2 — resolved EXACTLY ONCE per run (doesn't vary
+    // per-AC, same "resolve once, thread down" shape resolvedEnv below uses).
+    // `opts.executionRoot` is the CLI adapter's own pre-resolution (this service
+    // never probes git); its absence (e.g. an MCP caller) falls back to the
+    // pre-SPEC-063 constant — byte-identical for that caller (REGRESSION,
+    // AC-063-3). A fallback-triggered `warning` (an anomalous/unresolved git
+    // probe) is surfaced the same way the draft-spec advisory above is.
+    const resolvedExecutionRoot = opts.executionRoot ?? {
+      root: this.config.repoRoot,
+      mode: "corpus_root" as const,
+    };
+    if (resolvedExecutionRoot.warning !== undefined) {
+      warnings.push(resolvedExecutionRoot.warning);
+    }
+
     // SPEC-039 §M2 — env resolved EXACTLY ONCE per run (doesn't vary per-AC).
     const resolvedEnv = resolveVerifyEnv(this.config.processEnv, {
       allowlist: this.config.envAllowlist,
@@ -369,8 +410,12 @@ export class VerifyRunnerService {
         }
       }
 
+      // SPEC-063 §Design Decisions D2 — spawns from the RESOLVED execution root,
+      // not unconditionally `this.config.repoRoot` (the pre-SPEC-063 corpus-root
+      // constant that silently mis-executed against the main checkout when the
+      // caller was actually standing inside a linked worktree).
       const spawnSpec = buildVerifySpawnSpec(criterion, {
-        repoRoot: this.config.repoRoot,
+        repoRoot: resolvedExecutionRoot.root,
         defaultTimeoutMs: this.config.defaultTimeoutMs,
         ...(resolvedEnv !== undefined ? { env: resolvedEnv } : {}),
       });
@@ -437,6 +482,13 @@ export class VerifyRunnerService {
             // evidenceEntrySchema.attestation).
             ...(completeness !== undefined ? { completeness } : {}),
             ...(executedFiles !== undefined ? { executed_files: executedFiles } : {}),
+            // SPEC-063 §Design Decisions D3 — ALWAYS present on evidence recorded
+            // under this change (both "corpus_root" and "worktree" resolutions),
+            // so the audit trail can distinguish "recorded before SPEC-063" (both
+            // fields absent) from "this run used the corpus root" (present, mode
+            // "corpus_root").
+            execution_root: resolvedExecutionRoot.root,
+            execution_mode: resolvedExecutionRoot.mode,
           },
         },
         opts.nowIso,
