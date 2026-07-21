@@ -18,6 +18,60 @@
  * `SetupService.install`'s plan → backup → write → manifest-last sequence —
  * see `runManifestWriteSeam` below for the full contract.
  *
+ * **SPEC-060 D3/D4 — repo-root `.gitignore` (append) and `CLAUDE.md` (backup-
+ * then-overwrite) stubs.** Both route through the SAME `plannedWrite`
+ * collector (`runManifestWriteSeam`) as the D1 hooks/tree_yaml candidates —
+ * per the spec's own §Design ("Each of the four existing steps plus the two
+ * new file steps (D3/D4) routes its writes through one `plannedWrite`
+ * collector") — but with two DIFFERENT candidate-construction strategies:
+ *   - `.gitignore` (`runGitignoreStep`) computes its candidate content
+ *     DYNAMICALLY each run: the current on-disk bytes (verbatim, if any) plus
+ *     the shipped `gitignore.template` block appended, UNLESS that block's
+ *     `# --- lore ---` marker is already present on disk (substring check),
+ *     in which case the candidate content is simply the unchanged on-disk
+ *     bytes (byte-identical -> `planInstall` classifies it a `skip`, closing
+ *     AC-060-4's "third run appends 0 additional blocks"). Because the
+ *     existing bytes are ALWAYS a literal prefix of the appended candidate,
+ *     `planInstall`'s blanket "differs -> write + backup" rule (see
+ *     `@lore/core/setup-manifest.ts`) may also back up a pre-existing
+ *     `.gitignore` before the FIRST append — this is a harmless, defensive
+ *     byproduct of reusing the same rule uniformly (nothing is ever lost;
+ *     the original bytes remain a prefix of the final file either way), not
+ *     a design requirement of D3.
+ *   - `CLAUDE.md` (`runClaudeMdStep`) computes its candidate content
+ *     STATICALLY (the shipped `CLAUDE.md.template`, unconditionally,
+ *     regardless of what's on disk) — this is what makes `planInstall`'s
+ *     ordinary rule produce EXACTLY D4's documented "backup-then-overwrite"
+ *     semantics with zero extra code: present-and-different -> write +
+ *     backup (the file the operator's own `/lore-init-context` run may have
+ *     since filled in gets clobbered, recoverably, per the owner-accepted
+ *     trade-off in the spec's §Scope D4); absent -> plain write, no backup;
+ *     present-and-identical -> skip.
+ * Because BOTH candidates may legitimately be classified `write` even when
+ * their target was already present (unlike hooks/tree_yaml, which exclude a
+ * present-and-different path from `candidates` entirely and so never reach
+ * this ambiguity), their FINAL report status can't be derived from a simple
+ * "was it missing before this run?" flag the way `finalizeHookRow`/
+ * `finalizeTreeYamlRow` do — `runManifestWriteSeam` additionally returns
+ * `written: Set<string>` (the paths `planInstall` classified `write` AND
+ * whose write attempt did not fail) for `finalizeGitignoreRow`/
+ * `finalizeClaudeMdRow` to key off instead.
+ *
+ * **`backups` semantics — a single resolved ambiguity (SPEC-060 D6).** T1's
+ * original `ProjectScaffoldReport.backups` doc comment was ambiguous between
+ * "the ORIGINAL path that got backed up" (the machine-installer
+ * `SetupReceipt.backups` convention) and "the BACKUP DESTINATION path" (what
+ * `adapters/cli/setup-render.ts`'s D6 loud-reporting renderer — and its
+ * already-authored test fixtures — assume, since a recovery pointer is only
+ * useful if it names WHERE to recover FROM). This module resolves it in favor
+ * of the DESTINATION reading: `backups: string[]` holds repo-relative
+ * `.lore/.lore-backups/<iso>/<original-path>` strings. The original path is
+ * never lost — it's the destination's own suffix after the `<iso>/` segment
+ * — so nothing is sacrificed by not ALSO carrying a separate `original` field;
+ * every per-step report row (e.g. `claude_md.detail`) already names the
+ * target file independently, so a reader is never left wondering "backup of
+ * what."
+ *
  * Public surface:
  *   ProjectFsPort        — the narrow fs port (exists/readFile/writeFile/mkdir
  *                           + OPTIONAL backup/remove, SPEC-060 D1/D2)
@@ -227,6 +281,21 @@ export interface ProjectScaffoldReport {
   init: SimpleStepResult;
   hooks: HookFileResult[];
   tree_yaml: SimpleStepResult;
+  /**
+   * SPEC-060 D3 — outcome of the repo-root `.gitignore` append step. `"done"`
+   * means a write happened this run (fresh file, OR the `# --- lore ---`
+   * block was appended); `"skipped"` means the marker was already present
+   * and the file is unchanged. See `runGitignoreStep`'s doc comment.
+   */
+  gitignore: SimpleStepResult;
+  /**
+   * SPEC-060 D4 — outcome of the repo-root `CLAUDE.md` backup-then-overwrite
+   * step. `"done"` covers BOTH a fresh write (file was absent) AND an
+   * overwrite of pre-existing, differing content (backed up first — see
+   * `backups` below); `"skipped"` means the on-disk file already matched the
+   * shipped template byte-for-byte.
+   */
+  claude_md: SimpleStepResult;
   git_hooks_path: GitHooksPathResult;
   /**
    * SPEC-060 D1 — outcome of writing `.lore/.lore-project-manifest.json`
@@ -236,11 +305,16 @@ export interface ProjectScaffoldReport {
    */
   manifest: SimpleStepResult;
   /**
-   * SPEC-060 D1/D6 — repo-relative paths backed up (into
-   * `.lore/.lore-backups/<iso>/`) before being overwritten this run. Always
-   * `[]` for THIS task's own two ledger-tracked steps (hooks/tree_yaml never
-   * overwrite differing content — see module doc) — populated once a future
-   * step with true backup-then-overwrite semantics lands (SPEC-060 D4).
+   * SPEC-060 D1/D6 — repo-relative BACKUP DESTINATION paths written this run
+   * (e.g. `.lore/.lore-backups/2026-07-21T.../CLAUDE.md`), before the
+   * corresponding target was overwritten with different content — see this
+   * module's top-level doc comment ("`backups` semantics") for why this is
+   * the DESTINATION path, not the original overwritten path (the original is
+   * always recoverable as the destination's own suffix after the `<iso>/`
+   * segment). Always `[]` for the two ORIGINAL D1 ledger-tracked steps
+   * (hooks/tree_yaml never overwrite differing content — see module doc);
+   * populated by the D3/D4 steps whenever an existing `.gitignore`/`CLAUDE.md`
+   * differed from its computed candidate content.
    */
   backups: string[];
 }
@@ -263,10 +337,26 @@ const TREE_TEMPLATE_ASSET_NAME = "lore.tree.yaml.template";
 const TREE_TEMPLATE_TARGET_NAME = "lore.tree.yaml";
 const TREE_YAML_MODE = 0o644;
 
+/** The `assets/project/gitignore.template` asset — the `# --- lore ---`-delimited block appended to the repo-root `.gitignore` (SPEC-060 D3). */
+const GITIGNORE_ASSET_NAME = "gitignore.template";
+const GITIGNORE_TARGET_NAME = ".gitignore";
+/** Delimiter marker `runGitignoreStep` searches for (substring check) to decide whether the block was already appended. */
+const GITIGNORE_MARKER = "# --- lore ---";
+
+/** The `assets/project/CLAUDE.md.template` asset — the repo-root `CLAUDE.md` stub, backup-then-overwrite (SPEC-060 D4). */
+const CLAUDE_MD_ASSET_NAME = "CLAUDE.md.template";
+const CLAUDE_MD_TARGET_NAME = "CLAUDE.md";
+
 // ─── SPEC-060 D1 — repo-level install ledger constants ─────────────────────
 
-/** Repo-relative path to the ledger this flow maintains (mirrors `SetupService`'s `.lore-setup-manifest.json`, one directory tier down). */
-const PROJECT_MANIFEST_RELATIVE_PATH = ".lore/.lore-project-manifest.json";
+/**
+ * Repo-relative path to the ledger this flow maintains (mirrors
+ * `SetupService`'s `.lore-setup-manifest.json`, one directory tier down).
+ * Exported so `adapters/cli/commands/setup.ts` can derive the manifest's
+ * absolute path for its receipt/`--json` output without re-declaring this
+ * literal a second time.
+ */
+export const PROJECT_MANIFEST_RELATIVE_PATH = ".lore/.lore-project-manifest.json";
 /** Repo-relative directory backups land under, one `<iso>` subdirectory per write-seam run that performed at least one backup. */
 const PROJECT_BACKUPS_RELATIVE_DIRNAME = ".lore/.lore-backups";
 /** Ledger schema version — opaque string, bumped only on a breaking shape change (mirrors `SetupService.MANIFEST_VERSION`). */
@@ -283,11 +373,11 @@ const PROJECT_MANIFEST_VERSION = "1";
  * artifact — the same rough category as the machine installer's own
  * `governance/corpus-workflow.md`). Chosen over widening `SETUP_ENTRY_KINDS`
  * itself because that enum backs an exhaustive `Record<..., string>` in
- * `adapters/cli/setup-render.ts` (a SIBLING task's file anchor, off-limits
- * here) — adding a member would force an edit there. A future step with true
- * backup-then-overwrite semantics (SPEC-060 D4, `CLAUDE.md.template`) should
- * reuse this SAME constant for consistency, unless a later task explicitly
- * revisits the kind taxonomy.
+ * `adapters/cli/setup-render.ts`. Reused unchanged by the SPEC-060 D3/D4
+ * `.gitignore`/`CLAUDE.md` candidates below — four total consumers now
+ * (tree_yaml, gitignore, claude_md, plus this constant's own original
+ * tree_yaml use) — unless a later task explicitly revisits the kind
+ * taxonomy.
  */
 const PROJECT_ASSET_KIND: SetupEntryKind = "governance";
 
@@ -342,12 +432,28 @@ function readProjectManifest(deps: ProjectScaffoldFlowDeps, repoDir: string): Se
   }
 }
 
-/** The manifest write seam's outcome — folded into {@link ProjectScaffoldReport}'s `manifest`/`backups` fields by {@link scaffoldProject}. */
+/** The manifest write seam's outcome — folded into {@link ProjectScaffoldReport}'s `manifest`/`backups`/`gitignore`/`claude_md` fields by {@link scaffoldProject}. */
 interface ManifestSeamResult {
   /** Repo-relative path → error message, for any candidate whose backup or write attempt threw. */
   failed: Map<string, string>;
-  /** Repo-relative paths successfully backed up before an overwrite, this run. */
+  /**
+   * Repo-relative BACKUP DESTINATION paths (e.g.
+   * `.lore/.lore-backups/<iso>/CLAUDE.md`) successfully written before an
+   * overwrite, this run — see this module's top-level doc comment
+   * ("`backups` semantics") for why this is the destination, not the
+   * original overwritten path.
+   */
   backups: string[];
+  /**
+   * Repo-relative paths `planInstall` classified `write` AND whose write
+   * attempt did NOT fail this run — i.e. every candidate actually persisted
+   * to disk, fresh or overwritten. `runGitignoreStep`/`runClaudeMdStep`'s
+   * candidates may legitimately appear here even when their target already
+   * existed (unlike hooks/tree_yaml, which never do — see module doc), so
+   * `finalizeGitignoreRow`/`finalizeClaudeMdRow` key off this set rather than
+   * a "was it missing before this run?" flag.
+   */
+  written: Set<string>;
   /** Outcome of writing the ledger file itself, last. */
   manifestStatus: SimpleStepResult;
 }
@@ -425,10 +531,18 @@ async function runManifestWriteSeam(
         );
       }
       const srcFull = join(repoDir, backupPath);
-      const backupDir = dirname(join(repoDir, PROJECT_BACKUPS_RELATIVE_DIRNAME, nowIso, backupPath));
+      // reason: the backup DESTINATION's repo-relative path is exactly
+      // join(PROJECT_BACKUPS_RELATIVE_DIRNAME, nowIso, backupPath) — its own
+      // dirname is where deps.fs.backup(src, destDir) must copy the file
+      // (destDir + basename(backupPath) reconstructs this SAME path). See
+      // this module's top-level doc comment ("`backups` semantics") for why
+      // the report tracks the destination, not the original, path.
+      const backupDestRel = join(PROJECT_BACKUPS_RELATIVE_DIRNAME, nowIso, backupPath);
+      const backupDestAbs = join(repoDir, backupDestRel);
+      const backupDir = dirname(backupDestAbs);
       deps.fs.mkdir(backupDir);
       deps.fs.backup(srcFull, backupDir);
-      committedBackups.push(backupPath);
+      committedBackups.push(backupDestRel);
     } catch (error) {
       failed.set(backupPath, toMessage(error));
     }
@@ -444,6 +558,13 @@ async function runManifestWriteSeam(
       failed.set(write.path, toMessage(error));
     }
   }
+
+  // Every candidate planInstall classified `write` whose write attempt did
+  // NOT fail this run — see ManifestSeamResult.written's doc comment for why
+  // D3/D4's finalize functions key off this instead of a "was it missing"
+  // flag (their candidate may legitimately be a `write` even when the
+  // target already existed on disk, unlike hooks/tree_yaml).
+  const written = new Set(plan.writes.filter((w) => !failed.has(w.path)).map((w) => w.path));
 
   for (const removedPath of plan.removals) {
     try {
@@ -484,6 +605,7 @@ async function runManifestWriteSeam(
     return {
       failed,
       backups: committedBackups,
+      written,
       manifestStatus: {
         status: "failed",
         detail: `computed project manifest failed schema validation: ${validation.error.message}`,
@@ -494,15 +616,15 @@ async function runManifestWriteSeam(
   const manifestContent = `${JSON.stringify(manifest, null, 2)}\n`;
   const currentRaw = deps.fs.readFile(manifestPath);
   if (manifestContent === (currentRaw ?? "")) {
-    return { failed, backups: committedBackups, manifestStatus: { status: "skipped", detail: manifestPath } };
+    return { failed, backups: committedBackups, written, manifestStatus: { status: "skipped", detail: manifestPath } };
   }
 
   try {
     deps.fs.mkdir(dirname(manifestPath));
     deps.fs.writeFile(manifestPath, manifestContent, 0o644);
-    return { failed, backups: committedBackups, manifestStatus: { status: "done", detail: manifestPath } };
+    return { failed, backups: committedBackups, written, manifestStatus: { status: "done", detail: manifestPath } };
   } catch (error) {
-    return { failed, backups: committedBackups, manifestStatus: { status: "failed", detail: toMessage(error) } };
+    return { failed, backups: committedBackups, written, manifestStatus: { status: "failed", detail: toMessage(error) } };
   }
 }
 
@@ -643,6 +765,96 @@ async function runTreeYamlStep(
   }
 }
 
+/**
+ * Classifies the repo-root `.gitignore` (SPEC-060 D3) — NEVER writes to disk
+ * itself (same D1 restructuring as `runHooksStep`/`runTreeYamlStep`). Unlike
+ * those two steps, this one's candidate content is computed DYNAMICALLY:
+ *   - absent on disk -> candidate content is the shipped block verbatim.
+ *   - present, `# --- lore ---` marker NOT found (substring check) -> the
+ *     current on-disk bytes, PLUS a separating newline (only if the existing
+ *     bytes don't already end in one; omitted entirely for an empty file),
+ *     PLUS the shipped block — the original bytes are ALWAYS a literal
+ *     prefix of this candidate.
+ *   - present, marker already found -> the current on-disk bytes UNCHANGED
+ *     (candidate content === existing), which makes `planInstall` classify
+ *     it a `skip` (byte-identical) — this is what closes AC-060-4's "third
+ *     run appends 0 additional blocks" with zero extra logic downstream.
+ * Never returns `terminal: {status: "skipped"}` the way `runTreeYamlStep`
+ * does — always either `terminal: {status: "failed"}` (asset load threw) or
+ * a `pending` candidate, deferring the write/skip decision to the shared
+ * seam's `planInstall` call.
+ */
+async function runGitignoreStep(
+  deps: ProjectScaffoldFlowDeps,
+  repoDir: string,
+): Promise<{ terminal?: SimpleStepResult; pending?: AssetFile }> {
+  const targetAbsPath = join(repoDir, GITIGNORE_TARGET_NAME);
+  try {
+    const assetResult = await deps.assets.readAsset(GITIGNORE_ASSET_NAME);
+    if (!assetResult.ok) {
+      return { terminal: { status: "failed", detail: describeError(assetResult.error) } };
+    }
+    const block = assetResult.value;
+    const existing = deps.fs.readFile(targetAbsPath);
+
+    let content: string;
+    if (existing === null) {
+      content = block;
+    } else if (existing.includes(GITIGNORE_MARKER)) {
+      content = existing; // already appended — byte-identical candidate, planInstall skips it
+    } else {
+      const separator = existing.length === 0 ? "" : existing.endsWith("\n") ? "" : "\n";
+      content = `${existing}${separator}${block}`;
+    }
+
+    return {
+      pending: { path: GITIGNORE_TARGET_NAME, kind: PROJECT_ASSET_KIND, content, sha256: sha256Hex(content) },
+    };
+  } catch (error) {
+    return { terminal: { status: "failed", detail: toMessage(error) } };
+  }
+}
+
+/**
+ * Classifies the repo-root `CLAUDE.md` stub (SPEC-060 D4) — NEVER writes to
+ * disk itself. Candidate content is the shipped template UNCONDITIONALLY
+ * (never diffed against on-disk content here) — this is deliberate: it is
+ * what makes `planInstall`'s ordinary "differs -> write + backup" rule
+ * produce D4's documented backup-then-overwrite semantics automatically (see
+ * this module's top-level doc comment).
+ */
+async function runClaudeMdStep(
+  deps: ProjectScaffoldFlowDeps,
+  repoDir: string,
+): Promise<{ terminal?: SimpleStepResult; pending?: AssetFile }> {
+  try {
+    const assetResult = await deps.assets.readAsset(CLAUDE_MD_ASSET_NAME);
+    if (!assetResult.ok) {
+      return { terminal: { status: "failed", detail: describeError(assetResult.error) } };
+    }
+    const content = assetResult.value;
+    return {
+      pending: { path: CLAUDE_MD_TARGET_NAME, kind: PROJECT_ASSET_KIND, content, sha256: sha256Hex(content) },
+    };
+  } catch (error) {
+    return { terminal: { status: "failed", detail: toMessage(error) } };
+  }
+}
+
+/** Finalizes the gitignore candidate's report row once the seam has run — keys off `seam.written` (see module doc). */
+function finalizeGitignoreRow(seam: ManifestSeamResult): SimpleStepResult {
+  const failure = seam.failed.get(GITIGNORE_TARGET_NAME);
+  if (failure !== undefined) return { status: "failed", detail: failure };
+  return { status: seam.written.has(GITIGNORE_TARGET_NAME) ? "done" : "skipped", detail: GITIGNORE_TARGET_NAME };
+}
+
+/** Finalizes the CLAUDE.md candidate's report row once the seam has run — keys off `seam.written` (see module doc). */
+function finalizeClaudeMdRow(seam: ManifestSeamResult): SimpleStepResult {
+  const failure = seam.failed.get(CLAUDE_MD_TARGET_NAME);
+  if (failure !== undefined) return { status: "failed", detail: failure };
+  return { status: seam.written.has(CLAUDE_MD_TARGET_NAME) ? "done" : "skipped", detail: CLAUDE_MD_TARGET_NAME };
+}
+
 async function runGitHooksPathStep(deps: ProjectScaffoldFlowDeps, repoDir: string): Promise<GitHooksPathResult> {
   try {
     const getResult = await deps.exec.run(["git", "config", "--get", "core.hooksPath"], repoDir);
@@ -673,13 +885,15 @@ async function runGitHooksPathStep(deps: ProjectScaffoldFlowDeps, repoDir: strin
  * Scaffolds `opts.repoDir` with the Lore-governed project workflow: `.lore/`
  * init (skipped if already present), `assets/project/` hooks copied into
  * `<repo>/hooks/` (conflict-checked, never clobbered), `lore.tree.yaml`
- * written from template (skipped if already present), and
- * `git config core.hooksPath hooks` wired via the injected {@link ExecPort}.
- * SPEC-060 D1 additionally records every hooks/tree_yaml write into a
- * repo-local ledger at `.lore/.lore-project-manifest.json` via
- * {@link runManifestWriteSeam} — see this module's top-level doc comment.
+ * written from template (skipped if already present), a repo-root
+ * `.gitignore` append (SPEC-060 D3), a repo-root `CLAUDE.md` backup-then-
+ * overwrite stub (SPEC-060 D4), and `git config core.hooksPath hooks` wired
+ * via the injected {@link ExecPort}. SPEC-060 D1 additionally records every
+ * hooks/tree_yaml/gitignore/claude_md write into a repo-local ledger at
+ * `.lore/.lore-project-manifest.json` via {@link runManifestWriteSeam} — see
+ * this module's top-level doc comment.
  *
- * All four scaffold steps run UNCONDITIONALLY and INDEPENDENTLY of each
+ * All six scaffold steps run UNCONDITIONALLY and INDEPENDENTLY of each
  * other's outcome — a failure in one step never prevents the remaining steps
  * from being attempted (see module invariants). The function itself only
  * ever returns a top-level `err` for a structurally invalid `opts.repoDir`;
@@ -717,14 +931,20 @@ export async function scaffoldProject(
 
   const hooksOutcome = await runHooksStep(deps, repoDir);
   const treeYamlOutcome = await runTreeYamlStep(deps, repoDir);
+  const gitignoreOutcome = await runGitignoreStep(deps, repoDir);
+  const claudeMdOutcome = await runClaudeMdStep(deps, repoDir);
 
   const candidates: AssetFile[] = [
     ...hooksOutcome.pending.map((p) => p.candidate),
     ...(treeYamlOutcome.pending ? [treeYamlOutcome.pending.candidate] : []),
+    ...(gitignoreOutcome.pending ? [gitignoreOutcome.pending] : []),
+    ...(claudeMdOutcome.pending ? [claudeMdOutcome.pending] : []),
   ];
   const managedPaths = new Set<string>([
     ...HOOK_ASSET_NAMES.map((name) => `hooks/${name}`),
     TREE_TEMPLATE_TARGET_NAME,
+    GITIGNORE_TARGET_NAME,
+    CLAUDE_MD_TARGET_NAME,
   ]);
 
   const seam = await runManifestWriteSeam(deps, repoDir, candidates, managedPaths, now);
@@ -738,7 +958,19 @@ export async function scaffoldProject(
     ? treeYamlOutcome.terminal
     : finalizeTreeYamlRow(treeYamlOutcome.pending!.wasMissing, seam.failed);
 
+  const gitignore: SimpleStepResult = gitignoreOutcome.terminal ?? finalizeGitignoreRow(seam);
+  const claude_md: SimpleStepResult = claudeMdOutcome.terminal ?? finalizeClaudeMdRow(seam);
+
   const git_hooks_path = await runGitHooksPathStep(deps, repoDir);
 
-  return ok({ init, hooks, tree_yaml, git_hooks_path, manifest: seam.manifestStatus, backups: seam.backups });
+  return ok({
+    init,
+    hooks,
+    tree_yaml,
+    gitignore,
+    claude_md,
+    git_hooks_path,
+    manifest: seam.manifestStatus,
+    backups: seam.backups,
+  });
 }

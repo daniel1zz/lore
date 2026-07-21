@@ -384,6 +384,9 @@ const DECLARED_FILES = [
   "project/pre-push",
   "project/lore.tree.yaml.template",
   "project/lore-config-template.yaml",
+  // project scaffold repo-root .gitignore + CLAUDE.md stub templates (SPEC-060 D3/D4)
+  "project/gitignore.template",
+  "project/CLAUDE.md.template",
   // governance
   "governance/corpus-workflow.md",
   "governance/seat-briefing.md",

@@ -260,33 +260,31 @@ export function renderUninstallReceipt(receipt: SetupReceipt, ctx: SetupRenderCt
 // ─── `--project` scaffold receipt (SPEC-060 §Scope D5/D6) ──────────────────
 
 /**
- * `flows/setup-project-flow.ts::ProjectScaffoldReport` plus the two additive
- * fields SPEC-060 D1/D6 introduce — `backups` and `manifestPath` — that
- * `flows/setup-project-flow.ts` does not yet declare on `ProjectScaffoldReport`
- * itself as of this module's authoring (that file's own SPEC-060 D1 task owns
- * landing the repo-level install ledger + backup mechanism it would come
- * from). This renderer is written against the INTERFACE shape it needs, not
- * against whatever `ProjectScaffoldReport` happens to export today — when D1
- * lands, either `ProjectScaffoldReport` grows these two fields directly (this
- * intersection type then collapses to a no-op alias) or the two fields are
- * threaded in some other shape at the call site; either way only THIS type
- * alias needs to move, `renderProjectScaffoldReceipt`'s body does not.
+ * `flows/setup-project-flow.ts::ProjectScaffoldReport` plus ONE additive
+ * field — `manifestPath` — that report doesn't itself carry (it's an
+ * adapter-derived value: `setup-project-flow.ts` never resolves a display
+ * path, it only reports `report.manifest.detail`, which holds an ERROR
+ * message rather than a path on a `"failed"` outcome — see
+ * `commands/setup.ts::runProjectScaffold`, which now derives `manifestPath`
+ * from the exported `PROJECT_MANIFEST_RELATIVE_PATH` constant unconditionally,
+ * so this receipt always has a real path regardless of that step's status).
  *
- * `backups` here is a list of the BACKUP DESTINATION paths (e.g.
- * `.lore/.lore-backups/<iso>/CLAUDE.md`), deliberately DIFFERENT semantics
- * from the machine-installer's `SetupReceipt.backups` (which lists the
- * ORIGINAL target-relative path that got backed up, see `setup-service.ts`'s
- * `committedBackups` construction). The difference is intentional: D6 exists
- * specifically so an operator can find and recover from a clobbered file
- * (SPEC-060 §Scope D4's documented CLAUDE.md overwrite trade-off) — printing
- * only the ORIGINAL path (already visible everywhere else in the receipt)
+ * `backups` is now INHERITED directly from `ProjectScaffoldReport` (this
+ * module previously redeclared it locally, pending the D1 task landing the
+ * field — that landed field is `string[]` of BACKUP DESTINATION paths, e.g.
+ * `.lore/.lore-backups/<iso>/CLAUDE.md`, matching the semantics this
+ * renderer always assumed — see `setup-project-flow.ts`'s top-level doc
+ * comment, "`backups` semantics", for the deliberate resolution of what was
+ * briefly a same-field-different-meaning ambiguity between the D1 task's
+ * original doc comment and this module's). D6 exists specifically so an
+ * operator can find and recover from a clobbered file (SPEC-060 §Scope D4's
+ * documented CLAUDE.md overwrite trade-off) — printing only the ORIGINAL
+ * path (already visible elsewhere in the receipt, e.g. the `claude_md` row)
  * would not tell them WHERE the recovery copy lives. AC-060-5 confirms this
  * reading: "stdout contains that backup path" refers to the literal
  * `.lore/.lore-backups/<iso>/CLAUDE.md` path, not `CLAUDE.md` itself.
  */
 export type ProjectScaffoldReceipt = ProjectScaffoldReport & {
-  /** Backup DESTINATION paths written this run, before an existing file was overwritten (D6). */
-  backups: string[];
   /** Absolute path to the repo-level `.lore-project-manifest.json` ledger (D1). */
   manifestPath: string;
 };
@@ -375,6 +373,8 @@ export function renderProjectScaffoldReceipt(receipt: ProjectScaffoldReceipt, ct
   lines.push(
     `Tree blueprint: ${receipt.tree_yaml.status}${receipt.tree_yaml.detail ? ` (${receipt.tree_yaml.detail})` : ""}`,
   );
+  lines.push(`.gitignore: ${receipt.gitignore.status}${receipt.gitignore.detail ? ` (${receipt.gitignore.detail})` : ""}`);
+  lines.push(`CLAUDE.md: ${receipt.claude_md.status}${receipt.claude_md.detail ? ` (${receipt.claude_md.detail})` : ""}`);
   lines.push(
     `Git hooksPath: ${receipt.git_hooks_path.status} (prior: ${receipt.git_hooks_path.prior_value ?? "unset"})` +
       (receipt.git_hooks_path.detail ? ` — ${receipt.git_hooks_path.detail}` : ""),

@@ -36,6 +36,8 @@ function baseReport(overrides: Partial<ProjectScaffoldReport> = {}): ProjectScaf
       { file: "hooks/pre-push", status: "done" },
     ],
     tree_yaml: { status: "done", detail: "lore.tree.yaml" },
+    gitignore: { status: "done", detail: ".gitignore" },
+    claude_md: { status: "done", detail: "CLAUDE.md" },
     git_hooks_path: { status: "done", prior_value: null },
     manifest: { status: "done", detail: ".lore/.lore-project-manifest.json" },
     backups: [],
@@ -91,6 +93,15 @@ describe("renderProjectScaffoldReceipt", () => {
     for (let i = 1; i < stepIndices.length; i++) {
       expect(stepIndices[i]).toBeGreaterThan(stepIndices[i - 1]!);
     }
+  });
+
+  // HAPPY — SPEC-060 D3/D4: the .gitignore and CLAUDE.md step rows render
+  // alongside the pre-existing hooks/tree_yaml rows.
+  it("HAPPY: renders .gitignore and CLAUDE.md step status lines", () => {
+    const out = renderProjectScaffoldReceipt(baseReceipt(), CTX);
+
+    expect(out).toContain(".gitignore: done");
+    expect(out).toContain("CLAUDE.md: done");
   });
 
   // NEGATIVE — failed steps carry their error detail into the output rather than being
