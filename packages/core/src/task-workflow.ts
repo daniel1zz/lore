@@ -24,13 +24,42 @@
  *
  * Side-effect class: pure
  *
- * Source: SPEC-025 §3 D1-D3, D9, D10; §8.2, §8.3; SPEC-039 §2 D1, D4; SPEC-039 §M2
+ * Source: SPEC-025 §3 D1-D3, D9, D10; §8.2, §8.3; SPEC-039 §2 D1, D4; SPEC-039 §M2;
+ *   SPEC-061 §Scope D2, D4
  */
 
 import { z } from "zod";
 import { ok, err } from "./errors.js";
 import type { Result, LoreError } from "./errors.js";
 import type { DocId, DocRecord, DocStatus, DocSummary, LinkRecord } from "./types.js";
+import type { CompletenessVerdict } from "./attestation-completeness.js";
+
+/**
+ * `attestation.completeness`'s value set, mirrored here (not re-derived) from
+ * `attestation-completeness.ts::CompletenessVerdict` so `evidenceEntrySchema`
+ * has a concrete Zod enum to validate against (SPEC-061 §Scope D2/D4).
+ * `satisfies readonly CompletenessVerdict[]` pins the "every listed literal is
+ * a real CompletenessVerdict member" direction at the declaration itself.
+ */
+const COMPLETENESS_VERDICTS = [
+  "complete",
+  "under_match",
+  "zero_match",
+  "unknown_runner",
+] as const satisfies readonly CompletenessVerdict[];
+
+// Type-level exhaustiveness gate, other direction: every CompletenessVerdict
+// member must appear in COMPLETENESS_VERDICTS. Combined with the `satisfies`
+// above, the two enums cannot silently drift apart — mirrors acceptance.ts's
+// `_scriptOraclesCoverAllButManual` precedent (never read at runtime; its
+// sole purpose is to fail `tsc` on drift).
+type _CompletenessVerdictsCoverAll = [CompletenessVerdict] extends [
+  (typeof COMPLETENESS_VERDICTS)[number],
+]
+  ? true
+  : never;
+const _completenessVerdictsCoverAll: _CompletenessVerdictsCoverAll = true;
+void _completenessVerdictsCoverAll;
 
 // ─── Evidence Schema ───────────────────────────────────────────────────────
 
@@ -91,6 +120,24 @@ export type AttestationRunner = (typeof ATTESTATION_RUNNERS)[number];
  *   `false` for this command at execution time — i.e. this run was the first time (or
  *   the first time after a change) this exact command string was executed for this
  *   task. Omitted (never `false`) for a previously-seen command.
+ * @invariant `result: "inconclusive"` (SPEC-061 §Scope D2) is RUNNER-ISSUED ONLY, the
+ *   same restriction §M2 already places on `attestation` itself — public write paths
+ *   (CLI `lore evidence`, MCP `lore_evidence_add`) reject any input carrying this value
+ *   loud (`TaskWorkflowService._addEvidenceImpl`'s explicit runtime check, mirroring its
+ *   pre-existing `attestation` `hasOwnProperty` guard). It marks a `script:test` AC whose
+ *   process exited 0 but whose declared test-file path arguments were NOT all matched by
+ *   the runner (zero-match or under-match — a false-positive-attestation guard, SPEC-061)
+ *   — never `"pass"` for that outcome, regardless of the real exit code. `computeAcCoverage`
+ *   (`acceptance.ts`) never counts an `inconclusive` entry as `attested_pass`/`attested_fail`
+ *   — it satisfies neither `=== "pass"` nor `=== "fail"` filter by construction, no special
+ *   casing needed there.
+ * @invariant `attestation.completeness`/`attestation.executed_files` (SPEC-061 §Scope D4)
+ *   are BOTH optional and present-iff-computed: only a `script:test` AC whose process
+ *   exited 0 ever gets a completeness verdict computed at all (`VerifyRunnerService`); every
+ *   other oracle kind, and every non-zero exit, leaves both fields absent — byte-identical
+ *   to pre-SPEC-061 attestation objects (REGRESSION). `executed_files` is additionally
+ *   present-iff-PARSED — a `completeness: "unknown_runner"` verdict (the runner's stdout
+ *   carried no recognised summary line) never has an `executed_files` count to report.
  *
  * @example
  * evidenceEntrySchema.parse({
@@ -115,7 +162,7 @@ export type AttestationRunner = (typeof ATTESTATION_RUNNERS)[number];
 export const evidenceEntrySchema = z.object({
   oracle: z.enum(ORACLE_KINDS),
   command: z.string().min(1),
-  result: z.enum(["pass", "fail"]),
+  result: z.enum(["pass", "fail", "inconclusive"]),
   output_tail: z.string().max(4000).optional(),
   recorded_at: z.string(),
   recorded_by: z.string().min(1),
@@ -139,6 +186,19 @@ export const evidenceEntrySchema = z.object({
        * on every pre-M2 attestation (additive field, REGRESSION-safe).
        */
       first_seen: z.boolean().optional(),
+      /**
+       * Completeness verdict for a `script:test` AC whose process exited 0
+       * (SPEC-061 §Scope D4) — see the field-level invariant above. Absent
+       * for every other oracle kind and every non-zero exit.
+       */
+      completeness: z.enum(COMPLETENESS_VERDICTS).optional(),
+      /**
+       * Count of test files the runner reported as actually executed
+       * (SPEC-061 §Scope D4) — present iff {@link parseExecutedUnits} (in
+       * `attestation-completeness.ts`) successfully parsed a count; absent
+       * whenever `completeness` is `"unknown_runner"` or unset entirely.
+       */
+      executed_files: z.number().int().min(0).optional(),
     })
     .optional(),
 });
@@ -308,7 +368,7 @@ export interface ReadyRecord {
   /** Present iff task.extra.claim is set; annotated with computed staleness/age. */
   claim?: TaskClaim & { stale: boolean; age_minutes: number };
   /** Result + timestamp of the most recently appended evidence entry, if any. */
-  latest_evidence?: { result: "pass" | "fail"; recorded_at: string };
+  latest_evidence?: { result: "pass" | "fail" | "inconclusive"; recorded_at: string };
   /** Total number of verification_evidence entries recorded on the task. */
   evidence_count: number;
   /**

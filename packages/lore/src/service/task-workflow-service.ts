@@ -137,9 +137,14 @@ export interface ReleaseOpts {
  * runner-issued only, via {@link TaskWorkflowService.recordVerifiedEvidence}. addEvidence
  * additionally runs a runtime check against the raw input object (not just this type) so
  * an `as EvidenceInput` cast on an untyped candidate cannot smuggle the field past the
- * type system — see the class-level @invariant.
+ * type system — see the class-level @invariant. `result` is likewise narrowed to EXCLUDE
+ * `"inconclusive"` (SPEC-061 §Scope D2) — that outcome is the attestation-completeness
+ * guard's own runner-issued verdict, written only via {@link TaskWorkflowService.recordVerifiedEvidence};
+ * `_addEvidenceImpl`'s runtime check (mirroring the `attestation` guard) is what actually
+ * stops an `as EvidenceInput`-cast candidate from smuggling it past this type exclusion.
  */
-export type EvidenceInput = Omit<EvidenceEntry, "recorded_at" | "attestation"> & {
+export type EvidenceInput = Omit<EvidenceEntry, "recorded_at" | "attestation" | "result"> & {
+  result: Exclude<EvidenceEntry["result"], "inconclusive">;
   /** See {@link ClaimOpts.source}. */
   source?: string;
 };
@@ -381,6 +386,22 @@ export class TaskWorkflowService {
         field: "attestation",
         message: "attestation is runner-issued; use lore verify (not a valid addEvidence input field)",
         value: (entry as Record<string, unknown>)["attestation"],
+      });
+    }
+
+    // SPEC-061 §Scope D2 — mirrors the attestation guard directly above: "inconclusive"
+    // is a RUNNER-ISSUED result (the attestation-completeness guard's own verdict,
+    // written only via `recordVerifiedEvidence`), never a self-reported value. Checked
+    // against the raw value (not gated behind EvidenceInput's compile-time type, which a
+    // caller can bypass with an `as EvidenceInput` cast on an untyped candidate object —
+    // same bypass vector the attestation check above defends against).
+    if ((entry.result as string) === "inconclusive") {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "result",
+        message:
+          "result \"inconclusive\" is runner-issued; use lore verify (not a valid addEvidence input value)",
+        value: entry.result,
       });
     }
 
