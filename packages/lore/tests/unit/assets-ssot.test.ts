@@ -363,7 +363,7 @@ const DECLARED_FILES = [
   "agents/lore-explorer.md",
   "agents/lore-implementer.md",
   "agents/lore-reviewer.md",
-  // hooks (6 .mjs + 4 .sh gates + 1 shared lib module)
+  // hooks (7 .mjs + 4 .sh gates + 1 shared lib module)
   "hooks/session-start-resume.mjs",
   "hooks/stop-doc-sync.mjs",
   "hooks/subagent-context.mjs",
@@ -371,6 +371,8 @@ const DECLARED_FILES = [
   "hooks/pre-no-general-agent-gate.mjs",
   // pre-bash-git-safety-gate (state-aware destructive-git guard, 2026-07-20)
   "hooks/pre-bash-git-safety-gate.mjs",
+  // subagent-stop-commit-guard (SubagentStop data-loss backstop, SPEC-046 amendment, 2026-07-21)
+  "hooks/subagent-stop-commit-guard.mjs",
   "hooks/lore-gate-g1-spec-create.sh",
   "hooks/lore-gate-g2-spec-promote.sh",
   "hooks/lore-gate-g3-plan-promote.sh",

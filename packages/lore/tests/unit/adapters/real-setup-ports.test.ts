@@ -376,6 +376,8 @@ const DECLARED_FILES_IN_SCOPE = [
   "hooks/pre-subagent-gate.mjs",
   "hooks/pre-no-general-agent-gate.mjs",
   "hooks/pre-bash-git-safety-gate.mjs",
+  // subagent-stop-commit-guard (SubagentStop data-loss backstop, SPEC-046 amendment, 2026-07-21)
+  "hooks/subagent-stop-commit-guard.mjs",
   "hooks/lore-gate-g1-spec-create.sh",
   "hooks/lore-gate-g2-spec-promote.sh",
   "hooks/lore-gate-g3-plan-promote.sh",
