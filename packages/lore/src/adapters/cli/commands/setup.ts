@@ -72,7 +72,7 @@
  * Source: SPEC-046 §Design, §Scope; task AC-046-E.
  */
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import { createInterface } from "node:readline/promises";
@@ -85,7 +85,13 @@ import type { LoreError, Result } from "@lore/core";
 
 import { SetupService, type McpRegistrar, type SetupReceipt } from "../../../service/setup-service.js";
 import { ProjectSetupService } from "../../../service/project-setup-service.js";
-import type { ExecPort, ProjectFsPort, ProjectAssetSource, ProjectScaffoldReport } from "../../../flows/setup-project-flow.js";
+import {
+  PROJECT_MANIFEST_RELATIVE_PATH,
+  type ExecPort,
+  type ProjectFsPort,
+  type ProjectAssetSource,
+  type ProjectScaffoldReport,
+} from "../../../flows/setup-project-flow.js";
 import {
   uninstallProject,
   type ProjectFsRemovePort,
@@ -93,9 +99,17 @@ import {
 } from "../../../flows/setup-project-uninstall.js";
 import { initCorpusAt } from "../../../flows/init-corpus.js";
 import { RealAssetSource } from "../../real-asset-source.js";
-import { RealSetupFsReader, RealSetupFsWriter } from "../../real-setup-fs.js";
+import { RealSetupFsReader, RealSetupFsWriter, backupProjectFile, removeProjectPath } from "../../real-setup-fs.js";
 import { RealMcpRegistrar } from "../../real-mcp-registrar.js";
-import { renderInstallPlan, renderInstallReceipt, renderUninstallReceipt, type SetupRenderCtx } from "../setup-render.js";
+import {
+  renderInstallPlan,
+  renderInstallReceipt,
+  renderProjectScaffoldReceipt,
+  renderUninstallReceipt,
+  PROJECT_NEXT_STEPS,
+  type ProjectScaffoldReceipt,
+  type SetupRenderCtx,
+} from "../setup-render.js";
 import {
   resolveAssetsRoot,
   resolveBinPath,
@@ -219,31 +233,18 @@ async function confirmOrReport(opts: {
   return true;
 }
 
-// ─── --project rendering (no shared renderer exists for this report shape) ──
-
-function renderScaffoldReport(repoDir: string, report: ProjectScaffoldReport): string {
-  const lines: string[] = [];
-  lines.push(`✓ lore project scaffold → ${repoDir}`);
-  lines.push("");
-  lines.push(`Init: ${report.init.status}${report.init.detail ? ` (${report.init.detail})` : ""}`);
-  lines.push("");
-  lines.push("Hooks:");
-  for (const hook of report.hooks) {
-    lines.push(`  ${hook.file}: ${hook.status}${hook.detail ? ` (${hook.detail})` : ""}`);
-  }
-  lines.push("");
-  lines.push(`Tree blueprint: ${report.tree_yaml.status}${report.tree_yaml.detail ? ` (${report.tree_yaml.detail})` : ""}`);
-  lines.push(
-    `Git hooksPath: ${report.git_hooks_path.status} (prior: ${report.git_hooks_path.prior_value ?? "unset"})` +
-      (report.git_hooks_path.detail ? ` — ${report.git_hooks_path.detail}` : ""),
-  );
-  return lines.join("\n");
-}
+// ─── --project rendering ──────────────────────────────────────────────────
+// SPEC-060 D5/D6: the actual receipt is rendered by
+// `../setup-render.js::renderProjectScaffoldReceipt` (shared SSOT with its
+// own test suite) — this module no longer carries a second, independently
+// authored text renderer for the same report shape.
 
 function scaffoldReportFailed(report: ProjectScaffoldReport): boolean {
   return (
     report.init.status === "failed" ||
     report.tree_yaml.status === "failed" ||
+    report.gitignore.status === "failed" ||
+    report.claude_md.status === "failed" ||
     report.git_hooks_path.status === "failed" ||
     report.hooks.some((h) => h.status === "failed")
   );
@@ -266,6 +267,17 @@ function renderProjectUninstallReport(repoDir: string, report: ProjectUninstallR
 
 // ─── Real project-scaffold ports (mirrors project-setup-service.test.ts's real port builders) ──
 
+/**
+ * Real {@link ProjectFsPort} — includes `backup`/`remove` (SPEC-060 D1/D2's
+ * OPTIONAL port extension, see `flows/setup-project-flow.ts`'s module doc)
+ * via the standalone `backupProjectFile`/`removeProjectPath` functions
+ * (`../../real-setup-fs.js`) so the D3/D4 backup-then-overwrite steps
+ * (`.gitignore` append, `CLAUDE.md` overwrite) can actually back up an
+ * existing file before it's replaced — without this, a `plan.backups` entry
+ * with no `deps.fs.backup` implementation fails LOUD per that module's own
+ * documented contract, silently degrading D4's "backup-then-overwrite" into
+ * "overwrite, no recovery" the moment a real CLAUDE.md needed one.
+ */
 function makeRealProjectFs(): ProjectFsPort {
   return {
     exists(path: string): boolean {
@@ -284,25 +296,23 @@ function makeRealProjectFs(): ProjectFsPort {
     mkdir(path: string): void {
       mkdirSync(path, { recursive: true });
     },
+    backup: backupProjectFile,
+    remove: removeProjectPath,
   };
 }
 
 /**
- * Real {@link ProjectFsRemovePort} — `makeRealProjectFs()`'s four methods
- * plus `remove` (SPEC-060 §Design D2, `--project --uninstall`'s ONLY new fs
- * capability; see `flows/setup-project-uninstall.ts`'s module header for why
- * this is a local port extension rather than a `ProjectFsPort` edit).
- * `rmSync(..., {recursive: true, force: true})` matches the port contract's
- * "a missing target is NOT an error" rule — `force: true` is what makes that
- * true for `rmSync` (its default throws ENOENT on a missing path).
+ * Real {@link ProjectFsRemovePort} — `makeRealProjectFs()`'s methods,
+ * narrowed to a NON-optional `remove` (SPEC-060 §Design D2,
+ * `--project --uninstall`'s port requirement; see
+ * `flows/setup-project-uninstall.ts`'s module header for why this is a local
+ * port extension rather than a `ProjectFsPort` edit). `makeRealProjectFs()`
+ * already implements `remove` via the SAME `removeProjectPath` function —
+ * this wrapper exists purely to satisfy `ProjectFsRemovePort`'s stricter
+ * (required, not optional) type, not to provide different behavior.
  */
 function makeRealProjectRemoveFs(): ProjectFsRemovePort {
-  return {
-    ...makeRealProjectFs(),
-    remove(path: string): void {
-      rmSync(path, { recursive: true, force: true });
-    },
-  };
+  return { ...makeRealProjectFs(), remove: removeProjectPath };
 }
 
 function makeRealProjectExec(): ExecPort {
@@ -347,7 +357,12 @@ function makeRealProjectAssetSource(projectAssetsDir: string): ProjectAssetSourc
  */
 const CONFIG_TEMPLATE_ASSET_NAME = "lore-config-template.yaml";
 
-async function runProjectScaffold(opts: { json: boolean; yes: boolean; assetsRoot: string }): Promise<void> {
+async function runProjectScaffold(opts: {
+  json: boolean;
+  yes: boolean;
+  assetsRoot: string;
+  binPath: string;
+}): Promise<void> {
   const repoDir = process.cwd();
 
   const proceed = await confirmOrReport({
@@ -356,7 +371,7 @@ async function runProjectScaffold(opts: { json: boolean; yes: boolean; assetsRoo
     verb: "scaffold",
     preview: () =>
       `This will scaffold ${repoDir} with the Lore-governed project workflow ` +
-      `(.lore/ init, hooks/, lore.tree.yaml, git core.hooksPath).`,
+      `(.lore/ init, hooks/, lore.tree.yaml, .gitignore, CLAUDE.md, git core.hooksPath).`,
   });
   if (!proceed) return;
 
@@ -388,10 +403,22 @@ async function runProjectScaffold(opts: { json: boolean; yes: boolean; assetsRoo
     return;
   }
 
+  // reason: report.backups/manifest.detail are repo-RELATIVE paths (see
+  // flows/setup-project-flow.ts's module doc, "`backups` semantics") — this
+  // adapter is the one place that resolves them to absolute paths for
+  // display, mirroring how targetDir/binPath are resolved here rather than
+  // in the flow (which stays repoDir-relative and IO-agnostic beyond its
+  // injected ports).
+  const receipt: ProjectScaffoldReceipt = {
+    ...result.value,
+    backups: result.value.backups.map((relPath) => join(repoDir, relPath)),
+    manifestPath: join(repoDir, PROJECT_MANIFEST_RELATIVE_PATH),
+  };
+
   if (opts.json) {
-    console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
+    console.log(JSON.stringify({ ok: true, data: { ...receipt, next_steps: PROJECT_NEXT_STEPS } }, null, 2));
   } else {
-    console.log(renderScaffoldReport(repoDir, result.value));
+    console.log(renderProjectScaffoldReceipt(receipt, { targetDir: repoDir, binPath: opts.binPath }));
   }
   process.exitCode = scaffoldReportFailed(result.value) ? 1 : 0;
 }
@@ -596,9 +623,10 @@ export default defineCommand({
       execPath: process.execPath,
     };
     const assetsRoot = resolveAssetsRoot(pathCtx);
+    const binPath = resolveBinPath(pathCtx);
 
     if (validated.mode === "project") {
-      await runProjectScaffold({ json, yes: args.yes === true, assetsRoot });
+      await runProjectScaffold({ json, yes: args.yes === true, assetsRoot, binPath });
       return;
     }
     if (validated.mode === "project-uninstall") {
@@ -611,7 +639,6 @@ export default defineCommand({
       env: process.env,
       homeDir: homedir(),
     });
-    const binPath = resolveBinPath(pathCtx);
 
     const mcpRegistrar = new CapturingMcpRegistrar(new RealMcpRegistrar());
     const service = new SetupService(

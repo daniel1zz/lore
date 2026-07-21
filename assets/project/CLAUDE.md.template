@@ -1,0 +1,19 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Lore-governed workflow
+
+This repository's shared knowledge, plans, and tasks live in the local Lore corpus (`.lore/`), not in this file. Query it via the `lore` CLI rather than reading files by path:
+
+- `lore search <query>` — full-text search the corpus
+- `lore get <id-or-slug>` — read a document
+- `lore tree` — view the document hierarchy
+- `lore bootstrap` — session pointer set (root PRD, active plans, pending reviews, your claims)
+- `lore status` — corpus health snapshot
+
+Run `/lore-init-context` to populate the module index below once this codebase has real structure worth documenting.
+
+## Module Index
+
+<!-- Populated by /lore-init-context. -->

@@ -1,0 +1,7 @@
+# --- lore ---
+.DS_Store
+node_modules/
+dist/
+coverage/
+.agent-worktree-marker
+.lore/lore.db*
