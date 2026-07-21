@@ -20,7 +20,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import yaml from "yaml";
-import { ConfigService } from "../../../src/service/config-service.js";
+import { ConfigService, computeConfigHash } from "../../../src/service/config-service.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import type { LoreConfig } from "@lore/core";
 
@@ -329,5 +329,113 @@ describe("SPEC-062 T1 — ConfigService", () => {
     if (!result.ok) return;
     expect(result.value.restart_required).toEqual([]);
     expect(result.value.updated).toEqual(["workflow.claim_ttl_minutes"]);
+  });
+
+  // ─── T3: expectedHash CAS (AC-062-11, TOCTOU closure) ──────────────────────
+  // reason: T2's route-level If-Match precheck alone left a real TOCTOU window —
+  // a concurrent writer landing between the route's precheck read and the
+  // eventual `ConfigService.update()` call was never caught, because `update()`
+  // had no internal CAS of its own (T2 flagged this explicitly in its module
+  // header rather than silently absorbing it). These tests prove the CAS lives
+  // INSIDE `update()` itself — a caller's own precheck is no longer load-bearing.
+
+  it("HAPPY expectedHash: a matching expectedHash is accepted and the patch is applied", async () => {
+    seedConfig(baseConfig());
+    const { configService } = harness();
+
+    const readResult = await configService.read();
+    expect(readResult.ok).toBe(true);
+    if (!readResult.ok) return;
+    const currentHash = computeConfigHash(readResult.value.config);
+
+    const result = await configService.update(
+      { workflow: { claim_ttl_minutes: 88 } },
+      { actor: "tester", expectedHash: currentHash },
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.updated).toEqual(["workflow.claim_ttl_minutes"]);
+  });
+
+  it("ERROR expectedHash: a mismatched expectedHash is rejected, zero bytes written, zero audit rows", async () => {
+    seedConfig(baseConfig());
+    const { configService, store } = harness();
+    const before = sha256(rawConfigBytes());
+
+    const result = await configService.update(
+      { workflow: { claim_ttl_minutes: 88 } },
+      { actor: "tester", expectedHash: "0000000000000000000000000000000000000000000000000000000000000000" },
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    expect(result.error.code === "VALIDATION_ERROR" && result.error.field).toBe("expectedHash");
+
+    const after = sha256(rawConfigBytes());
+    expect(after).toBe(before);
+
+    const audit = await store.queryAudit({});
+    expect(audit.ok && audit.value.length).toBe(0);
+  });
+
+  it("BOUNDARY expectedHash: omitted expectedHash skips the CAS entirely — matches CorpusService.set's opts.expectedVersion precedent", async () => {
+    seedConfig(baseConfig());
+    const { configService } = harness();
+
+    // No expectedHash at all — the pre-T3 default. Must behave BYTE-IDENTICAL
+    // to every pre-existing caller in this file (none of which pass it).
+    const result = await configService.update(
+      { workflow: { claim_ttl_minutes: 99 } },
+      { actor: "tester" },
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.updated).toEqual(["workflow.claim_ttl_minutes"]);
+  });
+
+  it("STATE expectedHash (TOCTOU): a concurrent writer landing between a read and update() is caught — the SECOND update (stale expectedHash) is rejected with 0 bytes written, the FIRST writer's commit survives untouched", async () => {
+    seedConfig(baseConfig());
+    const { configService } = harness();
+
+    // Writer A and writer B both read the config and observe the SAME hash
+    // (simulating two sessions that read before either wrote).
+    const readResult = await configService.read();
+    expect(readResult.ok).toBe(true);
+    if (!readResult.ok) return;
+    const sharedHash = computeConfigHash(readResult.value.config);
+
+    // Writer A commits first, using the shared hash both declared.
+    const writerA = await configService.update(
+      { workflow: { claim_ttl_minutes: 111 } },
+      { actor: "writer-a", expectedHash: sharedHash },
+    );
+    expect(writerA.ok).toBe(true);
+
+    const beforeB = sha256(rawConfigBytes());
+
+    // Writer B's update() call happens AFTER A's commit — by the time B's own
+    // internal loadConfig() runs, the file is already at A's version, but B
+    // still declares its ORIGINAL (now-stale) hash. Without an internal CAS,
+    // this would silently overwrite A's commit (classic lost update) — the
+    // whole point of this task.
+    const writerB = await configService.update(
+      { workflow: { claim_ttl_minutes: 222 } },
+      { actor: "writer-b", expectedHash: sharedHash },
+    );
+    expect(writerB.ok).toBe(false);
+    if (writerB.ok) return;
+    expect(writerB.error.code).toBe("VALIDATION_ERROR");
+    expect(writerB.error.code === "VALIDATION_ERROR" && writerB.error.field).toBe("expectedHash");
+
+    // Zero bytes written by B's rejected call — A's commit survives untouched.
+    const afterB = sha256(rawConfigBytes());
+    expect(afterB).toBe(beforeB);
+
+    const finalRead = await configService.read();
+    expect(finalRead.ok).toBe(true);
+    if (!finalRead.ok) return;
+    expect(
+      (finalRead.value.config.workflow as never as { claim_ttl_minutes?: number })?.claim_ttl_minutes,
+    ).toBe(111);
   });
 });

@@ -17,13 +17,18 @@
  *     all (AC-062-5) — zero risk of a code path here accidentally allowing one.
  *   - Config has no `DocRecord.version` — the "If-Match" value is a sha256 hash of the
  *     REDACTED config object `GET /api/config` returned (the exact payload the client
- *     observed), computed via {@link computeConfigHash} (a deterministic, key-order-
- *     independent JSON serialization — @see stableStringify). This is a ROUTE-LEVEL
- *     PRECHECK ONLY (mirrors `concurrency.ts::checkConcurrency`'s pre-BUG-003 shape) —
- *     a second writer committing BETWEEN this precheck's read and the subsequent
- *     `ConfigService.update()` call is NOT caught by an inner CAS (`ConfigService.update`
- *     has no `expectedHash` parameter — that would be a `ConfigService` change, out of
- *     this task's file anchors). Flagged as a known follow-up, not silently absorbed.
+ *     observed), computed via {@link computeConfigHash} — RE-EXPORTED from
+ *     `ConfigService` (the SSOT for the hash algorithm; see that module's header) rather
+ *     than kept as an independent local copy, closing the "hand-maintained twin" risk a
+ *     duplicate implementation here would otherwise carry.
+ *   - **SPEC-062 T3 (closes a TOCTOU T2 flagged but did not fix)**: this route's own
+ *     hash comparison below is now a PRECHECK ONLY, defense-in-depth — the AUTHORITATIVE
+ *     CAS lives inside `ConfigService.update` itself (`opts.expectedHash`), which
+ *     re-derives the current hash from a FRESH read at write time. A second writer
+ *     committing BETWEEN this precheck's read and the `update()` call is now caught
+ *     by that inner CAS (translated back into the same 409 `STALE_VERSION` shape
+ *     below, rather than the generic `VALIDATION_ERROR` → 422 mapping) instead of
+ *     silently overwriting the interleaved writer's commit.
  *   - Known coverage gap: the hash is computed over the REDACTED view (the only view
  *     `ConfigService.read()` exposes) — an out-of-band edit to an `ai.http.headers.*`
  *     value (which always redacts to the same marker) would not change the hash. Every
@@ -41,46 +46,23 @@
  * Source: SPEC-062 §Scope D3, D4, D5
  */
 
-import { createHash } from "node:crypto";
 import type { App } from "../../app.js";
 import type { ActorContext } from "./auth.js";
-import type { LoreConfig } from "@lore/core";
 import { jsonOk, jsonError, loreErrorResponse, parseJsonBody, emitDashboardTelemetry } from "./middleware.js";
+import { computeConfigHash } from "../../service/config-service.js";
 
 // ─── Hashing ────────────────────────────────────────────────────────────────
 
 /**
- * Deterministic, key-order-independent JSON serialization — object keys are
- * sorted recursively so two structurally-equal configs always serialize
- * identically regardless of how each was constructed (YAML key order,
- * object-spread order, etc.). Arrays keep their original element order
- * (order is semantically meaningful for arrays, unlike object keys).
- *
- * @param value - Any JSON-shaped value.
+ * The "If-Match"/hash function — RE-EXPORTED from `ConfigService`, the SSOT
+ * (see that module's `computeConfigHash` doc for the algorithm and the
+ * rationale for keeping exactly one implementation). Kept as a named
+ * re-export here (rather than requiring every caller to import from
+ * `service/config-service.js` directly) so this module's own documented
+ * "Public surface" list stays accurate and no external import site needs to
+ * change.
  */
-function stableStringify(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map((entry) => stableStringify(entry)).join(",")}]`;
-  }
-  if (value !== null && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    const keys = Object.keys(record).sort();
-    const entries = keys.map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`);
-    return `{${entries.join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
-
-/**
- * Compute the sha256 hex hash of `config`'s stable-stringified form — the
- * "version" a client's `If-Match` header must echo back (config has no
- * `DocRecord.version`; see module header).
- *
- * @param config - A (typically already-redacted) `LoreConfig`.
- */
-export function computeConfigHash(config: LoreConfig): string {
-  return createHash("sha256").update(stableStringify(config), "utf8").digest("hex");
-}
+export { computeConfigHash };
 
 // ─── GET /api/config ────────────────────────────────────────────────────────
 
@@ -170,8 +152,34 @@ export async function handleDashboardConfigPatch(
   }
 
   const actorName = actor.owner ?? actor.name;
-  const updateResult = await app.configService.update(body, { actor: actorName });
-  if (!updateResult.ok) return loreErrorResponse(updateResult.error);
+  const updateResult = await app.configService.update(body, {
+    actor: actorName,
+    expectedHash: ifMatch.trim(),
+  });
+  if (!updateResult.ok) {
+    // SPEC-062 T3 — a concurrent writer landed in the window between this
+    // route's own precheck read (above) and ConfigService.update's fresh
+    // internal re-read: the service's authoritative expectedHash CAS caught
+    // it. Translate that into the SAME 409 STALE_VERSION shape the precheck
+    // above returns (rather than the generic VALIDATION_ERROR → 422 mapping)
+    // so callers see one consistent conflict shape regardless of which layer
+    // caught the race.
+    if (updateResult.error.code === "VALIDATION_ERROR" && updateResult.error.field === "expectedHash") {
+      const freshResult = await app.configService.read();
+      if (!freshResult.ok) return loreErrorResponse(freshResult.error);
+      const freshHash = computeConfigHash(freshResult.value.config);
+      return jsonError(
+        {
+          code: "STALE_VERSION",
+          message: "Config has changed since you last read it",
+          current_hash: freshHash,
+          current: freshResult.value.config,
+        },
+        409,
+      );
+    }
+    return loreErrorResponse(updateResult.error);
+  }
 
   emitDashboardTelemetry(app, "config_update", {
     updated: updateResult.value.updated,
