@@ -236,6 +236,27 @@ export class PhaseWorkflowService {
       });
     }
 
+    // reason: SPEC-061 §Scope D2 parity — mirrors TaskWorkflowService._addEvidenceImpl's
+    // identical guard for the exact same reason the attestation check directly above
+    // exists: "inconclusive" is a RUNNER-ISSUED result (the attestation-completeness
+    // guard's own verdict, written only via recordChecklistVerifiedEvidence), never a
+    // self-reported value. This file's EvidenceInput is a type ALIAS of
+    // TaskWorkflowService's own EvidenceInput (imported, not redeclared — see this
+    // file's own header, "re-exported verbatim"), so it already structurally excludes
+    // "inconclusive" at compile time; this runtime check is what actually stops a
+    // candidate built via `as EvidenceInput` on an untyped object (the exact bypass
+    // vector the attestation check above defends against) from smuggling the value
+    // past that compile-time exclusion through THIS dispatch path.
+    if ((entry.result as string) === "inconclusive") {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "result",
+        message:
+          "result \"inconclusive\" is runner-issued; use lore verify (not a valid addEvidence input value)",
+        value: entry.result,
+      });
+    }
+
     return this.appendEvidenceEntry(idOrSlug, entry, entry.recorded_by, now);
   }
 

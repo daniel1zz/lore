@@ -25,6 +25,17 @@
  *              matching pre-SPEC-039 behaviour byte-for-byte
  *
  * @spec_ref AC-VRF-8
+ *
+ * SPEC-061 §Scope D5 addition (task-t2-close-spec-061-deferred-gaps): a separate
+ * `describe` block below covers the `⚑?` inconclusive-only badge — the fixture's
+ * `refs[]` now matters (the inconclusive count is derived from `fact.refs`, not a
+ * dedicated `AcCoverageFact` field; see `coverageBadge`'s own JSDoc for why). The
+ * REGRESSION block above already proves `·` for a fact with an EMPTY `refs` array;
+ * this addition's own REGRESSION case proves the SAME `·` outcome for a fact whose
+ * `refs` is empty even after this change (byte-identical), plus a dedicated
+ * AC-061-G2 case proving an attested-pass fact still renders `⚑✔` unaffected by the
+ * new branch (it is checked strictly AFTER pass/fail, never before).
+ * @spec_ref AC-061-G2
  */
 
 import { describe, it, expect } from "bun:test";
@@ -92,5 +103,74 @@ describe("coverageBadge — REGRESSION", () => {
   it("a zero-evidence fact (pass=0, fail=0) still renders bare '·', matching pre-SPEC-039 behaviour", () => {
     const coverage = [fact({ pass: 0, fail: 0, attested_pass: 0, attested_fail: 0 })];
     expect(coverageBadge(coverage, "AC-1")).toBe("·");
+  });
+});
+
+// ─── SPEC-061 §Scope D5 — inconclusive badge (task-t2-close-spec-061-deferred-gaps) ──
+
+describe("coverageBadge — SPEC-061 inconclusive badge — HAPPY", () => {
+  it("an AC whose only evidence is inconclusive renders ⚑?(n), distinct from · (AC-061-G2)", () => {
+    const coverage = [
+      fact({
+        pass: 0,
+        fail: 0,
+        refs: [
+          { task_id: "t1", result: "inconclusive" },
+          { task_id: "t2", result: "inconclusive" },
+        ],
+      }),
+    ];
+    expect(coverageBadge(coverage, "AC-1")).toBe("⚑?(2)");
+  });
+});
+
+describe("coverageBadge — SPEC-061 inconclusive badge — BOUNDARY", () => {
+  it("exactly one inconclusive ref renders ⚑?(1)", () => {
+    const coverage = [fact({ pass: 0, fail: 0, refs: [{ task_id: "t1", result: "inconclusive" }] })];
+    expect(coverageBadge(coverage, "AC-1")).toBe("⚑?(1)");
+  });
+});
+
+describe("coverageBadge — SPEC-061 inconclusive badge — STATE", () => {
+  it("a real pass alongside an inconclusive ref renders the pass badge, never the inconclusive one (pass/fail precedence)", () => {
+    const coverage = [
+      fact({
+        pass: 1,
+        fail: 0,
+        attested_pass: 0,
+        refs: [
+          { task_id: "t1", result: "pass" },
+          { task_id: "t2", result: "inconclusive" },
+        ],
+      }),
+    ];
+    expect(coverageBadge(coverage, "AC-1")).toBe("✔(1/0)");
+  });
+
+  it("a real fail alongside an inconclusive ref renders the fail badge, never the inconclusive one (fail precedence)", () => {
+    const coverage = [
+      fact({
+        pass: 0,
+        fail: 1,
+        attested_fail: 0,
+        refs: [
+          { task_id: "t1", result: "fail" },
+          { task_id: "t2", result: "inconclusive" },
+        ],
+      }),
+    ];
+    expect(coverageBadge(coverage, "AC-1")).toBe("✘(0/1)");
+  });
+});
+
+describe("coverageBadge — SPEC-061 inconclusive badge — REGRESSION", () => {
+  it("a zero-evidence fact (empty refs) still renders bare '·', unaffected by the new inconclusive branch", () => {
+    const coverage = [fact({ pass: 0, fail: 0, refs: [] })];
+    expect(coverageBadge(coverage, "AC-1")).toBe("·");
+  });
+
+  it("an attested-pass fact still renders ⚑✔ unaffected by the new inconclusive branch (pre-existing SPEC-039 HAPPY case, re-asserted)", () => {
+    const coverage = [fact({ pass: 2, fail: 0, attested_pass: 1 })];
+    expect(coverageBadge(coverage, "AC-1")).toBe("⚑✔(2/0, 1 attested)");
   });
 });
