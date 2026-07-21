@@ -57,6 +57,22 @@
  * Side-effect class: IO (synchronous node:fs reads AND writes).
  * Source: SPEC-046 §Design; atomicity/backup precedent: `SetupService`'s own
  *   module doc ("the REAL implementation ... owns write ATOMICITY").
+ *
+ * **SPEC-060 D1/D2 addition** — `backupProjectFile`/`removeProjectPath` are
+ * SYNC, standalone real implementations of the two OPTIONAL methods
+ * `flows/setup-project-flow.ts`'s `ProjectFsPort` gained (`backup`/`remove`,
+ * mirroring `SetupFsWriter`'s surface). They are plain functions rather than
+ * a class — `ProjectFsPort`'s other four methods (`exists`/`readFile`/
+ * `writeFile`/`mkdir`) are built independently by each caller of this module
+ * (`commands/setup.ts`'s `makeRealProjectFs`, `project-setup-service.test.ts`'s
+ * `makeRealFs` — neither file this task may edit) as a plain object literal,
+ * not a class instance; a caller that wants the full backup/remove capability
+ * simply spreads `{ backup: backupProjectFile, remove: removeProjectPath }`
+ * into that literal. Semantics mirror `RealSetupFsWriter.backup`/`.remove`
+ * above exactly (mode-preserving copy; recursive-force removal, missing
+ * target is a no-op) — the only difference is these are synchronous (`void`,
+ * not `Promise<void>`), matching `ProjectFsPort`'s existing sync convention
+ * (`writeFile`/`mkdir` are sync there too, unlike the async `SetupFsWriter`).
  */
 
 import {
@@ -166,4 +182,37 @@ export class RealSetupFsWriter implements SetupFsWriter {
 /** Narrow type guard for a Node `fs` errno exception (`{code: string}`), without importing `node:fs`'s internal error type. */
 function isErrnoException(value: unknown): value is NodeJS.ErrnoException {
   return value instanceof Error && "code" in value;
+}
+
+// ─── SPEC-060 D1/D2 — sync ProjectFsPort.backup/.remove real implementations ─
+
+/**
+ * Real, synchronous implementation of `ProjectFsPort.backup` (SPEC-060 D1) —
+ * copies `src`'s CURRENT bytes AND mode bits into `destDir` (same basename).
+ * Mirrors {@link RealSetupFsWriter.backup} exactly, minus the `Promise`
+ * wrapper (`ProjectFsPort` is sync). Callers (the manifest write seam in
+ * `flows/setup-project-flow.ts`) always `mkdir(destDir)` first — this
+ * function does not create `destDir` itself, matching the machine-installer
+ * counterpart's division of labor.
+ *
+ * @throws When `src` does not exist or is unreadable, or `destDir` cannot be
+ *   written to — never swallowed; the caller is responsible for treating a
+ *   thrown backup as a loud, per-path failure (never a silent skip).
+ */
+export function backupProjectFile(src: string, destDir: string): void {
+  const destPath = join(destDir, basename(src));
+  copyFileSync(src, destPath);
+  const srcMode = statSync(src).mode;
+  chmodSync(destPath, srcMode);
+}
+
+/**
+ * Real, synchronous implementation of `ProjectFsPort.remove` (SPEC-060 D1/D2)
+ * — removes the file or directory (recursively) at `path`; a missing target
+ * is a no-op. Mirrors {@link RealSetupFsWriter.remove} exactly, minus the
+ * `Promise` wrapper.
+ */
+export function removeProjectPath(path: string): void {
+  if (!existsSync(path)) return;
+  rmSync(path, { recursive: true, force: true });
 }
