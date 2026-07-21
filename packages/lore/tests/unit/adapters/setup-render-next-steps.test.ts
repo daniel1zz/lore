@@ -37,6 +37,8 @@ function baseReport(overrides: Partial<ProjectScaffoldReport> = {}): ProjectScaf
     ],
     tree_yaml: { status: "done", detail: "lore.tree.yaml" },
     git_hooks_path: { status: "done", prior_value: null },
+    manifest: { status: "done", detail: ".lore/.lore-project-manifest.json" },
+    backups: [],
     ...overrides,
   };
 }
