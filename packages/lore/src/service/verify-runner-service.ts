@@ -1,14 +1,14 @@
 /**
  * VerifyRunnerService — orchestrates `lore verify`: runs a plan's script-mode
  * acceptance criteria for real and records the outcome as runner-attested evidence
- * (SPEC-039 §2; §M2 trust-hardening).
+ * (SPEC-039 §2; §M2 trust-hardening; SPEC-061 attestation-completeness guard).
  *
  * Public surface:
  *   verifyPlan(planIdOrSlug, opts) → runs every (or a filtered subset of) script-mode
  *     AC declared on the plan's parent spec against the resolved target task
  *
  * Four-step pipeline, fully delegated (SPEC-039 §2), with an M2 pre-execution gate
- * inserted into step ③:
+ * inserted into step ③ and a SPEC-061 post-execution guard inserted into step ④:
  *   ① injected `getPlanBundle` — read orchestration (bound to
  *      `corpusService.getPlanBundle`, mirroring `resolveDeclaredAcIds`'s bind-in-app.ts
  *      precedent, SPEC-038 §7 D4)
@@ -22,10 +22,19 @@
  *   ③ injected `executor` — runs the spawn spec (bound to
  *      `verify-executor.ts::executeVerifySpawnSpec` in production), with a
  *      pre-resolved env map (`resolveVerifyEnv`, computed ONCE per run — SPEC-039 §M2)
+ *   ③.5 SPEC-061 attestation-completeness guard (core `countExplicitPathArgs` /
+ *      `parseExecutedUnits` / `judgeCompleteness`, all pure) — for an `oracle: "test"`
+ *      AC whose command exited 0, judges whether the runner actually executed as many
+ *      test files as the command explicitly declared; a zero/under-match downgrades the
+ *      about-to-be-recorded result from `"pass"` to `"inconclusive"` (never silently
+ *      stays `"pass"` — the AC-060-7 false-attestation incident this guard closes).
+ *      Every other oracle kind, and any non-zero exit, skips this step entirely (no
+ *      `completeness` computed, no field written — byte-identical to pre-SPEC-061).
  *   ④ injected `recordVerifiedEvidence` — the SOLE attestation injection point (bound
  *      to `taskWorkflowService.recordVerifiedEvidence`); the recorded attestation
  *      carries `first_seen: true` when step ②.5 found the command new/changed (M2
- *      command-provenance annotation)
+ *      command-provenance annotation), and `completeness`/`executed_files` when step
+ *      ③.5 ran (SPEC-061)
  *
  * Invariants:
  *   - Never imports `verify-executor.ts` (bun-only) — the executor is a constructor
@@ -52,7 +61,7 @@
  * Side-effect class: IO (delegates all IO to injected ports; this class itself has none)
  *
  * Source: SPEC-039 §2 D2, D3, D4, D6, D9; §3; §4 AC-VRF-3; §M2 (trust-hardening: env
- *   allowlist + command-provenance approval + annotation)
+ *   allowlist + command-provenance approval + annotation); SPEC-061 §Scope D3
  */
 
 import { err, ok } from "@lore/core";
@@ -61,7 +70,11 @@ import {
   specAcceptanceCriteriaSchema,
   resolveTargetTask,
   isApprovedVerifyCommand,
+  countExplicitPathArgs,
+  parseExecutedUnits,
+  judgeCompleteness,
   type AcVerifyMode,
+  type CompletenessVerdict,
 } from "@lore/core";
 import {
   buildVerifySpawnSpec,
@@ -108,7 +121,14 @@ export interface VerifyPlanOpts {
 /** One executed script-mode AC's outcome. */
 export interface VerifyAcResult {
   readonly ac_id: string;
-  readonly result: "pass" | "fail";
+  /**
+   * `"inconclusive"` (SPEC-061 §Scope D3) is the attestation-completeness
+   * guard's own verdict — set instead of `"pass"` when the command exited 0
+   * but its declared test-file path arguments were not all matched by the
+   * runner (zero-match or under-match). Never a caller assertion, same as
+   * `"pass"`/`"fail"` — always derived by this service.
+   */
+  readonly result: "pass" | "fail" | "inconclusive";
   readonly exit_code: number;
   readonly duration_ms: number;
   readonly timed_out: boolean;
@@ -119,6 +139,29 @@ export interface VerifyAcResult {
    * previously-seen command.
    */
   readonly first_seen?: boolean;
+  /**
+   * Attestation-completeness verdict (SPEC-061 §Scope D3/D4) — present ONLY
+   * for an `oracle: "test"` AC whose process exited 0 (the guard's own scope:
+   * a nonzero exit is already a `"fail"`, completeness is irrelevant; every
+   * other oracle kind is out of scope, SPEC-061 §Scope Out). Omitted for
+   * every other AC.
+   */
+  readonly completeness?: CompletenessVerdict;
+  /**
+   * Count of test files the runner reported as actually executed (SPEC-061
+   * §Scope D4) — present iff {@link completeness} is set AND a recognised
+   * runner-summary line was parsed (absent when `completeness ===
+   * "unknown_runner"`).
+   */
+  readonly executed_files?: number;
+  /**
+   * The command's own declared explicit test-file path-argument count
+   * (SPEC-061 §Scope D1/D3) — present alongside {@link completeness}
+   * whenever the guard ran, regardless of whether any files were parsed from
+   * stdout; renders the "ran X of Y declared paths" CLI message even when
+   * `executed_files` itself is absent (`unknown_runner`, X reads as unknown).
+   */
+  readonly declared_paths?: number;
 }
 
 /** One declared AC that was NOT executed because its verify.mode isn't "script". */
@@ -348,7 +391,31 @@ export class VerifyRunnerService {
       }
 
       const { exitCode, outputTail, durationMs, timedOut } = execResult.value;
-      const verifyResult = deriveVerifyResult(exitCode, timedOut);
+      let verifyResult: "pass" | "fail" | "inconclusive" = deriveVerifyResult(exitCode, timedOut);
+
+      // SPEC-061 §Scope D3 — attestation-completeness guard. Runs ONLY on an
+      // actual pass (a nonzero exit / timeout is already "fail"; completeness
+      // is irrelevant to it — §Design) AND ONLY for the "test" oracle family
+      // (tsc/lint/build/e2e/other have different zero-work-green modes and
+      // are explicitly OUT of this guard's scope). A zero/under-match downgrades
+      // the recorded result to "inconclusive" — NEVER "pass" — so a wrong test-
+      // path filter that silently matched fewer files than declared can never
+      // masquerade as a real attested pass again (the AC-060-7 incident this
+      // guard closes).
+      let completeness: CompletenessVerdict | undefined;
+      let executedFiles: number | undefined;
+      let declaredPaths: number | undefined;
+      if (verifyResult === "pass" && criterion.verify.oracle === "test") {
+        declaredPaths = countExplicitPathArgs(criterion.verify.command);
+        const executedUnits = parseExecutedUnits(outputTail);
+        completeness = judgeCompleteness({ declaredPaths, executedUnits });
+        if (executedUnits !== null) {
+          executedFiles = executedUnits.files;
+        }
+        if (completeness === "zero_match" || completeness === "under_match") {
+          verifyResult = "inconclusive";
+        }
+      }
 
       const recordResult = await this.recordVerifiedEvidence(
         task.id,
@@ -366,6 +433,10 @@ export class VerifyRunnerService {
             timed_out: timedOut,
             // SPEC-039 §M2 — command-provenance annotation, present-iff-true.
             ...(firstSeen ? { first_seen: true } : {}),
+            // SPEC-061 §Scope D4 — present-iff-computed (see field JSDoc on
+            // evidenceEntrySchema.attestation).
+            ...(completeness !== undefined ? { completeness } : {}),
+            ...(executedFiles !== undefined ? { executed_files: executedFiles } : {}),
           },
         },
         opts.nowIso,
@@ -380,6 +451,9 @@ export class VerifyRunnerService {
         duration_ms: durationMs,
         timed_out: timedOut,
         ...(firstSeen ? { first_seen: true } : {}),
+        ...(completeness !== undefined ? { completeness } : {}),
+        ...(executedFiles !== undefined ? { executed_files: executedFiles } : {}),
+        ...(declaredPaths !== undefined ? { declared_paths: declaredPaths } : {}),
       });
     }
 

@@ -34,6 +34,7 @@ export * from "./tree-blueprint.js";
 export * from "./ai.js";
 export * from "./text-normalise.js";
 export * from "./truncate.js";
+export * from "./attestation-completeness.js";
 export * from "./task-workflow.js";
 export * from "./acceptance.js";
 export * from "./ac-quality.js";

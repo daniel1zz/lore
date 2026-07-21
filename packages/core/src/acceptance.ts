@@ -31,7 +31,7 @@
  *
  * Side-effect class: pure
  *
- * Source: SPEC-038 §3 (schema), §7 D1-D3, D6; SPEC-039 §2 D8, D9
+ * Source: SPEC-038 §3 (schema), §7 D1-D3, D6; SPEC-039 §2 D8, D9; SPEC-061 §Scope D5
  */
 
 import { z } from "zod";
@@ -177,10 +177,18 @@ export const specAcceptanceCriteriaSchema = z
  *   (mirroring `ReadyRecord.claim`/`.phase` in task-workflow.ts) — set to `true`
  *   only when the source evidence entry carries `attestation`; omitted (not
  *   `false`) for self-reported entries, including all pre-SPEC-039 legacy data.
+ * @invariant `result` includes `"inconclusive"` (SPEC-061 §Scope D2/D5) — a
+ *   runner-issued outcome for a `script:test` AC whose command's declared
+ *   test-file paths were not all matched by the runner (zero/under-match).
+ *   {@link computeAcCoverage}'s `pass`/`fail`/`attested_pass`/`attested_fail`
+ *   filters below match the exact strings `"pass"`/`"fail"` — an
+ *   `"inconclusive"` ref satisfies neither, so it is counted in NEITHER
+ *   bucket with NO special-casing required (it still appears in `refs`, for
+ *   audit visibility).
  */
 export interface EvidenceRefLite {
   task_id: string;
-  result: "pass" | "fail";
+  result: "pass" | "fail" | "inconclusive";
   attested?: boolean;
 }
 

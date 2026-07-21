@@ -1,0 +1,415 @@
+/**
+ * Six-dimension tests for the SPEC-061 attestation-completeness guard's
+ * integration into `VerifyRunnerService` (D3) and its runner-issued-only
+ * enforcement on the public `TaskWorkflowService.addEvidence` path (D2/D6).
+ *
+ * `VerifyRunnerService` cases use the SAME hand-written port-double pattern as
+ * `verify-runner-service.test.ts` (this file's sibling) — the guard itself
+ * (`countExplicitPathArgs`/`parseExecutedUnits`/`judgeCompleteness`) is real,
+ * imported from `@lore/core`, unit-covered on its own in
+ * `packages/core/tests/attestation-completeness.test.ts`; only the
+ * ORCHESTRATION around its verdict (result downgrade, attestation fields) is
+ * under test here. The caller-supplied-inconclusive case uses a REAL
+ * `TaskWorkflowService` over `InMemoryStore` (mirrors
+ * `task-workflow-service.test.ts`'s SPEC-039 §2 D2 attestation-smuggling
+ * precedent) since that guard lives in `_addEvidenceImpl` itself.
+ *
+ * Dimension mapping:
+ *   HAPPY / REPRO (AC-061-4): the exact AC-060-7 shape — a command declaring 3
+ *               test-file paths, only 1 of which the runner actually matched
+ *               (vitest silently ignored the other two) — records
+ *               `result: "inconclusive"`, NEVER `"pass"`, with
+ *               `attestation.completeness: "under_match"`
+ *   NEGATIVE:   a zero-match run (runner summary reports 0 executed files
+ *               despite >=1 declared path) also downgrades to `"inconclusive"`
+ *               with `completeness: "zero_match"`
+ *   BOUNDARY:   a command declaring ZERO explicit paths (`bun run test`) is
+ *               NEVER downgraded even when the runner's summary line can't be
+ *               parsed — declaredPaths === 0 is vacuously "complete"
+ *   ERROR:      n/a at the orchestration level — the guard is a pure decision
+ *               over already-successful (exit 0) executor output, no new
+ *               throw/error surface; the runner-issued-only rejection (D2) IS
+ *               the "error" dimension for the addEvidence half of this file
+ *   STATE:      a non-"test" oracle (e.g. tsc) exiting 0 NEVER runs the guard
+ *               at all — no `completeness` field appears on its attestation,
+ *               regardless of its command/output shape
+ *   REGRESSION (AC-061-5): declared-count === executed-count records `"pass"`
+ *               with `completeness: "complete"`; an unrecognised runner
+ *               records `"pass"` with `completeness: "unknown_runner"` and no
+ *               `executed_files`; NEITHER is downgraded to `"inconclusive"`.
+ *               Plus: a caller attempting `result: "inconclusive"` through the
+ *               public `addEvidence` path (even via an `as EvidenceInput` cast
+ *               bypassing the compile-time exclusion) is rejected
+ *               VALIDATION_ERROR — mirrors the pre-existing `attestation`
+ *               smuggling guard exactly (AC-061-6).
+ *
+ * @spec_ref SPEC-061 §Scope D2, D3, D5; §Acceptance Criteria AC-061-4, AC-061-5, AC-061-6
+ */
+
+import { describe, it, expect } from "vitest";
+import { ok, err } from "@lore/core";
+import type { AcceptanceCriterion, DocRecord, LoreError, PlanBundle, Result } from "@lore/core";
+import { VerifyRunnerService } from "../../../src/service/verify-runner-service.js";
+import type { VerifySpawnSpec, VerifyExecutionResult } from "../../../src/service/verify-spawn.js";
+import type { VerifiedEvidenceInput } from "../../../src/service/task-workflow-service.js";
+import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { CorpusService } from "../../../src/service/corpus-service.js";
+import { TaskWorkflowService, type EvidenceInput } from "../../../src/service/task-workflow-service.js";
+import { exitCode } from "../../../src/adapters/cli/utils.js";
+import type { CreateDocInput } from "@lore/core";
+
+// ─── VerifyRunnerService fixture builders (mirrors verify-runner-service.test.ts) ──
+
+function makeDoc(overrides: Partial<DocRecord> & Pick<DocRecord, "id" | "type" | "title">): DocRecord {
+  return {
+    slug: overrides.id,
+    role: "plan",
+    status: "approved",
+    priority: "medium",
+    content: "body",
+    parent_id: null,
+    created_at: "2026-07-08T00:00:00.000Z",
+    updated_at: "2026-07-08T00:00:00.000Z",
+    created_by: "alice",
+    version: 1,
+    deleted_at: null,
+    tags: [],
+    extra: {},
+    ...overrides,
+  } as DocRecord;
+}
+
+function makePlan(overrides: Partial<DocRecord> = {}): DocRecord {
+  return makeDoc({ id: "plan-1", type: "plan", title: "Plan", ...overrides });
+}
+
+function makeSpec(acceptanceCriteria: AcceptanceCriterion[], overrides: Partial<DocRecord> = {}): DocRecord {
+  return makeDoc({
+    id: "spec-1",
+    type: "spec",
+    title: "Spec",
+    status: "approved",
+    extra: { acceptance_criteria: acceptanceCriteria },
+    ...overrides,
+  });
+}
+
+function makeTask(id: string, overrides: Partial<DocRecord> = {}): DocRecord {
+  return makeDoc({ id, type: "task", title: `Task ${id}`, slug: id, parent_id: "plan-1", ...overrides });
+}
+
+function testAc(id: string, command: string): AcceptanceCriterion {
+  return { id, statement: `${id} statement`, verify: { mode: "script", oracle: "test", command } };
+}
+
+function tscAc(id: string, command: string): AcceptanceCriterion {
+  return { id, statement: `${id} statement`, verify: { mode: "script", oracle: "tsc", command } };
+}
+
+function makeGetPlanBundle(bundle: PlanBundle) {
+  const fn = async (_planIdOrSlug: string): Promise<Result<PlanBundle, LoreError>> => ok(bundle);
+  return { fn };
+}
+
+function makeExecutor(results: Array<Result<VerifyExecutionResult, LoreError>>) {
+  const calls: VerifySpawnSpec[] = [];
+  const fn = async (spec: VerifySpawnSpec): Promise<Result<VerifyExecutionResult, LoreError>> => {
+    calls.push(spec);
+    const r = results[calls.length - 1];
+    if (r === undefined) throw new Error("executor double called more times than scripted");
+    return r;
+  };
+  return { fn, calls };
+}
+
+function makeRecordVerifiedEvidence() {
+  const calls: Array<{ idOrSlug: string; entry: VerifiedEvidenceInput; nowIso: string }> = [];
+  const fn = async (
+    idOrSlug: string,
+    entry: VerifiedEvidenceInput,
+    nowIso: string,
+  ): Promise<Result<DocRecord, LoreError>> => {
+    calls.push({ idOrSlug, entry, nowIso });
+    return ok(makeTask("task-1", { version: calls.length + 1 }));
+  };
+  return { fn, calls };
+}
+
+const config = {
+  repoRoot: "/repo",
+  defaultTimeoutMs: 300000,
+  claimTtlMinutes: 120,
+  requireCommandApproval: false,
+  envAllowlist: [],
+  envPassthroughAll: true,
+  processEnv: {},
+};
+const NOW = "2026-07-21T10:00:00.000Z";
+const FRESH_CLAIM_AT = "2026-07-21T09:59:00.000Z";
+
+function taskWithFreshClaim(id: string, by = "alice"): DocRecord {
+  return makeTask(id, { extra: { claim: { by, at: FRESH_CLAIM_AT } } });
+}
+
+// The literal AC-060-7 three-path command (2 of 3 paths never existed).
+const AC_060_7_COMMAND =
+  "bun run test:vitest packages/lore/tests/unit/setup-service.test.ts " +
+  "packages/lore/tests/unit/assets-ssot.test.ts " +
+  "packages/lore/tests/unit/real-setup-ports.test.ts";
+
+// ─── REPRO (AC-061-4) ─────────────────────────────────────────────────────────
+
+describe("REPRO — the exact AC-060-7 three-path-two-missing shape records inconclusive, never pass", () => {
+  it("exit 0 + a vitest tail reporting only 1 of 3 declared files ran -> result inconclusive, completeness under_match", async () => {
+    const spec = makeSpec([testAc("AC-060-7", AC_060_7_COMMAND)]);
+    const plan = makePlan();
+    const task = taskWithFreshClaim("task-1");
+    const bundle: PlanBundle = { plan, spec, tasks: [task] };
+    const { fn: getPlanBundle } = makeGetPlanBundle(bundle);
+    // The false-attestation incident: vitest silently ran only the one matching
+    // file (assets-ssot.test.ts) and exited 0.
+    const executor = makeExecutor([
+      ok({ exitCode: 0, outputTail: "...\nTest Files  1 passed (1)\n", durationMs: 639, timedOut: false }),
+    ]);
+    const recorder = makeRecordVerifiedEvidence();
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config);
+
+    const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.results).toHaveLength(1);
+    expect(result.value.results[0]).toMatchObject({
+      ac_id: "AC-060-7",
+      result: "inconclusive",
+      exit_code: 0,
+      completeness: "under_match",
+      executed_files: 1,
+      declared_paths: 3,
+    });
+
+    // The evidence actually recorded (what a caller would see via `lore ac list`)
+    // must carry "inconclusive", NEVER "pass" — this is the whole point of the guard.
+    expect(recorder.calls).toHaveLength(1);
+    expect(recorder.calls[0]?.entry.result).toBe("inconclusive");
+    expect(recorder.calls[0]?.entry.attestation).toMatchObject({
+      exit_code: 0,
+      completeness: "under_match",
+      executed_files: 1,
+    });
+  });
+});
+
+// ─── NEGATIVE ─────────────────────────────────────────────────────────────────
+
+describe("NEGATIVE — a zero-match run also downgrades to inconclusive", () => {
+  it("exit 0 + a runner summary reporting 0 executed files -> result inconclusive, completeness zero_match", async () => {
+    const spec = makeSpec([testAc("AC-1", "bunx vitest run packages/core/tests/nope.test.ts")]);
+    const plan = makePlan();
+    const task = taskWithFreshClaim("task-1");
+    const bundle: PlanBundle = { plan, spec, tasks: [task] };
+    const { fn: getPlanBundle } = makeGetPlanBundle(bundle);
+    const executor = makeExecutor([
+      ok({ exitCode: 0, outputTail: "Test Files  0 passed (0)\n", durationMs: 50, timedOut: false }),
+    ]);
+    const recorder = makeRecordVerifiedEvidence();
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config);
+
+    const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.results[0]).toMatchObject({
+      result: "inconclusive",
+      completeness: "zero_match",
+      executed_files: 0,
+      declared_paths: 1,
+    });
+  });
+});
+
+// ─── BOUNDARY ─────────────────────────────────────────────────────────────────
+
+describe("BOUNDARY — a zero-declared-path command is NEVER downgraded, even with unparseable output", () => {
+  it("`bun run test` (no path args) + unrecognised stdout -> still pass, completeness unknown_runner", async () => {
+    const spec = makeSpec([testAc("AC-1", "bun run test")]);
+    const plan = makePlan();
+    const task = taskWithFreshClaim("task-1");
+    const bundle: PlanBundle = { plan, spec, tasks: [task] };
+    const { fn: getPlanBundle } = makeGetPlanBundle(bundle);
+    const executor = makeExecutor([
+      ok({ exitCode: 0, outputTail: "no recognisable summary here\n", durationMs: 30, timedOut: false }),
+    ]);
+    const recorder = makeRecordVerifiedEvidence();
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config);
+
+    const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // reason: declaredPaths === 0 for "bun run test" — judgeCompleteness's own
+    // vacuous short-circuit means this can NEVER be zero_match/under_match
+    // regardless of what the (unparseable) stdout says.
+    expect(result.value.results[0]).toMatchObject({
+      result: "pass",
+      completeness: "unknown_runner",
+    });
+    expect(result.value.results[0]?.executed_files).toBeUndefined();
+  });
+});
+
+// ─── STATE ────────────────────────────────────────────────────────────────────
+
+describe("STATE — a non-test oracle never runs the guard at all", () => {
+  it("oracle: tsc, exit 0 -> no completeness field on either the result or the recorded attestation", async () => {
+    const spec = makeSpec([tscAc("AC-1", "bun run typecheck")]);
+    const plan = makePlan();
+    const task = taskWithFreshClaim("task-1");
+    const bundle: PlanBundle = { plan, spec, tasks: [task] };
+    const { fn: getPlanBundle } = makeGetPlanBundle(bundle);
+    const executor = makeExecutor([
+      ok({ exitCode: 0, outputTail: "", durationMs: 500, timedOut: false }),
+    ]);
+    const recorder = makeRecordVerifiedEvidence();
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config);
+
+    const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.results[0]?.result).toBe("pass");
+    expect(result.value.results[0]?.completeness).toBeUndefined();
+    expect(result.value.results[0]?.executed_files).toBeUndefined();
+    expect(recorder.calls[0]?.entry.attestation?.completeness).toBeUndefined();
+  });
+});
+
+// ─── REGRESSION (AC-061-5) ────────────────────────────────────────────────────
+
+describe("REGRESSION — declared count equal to executed count records pass + completeness complete", () => {
+  it("2 declared paths, vitest reports 2 files passed -> pass, completeness complete, executed_files 2", async () => {
+    const command =
+      "bunx vitest run packages/core/tests/a.test.ts packages/core/tests/b.test.ts";
+    const spec = makeSpec([testAc("AC-1", command)]);
+    const plan = makePlan();
+    const task = taskWithFreshClaim("task-1");
+    const bundle: PlanBundle = { plan, spec, tasks: [task] };
+    const { fn: getPlanBundle } = makeGetPlanBundle(bundle);
+    const executor = makeExecutor([
+      ok({ exitCode: 0, outputTail: "Test Files  2 passed (2)\n", durationMs: 300, timedOut: false }),
+    ]);
+    const recorder = makeRecordVerifiedEvidence();
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config);
+
+    const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.results[0]).toMatchObject({
+      result: "pass",
+      completeness: "complete",
+      executed_files: 2,
+      declared_paths: 2,
+    });
+    expect(recorder.calls[0]?.entry.result).toBe("pass");
+  });
+});
+
+describe("REGRESSION — an unrecognised runner records pass + completeness unknown_runner", () => {
+  it("declares 1 path, stdout matches no known runner summary -> pass, completeness unknown_runner, no executed_files", async () => {
+    const spec = makeSpec([testAc("AC-1", "bunx some-custom-runner packages/core/tests/a.test.ts")]);
+    const plan = makePlan();
+    const task = taskWithFreshClaim("task-1");
+    const bundle: PlanBundle = { plan, spec, tasks: [task] };
+    const { fn: getPlanBundle } = makeGetPlanBundle(bundle);
+    const executor = makeExecutor([
+      ok({ exitCode: 0, outputTail: "All good, 1 suite ran.\n", durationMs: 40, timedOut: false }),
+    ]);
+    const recorder = makeRecordVerifiedEvidence();
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config);
+
+    const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.results[0]).toMatchObject({
+      result: "pass",
+      completeness: "unknown_runner",
+    });
+    expect(result.value.results[0]?.executed_files).toBeUndefined();
+    expect(recorder.calls[0]?.entry.attestation?.executed_files).toBeUndefined();
+  });
+});
+
+// ─── caller-supplied inconclusive rejected (AC-061-6) ─────────────────────────
+
+function evidence(overrides: Partial<EvidenceInput> = {}): EvidenceInput {
+  return {
+    oracle: "tsc",
+    command: "bun run typecheck",
+    result: "pass",
+    recorded_by: "alice",
+    ...overrides,
+  };
+}
+
+async function createPlanDoc(cs: CorpusService, title = "Test Plan"): Promise<string> {
+  const result = await cs.create({ type: "plan", title, content: "body" } as CreateDocInput);
+  if (!result.ok) throw new Error(`Failed to create plan: ${JSON.stringify(result.error)}`);
+  return result.value.id;
+}
+
+async function createTaskDoc(cs: CorpusService, planId: string, title = "Test Task"): Promise<string> {
+  const result = await cs.create({
+    type: "task",
+    title,
+    parent_id: planId,
+    content: "body",
+    extra: { plan_id: planId },
+  } as CreateDocInput);
+  if (!result.ok) throw new Error(`Failed to create task: ${JSON.stringify(result.error)}`);
+  return result.value.id;
+}
+
+describe("REGRESSION — caller-supplied inconclusive result via addEvidence is rejected (SPEC-061 §Scope D2, mirrors the attestation guard)", () => {
+  it("VALIDATION_ERROR field result, doc unchanged, exit code 4 (same mapping as the pre-existing attestation-smuggling guard)", async () => {
+    const store = new InMemoryStore();
+    const corpusService = new CorpusService(store);
+    const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
+    const planId = await createPlanDoc(corpusService);
+    const taskId = await createTaskDoc(corpusService, planId);
+
+    // reason: "inconclusive" is excluded from EvidenceInput's `result` type at
+    // compile time (Exclude<EvidenceEntry["result"], "inconclusive">) — this
+    // `as EvidenceInput` cast on a fresh object literal simulates a caller
+    // bypassing that exclusion, the SAME bypass vector the pre-existing
+    // `attestation` smuggling test (task-workflow-service.test.ts) exercises.
+    const smuggled = { ...evidence(), result: "inconclusive" } as unknown as EvidenceInput;
+
+    const result = await taskWorkflowService.addEvidence(taskId, smuggled);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (result.error.code !== "VALIDATION_ERROR") return;
+    expect(result.error.field).toBe("result");
+    expect(result.error.message).toContain("lore verify");
+    expect(result.error.value).toBe("inconclusive");
+    expect(exitCode(result.error)).toBe(4);
+
+    // Doc must be completely unchanged — no version bump, no evidence array at all.
+    const after = await corpusService.get(taskId);
+    expect(after.ok).toBe(true);
+    if (!after.ok) return;
+    expect(after.value.doc.version).toBe(1);
+    expect(after.value.doc.extra["verification_evidence"]).toBeUndefined();
+  });
+
+  it("a legitimate pass/fail addEvidence call is UNAFFECTED by the new guard (REGRESSION)", async () => {
+    const store = new InMemoryStore();
+    const corpusService = new CorpusService(store);
+    const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
+    const planId = await createPlanDoc(corpusService);
+    const taskId = await createTaskDoc(corpusService, planId);
+
+    const result = await taskWorkflowService.addEvidence(taskId, evidence({ result: "fail" }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const evidenceArr = result.value.extra["verification_evidence"];
+    expect(Array.isArray(evidenceArr)).toBe(true);
+  });
+});

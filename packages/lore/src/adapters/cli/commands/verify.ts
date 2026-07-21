@@ -36,8 +36,9 @@
  * the whole gate via `verify.require_command_approval: false` in config.
  *
  * Exit codes (SPEC-003 §5 `exitCode()` SSOT covers the LoreError branch; the
- * "some AC failed" branch below is NOT a LoreError — it's a business outcome,
- * mapped independently):
+ * "some AC failed"/"some AC inconclusive" branches below are NOT LoreErrors —
+ * they're business outcomes, mapped independently, INCONCLUSIVE taking
+ * precedence over FAILED when a run has both):
  *   0 = success — every executed script-mode AC passed (or there were none to
  *       run, e.g. every declared AC is ai/human-mode; a clear notice prints in
  *       that case, per SPEC-039 §3's "ai/human mode ACs are skipped and
@@ -50,7 +51,13 @@
  *       "the thing I ran reported failure" (1) — chosen so a CI wrapper's
  *       single `$? -ne 0` check covers both a launch abort and a failed AC
  *       uniformly
- *   3 = DOC_NOT_FOUND (plan or explicit --task not found)
+ *   3 = DOC_NOT_FOUND (plan or explicit --task not found) — OR at least one
+ *       executed `oracle: "test"` AC's attestation-completeness guard (SPEC-061)
+ *       downgraded its result to `"inconclusive"` (a zero/under-match: the
+ *       command exited 0 but did not actually execute every test-file path it
+ *       declared) — the SAME "oracle found a problem" bucket `status
+ *       --check-drift` already uses. Takes precedence over exit 1 when a run
+ *       has both an inconclusive AND a genuinely-failed AC.
  *   4 = VALIDATION_ERROR (plan has no parent spec / spec has no structured ACs
  *       / unknown --ac id / ambiguous target task)
  *   5 = STALE_VERSION (a concurrent writer raced an evidence write)
@@ -62,7 +69,7 @@
  *       the command-provenance approval gate; the message names the exact
  *       `--allow-new-commands` recovery flag)
  *
- * Source: SPEC-039 §2, §3, §4 AC-VRF-10; §M2
+ * Source: SPEC-039 §2, §3, §4 AC-VRF-10; §M2; SPEC-061 §Scope D3
  */
 
 import { createInterface } from "node:readline/promises";
@@ -98,13 +105,27 @@ function normalizeRepeatableFlag(raw: unknown): string[] | undefined {
   return Array.isArray(raw) ? (raw as string[]) : [raw as string];
 }
 
-/** Render one executed AC's outcome line, e.g. "  ✔ AC-VRF-3 pass (12ms)". */
+/**
+ * Render one executed AC's outcome line, e.g. "  ✔ AC-VRF-3 pass (12ms)" or,
+ * for an attestation-completeness downgrade (SPEC-061), "  ⚠ AC-x inconclusive
+ * (ran 1 of 3 declared paths) (12ms, exit 0)".
+ */
 function formatAcResultLine(result: VerifyPlanResult["results"][number]): string {
-  const mark = result.result === "pass" ? "✔" : "✘";
   const timedOutSuffix = result.timed_out ? " [TIMED OUT]" : "";
   // SPEC-039 §M2 command-provenance annotation — surfaced so a human reviewing
   // `lore verify` output can see which commands were newly approved this run.
   const firstSeenSuffix = result.first_seen === true ? " [new]" : "";
+
+  if (result.result === "inconclusive") {
+    const executed = result.executed_files ?? "?";
+    const declared = result.declared_paths ?? "?";
+    return (
+      `  ⚠ ${result.ac_id} inconclusive (ran ${executed} of ${declared} declared paths) ` +
+      `(${result.duration_ms}ms, exit ${result.exit_code})${timedOutSuffix}${firstSeenSuffix}`
+    );
+  }
+
+  const mark = result.result === "pass" ? "✔" : "✘";
   return `  ${mark} ${result.ac_id} ${result.result} (${result.duration_ms}ms, exit ${result.exit_code})${timedOutSuffix}${firstSeenSuffix}`;
 }
 
@@ -213,6 +234,11 @@ export default defineCommand({
 
       const { task, results, skipped, warnings } = result.value;
       const failedCount = results.filter((r) => r.result === "fail").length;
+      // SPEC-061 §Scope D3 — the attestation-completeness guard's own outcome
+      // class; takes precedence over a plain failed count (see this file's
+      // module-header exit-code table for why).
+      const inconclusiveCount = results.filter((r) => r.result === "inconclusive").length;
+      const verifyExitCode = inconclusiveCount > 0 ? 3 : failedCount > 0 ? 1 : 0;
 
       // reason: SPEC-039 §3 "draft spec 的 AC → 执行 + stderr 警告行(不硬闸)" — printed
       // to stderr UNCONDITIONALLY (both --json and human mode, mirroring assess.ts's
@@ -225,7 +251,7 @@ export default defineCommand({
 
       if (args.json) {
         console.log(JSON.stringify({ ok: true, data: { task, results, skipped, warnings } }, null, 2));
-        process.exitCode = failedCount > 0 ? 1 : 0;
+        process.exitCode = verifyExitCode;
         return;
       }
 
@@ -245,10 +271,11 @@ export default defineCommand({
         );
       }
 
-      const passedCount = results.length - failedCount;
-      console.log(`${passedCount} passed, ${failedCount} failed.`);
+      const passedCount = results.length - failedCount - inconclusiveCount;
+      const inconclusiveSuffix = inconclusiveCount > 0 ? `, ${inconclusiveCount} inconclusive` : "";
+      console.log(`${passedCount} passed, ${failedCount} failed${inconclusiveSuffix}.`);
 
-      process.exitCode = failedCount > 0 ? 1 : 0;
+      process.exitCode = verifyExitCode;
     } finally {
       app.close();
     }

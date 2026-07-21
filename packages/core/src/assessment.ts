@@ -372,7 +372,11 @@ export type LlmAssessmentOutput = z.infer<typeof llmAssessmentOutputSchema>;
  */
 const evidenceRefLiteSchema = z.object({
   task_id: z.string(),
-  result: z.enum(["pass", "fail"]),
+  // SPEC-061 §Scope D5 — mirrors acceptance.ts's EvidenceRefLite.result widening
+  // (a runner-issued "inconclusive" verdict never counts as attested_pass/fail
+  // there; this Zod mirror must accept the same value or assigning a real
+  // computeAcCoverage() result here fails to typecheck).
+  result: z.enum(["pass", "fail", "inconclusive"]),
   attested: z.boolean().optional(),
 });
 
