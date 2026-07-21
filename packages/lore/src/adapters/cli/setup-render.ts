@@ -1,18 +1,28 @@
 /**
  * Terminal rendering for `lore setup`'s post-run install receipt, `--dry-run` plan
- * preview, and `--uninstall` reversal report (SPEC-046 §Design
- * "`adapters/cli/setup-render.ts`", §Scope "Post-run receipt"). Split out of
- * `commands/setup.ts` for vitest-testability, mirroring `assess-render.ts` /
- * `review-render.ts` — `commands/setup.ts` will transitively import `loader.ts`
- * (`bun:sqlite`), which vitest cannot resolve, but this module imports only
- * `@lore/core` types and `../../service/setup-service.js` types (erased at compile
- * time — `import type` never emits a runtime import).
+ * preview, `--uninstall` reversal report, and the `--project` scaffold receipt
+ * (SPEC-046 §Design "`adapters/cli/setup-render.ts`", §Scope "Post-run receipt";
+ * SPEC-060 §Scope D5/D6 for the `--project` half). Split out of `commands/setup.ts`
+ * for vitest-testability, mirroring `assess-render.ts` / `review-render.ts` —
+ * `commands/setup.ts` will transitively import `loader.ts` (`bun:sqlite`), which
+ * vitest cannot resolve, but this module imports only `@lore/core` types,
+ * `../../service/setup-service.js` types, and `../../flows/setup-project-flow.js`'s
+ * `ProjectScaffoldReport` type (all erased at compile time — `import type` never
+ * emits a runtime import, so none of these pull `bun:sqlite` into this module's
+ * resolution graph).
  *
  * Public surface:
  *   - renderInstallReceipt(receipt, ctx) — post-`SetupService.install()` report
  *   - renderInstallPlan(plan, ctx) — post-`SetupService.planInstall()` (`--dry-run`) preview
  *   - renderUninstallReceipt(receipt, ctx) — post-`SetupService.uninstall()` report
- *   - SetupRenderCtx — the caller-supplied context bag all three take
+ *   - renderProjectScaffoldReceipt(receipt, ctx) — post-`scaffoldProject()` `--project` report
+ *   - PROJECT_NEXT_STEPS — the ordered `--project` follow-up list (SPEC-060 D5), the
+ *     single SSOT both this module's text renderer and the CLI adapter's future
+ *     `--json` `next_steps` field must read from (AC-060-6's "same order" requirement)
+ *   - ProjectScaffoldReceipt — `ProjectScaffoldReport` plus the two additive fields
+ *     (`backups`, `manifestPath`) this renderer needs (see its own doc comment for
+ *     why they are NOT yet part of `ProjectScaffoldReport` itself)
+ *   - SetupRenderCtx — the caller-supplied context bag all four renderers take
  *
  * Invariants:
  *   - Pure string assembly — no `console.*`/`process.*` calls anywhere in this module;
@@ -47,6 +57,7 @@
  */
 
 import type { InstallPlan, PlannedSkip, PlannedWrite, SetupEntry, SetupEntryKind } from "@lore/core";
+import type { ProjectScaffoldReport } from "../../flows/setup-project-flow.js";
 import type { SetupReceipt } from "../../service/setup-service.js";
 
 /** Context every renderer in this module needs beyond the receipt/plan itself. */
@@ -242,6 +253,148 @@ export function renderUninstallReceipt(receipt: SetupReceipt, ctx: SetupRenderCt
   lines.push("");
 
   lines.push(`Manifest removed: ${receipt.manifestPath}`);
+
+  return lines.join("\n");
+}
+
+// ─── `--project` scaffold receipt (SPEC-060 §Scope D5/D6) ──────────────────
+
+/**
+ * `flows/setup-project-flow.ts::ProjectScaffoldReport` plus the two additive
+ * fields SPEC-060 D1/D6 introduce — `backups` and `manifestPath` — that
+ * `flows/setup-project-flow.ts` does not yet declare on `ProjectScaffoldReport`
+ * itself as of this module's authoring (that file's own SPEC-060 D1 task owns
+ * landing the repo-level install ledger + backup mechanism it would come
+ * from). This renderer is written against the INTERFACE shape it needs, not
+ * against whatever `ProjectScaffoldReport` happens to export today — when D1
+ * lands, either `ProjectScaffoldReport` grows these two fields directly (this
+ * intersection type then collapses to a no-op alias) or the two fields are
+ * threaded in some other shape at the call site; either way only THIS type
+ * alias needs to move, `renderProjectScaffoldReceipt`'s body does not.
+ *
+ * `backups` here is a list of the BACKUP DESTINATION paths (e.g.
+ * `.lore/.lore-backups/<iso>/CLAUDE.md`), deliberately DIFFERENT semantics
+ * from the machine-installer's `SetupReceipt.backups` (which lists the
+ * ORIGINAL target-relative path that got backed up, see `setup-service.ts`'s
+ * `committedBackups` construction). The difference is intentional: D6 exists
+ * specifically so an operator can find and recover from a clobbered file
+ * (SPEC-060 §Scope D4's documented CLAUDE.md overwrite trade-off) — printing
+ * only the ORIGINAL path (already visible everywhere else in the receipt)
+ * would not tell them WHERE the recovery copy lives. AC-060-5 confirms this
+ * reading: "stdout contains that backup path" refers to the literal
+ * `.lore/.lore-backups/<iso>/CLAUDE.md` path, not `CLAUDE.md` itself.
+ */
+export type ProjectScaffoldReceipt = ProjectScaffoldReport & {
+  /** Backup DESTINATION paths written this run, before an existing file was overwritten (D6). */
+  backups: string[];
+  /** Absolute path to the repo-level `.lore-project-manifest.json` ledger (D1). */
+  manifestPath: string;
+};
+
+/**
+ * Ordered follow-ups printed after a `lore setup --project` run (SPEC-060 D5).
+ * Order is semantic, not incidental — each step's output is the next step's
+ * input: `/lore-init-context` fills the module-level `CLAUDE.md` layer the
+ * scaffold left as an empty stub (D4); `/lore-kickoff` bootstraps the initial
+ * corpus (root PRD + first spec) INTO the `.lore/` this run created (D1); the
+ * first `lore create prd` is the literal first corpus-write command a
+ * follower can copy-paste once both skills have run. This is the ONE ordered
+ * list both this module's text renderer and the CLI adapter's future `--json`
+ * `next_steps` field must read from — never two independently authored
+ * copies (AC-060-6's "text mode prints the same next-steps in the same
+ * order" requirement is only satisfiable with a single shared SSOT).
+ */
+export const PROJECT_NEXT_STEPS: readonly string[] = [
+  "Run /lore-init-context to fill in this repo's CLAUDE.md module layer.",
+  "Run /lore-kickoff to bootstrap the initial corpus (root PRD + first spec).",
+  'Run `lore create prd --title "<your product>"` to start your first PRD.',
+];
+
+/**
+ * Renders the D6 "loud overwrite reporting" backups block — a marker-prefixed,
+ * one-line-per-path listing with an explicit recovery pointer. Deliberately
+ * NOT the quiet `renderPathList`-based convention this module's other three
+ * renderers use for their own `Backups:`/`Would back up:` sections: those
+ * report a machine-target install's backups as one item among many equally
+ * routine facts, but a `--project` backup is the operator's ONLY way to
+ * recover pre-existing content a backup-then-overwrite step just clobbered
+ * (D4's documented `CLAUDE.md` trade-off) — a bare indented path a reader's
+ * eye slides past would defeat the entire point of D6.
+ *
+ * @param backups - Backup destination paths (see {@link ProjectScaffoldReceipt}).
+ * @returns One rendered line per backup. Never called when `backups` is empty
+ *   — {@link renderProjectScaffoldReceipt} omits the whole section instead
+ *   (see that function's BOUNDARY note).
+ */
+function renderLoudBackupLines(backups: readonly string[]): string[] {
+  return [...backups]
+    .sort()
+    .map((path) => `  ⚠ backed up existing file → ${path}\n    (original overwritten; restore from this path if needed)`);
+}
+
+/**
+ * Renders `flows/setup-project-flow.ts::scaffoldProject()`'s outcome
+ * (extended with the D1/D6 fields, see {@link ProjectScaffoldReceipt}) for
+ * terminal output.
+ *
+ * @param receipt - The `--project` scaffold outcome to render.
+ * @param ctx - Rendering context; only `targetDir` is used (`binPath`/`mcpErrorTail`
+ *   are meaningless here — `--project` never touches the MCP registrar).
+ * @returns A deterministic, multi-line plain-text report.
+ * @throws Never.
+ *
+ * @example
+ * renderProjectScaffoldReceipt(
+ *   {
+ *     init: { status: "done", detail: "/repo/.lore" },
+ *     hooks: [],
+ *     tree_yaml: { status: "done" },
+ *     git_hooks_path: { status: "done", prior_value: null },
+ *     backups: [],
+ *     manifestPath: "/repo/.lore/.lore-project-manifest.json",
+ *   },
+ *   { targetDir: "/repo", binPath: "/usr/local/bin/lore" },
+ * );
+ * // => "✓ lore project scaffold → /repo\n\nInit: done (/repo/.lore)\n..."
+ */
+export function renderProjectScaffoldReceipt(receipt: ProjectScaffoldReceipt, ctx: SetupRenderCtx): string {
+  const lines: string[] = [];
+
+  lines.push(`✓ lore project scaffold → ${ctx.targetDir}`);
+  lines.push("");
+
+  lines.push(`Init: ${receipt.init.status}${receipt.init.detail ? ` (${receipt.init.detail})` : ""}`);
+  lines.push("");
+
+  lines.push("Hooks:");
+  for (const hook of [...receipt.hooks].sort((a, b) => a.file.localeCompare(b.file))) {
+    lines.push(`  ${hook.file}: ${hook.status}${hook.detail ? ` (${hook.detail})` : ""}`);
+  }
+  lines.push("");
+
+  lines.push(
+    `Tree blueprint: ${receipt.tree_yaml.status}${receipt.tree_yaml.detail ? ` (${receipt.tree_yaml.detail})` : ""}`,
+  );
+  lines.push(
+    `Git hooksPath: ${receipt.git_hooks_path.status} (prior: ${receipt.git_hooks_path.prior_value ?? "unset"})` +
+      (receipt.git_hooks_path.detail ? ` — ${receipt.git_hooks_path.detail}` : ""),
+  );
+  lines.push("");
+
+  // BOUNDARY: an empty `backups` array omits the WHOLE section — D6's "loud" intent
+  // means silence when nothing happened, never a hollow "Backups: none" placeholder
+  // line competing for attention with the runs that actually need to be noticed.
+  if (receipt.backups.length > 0) {
+    lines.push("Backups:");
+    lines.push(...renderLoudBackupLines(receipt.backups));
+    lines.push("");
+  }
+
+  lines.push(`Manifest: ${receipt.manifestPath}`);
+  lines.push("");
+
+  lines.push("Next steps:");
+  for (const step of PROJECT_NEXT_STEPS) lines.push(`  - ${step}`);
 
   return lines.join("\n");
 }
