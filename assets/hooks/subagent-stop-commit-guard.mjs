@@ -145,4 +145,81 @@ if (ahead === 0) {
   );
 }
 
+// --- Check 3: deferred-continuation termination ---------------------------
+// Distinct failure mode from checks 1-2, learned the hard way: an agent whose
+// work IS committed (so checks 1-2 pass) can still end its turn announcing it
+// has started something in the background and will "continue when notified".
+// A subagent that stops with no live background children never gets that
+// notification — it just hands the orchestrator a non-report and stalls the
+// pipeline until a manual recall. Observed 3x across two days, twice after the
+// prose-level rule was added to the agent definition AND to the dispatch
+// bundle.
+//
+// Deliberately NOT a general "is this a completion report?" judgement — that is
+// semantic and would misfire. This matches only explicit self-announced
+// deferral, and only in the first ~400 chars of the final message (a real
+// report that merely MENTIONS a background run mid-body is not caught). A false
+// negative here costs one recall; a false positive would wedge a finished
+// agent, so the pattern stays narrow on purpose.
+const finalMessage =
+  typeof payload.last_assistant_message === "string" ? payload.last_assistant_message : "";
+const head = finalMessage.slice(0, 400);
+
+// Length is the discriminator that phrasing alone cannot provide. Both observed
+// deferral messages were ~130-150 chars ("I've kicked off X… I'll continue once
+// the notification arrives."). A genuine completion report cannot be that short
+// — the dispatch bundle requires a file list, per-oracle commands with observed
+// results, and `git log --oneline`. Without this bound the patterns misfire on a
+// real report that merely NARRATES a past background run ("I had earlier started
+// a background run but read its output before finishing") — caught by this
+// guard's own test suite before it ever wedged an agent.
+const REPORT_MIN_CHARS = 600;
+
+// An honest short "I am blocked" report is legitimate and must never be caught.
+const BLOCKED_REPORT = /\b(?:BLOCKED|blocked report|STATUS:\s*BLOCKED)\b/;
+
+// Structural evidence that this IS a report rather than a promise to produce
+// one later. Length alone proved insufficient: a terse-but-complete report can
+// sit under the char bound while a padded deferral could sail over it. A
+// deferral message has none of these markers — it has no results to structure.
+const REPORT_STRUCTURE = [
+  /\bSTATUS:\s*(?:DONE|COMPLETE|BLOCKED)\b/i,
+  /\bfiles? (?:changed|modified)\b/i,
+  /\bgit log\b/i,
+  /\bTest Files\s+\d+/i,
+  /\bexit (?:code )?0\b/i,
+];
+
+if (
+  finalMessage.length >= REPORT_MIN_CHARS ||
+  BLOCKED_REPORT.test(head) ||
+  REPORT_STRUCTURE.some((re) => re.test(finalMessage))
+) {
+  allow();
+}
+
+const DEFERRAL_PATTERNS = [
+  /\b(?:I(?:'ve| have)?\s+)?(?:kicked off|started|launched|set up)\b[^.]{0,80}\b(?:background|monitor)\b/i,
+  /\bwill\s+(?:pick (?:this|it) back up|continue|resume|finalize|report back)\b[^.]{0,60}\b(?:once|when|after)\b/i,
+  /\b(?:waiting|wait) for\b[^.]{0,60}\b(?:it|that|the run|the monitor|notification|to (?:finish|complete))\b/i,
+  /\bI'll\s+(?:continue|finish|report|update)\b[^.]{0,60}\b(?:once|when|after)\b/i,
+];
+
+if (DEFERRAL_PATTERNS.some((re) => re.test(head))) {
+  block(
+    `BLOCKED: ${agentLabel} is ending its turn on a deferred continuation.\n` +
+      `Worktree: ${cwd}\n\n` +
+      `Your final message announces that you started something and will ` +
+      `continue when notified. You will NOT be notified: a subagent that stops ` +
+      `with no live background children simply returns a non-report to the ` +
+      `orchestrator, and the pipeline stalls until a human or the orchestrator ` +
+      `manually recalls you.\n\n` +
+      `Do the remaining work NOW, in the foreground:\n` +
+      `  - run the command directly and read its output yourself, or\n` +
+      `  - if it is already running in the background, read its output file before ending.\n\n` +
+      `Then end with your actual completion report (or an explicit BLOCKED ` +
+      `report naming what stopped you). This guard will not fire twice.`,
+  );
+}
+
 allow();
