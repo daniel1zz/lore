@@ -28,13 +28,17 @@
  *               tree; `--project` in a throwaway git repo completes the
  *               scaffold (delegates to AC-046-C, wiring proof only)
  *   NEGATIVE:   a mutating run with no TTY and no `--yes` exits 2 naming
- *               `--yes`; every rejected flag combination
- *               (`--project`+`--dry-run`, `--project`+`--uninstall`,
- *               `--project`+`--claude-dir`, `--dry-run`+`--uninstall`) exits 2
+ *               `--yes`; every STILL-rejected flag combination
+ *               (`--project`+`--dry-run`, `--project`+`--claude-dir`,
+ *               `--dry-run`+`--uninstall`) exits 2 — `--project`+`--uninstall`
+ *               is NO LONGER in this list (SPEC-060 §Design D2 made it a
+ *               valid, distinct mode; see its own coverage below)
  *   BOUNDARY:   `--claude-dir` wins over `$CLAUDE_CONFIG_DIR`; `$CLAUDE_CONFIG_DIR`
  *               wins over the `homedir()` default
  *   ERROR:      `--uninstall` against a directory with no setup manifest
- *               exits 4 (VALIDATION_ERROR, "nothing to uninstall")
+ *               exits 4 (VALIDATION_ERROR, "nothing to uninstall");
+ *               (SPEC-060 D2) `--project --uninstall` against a repo with no
+ *               project install ledger exits 4 the same way
  *   STATE:      install (--yes) → uninstall (--yes) round-trips — the
  *               manifest and every written file are gone afterward
  *   REGRESSION: a second `--dry-run` immediately after a real install reports
@@ -228,13 +232,6 @@ describe("lore setup — NEGATIVE", () => {
     expect(result.stderr).toContain("--project");
   });
 
-  it("AC-046-E.N3: --project + --uninstall is rejected (exit 2)", () => {
-    const scratch = makeScratchDir("lore-setup-conflict-");
-    const result = runSetup(["--project", "--uninstall"], scratch);
-    expect(result.exitCode).toBe(2);
-    expect(result.stderr).toContain("--project");
-  });
-
   it("AC-046-E.N4: --project + --claude-dir is rejected (exit 2)", () => {
     const scratch = makeScratchDir("lore-setup-conflict-");
     const result = runSetup(["--project", "--claude-dir", join(scratch, ".claude")], scratch);
@@ -293,6 +290,15 @@ describe("lore setup — ERROR", () => {
     mkdirSync(targetDir, { recursive: true });
 
     const result = runSetup(["--uninstall", "--claude-dir", targetDir, "--yes"], scratch);
+
+    expect(result.exitCode).toBe(4);
+    expect(result.stderr.toLowerCase()).toContain("uninstall");
+  });
+
+  it("AC-060-D2.E1: --project + --uninstall against a repo with no project install ledger exits 4 (VALIDATION_ERROR) — no longer the exit-2 flag-conflict this combination used to produce pre-SPEC-060", () => {
+    const scratch = makeScratchDir("lore-setup-project-nomanifest-");
+
+    const result = runSetup(["--project", "--uninstall", "--yes"], scratch);
 
     expect(result.exitCode).toBe(4);
     expect(result.stderr.toLowerCase()).toContain("uninstall");
