@@ -26,16 +26,18 @@
  * RESTORES (reads bytes already written to a backup file by a prior install)
  * or REMOVES; it never creates a new backup itself.
  *
- * ⚠ MANIFEST PATH ASSUMPTION — pinned directly from SPEC-060 §Scope D1 ("A
- * new `.lore/.lore-project-manifest.json` ... plus backups under
- * `.lore/.lore-backups/<iso>/`, reusing the pure `@lore/core/setup-manifest.ts`
- * primitives (`planInstall`, `setupManifestSchema`) unchanged"). This module
- * hardcodes those two literal path fragments (`PROJECT_MANIFEST_FILENAME`,
- * `PROJECT_BACKUPS_DIRNAME`, both under `.lore/`) and parses via the SAME
- * `setupManifestSchema` the machine-target installer uses. If T1's landed
- * implementation uses a different filename/directory, this module (and its
- * test fixtures) need a follow-up edit to match — flagged in this task's
- * completion report for the merge reviewer to reconcile.
+ * ⚠ MANIFEST PATH SSOT (SPEC-060 T5 follow-up, fixes an initial SSOT
+ * violation) — this module now imports `PROJECT_MANIFEST_RELATIVE_PATH` and
+ * `PROJECT_BACKUPS_RELATIVE_DIRNAME` directly from `./setup-project-flow.js`
+ * (T1's landed repo-level install ledger) instead of maintaining its own
+ * copy of those literals. It parses via the SAME `setupManifestSchema` the
+ * machine-target installer uses. (History: this module was originally
+ * authored concurrently with T1 while `setup-project-flow.ts` was off-limits
+ * under the anchor mutex, so it declared its own hardcoded duplicates —
+ * `PROJECT_MANIFEST_FILENAME`/`PROJECT_BACKUPS_DIRNAME` — as a stopgap.
+ * `PROJECT_BACKUPS_RELATIVE_DIRNAME` did not previously exist as an export;
+ * this task adds it, mirroring the already-exported
+ * `PROJECT_MANIFEST_RELATIVE_PATH`, so both flows share one literal.)
  *
  * ⚠ RESTORE FILE MODE ASSUMPTION — a restored file's POSIX mode is not part
  * of `SetupEntry` (only `path`/`kind`/`sha256`/`written_at`), so this module
@@ -72,6 +74,10 @@
 import { dirname, join } from "node:path";
 import { err, ok, setupManifestSchema } from "@lore/core";
 import type { LoreError, Result, SetupEntryKind } from "@lore/core";
+import {
+  PROJECT_BACKUPS_RELATIVE_DIRNAME,
+  PROJECT_MANIFEST_RELATIVE_PATH,
+} from "./setup-project-flow.js";
 import type { ProjectFsPort } from "./setup-project-flow.js";
 
 // ─── Ports ───────────────────────────────────────────────────────────────────
@@ -92,10 +98,10 @@ export interface ProjectUninstallOptions {
   repoDir: string;
 }
 
-// ─── Constants (pinned from SPEC-060 §Scope D1 — see module header assumption) ──
+// ─── Constants ───────────────────────────────────────────────────────────────
+// Manifest/backups path fragments are imported from `setup-project-flow.ts`
+// (the SSOT — see module header). Only mode literals are declared here.
 
-const PROJECT_MANIFEST_FILENAME = ".lore-project-manifest.json";
-const PROJECT_BACKUPS_DIRNAME = ".lore-backups";
 const DEFAULT_FILE_MODE = 0o644;
 const HOOK_FILE_MODE = 0o755;
 
@@ -154,7 +160,7 @@ export async function uninstallProject(
     });
   }
 
-  const manifestPath = join(repoDir, ".lore", PROJECT_MANIFEST_FILENAME);
+  const manifestPath = join(repoDir, PROJECT_MANIFEST_RELATIVE_PATH);
   const manifestRaw = fs.readFile(manifestPath);
   if (manifestRaw === null) {
     return err({
@@ -194,7 +200,7 @@ export async function uninstallProject(
   try {
     for (const entry of manifest.entries) {
       const fullPath = join(repoDir, entry.path);
-      const backupPath = join(repoDir, ".lore", PROJECT_BACKUPS_DIRNAME, entry.written_at, entry.path);
+      const backupPath = join(repoDir, PROJECT_BACKUPS_RELATIVE_DIRNAME, entry.written_at, entry.path);
 
       if (fs.exists(backupPath)) {
         const backupContent = fs.readFile(backupPath);
@@ -210,7 +216,7 @@ export async function uninstallProject(
       }
     }
 
-    fs.remove(join(repoDir, ".lore", PROJECT_BACKUPS_DIRNAME));
+    fs.remove(join(repoDir, PROJECT_BACKUPS_RELATIVE_DIRNAME));
   } catch (cause) {
     return err({
       code: "STORE_ERROR",
