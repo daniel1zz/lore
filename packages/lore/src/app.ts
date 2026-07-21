@@ -70,6 +70,7 @@ import { ValidityService } from "./service/validity-service.js";
 import { DriftCheckService } from "./service/drift-check-service.js";
 import { SeatService } from "./service/seat-service.js";
 import { RealGitPort } from "./adapters/real-git-port.js";
+import { ConfigService } from "./service/config-service.js";
 // reason: SPEC-056 phase execution model DI — construction lives in phase-wiring.ts,
 // NOT inline here, to minimize this file's diff surface against the concurrently-
 // dispatched app.ts-wiring task (see phase-wiring.ts's module header).
@@ -315,6 +316,18 @@ export interface App {
    */
   seatService?: SeatService;
   /**
+   * ConfigService — the FIRST runtime write path for `.lore/config.yaml`
+   * (`read`/`update`, SPEC-062 §Scope D1). Constructed over the corpus
+   * directory (`repoRoot`, the SAME directory `VerifyRunnerService`/
+   * `SeatService` already receive) rather than a store — config is file
+   * state, not `StoreInterface` state — plus a narrow `appendAuditEntry` port
+   * bound to `store.appendAuditEntry` for the D6 audit row.
+   * Optional for the same "pre-existing hand-built App test stubs stay valid"
+   * reason as `acService`/`seatService`/`uatService`; always wired in production.
+   * Source: SPEC-062 §Scope D1, D6.
+   */
+  configService?: ConfigService;
+  /**
    * Telemetry sink — exposed for dashboard route handlers to emit source-tagged events.
    * Dashboard handlers record { service: "dashboard", source: "dashboard" } events after
    * successful writes so AC-DASH-WRITE-TEL-1 is satisfied without modifying service signatures.
@@ -556,6 +569,11 @@ function buildAppFromSqlite(
         processEnv: process.env,
       },
     ),
+    // reason: ConfigService (SPEC-062 D1) — constructed over the SAME repoRoot
+    // VerifyRunnerService/SeatService already receive (config lives at
+    // "<repoRoot>/.lore/config.yaml"), not a store; the narrow appendAuditEntry
+    // port is bound directly to the store for the D6 audit row.
+    configService: new ConfigService(repoRoot, store.appendAuditEntry.bind(store)),
     // reason: telemetry exposed on App so dashboard route handlers can emit source-tagged events
     // without requiring service-layer signature changes (SPEC-022 §9.6).
     telemetry,
@@ -763,6 +781,8 @@ function buildAppFromTurso(
         processEnv: process.env,
       },
     ),
+    // reason: ConfigService (SPEC-062 D1) — see buildAppFromSqlite's identical comment.
+    configService: new ConfigService(repoRoot, store.appendAuditEntry.bind(store)),
     // reason: telemetry exposed on App so dashboard route handlers can emit source-tagged events
     // without requiring service-layer signature changes (SPEC-022 §9.6).
     telemetry,
