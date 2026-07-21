@@ -1,7 +1,8 @@
 /**
  * HTTP middleware utilities — JSON helpers, CORS, error formatting.
  * Public surface: jsonOk, jsonError, loreErrorToStatus, loreErrorResponse, corsHeaders,
- *   isOriginAllowed, corsPreflightResponse, applyCorsOrigin, parseJsonBody.
+ *   isOriginAllowed, corsPreflightResponse, applyCorsOrigin, parseJsonBody,
+ *   emitDashboardTelemetry.
  * Invariants:
  *   - corsHeaders() never returns an Access-Control-Allow-Origin value — origin echoing is
  *     request-scoped and applied exactly once, at the outermost Bun.serve fetch boundary
@@ -17,6 +18,7 @@
 
 import type { LoreError } from "@lore/core";
 import { ALLOWED_ORIGINS } from "./auth.js";
+import type { App } from "../../app.js";
 
 // ─── JSON response helpers ──────────────────────────────────────────────────
 
@@ -163,5 +165,42 @@ export async function parseJsonBody(req: Request): Promise<unknown> {
     return await req.json() as unknown;
   } catch {
     return null;
+  }
+}
+
+// ─── Dashboard telemetry ────────────────────────────────────────────────────
+
+/**
+ * Emit a dashboard-sourced telemetry event after a successful write. Separate
+ * from the service-internal event so `source:"dashboard"` is recorded
+ * (SPEC-022 §9.6). Swallows all errors (telemetry must never fail the caller).
+ *
+ * Lives here (not in `dashboard-routes.ts`) so both `dashboard-routes.ts` and
+ * `config-routes.ts` (SPEC-062 D4) can call it without one importing the other
+ * — importing it FROM `dashboard-routes.ts` would create a circular dependency,
+ * since `dashboard-routes.ts` also imports `handleDashboardConfigPatch` from
+ * `config-routes.ts` to dispatch `PATCH /api/dashboard/config`.
+ *
+ * @param app - Wired application instance (needs `telemetry`).
+ * @param method - The dashboard action name (e.g. "create", "update", "config_update").
+ * @param meta - Arbitrary event metadata.
+ */
+export function emitDashboardTelemetry(
+  app: App,
+  method: string,
+  meta: Record<string, unknown>,
+): void {
+  try {
+    app.telemetry.record({
+      ts: new Date().toISOString(),
+      service: "dashboard",
+      method,
+      ok: true,
+      duration_ms: 0,
+      source: "dashboard",
+      meta,
+    });
+  } catch {
+    // reason: telemetry failures MUST NOT break write operations (mirrors service invariant)
   }
 }

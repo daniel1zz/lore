@@ -59,9 +59,10 @@ import type { App } from "../../app.js";
 import type { ActorContext } from "./auth.js";
 import type { DocPatch, LinkType } from "@lore/core";
 import { createDocInputSchema } from "@lore/core";
-import { jsonOk, jsonError, loreErrorResponse, parseJsonBody, isOriginAllowed } from "./middleware.js";
+import { jsonOk, jsonError, loreErrorResponse, parseJsonBody, isOriginAllowed, emitDashboardTelemetry } from "./middleware.js";
 import { checkConcurrency, resolveExpectedVersion, buildConflictPayload } from "./concurrency.js";
 import { runCalibrationHook } from "../../flows/calibration-hook.js";
+import { handleDashboardConfigPatch } from "./config-routes.js";
 
 // ─── CSRF Origin guard ────────────────────────────────────────────────────────
 
@@ -119,31 +120,6 @@ function assertCookieActor(actor: ActorContext): Response | null {
   return null;
 }
 
-/**
- * Emit a dashboard telemetry event after a successful write.
- * Separate from the service-internal event so source:"dashboard" is recorded.
- * Swallows all errors (telemetry must never fail the caller).
- */
-function emitDashboardTelemetry(
-  app: App,
-  method: string,
-  meta: Record<string, unknown>,
-): void {
-  try {
-    app.telemetry.record({
-      ts: new Date().toISOString(),
-      service: "dashboard",
-      method,
-      ok: true,
-      duration_ms: 0,
-      source: "dashboard",
-      meta,
-    });
-  } catch {
-    // reason: telemetry failures MUST NOT break write operations (mirrors service invariant)
-  }
-}
-
 // ─── Path matching helpers ────────────────────────────────────────────────────
 
 type DashboardPathMatch =
@@ -154,12 +130,20 @@ type DashboardPathMatch =
   | { type: "createLink"; id: string }
   | { type: "deleteLink"; id: string; linkId: string }
   | { type: "deleteDoc"; id: string }
-  | { type: "restore"; id: string };
+  | { type: "restore"; id: string }
+  | { type: "configPatch" };
 
 function matchDashboardPath(method: string, path: string): DashboardPathMatch | null {
   // POST /api/dashboard/docs
   if (method === "POST" && path === "/api/dashboard/docs") {
     return { type: "create" };
+  }
+
+  // PATCH /api/dashboard/config (SPEC-062 D4) — checked before the /docs/:id patterns
+  // below since "config" would otherwise never collide with them anyway, but kept
+  // early for readability (config is a distinct, non-doc resource).
+  if (method === "PATCH" && path === "/api/dashboard/config") {
+    return { type: "configPatch" };
   }
 
   // PATCH /api/dashboard/docs/:id
@@ -589,5 +573,7 @@ export async function handleDashboardRoute(
       return handleDashboardDelete(req, match.id, app);
     case "restore":
       return handleDashboardRestore(req, match.id, app);
+    case "configPatch":
+      return handleDashboardConfigPatch(req, app, actor);
   }
 }

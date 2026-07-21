@@ -16,6 +16,7 @@ import type { ActorContext } from "./auth.js";
 import { ALLOWED_ORIGINS } from "./auth.js";
 import { jsonOk, jsonError, loreErrorResponse, parseJsonBody, corsHeaders } from "./middleware.js";
 import { handleDashboardRoute } from "./dashboard-routes.js";
+import { handleGetConfig } from "./config-routes.js";
 import type { ListFilters, SearchFilters } from "../../service/corpus-service.js";
 import type { PendingFilters } from "../../service/review-service.js";
 import type { CreateDocInput, DocPatch } from "@lore/core";
@@ -164,6 +165,12 @@ export async function handleApiRoute(
   // GET /api/status
   if (method === "GET" && path === "/api/status") {
     return handleStatus(app);
+  }
+
+  // GET /api/config (SPEC-062 D3) — available to both cookie and bearer sessions,
+  // unlike PATCH /api/dashboard/config which is cookie-only (dispatched above).
+  if (method === "GET" && path === "/api/config") {
+    return handleGetConfig(app);
   }
 
   // GET /api/docs
