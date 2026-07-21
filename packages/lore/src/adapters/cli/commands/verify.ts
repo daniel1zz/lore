@@ -1,6 +1,6 @@
 /**
  * lore verify <plan> [--ac <id> repeatable] [--task <t>] [--json] [--by]
- *   [--allow-new-commands|--yes]
+ *   [--allow-new-commands|--yes] [--execution-root <path>]
  *
  * Trusted runner (SPEC-039): actually EXECUTES a plan's declared script-mode
  * acceptance criteria (via `VerifyRunnerService.verifyPlan`) and records the
@@ -34,6 +34,36 @@
  * A command already present in the task's evidence history never triggers any
  * of the above (SPEC-039 §M2 — "don't re-prompt for known commands"). Disable
  * the whole gate via `verify.require_command_approval: false` in config.
+ *
+ * SPEC-063 execution-root correctness — a linked git worktree carries no
+ * `.lore/` of its own, so the corpus's `repoRoot` (`findLoreDbPath` walks UP
+ * from `process.cwd()`) always resolves to the MAIN checkout, even when this
+ * command is invoked from inside a worktree. Before SPEC-063, `lore verify`
+ * unconditionally spawned every AC command from that corpus root — an agent
+ * running it from its own worktree silently attested against the main
+ * checkout's tree, not the code it just wrote. This surface now:
+ *   1. Gathers git facts about `process.cwd()` (`git rev-parse
+ *      --git-common-dir`/`--git-dir`/`--show-toplevel`, `gatherVerifyGitFacts`
+ *      below) and resolves the execution root via `@lore/core`'s pure
+ *      `resolveVerifyExecutionRoot({corpusRoot, callerCwd, gitFacts})` — a
+ *      git-facts probe failure fails SAFE to the corpus root (never guesses).
+ *   2. `--execution-root <path>` overrides the inference entirely: the run
+ *      spawns from EXACTLY that path, resolved via the SAME core function fed
+ *      a synthetic fact set (`callerCwd`/`worktreeRoot` both the given path,
+ *      so containment trivially holds) — this ALWAYS prints the
+ *      execution-root line (point 3), even when the override happens to
+ *      coincide with the corpus root.
+ *   3. When the resolved mode is `"worktree"` (or an explicit override was
+ *      given), prints `Execution root: <path>` on its own line BEFORE the
+ *      "Verifying ..." header and any AC result line
+ *      (`verify-render.ts::buildVerifyHeaderLines`) — a silent switch would
+ *      trade one invisible wrong root for another. `mode === "corpus_root"`
+ *      with no override prints nothing extra (byte-identical to pre-SPEC-063
+ *      output).
+ *   4. Threads the resolved `{root, mode}` into `VerifyRunnerService.verifyPlan`'s
+ *      `opts.executionRoot` — every AC's command spawns from it, and every
+ *      recorded evidence's `attestation` carries `execution_root`/
+ *      `execution_mode` (SPEC-063 §Design Decisions D2, D3).
  *
  * Exit codes (SPEC-003 §5 `exitCode()` SSOT covers the LoreError branch; the
  * "some AC failed"/"some AC inconclusive" branches below are NOT LoreErrors —
@@ -69,14 +99,19 @@
  *       the command-provenance approval gate; the message names the exact
  *       `--allow-new-commands` recovery flag)
  *
- * Source: SPEC-039 §2, §3, §4 AC-VRF-10; §M2; SPEC-061 §Scope D3
+ * Source: SPEC-039 §2, §3, §4 AC-VRF-10; §M2; SPEC-061 §Scope D3; SPEC-063
+ *   §Design Decisions D1-D4
  */
 
+import { spawnSync } from "node:child_process";
+import { resolve as resolvePath } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
-import type { VerifyPlanResult } from "../../../service/verify-runner-service.js";
+import { formatAcResultLine, buildVerifyHeaderLines } from "../verify-render.js";
+import { resolveVerifyExecutionRoot } from "@lore/core";
+import type { VerifyGitFacts, VerifyExecutionRootResolution } from "@lore/core";
 import type { VerifyRunnerService } from "../../../service/verify-runner-service.js";
 import type { App } from "../../../app.js";
 
@@ -95,6 +130,19 @@ function requireVerifyRunnerService(app: App): VerifyRunnerService {
 }
 
 /**
+ * `App.repoRoot` is typed optional for the same pre-existing-test-stub reason
+ * as `verifyRunnerService` above (SPEC-063 §Design Decisions D1) — never
+ * actually undefined in the CLI, which only ever receives a fully-wired App
+ * from `createApp`.
+ */
+function requireRepoRoot(app: App): string {
+  if (app.repoRoot === undefined) {
+    throw new Error("Internal error: App.repoRoot not wired");
+  }
+  return app.repoRoot;
+}
+
+/**
  * citty's raw-arg parser collapses a flag passed more than once into a string
  * array (a single occurrence stays a plain string) — see `parseRawArgs`'s
  * `toVal` in `node_modules/citty/dist/index.mjs`. Normalize both shapes to a
@@ -106,27 +154,113 @@ function normalizeRepeatableFlag(raw: unknown): string[] | undefined {
 }
 
 /**
- * Render one executed AC's outcome line, e.g. "  ✔ AC-VRF-3 pass (12ms)" or,
- * for an attestation-completeness downgrade (SPEC-061), "  ⚠ AC-x inconclusive
- * (ran 1 of 3 declared paths) (12ms, exit 0)".
+ * Shells `git rev-parse` from `cwd` to resolve {@link VerifyGitFacts} (SPEC-063
+ * §Design). Mirrors `assets/hooks/session-start-resume.mjs`'s Phase D
+ * linked-worktree detection (same three-command sequence, same "differ iff
+ * linked worktree" fact) and `assess.ts`'s precedent of shelling `git` directly
+ * from a CLI command via `node:child_process` — this is IO gathering, not
+ * business logic; the DECISION over these facts lives entirely in
+ * `resolveVerifyExecutionRoot` (`@lore/core`, pure).
+ *
+ * ANY probe failure (non-git directory, `git` missing, a nonzero exit, an
+ * empty/whitespace-only stdout, a timeout, or a thrown `spawnSync` error)
+ * degrades to `{resolved: false, ...}` — the core resolver's own fail-safe
+ * branch then defaults to `corpus_root`. This function never throws.
+ *
+ * @param cwd - Directory to probe from (`process.cwd()` in production).
+ * @returns Resolved (or fail-safe-degraded) {@link VerifyGitFacts}.
  */
-function formatAcResultLine(result: VerifyPlanResult["results"][number]): string {
-  const timedOutSuffix = result.timed_out ? " [TIMED OUT]" : "";
-  // SPEC-039 §M2 command-provenance annotation — surfaced so a human reviewing
-  // `lore verify` output can see which commands were newly approved this run.
-  const firstSeenSuffix = result.first_seen === true ? " [new]" : "";
+function gatherVerifyGitFacts(cwd: string): VerifyGitFacts {
+  const UNRESOLVED: VerifyGitFacts = { resolved: false, isLinkedWorktree: false, worktreeRoot: null };
+  try {
+    const commonDirRaw = spawnSync("git", ["rev-parse", "--git-common-dir"], {
+      cwd,
+      encoding: "utf8",
+      timeout: 5000,
+    });
+    const gitDirRaw = spawnSync("git", ["rev-parse", "--git-dir"], {
+      cwd,
+      encoding: "utf8",
+      timeout: 5000,
+    });
+    if (
+      commonDirRaw.status !== 0 ||
+      gitDirRaw.status !== 0 ||
+      !commonDirRaw.stdout?.trim() ||
+      !gitDirRaw.stdout?.trim()
+    ) {
+      return UNRESOLVED;
+    }
 
-  if (result.result === "inconclusive") {
-    const executed = result.executed_files ?? "?";
-    const declared = result.declared_paths ?? "?";
-    return (
-      `  ⚠ ${result.ac_id} inconclusive (ran ${executed} of ${declared} declared paths) ` +
-      `(${result.duration_ms}ms, exit ${result.exit_code})${timedOutSuffix}${firstSeenSuffix}`
-    );
+    const commonDirAbs = resolvePath(cwd, commonDirRaw.stdout.trim());
+    const gitDirAbs = resolvePath(cwd, gitDirRaw.stdout.trim());
+    if (commonDirAbs === gitDirAbs) {
+      // Main checkout (or a non-worktree repo) — a resolved, non-worktree fact.
+      return { resolved: true, isLinkedWorktree: false, worktreeRoot: null };
+    }
+
+    const topLevelRaw = spawnSync("git", ["rev-parse", "--show-toplevel"], {
+      cwd,
+      encoding: "utf8",
+      timeout: 5000,
+    });
+    if (topLevelRaw.status !== 0 || !topLevelRaw.stdout?.trim()) {
+      // Linked worktree confirmed, but its root couldn't be resolved — an
+      // anomalous fact set; let the core resolver's fail-safe branch handle it
+      // rather than guessing a root here.
+      return { resolved: false, isLinkedWorktree: true, worktreeRoot: null };
+    }
+
+    return {
+      resolved: true,
+      isLinkedWorktree: true,
+      worktreeRoot: resolvePath(cwd, topLevelRaw.stdout.trim()),
+    };
+  } catch {
+    return UNRESOLVED;
+  }
+}
+
+/**
+ * Resolves the execution root for this `lore verify` invocation (SPEC-063
+ * §Design Decisions D1/D4). An explicit `--execution-root <path>` always
+ * wins: it is resolved via the SAME core `resolveVerifyExecutionRoot` fed a
+ * synthetic fact set (`callerCwd`/`worktreeRoot` both the given path, so
+ * containment trivially holds) rather than a separate ad-hoc code path — one
+ * decision function, two callers. Otherwise, git facts are gathered from
+ * `process.cwd()` via {@link gatherVerifyGitFacts} and resolved against the
+ * corpus root.
+ *
+ * @param corpusRoot - `App.repoRoot` (`requireRepoRoot(app)`).
+ * @param explicitRootArg - The raw `--execution-root` flag value, or `undefined`.
+ * @returns `{resolution, explicitOverride}` — `explicitOverride` feeds
+ *   `buildVerifyHeaderLines`'s D4 "always print" rule.
+ */
+function resolveCliExecutionRoot(
+  corpusRoot: string,
+  explicitRootArg: string | undefined,
+): { resolution: VerifyExecutionRootResolution; explicitOverride: boolean } {
+  if (explicitRootArg !== undefined) {
+    const explicitRoot = resolvePath(explicitRootArg);
+    return {
+      resolution: resolveVerifyExecutionRoot({
+        corpusRoot,
+        callerCwd: explicitRoot,
+        gitFacts: { resolved: true, isLinkedWorktree: true, worktreeRoot: explicitRoot },
+      }),
+      explicitOverride: true,
+    };
   }
 
-  const mark = result.result === "pass" ? "✔" : "✘";
-  return `  ${mark} ${result.ac_id} ${result.result} (${result.duration_ms}ms, exit ${result.exit_code})${timedOutSuffix}${firstSeenSuffix}`;
+  const callerCwd = process.cwd();
+  return {
+    resolution: resolveVerifyExecutionRoot({
+      corpusRoot,
+      callerCwd,
+      gitFacts: gatherVerifyGitFacts(callerCwd),
+    }),
+    explicitOverride: false,
+  };
 }
 
 /**
@@ -179,6 +313,13 @@ export default defineCommand({
         "Approve every new/changed verify command for this run without prompting (SPEC-039 §M2 " +
         "command-provenance approval gate) — required for non-interactive/CI invocations",
     },
+    "execution-root": {
+      type: "string",
+      description:
+        "Explicit override for the directory AC commands spawn from (SPEC-063 §Design Decisions " +
+        "D4) — bypasses the linked-worktree inference entirely and always prints the resolved " +
+        "execution root",
+    },
   },
   async run({ args }) {
     const { app } = loadLoreApp();
@@ -217,6 +358,18 @@ export default defineCommand({
               promptYesNo(`Run new/changed verify command "${info.command}" for ${info.ac_id}? [y/N] `)
           : undefined;
 
+      // SPEC-063 §Design Decisions D1/D4 — resolved BEFORE calling verifyPlan
+      // (the service never probes git/process state itself); the CLI's own
+      // fallback warning (if any) reaches stderr via the service's `warnings`
+      // array below (opts.executionRoot is threaded straight through, so a
+      // fallback-triggered warning is surfaced exactly once, not twice).
+      const explicitExecutionRootArg =
+        typeof args["execution-root"] === "string" ? args["execution-root"] : undefined;
+      const { resolution: executionRoot, explicitOverride } = resolveCliExecutionRoot(
+        requireRepoRoot(app),
+        explicitExecutionRootArg,
+      );
+
       const result = await requireVerifyRunnerService(app).verifyPlan(args.plan as string, {
         ...(acIds !== undefined ? { acIds } : {}),
         ...(typeof args.task === "string" ? { explicitTaskIdOrSlug: args.task } : {}),
@@ -224,6 +377,7 @@ export default defineCommand({
         nowIso: new Date().toISOString(),
         ...(allowNewCommands ? { allowNewCommands: true } : {}),
         ...(confirmUnapprovedCommand !== undefined ? { confirmUnapprovedCommand } : {}),
+        executionRoot,
       });
 
       if (!result.ok) {
@@ -250,12 +404,42 @@ export default defineCommand({
       }
 
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: { task, results, skipped, warnings } }, null, 2));
+        console.log(
+          JSON.stringify(
+            {
+              ok: true,
+              data: {
+                task,
+                results,
+                skipped,
+                warnings,
+                // SPEC-063 — the SAME resolved root/mode the CLI computed before
+                // calling verifyPlan (not re-derived; `VerifyPlanResult` itself
+                // stays free of this per-run-constant field to avoid touching
+                // every pre-existing hand-built VerifyPlanResult test fixture).
+                execution_root: { root: executionRoot.root, mode: executionRoot.mode },
+              },
+            },
+            null,
+            2,
+          ),
+        );
         process.exitCode = verifyExitCode;
         return;
       }
 
-      console.log(`Verifying ${args.plan as string} against task ${task.slug}:`);
+      // SPEC-063 §Design Decisions D2/D4 — the execution-root line (when
+      // printed) always precedes the "Verifying ..." header line, which
+      // itself always precedes the per-AC result lines below (AC-063-4).
+      for (const line of buildVerifyHeaderLines({
+        mode: executionRoot.mode,
+        root: executionRoot.root,
+        explicitOverride,
+        planArg: args.plan as string,
+        taskSlug: task.slug,
+      })) {
+        console.log(line);
+      }
 
       if (results.length === 0 && skipped.length === 0) {
         console.log("  (no declared acceptance criteria matched the selection)");

@@ -768,3 +768,83 @@ describe("evidenceEntrySchema.attestation.first_seen — REGRESSION", () => {
     expect(parsed.success).toBe(true);
   });
 });
+
+// ─── evidenceEntrySchema.attestation.execution_root/execution_mode (SPEC-063 §Design Decisions D3) ───
+
+describe("evidenceEntrySchema.attestation.execution_root/execution_mode — HAPPY", () => {
+  it("parses an entry with both execution_root and execution_mode present (worktree mode)", () => {
+    const parsed = evidenceEntrySchema.safeParse(
+      evidenceEntry("bun test", {
+        attestation: {
+          runner: "lore-cli",
+          exit_code: 0,
+          duration_ms: 1,
+          timed_out: false,
+          execution_root: "/repo/.worktrees/t1",
+          execution_mode: "worktree",
+        },
+      }),
+    );
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(parsed.data.attestation?.execution_root).toBe("/repo/.worktrees/t1");
+    expect(parsed.data.attestation?.execution_mode).toBe("worktree");
+  });
+
+  it("parses an entry with both fields present (corpus_root mode)", () => {
+    const parsed = evidenceEntrySchema.safeParse(
+      evidenceEntry("bun test", {
+        attestation: {
+          runner: "lore-cli",
+          exit_code: 0,
+          duration_ms: 1,
+          timed_out: false,
+          execution_root: "/repo",
+          execution_mode: "corpus_root",
+        },
+      }),
+    );
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(parsed.data.attestation?.execution_mode).toBe("corpus_root");
+  });
+});
+
+describe("evidenceEntrySchema.attestation.execution_mode — BOUNDARY (locked enum)", () => {
+  it("rejects an execution_mode value outside {corpus_root, worktree}", () => {
+    const parsed = evidenceEntrySchema.safeParse(
+      evidenceEntry("bun test", {
+        attestation: {
+          runner: "lore-cli",
+          exit_code: 0,
+          duration_ms: 1,
+          timed_out: false,
+          execution_root: "/repo",
+          execution_mode: "some_other_mode",
+        },
+      }),
+    );
+    expect(parsed.success).toBe(false);
+  });
+});
+
+describe("evidenceEntrySchema.attestation.execution_root/execution_mode — REGRESSION", () => {
+  it("an evidence record lacking both fields still parses against evidenceEntrySchema with 0 validation errors (pre-SPEC-063 attestation)", () => {
+    const parsed = evidenceEntrySchema.safeParse(
+      evidenceEntry("bun test", {
+        attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1234, timed_out: false },
+      }),
+    );
+    // 0 validation errors — a successful safeParse() IS the "0 errors" oracle
+    // (a failure branch would carry a populated ZodError instead).
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(parsed.data.attestation?.execution_root).toBeUndefined();
+    expect(parsed.data.attestation?.execution_mode).toBeUndefined();
+  });
+
+  it("a legacy entry with NO attestation object at all still parses (the pre-SPEC-039 shape)", () => {
+    const parsed = evidenceEntrySchema.safeParse(evidenceEntry("bun test"));
+    expect(parsed.success).toBe(true);
+  });
+});
