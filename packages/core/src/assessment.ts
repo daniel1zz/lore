@@ -45,6 +45,13 @@
  *   - renderAssessmentContent(result) — deterministic Markdown rendering of a persisted result;
  *     additionally renders typed tables/dimension scores/facts/rubric warnings when present
  *     (SPEC-040 D3) — legacy-only results render byte-identically to before (regression-protected)
+ *   - parseDiffFilePaths(diffText) — pure `diff --git a/… b/…` header parse, returns the
+ *     "b/" (post-change) path per file, deduplicated, in first-seen order (assess
+ *     diff-range scope guard, hotfix plan)
+ *   - scopeMismatchWarningSchema / ScopeMismatchWarning — non-blocking advisory shape
+ *     surfaced when a `lore assess --diff` range looks too wide for the plan it's assessing
+ *   - computeScopeMismatchWarning(diffFiles, taskAnchors) — pure fact-only comparison
+ *     between a diff's changed files and a plan's declared task file_anchors
  *
  * Invariants:
  *   - No IO, no wall-clock reads, no Math.random() — renderAssessmentContent is deterministic:
@@ -78,11 +85,26 @@
  *     in task-workflow.ts), never a thrown error or a fabricated empty-but-present scope.
  *   - computeAssessmentFacts.ac_coverage MUST be produced by acceptance.ts's computeAcCoverage
  *     — never reimplemented here (single derivation site).
+ *   - parseDiffFilePaths never throws — a diff with no recognizable `diff --git a/... b/...`
+ *     headers (e.g. empty string, a non-git diff format) simply yields `[]`.
+ *   - computeScopeMismatchWarning is a deterministic FACTS comparison (diff files ∩ task
+ *     anchors), never an LLM judgment — it must not be confused with the judge's own
+ *     `scope_fidelity` dimension score. It returns `undefined` (no warning, not an error)
+ *     in two cases: `taskAnchors` is empty (no task in the plan declared any file_anchors —
+ *     a warning here would be noise on the many older plans with no anchors at all) OR
+ *     `diffFiles` is empty (nothing to compare against). Otherwise it warns iff STRICTLY
+ *     fewer than half of `diffFiles` intersect `taskAnchors` — exactly half is NOT a
+ *     mismatch (boundary-tested).
+ *   - `scope_warning` on {@link assessmentResultSchema} is OPTIONAL and ADDITIVE, mirroring
+ *     `facts`/`source_versions` — every assessment persisted before this warning existed
+ *     has no `scope_warning` and still validates unchanged. It NEVER affects `verdict`,
+ *     `overall_score`, or whether the assessment persists — advisory only.
  *
  * Side-effect class: pure
  *
  * Source: SPEC-026 §3 D2, D6, D7; §4 AC-ASSESS-1..13; §5; §8.1, §8.2; SPEC-029 AC-AR-2, AC-AR-3;
- *   SPEC-040 §T1 D1, D2, D3, D9; AC-ADF-2, AC-ADF-10
+ *   SPEC-040 §T1 D1, D2, D3, D9; AC-ADF-2, AC-ADF-10;
+ *   task-assess-diff-range-scope-mismatch-warning (hotfix plan, AC-040-SCOPE-1)
  */
 
 import { z } from "zod";
@@ -92,6 +114,7 @@ import { err, ok, type Result } from "./errors.js";
 import { AC_VERIFY_MODES, computeAcCoverage, type AcceptanceCriterion } from "./acceptance.js";
 import { ORACLE_KINDS, extractEvidence } from "./task-workflow.js";
 import { headChars } from "./truncate.js";
+import { anchorsOverlap } from "./file-anchors.js";
 
 // ─── Evidence Ref / AC Score / Judgment / Scope ────────────────────────────
 
@@ -471,6 +494,115 @@ export const sourceVersionRefSchema = z.object({
 /** Derived TypeScript type for one source-version pin. */
 export type SourceVersionRef = z.infer<typeof sourceVersionRefSchema>;
 
+// ─── Diff-Range Scope-Mismatch Warning (assess diff-range scope guard) ──────
+
+/** Matches a git unified-diff file header, e.g. `diff --git a/src/foo.ts b/src/foo.ts`. */
+const DIFF_GIT_HEADER_PATTERN = /^diff --git a\/(.*) b\/(.*)$/;
+
+/**
+ * Pure parse of a unified diff's changed-file set from its `diff --git a/… b/…` headers.
+ * Never throws — a diff with no recognizable headers (empty string, a non-git diff
+ * format) simply yields `[]`.
+ *
+ * @param diffText - Raw unified diff text (e.g. `git diff <range>` stdout)
+ * @returns The "b/" (post-change) path of every distinct file header, deduplicated,
+ *   first-seen order preserved
+ *
+ * @example
+ * parseDiffFilePaths(
+ *   "diff --git a/src/foo.ts b/src/foo.ts\n@@ -1 +1 @@\n-old\n+new\n" +
+ *   "diff --git a/src/bar.ts b/src/bar.ts\n@@ -1 +1 @@\n-old\n+new\n",
+ * );
+ * // → ["src/foo.ts", "src/bar.ts"]
+ *
+ * @example
+ * parseDiffFilePaths("not a diff at all"); // → []
+ */
+export function parseDiffFilePaths(diffText: string): string[] {
+  const paths: string[] = [];
+  const seen = new Set<string>();
+  for (const line of diffText.split("\n")) {
+    const match = DIFF_GIT_HEADER_PATTERN.exec(line);
+    if (match === null) continue;
+    const filePath = match[2];
+    if (filePath === undefined || filePath.length === 0) continue;
+    if (seen.has(filePath)) continue;
+    seen.add(filePath);
+    paths.push(filePath);
+  }
+  return paths;
+}
+
+/**
+ * Non-blocking advisory surfaced on {@link AssessmentResult} when a `lore assess --diff`
+ * range looks too wide for the plan being assessed (mechanizes the discipline behind
+ * three real incidents — see task-assess-diff-range-scope-mismatch-warning).
+ */
+export const scopeMismatchWarningSchema = z.object({
+  /** Total distinct files the diff touches. */
+  diff_file_count: z.number().int().nonnegative(),
+  /** How many of those files intersect the plan's declared task file_anchors. */
+  intersecting_count: z.number().int().nonnegative(),
+  /** Human-readable warning text — ready to print as-is (CLI text + `--json`). */
+  message: z.string().min(1),
+});
+
+/** Derived TypeScript type for the scope-mismatch warning. */
+export type ScopeMismatchWarning = z.infer<typeof scopeMismatchWarningSchema>;
+
+/**
+ * Compares a diff's changed-file set against a plan's declared task `file_anchors` and
+ * returns a non-blocking warning when the diff looks too wide for that plan — a deterministic
+ * FACTS comparison, never an LLM judgment (must not be confused with the judge's own
+ * `scope_fidelity` dimension score).
+ *
+ * @invariant Returns `undefined` (no warning, not an error) when `taskAnchors` is empty —
+ *   no task in the plan declared any file_anchors, so there is nothing to compare against;
+ *   warning on an anchor-less plan would be pure noise (many older plans declare none).
+ * @invariant Returns `undefined` when `diffFiles` is empty — nothing to compare.
+ * @invariant Warns iff STRICTLY fewer than half of `diffFiles` intersect `taskAnchors`.
+ *   Exactly half is NOT a mismatch (boundary-tested) — `intersecting_count >=
+ *   diffFiles.length / 2` short-circuits to no warning.
+ * @invariant `taskAnchors` is assumed already-normalized (the same precondition
+ *   {@link anchorsOverlap} itself documents) — callers pass `extractFileAnchors(task)`
+ *   output, which is written only through the sanctioned SPEC-042 anchor-mutation seams.
+ *
+ * @param diffFiles - {@link parseDiffFilePaths} output for the diff under assessment
+ * @param taskAnchors - Union of every task-in-plan's declared `file_anchors` (may contain
+ *   duplicates across tasks — harmless, `anchorsOverlap` treats it as a plain candidate set)
+ * @returns `ScopeMismatchWarning` when the range looks too wide, else `undefined`
+ *
+ * @example
+ * computeScopeMismatchWarning(["src/a.ts", "src/b.ts"], ["src/a.ts"]);
+ * // → { diff_file_count: 2, intersecting_count: 1, message: "⚠ diff touches 2 files, ..." }
+ *
+ * @example
+ * computeScopeMismatchWarning(["src/a.ts"], []); // → undefined (no task declares anchors)
+ *
+ * @example
+ * computeScopeMismatchWarning(["src/a.ts", "src/b.ts"], ["src/a.ts", "src/b/c.ts"]);
+ * // → undefined (2 of 2 intersect — exactly half of 2 also passes here, both intersect)
+ */
+export function computeScopeMismatchWarning(
+  diffFiles: string[],
+  taskAnchors: string[],
+): ScopeMismatchWarning | undefined {
+  if (taskAnchors.length === 0) return undefined;
+  if (diffFiles.length === 0) return undefined;
+
+  const intersectingCount = diffFiles.filter((file) => anchorsOverlap([file], taskAnchors).overlaps).length;
+
+  if (intersectingCount >= diffFiles.length / 2) return undefined;
+
+  return {
+    diff_file_count: diffFiles.length,
+    intersecting_count: intersectingCount,
+    message:
+      `⚠ diff touches ${diffFiles.length} files, only ${intersectingCount} intersect this plan's ` +
+      `task anchors — the range may be too wide; derive it from the plan's own task commits.`,
+  };
+}
+
 // ─── Full Assessment Result (persisted shape) ──────────────────────────────
 
 /**
@@ -495,6 +627,7 @@ export const assessmentResultSchema = llmAssessmentOutputSchema.extend({
   judgment: judgmentSchema,
   facts: assessmentFactsSchema.optional(),
   source_versions: z.array(sourceVersionRefSchema).optional(),
+  scope_warning: scopeMismatchWarningSchema.optional(),
 });
 
 /** Derived TypeScript type for a full persisted assessment result. */
