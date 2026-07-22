@@ -1038,6 +1038,180 @@ describe("lore create — state verification", () => {
   });
 });
 
+// ─── --requires-uat (SPEC-058 hotfix: plan-add-requires-uat-authoring-path) ────
+//
+// NOTE on ERROR-dimension exit code: the task doc that spawned this test file
+// addition stated "exit 4" for the type-flag mismatch case. The ACTUAL,
+// pre-existing TYPE_SPECIFIC_FLAGS mismatch-validation block (~line 212, which
+// this hotfix reuses verbatim for --requires-uat, same as every other entry:
+// --decision-status/--sub-type/--plan-id/--kind) calls `process.exit(2)`, not 4
+// — verified against the sibling tests above ("exits 2 when --kind is passed
+// for prd", "exits 2 when --sub-type is passed for plan", etc.). This test
+// asserts the REAL, observed exit code (2) rather than the task doc's prose,
+// per this repo's established evidence-over-spec-prose correction discipline
+// (see CLAUDE.md's SPEC-059/060/061 eval-log rows for the same pattern).
+
+describe("lore create — --requires-uat (SPEC-058 hotfix)", () => {
+  it("HAPPY: --requires-uat sets extra.requires_uat=true on a plan", async () => {
+    await initLoreDb();
+    const cmd = await importCreateCommand();
+
+    const out1 = captureOutput();
+    try {
+      await runCmd(cmd, { type: "prd", title: "Root", ai: false });
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
+    } finally {
+      out1.restore();
+    }
+    const prdSlug = out1.stdout.find((l) => l.includes("prd-"))?.match(/prd-[\w-]+/)?.[0];
+
+    const out2 = captureOutput();
+    const exit2 = captureExit();
+    try {
+      await runCmd(cmd, {
+        type: "plan",
+        title: "UAT-Gated Plan",
+        parent: prdSlug,
+        "requires-uat": true,
+        ai: false,
+      });
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
+    } finally {
+      out2.restore();
+    }
+    expect(exit2.code).toBeUndefined();
+    const planSlug = out2.stdout.find((l) => l.includes("plan-"))?.match(/plan-[\w-]+/)?.[0];
+    expect(planSlug).toBeTruthy();
+
+    const getCmd = await importGetCommand();
+    const out3 = captureOutput();
+    try {
+      await runCmd(getCmd, { id: planSlug, json: true });
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
+    } finally {
+      out3.restore();
+    }
+    const planJson = JSON.parse(out3.stdout.join("")) as {
+      data?: { doc?: { extra?: { requires_uat?: boolean } } };
+    };
+    expect(planJson.data?.doc?.extra?.requires_uat).toBe(true);
+  });
+
+  it("REGRESSION: plan created WITHOUT --requires-uat has no requires_uat key (absent, not false)", async () => {
+    await initLoreDb();
+    const cmd = await importCreateCommand();
+
+    const out1 = captureOutput();
+    try {
+      await runCmd(cmd, { type: "prd", title: "Root", ai: false });
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
+    } finally {
+      out1.restore();
+    }
+    const prdSlug = out1.stdout.find((l) => l.includes("prd-"))?.match(/prd-[\w-]+/)?.[0];
+
+    const out2 = captureOutput();
+    const exit2 = captureExit();
+    try {
+      await runCmd(cmd, { type: "plan", title: "Plain Plan", parent: prdSlug, ai: false });
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
+    } finally {
+      out2.restore();
+    }
+    expect(exit2.code).toBeUndefined();
+    const planSlug = out2.stdout.find((l) => l.includes("plan-"))?.match(/plan-[\w-]+/)?.[0];
+    expect(planSlug).toBeTruthy();
+
+    const getCmd = await importGetCommand();
+    const out3 = captureOutput();
+    try {
+      await runCmd(getCmd, { id: planSlug, json: true });
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
+    } finally {
+      out3.restore();
+    }
+    const planJson = JSON.parse(out3.stdout.join("")) as {
+      data?: { doc?: { extra?: Record<string, unknown> } };
+    };
+    expect(planJson.data?.doc?.extra?.["requires_uat"]).toBeUndefined();
+    expect("requires_uat" in (planJson.data?.doc?.extra ?? {})).toBe(false);
+  });
+
+  it("BOUNDARY: --requires-uat=false is treated as absent — no requires_uat key written", async () => {
+    await initLoreDb();
+    const cmd = await importCreateCommand();
+
+    const out1 = captureOutput();
+    try {
+      await runCmd(cmd, { type: "prd", title: "Root", ai: false });
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
+    } finally {
+      out1.restore();
+    }
+    const prdSlug = out1.stdout.find((l) => l.includes("prd-"))?.match(/prd-[\w-]+/)?.[0];
+
+    const out2 = captureOutput();
+    const exit2 = captureExit();
+    try {
+      await runCmd(cmd, {
+        type: "plan",
+        title: "Explicit False Plan",
+        parent: prdSlug,
+        "requires-uat": false,
+        ai: false,
+      });
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
+    } finally {
+      out2.restore();
+    }
+    expect(exit2.code).toBeUndefined();
+    const planSlug = out2.stdout.find((l) => l.includes("plan-"))?.match(/plan-[\w-]+/)?.[0];
+    expect(planSlug).toBeTruthy();
+
+    const getCmd = await importGetCommand();
+    const out3 = captureOutput();
+    try {
+      await runCmd(getCmd, { id: planSlug, json: true });
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
+    } finally {
+      out3.restore();
+    }
+    const planJson = JSON.parse(out3.stdout.join("")) as {
+      data?: { doc?: { extra?: Record<string, unknown> } };
+    };
+    expect("requires_uat" in (planJson.data?.doc?.extra ?? {})).toBe(false);
+  });
+
+  it("ERROR: --requires-uat on a non-plan type (spec) is rejected as a type-flag mismatch (exit 2, per the REAL mismatch-validation block — see file-header note)", async () => {
+    await initLoreDb();
+    const cmd = await importCreateCommand();
+    const output = captureOutput();
+    const exit = captureExit();
+
+    try {
+      await runCmd(cmd, { type: "spec", title: "Spec", "requires-uat": true });
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
+    } finally {
+      output.restore();
+    }
+
+    expect(exit.code).toBe(2);
+    const errText = output.stderr.join("\n");
+    expect(errText).toContain("--requires-uat");
+    expect(errText).toContain("plan");
+  });
+});
+
 // ─── REGRESSION guards ────────────────────────────────────────────────────────
 
 describe("lore create — regression guards", () => {
