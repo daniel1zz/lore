@@ -4,23 +4,29 @@
  *   the server's { ok, data } envelope and normalize errors.
  * Public surface: apiList, apiSearch, apiTree, apiGetDoc, apiGetStatus,
  *   apiGetJudgments, apiGetAuditForDoc, apiGetAuditVerify, apiGetCalibrationStats,
- *   apiGetPendingReview, apiGetReady
+ *   apiGetPendingReview, apiGetReady, apiGetConfig, apiGetMachineConfig
  * Invariants: 5-second timeout via AbortSignal.timeout; never leaks raw Response objects.
  *   Throws ApiError on non-2xx or server-side { ok: false } — EXCEPT `apiGetReady`,
  *   which returns `Result<ReadyRecord[], ApiError>` per its SPEC-037 §2 contract
  *   (the only Result-returning function in this file; every other export throws).
  * Side-effect class: IO (fetch)
  * Source: SPEC-011 §3, §5; SPEC-015 §3; SPEC-033 F1 (feedback-loop read routes);
- *   SPEC-037 §2 (readiness route client)
+ *   SPEC-037 §2 (readiness route client); SPEC-062 §Design D3 / SPEC-064 §Design D6
+ *   (config GET reads — both team and machine scope, available to cookie AND
+ *   bearer sessions, mirroring every other read in this file — see
+ *   `config-routes.ts`'s module header on the auth-surface split)
  */
 
 import type {
   AuditEntry,
+  ConfigEffect,
   DocRecord,
   DocSummary,
   DocType,
   DocTypeMeta,
   DocStatus,
+  GlobalLoreConfig,
+  LoreConfig,
   ReadyRecord,
   ReviewJudgment,
   Result,
@@ -544,4 +550,47 @@ export async function apiGetReady(planIdOrSlug: string): Promise<Result<ReadyRec
         : new ApiError(0, "NETWORK_ERROR", caught instanceof Error ? caught.message : "Unknown error");
     return { ok: false, error: apiError };
   }
+}
+
+// ─── SPEC-062/SPEC-064: config read (team + machine scope) ──────────────────
+
+/**
+ * Response shape shared by `GET /api/config` and `GET /api/config/machine`
+ * (`handleGetConfig`/`handleGetMachineConfig`, `config-routes.ts`) — the
+ * redacted config, its per-leaf-key effect classification, and a sha256
+ * `hash` over the redacted view (the `If-Match` value a subsequent
+ * `apiPatchConfig`/`apiPatchMachineConfig` call must send, SPEC-064 D5).
+ */
+export interface ConfigReadResponse<C> {
+  config: C;
+  effects: Record<string, ConfigEffect>;
+  hash: string;
+}
+
+/**
+ * Fetch the TEAM-scope config (`.lore/config.yaml`, `LoreConfigSchema`),
+ * redacted per `CONFIG_REDACT_KEYS`. Available to both cookie and bearer
+ * sessions (SPEC-062 D3).
+ *
+ * @throws {ApiError} On HTTP or network error.
+ */
+export async function apiGetConfig(): Promise<ConfigReadResponse<LoreConfig>> {
+  return fetchJson<ConfigReadResponse<LoreConfig>>("/api/config");
+}
+
+/**
+ * Fetch the MACHINE-scope config (XDG global config, `GlobalLoreConfigSchema`
+ * — `{defaults?}` only), redacted per `CONFIG_REDACT_KEYS`. A missing file on
+ * disk is NOT an error (SPEC-064 D7) — the server returns an empty/near-empty
+ * `config` with `ok: true`, same shape as a populated one. Available to both
+ * cookie and bearer sessions, mirroring {@link apiGetConfig} (SPEC-064 D6).
+ *
+ * @throws {ApiError} On HTTP or network error (including a malformed on-disk
+ *   global config — SPEC-064 D7's "loud banner in that scope only" is a
+ *   caller-side concern: this function still just throws `ApiError`, the
+ *   Settings route's machine-scope panel is what must not let that failure
+ *   blank the team-scope panel too).
+ */
+export async function apiGetMachineConfig(): Promise<ConfigReadResponse<GlobalLoreConfig>> {
+  return fetchJson<ConfigReadResponse<GlobalLoreConfig>>("/api/config/machine");
 }

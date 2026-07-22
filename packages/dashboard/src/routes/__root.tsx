@@ -59,6 +59,15 @@ function RootLayout(): React.ReactElement {
             >
               Tree
             </Link>
+            {/* reason: SPEC-064 T4 — the Settings route is the UI for the SPEC-062
+                config write backend (team + machine scope config editing). */}
+            <Link
+              to="/settings"
+              className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+              activeProps={{ className: "text-foreground font-medium" }}
+            >
+              Settings
+            </Link>
           </nav>
 
           <div className="flex-1 max-w-sm ml-auto">

@@ -5,7 +5,8 @@
  *   F1 calibration feedback loop on approve/reject.
  * Public surface: apiCreateDoc, apiPatchDoc, apiApproveDoc, apiRejectDoc,
  *   apiCreateLink, apiDeleteLink, apiDeleteDoc, apiRestoreVersion,
- *   ConflictError, DashboardApiError
+ *   apiPatchConfig, apiPatchMachineConfig,
+ *   ConflictError, ConfigConflictError, DashboardApiError
  * Invariants:
  *   - All writes use credentials:"include" so the lore_sid cookie is sent.
  *   - 409 responses are thrown as ConflictError (caller handles conflict modal).
@@ -23,11 +24,22 @@
  *     when the server's implicit calibration hook hit a genuine IO failure; the
  *     approve/reject itself already succeeded by the time `warnings` could be
  *     non-empty, so it is never a reason to treat the call as failed.
+ *   - apiPatchConfig / apiPatchMachineConfig (SPEC-062/SPEC-064) send `If-Match`
+ *     as the config `hash` (from a prior `apiGetConfig`/`apiGetMachineConfig`
+ *     call, `lib/api.ts`) — NOT a `version` number, config has no `DocRecord`.
+ *     409 is thrown as `ConfigConflictError` (a DISTINCT class from
+ *     `ConflictError` — the server's config-conflict payload is
+ *     `{current_hash, current}`, not `{current, mine, diff}`; see that class's
+ *     own doc). Neither config PATCH route offers a force-overwrite escape
+ *     (`config-routes.ts`'s module header: "no unconditional-write path" is
+ *     deliberate for config, unlike the doc-PATCH route) — a conflict can only
+ *     be resolved by re-reading and re-editing, never bypassed from this client.
  * Side-effect class: IO (fetch)
- * Source: SPEC-022 §9.3, §9.4; SPEC-027 AC-DH-6, AC-DH-7, AC-DH-11; SPEC-033 F1
+ * Source: SPEC-022 §9.3, §9.4; SPEC-027 AC-DH-6, AC-DH-7, AC-DH-11; SPEC-033 F1;
+ *   SPEC-062 §Design D3-D5; SPEC-064 §Design D6
  */
 
-import type { DocRecord, LinkType } from "@lore/core";
+import type { ConfigEffect, DocRecord, GlobalLoreConfig, LinkType, LoreConfig } from "@lore/core";
 import { createDocInputSchema } from "@lore/core";
 import type { z } from "zod";
 
@@ -399,4 +411,134 @@ export async function apiDeleteLink(fromId: string, toId: string): Promise<void>
       errBody.error?.message ?? `HTTP ${response.status}`,
     );
   }
+}
+
+// ─── SPEC-062/SPEC-064: config write (team + machine scope) ─────────────────
+
+/**
+ * Conflict error for a config PATCH (SPEC-062 D3-D5, SPEC-064 D6) — thrown on
+ * 409. DISTINCT from {@link ConflictError}: config has no `DocRecord`/version,
+ * so the server's conflict payload is `{current_hash, current}` (the FRESH
+ * redacted config + its hash), not `{current, mine, diff}` — there is no
+ * unified diff to render (config isn't a single text blob), and no
+ * force-overwrite escape (`config-routes.ts` deliberately offers none for
+ * either config PATCH route — see this module's header).
+ */
+export class ConfigConflictError extends DashboardApiError {
+  /** Fresh redacted config read at rejection time. */
+  readonly currentConfig: unknown;
+  /** Fresh hash — the `If-Match` value a retry (fresh edit) must send. */
+  readonly currentHash: string;
+
+  constructor(currentConfig: unknown, currentHash: string) {
+    super(409, "STALE_VERSION", "Config was modified since you loaded it");
+    this.name = "ConfigConflictError";
+    this.currentConfig = currentConfig;
+    this.currentHash = currentHash;
+  }
+}
+
+/** Success payload from a config PATCH — mirrors `ConfigUpdateResult` (`config-service.ts`). */
+export interface ConfigUpdateResult<C> {
+  config: C;
+  effects: Record<string, ConfigEffect>;
+  /** Dotted leaf-key paths the accepted patch touched (SPEC-062 D5). */
+  updated: string[];
+  /** Subset of `updated` requiring a process restart to take effect — NEVER undifferentiated success. */
+  restart_required: string[];
+  /** New hash — the `If-Match` value the NEXT edit session must freeze at edit-start. */
+  hash: string;
+}
+
+/**
+ * Shared PATCH implementation for both config scopes — sends `If-Match`
+ * (the frozen base hash, SPEC-064 D5) and the raw patch object as the body
+ * (NOT wrapped, unlike `apiCreateDoc`'s Zod-validated envelope — config
+ * validation is entirely server-side, `ConfigService`/`GlobalConfigService`
+ * own the `LoreConfigSchema`/`GlobalLoreConfigSchema` truth).
+ *
+ * @throws {ConfigConflictError} On 409 (stale `If-Match`).
+ * @throws {DashboardApiError} On any other HTTP/network/validation error.
+ */
+async function writeConfigFetch<C>(
+  path: string,
+  patch: Record<string, unknown>,
+  ifMatch: string,
+): Promise<ConfigUpdateResult<C>> {
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      method: "PATCH",
+      headers: {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "If-Match": ifMatch,
+      },
+      credentials: "include",
+      signal: AbortSignal.timeout(10000),
+      body: JSON.stringify(patch),
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Network error";
+    throw new DashboardApiError(0, "NETWORK_ERROR", message);
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = await response.json();
+  } catch {
+    throw new DashboardApiError(response.status, "PARSE_ERROR", "Failed to parse JSON response");
+  }
+
+  if (response.status === 409) {
+    const conflict = (parsed as { error?: { current_hash?: string; current?: unknown } }).error;
+    if (conflict?.current !== undefined && conflict.current_hash !== undefined) {
+      throw new ConfigConflictError(conflict.current, conflict.current_hash);
+    }
+    throw new DashboardApiError(409, "STALE_VERSION", "Config modified concurrently");
+  }
+
+  const envelope = parsed as {
+    ok: boolean;
+    data?: ConfigUpdateResult<C>;
+    error?: { code?: string; message?: string };
+  };
+  if (!response.ok || !envelope.ok) {
+    const err = envelope.error ?? {};
+    throw new DashboardApiError(response.status, err.code ?? "API_ERROR", err.message ?? `HTTP ${response.status}`);
+  }
+
+  return envelope.data as ConfigUpdateResult<C>;
+}
+
+/**
+ * Patch the TEAM-scope config via PATCH /api/dashboard/config.
+ *
+ * @param patch - Minimal nested patch (only the changed leaves — see
+ *   `components/config-path-utils.ts::buildPatchFromChangedPaths`, whose
+ *   whole reason to exist is keeping this argument minimal so
+ *   `restart_required` stays honest, SPEC-062 D5).
+ * @param ifMatch - The base hash frozen at edit-start (SPEC-064 D5).
+ * @throws {ConfigConflictError} On 409.
+ * @throws {DashboardApiError} On other HTTP/network errors (incl. a denied-key patch, 422).
+ */
+export async function apiPatchConfig(
+  patch: Record<string, unknown>,
+  ifMatch: string,
+): Promise<ConfigUpdateResult<LoreConfig>> {
+  return writeConfigFetch<LoreConfig>("/api/dashboard/config", patch, ifMatch);
+}
+
+/**
+ * Patch the MACHINE-scope config via PATCH /api/dashboard/config/machine.
+ * Same contract as {@link apiPatchConfig}, against `GlobalLoreConfigSchema`.
+ *
+ * @throws {ConfigConflictError} On 409.
+ * @throws {DashboardApiError} On other HTTP/network errors.
+ */
+export async function apiPatchMachineConfig(
+  patch: Record<string, unknown>,
+  ifMatch: string,
+): Promise<ConfigUpdateResult<GlobalLoreConfig>> {
+  return writeConfigFetch<GlobalLoreConfig>("/api/dashboard/config/machine", patch, ifMatch);
 }
