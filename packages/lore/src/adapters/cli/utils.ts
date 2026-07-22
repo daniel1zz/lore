@@ -230,23 +230,93 @@ export function formatError(error: LoreError, opts?: { aiHasNoFallback?: boolean
 // ─── Actor Resolution ───────────────────────────────────────────────────────
 
 /**
+ * Which resolution tier produced the actor identity {@link resolveActorWithSource}
+ * returned — `"explicit"` (--by), `"env"` ($LORE_ACTOR), or `"os-fallback"`
+ * (os.userInfo().username, the untraceable default).
+ */
+export type ActorSource = "explicit" | "env" | "os-fallback";
+
+/** Result of {@link resolveActorWithSource} — the resolved identity plus which tier won. */
+export interface ResolvedActor {
+  readonly actor: string;
+  readonly source: ActorSource;
+}
+
+/**
+ * Pure actor-resolution core shared by {@link resolveActor}. Mirrors
+ * resolveActor's precedence EXACTLY (first non-empty wins: --by > $LORE_ACTOR
+ * > OS username) but additionally reports which tier won, so callers can
+ * decide whether the resolution is an OS-username fallback WITHOUT
+ * re-deriving the precedence logic themselves. No IO — this function never
+ * writes to stderr.
+ *
+ * @param explicit - Value of the --by flag, if the caller passed one
+ * @returns `{actor, source}` — `actor` is never empty (OS username is always available)
+ * @example
+ *   resolveActorWithSource("alice")  // => {actor: "alice", source: "explicit"}
+ *   resolveActorWithSource(undefined) // => {actor: "<OS username>", source: "os-fallback"}
+ *   //   (or {source: "env"} when $LORE_ACTOR is set)
+ */
+export function resolveActorWithSource(explicit?: string): ResolvedActor {
+  if (explicit !== undefined && explicit.trim() !== "") {
+    return { actor: explicit, source: "explicit" };
+  }
+  const envActor = process.env["LORE_ACTOR"];
+  if (envActor !== undefined && envActor.trim() !== "") {
+    return { actor: envActor, source: "env" };
+  }
+  return { actor: userInfo().username, source: "os-fallback" };
+}
+
+// reason: module-level once-per-process guard (retro `knowledge-session-process-review-2026-07-22-spec-062-064-continu`,
+// AC-AUDIT-ACTOR-1) — a batch command (e.g. `lore review --pending`) calling
+// resolveActor once per doc must warn exactly once per process, not once per call.
+let warnedActorFallback = false;
+
+/**
+ * Test-only: reset the once-per-process OS-fallback advisory guard so a test
+ * can assert the advisory fires again in a fresh "process" (vitest runs all
+ * cases in one real process, so the guard would otherwise leak across tests).
+ * Never called from production code.
+ */
+export function resetActorFallbackWarningForTests(): void {
+  warnedActorFallback = false;
+}
+
+/**
  * Resolve the acting user identity for `claim` / `release` / `evidence` commands.
  * Resolution order (first non-empty wins):
  *   1. --by flag (explicit, always wins)
  *   2. $LORE_ACTOR environment variable
  *   3. OS username (os.userInfo().username)
  *
+ * When resolution falls all the way to the OS-username tier — no --by, no
+ * $LORE_ACTOR — emits a ONCE-PER-PROCESS non-blocking advisory to stderr
+ * naming the fix (retro `knowledge-session-process-review-2026-07-22-spec-062-064-continu`:
+ * OS-username actors were landing silently in the corpus audit trail, untraceable
+ * to any agent). Deliberately does NOT fire on an explicit --by or $LORE_ACTOR
+ * value, even one that looks like a bare human name ("daniel") — that is a
+ * DELIBERATE choice by the caller, not the untraceable default this advisory
+ * targets. The advisory is a pure side effect; the returned string and every
+ * caller's exit code are unaffected.
+ *
  * @param explicit - Value of the --by flag, if the user passed one
  * @returns Resolved actor identity string (never empty — OS username is always available)
  * @example
- *   resolveActor(undefined) // => "$LORE_ACTOR" or OS username
- *   resolveActor("alice")   // => "alice"
+ *   resolveActor(undefined) // => "$LORE_ACTOR" or OS username (warns once if OS-fallback)
+ *   resolveActor("alice")   // => "alice" (never warns)
  */
 export function resolveActor(explicit?: string): string {
-  if (explicit !== undefined && explicit.trim() !== "") return explicit;
-  const envActor = process.env["LORE_ACTOR"];
-  if (envActor !== undefined && envActor.trim() !== "") return envActor;
-  return userInfo().username;
+  const resolved = resolveActorWithSource(explicit);
+  if (resolved.source === "os-fallback" && !warnedActorFallback) {
+    warnedActorFallback = true;
+    process.stderr.write(
+      `⚠ actor resolved to OS username "${resolved.actor}" — corpus writes under this identity ` +
+        "aren't traceable to an agent. Pass --by <id> or export LORE_ACTOR=agent:<slug> " +
+        "(or ai:<...>) for a traceable actor.\n",
+    );
+  }
+  return resolved.actor;
 }
 
 // ─── Actor Flag Alias Resolution (SPEC-051 D2) ─────────────────────────────
