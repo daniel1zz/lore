@@ -30,6 +30,9 @@ import {
   countExplicitPathArgs,
   parseExecutedUnits,
   judgeCompleteness,
+  commandHasCaseFilter,
+  commandReferencesCompiledBinary,
+  judgeBinaryFreshness,
 } from "../src/attestation-completeness.js";
 
 describe("countExplicitPathArgs", () => {
@@ -152,5 +155,182 @@ describe("judgeCompleteness", () => {
     // vitest silently ran only the ONE matching file (assets-ssot.test.ts).
     const executedUnits = parseExecutedUnits("...\nTest Files  1 passed (1)\n");
     expect(judgeCompleteness({ declaredPaths, executedUnits })).toBe("under_match");
+  });
+});
+
+// ─── Part B: -t / --testNamePattern matched-case count (task
+// task-verify-trust-extensions-build-freshness-t-case-count-guard, Part B) ──────
+
+describe("parseExecutedUnits — vitest 'Tests' line (Part B prerequisite)", () => {
+  it("HAPPY: a vitest tail carrying both 'Test Files' and 'Tests' lines parses both counts", () => {
+    const stdout = "some preamble\n\n Test Files  1 passed (1)\n Tests  4 passed (4)\n";
+    expect(parseExecutedUnits(stdout)).toEqual({ files: 1, tests: 4 });
+  });
+
+  it("REGRESSION: a vitest tail with ONLY 'Test Files' (no 'Tests' line) leaves tests undefined", () => {
+    const stdout = "...\nTest Files  1 passed (1)\n";
+    const result = parseExecutedUnits(stdout);
+    expect(result?.files).toBe(1);
+    expect(result?.tests).toBeUndefined();
+  });
+
+  it("BOUNDARY: the 'Test Files' line itself never false-matches the 'Tests' pattern", () => {
+    // reason: "Tests" (plural, standalone word) must not accidentally match inside
+    // "Test Files" (singular "Test" + " Files") — if it did, `tests` would wrongly
+    // pick up the FILE count instead of staying undefined.
+    const stdout = "Test Files  1 passed (1)\n";
+    expect(parseExecutedUnits(stdout)?.tests).toBeUndefined();
+  });
+});
+
+describe("commandHasCaseFilter", () => {
+  it("HAPPY: recognises a short -t case filter", () => {
+    expect(commandHasCaseFilter("bunx vitest run -t 'REPRO' packages/core/tests/a.test.ts")).toBe(
+      true,
+    );
+  });
+
+  it("HAPPY: recognises the long --testNamePattern flag", () => {
+    expect(
+      commandHasCaseFilter("bunx vitest run --testNamePattern REPRO packages/core/tests/a.test.ts"),
+    ).toBe(true);
+  });
+
+  it("BOUNDARY: recognises the --testNamePattern=VALUE equals-form", () => {
+    expect(commandHasCaseFilter("bunx vitest run --testNamePattern=REPRO")).toBe(true);
+  });
+
+  it("NEGATIVE: a filterless command is false", () => {
+    expect(commandHasCaseFilter("bunx vitest run packages/core/tests/a.test.ts")).toBe(false);
+    expect(commandHasCaseFilter("bun run test")).toBe(false);
+  });
+
+  it("BOUNDARY: a token merely CONTAINING '-t' as a substring is never a false positive", () => {
+    // reason: exact-token matching, not substring matching — "--title" contains "-t"
+    // as a substring but is an unrelated flag.
+    expect(commandHasCaseFilter("bun run test --title foo")).toBe(false);
+  });
+});
+
+describe("judgeCompleteness — Part B case-filter extension", () => {
+  it("HAPPY: hasCaseFilter true + 0 matched cases -> zero_match", () => {
+    expect(
+      judgeCompleteness({
+        declaredPaths: 0,
+        executedUnits: { files: 1, tests: 0 },
+        hasCaseFilter: true,
+      }),
+    ).toBe("zero_match");
+  });
+
+  it("BOUNDARY: hasCaseFilter true + matched cases >= 1 but fewer than declaredPaths -> under_match", () => {
+    // reason: the -t 'REPRO' filter matched only 1 case even though 3 file paths
+    // were declared — a plausible-typo shape the file-level check alone would miss
+    // (each declared file individually "matched" at the file level).
+    expect(
+      judgeCompleteness({
+        declaredPaths: 3,
+        executedUnits: { files: 3, tests: 1 },
+        hasCaseFilter: true,
+      }),
+    ).toBe("under_match");
+  });
+
+  it("HAPPY: hasCaseFilter true + matched cases >= declaredPaths -> complete", () => {
+    expect(
+      judgeCompleteness({
+        declaredPaths: 1,
+        executedUnits: { files: 1, tests: 4 },
+        hasCaseFilter: true,
+      }),
+    ).toBe("complete");
+  });
+
+  it("REGRESSION: filterless command (hasCaseFilter omitted) is BYTE-IDENTICAL to file-count-only behavior, even when tests is suspiciously low", () => {
+    // reason: this is the exact scenario a naive 'always parse cases' change would
+    // break — declaredPaths===3, files===3 (file-level complete), but tests===1
+    // (a low case count that would wrongly downgrade to under_match if the case
+    // check ran unconditionally). Without hasCaseFilter, the tests field MUST be
+    // ignored entirely.
+    expect(
+      judgeCompleteness({ declaredPaths: 3, executedUnits: { files: 3, tests: 1 } }),
+    ).toBe("complete");
+  });
+
+  it("REGRESSION: hasCaseFilter explicitly false behaves identically to omitted", () => {
+    expect(
+      judgeCompleteness({
+        declaredPaths: 3,
+        executedUnits: { files: 3, tests: 1 },
+        hasCaseFilter: false,
+      }),
+    ).toBe("complete");
+  });
+
+  it("STATE: hasCaseFilter true but tests unparseable (undefined) falls through to the file-level check", () => {
+    // reason: fail-open — no case-level data means no case-level verdict; the
+    // guard must not invent a zero/under-match out of missing information. The
+    // file-level check still applies underneath (files < declaredPaths here).
+    expect(
+      judgeCompleteness({
+        declaredPaths: 3,
+        executedUnits: { files: 1 },
+        hasCaseFilter: true,
+      }),
+    ).toBe("under_match");
+  });
+
+  it("ERROR: hasCaseFilter true + executedUnits null is still unknown_runner (null always wins first)", () => {
+    expect(
+      judgeCompleteness({ declaredPaths: 3, executedUnits: null, hasCaseFilter: true }),
+    ).toBe("unknown_runner");
+  });
+});
+
+// ─── Part A: build-freshness precheck (task
+// task-verify-trust-extensions-build-freshness-t-case-count-guard, Part A) ──────
+
+describe("commandReferencesCompiledBinary", () => {
+  it("HAPPY: a relative dist/lore invocation is recognised", () => {
+    expect(commandReferencesCompiledBinary("./dist/lore verify plan-1")).toBe(true);
+  });
+
+  it("HAPPY: an absolute path ending in dist/lore is recognised", () => {
+    expect(commandReferencesCompiledBinary("/repo/dist/lore --version")).toBe(true);
+  });
+
+  it("NEGATIVE: an ordinary source-run command is false", () => {
+    expect(commandReferencesCompiledBinary("bun run typecheck")).toBe(false);
+    expect(commandReferencesCompiledBinary("lore claim task-1")).toBe(false);
+  });
+
+  it("BOUNDARY: a substring collision ('mydist/lore', no path separator boundary) is never a false positive", () => {
+    // reason: word-boundary matching, not raw substring search — "mydist/lore"
+    // contains the literal characters "dist/lore" but is not a path to the binary.
+    expect(commandReferencesCompiledBinary("bun run mydist/lore-helper.ts")).toBe(false);
+  });
+});
+
+describe("judgeBinaryFreshness", () => {
+  it("HAPPY: null binaryMtimeMs (binary missing) -> missing", () => {
+    expect(judgeBinaryFreshness({ binaryMtimeMs: null, newestSourceMtimeMs: 1000 })).toBe(
+      "missing",
+    );
+  });
+
+  it("HAPPY: newest source mtime newer than the binary -> stale", () => {
+    expect(judgeBinaryFreshness({ binaryMtimeMs: 1000, newestSourceMtimeMs: 2000 })).toBe("stale");
+  });
+
+  it("HAPPY: binary mtime newer than every source file -> fresh", () => {
+    expect(judgeBinaryFreshness({ binaryMtimeMs: 2000, newestSourceMtimeMs: 1000 })).toBe("fresh");
+  });
+
+  it("BOUNDARY: equal mtimes is fresh, not stale (strictly-greater-than source wins)", () => {
+    expect(judgeBinaryFreshness({ binaryMtimeMs: 1000, newestSourceMtimeMs: 1000 })).toBe("fresh");
+  });
+
+  it("BOUNDARY: newestSourceMtimeMs 0 (no source files found) with a real binary is fresh", () => {
+    expect(judgeBinaryFreshness({ binaryMtimeMs: 500, newestSourceMtimeMs: 0 })).toBe("fresh");
   });
 });

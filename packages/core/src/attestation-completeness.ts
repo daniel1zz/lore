@@ -12,9 +12,19 @@
  *     command's own flags and their values.
  *   - parseExecutedUnits(stdout) — recognises the run-summary tail of the two
  *     runners this repo uses (vitest / bun test), returning how many files
- *     were actually executed; `null` when no known summary line is present.
- *   - judgeCompleteness({declaredPaths, executedUnits}) — pure decision
- *     combining the two counts into a {@link CompletenessVerdict}.
+ *     (and, when parseable, tests) were actually executed; `null` when no
+ *     known summary line is present.
+ *   - commandHasCaseFilter(command) — detects a `-t`/`--testNamePattern` case
+ *     filter on the command (task "verify trust extensions" Part B).
+ *   - judgeCompleteness({declaredPaths, executedUnits, hasCaseFilter?}) — pure
+ *     decision combining the counts into a {@link CompletenessVerdict}.
+ *   - commandReferencesCompiledBinary(command) — detects whether the command
+ *     spawns the compiled `dist/lore` binary (task "verify trust extensions"
+ *     Part A).
+ *   - judgeBinaryFreshness({binaryMtimeMs, newestSourceMtimeMs}) — pure
+ *     decision yielding a {@link BinaryFreshnessVerdict}; the caller performs
+ *     the actual `stat()` calls (mtimes arrive as DATA, mirrors the
+ *     `FsProbe`/git-facts precedent used elsewhere in this codebase).
  *
  * Invariants:
  *   - Referentially transparent: same input in → same output, always.
@@ -24,11 +34,22 @@
  *     (see {@link judgeCompleteness}'s `declaredPaths === 0` short-circuit).
  *   - `parseExecutedUnits` never throws on arbitrary/garbled stdout — an
  *     unrecognised tail degrades to `null`, not an exception.
+ *   - `judgeCompleteness`'s `hasCaseFilter` case-count branch is CONSULTED
+ *     ONLY when `hasCaseFilter === true` AND `executedUnits.tests !== undefined`
+ *     — a filterless command (the pre-existing SPEC-061 call shape, no third
+ *     argument passed) is BYTE-IDENTICAL to before this module's Part B
+ *     extension; an unparseable case count under a filter fails OPEN by
+ *     falling through to the file-level check rather than inventing a verdict
+ *     from missing data.
+ *   - `judgeBinaryFreshness` never does IO itself — `binaryMtimeMs`/
+ *     `newestSourceMtimeMs` are caller-supplied facts (the caller `stat()`s).
  *
  * Side-effect class: pure
  *
  * Source: SPEC-061 — Attestation completeness guard (detect zero-match /
- *   under-match test oracles), §Scope D1, §Acceptance Criteria AC-061-1..3
+ *   under-match test oracles), §Scope D1, §Acceptance Criteria AC-061-1..3;
+ *   task "verify trust extensions" (build-freshness precheck + -t matched-case
+ *   count guard), AC-061-9, AC-061-10
  */
 
 // ─── Explicit Path-Argument Counting ────────────────────────────────────────
@@ -125,16 +146,50 @@ export function countExplicitPathArgs(command: string): number {
   return count;
 }
 
+/**
+ * The exact tokens (short and long form, plus the long form's `=value`
+ * variant) this module recognises as a test-runner case-name filter. Both
+ * vitest and bun test accept `-t`/`--testNamePattern <pattern>`.
+ */
+const CASE_FILTER_TOKENS = new Set(["-t", "--testNamePattern"]);
+const CASE_FILTER_EQUALS_PREFIX = "--testNamePattern=";
+
+/**
+ * Detects whether `command` carries a `-t`/`--testNamePattern` test-CASE-name
+ * filter (as opposed to the file-PATH filtering `countExplicitPathArgs`
+ * counts). Exact-token matching, never substring matching — `--title` is a
+ * different, unrelated flag that happens to contain `-t` as a substring.
+ *
+ * @param command - The full shell command string.
+ * @returns `true` iff a case-filter flag token is present.
+ *
+ * @example
+ * commandHasCaseFilter("bunx vitest run -t 'REPRO' packages/core/tests/a.test.ts")
+ * // => true
+ *
+ * @example
+ * commandHasCaseFilter("bun run test --title foo") // => false — "--title" is not "-t"
+ */
+export function commandHasCaseFilter(command: string): boolean {
+  const tokens = tokenizeCommand(command);
+  return tokens.some(
+    (token) => CASE_FILTER_TOKENS.has(token) || token.startsWith(CASE_FILTER_EQUALS_PREFIX),
+  );
+}
+
 // ─── Executed-Unit Parsing ───────────────────────────────────────────────────
 
 /**
  * How many test files (and, when parseable, tests) a runner reports having
  * actually executed, extracted from its stdout summary line.
  *
- * @invariant `tests` is present-iff-parseable from the SAME summary line
- *   `files` came from (this repo's vitest summary line carries no test
- *   count, only a file count — `tests` is therefore always absent for a
- *   vitest-shaped match; bun's summary line carries both).
+ * @invariant `tests` is present-iff-parseable from the summary a runner
+ *   emitted: bun's `"Ran N tests across M files"` line always carries both
+ *   counts; vitest emits its file count on a `"Test Files … (N)"` line and
+ *   (when present in the captured tail) its case count on a separate
+ *   `"Tests … (N)"` line — `tests` is populated for a vitest-shaped match
+ *   ONLY when that second line was captured (a tail truncation that drops it
+ *   degrades to `tests: undefined`, never a fabricated count).
  */
 export interface ExecutedUnits {
   files: number;
@@ -157,6 +212,18 @@ const BUN_SUMMARY_PATTERN = /\bRan\s+(\d+)\s+tests?\s+across\s+(\d+)\s+files?\b/
 const VITEST_SUMMARY_PATTERN = /Test Files\s+.*?\((\d+)\)/;
 
 /**
+ * vitest's separate case-count summary line, e.g. `"Tests  4 passed (4)"` or
+ * a mixed `"Tests  1 failed | 3 passed (4)"`. The leading `\b` anchors on the
+ * whole word "Tests" (plural) so this can never false-match inside the
+ * "Test Files" line above (singular "Test" followed by " Files", never the
+ * substring "Tests"). Present in vitest's default reporter output alongside
+ * the "Test Files" line; a truncated tail that drops it is a genuine "not
+ * captured" case (see {@link ExecutedUnits}'s field invariant), not parsed as
+ * zero.
+ */
+const VITEST_TESTS_LINE_PATTERN = /\bTests\s+.*?\((\d+)\)/;
+
+/**
  * Recognises the run-summary tail of the two runners this repo uses (bun
  * test, then vitest) and extracts the count of files actually executed.
  * Never throws — arbitrary or garbled stdout that matches neither pattern
@@ -166,12 +233,14 @@ const VITEST_SUMMARY_PATTERN = /Test Files\s+.*?\((\d+)\)/;
  *   typically the tail-truncated `output_tail` a verify run recorded — the
  *   summary line is emitted near the end of both runners' output, so a tail
  *   truncation essentially never loses it)
- * @returns `{files}` (bun additionally carries `tests`) when a known summary
- *   is found; `null` when no known runner-summary line is present
+ * @returns `{files}` (plus `tests` when a case count was also parseable —
+ *   always for bun, iff the "Tests" line was captured for vitest) when a
+ *   known summary is found; `null` when no known runner-summary line is
+ *   present
  *
  * @example
  * parseExecutedUnits("...\nTest Files  1 passed (1)\nTests  4 passed (4)\n")
- * // => { files: 1 }
+ * // => { files: 1, tests: 4 }
  *
  * @example
  * parseExecutedUnits("...\nRan 963 tests across 70 files. [1.2s]\n")
@@ -191,6 +260,10 @@ export function parseExecutedUnits(stdout: string): ExecutedUnits | null {
   const vitestMatch = VITEST_SUMMARY_PATTERN.exec(stdout);
   if (vitestMatch !== null) {
     const files = Number(vitestMatch[1]);
+    const testsMatch = VITEST_TESTS_LINE_PATTERN.exec(stdout);
+    if (testsMatch !== null) {
+      return { files, tests: Number(testsMatch[1]) };
+    }
     return { files };
   }
 
@@ -218,6 +291,14 @@ export interface CompletenessJudgeInput {
   declaredPaths: number;
   /** {@link parseExecutedUnits}'s result for the command's captured stdout. */
   executedUnits: ExecutedUnits | null;
+  /**
+   * {@link commandHasCaseFilter}'s result for the executed command (Part B —
+   * the `-t`/`--testNamePattern` matched-case guard). Omitted/`false` keeps
+   * this function's decision BYTE-IDENTICAL to its pre-Part-B behavior —
+   * `executedUnits.tests` is never consulted unless this is `true` (the
+   * REGRESSION invariant a filterless command depends on).
+   */
+  hasCaseFilter?: boolean;
 }
 
 /**
@@ -229,16 +310,35 @@ export interface CompletenessJudgeInput {
  * Decision order:
  *   1. `executedUnits === null` → `"unknown_runner"` (fail-open: an
  *      unrecognised runner must never block a legitimate oracle merely
- *      because this guard doesn't understand its output format).
- *   2. `declaredPaths === 0` → `"complete"` (nothing was declared, so nothing
+ *      because this guard doesn't understand its output format). This
+ *      ALWAYS wins first, even when `hasCaseFilter` is `true`.
+ *   2. `hasCaseFilter === true` AND `executedUnits.tests !== undefined` (Part
+ *      B) — a case-name filter promises SOME test case matched; the matched
+ *      CASE count is checked before the file-level check below:
+ *        a. `executedUnits.tests === 0` → `"zero_match"` (the filter matched
+ *           nothing at all — the exact "`vitest -t 'REPRO'` matched 0 tests"
+ *           shape this guard closes).
+ *        b. `declaredPaths > 0` AND `executedUnits.tests < declaredPaths` →
+ *           `"under_match"` (fewer matched cases than declared file paths —
+ *           a plausible signal that not every declared file's filtered case
+ *           actually ran, even though each declared file individually
+ *           "matched" at the file level below).
+ *        c. Otherwise, falls through to the file-level check (defense in
+ *           depth — a case-level pass does not exempt the file-level check).
+ *      When `hasCaseFilter` is `true` but `executedUnits.tests` is
+ *      `undefined` (case count unparseable from the captured stdout), this
+ *      step is skipped entirely (fail-open — no case-level verdict is
+ *      invented from missing data) and control falls through to the SAME
+ *      file-level check every other input uses.
+ *   3. `declaredPaths === 0` → `"complete"` (nothing was declared, so nothing
  *      can be under- or zero-matched — the BOUNDARY case, e.g. `bun run test`
  *      with no path arguments at all).
- *   3. `executedUnits.files === 0` → `"zero_match"` (≥1 path was declared,
+ *   4. `executedUnits.files === 0` → `"zero_match"` (≥1 path was declared,
  *      and NONE of them matched anything the runner actually ran — the
  *      AC-060-7 shape).
- *   4. `executedUnits.files < declaredPaths` → `"under_match"` (some, but not
+ *   5. `executedUnits.files < declaredPaths` → `"under_match"` (some, but not
  *      all, declared paths were matched).
- *   5. Otherwise (`executedUnits.files >= declaredPaths`) → `"complete"`.
+ *   6. Otherwise (`executedUnits.files >= declaredPaths`) → `"complete"`.
  *
  * @example
  * judgeCompleteness({ declaredPaths: 3, executedUnits: { files: 1 } })
@@ -255,12 +355,32 @@ export interface CompletenessJudgeInput {
  * @example
  * judgeCompleteness({ declaredPaths: 3, executedUnits: null })
  * // => "unknown_runner"
+ *
+ * @example
+ * judgeCompleteness({
+ *   declaredPaths: 3,
+ *   executedUnits: { files: 3, tests: 1 },
+ *   hasCaseFilter: true,
+ * })
+ * // => "under_match" — a -t filter matched only 1 of 3 declared files' cases
  */
 export function judgeCompleteness(input: CompletenessJudgeInput): CompletenessVerdict {
-  const { declaredPaths, executedUnits } = input;
+  const { declaredPaths, executedUnits, hasCaseFilter = false } = input;
 
   if (executedUnits === null) {
     return "unknown_runner";
+  }
+
+  if (hasCaseFilter && executedUnits.tests !== undefined) {
+    if (executedUnits.tests === 0) {
+      return "zero_match";
+    }
+    if (declaredPaths > 0 && executedUnits.tests < declaredPaths) {
+      return "under_match";
+    }
+    // Case-level check passed (>= 1 matched case, and not fewer than the
+    // declared path count) — fall through to the file-level check below for
+    // defense in depth; a case-level pass never SKIPS the file-level check.
   }
 
   if (declaredPaths === 0) {
@@ -276,4 +396,104 @@ export function judgeCompleteness(input: CompletenessJudgeInput): CompletenessVe
   }
 
   return "complete";
+}
+
+// ─── Compiled-Binary Freshness (Part A) ─────────────────────────────────────
+
+/**
+ * Matches a command token that is (or ends in) a path to the compiled
+ * `dist/lore` binary — `\b` before "dist" requires the preceding character
+ * (if any) to be a non-word character (`/`, whitespace, start-of-string),
+ * so a token like `mydist/lore-helper.ts` (no path-separator boundary before
+ * "dist") never false-matches.
+ */
+const COMPILED_BINARY_PATTERN = /\bdist\/lore\b/;
+
+/**
+ * Detects whether `command` spawns the compiled `dist/lore` binary (as
+ * opposed to running from source, e.g. `bun run src/index.ts` — which this
+ * guard is not concerned with, since source-run commands are fresh by
+ * construction).
+ *
+ * @param command - The full shell command string.
+ * @returns `true` iff a `dist/lore` path token is present.
+ *
+ * @example
+ * commandReferencesCompiledBinary("./dist/lore verify plan-1") // => true
+ *
+ * @example
+ * commandReferencesCompiledBinary("bun run typecheck") // => false
+ *
+ * @example
+ * commandReferencesCompiledBinary("bun run mydist/lore-helper.ts")
+ * // => false — no path-separator boundary before "dist"
+ */
+export function commandReferencesCompiledBinary(command: string): boolean {
+  return COMPILED_BINARY_PATTERN.test(command);
+}
+
+/**
+ * Freshness verdict for the compiled `dist/lore` binary relative to this
+ * repo's TypeScript sources:
+ *   - `"missing"` — the binary does not exist at all.
+ *   - `"stale"` — at least one source `.ts` file is newer than the binary
+ *     (a `bun run build` has not run since the most recent source change).
+ *   - `"fresh"` — the binary is at least as new as every scanned source file.
+ */
+export type BinaryFreshnessVerdict = "fresh" | "stale" | "missing";
+
+/** Input to {@link judgeBinaryFreshness}. */
+export interface BinaryFreshnessInput {
+  /**
+   * The compiled binary's `mtimeMs` (e.g. `fs.statSync(binPath).mtimeMs`), or
+   * `null` when the binary does not exist at that path (e.g. `fs.existsSync`
+   * returned `false`, so the caller never attempted the `stat()`).
+   */
+  binaryMtimeMs: number | null;
+  /**
+   * The newest `mtimeMs` among every relevant source `.ts` file (e.g. the
+   * recursive scan `assert-fresh-binary.ts::newestTsMtimeMs` already
+   * performs for `packages/lore/src` + `packages/core/src`); `0` when no
+   * source file was found at all (a degenerate/empty scan — never treated as
+   * "infinitely stale", see the BOUNDARY example below).
+   */
+  newestSourceMtimeMs: number;
+}
+
+/**
+ * Pure decision comparing a compiled binary's mtime against the newest
+ * relevant source file's mtime. Performs NO IO itself — both inputs are
+ * caller-supplied facts (the caller `stat()`s; mirrors this codebase's
+ * `FsProbe`/git-facts-as-DATA precedent, e.g. `verify-execution-root.ts`).
+ *
+ * @param input - `{binaryMtimeMs, newestSourceMtimeMs}`
+ * @returns `"missing"` when `binaryMtimeMs` is `null`; `"stale"` when the
+ *   newest source file is strictly newer than the binary; `"fresh"`
+ *   otherwise (including the equal-mtime BOUNDARY case — the binary is
+ *   considered fresh unless a source file is DEMONSTRABLY newer)
+ *
+ * @example
+ * judgeBinaryFreshness({ binaryMtimeMs: null, newestSourceMtimeMs: 1000 })
+ * // => "missing"
+ *
+ * @example
+ * judgeBinaryFreshness({ binaryMtimeMs: 1000, newestSourceMtimeMs: 2000 })
+ * // => "stale"
+ *
+ * @example
+ * judgeBinaryFreshness({ binaryMtimeMs: 1000, newestSourceMtimeMs: 1000 })
+ * // => "fresh" — equal mtimes are never stale
+ */
+export function judgeBinaryFreshness(input: BinaryFreshnessInput): BinaryFreshnessVerdict {
+  const { binaryMtimeMs, newestSourceMtimeMs } = input;
+
+  if (binaryMtimeMs === null) {
+    return "missing";
+  }
+
+  if (newestSourceMtimeMs > binaryMtimeMs) {
+    return "stale";
+  }
+
+  return "fresh";
 }

@@ -22,10 +22,22 @@
  *   ③ injected `executor` — runs the spawn spec (bound to
  *      `verify-executor.ts::executeVerifySpawnSpec` in production), with a
  *      pre-resolved env map (`resolveVerifyEnv`, computed ONCE per run — SPEC-039 §M2)
+ *   ③.4 build-freshness precheck (core `commandReferencesCompiledBinary` /
+ *      `judgeBinaryFreshness`, both pure) — for ANY AC (regardless of oracle kind)
+ *      whose command exited 0 and whose command string spawns the compiled
+ *      `dist/lore` binary, checks whether that binary is stale/missing relative to
+ *      this repo's TypeScript sources; a non-"fresh" verdict downgrades the
+ *      about-to-be-recorded result to `"inconclusive"` PLUS a `warnings` entry
+ *      naming `bun run build` (closes false-oracle vector 4 — a spawn-based test
+ *      exercising a binary that predates the session's source changes). A command
+ *      not referencing the binary skips this step entirely (no fs access at all —
+ *      `checkBinaryFreshness` is never invoked). Runs BEFORE step ③.5 so an
+ *      already-downgraded result short-circuits that step's own `"pass"`-only guard.
  *   ③.5 SPEC-061 attestation-completeness guard (core `countExplicitPathArgs` /
  *      `parseExecutedUnits` / `judgeCompleteness`, all pure) — for an `oracle: "test"`
  *      AC whose command exited 0, judges whether the runner actually executed as many
- *      test files as the command explicitly declared; a zero/under-match downgrades the
+ *      test files (and, when a `-t`/`--testNamePattern` case filter is present, test
+ *      CASES) as the command explicitly declared; a zero/under-match downgrades the
  *      about-to-be-recorded result from `"pass"` to `"inconclusive"` (never silently
  *      stays `"pass"` — the AC-060-7 false-attestation incident this guard closes).
  *      Every other oracle kind, and any non-zero exit, skips this step entirely (no
@@ -35,7 +47,11 @@
  *      carries `first_seen: true` when step ②.5 found the command new/changed (M2
  *      command-provenance annotation), `completeness`/`executed_files` when step
  *      ③.5 ran (SPEC-061), and ALWAYS `execution_root`/`execution_mode` (SPEC-063
- *      §Design Decisions D2/D3 — see `opts.executionRoot` below)
+ *      §Design Decisions D2/D3 — see `opts.executionRoot` below). Step ③.4's
+ *      `binary_freshness` verdict is surfaced on the in-memory `VerifyAcResult` and
+ *      the run's `warnings` ONLY — it is NOT persisted onto `attestation` (the
+ *      `evidenceEntrySchema.attestation` shape lives outside this task's anchors;
+ *      the downgraded `result`/the warning text are the durable signal).
  *
  * SPEC-063 execution-root correctness — `opts.executionRoot` (optional) is the
  * CLI adapter's pre-resolved `resolveVerifyExecutionRoot(...)` result (core, pure);
@@ -69,14 +85,31 @@
  *   - `opts.confirmUnapprovedCommand` is a PER-CALL option, not constructor DI — the
  *     CLI wires a TTY-aware prompt callback, MCP never supplies one (non-interactive
  *     by design); `createApp`/`app.ts` stays adapter-agnostic (SPEC-039 §M2).
+ *   - `checkBinaryFreshness` (constructor arg 5, OPTIONAL) is the build-freshness
+ *     port — a `() => BinaryFreshnessVerdict` thunk, computed AT MOST ONCE per
+ *     `verifyPlan` call (cached the same way `resolveVerifyEnv`/`executionRoot` are
+ *     resolved once and threaded down) and ONLY when at least one AC's command
+ *     references the compiled binary. Omitting it (every pre-Part-A call site,
+ *     incl. `app.ts`'s existing 4-arg construction) falls back to a private
+ *     `node:fs`-based real check (`newestTsMtimeMs` scan of `packages/{lore,core}/src`
+ *     vs `<repoRoot>/dist/lore`'s mtime, mirroring
+ *     `tests/integration/helpers/assert-fresh-binary.ts`'s algorithm) — this is the
+ *     ONE place this class does direct filesystem IO itself, deliberately scoped to
+ *     production use (every test in this class's suite injects a fake, per the
+ *     `executor`/`getPlanBundle` precedent).
  *
- * Side-effect class: IO (delegates all IO to injected ports; this class itself has none)
+ * Side-effect class: IO (delegates all IO to injected ports, EXCEPT the default
+ *   `checkBinaryFreshness` fallback described above, which does direct `node:fs`
+ *   reads when no port is injected)
  *
  * Source: SPEC-039 §2 D2, D3, D4, D6, D9; §3; §4 AC-VRF-3; §M2 (trust-hardening: env
  *   allowlist + command-provenance approval + annotation); SPEC-061 §Scope D3;
- *   SPEC-063 §Design Decisions D2, D3
+ *   SPEC-063 §Design Decisions D2, D3; task "verify trust extensions"
+ *   (build-freshness precheck + -t matched-case count guard), AC-061-9
  */
 
+import { existsSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { err, ok } from "@lore/core";
 import type { Result, LoreError, DocId, DocRecord, PlanBundle } from "@lore/core";
 import {
@@ -86,8 +119,12 @@ import {
   countExplicitPathArgs,
   parseExecutedUnits,
   judgeCompleteness,
+  commandHasCaseFilter,
+  commandReferencesCompiledBinary,
+  judgeBinaryFreshness,
   type AcVerifyMode,
   type CompletenessVerdict,
+  type BinaryFreshnessVerdict,
   type VerifyExecutionRootResolution,
 } from "@lore/core";
 import {
@@ -188,6 +225,15 @@ export interface VerifyAcResult {
    * `executed_files` itself is absent (`unknown_runner`, X reads as unknown).
    */
   readonly declared_paths?: number;
+  /**
+   * Build-freshness verdict (Part A) — present ONLY when this AC's command
+   * references the compiled `dist/lore` binary (`commandReferencesCompiledBinary`)
+   * AND the process exited 0. `"stale"`/`"missing"` downgrade {@link result} to
+   * `"inconclusive"` and add a `bun run build`-naming entry to the run's
+   * `warnings`; `"fresh"` leaves {@link result} exactly as otherwise computed.
+   * Omitted for every AC whose command does not reference the binary.
+   */
+  readonly binary_freshness?: BinaryFreshnessVerdict;
 }
 
 /** One declared AC that was NOT executed because its verify.mode isn't "script". */
@@ -232,6 +278,11 @@ export class VerifyRunnerService {
    *   `processEnv` (a captured `process.env` snapshot — `app.ts` composition time,
    *   mirroring how `repoRoot` is captured from `process.cwd()` there too) feed the
    *   ONE `resolveVerifyEnv` call made per `verifyPlan` invocation.
+   * @param checkBinaryFreshness - OPTIONAL build-freshness port (Part A) — see the
+   *   class-level Invariants entry. Omitted in every existing call site (`app.ts`'s
+   *   4-arg construction stays valid); production code that DOES wire it would pass
+   *   a thunk performing the real `stat()` calls. When omitted, this class falls
+   *   back to its own private `node:fs`-based check computed against `config.repoRoot`.
    */
   constructor(
     private readonly getPlanBundle: (
@@ -258,7 +309,58 @@ export class VerifyRunnerService {
       /** SPEC-039 §M2 — parent environment snapshot fed to `resolveVerifyEnv`. */
       processEnv: Readonly<Record<string, string | undefined>>;
     },
+    private readonly checkBinaryFreshness?: () => BinaryFreshnessVerdict,
   ) {}
+
+  /**
+   * Recursively finds the newest `mtimeMs` among `.ts` files under `dir`
+   * (returns `0` when `dir` doesn't exist or contains none) — the same
+   * algorithm `tests/integration/helpers/assert-fresh-binary.ts::newestTsMtimeMs`
+   * uses, duplicated here (not imported — that module lives under `tests/`,
+   * not `src/`) per the task's "leave the helper and just share the pure
+   * predicate" guidance.
+   */
+  private static _newestTsMtimeMsUnder(dir: string): number {
+    try {
+      const entries = readdirSync(dir, { withFileTypes: true });
+      let newest = 0;
+      for (const entry of entries) {
+        const fullPath = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          const childNewest = VerifyRunnerService._newestTsMtimeMsUnder(fullPath);
+          if (childNewest > newest) newest = childNewest;
+        } else if (entry.isFile() && entry.name.endsWith(".ts")) {
+          const mtimeMs = statSync(fullPath).mtimeMs;
+          if (mtimeMs > newest) newest = mtimeMs;
+        }
+      }
+      return newest;
+    } catch {
+      // reason: an unreadable/missing directory degrades to "no source files
+      // found here" (0), never an exception — mirrors
+      // assert-fresh-binary.ts's existsSync-guarded original, and keeps this
+      // freshness check fail-open per the module's own invariant.
+      return 0;
+    }
+  }
+
+  /**
+   * Default `checkBinaryFreshness` implementation — real `node:fs` reads
+   * against `config.repoRoot`. Only ever called when the constructor received
+   * no `checkBinaryFreshness` port AND at least one AC's command references
+   * the compiled binary (`commandReferencesCompiledBinary`); every unit test
+   * in this class's suite injects a fake port instead, so this method's own
+   * filesystem access is exercised only in production.
+   */
+  private _computeRealBinaryFreshness(): BinaryFreshnessVerdict {
+    const binPath = join(this.config.repoRoot, "dist", "lore");
+    const binaryMtimeMs = existsSync(binPath) ? statSync(binPath).mtimeMs : null;
+    const newestSourceMtimeMs = Math.max(
+      VerifyRunnerService._newestTsMtimeMsUnder(join(this.config.repoRoot, "packages", "lore", "src")),
+      VerifyRunnerService._newestTsMtimeMsUnder(join(this.config.repoRoot, "packages", "core", "src")),
+    );
+    return judgeBinaryFreshness({ binaryMtimeMs, newestSourceMtimeMs });
+  }
 
   /**
    * Runs a plan's declared script-mode acceptance criteria for real and records
@@ -379,6 +481,10 @@ export class VerifyRunnerService {
     // ③④ execute + record, one script-mode AC at a time
     const results: VerifyAcResult[] = [];
     const completedAcIds: string[] = [];
+    // Part A — computed AT MOST ONCE per run (the binary's freshness doesn't vary
+    // per-AC, same "resolve once, thread down" shape resolvedExecutionRoot/resolvedEnv
+    // above use), and ONLY when some AC's command actually references the binary.
+    let cachedBinaryFreshness: BinaryFreshnessVerdict | undefined;
     for (const criterion of scriptCriteria) {
       // ②.5 SPEC-039 §M2 — command-provenance approval gate. A command absent from
       // the task's evidence history is "new/changed"; `firstSeen` also feeds the
@@ -437,23 +543,59 @@ export class VerifyRunnerService {
 
       const { exitCode, outputTail, durationMs, timedOut } = execResult.value;
       let verifyResult: "pass" | "fail" | "inconclusive" = deriveVerifyResult(exitCode, timedOut);
+      // Captured BEFORE either downgrade guard below may mutate `verifyResult` —
+      // both Part A (freshness) and Part B/SPEC-061 (completeness) are
+      // INDEPENDENT signals over the same "the process actually exited 0"
+      // fact, so one downgrading `verifyResult` to "inconclusive" must never
+      // suppress the other's own check (both are informative on the result;
+      // see the combined-signal REGRESSION test in this file's sibling suite).
+      const executedSuccessfully = verifyResult === "pass";
 
-      // SPEC-061 §Scope D3 — attestation-completeness guard. Runs ONLY on an
-      // actual pass (a nonzero exit / timeout is already "fail"; completeness
-      // is irrelevant to it — §Design) AND ONLY for the "test" oracle family
-      // (tsc/lint/build/e2e/other have different zero-work-green modes and
-      // are explicitly OUT of this guard's scope). A zero/under-match downgrades
-      // the recorded result to "inconclusive" — NEVER "pass" — so a wrong test-
-      // path filter that silently matched fewer files than declared can never
-      // masquerade as a real attested pass again (the AC-060-7 incident this
-      // guard closes).
+      // ③.4 build-freshness precheck (Part A, "verify trust extensions" task) —
+      // applies to ANY oracle kind (not just "test") whose command spawns the
+      // compiled binary; a command that doesn't reference it never even calls
+      // the port.
+      let binaryFreshness: BinaryFreshnessVerdict | undefined;
+      if (executedSuccessfully && commandReferencesCompiledBinary(criterion.verify.command)) {
+        if (cachedBinaryFreshness === undefined) {
+          cachedBinaryFreshness = (
+            this.checkBinaryFreshness ?? (() => this._computeRealBinaryFreshness())
+          )();
+        }
+        binaryFreshness = cachedBinaryFreshness;
+        if (binaryFreshness !== "fresh") {
+          verifyResult = "inconclusive";
+          warnings.push(
+            `AC "${criterion.id}": dist/lore is ${binaryFreshness} — run 'bun run build' ` +
+              "before trusting this attested result.",
+          );
+        }
+      }
+
+      // SPEC-061 §Scope D3 — attestation-completeness guard. Runs ONLY when the
+      // process actually exited 0 (a nonzero exit/timeout is already "fail",
+      // completeness is irrelevant to it — §Design; gated on `executedSuccessfully`,
+      // NOT the possibly-already-downgraded `verifyResult`, so a Part-A freshness
+      // downgrade never suppresses this independent check) AND ONLY for the "test"
+      // oracle family (tsc/lint/build/e2e/other have different zero-work-green
+      // modes and are explicitly OUT of this guard's scope). A zero/under-match
+      // downgrades the recorded result to "inconclusive" — NEVER "pass" — so a
+      // wrong test-path filter that silently matched fewer files than declared
+      // can never masquerade as a real attested pass again (the AC-060-7
+      // incident this guard closes). Part B extends this with a `-t`/
+      // `--testNamePattern` matched-CASE check (`hasCaseFilter`) — a filterless
+      // command's `judgeCompleteness` call is byte-identical to pre-Part-B.
       let completeness: CompletenessVerdict | undefined;
       let executedFiles: number | undefined;
       let declaredPaths: number | undefined;
-      if (verifyResult === "pass" && criterion.verify.oracle === "test") {
+      if (executedSuccessfully && criterion.verify.oracle === "test") {
         declaredPaths = countExplicitPathArgs(criterion.verify.command);
         const executedUnits = parseExecutedUnits(outputTail);
-        completeness = judgeCompleteness({ declaredPaths, executedUnits });
+        completeness = judgeCompleteness({
+          declaredPaths,
+          executedUnits,
+          hasCaseFilter: commandHasCaseFilter(criterion.verify.command),
+        });
         if (executedUnits !== null) {
           executedFiles = executedUnits.files;
         }
@@ -506,6 +648,7 @@ export class VerifyRunnerService {
         ...(completeness !== undefined ? { completeness } : {}),
         ...(executedFiles !== undefined ? { executed_files: executedFiles } : {}),
         ...(declaredPaths !== undefined ? { declared_paths: declaredPaths } : {}),
+        ...(binaryFreshness !== undefined ? { binary_freshness: binaryFreshness } : {}),
       });
     }
 
