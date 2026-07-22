@@ -103,12 +103,31 @@
  *     §M2's entire env-allowlist trust-hardening, handing the full
  *     `process.env` (including `LORE_SYNC_TOKEN`) to every `lore verify`
  *     spawned command.
+ *   - `defaults.editor` — a DEFERRED-execution RCE, distinct in shape from the
+ *     other three (which fire on the NEXT `lore verify`/AI-provider call):
+ *     `resolveEditorCommand` (`packages/lore/src/adapters/cli/editor.ts`)
+ *     prefers `defaults.editor` over `$EDITOR`, and `openEditor` in that same
+ *     module whitespace-splits it and `spawnSync`s the first token with a temp
+ *     file path as an argument. The write itself is silent; the payload runs
+ *     on the operator's own next interactive `lore create`/`lore set` (no
+ *     flags needed to trigger it — just opening an editor). Honest bounds:
+ *     this requires a valid cookie session (localhost dashboard, CSRF-Origin
+ *     enforced) and only fires under `process.stdin.isTTY`; `openEditor` does
+ *     NOT set `shell: true`, so there is no shell-metacharacter injection —
+ *     but the executed binary path is fully attacker-chosen. Sibling keys
+ *     `defaults.format` (enum) and `defaults.color` (boolean) are inert and
+ *     deliberately NOT denied — this entry targets `defaults.editor` alone,
+ *     never the `defaults` subtree wholesale (a `{defaults: null}`/`{defaults:
+ *     {}}` patch is still caught by the proper-ancestor rule above, since it
+ *     is a shorter path than this 2-segment pattern already is — no widening
+ *     needed on this entry's account).
  */
 export const CONFIG_DENY_KEYS: readonly string[] = [
   "ai.providers.*.command",
   "ai.providers.*.args",
   "ai.http.headers.*",
   "verify.env.passthrough_all",
+  "defaults.editor",
 ];
 
 /**

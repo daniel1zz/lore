@@ -63,15 +63,50 @@ describe("findDeniedConfigKeys — HAPPY: exact-leaf denial for every CONFIG_DEN
     ]);
   });
 
-  it("CONFIG_DENY_KEYS declares exactly the 4 documented patterns", () => {
+  it("denies defaults.editor", () => {
+    expect(findDeniedConfigKeys({ defaults: { editor: "/tmp/evil.sh" } })).toEqual(["defaults.editor"]);
+  });
+
+  it("CONFIG_DENY_KEYS declares exactly the 5 documented patterns", () => {
     expect([...CONFIG_DENY_KEYS].sort()).toEqual(
       [
         "ai.http.headers.*",
         "ai.providers.*.args",
         "ai.providers.*.command",
         "verify.env.passthrough_all",
+        "defaults.editor",
       ].sort(),
     );
+  });
+});
+
+// ─── findDeniedConfigKeys — AC-062-13: defaults.editor (deferred-execution RCE) ──
+
+describe("findDeniedConfigKeys — AC-062-13: defaults.editor deny-key", () => {
+  it("HAPPY: {defaults:{editor:'/tmp/evil.sh'}} denies exactly ['defaults.editor']", () => {
+    expect(findDeniedConfigKeys({ defaults: { editor: "/tmp/evil.sh" } })).toEqual(["defaults.editor"]);
+  });
+
+  it("NEGATIVE: {defaults:{format:'json'}} — inert sibling key, exactly 0 denied", () => {
+    expect(findDeniedConfigKeys({ defaults: { format: "json" } })).toEqual([]);
+  });
+
+  it("NEGATIVE: {defaults:{color:false}} — inert sibling key, exactly 0 denied", () => {
+    expect(findDeniedConfigKeys({ defaults: { color: false } })).toEqual([]);
+  });
+
+  it("NEGATIVE: a patch touching both inert siblings together still denies 0", () => {
+    expect(findDeniedConfigKeys({ defaults: { format: "json", color: true } })).toEqual([]);
+  });
+
+  it("BOUNDARY (ancestor): {defaults:null} — proper ancestor of defaults.editor, denied", () => {
+    const denied = findDeniedConfigKeys({ defaults: null });
+    expect(denied).toContain("defaults");
+  });
+
+  it("BOUNDARY (ancestor): {defaults:{}} — empty-object-is-a-leaf branch, denied", () => {
+    const denied = findDeniedConfigKeys({ defaults: {} });
+    expect(denied).toContain("defaults");
   });
 });
 

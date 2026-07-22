@@ -174,6 +174,47 @@ describe("SPEC-062 T1 — ConfigService", () => {
     expect(after).toBe(before);
   });
 
+  it("NEGATIVE: deny keys — defaults.editor is rejected (AC-062-13, deferred-execution RCE), zero bytes written", async () => {
+    seedConfig(baseConfig());
+    const { configService } = harness();
+    const before = sha256(rawConfigBytes());
+
+    const result = await configService.update(
+      { defaults: { editor: "/tmp/evil.sh" } },
+      { actor: "tester" },
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    expect(result.error.code === "VALIDATION_ERROR" && result.error.field).toBe("defaults.editor");
+
+    const after = sha256(rawConfigBytes());
+    expect(after).toBe(before);
+  });
+
+  it("NEGATIVE: defaults.format and defaults.color (siblings of defaults.editor) remain WRITABLE", async () => {
+    seedConfig(baseConfig());
+    const { configService } = harness();
+
+    const formatResult = await configService.update(
+      { defaults: { format: "json" } },
+      { actor: "tester" },
+    );
+    expect(formatResult.ok).toBe(true);
+
+    const colorResult = await configService.update(
+      { defaults: { color: false } },
+      { actor: "tester" },
+    );
+    expect(colorResult.ok).toBe(true);
+
+    const reread = await configService.read();
+    expect(reread.ok).toBe(true);
+    if (!reread.ok) return;
+    expect((reread.value.config.defaults as never as { format?: string })?.format).toBe("json");
+    expect((reread.value.config.defaults as never as { color?: boolean })?.color).toBe(false);
+  });
+
   // ─── BOUNDARY: mixed legal + deny key patch ────────────────────────────────
 
   it("BOUNDARY: a patch mixing a legal key and a deny key is rejected wholesale (no partial apply)", async () => {
