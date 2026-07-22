@@ -24,6 +24,7 @@ import type { App } from "../../../src/app.js";
 import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
 import { registerTools } from "../../../src/adapters/mcp/tools.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { DocRecord } from "@lore/core";
 
 // ─── Test Infrastructure ─────────────────────────────────────────────────────
 
@@ -178,6 +179,76 @@ describe("lore_create", () => {
 
   // STATE: N/A — stateless per call
   // REGRESSION: N/A — no known regressions
+
+  // ─── requires_uat (SPEC-058 hotfix: plan-add-requires-uat-authoring-path) ───
+  //
+  // Consistency note: the CLI's `lore create <type> --requires-uat` rejects the
+  // flag on any non-plan type as a type-flag mismatch, exit 2 (see
+  // cli-create.bun.test.ts's "--requires-uat (SPEC-058 hotfix)" describe block
+  // for the exit-code correction — the task doc that spawned this test file
+  // addition stated exit 4, but the REAL, pre-existing mismatch-validation
+  // block this hotfix reuses calls process.exit(2), same as every other entry
+  // in TYPE_SPECIFIC_FLAGS). This tool matches that REJECT stance (not "ignore")
+  // via a VALIDATION_ERROR, asserted below.
+  describe("requires_uat (SPEC-058 hotfix)", () => {
+    it("HAPPY: requires_uat=true on a plan sets extra.requires_uat=true", async () => {
+      const prdResult = await call()({ type: "prd", title: "Root" });
+      const prd = parseResult(prdResult) as { id: string };
+
+      const planResult = await call()({
+        type: "plan",
+        title: "UAT-Gated Plan",
+        parent_id: prd.id,
+        requires_uat: true,
+      });
+      expect(planResult.isError).toBeFalsy();
+      const plan = parseResult(planResult) as { id: string };
+
+      const getResult = await getToolHandler(server, "lore_get")({ id_or_slug: plan.id });
+      expect(getResult.isError).toBeFalsy();
+      const data = parseResult(getResult) as { doc: DocRecord };
+      expect(data.doc.extra["requires_uat"]).toBe(true);
+    });
+
+    it("REGRESSION: a plan created WITHOUT requires_uat has no requires_uat key (absent, not false)", async () => {
+      const prdResult = await call()({ type: "prd", title: "Root" });
+      const prd = parseResult(prdResult) as { id: string };
+
+      const planResult = await call()({ type: "plan", title: "Plain Plan", parent_id: prd.id });
+      expect(planResult.isError).toBeFalsy();
+      const plan = parseResult(planResult) as { id: string };
+
+      const getResult = await getToolHandler(server, "lore_get")({ id_or_slug: plan.id });
+      const data = parseResult(getResult) as { doc: DocRecord };
+      expect("requires_uat" in data.doc.extra).toBe(false);
+    });
+
+    it("BOUNDARY: requires_uat=false is treated as absent — no requires_uat key written", async () => {
+      const prdResult = await call()({ type: "prd", title: "Root" });
+      const prd = parseResult(prdResult) as { id: string };
+
+      const planResult = await call()({
+        type: "plan",
+        title: "Explicit False Plan",
+        parent_id: prd.id,
+        requires_uat: false,
+      });
+      expect(planResult.isError).toBeFalsy();
+      const plan = parseResult(planResult) as { id: string };
+
+      const getResult = await getToolHandler(server, "lore_get")({ id_or_slug: plan.id });
+      const data = parseResult(getResult) as { doc: DocRecord };
+      expect("requires_uat" in data.doc.extra).toBe(false);
+    });
+
+    it("consistency with the CLI: requires_uat=true on a non-plan type is rejected (VALIDATION_ERROR), never silently ignored", async () => {
+      const result = await call()({ type: "spec", title: "Spec", requires_uat: true });
+      expect(result.isError).toBe(true);
+      const error = parseResult(result) as { code: string; field?: string };
+      expect(error.code).toBe("VALIDATION_ERROR");
+      expect(error.field).toBe("requires_uat");
+    });
+  });
 });
 
 // ─── lore_get ─────────────────────────────────────────────────────────────────

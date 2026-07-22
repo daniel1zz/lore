@@ -136,6 +136,22 @@ export const LoreCreateSchema = z.object({
    */
   file_anchors: z.array(z.string()).optional(),
   /**
+   * [plan branch only] Declares that this plan requires a P0-accepted UAT
+   * verdict before it may be archived (SPEC-058 plan-promote `requiresUat`
+   * gate / SPEC-054 plan-close `uatP0Accepted` gate). Merged into
+   * `extra.requires_uat` before the call reaches `CorpusService.create` —
+   * ONLY when `true`; `false` or omitted leaves `extra.requires_uat` unset
+   * (byte-identical to a call that never passed this field at all).
+   *
+   * Consistency with the CLI (SPEC-058 hotfix `plan-add-requires-uat-authoring-path`):
+   * the CLI's `lore create <type> --requires-uat` REJECTS the flag on any
+   * non-plan type as a type-flag mismatch (exit 2). This tool matches that
+   * stance — passing `requires_uat: true` with `type` other than `"plan"`
+   * is a VALIDATION_ERROR, never a silent ignore, so the two surfaces can
+   * never silently diverge on what counts as a legal combination.
+   */
+  requires_uat: z.boolean().optional(),
+  /**
    * ID or slug of an existing knowledge/adr doc this new doc supersedes
    * (SPEC-043 §Design Decisions D11) — composes `CorpusService.create` THEN
    * `ValidityService.invalidate(supersedes, {supersededBy: newDoc.id, by})` via
@@ -776,15 +792,33 @@ export function registerTools(server: McpServer, app: App): void {
       resolvedContent = aiResult.value.content;
     }
 
-    // Strip the `ai`/`file_anchors`/`supersedes`/`by` fields before passing to
-    // corpusService.create — none is a corpus field; file_anchors (SPEC-042 D9) is
-    // folded into `extra` here so CorpusService._createImpl's single validation gate
-    // sees it the same way it would from a raw extra.file_anchors payload.
-    const { ai: _ai, file_anchors: fileAnchors, supersedes, by, ...createInput } = args;
-    const mergedExtra =
-      fileAnchors !== undefined
-        ? { ...(createInput.extra ?? {}), file_anchors: fileAnchors }
-        : createInput.extra;
+    // SPEC-058 hotfix (plan-add-requires-uat-authoring-path): match the CLI's
+    // `TYPE_SPECIFIC_FLAGS` mismatch-rejection stance for --requires-uat — a
+    // `requires_uat: true` on any non-plan type is a VALIDATION_ERROR, never a
+    // silent ignore, so the CLI and MCP surfaces cannot silently diverge on
+    // what a legal combination is.
+    if (args.requires_uat === true && args.type !== "plan") {
+      return errorContent({
+        code: "VALIDATION_ERROR",
+        field: "requires_uat",
+        message: `requires_uat is only valid for type "plan" (got "${args.type}").`,
+        value: args.requires_uat,
+      });
+    }
+
+    // Strip the `ai`/`file_anchors`/`requires_uat`/`supersedes`/`by` fields before
+    // passing to corpusService.create — none is a corpus field; file_anchors
+    // (SPEC-042 D9) and requires_uat (SPEC-058 hotfix, plan branch only, `true` only)
+    // are folded into `extra` here so CorpusService._createImpl's single validation
+    // gate sees them the same way it would from a raw extra.* payload.
+    const { ai: _ai, file_anchors: fileAnchors, requires_uat: requiresUat, supersedes, by, ...createInput } = args;
+    let mergedExtra = createInput.extra;
+    if (fileAnchors !== undefined) {
+      mergedExtra = { ...(mergedExtra ?? {}), file_anchors: fileAnchors };
+    }
+    if (createInput.type === "plan" && requiresUat === true) {
+      mergedExtra = { ...(mergedExtra ?? {}), requires_uat: true };
+    }
     const resolvedCreateInput = {
       ...createInput,
       content: resolvedContent,
@@ -1675,19 +1709,30 @@ async function executeBatchOp(
     case "create": {
       const parsed = LoreCreateSchema.safeParse(args);
       if (!parsed.success) return { ok: false, error: zodIssueToLoreError(parsed.error, "create") };
-      // reason: strip MCP-schema-only fields (ai/file_anchors/supersedes/by) — the
-      // batch executor never invokes AI generation or the supersedes orchestration
-      // (out of scope for lore_batch); file_anchors still folds into extra the same
-      // way the single-op lore_create handler does, so a batch-created task's
-      // declared anchors aren't silently dropped.
-      const { ai: _ai, file_anchors: fileAnchors, supersedes: _supersedes, by: _by, ...createInput } = parsed.data;
+      // reason: strip MCP-schema-only fields (ai/file_anchors/requires_uat/supersedes/by)
+      // — the batch executor never invokes AI generation or the supersedes orchestration
+      // (out of scope for lore_batch); file_anchors and requires_uat (SPEC-058 hotfix,
+      // plan branch only, `true` only) still fold into extra the same way the single-op
+      // lore_create handler does, so a batch-created task's declared anchors — or a
+      // batch-created plan's requires_uat flag — aren't silently dropped.
+      const {
+        ai: _ai,
+        file_anchors: fileAnchors,
+        requires_uat: requiresUat,
+        supersedes: _supersedes,
+        by: _by,
+        ...createInput
+      } = parsed.data;
       void _ai;
       void _supersedes;
       void _by;
-      const mergedExtra =
-        fileAnchors !== undefined
-          ? { ...(createInput.extra ?? {}), file_anchors: fileAnchors }
-          : createInput.extra;
+      let mergedExtra = createInput.extra;
+      if (fileAnchors !== undefined) {
+        mergedExtra = { ...(mergedExtra ?? {}), file_anchors: fileAnchors };
+      }
+      if (createInput.type === "plan" && requiresUat === true) {
+        mergedExtra = { ...(mergedExtra ?? {}), requires_uat: true };
+      }
       const resolvedCreateInput = {
         ...createInput,
         ...(mergedExtra !== undefined ? { extra: mergedExtra } : {}),

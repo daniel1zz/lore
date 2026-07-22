@@ -13,6 +13,8 @@
  *               as VALIDATION_ERROR (exit 4) — unlike --decision-status/--sub-type,
  *               --kind is NOT pre-validated here since it is optional, not required.
  *               Source: SPEC-032 §3.1
+ *   plan      → --requires-uat (boolean); absent/false leaves extra.requires_uat unset.
+ *               Source: SPEC-058 hotfix (plan-add-requires-uat-authoring-path)
  *
  * Content decision tree (SPEC-017 §3.11, amended by SPEC-024):
  *   --content-file <path> → read file, use its contents (skip AI and editor)
@@ -75,6 +77,7 @@ const TYPE_SPECIFIC_FLAGS: Readonly<Record<string, readonly DocType[]>> = {
   kind: ["spec"],
   anchor: ["task"],
   "code-anchor": ["spec"],
+  "requires-uat": ["plan"],
 };
 
 /** citty/mri yields a single string for one occurrence of a repeatable flag, an array for ≥2, or `undefined` for zero. Normalizes to a string array. */
@@ -154,6 +157,11 @@ export default defineCommand({
       type: "string",
       description:
         "[spec only, repeatable] Declare a code_anchors entry (path[#Symbol] — repo-relative POSIX path, optional #ExportedSymbol). Distinct grammar from task --anchor. Verified by `lore status --check-drift` (SPEC-045).",
+    },
+    "requires-uat": {
+      type: "boolean",
+      description:
+        "[plan only] Declare that this plan requires a P0-accepted UAT verdict before it may be archived (SPEC-058 plan-promote requiresUat gate / SPEC-054 plan-close uatP0Accepted gate). Absent or --requires-uat=false leaves extra.requires_uat unset.",
     },
     supersedes: {
       type: "string",
@@ -410,6 +418,7 @@ export default defineCommand({
         args.kind,
         normalizeRepeatable(args.anchor),
         normalizeRepeatable(args["code-anchor"]),
+        args["requires-uat"] as boolean | undefined,
       );
 
       const createInput = {
@@ -510,6 +519,9 @@ export default defineCommand({
  * grammar — SPEC-045 D1/D6, a DISTINCT flag from task's `--anchor`); the RAW
  * strings pass through untouched here too — `CorpusService._createImpl`'s D6a
  * grammar branch is the single enforcement gate.
+ * For plans: includes requires_uat ONLY when --requires-uat was passed AND true
+ * (SPEC-058 hotfix) — `--requires-uat=false` or an omitted flag both leave the
+ * plan's extra undefined, byte-identical to pre-hotfix behavior (REGRESSION).
  */
 function buildExtra(
   docType: DocType,
@@ -520,6 +532,7 @@ function buildExtra(
   specKind?: string,
   anchors?: string[],
   codeAnchors?: string[],
+  requiresUat?: boolean,
 ): Record<string, unknown> | undefined {
   if (docType === "adr" && decisionStatus !== undefined) {
     return { decision_status: decisionStatus };
@@ -542,6 +555,9 @@ function buildExtra(
     if (specKind !== undefined) extra["spec_kind"] = specKind;
     if (codeAnchors !== undefined && codeAnchors.length > 0) extra["code_anchors"] = codeAnchors;
     return Object.keys(extra).length > 0 ? extra : undefined;
+  }
+  if (docType === "plan" && requiresUat === true) {
+    return { requires_uat: true };
   }
   return undefined;
 }
