@@ -413,3 +413,216 @@ describe("REGRESSION — caller-supplied inconclusive result via addEvidence is 
     expect(Array.isArray(evidenceArr)).toBe(true);
   });
 });
+
+// ─── Part A — build-freshness precheck (task
+// task-verify-trust-extensions-build-freshness-t-case-count-guard) ────────────
+//
+// `checkBinaryFreshness` is an OPTIONAL 5th constructor argument (a
+// `() => BinaryFreshnessVerdict` port, mirrors the `executor`/`getPlanBundle`
+// injection pattern) — omitting it (as every OTHER describe block in this
+// file does) preserves the pre-Part-A constructor signature exactly, so
+// `app.ts`'s existing 4-arg call sites need no change. It is consulted ONLY
+// when a script:test AC's command references the compiled `dist/lore` binary
+// (`commandReferencesCompiledBinary`) — every other command is completely
+// unaffected, and the port itself is never even invoked for them (asserted
+// via a throwing spy below).
+//
+// Dimension mapping:
+//   HAPPY / REPRO: a command referencing dist/lore with a "stale" verdict
+//               downgrades result to "inconclusive" and appends a warning
+//               naming `bun run build`
+//   NEGATIVE:   a "missing" verdict also downgrades + warns
+//   BOUNDARY:   a "fresh" verdict leaves the result exactly as computed
+//               otherwise (pass stays pass)
+//   ERROR:      n/a — the port is a total function (`BinaryFreshnessVerdict`
+//               has no error state); no new throw surface
+//   STATE:      a command that does NOT reference dist/lore never calls the
+//               port at all, regardless of its verdict
+//   REGRESSION: omitting the 5th constructor arg entirely (the pre-Part-A
+//               call shape) leaves a non-binary-referencing command's result
+//               byte-identical; a stale-binary verdict combined with an
+//               already-"under_match" completeness verdict stays
+//               "inconclusive" without duplicating the completeness verdict
+
+function makeFreshnessCheck(verdict: "fresh" | "stale" | "missing") {
+  const calls: number[] = [];
+  const fn = (): "fresh" | "stale" | "missing" => {
+    calls.push(1);
+    return verdict;
+  };
+  return { fn, calls };
+}
+
+function makeThrowingFreshnessCheck() {
+  return (): "fresh" | "stale" | "missing" => {
+    throw new Error("checkBinaryFreshness must never be called for a non-binary command");
+  };
+}
+
+describe("HAPPY/REPRO — a stale dist/lore-referencing command downgrades to inconclusive", () => {
+  it("exit 0 + stale binary verdict -> result inconclusive, warning names 'bun run build'", async () => {
+    const spec = makeSpec([tscAc("AC-1", "./dist/lore verify plan-1")]);
+    const plan = makePlan();
+    const task = taskWithFreshClaim("task-1");
+    const bundle: PlanBundle = { plan, spec, tasks: [task] };
+    const { fn: getPlanBundle } = makeGetPlanBundle(bundle);
+    const executor = makeExecutor([
+      ok({ exitCode: 0, outputTail: "verified ok\n", durationMs: 50, timedOut: false }),
+    ]);
+    const recorder = makeRecordVerifiedEvidence();
+    const { fn: checkBinaryFreshness } = makeFreshnessCheck("stale");
+    const service = new VerifyRunnerService(
+      getPlanBundle,
+      recorder.fn,
+      executor.fn,
+      config,
+      checkBinaryFreshness,
+    );
+
+    const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.results[0]?.result).toBe("inconclusive");
+    expect(result.value.results[0]?.binary_freshness).toBe("stale");
+    expect(result.value.warnings.some((w) => w.includes("bun run build"))).toBe(true);
+    expect(recorder.calls[0]?.entry.result).toBe("inconclusive");
+  });
+});
+
+describe("NEGATIVE — a missing binary also downgrades to inconclusive", () => {
+  it("exit 0 + missing binary verdict -> result inconclusive, warning present", async () => {
+    const spec = makeSpec([tscAc("AC-1", "/repo/dist/lore --version")]);
+    const plan = makePlan();
+    const task = taskWithFreshClaim("task-1");
+    const bundle: PlanBundle = { plan, spec, tasks: [task] };
+    const { fn: getPlanBundle } = makeGetPlanBundle(bundle);
+    const executor = makeExecutor([
+      ok({ exitCode: 0, outputTail: "", durationMs: 10, timedOut: false }),
+    ]);
+    const recorder = makeRecordVerifiedEvidence();
+    const { fn: checkBinaryFreshness } = makeFreshnessCheck("missing");
+    const service = new VerifyRunnerService(
+      getPlanBundle,
+      recorder.fn,
+      executor.fn,
+      config,
+      checkBinaryFreshness,
+    );
+
+    const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.results[0]?.result).toBe("inconclusive");
+    expect(result.value.results[0]?.binary_freshness).toBe("missing");
+    expect(result.value.warnings.some((w) => w.includes("bun run build"))).toBe(true);
+  });
+});
+
+describe("BOUNDARY — a fresh binary leaves the result exactly as otherwise computed", () => {
+  it("exit 0 + fresh verdict -> result stays pass, no freshness warning", async () => {
+    const spec = makeSpec([tscAc("AC-1", "./dist/lore verify plan-1")]);
+    const plan = makePlan();
+    const task = taskWithFreshClaim("task-1");
+    const bundle: PlanBundle = { plan, spec, tasks: [task] };
+    const { fn: getPlanBundle } = makeGetPlanBundle(bundle);
+    const executor = makeExecutor([
+      ok({ exitCode: 0, outputTail: "verified ok\n", durationMs: 50, timedOut: false }),
+    ]);
+    const recorder = makeRecordVerifiedEvidence();
+    const { fn: checkBinaryFreshness } = makeFreshnessCheck("fresh");
+    const service = new VerifyRunnerService(
+      getPlanBundle,
+      recorder.fn,
+      executor.fn,
+      config,
+      checkBinaryFreshness,
+    );
+
+    const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.results[0]?.result).toBe("pass");
+    expect(result.value.results[0]?.binary_freshness).toBe("fresh");
+    expect(result.value.warnings.some((w) => w.includes("bun run build"))).toBe(false);
+  });
+});
+
+describe("STATE — a non-binary-referencing command never invokes checkBinaryFreshness at all", () => {
+  it("a plain source-run command completes normally even with a throwing freshness port", async () => {
+    const spec = makeSpec([tscAc("AC-1", "bun run typecheck")]);
+    const plan = makePlan();
+    const task = taskWithFreshClaim("task-1");
+    const bundle: PlanBundle = { plan, spec, tasks: [task] };
+    const { fn: getPlanBundle } = makeGetPlanBundle(bundle);
+    const executor = makeExecutor([
+      ok({ exitCode: 0, outputTail: "", durationMs: 500, timedOut: false }),
+    ]);
+    const recorder = makeRecordVerifiedEvidence();
+    const service = new VerifyRunnerService(
+      getPlanBundle,
+      recorder.fn,
+      executor.fn,
+      config,
+      makeThrowingFreshnessCheck(),
+    );
+
+    const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.results[0]?.result).toBe("pass");
+    expect(result.value.results[0]?.binary_freshness).toBeUndefined();
+  });
+});
+
+describe("REGRESSION — omitting the 5th constructor argument entirely is byte-identical for a non-binary command", () => {
+  it("no checkBinaryFreshness passed at all -> unaffected (pre-Part-A call shape)", async () => {
+    const spec = makeSpec([testAc("AC-1", "bunx vitest run packages/core/tests/a.test.ts")]);
+    const plan = makePlan();
+    const task = taskWithFreshClaim("task-1");
+    const bundle: PlanBundle = { plan, spec, tasks: [task] };
+    const { fn: getPlanBundle } = makeGetPlanBundle(bundle);
+    const executor = makeExecutor([
+      ok({ exitCode: 0, outputTail: "Test Files  1 passed (1)\n", durationMs: 30, timedOut: false }),
+    ]);
+    const recorder = makeRecordVerifiedEvidence();
+    // reason: the pre-Part-A 4-arg constructor call — proves app.ts's existing
+    // wiring needs no change.
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config);
+
+    const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.results[0]).toMatchObject({ result: "pass", completeness: "complete" });
+    expect(result.value.results[0]?.binary_freshness).toBeUndefined();
+  });
+
+  it("a stale binary combined with an already-under_match completeness verdict stays inconclusive (no duplicated downgrade)", async () => {
+    const command = "./dist/lore verify plan-1 packages/core/tests/a.test.ts packages/core/tests/b.test.ts";
+    const spec = makeSpec([testAc("AC-1", command)]);
+    const plan = makePlan();
+    const task = taskWithFreshClaim("task-1");
+    const bundle: PlanBundle = { plan, spec, tasks: [task] };
+    const { fn: getPlanBundle } = makeGetPlanBundle(bundle);
+    // vitest reports only 1 of the 2 declared files ran (under_match) AND the
+    // binary is stale — both signals independently demand "inconclusive".
+    const executor = makeExecutor([
+      ok({ exitCode: 0, outputTail: "Test Files  1 passed (1)\n", durationMs: 30, timedOut: false }),
+    ]);
+    const recorder = makeRecordVerifiedEvidence();
+    const { fn: checkBinaryFreshness } = makeFreshnessCheck("stale");
+    const service = new VerifyRunnerService(
+      getPlanBundle,
+      recorder.fn,
+      executor.fn,
+      config,
+      checkBinaryFreshness,
+    );
+
+    const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.results[0]?.result).toBe("inconclusive");
+    expect(result.value.results[0]?.completeness).toBe("under_match");
+    expect(result.value.results[0]?.binary_freshness).toBe("stale");
+  });
+});
