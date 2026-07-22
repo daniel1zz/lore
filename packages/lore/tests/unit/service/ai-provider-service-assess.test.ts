@@ -1126,3 +1126,155 @@ describe("buildAssessPrompt — structured AC table truncation (BOUNDARY, SPEC-0
     expect(truncatedResult.prompt).toContain("## Spec Acceptance Criteria (structured)");
   });
 });
+
+// ─── hotfix: assess diff-range scope guard (task-assess-diff-range-scope-mismatch-warning) ───
+//
+// Mechanizes the discipline behind three real incidents (2026-07-21 main~8..main;
+// 2026-07-22 SPEC-062/SPEC-064 re-runs): a too-wide `lore assess --diff` range silently
+// converts unrelated work into false scope_fidelity gaps. assessPlan computes a
+// non-blocking `scope_warning` — a deterministic FACTS comparison (diff files ∩ the
+// plan's declared task file_anchors), never an LLM judgment — that fires only when
+// STRICTLY fewer than half the diff's files intersect, and only when at least one task
+// in the plan declares anchors at all.
+
+/**
+ * Builds a real PlanBundle (same construction path as `makeBundle`) whose single child
+ * task declares `extra.file_anchors` (or none at all, when `anchors` is `undefined`).
+ */
+async function makeBundleWithTaskAnchors(store: InMemoryStore, anchors: string[] | undefined): Promise<PlanBundle> {
+  const corpusService = new CorpusService(store);
+
+  const prdResult = await corpusService.create({
+    type: "prd",
+    title: "Scope Guard Test PRD",
+    content: "Root PRD for scope-guard tests.",
+  } as CreateDocInput);
+  if (!prdResult.ok) throw new Error("prd create failed");
+
+  const specResult = await corpusService.create({
+    type: "spec",
+    title: "Scope Guard Test Spec",
+    parent_id: prdResult.value.id,
+    content: "## Acceptance Criteria\n\n**AC-SG-1** Something must happen.\n",
+  } as CreateDocInput);
+  if (!specResult.ok) throw new Error("spec create failed");
+
+  const planResult = await corpusService.create({
+    type: "plan",
+    title: "Scope Guard Test Plan",
+    parent_id: specResult.value.id,
+    content: "Plan goals for scope-guard tests.",
+  } as CreateDocInput);
+  if (!planResult.ok) throw new Error("plan create failed");
+
+  const taskResult = await corpusService.create({
+    type: "task",
+    title: "Do the scoped work",
+    parent_id: planResult.value.id,
+    content: "Task body describing the scoped work.",
+    extra: {
+      plan_id: planResult.value.id,
+      ...(anchors !== undefined ? { file_anchors: anchors } : {}),
+    },
+  } as CreateDocInput);
+  if (!taskResult.ok) throw new Error("task create failed");
+
+  const bundleResult = await corpusService.getPlanBundle(planResult.value.id);
+  if (!bundleResult.ok) throw new Error("getPlanBundle failed");
+  return bundleResult.value;
+}
+
+/** Builds a minimal-but-valid unified diff touching exactly the given file paths. */
+function diffTouching(paths: string[]): string {
+  return paths
+    .map((p) => `diff --git a/${p} b/${p}\nindex 1..2 100644\n--- a/${p}\n+++ b/${p}\n@@ -1,1 +1,1 @@\n+x\n`)
+    .join("");
+}
+
+describe("assessPlan — diff-range scope-mismatch warning (task-assess-diff-range-scope-mismatch-warning)", () => {
+  it("HAPPY: a diff whose files all fall under the plan's task anchors → no warning", async () => {
+    const store = new InMemoryStore();
+    const bundle = await makeBundleWithTaskAnchors(store, ["src/a.ts", "src/b.ts"]);
+    const diffText = diffTouching(["src/a.ts", "src/b.ts"]);
+    const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
+    const { service } = makeAssessService({ provider });
+
+    const result = await service.assessPlan(bundle, { diffText });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.scope_warning).toBeUndefined();
+  });
+
+  it("NEGATIVE/STATE: a diff dominated by files OUTSIDE the task anchors (< half intersect) → exactly one warning naming the counts", async () => {
+    const store = new InMemoryStore();
+    const bundle = await makeBundleWithTaskAnchors(store, ["src/a.ts"]);
+    // 1 of 3 files intersects — strictly fewer than half.
+    const diffText = diffTouching(["src/a.ts", "docs/readme.md", "packages/dashboard/x.tsx"]);
+    const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
+    const { service } = makeAssessService({ provider });
+
+    const result = await service.assessPlan(bundle, { diffText });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.scope_warning).toBeDefined();
+    expect(result.value.scope_warning?.diff_file_count).toBe(3);
+    expect(result.value.scope_warning?.intersecting_count).toBe(1);
+    expect(result.value.scope_warning?.message).toContain("3 files");
+    expect(result.value.scope_warning?.message).toContain("only 1 intersect");
+  });
+
+  it("BOUNDARY: a plan with zero task anchors → check skipped entirely, no warning even though 0 files intersect", async () => {
+    const store = new InMemoryStore();
+    const bundle = await makeBundleWithTaskAnchors(store, undefined); // no file_anchors declared at all
+    const diffText = diffTouching(["docs/readme.md", "packages/dashboard/x.tsx"]);
+    const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
+    const { service } = makeAssessService({ provider });
+
+    const result = await service.assessPlan(bundle, { diffText });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.scope_warning).toBeUndefined();
+  });
+
+  it("BOUNDARY: exactly half of the diff's files intersect → NOT a mismatch (a naive 'warn when any file is outside' rule would wrongly fire here)", async () => {
+    const store = new InMemoryStore();
+    const bundle = await makeBundleWithTaskAnchors(store, ["src/a.ts"]);
+    // 1 of 2 files intersects — exactly half, must NOT warn.
+    const diffText = diffTouching(["src/a.ts", "docs/readme.md"]);
+    const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
+    const { service } = makeAssessService({ provider });
+
+    const result = await service.assessPlan(bundle, { diffText });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.scope_warning).toBeUndefined();
+  });
+
+  it("REGRESSION: verdict/overall_score/ac_scores/persistence-relevant fields are identical whether or not the warning fires", async () => {
+    const storeA = new InMemoryStore();
+    const bundleNoWarning = await makeBundleWithTaskAnchors(storeA, ["src/a.ts"]);
+    const storeB = new InMemoryStore();
+    const bundleWithWarning = await makeBundleWithTaskAnchors(storeB, ["src/a.ts"]);
+
+    const providerA = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
+    const { service: serviceA } = makeAssessService({ provider: providerA });
+    const resultNoWarning = await serviceA.assessPlan(bundleNoWarning, { diffText: diffTouching(["src/a.ts"]) });
+
+    const providerB = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
+    const { service: serviceB } = makeAssessService({ provider: providerB });
+    const resultWithWarning = await serviceB.assessPlan(bundleWithWarning, {
+      diffText: diffTouching(["src/a.ts", "docs/x.md", "docs/y.md"]),
+    });
+
+    expect(resultNoWarning.ok).toBe(true);
+    expect(resultWithWarning.ok).toBe(true);
+    if (!resultNoWarning.ok || !resultWithWarning.ok) return;
+    expect(resultNoWarning.value.scope_warning).toBeUndefined();
+    expect(resultWithWarning.value.scope_warning).toBeDefined();
+    // Same judge output (VALID_JSON) on both runs → verdict/score/ac_scores are identical
+    // regardless of whether the advisory warning fired (never blocks, never changes them).
+    expect(resultNoWarning.value.verdict).toBe(resultWithWarning.value.verdict);
+    expect(resultNoWarning.value.overall_score).toBe(resultWithWarning.value.overall_score);
+    expect(resultNoWarning.value.ac_scores).toEqual(resultWithWarning.value.ac_scores);
+  });
+});

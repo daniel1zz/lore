@@ -19,8 +19,13 @@
  * default; only an EXPLICIT `ai.default_per_surface.<surface> = false` config override
  * requires `--ai` to proceed. `--no-ai` is always a contradiction → exit 2.
  *
+ * Diff-range scope-mismatch warning (hotfix task-assess-diff-range-scope-mismatch-warning):
+ * `result.scope_warning` (computed by `aiProviderService.assessPlan`, never this adapter)
+ * is a non-blocking advisory printed after the summary in text mode, and surfaced under a
+ * stable `data.scope_warning` key in `--json` output — never affects verdict/exit code.
+ *
  * Source: SPEC-026 §3 D1-D5; §4 AC-ASSESS-1, AC-ASSESS-6, AC-ASSESS-8, AC-ASSESS-9;
- * SPEC-028 AC-AE-1
+ * SPEC-028 AC-AE-1; task-assess-diff-range-scope-mismatch-warning
  */
 
 import { spawnSync } from "node:child_process";
@@ -209,12 +214,27 @@ export default defineCommand({
       }
 
       // ─── Step 7: render ─────────────────────────────────────────────────────────
+      // reason: hotfix (task-assess-diff-range-scope-mismatch-warning) — a non-blocking
+      // advisory, computed by assessPlan and persisted on `result.scope_warning`. Surfaced
+      // under the stable top-level `data.scope_warning` key (in addition to its copy
+      // inside `data.result`) so a caller doesn't need to know it lives nested — `undefined`
+      // is dropped by JSON.stringify, so the key is simply absent when no warning fired.
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: { assessment: assessmentDoc, result } }, null, 2));
+        console.log(
+          JSON.stringify(
+            { ok: true, data: { assessment: assessmentDoc, result, scope_warning: result.scope_warning } },
+            null,
+            2,
+          ),
+        );
         return;
       }
 
       console.log(formatAssessmentSummary(result));
+      if (result.scope_warning) {
+        console.log("");
+        console.log(result.scope_warning.message);
+      }
       console.log("");
       console.log(`Saved as ${assessmentDoc.slug} (linked to ${bundle.plan.slug} via informs)`);
     } finally {

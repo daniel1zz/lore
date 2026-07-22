@@ -62,24 +62,42 @@
  *     (D4) appends ungrounded absence-based dimension-score warnings to `rubric_warning`,
  *     never fatal. The active prompt template is resolved via `getAssessTemplate`
  *     (SPEC-040 D6) rather than calling `buildAssessPrompt` directly.
+ *   - assessPlan (hotfix task-assess-diff-range-scope-mismatch-warning) ALSO computes an
+ *     optional `scope_warning` — a deterministic, non-blocking FACTS comparison between the
+ *     diff's changed files (`parseDiffFilePaths`) and the plan's declared task
+ *     `file_anchors` (`computeScopeMismatchWarning`, both `@lore/core`) — exactly once,
+ *     alongside `facts`/`sourceVersions`, and persisted verbatim by `_finalizeAssessment`.
+ *     It NEVER affects `verdict`, `overall_score`, retry behavior, or whether the
+ *     assessment persists; absent (no field, not `undefined`) when no task in the plan
+ *     declares anchors, no diff was supplied, or the intersection is half-or-more.
  *
  * Side-effect class: IO (delegates to AIProvider.generate and Telemetry.emit)
  *
  * Source: SPEC-017 §3.6, SPEC-019 §9.1, SPEC-026 §3 D1, D2; SPEC-029 AC-AR-2, AC-AR-3; SPEC-034 §4;
- * SPEC-038 §5, §7 D5; SPEC-040 §T2 D1-D6, D8
+ * SPEC-038 §5, §7 D5; SPEC-040 §T2 D1-D6, D8; task-assess-diff-range-scope-mismatch-warning
  */
 
 import { err, ok } from "@lore/core";
 import type { AIProvider, DocRecord, DocType, GenerateInput, GenerateOutput, LinkType, LoreError, Telemetry } from "@lore/core";
 import type { AiDefaultSource, CallerSurface, Result } from "@lore/core";
 import { linkTypeSchema } from "@lore/core";
-import type { AssessmentFacts, AssessmentResult, LlmAssessmentOutput, PlanBundle, SourceVersionRef } from "@lore/core";
+import type {
+  AssessmentFacts,
+  AssessmentResult,
+  LlmAssessmentOutput,
+  PlanBundle,
+  ScopeMismatchWarning,
+  SourceVersionRef,
+} from "@lore/core";
 import {
   clipOverlongReasoning,
   computeAssessmentFacts,
+  computeScopeMismatchWarning,
   deriveLegacyFindings,
   extractAssessmentJson,
+  extractFileAnchors,
   llmAssessmentOutputSchema,
+  parseDiffFilePaths,
 } from "@lore/core";
 import type { CheckResult, LlmReviewOutput, NewReviewJudgment, ReviewBundle } from "@lore/core";
 import { llmReviewOutputSchema } from "@lore/core";
@@ -650,6 +668,16 @@ export class AIProviderService {
     const facts = computeAssessmentFacts(bundle, declaredCriteriaForFacts, buildAssessDiffMeta(opts?.diffText));
     const sourceVersions = this._buildSourceVersions(bundle);
 
+    // reason: hotfix (task-assess-diff-range-scope-mismatch-warning) — a deterministic,
+    // non-blocking FACTS comparison between the diff's changed files and the plan's
+    // declared task file_anchors, computed once alongside `facts`/`sourceVersions` and
+    // persisted verbatim by `_finalizeAssessment`. `computeScopeMismatchWarning` itself
+    // degrades to `undefined` (no warning) when no task in the plan declares any anchors
+    // or the diff touches no files — never an error, never a blocked run.
+    const diffFilesForScope = parseDiffFilePaths(opts?.diffText ?? "");
+    const taskAnchorsForScope = bundle.tasks.flatMap((task) => extractFileAnchors(task));
+    const scopeWarning = computeScopeMismatchWarning(diffFilesForScope, taskAnchorsForScope);
+
     const templateResult = getAssessTemplate(ASSESS_PROMPT_VERSION);
     if (!templateResult.ok) return templateResult;
     const { prompt, truncated, declaredAcIds } = templateResult.value(
@@ -707,6 +735,7 @@ export class AIProviderService {
           first.clippedAcIds ?? [],
           facts,
           sourceVersions,
+          scopeWarning,
         ),
       );
     }
@@ -740,6 +769,7 @@ export class AIProviderService {
           second.clippedAcIds ?? [],
           facts,
           sourceVersions,
+          scopeWarning,
         ),
       );
     }
@@ -1113,6 +1143,9 @@ export class AIProviderService {
    *   set (additive-only field, AC-AR-3) when this is non-empty
    * @param facts - Pre-computed AssessmentFacts (SPEC-040 D1) — persisted unchanged
    * @param sourceVersions - Pre-built source-version pins (SPEC-040 D2) — persisted unchanged
+   * @param scopeWarning - Pre-computed diff-range scope-mismatch advisory (hotfix
+   *   task-assess-diff-range-scope-mismatch-warning) — persisted unchanged when present;
+   *   `undefined` omits the field entirely (additive-only, mirrors `facts`/`source_versions`)
    */
   private _finalizeAssessment(
     parsed: LlmAssessmentOutput,
@@ -1123,6 +1156,7 @@ export class AIProviderService {
     clippedAcIds: string[],
     facts: AssessmentFacts,
     sourceVersions: SourceVersionRef[],
+    scopeWarning: ScopeMismatchWarning | undefined,
   ): AssessmentResult {
     // reason: SPEC-040 D3 — only substitute the legacy string arrays when the judge
     // actually emitted the corresponding typed array; a typed_gaps-less response leaves
@@ -1153,6 +1187,7 @@ export class AIProviderService {
       },
       facts,
       source_versions: sourceVersions,
+      ...(scopeWarning !== undefined ? { scope_warning: scopeWarning } : {}),
     };
   }
 
