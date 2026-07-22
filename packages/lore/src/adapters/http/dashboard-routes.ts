@@ -62,7 +62,7 @@ import { createDocInputSchema } from "@lore/core";
 import { jsonOk, jsonError, loreErrorResponse, parseJsonBody, isOriginAllowed, emitDashboardTelemetry } from "./middleware.js";
 import { checkConcurrency, resolveExpectedVersion, buildConflictPayload } from "./concurrency.js";
 import { runCalibrationHook } from "../../flows/calibration-hook.js";
-import { handleDashboardConfigPatch } from "./config-routes.js";
+import { handleDashboardConfigPatch, handleDashboardMachineConfigPatch } from "./config-routes.js";
 
 // ─── CSRF Origin guard ────────────────────────────────────────────────────────
 
@@ -131,7 +131,8 @@ type DashboardPathMatch =
   | { type: "deleteLink"; id: string; linkId: string }
   | { type: "deleteDoc"; id: string }
   | { type: "restore"; id: string }
-  | { type: "configPatch" };
+  | { type: "configPatch" }
+  | { type: "machineConfigPatch" };
 
 function matchDashboardPath(method: string, path: string): DashboardPathMatch | null {
   // POST /api/dashboard/docs
@@ -144,6 +145,14 @@ function matchDashboardPath(method: string, path: string): DashboardPathMatch | 
   // early for readability (config is a distinct, non-doc resource).
   if (method === "PATCH" && path === "/api/dashboard/config") {
     return { type: "configPatch" };
+  }
+
+  // PATCH /api/dashboard/config/machine (SPEC-064 D6) — machine-scope sibling,
+  // checked before /docs/:id for the same readability reason above. A distinct
+  // literal path (not a ?scope= query param) keeps this exact-string dispatch
+  // table one-entry-per-resource, matching every other route below.
+  if (method === "PATCH" && path === "/api/dashboard/config/machine") {
+    return { type: "machineConfigPatch" };
   }
 
   // PATCH /api/dashboard/docs/:id
@@ -575,5 +584,7 @@ export async function handleDashboardRoute(
       return handleDashboardRestore(req, match.id, app);
     case "configPatch":
       return handleDashboardConfigPatch(req, app, actor);
+    case "machineConfigPatch":
+      return handleDashboardMachineConfigPatch(req, app, actor);
   }
 }

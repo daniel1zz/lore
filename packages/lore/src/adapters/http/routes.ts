@@ -16,7 +16,7 @@ import type { ActorContext } from "./auth.js";
 import { ALLOWED_ORIGINS } from "./auth.js";
 import { jsonOk, jsonError, loreErrorResponse, parseJsonBody, corsHeaders } from "./middleware.js";
 import { handleDashboardRoute } from "./dashboard-routes.js";
-import { handleGetConfig } from "./config-routes.js";
+import { handleGetConfig, handleGetMachineConfig } from "./config-routes.js";
 import type { ListFilters, SearchFilters } from "../../service/corpus-service.js";
 import type { PendingFilters } from "../../service/review-service.js";
 import type { CreateDocInput, DocPatch } from "@lore/core";
@@ -171,6 +171,13 @@ export async function handleApiRoute(
   // unlike PATCH /api/dashboard/config which is cookie-only (dispatched above).
   if (method === "GET" && path === "/api/config") {
     return handleGetConfig(app);
+  }
+
+  // GET /api/config/machine (SPEC-064 D6) — machine-scope sibling of GET /api/config,
+  // same cookie-or-bearer duality; a DISTINCT path (not a ?scope= query param) so
+  // this dispatcher's route table stays one-entry-per-resource.
+  if (method === "GET" && path === "/api/config/machine") {
+    return handleGetMachineConfig(app);
   }
 
   // GET /api/docs

@@ -48,7 +48,11 @@ import { resolveAiDefault } from "./ai/resolve-ai.js";
 import { NoOpTelemetry, type Telemetry } from "@lore/core";
 // reason: createTelemetry writes JSONL via Node fs — only reachable via the
 // @lore/core/node subpath (browser-safety split, packages/core/src/CLAUDE.md).
-import { createTelemetry } from "@lore/core/node";
+// resolveGlobalConfigPath/resolveGlobalConfigWritePath (SPEC-064 D1) are the SAME
+// XDG resolution helpers loader.ts already uses for the read-only global-defaults
+// merge — reused here (never re-derived) to locate the machine-scope config file
+// GlobalConfigService writes to.
+import { createTelemetry, resolveGlobalConfigPath, resolveGlobalConfigWritePath } from "@lore/core/node";
 import { buildProviderRegistry } from "./ai/registry.js";
 import { AIProviderService } from "./service/ai-provider-service.js";
 import { SyncDocsService } from "./service/sync-docs-service.js";
@@ -71,6 +75,7 @@ import { DriftCheckService } from "./service/drift-check-service.js";
 import { SeatService } from "./service/seat-service.js";
 import { RealGitPort } from "./adapters/real-git-port.js";
 import { ConfigService } from "./service/config-service.js";
+import { GlobalConfigService } from "./service/global-config-service.js";
 // reason: SPEC-056 phase execution model DI — construction lives in phase-wiring.ts,
 // NOT inline here, to minimize this file's diff surface against the concurrently-
 // dispatched app.ts-wiring task (see phase-wiring.ts's module header).
@@ -327,6 +332,18 @@ export interface App {
    * Source: SPEC-062 §Scope D1, D6.
    */
   configService?: ConfigService;
+  /**
+   * GlobalConfigService — the machine-scope (`~/.config/lore/config.yaml` / XDG)
+   * sibling of `configService` (SPEC-064 §Design D1/D7). Constructed over
+   * `resolveGlobalConfigPath() ?? resolveGlobalConfigWritePath()` — the SAME
+   * XDG-precedence helpers `loader.ts` already uses for the read-only global-
+   * defaults merge, never a second resolution path — plus the same narrow
+   * `appendAuditEntry` port `configService` receives.
+   * Optional for the same "pre-existing hand-built App test stubs stay valid"
+   * reason as `configService`/`acService`/`seatService`; always wired in production.
+   * Source: SPEC-064 §Design D1.
+   */
+  globalConfigService?: GlobalConfigService;
   /**
    * The corpus root — `dirname(dirname(dbPath))` (`dbPath` is always
    * `<repoRoot>/.lore/lore.db`), the SAME value threaded into
@@ -594,6 +611,17 @@ function buildAppFromSqlite(
     // "<repoRoot>/.lore/config.yaml"), not a store; the narrow appendAuditEntry
     // port is bound directly to the store for the D6 audit row.
     configService: new ConfigService(repoRoot, store.appendAuditEntry.bind(store)),
+    // reason: GlobalConfigService (SPEC-064 D1) — the machine-scope sibling of
+    // ConfigService above, over the XDG global config path rather than repoRoot.
+    // `resolveGlobalConfigPath()` returns undefined when no global config file
+    // exists yet (D7 — a missing file is `ok({})`, not an error); falling back to
+    // `resolveGlobalConfigWritePath()` gives GlobalConfigService.update somewhere
+    // to write the FIRST machine config to, mirroring loader.ts's read-only use of
+    // the same pair.
+    globalConfigService: new GlobalConfigService(
+      resolveGlobalConfigPath() ?? resolveGlobalConfigWritePath(),
+      store.appendAuditEntry.bind(store),
+    ),
     // reason: SPEC-063 §Design Decisions D1 — exposed so the CLI adapter can read
     // the corpus root as `resolveVerifyExecutionRoot`'s `corpusRoot` input, the
     // SAME value already threaded into VerifyRunnerService's config.repoRoot below.
@@ -807,6 +835,11 @@ function buildAppFromTurso(
     ),
     // reason: ConfigService (SPEC-062 D1) — see buildAppFromSqlite's identical comment.
     configService: new ConfigService(repoRoot, store.appendAuditEntry.bind(store)),
+    // reason: GlobalConfigService (SPEC-064 D1) — see buildAppFromSqlite's identical comment.
+    globalConfigService: new GlobalConfigService(
+      resolveGlobalConfigPath() ?? resolveGlobalConfigWritePath(),
+      store.appendAuditEntry.bind(store),
+    ),
     // reason: SPEC-063 §Design Decisions D1 — exposed so the CLI adapter can read
     // the corpus root as `resolveVerifyExecutionRoot`'s `corpusRoot` input, the
     // SAME value already threaded into VerifyRunnerService's config.repoRoot below.
