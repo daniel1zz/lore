@@ -64,3 +64,4 @@ export * from "./merge-settings.js";
 export * from "./register-mcp.js";
 export * from "./distribution-hooks.js";
 export * from "./config-editability.js";
+export * from "./config-precedence.js";
