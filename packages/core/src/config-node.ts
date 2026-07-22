@@ -4,12 +4,20 @@
  * Public surface:
  *   - loadConfig / saveConfig — project config I/O (<dir>/.lore/config.yaml)
  *   - resolveGlobalConfigPath / loadGlobalConfig — global config (XDG) resolution + loading
+ *   - resolveGlobalConfigWritePath / saveGlobalConfig — global config (XDG) write
+ *     target resolution + validate-then-write (SPEC-064 D7)
  *
  * Invariants:
  *   - D-004: saveConfig writes only the env-var NAME (auth_token_env) — never a
  *     resolved token value
  *   - Global config missing/empty → ok({}) (NOT an error — user-optional)
  *   - Global config malformed → err(VALIDATION_ERROR) (caller decides whether to warn)
+ *   - SPEC-064 D7: `saveGlobalConfig` is validate-THEN-write — `GlobalLoreConfigSchema`
+ *     is checked BEFORE any filesystem access, so a schema-invalid candidate writes
+ *     ZERO bytes and leaves any pre-existing file byte-identical. The write itself is
+ *     atomic (temp file in the same directory, then `renameSync` — POSIX rename is
+ *     atomic within one filesystem) and creates every missing parent directory, so a
+ *     first write to a not-yet-existing XDG path succeeds without a separate mkdir step.
  *   - This module imports `fs`/`path`/`os` — it MUST only be reached via the
  *     `@lore/core/node` subpath (`src/node.ts`), never via the default `@lore/core`
  *     barrel (`src/index.ts`). `@lore/dashboard` (browser) MUST NOT import this
@@ -21,8 +29,8 @@
  */
 
 import yaml from "yaml";
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
-import { join } from "path";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from "fs";
+import { join, dirname } from "path";
 import { homedir } from "os";
 import { ok, err } from "./errors.js";
 import type { Result, LoreError } from "./errors.js";
@@ -204,4 +212,101 @@ export function loadGlobalConfig(
     message,
     value: parsed,
   } satisfies LoreError);
+}
+
+/**
+ * Resolves the XDG target path for a NEW global config write — the same
+ * precedence order as {@link resolveGlobalConfigPath} ($LORE_CONFIG_HOME >
+ * $XDG_CONFIG_HOME/lore > ~/.config/lore), but NOT gated on `existsSync`: this
+ * answers "where would a freshly-created config.yaml go", not "where does one
+ * already live" (SPEC-064 D7 — a missing global config is not an error, and the
+ * first write must create the file at a deterministic path).
+ *
+ * Callers that want read-or-create semantics compose:
+ *   `resolveGlobalConfigPath() ?? resolveGlobalConfigWritePath()`.
+ *
+ * Pure side-effect: reads env vars + `homedir()` only. Never touches the filesystem.
+ *
+ * @example
+ *   const path = resolveGlobalConfigPath() ?? resolveGlobalConfigWritePath();
+ *   saveGlobalConfig(newConfig, path);
+ */
+export function resolveGlobalConfigWritePath(): string {
+  const loreConfigHome = process.env["LORE_CONFIG_HOME"];
+  if (loreConfigHome) return join(loreConfigHome, "config.yaml");
+
+  const xdgConfigHome = process.env["XDG_CONFIG_HOME"];
+  if (xdgConfigHome) return join(xdgConfigHome, "lore", "config.yaml");
+
+  return join(homedir(), ".config", "lore", "config.yaml");
+}
+
+/**
+ * Validate-then-write the machine-scope global config (SPEC-064 D7).
+ *
+ * Order of operations:
+ *   1. Validate `config` against {@link GlobalLoreConfigSchema} — a schema
+ *      violation returns `err(VALIDATION_ERROR)` before any filesystem access
+ *      (zero bytes written, any pre-existing file left byte-identical).
+ *   2. Resolve the target path (`path` if given, else
+ *      {@link resolveGlobalConfigWritePath}) and `mkdirSync(..., {recursive: true})`
+ *      its parent directory — creates every missing directory component.
+ *   3. Write to a sibling temp file, then `renameSync` it onto the target path —
+ *      atomic: a crash mid-write never leaves a partially-written config.yaml, and
+ *      a concurrent reader either sees the old file in full or the new file in
+ *      full, never a torn write.
+ *
+ * @param config - Candidate GlobalLoreConfig, validated BEFORE any IO
+ * @param path - Optional explicit target path (tests should always pass one,
+ *   pointing at a throwaway `mkdtemp` directory — never the real XDG path).
+ *   Omitted → {@link resolveGlobalConfigWritePath}.
+ * @returns `Result<void, LoreError>` — never throws. Schema violation →
+ *   `VALIDATION_ERROR`; any IO failure (permission denied, disk full, ...) →
+ *   `STORE_ERROR`.
+ * @example
+ *   const result = saveGlobalConfig({ defaults: { format: "json" } }, "/tmp/x/config.yaml");
+ *   // result.ok === true; /tmp/x was created; loadGlobalConfig("/tmp/x/config.yaml")
+ *   // round-trips to { defaults: { format: "json" } }
+ */
+export function saveGlobalConfig(
+  config: GlobalLoreConfig,
+  path?: string,
+): Result<void, LoreError> {
+  const parsed = GlobalLoreConfigSchema.safeParse(config);
+  if (!parsed.success) {
+    const firstIssue = parsed.error.issues[0];
+    const field =
+      firstIssue !== undefined ? firstIssue.path.join(".") || "root" : "root";
+    const message =
+      firstIssue !== undefined ? firstIssue.message : parsed.error.message;
+    return err({
+      code: "VALIDATION_ERROR",
+      field,
+      message,
+      value: config,
+    } satisfies LoreError);
+  }
+
+  const targetPath = path ?? resolveGlobalConfigWritePath();
+
+  try {
+    mkdirSync(dirname(targetPath), { recursive: true });
+    const yamlText = yaml.stringify(parsed.data);
+    // reason: write-then-rename (not a direct writeFileSync onto targetPath) is
+    // what makes this atomic — a process crash between these two calls leaves
+    // only an orphan temp file, never a truncated/partial config.yaml.
+    const tmpPath = `${targetPath}.tmp-${process.pid}-${Date.now()}`;
+    writeFileSync(tmpPath, yamlText, "utf8");
+    renameSync(tmpPath, targetPath);
+    return ok(undefined);
+  } catch (e) {
+    const message =
+      e instanceof Error ? e.message : "Failed to write global config file";
+    const cause = e instanceof Error ? e : undefined;
+    return err({
+      code: "STORE_ERROR",
+      message,
+      ...(cause !== undefined ? { cause } : {}),
+    } satisfies LoreError);
+  }
 }

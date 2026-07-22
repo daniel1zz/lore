@@ -22,15 +22,23 @@ import {
   mkdtempSync,
   mkdirSync,
   writeFileSync,
+  readFileSync,
+  existsSync,
   rmSync,
 } from "fs";
 import { join, resolve } from "path";
-import { tmpdir } from "os";
+import { tmpdir, homedir } from "os";
+import { createHash } from "crypto";
 import { GlobalLoreConfigSchema, mergeDefaults, LoreDefaultsSchema } from "@lore/core";
 // reason: resolveGlobalConfigPath/loadGlobalConfig read the filesystem via Node
 // fs/path/os — only reachable via the @lore/core/node subpath (browser-safety
 // split, packages/core/src/CLAUDE.md).
-import { resolveGlobalConfigPath, loadGlobalConfig } from "@lore/core/node";
+import {
+  resolveGlobalConfigPath,
+  resolveGlobalConfigWritePath,
+  loadGlobalConfig,
+  saveGlobalConfig,
+} from "@lore/core/node";
 
 // ─── Env-var save/restore ─────────────────────────────────────────────────────
 
@@ -521,5 +529,173 @@ describe("mergeDefaults() — AC-GC-7 merge semantics", () => {
     expect(merged.editor).toBe("nano");   // project wins
     expect(merged.format).toBe("json");   // project wins
     expect(merged.color).toBe(true);      // global survives
+  });
+});
+
+// ─── AC-064-3: saveGlobalConfig — validate-then-write, atomic ────────────────
+//
+// Source: SPEC-064 §Acceptance Criteria AC-064-3. Coverage dimensions:
+//   HAPPY:      valid write to a non-existent path creates parent dirs +
+//               round-trips via loadGlobalConfig
+//   NEGATIVE:   a schema-invalid candidate (unknown top-level key) is rejected
+//   BOUNDARY:   first write creates multiple nested missing directories
+//   ERROR:      malformed/non-object input never throws
+//   STATE:      a rejected write leaves a PRE-EXISTING file byte-identical
+//               (sha256 asserted before === after, not just "file exists")
+//   REGRESSION: an accepted write's content round-trips through YAML +
+//               loadGlobalConfig exactly (no silent coercion)
+
+function sha256(text: string): string {
+  return createHash("sha256").update(text, "utf8").digest("hex");
+}
+
+describe("saveGlobalConfig() — validate-then-write + atomic (AC-064-3)", () => {
+  // ─── HAPPY ──────────────────────────────────────────────────────────────
+
+  it("HAPPY: valid write to a non-existent XDG path creates parent dirs and round-trips", () => {
+    const dir = makeTempDir();
+    const targetPath = join(dir, "nested", "does", "not", "exist", "config.yaml");
+    expect(existsSync(targetPath)).toBe(false);
+
+    const result = saveGlobalConfig(
+      { defaults: { format: "json", color: false } },
+      targetPath,
+    );
+    expect(result.ok).toBe(true);
+    expect(existsSync(targetPath)).toBe(true);
+
+    const reread = loadGlobalConfig(targetPath);
+    expect(reread.ok).toBe(true);
+    if (reread.ok) {
+      expect(reread.value).toEqual({ defaults: { format: "json", color: false } });
+    }
+  });
+
+  it("HAPPY: omitting path resolves via resolveGlobalConfigWritePath (LORE_CONFIG_HOME)", () => {
+    const dir = makeTempDir();
+    process.env["LORE_CONFIG_HOME"] = dir;
+    delete process.env["XDG_CONFIG_HOME"];
+
+    const result = saveGlobalConfig({ defaults: { editor: "vim" } });
+    expect(result.ok).toBe(true);
+
+    const expectedPath = join(dir, "config.yaml");
+    expect(existsSync(expectedPath)).toBe(true);
+    const reread = loadGlobalConfig(expectedPath);
+    expect(reread.ok && reread.value.defaults?.editor).toBe("vim");
+  });
+
+  // ─── NEGATIVE / STATE ───────────────────────────────────────────────────
+
+  it("NEGATIVE+STATE: schema-invalid config writes 0 bytes, pre-existing file byte-identical", () => {
+    const dir = makeTempDir();
+    const targetPath = writeGlobalConfig(dir, "defaults:\n  editor: vim\n");
+    const before = sha256(readFileSync(targetPath, "utf8"));
+
+    // reason: GlobalLoreConfigSchema is .strict() at the top level — an unknown
+    // key ("bogus") is schema-invalid regardless of what's nested under it.
+    const result = saveGlobalConfig(
+      { defaults: { editor: "nano" }, bogus: "field" } as never,
+      targetPath,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("VALIDATION_ERROR");
+    }
+
+    const after = sha256(readFileSync(targetPath, "utf8"));
+    expect(after).toBe(before);
+  });
+
+  it("NEGATIVE: an invalid enum value (defaults.format) is rejected, writes 0 bytes", () => {
+    const dir = makeTempDir();
+    const targetPath = join(dir, "config.yaml");
+    // reason: no pre-existing file this time — asserts the REJECTED write never
+    // CREATES a file either (not just "doesn't corrupt an existing one").
+    const result = saveGlobalConfig(
+      { defaults: { format: "yaml" } } as never,
+      targetPath,
+    );
+    expect(result.ok).toBe(false);
+    expect(existsSync(targetPath)).toBe(false);
+  });
+
+  // ─── BOUNDARY ───────────────────────────────────────────────────────────
+
+  it("BOUNDARY: creates every missing nested parent directory in one write", () => {
+    const dir = makeTempDir();
+    const targetPath = join(dir, "a", "b", "c", "d", "e", "config.yaml");
+
+    const result = saveGlobalConfig({ defaults: { color: true } }, targetPath);
+    expect(result.ok).toBe(true);
+    expect(existsSync(join(dir, "a", "b", "c", "d", "e"))).toBe(true);
+    expect(existsSync(targetPath)).toBe(true);
+  });
+
+  it("BOUNDARY: an empty GlobalLoreConfig ({}) writes successfully and round-trips to {}", () => {
+    const dir = makeTempDir();
+    const targetPath = join(dir, "config.yaml");
+
+    const result = saveGlobalConfig({}, targetPath);
+    expect(result.ok).toBe(true);
+
+    const reread = loadGlobalConfig(targetPath);
+    expect(reread.ok).toBe(true);
+    if (reread.ok) {
+      expect(reread.value).toEqual({});
+    }
+  });
+
+  // ─── ERROR ──────────────────────────────────────────────────────────────
+
+  it("ERROR: does not throw on a malformed (non-object) candidate", () => {
+    const dir = makeTempDir();
+    const targetPath = join(dir, "config.yaml");
+
+    expect(() => saveGlobalConfig(null as never, targetPath)).not.toThrow();
+    expect(() => saveGlobalConfig("not-an-object" as never, targetPath)).not.toThrow();
+    expect(existsSync(targetPath)).toBe(false);
+  });
+
+  // ─── REGRESSION ─────────────────────────────────────────────────────────
+
+  it("REGRESSION: an accepted write's content is exactly what loadGlobalConfig reads back", () => {
+    const dir = makeTempDir();
+    const targetPath = join(dir, "config.yaml");
+    const config = { defaults: { format: "text" as const, color: true } };
+
+    const result = saveGlobalConfig(config, targetPath);
+    expect(result.ok).toBe(true);
+
+    const reread = loadGlobalConfig(targetPath);
+    expect(reread.ok).toBe(true);
+    if (reread.ok) {
+      expect(reread.value).toEqual(config);
+    }
+  });
+});
+
+describe("resolveGlobalConfigWritePath() — precedence (mirrors resolveGlobalConfigPath, unresolved-by-existence)", () => {
+  it("prefers $LORE_CONFIG_HOME when set, regardless of whether the file exists", () => {
+    const dir = makeTempDir(); // no config.yaml inside — deliberately non-existent
+    process.env["LORE_CONFIG_HOME"] = dir;
+    delete process.env["XDG_CONFIG_HOME"];
+
+    expect(resolveGlobalConfigWritePath()).toBe(join(dir, "config.yaml"));
+  });
+
+  it("falls back to $XDG_CONFIG_HOME/lore/config.yaml when LORE_CONFIG_HOME is unset", () => {
+    delete process.env["LORE_CONFIG_HOME"];
+    const dir = makeTempDir();
+    process.env["XDG_CONFIG_HOME"] = dir;
+
+    expect(resolveGlobalConfigWritePath()).toBe(join(dir, "lore", "config.yaml"));
+  });
+
+  it("falls back to ~/.config/lore/config.yaml when neither env var is set", () => {
+    delete process.env["LORE_CONFIG_HOME"];
+    delete process.env["XDG_CONFIG_HOME"];
+
+    expect(resolveGlobalConfigWritePath()).toBe(join(homedir(), ".config", "lore", "config.yaml"));
   });
 });
