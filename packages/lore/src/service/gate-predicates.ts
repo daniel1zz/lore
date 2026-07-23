@@ -492,3 +492,86 @@ export function requiresUatDeclared(
   }
   return { ok: false, reason: REQUIRES_UAT_NOT_DECLARED_REASON, field: REQUIRES_UAT_FIELD };
 }
+
+/**
+ * One task's (or, since `getPlanBundle` also returns SPEC-056 phase docs, one
+ * phase's) evidence-attestation facts, precomputed by the CALLER (SPEC-069
+ * §Design Decisions D1, mirrors `SiblingClaimInfo`'s "caller does the IO,
+ * predicate stays pure" seam) — `evidenceCount`/`attestedCount` are derived
+ * from `extractEvidence(task)` (`@lore/core`, task-workflow.ts), never
+ * re-parsed here (module invariant: no store, no IO).
+ */
+export interface TaskAttestationInfo {
+  slug: string;
+  title: string;
+  /** Total `verification_evidence[]` entries on this task. */
+  evidenceCount: number;
+  /** Of those, how many carry a runner-issued `attestation` object. */
+  attestedCount: number;
+}
+
+/** `attestationFloor`'s single machine-readable failure reason. */
+export const ATTESTATION_FLOOR_REASON = "ATTESTATION_FLOOR_NOT_MET";
+
+/** The `PredicateResult.field` value `attestationFloor`'s failure carries (SPEC-069). */
+export const ATTESTATION_FLOOR_FIELD = "attestation-floor";
+
+/**
+ * `plan-close`'s execution-time attestation-floor predicate (SPEC-069 §Design
+ * Decisions D1) — opt-OUT, not opt-in (unlike `uatP0Accepted`, this predicate
+ * runs for every closing plan unless exempted; see `checkPlanClose` in
+ * `checkpoint-registry.ts`). Two independent conditions, EITHER of which
+ * blocks:
+ *
+ *   1. every task that carries ANY `verification_evidence` must carry at
+ *      least one runner-issued (attested) entry — a task with N self-reported
+ *      entries and ZERO attested ones is undetectable fabrication risk, even
+ *      if some OTHER task in the plan is fully attested and keeps the
+ *      plan-wide ratio above the floor;
+ *   2. the plan-wide attested-evidence ratio (total attested entries / total
+ *      evidence entries, across every task) must be ≥ `minRatio`.
+ *
+ * A plan with NO evidence at all on any task (`totalEvidence === 0`) is a
+ * vacuous PASS — this is the "pure-planning plan" carve-out (SPEC-069 §Scope):
+ * the floor only constrains a plan that claims to have been verified, never
+ * one that never ran any oracle at all.
+ *
+ * @param tasks - Every task (or phase) in the closing plan, with its own
+ *   evidence/attested counts — `undefined` is treated identically to `[]`
+ *   (no tasks resolved, vacuous pass, mirrors `noAnchorOverlap`'s `?? []`
+ *   shape).
+ * @param minRatio - The configured floor (`workflow.attestation.min_ratio`,
+ *   resolved by the CALLER via `GateEnforcer.resolveAttestationMinRatio` —
+ *   this predicate never reads config itself).
+ * @returns `{ok: true}` when there is no evidence at all, OR every
+ *   evidence-bearing task has ≥1 attested entry AND the plan-wide ratio meets
+ *   `minRatio`; `{ok: false, reason: "ATTESTATION_FLOOR_NOT_MET", field:
+ *   "attestation-floor"}` otherwise.
+ * @example
+ * attestationFloor([
+ *   { slug: "task-1", title: "T1", evidenceCount: 3, attestedCount: 0 },
+ * ], 0.5); // => { ok: false, reason: "ATTESTATION_FLOOR_NOT_MET", field: "attestation-floor" }
+ * @example
+ * attestationFloor([
+ *   { slug: "task-1", title: "T1", evidenceCount: 2, attestedCount: 2 },
+ * ], 0.5); // => { ok: true }
+ * @example
+ * attestationFloor(undefined, 0.5); // => { ok: true } — no tasks, vacuous pass
+ */
+export function attestationFloor(
+  tasks: readonly TaskAttestationInfo[] | undefined,
+  minRatio: number,
+): PredicateResult {
+  const list = tasks ?? [];
+  const totalEvidence = list.reduce((sum, t) => sum + t.evidenceCount, 0);
+  if (totalEvidence === 0) {
+    return { ok: true };
+  }
+  const totalAttested = list.reduce((sum, t) => sum + t.attestedCount, 0);
+  const hasZeroAttestedTask = list.some((t) => t.evidenceCount > 0 && t.attestedCount === 0);
+  const ratio = totalAttested / totalEvidence;
+  if (hasZeroAttestedTask || ratio < minRatio) {
+    return { ok: false, reason: ATTESTATION_FLOOR_REASON, field: ATTESTATION_FLOOR_FIELD };
+  }
+  return { ok: true };
+}

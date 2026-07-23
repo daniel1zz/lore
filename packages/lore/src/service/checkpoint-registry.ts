@@ -89,12 +89,16 @@ import {
   uatP0Accepted,
   oracleCoverage,
   requiresUatDeclared,
+  attestationFloor,
   ANCHOR_OVERLAP_FIELD,
   AC_QUANTIFIABLE_FIELD,
   ORACLE_COVERAGE_FIELD,
   REQUIRES_UAT_FIELD,
+  PLAN_CLOSE_FIELD,
+  ATTESTATION_FLOOR_FIELD,
   type PredicateResult,
   type SiblingClaimInfo,
+  type TaskAttestationInfo,
 } from "./gate-predicates.js";
 import { buildFeedingPack, renderFeedingPack } from "./gate-feeding.js";
 
@@ -278,6 +282,37 @@ export interface GateContext {
   readonly uatP0Accepted?: boolean;
   /** The latest verdict's uncovered P0 requirement ids, for the feeding-pack message only. */
   readonly uatUncoveredP0?: string[];
+
+  // -- plan-close: check() + feed() (SPEC-069 §Design Decisions D1, attestation floor) --
+  /**
+   * Whether the closing plan is EXEMPTED from the attestation-floor predicate
+   * (`extra.attestation_exempt === true` AND a non-empty
+   * `extra.attestation_exempt_reason` — a bare `attestation_exempt: true` with
+   * no reason string is treated as NOT exempt, resolved by the caller,
+   * `CorpusService.set`). `true` short-circuits `attestationFloor` out of
+   * `checkPlanClose` entirely (the same "opt-out ⇒ vacuous pass" shape
+   * `hasSpecParent`/`requiresUat` use elsewhere in this module) — the exempt
+   * plan closes regardless of its tasks' evidence/attestation state.
+   */
+  readonly attestationExempt?: boolean;
+  /**
+   * Every task (or SPEC-056 phase doc) in the closing plan, with its own
+   * evidence/attested counts (`CorpusService.set`, built from `getPlanBundle`
+   * + `extractEvidence`, `@lore/core`) — populated whenever
+   * `attestationExempt` is not `true`; `undefined` (the exempt case, or a
+   * checkpoint context built by a caller that never resolves this field) is
+   * treated identically to `[]` by `attestationFloor` itself.
+   */
+  readonly planTasksAttestation?: TaskAttestationInfo[];
+  /**
+   * The resolved `workflow.attestation.min_ratio` floor (SPEC-069, default
+   * 0.5) — resolved by the CALLER via `GateEnforcer.resolveAttestationMinRatio`
+   * (module invariant: no config access here, mirrors `verificationProfile`'s
+   * caller-resolved shape). `undefined` falls back to `attestationFloor`'s own
+   * default-matching literal in `checkPlanClose` below — only exercised by a
+   * ctx built without this field (e.g. a hand-built test fixture).
+   */
+  readonly attestationMinRatio?: number;
 }
 
 /**
@@ -654,32 +689,113 @@ function feedPhaseClaim(ctx: GateContext, failures: PredicateResult[]): string {
 }
 
 /**
- * `plan-close`'s single predicate (SPEC-054): a plan that OPTED IN to UAT
- * (`ctx.requiresUat === true`) may close only when its latest linked UAT verdict is
- * P0-accepted. `ctx.requiresUat !== true` short-circuits to `[]` (vacuous pass) BEFORE
- * the predicate runs — same "opt-out ⇒ no gate" shape `checkPlanPromote` uses for
- * `hasSpecParent` (third module invariant). By the time `uatP0Accepted` runs, the plan
- * has opted in, so a missing/rejected verdict is a genuine block.
+ * `plan-close`'s default attestation-floor ratio (SPEC-069) — MUST match
+ * `WorkflowConfigSchema`'s `workflow.attestation.min_ratio` Zod default (`@lore/core`,
+ * config.ts) exactly. Production callers always resolve `ctx.attestationMinRatio` via
+ * `GateEnforcer.resolveAttestationMinRatio` (which reads that same schema default when
+ * unconfigured), so this constant is only ever exercised by a hand-built `GateContext`
+ * (a direct `attestationFloor`/`checkPlanClose` unit test) that omits the field.
+ */
+const DEFAULT_ATTESTATION_MIN_RATIO = 0.5;
+
+/**
+ * `plan-close`'s two predicates (SPEC-054 + SPEC-069 §Design Decisions D1):
+ *
+ *   - `uatP0Accepted` — OPT-IN (SPEC-054): only runs when the plan declared
+ *     `ctx.requiresUat === true`; `ctx.requiresUat !== true` skips it entirely
+ *     (same "opt-out ⇒ no gate" shape `checkPlanPromote` uses for
+ *     `hasSpecParent`, third module invariant).
+ *   - `attestationFloor` — OPT-OUT (SPEC-069 D1): runs for EVERY closing plan
+ *     UNLESS `ctx.attestationExempt === true` (a plan explicitly declaring
+ *     `extra.attestation_exempt: true` + a non-empty reason). Deliberately NOT
+ *     gated by `ctx.requiresUat` — a plan that never opted into UAT still owes
+ *     an honest attestation floor over whatever evidence it DOES carry.
+ *
+ * Both predicates, when they run, are pushed into the SAME results array (this
+ * module's "run every predicate, don't short-circuit on the first failure"
+ * contract) — a plan can fail EITHER, BOTH, or neither independently.
  */
 function checkPlanClose(ctx: GateContext): PredicateResult[] {
-  if (ctx.requiresUat !== true) {
-    return [];
+  const results: PredicateResult[] = [];
+  if (ctx.requiresUat === true) {
+    results.push(uatP0Accepted(ctx.uatVerdictPresent === true, ctx.uatP0Accepted === true));
   }
-  return [uatP0Accepted(ctx.uatVerdictPresent === true, ctx.uatP0Accepted === true)];
+  if (ctx.attestationExempt !== true) {
+    results.push(
+      attestationFloor(ctx.planTasksAttestation, ctx.attestationMinRatio ?? DEFAULT_ATTESTATION_MIN_RATIO),
+    );
+  }
+  return results;
 }
 
 /**
- * `plan-close`'s feeding message — names the literal `lore uat record` recovery command
- * (and, when a verdict exists but left P0 requirements uncovered, lists them) so a blocked
- * caller knows exactly how to unblock: run acceptance (`/lore-uat`) and record its verdict.
- * Pointers only — never a doc body dump (`gate-feeding.ts` provenance convention).
+ * Renders the attestation-floor-specific feeding pack (SPEC-069 §Design Decisions
+ * D1) — names every offending task (carries `verification_evidence` but ZERO
+ * runner-attested entries), the plan-wide attested ratio against the configured
+ * floor, and the literal recovery command (`lore verify <plan>` — the exact
+ * substring AC-069-1 pins). Pointers only (task slug/title, never body content),
+ * mirroring `feedAnchorOverlap`'s "recompute offending items from ctx" shape.
+ */
+function feedAttestationFloor(ctx: GateContext, failures: PredicateResult[]): string {
+  const tasks = ctx.planTasksAttestation ?? [];
+  const offending = tasks.filter((t) => t.evidenceCount > 0 && t.attestedCount === 0);
+  const totalEvidence = tasks.reduce((sum, t) => sum + t.evidenceCount, 0);
+  const totalAttested = tasks.reduce((sum, t) => sum + t.attestedCount, 0);
+  const ratio = totalEvidence > 0 ? totalAttested / totalEvidence : 0;
+  const minRatio = ctx.attestationMinRatio ?? DEFAULT_ATTESTATION_MIN_RATIO;
+  const plan = ctx.targetIdOrSlug ?? "<plan>";
+  const offendingLine =
+    offending.length > 0
+      ? `Task(s) with self-reported-only evidence (zero runner-attested entries): ` +
+        `${offending.map((t) => `${t.slug} — "${t.title}"`).join(", ")}. `
+      : "";
+  const pack = buildFeedingPack({
+    ruleSource: "corpus (task verification_evidence)",
+    ruleMarkdown:
+      `Required for plan-close: every task carrying verification_evidence must carry ` +
+      `at least one runner-issued (attested) entry, and the plan-wide attested-evidence ` +
+      `ratio must be >= ${minRatio} (currently ${ratio.toFixed(2)}). ${offendingLine}` +
+      `Recovery: run \`lore verify ${plan}\` to record attested evidence against each ` +
+      `task's declared script-mode acceptance criteria (declare one first via ` +
+      `\`lore ac add <spec> <id> --mode script ...\` if none exists yet) — or, if this ` +
+      `plan genuinely has no oracle to attest against, set \`extra.attestation_exempt: ` +
+      `true\` plus a reason via the MCP \`lore_set\` tool.`,
+    missing: selectFailures(failures).map((f) => f.reason),
+  });
+  return renderFeedingPack(pack);
+}
+
+/**
+ * `plan-close`'s feeding message — dispatches between two independent failure
+ * families (SPEC-054's `uatP0Accepted` and SPEC-069's `attestationFloor`, both
+ * on `checkPlanClose`, see that function's own JSDoc):
+ *
+ *   - ONLY `attestationFloor` failed → {@link feedAttestationFloor} alone (the
+ *     dedicated, `lore verify`-naming message).
+ *   - `uatP0Accepted` failed (with or without `attestationFloor` also failing)
+ *     → the pre-existing `lore uat record`-naming message, UNCHANGED wording
+ *     when attestation passed (REGRESSION: byte-identical to pre-SPEC-069 —
+ *     `uat-service.test.ts`'s `.toContain("lore uat record")` assertions and
+ *     `requires-uat-gate.test.ts`'s STATE scenario both pin this), with one
+ *     extra sentence appended when attestation ALSO failed.
  */
 function feedPlanClose(ctx: GateContext, failures: PredicateResult[]): string {
+  const uatFailed = failures.some((f) => !f.ok && f.field === PLAN_CLOSE_FIELD);
+  const attestationFailed = failures.some((f) => !f.ok && f.field === ATTESTATION_FLOOR_FIELD);
+
+  if (attestationFailed && !uatFailed) {
+    return feedAttestationFloor(ctx, failures);
+  }
+
   const uncovered = ctx.uatUncoveredP0 ?? [];
   const detail =
     uncovered.length > 0
       ? ` Uncovered P0 requirements: ${uncovered.join(", ")}.`
       : "";
+  const attestationNote = attestationFailed
+    ? ` Additionally, the execution-time attestation floor is unmet — see ` +
+      `\`lore verify ${ctx.targetIdOrSlug ?? "<plan>"}\`.`
+    : "";
   const pack = buildFeedingPack({
     ruleSource: "corpus (UAT verdict)",
     ruleMarkdown:
@@ -687,7 +803,7 @@ function feedPlanClose(ctx: GateContext, failures: PredicateResult[]): string {
       `archived after a linked UAT verdict shows P0 acceptance (verdict not "reject", no ` +
       `rejected P0 journey, no uncovered P0 requirement, no UIUX blocker).${detail} ` +
       `Recovery: run acceptance (\`/lore-uat\`) then \`lore uat record ` +
-      `${ctx.targetIdOrSlug ?? "<plan>"} --json-file <verdict.json>\`.`,
+      `${ctx.targetIdOrSlug ?? "<plan>"} --json-file <verdict.json>\`.${attestationNote}`,
     missing: selectFailures(failures).map((f) => f.reason),
   });
   return renderFeedingPack(pack);

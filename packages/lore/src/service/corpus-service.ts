@@ -35,6 +35,7 @@ import {
   prdRequirementsSchema,
   computeRequirementCoverage,
   SPEC_KINDS,
+  extractEvidence,
 } from "@lore/core";
 import type {
   CreateDocInput,
@@ -1369,13 +1370,17 @@ export class CorpusService {
       if (!gateResult.ok) return gateResult;
     }
 
-    // Gate `plan-close` on a plan's → archived TRANSITION reached via `set` (SPEC-054).
-    // `archived` is the lifecycle terminal — "closing" a plan. Only fires for an ACTUAL
-    // close (`existing.status !== "archived"`, so re-archiving is a no-op that never
-    // re-blocks) of a plan that OPTED IN (`extra.requires_uat === true`). An opt-out plan
-    // (no `requires_uat`) archives unchanged (D2). When enabled + opted-in, the plan's
-    // latest linked UAT verdict must show P0 acceptance — resolved here (the ONE extra
-    // read this gate pays for), fed to the pure `plan-close` predicate.
+    // Gate `plan-close` on a plan's → archived TRANSITION reached via `set` (SPEC-054 +
+    // SPEC-069 §Design Decisions D1). `archived` is the lifecycle terminal — "closing" a
+    // plan. Only fires for an ACTUAL close (`existing.status !== "archived"`, so
+    // re-archiving is a no-op that never re-blocks). Two independent sub-gates share this
+    // block:
+    //   - `uatP0Accepted` (SPEC-054, OPT-IN): only evaluated when the plan declares
+    //     `extra.requires_uat === true` — an opt-out plan archives unaffected (D2).
+    //   - `attestationFloor` (SPEC-069, OPT-OUT): evaluated for EVERY closing plan unless
+    //     it declares `extra.attestation_exempt: true` PLUS a non-empty
+    //     `extra.attestation_exempt_reason` (a bare `attestation_exempt: true` with no
+    //     reason is treated as NOT exempt — D1's "缺 reason 视同未豁免" rule).
     if (
       existing.type === "plan" &&
       newStatus === "archived" &&
@@ -1383,20 +1388,52 @@ export class CorpusService {
       this.gateEnforcer &&
       this.gateEnforcer.isEnabled("plan-close")
     ) {
-      const effectiveExtra = parsedPatch.data.extra !== undefined ? parsedPatch.data.extra : existing.extra;
-      const requiresUat = (effectiveExtra as Record<string, unknown>)["requires_uat"] === true;
+      const effectiveExtra = (parsedPatch.data.extra !== undefined
+        ? parsedPatch.data.extra
+        : existing.extra) as Record<string, unknown>;
+      const requiresUat = effectiveExtra["requires_uat"] === true;
+      const attestationExemptReason = effectiveExtra["attestation_exempt_reason"];
+      const attestationExempt =
+        effectiveExtra["attestation_exempt"] === true &&
+        typeof attestationExemptReason === "string" &&
+        attestationExemptReason.trim().length > 0;
+
+      let planCloseCtx: GateContext = { targetIdOrSlug: existing.slug };
+
       if (requiresUat) {
         const uatResult = await this.getLatestUatVerdict(existing.id);
         if (!uatResult.ok) return uatResult;
-        const gateResult = this.gateEnforcer.enforce("plan-close", {
+        planCloseCtx = {
+          ...planCloseCtx,
           requiresUat: true,
           uatVerdictPresent: uatResult.value.present,
           uatP0Accepted: uatResult.value.p0Accepted,
           uatUncoveredP0: uatResult.value.uncoveredP0,
-          targetIdOrSlug: existing.slug,
-        });
-        if (!gateResult.ok) return gateResult;
+        };
       }
+
+      planCloseCtx = { ...planCloseCtx, attestationExempt };
+      if (!attestationExempt) {
+        const bundleResult = await this.getPlanBundle(existing.id);
+        if (!bundleResult.ok) return bundleResult;
+        const planTasksAttestation = bundleResult.value.tasks.map((task) => {
+          const evidence = extractEvidence(task);
+          return {
+            slug: task.slug,
+            title: task.title,
+            evidenceCount: evidence.length,
+            attestedCount: evidence.filter((entry) => entry.attestation !== undefined).length,
+          };
+        });
+        planCloseCtx = {
+          ...planCloseCtx,
+          planTasksAttestation,
+          attestationMinRatio: this.gateEnforcer.resolveAttestationMinRatio(),
+        };
+      }
+
+      const gateResult = this.gateEnforcer.enforce("plan-close", planCloseCtx);
+      if (!gateResult.ok) return gateResult;
     }
 
     // BUG-002 (audit finding) — update + version snapshot + update audit entry as

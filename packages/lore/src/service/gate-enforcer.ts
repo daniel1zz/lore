@@ -57,6 +57,7 @@ import {
   resolveOracleCoverageGateEnabled,
   resolveRequiresUatGateEnabled,
   resolveVerificationProfile,
+  resolveAttestationMinRatio,
   type LoreConfig,
   type LoreError,
   type Result,
@@ -293,5 +294,22 @@ export class GateEnforcer {
    */
   resolveVerificationProfile(specKind: SpecKind): VerificationProfile | null {
     return resolveVerificationProfile(this.config, specKind);
+  }
+
+  /**
+   * Resolves `plan-close`'s execution-time attestation-floor ratio
+   * (`workflow.attestation.min_ratio`, SPEC-069 §Design Decisions D1) against
+   * this enforcer's own `LoreConfig` — the single config-reading seam a caller
+   * building `GateContext.attestationMinRatio` (`CorpusService.set`) consults,
+   * mirroring `resolveVerificationProfile`'s "GateEnforcer owns the one config
+   * reference" shape.
+   *
+   * @returns The configured floor, or the schema default (0.5) when
+   *   unconfigured.
+   * @example
+   * enforcer.resolveAttestationMinRatio(); // => 0.5 by default, 0.3 when configured
+   */
+  resolveAttestationMinRatio(): number {
+    return resolveAttestationMinRatio(this.config);
   }
 }
