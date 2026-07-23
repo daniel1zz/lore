@@ -36,6 +36,7 @@ import {
   renderHandoffContent,
   bootstrapReportSchema,
   deriveSessions,
+  deriveLastActivityAt,
   deriveResumeHint,
   parseSeatBranch,
 } from "@lore/core";
@@ -254,7 +255,14 @@ export class SessionService {
         activeBlocksLinksResult.value,
       );
       if (!countsResult.ok) return countsResult;
-      activePlans.push({ slug: plan.slug, title: truncateTitle(plan.title), task_counts: countsResult.value });
+      activePlans.push({
+        slug: plan.slug,
+        title: truncateTitle(plan.title),
+        task_counts: countsResult.value,
+        // SPEC-069 §Design Decisions D6 — zero extra store calls: plan + tasks
+        // are already resident in memory from the loop above.
+        last_activity_at: deriveLastActivityAt(plan, tasks),
+      });
     }
 
     // Corpus-wide derived sessions over every ACTIVE plan's tasks (SPEC-042 D8) —
