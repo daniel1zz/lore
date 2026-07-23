@@ -46,6 +46,16 @@
  *   z.record — there is no schema hook analogous to createDocInputSchema's superRefine on the
  *   patch path — so an invalid value is validated here, in the CLI, against SPEC_KINDS before
  *   ever reaching the service, and reported as exit 4 (VALIDATION_ERROR-equivalent).
+ *
+ * --slug <new-slug> (SPEC-066 D5):
+ *   The repair path for a degenerate slug (e.g. a CJK-titled doc created before SPEC-066's
+ *   pinyin transliteration landed). Validated + uniqueness-checked entirely inside
+ *   CorpusService.set (slugSchema + "taken by another doc" VALIDATION_ERROR, exit 4);
+ *   restating the doc's own current slug is a no-op. Does NOT reset an approved doc to
+ *   draft (slug is an address, not content — only title/content edits do that). The old
+ *   slug stops resolving immediately; this command prints a reminder that any FREE-TEXT
+ *   reference to the old slug inside OTHER docs' bodies is NOT rewritten (link-table edges
+ *   key on the doc's immutable ULID and are unaffected either way).
  */
 
 import { readFileSync } from "node:fs";
@@ -95,6 +105,13 @@ export default defineCommand({
     kind: {
       type: "string",
       description: `[spec only] Spec kind: ${SPEC_KINDS.join(" | ")}. Source: SPEC-032`,
+    },
+    slug: {
+      type: "string",
+      description:
+        "New slug (repair path for a degenerate slug, e.g. a pre-SPEC-066 CJK title). " +
+        "Must be unique; restating the current slug is a no-op. Does not reset an " +
+        "approved doc to draft. Source: SPEC-066 D5",
     },
     json: {
       type: "boolean",
@@ -361,6 +378,7 @@ export default defineCommand({
       if (args.tags !== undefined) {
         patch["tags"] = args.tags.split(",").map((t: string) => t.trim()).filter(Boolean);
       }
+      if (args.slug !== undefined) patch["slug"] = args.slug;
 
       // --kind (SPEC-032 §3.1): type-scoped to 'spec', and extra is patched wholesale by
       // CorpusService.set (not merged) — fetch the existing doc so we can (a) reject
@@ -450,6 +468,15 @@ export default defineCommand({
         console.log(JSON.stringify({ ok: true, data: doc }, null, 2));
       } else {
         console.log(`Updated ${doc.slug} → v${doc.version}`);
+        // reason: SPEC-066 D5 — when --slug renamed the doc, the old slug stops
+        // resolving immediately, but any FREE-TEXT reference to it inside other
+        // docs' bodies (e.g. "see spec-foo") is NOT rewritten; link-table edges
+        // key on the doc's immutable ULID and are unaffected either way.
+        if (args.slug !== undefined) {
+          console.log(
+            `  (note: free-text references to the old slug in other docs' bodies are not rewritten)`,
+          );
+        }
       }
     } finally {
       app.close();

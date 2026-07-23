@@ -59,6 +59,10 @@
 
 import { ulid } from "ulidx";
 import { err, ok, slugifyWithCollision } from "@lore/core";
+// reason: transliterateCjk (SPEC-066 D1) is Node-only-subpath-gated purely for the
+// browser-safety barrel-isolation invariant (packages/core/src/CLAUDE.md) — this
+// service file is always server-side, same precedent config-service.ts already set.
+import { transliterateCjk } from "@lore/core/node";
 import type {
   DocId,
   DocRecord,
@@ -255,10 +259,15 @@ export class PhaseMigrationService {
           const { extra, evidenceCount, warningsForGroup } = this.mergeGroup(plan, group, nowIso);
           warnings.push(...warningsForGroup);
 
-          const slug = await slugifyWithCollision(PHASE_DOC_TYPE, group.title, async (candidate) => {
-            const r = await this.store.findBySlug(candidate);
-            return r.ok && r.value !== null;
-          });
+          const slug = await slugifyWithCollision(
+            PHASE_DOC_TYPE,
+            group.title,
+            async (candidate) => {
+              const r = await this.store.findBySlug(candidate);
+              return r.ok && r.value !== null;
+            },
+            { transliterate: transliterateCjk },
+          );
 
           const phaseId = ulid();
           const phaseDoc: DocRecord = {

@@ -95,6 +95,10 @@ import {
   DOC_TYPE_ROLE_MAP,
   splitFrontmatter,
 } from "@lore/core";
+// reason: transliterateCjk (SPEC-066 D1) is Node-only-subpath-gated purely for the
+// browser-safety barrel-isolation invariant (packages/core/src/CLAUDE.md) — this
+// service file is always server-side, same precedent config-service.ts already set.
+import { transliterateCjk } from "@lore/core/node";
 import type {
   LoreError,
   Result,
@@ -676,7 +680,7 @@ function buildOrExtendIndex(
     // Compute file name from human ID + slugified title (minus type prefix).
     // reason: slugify() produces "{type}-{kebab}" — strip the type prefix to get
     // just the kebab portion for the filename, keeping SPEC-025 prefix only from humanId.
-    const fullSlug = slugify(doc.type, doc.title);
+    const fullSlug = slugify(doc.type, doc.title, { transliterate: transliterateCjk });
     const typePrefix = `${doc.type}-`;
     const kebabPart = fullSlug.startsWith(typePrefix)
       ? fullSlug.slice(typePrefix.length)
