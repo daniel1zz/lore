@@ -16,6 +16,10 @@
  *   claim(idOrSlug, opts, now?)            → acquire/refresh/steal the advisory lease
  *   release(idOrSlug, opts, now?)          → clear the advisory lease
  *   ready(planIdOrSlug, now?)              → computed readiness report (zero writes)
+ *   readyAdhoc(now?)                       → OPEN ad-hoc (planless) task listing (zero
+ *                                             writes, SPEC-069 D2) — the `--adhoc`
+ *                                             counterpart to `ready()`, corpus-wide
+ *                                             rather than plan-scoped
  *
  * @invariant All public methods return Promise<Result<T, LoreError>> — no thrown exceptions.
  * @invariant Every write carries the read version as a CAS guard (store.update's
@@ -1029,6 +1033,79 @@ export class TaskWorkflowService {
       sessions: deriveSessions(tasks, nowIso, this.claimTtlMinutes),
       anchor_conflicts: anchorConflicts,
     });
+  }
+
+  /**
+   * Computed readiness-style listing for OPEN (non-terminal) ad-hoc tasks
+   * (SPEC-069 §Design Decisions D2, AC-069-7) — the `--adhoc` counterpart to
+   * `ready(plan)`: a planless task can never be "ready under a plan" (it has
+   * no `plan_id`), and must not become INVISIBLE to `lore ready` just because
+   * of that — the whole point of D2 was giving ad-hoc work a first-class,
+   * discoverable home instead of a silently-parked one.
+   *
+   * Reuses the SAME pure `evaluateReadiness` (`@lore/core`) `ready()`
+   * delegates to (blocks-links + terminal-status computation) — an ad-hoc
+   * task's readiness fields are byte-identical in SHAPE to a plan task's,
+   * only the SOURCE SET differs (every corpus-wide `extra.adhoc === true`
+   * task, not one plan's children). `parentSpecStatus` is always `null` here
+   * (no plan → no upstream-spec advisory is possible for this listing).
+   *
+   * "Open" = not yet terminal — `task.status` is neither `archived` nor
+   * `deprecated` — the SAME terminal-state notion `formatReadyLine`'s "done"
+   * bucket and `evaluateReadiness`'s own `isTerminal` check already use;
+   * filtered HERE (before `evaluateReadiness` runs) rather than post-hoc, so
+   * a closed ad-hoc task never appears in this listing at all.
+   *
+   * Zero writes (D3, same invariant `ready()` carries).
+   *
+   * @param now - Time seam — drives claim staleness computation, same as `ready()`
+   * @returns every OPEN ad-hoc task's `ReadyRecord` (unsorted — call-site
+   *   ordering is `findMany`'s own `updated_at DESC, id ASC`, unchanged here)
+   */
+  async readyAdhoc(now: () => string = defaultNow): Promise<Result<ReadyRecord[], LoreError>> {
+    const tasksResult = await this.store.findMany({ type: "task" });
+    if (!tasksResult.ok) return tasksResult;
+    const openAdhocTasks = tasksResult.value.filter(
+      (t) =>
+        t.extra?.["adhoc"] === true &&
+        t.status !== "archived" &&
+        t.status !== "deprecated",
+    );
+
+    if (openAdhocTasks.length === 0) return ok([]);
+
+    const nowIso = now();
+
+    const taskIds = openAdhocTasks.map((t) => t.id);
+    const linksResult = await this.store.findLinksByToIds(taskIds, "blocks");
+    if (!linksResult.ok) return linksResult;
+    const blocksLinks = linksResult.value;
+
+    const blockerIds = new Set(blocksLinks.map((l) => l.from_id));
+    const blockerStatuses = new Map<DocId, BlockerInfo>();
+    if (blockerIds.size > 0) {
+      // reason: same "one unfiltered findMany + client-side pick" tradeoff
+      // ready()'s identical block above documents — StoreFilters has no
+      // id-in-list predicate.
+      const allDocsResult = await this.store.findMany({});
+      if (!allDocsResult.ok) return allDocsResult;
+      for (const doc of allDocsResult.value) {
+        if (blockerIds.has(doc.id)) {
+          blockerStatuses.set(doc.id, { slug: doc.slug, status: doc.status });
+        }
+      }
+    }
+
+    const records = evaluateReadiness(
+      openAdhocTasks,
+      blocksLinks,
+      blockerStatuses,
+      nowIso,
+      this.claimTtlMinutes,
+      null,
+    );
+
+    return ok(records);
   }
 
   /**
