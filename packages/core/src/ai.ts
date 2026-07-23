@@ -125,15 +125,21 @@ export interface AIProvider {
  *
  * @example
  * const cfg = AiProviderConfigSchema.parse({ command: "claude", args: ["-p"] });
- * // → { command: "claude", args: ["-p"], timeout_ms: 60000 }
+ * // → { command: "claude", args: ["-p"], timeout_ms: 180000 }
  */
 export const AiProviderConfigSchema = z.object({
   /** Executable to spawn (e.g. "claude") */
   command: z.string().min(1),
   /** Additional CLI arguments appended after the command (e.g. ["-p"]) */
   args: z.array(z.string()).default([]),
-  /** Milliseconds before SIGTERM is sent to the spawned process */
-  timeout_ms: z.number().int().positive().default(60_000),
+  /**
+   * Milliseconds before SIGTERM is sent to the spawned process.
+   * Default 180_000 (SPEC-067 D1) — a real `lore assess` judge round measures ~73s under
+   * normal load; 180s gives 2x headroom plus margin without adopting the full 300s some
+   * production configs use. Explicit config (`ai.providers.<name>.timeout_ms`) always wins
+   * over this schema default.
+   */
+  timeout_ms: z.number().int().positive().default(180_000),
 }).strict();
 
 /** Validated per-provider CLI configuration. */

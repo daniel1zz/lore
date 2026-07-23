@@ -267,8 +267,12 @@ describe("buildHermeticSpawnSpec — STATE: purity", () => {
 // ─── REGRESSION: real default provider config, flag-injection order pinned ────
 
 describe("buildHermeticSpawnSpec — REGRESSION: real default provider entry", () => {
-  it('a config resembling the real default provider entry ({command: "claude", args: ["-p"], timeout_ms: 60000}) produces args starting with ["-p", "--setting-sources", ""] in that exact order', () => {
-    const cfg: AiProviderConfig = { command: "claude", args: ["-p"], timeout_ms: 60_000 };
+  it('a config resembling the real default provider entry ({command: "claude", args: ["-p"], timeout_ms: 180000}) produces args starting with ["-p", "--setting-sources", ""] in that exact order', () => {
+    // reason: SPEC-067 D1 raised the built-in default timeout_ms 60_000 -> 180_000 —
+    // this literal is unrelated to arg-injection order (the assertion below), but is
+    // kept in sync with the real default so the test's own "resembling the real
+    // default" claim stays accurate.
+    const cfg: AiProviderConfig = { command: "claude", args: ["-p"], timeout_ms: 180_000 };
     const result = buildHermeticSpawnSpec(cfg, {
       sourceEnv: { PATH: "/bin" },
       tmpDir: "/tmp/x",

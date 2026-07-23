@@ -187,7 +187,9 @@ export default defineCommand({
       const result = assessResult.value;
 
       if (showSpinner) {
-        process.stderr.write(`✓ Assessment complete: ${result.verdict} (${result.overall_score}/100)\n`);
+        // SPEC-067 D4: overall_score is omitted at 100% task-truncation coverage.
+        const scoreLabel = result.overall_score !== undefined ? `${result.overall_score}/100` : "N/A (fully truncated)";
+        process.stderr.write(`✓ Assessment complete: ${result.verdict} (${scoreLabel})\n`);
       }
 
       // ─── Step 6: persist as a knowledge doc, linked to the plan ────────────────

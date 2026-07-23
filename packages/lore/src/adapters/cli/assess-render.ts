@@ -33,7 +33,10 @@ import { formatTable } from "./utils.js";
 /** Human-readable verdict + AC score table rendering for terminal output. */
 export function formatAssessmentSummary(result: AssessmentResult): string {
   const lines: string[] = [];
-  lines.push(`Verdict: ${result.verdict} (score: ${result.overall_score}/100)`);
+  // SPEC-067 D4: overall_score is omitted at 100% task-truncation coverage (verdict
+  // "inconclusive") — render an explicit placeholder rather than interpolating `undefined`.
+  const scoreLabel = result.overall_score !== undefined ? `${result.overall_score}/100` : "N/A (fully truncated)";
+  lines.push(`Verdict: ${result.verdict} (score: ${scoreLabel})`);
   lines.push("");
 
   if (result.ac_scores.length > 0) {
@@ -112,6 +115,15 @@ export function formatAssessmentSummary(result: AssessmentResult): string {
       (result.judgment.truncated.length > 0 ? `, truncated: ${result.judgment.truncated.join(", ")}` : "") +
       `)`,
   );
+
+  // SPEC-067 D4: additive-only — absent on every pre-SPEC-067 assessment and every run
+  // below the truncation-cap threshold.
+  if (result.judgment.overall_confidence !== undefined) {
+    lines.push(
+      `Overall confidence: ${result.judgment.overall_confidence}` +
+        (result.judgment.degraded_by_truncation ? " (degraded by truncation)" : ""),
+    );
+  }
 
   return lines.join("\n");
 }

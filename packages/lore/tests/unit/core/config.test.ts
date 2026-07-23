@@ -544,8 +544,10 @@ describe("SPEC-030 AC-HJ-3 — ai config fail-loud — HAPPY", () => {
     if (result.ok) {
       expect(result.value.ai?.provider).toBe("claude-cli");
       expect(result.value.ai?.providers["claude-cli"]?.command).toBe("claude");
-      // timeout_ms is not supplied — schema default (60000) must still apply
-      expect(result.value.ai?.providers["claude-cli"]?.timeout_ms).toBe(60_000);
+      // timeout_ms is not supplied — schema default must still apply. SPEC-067 D1
+      // raised this default 60_000 -> 180_000 (a real `lore assess` judge round
+      // measures ~73s under normal load).
+      expect(result.value.ai?.providers["claude-cli"]?.timeout_ms).toBe(180_000);
     }
   });
 });
