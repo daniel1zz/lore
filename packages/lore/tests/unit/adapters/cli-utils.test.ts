@@ -535,6 +535,14 @@ describe("parsePositiveIntArg", () => {
 // `knowledge-session-process-review-2026-07-22-spec-062-064-continu`,
 // AC-AUDIT-ACTOR-1) ─────────────────────────────────────────────────────────
 
+// Ambient Claude Code shells export CLAUDE_CODE_SESSION_ID, which the SPEC-069
+// session tier resolves ahead of os-fallback — clear both session vars for every
+// test in this file so the os-fallback cases below still exercise os-fallback.
+beforeEach(() => {
+  delete process.env["CLAUDE_CODE_SESSION_ID"];
+  delete process.env["CLAUDE_SESSION_ID"];
+});
+
 describe("resolveActorWithSource", () => {
   const OS_USERNAME = userInfo().username;
   const ORIGINAL_LORE_ACTOR = process.env["LORE_ACTOR"];
