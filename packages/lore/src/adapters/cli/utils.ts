@@ -19,7 +19,13 @@ import { existsSync } from "fs";
 import { join, dirname } from "path";
 import { userInfo } from "os";
 import { z } from "zod";
-import { evidenceEntrySchema, taskClaimSchema, isClaimStale, isInvalidated } from "@lore/core";
+import {
+  evidenceEntrySchema,
+  taskClaimSchema,
+  isClaimStale,
+  isInvalidated,
+  sessionActorFromId,
+} from "@lore/core";
 import type { DocRecord, LoreError, ReviewJudgment, ValidityCarrier } from "@lore/core";
 import type { TreeNode } from "../../service/corpus-service.js";
 import type { DocWithNavigation } from "../../service/corpus-service.js";
@@ -231,10 +237,11 @@ export function formatError(error: LoreError, opts?: { aiHasNoFallback?: boolean
 
 /**
  * Which resolution tier produced the actor identity {@link resolveActorWithSource}
- * returned — `"explicit"` (--by), `"env"` ($LORE_ACTOR), or `"os-fallback"`
- * (os.userInfo().username, the untraceable default).
+ * returned — `"explicit"` (--by), `"env"` ($LORE_ACTOR), `"session"`
+ * (`$CLAUDE_CODE_SESSION_ID`/`$CLAUDE_SESSION_ID`, SPEC-069 F1), or
+ * `"os-fallback"` (os.userInfo().username, the untraceable default).
  */
-export type ActorSource = "explicit" | "env" | "os-fallback";
+export type ActorSource = "explicit" | "env" | "session" | "os-fallback";
 
 /** Result of {@link resolveActorWithSource} — the resolved identity plus which tier won. */
 export interface ResolvedActor {
@@ -245,25 +252,45 @@ export interface ResolvedActor {
 /**
  * Pure actor-resolution core shared by {@link resolveActor}. Mirrors
  * resolveActor's precedence EXACTLY (first non-empty wins: --by > $LORE_ACTOR
- * > OS username) but additionally reports which tier won, so callers can
- * decide whether the resolution is an OS-username fallback WITHOUT
- * re-deriving the precedence logic themselves. No IO — this function never
- * writes to stderr.
+ * > session tier > OS username) but additionally reports which tier won, so
+ * callers can decide whether the resolution is an OS-username fallback
+ * WITHOUT re-deriving the precedence logic themselves. No IO — this function
+ * never writes to stderr.
+ *
+ * The session tier (SPEC-069 F1, W2 fix) reads `env["CLAUDE_CODE_SESSION_ID"]`,
+ * falling back to the alias `env["CLAUDE_SESSION_ID"]` — both verified present
+ * in Claude Code's own Bash tool environment, so two concurrent agent sessions
+ * with no `$LORE_ACTOR` set no longer collapse onto the same untraceable OS
+ * username (the W2 collision this feature closes). A present-but-blank
+ * (empty/whitespace-only) session id tier falls through to OS-fallback, same
+ * as the explicit/env tiers above it.
  *
  * @param explicit - Value of the --by flag, if the caller passed one
+ * @param env - Environment map to resolve `$LORE_ACTOR`/session-id vars from;
+ *   defaults to `process.env`. Tests pass a literal object here instead of
+ *   mutating `process.env` (SPEC-069 §Design Decisions D8).
  * @returns `{actor, source}` — `actor` is never empty (OS username is always available)
  * @example
  *   resolveActorWithSource("alice")  // => {actor: "alice", source: "explicit"}
+ *   resolveActorWithSource(undefined, { CLAUDE_CODE_SESSION_ID: "3de02220-..." })
+ *   //   => {actor: "agent:session-3de02220", source: "session"}
  *   resolveActorWithSource(undefined) // => {actor: "<OS username>", source: "os-fallback"}
  *   //   (or {source: "env"} when $LORE_ACTOR is set)
  */
-export function resolveActorWithSource(explicit?: string): ResolvedActor {
+export function resolveActorWithSource(
+  explicit?: string,
+  env: Record<string, string | undefined> = process.env,
+): ResolvedActor {
   if (explicit !== undefined && explicit.trim() !== "") {
     return { actor: explicit, source: "explicit" };
   }
-  const envActor = process.env["LORE_ACTOR"];
+  const envActor = env["LORE_ACTOR"];
   if (envActor !== undefined && envActor.trim() !== "") {
     return { actor: envActor, source: "env" };
+  }
+  const sessionId = env["CLAUDE_CODE_SESSION_ID"] ?? env["CLAUDE_SESSION_ID"];
+  if (sessionId !== undefined && sessionId.trim() !== "") {
+    return { actor: sessionActorFromId(sessionId), source: "session" };
   }
   return { actor: userInfo().username, source: "os-fallback" };
 }
