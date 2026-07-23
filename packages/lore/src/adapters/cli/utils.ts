@@ -290,7 +290,18 @@ export function resolveActorWithSource(
   }
   const sessionId = env["CLAUDE_CODE_SESSION_ID"] ?? env["CLAUDE_SESSION_ID"];
   if (sessionId !== undefined && sessionId.trim() !== "") {
-    return { actor: sessionActorFromId(sessionId), source: "session" };
+    // reason: `sessionActorFromId` is deliberately fail-loud (SPEC-069 D3) on a
+    // sessionId that sanitizes to the empty string (e.g. "---", "!!!" — all
+    // non-whitespace but zero [a-z0-9-] characters), so it throws rather than
+    // returning a collision-prone bare prefix. That fail-loud contract stays
+    // correct for the core primitive; this CLI tier degrades gracefully
+    // instead of crashing the whole command, mirroring the whitespace-only
+    // fall-through one line above.
+    try {
+      return { actor: sessionActorFromId(sessionId), source: "session" };
+    } catch {
+      return { actor: userInfo().username, source: "os-fallback" };
+    }
   }
   return { actor: userInfo().username, source: "os-fallback" };
 }
@@ -315,7 +326,11 @@ export function resetActorFallbackWarningForTests(): void {
  * Resolution order (first non-empty wins):
  *   1. --by flag (explicit, always wins)
  *   2. $LORE_ACTOR environment variable
- *   3. OS username (os.userInfo().username)
+ *   3. session tier (`$CLAUDE_CODE_SESSION_ID` / `$CLAUDE_SESSION_ID` — SPEC-069
+ *      F1 — mapped to `agent:session-<8-char sanitized id prefix>`; a value
+ *      that sanitizes to empty falls through to the OS-username tier instead
+ *      of throwing, see the try/catch in `resolveActorWithSource` above)
+ *   4. OS username (os.userInfo().username)
  *
  * When resolution falls all the way to the OS-username tier — no --by, no
  * $LORE_ACTOR — emits a ONCE-PER-PROCESS non-blocking advisory to stderr
