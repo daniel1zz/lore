@@ -8,11 +8,15 @@
  * Public surface:
  *   - loadConfig / saveConfig / resolveGlobalConfigPath / loadGlobalConfig (config-node.ts)
  *   - JsonlTelemetry / createTelemetry (telemetry-node.ts)
- *   - transliterateCjk (slugify-node.ts, SPEC-068 D1) — pinyin-pro-powered CJK
- *     transliteration for `slugify`'s `opts.transliterate` hook. Grouped here for
- *     the SAME barrel-isolation reason as the other two (pinyin-pro is ~931KB
- *     unpacked, must stay unreachable from the browser bundle), even though this
- *     one performs no filesystem IO of its own — see slugify-node.ts's own header.
+ *   - getTransliterateCjk / containsCjk (slugify-node.ts, SPEC-068 D1, hotfix
+ *     2026-07-23) — pinyin-pro-powered CJK transliteration for `slugify`'s
+ *     `opts.transliterate` hook. `getTransliterateCjk()` is async (a
+ *     static-specifier dynamic `import("pinyin-pro")`, compile-safe under
+ *     `bun build --compile` — see slugify-node.ts's own header for why the
+ *     prior `createRequire` form broke in the compiled binary). Grouped here
+ *     for the SAME barrel-isolation reason as the other two (pinyin-pro is
+ *     ~931KB unpacked, must stay unreachable from the browser bundle), even
+ *     though this one performs no filesystem IO of its own.
  *
  * Invariants:
  *   - Import via `@lore/core/node`, never via relative path into another package.
@@ -21,7 +25,8 @@
  *     (grep check: `grep -r '@lore/core/node' packages/dashboard/src` → 0 hits).
  *
  * Side-effect class: IO (config-node.ts/telemetry-node.ts perform filesystem
- *   access; slugify-node.ts is pure — grouped here for barrel isolation only)
+ *   access; slugify-node.ts's IO is its deferred dynamic `import()`, not
+ *   filesystem/network access — grouped here for barrel isolation)
  *
  * Source: fix(core) browser-safety task — see packages/core/src/CLAUDE.md
  *   "Browser Safety Invariant" and packages/core/src/index.ts header.

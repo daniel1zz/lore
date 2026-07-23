@@ -7,11 +7,12 @@
 import { ulid } from "ulidx";
 import { err, ok, type Result } from "@lore/core";
 import type { LoreError } from "@lore/core";
-// reason: transliterateCjk (SPEC-068 D1) is Node-only-subpath-gated purely for the
-// browser-safety barrel-isolation invariant (packages/core/src/CLAUDE.md) — this
-// service file is always server-side, same precedent config-service.ts/
-// global-config-service.ts already set for direct `@lore/core/node` imports.
-import { transliterateCjk } from "@lore/core/node";
+// reason: getTransliterateCjk/containsCjk (SPEC-068 D1, hotfix 2026-07-23) are
+// Node-only-subpath-gated purely for the browser-safety barrel-isolation
+// invariant (packages/core/src/CLAUDE.md) — this service file is always
+// server-side, same precedent config-service.ts/global-config-service.ts
+// already set for direct `@lore/core/node` imports.
+import { containsCjk, getTransliterateCjk } from "@lore/core/node";
 import {
   adrExtraSchema,
   canonicaliseBody,
@@ -662,9 +663,15 @@ export class CorpusService {
     const now = new Date().toISOString();
     const role = DOC_TYPE_ROLE_MAP[data.type];
 
-    // Generate collision-free slug. transliterate: transliterateCjk (SPEC-068 D1) —
-    // CJK titles get a pinyin-derived slug instead of collapsing to the bare type
-    // name (kebab's [^a-z0-9]+ strips every non-ASCII character otherwise).
+    // Generate collision-free slug. transliterate: getTransliterateCjk (SPEC-068
+    // D1) — CJK titles get a pinyin-derived slug instead of collapsing to the
+    // bare type name (kebab's [^a-z0-9]+ strips every non-ASCII character
+    // otherwise). Only awaited when the title actually contains CJK — an
+    // ASCII-only title never pays the pinyin-pro load cost.
+    // reason: exactOptionalPropertyTypes forbids `{ transliterate: undefined }`
+    // — omit the key entirely (not just set it undefined) when the title has
+    // no CJK, rather than always spreading an `undefined`-valued property.
+    const slugOpts = containsCjk(data.title) ? { transliterate: await getTransliterateCjk() } : undefined;
     const slug = await slugifyWithCollision(
       data.type,
       data.title,
@@ -672,7 +679,7 @@ export class CorpusService {
         const r = await this.store.findBySlug(candidate);
         return r.ok && r.value !== null;
       },
-      { transliterate: transliterateCjk },
+      slugOpts,
     );
 
     // Default extra.spec_kind = "feature" for spec docs when absent (SPEC-032 §3.1).

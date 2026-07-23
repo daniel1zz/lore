@@ -22,11 +22,20 @@
  * barrel): `pinyin-pro` must load LAZILY (on first CJK title) rather than at
  * module top level, even within its own sanctioned `/node`-subpath file —
  * root-caused via migrate-phases integration-test timing (30s->46s under
- * repeated CLI spawns; measured `~1s` per `import("pinyin-pro")`, paid by
- * EVERY `lore` process on the CLI's import chain regardless of whether the
- * corpus ever has a CJK title). Pinned below as an additional AC-068-6 case:
- * `slugify-node.ts` may contain a top-level `import type` (erased, zero
- * runtime cost) but NO top-level static VALUE import of `pinyin-pro`.
+ * repeated CLI spawns; measured `~1s` per source-mode `import("pinyin-pro")`,
+ * paid by EVERY `lore` process on the CLI's import chain regardless of
+ * whether the corpus ever has a CJK title). Pinned below as an additional
+ * AC-068-6 case: `slugify-node.ts` may contain a top-level `import type`
+ * (erased, zero runtime cost) but NO top-level static VALUE import of
+ * `pinyin-pro` — the real load happens via a STATIC-SPECIFIER dynamic
+ * `import("pinyin-pro")` nested inside `getTransliterateCjk()`'s body, never
+ * a bare `require()` (SPEC-068 hotfix, 2026-07-23: the original
+ * `createRequire(import.meta.url)("pinyin-pro")` form could not resolve the
+ * package from inside a `bun build --compile`d binary's virtual `$bunfs/root`
+ * filesystem — a literal-specifier dynamic `import()` IS bundled by `bun
+ * build --compile` and loads correctly there; see slugify-node.ts's own
+ * header and `packages/lore/tests/integration/cli/slugify-compiled.bun.test.ts`,
+ * AC-068-10, for the compiled-binary regression oracle).
  *
  * Runner: vitest (pure fs/path read, no `bun:sqlite`).
  */
@@ -112,7 +121,7 @@ describe("AC-068-6: @lore/core default barrel is unreachable from pinyin-pro", (
     expect(bareSpecifiers.has("pinyin-pro")).toBe(true);
   });
 
-  it("AC-068-6 (startup-tax fix): slugify-node.ts has NO top-level static VALUE import of pinyin-pro — type-only + lazy require", () => {
+  it("AC-068-6 (startup-tax fix, hotfix 2026-07-23): slugify-node.ts has NO top-level static VALUE import of pinyin-pro — type-only + lazy STATIC-SPECIFIER dynamic import", () => {
     const content = readFileSync(join(CORE_SRC, "slugify-node.ts"), "utf8");
 
     // No eager VALUE import (`import { pinyin } from "pinyin-pro"`, default,
@@ -127,10 +136,21 @@ describe("AC-068-6: @lore/core default barrel is unreachable from pinyin-pro", (
     const typeOnlyImportPattern = /^\s*import\s+type\s+[^;]*from\s+["']pinyin-pro["']/m;
     expect(typeOnlyImportPattern.test(content)).toBe(true);
 
-    // The lazy require() call exists, indented (nested inside a function body
-    // — never at column 0 / module top level, where it would execute eagerly
-    // on every module load regardless of whether a CJK title is ever seen).
-    expect(content).toMatch(/\n[ \t]+.*require\(["']pinyin-pro["']\)/);
-    expect(content).not.toMatch(/^require\(["']pinyin-pro["']\)/m);
+    // No CJS require() of pinyin-pro anywhere — the hotfix retired
+    // createRequire(import.meta.url)("pinyin-pro") entirely (it could not
+    // resolve the package from inside a `bun build --compile`d binary's
+    // virtual filesystem).
+    expect(content).not.toMatch(/require\(["']pinyin-pro["']\)/);
+
+    // The lazy dynamic import() call exists, indented (nested inside a
+    // function body — never at column 0 / module top level, where it would
+    // execute eagerly on every module load regardless of whether a CJK title
+    // is ever seen), AND its specifier is a STATIC string literal — never a
+    // template literal or variable. A computed specifier would defeat bun's
+    // compile-time bundling of the dynamic import (the exact mechanism this
+    // hotfix relies on to survive `bun build --compile`).
+    expect(content).toMatch(/\n[ \t]+.*import\(["']pinyin-pro["']\)/);
+    expect(content).not.toMatch(/^import\(["']pinyin-pro["']\)/m);
+    expect(content).not.toMatch(/import\(\s*[`$]/); // no template-literal/variable specifier
   });
 });

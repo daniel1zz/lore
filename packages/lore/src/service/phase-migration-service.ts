@@ -59,10 +59,11 @@
 
 import { ulid } from "ulidx";
 import { err, ok, slugifyWithCollision } from "@lore/core";
-// reason: transliterateCjk (SPEC-066 D1) is Node-only-subpath-gated purely for the
-// browser-safety barrel-isolation invariant (packages/core/src/CLAUDE.md) — this
-// service file is always server-side, same precedent config-service.ts already set.
-import { transliterateCjk } from "@lore/core/node";
+// reason: getTransliterateCjk/containsCjk (SPEC-068 D1, hotfix 2026-07-23) are
+// Node-only-subpath-gated purely for the browser-safety barrel-isolation
+// invariant (packages/core/src/CLAUDE.md) — this service file is always
+// server-side, same precedent config-service.ts already set.
+import { containsCjk, getTransliterateCjk } from "@lore/core/node";
 import type {
   DocId,
   DocRecord,
@@ -259,6 +260,13 @@ export class PhaseMigrationService {
           const { extra, evidenceCount, warningsForGroup } = this.mergeGroup(plan, group, nowIso);
           warnings.push(...warningsForGroup);
 
+          // Only awaited when the title actually contains CJK — an ASCII-only
+          // title never pays the pinyin-pro load cost (SPEC-068 D1 hotfix).
+          // reason: exactOptionalPropertyTypes forbids `{ transliterate: undefined }`
+          // — omit the key entirely rather than spread an undefined-valued property.
+          const slugOpts = containsCjk(group.title)
+            ? { transliterate: await getTransliterateCjk() }
+            : undefined;
           const slug = await slugifyWithCollision(
             PHASE_DOC_TYPE,
             group.title,
@@ -266,7 +274,7 @@ export class PhaseMigrationService {
               const r = await this.store.findBySlug(candidate);
               return r.ok && r.value !== null;
             },
-            { transliterate: transliterateCjk },
+            slugOpts,
           );
 
           const phaseId = ulid();

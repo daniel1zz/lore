@@ -27,9 +27,9 @@
  * @spec_ref SPEC-068
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import { slugify, slugSchema, type DocType } from "@lore/core";
-import { transliterateCjk } from "@lore/core/node";
+import { getTransliterateCjk } from "@lore/core/node";
 
 /**
  * Independent re-implementation of the D2 fallback hash (FNV-1a 32-bit,
@@ -53,6 +53,17 @@ function fnv1a32Hex(input: string): string {
 }
 
 describe("slugify — SPEC-068 adversarial sweep", () => {
+  // `getTransliterateCjk()` is async (SPEC-068 hotfix 2026-07-23 — dynamic
+  // `import("pinyin-pro")`, compile-safe under `bun build --compile`, replacing
+  // the prior `createRequire` form); resolve the cached sync transliterator
+  // once, then pass it into `slugify`'s sync `opts.transliterate` hook the same
+  // way every production caller does. Zero assertion changes below — this is
+  // purely the async-getter migration mirroring `slugify-cjk.test.ts`.
+  let transliterateCjk: (text: string) => string;
+  beforeAll(async () => {
+    transliterateCjk = await getTransliterateCjk();
+  });
+
   // ─── HAPPY: polyphonic CJK disambiguation (beyond AC-068-1/2) ────────────
 
   describe("polyphonic CJK characters — context-dependent readings, not naive per-char lookup", () => {
