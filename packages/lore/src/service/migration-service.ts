@@ -11,6 +11,10 @@ import { parse as parseYaml } from "yaml";
 import { ulid } from "ulidx";
 import { err, ok, splitFrontmatter } from "@lore/core";
 import { slugify, slugifyWithCollision } from "@lore/core";
+// reason: transliterateCjk (SPEC-066 D1) is Node-only-subpath-gated purely for the
+// browser-safety barrel-isolation invariant (packages/core/src/CLAUDE.md) — this
+// service file is always server-side, same precedent config-service.ts already set.
+import { transliterateCjk } from "@lore/core/node";
 import type { LoreError, Result } from "@lore/core";
 import type {
   DocId,
@@ -322,6 +326,7 @@ export class MigrationService {
         mappingResult.type,
         doc.title,
         existingSlugsFn,
+        { transliterate: transliterateCjk },
       );
 
       const extra = buildExtra(mappingResult, doc);

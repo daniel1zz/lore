@@ -10,6 +10,7 @@
     "./node": "./src/node.ts"
   },
   "dependencies": {
+    "pinyin-pro": "^3.28.2",
     "yaml": "^2.7.1",
     "zod": "^3.24.4"
   }

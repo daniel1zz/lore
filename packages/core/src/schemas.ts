@@ -15,6 +15,7 @@ import { specAcceptanceCriteriaSchema } from "./acceptance.js";
 import { handoffExtraSchema } from "./session.js";
 import { validitySchema } from "./validity.js";
 import { phaseExtraSchema } from "./phase.js";
+import { fnv1a32Hex } from "./slug-hash.js";
 
 // ─── Primitive Schemas ─────────────────────────────────────────────────────
 
@@ -593,31 +594,106 @@ export function getAllowedTransitions(from: DocStatus): DocStatus[] {
 // ─── Slug Generation ───────────────────────────────────────────────────────
 
 /**
- * Generate a valid slug from a doc type and title.
- * Rules per SPEC-002 §6.1:
- * - Format: {type}-{kebab-case-name}
- * - Lowercase, non-alphanumeric → hyphens, deduplicate hyphens
- * - Total max 64 chars
- * Collision handling (-2, -3, ...) is delegated to CorpusService.
+ * Options for `slugify` (SPEC-066 D1).
  */
-export function slugify(type: DocType, title: string): Slug {
+export interface SlugifyOptions {
+  /**
+   * Applied to the raw title BEFORE the kebab step. Used to transliterate a
+   * non-ASCII script (e.g. Chinese → pinyin) into ASCII so the kebab regex
+   * doesn't strip it entirely. The real implementation (`transliterateCjk`,
+   * pinyin-pro-powered) lives OUTSIDE this browser-safe barrel — see
+   * `packages/core/src/slugify-node.ts`'s module header and this package's
+   * CLAUDE.md "Browser safety" invariant. Absent → pure pre-SPEC-066 behavior
+   * (the kebab step strips every non-ASCII-alphanumeric character as before).
+   */
+  transliterate?: (raw: string) => string;
+}
+
+/**
+ * Generate a valid slug from a doc type and title.
+ *
+ * Format: `{type}-{kebab-case-name}`, lowercase, non-alphanumeric collapsed to
+ * single hyphens, max 64 chars (SPEC-002 §6.1). Collision handling (-2, -3, ...)
+ * is delegated to `slugifyWithCollision`/`CorpusService`.
+ *
+ * SPEC-066 additions on top of the SPEC-002 base rule:
+ *   - D1: `opts.transliterate`, applied to the raw title before the kebab step
+ *     (e.g. CJK → pinyin) — see `SlugifyOptions`.
+ *   - D2: a non-empty title that transliterates+kebabs to an EMPTY name part
+ *     (no transliterator injected + non-ASCII title, or a script the injected
+ *     transliterator doesn't cover — Korean/kana/emoji, ...) never falls back
+ *     to the bare type name; it gets a deterministic `{type}-{fnv8hex}` instead,
+ *     hashed over the RAW title (stable regardless of whether/which
+ *     transliterator ran). An empty/whitespace-only title is the one case that
+ *     KEEPS the bare-type-name result — there's nothing meaningful to hash.
+ *   - D3: a kebab result equal to the type, or starting with `{type}-`, has
+ *     that leading segment stripped BEFORE the type prefix is (re-)applied —
+ *     prevents `adr-adr-...` when a title already opens with the type word.
+ *   - D4: truncation cuts back to the last COMPLETE hyphen-separated token
+ *     within the 64-char limit (no mid-word cut), unless the name part's first
+ *     token alone already overflows the limit — then the hard character cut is
+ *     kept (a full single token beats an empty name part).
+ *
+ * @param type - Document type; becomes the slug's mandatory prefix.
+ * @param title - Raw document title (any script, any length).
+ * @param opts - Optional D1 transliteration hook.
+ * @returns A slug matching `slugSchema` (3–64 chars, `^[a-z][a-z0-9-]*[a-z0-9]$`).
+ * @example
+ *   slugify("adr", "ADR: internal-circle positioning")
+ *   // => "adr-internal-circle-positioning" (D3: no adr-adr- duplication)
+ * @example
+ *   slugify("adr", "产品定位", { transliterate: transliterateCjk })
+ *   // => "adr-chan-pin-ding-wei" (D1)
+ * @example
+ *   slugify("adr", "한국어 제목") // no transliterator covers Korean
+ *   // => "adr-{8-char fnv1a32 hex}" (D2 — never the bare "adr")
+ */
+export function slugify(type: DocType, title: string, opts?: SlugifyOptions): Slug {
   const MAX_SLUG_LENGTH = 64;
 
-  const kebab = title
+  // Empty/whitespace-only title: nothing meaningful to transliterate or hash —
+  // keep the pre-SPEC-066 bare-prefix behavior (D2's one exemption).
+  if (title.trim() === "") {
+    return type as Slug;
+  }
+
+  const transliterated = opts?.transliterate ? opts.transliterate(title) : title;
+
+  let kebab = transliterated
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/-{2,}/g, "-")
     .replace(/^-|-$/g, "");
 
-  const prefix = type;
-  const separator = kebab.length > 0 ? "-" : "";
-  const combined = `${prefix}${separator}${kebab}`;
+  // D3 — type-prefix dedup: a title beginning with the type word must not
+  // duplicate the prefix ("ADR: x" -> "adr-x", never "adr-adr-x").
+  if (kebab === type) {
+    kebab = "";
+  } else if (kebab.startsWith(`${type}-`)) {
+    kebab = kebab.slice(type.length + 1);
+  }
 
-  // Truncate to max length, trimming trailing hyphens after truncation
-  const truncated = combined.slice(0, MAX_SLUG_LENGTH).replace(/-+$/, "");
+  // D2 — never emit a bare type name for a non-empty title: if transliteration
+  // + kebab (+ D3 stripping) leaves nothing, fall back to a deterministic hash
+  // of the RAW title — stable regardless of whether a transliterator ran.
+  if (kebab === "") {
+    kebab = fnv1a32Hex(title);
+  }
 
-  // Ensure result is at least the type prefix (never empty)
-  return (truncated.length >= 2 ? truncated : prefix) as Slug;
+  const combined = `${type}-${kebab}`;
+  if (combined.length <= MAX_SLUG_LENGTH) {
+    return combined as Slug;
+  }
+
+  // D4 — token-boundary truncation: cut back to the last complete
+  // hyphen-separated token inside the 64-char hard cut, UNLESS the first name
+  // token alone already overflows the limit (then keep the hard character cut).
+  const hardCut = combined.slice(0, MAX_SLUG_LENGTH);
+  const firstToken = kebab.split("-", 1)[0] ?? "";
+  const firstTokenEndIdx = type.length + 1 + firstToken.length; // end of "{type}-{firstToken}"
+  const lastHyphenIdx = hardCut.lastIndexOf("-");
+  const boundaryCut = lastHyphenIdx >= firstTokenEndIdx ? hardCut.slice(0, lastHyphenIdx) : hardCut;
+  return boundaryCut.replace(/-+$/, "") as Slug;
 }
 
 // ─── Anthropic Messages HTTP Response Schema (SPEC-020) ────────────────────
@@ -721,23 +797,28 @@ export type ExportIndexMapping = z.infer<typeof exportIndexMappingSchema>;
  * `existsSlug` must return true if the candidate slug is already taken.
  * Accepts both sync and async `existsSlug` callbacks.
  * Returns a Promise when `existsSlug` is async, Slug when sync.
+ * `opts` (SPEC-066 D1) forwards unchanged to the underlying `slugify(type, title, opts)`
+ * call that produces the base candidate — see `SlugifyOptions`.
  */
 export function slugifyWithCollision(
   type: DocType,
   title: string,
   existsSlug: (slug: string) => boolean,
+  opts?: SlugifyOptions,
 ): Slug;
 export function slugifyWithCollision(
   type: DocType,
   title: string,
   existsSlug: (slug: string) => Promise<boolean>,
+  opts?: SlugifyOptions,
 ): Promise<Slug>;
 export function slugifyWithCollision(
   type: DocType,
   title: string,
   existsSlug: (slug: string) => boolean | Promise<boolean>,
+  opts?: SlugifyOptions,
 ): Slug | Promise<Slug> {
-  const base = slugify(type, title);
+  const base = slugify(type, title, opts);
   const checkResult = existsSlug(base);
 
   if (checkResult instanceof Promise) {
