@@ -535,23 +535,37 @@ describe("parsePositiveIntArg", () => {
 // `knowledge-session-process-review-2026-07-22-spec-062-064-continu`,
 // AC-AUDIT-ACTOR-1) ─────────────────────────────────────────────────────────
 
-// Ambient Claude Code shells export CLAUDE_CODE_SESSION_ID, which the SPEC-069
-// session tier resolves ahead of os-fallback — clear both session vars for every
-// test in this file so the os-fallback cases below still exercise os-fallback.
-beforeEach(() => {
-  delete process.env["CLAUDE_CODE_SESSION_ID"];
-  delete process.env["CLAUDE_SESSION_ID"];
-});
-
 describe("resolveActorWithSource", () => {
   const OS_USERNAME = userInfo().username;
   const ORIGINAL_LORE_ACTOR = process.env["LORE_ACTOR"];
+  const ORIGINAL_CLAUDE_CODE_SESSION_ID = process.env["CLAUDE_CODE_SESSION_ID"];
+  const ORIGINAL_CLAUDE_SESSION_ID = process.env["CLAUDE_SESSION_ID"];
+
+  // Ambient Claude Code shells export CLAUDE_CODE_SESSION_ID, which the SPEC-069
+  // session tier resolves ahead of os-fallback — clear both session vars before
+  // every test in THIS describe block (scoped, not file-level) so the os-fallback
+  // cases below still exercise os-fallback, then restore whatever the ambient
+  // shell actually had so other describe blocks in this file are unaffected.
+  beforeEach(() => {
+    delete process.env["CLAUDE_CODE_SESSION_ID"];
+    delete process.env["CLAUDE_SESSION_ID"];
+  });
 
   afterEach(() => {
     if (ORIGINAL_LORE_ACTOR === undefined) {
       delete process.env["LORE_ACTOR"];
     } else {
       process.env["LORE_ACTOR"] = ORIGINAL_LORE_ACTOR;
+    }
+    if (ORIGINAL_CLAUDE_CODE_SESSION_ID === undefined) {
+      delete process.env["CLAUDE_CODE_SESSION_ID"];
+    } else {
+      process.env["CLAUDE_CODE_SESSION_ID"] = ORIGINAL_CLAUDE_CODE_SESSION_ID;
+    }
+    if (ORIGINAL_CLAUDE_SESSION_ID === undefined) {
+      delete process.env["CLAUDE_SESSION_ID"];
+    } else {
+      process.env["CLAUDE_SESSION_ID"] = ORIGINAL_CLAUDE_SESSION_ID;
     }
   });
 
@@ -640,11 +654,19 @@ function spyOnStderrWrite() {
 
 describe("resolveActor — OS-fallback advisory side effect (AC-AUDIT-ACTOR-1)", () => {
   const ORIGINAL_LORE_ACTOR = process.env["LORE_ACTOR"];
+  const ORIGINAL_CLAUDE_CODE_SESSION_ID = process.env["CLAUDE_CODE_SESSION_ID"];
+  const ORIGINAL_CLAUDE_SESSION_ID = process.env["CLAUDE_SESSION_ID"];
   let stderrSpy: ReturnType<typeof spyOnStderrWrite>;
 
   beforeEach(() => {
     resetActorFallbackWarningForTests();
     stderrSpy = spyOnStderrWrite();
+    // Ambient Claude Code shells export CLAUDE_CODE_SESSION_ID, which the SPEC-069
+    // session tier resolves ahead of os-fallback — clear both session vars before
+    // every test in THIS describe block (scoped, not file-level) so the
+    // os-fallback cases below still exercise os-fallback.
+    delete process.env["CLAUDE_CODE_SESSION_ID"];
+    delete process.env["CLAUDE_SESSION_ID"];
   });
 
   afterEach(() => {
@@ -653,6 +675,16 @@ describe("resolveActor — OS-fallback advisory side effect (AC-AUDIT-ACTOR-1)",
       delete process.env["LORE_ACTOR"];
     } else {
       process.env["LORE_ACTOR"] = ORIGINAL_LORE_ACTOR;
+    }
+    if (ORIGINAL_CLAUDE_CODE_SESSION_ID === undefined) {
+      delete process.env["CLAUDE_CODE_SESSION_ID"];
+    } else {
+      process.env["CLAUDE_CODE_SESSION_ID"] = ORIGINAL_CLAUDE_CODE_SESSION_ID;
+    }
+    if (ORIGINAL_CLAUDE_SESSION_ID === undefined) {
+      delete process.env["CLAUDE_SESSION_ID"];
+    } else {
+      process.env["CLAUDE_SESSION_ID"] = ORIGINAL_CLAUDE_SESSION_ID;
     }
   });
 

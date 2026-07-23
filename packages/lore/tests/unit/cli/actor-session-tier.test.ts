@@ -17,18 +17,27 @@
  * Six-dimension coverage: HAPPY (env tier, session tier both id-var forms) /
  * NEGATIVE (explicit beats a fully-populated env — every lower tier present
  * simultaneously) / BOUNDARY (whitespace-only values at each tier fall
- * through exactly one level) / ERROR (n/a — no throwing path in
- * `resolveActorWithSource` itself; sanitize-to-empty is exercised at the
- * `sessionActorFromId` unit in `tests/unit/core/session-actor.test.ts`) /
- * STATE (alias precedence between the two session env var names) /
- * REGRESSION (`ActorSource` literal union includes `"session"`; the exact
- * spec-quoted id `"3DE02220-5d69-..."` example from SPEC-069's AC text).
+ * through exactly one level; a NON-whitespace value that still sanitizes to
+ * empty — e.g. "---", "!!!" — passes the `.trim() !== ""` guard but must not
+ * throw out of `resolveActorWithSource`, see the review-fix ERROR case below) /
+ * ERROR (a sanitize-to-empty session id degrades to os-fallback instead of
+ * propagating `sessionActorFromId`'s throw — `sessionActorFromId` itself
+ * stays fail-loud, unit-tested at `tests/unit/core/session-actor.test.ts`;
+ * this suite covers the CLI tier's catch-and-degrade wrapper) / STATE (alias
+ * precedence between the two session env var names) / REGRESSION
+ * (`ActorSource` literal union includes `"session"`; the exact spec-quoted
+ * id `"3DE02220-5d69-..."` example from SPEC-069's AC text).
  *
  * Runner: vitest (pure fn, no bun:sqlite, no IO).
  */
 
-import { describe, it, expect } from "vitest";
-import { resolveActorWithSource, type ActorSource } from "../../../src/adapters/cli/utils.js";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import {
+  resolveActorWithSource,
+  resolveActor,
+  resetActorFallbackWarningForTests,
+  type ActorSource,
+} from "../../../src/adapters/cli/utils.js";
 
 describe("SPEC-069 AC-069-1: resolveActorWithSource session tier", () => {
   describe("HAPPY", () => {
@@ -101,6 +110,29 @@ describe("SPEC-069 AC-069-1: resolveActorWithSource session tier", () => {
       const result = resolveActorWithSource(undefined, { CLAUDE_CODE_SESSION_ID: "" });
       expect(result.source).toBe("os-fallback");
     });
+
+    it("a non-whitespace session id that sanitizes to empty (\"---\") falls through to os-fallback without throwing", () => {
+      expect(() =>
+        resolveActorWithSource(undefined, { CLAUDE_CODE_SESSION_ID: "---" }),
+      ).not.toThrow();
+      const result = resolveActorWithSource(undefined, { CLAUDE_CODE_SESSION_ID: "---" });
+      expect(result.source).toBe("os-fallback");
+      expect(result.actor.length).toBeGreaterThan(0);
+    });
+
+    it("a non-whitespace session id that sanitizes to empty (\"!!!\") falls through to os-fallback without throwing", () => {
+      expect(() =>
+        resolveActorWithSource(undefined, { CLAUDE_CODE_SESSION_ID: "!!!" }),
+      ).not.toThrow();
+      const result = resolveActorWithSource(undefined, { CLAUDE_CODE_SESSION_ID: "!!!" });
+      expect(result.source).toBe("os-fallback");
+      expect(result.actor.length).toBeGreaterThan(0);
+    });
+
+    it("the CLAUDE_SESSION_ID alias also degrades to os-fallback on a sanitize-to-empty value, not a throw", () => {
+      const result = resolveActorWithSource(undefined, { CLAUDE_SESSION_ID: "___" });
+      expect(result.source).toBe("os-fallback");
+    });
   });
 
   describe("NEGATIVE — omitted env keys never crash, missing means absent", () => {
@@ -119,6 +151,41 @@ describe("SPEC-069 AC-069-1: resolveActorWithSource session tier", () => {
     it("omitting the env param entirely still type-checks and returns a ResolvedActor (default-param regression)", () => {
       const result = resolveActorWithSource("zed");
       expect(result).toEqual({ actor: "zed", source: "explicit" });
+    });
+  });
+
+  // This describe block deliberately breaks the file's own "zero process.env
+  // mutation" rule (see module docstring) — `resolveActor` (unlike
+  // `resolveActorWithSource`) always reads real `process.env`, so exercising
+  // its stderr advisory side effect on the sanitize-to-empty degrade path
+  // requires real env vars. Full save/restore keeps this file parallel-safe.
+  describe("ERROR — resolveActor's stderr advisory path still fires on the degrade route", () => {
+    const ORIGINAL_ENV = { ...process.env };
+
+    beforeEach(() => {
+      delete process.env["LORE_ACTOR"];
+      delete process.env["CLAUDE_CODE_SESSION_ID"];
+      delete process.env["CLAUDE_SESSION_ID"];
+      resetActorFallbackWarningForTests();
+    });
+
+    afterEach(() => {
+      process.env = { ...ORIGINAL_ENV };
+      resetActorFallbackWarningForTests();
+    });
+
+    it("a sanitize-to-empty CLAUDE_CODE_SESSION_ID (\"---\") degrades to os-fallback AND still emits the OS-fallback stderr advisory, without throwing", () => {
+      process.env["CLAUDE_CODE_SESSION_ID"] = "---";
+      const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+      let actor = "";
+      expect(() => {
+        actor = resolveActor(undefined);
+      }).not.toThrow();
+      expect(actor.length).toBeGreaterThan(0);
+      expect(stderrSpy).toHaveBeenCalledTimes(1);
+      const [firstCallArg] = stderrSpy.mock.calls[0] as [string];
+      expect(firstCallArg).toMatch(/OS username/);
+      stderrSpy.mockRestore();
     });
   });
 });

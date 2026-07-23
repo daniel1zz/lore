@@ -15,7 +15,11 @@
  *               audit details.claim_renewed === true
  *   NEGATIVE:   foreign-holder claim left byte-identical, no claim_renewed key
  *   BOUNDARY:   same-holder STALE claim (far past TTL) still renews on evidence
- *   ERROR:      n/a beyond the STALE_VERSION regression check below
+ *   ERROR:      STALE_VERSION sequential-CAS recipe (SPEC-025 §7) still rejects
+ *               correctly with a same-holder claim in play — renewal never
+ *               short-circuits the CAS guard, and a rejected write leaves
+ *               extra.claim at its pre-call value (mirrors
+ *               task-workflow-evidence-renewal.test.ts's identical recipe)
  *   STATE:      no claim held -> extra.claim stays absent after addEvidence
  *   REGRESSION: identical single-version-bump / foreign-holder-untouched
  *               assertions as TaskWorkflowService (parity requirement, D4)
@@ -214,6 +218,56 @@ describe("STATE — no claim held on the phase doc (AC-069-5)", () => {
     if (!auditResult.ok) return;
     const entry = auditResult.value[0] as AuditEntry;
     expect(entry.details?.["claim_renewed"]).toBeUndefined();
+  });
+});
+
+// ─── ERROR — STALE_VERSION regression under the new renewal wiring ──────────
+
+describe("ERROR — STALE_VERSION sequential-CAS recipe still rejects correctly with a same-holder phase claim in play (AC-069-5, REGRESSION)", () => {
+  it("addEvidence surfaces STALE_VERSION and leaves extra.claim at its pre-call value when the write is rejected", async () => {
+    const { store, service } = makeServices();
+    await mustInsert(store, makePlanRecord());
+    await mustInsert(store, makePhaseRecord());
+
+    const claimResult = await service.claim("phase-one", { by: "agent:p1" }, () => "2026-07-23T10:00:00.000Z");
+    expect(claimResult.ok).toBe(true);
+    if (!claimResult.ok) return;
+    const versionAfterClaim = claimResult.value.version;
+    const claimBefore = claimResult.value.extra["claim"];
+
+    let sideEffectApplied = false;
+    // reason: `now()` fires AFTER resolvePhase() has captured phase.version (the CAS
+    // expected_version) but BEFORE writePhaseExtra's store.update call — bumping the
+    // doc's version here deterministically simulates a concurrent writer, per the
+    // documented sequential-CAS recipe (SPEC-025 §7), mirroring
+    // task-workflow-evidence-renewal.test.ts's identical recipe.
+    const now = (): string => {
+      if (!sideEffectApplied) {
+        sideEffectApplied = true;
+        void store.update(
+          "01HPHASE00000000000000001",
+          {
+            extra: { plan_id: "01HPLAN000000000000000000", claim: claimBefore, injected_by_other_writer: true },
+            version: versionAfterClaim + 1,
+          },
+          { expected_version: versionAfterClaim },
+        );
+      }
+      return "2026-07-23T11:00:00.000Z";
+    };
+
+    // The SAME actor as the claim holder records evidence — renewClaimForEvidence
+    // would produce a non-null renewal, but the CAS guard must still reject.
+    const result = await service.addEvidence("phase-one", evidence(), now);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("STALE_VERSION");
+
+    const docResult = await store.find("01HPHASE00000000000000001");
+    expect(docResult.ok).toBe(true);
+    if (!docResult.ok) return;
+    expect(docResult.value?.extra["claim"]).toStrictEqual(claimBefore);
+    expect(docResult.value?.extra["verification_evidence"]).toBeUndefined();
   });
 });
 
