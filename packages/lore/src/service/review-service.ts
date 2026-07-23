@@ -4,7 +4,7 @@
  * Source: SPEC-005 §3, SPEC-001 §3.2
  */
 
-import type { DocId, DocRecord, DocType, DocTypeMeta, SpecKind } from "@lore/core";
+import type { DocId, DocRecord, DocType, DocTypeMeta, Slug, SpecKind } from "@lore/core";
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import {
   getAllowedTransitions,
@@ -30,9 +30,16 @@ import type { GateDependencies } from "./gate-enforcer.js";
  *   docs or when the doc's type-specific `extra` fields are missing/malformed;
  *   `task.claim_stale` is additionally absent whenever this service wasn't
  *   constructed with `claimTtlMinutes`.
+ * @invariant `slug` (SPEC-065 D3) is ALWAYS present, never optional — unlike
+ *   `meta`, a doc's slug is never absent/malformed by construction. Added so
+ *   `lore pending`'s table can print a resolvable identifier alongside the
+ *   truncated 10-char id column (SPEC-065's whole premise: an id a surface
+ *   PRINTS must be a valid INPUT to `resolveDoc`'s prefix resolution — the
+ *   slug always was, but wasn't SHOWN here before this field existed).
  */
 export interface PendingDoc {
   id: DocId;
+  slug: Slug;
   type: DocType;
   title: string;
   status: "draft";
@@ -475,6 +482,7 @@ function toPendingDoc(doc: DocRecord, opts?: { claimTtlMinutes?: number }): Pend
   const meta = deriveTypeMeta(doc, opts);
   return {
     id: doc.id,
+    slug: doc.slug,
     type: doc.type,
     title: doc.title,
     status: "draft",

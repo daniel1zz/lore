@@ -283,6 +283,26 @@ export class SQLiteStore implements StoreInterface {
     }
   }
 
+  /**
+   * @see StoreInterface.findByIdPrefix
+   * SQLite's `LIKE` is case-insensitive for ASCII by default, which is the
+   * exact matching semantics the interface contract asks for — no manual
+   * `UPPER()` needed. `prefix` is never string-interpolated (bound param);
+   * no escaping of `%`/`_` wildcard chars is needed either since a real ULID
+   * only ever contains Crockford base32 chars, which can't smuggle a
+   * wildcard even from an attacker-controlled prefix.
+   */
+  async findByIdPrefix(prefix: string): Promise<Result<DocRecord[], LoreError>> {
+    try {
+      const rows = this.db
+        .prepare("SELECT * FROM docs WHERE id LIKE ? AND deleted_at IS NULL")
+        .all(`${prefix}%`) as DocRow[];
+      return ok(rows.map(rowToDocRecord));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
   async findByIds(ids: DocId[]): Promise<Result<Map<DocId, DocRecord>, LoreError>> {
     const byId = new Map<DocId, DocRecord>();
     if (ids.length === 0) return ok(byId);

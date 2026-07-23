@@ -180,6 +180,26 @@ describe("InMemoryStore", () => {
       expect(result.value?.id).toBe(doc.id);
     });
 
+    it("SPEC-065 D2: findByIdPrefix resolves a unique 10-char prefix", async () => {
+      const doc = makeDoc({ id: "01HZUNIQUE0000000000000001", slug: "prd-unique-prefix" });
+      await store.insert(doc);
+
+      const result = await store.findByIdPrefix(doc.id.slice(0, 10));
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.map((d) => d.id)).toEqual([doc.id]);
+    });
+
+    it("SPEC-065 D2: findByIdPrefix is case-insensitive (mirrors SQLite/libSQL's default ASCII LIKE)", async () => {
+      const doc = makeDoc({ id: "01HZCASEINS0000000000000001", slug: "prd-case-insensitive" });
+      await store.insert(doc);
+
+      const result = await store.findByIdPrefix(doc.id.slice(0, 10).toLowerCase());
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.map((d) => d.id)).toEqual([doc.id]);
+    });
+
     it("tags round-trip: insert doc with tags, retrieve with tags preserved", async () => {
       const doc = makeDoc({
         slug: "prd-tags",
@@ -466,6 +486,36 @@ describe("InMemoryStore", () => {
       expect(result.ok).toBe(true);
       if (!result.ok) return;
       expect(result.value).toBeNull();
+    });
+
+    it("SPEC-065 D2: findByIdPrefix on a non-matching prefix returns an empty array (not an error)", async () => {
+      const result = await store.findByIdPrefix("01HZNOMATCH");
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value).toEqual([]);
+    });
+
+    it("SPEC-065 D2: findByIdPrefix returns every matching doc when the prefix is ambiguous", async () => {
+      const a = makeDoc({ id: "01HZAMBIGAAAA0000000000001", slug: "prd-ambig-a" });
+      const b = makeDoc({ id: "01HZAMBIGBBBB0000000000002", slug: "prd-ambig-b" });
+      await store.insert(a);
+      await store.insert(b);
+
+      const result = await store.findByIdPrefix("01HZAMBIG");
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.map((d) => d.id).sort()).toEqual([a.id, b.id].sort());
+    });
+
+    it("SPEC-065 D2: findByIdPrefix excludes soft-deleted docs, mirroring findMany's default", async () => {
+      const doc = makeDoc({ id: "01HZSOFTDEL0000000000000001", slug: "prd-soft-deleted" });
+      await store.insert(doc);
+      await store.softDelete(doc.id);
+
+      const result = await store.findByIdPrefix(doc.id.slice(0, 10));
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value).toEqual([]);
     });
 
     it("AC-STORE-002.N01: update on missing id returns DOC_NOT_FOUND", async () => {

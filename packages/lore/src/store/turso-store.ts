@@ -373,6 +373,25 @@ export class TursoStore implements StoreInterface {
     }
   }
 
+  /**
+   * @see StoreInterface.findByIdPrefix
+   * libSQL is SQLite-wire-compatible — `LIKE` is case-insensitive for ASCII
+   * by the same default, so no `UPPER()` normalization is needed here either
+   * (mirrors SQLiteStore's identical implementation note).
+   */
+  async findByIdPrefix(prefix: string): Promise<Result<DocRecord[], LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute({
+        sql: "SELECT * FROM docs WHERE id LIKE ? AND deleted_at IS NULL",
+        args: [`${prefix}%`],
+      });
+      return ok(rs.rows.map((row) => rowToDocRecord(libsqlRowToDocRow(row))));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
   async findByIds(ids: DocId[]): Promise<Result<Map<DocId, DocRecord>, LoreError>> {
     const byId = new Map<DocId, DocRecord>();
     if (ids.length === 0) return ok(byId);

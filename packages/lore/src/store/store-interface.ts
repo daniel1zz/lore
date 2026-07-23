@@ -153,6 +153,34 @@ export interface StoreInterface {
   findBySlug(slug: Slug): Promise<Result<DocRecord | null, LoreError>>;
 
   /**
+   * Find every doc whose `id` starts with `prefix`, for unique ID-prefix
+   * resolution (SPEC-065 D1/D2) — `resolveDoc` calls this ONLY after an exact
+   * `find`/`findBySlug` lookup misses, so a full-ULID prefix collision with a
+   * REAL other doc's id is the only case this method needs to disambiguate.
+   *
+   * Matching is case-INSENSITIVE (mirrors the caller's `/i`-flagged prefix
+   * regex — a copy-pasted 10-char prefix should resolve the same whether the
+   * terminal preserved case or not); implementations MAY rely on the storage
+   * engine's native case-insensitive `LIKE` (SQLite/libSQL) or perform an
+   * explicit uppercase compare (InMemoryStore).
+   *
+   * UNLIKE {@link find}/{@link findByIds} (direct-address lookups that
+   * deliberately do NOT filter soft-deleted rows), this is a discovery-shaped
+   * query — it EXCLUDES soft-deleted docs (`deleted_at IS NULL`), same
+   * default `findMany` applies, so a prefix that only matches a deleted doc
+   * resolves as zero candidates (falls through to the NOT_FOUND path with the
+   * truncation diagnostic), not a phantom match on a doc no surface can act
+   * on anymore.
+   *
+   * @param prefix - a candidate ID prefix, 6-25 chars (caller-validated via
+   *   the `ID_PREFIX_REGEX` in `resolve.ts`; this method does not re-validate
+   *   length/charset — an empty or malformed prefix is a caller bug).
+   * @returns every non-deleted doc whose id starts with `prefix`, in NO
+   *   particular guaranteed order (the caller only branches on `length`).
+   */
+  findByIdPrefix(prefix: string): Promise<Result<DocRecord[], LoreError>>;
+
+  /**
    * Batch-find docs by id, in ONE round trip. `WHERE id IN (...)` — avoids the N+1
    * pattern of calling {@link find} once per "other side of a link" id, e.g.
    * `CorpusService`'s `related` resolution over a doc's non-parent links.

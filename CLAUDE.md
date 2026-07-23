@@ -187,6 +187,7 @@ All feature specs live under `docs/requirements/spec/`; the corpus is the SSOT �
 - `SPEC-062` — config write layer: `ConfigService` (validate-then-write, CAS, audit), `GET /api/config` (cookie or bearer) + cookie-only `PATCH /api/dashboard/config` (If-Match required), `CONFIG_DENY_KEYS` — RCE/secret-bearing keys structurally unwritable over HTTP (incl. `defaults.editor`, proper-ancestor matching)
 - `SPEC-063` — verify execution-root correctness under linked worktrees: pure `resolveVerifyExecutionRoot` (fail-safe to corpus root), attestation `execution_root`/`execution_mode`, CLI prints worktree root before running
 - `SPEC-064` — dashboard Settings UI: two-scope config editing (team `.lore/config.yaml` vs machine `~/.config/lore/config.yaml`) with precedence display + blast-radius disclosure; machine-scope write backend (`saveGlobalConfig`, cookie-only routes)
+- `SPEC-065` — CLI ergonomics: unique ID-prefix resolution in `resolveDoc` (service-level, so CLI/MCP/HTTP all inherit it; ambiguous → `VALIDATION_ERROR` listing candidates, zero-match → `DOC_NOT_FOUND` truncation diagnostic) via `StoreInterface.findByIdPrefix`; `lore pending` table gains a Slug column; `lore create task` single-pass required-flag aggregation (`--plan-id`/`--parent`) + `--parent`-defaults-to-`--plan-id` inference
 
 ## AI Default Behavior by Caller Surface (SPEC-024)
 
