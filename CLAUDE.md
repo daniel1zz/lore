@@ -188,6 +188,8 @@ All feature specs live under `docs/requirements/spec/`; the corpus is the SSOT �
 - `SPEC-063` — verify execution-root correctness under linked worktrees: pure `resolveVerifyExecutionRoot` (fail-safe to corpus root), attestation `execution_root`/`execution_mode`, CLI prints worktree root before running
 - `SPEC-064` — dashboard Settings UI: two-scope config editing (team `.lore/config.yaml` vs machine `~/.config/lore/config.yaml`) with precedence display + blast-radius disclosure; machine-scope write backend (`saveGlobalConfig`, cookie-only routes)
 - `SPEC-065` — CLI ergonomics: unique ID-prefix resolution in `resolveDoc` (service-level, so CLI/MCP/HTTP all inherit it; ambiguous → `VALIDATION_ERROR` listing candidates, zero-match → `DOC_NOT_FOUND` truncation diagnostic) via `StoreInterface.findByIdPrefix`; `lore pending` table gains a Slug column; `lore create task` single-pass required-flag aggregation (`--plan-id`/`--parent`) + `--parent`-defaults-to-`--plan-id` inference
+- `SPEC-066` — git-safety-gate heredoc/string-literal awareness: `stripHeredocs` removes heredoc bodies (all delimiter forms) before segmentation, rule triggers anchor to command position (SPEC-050 D4 semantics), preprocessing failure falls back to raw-text inspection (fail-closed)
+- `SPEC-067` — AI-surface robustness: built-in claude-cli `timeout_ms` default 60s→180s, partial provider entries (missing `command`/`args` after replace-not-merge) fail loud at registry build, ungrounded `based_on="absence"` dimension scores forced to low confidence, >25% task truncation caps assessment confidence (`degraded_by_truncation`), 100% truncation → `inconclusive` with no `overall_score`
 
 ## AI Default Behavior by Caller Surface (SPEC-024)
 
