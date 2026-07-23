@@ -275,6 +275,39 @@ const WorkflowConfigSchema = z
       })
       .strict()
       .default({}),
+    /**
+     * `lore feed task-start <task>`'s per-section character budgets (SPEC-070
+     * §Design Decisions D5) — the FIRST feed-pack budget config actually wired end
+     * to end (the `phase_feed` precedent's equivalent comment was aspirational and
+     * was never consumed by any code path; this one is read by
+     * `adapters/cli/task-feed-wiring.ts::resolveTaskStartBudgets` on every `lore
+     * feed task-start` / `lore_feed {checkpoint: "task-start"}` call).
+     *
+     * @invariant Every field is OPTIONAL with NO Zod-level default (deliberately —
+     *   the flow-owned `DEFAULT_TASK_START_BUDGETS` constant in
+     *   `flows/task-feed-flow.ts` is the SOLE default source; duplicating numeric
+     *   defaults here would risk the two silently drifting apart). Absence of the
+     *   whole `workflow` section, or of `task_feed` within it, or of an individual
+     *   field, all mean "use the flow's own default for that section" —
+     *   `buildTaskStartPack`'s `{ ...DEFAULT_TASK_START_BUDGETS, ...budgets }` merge
+     *   handles the fill-in.
+     * @invariant An out-of-range value (non-positive, non-integer) fails loud at
+     *   config parse time (the existing `loadLoreApp` Zod-parse path) — never a
+     *   silently-ignored bad override.
+     */
+    task_feed: z
+      .object({
+        max_objective_chars: z.number().int().positive().optional(),
+        max_acceptance_chars: z.number().int().positive().optional(),
+        max_constraints_chars: z.number().int().positive().optional(),
+        max_boundaries_chars: z.number().int().positive().optional(),
+        max_claim_chars: z.number().int().positive().optional(),
+        max_plan_state_chars: z.number().int().positive().optional(),
+        max_knowledge_chars: z.number().int().positive().optional(),
+        max_handoff_chars: z.number().int().positive().optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 

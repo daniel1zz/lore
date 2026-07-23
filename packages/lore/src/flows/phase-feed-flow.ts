@@ -41,13 +41,22 @@
  * dedicated adapter dispatch, mirroring `session-resume`'s D5 special-case) will
  * call — wiring that dispatch is a separate task, out of this module's scope.
  *
+ * `KnowledgePointer`/`HandoffPointer` (SPEC-070 §Design Decisions D6) now live in
+ * `feed-shared-types.ts` — the shared pointer vocabulary `task-feed-flow.ts` also
+ * consumes. Re-exported here verbatim so existing importers of THIS module (e.g.
+ * `adapters/cli/phase-wiring.ts`) keep compiling unchanged (import-compat).
+ *
  * Side-effect class: none (pure over the injected `PhaseFeedFlowDeps` — no direct IO)
  * Source: spec-spec-056-phase-execution-model-phase-doc-type-computed-comp
- *   §Module Boundary, §Design Decisions D5; §Acceptance Criteria AC-P-4
+ *   §Module Boundary, §Design Decisions D5; §Acceptance Criteria AC-P-4; SPEC-070 D6
  */
 
 import { ok, truncateSection } from "@lore/core";
 import type { DocRecord, LoreError, Result } from "@lore/core";
+import type { KnowledgePointer, HandoffPointer } from "./feed-shared-types.js";
+
+/** Re-exported for import-compat — see `feed-shared-types.ts` for the authoritative shapes. */
+export type { KnowledgePointer, HandoffPointer } from "./feed-shared-types.js";
 
 /** One other phase under the same plan, pre-summarized by the caller (never re-derived here). */
 export interface PhaseSiblingSummary {
@@ -67,20 +76,6 @@ export interface PhaseBundle {
   /** `null` (not absent) when the plan has no spec ancestor — "nothing to aggregate", not "empty". */
   readonly specSlice: string | null;
   readonly siblings: PhaseSiblingSummary[];
-}
-
-/** A linked-knowledge pointer — the port surfaces invalidation state rather than silently omitting rows. */
-export interface KnowledgePointer {
-  readonly doc_id: string;
-  readonly slug: string;
-  readonly title: string;
-  readonly invalidated: boolean;
-}
-
-/** The latest handoff knowledge doc for a plan, pointer-only. */
-export interface HandoffPointer {
-  readonly slug: string;
-  readonly title: string;
 }
 
 /**
