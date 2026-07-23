@@ -18,6 +18,16 @@
  *      modules can't reach the /node-only subpath at all, not merely "don't
  *      import pinyin-pro directly").
  *
+ * A SECOND, independent invariant lives in `slugify-node.ts` itself (not the
+ * barrel): `pinyin-pro` must load LAZILY (on first CJK title) rather than at
+ * module top level, even within its own sanctioned `/node`-subpath file —
+ * root-caused via migrate-phases integration-test timing (30s->46s under
+ * repeated CLI spawns; measured `~1s` per `import("pinyin-pro")`, paid by
+ * EVERY `lore` process on the CLI's import chain regardless of whether the
+ * corpus ever has a CJK title). Pinned below as an additional AC-066-6 case:
+ * `slugify-node.ts` may contain a top-level `import type` (erased, zero
+ * runtime cost) but NO top-level static VALUE import of `pinyin-pro`.
+ *
  * Runner: vitest (pure fs/path read, no `bun:sqlite`).
  */
 
@@ -95,6 +105,32 @@ describe("AC-066-6: @lore/core default barrel is unreachable from pinyin-pro", (
 
   it("control: node.ts's OWN closure DOES reach pinyin-pro (proves the scanner can detect a real hit)", () => {
     const { bareSpecifiers } = collectImportClosure(join(CORE_SRC, "node.ts"));
+    // The hit comes from slugify-node.ts's top-level `import type` line below —
+    // the scanner's `from "..."` pattern matches both value and type-only
+    // imports (it's a specifier-presence scan, not an eager-vs-lazy check;
+    // that distinction is the dedicated test right below).
     expect(bareSpecifiers.has("pinyin-pro")).toBe(true);
+  });
+
+  it("AC-066-6 (startup-tax fix): slugify-node.ts has NO top-level static VALUE import of pinyin-pro — type-only + lazy require", () => {
+    const content = readFileSync(join(CORE_SRC, "slugify-node.ts"), "utf8");
+
+    // No eager VALUE import (`import { pinyin } from "pinyin-pro"`, default,
+    // or namespace form) — a top-level line is only allowed to reference the
+    // bare specifier via `import type`.
+    const eagerValueImportPattern = /^\s*import\s+(?!type\b)[^;]*from\s+["']pinyin-pro["']/m;
+    expect(eagerValueImportPattern.test(content)).toBe(false);
+
+    // A type-only import of pinyin-pro IS present — erased at compile time
+    // (zero runtime cost), proving the dependency is deliberately deferred,
+    // not silently dropped.
+    const typeOnlyImportPattern = /^\s*import\s+type\s+[^;]*from\s+["']pinyin-pro["']/m;
+    expect(typeOnlyImportPattern.test(content)).toBe(true);
+
+    // The lazy require() call exists, indented (nested inside a function body
+    // — never at column 0 / module top level, where it would execute eagerly
+    // on every module load regardless of whether a CJK title is ever seen).
+    expect(content).toMatch(/\n[ \t]+.*require\(["']pinyin-pro["']\)/);
+    expect(content).not.toMatch(/^require\(["']pinyin-pro["']\)/m);
   });
 });
