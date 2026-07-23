@@ -84,6 +84,24 @@ export class InMemoryStore implements StoreInterface {
     return ok(null);
   }
 
+  /**
+   * @see StoreInterface.findByIdPrefix
+   * Explicit `toUpperCase()` compare mirrors SQLite/libSQL's native
+   * case-insensitive `LIKE` default (see those stores' implementation
+   * notes) — this is a plain in-memory filter, no query engine to lean on.
+   */
+  async findByIdPrefix(prefix: string): Promise<Result<DocRecord[], LoreError>> {
+    const upperPrefix = prefix.toUpperCase();
+    const matches: DocRecord[] = [];
+    for (const doc of this.docs.values()) {
+      if (doc.deleted_at !== null) continue;
+      if (doc.id.toUpperCase().startsWith(upperPrefix)) {
+        matches.push({ ...doc });
+      }
+    }
+    return ok(matches);
+  }
+
   async findByIds(ids: DocId[]): Promise<Result<Map<DocId, DocRecord>, LoreError>> {
     const byId = new Map<DocId, DocRecord>();
     if (ids.length === 0) return ok(byId);
