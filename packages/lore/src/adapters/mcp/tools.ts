@@ -52,7 +52,8 @@
  * correct runtime behaviour (SDK reads `tool.inputSchema` at call time, not registration time).
  * — reason: ADR-01KVYFJ5G8EVB6S5NMD3PNY5KA §"Fast Path" Pattern 1 (implementation note)
  *
- * Public surface: `registerTools(server, app): void`
+ * Public surface: `registerTools(server, app, config?): void` (`config` is an
+ * AC-070-9 additive optional third param — see its own JSDoc below)
  * Invariants: one registration per tool name; every tool returns `{ content: [text] }` or
  *   `{ content: [text], isError: true }` (never throws across the MCP boundary).
  * Side-effect class: IO (reads/writes corpus via App services; no network I/O itself).
@@ -63,7 +64,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { App } from "../../app.js";
-import type { LoreError } from "@lore/core";
+import type { LoreError, LoreConfig } from "@lore/core";
 import type { LinkType } from "@lore/core";
 import { renderAssessmentContent } from "@lore/core";
 import type { NewReviewJudgment, ReviewJudgment, Result, TreeBlueprint } from "@lore/core";
@@ -77,7 +78,7 @@ import { runCalibrationHook } from "../../flows/calibration-hook.js";
 import { buildFeed, buildResumeFeed, SESSION_RESUME_CHECKPOINT } from "../../flows/feed-flow.js";
 import { buildPhaseStartPack, PHASE_START_CHECKPOINT } from "../../flows/phase-feed-flow.js";
 import { buildTaskStartPack, TASK_START_CHECKPOINT } from "../../flows/task-feed-flow.js";
-import { buildTaskFeedFlowDeps } from "../cli/task-feed-wiring.js";
+import { buildTaskFeedFlowDeps, resolveTaskStartBudgets } from "../cli/task-feed-wiring.js";
 import { createWithSupersedes, renderSupersedeRepairMessage } from "../../flows/supersede-flow.js";
 import { computeValidityState } from "../../flows/validity-state.js";
 import {
@@ -788,10 +789,27 @@ async function reviewDocViaMcp(
  * Tools with input use `registerToolWithArgs` (avoids ZodRawShapeCompat type bomb).
  * Tools without input (`lore_schema`) use plain `server.tool(name, desc, cb)`.
  *
+ * SPEC-070 AC-070-9: `registerTools` gains an ADDITIVE optional third `config`
+ * param — the SAME parsed `LoreConfig` the CLI's `loadLoreApp()` returns
+ * (`packages/lore/src/index.ts`'s `--mcp-server` branch threads it through
+ * `startMcpServer`). Every pre-existing call site (production `index.ts` prior
+ * to this fix, every test in this file) omits it — `config` stays `undefined`,
+ * and `resolveTaskStartBudgets(undefined)` returns `{}`, so the "task-start"
+ * branch below falls back to `DEFAULT_TASK_START_BUDGETS` exactly as before
+ * (REGRESSION-safe). Only the "task-start" branch consumes it today — no other
+ * tool reads `config` yet, mirroring `lore_staleness_probe`'s per-call
+ * `limit`/`min_age_days` override precedent (that one takes the override as a
+ * per-call arg instead, since MCP previously had no config-threading seam at
+ * all; this is the first tool to close that gap for one section).
+ *
  * @param server - The McpServer instance to register tools on
  * @param app - The composition root providing access to all services
+ * @param config - The parsed project `.lore/config.yaml` (or `undefined` when
+ *   none was found/parsed) — same value shape `loadLoreApp()`'s `config`
+ *   return field carries. Currently read only by the "task-start" `lore_feed`
+ *   branch via `resolveTaskStartBudgets`.
  */
-export function registerTools(server: McpServer, app: App): void {
+export function registerTools(server: McpServer, app: App, config?: LoreConfig): void {
   const { corpusService, versionService, reviewService, outlineService, taskWorkflowService, auditService, judgmentService } = app;
 
   // lore_create
@@ -1564,12 +1582,15 @@ export function registerTools(server: McpServer, app: App): void {
         return textContent(result.value);
       }
 
-      // SPEC-070 §Design Decisions D1, D8: mirrors the CLI's `lore feed task-start
-      // <task>` dedicated dispatch — the SAME buildTaskFeedFlowDeps/buildTaskStartPack
-      // construction, so CLI --json and this tool's response are deep-equal by
-      // construction for identical corpus state. Budgets are omitted (falls back to
-      // DEFAULT_TASK_START_BUDGETS) — MCP carries no parsed LoreConfig, same
-      // documented limitation as lore_staleness_probe's limit/min_age_days fallback.
+      // SPEC-070 §Design Decisions D1, D8; AC-070-9: mirrors the CLI's `lore feed
+      // task-start <task>` dedicated dispatch — the SAME buildTaskFeedFlowDeps/
+      // buildTaskStartPack construction, so CLI --json and this tool's response are
+      // deep-equal by construction for identical corpus state. Budgets now resolve
+      // from `config` (this function's additive third param, threaded from
+      // `startMcpServer`/`index.ts`'s `--mcp-server` branch) via the SAME
+      // resolveTaskStartBudgets the CLI's `handleTaskStart` calls — `config`
+      // undefined (no third arg passed) resolves to `{}`, so the pre-fix
+      // DEFAULT_TASK_START_BUDGETS fallback is preserved byte-for-byte (REGRESSION).
       if (args.checkpoint === TASK_START_CHECKPOINT) {
         if (args.task === undefined) {
           return errorContent({
@@ -1579,7 +1600,8 @@ export function registerTools(server: McpServer, app: App): void {
           });
         }
         const deps = buildTaskFeedFlowDeps(app);
-        const result = await buildTaskStartPack(deps, args.task);
+        const budgets = resolveTaskStartBudgets(config);
+        const result = await buildTaskStartPack(deps, args.task, budgets);
         if (!result.ok) return errorContent(result.error);
         return textContent(result.value);
       }

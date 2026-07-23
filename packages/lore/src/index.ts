@@ -9,8 +9,13 @@ export {};
 if (process.argv.includes("--mcp-server")) {
   const { startMcpServer } = await import("./adapters/mcp/index.js");
   const { loadLoreApp } = await import("./adapters/cli/loader.js");
-  const { app } = loadLoreApp();
-  await startMcpServer(app);
+  // SPEC-070 AC-070-9: thread the SAME parsed config the CLI's `lore feed
+  // task-start` reads through to the MCP surface, so `lore_feed`'s "task-start"
+  // branch resolves `workflow.task_feed.*` budgets identically instead of
+  // always falling back to DEFAULT_TASK_START_BUDGETS (previously `config` was
+  // destructured off and silently discarded here).
+  const { app, config } = loadLoreApp();
+  await startMcpServer(app, config);
 } else {
   // reason: CLI branch ONLY — installSyncStdio replaces console.log/info/warn/
   // error/debug with a writeAllSync-backed implementation immune to the
