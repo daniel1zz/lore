@@ -7,7 +7,7 @@
 import { ulid } from "ulidx";
 import { err, ok, type Result } from "@lore/core";
 import type { LoreError } from "@lore/core";
-// reason: transliterateCjk (SPEC-066 D1) is Node-only-subpath-gated purely for the
+// reason: transliterateCjk (SPEC-068 D1) is Node-only-subpath-gated purely for the
 // browser-safety barrel-isolation invariant (packages/core/src/CLAUDE.md) — this
 // service file is always server-side, same precedent config-service.ts/
 // global-config-service.ts already set for direct `@lore/core/node` imports.
@@ -661,7 +661,7 @@ export class CorpusService {
     const now = new Date().toISOString();
     const role = DOC_TYPE_ROLE_MAP[data.type];
 
-    // Generate collision-free slug. transliterate: transliterateCjk (SPEC-066 D1) —
+    // Generate collision-free slug. transliterate: transliterateCjk (SPEC-068 D1) —
     // CJK titles get a pinyin-derived slug instead of collapsing to the bare type
     // name (kebab's [^a-z0-9]+ strips every non-ASCII character otherwise).
     const slug = await slugifyWithCollision(
@@ -1135,14 +1135,14 @@ export class CorpusService {
     if (parsedPatch.data.extra !== undefined) docPatch.extra = parsedPatch.data.extra;
     if (parsedPatch.data.slug !== undefined) docPatch.slug = parsedPatch.data.slug;
 
-    // Slug repair path (`lore set --slug`, SPEC-066 D5). `docPatchSchema.safeParse`
+    // Slug repair path (`lore set --slug`, SPEC-068 D5). `docPatchSchema.safeParse`
     // above already rejected a slugSchema-invalid candidate; the remaining
     // responsibility here is uniqueness. A patch that RESTATES the doc's OWN
     // current slug is a no-op by construction — `store.findBySlug` resolves to
     // THIS doc itself, so the `holder.id !== existing.id` check below never fires
     // and the lookup is skipped entirely (the `!== existing.slug` guard), leaving
     // `docPatch.slug` set to the same value the doc already has (a harmless
-    // rewrite, not a special-cased early return — AC-066-8 "unchanged is a
+    // rewrite, not a special-cased early return — AC-068-8 "unchanged is a
     // no-op"). Slug is deliberately NOT part of the approved→draft auto-reset
     // trigger above (`contentOrTitleChanged`) — it is an address, not content.
     if (parsedPatch.data.slug !== undefined && parsedPatch.data.slug !== existing.slug) {

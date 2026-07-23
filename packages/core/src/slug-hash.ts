@@ -19,7 +19,7 @@
  * two distinct untransliterable titles under the same type still get DISTINCT
  * (if opaque) slugs rather than colliding on the bare prefix.
  *
- * Source: SPEC-066 §Design Decisions D2
+ * Source: SPEC-068 §Design Decisions D2
  */
 
 const FNV_OFFSET_BASIS_32 = 0x811c9dc5;
