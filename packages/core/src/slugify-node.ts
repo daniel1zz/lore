@@ -14,7 +14,7 @@
  *     (browser-safety invariant, this package's own CLAUDE.md). `@lore/dashboard`
  *     imports `@lore/core` only and must never reach this file, directly or
  *     transitively. Static import-graph oracle:
- *     `packages/lore/tests/unit/core/barrel-isolation.test.ts` (SPEC-066 AC-066-6).
+ *     `packages/lore/tests/unit/core/barrel-isolation.test.ts` (SPEC-068 AC-068-6).
  *   - **`pinyin-pro` loads LAZILY on first CJK title, never at module load** —
  *     measured cost: ~1s to `import`/`require` the package. A top-level
  *     `import { pinyin } from "pinyin-pro"` would pay that tax on EVERY `lore`
@@ -33,7 +33,7 @@
  *     Unified Ideographs") short-circuits and returns the input UNCHANGED —
  *     no `pinyin-pro` load OR call at all — this is what keeps existing
  *     ASCII-title slugs byte-identical AND keeps their CLI calls tax-free
- *     (SPEC-066 §Regression stance, AC-066-9).
+ *     (SPEC-068 §Regression stance, AC-068-9).
  *
  * Side-effect class: IO (deliberate deferred module load, see above — despite
  *   living in the "/node" subpath for the SAME reason as the eager-IO modules
@@ -48,7 +48,7 @@
  * no `app.ts` DI wiring needed, these service files are always server-side) and
  * passing it as `slugify(...)`'s `opts.transliterate`.
  *
- * Source: SPEC-066 §Design Decisions D1
+ * Source: SPEC-068 §Design Decisions D1
  */
 
 import { createRequire } from "node:module";

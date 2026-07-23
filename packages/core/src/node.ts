@@ -8,7 +8,7 @@
  * Public surface:
  *   - loadConfig / saveConfig / resolveGlobalConfigPath / loadGlobalConfig (config-node.ts)
  *   - JsonlTelemetry / createTelemetry (telemetry-node.ts)
- *   - transliterateCjk (slugify-node.ts, SPEC-066 D1) — pinyin-pro-powered CJK
+ *   - transliterateCjk (slugify-node.ts, SPEC-068 D1) — pinyin-pro-powered CJK
  *     transliteration for `slugify`'s `opts.transliterate` hook. Grouped here for
  *     the SAME barrel-isolation reason as the other two (pinyin-pro is ~931KB
  *     unpacked, must stay unreachable from the browser bundle), even though this

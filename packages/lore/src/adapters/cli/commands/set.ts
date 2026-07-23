@@ -47,8 +47,8 @@
  *   patch path — so an invalid value is validated here, in the CLI, against SPEC_KINDS before
  *   ever reaching the service, and reported as exit 4 (VALIDATION_ERROR-equivalent).
  *
- * --slug <new-slug> (SPEC-066 D5):
- *   The repair path for a degenerate slug (e.g. a CJK-titled doc created before SPEC-066's
+ * --slug <new-slug> (SPEC-068 D5):
+ *   The repair path for a degenerate slug (e.g. a CJK-titled doc created before SPEC-068's
  *   pinyin transliteration landed). Validated + uniqueness-checked entirely inside
  *   CorpusService.set (slugSchema + "taken by another doc" VALIDATION_ERROR, exit 4);
  *   restating the doc's own current slug is a no-op. Does NOT reset an approved doc to
@@ -109,9 +109,9 @@ export default defineCommand({
     slug: {
       type: "string",
       description:
-        "New slug (repair path for a degenerate slug, e.g. a pre-SPEC-066 CJK title). " +
+        "New slug (repair path for a degenerate slug, e.g. a pre-SPEC-068 CJK title). " +
         "Must be unique; restating the current slug is a no-op. Does not reset an " +
-        "approved doc to draft. Source: SPEC-066 D5",
+        "approved doc to draft. Source: SPEC-068 D5",
     },
     json: {
       type: "boolean",
@@ -468,7 +468,7 @@ export default defineCommand({
         console.log(JSON.stringify({ ok: true, data: doc }, null, 2));
       } else {
         console.log(`Updated ${doc.slug} → v${doc.version}`);
-        // reason: SPEC-066 D5 — when --slug renamed the doc, the old slug stops
+        // reason: SPEC-068 D5 — when --slug renamed the doc, the old slug stops
         // resolving immediately, but any FREE-TEXT reference to it inside other
         // docs' bodies (e.g. "see spec-foo") is NOT rewritten; link-table edges
         // key on the doc's immutable ULID and are unaffected either way.

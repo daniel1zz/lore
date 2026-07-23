@@ -1,5 +1,5 @@
 /**
- * AC-066-6 — static import-graph oracle: `pinyin-pro` (SPEC-066 D1, ~931KB
+ * AC-068-6 — static import-graph oracle: `pinyin-pro` (SPEC-068 D1, ~931KB
  * unpacked) MUST be unreachable from the `@lore/core` default barrel
  * (`packages/core/src/index.ts`)'s transitive closure. Mirrors this package's
  * own pre-existing browser-safety invariant (packages/core/src/CLAUDE.md,
@@ -24,7 +24,7 @@
  * root-caused via migrate-phases integration-test timing (30s->46s under
  * repeated CLI spawns; measured `~1s` per `import("pinyin-pro")`, paid by
  * EVERY `lore` process on the CLI's import chain regardless of whether the
- * corpus ever has a CJK title). Pinned below as an additional AC-066-6 case:
+ * corpus ever has a CJK title). Pinned below as an additional AC-068-6 case:
  * `slugify-node.ts` may contain a top-level `import type` (erased, zero
  * runtime cost) but NO top-level static VALUE import of `pinyin-pro`.
  *
@@ -84,7 +84,7 @@ function collectImportClosure(entryFile: string): {
   return { visitedFiles, bareSpecifiers };
 }
 
-describe("AC-066-6: @lore/core default barrel is unreachable from pinyin-pro", () => {
+describe("AC-068-6: @lore/core default barrel is unreachable from pinyin-pro", () => {
   it("index.ts's transitive closure contains zero pinyin-pro imports", () => {
     const { bareSpecifiers } = collectImportClosure(ENTRY);
     expect(bareSpecifiers.has("pinyin-pro")).toBe(false);
@@ -112,7 +112,7 @@ describe("AC-066-6: @lore/core default barrel is unreachable from pinyin-pro", (
     expect(bareSpecifiers.has("pinyin-pro")).toBe(true);
   });
 
-  it("AC-066-6 (startup-tax fix): slugify-node.ts has NO top-level static VALUE import of pinyin-pro — type-only + lazy require", () => {
+  it("AC-068-6 (startup-tax fix): slugify-node.ts has NO top-level static VALUE import of pinyin-pro — type-only + lazy require", () => {
     const content = readFileSync(join(CORE_SRC, "slugify-node.ts"), "utf8");
 
     // No eager VALUE import (`import { pinyin } from "pinyin-pro"`, default,

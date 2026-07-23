@@ -1,6 +1,6 @@
 /**
- * Unit tests for `CorpusService.set`'s `--slug` repair path (SPEC-066 D5) —
- * AC-066-7, AC-066-8.
+ * Unit tests for `CorpusService.set`'s `--slug` repair path (SPEC-068 D5) —
+ * AC-068-7, AC-068-8.
  *
  * Uses InMemoryStore — no file I/O, no SQLite dependency, so this runs under
  * vitest (mirrors corpus-service.test.ts's existing convention).
@@ -20,8 +20,8 @@ function prdInput(title = "My Product"): CreateDocInput {
   return { type: "prd", title };
 }
 
-describe("CorpusService.set --slug (SPEC-066 D5)", () => {
-  it("AC-066-7: renaming resolves under the new slug", async () => {
+describe("CorpusService.set --slug (SPEC-068 D5)", () => {
+  it("AC-068-7: renaming resolves under the new slug", async () => {
     const { service } = makeService();
     const created = await service.create(prdInput("Degenerate CJK Doc"));
     expect(created.ok).toBe(true);
@@ -38,7 +38,7 @@ describe("CorpusService.set --slug (SPEC-066 D5)", () => {
     expect(resolvedNew.value.doc.id).toBe(created.value.id);
   });
 
-  it("AC-066-7: the old slug returns DOC_NOT_FOUND after a rename", async () => {
+  it("AC-068-7: the old slug returns DOC_NOT_FOUND after a rename", async () => {
     const { service } = makeService();
     const created = await service.create(prdInput("Old Slug Doc"));
     expect(created.ok).toBe(true);
@@ -54,7 +54,7 @@ describe("CorpusService.set --slug (SPEC-066 D5)", () => {
     expect(oldLookup.error.code).toBe("DOC_NOT_FOUND");
   });
 
-  it("AC-066-7: the version log gains an entry on a slug rename", async () => {
+  it("AC-068-7: the version log gains an entry on a slug rename", async () => {
     const { service, store } = makeService();
     const created = await service.create(prdInput("Versioned Doc"));
     expect(created.ok).toBe(true);
@@ -76,7 +76,7 @@ describe("CorpusService.set --slug (SPEC-066 D5)", () => {
     expect(afterVersions.value.length).toBe(countBefore + 1);
   });
 
-  it("AC-066-7: links (ULID-keyed) survive a slug rename", async () => {
+  it("AC-068-7: links (ULID-keyed) survive a slug rename", async () => {
     const { service, store } = makeService();
     const parent = await service.create(prdInput("Parent Doc"));
     expect(parent.ok).toBe(true);
@@ -109,7 +109,7 @@ describe("CorpusService.set --slug (SPEC-066 D5)", () => {
     expect(linksAfter.value[0]!.to_id).toBe(parent.value.id);
   });
 
-  it("AC-066-7: an approved doc does NOT reset to draft when only slug changes", async () => {
+  it("AC-068-7: an approved doc does NOT reset to draft when only slug changes", async () => {
     const { service } = makeService();
     const created = await service.create(prdInput("Approved Doc"));
     expect(created.ok).toBe(true);
@@ -128,7 +128,7 @@ describe("CorpusService.set --slug (SPEC-066 D5)", () => {
     expect(renamed.value.status).toBe("approved");
   });
 
-  it("AC-066-8: rejects with VALIDATION_ERROR when the slug is taken by another doc, naming the holder", async () => {
+  it("AC-068-8: rejects with VALIDATION_ERROR when the slug is taken by another doc, naming the holder", async () => {
     const { service } = makeService();
     const holder = await service.create(prdInput("Holder Doc"));
     expect(holder.ok).toBe(true);
@@ -153,7 +153,7 @@ describe("CorpusService.set --slug (SPEC-066 D5)", () => {
     expect(stillOther.ok).toBe(true);
   });
 
-  it("AC-066-8: rejects with VALIDATION_ERROR when the candidate slug fails slugSchema", async () => {
+  it("AC-068-8: rejects with VALIDATION_ERROR when the candidate slug fails slugSchema", async () => {
     const { service } = makeService();
     const created = await service.create(prdInput("Bad Slug Target"));
     expect(created.ok).toBe(true);
@@ -165,7 +165,7 @@ describe("CorpusService.set --slug (SPEC-066 D5)", () => {
     expect(result.error.code).toBe("VALIDATION_ERROR");
   });
 
-  it("AC-066-8: restating the doc's own current slug is a no-op (not a self-conflict)", async () => {
+  it("AC-068-8: restating the doc's own current slug is a no-op (not a self-conflict)", async () => {
     const { service, store } = makeService();
     const created = await service.create(prdInput("Self Restate Doc"));
     expect(created.ok).toBe(true);

@@ -594,7 +594,7 @@ export function getAllowedTransitions(from: DocStatus): DocStatus[] {
 // ─── Slug Generation ───────────────────────────────────────────────────────
 
 /**
- * Options for `slugify` (SPEC-066 D1).
+ * Options for `slugify` (SPEC-068 D1).
  */
 export interface SlugifyOptions {
   /**
@@ -603,7 +603,7 @@ export interface SlugifyOptions {
    * doesn't strip it entirely. The real implementation (`transliterateCjk`,
    * pinyin-pro-powered) lives OUTSIDE this browser-safe barrel — see
    * `packages/core/src/slugify-node.ts`'s module header and this package's
-   * CLAUDE.md "Browser safety" invariant. Absent → pure pre-SPEC-066 behavior
+   * CLAUDE.md "Browser safety" invariant. Absent → pure pre-SPEC-068 behavior
    * (the kebab step strips every non-ASCII-alphanumeric character as before).
    */
   transliterate?: (raw: string) => string;
@@ -616,7 +616,7 @@ export interface SlugifyOptions {
  * single hyphens, max 64 chars (SPEC-002 §6.1). Collision handling (-2, -3, ...)
  * is delegated to `slugifyWithCollision`/`CorpusService`.
  *
- * SPEC-066 additions on top of the SPEC-002 base rule:
+ * SPEC-068 additions on top of the SPEC-002 base rule:
  *   - D1: `opts.transliterate`, applied to the raw title before the kebab step
  *     (e.g. CJK → pinyin) — see `SlugifyOptions`.
  *   - D2: a non-empty title that transliterates+kebabs to an EMPTY name part
@@ -652,7 +652,7 @@ export function slugify(type: DocType, title: string, opts?: SlugifyOptions): Sl
   const MAX_SLUG_LENGTH = 64;
 
   // Empty/whitespace-only title: nothing meaningful to transliterate or hash —
-  // keep the pre-SPEC-066 bare-prefix behavior (D2's one exemption).
+  // keep the pre-SPEC-068 bare-prefix behavior (D2's one exemption).
   if (title.trim() === "") {
     return type as Slug;
   }
@@ -797,7 +797,7 @@ export type ExportIndexMapping = z.infer<typeof exportIndexMappingSchema>;
  * `existsSlug` must return true if the candidate slug is already taken.
  * Accepts both sync and async `existsSlug` callbacks.
  * Returns a Promise when `existsSlug` is async, Slug when sync.
- * `opts` (SPEC-066 D1) forwards unchanged to the underlying `slugify(type, title, opts)`
+ * `opts` (SPEC-068 D1) forwards unchanged to the underlying `slugify(type, title, opts)`
  * call that produces the base candidate — see `SlugifyOptions`.
  */
 export function slugifyWithCollision(
