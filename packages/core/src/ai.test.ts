@@ -101,9 +101,12 @@ describe("AiProviderConfigSchema strict rejection (AC-AI-12)", () => {
   });
 
   it("fills defaults for args and timeout_ms when only command is given", () => {
+    // reason: SPEC-067 D1 raised the timeout_ms default 60_000 → 180_000 — a real
+    // `lore assess` judge round measures ~73s under normal load, so the old 60s floor
+    // timed out on the flagship AI feature under its own normal workload.
     const result = AiProviderConfigSchema.parse({ command: "my-tool" });
     expect(result.args).toEqual([]);
-    expect(result.timeout_ms).toBe(60_000);
+    expect(result.timeout_ms).toBe(180_000);
   });
 
   it("rejects negative timeout_ms", () => {
