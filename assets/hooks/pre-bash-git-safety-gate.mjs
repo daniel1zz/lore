@@ -226,18 +226,91 @@ const RULES = [
   },
 ];
 
-// ── preprocess: expand `bash -c "…"`, blank quoted string contents ────────────
+// ── SPEC-066 D1: strip heredoc BODIES before segmentation ─────────────────────
+// A heredoc body is DATA, not a command: `cat <<'EOF' ... git branch -D
+// old-feature ... EOF` (a runbook/knowledge-doc write) must never be treated as
+// if `git branch -D` were about to execute (verified dogfood failure P1-4,
+// 2026-07-22 — the branch-probe helper went on to parse a prose word as a
+// branch name). Detects `<<` / `<<-` redirects with an unquoted, single- or
+// double-quoted delimiter word, then blanks every line up to (and including)
+// the matching terminator line — same length, so later regex/position logic
+// needs no adjustment. Multiple heredocs in one command are handled
+// left-to-right by resuming the scan after each terminator (or, for an
+// unterminated heredoc, at end-of-text: that body cannot execute either way —
+// D1/AC-066-5). `<<-` strips leading tabs from the terminator line only, per
+// shell semantics, not from body lines (body content is discarded regardless).
+const HEREDOC_RE = /<<(-?)\s*(?:'([^']*)'|"([^"]*)"|([A-Za-z_][A-Za-z0-9_]*))/g;
+
+function stripHeredocs(raw) {
+  let out = '';
+  let i = 0;
+  HEREDOC_RE.lastIndex = 0;
+  let m;
+  while ((m = HEREDOC_RE.exec(raw)) !== null) {
+    if (m.index < i) continue; // inside a body region already consumed below
+    const dashed = m[1] === '-';
+    const delim = m[2] ?? m[3] ?? m[4];
+    const matchEnd = m.index + m[0].length;
+    out += raw.slice(i, matchEnd);
+    i = matchEnd;
+    if (!delim) continue; // pattern matched `<<` with no parseable delimiter — leave as-is
+
+    // Body starts on the NEXT line — the redirect's own line may carry further
+    // tokens (`cat <<EOF > out.txt`) and stays intact.
+    const firstNl = raw.indexOf('\n', i);
+    if (firstNl === -1) continue; // redirect written but no body lines present in this text
+    out += raw.slice(i, firstNl + 1);
+    i = firstNl + 1;
+
+    let terminated = false;
+    while (i <= raw.length) {
+      const nextNl = raw.indexOf('\n', i);
+      const lineEnd = nextNl === -1 ? raw.length : nextNl;
+      const line = raw.slice(i, lineEnd);
+      const compareLine = dashed ? line.replace(/^\t+/, '') : line;
+      out += ' '.repeat(line.length); // blank the line, preserve its length + any newline below
+      if (compareLine === delim) {
+        terminated = true;
+        if (nextNl === -1) { i = raw.length; break; }
+        out += '\n';
+        i = nextNl + 1;
+        break;
+      }
+      if (nextNl === -1) { i = raw.length; break; } // AC-066-5: unterminated — strip to end of text
+      out += '\n';
+      i = nextNl + 1;
+    }
+    HEREDOC_RE.lastIndex = i;
+    if (!terminated) break; // already blanked through end of text; nothing left to scan
+  }
+  out += raw.slice(i);
+  return out;
+}
+
+// ── preprocess: strip heredocs, expand `bash -c "…"`, blank quoted strings ────
 function preprocessForInspection(raw) {
   let work = raw.replace(
     /\b(?:bash|sh|zsh)\s+(?:-l\s+)?-c\s+("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/g,
     (_m, q) => ` ; ${q.slice(1, -1)} ; `,
   );
+  work = stripHeredocs(work);
   work = work.replace(/"(?:[^"\\]|\\.)*"/g, '""');
   work = work.replace(/'(?:[^'\\]|\\.)*'/g, "''");
   return work;
 }
 
-const segments = preprocessForInspection(cmd)
+// SPEC-066 D3: fail-closed. A preprocessing exception falls back to inspecting
+// the ORIGINAL raw text — the gate may over-block on pathological input it
+// cannot parse, but must never silently under-block (same posture as the
+// probe try/catch blocks below).
+let preprocessed;
+try {
+  preprocessed = preprocessForInspection(cmd);
+} catch {
+  preprocessed = cmd;
+}
+
+const segments = preprocessed
   .split(/(?:&&|\|\||\||;|\n)+/)
   .map((s) => s.trim())
   .filter(Boolean);
@@ -251,11 +324,25 @@ function shouldInspect(segment) {
   return { inner: segment, inspect: true };
 }
 
+// ── SPEC-066 D2: command-position trigger matching (SPEC-050 D4 semantics) ────
+// A rule fires only when its trigger sits at the START of the (already
+// separator-split) segment — optionally after simple `VAR=value` env-assignment
+// prefixes — never when it merely appears in ARGUMENT position, e.g.
+// `notify-send git branch -D backup` passes "git branch -D backup" as literal
+// argv to notify-send; nothing named `git` ever executes there.
+const ENV_ASSIGN_PREFIX = /^(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*/;
+
+function isCommandPositionMatch(segment, pattern) {
+  const stripped = segment.replace(ENV_ASSIGN_PREFIX, '');
+  const anchored = new RegExp('^' + pattern.source, pattern.flags.replace('g', ''));
+  return anchored.test(stripped);
+}
+
 for (const segment of segments) {
   const { inner, inspect } = shouldInspect(segment);
   if (!inspect) continue;
   for (const rule of RULES) {
-    if (rule.pat.test(inner)) {
+    if (isCommandPositionMatch(inner, rule.pat)) {
       let assessment = '';
       if (rule.probe) {
         try { assessment = rule.probe(inner); } catch { assessment = 'Assessment: probe failed — treat as UNSAFE.'; }

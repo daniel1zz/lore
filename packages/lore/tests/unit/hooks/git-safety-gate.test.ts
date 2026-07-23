@@ -173,3 +173,71 @@ describe("git-safety-gate — PROBE evidence (state-accurate, against a real rep
     expect(stderr).toMatch(/Likely SAFE|merged into/);
   });
 });
+
+// ── SPEC-066: heredoc/string-literal awareness + command-position discipline ──
+//
+// Verified dogfood failure P1-4 (guyin 2026-07-22, reproduced on HEAD e9e5188):
+// `preprocessForInspection` only stripped quoted strings, not heredoc bodies —
+// so writing a runbook/knowledge doc whose BODY quotes a dangerous command
+// (`cat <<'EOF' ... git branch -D old-feature ... EOF`) was blocked as if the
+// command were executing, and the branch-probe helper went on to parse a prose
+// word as a branch name. D1 strips heredoc bodies before segmentation; D2 adds
+// command-position trigger matching (SPEC-050 D4 semantics) so a dangerous
+// token in ARGUMENT position never fires; D3 keeps the fail-closed posture.
+describe("git-safety-gate — SPEC-066 heredoc stripping (D1, AC-066-1)", () => {
+  const cases: Array<[string, string]> = [
+    ["unquoted delimiter", "cat <<EOF\nSome runbook example: git branch -D old-feature\nEOF"],
+    ["single-quoted delimiter", "cat <<'EOF'\nSome runbook example: git branch -D old-feature\nEOF"],
+    ["double-quoted delimiter", 'cat <<"EOF"\nSome runbook example: git branch -D old-feature\nEOF'],
+    ["dash-trimmed <<- delimiter (indented terminator)", "cat <<-EOF\n\tSome runbook example: git branch -D old-feature\n\tEOF"],
+  ];
+  for (const [name, cmd] of cases) {
+    it(`AC-066-1: allows a heredoc body containing a dangerous command — ${name}`, () => {
+      const { code, stderr } = run(cmd);
+      expect(code).toBe(0);
+      expect(stderr).toBe("");
+    });
+  }
+});
+
+describe("git-safety-gate — SPEC-066 directly-executing danger still blocks (D2, AC-066-2)", () => {
+  it("AC-066-2: a directly-executing git branch -D remains BLOCKED", () => {
+    expect(run("git branch -D some-branch").code).toBe(2);
+  });
+
+  it("AC-066-2: a directly-executing git branch -D as a &&-chained later segment remains BLOCKED", () => {
+    expect(run("echo hi && git branch -D some-branch").code).toBe(2);
+  });
+
+  it("AC-066-2: a directly-executing git branch -D as a ;-chained later segment remains BLOCKED", () => {
+    expect(run("echo hi; git branch -D some-branch").code).toBe(2);
+  });
+});
+
+describe("git-safety-gate — SPEC-066 heredoc body does not swallow a trailing real danger (AC-066-3)", () => {
+  it("AC-066-3: a dangerous command inside a heredoc body followed by a REAL dangerous command outside it is still BLOCKED", () => {
+    const { code, stderr } = run(
+      "cat <<EOF\ngit branch -D fake-branch-from-heredoc\nEOF\ngit push --force origin main",
+    );
+    expect(code).toBe(2);
+    expect(stderr).toMatch(/force-push overwrites remote history/);
+  });
+});
+
+describe("git-safety-gate — SPEC-066 command-position discipline (D2, AC-066-4)", () => {
+  it("AC-066-4: a dangerous trigger token in ARGUMENT position (not command position) does not fire the rule", () => {
+    const { code, stderr } = run("notify-send git branch -D backup");
+    expect(code).toBe(0);
+    expect(stderr).toBe("");
+  });
+});
+
+describe("git-safety-gate — SPEC-066 unterminated heredoc (D1, AC-066-5)", () => {
+  it("AC-066-5: an unterminated heredoc neither crashes the gate nor blocks on body content", () => {
+    const { code, stderr } = run(
+      "cat <<EOF\ngit branch -D unterminated-body\nno closing delimiter anywhere in this text",
+    );
+    expect(code).toBe(0);
+    expect(stderr).toBe("");
+  });
+});
