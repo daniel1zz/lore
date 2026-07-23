@@ -21,7 +21,8 @@ Session knowledge → lore CLI
 ├─ API contract / data model / UI standard        → belongs on the governing spec: lore set <spec> (or create
 │                                                   a tech/design spec: --kind tech|design); one-off observation
 │                                                   with no spec home → knowledge --sub-type reference
-├─ Unfinished-work handoff                        → lore create knowledge --sub-type handoff --title "Handoff — <actor>"
+├─ Unfinished-work handoff                        → lore handoff --decision "..." --next "..."
+│                                                   (⛔ NOT create --sub-type handoff — rejected; SPEC-041)
 └─ Knowledge proven WRONG                          → lore invalidate <old> [--superseded-by <new>] --reason "..."
 ```
 
@@ -137,8 +138,10 @@ would keep feeding it to future sessions as truth.
 **Detection signals**: WIP remains at session end — claimed tasks, half-done plan,
 uncommitted direction.
 
-**Persist**: `lore create knowledge --sub-type handoff --title "Handoff — <actor>"`
-Body: plan slug, task refs (claimed/ready/blocked), modified files, key decisions,
-next steps. Link `--type=informs` to the plan.
+**Persist**: `lore handoff --by <actor> [--plan <plan>] --decision "<judgment>[@conf]" --next "<step>" [--file <path>]...`
+(or `--json-file <payload.json>` — the file IS `extra.handoff`). ⛔ NOT
+`lore create knowledge --sub-type handoff` — create rejects it; `lore handoff` is the
+sole writer and the body is a deterministic projection of the structured fields
+(SPEC-041). Link `--type=informs` to the plan.
 
 **Consumed by**: `lore feed session-resume [--by <actor>]` in the next session.

@@ -86,8 +86,21 @@ if (!cwd) allow();
 // checkout shares the operator's tree; its uncommitted files are not "its work
 // about to be discarded", and blocking there would fire on every read-only
 // agent the session spawns.
-const gitCommonDir = git(cwd, ["rev-parse", "--git-common-dir"]);
-const gitDir = git(cwd, ["rev-parse", "--git-dir"]);
+// ⛔ `--path-format=absolute` is load-bearing, not cosmetic (root-caused
+// 2026-07-21). Without it, `--git-common-dir` returns a path RELATIVE to cwd
+// while `--git-dir` returns an ABSOLUTE one, so the two are never string-equal
+// outside the repo root. Measured in a main checkout:
+//     repo root   → common=.git            dir=.git             (equal, allowed)
+//     apps/web    → common=../../.git      dir=/abs/repo/.git   (UNEQUAL!)
+// Every subagent whose cwd was a subdirectory therefore looked like a linked
+// worktree and got blocked — observed derailing 5 consecutive read-only
+// Explore agents, each burning its final report arguing with the commit
+// directive instead of delivering findings. With the flag, a main checkout
+// reports the same absolute path from any depth, while a real worktree still
+// differs (`/repo/.git` vs `/repo/.git/worktrees/<name>`) at any depth —
+// both directions verified against a live probe worktree.
+const gitCommonDir = git(cwd, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+const gitDir = git(cwd, ["rev-parse", "--path-format=absolute", "--git-dir"]);
 if (gitCommonDir === null || gitDir === null) allow(); // not a repo / no git
 if (gitCommonDir === gitDir) allow(); // main checkout, not a linked worktree
 

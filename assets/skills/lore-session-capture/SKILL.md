@@ -85,13 +85,15 @@ Valid types: `parent | implements | informs | supersedes | relates-to | blocks |
 
 ### 7. Handoff (if WIP exists)
 
-Unfinished work → write a handoff knowledge doc:
+Unfinished work → write a handoff knowledge doc via the dedicated command (⛔ NOT `lore create knowledge --sub-type handoff` — create rejects the handoff sub-type; `lore handoff` is the sole authoring surface, SPEC-041):
 
 ```bash
-lore create knowledge --sub-type handoff --title "Handoff — <actor>" --content-file <tmp.md>
+lore handoff --by <actor> --plan <plan-slug> \
+  --decision "<judgment>[@<confidence 0-1>]" --next "<concrete step>" [--file <modified-path>]...
+# or: lore handoff --json-file <payload.json>   # the file IS the extra.handoff payload
 ```
 
-Body MUST contain: active plan slug, task refs (claimed/ready/blocked), modified files, key decisions made this session, concrete next steps. Link it: `lore link <handoff> <plan> --type=informs`.
+There is no `--content`/`--content-file` — the doc body is a deterministic projection of the structured fields. Repeatable flags carry the substance: `--file` (modified files), `--decision` (key decisions), `--next` (next steps, ≥1 required), plus `--failing-command` + `--failing-tail-file` for a failing oracle. Link it: `lore link <handoff> <plan> --type=informs`.
 
 **Consumption path — state this explicitly in your output**: the NEXT session picks the handoff up via `lore feed session-resume [--by <actor>]` (newest-wins; `--plan <slug>` to scope, `--handoff <slug>` to target directly). Also release stale task leases you hold: `lore release <task> --by <actor>`.
 
