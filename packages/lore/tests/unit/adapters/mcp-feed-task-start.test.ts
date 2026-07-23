@@ -39,6 +39,15 @@
  *
  * Source: spec-070-deterministic-task-dispatch-bundle-lore-feed-task-start
  *   §Design D8; task-skill-implement-t2-mcp-lore-feed-task-start-phase-start
+ *
+ * AC-070-9 addendum: `registerTools` gains an ADDITIVE optional third `config`
+ * param (mirrors the CLI's `loadLoreApp()`-threaded config) so the MCP
+ * "task-start" branch can resolve `workflow.task_feed.*` budgets identically to
+ * the CLI path (`resolveTaskStartBudgets`) instead of always falling back to
+ * `DEFAULT_TASK_START_BUDGETS`. Covered below by a dedicated describe block —
+ * every pre-existing test in this file calls `registerTools(server, app)` with
+ * NO third arg, pinning that omission still means "no config, default budgets"
+ * (REGRESSION, byte-identical to pre-fix).
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
@@ -54,7 +63,7 @@ import { TaskWorkflowService } from "../../../src/service/task-workflow-service.
 import { SessionService } from "../../../src/service/session-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { buildPhaseServices, buildPhaseFeedFlowDeps } from "../../../src/adapters/cli/phase-wiring.js";
-import { buildTaskFeedFlowDeps } from "../../../src/adapters/cli/task-feed-wiring.js";
+import { buildTaskFeedFlowDeps, resolveTaskStartBudgets } from "../../../src/adapters/cli/task-feed-wiring.js";
 import { buildPhaseStartPack } from "../../../src/flows/phase-feed-flow.js";
 import { buildTaskStartPack } from "../../../src/flows/task-feed-flow.js";
 import { NoOpTelemetry, ok } from "@lore/core";
@@ -62,7 +71,7 @@ import type { App } from "../../../src/app.js";
 import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
 import { registerTools } from "../../../src/adapters/mcp/tools.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { CreateDocInput, DocRecord } from "@lore/core";
+import type { CreateDocInput, DocRecord, LoreConfig } from "@lore/core";
 
 // ─── Test Infrastructure (mirrors mcp-tools-phase.test.ts + mcp-session-tools.test.ts) ─
 
@@ -322,6 +331,79 @@ describe('lore_feed checkpoint "phase-start"', () => {
       expect(data).toHaveProperty("sections");
       expect(data).not.toHaveProperty("feed");
       expect(data).not.toHaveProperty("skill");
+    },
+  );
+});
+
+// ─── AC-070-9: MCP task-start budget parity with the CLI config path ──────────
+
+describe("AC-070-9: lore_feed task-start resolves workflow.task_feed.* config budgets identically to the CLI path", () => {
+  const LONG_TITLE =
+    "This Is A Deliberately Long Task Title Written To Overflow A Tiny Objective Budget";
+
+  it(
+    "HAPPY: a tiny workflow.task_feed budget forces truncated[] on both surfaces, and the " +
+      "MCP pack deep-equals the CLI-path pack (buildTaskFeedFlowDeps + resolveTaskStartBudgets " +
+      "+ buildTaskStartPack called directly) under the SAME config",
+    async () => {
+      const plan = await createPlan();
+      const task = await createTask(plan.id, LONG_TITLE);
+
+      const config = {
+        workflow: {
+          task_feed: {
+            max_objective_chars: 10,
+          },
+        },
+      } as unknown as LoreConfig;
+
+      // MCP path: registerTools receives the config as its additive third param —
+      // the SAME parsed LoreConfig the CLI's loadLoreApp() threads through.
+      const configuredServer = new McpServer({ name: "test-ac-070-9", version: "0.0.0" });
+      registerTools(configuredServer, app, config);
+
+      const mcpResult = await getToolHandler(configuredServer, "lore_feed")({
+        checkpoint: "task-start",
+        task: task.slug,
+      });
+      expect(mcpResult.isError).toBeFalsy();
+      const mcpPack = parseResult(mcpResult) as {
+        task_id: string;
+        sections: Record<string, string>;
+        truncated: string[];
+      };
+
+      // Prove the override actually bit — a pack indistinguishable from the
+      // untouched-default case would make the deep-equal below vacuous.
+      expect(mcpPack.truncated).toContain("objective");
+
+      // CLI path: the EXACT SAME wiring the CLI's `handleTaskStart` calls,
+      // invoked directly against the SAME config and corpus state.
+      const deps = buildTaskFeedFlowDeps(app);
+      const budgets = resolveTaskStartBudgets(config);
+      const cliPack = await buildTaskStartPack(deps, task.slug, budgets);
+      if (!cliPack.ok) throw new Error("direct buildTaskStartPack call failed");
+
+      expect(mcpPack).toEqual(cliPack.value);
+    },
+  );
+
+  it(
+    "REGRESSION: registerTools called with NO config arg (every pre-existing call site) still " +
+      "falls back to DEFAULT_TASK_START_BUDGETS — omission is not a truncation regression",
+    async () => {
+      const plan = await createPlan();
+      const task = await createTask(plan.id, LONG_TITLE);
+
+      // `server` (from the outer beforeEach) was registered via `registerTools(server, app)`,
+      // no third arg — pins the additive param's default-omitted behavior.
+      const result = await getToolHandler(server, "lore_feed")({
+        checkpoint: "task-start",
+        task: task.slug,
+      });
+      expect(result.isError).toBeFalsy();
+      const pack = parseResult(result) as { truncated: string[] };
+      expect(pack.truncated).toEqual([]);
     },
   );
 });
