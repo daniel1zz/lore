@@ -23,7 +23,12 @@
  * @invariant Every successful write bumps the task's version and appends one VersionRecord
  *   (action: "update") so `lore log` shows who claimed/released/added evidence and when.
  * @invariant addEvidence/claim/release/recordVerifiedEvidence touch ONLY extra.claim /
- *   extra.verification_evidence — never content, title, or status.
+ *   extra.verification_evidence — never content, title, or status. Bounded exception
+ *   (SPEC-069 §Design Decisions D4/D5): when the evidence recorder IS the current
+ *   fresh-OR-stale claim holder, `appendEvidenceEntry` folds a `renewClaimForEvidence`-
+ *   refreshed `extra.claim` (same `at` as the evidence's `recorded_at`) into the SAME
+ *   CAS write as the evidence append — still `extra.claim` only, never a second write,
+ *   never content/title/status. A foreign holder's claim is left byte-identical.
  * @invariant ready() performs zero writes — readiness is computed, never stored (D3).
  * @invariant addEvidence's optional `ac_ref` is cross-entity validated via the
  *   constructor-injected `resolveDeclaredAcIds` port (CorpusService owns the actual
@@ -70,6 +75,7 @@ import {
   isClaimStale,
   evaluateReadiness,
   buildTaskClaim,
+  renewClaimForEvidence,
   deriveSessions,
   normalizeFileAnchors,
   extractFileAnchors,
@@ -494,9 +500,17 @@ export class TaskWorkflowService {
       }
     }
 
+    // SPEC-069 §Design Decisions D4/D5 (W3 fix) — an evidence recorder who IS the
+    // current claim holder (fresh OR stale) is demonstrably alive; fold the renewed
+    // claim into this SAME CAS write so a still-working session's TTL never falsely
+    // expires between evidence appends. `renewClaimForEvidence` reuses `nowIso`
+    // captured above — NEVER a second `now()` invocation (would break the
+    // STALE_VERSION sequential-CAS test recipe, which relies on single-fire).
+    const renewedClaim = renewClaimForEvidence(readClaim(task), actor, nowIso);
     const newExtra: Record<string, unknown> = {
       ...task.extra,
       verification_evidence: [...existing, parsedEntry.data],
+      ...(renewedClaim !== null ? { claim: renewedClaim } : {}),
     };
 
     return this.writeTaskExtra(
@@ -506,7 +520,12 @@ export class TaskWorkflowService {
       actor,
       `Evidence added: ${entry.oracle} ${entry.result}`,
       "evidence",
-      { oracle: entry.oracle, command: entry.command, result: entry.result },
+      {
+        oracle: entry.oracle,
+        command: entry.command,
+        result: entry.result,
+        ...(renewedClaim !== null ? { claim_renewed: true } : {}),
+      },
     );
   }
 

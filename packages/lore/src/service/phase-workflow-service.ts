@@ -41,7 +41,12 @@
  *   VersionRecord (action: "update") so `lore log` shows who claimed/released/added
  *   evidence and when.
  * @invariant claim/release/addEvidence touch ONLY extra.claim / extra.verification_evidence
- *   — never content, title, or status.
+ *   — never content, title, or status. Bounded exception (SPEC-069 §Design Decisions
+ *   D4/D5, mirrors TaskWorkflowService): when the evidence recorder IS the current
+ *   fresh-OR-stale claim holder, `appendEvidenceEntry` folds a `renewClaimForEvidence`-
+ *   refreshed `extra.claim` (same `at` as the evidence's `recorded_at`) into the SAME
+ *   CAS write as the evidence append — still `extra.claim` only, never a second write,
+ *   never content/title/status. A foreign holder's claim is left byte-identical.
  * @invariant ready() performs zero writes — readiness is computed, never stored (D3,
  *   inherited from SPEC-025).
  * @invariant Method signatures reuse the EXACT SPEC-025/042 option/result types
@@ -82,6 +87,7 @@ import {
   isClaimStale,
   evaluateReadiness,
   buildTaskClaim,
+  renewClaimForEvidence,
   deriveSessions,
   extractFileAnchors,
   anchorsOverlap,
@@ -412,9 +418,17 @@ export class PhaseWorkflowService {
       }
     }
 
+    // SPEC-069 §Design Decisions D4/D5 (W3 fix, mirrors TaskWorkflowService) — an
+    // evidence recorder who IS the current claim holder (fresh OR stale) is
+    // demonstrably alive; fold the renewed claim into this SAME CAS write so a still-
+    // working session's TTL never falsely expires between evidence appends.
+    // `renewClaimForEvidence` reuses `nowIso` captured above — NEVER a second `now()`
+    // invocation (mirrors TaskWorkflowService's identical single-fire constraint).
+    const renewedClaim = renewClaimForEvidence(readClaim(phase), actor, nowIso);
     const newExtra: Record<string, unknown> = {
       ...phase.extra,
       verification_evidence: [...existing, parsedEntry.data],
+      ...(renewedClaim !== null ? { claim: renewedClaim } : {}),
     };
 
     return this.writePhaseExtra(
@@ -424,7 +438,12 @@ export class PhaseWorkflowService {
       actor,
       `Evidence added: ${entry.oracle} ${entry.result}`,
       "evidence",
-      { oracle: entry.oracle, command: entry.command, result: entry.result },
+      {
+        oracle: entry.oracle,
+        command: entry.command,
+        result: entry.result,
+        ...(renewedClaim !== null ? { claim_renewed: true } : {}),
+      },
     );
   }
 

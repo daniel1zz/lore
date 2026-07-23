@@ -359,6 +359,57 @@ export function isClaimStale(claim: TaskClaim, nowIso: string, ttlMinutes: numbe
   return ageMs > ttlMinutes * 60_000;
 }
 
+// ─── Evidence-Triggered Claim Renewal (SPEC-069 §Design Decisions D4/D5) ────
+
+/**
+ * Refreshes a task's claim when the evidence recorder IS the current holder —
+ * a session still producing evidence is alive, so TTL takeover should only
+ * ever hit an actually-dead session (SPEC-069 D5, closes window W3). Matches
+ * on `claim.by === actor` REGARDLESS of staleness (fresh OR stale) —
+ * deliberately NOT gated by {@link isClaimStale}: a holder still actively
+ * recording evidence is alive by construction, independent of how long ago
+ * `claim.at` was set. This mirrors `claim()`'s own same-holder refresh
+ * semantics ({@link buildTaskClaim}'s `carryForward` path).
+ *
+ * A foreign holder or an absent claim is left untouched (returns `null`) —
+ * evidence never implicitly ACQUIRES a claim; only an already-held claim by
+ * the SAME actor gets renewed (D5 — implicit acquisition via evidence would
+ * break claim explicitness).
+ *
+ * @param claim - The task's current claim, or `undefined` if none.
+ * @param actor - The evidence entry's `recorded_by` actor.
+ * @param nowIso - Caller-supplied current time (D10 time seam). MUST be the
+ *   exact same instant the caller stamps onto the triggering evidence entry's
+ *   `recorded_at` — never a second, independently-captured timestamp — so a
+ *   renewal and its triggering evidence entry always carry an identical
+ *   instant (SPEC-069 §Module Boundary: "F2 must reuse the already-captured
+ *   nowIso — never invoke the now() thunk twice").
+ * @returns A NEW `TaskClaim` object with `at` set to `nowIso` — `branch`/
+ *   `machine`/`worktree` preserved verbatim from `claim` — on a same-holder
+ *   match; `null` when the claim is absent or held by a different actor.
+ *   Never mutates `claim`.
+ *
+ * @example
+ * renewClaimForEvidence({ by: "alice", at: "T0", branch: "b1" }, "alice", "T1");
+ * // => { by: "alice", at: "T1", branch: "b1" }
+ *
+ * @example
+ * renewClaimForEvidence({ by: "alice", at: "T0" }, "bob", "T1");
+ * // => null (foreign holder — untouched, no renewal)
+ *
+ * @example
+ * renewClaimForEvidence(undefined, "alice", "T1");
+ * // => null (no claim to renew)
+ */
+export function renewClaimForEvidence(
+  claim: TaskClaim | undefined,
+  actor: string,
+  nowIso: string,
+): TaskClaim | null {
+  if (claim === undefined || claim.by !== actor) return null;
+  return { ...claim, at: nowIso };
+}
+
 // ─── Readiness ─────────────────────────────────────────────────────────────
 
 /**
