@@ -520,6 +520,41 @@ export class CorpusService {
       resolvedParentMarkdown = parentDoc.content;
     }
 
+    // Ad-hoc task auto-parenting to the corpus root PRD (SPEC-069 §Design
+    // Decisions D2). reason: an ad-hoc task deliberately supplies NO
+    // --parent/--plan-id — `taskExtraSchema`'s superRefine (schemas.ts)
+    // relaxes `plan_id`, and `createDocInputSchema`'s superRefine relaxes the
+    // top-level `parent_id` requirement, for exactly this shape
+    // (`extra.adhoc === true`). CorpusService, not the CLI, resolves the
+    // actual parent here so every ad-hoc task lands on the SAME anchor
+    // regardless of caller surface (CLI/MCP/HTTP all reach this one code
+    // path). Reuses the exact "first PRD" lookup `tree()`'s no-root-given
+    // default already uses (`store.findMany({type: "prd"})[0]`) — no new
+    // root-finding heuristic introduced. Deliberately bypasses
+    // `isValidParentType`/`PARENT_TYPE_CONTRACT` (whose only declared task
+    // parent is `plan`) — SPEC-069 D2 explicitly parents ad-hoc tasks to the
+    // root PRD "for tree reachability", a narrower purpose than full
+    // parent-type membership; widening `PARENT_TYPE_CONTRACT.task` itself
+    // would legalize task→prd for EVERY task (including a --plan-id-less,
+    // non-adhoc caller forcing --parent to a PRD), which is not this design's
+    // intent.
+    if (data.type === "task" && data.parent_id === undefined && data.extra?.["adhoc"] === true) {
+      const prdsResult = await this.store.findMany({ type: "prd" });
+      if (!prdsResult.ok) return prdsResult;
+      const rootPrd = prdsResult.value[0];
+      if (!rootPrd) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "parent_id",
+          message:
+            "cannot create an --adhoc task: no root PRD exists in this corpus to parent it to",
+        });
+      }
+      resolvedParentId = rootPrd.id;
+      resolvedParentType = rootPrd.type;
+      resolvedParentMarkdown = rootPrd.content;
+    }
+
     // Cross-entity phase validation for tasks with extra.phase (AC-PHASE-3, SPEC-023 §4).
     // reason: Zod cannot express cross-document constraints — must be enforced in service layer.
     // Three sub-cases: (1) parent has no phases → VALIDATION_ERROR, (2) phase name not found

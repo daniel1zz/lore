@@ -244,10 +244,16 @@ export const knowledgeExtraSchema = z
  *   Written exclusively via the sanctioned seams; never through
  *   `CorpusService.set` (D3 — a wholesale-extra replace flag was deliberately
  *   not built for anchors).
+ * @invariant `plan_id` is REQUIRED unless `adhoc === true` (SPEC-069 §Design
+ *   Decisions D2, ad-hoc task channel). Zod's declarative `.optional()` alone
+ *   cannot express "required unless flag X" — the superRefine below is the
+ *   real enforcement point; `plan_id: docIdSchema.optional()` only widens the
+ *   SHAPE so an ad-hoc task's absent `plan_id` doesn't fail before the
+ *   superRefine gets a chance to look at `adhoc`.
  */
 export const taskExtraSchema = z
   .object({
-    plan_id: docIdSchema,
+    plan_id: docIdSchema.optional(),
     assignee: z.string().optional(),
     /**
      * Optional phase grouping name. When present, validated against the parent
@@ -270,8 +276,38 @@ export const taskExtraSchema = z
      * safety net's SSOT (SPEC-042 §3 D3). See this schema's own @invariant above.
      */
     file_anchors: z.array(z.string()).optional(),
+    /**
+     * Marks this task as planless (SPEC-069 §Design Decisions D2, ad-hoc task
+     * channel). Set only via `lore create task --adhoc`; relaxes `plan_id`
+     * (this schema's superRefine below) AND `parent_id`
+     * (`createDocInputSchema`'s superRefine) — `CorpusService._createImpl`
+     * parents the doc to the corpus root PRD instead of a plan. Mutually
+     * exclusive with `plan_id`/`phase` at the CLI validation layer
+     * (`create-task-validation.ts`), never re-checked here — this schema
+     * stays a pure shape+plan_id-presence gate.
+     */
+    adhoc: z.boolean().optional(),
+    /**
+     * Free-text justification for WHY this task is attached to `plan_id`
+     * despite looking unrelated to the plan's declared scope (SPEC-069
+     * §Design Decisions D3). Verbatim input, no shape constraint beyond
+     * "a string" — surfaced in `computeAssessmentFacts`'s scope-fidelity
+     * facts (`assessment.ts`) so an explained attachment reads differently
+     * from silent drift. Mutually exclusive with `adhoc` at the CLI
+     * validation layer, same reason as above.
+     */
+    linkage: z.string().optional(),
   })
-  .passthrough();
+  .passthrough()
+  .superRefine((data, ctx) => {
+    if (data.adhoc !== true && data.plan_id === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "plan_id is required unless extra.adhoc is true",
+        path: ["plan_id"],
+      });
+    }
+  });
 
 /**
  * One declared phase on a plan document.
@@ -430,13 +466,22 @@ export const createDocInputSchema = baseCreateDocInputSchema.superRefine(
   (data, ctx) => {
     const { type, parent_id, extra } = data;
 
-    // spec, task, and phase require parent_id (phase: SPEC-056 D1 — always a plan)
+    // spec, task, and phase require parent_id (phase: SPEC-056 D1 — always a plan).
+    // reason: an ad-hoc task (SPEC-069 §Design Decisions D2, extra.adhoc === true)
+    // is the ONE exception — it deliberately supplies no --parent/--plan-id;
+    // CorpusService._createImpl resolves parent_id to the corpus root PRD instead.
+    // Zod cannot see that resolution (it happens after this parse succeeds), so
+    // this check must not fire for that one shape.
     if ((type === "spec" || type === "task" || type === "phase") && !parent_id) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: `parent_id is required for type '${type}'`,
-        path: ["parent_id"],
-      });
+      const isAdhocTask =
+        type === "task" && (extra as { adhoc?: unknown } | undefined)?.adhoc === true;
+      if (!isAdhocTask) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `parent_id is required for type '${type}'`,
+          path: ["parent_id"],
+        });
+      }
     }
 
     // adr requires extra.decision_status (and, when extra.validity is present, a
