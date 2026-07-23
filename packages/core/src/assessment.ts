@@ -52,6 +52,10 @@
  *     surfaced when a `lore assess --diff` range looks too wide for the plan it's assessing
  *   - computeScopeMismatchWarning(diffFiles, taskAnchors) — pure fact-only comparison
  *     between a diff's changed files and a plan's declared task file_anchors
+ *   - TRUNCATION_DOWNGRADE_THRESHOLDS — the SPEC-067 D4 truncation-ratio thresholds
+ *     (single exported constant, never scattered literals)
+ *   - computeTaskTruncationRatio(truncatedSections, totalTaskCount) — pure fraction of a
+ *     plan's tasks whose section was truncated in the judge prompt (SPEC-067 D4)
  *
  * Invariants:
  *   - No IO, no wall-clock reads, no Math.random() — renderAssessmentContent is deterministic:
@@ -99,12 +103,33 @@
  *     `facts`/`source_versions` — every assessment persisted before this warning existed
  *     has no `scope_warning` and still validates unchanged. It NEVER affects `verdict`,
  *     `overall_score`, or whether the assessment persists — advisory only.
+ *   - SPEC-067 D3/D4 mechanical downgrades (computed by the service layer, `ai-provider-service.ts`,
+ *     NOT here — this module stays schema+pure-helper-only, same division as every prior
+ *     assessment feature):
+ *     - `dimensionScoreEntrySchema.confidence` is widened from a bare `z.number().min(0).max(1)`
+ *       to `number | "low"` — `"low"` is a service-written sentinel DISTINCT from any
+ *       judge-reported float, stamped when a `based_on:"absence"` score has no matching
+ *       `unverifiable[]`/`judgment.truncated[]` citation (D3). Backward-compatible: every
+ *       already-persisted numeric confidence value still parses.
+ *     - `dimensionScoreEntrySchema.confidence_reason` is a NEW optional field, additive-only
+ *       (present only alongside a service-forced `confidence: "low"`, absent on every
+ *       pre-SPEC-067 dimension score and on judge-reported floats).
+ *     - `judgmentSchema.overall_confidence`/`degraded_by_truncation` are NEW optional fields
+ *       (both additive-only, present-iff-true/present-iff-"low") — set when
+ *       {@link computeTaskTruncationRatio} exceeds {@link TRUNCATION_DOWNGRADE_THRESHOLDS}'s
+ *       `confidenceCapRatio` (D4).
+ *     - `assessmentResultSchema.verdict` is widened to add `"inconclusive"` and
+ *       `assessmentResultSchema.overall_score` is widened from required to optional — both
+ *       ONLY on the persisted shape (never on `llmAssessmentOutputSchema` — the judge itself
+ *       never emits either override), set when {@link computeTaskTruncationRatio} reaches
+ *       `TRUNCATION_DOWNGRADE_THRESHOLDS.inconclusiveRatio` (100% of tasks truncated, D4).
  *
  * Side-effect class: pure
  *
  * Source: SPEC-026 §3 D2, D6, D7; §4 AC-ASSESS-1..13; §5; §8.1, §8.2; SPEC-029 AC-AR-2, AC-AR-3;
  *   SPEC-040 §T1 D1, D2, D3, D9; AC-ADF-2, AC-ADF-10;
- *   task-assess-diff-range-scope-mismatch-warning (hotfix plan, AC-040-SCOPE-1)
+ *   task-assess-diff-range-scope-mismatch-warning (hotfix plan, AC-040-SCOPE-1);
+ *   SPEC-067 D3, D4
  */
 
 import { z } from "zod";
@@ -176,6 +201,11 @@ export type AcScore = z.infer<typeof acScoreSchema>;
  *   provider: "claude-cli", prompt_version: 1, duration_ms: 4230,
  *   retried: false, truncated: [], reasoning_clipped: ["AC-ASSESS-3"],
  * });
+ * judgmentSchema.parse({
+ *   provider: "claude-cli", prompt_version: 6, duration_ms: 4230,
+ *   retried: false, truncated: ["task:t1", "task:t2"],
+ *   overall_confidence: "low", degraded_by_truncation: true,
+ * });
  */
 export const judgmentSchema = z.object({
   provider: z.string().min(1),
@@ -184,6 +214,19 @@ export const judgmentSchema = z.object({
   retried: z.boolean(),
   truncated: z.array(z.string()),
   reasoning_clipped: z.array(z.string()).optional(),
+  /**
+   * SPEC-067 D4 — set to `"low"` ONLY when {@link computeTaskTruncationRatio} exceeds
+   * {@link TRUNCATION_DOWNGRADE_THRESHOLDS}.confidenceCapRatio. Additive-only: absent on
+   * every assessment persisted before SPEC-067 and on every run below the cap threshold.
+   * `"low"` is the only value this field ever holds — no other cap tier is defined.
+   */
+  overall_confidence: z.literal("low").optional(),
+  /**
+   * SPEC-067 D4 — `true` iff `overall_confidence` was forced to `"low"` by task-truncation
+   * coverage. Present-iff-true (mirrors `evidenceEntrySchema.attestation.first_seen`'s
+   * convention) — never `false`, just omitted.
+   */
+  degraded_by_truncation: z.literal(true).optional(),
 });
 
 /** Derived TypeScript type for judge run metadata. */
@@ -216,16 +259,26 @@ export type AssessmentDimension = (typeof ASSESSMENT_DIMENSIONS)[number];
 /**
  * One dimension's score within {@link dimensionScoresSchema}.
  *
- * @invariant confidence is advisory-only and self-reported by the judge — never treated
- *   as a calibrated probability. {@link renderAssessmentContent} labels it accordingly.
+ * @invariant confidence is advisory-only and self-reported by the judge as a 0-1 float —
+ *   never treated as a calibrated probability. {@link renderAssessmentContent} labels it
+ *   accordingly. SPEC-067 D3 widens this to `number | "low"`: the literal string `"low"`
+ *   is a SERVICE-WRITTEN sentinel (never judge-emitted — the prompt only ever asks for a
+ *   float), stamped by `applyGroundingConfidenceDowngrade` (`ai-provider-service.ts`) when
+ *   this entry is `based_on:"absence"` with no matching `unverifiable[]`/
+ *   `judgment.truncated[]` citation. Distinguishing the sentinel from any float means a
+ *   downgraded entry is identifiable by an exact `confidence === "low"` check alone.
  * @invariant reasoning is capped at 200 chars; clipped pre-validation by
  *   {@link clipOverlongReasoning} (SPEC-040 D9), mirroring acScoreSchema's reasoning cap.
+ * @invariant confidence_reason is additive-only (SPEC-067 D3) — present ONLY alongside a
+ *   service-forced `confidence: "low"`; absent on every pre-SPEC-067 dimension score and
+ *   on every judge-reported float confidence.
  */
 const dimensionScoreEntrySchema = z.object({
   score: z.number().int().min(0).max(100),
-  confidence: z.number().min(0).max(1),
+  confidence: z.union([z.number().min(0).max(1), z.literal("low")]),
   based_on: z.enum(["evidence", "absence"]),
   reasoning: z.string().max(200),
+  confidence_reason: z.string().optional(),
 });
 
 /** Derived TypeScript type for one dimension score entry. */
@@ -603,6 +656,55 @@ export function computeScopeMismatchWarning(
   };
 }
 
+// ─── Truncation-Coverage Downgrade Thresholds (SPEC-067 D4) ────────────────
+
+/**
+ * Single exported home for the SPEC-067 D4 truncation-ratio thresholds — never inline
+ * these fractions as scattered literals at call sites.
+ *
+ * @invariant `confidenceCapRatio` is a STRICT lower bound (`ratio > confidenceCapRatio`,
+ *   not `>=`) — exactly 25% truncated is NOT degraded, matching the spec text "> 25%".
+ * @invariant `inconclusiveRatio` is reached via `ratio >= inconclusiveRatio` — with
+ *   `inconclusiveRatio` set to `1`, this is only ever true at exactly 100% (a ratio can
+ *   never exceed 1 by construction of {@link computeTaskTruncationRatio}).
+ */
+export const TRUNCATION_DOWNGRADE_THRESHOLDS = {
+  /** > this fraction of a plan's tasks truncated → overall confidence capped at "low" + `judgment.degraded_by_truncation: true`. */
+  confidenceCapRatio: 0.25,
+  /** >= this fraction (i.e. 100%) of a plan's tasks truncated → `overall_score` omitted, `verdict` forced to "inconclusive". */
+  inconclusiveRatio: 1,
+} as const;
+
+/**
+ * Fraction of a plan's tasks whose material was truncated in the judge prompt — the SPEC-067
+ * D4 truncation-coverage signal. Per-task truncated-section entries are written as
+ * `` `task:${task.slug}` `` (see `assess-template.ts`'s `truncated.push` convention); this
+ * function counts those, never re-deriving the prefix convention at each call site.
+ *
+ * @invariant Pure — no IO, no mutation.
+ * @invariant `totalTaskCount === 0` → ratio `0`, never a divide-by-zero and never a vacuous
+ *   100% ("no tasks" is not "all tasks truncated").
+ * @param truncatedSections - `judgment.truncated[]` (or the pre-finalization `truncated`
+ *   array `assessPlan` builds the prompt with — same shape either way)
+ * @param totalTaskCount - `bundle.tasks.length` — the plan's full task count, not just the
+ *   ones that appear in `truncatedSections`
+ * @returns A fraction in `[0, 1]`
+ *
+ * @example
+ * computeTaskTruncationRatio(["task:t1", "task:t2", "plan"], 16); // → 0.125 (2/16)
+ *
+ * @example
+ * computeTaskTruncationRatio(["task:t1", "task:t2"], 2); // → 1 (100% truncated)
+ *
+ * @example
+ * computeTaskTruncationRatio([], 0); // → 0 (no tasks at all — not "fully truncated")
+ */
+export function computeTaskTruncationRatio(truncatedSections: string[], totalTaskCount: number): number {
+  if (totalTaskCount === 0) return 0;
+  const truncatedTaskCount = truncatedSections.filter((section) => section.startsWith("task:")).length;
+  return truncatedTaskCount / totalTaskCount;
+}
+
 // ─── Full Assessment Result (persisted shape) ──────────────────────────────
 
 /**
@@ -628,6 +730,13 @@ export const assessmentResultSchema = llmAssessmentOutputSchema.extend({
   facts: assessmentFactsSchema.optional(),
   source_versions: z.array(sourceVersionRefSchema).optional(),
   scope_warning: scopeMismatchWarningSchema.optional(),
+  // SPEC-067 D4 — both fields OVERRIDE llmAssessmentOutputSchema's narrower base shape.
+  // The judge itself never emits "inconclusive" or omits overall_score — these are
+  // service-computed finalization overrides (_finalizeAssessment, ai-provider-service.ts)
+  // applied only at 100% task-truncation coverage; llmAssessmentOutputSchema (what the
+  // judge is validated against) is untouched.
+  verdict: z.enum(["met", "partially_met", "not_met", "inconclusive"]),
+  overall_score: z.number().int().min(0).max(100).optional(),
 });
 
 /** Derived TypeScript type for a full persisted assessment result. */
@@ -1176,7 +1285,10 @@ export function clipOverlongReasoning(
 export function renderAssessmentContent(result: AssessmentResult): string {
   const lines: string[] = [];
 
-  lines.push(`# Assessment: ${result.verdict} (${result.overall_score}/100)`);
+  // SPEC-067 D4: overall_score is omitted (not a number) at 100% task-truncation coverage —
+  // render an explicit placeholder rather than interpolating `undefined` into the heading.
+  const scoreLabel = result.overall_score !== undefined ? `${result.overall_score}/100` : "N/A (fully truncated)";
+  lines.push(`# Assessment: ${result.verdict} (${scoreLabel})`);
   lines.push("");
   lines.push(`Scope: ${result.scope.type} \`${result.scope.id}\``);
   lines.push("");
@@ -1223,6 +1335,14 @@ export function renderAssessmentContent(result: AssessmentResult): string {
     // pre-SPEC-029 assessments (no reasoning_clipped in judgment) render identically to
     // before this line existed.
     lines.push(`- Reasoning clipped for: ${result.judgment.reasoning_clipped.join(", ")}`);
+  }
+  if (result.judgment.overall_confidence !== undefined) {
+    // reason: additive-only field (SPEC-067 D4) — same rendering precedent as
+    // reasoning_clipped above; absent on every pre-SPEC-067 assessment.
+    lines.push(
+      `- Overall confidence: ${result.judgment.overall_confidence}` +
+        (result.judgment.degraded_by_truncation ? " (degraded by truncation)" : ""),
+    );
   }
 
   // reason: every block below is additive-only (SPEC-040 D3) — each is guarded by

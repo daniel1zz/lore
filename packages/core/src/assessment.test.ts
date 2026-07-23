@@ -28,6 +28,10 @@ import {
   clipOverlongReasoning,
   DEFAULT_REASONING_CLIP_CHARS,
   judgmentSchema,
+  dimensionScoresSchema,
+  assessmentResultSchema,
+  computeTaskTruncationRatio,
+  TRUNCATION_DOWNGRADE_THRESHOLDS,
   type AssessmentResult,
 } from "./assessment.js";
 
@@ -583,5 +587,119 @@ describe("renderAssessmentContent — reasoning_clipped rendering (SPEC-029 AC-A
     const judgmentSection = content.slice(content.indexOf("## Judgment"));
     const bulletLines = judgmentSection.split("\n").filter((l) => l.startsWith("- "));
     expect(bulletLines).toHaveLength(5);
+  });
+});
+
+// ─── SPEC-067 D3/D4: schema widening + computeTaskTruncationRatio ────────────
+
+describe("computeTaskTruncationRatio (SPEC-067 D4)", () => {
+  it("HAPPY: counts only task:-prefixed entries against the total task count", () => {
+    expect(computeTaskTruncationRatio(["task:t1", "task:t2", "plan", "spec"], 16)).toBeCloseTo(2 / 16);
+  });
+
+  it("HAPPY: 5 of 16 truncated matches the spec's own worked example", () => {
+    const truncated = ["task:t1", "task:t2", "task:t3", "task:t4", "task:t5", "plan"];
+    expect(computeTaskTruncationRatio(truncated, 16)).toBeCloseTo(0.3125);
+  });
+
+  it("BOUNDARY: totalTaskCount 0 → ratio 0, never a divide-by-zero and never a vacuous 100%", () => {
+    expect(computeTaskTruncationRatio([], 0)).toBe(0);
+    expect(computeTaskTruncationRatio(["plan"], 0)).toBe(0);
+  });
+
+  it("BOUNDARY: all tasks truncated → ratio exactly 1", () => {
+    expect(computeTaskTruncationRatio(["task:t1", "task:t2"], 2)).toBe(1);
+  });
+
+  it("NEGATIVE: non-task truncated sections (plan/spec/diff) never count toward the ratio", () => {
+    expect(computeTaskTruncationRatio(["plan", "spec", "diff:foo.ts"], 4)).toBe(0);
+  });
+
+  it("REGRESSION: TRUNCATION_DOWNGRADE_THRESHOLDS is a single exported constant carrying both thresholds", () => {
+    expect(TRUNCATION_DOWNGRADE_THRESHOLDS.confidenceCapRatio).toBe(0.25);
+    expect(TRUNCATION_DOWNGRADE_THRESHOLDS.inconclusiveRatio).toBe(1);
+  });
+});
+
+describe("dimensionScoresSchema — SPEC-067 D3 confidence widening (backward compat)", () => {
+  it("REGRESSION: a legacy numeric confidence still parses (pre-SPEC-067 assessments unaffected)", () => {
+    const parsed = dimensionScoresSchema.parse({
+      outcome: { score: 80, confidence: 0.7, based_on: "evidence", reasoning: "strong" },
+    });
+    expect(parsed["outcome"]?.confidence).toBe(0.7);
+    expect(parsed["outcome"]?.confidence_reason).toBeUndefined();
+  });
+
+  it("HAPPY: the service-written 'low' sentinel + confidence_reason both parse", () => {
+    const parsed = dimensionScoresSchema.parse({
+      scope_fidelity: {
+        score: 40,
+        confidence: "low",
+        based_on: "absence",
+        reasoning: "cannot verify",
+        confidence_reason: 'Forced to "low": ungrounded absence claim (SPEC-067 D3).',
+      },
+    });
+    expect(parsed["scope_fidelity"]?.confidence).toBe("low");
+    expect(parsed["scope_fidelity"]?.confidence_reason).toContain("SPEC-067");
+  });
+
+  it("NEGATIVE: an arbitrary string confidence (not the 'low' sentinel) is rejected", () => {
+    const result = dimensionScoresSchema.safeParse({
+      outcome: { score: 80, confidence: "medium", based_on: "evidence", reasoning: "x" },
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("assessmentResultSchema — SPEC-067 D4 verdict/overall_score widening (backward compat)", () => {
+  it("REGRESSION: a legacy assessment with a required numeric overall_score and no 'inconclusive' still parses", () => {
+    const parsed = assessmentResultSchema.parse({
+      scope: { type: "plan", id: "01ARZ3NDEKTSV4RRFFQ69G5FAV" },
+      verdict: "met",
+      overall_score: 90,
+      ac_scores: [],
+      gaps: [],
+      recommendations: [],
+      judgment: { provider: "claude-cli", prompt_version: 1, duration_ms: 100, retried: false, truncated: [] },
+    });
+    expect(parsed.overall_score).toBe(90);
+  });
+
+  it("HAPPY: verdict 'inconclusive' with overall_score OMITTED entirely parses", () => {
+    const parsed = assessmentResultSchema.parse({
+      scope: { type: "plan", id: "01ARZ3NDEKTSV4RRFFQ69G5FAV" },
+      verdict: "inconclusive",
+      ac_scores: [],
+      gaps: [],
+      recommendations: [],
+      judgment: {
+        provider: "claude-cli",
+        prompt_version: 6,
+        duration_ms: 100,
+        retried: false,
+        truncated: ["task:t1", "task:t2"],
+        overall_confidence: "low",
+        degraded_by_truncation: true,
+      },
+    });
+    expect(parsed.overall_score).toBeUndefined();
+    expect(parsed.verdict).toBe("inconclusive");
+    expect(parsed.judgment.degraded_by_truncation).toBe(true);
+  });
+
+  it("NEGATIVE: llmAssessmentOutputSchema itself (the judge-facing shape) still requires overall_score and rejects 'inconclusive'", () => {
+    // reason: the widening is a finalize-time OVERRIDE on the persisted shape only — the
+    // judge is never validated against, or told to emit, either relaxation.
+    const stillRequired = assessmentResultSchema.safeParse({
+      scope: { type: "plan", id: "01ARZ3NDEKTSV4RRFFQ69G5FAV" },
+      verdict: "not-a-real-verdict",
+      overall_score: 90,
+      ac_scores: [],
+      gaps: [],
+      recommendations: [],
+      judgment: { provider: "claude-cli", prompt_version: 1, duration_ms: 100, retried: false, truncated: [] },
+    });
+    expect(stillRequired.success).toBe(false);
   });
 });
