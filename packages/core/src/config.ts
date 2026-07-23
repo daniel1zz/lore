@@ -254,6 +254,27 @@ const WorkflowConfigSchema = z
       })
       .strict()
       .default({}),
+    /**
+     * `plan-close`'s execution-time attestation-floor sub-predicate config
+     * (SPEC-069 §Design Decisions D1) — the minimum plan-wide fraction of a
+     * closing plan's `verification_evidence` entries (aggregated across every
+     * task) that must be runner-issued (`attestation` present) before the plan
+     * may transition to `archived`. Nested under `workflow` (not
+     * `gates.<checkpoint>`) because it is a NUMBER, not an `enabled` toggle —
+     * `GateCheckpointConfigSchema`'s existing sub-predicate shape only carries
+     * boolean switches; whether the predicate runs AT ALL is still
+     * `workflow.gates."plan-close".enabled` (the whole-checkpoint knob,
+     * unchanged). Absence of the whole `workflow` section, or of `attestation`
+     * within it, both fall back to the schema default (0.5) — same
+     * "absence = default floor" shape as `staleness`/`drift` above.
+     */
+    attestation: z
+      .object({
+        /** Minimum plan-wide attested-evidence ratio required to close. Default: 0.5. */
+        min_ratio: z.number().min(0).max(1).default(0.5),
+      })
+      .strict()
+      .default({}),
   })
   .strict();
 
@@ -690,6 +711,38 @@ export function resolveStalenessDefaults(
  */
 export function resolveDriftEnabled(config: LoreConfig | undefined): boolean {
   return (config?.workflow ?? WorkflowConfigSchema.parse({})).drift.enabled;
+}
+
+/**
+ * Resolve the effective `workflow.attestation.min_ratio` floor (SPEC-069 §Design
+ * Decisions D1) from an optional LoreConfig. Absence of the whole config, the
+ * `workflow` section, or `workflow.attestation` specifically all fall back to the
+ * schema default (0.5).
+ *
+ * Deliberately fully-optional-chained (`config?.workflow?.attestation?.min_ratio`)
+ * rather than {@link resolveDriftEnabled}'s `config?.workflow ?? schemaDefault`
+ * shape: that shape assumes a PRESENT `config.workflow` is always the FULL,
+ * schema-validated `WorkflowConfig` (true for every production config, which is
+ * always routed through `LoreConfigSchema.parse` before reaching a service) — but
+ * several pre-existing test harnesses across this codebase hand-build a raw
+ * `{workflow: {gates: {...}}} as unknown as LoreConfig` literal that deliberately
+ * OMITS every other `workflow.*` sub-section to keep the fixture terse (e.g.
+ * `requires-uat-gate.test.ts`'s `configWithDesignRequiresUat`). Reaching this
+ * predicate's caller (`GateEnforcer.resolveAttestationMinRatio`, now on the
+ * `plan-close` checkpoint's ALWAYS-evaluated attestation-floor sub-predicate,
+ * unlike the narrower sub-knobs those other `resolve*` functions serve) with such
+ * a fixture must degrade to the default, not throw on `.attestation` being
+ * `undefined`.
+ *
+ * @param config - Parsed LoreConfig, or undefined when no config file was loaded
+ * @returns Effective `workflow.attestation.min_ratio` value
+ * @example
+ *   resolveAttestationMinRatio(undefined) // => 0.5
+ *   resolveAttestationMinRatio({ ..., workflow: { attestation: { min_ratio: 0.3 } } }) // => 0.3
+ *   resolveAttestationMinRatio({ ..., workflow: { gates: {} } } as LoreConfig) // => 0.5 (no throw)
+ */
+export function resolveAttestationMinRatio(config: LoreConfig | undefined): number {
+  return config?.workflow?.attestation?.min_ratio ?? WorkflowConfigSchema.parse({}).attestation.min_ratio;
 }
 
 /**
