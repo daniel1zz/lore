@@ -72,7 +72,7 @@ Partition ready tasks by declared `extra.file_anchors` (from `lore ready --json`
 
 Dispatch one `lore-implementer` subagent per task, **worktree isolated**
 (`Agent(subagent_type="lore-implementer", isolation="worktree")`). Same-wave tasks go in one
-message (parallel). The dispatch bundle MUST carry five sections:
+message (parallel). ⛔ **Bundle source of truth (SPEC-070): run `lore feed task-start <task>` and paste its pack as the bundle core** — it deterministically renders objective/acceptance (with live coverage badges + script-AC oracle commands)/constraints (prior-failure anti-patterns)/boundaries (anchors + scoped-oracle line)/claim/plan_state/knowledge_pointers/handoff from corpus state, so the bundle is always fresh and resume ≡ first dispatch. Hand-assemble ONLY what the pack cannot know (e.g. session-specific merge-base, retry anti-pattern notes not yet in evidence). The pack covers the five mandatory sections:
 
 1. **Task Objective** — task slug + title + one-line goal
 2. **Spec Reference** — governing spec slug (implementer runs `lore get` / `lore ac list` itself)
