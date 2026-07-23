@@ -4,7 +4,13 @@
  * Type-specific required flags:
  *   adr       → --decision-status (proposed|accepted|deprecated|superseded)
  *   knowledge → --sub-type (ideation|retro|research|reference)
- *   task      → --parent <plan-slug-or-id> AND --plan-id <plan-slug-or-id>
+ *   task      → --plan-id <plan-slug-or-id> is ALWAYS required. --parent
+ *               <slug-or-id> defaults to the resolved --plan-id when omitted
+ *               (SPEC-065 D4 — the dominant shape; a task parented somewhere
+ *               OTHER than its own plan passes --parent explicitly). Missing
+ *               BOTH flags is reported in ONE exit-2 message
+ *               (`create-task-validation.ts::checkTaskCreateRequiredFlags`),
+ *               not two separate round trips. Source: SPEC-065 D4.
  *
  * Type-specific OPTIONAL flags:
  *   spec      → --kind (feature|tech|design); defaults to "feature" when omitted
@@ -46,6 +52,11 @@ import { openEditor } from "../editor.js";
 import type { DocType, KnowledgeSubType, LoreError, Priority } from "@lore/core";
 import { KNOWLEDGE_SUB_TYPES, SPEC_KINDS } from "@lore/core";
 import { createWithSupersedes, renderSupersedeRepairMessage } from "../../../flows/supersede-flow.js";
+import {
+  checkTaskCreateRequiredFlags,
+  formatTaskCreateMissingFlagsError,
+  inferTaskParentId,
+} from "../create-task-validation.js";
 
 const VALID_TYPES: DocType[] = ["prd", "spec", "adr", "plan", "knowledge", "task"];
 
@@ -256,12 +267,18 @@ export default defineCommand({
       }
     }
 
-    if (docType === "task" && !args["plan-id"]) {
-      process.stderr.write(
-        `Error: --plan-id is required for type 'task'.\n` +
-          `  Pass the plan document's ID or slug.\n`,
-      );
-      process.exit(2);
+    // SPEC-065 D4: single-pass required-flag aggregation — reports BOTH a
+    // missing --plan-id AND a missing --parent in ONE exit-2 message instead
+    // of the pre-D4 two-round-trip discovery (P1-5 dogfood finding).
+    if (docType === "task") {
+      const missingTaskFlags = checkTaskCreateRequiredFlags({
+        planId: args["plan-id"] as string | undefined,
+        parent: args.parent,
+      });
+      if (missingTaskFlags.length > 0) {
+        process.stderr.write(formatTaskCreateMissingFlagsError(missingTaskFlags) + "\n");
+        process.exit(2);
+      }
     }
 
     // SPEC-024 §9.1: tri-state AI detection.
@@ -421,10 +438,15 @@ export default defineCommand({
         args["requires-uat"] as boolean | undefined,
       );
 
+      // SPEC-065 D4: --parent defaults to the (already-resolved) --plan-id when
+      // omitted — for every non-task type resolvedPlanId is always undefined, so
+      // this transparently reduces to the pre-D4 `args.parent` passthrough.
+      const inferredParentId = inferTaskParentId(args.parent, resolvedPlanId);
+
       const createInput = {
         type: docType,
         title: args.title,
-        ...(args.parent !== undefined ? { parent_id: args.parent } : {}),
+        ...(inferredParentId !== undefined ? { parent_id: inferredParentId } : {}),
         content: resolvedContent,
         priority: (args.priority as Priority) ?? "medium",
         ...(tags.length > 0 ? { tags } : {}),
