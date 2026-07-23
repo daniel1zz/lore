@@ -131,10 +131,15 @@ export async function resolveParentDoc(
  * (`phase-feed-flow.ts::buildPhaseStartPack`) is a phase-specific composition
  * distinct from `buildFeed`'s generic skill-discovery pull; wiring the dispatch
  * branch that calls it is a separate task, out of this map's own scope.
+ *
+ * `"task-start"` (SPEC-070 §Design Decisions D1) is registered the SAME way —
+ * `task-feed-flow.ts::buildTaskStartPack` is its own dedicated composition, dispatched
+ * by `commands/feed.ts` BEFORE this map's generic `buildFeed` path is ever consulted.
  */
 export const CHECKPOINT_PRODUCED_TYPE: Readonly<Record<string, string>> = {
   "spec-create": "spec",
   "phase-start": "phase",
+  "task-start": "task",
 };
 
 /** Pointer to the discovered governing skill doc — slug/title only, never its full body. */

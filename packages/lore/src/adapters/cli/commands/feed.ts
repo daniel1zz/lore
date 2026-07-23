@@ -1,9 +1,9 @@
 /**
- * lore feed <checkpoint> [<phase>] [--parent <id-or-slug>] [--plan <id-or-slug>]
+ * lore feed <checkpoint> [<target>] [--parent <id-or-slug>] [--plan <id-or-slug>]
  *   [--handoff <id-or-slug>] [--by <name>] [--json] — the deterministic
  * feed-before-produce PULL surface (IoC vertical-slice tech-spec §4.1/§11, P4 slice)
  * PLUS the SPEC-041 S2 session-resume dispatch (D5) PLUS the SPEC-056 phase-start
- * dispatch (task-skill-implement-cli-mcp-surfaces-checklist-ref-evidence).
+ * dispatch PLUS the SPEC-070 task-start dispatch (D1).
  *
  * Where `lore gate <checkpoint>` PUSHES a feeding pack back to the caller only AFTER a
  * violation, `lore feed <checkpoint>` lets a caller PULL the same governing rule ahead
@@ -14,65 +14,171 @@
  * the two can never drift on how a rule doc's (or a `--parent` doc's) markdown gets
  * rendered into a feeding-pack slice.
  *
+ * DISPATCH (SPEC-070 D1 — refactored from an if/else chain to a checkpoint→handler
+ * table): `SPECIAL_CHECKPOINT_HANDLERS` maps the three checkpoints with a dedicated
+ * assembly (`session-resume`, `phase-start`, `task-start`) to their own handler
+ * function; any OTHER checkpoint (including the pre-existing `spec-create`) falls
+ * through to the generic `buildFeed` composition below, driven by `feed-flow.ts`'s
+ * `CHECKPOINT_PRODUCED_TYPE` map. `spec-create`/`session-resume`/`phase-start`'s
+ * rendered output is BYTE-IDENTICAL to before this refactor (AC-070-7 regression pin
+ * — see `tests/integration/cli-feed-task-start.bun.test.ts`) — this file's dispatch
+ * SHAPE changed, no checkpoint's OWN logic did.
+ *
  * `<checkpoint>` derives a produced-type via `CHECKPOINT_PRODUCED_TYPE`
- * (`flows/feed-flow.ts`) — this slice only wires `spec-create` → `"spec"`. When an
- * approved `knowledge/skill` doc scoped `extra.skill.applies_to` to that type exists
- * (`corpusService.findFeedingSkill`, the SAME discovery `lore gate spec-create` uses),
- * its rule slice (plus the `--parent` doc's MDX-resolved summary, when supplied) is
- * printed. No approved skill → a clear one-line note, NOT an error.
+ * (`flows/feed-flow.ts`) for the generic path — this slice only wires `spec-create` →
+ * `"spec"`. When an approved `knowledge/skill` doc scoped `extra.skill.applies_to` to
+ * that type exists (`corpusService.findFeedingSkill`, the SAME discovery `lore gate
+ * spec-create` uses), its rule slice (plus the `--parent` doc's MDX-resolved summary,
+ * when supplied) is printed. No approved skill → a clear one-line note, NOT an error.
  *
- * `--checkpoint session-resume` is a SEPARATE dispatch (SPEC-041 §3 D5) —
- * `flows/feed-flow.ts::buildResumeFeed` (`SessionService.resume`), consulted BEFORE
- * the `CHECKPOINT_PRODUCED_TYPE` lookup above. `--plan`/`--handoff`/`--by` are only
- * meaningful for this checkpoint. Unlike the gate-checkpoint path, this dispatch CAN
- * fail (an unresolvable `--plan`/`--handoff` target) — see the exit-code note below.
+ * `--checkpoint session-resume` (SPEC-041 §3 D5) — `flows/feed-flow.ts::buildResumeFeed`
+ * (`SessionService.resume`). `--plan`/`--handoff`/`--by` are only meaningful for this
+ * checkpoint. Unlike the generic path, this dispatch CAN fail (an unresolvable
+ * `--plan`/`--handoff` target) — see the exit-code note below.
  *
- * `lore feed phase-start <phase>` is a THIRD, SEPARATE dispatch (SPEC-056 §Design
- * Decisions D5), also consulted BEFORE the `CHECKPOINT_PRODUCED_TYPE` lookup — even
- * though `"phase-start"` IS registered in that map (unlike `session-resume`), a
- * generic `buildFeed` call has no notion of a phase-scoped bundle. `<phase>` is a
- * SECOND positional (consumed only when `checkpoint === "phase-start"`); it names
- * the phase document id/slug to build the pack for. `buildPhaseStartPack`
- * (`../../../flows/phase-feed-flow.js`) does the actual assembly over a REAL
- * `PhaseFeedFlowDeps` binding (`../phase-wiring.js::buildPhaseFeedFlowDeps`) — the
- * SAME binding a future MCP `lore_feed` phase-start branch would call, so CLI/MCP
- * payloads stay deep-equal by construction. UNLIKE the other two checkpoints, this
- * dispatch CAN fail (an unresolvable/non-phase `<phase>` target) — see the exit-code
- * note below.
+ * `lore feed phase-start <target>` (SPEC-056 §Design Decisions D5) — `<target>` names
+ * the phase document id/slug. `buildPhaseStartPack` (`../../../flows/phase-feed-flow.js`)
+ * does the actual assembly over a REAL `PhaseFeedFlowDeps` binding
+ * (`../phase-wiring.js::buildPhaseFeedFlowDeps`).
+ *
+ * `lore feed task-start <target>` (SPEC-070 §Design Decisions D1, D7) — `<target>`
+ * names the TASK document id/slug. `buildTaskStartPack`
+ * (`../../../flows/task-feed-flow.js`) assembles the eight-section deterministic
+ * dispatch pack over a REAL `TaskFeedFlowDeps` binding
+ * (`../task-feed-wiring.js::buildTaskFeedFlowDeps`), with `workflow.task_feed.*`
+ * config budgets resolved via `../task-feed-wiring.js::resolveTaskStartBudgets` —
+ * the SAME construction a future MCP `lore_feed` task-start branch calls, so CLI/MCP
+ * payloads stay deep-equal by construction (mirrors `phase-start`'s rationale).
+ * Rendering (non-`--json`) goes through the exported `../task-feed-render.js::
+ * renderTaskStartPack` (D7 — vitest-testable, reusable by a future claim-time print
+ * or dashboard surface without touching this file).
  *
  * Exit code: for the generic `CHECKPOINT_PRODUCED_TYPE`-driven path, ALWAYS 0 — feed
  * is advisory context, never a gate (module header, task objective). For
- * `session-resume` AND `phase-start`, 0 on success — a resolution failure maps
- * through the normal `exitCode()`/`formatError()` pipeline instead, since an
- * unresolvable target is a caller input error, not an advisory-degrade case.
+ * `session-resume`, `phase-start`, AND `task-start`, 0 on success — a resolution
+ * failure maps through the normal `exitCode()`/`formatError()` pipeline instead, since
+ * an unresolvable target is a caller input error, not an advisory-degrade case.
  *
  * Source: IoC vertical-slice tech-spec §4.1/§11, P4 slice; SPEC-041 §3 D5;
- *   SPEC-056 §Design Decisions D5
+ *   SPEC-056 §Design Decisions D5; SPEC-070 §Design Decisions D1, D7
  */
 
 import { defineCommand } from "citty";
+import type { LoreConfig } from "@lore/core";
+import type { App } from "../../../app.js";
 import { loadLoreApp } from "../loader.js";
 import { buildFeed, buildResumeFeed, SESSION_RESUME_CHECKPOINT } from "../../../flows/feed-flow.js";
 import { buildPhaseStartPack, PHASE_START_CHECKPOINT } from "../../../flows/phase-feed-flow.js";
 import type { PhaseStartPack } from "../../../flows/phase-feed-flow.js";
+import { buildTaskStartPack, TASK_START_CHECKPOINT } from "../../../flows/task-feed-flow.js";
 import { buildPhaseFeedFlowDeps } from "../phase-wiring.js";
+import { buildTaskFeedFlowDeps, resolveTaskStartBudgets } from "../task-feed-wiring.js";
+import { renderTaskStartPack } from "../task-feed-render.js";
 import { exitCode, formatError } from "../utils.js";
+
+/** Loosely-typed view of the args this command's dispatch table needs — mirrors citty's parsed-args shape. */
+interface FeedArgs {
+  checkpoint?: unknown;
+  target?: unknown;
+  parent?: unknown;
+  plan?: unknown;
+  handoff?: unknown;
+  by?: unknown;
+  json?: unknown;
+}
+
+/** One checkpoint's dedicated handler — sets `process.exitCode`/prints output itself, mirroring the pre-refactor inline branches. */
+type CheckpointHandler = (app: App, args: FeedArgs) => Promise<void>;
+
+async function handleSessionResume(app: App, args: FeedArgs): Promise<void> {
+  const result = await buildResumeFeed(app, {
+    ...(typeof args.plan === "string" ? { plan: args.plan } : {}),
+    ...(typeof args.handoff === "string" ? { handoff: args.handoff } : {}),
+    ...(typeof args.by === "string" ? { by: args.by } : {}),
+  });
+
+  if (!result.ok) {
+    process.stderr.write(formatError(result.error) + "\n");
+    process.exitCode = exitCode(result.error);
+    return;
+  }
+
+  if (args.json) {
+    console.log(JSON.stringify(result.value, null, 2));
+  } else {
+    console.log(result.value.feed);
+  }
+  process.exitCode = 0;
+}
+
+async function handlePhaseStart(app: App, args: FeedArgs): Promise<void> {
+  if (typeof args.target !== "string" || args.target.length === 0) {
+    process.stderr.write(
+      "Error: `lore feed phase-start <phase>` requires a phase document ID or slug.\n",
+    );
+    process.exitCode = 2;
+    return;
+  }
+
+  const deps = buildPhaseFeedFlowDeps(app);
+  const result = await buildPhaseStartPack(deps, args.target);
+
+  if (!result.ok) {
+    process.stderr.write(formatError(result.error) + "\n");
+    process.exitCode = exitCode(result.error);
+    return;
+  }
+
+  if (args.json) {
+    console.log(JSON.stringify(result.value, null, 2));
+  } else {
+    renderPhaseStartPackText(result.value);
+  }
+  process.exitCode = 0;
+}
+
+async function handleTaskStart(app: App, args: FeedArgs, config: LoreConfig | undefined): Promise<void> {
+  if (typeof args.target !== "string" || args.target.length === 0) {
+    process.stderr.write(
+      "Error: `lore feed task-start <task>` requires a task document ID or slug.\n",
+    );
+    process.exitCode = 2;
+    return;
+  }
+
+  const deps = buildTaskFeedFlowDeps(app);
+  const budgets = resolveTaskStartBudgets(config);
+  const result = await buildTaskStartPack(deps, args.target, budgets);
+
+  if (!result.ok) {
+    process.stderr.write(formatError(result.error) + "\n");
+    process.exitCode = exitCode(result.error);
+    return;
+  }
+
+  if (args.json) {
+    console.log(JSON.stringify(result.value, null, 2));
+  } else {
+    console.log(renderTaskStartPack(result.value));
+  }
+  process.exitCode = 0;
+}
 
 export default defineCommand({
   meta: {
     name: "feed",
     description:
-      'Feed-before-produce PULL: print the governing skill\'s rule slice for a checkpoint ahead of writing (advisory only, never a gate); "session-resume" dispatches to SPEC-041 S2 resume instead',
+      'Feed-before-produce PULL: print the governing skill\'s rule slice for a checkpoint ahead of writing (advisory only, never a gate); "session-resume"/"phase-start"/"task-start" dispatch to their own dedicated packs instead',
   },
   args: {
     checkpoint: {
       type: "positional",
-      description: 'Checkpoint to feed, e.g. "spec-create", "session-resume" (SPEC-041 S2), or "phase-start" (SPEC-056)',
+      description: 'Checkpoint to feed, e.g. "spec-create", "session-resume" (SPEC-041 S2), "phase-start" (SPEC-056), or "task-start" (SPEC-070)',
       required: true,
     },
-    phase: {
+    target: {
       type: "positional",
-      description: "[phase-start only] Phase document ID or slug to build the feed pack for",
+      description: "[phase-start/task-start only] Phase or task document ID or slug to build the feed pack for",
       required: false,
     },
     parent: {
@@ -97,54 +203,17 @@ export default defineCommand({
     },
   },
   async run({ args }) {
-    const { app } = loadLoreApp();
+    const { app, config } = loadLoreApp();
     try {
-      if (args.checkpoint === SESSION_RESUME_CHECKPOINT) {
-        const result = await buildResumeFeed(app, {
-          ...(typeof args.plan === "string" ? { plan: args.plan } : {}),
-          ...(typeof args.handoff === "string" ? { handoff: args.handoff } : {}),
-          ...(typeof args.by === "string" ? { by: args.by } : {}),
-        });
+      const specialHandlers: Record<string, CheckpointHandler> = {
+        [SESSION_RESUME_CHECKPOINT]: handleSessionResume,
+        [PHASE_START_CHECKPOINT]: handlePhaseStart,
+        [TASK_START_CHECKPOINT]: (a, ar) => handleTaskStart(a, ar, config),
+      };
 
-        if (!result.ok) {
-          process.stderr.write(formatError(result.error) + "\n");
-          process.exitCode = exitCode(result.error);
-          return;
-        }
-
-        if (args.json) {
-          console.log(JSON.stringify(result.value, null, 2));
-        } else {
-          console.log(result.value.feed);
-        }
-        process.exitCode = 0;
-        return;
-      }
-
-      if (args.checkpoint === PHASE_START_CHECKPOINT) {
-        if (typeof args.phase !== "string" || args.phase.length === 0) {
-          process.stderr.write(
-            "Error: `lore feed phase-start <phase>` requires a phase document ID or slug.\n",
-          );
-          process.exitCode = 2;
-          return;
-        }
-
-        const deps = buildPhaseFeedFlowDeps(app);
-        const result = await buildPhaseStartPack(deps, args.phase);
-
-        if (!result.ok) {
-          process.stderr.write(formatError(result.error) + "\n");
-          process.exitCode = exitCode(result.error);
-          return;
-        }
-
-        if (args.json) {
-          console.log(JSON.stringify(result.value, null, 2));
-        } else {
-          renderPhaseStartPack(result.value);
-        }
-        process.exitCode = 0;
+      const handler = specialHandlers[args.checkpoint as string];
+      if (handler !== undefined) {
+        await handler(app, args);
         return;
       }
 
@@ -170,7 +239,7 @@ export default defineCommand({
 });
 
 /** Renders a phase-start pack's four sections to stdout, plus a truncation notice when any section was clipped. */
-function renderPhaseStartPack(pack: PhaseStartPack): void {
+function renderPhaseStartPackText(pack: PhaseStartPack): void {
   console.log(`# Phase start — ${pack.phase_id}\n`);
   console.log("## Scope");
   console.log(pack.sections.scope);
