@@ -22,6 +22,9 @@
  *   - deriveSessions(tasks, nowIso, ttlMinutes) — groups FRESH claims by
  *     `(by, machine, worktree)`; the pure computation behind both `lore ready`'s
  *     per-plan `sessions[]` and `lore bootstrap`'s corpus-wide `active_sessions`
+ *   - deriveLastActivityAt(plan, tasks) — max `updated_at` across a plan and its
+ *     child tasks; populates each `bootstrap.active_plans[]` entry's required
+ *     `last_activity_at` (SPEC-069 §Design Decisions D6, D7)
  *
  * Invariants:
  *   - No IO, no wall-clock reads, no randomness — `renderHandoffContent` is deterministic:
@@ -236,11 +239,20 @@ export const bootstrapTaskCountsSchema = z.object({
   done: z.number().int().min(0),
 });
 
-/** One non-terminal plan's pointer + task readiness snapshot. */
+/**
+ * One non-terminal plan's pointer + task readiness snapshot.
+ *
+ * @invariant `last_activity_at` is REQUIRED (SPEC-069 §Design Decisions D7) —
+ *   fail-loud: a caller that forgets to populate it throws at
+ *   `bootstrapReportSchema.parse` (the same self-check that guards
+ *   `active_sessions`, review S6) rather than silently stripping the field.
+ *   Populated exclusively by {@link deriveLastActivityAt}.
+ */
 export const bootstrapActivePlanSchema = z.object({
   slug: z.string(),
   title: z.string(),
   task_counts: bootstrapTaskCountsSchema,
+  last_activity_at: z.string(),
 });
 
 /** The draft-status review queue's size + a bounded slug sample (never the full queue). */
@@ -403,6 +415,45 @@ export function deriveSessions(tasks: DocRecord[], nowIso: string, ttlMinutes: n
       newest_at: g.newest_at,
     };
   });
+}
+
+/**
+ * Max `updated_at` across a plan doc and its child tasks (SPEC-069 §Design
+ * Decisions D6) — the last corpus write anywhere in the plan's subtree. Pure,
+ * total: no IO, no wall-clock reads, no store lookups — `plan.updated_at` and
+ * every `tasks[].updated_at` are ISO-8601 UTC strings, which compare
+ * correctly under plain lexicographic `>` (no `Date` parsing needed).
+ *
+ * @invariant Deliberately over-inclusive: ANY mutation counts — claim,
+ *   evidence, release, or a plain title/content edit — not execution activity
+ *   specifically. `release` clears a claim, making claim/evidence timestamps
+ *   alone insufficient (activity would go invisible the instant a task is
+ *   released); `updated_at` bounds every write and always exists on both the
+ *   plan and each task, which is what makes this function total. Over-
+ *   reporting is the safe direction here: a fresh session skipping one
+ *   plan that turns out to be idle costs far less than two sessions
+ *   colliding on the same live plan.
+ * @invariant Totality: zero tasks still returns `plan.updated_at` — there is
+ *   no undefined/null case to handle at call sites.
+ *
+ * @param plan - The plan doc itself.
+ * @param tasks - The plan's child task docs (may be empty).
+ * @returns The lexicographically greatest `updated_at` among `plan` and `tasks`.
+ * @example
+ * deriveLastActivityAt(
+ *   { updated_at: "2026-07-20T00:00:00.000Z", ... } as DocRecord,
+ *   [{ updated_at: "2026-07-23T00:00:00.000Z", ... } as DocRecord],
+ * ); // => "2026-07-23T00:00:00.000Z" (a task's activity outpaces the plan's own)
+ * @example
+ * deriveLastActivityAt({ updated_at: "2026-07-20T00:00:00.000Z", ... } as DocRecord, []);
+ * // => "2026-07-20T00:00:00.000Z" (totality — no tasks, falls back to the plan itself)
+ */
+export function deriveLastActivityAt(plan: DocRecord, tasks: DocRecord[]): string {
+  let latest = plan.updated_at;
+  for (const task of tasks) {
+    if (task.updated_at > latest) latest = task.updated_at;
+  }
+  return latest;
 }
 
 export const bootstrapReportSchema = z.object({

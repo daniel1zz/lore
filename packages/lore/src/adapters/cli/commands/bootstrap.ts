@@ -22,7 +22,7 @@
 import { defineCommand } from "citty";
 import type { BootstrapReport } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, resolveActor } from "../utils.js";
+import { exitCode, formatError, relativeTime, resolveActor } from "../utils.js";
 import { buildStalenessFlowDeps, listFreshStalenessEscalates } from "../../../flows/staleness-flow.js";
 import { buildListSpecs, countArmedSpecs } from "../../../flows/drift-flow.js";
 
@@ -66,7 +66,8 @@ export function formatBootstrapReport(report: BootstrapReportWithStaleness, by: 
     for (const plan of report.active_plans) {
       lines.push(
         `  - ${plan.slug} "${plan.title}" — ready ${plan.task_counts.ready}, ` +
-          `claimed ${plan.task_counts.claimed}, done ${plan.task_counts.done}`,
+          `claimed ${plan.task_counts.claimed}, done ${plan.task_counts.done}, ` +
+          `last activity ${relativeTime(plan.last_activity_at)}`,
       );
     }
   } else {
