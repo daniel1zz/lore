@@ -25,6 +25,15 @@
  * `../cli/phase-wiring.js::getPhaseStatus`. lore_evidence_add gains optional
  * checklist_ref and target-type dispatch (task vs phase, mirrors the CLI's
  * `lore evidence` retry-based dispatch).
+ * + no new tool for SPEC-070 (deterministic task-dispatch bundle, §Design D8):
+ * lore_feed gains `phase`/`task` optional fields and two dedicated dispatch
+ * branches — checkpoint "phase-start" now returns the REAL PhaseStartPack (closes
+ * the SPEC-056 deferred phase-start MCP gap — it previously fell through to the
+ * generic advisory note) and checkpoint "task-start" returns the REAL TaskStartPack,
+ * both via the SAME wiring (`../cli/phase-wiring.js::buildPhaseFeedFlowDeps`,
+ * `../cli/task-feed-wiring.js::buildTaskFeedFlowDeps`) the CLI `lore feed
+ * phase-start`/`lore feed task-start` dispatches call, so CLI/MCP payloads are
+ * deep-equal by construction.
  *
  * Architecture: Tools with input use the `registerToolWithArgs` helper defined below, which:
  *   1. Calls `server.tool(name, desc, handler)` in 3-arg form (avoids ZodRawShapeCompat type bomb)
@@ -66,6 +75,9 @@ import { REVIEW_PROMPT_VERSION } from "../../ai/review-template.js";
 import { CORPUS_SCHEMA_INFO } from "./schema-info.js";
 import { runCalibrationHook } from "../../flows/calibration-hook.js";
 import { buildFeed, buildResumeFeed, SESSION_RESUME_CHECKPOINT } from "../../flows/feed-flow.js";
+import { buildPhaseStartPack, PHASE_START_CHECKPOINT } from "../../flows/phase-feed-flow.js";
+import { buildTaskStartPack, TASK_START_CHECKPOINT } from "../../flows/task-feed-flow.js";
+import { buildTaskFeedFlowDeps } from "../cli/task-feed-wiring.js";
 import { createWithSupersedes, renderSupersedeRepairMessage } from "../../flows/supersede-flow.js";
 import { computeValidityState } from "../../flows/validity-state.js";
 import {
@@ -79,7 +91,7 @@ import { buildDriftFlowDeps, buildListSpecs, countArmedSpecs, runDrift } from ".
 import { loadTreeBlueprint } from "../../flows/blueprint-flow.js";
 import { buildRealFsProbe } from "../real-fs-probe.js";
 import { buildAssessSummaryText } from "./assess-render.js";
-import { requirePhaseWorkflowService, getPhaseStatus } from "../cli/phase-wiring.js";
+import { requirePhaseWorkflowService, getPhaseStatus, buildPhaseFeedFlowDeps } from "../cli/phase-wiring.js";
 
 // ─── Schema Constants ────────────────────────────────────────────────────────
 // Each schema is a `z.object(...)` instance (AnySchema), NOT an inline ZodRawShape literal.
@@ -515,14 +527,20 @@ export const LoreVerifySchema = z.object({
 
 /**
  * Input schema for lore_feed (IoC vertical-slice tech-spec §4.1/§11, P4 slice;
- * extended by SPEC-041 §3 D5 for the session-resume dispatch).
+ * extended by SPEC-041 §3 D5 for the session-resume dispatch; extended by SPEC-056
+ * for the phase-start dispatch; extended by SPEC-070 §Design Decisions D8 for the
+ * task-start dispatch).
  * `checkpoint` — e.g. `"spec-create"`, mapped to a produced-type via
  * `CHECKPOINT_PRODUCED_TYPE` (`../../flows/feed-flow.js`). `parent_id_or_slug` —
  * optional intended-parent doc whose MDX-resolved summary is included in the feed
  * when supplied, mirroring the CLI's `--parent`. `plan`/`handoff`/`by` are only
  * meaningful when `checkpoint === "session-resume"` — forwarded verbatim to
  * `SessionService.resume` via `buildResumeFeed`, mirroring the CLI's
- * `--plan`/`--handoff`/`--by`.
+ * `--plan`/`--handoff`/`--by`. `phase` is only meaningful when
+ * `checkpoint === "phase-start"` — the target phase document id/slug, mirroring the
+ * CLI's `lore feed phase-start <phase>` positional. `task` is only meaningful when
+ * `checkpoint === "task-start"` — the target task document id/slug, mirroring the
+ * CLI's `lore feed task-start <task>` positional.
  */
 export const LoreFeedSchema = z.object({
   checkpoint: z.string(),
@@ -530,6 +548,8 @@ export const LoreFeedSchema = z.object({
   plan: z.string().optional(),
   handoff: z.string().optional(),
   by: z.string().optional(),
+  phase: z.string().optional(),
+  task: z.string().optional(),
 });
 
 /**
@@ -1504,13 +1524,15 @@ export function registerTools(server: McpServer, app: App): void {
   );
 
   // ── IoC vertical-slice tech-spec §4.1/§11 P4: feed-before-produce PULL ────
-  // (extended by SPEC-041 §3 D5 for the session-resume dispatch)
+  // (extended by SPEC-041 §3 D5 for the session-resume dispatch; extended by
+  // SPEC-056 for the phase-start dispatch; extended by SPEC-070 §Design
+  // Decisions D8 for the task-start dispatch)
 
   // lore_feed
   registerToolWithArgs(
     server,
     "lore_feed",
-    'Feed-before-produce PULL: return the governing skill\'s rule slice for a checkpoint ahead of writing (advisory only, never a gate — always succeeds); checkpoint "session-resume" dispatches to SPEC-041 S2 resume instead (can fail on an unresolvable plan/handoff target)',
+    'Feed-before-produce PULL: return the governing skill\'s rule slice for a checkpoint ahead of writing (advisory only, never a gate — always succeeds); checkpoint "session-resume" dispatches to SPEC-041 S2 resume, "phase-start" to the SPEC-056 phase-start pack, and "task-start" to the SPEC-070 task-start pack instead (each of the three CAN fail on an unresolvable target)',
     LoreFeedSchema,
     async (args) => {
       if (args.checkpoint === SESSION_RESUME_CHECKPOINT) {
@@ -1519,6 +1541,45 @@ export function registerTools(server: McpServer, app: App): void {
           ...(args.handoff !== undefined ? { handoff: args.handoff } : {}),
           ...(args.by !== undefined ? { by: args.by } : {}),
         });
+        if (!result.ok) return errorContent(result.error);
+        return textContent(result.value);
+      }
+
+      // SPEC-070 §Design Decisions D8: closes the SPEC-056 deferred phase-start MCP
+      // gap — without this branch, checkpoint "phase-start" fell through to the
+      // generic buildFeed path below, which has no CHECKPOINT_PRODUCED_TYPE entry
+      // for "phase-start" and so degraded to a one-line "unknown checkpoint" note
+      // instead of the real PhaseStartPack the CLI's `lore feed phase-start` renders.
+      if (args.checkpoint === PHASE_START_CHECKPOINT) {
+        if (args.phase === undefined) {
+          return errorContent({
+            code: "VALIDATION_ERROR",
+            field: "phase",
+            message: 'checkpoint "phase-start" requires a `phase` document id or slug',
+          });
+        }
+        const deps = buildPhaseFeedFlowDeps(app);
+        const result = await buildPhaseStartPack(deps, args.phase);
+        if (!result.ok) return errorContent(result.error);
+        return textContent(result.value);
+      }
+
+      // SPEC-070 §Design Decisions D1, D8: mirrors the CLI's `lore feed task-start
+      // <task>` dedicated dispatch — the SAME buildTaskFeedFlowDeps/buildTaskStartPack
+      // construction, so CLI --json and this tool's response are deep-equal by
+      // construction for identical corpus state. Budgets are omitted (falls back to
+      // DEFAULT_TASK_START_BUDGETS) — MCP carries no parsed LoreConfig, same
+      // documented limitation as lore_staleness_probe's limit/min_age_days fallback.
+      if (args.checkpoint === TASK_START_CHECKPOINT) {
+        if (args.task === undefined) {
+          return errorContent({
+            code: "VALIDATION_ERROR",
+            field: "task",
+            message: 'checkpoint "task-start" requires a `task` document id or slug',
+          });
+        }
+        const deps = buildTaskFeedFlowDeps(app);
+        const result = await buildTaskStartPack(deps, args.task);
         if (!result.ok) return errorContent(result.error);
         return textContent(result.value);
       }
