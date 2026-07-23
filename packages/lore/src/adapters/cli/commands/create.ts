@@ -11,6 +11,14 @@
  *               BOTH flags is reported in ONE exit-2 message
  *               (`create-task-validation.ts::checkTaskCreateRequiredFlags`),
  *               not two separate round trips. Source: SPEC-065 D4.
+ *               EXCEPTION: --adhoc (SPEC-069 D2) makes --plan-id/--parent
+ *               BOTH optional — an ad-hoc task is deliberately planless and
+ *               parents to the corpus root PRD instead (resolved service-side,
+ *               CorpusService._createImpl). --adhoc is mutually exclusive with
+ *               --plan-id/--phase (nothing plan-scoped to declare) and with
+ *               --linkage (which JUSTIFIES a CHOSEN plan attachment — SPEC-069
+ *               D3 — the opposite of "no plan"), checked in the SAME
+ *               single-pass validation (`checkTaskCreateAdhocConflicts`).
  *
  * Type-specific OPTIONAL flags:
  *   spec      → --kind (feature|tech|design); defaults to "feature" when omitted
@@ -53,7 +61,9 @@ import type { DocType, KnowledgeSubType, LoreError, Priority } from "@lore/core"
 import { KNOWLEDGE_SUB_TYPES, SPEC_KINDS } from "@lore/core";
 import { createWithSupersedes, renderSupersedeRepairMessage } from "../../../flows/supersede-flow.js";
 import {
+  checkTaskCreateAdhocConflicts,
   checkTaskCreateRequiredFlags,
+  formatTaskCreateAdhocConflictError,
   formatTaskCreateMissingFlagsError,
   inferTaskParentId,
 } from "../create-task-validation.js";
@@ -89,6 +99,8 @@ const TYPE_SPECIFIC_FLAGS: Readonly<Record<string, readonly DocType[]>> = {
   anchor: ["task"],
   "code-anchor": ["spec"],
   "requires-uat": ["plan"],
+  adhoc: ["task"],
+  linkage: ["task"],
 };
 
 /** citty/mri yields a single string for one occurrence of a repeatable flag, an array for ≥2, or `undefined` for zero. Normalizes to a string array. */
@@ -173,6 +185,16 @@ export default defineCommand({
       type: "boolean",
       description:
         "[plan only] Declare that this plan requires a P0-accepted UAT verdict before it may be archived (SPEC-058 plan-promote requiresUat gate / SPEC-054 plan-close uatP0Accepted gate). Absent or --requires-uat=false leaves extra.requires_uat unset.",
+    },
+    adhoc: {
+      type: "boolean",
+      description:
+        "[task only] Create a planless task (extra.adhoc = true), parented to the corpus root PRD instead of a plan. Makes --plan-id/--parent both optional; mutually exclusive with --plan-id, --phase, and --linkage. Source: SPEC-069 D2",
+    },
+    linkage: {
+      type: "string",
+      description:
+        "[task only] Free-text justification for WHY this task is attached to --plan-id despite looking unrelated to the plan's declared scope — stored verbatim in extra.linkage and surfaced in lore assess scope-fidelity facts. Mutually exclusive with --adhoc. Source: SPEC-069 D3",
     },
     supersedes: {
       type: "string",
@@ -267,14 +289,26 @@ export default defineCommand({
       }
     }
 
-    // SPEC-065 D4: single-pass required-flag aggregation — reports BOTH a
-    // missing --plan-id AND a missing --parent in ONE exit-2 message instead
-    // of the pre-D4 two-round-trip discovery (P1-5 dogfood finding).
+    // SPEC-065 D4 (extended by SPEC-069 D2/D3/D4): single-pass validation —
+    // reports every --adhoc mutual-exclusion conflict AND every missing
+    // required flag together, never a two-round-trip discovery (P1-5 dogfood
+    // finding). Conflicts are checked FIRST: a --adhoc + --plan-id caller
+    // should see the conflict, not a (misleading, since --adhoc alone needs
+    // neither) missing-flags message.
     if (docType === "task") {
-      const missingTaskFlags = checkTaskCreateRequiredFlags({
+      const taskCreateFlags = {
         planId: args["plan-id"] as string | undefined,
         parent: args.parent,
-      });
+        adhoc: args.adhoc as boolean | undefined,
+        phase: args.phase,
+        linkage: args.linkage as string | undefined,
+      };
+      const adhocConflicts = checkTaskCreateAdhocConflicts(taskCreateFlags);
+      if (adhocConflicts.length > 0) {
+        process.stderr.write(formatTaskCreateAdhocConflictError(adhocConflicts) + "\n");
+        process.exit(2);
+      }
+      const missingTaskFlags = checkTaskCreateRequiredFlags(taskCreateFlags);
       if (missingTaskFlags.length > 0) {
         process.stderr.write(formatTaskCreateMissingFlagsError(missingTaskFlags) + "\n");
         process.exit(2);
@@ -436,6 +470,8 @@ export default defineCommand({
         normalizeRepeatable(args.anchor),
         normalizeRepeatable(args["code-anchor"]),
         args["requires-uat"] as boolean | undefined,
+        args.adhoc as boolean | undefined,
+        args.linkage as string | undefined,
       );
 
       // SPEC-065 D4: --parent defaults to the (already-resolved) --plan-id when
@@ -544,6 +580,14 @@ export default defineCommand({
  * For plans: includes requires_uat ONLY when --requires-uat was passed AND true
  * (SPEC-058 hotfix) — `--requires-uat=false` or an omitted flag both leave the
  * plan's extra undefined, byte-identical to pre-hotfix behavior (REGRESSION).
+ * For tasks (SPEC-069 D2/D3): includes adhoc ONLY when --adhoc was passed AND
+ * true (extra.adhoc = true; `--adhoc=false`/omitted leaves it unset, same
+ * "only-true-is-meaningful" shape as requires_uat above) and linkage ONLY
+ * when --linkage was passed (stored VERBATIM — no trim, unlike phase, since
+ * this is free-text justification prose, not a lookup key). An --adhoc task
+ * has no planId, so the extra-object branch below fires on `adhoc === true`
+ * as an ALTERNATIVE to the pre-SPEC-069 `planId !== undefined` gate, not a
+ * replacement of it — a --plan-id task without --adhoc is unaffected.
  */
 function buildExtra(
   docType: DocType,
@@ -555,6 +599,8 @@ function buildExtra(
   anchors?: string[],
   codeAnchors?: string[],
   requiresUat?: boolean,
+  adhoc?: boolean,
+  linkage?: string,
 ): Record<string, unknown> | undefined {
   if (docType === "adr" && decisionStatus !== undefined) {
     return { decision_status: decisionStatus };
@@ -562,8 +608,11 @@ function buildExtra(
   if (docType === "knowledge" && subType !== undefined) {
     return { sub_type: subType };
   }
-  if (docType === "task" && planId !== undefined) {
-    const extra: Record<string, unknown> = { plan_id: planId };
+  if (docType === "task" && (planId !== undefined || adhoc === true)) {
+    const extra: Record<string, unknown> = {};
+    if (planId !== undefined) extra["plan_id"] = planId;
+    if (adhoc === true) extra["adhoc"] = true;
+    if (linkage !== undefined) extra["linkage"] = linkage;
     if (phase !== undefined) {
       extra["phase"] = phase.trim();
     }

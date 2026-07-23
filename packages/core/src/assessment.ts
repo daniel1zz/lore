@@ -34,7 +34,9 @@
  *     not schema-validated: an in-process function argument, not an external boundary)
  *   - computeAssessmentFacts(bundle, declaredCriteria, diffMeta?) — pure deterministic facts
  *     snapshot: AC coverage, per-task evidence completeness, AC-scope-vs-declared drift,
- *     knowledge-capture, and regression signals (SPEC-040 D1)
+ *     knowledge-capture, and regression signals (SPEC-040 D1); additionally task-level
+ *     `extra.linkage` justifications and the plan's attestation-floor exemption state
+ *     (SPEC-069 §Design Decisions D1/D3, `task_linkage`/`attestation_exemption`)
  *   - extractAssessmentJson(raw) — tolerant JSON extraction from raw AI text (fences, prose-wrapped)
  *   - truncateSection(text, maxChars) — single-section truncation primitive
  *   - clipTextToBudget(text, maxChars) — single-string, surrogate-pair-safe character clip
@@ -507,6 +509,32 @@ const knowledgeCaptureFactSchema = z.object({
 });
 
 /**
+ * One task's `extra.linkage` justification (SPEC-069 §Design Decisions D3) — the
+ * free-text explanation of WHY an `--linkage`-created task is attached to this plan
+ * despite looking unrelated to its declared scope. Only tasks that actually carry a
+ * non-empty `extra.linkage` appear here (an omission-based "unavailable" state would
+ * be noise on the many plans with zero `--linkage` tasks — mirrors this module's
+ * `knowledge_capture.source: "unavailable"` distinction being reserved for a
+ * genuinely different situation: bundle assembly predating T2, not "nothing to say").
+ */
+const taskLinkageFactSchema = z.object({
+  task_id: z.string(),
+  linkage: z.string(),
+});
+
+/**
+ * Plan-level attestation-floor exemption fact (SPEC-069 §Design Decisions D1, consumed
+ * here per D1's own text: "exemption is visible in `lore assess` facts either way").
+ * `exempt: false` (with `reason` omitted) is the default, non-exempted state — this
+ * field is ALWAYS present (unlike `scope`, which is spec-presence-gated) since
+ * exemption is a plan-level fact independent of whether the plan has a spec parent.
+ */
+const attestationExemptionFactSchema = z.object({
+  exempt: z.boolean(),
+  reason: z.string().optional(),
+});
+
+/**
  * Regression signals derived from an optional pre-classified diff and the bundle's
  * aggregate evidence attestation.
  */
@@ -526,6 +554,16 @@ const regressionFactsSchema = z.object({
  *
  * @invariant `scope` is present iff the bundle has a spec (`bundle.spec !== undefined`);
  *   a spec-less bundle yields `scope: undefined`, never a thrown error (AC-ADF-10).
+ * @invariant `task_linkage` and `attestation_exemption` (SPEC-069 §Design Decisions
+ *   D1/D3, AC-069-4/AC-069-6) are `.optional()` at the SCHEMA layer ONLY for
+ *   backward compatibility — a pre-SPEC-069 persisted `facts` object (SPEC-040-era,
+ *   missing these two keys entirely) must still `safeParse` successfully, the same
+ *   additive-field discipline `dimension_scores`/`typed_gaps`/`unverifiable`/
+ *   `rubric_warning` already established on the LLM output side. {@link
+ *   computeAssessmentFacts} itself ALWAYS populates both for every NEW facts
+ *   snapshot it computes (`task_linkage: []` / `attestation_exemption: {exempt:
+ *   false}` are the "nothing to report" states, never an omitted key) — unlike
+ *   `scope`, which genuinely IS absent for a spec-less bundle (AC-ADF-10).
  */
 export const assessmentFactsSchema = z.object({
   ac_coverage: z.array(acCoverageFactSchema),
@@ -533,6 +571,8 @@ export const assessmentFactsSchema = z.object({
   scope: acScopeFactsSchema.optional(),
   knowledge_capture: knowledgeCaptureFactSchema,
   regression: regressionFactsSchema,
+  task_linkage: z.array(taskLinkageFactSchema).optional(),
+  attestation_exemption: attestationExemptionFactSchema.optional(),
 });
 
 /** Derived TypeScript type for the D1 facts snapshot. */
@@ -835,6 +875,39 @@ function extractAcScope(plan: DocRecord): string[] {
 }
 
 /**
+ * Defensive `task.extra.linkage` accessor (SPEC-069 §Design Decisions D3) — returns
+ * the verbatim justification string, or `undefined` when absent/empty/non-string.
+ * Mirrors `extractAcScope`'s defensive-read shape immediately above (extra is
+ * untyped storage; never throws).
+ */
+function extractTaskLinkage(task: DocRecord): string | undefined {
+  const extra: unknown = task.extra;
+  if (extra === null || typeof extra !== "object" || Array.isArray(extra)) return undefined;
+  const raw = (extra as Record<string, unknown>)["linkage"];
+  return typeof raw === "string" && raw.length > 0 ? raw : undefined;
+}
+
+/**
+ * Defensive `plan.extra.attestation_exempt` (+ sibling `attestation_exempt_reason`)
+ * accessor (SPEC-069 §Design Decisions D1) — the plan-close attestation floor's
+ * escape hatch. `exempt: false` (reason omitted) for every plan that doesn't
+ * explicitly carry `extra.attestation_exempt === true`; never throws.
+ */
+function extractAttestationExemption(plan: DocRecord): { exempt: boolean; reason?: string } {
+  const extra: unknown = plan.extra;
+  if (extra === null || typeof extra !== "object" || Array.isArray(extra)) {
+    return { exempt: false };
+  }
+  const record = extra as Record<string, unknown>;
+  if (record["attestation_exempt"] !== true) return { exempt: false };
+  const reasonRaw = record["attestation_exempt_reason"];
+  return {
+    exempt: true,
+    ...(typeof reasonRaw === "string" && reasonRaw.length > 0 ? { reason: reasonRaw } : {}),
+  };
+}
+
+/**
  * Computes {@link AssessmentFacts} — a deterministic, creation-time-frozen snapshot of
  * facts about a plan's execution, independent of anything a judge prompt may have
  * truncated (AC-ADF-10). Never throws.
@@ -893,11 +966,20 @@ export function computeAssessmentFacts(
     attested_evidence_ratio: totalEvidence === 0 ? 0 : totalAttested / totalEvidence,
   };
 
+  const taskLinkage = bundle.tasks
+    .map((task) => {
+      const linkage = extractTaskLinkage(task);
+      return linkage === undefined ? undefined : { task_id: task.id, linkage };
+    })
+    .filter((entry): entry is { task_id: string; linkage: string } => entry !== undefined);
+
   const facts: AssessmentFacts = {
     ac_coverage: acCoverage,
     task_evidence: taskEvidence,
     knowledge_capture: knowledgeCapture,
     regression,
+    task_linkage: taskLinkage,
+    attestation_exemption: extractAttestationExemption(bundle.plan),
   };
 
   // reason: exactOptionalPropertyTypes forbids `scope: undefined` — the key must be

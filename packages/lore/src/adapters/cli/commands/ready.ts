@@ -1,11 +1,12 @@
 /**
- * lore ready <plan> — computed readiness report over a plan's tasks.
+ * lore ready <plan> | lore ready --adhoc — computed readiness report.
  *
- * A task is ready iff its status is not archived/deprecated AND every blocker
- * (doc on the `from` side of a `blocks` link targeting it) has status archived.
- * Never stored — recomputed on every call (D3). Human rendering groups by phase
- * when the plan declares phases (D9 — the flat data shape is grouped here, at
- * the CLI presentation layer only).
+ * `<plan>` mode: readiness over a plan's tasks. A task is ready iff its status
+ * is not archived/deprecated AND every blocker (doc on the `from` side of a
+ * `blocks` link targeting it) has status archived. Never stored — recomputed
+ * on every call (D3). Human rendering groups by phase when the plan declares
+ * phases (D9 — the flat data shape is grouped here, at the CLI presentation
+ * layer only).
  *
  * When the plan's parent spec is not "approved" (SPEC-032 §3.4), every record
  * carries `upstream_unapproved: true` — readiness/exit codes are unaffected; a
@@ -21,9 +22,20 @@
  * flat array — see `ReadyReport`'s own JSDoc for why a wrapper object was
  * chosen over bolting extra properties onto an array).
  *
- * Exit codes: 0 = success, 3 = DOC_NOT_FOUND, 4 = VALIDATION_ERROR (not a plan).
+ * `--adhoc` mode (SPEC-069 §Design Decisions D2, AC-069-7): mutually
+ * exclusive with `<plan>` (a corpus-wide, plan-less listing has no plan
+ * positional to resolve). Lists every OPEN (non-terminal) `extra.adhoc ===
+ * true` task, thin pipe over `TaskWorkflowService.readyAdhoc` — a planless
+ * task is otherwise invisible to `lore ready`, which is exactly the gap D2
+ * closes. `--json` prints `{records: ReadyRecord[]}` under `data.adhoc` — no
+ * `sessions`/`anchor_conflicts` (those are plan-scoped SPEC-042 D7 concepts
+ * that don't apply to a plan-less listing).
  *
- * Source: SPEC-025 §4 AC-WF-7, AC-WF-8; SPEC-032 §3.4; SPEC-042 §Design Decisions D7
+ * Exit codes: 0 = success, 2 = usage error (`<plan>`/`--adhoc` both or
+ * neither passed), 3 = DOC_NOT_FOUND, 4 = VALIDATION_ERROR (not a plan).
+ *
+ * Source: SPEC-025 §4 AC-WF-7, AC-WF-8; SPEC-032 §3.4; SPEC-042 §Design Decisions D7;
+ *         SPEC-069 §Design Decisions D2, AC-069-7
  */
 
 import { defineCommand } from "citty";
@@ -79,8 +91,13 @@ export default defineCommand({
   args: {
     plan: {
       type: "positional",
-      description: "Plan document ID or slug",
-      required: true,
+      description: "Plan document ID or slug. Omit when passing --adhoc.",
+      required: false,
+    },
+    adhoc: {
+      type: "boolean",
+      description:
+        "List OPEN (non-terminal) ad-hoc (planless) tasks corpus-wide instead of a plan's readiness. Mutually exclusive with <plan>. Source: SPEC-069 D2",
     },
     json: {
       type: "boolean",
@@ -88,8 +105,45 @@ export default defineCommand({
     },
   },
   async run({ args }) {
+    const hasPlan = args.plan !== undefined && String(args.plan).trim() !== "";
+    const hasAdhoc = args.adhoc === true;
+
+    if (hasPlan && hasAdhoc) {
+      process.stderr.write("Error: <plan> and --adhoc are mutually exclusive. Pass only one.\n");
+      process.exitCode = 2;
+      return;
+    }
+    if (!hasPlan && !hasAdhoc) {
+      process.stderr.write("Error: a plan document ID or slug is required unless --adhoc is passed.\n");
+      process.exitCode = 2;
+      return;
+    }
+
     const { app } = loadLoreApp();
     try {
+      if (hasAdhoc) {
+        const adhocResult = await app.taskWorkflowService.readyAdhoc();
+        if (!adhocResult.ok) {
+          process.stderr.write(formatError(adhocResult.error) + "\n");
+          process.exitCode = exitCode(adhocResult.error);
+          return;
+        }
+        const records = adhocResult.value;
+
+        if (args.json) {
+          console.log(JSON.stringify({ ok: true, data: { adhoc: { records } } }, null, 2));
+          return;
+        }
+
+        if (records.length === 0) {
+          console.log("No open ad-hoc tasks.");
+        } else {
+          console.log(`Ad-hoc tasks (${records.length}):`);
+          for (const record of records) console.log(formatReadyLine(record));
+        }
+        return;
+      }
+
       const result = await app.taskWorkflowService.ready(args.plan as string);
 
       if (!result.ok) {
