@@ -11,10 +11,11 @@ import { parse as parseYaml } from "yaml";
 import { ulid } from "ulidx";
 import { err, ok, splitFrontmatter } from "@lore/core";
 import { slugify, slugifyWithCollision } from "@lore/core";
-// reason: transliterateCjk (SPEC-066 D1) is Node-only-subpath-gated purely for the
-// browser-safety barrel-isolation invariant (packages/core/src/CLAUDE.md) — this
-// service file is always server-side, same precedent config-service.ts already set.
-import { transliterateCjk } from "@lore/core/node";
+// reason: getTransliterateCjk/containsCjk (SPEC-068 D1, hotfix 2026-07-23) are
+// Node-only-subpath-gated purely for the browser-safety barrel-isolation
+// invariant (packages/core/src/CLAUDE.md) — this service file is always
+// server-side, same precedent config-service.ts already set.
+import { containsCjk, getTransliterateCjk } from "@lore/core/node";
 import type { LoreError, Result } from "@lore/core";
 import type {
   DocId,
@@ -322,11 +323,16 @@ export class MigrationService {
         return r.ok && r.value !== null;
       };
 
+      // Only awaited when the title actually contains CJK — an ASCII-only
+      // title never pays the pinyin-pro load cost (SPEC-068 D1 hotfix).
+      // reason: exactOptionalPropertyTypes forbids `{ transliterate: undefined }`
+      // — omit the key entirely rather than spread an undefined-valued property.
+      const slugOpts = containsCjk(doc.title) ? { transliterate: await getTransliterateCjk() } : undefined;
       const slug = await slugifyWithCollision(
         mappingResult.type,
         doc.title,
         existingSlugsFn,
-        { transliterate: transliterateCjk },
+        slugOpts,
       );
 
       const extra = buildExtra(mappingResult, doc);

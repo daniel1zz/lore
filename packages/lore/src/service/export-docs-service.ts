@@ -95,10 +95,11 @@ import {
   DOC_TYPE_ROLE_MAP,
   splitFrontmatter,
 } from "@lore/core";
-// reason: transliterateCjk (SPEC-066 D1) is Node-only-subpath-gated purely for the
-// browser-safety barrel-isolation invariant (packages/core/src/CLAUDE.md) — this
-// service file is always server-side, same precedent config-service.ts already set.
-import { transliterateCjk } from "@lore/core/node";
+// reason: getTransliterateCjk/containsCjk (SPEC-068 D1, hotfix 2026-07-23) are
+// Node-only-subpath-gated purely for the browser-safety barrel-isolation
+// invariant (packages/core/src/CLAUDE.md) — this service file is always
+// server-side, same precedent config-service.ts already set.
+import { containsCjk, getTransliterateCjk } from "@lore/core/node";
 import type {
   LoreError,
   Result,
@@ -285,7 +286,7 @@ export class ExportDocsService {
     if (!docsResult.ok) return docsResult;
     const allDocs = docsResult.value;
 
-    const indexResult = buildOrExtendIndex(indexPath, docsBaseDir, allDocs, opts.projectDir);
+    const indexResult = await buildOrExtendIndex(indexPath, docsBaseDir, allDocs, opts.projectDir);
     if (!indexResult.ok) return indexResult;
     const { index, repaired } = indexResult.value;
 
@@ -568,12 +569,12 @@ function maxNumberForPrefix(prefix: string, humanIds: string[]): number {
  * @param projectDir - Absolute project root (for resolving file_path during self-heal).
  * @returns ok({index, repaired}) with all docs mapped; err on allocation exhaustion or store failure.
  */
-function buildOrExtendIndex(
+async function buildOrExtendIndex(
   indexPath: string,
   docsBaseDir: string,
   docs: DocRecord[],
   projectDir: string,
-): Result<{ index: ExportIndex; repaired: string[] }, LoreError> {
+): Promise<Result<{ index: ExportIndex; repaired: string[] }, LoreError>> {
   const index = loadIndex(indexPath);
 
   // Self-heal BEFORE seeding counters/usedFilePaths so repaired (stripped) doc ids are
@@ -680,7 +681,12 @@ function buildOrExtendIndex(
     // Compute file name from human ID + slugified title (minus type prefix).
     // reason: slugify() produces "{type}-{kebab}" — strip the type prefix to get
     // just the kebab portion for the filename, keeping SPEC-025 prefix only from humanId.
-    const fullSlug = slugify(doc.type, doc.title, { transliterate: transliterateCjk });
+    // Only awaited when the title actually contains CJK — an ASCII-only title
+    // never pays the pinyin-pro load cost (SPEC-068 D1 hotfix). reason:
+    // exactOptionalPropertyTypes forbids `{ transliterate: undefined }` — omit
+    // the key entirely rather than spread an undefined-valued property.
+    const slugOpts = containsCjk(doc.title) ? { transliterate: await getTransliterateCjk() } : undefined;
+    const fullSlug = slugify(doc.type, doc.title, slugOpts);
     const typePrefix = `${doc.type}-`;
     const kebabPart = fullSlug.startsWith(typePrefix)
       ? fullSlug.slice(typePrefix.length)

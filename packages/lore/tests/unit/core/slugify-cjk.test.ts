@@ -12,11 +12,20 @@
  * Runner: vitest (no `bun:sqlite` — plain `@lore/core`/`@lore/core/node` imports).
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import { slugify, slugSchema } from "@lore/core";
-import { transliterateCjk } from "@lore/core/node";
+import { getTransliterateCjk } from "@lore/core/node";
 
 describe("slugify — SPEC-068 CJK transliteration + repair (D1-D4)", () => {
+  // `getTransliterateCjk()` is async (SPEC-068 hotfix 2026-07-23 — dynamic
+  // `import("pinyin-pro")`, compile-safe under `bun build --compile`); resolve
+  // the cached sync transliterator once, then pass it into `slugify`'s sync
+  // `opts.transliterate` hook the same way every production caller does.
+  let transliterateCjk: (text: string) => string;
+  beforeAll(async () => {
+    transliterateCjk = await getTransliterateCjk();
+  });
+
   it("AC-068-1: all-CJK title transliterates to a tone-less pinyin slug", () => {
     const title = "产品定位：内部圈子使用，功能强大优先于合规保守";
     const result = slugify("adr", title, { transliterate: transliterateCjk });
