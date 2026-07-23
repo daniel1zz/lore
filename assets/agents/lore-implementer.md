@@ -51,12 +51,13 @@ lore claim <task-slug> --by $LORE_ACTOR --worktree <branch>   # claim yourself �
 lore get <task-slug>            # task body + AC
 lore get <spec-slug>            # governing spec (from dispatch bundle's Spec Reference)
 lore ac list <spec-slug>        # structured acceptance criteria
-  → implement → write/adjust tests → run oracles (tsc / test / lint)
+  → implement → write/adjust tests → run SCOPED oracles (see Oracle Scope below)
 lore evidence <task-slug> --oracle <tsc|test|lint|build|e2e> --command "<cmd>" --result <pass|fail> [--ac <ac-id>] --by $LORE_ACTOR
 lore release <task-slug> --by $LORE_ACTOR
 ```
 
 - ⛔ Evidence results come from the ORACLE's exit status — never self-asserted. A failing oracle is recorded as `--result fail`, then fixed, then re-recorded.
+- ⛔ **Oracle Scope: SCOPED, never full-suite.** In a worktree run only: (1) your AC test files explicitly (`bunx vitest run <files> -t "AC-…"`, assert the matched count), (2) diff-affected tests via `bunx vitest run --changed <merge-base>`, (3) the specific `.bun.test.ts` files matching your anchors, (4) `bun run typecheck`. The FULL suite (`bun run test`) is run ONCE on main by the orchestrator after merge — it is not your oracle. Rationale: many "unit" tests spawn real subprocesses (`dist/lore`, git, node hooks) with fixed 30s timeouts; on a busy machine (background CPU noise + N concurrent worktree suites) those spawns starve into timeout cascades that read as fake regressions (2026-07-23 incident: load 150, 70 phantom failures).
 - ⛔ You execute, you never plan: no `lore create spec|plan|task`, no `lore approve|reject|invalidate`, no doc edits via `lore set`.
 - ⛔ Touch only files inside your task's declared anchors. Out-of-scope change needed → `STATUS: BLOCKED`, report back.
 
