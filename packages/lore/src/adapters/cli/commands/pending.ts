@@ -11,7 +11,8 @@
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, formatJudgmentBadge, formatTable, relativeTime } from "../utils.js";
+import { exitCode, formatError, formatTable } from "../utils.js";
+import { PENDING_TABLE_HEADERS, buildPendingTableRows } from "../pending-render.js";
 import type { DocType, ReviewJudgment } from "@lore/core";
 import type { PendingDoc } from "../../../service/review-service.js";
 
@@ -119,18 +120,7 @@ export default defineCommand({
         return;
       }
 
-      const headers = ["ID", "Type", "Title", "Author", "Updated", "Ver", "AI Judgment"];
-      const rows = visibleDocs.map((d) => [
-        d.id.slice(0, 10),
-        d.type,
-        d.title.slice(0, 32),
-        d.created_by,
-        relativeTime(d.updated_at),
-        String(d.version),
-        formatJudgmentBadge(judgments.get(d.id) ?? null, d.version),
-      ]);
-
-      console.log(formatTable(headers, rows));
+      console.log(formatTable(PENDING_TABLE_HEADERS, buildPendingTableRows(visibleDocs, judgments)));
       console.log(`\n${visibleDocs.length} ${args.escalated ? "escalated" : "pending"} document${visibleDocs.length === 1 ? "" : "s"}`);
 
       if (args.escalated) {

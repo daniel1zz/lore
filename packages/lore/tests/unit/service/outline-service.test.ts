@@ -608,6 +608,9 @@ describe("OutlineService.resolve", () => {
         }),
         find: (id) => store.find(id),
         findBySlug: (slug) => store.findBySlug(slug),
+        // reason: SPEC-065 D2 — new required StoreInterface method; mechanical
+        // addition (same class of fix as every other explicit delegate here).
+        findByIdPrefix: (prefix) => store.findByIdPrefix(prefix),
         // reason: N+1 batch fix — new required StoreInterface method; mechanical
         // addition (same class of fix as every other explicit delegate above).
         findByIds: (ids) => store.findByIds(ids),
