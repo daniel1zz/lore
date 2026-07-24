@@ -1,7 +1,9 @@
 /**
  * Root layout route — wraps all pages with the top navigation bar.
  * Purpose: persistent header with logo, search shortcut, and theme toggle.
- * Invariants: renders <Outlet /> for nested routes; no data fetching at root level.
+ * Invariants: renders <Outlet /> for nested routes; no data fetching at root level
+ *   beyond the SPEC-075 route-view telemetry ping (`useRouteTelemetry`, R-10) — a
+ *   fire-and-forget side effect, not a render-blocking fetch.
  */
 
 import { createRootRoute, Link, Outlet, useNavigate } from "@tanstack/react-router";
@@ -11,6 +13,7 @@ import { SearchBar } from "@/components/SearchBar";
 import { Badge } from "@/components/ui/badge";
 import { apiGetStatus } from "@/lib/api";
 import { useIssueReportsQuery } from "@/lib/issue-reports-query";
+import { useRouteTelemetry } from "@/lib/use-route-telemetry";
 
 export const Route = createRootRoute({
   component: RootLayout,
@@ -18,6 +21,11 @@ export const Route = createRootRoute({
 
 function RootLayout(): React.ReactElement {
   const navigate = useNavigate();
+  // reason: SPEC-075 R-10 — mounted once at the root so EVERY client-side
+  // navigation (home/library/tree/settings/issues/a doc detail page) records one
+  // route-view telemetry ping. Fire-and-forget (see apiPostRouteView's doc
+  // comment) — never blocks or errors this layout's render.
+  useRouteTelemetry();
   const { data: status } = useQuery({
     queryKey: ["status"],
     queryFn: apiGetStatus,

@@ -36,6 +36,7 @@ import {
   apiDeleteLink,
   apiDeleteDoc,
   apiRestoreVersion,
+  apiPostRouteView,
   DashboardApiError,
   ConflictError,
 } from "../../../src/api/mutations";
@@ -552,5 +553,66 @@ describe("regression — apiApproveDoc and apiRejectDoc", () => {
 
     const result = await apiCreateLink("from-id", { to: "to-id", type: "relates-to" });
     expect(result).toBeUndefined(); // apiCreateLink returns void
+  });
+});
+
+// ─── SPEC-075 D4: apiPostRouteView (fire-and-forget telemetry) ────────────────
+
+describe("apiPostRouteView", () => {
+  describe("happy path", () => {
+    it("POSTs route_id and doc_type with credentials: include", async () => {
+      (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+      await apiPostRouteView({ route_id: "/docs/abc", doc_type: "task" });
+
+      const call = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(call[0]).toBe("/api/dashboard/telemetry/route-view");
+      expect(call[1]?.method).toBe("POST");
+      expect(call[1]?.credentials).toBe("include");
+      const sentBody = JSON.parse((call[1] as RequestInit).body as string) as Record<string, unknown>;
+      expect(sentBody).toEqual({ route_id: "/docs/abc", doc_type: "task" });
+    });
+
+    it("resolves to undefined on a successful 204", async () => {
+      (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(new Response(null, { status: 204 }));
+      const result = await apiPostRouteView({ route_id: "/library" });
+      expect(result).toBeUndefined();
+    });
+  });
+
+  describe("negative", () => {
+    it("omits doc_type from the body when not supplied", async () => {
+      (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(new Response(null, { status: 204 }));
+      await apiPostRouteView({ route_id: "/library" });
+      const call = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+      const sentBody = JSON.parse((call[1] as RequestInit).body as string) as Record<string, unknown>;
+      expect(sentBody).toEqual({ route_id: "/library" });
+    });
+  });
+
+  describe("error — never throws (fire-and-forget)", () => {
+    it("swallows a network/timeout failure silently, never rejecting", async () => {
+      (global.fetch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("network down"));
+      await expect(apiPostRouteView({ route_id: "/docs/x" })).resolves.toBeUndefined();
+    });
+
+    it("swallows a non-2xx server response silently, never rejecting", async () => {
+      (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+        mockJsonResponse({ ok: false, error: { code: "VALIDATION_ERROR", message: "bad body" } }, 422),
+      );
+      await expect(apiPostRouteView({ route_id: "/docs/x" })).resolves.toBeUndefined();
+    });
+  });
+
+  describe("regression", () => {
+    it("never calls response.json() (fire-and-forget — no envelope parsing at all)", async () => {
+      const jsonSpy = vi.fn();
+      const fakeResponse = { ok: true, status: 204, json: jsonSpy } as unknown as Response;
+      (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(fakeResponse);
+
+      await apiPostRouteView({ route_id: "/tree" });
+
+      expect(jsonSpy).not.toHaveBeenCalled();
+    });
   });
 });

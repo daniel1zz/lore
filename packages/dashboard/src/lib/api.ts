@@ -5,7 +5,7 @@
  * Public surface: apiList, apiSearch, apiTree, apiGetDoc, apiGetStatus,
  *   apiGetJudgments, apiGetAuditForDoc, apiGetAuditVerify, apiGetCalibrationStats,
  *   apiGetPendingReview, apiGetReady, apiGetConfig, apiGetMachineConfig,
- *   apiGetIssueReports
+ *   apiGetIssueReports, apiGetEvidencePanel, evidencePanelQueryKey
  * Invariants: 5-second timeout via AbortSignal.timeout; never leaks raw Response objects.
  *   Throws ApiError on non-2xx or server-side { ok: false } — EXCEPT `apiGetReady`,
  *   which returns `Result<ReadyRecord[], ApiError>` per its SPEC-037 §2 contract
@@ -15,7 +15,8 @@
  *   SPEC-037 §2 (readiness route client); SPEC-062 §Design D3 / SPEC-064 §Design D6
  *   (config GET reads — both team and machine scope, available to cookie AND
  *   bearer sessions, mirroring every other read in this file — see
- *   `config-routes.ts`'s module header on the auth-surface split)
+ *   `config-routes.ts`'s module header on the auth-surface split); SPEC-075
+ *   §Module Boundary (evidence-panel projection read)
  */
 
 import type {
@@ -26,6 +27,7 @@ import type {
   DocType,
   DocTypeMeta,
   DocStatus,
+  EvidencePanelProjection,
   GlobalLoreConfig,
   LoreConfig,
   ReadyRecord,
@@ -635,4 +637,37 @@ export interface IssueReportsResponse {
  */
 export async function apiGetIssueReports(): Promise<IssueReportsResponse> {
   return fetchJson<IssueReportsResponse>("/api/issue-reports");
+}
+
+// ─── SPEC-075: dashboard adjudication workbench (evidence-panel read) ───────
+
+/**
+ * TanStack Query key for a doc's evidence-panel projection — a shared helper
+ * (not a bare literal) so `EvidenceTab` (self-contained fetch, mounted only
+ * when its tab is active) and `DocDetail` (fetches once for `AdjudicationBar`,
+ * mounted unconditionally in the header for in-review docs) resolve to the
+ * SAME cache entry — one network request when both are mounted, never two.
+ *
+ * @param idOrSlug - Document ULID or slug.
+ */
+export function evidencePanelQueryKey(idOrSlug: string): readonly [string, string] {
+  return ["evidence-panel", idOrSlug] as const;
+}
+
+/**
+ * Fetch the dashboard adjudication workbench's Evidence-tab projection for one
+ * doc (SPEC-075 §Module Boundary). Thin pipe over `GET /api/evidence-panel/:idOrSlug`
+ * — the response `data` field IS the `EvidencePanelProjection` discriminated
+ * union verbatim (`VerificationProjectionService.evidencePanel`,
+ * `packages/lore/src/service/verification-projection-service.ts`), no
+ * client-side re-shaping.
+ *
+ * @param idOrSlug - Document ULID, slug, or unique id-prefix.
+ * @returns The assembled projection, discriminated by `doc_type`.
+ * @throws {ApiError} On HTTP or network error (e.g. `DOC_NOT_FOUND` for an
+ *   unknown id, or `VALIDATION_ERROR` for the D9 phase-children-without-tasks
+ *   hierarchy-assumption violation).
+ */
+export async function apiGetEvidencePanel(idOrSlug: string): Promise<EvidencePanelProjection> {
+  return fetchJson<EvidencePanelProjection>(`/api/evidence-panel/${encodeURIComponent(idOrSlug)}`);
 }

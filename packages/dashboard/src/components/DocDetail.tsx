@@ -68,11 +68,22 @@
  *     `TaskExecution` (claim card + evidence timeline) above the
  *     parent/links footer, only when there's a claim or evidence to show
  *     (SPEC-037 D3).
+ *   - SPEC-075 R-8: an "Evidence" tab (alongside content/history/audit)
+ *     renders for `task`/`spec`/`plan` docs only (`showEvidenceTab`, mirrors
+ *     `VerificationProjectionService`'s own doc_type switch — everything
+ *     else has no evidence surface, tab button omitted entirely). An
+ *     `AdjudicationBar` (evidence-summary chips + approve/reject +
+ *     calibration note) renders in the header, same screen as the rest of
+ *     the doc, for any doc whose `status === "in-review"` — its panel data
+ *     is fetched once here (`evidencePanelQueryKey(doc.id)`) so the header
+ *     bar and the Evidence tab (when opened) share one cached fetch.
  * Side-effect class: IO (fetch, localStorage)
- * Source: SPEC-015, SPEC-022 §9.2, SPEC-027, SPEC-036 §1 D1/D3, SPEC-037 §1 D2/D3
+ * Source: SPEC-015, SPEC-022 §9.2, SPEC-027, SPEC-036 §1 D1/D3, SPEC-037 §1 D2/D3,
+ *   SPEC-075 §Module Boundary D7, R-8
  */
 
 import { useState, useCallback, useRef, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -84,6 +95,8 @@ import { StatusPill } from "@/components/StatusPill";
 import { LinksPanel } from "@/components/LinksPanel";
 import { HistoryTab } from "@/components/HistoryTab";
 import { AuditTab } from "@/components/AuditTab";
+import { EvidenceTab } from "@/components/EvidenceTab";
+import { AdjudicationBar } from "@/components/AdjudicationBar";
 import { ConflictModal } from "@/components/ConflictModal";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { PlanExecution } from "@/components/PlanExecution";
@@ -91,7 +104,8 @@ import { TaskExecution } from "@/components/TaskExecution";
 import { saveDraft, loadDraft, clearDraft, isDraftStale } from "@/store/draft";
 import { resolveEditBaseVersion } from "@/lib/edit-session";
 import type { DocWithNavigation } from "@/lib/api";
-import type { DocStatus, LinkType } from "@lore/core";
+import { apiGetEvidencePanel, evidencePanelQueryKey } from "@/lib/api";
+import type { DocRecord, DocStatus, LinkType } from "@lore/core";
 import { deriveTypeMeta, extractClaim, extractEvidence } from "@lore/core";
 import { cn } from "@/lib/utils";
 import { TYPE_ACCENT, TYPE_ACCENT_BORDER_CLASS } from "@/lib/type-accent";
@@ -163,6 +177,32 @@ function DeleteConfirmDialog({ title, isPending, onConfirm, onCancel }: DeleteCo
   );
 }
 
+// ─── AdjudicationBar data-fetching wrapper (SPEC-075 R-8) ─────────────────────
+
+interface AdjudicationBarSectionProps {
+  doc: DocRecord;
+  onMutated?: () => void;
+}
+
+/**
+ * Fetches the evidence-panel projection and renders `AdjudicationBar` once it
+ * resolves. Deliberately a SEPARATE component from `DocDetail` (not an inline
+ * `useQuery` call in `DocDetail`'s body) — `DocDetail` mounts this ONLY for
+ * `status === "in-review"` docs, so its `useQuery` (which requires a
+ * `QueryClientProvider` ancestor) is never invoked for any other status,
+ * keeping every non-in-review DocDetail render usable in read-only/unit-test
+ * contexts with no query provider (see the mount-site comment in `DocDetail`).
+ */
+function AdjudicationBarSection({ doc, onMutated }: AdjudicationBarSectionProps): React.ReactElement | null {
+  const { data } = useQuery({
+    queryKey: evidencePanelQueryKey(doc.id),
+    queryFn: () => apiGetEvidencePanel(doc.id),
+  });
+
+  if (data === undefined) return null;
+  return <AdjudicationBar doc={doc} panel={data} {...(onMutated !== undefined ? { onMutated } : {})} />;
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface DocDetailProps {
@@ -199,7 +239,7 @@ export interface DocDetailProps {
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
 
-type ActiveTab = "content" | "history" | "audit";
+type ActiveTab = "content" | "history" | "audit" | "evidence";
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -244,6 +284,13 @@ export function DocDetail({
   // Separator isn't orphaned when TaskExecution would render `null`.
   const hasTaskExecutionData =
     doc.type === "task" && (extractClaim(doc) !== undefined || extractEvidence(doc).length > 0);
+  // reason: SPEC-075 §Module Boundary — mirrors VerificationProjectionService.evidencePanel's
+  // own doc_type switch (task/spec/plan get a real projection branch; everything else —
+  // prd/adr/knowledge/phase — is "other", no evidence surface). Gating the tab BUTTON on
+  // this client-side check (rather than always rendering the tab and letting EvidenceTab's
+  // fetched `doc_type: "other"` branch render nothing) means the tab is never shown at all
+  // for a doc type that structurally has no evidence surface (AC-075-3's D7 contract).
+  const showEvidenceTab = doc.type === "task" || doc.type === "spec" || doc.type === "plan";
 
   // ── Edit state ──────────────────────────────────────────────────────────────
   const [isEditing, setIsEditing] = useState(false);
@@ -615,6 +662,20 @@ export function DocDetail({
             ))}
           </div>
         )}
+
+        {/* AdjudicationBar (SPEC-075 R-8) — same-screen evidence summary + approve/reject
+            for in-review docs. `AdjudicationBarSection` is a SEPARATE child component
+            (not an inline useQuery call here) so its `useQuery` — which requires a
+            QueryClientProvider ancestor — is only ever mounted/invoked for an in-review
+            doc; every other status renders nothing here and calls no query hook at all,
+            keeping DocDetail usable in read-only/unit-test contexts with no provider
+            (the SAME "read-only tests never mount a query-consuming child" convention
+            LinksPanel/HistoryTab/AuditTab already rely on). */}
+        {doc.status === "in-review" && (
+          <div className="mt-3">
+            <AdjudicationBarSection doc={doc} {...(onMutated !== undefined ? { onMutated } : {})} />
+          </div>
+        )}
       </header>
 
       <Separator />
@@ -653,7 +714,16 @@ export function DocDetail({
 
       {/* Tab switcher */}
       <div className="flex gap-4 border-b">
-        {(["content", "history", "audit"] as ActiveTab[]).map((tab) => (
+        {(
+          [
+            "content",
+            "history",
+            "audit",
+            // reason: AC-075-3/D7 — the Evidence tab button never renders at all for a
+            // doc_type with no evidence surface (prd/adr/knowledge/phase).
+            ...(showEvidenceTab ? (["evidence"] as ActiveTab[]) : []),
+          ] as ActiveTab[]
+        ).map((tab) => (
           <button
             key={tab}
             type="button"
@@ -701,6 +771,13 @@ export function DocDetail({
       {activeTab === "audit" && (
         <section aria-label="Audit trail">
           <AuditTab docId={doc.id} />
+        </section>
+      )}
+
+      {/* Evidence tab (SPEC-075) */}
+      {activeTab === "evidence" && showEvidenceTab && (
+        <section aria-label="Evidence">
+          <EvidenceTab doc={doc} />
         </section>
       )}
 

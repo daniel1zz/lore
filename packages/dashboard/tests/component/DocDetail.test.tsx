@@ -49,11 +49,12 @@ import type { DocRecord, DocSummary } from "@lore/core";
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/lib/api")>();
-  return { ...actual, apiGetReady: vi.fn() };
+  return { ...actual, apiGetReady: vi.fn(), apiGetEvidencePanel: vi.fn() };
 });
 
-import { apiGetReady } from "@/lib/api";
+import { apiGetReady, apiGetEvidencePanel } from "@/lib/api";
 const mockedApiGetReady = vi.mocked(apiGetReady);
+const mockedApiGetEvidencePanel = vi.mocked(apiGetEvidencePanel);
 
 function renderWithClient(ui: React.ReactElement) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -428,6 +429,41 @@ describe("DocDetail", () => {
 
       const badge = screen.getByText("✔1/✘0");
       expect(badge).not.toHaveClass("text-destructive-foreground");
+    });
+  });
+
+  describe("SPEC-075: Evidence tab visibility + AdjudicationBar same-screen mount (R-8)", () => {
+    it("shows the Evidence tab button for a task doc", () => {
+      const taskDoc: DocWithNavigation = { doc: { ...mockDocRecord, type: "task" }, navigation: mockDocWithNav.navigation };
+      render(<DocDetail docWithNav={taskDoc} />);
+      expect(screen.getByRole("button", { name: "evidence" })).toBeInTheDocument();
+    });
+
+    it("hides the Evidence tab button entirely for a prd doc (doc_type: other)", () => {
+      render(<DocDetail docWithNav={mockDocWithNav} />);
+      expect(screen.queryByRole("button", { name: "evidence" })).not.toBeInTheDocument();
+    });
+
+    it("mounts AdjudicationBar in the header, same screen as StatusPill, for an in-review doc", async () => {
+      mockedApiGetEvidencePanel.mockResolvedValue({ doc_type: "task", evidence: [], ac_refs: [] });
+      const taskDoc: DocWithNavigation = {
+        doc: { ...mockDocRecord, type: "task", status: "in-review" },
+        navigation: mockDocWithNav.navigation,
+      };
+
+      renderWithClient(<DocDetail docWithNav={taskDoc} />);
+
+      // Same header region: the AdjudicationBar's evidence-summary chips and the
+      // StatusPill badge both resolve without any tab click / extra navigation.
+      expect(await screen.findByLabelText("Evidence summary")).toBeInTheDocument();
+      expect(screen.getByText("in-review")).toBeInTheDocument();
+    });
+
+    it("does not mount AdjudicationBar for a non-in-review doc", () => {
+      const taskDoc: DocWithNavigation = { doc: { ...mockDocRecord, type: "task", status: "draft" }, navigation: mockDocWithNav.navigation };
+      renderWithClient(<DocDetail docWithNav={taskDoc} />);
+      expect(screen.queryByLabelText("Evidence summary")).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("Adjudication")).not.toBeInTheDocument();
     });
   });
 });

@@ -5,7 +5,7 @@
  *   F1 calibration feedback loop on approve/reject.
  * Public surface: apiCreateDoc, apiPatchDoc, apiApproveDoc, apiRejectDoc,
  *   apiCreateLink, apiDeleteLink, apiDeleteDoc, apiRestoreVersion,
- *   apiPatchConfig, apiPatchMachineConfig,
+ *   apiPatchConfig, apiPatchMachineConfig, apiPostRouteView,
  *   ConflictError, ConfigConflictError, DashboardApiError
  * Invariants:
  *   - All writes use credentials:"include" so the lore_sid cookie is sent.
@@ -34,12 +34,15 @@
  *     (`config-routes.ts`'s module header: "no unconditional-write path" is
  *     deliberate for config, unlike the doc-PATCH route) — a conflict can only
  *     be resolved by re-reading and re-editing, never bypassed from this client.
+ *   - apiPostRouteView (SPEC-075 D4) NEVER throws — network errors, timeouts, and
+ *     non-2xx responses are all silently swallowed (the PRD-documented
+ *     fire-and-forget telemetry exception; see its own doc comment).
  * Side-effect class: IO (fetch)
  * Source: SPEC-022 §9.3, §9.4; SPEC-027 AC-DH-6, AC-DH-7, AC-DH-11; SPEC-033 F1;
- *   SPEC-062 §Design D3-D5; SPEC-064 §Design D6
+ *   SPEC-062 §Design D3-D5; SPEC-064 §Design D6; SPEC-075 D4 (route-view telemetry)
  */
 
-import type { ConfigEffect, DocRecord, GlobalLoreConfig, LinkType, LoreConfig } from "@lore/core";
+import type { ConfigEffect, DocRecord, DocType, GlobalLoreConfig, LinkType, LoreConfig } from "@lore/core";
 import { createDocInputSchema } from "@lore/core";
 import type { z } from "zod";
 
@@ -541,4 +544,46 @@ export async function apiPatchMachineConfig(
   ifMatch: string,
 ): Promise<ConfigUpdateResult<GlobalLoreConfig>> {
   return writeConfigFetch<GlobalLoreConfig>("/api/dashboard/config/machine", patch, ifMatch);
+}
+
+// ─── SPEC-075 D4: route-view telemetry (fire-and-forget) ────────────────────
+
+/**
+ * Record one dashboard route-navigation event via
+ * `POST /api/dashboard/telemetry/route-view` (SPEC-075 D4, PRD §21 F2).
+ *
+ * FIRE-AND-FORGET BY DESIGN (the two PRD-documented telemetry exceptions this
+ * module otherwise never takes): unlike every other function in this file,
+ * this NEVER throws to the caller — a network failure, a non-2xx response, or
+ * a malformed body are all swallowed silently here. The route-view ping is a
+ * pure observability signal (F2 IS the observability deliverable); a broken
+ * telemetry sink or an offline network must never surface a toast, break
+ * navigation, or throw an unhandled rejection in `use-route-telemetry.ts`'s
+ * effect. The server side has its own matching fail-quiet exception (one
+ * `console.error` line on a sink-write failure, still 204 to the client) —
+ * see `handleDashboardRouteViewTelemetry`'s doc comment
+ * (`packages/lore/src/adapters/http/dashboard-routes.ts`). Nothing is logged
+ * client-side either — there is no dashboard-side console/telemetry channel
+ * for this failure to land in beyond the browser's own network-tab trace.
+ *
+ * @param params.route_id - Pathname-shaped route identifier (server caps at
+ *   200 chars via zod; this function does not pre-validate length — an
+ *   oversized value simply fails server-side and is swallowed here like any
+ *   other failure).
+ * @param params.doc_type - The loaded doc's type, when on a doc route and
+ *   cheaply available; omitted otherwise (never fabricated).
+ */
+export async function apiPostRouteView(params: { route_id: string; doc_type?: DocType }): Promise<void> {
+  try {
+    await fetch("/api/dashboard/telemetry/route-view", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      signal: AbortSignal.timeout(5000),
+      body: JSON.stringify(params),
+    });
+  } catch {
+    // reason: fire-and-forget (SPEC-075 D4) — a network/timeout failure must never
+    // surface to the UI or throw out of the caller's effect. See module doc comment.
+  }
 }
