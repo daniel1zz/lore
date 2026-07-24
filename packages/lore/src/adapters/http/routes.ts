@@ -253,6 +253,12 @@ export async function handleApiRoute(
     return handleGetReady(readyMatch, app);
   }
 
+  // GET /api/evidence-panel/:idOrSlug (SPEC-075 §Module Boundary)
+  const evidencePanelMatch = matchEvidencePanelPath(path);
+  if (evidencePanelMatch !== null && method === "GET") {
+    return handleGetEvidencePanel(evidencePanelMatch, app);
+  }
+
   // DELETE /api/links/:from/:to
   const linksDeleteMatch = matchLinksDeletePath(path);
   if (linksDeleteMatch !== null && method === "DELETE") {
@@ -493,6 +499,28 @@ async function handleGetReady(planIdOrSlug: string, app: App): Promise<Response>
 }
 
 /**
+ * GET /api/evidence-panel/:idOrSlug (SPEC-075 §Module Boundary) — the dashboard
+ * adjudication workbench's Evidence-tab projection for one doc. Thin pipe over
+ * `VerificationProjectionService.evidencePanel` (zero writes); read-only, SPEC-033
+ * read-family auth parity (cookie OR bearer — no per-route auth here, rides the
+ * same central gate as every other v1 GET route). Unknown id → `DOC_NOT_FOUND`
+ * (404); the D9 hierarchy-assumption violation (a plan with phase children and
+ * zero task children) surfaces as `VALIDATION_ERROR` (422 via `loreErrorResponse`),
+ * same as any other service-level validation failure.
+ */
+async function handleGetEvidencePanel(idOrSlug: string, app: App): Promise<Response> {
+  if (app.verificationProjectionService === undefined) {
+    return jsonError(
+      { code: "STORE_ERROR", message: "VerificationProjectionService not wired on App" },
+      500,
+    );
+  }
+  const result = await app.verificationProjectionService.evidencePanel(idOrSlug);
+  if (!result.ok) return loreErrorResponse(result.error);
+  return jsonOk(result.value);
+}
+
+/**
  * GET /api/audit/verify[?since=<ISO8601>] — versions⋈audit completeness oracle.
  * `since` overrides the configured `audit.verify_since` watermark for this call
  * only (mirrors `lore audit --verify --since`); omitted, `AuditService.verify`
@@ -607,6 +635,12 @@ function matchAuditDocPath(path: string): string | null {
 /** Matches GET /api/ready/:planIdOrSlug (SPEC-037 D1). */
 function matchReadyPath(path: string): string | null {
   const match = path.match(/^\/api\/ready\/([^/]+)$/);
+  return match?.[1] !== undefined ? decodeURIComponent(match[1]) : null;
+}
+
+/** Matches GET /api/evidence-panel/:idOrSlug (SPEC-075 §Module Boundary). */
+function matchEvidencePanelPath(path: string): string | null {
+  const match = path.match(/^\/api\/evidence-panel\/([^/]+)$/);
   return match?.[1] !== undefined ? decodeURIComponent(match[1]) : null;
 }
 
