@@ -4,12 +4,32 @@
  *
  * THICK-BUNDLE / THIN-FLOW (D2): every domain derivation `flows/task-feed-flow.ts`
  * renders — `computeAcCoverage`, `extractClaim`+`isClaimStale`, fail-evidence
- * extraction (`extractEvidence`), `ac_scope` filtering/dangling-id detection —
- * lives HERE, over `CorpusService.getPlanBundle` + `TaskWorkflowService.ready`.
- * The flow module itself imports none of these functions (AC-070-1, enforced by
+ * extraction, `ac_scope` filtering/dangling-id detection — lives HERE, over
+ * `CorpusService.getPlanBundle` + `TaskWorkflowService.ready`. The flow module
+ * itself imports none of these functions (AC-070-1, enforced by
  * `tests/unit/flows/task-feed-flow.test.ts`'s import-graph check) — this module is
  * where that weight actually lives, mirroring `phase-wiring.ts`'s
  * `buildPhaseFeedFlowDeps` precedent for the phase-start checkpoint.
+ *
+ * SPEC-070 review-fix wave additions (AC-070-10..14, 17 — see each function's own
+ * JSDoc for the full rationale):
+ *   - `output_tail` clipping uses `@lore/core`'s `headChars` (surrogate-safe),
+ *     never a bare `.slice()` (F1/AC-070-10 — BUG-001-class corruption).
+ *   - Prior-failure extraction is PER-ENTRY tolerant (`extractEvidenceTolerant`),
+ *     a documented divergence from `extractEvidence`'s whole-array fail-closed
+ *     contract (F2/AC-070-11) — `computeAcCoverage` keeps using `extractEvidence`
+ *     unchanged for AC-coverage counting.
+ *   - Coverage-label precedence delegates to `@lore/core`'s shared
+ *     `deriveAcCoverageState` (F3/AC-070-12) instead of a second, independently
+ *     drifted precedence implementation.
+ *   - A present-but-schema-invalid `plan.extra.ac_scope` is a loud
+ *     `VALIDATION_ERROR`, never silently treated as absent (F4/AC-070-13).
+ *   - Aux-port internal refetch failures (`listLinkedKnowledgePointers`,
+ *     `latestHandoffForPlan`) propagate as `err(...)` instead of manufacturing a
+ *     success row (F5/AC-070-14).
+ *   - The task doc is fetched exactly once — `listLinkedKnowledgePointers` takes
+ *     the already-computed `TaskBundle.relatedKnowledge` directly rather than
+ *     re-fetching the task by id (F10/AC-070-17).
  *
  * Two DISTINCT truncation mechanisms — never conflated (2026-07-23 lesson,
  * documented again here since this is the mechanism that performs the first one):
@@ -37,15 +57,17 @@ import {
   ok,
   err,
   computeAcCoverage,
+  deriveAcCoverageState,
   extractClaim,
   isClaimStale,
-  extractEvidence,
   extractFileAnchors,
   planAcScopeSchema,
+  evidenceEntrySchema,
   UPSTREAM_APPROVED_STATUSES,
   isInvalidated,
+  headChars,
 } from "@lore/core";
-import type { Result, LoreError, LoreConfig, AcCoverageFact } from "@lore/core";
+import type { Result, LoreError, LoreConfig, EvidenceEntry, AcCoverageFact, DocRecord } from "@lore/core";
 import type { App } from "../../app.js";
 import { extractSpecCriteria } from "../../flows/phase-status-flow.js";
 import type {
@@ -58,6 +80,7 @@ import type {
   TaskStartBudgets,
   KnowledgePointer,
   HandoffPointer,
+  RelatedKnowledgeRef,
 } from "../../flows/task-feed-flow.js";
 
 /** Cap on how many prior-failure evidence entries `buildTaskBundle` surfaces (last-N, not budget-clipped). */
@@ -66,12 +89,57 @@ const PRIOR_FAILURE_LIMIT = 3;
 /** Cap on one prior-failure entry's `output_tail`, pre-clipped HERE (distinct from the flow's own char-budget clipping — see module header). */
 const PRIOR_FAILURE_TAIL_CHARS = 500;
 
-/** Derives the coverage-precedence label `AcceptanceView.coverage` renders (attested_pass > pass > fail > none). */
+/**
+ * Derives the coverage-precedence label `AcceptanceView.coverage` renders. Delegates
+ * to `@lore/core`'s `deriveAcCoverageState` — the ONE fail-first precedence
+ * implementation this codebase shares with `commands/ac.ts`'s `coverageBadge`
+ * (SPEC-070 AC-070-12, review finding F3). Previously this function re-implemented
+ * its OWN ordering (`attested_pass > pass > fail > none`), which silently masked a
+ * real failure behind an attested-pass badge whenever a criterion had both — the
+ * shared helper's fail-first ordering is the deliberate semantic fix.
+ */
 function deriveCoverageLabel(fact: AcCoverageFact): AcceptanceView["coverage"] {
-  if (fact.attested_pass > 0) return "attested_pass";
-  if (fact.pass > 0) return "pass";
-  if (fact.fail > 0) return "fail";
-  return "none";
+  return deriveAcCoverageState(fact);
+}
+
+/**
+ * Per-entry tolerant fail-evidence extraction for the `constraints` section's
+ * prior-failure list (SPEC-070 AC-070-11, review finding F2) — a DELIBERATE
+ * DIVERGENCE from `@lore/core`'s `extractEvidence`, which is whole-array
+ * fail-closed ON PURPOSE (one malformed entry poisons the WHOLE parsed array —
+ * the safe direction for AC-coverage counting, where a corrupted entry must never
+ * silently count as evidence; `computeAcCoverage` keeps using `extractEvidence`
+ * unchanged). This section is advisory prose for a human/agent dispatch read, not
+ * a counting oracle — one malformed entry among several good ones must not blank
+ * the ENTIRE prior-failure history. `evidenceEntrySchema` (the SAME schema
+ * `extractEvidence` parses with) is applied PER ENTRY via `safeParse`; entries
+ * that fail are counted, never surfaced individually.
+ *
+ * @param task - The task doc whose `extra.verification_evidence` is read directly
+ *   (mirrors this file's existing direct `task.extra["phase"]` access — `extra` is
+ *   typed `Record<string, unknown>`, untyped storage by design).
+ * @returns `{entries, unparseableCount}` — `entries` holds every entry that DID
+ *   parse (original array order preserved); `unparseableCount` is how many did not.
+ *   A non-array/absent `verification_evidence` yields `{entries: [], unparseableCount: 0}`
+ *   (a fact — "no evidence recorded", not a parse failure).
+ */
+function extractEvidenceTolerant(
+  task: DocRecord,
+): { entries: EvidenceEntry[]; unparseableCount: number } {
+  const raw = task.extra["verification_evidence"];
+  if (!Array.isArray(raw)) return { entries: [], unparseableCount: 0 };
+
+  const entries: EvidenceEntry[] = [];
+  let unparseableCount = 0;
+  for (const item of raw) {
+    const parsed = evidenceEntrySchema.safeParse(item);
+    if (parsed.success) {
+      entries.push(parsed.data);
+    } else {
+      unparseableCount++;
+    }
+  }
+  return { entries, unparseableCount };
 }
 
 /**
@@ -107,8 +175,30 @@ async function buildTaskBundle(app: App, taskIdOrSlug: string): Promise<Result<T
   const bundle = bundleResult.value;
 
   const criteria = bundle.spec !== undefined ? extractSpecCriteria(bundle.spec) : [];
-  const acScopeParsed = planAcScopeSchema.safeParse(bundle.plan.extra["ac_scope"]);
-  const acScope = acScopeParsed.success ? acScopeParsed.data : undefined;
+
+  // reason: SPEC-070 AC-070-13 (review finding F4) — a PRESENT-but-schema-invalid
+  // `plan.extra.ac_scope` previously fell through `safeParse`'s failure branch to
+  // `undefined` (= "unscoped", suppressing dangling-id reporting entirely). `extra`
+  // is untyped storage (direct store write, legacy data, or a future format never
+  // validated by this reader) — an ABSENT key is legal (no scope declared), but a
+  // PRESENT, malformed one must fail loud rather than silently degrade to the
+  // widest-possible interpretation.
+  const rawAcScope: unknown = bundle.plan.extra["ac_scope"];
+  let acScope: string[] | undefined;
+  if (rawAcScope === undefined) {
+    acScope = undefined;
+  } else {
+    const acScopeParsed = planAcScopeSchema.safeParse(rawAcScope);
+    if (!acScopeParsed.success) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "plan.extra.ac_scope",
+        message: `Plan '${bundle.plan.slug}' declares a schema-invalid ac_scope: ${acScopeParsed.error.message}`,
+        value: rawAcScope,
+      });
+    }
+    acScope = acScopeParsed.data;
+  }
 
   const coverage = computeAcCoverage(criteria, bundle.tasks);
   const acceptance: AcceptanceView[] = criteria.map((criterion, i) => {
@@ -135,19 +225,34 @@ async function buildTaskBundle(app: App, taskIdOrSlug: string): Promise<Result<T
   const claimView: ClaimView | null =
     claim === undefined ? null : { holder: claim.by, fresh: !isClaimStale(claim, nowIso, ttlMinutes) };
 
-  const priorFailures: FailureSummary[] = extractEvidence(task)
+  const { entries: tolerantEvidence, unparseableCount: unparseableEvidenceCount } = extractEvidenceTolerant(task);
+  const priorFailures: FailureSummary[] = tolerantEvidence
     .filter((e) => e.result === "fail")
     .slice(-PRIOR_FAILURE_LIMIT)
     .map((e) => ({
       oracle: e.oracle,
       command: e.command,
-      tail: (e.output_tail ?? "").slice(0, PRIOR_FAILURE_TAIL_CHARS),
+      // reason: SPEC-070 AC-070-10 (review finding F1, BUG-001-class corruption) —
+      // a bare `.slice(0, N)` cuts by raw UTF-16 code-unit offset, splitting an
+      // astral-plane character (emoji, CJK ext-B) straddling the cut boundary into
+      // an unpaired surrogate half. `bun:sqlite` accepts and stores that unpaired
+      // surrogate WITHOUT raising an error but does not round-trip it — silent
+      // corruption. `headChars` (@lore/core) is the surrogate-safe replacement.
+      tail: headChars(e.output_tail ?? "", PRIOR_FAILURE_TAIL_CHARS),
     }));
 
   const upstreamSpecApproved =
     bundle.spec !== undefined ? UPSTREAM_APPROVED_STATUSES.has(bundle.spec.status) : null;
 
   const phaseName = typeof task.extra["phase"] === "string" ? (task.extra["phase"] as string) : null;
+
+  // reason: SPEC-070 AC-070-17 (review finding F10) — reuse THIS fetch's own
+  // `navigation.related`, already computed by `app.corpusService.get` above, so
+  // `listLinkedKnowledgePointers` never needs to re-fetch the task doc just to
+  // re-derive the same related-links list.
+  const relatedKnowledge: RelatedKnowledgeRef[] = taskResult.value.navigation.related
+    .filter((r) => r.type === "knowledge")
+    .map((r) => ({ id: r.id, slug: r.slug, title: r.title }));
 
   return ok({
     task,
@@ -159,8 +264,10 @@ async function buildTaskBundle(app: App, taskIdOrSlug: string): Promise<Result<T
     danglingScopedIds,
     anchors,
     priorFailures,
+    unparseableEvidenceCount,
     claimView,
     upstreamSpecApproved,
+    relatedKnowledge,
   });
 }
 
@@ -177,29 +284,36 @@ async function planStateForTask(app: App, planIdOrSlug: string): Promise<Result<
 }
 
 /**
- * `TaskFeedFlowDeps.listLinkedKnowledgePointers` real binding — mirrors
- * `phase-wiring.ts`'s identically-named binding (reuses `corpusService.get()`'s
- * already-computed `navigation.related`, filtered to `type === "knowledge"`, each
- * candidate re-fetched to check `isInvalidated` since invalidation state isn't
- * carried on the lightweight `DocSummary` navigation entries).
+ * `TaskFeedFlowDeps.listLinkedKnowledgePointers` real binding — takes the task's
+ * already-filtered `relatedKnowledge` pointers DIRECTLY (SPEC-070 AC-070-17, review
+ * finding F10 — the task doc was already fetched once by `buildTaskBundle`, this
+ * binding must not re-fetch it just to re-derive the same `navigation.related`
+ * list). Each candidate is still re-fetched (bounded by `limit`) to check
+ * `isInvalidated`, since invalidation state isn't carried on the lightweight
+ * `DocSummary` navigation entries — that per-pointer fetch is unavoidable and
+ * explicitly out of this fix's scope.
+ *
+ * **SPEC-070 AC-070-14 (review finding F5)**: a refetch failure on any candidate
+ * PROPAGATES as `err(...)` — it no longer manufactures a success row
+ * (`invalidated: false`) for a pointer whose doc couldn't actually be re-read. The
+ * flow's `renderKnowledgeSection` already degrades the WHOLE section to one
+ * "unavailable" line on any `err`, so one bad pointer among several good ones does
+ * still lose the whole section here — deliberately: a partial, silently-wrong
+ * pointer list is worse than an honest "couldn't verify" note.
  */
 async function listLinkedKnowledgePointers(
   app: App,
-  docId: string,
+  related: RelatedKnowledgeRef[],
   limit: number,
 ): Promise<Result<KnowledgePointer[], LoreError>> {
-  const result = await app.corpusService.get(docId);
-  if (!result.ok) return result;
-
   const nowIso = new Date().toISOString();
-  const knowledgeRelated = result.value.navigation.related
-    .filter((r) => r.type === "knowledge")
-    .slice(0, limit);
+  const candidates = related.slice(0, limit);
 
   const pointers: KnowledgePointer[] = [];
-  for (const summary of knowledgeRelated) {
+  for (const summary of candidates) {
     const docResult = await app.corpusService.get(summary.id);
-    const invalidated = docResult.ok ? isInvalidated(docResult.value.doc, nowIso) : false;
+    if (!docResult.ok) return docResult;
+    const invalidated = isInvalidated(docResult.value.doc, nowIso);
     pointers.push({ doc_id: summary.id, slug: summary.slug, title: summary.title, invalidated });
   }
   return ok(pointers);
@@ -209,6 +323,12 @@ async function listLinkedKnowledgePointers(
  * `TaskFeedFlowDeps.latestHandoffForPlan` real binding — mirrors `phase-wiring.ts`'s
  * identically-named binding (`SessionService.resume({plan: planId})`, the SAME
  * newest-wins/multi-actor derivation `lore feed session-resume` uses).
+ *
+ * **SPEC-070 AC-070-14 (review finding F5)**: the handoff doc's own refetch failure
+ * (`corpusService.get(record.handoff_slug)`) PROPAGATES as `err(...)` — it no
+ * longer manufactures a `{slug, title: slug}` row when the doc couldn't actually be
+ * re-read (previously silently substituted the slug for the title, indistinguishable
+ * from a real, successfully-resolved pointer whose title happens to equal its slug).
  */
 async function latestHandoffForPlan(app: App, planId: string): Promise<Result<HandoffPointer | null, LoreError>> {
   if (app.sessionService === undefined) {
@@ -223,8 +343,8 @@ async function latestHandoffForPlan(app: App, planId: string): Promise<Result<Ha
   if (record === undefined) return ok(null);
 
   const docResult = await app.corpusService.get(record.handoff_slug);
-  const title = docResult.ok ? docResult.value.doc.title : record.handoff_slug;
-  return ok({ slug: record.handoff_slug, title });
+  if (!docResult.ok) return docResult;
+  return ok({ slug: record.handoff_slug, title: docResult.value.doc.title });
 }
 
 /**
@@ -237,7 +357,7 @@ export function buildTaskFeedFlowDeps(app: App): TaskFeedFlowDeps {
   return {
     getTaskBundle: (taskId) => buildTaskBundle(app, taskId),
     planStateForTask: (planId) => planStateForTask(app, planId),
-    listLinkedKnowledgePointers: (docId, limit) => listLinkedKnowledgePointers(app, docId, limit),
+    listLinkedKnowledgePointers: (related, limit) => listLinkedKnowledgePointers(app, related, limit),
     latestHandoffForPlan: (planId) => latestHandoffForPlan(app, planId),
   };
 }

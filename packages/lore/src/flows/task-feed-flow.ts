@@ -43,6 +43,19 @@
  *     configured budget.
  *   - `buildTaskStartPack` is deterministic for identical deps+args (AC-070-1) —
  *     the CLI `--json` / MCP deep-equal foundation.
+ *   - **SPEC-070 AC-070-11 (review finding F2)**: the wiring's fail-evidence
+ *     extraction is PER-ENTRY tolerant (a documented divergence from
+ *     `extractEvidence`'s whole-array fail-closed contract, which stays
+ *     fail-closed for AC-coverage counting) — `TaskBundle.unparseableEvidenceCount`
+ *     carries how many raw evidence entries failed to parse; `renderConstraints`
+ *     appends an explicit degraded line whenever it is `> 0`, so a non-empty raw
+ *     evidence array never silently renders "(no prior failures)".
+ *   - **SPEC-070 AC-070-17 (review finding F10)**: `TaskBundle.relatedKnowledge`
+ *     carries the task's already-filtered `navigation.related` (type === "knowledge")
+ *     summaries from the wiring's ONE `getTaskBundle` fetch of the task doc —
+ *     `deps.listLinkedKnowledgePointers` takes THESE pointers directly (not a
+ *     `docId` to re-fetch), so the task doc is never fetched a second time just to
+ *     re-derive its own `navigation.related`.
  *
  * `TASK_START_CHECKPOINT` is registered in `feed-flow.ts`'s `CHECKPOINT_PRODUCED_TYPE`
  * SSOT map (SPEC-070 D1) — `commands/feed.ts` special-cases it (mirroring
@@ -95,6 +108,18 @@ export interface FailureSummary {
   readonly oracle: string;
   readonly command: string;
   readonly tail: string;
+}
+
+/**
+ * One `type === "knowledge"` entry from the task's own `navigation.related` — the
+ * pre-filtered pointer shape `TaskBundle.relatedKnowledge` carries (SPEC-070
+ * AC-070-17, review finding F10) so `deps.listLinkedKnowledgePointers` never needs
+ * to re-fetch the task doc just to re-derive its own related-links list.
+ */
+export interface RelatedKnowledgeRef {
+  readonly id: string;
+  readonly slug: string;
+  readonly title: string;
 }
 
 /** Pre-derived claim verdict — the flow receives a verdict, never computes staleness itself (SPEC-070 D2). */
@@ -150,10 +175,23 @@ export interface TaskBundle {
   readonly anchors: string[];
   /** Last ≤3 FAILING evidence entries, pre-clipped (see module header). */
   readonly priorFailures: FailureSummary[];
+  /**
+   * Count of raw `verification_evidence` entries that failed per-entry parsing
+   * (SPEC-070 AC-070-11, review finding F2) — rendered as an explicit degraded
+   * line in `constraints` whenever `> 0`. `0` when every entry parsed (including
+   * when there is no evidence at all).
+   */
+  readonly unparseableEvidenceCount: number;
   /** `null` when the task holds no claim. */
   readonly claimView: ClaimView | null;
   /** `null` when the plan has no spec ancestor — "nothing to check", not "unapproved". */
   readonly upstreamSpecApproved: boolean | null;
+  /**
+   * The task's OWN `navigation.related` entries filtered to `type === "knowledge"`
+   * (SPEC-070 AC-070-17, review finding F10) — `deps.listLinkedKnowledgePointers`
+   * consumes this directly instead of re-fetching the task doc.
+   */
+  readonly relatedKnowledge: RelatedKnowledgeRef[];
 }
 
 /**
@@ -165,9 +203,15 @@ export interface TaskFeedFlowDeps {
   getTaskBundle: (taskId: string) => Promise<Result<TaskBundle, LoreError>>;
   /** Plan-scoped sessions + anchor conflicts (a slice of `TaskWorkflowService.ready`'s report). NON-FATAL on error. */
   planStateForTask: (planId: string) => Promise<Result<PlanStateSlice, LoreError>>;
-  /** Hygiene-filtered (D3-style) linked-knowledge lookup — this module also filters defensively. NON-FATAL on error. */
+  /**
+   * Hygiene-filtered (D3-style) linked-knowledge lookup — this module also filters
+   * defensively. Takes `TaskBundle.relatedKnowledge` DIRECTLY (SPEC-070 AC-070-17,
+   * review finding F10) rather than a `docId` to re-fetch — the task doc's
+   * `navigation.related` was already computed by the ONE `getTaskBundle` fetch.
+   * NON-FATAL on error.
+   */
   listLinkedKnowledgePointers: (
-    docId: string,
+    related: RelatedKnowledgeRef[],
     limit: number,
   ) => Promise<Result<KnowledgePointer[], LoreError>>;
   /** The most recent `handoff` knowledge doc linked to `planId`, or `null` when none exists. NON-FATAL on error. */
@@ -289,6 +333,11 @@ function renderConstraints(bundle: TaskBundle): string {
       ? "(no prior failures)"
       : bundle.priorFailures.map(renderFailure).join("\n"),
   );
+  if (bundle.unparseableEvidenceCount > 0) {
+    lines.push(
+      `⚠ (${bundle.unparseableEvidenceCount} evidence entries unparseable — history may be incomplete)`,
+    );
+  }
   if (bundle.upstreamSpecApproved === false) {
     lines.push("⚠ upstream spec not approved");
   }
@@ -382,7 +431,7 @@ export async function buildTaskStartPack(
 
   const [planStateResult, knowledgeResult, handoffResult] = await Promise.all([
     deps.planStateForTask(bundle.planSlug),
-    deps.listLinkedKnowledgePointers(bundle.task.id, KNOWLEDGE_POINTER_LIMIT),
+    deps.listLinkedKnowledgePointers(bundle.relatedKnowledge, KNOWLEDGE_POINTER_LIMIT),
     deps.latestHandoffForPlan(bundle.planSlug),
   ]);
 
