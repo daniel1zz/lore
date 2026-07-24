@@ -80,6 +80,7 @@ const main = defineCommand({
     invalidate: () => import("./commands/invalidate.js").then(wrapDefault("invalidate")),
     setup: () => import("./commands/setup.js").then(wrapDefault("setup")),
     seat: () => import("./commands/seat.js").then(wrapDefault("seat")),
+    "report-issue": () => import("./commands/report-issue.js").then(wrapDefault("report-issue")),
   },
 });
 
