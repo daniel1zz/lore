@@ -76,6 +76,10 @@ import {
   checkOracleCoverage,
   type AcceptanceCriterion,
   type DocRecord,
+  // reason: SPEC-075 D6 — TaskAttestationInfo's home MOVED to @lore/core
+  // (evidence-panel.ts), read from there directly rather than re-exported
+  // through gate-predicates.ts (see that file's own JSDoc for the type).
+  type TaskAttestationInfo,
   type VerificationProfile,
 } from "@lore/core";
 import {
@@ -98,7 +102,6 @@ import {
   ATTESTATION_FLOOR_FIELD,
   type PredicateResult,
   type SiblingClaimInfo,
-  type TaskAttestationInfo,
 } from "./gate-predicates.js";
 import { buildFeedingPack, renderFeedingPack } from "./gate-feeding.js";
 

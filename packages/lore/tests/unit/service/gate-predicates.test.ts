@@ -14,13 +14,14 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { SPEC_KINDS } from "@lore/core";
+import { SPEC_KINDS, type TaskAttestationInfo } from "@lore/core";
 import {
   parentLegal,
   specKindValid,
   hasSkeleton,
   upstreamApproved,
   upstreamHasAcceptanceCriteria,
+  attestationFloor,
 } from "../../../src/service/gate-predicates.js";
 
 describe("gate-predicates", () => {
@@ -328,4 +329,65 @@ describe("gate-predicates", () => {
   // carry no STATE dimension). upstreamApproved / upstreamHasAcceptanceCriteria DO
   // get STATE-dimension coverage above (same upstream doc re-checked across a
   // status/AC-count transition), since they gate a corpus doc's own lifecycle.
+
+  // ─── attestationFloor — SPEC-075 AC-075-11 parity suite ────────────────────
+  //
+  // gate-predicates.ts::attestationFloor is now a thin delegate over
+  // @lore/core's deriveAttestationSummary (evidence-panel.ts, SPEC-075 §Design
+  // Decisions D6). This suite pins BYTE-IDENTICAL gate behavior across both of
+  // attestationFloor's independent failure conditions, plus the vacuous-pass and
+  // boundary-ratio cases — the same scenarios attestation-floor.test.ts already
+  // exercises end-to-end through CorpusService, now at the pure-predicate layer.
+  describe("attestationFloor — AC-075-11: delegates to deriveAttestationSummary, byte-identical gate behavior", () => {
+    function taskInfo(overrides: Partial<TaskAttestationInfo>): TaskAttestationInfo {
+      return { slug: "task-x", title: "Task X", evidenceCount: 0, attestedCount: 0, ...overrides };
+    }
+
+    it("AC-075-11: a zero-attested task blocks even when the plan-wide ratio meets the floor", () => {
+      // Task A: 10 attested. Task B: 1 self-reported, 0 attested. Ratio ~0.91 (>= 0.5),
+      // but condition 1 (per-task zero-attested) must still block on Task B alone.
+      const tasks: TaskAttestationInfo[] = [
+        taskInfo({ slug: "task-a", evidenceCount: 10, attestedCount: 10 }),
+        taskInfo({ slug: "task-b", evidenceCount: 1, attestedCount: 0 }),
+      ];
+      expect(attestationFloor(tasks, 0.5)).toEqual({
+        ok: false,
+        reason: "ATTESTATION_FLOOR_NOT_MET",
+        field: "attestation-floor",
+      });
+    });
+
+    it("AC-075-11: a below-floor ratio blocks even when every task has an attested entry", () => {
+      // Task A: 4 entries, 1 attested. Task B: 1 entry, 1 attested. Ratio 5/2=0.4 < 0.5.
+      // Neither task individually has zero attested entries — condition 2 alone trips this.
+      const tasks: TaskAttestationInfo[] = [
+        taskInfo({ slug: "task-a", evidenceCount: 4, attestedCount: 1 }),
+        taskInfo({ slug: "task-b", evidenceCount: 1, attestedCount: 1 }),
+      ];
+      expect(attestationFloor(tasks, 0.5)).toEqual({
+        ok: false,
+        reason: "ATTESTATION_FLOOR_NOT_MET",
+        field: "attestation-floor",
+      });
+    });
+
+    it("AC-075-11: a vacuous plan (no evidence anywhere) passes regardless of minRatio", () => {
+      expect(attestationFloor(undefined, 0.5)).toEqual({ ok: true });
+      expect(attestationFloor([], 0.9)).toEqual({ ok: true });
+      expect(attestationFloor([taskInfo({ evidenceCount: 0, attestedCount: 0 })], 1)).toEqual({ ok: true });
+    });
+
+    it("AC-075-11: a ratio exactly equal to minRatio passes (boundary, >= not >)", () => {
+      const tasks: TaskAttestationInfo[] = [taskInfo({ slug: "task-a", evidenceCount: 2, attestedCount: 1 })];
+      expect(attestationFloor(tasks, 0.5)).toEqual({ ok: true });
+    });
+
+    it("AC-075-11: fully attested evidence at/above the floor with no zero-attested task passes", () => {
+      const tasks: TaskAttestationInfo[] = [
+        taskInfo({ slug: "task-a", evidenceCount: 2, attestedCount: 2 }),
+        taskInfo({ slug: "task-b", evidenceCount: 1, attestedCount: 1 }),
+      ];
+      expect(attestationFloor(tasks, 0.5)).toEqual({ ok: true });
+    });
+  });
 });

@@ -49,8 +49,10 @@ import {
   anchorsOverlap,
   lintAcQuantifiability,
   checkOracleCoverage,
+  deriveAttestationSummary,
   type AcceptanceCriterion,
   type DocType,
+  type TaskAttestationInfo,
   type VerificationProfile,
 } from "@lore/core";
 
@@ -500,15 +502,16 @@ export function requiresUatDeclared(
  * predicate stays pure" seam) — `evidenceCount`/`attestedCount` are derived
  * from `extractEvidence(task)` (`@lore/core`, task-workflow.ts), never
  * re-parsed here (module invariant: no store, no IO).
+ *
+ * MOVED to `@lore/core` (`evidence-panel.ts`, SPEC-075 §Design Decisions D6) —
+ * this module now imports the type rather than declaring it, since the
+ * dashboard adjudication workbench's `EvidencePanelProjection.plan` branch
+ * needs the SAME shape and `@lore/dashboard` cannot import from
+ * `packages/lore/src/**` (browser-safety boundary, SPEC-014 AC-MR-B1). Every
+ * importer of this type now reads it directly from `@lore/core` (see
+ * `checkpoint-registry.ts`) rather than through this file — this comment
+ * documents WHERE the type went for anyone still grepping this module for it.
  */
-export interface TaskAttestationInfo {
-  slug: string;
-  title: string;
-  /** Total `verification_evidence[]` entries on this task. */
-  evidenceCount: number;
-  /** Of those, how many carry a runner-issued `attestation` object. */
-  attestedCount: number;
-}
 
 /** `attestationFloor`'s single machine-readable failure reason. */
 export const ATTESTATION_FLOOR_REASON = "ATTESTATION_FLOOR_NOT_MET";
@@ -536,6 +539,15 @@ export const ATTESTATION_FLOOR_FIELD = "attestation-floor";
  * the floor only constrains a plan that claims to have been verified, never
  * one that never ran any oracle at all.
  *
+ * SPEC-075 §Design Decisions D6/AC-075-11: this predicate is now a THIN
+ * delegate over `@lore/core`'s `deriveAttestationSummary` — the SAME two
+ * conditions, now computed once in the SSOT the dashboard adjudication
+ * workbench's Evidence tab also renders from, rather than re-implemented here.
+ * `attestationFloor`'s own signature, reasons, and pass/fail outcomes are
+ * byte-identical to before this delegation (every pre-existing caller,
+ * including `attestation-floor.test.ts`'s end-to-end service-layer suite,
+ * observes no behavior change).
+ *
  * @param tasks - Every task (or phase) in the closing plan, with its own
  *   evidence/attested counts — `undefined` is treated identically to `[]`
  *   (no tasks resolved, vacuous pass, mirrors `noAnchorOverlap`'s `?? []`
@@ -562,15 +574,8 @@ export function attestationFloor(
   tasks: readonly TaskAttestationInfo[] | undefined,
   minRatio: number,
 ): PredicateResult {
-  const list = tasks ?? [];
-  const totalEvidence = list.reduce((sum, t) => sum + t.evidenceCount, 0);
-  if (totalEvidence === 0) {
-    return { ok: true };
-  }
-  const totalAttested = list.reduce((sum, t) => sum + t.attestedCount, 0);
-  const hasZeroAttestedTask = list.some((t) => t.evidenceCount > 0 && t.attestedCount === 0);
-  const ratio = totalAttested / totalEvidence;
-  if (hasZeroAttestedTask || ratio < minRatio) {
+  const summary = deriveAttestationSummary(tasks ?? [], minRatio);
+  if (!summary.meets_floor) {
     return { ok: false, reason: ATTESTATION_FLOOR_REASON, field: ATTESTATION_FLOOR_FIELD };
   }
   return { ok: true };
