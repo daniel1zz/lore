@@ -139,15 +139,26 @@ test.describe("SPEC-033 dashboard feedback-loop", () => {
 
     // Create a child doc parented under the PRD (ChildrenOf's query is
     // `parent_id: doc.id`, no type filter, so any child type qualifies).
+    //
+    // Seeded out-of-band via `page.request.post` rather than driving
+    // NewDocModal's UI form — that form has no content field (SPEC-022), and the
+    // service-layer spec-create gate (`hasSkeleton` predicate) now denies a
+    // content-less spec as MISSING_SKELETON. This test's own subject is
+    // ChildrenOf's resolution of "any child type", not the create-modal flow
+    // (covered separately by write-flow.pw.ts) — so seeding a gate-conformant
+    // spec directly is the faithful fix, not a workaround around the gate
+    // (task-fix-pre-existing-dashboard-e2e-regression-browse-ux-spec).
     const childTitle = `E2E Review-Loop Child ${runId}`;
-    await page.goto("/library");
-    await page.getByRole("button", { name: "New doc" }).click();
-    const childDialog = page.getByRole("dialog", { name: "Create new document" });
-    await childDialog.locator("#doc-type").selectOption("spec");
-    await childDialog.locator("#doc-title").fill(childTitle);
-    await childDialog.locator("#parent-id").fill(prdId);
-    await childDialog.getByRole("button", { name: "Create" }).click();
-    await expect(page.getByText(`Created spec-`, { exact: false })).toBeVisible();
+    const childRes = await page.request.post(`${API_ORIGIN}/api/dashboard/docs`, {
+      headers: { "Content-Type": "application/json" },
+      data: {
+        type: "spec",
+        title: childTitle,
+        parent_id: prdId,
+        content: "## Overview\n\nE2E review-loop fixture spec.\n\n## Scope\n\nHome ChildrenOf rendering only.\n\n## Acceptance Criteria\n\n- N/A (fixture doc, not a real spec).\n",
+      },
+    });
+    expect(childRes.ok()).toBe(true);
 
     // Splice a ChildrenOf placeholder into the PRD's content out-of-band —
     // content only, title/type are never touched (see file-header comment).

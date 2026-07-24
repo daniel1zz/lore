@@ -81,7 +81,17 @@ test.describe("SPEC-036 dashboard browsing UX", () => {
       const prd = await createDoc(page, { type: "prd", title: prdTitle });
       prdId = prd.id;
 
-      const spec = await createDoc(page, { type: "spec", title: specTitle, parent_id: prdId });
+      // Gate-conformant skeleton (service-layer spec-create gate, `hasSkeleton`
+      // predicate) — a spec created with no `content` is denied MISSING_SKELETON;
+      // any single `## ` heading satisfies the predicate, but the full three-heading
+      // shape mirrors what a real authored spec looks like (task-fix-pre-existing-
+      // dashboard-e2e-regression-browse-ux-spec).
+      const spec = await createDoc(page, {
+        type: "spec",
+        title: specTitle,
+        parent_id: prdId,
+        content: "## Overview\n\nE2E breadcrumb fixture spec.\n\n## Scope\n\nBreadcrumb navigation only.\n\n## Acceptance Criteria\n\n- N/A (fixture doc, not a real spec).\n",
+      });
       specId = spec.id;
 
       const plan = await createDoc(page, { type: "plan", title: planTitle, parent_id: specId });
