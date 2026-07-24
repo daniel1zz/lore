@@ -1,0 +1,359 @@
+/**
+ * RED (TDD) vitest suite for SPEC-072 `IssueReportService`
+ * (`packages/lore/src/service/issue-report-service.ts` — DOES NOT EXIST YET).
+ *
+ * `IssueReportService` is the DI-only orchestrator behind `lore report-issue`:
+ * it runs the §5 check sequence (fail-loud, cheapest-first, ZERO writes until
+ * the `createDraft` step succeeds) over an injected `IssueReportDeps` bundle —
+ * never touching `bun:sqlite`, config files, or the filesystem directly. All
+ * fakes below satisfy the shapes named in SPEC-072 §4 Public Interface
+ * (`IssueReportDeps` / `UpstreamPort` / `IssueReportInput` / `IssueReportResult`),
+ * redeclared LOCALLY in this file rather than imported — the real
+ * `flows/upstream-context-flow.ts` and `service/issue-report-service.ts`
+ * modules do not exist yet, so importing types from them (even `import type`,
+ * which still requires module resolution) would break `tsc`. `IssueReportPayload`,
+ * `matchRootPrd`, `countOpenReports`, `buildIssueReportExtra`, `OPEN_REPORT_CAP`,
+ * `ok`, `err` DO already exist in `@lore/core` (T1, merged) and are imported
+ * for real.
+ *
+ * Module-resolution note (see also receipt-log.test.ts's header): a
+ * literal-string `import("../../../src/service/issue-report-service.js")`
+ * would be statically resolved by `tsc` and fail `bun run typecheck` with
+ * TS2307 even under `--noEmit`. Routing the specifier through a `const`
+ * (non-literal) opts the dynamic `import()` out of TypeScript's static
+ * module-resolution check (verified empirically against this exact repo's
+ * tsconfig: a literal `import("./does-not-exist.js")` is flagged, the same
+ * call through a variable is not). `bun`'s runtime resolver has no such
+ * literal-only restriction — the import still rejects at test-run time with
+ * a real "Cannot find module" error, which is exactly the RED failure this
+ * suite exists to produce.
+ *
+ * Coverage dimensions: HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE / REGRESSION.
+ *
+ * Source: SPEC-072 §4 Public Interface, §5 check sequence, §Acceptance Criteria
+ *   AC-072-7, AC-072-13.
+ */
+
+import { describe, it, expect, vi } from "vitest";
+import { readFileSync } from "fs";
+import { dirname, resolve } from "path";
+import { fileURLToPath } from "url";
+import { ok, err, buildIssueReportExtra, type LoreConfig, type LoreError, type Result } from "@lore/core";
+
+// ─── Locally-redeclared SPEC-072 §4 shapes (SUT modules don't exist yet) ────
+
+interface LocalUpstreamPort {
+  resolveRootDoc(): Promise<Result<{ id: string; slug: string } | null, LoreError>>;
+  listOpenAdhocDrafts(): Promise<Result<Array<{ id: string; status: string; extra?: unknown }>, LoreError>>;
+  searchDuplicates(query: string, limit: number): Promise<Result<string[], LoreError>>;
+  createDraft(input: {
+    title: string;
+    content: string;
+    extra: Record<string, unknown>;
+  }): Promise<Result<{ id: string }, LoreError>>;
+  close(): void;
+}
+
+interface LocalReceiptLog {
+  append(e: { upstream_doc_id: string; title: string; at: string }): Result<void, LoreError>;
+  read(): Result<{ entries: unknown[]; corrupt_lines: number[] }, LoreError>;
+}
+
+interface LocalIssueReportDeps {
+  loadUpstreamConfig: (root: string) => Result<LoreConfig, LoreError>;
+  probe: (dbPath: string) => Result<{ user_version: number }, LoreError>;
+  expectedSchemaVersion: number;
+  openUpstream: (root: string) => Result<LocalUpstreamPort, LoreError>;
+  receipts: LocalReceiptLog;
+  loreVersion: string;
+  reporterProject: string;
+  now: () => string;
+}
+
+interface LocalIssueReportInput {
+  title: string;
+  description: string;
+  expected: string;
+  actual: string;
+  repro_command?: string;
+  by?: string;
+}
+
+type LocalCfg = { corpus_path: string; root_prd: string };
+
+// ─── Dynamic import helper (module does not exist yet — see header note) ────
+
+const ISSUE_REPORT_SERVICE_MODULE_SPECIFIER = "../../../src/service/issue-report-service.js";
+
+async function importIssueReportService(): Promise<{
+  IssueReportService: new (deps: LocalIssueReportDeps) => {
+    report(
+      input: LocalIssueReportInput,
+      cfg: LocalCfg | undefined,
+    ): Promise<Result<{ upstream_doc_id: string; possible_duplicates: string[]; dedup_degraded: boolean }, LoreError>>;
+    list(cfg: LocalCfg): Promise<Result<unknown[], LoreError>>;
+  };
+}> {
+  const mod = await import(ISSUE_REPORT_SERVICE_MODULE_SPECIFIER);
+  const IssueReportService = (mod as any).IssueReportService;
+  if (typeof IssueReportService !== "function") {
+    throw new Error(
+      "issue-report-service.ts does not export IssueReportService — implementation missing (RED expected)",
+    );
+  }
+  return { IssueReportService };
+}
+
+// ─── Fixtures ────────────────────────────────────────────────────────────────
+
+const BASE_INPUT: LocalIssueReportInput = {
+  title: "lore create prd crashes on empty title",
+  description: "Filing an empty --title should fail loud, not crash.",
+  expected: "exit 4 VALIDATION_ERROR",
+  actual: "exit 1 unhandled TypeError",
+  repro_command: "lore create prd --title ''",
+};
+
+const BASE_CFG: LocalCfg = { corpus_path: "/tmp/upstream-corpus", root_prd: "prd-lore" };
+
+const NOW_ISO = "2026-07-24T00:00:00.000Z";
+
+function makeFakePort(overrides: Partial<LocalUpstreamPort> = {}): LocalUpstreamPort {
+  return {
+    resolveRootDoc: vi.fn(async () => ok({ id: "01ROOTPRD", slug: "prd-lore" })),
+    listOpenAdhocDrafts: vi.fn(async () => ok([])),
+    searchDuplicates: vi.fn(async () => ok([])),
+    createDraft: vi.fn(async () => ok({ id: "01NEWDOC" })),
+    close: vi.fn(),
+    ...overrides,
+  };
+}
+
+function makeFakeDeps(
+  overrides: Partial<Omit<LocalIssueReportDeps, "receipts">> & { port?: LocalUpstreamPort; receipts?: LocalReceiptLog } = {},
+): { deps: LocalIssueReportDeps; port: LocalUpstreamPort } {
+  const port = overrides.port ?? makeFakePort();
+  const receipts: LocalReceiptLog = overrides.receipts ?? {
+    append: vi.fn(() => ok(undefined)),
+    read: vi.fn(() => ok({ entries: [], corrupt_lines: [] })),
+  };
+  const deps: LocalIssueReportDeps = {
+    loadUpstreamConfig: vi.fn(() => ok({} as LoreConfig)),
+    probe: vi.fn(() => ok({ user_version: 7 })),
+    expectedSchemaVersion: 7,
+    openUpstream: vi.fn(() => ok(port)),
+    receipts,
+    loreVersion: "0.9.0",
+    reporterProject: "consumer-a",
+    now: () => NOW_ISO,
+    ...overrides,
+  };
+  return { deps, port };
+}
+
+// ─── Scenarios ───────────────────────────────────────────────────────────────
+
+describe("SPEC-072 IssueReportService (RED — packages/lore/src/service/issue-report-service.ts not implemented yet)", () => {
+  it("ERROR: createDraft failure propagates VERBATIM (same code+message) and receipts.append is never called (AC-072-7)", async () => {
+    const { IssueReportService } = await importIssueReportService();
+    const failure: LoreError = { code: "STORE_ERROR", message: "upstream write failed: disk full" };
+    const port = makeFakePort({ createDraft: vi.fn(async () => err(failure)) });
+    const { deps } = makeFakeDeps({ port });
+    const service = new IssueReportService(deps);
+
+    const result = await service.report(BASE_INPUT, BASE_CFG);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toEqual(failure);
+    }
+    expect(deps.receipts.append).not.toHaveBeenCalled();
+  });
+
+  it("NEGATIVE: cfg unset (feedback.upstream not configured) → VALIDATION_ERROR naming both feedback.upstream.corpus_path and feedback.upstream.root_prd; no dep beyond config invoked", async () => {
+    const { IssueReportService } = await importIssueReportService();
+    const { deps } = makeFakeDeps();
+    const service = new IssueReportService(deps);
+
+    const result = await service.report(BASE_INPUT, undefined);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("VALIDATION_ERROR");
+      const message = (result.error as { message: string }).message;
+      expect(message).toContain("feedback.upstream.corpus_path");
+      expect(message).toContain("feedback.upstream.root_prd");
+    }
+    expect(deps.loadUpstreamConfig).not.toHaveBeenCalled();
+    expect(deps.probe).not.toHaveBeenCalled();
+    expect(deps.openUpstream).not.toHaveBeenCalled();
+    expect(deps.receipts.append).not.toHaveBeenCalled();
+  });
+
+  it("NEGATIVE: probe user_version !== expectedSchemaVersion → VALIDATION_ERROR naming both versions; openUpstream never called (ordering)", async () => {
+    const { IssueReportService } = await importIssueReportService();
+    const { deps } = makeFakeDeps({
+      probe: vi.fn(() => ok({ user_version: 5 })),
+      expectedSchemaVersion: 7,
+    });
+    const service = new IssueReportService(deps);
+
+    const result = await service.report(BASE_INPUT, BASE_CFG);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("VALIDATION_ERROR");
+      const message = (result.error as { message: string }).message;
+      expect(message).toContain("5");
+      expect(message).toContain("7");
+    }
+    expect(deps.openUpstream).not.toHaveBeenCalled();
+  });
+
+  it("NEGATIVE: upstream config sync.enabled=true → VALIDATION_ERROR naming the v1 SQLite-only constraint; probe never called (config check precedes probe)", async () => {
+    const { IssueReportService } = await importIssueReportService();
+    const { deps } = makeFakeDeps({
+      loadUpstreamConfig: vi.fn(() => ok({ sync: { enabled: true } } as unknown as LoreConfig)),
+    });
+    const service = new IssueReportService(deps);
+
+    const result = await service.report(BASE_INPUT, BASE_CFG);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("VALIDATION_ERROR");
+      const message = (result.error as { message: string }).message.toLowerCase();
+      expect(message).toContain("sqlite");
+    }
+    expect(deps.probe).not.toHaveBeenCalled();
+  });
+
+  it("NEGATIVE: root-PRD mismatch (matchRootPrd fails) → VALIDATION_ERROR naming expected vs found; createDraft never called", async () => {
+    const { IssueReportService } = await importIssueReportService();
+    const port = makeFakePort({
+      resolveRootDoc: vi.fn(async () => ok({ id: "01OTHERROOT", slug: "prd-other-project" })),
+    });
+    const { deps } = makeFakeDeps({ port });
+    const service = new IssueReportService(deps);
+
+    // BASE_CFG.root_prd === "prd-lore"; upstream's actual root is "prd-other-project".
+    const result = await service.report(BASE_INPUT, BASE_CFG);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("VALIDATION_ERROR");
+      const message = (result.error as { message: string }).message;
+      expect(message).toContain("prd-lore"); // expected
+      expect(message).toContain("prd-other-project"); // found
+    }
+    expect(port.createDraft).not.toHaveBeenCalled();
+  });
+
+  it("NEGATIVE: 10 open reports already filed by this reporter_project → VALIDATION_ERROR listing the 10 open ids; createDraft never called", async () => {
+    const { IssueReportService } = await importIssueReportService();
+    const openTasks = Array.from({ length: 10 }, (_, i) => ({
+      id: `01OPENTASK${i}`,
+      status: "draft",
+      extra: buildIssueReportExtra({
+        reporter_project: "consumer-a",
+        reporter_actor: "agent:consumer-a",
+        lore_version: "0.9.0",
+        expected: "e",
+        actual: "a",
+        reported_at: NOW_ISO,
+        possible_duplicates: [],
+      }),
+    }));
+    const port = makeFakePort({ listOpenAdhocDrafts: vi.fn(async () => ok(openTasks)) });
+    const { deps } = makeFakeDeps({ port, reporterProject: "consumer-a" });
+    const service = new IssueReportService(deps);
+
+    const result = await service.report(BASE_INPUT, BASE_CFG);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("VALIDATION_ERROR");
+      const message = (result.error as { message: string }).message;
+      for (const task of openTasks) {
+        expect(message).toContain(task.id);
+      }
+    }
+    expect(port.createDraft).not.toHaveBeenCalled();
+  });
+
+  it("STATE: searchDuplicates failure degrades to dedup_degraded=true but still proceeds to createDraft (advisory never blocks)", async () => {
+    const { IssueReportService } = await importIssueReportService();
+    const port = makeFakePort({
+      searchDuplicates: vi.fn(async () => err({ code: "STORE_ERROR", message: "fts5 unavailable" })),
+    });
+    const { deps } = makeFakeDeps({ port });
+    const service = new IssueReportService(deps);
+
+    const result = await service.report(BASE_INPUT, BASE_CFG);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.dedup_degraded).toBe(true);
+    }
+    expect(port.createDraft).toHaveBeenCalledTimes(1);
+  });
+
+  it("HAPPY: successful createDraft appends exactly one receipt, strictly AFTER createDraft resolves, with {upstream_doc_id,title,at}", async () => {
+    const { IssueReportService } = await importIssueReportService();
+    const callOrder: string[] = [];
+    const port = makeFakePort({
+      createDraft: vi.fn(async () => {
+        callOrder.push("createDraft");
+        return ok({ id: "01NEWDOCID" });
+      }),
+    });
+    const receipts: LocalReceiptLog = {
+      append: vi.fn((entry: { upstream_doc_id: string; title: string; at: string }) => {
+        callOrder.push("append");
+        return ok(undefined);
+      }),
+      read: vi.fn(() => ok({ entries: [], corrupt_lines: [] })),
+    };
+    const { deps } = makeFakeDeps({ port, receipts });
+    const service = new IssueReportService(deps);
+
+    const result = await service.report(BASE_INPUT, BASE_CFG);
+
+    expect(result.ok).toBe(true);
+    expect(receipts.append).toHaveBeenCalledTimes(1);
+    // Ordering: createDraft must resolve BEFORE append is invoked (§5 step 9:
+    // "only after step-8 success").
+    expect(callOrder).toEqual(["createDraft", "append"]);
+
+    const appendMock = receipts.append as ReturnType<typeof vi.fn>;
+    const firstCall = appendMock.mock.calls[0];
+    if (!firstCall) throw new Error("receipts.append was not called");
+    const appendedEntry = firstCall[0] as { upstream_doc_id: string; title: string; at: string };
+    expect(appendedEntry.upstream_doc_id).toBe("01NEWDOCID");
+    expect(appendedEntry.title).toBe(BASE_INPUT.title);
+    expect(typeof appendedEntry.at).toBe("string");
+  });
+
+  // ─── AC-072-13: static import-graph pin ──────────────────────────────────
+
+  it("AC-072-13: issue-report-service.ts has no value import of flows/* or bun:sqlite (import type allowed)", () => {
+    const __dirname = dirname(fileURLToPath(import.meta.url));
+    // tests/unit/service -> src/service (3 levels up + src/service)
+    const serviceSourcePath = resolve(__dirname, "../../../src/service/issue-report-service.ts");
+
+    // The implementation module does not exist yet — this read is expected to
+    // throw ENOENT (a legitimate RED failure: the file this AC pins doesn't
+    // exist to be scanned).
+    const content = readFileSync(serviceSourcePath, "utf8");
+
+    // No bare `bun:sqlite` VALUE import (type-only via `import type` allowed).
+    const bunSqliteValueImport = /^\s*import\s+(?!type\b)[^;]*from\s+["']bun:sqlite["']/m;
+    expect(bunSqliteValueImport.test(content)).toBe(false);
+
+    // No bare `flows/*` VALUE import (type-only via `import type` allowed) —
+    // matches any relative specifier whose path contains a `flows/` segment,
+    // regardless of how many `../` levels precede it.
+    const flowsValueImport = /^\s*import\s+(?!type\b)[^;]*from\s+["'][^"']*\/flows\/[^"']*["']/m;
+    expect(flowsValueImport.test(content)).toBe(false);
+  });
+});
