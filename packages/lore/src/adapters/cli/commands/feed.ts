@@ -24,6 +24,17 @@
  * — see `tests/integration/cli-feed-task-start.bun.test.ts`) — this file's dispatch
  * SHAPE changed, no checkpoint's OWN logic did.
  *
+ * DISPATCH TABLE MEMBERSHIP (SPEC-070 review Fix F7 — dispatch-triplication fix):
+ * `SPECIAL_CHECKPOINT_HANDLERS`'s key set is asserted (at MODULE INIT, fail loud,
+ * `assertHandlersCoverDescriptor`) to cover every checkpoint named by
+ * `../../../flows/feed-flow.js::SPECIAL_FEED_CHECKPOINTS` — the SAME descriptor
+ * `adapters/mcp/tools.ts`'s `lore_feed` handler consumes for its own branch
+ * membership + required-field validation + contradictory-combo rejection (Fix F8).
+ * Before this fix, "which checkpoints are special" was maintained independently in
+ * three places with no test catching drift between them; a checkpoint added to the
+ * descriptor without a matching entry here now throws at CLI startup instead of
+ * silently falling through to the generic `buildFeed` advisory-note path.
+ *
  * `<checkpoint>` derives a produced-type via `CHECKPOINT_PRODUCED_TYPE`
  * (`flows/feed-flow.ts`) for the generic path — this slice only wires `spec-create` →
  * `"spec"`. When an approved `knowledge/skill` doc scoped `extra.skill.applies_to` to
@@ -67,7 +78,13 @@ import { defineCommand } from "citty";
 import type { LoreConfig } from "@lore/core";
 import type { App } from "../../../app.js";
 import { loadLoreApp } from "../loader.js";
-import { buildFeed, buildResumeFeed, SESSION_RESUME_CHECKPOINT } from "../../../flows/feed-flow.js";
+import {
+  buildFeed,
+  buildResumeFeed,
+  SESSION_RESUME_CHECKPOINT,
+  SPECIAL_FEED_CHECKPOINTS,
+  assertHandlersCoverDescriptor,
+} from "../../../flows/feed-flow.js";
 import { buildPhaseStartPack, PHASE_START_CHECKPOINT } from "../../../flows/phase-feed-flow.js";
 import type { PhaseStartPack } from "../../../flows/phase-feed-flow.js";
 import { buildTaskStartPack, TASK_START_CHECKPOINT } from "../../../flows/task-feed-flow.js";
@@ -87,10 +104,17 @@ interface FeedArgs {
   json?: unknown;
 }
 
-/** One checkpoint's dedicated handler — sets `process.exitCode`/prints output itself, mirroring the pre-refactor inline branches. */
-type CheckpointHandler = (app: App, args: FeedArgs) => Promise<void>;
+/**
+ * One checkpoint's dedicated handler — sets `process.exitCode`/prints output itself,
+ * mirroring the pre-refactor inline branches. Every handler takes the SAME
+ * `(app, args, config)` shape (SPEC-070 Fix F7) — `config` is unused by
+ * `handleSessionResume`/`handlePhaseStart` (only `handleTaskStart` reads it, for
+ * `resolveTaskStartBudgets`) but a uniform signature lets `SPECIAL_CHECKPOINT_HANDLERS`
+ * be a single module-scope table instead of a per-invocation closure-building step.
+ */
+type CheckpointHandler = (app: App, args: FeedArgs, config: LoreConfig | undefined) => Promise<void>;
 
-async function handleSessionResume(app: App, args: FeedArgs): Promise<void> {
+async function handleSessionResume(app: App, args: FeedArgs, _config: LoreConfig | undefined): Promise<void> {
   const result = await buildResumeFeed(app, {
     ...(typeof args.plan === "string" ? { plan: args.plan } : {}),
     ...(typeof args.handoff === "string" ? { handoff: args.handoff } : {}),
@@ -111,7 +135,7 @@ async function handleSessionResume(app: App, args: FeedArgs): Promise<void> {
   process.exitCode = 0;
 }
 
-async function handlePhaseStart(app: App, args: FeedArgs): Promise<void> {
+async function handlePhaseStart(app: App, args: FeedArgs, _config: LoreConfig | undefined): Promise<void> {
   if (typeof args.target !== "string" || args.target.length === 0) {
     process.stderr.write(
       "Error: `lore feed phase-start <phase>` requires a phase document ID or slug.\n",
@@ -164,6 +188,25 @@ async function handleTaskStart(app: App, args: FeedArgs, config: LoreConfig | un
   process.exitCode = 0;
 }
 
+/**
+ * The checkpoint→handler table (SPEC-070 Fix F7) — module-scope (not rebuilt per
+ * `run()` invocation, unlike the pre-fix closure-over-`config` shape) now that every
+ * handler shares the uniform `(app, args, config)` signature.
+ */
+const SPECIAL_CHECKPOINT_HANDLERS: Readonly<Record<string, CheckpointHandler>> = {
+  [SESSION_RESUME_CHECKPOINT]: handleSessionResume,
+  [PHASE_START_CHECKPOINT]: handlePhaseStart,
+  [TASK_START_CHECKPOINT]: handleTaskStart,
+};
+
+// SPEC-070 Fix F7: fail loud, at module init, if the shared SPECIAL_FEED_CHECKPOINTS
+// descriptor (flows/feed-flow.ts, the SSOT the MCP `lore_feed` handler ALSO consumes)
+// names a checkpoint this file has no handler for — the CLI dispatch table's own
+// deterministic self-check that it hasn't silently drifted behind the SSOT. A checkpoint
+// present in the descriptor but absent here would otherwise silently fall through to the
+// generic `buildFeed` advisory-note path below and exit 0, masking the gap.
+assertHandlersCoverDescriptor(SPECIAL_FEED_CHECKPOINTS, SPECIAL_CHECKPOINT_HANDLERS);
+
 export default defineCommand({
   meta: {
     name: "feed",
@@ -205,15 +248,9 @@ export default defineCommand({
   async run({ args }) {
     const { app, config } = loadLoreApp();
     try {
-      const specialHandlers: Record<string, CheckpointHandler> = {
-        [SESSION_RESUME_CHECKPOINT]: handleSessionResume,
-        [PHASE_START_CHECKPOINT]: handlePhaseStart,
-        [TASK_START_CHECKPOINT]: (a, ar) => handleTaskStart(a, ar, config),
-      };
-
-      const handler = specialHandlers[args.checkpoint as string];
+      const handler = SPECIAL_CHECKPOINT_HANDLERS[args.checkpoint as string];
       if (handler !== undefined) {
-        await handler(app, args);
+        await handler(app, args, config);
         return;
       }
 

@@ -33,7 +33,14 @@
  * both via the SAME wiring (`../cli/phase-wiring.js::buildPhaseFeedFlowDeps`,
  * `../cli/task-feed-wiring.js::buildTaskFeedFlowDeps`) the CLI `lore feed
  * phase-start`/`lore feed task-start` dispatches call, so CLI/MCP payloads are
- * deep-equal by construction.
+ * deep-equal by construction. Review Fix F7/F8 (dispatch-triplication + schema
+ * laxness): `lore_feed`'s branch membership + per-checkpoint required-field
+ * validation now derive from `../../flows/feed-flow.js::SPECIAL_FEED_CHECKPOINTS`
+ * (the SAME descriptor the CLI's `commands/feed.ts` asserts handler coverage
+ * against at module init) instead of three independently-maintained `if` checks,
+ * and a contradictory field combo (`task-start` + `phase`, `phase-start` + `task`,
+ * or ANY non-special checkpoint carrying `task`/`phase`) is rejected up front with
+ * `VALIDATION_ERROR` instead of silently ignoring the extraneous field.
  *
  * Architecture: Tools with input use the `registerToolWithArgs` helper defined below, which:
  *   1. Calls `server.tool(name, desc, handler)` in 3-arg form (avoids ZodRawShapeCompat type bomb)
@@ -52,8 +59,9 @@
  * correct runtime behaviour (SDK reads `tool.inputSchema` at call time, not registration time).
  * — reason: ADR-01KVYFJ5G8EVB6S5NMD3PNY5KA §"Fast Path" Pattern 1 (implementation note)
  *
- * Public surface: `registerTools(server, app, config?): void` (`config` is an
- * AC-070-9 additive optional third param — see its own JSDoc below)
+ * Public surface: `registerTools(server, app, getConfig?): void` (`getConfig` is a
+ * SPEC-070 F6 additive optional third param — a config GETTER, called per "task-start"
+ * `lore_feed` invocation, not a one-time snapshot — see its own JSDoc below)
  * Invariants: one registration per tool name; every tool returns `{ content: [text] }` or
  *   `{ content: [text], isError: true }` (never throws across the MCP boundary).
  * Side-effect class: IO (reads/writes corpus via App services; no network I/O itself).
@@ -75,7 +83,12 @@ import { isAssessAiBraked } from "../../ai/resolve-ai.js";
 import { REVIEW_PROMPT_VERSION } from "../../ai/review-template.js";
 import { CORPUS_SCHEMA_INFO } from "./schema-info.js";
 import { runCalibrationHook } from "../../flows/calibration-hook.js";
-import { buildFeed, buildResumeFeed, SESSION_RESUME_CHECKPOINT } from "../../flows/feed-flow.js";
+import {
+  buildFeed,
+  buildResumeFeed,
+  SESSION_RESUME_CHECKPOINT,
+  SPECIAL_FEED_CHECKPOINTS,
+} from "../../flows/feed-flow.js";
 import { buildPhaseStartPack, PHASE_START_CHECKPOINT } from "../../flows/phase-feed-flow.js";
 import { buildTaskStartPack, TASK_START_CHECKPOINT } from "../../flows/task-feed-flow.js";
 import { buildTaskFeedFlowDeps, resolveTaskStartBudgets } from "../cli/task-feed-wiring.js";
@@ -789,27 +802,34 @@ async function reviewDocViaMcp(
  * Tools with input use `registerToolWithArgs` (avoids ZodRawShapeCompat type bomb).
  * Tools without input (`lore_schema`) use plain `server.tool(name, desc, cb)`.
  *
- * SPEC-070 AC-070-9: `registerTools` gains an ADDITIVE optional third `config`
- * param — the SAME parsed `LoreConfig` the CLI's `loadLoreApp()` returns
- * (`packages/lore/src/index.ts`'s `--mcp-server` branch threads it through
- * `startMcpServer`). Every pre-existing call site (production `index.ts` prior
- * to this fix, every test in this file) omits it — `config` stays `undefined`,
- * and `resolveTaskStartBudgets(undefined)` returns `{}`, so the "task-start"
- * branch below falls back to `DEFAULT_TASK_START_BUDGETS` exactly as before
- * (REGRESSION-safe). Only the "task-start" branch consumes it today — no other
- * tool reads `config` yet, mirroring `lore_staleness_probe`'s per-call
- * `limit`/`min_age_days` override precedent (that one takes the override as a
- * per-call arg instead, since MCP previously had no config-threading seam at
- * all; this is the first tool to close that gap for one section).
+ * SPEC-070 F6 (config-staleness fix, supersedes the AC-070-9 snapshot): `registerTools`
+ * gains an ADDITIVE optional third `getConfig` param — a GETTER (`() => LoreConfig |
+ * undefined`), not a one-time `LoreConfig` value. `lore --mcp-server` is a long-lived
+ * process; a config VALUE closed over at server-start (the pre-fix shape) could never
+ * observe a `.lore/config.yaml` edit made after the server started — the CLI never had
+ * this problem, since every CLI invocation is a fresh process that re-reads config from
+ * scratch. `packages/lore/src/index.ts`'s `--mcp-server` branch now threads
+ * `../cli/loader.js::loadProjectConfig` itself (re-runs the SAME canonical parse
+ * `loadLoreApp` performs, never a second hand-rolled YAML read) as this getter, so the
+ * "task-start" branch below calls `getConfig?.()` FRESH on every `lore_feed` invocation.
+ * Every pre-existing call site (every test in this file) omits the third arg —
+ * `getConfig` stays `undefined`, `getConfig?.()` short-circuits to `undefined`, and
+ * `resolveTaskStartBudgets(undefined)` returns `{}`, so the "task-start" branch falls
+ * back to `DEFAULT_TASK_START_BUDGETS` exactly as before (REGRESSION-safe). Only the
+ * "task-start" branch calls it today — no other tool reads config yet, mirroring
+ * `lore_staleness_probe`'s per-call `limit`/`min_age_days` override precedent (that one
+ * takes the override as a per-call ARG instead, since MCP previously had no
+ * config-threading seam at all; this is the first tool to close that gap for one
+ * section).
  *
  * @param server - The McpServer instance to register tools on
  * @param app - The composition root providing access to all services
- * @param config - The parsed project `.lore/config.yaml` (or `undefined` when
- *   none was found/parsed) — same value shape `loadLoreApp()`'s `config`
- *   return field carries. Currently read only by the "task-start" `lore_feed`
- *   branch via `resolveTaskStartBudgets`.
+ * @param getConfig - A zero-arg getter returning the parsed project
+ *   `.lore/config.yaml` (or `undefined` when none was found/parsed), called ONCE
+ *   PER "task-start" `lore_feed` invocation rather than read from a closed-over
+ *   snapshot — see this function's own JSDoc above for why a getter, not a value.
  */
-export function registerTools(server: McpServer, app: App, config?: LoreConfig): void {
+export function registerTools(server: McpServer, app: App, getConfig?: () => LoreConfig | undefined): void {
   const { corpusService, versionService, reviewService, outlineService, taskWorkflowService, auditService, judgmentService } = app;
 
   // lore_create
@@ -1550,9 +1570,47 @@ export function registerTools(server: McpServer, app: App, config?: LoreConfig):
   registerToolWithArgs(
     server,
     "lore_feed",
-    'Feed-before-produce PULL: return the governing skill\'s rule slice for a checkpoint ahead of writing (advisory only, never a gate — always succeeds); checkpoint "session-resume" dispatches to SPEC-041 S2 resume, "phase-start" to the SPEC-056 phase-start pack, and "task-start" to the SPEC-070 task-start pack instead (each of the three CAN fail on an unresolvable target)',
+    'Feed-before-produce PULL: return the governing skill\'s rule slice for a checkpoint ahead of writing (advisory only, never a gate — always succeeds); checkpoint "session-resume" dispatches to SPEC-041 S2 resume, "phase-start" to the SPEC-056 phase-start pack, and "task-start" to the SPEC-070 task-start pack instead (each of the three CAN fail on an unresolvable target); a contradictory field combo (e.g. "task-start" with `phase`, or any non-special checkpoint with `task`/`phase`) is rejected with VALIDATION_ERROR',
     LoreFeedSchema,
     async (args) => {
+      // SPEC-070 review Fix F8 (contradictory-combo rejection) + branch-membership/
+      // required-arg lookup, BOTH derived from the SAME `SPECIAL_FEED_CHECKPOINTS`
+      // descriptor (Fix F7) the CLI's `SPECIAL_CHECKPOINT_HANDLERS` table asserts
+      // coverage against — never a THIRD independently-maintained set of `if` checks.
+      // Runs BEFORE any branch dispatch below, so a contradictory or extraneous
+      // `task`/`phase` never silently reaches (and is silently ignored by) the wrong
+      // assembly: `task-start` + `phase`, `phase-start` + `task`, and a NON-special
+      // checkpoint (the generic `buildFeed` path) carrying `task` OR `phase` are all
+      // rejected here.
+      const specialDescriptor = SPECIAL_FEED_CHECKPOINTS[args.checkpoint];
+      for (const field of ["task", "phase"] as const) {
+        const suppliedValue = field === "task" ? args.task : args.phase;
+        if (suppliedValue === undefined) continue;
+        if (specialDescriptor?.requiredArg !== field) {
+          return errorContent({
+            code: "VALIDATION_ERROR",
+            field,
+            message:
+              specialDescriptor === undefined
+                ? `\`${field}\` is not a valid field for checkpoint "${args.checkpoint}" (it does not dispatch to a "${field}"-scoped pack)`
+                : specialDescriptor.requiredArg === null
+                  ? `\`${field}\` is not valid for checkpoint "${args.checkpoint}" (this checkpoint takes no task/phase target)`
+                  : `\`${field}\` is not valid for checkpoint "${args.checkpoint}" (it requires \`${specialDescriptor.requiredArg}\`, not \`${field}\`)`,
+          });
+        }
+      }
+      if (specialDescriptor !== undefined && specialDescriptor.requiredArg !== null) {
+        const requiredField = specialDescriptor.requiredArg;
+        const suppliedValue = requiredField === "task" ? args.task : args.phase;
+        if (suppliedValue === undefined) {
+          return errorContent({
+            code: "VALIDATION_ERROR",
+            field: requiredField,
+            message: `checkpoint "${args.checkpoint}" requires a \`${requiredField}\` document id or slug`,
+          });
+        }
+      }
+
       if (args.checkpoint === SESSION_RESUME_CHECKPOINT) {
         const result = await buildResumeFeed(app, {
           ...(args.plan !== undefined ? { plan: args.plan } : {}),
@@ -1582,15 +1640,18 @@ export function registerTools(server: McpServer, app: App, config?: LoreConfig):
         return textContent(result.value);
       }
 
-      // SPEC-070 §Design Decisions D1, D8; AC-070-9: mirrors the CLI's `lore feed
-      // task-start <task>` dedicated dispatch — the SAME buildTaskFeedFlowDeps/
-      // buildTaskStartPack construction, so CLI --json and this tool's response are
-      // deep-equal by construction for identical corpus state. Budgets now resolve
-      // from `config` (this function's additive third param, threaded from
-      // `startMcpServer`/`index.ts`'s `--mcp-server` branch) via the SAME
-      // resolveTaskStartBudgets the CLI's `handleTaskStart` calls — `config`
-      // undefined (no third arg passed) resolves to `{}`, so the pre-fix
-      // DEFAULT_TASK_START_BUDGETS fallback is preserved byte-for-byte (REGRESSION).
+      // SPEC-070 §Design Decisions D1, D8; F6 (config-staleness fix, supersedes
+      // AC-070-9's snapshot): mirrors the CLI's `lore feed task-start <task>`
+      // dedicated dispatch — the SAME buildTaskFeedFlowDeps/buildTaskStartPack
+      // construction, so CLI --json and this tool's response are deep-equal by
+      // construction for identical corpus state. `getConfig?.()` is called HERE,
+      // PER INVOCATION — not once at server-start — so a `.lore/config.yaml` edit
+      // made between two `lore_feed` calls on the same long-lived server changes
+      // the SECOND call's resolved budgets without a restart (AC-070-15). Budgets
+      // resolve via the SAME resolveTaskStartBudgets the CLI's `handleTaskStart`
+      // calls — an omitted/undefined-returning getter resolves to `{}`, so the
+      // pre-fix DEFAULT_TASK_START_BUDGETS fallback is preserved byte-for-byte
+      // (REGRESSION).
       if (args.checkpoint === TASK_START_CHECKPOINT) {
         if (args.task === undefined) {
           return errorContent({
@@ -1600,7 +1661,7 @@ export function registerTools(server: McpServer, app: App, config?: LoreConfig):
           });
         }
         const deps = buildTaskFeedFlowDeps(app);
-        const budgets = resolveTaskStartBudgets(config);
+        const budgets = resolveTaskStartBudgets(getConfig?.());
         const result = await buildTaskStartPack(deps, args.task, budgets);
         if (!result.ok) return errorContent(result.error);
         return textContent(result.value);

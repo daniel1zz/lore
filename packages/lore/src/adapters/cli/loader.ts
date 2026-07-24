@@ -36,7 +36,7 @@
 
 import { dirname } from "path";
 import { mergeDefaults, isAiConfigValidationError } from "@lore/core";
-import type { LoreConfig, LoreDefaults, CallerSurface } from "@lore/core";
+import type { LoreConfig, LoreDefaults, CallerSurface, LoreError, Result } from "@lore/core";
 // reason: loadConfig/loadGlobalConfig/resolveGlobalConfigPath read the filesystem
 // via Node fs/path/os — only reachable via the @lore/core/node subpath
 // (browser-safety split, packages/core/src/CLAUDE.md).
@@ -71,6 +71,52 @@ function detectCliSurface(): CallerSurface {
     return "agent";
   }
   return "cli";
+}
+
+/**
+ * Resolves the project directory one level up from a discovered `.lore/lore.db`
+ * path and loads `.lore/config.yaml` via `@lore/core/node`'s `loadConfig` — the
+ * ONE parse both {@link loadLoreApp} (one-time CLI startup) and
+ * {@link loadProjectConfig} (per-call MCP re-read, SPEC-070 F6) build on, so a
+ * long-lived MCP server observing config edits without restart never grows a
+ * second, independently-drifting YAML-parsing implementation.
+ *
+ * @param dbPath - An already-discovered `.lore/lore.db` path (`findLoreDbPath()`).
+ * @returns The raw `loadConfig` result — `sync` NOT yet stripped (each caller
+ *   strips it on its own success path, matching their pre-existing behaviour).
+ */
+function resolveProjectConfigResult(dbPath: string): Result<LoreConfig, LoreError> {
+  // The .lore dir is always one level up from lore.db
+  const loreDir = dirname(dbPath);
+  const projectDir = dirname(loreDir);
+  return loadConfig(projectDir);
+}
+
+/**
+ * Re-resolves `.lore/lore.db` (`findLoreDbPath`) and re-loads `.lore/config.yaml`
+ * (`resolveProjectConfigResult`) fresh on every call, sync section stripped — the
+ * SAME canonical parse {@link loadLoreApp} performs at CLI startup, reused here so
+ * a long-lived caller (the MCP server's per-call `getConfig` getter, SPEC-070 F6)
+ * observes `.lore/config.yaml` edits without a restart, exactly as a CLI
+ * invocation naturally would (a fresh process per call).
+ *
+ * Deliberately narrower than `loadLoreApp`: no App construction, no global-config
+ * merge, and no `process.exit` on an invalid `ai` block (AC-HJ-3's loud-exit is a
+ * ONE-TIME CLI-startup concern — a live MCP server's per-call config re-read must
+ * never abort the process mid-request). Every parse failure, `ai`-block-invalid
+ * included, degrades to `undefined` here — the caller's pre-existing "no config"
+ * fallback path (e.g. `resolveTaskStartBudgets(undefined)` returning `{}`).
+ *
+ * @returns The parsed project config with `sync` stripped, or `undefined` when no
+ *   `.lore/lore.db` is discoverable from `cwd`, or the config file is
+ *   missing/malformed.
+ */
+export function loadProjectConfig(): LoreConfig | undefined {
+  const dbPath = findLoreDbPath();
+  const configResult = resolveProjectConfigResult(dbPath);
+  if (!configResult.ok) return undefined;
+  const { sync: _sync, ...configWithoutSync } = configResult.value;
+  return configWithoutSync as LoreConfig;
 }
 
 /**
@@ -125,10 +171,7 @@ export function loadLoreApp(): {
   config: LoreConfig | undefined;
 } {
   const dbPath = findLoreDbPath();
-  // The .lore dir is always one level up from lore.db
-  const loreDir = dirname(dbPath);
-  const projectDir = dirname(loreDir);
-  const configResult = loadConfig(projectDir);
+  const configResult = resolveProjectConfigResult(dbPath);
   let rawConfig: LoreConfig | undefined;
   if (configResult.ok) {
     rawConfig = configResult.value;

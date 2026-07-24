@@ -8,14 +8,17 @@ export {};
 // so we intercept here before calling runMain().
 if (process.argv.includes("--mcp-server")) {
   const { startMcpServer } = await import("./adapters/mcp/index.js");
-  const { loadLoreApp } = await import("./adapters/cli/loader.js");
-  // SPEC-070 AC-070-9: thread the SAME parsed config the CLI's `lore feed
-  // task-start` reads through to the MCP surface, so `lore_feed`'s "task-start"
-  // branch resolves `workflow.task_feed.*` budgets identically instead of
-  // always falling back to DEFAULT_TASK_START_BUDGETS (previously `config` was
-  // destructured off and silently discarded here).
-  const { app, config } = loadLoreApp();
-  await startMcpServer(app, config);
+  const { loadLoreApp, loadProjectConfig } = await import("./adapters/cli/loader.js");
+  // SPEC-070 F6 (config-staleness fix): pass a GETTER, not the one-time `config`
+  // snapshot `loadLoreApp()` returned at server-start — `loadProjectConfig` re-runs
+  // the SAME canonical `.lore/config.yaml` parse `loadLoreApp` uses (never a second
+  // hand-rolled YAML read) so a long-lived `lore --mcp-server` process observes
+  // `workflow.task_feed.*` (and any other config) edits made mid-session, without
+  // requiring a restart — the CLI never had this staleness problem because each
+  // invocation is a fresh process. `app` itself still comes from the one-time
+  // `loadLoreApp()` call (DB connection + services are legitimately long-lived).
+  const { app } = loadLoreApp();
+  await startMcpServer(app, loadProjectConfig);
 } else {
   // reason: CLI branch ONLY — installSyncStdio replaces console.log/info/warn/
   // error/debug with a writeAllSync-backed implementation immune to the
