@@ -35,6 +35,14 @@
  *   buildResumeFeed(app, opts)               — SPEC-041 S2 resume dispatch, called
  *                                               BEFORE `buildFeed`'s
  *                                               `CHECKPOINT_PRODUCED_TYPE` lookup
+ *   SPECIAL_FEED_CHECKPOINTS                 — SPEC-070 Fix F7 SSOT: the special
+ *                                               checkpoint set (session-resume/
+ *                                               phase-start/task-start) + which
+ *                                               field each requires, consumed by
+ *                                               both `commands/feed.ts` and
+ *                                               `adapters/mcp/tools.ts`
+ *   assertHandlersCoverDescriptor(d, h)      — fail-loud coverage check, called by
+ *                                               `commands/feed.ts` at module init
  *
  * @invariant `buildFeed` never throws and its result never carries a caller-visible
  *   failure signal — see module header. A checkpoint absent from
@@ -61,6 +69,8 @@ import { buildFeedingPack, renderFeedingPack } from "../service/gate-feeding.js"
 import { renderResolvedToMarkdown } from "../service/outline-service.js";
 import type { ResumeHandoffRecord, ResumeResult } from "../service/session-service.js";
 import { formatError } from "../adapters/cli/utils.js";
+import { PHASE_START_CHECKPOINT } from "./phase-feed-flow.js";
+import { TASK_START_CHECKPOINT } from "./task-feed-flow.js";
 
 /** Time seam (SPEC-043 D3/D4 convention) — never `Date.now()` read directly. */
 const defaultNow = (): string => new Date().toISOString();
@@ -334,4 +344,77 @@ export async function buildResumeFeed(
     resume: result.value,
     feed: renderResumeFeed(result.value),
   });
+}
+
+// ─── SPEC-070 Fix F7: shared special-checkpoint descriptor (dispatch-triplication fix) ─
+
+/**
+ * ONE checkpoint each for `"task"` (an "id-or-slug" positional/field) or `"phase"`
+ * required, or `null` when the checkpoint has no single mandatory target field
+ * (`"session-resume"` — `plan`/`handoff`/`by` are all optional).
+ */
+export type SpecialFeedCheckpointDescriptor = { readonly requiredArg: "task" | "phase" | null };
+
+/**
+ * The ONE exported descriptor of every checkpoint `lore feed`/`lore_feed` dispatch to
+ * a DEDICATED assembly instead of the generic `buildFeed`/`CHECKPOINT_PRODUCED_TYPE`
+ * path above — `session-resume` (SPEC-041 D5), `phase-start` (SPEC-056 D5), `task-start`
+ * (SPEC-070 D1). Before this fix, "which checkpoints are special" was maintained
+ * independently in THREE places (this module's own header comment, `commands/feed.ts`'s
+ * handler table, `adapters/mcp/tools.ts`'s `if` chain) — a silent three-way SSOT that
+ * could drift without any test catching it. Both adapters now derive membership +
+ * per-checkpoint required-field validation from THIS map:
+ *   - `commands/feed.ts`'s `SPECIAL_CHECKPOINT_HANDLERS` table asserts, at MODULE INIT
+ *     (via {@link assertHandlersCoverDescriptor}, fail loud — never a silent fallthrough
+ *     to the generic `buildFeed` path), that every key here has a matching CLI handler.
+ *   - `adapters/mcp/tools.ts`'s `lore_feed` handler looks up `SPECIAL_FEED_CHECKPOINTS[checkpoint]`
+ *     for contradictory-field-combo rejection (task-start+phase, phase-start+task, a
+ *     non-special checkpoint carrying task or phase — Fix F8) AND for the
+ *     "missing required field" `VALIDATION_ERROR` (`requiredArg` non-null and absent).
+ *
+ * Handler/branch BODIES stay adapter-local — their dependencies genuinely differ (the
+ * CLI handler prints to stdout and sets `process.exitCode`; the MCP branch returns a
+ * `CallToolResult`) — only the SET of checkpoint names + which field each requires is
+ * centralised here.
+ */
+export const SPECIAL_FEED_CHECKPOINTS: Readonly<Record<string, SpecialFeedCheckpointDescriptor>> = {
+  [SESSION_RESUME_CHECKPOINT]: { requiredArg: null },
+  [PHASE_START_CHECKPOINT]: { requiredArg: "phase" },
+  [TASK_START_CHECKPOINT]: { requiredArg: "task" },
+};
+
+/**
+ * Asserts every checkpoint declared in `descriptor` has a matching key in `handlers` —
+ * throws (fail loud) naming the FIRST checkpoint missing one. `commands/feed.ts` calls
+ * this once, at MODULE INIT, against its own `SPECIAL_CHECKPOINT_HANDLERS` table, so a
+ * checkpoint added to {@link SPECIAL_FEED_CHECKPOINTS} without a matching CLI handler
+ * fails the very first time the CLI process starts — never a silent fallthrough to the
+ * generic `buildFeed` advisory-note path (which would print the wrong thing and exit 0,
+ * masking the gap). Exported (rather than private to `commands/feed.ts`, which
+ * transitively imports `bun:sqlite` via `loader.ts` and is therefore NOT
+ * vitest-reachable) so this invariant is unit-testable against fixture descriptor/
+ * handler pairs without spawning the compiled CLI binary.
+ *
+ * @param descriptor - The special-checkpoint descriptor map (production callers pass
+ *   {@link SPECIAL_FEED_CHECKPOINTS}).
+ * @param handlers - The checkpoint→handler table to check for coverage. Only key
+ *   presence is checked — handler value type is deliberately `unknown` so this
+ *   function stays usable from any adapter's own handler-table shape.
+ * @throws {Error} naming the first descriptor checkpoint absent from `handlers`.
+ * @example
+ * assertHandlersCoverDescriptor(SPECIAL_FEED_CHECKPOINTS, SPECIAL_CHECKPOINT_HANDLERS);
+ */
+export function assertHandlersCoverDescriptor(
+  descriptor: Readonly<Record<string, SpecialFeedCheckpointDescriptor>>,
+  handlers: Readonly<Record<string, unknown>>,
+): void {
+  for (const checkpoint of Object.keys(descriptor)) {
+    if (handlers[checkpoint] === undefined) {
+      throw new Error(
+        `SPECIAL_FEED_CHECKPOINTS declares checkpoint "${checkpoint}" with no matching ` +
+          "handler in the caller's handler table — add one before this checkpoint can " +
+          "dispatch (SPEC-070 Fix F7 SSOT invariant).",
+      );
+    }
+  }
 }

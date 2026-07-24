@@ -16,15 +16,18 @@ import { registerResources } from "./resources.js";
  * Blocks until the transport closes.
  *
  * @param app - The wired composition root.
- * @param config - SPEC-070 AC-070-9: the parsed project `.lore/config.yaml`
- *   (`loadLoreApp()`'s `config` return field, `undefined` when none was found/
- *   parsed) — threaded straight through to `registerTools` so the MCP
- *   `lore_feed` "task-start" branch resolves `workflow.task_feed.*` budgets
- *   identically to the CLI's `lore feed task-start`. Additive/optional — an
- *   omitted `config` preserves the pre-fix `DEFAULT_TASK_START_BUDGETS`
- *   fallback (REGRESSION-safe).
+ * @param getConfig - SPEC-070 F6 (staleness fix): a config GETTER, invoked once
+ *   PER `lore_feed` "task-start" call rather than a snapshot closed over at
+ *   server start — an MCP server is long-lived, so a `LoreConfig` value captured
+ *   once at `startMcpServer` time would never observe a `.lore/config.yaml` edit
+ *   made after the server started (the CLI never has this problem — each
+ *   invocation is a fresh process). Forwarded straight through to
+ *   `registerTools`, which calls it inside the "task-start" branch itself
+ *   (`resolveTaskStartBudgets(getConfig?.())`). Additive/optional — an omitted
+ *   `getConfig` preserves the pre-fix `DEFAULT_TASK_START_BUDGETS` fallback
+ *   (REGRESSION-safe).
  */
-export async function startMcpServer(app: App, config?: LoreConfig): Promise<void> {
+export async function startMcpServer(app: App, getConfig?: () => LoreConfig | undefined): Promise<void> {
   // reason: SPEC-024 §9.2 — MCP surface MUST use in-process flag, not env var.
   // The timing problem: if we tried to read a LORE_SURFACE env var, the MCP adapter
   // and the tool handlers share one process, so there is no reliable moment to set
@@ -37,7 +40,7 @@ export async function startMcpServer(app: App, config?: LoreConfig): Promise<voi
     version: "0.1.0",
   });
 
-  registerTools(server, app, config);
+  registerTools(server, app, getConfig);
   registerResources(server, app);
 
   const transport = new StdioServerTransport();
