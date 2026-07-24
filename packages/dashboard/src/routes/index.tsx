@@ -26,6 +26,7 @@ import { ResolvedPrdBody } from "@/components/ResolvedPrdBody";
 import { PendingPanel } from "@/components/PendingPanel";
 import { ActivePlansPanel } from "@/components/ActivePlansPanel";
 import { LoopPanel } from "@/components/LoopPanel";
+import { IssueReportsCard } from "@/components/IssueReportsCard";
 
 export const Route = createFileRoute("/")({
   component: HomePage,
@@ -102,6 +103,7 @@ function HomePage(): React.ReactElement {
       </div>
 
       <aside className="space-y-4">
+        <IssueReportsCard onNavigate={() => void navigate({ to: "/issues" })} />
         <PendingPanel onNavigate={handleNavigate} />
         <ActivePlansPanel onNavigate={handleNavigate} />
         <LoopPanel />

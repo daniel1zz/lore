@@ -4,7 +4,8 @@
  *   the server's { ok, data } envelope and normalize errors.
  * Public surface: apiList, apiSearch, apiTree, apiGetDoc, apiGetStatus,
  *   apiGetJudgments, apiGetAuditForDoc, apiGetAuditVerify, apiGetCalibrationStats,
- *   apiGetPendingReview, apiGetReady, apiGetConfig, apiGetMachineConfig
+ *   apiGetPendingReview, apiGetReady, apiGetConfig, apiGetMachineConfig,
+ *   apiGetIssueReports
  * Invariants: 5-second timeout via AbortSignal.timeout; never leaks raw Response objects.
  *   Throws ApiError on non-2xx or server-side { ok: false } — EXCEPT `apiGetReady`,
  *   which returns `Result<ReadyRecord[], ApiError>` per its SPEC-037 §2 contract
@@ -593,4 +594,45 @@ export async function apiGetConfig(): Promise<ConfigReadResponse<LoreConfig>> {
  */
 export async function apiGetMachineConfig(): Promise<ConfigReadResponse<GlobalLoreConfig>> {
   return fetchJson<ConfigReadResponse<GlobalLoreConfig>>("/api/config/machine");
+}
+
+// ─── SPEC-074: dashboard Issues triage projection ────────────────────────────
+
+/**
+ * One row of the `GET /api/issue-reports` projection. Mirrors `IssueReportRow`
+ * (`packages/lore/src/adapters/http/issue-reports-routes.ts`) exactly — the 8
+ * report-identity fields plus lifecycle `status`. Never carries the full
+ * `extra.issue_report` payload (e.g. `expected`/`actual`/`repro_command`) —
+ * the detail view reads those via the existing `GET /api/docs/:id` route
+ * (`apiGetDoc`), per the server module's own doc comment.
+ */
+export interface IssueReportRow {
+  id: string;
+  slug: string;
+  title: string;
+  reporter_project: string;
+  reporter_actor: string;
+  lore_version: string;
+  reported_at: string;
+  possible_duplicates: string[];
+  status: string;
+}
+
+/** Response shape of `GET /api/issue-reports`. `open_count` is always `rows.length`. */
+export interface IssueReportsResponse {
+  rows: IssueReportRow[];
+  open_count: number;
+}
+
+/**
+ * Fetch the open incoming issue-report projection (SPEC-074) — the SAME
+ * endpoint the dashboard's nav badge, home card, and Issues list page all
+ * read (spec's "one endpoint, no second count route" design note — see
+ * `src/lib/issue-reports-query.ts`, this file's shared TanStack Query binding).
+ *
+ * @returns `{ rows, open_count }` — rows sorted `reported_at` descending.
+ * @throws {ApiError} On HTTP or network error.
+ */
+export async function apiGetIssueReports(): Promise<IssueReportsResponse> {
+  return fetchJson<IssueReportsResponse>("/api/issue-reports");
 }
