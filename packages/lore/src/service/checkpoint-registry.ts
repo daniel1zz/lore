@@ -76,6 +76,7 @@ import {
   checkOracleCoverage,
   type AcceptanceCriterion,
   type DocRecord,
+  type LoreError,
   // reason: SPEC-075 D6 — TaskAttestationInfo's home MOVED to @lore/core
   // (evidence-panel.ts), read from there directly rather than re-exported
   // through gate-predicates.ts (see that file's own JSDoc for the type).
@@ -810,6 +811,31 @@ function feedPlanClose(ctx: GateContext, failures: PredicateResult[]): string {
     missing: selectFailures(failures).map((f) => f.reason),
   });
   return renderFeedingPack(pack);
+}
+
+/**
+ * Structural signal for the SPEC-069 ad-hoc-task claim gap (task-fix-spec-069-gap-
+ * adhoc-task-claim-structurally-impossible): `true` exactly when a `getPlanBundle`
+ * lookup failed BECAUSE the resolved parent doc exists but is not `type: "plan"` —
+ * the precise `{code: "VALIDATION_ERROR", field: "type"}` shape
+ * `CorpusService.getPlanBundle` returns for a task auto-parented to the root PRD
+ * (SPEC-069's `--adhoc` channel) or any other non-plan parent. `task-claim`'s two
+ * call sites (`enforceClaimGate`, `runTaskClaimGate`) use this to route such a task
+ * through the SAME "no governing plan" vacuous-pass-on-`upstreamApproved` treatment
+ * `parent_id === null` already gets — see this module's third invariant.
+ *
+ * Deliberately keyed on the STRUCTURAL fact returned by the resolution itself, not
+ * on `task.extra.adhoc === true` — the latter is caller-set data that can drift (a
+ * hand-edited task, a future planless-task channel that never sets it); a parent
+ * that resolved but isn't a plan cannot lie about its own `type`. Every OTHER
+ * `getPlanBundle` failure (`DOC_NOT_FOUND` — an unresolvable or soft-deleted
+ * parent; a `STORE_ERROR`) is a real anomaly and must still propagate as a hard
+ * failure, never silently treated as "no governing plan".
+ *
+ * @param error - The `LoreError` a failed `getPlanBundle(task.parent_id)` call returned.
+ */
+export function isNonPlanParentError(error: LoreError): boolean {
+  return error.code === "VALIDATION_ERROR" && error.field === "type";
 }
 
 /**

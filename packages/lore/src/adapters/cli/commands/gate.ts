@@ -137,6 +137,7 @@ import {
   selectFailures,
   buildUpstreamSpecContext,
   buildAnchorGateContext,
+  isNonPlanParentError,
   type CheckpointDef,
   type GateCheckpoint,
   type GateContext,
@@ -683,6 +684,17 @@ async function runPlanPromoteGate(
  * value `lore tree`/`lore list`'s claim badges use (`resolveClaimTtlMinutes(config)`,
  * resolved ONCE in `app.ts`) — never re-derived a second time here.
  *
+ * SPEC-069 ad-hoc gap fix (task-fix-spec-069-gap-adhoc-task-claim-structurally-
+ * impossible): a `--adhoc` task's `parent_id` is the root PRD (non-null, but not a
+ * `plan`), so `getPlanBundle` used to hard-fail this gate with "Expected a plan
+ * document" for the ENTIRE `--adhoc` channel. `isNonPlanParentError` distinguishes
+ * that specific, structural failure shape from every other `getPlanBundle` error and
+ * routes it through the vacuous-pass-on-upstream-spec branch, while still running
+ * `noAnchorOverlap` against `app.taskWorkflowService.findAdhocSiblingTasks()` (every
+ * other corpus-wide `extra.adhoc === true` task) — never an empty sibling list, which
+ * would silently disable this predicate for every ad-hoc task. See the inline `reason`
+ * comment at that branch.
+ *
  * @param app - Wired `App` (from `loadLoreApp()`).
  * @param taskIdOrSlug - Task document ULID or slug to gate.
  * @param by - The actor attempting the claim (feeds `noAnchorOverlap`'s "different
@@ -750,16 +762,45 @@ async function runTaskClaimGate(
   } else {
     const bundleResult = await app.corpusService.getPlanBundle(task.parent_id);
     if (!bundleResult.ok) {
-      process.stderr.write(formatError(bundleResult.error) + "\n");
-      process.exitCode = exitCode(bundleResult.error);
-      return;
+      // reason: SPEC-069 ad-hoc gap fix (task-fix-spec-069-gap-adhoc-task-claim-
+      // structurally-impossible) — every `--adhoc` task (SPEC-069 D2) is auto-
+      // parented to the root PRD, a NON-null `parent_id` that resolves but isn't
+      // `type: "plan"`. `getPlanBundle` reports that SPECIFIC shape via
+      // `isNonPlanParentError` (checkpoint-registry.ts); routed through the SAME
+      // "no governing plan" vacuous-pass-on-upstreamApproved treatment as
+      // `parent_id === null` above, mirroring `TaskWorkflowService.
+      // enforceClaimGate`'s identical fix — but `noAnchorOverlap` still runs
+      // against REAL corpus-wide ad-hoc siblings (`findAdhocSiblingTasks`), not
+      // an empty list, so this pre-flight gate keeps reaching the IDENTICAL
+      // verdict `lore claim` itself now reaches for the same task/actor (the
+      // anchor-overlap-parity invariant this function's own header documents).
+      // Every OTHER `getPlanBundle` failure (unresolvable/soft-deleted parent,
+      // store error) still exits loud, unchanged.
+      if (!isNonPlanParentError(bundleResult.error)) {
+        process.stderr.write(formatError(bundleResult.error) + "\n");
+        process.exitCode = exitCode(bundleResult.error);
+        return;
+      }
+      const siblingsResult = await app.taskWorkflowService.findAdhocSiblingTasks();
+      if (!siblingsResult.ok) {
+        process.stderr.write(formatError(siblingsResult.error) + "\n");
+        process.exitCode = exitCode(siblingsResult.error);
+        return;
+      }
+      ctx = {
+        ...buildUpstreamSpecContext(undefined),
+        ...buildAnchorGateContext(by, task, siblingsResult.value, nowIso, ttlMinutes),
+        targetIdOrSlug: taskIdOrSlug,
+        anchorOverlapEnabled,
+      };
+    } else {
+      ctx = {
+        ...buildUpstreamSpecContext(bundleResult.value.spec),
+        ...buildAnchorGateContext(by, task, bundleResult.value.tasks, nowIso, ttlMinutes),
+        targetIdOrSlug: taskIdOrSlug,
+        anchorOverlapEnabled,
+      };
     }
-    ctx = {
-      ...buildUpstreamSpecContext(bundleResult.value.spec),
-      ...buildAnchorGateContext(by, task, bundleResult.value.tasks, nowIso, ttlMinutes),
-      targetIdOrSlug: taskIdOrSlug,
-      anchorOverlapEnabled,
-    };
   }
 
   const results = checkpoint.check(ctx);

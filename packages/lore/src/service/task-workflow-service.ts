@@ -94,7 +94,7 @@ import type { DocId, DocRecord, DocStatus } from "@lore/core";
 import { NoOpTelemetry, type Telemetry, type TelemetryEvent, type TaskWorkflowEventName } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
-import { buildUpstreamSpecContext, buildAnchorGateContext } from "./checkpoint-registry.js";
+import { buildUpstreamSpecContext, buildAnchorGateContext, isNonPlanParentError } from "./checkpoint-registry.js";
 import type { GateDependencies } from "./gate-enforcer.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────
@@ -1237,7 +1237,26 @@ export class TaskWorkflowService {
    * corrupted rows) is routed through the SAME checkpoint via a synthetic "no
    * spec parent, no siblings" context rather than a second hardcoded pass,
    * mirroring `gate.ts`'s `runTaskClaimGate` identical handling of this edge
-   * case. A no-op (`ok(undefined)`) when this service wasn't constructed with a
+   * case.
+   *
+   * **SPEC-069 ad-hoc gap fix (task-fix-spec-069-gap-adhoc-task-claim-
+   * structurally-impossible)**: a task with a NON-null `parent_id` that resolves
+   * but is not `type: "plan"` — every `--adhoc` task (SPEC-069 §Design Decisions
+   * D2), auto-parented to the root PRD — used to hard-fail here via
+   * `getPlanBundle`'s "Expected a plan document" error, making such a task
+   * structurally unclaimable. `isNonPlanParentError` (`checkpoint-registry.ts`)
+   * detects this SPECIFIC, structural failure shape (parent resolved, wrong
+   * type) and routes it through the SAME "no governing plan" vacuous-pass
+   * `upstreamApproved` gets for `parent_id === null` — but, UNLIKE that legacy
+   * branch, `noAnchorOverlap` is still evaluated against REAL siblings
+   * (`findAdhocSiblingTasks`, every OTHER corpus-wide `extra.adhoc === true`
+   * task) rather than an empty list: SPEC-042 requires this predicate to run
+   * UNCONDITIONALLY, and a permanently-empty sibling set would silently make it
+   * unable to ever fire for the entire `--adhoc` channel. Every OTHER
+   * `getPlanBundle` failure (an unresolvable/soft-deleted parent, a store
+   * error) still propagates as a hard failure, unchanged.
+   *
+   * A no-op (`ok(undefined)`) when this service wasn't constructed with a
    * `gate` dependency (see constructor JSDoc).
    *
    * @param task - The task `claim()` is about to write a lease onto.
@@ -1270,9 +1289,16 @@ export class TaskWorkflowService {
       ctx = { ...buildUpstreamSpecContext(undefined), candidateBy: by, candidateAnchors: extractFileAnchors(task), siblingClaims: [] };
     } else {
       const bundleResult = await this.gate.getPlanBundle(task.parent_id);
-      if (!bundleResult.ok) return bundleResult;
-      const anchorCtx = buildAnchorGateContext(by, task, bundleResult.value.tasks, nowIso, this.claimTtlMinutes);
-      ctx = { ...buildUpstreamSpecContext(bundleResult.value.spec), ...anchorCtx };
+      if (!bundleResult.ok) {
+        if (!isNonPlanParentError(bundleResult.error)) return bundleResult;
+        const siblingsResult = await this.findAdhocSiblingTasks();
+        if (!siblingsResult.ok) return siblingsResult;
+        const anchorCtx = buildAnchorGateContext(by, task, siblingsResult.value, nowIso, this.claimTtlMinutes);
+        ctx = { ...buildUpstreamSpecContext(undefined), ...anchorCtx };
+      } else {
+        const anchorCtx = buildAnchorGateContext(by, task, bundleResult.value.tasks, nowIso, this.claimTtlMinutes);
+        ctx = { ...buildUpstreamSpecContext(bundleResult.value.spec), ...anchorCtx };
+      }
     }
 
     return this.gate.enforcer.enforce("task-claim", {
@@ -1280,6 +1306,34 @@ export class TaskWorkflowService {
       targetIdOrSlug: task.slug,
       anchorOverlapEnabled: this.gate.enforcer.isTaskClaimAnchorOverlapEnabled(),
     });
+  }
+
+  /**
+   * Corpus-wide `extra.adhoc === true` task scan — the `noAnchorOverlap`
+   * sibling universe for a task with no governing plan (SPEC-069 ad-hoc gap
+   * fix, see `enforceClaimGate`'s JSDoc). Mirrors `readyAdhoc`'s identical
+   * `store.findMany({type: "task"})` + `extra.adhoc === true` filter, MINUS
+   * its open/issue-report narrowing — anchor-overlap must consider every
+   * ad-hoc task holding a claim regardless of status; `buildAnchorGateContext`
+   * already discounts a stale claim (`isClaimStale`) and skips the candidate
+   * task itself (matched by id), so no further filtering belongs here.
+   *
+   * PUBLIC (not just an `enforceClaimGate` internal) because `gate.ts`'s
+   * `runTaskClaimGate` (the `lore gate task-claim` pre-flight CLI command)
+   * needs the IDENTICAL sibling universe to reach the same verdict `claim()`
+   * itself would for the same target/actor — the same "one shared ctx-builder,
+   * two call sites" precedent `buildAnchorGateContext`/`buildUpstreamSpecContext`
+   * already establish (see `checkpoint-registry.ts`'s module header).
+   *
+   * @returns every task doc (any status) with `extra.adhoc === true`,
+   *   INCLUDING the candidate task if it happens to be one — `buildAnchorGateContext`
+   *   filters it out by id, the same way `getPlanBundle`'s own `tasks[]` includes
+   *   the candidate and relies on that same self-filter.
+   */
+  async findAdhocSiblingTasks(): Promise<Result<DocRecord[], LoreError>> {
+    const tasksResult = await this.store.findMany({ type: "task" });
+    if (!tasksResult.ok) return tasksResult;
+    return ok(tasksResult.value.filter((t) => t.extra?.["adhoc"] === true));
   }
 
   /**
