@@ -1075,6 +1075,19 @@ export class TaskWorkflowService {
    * filtered HERE (before `evaluateReadiness` runs) rather than post-hoc, so
    * a closed ad-hoc task never appears in this listing at all.
    *
+   * @invariant SPEC-072 review-gate carve-out — a foreign-authored issue
+   *   report (`extra.issue_report` present, written by `lore report-issue`
+   *   against an upstream corpus) is EXCLUDED here while its status is
+   *   `draft` or `in-review`: PRD §20 F3's user-approved boundary and
+   *   AC-072-1 both require the report to sit in pending review, invisible
+   *   to `--adhoc`, until a human/AI reviewer approves it. This is a
+   *   NARROWER carve-out than SPEC-069 D2's own stated design intent (an
+   *   ad-hoc task "must not become invisible just because" of status) —
+   *   D2's visibility guarantee is intentionally PRESERVED for self-authored
+   *   ad-hoc tasks (no `extra.issue_report`), which still surface in draft.
+   *   Once approved (or in any status past `in-review`), an issue-report
+   *   task is indistinguishable from any other open ad-hoc task.
+   *
    * Zero writes (D3, same invariant `ready()` carries).
    *
    * @param now - Time seam — drives claim staleness computation, same as `ready()`
@@ -1084,12 +1097,19 @@ export class TaskWorkflowService {
   async readyAdhoc(now: () => string = defaultNow): Promise<Result<ReadyRecord[], LoreError>> {
     const tasksResult = await this.store.findMany({ type: "task" });
     if (!tasksResult.ok) return tasksResult;
-    const openAdhocTasks = tasksResult.value.filter(
-      (t) =>
-        t.extra?.["adhoc"] === true &&
-        t.status !== "archived" &&
-        t.status !== "deprecated",
-    );
+    const openAdhocTasks = tasksResult.value.filter((t) => {
+      if (t.extra?.["adhoc"] !== true) return false;
+      if (t.status === "archived" || t.status === "deprecated") return false;
+      // reason: foreign-authored issue reports are review-gated (SPEC-072,
+      // PRD §20 F3) — a draft/in-review report stays out of --adhoc until a
+      // reviewer approves it, even though a self-authored ad-hoc task in the
+      // same status is intentionally visible (SPEC-069 D2).
+      const isUnreviewedIssueReport =
+        t.extra?.["issue_report"] !== undefined &&
+        (t.status === "draft" || t.status === "in-review");
+      if (isUnreviewedIssueReport) return false;
+      return true;
+    });
 
     if (openAdhocTasks.length === 0) return ok([]);
 
