@@ -106,11 +106,6 @@ import { loadTreeBlueprint } from "../../flows/blueprint-flow.js";
 import { buildRealFsProbe } from "../real-fs-probe.js";
 import { buildAssessSummaryText } from "./assess-render.js";
 import { requirePhaseWorkflowService, getPhaseStatus, buildPhaseFeedFlowDeps } from "../cli/phase-wiring.js";
-import {
-  buildIssueReportDeps,
-  resolveConsumerCorpusRoot,
-  resolveFeedbackUpstreamCfg,
-} from "../cli/report-issue-wiring.js";
 import { IssueReportService } from "../../service/issue-report-service.js";
 
 // ─── Schema Constants ────────────────────────────────────────────────────────
@@ -1828,6 +1823,12 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
     "File a structured lore-defect report into this corpus's configured upstream (feedback.upstream in .lore/config.yaml) — lands as a draft ad-hoc task in the upstream pending-review queue",
     LoreReportIssueSchema,
     async (args) => {
+      // Lazy import: report-issue-wiring value-imports flows/upstream-context-flow →
+      // SQLiteStore → bun:sqlite; a static import here would drag bun:sqlite into the
+      // vitest graph of every tools.ts consumer (mcp-tools.test.ts). Deferring to call
+      // time keeps the module vitest-loadable (same isolation move as the CLI loader).
+      const { buildIssueReportDeps, resolveConsumerCorpusRoot, resolveFeedbackUpstreamCfg } =
+        await import("../cli/report-issue-wiring.js");
       const corpusRoot = resolveConsumerCorpusRoot();
       const deps = buildIssueReportDeps(corpusRoot);
       const service = new IssueReportService(deps);
