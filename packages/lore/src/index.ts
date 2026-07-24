@@ -32,5 +32,12 @@ if (process.argv.includes("--mcp-server")) {
   installSyncStdio();
   const { runMain } = await import("citty");
   const { default: main } = await import("./adapters/cli/index.js");
-  runMain(main);
+  // SPEC-073 D2: citty's own built-in `showUsage` renders a multi-char
+  // alias (`lore verify`'s `--yes`) with a single dash (`-yes`) — exactly
+  // the broken form D1's strict-flag scan now rejects. `renderUsageDoubleDash`
+  // is citty's own documented `RunMainOptions.showUsage` override point
+  // (`usage-render.ts`'s module header has the full root-cause chain), the
+  // ONE composition-site seam this fix needs — no per-command edit, no fork.
+  const { renderUsageDoubleDash } = await import("./adapters/cli/usage-render.js");
+  runMain(main, { showUsage: renderUsageDoubleDash });
 }
