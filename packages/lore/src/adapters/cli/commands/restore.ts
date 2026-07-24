@@ -10,7 +10,11 @@ import type { DocId } from "@lore/core";
 export default defineCommand({
   meta: {
     name: "restore",
-    description: "Restore a document to a previous version (creates new version)",
+    description:
+      "Restore a document to a previous version (creates new version). " +
+      "Never restores the document's slug — a slug is a stable address, not " +
+      "restorable content (SPEC-072 D4); the doc keeps its CURRENT slug " +
+      "regardless of what the target version's snapshot carried.",
   },
   args: {
     id: {

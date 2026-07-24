@@ -59,12 +59,15 @@ export default defineCommand({
         return;
       }
 
-      const headers = ["Version", "Action", "Author", "Timestamp", "Summary"];
+      // SPEC-072 D3 — Slug column renders the value when present; a legacy
+      // row with no slug renders an empty cell, never an "unknown" placeholder.
+      const headers = ["Version", "Action", "Author", "Timestamp", "Slug", "Summary"];
       const rows = entries.map((e) => [
         `v${e.version}`,
         e.action,
         e.created_by,
         e.created_at.slice(0, 19).replace("T", " "),
+        e.slug ?? "",
         (e.change_summary ?? "").slice(0, 30),
       ]);
 

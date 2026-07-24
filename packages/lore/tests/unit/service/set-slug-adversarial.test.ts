@@ -195,22 +195,24 @@ describe("CorpusService.set --slug — adversarial sweep (SPEC-068 D5)", () => {
       expect(versionNumbers).toEqual([1, 2, 3, 4]);
     });
 
-    it("version snapshot rows do NOT carry a slug field — the slug value at each historical version is NOT recoverable from `lore log`", async () => {
-      // Documents an ACTUAL (possibly surprising) behavior: SPEC-068 D5 says
-      // "Slug change is recorded in the version log like title changes" —
-      // but `VersionRecord` (@lore/core types.ts) has no `slug` field at
-      // all (only doc_id/version/content/extra/status/title/action/
-      // created_at). A rename produces a NEW version ROW (count increases,
-      // matching AC-068-7's existing assertion), but that row cannot tell
-      // you what the slug WAS at that version — only that *something*
-      // changed. This is a documented gap for the completion report, not an
-      // assumed defect (the AC only requires "gains an entry").
+    it("version snapshot rows DO carry a slug field — the slug value at each historical version IS recoverable from `lore log` (SPEC-072, closes this gap)", async () => {
+      // SPEC-068 D5 said "Slug change is recorded in the version log like
+      // title changes" — but until SPEC-072, `VersionRecord` (@lore/core
+      // types.ts) had no `slug` field at all, so a rename's version count
+      // increased (AC-068-7) without the row ever saying what the slug WAS
+      // at that version. SPEC-072 closes this gap: `VersionRecord.slug` is
+      // now written at every version-insert point (create/update/restore).
+      // See `version-slug.test.ts` (AC-072-1..3) for the full behavioral
+      // suite; this test is updated in place (not deleted) so this file's
+      // own historical narrative — "here's the gap, here's the fix" —
+      // stays readable in one place.
       const { service, store } = makeService();
       const created = await service.create(prdInput("Slug History Doc"));
       expect(created.ok).toBe(true);
       if (!created.ok) return;
+      const originalSlug = created.value.slug;
 
-      const renamed = await service.set(created.value.slug, { slug: "prd-history-repaired" });
+      const renamed = await service.set(originalSlug, { slug: "prd-history-repaired" });
       expect(renamed.ok).toBe(true);
       if (!renamed.ok) return;
 
@@ -218,8 +220,16 @@ describe("CorpusService.set --slug — adversarial sweep (SPEC-068 D5)", () => {
       expect(versions.ok).toBe(true);
       if (!versions.ok) return;
       for (const v of versions.value) {
-        expect(Object.prototype.hasOwnProperty.call(v, "slug")).toBe(false);
+        expect(Object.prototype.hasOwnProperty.call(v, "slug")).toBe(true);
       }
+
+      // The pre-rename slug is recoverable from the version-1 row (state as
+      // of that version, written at create time); the rename's own row (v2)
+      // carries the NEW slug — see version-slug.test.ts's convention note.
+      const v1 = versions.value.find((v) => v.version === 1);
+      const v2 = versions.value.find((v) => v.version === 2);
+      expect(v1?.slug).toBe(originalSlug);
+      expect(v2?.slug).toBe("prd-history-repaired");
     });
 
     it("old slugs from EVERY step of a multi-rename chain 404, not just the immediately-prior one", async () => {

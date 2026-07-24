@@ -77,6 +77,8 @@ export interface VersionRow {
   created_at: string;
   created_by: string;
   change_summary: string | null;
+  /** SPEC-072 D2 — nullable; NULL on legacy pre-migration-007 rows. */
+  slug: string | null;
 }
 
 export interface AuditRow {
@@ -252,6 +254,10 @@ export function rowToVersionRecord(row: VersionRow): VersionRecord {
     ...(row.change_summary !== null
       ? { change_summary: row.change_summary }
       : {}),
+    // reason: SPEC-072 D1 — absence-tolerant. NULL (legacy row, or a
+    // deliberately slug-less sentinel like the delete version-0 row) never
+    // becomes a placeholder string; the key is omitted entirely.
+    ...(row.slug !== null ? { slug: row.slug } : {}),
   };
 }
 

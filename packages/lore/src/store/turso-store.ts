@@ -19,6 +19,7 @@ import { MIGRATION_003_SQL } from "./migrations/migration-003.js";
 import { MIGRATION_004_SQL } from "./migrations/migration-004.js";
 import { MIGRATION_005_SQL } from "./migrations/migration-005.js";
 import { MIGRATION_006_SQL } from "./migrations/migration-006.js";
+import { MIGRATION_007_SQL } from "./migrations/migration-007.js";
 import type {
   AuditEntry,
   CalibrationRecord,
@@ -151,6 +152,7 @@ function libsqlRowToVersionRow(row: Row): VersionRow {
     created_at: rowStr(row, "created_at"),
     created_by: rowStr(row, "created_by"),
     change_summary: rowStrOrNull(row, "change_summary"),
+    slug: rowStrOrNull(row, "slug"),
   };
 }
 
@@ -288,6 +290,10 @@ export class TursoStore implements StoreInterface {
 
       if (currentVersion < 6) {
         await this.client.executeMultiple(MIGRATION_006_SQL);
+      }
+
+      if (currentVersion < 7) {
+        await this.client.executeMultiple(MIGRATION_007_SQL);
       }
     })();
 
@@ -697,8 +703,8 @@ export class TursoStore implements StoreInterface {
       await tx.execute({
         sql: `INSERT INTO versions
                (doc_id, version, content, extra, status, title,
-                action, created_at, created_by, change_summary)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                action, created_at, created_by, change_summary, slug)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [
           version.doc_id,
           version.version,
@@ -710,6 +716,7 @@ export class TursoStore implements StoreInterface {
           version.created_at,
           version.created_by,
           version.change_summary ?? null,
+          version.slug ?? null,
         ] as InValue[],
       });
 
@@ -860,8 +867,8 @@ export class TursoStore implements StoreInterface {
       await tx.execute({
         sql: `INSERT INTO versions
                (doc_id, version, content, extra, status, title,
-                action, created_at, created_by, change_summary)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                action, created_at, created_by, change_summary, slug)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [
           version.doc_id,
           version.version,
@@ -873,6 +880,7 @@ export class TursoStore implements StoreInterface {
           version.created_at,
           version.created_by,
           version.change_summary ?? null,
+          version.slug ?? null,
         ] as InValue[],
       });
 
@@ -934,8 +942,8 @@ export class TursoStore implements StoreInterface {
       await tx.execute({
         sql: `INSERT INTO versions
                (doc_id, version, content, extra, status, title,
-                action, created_at, created_by, change_summary)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                action, created_at, created_by, change_summary, slug)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [
           version.doc_id,
           version.version,
@@ -947,6 +955,7 @@ export class TursoStore implements StoreInterface {
           version.created_at,
           version.created_by,
           version.change_summary ?? null,
+          version.slug ?? null,
         ] as InValue[],
       });
 
@@ -1248,8 +1257,8 @@ export class TursoStore implements StoreInterface {
       await this.client.execute({
         sql: `INSERT INTO versions
                (doc_id, version, content, extra, status, title,
-                action, created_at, created_by, change_summary)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                action, created_at, created_by, change_summary, slug)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [
           version.doc_id,
           version.version,
@@ -1261,6 +1270,7 @@ export class TursoStore implements StoreInterface {
           version.created_at,
           version.created_by,
           version.change_summary ?? null,
+          version.slug ?? null,
         ] as InValue[],
       });
       return ok(version);
