@@ -33,5 +33,6 @@ Discipline lives in the corpus, not in the prompt: deterministic gates intercept
 - Superseded knowledge → `lore invalidate <doc> --superseded-by <new> --reason "<why>"` — never leave it quietly stale.
 - Session interrupted or ending with open work → `lore create knowledge --sub-type handoff --title "Handoff — <actor>"` (the next session consumes it via `lore feed session-resume`).
 - Maintenance cadence: `lore pending` (review queue) / `lore review --staleness --list` (stale candidates) / `lore status --check-tree --check-drift` (structure and code-anchor drift).
+- Suspect a lore defect itself (gate false-deny, wrong/misleading output, a crash)? Re-verify your own input first. Still confirmed → `lore report-issue --title <t> --expected <e> --actual <a>` (needs `feedback.upstream` configured). Check `lore report-issue --list` for a prior filing before re-reporting the same symptom.
 
 </corpus-workflow>

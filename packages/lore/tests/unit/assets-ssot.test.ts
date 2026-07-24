@@ -562,6 +562,21 @@ describe("assets-ssot — BOUNDARY", () => {
     },
   );
 
+  // AC-073-4 (SPEC-073): the CLOSE section carries a standing reporting-discipline
+  // stanza — suspected lore defect -> re-verify own input first -> `lore
+  // report-issue`. Two independent token assertions (the command name AND the
+  // re-verify-first clause) so byte-parity checks elsewhere can never vacuously
+  // pass with the stanza silently absent from BOTH the SSOT and an installed copy.
+  it("corpus-workflow.md AC-073-4: reporting-discipline stanza names lore report-issue", () => {
+    const content = readRequiredFile(GOVERNANCE_PATH);
+    expect(content).toContain("lore report-issue");
+  });
+
+  it("corpus-workflow.md AC-073-4: reporting-discipline stanza carries the re-verify-first clause", () => {
+    const content = readRequiredFile(GOVERNANCE_PATH);
+    expect(content).toContain("Re-verify your own input first");
+  });
+
   it.each(SKILL_MD_FILES)("%s starts with --- frontmatter", (relPath) => {
     const content = readRequiredFile(join(ASSETS_ROOT, relPath));
     expect(content.startsWith("---")).toBe(true);
