@@ -31,23 +31,17 @@
  *               re-proves it through the REAL CLI spawn path, not just the
  *               `buildUpstreamContext` unit.
  *
- * ── IMPORTANT DEVIATION FOUND (documented, NOT fixed — out of this task's
- * scope; see the AC-072-1 describe block's own comment for the full
- * empirical trail) ──
- * SPEC-072's AC-072-1 text states a freshly-filed report is "absent from
- * `lore ready --adhoc` output until approved". Empirically (both by reading
- * `TaskWorkflowService.readyAdhoc` — it filters OUT only `archived`/
- * `deprecated`, never `draft` — and by a live CLI probe run during this
- * task) a `status: draft` ad-hoc task IS present in `lore ready --adhoc`
- * with `ready: true`, identical in shape to an approved one. This is
- * SPEC-069 D2's OWN stated design intent for `readyAdhoc` ("must not become
- * INVISIBLE just because" of status) — i.e. AC-072-1's literal wording
- * conflicts with the general ad-hoc-visibility mechanism it builds on. Per
- * this task's boundary ("record a discovered product bug precisely, do NOT
- * fix product code"), the test below asserts the REAL, verified behavior
- * (present both before and after approve) rather than a permanently-red
- * assertion of the AC's literal text, and flags this prominently in this
- * header + the final task report.
+ * ── AC-072-1 vs SPEC-069 D2 conflict — RESOLVED (plan-closure fix,
+ * fix-readyadhoc-filter) ──
+ * A prior version of this suite flagged that `TaskWorkflowService.readyAdhoc`
+ * passed a draft ad-hoc task through unconditionally (SPEC-069 D2's own
+ * stated visibility intent), which conflicted with AC-072-1 + PRD §20 F3's
+ * requirement that a foreign-authored issue report stay out of `--adhoc`
+ * until approved. Resolution: `readyAdhoc` now excludes a task ONLY when it
+ * BOTH carries `extra.issue_report` AND is `draft`/`in-review` — self-authored
+ * ad-hoc tasks (no `issue_report`) keep full SPEC-069 D2 visibility
+ * unchanged. The test below asserts the literal AC-072-1 text (absent while
+ * draft, present after approve).
  *
  * Source: SPEC-072 §4 Public Interface, §5 check sequence, §Acceptance
  * Criteria AC-072-1..6, 8..11.
@@ -324,23 +318,18 @@ describe("AC-072-1: round-trip lands a draft ad-hoc task with all 7 issue_report
     expect(issueReport["expected"]).toBe("exit 0");
     expect(issueReport["actual"]).toBe("exit 4 with a confusing message");
 
-    // ── DEVIATION FROM AC-072-1's LITERAL TEXT (documented in this file's header) ──
-    // The AC states the task is "absent from lore ready --adhoc output until
-    // approved". Empirically (verified against readyAdhoc's real filter —
-    // status !== archived && status !== deprecated, no draft exclusion — plus
-    // a live CLI probe run during this task) a DRAFT ad-hoc task IS present.
-    // Asserting the real, oracle-verified behavior rather than a permanently
-    // failing literal-text assertion.
+    // Per the resolved AC-072-1 vs SPEC-069 D2 conflict (this file's header):
+    // a foreign-authored issue report is review-gated — ABSENT from
+    // `lore ready --adhoc` while still draft.
     const readyBeforeApprove = runJson<{ ok: true; data: { adhoc: { records: Array<{ task: { id: string; status: string }; ready: boolean }> } } }>(
       ["ready", "--adhoc"],
       { cwd: upstream.root },
     );
     expect(readyBeforeApprove.result.exitCode).toBe(0);
     const recordBeforeApprove = readyBeforeApprove.data.data.adhoc.records.find((r) => r.task.id === upstreamDocId);
-    expect(recordBeforeApprove).toBeTruthy();
-    expect(recordBeforeApprove?.task.status).toBe("draft");
+    expect(recordBeforeApprove).toBeUndefined();
 
-    // After approve, the task is (still) present in ready --adhoc, now approved.
+    // After approve, the task becomes present in ready --adhoc.
     const approve = run(["approve", upstreamDocId, "--by", "tester"], { cwd: upstream.root });
     expect(approve.exitCode).toBe(0);
 

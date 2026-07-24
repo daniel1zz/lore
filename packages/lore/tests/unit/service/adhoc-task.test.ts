@@ -590,6 +590,74 @@ describe("AC-069-7: readyAdhoc() lists OPEN ad-hoc tasks corpus-wide", () => {
 
   // ── REGRESSION ─────────────────────────────────────────────────────────
 
+  it("REGRESSION (SPEC-072): a plain --adhoc task with no extra.issue_report is NOT review-gated — draft status still appears", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    await createRootPrd(corpusService);
+    const created = await corpusService.create({
+      type: "task",
+      title: "Self-authored ad-hoc, still draft",
+      extra: { adhoc: true },
+    } as CreateDocInput);
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    // reason: default creation status is "draft" (CorpusService) — this task
+    // is deliberately left unapproved to prove the SPEC-072 issue-report
+    // review-gate carve-out is scoped to `extra.issue_report` tasks only.
+    expect(created.value.status).toBe("draft");
+    expect(created.value.extra["issue_report"]).toBeUndefined();
+
+    const result = await taskWorkflowService.readyAdhoc();
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value).toHaveLength(1);
+    expect(result.value[0]?.task.id).toBe(created.value.id);
+  });
+
+  it("REGRESSION (SPEC-072): an issue-report ad-hoc task IS excluded while draft/in-review, but a plain one alongside it is not", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    await createRootPrd(corpusService);
+    const plainAdhoc = await corpusService.create({
+      type: "task",
+      title: "Plain ad-hoc",
+      extra: { adhoc: true },
+    } as CreateDocInput);
+    const issueReportAdhoc = await corpusService.create({
+      type: "task",
+      title: "Foreign issue report",
+      extra: {
+        adhoc: true,
+        issue_report: {
+          reporter_project: "consumer-corpus",
+          reporter_actor: "agent:someone",
+          lore_version: "0.0.0",
+          expected: "exit 0",
+          actual: "exit 4",
+          reported_at: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    } as CreateDocInput);
+    expect(plainAdhoc.ok && issueReportAdhoc.ok).toBe(true);
+    if (!plainAdhoc.ok || !issueReportAdhoc.ok) return;
+    expect(plainAdhoc.value.status).toBe("draft");
+    expect(issueReportAdhoc.value.status).toBe("draft");
+
+    const result = await taskWorkflowService.readyAdhoc();
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const ids = result.value.map((r) => r.task.id);
+    expect(ids).toContain(plainAdhoc.value.id);
+    expect(ids).not.toContain(issueReportAdhoc.value.id);
+
+    // Once approved, the (formerly gated) issue-report task appears too.
+    await corpusService.set(issueReportAdhoc.value.id, { status: "approved" });
+    const resultAfterApprove = await taskWorkflowService.readyAdhoc();
+    expect(resultAfterApprove.ok).toBe(true);
+    if (!resultAfterApprove.ok) return;
+    const idsAfterApprove = resultAfterApprove.value.map((r) => r.task.id);
+    expect(idsAfterApprove).toContain(plainAdhoc.value.id);
+    expect(idsAfterApprove).toContain(issueReportAdhoc.value.id);
+  });
+
   it("REGRESSION: readyAdhoc() performs zero writes (task version is unchanged after the call)", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     await createRootPrd(corpusService);
