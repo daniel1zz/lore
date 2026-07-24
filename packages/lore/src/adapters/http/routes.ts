@@ -17,6 +17,7 @@ import { ALLOWED_ORIGINS } from "./auth.js";
 import { jsonOk, jsonError, loreErrorResponse, parseJsonBody, corsHeaders } from "./middleware.js";
 import { handleDashboardRoute } from "./dashboard-routes.js";
 import { handleGetConfig, handleGetMachineConfig } from "./config-routes.js";
+import { handleGetIssueReports } from "./issue-reports-routes.js";
 import type { ListFilters, SearchFilters } from "../../service/corpus-service.js";
 import type { PendingFilters } from "../../service/review-service.js";
 import type { CreateDocInput, DocPatch } from "@lore/core";
@@ -178,6 +179,13 @@ export async function handleApiRoute(
   // this dispatcher's route table stays one-entry-per-resource.
   if (method === "GET" && path === "/api/config/machine") {
     return handleGetMachineConfig(app);
+  }
+
+  // GET /api/issue-reports (SPEC-074 AC-074-5) — available to both cookie and
+  // bearer sessions, same auth duality as GET /api/config above; read-only
+  // dashboard Issues triage projection, never a write.
+  if (method === "GET" && path === "/api/issue-reports") {
+    return handleGetIssueReports(app);
   }
 
   // GET /api/docs
