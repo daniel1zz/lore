@@ -1,0 +1,413 @@
+/**
+ * IssueReportService — DI-only orchestrator behind `lore report-issue`
+ * (SPEC-072). Runs the §5 fail-loud, cheapest-first check sequence over an
+ * injected `IssueReportDeps` bundle: config presence → upstream's own
+ * sync-mode constraint → schema-version match → upstream root-PRD identity
+ * → per-reporter rate cap → advisory duplicate search → `createDraft` →
+ * (only on success) local receipt append.
+ *
+ * Public surface:
+ *   - `IssueReportService` — `report(input, cfg?)` / `list(cfg)`.
+ *   - `IssueReportInput` / `IssueReportResult` / `ReceiptStatusRow` /
+ *     `IssueReportDeps` — the DTOs this service's constructor and methods
+ *     are typed against (SPEC-072 §4).
+ *
+ * Invariants:
+ *   - ZERO writes before `createDraft` (step 8) succeeds — every check
+ *     before it is read-only or pure. `receipts.append` (step 9) runs
+ *     STRICTLY AFTER `createDraft` resolves `ok`, never before, never in
+ *     parallel.
+ *   - Any `createDraft` failure (validation, store, or otherwise) is
+ *     returned VERBATIM — this service does not wrap, rename, or
+ *     re-interpret it (SPEC-072 R-5e failure-transparency, AC-072-7).
+ *   - `import type` ONLY from `../flows/*` — this file must stay reachable
+ *     from vitest without ever touching `bun:sqlite` (AC-072-13's static
+ *     import-graph pin; also enforced by this repo's `bun-only` composition
+ *     convention — see `../flows/upstream-context-flow.ts`'s own header).
+ *   - `deps.loadUpstreamConfig(root)` loads the UPSTREAM corpus's OWN
+ *     config (its `sync.enabled` flag) — distinct from `cfg`, which is the
+ *     CONSUMER's `feedback.upstream.*` settings naming which upstream to
+ *     talk to. Do not conflate the two: `cfg` says "where"; the loaded
+ *     config says "is that place even a supported v1 target".
+ *   - `cfg` is OPTIONAL on `report()` — an unconfigured `feedback.upstream`
+ *     is the single most common failure a first-time caller hits, so it is
+ *     checked before any dependency is invoked at all (T2 deviation note,
+ *     reconciled with SPEC-072 intent: the spec's own TS listing shows a
+ *     required `cfg`, but the check-sequence table's step 1 is literally
+ *     "`feedback.upstream` unset", which is only observable if the type
+ *     permits the unset state to reach this method).
+ *
+ * Side-effect class: orchestration only — all actual IO (config load,
+ * schema probe, upstream store access, receipt file IO) lives behind the
+ * injected `IssueReportDeps` ports; this class itself performs none.
+ *
+ * Source: SPEC-072 §4 Public Interface, §5 check sequence, §Acceptance
+ * Criteria AC-072-1 .. AC-072-13.
+ */
+
+import { join } from "node:path";
+import {
+  ok,
+  err,
+  buildIssueReportExtra,
+  countOpenReports,
+  matchRootPrd,
+  OPEN_REPORT_CAP,
+  type DocStatus,
+  type IssueReportPayload,
+  type LoreConfig,
+  type LoreError,
+  type Result,
+} from "@lore/core";
+import type { UpstreamPort } from "../flows/upstream-context-flow.js";
+import type { ReceiptEntry, ReceiptLog } from "./receipt-log.js";
+
+/** Input to `IssueReportService.report` — the fields a caller (CLI/MCP) supplies. */
+export interface IssueReportInput {
+  title: string;
+  description: string;
+  expected: string;
+  actual: string;
+  repro_command?: string;
+  /**
+   * Filing actor identity. Optional at THIS layer's type — the CLI wiring
+   * always resolves one via `resolveActor` before calling `report()`, and
+   * the MCP wiring REQUIRES it explicitly before calling `report()` at all
+   * (SPEC-072 §11 Downstream Handoff) — so an absent `by` reaching this
+   * service is a defensive-only case, handled by falling back to
+   * `deps.reporterProject` (see `report()`), never by throwing.
+   */
+  by?: string;
+}
+
+/** Successful outcome of `IssueReportService.report`. */
+export interface IssueReportResult {
+  upstream_doc_id: string;
+  possible_duplicates: string[];
+  /** `true` iff the advisory FTS dedup search errored — filing proceeded anyway. */
+  dedup_degraded: boolean;
+}
+
+/** One joined row of `IssueReportService.list`'s output. */
+export interface ReceiptStatusRow {
+  upstream_doc_id: string;
+  title: string;
+  at: string;
+  /**
+   * Live upstream lifecycle status, or `"unreachable"` when the upstream
+   * corpus could not be validated/opened at all (SPEC-072 AC-072-10: history
+   * stays visible even when upstream is gone).
+   */
+  status: DocStatus | "unreachable";
+  rejection_reason?: string;
+  /**
+   * Non-blocking caveats about this row's data (e.g. a receipt line the
+   * local `ReceiptLog` had to skip as corrupt, or a status this service
+   * could only infer rather than confirm — see `list()`'s inline note on
+   * `UpstreamPort`'s read surface).
+   */
+  warnings?: string[];
+}
+
+/**
+ * Constructor dependency bundle — every actual IO operation `report()` /
+ * `list()` need, injected so this service stays vitest-reachable with fully
+ * faked ports (SPEC-072 §4).
+ */
+export interface IssueReportDeps {
+  /** Loads the UPSTREAM corpus's own `.lore/config.yaml` (its `sync.enabled` flag). */
+  loadUpstreamConfig: (root: string) => Result<LoreConfig, LoreError>;
+  /** Readonly `PRAGMA user_version` probe — see `../flows/upstream-probe.ts`. */
+  probe: (dbPath: string) => Result<{ user_version: number }, LoreError>;
+  /** This install's `LATEST_SCHEMA_VERSION` — compared against `probe`'s result. */
+  expectedSchemaVersion: number;
+  /** Opens the narrow `UpstreamPort` — see `../flows/upstream-context-flow.ts`. */
+  openUpstream: (root: string) => Result<UpstreamPort, LoreError>;
+  receipts: ReceiptLog;
+  loreVersion: string;
+  reporterProject: string;
+  /** Wall-clock read, injected for determinism (no `new Date()` inside this service). */
+  now: () => string;
+}
+
+/** Consumer-side `feedback.upstream.*` config, as resolved by the caller. */
+type UpstreamCfg = { corpus_path: string; root_prd: string };
+
+/**
+ * Generic human-readable description of a `LoreError` — only 4 of the 16
+ * variants carry a `message` field (`VALIDATION_ERROR`/`STORE_ERROR`/
+ * `AI_PROVIDER_ERROR`/`NEEDS_APPROVAL`); every other variant is identified
+ * by its `code` alone. Used ONLY for composing this service's own advisory
+ * warning strings (never for the `err(...)` values this service returns —
+ * those always propagate the original typed `LoreError` verbatim).
+ */
+function describeLoreError(error: LoreError): string {
+  if ("message" in error) return error.message;
+  return error.code;
+}
+
+/**
+ * DI-only orchestrator for `lore report-issue` — see module header for the
+ * full check-sequence/invariant summary. Construct with a fully-assembled
+ * `IssueReportDeps` (CLI/MCP wiring resolves the real ports; tests fake
+ * them directly — no partial/default construction path exists).
+ */
+export class IssueReportService {
+  constructor(private readonly deps: IssueReportDeps) {}
+
+  /**
+   * Runs the SPEC-072 §5 check sequence and, on success, files a new
+   * ad-hoc draft task in the configured upstream corpus.
+   *
+   * @param input - the report's content fields
+   * @param cfg - the consumer's `feedback.upstream.{corpus_path,root_prd}`;
+   *   `undefined` means "not configured" (step 1's failure case)
+   * @returns `ok({upstream_doc_id, possible_duplicates, dedup_degraded})` on
+   *   success; `err(...)` on the first failing check (§5 table) — ZERO
+   *   writes occur before `createDraft` succeeds
+   */
+  async report(
+    input: IssueReportInput,
+    cfg: UpstreamCfg | undefined,
+  ): Promise<Result<IssueReportResult, LoreError>> {
+    // Step 1: feedback.upstream unset.
+    if (cfg === undefined) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "feedback.upstream",
+        message:
+          "`feedback.upstream` is not configured — lore report-issue needs both " +
+          "feedback.upstream.corpus_path and feedback.upstream.root_prd set in " +
+          ".lore/config.yaml, e.g.:\n\n" +
+          "feedback:\n" +
+          "  upstream:\n" +
+          "    corpus_path: /path/to/upstream/repo\n" +
+          "    root_prd: prd-lore\n",
+      });
+    }
+
+    const upstreamResult = await this.openValidatedUpstream(cfg);
+    if (!upstreamResult.ok) return upstreamResult;
+    const port = upstreamResult.value;
+
+    try {
+      // Step 6: rate cap (R-5d).
+      const openDraftsResult = await port.listOpenAdhocDrafts();
+      if (!openDraftsResult.ok) return openDraftsResult;
+      const { open, ids } = countOpenReports(openDraftsResult.value, this.deps.reporterProject);
+      if (open >= OPEN_REPORT_CAP) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "feedback.upstream",
+          message:
+            `reporter project '${this.deps.reporterProject}' already has ${open} open ` +
+            `report(s) upstream (cap ${OPEN_REPORT_CAP}) — resolve or wait for review on: ${ids.join(", ")}`,
+          value: ids,
+        });
+      }
+
+      // Step 7: advisory FTS dedup — a search failure degrades, never blocks.
+      let possibleDuplicates: string[] = [];
+      let dedupDegraded = false;
+      const dedupResult = await port.searchDuplicates(input.title, 5);
+      if (dedupResult.ok) {
+        possibleDuplicates = dedupResult.value;
+      } else {
+        dedupDegraded = true;
+      }
+
+      // Step 8: createDraft — any failure propagates VERBATIM, no receipt.
+      const reportedAt = this.deps.now();
+      const payload: IssueReportPayload = {
+        reporter_project: this.deps.reporterProject,
+        // reason: see IssueReportInput.by's JSDoc — CLI/MCP always resolve a
+        // real actor before calling report(); this fallback only guards a
+        // defensive/direct-caller path (also exercised by the RED suite's
+        // BASE_INPUT, which omits `by`).
+        reporter_actor: input.by ?? this.deps.reporterProject,
+        lore_version: this.deps.loreVersion,
+        expected: input.expected,
+        actual: input.actual,
+        reported_at: reportedAt,
+        possible_duplicates: possibleDuplicates,
+        ...(input.repro_command !== undefined ? { repro_command: input.repro_command } : {}),
+      };
+      const createResult = await port.createDraft({
+        title: input.title,
+        content: input.description,
+        extra: buildIssueReportExtra(payload),
+      });
+      if (!createResult.ok) return createResult;
+
+      // Step 9: receipts.append — strictly after step 8 succeeds.
+      const appendResult = this.deps.receipts.append({
+        upstream_doc_id: createResult.value.id,
+        title: input.title,
+        at: reportedAt,
+      });
+      if (!appendResult.ok) {
+        return err({
+          code: "STORE_ERROR",
+          message:
+            `report filed upstream as '${createResult.value.id}' but the local receipt ` +
+            `failed to record (${describeLoreError(appendResult.error)}) — the upstream ` +
+            `report itself was NOT lost, only its local audit trail.`,
+        });
+      }
+
+      return ok({
+        upstream_doc_id: createResult.value.id,
+        possible_duplicates: possibleDuplicates,
+        dedup_degraded: dedupDegraded,
+      });
+    } finally {
+      port.close();
+    }
+  }
+
+  /**
+   * Joins the local receipt history with live upstream status.
+   *
+   * @param cfg - the consumer's `feedback.upstream.{corpus_path,root_prd}`
+   * @returns `ok(rows[])` — an upstream that cannot be validated/opened at
+   *   all degrades every row to `status: "unreachable"` rather than failing
+   *   the whole call (SPEC-072 AC-072-10: "history stays visible, no
+   *   crash"); `err(...)` only for a `receipts.read()` failure (a genuine
+   *   local IO error, not an upstream-reachability concern)
+   */
+  async list(cfg: UpstreamCfg): Promise<Result<ReceiptStatusRow[], LoreError>> {
+    const receiptsResult = this.deps.receipts.read();
+    if (!receiptsResult.ok) return receiptsResult;
+    const { entries, corrupt_lines } = receiptsResult.value;
+    const corruptWarning =
+      corrupt_lines.length > 0
+        ? [`${corrupt_lines.length} corrupt receipt line(s) skipped: ${corrupt_lines.join(", ")}`]
+        : [];
+
+    const upstreamResult = await this.openValidatedUpstream(cfg);
+    if (!upstreamResult.ok) {
+      // reason: an upstream that can't be reached/validated must never hide
+      // the LOCAL history — every row degrades to "unreachable" instead of
+      // propagating the rail error (AC-072-10).
+      return ok(
+        entries.map((entry) => ({
+          upstream_doc_id: entry.upstream_doc_id,
+          title: entry.title,
+          at: entry.at,
+          status: "unreachable" as const,
+          warnings: corruptWarning,
+        })),
+      );
+    }
+
+    const port = upstreamResult.value;
+    try {
+      const openDraftsResult = await port.listOpenAdhocDrafts();
+      const openIds = new Set(openDraftsResult.ok ? openDraftsResult.value.map((task) => task.id) : []);
+      const openReachWarning = openDraftsResult.ok
+        ? []
+        : [`could not confirm which reports are still open upstream: ${describeLoreError(openDraftsResult.error)}`];
+
+      return ok(
+        entries.map((entry) => {
+          const stillOpen = openIds.has(entry.upstream_doc_id);
+          const warnings = [...corruptWarning, ...openReachWarning];
+          if (!stillOpen && openDraftsResult.ok) {
+            // reason: UpstreamPort (SPEC-072 §4) exposes exactly 4 ops —
+            // none of them is "read one doc's current status/rejection
+            // reason by id". A receipt whose doc has left the open-draft
+            // set was approved, rejected, or archived upstream, and this
+            // port structurally cannot distinguish which. "approved" is
+            // reported as the best-effort default (most ad-hoc reports
+            // that leave draft do so via approval) with the uncertainty
+            // named explicitly in `warnings` rather than silently assumed.
+            // A precise join needs a port extension — tracked against
+            // plan-spec-072's Phase 3 (CLI/MCP wiring, T5/T6), not this
+            // service's scope.
+            warnings.push(
+              "status inferred as 'approved' — UpstreamPort has no per-doc status/rejection-reason lookup",
+            );
+          }
+          return {
+            upstream_doc_id: entry.upstream_doc_id,
+            title: entry.title,
+            at: entry.at,
+            status: stillOpen ? ("draft" as const) : ("approved" as const),
+            warnings,
+          };
+        }),
+      );
+    } finally {
+      port.close();
+    }
+  }
+
+  /**
+   * Runs SPEC-072 §5 steps 2-5 (upstream sync-mode constraint → schema
+   * version match → open the narrow `UpstreamPort` → root-PRD identity) —
+   * the rails shared verbatim by `report()` and `list()` ("§5: list() runs
+   * steps 1-5, same rails").
+   *
+   * @returns `ok(port)` on a fully-validated, OPEN upstream connection
+   *   (caller MUST `port.close()` when done); `err(...)` naming the first
+   *   failing rail
+   */
+  private async openValidatedUpstream(cfg: UpstreamCfg): Promise<Result<UpstreamPort, LoreError>> {
+    // Step 3: upstream config sync.enabled === true (config check precedes probe).
+    const upstreamConfigResult = this.deps.loadUpstreamConfig(cfg.corpus_path);
+    if (!upstreamConfigResult.ok) return upstreamConfigResult;
+    if (upstreamConfigResult.value.sync?.enabled === true) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "feedback.upstream.corpus_path",
+        message:
+          `upstream corpus at '${cfg.corpus_path}' has sync.enabled=true — lore ` +
+          "report-issue v1 only supports SQLite-only (non-sync) upstream corpora.",
+        value: cfg.corpus_path,
+      });
+    }
+
+    // Step 4: probe.user_version !== expectedSchemaVersion.
+    const dbPath = join(cfg.corpus_path, ".lore", "lore.db");
+    const probeResult = this.deps.probe(dbPath);
+    if (!probeResult.ok) return probeResult;
+    if (probeResult.value.user_version !== this.deps.expectedSchemaVersion) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "feedback.upstream.corpus_path",
+        message:
+          `upstream corpus schema version mismatch at '${dbPath}': this lore install ` +
+          `expects user_version ${this.deps.expectedSchemaVersion}, found ${probeResult.value.user_version}`,
+        value: { expected: this.deps.expectedSchemaVersion, found: probeResult.value.user_version },
+      });
+    }
+
+    // Open the narrow UpstreamPort (buildUpstreamContext re-runs its own
+    // TOCTOU version re-check — SPEC-072 §7 Design Decisions "Schema precheck").
+    const portResult = this.deps.openUpstream(cfg.corpus_path);
+    if (!portResult.ok) return portResult;
+    const port = portResult.value;
+
+    // Step 5: root-PRD identity (R-5a).
+    const rootResult = await port.resolveRootDoc();
+    if (!rootResult.ok) {
+      port.close();
+      return rootResult;
+    }
+    const match = matchRootPrd(rootResult.value, cfg.root_prd);
+    if (!match.ok) {
+      port.close();
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "feedback.upstream.root_prd",
+        message: `upstream root PRD mismatch: expected '${cfg.root_prd}', found '${match.found ?? "(no root PRD)"}'`,
+        value: { expected: cfg.root_prd, found: match.found },
+      });
+    }
+
+    return ok(port);
+  }
+}
+
+/** Re-exported for callers that only need the receipt shape (CLI/MCP wiring). */
+export type { ReceiptEntry };
