@@ -8,9 +8,14 @@
  * `service/`, since `service/` files never construct stores themselves.
  *
  * Public surface:
- *   - `UpstreamPort` — the 4-op transport seam `IssueReportService` is
- *     injected with (SPEC-072 §4; a future P2 `HttpUpstreamPort` implements
- *     the same interface with zero orchestration rewrite).
+ *   - `UpstreamPort` — the transport seam `IssueReportService` is injected
+ *     with (SPEC-072 §4; a future P2 `HttpUpstreamPort` implements the same
+ *     interface with zero orchestration rewrite). Gained a 5th op,
+ *     `getDocStatus` (T5, AC-072-10), on top of the original 4 — see that
+ *     method's own JSDoc for why a per-doc status/rejection-reason lookup
+ *     could not be derived from the original 4 ops (`list()`'s prior
+ *     best-effort "approved" default, `service/issue-report-service.ts`'s
+ *     git history).
  *   - `buildUpstreamContext(corpusRoot)` — resolves `corpusRoot/.lore/lore.db`,
  *     re-asserts its schema version against `LATEST_SCHEMA_VERSION` via a
  *     readonly probe BEFORE constructing a real (migrating) `SQLiteStore`,
@@ -47,7 +52,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { err, ok, type Result } from "@lore/core";
-import type { LoreError } from "@lore/core";
+import type { DocStatus, LoreError } from "@lore/core";
 import { probeUpstreamDb } from "./upstream-probe.js";
 import { SQLiteStore, LATEST_SCHEMA_VERSION } from "../store/sqlite-store.js";
 import { CorpusService } from "../service/corpus-service.js";
@@ -100,6 +105,38 @@ export interface UpstreamPort {
     content: string;
     extra: Record<string, unknown>;
   }): Promise<Result<{ id: string }, LoreError>>;
+  /**
+   * Live status + rejection-reason lookup for ONE upstream doc by id (T5,
+   * AC-072-10). Added AFTER the original 4 ops proved insufficient: none of
+   * `resolveRootDoc`/`listOpenAdhocDrafts`/`searchDuplicates`/`createDraft`
+   * can answer "what is doc X's CURRENT status, and if it was rejected, why"
+   * — `listOpenAdhocDrafts` only ever returns the OPEN subset, so a report
+   * that left `draft` (approved OR rejected — `ReviewService.reject` leaves
+   * status AT `draft`, see below) was indistinguishable from one still
+   * pending. `IssueReportService.list()` previously papered over this with a
+   * best-effort "approved" default plus a warning; this op replaces that
+   * guess with a real per-doc read.
+   *
+   * @param id - the upstream draft task's doc id (a `ReceiptEntry.upstream_doc_id`)
+   * @returns `ok(null)` when no doc with this id exists upstream anymore
+   *   (deleted, or never existed) — a fact, not an error, and the caller's
+   *   documented "unreachable"-equivalent row case (SPEC-072 T5 task packet);
+   *   `ok({status, rejection_reason?})` otherwise, where `status` is the
+   *   doc's CURRENT lifecycle status. `rejection_reason` is populated ONLY
+   *   when `status === "draft"` AND the audit log's most recent `"reject"`
+   *   entry for this doc carries a `details.reason` string —
+   *   `ReviewService.reject` (`service/review-service.ts`) never transitions
+   *   a doc OFF `draft` (SPEC-005 §3/§4: only `draft`/`in-review` can be
+   *   rejected, and rejection returns to `draft`, not a distinct "rejected"
+   *   `DocStatus` — no such status exists, see `@lore/core`'s `DocStatus`
+   *   union), so the audit trail is the ONLY place "this draft was actually
+   *   rejected, not merely never-yet-reviewed" is recorded. A doc re-approved
+   *   after a prior rejection reports its CURRENT status (`"approved"`, no
+   *   `rejection_reason` — the stale rejection is superseded, not surfaced).
+   */
+  getDocStatus(
+    id: string,
+  ): Promise<Result<{ status: DocStatus; rejection_reason?: string } | null, LoreError>>;
   /** Closes the underlying SQLite connection. Idempotent-unsafe (do not call twice). */
   close(): void;
 }
@@ -183,6 +220,32 @@ export function buildUpstreamContext(corpusRoot: string): Result<UpstreamPort, L
       });
       if (!result.ok) return result;
       return ok({ id: result.value.id });
+    },
+
+    async getDocStatus(id) {
+      const docResult = await store.find(id);
+      if (!docResult.ok) return docResult;
+      const doc = docResult.value;
+      if (doc === null) return ok(null);
+
+      if (doc.status !== "draft") {
+        return ok({ status: doc.status });
+      }
+
+      // reason: status alone can't distinguish "never reviewed" from
+      // "rejected back to draft" (see this method's own JSDoc) — the audit
+      // trail is the sole record of a reject event. queryAudit orders by
+      // `timestamp DESC`, so index 0 (with limit:1) is the MOST RECENT
+      // reject, correctly superseding an earlier one if the doc was
+      // rejected more than once.
+      const auditResult = await store.queryAudit({ doc_id: doc.id, action: "reject", limit: 1 });
+      if (!auditResult.ok) return auditResult;
+      const latestReject = auditResult.value[0];
+      const reason = latestReject?.details?.["reason"];
+      return ok({
+        status: doc.status,
+        ...(typeof reason === "string" ? { rejection_reason: reason } : {}),
+      });
     },
 
     close() {

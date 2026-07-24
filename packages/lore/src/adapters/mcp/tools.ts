@@ -106,6 +106,12 @@ import { loadTreeBlueprint } from "../../flows/blueprint-flow.js";
 import { buildRealFsProbe } from "../real-fs-probe.js";
 import { buildAssessSummaryText } from "./assess-render.js";
 import { requirePhaseWorkflowService, getPhaseStatus, buildPhaseFeedFlowDeps } from "../cli/phase-wiring.js";
+import {
+  buildIssueReportDeps,
+  resolveConsumerCorpusRoot,
+  resolveFeedbackUpstreamCfg,
+} from "../cli/report-issue-wiring.js";
+import { IssueReportService } from "../../service/issue-report-service.js";
 
 // ─── Schema Constants ────────────────────────────────────────────────────────
 // Each schema is a `z.object(...)` instance (AnySchema), NOT an inline ZodRawShape literal.
@@ -628,6 +634,26 @@ export const LoreRequirementAddSchema = z.object({
   id: z.string().min(1),
   statement: z.string().min(1),
   priority: z.enum(REQUIREMENT_PRIORITIES),
+});
+
+/**
+ * Input schema for lore_report_issue (SPEC-072 T5) — files a structured
+ * lore-defect report into this CONSUMER corpus's configured upstream
+ * (`feedback.upstream.{corpus_path,root_prd}` in `.lore/config.yaml`), thin
+ * pipe over `IssueReportService.report`. `by` is required — same MCP
+ * actor-identity precedent as `lore_claim`/`lore_release`/`lore_evidence_add`/
+ * `lore_ready`/`lore_review`/`lore_verify` (MCP callers pass actor identity
+ * explicitly; the CLI's `resolveActor` fallback chain does not apply here).
+ * No `list` field on this surface — the CLI's `--list` (live-status join over
+ * the local receipt log) has no MCP counterpart in this task's scope.
+ */
+export const LoreReportIssueSchema = z.object({
+  by: z.string().min(1),
+  title: z.string().min(1),
+  description: z.string().min(1),
+  expected: z.string().min(1),
+  actual: z.string().min(1),
+  repro_command: z.string().optional(),
 });
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -1790,6 +1816,36 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
         payload["decision_status_unchanged"] = result.value.decision_status_unchanged;
       }
       return textContent(payload);
+    },
+  );
+
+  // ── SPEC-072 T5: upstream issue reporting ──────────────────────────────────
+
+  // lore_report_issue
+  registerToolWithArgs(
+    server,
+    "lore_report_issue",
+    "File a structured lore-defect report into this corpus's configured upstream (feedback.upstream in .lore/config.yaml) — lands as a draft ad-hoc task in the upstream pending-review queue",
+    LoreReportIssueSchema,
+    async (args) => {
+      const corpusRoot = resolveConsumerCorpusRoot();
+      const deps = buildIssueReportDeps(corpusRoot);
+      const service = new IssueReportService(deps);
+      const cfg = resolveFeedbackUpstreamCfg(getConfig?.());
+
+      const result = await service.report(
+        {
+          title: args.title,
+          description: args.description,
+          expected: args.expected,
+          actual: args.actual,
+          by: args.by,
+          ...(args.repro_command !== undefined ? { repro_command: args.repro_command } : {}),
+        },
+        cfg,
+      );
+      if (!result.ok) return errorContent(result.error);
+      return textContent(result.value);
     },
   );
 }

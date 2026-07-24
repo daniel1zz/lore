@@ -147,6 +147,31 @@ function describeLoreError(error: LoreError): string {
 }
 
 /**
+ * The SPEC-072 §5 step 1 error for an unconfigured `feedback.upstream` —
+ * exported so a CLI/MCP adapter can render the IDENTICAL message when
+ * rejecting an unconfigured `--list`/`list` call itself, BEFORE ever
+ * constructing a `UpstreamCfg` to pass to `list()` (whose `cfg` param is
+ * REQUIRED, unlike `report()`'s optional `cfg` — see `list()`'s own JSDoc for
+ * why: `list()`'s only local IO, `receipts.read()`, needs no upstream config
+ * at all, so the "unconfigured" check is the CALLER's responsibility on that
+ * path, not this service's).
+ */
+export function buildUnconfiguredUpstreamError(): LoreError {
+  return {
+    code: "VALIDATION_ERROR",
+    field: "feedback.upstream",
+    message:
+      "`feedback.upstream` is not configured — lore report-issue needs both " +
+      "feedback.upstream.corpus_path and feedback.upstream.root_prd set in " +
+      ".lore/config.yaml, e.g.:\n\n" +
+      "feedback:\n" +
+      "  upstream:\n" +
+      "    corpus_path: /path/to/upstream/repo\n" +
+      "    root_prd: prd-lore\n",
+  };
+}
+
+/**
  * DI-only orchestrator for `lore report-issue` — see module header for the
  * full check-sequence/invariant summary. Construct with a fully-assembled
  * `IssueReportDeps` (CLI/MCP wiring resolves the real ports; tests fake
@@ -172,18 +197,7 @@ export class IssueReportService {
   ): Promise<Result<IssueReportResult, LoreError>> {
     // Step 1: feedback.upstream unset.
     if (cfg === undefined) {
-      return err({
-        code: "VALIDATION_ERROR",
-        field: "feedback.upstream",
-        message:
-          "`feedback.upstream` is not configured — lore report-issue needs both " +
-          "feedback.upstream.corpus_path and feedback.upstream.root_prd set in " +
-          ".lore/config.yaml, e.g.:\n\n" +
-          "feedback:\n" +
-          "  upstream:\n" +
-          "    corpus_path: /path/to/upstream/repo\n" +
-          "    root_prd: prd-lore\n",
-      });
+      return err(buildUnconfiguredUpstreamError());
     }
 
     const upstreamResult = await this.openValidatedUpstream(cfg);
@@ -272,8 +286,12 @@ export class IssueReportService {
    * @returns `ok(rows[])` — an upstream that cannot be validated/opened at
    *   all degrades every row to `status: "unreachable"` rather than failing
    *   the whole call (SPEC-072 AC-072-10: "history stays visible, no
-   *   crash"); `err(...)` only for a `receipts.read()` failure (a genuine
-   *   local IO error, not an upstream-reachability concern)
+   *   crash"); a receipt whose doc no longer exists upstream ALSO degrades
+   *   to `status: "unreachable"` (`UpstreamPort.getDocStatus`'s documented
+   *   `ok(null)` case — T5 replaced the prior best-effort "approved"
+   *   default with this real per-doc lookup); `err(...)` only for a
+   *   `receipts.read()` failure (a genuine local IO error, not an
+   *   upstream-reachability concern)
    */
   async list(cfg: UpstreamCfg): Promise<Result<ReceiptStatusRow[], LoreError>> {
     const receiptsResult = this.deps.receipts.read();
@@ -295,48 +313,49 @@ export class IssueReportService {
           title: entry.title,
           at: entry.at,
           status: "unreachable" as const,
-          warnings: corruptWarning,
+          ...(corruptWarning.length > 0 ? { warnings: corruptWarning } : {}),
         })),
       );
     }
 
     const port = upstreamResult.value;
     try {
-      const openDraftsResult = await port.listOpenAdhocDrafts();
-      const openIds = new Set(openDraftsResult.ok ? openDraftsResult.value.map((task) => task.id) : []);
-      const openReachWarning = openDraftsResult.ok
-        ? []
-        : [`could not confirm which reports are still open upstream: ${describeLoreError(openDraftsResult.error)}`];
-
-      return ok(
-        entries.map((entry) => {
-          const stillOpen = openIds.has(entry.upstream_doc_id);
-          const warnings = [...corruptWarning, ...openReachWarning];
-          if (!stillOpen && openDraftsResult.ok) {
-            // reason: UpstreamPort (SPEC-072 §4) exposes exactly 4 ops —
-            // none of them is "read one doc's current status/rejection
-            // reason by id". A receipt whose doc has left the open-draft
-            // set was approved, rejected, or archived upstream, and this
-            // port structurally cannot distinguish which. "approved" is
-            // reported as the best-effort default (most ad-hoc reports
-            // that leave draft do so via approval) with the uncertainty
-            // named explicitly in `warnings` rather than silently assumed.
-            // A precise join needs a port extension — tracked against
-            // plan-spec-072's Phase 3 (CLI/MCP wiring, T5/T6), not this
-            // service's scope.
-            warnings.push(
-              "status inferred as 'approved' — UpstreamPort has no per-doc status/rejection-reason lookup",
-            );
+      const rows = await Promise.all(
+        entries.map(async (entry): Promise<ReceiptStatusRow> => {
+          const statusResult = await port.getDocStatus(entry.upstream_doc_id);
+          if (!statusResult.ok) {
+            return {
+              upstream_doc_id: entry.upstream_doc_id,
+              title: entry.title,
+              at: entry.at,
+              status: "unreachable",
+              warnings: [
+                ...corruptWarning,
+                `could not determine live status: ${describeLoreError(statusResult.error)}`,
+              ],
+            };
+          }
+          const live = statusResult.value;
+          if (live === null) {
+            return {
+              upstream_doc_id: entry.upstream_doc_id,
+              title: entry.title,
+              at: entry.at,
+              status: "unreachable",
+              warnings: [...corruptWarning, "upstream doc no longer found (deleted, or never existed)"],
+            };
           }
           return {
             upstream_doc_id: entry.upstream_doc_id,
             title: entry.title,
             at: entry.at,
-            status: stillOpen ? ("draft" as const) : ("approved" as const),
-            warnings,
+            status: live.status,
+            ...(live.rejection_reason !== undefined ? { rejection_reason: live.rejection_reason } : {}),
+            ...(corruptWarning.length > 0 ? { warnings: corruptWarning } : {}),
           };
         }),
       );
+      return ok(rows);
     } finally {
       port.close();
     }
