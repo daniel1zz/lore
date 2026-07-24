@@ -25,12 +25,14 @@
  *   5 = STALE_VERSION
  *
  * Source: SPEC-038 §4, §6 AC-ACODE-7; SPEC-039 §2 D8 (attested coverage annotation);
- *   SPEC-061 §Scope D5 (inconclusive badge)
+ *   SPEC-061 §Scope D5 (inconclusive badge); SPEC-070 AC-070-12 (shared fail-first
+ *   precedence via @lore/core's deriveAcCoverageState)
  */
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
+import { deriveAcCoverageState } from "@lore/core";
 import type { AcceptanceCriterion } from "@lore/core";
 import type { AcService, AcListResult } from "../../../service/ac-service.js";
 import type { App } from "../../../app.js";
@@ -320,7 +322,12 @@ function describeVerify(verify: AcceptanceCriterion["verify"]): string {
  * `> 0`. Rendering ONLY: `fact.attested_pass`/`fact.attested_fail` come straight from
  * `computeAcCoverage` (`@lore/core`) — this function never re-derives "was this attested".
  *
- * SPEC-061 §Scope D5: when neither `pass` nor `fail` is > 0 but `fact.refs` holds at
+ * **SPEC-070 AC-070-12 (review finding F3)**: the fail/attested_pass/pass PRECEDENCE
+ * itself is delegated to `@lore/core`'s `deriveAcCoverageState(fact)` — the ONE shared
+ * fail-first ordering `lore feed task-start`'s wiring also consumes. This function
+ * renders each resulting state, it never re-decides the ordering.
+ *
+ * SPEC-061 §Scope D5: when the derived state is `"none"` but `fact.refs` holds at
  * least one `"inconclusive"` entry, renders `⚑?(n)` — n is the inconclusive ref count.
  * `computeAcCoverage` deliberately does NOT surface a dedicated `inconclusive` count on
  * `AcCoverageFact` (D6: "no presentation pre-aggregation… renderers live with each
@@ -337,12 +344,14 @@ function describeVerify(verify: AcceptanceCriterion["verify"]): string {
 export function coverageBadge(coverage: AcListResult["coverage"], acId: string): string {
   const fact = coverage?.find((f) => f.ac_id === acId);
   if (fact === undefined) return "·";
-  if (fact.fail > 0) {
+
+  const state = deriveAcCoverageState(fact);
+  if (state === "fail") {
     const attestedNote = fact.attested_fail > 0 ? `, ${fact.attested_fail} attested` : "";
     return `✘(${fact.pass}/${fact.fail}${attestedNote})`;
   }
-  if (fact.pass > 0) {
-    const prefix = fact.attested_pass > 0 ? "⚑✔" : "✔";
+  if (state === "attested_pass" || state === "pass") {
+    const prefix = state === "attested_pass" ? "⚑✔" : "✔";
     const attestedNote = fact.attested_pass > 0 ? `, ${fact.attested_pass} attested` : "";
     return `${prefix}(${fact.pass}/${fact.fail}${attestedNote})`;
   }

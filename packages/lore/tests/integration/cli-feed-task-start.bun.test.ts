@@ -1,6 +1,6 @@
 /**
  * @spec_ref spec-070-deterministic-task-dispatch-bundle-lore-feed-task-start
- *   §Design D1, D7; §Acceptance Criteria AC-070-7.
+ *   §Design D1, D7; §Acceptance Criteria AC-070-7, AC-070-18.
  *
  * bun test (not vitest): spawns the real compiled `dist/lore` binary against a
  * THROWAWAY corpus (`mkdtemp` + `lore init`, cwd inside it) — mirrors
@@ -23,7 +23,10 @@
  *   BOUNDARY   — missing positional → exit 2.
  *   STATE      — `workflow.task_feed.*` config override clips a section end to end.
  *   REGRESSION — `spec-create` / `session-resume` / `phase-start` outputs are
- *                unchanged after the table-driven dispatch refactor (SPEC-070 D1).
+ *                unchanged after the table-driven dispatch refactor (SPEC-070 D1);
+ *                `phase-start`'s HAPPY path additionally gets a full byte-for-byte
+ *                text-output pin (AC-070-18, review finding F9 — previously only
+ *                its error paths were regression-pinned here).
  */
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
@@ -212,6 +215,65 @@ function createFullChain(dir: string): {
   return { prdSlug, specSlug, planSlug, taskSlug };
 }
 
+/**
+ * Creates a prd -> plan -> ONE task chain, then migrates that task into a phase doc
+ * via `lore migrate tasks-to-phases` (the ONLY way a `phase` doc comes to exist —
+ * see root CLAUDE.md's SPEC-056 entry) — deliberately NO spec ancestor, so the
+ * resulting phase-start pack's `scope` section is fully deterministic
+ * ("(no spec ancestor)", never a spec title/content slice that could drift or hit
+ * a char budget). One-per-task fallback grouping (no `extra.phase` declared) means
+ * the created phase doc's title equals the source task's own title verbatim
+ * (`PhaseMigrationService.buildGroups`'s `solo:` branch).
+ */
+function createPhaseChain(dir: string): { planSlug: string; phaseSlug: string; taskTitle: string; planTitle: string } {
+  const prdResult = runLore(
+    ["create", "prd", "--title", "AC-070-18 Phase PRD", "--content", "PRD body.", "--no-ai"],
+    dir,
+  );
+  expect(prdResult.exitCode).toBe(0);
+  const prdSlug = parseSlug(prdResult.stdout);
+
+  const planTitle = "AC-070-18 Phase Plan";
+  const planResult = runLore(
+    ["create", "plan", "--title", planTitle, "--parent", prdSlug, "--content", "Plan body.", "--no-ai"],
+    dir,
+  );
+  expect(planResult.exitCode).toBe(0);
+  const planSlug = parseSlug(planResult.stdout);
+
+  const taskTitle = "AC-070-18 Phase Task";
+  const taskResult = runLore(
+    [
+      "create",
+      "task",
+      "--title",
+      taskTitle,
+      "--parent",
+      planSlug,
+      "--plan-id",
+      planSlug,
+      "--content",
+      "Estimate: S\nApproach: migrate this task into a phase doc.",
+      "--no-ai",
+    ],
+    dir,
+  );
+  expect(taskResult.exitCode).toBe(0);
+
+  const migrateResult = runLore(["migrate", "tasks-to-phases"], dir);
+  expect(migrateResult.exitCode).toBe(0);
+
+  const listResult = runLore(["list", "--type", "phase", "--json"], dir);
+  expect(listResult.exitCode).toBe(0);
+  const listPayload = JSON.parse(listResult.stdout) as { data: { docs: Array<{ slug: string }> } };
+  const phaseSlug = listPayload.data.docs[0]?.slug;
+  if (phaseSlug === undefined) {
+    throw new Error(`no phase doc found after migration: ${listResult.stdout}`);
+  }
+
+  return { planSlug, phaseSlug, taskTitle, planTitle };
+}
+
 // ─── Project-level state ──────────────────────────────────────────────────────
 
 let tmpDir: string;
@@ -377,6 +439,31 @@ describe("REGRESSION — spec-create / session-resume / phase-start outputs are 
   it("phase-start with an unresolvable target still exits 3 (unchanged error-mapping path)", () => {
     const result = runLore(["feed", "phase-start", "no-such-phase-at-all"], tmpDir);
     expect(result.exitCode).toBe(3);
+  });
+
+  it("phase-start HAPPY path pins the FULL text output byte-for-byte (AC-070-18 — previously only its error paths were pinned)", () => {
+    const { phaseSlug, taskTitle, planTitle } = createPhaseChain(tmpDir);
+
+    const result = runLore(["feed", "phase-start", phaseSlug], tmpDir);
+    expect(result.exitCode).toBe(0);
+
+    // Mirrors `renderPhaseStartPackText`'s exact `console.log` call sequence
+    // (commands/feed.ts) — each call appends its own trailing "\n".
+    const scope = `Phase: ${taskTitle}\nPlan: ${planTitle}\n\n(no spec ancestor)`;
+    const logCalls = [
+      `# Phase start — ${phaseSlug}\n`,
+      "## Scope",
+      scope,
+      "\n## Sibling phases",
+      "(no other phases)",
+      "\n## Linked knowledge",
+      "(no linked knowledge)",
+      "\n## Latest handoff",
+      "(no handoff recorded)",
+    ];
+    const expected = logCalls.map((line) => line + "\n").join("");
+
+    expect(result.stdout).toBe(expected);
   });
 
   it("an unknown checkpoint still falls through to the generic advisory note, exit 0", () => {

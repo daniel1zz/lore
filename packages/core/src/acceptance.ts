@@ -10,8 +10,12 @@
  *     SPEC-039 §2 D9)
  *   - specAcceptanceCriteriaSchema — spec.extra.acceptance_criteria array (max 50, unique id)
  *   - computeAcCoverage(criteria, tasks) — pure pass/fail(+attested) aggregation over
- *     tasks' evidence
+ *     tasks' evidence (single-pass over tasks/evidence — SPEC-070 AC-070-17, review
+ *     finding F10: evidence is extracted+bucketed by ac_ref ONCE, not re-walked once
+ *     per criterion)
  *   - AcCoverageFact / EvidenceRefLite — computeAcCoverage's output row shapes
+ *   - deriveAcCoverageState(fact) — the ONE fail-first coverage-precedence derivation
+ *     (SPEC-070 AC-070-12, review finding F3) every rendering consumer shares
  *
  * Invariants:
  *   - `id` format is `^AC-[A-Z0-9]+(-[A-Z0-9]+)*$` — matches every corpus-observed
@@ -231,24 +235,41 @@ export interface AcCoverageFact {
  * // => [{ ac_id: "AC-1", mode: "script", pass: 1, fail: 0,
  * //      refs: [{ task_id: "...", result: "pass", attested: true }],
  * //      attested_pass: 1, attested_fail: 0 }]
+ *
+ * @remarks Single-pass over `tasks`/their evidence (SPEC-070 AC-070-17, review
+ *   finding F10) — the PREVIOUS implementation re-called `extractEvidence(task)`
+ *   (a `z.array(...).safeParse` over the WHOLE evidence array) once PER CRITERION
+ *   PER TASK, so a task's evidence was re-parsed `criteria.length` times. This
+ *   version extracts+parses each task's evidence exactly ONCE, bucketing every ref
+ *   by `entry.ac_ref` into a `Map`, then reads each declared criterion's bucket —
+ *   output is unchanged (same refs, same order: tasks then their evidence entries,
+ *   in input order) for every criterion, declared or not — an `ac_ref` naming an
+ *   UNDECLARED id still lands in the map but is never read back out (D6's "silently
+ *   excluded from every AcCoverageFact" contract, preserved).
  */
 export function computeAcCoverage(
   criteria: AcceptanceCriterion[],
   tasks: DocRecord[],
 ): AcCoverageFact[] {
-  return criteria.map((criterion) => {
-    const refs: EvidenceRefLite[] = [];
-    for (const task of tasks) {
-      for (const entry of extractEvidence(task)) {
-        if (entry.ac_ref === criterion.id) {
-          const ref: EvidenceRefLite = { task_id: task.id, result: entry.result };
-          if (entry.attestation !== undefined) {
-            ref.attested = true;
-          }
-          refs.push(ref);
-        }
+  const refsByAcId = new Map<string, EvidenceRefLite[]>();
+  for (const task of tasks) {
+    for (const entry of extractEvidence(task)) {
+      if (entry.ac_ref === undefined) continue;
+      const ref: EvidenceRefLite = { task_id: task.id, result: entry.result };
+      if (entry.attestation !== undefined) {
+        ref.attested = true;
+      }
+      const bucket = refsByAcId.get(entry.ac_ref);
+      if (bucket === undefined) {
+        refsByAcId.set(entry.ac_ref, [ref]);
+      } else {
+        bucket.push(ref);
       }
     }
+  }
+
+  return criteria.map((criterion) => {
+    const refs = refsByAcId.get(criterion.id) ?? [];
     return {
       ac_id: criterion.id,
       mode: criterion.verify.mode,
@@ -259,4 +280,40 @@ export function computeAcCoverage(
       attested_fail: refs.filter((r) => r.result === "fail" && r.attested === true).length,
     };
   });
+}
+
+// ─── AC Coverage Precedence (SPEC-070 AC-070-12, review finding F3) ────────
+
+/**
+ * The fail-first coverage-precedence VERDICT for one declared criterion's
+ * {@link AcCoverageFact} — the SINGLE precedence implementation this codebase uses
+ * to turn raw pass/fail/attested counts into a rendering-ready state. Every
+ * consumer that needs a coverage label (the `lore feed task-start` pack's
+ * `AcceptanceView.coverage`, `lore ac list`'s coverage badge) derives it from THIS
+ * function — never re-implements its own ordering.
+ *
+ * FAIL-FIRST (the deliberate semantic fix this function codifies, not a
+ * refactor-only extraction): a criterion with BOTH failing AND passing evidence is
+ * `"fail"` — a loud failure signal always wins over any pass, attested or not.
+ * Before this function existed, two INDEPENDENT precedence implementations
+ * disagreed: `commands/ac.ts`'s `coverageBadge` was already fail-first (checked
+ * `fact.fail > 0` before `fact.pass > 0`), but `task-feed-wiring.ts`'s
+ * `deriveCoverageLabel` checked `attested_pass > 0` FIRST — a criterion with an
+ * attested pass AND a later fail silently rendered `"attested_pass"` in the
+ * task-start pack, masking the real failure behind a green badge.
+ *
+ * @param fact - One {@link computeAcCoverage} output row for a single criterion.
+ * @returns `"fail"` (`fact.fail > 0`) \> `"attested_pass"` (no fail, `fact.attested_pass > 0`)
+ *   \> `"pass"` (no fail, `fact.pass > 0`, no attested pass) \> `"none"` (no evidence at all).
+ * @example
+ * deriveAcCoverageState({ ac_id: "AC-1", mode: "script", pass: 1, fail: 1, refs: [], attested_pass: 0, attested_fail: 0 });
+ * // => "fail" — a fail always wins, even alongside a pass
+ */
+export function deriveAcCoverageState(
+  fact: AcCoverageFact,
+): "fail" | "attested_pass" | "pass" | "none" {
+  if (fact.fail > 0) return "fail";
+  if (fact.attested_pass > 0) return "attested_pass";
+  if (fact.pass > 0) return "pass";
+  return "none";
 }

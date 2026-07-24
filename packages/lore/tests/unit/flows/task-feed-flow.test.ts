@@ -49,6 +49,40 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // packages/lore/tests/unit/flows/ -> ../../../src/flows/task-feed-flow.ts
 const TASK_FEED_FLOW_PATH = resolve(__dirname, "../../../src/flows/task-feed-flow.ts");
 
+/**
+ * Collects each full `import`/`export` STATEMENT (not just its first line) from
+ * `source` (SPEC-070 AC-070-1 import-scanner hardening, review finding F9) — the
+ * PRE-hardening scanner only kept lines whose OWN text started with
+ * `import`/`export`, so a future edit shaped like:
+ *   import {
+ *     computeAcCoverage,
+ *   } from "@lore/core";
+ * would have its `computeAcCoverage,` CONTINUATION line silently excluded from the
+ * scanned text — a false negative, the forbidden import would slip past undetected.
+ * This walks line-by-line; once a line opens an import/export statement it keeps
+ * appending subsequent lines until one ends with `;` (every import/export statement
+ * in this codebase's formatting terminates on a `;`-ending line, never mid-line —
+ * balanced-brace multi-line specifier lists never contain a stray `;`).
+ */
+function collectImportExportStatements(source: string): string {
+  const lines = source.split("\n");
+  const collected: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i] ?? "";
+    if (/^(import|export)\b/.test(line.trim())) {
+      let statement = line;
+      while (!statement.trim().endsWith(";") && i + 1 < lines.length) {
+        i++;
+        statement += "\n" + (lines[i] ?? "");
+      }
+      collected.push(statement);
+    }
+    i++;
+  }
+  return collected.join("\n");
+}
+
 // ─── Fixture helpers ────────────────────────────────────────────────────────
 
 function fakeDoc(overrides: Partial<DocRecord> & { id: DocId; title: string }): DocRecord {
@@ -114,8 +148,10 @@ function sampleBundle(overrides: Partial<TaskBundle> = {}): TaskBundle {
     danglingScopedIds: [],
     anchors: ["packages/lore/src/flows/task-feed-flow.ts"],
     priorFailures: [{ oracle: "test", command: "bun test", tail: "1 failing" }],
+    unparseableEvidenceCount: 0,
     claimView: { holder: "agent:spec-070-core-cli", fresh: true },
     upstreamSpecApproved: true,
+    relatedKnowledge: [],
     ...overrides,
   };
 }
@@ -276,6 +312,24 @@ describe("BOUNDARY — constraints section renders prior failures + upstream-spe
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.sections.constraints).not.toContain("upstream spec not approved");
+  });
+
+  it("a nonzero unparseableEvidenceCount renders an explicit degraded line naming the count (AC-070-11)", async () => {
+    const deps = makeDeps({
+      getTaskBundle: async () => ok(sampleBundle({ unparseableEvidenceCount: 1 })),
+    });
+    const result = await buildTaskStartPack(deps, "task-1");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.sections.constraints).toContain("1 evidence entries unparseable");
+    expect(result.value.sections.constraints).not.toContain("no prior failures");
+  });
+
+  it("a zero unparseableEvidenceCount renders no degraded line (REGRESSION)", async () => {
+    const result = await buildTaskStartPack(makeDeps(), "task-1");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.sections.constraints).not.toContain("unparseable");
   });
 });
 
@@ -445,17 +499,36 @@ describe("BOUNDARY — per-section budgets clip independently and record exact t
 describe("STATE/REGRESSION — buildTaskStartPack import-graph purity + SSOT registration (AC-070-1)", () => {
   it("the module's import/re-export statements never reference computeAcCoverage/extractClaim/isClaimStale/extractEvidence (thick-bundle/thin-flow)", () => {
     const source = readFileSync(TASK_FEED_FLOW_PATH, "utf8");
-    const importLines = source
-      .split("\n")
-      .filter((line) => /^(import|export)\b/.test(line.trim()))
-      .join("\n");
+    const importStatements = collectImportExportStatements(source);
 
     for (const forbidden of ["computeAcCoverage", "extractClaim", "isClaimStale", "extractEvidence"]) {
-      expect(importLines).not.toContain(forbidden);
+      expect(importStatements).not.toContain(forbidden);
     }
   });
 
   it("CHECKPOINT_PRODUCED_TYPE['task-start'] resolves to the 'task' produced type", () => {
     expect(CHECKPOINT_PRODUCED_TYPE["task-start"]).toBe("task");
+  });
+});
+
+// ─── REGRESSION — import-scanner hardening itself (AC-070-1, review finding F9) ──
+
+describe("REGRESSION — collectImportExportStatements catches a multi-line import continuation (AC-070-1 scanner hardening, F9)", () => {
+  it("a forbidden name landing on a CONTINUATION line of a multi-line import is still caught", () => {
+    const fixture = ['import {', "  ok,", "  computeAcCoverage,", '} from "@lore/core";'].join("\n");
+    expect(collectImportExportStatements(fixture)).toContain("computeAcCoverage");
+  });
+
+  it("a forbidden name appearing ONLY in a prose comment (never an import/export line) is not flagged", () => {
+    const fixture = [
+      "// This module never imports computeAcCoverage.",
+      'import { ok } from "@lore/core";',
+    ].join("\n");
+    expect(collectImportExportStatements(fixture)).not.toContain("computeAcCoverage");
+  });
+
+  it("a single-line import is collected unchanged (REGRESSION, pre-hardening shape)", () => {
+    const fixture = 'import { ok, truncateSection } from "@lore/core";';
+    expect(collectImportExportStatements(fixture)).toBe(fixture);
   });
 });
