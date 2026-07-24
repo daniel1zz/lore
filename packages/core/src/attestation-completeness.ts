@@ -43,13 +43,22 @@
  *     from missing data.
  *   - `judgeBinaryFreshness` never does IO itself — `binaryMtimeMs`/
  *     `newestSourceMtimeMs` are caller-supplied facts (the caller `stat()`s).
+ *   - `parseExecutedUnits`'s vitest matched-case count (the `tests` field) is
+ *     the sum of the "Tests" line's `passed`/`failed` segments, NEVER its
+ *     trailing parenthesised total — a `-t` filter matching zero cases makes
+ *     vitest report every test as `skipped` (e.g. `"Tests 46 skipped (46)"`),
+ *     so reading the total would report 46 matched cases for a filter that
+ *     matched none. See {@link countMatchedVitestCases}.
  *
  * Side-effect class: pure
  *
  * Source: SPEC-061 — Attestation completeness guard (detect zero-match /
  *   under-match test oracles), §Scope D1, §Acceptance Criteria AC-061-1..3;
  *   task "verify trust extensions" (build-freshness precheck + -t matched-case
- *   count guard), AC-061-9, AC-061-10
+ *   count guard), AC-061-9, AC-061-10; task
+ *   task-fix-spec-061-miss-vitest-t-zero-matched-case-run-recorded (fixes the
+ *   vitest "-t matches 0 cases but every test is reported `skipped`, not
+ *   `passed`" miss — SPEC-075 T1-stage incident)
  */
 
 // ─── Explicit Path-Argument Counting ────────────────────────────────────────
@@ -186,10 +195,15 @@ export function commandHasCaseFilter(command: string): boolean {
  * @invariant `tests` is present-iff-parseable from the summary a runner
  *   emitted: bun's `"Ran N tests across M files"` line always carries both
  *   counts; vitest emits its file count on a `"Test Files … (N)"` line and
- *   (when present in the captured tail) its case count on a separate
+ *   (when present in the captured tail) its MATCHED-case count on a separate
  *   `"Tests … (N)"` line — `tests` is populated for a vitest-shaped match
  *   ONLY when that second line was captured (a tail truncation that drops it
- *   degrades to `tests: undefined`, never a fabricated count).
+ *   degrades to `tests: undefined`, never a fabricated count). For vitest,
+ *   "matched" means the `passed`/`failed` segments of that line's breakdown
+ *   (see {@link countMatchedVitestCases}), NOT the line's trailing
+ *   parenthesised total — a `-t` filter that selects zero cases makes every
+ *   test in the loaded file(s) `skipped`, so the total stays nonzero while
+ *   the matched count is correctly `0`.
  */
 export interface ExecutedUnits {
   files: number;
@@ -213,15 +227,68 @@ const VITEST_SUMMARY_PATTERN = /Test Files\s+.*?\((\d+)\)/;
 
 /**
  * vitest's separate case-count summary line, e.g. `"Tests  4 passed (4)"` or
- * a mixed `"Tests  1 failed | 3 passed (4)"`. The leading `\b` anchors on the
- * whole word "Tests" (plural) so this can never false-match inside the
- * "Test Files" line above (singular "Test" followed by " Files", never the
- * substring "Tests"). Present in vitest's default reporter output alongside
- * the "Test Files" line; a truncated tail that drops it is a genuine "not
- * captured" case (see {@link ExecutedUnits}'s field invariant), not parsed as
- * zero.
+ * a mixed `"Tests  1 failed | 3 passed (4)"`. Captures the BREAKDOWN body
+ * (group 1 — everything between "Tests" and the trailing parenthesised
+ * total) rather than the total itself; see {@link countMatchedVitestCases}
+ * for why the trailing number is the wrong thing to read here. The leading
+ * `\b` anchors on the whole word "Tests" (plural) so this can never
+ * false-match inside the "Test Files" line above (singular "Test" followed
+ * by " Files", never the substring "Tests"). Present in vitest's default
+ * reporter output alongside the "Test Files" line; a truncated tail that
+ * drops it is a genuine "not captured" case (see {@link ExecutedUnits}'s
+ * field invariant), not parsed as zero.
  */
-const VITEST_TESTS_LINE_PATTERN = /\bTests\s+.*?\((\d+)\)/;
+const VITEST_TESTS_LINE_PATTERN = /\bTests\s+(.*?)\((\d+)\)/;
+
+/**
+ * Matches one `<N> passed` / `<N> failed` segment inside a vitest "Tests"
+ * line's breakdown body (the text {@link VITEST_TESTS_LINE_PATTERN} captures
+ * before the trailing total). Deliberately excludes `skipped`/`todo`
+ * segments — see {@link countMatchedVitestCases}.
+ */
+const VITEST_TESTS_RAN_SEGMENT_PATTERN = /(\d+)\s+(?:passed|failed)\b/g;
+
+/**
+ * Sums the `passed` + `failed` counts out of a vitest "Tests" line's
+ * breakdown body — the count of cases the `-t`/`--testNamePattern` filter
+ * actually SELECTED and ran, as opposed to the line's trailing parenthesised
+ * number, which is the TOTAL test count in the loaded file(s) regardless of
+ * whether the filter matched them.
+ *
+ * // reason: this is the exact false-oracle miss task
+ * // task-fix-spec-061-miss-vitest-t-zero-matched-case-run-recorded closes —
+ * // when a `-t` filter matches ZERO cases, vitest does not print "0 tests";
+ * // it prints every test in the loaded file(s) as `skipped`, e.g.
+ * // `"Tests  46 skipped (46)"`. Reading the trailing `(46)` as the matched
+ * // count (the pre-fix behavior) reports 46 MATCHED cases for a filter that
+ * // actually matched none — the exact SPEC-075 T1-stage incident (verify
+ * // ran `-t AC-075-N` before the matching tests existed; 37 files loaded,
+ * // 0 cases matched, attestation still recorded `completeness: complete`).
+ * // `skipped`/`todo` segments are never counted: a skipped/not-selected test
+ * // did not run, so it cannot count as "matched by the filter".
+ *
+ * @param testsLineBody - The breakdown text between "Tests" and the line's
+ *   trailing `(N)` total (e.g. `"1 failed | 3 passed | 2 skipped "`, or just
+ *   `"46 skipped "` when nothing matched).
+ * @returns The summed `passed` + `failed` count; `0` when the body contains
+ *   neither segment (every test in scope was skipped — nothing matched).
+ *
+ * @example
+ * countMatchedVitestCases("4 passed ") // => 4
+ *
+ * @example
+ * countMatchedVitestCases("1 failed | 1 passed | 1 skipped ") // => 2
+ *
+ * @example
+ * countMatchedVitestCases("46 skipped ") // => 0 — nothing matched the filter
+ */
+function countMatchedVitestCases(testsLineBody: string): number {
+  let matched = 0;
+  for (const segment of testsLineBody.matchAll(VITEST_TESTS_RAN_SEGMENT_PATTERN)) {
+    matched += Number(segment[1]);
+  }
+  return matched;
+}
 
 /**
  * Recognises the run-summary tail of the two runners this repo uses (bun
@@ -247,6 +314,13 @@ const VITEST_TESTS_LINE_PATTERN = /\bTests\s+.*?\((\d+)\)/;
  * // => { files: 70, tests: 963 }
  *
  * @example
+ * // A -t filter that matched nothing: every test in the loaded file is
+ * // "skipped", not "passed" — the matched-case count is correctly 0, even
+ * // though the file itself still shows as executed.
+ * parseExecutedUnits("...\nTest Files  1 skipped (1)\nTests  46 skipped (46)\n")
+ * // => { files: 1, tests: 0 }
+ *
+ * @example
  * parseExecutedUnits("some unrelated tool output\n") // => null
  */
 export function parseExecutedUnits(stdout: string): ExecutedUnits | null {
@@ -262,7 +336,8 @@ export function parseExecutedUnits(stdout: string): ExecutedUnits | null {
     const files = Number(vitestMatch[1]);
     const testsMatch = VITEST_TESTS_LINE_PATTERN.exec(stdout);
     if (testsMatch !== null) {
-      return { files, tests: Number(testsMatch[1]) };
+      const testsLineBody = testsMatch[1] ?? "";
+      return { files, tests: countMatchedVitestCases(testsLineBody) };
     }
     return { files };
   }

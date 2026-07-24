@@ -22,7 +22,10 @@
  *               under_match/zero_match depending on the executed-file count — never
  *               silently "complete"
  *
- * @spec_ref SPEC-061 §Scope D1; §Acceptance Criteria AC-061-1, AC-061-2, AC-061-3
+ * @spec_ref SPEC-061 §Scope D1; §Acceptance Criteria AC-061-1, AC-061-2,
+ *   AC-061-3, AC-061-9, AC-061-10; task
+ *   task-fix-spec-061-miss-vitest-t-zero-matched-case-run-recorded (vitest
+ *   "-t matches 0 cases" false-oracle miss fix)
  */
 
 import { describe, it, expect } from "vitest";
@@ -180,6 +183,71 @@ describe("parseExecutedUnits — vitest 'Tests' line (Part B prerequisite)", () 
     // pick up the FILE count instead of staying undefined.
     const stdout = "Test Files  1 passed (1)\n";
     expect(parseExecutedUnits(stdout)?.tests).toBeUndefined();
+  });
+
+  // ─── task-fix-spec-061-miss-vitest-t-zero-matched-case-run-recorded:
+  // the "-t matches 0 cases" false-oracle miss. Fixtures below use REAL vitest
+  // v3.2.6 output captured by running `bunx vitest run
+  // packages/core/tests/attestation-completeness.test.ts -t '<pattern>'`
+  // against this repo's own suite (not an imagined shape) — see task
+  // verification_evidence / commit message for the exact repro commands.
+
+  it("REGRESSION (task-fix-spec-061-miss-vitest-t-zero-matched-case-run-recorded): a -t filter matching 0 cases reports tests:0, not the 'skipped' total", () => {
+    // reason: this is the EXACT false-oracle shape — every test in the loaded
+    // file is reported "skipped" (not "passed"), so the line's trailing
+    // parenthesised total (46) is nonzero even though nothing matched. Reading
+    // that total (the pre-fix behavior) reported tests:46 for a filter that
+    // matched zero cases.
+    const stdout =
+      " RUN  v3.2.6 /repo\n\n" +
+      " ↓ packages/core/tests/attestation-completeness.test.ts (46 tests | 46 skipped)\n\n" +
+      " Test Files  1 skipped (1)\n" +
+      "      Tests  46 skipped (46)\n" +
+      "   Start at  22:40:50\n" +
+      "   Duration  272ms\n";
+    expect(parseExecutedUnits(stdout)).toEqual({ files: 1, tests: 0 });
+  });
+
+  it("HAPPY: a -t filter matching SOME cases reports the passed+skipped breakdown's matched count, not the trailing total", () => {
+    // reason: real captured shape — 16 of 46 cases matched (passed), the
+    // other 30 were skipped (did not match); the trailing total (46) is the
+    // file's full case count, not the matched count.
+    const stdout =
+      " ✓ packages/core/tests/attestation-completeness.test.ts (46 tests | 30 skipped) 2ms\n\n" +
+      " Test Files  1 passed (1)\n" +
+      "      Tests  16 passed | 30 skipped (46)\n";
+    expect(parseExecutedUnits(stdout)).toEqual({ files: 1, tests: 16 });
+  });
+
+  it("BOUNDARY: a mixed passed+failed+skipped breakdown sums passed and failed, excluding skipped", () => {
+    // reason: real captured shape from a 3-case file filtered to 2 cases (one
+    // passing, one failing) — the matched count is failed(1)+passed(1)=2, the
+    // skipped(1) case never ran and must not be counted.
+    const stdout = " Test Files  1 failed (1)\n      Tests  1 failed | 1 passed | 1 skipped (3)\n";
+    expect(parseExecutedUnits(stdout)).toEqual({ files: 1, tests: 2 });
+  });
+
+  it("STATE (T1-shape end-to-end): the full SPEC-075 T1-stage incident command now judges zero_match, never complete", () => {
+    // reason: pins the exact incident end-to-end (task body: "'cd
+    // packages/dashboard && bunx vitest run -t AC-075-N' ... executed the
+    // existing 37-file suite, matched ZERO cases ... attestation recorded
+    // completeness: complete, executed_files: 37"). The literal `-t AC-075-1`
+    // command has no explicit file-path arguments (declaredPaths is 0) against
+    // a 37-file-suite zero-matched-case vitest output. Pre-fix, this fell
+    // through to the file-level `declaredPaths === 0 -> "complete"` rule
+    // DESPITE zero cases matching; post-fix, the case-filter branch's
+    // `tests === 0 -> "zero_match"` check fires first (VerifyRunnerService maps
+    // any non-"complete" verdict to `inconclusive`, exit 3).
+    const command = "cd packages/dashboard && bunx vitest run -t AC-075-1";
+    const stdout =
+      " Test Files  37 skipped (37)\n" + "      Tests  312 skipped (312)\n" + "   Duration  4.2s\n";
+    const declaredPaths = countExplicitPathArgs(command);
+    expect(declaredPaths).toBe(0);
+    const executedUnits = parseExecutedUnits(stdout);
+    expect(executedUnits).toEqual({ files: 37, tests: 0 });
+    const hasCaseFilter = commandHasCaseFilter(command);
+    expect(hasCaseFilter).toBe(true);
+    expect(judgeCompleteness({ declaredPaths, executedUnits, hasCaseFilter })).toBe("zero_match");
   });
 });
 
