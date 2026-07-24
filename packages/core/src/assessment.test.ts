@@ -29,6 +29,7 @@ import {
   DEFAULT_REASONING_CLIP_CHARS,
   judgmentSchema,
   dimensionScoresSchema,
+  llmAssessmentOutputSchema,
   assessmentResultSchema,
   computeTaskTruncationRatio,
   TRUNCATION_DOWNGRADE_THRESHOLDS,
@@ -688,9 +689,35 @@ describe("assessmentResultSchema — SPEC-067 D4 verdict/overall_score widening 
     expect(parsed.judgment.degraded_by_truncation).toBe(true);
   });
 
-  it("NEGATIVE: llmAssessmentOutputSchema itself (the judge-facing shape) still requires overall_score and rejects 'inconclusive'", () => {
-    // reason: the widening is a finalize-time OVERRIDE on the persisted shape only — the
-    // judge is never validated against, or told to emit, either relaxation.
+  it("NEGATIVE: llmAssessmentOutputSchema (the judge-facing shape) still requires overall_score", () => {
+    // reason: the SPEC-067 D4 widening is a finalize-time OVERRIDE on the persisted shape
+    // only (assessmentResultSchema.extend) — the judge is never validated against, or told
+    // to emit, either relaxation. Parse the judge schema DIRECTLY to pin its narrowness.
+    const missingScore = llmAssessmentOutputSchema.safeParse({
+      verdict: "met",
+      ac_scores: [],
+      gaps: [],
+      recommendations: [],
+    });
+    expect(missingScore.success).toBe(false);
+  });
+
+  it("NEGATIVE: llmAssessmentOutputSchema (the judge-facing shape) rejects verdict 'inconclusive'", () => {
+    // reason: same D4 override boundary as above — "inconclusive" exists only in the
+    // persisted enum; an otherwise fully valid judge output must not be able to emit it.
+    const inconclusive = llmAssessmentOutputSchema.safeParse({
+      verdict: "inconclusive",
+      overall_score: 90,
+      ac_scores: [],
+      gaps: [],
+      recommendations: [],
+    });
+    expect(inconclusive.success).toBe(false);
+  });
+
+  it("NEGATIVE: assessmentResultSchema's widened verdict enum still rejects arbitrary strings", () => {
+    // reason: the persisted enum gained exactly one member ("inconclusive"), it did not
+    // degrade to a free-form string — an unknown verdict must still fail loud.
     const stillRequired = assessmentResultSchema.safeParse({
       scope: { type: "plan", id: "01ARZ3NDEKTSV4RRFFQ69G5FAV" },
       verdict: "not-a-real-verdict",
