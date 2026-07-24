@@ -10,6 +10,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { SearchBar } from "@/components/SearchBar";
 import { Badge } from "@/components/ui/badge";
 import { apiGetStatus } from "@/lib/api";
+import { useIssueReportsQuery } from "@/lib/issue-reports-query";
 
 export const Route = createRootRoute({
   component: RootLayout,
@@ -22,6 +23,12 @@ function RootLayout(): React.ReactElement {
     queryFn: apiGetStatus,
     staleTime: 60 * 1000,
   });
+  // reason: SPEC-074 — the nav badge polls the SAME issue-reports projection
+  // the Issues page renders (one endpoint, no second count route); always
+  // mounted (root layout) so an approve/reject invalidation on the detail
+  // view has a live subscriber even when the Issues page itself isn't open.
+  const { data: issueReports } = useIssueReportsQuery();
+  const openIssueCount = issueReports?.open_count ?? 0;
 
   function handleSearch(query: string): void {
     void navigate({ to: "/search", search: { q: query } });
@@ -67,6 +74,23 @@ function RootLayout(): React.ReactElement {
               activeProps={{ className: "text-foreground font-medium" }}
             >
               Settings
+            </Link>
+            {/* reason: SPEC-074 — badge hidden at 0 open reports (AC-074-4). */}
+            <Link
+              to="/issues"
+              className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+              activeProps={{ className: "text-foreground font-medium" }}
+            >
+              Issues
+              {openIssueCount > 0 && (
+                <Badge
+                  variant="destructive"
+                  className="text-xs px-1.5 py-0"
+                  aria-label={`${openIssueCount} open issue reports`}
+                >
+                  {openIssueCount}
+                </Badge>
+              )}
             </Link>
           </nav>
 
