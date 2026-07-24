@@ -16,6 +16,15 @@
  *     create is already in flight could fire a second, duplicate
  *     `apiCreateDoc` racing the first. The title input is ALSO disabled while
  *     pending, narrowing (not replacing) that surface.
+ *   - `docType === "spec"` is create-time BLOCKED (ADR: adr-newdocmodal-spec-create-cli-skill-only-authoring-disable):
+ *     the spec-create gate (`hasSkeleton` + the deterministic/structured-AC rules
+ *     in knowledge-write-spec-rules-gate-feeding-source) requires a skeleton
+ *     PLUS follow-up `lore ac add` calls that this quick-create form has no way
+ *     to collect — a seeded template would only mechanically pass the gate while
+ *     staying hollow. So no `POST /api/dashboard/docs` request is ever issued for
+ *     a spec: the form renders a visible notice naming the real authoring paths
+ *     (`lore create spec` CLI / `/lore-design` skill) and disables Create,
+ *     instead of letting the user hit a silent 4xx from the service-layer gate.
  * Side-effect class: IO (calls onCreate callback)
  * Source: SPEC-022 §9.2, AC-DASH-WRITE-10
  */
@@ -45,6 +54,24 @@ export interface NewDocModalProps {
 const DOC_TYPES: DocType[] = ["prd", "spec", "adr", "plan", "knowledge", "task"];
 
 const TYPES_REQUIRING_PARENT: DocType[] = ["spec", "task"];
+
+/**
+ * Doc types this quick-create form must never submit, because the service-layer
+ * create-time gate for that type demands more than type/title/parent can ever
+ * express (see ADR adr-newdocmodal-spec-create-cli-skill-only-authoring-disable).
+ * Currently just `spec`: the spec-create gate's `hasSkeleton` check requires
+ * `## ` heading lines, and the write-spec rules go further still (deterministic,
+ * oracle-verifiable ACs added via a separate `lore ac add` call) — no single
+ * create-time payload, templated or not, can satisfy that. Submitting for a
+ * blocked type would always be denied server-side with no way for this form to
+ * explain why, so `isCreateBlockedType` is checked BEFORE any request is sent.
+ */
+const TYPES_BLOCKED_AT_CREATE: DocType[] = ["spec"];
+
+/** @returns whether `docType` is in {@link TYPES_BLOCKED_AT_CREATE}. */
+function isCreateBlockedType(docType: DocType): boolean {
+  return TYPES_BLOCKED_AT_CREATE.includes(docType);
+}
 
 /**
  * Maps a raw Zod validation issue to user-facing copy.
@@ -125,6 +152,13 @@ export function NewDocModal({ onCreate, isPending, error, onClose }: NewDocModal
     // independent of the Create button's own disabled attribute) while the
     // first create is already in flight. See module doc comment.
     if (isPending) return;
+    // reason: `spec` (and any future TYPES_BLOCKED_AT_CREATE entry) can never
+    // pass the spec-create gate through this form — see the module doc comment
+    // and TYPES_BLOCKED_AT_CREATE above. Guarding here (in addition to the
+    // disabled Create button) mirrors the isPending guard's belt-and-braces
+    // shape: a stray form "submit" event bypasses a button's own disabled
+    // attribute, so the real gate belongs in handleSubmit, not only in JSX.
+    if (isCreateBlockedType(docType)) return;
     setValidationError(null);
 
     const payload = buildPayload();
@@ -173,6 +207,19 @@ export function NewDocModal({ onCreate, isPending, error, onClose }: NewDocModal
             ))}
           </select>
         </div>
+
+        {/* Spec-create is deliberately CLI/skill-only (visible explanation,
+            per AC-1 — no silent 4xx from the service-layer spec-create gate).
+            See TYPES_BLOCKED_AT_CREATE + the module doc comment. */}
+        {isCreateBlockedType(docType) && (
+          <p role="status" className="text-xs text-muted-foreground bg-muted rounded p-3">
+            Specs need a gate-conformant skeleton and structured, verifiable
+            acceptance criteria (<code>lore ac add</code>) that this quick-create
+            form can&rsquo;t collect. Create specs with{" "}
+            <code>lore create spec</code> on the CLI, or the{" "}
+            <code>/lore-design</code> skill.
+          </p>
+        )}
 
         {/* Title */}
         <div className="space-y-1">
@@ -287,7 +334,7 @@ export function NewDocModal({ onCreate, isPending, error, onClose }: NewDocModal
           <button
             type="submit"
             className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded hover:bg-primary/90 disabled:opacity-50"
-            disabled={isPending || title.trim() === ""}
+            disabled={isPending || title.trim() === "" || isCreateBlockedType(docType)}
           >
             {isPending ? "Creating..." : "Create"}
           </button>

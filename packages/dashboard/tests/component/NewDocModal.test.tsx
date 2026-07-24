@@ -12,13 +12,16 @@
  *   HAPPY:
  *     - Creating a "prd" (no parent/extra required) calls onCreate with the
  *       trimmed title and no parent_id.
- *     - Creating a "spec" with a parent id calls onCreate with parent_id set.
+ *     - Creating a "plan" (no parent/extra required, distinct from "prd") calls
+ *       onCreate with the trimmed title and no parent_id.
  *   NEGATIVE:
- *     - Submitting a "spec" with no parent id shows the schema's
- *       "parent_id is required for type 'spec'" validation error and never
- *       calls onCreate (fail loud, not a silent skip).
  *     - Submitting a "task" with a parent id but no plan id shows the
  *       "task requires extra.plan_id" validation error and never calls onCreate.
+ *     - Selecting "spec" then forcing the form's native submit event (bypassing
+ *       the disabled Create button, mirroring the isPending stray-Enter tests
+ *       below) still never calls onCreate — the handleSubmit-level guard, not
+ *       only the disabled button, blocks it (ADR
+ *       adr-newdocmodal-spec-create-cli-skill-only-authoring-disable).
  *   BOUNDARY:
  *     - A whitespace-only title is trimmed to empty by buildPayload, which the
  *       Create button's own `disabled` condition (`title.trim() === ""`) blocks —
@@ -34,10 +37,15 @@
  *     - Selecting "adr" reveals the decision_status field; switching to "prd"
  *       hides all type-specific fields again.
  *     - Escape closes the modal via onClose.
+ *     - Selecting "spec" renders the visible CLI/skill-only notice and disables
+ *       Create; switching away to another type removes the notice and
+ *       re-enables Create (ADR adr-newdocmodal-spec-create-cli-skill-only-authoring-disable, AC-1/AC-2).
  *   REGRESSION:
  *     - onCreate receives the type-specific `extra` shape appropriate to the
  *       selected type (adr -> decision_status, knowledge -> sub_type, task ->
  *       plan_id) rather than a hardcoded/omitted extra object.
+ *     - Selecting "spec" is the ONLY type whose notice renders / Create disables
+ *       for this reason — every other type in DOC_TYPES stays unaffected.
  */
 
 import "@testing-library/jest-dom/vitest";
@@ -81,34 +89,39 @@ describe("NewDocModal", () => {
       expect(payload.parent_id).toBeUndefined();
     });
 
-    it("creates a spec with the entered parent_id", async () => {
+    it("creates a plan with a trimmed title and no parent_id", async () => {
       const user = userEvent.setup();
       const { onCreate } = renderModal();
 
-      await selectType(user, "spec");
-      await user.type(screen.getByLabelText(/Title/), "My Spec");
-      await user.type(screen.getByLabelText(/Parent ID/), "01HPARENT000000000000000001");
+      await selectType(user, "plan");
+      await user.type(screen.getByLabelText(/Title/), "  My New Plan  ");
       await user.click(screen.getByRole("button", { name: "Create" }));
 
       expect(onCreate).toHaveBeenCalledTimes(1);
       const payload = onCreate.mock.calls[0]?.[0];
-      expect(payload.type).toBe("spec");
-      expect(payload.parent_id).toBe("01HPARENT000000000000000001");
+      expect(payload.type).toBe("plan");
+      expect(payload.title).toBe("My New Plan");
+      expect(payload.parent_id).toBeUndefined();
     });
   });
 
   describe("negative", () => {
-    it("rejects a spec with no parent_id (fail loud, not silent skip)", async () => {
+    it("never creates a spec, even forcing the form's native submit past the disabled Create button", async () => {
       const user = userEvent.setup();
       const { onCreate } = renderModal();
 
       await selectType(user, "spec");
-      await user.type(screen.getByLabelText(/Title/), "Spec without parent");
-      await user.click(screen.getByRole("button", { name: "Create" }));
+      await user.type(screen.getByLabelText(/Title/), "A spec, blocked");
+      await user.type(screen.getByLabelText(/Parent ID/), "01HPARENT000000000000000001");
 
-      expect(
-        screen.getByText("Choose a parent document — every spec lives under one."),
-      ).toBeInTheDocument();
+      // Create is disabled (asserted separately in the "state" block below);
+      // bypass it the same way the ASYNC2D-002 tests bypass isPending, to
+      // prove the block is enforced in handleSubmit itself, not only the JSX
+      // disabled attribute.
+      const form = screen.getByRole("status").closest("form");
+      expect(form).not.toBeNull();
+      fireEvent.submit(form as HTMLFormElement);
+
       expect(onCreate).not.toHaveBeenCalled();
     });
 
@@ -204,6 +217,24 @@ describe("NewDocModal", () => {
       fireEvent.keyDown(document, { key: "Escape" });
       expect(onClose).toHaveBeenCalledTimes(1);
     });
+
+    it("shows the CLI/skill-only notice and disables Create for spec, then clears both when switching away", async () => {
+      const user = userEvent.setup();
+      renderModal();
+
+      // docType initializes to "spec" — the notice is visible immediately,
+      // before any interaction (AC-1: visible explanation, no silent 4xx).
+      expect(screen.getByRole("status")).toHaveTextContent("lore create spec");
+      expect(screen.getByRole("status")).toHaveTextContent("/lore-design");
+      expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
+
+      await selectType(user, "task");
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+
+      await selectType(user, "spec");
+      expect(screen.getByRole("status")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
+    });
   });
 
   describe("regression", () => {
@@ -245,6 +276,19 @@ describe("NewDocModal", () => {
 
       expect(onCreate).toHaveBeenCalledTimes(1);
       expect(onCreate.mock.calls[0]?.[0].extra).toEqual({ plan_id: "01HPLAN0000000000000000001" });
+    });
+
+    it("renders the CLI/skill-only notice for spec ONLY — every other type is unaffected", async () => {
+      const user = userEvent.setup();
+      renderModal();
+
+      for (const type of ["prd", "adr", "plan", "knowledge", "task"] as const) {
+        await selectType(user, type);
+        expect(screen.queryByRole("status")).not.toBeInTheDocument();
+      }
+
+      await selectType(user, "spec");
+      expect(screen.getByRole("status")).toBeInTheDocument();
     });
   });
 
