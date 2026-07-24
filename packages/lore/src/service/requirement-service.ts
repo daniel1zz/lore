@@ -267,6 +267,9 @@ export class RequirementService {
       created_at: now,
       created_by: "system",
       change_summary: `Requirements ${operation === "add" ? "updated" : "updated (removal)"} — ${requirements.length} entries`,
+      // SPEC-072 D1/D2 — this write path only touches `extra`; carry the
+      // current (unchanged) slug.
+      slug: updateResult.value.slug,
     });
     if (!versionResult.ok) return versionResult;
 

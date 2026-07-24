@@ -283,6 +283,9 @@ export class DriftCheckService {
       created_at: nowIso,
       created_by: "system",
       change_summary: `Code anchors ${changeVerb} — ${anchors.length} entries`,
+      // SPEC-072 D1/D2 — this write path only touches `extra`; carry the
+      // current (unchanged) slug.
+      slug: updateResult.value.slug,
     });
     if (!versionResult.ok) return versionResult;
 

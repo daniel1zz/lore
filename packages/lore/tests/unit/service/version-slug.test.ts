@@ -38,7 +38,9 @@ import { describe, expect, it } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { VersionService } from "../../../src/service/version-service.js";
-import type { CreateDocInput, VersionRecord } from "@lore/core";
+import { ReviewService } from "../../../src/service/review-service.js";
+import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
+import type { CreateDocInput, DocRecord, VersionRecord } from "@lore/core";
 
 function makeServices() {
   const store = new InMemoryStore();
@@ -126,6 +128,94 @@ describe("VersionRecord.slug capture (SPEC-072)", () => {
       expect(byVersion.get(1)!.slug).toBe(slugV1);
       expect(byVersion.get(2)!.slug).toBe("prd-second-name");
       expect(byVersion.get(3)!.slug).toBe("prd-third-name");
+    });
+
+    // Rollout follow-up (post-implementation extension) — slug capture is not
+    // limited to CorpusService's own write paths. Every OTHER service that
+    // independently constructs a VersionRecord via `store.insertVersion(...)`
+    // (review-service, task-workflow-service, ac-service, drift-check-service,
+    // validity-service, requirement-service, phase-workflow-service,
+    // phase-checklist-service, phase-migration-service) now also carries the
+    // doc's slug through its shared write-path helper. These two tests prove
+    // it end-to-end via a REAL non-corpus-service write, for the two most
+    // commonly exercised of those services.
+    it("AC-072-1: ReviewService.approve's version row carries the doc's slug (non-corpus-service write path)", async () => {
+      const store = new InMemoryStore();
+      const reviewService = new ReviewService(store);
+      // reason: `ReviewService.approve` resolves via `resolveDoc`'s ULID_REGEX
+      // (`^[0-9A-HJKMNP-TV-Z]{26}$/i` — Crockford Base32, excludes I/L/O/U), so
+      // a hand-picked id must avoid those 4 letters or the lookup silently
+      // falls through to a slug/prefix search and misses (DOC_NOT_FOUND).
+      const doc: DocRecord = {
+        id: "01HREVAPPR0VE0000000000001",
+        slug: "prd-review-approve-slug",
+        type: "prd",
+        role: "intent",
+        title: "Review Approve Slug Doc",
+        status: "draft",
+        priority: "medium",
+        content: "content",
+        parent_id: null,
+        created_at: "2026-07-24T00:00:00.000Z",
+        updated_at: "2026-07-24T00:00:00.000Z",
+        created_by: "alice",
+        version: 1,
+        deleted_at: null,
+        tags: [],
+        extra: {},
+      };
+      const insertResult = await store.insert(doc);
+      expect(insertResult.ok).toBe(true);
+
+      const approveResult = await reviewService.approve(doc.id, { reviewer: "alice" });
+      expect(approveResult.ok).toBe(true);
+      if (!approveResult.ok) return;
+      expect(approveResult.value.status).toBe("approved");
+
+      const versions = await store.findVersions(doc.id);
+      expect(versions.ok).toBe(true);
+      if (!versions.ok) return;
+      const approveVersion = versions.value.find((v) => v.action === "approve");
+      expect(approveVersion).toBeDefined();
+      expect(approveVersion!.slug).toBe("prd-review-approve-slug");
+    });
+
+    it("AC-072-1: TaskWorkflowService.addEvidence's version row carries the task's slug (non-corpus-service write path)", async () => {
+      const store = new InMemoryStore();
+      const corpusService = new CorpusService(store);
+      const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
+
+      const plan = await corpusService.create({ type: "plan", title: "Evidence Slug Plan", content: "body" } as CreateDocInput);
+      expect(plan.ok).toBe(true);
+      if (!plan.ok) return;
+
+      const task = await corpusService.create({
+        type: "task",
+        title: "Evidence Slug Task",
+        parent_id: plan.value.id,
+        content: "body",
+        extra: { plan_id: plan.value.id },
+      } as CreateDocInput);
+      expect(task.ok).toBe(true);
+      if (!task.ok) return;
+      const taskSlug = task.value.slug;
+
+      const evidenceResult = await taskWorkflowService.addEvidence(task.value.id, {
+        oracle: "tsc",
+        command: "bun run typecheck",
+        result: "pass",
+        recorded_by: "alice",
+      });
+      expect(evidenceResult.ok).toBe(true);
+      if (!evidenceResult.ok) return;
+
+      const versions = await store.findVersions(task.value.id);
+      expect(versions.ok).toBe(true);
+      if (!versions.ok) return;
+      // v1 = create, v2 = evidence append.
+      const evidenceVersion = versions.value.find((v) => v.version === 2);
+      expect(evidenceVersion).toBeDefined();
+      expect(evidenceVersion!.slug).toBe(taskSlug);
     });
   });
 
