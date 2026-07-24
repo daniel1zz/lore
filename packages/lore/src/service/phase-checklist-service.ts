@@ -453,6 +453,9 @@ export class PhaseChecklistService {
       created_at: now,
       created_by: "system",
       change_summary: changeSummary,
+      // SPEC-072 D1/D2 — this write path only touches `extra`; carry the
+      // current (unchanged) slug.
+      slug: updateResult.value.slug,
     });
     if (!versionResult.ok) return versionResult;
 

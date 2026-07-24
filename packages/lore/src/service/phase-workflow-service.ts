@@ -908,6 +908,9 @@ export class PhaseWorkflowService {
       created_at: nowIso,
       created_by: actor,
       change_summary: changeSummary,
+      // SPEC-072 D1/D2 — this write path (claim/release/evidence) never
+      // touches slug (D8-parity bound: only `extra`); carry the current value.
+      slug: updateResult.value.slug,
     });
     if (!versionResult.ok) return versionResult;
 

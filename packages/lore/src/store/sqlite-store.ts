@@ -12,6 +12,7 @@ import { MIGRATION_003_SQL } from "./migrations/migration-003.js";
 import { MIGRATION_004_SQL } from "./migrations/migration-004.js";
 import { MIGRATION_005_SQL } from "./migrations/migration-005.js";
 import { MIGRATION_006_SQL } from "./migrations/migration-006.js";
+import { MIGRATION_007_SQL } from "./migrations/migration-007.js";
 import type {
   AuditEntry,
   CalibrationRecord,
@@ -198,6 +199,24 @@ export class SQLiteStore implements StoreInterface {
           // connection — at that point the process is already going to
           // surface `error` below and this connection is unusable regardless
           // of FK state; safe to ignore.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 7) {
+      // reason: mirrors migration-005's catch/ROLLBACK wrapper (see
+      // migration-007.ts's own JSDoc @invariant) — a plain nullable `ADD
+      // COLUMN` plus the trailing `PRAGMA user_version` bump, wrapped in one
+      // BEGIN/COMMIT so a crash between them can't leave the column present
+      // with a stale version number.
+      try {
+        this.db.exec(MIGRATION_007_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-004/005/006 — safe to ignore, see above.
         }
         throw error;
       }
@@ -850,8 +869,8 @@ export class SQLiteStore implements StoreInterface {
         .prepare(
           `INSERT INTO versions
              (doc_id, version, content, extra, status, title,
-              action, created_at, created_by, change_summary)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              action, created_at, created_by, change_summary, slug)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           version.doc_id,
@@ -864,6 +883,7 @@ export class SQLiteStore implements StoreInterface {
           version.created_at,
           version.created_by,
           version.change_summary ?? null,
+          version.slug ?? null,
         );
       return ok(version);
     } catch (e) {

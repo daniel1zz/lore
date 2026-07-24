@@ -350,6 +350,8 @@ export class PhaseMigrationService {
       created_at: nowIso,
       created_by: MIGRATION_ACTOR,
       change_summary: `migrated from ${group.tasks.length} task(s)`,
+      // SPEC-072 D1/D2 — the phase doc's slug at its own creation.
+      slug: phaseDoc.slug,
     });
     if (!versionResult.ok) return err(versionResult.error);
 
@@ -385,6 +387,8 @@ export class PhaseMigrationService {
         created_at: nowIso,
         created_by: MIGRATION_ACTOR,
         change_summary: `migrated to phase ${phaseDoc.id}`,
+        // SPEC-072 D1/D2 — archiving never touches slug; carry the current value.
+        slug: updateResult.value.slug,
       });
       if (!taskVersionResult.ok) return err(taskVersionResult.error);
 

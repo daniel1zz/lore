@@ -18,6 +18,12 @@ export interface VersionEntry {
   created_at: string;
   created_by: string;
   change_summary?: string;
+  /**
+   * Doc's slug as of this version (SPEC-072 D1/D3) — absent on legacy rows
+   * written before this field existed. Never a placeholder string; renderers
+   * MUST degrade by omission, not print "unknown".
+   */
+  slug?: string;
 }
 
 export interface FieldChange {
@@ -67,6 +73,9 @@ export class VersionService {
       ...(v.change_summary !== undefined
         ? { change_summary: v.change_summary }
         : {}),
+      // SPEC-072 D3 — absence-tolerant: a legacy row with no slug omits the
+      // key entirely, never a placeholder.
+      ...(v.slug !== undefined ? { slug: v.slug } : {}),
     }));
 
     return ok(entries);
@@ -173,6 +182,16 @@ export class VersionService {
    * Restore a document to a previous version by creating a new version N+1.
    * Non-destructive — history is append-only.
    * Resets doc status to 'draft'.
+   *
+   * @remarks SPEC-072 D4 — restore NEVER touches the doc's current `slug`,
+   * even when `targetRecord.slug` (the version being restored FROM) carries a
+   * different value than the doc's slug today. The `store.update` patch below
+   * deliberately omits `slug`, and the new version-N+1 snapshot's own `slug`
+   * is the doc's CURRENT (unchanged) slug — consistent with every other
+   * "state as of this version" field on that snapshot, and consistent with a
+   * slug being a stable address rather than restorable content (restoring an
+   * old slug could also collide with a different doc that has since taken
+   * it).
    */
   async restore(idOrSlug: string, version: number): Promise<Result<DocRecord, LoreError>> {
     const resolved = await resolveDocId(this.store, idOrSlug);
@@ -225,7 +244,10 @@ export class VersionService {
     }, { expected_version: currentDoc.version });
     if (!updateResult.ok) return updateResult;
 
-    // Create new version snapshot (N+1) with target version's content
+    // Create new version snapshot (N+1) with target version's content.
+    // slug is deliberately `currentDoc.slug` (the doc's UNCHANGED slug),
+    // never `targetRecord.slug` — see this method's JSDoc @remarks (SPEC-072
+    // D4): restore never restores slug.
     const newVersionRecord = {
       doc_id: docId,
       version: nextVersion,
@@ -237,6 +259,7 @@ export class VersionService {
       created_at: now,
       created_by: currentDoc.created_by,
       change_summary: `Restored from v${version}`,
+      slug: currentDoc.slug,
     };
 
     const insertResult = await this.store.insertVersion(newVersionRecord);

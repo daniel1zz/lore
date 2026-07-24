@@ -27,7 +27,8 @@
  *
  * Six-dimension coverage for this file:
  *   HAPPY:      a fresh SQLiteStore (real class, real constructor) lands on
- *               user_version 6 with FK enforcement ON — the non-failure baseline.
+ *               the current head user_version (7, as of SPEC-072's
+ *               migration-007) with FK enforcement ON — the non-failure baseline.
  *   ERROR:      migration-006 sabotaged to fail mid-transaction (docs missing a
  *               column the migration's INSERT...SELECT depends on) — reproduces the
  *               exact "OFF toggle ran, then a throw before the ON toggle" sequence.
@@ -106,11 +107,15 @@ describe("migration-006 mid-transaction failure — PRAGMA foreign_keys restore 
 
   // ── HAPPY ──────────────────────────────────────────────────────────────
 
-  it("HAPPY: a fresh SQLiteStore lands on user_version 6 with FK enforcement ON", () => {
+  it("HAPPY: a fresh SQLiteStore lands on the current head user_version with FK enforcement ON", () => {
     const store = new SQLiteStore(":memory:");
     const db = store.getDatabase();
 
-    expect(userVersion(db)).toBe(6);
+    // reason: SPEC-072 added migration-007 (versions.slug) — a fresh store now
+    // runs every migration up to the current head (7), not just through
+    // migration-006. This test's own concern (FK enforcement restored after
+    // migration-006) is unaffected — asserted directly below.
+    expect(userVersion(db)).toBe(7);
     expect(foreignKeysEnabled(db)).toBe(true);
 
     store.close();

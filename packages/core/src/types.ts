@@ -93,7 +93,21 @@ export interface LinkRecord {
   created_by: string;
 }
 
-/** Version snapshot — created on every write. PK: (doc_id, version) */
+/**
+ * Version snapshot — created on every write. PK: (doc_id, version)
+ *
+ * `slug` (SPEC-072 D1) is OPTIONAL and absence-tolerant — a legacy row
+ * written before this field existed simply omits it (never a placeholder
+ * string, never backfilled). Every consumer (rendering, JSON output) MUST
+ * degrade by omission on a missing `slug`, the same convention
+ * `deriveTypeMeta` uses elsewhere in this package. Where present, it follows
+ * the SAME "state as of this version" convention every other snapshot field
+ * here already uses (`content`/`extra`/`status`/`title`): the value is the
+ * doc's slug AS OF this version, i.e. AFTER whatever patch produced this row
+ * — not a "value before this specific change" field. To recover what the
+ * slug was immediately before a given rename, read the PRIOR version row's
+ * `slug`, not this one's.
+ */
 export interface VersionRecord {
   doc_id: DocId;
   /** Monotonic, starting at 1 */
@@ -114,6 +128,8 @@ export interface VersionRecord {
   created_by: string;
   /** Optional human/AI-generated summary */
   change_summary?: string;
+  /** Doc's slug as of this version (SPEC-072 D1) — absent on legacy rows */
+  slug?: string;
 }
 
 /** Append-only audit log entry. */

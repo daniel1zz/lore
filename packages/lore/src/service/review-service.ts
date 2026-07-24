@@ -271,6 +271,10 @@ export class ReviewService {
       action: "approve",
       created_at: now,
       created_by: reviewer,
+      // SPEC-072 D2/D1 — same "state as of this version" convention as
+      // content/extra/status/title above; `approve` never changes slug, so
+      // this is simply the doc's current (unchanged) slug.
+      slug: updatedDoc.slug,
     });
     if (!versionResult.ok) return versionResult;
 
@@ -358,6 +362,8 @@ export class ReviewService {
       action: "reject",
       created_at: now,
       created_by: reviewer,
+      // SPEC-072 D1/D2 — rollback never changes slug; carry the current value.
+      slug: updatedDoc.slug,
       change_summary:
         "Self-rollback: ancestor spec's approval prerequisites failed a post-write " +
         "re-check (ASYNC2-002 TOCTOU guard)",

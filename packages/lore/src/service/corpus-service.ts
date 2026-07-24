@@ -836,6 +836,8 @@ export class CorpusService {
         action: "create",
         created_at: now,
         created_by: doc.created_by,
+        // SPEC-072 D1/D2 — version rows write the doc's slug from now on.
+        slug: doc.slug,
       },
       {
         timestamp: now,
@@ -1499,6 +1501,17 @@ export class CorpusService {
       action: "update",
       created_at: now,
       created_by: "system",
+      // reason: SPEC-072 D1 — `slug` follows the EXACT same "state as of this
+      // version" convention as content/extra/status/title above (docPatch's
+      // new value when the patch changed it, else the unchanged existing
+      // value). A `lore set --slug` rename therefore makes THIS row carry the
+      // NEW slug; the OLD (pre-rename) slug remains readable on the PREVIOUS
+      // version row (which, once this feature has been live since its own
+      // creation, already carries the doc's slug at that point in time) —
+      // `lore log --json` walking the full history recovers "what was the
+      // slug at any historical version" (the spec's stated problem) without
+      // this row needing a special before/after carve-out.
+      slug: docPatch.slug ?? existing.slug,
     };
 
     const updateResult = await this.store.updateWithProvenance(
@@ -1550,6 +1563,14 @@ export class CorpusService {
     // BUG-002 (audit finding) — soft-delete + version-0 sentinel + delete audit
     // entry as ONE atomic composite write (StoreInterface.softDeleteWithProvenance),
     // mirroring _createImpl's/set's fix above.
+    // reason: SPEC-072 D2 — deliberately no `slug` here. This is the
+    // pre-existing version-0 SENTINEL row (content/title already blank, not
+    // real snapshots — see the surrounding comment above), and `delete()`
+    // only ever resolves an id here (never fetches the full doc), so there is
+    // no slug value on hand without an extra read purely to populate a
+    // placeholder field on a row that isn't a real state snapshot to begin
+    // with. Omitted (never a bare `null`/empty-string placeholder) —
+    // consumers already treat an absent `slug` as legacy-row-shaped.
     const versionRecord: VersionRecord = {
       doc_id: id,
       version: 0,
