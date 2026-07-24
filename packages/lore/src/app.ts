@@ -37,6 +37,7 @@ import {
   resolveVerifyEnvConfig,
   resolveVerifyRequireCommandApproval,
   resolveRequirementQuantifiableEnabled,
+  resolveAttestationMinRatio,
   type LoreConfig,
   type VerifyEnvConfig,
   AiConfigSchema,
@@ -69,6 +70,7 @@ import { UatService } from "./service/uat-service.js";
 import { VerifyRunnerService } from "./service/verify-runner-service.js";
 import { executeVerifySpawnSpec } from "./service/verify-executor.js";
 import { GateEnforcer } from "./service/gate-enforcer.js";
+import { VerificationProjectionService } from "./service/verification-projection-service.js";
 import { SessionService } from "./service/session-service.js";
 import { ValidityService } from "./service/validity-service.js";
 import { DriftCheckService } from "./service/drift-check-service.js";
@@ -295,6 +297,23 @@ export interface App {
    */
   driftCheckService?: DriftCheckService;
   /**
+   * VerificationProjectionService — assembles the dashboard adjudication
+   * workbench's Evidence-tab projection for one doc (`GET /api/evidence-panel/:id`,
+   * SPEC-075 §Module Boundary D1). Store-only, no telemetry, same DI shape as
+   * `DriftCheckService`/`PhaseService` — plus one resolved scalar
+   * (`resolveAttestationMinRatio(config)`, the SAME value `GateEnforcer` feeds
+   * `attestationFloor`, so the plan panel and the `plan-close` gate can never
+   * disagree on which floor a plan is measured against).
+   *
+   * Optional for the same reason `driftCheckService`/`acService` are:
+   * pre-existing hand-built App test stubs (HTTP routes / MCP tools / eval
+   * scenarios — outside this task's file anchors) remain valid without a
+   * mechanical touch to every one of them. Always present in production —
+   * both `buildAppFromSqlite` and `buildAppFromTurso` wire it unconditionally.
+   * Source: SPEC-075 §Module Boundary D1, §Design Decisions D3/D6.
+   */
+  verificationProjectionService?: VerificationProjectionService;
+  /**
    * UatService — the sole write orchestrator for a structured UAT verdict
    * (`lore uat record`, SPEC-054). Narrow injected ports (`corpusService.createUatDoc` /
    * `corpusService.resolve` / `store.addLink`), same optional-DI shape as `acService`.
@@ -420,6 +439,11 @@ export interface App {
  *   `CorpusService`/`ReviewService`/`TaskWorkflowService`, all three of which treat it
  *   as OPTIONAL DI (see each service's constructor JSDoc). Also bound into
  *   `SessionService` (`isEnabled`) — SPEC-041's `bootstrap` armed-gate resolution.
+ * @param attestationMinRatio - `workflow.attestation.min_ratio` floor (SPEC-075
+ *   §Public Interface), threaded into `VerificationProjectionService` — the SAME
+ *   resolved value `GateEnforcer.resolveAttestationMinRatio` feeds `attestationFloor`,
+ *   so the dashboard's plan Evidence-panel and the `plan-close` gate can never
+ *   disagree on which floor a plan is measured against.
  */
 function buildAppFromSqlite(
   store: SQLiteStore,
@@ -435,6 +459,7 @@ function buildAppFromSqlite(
   repoRoot: string = process.cwd(),
   gateEnforcer: GateEnforcer = new GateEnforcer(undefined),
   requirementQuantifiableEnabled: boolean = true,
+  attestationMinRatio: number = resolveAttestationMinRatio(undefined),
 ): App {
   // reason: SPEC-024 §9.1 — callerSurface must be mutable so adapters can set it at startup.
   // Using a let variable closed over by the getter/setter ensures reads always see the current
@@ -538,6 +563,10 @@ function buildAppFromSqlite(
     // reason: DriftCheckService depends only on StoreInterface — stateless, no AI, no
     // telemetry, same shape as PhaseService/AcService. SPEC-045 §Design Decisions D4.
     driftCheckService: new DriftCheckService(store),
+    // reason: VerificationProjectionService depends only on StoreInterface plus the
+    // resolved attestationMinRatio scalar — stateless, no AI, no telemetry, same DI
+    // shape as DriftCheckService/PhaseService. SPEC-075 §Module Boundary D1/D6.
+    verificationProjectionService: new VerificationProjectionService(store, attestationMinRatio),
     // reason: SeatService (SPEC-057) — real GitPort over the SAME repoRoot
     // VerifyRunnerService already receives (captured at composition time, never a
     // second `process.cwd()` read); getReadyReport is bound to
@@ -668,6 +697,8 @@ function buildAppFromSqlite(
  *   `<repoRoot>/.lore/lore.db`)
  * @param gateEnforcer - Service-layer gate enforcement (retro follow-up item 8,
  *   defense-in-depth) — see `buildAppFromSqlite`'s identical parameter JSDoc.
+ * @param attestationMinRatio - `workflow.attestation.min_ratio` floor — see
+ *   `buildAppFromSqlite`'s identical parameter JSDoc.
  */
 function buildAppFromTurso(
   store: TursoStore,
@@ -684,6 +715,7 @@ function buildAppFromTurso(
   repoRoot: string = process.cwd(),
   gateEnforcer: GateEnforcer = new GateEnforcer(undefined),
   requirementQuantifiableEnabled: boolean = true,
+  attestationMinRatio: number = resolveAttestationMinRatio(undefined),
 ): App {
   // reason: SPEC-024 §9.1 — same mutable callerSurface pattern as buildAppFromSqlite.
   let _callerSurface: CallerSurface = "cli";
@@ -770,6 +802,10 @@ function buildAppFromTurso(
     // reason: DriftCheckService depends only on StoreInterface — stateless, no AI, no
     // telemetry, same shape as PhaseService/AcService. SPEC-045 §Design Decisions D4.
     driftCheckService: new DriftCheckService(store),
+    // reason: VerificationProjectionService depends only on StoreInterface plus the
+    // resolved attestationMinRatio scalar — stateless, no AI, no telemetry, same DI
+    // shape as DriftCheckService/PhaseService. SPEC-075 §Module Boundary D1/D6.
+    verificationProjectionService: new VerificationProjectionService(store, attestationMinRatio),
     // reason: SeatService (SPEC-057) — real GitPort over the SAME repoRoot
     // VerifyRunnerService already receives (captured at composition time, never a
     // second `process.cwd()` read); getReadyReport is bound to
@@ -945,6 +981,12 @@ export function createApp(
   // to enabled (true) when config/workflow section absent.
   const requirementQuantifiableEnabled = resolveRequirementQuantifiableEnabled(config);
 
+  // Attestation-floor ratio (SPEC-069/SPEC-075) — the SAME resolved value
+  // GateEnforcer.resolveAttestationMinRatio feeds attestationFloor, threaded here
+  // so VerificationProjectionService's plan Evidence-panel and the plan-close gate
+  // can never disagree on which floor a plan is measured against.
+  const attestationMinRatio = resolveAttestationMinRatio(config);
+
   // reason: dbPath is always "<repoRoot>/.lore/lore.db" (findLoreDbPath's contract,
   // adapters/cli/utils.ts) — two levels up recovers the project root `lore verify`
   // spawns commands from (SPEC-039 §2). Computed here rather than added as a new
@@ -985,6 +1027,7 @@ export function createApp(
       repoRoot,
       gateEnforcer,
       requirementQuantifiableEnabled,
+      attestationMinRatio,
     );
   }
 
@@ -1027,6 +1070,7 @@ export function createApp(
         repoRoot,
         gateEnforcer,
         requirementQuantifiableEnabled,
+        attestationMinRatio,
       ),
     };
   } catch (e) {

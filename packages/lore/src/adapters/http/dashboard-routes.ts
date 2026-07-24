@@ -55,10 +55,11 @@
  * Source: SPEC-022 §9.1, §9.3, §9.4, §9.5, §9.6; SPEC-027 AC-DH-6, AC-DH-7, AC-DH-11; SPEC-033 F1
  */
 
+import { z } from "zod";
 import type { App } from "../../app.js";
 import type { ActorContext } from "./auth.js";
-import type { DocPatch, LinkType } from "@lore/core";
-import { createDocInputSchema } from "@lore/core";
+import type { DocPatch, LinkType, Telemetry } from "@lore/core";
+import { createDocInputSchema, docTypeSchema } from "@lore/core";
 import { jsonOk, jsonError, loreErrorResponse, parseJsonBody, isOriginAllowed, emitDashboardTelemetry } from "./middleware.js";
 import { checkConcurrency, resolveExpectedVersion, buildConflictPayload } from "./concurrency.js";
 import { runCalibrationHook } from "../../flows/calibration-hook.js";
@@ -132,7 +133,8 @@ type DashboardPathMatch =
   | { type: "deleteDoc"; id: string }
   | { type: "restore"; id: string }
   | { type: "configPatch" }
-  | { type: "machineConfigPatch" };
+  | { type: "machineConfigPatch" }
+  | { type: "routeViewTelemetry" };
 
 function matchDashboardPath(method: string, path: string): DashboardPathMatch | null {
   // POST /api/dashboard/docs
@@ -153,6 +155,13 @@ function matchDashboardPath(method: string, path: string): DashboardPathMatch | 
   // table one-entry-per-resource, matching every other route below.
   if (method === "PATCH" && path === "/api/dashboard/config/machine") {
     return { type: "machineConfigPatch" };
+  }
+
+  // POST /api/dashboard/telemetry/route-view (SPEC-075 D4/D8) — checked early for
+  // the same readability reason as the config routes above (a distinct, non-doc
+  // resource).
+  if (method === "POST" && path === "/api/dashboard/telemetry/route-view") {
+    return { type: "routeViewTelemetry" };
   }
 
   // PATCH /api/dashboard/docs/:id
@@ -531,6 +540,82 @@ async function handleDashboardRestore(
   return jsonOk({ doc: result.value });
 }
 
+/** Zod body shape for {@link handleDashboardRouteViewTelemetry} (SPEC-075 D4). */
+const routeViewBodySchema = z.object({
+  route_id: z.string().max(200),
+  doc_type: docTypeSchema.optional(),
+});
+
+/**
+ * POST /api/dashboard/telemetry/route-view (PRD §21 F2, SPEC-075 D4/D8) — records
+ * one dashboard route-navigation event to the SPEC-012 JSONL telemetry sink.
+ *
+ * The telemetry sink is passed as an EXPLICIT parameter (`telemetry`), not read
+ * internally off `app.telemetry` the way `emitDashboardTelemetry` reads it off
+ * `app` — same injectable-seam intent (a caller can substitute a throwing double),
+ * spelled out as its own parameter here so a `.bun.test.ts` HTTP test can inject
+ * one without needing a second App construction path. Production dispatch
+ * (`handleDashboardRoute` below) always passes `app.telemetry`, so this handler's
+ * observable behavior is unchanged from calling `emitDashboardTelemetry` directly —
+ * it exists because D8 additionally requires the sink-failure branch be reachable.
+ *
+ * Body: `{route_id: string (<=200 chars), doc_type?: DocType}`.
+ * - Telemetry enabled (`JsonlTelemetry`) → exactly one JSONL event
+ *   (`service:"dashboard"`, `method:"route_view"`, `source:"dashboard"`,
+ *   `meta:{route_id, doc_type?}`, server-stamped `ts`).
+ * - Telemetry disabled (`NoOpTelemetry`) → `record()` is a documented no-op — zero
+ *   sink writes.
+ * - `record()` THROWS (a test-injected throwing double) → the write is swallowed
+ *   (mirrors `emitDashboardTelemetry`'s "telemetry must never fail the caller"
+ *   invariant) but, UNLIKE that shared helper's silent catch, this route emits
+ *   exactly one `console.error` line — a documented fail-QUIET (never fail-loud to
+ *   the client) exception (PRD §21): the dashboard UI must never break because a
+ *   fire-and-forget navigation ping failed, but an operator reading server logs
+ *   still needs to see the sink is broken.
+ * Always returns 204 (malformed body → 422, the one exception).
+ */
+async function handleDashboardRouteViewTelemetry(
+  req: Request,
+  telemetry: Telemetry,
+): Promise<Response> {
+  const body = await parseJsonBody(req);
+  const parsed = routeViewBodySchema.safeParse(body);
+  if (!parsed.success) {
+    const firstIssue = parsed.error.issues[0];
+    return jsonError(
+      {
+        code: "VALIDATION_ERROR",
+        field: firstIssue?.path.join(".") ?? "body",
+        message: firstIssue?.message ?? "Validation failed",
+      },
+      422,
+    );
+  }
+
+  try {
+    telemetry.record({
+      ts: new Date().toISOString(),
+      service: "dashboard",
+      method: "route_view",
+      ok: true,
+      duration_ms: 0,
+      source: "dashboard",
+      meta: {
+        route_id: parsed.data.route_id,
+        ...(parsed.data.doc_type !== undefined ? { doc_type: parsed.data.doc_type } : {}),
+      },
+    });
+  } catch (e) {
+    // reason: PRD §21 documented fail-quiet exception — a sink write failure must
+    // never surface to the dashboard UI (mirrors emitDashboardTelemetry's silent
+    // catch), but a totally silent swallow would make the sink's brokenness
+    // undiagnosable. One structured server-side log line, no user-visible error.
+    console.error("dashboard telemetry route_view sink write failed:", e);
+  }
+
+  return new Response(null, { status: 204 });
+}
+
 // ─── Route dispatcher ─────────────────────────────────────────────────────────
 
 /**
@@ -586,5 +671,7 @@ export async function handleDashboardRoute(
       return handleDashboardConfigPatch(req, app, actor);
     case "machineConfigPatch":
       return handleDashboardMachineConfigPatch(req, app, actor);
+    case "routeViewTelemetry":
+      return handleDashboardRouteViewTelemetry(req, app.telemetry);
   }
 }
