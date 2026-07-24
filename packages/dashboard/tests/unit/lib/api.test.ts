@@ -41,8 +41,17 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { apiGetStatus, apiList, apiSearch, apiGetDoc, apiGetReady, ApiError } from "../../../src/lib/api";
-import type { ReadyRecord } from "@lore/core";
+import {
+  apiGetStatus,
+  apiList,
+  apiSearch,
+  apiGetDoc,
+  apiGetReady,
+  apiGetEvidencePanel,
+  evidencePanelQueryKey,
+  ApiError,
+} from "../../../src/lib/api";
+import type { EvidencePanelProjection, ReadyRecord } from "@lore/core";
 
 // ─── Mock fetch ───────────────────────────────────────────────────────────────
 
@@ -447,6 +456,70 @@ describe("ApiError", () => {
       const result = await apiGetStatus();
 
       expect(result.total_docs).toBe(0);
+    });
+  });
+});
+
+// ─── SPEC-075: apiGetEvidencePanel / evidencePanelQueryKey ───────────────────
+
+describe("apiGetEvidencePanel", () => {
+  describe("happy path", () => {
+    it("fetches GET /api/evidence-panel/:idOrSlug and returns the projection verbatim", async () => {
+      const projection: EvidencePanelProjection = { doc_type: "task", evidence: [], ac_refs: [] };
+      vi.stubGlobal("fetch", makeFetchMock({ ok: true, data: projection }));
+
+      const result = await apiGetEvidencePanel("task-fixture");
+
+      expect(result).toStrictEqual(projection);
+    });
+
+    it("URL-encodes the idOrSlug parameter", async () => {
+      const fetchMock = makeFetchMock({ ok: true, data: { doc_type: "other" } });
+      vi.stubGlobal("fetch", fetchMock);
+
+      await apiGetEvidencePanel("spec/with slash");
+
+      const calledUrl = (fetchMock as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string;
+      expect(calledUrl).toBe(`/api/evidence-panel/${encodeURIComponent("spec/with slash")}`);
+    });
+  });
+
+  describe("negative", () => {
+    it("throws ApiError with the server's code on a DOC_NOT_FOUND response", async () => {
+      vi.stubGlobal(
+        "fetch",
+        makeFetchMock({ ok: false, error: { code: "DOC_NOT_FOUND", message: "not found" } }, 404),
+      );
+
+      const err = await apiGetEvidencePanel("missing").catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).code).toBe("DOC_NOT_FOUND");
+    });
+  });
+
+  describe("error: network failure", () => {
+    it("throws ApiError with code NETWORK_ERROR", async () => {
+      vi.stubGlobal("fetch", makeNetworkErrorMock());
+
+      const err = await apiGetEvidencePanel("task-fixture").catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).code).toBe("NETWORK_ERROR");
+    });
+  });
+});
+
+describe("evidencePanelQueryKey", () => {
+  describe("happy path", () => {
+    it("returns a ['evidence-panel', idOrSlug] tuple", () => {
+      expect(evidencePanelQueryKey("task-fixture")).toEqual(["evidence-panel", "task-fixture"]);
+    });
+  });
+
+  describe("regression", () => {
+    it("returns an equal-by-value key for the same idOrSlug across calls (TanStack Query cache-sharing contract)", () => {
+      expect(evidencePanelQueryKey("plan-x")).toEqual(evidencePanelQueryKey("plan-x"));
     });
   });
 });

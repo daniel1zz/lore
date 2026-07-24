@@ -37,8 +37,27 @@
  *     in `api/mutations.ts`); a 409 from either surfaces as a generic error
  *     toast via `DashboardApiError`, matching how `DocDetail.handleTransition`
  *     already treats a status-transition conflict it can't map onto a diff.
+ *   - SPEC-075 R-9: `useTriageKeyboard` drives j/k row selection (visually a
+ *     `ring-2 ring-primary` outline on the selected row), `a` approves the
+ *     selected row IMMEDIATELY with no note (the fast path — a reviewer who
+ *     wants to add a calibration note still uses the mouse "Review" flow),
+ *     `x` OPENS the selected row's adjudicate panel rather than rejecting
+ *     outright (a destructive action always gets the chance to type a
+ *     reason first — "reject-with-reason", never a silent keystroke
+ *     rejection), `e` toggles the SAME `expandedQuestionsId` state the
+ *     mouse-driven "Show blocking questions" button already used, and `o`
+ *     navigates to the selected row's detail page. Disabled entirely while
+ *     any adjudicate panel is open (`enabled: adjudicatingId === null`) so
+ *     typing "e"/"a"/"x"/"o" into the doc-title flow never double-fires
+ *     while a reviewer's mid-adjudication (the calibration-note `<input>`
+ *     itself is separately covered by the hook's own editable-target
+ *     suppression, AC-075-6).
+ *   - `JudgmentDrilldown` renders alongside `JudgmentBadge` per row — an
+ *     independent, click-driven expand/collapse for the judgment's
+ *     decision/confidence/reasons/checks/prompt_version, distinct from the
+ *     keyboard-driven blocking-questions-only expand above.
  * Side-effect class: IO (fetch via TanStack Query, toast)
- * Source: SPEC-033 F3 §3
+ * Source: SPEC-033 F3 §3; SPEC-075 §Module Boundary D7, R-9
  */
 
 import { useMemo, useState } from "react";
@@ -48,10 +67,13 @@ import { apiGetPendingReview, apiGetJudgments } from "@/lib/api";
 import type { PendingDocRow } from "@/lib/api";
 import type { ReviewJudgment } from "@lore/core";
 import { JudgmentBadge } from "@/components/judgment-badge";
+import { JudgmentDrilldown } from "@/components/JudgmentDrilldown";
 import { formatTypeMetaLabel, metaBadgeVariant } from "@/lib/type-meta-label";
 import { apiApproveDoc, apiRejectDoc, DashboardApiError } from "@/api/mutations";
+import { useTriageKeyboard } from "@/lib/use-triage-keyboard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 
 export const TRIAGE_QUEUE_KEY = ["pending", "triage-queue"] as const;
 
@@ -105,6 +127,20 @@ export function TriageQueue({ onNavigate }: TriageQueueProps): React.ReactElemen
     if (data === undefined) return [];
     return escalatedOnly ? data.filter(isFreshEscalation) : data;
   }, [data, escalatedOnly]);
+
+  const rowIds = useMemo(() => rows.map((row) => row.doc.id), [rows]);
+
+  // reason: SPEC-075 R-9 — see the module doc comment for the full a/x/e/o mapping.
+  // Disabled while an adjudicate panel is open so the keyboard loop never fights
+  // with in-progress mouse-driven adjudication.
+  const { selectedId } = useTriageKeyboard({
+    itemIds: rowIds,
+    enabled: adjudicatingId === null,
+    onApprove: (docId) => void handleAdjudicate(docId, "approve"),
+    onReject: (docId) => openAdjudicate(docId),
+    onExpand: (docId) => setExpandedQuestionsId((prev) => (prev === docId ? null : docId)),
+    onOpen: (docId) => onNavigate?.(docId),
+  });
 
   function openAdjudicate(docId: string): void {
     setAdjudicatingId(docId);
@@ -182,7 +218,13 @@ export function TriageQueue({ onNavigate }: TriageQueueProps): React.ReactElemen
             const metaLabel = doc.meta !== undefined ? formatTypeMetaLabel(doc.meta) : null;
 
             return (
-              <div key={doc.id} className="rounded-lg border p-3 space-y-2">
+              <div
+                key={doc.id}
+                className={cn(
+                  "rounded-lg border p-3 space-y-2",
+                  selectedId === doc.id && "ring-2 ring-primary",
+                )}
+              >
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0">
                     <Badge variant="outline" className="text-xs shrink-0">
@@ -215,6 +257,8 @@ export function TriageQueue({ onNavigate }: TriageQueueProps): React.ReactElemen
                     </button>
                   </div>
                 </div>
+
+                <JudgmentDrilldown judgment={judgment} />
 
                 {blockingQuestions.length > 0 && (
                   <div>
