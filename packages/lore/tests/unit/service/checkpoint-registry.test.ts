@@ -16,9 +16,10 @@ import {
   isCheckpointBlocked,
   selectFailures,
   buildUpstreamSpecContext,
+  isNonPlanParentError,
   type GateContext,
 } from "../../../src/service/checkpoint-registry.js";
-import type { DocRecord } from "@lore/core";
+import type { DocRecord, LoreError } from "@lore/core";
 
 describe("checkpointRegistry", () => {
   // HAPPY — registry shape: all four GateCheckpoint members are now populated
@@ -442,6 +443,46 @@ describe("checkpointRegistry", () => {
       const ctx = buildUpstreamSpecContext(spec);
       expect(ctx.hasSpecParent).toBe(true);
       expect(ctx.parentSpec?.deleted_at).toBe("2026-07-09T00:00:00.000Z");
+    });
+  });
+
+  // ─── isNonPlanParentError (SPEC-069 ad-hoc gap fix) ─────────────────────────
+  describe("isNonPlanParentError", () => {
+    // HAPPY — the exact shape `CorpusService.getPlanBundle` returns for a
+    // resolved-but-not-plan parent (e.g. an ad-hoc task's root-PRD parent).
+    it("is true for the exact {VALIDATION_ERROR, field: 'type'} shape getPlanBundle returns for a non-plan parent", () => {
+      const error: LoreError = {
+        code: "VALIDATION_ERROR",
+        field: "type",
+        message: "Expected a plan document; got type 'prd'",
+        value: "prd",
+      };
+      expect(isNonPlanParentError(error)).toBe(true);
+    });
+
+    // NEGATIVE — every OTHER getPlanBundle failure shape must NOT be mistaken
+    // for the structural non-plan-parent case (these must still propagate as
+    // hard failures, unchanged).
+    it("is false for DOC_NOT_FOUND (an unresolvable or soft-deleted parent)", () => {
+      const error: LoreError = { code: "DOC_NOT_FOUND", id: "01ABCDEFGHJKMNPQRSTVWXYZ00" };
+      expect(isNonPlanParentError(error)).toBe(false);
+    });
+
+    it("is false for a STORE_ERROR", () => {
+      const error: LoreError = { code: "STORE_ERROR", message: "disk full" };
+      expect(isNonPlanParentError(error)).toBe(false);
+    });
+
+    // BOUNDARY — a VALIDATION_ERROR on a DIFFERENT field must not be confused
+    // with the specific "wrong doc type" shape.
+    it("is false for a VALIDATION_ERROR on a different field", () => {
+      const error: LoreError = {
+        code: "VALIDATION_ERROR",
+        field: "plan.extra.ac_scope",
+        message: "declares a schema-invalid ac_scope",
+        value: {},
+      };
+      expect(isNonPlanParentError(error)).toBe(false);
     });
   });
 });

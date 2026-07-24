@@ -70,6 +70,7 @@ import {
 import type { Result, LoreError, LoreConfig, EvidenceEntry, AcCoverageFact, DocRecord } from "@lore/core";
 import type { App } from "../../app.js";
 import { extractSpecCriteria } from "../../flows/phase-status-flow.js";
+import { isNonPlanParentError } from "../../service/checkpoint-registry.js";
 import type {
   TaskFeedFlowDeps,
   TaskBundle,
@@ -143,10 +144,45 @@ function extractEvidenceTolerant(
 }
 
 /**
+ * Rendered as `TaskBundle.planSlug` for a task with no governing plan (SPEC-069
+ * ad-hoc gap fix, see `buildTaskBundle`'s JSDoc) — `TaskBundle.planSlug` is a
+ * required `string` (never `string | null`; widening it would ripple into
+ * `flows/task-feed-flow.ts`'s render functions and `TaskFeedFlowDeps` signatures,
+ * out of this fix's scope), so a real slug value is needed here. This sentinel is
+ * deliberately NOT kebab-case (real slugs never contain spaces/parens/em-dashes),
+ * so it can never collide with an actual corpus slug; `planStateForTask`/
+ * `latestHandoffForPlan` resolving it fails with `DOC_NOT_FOUND` — both call sites
+ * already render THAT failure gracefully (`renderPlanState`/`renderHandoffSection`,
+ * `task-feed-flow.ts`'s non-fatal-by-design contract for these two sections), so
+ * the pack still renders in full, just with an honest "unavailable" note in those
+ * two sections instead of a fabricated plan name.
+ */
+const NO_GOVERNING_PLAN_SENTINEL = "(none — ad-hoc task, no governing plan)";
+
+/**
  * `TaskFeedFlowDeps.getTaskBundle` real binding — resolves `taskIdOrSlug`, walks its
  * parent plan via `corpusService.getPlanBundle` (the SAME port `TaskWorkflowService`'s
  * claim gate and `phase-wiring.ts`'s `buildPhaseBundle` both use), and assembles every
  * pre-derived fact `buildTaskStartPack` (`flows/task-feed-flow.ts`) renders.
+ *
+ * **SPEC-069 ad-hoc gap fix (task-fix-spec-069-gap-adhoc-task-claim-structurally-
+ * impossible, AC-4)**: a `--adhoc` task's `parent_id` (SPEC-069 D2) is the root PRD
+ * — non-null, but not `type: "plan"` — so `getPlanBundle` used to hard-fail this
+ * function with "Expected a plan document" for the ENTIRE `--adhoc` channel,
+ * mirroring the SAME root cause `TaskWorkflowService.enforceClaimGate`/`gate.ts`'s
+ * `runTaskClaimGate` had (`checkpoint-registry.ts::isNonPlanParentError`
+ * distinguishes this SPECIFIC, structural failure shape from every other
+ * `getPlanBundle` error, which still propagates fatally, unchanged). When it fires,
+ * this function degrades to a "no governing plan" bundle instead of failing:
+ * `spec: undefined` (an ad-hoc task's parent is a PRD, never a spec-tier ancestor),
+ * `criteria: []` (nothing to score against — `noDeclaredAcs: true`), `acScope:
+ * undefined` (there is no PLAN doc at all to read `extra.ac_scope` off of — the
+ * AC-070-13 malformed-scope check below is skipped entirely, not silently passed;
+ * skipping is correct here because there is structurally no field to be malformed),
+ * and `planSlug: NO_GOVERNING_PLAN_SENTINEL` (see that constant's own JSDoc). Every
+ * OTHER fact on `TaskBundle` (`anchors`, `claimView`, `priorFailures`,
+ * `relatedKnowledge`, `phaseName`) is read DIRECTLY off `task`/`taskResult`, not off
+ * the plan bundle, so none of it is affected by this branch.
  */
 async function buildTaskBundle(app: App, taskIdOrSlug: string): Promise<Result<TaskBundle, LoreError>> {
   const taskResult = await app.corpusService.get(taskIdOrSlug);
@@ -171,10 +207,16 @@ async function buildTaskBundle(app: App, taskIdOrSlug: string): Promise<Result<T
   }
 
   const bundleResult = await app.corpusService.getPlanBundle(task.parent_id);
-  if (!bundleResult.ok) return bundleResult;
-  const bundle = bundleResult.value;
+  if (!bundleResult.ok && !isNonPlanParentError(bundleResult.error)) return bundleResult;
 
-  const criteria = bundle.spec !== undefined ? extractSpecCriteria(bundle.spec) : [];
+  // reason: SPEC-069 ad-hoc gap fix — `planSlug`/`spec`/`siblingTasks` all resolve to
+  // the "no governing plan" degraded shape when `getPlanBundle` failed structurally
+  // (see this function's own JSDoc); otherwise the real bundle's fields, unchanged.
+  const planSlug = bundleResult.ok ? bundleResult.value.plan.slug : NO_GOVERNING_PLAN_SENTINEL;
+  const spec = bundleResult.ok ? bundleResult.value.spec : undefined;
+  const siblingTasks = bundleResult.ok ? bundleResult.value.tasks : [];
+
+  const criteria = spec !== undefined ? extractSpecCriteria(spec) : [];
 
   // reason: SPEC-070 AC-070-13 (review finding F4) — a PRESENT-but-schema-invalid
   // `plan.extra.ac_scope` previously fell through `safeParse`'s failure branch to
@@ -182,25 +224,32 @@ async function buildTaskBundle(app: App, taskIdOrSlug: string): Promise<Result<T
   // is untyped storage (direct store write, legacy data, or a future format never
   // validated by this reader) — an ABSENT key is legal (no scope declared), but a
   // PRESENT, malformed one must fail loud rather than silently degrade to the
-  // widest-possible interpretation.
-  const rawAcScope: unknown = bundle.plan.extra["ac_scope"];
+  // widest-possible interpretation. Only reachable when `bundleResult.ok` — an
+  // ad-hoc task has no PLAN doc at all to read `extra.ac_scope` off of, so `acScope`
+  // stays `undefined` (no scope declared, structurally) rather than attempting a
+  // read against a bundle that doesn't exist.
   let acScope: string[] | undefined;
-  if (rawAcScope === undefined) {
-    acScope = undefined;
-  } else {
-    const acScopeParsed = planAcScopeSchema.safeParse(rawAcScope);
-    if (!acScopeParsed.success) {
-      return err({
-        code: "VALIDATION_ERROR",
-        field: "plan.extra.ac_scope",
-        message: `Plan '${bundle.plan.slug}' declares a schema-invalid ac_scope: ${acScopeParsed.error.message}`,
-        value: rawAcScope,
-      });
+  if (bundleResult.ok) {
+    const rawAcScope: unknown = bundleResult.value.plan.extra["ac_scope"];
+    if (rawAcScope === undefined) {
+      acScope = undefined;
+    } else {
+      const acScopeParsed = planAcScopeSchema.safeParse(rawAcScope);
+      if (!acScopeParsed.success) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "plan.extra.ac_scope",
+          message: `Plan '${bundleResult.value.plan.slug}' declares a schema-invalid ac_scope: ${acScopeParsed.error.message}`,
+          value: rawAcScope,
+        });
+      }
+      acScope = acScopeParsed.data;
     }
-    acScope = acScopeParsed.data;
+  } else {
+    acScope = undefined;
   }
 
-  const coverage = computeAcCoverage(criteria, bundle.tasks);
+  const coverage = computeAcCoverage(criteria, siblingTasks);
   const acceptance: AcceptanceView[] = criteria.map((criterion, i) => {
     const fact = coverage[i];
     const scoped = acScope === undefined ? true : acScope.includes(criterion.id);
@@ -241,8 +290,7 @@ async function buildTaskBundle(app: App, taskIdOrSlug: string): Promise<Result<T
       tail: headChars(e.output_tail ?? "", PRIOR_FAILURE_TAIL_CHARS),
     }));
 
-  const upstreamSpecApproved =
-    bundle.spec !== undefined ? UPSTREAM_APPROVED_STATUSES.has(bundle.spec.status) : null;
+  const upstreamSpecApproved = spec !== undefined ? UPSTREAM_APPROVED_STATUSES.has(spec.status) : null;
 
   const phaseName = typeof task.extra["phase"] === "string" ? (task.extra["phase"] as string) : null;
 
@@ -256,8 +304,8 @@ async function buildTaskBundle(app: App, taskIdOrSlug: string): Promise<Result<T
 
   return ok({
     task,
-    planSlug: bundle.plan.slug,
-    specSlug: bundle.spec !== undefined ? bundle.spec.slug : null,
+    planSlug,
+    specSlug: spec !== undefined ? spec.slug : null,
     phaseName,
     acceptance,
     noDeclaredAcs: criteria.length === 0,
