@@ -1,10 +1,9 @@
 /**
  * GET /api/issue-reports — SPEC-074 dashboard Issues triage read projection.
- * Surfaces every still-open (status draft|in-review) incoming issue report
- * (a `task` doc carrying `extra.issue_report`, written by the upstream
- * `lore report-issue` consumer flow — SPEC-072) as a slim row the dashboard's
- * Issues page/nav badge/home card render directly, plus the corpus-wide open
- * count the badge polls.
+ * Surfaces every still-open incoming issue report (a `task` doc carrying
+ * `extra.issue_report`, written by the upstream `lore report-issue` consumer
+ * flow — SPEC-072) as a slim row the dashboard's Issues page/nav badge/home
+ * card render directly, plus the corpus-wide open count the badge polls.
  *
  * Public surface: handleGetIssueReports, IssueReportRow.
  *
@@ -20,6 +19,23 @@
  *     predicate, so this is deliberately not pushed into CorpusService (see
  *     SPEC-074 §Design: "if the list surface can't express it, a narrow
  *     read-only helper is acceptable [over CorpusService], never a write").
+ *   - "Open" is NOT status alone. `ReviewService.reject`
+ *     (`service/review-service.ts`) never transitions a doc OFF
+ *     `draft`/`in-review` (SPEC-005 §3/§4 — rejection returns a doc TO
+ *     `draft`, there is no distinct "rejected" `DocStatus`) — so a rejected
+ *     report's `status` is indistinguishable from a never-yet-reviewed one.
+ *     The audit trail is the ONLY record of "this draft was actually
+ *     rejected". This mirrors the EXACT decision shape
+ *     `flows/upstream-context-flow.ts::UpstreamPort.getDocStatus` already
+ *     uses for the SAME invariant (latest `"reject"` audit entry wins unless
+ *     superseded by a later `"approve"`), generalized here from a single-doc
+ *     `queryAudit({doc_id, action: "reject", limit: 1})` lookup to two
+ *     BATCHED whole-corpus queries (`action: "reject"` / `action: "approve"`,
+ *     via `app.auditService.query`) — one round trip per action covering
+ *     every candidate at once, since `AuditFilters` has no "doc_id IN (...)"
+ *     predicate to scope a single query to just the candidate set. See
+ *     `hasOpenIssueReportShape` (sync status+shape gate) and
+ *     `wasRejectedWithoutLaterApproval` (the audit-derived exclusion) below.
  *   - Auth: cookie OR bearer, same duality as every other v1 GET route
  *     (dispatched from `routes.ts`'s general `/api/*` table, not the
  *     cookie-only `/api/dashboard/*` namespace — SPEC-062 GET precedent).
@@ -34,16 +50,16 @@
  *   - Zero matching tasks → `{rows: [], open_count: 0}` with HTTP 200, never
  *     an error (AC-074-5) — an empty result is a fact, not a failure.
  *
- * Side-effect class: pure read (delegates to `CorpusService.listFull`, itself
- *   a read-only store query; this module performs no writes and no IO of its
- *   own).
+ * Side-effect class: pure read (delegates to `CorpusService.listFull` and
+ *   `AuditService.query`, both read-only store queries; this module performs
+ *   no writes and no IO of its own).
  *
- * Source: SPEC-074 §Scope, §Design; AC-074-5.
+ * Source: SPEC-074 §Scope, §Design; AC-074-3, AC-074-5.
  */
 
 import type { App } from "../../app.js";
 import { jsonOk, loreErrorResponse } from "./middleware.js";
-import type { DocRecord } from "@lore/core";
+import type { AuditEntry, DocRecord } from "@lore/core";
 
 /**
  * One row of the `GET /api/issue-reports` projection — exactly the 9 fields
@@ -76,7 +92,7 @@ export interface IssueReportRow {
  *
  * @param doc - a `task`-typed `DocRecord` already known to carry a non-null
  *   `extra.issue_report` object (callers check presence before calling this;
- *   see {@link isIssueReportTask})
+ *   see {@link hasOpenIssueReportShape})
  * @returns the projected row; every nested field that is missing or the
  *   wrong type degrades to `""` (or `[]` for `possible_duplicates`) rather
  *   than throwing — malformed upstream data must never crash this route
@@ -108,17 +124,24 @@ function projectIssueReportRow(doc: DocRecord): IssueReportRow {
 }
 
 /**
- * Whether a task `DocRecord` is a still-open incoming issue report: status
- * ∈ {draft, in-review} AND `extra.issue_report` is present (a non-null,
- * non-array object — the same defensive shape check
+ * Whether a task `DocRecord` HAS THE SHAPE of a still-open incoming issue
+ * report: status ∈ {draft, in-review} AND `extra.issue_report` is present (a
+ * non-null, non-array object — the same defensive shape check
  * `readReporterProject`/`countOpenReports` in `@lore/core` use for this same
- * nested field). Approved (or later-lifecycle) reports are EXCLUDED — once a
- * reviewer approves or rejects a report it leaves this open set entirely
- * (SPEC-074 AC-074-5's "approved reports excluded from open set").
+ * nested field). Approved (or later-lifecycle) reports are EXCLUDED by this
+ * check — once a reviewer approves a report its `status` itself leaves
+ * `draft`/`in-review` (SPEC-074 AC-074-5's "approved reports excluded from
+ * open set").
+ *
+ * This is a NECESSARY but not SUFFICIENT condition for "open" — a doc can
+ * pass this shape check and still have been rejected (status stays `draft`
+ * on reject, see module header). Callers MUST additionally apply
+ * {@link wasRejectedWithoutLaterApproval} before treating a match as truly
+ * open (see `handleGetIssueReports`).
  *
  * @param doc - candidate `DocRecord` (any type; non-`task` docs never match)
  */
-function isOpenIssueReportTask(doc: DocRecord): boolean {
+function hasOpenIssueReportShape(doc: DocRecord): boolean {
   if (doc.type !== "task") return false;
   if (doc.status !== "draft" && doc.status !== "in-review") return false;
 
@@ -130,6 +153,58 @@ function isOpenIssueReportTask(doc: DocRecord): boolean {
 }
 
 /**
+ * Builds a `doc_id -> latest timestamp` map for a single-action `queryAudit`
+ * result. `queryAudit`'s documented contract orders rows `timestamp DESC`
+ * (newest first — see `StoreInterface.queryAudit`), so the FIRST row seen per
+ * `doc_id` while iterating is that doc's most recent entry for the action;
+ * this is the same "index 0 wins" reasoning
+ * `flows/upstream-context-flow.ts::getDocStatus` uses for its own
+ * `limit: 1`-scoped single-doc read, generalized here to one UNSCOPED
+ * (`doc_id` omitted) query covering every doc's most recent entry for that
+ * action in a single round trip.
+ *
+ * @param entries - a `queryAudit({action: "..."})` result (single action,
+ *   every doc, newest-first)
+ * @returns doc_id -> that doc's most recent `timestamp` for this action;
+ *   entries with no `doc_id` (non-doc audit rows) are skipped
+ */
+function latestAuditTimestampByDoc(entries: readonly AuditEntry[]): Map<string, string> {
+  const latest = new Map<string, string>();
+  for (const entry of entries) {
+    if (entry.doc_id === undefined) continue;
+    if (!latest.has(entry.doc_id)) latest.set(entry.doc_id, entry.timestamp);
+  }
+  return latest;
+}
+
+/**
+ * Whether a doc's most recent `"reject"` audit entry is NEWER than its most
+ * recent `"approve"` entry — i.e. the doc was rejected and has NOT since been
+ * re-approved. Mirrors the decision shape
+ * `flows/upstream-context-flow.ts::UpstreamPort.getDocStatus` uses (a later
+ * approve supersedes an earlier reject; a doc never rejected at all is never
+ * excluded), generalized from that function's single-doc lookup to the
+ * batched maps {@link latestAuditTimestampByDoc} builds across every
+ * candidate at once.
+ *
+ * @param docId - candidate doc id
+ * @param rejectedAt - doc_id -> latest `"reject"` audit timestamp (see {@link latestAuditTimestampByDoc})
+ * @param approvedAt - doc_id -> latest `"approve"` audit timestamp
+ * @returns true when this doc has a reject entry with no later approve entry
+ *   (i.e. it must be excluded from the open set)
+ */
+function wasRejectedWithoutLaterApproval(
+  docId: string,
+  rejectedAt: ReadonlyMap<string, string>,
+  approvedAt: ReadonlyMap<string, string>,
+): boolean {
+  const rejectedTimestamp = rejectedAt.get(docId);
+  if (rejectedTimestamp === undefined) return false;
+  const approvedTimestamp = approvedAt.get(docId);
+  return approvedTimestamp === undefined || rejectedTimestamp > approvedTimestamp;
+}
+
+/**
  * GET /api/issue-reports — the dashboard Issues triage projection.
  * Available to both cookie and bearer sessions (see module header).
  *
@@ -137,15 +212,33 @@ function isOpenIssueReportTask(doc: DocRecord): boolean {
  * @returns 200 `{rows: IssueReportRow[], open_count: number}`, rows sorted
  *   `reported_at` descending (newest first — malformed/missing `reported_at`
  *   values sort last, never crash the sort); `open_count` is always
- *   `rows.length`. A `CorpusService` store failure surfaces via the standard
+ *   `rows.length`. A store failure (either the `CorpusService.listFull` doc
+ *   scan or either `AuditService.query` call) surfaces via the standard
  *   `loreErrorResponse` mapping (never this route's own error shape).
  */
 export async function handleGetIssueReports(app: App): Promise<Response> {
   const result = await app.corpusService.listFull({ type: "task" });
   if (!result.ok) return loreErrorResponse(result.error);
 
-  const rows = result.value.docs
-    .filter(isOpenIssueReportTask)
+  const candidates = result.value.docs.filter(hasOpenIssueReportShape);
+
+  // reason: two BATCHED whole-corpus audit queries (one per action) rather
+  // than one queryAudit per candidate doc — AuditFilters has no "doc_id IN
+  // (...)" predicate, so this is the narrowest single-round-trip-per-action
+  // shape the store surface supports. See module header + these two
+  // functions' own JSDoc.
+  const [rejectResult, approveResult] = await Promise.all([
+    app.auditService.query({ action: "reject" }),
+    app.auditService.query({ action: "approve" }),
+  ]);
+  if (!rejectResult.ok) return loreErrorResponse(rejectResult.error);
+  if (!approveResult.ok) return loreErrorResponse(approveResult.error);
+
+  const rejectedAt = latestAuditTimestampByDoc(rejectResult.value);
+  const approvedAt = latestAuditTimestampByDoc(approveResult.value);
+
+  const rows = candidates
+    .filter((doc) => !wasRejectedWithoutLaterApproval(doc.id, rejectedAt, approvedAt))
     .map(projectIssueReportRow)
     .sort((a, b) => (a.reported_at < b.reported_at ? 1 : a.reported_at > b.reported_at ? -1 : 0));
 

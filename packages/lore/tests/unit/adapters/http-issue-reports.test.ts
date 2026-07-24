@@ -30,11 +30,16 @@ import { NoOpTelemetry } from "@lore/core";
 import type { CreateDocInput } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
+import { ReviewService } from "../../../src/service/review-service.js";
+import { AuditService } from "../../../src/service/audit-service.js";
 import { handleApiRoute } from "../../../src/adapters/http/routes.js";
 import { authenticateRequest } from "../../../src/adapters/http/auth.js";
 import type { ApiKeyStore, ActorContext } from "../../../src/adapters/http/auth.js";
 import type { SessionStore } from "../../../src/adapters/http/sessions.js";
 import type { App } from "../../../src/app.js";
+
+/** Far enough in the past that every audit entry this suite writes is "since" it. */
+const FAR_PAST = "2000-01-01T00:00:00.000Z";
 
 // ─── Test infrastructure ────────────────────────────────────────────────────
 
@@ -57,7 +62,11 @@ const stubApiKeyStore = {} as ApiKeyStore;
 function makeApp(store: InMemoryStore): App {
   return {
     corpusService: new CorpusService(store),
-    reviewService: null as unknown as App["reviewService"],
+    // reason: real ReviewService/AuditService (not null-cast, unlike the
+    // other unused services below) — the AC-074-3 exclusion this route now
+    // implements reads real "reject"/"approve" audit entries, which only
+    // ReviewService.reject/approve actually write.
+    reviewService: new ReviewService(store),
     versionService: null as unknown as App["versionService"],
     outlineService: null as unknown as App["outlineService"],
     migrationService: null as unknown as App["migrationService"],
@@ -70,7 +79,7 @@ function makeApp(store: InMemoryStore): App {
     taskWorkflowService: null as unknown as App["taskWorkflowService"],
     specKindService: null as unknown as App["specKindService"],
     judgmentService: null as unknown as App["judgmentService"],
-    auditService: null as unknown as App["auditService"],
+    auditService: new AuditService(store, { verifySince: FAR_PAST }),
     callerSurface: "cli" as const,
     resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),
     telemetry: new NoOpTelemetry(),
@@ -304,6 +313,34 @@ describe("GET /api/issue-reports (AC-074-5)", () => {
     expect(body.data!.open_count).toBe(1);
   });
 
+  it("AC-074-3 NEGATIVE: a rejected report is excluded from the open set even though its status stays draft (SPEC-005 audit-trail invariant)", async () => {
+    const store = new InMemoryStore();
+    const app = makeApp(store);
+    const prdId = await createRootPrd(app.corpusService);
+    const planId = await createPlan(app.corpusService, prdId);
+    const stillOpen = await createIssueReportTask(app.corpusService, planId, {
+      title: "Still open",
+      reported_at: "2026-07-20T00:00:00.000Z",
+    });
+    const rejected = await createIssueReportTask(app.corpusService, planId, {
+      title: "Rejected report",
+      reported_at: "2026-07-21T00:00:00.000Z",
+    });
+
+    const rejectResult = await app.reviewService.reject(rejected.id, { reason: "not a lore defect" });
+    if (!rejectResult.ok) throw new Error(JSON.stringify(rejectResult.error));
+    // `ReviewService.reject` NEVER transitions a doc off draft (SPEC-005) —
+    // the rejected report's status is still "draft" going into this route.
+    expect(rejectResult.value.status).toBe("draft");
+
+    const res = await getIssueReports(app);
+    const body = await parseRes(res);
+    expect(body.data!.rows.length).toBe(1);
+    expect(body.data!.rows[0]!.id).toBe(stillOpen.id);
+    expect(body.data!.rows.some((r) => r.id === rejected.id)).toBe(false);
+    expect(body.data!.open_count).toBe(1);
+  });
+
   // ─── BOUNDARY ──────────────────────────────────────────────────────────────
 
   it("AC-074-5 BOUNDARY: zero reports returns 200 with empty rows and open_count 0, not an error", async () => {
@@ -388,6 +425,45 @@ describe("GET /api/issue-reports (AC-074-5)", () => {
     expect(body.data!.rows.length).toBe(1);
     expect(body.data!.rows[0]!.status).toBe("in-review");
   });
+
+  it(
+    "AC-074-3 STATE: a report rejected then re-approved and later reopened (content edit auto-demotes an approved doc to draft) is NOT excluded — a later approve supersedes the earlier reject",
+    async () => {
+      const store = new InMemoryStore();
+      const app = makeApp(store);
+      const prdId = await createRootPrd(app.corpusService);
+      const planId = await createPlan(app.corpusService, prdId);
+      const report = await createIssueReportTask(app.corpusService, planId, {
+        title: "Reopened report",
+        reported_at: "2026-07-22T00:00:00.000Z",
+      });
+
+      // Reject first (audit "reject" entry #1) ...
+      const rejectResult = await app.reviewService.reject(report.id, { reason: "premature" });
+      if (!rejectResult.ok) throw new Error(JSON.stringify(rejectResult.error));
+
+      // ... then a reviewer changes their mind and approves it (a real
+      // draft -> approved transition is still legal after reject, since
+      // reject never leaves `draft` — this "approve" audit entry is NEWER
+      // than the reject above).
+      const approveResult = await app.reviewService.approve(report.id, { reviewer: "reviewer-2" });
+      if (!approveResult.ok) throw new Error(JSON.stringify(approveResult.error));
+      expect(approveResult.value.status).toBe("approved");
+
+      // Editing content on an approved doc auto-demotes it back to `draft`
+      // (CorpusService's approved->draft auto-reset invariant) — the report
+      // is under review again, with NO new reject entry since the approve.
+      const editResult = await app.corpusService.set(report.id, { content: "updated report body" });
+      if (!editResult.ok) throw new Error(JSON.stringify(editResult.error));
+      expect(editResult.value.status).toBe("draft");
+
+      const res = await getIssueReports(app);
+      const body = await parseRes(res);
+      expect(body.data!.rows.length).toBe(1);
+      expect(body.data!.rows[0]!.id).toBe(report.id);
+      expect(body.data!.open_count).toBe(1);
+    },
+  );
 
   // ─── REGRESSION ────────────────────────────────────────────────────────────
 
