@@ -36,6 +36,11 @@ import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import type { DocRecord, LinkRecord, VersionRecord, AuditEntry } from "@lore/core";
 import { MIGRATION_001_SQL } from "../../../src/store/migrations/migration-001.js";
 import { MIGRATION_002_SQL } from "../../../src/store/migrations/migration-002.js";
+import { MIGRATION_003_SQL } from "../../../src/store/migrations/migration-003.js";
+import { MIGRATION_004_SQL } from "../../../src/store/migrations/migration-004.js";
+import { MIGRATION_005_SQL } from "../../../src/store/migrations/migration-005.js";
+import { MIGRATION_006_SQL } from "../../../src/store/migrations/migration-006.js";
+import { MIGRATION_007_SQL } from "../../../src/store/migrations/migration-007.js";
 
 // ─── Fixture Helpers ─────────────────────────────────────────────────────────
 
@@ -70,12 +75,46 @@ function makeDoc(overrides: Partial<DocRecord> = {}): DocRecord {
 }
 
 // ─── Apply Schema to a libsql Client ────────────────────────────────────────
-// MOCK RISK: we apply the same migrations as SQLiteStore to the remote DB.
-// This mirrors the real setup but bypasses TursoStore's constructor logic.
+// MOCK RISK: we hand-apply the FULL migration chain (same order
+// SQLiteStore.runMigrations() applies internally) to the remote fixture DB.
+// This mirrors the real TursoStore setup but bypasses its constructor logic.
+// Every new migration.ts added to src/store/migrations/ MUST get a matching
+// `await client.executeMultiple(MIGRATION_00N_SQL)` line here — the parity
+// guard below turns a forgotten line into a loud fixture-setup failure
+// instead of a wall of confusing per-row INSERT/column-mismatch errors.
 
-async function applyMigrationsToClient(client: Client): Promise<void> {
+async function applyMigrationsToClient(client: Client, localStore: SQLiteStore): Promise<void> {
   await client.executeMultiple(MIGRATION_001_SQL);
   await client.executeMultiple(MIGRATION_002_SQL);
+  await client.executeMultiple(MIGRATION_003_SQL);
+  await client.executeMultiple(MIGRATION_004_SQL);
+  await client.executeMultiple(MIGRATION_005_SQL);
+  await client.executeMultiple(MIGRATION_006_SQL);
+  await client.executeMultiple(MIGRATION_007_SQL);
+
+  // ─── Parity guard ────────────────────────────────────────────────────────
+  // Assert the remote fixture's PRAGMA user_version matches the REAL
+  // SQLiteStore's — the two schemas are hand-kept in lockstep above. If they
+  // ever diverge (a migration added to SQLiteStore.runMigrations() but not
+  // mirrored in the executeMultiple() calls above), fail loudly HERE, at
+  // fixture setup, rather than via opaque per-row remote-INSERT failures
+  // scattered across every test in this file.
+  const localVersionRow = localStore
+    .getDatabase()
+    .query("PRAGMA user_version")
+    .get() as { user_version: number };
+  const remoteVersionRs = await client.execute("PRAGMA user_version");
+  const remoteVersionRow = remoteVersionRs.rows[0];
+  const remoteVersion = remoteVersionRow ? Number(remoteVersionRow["user_version"]) : -1;
+
+  if (localVersionRow.user_version !== remoteVersion) {
+    throw new Error(
+      "sync-push fixture drift: remote fixture migration chain diverged from " +
+        `SQLiteStore — local PRAGMA user_version=${localVersionRow.user_version}, ` +
+        `remote PRAGMA user_version=${remoteVersion}. Add the missing ` +
+        "MIGRATION_00N here (applyMigrationsToClient in sync-push.bun.test.ts).",
+    );
+  }
 }
 
 // ─── Count rows in a libsql table ────────────────────────────────────────────
@@ -189,7 +228,7 @@ beforeAll(async () => {
 
   // Create remote libsql client (file: mode — no network)
   remoteClient = createClient({ url: `file:${remoteDbPath}` });
-  await applyMigrationsToClient(remoteClient);
+  await applyMigrationsToClient(remoteClient, localStore);
 });
 
 afterAll(async () => {
@@ -348,7 +387,7 @@ describe("syncPush — idempotency (SPEC-009 §3.3 state)", () => {
     }
 
     idempotentRemoteClient = createClient({ url: `file:${idempotentRemotePath}` });
-    await applyMigrationsToClient(idempotentRemoteClient);
+    await applyMigrationsToClient(idempotentRemoteClient, idempotentLocalStore);
   });
 
   afterAll(async () => {
@@ -436,7 +475,7 @@ describe("syncPush — boundary values (empty local DB)", () => {
     boundaryLocalStore = new SQLiteStore(boundaryLocalPath);
 
     boundaryRemoteClient = createClient({ url: `file:${boundaryRemotePath}` });
-    await applyMigrationsToClient(boundaryRemoteClient);
+    await applyMigrationsToClient(boundaryRemoteClient, boundaryLocalStore);
   });
 
   afterAll(async () => {
