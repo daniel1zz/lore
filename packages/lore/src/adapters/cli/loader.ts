@@ -21,9 +21,18 @@
  *     failure (malformed YAML, bad `sync`/`telemetry`/`workflow` section, unknown top-level
  *     key, etc.) keeps the pre-existing silent fallback-to-undefined behaviour — this is a
  *     documented non-goal of SPEC-030, not an oversight.
+ *   - SPEC-073: `createApp()` is called inside a `try/catch` — a corrupted/non-SQLite
+ *     `.lore/lore.db` makes `bun:sqlite`'s `Database` constructor throw SYNCHRONOUSLY
+ *     (never a `Result`), which pre-SPEC-073 propagated uncaught all the way to citty's
+ *     own `runMain` catch-all (a bare stack-trace dump, no report-issue hint reachable
+ *     there — see `safeInternalErrorHint`'s call site for the full rationale). Both this
+ *     catch AND the pre-existing "`ai.provider` unknown" `STORE_ERROR` branch append a
+ *     best-effort SPEC-073 report-issue hint via `safeInternalErrorHint` when the
+ *     consumer has `feedback.upstream` configured.
  *
- * Side-effect class: IO (file reads, process.exit(1) on missing DB or unknown ai.provider,
- *   process.exit on invalid `ai` config block (AC-HJ-3), console.error for warnings)
+ * Side-effect class: IO (file reads, process.exit(1) on missing DB, unknown ai.provider,
+ *   or an unexpected App-construction throw (SPEC-073); process.exit on invalid `ai`
+ *   config block (AC-HJ-3), console.error for warnings)
  *
  * reason: Kept separate from utils.ts because utils.ts is imported by vitest tests
  * that cannot resolve bun:sqlite. This module imports app.ts (which imports bun:sqlite)
@@ -32,6 +41,7 @@
  * Source: SPEC-012 §5 (K3 — full-CLI telemetry coverage, AC-K3-1), SPEC-003 §6.2 (global config)
  *         SPEC-017 §3.12 (AC-AI-11 — unknown ai.provider → exit 1 with STORE_ERROR message)
  *         SPEC-030 §2 (AC-HJ-3 — fail-loud `ai` block config errors)
+ *         SPEC-073 §Design (error-path report-issue hint, "internal" errClass)
  */
 
 import { dirname } from "path";
@@ -47,6 +57,15 @@ import {
 } from "@lore/core/node";
 import { createApp, type App } from "../../app.js";
 import { findLoreDbPath, formatError, exitCode } from "./utils.js";
+// reason: buildReportIssueHint is pure/import-light (SPEC-073) — safe here regardless
+// of this module's own bun-only status. resolveFeedbackUpstreamCfg's OWNING module
+// (report-issue-wiring.ts) DOES value-import bun:sqlite transitively (probeUpstreamDb/
+// ReceiptLog/LATEST_SCHEMA_VERSION) — but this file already imports "../../app.js"
+// (bun:sqlite via createApp), so it is bun-only already and never vitest-reachable;
+// no lazy-import indirection is needed here (contrast the MCP tools.ts precedent,
+// which DOES need one because that file is NOT already bun-only).
+import { buildReportIssueHint } from "./report-issue-hint.js";
+import { resolveFeedbackUpstreamCfg } from "./report-issue-wiring.js";
 
 /**
  * Detect whether the current CLI invocation is by an AI agent or a human.
@@ -90,6 +109,29 @@ function resolveProjectConfigResult(dbPath: string): Result<LoreConfig, LoreErro
   const loreDir = dirname(dbPath);
   const projectDir = dirname(loreDir);
   return loadConfig(projectDir);
+}
+
+/**
+ * Best-effort SPEC-073 report-issue hint for an `"internal"`-classified
+ * `loadLoreApp()` failure (STORE_ERROR result, OR an unexpected throw during App
+ * construction — e.g. a corrupted `.lore/lore.db` file, which `bun:sqlite`'s
+ * `Database` constructor throws synchronously rather than returning a `Result` for).
+ * Wrapped in a `try/catch` so a hint-resolution failure (malformed config shape)
+ * can NEVER turn this already-fatal error path into a second, worse crash — every
+ * failure mode here degrades to `null` (print nothing), never a throw.
+ *
+ * @param rawConfig - the ALREADY-parsed project config from this same
+ *   `loadLoreApp()` call (sync section not yet stripped — irrelevant here, only
+ *   `feedback.upstream` is read) — no second `.lore/config.yaml` parse.
+ * @returns the hint line (no trailing newline), or `null` when unconfigured /
+ *   resolution failed.
+ */
+function safeInternalErrorHint(rawConfig: LoreConfig | undefined): string | null {
+  try {
+    return buildReportIssueHint("internal", resolveFeedbackUpstreamCfg(rawConfig) !== undefined);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -158,8 +200,10 @@ export function loadProjectConfig(): LoreConfig | undefined {
  *   see this function's header). Callers that need e.g. `workflow.gates` read `config`
  *   directly; it is intentionally the raw parsed shape, not yet another resolved helper.
  * @throws process.exit if no .lore/lore.db found in directory tree (code 1), if
- *   ai.provider references an unknown provider name (AC-AI-11, code 1), or if the `ai`
- *   config block itself fails schema validation (SPEC-030 AC-HJ-3, code from exitCode())
+ *   ai.provider references an unknown provider name (AC-AI-11, code 1), if the `ai`
+ *   config block itself fails schema validation (SPEC-030 AC-HJ-3, code from exitCode()),
+ *   or if App construction throws unexpectedly — e.g. a corrupted/non-SQLite
+ *   `.lore/lore.db` (SPEC-073, code 1)
  * @example
  *   const { app, defaults, config } = loadLoreApp();
  *   try { ... } finally { app.close(); }
@@ -229,12 +273,33 @@ export function loadLoreApp(): {
   // err(STORE_ERROR) and createApp propagates it as Result<App, LoreError>.
   // reason: always returns App when sync is disabled AND ai.provider is a known name;
   // otherwise returns Result and we surface it as exit 1 (AC-AI-11, SPEC-017 §3.12).
-  const appOrResult = createApp(dbPath, telemetryOnlyConfig);
+  //
+  // SPEC-073: createApp can ALSO throw SYNCHRONOUSLY (not return a Result) — the
+  // bun:sqlite Database constructor throws on a corrupted/non-sqlite lore.db file,
+  // before any Result-based error path is ever reached. Pre-SPEC-073 this propagated
+  // uncaught all the way to citty's OWN `runMain` catch-all (a bare consola
+  // stack-trace dump) — citty's internal error rendering has no override hook this
+  // codebase can use (unlike `showUsage`, see `usage-render.ts`), so a report-issue
+  // hint could never reach that output. Catching it HERE, at the one choke point
+  // every corpus command's App construction passes through, is what makes the
+  // "internal unexpected throw" errClass (SPEC-073 §Design) actually reachable.
+  let appOrResult: App | Result<App, LoreError>;
+  try {
+    appOrResult = createApp(dbPath, telemetryOnlyConfig);
+  } catch (thrown) {
+    const message = thrown instanceof Error ? thrown.message : String(thrown);
+    console.error(`Error: Storage failure: ${message}`); // CLI surface
+    const hint = safeInternalErrorHint(rawConfig);
+    if (hint !== null) console.error(hint); // CLI surface
+    process.exit(1);
+  }
   let app: App;
   if ("ok" in appOrResult) {
     // createApp returned a Result — only happens when ai.provider is unknown
     if (!appOrResult.ok) {
       console.error(formatError(appOrResult.error)); // CLI surface
+      const hint = safeInternalErrorHint(rawConfig);
+      if (hint !== null) console.error(hint); // CLI surface
       process.exit(1);
     }
     app = appOrResult.value;

@@ -114,8 +114,17 @@
  * share exactly one MDX-rendering and parent-resolution implementation — see that
  * module's header for the P4 slice this enables.
  *
+ * `emitGateReportIssueHint` (SPEC-073) is called from all FIVE `isCheckpointBlocked`
+ * branches (spec-create, spec-promote, plan-promote, task-claim, phase-claim) right
+ * after each checkpoint's own feeding-pack output, appending a one-line "file this
+ * upstream" hint to STDERR when the consumer has `feedback.upstream` configured
+ * (SPEC-072) — never on the ALLOW branch, never when unconfigured. Shares its wording
+ * (`../report-issue-hint.js::buildReportIssueHint`) with `loader.ts`'s `"internal"`
+ * errClass sibling.
+ *
  * Source: IoC vertical-slice tech-spec §4.1/§5.1/§11 ("deterministic zone" +
  * "active feeding" + INV2 "probabilistic zone is advisory-only")
+ *         SPEC-073 §Design (error-path report-issue hint, "gate" errClass)
  */
 
 import { defineCommand } from "citty";
@@ -148,6 +157,12 @@ import {
   CHECKPOINT_PRODUCED_TYPE,
 } from "../../../flows/feed-flow.js";
 import { requirePhaseWorkflowService } from "../phase-wiring.js";
+// reason: this file already imports "../loader.js" (bun:sqlite via createApp), so it
+// is bun-only and never vitest-reachable — no lazy-import indirection needed for
+// report-issue-wiring.ts's transitive bun:sqlite value-imports (mirrors loader.ts's
+// identical note).
+import { buildReportIssueHint } from "../report-issue-hint.js";
+import { resolveFeedbackUpstreamCfg } from "../report-issue-wiring.js";
 
 /**
  * Looks up `checkpoint` in `flows/feed-flow.ts::CHECKPOINT_PRODUCED_TYPE` — the SINGLE
@@ -333,7 +348,7 @@ export default defineCommand({
         const { app, config } = loadLoreApp();
         try {
           if (isGateDisabledByConfig("plan-promote", config)) return;
-          await runPlanPromoteGate(app, args.plan as string);
+          await runPlanPromoteGate(app, args.plan as string, config);
         } finally {
           app.close();
         }
@@ -543,6 +558,7 @@ async function runSpecCreateGate(
   };
 
   console.log(checkpoint.feed(feedCtx, selectFailures(results)));
+  emitGateReportIssueHint(config);
   process.exitCode = 4;
 }
 
@@ -575,6 +591,33 @@ function requireCheckpoint(cp: GateCheckpoint): CheckpointDef {
 }
 
 /**
+ * Best-effort SPEC-073 report-issue hint for a gate denial's stderr output — the
+ * SAME `errClass: "gate"` classification `loader.ts`'s `"internal"` sibling uses,
+ * shared wording (`report-issue-hint.ts::buildReportIssueHint`). Called from every
+ * one of this file's FIVE `isCheckpointBlocked` branches (spec-create, spec-promote,
+ * plan-promote, task-claim, phase-claim) right after the checkpoint's own feeding-pack
+ * output — never before it, so the hint always reads as a trailing note, not the
+ * primary denial content. Wrapped in a `try/catch` so a hint-resolution failure can
+ * NEVER turn a working gate-deny path into a crash; prints nothing when the hint
+ * resolves to `null` (unconfigured consumer) — every pre-SPEC-073 blocked-output
+ * byte sequence is otherwise untouched.
+ *
+ * @param config - `loadLoreApp()`'s resolved project config (may be `undefined`) —
+ *   the SAME value each `run{X}Gate` function already threads through for
+ *   `resolveAcQuantifiableGateEnabled`/`resolveAnchorOverlapGateEnabled`; no second
+ *   config parse.
+ */
+function emitGateReportIssueHint(config: LoreConfig | undefined): void {
+  let hint: string | null = null;
+  try {
+    hint = buildReportIssueHint("gate", resolveFeedbackUpstreamCfg(config) !== undefined);
+  } catch {
+    hint = null;
+  }
+  if (hint !== null) process.stderr.write(hint + "\n"); // CLI surface
+}
+
+/**
  * Runs the `plan-promote` checkpoint against an already-created plan: resolves the
  * plan's ancestor spec via `CorpusService.getPlanBundle` (the SAME plan→parent-spec
  * traversal `TaskWorkflowService.ready()` uses to compute `upstream_unapproved`), then
@@ -582,8 +625,16 @@ function requireCheckpoint(cp: GateCheckpoint): CheckpointDef {
  *
  * @param app - Wired `App` (from `loadLoreApp()`).
  * @param planIdOrSlug - Plan document ULID or slug to gate.
+ * @param config - `loadLoreApp()`'s resolved project config — forwarded ONLY to
+ *   `emitGateReportIssueHint` (SPEC-073); `plan-promote`'s own predicates read no
+ *   config-driven knob today, unlike its `task-claim`/`phase-claim`/`spec-create`/
+ *   `spec-promote` siblings, which is why this parameter is new to this function.
  */
-async function runPlanPromoteGate(app: App, planIdOrSlug: string): Promise<void> {
+async function runPlanPromoteGate(
+  app: App,
+  planIdOrSlug: string,
+  config: LoreConfig | undefined,
+): Promise<void> {
   const bundleResult = await app.corpusService.getPlanBundle(planIdOrSlug);
   if (!bundleResult.ok) {
     process.stderr.write(formatError(bundleResult.error) + "\n");
@@ -600,6 +651,7 @@ async function runPlanPromoteGate(app: App, planIdOrSlug: string): Promise<void>
 
   if (isCheckpointBlocked(results)) {
     console.log(checkpoint.feed(ctx, selectFailures(results)));
+    emitGateReportIssueHint(config);
     process.exitCode = 4;
     return;
   }
@@ -714,6 +766,7 @@ async function runTaskClaimGate(
 
   if (isCheckpointBlocked(results)) {
     console.log(checkpoint.feed(ctx, selectFailures(results)));
+    emitGateReportIssueHint(config);
     process.exitCode = 4;
     return;
   }
@@ -805,6 +858,7 @@ async function runPhaseClaimGate(
 
   if (isCheckpointBlocked(results)) {
     console.log(checkpoint.feed(ctx, selectFailures(results)));
+    emitGateReportIssueHint(config);
     process.exitCode = 4;
     return;
   }
@@ -859,6 +913,7 @@ async function runSpecPromoteGate(
 
   if (isCheckpointBlocked(results)) {
     process.stderr.write(checkpoint.feed(ctx, selectFailures(results)));
+    emitGateReportIssueHint(config);
     process.exitCode = 4;
     return;
   }
