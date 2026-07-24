@@ -67,3 +67,4 @@ export * from "./config-editability.js";
 export * from "./config-precedence.js";
 export * from "./session-actor.js";
 export * from "./issue-report.js";
+export * from "./evidence-panel.js";

@@ -36,7 +36,7 @@ import {
   prdRequirementsSchema,
   computeRequirementCoverage,
   SPEC_KINDS,
-  extractEvidence,
+  buildTaskAttestationInfos,
 } from "@lore/core";
 import type {
   CreateDocInput,
@@ -1460,15 +1460,11 @@ export class CorpusService {
       if (!attestationExempt) {
         const bundleResult = await this.getPlanBundle(existing.id);
         if (!bundleResult.ok) return bundleResult;
-        const planTasksAttestation = bundleResult.value.tasks.map((task) => {
-          const evidence = extractEvidence(task);
-          return {
-            slug: task.slug,
-            title: task.title,
-            evidenceCount: evidence.length,
-            attestedCount: evidence.filter((entry) => entry.attestation !== undefined).length,
-          };
-        });
+        // reason: SPEC-075 D6 — the evidence/attested counting SSOT moved to
+        // @lore/core's buildTaskAttestationInfos (evidence-panel.ts), which the
+        // dashboard adjudication workbench's plan Evidence-panel branch also
+        // calls; this call site no longer re-derives the same counts inline.
+        const planTasksAttestation = buildTaskAttestationInfos(bundleResult.value.tasks);
         planCloseCtx = {
           ...planCloseCtx,
           planTasksAttestation,
