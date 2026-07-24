@@ -15,6 +15,10 @@
  * Invariants:
  *   - D-004: auth_token_env is ALWAYS an env-var NAME — never the plaintext token
  *   - D-007: sync.enabled=true + remote_url MUST be present (TursoStore selection)
+ *   - SPEC-072: `feedback.upstream` (both `corpus_path` and `root_prd`) is either
+ *     fully present or fully absent — there is no partial-config default; absence
+ *     means `lore report-issue` is unconfigured and fails loud (this is the
+ *     feature's consent act, not a silently-degraded mode)
  *   - SPEC-030 AC-HJ-3: an invalid `ai` block MUST be reported as a VALIDATION_ERROR whose
  *     `field` names the offending key path (e.g. "ai.cli") — callers (loadLoreApp) use
  *     isAiConfigValidationError() to decide fail-loud vs the (unchanged, non-goal) silent
@@ -338,6 +342,48 @@ const AuditConfigSchema = z
 /** Audit completeness-oracle config section. Source: SPEC-035 §2 D5. */
 export type AuditConfig = z.infer<typeof AuditConfigSchema>;
 
+// ─── Feedback Section Schema ────────────────────────────────────────────────
+
+/**
+ * Upstream issue-reporting configuration (SPEC-072 §4 Public Interface) —
+ * consent to file `lore report-issue` reports into a configured upstream
+ * corpus. Mirrors `SyncConfigSchema`'s nesting shape (a `.strict()` object
+ * nested one level under its own top-level section, both levels `.strict()`
+ * so a typo fails loud at config-parse time rather than silently no-opping).
+ *
+ * @invariant `upstream` is OPTIONAL — its absence means "not configured",
+ *   which `IssueReportService`'s §5 check-sequence step 1 treats as a
+ *   fail-loud `VALIDATION_ERROR` naming BOTH `corpus_path` and `root_prd`
+ *   (configuring this section IS the consent act, SPEC-072 Overview) — there
+ *   is no partial/silent-degrade state.
+ * @invariant Both `corpus_path` and `root_prd` are REQUIRED once `upstream`
+ *   is present — there is no meaningful default for either (a missing
+ *   `corpus_path` names no filesystem location to probe; a missing
+ *   `root_prd` disables the R-5a identity-pin check entirely).
+ * @invariant `root_prd` accepts EITHER the upstream root PRD's slug or its
+ *   id (see `issue-report.ts::matchRootPrd`) — deliberately untyped as a
+ *   plain non-empty string rather than two separate optional fields, since
+ *   the consumer author only ever knows one or the other at config time.
+ */
+export const FeedbackConfigSchema = z
+  .object({
+    upstream: z
+      .object({
+        /** Absolute path to the upstream repo ROOT (the shape `lore init` produces — a `.lore/lore.db` lives directly under it). */
+        corpus_path: z.string().min(1),
+        /** Expected upstream root-PRD slug OR id (R-5a identity pin, SPEC-072 §5 step 5). */
+        root_prd: z.string().min(1),
+        // P2 seam (named, NOT implemented, SPEC-072 §Extension Seams):
+        // transport: z.enum(["sqlite","http"]).default("sqlite")
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
+/** Upstream issue-reporting config section. Source: SPEC-072 §4 Public Interface. */
+export type FeedbackConfig = z.infer<typeof FeedbackConfigSchema>;
+
 // ─── Verify Section Schema ──────────────────────────────────────────────────
 
 /**
@@ -445,6 +491,14 @@ export const LoreConfigSchema = z
      * (default_timeout_ms = 300000).
      */
     verify: VerifyConfigSchema.optional(),
+    /**
+     * Upstream issue-reporting configuration (SPEC-072).
+     * When absent, `lore report-issue` fails loud (VALIDATION_ERROR naming
+     * both `feedback.upstream.corpus_path` and `feedback.upstream.root_prd`)
+     * — there is no AI-provider-style "defaults to a built-in behavior"
+     * fallback, since configuring this section IS the consent act.
+     */
+    feedback: FeedbackConfigSchema.optional(),
   })
   .strict();
 

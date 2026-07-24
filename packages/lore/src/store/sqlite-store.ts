@@ -13,6 +13,13 @@ import { MIGRATION_004_SQL } from "./migrations/migration-004.js";
 import { MIGRATION_005_SQL } from "./migrations/migration-005.js";
 import { MIGRATION_006_SQL } from "./migrations/migration-006.js";
 import { MIGRATION_007_SQL } from "./migrations/migration-007.js";
+// SPEC-072 (upstream issue reporting) §3 Structure — re-exported here (beside
+// the migration chain it describes) from a bun:sqlite-free sibling module so
+// vitest-reachable code (e.g. flows/upstream-probe.ts, a later phase of this
+// spec) can import the version ceiling without pulling bun:sqlite into the
+// vitest module graph. See schema-version.ts's own JSDoc for the "why a
+// separate module" rationale and the bump-together invariant.
+export { LATEST_SCHEMA_VERSION } from "./schema-version.js";
 import type {
   AuditEntry,
   CalibrationRecord,
