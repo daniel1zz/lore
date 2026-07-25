@@ -1,23 +1,39 @@
-// SPIKE-CONCLUSION (revised 2026-07-25, task-stabilize-deleted-corpus-liveness):
+// SPIKE-CONCLUSION (revised 2026-07-25, task-stabilize-deleted-corpus-liveness-2):
 // settle-fast, never hang — deleting a mounted corpus's `lore.db` (+ `-wal`/`-shm`)
 // mid-session, while its `bun:sqlite` `Database` handle stays open, makes the NEXT
 // write against that corpus SETTLE near-instantly (observed well under the 5000ms
 // ceiling in every recorded run) — but WHICH way it settles is a genuine OS/SQLite
-// race, not a JS-event-loop timing artifact. The common case is a thrown
-// `SQLiteError` ("disk I/O error", `SQLITE_IOERR_VNODE`). The other observed case
-// is a silent SELF-HEAL: POSIX unlink-while-open keeps the main db file's inode
-// alive via the already-open fd, so if `bun:sqlite`'s WAL layer needs to reopen
-// `-wal`/`-shm` before this write (e.g. an auto-checkpoint fired in the gap since
-// the seed write), `open(O_CREAT)` on the now-directory-entry-free path trivially
-// succeeds, a fresh WAL is created, and the write lands normally. Under concurrent
-// full-suite load this file recorded the resolve branch twice (SPEC-078 T7/T8
-// evidence) where an earlier version of this test asserted "always rejects" and
-// failed; in EVERY recorded run — loaded or not — the operation has settled well
-// under the ceiling and never once hit TIMEOUT. Watchdog verdict for T8: NOT
-// REQUIRED for this failure mode in EITHER branch — Promise.race around store
-// dispatch would be pure defense-in-depth here, not a fix for an observed hang. A
-// concurrent operation against an intact corpus B is unaffected and resolves
-// normally in the SAME window regardless of which branch A takes.
+// race, not a JS-event-loop timing artifact. THREE legitimate settlements are
+// pinned here, not two:
+//   1. REJECTED — a thrown `SQLiteError` ("disk I/O error", `SQLITE_IOERR_VNODE`)
+//      escaping past `SQLiteStore.insertWithProvenance`'s `BEGIN IMMEDIATE` call
+//      (see the root-cause note below on that call sitting outside its own
+//      try/catch).
+//   2. RESOLVED, self-heal (`ok: true`) — POSIX unlink-while-open keeps the main
+//      db file's inode alive via the already-open fd, so if `bun:sqlite`'s WAL
+//      layer needs to reopen `-wal`/`-shm` before this write (e.g. an
+//      auto-checkpoint fired in the gap since the seed write), `open(O_CREAT)` on
+//      the now-directory-entry-free path trivially succeeds, a fresh WAL is
+//      created, and the write lands normally.
+//   3. RESOLVED, guarded-IOERR (`ok: false`, `error.code === "STORE_ERROR"`) —
+//      added 2026-07-25 once `SQLiteStore.insertWithProvenance` /
+//      `updateWithProvenance` / `softDeleteWithProvenance`
+//      (`packages/lore/src/store/sqlite-store.ts`, commits 009ee41/15a2e52)
+//      wrapped their `BEGIN IMMEDIATE` call in its own try/catch returning
+//      `wrapStoreError(e)` — a SQLITE_IOERR that used to escape as branch 1's
+//      thrown exception now resolves as a well-formed `Result` err instead. That
+//      store fix is the ORIGIN of this third branch: it converts a former reject
+//      into a resolve, it does not introduce a new failure mode.
+// Under concurrent full-suite load this file has recorded all three branches
+// (SPEC-078 T7/T8 evidence for branch 2; a full-suite run after the store fix
+// landed for branch 3, which an earlier version of this test's resolved-branch
+// assertion did not yet allow for — see the two `else`-branch comments below); in
+// EVERY recorded run — loaded or not — the operation has settled well under the
+// ceiling and never once hit TIMEOUT. Watchdog verdict for T8: NOT REQUIRED for
+// this failure mode in ANY branch — Promise.race around store dispatch would be
+// pure defense-in-depth here, not a fix for an observed hang. A concurrent
+// operation against an intact corpus B is unaffected and resolves normally in the
+// SAME window regardless of which branch A takes.
 
 /**
  * SPEC-078 D8 — deleted-corpus liveness spike (throw-vs-hang empirical pin).
@@ -145,6 +161,26 @@ function unlinkCorpusDb(dbPath: string): void {
   }
 }
 
+/**
+ * Asserts a RESOLVED (never rejected/TIMEOUT — callers gate on that separately)
+ * settle outcome is one of the two legitimate resolve branches from the
+ * file-header SPIKE-CONCLUSION:
+ *   - self-heal — the write actually landed (`ok: true`); or
+ *   - guarded-IOERR — `SqliteStore`'s `BEGIN IMMEDIATE` try/catch
+ *     (`packages/lore/src/store/sqlite-store.ts`, commits 009ee41/15a2e52)
+ *     converted a SQLITE_IOERR that used to escape as a thrown exception into a
+ *     resolved `err({ code: "STORE_ERROR" })` instead.
+ * Anything else on resolve — including `ok: false` with a DIFFERENT error
+ * code — still fails this assertion; it deliberately does not widen to "any
+ * resolve is fine".
+ */
+function expectLegitimateResolve(value: unknown): void {
+  const v = value as { ok: boolean; error?: { code?: string } };
+  const selfHeal = v.ok === true;
+  const guardedIoerr = v.ok === false && v.error?.code === "STORE_ERROR";
+  expect(selfHeal || guardedIoerr).toBe(true);
+}
+
 // ─── HAPPY ────────────────────────────────────────────────────────────────────
 
 describe("deleted-corpus liveness spike — HAPPY", () => {
@@ -185,10 +221,15 @@ describe("deleted-corpus liveness spike — HAPPY", () => {
     if (resultA.settled === "rejected") {
       expect(String(resultA.error)).toContain("SQLiteError");
     } else if (resultA.settled === "resolved") {
-      // Self-heal branch (see SPIKE-CONCLUSION): bun:sqlite reopened a fresh
-      // -wal at the now-directory-entry-free path and the write actually
-      // landed — still a legitimate "did not hang" outcome, not corruption.
-      expect((resultA.value as { ok: boolean }).ok).toBe(true);
+      // Two legitimate resolve outcomes (see SPIKE-CONCLUSION's branches 2/3):
+      // self-heal (bun:sqlite reopened a fresh -wal at the now-directory-
+      // entry-free path and the write actually landed, ok: true) OR
+      // guarded-IOERR (the sqlite-store.ts BEGIN IMMEDIATE try/catch fix,
+      // commits 009ee41/15a2e52, turned a would-be thrown SQLITE_IOERR into a
+      // resolved err({ code: "STORE_ERROR" })) — both are legitimate "did not
+      // hang" outcomes, not corruption. A resolve with any OTHER error code
+      // still fails expectLegitimateResolve.
+      expectLegitimateResolve(resultA.value);
     }
 
     // Corpus B, mounted on an intact db file, must succeed in the SAME window
@@ -221,11 +262,28 @@ describe("deleted-corpus liveness spike — STATE", () => {
     );
     expect(first.settled).not.toBe("TIMEOUT");
     expect(first.ms).toBeLessThan(RACE_CEILING_MS / 2);
+    if (first.settled === "rejected") {
+      expect(String(first.error)).toContain("SQLiteError");
+    } else if (first.settled === "resolved") {
+      // Mirrors the HAPPY test's resolved-branch check (SPIKE-CONCLUSION
+      // branches 2/3: self-heal ok:true, or guarded-IOERR err STORE_ERROR
+      // from the sqlite-store.ts BEGIN IMMEDIATE try/catch fix, commits
+      // 009ee41/15a2e52) — any OTHER error code still fails this assertion.
+      expectLegitimateResolve(first.value);
+    }
 
     const second = await withCeiling(
       corpusA.app.corpusService.create({ type: "prd", title: "Second after unlink", content: "2" }),
     );
     expect(second.settled).not.toBe("TIMEOUT");
     expect(second.ms).toBeLessThan(RACE_CEILING_MS / 2);
+    if (second.settled === "rejected") {
+      expect(String(second.error)).toContain("SQLiteError");
+    } else if (second.settled === "resolved") {
+      // Same legitimate-resolve check as `first` above — repeated calls
+      // against the same broken connection can independently land on either
+      // branch; this STATE variant does not pin them to match each other.
+      expectLegitimateResolve(second.value);
+    }
   });
 });
