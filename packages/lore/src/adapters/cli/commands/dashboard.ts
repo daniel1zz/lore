@@ -17,17 +17,31 @@
  *     not this project's `.lore/`, so a second project's `lore dashboard` run reuses the
  *     SAME machine-wide key instead of colliding on `ApiKeyStore.create`'s unique-name
  *     constraint.
+ *   - Multi-project mount registry (SPEC-078 D2/D7, T8): when the MACHINE-scope config
+ *     (`~/.config/lore/config.yaml`'s `dashboard.projects`, D3) declares one or more
+ *     registered projects, a `MountRegistry` is built (probe → classify → parallel
+ *     `createApp`, T5) and threaded into `startHttpServer` — the ONLY caller responsible
+ *     for constructing one; every per-request classification/isolation concern lives in
+ *     `adapters/http/index.ts`'s multi-mode branch. Absent/empty `dashboard.projects`
+ *     (the default): `mountRegistry` stays `undefined` and `startHttpServer`'s multi-mode
+ *     branch is completely inert (R-15) — this command's existing single-project behavior
+ *     is byte-unchanged.
  * Side-effect class: IO (file system, network, child_process, process signals)
- * Source: SPEC-016 §3.6; SPEC-078 §Design Decisions D1
+ * Source: SPEC-016 §3.6; SPEC-078 §Design Decisions D1, D2, D7
  */
 
 import { dirname } from "node:path";
 import { spawn } from "node:child_process";
 import { defineCommand } from "citty";
+import { loadGlobalConfig } from "@lore/core/node";
 import { loadLoreApp } from "../loader.js";
+import { createApp } from "../../../app.js";
+import type { App } from "../../../app.js";
 import { startHttpServer } from "../../http/index.js";
 import { createMachineAuthStores } from "../../http/machine-auth.js";
 import { ensureLocalApiKey } from "../local-key.js";
+import { createMountRegistry } from "../../../mount/mount-registry.js";
+import type { MountRegistry } from "../../../mount/types.js";
 
 // Re-export for tests that import from this module path.
 export { ensureLocalApiKey } from "../local-key.js";
@@ -117,6 +131,32 @@ export default defineCommand({
     // (ApiKeyStore.create rejects a duplicate name).
     const localKey = await ensureLocalApiKey(machineAuth.apiKeyStore, machineAuth.baseDir);
 
+    // SPEC-078 D2/D7 — multi-project mount registry, built ONLY when the machine-scope
+    // config declares `dashboard.projects`. `loadGlobalConfig` failures (malformed YAML,
+    // etc.) degrade to "no registry" rather than aborting the whole `lore dashboard` run —
+    // this command's pre-existing single-project behavior must still work even if the
+    // OPTIONAL multi-project section is broken.
+    const globalConfigResult = loadGlobalConfig();
+    const registeredProjects = globalConfigResult.ok ? (globalConfigResult.value.dashboard?.projects ?? []) : [];
+
+    let mountRegistry: MountRegistry<App> | undefined;
+    if (registeredProjects.length > 0) {
+      mountRegistry = createMountRegistry<App>();
+      await mountRegistry.init(
+        { projects: registeredProjects },
+        // reason: registered projects are always plain local SQLite corpora (no `sync`
+        // config passed) — `createApp(dbPath)`'s single-arg overload always returns a
+        // bare `App`, never `Result<App>` (see `app.ts`'s overload pair).
+        { createApp: async (registryDbPath: string) => createApp(registryDbPath) },
+      );
+
+      process.stdout.write(`\n[dashboard] Multi-project registry (${registeredProjects.length} declared):\n`);
+      for (const entry of mountRegistry.listEntries()) {
+        const detail = entry.state === "mounted" ? "mounted" : `${entry.state}${entry.diagnosis !== undefined ? ` — ${entry.diagnosis}` : ""}`;
+        process.stdout.write(`  - ${entry.name}: ${detail}\n`);
+      }
+    }
+
     const apiPort = parseInt(args["api-port"] ?? "8787", 10);
     const dashPort = parseInt(args["dashboard-port"] ?? "5173", 10);
 
@@ -133,7 +173,15 @@ export default defineCommand({
     // reason: In-process server means no IPC latency and no race on .lore/lore.db.
     // SPEC-016 §3.6. `machineAuth` here is the SAME instance ensureLocalApiKey just used
     // above — see this file's header (SPEC-078 D1).
-    const server = startHttpServer(app, { port: apiPort, host: "127.0.0.1", machineAuth });
+    // reason: `exactOptionalPropertyTypes` — `mountRegistry` is only spread onto the
+    // config object when defined, rather than passed as an explicit `undefined` value
+    // (HttpConfig's `mountRegistry?` means "may be absent", not "may be `undefined`").
+    const server = startHttpServer(app, {
+      port: apiPort,
+      host: "127.0.0.1",
+      machineAuth,
+      ...(mountRegistry !== undefined ? { mountRegistry } : {}),
+    });
 
     // Spawn Vite dev server as the only child process.
     // reason: VITE_LORE_BOOTSTRAP_TOKEN is passed via env (not CLI args) to avoid it
@@ -180,25 +228,37 @@ export default defineCommand({
     // Block until SIGINT (Ctrl+C), then tear down gracefully.
     await new Promise<void>((resolve) => {
       process.once("SIGINT", () => {
-        process.stdout.write("\n[dashboard] Shutting down...\n");
+        void (async () => {
+          process.stdout.write("\n[dashboard] Shutting down...\n");
 
-        // Kill Vite child process.
-        try {
-          vite.kill("SIGTERM");
-        } catch {
-          // Child may have already exited.
-        }
+          // Kill Vite child process.
+          try {
+            vite.kill("SIGTERM");
+          } catch {
+            // Child may have already exited.
+          }
 
-        // Stop HTTP server and release app resources.
-        try {
-          server.stop(true);
-        } catch {
-          // Server may have already stopped.
-        }
+          // Stop HTTP server and release app resources.
+          try {
+            server.stop(true);
+          } catch {
+            // Server may have already stopped.
+          }
 
-        app.close();
-        machineAuth.db.close();
-        resolve();
+          // SPEC-078 D2 — ordered close() fan-out over every mounted registry entry
+          // (extends, not duplicates, machineAuth.db.close() below).
+          if (mountRegistry !== undefined) {
+            try {
+              await mountRegistry.closeAll();
+            } catch {
+              // reason: best-effort shutdown — a close failure must never block process exit.
+            }
+          }
+
+          app.close();
+          machineAuth.db.close();
+          resolve();
+        })();
       });
     });
 
