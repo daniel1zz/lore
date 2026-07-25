@@ -19,11 +19,15 @@
  * Expected interface (not yet implemented — this is what T7 must build):
  *   - `MergeSettingsInput` gains an OPTIONAL `hooksPathPrefix?: string`.
  *     When absent, behavior is 100% unchanged from today (backward
- *     compatible with every pre-existing `mergeSettings` test — see scenario
- *     5 below). When present, stage 1 ALSO strips any existing hook entry
- *     whose `command` starts with `hooksPathPrefix` AND is NOT a member of
- *     the current `loreEntries`' command set (an "orphan") — on top of the
- *     existing exact-match strip.
+ *     compatible with every pre-existing `mergeSettings` test — see the
+ *     REGRESSION scenario below). When present, stage 1 ALSO strips any
+ *     existing hook entry recognized as lore-owned by path — a
+ *     whitespace-delimited TOKEN of `command` starts with `hooksPathPrefix`,
+ *     NOT a raw substring test (assess follow-up, 2026-07-25 — a raw
+ *     substring would also match a foreign command that merely references
+ *     the hooks path as an argument value, see SCENARIO 5 below) — AND is
+ *     NOT a member of the current `loreEntries`' command set (an "orphan")
+ *     — on top of the existing exact-match strip.
  *   - `MergeSettingsResult` gains a `prunedCount: number` field — the count
  *     of entries removed BY THE ORPHAN RULE specifically (never by the
  *     pre-existing "same entry, being re-added" strip/re-add cycle in
@@ -140,6 +144,39 @@ describe("mergeSettings — orphan pruning (SPEC-076 §C5)", () => {
     expect(serialized).toContain("hook-b.mjs");
     expect(serialized).not.toContain("hook-a.mjs");
     expect((result.value as unknown as { prunedCount: number }).prunedCount).toBe(1);
+  });
+
+  it("SCENARIO 5: a foreign command that merely CONTAINS hooksPathPrefix as a substring inside a longer, unrelated path/argument survives untouched (path-boundary match, never a raw substring test)", () => {
+    // Deliberately NOT a lore hook registration — a foreign backup/restore
+    // tool invoked with the hooks directory as an ARGUMENT VALUE. The
+    // substring `${HOOKS_PREFIX}` is present in the command string, but it
+    // does not anchor any whitespace-delimited TOKEN (the token is
+    // "--source=/Users/agent/.claude/hooks/old.mjs.bak", which starts with
+    // "--source=", not with HOOKS_PREFIX) — a naive `command.includes(...)`
+    // test would wrongly prune this, violating AC-076-5's "leaves non-lore
+    // entries byte-identical" half.
+    const foreignCommand = `backup-restore --source=${HOOKS_PREFIX}old.mjs.bak --dry-run`;
+    const foreignGroup = {
+      hooks: [{ type: "command", command: foreignCommand }],
+    };
+    const existingRaw = JSON.stringify({
+      hooks: {
+        Stop: [foreignGroup],
+      },
+    });
+
+    const result = mergeSettings({
+      existingRaw,
+      loreEntries: [], // foreignCommand is not lore's — never part of any desired set
+      hooksPathPrefix: HOOKS_PREFIX,
+    } as Parameters<typeof mergeSettings>[0]);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const merged = result.value.merged as { hooks?: { Stop?: unknown[] } };
+    expect(merged.hooks?.Stop).toEqual([foreignGroup]);
+    expect((result.value as unknown as { prunedCount: number }).prunedCount).toBe(0);
   });
 
   it("REGRESSION: omitting hooksPathPrefix disables orphan pruning entirely (legacy call sites stay byte-identical)", () => {

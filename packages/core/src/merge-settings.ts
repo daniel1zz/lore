@@ -44,18 +44,30 @@
  *     registered in a PAST run that is no longer part of `loreEntries` AT ALL
  *     (renamed/removed upstream) is invisible to that match and survives
  *     forever. When the caller supplies `hooksPathPrefix`, stage 1 ALSO
- *     strips any hook entry whose `command` CONTAINS `hooksPathPrefix` as a
- *     substring (not necessarily at the very start — production `command`
- *     strings are `"<runner> <path>"`, e.g. `"node /x/.claude/hooks/foo.mjs"`,
- *     so a bare `startsWith` would never match) AND is NOT a member of the
- *     current `loreEntries`' command set — an "orphan". `hooksPathPrefix` is
- *     OPTIONAL and OFF by default: omitting it (every pre-SPEC-076 call site)
- *     leaves behavior 100% unchanged — orphan pruning never runs, and a
- *     stale entry survives exactly as before (see the REGRESSION scenario in
+ *     strips any hook entry recognized as lore-owned-by-path (see
+ *     `commandReferencesHooksPath` below) AND is NOT a member of the current
+ *     `loreEntries`' command set — an "orphan". `hooksPathPrefix` is OPTIONAL
+ *     and OFF by default: omitting it (every pre-SPEC-076 call site) leaves
+ *     behavior 100% unchanged — orphan pruning never runs, and a stale entry
+ *     survives exactly as before (see the REGRESSION scenario in
  *     `merge-settings-prune.test.ts`). `MergeSettingsResult.prunedCount`
  *     counts ONLY entries removed by this orphan rule — never the
  *     pre-existing "same entry, being re-added" strip/re-add cycle (stages
  *     1+2 together), which is a replace, not a prune.
+ *   - **Path-boundary match, never a raw substring test (assess follow-up,
+ *     2026-07-25)** — `commandReferencesHooksPath` requires `hooksPathPrefix`
+ *     to anchor a whitespace-delimited TOKEN of `command`
+ *     (`token.startsWith(hooksPathPrefix)` for some token in
+ *     `command.split(/\s+/)`), matching production `command` shapes of both
+ *     a bare path (`"<path>"`) and `"<runner> <path> [args...]"` (e.g.
+ *     `"node /x/.claude/hooks/foo.mjs"`). A bare `command.includes(...)`
+ *     substring test was tried first and rejected: it would ALSO match a
+ *     genuinely foreign command that merely references the hooks path as an
+ *     ARGUMENT VALUE or inside an unrelated longer path (e.g.
+ *     `"backup-restore --source=/x/.claude/hooks/old.mjs.bak"`), wrongly
+ *     pruning a registration lore never owned — a direct violation of
+ *     AC-076-5's "leaves non-lore entries byte-identical" half. See the
+ *     foreign-command NEGATIVE scenario in `merge-settings-prune.test.ts`.
  *
  * Source: SPEC-046 §Design ("`merge-settings.ts`"), §Scope ("settings.json merge"), §Design I1.
  *   SPEC-076 §C5 (orphan pruning) — task-skill-implement-t7-mergesettings-orphan-pruning-backup.
@@ -118,6 +130,26 @@ interface HookGroup {
 /** Narrow runtime type guard — true for non-null, non-array JSON objects. */
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Path-boundary test behind SPEC-076 §C5 orphan pruning — TRUE iff
+ * `hooksPathPrefix` anchors the START of some whitespace-delimited TOKEN of
+ * `command`, never a raw substring anywhere in the string. Production
+ * `command` values take one of two shapes: a bare path (`"<path>"`) or
+ * `"<runner> <path> [args...]"` (e.g. `"node /x/.claude/hooks/foo.mjs"`) —
+ * splitting on whitespace and checking `startsWith` per token matches both
+ * without also matching a foreign command that merely references the hooks
+ * directory as an argument VALUE or as a substring of an unrelated longer
+ * path (e.g. `"backup-restore --source=/x/.claude/hooks/old.mjs.bak"` does
+ * NOT match — that flag's value doesn't itself START with the prefix).
+ *
+ * @param command - The hook entry's full `command` string.
+ * @param hooksPathPrefix - The lore-owned hooks-directory path prefix.
+ * @returns `true` iff some token of `command` starts with `hooksPathPrefix`.
+ */
+function commandReferencesHooksPath(command: string, hooksPathPrefix: string): boolean {
+  return command.split(/\s+/).some((token) => token.startsWith(hooksPathPrefix));
 }
 
 /**
@@ -239,9 +271,10 @@ export function mergeSettings(input: MergeSettingsInput): Result<MergeSettingsRe
 
   // Stage 1: strip every previously lore-managed hook entry (command match),
   // dropping any matcher-group left with zero hooks. When `hooksPathPrefix`
-  // is present, ALSO strip an "orphan" — an entry whose command contains the
-  // prefix (SPEC-076 §C5, a lore-owned hooks-directory path) but is no
-  // longer present in `loreEntries` at all — counting each into `prunedCount`.
+  // is present, ALSO strip an "orphan" — an entry recognized as lore-owned
+  // by path (SPEC-076 §C5, path-boundary match — see
+  // `commandReferencesHooksPath`) but no longer present in `loreEntries` at
+  // all — counting each into `prunedCount`.
   for (const eventKey of Object.keys(hooksObj)) {
     const groups = hooksObj[eventKey];
     if (!Array.isArray(groups)) {
@@ -277,7 +310,7 @@ export function mergeSettings(input: MergeSettingsInput): Result<MergeSettingsRe
         const command = hook["command"];
         if (typeof command !== "string") return true;
         if (loreCommands.has(command)) return false; // exact-match strip (replace, not prune)
-        if (hooksPathPrefix !== undefined && command.includes(hooksPathPrefix)) {
+        if (hooksPathPrefix !== undefined && commandReferencesHooksPath(command, hooksPathPrefix)) {
           prunedCount += 1; // orphan: lore-owned by path, absent from the new payload
           return false;
         }

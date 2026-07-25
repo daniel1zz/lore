@@ -998,9 +998,12 @@ async function resolvePayload(
       // resolves; a trailing `/` on `targetDir` is stripped the same way
       // that function tolerates one, so both `"/x/.claude"` and
       // `"/x/.claude/"` compute an identical, double-slash-free prefix).
-      // `mergeSettings` matches via `command.includes(...)` specifically
-      // because a real command is prefixed with a runner (`"node "`/
-      // `"bash "`), never a bare path — see that module's own doc.
+      // `mergeSettings` matches via a whitespace-token `startsWith` check
+      // (`commandReferencesHooksPath`, path-boundary, never a raw substring
+      // test) specifically because a real command is prefixed with a runner
+      // (`"node "`/`"bash "`), never a bare path — the runner-prefixed path
+      // token itself still starts with `hooksPathPrefix` — see that module's
+      // own doc.
       const trimmedTargetDir = targetDir.endsWith("/") ? targetDir.slice(0, -1) : targetDir;
       const hooksPathPrefix = `${trimmedTargetDir}/hooks/`;
       const mergeResult = mergeSettings({ existingRaw, loreEntries, hooksPathPrefix });
