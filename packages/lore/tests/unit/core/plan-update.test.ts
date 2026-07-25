@@ -66,10 +66,12 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// `planUpdate` does not exist yet — this import resolves to `undefined`
-// (or fails outright) until T3 lands `packages/core/src/plan-update.ts` and
-// re-exports it from the `@lore/core` barrel, per the dispatch contract.
-// @ts-expect-error — SPEC-076 T3 not implemented yet; RED by design.
+// `planUpdate` — GREEN as of T3, `packages/core/src/plan-update.ts`,
+// re-exported from the `@lore/core` barrel per the dispatch contract. The
+// `@ts-expect-error` this import carried during the RED phase (T3r) is
+// removed here — it is now unused (a compile error under `tsc`'s
+// `noUnusedLocals`-adjacent `@ts-expect-error` check), a pure compile-time
+// pragma flip with zero effect on any assertion below.
 import { planUpdate } from "@lore/core";
 import type { SetupManifest, SetupEntry } from "@lore/core";
 import type {

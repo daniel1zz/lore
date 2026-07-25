@@ -68,3 +68,4 @@ export * from "./config-precedence.js";
 export * from "./session-actor.js";
 export * from "./issue-report.js";
 export * from "./evidence-panel.js";
+export * from "./plan-update.js";
