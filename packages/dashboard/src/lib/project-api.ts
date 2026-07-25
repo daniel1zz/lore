@@ -11,8 +11,8 @@
  *   returns `key` verbatim, so the TanStack Query cache shape — and every
  *   existing `invalidateQueries`/`getQueryData` call keying off it — is
  *   unchanged.
- * Public surface: apiFetch, queryKeys, useProjectParam, ProjectsResponse,
- *   ProjectsResponseEntry
+ * Public surface: apiFetch, queryKeys, useProjectParam, projectPath,
+ *   ProjectsResponse, ProjectsResponseEntry
  * Invariants:
  *   - `apiFetch`'s `resourcePath` argument is the portion of the URL AFTER
  *     "/api" (e.g. "/docs", "/dashboard/docs/123/approve") and must NEVER
@@ -153,6 +153,38 @@ export function useProjectParam(): string | null {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const match = PROJECT_PARAM_PATTERN.exec(pathname);
   return match?.[1] !== undefined ? decodeURIComponent(match[1]) : null;
+}
+
+/**
+ * Builds a project-scoped PAGE route path — the browser-navigation mirror of
+ * {@link buildApiPath} (that function prefixes backend `/api/...` requests;
+ * this one prefixes the `Link`/`navigate` targets the user actually clicks).
+ * Purpose: fixes the defect where `__root.tsx`'s nav (logo/Home/Library/Tree/
+ * Execution/Settings/Issues) and the search-box submit hardcoded unprefixed
+ * paths (`/library`, `/search`, …) — every click under a `/p/:name` context
+ * silently dropped the user back into the default (registry-less) project.
+ * Every nav/header link and the search-box navigation MUST route its target
+ * through this function rather than hardcoding a route string, so the
+ * prefixing logic has exactly one home (mirrors {@link apiFetch}'s D5
+ * "one seam" role for backend addressing).
+ *
+ * @param project - Registry project name (from {@link useProjectParam}), or
+ *   `null` for registry-less mode / no active `/p/:name` context.
+ * @param routePath - The unprefixed route path, e.g. "/library" or "/" for
+ *   home — MUST start with "/".
+ * @returns `routePath` unchanged when `project` is `null` (today's shape,
+ *   byte-identical — regression guard). Otherwise `/p/${project}` plus
+ *   `routePath` (home's `"/"` collapses to bare `/p/${project}`, never a
+ *   trailing slash, matching the `/p/$name` index route's own path).
+ * @example
+ * projectPath(null, "/library")   // => "/library"
+ * projectPath("acme", "/library") // => "/p/acme/library"
+ * projectPath("acme", "/")        // => "/p/acme"
+ */
+export function projectPath(project: string | null, routePath: string): string {
+  if (project === null) return routePath;
+  const prefix = `/p/${encodeURIComponent(project)}`;
+  return routePath === "/" ? prefix : `${prefix}${routePath}`;
 }
 
 // ─── D7 mirrored types (GET /api/projects) ───────────────────────────────────

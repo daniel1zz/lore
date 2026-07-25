@@ -12,6 +12,7 @@
  *     - queryKeys.scope(null, key) returns key unchanged
  *     - queryKeys.scope("acme", key) prefixes with a project segment
  *     - useProjectParam reads "acme" from pathname "/p/acme/library"
+ *     - projectPath("acme", "/library") returns "/p/acme/library"
  *
  *   NEGATIVE:
  *     - useProjectParam returns null for a non-project-scoped pathname
@@ -21,6 +22,7 @@
  *     - useProjectParam matches "/p/acme" with no trailing segment (exact,
  *       not just prefix-of-a-longer-name)
  *     - a project name containing url-encoded characters is decoded
+ *     - projectPath("acme", "/") collapses to "/p/acme" (no trailing slash)
  *
  *   ERROR:
  *     - (n/a — apiFetch has no additional error-throwing behavior of its own;
@@ -38,8 +40,12 @@
  *     - queryKeys.scope is referentially the identity function's VALUE (same
  *       array contents) when project is null, guarding any future change
  *       that would silently break `getQueryData`/`invalidateQueries` cache matches
+ *     - projectPath(null, "/library") returns "/library" UNCHANGED (byte-identical
+ *       regression guard for the task-multi-project-nav-links-drop-the-p-name-prefix
+ *       fix — registry-less nav must render exactly today's hrefs)
+ *     - projectPath url-encodes the project name in the prefix
  *
- * @spec_ref SPEC-078 D5
+ * @spec_ref SPEC-078 D5, task-multi-project-nav-links-drop-the-p-name-prefix-clicking
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -51,7 +57,7 @@ vi.mock("@tanstack/react-router", () => ({
     opts.select({ location: { pathname: mockUseRouterState() as string } }),
 }));
 
-import { apiFetch, queryKeys, useProjectParam } from "../../../src/lib/project-api";
+import { apiFetch, queryKeys, useProjectParam, projectPath } from "../../../src/lib/project-api";
 
 beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}")));
@@ -176,6 +182,33 @@ describe("useProjectParam", () => {
       mockUseRouterState.mockReturnValue("/plan");
       const { result } = renderHook(() => useProjectParam());
       expect(result.current).toBeNull();
+    });
+  });
+});
+
+// ─── projectPath ──────────────────────────────────────────────────────────────
+
+describe("projectPath (task-multi-project-nav-links-drop-the-p-name-prefix-clicking)", () => {
+  describe("happy path", () => {
+    it("prefixes a route path with /p/<project> when a project is given", () => {
+      expect(projectPath("acme", "/library")).toBe("/p/acme/library");
+    });
+  });
+
+  describe("boundary", () => {
+    it("collapses the home route ('/') to a bare /p/<project> — no trailing slash", () => {
+      expect(projectPath("acme", "/")).toBe("/p/acme");
+    });
+  });
+
+  describe("regression", () => {
+    it("returns routePath UNCHANGED for project: null (byte-identical registry-less nav)", () => {
+      expect(projectPath(null, "/library")).toBe("/library");
+      expect(projectPath(null, "/")).toBe("/");
+    });
+
+    it("url-encodes the project name in the prefix", () => {
+      expect(projectPath("a b", "/library")).toBe("/p/a%20b/library");
     });
   });
 });
