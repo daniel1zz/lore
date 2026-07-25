@@ -15,10 +15,16 @@
  * Bun embeds any .node file that appears as a static string literal require.
  */
 
-import { join } from "path";
-import { existsSync } from "fs";
+import { join, dirname } from "path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import type { BunPlugin, PluginBuilder, OnLoadArgs } from "bun";
 import { resolvePlatform } from "./platform-map.js";
+import {
+  buildManifest,
+  renderGeneratedFile,
+  extractEmbeddedTreeDigest,
+  GENERATED_FILE_PATH,
+} from "./embed-assets-manifest.mjs";
 
 const root = join(import.meta.dir, "..");
 const entrypoint = join(root, "packages", "lore", "src", "index.ts");
@@ -110,6 +116,35 @@ const nativePkg = `@libsql/${resolvePlatform().libsqlTarget}`;
 const nativeNodePath = resolveNativeNodePath(nativePkg);
 
 console.log(`  Native: ${nativeNodePath}`);
+
+// ─── Embedded assets manifest (SPEC-076 §C2, R1 mitigation) ──────────────────
+// MUST run BEFORE Bun.build's compile step below — the manifest generator's
+// output (packages/lore/src/generated/assets-manifest.ts) is a normal source
+// file, embedded into the binary exactly as it reads on disk at compile time.
+// Regenerating it AFTER compiling would silently ship a stale `tree_digest`
+// (the very freshness truth `lore setup --check` depends on) inside the
+// binary. Do not reorder this block below the `Bun.build()` call.
+console.log(`Regenerating embedded assets manifest...`);
+const assetsManifest = buildManifest(join(root, "assets"), root);
+mkdirSync(dirname(GENERATED_FILE_PATH), { recursive: true });
+writeFileSync(GENERATED_FILE_PATH, renderGeneratedFile(assetsManifest), "utf8");
+
+// Post-write self-check: read back what was just written and confirm its
+// embedded tree_digest equals the freshly-computed one — this is the ordering
+// assertion the compiled binary's embedded digest correctness depends on
+// (AC: "compiled binary's embedded tree_digest equals a fresh recomputation").
+const verifyDigest = extractEmbeddedTreeDigest(readFileSync(GENERATED_FILE_PATH, "utf8"));
+if (verifyDigest !== assetsManifest.tree_digest) {
+  throw new Error(
+    `[build] Post-write verification failed: ${GENERATED_FILE_PATH} embeds tree_digest ` +
+      `"${verifyDigest}" but a fresh recomputation over assets/ is "${assetsManifest.tree_digest}". ` +
+      `This must never happen — investigate scripts/embed-assets-manifest.mjs's ` +
+      `renderGeneratedFile/extractEmbeddedTreeDigest for a round-trip bug.`,
+  );
+}
+console.log(
+  `  Assets manifest: ${assetsManifest.entries.length} files, tree_digest ${assetsManifest.tree_digest} (verified fresh)`,
+);
 
 const result = await Bun.build({
   entrypoints: [entrypoint],
