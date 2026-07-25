@@ -55,6 +55,7 @@
     "@typescript-eslint/parser": "^8.65.0",
     "autoprefixer": "^10.4.21",
     "eslint": "^10.8.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "jsdom": "^25.0.1",
     "postcss": "^8.5.3",
     "tailwindcss": "^4.1.8",

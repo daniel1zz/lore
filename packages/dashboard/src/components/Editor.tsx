@@ -114,7 +114,7 @@ export function Editor({
     };
   // reason: Re-initialise only when initialValue changes (not on every render).
   // onChange is captured in handleChange which is stable via useCallback.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: re-initialising CodeMirror on handleChange identity churn destroys+recreates the view per keystroke, dropping/scrambling rapidly typed input (observed regression, see reason above)
   }, [initialValue]);
 
   if (!splitView) {
