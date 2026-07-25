@@ -38,6 +38,20 @@
  *               (Phase F never reorders earlier phases) when both fire in
  *               the same session
  *
+ * SPEC-076 T8b addition (`setup.check_reminder` config-knob wiring, see
+ * `reminder_enabled` cases below):
+ *   NEGATIVE:   a fresh stale cache with `reminder_enabled: false` (written
+ *               by `setup-check.ts::resolveCheckReminderEnabled` when the
+ *               team's `setup.check_reminder` config resolves to false)
+ *               injects 0 advisory bytes and spawns 0 `lore` child processes
+ *               — same silence as the pre-existing sync-cache HAPPY case,
+ *               but for a STALE cache under the config-suppressed path.
+ *   STATE:      a fresh stale cache with `reminder_enabled: true` (explicit,
+ *               present) renders the advisory identically to an ABSENT
+ *               field — proves the hook's `!== false` check treats explicit
+ *               `true` and omission the same way (fail-open is about the
+ *               VALUE `false`, not mere field presence).
+ *
  * @spec_ref AC-076-7
  */
 
@@ -279,6 +293,54 @@ describe("session-start-freshness — NEGATIVE", () => {
 
     expect(result.status).toBe(0);
     expect(parseAdditionalContext(result.stdout as string)).toBe("");
+    expect(readLogLines(logPath)).toHaveLength(0);
+  });
+});
+
+// ─── reminder_enabled (SPEC-076 T8b) — config-knob suppression + fail-open ────
+
+describe("session-start-freshness — reminder_enabled (SPEC-076 T8b)", () => {
+  it("NEGATIVE: fresh stale cache with reminder_enabled:false injects 0 advisory bytes and spawns 0 lore child processes", () => {
+    const { cwd, claudeDir, cachePath, logPath, stubDir } = setupFixture();
+    writeCache(cachePath, {
+      checked_at: isoMinusMs(60_000),
+      binary_version: "1.2.3",
+      status: "stale",
+      stale_counts: { outdated: 2, diverged: 1, missing: 0 },
+      reminder_enabled: false,
+    });
+
+    const { result } = runHook({
+      cwd,
+      extraEnv: { PATH: `${stubDir}:${process.env.PATH}`, CLAUDE_AGENTS_DIR_OVERRIDE: join(claudeDir, "agents") },
+    });
+
+    expect(result.status).toBe(0);
+    expect(parseAdditionalContext(result.stdout as string)).toBe("");
+    expect(readLogLines(logPath)).toHaveLength(0);
+  });
+
+  it("STATE: fresh stale cache with reminder_enabled:true renders the advisory identically to an absent field", () => {
+    const { cwd, claudeDir, cachePath, logPath, stubDir } = setupFixture();
+    writeCache(cachePath, {
+      checked_at: isoMinusMs(60_000),
+      binary_version: "1.2.3",
+      status: "stale",
+      stale_counts: { outdated: 2, diverged: 1, missing: 0 },
+      reminder_enabled: true,
+    });
+
+    const { result } = runHook({
+      cwd,
+      extraEnv: { PATH: `${stubDir}:${process.env.PATH}`, CLAUDE_AGENTS_DIR_OVERRIDE: join(claudeDir, "agents") },
+    });
+
+    expect(result.status).toBe(0);
+    const ctx = parseAdditionalContext(result.stdout as string);
+    const lines = ctx.split("\n").filter((l) => l.length > 0);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("⚠ lore assets outdated");
+    expect(lines[0]).toContain("lore setup");
     expect(readLogLines(logPath)).toHaveLength(0);
   });
 });

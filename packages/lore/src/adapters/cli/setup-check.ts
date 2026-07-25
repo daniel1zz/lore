@@ -18,7 +18,10 @@
  *     SPEC-076 §C3's documented `--json` contract).
  *   - SetupCheckCache — the persisted cache file shape (SPEC-076 §C6
  *     Downstream Handoff, verbatim: `{checked_at, binary_version, status,
- *     stale_counts?}`).
+ *     stale_counts?}`), additively extended by task task-skill-implement-t8b
+ *     with an OPTIONAL `reminder_enabled: false` (present ONLY when the
+ *     resolved `setup.check_reminder` config is `false` — see
+ *     `resolveCheckReminderEnabled` below).
  *
  * Invariants:
  *   - ZERO MUTATION beyond the check cache file (SPEC-076 Invariant I4 /
@@ -70,6 +73,18 @@
  *     absent manifest file (ENOENT) IS the legitimate "fresh target" signal
  *     (`installed: null`) — `planUpdate` itself already documents that this
  *     classifies every embedded entry as `missing` (install-equivalent).
+ *   - `resolveCheckReminderEnabled` (task task-skill-implement-t8b, SPEC-076
+ *     §C6 D5) reads `setup.check_reminder` from the TEAM `.lore/config.yaml`
+ *     — walked up from `opts.cwd` (default `process.cwd()`), the same
+ *     "nearest ancestor `.lore/`" convention `loader.ts::findLoreDbPath`
+ *     uses, but WITHOUT that helper's `process.exit(1)` on a miss: `--check`
+ *     must keep working (default enabled) outside any project, and this
+ *     module already forgoes `loadLoreApp()` entirely (see the "bootstrap-
+ *     stage" invariant above). No `.lore/config.yaml` found, or found but
+ *     unparsable/invalid → fail-open (`resolveSetupCheckReminderEnabled(undefined)
+ *     === true`), never a hard failure of the `--check` run itself. Reuses
+ *     `@lore/core/node`'s `loadConfig` (the SAME parse `loader.ts` builds on)
+ *     rather than hand-rolling a second YAML reader.
  *
  * Side-effect class: IO (synchronous `node:fs` reads; one atomic write — the
  *   check cache file only).
@@ -80,12 +95,18 @@
 
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { z } from "zod";
 
-import { err, ok, planUpdate, setupManifestSchema } from "@lore/core";
+import { err, ok, planUpdate, resolveSetupCheckReminderEnabled, setupManifestSchema } from "@lore/core";
 import type { LoreError, Result, SetupManifest, UpdateProbe } from "@lore/core";
+// reason: loadConfig reads `<dir>/.lore/config.yaml` via Node fs — only
+// reachable via the `@lore/core/node` subpath (browser-safety split,
+// packages/core/src/CLAUDE.md). This is a plain fs+yaml read, NOT a
+// bun:sqlite dependency — safe to import from this bootstrap-stage module
+// (which, per the module doc above, deliberately never calls `loadLoreApp()`).
+import { loadConfig } from "@lore/core/node";
 
 import { EMBEDDED_ASSETS_MANIFEST, LORE_BINARY_VERSION } from "../../generated/assets-manifest.js";
 import type { EmbeddedAssetEntry } from "../../generated/assets-manifest.js";
@@ -118,6 +139,15 @@ const setupCheckCacheSchema = z.object({
       missing: z.number().int().nonnegative(),
     })
     .optional(),
+  /**
+   * Present ONLY as `false`, and ONLY when the resolved `setup.check_reminder`
+   * config is `false` (SPEC-076 §C6 D5, task task-skill-implement-t8b) — mirrors
+   * the `attestation.first_seen?: boolean` "present iff true" precedent
+   * (SPEC-039 §M2), just inverted to "present iff false". Absence (legacy cache,
+   * or a run where the reminder is enabled) is read by the hook as enabled —
+   * fail-open, byte-identical to pre-T8b cache shape.
+   */
+  reminder_enabled: z.literal(false).optional(),
 });
 
 /** Derived TypeScript type for the check-cache file (SPEC-076 §C6 Downstream Handoff). */
@@ -258,10 +288,53 @@ class RealSetupCheckProbe implements UpdateProbe {
   }
 }
 
+// ─── setup.check_reminder config resolution (SPEC-076 §C6 D5, T8b) ─────────
+
+/**
+ * Walks from `startDir` up to filesystem root looking for the nearest
+ * ancestor directory containing `.lore/config.yaml` — the TEAM config file
+ * `setup.check_reminder` (SPEC-076 §C6) lives in. Mirrors
+ * `loader.ts::findLoreDbPath`'s upward-walk shape, but NEVER exits the
+ * process on a miss (returns `undefined` instead) — this module's `--check`
+ * run must keep working (default enabled) outside any project.
+ */
+function findProjectConfigDir(startDir: string): string | undefined {
+  let dir = startDir;
+  while (true) {
+    if (existsSync(join(dir, ".lore", "config.yaml"))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) return undefined;
+    dir = parent;
+  }
+}
+
+/**
+ * Resolves the effective `setup.check_reminder` value (SPEC-076 §C6 D5) by
+ * locating and parsing the nearest ancestor `.lore/config.yaml` from `cwd`.
+ * Fail-open at every step (no project config found, or found but unparsable/
+ * schema-invalid) — `resolveSetupCheckReminderEnabled(undefined)` already
+ * defaults to `true`, so this function never blocks or fails the `--check`
+ * run itself over a config-read problem.
+ */
+function resolveCheckReminderEnabled(cwd: string): boolean {
+  const projectDir = findProjectConfigDir(cwd);
+  if (projectDir === undefined) return resolveSetupCheckReminderEnabled(undefined);
+
+  const configResult = loadConfig(projectDir);
+  if (!configResult.ok) return resolveSetupCheckReminderEnabled(undefined);
+
+  return resolveSetupCheckReminderEnabled(configResult.value);
+}
+
 // ─── Check-cache write (the SOLE write this command performs) ─────────────
 
-function buildCache(report: SetupCheckReport, checkedAt: string): SetupCheckCache {
-  const base = { checked_at: checkedAt, binary_version: report.binary_version, status: report.summary } as const;
+function buildCache(report: SetupCheckReport, checkedAt: string, reminderEnabled: boolean): SetupCheckCache {
+  const base = {
+    checked_at: checkedAt,
+    binary_version: report.binary_version,
+    status: report.summary,
+    ...(reminderEnabled ? {} : { reminder_enabled: false as const }),
+  };
   if (report.summary !== "stale") return base;
   return {
     ...base,
@@ -273,8 +346,13 @@ function buildCache(report: SetupCheckReport, checkedAt: string): SetupCheckCach
   };
 }
 
-async function writeCheckCache(targetDir: string, report: SetupCheckReport, nowIso: string): Promise<void> {
-  const cache = setupCheckCacheSchema.parse(buildCache(report, nowIso));
+async function writeCheckCache(
+  targetDir: string,
+  report: SetupCheckReport,
+  nowIso: string,
+  reminderEnabled: boolean,
+): Promise<void> {
+  const cache = setupCheckCacheSchema.parse(buildCache(report, nowIso, reminderEnabled));
   const writer = new RealSetupFsWriter();
   await writer.write(join(targetDir, CHECK_CACHE_FILENAME), `${JSON.stringify(cache, null, 2)}\n`);
 }
@@ -316,10 +394,12 @@ function renderSetupCheckReport(report: SetupCheckReport, targetDir: string): st
 
 /**
  * Runs the full `lore setup --check` flow: reads the installed manifest,
- * classifies every managed entry via `planUpdate`, writes the check cache
- * (the run's ONLY write — see module doc), prints text or `--json` output,
- * and sets `process.exitCode` (0 sync / 3 stale / a mapped `LoreError` code
- * on a read/parse failure — never a JS exception escaping this function).
+ * classifies every managed entry via `planUpdate`, resolves the team's
+ * `setup.check_reminder` config (`resolveCheckReminderEnabled`), writes the
+ * check cache (the run's ONLY write — see module doc), prints text or
+ * `--json` output, and sets `process.exitCode` (0 sync / 3 stale / a mapped
+ * `LoreError` code on a read/parse failure — never a JS exception escaping
+ * this function).
  *
  * @param opts.targetDir - The resolved install target (`--claude-dir` >
  *   `$CLAUDE_CONFIG_DIR` > `~/.claude`, resolved by the caller — mirrors
@@ -328,14 +408,19 @@ function renderSetupCheckReport(report: SetupCheckReport, targetDir: string): st
  * @param opts.now - Time seam for the cache's `checked_at` (mirrors the
  *   codebase-wide `now: () => string` convention, e.g. `SetupService.install`)
  *   — defaults to `() => new Date().toISOString()`.
+ * @param opts.cwd - Directory to start the `setup.check_reminder` team-config
+ *   lookup from (walked upward — see `resolveCheckReminderEnabled`). Defaults
+ *   to `process.cwd()`. Test seam, mirrors `opts.now`.
  * @throws Never.
  */
 export async function runSetupCheck(opts: {
   targetDir: string;
   json: boolean;
   now?: () => string;
+  cwd?: string;
 }): Promise<void> {
   const now = opts.now ?? (() => new Date().toISOString());
+  const cwd = opts.cwd ?? process.cwd();
 
   const manifestResult = readInstalledManifest(opts.targetDir);
   if (!manifestResult.ok) {
@@ -368,7 +453,7 @@ export async function runSetupCheck(opts: {
     },
   };
 
-  await writeCheckCache(opts.targetDir, report, now());
+  await writeCheckCache(opts.targetDir, report, now(), resolveCheckReminderEnabled(cwd));
 
   if (opts.json) {
     console.log(JSON.stringify({ ok: true, data: report }, null, 2));

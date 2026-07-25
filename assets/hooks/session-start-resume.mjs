@@ -40,15 +40,18 @@
  *          than inventing a phantom installed-version field.
  *
  *          `setup.check_reminder` (`packages/core/src/config.ts`, default
- *          true) is DEFINED but NOT consulted by this phase — a standalone
- *          installed hook script (`node <path>`, no guaranteed local
- *          `node_modules`, so no `yaml` parser reachable) cannot cheaply
- *          parse `.lore/config.yaml`, and the CLI-side enforcement point
- *          (`lore setup --check` writing a suppressed/gated cache) lives in
- *          `setup-check.ts`, outside this task's file anchors (T4/T5 own
- *          that module concurrently). `LORE_SETUP_NO_CHECK=1` is the sole
- *          Phase F kill-switch today — a documented, reported gap, not a
- *          silent one.
+ *          true) is enforced end-to-end as of task task-skill-implement-t8b:
+ *          this standalone installed hook script still never parses
+ *          `.lore/config.yaml` itself (no guaranteed local `node_modules`,
+ *          so no `yaml` parser reachable) — instead the CLI-side write path
+ *          (`adapters/cli/setup-check.ts::resolveCheckReminderEnabled`)
+ *          resolves the config and stamps `reminder_enabled: false` onto the
+ *          cache when the reminder is disabled; this phase just honors that
+ *          field (`cache.reminder_enabled === false` → suppress, same as the
+ *          `LORE_SETUP_NO_CHECK=1` kill-switch but per-config instead of
+ *          per-env-var). A cache with NO `reminder_enabled` field (legacy,
+ *          or the reminder enabled) behaves byte-identically to before this
+ *          task — fail-open on absence.
  *
  * Bootstrap is hook-injected (was lazy-loaded by AI). Rationale: SessionStart
  * is low-frequency, `lore bootstrap` is a slim progressive-disclosure pointer
@@ -360,14 +363,19 @@ try {
       const fresh = Number.isFinite(ageMs) && ageMs >= 0 && ageMs < SETUP_CHECK_CACHE_TTL_MS;
       if (!fresh) {
         spawnSetupCheckRefresh(claudeDir);
-      } else if (cache.status === 'stale') {
+      } else if (cache.status === 'stale' && cache.reminder_enabled !== false) {
+        // `cache.reminder_enabled === false` is written ONLY when the team's
+        // `setup.check_reminder` config resolved to false (setup-check.ts's
+        // resolveCheckReminderEnabled); a legacy cache with no such field
+        // falls through this check unaffected (fail-open, REGRESSION-safe).
         const counts = cache.stale_counts;
         const countsNote = counts && typeof counts === 'object'
           ? `${(counts.outdated ?? 0) + (counts.diverged ?? 0) + (counts.missing ?? 0)} file(s), binary ${cache.binary_version}`
           : `binary ${cache.binary_version}`;
         advisoryBlock = `⚠ lore assets outdated (${countsNote}) — run \`lore setup\``;
       }
-      // fresh + sync → advisoryBlock stays '' (0 bytes, 0 spawn)
+      // fresh + sync, OR fresh + stale with reminder_enabled === false →
+      // advisoryBlock stays '' (0 bytes, 0 spawn)
     }
   }
 } catch {
