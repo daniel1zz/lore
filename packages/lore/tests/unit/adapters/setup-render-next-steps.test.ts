@@ -179,6 +179,10 @@ describe("renderProjectScaffoldReceipt", () => {
         backups: [],
         mcp: "registered" as const,
         manifestPath: "/tmp/fake-claude-dir/.lore-setup-manifest.json",
+        // SPEC-076 T5 — SetupReceipt gained this required field; renderInstallReceipt
+        // itself never reads it (see this describe block's own REGRESSION intent), so
+        // an empty list keeps the byte-identical-output assertion below meaningful.
+        skippedDiverged: [],
       };
       const ctx: SetupRenderCtx = { targetDir: "/tmp/fake-claude-dir", binPath: "/usr/local/bin/lore" };
 
@@ -236,6 +240,10 @@ describe("renderProjectScaffoldReceipt", () => {
         backups: [],
         mcp: "registered" as const,
         manifestPath: "/tmp/fake-claude-dir/.lore-setup-manifest.json",
+        // SPEC-076 T5 — SetupReceipt gained this required field; renderInstallReceipt
+        // itself never reads it (see this describe block's own REGRESSION intent), so
+        // an empty list keeps the byte-identical-output assertion below meaningful.
+        skippedDiverged: [],
       };
       const ctx: SetupRenderCtx = { targetDir: "/tmp/fake-claude-dir", binPath: "/usr/local/bin/lore" };
 

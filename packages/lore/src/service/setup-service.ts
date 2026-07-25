@@ -101,11 +101,53 @@
  *     aborts the run — `SetupReceipt.mcp` records `"failed"` and the CALLER
  *     (CLI adapter) is responsible for mapping that to a non-zero exit code;
  *     every file-asset write still completes.
+ *   - **SPEC-076 T5 — converge-semantics hardening.** `install()` ALWAYS uses
+ *     `computeInstallPlan` (`planInstall`) for the base writes/skips/backups
+ *     decision (fresh install and re-converge alike — the write PLANNER never
+ *     changes); when an installed manifest already exists (`current !== null`
+ *     — the UPDATE path, D3: a fresh install has no "diverged" concept at
+ *     all), that plan is ADDITIONALLY overlaid with `@lore/core`'s pure
+ *     five-state `planUpdate` classifier (private `classifyManagedDivergence`
+ *     below) to identify which of `plan.writes` are `diverged` (user-edited
+ *     since the last converge, per SPEC-076 §C3) — those are REMOVED from the
+ *     write/backup set and reported via `SetupReceipt.skippedDiverged`
+ *     instead of being silently overwritten (§C3 D2), UNLESS
+ *     `opts.forceDiverged` is set, in which case they flow through the write
+ *     path unchanged (backup-then-overwrite, identical to an `outdated`
+ *     entry). `classifyManagedDivergence` deliberately calls `planUpdate`
+ *     with the on-disk manifest's `assets_digest` field STRIPPED — see that
+ *     function's own doc for why trusting it here would defeat this very
+ *     detection.
+ *   - **SPEC-076 T5 — manifest version fields (§C4), stamped LAST, always.**
+ *     `binary_version` (the running binary's embedded `LORE_BINARY_VERSION`)
+ *     and `installed_at` (this run's `nowIso`) are written on EVERY
+ *     successful converge, fresh install or update alike. `assets_digest`
+ *     (the embedded tree's whole-tree `tree_digest`) is written ONLY when
+ *     `skippedDiverged` is empty this run — stamping it while a diverged
+ *     file remains un-overwritten would let `lore setup --check`'s digest
+ *     short-circuit (`@lore/core`'s `planUpdate`) wrongly report the target
+ *     fully `"sync"` despite a known, un-repaired divergence; omitting the
+ *     field (rather than writing a stale/incorrect value) is the fail-loud
+ *     direction here — a reader missing `assets_digest` must fall back to
+ *     full per-entry classification, never assume sync.
+ *   - **SPEC-076 T5 — check-cache invalidation.** A converge that actually
+ *     wrote/removed anything (asset files OR the manifest itself) removes
+ *     `<targetDir>/.lore-setup-check.json` (the `lore setup --check` cache,
+ *     T4) as its FINAL step — a stale cache claiming `"sync"` must not
+ *     outlive the state it described. A fully idempotent re-run (I2 — zero
+ *     underlying writes) makes ZERO calls here too, preserving I2's "byte-
+ *     identical re-run fires zero writer calls" invariant; a failure to
+ *     remove an already-absent/permission-denied cache file is swallowed
+ *     (best-effort — the cache is purely advisory, C6's fail-open posture;
+ *     a stale cache self-corrects on its own 24h TTL or the NEXT successful
+ *     converge).
  *
  * Side-effect class: IO (delegates ALL of it to the four injected ports —
  *   this class itself makes no direct `fs`/`child_process` calls).
  *
  * Source: SPEC-046 §Design ("`service/setup-service.ts`"), §Scope, invariants I1–I5.
+ *   SPEC-076 §C3 (five-state converge hardening), §C4 (manifest version
+ *   fields), §C7, D2 — task task-skill-implement-t5-converge-hardening-diverged-skip-force.
  */
 
 import { createHash } from "node:crypto";
@@ -116,6 +158,7 @@ import { err, ok } from "@lore/core";
 import type { Result, LoreError } from "@lore/core";
 import {
   planInstall as computeInstallPlan,
+  planUpdate,
   setupManifestSchema,
   mergeSettings,
 } from "@lore/core";
@@ -123,10 +166,15 @@ import type {
   AssetFile,
   AssetPayload,
   InstallPlan,
+  PlannedWrite,
   SetupEntry,
   SetupManifest,
   SettingsHookEntry,
+  UpdatePlan,
+  UpdateProbe,
 } from "@lore/core";
+
+import { EMBEDDED_ASSETS_MANIFEST, LORE_BINARY_VERSION } from "../generated/assets-manifest.js";
 
 // ─── Ports ───────────────────────────────────────────────────────────────────
 
@@ -238,15 +286,47 @@ export interface SetupReceipt {
   mcp: "registered" | "skipped" | "failed";
   /** Absolute path to `.lore-setup-manifest.json` under the target dir. */
   manifestPath: string;
+  /**
+   * install(): managed-ownership paths this run classified as `diverged`
+   * (SPEC-076 §C3 — on-disk bytes differ from BOTH the target content AND
+   * the last-recorded manifest sha, i.e. user-edited since the last
+   * converge) and therefore did NOT overwrite, per §C3 D2's default-skip
+   * policy. Always `[]` on a fresh install (no prior manifest — D3, the
+   * "diverged" concept does not apply) and whenever `--force-diverged` was
+   * passed (every diverged path is routed through the normal
+   * backup-then-overwrite path instead, same as an `outdated` entry).
+   * uninstall(): always `[]` — the concept does not apply to a reversal.
+   */
+  skippedDiverged: string[];
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const MANIFEST_FILENAME = ".lore-setup-manifest.json";
+/**
+ * `<targetDir>/.lore-setup-manifest.json` — exported (SPEC-076 T5) so
+ * `../adapters/cli/setup-check.ts` (T4, a concurrently-claimed sibling task
+ * at the time this constant was private) can import the single SSOT literal
+ * instead of carrying its own documented duplicate. See that module's own
+ * header for the migration note.
+ */
+export const MANIFEST_FILENAME = ".lore-setup-manifest.json";
 const MANIFEST_VERSION = "1";
 const BACKUPS_DIRNAME = ".lore-backups";
 /** Synthetic manifest path for the `mcp` kind entry — there is no real file behind it. */
 const MCP_ENTRY_PATH = "mcp:lore";
+/**
+ * `<targetDir>/.lore-setup-check.json` — the `lore setup --check` cache file
+ * (SPEC-076 §C6, T4/`setup-check.ts`'s `SetupCheckCache` shape/lifecycle,
+ * NOT owned here). This is a DELIBERATE literal duplicate of that module's
+ * own `CHECK_CACHE_FILENAME` constant, same rationale as the (former)
+ * `MANIFEST_FILENAME` duplication it documents: this service only needs the
+ * stable on-disk FILENAME to invalidate the cache on a real converge (see
+ * this module's header, "check-cache invalidation") — it has no reason to
+ * import `setup-check.ts` (an adapter-layer module; services don't depend on
+ * adapters), and the reverse direction (setup-check.ts importing FROM here)
+ * is already used for `MANIFEST_FILENAME` above.
+ */
+const CHECK_CACHE_FILENAME = ".lore-setup-check.json";
 
 const defaultNow = (): string => new Date().toISOString();
 
@@ -349,8 +429,14 @@ export class SetupService {
    * actually differs from what's on disk — writes the authoritative manifest
    * LAST.
    *
-   * @param opts - `{targetDir, binPath}` — `binPath` is passed straight to
-   *   `McpRegistrar.add`.
+   * @param opts - `{targetDir, binPath, forceDiverged?}` — `binPath` is passed
+   *   straight to `McpRegistrar.add`. `forceDiverged` (SPEC-076 §C3 D2,
+   *   default `false`) overrides the default-skip policy for `diverged`
+   *   managed-ownership paths on the UPDATE path (an installed manifest
+   *   already exists) — every diverged path is then backed up and
+   *   overwritten instead of reported via `SetupReceipt.skippedDiverged`. No
+   *   effect on a fresh install (D3 — no prior manifest means no "diverged"
+   *   concept to override).
    * @param now - Time seam (mirrors the codebase-wide `now: () => string`
    *   convention, e.g. `DriftCheckService`/`PhaseService`) — resolved ONCE per
    *   call; also doubles as the backup-run directory key `uninstall` later
@@ -361,10 +447,11 @@ export class SetupService {
    *   malformed manifest / computed manifest fails its own schema),
    *   STORE_ERROR (asset load failure; a writer-port call threw mid-run — the
    *   message names every path committed before the failure and confirms the
-   *   manifest was NOT written; the manifest write itself failed)
+   *   manifest was NOT written; the manifest write itself failed; the
+   *   `planUpdate` divergence probe threw)
    */
   async install(
-    opts: { targetDir: string; binPath: string },
+    opts: { targetDir: string; binPath: string; forceDiverged?: boolean },
     now: () => string = defaultNow,
   ): Promise<Result<SetupReceipt, LoreError>> {
     const guard = assertSafeTargetDir(opts.targetDir);
@@ -388,8 +475,40 @@ export class SetupService {
 
     const existingFilesResult = await buildExistingFilesMap(opts.targetDir, resolvedPayload, this.reader);
     if (!existingFilesResult.ok) return existingFilesResult;
+    const existingFiles = existingFilesResult.value;
 
-    const plan = computeInstallPlan(stripMcpEntries(current), resolvedPayload, existingFilesResult.value);
+    const strippedCurrent = stripMcpEntries(current);
+    const plan = computeInstallPlan(strippedCurrent, resolvedPayload, existingFiles);
+
+    // ── SPEC-076 T5: diverged-skip overlay — UPDATE path only (D3: a fresh
+    // install, current === null, has no "diverged" concept at all). See
+    // `classifyManagedDivergence`'s own doc for why the digest short-circuit
+    // is deliberately bypassed here.
+    let writePlan: PlannedWrite[] = plan.writes;
+    let backupPaths: string[] = plan.backups;
+    const skippedDiverged: string[] = [];
+    const divergedOnDiskSha = new Map<string, string>();
+
+    if (strippedCurrent !== null) {
+      const divergenceResult = classifyManagedDivergence(strippedCurrent, existingFiles);
+      if (!divergenceResult.ok) return divergenceResult;
+      const divergedPaths = new Set(divergenceResult.value.files.diverged);
+
+      if (divergedPaths.size > 0 && opts.forceDiverged !== true) {
+        const survivingWrites: PlannedWrite[] = [];
+        for (const write of plan.writes) {
+          if (!divergedPaths.has(write.path)) {
+            survivingWrites.push(write);
+            continue;
+          }
+          skippedDiverged.push(write.path);
+          const diskSha = existingFiles.get(write.path);
+          if (diskSha !== undefined) divergedOnDiskSha.set(write.path, diskSha);
+        }
+        writePlan = survivingWrites;
+        backupPaths = plan.backups.filter((p) => !divergedPaths.has(p));
+      }
+    }
 
     // ── Write phase — the first point ANY SetupFsWriter call may occur ─────
     const committedBackups: string[] = [];
@@ -397,7 +516,7 @@ export class SetupService {
     const committedRemovals: string[] = [];
 
     try {
-      for (const backupPath of plan.backups) {
+      for (const backupPath of backupPaths) {
         const srcFull = path.join(opts.targetDir, backupPath);
         const backupDir = path.dirname(path.join(opts.targetDir, BACKUPS_DIRNAME, nowIso, backupPath));
         await this.writer.mkdir(backupDir);
@@ -405,7 +524,7 @@ export class SetupService {
         committedBackups.push(backupPath);
       }
 
-      for (const write of plan.writes) {
+      for (const write of writePlan) {
         const fullPath = path.join(opts.targetDir, write.path);
         await this.writer.mkdir(path.dirname(fullPath));
         await this.writer.write(fullPath, write.content, write.kind === "hook" ? { executable: true } : undefined);
@@ -429,7 +548,10 @@ export class SetupService {
       mcp = "registered";
       const shaOfBin = sha256Hex(opts.binPath);
       const writtenAt = previousMcpEntry?.sha256 === shaOfBin ? previousMcpEntry.written_at : nowIso;
-      mcpEntry = { path: MCP_ENTRY_PATH, kind: "mcp", sha256: shaOfBin, written_at: writtenAt };
+      // reason: SPEC-076 D8 — the mcp entry is never emitted by an AssetSource (it has no
+      // file behind it), so its ownership is stamped directly here, "managed" per
+      // setup-manifest.ts's deriveOwnershipFromKind mapping for kind: "mcp".
+      mcpEntry = { path: MCP_ENTRY_PATH, kind: "mcp", sha256: shaOfBin, written_at: writtenAt, ownership: "managed" };
     } else {
       mcp = "failed";
       mcpEntry = previousMcpEntry;
@@ -437,19 +559,73 @@ export class SetupService {
 
     // ── Manifest — authoritative, written LAST, and only if it changed ─────
     const previousEntryByPath = new Map((current?.entries ?? []).map((e) => [e.path, e] as const));
-    const writeByPath = new Map(plan.writes.map((w) => [w.path, w] as const));
+    const writeByPath = new Map(writePlan.map((w) => [w.path, w] as const));
+    const skippedDivergedSet = new Set(skippedDiverged);
 
     const fileEntries: SetupEntry[] = resolvedPayload.files.map((file) => {
+      const ownershipField = file.ownership !== undefined ? { ownership: file.ownership } : {};
       const write = writeByPath.get(file.path);
       if (write !== undefined) {
-        return { path: file.path, kind: file.kind, sha256: write.sha256, written_at: nowIso };
+        return { path: file.path, kind: file.kind, sha256: write.sha256, written_at: nowIso, ...ownershipField };
       }
       const prev = previousEntryByPath.get(file.path);
-      return { path: file.path, kind: file.kind, sha256: file.sha256, written_at: prev?.written_at ?? nowIso };
+      // Plain byte-identical skip (computeInstallPlan's `plan.skips`, disk == target) —
+      // unchanged from pre-T5 behavior: `file.sha256` already equals what's on disk.
+      // A diverged-and-skipped path (this file's path is in `skippedDiverged`) is the ONE
+      // case that must NOT use `file.sha256` (the target — would claim disk matches the
+      // target when it deliberately doesn't, SPEC-076 §C3 D2) NOR the disk's own current
+      // (diverged) sha either: recording the disk value would make `classifyManagedDivergence`'s
+      // NEXT run see diskSha === manifestSha (both now the user's edit) and misclassify the
+      // entry as merely `outdated` instead of `diverged` — silently losing the skip
+      // protection after exactly one run (empirically caught by this task's own
+      // `setup-converge-diverged.bun.test.ts` STATE dimension, which re-runs `--yes` a
+      // second time over the same still-diverged file and expects it skipped AGAIN). The
+      // manifest sha256 must therefore STAY at the previous entry's own recorded value
+      // (the last content lore itself actually wrote/verified); `divergedOnDiskSha` is the
+      // last-resort fallback ONLY for a path with no `prev` entry at all (an untracked,
+      // foreign, already-differing file discovered on a target's FIRST update-path run —
+      // no "last known lore value" exists to preserve).
+      const sha256Value = skippedDivergedSet.has(file.path)
+        ? (prev?.sha256 ?? divergedOnDiskSha.get(file.path) ?? file.sha256)
+        : file.sha256;
+      return {
+        path: file.path,
+        kind: file.kind,
+        sha256: sha256Value,
+        written_at: prev?.written_at ?? nowIso,
+        ...ownershipField,
+      };
     });
 
+    // `installed_at` bumps to `nowIso` only when THIS run actually changed the file state
+    // (a write or a removal) or is stamping it for the first time ever (fresh install, or
+    // a legacy pre-SPEC-076 manifest migrating in place). A byte-identical re-run RETAINS
+    // the previous value — bumping it unconditionally (like `binary_version`'s bare
+    // constant, which is naturally stable across calls within one process and needs no
+    // such guard) would make `manifestContent` differ from `manifestRaw` on EVERY run
+    // regardless of real change, breaking invariant I2 ("byte-identical re-run fires ZERO
+    // writer calls") — caught by this task's own regression pass against the pre-existing
+    // I2 tests in `setup-service.test.ts`.
+    const hasFileChangesThisRun = writePlan.length > 0 || plan.removals.length > 0;
+    const installedAt = hasFileChangesThisRun || current?.installed_at === undefined ? nowIso : current.installed_at;
+
     const manifestEntries = mcpEntry !== undefined ? [...fileEntries, mcpEntry] : fileEntries;
-    const manifest: SetupManifest = { version: MANIFEST_VERSION, claude_dir: opts.targetDir, entries: manifestEntries };
+    const manifest: SetupManifest = {
+      version: MANIFEST_VERSION,
+      claude_dir: opts.targetDir,
+      entries: manifestEntries,
+      // SPEC-076 §C4 — stamped on EVERY successful converge (fresh install and update
+      // alike): "which binary, when" is true regardless of whether some managed files
+      // were skipped this run. `binary_version` is a bare compile-time constant — already
+      // stable across repeated calls within one process, no idempotency guard needed.
+      binary_version: LORE_BINARY_VERSION,
+      installed_at: installedAt,
+      // `assets_digest` is written ONLY when this converge leaves zero diverged files
+      // un-repaired — see this module's header ("manifest version fields") for why
+      // stamping it unconditionally would let a later `--check`'s digest short-circuit
+      // wrongly report full sync despite a known, un-repaired divergence.
+      ...(skippedDiverged.length === 0 ? { assets_digest: EMBEDDED_ASSETS_MANIFEST.tree_digest } : {}),
+    };
 
     const manifestValidation = setupManifestSchema.safeParse(manifest);
     if (!manifestValidation.success) {
@@ -462,7 +638,8 @@ export class SetupService {
     }
 
     const manifestContent = `${JSON.stringify(manifest, null, 2)}\n`;
-    if (manifestContent !== (manifestRaw ?? "")) {
+    const manifestChanged = manifestContent !== (manifestRaw ?? "");
+    if (manifestChanged) {
       try {
         await this.writer.mkdir(path.dirname(manifestPath));
         await this.writer.write(manifestPath, manifestContent);
@@ -478,12 +655,27 @@ export class SetupService {
       }
     }
 
+    // ── Check-cache invalidation (SPEC-076 T5) — see module header. Only when this run
+    // actually changed something (I2's "byte-identical re-run fires zero writer calls"
+    // must hold even for this cleanup step); best-effort (advisory cache, fail-open).
+    if (committedWrites.length > 0 || committedRemovals.length > 0 || manifestChanged) {
+      try {
+        await this.writer.remove(path.join(opts.targetDir, CHECK_CACHE_FILENAME));
+      } catch {
+        // reason: the check cache is purely advisory (SPEC-076 §C6) — a failed removal
+        // (e.g. permission denied, or it never existed) does not invalidate this
+        // otherwise-successful converge; a stale cache self-corrects on its own 24h TTL
+        // or the next successful converge that DOES manage to remove it.
+      }
+    }
+
     return ok({
       written: fileEntries.filter((e) => writeByPath.has(e.path)),
       skipped: plan.skips.map((s) => s.path),
       backups: committedBackups,
       mcp,
       manifestPath,
+      skippedDiverged,
     });
   }
 
@@ -590,6 +782,7 @@ export class SetupService {
       backups: restoredPaths,
       mcp,
       manifestPath,
+      skippedDiverged: [],
     });
   }
 }
@@ -708,6 +901,12 @@ async function resolvePayload(
         kind: file.kind,
         content: mergedContent,
         sha256: sha256Hex(mergedContent),
+        // reason: SPEC-076 T5 — this object is built fresh (not `...file`) because
+        // `content`/`sha256` MUST be the post-merge values, so `ownership` (declared by
+        // the AssetSource, e.g. RealAssetSource's "merged" for settings-hook) must be
+        // carried through explicitly too, or a settings-hook entry would silently lose
+        // its ownership zone on every resolvePayload call.
+        ...(file.ownership !== undefined ? { ownership: file.ownership } : {}),
       });
       continue;
     }
@@ -731,6 +930,76 @@ async function resolvePayload(
 function stripMcpEntries(manifest: SetupManifest | null): SetupManifest | null {
   if (manifest === null) return null;
   return { ...manifest, entries: manifest.entries.filter((e) => e.kind !== "mcp") };
+}
+
+/**
+ * The machine-installer-relevant view of the compiled binary's embedded
+ * asset manifest — `kind: "project"` entries excluded (mirrors
+ * `../adapters/cli/setup-check.ts`'s own `buildCheckEmbeddedManifest`; that
+ * module's doc explains why `assets/project/` is out of scope for the
+ * global machine installer). `tree_digest` is carried through UNCHANGED
+ * (still the whole-tree value, project entries included) — this function's
+ * caller ({@link classifyManagedDivergence}) never reads it (see that
+ * function's own "deliberately bypasses the digest short-circuit" doc).
+ */
+function buildManagedEmbeddedManifest(): { binary_version: string; tree_digest: string; entries: readonly (typeof EMBEDDED_ASSETS_MANIFEST.entries)[number][] } {
+  return {
+    binary_version: LORE_BINARY_VERSION,
+    tree_digest: EMBEDDED_ASSETS_MANIFEST.tree_digest,
+    entries: EMBEDDED_ASSETS_MANIFEST.entries.filter((entry) => entry.kind !== "project"),
+  };
+}
+
+/**
+ * Classifies every managed (non-project) embedded asset path's on-disk
+ * freshness via `@lore/core`'s pure five-state `planUpdate`, using the
+ * already-probed `existingFiles` map (`buildExistingFilesMap`'s output —
+ * paid for regardless, by `computeInstallPlan`'s own needs) as the
+ * `UpdateProbe`'s per-path answer. `install()`'s ONLY consumer of this
+ * result is `files.diverged` — deciding which of `computeInstallPlan`'s
+ * writes must be skipped-by-default (SPEC-076 §C3 D2).
+ *
+ * @invariant Deliberately STRIPS `assets_digest` from the `installed`
+ *   manifest handed to `planUpdate`, even though the REAL on-disk manifest
+ *   may already carry one (stamped by THIS service's own prior successful
+ *   converge — see this module's header, "manifest version fields").
+ *   `planUpdate`'s digest-equality short-circuit exists to let
+ *   `lore setup --check` (T4, a separate, read-only projection) skip a
+ *   fresh 292-path probe when nothing has changed at the BUILD level — but
+ *   `install()` has ALREADY paid the cost of probing every path (via
+ *   `buildExistingFilesMap`, unconditionally required by
+ *   `computeInstallPlan` regardless of this call), so the short-circuit buys
+ *   this call zero performance while silently defeating the very divergence
+ *   detection this run exists to perform: a converge whose OWN prior run
+ *   stamped a matching `assets_digest` must never trust that value for its
+ *   OWN next-run write decision, or a user-edited managed file would go
+ *   right on being silently overwritten forever (the exact bug SPEC-076 D2
+ *   exists to fix) as long as the binary/build never changes.
+ * @invariant `listManagedPaths()` (orphan discovery) always returns `[]` —
+ *   `SetupFsReader` (this service's read port) has no directory-enumeration
+ *   member, and extending it would touch `real-setup-fs.ts`, outside this
+ *   task's claimed anchors. `install()`'s converge decision never consults
+ *   `files.orphaned` (SPEC-076 §C3: orphaned entries are report-only and
+ *   never actioned by ANY command) — full orphan discovery for human/CI
+ *   consumption remains `lore setup --check`'s dedicated job (T4's
+ *   `RealSetupCheckProbe`, which DOES walk the managed directories).
+ */
+function classifyManagedDivergence(
+  installed: SetupManifest,
+  existingFiles: Map<string, string>,
+): Result<UpdatePlan, LoreError> {
+  const embedded = buildManagedEmbeddedManifest();
+  const installedForClassification: SetupManifest = { ...installed, assets_digest: undefined };
+  const probe: UpdateProbe = {
+    resolve(relPath: string): { sha256: string } | "missing" {
+      const sha = existingFiles.get(relPath);
+      return sha !== undefined ? { sha256: sha } : "missing";
+    },
+    listManagedPaths(): string[] {
+      return [];
+    },
+  };
+  return planUpdate(embedded, installedForClassification, probe);
 }
 
 /**

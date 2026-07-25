@@ -26,6 +26,10 @@ function baseReceipt(overrides: Partial<SetupReceipt> = {}): SetupReceipt {
     backups: [],
     mcp: "registered",
     manifestPath: "/tmp/fake-claude-dir/.lore-setup-manifest.json",
+    // SPEC-076 T5 — SetupReceipt gained this required field; neither renderer this
+    // suite exercises reads it, so an empty default keeps every existing fixture's
+    // rendered-output assertions unchanged.
+    skippedDiverged: [],
     ...overrides,
   };
 }
