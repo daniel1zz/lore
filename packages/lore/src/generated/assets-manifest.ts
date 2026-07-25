@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "42f67730975b132cf8013856a4c76eab3ac6de13ddb8debaaeb621305031b924",
+  tree_digest: "c381dbf20363a8ee0f1ef85f6906ca98f84875280f7f8f5797ca053b5eb59453",
   entries: [
   { path: "agents/lore-explorer.md", kind: "agent", ownership: "managed", sha256: "18b80554da11704960849d5b68ea9ef763bdc88315ebe89acc26a1e86d7e5629" },
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "324340b8173cae8e3133968185fdf882b81daee2115c988f7506e1bc968a5364" },
@@ -71,7 +71,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "project/g4-task-claim.sh", kind: "project", ownership: "managed", sha256: "267fd07dfcb2a3244f354fa3408724b5e46d58b6e05e721872a37b30f12bd88f" },
   { path: "project/gitignore.template", kind: "project", ownership: "merged", sha256: "ae5fc002a59c4c940a269a293d4e5070eda567a5ef55f7e890ad02af18968d74" },
   { path: "project/lore-config-template.yaml", kind: "project", ownership: "user_once", sha256: "bbe675b6403d919bdfa39caf7b9c8bb761f0125ea31e80066d143c7d87f3b804" },
-  { path: "project/lore.tree.yaml.template", kind: "project", ownership: "user_once", sha256: "297de05951a615678f451b6e0f7510c7546691f0278404754ec0833d23dc715e" },
+  { path: "project/lore.tree.yaml.template", kind: "project", ownership: "user_once", sha256: "74d313c717ea142572715ac4846df8e7e24bdfb89e1147b5c4f8700ab49e3f4d" },
   { path: "project/pre-push", kind: "project", ownership: "managed", sha256: "748003ce40cf6c7924ad9d2ab29a00c8c3698274feeea867a7bfd2ef3724afa4" },
   { path: "skills/lore-ai-native-coding/SKILL.md", kind: "skill", ownership: "managed", sha256: "08d4a8182e382d56c95d78d2f6a7b2526ef908c62fb398e1ef82d97cf674d3eb" },
   { path: "skills/lore-ai-native-coding/references/ai-anti-patterns.md", kind: "skill", ownership: "managed", sha256: "91edef16b885924ba3639d7b918a68c14160cf2f4ba01e27eac2492ba6b39743" },

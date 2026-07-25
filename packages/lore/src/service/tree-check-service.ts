@@ -3,6 +3,11 @@
  * parent_id field vs. link table for the Lore corpus tree.
  *
  * Spec: TECH-01KV4W88GZF74B98BHCBBV9GHD §4.3 + §4.4 + §10
+ *
+ * SPEC-069 §Design Decisions D2 exception: a `task` with `extra.adhoc ===
+ * true` parented to the corpus root PRD is a sanctioned deviation from
+ * `PARENT_TYPE_CONTRACT` (see `isAdhocTaskUnderRoot`, below) and never
+ * reports `misplaced` — a non-adhoc task under a PRD still does.
  */
 
 import type { StoreInterface } from "../store/store-interface.js";
@@ -125,6 +130,7 @@ export class TreeCheckService {
 
       const parent = byId.get(d.parent_id)!;
       if (!isValidParentType(d.type, parent.type)) {
+        if (isAdhocTaskUnderRoot(d, parent)) continue; // SPEC-069 D2 sanctioned exception
         misplacedIds.add(d.id);
         drifts.push({
           kind: "misplaced",
@@ -365,6 +371,33 @@ function detectCyclicNodes(
   }
 
   return cyclic;
+}
+
+/**
+ * SPEC-069 §Design Decisions D2 exception to the misplaced-drift check.
+ *
+ * `lore create task --adhoc` (and every issue report, which also sets
+ * `extra.adhoc: true` — see `packages/core/src/issue-report.ts`) is
+ * deliberately auto-parented to the corpus root PRD by `CorpusService`
+ * "for tree reachability", bypassing `PARENT_TYPE_CONTRACT.task` (whose
+ * only declared parent is `plan`) on purpose — see the design-decision
+ * comment at `corpus-service.ts`'s ad-hoc auto-parenting block. Widening
+ * `PARENT_TYPE_CONTRACT.task` itself would legalize task→prd for EVERY
+ * task (including a non-adhoc caller forcing `--parent` to a PRD), which
+ * is a real drift and must keep tripping `misplaced` — see
+ * AC-TREE-NEG-05 in the test suite. `TreeNodeSpec` (the `lore.tree.yaml`
+ * blueprint shape) has no way to key a slot on `extra.adhoc`, so this
+ * carve-out lives here, not in the YAML contract.
+ *
+ * @returns true iff `doc` is a `task` with `extra.adhoc === true` whose
+ *   resolved parent is a ROOT_TYPES doc (i.e. the corpus root PRD).
+ */
+function isAdhocTaskUnderRoot(doc: DocRecord, parent: DocRecord): boolean {
+  return (
+    doc.type === "task" &&
+    doc.extra?.["adhoc"] === true &&
+    ROOT_TYPES.includes(parent.type)
+  );
 }
 
 /**

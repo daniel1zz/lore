@@ -240,6 +240,122 @@ describe("TreeCheckService.checkTree — NEGATIVE", () => {
     const orphanDrifts = result.value.drifts.filter((d) => d.kind === "orphan");
     expect(orphanDrifts.length).toBeGreaterThanOrEqual(1);
   });
+
+  it("AC-TREE-NEG-04: SPEC-069 ad-hoc task (extra.adhoc=true) parented to root prd → NOT misplaced", async () => {
+    /**
+     * SPEC-069 §Design Decisions D2 deliberately parents `--adhoc` tasks (incl.
+     * issue reports, which set `adhoc: true` too) to the corpus root PRD for
+     * tree reachability, bypassing PARENT_TYPE_CONTRACT.task (whose only
+     * declared parent is `plan`) on purpose. Pre-fix, checkTree's Step 4 has
+     * no awareness of this and flags every adhoc task "misplaced" — a
+     * permanent false positive that arms the pre-push gate
+     * (`lore status --check-tree`) forever. This is the RED case.
+     */
+    const store = new InMemoryStore();
+    const svc = new TreeCheckService(store);
+    const prdId = makeId("PRD001");
+    const adhocTaskId = makeId("ADH001");
+
+    await seedDoc(store, { id: prdId, type: "prd" });
+    await seedDoc(store, {
+      id: adhocTaskId,
+      type: "task",
+      parent_id: prdId,
+      extra: { adhoc: true },
+    });
+
+    const blueprint: TreeBlueprint = {
+      version: 1,
+      root: { type: "prd", min: 0, max: null, children: [] },
+    };
+
+    const result = await svc.checkTree(blueprint);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const misplacedForAdhoc = result.value.drifts.filter(
+      (d) => d.kind === "misplaced" && d.actual?.id === adhocTaskId,
+    );
+    expect(misplacedForAdhoc).toHaveLength(0);
+    expect(result.value.consistent).toBe(true);
+  });
+
+  it("AC-TREE-NEG-05: a NON-adhoc task parented to root prd → STILL misplaced (adhoc exemption is not a blanket task→prd allowance)", async () => {
+    /**
+     * Guards the exemption's precision: without extra.adhoc===true, a task
+     * directly under a prd is a genuine drift (e.g. a caller forcing
+     * --parent to a PRD without --adhoc) and must keep tripping the gate.
+     */
+    const store = new InMemoryStore();
+    const svc = new TreeCheckService(store);
+    const prdId = makeId("PRD001");
+    const strayTaskId = makeId("STR001");
+
+    await seedDoc(store, { id: prdId, type: "prd" });
+    await seedDoc(store, { id: strayTaskId, type: "task", parent_id: prdId });
+
+    const blueprint: TreeBlueprint = {
+      version: 1,
+      root: { type: "prd", min: 0, max: null, children: [] },
+    };
+
+    const result = await svc.checkTree(blueprint);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const misplacedForStray = result.value.drifts.filter(
+      (d) => d.kind === "misplaced" && d.actual?.id === strayTaskId,
+    );
+    expect(misplacedForStray).toHaveLength(1);
+    expect(result.value.consistent).toBe(false);
+  });
+
+  it("AC-TREE-NEG-06: a genuinely misparented doc (spec under task) still trips misplaced → exit-3-worthy", async () => {
+    /**
+     * Negative control for the exemption: proves the adhoc carve-out is
+     * scoped to task-under-prd only, not a general relaxation of the
+     * misplaced check for unrelated type combinations.
+     */
+    const store = new InMemoryStore();
+    const svc = new TreeCheckService(store);
+    const prdId = makeId("PRD001");
+    const planId = makeId("PLN001");
+    const taskId = makeId("TSK001");
+    const specId = makeId("SPC001");
+
+    await seedDoc(store, { id: prdId, type: "prd" });
+    await seedDoc(store, { id: planId, type: "plan", parent_id: prdId });
+    await seedDoc(store, { id: taskId, type: "task", parent_id: planId });
+    // spec placed under task — not a valid parent type for spec anywhere
+    await seedDoc(store, { id: specId, type: "spec", parent_id: taskId });
+
+    const blueprint: TreeBlueprint = {
+      version: 1,
+      root: {
+        type: "prd",
+        min: 0,
+        max: null,
+        children: [
+          {
+            type: "plan",
+            min: 0,
+            max: null,
+            children: [{ type: "task", min: 0, max: null, children: [] }],
+          },
+        ],
+      },
+    };
+
+    const result = await svc.checkTree(blueprint);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.consistent).toBe(false);
+
+    const misplacedForSpec = result.value.drifts.filter(
+      (d) => d.kind === "misplaced" && d.actual?.id === specId,
+    );
+    expect(misplacedForSpec).toHaveLength(1);
+  });
 });
 
 // ─── BOUNDARY ───────────────────────────────────────────────────────────────
