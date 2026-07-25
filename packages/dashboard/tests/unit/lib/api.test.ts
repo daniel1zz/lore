@@ -12,24 +12,28 @@
  *     - apiSearch returns docs for a query
  *     - apiGetDoc returns DocWithNavigation
  *     - apiGetDoc with resolveMdx=true appends ?resolveMdx=true to path
- *     - apiGetReady returns { ok: true, value: ReadyRecord[] } on success (SPEC-037 D1)
+ *     - apiGetReadyReport returns { ok: true, value: ReadyReportResponse } — the
+ *       FULL {records, sessions, anchor_conflicts, claim_ttl_minutes} object, on
+ *       success (SPEC-042/SPEC-077; the route has never returned a bare
+ *       `ReadyRecord[]` — see the module's regression-history doc comment)
  *
  *   NEGATIVE:
  *     - Non-2xx response throws ApiError with HTTP status
  *     - Server { ok: false } envelope throws ApiError with server code
  *     - Unknown error code in envelope is preserved
- *     - apiGetReady returns { ok: false, error } instead of throwing on a server error
+ *     - apiGetReadyReport returns { ok: false, error } instead of throwing on a server error
  *
  *   BOUNDARY:
  *     - Empty docs array in response is returned as-is
  *     - apiSearch with empty query still builds URL (caller controls enabled)
  *     - apiList with an empty tags[] array omits the tags query param entirely
- *     - apiGetReady against a plan with zero tasks returns an empty array (still ok:true)
+ *     - apiGetReadyReport against a plan with zero tasks returns an empty
+ *       records array (still ok:true) inside the full report object
  *
  *   ERROR:
  *     - Timeout (AbortSignal) throws ApiError with code NETWORK_ERROR
  *     - JSON parse failure throws ApiError with code PARSE_ERROR
- *     - apiGetReady wraps a network failure into { ok: false, error } (never throws)
+ *     - apiGetReadyReport wraps a network failure into { ok: false, error } (never throws)
  *
  *   STATE:
  *     - Multiple sequential calls each get their own response (no shared state)
@@ -37,7 +41,7 @@
  *   REGRESSION:
  *     - Response without Content-Type header still parses (no Content-Type check)
  *     - apiGetDoc URL-encodes the idOrSlug parameter
- *     - apiGetReady URL-encodes the planIdOrSlug parameter
+ *     - apiGetReadyReport URL-encodes the planIdOrSlug parameter
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -46,7 +50,7 @@ import {
   apiList,
   apiSearch,
   apiGetDoc,
-  apiGetReady,
+  apiGetReadyReport,
   apiGetEvidencePanel,
   evidencePanelQueryKey,
   ApiError,
@@ -220,9 +224,14 @@ describe("apiSearch", () => {
   });
 });
 
-describe("apiGetReady", () => {
+describe("apiGetReadyReport", () => {
+  // reason: the server has returned the FULL `{records, sessions,
+  // anchor_conflicts, claim_ttl_minutes}` object from `GET /api/ready/:plan`
+  // since SPEC-042 — every fixture below mirrors that real shape (never a
+  // bare records array) per `task-fix-live-spec-042-regression-apigetready-
+  // types-api-ready`.
   describe("happy path", () => {
-    it("returns { ok: true, value: ReadyRecord[] } on a successful fetch", async () => {
+    it("returns { ok: true, value: ReadyReportResponse } — the full report object — on a successful fetch", async () => {
       const record: ReadyRecord = {
         task: {
           id: "01HTASK0000000000000000001",
@@ -238,26 +247,38 @@ describe("apiGetReady", () => {
         unmet_blockers: [],
         evidence_count: 0,
       };
-      vi.stubGlobal("fetch", makeFetchMock({ ok: true, data: [record] }));
+      vi.stubGlobal(
+        "fetch",
+        makeFetchMock({
+          ok: true,
+          data: { records: [record], sessions: [], anchor_conflicts: [], claim_ttl_minutes: 120 },
+        }),
+      );
 
-      const result = await apiGetReady("plan-a");
+      const result = await apiGetReadyReport("plan-a");
 
       expect(result.ok).toBe(true);
       if (result.ok) {
-        expect(result.value).toHaveLength(1);
-        expect(result.value[0]?.task.slug).toBe("task-a");
+        expect(result.value.records).toHaveLength(1);
+        expect(result.value.records[0]?.task.slug).toBe("task-a");
+        expect(result.value.sessions).toEqual([]);
+        expect(result.value.anchor_conflicts).toEqual([]);
+        expect(result.value.claim_ttl_minutes).toBe(120);
       }
     });
   });
 
   describe("boundary", () => {
-    it("returns an empty array (still ok:true) for a plan with zero tasks", async () => {
-      vi.stubGlobal("fetch", makeFetchMock({ ok: true, data: [] }));
+    it("returns an empty records array (still ok:true) for a plan with zero tasks", async () => {
+      vi.stubGlobal(
+        "fetch",
+        makeFetchMock({ ok: true, data: { records: [], sessions: [], anchor_conflicts: [], claim_ttl_minutes: 120 } }),
+      );
 
-      const result = await apiGetReady("plan-empty");
+      const result = await apiGetReadyReport("plan-empty");
 
       expect(result.ok).toBe(true);
-      if (result.ok) expect(result.value).toHaveLength(0);
+      if (result.ok) expect(result.value.records).toHaveLength(0);
     });
   });
 
@@ -268,7 +289,7 @@ describe("apiGetReady", () => {
         makeFetchMock({ ok: false, error: { code: "VALIDATION_ERROR", message: "not a plan" } }, 422),
       );
 
-      const result = await apiGetReady("spec-not-a-plan");
+      const result = await apiGetReadyReport("spec-not-a-plan");
 
       expect(result.ok).toBe(false);
       if (!result.ok) {
@@ -283,7 +304,7 @@ describe("apiGetReady", () => {
     it("wraps a network failure into { ok: false, error } rather than throwing", async () => {
       vi.stubGlobal("fetch", makeNetworkErrorMock());
 
-      const result = await apiGetReady("plan-a");
+      const result = await apiGetReadyReport("plan-a");
 
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.error.code).toBe("NETWORK_ERROR");
@@ -298,15 +319,21 @@ describe("apiGetReady", () => {
         vi.fn().mockImplementation((url: string) => {
           calls.push(url);
           return Promise.resolve(
-            new Response(JSON.stringify({ ok: true, data: [] }), {
-              status: 200,
-              headers: { "Content-Type": "application/json" },
-            }),
+            new Response(
+              JSON.stringify({
+                ok: true,
+                data: { records: [], sessions: [], anchor_conflicts: [], claim_ttl_minutes: 120 },
+              }),
+              {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+              },
+            ),
           );
         }),
       );
 
-      await apiGetReady("plan with spaces");
+      await apiGetReadyReport("plan with spaces");
 
       expect(calls[0]).toContain(encodeURIComponent("plan with spaces"));
     });

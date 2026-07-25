@@ -14,12 +14,18 @@
  *     degrades only that row (no counter + a small muted note), never blanks
  *     the whole panel. A plan with zero tasks renders muted "no tasks" text,
  *     never a fabricated "0 ready / 0 tasks".
+ *   - Reads `apiGetReadyReport(planId).value.records` (never the deleted
+ *     flat-array reader) — `GET /api/ready/:planIdOrSlug` has always returned
+ *     the `{records, sessions, anchor_conflicts}` object (SPEC-042); a prior
+ *     version of this file called `.value.length`/`.value.filter` directly on
+ *     that object, a silent-then-throwing bug fixed by
+ *     `task-fix-live-spec-042-regression-apigetready-types-api-ready`.
  * Side-effect class: IO (fetch via TanStack Query)
  * Source: SPEC-033 §2.2; SPEC-037 §1 D1, AC-37-2
  */
 
 import { useQuery } from "@tanstack/react-query";
-import { apiGetReady, apiList } from "@/lib/api";
+import { apiGetReadyReport, apiList } from "@/lib/api";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const ACTIVE_PLANS_LIMIT = 8;
@@ -42,7 +48,7 @@ interface PlanReadinessSummaryProps {
 function PlanReadinessSummary({ planId }: PlanReadinessSummaryProps): React.ReactElement | null {
   const { data, isLoading } = useQuery({
     queryKey: ["home", "ready", planId],
-    queryFn: () => apiGetReady(planId),
+    queryFn: () => apiGetReadyReport(planId),
   });
 
   if (isLoading || data === undefined) {
@@ -53,7 +59,7 @@ function PlanReadinessSummary({ planId }: PlanReadinessSummaryProps): React.Reac
     return <span className="text-xs text-muted-foreground">readiness unavailable</span>;
   }
 
-  const records = data.value;
+  const records = data.value.records;
   if (records.length === 0) {
     return <span className="text-xs text-muted-foreground">no tasks</span>;
   }

@@ -26,6 +26,11 @@
  *   REGRESSION:
  *     - a blocked non-terminal task shows "blocked by <slug>" (+n for extras)
  *     - a failed/pending readiness fetch omits "R ready" rather than fabricating it
+ *
+ * `GET /api/ready/:planIdOrSlug` has returned the FULL
+ * `{records, sessions, anchor_conflicts}` object (never a bare `ReadyRecord[]`)
+ * since SPEC-042 — every fixture below mirrors that real shape via
+ * `apiGetReadyReport` (`task-fix-live-spec-042-regression-apigetready-types-api-ready`).
  */
 
 import "@testing-library/jest-dom/vitest";
@@ -35,13 +40,13 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { DocRecord, DocSummary, ReadyRecord } from "@lore/core";
 
 vi.mock("@/lib/api", () => ({
-  apiGetReady: vi.fn(),
+  apiGetReadyReport: vi.fn(),
 }));
 
-import { apiGetReady } from "@/lib/api";
+import { apiGetReadyReport } from "@/lib/api";
 import { PlanExecution } from "../../src/components/PlanExecution";
 
-const mockedApiGetReady = vi.mocked(apiGetReady);
+const mockedApiGetReadyReport = vi.mocked(apiGetReadyReport);
 
 function makePlan(overrides: Partial<DocRecord> = {}): DocRecord {
   return {
@@ -79,13 +84,22 @@ function makeReady(overrides: Partial<ReadyRecord> & { task: ReadyRecord["task"]
   return { ready: true, unmet_blockers: [], evidence_count: 0, ...overrides };
 }
 
+/**
+ * Builds the REAL `GET /api/ready/:planIdOrSlug` response object — the
+ * `{records, sessions, anchor_conflicts, claim_ttl_minutes}` shape the route
+ * has returned since SPEC-042 (never a bare `ReadyRecord[]`).
+ */
+function makeReadyReport(records: ReadyRecord[] = []) {
+  return { records, sessions: [], anchor_conflicts: [], claim_ttl_minutes: 120 };
+}
+
 function renderWithClient(ui: React.ReactElement) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
 }
 
 beforeEach(() => {
-  mockedApiGetReady.mockReset();
+  mockedApiGetReadyReport.mockReset();
 });
 
 describe("PlanExecution", () => {
@@ -94,12 +108,12 @@ describe("PlanExecution", () => {
       const plan = makePlan({ extra: { phases: [{ name: "Design" }, { name: "Build" }] } });
       const design1 = makeTask({ id: "t1", title: "Design task" });
       const build1 = makeTask({ id: "t2", title: "Build task", status: "archived" });
-      mockedApiGetReady.mockResolvedValue({
+      mockedApiGetReadyReport.mockResolvedValue({
         ok: true,
-        value: [
+        value: makeReadyReport([
           makeReady({ task: design1, phase: "Design", ready: true }),
           makeReady({ task: build1, phase: "Build", ready: true }),
-        ],
+        ]),
       });
 
       const { container } = renderWithClient(<PlanExecution plan={plan} children={[design1, build1]} />);
@@ -124,7 +138,7 @@ describe("PlanExecution", () => {
         title: "Failing task",
         meta: { t: "task", evidence_pass: 1, evidence_fail: 2 },
       });
-      mockedApiGetReady.mockResolvedValue({ ok: true, value: [makeReady({ task: failingTask })] });
+      mockedApiGetReadyReport.mockResolvedValue({ ok: true, value: makeReadyReport([makeReady({ task: failingTask })]) });
 
       renderWithClient(<PlanExecution plan={plan} children={[failingTask]} />);
 
@@ -137,7 +151,7 @@ describe("PlanExecution", () => {
     it("omits the Unphased group entirely when every task has a declared phase", async () => {
       const plan = makePlan({ extra: { phases: [{ name: "Only" }] } });
       const task = makeTask({ id: "t1", title: "Task A" });
-      mockedApiGetReady.mockResolvedValue({ ok: true, value: [makeReady({ task, phase: "Only" })] });
+      mockedApiGetReadyReport.mockResolvedValue({ ok: true, value: makeReadyReport([makeReady({ task, phase: "Only" })]) });
 
       renderWithClient(<PlanExecution plan={plan} children={[task]} />);
 
@@ -151,7 +165,7 @@ describe("PlanExecution", () => {
     it("renders non-task children under 'Other documents', title-only", async () => {
       const plan = makePlan();
       const knowledgeDoc = makeTask({ id: "k1", title: "Retro Notes", type: "knowledge" });
-      mockedApiGetReady.mockResolvedValue({ ok: true, value: [] });
+      mockedApiGetReadyReport.mockResolvedValue({ ok: true, value: makeReadyReport() });
 
       renderWithClient(<PlanExecution plan={plan} children={[knowledgeDoc]} />);
 
@@ -164,7 +178,7 @@ describe("PlanExecution", () => {
     it("renders a task with no matching ReadyRecord without adornments, never throws", async () => {
       const plan = makePlan();
       const orphanTask = makeTask({ id: "orphan", title: "Orphan Task" });
-      mockedApiGetReady.mockResolvedValue({ ok: true, value: [] });
+      mockedApiGetReadyReport.mockResolvedValue({ ok: true, value: makeReadyReport() });
 
       expect(() => renderWithClient(<PlanExecution plan={plan} children={[orphanTask]} />)).not.toThrow();
 
@@ -178,7 +192,7 @@ describe("PlanExecution", () => {
       const plan = makePlan();
       const task = makeTask({ id: "t1", title: "Clickable Task" });
       const onNavigate = vi.fn();
-      mockedApiGetReady.mockResolvedValue({ ok: true, value: [makeReady({ task })] });
+      mockedApiGetReadyReport.mockResolvedValue({ ok: true, value: makeReadyReport([makeReady({ task })]) });
 
       renderWithClient(<PlanExecution plan={plan} children={[task]} onNavigate={onNavigate} />);
 
@@ -193,9 +207,9 @@ describe("PlanExecution", () => {
     it("shows 'blocked by <slug>' for a blocked non-terminal task, with '+n' for extra blockers", async () => {
       const plan = makePlan();
       const blockedTask = makeTask({ id: "t1", title: "Blocked Task" });
-      mockedApiGetReady.mockResolvedValue({
+      mockedApiGetReadyReport.mockResolvedValue({
         ok: true,
-        value: [
+        value: makeReadyReport([
           makeReady({
             task: blockedTask,
             ready: false,
@@ -204,7 +218,7 @@ describe("PlanExecution", () => {
               { id: "b2", slug: "spec-blocker-two", status: "draft" },
             ],
           }),
-        ],
+        ]),
       });
 
       renderWithClient(<PlanExecution plan={plan} children={[blockedTask]} />);
@@ -215,7 +229,7 @@ describe("PlanExecution", () => {
     it("omits 'R ready' from the rollup when the readiness fetch fails", async () => {
       const plan = makePlan();
       const task = makeTask({ id: "t1", title: "Task A" });
-      mockedApiGetReady.mockResolvedValue({
+      mockedApiGetReadyReport.mockResolvedValue({
         ok: false,
         error: { name: "ApiError", message: "boom", status: 500, code: "STORE_ERROR" } as never,
       });

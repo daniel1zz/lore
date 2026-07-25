@@ -29,9 +29,9 @@
  *     `findMany` ordering, the SAME convention `ActivePlansPanel` relies on)
  *     WITHOUT pushing that default into the URL itself — a plain fallback
  *     render, not an auto-navigate side effect.
- *   - Uses `apiGetReadyReport` (SPEC-077's corrected ready-route client),
- *     never the pre-existing `apiGetReady` — see that function's doc comment
- *     in `lib/api.ts` for why.
+ *   - Uses `apiGetReadyReport` (SPEC-077's corrected ready-route client) —
+ *     the only client for `GET /api/ready/:planIdOrSlug` in this codebase;
+ *     see its doc comment in `lib/api.ts` for the SPEC-042 regression history.
  * Side-effect class: IO (fetch via TanStack Query)
  * Source: SPEC-077 §Scope S1/S2, AC-077-1
  *
