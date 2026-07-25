@@ -11,6 +11,7 @@ import { SearchResultCard } from "@/components/SearchResultCard";
 import { SearchBar } from "@/components/SearchBar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiSearch } from "@/lib/api";
+import { queryKeys } from "@/lib/project-api";
 
 const searchParamsSchema = z.object({
   q: z.string().optional().default(""),
@@ -26,7 +27,7 @@ function SearchPage(): React.ReactElement {
   const { q } = Route.useSearch();
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["search", q],
+    queryKey: queryKeys.scope(null, ["search", q]),
     queryFn: () => apiSearch(q),
     enabled: q.trim().length > 0,
   });

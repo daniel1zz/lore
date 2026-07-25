@@ -26,6 +26,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { apiGetReadyReport, apiList } from "@/lib/api";
+import { queryKeys } from "@/lib/project-api";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const ACTIVE_PLANS_LIMIT = 8;
@@ -47,7 +48,7 @@ interface PlanReadinessSummaryProps {
  */
 function PlanReadinessSummary({ planId }: PlanReadinessSummaryProps): React.ReactElement | null {
   const { data, isLoading } = useQuery({
-    queryKey: ["home", "ready", planId],
+    queryKey: queryKeys.scope(null, ["home", "ready", planId]),
     queryFn: () => apiGetReadyReport(planId),
   });
 
@@ -78,7 +79,7 @@ function PlanReadinessSummary({ planId }: PlanReadinessSummaryProps): React.Reac
  */
 export function ActivePlansPanel({ onNavigate }: ActivePlansPanelProps): React.ReactElement {
   const { data, isLoading, error } = useQuery({
-    queryKey: ["home", "active-plans"],
+    queryKey: queryKeys.scope(null, ["home", "active-plans"]),
     queryFn: () => apiList({ type: "plan", status: "active" }),
   });
 

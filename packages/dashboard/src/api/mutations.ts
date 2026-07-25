@@ -45,6 +45,7 @@
 import type { ConfigEffect, DocRecord, DocType, GlobalLoreConfig, LinkType, LoreConfig } from "@lore/core";
 import { createDocInputSchema } from "@lore/core";
 import type { z } from "zod";
+import { apiFetch } from "@/lib/project-api";
 
 // ─── Error types ──────────────────────────────────────────────────────────────
 
@@ -162,9 +163,14 @@ interface ErrorResponse {
 /**
  * Perform a write fetch with cookie credentials.
  * Throws DashboardApiError or ConflictError on failure.
+ *
+ * @param resourcePath - Path AFTER "/api" (SPEC-078 D5 — see `project-api.ts`'s
+ *   `apiFetch` doc comment). Routes through `apiFetch(null, resourcePath, ...)`;
+ *   `project: null` resolves to today's registry-less paths, byte-identical to
+ *   the pre-SPEC-078 direct `fetch(path)` call this replaced.
  */
 async function writeFetch<T>(
-  path: string,
+  resourcePath: string,
   method: string,
   body?: unknown,
   extraHeaders?: Record<string, string>,
@@ -177,7 +183,7 @@ async function writeFetch<T>(
 
   let response: Response;
   try {
-    response = await fetch(path, {
+    response = await apiFetch(null, resourcePath, {
       method,
       headers,
       credentials: "include",
@@ -236,7 +242,7 @@ export async function apiCreateDoc(payload: CreateDocPayload): Promise<DocRecord
     );
   }
 
-  const result = await writeFetch<{ doc: DocRecord }>("/api/dashboard/docs", "POST", parsed.data);
+  const result = await writeFetch<{ doc: DocRecord }>("/dashboard/docs", "POST", parsed.data);
   return result.doc;
 }
 
@@ -265,7 +271,7 @@ export async function apiPatchDoc(
   }
 
   const result = await writeFetch<{ doc: DocRecord }>(
-    `/api/dashboard/docs/${encodeURIComponent(id)}`,
+    `/dashboard/docs/${encodeURIComponent(id)}`,
     "PATCH",
     patch,
     extraHeaders,
@@ -289,7 +295,7 @@ export async function apiApproveDoc(
   opts: { calibrationNote?: string } = {},
 ): Promise<AdjudicateDocResult> {
   return writeFetch<AdjudicateDocResult>(
-    `/api/dashboard/docs/${encodeURIComponent(id)}/approve`,
+    `/dashboard/docs/${encodeURIComponent(id)}/approve`,
     "POST",
     opts.calibrationNote !== undefined ? { calibration_note: opts.calibrationNote } : undefined,
   );
@@ -316,7 +322,7 @@ export async function apiRejectDoc(
   if (opts.calibrationNote !== undefined) body["calibration_note"] = opts.calibrationNote;
 
   return writeFetch<AdjudicateDocResult>(
-    `/api/dashboard/docs/${encodeURIComponent(id)}/reject`,
+    `/dashboard/docs/${encodeURIComponent(id)}/reject`,
     "POST",
     Object.keys(body).length > 0 ? body : undefined,
   );
@@ -334,7 +340,7 @@ export async function apiRejectDoc(
  */
 export async function apiDeleteDoc(id: string): Promise<DeleteDocResult> {
   return writeFetch<DeleteDocResult>(
-    `/api/dashboard/docs/${encodeURIComponent(id)}?confirm=true`,
+    `/dashboard/docs/${encodeURIComponent(id)}?confirm=true`,
     "DELETE",
   );
 }
@@ -354,7 +360,7 @@ export async function apiDeleteDoc(id: string): Promise<DeleteDocResult> {
  */
 export async function apiRestoreVersion(id: string, version: number): Promise<DocRecord> {
   const result = await writeFetch<{ doc: DocRecord }>(
-    `/api/dashboard/docs/${encodeURIComponent(id)}/restore?confirm=true`,
+    `/dashboard/docs/${encodeURIComponent(id)}/restore?confirm=true`,
     "POST",
     { version },
   );
@@ -371,7 +377,7 @@ export async function apiRestoreVersion(id: string, version: number): Promise<Do
  */
 export async function apiCreateLink(fromId: string, payload: CreateLinkPayload): Promise<void> {
   await writeFetch<{ ok: boolean }>(
-    `/api/dashboard/docs/${encodeURIComponent(fromId)}/links`,
+    `/dashboard/docs/${encodeURIComponent(fromId)}/links`,
     "POST",
     payload,
   );
@@ -388,8 +394,9 @@ export async function apiCreateLink(fromId: string, payload: CreateLinkPayload):
 export async function apiDeleteLink(fromId: string, toId: string): Promise<void> {
   let response: Response;
   try {
-    response = await fetch(
-      `/api/dashboard/docs/${encodeURIComponent(fromId)}/links/${encodeURIComponent(toId)}`,
+    response = await apiFetch(
+      null,
+      `/dashboard/docs/${encodeURIComponent(fromId)}/links/${encodeURIComponent(toId)}`,
       {
         method: "DELETE",
         credentials: "include",
@@ -460,17 +467,19 @@ export interface ConfigUpdateResult<C> {
  * validation is entirely server-side, `ConfigService`/`GlobalConfigService`
  * own the `LoreConfigSchema`/`GlobalLoreConfigSchema` truth).
  *
+ * @param resourcePath - Path AFTER "/api" (SPEC-078 D5) — see `writeFetch`'s
+ *   matching doc comment.
  * @throws {ConfigConflictError} On 409 (stale `If-Match`).
  * @throws {DashboardApiError} On any other HTTP/network/validation error.
  */
 async function writeConfigFetch<C>(
-  path: string,
+  resourcePath: string,
   patch: Record<string, unknown>,
   ifMatch: string,
 ): Promise<ConfigUpdateResult<C>> {
   let response: Response;
   try {
-    response = await fetch(path, {
+    response = await apiFetch(null, resourcePath, {
       method: "PATCH",
       headers: {
         "Accept": "application/json",
@@ -529,7 +538,7 @@ export async function apiPatchConfig(
   patch: Record<string, unknown>,
   ifMatch: string,
 ): Promise<ConfigUpdateResult<LoreConfig>> {
-  return writeConfigFetch<LoreConfig>("/api/dashboard/config", patch, ifMatch);
+  return writeConfigFetch<LoreConfig>("/dashboard/config", patch, ifMatch);
 }
 
 /**
@@ -543,7 +552,7 @@ export async function apiPatchMachineConfig(
   patch: Record<string, unknown>,
   ifMatch: string,
 ): Promise<ConfigUpdateResult<GlobalLoreConfig>> {
-  return writeConfigFetch<GlobalLoreConfig>("/api/dashboard/config/machine", patch, ifMatch);
+  return writeConfigFetch<GlobalLoreConfig>("/dashboard/config/machine", patch, ifMatch);
 }
 
 // ─── SPEC-075 D4: route-view telemetry (fire-and-forget) ────────────────────
@@ -575,7 +584,7 @@ export async function apiPatchMachineConfig(
  */
 export async function apiPostRouteView(params: { route_id: string; doc_type?: DocType }): Promise<void> {
   try {
-    await fetch("/api/dashboard/telemetry/route-view", {
+    await apiFetch(null, "/dashboard/telemetry/route-view", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",

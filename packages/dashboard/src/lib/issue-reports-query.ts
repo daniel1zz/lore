@@ -22,9 +22,10 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { apiGetIssueReports } from "./api";
+import { queryKeys } from "./project-api";
 
 /** Shared query key — pass to `queryClient.invalidateQueries` after approve/reject. */
-export const ISSUE_REPORTS_QUERY_KEY = ["issue-reports"] as const;
+export const ISSUE_REPORTS_QUERY_KEY = queryKeys.scope(null, ["issue-reports"]);
 
 const ISSUE_REPORTS_POLL_MS = 15_000;
 

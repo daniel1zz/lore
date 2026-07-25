@@ -9,8 +9,12 @@
  *   - On POST failure, throws so the caller (main.tsx) can show a toast + render anyway.
  *   - credentials: "include" is set so the server's Set-Cookie response is accepted.
  * Side-effect class: IO (fetch POST to /api/auth/local-bootstrap)
- * Source: SPEC-016 §3.8
+ * Source: SPEC-016 §3.8; SPEC-078 D5 (routes through `project-api.ts`'s
+ *   `apiFetch`, project always `null` — bootstrap precedes any project
+ *   selection)
  */
+
+import { apiFetch } from "./project-api";
 
 // ─── Window augmentation (dev-only global, never in built artefacts) ──────────
 
@@ -45,7 +49,7 @@ export async function bootstrapAuthIfNeeded(): Promise<void> {
   if (!token) return;
 
   try {
-    const res = await fetch("/api/auth/local-bootstrap", {
+    const res = await apiFetch(null, "/auth/local-bootstrap", {
       method: "POST",
       headers: { "X-Lore-Token": token },
       // reason: credentials: "include" is required so the browser accepts the Set-Cookie

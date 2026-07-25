@@ -34,6 +34,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiGetAuditForDoc, apiGetJudgments } from "@/lib/api";
 import { parseAuditActor } from "@lore/core";
+import { queryKeys } from "@/lib/project-api";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 
@@ -66,12 +67,12 @@ export function AuditTab({ docId }: AuditTabProps): React.ReactElement {
   const [expandedEntryIndex, setExpandedEntryIndex] = useState<number | null>(null);
 
   const auditQuery = useQuery({
-    queryKey: ["audit", docId],
+    queryKey: queryKeys.scope(null, ["audit", docId]),
     queryFn: () => apiGetAuditForDoc(docId),
   });
 
   const judgmentsQuery = useQuery({
-    queryKey: ["judgments", docId],
+    queryKey: queryKeys.scope(null, ["judgments", docId]),
     queryFn: () => apiGetJudgments(docId),
   });
 

@@ -18,6 +18,7 @@ import { NewDocModal } from "@/components/NewDocModal";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiList } from "@/lib/api";
+import { queryKeys } from "@/lib/project-api";
 import { docTypeSchema, docStatusSchema } from "@lore/core";
 import type { DocType, DocStatus } from "@lore/core";
 import { librarySearchSchema, tagsFromParam, tagsToParam } from "@/lib/library-search";
@@ -53,13 +54,13 @@ function LibraryPage(): React.ReactElement {
   // the filtered query below's key exactly when no filter is active, so TanStack
   // Query dedupes them into ONE request rather than two identical fetches.
   const { data: unfilteredData } = useQuery({
-    queryKey: ["docs", "list", undefined, undefined, undefined],
+    queryKey: queryKeys.scope(null, ["docs", "list", undefined, undefined, undefined]),
     queryFn: () => apiList({}),
   });
   const tagVocabulary = computeTagVocabulary(unfilteredData?.docs ?? []);
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["docs", "list", selectedType, selectedStatus, search.tags],
+    queryKey: queryKeys.scope(null, ["docs", "list", selectedType, selectedStatus, search.tags]),
     // reason: exactOptionalPropertyTypes forbids passing `undefined` for optional
     // ListOpts fields; conditional spread omits each key entirely when unset. SPEC-015 §4.
     queryFn: () =>
@@ -112,7 +113,7 @@ function LibraryPage(): React.ReactElement {
     setCreateError(null);
     try {
       const newDoc = await apiCreateDoc(payload);
-      void queryClient.invalidateQueries({ queryKey: ["docs", "list"] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.scope(null, ["docs", "list"]) });
       setShowCreateModal(false);
       toast.success(`Created ${newDoc.slug}`);
       void navigate({ to: "/docs/$id", params: { id: newDoc.id } });

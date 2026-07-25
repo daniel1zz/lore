@@ -3,7 +3,7 @@
  * (SPEC-074 AC-074-2, AC-074-3).
  * Purpose: renders the full `extra.issue_report` payload plus the doc's
  *   description body (`doc.content`), and composes the EXISTING SPEC-022
- *   cookie-gated `/api/dashboard/docs/:id/approve|reject` routes (via
+ *   cookie-gated dashboard-docs approve/reject write routes (via
  *   `apiApproveDoc`/`apiRejectDoc`, `src/api/mutations.ts`) so approve/reject
  *   here is the SAME write path `TriageQueue` uses — never a second,
  *   independently-authored adjudication call.
@@ -34,6 +34,7 @@ import { toast } from "sonner";
 import { apiGetDoc } from "@/lib/api";
 import { apiApproveDoc, apiRejectDoc, DashboardApiError } from "@/api/mutations";
 import { ISSUE_REPORTS_QUERY_KEY } from "@/lib/issue-reports-query";
+import { queryKeys } from "@/lib/project-api";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 
@@ -75,12 +76,12 @@ export function IssueDetail({ reportId, onAdjudicated }: IssueDetailProps): Reac
   const [submitting, setSubmitting] = useState<"approve" | "reject" | null>(null);
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["doc", reportId],
+    queryKey: queryKeys.scope(null, ["doc", reportId]),
     queryFn: () => apiGetDoc(reportId),
   });
 
   async function invalidateAfterAdjudicate(): Promise<void> {
-    await queryClient.invalidateQueries({ queryKey: ["doc", reportId] });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.scope(null, ["doc", reportId]) });
     await queryClient.invalidateQueries({ queryKey: ISSUE_REPORTS_QUERY_KEY });
   }
 

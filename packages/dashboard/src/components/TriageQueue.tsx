@@ -74,8 +74,9 @@ import { useTriageKeyboard } from "@/lib/use-triage-keyboard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { queryKeys } from "@/lib/project-api";
 
-export const TRIAGE_QUEUE_KEY = ["pending", "triage-queue"] as const;
+export const TRIAGE_QUEUE_KEY = queryKeys.scope(null, ["pending", "triage-queue"]);
 
 export interface TriageQueueProps {
   /** Called when a listed document's title is clicked. */
@@ -167,7 +168,7 @@ export function TriageQueue({ onNavigate }: TriageQueueProps): React.ReactElemen
 
       closeAdjudicate();
       await queryClient.invalidateQueries({ queryKey: TRIAGE_QUEUE_KEY });
-      await queryClient.invalidateQueries({ queryKey: ["home", "pending-panel"] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.scope(null, ["home", "pending-panel"]) });
     } catch (err) {
       const message = err instanceof DashboardApiError ? err.message : "Adjudication failed";
       toast.error(message);

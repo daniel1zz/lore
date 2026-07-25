@@ -25,6 +25,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { apiGetVersionLog, apiGetVersionDiff } from "@/lib/api";
 import { apiRestoreVersion, DashboardApiError } from "@/api/mutations";
+import { queryKeys } from "@/lib/project-api";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DiffView } from "@/components/DiffView";
 import { X } from "lucide-react";
@@ -54,7 +55,7 @@ interface DiffModalProps {
 
 function DiffModal({ docId, fromVersion, toVersion, onClose }: DiffModalProps): React.ReactElement {
   const { data, isLoading, error } = useQuery({
-    queryKey: ["diff", docId, fromVersion, toVersion],
+    queryKey: queryKeys.scope(null, ["diff", docId, fromVersion, toVersion]),
     queryFn: () => apiGetVersionDiff(docId, { from: fromVersion, to: toVersion }),
   });
 
@@ -103,7 +104,7 @@ function DiffModal({ docId, fromVersion, toVersion, onClose }: DiffModalProps): 
  * Adjacent version pairs have a "diff" link that opens the DiffModal.
  *
  * @example
- * <HistoryTab docId={doc.id} onRestored={() => queryClient.invalidateQueries({ queryKey: ["doc", doc.id] })} />
+ * <HistoryTab docId={doc.id} onRestored={() => queryClient.invalidateQueries({ queryKey: queryKeys.scope(null, ["doc", doc.id]) })} />
  */
 export function HistoryTab({ docId, onRestored }: HistoryTabProps): React.ReactElement {
   const [diffVersions, setDiffVersions] = useState<{ from: number; to: number } | null>(null);
@@ -111,7 +112,7 @@ export function HistoryTab({ docId, onRestored }: HistoryTabProps): React.ReactE
   const queryClient = useQueryClient();
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["version-log", docId],
+    queryKey: queryKeys.scope(null, ["version-log", docId]),
     queryFn: () => apiGetVersionLog(docId, { limit: 50 }),
   });
 
@@ -123,7 +124,7 @@ export function HistoryTab({ docId, onRestored }: HistoryTabProps): React.ReactE
       // reason: restore creates version N+1 — refresh this tab's own log so the
       // new entry appears, then let the parent refresh the doc content/metadata
       // it owns (this component has no access to the outer "doc" query key).
-      await queryClient.invalidateQueries({ queryKey: ["version-log", docId] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.scope(null, ["version-log", docId]) });
       onRestored?.();
     } catch (err) {
       const message = err instanceof DashboardApiError ? err.message : "Restore failed";

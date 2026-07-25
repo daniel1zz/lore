@@ -41,6 +41,7 @@ import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import type { DocType } from "@lore/core";
 import type { DocWithNavigation } from "@/lib/api";
 import { apiPostRouteView } from "@/api/mutations";
+import { queryKeys } from "@/lib/project-api";
 
 /** Matches `/docs/:id` — the only route whose loaded doc carries a `doc_type`. */
 const DOC_ROUTE_PATTERN = /^\/docs\/([^/]+)$/;
@@ -76,7 +77,7 @@ export function resolveRouteViewParams(
 
 /** Reads a doc's cached `type` from the TanStack Query `["doc", id]` cache entry, if present. */
 function lookupCachedDocType(queryClient: QueryClient, docId: string): DocType | undefined {
-  const cached = queryClient.getQueryData<DocWithNavigation>(["doc", docId]);
+  const cached = queryClient.getQueryData<DocWithNavigation>(queryKeys.scope(null, ["doc", docId]));
   return cached?.doc.type;
 }
 
