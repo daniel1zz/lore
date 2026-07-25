@@ -1,14 +1,23 @@
 /**
  * Local API key management for `lore dashboard`.
- * Purpose: create or reuse a per-project API key stored in .lore/local-key.
+ * Purpose: create or reuse the "dashboard-local" bootstrap API key, caching its raw value
+ *   in a `local-key` file alongside wherever the caller's store actually lives.
  * Public surface: ensureLocalApiKey, LocalApiKeyCreator interface.
  * Invariants:
- *   - .lore/local-key is written with mode 0600 (owner-readable only).
+ *   - `<baseDir>/local-key` is written with mode 0600 (owner-readable only).
  *   - Existing file is reused without rotation.
  *   - Missing file triggers api key creation via the injected creator.
  *   - Failure to create is fatal (process.exit(1)) — no silent fallback.
+ *   - SPEC-078 D1: `baseDir` is now the MACHINE-scope auth store's own base directory
+ *     (`MachineAuthStores.baseDir`, i.e. `createMachineAuthStores()`'s resolved XDG state
+ *     dir), never this project's `.lore/` — the "dashboard-local" key is machine-wide
+ *     (one key across every project on this machine), so its raw-value cache must be
+ *     co-located with the store that actually holds it. A per-project cache would
+ *     collide on the SECOND project's `lore dashboard` run (the store's own unique-name
+ *     constraint rejects a second "dashboard-local" key). This module itself is
+ *     path-agnostic — `dashboard.ts` decides which directory to pass.
  * Side-effect class: IO (fs read/write, process.exit on error)
- * Source: SPEC-016 §3.6, §3.7
+ * Source: SPEC-016 §3.6, §3.7; SPEC-078 §Design Decisions D1
  *
  * reason: Extracted from dashboard.ts so this module has NO bun:sqlite transitive dependency.
  * vitest can import and test ensureLocalApiKey with a mock creator without hitting
@@ -38,21 +47,23 @@ export interface LocalApiKeyCreator {
 
 /**
  * Ensure a local API key exists for the dashboard command.
- * Reads .lore/local-key if present; otherwise creates "dashboard-local" via the store,
- * writes the raw key to .lore/local-key with 0600 permissions, and returns it.
+ * Reads `<baseDir>/local-key` if present; otherwise creates "dashboard-local" via the
+ * store, writes the raw key to `<baseDir>/local-key` with 0600 permissions, and returns it.
  *
  * @param store - API key creator (ApiKeyStore satisfies this interface).
- * @param loreDir - Path to the .lore/ directory (absolute).
+ * @param baseDir - Absolute path to the directory the raw key is cached in. SPEC-078 D1:
+ *   pass the machine-scope auth store's own base dir (`MachineAuthStores.baseDir`), not
+ *   this project's `.lore/` — see this module's header for why.
  * @returns The raw API key string (never hashed, caller must keep it secret).
  * @throws process.exit(1) if key creation fails.
  * @example
- *   const rawKey = await ensureLocalApiKey(app.apiKeyStore, "/project/.lore");
+ *   const rawKey = await ensureLocalApiKey(machineAuth.apiKeyStore, machineAuth.baseDir);
  */
 export async function ensureLocalApiKey(
   store: LocalApiKeyCreator,
-  loreDir: string,
+  baseDir: string,
 ): Promise<string> {
-  const keyPath = join(loreDir, "local-key");
+  const keyPath = join(baseDir, "local-key");
 
   if (existsSync(keyPath)) {
     return readFileSync(keyPath, "utf8").trim();

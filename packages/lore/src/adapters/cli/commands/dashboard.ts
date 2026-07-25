@@ -9,8 +9,16 @@
  *   - SIGINT kills Vite and stops the HTTP server before exiting.
  *   - --no-open skips browser launch.
  *   - Failure to open browser is non-fatal (prints URL and continues).
+ *   - The "dashboard-local" API key + the cookie sessions it mints live in a MACHINE-scope
+ *     auth store (SPEC-078 D1), constructed ONCE via `createMachineAuthStores()` and
+ *     shared between `ensureLocalApiKey` and `startHttpServer` — never the per-corpus
+ *     `app.apiKeyStore`/`app.sessionStore`, and never two independently-constructed
+ *     machine stores. The raw-key cache file lives alongside that store's own db file,
+ *     not this project's `.lore/`, so a second project's `lore dashboard` run reuses the
+ *     SAME machine-wide key instead of colliding on `ApiKeyStore.create`'s unique-name
+ *     constraint.
  * Side-effect class: IO (file system, network, child_process, process signals)
- * Source: SPEC-016 §3.6
+ * Source: SPEC-016 §3.6; SPEC-078 §Design Decisions D1
  */
 
 import { dirname } from "node:path";
@@ -18,6 +26,7 @@ import { spawn } from "node:child_process";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { startHttpServer } from "../../http/index.js";
+import { createMachineAuthStores } from "../../http/machine-auth.js";
 import { ensureLocalApiKey } from "../local-key.js";
 
 // Re-export for tests that import from this module path.
@@ -92,8 +101,21 @@ export default defineCommand({
     const loreDir = dirname(dbPath);
     const projectRoot = dirname(loreDir);
 
+    // reason: SPEC-078 D1 unconditional re-point — the dashboard cookie login flow
+    // (bootstrap + session resolution) moves to a MACHINE-scope auth store, never the
+    // per-corpus app.apiKeyStore/app.sessionStore. Constructed ONCE here and threaded
+    // into BOTH ensureLocalApiKey (below) and startHttpServer (below) so the key this
+    // command mints and the key the running server validates are the SAME store
+    // instance — never two independently-constructed stores that could disagree.
+    const machineAuth = createMachineAuthStores();
+
     // Ensure local API key (create if absent, reuse if present). Fail-loud on error.
-    const localKey = await ensureLocalApiKey(app.apiKeyStore, loreDir);
+    // The cached raw-key file now lives alongside the machine auth db (machineAuth's own
+    // base dir), not this project's .lore/ — the key itself is machine-wide (one
+    // "dashboard-local" key across every project), so the cache must be too; a
+    // per-project cache would collide on the SECOND project's `lore dashboard` run
+    // (ApiKeyStore.create rejects a duplicate name).
+    const localKey = await ensureLocalApiKey(machineAuth.apiKeyStore, machineAuth.baseDir);
 
     const apiPort = parseInt(args["api-port"] ?? "8787", 10);
     const dashPort = parseInt(args["dashboard-port"] ?? "5173", 10);
@@ -108,9 +130,10 @@ export default defineCommand({
     }
 
     // Start HTTP server in-process — single Database connection, no cross-process sync.
-    // reason: In-process server means no IPC latency, no race on .lore/lore.db, and the
-    // dashboard and CLI share the same ApiKeyStore + SessionStore instance. SPEC-016 §3.6.
-    const server = startHttpServer(app, { port: apiPort, host: "127.0.0.1" });
+    // reason: In-process server means no IPC latency and no race on .lore/lore.db.
+    // SPEC-016 §3.6. `machineAuth` here is the SAME instance ensureLocalApiKey just used
+    // above — see this file's header (SPEC-078 D1).
+    const server = startHttpServer(app, { port: apiPort, host: "127.0.0.1", machineAuth });
 
     // Spawn Vite dev server as the only child process.
     // reason: VITE_LORE_BOOTSTRAP_TOKEN is passed via env (not CLI args) to avoid it
@@ -174,6 +197,7 @@ export default defineCommand({
         }
 
         app.close();
+        machineAuth.db.close();
         resolve();
       });
     });

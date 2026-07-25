@@ -36,6 +36,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { startHttpServer } from "../../src/adapters/http/index.js";
+import { createMachineAuthStores, type MachineAuthStores } from "../../src/adapters/http/machine-auth.js";
 import { createApp } from "../../src/app.js";
 import type { App } from "../../src/app.js";
 import type { LoreConfig, Telemetry, TelemetryEvent } from "@lore/core";
@@ -44,6 +45,10 @@ interface TestContext {
   server: ReturnType<typeof Bun.serve>;
   app: App;
   rawKey: string;
+  // reason: SPEC-078 D1 — the cookie-bootstrap flow (bootstrapCookie below) mints
+  // "dashboard-local" on this MACHINE-scope store, never the per-corpus app.apiKeyStore.
+  machineAuth: MachineAuthStores;
+  machineRawKey: string;
   baseUrl: string;
   tmpDir: string;
   telemetryPath: string;
@@ -75,20 +80,37 @@ async function makeTestServer(telemetryEnabled: boolean): Promise<TestContext> {
   // narrows the union for TS without a runtime branch that can ever be false.
   const app = appResult as App;
 
-  const createResult = await app.apiKeyStore.create("dashboard-local", "admin");
+  // reason: SPEC-078 D1 — this key is used ONLY for the bearer-token test below;
+  // "dashboard-local" for the cookie-bootstrap flow lives on machineAuth.
+  const createResult = await app.apiKeyStore.create("regression-agent", "owner");
   if (!createResult.ok) throw new Error("Failed to create API key");
   const rawKey = createResult.value.rawKey;
 
-  const server = startHttpServer(app, { port: 0, host: "127.0.0.1" });
+  const machineAuth = createMachineAuthStores({ baseDir: mkdtempSync(join(tmpdir(), "lore-telemetry-route-machine-auth-")) });
+  const machineKeyResult = await machineAuth.apiKeyStore.create("dashboard-local", "admin");
+  if (!machineKeyResult.ok) throw new Error("Failed to create machine API key");
+
+  const server = startHttpServer(app, { port: 0, host: "127.0.0.1", machineAuth });
   const baseUrl = `http://127.0.0.1:${server.port}`;
 
-  return { server, app, rawKey, baseUrl, tmpDir, telemetryPath };
+  return {
+    server,
+    app,
+    rawKey,
+    machineAuth,
+    machineRawKey: machineKeyResult.value.rawKey,
+    baseUrl,
+    tmpDir,
+    telemetryPath,
+  };
 }
 
 async function bootstrapCookie(ctx: TestContext): Promise<string> {
   const res = await fetch(`${ctx.baseUrl}/api/auth/local-bootstrap`, {
     method: "POST",
-    headers: { "X-Lore-Token": ctx.rawKey, Origin: ALLOWED_ORIGIN },
+    // reason: SPEC-078 D1 — bootstrap validates against the MACHINE-scope
+    // "dashboard-local" key, not the bearer-only ctx.rawKey.
+    headers: { "X-Lore-Token": ctx.machineRawKey, Origin: ALLOWED_ORIGIN },
   });
   const { data } = (await res.json()) as { data: { session_id: string } };
   return data.session_id;
@@ -122,6 +144,7 @@ describe("POST /api/dashboard/telemetry/route-view — HAPPY: telemetry enabled 
   afterEach(() => {
     ctx.server.stop(true);
     ctx.app.close();
+    ctx.machineAuth.db.close();
     rmSync(ctx.tmpDir, { recursive: true, force: true });
   });
 
@@ -176,6 +199,7 @@ describe("POST /api/dashboard/telemetry/route-view — STATE: telemetry disabled
   afterEach(() => {
     ctx.server.stop(true);
     ctx.app.close();
+    ctx.machineAuth.db.close();
     rmSync(ctx.tmpDir, { recursive: true, force: true });
   });
 
@@ -201,6 +225,7 @@ describe("POST /api/dashboard/telemetry/route-view — ERROR: throwing sink (AC-
   afterEach(() => {
     ctx.server.stop(true);
     ctx.app.close();
+    ctx.machineAuth.db.close();
     rmSync(ctx.tmpDir, { recursive: true, force: true });
   });
 
@@ -251,6 +276,7 @@ describe("POST /api/dashboard/telemetry/route-view — NEGATIVE: auth matrix (AC
   afterEach(() => {
     ctx.server.stop(true);
     ctx.app.close();
+    ctx.machineAuth.db.close();
     rmSync(ctx.tmpDir, { recursive: true, force: true });
   });
 
@@ -287,6 +313,7 @@ describe("POST /api/dashboard/telemetry/route-view — BOUNDARY: route_id <= 200
   afterEach(() => {
     ctx.server.stop(true);
     ctx.app.close();
+    ctx.machineAuth.db.close();
     rmSync(ctx.tmpDir, { recursive: true, force: true });
   });
 
