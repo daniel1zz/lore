@@ -5,18 +5,21 @@
  * Public surface: apiList, apiSearch, apiTree, apiGetDoc, apiGetStatus,
  *   apiGetJudgments, apiGetAuditForDoc, apiGetAuditVerify, apiGetCalibrationStats,
  *   apiGetPendingReview, apiGetReady, apiGetConfig, apiGetMachineConfig,
- *   apiGetIssueReports, apiGetEvidencePanel, evidencePanelQueryKey
+ *   apiGetIssueReports, apiGetEvidencePanel, evidencePanelQueryKey,
+ *   apiGetReadyReport, apiGetPhaseStatus
  * Invariants: 5-second timeout via AbortSignal.timeout; never leaks raw Response objects.
- *   Throws ApiError on non-2xx or server-side { ok: false } — EXCEPT `apiGetReady`,
- *   which returns `Result<ReadyRecord[], ApiError>` per its SPEC-037 §2 contract
- *   (the only Result-returning function in this file; every other export throws).
+ *   Throws ApiError on non-2xx or server-side { ok: false } — EXCEPT `apiGetReady`
+ *   and `apiGetReadyReport`, which return `Result<T, ApiError>` (the only two
+ *   Result-returning functions in this file; every other export throws).
  * Side-effect class: IO (fetch)
  * Source: SPEC-011 §3, §5; SPEC-015 §3; SPEC-033 F1 (feedback-loop read routes);
  *   SPEC-037 §2 (readiness route client); SPEC-062 §Design D3 / SPEC-064 §Design D6
  *   (config GET reads — both team and machine scope, available to cookie AND
  *   bearer sessions, mirroring every other read in this file — see
  *   `config-routes.ts`'s module header on the auth-surface split); SPEC-075
- *   §Module Boundary (evidence-panel projection read)
+ *   §Module Boundary (evidence-panel projection read); SPEC-077 S1/S3 (execution
+ *   read surface — ready report incl. sessions/anchor_conflicts/claim_ttl_minutes,
+ *   NEW phase-status route client)
  */
 
 import type {
@@ -31,6 +34,7 @@ import type {
   GlobalLoreConfig,
   LoreConfig,
   ReadyRecord,
+  ReadySession,
   ReviewJudgment,
   Result,
   SearchHit,
@@ -670,4 +674,121 @@ export function evidencePanelQueryKey(idOrSlug: string): readonly [string, strin
  */
 export async function apiGetEvidencePanel(idOrSlug: string): Promise<EvidencePanelProjection> {
   return fetchJson<EvidencePanelProjection>(`/api/evidence-panel/${encodeURIComponent(idOrSlug)}`);
+}
+
+// ─── SPEC-077: dashboard execution read surface ─────────────────────────────
+
+/**
+ * One SPEC-042 D7 anchor-overlap advisory entry. Hand-copied (not a `@lore/core`
+ * re-export) — `AnchorConflict` is declared in `packages/lore/src/service/
+ * task-workflow-service.ts` (a LORE-package-only type), and `@lore/dashboard`
+ * must never depend on `@lore/lore` (module invariant, `packages/dashboard/
+ * CLAUDE.md`). Mirrors that interface exactly: `task_slug` is the task IN THIS
+ * REPORT the conflict applies to; `holder`/`paths` describe the fresh foreign
+ * sibling claim it collides with.
+ */
+export interface AnchorConflict {
+  task_slug: string;
+  holder: string;
+  paths: string[];
+}
+
+/**
+ * `TaskWorkflowService.ready`'s FULL return shape (`ReadyReport`,
+ * `packages/lore/src/service/task-workflow-service.ts`) plus the SPEC-077 S4
+ * additive `claim_ttl_minutes` field — the resolved `workflow.claim_ttl_minutes`
+ * config value, so the execution page's claim countdown never hardcodes the TTL.
+ * Hand-copied for the same `@lore/lore` boundary reason as {@link AnchorConflict}.
+ *
+ * @invariant This is the CORRECTED shape for `GET /api/ready/:planIdOrSlug` —
+ *   the route has returned `{records, sessions, anchor_conflicts}` (not a bare
+ *   `ReadyRecord[]`) since SPEC-042 landed `sessions`/`anchor_conflicts` on
+ *   `ReadyReport`. The pre-existing {@link apiGetReady}/{@link ReadyRecord}
+ *   pairing in this file still types the response as a flat `ReadyRecord[]`
+ *   (a latent SPEC-042-era contract drift discovered while building this
+ *   route's SPEC-077 consumer, out of this task's declared anchors to repair —
+ *   `apiGetReady`'s existing callers/tests assume the stale flat shape). This
+ *   new function/type pair is the accurate one; `ExecutionPage` uses ONLY this,
+ *   never `apiGetReady`.
+ */
+export interface ReadyReportResponse {
+  records: ReadyRecord[];
+  sessions: ReadySession[];
+  anchor_conflicts: AnchorConflict[];
+  /** SPEC-077 S4 additive field — `workflow.claim_ttl_minutes`, HTTP-layer enrichment. */
+  claim_ttl_minutes: number;
+}
+
+/**
+ * Fetch the full computed readiness report for a plan — records, derived
+ * sessions, anchor conflicts, and the claim TTL (SPEC-077 S1/S4). Thin pipe
+ * over the SAME `GET /api/ready/:planIdOrSlug` route {@link apiGetReady} calls,
+ * but typed to the route's ACTUAL response shape (see {@link ReadyReportResponse}'s
+ * invariant note) rather than that function's stale flat-array assumption.
+ * Result-returning (never throws), mirroring `apiGetReady`'s SPEC-037 §2
+ * contract, so `ExecutionPage` can degrade a single plan's readiness fetch
+ * without needing TanStack Query's `isError`/`error` machinery.
+ *
+ * @param planIdOrSlug - Plan document ULID or slug.
+ * @returns `{ok: true, value: ReadyReportResponse}` on success; `{ok: false, error: ApiError}`
+ *   on any HTTP/network/server error (422 for a non-plan target, 404 for unknown id).
+ */
+export async function apiGetReadyReport(planIdOrSlug: string): Promise<Result<ReadyReportResponse, ApiError>> {
+  try {
+    const data = await fetchJson<ReadyReportResponse>(`/api/ready/${encodeURIComponent(planIdOrSlug)}`);
+    return ok(data);
+  } catch (caught) {
+    const apiError =
+      caught instanceof ApiError
+        ? caught
+        : new ApiError(0, "NETWORK_ERROR", caught instanceof Error ? caught.message : "Unknown error");
+    return { ok: false, error: apiError };
+  }
+}
+
+/**
+ * One checklist item within a {@link PhaseScorecard}. `state`/`trust_label` are
+ * rendered VERBATIM by `PhaseProgressPanel` — never re-derived client-side
+ * (mirrors this codebase's "manual-vs-attested trust labels ... never
+ * re-derived" convention for evidence-panel projections, `packages/dashboard/
+ * CLAUDE.md`). Field names are SPEC-PINNED (SPEC-077 §Context Digest) — this
+ * task develops against the pinned shape ahead of the sibling T1 backend task
+ * that lands the real route; reconcile at integration if T1's literal field
+ * names differ.
+ */
+export interface PhaseChecklistItemView {
+  id: string;
+  statement: string;
+  /** e.g. "satisfied" | "blocking" | "dropped" — rendered verbatim. */
+  state: string;
+  /** e.g. "manual" | "attested" — rendered verbatim. */
+  trust_label: string;
+}
+
+/** One phase's execution scorecard — SPEC-077 S2 `PhaseProgressPanel` projection. */
+export interface PhaseScorecard {
+  name: string;
+  ac_scope: { attested: number; total: number };
+  checklist: PhaseChecklistItemView[];
+  dropped_item_names: string[];
+  /** True iff the SPEC-056 §Design Decisions D3 anti-vacuous-completion guard fired. */
+  vacuous: boolean;
+}
+
+/** Response shape of the NEW `GET /api/phase-status/:planIdOrSlug` route (SPEC-077 S3). */
+export interface PhaseStatusResponse {
+  plan: { id: string; slug: string; title: string };
+  phases: PhaseScorecard[];
+}
+
+/**
+ * Fetch per-phase execution scorecards for a plan (SPEC-077 S3, T1 sibling
+ * task). Thin pipe over `GET /api/phase-status/:planIdOrSlug`; a plan with no
+ * phases returns `{plan, phases: []}` (still 200, not an error).
+ *
+ * @param planIdOrSlug - Plan document ULID or slug.
+ * @throws {ApiError} On HTTP or network error (404 unknown id, 422 non-plan target).
+ */
+export async function apiGetPhaseStatus(planIdOrSlug: string): Promise<PhaseStatusResponse> {
+  return fetchJson<PhaseStatusResponse>(`/api/phase-status/${encodeURIComponent(planIdOrSlug)}`);
 }

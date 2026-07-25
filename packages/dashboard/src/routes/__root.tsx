@@ -74,6 +74,15 @@ function RootLayout(): React.ReactElement {
             >
               Tree
             </Link>
+            {/* reason: SPEC-077 S1 — the dashboard execution read surface (ready/
+                blocked tasks, sessions, anchor conflicts, phase progress). */}
+            <Link
+              to="/execution"
+              className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+              activeProps={{ className: "text-foreground font-medium" }}
+            >
+              Execution
+            </Link>
             {/* reason: SPEC-064 T4 — the Settings route is the UI for the SPEC-062
                 config write backend (team + machine scope config editing). */}
             <Link
