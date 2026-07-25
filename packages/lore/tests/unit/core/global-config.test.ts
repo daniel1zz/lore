@@ -8,7 +8,9 @@
  *
  * Test dimensions:
  *   HAPPY:      valid global config → ok with defaults populated
- *   NEGATIVE:   path resolution ordering ($LORE_CONFIG_HOME > $XDG_CONFIG_HOME > ~/.config)
+ *   NEGATIVE:   path resolution ordering ($LORE_CONFIG_HOME > $XDG_CONFIG_HOME
+ *               either/or ~/.config — an explicit $XDG_CONFIG_HOME REPLACES
+ *               the ~/.config default, it never stacks under it)
  *   BOUNDARY:   empty file, file with only defaults:{}, null YAML
  *   ERROR:      malformed YAML, project/sync/telemetry keys, unknown keys
  *   STATE:      resolveGlobalConfigPath returns undefined when no file exists
@@ -269,6 +271,63 @@ describe("resolveGlobalConfigPath() — path resolution ordering (AC-GC-2)", () 
   });
 });
 
+// ─── XDG semantics regression (task-xdg-semantics-resolveglobalconfigpath) ───
+//
+// XDG Base Directory spec: $XDG_CONFIG_HOME, when set (even to an empty dir
+// with no lore/config.yaml inside), REPLACES the ~/.config default — it never
+// stacks under it (pnpm/helm/gh all implement this as either-or). Before the
+// 2026-07-25 fix, resolveGlobalConfigPath's step 3 ran unconditionally
+// whenever step 2 found nothing, silently falling through to the REAL
+// ~/.config/lore/config.yaml even with $XDG_CONFIG_HOME explicitly set to an
+// isolated temp dir.
+
+describe("resolveGlobalConfigPath() — XDG_CONFIG_HOME replaces (never stacks under) ~/.config default", () => {
+  it("returns undefined when XDG_CONFIG_HOME points at an empty dir, even if ~/.config/lore/config.yaml exists on this machine", () => {
+    // reason: this assertion is the exact leak-repro from the incident. There
+    // is no fake-homedir seam in this module (homedir() is called directly
+    // from "os"), so this pins the resolver's CONTRACT rather than faking the
+    // real home directory. It passes VACUOUSLY on a machine with no real
+    // ~/.config/lore/config.yaml — it becomes NON-vacuous (and catches a
+    // regression of this exact bug) the moment that file exists, which is
+    // this repo's own dev machine state as of the incident (SPEC-078
+    // dashboard.projects populated ~/.config/lore/config.yaml).
+    delete process.env["LORE_CONFIG_HOME"];
+    process.env["XDG_CONFIG_HOME"] = makeTempDir(); // no lore/ subdir inside
+
+    expect(resolveGlobalConfigPath()).toBeUndefined();
+  });
+
+  it("treats an empty-string XDG_CONFIG_HOME identically to unset (AC-4)", () => {
+    // reason: the XDG spec says "not set OR empty" for the default fallback
+    // condition — an empty string must behave exactly like a deleted env var,
+    // never like "set to the empty path". We don't assert a specific resolved
+    // value (machine-dependent) — only that "" and deleted produce the SAME
+    // outcome, proving "" is not silently treated as a truthy override.
+    delete process.env["LORE_CONFIG_HOME"];
+
+    delete process.env["XDG_CONFIG_HOME"];
+    const withUnsetVar = resolveGlobalConfigPath();
+
+    process.env["XDG_CONFIG_HOME"] = "";
+    const withEmptyVar = resolveGlobalConfigPath();
+
+    expect(withEmptyVar).toBe(withUnsetVar);
+  });
+
+  it("XDG_CONFIG_HOME unset → ~/.config/lore/config.yaml still resolves when present (AC-2, existing behavior preserved)", () => {
+    delete process.env["LORE_CONFIG_HOME"];
+    delete process.env["XDG_CONFIG_HOME"];
+
+    // No machine-dependent value assertion — only that omitting XDG_CONFIG_HOME
+    // does not itself suppress the ~/.config default (never throws, and any
+    // returned path must be the real default candidate).
+    const path = resolveGlobalConfigPath();
+    if (path !== undefined) {
+      expect(path).toBe(join(homedir(), ".config", "lore", "config.yaml"));
+    }
+  });
+});
+
 // ─── BOUNDARY (AC-GC-3) ──────────────────────────────────────────────────────
 
 describe("loadGlobalConfig() — boundary cases (AC-GC-3)", () => {
@@ -309,7 +368,14 @@ describe("loadGlobalConfig() — boundary cases (AC-GC-3)", () => {
   });
 
   it("no global config path (undefined) → returns ok({})", () => {
-    // Call with explicit undefined — simulates no file found
+    // reason: force resolveGlobalConfigPath() to find nothing at any candidate
+    // path via an isolated, empty $XDG_CONFIG_HOME — WITHOUT this isolation,
+    // the fallthrough call inside loadGlobalConfig(undefined) resolves the
+    // real machine's ambient env, which leaked ~/.config/lore/config.yaml
+    // into this "no config" assertion (2026-07-25 incident, task-xdg-semantics).
+    delete process.env["LORE_CONFIG_HOME"];
+    process.env["XDG_CONFIG_HOME"] = makeTempDir(); // no lore/ subdir inside
+
     const result = loadGlobalConfig(undefined);
     expect(result.ok).toBe(true);
     if (result.ok) {

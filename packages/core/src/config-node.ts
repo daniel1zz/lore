@@ -12,6 +12,11 @@
  *     resolved token value
  *   - Global config missing/empty → ok({}) (NOT an error — user-optional)
  *   - Global config malformed → err(VALIDATION_ERROR) (caller decides whether to warn)
+ *   - XDG resolution is EITHER/OR at each precedence tier — a set (non-empty)
+ *     $XDG_CONFIG_HOME REPLACES the ~/.config default, it never stacks under
+ *     it (XDG Base Directory spec; matches pnpm/helm/gh). Both
+ *     resolveGlobalConfigPath and resolveGlobalConfigWritePath honor this;
+ *     see each function's own docstring for the precise gating.
  *   - SPEC-064 D7: `saveGlobalConfig` is validate-THEN-write — `GlobalLoreConfigSchema`
  *     is checked BEFORE any filesystem access, so a schema-invalid candidate writes
  *     ZERO bytes and leaves any pre-existing file byte-identical. The write itself is
@@ -99,12 +104,23 @@ export function saveConfig(
  * Resolve the global Lore config file path using the XDG Base Directory spec
  * and the $LORE_CONFIG_HOME app-specific escape hatch (SPEC-003 §6.2).
  *
- * Resolution order (first existing path wins):
+ * Resolution order (first existing path wins), where step 3 is EITHER/OR
+ * with step 2, never a stack:
  *   1. $LORE_CONFIG_HOME/config.yaml
- *   2. $XDG_CONFIG_HOME/lore/config.yaml
- *   3. ~/.config/lore/config.yaml
+ *   2. $XDG_CONFIG_HOME/lore/config.yaml — only when $XDG_CONFIG_HOME is set
+ *      (non-empty)
+ *   3. ~/.config/lore/config.yaml — the XDG default, used ONLY when
+ *      $XDG_CONFIG_HOME is unset or empty
  *
- * Returns undefined when no file exists at any candidate path.
+ * Per the XDG Base Directory spec, an explicit $XDG_CONFIG_HOME REPLACES the
+ * ~/.config default; it does not stack under it (pnpm/helm/gh all implement
+ * this as either-or). A set-but-empty $XDG_CONFIG_HOME is treated the same
+ * as unset. Falling through to step 3 whenever step 2 finds nothing — even
+ * with $XDG_CONFIG_HOME explicitly set — silently leaks whatever lives at
+ * the real ~/.config/lore/config.yaml into a caller that asked for an
+ * isolated XDG root (2026-07-25 incident: leaked into test isolation).
+ *
+ * Returns undefined when no file exists at any applicable candidate path.
  * Pure side-effect: reads env vars + existsSync only. Never writes.
  *
  * @example
@@ -126,9 +142,15 @@ export function resolveGlobalConfigPath(): string | undefined {
     if (existsSync(candidate)) return candidate;
   }
 
-  // 3. ~/.config/lore/config.yaml — XDG default (macOS/Linux/Windows all use ~/.config per pnpm/helm/gh)
-  const defaultCandidate = join(homedir(), ".config", "lore", "config.yaml");
-  if (existsSync(defaultCandidate)) return defaultCandidate;
+  // 3. ~/.config/lore/config.yaml — XDG default (macOS/Linux/Windows all use
+  //    ~/.config per pnpm/helm/gh). GATED on $XDG_CONFIG_HOME being unset/empty:
+  //    a set $XDG_CONFIG_HOME replaces this default, it never stacks under it —
+  //    reaching this branch with $XDG_CONFIG_HOME set would silently leak the
+  //    real machine-wide config into a caller that asked for an isolated XDG root.
+  if (!xdgConfigHome) {
+    const defaultCandidate = join(homedir(), ".config", "lore", "config.yaml");
+    if (existsSync(defaultCandidate)) return defaultCandidate;
+  }
 
   return undefined;
 }
@@ -216,11 +238,22 @@ export function loadGlobalConfig(
 
 /**
  * Resolves the XDG target path for a NEW global config write — the same
- * precedence order as {@link resolveGlobalConfigPath} ($LORE_CONFIG_HOME >
- * $XDG_CONFIG_HOME/lore > ~/.config/lore), but NOT gated on `existsSync`: this
- * answers "where would a freshly-created config.yaml go", not "where does one
- * already live" (SPEC-064 D7 — a missing global config is not an error, and the
- * first write must create the file at a deterministic path).
+ * EITHER/OR precedence as {@link resolveGlobalConfigPath} (never gated on
+ * `existsSync`: this answers "where would a freshly-created config.yaml go",
+ * not "where does one already live", SPEC-064 D7 — a missing global config
+ * is not an error, and the first write must create the file at a
+ * deterministic path):
+ *   1. $LORE_CONFIG_HOME/config.yaml
+ *   2. $XDG_CONFIG_HOME/lore/config.yaml — only when $XDG_CONFIG_HOME is set
+ *      (non-empty); a set-but-empty value is treated the same as unset
+ *   3. ~/.config/lore/config.yaml — the XDG default, returned ONLY when
+ *      neither env var above is set/non-empty (an explicit $XDG_CONFIG_HOME
+ *      REPLACES this default, it never stacks under it)
+ *
+ * Each branch RETURNS immediately (mutually exclusive if/else-if/else), so
+ * this function has never exhibited the step-3-unconditional-fallthrough bug
+ * {@link resolveGlobalConfigPath} had (fixed 2026-07-25) — documented here so
+ * the two functions' precedence stays provably in sync on future edits.
  *
  * Callers that want read-or-create semantics compose:
  *   `resolveGlobalConfigPath() ?? resolveGlobalConfigWritePath()`.

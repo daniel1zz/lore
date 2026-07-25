@@ -159,10 +159,12 @@ export type MountState = (typeof MOUNT_STATES)[number];
 
 /**
  * Global user-level Lore config (SPEC-003 §6.2).
- * Loaded from the first existing path in XDG resolution order:
+ * Loaded from the first existing path in XDG resolution order, where step 3
+ * is EITHER/OR with step 2 (a set $XDG_CONFIG_HOME REPLACES the ~/.config
+ * default, it never stacks under it — see `config-node.ts::resolveGlobalConfigPath`):
  *   1. $LORE_CONFIG_HOME/config.yaml
- *   2. $XDG_CONFIG_HOME/lore/config.yaml
- *   3. ~/.config/lore/config.yaml
+ *   2. $XDG_CONFIG_HOME/lore/config.yaml — only when $XDG_CONFIG_HOME is set (non-empty)
+ *   3. ~/.config/lore/config.yaml — only when $XDG_CONFIG_HOME is unset/empty
  *
  * @invariant MUST NOT contain project / sync / telemetry sections (strict schema).
  * @invariant Missing file is NOT an error — returns ok({}).
