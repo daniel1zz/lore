@@ -189,3 +189,30 @@ test.describe("SPEC-036 dashboard browsing UX", () => {
     });
   });
 });
+
+// ── SPEC-078 AC-078-9 registry-less route-shape pin ───────────────────────────
+//
+// Runs under the SAME (unmodified) `global-setup.ts` as every test above — a
+// genuinely registry-less server (`dashboard.projects` absent, `mountRegistry`
+// never constructed). Deliberately placed as an INDEPENDENT top-level test (its
+// own fresh `page` fixture, not the shared `page` variable the two describes
+// above close over) so it neither depends on nor disturbs their serial state.
+// Proves the literal R-15 invariant: a canonical (unprefixed) route resolves
+// with NO `/p/:name` segment and returns 200 — so a future regression that
+// silently starts requiring a `/p/` prefix for the default project cannot pass
+// vacuously (a mistyped/never-executed assertion here would otherwise look
+// identical to "still works").
+test("SPEC-078 AC-078-9 — registry-less canonical route resolves with no /p/:name segment (200)", async ({
+  page,
+}) => {
+  const pageResponse = await page.goto("/");
+  expect(pageResponse?.status()).toBe(200);
+  await expect(page).toHaveURL(/^http:\/\/localhost:5173\/$/);
+  expect(new URL(page.url()).pathname.startsWith("/p/")).toBe(false);
+
+  // Same invariant at the API layer, over the SAME cookie session bootstrapAuthIfNeeded()
+  // just minted via the page.goto above.
+  const apiResponse = await page.request.get(`${API_ORIGIN}/api/docs`);
+  expect(apiResponse.status()).toBe(200);
+  expect(new URL(apiResponse.url()).pathname.startsWith("/api/p/")).toBe(false);
+});

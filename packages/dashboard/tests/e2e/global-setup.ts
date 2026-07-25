@@ -53,6 +53,25 @@
  *      unauthenticated and answers identically for every corpus).
  *
  * Source: SPEC-022 §9.7, SPEC-016 §3.6-§3.9.
+ *
+ * SPEC-078 D1 fixture repair (found while building T11's multi-project e2e suite):
+ * `POST /api/auth/local-bootstrap` now validates `X-Lore-Token` ONLY against the
+ * MACHINE-scope auth store (`machine-auth.ts::createMachineAuthStores`), never the
+ * per-corpus `app.apiKeyStore` — a real, live regression this harness had every step
+ * (1)-(4) below still stepping right into: the "dashboard-local" key it minted via
+ * `lore agent create` (per-corpus) no longer authenticates ANYTHING once D1 landed,
+ * so `VITE_LORE_BOOTSTRAP_TOKEN` silently stopped working and every write-path e2e
+ * test started failing at its very first authenticated action (confirmed empirically
+ * before this fix: `write-flow.pw.ts`'s "create" test failed with "Project registry
+ * error: Invalid or missing API key" / "Failed to load documents"). The fix mints a
+ * SEPARATE machine-scope key via `mint-machine-dashboard-key.ts` against a fresh
+ * `mkdtemp` base dir (never the real `~/.local/state/lore` — same pollution-incident
+ * discipline as the corpus `tmpDir` itself) and points the spawned `lore serve` child
+ * at that SAME store via `LORE_STATE_HOME` (the `resolveMachineAuthBaseDir` escape
+ * hatch, `machine-auth.ts`) — the per-corpus `rawKey` created in step 2 below is
+ * UNCHANGED and still correct: `assertServerIsOurs` authenticates via BEARER, and
+ * bearer auth stays per-corpus (`app.apiKeyStore`) even after D1 — only the cookie-
+ * bootstrap token needed to move to the machine key.
  */
 
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
@@ -68,6 +87,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, "..", "..", "..", "..");
 const LORE_ENTRY = join(REPO_ROOT, "packages", "lore", "src", "index.ts");
 const DASHBOARD_DIR = join(REPO_ROOT, "packages", "dashboard");
+const MINT_MACHINE_KEY_SCRIPT = join(__dirname, "mint-machine-dashboard-key.ts");
 
 export const API_PORT = 8787;
 export const DASH_PORT = 5173;
@@ -198,6 +218,9 @@ export default async function globalSetup(_config: FullConfig): Promise<() => Pr
   await assertPortFree(DASH_PORT, "vite dev server");
 
   const tmpDir = mkdtempSync(join(tmpdir(), "lore-e2e-"));
+  // SPEC-078 D1 fixture repair (see this file's header) — machine-scope auth store,
+  // NEVER the real `~/.local/state/lore`.
+  const machineAuthBaseDir = mkdtempSync(join(tmpdir(), "lore-e2e-machine-"));
 
   // Publish the throwaway corpus's SQLite path via env var so spec files that need to
   // seed data the UI cannot create (e.g. SPEC-034 review judgments — no UI writes
@@ -230,11 +253,29 @@ export default async function globalSetup(_config: FullConfig): Promise<() => Pr
   }
   const rawKey = created.data.api_key;
 
-  // 3. Start the real HTTP API server against the throwaway corpus.
+  // 2b. Mint the MACHINE-scope "dashboard-local" key (SPEC-078 D1 fixture repair, see
+  //     this file's header) — this is what the cookie-bootstrap flow actually checks.
+  const mintOut = execFileSync("bun", [MINT_MACHINE_KEY_SCRIPT, machineAuthBaseDir], { stdio: "pipe" }).toString();
+  const minted = parseLastJsonLine(mintOut) as { ok: boolean; data?: { api_key: string } };
+  if (!minted.ok || minted.data === undefined) {
+    rmSync(tmpDir, { recursive: true, force: true });
+    rmSync(machineAuthBaseDir, { recursive: true, force: true });
+    throw new Error(`Failed to mint machine-scope dashboard-local key: ${mintOut}`);
+  }
+  const machineRawKey = minted.data.api_key;
+
+  // 3. Start the real HTTP API server against the throwaway corpus. LORE_STATE_HOME
+  //    points its LAZILY-resolved machine auth store at the SAME mkdtemp dir the mint
+  //    step above just used (`machine-auth.ts::resolveMachineAuthBaseDir`'s escape
+  //    hatch) — never the real `~/.local/state/lore`.
   const apiProc = spawn(
     "bun",
     [LORE_ENTRY, "serve", "--port", String(API_PORT), "--host", "127.0.0.1"],
-    { cwd: tmpDir, stdio: ["ignore", "pipe", "pipe"] },
+    {
+      cwd: tmpDir,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, LORE_STATE_HOME: machineAuthBaseDir },
+    },
   );
   apiProc.stdout?.on("data", () => {});
   apiProc.stderr?.on("data", (chunk: Buffer) => {
@@ -251,18 +292,22 @@ export default async function globalSetup(_config: FullConfig): Promise<() => Pr
   } catch (err) {
     await killAndWait(apiProc);
     rmSync(tmpDir, { recursive: true, force: true });
+    rmSync(machineAuthBaseDir, { recursive: true, force: true });
     throw err;
   }
 
   // 4. Start the real Vite dev server with the bootstrap token injected via env —
-  //    same mechanism `lore dashboard` uses (SPEC-016 §3.6, §3.7).
+  //    same mechanism `lore dashboard` uses (SPEC-016 §3.6, §3.7). The token is the
+  //    MACHINE-scope key (SPEC-078 D1 fixture repair, see this file's header) — NOT
+  //    the per-corpus `rawKey` step 2 created (that one is still used above for the
+  //    bearer-based `assertServerIsOurs` identity check, unaffected by D1).
   const viteProc = spawn(
     "bun",
     ["run", "dev", "--", "--port", String(DASH_PORT), "--strictPort"],
     {
       cwd: DASHBOARD_DIR,
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, VITE_LORE_BOOTSTRAP_TOKEN: rawKey },
+      env: { ...process.env, VITE_LORE_BOOTSTRAP_TOKEN: machineRawKey },
     },
   );
   viteProc.stdout?.on("data", () => {});
@@ -276,6 +321,7 @@ export default async function globalSetup(_config: FullConfig): Promise<() => Pr
     await killAndWait(apiProc);
     await killAndWait(viteProc);
     rmSync(tmpDir, { recursive: true, force: true });
+    rmSync(machineAuthBaseDir, { recursive: true, force: true });
     throw err;
   }
 
@@ -283,6 +329,11 @@ export default async function globalSetup(_config: FullConfig): Promise<() => Pr
     await Promise.all([killAndWait(apiProc), killAndWait(viteProc)]);
     try {
       rmSync(tmpDir, { recursive: true, force: true });
+    } catch {
+      // best-effort cleanup — never fail the test run over a leftover tmp dir
+    }
+    try {
+      rmSync(machineAuthBaseDir, { recursive: true, force: true });
     } catch {
       // best-effort cleanup — never fail the test run over a leftover tmp dir
     }
