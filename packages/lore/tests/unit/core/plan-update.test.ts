@@ -41,12 +41,15 @@
  *               `merged`-ownership `outdated` file lands in `merges`, never
  *               `writes`.
  *   NEGATIVE:   a `diverged` file is excluded from `writes`/`merges`; a
- *               `user_once` file is excluded from `writes`/`markerRewrites`
- *               across three different sha combinations (outdated-like,
- *               diverged-like, missing-like).
+ *               `user_once` file is excluded from `writes` across three
+ *               different sha combinations (outdated-like, diverged-like,
+ *               missing-like).
  *   BOUNDARY:   a single `missing` entry restores into `writes`; an orphaned
  *               disk file (unknown to both manifests) is reported but never
- *               actioned; a totally empty/absent installed manifest (fresh
+ *               actioned; a path with no installed-manifest entry at all
+ *               whose disk content already equals the embedded sha
+ *               classifies as `sync`, never `diverged` (assess follow-up,
+ *               2026-07-25); a totally empty/absent installed manifest (fresh
  *               target) classifies every embedded entry as `missing`
  *               (install-equivalent); a legacy installed manifest with NO
  *               `assets_digest` field never short-circuits.
@@ -101,7 +104,6 @@ interface UpdatePlan {
   files: Record<FileFreshness, string[]>;
   writes: ActionEntry[];
   merges: ActionEntry[];
-  markerRewrites: ActionEntry[];
 }
 
 interface UpdateProbe {
@@ -278,7 +280,7 @@ describe("NEGATIVE: user_once files are never written or marker-rewritten", () =
       installedSha: "recorded-sha",
       probeResult: "missing" as const,
     },
-  ])("never appears in writes/markerRewrites for $label", ({ embeddedSha, installedSha, probeResult }) => {
+  ])("never appears in writes for $label", ({ embeddedSha, installedSha, probeResult }) => {
     const embedded = makeEmbedded(
       [embeddedEntry({ path, kind: "project" as AssetEntryKind, ownership: "user_once", sha256: embeddedSha })],
       "digest-A",
@@ -294,7 +296,6 @@ describe("NEGATIVE: user_once files are never written or marker-rewritten", () =
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(hasPath(result.value.writes, path)).toBe(false);
-    expect(hasPath(result.value.markerRewrites, path)).toBe(false);
   });
 });
 
@@ -355,6 +356,30 @@ describe("BOUNDARY: fresh target (no installed manifest at all)", () => {
     expect(result.value.files.missing).toEqual(expect.arrayContaining([pathA, pathB]));
     expect(hasPath(result.value.writes, pathA)).toBe(true);
     expect(hasPath(result.value.writes, pathB)).toBe(true);
+  });
+});
+
+describe("BOUNDARY: no installed-manifest entry but disk already matches embedded sha", () => {
+  it("classifies as sync, not diverged — DECISION: absent provenance for a path (no installed-manifest entry at all, e.g. a brand-new asset since the last recorded install) is not itself evidence of user modification; disk content already equal to the embedded/target sha needs zero action, so this must not be gated behind --force-diverged like a real diverged file would be. `missing` does not apply either — that state is reserved for the opposite shape (manifest HAS the entry, disk does not)", () => {
+    const path = "skills/brand-new-since-last-install/SKILL.md";
+    const embedded = makeEmbedded([embeddedEntry({ path, sha256: "target-sha" })], "digest-A");
+    // Installed manifest tracks a DIFFERENT path only — zero provenance for
+    // `path` itself (not the same as an empty/absent installed manifest,
+    // covered by the "fresh target" BOUNDARY case above).
+    const installed = makeInstalled(
+      [installedEntry({ path: "skills/unrelated/SKILL.md", sha256: "other-sha" })],
+      "digest-B",
+    );
+    const probe = makeProbe({ [path]: { sha256: "target-sha" } }); // disk already holds the target bytes
+
+    const result: PlanUpdateResult = planUpdate(embedded, installed, probe);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.files.sync).toContain(path);
+    expect(result.value.files.diverged).not.toContain(path);
+    expect(hasPath(result.value.writes, path)).toBe(false);
+    expect(hasPath(result.value.merges, path)).toBe(false);
   });
 });
 
@@ -442,7 +467,6 @@ describe("STATE: multiple entries in one call classify into mutually exclusive b
     // sync path: in NO action bucket at all.
     expect(hasPath(result.value.writes, syncPath)).toBe(false);
     expect(hasPath(result.value.merges, syncPath)).toBe(false);
-    expect(hasPath(result.value.markerRewrites, syncPath)).toBe(false);
 
     // outdated path: writes only.
     expect(hasPath(result.value.writes, outdatedPath)).toBe(true);

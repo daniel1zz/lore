@@ -14,8 +14,7 @@
  *   - EmbeddedAssetsManifest / EmbeddedAssetEntry — the shape `planUpdate`
  *     expects for its `embedded` argument (see Invariants below for why this
  *     is a LOCAL structural mirror, not an import of the real generated type)
- *   - UpdatePlannedWrite / UpdatePlannedMerge / UpdatePlannedMarkerRewrite — one action-bucket
- *     row each
+ *   - UpdatePlannedWrite / UpdatePlannedMerge — one action-bucket row each
  *   - UpdatePlan — the full classification + action-plan output
  *   - planUpdate(embedded, installed, probe) — the pure decision function
  *
@@ -51,8 +50,8 @@
  *     consumer's benefit but is NOT read by any classification decision in
  *     this module.
  *   - Update-planner output types carry an `Update` prefix
- *     (`UpdatePlannedWrite`/`UpdatePlannedMerge`/`UpdatePlannedMarkerRewrite`)
- *     to avoid a same-package export collision with `setup-manifest.ts`'s
+ *     (`UpdatePlannedWrite`/`UpdatePlannedMerge`) to avoid a same-package
+ *     export collision with `setup-manifest.ts`'s
  *     OWN `PlannedWrite`/`PlannedSkip` (the install-time planner's output
  *     rows) — both modules are re-exported from this package's single flat
  *     barrel (`index.ts`), so the names must be distinct even though the two
@@ -68,13 +67,22 @@
  *     touched again" overrides even the restore-on-missing default every
  *     other ownership zone gets). `merged` ownership routes both `outdated`
  *     and `missing` states to `merges`, never `writes`.
- *   - `markerRewrites` is ALWAYS EMPTY in this module. CLAUDE.md's
- *     marker-section special case (SPEC-076 C1's fourth, unnamed-ownership
- *     row) is SPEC-076 T6's exclusive concern (a distinct claimed task, out
- *     of this task's anchors) — the field exists here only because the
- *     Downstream Handoff's `UpdatePlan` shape requires it, and the paired RED
- *     test file exercises zero populated-markerRewrites scenarios. A future
- *     T6 change wires real detection; this module does not guess at it.
+ *     CLAUDE.md's marker-section rewrite (SPEC-076 C1's fourth, unnamed-
+ *     ownership row) is SPEC-076 T6's exclusive concern, implemented directly
+ *     in `setup-project-flow.ts` rather than through this classifier — the
+ *     Downstream Handoff's original `UpdatePlan.markerRewrites` field was
+ *     REMOVED (assess follow-up, 2026-07-25) once T6 landed without ever
+ *     populating it: a field this module could only ever return empty is a
+ *     misleading bucket for future consumers, not a genuine contract.
+ *   - `classifyEntry`'s no-manifest-entry edge: a path present in `embedded`
+ *     but absent from `installed` (no recorded provenance — e.g. an asset
+ *     added since the last install) classifies as `sync`, not `diverged`,
+ *     whenever disk content already equals the embedded/target sha. Checking
+ *     `diskSha === embeddedSha` BEFORE the manifest-sha comparison is what
+ *     makes this work — a strictly correctly-installed file must never be
+ *     gated behind `--force-diverged` merely because its provenance record
+ *     is missing (assess follow-up, 2026-07-25; see the paired BOUNDARY test
+ *     "no installed-manifest entry but disk already matches embedded sha").
  *   - Digest short-circuit: `installed.assets_digest === embedded.tree_digest`
  *     (both present, exact string equality — never a prefix/substring check,
  *     the paired RED test's REGRESSION case guards this) skips per-file
@@ -166,18 +174,13 @@ export interface UpdatePlannedMerge {
   readonly kind: string;
 }
 
-/** One CLAUDE.md-style marker-section rewrite. Always empty in this module — see Invariants (T6 owns population). */
-export interface UpdatePlannedMarkerRewrite {
-  readonly path: string;
-}
-
 /**
  * The full pure decision output of {@link planUpdate}.
  *
  * @invariant `files` always has all five {@link FileFreshness} keys present
  *   (empty arrays where nothing classified into that state).
- * @invariant `writes`, `merges`, and `markerRewrites` are mutually exclusive
- *   over `path` — a path appears in at most one action bucket.
+ * @invariant `writes` and `merges` are mutually exclusive over `path` — a
+ *   path appears in at most one action bucket.
  */
 export interface UpdatePlan {
   /** Digest-short-circuit result: `"sync"` iff every non-orphaned embedded entry classifies as `sync`. */
@@ -185,7 +188,6 @@ export interface UpdatePlan {
   readonly files: Record<FileFreshness, string[]>;
   readonly writes: UpdatePlannedWrite[];
   readonly merges: UpdatePlannedMerge[];
-  readonly markerRewrites: UpdatePlannedMarkerRewrite[];
 }
 
 // ─── Classifier ─────────────────────────────────────────────────────────────
@@ -197,9 +199,19 @@ function emptyFileBuckets(): Record<FileFreshness, string[]> {
 /**
  * Classifies one embedded entry's freshness given its on-disk probe result
  * and the installed manifest's recorded sha (`undefined` when the installed
- * manifest has no entry for this path at all — treated as "no provenance
- * signal", which falls through to `diverged` for any present-but-differing
- * disk content, or `missing` when disk has nothing either).
+ * manifest has no entry for this path at all — e.g. a brand-new asset added
+ * since the target's last recorded install, or manifest data loss).
+ *
+ * Missing provenance is deliberately NOT treated as evidence of user
+ * modification: when disk content already equals the embedded/target sha,
+ * the file needs zero action regardless of whether a manifest record backs
+ * it up, so that case classifies as `sync` (checked FIRST, before the
+ * manifest-sha comparison) — never `diverged` (which would wrongly gate a
+ * correctly-installed file behind `--force-diverged`) and never `missing`
+ * (reserved for the opposite shape: manifest HAS the entry, disk does not).
+ * Only a present-but-DIFFERING disk content with no manifest record falls
+ * through to `diverged` — the conservative default for "disk disagrees with
+ * target and we have no recorded history to explain why" (SPEC-076 D2).
  */
 function classifyEntry(
   diskResult: { sha256: string } | "missing",
@@ -210,8 +222,11 @@ function classifyEntry(
     return "missing";
   }
   const diskSha = diskResult.sha256;
+  if (diskSha === embeddedSha) {
+    return "sync";
+  }
   if (diskSha === manifestSha) {
-    return diskSha === embeddedSha ? "sync" : "outdated";
+    return "outdated";
   }
   return "diverged";
 }
@@ -234,7 +249,7 @@ function classifyEntry(
  * @throws Never — probe exceptions are caught and converted to a `Result`.
  * @example
  * planUpdate(embeddedManifest, installedManifest, fsProbe);
- * // => { ok: true, value: { summary: "stale", files: {...}, writes: [...], merges: [], markerRewrites: [] } }
+ * // => { ok: true, value: { summary: "stale", files: {...}, writes: [...], merges: [] } }
  */
 export function planUpdate(
   embedded: EmbeddedAssetsManifest,
@@ -248,7 +263,7 @@ export function planUpdate(
     for (const entry of embedded.entries) {
       files.sync.push(entry.path);
     }
-    return ok({ summary: "sync", files, writes: [], merges: [], markerRewrites: [] });
+    return ok({ summary: "sync", files, writes: [], merges: [] });
   }
 
   const files = emptyFileBuckets();
@@ -323,6 +338,5 @@ export function planUpdate(
     files,
     writes,
     merges,
-    markerRewrites: [],
   });
 }
