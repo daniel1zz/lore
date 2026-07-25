@@ -1,5 +1,5 @@
 /**
- * lore setup [--dry-run] [--uninstall] [--project] [--claude-dir <path>] [--yes] [--json]
+ * lore setup [--dry-run] [--uninstall] [--project] [--check] [--claude-dir <path>] [--yes] [--json]
  *
  * Thin CLI adapter wiring `SetupService` (global machine install into a
  * Claude Code config directory, conventionally `~/.claude`) and
@@ -8,6 +8,15 @@
  * `RealSetupFsReader`/`RealSetupFsWriter`, `RealMcpRegistrar`) — the FINAL
  * SPEC-046 wiring task, connecting every previously-merged service/port/
  * renderer into a reachable CLI verb (SPEC-046 §Design, task AC-046-E).
+ *
+ * `--check` (SPEC-076 §C3, task task-skill-implement-t4-lore-setup-check-read-only-projection,
+ * AC-076-2) is a FULLY SEPARATE, READ-ONLY dispatch — handled at the very top
+ * of `run()`, before `validateSetupFlags`'s `SetupMode` resolution even runs,
+ * since it composes with NONE of install/dry-run/uninstall/project's modes
+ * (mutually exclusive with `--uninstall`/`--dry-run`; `--check --project` is
+ * an explicit, named-exit-2 Scope-Alt — never a silent global-only check).
+ * Thin pipe over `../setup-check.js::runSetupCheck` — see that module's own
+ * doc for the zero-mutation-beyond-the-check-cache invariant.
  *
  * `--project --uninstall` (SPEC-060 §Design D2) is a FIFTH mode
  * (`"project-uninstall"`, `../setup-args.js::SetupMode`) reversing a prior
@@ -118,6 +127,7 @@ import {
   type SetupPathContext,
 } from "../setup-args.js";
 import { exitCode, formatError } from "../utils.js";
+import { runSetupCheck } from "../setup-check.js";
 
 // ─── Repo-root resolution (dev mode only — see setup-args.ts's module doc) ──
 // packages/lore/src/adapters/cli/commands/setup.ts -> repo root is 6 levels up.
@@ -568,6 +578,11 @@ export default defineCommand({
       type: "boolean",
       description: "Reverse a prior install via its setup manifest",
     },
+    check: {
+      type: "boolean",
+      description:
+        "Read-only freshness check against the embedded asset manifest — exit 0 sync / 3 stale, writes only the check cache",
+    },
     project: {
       type: "boolean",
       description: "Scaffold the CURRENT repo's Lore-governed project workflow instead of the global machine install",
@@ -588,6 +603,34 @@ export default defineCommand({
   async run({ args }) {
     const json = args.json === true;
     const claudeDirFlag = typeof args["claude-dir"] === "string" ? args["claude-dir"] : undefined;
+
+    // ── --check: fully separate, read-only dispatch — see header doc. ──────
+    if (args.check === true) {
+      const mutexFlag =
+        args.uninstall === true ? "--uninstall" : args["dry-run"] === true ? "--dry-run" : undefined;
+      if (mutexFlag !== undefined) {
+        process.stderr.write(
+          `Error: --check cannot be combined with ${mutexFlag} — a read-only check has no separate mutate mode.\n`,
+        );
+        process.exitCode = 2;
+        return;
+      }
+      if (args.project === true) {
+        process.stderr.write(
+          "Error: --check --project is not supported yet — run `lore setup --check` (without --project) " +
+            "to check the global machine install only; project-scaffold freshness checking is deferred.\n",
+        );
+        process.exitCode = 2;
+        return;
+      }
+      const checkTargetDir = resolveTargetDir({
+        ...(claudeDirFlag !== undefined ? { claudeDirFlag } : {}),
+        env: process.env,
+        homeDir: homedir(),
+      });
+      await runSetupCheck({ targetDir: checkTargetDir, json });
+      return;
+    }
 
     const validated = validateSetupFlags({
       dryRun: args["dry-run"] === true,
