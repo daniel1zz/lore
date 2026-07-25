@@ -1,28 +1,34 @@
 /**
- * SPEC-060 D4 — repo-root `CLAUDE.md` backup-then-overwrite step suite.
- * Exercises `flows/setup-project-flow.ts`'s `runClaudeMdStep` (not exported
- * — tested exclusively through `scaffoldProject`'s public surface) against an
- * in-memory `ProjectFsPort` fake, mirroring
- * `tests/unit/flows/setup-project-manifest.test.ts`'s established fixture
- * pattern.
+ * SPEC-076 §C1 D7 — repo-root `CLAUDE.md` marker-section rewrite step suite
+ * (migrated off SPEC-060 D4's original blanket backup-then-overwrite).
+ * Exercises `flows/setup-project-flow.ts`'s `runClaudeMdStep`/
+ * `computeClaudeMdCandidate` (not exported — tested exclusively through
+ * `scaffoldProject`'s public surface) against an in-memory `ProjectFsPort`
+ * fake, mirroring `tests/unit/flows/setup-project-manifest.test.ts`'s
+ * established fixture pattern. Six-dimension coverage of the SAME single
+ * step this suite has always covered — see
+ * `tests/integration/setup-user-once-marker.bun.test.ts` (AC-076-4) for the
+ * fuller three-legacy-form + user_once + fs-error-injection integration
+ * suite this task's own oracle names.
  *
  * Coverage:
- *   HAPPY:      no pre-existing CLAUDE.md -> plain write, no backup, "done"
+ *   HAPPY:      no pre-existing CLAUDE.md -> the whole file becomes the
+ *               marker-wrapped template, verbatim; no backup
  *   NEGATIVE:   an unreadable/missing CLAUDE.md.template asset -> the step
  *               reports "failed", every OTHER step still completes normally
- *   BOUNDARY:   pre-existing CLAUDE.md byte-identical to the template ->
- *               "skipped", no backup created
+ *   BOUNDARY:   pre-existing CLAUDE.md byte-identical to the (already
+ *               marker-wrapped) template -> "skipped", no backup created
  *   ERROR:      an injected write failure on a DIFFERING pre-existing
- *               CLAUDE.md leaves the original content on disk untouched and
- *               reports "failed"
- *   STATE:      pre-existing CLAUDE.md that DIFFERS from the template -> a
- *               backup is written under `.lore/.lore-backups/<iso>/CLAUDE.md`
- *               byte-identical to the pre-run file, and the target is
- *               overwritten with the template (AC-060-5); a SECOND run over
- *               the now-template-matching file performs 0 additional backups
+ *               CLAUDE.md (user-authored content) leaves the original
+ *               content on disk untouched and reports "failed"
+ *   STATE:      pre-existing differing (user-authored) CLAUDE.md -> the
+ *               marker-wrapped section is APPENDED (never a whole-file
+ *               overwrite), a backup of the pre-run bytes is written first
+ *               (AC-076-4/R3), and a SECOND run over the now marker-wrapped
+ *               file performs 0 additional backups (idempotent)
  *   REGRESSION: the manifest ledger tracks "CLAUDE.md" after a write
  *
- * @spec_ref AC-060-5
+ * @spec_ref AC-076-4
  */
 
 import { describe, expect, it } from "vitest";
@@ -50,7 +56,13 @@ const HOOK_ASSET_CONTENTS: Record<string, string> = {
 };
 const TREE_YAML_CONTENT = "root: prd\n";
 const GITIGNORE_BLOCK = "# --- lore ---\n.DS_Store\nnode_modules/\ndist/\ncoverage/\n.agent-worktree-marker\n.lore/lore.db*\n";
-const CLAUDE_MD_TEMPLATE = "# CLAUDE.md\n\nLore-governed workflow stub.\n\n## Module Index\n";
+// Mirrors the shipped `assets/project/CLAUDE.md.template`'s own marker pair
+// verbatim (module-private constants, not imported — same convention this
+// file already used for its OTHER fixture constants).
+const CLAUDE_MD_MARKER_START = "# ─── lore governance (managed) ───";
+const CLAUDE_MD_MARKER_END = "# ─── end lore governance ───";
+const CLAUDE_MD_BODY = "# CLAUDE.md\n\nLore-governed workflow stub.\n\n## Module Index\n";
+const CLAUDE_MD_TEMPLATE = `${CLAUDE_MD_MARKER_START}\n${CLAUDE_MD_BODY}${CLAUDE_MD_MARKER_END}\n`;
 
 interface FakeFile {
   content: string;
@@ -145,8 +157,8 @@ const fixedNow = (): string => FIXED_NOW;
 
 // ─── HAPPY ───────────────────────────────────────────────────────────────────
 
-describe("setup-project-flow — CLAUDE.md backup-then-overwrite (SPEC-060 D4) — HAPPY", () => {
-  it("no pre-existing CLAUDE.md: plain write, no backup", async () => {
+describe("setup-project-flow — CLAUDE.md marker-section rewrite (SPEC-076 D7) — HAPPY", () => {
+  it("no pre-existing CLAUDE.md: the whole file becomes the marker-wrapped template, no backup", async () => {
     const fs = new InMemoryProjectFs();
     const result = await scaffoldProject(makeDeps(fs), { repoDir: REPO_DIR }, fixedNow);
     expect(result.ok).toBe(true);
@@ -161,7 +173,7 @@ describe("setup-project-flow — CLAUDE.md backup-then-overwrite (SPEC-060 D4) �
 
 // ─── NEGATIVE ────────────────────────────────────────────────────────────────
 
-describe("setup-project-flow — CLAUDE.md backup-then-overwrite (SPEC-060 D4) — NEGATIVE", () => {
+describe("setup-project-flow — CLAUDE.md marker-section rewrite (SPEC-076 D7) — NEGATIVE", () => {
   it("unreadable CLAUDE.md.template asset: step reports failed, every other step still completes", async () => {
     const fs = new InMemoryProjectFs();
     const deps = makeDeps(fs, { "CLAUDE.md.template": undefined });
@@ -183,8 +195,8 @@ describe("setup-project-flow — CLAUDE.md backup-then-overwrite (SPEC-060 D4) �
 
 // ─── BOUNDARY ────────────────────────────────────────────────────────────────
 
-describe("setup-project-flow — CLAUDE.md backup-then-overwrite (SPEC-060 D4) — BOUNDARY", () => {
-  it("pre-existing CLAUDE.md byte-identical to the template: skipped, no backup", async () => {
+describe("setup-project-flow — CLAUDE.md marker-section rewrite (SPEC-076 D7) — BOUNDARY", () => {
+  it("pre-existing CLAUDE.md byte-identical to the (marker-wrapped) template: skipped, no backup", async () => {
     const fs = new InMemoryProjectFs();
     fs.files.set(CLAUDE_MD_PATH, { content: CLAUDE_MD_TEMPLATE, mode: 0o644 });
 
@@ -201,8 +213,8 @@ describe("setup-project-flow — CLAUDE.md backup-then-overwrite (SPEC-060 D4) �
 
 // ─── ERROR ───────────────────────────────────────────────────────────────────
 
-describe("setup-project-flow — CLAUDE.md backup-then-overwrite (SPEC-060 D4) — ERROR", () => {
-  it("injected write failure on a differing pre-existing CLAUDE.md: original left untouched, reports failed", async () => {
+describe("setup-project-flow — CLAUDE.md marker-section rewrite (SPEC-076 D7) — ERROR", () => {
+  it("injected write failure on a differing (user-authored) pre-existing CLAUDE.md: original left untouched, reports failed", async () => {
     const fs = new InMemoryProjectFs();
     const original = "# CLAUDE.md\n\nHand-written by lore-init-context.\n";
     fs.files.set(CLAUDE_MD_PATH, { content: original, mode: 0o644 });
@@ -221,8 +233,8 @@ describe("setup-project-flow — CLAUDE.md backup-then-overwrite (SPEC-060 D4) �
 
 // ─── STATE ───────────────────────────────────────────────────────────────────
 
-describe("setup-project-flow — CLAUDE.md backup-then-overwrite (SPEC-060 D4) — STATE", () => {
-  it("AC-060-5: pre-existing differing CLAUDE.md is backed up byte-identically then overwritten; a second run backs up 0 more", async () => {
+describe("setup-project-flow — CLAUDE.md marker-section rewrite (SPEC-076 D7) — STATE", () => {
+  it("AC-076-4: pre-existing differing (user-authored) CLAUDE.md is preserved and backed up, the managed section is APPENDED; a second run appends 0 more", async () => {
     const fs = new InMemoryProjectFs();
     const original = "# CLAUDE.md\n\nHand-written by lore-init-context.\n";
     fs.files.set(CLAUDE_MD_PATH, { content: original, mode: 0o644 });
@@ -233,8 +245,9 @@ describe("setup-project-flow — CLAUDE.md backup-then-overwrite (SPEC-060 D4) �
     if (!first.ok) return;
 
     expect(first.value.claude_md.status).toBe("done");
-    // The target is now the template — overwritten.
-    expect(fs.readFile(CLAUDE_MD_PATH)).toBe(CLAUDE_MD_TEMPLATE);
+    // Every original byte survives as an exact prefix; the managed section is appended after it.
+    const afterFirst = fs.readFile(CLAUDE_MD_PATH) as string;
+    expect(afterFirst).toBe(`${original}${CLAUDE_MD_TEMPLATE}`);
 
     // Exactly one backup, at the deterministic destination path, byte-identical to the pre-run file.
     const expectedBackupPath = `.lore/.lore-backups/${FIXED_NOW}/CLAUDE.md`;
@@ -242,20 +255,20 @@ describe("setup-project-flow — CLAUDE.md backup-then-overwrite (SPEC-060 D4) �
     expect(fs.readFile(`${REPO_DIR}/${expectedBackupPath}`)).toBe(original);
     expect(fs.backupCalls).toBe(1);
 
-    // Second run: the file now matches the template — no further backup/overwrite.
+    // Second run: the file is now marker-wrapped — no further backup/append.
     const second = await scaffoldProject(deps, { repoDir: REPO_DIR }, fixedNow);
     expect(second.ok).toBe(true);
     if (!second.ok) return;
 
     expect(second.value.claude_md.status).toBe("skipped");
     expect(second.value.backups).toEqual([]);
-    expect(fs.readFile(CLAUDE_MD_PATH)).toBe(CLAUDE_MD_TEMPLATE);
+    expect(fs.readFile(CLAUDE_MD_PATH)).toBe(afterFirst);
   });
 });
 
 // ─── REGRESSION ──────────────────────────────────────────────────────────────
 
-describe("setup-project-flow — CLAUDE.md backup-then-overwrite (SPEC-060 D4) — REGRESSION", () => {
+describe("setup-project-flow — CLAUDE.md marker-section rewrite (SPEC-076 D7) — REGRESSION", () => {
   it("manifest tracks CLAUDE.md after a write", async () => {
     const fs = new InMemoryProjectFs();
     const result = await scaffoldProject(makeDeps(fs), { repoDir: REPO_DIR }, fixedNow);
