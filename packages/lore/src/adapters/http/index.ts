@@ -7,7 +7,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { App } from "../../app.js";
-import { authenticateRequest, extractSessionCookie } from "./auth.js";
+import { authenticateRequest, extractSessionCookie, ALLOWED_ORIGINS } from "./auth.js";
 import { handleApiRoute, handleLocalBootstrap } from "./routes.js";
 import { jsonError, corsPreflightResponse, applyCorsOrigin } from "./middleware.js";
 import { createMachineAuthStores, type MachineAuthStores } from "./machine-auth.js";
@@ -38,6 +38,17 @@ export interface HttpConfig {
    * takes EXACTLY the same path it did before SPEC-078 (R-15), byte-identical.
    */
   mountRegistry?: MountRegistry<App>;
+  /**
+   * Origin allowlist for CSRF/bootstrap Origin checks (`POST /api/auth/local-bootstrap`
+   * and `/api/dashboard/*`'s CSRF guard) — defaults to `ALLOWED_ORIGINS` (auth.ts's
+   * default-port 8787/5173 list) when omitted, byte-identical to pre-existing behavior.
+   * A caller running the API and the Vite dev server on non-default ports MUST compute
+   * its own allowlist via `auth.ts::buildAllowedOrigins(apiPort, dashPort)` and pass it
+   * here — `lore dashboard` does this with the REAL port it launches Vite on (task-
+   * dashboard-bootstrap-origin-allowlist-hardcodes-port-5173): otherwise a request from
+   * that actual origin 403s and the SPA never mints a session cookie.
+   */
+  allowedOrigins?: readonly string[];
 }
 
 /**
@@ -96,6 +107,7 @@ async function dispatchProjectRequest(
   mountRegistry: MountRegistry<App>,
   primaryApp: App,
   getMachineAuth: () => MachineAuthStores,
+  allowedOrigins: readonly string[],
 ): Promise<Response> {
   const { name, rest } = match;
   const entry = mountRegistry.resolve(name);
@@ -145,7 +157,7 @@ async function dispatchProjectRequest(
     const strippedUrl = new URL(url.toString());
     strippedUrl.pathname = rest;
 
-    const response = await handleApiRoute(req, strippedUrl, entry.app, actor, getMachineAuth);
+    const response = await handleApiRoute(req, strippedUrl, entry.app, actor, getMachineAuth, allowedOrigins);
     if (response === null) {
       return jsonError(
         { code: "NOT_FOUND", message: `Route not found: ${req.method} ${strippedUrl.pathname}` },
@@ -175,6 +187,11 @@ export function startHttpServer(app: App, config: HttpConfig = {}): ReturnType<t
   const port = config.port ?? 3456;
   const hostname = config.host ?? "localhost";
   const mountRegistry = config.mountRegistry;
+  // reason: task-dashboard-bootstrap-origin-allowlist-hardcodes-port-5173 — resolved ONCE
+  // per server instance (not per-request) and threaded to every Origin-checking call site
+  // below. Omitted config.allowedOrigins → default-port ALLOWED_ORIGINS, byte-identical to
+  // pre-existing behavior (R-15-style regression guarantee).
+  const allowedOrigins = config.allowedOrigins ?? ALLOWED_ORIGINS;
   // reason: SPEC-078 D7 — a stable per-PROCESS identity label (not per-request), generated
   // once here regardless of whether a registry was supplied (cheap, and keeps this value's
   // provenance simple — "one per startHttpServer() call" — rather than conditionally
@@ -217,7 +234,7 @@ export function startHttpServer(app: App, config: HttpConfig = {}): ReturnType<t
 
       // CORS preflight
       if (req.method === "OPTIONS") {
-        return corsPreflightResponse(origin);
+        return corsPreflightResponse(origin, allowedOrigins);
       }
 
       // Health check — no auth required
@@ -227,6 +244,7 @@ export function startHttpServer(app: App, config: HttpConfig = {}): ReturnType<t
             headers: { "Content-Type": "application/json" },
           }),
           origin,
+          allowedOrigins,
         );
       }
 
@@ -236,7 +254,7 @@ export function startHttpServer(app: App, config: HttpConfig = {}): ReturnType<t
         // + Origin allowlist for its own auth. It must run BEFORE the bearer/cookie gate to avoid
         // a chicken-and-egg deadlock (no session yet → no auth → can't bootstrap). SPEC-016 §3.2.
         if (req.method === "POST" && url.pathname === "/api/auth/local-bootstrap") {
-          return applyCorsOrigin(await handleLocalBootstrap(req, getMachineAuth()), origin);
+          return applyCorsOrigin(await handleLocalBootstrap(req, getMachineAuth(), allowedOrigins), origin, allowedOrigins);
         }
 
         // SPEC-078 D4 — multi-project path shim. Runs BEFORE the single-app auth gate
@@ -248,8 +266,8 @@ export function startHttpServer(app: App, config: HttpConfig = {}): ReturnType<t
         if (mountRegistry !== undefined) {
           const projectMatch = matchProjectPrefix(url.pathname);
           if (projectMatch !== null) {
-            const response = await dispatchProjectRequest(req, url, projectMatch, mountRegistry, app, getMachineAuth);
-            return applyCorsOrigin(response, origin);
+            const response = await dispatchProjectRequest(req, url, projectMatch, mountRegistry, app, getMachineAuth, allowedOrigins);
+            return applyCorsOrigin(response, origin, allowedOrigins);
           }
         }
 
@@ -261,7 +279,7 @@ export function startHttpServer(app: App, config: HttpConfig = {}): ReturnType<t
         const cookieSessionStore = extractSessionCookie(req) !== null ? getMachineAuth().sessionStore : undefined;
         const authResult = await authenticateRequest(req, app.apiKeyStore, cookieSessionStore);
         if (!authResult.ok) {
-          return applyCorsOrigin(jsonError({ code: "UNAUTHORIZED", message: "Invalid or missing API key" }, 401), origin);
+          return applyCorsOrigin(jsonError({ code: "UNAUTHORIZED", message: "Invalid or missing API key" }, 401), origin, allowedOrigins);
         }
 
         const actor = authResult.value;
@@ -274,22 +292,24 @@ export function startHttpServer(app: App, config: HttpConfig = {}): ReturnType<t
           return applyCorsOrigin(
             handleGetProjects(mountRegistry, { port: server.port ?? port, registryName: instanceRegistryName }),
             origin,
+            allowedOrigins,
           );
         }
 
-        const response = await handleApiRoute(req, url, app, actor, getMachineAuth);
+        const response = await handleApiRoute(req, url, app, actor, getMachineAuth, allowedOrigins);
 
         if (response === null) {
           return applyCorsOrigin(
             jsonError({ code: "NOT_FOUND", message: `Route not found: ${req.method} ${url.pathname}` }, 404),
             origin,
+            allowedOrigins,
           );
         }
 
-        return applyCorsOrigin(response, origin);
+        return applyCorsOrigin(response, origin, allowedOrigins);
       }
 
-      return applyCorsOrigin(jsonError({ code: "NOT_FOUND", message: "Not Found" }, 404), origin);
+      return applyCorsOrigin(jsonError({ code: "NOT_FOUND", message: "Not Found" }, 404), origin, allowedOrigins);
     },
 
     error(err) {

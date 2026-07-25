@@ -9,10 +9,17 @@
  *     (index.ts), via corsPreflightResponse / applyCorsOrigin. This keeps every downstream
  *     route handler (routes.ts, dashboard-routes.ts) free of CORS/origin plumbing — SSOT.
  *   - Access-Control-Allow-Origin is a case-sensitive echo of the request's Origin header,
- *     only when that Origin is a member of ALLOWED_ORIGINS (auth.ts). No wildcard is ever
+ *     only when that Origin is a member of the active allowlist. No wildcard is ever
  *     emitted. Requests with no Origin header (non-browser bearer-token API clients) get no
  *     Allow-Origin header at all — correct, since CORS is a browser-enforced mechanism and
  *     non-browser callers never evaluate it. Source: SPEC-027 AC-DH-5.
+ *   - isOriginAllowed / corsPreflightResponse / applyCorsOrigin all take an OPTIONAL
+ *     `allowedOrigins` parameter, defaulting to `ALLOWED_ORIGINS` (auth.ts's default-port
+ *     8787/5173 list) — production `index.ts` threads the server's ACTUAL configured
+ *     allowlist (`HttpConfig.allowedOrigins`, built via `auth.ts::buildAllowedOrigins`) so
+ *     a non-default `--dashboard-port`/`--api-port` pair is honored; every pre-existing
+ *     direct call site (tests, this module's own default) keeps working unchanged.
+ *     Source: task-dashboard-bootstrap-origin-allowlist-hardcodes-port-5173.
  * Side-effect class: pure (all functions).
  */
 
@@ -107,15 +114,18 @@ export function corsHeaders(extra: Record<string, string> = {}): Record<string, 
 }
 
 /**
- * Check whether a request Origin header value is in the SPEC-016 allowlist.
+ * Check whether a request Origin header value is in the active allowlist.
  * Reused as the single source of truth for CORS origin echoing (SPEC-027 AC-DH-5) —
  * do not introduce a second allowlist.
  *
  * @param origin - The request's `Origin` header value, or null if absent (non-browser caller).
- * @returns true iff origin is present and exactly matches an entry in ALLOWED_ORIGINS.
+ * @param allowedOrigins - The allowlist to check against; defaults to the default-port
+ *   `ALLOWED_ORIGINS` (auth.ts). Production callers pass the server's actual configured
+ *   allowlist (`HttpConfig.allowedOrigins`, index.ts) so a non-default port is honored.
+ * @returns true iff origin is present and exactly matches an entry in allowedOrigins.
  */
-export function isOriginAllowed(origin: string | null): origin is (typeof ALLOWED_ORIGINS)[number] {
-  return origin !== null && (ALLOWED_ORIGINS as readonly string[]).includes(origin);
+export function isOriginAllowed(origin: string | null, allowedOrigins: readonly string[] = ALLOWED_ORIGINS): origin is string {
+  return origin !== null && allowedOrigins.includes(origin);
 }
 
 /**
@@ -124,9 +134,10 @@ export function isOriginAllowed(origin: string | null): origin is (typeof ALLOWE
  * Access-Control-Allow-Origin entirely (never a wildcard, never a disallowed echo).
  *
  * @param origin - The preflight request's `Origin` header value, or null if absent.
+ * @param allowedOrigins - The allowlist to check against; defaults to `ALLOWED_ORIGINS`.
  */
-export function corsPreflightResponse(origin: string | null): Response {
-  const extra = isOriginAllowed(origin)
+export function corsPreflightResponse(origin: string | null, allowedOrigins: readonly string[] = ALLOWED_ORIGINS): Response {
+  const extra = isOriginAllowed(origin, allowedOrigins)
     ? { "Access-Control-Allow-Origin": origin, "Vary": "Origin" }
     : {};
   return new Response(null, { status: 204, headers: corsHeaders(extra) });
@@ -141,12 +152,13 @@ export function corsPreflightResponse(origin: string | null): Response {
  *
  * @param response - The Response produced by a route handler (jsonOk / jsonError / custom).
  * @param origin - The request's `Origin` header value, or null if absent.
+ * @param allowedOrigins - The allowlist to check against; defaults to `ALLOWED_ORIGINS`.
  * @returns The same response when origin is absent or not allowlisted (no header added —
  *   correct for non-browser bearer-token callers, which never send Origin). A new Response
  *   with Access-Control-Allow-Origin + Vary: Origin set when origin is allowlisted.
  */
-export function applyCorsOrigin(response: Response, origin: string | null): Response {
-  if (!isOriginAllowed(origin)) return response;
+export function applyCorsOrigin(response: Response, origin: string | null, allowedOrigins: readonly string[] = ALLOWED_ORIGINS): Response {
+  if (!isOriginAllowed(origin, allowedOrigins)) return response;
 
   const headers = new Headers(response.headers);
   headers.set("Access-Control-Allow-Origin", origin);
