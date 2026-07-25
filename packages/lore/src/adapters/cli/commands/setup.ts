@@ -1,5 +1,18 @@
 /**
- * lore setup [--dry-run] [--uninstall] [--project] [--check] [--claude-dir <path>] [--yes] [--json]
+ * lore setup [--dry-run] [--uninstall] [--project] [--check] [--claude-dir <path>] [--force-diverged] [--yes] [--json]
+ *
+ * `--force-diverged` (SPEC-076 §C3 D2, task
+ * task-skill-implement-t5-converge-hardening-diverged-skip-force) — install/
+ * converge mode only. On the UPDATE path (an installed manifest already
+ * exists — a fresh install has no "diverged" concept at all), a managed
+ * file whose on-disk bytes have been user-edited since the last converge is,
+ * by default, left UNTOUCHED and reported via the receipt's
+ * `skippedDiverged` list (plus a `lore setup --yes --force-diverged` repair
+ * line per path, non-JSON mode). Passing this flag overrides that default:
+ * every diverged path is backed up (same `.lore-backups` mechanism as an
+ * `outdated` file) and overwritten instead. Mutually exclusive with
+ * `--check` (a read-only projection has no write-time override to make;
+ * checked alongside `--uninstall`/`--dry-run` in the same early mutex).
  *
  * Thin CLI adapter wiring `SetupService` (global machine install into a
  * Claude Code config directory, conventionally `~/.claude`) and
@@ -484,10 +497,28 @@ async function runDryRun(service: SetupService, targetDir: string, binPath: stri
   process.exitCode = 0;
 }
 
+/**
+ * Renders the diverged-skip section (SPEC-076 §C3 D2, task
+ * task-skill-implement-t5-converge-hardening-diverged-skip-force) — one line
+ * per skipped path plus a literal repair command, appended directly here
+ * (rather than inside `renderInstallReceipt`, `../setup-render.js`, which is
+ * a sibling task's claimed anchor). No-op when `skippedDiverged` is empty
+ * (fresh install, or an update converge with nothing diverged).
+ */
+function renderDivergedSkipSection(skippedDiverged: string[]): void {
+  if (skippedDiverged.length === 0) return;
+  console.log("");
+  console.log(`skipped (diverged, ${skippedDiverged.length}) — user-modified, not overwritten:`);
+  for (const p of skippedDiverged) {
+    console.log(`  ${p}`);
+    console.log("    repair: lore setup --yes --force-diverged");
+  }
+}
+
 async function runInstall(
   service: SetupService,
   mcpRegistrar: CapturingMcpRegistrar,
-  opts: { targetDir: string; binPath: string; json: boolean; yes: boolean },
+  opts: { targetDir: string; binPath: string; json: boolean; yes: boolean; forceDiverged: boolean },
 ): Promise<void> {
   const proceed = await confirmOrReport({
     yes: opts.yes,
@@ -504,7 +535,7 @@ async function runInstall(
   });
   if (!proceed) return;
 
-  const result = await service.install({ targetDir: opts.targetDir, binPath: opts.binPath });
+  const result = await service.install({ targetDir: opts.targetDir, binPath: opts.binPath, forceDiverged: opts.forceDiverged });
   if (!result.ok) {
     process.stderr.write(formatError(result.error) + "\n");
     process.exitCode = exitCode(result.error);
@@ -516,6 +547,7 @@ async function runInstall(
     console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
   } else {
     console.log(renderInstallReceipt(result.value, ctx));
+    renderDivergedSkipSection(result.value.skippedDiverged);
   }
   process.exitCode = mcpOutcomeExitCode(result.value);
 }
@@ -591,6 +623,11 @@ export default defineCommand({
       type: "string",
       description: "Override the target Claude Code config directory (default: $CLAUDE_CONFIG_DIR or ~/.claude)",
     },
+    "force-diverged": {
+      type: "boolean",
+      description:
+        "Install/converge mode only: overwrite diverged (user-modified) managed files instead of skipping them — backs up the user's version first (SPEC-076 §C3 D2)",
+    },
     yes: {
       type: "boolean",
       description: "Skip the confirmation prompt before a mutating run (required for non-interactive invocations)",
@@ -607,7 +644,13 @@ export default defineCommand({
     // ── --check: fully separate, read-only dispatch — see header doc. ──────
     if (args.check === true) {
       const mutexFlag =
-        args.uninstall === true ? "--uninstall" : args["dry-run"] === true ? "--dry-run" : undefined;
+        args.uninstall === true
+          ? "--uninstall"
+          : args["dry-run"] === true
+            ? "--dry-run"
+            : args["force-diverged"] === true
+              ? "--force-diverged"
+              : undefined;
       if (mutexFlag !== undefined) {
         process.stderr.write(
           `Error: --check cannot be combined with ${mutexFlag} — a read-only check has no separate mutate mode.\n`,
@@ -699,6 +742,12 @@ export default defineCommand({
       await runUninstall(service, mcpRegistrar, { targetDir, binPath, json, yes: args.yes === true });
       return;
     }
-    await runInstall(service, mcpRegistrar, { targetDir, binPath, json, yes: args.yes === true });
+    await runInstall(service, mcpRegistrar, {
+      targetDir,
+      binPath,
+      json,
+      yes: args.yes === true,
+      forceDiverged: args["force-diverged"] === true,
+    });
   },
 });

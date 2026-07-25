@@ -30,15 +30,17 @@
  *     (`../real-setup-fs.js`) — the SAME atomic temp+rename implementation
  *     `SetupService` itself uses for every real asset write, reused here
  *     rather than hand-rolling a second atomic-write path.
- *   - `MANIFEST_FILENAME` is a DELIBERATE literal duplicate of
- *     `../../service/setup-service.ts`'s own private (unexported) constant of
- *     the same name — that module is SPEC-076 T5's exclusively claimed
- *     anchor (concurrent worktree dispatch), so this module cannot import it.
- *     The filename itself is part of SPEC-046's stable on-disk manifest
- *     contract, not something either task may change unilaterally; a
+ *   - `MANIFEST_FILENAME` is imported from `../../service/setup-service.ts`
+ *     (SPEC-076 T5) — that module exported its own constant of the same name
+ *     once T5 landed, replacing what was previously a DELIBERATE literal
+ *     duplicate here (T4 predates T5; at the time this module was written,
+ *     `setup-service.ts` was a concurrently-claimed sibling task's exclusive
+ *     anchor, so this module carried its own copy of SPEC-046's stable
+ *     on-disk manifest-filename contract rather than importing it). A
  *     regression test in the paired integration suite reads a REAL manifest
  *     `SetupService.install()` wrote, which would fail loud (manifest not
- *     found → treated as "fresh target") if the two literals ever diverged.
+ *     found → treated as "fresh target") if the single SSOT literal were
+ *     ever wrong.
  *   - The embedded manifest handed to `planUpdate` is FILTERED to exclude
  *     `kind: "project"` entries — `assets/project/` is the PER-REPO project
  *     scaffold's own asset set (`lore setup --project`'s separate
@@ -88,12 +90,10 @@ import type { LoreError, Result, SetupManifest, UpdateProbe } from "@lore/core";
 import { EMBEDDED_ASSETS_MANIFEST, LORE_BINARY_VERSION } from "../../generated/assets-manifest.js";
 import type { EmbeddedAssetEntry } from "../../generated/assets-manifest.js";
 import { RealSetupFsWriter } from "../real-setup-fs.js";
+import { MANIFEST_FILENAME } from "../../service/setup-service.js";
 import { exitCode, formatError } from "./utils.js";
 
 // ─── On-disk artifact filenames ─────────────────────────────────────────────
-
-/** See module doc's "MANIFEST_FILENAME is a deliberate literal duplicate" invariant. */
-const MANIFEST_FILENAME = ".lore-setup-manifest.json";
 
 /** `<claude-dir>/.lore-setup-check.json` — SPEC-076 §C6's check cache path. */
 const CHECK_CACHE_FILENAME = ".lore-setup-check.json";
