@@ -141,13 +141,29 @@
  *     (best-effort — the cache is purely advisory, C6's fail-open posture;
  *     a stale cache self-corrects on its own 24h TTL or the NEXT successful
  *     converge).
+ *   - **SPEC-076 §C5, T7 — orphan pruning + backup hygiene.** `install()`
+ *     wires a `hooksPathPrefix` (`"<targetDir>/hooks/"`) into every
+ *     `settings-hook` asset's `mergeSettings` call (`resolvePayload`) so a
+ *     PAST lore hook registration no longer present in the current asset
+ *     payload at all (renamed/removed upstream) is pruned instead of
+ *     surviving forever as a dead entry — see `@lore/core`'s
+ *     `merge-settings.ts` for the pure matching rule. Separately, a
+ *     successful write phase is ALWAYS followed by `pruneBackupRuns`,
+ *     trimming `<targetDir>/.lore-backups/` to the `BACKUP_RUNS_KEEP` (5)
+ *     most recent run directories — best-effort (a thrown failure here is
+ *     caught and degraded to an advisory stderr line, NEVER a failed
+ *     install; this task's own Scope-Alt). `SetupFsReader.listDir` (the port
+ *     method this needs) is OPTIONAL/additive — a reader that doesn't
+ *     implement it makes pruning a silent no-op, never an error.
  *
  * Side-effect class: IO (delegates ALL of it to the four injected ports —
  *   this class itself makes no direct `fs`/`child_process` calls).
  *
  * Source: SPEC-046 §Design ("`service/setup-service.ts`"), §Scope, invariants I1–I5.
  *   SPEC-076 §C3 (five-state converge hardening), §C4 (manifest version
- *   fields), §C7, D2 — task task-skill-implement-t5-converge-hardening-diverged-skip-force.
+ *   fields), §C5 (orphan pruning + backup hygiene, T7), §C7, D2 —
+ *   task task-skill-implement-t5-converge-hardening-diverged-skip-force,
+ *   task-skill-implement-t7-mergesettings-orphan-pruning-backup.
  */
 
 import { createHash } from "node:crypto";
@@ -209,6 +225,21 @@ export interface SetupFsReader {
    * contract is violated).
    */
   stat(path: string): Promise<{ exists: boolean; sha256?: string }>;
+  /**
+   * OPTIONAL (SPEC-076 §C5, T7, additive) — lists the IMMEDIATE entries of
+   * an ABSOLUTE directory path (never recursing into subdirectories). A
+   * missing directory resolves to `[]` — silent, mirroring
+   * `SetupFsWriter.removeDirIfEmpty`'s "missing target is a no-op" contract
+   * — never an error. Absent on a `SetupFsReader` implementation that
+   * predates this capability (every pre-T7 fake in this codebase's test
+   * suites); `SetupService`'s backup-hygiene sweep (`pruneBackupRuns`)
+   * treats a missing `listDir` as "pruning unsupported by this port" and
+   * silently no-ops rather than failing the install — the SAME
+   * optional-capability-detection shape `GateEnforcer`/`claimTtlMinutes?`
+   * already use elsewhere in this codebase (see `service/CLAUDE.md`), not a
+   * new pattern.
+   */
+  listDir?(path: string): Promise<Array<{ name: string; isDirectory: boolean }>>;
 }
 
 /**
@@ -312,6 +343,24 @@ export interface SetupReceipt {
 export const MANIFEST_FILENAME = ".lore-setup-manifest.json";
 const MANIFEST_VERSION = "1";
 const BACKUPS_DIRNAME = ".lore-backups";
+/**
+ * `.lore-backups/` run-directory retention count (SPEC-076 §C5, T7) — the
+ * 6th-oldest-and-beyond conforming run directory is pruned on every
+ * successful `install()` call. See `pruneBackupRuns`.
+ */
+const BACKUP_RUNS_KEEP = 5;
+/**
+ * Shape of a GENUINE `.lore-backups/<run>` directory name — exactly what
+ * `defaultNow()` (`new Date().toISOString()`, e.g.
+ * `"2026-01-08T00:00:00.000Z"`) produces, and what `install()`'s own
+ * `nowIso` names every backup-run directory it creates. A directory name
+ * that does NOT match this shape is foreign/user-created and is NEVER a
+ * pruning candidate, regardless of how many conforming directories already
+ * exceed {@link BACKUP_RUNS_KEEP} (SPEC-076 §C5 safety requirement).
+ * Lexicographic sort of matching names equals chronological order for this
+ * exact format (the same property `uninstall` already relies on).
+ */
+const RUN_DIR_NAME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 /** Synthetic manifest path for the `mcp` kind entry — there is no real file behind it. */
 const MCP_ENTRY_PATH = "mcp:lore";
 /**
@@ -539,6 +588,19 @@ export class SetupService {
       return err(describeWriterFailure("install", cause, { committedBackups, committedWrites, committedRemovals }));
     }
 
+    // ── Backup hygiene (SPEC-076 §C5, T7) — best-effort, NEVER aborts the
+    // install (this task's Scope-Alt: an advisory stderr line, no
+    // SetupReceipt field). Runs after a successful write phase, on every
+    // install call — independent of whether THIS run itself wrote/backed up
+    // anything.
+    try {
+      await this.pruneBackupRuns(opts.targetDir);
+    } catch (cause) {
+      process.stderr.write(
+        `lore setup install: warning — failed to prune old .lore-backups run directories: ${describeCaught(cause)}\n`,
+      );
+    }
+
     // ── MCP registration (never aborts the run — see module invariants) ────
     const previousMcpEntry = current?.entries.find((e) => e.kind === "mcp");
     const mcpResult = await this.mcpRegistrar.add(opts.binPath);
@@ -677,6 +739,42 @@ export class SetupService {
       manifestPath,
       skippedDiverged,
     });
+  }
+
+  /**
+   * Prunes `<targetDir>/.lore-backups/` down to the {@link BACKUP_RUNS_KEEP}
+   * most recent run directories (SPEC-076 §C5, T7). Conforming candidates
+   * (`RUN_DIR_NAME_RE`) are sorted lexicographically (== chronologically for
+   * ISO8601) and the oldest excess ones are removed via `this.writer.remove`
+   * (recursive — matches a backup-run directory's own tree). A
+   * non-conforming (foreign/user-created) directory name is NEVER a
+   * candidate, unconditionally. A `this.reader` without `listDir` support
+   * means "pruning unsupported by this port" — a silent no-op (see
+   * `SetupFsReader.listDir`'s own doc).
+   *
+   * @param targetDir - Resolved, absolute (same param `install` received).
+   * @throws Whatever `this.reader.listDir` / `this.writer.remove` throw —
+   *   this method adds no swallowing of its own; `install`'s call site is
+   *   responsible for degrading a thrown failure here to an advisory stderr
+   *   warning without aborting the run (this task's own Scope-Alt: "prune
+   *   warning channel = stderr line, no receipt section").
+   */
+  private async pruneBackupRuns(targetDir: string): Promise<void> {
+    if (this.reader.listDir === undefined) return;
+
+    const backupsDir = path.join(targetDir, BACKUPS_DIRNAME);
+    const entries = await this.reader.listDir(backupsDir);
+    const runDirNames = entries
+      .filter((e) => e.isDirectory && RUN_DIR_NAME_RE.test(e.name))
+      .map((e) => e.name)
+      .sort();
+
+    if (runDirNames.length <= BACKUP_RUNS_KEEP) return;
+
+    const toRemove = runDirNames.slice(0, runDirNames.length - BACKUP_RUNS_KEEP);
+    for (const name of toRemove) {
+      await this.writer.remove(path.join(backupsDir, name));
+    }
   }
 
   /**
@@ -892,7 +990,20 @@ async function resolvePayload(
       }));
 
       const existingRaw = await reader.read(path.join(targetDir, file.path));
-      const mergeResult = mergeSettings({ existingRaw, loreEntries });
+      // SPEC-076 §C5 (T7): enable orphan pruning — `hooksPathPrefix` mirrors
+      // `distribution-hooks.ts::buildHookSettingsEntries`'s OWN literal
+      // `${claudeDir}/hooks/` concatenation (never `path.join`, no OS
+      // separator translation — command strings are plain
+      // `"<runner> <path>"` shell text, not filesystem paths this process
+      // resolves; a trailing `/` on `targetDir` is stripped the same way
+      // that function tolerates one, so both `"/x/.claude"` and
+      // `"/x/.claude/"` compute an identical, double-slash-free prefix).
+      // `mergeSettings` matches via `command.includes(...)` specifically
+      // because a real command is prefixed with a runner (`"node "`/
+      // `"bash "`), never a bare path — see that module's own doc.
+      const trimmedTargetDir = targetDir.endsWith("/") ? targetDir.slice(0, -1) : targetDir;
+      const hooksPathPrefix = `${trimmedTargetDir}/hooks/`;
+      const mergeResult = mergeSettings({ existingRaw, loreEntries, hooksPathPrefix });
       if (!mergeResult.ok) return mergeResult;
 
       const mergedContent = `${JSON.stringify(mergeResult.value.merged, null, 2)}\n`;

@@ -25,6 +25,10 @@
  *     `buildExistingFilesMap`, which already fails loud on an
  *     `exists:true`-with-no-sha256 contract violation but has no comparable
  *     escape hatch for a `stat` throw).
+ *   - **SPEC-076 §C5, T7** — `RealSetupFsReader.listDir` (the OPTIONAL
+ *     `SetupFsReader` capability `SetupService.pruneBackupRuns` needs)
+ *     mirrors `read`'s ENOENT-vs-other-failure split: a missing directory
+ *     resolves to `[]`, any OTHER `readdirSync` failure re-throws.
  *   - `RealSetupFsWriter.write` is ATOMIC — content is written to a sibling
  *     `<path>.tmp-<pid>-<counter>` file (never a shared/predictable name
  *     across concurrent calls in the SAME process) then renamed onto `path`
@@ -82,6 +86,7 @@ import {
   existsSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmdirSync,
@@ -124,6 +129,23 @@ export class RealSetupFsReader implements SetupFsReader {
       return { exists: true, sha256: createHash("sha256").update(content).digest("hex") };
     } catch {
       return { exists: false };
+    }
+  }
+
+  /**
+   * SPEC-076 §C5 (T7) — real implementation of `SetupFsReader`'s OPTIONAL
+   * `listDir`. A missing directory resolves to `[]` (mirrors `read`'s
+   * ENOENT-is-not-an-error contract); any OTHER read failure re-throws, same
+   * reasoning as `read` above (a permission-denied `.lore-backups/` must not
+   * be silently reported as "empty, nothing to prune").
+   */
+  async listDir(path: string): Promise<Array<{ name: string; isDirectory: boolean }>> {
+    try {
+      const dirents = readdirSync(path, { withFileTypes: true });
+      return dirents.map((dirent) => ({ name: dirent.name, isDirectory: dirent.isDirectory() }));
+    } catch (cause) {
+      if (isErrnoException(cause) && cause.code === "ENOENT") return [];
+      throw cause;
     }
   }
 }
