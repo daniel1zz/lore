@@ -77,9 +77,17 @@ function projectStateErrorCode(state: MountEntry["state"]): string {
  *
  * R-17 isolation: the delegate call is wrapped in try/catch — a per-request dispatch
  * failure against a `"mounted"` entry (its corpus disappearing mid-session, a real
- * `bun:sqlite` throw — see the D8 deleted-corpus-liveness spike) demotes JUST this one
- * entry to `"error"` (`mountRegistry.markError`) and returns a NAMED 5xx; every other
- * mounted project is completely unaffected by this catch.
+ * `bun:sqlite` throw — see the D8 deleted-corpus-liveness spike,
+ * `tests/unit/mount/deleted-corpus-liveness.bun.test.ts`) demotes JUST this one entry
+ * to `"error"` (`mountRegistry.markError`) and returns a NAMED 5xx; every other mounted
+ * project is completely unaffected by this catch. No dispatch watchdog/timeout wrapper
+ * (task-stabilize-deleted-corpus-liveness-bun-test-ts-2-recorded, 2026-07-25): the spike
+ * empirically settled on TWO possible outcomes for a broken corpus's next store call —
+ * a fast throw (caught right here) or a fast silent self-heal/resolve (falls through to
+ * the normal response path, also fine) — but in every recorded run, loaded or not, it
+ * has always settled well under a 5000ms ceiling and never once hung. This try/catch
+ * exists to attribute the throw branch when it occurs, not to guard against a hang that
+ * has never been observed.
  */
 async function dispatchProjectRequest(
   req: Request,
@@ -103,11 +111,15 @@ async function dispatchProjectRequest(
   // reason: SPEC-078 D8/R-17 — EVERYTHING from here on (auth included) runs inside
   // ONE try/catch. A "mounted" entry backed by a corpus that has gone bad can throw
   // from ANY property touch, not just inside the delegated route handler — the D8
-  // deleted-corpus-liveness spike's throw happens on the FIRST store call after the
-  // underlying file disappears, which could just as easily be triggered by the
+  // deleted-corpus-liveness spike's throw branch fires on the FIRST store call after
+  // the underlying file disappears, which could just as easily be triggered by the
   // bearer-auth lookup below (`entry.app.apiKeyStore`) as by the route body itself.
   // Narrowing the try/catch to only the final delegate call would let that class of
   // failure escape as an unattributed 500 without ever demoting the entry to "error".
+  // No watchdog/timeout wrapper around this whole block either (same task as above):
+  // the spike's OTHER observed branch — a fast silent resolve — just falls through
+  // this try/catch and returns a normal successful response, which is equally fine;
+  // neither branch has ever hung.
   try {
     const cookieSessionStore = extractSessionCookie(req) !== null ? getMachineAuth().sessionStore : undefined;
     const bearerStore = entry.app?.apiKeyStore ?? primaryApp.apiKeyStore;
