@@ -2,14 +2,22 @@
  * HTTP auth for Lore — API key management + request authentication.
  * Purpose: bearer-token API key auth (existing) + cookie-based session auth (SPEC-016).
  * Public surface: ApiKeyStore, authenticateRequest, extractBearerToken, extractSessionCookie,
- *   generateApiKey, hashApiKey, ActorContext, ApiKeyRecord, ALLOWED_ORIGINS.
+ *   generateApiKey, hashApiKey, ActorContext, ApiKeyRecord, ALLOWED_ORIGINS, buildAllowedOrigins.
  * Invariants:
  *   - authenticateRequest is cookie-first: if lore_sid cookie present → resolve session;
  *     else if Bearer token present → existing API key validation path; else UNAUTHORIZED.
  *   - Expired sessions are deleted inline and return an auth failure.
  *   - Valid sessions are sliding-renewed (touch) on every authenticated request.
- *   - ALLOWED_ORIGINS is the allowlist for POST /api/auth/local-bootstrap Origin checks
- *     (also reused by dashboard-routes.ts's CSRF Origin check via middleware.ts::isOriginAllowed).
+ *   - ALLOWED_ORIGINS is the DEFAULT-port allowlist (api 8787 / dashboard 5173) for
+ *     POST /api/auth/local-bootstrap Origin checks (also reused by dashboard-routes.ts's
+ *     CSRF Origin check via middleware.ts::isOriginAllowed). It is DERIVED from
+ *     `buildAllowedOrigins` — never hand-maintained as a second literal — so the default
+ *     and any port-configured allowlist are computed by the SAME pure function. A caller
+ *     that runs the HTTP API and the Vite dev server on non-default ports (`lore dashboard
+ *     --dashboard-port P`, or Vite auto-incrementing off a held 5173) MUST compute its own
+ *     allowlist via `buildAllowedOrigins(apiPort, dashPort)` and thread it through
+ *     `HttpConfig.allowedOrigins` (index.ts) — a request from the ACTUAL port is rejected
+ *     by this constant alone (task-dashboard-bootstrap-origin-allowlist-hardcodes-port-5173).
  *   - API keys are SHA-256 hashed at rest. Raw key = "lore_ak_" + 64 hex chars.
  *   - ApiKeyStore.revoke() cascade-deletes the revoked key's cookie sessions (same `db`
  *     handle as SessionStore) — a revoked key invalidates every session it ever minted.
@@ -75,17 +83,41 @@ const KEY_PREFIX = "lore_ak_";
 // ─── Origin allowlist ────────────────────────────────────────────────────────
 
 /**
- * Allowed Origin values for POST /api/auth/local-bootstrap.
- * Guards against cross-site requests to the bootstrap endpoint.
- * SameSite=Strict on the resulting cookie provides CSRF protection for subsequent requests.
+ * Build the Origin allowlist for a given (apiPort, dashPort) pair — the four
+ * `http(s)://{localhost,127.0.0.1}:{apiPort,dashPort}` origins a browser tab serving the
+ * dashboard SPA (Vite, dashPort) can legitimately call the lore HTTP API (apiPort) from.
+ * Pure function — no IO, no defaults baked in — so a caller with non-default ports
+ * (`lore dashboard --dashboard-port P`, or an auto-incremented Vite port) computes the
+ * SAME allowlist shape `ALLOWED_ORIGINS` below is itself derived from.
+ *
+ * @param apiPort - Port the lore HTTP API server is bound to.
+ * @param dashPort - Port the Vite dev server is bound to.
+ * @returns Exactly 4 origins, order-stable: localhost/apiPort, localhost/dashPort,
+ *   127.0.0.1/apiPort, 127.0.0.1/dashPort. Typed as a fixed 4-tuple (not `string[]`) so
+ *   `ALLOWED_ORIGINS[0]` (existing test call sites) stays `string`, never `string |
+ *   undefined` — preserves the pre-existing indexed-access ergonomics.
+ * @example
+ *   buildAllowedOrigins(9000, 6000);
+ *   // ["http://localhost:9000", "http://localhost:6000", "http://127.0.0.1:9000", "http://127.0.0.1:6000"]
+ */
+export function buildAllowedOrigins(apiPort: number, dashPort: number): readonly [string, string, string, string] {
+  return [
+    `http://localhost:${apiPort}`,
+    `http://localhost:${dashPort}`,
+    `http://127.0.0.1:${apiPort}`,
+    `http://127.0.0.1:${dashPort}`,
+  ] as const;
+}
+
+/**
+ * Default-port Origin allowlist for POST /api/auth/local-bootstrap (api 8787 / dashboard
+ * 5173 — SPEC-016's original single-instance default). Guards against cross-site requests
+ * to the bootstrap endpoint. SameSite=Strict on the resulting cookie provides CSRF
+ * protection for subsequent requests. Derived from {@link buildAllowedOrigins} — see this
+ * module's header for why a non-default port setup must NOT rely on this constant alone.
  * Source: SPEC-016 §3.2
  */
-export const ALLOWED_ORIGINS = [
-  "http://localhost:5173",
-  "http://localhost:8787",
-  "http://127.0.0.1:5173",
-  "http://127.0.0.1:8787",
-] as const;
+export const ALLOWED_ORIGINS = buildAllowedOrigins(8787, 5173);
 
 // ─── Key generation ────────────────────────────────────────────────────────
 

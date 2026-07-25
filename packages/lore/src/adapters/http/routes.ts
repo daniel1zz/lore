@@ -70,7 +70,7 @@ function isSecureRequestContext(req: Request): boolean {
 
 /**
  * POST /api/auth/local-bootstrap — trade raw API key for an HttpOnly session cookie.
- * Verifies Origin against ALLOWED_ORIGINS and X-Lore-Token against the MACHINE-SCOPE
+ * Verifies Origin against the active allowlist and X-Lore-Token against the MACHINE-SCOPE
  * api_keys table (SPEC-078 D1 unconditional re-point — the "dashboard-local" key and the
  * session it mints live in `machineAuth`, never a per-corpus `App` — this route no longer
  * needs an `App` at all; bearer API keys stay per-corpus and are untouched by this route).
@@ -79,12 +79,20 @@ function isSecureRequestContext(req: Request): boolean {
  * @param req - Incoming request with X-Lore-Token header and Origin header.
  * @param machineAuth - Machine-scope auth stores (SPEC-078 D1); the SAME instance the
  *   server's cookie-auth path resolves sessions against.
+ * @param allowedOrigins - The allowlist to check the request's Origin against; defaults to
+ *   `ALLOWED_ORIGINS` (auth.ts's default-port 8787/5173 list). Production `index.ts`
+ *   threads the server's actual configured allowlist so a non-default `--dashboard-port`
+ *   is honored (task-dashboard-bootstrap-origin-allowlist-hardcodes-port-5173).
  * @returns 200 + Set-Cookie on success, 403 on bad Origin, 401 on bad token.
  */
-export async function handleLocalBootstrap(req: Request, machineAuth: MachineAuthStores): Promise<Response> {
+export async function handleLocalBootstrap(
+  req: Request,
+  machineAuth: MachineAuthStores,
+  allowedOrigins: readonly string[] = ALLOWED_ORIGINS,
+): Promise<Response> {
   // Validate Origin against allowlist — CSRF protection for bootstrap endpoint.
   const origin = req.headers.get("Origin") ?? "";
-  if (!(ALLOWED_ORIGINS as readonly string[]).includes(origin)) {
+  if (!allowedOrigins.includes(origin)) {
     return jsonError(
       { code: "VALIDATION_ERROR", field: "Origin", message: `Origin not in allowlist: ${origin}` },
       403,
@@ -142,6 +150,10 @@ export async function handleLocalBootstrap(req: Request, machineAuth: MachineAut
  *   `startHttpServer` always supplies its own memoized getter. A logout request that
  *   somehow reaches this function without one wired gets a loud 500, never a silent
  *   no-op or an uncaught "not a function" throw.
+ * @param allowedOrigins - Origin allowlist threaded to `/api/dashboard/*`'s CSRF guard
+ *   (`handleDashboardRoute`); defaults to `ALLOWED_ORIGINS`. Production `index.ts` passes
+ *   the server's actual configured allowlist (task-dashboard-bootstrap-origin-allowlist-
+ *   hardcodes-port-5173).
  */
 export async function handleApiRoute(
   req: Request,
@@ -149,6 +161,7 @@ export async function handleApiRoute(
   app: App,
   actor: ActorContext,
   getMachineAuth?: () => MachineAuthStores,
+  allowedOrigins: readonly string[] = ALLOWED_ORIGINS,
 ): Promise<Response | null> {
   const method = req.method.toUpperCase();
   const path = url.pathname;
@@ -161,7 +174,7 @@ export async function handleApiRoute(
   // never accidentally matched by v1 wildcard patterns. Bearer-token actors get 403
   // inside handleDashboardRoute (AC-DASH-WRITE-9); unauthenticated already caught above.
   if (path.startsWith("/api/dashboard/")) {
-    return handleDashboardRoute(req, url, app, actor);
+    return handleDashboardRoute(req, url, app, actor, allowedOrigins);
   }
 
   // GET /api/auth/me — return session actor context (SPEC-016 §3.2)

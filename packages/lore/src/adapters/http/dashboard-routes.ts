@@ -61,6 +61,7 @@ import type { ActorContext } from "./auth.js";
 import type { DocPatch, LinkType, Telemetry } from "@lore/core";
 import { createDocInputSchema, docTypeSchema } from "@lore/core";
 import { jsonOk, jsonError, loreErrorResponse, parseJsonBody, isOriginAllowed, emitDashboardTelemetry } from "./middleware.js";
+import { ALLOWED_ORIGINS } from "./auth.js";
 import { checkConcurrency, resolveExpectedVersion, buildConflictPayload } from "./concurrency.js";
 import { runCalibrationHook } from "../../flows/calibration-hook.js";
 import { handleDashboardConfigPatch, handleDashboardMachineConfigPatch } from "./config-routes.js";
@@ -82,11 +83,15 @@ import { handleDashboardConfigPatch, handleDashboardMachineConfigPatch } from ".
  * an actual cross-site browser request.
  *
  * @param req - Incoming request.
+ * @param allowedOrigins - The allowlist to check against; defaults to `ALLOWED_ORIGINS`.
+ *   `handleDashboardRoute`'s caller (`routes.ts::handleApiRoute`) threads the server's
+ *   actual configured allowlist so a non-default `--dashboard-port` is honored
+ *   (task-dashboard-bootstrap-origin-allowlist-hardcodes-port-5173).
  * @returns 403 Response when Origin is present and disallowed, null otherwise.
  */
-function assertAllowedOrigin(req: Request): Response | null {
+function assertAllowedOrigin(req: Request, allowedOrigins: readonly string[]): Response | null {
   const origin = req.headers.get("Origin");
-  if (origin !== null && !isOriginAllowed(origin)) {
+  if (origin !== null && !isOriginAllowed(origin, allowedOrigins)) {
     return jsonError(
       { code: "VALIDATION_ERROR", field: "Origin", message: `Origin not in allowlist: ${origin}` },
       403,
@@ -627,6 +632,9 @@ async function handleDashboardRouteViewTelemetry(
  * @param url   - Parsed URL.
  * @param app   - Wired application instance.
  * @param actor - Resolved auth actor from the main auth gate.
+ * @param allowedOrigins - CSRF Origin allowlist; defaults to `ALLOWED_ORIGINS`. Production
+ *   `index.ts`/`routes.ts::handleApiRoute` thread the server's actual configured allowlist
+ *   so a non-default `--dashboard-port` is honored.
  * @returns Response or null (null → caller returns 404).
  */
 export async function handleDashboardRoute(
@@ -634,6 +642,7 @@ export async function handleDashboardRoute(
   url: URL,
   app: App,
   actor: ActorContext,
+  allowedOrigins: readonly string[] = ALLOWED_ORIGINS,
 ): Promise<Response | null> {
   const method = req.method.toUpperCase();
   const path = url.pathname;
@@ -643,7 +652,7 @@ export async function handleDashboardRoute(
 
   // CSRF Origin guard — applies to ALL dashboard write endpoints, checked BEFORE the
   // cookie-actor guard (fail on the cheaper, header-only check first).
-  const originGuardResponse = assertAllowedOrigin(req);
+  const originGuardResponse = assertAllowedOrigin(req, allowedOrigins);
   if (originGuardResponse !== null) return originGuardResponse;
 
   // Cookie-only guard (AC-DASH-WRITE-9) — applies to ALL dashboard write endpoints.
