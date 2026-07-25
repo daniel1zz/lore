@@ -259,6 +259,12 @@ export async function handleApiRoute(
     return handleGetEvidencePanel(evidencePanelMatch, app);
   }
 
+  // GET /api/phase-status/:planIdOrSlug (SPEC-077 S3)
+  const phaseStatusMatch = matchPhaseStatusPath(path);
+  if (phaseStatusMatch !== null && method === "GET") {
+    return handleGetPhaseStatus(phaseStatusMatch, app);
+  }
+
   // DELETE /api/links/:from/:to
   const linksDeleteMatch = matchLinksDeletePath(path);
   if (linksDeleteMatch !== null && method === "DELETE") {
@@ -485,17 +491,23 @@ async function handleGetAuditForDoc(docId: string, app: App): Promise<Response> 
 }
 
 /**
- * GET /api/ready/:planIdOrSlug (SPEC-037 D1) — computed readiness report over a
- * plan's tasks, thin pipe over `TaskWorkflowService.ready` (zero writes). A
- * non-plan target surfaces the service's existing `VALIDATION_ERROR` (422 via
- * `loreErrorResponse`); an unknown id surfaces `DOC_NOT_FOUND` (404). No new
- * error codes, no per-route auth — rides the same central cookie/bearer gate
- * as every other v1 GET route.
+ * GET /api/ready/:planIdOrSlug (SPEC-037 D1; SPEC-077 S4 `claim_ttl_minutes`
+ * enrichment) — computed readiness report over a plan's tasks, thin pipe over
+ * `TaskWorkflowService.ready` (zero writes). A non-plan target surfaces the
+ * service's existing `VALIDATION_ERROR` (422 via `loreErrorResponse`); an unknown
+ * id surfaces `DOC_NOT_FOUND` (404). No new error codes, no per-route auth — rides
+ * the same central cookie/bearer gate as every other v1 GET route.
+ *
+ * SPEC-077 S4: the response gains a top-level `claim_ttl_minutes` — the resolved
+ * `workflow.claim_ttl_minutes` config value `app.taskWorkflowService` was
+ * constructed with. This is HTTP-LAYER enrichment only — core `ReadyReport`
+ * (`../../service/task-workflow-service.js`) stays untouched/pure; the dashboard's
+ * claim-countdown UI divides by this field instead of hardcoding the TTL.
  */
 async function handleGetReady(planIdOrSlug: string, app: App): Promise<Response> {
   const result = await app.taskWorkflowService.ready(planIdOrSlug);
   if (!result.ok) return loreErrorResponse(result.error);
-  return jsonOk(result.value);
+  return jsonOk({ ...result.value, claim_ttl_minutes: app.taskWorkflowService.claimTtlMinutes });
 }
 
 /**
@@ -516,6 +528,26 @@ async function handleGetEvidencePanel(idOrSlug: string, app: App): Promise<Respo
     );
   }
   const result = await app.verificationProjectionService.evidencePanel(idOrSlug);
+  if (!result.ok) return loreErrorResponse(result.error);
+  return jsonOk(result.value);
+}
+
+/**
+ * GET /api/phase-status/:planIdOrSlug (SPEC-077 S3) — the dashboard execution read
+ * surface's phase-progress projection for one plan. Thin pipe over
+ * `PhaseWorkflowService.planPhaseStatus` (zero derivation in this file — see that
+ * method's own JSDoc); read-only, same v1 read-family auth duality (cookie OR
+ * bearer) as every other route in this dispatcher. Unknown id → `DOC_NOT_FOUND`
+ * (404); a resolvable doc that is not type `plan` → `VALIDATION_ERROR` naming the
+ * actual type (422 via `loreErrorResponse`), same non-member-type semantics as the
+ * evidence-panel route. A plan with zero `phase` children returns `200` with
+ * `phases: []` (not an error).
+ */
+async function handleGetPhaseStatus(planIdOrSlug: string, app: App): Promise<Response> {
+  if (app.phaseWorkflowService === undefined) {
+    return jsonError({ code: "STORE_ERROR", message: "PhaseWorkflowService not wired on App" }, 500);
+  }
+  const result = await app.phaseWorkflowService.planPhaseStatus(planIdOrSlug);
   if (!result.ok) return loreErrorResponse(result.error);
   return jsonOk(result.value);
 }
@@ -641,6 +673,12 @@ function matchReadyPath(path: string): string | null {
 /** Matches GET /api/evidence-panel/:idOrSlug (SPEC-075 §Module Boundary). */
 function matchEvidencePanelPath(path: string): string | null {
   const match = path.match(/^\/api\/evidence-panel\/([^/]+)$/);
+  return match?.[1] !== undefined ? decodeURIComponent(match[1]) : null;
+}
+
+/** Matches GET /api/phase-status/:planIdOrSlug (SPEC-077 S3). */
+function matchPhaseStatusPath(path: string): string | null {
+  const match = path.match(/^\/api\/phase-status\/([^/]+)$/);
   return match?.[1] !== undefined ? decodeURIComponent(match[1]) : null;
 }
 

@@ -144,6 +144,20 @@ describe("GET /api/ready/:planIdOrSlug — auth boundary + wiring smoke (SPEC-03
       expect(Array.isArray(body.data.records)).toBe(true);
       expect(body.data.records).toHaveLength(1);
     });
+
+    // reason: SPEC-077 S4 — the response gains a top-level `claim_ttl_minutes`
+    // equal to the resolved `workflow.claim_ttl_minutes` value the test's
+    // `TaskWorkflowService` was constructed with (120, see `makeTestServer`
+    // above) — HTTP-layer enrichment only, core `ReadyReport` stays untouched.
+    it("AC-077-4: GET /api/ready/:planId → 200 with top-level claim_ttl_minutes equal to the resolved config value", async () => {
+      const res = await fetch(`${ctx.baseUrl}/api/ready/${ctx.planId}`, {
+        headers: { Authorization: `Bearer ${ctx.rawKey}` },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { ok: boolean; data: { claim_ttl_minutes: number } };
+      expect(body.ok).toBe(true);
+      expect(body.data.claim_ttl_minutes).toBe(120);
+    });
   });
 
   describe("negative — no auth → 401", () => {
