@@ -555,6 +555,24 @@ export default defineCommand({
         process.stderr.write(`Error: ${repairMsg}\n  (invalidate failed: ${formatError(supersedeError)})\n`);
         process.exitCode = exitCode(supersedeError);
       }
+
+      // Create-time orphan advisory (task-create-time-orphan-advisory-warn-or-default-
+      // parent-to-root) — CorpusService.create computes this typed, non-persisted
+      // `orphan_advisory` field; it never prints anything itself (services stay
+      // adapter-agnostic). This is the sole render site for text mode, mirroring
+      // resolveActor's OS-fallback advisory convention (utils.ts: "⚠ " to stderr,
+      // never affecting the exit code). The --json payload above already carries the
+      // field verbatim (it's a real key on `doc`, spread/passed through as-is) — no
+      // separate JSON-mode branch is needed.
+      // reason: `doc`'s evolving `let` type unions `CreateDocResult` (the direct
+      // create() branch) with the plain `DocRecord` createWithSupersedes's port
+      // declares (the --supersedes branch, which never surfaces this field) — a
+      // narrow read-only cast is the correct way to consult an OPTIONAL field only
+      // one union member statically carries, without widening the port's own type.
+      const orphanAdvisory = (doc as { orphan_advisory?: string }).orphan_advisory;
+      if (typeof orphanAdvisory === "string") {
+        process.stderr.write(`⚠ ${orphanAdvisory}\n`);
+      }
     } finally {
       app.close();
     }
