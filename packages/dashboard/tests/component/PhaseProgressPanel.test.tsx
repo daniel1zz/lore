@@ -3,17 +3,24 @@
  * Tests for PhaseProgressPanel — SPEC-077 S2 execution-page phase scorecards.
  * @spec_ref AC-077-3
  *
+ * Fixtures mirror the REAL `GET /api/phase-status/:planIdOrSlug` response
+ * shape (`PhaseWorkflowService.planPhaseStatus`, `packages/lore/src/service/
+ * phase-workflow-service.ts`) — a prior version of this file asserted against
+ * an invented shape (`name`/`checklist: []`/`dropped_item_names`/`trust_label`)
+ * that never matched the server and caused a live `/execution` page crash
+ * (SPEC-077 T2 client-shape-drift fix).
+ *
  * Test plan (six-dimension coverage):
  *   HAPPY:
  *     - renders one scorecard per phase with "a/b attested" counts
- *     - renders per-item checklist state and trust-label badges verbatim
- *     - renders dropped item names
+ *     - renders per-item checklist state and trust badges verbatim
+ *     - renders dropped item names derived from dropped-state checklist_items
  *   NEGATIVE:
  *     - a non-vacuous phase renders no "vacuous" badge
- *     - a phase with an empty checklist renders no checklist list
+ *     - a phase with an empty checklist_items renders no checklist list
  *   BOUNDARY:
  *     - zero phases renders the explicit empty state
- *     - a phase with zero dropped items renders no "Dropped:" text
+ *     - a phase with zero dropped-state items renders no "Dropped:" text
  *   ERROR:
  *     - n/a (pure render of an already-typed projection; no fallible IO here)
  *   STATE:
@@ -33,11 +40,17 @@ import { PhaseProgressPanel } from "../../src/components/PhaseProgressPanel";
 
 function makeScorecard(overrides: Partial<PhaseScorecard> = {}): PhaseScorecard {
   return {
-    name: "Phase 1",
-    ac_scope: { attested: 2, total: 5 },
-    checklist: [],
-    dropped_item_names: [],
+    phase_id: "01PHASE0000000000000000000",
+    phase_slug: "phase-phase-1",
+    phase_title: "Phase 1",
+    state: "in-progress",
     vacuous: false,
+    ac_scope: { total: 5, attested: 2, blocking: [] },
+    checklist: { total: 0, satisfied: 0, blocking: [], dropped_named: [], manual_selfattested: [] },
+    checklist_items: [],
+    blocking: [],
+    claim: null,
+    task_count: 0,
     ...overrides,
   };
 }
@@ -45,14 +58,18 @@ function makeScorecard(overrides: Partial<PhaseScorecard> = {}): PhaseScorecard 
 describe("PhaseProgressPanel", () => {
   describe("happy path (AC-077-3)", () => {
     it("renders one scorecard per phase with 'a/b attested' counts", () => {
-      render(<PhaseProgressPanel phases={[makeScorecard({ name: "Phase 1", ac_scope: { attested: 2, total: 5 } })]} />);
+      render(
+        <PhaseProgressPanel
+          phases={[makeScorecard({ phase_title: "Phase 1", ac_scope: { total: 5, attested: 2, blocking: [] } })]}
+        />,
+      );
       expect(screen.getByText("Phase 1")).toBeInTheDocument();
       expect(screen.getByText("2/5 attested")).toBeInTheDocument();
     });
 
-    it("renders per-item checklist state and trust-label badges", () => {
+    it("renders per-item checklist state and trust badges", () => {
       const scorecard = makeScorecard({
-        checklist: [{ id: "CHK-1", statement: "unit suite green", state: "satisfied", trust_label: "attested" }],
+        checklist_items: [{ id: "CHK-1", statement: "unit suite green", state: "satisfied", trust: "attested" }],
       });
       render(<PhaseProgressPanel phases={[scorecard]} />);
       expect(screen.getByText("satisfied")).toBeInTheDocument();
@@ -60,8 +77,19 @@ describe("PhaseProgressPanel", () => {
       expect(screen.getByText("unit suite green")).toBeInTheDocument();
     });
 
-    it("renders dropped item names", () => {
-      render(<PhaseProgressPanel phases={[makeScorecard({ dropped_item_names: ["CHK-2", "CHK-3"] })]} />);
+    it("renders dropped item names derived from dropped-state checklist_items", () => {
+      render(
+        <PhaseProgressPanel
+          phases={[
+            makeScorecard({
+              checklist_items: [
+                { id: "CHK-2", statement: "CHK-2", state: "dropped", trust: "manual" },
+                { id: "CHK-3", statement: "CHK-3", state: "dropped", trust: "attested" },
+              ],
+            }),
+          ]}
+        />,
+      );
       expect(screen.getByText("Dropped: CHK-2, CHK-3")).toBeInTheDocument();
     });
   });
@@ -72,8 +100,8 @@ describe("PhaseProgressPanel", () => {
       expect(screen.queryByText("vacuous")).not.toBeInTheDocument();
     });
 
-    it("renders no checklist list for an empty checklist", () => {
-      const { container } = render(<PhaseProgressPanel phases={[makeScorecard({ checklist: [] })]} />);
+    it("renders no checklist list for an empty checklist_items", () => {
+      const { container } = render(<PhaseProgressPanel phases={[makeScorecard({ checklist_items: [] })]} />);
       expect(container.querySelector("ul")).toBeNull();
     });
   });
@@ -85,8 +113,16 @@ describe("PhaseProgressPanel", () => {
       expect(screen.queryByLabelText("Phase progress")).not.toBeInTheDocument();
     });
 
-    it("renders no 'Dropped:' text when dropped_item_names is empty", () => {
-      render(<PhaseProgressPanel phases={[makeScorecard({ dropped_item_names: [] })]} />);
+    it("renders no 'Dropped:' text when no checklist_items are in the dropped state", () => {
+      render(
+        <PhaseProgressPanel
+          phases={[
+            makeScorecard({
+              checklist_items: [{ id: "CHK-1", statement: "still open", state: "blocking", trust: "manual" }],
+            }),
+          ]}
+        />,
+      );
       expect(screen.queryByText(/Dropped:/)).not.toBeInTheDocument();
     });
   });
@@ -96,8 +132,8 @@ describe("PhaseProgressPanel", () => {
       render(
         <PhaseProgressPanel
           phases={[
-            makeScorecard({ name: "Phase A", vacuous: true, ac_scope: { attested: 0, total: 0 } }),
-            makeScorecard({ name: "Phase B", vacuous: false }),
+            makeScorecard({ phase_id: "phase-a", phase_title: "Phase A", vacuous: true, ac_scope: { total: 0, attested: 0, blocking: [] } }),
+            makeScorecard({ phase_id: "phase-b", phase_title: "Phase B", vacuous: false }),
           ]}
         />,
       );
@@ -107,7 +143,7 @@ describe("PhaseProgressPanel", () => {
 
     it("renders trust labels verbatim from the projection, never recomputed", () => {
       const scorecard = makeScorecard({
-        checklist: [{ id: "CHK-1", statement: "manual smoke test", state: "blocking", trust_label: "manual" }],
+        checklist_items: [{ id: "CHK-1", statement: "manual smoke test", state: "blocking", trust: "manual" }],
       });
       render(<PhaseProgressPanel phases={[scorecard]} />);
       expect(screen.getByText("manual")).toBeInTheDocument();
