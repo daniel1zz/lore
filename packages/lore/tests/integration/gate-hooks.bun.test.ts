@@ -386,8 +386,13 @@ describe("hooks/g2-spec-promote.sh", () => {
 
   afterAll(() => cleanupDir(tmpDir));
 
-  // NEGATIVE — approving a spec with 0 declared ACs → deny.
-  it("denies `lore approve <spec-with-no-AC>`", () => {
+  // NEGATIVE — approving a spec with 0 declared ACs → deny. REGRESSION pin
+  // (task-gate-hook-denies-the-whole-chained-bash-command-when-any AC2): a
+  // single-command deny must stay byte-identical to the raw `lore gate
+  // spec-promote` output — no chain-block banner prefix — since there is no
+  // chain to explain.
+  it("denies `lore approve <spec-with-no-AC>` — single-command deny is byte-identical to the raw gate output", () => {
+    const rawGate = runLore(["gate", "spec-promote", "--spec", noAcSpecSlug], tmpDir);
     const result = runShim(G2_SHIM, {
       tool_name: "Bash",
       tool_input: { command: `${LORE_BIN} approve ${noAcSpecSlug}` },
@@ -396,6 +401,51 @@ describe("hooks/g2-spec-promote.sh", () => {
     const hook = parseHookOutput(result.stdout);
     expect(hook.permissionDecision).toBe("deny");
     expect(hook.permissionDecisionReason ?? "").toContain("no structured acceptance criteria");
+    expect(hook.permissionDecisionReason).toBe(rawGate.stderr.trim());
+    expect(hook.permissionDecisionReason ?? "").not.toContain("CHAINED COMMAND BLOCKED");
+  });
+
+  // NEGATIVE / BOUNDARY — chained `A && B` where only B (`lore approve`) matches
+  // this checkpoint's armed trigger (task-gate-hook-denies-the-whole-chained-bash-
+  // command-when-any AC1): PreToolUse hooks are all-or-nothing per Bash tool call,
+  // so denying B necessarily blocks the WHOLE command including A, which never
+  // executes. Before this fix, the deny reason described only B's gate verdict —
+  // a caller reasonably (and wrongly) concluded A itself had failed (observed
+  // live 2026-07-25: three wasted round-trips + a false "gate non-determinism"
+  // hypothesis). The deny reason must now START with a banner naming B verbatim
+  // and stating the whole chain — including A, named — was blocked because A did
+  // not run; the feeding pack (gate verdict) follows after.
+  it("CHAIN: denies a chained `A && B` command with a banner naming B verbatim and stating A did not run", () => {
+    const segmentA = `${LORE_BIN} set ${noAcSpecSlug} --content-file /tmp/does-not-matter.md`;
+    const segmentB = `${LORE_BIN} approve ${noAcSpecSlug}`;
+    const result = runShim(G2_SHIM, {
+      tool_name: "Bash",
+      tool_input: { command: `${segmentA} && ${segmentB}` },
+      cwd: tmpDir,
+    });
+    const hook = parseHookOutput(result.stdout);
+    expect(hook.permissionDecision).toBe("deny");
+    const reason = hook.permissionDecisionReason ?? "";
+    expect(reason.startsWith("⛔ CHAINED COMMAND BLOCKED")).toBe(true);
+    expect(reason).toContain(segmentB);
+    expect(reason).toContain(segmentA);
+    expect(reason).toContain("did NOT run");
+    expect(reason).toContain("no structured acceptance criteria"); // feeding pack still follows
+  });
+
+  // BOUNDARY — chained command where NO segment matches this checkpoint's trigger
+  // (task-gate-hook-denies-the-whole-chained-bash-command-when-any AC3): allowed,
+  // no gate invocation, no banner — regression pin for the multi-segment fail-open
+  // path (single-segment fail-open is covered by the "unrelated Bash command" test
+  // below).
+  it("CHAIN: allows a chained command where no segment matches (regression)", () => {
+    const result = runShim(G2_SHIM, {
+      tool_name: "Bash",
+      tool_input: { command: "git status && ls -la" },
+      cwd: tmpDir,
+    });
+    const hook = parseHookOutput(result.stdout);
+    expect(hook.permissionDecision).toBe("allow");
   });
 
   // HAPPY — approving a spec with ≥1 declared AC → allow.

@@ -115,6 +115,70 @@ is_command_position_match() {
     | grep -Eq "^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*${pattern}"
 }
 
+# ─── task-gate-hook-denies-the-whole-chained-bash-command-when-any: chain-block banner ───
+# PreToolUse hooks are all-or-nothing per Bash tool call — there is no way to let an
+# earlier chain segment execute and block only a LATER one that trips this gate. Left
+# silent, denying `A && B` (only B matches) reads as "A failed": the deny reason only
+# ever described B's gate verdict (three live round-trips were burned on a false "gate
+# non-determinism" hypothesis before this was traced to that ambiguity — chosen fix is
+# (b) explicit whole-chain-blocked banner, not only-B-blocking semantics: a PreToolUse
+# hook cannot partially execute a Bash string, so there is no sound way to run A and
+# still deny B from the SAME tool call). Prefixes the deny reason with a banner that
+# (1) quotes the segment that actually matched, verbatim, using the SAME split
+# `is_command_position_match` uses (no independent re-parsing to drift out of sync
+# with SPEC-050 D4 semantics), and (2) names every earlier segment, stating none of
+# them ran. When the same pattern matches more than one segment (e.g. two chained
+# calls of the same shape), the LAST match is reported — that mirrors the existing
+# DOC_ID/PAYLOAD-extraction sed's greedy `.*`, which also resolves to the segment the
+# gate actually ran against. Returns empty output for a single-segment command —
+# callers MUST skip prefixing in that case so the single-command deny path stays
+# byte-identical to before this fix.
+# $1 = raw Bash command string. $2 = the command-position pattern that produced the
+# deny-triggering match (the same pattern string passed to the winning
+# `is_command_position_match` call above).
+build_chain_block_banner() {
+  local cmd="$1" pattern="$2" segments segment_count
+  segments="$(printf '%s' "$cmd" | sed -E 's/(\&\&|\|\||;|\||\$\(|`)/\n/g')"
+  segment_count="$(printf '%s\n' "$segments" | grep -c '[^[:space:]]')"
+  [ "$segment_count" -le 1 ] && return 0
+
+  # Pass 1: find the LAST segment (by index) that matches — see rationale above.
+  local seg trimmed idx=0 match_idx=0
+  while IFS= read -r seg; do
+    trimmed="$(printf '%s' "$seg" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+    [ -z "$trimmed" ] && continue
+    idx=$((idx + 1))
+    if printf '%s' "$trimmed" | grep -Eq "^([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*${pattern}"; then
+      match_idx=$idx
+    fi
+  done < <(printf '%s\n' "$segments")
+  [ "$match_idx" -eq 0 ] && return 0
+
+  # Pass 2: re-walk in order, naming the matched segment and every segment before it.
+  local matched_segment="" earlier_named=""
+  idx=0
+  while IFS= read -r seg; do
+    trimmed="$(printf '%s' "$seg" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+    [ -z "$trimmed" ] && continue
+    idx=$((idx + 1))
+    if [ "$idx" -eq "$match_idx" ]; then
+      matched_segment="$trimmed"
+    elif [ "$idx" -lt "$match_idx" ]; then
+      if [ -z "$earlier_named" ]; then
+        earlier_named="\`$trimmed\`"
+      else
+        earlier_named="$earlier_named, \`$trimmed\`"
+      fi
+    fi
+  done < <(printf '%s\n' "$segments")
+
+  # NOTE: no trailing \n here — `$(...)` command substitution at every call site
+  # strips trailing newlines anyway, so the blank-line separator before the gate's
+  # own reason is added explicitly by the caller instead (see deny call site below).
+  printf '⛔ CHAINED COMMAND BLOCKED — matched segment: `%s`\nThis segment tripped an armed gate that denies below. A PreToolUse hook can only allow or deny an ENTIRE Bash tool call — it cannot run part of a chain and block only this segment — so the WHOLE command was blocked, including the earlier segment(s) that did NOT run: %s' \
+    "$matched_segment" "${earlier_named:-(none — matched segment ran first)}"
+}
+
 # ─── BUG-014 fix: constrain --content-file to safe path prefixes ────────────
 # extract_flag (below) returns the RAW --content-file value from the Bash
 # command string with zero shell-quoting/escaping awareness. Without a path
@@ -203,6 +267,11 @@ if [ ! -x "$LORE_BIN" ]; then
 fi
 
 PAYLOAD=""
+# Chain-block banner state (task-gate-hook-denies-the-whole-chained-bash-command-when-any):
+# only the Bash branch below ever populates these — MCP tool calls are atomic, not
+# shell commands, so they have no "chain" and the banner never applies to them.
+CHAIN_MATCH_PATTERN=""
+CHAIN_COMMAND=""
 
 case "$TOOL_NAME" in
   Bash)
@@ -213,9 +282,12 @@ case "$TOOL_NAME" in
     # "create spec" as its own tokens. Avoids matching e.g. "explore create
     # spec" AND avoids matching the phrase when it merely appears inside a
     # quoted argument value elsewhere in the command.
-    if ! is_command_position_match "$COMMAND" '([^[:space:]]*/)?lore[[:space:]]+create[[:space:]]+spec([[:space:]]|$)'; then
+    CREATE_SPEC_PATTERN='([^[:space:]]*/)?lore[[:space:]]+create[[:space:]]+spec([[:space:]]|$)'
+    if ! is_command_position_match "$COMMAND" "$CREATE_SPEC_PATTERN"; then
       allow
     fi
+    CHAIN_MATCH_PATTERN="$CREATE_SPEC_PATTERN"
+    CHAIN_COMMAND="$COMMAND"
 
     # Best-effort flag extraction: double-quoted, single-quoted, then bare-token
     # value, in that priority order. Values that don't parse (complex shell
@@ -314,7 +386,15 @@ case "$GATE_EXIT" in
       log "UNRESOLVED_PARENT: declared parent '$DECLARED_PARENT' did not resolve against $TARGET_CWD's corpus — failing open; service-layer GateEnforcer still gates the real write"
       allow
     fi
-    deny_with_reason "$GATE_OUTPUT"
+    CHAIN_BANNER=""
+    [ -n "$CHAIN_MATCH_PATTERN" ] && CHAIN_BANNER="$(build_chain_block_banner "$CHAIN_COMMAND" "$CHAIN_MATCH_PATTERN")"
+    if [ -n "$CHAIN_BANNER" ]; then
+      deny_with_reason "${CHAIN_BANNER}
+
+${GATE_OUTPUT}"
+    else
+      deny_with_reason "$GATE_OUTPUT"
+    fi
     ;;
   *)
     log "lore gate spec-create exited $GATE_EXIT (undocumented verdict) — failing open"
