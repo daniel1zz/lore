@@ -45,6 +45,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { apiList, apiGetReadyReport, apiGetPhaseStatus } from "@/lib/api";
+import { queryKeys } from "@/lib/project-api";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ReadyTaskList } from "@/components/ReadyTaskList";
 import { SessionsPanel } from "@/components/SessionsPanel";
@@ -70,7 +71,7 @@ export function ExecutionPage({ planParam, onPlanChange, onNavigateToDoc }: Exec
     isLoading: plansLoading,
     error: plansError,
   } = useQuery({
-    queryKey: ["execution", "active-plans"],
+    queryKey: queryKeys.scope(null, ["execution", "active-plans"]),
     queryFn: () => apiList({ type: "plan", status: "active" }),
   });
 
@@ -81,7 +82,7 @@ export function ExecutionPage({ planParam, onPlanChange, onNavigateToDoc }: Exec
   const effectivePlan = planParam ?? plans[0]?.id;
 
   const { data: readyResult, isLoading: readyLoading } = useQuery({
-    queryKey: ["execution", "ready", effectivePlan],
+    queryKey: queryKeys.scope(null, ["execution", "ready", effectivePlan]),
     queryFn: () => apiGetReadyReport(effectivePlan as string),
     enabled: effectivePlan !== undefined,
   });
@@ -91,7 +92,7 @@ export function ExecutionPage({ planParam, onPlanChange, onNavigateToDoc }: Exec
     isLoading: phaseLoading,
     error: phaseError,
   } = useQuery({
-    queryKey: ["execution", "phase-status", effectivePlan],
+    queryKey: queryKeys.scope(null, ["execution", "phase-status", effectivePlan]),
     queryFn: () => apiGetPhaseStatus(effectivePlan as string),
     enabled: effectivePlan !== undefined,
   });

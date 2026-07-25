@@ -10,6 +10,7 @@ import { DocTree } from "@/components/DocTree";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiTree } from "@/lib/api";
 import type { TreeNode } from "@/lib/api";
+import { queryKeys } from "@/lib/project-api";
 
 export const Route = createFileRoute("/tree")({
   component: TreePage,
@@ -19,7 +20,7 @@ function TreePage(): React.ReactElement {
   const navigate = useNavigate();
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["tree"],
+    queryKey: queryKeys.scope(null, ["tree"]),
     queryFn: () => apiTree(),
   });
 

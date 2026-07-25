@@ -22,6 +22,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiTree, apiGetDoc } from "@/lib/api";
+import { queryKeys } from "@/lib/project-api";
 import { ResolvedPrdBody } from "@/components/ResolvedPrdBody";
 import { PendingPanel } from "@/components/PendingPanel";
 import { ActivePlansPanel } from "@/components/ActivePlansPanel";
@@ -40,7 +41,7 @@ function HomePage(): React.ReactElement {
     isLoading: isTreeLoading,
     error: treeError,
   } = useQuery({
-    queryKey: ["tree"],
+    queryKey: queryKeys.scope(null, ["tree"]),
     queryFn: () => apiTree(),
   });
 
@@ -51,7 +52,7 @@ function HomePage(): React.ReactElement {
     isLoading: isPrdLoading,
     error: prdError,
   } = useQuery({
-    queryKey: ["docs", prdId, "resolved"],
+    queryKey: queryKeys.scope(null, ["docs", prdId, "resolved"]),
     // reason: `enabled` gates this query on prdId being defined; the non-null
     // assertion below is safe because TanStack Query never invokes queryFn
     // while `enabled` is false.

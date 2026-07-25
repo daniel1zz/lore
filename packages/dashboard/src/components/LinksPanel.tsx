@@ -17,6 +17,7 @@ import { useState, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiSearch } from "@/lib/api";
 import type { SearchHit } from "@/lib/api";
+import { queryKeys } from "@/lib/project-api";
 import { X, Plus, Loader2 } from "lucide-react";
 import { linkTypeSchema, type LinkType } from "@lore/core";
 
@@ -91,7 +92,7 @@ function LinkAddSearch({ onAdd, addError, isPending }: LinkAddSearchProps): Reac
   // reason: useQuery is only mounted inside this sub-component, not at LinksPanel root.
   // This keeps LinksPanel renderable without a QueryClientProvider (e.g., read-only tests).
   const { data: searchResults } = useQuery({
-    queryKey: ["links-search", debouncedQuery],
+    queryKey: queryKeys.scope(null, ["links-search", debouncedQuery]),
     queryFn: () => apiSearch(debouncedQuery, {}),
     enabled: debouncedQuery.trim().length >= 2,
   });

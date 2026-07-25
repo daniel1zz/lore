@@ -28,6 +28,13 @@
  *   render-time TypeError on `.filter`) — see `task-fix-live-spec-042-
  *   regression-apigetready-types-api-ready`. `apiGetReadyReport` (this file,
  *   below) is the ONLY client for `GET /api/ready/:planIdOrSlug` now.
+ * SPEC-078 D5: `fetchJson`'s internal request now routes through
+ *   `project-api.ts`'s `apiFetch(null, resourcePath)` — every path literal in
+ *   this file dropped its "/api" prefix (that prefix is now built exclusively
+ *   inside `project-api.ts`, the ONE module allowed to write it, per the
+ *   `dashboard-local/no-raw-api-literal` ESLint rule). Behavior is
+ *   byte-identical (project is always `null` here — see that module's
+ *   invariant on why no call site here threads a real project yet).
  */
 
 import type {
@@ -48,6 +55,7 @@ import type {
   SearchHit,
 } from "@lore/core";
 import { ok } from "@lore/core";
+import { apiFetch, queryKeys } from "./project-api";
 
 // ─── Error type ──────────────────────────────────────────────────────────────
 
@@ -206,15 +214,20 @@ function buildQueryString(opts: Record<string, string | number | boolean | undef
 }
 
 /**
- * Fetch a URL with a 5-second timeout, returning parsed JSON data.
- * Throws ApiError on non-2xx HTTP status or server { ok: false }.
+ * Fetch a resource path (the portion AFTER "/api" — see `project-api.ts`'s
+ * `apiFetch` doc comment) with a 5-second timeout, returning parsed JSON
+ * data. Throws ApiError on non-2xx HTTP status or server { ok: false }.
+ *
+ * Routes through `apiFetch` (SPEC-078 D5) with `project: null` — every
+ * caller in this file resolves to today's registry-less paths, byte-
+ * identical to the pre-SPEC-078 direct `fetch(path)` call this replaced.
  *
  * @throws {ApiError} On HTTP error, server error, or timeout.
  */
-async function fetchJson<T>(path: string): Promise<T> {
+async function fetchJson<T>(resourcePath: string): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(path, {
+    response = await apiFetch(null, resourcePath, {
       headers: { Accept: "application/json" },
       signal: AbortSignal.timeout(5000),
       // reason: credentials: "include" sends the lore_sid session cookie set by bootstrapAuthIfNeeded().
@@ -257,7 +270,7 @@ async function fetchJson<T>(path: string): Promise<T> {
  * @throws {ApiError} On HTTP or network error.
  */
 export async function apiGetStatus(): Promise<StatusResponse> {
-  return fetchJson<StatusResponse>("/api/status");
+  return fetchJson<StatusResponse>("/status");
 }
 
 /**
@@ -276,7 +289,7 @@ export async function apiList(opts: ListOpts = {}): Promise<ListResponse> {
     ...(scalarOpts as Record<string, string | undefined>),
     ...(tags !== undefined && tags.length > 0 ? { tags: tags.join(",") } : {}),
   });
-  return fetchJson<ListResponse>(`/api/docs${qs}`);
+  return fetchJson<ListResponse>(`/docs${qs}`);
 }
 
 /**
@@ -289,7 +302,7 @@ export async function apiList(opts: ListOpts = {}): Promise<ListResponse> {
  */
 export async function apiSearch(query: string, opts: SearchOpts = {}): Promise<SearchResponse> {
   const qs = buildQueryString({ q: query, ...opts } as Record<string, string | undefined>);
-  return fetchJson<SearchResponse>(`/api/search${qs}`);
+  return fetchJson<SearchResponse>(`/search${qs}`);
 }
 
 /**
@@ -301,7 +314,7 @@ export async function apiSearch(query: string, opts: SearchOpts = {}): Promise<S
  */
 export async function apiTree(opts: TreeOpts = {}): Promise<TreeNode> {
   const qs = buildQueryString(opts as Record<string, string | number | undefined>);
-  return fetchJson<TreeNode>(`/api/tree${qs}`);
+  return fetchJson<TreeNode>(`/tree${qs}`);
 }
 
 /**
@@ -314,7 +327,7 @@ export async function apiTree(opts: TreeOpts = {}): Promise<TreeNode> {
  */
 export async function apiGetDoc(idOrSlug: string, opts: GetDocOpts = {}): Promise<DocWithNavigation> {
   const qs = buildQueryString({ resolveMdx: opts.resolveMdx });
-  return fetchJson<DocWithNavigation>(`/api/docs/${encodeURIComponent(idOrSlug)}${qs}`);
+  return fetchJson<DocWithNavigation>(`/docs/${encodeURIComponent(idOrSlug)}${qs}`);
 }
 
 // ─── Version history ──────────────────────────────────────────────────────────
@@ -358,7 +371,7 @@ export async function apiGetVersionLog(
   opts: { limit?: number; offset?: number } = {},
 ): Promise<VersionLogEntry[]> {
   const qs = buildQueryString(opts as Record<string, number | undefined>);
-  return fetchJson<VersionLogEntry[]>(`/api/docs/${encodeURIComponent(idOrSlug)}/log${qs}`);
+  return fetchJson<VersionLogEntry[]>(`/docs/${encodeURIComponent(idOrSlug)}/log${qs}`);
 }
 
 /**
@@ -374,7 +387,7 @@ export async function apiGetVersionDiff(
   opts: { from?: number; to?: number } = {},
 ): Promise<VersionDiffResponse> {
   const qs = buildQueryString(opts as Record<string, number | undefined>);
-  return fetchJson<VersionDiffResponse>(`/api/docs/${encodeURIComponent(idOrSlug)}/diff${qs}`);
+  return fetchJson<VersionDiffResponse>(`/docs/${encodeURIComponent(idOrSlug)}/diff${qs}`);
 }
 
 // ─── SPEC-033 F1: feedback-loop reads (judgments, audit, calibration stats) ──
@@ -436,7 +449,7 @@ export interface CalibrationStatsOpts {
  * @throws {ApiError} On HTTP or network error.
  */
 export async function apiGetJudgments(docId: string): Promise<JudgmentsResponse> {
-  return fetchJson<JudgmentsResponse>(`/api/judgments/${encodeURIComponent(docId)}`);
+  return fetchJson<JudgmentsResponse>(`/judgments/${encodeURIComponent(docId)}`);
 }
 
 /**
@@ -449,7 +462,7 @@ export async function apiGetJudgments(docId: string): Promise<JudgmentsResponse>
  * @throws {ApiError} On HTTP or network error.
  */
 export async function apiGetAuditForDoc(docId: string): Promise<AuditEntry[]> {
-  return fetchJson<AuditEntry[]>(`/api/audit/${encodeURIComponent(docId)}`);
+  return fetchJson<AuditEntry[]>(`/audit/${encodeURIComponent(docId)}`);
 }
 
 /**
@@ -461,7 +474,7 @@ export async function apiGetAuditForDoc(docId: string): Promise<AuditEntry[]> {
  */
 export async function apiGetAuditVerify(opts: { since?: string } = {}): Promise<AuditVerifyResponse> {
   const qs = buildQueryString(opts as Record<string, string | undefined>);
-  return fetchJson<AuditVerifyResponse>(`/api/audit/verify${qs}`);
+  return fetchJson<AuditVerifyResponse>(`/audit/verify${qs}`);
 }
 
 /**
@@ -475,7 +488,7 @@ export async function apiGetCalibrationStats(
   opts: CalibrationStatsOpts = {},
 ): Promise<CalibrationStatsRow[]> {
   const qs = buildQueryString({ doc_type: opts.docType, prompt_version: opts.promptVersion });
-  return fetchJson<CalibrationStatsRow[]>(`/api/calibration/stats${qs}`);
+  return fetchJson<CalibrationStatsRow[]>(`/calibration/stats${qs}`);
 }
 
 // ─── SPEC-033 F2: pending-review queue (home page + triage panels) ──────────
@@ -521,7 +534,7 @@ export interface PendingReviewOpts {
  */
 export async function apiGetPendingReview(opts: PendingReviewOpts = {}): Promise<PendingDocRow[]> {
   const qs = buildQueryString(opts as Record<string, string | undefined>);
-  return fetchJson<PendingDocRow[]>(`/api/review/pending${qs}`);
+  return fetchJson<PendingDocRow[]>(`/review/pending${qs}`);
 }
 
 // ─── SPEC-037 D1: computed readiness ─────────────────────────────────────────
@@ -569,7 +582,7 @@ export interface ConfigReadResponse<C> {
  * @throws {ApiError} On HTTP or network error.
  */
 export async function apiGetConfig(): Promise<ConfigReadResponse<LoreConfig>> {
-  return fetchJson<ConfigReadResponse<LoreConfig>>("/api/config");
+  return fetchJson<ConfigReadResponse<LoreConfig>>("/config");
 }
 
 /**
@@ -586,7 +599,7 @@ export async function apiGetConfig(): Promise<ConfigReadResponse<LoreConfig>> {
  *   blank the team-scope panel too).
  */
 export async function apiGetMachineConfig(): Promise<ConfigReadResponse<GlobalLoreConfig>> {
-  return fetchJson<ConfigReadResponse<GlobalLoreConfig>>("/api/config/machine");
+  return fetchJson<ConfigReadResponse<GlobalLoreConfig>>("/config/machine");
 }
 
 // ─── SPEC-074: dashboard Issues triage projection ────────────────────────────
@@ -627,7 +640,7 @@ export interface IssueReportsResponse {
  * @throws {ApiError} On HTTP or network error.
  */
 export async function apiGetIssueReports(): Promise<IssueReportsResponse> {
-  return fetchJson<IssueReportsResponse>("/api/issue-reports");
+  return fetchJson<IssueReportsResponse>("/issue-reports");
 }
 
 // ─── SPEC-075: dashboard adjudication workbench (evidence-panel read) ───────
@@ -641,8 +654,8 @@ export async function apiGetIssueReports(): Promise<IssueReportsResponse> {
  *
  * @param idOrSlug - Document ULID or slug.
  */
-export function evidencePanelQueryKey(idOrSlug: string): readonly [string, string] {
-  return ["evidence-panel", idOrSlug] as const;
+export function evidencePanelQueryKey(idOrSlug: string): readonly unknown[] {
+  return queryKeys.scope(null, ["evidence-panel", idOrSlug]);
 }
 
 /**
@@ -660,7 +673,7 @@ export function evidencePanelQueryKey(idOrSlug: string): readonly [string, strin
  *   hierarchy-assumption violation).
  */
 export async function apiGetEvidencePanel(idOrSlug: string): Promise<EvidencePanelProjection> {
-  return fetchJson<EvidencePanelProjection>(`/api/evidence-panel/${encodeURIComponent(idOrSlug)}`);
+  return fetchJson<EvidencePanelProjection>(`/evidence-panel/${encodeURIComponent(idOrSlug)}`);
 }
 
 // ─── SPEC-077: dashboard execution read surface ─────────────────────────────
@@ -721,7 +734,7 @@ export interface ReadyReportResponse {
  */
 export async function apiGetReadyReport(planIdOrSlug: string): Promise<Result<ReadyReportResponse, ApiError>> {
   try {
-    const data = await fetchJson<ReadyReportResponse>(`/api/ready/${encodeURIComponent(planIdOrSlug)}`);
+    const data = await fetchJson<ReadyReportResponse>(`/ready/${encodeURIComponent(planIdOrSlug)}`);
     return ok(data);
   } catch (caught) {
     const apiError =
@@ -817,5 +830,5 @@ export interface PhaseStatusResponse {
  * @throws {ApiError} On HTTP or network error (404 unknown id, 422 non-plan target).
  */
 export async function apiGetPhaseStatus(planIdOrSlug: string): Promise<PhaseStatusResponse> {
-  return fetchJson<PhaseStatusResponse>(`/api/phase-status/${encodeURIComponent(planIdOrSlug)}`);
+  return fetchJson<PhaseStatusResponse>(`/phase-status/${encodeURIComponent(planIdOrSlug)}`);
 }

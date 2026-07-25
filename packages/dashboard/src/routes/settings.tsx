@@ -21,6 +21,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { computeDefaultsPrecedence } from "@lore/core";
 import { apiGetConfig, apiGetMachineConfig } from "@/lib/api";
 import { apiPatchConfig, apiPatchMachineConfig } from "@/api/mutations";
+import { queryKeys } from "@/lib/project-api";
 import { ConfigScopePanel } from "@/components/ConfigScopePanel";
 import { DefaultsPrecedenceTable } from "@/components/DefaultsPrecedenceTable";
 import { TEAM_FIELD_SPECS, MACHINE_FIELD_SPECS } from "@/components/config-field-specs";
@@ -36,14 +37,14 @@ function SettingsPage(): React.ReactElement {
   const [isEditingMachine, setIsEditingMachine] = useState(false);
 
   const teamQuery = useQuery({
-    queryKey: ["config", "team"],
+    queryKey: queryKeys.scope(null, ["config", "team"]),
     queryFn: apiGetConfig,
     refetchOnWindowFocus: !isEditingTeam,
     refetchOnReconnect: !isEditingTeam,
   });
 
   const machineQuery = useQuery({
-    queryKey: ["config", "machine"],
+    queryKey: queryKeys.scope(null, ["config", "machine"]),
     queryFn: apiGetMachineConfig,
     refetchOnWindowFocus: !isEditingMachine,
     refetchOnReconnect: !isEditingMachine,
@@ -52,11 +53,11 @@ function SettingsPage(): React.ReactElement {
   const precedenceRows = computeDefaultsPrecedence(machineQuery.data?.config.defaults, teamQuery.data?.config.defaults);
 
   function invalidateTeam(): void {
-    void queryClient.invalidateQueries({ queryKey: ["config", "team"] });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.scope(null, ["config", "team"]) });
   }
 
   function invalidateMachine(): void {
-    void queryClient.invalidateQueries({ queryKey: ["config", "machine"] });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.scope(null, ["config", "machine"]) });
   }
 
   return (

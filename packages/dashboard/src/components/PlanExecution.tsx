@@ -37,6 +37,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { DocRecord, DocSummary, ReadyRecord } from "@lore/core";
 import { planExtraSchema } from "@lore/core";
 import { apiGetReadyReport } from "@/lib/api";
+import { queryKeys } from "@/lib/project-api";
 import { Badge } from "@/components/ui/badge";
 import { StatusPill } from "@/components/StatusPill";
 import { cn } from "@/lib/utils";
@@ -136,7 +137,7 @@ function TaskGroup({
  */
 export function PlanExecution({ plan, children, onNavigate }: PlanExecutionProps): React.ReactElement {
   const { data } = useQuery({
-    queryKey: ["planExecution", "ready", plan.id],
+    queryKey: queryKeys.scope(null, ["planExecution", "ready", plan.id]),
     queryFn: () => apiGetReadyReport(plan.id),
   });
 

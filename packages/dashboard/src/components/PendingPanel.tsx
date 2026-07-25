@@ -33,6 +33,7 @@ import { JudgmentBadge } from "@/components/judgment-badge";
 import { formatTypeMetaLabel, metaBadgeVariant } from "@/lib/type-meta-label";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { queryKeys } from "@/lib/project-api";
 
 const PENDING_PANEL_LIMIT = 8;
 
@@ -58,7 +59,7 @@ async function fetchPendingWithJudgments(): Promise<PendingRow[]> {
  */
 export function PendingPanel({ onNavigate }: PendingPanelProps): React.ReactElement {
   const { data, isLoading, error } = useQuery({
-    queryKey: ["home", "pending-panel"],
+    queryKey: queryKeys.scope(null, ["home", "pending-panel"]),
     queryFn: fetchPendingWithJudgments,
   });
 

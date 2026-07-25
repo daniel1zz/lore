@@ -19,6 +19,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiGetCalibrationStats, apiGetAuditVerify } from "@/lib/api";
 import type { AuditVerifyResponse } from "@/lib/api";
+import { queryKeys } from "@/lib/project-api";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
@@ -58,11 +59,11 @@ function AuditVerifyChip({ data, isLoading, error }: AuditVerifyChipProps): Reac
  */
 export function LoopPanel(): React.ReactElement {
   const statsQuery = useQuery({
-    queryKey: ["home", "loop", "calibration-stats"],
+    queryKey: queryKeys.scope(null, ["home", "loop", "calibration-stats"]),
     queryFn: () => apiGetCalibrationStats(),
   });
   const verifyQuery = useQuery({
-    queryKey: ["home", "loop", "audit-verify"],
+    queryKey: queryKeys.scope(null, ["home", "loop", "audit-verify"]),
     queryFn: () => apiGetAuditVerify(),
   });
 

@@ -12,6 +12,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { SearchBar } from "@/components/SearchBar";
 import { Badge } from "@/components/ui/badge";
 import { apiGetStatus } from "@/lib/api";
+import { queryKeys } from "@/lib/project-api";
 import { useIssueReportsQuery } from "@/lib/issue-reports-query";
 import { useRouteTelemetry } from "@/lib/use-route-telemetry";
 
@@ -27,7 +28,7 @@ function RootLayout(): React.ReactElement {
   // comment) — never blocks or errors this layout's render.
   useRouteTelemetry();
   const { data: status } = useQuery({
-    queryKey: ["status"],
+    queryKey: queryKeys.scope(null, ["status"]),
     queryFn: apiGetStatus,
     staleTime: 60 * 1000,
   });

@@ -253,7 +253,7 @@ type ActiveTab = "content" | "history" | "audit" | "evidence";
  *   docWithNav={data}
  *   onNavigate={(id) => navigate({ to: '/docs/$id', params: { id } })}
  *   onNavigateHome={() => navigate({ to: '/' })}
- *   onMutated={() => queryClient.invalidateQueries({ queryKey: ["doc", doc.id] })}
+ *   onMutated={() => queryClient.invalidateQueries({ queryKey: queryKeys.scope(null, ["doc", doc.id]) })}
  *   onDeleted={() => navigate({ to: '/' })}
  * />
  */

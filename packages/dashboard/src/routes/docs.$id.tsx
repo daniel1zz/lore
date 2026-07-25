@@ -19,6 +19,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DocDetail } from "@/components/DocDetail";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiGetDoc } from "@/lib/api";
+import { queryKeys } from "@/lib/project-api";
 
 export const Route = createFileRoute("/docs/$id")({
   component: DocPage,
@@ -31,7 +32,7 @@ function DocPage(): React.ReactElement {
   const [isEditingDoc, setIsEditingDoc] = useState(false);
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["doc", id],
+    queryKey: queryKeys.scope(null, ["doc", id]),
     queryFn: () => apiGetDoc(id, { resolveMdx: true }),
     enabled: id.length > 0,
     refetchOnWindowFocus: !isEditingDoc,
@@ -45,8 +46,8 @@ function DocPage(): React.ReactElement {
   function handleMutated(): void {
     // reason: invalidate both the detail query and all list queries so the
     // index page reflects updated status/title. SPEC-022 §9.2.
-    void queryClient.invalidateQueries({ queryKey: ["doc", id] });
-    void queryClient.invalidateQueries({ queryKey: ["docs", "list"] });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.scope(null, ["doc", id]) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.scope(null, ["docs", "list"]) });
   }
 
   function handleDeleted(): void {
@@ -55,8 +56,8 @@ function DocPage(): React.ReactElement {
     // the now-stale detail query and navigate away rather than invalidating
     // it (which would just re-fetch a doc that's now soft-deleted).
     // SPEC-027 AC-DH-6.
-    queryClient.removeQueries({ queryKey: ["doc", id] });
-    void queryClient.invalidateQueries({ queryKey: ["docs", "list"] });
+    queryClient.removeQueries({ queryKey: queryKeys.scope(null, ["doc", id]) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.scope(null, ["docs", "list"]) });
     void navigate({ to: "/" });
   }
 
