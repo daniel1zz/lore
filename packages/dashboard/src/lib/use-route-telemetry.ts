@@ -41,10 +41,13 @@ import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import type { DocType } from "@lore/core";
 import type { DocWithNavigation } from "@/lib/api";
 import { apiPostRouteView } from "@/api/mutations";
-import { queryKeys } from "@/lib/project-api";
+import { queryKeys, useProjectParam } from "@/lib/project-api";
 
-/** Matches `/docs/:id` — the only route whose loaded doc carries a `doc_type`. */
-const DOC_ROUTE_PATTERN = /^\/docs\/([^/]+)$/;
+/**
+ * Matches `/docs/:id`, optionally prefixed by `/p/:name` (SPEC-078 T10) — the
+ * only route shape whose loaded doc carries a `doc_type`.
+ */
+const DOC_ROUTE_PATTERN = /^(?:\/p\/[^/]+)?\/docs\/([^/]+)$/;
 
 /**
  * Pure derivation of `{route_id, doc_type?}` from a pathname plus a doc_type
@@ -76,8 +79,8 @@ export function resolveRouteViewParams(
 }
 
 /** Reads a doc's cached `type` from the TanStack Query `["doc", id]` cache entry, if present. */
-function lookupCachedDocType(queryClient: QueryClient, docId: string): DocType | undefined {
-  const cached = queryClient.getQueryData<DocWithNavigation>(queryKeys.scope(null, ["doc", docId]));
+function lookupCachedDocType(queryClient: QueryClient, project: string | null, docId: string): DocType | undefined {
+  const cached = queryClient.getQueryData<DocWithNavigation>(queryKeys.scope(project, ["doc", docId]));
   return cached?.doc.type;
 }
 
@@ -90,6 +93,7 @@ function lookupCachedDocType(queryClient: QueryClient, docId: string): DocType |
  */
 export function useRouteTelemetry(): void {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const project = useProjectParam();
   const queryClient = useQueryClient();
   const lastFiredPathnameRef = useRef<string | null>(null);
 
@@ -97,7 +101,7 @@ export function useRouteTelemetry(): void {
     if (lastFiredPathnameRef.current === pathname) return;
     lastFiredPathnameRef.current = pathname;
 
-    const params = resolveRouteViewParams(pathname, (docId) => lookupCachedDocType(queryClient, docId));
-    void apiPostRouteView(params);
-  }, [pathname, queryClient]);
+    const params = resolveRouteViewParams(pathname, (docId) => lookupCachedDocType(queryClient, project, docId));
+    void apiPostRouteView(project, params);
+  }, [pathname, project, queryClient]);
 }

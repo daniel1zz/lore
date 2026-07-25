@@ -97,7 +97,7 @@ describe("apiCreateDoc — happy path", () => {
       mockJsonResponse({ ok: true, data: { doc } }),
     );
 
-    const result = await apiCreateDoc({ type: "prd", title: "My New PRD" });
+    const result = await apiCreateDoc(null, { type: "prd", title: "My New PRD" });
     expect(result).toStrictEqual(doc);
   });
 
@@ -107,7 +107,7 @@ describe("apiCreateDoc — happy path", () => {
       mockJsonResponse({ ok: true, data: { doc } }),
     );
 
-    await apiCreateDoc({ type: "prd", title: "My New PRD" });
+    await apiCreateDoc(null, { type: "prd", title: "My New PRD" });
 
     const call = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(call[0]).toBe("/api/dashboard/docs");
@@ -124,8 +124,8 @@ describe("apiCreateDoc — happy path", () => {
       .mockResolvedValueOnce(mockJsonResponse({ ok: true, data: { doc: doc1 } }))
       .mockResolvedValueOnce(mockJsonResponse({ ok: true, data: { doc: doc2 } }));
 
-    const r1 = await apiCreateDoc({ type: "prd", title: "PRD One" });
-    const r2 = await apiCreateDoc({ type: "plan", title: "Plan Two" });
+    const r1 = await apiCreateDoc(null, { type: "prd", title: "PRD One" });
+    const r2 = await apiCreateDoc(null, { type: "plan", title: "Plan Two" });
 
     expect(r1.id).toBe("DOC1");
     expect(r2.id).toBe("DOC2");
@@ -141,7 +141,7 @@ describe("apiPatchDoc — header dispatch", () => {
       mockJsonResponse({ ok: true, data: { doc } }),
     );
 
-    await apiPatchDoc("01JTEST", { content: "updated" }, { version: 5 });
+    await apiPatchDoc(null, "01JTEST", { content: "updated" }, { version: 5 });
 
     const headers = capturedHeaders();
     expect(headers["If-Match"]).toBe("5");
@@ -156,7 +156,7 @@ describe("apiPatchDoc — header dispatch", () => {
       mockJsonResponse({ ok: true, data: { doc } }),
     );
 
-    await apiPatchDoc("01JTEST", { content: "force write" }, { forceOverwrite: true });
+    await apiPatchDoc(null, "01JTEST", { content: "force write" }, { forceOverwrite: true });
 
     const headers = capturedHeaders();
     expect(headers["X-Force-Overwrite"]).toBe("1");
@@ -170,7 +170,7 @@ describe("apiPatchDoc — header dispatch", () => {
       mockJsonResponse({ ok: true, data: { doc } }),
     );
 
-    await apiPatchDoc("my-doc-id", { content: "updated" }, { version: 1 });
+    await apiPatchDoc(null, "my-doc-id", { content: "updated" }, { version: 1 });
 
     const call = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(call[0]).toContain("/api/dashboard/docs/");
@@ -209,7 +209,7 @@ describe("apiPatchDoc — 409 → ConflictError (AC-DASH-WRITE-3)", () => {
     );
 
     await expect(
-      apiPatchDoc("01JTEST", { content: "client content" }, { version: 2 }),
+      apiPatchDoc(null, "01JTEST", { content: "client content" }, { version: 2 }),
     ).rejects.toThrow(ConflictError);
   });
 
@@ -222,7 +222,7 @@ describe("apiPatchDoc — 409 → ConflictError (AC-DASH-WRITE-3)", () => {
 
     let caughtError: ConflictError | null = null;
     try {
-      await apiPatchDoc("01JTEST", { content: "client content" }, { version: 2 });
+      await apiPatchDoc(null, "01JTEST", { content: "client content" }, { version: 2 });
     } catch (e) {
       if (e instanceof ConflictError) caughtError = e;
     }
@@ -241,7 +241,7 @@ describe("apiPatchDoc — 409 → ConflictError (AC-DASH-WRITE-3)", () => {
       mockJsonResponse({ ok: false, error: { current: currentDoc, mine: "mine", diff: "diff" } }, 409),
     );
 
-    const err = await apiPatchDoc("01JTEST", { content: "mine" }, { version: 2 }).catch((e) => e);
+    const err = await apiPatchDoc(null, "01JTEST", { content: "mine" }, { version: 2 }).catch((e) => e);
     expect(err).toBeInstanceOf(ConflictError);
     expect(err).toBeInstanceOf(DashboardApiError);
   });
@@ -255,7 +255,7 @@ describe("apiPatchDoc — 409 → ConflictError (AC-DASH-WRITE-3)", () => {
       mockJsonResponse({ ok: false, current: currentDoc, mine: "mine", diff: "diff" }, 409),
     );
 
-    const err = await apiPatchDoc("01JTEST", { content: "mine" }, { version: 2 }).catch((e) => e);
+    const err = await apiPatchDoc(null, "01JTEST", { content: "mine" }, { version: 2 }).catch((e) => e);
     expect(err).toBeInstanceOf(DashboardApiError);
     expect(err).not.toBeInstanceOf(ConflictError);
     expect((err as DashboardApiError).code).toBe("STALE_VERSION");
@@ -271,7 +271,7 @@ describe("apiCreateDoc — 422 → DashboardApiError (AC-DASH-WRITE-10)", () => 
       ),
     );
 
-    const err = await apiCreateDoc({ type: "prd", title: "Valid Title" }).catch((e) => e);
+    const err = await apiCreateDoc(null, { type: "prd", title: "Valid Title" }).catch((e) => e);
     expect(err).toBeInstanceOf(DashboardApiError);
     expect(err.status).toBe(422);
   });
@@ -292,7 +292,7 @@ describe("apiCreateDoc — 422 → DashboardApiError (AC-DASH-WRITE-10)", () => 
     let threw: Error | null = null;
     try {
       // @ts-expect-error — intentionally passing empty title to test validation
-      await apiCreateDoc({ type: "prd", title: "" });
+      await apiCreateDoc(null, { type: "prd", title: "" });
     } catch (e) {
       threw = e as Error;
     }
@@ -315,7 +315,7 @@ describe("apiPatchDoc — no version and no forceOverwrite", () => {
       mockJsonResponse({ ok: true, data: { doc } }),
     );
 
-    await apiPatchDoc("01JTEST", { content: "bare patch" });
+    await apiPatchDoc(null, "01JTEST", { content: "bare patch" });
 
     const headers = capturedHeaders();
     expect(headers["If-Match"]).toBeUndefined();
@@ -329,7 +329,7 @@ describe("apiPatchDoc — no version and no forceOverwrite", () => {
       mockJsonResponse({ ok: true, data: { doc } }),
     );
 
-    await apiPatchDoc("01JTEST", { content: "force" }, { version: 3, forceOverwrite: true });
+    await apiPatchDoc(null, "01JTEST", { content: "force" }, { version: 3, forceOverwrite: true });
 
     const headers = capturedHeaders();
     expect(headers["X-Force-Overwrite"]).toBe("1");
@@ -344,7 +344,7 @@ describe("apiDeleteLink — boundary", () => {
       new Response(null, { status: 204 }),
     );
 
-    await expect(apiDeleteLink("from-id", "to-id")).resolves.toBeUndefined();
+    await expect(apiDeleteLink(null, "from-id", "to-id")).resolves.toBeUndefined();
   });
 });
 
@@ -359,7 +359,7 @@ describe("DashboardApiError error classification", () => {
       ),
     );
 
-    const err = await apiCreateDoc({ type: "prd", title: "Test" }).catch((e) => e);
+    const err = await apiCreateDoc(null, { type: "prd", title: "Test" }).catch((e) => e);
     expect(err).toBeInstanceOf(DashboardApiError);
     expect(err.status).toBe(403);
     expect(err.code).toBe("FORBIDDEN");
@@ -368,7 +368,7 @@ describe("DashboardApiError error classification", () => {
   it("throws DashboardApiError with NETWORK_ERROR code when fetch itself throws", async () => {
     (global.fetch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new TypeError("Failed to fetch"));
 
-    const err = await apiCreateDoc({ type: "prd", title: "Test" }).catch((e) => e);
+    const err = await apiCreateDoc(null, { type: "prd", title: "Test" }).catch((e) => e);
     expect(err).toBeInstanceOf(DashboardApiError);
     expect(err.code).toBe("NETWORK_ERROR");
     expect(err.status).toBe(0);
@@ -383,7 +383,7 @@ describe("apiDeleteDoc — happy path (AC-DH-6)", () => {
       mockJsonResponse({ ok: true, data: { id: "01JTEST", recoverable_until: "2024-02-01T00:00:00Z" } }),
     );
 
-    const result = await apiDeleteDoc("01JTEST");
+    const result = await apiDeleteDoc(null, "01JTEST");
     expect(result).toStrictEqual({ id: "01JTEST", recoverable_until: "2024-02-01T00:00:00Z" });
   });
 
@@ -392,7 +392,7 @@ describe("apiDeleteDoc — happy path (AC-DH-6)", () => {
       mockJsonResponse({ ok: true, data: { id: "01JTEST", recoverable_until: "2024-02-01T00:00:00Z" } }),
     );
 
-    await apiDeleteDoc("01JTEST");
+    await apiDeleteDoc(null, "01JTEST");
 
     const call = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(call[0]).toBe("/api/dashboard/docs/01JTEST?confirm=true");
@@ -405,7 +405,7 @@ describe("apiDeleteDoc — happy path (AC-DH-6)", () => {
       mockJsonResponse({ ok: true, data: { id: "prd-a/b", recoverable_until: "2024-02-01T00:00:00Z" } }),
     );
 
-    await apiDeleteDoc("prd-a/b");
+    await apiDeleteDoc(null, "prd-a/b");
 
     const call = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(call[0]).toBe(`/api/dashboard/docs/${encodeURIComponent("prd-a/b")}?confirm=true`);
@@ -418,7 +418,7 @@ describe("apiDeleteDoc — error path", () => {
       mockJsonResponse({ ok: false, error: { code: "DOC_NOT_FOUND", message: "not found" } }, 404),
     );
 
-    const err = await apiDeleteDoc("missing-id").catch((e) => e);
+    const err = await apiDeleteDoc(null, "missing-id").catch((e) => e);
     expect(err).toBeInstanceOf(DashboardApiError);
     expect(err.status).toBe(404);
   });
@@ -431,7 +431,7 @@ describe("apiDeleteDoc — error path", () => {
       mockJsonResponse({ ok: false, error: { code: "DELETE_REQUIRES_CONFIRM", message: "confirm required" } }, 400),
     );
 
-    const err = await apiDeleteDoc("01JTEST").catch((e) => e);
+    const err = await apiDeleteDoc(null, "01JTEST").catch((e) => e);
     expect(err).toBeInstanceOf(DashboardApiError);
     expect(err.status).toBe(400);
     expect(err.code).toBe("DELETE_REQUIRES_CONFIRM");
@@ -447,7 +447,7 @@ describe("apiRestoreVersion — happy path (AC-DH-7)", () => {
       mockJsonResponse({ ok: true, data: { doc } }),
     );
 
-    const result = await apiRestoreVersion("01JTEST", 1);
+    const result = await apiRestoreVersion(null, "01JTEST", 1);
     expect(result).toStrictEqual(doc);
   });
 
@@ -457,7 +457,7 @@ describe("apiRestoreVersion — happy path (AC-DH-7)", () => {
       mockJsonResponse({ ok: true, data: { doc } }),
     );
 
-    await apiRestoreVersion("01JTEST", 1);
+    await apiRestoreVersion(null, "01JTEST", 1);
 
     const call = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(call[0]).toBe("/api/dashboard/docs/01JTEST/restore?confirm=true");
@@ -473,7 +473,7 @@ describe("apiRestoreVersion — error path", () => {
       mockJsonResponse({ ok: false, error: { code: "DOC_NOT_FOUND", message: "Version 99 not found" } }, 404),
     );
 
-    const err = await apiRestoreVersion("01JTEST", 99).catch((e) => e);
+    const err = await apiRestoreVersion(null, "01JTEST", 99).catch((e) => e);
     expect(err).toBeInstanceOf(DashboardApiError);
     expect(err.status).toBe(404);
   });
@@ -489,7 +489,7 @@ describe("apiRestoreVersion — error path", () => {
       ),
     );
 
-    const err = await apiRestoreVersion("01JTEST", 1).catch((e) => e);
+    const err = await apiRestoreVersion(null, "01JTEST", 1).catch((e) => e);
     expect(err).toBeInstanceOf(DashboardApiError);
     expect(err.status).toBe(400);
     expect(err.code).toBe("RESTORE_REQUIRES_CONFIRM");
@@ -505,7 +505,7 @@ describe("regression — apiApproveDoc and apiRejectDoc", () => {
       mockJsonResponse({ ok: true, data: { doc, warnings: [] } }),
     );
 
-    const result = await apiApproveDoc("01JTEST");
+    const result = await apiApproveDoc(null, "01JTEST");
     expect(result.doc.status).toBe("approved");
     expect(result.warnings).toEqual([]);
   });
@@ -516,7 +516,7 @@ describe("regression — apiApproveDoc and apiRejectDoc", () => {
       mockJsonResponse({ ok: true, data: { doc, warnings: [] } }),
     );
 
-    const result = await apiRejectDoc("01JTEST", "Needs more work");
+    const result = await apiRejectDoc(null, "01JTEST", "Needs more work");
     expect(result.doc.status).toBe("draft");
     expect(result.warnings).toEqual([]);
   });
@@ -527,7 +527,7 @@ describe("regression — apiApproveDoc and apiRejectDoc", () => {
       mockJsonResponse({ ok: true, data: { doc, warnings: ["approved, but calibration record failed: STORE_ERROR"] } }),
     );
 
-    const result = await apiApproveDoc("01JTEST", { calibrationNote: "reviewer note" });
+    const result = await apiApproveDoc(null, "01JTEST", { calibrationNote: "reviewer note" });
     expect(result.doc.status).toBe("approved");
     expect(result.warnings).toHaveLength(1);
   });
@@ -538,7 +538,7 @@ describe("regression — apiApproveDoc and apiRejectDoc", () => {
       mockJsonResponse({ ok: true, data: { doc, warnings: [] } }),
     );
 
-    await apiRejectDoc("01JTEST", "Needs more work", { calibrationNote: "AI missed context" });
+    await apiRejectDoc(null, "01JTEST", "Needs more work", { calibrationNote: "AI missed context" });
 
     const [, options] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
     const sentBody = JSON.parse(options.body as string) as Record<string, unknown>;
@@ -551,7 +551,7 @@ describe("regression — apiApproveDoc and apiRejectDoc", () => {
       mockJsonResponse({ ok: true, data: { ok: true } }, 201),
     );
 
-    const result = await apiCreateLink("from-id", { to: "to-id", type: "relates-to" });
+    const result = await apiCreateLink(null, "from-id", { to: "to-id", type: "relates-to" });
     expect(result).toBeUndefined(); // apiCreateLink returns void
   });
 });
@@ -563,7 +563,7 @@ describe("apiPostRouteView", () => {
     it("POSTs route_id and doc_type with credentials: include", async () => {
       (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(new Response(null, { status: 204 }));
 
-      await apiPostRouteView({ route_id: "/docs/abc", doc_type: "task" });
+      await apiPostRouteView(null, { route_id: "/docs/abc", doc_type: "task" });
 
       const call = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(call[0]).toBe("/api/dashboard/telemetry/route-view");
@@ -575,7 +575,7 @@ describe("apiPostRouteView", () => {
 
     it("resolves to undefined on a successful 204", async () => {
       (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(new Response(null, { status: 204 }));
-      const result = await apiPostRouteView({ route_id: "/library" });
+      const result = await apiPostRouteView(null, { route_id: "/library" });
       expect(result).toBeUndefined();
     });
   });
@@ -583,7 +583,7 @@ describe("apiPostRouteView", () => {
   describe("negative", () => {
     it("omits doc_type from the body when not supplied", async () => {
       (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(new Response(null, { status: 204 }));
-      await apiPostRouteView({ route_id: "/library" });
+      await apiPostRouteView(null, { route_id: "/library" });
       const call = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
       const sentBody = JSON.parse((call[1] as RequestInit).body as string) as Record<string, unknown>;
       expect(sentBody).toEqual({ route_id: "/library" });
@@ -593,14 +593,14 @@ describe("apiPostRouteView", () => {
   describe("error — never throws (fire-and-forget)", () => {
     it("swallows a network/timeout failure silently, never rejecting", async () => {
       (global.fetch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("network down"));
-      await expect(apiPostRouteView({ route_id: "/docs/x" })).resolves.toBeUndefined();
+      await expect(apiPostRouteView(null, { route_id: "/docs/x" })).resolves.toBeUndefined();
     });
 
     it("swallows a non-2xx server response silently, never rejecting", async () => {
       (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
         mockJsonResponse({ ok: false, error: { code: "VALIDATION_ERROR", message: "bad body" } }, 422),
       );
-      await expect(apiPostRouteView({ route_id: "/docs/x" })).resolves.toBeUndefined();
+      await expect(apiPostRouteView(null, { route_id: "/docs/x" })).resolves.toBeUndefined();
     });
   });
 
@@ -610,7 +610,7 @@ describe("apiPostRouteView", () => {
       const fakeResponse = { ok: true, status: 204, json: jsonSpy } as unknown as Response;
       (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(fakeResponse);
 
-      await apiPostRouteView({ route_id: "/tree" });
+      await apiPostRouteView(null, { route_id: "/tree" });
 
       expect(jsonSpy).not.toHaveBeenCalled();
     });

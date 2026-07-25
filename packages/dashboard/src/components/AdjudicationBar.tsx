@@ -36,6 +36,7 @@ import { toast } from "sonner";
 import type { DocRecord, EvidencePanelProjection } from "@lore/core";
 import { summarizeForAdjudicationBar } from "@lore/core";
 import { Badge } from "@/components/ui/badge";
+import { ProjectIdentityLabel } from "@/components/ProjectIdentityLabel";
 import { apiApproveDoc, apiRejectDoc, DashboardApiError } from "@/api/mutations";
 
 export interface AdjudicationBarProps {
@@ -43,6 +44,8 @@ export interface AdjudicationBarProps {
   doc: DocRecord;
   /** This doc's evidence-panel projection (`GET /api/evidence-panel/:idOrSlug`). */
   panel: EvidencePanelProjection;
+  /** Active project, or `null`/absent for registry-less mode (SPEC-078 T10). */
+  project?: string | null;
   /**
    * Called after a successful approve/reject. Caller (`DocDetail`) should
    * invalidate this doc's query cache. Omitted → the note/approve/reject
@@ -63,7 +66,12 @@ function statusVariant(status: "pass" | "fail" | "none"): "secondary" | "destruc
  * @example
  * <AdjudicationBar doc={doc} panel={panel} onMutated={refresh} />
  */
-export function AdjudicationBar({ doc, panel, onMutated }: AdjudicationBarProps): React.ReactElement | null {
+export function AdjudicationBar({
+  doc,
+  panel,
+  project = null,
+  onMutated,
+}: AdjudicationBarProps): React.ReactElement | null {
   const [note, setNote] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -77,7 +85,9 @@ export function AdjudicationBar({ doc, panel, onMutated }: AdjudicationBarProps)
       const trimmedNote = note.trim();
       const opts = trimmedNote.length > 0 ? { calibrationNote: trimmedNote } : {};
       const result =
-        action === "approve" ? await apiApproveDoc(doc.id, opts) : await apiRejectDoc(doc.id, undefined, opts);
+        action === "approve"
+          ? await apiApproveDoc(project, doc.id, opts)
+          : await apiRejectDoc(project, doc.id, undefined, opts);
 
       toast.success(action === "approve" ? "Document approved" : "Document rejected");
       if (result.warnings.length > 0) {
@@ -120,6 +130,8 @@ export function AdjudicationBar({ doc, panel, onMutated }: AdjudicationBarProps)
 
       {onMutated !== undefined && (
         <div className="flex items-center gap-2">
+          {/* SPEC-078 T10 R-13: project identity adjacent to approve/reject. */}
+          <ProjectIdentityLabel project={project} />
           <input
             type="text"
             className="flex-1 text-xs px-2 py-1 border rounded bg-background"

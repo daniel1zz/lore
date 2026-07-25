@@ -10,9 +10,10 @@ import { createRootRoute, Link, Outlet, useNavigate } from "@tanstack/react-rout
 import { useQuery } from "@tanstack/react-query";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { SearchBar } from "@/components/SearchBar";
+import { ProjectSwitcher } from "@/components/ProjectSwitcher";
 import { Badge } from "@/components/ui/badge";
 import { apiGetStatus } from "@/lib/api";
-import { queryKeys } from "@/lib/project-api";
+import { queryKeys, useProjectParam } from "@/lib/project-api";
 import { useIssueReportsQuery } from "@/lib/issue-reports-query";
 import { useRouteTelemetry } from "@/lib/use-route-telemetry";
 
@@ -27,9 +28,10 @@ function RootLayout(): React.ReactElement {
   // route-view telemetry ping. Fire-and-forget (see apiPostRouteView's doc
   // comment) — never blocks or errors this layout's render.
   useRouteTelemetry();
+  const project = useProjectParam();
   const { data: status } = useQuery({
-    queryKey: queryKeys.scope(null, ["status"]),
-    queryFn: apiGetStatus,
+    queryKey: queryKeys.scope(project, ["status"]),
+    queryFn: () => apiGetStatus(project),
     staleTime: 60 * 1000,
   });
   // reason: SPEC-074 — the nav badge polls the SAME issue-reports projection
@@ -122,6 +124,8 @@ function RootLayout(): React.ReactElement {
                 {status.total_docs} docs
               </Badge>
             )}
+            {/* reason: SPEC-078 T10 — renders null in registry-less mode (byte-identical, R-15). */}
+            <ProjectSwitcher />
             <ThemeToggle />
           </div>
         </div>

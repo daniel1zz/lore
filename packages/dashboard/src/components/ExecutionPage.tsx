@@ -55,6 +55,8 @@ import { PhaseProgressPanel } from "@/components/PhaseProgressPanel";
 export interface ExecutionPageProps {
   /** The current `?plan` search-param value, or `undefined` when absent from the URL. */
   planParam?: string;
+  /** Active project, or `null`/absent for registry-less mode (SPEC-078 T10). */
+  project?: string | null;
   /** Called with the newly-selected plan's doc id when the user changes the plan selector. */
   onPlanChange: (planId: string) => void;
   /** Called with a task's doc id when a `ReadyTaskList` row is clicked. */
@@ -65,14 +67,19 @@ export interface ExecutionPageProps {
  * @example
  * <ExecutionPage planParam={undefined} onPlanChange={() => {}} onNavigateToDoc={() => {}} />
  */
-export function ExecutionPage({ planParam, onPlanChange, onNavigateToDoc }: ExecutionPageProps): React.ReactElement {
+export function ExecutionPage({
+  planParam,
+  project = null,
+  onPlanChange,
+  onNavigateToDoc,
+}: ExecutionPageProps): React.ReactElement {
   const {
     data: plansData,
     isLoading: plansLoading,
     error: plansError,
   } = useQuery({
-    queryKey: queryKeys.scope(null, ["execution", "active-plans"]),
-    queryFn: () => apiList({ type: "plan", status: "active" }),
+    queryKey: queryKeys.scope(project, ["execution", "active-plans"]),
+    queryFn: () => apiList(project, { type: "plan", status: "active" }),
   });
 
   const plans = plansData?.docs ?? [];
@@ -82,8 +89,8 @@ export function ExecutionPage({ planParam, onPlanChange, onNavigateToDoc }: Exec
   const effectivePlan = planParam ?? plans[0]?.id;
 
   const { data: readyResult, isLoading: readyLoading } = useQuery({
-    queryKey: queryKeys.scope(null, ["execution", "ready", effectivePlan]),
-    queryFn: () => apiGetReadyReport(effectivePlan as string),
+    queryKey: queryKeys.scope(project, ["execution", "ready", effectivePlan]),
+    queryFn: () => apiGetReadyReport(project, effectivePlan as string),
     enabled: effectivePlan !== undefined,
   });
 
@@ -92,8 +99,8 @@ export function ExecutionPage({ planParam, onPlanChange, onNavigateToDoc }: Exec
     isLoading: phaseLoading,
     error: phaseError,
   } = useQuery({
-    queryKey: queryKeys.scope(null, ["execution", "phase-status", effectivePlan]),
-    queryFn: () => apiGetPhaseStatus(effectivePlan as string),
+    queryKey: queryKeys.scope(project, ["execution", "phase-status", effectivePlan]),
+    queryFn: () => apiGetPhaseStatus(project, effectivePlan as string),
     enabled: effectivePlan !== undefined,
   });
 

@@ -57,6 +57,7 @@ import { ConfigConflictModal, type ConfigConflictRow } from "@/components/Config
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ProjectIdentityLabel } from "@/components/ProjectIdentityLabel";
 
 /** Props for {@link ConfigScopePanel} — one scope's config editor, driven entirely by `fieldSpecs`. */
 export interface ConfigScopePanelProps<C> {
@@ -76,6 +77,12 @@ export interface ConfigScopePanelProps<C> {
   className?: string;
   /** Extra content rendered in the panel header, ABOVE the field rows — e.g. the machine scope's blast-radius disclosure. */
   headerExtra?: React.ReactNode;
+  /**
+   * Active project (SPEC-078 T10 R-13) — rendered via `ProjectIdentityLabel`
+   * immediately adjacent to the Save/Edit controls. `undefined`/`null` both
+   * render nothing (registry-less mode, R-15 byte-identical default).
+   */
+  project?: string | null;
 }
 
 interface ConfigRow {
@@ -241,6 +248,7 @@ export function ConfigScopePanel<C>({
   onEditingChange,
   className,
   headerExtra,
+  project = null,
 }: ConfigScopePanelProps<C>): React.ReactElement {
   const [isEditing, setIsEditing] = useState(false);
   const [baseHash, setBaseHash] = useState<string | null>(null);
@@ -382,6 +390,7 @@ export function ConfigScopePanel<C>({
         </div>
         {!isLoading && error === null && data !== undefined && (
           <div className="flex items-center gap-2">
+            <ProjectIdentityLabel project={project} />
             {isEditing ? (
               <>
                 <Button variant="outline" size="sm" onClick={cancelEditing} disabled={isSaving}>

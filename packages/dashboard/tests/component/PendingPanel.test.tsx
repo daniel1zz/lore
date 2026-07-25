@@ -112,7 +112,7 @@ describe("PendingPanel", () => {
       const doc1 = makePendingDoc({ id: "01HDOC00000000000000000001", title: "Doc One", version: 2 });
       const doc2 = makePendingDoc({ id: "01HDOC00000000000000000002", title: "Doc Two", version: 5 });
       mockedGetPending.mockResolvedValue([doc1, doc2]);
-      mockedGetJudgments.mockImplementation(async (docId: string) => {
+      mockedGetJudgments.mockImplementation(async (_project: string | null, docId: string) => {
         if (docId === doc1.id) return { latest: makeJudgment({ doc_version: 2, decision: "approve" }), history: [] };
         return { latest: null, history: [] };
       });

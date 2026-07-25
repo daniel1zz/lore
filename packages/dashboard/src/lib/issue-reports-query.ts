@@ -6,7 +6,7 @@
  *   route" design) — centralizing the query key + poll interval here means
  *   all three surfaces update from a single cache entry / single invalidation
  *   instead of drifting into three independently-typed `useQuery` calls.
- * Public surface: ISSUE_REPORTS_QUERY_KEY, useIssueReportsQuery
+ * Public surface: issueReportsQueryKey, useIssueReportsQuery
  * Invariants:
  *   - Polls every ISSUE_REPORTS_POLL_MS as a background freshness floor — but
  *     the detail view's approve/reject mutations ADDITIONALLY invalidate this
@@ -16,16 +16,23 @@
  *   - Always mounted (the nav badge lives in the root layout, rendered on
  *     every route) — an approve/reject invalidation always has a live
  *     subscriber to refresh, even when the Issues page itself isn't mounted.
+ *   - `issueReportsQueryKey` is a FUNCTION, not a module-level constant
+ *     (SPEC-078 T10) — `queryKeys.scope` needs a live `project` value, and a
+ *     React hook (`useProjectParam`) cannot be called at module scope.
+ *     Callers (`useIssueReportsQuery` here, `IssueDetail.tsx`'s invalidation)
+ *     each call `useProjectParam()` themselves and pass the result in.
  * Side-effect class: IO (fetch via TanStack Query)
  * Source: SPEC-074 §Design ("nav badge polls the same projection the page renders")
  */
 
 import { useQuery } from "@tanstack/react-query";
 import { apiGetIssueReports } from "./api";
-import { queryKeys } from "./project-api";
+import { queryKeys, useProjectParam } from "./project-api";
 
-/** Shared query key — pass to `queryClient.invalidateQueries` after approve/reject. */
-export const ISSUE_REPORTS_QUERY_KEY = queryKeys.scope(null, ["issue-reports"]);
+/** Query key builder — pass to `queryClient.invalidateQueries` after approve/reject. */
+export function issueReportsQueryKey(project: string | null): readonly unknown[] {
+  return queryKeys.scope(project, ["issue-reports"]);
+}
 
 const ISSUE_REPORTS_POLL_MS = 15_000;
 
@@ -35,9 +42,10 @@ const ISSUE_REPORTS_POLL_MS = 15_000;
  * const openCount = data?.open_count ?? 0;
  */
 export function useIssueReportsQuery() {
+  const project = useProjectParam();
   return useQuery({
-    queryKey: ISSUE_REPORTS_QUERY_KEY,
-    queryFn: apiGetIssueReports,
+    queryKey: issueReportsQueryKey(project),
+    queryFn: () => apiGetIssueReports(project),
     refetchInterval: ISSUE_REPORTS_POLL_MS,
   });
 }

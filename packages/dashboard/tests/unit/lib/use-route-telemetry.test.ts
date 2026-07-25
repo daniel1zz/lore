@@ -41,6 +41,10 @@ import type { DocType } from "@lore/core";
 
 const mockUseRouterState = vi.fn();
 vi.mock("@tanstack/react-router", () => ({
+  // reason: SPEC-078 T10 — `useProjectParam()` (imported by use-route-telemetry.ts
+  // via project-api.ts) ALSO calls `useRouterState`, reading the same mocked
+  // pathname to derive the `/p/:name` segment. Every test pathname below has no
+  // `/p/` prefix, so `useProjectParam()` always resolves to `null` here.
   useRouterState: (opts: { select: (state: { location: { pathname: string } }) => string }) =>
     opts.select({ location: { pathname: mockUseRouterState() as string } }),
 }));
@@ -99,7 +103,7 @@ describe("useRouteTelemetry (AC-075-8)", () => {
       renderHook(() => useRouteTelemetry());
 
       expect(mockApiPostRouteView).toHaveBeenCalledTimes(1);
-      expect(mockApiPostRouteView).toHaveBeenCalledWith({ route_id: "/library" });
+      expect(mockApiPostRouteView).toHaveBeenCalledWith(null, { route_id: "/library" });
     });
   });
 
@@ -111,7 +115,7 @@ describe("useRouteTelemetry (AC-075-8)", () => {
       renderHook(() => useRouteTelemetry());
 
       expect(mockApiPostRouteView).toHaveBeenCalledTimes(1);
-      expect(mockApiPostRouteView).toHaveBeenCalledWith({ route_id: "/execution" });
+      expect(mockApiPostRouteView).toHaveBeenCalledWith(null, { route_id: "/execution" });
     });
   });
 
@@ -136,7 +140,7 @@ describe("useRouteTelemetry (AC-075-8)", () => {
       rerender();
 
       expect(mockApiPostRouteView).toHaveBeenCalledTimes(2);
-      expect(mockApiPostRouteView).toHaveBeenNthCalledWith(2, { route_id: "/tree" });
+      expect(mockApiPostRouteView).toHaveBeenNthCalledWith(2, null, { route_id: "/tree" });
     });
   });
 });

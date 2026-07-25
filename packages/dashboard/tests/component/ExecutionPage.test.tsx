@@ -128,7 +128,7 @@ describe("ExecutionPage", () => {
       });
       renderWithClient(<ExecutionPage planParam="plan-b-id" onPlanChange={vi.fn()} onNavigateToDoc={vi.fn()} />);
       await screen.findByRole("option", { name: "Plan B" });
-      expect(mockedApiGetReadyReport).toHaveBeenCalledWith("plan-b-id");
+      expect(mockedApiGetReadyReport).toHaveBeenCalledWith(null, "plan-b-id");
     });
 
     it("falls back to the first (most-recently-active) plan when planParam is absent", async () => {
@@ -138,7 +138,7 @@ describe("ExecutionPage", () => {
       });
       renderWithClient(<ExecutionPage planParam={undefined} onPlanChange={vi.fn()} onNavigateToDoc={vi.fn()} />);
       await screen.findByRole("option", { name: "Plan A" });
-      expect(mockedApiGetReadyReport).toHaveBeenCalledWith("plan-a-id");
+      expect(mockedApiGetReadyReport).toHaveBeenCalledWith(null, "plan-a-id");
     });
   });
 

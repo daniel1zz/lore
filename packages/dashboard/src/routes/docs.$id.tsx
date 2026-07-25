@@ -11,6 +11,11 @@
  *   background refetch corrupting a Save's If-Match version is DocDetail's own
  *   `editBaseVersion` freeze (src/lib/edit-session.ts), which holds even if
  *   this route were to stop wiring the callback.
+ * SPEC-078 T10: split into a thin route wrapper (`DocRoute`, owns this file's
+ *   `Route.useParams()` — route-bound to the literal "/docs/$id" id, so it
+ *   cannot be called from a component mounted under `/p/$name/docs/$id`) plus
+ *   `DocPageBody` (exported, takes `id` as a prop, reused verbatim by that
+ *   mirror route's own thin wrapper).
  */
 
 import { useState } from "react";
@@ -19,35 +24,58 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DocDetail } from "@/components/DocDetail";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiGetDoc } from "@/lib/api";
-import { queryKeys } from "@/lib/project-api";
+import { queryKeys, useProjectParam } from "@/lib/project-api";
 
 export const Route = createFileRoute("/docs/$id")({
-  component: DocPage,
+  component: DocRoute,
 });
 
-function DocPage(): React.ReactElement {
+/** Thin route wrapper — owns this file's own Route-bound `id` param. */
+function DocRoute(): React.ReactElement {
   const { id } = Route.useParams();
+  return <DocPageBody id={id} />;
+}
+
+/**
+ * Route-agnostic doc-detail body — reused verbatim by
+ * `routes/p.$name.docs.$id.tsx` (SPEC-078 T10). Exported for that reuse.
+ *
+ * @param id - Document ULID or slug (from whichever route mounted this body).
+ */
+export function DocPageBody({ id }: { id: string }): React.ReactElement {
   const navigate = useNavigate();
+  const project = useProjectParam();
   const queryClient = useQueryClient();
   const [isEditingDoc, setIsEditingDoc] = useState(false);
 
+  // reason: navigating "home" from within a project context should stay in
+  // that project's scope (`/p/:name`), not bounce to the bare "/" (which
+  // would then redirect back via `useProjectRedirect` anyway — going direct
+  // avoids the extra round trip and matches user intent: "back to THIS
+  // project's home", not "re-resolve which project to land on").
+  const homeTarget = project !== null ? ({ to: "/p/$name", params: { name: project } } as const) : ({ to: "/" } as const);
+
   const { data, isLoading, error } = useQuery({
-    queryKey: queryKeys.scope(null, ["doc", id]),
-    queryFn: () => apiGetDoc(id, { resolveMdx: true }),
+    queryKey: queryKeys.scope(project, ["doc", id]),
+    queryFn: () => apiGetDoc(project, id, { resolveMdx: true }),
     enabled: id.length > 0,
     refetchOnWindowFocus: !isEditingDoc,
     refetchOnReconnect: !isEditingDoc,
   });
 
   function handleNavigate(targetId: string): void {
+    if (project !== null) {
+      void navigate({ to: "/p/$name/docs/$id", params: { name: project, id: targetId } });
+      return;
+    }
     void navigate({ to: "/docs/$id", params: { id: targetId } });
   }
 
   function handleMutated(): void {
     // reason: invalidate both the detail query and all list queries so the
     // index page reflects updated status/title. SPEC-022 §9.2.
-    void queryClient.invalidateQueries({ queryKey: queryKeys.scope(null, ["doc", id]) });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.scope(null, ["docs", "list"]) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.scope(project, ["doc", id]) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.scope(project, ["docs", "list"]) });
   }
 
   function handleDeleted(): void {
@@ -56,9 +84,9 @@ function DocPage(): React.ReactElement {
     // the now-stale detail query and navigate away rather than invalidating
     // it (which would just re-fetch a doc that's now soft-deleted).
     // SPEC-027 AC-DH-6.
-    queryClient.removeQueries({ queryKey: queryKeys.scope(null, ["doc", id]) });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.scope(null, ["docs", "list"]) });
-    void navigate({ to: "/" });
+    queryClient.removeQueries({ queryKey: queryKeys.scope(project, ["doc", id]) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.scope(project, ["docs", "list"]) });
+    void navigate(homeTarget);
   }
 
   if (isLoading) {
@@ -86,7 +114,7 @@ function DocPage(): React.ReactElement {
           </p>
           <button
             className="mt-4 text-sm text-primary hover:underline"
-            onClick={() => void navigate({ to: "/" })}
+            onClick={() => void navigate(homeTarget)}
             type="button"
           >
             Back to document list
@@ -110,7 +138,7 @@ function DocPage(): React.ReactElement {
       key={data.doc.id}
       docWithNav={data}
       onNavigate={handleNavigate}
-      onNavigateHome={() => void navigate({ to: "/" })}
+      onNavigateHome={() => void navigate(homeTarget)}
       onMutated={handleMutated}
       onDeleted={handleDeleted}
       onEditingChange={setIsEditingDoc}

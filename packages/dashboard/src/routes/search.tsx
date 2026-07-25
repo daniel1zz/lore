@@ -11,7 +11,7 @@ import { SearchResultCard } from "@/components/SearchResultCard";
 import { SearchBar } from "@/components/SearchBar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiSearch } from "@/lib/api";
-import { queryKeys } from "@/lib/project-api";
+import { queryKeys, useProjectParam } from "@/lib/project-api";
 
 const searchParamsSchema = z.object({
   q: z.string().optional().default(""),
@@ -24,11 +24,12 @@ export const Route = createFileRoute("/search")({
 
 function SearchPage(): React.ReactElement {
   const navigate = useNavigate({ from: "/search" });
+  const project = useProjectParam();
   const { q } = Route.useSearch();
 
   const { data, isLoading, error } = useQuery({
-    queryKey: queryKeys.scope(null, ["search", q]),
-    queryFn: () => apiSearch(q),
+    queryKey: queryKeys.scope(project, ["search", q]),
+    queryFn: () => apiSearch(project, q),
     enabled: q.trim().length > 0,
   });
 

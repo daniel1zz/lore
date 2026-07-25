@@ -127,7 +127,7 @@ describe("EvidenceTab", () => {
         </QueryClientProvider>,
       );
       await screen.findByText("No verification evidence recorded yet.");
-      expect(client.getQueryData(evidencePanelQueryKey("01HDOC0000000000000000001"))).toBeDefined();
+      expect(client.getQueryData(evidencePanelQueryKey(null, "01HDOC0000000000000000001"))).toBeDefined();
     });
   });
 });

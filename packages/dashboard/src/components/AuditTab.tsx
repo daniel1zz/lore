@@ -41,6 +41,8 @@ import { Badge } from "@/components/ui/badge";
 export interface AuditTabProps {
   /** Document ULID. */
   docId: string;
+  /** Active project, or `null`/absent for registry-less mode (SPEC-078 T10). */
+  project?: string | null;
 }
 
 /** Read a string-typed `details` field, or `undefined` if absent/wrong type. */
@@ -63,17 +65,17 @@ function readNumberDetail(details: Record<string, unknown> | undefined, key: str
  * @example
  * <AuditTab docId={doc.id} />
  */
-export function AuditTab({ docId }: AuditTabProps): React.ReactElement {
+export function AuditTab({ docId, project = null }: AuditTabProps): React.ReactElement {
   const [expandedEntryIndex, setExpandedEntryIndex] = useState<number | null>(null);
 
   const auditQuery = useQuery({
-    queryKey: queryKeys.scope(null, ["audit", docId]),
-    queryFn: () => apiGetAuditForDoc(docId),
+    queryKey: queryKeys.scope(project, ["audit", docId]),
+    queryFn: () => apiGetAuditForDoc(project, docId),
   });
 
   const judgmentsQuery = useQuery({
-    queryKey: queryKeys.scope(null, ["judgments", docId]),
-    queryFn: () => apiGetJudgments(docId),
+    queryKey: queryKeys.scope(project, ["judgments", docId]),
+    queryFn: () => apiGetJudgments(project, docId),
   });
 
   if (auditQuery.isLoading) {

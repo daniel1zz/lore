@@ -32,6 +32,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 const ACTIVE_PLANS_LIMIT = 8;
 
 export interface ActivePlansPanelProps {
+  /** Active project, or `null`/absent for registry-less mode (SPEC-078 T10). */
+  project?: string | null;
   /** Called when a listed plan is clicked. */
   onNavigate?: (docId: string) => void;
 }
@@ -39,6 +41,8 @@ export interface ActivePlansPanelProps {
 interface PlanReadinessSummaryProps {
   /** The plan document ID to fetch readiness for. */
   planId: string;
+  /** Active project, or `null` for registry-less mode. */
+  project: string | null;
 }
 
 /**
@@ -46,10 +50,10 @@ interface PlanReadinessSummaryProps {
  * TanStack Query instance (and thus its own loading/error state) never
  * affects sibling rows or the panel's plans-list query (AC-37-2).
  */
-function PlanReadinessSummary({ planId }: PlanReadinessSummaryProps): React.ReactElement | null {
+function PlanReadinessSummary({ planId, project }: PlanReadinessSummaryProps): React.ReactElement | null {
   const { data, isLoading } = useQuery({
-    queryKey: queryKeys.scope(null, ["home", "ready", planId]),
-    queryFn: () => apiGetReadyReport(planId),
+    queryKey: queryKeys.scope(project, ["home", "ready", planId]),
+    queryFn: () => apiGetReadyReport(project, planId),
   });
 
   if (isLoading || data === undefined) {
@@ -77,10 +81,10 @@ function PlanReadinessSummary({ planId }: PlanReadinessSummaryProps): React.Reac
  * @example
  * <ActivePlansPanel onNavigate={(id) => navigate({ to: '/docs/$id', params: { id } })} />
  */
-export function ActivePlansPanel({ onNavigate }: ActivePlansPanelProps): React.ReactElement {
+export function ActivePlansPanel({ project = null, onNavigate }: ActivePlansPanelProps): React.ReactElement {
   const { data, isLoading, error } = useQuery({
-    queryKey: queryKeys.scope(null, ["home", "active-plans"]),
-    queryFn: () => apiList({ type: "plan", status: "active" }),
+    queryKey: queryKeys.scope(project, ["home", "active-plans"]),
+    queryFn: () => apiList(project, { type: "plan", status: "active" }),
   });
 
   const plans = data?.docs.slice(0, ACTIVE_PLANS_LIMIT) ?? [];
@@ -118,7 +122,7 @@ export function ActivePlansPanel({ onNavigate }: ActivePlansPanelProps): React.R
               >
                 {plan.title}
               </button>
-              <PlanReadinessSummary planId={plan.id} />
+              <PlanReadinessSummary planId={plan.id} project={project} />
             </li>
           ))}
         </ul>

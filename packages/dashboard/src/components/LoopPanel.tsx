@@ -53,18 +53,23 @@ function AuditVerifyChip({ data, isLoading, error }: AuditVerifyChipProps): Reac
   );
 }
 
+export interface LoopPanelProps {
+  /** Active project, or `null`/absent for registry-less mode (SPEC-078 T10). */
+  project?: string | null;
+}
+
 /**
  * @example
  * <LoopPanel />
  */
-export function LoopPanel(): React.ReactElement {
+export function LoopPanel({ project = null }: LoopPanelProps = {}): React.ReactElement {
   const statsQuery = useQuery({
-    queryKey: queryKeys.scope(null, ["home", "loop", "calibration-stats"]),
-    queryFn: () => apiGetCalibrationStats(),
+    queryKey: queryKeys.scope(project, ["home", "loop", "calibration-stats"]),
+    queryFn: () => apiGetCalibrationStats(project),
   });
   const verifyQuery = useQuery({
-    queryKey: queryKeys.scope(null, ["home", "loop", "audit-verify"]),
-    queryFn: () => apiGetAuditVerify(),
+    queryKey: queryKeys.scope(project, ["home", "loop", "audit-verify"]),
+    queryFn: () => apiGetAuditVerify(project),
   });
 
   return (

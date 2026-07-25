@@ -251,6 +251,7 @@ describe("AC-DH-2: status transitions pass If-Match and never silently clobber",
     await openTransitionMenuAndClick("Archive");
 
     expect(mockedApiPatchDoc).toHaveBeenCalledWith(
+      null,
       doc.id,
       { status: "archived" },
       { version: 7 },
@@ -400,6 +401,7 @@ describe("ASYNC2D-001: If-Match version is frozen at edit-session start, not rea
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(mockedApiPatchDoc).toHaveBeenCalledWith(
+      null,
       doc.id,
       { content: expect.stringContaining("more") },
       { version: 5 },
@@ -442,6 +444,6 @@ describe("ASYNC2D-001: If-Match version is frozen at edit-session start, not rea
     const menu = await screen.findByRole("menu");
     await user.click(within(menu).getByText("Archive"));
 
-    expect(mockedApiPatchDoc).toHaveBeenCalledWith(doc.id, { status: "archived" }, { version: 6 });
+    expect(mockedApiPatchDoc).toHaveBeenCalledWith(null, doc.id, { status: "archived" }, { version: 6 });
   });
 });
