@@ -39,8 +39,26 @@
  *     byte-restore-from-backup (SPEC-046 §Scope: "restore-from-backup is THE
  *     uninstall mechanism for merge-target files"), never a `mergeSettings`
  *     call with an empty entry list.
+ *   - **Orphan pruning (SPEC-076 §C5, OPTIONAL, additive)** — `loreEntries`'
+ *     exact-`command`-match identification above has a gap: a hook lore
+ *     registered in a PAST run that is no longer part of `loreEntries` AT ALL
+ *     (renamed/removed upstream) is invisible to that match and survives
+ *     forever. When the caller supplies `hooksPathPrefix`, stage 1 ALSO
+ *     strips any hook entry whose `command` CONTAINS `hooksPathPrefix` as a
+ *     substring (not necessarily at the very start — production `command`
+ *     strings are `"<runner> <path>"`, e.g. `"node /x/.claude/hooks/foo.mjs"`,
+ *     so a bare `startsWith` would never match) AND is NOT a member of the
+ *     current `loreEntries`' command set — an "orphan". `hooksPathPrefix` is
+ *     OPTIONAL and OFF by default: omitting it (every pre-SPEC-076 call site)
+ *     leaves behavior 100% unchanged — orphan pruning never runs, and a
+ *     stale entry survives exactly as before (see the REGRESSION scenario in
+ *     `merge-settings-prune.test.ts`). `MergeSettingsResult.prunedCount`
+ *     counts ONLY entries removed by this orphan rule — never the
+ *     pre-existing "same entry, being re-added" strip/re-add cycle (stages
+ *     1+2 together), which is a replace, not a prune.
  *
  * Source: SPEC-046 §Design ("`merge-settings.ts`"), §Scope ("settings.json merge"), §Design I1.
+ *   SPEC-076 §C5 (orphan pruning) — task-skill-implement-t7-mergesettings-orphan-pruning-backup.
  */
 
 import { err, ok } from "./errors.js";
@@ -65,6 +83,15 @@ export interface MergeSettingsInput {
   existingRaw: string | null;
   /** The complete desired set of lore-managed hook entries after this merge. */
   loreEntries: SettingsHookEntry[];
+  /**
+   * OPTIONAL (SPEC-076 §C5) — when present, enables orphan pruning: any
+   * existing hook entry whose `command` CONTAINS this string AND is NOT a
+   * member of `loreEntries`' command set is stripped as an orphaned past
+   * lore registration, on top of the existing exact-match strip. Absent
+   * (the default) disables orphan pruning entirely — see this module's
+   * "Orphan pruning" invariant.
+   */
+  hooksPathPrefix?: string;
 }
 
 /** Output of a successful {@link mergeSettings} call. */
@@ -73,6 +100,13 @@ export interface MergeSettingsResult {
   merged: Record<string, unknown>;
   /** `true` iff `merged` is NOT deep-equal to the parsed `existingRaw` input. */
   changed: boolean;
+  /**
+   * Count of entries removed by the orphan-pruning rule specifically
+   * (SPEC-076 §C5) — always `0` when `hooksPathPrefix` was omitted. Never
+   * counts the pre-existing exact-match strip/re-add cycle (a replace, not a
+   * prune).
+   */
+  prunedCount: number;
 }
 
 /** One Claude Code `hooks[event][]` matcher-group, in its on-disk shape. */
@@ -140,20 +174,21 @@ function groupLoreEntries(entries: SettingsHookEntry[]): Record<string, HookGrou
  *      `changed: false` against a byte-identical `merged`, rather than
  *      spuriously introducing an empty `hooks: {}`.
  *
- * @param input - `{existingRaw, loreEntries}` — see {@link MergeSettingsInput}.
- * @returns `ok({merged, changed})` or `err(VALIDATION_ERROR)` naming the exact
- *   malformed field. Never throws.
+ * @param input - `{existingRaw, loreEntries, hooksPathPrefix?}` — see
+ *   {@link MergeSettingsInput}.
+ * @returns `ok({merged, changed, prunedCount})` or `err(VALIDATION_ERROR)`
+ *   naming the exact malformed field. Never throws.
  *
  * @example
  * mergeSettings({ existingRaw: null, loreEntries: [{event: "Stop", command: "lore-hook.mjs"}] });
- * // => ok({ merged: { hooks: { Stop: [{ hooks: [{ type: "command", command: "lore-hook.mjs" }] }] } }, changed: true })
+ * // => ok({ merged: { hooks: { Stop: [{ hooks: [{ type: "command", command: "lore-hook.mjs" }] }] } }, changed: true, prunedCount: 0 })
  *
  * @example
  * mergeSettings({ existingRaw: "{not json", loreEntries: [] });
  * // => err({ code: "VALIDATION_ERROR", field: "existingRaw", ... })
  */
 export function mergeSettings(input: MergeSettingsInput): Result<MergeSettingsResult, LoreError> {
-  const { existingRaw, loreEntries } = input;
+  const { existingRaw, loreEntries, hooksPathPrefix } = input;
 
   let parsed: Record<string, unknown>;
   if (existingRaw === null || existingRaw.trim() === "") {
@@ -200,9 +235,13 @@ export function mergeSettings(input: MergeSettingsInput): Result<MergeSettingsRe
   }
 
   const loreCommands = new Set(loreEntries.map((e) => e.command));
+  let prunedCount = 0;
 
   // Stage 1: strip every previously lore-managed hook entry (command match),
-  // dropping any matcher-group left with zero hooks.
+  // dropping any matcher-group left with zero hooks. When `hooksPathPrefix`
+  // is present, ALSO strip an "orphan" — an entry whose command contains the
+  // prefix (SPEC-076 §C5, a lore-owned hooks-directory path) but is no
+  // longer present in `loreEntries` at all — counting each into `prunedCount`.
   for (const eventKey of Object.keys(hooksObj)) {
     const groups = hooksObj[eventKey];
     if (!Array.isArray(groups)) {
@@ -236,7 +275,13 @@ export function mergeSettings(input: MergeSettingsInput): Result<MergeSettingsRe
       const filteredHooks = groupHooks.filter((hook) => {
         if (!isPlainObject(hook)) return true; // foreign shape — leave untouched, don't strip
         const command = hook["command"];
-        return !(typeof command === "string" && loreCommands.has(command));
+        if (typeof command !== "string") return true;
+        if (loreCommands.has(command)) return false; // exact-match strip (replace, not prune)
+        if (hooksPathPrefix !== undefined && command.includes(hooksPathPrefix)) {
+          prunedCount += 1; // orphan: lore-owned by path, absent from the new payload
+          return false;
+        }
+        return true;
       });
       if (filteredHooks.length > 0) {
         survivors.push({ ...group, hooks: filteredHooks });
@@ -266,5 +311,5 @@ export function mergeSettings(input: MergeSettingsInput): Result<MergeSettingsRe
   }
 
   const after = JSON.stringify(merged);
-  return ok({ merged, changed: before !== after });
+  return ok({ merged, changed: before !== after, prunedCount });
 }
