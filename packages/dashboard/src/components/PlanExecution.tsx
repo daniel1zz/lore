@@ -23,6 +23,12 @@
  *   - Caller (`DocDetail`) only mounts this when the plan has >=1 task child;
  *     zero-task-children plans keep the plain flat list, so this component
  *     never has to render an empty rollup shell.
+ *   - Reads `apiGetReadyReport(plan.id).value.records` (never the deleted
+ *     flat-array reader) — `GET /api/ready/:planIdOrSlug` has always returned
+ *     the `{records, sessions, anchor_conflicts}` object (SPEC-042); a prior
+ *     version of this file read `.value` as if it were the records array
+ *     itself, a silent-then-throwing bug fixed by
+ *     `task-fix-live-spec-042-regression-apigetready-types-api-ready`.
  * Side-effect class: IO (fetch via TanStack Query, read-only)
  * Source: SPEC-037 §1 D2, AC-37-3, AC-37-4, AC-37-6
  */
@@ -30,7 +36,7 @@
 import { useQuery } from "@tanstack/react-query";
 import type { DocRecord, DocSummary, ReadyRecord } from "@lore/core";
 import { planExtraSchema } from "@lore/core";
-import { apiGetReady } from "@/lib/api";
+import { apiGetReadyReport } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { StatusPill } from "@/components/StatusPill";
 import { cn } from "@/lib/utils";
@@ -131,10 +137,10 @@ function TaskGroup({
 export function PlanExecution({ plan, children, onNavigate }: PlanExecutionProps): React.ReactElement {
   const { data } = useQuery({
     queryKey: ["planExecution", "ready", plan.id],
-    queryFn: () => apiGetReady(plan.id),
+    queryFn: () => apiGetReadyReport(plan.id),
   });
 
-  const readyRecords: ReadyRecord[] = data !== undefined && data.ok ? data.value : [];
+  const readyRecords: ReadyRecord[] = data !== undefined && data.ok ? data.value.records : [];
   const readyByTaskId = new Map(readyRecords.map((record) => [record.task.id, record]));
 
   const taskChildren = children.filter((child) => child.type === "task");

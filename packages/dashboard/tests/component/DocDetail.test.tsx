@@ -49,11 +49,11 @@ import type { DocRecord, DocSummary } from "@lore/core";
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/lib/api")>();
-  return { ...actual, apiGetReady: vi.fn(), apiGetEvidencePanel: vi.fn() };
+  return { ...actual, apiGetReadyReport: vi.fn(), apiGetEvidencePanel: vi.fn() };
 });
 
-import { apiGetReady, apiGetEvidencePanel } from "@/lib/api";
-const mockedApiGetReady = vi.mocked(apiGetReady);
+import { apiGetReadyReport, apiGetEvidencePanel } from "@/lib/api";
+const mockedApiGetReadyReport = vi.mocked(apiGetReadyReport);
 const mockedApiGetEvidencePanel = vi.mocked(apiGetEvidencePanel);
 
 function renderWithClient(ui: React.ReactElement) {
@@ -351,7 +351,13 @@ describe("DocDetail", () => {
         doc: { ...mockDocRecord, id: "01HPLANEXEC000000000000001", type: "plan" },
         navigation: { ...mockDocWithNav.navigation, children: [taskChild] },
       };
-      mockedApiGetReady.mockResolvedValue({ ok: true, value: [] });
+      // reason: `GET /api/ready/:planIdOrSlug` returns the FULL
+      // `{records, sessions, anchor_conflicts}` object (SPEC-042), never a
+      // bare `ReadyRecord[]` — see `apiGetReadyReport`'s doc comment in `lib/api.ts`.
+      mockedApiGetReadyReport.mockResolvedValue({
+        ok: true,
+        value: { records: [], sessions: [], anchor_conflicts: [], claim_ttl_minutes: 120 },
+      });
 
       renderWithClient(<DocDetail docWithNav={planDoc} />);
 

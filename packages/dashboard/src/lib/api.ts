@@ -4,13 +4,13 @@
  *   the server's { ok, data } envelope and normalize errors.
  * Public surface: apiList, apiSearch, apiTree, apiGetDoc, apiGetStatus,
  *   apiGetJudgments, apiGetAuditForDoc, apiGetAuditVerify, apiGetCalibrationStats,
- *   apiGetPendingReview, apiGetReady, apiGetConfig, apiGetMachineConfig,
+ *   apiGetPendingReview, apiGetConfig, apiGetMachineConfig,
  *   apiGetIssueReports, apiGetEvidencePanel, evidencePanelQueryKey,
  *   apiGetReadyReport, apiGetPhaseStatus
  * Invariants: 5-second timeout via AbortSignal.timeout; never leaks raw Response objects.
- *   Throws ApiError on non-2xx or server-side { ok: false } — EXCEPT `apiGetReady`
- *   and `apiGetReadyReport`, which return `Result<T, ApiError>` (the only two
- *   Result-returning functions in this file; every other export throws).
+ *   Throws ApiError on non-2xx or server-side { ok: false } — EXCEPT `apiGetReadyReport`,
+ *   which returns `Result<T, ApiError>` (the only Result-returning function in
+ *   this file; every other export throws).
  * Side-effect class: IO (fetch)
  * Source: SPEC-011 §3, §5; SPEC-015 §3; SPEC-033 F1 (feedback-loop read routes);
  *   SPEC-037 §2 (readiness route client); SPEC-062 §Design D3 / SPEC-064 §Design D6
@@ -19,7 +19,15 @@
  *   `config-routes.ts`'s module header on the auth-surface split); SPEC-075
  *   §Module Boundary (evidence-panel projection read); SPEC-077 S1/S3 (execution
  *   read surface — ready report incl. sessions/anchor_conflicts/claim_ttl_minutes,
- *   NEW phase-status route client)
+ *   NEW phase-status route client). A stale flat-array reader for this same
+ *   route (SPEC-037 D1 original, `ReadyRecord[]`-typed) was DELETED as a live
+ *   SPEC-042 regression fix — the server has returned the `ReadyReport` OBJECT
+ *   `{records, sessions, anchor_conflicts}` since SPEC-042, and that reader's
+ *   flat typing let two consumers ship a `records.length`/`records.filter` call
+ *   directly on that object (`undefined === 0` silently false, then a
+ *   render-time TypeError on `.filter`) — see `task-fix-live-spec-042-
+ *   regression-apigetready-types-api-ready`. `apiGetReadyReport` (this file,
+ *   below) is the ONLY client for `GET /api/ready/:planIdOrSlug` now.
  */
 
 import type {
@@ -527,37 +535,16 @@ export async function apiGetPendingReview(opts: PendingReviewOpts = {}): Promise
  * EXACTLY with zero drift risk. `task` is a narrow `DocSummary` projection
  * with NO `.meta` (server contract, SPEC-037 §0) — callers that need
  * type-differentiated meta must join against `navigation.children` instead.
+ *
+ * @invariant This type has NO dedicated fetch function of its own — the route
+ *   that produces it, `GET /api/ready/:planIdOrSlug`, has always returned the
+ *   FULL `ReadyReport` object `{records, sessions, anchor_conflicts}` (SPEC-042),
+ *   never a bare `ReadyRecord[]`. A now-deleted flat-array reader once typed
+ *   that route's response as `ReadyRecord[]` directly and was removed as a
+ *   live regression fix (`task-fix-live-spec-042-regression-apigetready-types-api-ready`)
+ *   — use {@link apiGetReadyReport} and read `.value.records`.
  */
 export type { ReadyRecord } from "@lore/core";
-
-/**
- * Fetch computed task readiness for a plan (SPEC-025 `TaskWorkflowService.ready`,
- * exposed over HTTP by SPEC-037 D1). Unlike every other function in this file,
- * this does NOT throw on failure — it returns `Result<ReadyRecord[], ApiError>`
- * per the SPEC-037 §2 contract, so callers (e.g. `ActivePlansPanel`'s per-plan
- * readiness query) can degrade a single row without needing TanStack Query's
- * `isError`/`error` machinery to distinguish "no data yet" from "this plan's
- * readiness fetch failed."
- *
- * @param planIdOrSlug - Plan document ULID or slug.
- * @returns `{ok: true, value: ReadyRecord[]}` on success; `{ok: false, error: ApiError}`
- *   on any HTTP/network/server error (422 for a non-plan target, 404 for unknown id).
- */
-export async function apiGetReady(planIdOrSlug: string): Promise<Result<ReadyRecord[], ApiError>> {
-  try {
-    const data = await fetchJson<ReadyRecord[]>(`/api/ready/${encodeURIComponent(planIdOrSlug)}`);
-    return ok(data);
-  } catch (caught) {
-    // reason: `@lore/core`'s `err()` helper requires `E extends LoreError` — `ApiError`
-    // is a distinct client-side error class, so the failure branch is built directly
-    // rather than forcing it through a helper typed for the wrong error union.
-    const apiError =
-      caught instanceof ApiError
-        ? caught
-        : new ApiError(0, "NETWORK_ERROR", caught instanceof Error ? caught.message : "Unknown error");
-    return { ok: false, error: apiError };
-  }
-}
 
 // ─── SPEC-062/SPEC-064: config read (team + machine scope) ──────────────────
 
@@ -703,13 +690,12 @@ export interface AnchorConflict {
  * @invariant This is the CORRECTED shape for `GET /api/ready/:planIdOrSlug` —
  *   the route has returned `{records, sessions, anchor_conflicts}` (not a bare
  *   `ReadyRecord[]`) since SPEC-042 landed `sessions`/`anchor_conflicts` on
- *   `ReadyReport`. The pre-existing {@link apiGetReady}/{@link ReadyRecord}
- *   pairing in this file still types the response as a flat `ReadyRecord[]`
- *   (a latent SPEC-042-era contract drift discovered while building this
- *   route's SPEC-077 consumer, out of this task's declared anchors to repair —
- *   `apiGetReady`'s existing callers/tests assume the stale flat shape). This
- *   new function/type pair is the accurate one; `ExecutionPage` uses ONLY this,
- *   never `apiGetReady`.
+ *   `ReadyReport`. A now-deleted flat-array reader typed this route's response
+ *   as a flat `ReadyRecord[]` (a latent SPEC-042-era contract drift discovered
+ *   while building this route's SPEC-077 consumer) and broke two live
+ *   consumers at render time; it was DELETED as a regression fix
+ *   (`task-fix-live-spec-042-regression-apigetready-types-api-ready`) — this
+ *   is now the ONLY client type/function pair for this route.
  */
 export interface ReadyReportResponse {
   records: ReadyRecord[];
@@ -722,12 +708,12 @@ export interface ReadyReportResponse {
 /**
  * Fetch the full computed readiness report for a plan — records, derived
  * sessions, anchor conflicts, and the claim TTL (SPEC-077 S1/S4). Thin pipe
- * over the SAME `GET /api/ready/:planIdOrSlug` route {@link apiGetReady} calls,
- * but typed to the route's ACTUAL response shape (see {@link ReadyReportResponse}'s
- * invariant note) rather than that function's stale flat-array assumption.
- * Result-returning (never throws), mirroring `apiGetReady`'s SPEC-037 §2
- * contract, so `ExecutionPage` can degrade a single plan's readiness fetch
- * without needing TanStack Query's `isError`/`error` machinery.
+ * over `GET /api/ready/:planIdOrSlug`, typed to the route's ACTUAL response
+ * shape (see {@link ReadyReportResponse}'s invariant note). Result-returning
+ * (never throws), per the SPEC-037 §2 contract, so callers (`ExecutionPage`,
+ * `ActivePlansPanel`'s per-plan readiness row, `PlanExecution`'s Execution
+ * section) can degrade a single plan's readiness fetch without needing
+ * TanStack Query's `isError`/`error` machinery.
  *
  * @param planIdOrSlug - Plan document ULID or slug.
  * @returns `{ok: true, value: ReadyReportResponse}` on success; `{ok: false, error: ApiError}`

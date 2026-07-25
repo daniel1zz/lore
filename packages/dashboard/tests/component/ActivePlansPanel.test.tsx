@@ -4,8 +4,8 @@
  *
  * Tests for ActivePlansPanel — home-page side panel listing active plans,
  * each row now showing computed readiness ("N ready / M tasks") fetched from
- * `apiGetReady` (SPEC-037 D1 — this panel previously stood in for that data
- * with a "not ready-aware" placeholder badge, now removed).
+ * `apiGetReadyReport` (SPEC-037 D1 — this panel previously stood in for that
+ * data with a "not ready-aware" placeholder badge, now removed).
  *
  * Spec expectations (written from the module's documented invariants, before
  * reading the implementation body):
@@ -15,10 +15,14 @@
  *   - Loading, empty-list, and fetch-error states each render a distinct
  *     labeled state — never a blank panel.
  *   - Clicking a listed plan's title calls onNavigate with that plan's id.
- *   - Each plan row fetches its own readiness (`apiGetReady`) and renders
- *     "N ready / M tasks"; a plan with zero tasks renders "no tasks"; a
- *     failed readiness fetch renders a degraded note WITHOUT blanking the row
- *     or the panel.
+ *   - Each plan row fetches its own readiness (`apiGetReadyReport`) and
+ *     renders "N ready / M tasks"; a plan with zero tasks renders "no tasks";
+ *     a failed readiness fetch renders a degraded note WITHOUT blanking the
+ *     row or the panel.
+ *   - `GET /api/ready/:planIdOrSlug` has returned the FULL
+ *     `{records, sessions, anchor_conflicts}` object (never a bare
+ *     `ReadyRecord[]`) since SPEC-042 — every fixture below mirrors that
+ *     real shape.
  *
  * Test plan (six-dimension coverage):
  *   HAPPY — two active plans with different titles both render; a plan with
@@ -28,12 +32,15 @@
  *     still renders only 8 rows (panel cap); a plan with zero tasks renders
  *     "no tasks", never a fabricated "0 ready / 0 tasks".
  *   ERROR — apiList rejecting renders the failure message; a failed
- *     apiGetReady degrades only that row, not the whole panel.
+ *     apiGetReadyReport degrades only that row, not the whole panel.
  *   STATE — loading state shows skeletons before data resolves; clicking a
  *     title calls onNavigate with that plan's id.
  *   REGRESSION — apiList is called with the exact `{type:"plan",status:"active"}`
  *     filter (guards against silently widening/narrowing the query); the
- *     "not ready-aware" placeholder badge is gone (SPEC-037 D1 supersedes it).
+ *     "not ready-aware" placeholder badge is gone (SPEC-037 D1 supersedes it);
+ *     SPEC-042 real ready-report object shape never throws (this file's
+ *     regression addition below — verified RED against the pre-fix component,
+ *     see that test's own comment).
  */
 
 import "@testing-library/jest-dom/vitest";
@@ -46,14 +53,14 @@ import type { DocSummary, ReadyRecord } from "@lore/core";
 
 vi.mock("@/lib/api", () => ({
   apiList: vi.fn(),
-  apiGetReady: vi.fn(),
+  apiGetReadyReport: vi.fn(),
 }));
 
-import { apiList, apiGetReady } from "@/lib/api";
+import { apiList, apiGetReadyReport } from "@/lib/api";
 import { ActivePlansPanel } from "../../src/components/ActivePlansPanel";
 
 const mockedApiList = vi.mocked(apiList);
-const mockedApiGetReady = vi.mocked(apiGetReady);
+const mockedApiGetReadyReport = vi.mocked(apiGetReadyReport);
 
 function makePlan(overrides: Partial<DocSummary> & { id: string; title: string }): DocSummary {
   return {
@@ -76,6 +83,16 @@ function makeReadyRecord(overrides: Partial<ReadyRecord> & { task: ReadyRecord["
   };
 }
 
+/**
+ * Builds the REAL `GET /api/ready/:planIdOrSlug` response object — the
+ * `{records, sessions, anchor_conflicts, claim_ttl_minutes}` shape the route
+ * has returned since SPEC-042 (never a bare `ReadyRecord[]`, the bug this
+ * file's regression test below pins).
+ */
+function makeReadyReport(records: ReadyRecord[] = []) {
+  return { records, sessions: [], anchor_conflicts: [], claim_ttl_minutes: 120 };
+}
+
 function renderWithClient(ui: React.ReactElement) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
@@ -83,10 +100,10 @@ function renderWithClient(ui: React.ReactElement) {
 
 beforeEach(() => {
   mockedApiList.mockReset();
-  mockedApiGetReady.mockReset();
+  mockedApiGetReadyReport.mockReset();
   // reason: default every plan row to "zero tasks" unless a test overrides it —
   // keeps tests that don't care about readiness from needing per-test mocking.
-  mockedApiGetReady.mockResolvedValue({ ok: true, value: [] });
+  mockedApiGetReadyReport.mockResolvedValue({ ok: true, value: makeReadyReport() });
 });
 
 describe("ActivePlansPanel", () => {
@@ -105,9 +122,9 @@ describe("ActivePlansPanel", () => {
     it("renders 'N ready / M tasks' for a plan with readiness data", async () => {
       const plan1 = makePlan({ id: "01HPLAN0000000000000000001", title: "Plan Alpha" });
       mockedApiList.mockResolvedValue({ docs: [plan1], total: 1 });
-      mockedApiGetReady.mockResolvedValue({
+      mockedApiGetReadyReport.mockResolvedValue({
         ok: true,
-        value: [
+        value: makeReadyReport([
           makeReadyRecord({
             task: { id: "t1", slug: "task-1", type: "task", title: "T1", status: "draft", updated_at: "", tags: [], priority: "medium" },
             ready: true,
@@ -116,7 +133,7 @@ describe("ActivePlansPanel", () => {
             task: { id: "t2", slug: "task-2", type: "task", title: "T2", status: "draft", updated_at: "", tags: [], priority: "medium" },
             ready: false,
           }),
-        ],
+        ]),
       });
 
       renderWithClient(<ActivePlansPanel />);
@@ -158,7 +175,7 @@ describe("ActivePlansPanel", () => {
     it("renders muted 'no tasks' text, not a fabricated 0/0 counter", async () => {
       const plan1 = makePlan({ id: "01HPLAN0000000000000000001", title: "Plan Alpha" });
       mockedApiList.mockResolvedValue({ docs: [plan1], total: 1 });
-      mockedApiGetReady.mockResolvedValue({ ok: true, value: [] });
+      mockedApiGetReadyReport.mockResolvedValue({ ok: true, value: makeReadyReport() });
 
       renderWithClient(<ActivePlansPanel />);
 
@@ -197,7 +214,7 @@ describe("ActivePlansPanel", () => {
       // reason: the component only branches on `data.ok` — it never reads
       // `.error`'s fields, so a plain shape (not a real ApiError instance) is
       // sufficient and avoids importing the class through the mocked module.
-      mockedApiGetReady.mockResolvedValue({
+      mockedApiGetReadyReport.mockResolvedValue({
         ok: false,
         error: { name: "ApiError", message: "boom", status: 500, code: "STORE_ERROR" } as never,
       });
@@ -207,6 +224,46 @@ describe("ActivePlansPanel", () => {
       // The panel and the plan title are still intact.
       expect(await screen.findByText("Plan Alpha")).toBeInTheDocument();
       expect(await screen.findByText("readiness unavailable")).toBeInTheDocument();
+    });
+  });
+
+  describe("regression: SPEC-042 real ready-report object shape", () => {
+    // reason: `GET /api/ready/:planIdOrSlug` has returned the FULL
+    // `{records, sessions, anchor_conflicts}` object (never a bare
+    // `ReadyRecord[]`) since SPEC-042. This test renders the panel against
+    // that REAL shape — verified RED against the pre-fix component (which
+    // called the now-deleted flat-array reader and read `.value.length`/
+    // `.value.filter` directly on the object: an `undefined === 0`
+    // false-negative on `.length`, then a
+    // render-time `TypeError: records.filter is not a function`) BEFORE the
+    // consumer was migrated to `apiGetReadyReport`
+    // (`task-fix-live-spec-042-regression-apigetready-types-api-ready`).
+    it("renders 'N ready / M tasks' against the real {records,sessions,anchor_conflicts} object, never throws", async () => {
+      const plan1 = makePlan({ id: "01HPLAN0000000000000000001", title: "Plan Alpha" });
+      mockedApiList.mockResolvedValue({ docs: [plan1], total: 1 });
+      mockedApiGetReadyReport.mockResolvedValue({
+        ok: true,
+        value: makeReadyReport([
+          makeReadyRecord({
+            task: {
+              id: "t1",
+              slug: "task-1",
+              type: "task",
+              title: "T1",
+              status: "draft",
+              updated_at: "",
+              tags: [],
+              priority: "medium",
+            },
+            ready: true,
+          }),
+        ]),
+      });
+
+      expect(() => renderWithClient(<ActivePlansPanel />)).not.toThrow();
+
+      expect(await screen.findByText("Plan Alpha")).toBeInTheDocument();
+      expect(await screen.findByText("1 ready / 1 tasks")).toBeInTheDocument();
     });
   });
 
