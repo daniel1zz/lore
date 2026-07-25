@@ -22,9 +22,13 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Database } from "bun:sqlite";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { ApiKeyStore } from "../../../../src/adapters/http/auth.js";
 import { SessionStore } from "../../../../src/adapters/http/sessions.js";
 import { startHttpServer } from "../../../../src/adapters/http/index.js";
+import { createMachineAuthStores, type MachineAuthStores } from "../../../../src/adapters/http/machine-auth.js";
 import { InMemoryStore } from "../../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../../src/service/corpus-service.js";
 import { ReviewService } from "../../../../src/service/review-service.js";
@@ -49,6 +53,10 @@ interface TestContext {
   app: App;
   db: Database;
   rawKey: string;
+  // reason: SPEC-078 D1 — machine-scope auth store; the cookie-session regression test
+  // below mints "dashboard-local" here (not on the per-corpus apiKeyStore above).
+  machineAuth: MachineAuthStores;
+  machineRawKey: string;
   baseUrl: string;
   planId: string;
   planSlug: string;
@@ -88,9 +96,15 @@ async function makeTestServer(): Promise<TestContext> {
     close: () => db.close(),
   };
 
-  const createResult = await apiKeyStore.create("dashboard-local", "admin");
+  // reason: SPEC-078 D1 — this key is used ONLY for the bearer-token happy path below;
+  // "dashboard-local" for the cookie-bootstrap regression test lives on machineAuth.
+  const createResult = await apiKeyStore.create("regression-agent", "owner");
   if (!createResult.ok) throw new Error("Failed to create API key");
   const rawKey = createResult.value.rawKey;
+
+  const machineAuth = createMachineAuthStores({ baseDir: mkdtempSync(join(tmpdir(), "lore-ready-route-test-")) });
+  const machineKeyResult = await machineAuth.apiKeyStore.create("dashboard-local", "admin");
+  if (!machineKeyResult.ok) throw new Error("Failed to create machine API key");
 
   const planResult = await app.corpusService.create({ type: "plan", title: "Ready Route Plan", content: "body" });
   if (!planResult.ok) throw new Error("Failed to create seed plan");
@@ -105,10 +119,20 @@ async function makeTestServer(): Promise<TestContext> {
   if (!taskResult.ok) throw new Error("Failed to create seed task");
 
   // Port 0 → OS assigns a free port
-  const server = startHttpServer(app, { port: 0, host: "127.0.0.1" });
+  const server = startHttpServer(app, { port: 0, host: "127.0.0.1", machineAuth });
   const baseUrl = `http://127.0.0.1:${server.port}`;
 
-  return { server, app, db, rawKey, baseUrl, planId: planResult.value.id, planSlug: planResult.value.slug };
+  return {
+    server,
+    app,
+    db,
+    rawKey,
+    machineAuth,
+    machineRawKey: machineKeyResult.value.rawKey,
+    baseUrl,
+    planId: planResult.value.id,
+    planSlug: planResult.value.slug,
+  };
 }
 
 // ─── Test suite ───────────────────────────────────────────────────────────────
@@ -123,6 +147,7 @@ describe("GET /api/ready/:planIdOrSlug — auth boundary + wiring smoke (SPEC-03
   afterEach(() => {
     ctx.server.stop(true);
     ctx.app.close();
+    ctx.machineAuth.db.close();
   });
 
   describe("happy path — valid bearer token", () => {
@@ -171,7 +196,9 @@ describe("GET /api/ready/:planIdOrSlug — auth boundary + wiring smoke (SPEC-03
     it("GET /api/ready/:planId with a valid cookie session → 200", async () => {
       const bootstrapRes = await fetch(`${ctx.baseUrl}/api/auth/local-bootstrap`, {
         method: "POST",
-        headers: { "X-Lore-Token": ctx.rawKey, Origin: "http://localhost:5173" },
+        // reason: SPEC-078 D1 — bootstrap validates against the MACHINE-scope
+        // "dashboard-local" key, not the bearer-only ctx.rawKey above.
+        headers: { "X-Lore-Token": ctx.machineRawKey, Origin: "http://localhost:5173" },
       });
       const { data: { session_id } } = await bootstrapRes.json() as { data: { session_id: string } };
 

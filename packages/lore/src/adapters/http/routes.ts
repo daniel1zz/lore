@@ -14,6 +14,12 @@
 import type { App } from "../../app.js";
 import type { ActorContext } from "./auth.js";
 import { ALLOWED_ORIGINS } from "./auth.js";
+// reason: TYPE-ONLY import — routes.ts is reachable from vitest test suites
+// (`bun:sqlite` is external to vitest, see project CLAUDE.md), so the runtime
+// `createMachineAuthStores` value (which imports `bun:sqlite`) must never be imported
+// here, only its return type. Production always supplies a real `getMachineAuth`
+// accessor (`index.ts`); this module never constructs one itself.
+import type { MachineAuthStores } from "./machine-auth.js";
 import { jsonOk, jsonError, loreErrorResponse, parseJsonBody, corsHeaders } from "./middleware.js";
 import { handleDashboardRoute } from "./dashboard-routes.js";
 import { handleGetConfig, handleGetMachineConfig } from "./config-routes.js";
@@ -64,14 +70,18 @@ function isSecureRequestContext(req: Request): boolean {
 
 /**
  * POST /api/auth/local-bootstrap — trade raw API key for an HttpOnly session cookie.
- * Verifies Origin against ALLOWED_ORIGINS and X-Lore-Token against api_keys.
+ * Verifies Origin against ALLOWED_ORIGINS and X-Lore-Token against the MACHINE-SCOPE
+ * api_keys table (SPEC-078 D1 unconditional re-point — the "dashboard-local" key and the
+ * session it mints live in `machineAuth`, never a per-corpus `App` — this route no longer
+ * needs an `App` at all; bearer API keys stay per-corpus and are untouched by this route).
  * Called BEFORE authenticateRequest in index.ts (no prior auth required).
  *
  * @param req - Incoming request with X-Lore-Token header and Origin header.
- * @param app - App instance (needs apiKeyStore and sessionStore).
+ * @param machineAuth - Machine-scope auth stores (SPEC-078 D1); the SAME instance the
+ *   server's cookie-auth path resolves sessions against.
  * @returns 200 + Set-Cookie on success, 403 on bad Origin, 401 on bad token.
  */
-export async function handleLocalBootstrap(req: Request, app: App): Promise<Response> {
+export async function handleLocalBootstrap(req: Request, machineAuth: MachineAuthStores): Promise<Response> {
   // Validate Origin against allowlist — CSRF protection for bootstrap endpoint.
   const origin = req.headers.get("Origin") ?? "";
   if (!(ALLOWED_ORIGINS as readonly string[]).includes(origin)) {
@@ -89,8 +99,8 @@ export async function handleLocalBootstrap(req: Request, app: App): Promise<Resp
     );
   }
 
-  // Validate the raw key against api_keys (SHA-256 match).
-  const validateResult = await app.apiKeyStore.validate(token.trim());
+  // Validate the raw key against the MACHINE-SCOPE api_keys (SHA-256 match) — SPEC-078 D1.
+  const validateResult = await machineAuth.apiKeyStore.validate(token.trim());
   if (!validateResult.ok) {
     return jsonError(
       { code: "VALIDATION_ERROR", field: "X-Lore-Token", message: "Invalid token" },
@@ -98,11 +108,7 @@ export async function handleLocalBootstrap(req: Request, app: App): Promise<Resp
     );
   }
 
-  if (app.sessionStore === undefined) {
-    return jsonError({ code: "STORE_ERROR", message: "Session store not initialised" }, 500);
-  }
-
-  const { session_id, expires_at } = app.sessionStore.create(validateResult.value.name);
+  const { session_id, expires_at } = machineAuth.sessionStore.create(validateResult.value.name);
 
   // reason: Set-Cookie must be in the Response headers, not in CORS headers.
   // Max-Age=2592000 = 30 days in seconds. Path=/api keeps the cookie scoped to API routes
@@ -127,12 +133,22 @@ export async function handleLocalBootstrap(req: Request, app: App): Promise<Resp
 /**
  * Dispatch authenticated API requests to service methods.
  * Returns null if the route is not matched (caller should return 404).
+ *
+ * @param getMachineAuth - Lazy accessor for the machine-scope auth stores (SPEC-078 D1),
+ *   invoked ONLY by the `/api/auth/logout` branch below — every other route ignores it,
+ *   so a bearer-only request never triggers machine-auth-store construction. OPTIONAL
+ *   (no default value) so this dispatcher's many existing direct-call test suites —
+ *   none of which exercise the logout branch — need no changes; production
+ *   `startHttpServer` always supplies its own memoized getter. A logout request that
+ *   somehow reaches this function without one wired gets a loud 500, never a silent
+ *   no-op or an uncaught "not a function" throw.
  */
 export async function handleApiRoute(
   req: Request,
   url: URL,
   app: App,
   actor: ActorContext,
+  getMachineAuth?: () => MachineAuthStores,
 ): Promise<Response | null> {
   const method = req.method.toUpperCase();
   const path = url.pathname;
@@ -160,7 +176,13 @@ export async function handleApiRoute(
 
   // POST /api/auth/logout — delete session + clear cookie (SPEC-016 §3.2)
   if (method === "POST" && path === "/api/auth/logout") {
-    return handleLogout(actor, app);
+    if (getMachineAuth === undefined) {
+      // reason: a wiring bug (production always supplies this), not a caller-input
+      // error — fail loud with a 500 rather than silently no-op the logout or let an
+      // uncaught "getMachineAuth is not a function" TypeError escape.
+      return jsonError({ code: "STORE_ERROR", message: "Machine auth store not wired for this request" }, 500);
+    }
+    return handleLogout(actor, getMachineAuth());
   }
 
   // GET /api/status
@@ -285,14 +307,15 @@ export async function handleApiRoute(
 /**
  * POST /api/auth/logout — delete the session row and clear the lore_sid cookie.
  * Idempotent: calling when no session row exists is a no-op (still returns ok).
+ * SPEC-078 D1: deletes from the MACHINE-SCOPE sessions table (logout is store-wide —
+ * it invalidates the session on every project's routes, not just whichever one the
+ * logout request happened to be addressed to).
  */
-function handleLogout(actor: ActorContext, app: App): Response {
-  if (app.sessionStore !== undefined) {
-    // reason: actor.session_id for cookie-auth is the actual 32-hex session_id.
-    // For bearer-auth, it's a hash prefix — no matching session row, so delete is a no-op.
-    // Either way idempotent. SPEC-016 §3.2.
-    app.sessionStore.delete(actor.session_id);
-  }
+function handleLogout(actor: ActorContext, machineAuth: MachineAuthStores): Response {
+  // reason: actor.session_id for cookie-auth is the actual 32-hex session_id.
+  // For bearer-auth, it's a hash prefix — no matching session row, so delete is a no-op.
+  // Either way idempotent. SPEC-016 §3.2.
+  machineAuth.sessionStore.delete(actor.session_id);
 
   // Clear the cookie by setting Max-Age=0.
   const clearCookie = "lore_sid=; Path=/api; Max-Age=0";

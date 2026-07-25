@@ -37,9 +37,13 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Database } from "bun:sqlite";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { ApiKeyStore } from "../../../../src/adapters/http/auth.js";
 import { SessionStore } from "../../../../src/adapters/http/sessions.js";
 import { startHttpServer } from "../../../../src/adapters/http/index.js";
+import { createMachineAuthStores, type MachineAuthStores } from "../../../../src/adapters/http/machine-auth.js";
 import { InMemoryStore } from "../../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../../src/service/corpus-service.js";
 import { ReviewService } from "../../../../src/service/review-service.js";
@@ -59,6 +63,12 @@ interface TestContext {
   db: Database;
   apiKeyStore: ApiKeyStore;
   sessionStore: SessionStore;
+  // reason: SPEC-078 D1 — the "dashboard-local" key + sessions this suite exercises via
+  // the real HTTP bootstrap/logout/cookie routes now live in the MACHINE-scope store,
+  // never `db`/`apiKeyStore`/`sessionStore` above (those remain the PER-CORPUS
+  // app.apiKeyStore/app.sessionStore, still constructed for shape-parity but no longer
+  // what the cookie flow actually reads/writes).
+  machineAuth: MachineAuthStores;
   rawKey: string;
   baseUrl: string;
 }
@@ -70,6 +80,9 @@ async function makeTestServer(): Promise<TestContext> {
   const apiKeyStore = new ApiKeyStore(db);
   const sessionStore = new SessionStore(db);
   const docStore = new InMemoryStore();
+  // reason: SPEC-078 D1 — mkdtemp per test, never the real XDG state path (root
+  // CLAUDE.md 2026-07-07 pollution-incident rule).
+  const machineAuth = createMachineAuthStores({ baseDir: mkdtempSync(join(tmpdir(), "lore-auth-routes-test-")) });
 
   const app: App = {
     corpusService: new CorpusService(docStore),
@@ -103,15 +116,17 @@ async function makeTestServer(): Promise<TestContext> {
     close: () => db.close(),
   };
 
-  const createResult = await apiKeyStore.create("dashboard-local", "admin");
+  // reason: SPEC-078 D1 — "dashboard-local" is minted on the MACHINE store; the
+  // per-corpus apiKeyStore above never sees this key.
+  const createResult = await machineAuth.apiKeyStore.create("dashboard-local", "admin");
   if (!createResult.ok) throw new Error("Failed to create API key");
   const rawKey = createResult.value.rawKey;
 
   // Port 0 → OS assigns a free port
-  const server = startHttpServer(app, { port: 0, host: "127.0.0.1" });
+  const server = startHttpServer(app, { port: 0, host: "127.0.0.1", machineAuth });
   const baseUrl = `http://127.0.0.1:${server.port}`;
 
-  return { server, app, db, apiKeyStore, sessionStore, rawKey, baseUrl };
+  return { server, app, db, apiKeyStore, sessionStore, machineAuth, rawKey, baseUrl };
 }
 
 // ─── Test suite ───────────────────────────────────────────────────────────────
@@ -126,6 +141,7 @@ describe("POST /api/auth/local-bootstrap", () => {
   afterEach(() => {
     ctx.server.stop(true);
     ctx.app.close();
+    ctx.machineAuth.db.close();
   });
 
   describe("happy path (AC-A-B2)", () => {
@@ -217,14 +233,18 @@ describe("POST /api/auth/local-bootstrap", () => {
       expect(res.status).toBe(200);
 
       const body = await res.json() as { ok: boolean; data: { session_id: string } };
-      const row = ctx.db.prepare("SELECT session_id FROM sessions WHERE session_id = ?").get(body.data.session_id);
+      const row = ctx.machineAuth.db.prepare("SELECT session_id FROM sessions WHERE session_id = ?").get(body.data.session_id);
       expect(row).not.toBeNull();
     });
   });
 
   describe("regression (AC-A-B1)", () => {
-    it("sessions table exists after server start (PRAGMA table_info)", () => {
-      const rows = ctx.db.prepare("PRAGMA table_info(sessions)").all();
+    // reason: SPEC-078 D1 — the meaningful "sessions table exists" invariant now lives on
+    // the MACHINE-scope db (created by createMachineAuthStores' SessionStore construction),
+    // not the per-corpus db. The corpus db's own sessions table still exists too (vestigial,
+    // schema untouched — no corpus migration per D1) but is no longer what login flows read.
+    it("sessions table exists on the machine auth db after server start (PRAGMA table_info)", () => {
+      const rows = ctx.machineAuth.db.prepare("PRAGMA table_info(sessions)").all();
       expect(Array.isArray(rows)).toBe(true);
       expect(rows.length).toBeGreaterThan(0);
     });
@@ -243,6 +263,7 @@ describe("GET /api/auth/me", () => {
   afterEach(() => {
     ctx.server.stop(true);
     ctx.app.close();
+    ctx.machineAuth.db.close();
   });
 
   describe("happy path (AC-A-B9)", () => {
@@ -297,6 +318,7 @@ describe("POST /api/auth/logout", () => {
   afterEach(() => {
     ctx.server.stop(true);
     ctx.app.close();
+    ctx.machineAuth.db.close();
   });
 
   describe("happy path (AC-A-B8)", () => {
@@ -320,7 +342,7 @@ describe("POST /api/auth/logout", () => {
       expect(setCookie).toContain("Max-Age=0");
 
       // Session row should be gone
-      const row = ctx.db.prepare("SELECT session_id FROM sessions WHERE session_id = ?").get(session_id);
+      const row = ctx.machineAuth.db.prepare("SELECT session_id FROM sessions WHERE session_id = ?").get(session_id);
       expect(row).toBeNull();
     });
 
@@ -368,6 +390,7 @@ describe("GET /api/docs with cookie auth", () => {
   afterEach(() => {
     ctx.server.stop(true);
     ctx.app.close();
+    ctx.machineAuth.db.close();
   });
 
   describe("happy path (AC-A-B5)", () => {
@@ -392,7 +415,10 @@ describe("GET /api/docs with cookie auth", () => {
       const past = new Date(Date.now() - 1000).toISOString();
       const now = new Date().toISOString();
       const expiredSid = "deadbeef".repeat(4); // 32 hex chars
-      ctx.db.prepare(
+      // reason: SPEC-078 D1 — cookie resolution now reads the MACHINE-scope db, so the
+      // expired row must live there (that db's api_keys already has "dashboard-local"
+      // from makeTestServer's machineAuth.apiKeyStore.create call).
+      ctx.machineAuth.db.prepare(
         "INSERT INTO sessions (session_id, api_key_name, created_at, expires_at, last_used_at) VALUES (?, ?, ?, ?, ?)",
       ).run(expiredSid, "dashboard-local", now, past, now);
 
@@ -402,15 +428,22 @@ describe("GET /api/docs with cookie auth", () => {
       expect(docsRes.status).toBe(401);
 
       // Row must be deleted
-      const row = ctx.db.prepare("SELECT session_id FROM sessions WHERE session_id = ?").get(expiredSid);
+      const row = ctx.machineAuth.db.prepare("SELECT session_id FROM sessions WHERE session_id = ?").get(expiredSid);
       expect(row).toBeNull();
     });
   });
 
   describe("regression (AC-A-B7)", () => {
     it("bearer token auth still returns 200 (no cookie needed)", async () => {
+      // reason: SPEC-078 D1 — "dashboard-local" (ctx.rawKey) now lives on the MACHINE
+      // store and is no longer a valid BEARER credential (bearer stays per-corpus,
+      // unchanged). This regression is specifically about the per-corpus bearer path
+      // still working, so it mints its OWN per-corpus agent key via ctx.apiKeyStore —
+      // decoupled from the cookie-bootstrap key entirely.
+      const agentKeyResult = await ctx.apiKeyStore.create("regression-agent", "owner");
+      if (!agentKeyResult.ok) throw new Error("expected ok create");
       const docsRes = await fetch(`${ctx.baseUrl}/api/docs`, {
-        headers: { Authorization: `Bearer ${ctx.rawKey}` },
+        headers: { Authorization: `Bearer ${agentKeyResult.value.rawKey}` },
       });
       expect(docsRes.status).toBe(200);
     });

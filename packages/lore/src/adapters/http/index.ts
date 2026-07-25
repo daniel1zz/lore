@@ -4,13 +4,23 @@
  */
 
 import type { App } from "../../app.js";
-import { authenticateRequest } from "./auth.js";
+import { authenticateRequest, extractSessionCookie } from "./auth.js";
 import { handleApiRoute, handleLocalBootstrap } from "./routes.js";
 import { jsonError, corsPreflightResponse, applyCorsOrigin } from "./middleware.js";
+import { createMachineAuthStores, type MachineAuthStores } from "./machine-auth.js";
 
 export interface HttpConfig {
   port?: number;
   host?: string;
+  /**
+   * Machine-scope auth stores (SPEC-078 D1) — tests inject one built over an `mkdtemp`
+   * base dir; production callers (`lore dashboard`, `lore serve`) may pass one explicitly
+   * to share a single instance across `ensureLocalApiKey` and this server (`lore
+   * dashboard` does this so the key it mints and the key the server validates are the
+   * SAME store), or omit it and let the server resolve the real XDG state path lazily
+   * on first actual need.
+   */
+  machineAuth?: MachineAuthStores;
 }
 
 /**
@@ -24,6 +34,22 @@ export interface HttpConfig {
 export function startHttpServer(app: App, config: HttpConfig = {}): ReturnType<typeof Bun.serve> {
   const port = config.port ?? 3456;
   const hostname = config.host ?? "localhost";
+
+  // reason: SPEC-078 D1 — the machine-scope auth store is resolved LAZILY (memoized on
+  // first actual need: a lore_sid cookie present on a request, OR the dedicated
+  // bootstrap/logout routes) rather than eagerly on every startHttpServer() call.
+  // Eager construction would touch the REAL XDG state path
+  // (~/.local/state/lore/dashboard-auth.db) the moment ANY caller — including this
+  // adapter's many bearer-only test suites — invokes startHttpServer(), even when that
+  // caller never sends a cookie or hits the bootstrap/logout routes: a real-filesystem
+  // side effect matching the class of bug the 2026-07-07 corpus-pollution incident
+  // (root CLAUDE.md) warns about. `config.machineAuth` (tests, or a production caller
+  // that wants one shared instance) skips lazy resolution entirely.
+  let machineAuth: MachineAuthStores | undefined = config.machineAuth;
+  function getMachineAuth(): MachineAuthStores {
+    if (machineAuth === undefined) machineAuth = createMachineAuthStores();
+    return machineAuth;
+  }
 
   const server = Bun.serve({
     port,
@@ -56,16 +82,22 @@ export function startHttpServer(app: App, config: HttpConfig = {}): ReturnType<t
         // + Origin allowlist for its own auth. It must run BEFORE the bearer/cookie gate to avoid
         // a chicken-and-egg deadlock (no session yet → no auth → can't bootstrap). SPEC-016 §3.2.
         if (req.method === "POST" && url.pathname === "/api/auth/local-bootstrap") {
-          return applyCorsOrigin(await handleLocalBootstrap(req, app), origin);
+          return applyCorsOrigin(await handleLocalBootstrap(req, getMachineAuth()), origin);
         }
 
-        const authResult = await authenticateRequest(req, app.apiKeyStore, app.sessionStore);
+        // reason: SPEC-078 D1 — cookie auth resolves against the machine-scope
+        // sessionStore (constructed/reused via getMachineAuth()), bearer auth stays
+        // against the per-corpus app.apiKeyStore (unchanged). extractSessionCookie is
+        // checked here (not just inside authenticateRequest) so a bearer-only request
+        // (no lore_sid cookie) never triggers machine-auth-store construction.
+        const cookieSessionStore = extractSessionCookie(req) !== null ? getMachineAuth().sessionStore : undefined;
+        const authResult = await authenticateRequest(req, app.apiKeyStore, cookieSessionStore);
         if (!authResult.ok) {
           return applyCorsOrigin(jsonError({ code: "UNAUTHORIZED", message: "Invalid or missing API key" }, 401), origin);
         }
 
         const actor = authResult.value;
-        const response = await handleApiRoute(req, url, app, actor);
+        const response = await handleApiRoute(req, url, app, actor, getMachineAuth);
 
         if (response === null) {
           return applyCorsOrigin(

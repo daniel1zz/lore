@@ -36,6 +36,7 @@ import { SQLiteStore } from "../../../../src/store/sqlite-store.js";
 import { ApiKeyStore } from "../../../../src/adapters/http/auth.js";
 import { SessionStore } from "../../../../src/adapters/http/sessions.js";
 import { startHttpServer } from "../../../../src/adapters/http/index.js";
+import { createMachineAuthStores, type MachineAuthStores } from "../../../../src/adapters/http/machine-auth.js";
 import { CorpusService } from "../../../../src/service/corpus-service.js";
 import { ReviewService } from "../../../../src/service/review-service.js";
 import { VersionService } from "../../../../src/service/version-service.js";
@@ -65,6 +66,9 @@ interface TestContext {
   app: App;
   store: SQLiteStore;
   rawKey: string;
+  // reason: SPEC-078 D1 — the cookie-bootstrap flow (bootstrapCookie below) mints
+  // "dashboard-local" on this MACHINE-scope store, never the per-corpus app.apiKeyStore.
+  machineAuth: MachineAuthStores;
   baseUrl: string;
   tmpDir: string;
 }
@@ -107,14 +111,18 @@ async function makeTestServer(useFailingStore: boolean): Promise<TestContext> {
     close: () => { store.close(); },
   };
 
-  const createResult = await app.apiKeyStore.create("dashboard-local", "admin");
+  // reason: SPEC-078 D1 — "dashboard-local" is minted on the MACHINE store; the
+  // per-corpus app.apiKeyStore never sees this key. mkdtemp per call — never the real
+  // XDG state path (root CLAUDE.md 2026-07-07 pollution-incident rule).
+  const machineAuth = createMachineAuthStores({ baseDir: mkdtempSync(join(tmpdir(), "lore-calibration-machine-auth-")) });
+  const createResult = await machineAuth.apiKeyStore.create("dashboard-local", "admin");
   if (!createResult.ok) throw new Error("Failed to create API key");
   const rawKey = createResult.value.rawKey;
 
-  const server = startHttpServer(app, { port: 0, host: "127.0.0.1" });
+  const server = startHttpServer(app, { port: 0, host: "127.0.0.1", machineAuth });
   const baseUrl = `http://127.0.0.1:${server.port}`;
 
-  return { server, app, store, rawKey, baseUrl, tmpDir };
+  return { server, app, store, rawKey, machineAuth, baseUrl, tmpDir };
 }
 
 async function bootstrapCookie(ctx: TestContext): Promise<string> {
@@ -168,6 +176,7 @@ describe("HTTP calibration capture end-to-end (SQLiteStore)", () => {
   afterEach(() => {
     ctx.server.stop(true);
     ctx.app.close();
+    ctx.machineAuth.db.close();
     rmSync(ctx.tmpDir, { recursive: true, force: true });
   });
 
@@ -228,6 +237,7 @@ describe("HTTP calibration capture — forced hook failure (SQLiteStore)", () =>
   afterEach(() => {
     ctx.server.stop(true);
     ctx.app.close();
+    ctx.machineAuth.db.close();
     rmSync(ctx.tmpDir, { recursive: true, force: true });
   });
 

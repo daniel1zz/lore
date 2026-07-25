@@ -40,6 +40,7 @@ import { mkdtempSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { startHttpServer } from "../../src/adapters/http/index.js";
+import { createMachineAuthStores, type MachineAuthStores } from "../../src/adapters/http/machine-auth.js";
 import { createApp } from "../../src/app.js";
 import type { App } from "../../src/app.js";
 import type { CreateDocInput } from "@lore/core";
@@ -48,6 +49,10 @@ interface TestContext {
   server: ReturnType<typeof Bun.serve>;
   app: App;
   rawKey: string;
+  // reason: SPEC-078 D1 — the cookie-bootstrap flow (bootstrapCookie below) mints
+  // "dashboard-local" on this MACHINE-scope store, never the per-corpus app.apiKeyStore.
+  machineAuth: MachineAuthStores;
+  machineRawKey: string;
   baseUrl: string;
   tmpDir: string;
   planId: string;
@@ -63,9 +68,15 @@ async function makeTestServer(): Promise<TestContext> {
 
   const app = createApp(dbPath);
 
-  const createResult = await app.apiKeyStore.create("dashboard-local", "admin");
+  // reason: SPEC-078 D1 — this key is used ONLY for the bearer-token tests below;
+  // "dashboard-local" for the cookie-bootstrap regression test lives on machineAuth.
+  const createResult = await app.apiKeyStore.create("regression-agent", "owner");
   if (!createResult.ok) throw new Error("Failed to create API key");
   const rawKey = createResult.value.rawKey;
+
+  const machineAuth = createMachineAuthStores({ baseDir: mkdtempSync(join(tmpdir(), "lore-phase-status-machine-auth-")) });
+  const machineKeyResult = await machineAuth.apiKeyStore.create("dashboard-local", "admin");
+  if (!machineKeyResult.ok) throw new Error("Failed to create machine API key");
 
   const prdResult = await app.corpusService.create({ type: "prd", title: "Phase Status Root PRD", content: "root" });
   if (!prdResult.ok) throw new Error("Failed to create seed prd");
@@ -100,13 +111,15 @@ async function makeTestServer(): Promise<TestContext> {
   } as CreateDocInput);
   if (!taskResult.ok) throw new Error("Failed to create seed task");
 
-  const server = startHttpServer(app, { port: 0, host: "127.0.0.1" });
+  const server = startHttpServer(app, { port: 0, host: "127.0.0.1", machineAuth });
   const baseUrl = `http://127.0.0.1:${server.port}`;
 
   return {
     server,
     app,
     rawKey,
+    machineAuth,
+    machineRawKey: machineKeyResult.value.rawKey,
     baseUrl,
     tmpDir,
     planId: planResult.value.id,
@@ -119,7 +132,9 @@ async function makeTestServer(): Promise<TestContext> {
 async function bootstrapCookie(ctx: TestContext): Promise<string> {
   const res = await fetch(`${ctx.baseUrl}/api/auth/local-bootstrap`, {
     method: "POST",
-    headers: { "X-Lore-Token": ctx.rawKey, Origin: "http://localhost:5173" },
+    // reason: SPEC-078 D1 — bootstrap validates against the MACHINE-scope
+    // "dashboard-local" key, not the bearer-only ctx.rawKey.
+    headers: { "X-Lore-Token": ctx.machineRawKey, Origin: "http://localhost:5173" },
   });
   const { data } = (await res.json()) as { data: { session_id: string } };
   return data.session_id;
@@ -197,6 +212,7 @@ describe("GET /api/phase-status/:planIdOrSlug (SPEC-077 S3)", () => {
   afterEach(() => {
     ctx.server.stop(true);
     ctx.app.close();
+    ctx.machineAuth.db.close();
     rmSync(ctx.tmpDir, { recursive: true, force: true });
   });
 
