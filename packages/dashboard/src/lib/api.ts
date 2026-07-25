@@ -6,7 +6,7 @@
  *   apiGetJudgments, apiGetAuditForDoc, apiGetAuditVerify, apiGetCalibrationStats,
  *   apiGetPendingReview, apiGetConfig, apiGetMachineConfig,
  *   apiGetIssueReports, apiGetEvidencePanel, evidencePanelQueryKey,
- *   apiGetReadyReport, apiGetPhaseStatus
+ *   apiGetReadyReport, apiGetPhaseStatus, apiGetProjects
  * Invariants: 5-second timeout via AbortSignal.timeout; never leaks raw Response objects.
  *   Throws ApiError on non-2xx or server-side { ok: false } — EXCEPT `apiGetReadyReport`,
  *   which returns `Result<T, ApiError>` (the only Result-returning function in
@@ -28,13 +28,17 @@
  *   render-time TypeError on `.filter`) — see `task-fix-live-spec-042-
  *   regression-apigetready-types-api-ready`. `apiGetReadyReport` (this file,
  *   below) is the ONLY client for `GET /api/ready/:planIdOrSlug` now.
- * SPEC-078 D5: `fetchJson`'s internal request now routes through
- *   `project-api.ts`'s `apiFetch(null, resourcePath)` — every path literal in
- *   this file dropped its "/api" prefix (that prefix is now built exclusively
- *   inside `project-api.ts`, the ONE module allowed to write it, per the
- *   `dashboard-local/no-raw-api-literal` ESLint rule). Behavior is
- *   byte-identical (project is always `null` here — see that module's
- *   invariant on why no call site here threads a real project yet).
+ * SPEC-078 D5/T10: `fetchJson`'s internal request routes through
+ *   `project-api.ts`'s `apiFetch(project, resourcePath)` — every path literal
+ *   in this file dropped its "/api" prefix (that prefix is now built
+ *   exclusively inside `project-api.ts`, the ONE module allowed to write it,
+ *   per the `dashboard-local/no-raw-api-literal` ESLint rule). Every exported
+ *   function in this file takes `project: string | null` as its FIRST
+ *   parameter (no default — SPEC-078 T10 threads the caller's
+ *   `useProjectParam()` output explicitly rather than silently defaulting to
+ *   `null`, so a forgotten thread-through fails typecheck, not silently at
+ *   runtime). `project === null` reproduces today's registry-less paths,
+ *   byte-identical to pre-SPEC-078 behavior.
  */
 
 import type {
@@ -56,6 +60,7 @@ import type {
 } from "@lore/core";
 import { ok } from "@lore/core";
 import { apiFetch, queryKeys } from "./project-api";
+import type { ProjectsResponse } from "./project-api";
 
 // ─── Error type ──────────────────────────────────────────────────────────────
 
@@ -218,16 +223,17 @@ function buildQueryString(opts: Record<string, string | number | boolean | undef
  * `apiFetch` doc comment) with a 5-second timeout, returning parsed JSON
  * data. Throws ApiError on non-2xx HTTP status or server { ok: false }.
  *
- * Routes through `apiFetch` (SPEC-078 D5) with `project: null` — every
- * caller in this file resolves to today's registry-less paths, byte-
- * identical to the pre-SPEC-078 direct `fetch(path)` call this replaced.
+ * Routes through `apiFetch` (SPEC-078 D5) with the caller-supplied `project`
+ * — `null` resolves to today's registry-less paths, byte-identical to the
+ * pre-SPEC-078 direct `fetch(path)` call this replaced.
  *
+ * @param project - Registry project name, or `null` for registry-less mode.
  * @throws {ApiError} On HTTP error, server error, or timeout.
  */
-async function fetchJson<T>(resourcePath: string): Promise<T> {
+async function fetchJson<T>(project: string | null, resourcePath: string): Promise<T> {
   let response: Response;
   try {
-    response = await apiFetch(null, resourcePath, {
+    response = await apiFetch(project, resourcePath, {
       headers: { Accept: "application/json" },
       signal: AbortSignal.timeout(5000),
       // reason: credentials: "include" sends the lore_sid session cookie set by bootstrapAuthIfNeeded().
@@ -266,21 +272,23 @@ async function fetchJson<T>(resourcePath: string): Promise<T> {
 /**
  * Fetch the corpus status (total docs, by_type, by_status).
  *
+ * @param project - Registry project name, or `null` for registry-less mode.
  * @returns Status snapshot from the server.
  * @throws {ApiError} On HTTP or network error.
  */
-export async function apiGetStatus(): Promise<StatusResponse> {
-  return fetchJson<StatusResponse>("/status");
+export async function apiGetStatus(project: string | null): Promise<StatusResponse> {
+  return fetchJson<StatusResponse>(project, "/status");
 }
 
 /**
  * Fetch a filtered list of documents.
  *
+ * @param project - Registry project name, or `null` for registry-less mode.
  * @param opts - Optional filter parameters.
  * @returns Paginated docs and total count.
  * @throws {ApiError} On HTTP or network error.
  */
-export async function apiList(opts: ListOpts = {}): Promise<ListResponse> {
+export async function apiList(project: string | null, opts: ListOpts = {}): Promise<ListResponse> {
   // reason: `tags` is a string[] but buildQueryString only accepts scalar values —
   // join it into the same comma-separated form the HTTP server already comma-splits
   // (routes.ts) before building the rest of the query string from the scalar fields.
@@ -289,45 +297,56 @@ export async function apiList(opts: ListOpts = {}): Promise<ListResponse> {
     ...(scalarOpts as Record<string, string | undefined>),
     ...(tags !== undefined && tags.length > 0 ? { tags: tags.join(",") } : {}),
   });
-  return fetchJson<ListResponse>(`/docs${qs}`);
+  return fetchJson<ListResponse>(project, `/docs${qs}`);
 }
 
 /**
  * Full-text search across the corpus.
  *
+ * @param project - Registry project name, or `null` for registry-less mode.
  * @param query - Search string (FTS5 query).
  * @param opts - Optional type/status filters.
  * @returns Matching docs and total count.
  * @throws {ApiError} On HTTP or network error.
  */
-export async function apiSearch(query: string, opts: SearchOpts = {}): Promise<SearchResponse> {
+export async function apiSearch(
+  project: string | null,
+  query: string,
+  opts: SearchOpts = {},
+): Promise<SearchResponse> {
   const qs = buildQueryString({ q: query, ...opts } as Record<string, string | undefined>);
-  return fetchJson<SearchResponse>(`/search${qs}`);
+  return fetchJson<SearchResponse>(project, `/search${qs}`);
 }
 
 /**
  * Fetch the document tree rooted at an optional ID.
  *
+ * @param project - Registry project name, or `null` for registry-less mode.
  * @param opts - Optional root ID and depth.
  * @returns The recursive root `TreeNode` (never a bare array — see `TreeNode` doc comment).
  * @throws {ApiError} On HTTP or network error (e.g. no PRD exists to default to).
  */
-export async function apiTree(opts: TreeOpts = {}): Promise<TreeNode> {
+export async function apiTree(project: string | null, opts: TreeOpts = {}): Promise<TreeNode> {
   const qs = buildQueryString(opts as Record<string, string | number | undefined>);
-  return fetchJson<TreeNode>(`/tree${qs}`);
+  return fetchJson<TreeNode>(project, `/tree${qs}`);
 }
 
 /**
  * Fetch a single document by ID or slug, optionally with MDX placeholders resolved.
  *
+ * @param project - Registry project name, or `null` for registry-less mode.
  * @param idOrSlug - Document ULID or slug.
  * @param opts.resolveMdx - When true, server resolves MDX placeholders and includes resolvedMdx field.
  * @returns DocWithNavigation, optionally extended with resolvedMdx.
  * @throws {ApiError} On HTTP or network error.
  */
-export async function apiGetDoc(idOrSlug: string, opts: GetDocOpts = {}): Promise<DocWithNavigation> {
+export async function apiGetDoc(
+  project: string | null,
+  idOrSlug: string,
+  opts: GetDocOpts = {},
+): Promise<DocWithNavigation> {
   const qs = buildQueryString({ resolveMdx: opts.resolveMdx });
-  return fetchJson<DocWithNavigation>(`/docs/${encodeURIComponent(idOrSlug)}${qs}`);
+  return fetchJson<DocWithNavigation>(project, `/docs/${encodeURIComponent(idOrSlug)}${qs}`);
 }
 
 // ─── Version history ──────────────────────────────────────────────────────────
@@ -357,6 +376,7 @@ export interface VersionDiffResponse {
 /**
  * Fetch version history for a document.
  *
+ * @param project - Registry project name, or `null` for registry-less mode.
  * @param idOrSlug - Document ULID or slug.
  * @param opts - Pagination options.
  * @returns Version log entries, newest first — `GET /api/docs/:id/log`'s `data` field
@@ -367,27 +387,30 @@ export interface VersionDiffResponse {
  * @throws {ApiError} On HTTP or network error.
  */
 export async function apiGetVersionLog(
+  project: string | null,
   idOrSlug: string,
   opts: { limit?: number; offset?: number } = {},
 ): Promise<VersionLogEntry[]> {
   const qs = buildQueryString(opts as Record<string, number | undefined>);
-  return fetchJson<VersionLogEntry[]>(`/docs/${encodeURIComponent(idOrSlug)}/log${qs}`);
+  return fetchJson<VersionLogEntry[]>(project, `/docs/${encodeURIComponent(idOrSlug)}/log${qs}`);
 }
 
 /**
  * Fetch a unified diff between two versions of a document.
  *
+ * @param project - Registry project name, or `null` for registry-less mode.
  * @param idOrSlug - Document ULID or slug.
  * @param opts - from/to version numbers.
  * @returns Unified diff.
  * @throws {ApiError} On HTTP or network error.
  */
 export async function apiGetVersionDiff(
+  project: string | null,
   idOrSlug: string,
   opts: { from?: number; to?: number } = {},
 ): Promise<VersionDiffResponse> {
   const qs = buildQueryString(opts as Record<string, number | undefined>);
-  return fetchJson<VersionDiffResponse>(`/docs/${encodeURIComponent(idOrSlug)}/diff${qs}`);
+  return fetchJson<VersionDiffResponse>(project, `/docs/${encodeURIComponent(idOrSlug)}/diff${qs}`);
 }
 
 // ─── SPEC-033 F1: feedback-loop reads (judgments, audit, calibration stats) ──
@@ -444,12 +467,13 @@ export interface CalibrationStatsOpts {
 /**
  * Fetch a document's latest AI review judgment plus its full history.
  *
+ * @param project - Registry project name, or `null` for registry-less mode.
  * @param docId - Document ULID.
  * @returns `{ latest, history }` — `latest` is `null` when the doc has never been judged.
  * @throws {ApiError} On HTTP or network error.
  */
-export async function apiGetJudgments(docId: string): Promise<JudgmentsResponse> {
-  return fetchJson<JudgmentsResponse>(`/judgments/${encodeURIComponent(docId)}`);
+export async function apiGetJudgments(project: string | null, docId: string): Promise<JudgmentsResponse> {
+  return fetchJson<JudgmentsResponse>(project, `/judgments/${encodeURIComponent(docId)}`);
 }
 
 /**
@@ -457,38 +481,45 @@ export async function apiGetJudgments(docId: string): Promise<JudgmentsResponse>
  * AI-judge entries look like `ai:claude-cli:claude-sonnet-5:v1`; decode them
  * with `parseAuditActor` (browser-safe, `@lore/core`) for display, never here.
  *
+ * @param project - Registry project name, or `null` for registry-less mode.
  * @param docId - Document ULID.
  * @returns Audit entries for the doc.
  * @throws {ApiError} On HTTP or network error.
  */
-export async function apiGetAuditForDoc(docId: string): Promise<AuditEntry[]> {
-  return fetchJson<AuditEntry[]>(`/audit/${encodeURIComponent(docId)}`);
+export async function apiGetAuditForDoc(project: string | null, docId: string): Promise<AuditEntry[]> {
+  return fetchJson<AuditEntry[]>(project, `/audit/${encodeURIComponent(docId)}`);
 }
 
 /**
  * Run the versions⋈audit completeness oracle across the whole corpus.
  *
+ * @param project - Registry project name, or `null` for registry-less mode.
  * @param opts.since - Optional ISO 8601 watermark override.
  * @returns `{ clean, misses, since }`.
  * @throws {ApiError} On HTTP or network error.
  */
-export async function apiGetAuditVerify(opts: { since?: string } = {}): Promise<AuditVerifyResponse> {
+export async function apiGetAuditVerify(
+  project: string | null,
+  opts: { since?: string } = {},
+): Promise<AuditVerifyResponse> {
   const qs = buildQueryString(opts as Record<string, string | undefined>);
-  return fetchJson<AuditVerifyResponse>(`/audit/verify${qs}`);
+  return fetchJson<AuditVerifyResponse>(project, `/audit/verify${qs}`);
 }
 
 /**
  * Fetch Wilson-bound calibration agreement stats per (doc_type, prompt_version).
  *
+ * @param project - Registry project name, or `null` for registry-less mode.
  * @param opts - Optional doc_type/prompt_version narrowing.
  * @returns One row per distinct (doc_type, prompt_version) pair present in the window.
  * @throws {ApiError} On HTTP or network error.
  */
 export async function apiGetCalibrationStats(
+  project: string | null,
   opts: CalibrationStatsOpts = {},
 ): Promise<CalibrationStatsRow[]> {
   const qs = buildQueryString({ doc_type: opts.docType, prompt_version: opts.promptVersion });
-  return fetchJson<CalibrationStatsRow[]>(`/calibration/stats${qs}`);
+  return fetchJson<CalibrationStatsRow[]>(project, `/calibration/stats${qs}`);
 }
 
 // ─── SPEC-033 F2: pending-review queue (home page + triage panels) ──────────
@@ -527,14 +558,18 @@ export interface PendingReviewOpts {
 /**
  * Fetch documents in draft status awaiting review.
  *
+ * @param project - Registry project name, or `null` for registry-less mode.
  * @param opts - Optional author/type/since filters.
  * @returns Pending doc rows (server order — `ReviewService.pending`'s underlying
  *   `findMany` query, not independently re-sorted here).
  * @throws {ApiError} On HTTP or network error.
  */
-export async function apiGetPendingReview(opts: PendingReviewOpts = {}): Promise<PendingDocRow[]> {
+export async function apiGetPendingReview(
+  project: string | null,
+  opts: PendingReviewOpts = {},
+): Promise<PendingDocRow[]> {
   const qs = buildQueryString(opts as Record<string, string | undefined>);
-  return fetchJson<PendingDocRow[]>(`/review/pending${qs}`);
+  return fetchJson<PendingDocRow[]>(project, `/review/pending${qs}`);
 }
 
 // ─── SPEC-037 D1: computed readiness ─────────────────────────────────────────
@@ -579,10 +614,11 @@ export interface ConfigReadResponse<C> {
  * redacted per `CONFIG_REDACT_KEYS`. Available to both cookie and bearer
  * sessions (SPEC-062 D3).
  *
+ * @param project - Registry project name, or `null` for registry-less mode.
  * @throws {ApiError} On HTTP or network error.
  */
-export async function apiGetConfig(): Promise<ConfigReadResponse<LoreConfig>> {
-  return fetchJson<ConfigReadResponse<LoreConfig>>("/config");
+export async function apiGetConfig(project: string | null): Promise<ConfigReadResponse<LoreConfig>> {
+  return fetchJson<ConfigReadResponse<LoreConfig>>(project, "/config");
 }
 
 /**
@@ -597,9 +633,12 @@ export async function apiGetConfig(): Promise<ConfigReadResponse<LoreConfig>> {
  *   caller-side concern: this function still just throws `ApiError`, the
  *   Settings route's machine-scope panel is what must not let that failure
  *   blank the team-scope panel too).
+ * @param project - Registry project name, or `null` for registry-less mode.
  */
-export async function apiGetMachineConfig(): Promise<ConfigReadResponse<GlobalLoreConfig>> {
-  return fetchJson<ConfigReadResponse<GlobalLoreConfig>>("/config/machine");
+export async function apiGetMachineConfig(
+  project: string | null,
+): Promise<ConfigReadResponse<GlobalLoreConfig>> {
+  return fetchJson<ConfigReadResponse<GlobalLoreConfig>>(project, "/config/machine");
 }
 
 // ─── SPEC-074: dashboard Issues triage projection ────────────────────────────
@@ -636,11 +675,12 @@ export interface IssueReportsResponse {
  * read (spec's "one endpoint, no second count route" design note — see
  * `src/lib/issue-reports-query.ts`, this file's shared TanStack Query binding).
  *
+ * @param project - Registry project name, or `null` for registry-less mode.
  * @returns `{ rows, open_count }` — rows sorted `reported_at` descending.
  * @throws {ApiError} On HTTP or network error.
  */
-export async function apiGetIssueReports(): Promise<IssueReportsResponse> {
-  return fetchJson<IssueReportsResponse>("/issue-reports");
+export async function apiGetIssueReports(project: string | null): Promise<IssueReportsResponse> {
+  return fetchJson<IssueReportsResponse>(project, "/issue-reports");
 }
 
 // ─── SPEC-075: dashboard adjudication workbench (evidence-panel read) ───────
@@ -652,10 +692,11 @@ export async function apiGetIssueReports(): Promise<IssueReportsResponse> {
  * mounted unconditionally in the header for in-review docs) resolve to the
  * SAME cache entry — one network request when both are mounted, never two.
  *
+ * @param project - Registry project name, or `null` for registry-less mode.
  * @param idOrSlug - Document ULID or slug.
  */
-export function evidencePanelQueryKey(idOrSlug: string): readonly unknown[] {
-  return queryKeys.scope(null, ["evidence-panel", idOrSlug]);
+export function evidencePanelQueryKey(project: string | null, idOrSlug: string): readonly unknown[] {
+  return queryKeys.scope(project, ["evidence-panel", idOrSlug]);
 }
 
 /**
@@ -666,14 +707,18 @@ export function evidencePanelQueryKey(idOrSlug: string): readonly unknown[] {
  * `packages/lore/src/service/verification-projection-service.ts`), no
  * client-side re-shaping.
  *
+ * @param project - Registry project name, or `null` for registry-less mode.
  * @param idOrSlug - Document ULID, slug, or unique id-prefix.
  * @returns The assembled projection, discriminated by `doc_type`.
  * @throws {ApiError} On HTTP or network error (e.g. `DOC_NOT_FOUND` for an
  *   unknown id, or `VALIDATION_ERROR` for the D9 phase-children-without-tasks
  *   hierarchy-assumption violation).
  */
-export async function apiGetEvidencePanel(idOrSlug: string): Promise<EvidencePanelProjection> {
-  return fetchJson<EvidencePanelProjection>(`/evidence-panel/${encodeURIComponent(idOrSlug)}`);
+export async function apiGetEvidencePanel(
+  project: string | null,
+  idOrSlug: string,
+): Promise<EvidencePanelProjection> {
+  return fetchJson<EvidencePanelProjection>(project, `/evidence-panel/${encodeURIComponent(idOrSlug)}`);
 }
 
 // ─── SPEC-077: dashboard execution read surface ─────────────────────────────
@@ -728,13 +773,17 @@ export interface ReadyReportResponse {
  * section) can degrade a single plan's readiness fetch without needing
  * TanStack Query's `isError`/`error` machinery.
  *
+ * @param project - Registry project name, or `null` for registry-less mode.
  * @param planIdOrSlug - Plan document ULID or slug.
  * @returns `{ok: true, value: ReadyReportResponse}` on success; `{ok: false, error: ApiError}`
  *   on any HTTP/network/server error (422 for a non-plan target, 404 for unknown id).
  */
-export async function apiGetReadyReport(planIdOrSlug: string): Promise<Result<ReadyReportResponse, ApiError>> {
+export async function apiGetReadyReport(
+  project: string | null,
+  planIdOrSlug: string,
+): Promise<Result<ReadyReportResponse, ApiError>> {
   try {
-    const data = await fetchJson<ReadyReportResponse>(`/ready/${encodeURIComponent(planIdOrSlug)}`);
+    const data = await fetchJson<ReadyReportResponse>(project, `/ready/${encodeURIComponent(planIdOrSlug)}`);
     return ok(data);
   } catch (caught) {
     const apiError =
@@ -826,9 +875,37 @@ export interface PhaseStatusResponse {
  * task). Thin pipe over `GET /api/phase-status/:planIdOrSlug`; a plan with no
  * phases returns `{plan, phases: []}` (still 200, not an error).
  *
+ * @param project - Registry project name, or `null` for registry-less mode.
  * @param planIdOrSlug - Plan document ULID or slug.
  * @throws {ApiError} On HTTP or network error (404 unknown id, 422 non-plan target).
  */
-export async function apiGetPhaseStatus(planIdOrSlug: string): Promise<PhaseStatusResponse> {
-  return fetchJson<PhaseStatusResponse>(`/phase-status/${encodeURIComponent(planIdOrSlug)}`);
+export async function apiGetPhaseStatus(
+  project: string | null,
+  planIdOrSlug: string,
+): Promise<PhaseStatusResponse> {
+  return fetchJson<PhaseStatusResponse>(project, `/phase-status/${encodeURIComponent(planIdOrSlug)}`);
+}
+
+// ─── SPEC-078 D7: project registry + mount-state health projection ──────────
+
+/**
+ * Fetch the mount registry projection (SPEC-078 D7) — one entry per
+ * `dashboard.projects` registry item plus this serving instance's identity.
+ * ALWAYS called with `project: null` — discovering which projects exist is
+ * structurally a registry-less-mode query (there is no project to scope it
+ * to yet), so unlike every other function in this file this one takes no
+ * `project` parameter.
+ *
+ * The route (`GET /api/projects`, T8) does not exist until the server-wave
+ * task lands — until then this call always resolves to a 404 `ApiError`,
+ * which callers (`useProjectsQuery`, `lib/use-projects-query.ts`) treat as
+ * the "no registry" signal and degrade to single-project chrome (the SAME
+ * degrade path as a real empty/absent `dashboard.projects` config — see that
+ * module's doc comment for the silent-vs-loud error split).
+ *
+ * @returns Registry entries + serving instance identity.
+ * @throws {ApiError} On HTTP or network error (404 = no registry route/config).
+ */
+export async function apiGetProjects(): Promise<ProjectsResponse> {
+  return fetchJson<ProjectsResponse>(null, "/projects");
 }

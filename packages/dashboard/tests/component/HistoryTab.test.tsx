@@ -127,7 +127,7 @@ describe("HAPPY: version log rendering + restore", () => {
     // Restore the oldest entry (v1) — its button is the last in DOM order.
     await user.click(restoreButtons[restoreButtons.length - 1]!);
 
-    expect(mockedApiRestoreVersion).toHaveBeenCalledWith("01JTEST", 1);
+    expect(mockedApiRestoreVersion).toHaveBeenCalledWith(null, "01JTEST", 1);
     await waitFor(() => expect(onRestored).toHaveBeenCalledTimes(1));
     expect(toastSuccess).toHaveBeenCalledWith("Restored to v1");
   });
@@ -267,6 +267,6 @@ describe("REGRESSION: restore hidden when onRestored is omitted", () => {
     await user.click(screen.getAllByRole("button", { name: "diff" })[0]!);
 
     expect(await screen.findByRole("dialog", { name: /Diff from v2 to v3/ })).toBeInTheDocument();
-    expect(mockedApiGetVersionDiff).toHaveBeenCalledWith("01JTEST", { from: 2, to: 3 });
+    expect(mockedApiGetVersionDiff).toHaveBeenCalledWith(null, "01JTEST", { from: 2, to: 3 });
   });
 });

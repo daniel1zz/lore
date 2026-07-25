@@ -37,16 +37,18 @@ import { PlanAttestationPanel } from "@/components/evidence/PlanAttestationPanel
 export interface EvidenceTabProps {
   /** The full task/spec/plan `DocRecord` (`GET /api/docs/:id`). */
   doc: DocRecord;
+  /** Active project, or `null`/absent for registry-less mode (SPEC-078 T10). */
+  project?: string | null;
 }
 
 /**
  * @example
  * <EvidenceTab doc={doc} />
  */
-export function EvidenceTab({ doc }: EvidenceTabProps): React.ReactElement {
+export function EvidenceTab({ doc, project = null }: EvidenceTabProps): React.ReactElement {
   const { data, isLoading, error } = useQuery({
-    queryKey: evidencePanelQueryKey(doc.id),
-    queryFn: () => apiGetEvidencePanel(doc.id),
+    queryKey: evidencePanelQueryKey(project, doc.id),
+    queryFn: () => apiGetEvidencePanel(project, doc.id),
   });
 
   if (isLoading) {

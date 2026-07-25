@@ -124,7 +124,7 @@ describe("HAPPY: confirmed delete", () => {
 
     await user.click(screen.getByRole("button", { name: /Delete \(recoverable\)/ }));
 
-    expect(mockedApiDeleteDoc).toHaveBeenCalledWith(doc.doc.id);
+    expect(mockedApiDeleteDoc).toHaveBeenCalledWith(null, doc.doc.id);
     expect(onDeleted).toHaveBeenCalledTimes(1);
     expect(toastSuccess).toHaveBeenCalled();
   });

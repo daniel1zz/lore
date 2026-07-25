@@ -164,12 +164,14 @@ interface ErrorResponse {
  * Perform a write fetch with cookie credentials.
  * Throws DashboardApiError or ConflictError on failure.
  *
+ * @param project - Registry project name, or `null` for registry-less mode
+ *   (SPEC-078 T10 — no default; every caller threads its own
+ *   `useProjectParam()` output explicitly).
  * @param resourcePath - Path AFTER "/api" (SPEC-078 D5 — see `project-api.ts`'s
- *   `apiFetch` doc comment). Routes through `apiFetch(null, resourcePath, ...)`;
- *   `project: null` resolves to today's registry-less paths, byte-identical to
- *   the pre-SPEC-078 direct `fetch(path)` call this replaced.
+ *   `apiFetch` doc comment).
  */
 async function writeFetch<T>(
+  project: string | null,
   resourcePath: string,
   method: string,
   body?: unknown,
@@ -183,7 +185,7 @@ async function writeFetch<T>(
 
   let response: Response;
   try {
-    response = await apiFetch(null, resourcePath, {
+    response = await apiFetch(project, resourcePath, {
       method,
       headers,
       credentials: "include",
@@ -226,11 +228,12 @@ async function writeFetch<T>(
  * Create a new document via POST /api/dashboard/docs.
  * Validates payload client-side before submitting (AC-DASH-WRITE-10).
  *
+ * @param project - Registry project name, or `null` for registry-less mode.
  * @param payload - Document creation input.
  * @returns The created DocRecord.
  * @throws {DashboardApiError} On validation failure or HTTP error.
  */
-export async function apiCreateDoc(payload: CreateDocPayload): Promise<DocRecord> {
+export async function apiCreateDoc(project: string | null, payload: CreateDocPayload): Promise<DocRecord> {
   // Client-side Zod validation — AC-DASH-WRITE-10: rejects empty title before HTTP submit.
   const parsed = createDocInputSchema.safeParse(payload);
   if (!parsed.success) {
@@ -242,7 +245,7 @@ export async function apiCreateDoc(payload: CreateDocPayload): Promise<DocRecord
     );
   }
 
-  const result = await writeFetch<{ doc: DocRecord }>("/dashboard/docs", "POST", parsed.data);
+  const result = await writeFetch<{ doc: DocRecord }>(project, "/dashboard/docs", "POST", parsed.data);
   return result.doc;
 }
 
@@ -251,6 +254,7 @@ export async function apiCreateDoc(payload: CreateDocPayload): Promise<DocRecord
  * Sends If-Match header when version is provided for optimistic concurrency.
  * Throws ConflictError on 409 so the caller can render the ConflictModal.
  *
+ * @param project - Registry project name, or `null` for registry-less mode.
  * @param id - Document ULID or slug.
  * @param patch - Partial fields to update.
  * @param opts - Concurrency options (version / forceOverwrite).
@@ -259,6 +263,7 @@ export async function apiCreateDoc(payload: CreateDocPayload): Promise<DocRecord
  * @throws {DashboardApiError} On other HTTP errors.
  */
 export async function apiPatchDoc(
+  project: string | null,
   id: string,
   patch: PatchDocPayload,
   opts: PatchDocOptions = {},
@@ -271,6 +276,7 @@ export async function apiPatchDoc(
   }
 
   const result = await writeFetch<{ doc: DocRecord }>(
+    project,
     `/dashboard/docs/${encodeURIComponent(id)}`,
     "PATCH",
     patch,
@@ -285,16 +291,19 @@ export async function apiPatchDoc(
  * Runs the server's implicit calibration hook (SPEC-033 F1) — see
  * {@link AdjudicateDocResult} for the `warnings` contract.
  *
+ * @param project - Registry project name, or `null` for registry-less mode.
  * @param id - Document ULID or slug.
  * @param opts.calibrationNote - Optional note → the calibration record's `delta_reasons[0]`.
  * @returns `{ doc, warnings }` — the approved DocRecord plus any calibration warnings.
  * @throws {DashboardApiError} On HTTP error or invalid transition.
  */
 export async function apiApproveDoc(
+  project: string | null,
   id: string,
   opts: { calibrationNote?: string } = {},
 ): Promise<AdjudicateDocResult> {
   return writeFetch<AdjudicateDocResult>(
+    project,
     `/dashboard/docs/${encodeURIComponent(id)}/approve`,
     "POST",
     opts.calibrationNote !== undefined ? { calibration_note: opts.calibrationNote } : undefined,
@@ -306,6 +315,7 @@ export async function apiApproveDoc(
  * Runs the server's implicit calibration hook (SPEC-033 F1) — see
  * {@link AdjudicateDocResult} for the `warnings` contract.
  *
+ * @param project - Registry project name, or `null` for registry-less mode.
  * @param id - Document ULID or slug.
  * @param reason - Optional rejection reason.
  * @param opts.calibrationNote - Optional note → the calibration record's `delta_reasons[0]`.
@@ -313,6 +323,7 @@ export async function apiApproveDoc(
  * @throws {DashboardApiError} On HTTP error or invalid transition.
  */
 export async function apiRejectDoc(
+  project: string | null,
   id: string,
   reason?: string,
   opts: { calibrationNote?: string } = {},
@@ -322,6 +333,7 @@ export async function apiRejectDoc(
   if (opts.calibrationNote !== undefined) body["calibration_note"] = opts.calibrationNote;
 
   return writeFetch<AdjudicateDocResult>(
+    project,
     `/dashboard/docs/${encodeURIComponent(id)}/reject`,
     "POST",
     Object.keys(body).length > 0 ? body : undefined,
@@ -334,12 +346,14 @@ export async function apiRejectDoc(
  * Always sends `?confirm=true` — the caller is expected to have already shown
  * an explicit confirmation dialog before invoking this function (AC-DH-6).
  *
+ * @param project - Registry project name, or `null` for registry-less mode.
  * @param id - Document ULID or slug.
  * @returns The deleted doc's id and the recoverable-until timestamp.
  * @throws {DashboardApiError} On HTTP error (e.g. 404 if the doc doesn't exist).
  */
-export async function apiDeleteDoc(id: string): Promise<DeleteDocResult> {
+export async function apiDeleteDoc(project: string | null, id: string): Promise<DeleteDocResult> {
   return writeFetch<DeleteDocResult>(
+    project,
     `/dashboard/docs/${encodeURIComponent(id)}?confirm=true`,
     "DELETE",
   );
@@ -353,13 +367,19 @@ export async function apiDeleteDoc(id: string): Promise<DeleteDocResult> {
  * `apiDeleteDoc`'s confirm gate); the HistoryTab's "restore" button click IS the
  * user-facing confirmation, so no second dialog is added on the client.
  *
+ * @param project - Registry project name, or `null` for registry-less mode.
  * @param id - Document ULID or slug.
  * @param version - The version number to restore content from.
  * @returns The updated DocRecord (now at version N+1, status reset to draft).
  * @throws {DashboardApiError} On HTTP error (e.g. 404 if the version doesn't exist).
  */
-export async function apiRestoreVersion(id: string, version: number): Promise<DocRecord> {
+export async function apiRestoreVersion(
+  project: string | null,
+  id: string,
+  version: number,
+): Promise<DocRecord> {
   const result = await writeFetch<{ doc: DocRecord }>(
+    project,
     `/dashboard/docs/${encodeURIComponent(id)}/restore?confirm=true`,
     "POST",
     { version },
@@ -370,13 +390,19 @@ export async function apiRestoreVersion(id: string, version: number): Promise<Do
 /**
  * Add a link from a document via POST /api/dashboard/docs/:id/links.
  *
+ * @param project - Registry project name, or `null` for registry-less mode.
  * @param fromId - Source document ULID or slug.
  * @param payload - Link target and type.
  * @returns void on success.
  * @throws {DashboardApiError} On HTTP error or LINK_CYCLE (422).
  */
-export async function apiCreateLink(fromId: string, payload: CreateLinkPayload): Promise<void> {
+export async function apiCreateLink(
+  project: string | null,
+  fromId: string,
+  payload: CreateLinkPayload,
+): Promise<void> {
   await writeFetch<{ ok: boolean }>(
+    project,
     `/dashboard/docs/${encodeURIComponent(fromId)}/links`,
     "POST",
     payload,
@@ -386,16 +412,17 @@ export async function apiCreateLink(fromId: string, payload: CreateLinkPayload):
 /**
  * Remove a link via DELETE /api/dashboard/docs/:id/links/:linkId.
  *
+ * @param project - Registry project name, or `null` for registry-less mode.
  * @param fromId - Source document ULID or slug.
  * @param toId - Target document ULID or slug.
  * @returns void on success.
  * @throws {DashboardApiError} On HTTP error.
  */
-export async function apiDeleteLink(fromId: string, toId: string): Promise<void> {
+export async function apiDeleteLink(project: string | null, fromId: string, toId: string): Promise<void> {
   let response: Response;
   try {
     response = await apiFetch(
-      null,
+      project,
       `/dashboard/docs/${encodeURIComponent(fromId)}/links/${encodeURIComponent(toId)}`,
       {
         method: "DELETE",
@@ -467,19 +494,21 @@ export interface ConfigUpdateResult<C> {
  * validation is entirely server-side, `ConfigService`/`GlobalConfigService`
  * own the `LoreConfigSchema`/`GlobalLoreConfigSchema` truth).
  *
+ * @param project - Registry project name, or `null` for registry-less mode.
  * @param resourcePath - Path AFTER "/api" (SPEC-078 D5) — see `writeFetch`'s
  *   matching doc comment.
  * @throws {ConfigConflictError} On 409 (stale `If-Match`).
  * @throws {DashboardApiError} On any other HTTP/network/validation error.
  */
 async function writeConfigFetch<C>(
+  project: string | null,
   resourcePath: string,
   patch: Record<string, unknown>,
   ifMatch: string,
 ): Promise<ConfigUpdateResult<C>> {
   let response: Response;
   try {
-    response = await apiFetch(null, resourcePath, {
+    response = await apiFetch(project, resourcePath, {
       method: "PATCH",
       headers: {
         "Accept": "application/json",
@@ -530,29 +559,33 @@ async function writeConfigFetch<C>(
  *   `components/config-path-utils.ts::buildPatchFromChangedPaths`, whose
  *   whole reason to exist is keeping this argument minimal so
  *   `restart_required` stays honest, SPEC-062 D5).
+ * @param project - Registry project name, or `null` for registry-less mode.
  * @param ifMatch - The base hash frozen at edit-start (SPEC-064 D5).
  * @throws {ConfigConflictError} On 409.
  * @throws {DashboardApiError} On other HTTP/network errors (incl. a denied-key patch, 422).
  */
 export async function apiPatchConfig(
+  project: string | null,
   patch: Record<string, unknown>,
   ifMatch: string,
 ): Promise<ConfigUpdateResult<LoreConfig>> {
-  return writeConfigFetch<LoreConfig>("/dashboard/config", patch, ifMatch);
+  return writeConfigFetch<LoreConfig>(project, "/dashboard/config", patch, ifMatch);
 }
 
 /**
  * Patch the MACHINE-scope config via PATCH /api/dashboard/config/machine.
  * Same contract as {@link apiPatchConfig}, against `GlobalLoreConfigSchema`.
  *
+ * @param project - Registry project name, or `null` for registry-less mode.
  * @throws {ConfigConflictError} On 409.
  * @throws {DashboardApiError} On other HTTP/network errors.
  */
 export async function apiPatchMachineConfig(
+  project: string | null,
   patch: Record<string, unknown>,
   ifMatch: string,
 ): Promise<ConfigUpdateResult<GlobalLoreConfig>> {
-  return writeConfigFetch<GlobalLoreConfig>("/dashboard/config/machine", patch, ifMatch);
+  return writeConfigFetch<GlobalLoreConfig>(project, "/dashboard/config/machine", patch, ifMatch);
 }
 
 // ─── SPEC-075 D4: route-view telemetry (fire-and-forget) ────────────────────
@@ -579,12 +612,16 @@ export async function apiPatchMachineConfig(
  *   200 chars via zod; this function does not pre-validate length — an
  *   oversized value simply fails server-side and is swallowed here like any
  *   other failure).
+ * @param project - Registry project name, or `null` for registry-less mode.
  * @param params.doc_type - The loaded doc's type, when on a doc route and
  *   cheaply available; omitted otherwise (never fabricated).
  */
-export async function apiPostRouteView(params: { route_id: string; doc_type?: DocType }): Promise<void> {
+export async function apiPostRouteView(
+  project: string | null,
+  params: { route_id: string; doc_type?: DocType },
+): Promise<void> {
   try {
-    await apiFetch(null, "/dashboard/telemetry/route-view", {
+    await apiFetch(project, "/dashboard/telemetry/route-view", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",

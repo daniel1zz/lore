@@ -42,6 +42,8 @@ export interface LinkEntry {
 export interface LinksPanelProps {
   /** Current links (from navigation.related). */
   links: LinkEntry[];
+  /** Active project, or `null`/absent for registry-less mode (SPEC-078 T10) — threads into `LinkAddSearch`'s corpus search. */
+  project?: string | null;
   /** Called when user adds a link. Returns error message or null on success. */
   onLinkAdd?: (toId: string, type: LinkType) => Promise<string | null>;
   /** Called when user removes a link. */
@@ -58,6 +60,8 @@ export interface LinksPanelProps {
 // `hit.type`/`hit.status` silently rendered `undefined`.
 
 interface LinkAddSearchProps {
+  /** Active project, or `null` for registry-less mode. */
+  project: string | null;
   /** Called with the selected doc's id and the chosen link type. */
   onAdd: (toId: string, linkType: LinkType) => Promise<void>;
   addError: string | null;
@@ -72,7 +76,7 @@ interface LinkAddSearchProps {
  * @example
  * <LinkAddSearch onAdd={handleAddLink} addError={addError} isPending={isPending} />
  */
-function LinkAddSearch({ onAdd, addError, isPending }: LinkAddSearchProps): React.ReactElement {
+function LinkAddSearch({ project, onAdd, addError, isPending }: LinkAddSearchProps): React.ReactElement {
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [selectedLinkType, setSelectedLinkType] = useState<LinkType>("relates-to");
@@ -92,8 +96,8 @@ function LinkAddSearch({ onAdd, addError, isPending }: LinkAddSearchProps): Reac
   // reason: useQuery is only mounted inside this sub-component, not at LinksPanel root.
   // This keeps LinksPanel renderable without a QueryClientProvider (e.g., read-only tests).
   const { data: searchResults } = useQuery({
-    queryKey: queryKeys.scope(null, ["links-search", debouncedQuery]),
-    queryFn: () => apiSearch(debouncedQuery, {}),
+    queryKey: queryKeys.scope(project, ["links-search", debouncedQuery]),
+    queryFn: () => apiSearch(project, debouncedQuery, {}),
     enabled: debouncedQuery.trim().length >= 2,
   });
 
@@ -169,6 +173,7 @@ function LinkAddSearch({ onAdd, addError, isPending }: LinkAddSearchProps): Reac
  */
 export function LinksPanel({
   links,
+  project = null,
   onLinkAdd,
   onLinkRemove,
   isPending,
@@ -238,6 +243,7 @@ export function LinksPanel({
           to avoid requiring QueryClientProvider in read-only / test contexts. */}
       {isWriteMode && onLinkAdd !== undefined && (
         <LinkAddSearch
+          project={project}
           onAdd={handleAddLink}
           addError={addError}
           isPending={isPending}

@@ -2,6 +2,11 @@
  * Tree route — hierarchical corpus tree view.
  * Path: /tree
  * Invariants: read-only tree view; clicking a node navigates to /docs/$id.
+ * SPEC-078 T10: `TreePage` has no route-bound search/params (`useNavigate()`
+ *   is called without `from`, resolving relative to wherever it's rendered),
+ *   so it is exported and reused directly by the `/p/$name/tree` mirror route
+ *   — no thin-wrapper split needed (unlike `library.tsx`'s `Route.useSearch()`
+ *   binding hazard).
  */
 
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
@@ -10,21 +15,27 @@ import { DocTree } from "@/components/DocTree";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiTree } from "@/lib/api";
 import type { TreeNode } from "@/lib/api";
-import { queryKeys } from "@/lib/project-api";
+import { queryKeys, useProjectParam } from "@/lib/project-api";
 
 export const Route = createFileRoute("/tree")({
   component: TreePage,
 });
 
-function TreePage(): React.ReactElement {
+/** Exported for reuse by the `/p/$name/tree` mirror route (SPEC-078 T10). */
+export function TreePage(): React.ReactElement {
   const navigate = useNavigate();
+  const project = useProjectParam();
 
   const { data, isLoading, error } = useQuery({
-    queryKey: queryKeys.scope(null, ["tree"]),
-    queryFn: () => apiTree(),
+    queryKey: queryKeys.scope(project, ["tree"]),
+    queryFn: () => apiTree(project),
   });
 
   function handleNodeSelect(node: TreeNode): void {
+    if (project !== null) {
+      void navigate({ to: "/p/$name/docs/$id", params: { name: project, id: node.doc.id } });
+      return;
+    }
     void navigate({ to: "/docs/$id", params: { id: node.doc.id } });
   }
 

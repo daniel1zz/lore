@@ -35,6 +35,8 @@ import { X } from "lucide-react";
 export interface HistoryTabProps {
   /** Document ULID or slug. */
   docId: string;
+  /** Active project, or `null`/absent for registry-less mode (SPEC-078 T10). */
+  project?: string | null;
   /**
    * Called after a successful restore. The parent (DocDetail) uses this to
    * refresh the doc's content/status/version it displays outside this tab —
@@ -48,15 +50,16 @@ export interface HistoryTabProps {
 
 interface DiffModalProps {
   docId: string;
+  project: string | null;
   fromVersion: number;
   toVersion: number;
   onClose: () => void;
 }
 
-function DiffModal({ docId, fromVersion, toVersion, onClose }: DiffModalProps): React.ReactElement {
+function DiffModal({ docId, project, fromVersion, toVersion, onClose }: DiffModalProps): React.ReactElement {
   const { data, isLoading, error } = useQuery({
-    queryKey: queryKeys.scope(null, ["diff", docId, fromVersion, toVersion]),
-    queryFn: () => apiGetVersionDiff(docId, { from: fromVersion, to: toVersion }),
+    queryKey: queryKeys.scope(project, ["diff", docId, fromVersion, toVersion]),
+    queryFn: () => apiGetVersionDiff(project, docId, { from: fromVersion, to: toVersion }),
   });
 
   return (
@@ -104,27 +107,27 @@ function DiffModal({ docId, fromVersion, toVersion, onClose }: DiffModalProps): 
  * Adjacent version pairs have a "diff" link that opens the DiffModal.
  *
  * @example
- * <HistoryTab docId={doc.id} onRestored={() => queryClient.invalidateQueries({ queryKey: queryKeys.scope(null, ["doc", doc.id]) })} />
+ * <HistoryTab docId={doc.id} onRestored={() => queryClient.invalidateQueries({ queryKey: queryKeys.scope(project, ["doc", doc.id]) })} />
  */
-export function HistoryTab({ docId, onRestored }: HistoryTabProps): React.ReactElement {
+export function HistoryTab({ docId, project = null, onRestored }: HistoryTabProps): React.ReactElement {
   const [diffVersions, setDiffVersions] = useState<{ from: number; to: number } | null>(null);
   const [restoringVersion, setRestoringVersion] = useState<number | null>(null);
   const queryClient = useQueryClient();
 
   const { data, isLoading, error } = useQuery({
-    queryKey: queryKeys.scope(null, ["version-log", docId]),
-    queryFn: () => apiGetVersionLog(docId, { limit: 50 }),
+    queryKey: queryKeys.scope(project, ["version-log", docId]),
+    queryFn: () => apiGetVersionLog(project, docId, { limit: 50 }),
   });
 
   async function handleRestore(version: number): Promise<void> {
     setRestoringVersion(version);
     try {
-      await apiRestoreVersion(docId, version);
+      await apiRestoreVersion(project, docId, version);
       toast.success(`Restored to v${version}`);
       // reason: restore creates version N+1 — refresh this tab's own log so the
       // new entry appears, then let the parent refresh the doc content/metadata
       // it owns (this component has no access to the outer "doc" query key).
-      await queryClient.invalidateQueries({ queryKey: queryKeys.scope(null, ["version-log", docId]) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.scope(project, ["version-log", docId]) });
       onRestored?.();
     } catch (err) {
       const message = err instanceof DashboardApiError ? err.message : "Restore failed";
@@ -208,6 +211,7 @@ export function HistoryTab({ docId, onRestored }: HistoryTabProps): React.ReactE
       {diffVersions !== null && (
         <DiffModal
           docId={docId}
+          project={project}
           fromVersion={diffVersions.from}
           toVersion={diffVersions.to}
           onClose={() => setDiffVersions(null)}

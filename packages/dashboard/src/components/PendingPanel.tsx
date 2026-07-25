@@ -38,6 +38,8 @@ import { queryKeys } from "@/lib/project-api";
 const PENDING_PANEL_LIMIT = 8;
 
 export interface PendingPanelProps {
+  /** Active project, or `null`/absent for registry-less mode (SPEC-078 T10). */
+  project?: string | null;
   /** Called when a listed document is clicked. */
   onNavigate?: (docId: string) => void;
 }
@@ -47,9 +49,9 @@ interface PendingRow {
   judgment: ReviewJudgment | null;
 }
 
-async function fetchPendingWithJudgments(): Promise<PendingRow[]> {
-  const docs = (await apiGetPendingReview()).slice(0, PENDING_PANEL_LIMIT);
-  const judgments = await Promise.all(docs.map((doc) => apiGetJudgments(doc.id)));
+async function fetchPendingWithJudgments(project: string | null): Promise<PendingRow[]> {
+  const docs = (await apiGetPendingReview(project)).slice(0, PENDING_PANEL_LIMIT);
+  const judgments = await Promise.all(docs.map((doc) => apiGetJudgments(project, doc.id)));
   return docs.map((doc, index) => ({ doc, judgment: judgments[index]?.latest ?? null }));
 }
 
@@ -57,10 +59,10 @@ async function fetchPendingWithJudgments(): Promise<PendingRow[]> {
  * @example
  * <PendingPanel onNavigate={(id) => navigate({ to: '/docs/$id', params: { id } })} />
  */
-export function PendingPanel({ onNavigate }: PendingPanelProps): React.ReactElement {
+export function PendingPanel({ project = null, onNavigate }: PendingPanelProps): React.ReactElement {
   const { data, isLoading, error } = useQuery({
-    queryKey: queryKeys.scope(null, ["home", "pending-panel"]),
-    queryFn: fetchPendingWithJudgments,
+    queryKey: queryKeys.scope(project, ["home", "pending-panel"]),
+    queryFn: () => fetchPendingWithJudgments(project),
   });
 
   return (

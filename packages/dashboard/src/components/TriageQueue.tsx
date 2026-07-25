@@ -75,10 +75,20 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { queryKeys } from "@/lib/project-api";
+import { ProjectIdentityLabel } from "@/components/ProjectIdentityLabel";
 
-export const TRIAGE_QUEUE_KEY = queryKeys.scope(null, ["pending", "triage-queue"]);
+/**
+ * Query key builder (SPEC-078 T10 — was a module-level constant; a `project`
+ * value can only be known at render time, so this is now a function, same
+ * conversion as `issue-reports-query.ts::issueReportsQueryKey`).
+ */
+export function triageQueueKey(project: string | null): readonly unknown[] {
+  return queryKeys.scope(project, ["pending", "triage-queue"]);
+}
 
 export interface TriageQueueProps {
+  /** Active project, or `null`/absent for registry-less mode (SPEC-078 T10). */
+  project?: string | null;
   /** Called when a listed document's title is clicked. */
   onNavigate?: (docId: string) => void;
 }
@@ -88,9 +98,9 @@ interface TriageRow {
   judgment: ReviewJudgment | null;
 }
 
-async function fetchTriageQueue(): Promise<TriageRow[]> {
-  const docs = await apiGetPendingReview();
-  const judgments = await Promise.all(docs.map((doc) => apiGetJudgments(doc.id)));
+async function fetchTriageQueue(project: string | null): Promise<TriageRow[]> {
+  const docs = await apiGetPendingReview(project);
+  const judgments = await Promise.all(docs.map((doc) => apiGetJudgments(project, doc.id)));
   return docs.map((doc, index) => ({ doc, judgment: judgments[index]?.latest ?? null }));
 }
 
@@ -111,7 +121,7 @@ function isFreshEscalation(row: TriageRow): boolean {
  * @example
  * <TriageQueue onNavigate={(id) => navigate({ to: '/docs/$id', params: { id } })} />
  */
-export function TriageQueue({ onNavigate }: TriageQueueProps): React.ReactElement {
+export function TriageQueue({ project = null, onNavigate }: TriageQueueProps): React.ReactElement {
   const queryClient = useQueryClient();
   const [escalatedOnly, setEscalatedOnly] = useState(false);
   const [expandedQuestionsId, setExpandedQuestionsId] = useState<string | null>(null);
@@ -120,8 +130,8 @@ export function TriageQueue({ onNavigate }: TriageQueueProps): React.ReactElemen
   const [submittingId, setSubmittingId] = useState<string | null>(null);
 
   const { data, isLoading, error } = useQuery({
-    queryKey: TRIAGE_QUEUE_KEY,
-    queryFn: fetchTriageQueue,
+    queryKey: triageQueueKey(project),
+    queryFn: () => fetchTriageQueue(project),
   });
 
   const rows = useMemo(() => {
@@ -159,7 +169,9 @@ export function TriageQueue({ onNavigate }: TriageQueueProps): React.ReactElemen
       const trimmedNote = noteDraft.trim();
       const opts = trimmedNote.length > 0 ? { calibrationNote: trimmedNote } : {};
       const result =
-        action === "approve" ? await apiApproveDoc(docId, opts) : await apiRejectDoc(docId, undefined, opts);
+        action === "approve"
+          ? await apiApproveDoc(project, docId, opts)
+          : await apiRejectDoc(project, docId, undefined, opts);
 
       toast.success(action === "approve" ? "Document approved" : "Document rejected");
       if (result.warnings.length > 0) {
@@ -167,8 +179,8 @@ export function TriageQueue({ onNavigate }: TriageQueueProps): React.ReactElemen
       }
 
       closeAdjudicate();
-      await queryClient.invalidateQueries({ queryKey: TRIAGE_QUEUE_KEY });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.scope(null, ["home", "pending-panel"]) });
+      await queryClient.invalidateQueries({ queryKey: triageQueueKey(project) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.scope(project, ["home", "pending-panel"]) });
     } catch (err) {
       const message = err instanceof DashboardApiError ? err.message : "Adjudication failed";
       toast.error(message);
@@ -284,6 +296,7 @@ export function TriageQueue({ onNavigate }: TriageQueueProps): React.ReactElemen
 
                 {isAdjudicating && (
                   <div className="flex items-center gap-2 pt-1 border-t">
+                    <ProjectIdentityLabel project={project} />
                     <input
                       type="text"
                       className="flex-1 text-xs px-2 py-1 border rounded bg-background"

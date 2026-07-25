@@ -90,7 +90,7 @@ describe("apiGetStatus", () => {
       const mockStatus = { total_docs: 42, by_type: { prd: 3 }, by_status: { active: 5 } };
       vi.stubGlobal("fetch", makeFetchMock({ ok: true, data: mockStatus }));
 
-      const result = await apiGetStatus();
+      const result = await apiGetStatus(null);
 
       expect(result.total_docs).toBe(42);
       expect(result.by_type.prd).toBe(3);
@@ -104,7 +104,7 @@ describe("apiList", () => {
       const mockData = { docs: [{ id: "01", slug: "prd-test", title: "Test", type: "prd", status: "draft", updated_at: "" }], total: 1 };
       vi.stubGlobal("fetch", makeFetchMock({ ok: true, data: mockData }));
 
-      const result = await apiList({});
+      const result = await apiList(null, {});
 
       expect(result.total).toBe(1);
       expect(result.docs).toHaveLength(1);
@@ -119,7 +119,7 @@ describe("apiList", () => {
         }));
       }));
 
-      await apiList({ type: "prd" });
+      await apiList(null, { type: "prd" });
 
       expect(calls[0]).toContain("type=prd");
     });
@@ -133,7 +133,7 @@ describe("apiList", () => {
         }));
       }));
 
-      await apiList({ tags: ["a", "b"] });
+      await apiList(null, { tags: ["a", "b"] });
 
       expect(calls[0]).toContain(`tags=${encodeURIComponent("a,b")}`);
     });
@@ -147,7 +147,7 @@ describe("apiList", () => {
         }));
       }));
 
-      await apiList({ type: "spec", status: "draft", tags: ["core"] });
+      await apiList(null, { type: "spec", status: "draft", tags: ["core"] });
 
       expect(calls[0]).toContain("type=spec");
       expect(calls[0]).toContain("status=draft");
@@ -159,7 +159,7 @@ describe("apiList", () => {
     it("returns empty docs array when server returns empty list", async () => {
       vi.stubGlobal("fetch", makeFetchMock({ ok: true, data: { docs: [], total: 0 } }));
 
-      const result = await apiList({});
+      const result = await apiList(null, {});
 
       expect(result.docs).toHaveLength(0);
       expect(result.total).toBe(0);
@@ -174,7 +174,7 @@ describe("apiList", () => {
         }));
       }));
 
-      await apiList({ tags: [] });
+      await apiList(null, { tags: [] });
 
       expect(calls[0]).not.toContain("tags=");
     });
@@ -192,7 +192,7 @@ describe("apiSearch", () => {
         }));
       }));
 
-      await apiSearch("hello world");
+      await apiSearch(null, "hello world");
 
       expect(calls[0]).toContain("q=hello+world");
     });
@@ -204,7 +204,7 @@ describe("apiSearch", () => {
       const mockData = { results: [{ id: "02", slug: "spec-test", title: "Spec", snippet: "...match...", score: 1.5, type: "spec", status: "active" }] };
       vi.stubGlobal("fetch", makeFetchMock({ ok: true, data: mockData }));
 
-      const result = await apiSearch("test");
+      const result = await apiSearch(null, "test");
 
       expect(result.results).toHaveLength(1);
       expect(result.results[0]?.title).toBe("Spec");
@@ -216,7 +216,7 @@ describe("apiSearch", () => {
       const mockData = { results: [{ id: "03", slug: "task-x", title: "Task X", snippet: "", score: 0.8, type: "task", status: "draft" }] };
       vi.stubGlobal("fetch", makeFetchMock({ ok: true, data: mockData }));
 
-      const result = await apiSearch("task");
+      const result = await apiSearch(null, "task");
 
       expect(result.results[0]?.type).toBe("task");
       expect(result.results[0]?.status).toBe("draft");
@@ -255,7 +255,7 @@ describe("apiGetReadyReport", () => {
         }),
       );
 
-      const result = await apiGetReadyReport("plan-a");
+      const result = await apiGetReadyReport(null, "plan-a");
 
       expect(result.ok).toBe(true);
       if (result.ok) {
@@ -275,7 +275,7 @@ describe("apiGetReadyReport", () => {
         makeFetchMock({ ok: true, data: { records: [], sessions: [], anchor_conflicts: [], claim_ttl_minutes: 120 } }),
       );
 
-      const result = await apiGetReadyReport("plan-empty");
+      const result = await apiGetReadyReport(null, "plan-empty");
 
       expect(result.ok).toBe(true);
       if (result.ok) expect(result.value.records).toHaveLength(0);
@@ -289,7 +289,7 @@ describe("apiGetReadyReport", () => {
         makeFetchMock({ ok: false, error: { code: "VALIDATION_ERROR", message: "not a plan" } }, 422),
       );
 
-      const result = await apiGetReadyReport("spec-not-a-plan");
+      const result = await apiGetReadyReport(null, "spec-not-a-plan");
 
       expect(result.ok).toBe(false);
       if (!result.ok) {
@@ -304,7 +304,7 @@ describe("apiGetReadyReport", () => {
     it("wraps a network failure into { ok: false, error } rather than throwing", async () => {
       vi.stubGlobal("fetch", makeNetworkErrorMock());
 
-      const result = await apiGetReadyReport("plan-a");
+      const result = await apiGetReadyReport(null, "plan-a");
 
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.error.code).toBe("NETWORK_ERROR");
@@ -333,7 +333,7 @@ describe("apiGetReadyReport", () => {
         }),
       );
 
-      await apiGetReadyReport("plan with spaces");
+      await apiGetReadyReport(null, "plan with spaces");
 
       expect(calls[0]).toContain(encodeURIComponent("plan with spaces"));
     });
@@ -349,7 +349,7 @@ describe("apiGetDoc", () => {
       };
       vi.stubGlobal("fetch", makeFetchMock({ ok: true, data: mockDoc }));
 
-      const result = await apiGetDoc("01");
+      const result = await apiGetDoc(null, "01");
 
       expect(result.doc.id).toBe("01");
       expect(result.navigation.parent).toBeNull();
@@ -368,7 +368,7 @@ describe("apiGetDoc", () => {
       };
       vi.stubGlobal("fetch", makeFetchMock({ ok: true, data: mockDoc }));
 
-      const result = await apiGetDoc("03");
+      const result = await apiGetDoc(null, "03");
 
       expect(result.navigation.ancestors).toHaveLength(1);
       expect(result.navigation.ancestors[0]?.title).toBe("Root PRD");
@@ -384,7 +384,7 @@ describe("apiGetDoc", () => {
         }));
       }));
 
-      await apiGetDoc("01", { resolveMdx: true });
+      await apiGetDoc(null, "01", { resolveMdx: true });
 
       expect(calls[0]).toContain("resolveMdx=true");
     });
@@ -398,7 +398,7 @@ describe("apiGetDoc", () => {
         }));
       }));
 
-      await apiGetDoc("prd-my spec");
+      await apiGetDoc(null, "prd-my spec");
 
       expect(calls[0]).toContain(encodeURIComponent("prd-my spec"));
     });
@@ -415,7 +415,7 @@ describe("apiGetDoc", () => {
         }));
       }));
 
-      const [r1, r2] = await Promise.all([apiGetDoc("01"), apiGetDoc("02")]);
+      const [r1, r2] = await Promise.all([apiGetDoc(null, "01"), apiGetDoc(null, "02")]);
 
       expect(r1.doc.id).toBe("01");
       expect(r2.doc.id).toBe("02");
@@ -430,13 +430,13 @@ describe("ApiError", () => {
     it("throws ApiError when server returns { ok: false }", async () => {
       vi.stubGlobal("fetch", makeFetchMock({ ok: false, error: { code: "DOC_NOT_FOUND", message: "Not found" } }, 404));
 
-      await expect(apiGetDoc("missing")).rejects.toThrow(ApiError);
+      await expect(apiGetDoc(null, "missing")).rejects.toThrow(ApiError);
     });
 
     it("ApiError has status=404 and code=DOC_NOT_FOUND", async () => {
       vi.stubGlobal("fetch", makeFetchMock({ ok: false, error: { code: "DOC_NOT_FOUND", message: "Not found" } }, 404));
 
-      const err = await apiGetDoc("missing").catch((e: unknown) => e);
+      const err = await apiGetDoc(null, "missing").catch((e: unknown) => e);
 
       expect(err).toBeInstanceOf(ApiError);
       expect((err as ApiError).status).toBe(404);
@@ -446,7 +446,7 @@ describe("ApiError", () => {
     it("throws ApiError on non-2xx with no JSON error field", async () => {
       vi.stubGlobal("fetch", makeFetchMock({ ok: false }, 500));
 
-      await expect(apiList({})).rejects.toThrow(ApiError);
+      await expect(apiList(null, {})).rejects.toThrow(ApiError);
     });
   });
 
@@ -454,7 +454,7 @@ describe("ApiError", () => {
     it("throws ApiError with code NETWORK_ERROR on fetch failure", async () => {
       vi.stubGlobal("fetch", makeNetworkErrorMock());
 
-      const err = await apiGetStatus().catch((e: unknown) => e);
+      const err = await apiGetStatus(null).catch((e: unknown) => e);
 
       expect(err).toBeInstanceOf(ApiError);
       expect((err as ApiError).code).toBe("NETWORK_ERROR");
@@ -467,7 +467,7 @@ describe("ApiError", () => {
         new Response("not-json", { status: 200, headers: { "Content-Type": "text/plain" } }),
       ));
 
-      const err = await apiGetStatus().catch((e: unknown) => e);
+      const err = await apiGetStatus(null).catch((e: unknown) => e);
 
       expect(err).toBeInstanceOf(ApiError);
       expect((err as ApiError).code).toBe("PARSE_ERROR");
@@ -480,7 +480,7 @@ describe("ApiError", () => {
         new Response(JSON.stringify({ ok: true, data: { total_docs: 0, by_type: {}, by_status: {} } }), { status: 200 }),
       ));
 
-      const result = await apiGetStatus();
+      const result = await apiGetStatus(null);
 
       expect(result.total_docs).toBe(0);
     });
@@ -495,7 +495,7 @@ describe("apiGetEvidencePanel", () => {
       const projection: EvidencePanelProjection = { doc_type: "task", evidence: [], ac_refs: [] };
       vi.stubGlobal("fetch", makeFetchMock({ ok: true, data: projection }));
 
-      const result = await apiGetEvidencePanel("task-fixture");
+      const result = await apiGetEvidencePanel(null, "task-fixture");
 
       expect(result).toStrictEqual(projection);
     });
@@ -504,7 +504,7 @@ describe("apiGetEvidencePanel", () => {
       const fetchMock = makeFetchMock({ ok: true, data: { doc_type: "other" } });
       vi.stubGlobal("fetch", fetchMock);
 
-      await apiGetEvidencePanel("spec/with slash");
+      await apiGetEvidencePanel(null, "spec/with slash");
 
       const calledUrl = (fetchMock as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string;
       expect(calledUrl).toBe(`/api/evidence-panel/${encodeURIComponent("spec/with slash")}`);
@@ -518,7 +518,7 @@ describe("apiGetEvidencePanel", () => {
         makeFetchMock({ ok: false, error: { code: "DOC_NOT_FOUND", message: "not found" } }, 404),
       );
 
-      const err = await apiGetEvidencePanel("missing").catch((e: unknown) => e);
+      const err = await apiGetEvidencePanel(null, "missing").catch((e: unknown) => e);
 
       expect(err).toBeInstanceOf(ApiError);
       expect((err as ApiError).code).toBe("DOC_NOT_FOUND");
@@ -529,7 +529,7 @@ describe("apiGetEvidencePanel", () => {
     it("throws ApiError with code NETWORK_ERROR", async () => {
       vi.stubGlobal("fetch", makeNetworkErrorMock());
 
-      const err = await apiGetEvidencePanel("task-fixture").catch((e: unknown) => e);
+      const err = await apiGetEvidencePanel(null, "task-fixture").catch((e: unknown) => e);
 
       expect(err).toBeInstanceOf(ApiError);
       expect((err as ApiError).code).toBe("NETWORK_ERROR");
@@ -540,13 +540,13 @@ describe("apiGetEvidencePanel", () => {
 describe("evidencePanelQueryKey", () => {
   describe("happy path", () => {
     it("returns a ['evidence-panel', idOrSlug] tuple", () => {
-      expect(evidencePanelQueryKey("task-fixture")).toEqual(["evidence-panel", "task-fixture"]);
+      expect(evidencePanelQueryKey(null, "task-fixture")).toEqual(["evidence-panel", "task-fixture"]);
     });
   });
 
   describe("regression", () => {
     it("returns an equal-by-value key for the same idOrSlug across calls (TanStack Query cache-sharing contract)", () => {
-      expect(evidencePanelQueryKey("plan-x")).toEqual(evidencePanelQueryKey("plan-x"));
+      expect(evidencePanelQueryKey(null, "plan-x")).toEqual(evidencePanelQueryKey(null, "plan-x"));
     });
   });
 });

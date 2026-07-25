@@ -148,7 +148,7 @@ describe("ActivePlansPanel", () => {
 
       renderWithClient(<ActivePlansPanel />);
 
-      await waitFor(() => expect(mockedApiList).toHaveBeenCalledWith({ type: "plan", status: "active" }));
+      await waitFor(() => expect(mockedApiList).toHaveBeenCalledWith(null, { type: "plan", status: "active" }));
     });
 
     it("no longer renders the 'not ready-aware' placeholder badge (SPEC-037 D1)", async () => {
@@ -158,6 +158,39 @@ describe("ActivePlansPanel", () => {
 
       await screen.findByText("No active plans.");
       expect(screen.queryByText("not ready-aware")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("regression: SPEC-078 T10 project re-key on switch (AC-078-8 component-test half)", () => {
+    it("switching project A -> B re-keys the active-plans query (project segment present)", async () => {
+      mockedApiList.mockResolvedValue({ docs: [], total: 0 });
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+      const { rerender } = render(
+        <QueryClientProvider client={client}>
+          <ActivePlansPanel project="project-a" />
+        </QueryClientProvider>,
+      );
+      await waitFor(() =>
+        expect(mockedApiList).toHaveBeenCalledWith("project-a", { type: "plan", status: "active" }),
+      );
+
+      rerender(
+        <QueryClientProvider client={client}>
+          <ActivePlansPanel project="project-b" />
+        </QueryClientProvider>,
+      );
+      await waitFor(() =>
+        expect(mockedApiList).toHaveBeenCalledWith("project-b", { type: "plan", status: "active" }),
+      );
+
+      const cachedKeys = client.getQueryCache().getAll().map((q) => q.queryKey);
+      expect(cachedKeys).toContainEqual(["project:project-a", "home", "active-plans"]);
+      expect(cachedKeys).toContainEqual(["project:project-b", "home", "active-plans"]);
+      // reason: the two projects' cache entries must be genuinely DISTINCT keys —
+      // a bug that always resolved `project` to the same value (e.g. a stale
+      // closure) would collapse both onto one shared entry instead.
+      expect(cachedKeys.filter((k) => JSON.stringify(k).includes("active-plans")).length).toBeGreaterThanOrEqual(2);
     });
   });
 

@@ -190,7 +190,7 @@ describe("LinksPanel", () => {
 
       await typeAndAdvanceDebounce(user, input, "ab");
 
-      expect(mockedApiSearch).toHaveBeenCalledWith("ab", {});
+      expect(mockedApiSearch).toHaveBeenCalledWith(null, "ab", {});
     });
   });
 

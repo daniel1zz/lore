@@ -13,6 +13,11 @@
  *   refetchOnWindowFocus/refetchOnReconnect on THAT scope's query while an
  *   edit session is open — same ASYNC2D-001 defense-in-depth pattern as
  *   `routes/docs.$id.tsx` (SPEC-064 D5, the SPEC-062-retro lost-update class).
+ * SPEC-078 T10: no route-bound search/params here, so `SettingsPage` is
+ *   exported and reused directly by the `/p/$name/settings` mirror route.
+ *   `project` (`useProjectParam()`) threads into both config queries/saves
+ *   AND `ConfigScopePanel`'s `project` prop (R-13 identity label next to
+ *   Save/Edit).
  */
 
 import { useState } from "react";
@@ -21,7 +26,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { computeDefaultsPrecedence } from "@lore/core";
 import { apiGetConfig, apiGetMachineConfig } from "@/lib/api";
 import { apiPatchConfig, apiPatchMachineConfig } from "@/api/mutations";
-import { queryKeys } from "@/lib/project-api";
+import { queryKeys, useProjectParam } from "@/lib/project-api";
 import { ConfigScopePanel } from "@/components/ConfigScopePanel";
 import { DefaultsPrecedenceTable } from "@/components/DefaultsPrecedenceTable";
 import { TEAM_FIELD_SPECS, MACHINE_FIELD_SPECS } from "@/components/config-field-specs";
@@ -31,21 +36,23 @@ export const Route = createFileRoute("/settings")({
   component: SettingsPage,
 });
 
-function SettingsPage(): React.ReactElement {
+/** Exported for reuse by the `/p/$name/settings` mirror route (SPEC-078 T10). */
+export function SettingsPage(): React.ReactElement {
+  const project = useProjectParam();
   const queryClient = useQueryClient();
   const [isEditingTeam, setIsEditingTeam] = useState(false);
   const [isEditingMachine, setIsEditingMachine] = useState(false);
 
   const teamQuery = useQuery({
-    queryKey: queryKeys.scope(null, ["config", "team"]),
-    queryFn: apiGetConfig,
+    queryKey: queryKeys.scope(project, ["config", "team"]),
+    queryFn: () => apiGetConfig(project),
     refetchOnWindowFocus: !isEditingTeam,
     refetchOnReconnect: !isEditingTeam,
   });
 
   const machineQuery = useQuery({
-    queryKey: queryKeys.scope(null, ["config", "machine"]),
-    queryFn: apiGetMachineConfig,
+    queryKey: queryKeys.scope(project, ["config", "machine"]),
+    queryFn: () => apiGetMachineConfig(project),
     refetchOnWindowFocus: !isEditingMachine,
     refetchOnReconnect: !isEditingMachine,
   });
@@ -53,11 +60,11 @@ function SettingsPage(): React.ReactElement {
   const precedenceRows = computeDefaultsPrecedence(machineQuery.data?.config.defaults, teamQuery.data?.config.defaults);
 
   function invalidateTeam(): void {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.scope(null, ["config", "team"]) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.scope(project, ["config", "team"]) });
   }
 
   function invalidateMachine(): void {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.scope(null, ["config", "machine"]) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.scope(project, ["config", "machine"]) });
   }
 
   return (
@@ -83,9 +90,10 @@ function SettingsPage(): React.ReactElement {
           data={teamQuery.data}
           isLoading={teamQuery.isLoading}
           error={teamQuery.error}
-          onSave={apiPatchConfig}
+          onSave={(patch, ifMatch) => apiPatchConfig(project, patch, ifMatch)}
           onSaved={invalidateTeam}
           onEditingChange={setIsEditingTeam}
+          project={project}
           className="border-blue-200 dark:border-blue-900"
         />
 
@@ -97,9 +105,10 @@ function SettingsPage(): React.ReactElement {
           data={machineQuery.data}
           isLoading={machineQuery.isLoading}
           error={machineQuery.error}
-          onSave={apiPatchMachineConfig}
+          onSave={(patch, ifMatch) => apiPatchMachineConfig(project, patch, ifMatch)}
           onSaved={invalidateMachine}
           onEditingChange={setIsEditingMachine}
+          project={project}
           className="border-amber-300 dark:border-amber-800 bg-amber-50/40 dark:bg-amber-950/10"
           headerExtra={
             <div

@@ -107,7 +107,7 @@ describe("AdjudicationBar", () => {
       await user.type(screen.getByLabelText("Calibration note for Task Fixture"), "Looks correct");
       await user.click(screen.getByRole("button", { name: "Approve" }));
 
-      expect(mockedApprove).toHaveBeenCalledWith("01HTASK00000000000000000001", { calibrationNote: "Looks correct" });
+      expect(mockedApprove).toHaveBeenCalledWith(null, "01HTASK00000000000000000001", { calibrationNote: "Looks correct" });
       expect(toastSuccess).toHaveBeenCalledWith("Document approved");
     });
 
@@ -119,7 +119,7 @@ describe("AdjudicationBar", () => {
       await user.type(screen.getByLabelText("Calibration note for Task Fixture"), "Missed AC-3");
       await user.click(screen.getByRole("button", { name: "Reject" }));
 
-      expect(mockedReject).toHaveBeenCalledWith("01HTASK00000000000000000001", undefined, { calibrationNote: "Missed AC-3" });
+      expect(mockedReject).toHaveBeenCalledWith(null, "01HTASK00000000000000000001", undefined, { calibrationNote: "Missed AC-3" });
       expect(toastSuccess).toHaveBeenCalledWith("Document rejected");
     });
   });
@@ -140,7 +140,7 @@ describe("AdjudicationBar", () => {
       await user.type(screen.getByLabelText("Calibration note for Task Fixture"), "   ");
       await user.click(screen.getByRole("button", { name: "Approve" }));
 
-      expect(mockedApprove).toHaveBeenCalledWith("01HTASK00000000000000000001", {});
+      expect(mockedApprove).toHaveBeenCalledWith(null, "01HTASK00000000000000000001", {});
     });
   });
 
@@ -171,6 +171,34 @@ describe("AdjudicationBar", () => {
       render(<AdjudicationBar doc={makeDoc()} panel={taskPanelWithFail} onMutated={vi.fn()} />);
       const statusChip = screen.getByText("fail");
       expect(statusChip.className).toMatch(/destructive/);
+    });
+  });
+
+  describe("project identity label (SPEC-078 T10 R-13, AC-078-7 component-test half)", () => {
+    it("renders the active project's name adjacent to the approve/reject controls", () => {
+      render(<AdjudicationBar doc={makeDoc()} panel={taskPanelWithFail} project="acme" onMutated={vi.fn()} />);
+
+      const label = screen.getByTestId("project-identity-label");
+      expect(label).toHaveTextContent("acme");
+      // reason: "adjacent to the controls" — same DOM container as Approve/Reject,
+      // not merely present somewhere on the page.
+      const approveButton = screen.getByRole("button", { name: "Approve" });
+      expect(label.parentElement).toBe(approveButton.parentElement);
+    });
+
+    it("renders nothing (registry-less mode) when project is absent", () => {
+      render(<AdjudicationBar doc={makeDoc()} panel={taskPanelWithFail} onMutated={vi.fn()} />);
+      expect(screen.queryByTestId("project-identity-label")).not.toBeInTheDocument();
+    });
+
+    it("threads project into apiApproveDoc/apiRejectDoc so a write lands in the SELECTED project", async () => {
+      mockedApprove.mockResolvedValue({ doc: makeDoc({ status: "approved" }), warnings: [] });
+      const user = userEvent.setup();
+      render(<AdjudicationBar doc={makeDoc()} panel={otherPanel} project="acme" onMutated={vi.fn()} />);
+
+      await user.click(screen.getByRole("button", { name: "Approve" }));
+
+      expect(mockedApprove).toHaveBeenCalledWith("acme", "01HTASK00000000000000000001", {});
     });
   });
 });

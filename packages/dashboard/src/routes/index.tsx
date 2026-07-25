@@ -14,15 +14,24 @@
  *     `/tree` uses). A corpus with zero PRD docs surfaces a labeled empty
  *     state, never a crash.
  *   - Body renders via `<ResolvedPrdBody>`, which never dangerouslySetInnerHTML.
+ *   - SPEC-078 T10: the top-level `/` route additionally runs
+ *     `useProjectRedirect()` — in multi-mode (a project registry exists) this
+ *     immediately navigates to `/p/:name`; registry-less mode is a no-op, so
+ *     `HomeBody` below renders byte-identically to pre-SPEC-078 behavior
+ *     either way. `HomeBody` is exported (not just the route) so the
+ *     `/p/$name/` mirror route (`routes/p.$name.index.tsx`) can reuse the
+ *     SAME component — it already reads `useProjectParam()` internally, so
+ *     it needs no redirect wrapper there.
  * Side-effect class: IO (fetch via TanStack Query)
- * Source: PRD-001 §13.5, SPEC-033 §2.2/§2.4
+ * Source: PRD-001 §13.5, SPEC-033 §2.2/§2.4; SPEC-078 T10
  */
 
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiTree, apiGetDoc } from "@/lib/api";
-import { queryKeys } from "@/lib/project-api";
+import { queryKeys, useProjectParam } from "@/lib/project-api";
+import { useProjectRedirect } from "@/lib/use-project-redirect";
 import { ResolvedPrdBody } from "@/components/ResolvedPrdBody";
 import { PendingPanel } from "@/components/PendingPanel";
 import { ActivePlansPanel } from "@/components/ActivePlansPanel";
@@ -30,19 +39,31 @@ import { LoopPanel } from "@/components/LoopPanel";
 import { IssueReportsCard } from "@/components/IssueReportsCard";
 
 export const Route = createFileRoute("/")({
-  component: HomePage,
+  component: HomeRoute,
 });
 
-function HomePage(): React.ReactElement {
+/**
+ * Top-level `/` route component — runs the multi-mode redirect probe, then
+ * renders the SAME body the `/p/$name/` mirror route renders directly
+ * (without this wrapper, since a project-scoped URL never redirects again).
+ */
+function HomeRoute(): React.ReactElement {
+  useProjectRedirect();
+  return <HomeBody />;
+}
+
+/** Shared Home body — reused verbatim by `routes/p.$name.index.tsx`. */
+export function HomeBody(): React.ReactElement {
   const navigate = useNavigate();
+  const project = useProjectParam();
 
   const {
     data: root,
     isLoading: isTreeLoading,
     error: treeError,
   } = useQuery({
-    queryKey: queryKeys.scope(null, ["tree"]),
-    queryFn: () => apiTree(),
+    queryKey: queryKeys.scope(project, ["tree"]),
+    queryFn: () => apiTree(project),
   });
 
   const prdId = root?.doc.id;
@@ -52,15 +73,19 @@ function HomePage(): React.ReactElement {
     isLoading: isPrdLoading,
     error: prdError,
   } = useQuery({
-    queryKey: queryKeys.scope(null, ["docs", prdId, "resolved"]),
+    queryKey: queryKeys.scope(project, ["docs", prdId, "resolved"]),
     // reason: `enabled` gates this query on prdId being defined; the non-null
     // assertion below is safe because TanStack Query never invokes queryFn
     // while `enabled` is false.
-    queryFn: () => apiGetDoc(prdId as string, { resolveMdx: true }),
+    queryFn: () => apiGetDoc(project, prdId as string, { resolveMdx: true }),
     enabled: prdId !== undefined,
   });
 
   function handleNavigate(idOrSlug: string): void {
+    if (project !== null) {
+      void navigate({ to: "/p/$name/docs/$id", params: { name: project, id: idOrSlug } });
+      return;
+    }
     void navigate({ to: "/docs/$id", params: { id: idOrSlug } });
   }
 
@@ -104,10 +129,14 @@ function HomePage(): React.ReactElement {
       </div>
 
       <aside className="space-y-4">
+        {/* reason: SPEC-078 T10 — Issues/pending-review triage stays
+            registry-less-scoped for now (not yet mirrored under /p/:name);
+            a documented, conscious scope reduction (see T10 completion
+            report), not a silent gap. */}
         <IssueReportsCard onNavigate={() => void navigate({ to: "/issues" })} />
-        <PendingPanel onNavigate={handleNavigate} />
-        <ActivePlansPanel onNavigate={handleNavigate} />
-        <LoopPanel />
+        <PendingPanel project={project} onNavigate={handleNavigate} />
+        <ActivePlansPanel project={project} onNavigate={handleNavigate} />
+        <LoopPanel project={project} />
       </aside>
     </div>
   );

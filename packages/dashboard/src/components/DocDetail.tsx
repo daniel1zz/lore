@@ -75,7 +75,7 @@
  *     `AdjudicationBar` (evidence-summary chips + approve/reject +
  *     calibration note) renders in the header, same screen as the rest of
  *     the doc, for any doc whose `status === "in-review"` — its panel data
- *     is fetched once here (`evidencePanelQueryKey(doc.id)`) so the header
+ *     is fetched once here (`evidencePanelQueryKey(project, doc.id)`) so the header
  *     bar and the Evidence tab (when opened) share one cached fetch.
  * Side-effect class: IO (fetch, localStorage)
  * Source: SPEC-015, SPEC-022 §9.2, SPEC-027, SPEC-036 §1 D1/D3, SPEC-037 §1 D2/D3,
@@ -110,6 +110,7 @@ import { deriveTypeMeta, extractClaim, extractEvidence } from "@lore/core";
 import { cn } from "@/lib/utils";
 import { TYPE_ACCENT, TYPE_ACCENT_BORDER_CLASS } from "@/lib/type-accent";
 import { formatTypeMetaLabel, isNotablePriority, metaBadgeVariant } from "@/lib/type-meta-label";
+import { ProjectIdentityLabel } from "@/components/ProjectIdentityLabel";
 import {
   apiPatchDoc,
   apiApproveDoc,
@@ -181,6 +182,8 @@ function DeleteConfirmDialog({ title, isPending, onConfirm, onCancel }: DeleteCo
 
 interface AdjudicationBarSectionProps {
   doc: DocRecord;
+  /** Active project, or `null` for registry-less mode (SPEC-078 T10). */
+  project: string | null;
   onMutated?: () => void;
 }
 
@@ -193,14 +196,16 @@ interface AdjudicationBarSectionProps {
  * keeping every non-in-review DocDetail render usable in read-only/unit-test
  * contexts with no query provider (see the mount-site comment in `DocDetail`).
  */
-function AdjudicationBarSection({ doc, onMutated }: AdjudicationBarSectionProps): React.ReactElement | null {
+function AdjudicationBarSection({ doc, project, onMutated }: AdjudicationBarSectionProps): React.ReactElement | null {
   const { data } = useQuery({
-    queryKey: evidencePanelQueryKey(doc.id),
-    queryFn: () => apiGetEvidencePanel(doc.id),
+    queryKey: evidencePanelQueryKey(project, doc.id),
+    queryFn: () => apiGetEvidencePanel(project, doc.id),
   });
 
   if (data === undefined) return null;
-  return <AdjudicationBar doc={doc} panel={data} {...(onMutated !== undefined ? { onMutated } : {})} />;
+  return (
+    <AdjudicationBar doc={doc} panel={data} project={project} {...(onMutated !== undefined ? { onMutated } : {})} />
+  );
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -208,6 +213,14 @@ function AdjudicationBarSection({ doc, onMutated }: AdjudicationBarSectionProps)
 export interface DocDetailProps {
   /** Document with navigation context from the API. */
   docWithNav: DocWithNavigation;
+  /**
+   * Active project, or `null` for registry-less mode (SPEC-078 T10). Threads
+   * into every internal apiXxx call (save/approve/reject/link/delete/evidence)
+   * plus the `ProjectIdentityLabel` rendered next to the Save/adjudication
+   * controls (R-13). `undefined` behaves like `null` — read-only/unit-test
+   * contexts that never pass it stay byte-identical to pre-SPEC-078 behavior.
+   */
+  project?: string | null;
   /** Called when the user clicks on a sibling/related doc ID (also used by breadcrumb ancestor crumbs). */
   onNavigate?: (idOrSlug: string) => void;
   /** Called when the breadcrumb's Home crumb is clicked (SPEC-036 §1 D1). */
@@ -259,6 +272,7 @@ type ActiveTab = "content" | "history" | "audit" | "evidence";
  */
 export function DocDetail({
   docWithNav,
+  project = null,
   onNavigate,
   onNavigateHome,
   onMutated,
@@ -400,7 +414,7 @@ export function DocDetail({
     try {
       // reason: ASYNC2D-001 — editBaseVersion, not the live doc.version prop.
       // See module doc comment + src/lib/edit-session.ts.
-      const savedDoc = await apiPatchDoc(doc.id, { content: editContent }, { version: editBaseVersion });
+      const savedDoc = await apiPatchDoc(project, doc.id, { content: editContent }, { version: editBaseVersion });
       // reason: cancel any pending debounced draft-autosave before clearing — otherwise
       // a timer scheduled just before Save fires up to DRAFT_SAVE_DEBOUNCE_MS later and
       // rewrites localStorage with the pre-save content, resurrecting a draft the user
@@ -428,7 +442,7 @@ export function DocDetail({
   async function handleForceOverwrite(): Promise<void> {
     setIsForcing(true);
     try {
-      const savedDoc = await apiPatchDoc(doc.id, { content: editContent }, { forceOverwrite: true });
+      const savedDoc = await apiPatchDoc(project, doc.id, { content: editContent }, { forceOverwrite: true });
       clearDraft(doc.id);
       setConflictError(null);
       onMutated?.();
@@ -447,10 +461,10 @@ export function DocDetail({
     setIsTransitioning(true);
     try {
       if (toStatus === "approved") {
-        await apiApproveDoc(doc.id);
+        await apiApproveDoc(project, doc.id);
         toast.success("Document approved");
       } else if (toStatus === "draft" && doc.status === "in-review") {
-        await apiRejectDoc(doc.id, reason);
+        await apiRejectDoc(project, doc.id, reason);
         toast.success("Document rejected");
       } else {
         // reason: If-Match with the doc's known version closes the same concurrency
@@ -461,7 +475,7 @@ export function DocDetail({
         // edit session is open this stays pinned to the session's start version;
         // outside one it tracks doc.version live, so this is unchanged behavior
         // for the common (non-editing) transition case.
-        await apiPatchDoc(doc.id, { status: toStatus }, { version: editBaseVersion });
+        await apiPatchDoc(project, doc.id, { status: toStatus }, { version: editBaseVersion });
         toast.success(`Status → ${toStatus}`);
       }
       onMutated?.();
@@ -490,7 +504,7 @@ export function DocDetail({
   async function handleLinkAdd(toId: string, type: LinkType): Promise<string | null> {
     setIsLinkPending(true);
     try {
-      await apiCreateLink(doc.id, { to: toId, type });
+      await apiCreateLink(project, doc.id, { to: toId, type });
       onMutated?.();
       return null;
     } catch (err) {
@@ -504,7 +518,7 @@ export function DocDetail({
   async function handleLinkRemove(toId: string): Promise<void> {
     setIsLinkPending(true);
     try {
-      await apiDeleteLink(doc.id, toId);
+      await apiDeleteLink(project, doc.id, toId);
       onMutated?.();
     } catch (err) {
       const message = err instanceof DashboardApiError ? err.message : "Failed to remove link";
@@ -518,7 +532,7 @@ export function DocDetail({
   async function handleDelete(): Promise<void> {
     setIsDeleting(true);
     try {
-      await apiDeleteDoc(doc.id);
+      await apiDeleteDoc(project, doc.id);
       // reason: cancel any pending draft-autosave timer and clear the localStorage
       // draft for this doc — otherwise a stray timer or a stale draft would
       // resurrect content for a document that no longer exists in the active list.
@@ -570,6 +584,8 @@ export function DocDetail({
             isPending={isTransitioning}
           />
           <div className="ml-auto flex items-center gap-2">
+            {/* SPEC-078 T10 R-13: project identity adjacent to every write control below. */}
+            <ProjectIdentityLabel project={project} />
             {/* reason: gated on onDeleted (not onMutated) — Delete has no document
                 left to re-render after success, so it needs the distinct
                 navigate-away callback rather than a cache-invalidation callback.
@@ -673,7 +689,7 @@ export function DocDetail({
             LinksPanel/HistoryTab/AuditTab already rely on). */}
         {doc.status === "in-review" && (
           <div className="mt-3">
-            <AdjudicationBarSection doc={doc} {...(onMutated !== undefined ? { onMutated } : {})} />
+            <AdjudicationBarSection doc={doc} project={project} {...(onMutated !== undefined ? { onMutated } : {})} />
           </div>
         )}
       </header>
@@ -763,21 +779,25 @@ export function DocDetail({
               (content/status/version changed) is exactly the cache invalidation
               onMutated already triggers. Gated the same way as Edit/LinksPanel:
               absent in read-only contexts. SPEC-027 AC-DH-7. */}
-          <HistoryTab docId={doc.id} {...(onMutated !== undefined ? { onRestored: onMutated } : {})} />
+          <HistoryTab
+            docId={doc.id}
+            project={project}
+            {...(onMutated !== undefined ? { onRestored: onMutated } : {})}
+          />
         </section>
       )}
 
       {/* Audit tab (SPEC-033 F3) */}
       {activeTab === "audit" && (
         <section aria-label="Audit trail">
-          <AuditTab docId={doc.id} />
+          <AuditTab docId={doc.id} project={project} />
         </section>
       )}
 
       {/* Evidence tab (SPEC-075) */}
       {activeTab === "evidence" && showEvidenceTab && (
         <section aria-label="Evidence">
-          <EvidenceTab doc={doc} />
+          <EvidenceTab doc={doc} project={project} />
         </section>
       )}
 
@@ -812,6 +832,7 @@ export function DocDetail({
                   <PlanExecution
                     plan={doc}
                     children={navigation.children}
+                    project={project}
                     {...(onNavigate !== undefined ? { onNavigate } : {})}
                   />
                 ) : (
@@ -840,6 +861,7 @@ export function DocDetail({
                   that don't provide QueryClientProvider. SPEC-022 §9. */}
             <LinksPanel
               links={linkEntries}
+              project={project}
               {...(onMutated !== undefined
                 ? { onLinkAdd: handleLinkAdd, onLinkRemove: handleLinkRemove }
                 : {})}

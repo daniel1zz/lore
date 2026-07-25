@@ -154,7 +154,7 @@ describe("TriageQueue", () => {
       const approved = makePendingDoc({ id: "01HDOC00000000000000000003", title: "Just Approved", version: 1 });
 
       mockedGetPending.mockResolvedValue([freshEscalation, staleEscalation, approved]);
-      mockedGetJudgments.mockImplementation(async (docId: string) => {
+      mockedGetJudgments.mockImplementation(async (_project: string | null, docId: string) => {
         if (docId === freshEscalation.id) {
           return {
             latest: makeJudgment({ doc_version: 2, decision: "escalate", blocking_questions: ["Is this right?"] }),
@@ -247,7 +247,7 @@ describe("TriageQueue", () => {
       await user.type(screen.getByLabelText(`Calibration note for ${doc.title}`), "  looks solid  ");
       await user.click(screen.getByText("Approve"));
 
-      await waitFor(() => expect(mockedApprove).toHaveBeenCalledWith(doc.id, { calibrationNote: "looks solid" }));
+      await waitFor(() => expect(mockedApprove).toHaveBeenCalledWith(null, doc.id, { calibrationNote: "looks solid" }));
     });
 
     it("omits calibrationNote entirely when the note is left blank", async () => {
@@ -263,7 +263,7 @@ describe("TriageQueue", () => {
       await user.click(screen.getByText("Review"));
       await user.click(screen.getByText("Reject"));
 
-      await waitFor(() => expect(mockedReject).toHaveBeenCalledWith(doc.id, undefined, {}));
+      await waitFor(() => expect(mockedReject).toHaveBeenCalledWith(null, doc.id, undefined, {}));
     });
   });
 
@@ -388,7 +388,7 @@ describe("TriageQueue", () => {
           version: 1,
         });
         mockedGetPending.mockResolvedValue([freshEscalation, approved]);
-        mockedGetJudgments.mockImplementation(async (docId: string) => {
+        mockedGetJudgments.mockImplementation(async (_project: string | null, docId: string) => {
           if (docId === freshEscalation.id) {
             return { latest: makeJudgment({ doc_version: 2, decision: "escalate" }), history: [] };
           }

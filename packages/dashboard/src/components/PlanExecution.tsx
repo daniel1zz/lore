@@ -49,6 +49,8 @@ export interface PlanExecutionProps {
   plan: DocRecord;
   /** `navigation.children` from `GET /api/docs/:id` — full `DocSummary[]` incl. `.meta`. */
   children: DocSummary[];
+  /** Active project, or `null`/absent for registry-less mode (SPEC-078 T10). */
+  project?: string | null;
   /** Called when a task/document row is clicked. */
   onNavigate?: (docId: string) => void;
 }
@@ -135,10 +137,10 @@ function TaskGroup({
  * @example
  * <PlanExecution plan={doc} children={navigation.children} onNavigate={onNavigate} />
  */
-export function PlanExecution({ plan, children, onNavigate }: PlanExecutionProps): React.ReactElement {
+export function PlanExecution({ plan, children, project = null, onNavigate }: PlanExecutionProps): React.ReactElement {
   const { data } = useQuery({
-    queryKey: queryKeys.scope(null, ["planExecution", "ready", plan.id]),
-    queryFn: () => apiGetReadyReport(plan.id),
+    queryKey: queryKeys.scope(project, ["planExecution", "ready", plan.id]),
+    queryFn: () => apiGetReadyReport(project, plan.id),
   });
 
   const readyRecords: ReadyRecord[] = data !== undefined && data.ok ? data.value.records : [];

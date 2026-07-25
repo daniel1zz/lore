@@ -33,14 +33,17 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { apiGetDoc } from "@/lib/api";
 import { apiApproveDoc, apiRejectDoc, DashboardApiError } from "@/api/mutations";
-import { ISSUE_REPORTS_QUERY_KEY } from "@/lib/issue-reports-query";
+import { issueReportsQueryKey } from "@/lib/issue-reports-query";
 import { queryKeys } from "@/lib/project-api";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import { ProjectIdentityLabel } from "@/components/ProjectIdentityLabel";
 
 export interface IssueDetailProps {
   /** The issue report's task doc ULID or slug. */
   reportId: string;
+  /** Active project, or `null`/absent for registry-less mode (SPEC-078 T10). */
+  project?: string | null;
   /** Called after a successful approve or reject. */
   onAdjudicated?: () => void;
 }
@@ -69,26 +72,26 @@ function FieldRow({ label, value }: FieldRowProps): React.ReactElement {
  * @example
  * <IssueDetail reportId={id} onAdjudicated={() => navigate({ to: '/issues' })} />
  */
-export function IssueDetail({ reportId, onAdjudicated }: IssueDetailProps): React.ReactElement {
+export function IssueDetail({ reportId, project = null, onAdjudicated }: IssueDetailProps): React.ReactElement {
   const queryClient = useQueryClient();
   const [rejectReason, setRejectReason] = useState("");
   const [showRejectForm, setShowRejectForm] = useState(false);
   const [submitting, setSubmitting] = useState<"approve" | "reject" | null>(null);
 
   const { data, isLoading, error } = useQuery({
-    queryKey: queryKeys.scope(null, ["doc", reportId]),
-    queryFn: () => apiGetDoc(reportId),
+    queryKey: queryKeys.scope(project, ["doc", reportId]),
+    queryFn: () => apiGetDoc(project, reportId),
   });
 
   async function invalidateAfterAdjudicate(): Promise<void> {
-    await queryClient.invalidateQueries({ queryKey: queryKeys.scope(null, ["doc", reportId]) });
-    await queryClient.invalidateQueries({ queryKey: ISSUE_REPORTS_QUERY_KEY });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.scope(project, ["doc", reportId]) });
+    await queryClient.invalidateQueries({ queryKey: issueReportsQueryKey(project) });
   }
 
   async function handleApprove(): Promise<void> {
     setSubmitting("approve");
     try {
-      await apiApproveDoc(reportId);
+      await apiApproveDoc(project, reportId);
       toast.success("Issue report approved");
       await invalidateAfterAdjudicate();
       onAdjudicated?.();
@@ -105,7 +108,7 @@ export function IssueDetail({ reportId, onAdjudicated }: IssueDetailProps): Reac
 
     setSubmitting("reject");
     try {
-      await apiRejectDoc(reportId, trimmedReason);
+      await apiRejectDoc(project, reportId, trimmedReason);
       toast.success("Issue report rejected");
       await invalidateAfterAdjudicate();
       onAdjudicated?.();
@@ -186,6 +189,7 @@ export function IssueDetail({ reportId, onAdjudicated }: IssueDetailProps): Reac
       <div className="rounded-lg border p-4 space-y-3">
         <h2 className="text-sm font-semibold">Adjudicate</h2>
         <div className="flex items-center gap-2">
+          <ProjectIdentityLabel project={project} />
           <button
             type="button"
             className="text-sm px-3 py-1.5 bg-primary text-primary-foreground rounded hover:bg-primary/90 disabled:opacity-50"
