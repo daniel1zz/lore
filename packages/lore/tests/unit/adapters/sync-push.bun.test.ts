@@ -41,6 +41,11 @@ import { MIGRATION_004_SQL } from "../../../src/store/migrations/migration-004.j
 import { MIGRATION_005_SQL } from "../../../src/store/migrations/migration-005.js";
 import { MIGRATION_006_SQL } from "../../../src/store/migrations/migration-006.js";
 import { MIGRATION_007_SQL } from "../../../src/store/migrations/migration-007.js";
+import {
+  MIGRATION_008_ADD_COLUMNS_SQL,
+  MIGRATION_008_FTS_REBUILD_SQL,
+} from "../../../src/store/migrations/migration-008.js";
+import { computeFtsShadowValues } from "../../../src/store/store-shared.js";
 
 // ─── Fixture Helpers ─────────────────────────────────────────────────────────
 
@@ -79,9 +84,14 @@ function makeDoc(overrides: Partial<DocRecord> = {}): DocRecord {
 // SQLiteStore.runMigrations() applies internally) to the remote fixture DB.
 // This mirrors the real TursoStore setup but bypasses its constructor logic.
 // Every new migration.ts added to src/store/migrations/ MUST get a matching
-// `await client.executeMultiple(MIGRATION_00N_SQL)` line here — the parity
-// guard below turns a forgotten line into a loud fixture-setup failure
-// instead of a wall of confusing per-row INSERT/column-mismatch errors.
+// step here: a pure-SQL migration (like 001-007) needs one
+// `await client.executeMultiple(MIGRATION_00N_SQL)` line; a migration with a
+// JS-level transform phase (like 008's CJK bigram backfill) needs its full
+// SQL + JS-loop sequence mirrored from turso-store.ts's initSchema() (the
+// real production TursoStore handling for that migration), not just a single
+// executeMultiple call. The parity guard below turns a forgotten/incomplete
+// step into a loud fixture-setup failure instead of a wall of confusing
+// per-row INSERT/column-mismatch errors.
 
 async function applyMigrationsToClient(client: Client, localStore: SQLiteStore): Promise<void> {
   await client.executeMultiple(MIGRATION_001_SQL);
@@ -91,6 +101,45 @@ async function applyMigrationsToClient(client: Client, localStore: SQLiteStore):
   await client.executeMultiple(MIGRATION_005_SQL);
   await client.executeMultiple(MIGRATION_006_SQL);
   await client.executeMultiple(MIGRATION_007_SQL);
+
+  // migration-008 is a THREE-PHASE sequence (ADD COLUMN -> JS per-row CJK
+  // bigram backfill -> docs_fts drop/recreate + rebuild), NOT a single
+  // self-contained SQL string like migrations 001-007 — see
+  // migration-008.ts's module JSDoc. This mirrors turso-store.ts's
+  // initSchema() handling verbatim (same client.transaction("write")
+  // interactive-transaction API, same tx.executeMultiple/tx.execute calls),
+  // since this fixture stands in for the real TursoStore setup.
+  const tx008 = await client.transaction("write");
+  try {
+    await tx008.executeMultiple(MIGRATION_008_ADD_COLUMNS_SQL);
+
+    const rs008 = await tx008.execute("SELECT id, title, content, tags FROM docs");
+    for (const row of rs008.rows) {
+      const shadow = computeFtsShadowValues(
+        String(row["title"]),
+        String(row["content"]),
+        String(row["tags"]),
+      );
+      await tx008.execute({
+        sql: "UPDATE docs SET fts_title = ?, fts_content = ?, fts_tags = ? WHERE id = ?",
+        args: [shadow.fts_title, shadow.fts_content, shadow.fts_tags, String(row["id"])],
+      });
+    }
+
+    await tx008.executeMultiple(MIGRATION_008_FTS_REBUILD_SQL);
+    await tx008.commit();
+  } catch (e) {
+    try {
+      await tx008.rollback();
+    } catch {
+      // reason: rollback throws only when the transaction is already
+      // closed — safe to ignore, `e` below is what the caller needs
+      // (mirrors turso-store.ts's identical rollback guard).
+    }
+    throw e;
+  } finally {
+    tx008.close();
+  }
 
   // ─── Parity guard ────────────────────────────────────────────────────────
   // Assert the remote fixture's PRAGMA user_version matches the REAL
