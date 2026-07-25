@@ -11,6 +11,7 @@
 // and the `lint:api-factory-fixture` script (package.json) that proves this
 // rule actually fires on a deliberate violation.
 import tsParser from "@typescript-eslint/parser";
+import reactHooks from "eslint-plugin-react-hooks";
 
 /** @type {import("eslint").Rule.RuleModule} */
 const noRawApiLiteralRule = {
@@ -82,9 +83,24 @@ export default [
         ecmaFeatures: { jsx: true },
       },
     },
-    plugins: { "dashboard-local": dashboardLocalPlugin },
+    plugins: {
+      "dashboard-local": dashboardLocalPlugin,
+      "react-hooks": reactHooks,
+    },
     rules: {
       "dashboard-local/no-raw-api-literal": "error",
+      // reason: deliberately narrowed to the classic hooks-correctness pair
+      // (not `reactHooks.configs.flat["recommended-latest"]`, which as of
+      // v7 also bundles ~15 React-Compiler-derived rules — static-components,
+      // purity, immutability, set-state-in-effect, etc. — that were never
+      // evaluated against this codebase). Registering only these two closes
+      // the pre-existing "Definition for rule 'react-hooks/exhaustive-deps'
+      // was not found" gap (the plugin was never registered, so every
+      // `// eslint-disable-next-line react-hooks/exhaustive-deps` comment in
+      // this package failed to resolve) without adopting an unreviewed rule
+      // set as a side effect.
+      "react-hooks/rules-of-hooks": "error",
+      "react-hooks/exhaustive-deps": "error",
     },
   },
 ];

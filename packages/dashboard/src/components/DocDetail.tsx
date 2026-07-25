@@ -349,7 +349,7 @@ export function DocDetail({
   // primary guarantee and does not depend on this callback existing.
   useEffect(() => {
     onEditingChange?.(isEditing);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: fire ONLY on isEditing transitions, not on onEditingChange identity churn (optional broadcast callback, see reason above)
   }, [isEditing]);
 
   // ── Conflict modal state ────────────────────────────────────────────────────

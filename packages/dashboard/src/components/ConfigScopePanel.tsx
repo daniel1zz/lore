@@ -265,7 +265,7 @@ export function ConfigScopePanel<C>({
   // Optional/no-op when the caller doesn't wire it.
   useEffect(() => {
     onEditingChange?.(isEditing);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: fire ONLY on isEditing transitions, not on onEditingChange identity churn (optional broadcast callback, see reason above)
   }, [isEditing]);
 
   const { deniedPaths, rows } = useMemo(() => {
@@ -376,7 +376,7 @@ export function ConfigScopePanel<C>({
         label: fieldSpecs.find((s) => s.path === path)?.label ?? path,
         mine: getByPath(draft, path),
       }));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: recompute ONLY when a NEW conflict object arrives, not on every draft keystroke (baseline/draft are frozen for the conflict's lifetime, see reason above)
   }, [conflict]);
 
   let lastSection = "";
