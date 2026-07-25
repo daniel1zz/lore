@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "f2d5cc02d3594176f69f5a7709331a601e9515bd07d3fa89c57c1306f692d66a",
+  tree_digest: "1b49287d5efc56bda58f68c577088b2b17047ae9f8fa8a5d93fc4b9ac31af4bf",
   entries: [
   { path: "agents/lore-explorer.md", kind: "agent", ownership: "managed", sha256: "18b80554da11704960849d5b68ea9ef763bdc88315ebe89acc26a1e86d7e5629" },
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "324340b8173cae8e3133968185fdf882b81daee2115c988f7506e1bc968a5364" },
@@ -60,7 +60,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "hooks/pre-bash-git-safety-gate.mjs", kind: "hook", ownership: "managed", sha256: "fbe99de7153905ac178ec8b14f46812a00603b2aec69e53b212fb50b85b0c50e" },
   { path: "hooks/pre-no-general-agent-gate.mjs", kind: "hook", ownership: "managed", sha256: "e238cfcf73ba5794f3decbcd0efccfc8869ce0c593032923810a0ddd41cd3b1b" },
   { path: "hooks/pre-subagent-gate.mjs", kind: "hook", ownership: "managed", sha256: "7623ae3ebe4780af8bbaaee8734649d6a8307c2aa4cc0f2a3ba326afa290aa8f" },
-  { path: "hooks/session-start-resume.mjs", kind: "hook", ownership: "managed", sha256: "fe88fb0643cf5e52d706ccd835d57693a9c9216c5ab822ab3c10563f10728a37" },
+  { path: "hooks/session-start-resume.mjs", kind: "hook", ownership: "managed", sha256: "c7f4fe62cb026387dd7ca20e5046ee660a70e2cd7feee60a40b3ffc010b4e4ad" },
   { path: "hooks/stop-doc-sync.mjs", kind: "hook", ownership: "managed", sha256: "c7ca05c553446b1174839832989014741e8af9bd1c9c5f89aedb4b19a6836061" },
   { path: "hooks/subagent-context.mjs", kind: "hook", ownership: "managed", sha256: "03b512da45147aab2bcac2bb441b7e066b22a4e2e2df781a0b625c7963176587" },
   { path: "hooks/subagent-stop-commit-guard.mjs", kind: "hook", ownership: "managed", sha256: "19de55e36e53490b8386acf19de9efef4c89f96a8d6d7ac1160b60156bd201d8" },

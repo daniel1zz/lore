@@ -439,6 +439,38 @@ const VerifyConfigSchema = z
 /** Trusted-runner verify config section. Source: SPEC-039 §2 D9; §M2. */
 export type VerifyConfig = z.infer<typeof VerifyConfigSchema>;
 
+// ─── Setup Section Schema ───────────────────────────────────────────────────
+
+/**
+ * `lore setup` distribution-convergence configuration (SPEC-076 §C6, D5) —
+ * currently a single boolean switch consulted by the session-start hook's
+ * Phase F cache-first freshness advisory (`assets/hooks/session-start-resume.mjs`).
+ *
+ * @invariant `check_reminder` default `true` mirrors D5's "3-5 person single
+ *   distributor" scope decision to reject a three-state auto/reminder/disabled
+ *   config surface in favor of ONE boolean kill-switch — the second, sharper
+ *   switch is the `LORE_SETUP_NO_CHECK=1` env var, checked by the hook BEFORE
+ *   any cache read at all (env always wins, config is the softer opt-out).
+ * @invariant Additive/self-contained — see the hook's own Phase F header
+ *   comment for the documented Scope-Alt on WHY the installed standalone hook
+ *   script (a plain `node <path>` invocation with no guaranteed local
+ *   `node_modules`, hence no `yaml` parser reachable) does not itself read
+ *   `.lore/config.yaml` to consult this field today. This schema addition is
+ *   the config-surface half of SPEC-076's `setup.check_reminder` deliverable;
+ *   a future CLI-side consumer (`lore setup --check`, out of this task's file
+ *   anchors — see `setup-check.ts`) is the intended enforcement point once
+ *   that module is not concurrently claimed by a sibling task.
+ */
+const SetupConfigSchema = z
+  .object({
+    /** `false` suppresses the session-start hook's freshness advisory entirely. Default: true. */
+    check_reminder: z.boolean().default(true),
+  })
+  .strict();
+
+/** `lore setup` distribution-convergence config section. Source: SPEC-076 §C6, D5. */
+export type SetupConfig = z.infer<typeof SetupConfigSchema>;
+
 // ─── Root Config Schema ────────────────────────────────────────────────────
 
 /**
@@ -499,6 +531,12 @@ export const LoreConfigSchema = z
      * fallback, since configuring this section IS the consent act.
      */
     feedback: FeedbackConfigSchema.optional(),
+    /**
+     * `lore setup` distribution-convergence configuration (SPEC-076 §C6, D5).
+     * When absent, `resolveSetupCheckReminderEnabled` returns the schema
+     * default (`true` — advisory enabled).
+     */
+    setup: SetupConfigSchema.optional(),
   })
   .strict();
 
@@ -860,6 +898,26 @@ export function resolveAttestationMinRatio(config: LoreConfig | undefined): numb
  */
 export function resolveRequirementQuantifiableEnabled(config: LoreConfig | undefined): boolean {
   return config?.workflow?.requirement_quantifiable?.enabled !== false;
+}
+
+/**
+ * Resolve whether the session-start hook's Phase F freshness advisory is
+ * enabled, per `setup.check_reminder` (SPEC-076 §C6, D5). Absence of the
+ * whole config or the `setup` section both mean "enabled" — only an EXPLICIT
+ * `check_reminder: false` suppresses the advisory. Mirrors {@link
+ * resolveRequirementQuantifiableEnabled}'s full-optional-chaining shape
+ * (`!== false`, not the `??`-onto-a-parsed-default shape some other
+ * resolvers use) since this, too, may be called with a hand-built test
+ * fixture whose `LoreConfig` was never routed through `LoreConfigSchema.parse`.
+ *
+ * @param config - Parsed LoreConfig, or undefined when no config file was loaded
+ * @returns `false` iff `setup.check_reminder === false`; `true` otherwise
+ * @example
+ *   resolveSetupCheckReminderEnabled(undefined) // => true
+ *   resolveSetupCheckReminderEnabled({ ..., setup: { check_reminder: false } }) // => false
+ */
+export function resolveSetupCheckReminderEnabled(config: LoreConfig | undefined): boolean {
+  return config?.setup?.check_reminder !== false;
 }
 
 // ─── Pure Parse Helpers ────────────────────────────────────────────────────
