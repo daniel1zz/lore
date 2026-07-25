@@ -348,6 +348,170 @@ export function wrapStoreError(e: unknown): Result<never, LoreError> {
   return err({ code: "STORE_ERROR", message });
 }
 
+// ─── CJK bigram expansion for FTS5 (unicode61 contiguous-run limitation) ───
+//
+// unicode61 (FTS5's default tokenizer) treats CJK Unified Ideographs as
+// token characters, so a contiguous run with no ASCII/whitespace separator
+// tokenizes as ONE whole-run token — "量化交易策略" indexes as a single
+// 6-char token, not the 2-char words a Chinese query actually types. A
+// trigram tokenizer was evaluated and REJECTED (orchestrator decision,
+// task-fts5-cjk-search-returns-zero-hits-unicode61-tokenizes): it cannot
+// match a 2-char query, and 2-char words are the dominant Chinese query
+// shape. Overlapping CJK BIGRAMS, expanded into separate space-delimited
+// tokens BEFORE unicode61 ever sees the text, fix this without touching the
+// tokenizer: "交易策略" → "交易 易策 策略" indexes as three real tokens,
+// each independently matchable.
+
+/**
+ * CJK Unified Ideographs range (U+4E00–U+9FFF) — mirrors `@lore/core`'s
+ * `CJK_CHAR_PATTERN` (`packages/core/src/slugify-node.ts`, SPEC-068)
+ * character-for-character. Deliberately duplicated rather than imported:
+ * that constant lives behind the `@lore/core/node` subpath (grouped there
+ * because its sibling export `getTransliterateCjk` pulls in the ~931KB
+ * `pinyin-pro` dependency), and the store layer — bun-only already, but with
+ * no other reason to reach across that subpath boundary — has nothing to
+ * gain from taking on that reachability. If the upstream range ever changes,
+ * this must change with it; there is no automated parity check between the
+ * two, so a maintainer touching one must know to check the other.
+ */
+const CJK_RUN_PATTERN = /[一-鿿]+/g;
+
+/**
+ * Splits a maximal CJK run into overlapping bigrams: `"交易策略"` (4 chars)
+ * → `["交易", "易策", "策略"]` (3 bigrams, `run.length - 1`). The overlap is
+ * what preserves contiguity information — the SAME sequence of adjacent
+ * pairs is produced whether this runs over a document (for indexing) or a
+ * query piece (for phrase-matching), so a query phrase built from a
+ * sub-sequence of a document's bigrams is guaranteed to appear as a
+ * consecutive run in that document's index. Pure/no side effects. Not
+ * exported — callers go through {@link expandCjkForFts} or the query-side
+ * expansion in {@link escapeFtsQuery}, both of which handle the
+ * run.length === 1 case (a lone CJK char never becomes a bigram) before
+ * reaching this helper.
+ */
+function toBigrams(run: string): string[] {
+  const bigrams: string[] = [];
+  for (let i = 0; i < run.length - 1; i++) {
+    bigrams.push(run.slice(i, i + 2));
+  }
+  return bigrams;
+}
+
+/**
+ * Expands every maximal contiguous CJK run of length ≥2 in `text` into
+ * space-separated overlapping bigrams, in place — non-CJK spans (ASCII
+ * words, punctuation, whitespace, other scripts) and lone (length-1) CJK
+ * runs pass through byte-identical. This is the SHADOW-COLUMN transform:
+ * `SQLiteStore`/`TursoStore` compute `expandCjkForFts(title|content|tagsJson)`
+ * at every doc INSERT/UPDATE and persist the result into the `fts_title` /
+ * `fts_content` / `fts_tags` columns migration-008 adds to `docs` — those
+ * shadow columns, not the real `title`/`content`/`tags`, are what
+ * `docs_fts`'s external-content binding indexes (see migration-008.ts's
+ * module JSDoc for why the FTS5 table itself had to be redefined against
+ * them, not just fed different trigger values).
+ *
+ * A pure-ASCII `text` is returned UNCHANGED (no CJK run exists to expand),
+ * which is what keeps ASCII search/ranking byte-identical to pre-migration
+ * behavior even though every doc now carries these shadow columns.
+ *
+ * @param text - Raw title, content, or JSON-stringified tags-array text.
+ * @returns `text` with every CJK run of length ≥2 bigram-expanded.
+ * @example
+ *   expandCjkForFts("量化交易策略")        // => "量化 化交 交易 易策 策略"
+ *   expandCjkForFts("SPEC-078 多项目支持") // => "SPEC-078 多项 项目 目支 支持"
+ *   expandCjkForFts("交")                  // => "交" (length-1 run, unchanged)
+ *   expandCjkForFts("append-only")         // => "append-only" (no CJK, unchanged)
+ */
+export function expandCjkForFts(text: string): string {
+  if (text === "") return text;
+  return text.replace(CJK_RUN_PATTERN, (run) =>
+    run.length === 1 ? run : toBigrams(run).join(" "),
+  );
+}
+
+/**
+ * Computes the three `fts_*` shadow-column values that MUST accompany every
+ * `docs` row INSERT/UPDATE in both `SQLiteStore` and `TursoStore` — see
+ * {@link expandCjkForFts}'s JSDoc for the mechanism. Centralized here so the
+ * ~6 write sites across both stores (insert/update × conditional/
+ * unconditional × provenance-wrapped) compute this identically; a call site
+ * that skips this produces silently-stale CJK search for whatever it wrote.
+ *
+ * `tagsJson` is the ALREADY-`JSON.stringify`-d `tags` column value — both
+ * stores compute that once for the real `tags` column already; pass the
+ * SAME string here rather than re-stringifying. This mirrors a pre-existing
+ * (unrelated to this change) property of the FTS5 setup: the `tags` shadow
+ * has always indexed the raw JSON array text, brackets/quotes and all
+ * (unicode61 treats them as token separators, so this has always
+ * effectively indexed each tag word) — this function preserves that
+ * behavior for the CJK-expanded copy rather than redesigning it.
+ *
+ * @param title - The doc's `title` column value.
+ * @param content - The doc's `content` column value.
+ * @param tagsJson - The doc's `tags` column value (JSON-stringified array).
+ * @returns The three shadow-column values, ready to bind into the SQL INSERT/UPDATE.
+ */
+export function computeFtsShadowValues(
+  title: string,
+  content: string,
+  tagsJson: string,
+): { fts_title: string; fts_content: string; fts_tags: string } {
+  return {
+    fts_title: expandCjkForFts(title),
+    fts_content: expandCjkForFts(content),
+    fts_tags: expandCjkForFts(tagsJson),
+  };
+}
+
+/**
+ * Wraps `s` as one FTS5 double-quoted phrase, doubling any embedded `"`
+ * (FTS5 phrase-escape). Shared by both the plain (byte-identical-to-legacy)
+ * ASCII path and the CJK bigram-phrase path in {@link escapeFtsQuery} below
+ * so the quoting rule is written exactly once.
+ */
+function quoteFtsPhrase(s: string): string {
+  return `"${s.replaceAll('"', '""')}"`;
+}
+
+/**
+ * FTS5-ready expression for ONE whitespace-delimited query piece (the unit
+ * {@link escapeFtsQuery} splits `raw` into). Walks `piece` run-by-run,
+ * alternating non-CJK spans (quoted phrases, byte-identical to the pre-CJK
+ * escaping rule) and CJK spans:
+ *   - a length-1 CJK run becomes an UNQUOTED prefix bareword (`交*`) — FTS5
+ *     prefix syntax is explicitly NOT honored inside quotes (the tokenizer
+ *     would consume the literal `*`), and a single character only ever
+ *     appears in the bigram index as the leading or trailing half of some
+ *     bigram token, so a prefix match is what makes it findable at all;
+ *   - a length-≥2 CJK run becomes ONE quoted phrase of its space-joined
+ *     bigrams (`"量化 化交 交易"`, same {@link toBigrams} used on the
+ *     document side) — FTS5 phrase-query semantics (consecutive tokens, in
+ *     order) exactly recovers "these bigrams appeared contiguously", which
+ *     is the whole reason the document-side expansion overlaps.
+ *
+ * A `piece` with NO CJK characters exercises the loop zero times and falls
+ * straight to the trailing "remainder" branch, producing
+ * `quoteFtsPhrase(piece)` — the EXACT pre-CJK expression. This is what pins
+ * pure-ASCII query output byte-identical to the pre-change implementation.
+ */
+function expandFtsQueryPiece(piece: string): string {
+  const segments: string[] = [];
+  let consumed = 0;
+  for (const match of piece.matchAll(CJK_RUN_PATTERN)) {
+    const run = match[0];
+    const runStart = match.index;
+    if (runStart > consumed) {
+      segments.push(quoteFtsPhrase(piece.slice(consumed, runStart)));
+    }
+    segments.push(run.length === 1 ? `${run}*` : quoteFtsPhrase(toBigrams(run).join(" ")));
+    consumed = runStart + run.length;
+  }
+  if (consumed < piece.length) {
+    segments.push(quoteFtsPhrase(piece.slice(consumed)));
+  }
+  return segments.join(" ");
+}
+
 // ─── FTS5 query escape ─────────────────────────────────────────────────────
 
 /**
@@ -356,15 +520,19 @@ export function wrapStoreError(e: unknown): Result<never, LoreError> {
  * Algorithm:
  *   1. Trim input. If empty, return "".
  *   2. Split on whitespace (one or more) into pieces.
- *   3. For each piece, replace internal `"` with `""` (FTS5 phrase escape) and
- *      wrap in `"…"`.
- *   4. Join pieces with single spaces.
+ *   3. Each piece is expanded via {@link expandFtsQueryPiece} — pure-ASCII
+ *      pieces reduce to the ORIGINAL rule (replace internal `"` with `""`,
+ *      wrap in `"…"`); pieces containing a CJK run additionally emit a
+ *      bigram phrase (or prefix bareword for a lone CJK char) per the CJK
+ *      bigram-shadow-index scheme — see {@link expandCjkForFts}'s JSDoc.
+ *   4. Join pieces (and, within a mixed piece, its CJK/non-CJK segments)
+ *      with single spaces.
  *
- * Semantics: the resulting expression is an AND of phrase queries (FTS5 default
- * boolean operator between bare phrases is AND). Each phrase is FTS5-tokenized
- * internally — so `"append-only"` matches docs containing the consecutive
- * sequence "append" then "only", which is what users with a hyphenated term in
- * mind almost always want.
+ * Semantics: the resulting expression is an AND of phrase/prefix terms (FTS5
+ * default boolean operator between bare expressions is AND). Each ASCII
+ * phrase is FTS5-tokenized internally — so `"append-only"` matches docs
+ * containing the consecutive sequence "append" then "only", which is what
+ * users with a hyphenated term in mind almost always want.
  *
  * Returns "" only when input was empty or whitespace-only. Callers MUST treat
  * empty input as a no-results query and short-circuit BEFORE passing to FTS5
@@ -383,22 +551,18 @@ export function wrapStoreError(e: unknown): Result<never, LoreError> {
  *   escapeFtsQuery('he said "hi"')        === '"he" "said" """hi"""'
  *   escapeFtsQuery("foo*")                === '"foo*"'
  *   escapeFtsQuery("(append)")            === '"(append)"'
+ *   escapeFtsQuery("交易")                === '"交易"'   (2-char CJK run → 1 bigram phrase)
+ *   escapeFtsQuery("量化交易")            === '"量化 化交 交易"'
+ *   escapeFtsQuery("交")                  === '交*'      (lone CJK char → prefix bareword)
  *
- * Source: SPEC-013 §3.5 FTS5-special-token resilience
+ * Source: SPEC-013 §3.5 FTS5-special-token resilience; CJK bigram extension
+ * per task-fts5-cjk-search-returns-zero-hits-unicode61-tokenizes.
  */
 export function escapeFtsQuery(raw: string): string {
   const trimmed = raw.trim();
   if (trimmed === "") return "";
 
-  // reason: FTS5 phrase quoting: wrap each whitespace-delimited piece in double
-  // quotes, and escape any embedded double-quote by doubling it (""). This
-  // neutralises all FTS5 operators (hyphen, parens, colon, star, OR, AND, NOT)
-  // because the tokenizer processes the string inside the phrase, not the FTS5
-  // query parser. See SQLite FTS5 docs §3.1 (phrase queries).
   const pieces = trimmed.split(/\s+/);
-  const escaped = pieces.map((piece) => {
-    const inner = piece.replaceAll('"', '""');
-    return `"${inner}"`;
-  });
+  const escaped = pieces.map((piece) => expandFtsQueryPiece(piece));
   return escaped.join(" ");
 }

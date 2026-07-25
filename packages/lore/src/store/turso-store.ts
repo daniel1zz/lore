@@ -20,6 +20,10 @@ import { MIGRATION_004_SQL } from "./migrations/migration-004.js";
 import { MIGRATION_005_SQL } from "./migrations/migration-005.js";
 import { MIGRATION_006_SQL } from "./migrations/migration-006.js";
 import { MIGRATION_007_SQL } from "./migrations/migration-007.js";
+import {
+  MIGRATION_008_ADD_COLUMNS_SQL,
+  MIGRATION_008_FTS_REBUILD_SQL,
+} from "./migrations/migration-008.js";
 import type {
   AuditEntry,
   CalibrationRecord,
@@ -50,6 +54,7 @@ import type {
   UpdateOpts,
 } from "./store-interface.js";
 import {
+  computeFtsShadowValues,
   escapeFtsQuery,
   rowToAuditEntry,
   rowToCalibrationRecordWithPromptVersion,
@@ -295,6 +300,56 @@ export class TursoStore implements StoreInterface {
       if (currentVersion < 7) {
         await this.client.executeMultiple(MIGRATION_007_SQL);
       }
+
+      if (currentVersion < 8) {
+        // reason: migration-008 is a THREE-PHASE sequence (ADD COLUMN → JS
+        // per-row CJK bigram backfill → docs_fts drop/recreate + rebuild) —
+        // see migration-008.ts's module JSDoc. Unlike migrations 001-007
+        // (single self-contained `executeMultiple` call), the JS backfill
+        // loop must run BETWEEN the two SQL phases and INSIDE the same
+        // atomic unit as both — `client.transaction("write")` is the SAME
+        // interactive-transaction API this file's `insertWithProvenance`/
+        // `updateWithProvenance` already use (see this file's own "BUG-002"
+        // section comment for why it was chosen over `batch`/a fallback: a
+        // real `Transaction` object with execute/executeMultiple/commit/
+        // rollback/close, no version-gap risk against the installed client).
+        const tx = await this.client.transaction("write");
+        try {
+          await tx.executeMultiple(MIGRATION_008_ADD_COLUMNS_SQL);
+
+          const rs = await tx.execute("SELECT id, title, content, tags FROM docs");
+          for (const row of rs.rows) {
+            const shadow = computeFtsShadowValues(
+              rowStr(row, "title"),
+              rowStr(row, "content"),
+              rowStr(row, "tags"),
+            );
+            await tx.execute({
+              sql: "UPDATE docs SET fts_title = ?, fts_content = ?, fts_tags = ? WHERE id = ?",
+              args: [
+                shadow.fts_title,
+                shadow.fts_content,
+                shadow.fts_tags,
+                rowStr(row, "id"),
+              ] as InValue[],
+            });
+          }
+
+          await tx.executeMultiple(MIGRATION_008_FTS_REBUILD_SQL);
+          await tx.commit();
+        } catch (e) {
+          try {
+            await tx.rollback();
+          } catch {
+            // reason: rollback throws only when the transaction is already
+            // closed — safe to ignore, `e` below is what the caller needs
+            // (mirrors insertWithProvenance's identical rollback guard).
+          }
+          throw e;
+        } finally {
+          tx.close();
+        }
+      }
     })();
 
     return this._schemaInitPromise;
@@ -311,12 +366,17 @@ export class TursoStore implements StoreInterface {
     try {
       await this.ensureReady();
 
+      const tagsJson = JSON.stringify(doc.tags);
+      // reason: fts_title/fts_content/fts_tags (migration-008) are the CJK
+      // bigram shadow columns docs_fts actually indexes — every INSERT MUST
+      // compute and persist them, mirroring SQLiteStore.insertDocSync.
+      const shadow = computeFtsShadowValues(doc.title, doc.content, tagsJson);
       await this.client.execute({
         sql: `INSERT INTO docs
                (id, slug, type, role, title, status, priority, content,
                 parent_id, extra, tags, version, created_at, updated_at,
-                created_by, deleted_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                created_by, deleted_at, fts_title, fts_content, fts_tags)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [
           doc.id,
           doc.slug,
@@ -328,12 +388,15 @@ export class TursoStore implements StoreInterface {
           doc.content,
           doc.parent_id ?? null,
           JSON.stringify(doc.extra),
-          JSON.stringify(doc.tags),
+          tagsJson,
           doc.version,
           doc.created_at,
           doc.updated_at,
           doc.created_by,
           doc.deleted_at ?? null,
+          shadow.fts_title,
+          shadow.fts_content,
+          shadow.fts_tags,
         ] as InValue[],
       });
 
@@ -535,6 +598,11 @@ export class TursoStore implements StoreInterface {
         ...patch,
         id: current.id, // id is immutable
       };
+      const updatedTagsJson = JSON.stringify(updated.tags);
+      // reason: same shadow-column obligation as insert() — an UPDATE that
+      // skips this leaves fts_title/fts_content/fts_tags reflecting the
+      // PRE-patch text (mirrors SQLiteStore.updateDocSync).
+      const shadow = computeFtsShadowValues(updated.title, updated.content, updatedTagsJson);
 
       if (opts?.expected_version !== undefined) {
         // Conditional UPDATE: WHERE id = ? AND version = ?
@@ -543,7 +611,8 @@ export class TursoStore implements StoreInterface {
                  slug = ?, type = ?, role = ?, title = ?, status = ?,
                  priority = ?, content = ?, parent_id = ?, extra = ?,
                  tags = ?, version = ?, created_at = ?, updated_at = ?,
-                 created_by = ?, deleted_at = ?
+                 created_by = ?, deleted_at = ?, fts_title = ?, fts_content = ?,
+                 fts_tags = ?
                WHERE id = ? AND version = ?`,
           args: [
             updated.slug,
@@ -555,12 +624,15 @@ export class TursoStore implements StoreInterface {
             updated.content,
             updated.parent_id ?? null,
             JSON.stringify(updated.extra),
-            JSON.stringify(updated.tags),
+            updatedTagsJson,
             updated.version,
             updated.created_at,
             updated.updated_at,
             updated.created_by,
             updated.deleted_at ?? null,
+            shadow.fts_title,
+            shadow.fts_content,
+            shadow.fts_tags,
             id,
             opts.expected_version,
           ] as InValue[],
@@ -596,7 +668,8 @@ export class TursoStore implements StoreInterface {
                slug = ?, type = ?, role = ?, title = ?, status = ?,
                priority = ?, content = ?, parent_id = ?, extra = ?,
                tags = ?, version = ?, created_at = ?, updated_at = ?,
-               created_by = ?, deleted_at = ?
+               created_by = ?, deleted_at = ?, fts_title = ?, fts_content = ?,
+               fts_tags = ?
              WHERE id = ?`,
         args: [
           updated.slug,
@@ -608,12 +681,15 @@ export class TursoStore implements StoreInterface {
           updated.content,
           updated.parent_id ?? null,
           JSON.stringify(updated.extra),
-          JSON.stringify(updated.tags),
+          updatedTagsJson,
           updated.version,
           updated.created_at,
           updated.updated_at,
           updated.created_by,
           updated.deleted_at ?? null,
+          shadow.fts_title,
+          shadow.fts_content,
+          shadow.fts_tags,
           id,
         ] as InValue[],
       });
@@ -674,12 +750,17 @@ export class TursoStore implements StoreInterface {
     await this.ensureReady();
     const tx = await this.client.transaction("write");
     try {
+      const tagsJson = JSON.stringify(doc.tags);
+      // reason: same shadow-column obligation as insert() — mirrors
+      // SQLiteStore.insertDocSync (insertWithProvenance there also delegates
+      // to the same private sync helper insert() uses).
+      const shadow = computeFtsShadowValues(doc.title, doc.content, tagsJson);
       await tx.execute({
         sql: `INSERT INTO docs
                (id, slug, type, role, title, status, priority, content,
                 parent_id, extra, tags, version, created_at, updated_at,
-                created_by, deleted_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                created_by, deleted_at, fts_title, fts_content, fts_tags)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [
           doc.id,
           doc.slug,
@@ -691,12 +772,15 @@ export class TursoStore implements StoreInterface {
           doc.content,
           doc.parent_id ?? null,
           JSON.stringify(doc.extra),
-          JSON.stringify(doc.tags),
+          tagsJson,
           doc.version,
           doc.created_at,
           doc.updated_at,
           doc.created_by,
           doc.deleted_at ?? null,
+          shadow.fts_title,
+          shadow.fts_content,
+          shadow.fts_tags,
         ] as InValue[],
       });
 
@@ -784,6 +868,11 @@ export class TursoStore implements StoreInterface {
         ...patch,
         id: current.id, // id is immutable
       };
+      const updatedTagsJson = JSON.stringify(updated.tags);
+      // reason: same shadow-column obligation as update() — mirrors
+      // SQLiteStore.updateDocSync (updateWithProvenance there also
+      // delegates to the same private sync helper update() uses).
+      const shadow = computeFtsShadowValues(updated.title, updated.content, updatedTagsJson);
 
       if (opts?.expected_version !== undefined) {
         const updateRs = await tx.execute({
@@ -791,7 +880,8 @@ export class TursoStore implements StoreInterface {
                  slug = ?, type = ?, role = ?, title = ?, status = ?,
                  priority = ?, content = ?, parent_id = ?, extra = ?,
                  tags = ?, version = ?, created_at = ?, updated_at = ?,
-                 created_by = ?, deleted_at = ?
+                 created_by = ?, deleted_at = ?, fts_title = ?, fts_content = ?,
+                 fts_tags = ?
                WHERE id = ? AND version = ?`,
           args: [
             updated.slug,
@@ -803,12 +893,15 @@ export class TursoStore implements StoreInterface {
             updated.content,
             updated.parent_id ?? null,
             JSON.stringify(updated.extra),
-            JSON.stringify(updated.tags),
+            updatedTagsJson,
             updated.version,
             updated.created_at,
             updated.updated_at,
             updated.created_by,
             updated.deleted_at ?? null,
+            shadow.fts_title,
+            shadow.fts_content,
+            shadow.fts_tags,
             id,
             opts.expected_version,
           ] as InValue[],
@@ -841,7 +934,8 @@ export class TursoStore implements StoreInterface {
                  slug = ?, type = ?, role = ?, title = ?, status = ?,
                  priority = ?, content = ?, parent_id = ?, extra = ?,
                  tags = ?, version = ?, created_at = ?, updated_at = ?,
-                 created_by = ?, deleted_at = ?
+                 created_by = ?, deleted_at = ?, fts_title = ?, fts_content = ?,
+                 fts_tags = ?
                WHERE id = ?`,
           args: [
             updated.slug,
@@ -853,12 +947,15 @@ export class TursoStore implements StoreInterface {
             updated.content,
             updated.parent_id ?? null,
             JSON.stringify(updated.extra),
-            JSON.stringify(updated.tags),
+            updatedTagsJson,
             updated.version,
             updated.created_at,
             updated.updated_at,
             updated.created_by,
             updated.deleted_at ?? null,
+            shadow.fts_title,
+            shadow.fts_content,
+            shadow.fts_tags,
             id,
           ] as InValue[],
         });

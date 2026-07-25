@@ -110,11 +110,15 @@ describe("migration-007 (versions.slug nullable column)", () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("HAPPY: a fresh :memory: DB migrates straight to user_version 7 with versions.slug present", () => {
+  it("HAPPY: a fresh :memory: DB migrates straight to the current head user_version with versions.slug present", () => {
     const store = new SQLiteStore(":memory:");
     const db = store.getDatabase();
 
-    expect(userVersion(db)).toBe(7);
+    // reason: migration-008 (CJK bigram shadow columns) is now the head — a
+    // fresh store runs every migration up to it, not just through
+    // migration-007. This test's own concern (versions.slug present) is
+    // unaffected — asserted directly below.
+    expect(userVersion(db)).toBe(8);
     expect(tableColumnNames(db, "versions")).toContain("slug");
 
     store.close();
@@ -220,11 +224,12 @@ describe("migration-007 (versions.slug nullable column)", () => {
     rawDb.close();
 
     // Reopening via SQLiteStore should detect currentVersion (6) < 7 and
-    // apply migration-007 — never throw, never touch the pre-existing rows.
+    // apply migration-007, then migration-008 (currentVersion 7 < 8) — never
+    // throw, never touch the pre-existing rows.
     const store = new SQLiteStore(dbPath);
     const db = store.getDatabase();
 
-    expect(userVersion(db)).toBe(7);
+    expect(userVersion(db)).toBe(8);
     expect(tableColumnNames(db, "versions")).toContain("slug");
 
     const preservedDoc = db
@@ -250,7 +255,7 @@ describe("migration-007 (versions.slug nullable column)", () => {
     expect(() => {
       const secondOpen = new SQLiteStore(dbPath);
       const db = secondOpen.getDatabase();
-      expect(userVersion(db)).toBe(7);
+      expect(userVersion(db)).toBe(8);
       expect(tableColumnNames(db, "versions")).toContain("slug");
       secondOpen.close();
     }).not.toThrow();

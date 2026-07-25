@@ -94,11 +94,11 @@ describe("migration-001 (initial schema) — crash-safety / idempotency (Blocker
     const db = store.getDatabase();
 
     // reason: mirrors migration-004.bun.test.ts's own comment — a fresh store
-    // now runs every migration up to the current head (7, as of SPEC-072's
-    // versions.slug column, migration-007).
+    // now runs every migration up to the current head (8, as of the CJK
+    // bigram shadow-column migration, migration-008).
     // migration-001's own concern (idempotent CREATEs) is what BOUNDARY below
     // asserts directly; this test just confirms the happy path still lands.
-    expect(userVersion(db)).toBe(7);
+    expect(userVersion(db)).toBe(8);
     expect(tableNames(db)).toEqual(
       expect.arrayContaining(["docs", "links", "versions", "audit", "docs_fts"]),
     );
@@ -184,16 +184,41 @@ describe("migration-001 (initial schema) — crash-safety / idempotency (Blocker
     rawDb.close();
   });
 
-  it("REGRESSION: SQLiteStore.runMigrations() still produces a fully functional store post-fix (insert + FTS5 search)", () => {
+  it("REGRESSION: SQLiteStore.runMigrations() still produces a fully functional store post-fix (insert + FTS5 search)", async () => {
     const store = new SQLiteStore(":memory:");
-    const db = store.getDatabase();
 
-    insertDoc(db, "01HREGRESSIONDOC0000001", "regression-doc", "Regression Findable Doc");
+    // reason: goes through the REAL public insert() API (not raw SQL) — since
+    // migration-008 added fts_title/fts_content/fts_tags shadow columns that
+    // `insert()` populates but a bare `INSERT INTO docs` (missing those
+    // columns) would leave defaulted to '', silently breaking FTS5 search.
+    // Using the real API is both more faithful to what this REGRESSION test
+    // claims ("SQLiteStore ... produces a fully functional store") and
+    // immune to drifting out of sync with `docs`'s column list.
+    const insertResult = await store.insert({
+      id: "01HREGRESSIONDOC0000001",
+      slug: "regression-doc",
+      type: "spec",
+      role: "spec",
+      title: "Regression Findable Doc",
+      status: "draft",
+      priority: "medium",
+      content: "content",
+      parent_id: null,
+      extra: {},
+      tags: [],
+      version: 1,
+      created_at: "2026-07-13T00:00:00.000Z",
+      updated_at: "2026-07-13T00:00:00.000Z",
+      created_by: "agent:test",
+      deleted_at: null,
+    });
+    expect(insertResult.ok).toBe(true);
 
-    const hit = db
-      .query("SELECT rowid FROM docs_fts WHERE docs_fts MATCH 'Regression'")
-      .get() as { rowid: number } | null;
-    expect(hit).not.toBeNull();
+    const searchResult = await store.search("Regression");
+    expect(searchResult.ok).toBe(true);
+    if (searchResult.ok) {
+      expect(searchResult.value.map((h) => h.id)).toContain("01HREGRESSIONDOC0000001");
+    }
 
     store.close();
   });
