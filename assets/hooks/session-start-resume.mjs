@@ -20,6 +20,35 @@
  * Phase E: lore bootstrap injection (corpus pointer set, when the resolved
  *          corpus root — main checkout for a linked worktree, cwd otherwise —
  *          has .lore/)
+ * Phase F: session-start advisory — cache-first asset-freshness check
+ *          (SPEC-076 §C6). Reads `<claude-dir>/.lore-setup-check.json`
+ *          (written by `lore setup --check`, T4 of SPEC-076) — a fresh
+ *          (<24h) `sync` cache injects nothing, a fresh `stale` cache injects
+ *          exactly one advisory line, and a missing/expired/corrupted cache
+ *          fires a DETACHED, UNREF'D `lore setup --check --json` refresh
+ *          (never awaited — this session gets nothing, the NEXT session may
+ *          see a fresh cache). `LORE_SETUP_NO_CHECK=1` is a hard kill-switch
+ *          checked BEFORE any cache read.
+ *
+ *          Known gap (documented, not silently dropped): SPEC-076 §C6's
+ *          illustrative advisory text shows "(binary X / installed Y)", but
+ *          the ACTUAL `SetupCheckCache` shape (`adapters/cli/setup-check.ts`,
+ *          §C6 Downstream Handoff) carries only the CURRENTLY-RUNNING
+ *          binary's own `binary_version` — no separate "installed" version
+ *          field exists in the cache. This phase renders what the cache
+ *          actually contains (`binary_version` + stale-file counts) rather
+ *          than inventing a phantom installed-version field.
+ *
+ *          `setup.check_reminder` (`packages/core/src/config.ts`, default
+ *          true) is DEFINED but NOT consulted by this phase — a standalone
+ *          installed hook script (`node <path>`, no guaranteed local
+ *          `node_modules`, so no `yaml` parser reachable) cannot cheaply
+ *          parse `.lore/config.yaml`, and the CLI-side enforcement point
+ *          (`lore setup --check` writing a suppressed/gated cache) lives in
+ *          `setup-check.ts`, outside this task's file anchors (T4/T5 own
+ *          that module concurrently). `LORE_SETUP_NO_CHECK=1` is the sole
+ *          Phase F kill-switch today — a documented, reported gap, not a
+ *          silent one.
  *
  * Bootstrap is hook-injected (was lazy-loaded by AI). Rationale: SessionStart
  * is low-frequency, `lore bootstrap` is a slim progressive-disclosure pointer
@@ -30,7 +59,8 @@
  * Phase D follows the same rule: any git/fs error there must never block
  * session start — it silently produces no seat block and the rest of the
  * hook runs exactly as if this were a main-checkout session (g1-hook
- * fail-open precedent).
+ * fail-open precedent). Phase F follows the SAME rule (I6 fail-open) — any
+ * fs/JSON/spawn error there must never block or crash session start.
  */
 
 import {
@@ -38,7 +68,7 @@ import {
 } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, spawn } from 'node:child_process';
 import { resolveSessionId } from './lib/turn-state.mjs';
 
 // No longer read for a roster (removed 2026-07-17 — harness lists agents
@@ -49,6 +79,19 @@ const AGENTS_DIR = process.env.CLAUDE_AGENTS_DIR_OVERRIDE
 const SESSION_STATE_BASE = process.env.CLAUDE_STATE_BASE_OVERRIDE
   || join(homedir(), '.claude', 'session-state');
 const BOOTSTRAP_CHAR_CAP = 8000;
+
+// Phase F (SPEC-076 §C6) — cache filename is a DELIBERATE literal duplicate of
+// `adapters/cli/setup-check.ts`'s private `CHECK_CACHE_FILENAME` constant of
+// the same value: that module owns the write side, this hook only ever reads
+// it, and the two live in physically separate deployable artifacts (compiled
+// binary vs. standalone installed .mjs file) with no shared import surface —
+// same "deliberate literal duplicate" precedent `setup-check.ts`'s own module
+// doc documents for `MANIFEST_FILENAME`.
+const SETUP_CHECK_CACHE_FILENAME = '.lore-setup-check.json';
+// 24h — SPEC-076 §C6/D4: the timestamp only gates *when* to recheck; the
+// truth of "sync vs stale" always comes from the cache's own `status` field
+// (oh-my-zsh lesson named explicitly in the spec), never re-derived here.
+const SETUP_CHECK_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 function emit(additionalContext) {
   if (!additionalContext) {
@@ -259,6 +302,78 @@ ${items}
 Action: Check installation. Non-critical features are unaffected.`;
 }
 
-// ── Compose (order: workflow → seat → bootstrap → degradation) ─
-const parts = [workflowBlock, seatBlock, bootstrapBlock, degradationBlock].filter(Boolean);
+// ── Phase F: session-start advisory — cache-first freshness (SPEC-076 §C6) ─
+// See this file's module-header "Phase F" note for the full contract,
+// including the documented `setup.check_reminder` config-knob gap.
+
+/**
+ * Fires a DETACHED, UNREF'D `lore setup --check --json` refresh — never
+ * awaited, never blocks this session. `--claude-dir` is passed explicitly
+ * (rather than relying on the child's own `$CLAUDE_CONFIG_DIR`/`~/.claude`
+ * default resolution) so the refresh always targets the SAME directory this
+ * phase read the cache from, including under a test's
+ * `CLAUDE_AGENTS_DIR_OVERRIDE`. An 'error' listener is attached so a missing
+ * `lore` binary (ENOENT) surfaces as a swallowed async event instead of an
+ * unhandled 'error' throw — fail-open (I6), mirrors every other phase in
+ * this hook.
+ */
+function spawnSetupCheckRefresh(claudeDir) {
+  try {
+    const child = spawn('lore', ['setup', '--check', '--json', '--claude-dir', claudeDir], {
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.on('error', () => {});
+    child.unref();
+  } catch {
+    // Fail-open — spawn() throwing synchronously (rare) must never block session start.
+  }
+}
+
+let advisoryBlock = '';
+try {
+  if (process.env.LORE_SETUP_NO_CHECK !== '1') {
+    const claudeDir = dirname(AGENTS_DIR);
+    const cachePath = join(claudeDir, SETUP_CHECK_CACHE_FILENAME);
+
+    let cache = null;
+    if (existsSync(cachePath)) {
+      try {
+        cache = JSON.parse(readFileSync(cachePath, 'utf8'));
+      } catch {
+        cache = null; // corrupted JSON — treated as unusable below, never throws
+      }
+    }
+
+    const isValidCache = cache !== null && typeof cache === 'object'
+      && typeof cache.checked_at === 'string'
+      && typeof cache.binary_version === 'string'
+      && (cache.status === 'sync' || cache.status === 'stale');
+
+    if (!isValidCache) {
+      // Missing file, corrupted JSON, or a shape that doesn't match
+      // SetupCheckCache — all treated identically: fire a background refresh,
+      // inject nothing THIS session (never wait for it).
+      spawnSetupCheckRefresh(claudeDir);
+    } else {
+      const ageMs = Date.now() - Date.parse(cache.checked_at);
+      const fresh = Number.isFinite(ageMs) && ageMs >= 0 && ageMs < SETUP_CHECK_CACHE_TTL_MS;
+      if (!fresh) {
+        spawnSetupCheckRefresh(claudeDir);
+      } else if (cache.status === 'stale') {
+        const counts = cache.stale_counts;
+        const countsNote = counts && typeof counts === 'object'
+          ? `${(counts.outdated ?? 0) + (counts.diverged ?? 0) + (counts.missing ?? 0)} file(s), binary ${cache.binary_version}`
+          : `binary ${cache.binary_version}`;
+        advisoryBlock = `⚠ lore assets outdated (${countsNote}) — run \`lore setup\``;
+      }
+      // fresh + sync → advisoryBlock stays '' (0 bytes, 0 spawn)
+    }
+  }
+} catch {
+  // Fail-open (I6) — any fs/JSON error here must never block or crash session start.
+}
+
+// ── Compose (order: workflow → seat → bootstrap → degradation → advisory) ─
+const parts = [workflowBlock, seatBlock, bootstrapBlock, degradationBlock, advisoryBlock].filter(Boolean);
 emit(parts.join('\n\n'));
