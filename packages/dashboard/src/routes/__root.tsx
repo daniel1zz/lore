@@ -13,7 +13,7 @@ import { SearchBar } from "@/components/SearchBar";
 import { ProjectSwitcher } from "@/components/ProjectSwitcher";
 import { Badge } from "@/components/ui/badge";
 import { apiGetStatus } from "@/lib/api";
-import { queryKeys, useProjectParam } from "@/lib/project-api";
+import { queryKeys, useProjectParam, projectPath } from "@/lib/project-api";
 import { useIssueReportsQuery } from "@/lib/issue-reports-query";
 import { useRouteTelemetry } from "@/lib/use-route-telemetry";
 
@@ -42,36 +42,43 @@ function RootLayout(): React.ReactElement {
   const openIssueCount = issueReports?.open_count ?? 0;
 
   function handleSearch(query: string): void {
-    void navigate({ to: "/search", search: { q: query } });
+    // reason: nav-prefix fix — the search box is a navigation action like any
+    // nav link, so it goes through the same `projectPath` seam (see the
+    // Link `to` props below) instead of hardcoding the unprefixed "/search".
+    void navigate({ to: projectPath(project, "/search"), search: { q: query } });
   }
 
   return (
     <div className="min-h-screen flex flex-col">
       <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur">
         <div className="container flex h-14 items-center gap-4 px-4 mx-auto max-w-7xl">
-          <Link to="/" className="flex items-center gap-2 font-semibold">
+          <Link to={projectPath(project, "/")} className="flex items-center gap-2 font-semibold">
             <span className="text-lg">Lore</span>
           </Link>
 
           <nav className="flex items-center gap-2 ml-4">
             <Link
-              to="/"
+              to={projectPath(project, "/")}
               className="text-sm text-muted-foreground hover:text-foreground transition-colors"
               activeProps={{ className: "text-foreground font-medium" }}
             >
               Home
             </Link>
             {/* reason: SPEC-033 repurposed "/" as the resolved living PRD; the old
-                doc-browsing + create UX moved to /library (see routes/library.tsx). */}
+                doc-browsing + create UX moved to /library (see routes/library.tsx).
+                reason: nav-prefix fix — every `to` below routes through
+                `projectPath(project, …)` (`lib/project-api.ts`) so a click under
+                `/p/:name` stays scoped to that project instead of silently
+                switching back to the default (registry-less) project. */}
             <Link
-              to="/library"
+              to={projectPath(project, "/library")}
               className="text-sm text-muted-foreground hover:text-foreground transition-colors"
               activeProps={{ className: "text-foreground font-medium" }}
             >
               Library
             </Link>
             <Link
-              to="/tree"
+              to={projectPath(project, "/tree")}
               className="text-sm text-muted-foreground hover:text-foreground transition-colors"
               activeProps={{ className: "text-foreground font-medium" }}
             >
@@ -80,7 +87,7 @@ function RootLayout(): React.ReactElement {
             {/* reason: SPEC-077 S1 — the dashboard execution read surface (ready/
                 blocked tasks, sessions, anchor conflicts, phase progress). */}
             <Link
-              to="/execution"
+              to={projectPath(project, "/execution")}
               className="text-sm text-muted-foreground hover:text-foreground transition-colors"
               activeProps={{ className: "text-foreground font-medium" }}
             >
@@ -89,7 +96,7 @@ function RootLayout(): React.ReactElement {
             {/* reason: SPEC-064 T4 — the Settings route is the UI for the SPEC-062
                 config write backend (team + machine scope config editing). */}
             <Link
-              to="/settings"
+              to={projectPath(project, "/settings")}
               className="text-sm text-muted-foreground hover:text-foreground transition-colors"
               activeProps={{ className: "text-foreground font-medium" }}
             >
@@ -97,7 +104,7 @@ function RootLayout(): React.ReactElement {
             </Link>
             {/* reason: SPEC-074 — badge hidden at 0 open reports (AC-074-4). */}
             <Link
-              to="/issues"
+              to={projectPath(project, "/issues")}
               className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
               activeProps={{ className: "text-foreground font-medium" }}
             >
