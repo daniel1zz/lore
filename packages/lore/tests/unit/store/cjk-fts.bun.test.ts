@@ -204,6 +204,65 @@ describe("collapseCjkBigramSnippet — pure bigram-run collapse", () => {
   it("BOUNDARY: empty string returns empty string", () => {
     expect(collapseCjkBigramSnippet("")).toBe("");
   });
+
+  // ─── Real-corpus regression fixtures (guyin, 2026-07-25) ─────────────────
+  //
+  // Live `lore search 交易` on the guyin corpus (readonly `sqlite3` queries
+  // against .lore/lore.db) still showed partial bigram artifacts after the
+  // first collapse fix landed. Root cause: a single space-delimited chunk of
+  // snippet() output can itself contain TWO SEPARATE CJK runs glued together
+  // via non-CJK text with NO space between them (expandCjkForFts never
+  // inserts a separator at a run's own boundary, only BETWEEN bigrams of the
+  // SAME run) — e.g. "易日**（实测" is one chunk holding the tail of one run
+  // ("...交易日") fused to markdown emphasis + a paren fused to the HEAD of
+  // an entirely different run ("实测边界..."). The original chunk-first
+  // parser only ever extracted the FIRST CJK run per chunk, leaving the
+  // second invisible to the chain-overlap check against the NEXT chunk.
+  // Fixed by scanning raw characters instead of `" "`-split chunks (see
+  // collapseJoinerSpaces's JSDoc) — these fixtures pin the exact raw
+  // fts_content substrings extracted read-only from the live corpus.
+
+  it("HAPPY (real-corpus fixture 1): '易日**（实测' — a chunk fusing the tail of one CJK run to the head of an unrelated run via markdown emphasis + paren, no space — both runs still collapse, joined correctly with the NEXT chunk", () => {
+    // Exact raw fts_content substring (readonly sqlite3 query against
+    // guyin's .lore/lore.db, doc 01KY9DQ1F7C1YEHGSX4H4858EB):
+    //   "...个交 交易 易日**（实测 测边 边界 2026-07-06；更早..."
+    // Original prose: "...个交易日**（实测边界 2026-07-06；更早..."
+    const raw = "...个交 交易 易日**（实测 测边 边界 2026-07-06；更早...";
+    expect(collapseCjkBigramSnippet(raw)).toBe(
+      "...个交易日**（实测边界 2026-07-06；更早...",
+    );
+  });
+
+  it("HAPPY (real-corpus fixture 2): '全年（现仅' — a CJK run immediately followed by an opening paren then ANOTHER CJK run's first bigram, no space — the run behind the paren still chains with the following chunk", () => {
+    // Exact raw fts_content substring (readonly sqlite3 query against
+    // guyin's .lore/lore.db, doc 01KY6ZSGKPKJTDV6KDH5RAGG3S):
+    //   "...2026 全年（现仅 仅国 国庆）。Tier..."
+    // Original prose: "...2026 全年（现仅国庆）。Tier..."
+    const raw = "...2026 全年（现仅 仅国 国庆）。Tier...";
+    expect(collapseCjkBigramSnippet(raw)).toBe("...2026 全年（现仅国庆）。Tier...");
+  });
+
+  it("GENERALIZATION: a highlight mark on a token that is a DROPPED duplicate (the second half of a run-joining pair) still renders at the right position, even though that exact character never survives into the output", () => {
+    // Same shape as fixture 1, but the query matched "边界" specifically —
+    // its opening char '边' is the DUPLICATE dropped by the "测边 边界"
+    // joiner (the char is already in the output from "测边"'s contribution).
+    const raw = `...个交 交易 易日**（实测 测边 ${SNIPPET_MARK_OPEN}边界${SNIPPET_MARK_CLOSE} 2026-07-06；更早...`;
+    const collapsed = collapseCjkBigramSnippet(raw);
+    expect(collapsed).toBe(
+      `...个交易日**（实测${SNIPPET_MARK_OPEN}边界${SNIPPET_MARK_CLOSE} 2026-07-06；更早...`,
+    );
+    expect(
+      collapsed.split(SNIPPET_MARK_OPEN).join("").split(SNIPPET_MARK_CLOSE).join(""),
+    ).toBe("...个交易日**（实测边界 2026-07-06；更早...");
+  });
+
+  it("GENERALIZATION: a leading ellipsis attaches directly to a punctuation-prefixed mid-run chunk (truncation window starts exactly at the glued paren)", () => {
+    // Truncation-clipped leading bigram: the snippet window happens to start
+    // right at "（现仅" (paren + first bigram of the SECOND run) — the
+    // ellipsis must land before the paren, not swallow or reorder it.
+    const raw = "...（现仅 仅国 国庆）。Tier S 依据...";
+    expect(collapseCjkBigramSnippet(raw)).toBe("...（现仅国庆）。Tier S 依据...");
+  });
 });
 
 // ─── Store-level tests: SQLiteStore.search actually returns CJK hits ──────
