@@ -33,6 +33,13 @@
  *                                             NOT registered on any CLI/MCP surface
  *   ready(planIdOrSlug, now?)              → computed readiness report (zero writes) —
  *                                             renders BOTH phase and legacy task children
+ *   planPhaseStatus(planIdOrSlug, now?)    → per-phase completion scorecard for EVERY
+ *                                             `phase` child of a plan (zero writes,
+ *                                             SPEC-077 S3) — backs
+ *                                             `GET /api/phase-status/:planIdOrSlug`;
+ *                                             the plan-wide sibling of
+ *                                             `flows/phase-status-flow.ts`'s
+ *                                             single-phase `buildPhaseStatusPayload`
  *
  * @invariant All public methods return Promise<Result<T, LoreError>> — no thrown exceptions.
  * @invariant Every write carries the read version as a CAS guard (store.update's
@@ -91,10 +98,15 @@ import {
   deriveSessions,
   extractFileAnchors,
   anchorsOverlap,
+  computeAcCoverage,
+  computePhaseCompletion,
+  specAcceptanceCriteriaSchema,
   type EvidenceEntry,
   type TaskClaim,
   type ChecklistItem,
   type BlockerInfo,
+  type AcceptanceCriterion,
+  type PhaseCompletionState,
 } from "@lore/core";
 import type { DocId, DocRecord, DocStatus } from "@lore/core";
 import { NoOpTelemetry, type Telemetry, type TelemetryEvent, type TaskWorkflowEventName } from "@lore/core";
@@ -154,9 +166,96 @@ function readChecklist(doc: DocRecord): ChecklistItem[] {
   return parsed.success ? parsed.data : [];
 }
 
+/**
+ * Reads and validates phase.extra.ac_scope. Returns [] when absent or malformed —
+ * feeds `planPhaseStatus`'s (SPEC-077 S3) per-phase `computePhaseCompletion` call,
+ * mirroring `readChecklist`'s own "extract, tolerate malformed" shape.
+ */
+function readAcScope(doc: DocRecord): string[] {
+  const raw = doc.extra["ac_scope"];
+  if (!Array.isArray(raw)) return [];
+  const parsed = z.array(z.string()).safeParse(raw);
+  return parsed.success ? parsed.data : [];
+}
+
 /** Computes age in whole minutes between two ISO timestamps (nowIso - atIso). */
 function ageMinutesBetween(nowIso: string, atIso: string): number {
   return Math.floor((new Date(nowIso).getTime() - new Date(atIso).getTime()) / 60_000);
+}
+
+/**
+ * Projects one `ChecklistItem` into its render-ready {@link PhaseScorecardChecklistItem}
+ * form for `planPhaseStatus` (SPEC-077 S3) — computed here so no HTTP-route consumer
+ * re-derives `dropped`/`checked`/`result` precedence itself.
+ */
+function projectChecklistItem(item: ChecklistItem): PhaseScorecardChecklistItem {
+  const trust: "manual" | "attested" = item.bind.kind === "manual" ? "manual" : "attested";
+  if (item.dropped !== undefined) return { id: item.id, statement: item.statement, state: "dropped", trust };
+
+  const satisfied =
+    (item.bind.kind === "manual" && item.checked !== undefined) ||
+    (item.bind.kind === "script" && item.result === "pass");
+  return { id: item.id, statement: item.statement, state: satisfied ? "satisfied" : "blocking", trust };
+}
+
+// ─── Plan-wide phase scorecard types (SPEC-077 S3) ─────────────────────────
+// Public types owned by PhaseWorkflowService — the `planPhaseStatus` method's
+// return shape, backing `GET /api/phase-status/:planIdOrSlug`.
+
+/** AC-scope coverage summary for one phase — total declared ids, attested-passing count, and blocking subset. */
+export interface PhaseScorecardAcSummary {
+  total: number;
+  attested: number;
+  blocking: string[];
+}
+
+/** Checklist state summary for one phase (aggregate counts — see `checklist_items` for per-item detail). */
+export interface PhaseScorecardChecklistSummary {
+  total: number;
+  satisfied: number;
+  blocking: string[];
+  dropped_named: string[];
+  manual_selfattested: string[];
+}
+
+/** One checklist item's render-ready state — computed by `projectChecklistItem` so no consumer re-derives `dropped`/`checked`/`result` precedence itself. */
+export interface PhaseScorecardChecklistItem {
+  id: string;
+  statement: string;
+  state: "satisfied" | "blocking" | "dropped";
+  /** Which trust channel satisfies (or would satisfy) this item — verbatim from `bind.kind`, never re-labeled. */
+  trust: "manual" | "attested";
+}
+
+/** One phase's computed completion scorecard, as rendered for a plan-wide listing (`planPhaseStatus`). */
+export interface PhaseScorecard {
+  phase_id: string;
+  phase_slug: string;
+  phase_title: string;
+  state: PhaseCompletionState;
+  /** `true` iff `state === "vacuous"` — its own field so a UI badge never re-derives it from `state`. */
+  vacuous: boolean;
+  ac_scope: PhaseScorecardAcSummary;
+  checklist: PhaseScorecardChecklistSummary;
+  checklist_items: PhaseScorecardChecklistItem[];
+  /** Full blocking list from `computePhaseCompletion` — AC ids followed by checklist item ids. */
+  blocking: string[];
+  claim: { by: string; at: string; stale: boolean } | null;
+  /**
+   * Count of legacy `task`-typed plan children whose `extra.phase` names THIS
+   * phase's title (the SPEC-023 string-linkage model bridging onto a SPEC-056
+   * `phase` doc of the same name) — 0 for a corpus fully migrated via
+   * `PhaseMigrationService` (the expected steady state; source tasks are
+   * archived post-migration, so this is a transitional/diagnostic count, not a
+   * live task roster).
+   */
+  task_count: number;
+}
+
+/** The `GET /api/phase-status/:planIdOrSlug` response payload (SPEC-077 S3, pinned shape). */
+export interface PlanPhaseStatusReport {
+  plan: { id: string; slug: string; title: string };
+  phases: PhaseScorecard[];
 }
 
 // ─── PhaseWorkflowService ──────────────────────────────────────────────────
@@ -746,6 +845,131 @@ export class PhaseWorkflowService {
       sessions: deriveSessions(children, nowIso, this.claimTtlMinutes),
       anchor_conflicts: anchorConflicts,
     });
+  }
+
+  // ── planPhaseStatus ─────────────────────────────────────────────────────
+
+  /**
+   * Computes a per-phase completion scorecard for EVERY `phase` child of a plan
+   * (SPEC-077 S3, backs `GET /api/phase-status/:planIdOrSlug`) — the plan-wide
+   * sibling of `flows/phase-status-flow.ts::buildPhaseStatusPayload` (which renders
+   * exactly ONE phase, for `lore phase status`/MCP `lore_phase_status`). Zero writes,
+   * same as `ready()` above. Fetches the parent spec's declared AC criteria ONCE
+   * (never once per phase) and reuses the SAME `computeAcCoverage`/
+   * `computePhaseCompletion` pipeline (`@lore/core`) per phase, scoped to that
+   * phase's OWN evidence only — mirrors `buildPhaseStatusPayload`'s per-phase
+   * coverage scoping exactly, so the two surfaces never disagree on what "done"
+   * means for the same phase.
+   *
+   * @param planIdOrSlug - Plan document ULID or slug
+   * @param now - Time seam (D10); drives claim staleness + `computePhaseCompletion`
+   * @returns `ok({plan, phases})` — `phases: []` for a plan with zero `phase`
+   *   children (not an error, mirrors `ready()`'s empty-children handling)
+   * @throws DOC_NOT_FOUND (unresolvable plan), VALIDATION_ERROR (resolved doc is not
+   *   type `plan`, naming the actual type — mirrors `ready()`'s identical check; or a
+   *   corpus-integrity fault from a malformed phase's `computePhaseCompletion` call,
+   *   not expected in practice since `phaseExtraSchema` already validates `ac_scope`'s
+   *   AC-id grammar at write time)
+   */
+  async planPhaseStatus(
+    planIdOrSlug: string,
+    now: () => string = defaultNow,
+  ): Promise<Result<PlanPhaseStatusReport, LoreError>> {
+    const planResult = await resolveDoc(this.store, planIdOrSlug);
+    if (!planResult.ok) return planResult;
+    const plan = planResult.value;
+
+    if (plan.type !== "plan") {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "type",
+        message: `Expected a plan document; got type '${plan.type}'`,
+        value: plan.type,
+      });
+    }
+
+    let criteria: AcceptanceCriterion[] = [];
+    if (plan.parent_id !== null) {
+      const parentResult = await this.store.find(plan.parent_id);
+      if (!parentResult.ok) return parentResult;
+      if (parentResult.value !== null && parentResult.value.type === "spec") {
+        const parsedCriteria = specAcceptanceCriteriaSchema.safeParse(
+          parentResult.value.extra["acceptance_criteria"],
+        );
+        criteria = parsedCriteria.success ? parsedCriteria.data : [];
+      }
+    }
+
+    const childrenResult = await this.fetchPlanChildren(plan.id);
+    if (!childrenResult.ok) return childrenResult;
+    const children = childrenResult.value;
+
+    const phaseChildren = children.filter((doc) => doc.type === "phase");
+
+    // reason: legacy SPEC-023 string-linkage — a `task`-typed plan child names its
+    // phase by `extra.phase` (a plain string matching `plan.extra.phases[].name`),
+    // distinct from the SPEC-056 `phase` doc type this method otherwise reports on.
+    // Counted here (single pass, no per-phase re-scan) purely as a
+    // transitional/diagnostic signal — see `PhaseScorecard.task_count`'s own JSDoc.
+    const legacyTaskCountByPhaseName = new Map<string, number>();
+    for (const doc of children) {
+      if (doc.type !== "task") continue;
+      const phaseName = doc.extra["phase"];
+      if (typeof phaseName !== "string") continue;
+      legacyTaskCountByPhaseName.set(phaseName, (legacyTaskCountByPhaseName.get(phaseName) ?? 0) + 1);
+    }
+
+    const nowIso = now();
+    const phases: PhaseScorecard[] = [];
+    for (const phase of phaseChildren) {
+      const acScope = readAcScope(phase);
+      const checklist = readChecklist(phase);
+      const claim = readClaim(phase);
+
+      const coverage = computeAcCoverage(criteria, [phase]);
+      const completionResult = computePhaseCompletion({
+        acScope,
+        coverage,
+        checklist,
+        claim,
+        claimTtlMinutes: this.claimTtlMinutes,
+        now: new Date(nowIso),
+      });
+      if (!completionResult.ok) return completionResult;
+      const completion = completionResult.value;
+
+      const coverageByAcId = new Map(coverage.map((fact) => [fact.ac_id, fact]));
+      const acScopeSet = new Set(acScope);
+      const acAttested = acScope.filter((id) => (coverageByAcId.get(id)?.attested_pass ?? 0) > 0).length;
+      const acBlocking = completion.blocking.filter((id) => acScopeSet.has(id));
+      const checklistBlocking = completion.blocking.filter((id) => !acScopeSet.has(id));
+      const checklistSatisfied = checklist.length - checklistBlocking.length - completion.dropped_named.length;
+
+      phases.push({
+        phase_id: phase.id,
+        phase_slug: phase.slug,
+        phase_title: phase.title,
+        state: completion.state,
+        vacuous: completion.state === "vacuous",
+        ac_scope: { total: acScope.length, attested: acAttested, blocking: acBlocking },
+        checklist: {
+          total: checklist.length,
+          satisfied: checklistSatisfied,
+          blocking: checklistBlocking,
+          dropped_named: completion.dropped_named,
+          manual_selfattested: completion.manual_selfattested,
+        },
+        checklist_items: checklist.map(projectChecklistItem),
+        blocking: completion.blocking,
+        claim:
+          claim !== undefined
+            ? { by: claim.by, at: claim.at, stale: isClaimStale(claim, nowIso, this.claimTtlMinutes) }
+            : null,
+        task_count: legacyTaskCountByPhaseName.get(phase.title) ?? 0,
+      });
+    }
+
+    return ok({ plan: { id: plan.id, slug: plan.slug, title: plan.title }, phases });
   }
 
   /**

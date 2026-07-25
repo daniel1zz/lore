@@ -1,0 +1,302 @@
+/**
+ * End-to-end tests for GET /api/phase-status/:planIdOrSlug against a real
+ * in-process Bun.Server backed by a REAL SQLiteStore (via `createApp`, the actual
+ * production composition root — mirrors `evidence-panel.bun.test.ts`'s SPEC-075 D8
+ * rationale: avoid InMemoryStore-vs-production divergence and keep `bun:sqlite`
+ * reachability confined to `.bun.test.ts` files).
+ *
+ * Phase docs are seeded directly via `app.corpusService.create({type: "phase", ...})`
+ * — `CorpusService` itself places no restriction on direct `type: "phase"` creation
+ * (`createDocInputSchema`'s superRefine only requires `parent_id` + `extra.plan_id`,
+ * mirroring `task`); the CLI's `lore create` command excludes `"phase"` from its own
+ * `VALID_TYPES` allowlist (phase docs are migration-created only, SPEC-056 D6a), but
+ * that is a CLI-adapter-level restriction, not a service-level one — the SAME
+ * distinction `mcp-tools-phase.test.ts`/`phase-status-flow.test.ts` already rely on.
+ *
+ * Test plan (6-dimension; deep scorecard-assembly math coverage lives in
+ * `phase-status-flow.test.ts`'s vitest suite — this file proves the REAL route
+ * wiring + auth duality + pinned envelope shape, per AC-077-4):
+ *   HAPPY:
+ *     - a plan with one phase (attested AC + satisfied manual checklist item) → 200
+ *       with the pinned `{plan:{id,slug,title}, phases:[...]}` shape, phase fields
+ *       populated (state, vacuous, ac_scope, checklist, claim, task_count)
+ *     - a plan with ZERO phases → 200 with `phases: []` (not an error)
+ *   NEGATIVE:
+ *     - no auth header → 401
+ *   BOUNDARY:
+ *     - cookie session (not just bearer) also reaches this route (auth duality)
+ *   ERROR:
+ *     - unknown plan id → 404 DOC_NOT_FOUND
+ *     - a resolvable non-plan doc (a task) → 422 VALIDATION_ERROR naming the actual type
+ *   STATE:
+ *     - a vacuous phase (empty ac_scope, empty/all-dropped checklist) renders
+ *       `state: "vacuous"` and `vacuous: true`
+ *
+ * @spec_ref spec-077-dashboard-execution-read-surface-prd-21-f3 AC-077-4
+ */
+
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mkdtempSync, mkdirSync, rmSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
+import { startHttpServer } from "../../src/adapters/http/index.js";
+import { createApp } from "../../src/app.js";
+import type { App } from "../../src/app.js";
+import type { CreateDocInput } from "@lore/core";
+
+interface TestContext {
+  server: ReturnType<typeof Bun.serve>;
+  app: App;
+  rawKey: string;
+  baseUrl: string;
+  tmpDir: string;
+  planId: string;
+  planSlug: string;
+  planTitle: string;
+  taskId: string;
+}
+
+async function makeTestServer(): Promise<TestContext> {
+  const tmpDir = mkdtempSync(join(tmpdir(), "lore-phase-status-"));
+  mkdirSync(join(tmpDir, ".lore"), { recursive: true });
+  const dbPath = join(tmpDir, ".lore", "lore.db");
+
+  const app = createApp(dbPath);
+
+  const createResult = await app.apiKeyStore.create("dashboard-local", "admin");
+  if (!createResult.ok) throw new Error("Failed to create API key");
+  const rawKey = createResult.value.rawKey;
+
+  const prdResult = await app.corpusService.create({ type: "prd", title: "Phase Status Root PRD", content: "root" });
+  if (!prdResult.ok) throw new Error("Failed to create seed prd");
+
+  const specResult = await app.corpusService.create({
+    type: "spec",
+    title: "Phase Status Spec",
+    parent_id: prdResult.value.id,
+    content: "## Spec",
+    extra: {
+      acceptance_criteria: [
+        { id: "AC-1", statement: "does the thing", verify: { mode: "script", oracle: "test", command: "bun test" } },
+      ],
+    },
+  } as CreateDocInput);
+  if (!specResult.ok) throw new Error("Failed to create seed spec");
+
+  const planResult = await app.corpusService.create({
+    type: "plan",
+    title: "Phase Status Plan",
+    parent_id: specResult.value.id,
+    content: "## Plan",
+  } as CreateDocInput);
+  if (!planResult.ok) throw new Error("Failed to create seed plan");
+
+  const taskResult = await app.corpusService.create({
+    type: "task",
+    title: "Phase Status Non-Phase Target",
+    parent_id: planResult.value.id,
+    content: "## Task",
+    extra: { plan_id: planResult.value.id },
+  } as CreateDocInput);
+  if (!taskResult.ok) throw new Error("Failed to create seed task");
+
+  const server = startHttpServer(app, { port: 0, host: "127.0.0.1" });
+  const baseUrl = `http://127.0.0.1:${server.port}`;
+
+  return {
+    server,
+    app,
+    rawKey,
+    baseUrl,
+    tmpDir,
+    planId: planResult.value.id,
+    planSlug: planResult.value.slug,
+    planTitle: planResult.value.title,
+    taskId: taskResult.value.id,
+  };
+}
+
+async function bootstrapCookie(ctx: TestContext): Promise<string> {
+  const res = await fetch(`${ctx.baseUrl}/api/auth/local-bootstrap`, {
+    method: "POST",
+    headers: { "X-Lore-Token": ctx.rawKey, Origin: "http://localhost:5173" },
+  });
+  const { data } = (await res.json()) as { data: { session_id: string } };
+  return data.session_id;
+}
+
+/** Creates a done-case phase (attested AC-1 + satisfied manual checklist item). */
+async function createDonePhase(ctx: TestContext): Promise<{ id: string; title: string }> {
+  const title = "Backend slice";
+  const result = await ctx.app.corpusService.create({
+    type: "phase",
+    title,
+    parent_id: ctx.planId,
+    content: "## Phase",
+    extra: {
+      plan_id: ctx.planId,
+      ac_scope: ["AC-1"],
+      checklist: [
+        {
+          id: "CHK-1",
+          statement: "manual smoke test passes",
+          bind: { kind: "manual" },
+          checked: { by: "alice", at: "2026-07-24T00:00:00.000Z" },
+        },
+      ],
+      verification_evidence: [
+        {
+          oracle: "test",
+          command: "bun test",
+          result: "pass",
+          recorded_at: "2026-07-24T00:00:00.000Z",
+          recorded_by: "agent:t",
+          ac_ref: "AC-1",
+          attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 10, timed_out: false },
+        },
+      ],
+    },
+  } as unknown as CreateDocInput);
+  if (!result.ok) throw new Error(`Failed to create seed phase: ${JSON.stringify(result.error)}`);
+  return { id: result.value.id, title: result.value.title };
+}
+
+/** Creates a vacuous phase (no ac_scope, no checklist). */
+async function createVacuousPhase(ctx: TestContext): Promise<{ id: string; title: string }> {
+  const title = "Untracked slice";
+  const result = await ctx.app.corpusService.create({
+    type: "phase",
+    title,
+    parent_id: ctx.planId,
+    content: "## Phase",
+    extra: { plan_id: ctx.planId },
+  } as unknown as CreateDocInput);
+  if (!result.ok) throw new Error(`Failed to create seed vacuous phase: ${JSON.stringify(result.error)}`);
+  return { id: result.value.id, title: result.value.title };
+}
+
+interface PhaseScorecardBody {
+  phase_id: string;
+  phase_title: string;
+  state: string;
+  vacuous: boolean;
+  ac_scope: { total: number; attested: number; blocking: string[] };
+  checklist: { total: number; satisfied: number; blocking: string[] };
+  checklist_items: Array<{ id: string; state: string; trust: string }>;
+  claim: unknown;
+  task_count: number;
+}
+
+describe("GET /api/phase-status/:planIdOrSlug (SPEC-077 S3)", () => {
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    ctx = await makeTestServer();
+  });
+
+  afterEach(() => {
+    ctx.server.stop(true);
+    ctx.app.close();
+    rmSync(ctx.tmpDir, { recursive: true, force: true });
+  });
+
+  describe("HAPPY — populated phases + pinned envelope shape", () => {
+    it("a plan with one done-case phase → 200 with plan{id,slug,title} + one populated PhaseScorecard", async () => {
+      const phase = await createDonePhase(ctx);
+
+      const res = await fetch(`${ctx.baseUrl}/api/phase-status/${ctx.planId}`, {
+        headers: { Authorization: `Bearer ${ctx.rawKey}` },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        ok: boolean;
+        data: { plan: { id: string; slug: string; title: string }; phases: PhaseScorecardBody[] };
+      };
+      expect(body.ok).toBe(true);
+      expect(body.data.plan).toEqual({ id: ctx.planId, slug: ctx.planSlug, title: ctx.planTitle });
+      expect(body.data.phases).toHaveLength(1);
+
+      const scorecard = body.data.phases[0];
+      expect(scorecard).toBeDefined();
+      expect(scorecard?.phase_id).toBe(phase.id);
+      expect(scorecard?.phase_title).toBe(phase.title);
+      expect(scorecard?.state).toBe("done");
+      expect(scorecard?.vacuous).toBe(false);
+      expect(scorecard?.ac_scope).toEqual({ total: 1, attested: 1, blocking: [] });
+      expect(scorecard?.checklist.total).toBe(1);
+      expect(scorecard?.checklist.satisfied).toBe(1);
+      expect(scorecard?.checklist_items).toEqual([
+        { id: "CHK-1", statement: "manual smoke test passes", state: "satisfied", trust: "manual" },
+      ]);
+      expect(scorecard?.claim).toBeNull();
+      expect(scorecard?.task_count).toBe(0);
+    });
+
+    it("a plan with ZERO phases → 200 with phases: [] (not an error)", async () => {
+      const res = await fetch(`${ctx.baseUrl}/api/phase-status/${ctx.planId}`, {
+        headers: { Authorization: `Bearer ${ctx.rawKey}` },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { ok: boolean; data: { phases: unknown[] } };
+      expect(body.ok).toBe(true);
+      expect(body.data.phases).toEqual([]);
+    });
+  });
+
+  describe("STATE — vacuous phase", () => {
+    it("a phase with no ac_scope and no checklist renders state:'vacuous' + vacuous:true", async () => {
+      await createVacuousPhase(ctx);
+
+      const res = await fetch(`${ctx.baseUrl}/api/phase-status/${ctx.planSlug}`, {
+        headers: { Authorization: `Bearer ${ctx.rawKey}` },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: { phases: PhaseScorecardBody[] } };
+      expect(body.data.phases).toHaveLength(1);
+      expect(body.data.phases[0]?.state).toBe("vacuous");
+      expect(body.data.phases[0]?.vacuous).toBe(true);
+    });
+  });
+
+  describe("BOUNDARY — auth duality", () => {
+    it("a cookie session (not just bearer) also reaches this route → 200", async () => {
+      const sessionId = await bootstrapCookie(ctx);
+      const res = await fetch(`${ctx.baseUrl}/api/phase-status/${ctx.planId}`, {
+        headers: { Cookie: `lore_sid=${sessionId}` },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { ok: boolean };
+      expect(body.ok).toBe(true);
+    });
+  });
+
+  describe("NEGATIVE — no auth → 401", () => {
+    it("no auth header at all → 401", async () => {
+      const res = await fetch(`${ctx.baseUrl}/api/phase-status/${ctx.planId}`);
+      expect(res.status).toBe(401);
+    });
+  });
+
+  describe("ERROR — unknown id / wrong type", () => {
+    it("an unresolvable plan id → 404 DOC_NOT_FOUND", async () => {
+      const res = await fetch(`${ctx.baseUrl}/api/phase-status/does-not-exist-at-all`, {
+        headers: { Authorization: `Bearer ${ctx.rawKey}` },
+      });
+      expect(res.status).toBe(404);
+      const body = (await res.json()) as { ok: boolean; error: { code: string } };
+      expect(body.ok).toBe(false);
+      expect(body.error.code).toBe("DOC_NOT_FOUND");
+    });
+
+    it("a resolvable non-plan doc (a task) → 422 VALIDATION_ERROR naming the actual type", async () => {
+      const res = await fetch(`${ctx.baseUrl}/api/phase-status/${ctx.taskId}`, {
+        headers: { Authorization: `Bearer ${ctx.rawKey}` },
+      });
+      expect(res.status).toBe(422);
+      const body = (await res.json()) as { ok: boolean; error: { code: string; message: string } };
+      expect(body.ok).toBe(false);
+      expect(body.error.code).toBe("VALIDATION_ERROR");
+      expect(body.error.message).toContain("task");
+    });
+  });
+});

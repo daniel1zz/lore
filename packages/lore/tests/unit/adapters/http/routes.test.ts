@@ -913,7 +913,7 @@ describe("POST /api/review/:id/reject", () => {
 
 describe("GET /api/ready/:planIdOrSlug", () => {
   describe("happy path", () => {
-    it("returns ReadyReport parity with a direct TaskWorkflowService.ready() call (SPEC-042 report-shape change)", async () => {
+    it("returns ReadyReport parity with a direct TaskWorkflowService.ready() call, plus the SPEC-077 S4 claim_ttl_minutes enrichment", async () => {
       const { id: planId } = await createPlan("Ready Parity Plan");
       await createTask(planId, "Task A");
       await createTask(planId, "Task B");
@@ -928,18 +928,27 @@ describe("GET /api/ready/:planIdOrSlug", () => {
       const direct = await app.taskWorkflowService.ready(planId);
       expect(direct.ok).toBe(true);
       if (!direct.ok) return;
-      expect(body.data).toEqual(direct.value);
+      // reason: SPEC-077 S4 — the HTTP route enriches the core (pure) ReadyReport
+      // with a top-level `claim_ttl_minutes`, so full-body parity is checked
+      // against `direct.value` PLUS that one additive field, never the bare
+      // service result.
+      expect(body.data).toEqual({ ...direct.value, claim_ttl_minutes: app.taskWorkflowService.claimTtlMinutes });
       expect((body.data as { records: unknown[] }).records).toHaveLength(2);
     });
 
-    it("an empty plan (no tasks) returns 200 with an empty ReadyReport, not an error", async () => {
+    it("an empty plan (no tasks) returns 200 with an empty ReadyReport plus claim_ttl_minutes, not an error", async () => {
       const { id: planId } = await createPlan("Empty Ready Plan");
 
       const { req, url } = makeGetRequest(`/api/ready/${planId}`);
       const res = await handleApiRoute(req, url, app, TEST_ACTOR);
       expect(res!.status).toBe(200);
       const body = await parseResponse(res!);
-      expect(body.data).toEqual({ records: [], sessions: [], anchor_conflicts: [] });
+      expect(body.data).toEqual({
+        records: [],
+        sessions: [],
+        anchor_conflicts: [],
+        claim_ttl_minutes: app.taskWorkflowService.claimTtlMinutes,
+      });
     });
 
     it("resolves by slug as well as by id", async () => {
