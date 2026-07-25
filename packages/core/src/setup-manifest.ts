@@ -6,12 +6,19 @@
  *
  * Public surface:
  *   - setupEntryKindSchema / SetupEntryKind — the closed kind enum
+ *   - ASSET_OWNERSHIPS / assetOwnershipSchema / AssetOwnership — the closed
+ *     ownership enum (SPEC-076 D8: `"managed" | "merged" | "user_once"`)
  *   - setupEntrySchema / SetupEntry — one manifest row
  *   - setupManifestSchema / SetupManifest — the whole `.lore-setup-manifest.json`
+ *     (SPEC-076 §C4 adds optional top-level `binary_version` / `installed_at` /
+ *     `assets_digest`)
  *   - assetFileSchema / AssetFile, assetPayloadSchema / AssetPayload — the
  *     in-memory asset tree `planInstall` compares against disk state
  *   - PlannedWrite / PlannedSkip / InstallPlan — planner output row shapes
  *   - planInstall(current, payload, existingFiles) — the pure decision function
+ *   - deriveOwnershipFromKind(kind) — legacy-manifest migration fallback ONLY
+ *     (SPEC-076 §C4) — see its own doc comment for why this is NOT the
+ *     primary ownership-assignment path
  *
  * Invariants:
  *   - PURE — `planInstall` takes only in-memory parameters (a manifest, a
@@ -39,8 +46,49 @@
  *     being overwritten (recorded in `InstallPlan.backups`). A path already
  *     tracked by `current` is lore-owned and is overwritten without a backup
  *     (the manifest itself is the source of truth for "lore wrote this").
+ *   - **SPEC-076 D8 — ownership is DECLARED, never DERIVED (I6 kind∩ownership
+ *     legal-pairing table).** `ownership` on `assetFileSchema`/`setupEntrySchema`
+ *     is OPTIONAL (additive — a pre-SPEC-076 manifest with no `ownership` on
+ *     any entry, or an old binary that has never heard of this field, still
+ *     parses byte-for-byte unchanged; I3 regression). It is set EXPLICITLY by
+ *     whichever `AssetSource` constructs the `AssetFile`, at LOAD time — never
+ *     inferred from `kind` in the primary path. `kind` is a TECHNICAL
+ *     classification (which installer subsystem produced this file);
+ *     `ownership` is an ORTHOGONAL operational policy (how an update should
+ *     treat a diverged copy) — collapsing the two into a kind→ownership
+ *     lookup is provably wrong: `flows/setup-project-flow.ts` (the project
+ *     scaffold's OWN candidate-construction path, a separate `AssetSource`
+ *     from the machine installer's) already tags `lore.tree.yaml` /
+ *     `.gitignore` / `CLAUDE.md` with `kind: "governance"`, yet per SPEC-076's
+ *     ownership table those three are `user_once` / `merged` / `merged` (the
+ *     last a marker-segment special case, SPEC-076 T6) — NOT `managed`, which
+ *     is what a kind-based lookup would (wrongly) assign every `"governance"`
+ *     entry. The only LEGAL `(kind, ownership)` pairs this repo's real
+ *     `AssetSource` implementations currently produce (recorded HERE, in
+ *     `@lore/core`, rather than `packages/lore/src/service/setup-service.ts`'s
+ *     own module header — that file's anchors belong to a concurrently-claimed
+ *     sibling task, SPEC-076 T5; see `real-asset-source.ts`'s doc comment for
+ *     the producer-scoped detail):
+ *       - `RealAssetSource` (`packages/lore/src/adapters/real-asset-source.ts`,
+ *         the MACHINE `~/.claude` installer's sole `AssetSource`):
+ *         `skill → managed`, `agent → managed`, `hook → managed`,
+ *         `governance → managed`, `settings-hook → merged`. (`kind: "mcp"` is
+ *         a manifest-only entry `SetupService` constructs directly — never
+ *         emitted by an `AssetSource` — out of this table's scope; stamping
+ *         its `ownership: "managed"` is SPEC-076 T5's job.)
+ *       - The project scaffold path (`setup-project-flow.ts`) does not yet
+ *         declare `ownership` at all (out of THIS task's anchors) — its reuse
+ *         of `kind: "governance"` for `user_once`/`merged`-policy files is
+ *         exactly the counter-example above, proving this table must be keyed
+ *         per PRODUCER, never by `kind` alone.
+ *   - **The legacy-manifest fallback is a NAMED, DOCUMENTED exception, not a
+ *     second derivation path.** `deriveOwnershipFromKind` exists ONLY for a
+ *     manifest entry written before this field existed (no signal available
+ *     except `kind`) — see its own doc comment for the full caveat. Every
+ *     FRESH write goes through the explicit-declaration path above.
  *
- * Source: SPEC-046 §Design ("`@lore/core` (pure, browser-safe)").
+ * Source: SPEC-046 §Design ("`@lore/core` (pure, browser-safe)"); SPEC-076
+ *   §C1 (ownership three-zone model), §C4 (manifest version fields), D8.
  */
 
 import { z } from "zod";
@@ -64,6 +112,29 @@ export const setupEntryKindSchema = z.enum(SETUP_ENTRY_KINDS);
 export type SetupEntryKind = z.infer<typeof setupEntryKindSchema>;
 
 /**
+ * The closed set of ownership zones a file/entry can belong to (SPEC-076 §C1
+ * D8) — how an update should treat this path when its on-disk bytes diverge
+ * from what lore last wrote:
+ *   - `"managed"` — tool-owned, read-only distribution unit. Outdated →
+ *     backup-then-overwrite; diverged → skipped-by-default + reported
+ *     (`--force-diverged` to override).
+ *   - `"merged"` — both parties co-own via a deterministic merge (e.g.
+ *     `settings.json` via `mergeSettings`) — never a blind overwrite.
+ *   - `"user_once"` — scaffolded once, then belongs to the user forever
+ *     (e.g. a `config.yaml` template) — NEVER rewritten by a later converge.
+ * See {@link setupEntrySchema}'s/`assetFileSchema`'s `ownership` field doc and
+ * this module's top-level "ownership is DECLARED, never DERIVED" invariant
+ * for the full kind∩ownership legal-pairing table.
+ */
+export const ASSET_OWNERSHIPS = ["managed", "merged", "user_once"] as const;
+
+/** Zod schema for one {@link AssetOwnership}. */
+export const assetOwnershipSchema = z.enum(ASSET_OWNERSHIPS);
+
+/** Derived TypeScript union for an asset/manifest-entry's `ownership`. */
+export type AssetOwnership = z.infer<typeof assetOwnershipSchema>;
+
+/**
  * One row of the setup manifest — a single path `lore setup` has written (or,
  * for `kind: "mcp"`, a registration it performed with no corresponding file).
  *
@@ -78,6 +149,16 @@ export const setupEntrySchema = z.object({
   sha256: z.string().min(1),
   /** ISO-8601 timestamp of the write. */
   written_at: z.string().min(1),
+  /**
+   * OPTIONAL (SPEC-076 §C4, additive/I3-regression-safe) — this entry's
+   * ownership zone. Absent on every manifest written before SPEC-076 (and on
+   * any entry a future caller constructs without an opinion) — a reader that
+   * needs a value for a legacy entry uses {@link deriveOwnershipFromKind} as a
+   * one-time migration fallback, never a silent default baked into this
+   * schema. See the module's top-level "ownership is DECLARED, never DERIVED"
+   * invariant for why this is NOT inferred here from `kind`.
+   */
+  ownership: assetOwnershipSchema.optional(),
 });
 
 /** Derived TypeScript type for one manifest row. */
@@ -90,10 +171,81 @@ export const setupManifestSchema = z.object({
   /** The target directory this manifest describes (absolute path, as installed). */
   claude_dir: z.string().min(1),
   entries: z.array(setupEntrySchema),
+  /**
+   * OPTIONAL (SPEC-076 §C4, additive) — the `lore` binary version (embedded
+   * `LORE_BINARY_VERSION` constant, SPEC-076 §C2) that produced this manifest,
+   * stamped at the END of a successful converge (manifest-last discipline,
+   * unchanged). Absent on every pre-SPEC-076 manifest and on a manifest whose
+   * writer hasn't yet been upgraded to stamp it (SPEC-076 T5's job) — never
+   * back-filled by this schema.
+   */
+  binary_version: z.string().min(1).optional(),
+  /**
+   * OPTIONAL (SPEC-076 §C4, additive) — ISO-8601 timestamp of the most recent
+   * successful `lore setup` install/converge that touched this target.
+   */
+  installed_at: z.string().min(1).optional(),
+  /**
+   * OPTIONAL (SPEC-076 §C4, additive) — the embedded assets tree's
+   * `tree_digest` (SPEC-076 §C2, `generated/assets-manifest.ts`) AS OF this
+   * install/converge — the value `lore setup --check`'s digest-equality
+   * short-circuit compares the CURRENTLY-embedded digest against.
+   */
+  assets_digest: z.string().min(1).optional(),
 });
 
 /** Derived TypeScript type for the whole manifest document. */
 export type SetupManifest = z.infer<typeof setupManifestSchema>;
+
+/**
+ * One-time ownership DERIVATION for a legacy (pre-SPEC-076) manifest entry
+ * that lacks the `ownership` field — `kind` is the only signal available.
+ * This is a MIGRATION FALLBACK ONLY, never the primary assignment path: per
+ * this module's "ownership is DECLARED, never DERIVED" invariant (SPEC-076
+ * D8), a real `AssetSource` always sets `ownership` explicitly at load time.
+ * The mapping below is scoped to `RealAssetSource` (the MACHINE `~/.claude`
+ * installer) — it is NOT a universal kind→ownership truth: the project
+ * scaffold's `AssetSource` reuses `kind: "governance"` for files whose real
+ * ownership is `user_once`/`merged`, not `managed` (see this module's
+ * top-level doc comment for the full counter-example). A caller reading a
+ * legacy PROJECT-scope ledger should not use this function.
+ *
+ * The caller (the manifest-read seam SPEC-076 T5 wires into `SetupService`)
+ * owns emitting the single one-time stderr migration notice this fallback's
+ * existence implies — this function itself is silent and pure.
+ *
+ * @param kind - A manifest entry's `SetupEntryKind`, as produced by
+ *   `RealAssetSource` (or `SetupService`'s own synthetic `"mcp"` entry).
+ * @returns The best-effort {@link AssetOwnership} for that kind.
+ * @throws Never.
+ * @example
+ * deriveOwnershipFromKind("skill"); // => "managed"
+ * deriveOwnershipFromKind("settings-hook"); // => "merged"
+ */
+export function deriveOwnershipFromKind(kind: SetupEntryKind): AssetOwnership {
+  switch (kind) {
+    case "skill":
+    case "agent":
+    case "hook":
+    case "governance":
+    case "mcp":
+      return "managed";
+    case "settings-hook":
+      return "merged";
+    default: {
+      // Unreachable — SetupEntryKind is a closed Zod enum (setupEntryKindSchema)
+      // validated upstream; assigning `kind` to a `never`-typed const is a
+      // compile-time exhaustiveness guard (mirrors outline-service.ts's
+      // renderAcVerifyLine) that fails to build if a new kind is ever added
+      // without updating this switch. "managed" is the SAFEST fallback
+      // direction (D2: a managed, diverged file is never silently
+      // overwritten, only skipped+reported) — never reached in practice.
+      const _exhaustive: never = kind;
+      void _exhaustive;
+      return "managed";
+    }
+  }
+}
 
 // ─── Asset payload (planner input) ─────────────────────────────────────────
 
@@ -126,6 +278,18 @@ export const assetFileSchema = z.object({
    * schema rejecting it, ahead of `SetupService` being wired to read it.
    */
   executable: z.boolean().optional(),
+  /**
+   * OPTIONAL AT THE SCHEMA LEVEL (SPEC-076 §C4, additive/I3-regression-safe —
+   * a caller constructing an `AssetFile` with no opinion, e.g. a pre-SPEC-076
+   * asset source or `setup-project-flow.ts`'s own candidates, still
+   * validates). NOT optional in practice for `RealAssetSource.load()`'s own
+   * output — every file it returns sets this explicitly (see that module's
+   * doc comment and this module's top-level "ownership is DECLARED, never
+   * DERIVED" invariant for the full kind∩ownership legal-pairing table an
+   * unknown/mistyped string here is rejected by {@link assetOwnershipSchema}
+   * loud, at parse time, never silently defaulted).
+   */
+  ownership: assetOwnershipSchema.optional(),
 });
 
 /** Derived TypeScript type for one asset payload file. */

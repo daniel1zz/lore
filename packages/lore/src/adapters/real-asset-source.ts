@@ -49,11 +49,26 @@
  *   - `load()` never throws — an unreadable `assetsRoot`/subdirectory/file
  *     surfaces as `err(STORE_ERROR)` naming the failing path, never a
  *     partial or silently-empty payload.
+ *   - **SPEC-076 D8 — `AssetFile.ownership` is set EXPLICITLY here, per file,
+ *     never derived from `kind`.** This is the concrete producer `@lore/core`'s
+ *     `setup-manifest.ts` module doc names as the I6 legal-pairing table's
+ *     MACHINE-installer row: every walked file (all four `TOP_LEVEL_KIND_MAP`
+ *     kinds) is `ownership: "managed"` (`WALKED_ASSET_OWNERSHIP`); the
+ *     synthetic `settings.json` entry is `ownership: "merged"` (it is written
+ *     via `mergeSettings`'s deterministic merge, never a blind overwrite). No
+ *     file this port returns is ever `"user_once"` — that zone belongs
+ *     exclusively to the project-scaffold path (`setup-project-flow.ts`,
+ *     `lore.tree.yaml`/config templates), which this port has no knowledge of.
+ *     Every `AssetFile` `load()` returns therefore carries a non-undefined
+ *     `ownership` — `real-asset-source-ownership.test.ts` pins this as an
+ *     enumeration assertion over both the real repo `assets/` tree and a
+ *     synthetic fixture tree.
  *
  * Side-effect class: IO (synchronous node:fs reads only — never writes).
  * Source: SPEC-046 §Design; declared file set mirrors
  *   `packages/lore/tests/unit/assets-ssot.test.ts`'s manifest (minus
- *   `assets/project/`, out of this port's scope).
+ *   `assets/project/`, out of this port's scope). SPEC-076 §C1, §C4, D8
+ *   (ownership declaration).
  */
 
 import { createHash } from "node:crypto";
@@ -62,7 +77,7 @@ import { join } from "node:path";
 
 import { err, ok, buildHookSettingsEntries } from "@lore/core";
 import type { Result, LoreError } from "@lore/core";
-import type { AssetFile, AssetPayload, SetupEntryKind } from "@lore/core";
+import type { AssetFile, AssetOwnership, AssetPayload, SetupEntryKind } from "@lore/core";
 
 /** Placeholder token substituted for the real target dir by `SetupService.resolvePayload`. */
 const CLAUDE_DIR_PLACEHOLDER = "{{CLAUDE_DIR}}";
@@ -76,6 +91,23 @@ const TOP_LEVEL_KIND_MAP: Record<string, SetupEntryKind> = {
   hooks: "hook",
   governance: "governance",
 };
+
+/**
+ * Ownership zone for every file walked out of the four `TOP_LEVEL_KIND_MAP`
+ * directories (SPEC-076 D8) — all four kinds (`skill`/`agent`/`hook`/
+ * `governance`) are tool-owned, read-only distribution units from THIS
+ * port's perspective (see module doc's I6 table). A single constant, not a
+ * per-kind map, because the mapping is uniform across all four — unlike
+ * `kind`, which genuinely varies per top-level directory.
+ */
+const WALKED_ASSET_OWNERSHIP: AssetOwnership = "managed";
+
+/**
+ * Ownership zone for the synthetic `settings.json`/`kind: "settings-hook"`
+ * entry (SPEC-076 D8) — it is written via `mergeSettings`'s deterministic,
+ * both-parties-co-own merge, never a blind managed-style overwrite.
+ */
+const SETTINGS_HOOK_OWNERSHIP: AssetOwnership = "merged";
 
 /** Hex sha256 of a UTF-8 string — mirrors `SetupService`'s own private helper of the same shape. */
 function sha256Hex(content: string): string {
@@ -152,6 +184,7 @@ export class RealAssetSource implements AssetSource {
           kind,
           content,
           sha256: sha256Hex(content),
+          ownership: WALKED_ASSET_OWNERSHIP,
           ...(isExecutable ? { executable: true } : {}),
         });
       }
@@ -163,6 +196,7 @@ export class RealAssetSource implements AssetSource {
       kind: "settings-hook",
       content: settingsHookContent,
       sha256: sha256Hex(settingsHookContent),
+      ownership: SETTINGS_HOOK_OWNERSHIP,
     });
 
     return ok({ files });
