@@ -93,6 +93,16 @@ export class SQLiteStore implements StoreInterface {
     // Enable WAL for better concurrent read performance
     this.db.run("PRAGMA journal_mode = WAL");
     this.db.run("PRAGMA foreign_keys = ON");
+    // SPEC-078 D9: without a busy_timeout, a second writer contending for the
+    // same corpus file (e.g. a concurrently-mounted dashboard instance) gets an
+    // IMMEDIATE `SQLITE_BUSY` throw instead of a bounded retry-with-backoff —
+    // this is per-CONNECTION state (bun:sqlite defaults every new `Database` to
+    // 0ms), so it must be set here on every SQLiteStore construction, not once
+    // globally. 2000ms mirrors the multi-project mount registry's tolerance for
+    // a brief overlapping write from another mounted instance; TursoStore is
+    // deliberately untouched — libsql's client handles write serialization at
+    // the replica-sync layer, not via SQLite's file-level busy handler.
+    this.db.run("PRAGMA busy_timeout = 2000");
     this.runMigrations();
   }
 
