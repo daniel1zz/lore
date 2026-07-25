@@ -30,6 +30,9 @@
  *     - navigating to a SECOND distinct pathname fires a second, separate call
  *   REGRESSION:
  *     - a doc-route pathname decodes a URL-encoded id before the lookup
+ *     - navigating to /execution (SPEC-077 S1) issues exactly one POST with
+ *       route_id "/execution" — AC-077-6, generic pathname handling requires
+ *       no new telemetry code for this route
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -97,6 +100,18 @@ describe("useRouteTelemetry (AC-075-8)", () => {
 
       expect(mockApiPostRouteView).toHaveBeenCalledTimes(1);
       expect(mockApiPostRouteView).toHaveBeenCalledWith({ route_id: "/library" });
+    });
+  });
+
+  describe("regression (AC-077-6)", () => {
+    it("navigating to /execution issues exactly one POST with route_id '/execution'", () => {
+      mockUseRouterState.mockReturnValue("/execution");
+      mockGetQueryData.mockReturnValue(undefined);
+
+      renderHook(() => useRouteTelemetry());
+
+      expect(mockApiPostRouteView).toHaveBeenCalledTimes(1);
+      expect(mockApiPostRouteView).toHaveBeenCalledWith({ route_id: "/execution" });
     });
   });
 
