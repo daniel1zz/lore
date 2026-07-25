@@ -990,7 +990,17 @@ export class SQLiteStore implements StoreInterface {
     version: VersionRecord,
     audit: AuditEntry,
   ): Promise<Result<DocRecord, LoreError>> {
-    this.db.run("BEGIN IMMEDIATE");
+    // `BEGIN IMMEDIATE` gets its OWN try/catch, separate from the body below:
+    // a synchronous bun:sqlite throw here (e.g. SQLITE_IOERR_VNODE on a
+    // corpus file deleted out from under an open handle — observed live via
+    // SPEC-078 T2's multi-project mount probe) means no transaction was ever
+    // opened, so the body's ROLLBACK-on-catch must NOT run for it (ROLLBACK
+    // with nothing open is itself an error bun:sqlite would throw).
+    try {
+      this.db.run("BEGIN IMMEDIATE");
+    } catch (e) {
+      return wrapStoreError(e);
+    }
     try {
       const insertResult = this.insertDocSync(doc);
       if (!insertResult.ok) {
@@ -1034,7 +1044,15 @@ export class SQLiteStore implements StoreInterface {
     version: VersionRecord,
     audit: AuditEntry,
   ): Promise<Result<DocRecord, LoreError>> {
-    this.db.run("BEGIN IMMEDIATE");
+    // See insertWithProvenance's identical split above: BEGIN IMMEDIATE gets
+    // its own try/catch so a synchronous open-transaction throw returns
+    // err(STORE_ERROR) without attempting a ROLLBACK on a transaction that
+    // never opened.
+    try {
+      this.db.run("BEGIN IMMEDIATE");
+    } catch (e) {
+      return wrapStoreError(e);
+    }
     try {
       const updateResult = this.updateDocSync(id, patch, opts);
       if (!updateResult.ok) {
@@ -1077,7 +1095,15 @@ export class SQLiteStore implements StoreInterface {
     version: VersionRecord,
     audit: AuditEntry,
   ): Promise<Result<void, LoreError>> {
-    this.db.run("BEGIN IMMEDIATE");
+    // See insertWithProvenance's identical split above: BEGIN IMMEDIATE gets
+    // its own try/catch so a synchronous open-transaction throw returns
+    // err(STORE_ERROR) without attempting a ROLLBACK on a transaction that
+    // never opened.
+    try {
+      this.db.run("BEGIN IMMEDIATE");
+    } catch (e) {
+      return wrapStoreError(e);
+    }
     try {
       const deleteResult = this.softDeleteDocSync(id);
       if (!deleteResult.ok) {
