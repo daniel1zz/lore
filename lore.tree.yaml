@@ -22,3 +22,9 @@ root:
         - { type: knowledge, min: 0 }
     - { type: knowledge, min: 0 }
 # knowledge → knowledge deliberately unmodeled (unbounded recursion; see SPEC-032 §3.2 prose)
+# task is deliberately NOT declared as a child of prd here: SPEC-069 §Design
+# Decisions D2 ad-hoc tasks (extra.adhoc===true, incl. issue reports) ARE
+# parented to the root prd by CorpusService, but this YAML shape has no way
+# to key a slot on extra.adhoc — TreeCheckService.isAdhocTaskUnderRoot()
+# carries that exception in code instead, so it stays scoped to adhoc tasks
+# only (a non-adhoc task under a prd is still a genuine misplaced drift).
