@@ -31,10 +31,11 @@
  *     synchronous, so a page reload immediately after a switch still
  *     recalls the just-chosen project via the `/` redirect hook.
  *   - Navigates to the target project's HOME (`/p/:name`), never attempting
- *     to preserve the current sub-path — simple and never produces a 404 on
- *     a route that isn't mirrored under `/p/:name` yet (T10 mirrors only
- *     index/library/tree/settings/docs.$id; search/execution/issues/pending
- *     stay registry-less-only for now, a documented scope reduction).
+ *     to preserve the current sub-path — deliberate even though ALL routes
+ *     are mirrored under `/p/:name` (T13 completed the set T10 started):
+ *     the current sub-path names resources of the OLD project (doc ids,
+ *     search state) that need not exist in the target corpus, so home is
+ *     the only always-valid landing.
  * Side-effect class: IO (fetch via TanStack Query, localStorage, navigation)
  * Source: SPEC-078 D5, T10 dispatch deliverable 2
  *
