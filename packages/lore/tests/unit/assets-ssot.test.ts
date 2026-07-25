@@ -716,7 +716,17 @@ describe("assets-ssot — REGRESSION (BUG-004: no test-runner blocking in sessio
     },
   );
 
-  it("imports ONLY spawnSync from node:child_process — a bare `spawn` re-import is exactly what a re-added background test-runner block would need", () => {
+  // 2026-07-25 SPEC-076 Phase F exemption: T8 legitimately introduced a
+  // detached `spawn()` call (spawnSetupCheckRefresh) for the `lore setup
+  // --check --json` background cache refresh — fail-open + unref, with 13
+  // dedicated tests of its own (the SPEC-076 Phase F suite). A bare
+  // `import { ..., spawn }` is no longer forbidden outright, but the
+  // BUG-004 intent (2026-07-18: no re-introduced background test-runner
+  // block) still holds — so the proxy assertion moves from "spawn is never
+  // imported" to "every actual `spawn(` call site is provably the Phase F
+  // setup-check refresh, and nothing else". spawnSync must still be
+  // imported (Phase E git/bootstrap probes depend on it).
+  it("imports spawnSync from node:child_process (required by Phase E git/bootstrap probes)", () => {
     const content = readFileSync(SESSION_START_HOOK, "utf8");
     const importMatch = content.match(/import\s*\{([^}]*)\}\s*from\s*['"]node:child_process['"]/);
     expect(importMatch).not.toBeNull();
@@ -726,8 +736,58 @@ describe("assets-ssot — REGRESSION (BUG-004: no test-runner blocking in sessio
     }
     const importedNames = capturedNames.split(",").map((s) => s.trim());
     expect(importedNames).toContain("spawnSync");
-    expect(importedNames).not.toContain("spawn");
   });
+
+  it(
+    "every bare `spawn(` call site (non-spawnSync) is the SPEC-076 Phase F " +
+      "`lore setup --check` background refresh — any other spawn use (e.g. a " +
+      "re-introduced background test-runner) fails this test (BUG-004 intent, " +
+      "2026-07-25 Phase F exemption carve-out)",
+    () => {
+      const content = readFileSync(SESSION_START_HOOK, "utf8");
+
+      // Search code only — this file's prose (JSDoc block comments, full-line
+      // `//` comments) narrates `spawn()` in English (e.g. "spawn() throwing
+      // synchronously (rare) must never block session start") without being a
+      // real call site; strip both comment forms before scanning so those
+      // mentions can't produce a false match (positive OR negative).
+      const codeOnly = content.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+
+      // Word-boundary literal match: "spawnSync(" never matches `\bspawn\(`
+      // because "Sync" sits between "spawn" and "(" in that identifier — so
+      // this only finds genuine bare `spawn(...)` call sites, never
+      // `spawnSync(...)` ones.
+      const spawnCallRegex = /\bspawn\(/g;
+      const callSiteIndexes: number[] = [];
+      let match: RegExpExecArray | null;
+      while ((match = spawnCallRegex.exec(codeOnly)) !== null) {
+        callSiteIndexes.push(match.index);
+      }
+
+      if (callSiteIndexes.length > 0) {
+        // A bare `spawn` call site exists, so the import list must declare it
+        // explicitly (no re-export/aliasing trick that would hide it from the
+        // import-list check above).
+        const importMatch = content.match(/import\s*\{([^}]*)\}\s*from\s*['"]node:child_process['"]/);
+        expect(importMatch).not.toBeNull();
+        const capturedNames = (importMatch as RegExpMatchArray)[1];
+        if (capturedNames === undefined) {
+          throw new Error("node:child_process import regex matched but its capture group is undefined — regex bug");
+        }
+        const importedNames = capturedNames.split(",").map((s) => s.trim());
+        expect(importedNames).toContain("spawn");
+      }
+
+      // Each call site's surrounding argument text must reference the exact
+      // sanctioned invocation — `lore setup --check` — proving it is the
+      // Phase F cache refresh and not some other (e.g. test-runner) use.
+      for (const index of callSiteIndexes) {
+        const context = codeOnly.slice(index, index + 200);
+        expect(context).toContain("setup");
+        expect(context).toContain("--check");
+      }
+    },
+  );
 
   it("REGRESSION control: the marker scan is not vacuously true — a synthetic fixture carrying a forbidden marker IS flagged", () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "bug-004-regression-"));
