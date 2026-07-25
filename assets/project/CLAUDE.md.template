@@ -1,3 +1,4 @@
+# ─── lore governance (managed) ───
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
@@ -17,3 +18,4 @@ Run `/lore-init-context` to populate the module index below once this codebase h
 ## Module Index
 
 <!-- Populated by /lore-init-context. -->
+# ─── end lore governance ───

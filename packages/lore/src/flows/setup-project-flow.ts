@@ -18,8 +18,9 @@
  * `SetupService.install`'s plan → backup → write → manifest-last sequence —
  * see `runManifestWriteSeam` below for the full contract.
  *
- * **SPEC-060 D3/D4 — repo-root `.gitignore` (append) and `CLAUDE.md` (backup-
- * then-overwrite) stubs.** Both route through the SAME `plannedWrite`
+ * **SPEC-060 D3 / SPEC-076 D7 — repo-root `.gitignore` (append) and
+ * `CLAUDE.md` (marker-section rewrite, migrated off SPEC-060 D4's original
+ * blanket backup-then-overwrite) stubs.** Both route through the SAME `plannedWrite`
  * collector (`runManifestWriteSeam`) as the D1 hooks/tree_yaml candidates —
  * per the spec's own §Design ("Each of the four existing steps plus the two
  * new file steps (D3/D4) routes its writes through one `plannedWrite`
@@ -38,15 +39,25 @@
  *     byproduct of reusing the same rule uniformly (nothing is ever lost;
  *     the original bytes remain a prefix of the final file either way), not
  *     a design requirement of D3.
- *   - `CLAUDE.md` (`runClaudeMdStep`) computes its candidate content
- *     STATICALLY (the shipped `CLAUDE.md.template`, unconditionally,
- *     regardless of what's on disk) — this is what makes `planInstall`'s
- *     ordinary rule produce EXACTLY D4's documented "backup-then-overwrite"
- *     semantics with zero extra code: present-and-different -> write +
- *     backup (the file the operator's own `/lore-init-context` run may have
- *     since filled in gets clobbered, recoverably, per the owner-accepted
- *     trade-off in the spec's §Scope D4); absent -> plain write, no backup;
- *     present-and-identical -> skip.
+ *   - `CLAUDE.md` (`runClaudeMdStep`, SPEC-076 D7 — MIGRATED off SPEC-060 D4's
+ *     blanket backup-then-overwrite) computes its candidate content
+ *     DYNAMICALLY, same as `.gitignore` above, but marker-SECTION-scoped
+ *     rather than whole-file: the shipped `CLAUDE.md.template` asset is
+ *     itself wrapped in a `# ─── lore governance (managed) ───` /
+ *     `# ─── end lore governance ───` marker pair (mirrors `.gitignore`'s
+ *     marker-embedded-in-the-shipped-asset convention). `computeClaudeMdCandidate`
+ *     resolves three legacy on-disk forms to one candidate each: absent ->
+ *     the template verbatim (already marker-wrapped); byte-identical to the
+ *     OLD SPEC-060 D4 un-marked stub -> also fully replaced by the wrapped
+ *     form (it was lore's own prior output — nothing of the user's to
+ *     lose); anything else (genuinely user-authored/modified) -> the
+ *     marker-wrapped section is APPENDED at the end, every existing byte
+ *     preserved untouched. A file that already contains a valid marker pair
+ *     (a prior converge run's own output) has ONLY that span spliced out
+ *     and replaced — everything outside the markers stays byte-identical,
+ *     which is what makes a second consecutive run byte-identical too
+ *     (idempotency falls out of the splice, not a special case). See that
+ *     function's own doc comment for the full decision tree.
  * Because BOTH candidates may legitimately be classified `write` even when
  * their target was already present (unlike hooks/tree_yaml, which exclude a
  * present-and-different path from `candidates` entirely and so never reach
@@ -136,12 +147,16 @@
  *     write the ledger determines needs one — that surfaces as a LOUD,
  *     per-path `"failed"` result (see `runManifestWriteSeam`), never a silent
  *     skip-the-backup-and-overwrite. Neither of THIS module's own two
- *     ledger-tracked steps (hooks/tree_yaml) ever exercises the backup path
- *     today (see the conflict bullet above) — it exists for a future step
- *     with true backup-then-overwrite semantics (SPEC-060 D4, CLAUDE.md).
+ *     original ledger-tracked steps (hooks/tree_yaml) ever exercises the
+ *     backup path (see the conflict bullet above) — it IS exercised by the
+ *     `.gitignore` append step (first-append backup, see the module's own
+ *     D3 bullet above) and by the `CLAUDE.md` marker-section-rewrite step
+ *     (SPEC-076 D7, R3's "mandatory backup first" — falls out of
+ *     `planInstall`'s generic differs-then-backup rule whenever an existing
+ *     file's computed candidate differs from its on-disk bytes).
  *
  * Side-effect class: IO (delegates entirely to the injected ports)
- * Source: SPEC-046 §Design, §Scope; task AC-046-C. SPEC-060 §Design, D1.
+ * Source: SPEC-046 §Design, §Scope; task AC-046-C. SPEC-060 §Design, D1. SPEC-076 §C1 D7.
  */
 
 import { createHash } from "node:crypto";
@@ -289,11 +304,16 @@ export interface ProjectScaffoldReport {
    */
   gitignore: SimpleStepResult;
   /**
-   * SPEC-060 D4 — outcome of the repo-root `CLAUDE.md` backup-then-overwrite
-   * step. `"done"` covers BOTH a fresh write (file was absent) AND an
-   * overwrite of pre-existing, differing content (backed up first — see
-   * `backups` below); `"skipped"` means the on-disk file already matched the
-   * shipped template byte-for-byte.
+   * SPEC-076 D7 — outcome of the repo-root `CLAUDE.md` marker-section-rewrite
+   * step (migrated off SPEC-060 D4's blanket backup-then-overwrite). `"done"`
+   * covers a fresh write, a full replace of a byte-identical legacy pre-076
+   * stub, a section splice over an already marker-wrapped file, AND an
+   * append of the marker-wrapped section onto genuinely user-authored
+   * content — the last three back the OLD bytes up first whenever the
+   * computed candidate differs from disk (see `backups` below);
+   * `"skipped"` means the computed candidate already matched what's on disk
+   * byte-for-byte (a repeat converge with nothing to change). See
+   * `computeClaudeMdCandidate`'s doc comment for the full decision tree.
    */
   claude_md: SimpleStepResult;
   git_hooks_path: GitHooksPathResult;
@@ -343,9 +363,18 @@ const GITIGNORE_TARGET_NAME = ".gitignore";
 /** Delimiter marker `runGitignoreStep` searches for (substring check) to decide whether the block was already appended. */
 const GITIGNORE_MARKER = "# --- lore ---";
 
-/** The `assets/project/CLAUDE.md.template` asset — the repo-root `CLAUDE.md` stub, backup-then-overwrite (SPEC-060 D4). */
+/**
+ * The `assets/project/CLAUDE.md.template` asset — the repo-root `CLAUDE.md`
+ * stub, marker-section rewrite (SPEC-076 D7, migrated off SPEC-060 D4's
+ * blanket backup-then-overwrite). The shipped asset is itself wrapped in
+ * `CLAUDE_MD_MARKER_START`/`CLAUDE_MD_MARKER_END` (mirrors `GITIGNORE_MARKER`'s
+ * marker-embedded-in-the-asset convention) — see `computeClaudeMdCandidate`.
+ */
 const CLAUDE_MD_ASSET_NAME = "CLAUDE.md.template";
 const CLAUDE_MD_TARGET_NAME = "CLAUDE.md";
+/** Opening/closing markers bounding the section of `CLAUDE.md` lore owns — everything outside is the user's, untouched (SPEC-076 D7). */
+const CLAUDE_MD_MARKER_START = "# ─── lore governance (managed) ───";
+const CLAUDE_MD_MARKER_END = "# ─── end lore governance ───";
 
 // ─── SPEC-060 D1 — repo-level install ledger constants ─────────────────────
 
@@ -823,23 +852,120 @@ async function runGitignoreStep(
 }
 
 /**
- * Classifies the repo-root `CLAUDE.md` stub (SPEC-060 D4) — NEVER writes to
- * disk itself. Candidate content is the shipped template UNCONDITIONALLY
- * (never diffed against on-disk content here) — this is deliberate: it is
- * what makes `planInstall`'s ordinary "differs -> write + backup" rule
- * produce D4's documented backup-then-overwrite semantics automatically (see
- * this module's top-level doc comment).
+ * Splits a marker-wrapped `CLAUDE.md.template` asset into its managed
+ * BODY — everything strictly between the marker pair, exclusive of both
+ * marker lines and their own trailing newlines. Used ONLY by
+ * `computeClaudeMdCandidate` to derive the SPEC-060 D4 legacy-stub
+ * comparison target from the CURRENT shipped template, rather than
+ * duplicating that historical prose as a second hand-maintained string in
+ * this module.
+ *
+ * @throws If `template` doesn't start with `CLAUDE_MD_MARKER_START` and end
+ *   with `CLAUDE_MD_MARKER_END` — a malformed shipped asset, never a
+ *   runtime/user-data condition. `runClaudeMdStep`'s try/catch converts this
+ *   into the same `"failed"` step outcome any other asset-load failure gets.
+ */
+function splitManagedClaudeMdTemplate(template: string): string {
+  const startLine = `${CLAUDE_MD_MARKER_START}\n`;
+  const endLine = `${CLAUDE_MD_MARKER_END}\n`;
+  if (!template.startsWith(startLine) || !template.endsWith(endLine)) {
+    throw new Error("CLAUDE.md.template asset is not wrapped in the expected lore governance markers");
+  }
+  return template.slice(startLine.length, template.length - endLine.length);
+}
+
+/**
+ * Locates an EXISTING marker-wrapped span inside on-disk `existing` content,
+ * if present — byte offsets `{start, end}` spanning from the first
+ * `CLAUDE_MD_MARKER_START` occurrence through the matching
+ * `CLAUDE_MD_MARKER_END` occurrence PLUS its own trailing newline (absorbed
+ * here so `computeClaudeMdCandidate`'s splice never duplicates it —
+ * `template` itself always supplies that trailing newline). Returns `null`
+ * when no valid ordered marker pair is found, so the caller falls through to
+ * the legacy-stub / append decision instead.
+ */
+function findClaudeMdManagedRange(existing: string): { start: number; end: number } | null {
+  const start = existing.indexOf(CLAUDE_MD_MARKER_START);
+  if (start === -1) return null;
+  const endMarkerIdx = existing.indexOf(CLAUDE_MD_MARKER_END, start + CLAUDE_MD_MARKER_START.length);
+  if (endMarkerIdx === -1) return null;
+  let end = endMarkerIdx + CLAUDE_MD_MARKER_END.length;
+  if (existing[end] === "\n") end += 1;
+  return { start, end };
+}
+
+/**
+ * SPEC-076 D7 — computes the `CLAUDE.md` write candidate from whatever is
+ * (or isn't) currently on disk, resolving three legacy on-disk forms plus
+ * the idempotent-reconverge case to exactly one candidate each:
+ *
+ *   1. Already marker-wrapped (a prior converge run's own output, OR an
+ *      earlier form-(c) append that already introduced the markers) — ONLY
+ *      the governed span is spliced out and replaced with the fresh
+ *      `template`; everything before/after is preserved byte-for-byte. This
+ *      is what makes a second consecutive run over the SAME `template`
+ *      reproduce byte-identical output (idempotency needs no separate case),
+ *      and what confines a later template content change to the governed
+ *      span alone, never the user's surrounding text.
+ *   2. No CLAUDE.md on disk at all — `template` (already marker-wrapped in
+ *      the shipped asset) becomes the whole file, verbatim.
+ *   3. On disk, byte-identical to the SPEC-060 D4 legacy un-marked stub
+ *      (`splitManagedClaudeMdTemplate(template)`, i.e. today's managed body
+ *      with the markers stripped back off) — lore's own prior output, so it
+ *      is fully replaced by the marker-wrapped form exactly like case 2 (a
+ *      byte-identical match here PROVES nothing of the user's is at stake;
+ *      an unmatched/ambiguous stub safely falls through to case 4 instead —
+ *      the Scope-Alt-sanctioned safe direction, an extra marker block rather
+ *      than content loss).
+ *   4. On disk, anything else (genuinely user-authored or user-modified) —
+ *      the marker-wrapped section is APPENDED at the end; every existing
+ *      byte is preserved untouched. A leading newline separator is inserted
+ *      only when `existing` is non-empty and doesn't already end in one
+ *      (mirrors `runGitignoreStep`'s append rule).
+ *
+ * Never writes to disk or mutates any input — `runClaudeMdStep`'s try/catch
+ * is the only boundary that turns a thrown error (case 3's helper, on a
+ * malformed shipped asset) into a `"failed"` step result. `planInstall`'s
+ * ordinary "differs -> write + backup" rule then applies uniformly to
+ * whatever candidate this produces — R3's "mandatory backup first" falls out
+ * of that generic rule, zero extra logic needed here.
+ */
+function computeClaudeMdCandidate(existing: string | null, template: string): string {
+  if (existing !== null) {
+    const managedRange = findClaudeMdManagedRange(existing);
+    if (managedRange !== null) {
+      return existing.slice(0, managedRange.start) + template + existing.slice(managedRange.end);
+    }
+  }
+
+  if (existing === null) return template;
+
+  const legacyBody = splitManagedClaudeMdTemplate(template);
+  if (existing === legacyBody) return template;
+
+  const separator = existing.length === 0 ? "" : existing.endsWith("\n") ? "" : "\n";
+  return `${existing}${separator}${template}`;
+}
+
+/**
+ * Classifies the repo-root `CLAUDE.md` stub (SPEC-076 D7, migrated off
+ * SPEC-060 D4's blanket backup-then-overwrite) — NEVER writes to disk
+ * itself. Candidate content is computed by `computeClaudeMdCandidate` — see
+ * that function's doc comment for the full decision tree.
  */
 async function runClaudeMdStep(
   deps: ProjectScaffoldFlowDeps,
   repoDir: string,
 ): Promise<{ terminal?: SimpleStepResult; pending?: AssetFile }> {
+  const targetAbsPath = join(repoDir, CLAUDE_MD_TARGET_NAME);
   try {
     const assetResult = await deps.assets.readAsset(CLAUDE_MD_ASSET_NAME);
     if (!assetResult.ok) {
       return { terminal: { status: "failed", detail: describeError(assetResult.error) } };
     }
-    const content = assetResult.value;
+    const template = assetResult.value;
+    const existing = deps.fs.readFile(targetAbsPath);
+    const content = computeClaudeMdCandidate(existing, template);
     return {
       pending: { path: CLAUDE_MD_TARGET_NAME, kind: PROJECT_ASSET_KIND, content, sha256: sha256Hex(content) },
     };
@@ -893,8 +1019,8 @@ async function runGitHooksPathStep(deps: ProjectScaffoldFlowDeps, repoDir: strin
  * init (skipped if already present), `assets/project/` hooks copied into
  * `<repo>/hooks/` (conflict-checked, never clobbered), `lore.tree.yaml`
  * written from template (skipped if already present), a repo-root
- * `.gitignore` append (SPEC-060 D3), a repo-root `CLAUDE.md` backup-then-
- * overwrite stub (SPEC-060 D4), and `git config core.hooksPath hooks` wired
+ * `.gitignore` append (SPEC-060 D3), a repo-root `CLAUDE.md` marker-section
+ * rewrite stub (SPEC-076 D7), and `git config core.hooksPath hooks` wired
  * via the injected {@link ExecPort}. SPEC-060 D1 additionally records every
  * hooks/tree_yaml/gitignore/claude_md write into a repo-local ledger at
  * `.lore/.lore-project-manifest.json` via {@link runManifestWriteSeam} — see
