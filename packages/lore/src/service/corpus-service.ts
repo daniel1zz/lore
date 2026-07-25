@@ -110,6 +110,30 @@ function isUlid(input: string): boolean {
 }
 
 /**
+ * Doc types eligible for the create-time orphan advisory
+ * (task-create-time-orphan-advisory-warn-or-default-parent-to-root, dogfood finding
+ * 2026-07-25) — `spec`/`task` are excluded because `createDocInputSchema`'s superRefine
+ * already mandates their `parent_id` (a parentless create of either fails VALIDATION_ERROR
+ * before `_createImpl` ever reaches the advisory computation below, so they could never
+ * trigger it anyway); `prd` is excluded because it IS the root the advisory would name.
+ */
+const ORPHAN_ADVISORY_TYPES: ReadonlySet<DocType> = new Set(["adr", "plan", "knowledge"]);
+
+/**
+ * `CorpusService.create`'s return value — a `DocRecord` plus an OPTIONAL,
+ * non-persisted `orphan_advisory` string (task-create-time-orphan-advisory-...). The
+ * advisory is NEVER written to the `docs` table (see `_createImpl`'s final `return`) —
+ * it exists purely so the calling adapter (CLI/MCP/HTTP) can surface a one-line,
+ * non-blocking repair hint. Structurally a superset of `DocRecord`, so every
+ * pre-existing caller that only destructures known `DocRecord` fields (or treats the
+ * value as a plain `DocRecord`) keeps compiling unchanged — `createHandoffDoc`/
+ * `createUatDoc` deliberately keep their OWN return type as plain `DocRecord` (their
+ * internal-bypass callers, `SessionService.writeHandoff`/`UatService.record`, don't
+ * consume the advisory) even though both share this same `_createImpl` body.
+ */
+export type CreateDocResult = DocRecord & { readonly orphan_advisory?: string };
+
+/**
  * Names a structured `extra` field that a `lore set` / HTTP PATCH / MCP `lore_set`
  * patch would silently DROP, plus the dedicated writer that should be used instead.
  * `null` means no drop detected — the common case.
@@ -406,7 +430,7 @@ export class CorpusService {
    *   `VALIDATION_ERROR` — see {@link createHandoffDoc} for the sole legitimate
    *   creation path for that sub_type (SPEC-041 §3 D4).
    */
-  async create(input: CreateDocInput): Promise<Result<DocRecord, LoreError>> {
+  async create(input: CreateDocInput): Promise<Result<CreateDocResult, LoreError>> {
     const startMs = Date.now();
     const result = await this._createImpl(input);
     this.recordTelemetryEvent("create", startMs, result, { type: input.type });
@@ -457,7 +481,7 @@ export class CorpusService {
   private async _createImpl(
     input: CreateDocInput,
     opts?: { allowHandoff?: boolean; allowUat?: boolean },
-  ): Promise<Result<DocRecord, LoreError>> {
+  ): Promise<Result<CreateDocResult, LoreError>> {
     const parsed = createDocInputSchema.safeParse(input);
     if (!parsed.success) {
       const issue = parsed.error.issues[0];
@@ -913,7 +937,60 @@ export class CorpusService {
     // error.
     await this.writeProvenanceLink(insertResult.value);
 
-    return ok(insertResult.value);
+    // Create-time orphan advisory (task-create-time-orphan-advisory-warn-or-default-
+    // parent-to-root). reason: skipped entirely for the internal handoff/uat bypass
+    // paths (`opts.allowHandoff`/`opts.allowUat`) — those knowledge docs are linked to
+    // their subject via a graph `informs` edge, not `parent_id`, so a null parent there
+    // is expected shape, not an omission the advisory should ever flag.
+    const orphanAdvisory =
+      opts?.allowHandoff !== true && opts?.allowUat !== true
+        ? await this.computeOrphanAdvisory(data.type, resolvedParentId, insertResult.value.slug)
+        : undefined;
+
+    return ok(
+      orphanAdvisory !== undefined
+        ? { ...insertResult.value, orphan_advisory: orphanAdvisory }
+        : insertResult.value,
+    );
+  }
+
+  /**
+   * Create-time orphan advisory (task-create-time-orphan-advisory-warn-or-default-
+   * parent-to-root, dogfood finding 2026-07-25): a non-blocking, informational note —
+   * never an error, never a parent mutation — for a parentless adr/plan/knowledge
+   * create WHILE a root PRD already exists in the corpus.
+   *
+   * @invariant Orchestrator decision: ADVISORY-ONLY, never default-parenting. Silently
+   *   changing `parent_id` on a flagless create would be implicit magic; the SPEC-069
+   *   `--adhoc` auto-parenting precedent (`_createImpl`'s ad-hoc task block above) only
+   *   fires under an EXPLICIT `--adhoc` flag, never implicitly for a plain create.
+   * @invariant Deliberately silent when no root PRD exists yet — the SAME pre-PRD-
+   *   exploration deadlock rationale `spec`/`task`'s mandatory `parent_id` was carved
+   *   around (module header, "Gap" section of the governing task). Reuses the EXACT
+   *   "first PRD" lookup the ad-hoc auto-parenting block above already uses
+   *   (`store.findMany({type:"prd"})[0]`) — no second root-finding heuristic introduced.
+   * @param type - The doc's type; only `ORPHAN_ADVISORY_TYPES` members can trigger this.
+   * @param resolvedParentId - The already-resolved parent id (`null` = no parent supplied).
+   * @param slug - The just-created doc's own slug, named in the repair command.
+   * @returns `undefined` when not applicable (wrong type, parent supplied, no root PRD,
+   *   or the root-PRD lookup itself failed — a read failure degrades silently rather
+   *   than turning a successful create into an error) — a fact, never surfaced as an
+   *   error; a one-line repair-command string otherwise.
+   */
+  private async computeOrphanAdvisory(
+    type: DocType,
+    resolvedParentId: DocId | null,
+    slug: string,
+  ): Promise<string | undefined> {
+    if (resolvedParentId !== null || !ORPHAN_ADVISORY_TYPES.has(type)) return undefined;
+    const prdsResult = await this.store.findMany({ type: "prd" });
+    if (!prdsResult.ok) return undefined;
+    const rootPrd = prdsResult.value[0];
+    if (!rootPrd) return undefined;
+    return (
+      `Advisory: '${slug}' has no parent — consider ` +
+      `\`lore link ${slug} ${rootPrd.slug} --type parent\` to attach it to the root PRD.`
+    );
   }
 
   /**

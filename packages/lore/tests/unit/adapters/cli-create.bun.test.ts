@@ -1212,6 +1212,106 @@ describe("lore create — --requires-uat (SPEC-058 hotfix)", () => {
   });
 });
 
+// ─── Create-time orphan advisory (task-create-time-orphan-advisory-warn-or-default-
+// parent-to-root) ──────────────────────────────────────────────────────────────
+
+describe("lore create — orphan advisory", () => {
+  it("HAPPY: parentless knowledge --sub-type retro, root PRD exists → advisory printed to stderr, exit stays 0", async () => {
+    await initLoreDb();
+    const cmd = await importCreateCommand();
+
+    // Root PRD first, so the corpus has one for the advisory to point at.
+    const prdOutput = captureOutput();
+    const prdExit = captureExit();
+    try {
+      await runCmd(cmd, { type: "prd", title: "Root PRD", ai: false });
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
+    } finally {
+      prdOutput.restore();
+    }
+    expect(prdExit.code).toBeUndefined();
+    const prdSlug = prdOutput.stdout.find((l) => l.includes("prd-"))?.match(/prd-[\w-]+/)?.[0];
+    expect(prdSlug).toBeTruthy();
+
+    const output = captureOutput();
+    const exit = captureExit();
+    try {
+      await runCmd(cmd, { type: "knowledge", title: "Team Retro", "sub-type": "retro", ai: false });
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
+    } finally {
+      output.restore();
+    }
+
+    // Advisory-only — never a failure.
+    expect(exit.code).toBeUndefined();
+    expect(output.stdout.join("\n")).toContain("Created knowledge document");
+    const errText = output.stderr.join("\n");
+    expect(errText).toContain("⚠");
+    expect(errText).toContain("lore link");
+    expect(errText).toContain("--type parent");
+    expect(errText).toContain(String(prdSlug));
+  });
+
+  it("NEGATIVE: parentless knowledge --sub-type retro, NO root PRD in this corpus → no advisory (pre-PRD exploration stays silent)", async () => {
+    await initLoreDb();
+    const cmd = await importCreateCommand();
+
+    const output = captureOutput();
+    const exit = captureExit();
+    try {
+      await runCmd(cmd, { type: "knowledge", title: "Early Note", "sub-type": "retro", ai: false });
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
+    } finally {
+      output.restore();
+    }
+
+    expect(exit.code).toBeUndefined();
+    expect(output.stdout.join("\n")).toContain("Created knowledge document");
+    expect(output.stderr).toHaveLength(0);
+  });
+
+  it("BOUNDARY: knowledge created WITH --parent (root PRD also exists) → no advisory", async () => {
+    await initLoreDb();
+    const cmd = await importCreateCommand();
+
+    const prdOutput = captureOutput();
+    const prdExit = captureExit();
+    try {
+      await runCmd(cmd, { type: "prd", title: "Root PRD", ai: false });
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
+    } finally {
+      prdOutput.restore();
+    }
+    expect(prdExit.code).toBeUndefined();
+    const prdSlug = prdOutput.stdout.find((l) => l.includes("prd-"))?.match(/prd-[\w-]+/)?.[0];
+    expect(prdSlug).toBeTruthy();
+
+    const output = captureOutput();
+    const exit = captureExit();
+    try {
+      await runCmd(cmd, {
+        type: "knowledge",
+        title: "Attached Note",
+        "sub-type": "retro",
+        parent: prdSlug,
+        ai: false,
+      });
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
+    } finally {
+      output.restore();
+    }
+
+    expect(exit.code).toBeUndefined();
+    expect(output.stdout.join("\n")).toContain("Created knowledge document");
+    expect(output.stderr).toHaveLength(0);
+  });
+});
+
 // ─── REGRESSION guards ────────────────────────────────────────────────────────
 
 describe("lore create — regression guards", () => {

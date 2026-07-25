@@ -942,8 +942,13 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
 
     const result = await corpusService.create(resolvedCreateInput);
     if (!result.ok) return errorContent(result.error);
-    const { id, slug, type, status, version } = result.value;
-    return textContent({ id, slug, type, status, version });
+    const { id, slug, type, status, version, orphan_advisory } = result.value;
+    const payload: Record<string, unknown> = { id, slug, type, status, version };
+    // Create-time orphan advisory (task-create-time-orphan-advisory-warn-or-default-
+    // parent-to-root) — non-blocking, present only when CorpusService.create computed
+    // one; never affects `isError`/the response's other fields.
+    if (orphan_advisory !== undefined) payload["orphan_advisory"] = orphan_advisory;
+    return textContent(payload);
   });
 
   // lore_get
