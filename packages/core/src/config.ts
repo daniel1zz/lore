@@ -73,6 +73,88 @@ export const LoreDefaultsSchema = z
 /** CLI output defaults (editor, format, color). All fields optional. */
 export type LoreDefaults = z.infer<typeof LoreDefaultsSchema>;
 
+// ─── Dashboard Multi-Project Registry Schema (SPEC-078 D3, Q3) ───────────────
+
+/**
+ * One `dashboard.projects` registry entry — a switcher label (also the
+ * `/p/:name` route segment and `MountRegistry` Map key, SPEC-078 D2) paired
+ * with the project root path whose `.lore/lore.db` gets mounted.
+ *
+ * @invariant `name` is the uniqueness key enforced by
+ *   {@link DashboardConfigSchema}'s superRefine below — a duplicate makes one
+ *   entry structurally unreachable (same class of collision `planExtraSchema`
+ *   guards for `phases[].name`, `packages/core/src/schemas.ts`).
+ */
+const DashboardProjectEntrySchema = z
+  .object({
+    /** Switcher label + `/p/:name` route segment + registry Map key. Must be unique within `dashboard.projects`. */
+    name: z.string().min(1),
+    /** Absolute path to the project root (the `.lore/lore.db` corpus lives inside it). */
+    path: z.string().min(1),
+  })
+  .strict();
+
+/** One `dashboard.projects` registry entry. Source: SPEC-078 D3. */
+export type DashboardProjectEntry = z.infer<typeof DashboardProjectEntrySchema>;
+
+/**
+ * Dashboard multi-project registry config section (SPEC-078 D3, Q3).
+ * Optional — absence means registry-less single-project mode, observably
+ * identical to pre-SPEC-078 behavior (R-15).
+ *
+ * @invariant `projects[].name` MUST be unique — enforced by superRefine below
+ *   (case-sensitive, exact-match; same convention as `planExtraSchema`'s
+ *   `phases[].name` uniqueness check). A duplicate fails the WHOLE config
+ *   parse with a named issue pointing at BOTH colliding indices' `name` path,
+ *   never a silent last-one-wins overwrite.
+ * @invariant Absence of `projects`, or an empty array, both mean "no
+ *   registry entries" — neither is an error.
+ */
+export const DashboardConfigSchema = z
+  .object({
+    /** Registry of mountable projects (SPEC-078 D2 `MountRegistry` source). Absent → registry-less mode. */
+    projects: z.array(DashboardProjectEntrySchema).optional(),
+  })
+  .strict()
+  .superRefine((data, ctx) => {
+    if (!data.projects) return;
+    const seen = new Map<string, number>();
+    for (let i = 0; i < data.projects.length; i++) {
+      const entry = data.projects[i];
+      if (!entry) continue;
+      const firstIdx = seen.get(entry.name);
+      if (firstIdx !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `dashboard.projects[].name must be unique — "${entry.name}" appears at indices ${firstIdx} and ${i}`,
+          path: ["projects", i, "name"],
+        });
+      } else {
+        seen.set(entry.name, i);
+      }
+    }
+  });
+
+/** Dashboard multi-project registry config. Source: SPEC-078 D3. */
+export type DashboardConfig = z.infer<typeof DashboardConfigSchema>;
+
+/**
+ * Per-mount classification state (SPEC-078 D7) — client-renderable via
+ * `GET /api/projects` (the dashboard project switcher's per-entry badge) and
+ * the internal `MountRegistry`/`MountEntry` state (`packages/lore/src/mount/`).
+ * The ONLY four classes D2's probe-then-classify step produces:
+ *   - `"mounted"` — probed clean, `createApp` succeeded, routes are live.
+ *   - `"missing"` — registry `path` does not resolve to an existing corpus.
+ *   - `"schema-skew"` — a `.lore/lore.db` exists but its `PRAGMA user_version`
+ *     predates/exceeds what this binary supports (never auto-migrated, R-11).
+ *   - `"error"` — `createApp` (or, at runtime, a per-request dispatch) threw;
+ *     this entry's routes return a named 5xx, other mounts are unaffected.
+ */
+export const MOUNT_STATES = ["mounted", "missing", "schema-skew", "error"] as const;
+
+/** {@link MOUNT_STATES} as a union type. Source: SPEC-078 D7. */
+export type MountState = (typeof MOUNT_STATES)[number];
+
 // ─── Global Config Schema (XDG / $LORE_CONFIG_HOME) ──────────────────────────
 
 /**
@@ -84,10 +166,19 @@ export type LoreDefaults = z.infer<typeof LoreDefaultsSchema>;
  *
  * @invariant MUST NOT contain project / sync / telemetry sections (strict schema).
  * @invariant Missing file is NOT an error — returns ok({}).
+ * @invariant `dashboard` (SPEC-078 D3) lives here, not in the project-level
+ *   `LoreConfigSchema` — the multi-project registry is a machine-scope fact
+ *   ("which corpora does THIS machine's dashboard mount"), mirroring D1's
+ *   machine-scope auth DB reasoning.
  */
 export const GlobalLoreConfigSchema = z
   .object({
     defaults: LoreDefaultsSchema.optional(),
+    /**
+     * Dashboard multi-project registry (SPEC-078 D3). Absent → registry-less
+     * single-project mode, unchanged from pre-SPEC-078 behavior (R-15).
+     */
+    dashboard: DashboardConfigSchema.optional(),
   })
   .strict();
 
