@@ -13,6 +13,10 @@ import { MIGRATION_004_SQL } from "./migrations/migration-004.js";
 import { MIGRATION_005_SQL } from "./migrations/migration-005.js";
 import { MIGRATION_006_SQL } from "./migrations/migration-006.js";
 import { MIGRATION_007_SQL } from "./migrations/migration-007.js";
+import {
+  MIGRATION_008_ADD_COLUMNS_SQL,
+  MIGRATION_008_FTS_REBUILD_SQL,
+} from "./migrations/migration-008.js";
 // SPEC-072 (upstream issue reporting) §3 Structure — re-exported here (beside
 // the migration chain it describes) from a bun:sqlite-free sibling module so
 // vitest-reachable code (e.g. flows/upstream-probe.ts, a later phase of this
@@ -57,6 +61,7 @@ import {
   type JudgmentRow,
   type LinkRow,
   type VersionRow,
+  computeFtsShadowValues,
   escapeFtsQuery,
   rowToAuditEntry,
   rowToCalibrationRecordWithPromptVersion,
@@ -238,6 +243,43 @@ export class SQLiteStore implements StoreInterface {
         throw error;
       }
     }
+
+    if (currentVersion < 8) {
+      // reason: migration-008 is a THREE-PHASE sequence (ADD COLUMN → JS
+      // per-row CJK bigram backfill → docs_fts drop/recreate + rebuild),
+      // NOT a single self-contained SQL string like migrations 004-007 — see
+      // migration-008.ts's module JSDoc for why. This block owns the
+      // transaction wrapper (BEGIN IMMEDIATE .. COMMIT around all three
+      // phases) that the SQL constants deliberately do NOT embed themselves,
+      // mirroring migration-004/005/006/007's identical catch/ROLLBACK
+      // rethrow shape for the "bun:sqlite doesn't auto-rollback a caught
+      // mid-transaction throw" reason documented on this method's own JSDoc.
+      try {
+        this.db.run("BEGIN IMMEDIATE");
+        this.db.exec(MIGRATION_008_ADD_COLUMNS_SQL);
+
+        const rows = this.db
+          .query("SELECT id, title, content, tags FROM docs")
+          .all() as { id: string; title: string; content: string; tags: string }[];
+        const backfillStmt = this.db.prepare(
+          "UPDATE docs SET fts_title = ?, fts_content = ?, fts_tags = ? WHERE id = ?",
+        );
+        for (const row of rows) {
+          const shadow = computeFtsShadowValues(row.title, row.content, row.tags);
+          backfillStmt.run(shadow.fts_title, shadow.fts_content, shadow.fts_tags, row.id);
+        }
+
+        this.db.exec(MIGRATION_008_FTS_REBUILD_SQL);
+        this.db.run("COMMIT");
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-004/005/006/007 — safe to ignore, see above.
+        }
+        throw error;
+      }
+    }
   }
 
   // ── Document CRUD ─────────────────────────────────────────────────────────
@@ -253,13 +295,19 @@ export class SQLiteStore implements StoreInterface {
    */
   private insertDocSync(doc: DocRecord): Result<DocRecord, LoreError> {
     try {
+      const tagsJson = JSON.stringify(doc.tags);
+      // reason: fts_title/fts_content/fts_tags (migration-008) are the CJK
+      // bigram shadow columns docs_fts actually indexes — every INSERT MUST
+      // compute and persist them alongside the real columns, or this doc is
+      // silently unsearchable by CJK query bigrams until its next update.
+      const shadow = computeFtsShadowValues(doc.title, doc.content, tagsJson);
       this.db
         .prepare(
           `INSERT INTO docs
              (id, slug, type, role, title, status, priority, content,
               parent_id, extra, tags, version, created_at, updated_at,
-              created_by, deleted_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              created_by, deleted_at, fts_title, fts_content, fts_tags)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           doc.id,
@@ -272,12 +320,15 @@ export class SQLiteStore implements StoreInterface {
           doc.content,
           doc.parent_id ?? null,
           JSON.stringify(doc.extra),
-          JSON.stringify(doc.tags),
+          tagsJson,
           doc.version,
           doc.created_at,
           doc.updated_at,
           doc.created_by,
           doc.deleted_at ?? null,
+          shadow.fts_title,
+          shadow.fts_content,
+          shadow.fts_tags,
         );
       return ok(doc);
     } catch (e) {
@@ -476,6 +527,12 @@ export class SQLiteStore implements StoreInterface {
         ...patch,
         id: current.id, // id is immutable
       };
+      const updatedTagsJson = JSON.stringify(updated.tags);
+      // reason: same shadow-column obligation as insertDocSync — an UPDATE
+      // that skips this leaves fts_title/fts_content/fts_tags reflecting the
+      // PRE-patch text, so CJK search on the new title/content silently
+      // misses until some LATER write happens to touch this doc again.
+      const shadow = computeFtsShadowValues(updated.title, updated.content, updatedTagsJson);
 
       if (opts?.expected_version !== undefined) {
         // Conditional UPDATE: only affects the row if version still matches
@@ -485,7 +542,8 @@ export class SQLiteStore implements StoreInterface {
                slug = ?, type = ?, role = ?, title = ?, status = ?,
                priority = ?, content = ?, parent_id = ?, extra = ?,
                tags = ?, version = ?, created_at = ?, updated_at = ?,
-               created_by = ?, deleted_at = ?
+               created_by = ?, deleted_at = ?, fts_title = ?, fts_content = ?,
+               fts_tags = ?
              WHERE id = ? AND version = ?`,
           )
           .run(
@@ -498,12 +556,15 @@ export class SQLiteStore implements StoreInterface {
             updated.content,
             updated.parent_id ?? null,
             JSON.stringify(updated.extra),
-            JSON.stringify(updated.tags),
+            updatedTagsJson,
             updated.version,
             updated.created_at,
             updated.updated_at,
             updated.created_by,
             updated.deleted_at ?? null,
+            shadow.fts_title,
+            shadow.fts_content,
+            shadow.fts_tags,
             id,
             opts.expected_version,
           );
@@ -537,7 +598,8 @@ export class SQLiteStore implements StoreInterface {
              slug = ?, type = ?, role = ?, title = ?, status = ?,
              priority = ?, content = ?, parent_id = ?, extra = ?,
              tags = ?, version = ?, created_at = ?, updated_at = ?,
-             created_by = ?, deleted_at = ?
+             created_by = ?, deleted_at = ?, fts_title = ?, fts_content = ?,
+             fts_tags = ?
            WHERE id = ?`,
         )
         .run(
@@ -550,12 +612,15 @@ export class SQLiteStore implements StoreInterface {
           updated.content,
           updated.parent_id ?? null,
           JSON.stringify(updated.extra),
-          JSON.stringify(updated.tags),
+          updatedTagsJson,
           updated.version,
           updated.created_at,
           updated.updated_at,
           updated.created_by,
           updated.deleted_at ?? null,
+          shadow.fts_title,
+          shadow.fts_content,
+          shadow.fts_tags,
           id,
         );
 

@@ -111,11 +111,11 @@ describe("migration-006 mid-transaction failure — PRAGMA foreign_keys restore 
     const store = new SQLiteStore(":memory:");
     const db = store.getDatabase();
 
-    // reason: SPEC-072 added migration-007 (versions.slug) — a fresh store now
-    // runs every migration up to the current head (7), not just through
+    // reason: migration-008 (CJK bigram shadow columns) is now the head — a
+    // fresh store runs every migration up to it, not just through
     // migration-006. This test's own concern (FK enforcement restored after
     // migration-006) is unaffected — asserted directly below.
-    expect(userVersion(db)).toBe(7);
+    expect(userVersion(db)).toBe(8);
     expect(foreignKeysEnabled(db)).toBe(true);
 
     store.close();

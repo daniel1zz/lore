@@ -55,9 +55,10 @@ describe("migration-003 (review_judgments + calibration_records)", () => {
       user_version: number;
     };
     // reason: SPEC-044 T1 added migration-005; SPEC-056 added migration-006 (docs.type
-    // CHECK widening); SPEC-072 added migration-007 (versions.slug) — a fresh store now
-    // runs every migration up to the current head (7), not just through migration-003/004.
-    expect(userVersion).toBe(7);
+    // CHECK widening); SPEC-072 added migration-007 (versions.slug); the CJK bigram
+    // shadow-column migration added migration-008 — a fresh store now runs every
+    // migration up to the current head (8), not just through migration-003/004.
+    expect(userVersion).toBe(8);
 
     const tableNames = db
       .query("SELECT name FROM sqlite_master WHERE type = 'table'")
@@ -129,8 +130,9 @@ describe("migration-003 (review_judgments + calibration_records)", () => {
       user_version: number;
     };
     // reason: SPEC-044 T1 added migration-005; SPEC-056 added migration-006; SPEC-072
-    // added migration-007 — see HAPPY test's comment above.
-    expect(postUpgradeVersion).toBe(7);
+    // added migration-007; migration-008 (CJK bigram shadow columns) is now the head —
+    // see HAPPY test's comment above.
+    expect(postUpgradeVersion).toBe(8);
 
     const tableNames = db
       .query("SELECT name FROM sqlite_master WHERE type = 'table'")
@@ -157,8 +159,8 @@ describe("migration-003 (review_judgments + calibration_records)", () => {
         user_version: number;
       };
       // reason: SPEC-044 T1 added migration-005; SPEC-056 added migration-006; SPEC-072
-      // added migration-007 — see HAPPY test's comment above.
-      expect(userVersion).toBe(7);
+      // added migration-007; migration-008 is now the head — see HAPPY test's comment above.
+      expect(userVersion).toBe(8);
       secondOpen.close();
     }).not.toThrow();
   });
