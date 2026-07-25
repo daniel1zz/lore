@@ -409,4 +409,27 @@ describe("TriageQueue", () => {
       });
     });
   });
+
+  describe("state — project scoping (SPEC-078 T13, AC-078-7/AC-078-8)", () => {
+    it("scopes apiGetPendingReview/apiGetJudgments and the query cache key to the passed project", async () => {
+      const doc = makePendingDoc({ id: "01HDOC00000000000000000001", title: "Acme Doc" });
+      mockedGetPending.mockResolvedValue([doc]);
+      mockedGetJudgments.mockResolvedValue({ latest: null, history: [] });
+
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      render(
+        <QueryClientProvider client={client}>
+          <TriageQueue project="acme" />
+        </QueryClientProvider>,
+      );
+
+      await screen.findByText("Acme Doc");
+
+      expect(mockedGetPending).toHaveBeenCalledWith("acme");
+      expect(mockedGetJudgments).toHaveBeenCalledWith("acme", doc.id);
+
+      const keys = client.getQueryCache().getAll().map((q) => q.queryKey);
+      expect(keys).toContainEqual(["project:acme", "pending", "triage-queue"]);
+    });
+  });
 });

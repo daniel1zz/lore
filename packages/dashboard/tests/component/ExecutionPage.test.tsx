@@ -21,6 +21,13 @@
  *     - renders a loading skeleton while the active-plans query is pending
  *   REGRESSION:
  *     - clicking a ready-task row calls onNavigateToDoc with its doc id
+ *
+ * SPEC-078 T13 addendum — project scoping (AC-078-7/AC-078-8, the
+ * `/p/:name/execution` mirror route's own component-test half):
+ *   STATE — passing `project="acme"` (the value `routes/p.$name.execution.tsx`
+ *     resolves from `Route.useParams()` and threads in) scopes every fetch
+ *     call AND every TanStack Query cache key with the `project:acme` segment
+ *     — `queryKeys.scope`'s prefixing contract (`project-api.ts`).
  */
 
 import "@testing-library/jest-dom/vitest";
@@ -204,6 +211,29 @@ describe("ExecutionPage", () => {
       renderWithClient(<ExecutionPage planParam="plan-a" onPlanChange={vi.fn()} onNavigateToDoc={onNavigateToDoc} />);
       await user.click(await screen.findByText("Task A"));
       expect(onNavigateToDoc).toHaveBeenCalledWith("01HTASK0000000000000000001");
+    });
+  });
+
+  describe("state — project scoping (SPEC-078 T13, AC-078-7/AC-078-8)", () => {
+    it("scopes the active-plans, ready-report, and phase-status fetches to the passed project", async () => {
+      mockedApiList.mockResolvedValue({ docs: [makePlan()], total: 1 });
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      render(
+        <QueryClientProvider client={client}>
+          <ExecutionPage project="acme" planParam="plan-a" onPlanChange={vi.fn()} onNavigateToDoc={vi.fn()} />
+        </QueryClientProvider>,
+      );
+
+      await screen.findByText("Ready Tasks");
+
+      expect(mockedApiList).toHaveBeenCalledWith("acme", { type: "plan", status: "active" });
+      expect(mockedApiGetReadyReport).toHaveBeenCalledWith("acme", "plan-a");
+      expect(mockedApiGetPhaseStatus).toHaveBeenCalledWith("acme", "plan-a");
+
+      const keys = client.getQueryCache().getAll().map((q) => q.queryKey);
+      expect(keys).toContainEqual(["project:acme", "execution", "active-plans"]);
+      expect(keys).toContainEqual(["project:acme", "execution", "ready", "plan-a"]);
+      expect(keys).toContainEqual(["project:acme", "execution", "phase-status", "plan-a"]);
     });
   });
 });

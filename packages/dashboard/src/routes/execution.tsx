@@ -8,13 +8,20 @@
  *   lives in `ExecutionPage`. Route telemetry (`route_id: "/execution"`) is
  *   automatic via `__root.tsx`'s `useRouteTelemetry`, mounted once at the
  *   root layout — no telemetry code needed here (AC-077-6).
+ * SPEC-078 T13: `executionSearchSchema` exported for reuse by
+ *   `routes/p.$name.execution.tsx`'s own `validateSearch` — that mirror route
+ *   owns its own `Route.useSearch()`/`useNavigate({from: "/p/$name/execution"})`
+ *   bindings and passes `project={name}` into `ExecutionPage` (which already
+ *   accepts an explicit `project` prop, unlike `useProjectParam()`-driven
+ *   bodies such as `SearchPageBody`).
  */
 
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { z } from "zod";
 import { ExecutionPage } from "@/components/ExecutionPage";
 
-const executionSearchSchema = z.object({
+/** Exported for reuse by `routes/p.$name.execution.tsx`'s own `validateSearch`. */
+export const executionSearchSchema = z.object({
   plan: z.string().optional(),
 });
 
