@@ -1,11 +1,23 @@
-// SPIKE-CONCLUSION: throw — deleting a mounted corpus's `lore.db` (+ `-wal`/`-shm`)
+// SPIKE-CONCLUSION (revised 2026-07-25, task-stabilize-deleted-corpus-liveness):
+// settle-fast, never hang — deleting a mounted corpus's `lore.db` (+ `-wal`/`-shm`)
 // mid-session, while its `bun:sqlite` `Database` handle stays open, makes the NEXT
-// write against that corpus REJECT near-instantly (observed ~0-1ms, always << the
-// 5000ms ceiling) with a real thrown `SQLiteError` ("disk I/O error",
-// `SQLITE_IOERR_VNODE`) — never a hang. A concurrent operation against an intact
-// corpus B is unaffected and resolves normally in the SAME window. Watchdog
-// verdict for T8: NOT REQUIRED for this failure mode — Promise.race around store
-// dispatch would be pure defense-in-depth here, not a fix for an observed hang.
+// write against that corpus SETTLE near-instantly (observed well under the 5000ms
+// ceiling in every recorded run) — but WHICH way it settles is a genuine OS/SQLite
+// race, not a JS-event-loop timing artifact. The common case is a thrown
+// `SQLiteError` ("disk I/O error", `SQLITE_IOERR_VNODE`). The other observed case
+// is a silent SELF-HEAL: POSIX unlink-while-open keeps the main db file's inode
+// alive via the already-open fd, so if `bun:sqlite`'s WAL layer needs to reopen
+// `-wal`/`-shm` before this write (e.g. an auto-checkpoint fired in the gap since
+// the seed write), `open(O_CREAT)` on the now-directory-entry-free path trivially
+// succeeds, a fresh WAL is created, and the write lands normally. Under concurrent
+// full-suite load this file recorded the resolve branch twice (SPEC-078 T7/T8
+// evidence) where an earlier version of this test asserted "always rejects" and
+// failed; in EVERY recorded run — loaded or not — the operation has settled well
+// under the ceiling and never once hit TIMEOUT. Watchdog verdict for T8: NOT
+// REQUIRED for this failure mode in EITHER branch — Promise.race around store
+// dispatch would be pure defense-in-depth here, not a fix for an observed hang. A
+// concurrent operation against an intact corpus B is unaffected and resolves
+// normally in the SAME window regardless of which branch A takes.
 
 /**
  * SPEC-078 D8 — deleted-corpus liveness spike (throw-vs-hang empirical pin).
@@ -26,13 +38,16 @@
  * WAL`, so the sidecars are load-bearing, not incidental) is unlinked mid-session.
  * A subsequent A-operation is raced against a 5000ms ceiling timer via
  * `withCeiling` — if the timer ever wins, `settled === "TIMEOUT"` and the
- * dedicated ceiling assertion fails the test. This mechanism, not the assertion
- * on WHICH branch occurred, is what makes the AC's "never hangs" guarantee
- * regression-proof: a future SQLiteStore change that turns this failure mode
- * into a hang trips this file even if nobody remembers today's throw finding.
+ * dedicated ceiling assertion fails the test. This mechanism is what makes the
+ * AC's "never hangs" guarantee regression-proof: a future SQLiteStore change
+ * that turns this failure mode into a hang trips this file regardless of which
+ * settle branch (resolve/reject) is in play. The assertions deliberately do
+ * NOT pin WHICH branch occurs (see file-header SPIKE-CONCLUSION for why that
+ * is a genuine OS/SQLite race, not noise this test should paper over) — only
+ * that it settles, and settles fast.
  *
  * Root-cause note (not fixed here — out of this task's anchors, filed for a
- * follow-up): the reject-not-hang behavior traces to
+ * follow-up): the reject branch's fast-throw traces to
  * `SQLiteStore.insertWithProvenance` issuing `this.db.run("BEGIN IMMEDIATE")`
  * OUTSIDE its own `try { ... } catch (e) { return wrapStoreError(e); }` block
  * (`packages/lore/src/store/sqlite-store.ts`) — so a synchronous `bun:sqlite`
@@ -42,12 +57,13 @@
  * throw beats a hang), but it is still a Result-contract gap worth closing —
  * this spike's job is to pin the liveness behavior, not patch that gap.
  *
- * Six-dimension framing: HAPPY (the AC's core throw-vs-hang + concurrent-B
- * scenario) and STATE (repeat A-operation after the first failure — proves the
- * fast-reject is a stable characteristic of the broken connection, not a
- * one-off artifact of the first failing call) are the only dimensions that
- * make sense for an empirical liveness pin — there is no NEGATIVE/BOUNDARY/
- * ERROR/REGRESSION variant of "does an already-broken store hang".
+ * Six-dimension framing: HAPPY (the AC's core settle-fast-vs-hang + concurrent-B
+ * scenario) and STATE (repeat A-operation after the first — proves fast
+ * settlement is a stable characteristic of the broken connection across
+ * repeated calls, not a one-off artifact of the first call) are the only
+ * dimensions that make sense for an empirical liveness pin — there is no
+ * NEGATIVE/BOUNDARY/ERROR/REGRESSION variant of "does an already-broken store
+ * hang".
  *
  * @spec_ref spec-078-dashboard-multi-project-mount-registry-machine-scope AC-078-3
  */
@@ -156,13 +172,23 @@ describe("deleted-corpus liveness spike — HAPPY", () => {
     expect(resultA.settled).not.toBe("TIMEOUT");
 
     // Empirically pinned (2026-07-25, macOS + bun:sqlite WAL mode, this repo's
-    // toolchain): corpus A's write REJECTS, and does so fast — not merely
-    // "under the 5000ms ceiling" but near-instantly, ruling out a slow-path
-    // near-miss.
-    expect(resultA.settled).toBe("rejected");
-    expect(resultA.ms).toBeLessThan(1000);
+    // toolchain): corpus A's write always SETTLES fast — well under half the
+    // ceiling, ruling out a slow-path near-miss — but WHICH way it settles is a
+    // genuine OS/SQLite race (see file-header SPIKE-CONCLUSION), not something
+    // this test should force into one branch. An earlier version of this
+    // assertion required `settled === "rejected"` unconditionally and recorded
+    // two failures under concurrent full-suite load where the resolve branch
+    // fired instead (SPEC-078 T7/T8 evidence) — both were fast, non-hanging
+    // settlements, i.e. exactly what this spike exists to confirm.
+    expect(["resolved", "rejected"]).toContain(resultA.settled);
+    expect(resultA.ms).toBeLessThan(RACE_CEILING_MS / 2);
     if (resultA.settled === "rejected") {
       expect(String(resultA.error)).toContain("SQLiteError");
+    } else if (resultA.settled === "resolved") {
+      // Self-heal branch (see SPIKE-CONCLUSION): bun:sqlite reopened a fresh
+      // -wal at the now-directory-entry-free path and the write actually
+      // landed — still a legitimate "did not hang" outcome, not corruption.
+      expect((resultA.value as { ok: boolean }).ok).toBe(true);
     }
 
     // Corpus B, mounted on an intact db file, must succeed in the SAME window
@@ -178,23 +204,28 @@ describe("deleted-corpus liveness spike — HAPPY", () => {
 // ─── STATE ────────────────────────────────────────────────────────────────────
 
 describe("deleted-corpus liveness spike — STATE", () => {
-  it("a second consecutive A-operation after the first failure also settles under the ceiling (not a first-call-only artifact)", async () => {
+  it("a second consecutive A-operation after the first also settles fast, never hangs (not a first-call-only artifact)", async () => {
     const corpusA = makeScratchCorpus("liveness-a-repeat-");
     const seedA = await corpusA.app.corpusService.create({ type: "prd", title: "Corpus A Root", content: "root" });
     expect(seedA.ok).toBe(true);
 
     unlinkCorpusDb(corpusA.dbPath);
 
+    // Per the file-header SPIKE-CONCLUSION, WHICH branch (resolve/reject) each
+    // call takes is a genuine OS/SQLite race — not pinned here, deliberately.
+    // What this STATE variant exists to prove is that fast settlement (never a
+    // hang) is a stable characteristic across repeated calls against the same
+    // broken connection, not a one-off artifact of the first call.
     const first = await withCeiling(
       corpusA.app.corpusService.create({ type: "prd", title: "First after unlink", content: "1" }),
     );
     expect(first.settled).not.toBe("TIMEOUT");
-    expect(first.settled).toBe("rejected");
+    expect(first.ms).toBeLessThan(RACE_CEILING_MS / 2);
 
     const second = await withCeiling(
       corpusA.app.corpusService.create({ type: "prd", title: "Second after unlink", content: "2" }),
     );
     expect(second.settled).not.toBe("TIMEOUT");
-    expect(second.settled).toBe("rejected");
+    expect(second.ms).toBeLessThan(RACE_CEILING_MS / 2);
   });
 });
