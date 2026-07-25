@@ -576,16 +576,31 @@ function feedUpstreamSpecCheckpoint(
  * points at the MCP `lore_set` tool's generic `extra` passthrough instead of
  * fabricating a non-existent CLI flag (this codebase's "never a broken
  * recovery command" discipline — SPEC-050's lesson).
+ *
+ * @remarks NON-DESTRUCTIVE recovery only (task-gate-feeding-pack-recovery-via-
+ *   lore-set-extra-wholesale, 2026-07-25 incident fix) — the ORIGINAL recovery
+ *   text here (`extra: {"requires_uat": true}`) was followed literally over MCP
+ *   `lore_set` and REPLACED a plan's whole `extra` object, wiping its 4
+ *   `extra.phases` entries (extra has no merge semantics on this write path).
+ *   The rewritten instruction below fetches-merges-then-sets the FULL object,
+ *   and `CorpusService.set` (`findDroppedStructuredExtraField`,
+ *   `corpus-service.ts`) now REJECTS a patch that would drop `extra.phases`
+ *   on a plan as a second, independent line of defense — this feeding pack is
+ *   the FIRST line (don't tell the caller to do the destructive thing in the
+ *   first place).
  */
 function feedRequiresUat(ctx: GateContext, failures: PredicateResult[]): string {
+  const target = ctx.targetIdOrSlug ?? "<plan>";
   const pack = buildFeedingPack({
     ruleSource: "corpus (verification profile)",
     ruleMarkdown:
       "Required for plan-promote: the ancestor spec's configured verification profile " +
       'requires UAT — this plan must declare `extra.requires_uat: true` before it may be ' +
-      "promoted. Recovery: set it via the MCP `lore_set` tool " +
-      `(\`extra: {"requires_uat": true}\`) on ${ctx.targetIdOrSlug ?? "<plan>"} — ` +
-      "`lore set` (CLI) has no dedicated flag for this field yet.",
+      "promoted. Recovery: `extra` REPLACES the whole field wholesale on `lore_set` (it does " +
+      `NOT merge) — first fetch the current extra via \`lore get ${target} --json\` (read ` +
+      '`.extra`), merge `{"requires_uat": true}` into it while KEEPING every existing key ' +
+      "(e.g. `phases`), then call the MCP `lore_set` tool with the FULL merged object as " +
+      `\`extra\` on ${target}. \`lore set\` (CLI) has no dedicated flag for this field yet.`,
     missing: selectFailures(failures).map((f) => f.reason),
   });
   return renderFeedingPack(pack);

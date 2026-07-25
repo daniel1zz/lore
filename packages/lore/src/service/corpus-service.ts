@@ -109,6 +109,59 @@ function isUlid(input: string): boolean {
   return ULID_RE.test(input);
 }
 
+/**
+ * Names a structured `extra` field that a `lore set` / HTTP PATCH / MCP `lore_set`
+ * patch would silently DROP, plus the dedicated writer that should be used instead.
+ * `null` means no drop detected — the common case.
+ *
+ * @invariant `docPatch.extra` REPLACES `existing.extra` WHOLESALE (this file's own
+ *   `set()` assembly: `if (parsedPatch.data.extra !== undefined) docPatch.extra =
+ *   parsedPatch.data.extra;` — never a merge). A field is "dropped" when it was
+ *   PRESENT (non-empty) on the CURRENT doc and ABSENT from the INCOMING patch's
+ *   `extra` — mirrors SPEC-043's `extra.validity` writer-guard (present/current
+ *   comparison), generalized from "must not change" to "must not vanish".
+ *
+ * @remarks Incident (2026-07-25): a `plan-promote` feeding pack told a caller to
+ *   recover via `lore_set extra {"requires_uat": true}`. Followed literally over
+ *   MCP, the write replaced `extra` wholesale and the plan lost its 4
+ *   `extra.phases` entries — discovered only when a later `lore create task
+ *   --phase` failed with "parent plan declares no phases". Guards the three
+ *   structured fields with a documented dedicated-writer seam reachable through
+ *   this generic path: `plan.extra.phases` (`PhaseService` — `lore phase add`),
+ *   `task.extra.claim` (`TaskWorkflowService` — `lore claim` / `lore release`),
+ *   `task.extra.verification_evidence` (`TaskWorkflowService` — `lore evidence`).
+ *   `task.extra.file_anchors` is DELIBERATELY excluded — `taskExtraSchema`'s own
+ *   JSDoc (`@lore/core`) already documents `lore set` as never a sanctioned write
+ *   path for anchors ("a wholesale-extra replace flag was deliberately not built
+ *   for anchors"), so guarding a drop there would be scope creep past this
+ *   incident's actual blast radius (fields `lore set` legitimately CAN write, but
+ *   must not do so destructively).
+ */
+function findDroppedStructuredExtraField(
+  existing: DocRecord,
+  incomingExtra: Record<string, unknown>,
+): { field: string; writerHint: string } | null {
+  if (existing.type === "plan") {
+    const phasesBefore = existing.extra["phases"];
+    const hadPhases = Array.isArray(phasesBefore) && phasesBefore.length > 0;
+    if (hadPhases && incomingExtra["phases"] === undefined) {
+      return { field: "extra.phases", writerHint: "`lore phase add`" };
+    }
+  }
+  if (existing.type === "task") {
+    const claimBefore = existing.extra["claim"];
+    if (claimBefore !== undefined && claimBefore !== null && incomingExtra["claim"] === undefined) {
+      return { field: "extra.claim", writerHint: "`lore claim` / `lore release`" };
+    }
+    const evidenceBefore = existing.extra["verification_evidence"];
+    const hadEvidence = Array.isArray(evidenceBefore) && evidenceBefore.length > 0;
+    if (hadEvidence && incomingExtra["verification_evidence"] === undefined) {
+      return { field: "extra.verification_evidence", writerHint: "`lore evidence`" };
+    }
+  }
+  return null;
+}
+
 /** Time seam (D3/D10 convention) — never `Date.now()` read directly in method bodies. */
 const defaultNow = (): string => new Date().toISOString();
 
@@ -1201,6 +1254,32 @@ export class CorpusService {
             `slug "${parsedPatch.data.slug}" is already taken by ` +
             `${holderResult.value.slug} (id ${holderResult.value.id})`,
           value: parsedPatch.data.slug,
+        });
+      }
+    }
+
+    // Destructive-wholesale-replace guard (task-gate-feeding-pack-recovery-via-lore-set-
+    // extra-wholesale, 2026-07-25 incident). reason: docPatch.extra REPLACES existing.extra
+    // wholesale (assembled two lines above this block) — there is no merge semantics
+    // anywhere on this write path. A patch omitting a structured field that a DEDICATED
+    // writer service owns (plan.extra.phases / task.extra.claim /
+    // task.extra.verification_evidence) silently deletes it. Mirrors SPEC-043's
+    // extra.validity writer-guard (below) but for "must not vanish" rather than "must not
+    // change" — see findDroppedStructuredExtraField's JSDoc for the full incident + scope
+    // rationale (why file_anchors is deliberately excluded).
+    if (parsedPatch.data.extra !== undefined) {
+      const dropped = findDroppedStructuredExtraField(existing, parsedPatch.data.extra);
+      if (dropped !== null) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: dropped.field,
+          message:
+            `${dropped.field} would be dropped by this patch — \`extra\` REPLACES the whole ` +
+            `field wholesale, it does not merge with the doc's current extra. Use ` +
+            `${dropped.writerHint} instead, or fetch the current extra via \`lore get ` +
+            `${existing.slug} --json\` (read \`.extra\`), merge your change into it, and pass ` +
+            `the FULL merged object as \`extra\`.`,
+          value: parsedPatch.data.extra,
         });
       }
     }
