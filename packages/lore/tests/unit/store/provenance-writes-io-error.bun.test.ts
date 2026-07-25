@@ -1,13 +1,16 @@
 /**
  * Regression coverage for the Result-contract gap fixed alongside BUG-002's
- * atomic composite writes: `insertWithProvenance` / `updateWithProvenance`
- * used to issue `db.run("BEGIN IMMEDIATE")` BEFORE their try/catch, so a
- * SYNCHRONOUS bun:sqlite throw at that call (real repro below: deleting a
- * file-mode DB's backing file + `-wal`/`-shm` out from under an open handle
- * raises `SQLiteError: disk I/O error` — SQLite's IOERR family, observed live
- * via SPEC-078 T2's multi-project mount probe as `SQLITE_IOERR_VNODE`)
- * escaped as a raw JS exception instead of the `Result<T, LoreError>` every
- * `StoreInterface` method promises its callers.
+ * atomic composite writes: `insertWithProvenance` / `updateWithProvenance` /
+ * `softDeleteWithProvenance` used to issue `db.run("BEGIN IMMEDIATE")` BEFORE
+ * their try/catch, so a SYNCHRONOUS bun:sqlite throw at that call (real
+ * repro below: deleting a file-mode DB's backing file + `-wal`/`-shm` out
+ * from under an open handle raises `SQLiteError: disk I/O error` — SQLite's
+ * IOERR family, observed live via SPEC-078 T2's multi-project mount probe as
+ * `SQLITE_IOERR_VNODE`) escaped as a raw JS exception instead of the
+ * `Result<T, LoreError>` every `StoreInterface` method promises its callers.
+ * `softDeleteWithProvenance` coverage was added in a follow-up scope
+ * extension of the same task once the identical pre-try `BEGIN IMMEDIATE`
+ * was spotted alongside insert/update during review.
  *
  * Runner: bun:sqlite file-mode I/O — must run under `bun test`, not vitest
  * (see store/CLAUDE.md "bun:sqlite is external to vitest"). Uses a REAL
@@ -172,6 +175,39 @@ describe("SQLiteStore — insertWithProvenance/updateWithProvenance never throw 
     expect(result.error.code).toBe("STORE_ERROR");
   });
 
+  it("ERROR — softDeleteWithProvenance returns err(STORE_ERROR) instead of throwing when the backing file is deleted underneath it", async () => {
+    const seedDoc = makeDoc({ title: "Pre-Delete Soft-Delete Target" });
+    const seedResult = await store.insertWithProvenance(seedDoc, makeVersion(seedDoc), makeAudit(seedDoc));
+    expect(seedResult.ok).toBe(true);
+
+    deleteBackingFiles(dbPath);
+
+    const version = makeVersion(seedDoc, {
+      version: 0,
+      content: "",
+      extra: {},
+      status: "archived",
+      title: "",
+      action: "delete",
+    });
+    const audit = makeAudit(seedDoc, { action: "delete", details: { version: 0 } });
+
+    let thrown: unknown;
+    let result: Awaited<ReturnType<SQLiteStore["softDeleteWithProvenance"]>> | undefined;
+    try {
+      result = await store.softDeleteWithProvenance(seedDoc.id, version, audit);
+    } catch (e) {
+      thrown = e;
+    }
+
+    expect(thrown).toBeUndefined();
+    expect(result).toBeDefined();
+    if (result === undefined) return;
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("STORE_ERROR");
+  });
+
   // ── STATE — no dangling open transaction on the still-alive connection ──
 
   it("STATE — after the I/O error, a fresh BEGIN IMMEDIATE on the same handle does not fail with 'cannot start a transaction within a transaction'", async () => {
@@ -220,5 +256,28 @@ describe("SQLiteStore — insertWithProvenance/updateWithProvenance never throw 
     expect(found.ok).toBe(true);
     if (!found.ok) return;
     expect(found.value?.title).toBe("Still Works");
+  });
+
+  it("REGRESSION — softDeleteWithProvenance still succeeds when the backing file is intact", async () => {
+    const doc = makeDoc({ title: "Still Deletable" });
+    const seedResult = await store.insertWithProvenance(doc, makeVersion(doc), makeAudit(doc));
+    expect(seedResult.ok).toBe(true);
+
+    const version = makeVersion(doc, {
+      version: 0,
+      content: "",
+      extra: {},
+      status: "archived",
+      title: "",
+      action: "delete",
+    });
+    const audit = makeAudit(doc, { action: "delete", details: { version: 0 } });
+    const result = await store.softDeleteWithProvenance(doc.id, version, audit);
+    expect(result.ok).toBe(true);
+
+    const found = await store.find(doc.id);
+    expect(found.ok).toBe(true);
+    if (!found.ok) return;
+    expect(found.value?.deleted_at).not.toBeNull();
   });
 });

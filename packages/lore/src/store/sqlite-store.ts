@@ -1095,7 +1095,15 @@ export class SQLiteStore implements StoreInterface {
     version: VersionRecord,
     audit: AuditEntry,
   ): Promise<Result<void, LoreError>> {
-    this.db.run("BEGIN IMMEDIATE");
+    // See insertWithProvenance's identical split above: BEGIN IMMEDIATE gets
+    // its own try/catch so a synchronous open-transaction throw returns
+    // err(STORE_ERROR) without attempting a ROLLBACK on a transaction that
+    // never opened.
+    try {
+      this.db.run("BEGIN IMMEDIATE");
+    } catch (e) {
+      return wrapStoreError(e);
+    }
     try {
       const deleteResult = this.softDeleteDocSync(id);
       if (!deleteResult.ok) {
