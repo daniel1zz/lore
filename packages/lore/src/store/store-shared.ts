@@ -30,7 +30,14 @@ import type {
   SupersededCandidate,
   VersionRecord,
 } from "@lore/core";
-import { err, extractValidity, type LoreError, type Result } from "@lore/core";
+import {
+  err,
+  extractValidity,
+  SNIPPET_MARK_CLOSE,
+  SNIPPET_MARK_OPEN,
+  type LoreError,
+  type Result,
+} from "@lore/core";
 
 // ─── Raw DB row types ──────────────────────────────────────────────────────
 
@@ -200,7 +207,11 @@ export function rowToSearchHit(row: FtsRow): SearchHit {
     id: row.id,
     slug: row.slug,
     title: row.title,
-    snippet: row.snippet ?? "",
+    // reason: row.snippet is raw snippet() output over the CJK bigram-expanded
+    // fts_content/fts_title shadow columns (migration-008) — collapse back to
+    // prose for display. See collapseCjkBigramSnippet's JSDoc. ASCII-only
+    // snippets short-circuit inside the helper and come back byte-identical.
+    snippet: collapseCjkBigramSnippet(row.snippet ?? ""),
     score: typeof row.rank === "bigint" ? Number(row.rank) : row.rank,
     type: row.type as DocType,
     status: row.status as DocStatus,
@@ -461,6 +472,257 @@ export function computeFtsShadowValues(
     fts_content: expandCjkForFts(content),
     fts_tags: expandCjkForFts(tagsJson),
   };
+}
+
+// ─── CJK bigram snippet collapse (inverse of expandCjkForFts, display side) ─
+//
+// FTS5's `snippet()` returns a slice of the INDEXED column value verbatim —
+// since docs_fts indexes the bigram-expanded `fts_*` shadow columns (not the
+// real title/content/tags), a CJK hit's snippet renders as the raw shadow
+// text: overlapping bigrams joined by literal spaces the indexer inserted
+// (`"交易 易策 策略"`), not the original prose (`"交易策略"`). This section
+// collapses that back for display — the store-layer inverse of
+// {@link expandCjkForFts}, applied only to `snippet()` output, never to the
+// real `title`/`content` columns (those are untouched by the shadow scheme).
+
+/** The literal ellipsis text passed as `snippet()`'s 5th argument in both
+ *  `sqlite-store.ts` and `turso-store.ts` — duplicated here (not imported;
+ *  it's a SQL string literal, not a JS export) so the collapse parser can
+ *  recognize truncation markers. If either SQL call site's ellipsis literal
+ *  ever changes, this constant must change with it. */
+const SNIPPET_ELLIPSIS = "...";
+
+/** Non-global per-character existence probe — `CJK_RUN_PATTERN` is a `/g`
+ *  pattern with mutable `lastIndex` state; reusing it for a plain `.test()`
+ *  short-circuit would silently skip matches on the second-and-later call. */
+const CJK_SINGLE_CHAR_PROBE = /[一-鿿]/;
+
+/** Non-global sibling of {@link CJK_RUN_PATTERN} — extracts exactly the
+ *  first CJK run within one already-decoration-stripped chunk. Kept as its
+ *  own constant (rather than reusing the `/g` pattern with `.exec()`) for
+ *  the same "no mutable `lastIndex` between calls" reason as
+ *  {@link CJK_SINGLE_CHAR_PROBE}. */
+const CJK_RUN_PATTERN_SINGLE = /[一-鿿]+/;
+
+/**
+ * One space-delimited piece of a `snippet()` result, fully decomposed into
+ * FTS5's insertions (leading/trailing ellipsis, highlight marks) plus the
+ * raw indexed text split into `prefix + core + suffix`, where `core` is the
+ * (0, 1, or 2-char) CJK run found within that raw text and `prefix`/`suffix`
+ * are whatever non-CJK text is glued directly onto it with NO space —
+ * `expandCjkForFts` never inserts a separator between a CJK run and
+ * whatever immediately precedes/follows it in the original document (only
+ * BETWEEN bigrams of the SAME run), so a run ending right before punctuation
+ * (`控制。`) or starting right after an opening quote (`「本周`) shows up as
+ * one chunk with that punctuation fused on. Re-joining
+ * `leadingEllipsis + prefix + hasOpenMark + core + hasCloseMark + suffix +
+ * trailingEllipsis` in that order reproduces the original chunk exactly —
+ * {@link parseSnippetChunk} and {@link renderSnippetToken} are inverses for
+ * any token that ends up NOT part of a collapsed run.
+ */
+interface SnippetToken {
+  leadingEllipsis: boolean;
+  prefix: string;
+  hasOpenMark: boolean;
+  core: string;
+  hasCloseMark: boolean;
+  suffix: string;
+  trailingEllipsis: boolean;
+  isBigram: boolean;
+}
+
+/**
+ * Splits one `snippet()`-output chunk (already isolated by splitting the
+ * full result on `" "`) into decorations + `prefix`/`core`/`suffix`.
+ *
+ * Order matters: the ellipsis is spliced onto the OUTERMOST edges of the
+ * WHOLE `snippet()` result (so it is stripped first, from each end of the
+ * chunk — only the very first/last chunk of the whole result ever has one).
+ * Highlight marks wrap the matched TOKEN specifically — i.e. the CJK
+ * `core` — which is why they are located and removed by scanning the
+ * REMAINING string for the sentinel character rather than assumed to sit at
+ * the chunk's own edges: a matched token can still have punctuation glued
+ * on past its closing mark (`<控制>。`), so "ends with the close mark" would
+ * miss it. What's left after removing all four is the raw indexed text,
+ * which {@link CJK_RUN_PATTERN_SINGLE} then splits into `prefix`/`core`/`suffix`.
+ */
+function parseSnippetChunk(chunk: string): SnippetToken {
+  let s = chunk;
+  let leadingEllipsis = false;
+  if (s.startsWith(SNIPPET_ELLIPSIS)) {
+    leadingEllipsis = true;
+    s = s.slice(SNIPPET_ELLIPSIS.length);
+  }
+  let trailingEllipsis = false;
+  if (s.endsWith(SNIPPET_ELLIPSIS)) {
+    trailingEllipsis = true;
+    s = s.slice(0, s.length - SNIPPET_ELLIPSIS.length);
+  }
+
+  let hasOpenMark = false;
+  const openIdx = s.indexOf(SNIPPET_MARK_OPEN);
+  if (openIdx !== -1) {
+    hasOpenMark = true;
+    s = s.slice(0, openIdx) + s.slice(openIdx + SNIPPET_MARK_OPEN.length);
+  }
+  let hasCloseMark = false;
+  const closeIdx = s.indexOf(SNIPPET_MARK_CLOSE);
+  if (closeIdx !== -1) {
+    hasCloseMark = true;
+    s = s.slice(0, closeIdx) + s.slice(closeIdx + SNIPPET_MARK_CLOSE.length);
+  }
+
+  // `s` is now the raw indexed text for this chunk, decoration-free.
+  const runMatch = CJK_RUN_PATTERN_SINGLE.exec(s);
+  let prefix = "";
+  let core = "";
+  let suffix = s;
+  if (runMatch !== null) {
+    const runStart = runMatch.index;
+    const run = runMatch[0];
+    // A run longer than 2 chars within one no-space chunk should not occur
+    // (expandCjkForFts always space-joins bigrams within a single run of
+    // length ≥3) — defensively cap `core` at 2 chars and fold any excess
+    // into `suffix` as opaque literal text rather than lose or duplicate it.
+    const coreLen = Math.min(run.length, 2);
+    prefix = s.slice(0, runStart);
+    core = run.slice(0, coreLen);
+    suffix = run.slice(coreLen) + s.slice(runStart + run.length);
+  }
+
+  return {
+    leadingEllipsis,
+    prefix,
+    hasOpenMark,
+    core,
+    hasCloseMark,
+    suffix,
+    trailingEllipsis,
+    isBigram: core.length === 2,
+  };
+}
+
+/** Re-assembles a {@link SnippetToken} that was NOT folded into a collapsed
+ *  run back into its original chunk text — the inverse of
+ *  {@link parseSnippetChunk} for the passthrough case. */
+function renderSnippetToken(token: SnippetToken): string {
+  return (
+    (token.leadingEllipsis ? SNIPPET_ELLIPSIS : "") +
+    token.prefix +
+    (token.hasOpenMark ? SNIPPET_MARK_OPEN : "") +
+    token.core +
+    (token.hasCloseMark ? SNIPPET_MARK_CLOSE : "") +
+    token.suffix +
+    (token.trailingEllipsis ? SNIPPET_ELLIPSIS : "")
+  );
+}
+
+/**
+ * Collapses one maximal chain-compatible run of ≥2 bigram tokens
+ * (`run[i].core[1] === run[i + 1].core[0]` for every adjacent pair — the
+ * SAME overlap {@link toBigrams} guarantees within a single expanded CJK
+ * run) back into the original `run.length + 1`-character prose substring.
+ *
+ * Each token `i` (0-indexed within `run`) covers collapsed character
+ * positions `[i, i + 1]` (its first char at `i`, shared last char at
+ * `i + 1` — the next token's first char). Decorations attach at those same
+ * positions, in {@link parseSnippetChunk}'s canonical order:
+ * `leadingEllipsis`, then `prefix`, then `hasOpenMark` insert immediately
+ * BEFORE position `i`; `hasCloseMark`, then `suffix`, then `trailingEllipsis`
+ * insert immediately AFTER position `i + 1`. Two different tokens never
+ * target the same "before" (or same "after") slot — each token owns a
+ * unique `i` — so insertion order across tokens is unambiguous. In
+ * practice only the FIRST token of a run ever carries a non-empty `prefix`
+ * and only the LAST ever carries a non-empty `suffix` (interior tokens are
+ * always a pure 2-char bigram), but every token is handled uniformly here
+ * rather than special-casing the ends.
+ */
+function collapseBigramRun(run: SnippetToken[]): string {
+  const charCount = run.length + 1;
+  const chars: string[] = new Array(charCount);
+  chars[0] = run[0]!.core[0]!;
+  chars[1] = run[0]!.core[1]!;
+  for (let i = 1; i < run.length; i++) {
+    chars[i + 1] = run[i]!.core[1]!;
+  }
+
+  const before: string[][] = Array.from({ length: charCount }, () => []);
+  const after: string[][] = Array.from({ length: charCount }, () => []);
+  for (let i = 0; i < run.length; i++) {
+    const token = run[i]!;
+    if (token.leadingEllipsis) before[i]!.push(SNIPPET_ELLIPSIS);
+    if (token.prefix !== "") before[i]!.push(token.prefix);
+    if (token.hasOpenMark) before[i]!.push(SNIPPET_MARK_OPEN);
+    if (token.hasCloseMark) after[i + 1]!.push(SNIPPET_MARK_CLOSE);
+    if (token.suffix !== "") after[i + 1]!.push(token.suffix);
+    if (token.trailingEllipsis) after[i + 1]!.push(SNIPPET_ELLIPSIS);
+  }
+
+  let out = "";
+  for (let p = 0; p < charCount; p++) {
+    out += before[p]!.join("") + chars[p]! + after[p]!.join("");
+  }
+  return out;
+}
+
+/**
+ * Collapses the overlapping-bigram artifacts a `snippet()` call produces
+ * over the CJK bigram-expanded `fts_content`/`fts_title` shadow columns
+ * (migration-008) back into ORIGINAL prose for display — the inverse
+ * transform of {@link expandCjkForFts}, scoped to `snippet()` output only.
+ *
+ * `"…同步 步更 更新 新实 实测…"` → `"…同步更新实测…"`. Highlight marks
+ * ({@link SNIPPET_MARK_OPEN}/{@link SNIPPET_MARK_CLOSE}) and the ellipsis
+ * truncation marker are preserved at the position they annotate; punctuation
+ * or ASCII glued directly onto a run's first/last bigram with no space
+ * (`控制。`, `「本周`) rides along on that token's `prefix`/`suffix`. Two
+ * adjacent CJK bigram tokens that do NOT overlap (`run[i].core[1] !==
+ * run[i + 1].core[0]`) are genuinely separate matches (never produced by one
+ * {@link expandCjkForFts} run) and are left space-separated, unmerged.
+ *
+ * Single CJK-char tokens and ASCII/punctuation tokens never have a 2-char
+ * `core` and pass through byte-identical. A snippet with no CJK character
+ * at all short-circuits before the split/rejoin machinery runs at all,
+ * guaranteeing ASCII output stays byte-identical to the pre-migration-008
+ * behavior.
+ *
+ * @param snippet - Raw `snippet()` SQL function output (already includes
+ *   `SNIPPET_MARK_OPEN`/`CLOSE` highlight marks and `...` truncation text).
+ * @returns `snippet` with bigram-expansion artifacts collapsed back to prose.
+ * @example
+ *   collapseCjkBigramSnippet("同步 步更 更新")        // => "同步更新"
+ *   collapseCjkBigramSnippet("append-only version") // => "append-only version" (unchanged)
+ */
+export function collapseCjkBigramSnippet(snippet: string): string {
+  if (!CJK_SINGLE_CHAR_PROBE.test(snippet)) return snippet;
+
+  const chunks = snippet.split(" ");
+  const tokens = chunks.map(parseSnippetChunk);
+  const pieces: string[] = [];
+
+  let i = 0;
+  while (i < tokens.length) {
+    const current = tokens[i]!;
+    if (current.isBigram) {
+      let j = i;
+      while (
+        j + 1 < tokens.length &&
+        tokens[j + 1]!.isBigram &&
+        tokens[j]!.core[1] === tokens[j + 1]!.core[0]
+      ) {
+        j++;
+      }
+      if (j > i) {
+        pieces.push(collapseBigramRun(tokens.slice(i, j + 1)));
+        i = j + 1;
+        continue;
+      }
+    }
+    pieces.push(renderSnippetToken(current));
+    i++;
+  }
+
+  return pieces.join(" ");
 }
 
 /**

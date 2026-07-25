@@ -37,8 +37,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
-import { escapeFtsQuery, expandCjkForFts } from "../../../src/store/store-shared.js";
-import type { DocRecord } from "@lore/core";
+import {
+  collapseCjkBigramSnippet,
+  escapeFtsQuery,
+  expandCjkForFts,
+} from "../../../src/store/store-shared.js";
+import { SNIPPET_MARK_CLOSE, SNIPPET_MARK_OPEN, type DocRecord } from "@lore/core";
 
 // ─── Pure function tests: expandCjkForFts ──────────────────────────────────
 
@@ -120,6 +124,85 @@ describe("escapeFtsQuery — CJK query expansion", () => {
     ["a:b", '"a:b"'],
   ])("REGRESSION: escapeFtsQuery(%j) === %j (byte-identical to pre-CJK-change)", (input, expected) => {
     expect(escapeFtsQuery(input)).toBe(expected);
+  });
+});
+
+// ─── Pure function tests: collapseCjkBigramSnippet ─────────────────────────
+//
+// Byproduct-fix suite (task-search-snippets-render-bigram-expanded-shadow-text-tong-bu):
+// snippet() generates from the bigram-expanded fts_content/fts_title shadow
+// columns, so a raw CJK snippet shows overlapping-bigram artifacts
+// ("同步 步更 更新") instead of the original prose ("同步更新").
+// collapseCjkBigramSnippet is the store-layer inverse, applied to snippet()
+// output only.
+
+describe("collapseCjkBigramSnippet — pure bigram-run collapse", () => {
+  it("HAPPY: a chain of overlapping bigrams collapses back to the original run", () => {
+    expect(collapseCjkBigramSnippet("交易 易策 策略")).toBe("交易策略");
+  });
+
+  it("HAPPY: run-with-highlight-markers — marks + leading/trailing ellipsis all preserved at the position they annotate (mirrors real snippet() output, verified against a live bun:sqlite FTS5 query)", () => {
+    // Real snippet(docs_fts, 1, MARK_OPEN, MARK_CLOSE, '...', 6) output for a
+    // doc whose fts_content run is "量化 化交 交易 易策 策略 略的 的回…" when
+    // the query phrase matches only the "交易" bigram: the window is
+    // truncated on both sides (leading + trailing "...") and the single
+    // matched token is wrapped.
+    const raw =
+      `...量化 化交 ${SNIPPET_MARK_OPEN}交易${SNIPPET_MARK_CLOSE} 易策 策略 略的...`;
+    const collapsed = collapseCjkBigramSnippet(raw);
+    expect(collapsed).toBe(
+      `...量化${SNIPPET_MARK_OPEN}交易${SNIPPET_MARK_CLOSE}策略的...`,
+    );
+    // The marker chars themselves are never dropped.
+    expect(collapsed).toContain(SNIPPET_MARK_OPEN);
+    expect(collapsed).toContain(SNIPPET_MARK_CLOSE);
+    // No character from the original run is duplicated.
+    expect(collapsed.split(SNIPPET_MARK_OPEN).join("").split(SNIPPET_MARK_CLOSE).join("")).toBe(
+      "...量化交易策略的...",
+    );
+  });
+
+  it("HAPPY: a multi-token phrase match wraps the WHOLE matched span with ONE open + ONE close mark (SQLite's own snippet() convention, not per-token)", () => {
+    const raw =
+      `本周 周关 关注 注量 量化 化交 ${SNIPPET_MARK_OPEN}交易 易策 策略${SNIPPET_MARK_CLOSE} 略的`;
+    expect(collapseCjkBigramSnippet(raw)).toBe(
+      `本周关注量化${SNIPPET_MARK_OPEN}交易策略${SNIPPET_MARK_CLOSE}的`,
+    );
+  });
+
+  it("BOUNDARY: single CJK char tokens pass through untouched (never a bigram, never merged with a neighbor)", () => {
+    expect(collapseCjkBigramSnippet("交")).toBe("交");
+    expect(collapseCjkBigramSnippet("交 易")).toBe("交 易");
+  });
+
+  it("REGRESSION: ASCII-only snippet text is returned byte-identical (no CJK run exists to collapse)", () => {
+    expect(collapseCjkBigramSnippet("append-only version")).toBe("append-only version");
+    expect(collapseCjkBigramSnippet("...append-only version...")).toBe(
+      "...append-only version...",
+    );
+  });
+
+  it("HAPPY: mixed CJK + ASCII — the CJK run collapses, the ASCII word is untouched", () => {
+    expect(collapseCjkBigramSnippet("SPEC-078 多项 项目 目支 支持")).toBe(
+      "SPEC-078 多项目支持",
+    );
+  });
+
+  it("NEGATIVE: two genuinely SEPARATE CJK bigram tokens that do NOT overlap stay space-separated (never merge into one run)", () => {
+    // "交易" ends in 易, "策略" starts with 策 — no overlap, so these can only
+    // be two distinct original words, not one expandCjkForFts run.
+    const result = collapseCjkBigramSnippet("交易 策略");
+    expect(result).toBe("交易 策略");
+    expect(result).not.toBe("交易策略");
+  });
+
+  it("STATE: pure function — same input always returns the same output", () => {
+    const input = "量化 化交 交易 易策 策略";
+    expect(collapseCjkBigramSnippet(input)).toBe(collapseCjkBigramSnippet(input));
+  });
+
+  it("BOUNDARY: empty string returns empty string", () => {
+    expect(collapseCjkBigramSnippet("")).toBe("");
   });
 });
 
@@ -232,6 +315,33 @@ describe("SQLiteStore.search — CJK bigram hits (store-level)", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.map((h) => h.id)).toContain(doc.id);
+  });
+
+  it("HAPPY: snippet output collapses bigram-expansion artifacts back into original prose (no bare 'XY ZW'-overlap pattern survives)", async () => {
+    const doc = makeDoc({
+      title: "Trading Research Notes",
+      content: "本周关注量化交易策略的回撤控制。",
+    });
+    await store.insert(doc);
+
+    const result = await store.search("交易策略");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const hit = result.value.find((h) => h.id === doc.id);
+    expect(hit).toBeDefined();
+    if (!hit) return;
+
+    // The original contiguous substring is present once highlight marks
+    // (which legitimately wrap only the matched span, e.g.
+    // "…量化<mark>交易策略</mark>的回撤…") are stripped back out — a caller
+    // rendering the snippet strips/replaces these the same way.
+    const plain = hit.snippet.split(SNIPPET_MARK_OPEN).join("").split(SNIPPET_MARK_CLOSE).join("");
+    expect(plain.includes("量化交易策略")).toBe(true);
+    // No leftover bigram-overlap artifact (two adjacent 2-char CJK groups
+    // joined by a bare space) remains anywhere in the collapsed run — this
+    // fixture's content has no real internal space, so any such pattern
+    // would be an uncollapsed artifact, not a genuine word boundary.
+    expect(plain).not.toMatch(/[一-鿿]{2} [一-鿿]{2}/);
   });
 
   it("STATE: a doc RENAMED from ASCII to CJK becomes findable by the new CJK title (update() also writes shadow columns)", async () => {

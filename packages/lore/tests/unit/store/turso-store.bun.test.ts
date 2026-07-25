@@ -59,11 +59,13 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TursoStore } from "../../../src/store/turso-store.js";
-import type {
-  AuditEntry,
-  DocRecord,
-  LinkRecord,
-  VersionRecord,
+import {
+  SNIPPET_MARK_CLOSE,
+  SNIPPET_MARK_OPEN,
+  type AuditEntry,
+  type DocRecord,
+  type LinkRecord,
+  type VersionRecord,
 } from "@lore/core";
 
 // ─── Factories ───────────────────────────────────────────────────────────────
@@ -903,6 +905,36 @@ describe("TursoStore", () => {
       expect(hit).toBeDefined();
       expect(hit!.snippet).toContain("[figure 3]");
       expect(hit!.snippet).toContain("walkthrough");
+    });
+
+    // Byproduct fix (task-search-snippets-render-bigram-expanded-shadow-text-tong-bu):
+    // snippet() reads the CJK bigram-expanded fts_content shadow column
+    // (migration-008) — this pins that TursoStore.search collapses the
+    // bigram-overlap artifacts back to prose via the SAME shared
+    // rowToSearchHit/collapseCjkBigramSnippet helper SQLiteStore uses (both
+    // stores route through store-shared.ts, never duplicate the transform).
+    it("search snippet collapses CJK bigram-expansion artifacts back into original prose", async () => {
+      const doc = makeDoc({
+        slug: "prd-turso-cjk-snippet",
+        title: "Turso CJK Snippet Test",
+        content: "本周关注量化交易策略的回撤控制。",
+      });
+      await store.insert(doc);
+
+      const result = await store.search("交易策略");
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      const hit = result.value.find((h) => h.id === doc.id);
+      expect(hit).toBeDefined();
+      if (!hit) return;
+
+      const plain = hit.snippet
+        .split(SNIPPET_MARK_OPEN)
+        .join("")
+        .split(SNIPPET_MARK_CLOSE)
+        .join("");
+      expect(plain.includes("量化交易策略")).toBe(true);
+      expect(plain).not.toMatch(/[一-鿿]{2} [一-鿿]{2}/);
     });
 
     // SPEC-037 §2 — SearchHit now carries type + status from the docs join
