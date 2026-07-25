@@ -733,32 +733,73 @@ export async function apiGetReadyReport(planIdOrSlug: string): Promise<Result<Re
 }
 
 /**
- * One checklist item within a {@link PhaseScorecard}. `state`/`trust_label` are
+ * AC-scope coverage summary for one phase — mirrors the server's
+ * `PhaseScorecardAcSummary` (`packages/lore/src/service/phase-workflow-service.ts`)
+ * field-for-field; this client type is NOT independently authored.
+ */
+export interface PhaseScorecardAcSummary {
+  total: number;
+  attested: number;
+  blocking: string[];
+}
+
+/**
+ * Aggregate checklist-state counts for one phase (per-item detail lives in
+ * {@link PhaseScorecardChecklistItem}[] instead). Mirrors the server's
+ * `PhaseScorecardChecklistSummary` field-for-field.
+ */
+export interface PhaseScorecardChecklistSummary {
+  total: number;
+  satisfied: number;
+  blocking: string[];
+  dropped_named: string[];
+  manual_selfattested: string[];
+}
+
+/**
+ * One checklist item within a {@link PhaseScorecard}. `state`/`trust` are
  * rendered VERBATIM by `PhaseProgressPanel` — never re-derived client-side
  * (mirrors this codebase's "manual-vs-attested trust labels ... never
  * re-derived" convention for evidence-panel projections, `packages/dashboard/
- * CLAUDE.md`). Field names are SPEC-PINNED (SPEC-077 §Context Digest) — this
- * task develops against the pinned shape ahead of the sibling T1 backend task
- * that lands the real route; reconcile at integration if T1's literal field
- * names differ.
+ * CLAUDE.md`). Mirrors the server's `PhaseScorecardChecklistItem`
+ * (`packages/lore/src/service/phase-workflow-service.ts`) field-for-field —
+ * NOT independently authored (a prior version of this type invented an
+ * unreal `trust_label` field name and was the root cause of a live
+ * `/execution` page crash, SPEC-077 T2 client-shape-drift fix).
  */
-export interface PhaseChecklistItemView {
+export interface PhaseScorecardChecklistItem {
   id: string;
   statement: string;
-  /** e.g. "satisfied" | "blocking" | "dropped" — rendered verbatim. */
+  /** "satisfied" | "blocking" | "dropped" — rendered verbatim. */
   state: string;
-  /** e.g. "manual" | "attested" — rendered verbatim. */
-  trust_label: string;
+  /** "manual" | "attested" — which trust channel satisfies this item, rendered verbatim. */
+  trust: string;
 }
 
-/** One phase's execution scorecard — SPEC-077 S2 `PhaseProgressPanel` projection. */
+/**
+ * One phase's execution scorecard — SPEC-077 S2 `PhaseProgressPanel` projection.
+ * Mirrors the server's `PhaseScorecard` (`packages/lore/src/service/
+ * phase-workflow-service.ts`, the `GET /api/phase-status/:planIdOrSlug`
+ * response's SSOT) field-for-field. There is NO `dropped_item_names` field on
+ * the real response — dropped item names are derived client-side from
+ * `checklist_items` entries whose `state === "dropped"` (see
+ * `PhaseProgressPanel.tsx`'s `droppedItemNames` helper).
+ */
 export interface PhaseScorecard {
-  name: string;
-  ac_scope: { attested: number; total: number };
-  checklist: PhaseChecklistItemView[];
-  dropped_item_names: string[];
-  /** True iff the SPEC-056 §Design Decisions D3 anti-vacuous-completion guard fired. */
+  phase_id: string;
+  phase_slug: string;
+  phase_title: string;
+  state: string;
+  /** True iff `state === "vacuous"` (SPEC-056 §Design Decisions D3 anti-vacuous-completion guard). */
   vacuous: boolean;
+  ac_scope: PhaseScorecardAcSummary;
+  checklist: PhaseScorecardChecklistSummary;
+  checklist_items: PhaseScorecardChecklistItem[];
+  /** Full blocking list — AC ids followed by checklist item ids. */
+  blocking: string[];
+  claim: { by: string; at: string; stale: boolean } | null;
+  /** Legacy SPEC-023 string-linkage diagnostic count — see server JSDoc; not rendered here. */
+  task_count: number;
 }
 
 /** Response shape of the NEW `GET /api/phase-status/:planIdOrSlug` route (SPEC-077 S3). */
