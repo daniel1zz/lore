@@ -16,6 +16,7 @@ import { handoffExtraSchema } from "./session.js";
 import { validitySchema } from "./validity.js";
 import { phaseExtraSchema } from "./phase.js";
 import { fnv1a32Hex } from "./slug-hash.js";
+import { isSelfDeclaredOrdinalTitle } from "./ordinal.js";
 
 // ─── Primitive Schemas ─────────────────────────────────────────────────────
 
@@ -495,7 +496,21 @@ const baseCreateDocInputSchema = z.object({
  */
 export const createDocInputSchema = baseCreateDocInputSchema.superRefine(
   (data, ctx) => {
-    const { type, parent_id, extra } = data;
+    const { type, title, parent_id, extra } = data;
+
+    // title purity (SPEC-084 D6) — spec/adr titles are pure prose; a title
+    // self-declaring a display id (e.g. "SPEC-99 — …") races with the
+    // store-atomic allocator (the SPEC-084 incident's exact root cause).
+    // Applies regardless of exempt kind — see isSelfDeclaredOrdinalTitle's
+    // own doc comment ("exemptKinds semantics" clarification).
+    if (isSelfDeclaredOrdinalTitle(type, title)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "title must not self-declare a SPEC-/ADR- number — the ordinal is allocated at create; write the bare title",
+        path: ["title"],
+      });
+    }
 
     // spec, task, and phase require parent_id (phase: SPEC-056 D1 — always a plan).
     // reason: an ad-hoc task (SPEC-069 §Design Decisions D2, extra.adhoc === true)
