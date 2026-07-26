@@ -81,6 +81,22 @@ export interface DocRecord {
   tags: string[];
   /** Type-specific fields (see AdrExtra, TaskExtra, etc.) */
   extra: Record<string, unknown>;
+  /**
+   * Store-allocated display ordinal (SPEC-084) — e.g. `84` for `SPEC-84`.
+   * Populated atomically by the store (`insertWithAllocatedOrdinal` at
+   * create, or `allocateOrdinalForExisting` on an exempt→numbered kind
+   * flip — both in `packages/lore/src/store/`, never assigned directly by
+   * a service). `null` for a doc whose type/kind is exempt from numbering
+   * (see `ordinal.ts::ORDINAL_REGISTRY`); never reused after soft-delete
+   * (SPEC-084 D9 — the partial unique index includes deleted rows).
+   *
+   * OPTIONAL (not every `DocRecord` literal across the codebase — test
+   * fixtures, older store rows predating this column — carries it) but
+   * when present is `number | null`, never a placeholder value. Compose
+   * the human display id via `formatDocDisplayId`/`composeDocDisplayTitle`
+   * (`ordinal.ts`) — never interpolate `type` + `ordinal` at a call site.
+   */
+  ordinal?: number | null;
 }
 
 /** Graph link between two documents. PK: (from_id, to_id, link_type) */

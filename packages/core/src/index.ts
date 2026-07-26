@@ -70,3 +70,4 @@ export * from "./issue-report.js";
 export * from "./evidence-panel.js";
 export * from "./plan-update.js";
 export * from "./outline.js";
+export * from "./ordinal.js";
