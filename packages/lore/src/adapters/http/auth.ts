@@ -2,7 +2,8 @@
  * HTTP auth for Lore — API key management + request authentication.
  * Purpose: bearer-token API key auth (existing) + cookie-based session auth (SPEC-016).
  * Public surface: ApiKeyStore, authenticateRequest, extractBearerToken, extractSessionCookie,
- *   generateApiKey, hashApiKey, ActorContext, ApiKeyRecord, ALLOWED_ORIGINS, buildAllowedOrigins.
+ *   generateApiKey, hashApiKey, ActorContext, ApiKeyRecord, ALLOWED_ORIGINS, buildAllowedOrigins,
+ *   resolveDocWriteOpts.
  * Invariants:
  *   - authenticateRequest is cookie-first: if lore_sid cookie present → resolve session;
  *     else if Bearer token present → existing API key validation path; else UNAUTHORIZED.
@@ -24,6 +25,19 @@
  *   - ApiKeyStore.create()'s `api_keys.name` UNIQUE-constraint race (ASYNC2-001) maps to
  *     the SAME VALIDATION_ERROR the pre-insert existence check already returns — see the
  *     method's own JSDoc.
+ *   - `resolveDocWriteOpts` (`adr-dashboard-cookie-session-writes-attribute-author-via`) is
+ *     the SOLE translation from an authenticated `ActorContext` to a `CorpusService`
+ *     `WriteActorOpts` — every route handler that calls `create`/`set`/`delete` MUST go
+ *     through it rather than hand-building `{ by: actor.name }`, so the cookie-vs-bearer
+ *     attribution policy lives in exactly one place. Cookie sessions (`http_cookie`) omit
+ *     `by` entirely and set `attributeCreatedBy: true` — the static "dashboard-local"
+ *     bootstrap-key identity (`actor.name`) / its hardcoded "admin" owner field
+ *     (`actor.owner`) are NEVER used as the write actor; the human and `lore serve` share
+ *     a machine (SPEC-016), so `CorpusService.resolveWriteActor(undefined)` falls through
+ *     to `$LORE_ACTOR` (of the `lore serve` process) → session tier → OS username — the
+ *     SAME chain the CLI's `resolveActor` applies. Bearer sessions (`http_token`) are
+ *     UNCHANGED: explicit `by: actor.name` (the API key name), `attributeCreatedBy` omitted
+ *     (doc/version `created_by` stays the historical literal `"system"`).
  * Side-effect class: IO (bun:sqlite reads/writes, crypto)
  * Source: SPEC-010 §3.2, §3.3; SPEC-016 §3.3
  */
@@ -32,6 +46,7 @@ import { Database } from "bun:sqlite";
 import { err, ok, type Result } from "@lore/core";
 import type { LoreError } from "@lore/core";
 import type { SessionStore } from "./sessions.js";
+import type { WriteActorOpts } from "../../service/corpus-service.js";
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -362,4 +377,40 @@ export async function authenticateRequest(
   if (!tokenResult.ok) return tokenResult;
   // SPEC-024 AC-NOAI-6: bearer token = agent-issued = AI off by default
   return ok({ ...tokenResult.value, callerSurface: "http_token" as const });
+}
+
+// ─── Write-actor attribution (adr-dashboard-cookie-session-writes-attribute-author-via) ────
+
+/**
+ * Translate an authenticated {@link ActorContext} into the `CorpusService`
+ * `WriteActorOpts` a `create`/`set`/`delete` call should receive — the single
+ * policy seam for "who gets attributed as this write's author," so every HTTP
+ * route handler (v1 dual-auth routes AND the cookie-only dashboard routes)
+ * applies the SAME rule instead of each hand-rolling `{ by: actor.name }`.
+ *
+ * - `http_cookie` (dashboard UI, human on the SAME machine as `lore serve` —
+ *   SPEC-016's local-bootstrap model): omits `by` entirely and sets
+ *   `attributeCreatedBy: true`. `CorpusService.resolveWriteActor(undefined)`
+ *   then falls through its full chain (`$LORE_ACTOR` of the `lore serve`
+ *   process → session tier → OS username) — the exact `resolveActor`
+ *   precedence the CLI applies. The static `"dashboard-local"` bootstrap-key
+ *   name (`actor.name`) and its hardcoded `"admin"` owner field (`actor.owner`)
+ *   are deliberately NEVER used here: neither identifies WHICH human is at the
+ *   keyboard, so passing either as an "explicit" actor would just replace one
+ *   wrong static string ("system") with another ("admin").
+ * - `http_token` (bearer, agent-issued) and any other/absent surface: explicit
+ *   `by: actor.name` (the API key name) — UNCHANGED from the pre-existing
+ *   behavior, `attributeCreatedBy` omitted so `doc.created_by`/
+ *   `versionRecord.created_by` keep their historical literal `"system"`.
+ *
+ * @param actor - The caller's resolved identity from {@link authenticateRequest}.
+ * @returns Opts ready to spread/pass straight into `create`/`set`/`delete`.
+ * @example
+ *   const result = await app.corpusService.create(input, resolveDocWriteOpts(actor));
+ */
+export function resolveDocWriteOpts(actor: ActorContext): WriteActorOpts {
+  if (actor.callerSurface === "http_cookie") {
+    return { attributeCreatedBy: true };
+  }
+  return { by: actor.name };
 }

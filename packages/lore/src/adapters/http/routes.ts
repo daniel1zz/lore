@@ -13,7 +13,7 @@
 
 import type { App } from "../../app.js";
 import type { ActorContext } from "./auth.js";
-import { ALLOWED_ORIGINS } from "./auth.js";
+import { ALLOWED_ORIGINS, resolveDocWriteOpts } from "./auth.js";
 // reason: TYPE-ONLY import — routes.ts is reachable from vitest test suites
 // (`bun:sqlite` is external to vitest, see project CLAUDE.md), so the runtime
 // `createMachineAuthStores` value (which imports `bun:sqlite`) must never be imported
@@ -383,9 +383,11 @@ async function handleCreateDoc(req: Request, app: App, actor: ActorContext): Pro
   const _callerSurface = actor.callerSurface ?? "http_token"; // default to safest (AI off)
   void _callerSurface; // referenced above for documentation; suppress lint warning
 
-  // SPEC-079 G2 — thread the resolved actor (bearer key name or cookie session's
-  // owner) through as the create's audit actor instead of the literal "system".
-  const result = await app.corpusService.create(body as CreateDocInput, { by: actor.name });
+  // adr-dashboard-cookie-session-writes-attribute-author-via — resolveDocWriteOpts
+  // is the single cookie-vs-bearer attribution policy seam (see auth.ts). Cookie
+  // sessions get the full resolveActor chain + doc/version created_by attribution;
+  // bearer sessions keep the pre-existing `by: actor.name` (API key name) behavior.
+  const result = await app.corpusService.create(body as CreateDocInput, resolveDocWriteOpts(actor));
   if (!result.ok) return loreErrorResponse(result.error);
   return jsonOk(result.value, 201);
 }
@@ -634,14 +636,15 @@ async function handleCreateLink(req: Request, app: App, actor: ActorContext): Pr
   if (typeof from !== "string" || typeof to !== "string" || typeof type !== "string") {
     return jsonError({ code: "VALIDATION_ERROR", field: "body", message: "Required fields: from, to, type" }, 422);
   }
-  // SPEC-079 G2 — thread the resolved actor through as the link's audit actor.
-  const result = await app.corpusService.link(from, to, type as LinkType, { by: actor.name });
+  // adr-dashboard-cookie-session-writes-attribute-author-via — resolveDocWriteOpts
+  // (see auth.ts) is the single cookie-vs-bearer attribution policy seam.
+  const result = await app.corpusService.link(from, to, type as LinkType, resolveDocWriteOpts(actor));
   if (!result.ok) return loreErrorResponse(result.error);
   return jsonOk(result.value, 201);
 }
 
 async function handleDeleteLink(from: string, to: string, app: App, actor: ActorContext): Promise<Response> {
-  const result = await app.corpusService.unlink(from, to, { by: actor.name });
+  const result = await app.corpusService.unlink(from, to, resolveDocWriteOpts(actor));
   if (!result.ok) return loreErrorResponse(result.error);
   return jsonOk({ ok: true });
 }
@@ -792,8 +795,9 @@ async function handleSingleDoc(
     if (body === null || typeof body !== "object") {
       return jsonError({ code: "VALIDATION_ERROR", field: "body", message: "Request body must be JSON" }, 422);
     }
-    // SPEC-079 G2 — thread the resolved actor through as the update's audit actor.
-    const result = await app.corpusService.set(idOrSlug, body as DocPatch, { by: actor.name });
+    // adr-dashboard-cookie-session-writes-attribute-author-via — resolveDocWriteOpts
+    // (see auth.ts) is the single cookie-vs-bearer attribution policy seam.
+    const result = await app.corpusService.set(idOrSlug, body as DocPatch, resolveDocWriteOpts(actor));
     if (!result.ok) return loreErrorResponse(result.error);
     return jsonOk(result.value);
   }
@@ -801,7 +805,7 @@ async function handleSingleDoc(
   if (method === "DELETE") {
     const confirmStr = new URL(req.url).searchParams.get("confirm");
     const confirm = confirmStr === "true";
-    const result = await app.corpusService.delete(idOrSlug, confirm, { by: actor.name });
+    const result = await app.corpusService.delete(idOrSlug, confirm, resolveDocWriteOpts(actor));
     if (!result.ok) return loreErrorResponse(result.error);
     return jsonOk(result.value);
   }

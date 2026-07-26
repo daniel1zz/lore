@@ -20,7 +20,7 @@
  * Six-dimension coverage: HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE / REGRESSION
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { InMemoryStore } from "../../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../../src/service/corpus-service.js";
 import { ReviewService } from "../../../../src/service/review-service.js";
@@ -722,5 +722,91 @@ describe("regression — DELETE /api/dashboard/docs/:id without ?confirm=true is
     const body = await parseRes(res!);
     const error = body.error as Record<string, unknown>;
     expect(error.code).toBe("DELETE_REQUIRES_CONFIRM");
+  });
+});
+
+// ─── Author attribution (adr-dashboard-cookie-session-writes-attribute-author-via) ─────
+//
+// Cookie-session writes must attribute `doc.created_by` (and the new version
+// snapshot's `created_by`) via the SAME resolveActor chain the CLI uses
+// ($LORE_ACTOR > session tier > OS username), never the literal "system" and
+// never the static "dashboard-local"/"admin" bootstrap-key identity. `$LORE_ACTOR`
+// is injected/restored around each test for a deterministic assertion — mirrors
+// `audit-actor-fidelity.test.ts`'s ambient-env isolation pattern.
+//
+// Six-dimension coverage: HAPPY / REGRESSION (bearer path unaffected — dashboard
+// routes 403 bearer callers before ever reaching CorpusService, see the existing
+// AC-DASH-WRITE-9 tests above; the bearer-attribution REGRESSION pin itself lives
+// in routes.test.ts, which exercises the v1 dual-auth route CorpusService actually
+// reaches for a bearer actor).
+describe("author attribution — cookie-session writes resolve via the actor chain, never 'system'", () => {
+  const ORIGINAL_LORE_ACTOR = process.env["LORE_ACTOR"];
+
+  beforeEach(() => {
+    process.env["LORE_ACTOR"] = "agent:dashboard-human";
+  });
+
+  afterEach(() => {
+    if (ORIGINAL_LORE_ACTOR === undefined) delete process.env["LORE_ACTOR"];
+    else process.env["LORE_ACTOR"] = ORIGINAL_LORE_ACTOR;
+  });
+
+  it("POST /api/dashboard/docs records doc.created_by as the resolved $LORE_ACTOR, not 'system'", async () => {
+    const req = jsonReq("POST", "/api/dashboard/docs", { type: "prd", title: "Attributed Doc" });
+    const url = makeUrl("/api/dashboard/docs");
+    const res = await handleDashboardRoute(req, url, app, COOKIE_ACTOR);
+    expect(res!.status).toBe(201);
+    const body = await parseRes(res!);
+    const doc = (body.data as Record<string, unknown>).doc as Record<string, unknown>;
+
+    expect(doc.created_by).toBe("agent:dashboard-human");
+    expect(doc.created_by).not.toBe("system");
+    // The static bootstrap-key identity must never leak through either.
+    expect(doc.created_by).not.toBe("admin");
+    expect(doc.created_by).not.toBe(COOKIE_ACTOR.name);
+  });
+
+  it("the create's version-1 snapshot also carries the resolved actor, not 'system'", async () => {
+    const req = jsonReq("POST", "/api/dashboard/docs", { type: "prd", title: "Attributed Version Doc" });
+    const url = makeUrl("/api/dashboard/docs");
+    const res = await handleDashboardRoute(req, url, app, COOKIE_ACTOR);
+    const body = await parseRes(res!);
+    const doc = (body.data as Record<string, unknown>).doc as Record<string, unknown>;
+
+    const logResult = await app.versionService.log(doc.id as string);
+    if (!logResult.ok) throw new Error(JSON.stringify(logResult.error));
+    expect(logResult.value[0]?.created_by).toBe("agent:dashboard-human");
+  });
+
+  it("PATCH /api/dashboard/docs/:id records the NEW version snapshot's created_by as the resolved actor", async () => {
+    const { id } = await createPrd("Edited PRD");
+
+    const req = jsonReq("PATCH", `/api/dashboard/docs/${id}`, { content: "Edited content" });
+    const url = makeUrl(`/api/dashboard/docs/${id}`);
+    const res = await handleDashboardRoute(req, url, app, COOKIE_ACTOR);
+    expect(res!.status).toBe(200);
+
+    const logResult = await app.versionService.log(id);
+    if (!logResult.ok) throw new Error(JSON.stringify(logResult.error));
+    const latestVersion = logResult.value[0]; // newest first
+    expect(latestVersion?.action).toBe("update");
+    expect(latestVersion?.created_by).toBe("agent:dashboard-human");
+    expect(latestVersion?.created_by).not.toBe("system");
+  });
+
+  it("two different cookie sessions in sequence each resolve their OWN $LORE_ACTOR value (no caching across writes)", async () => {
+    const req1 = jsonReq("POST", "/api/dashboard/docs", { type: "prd", title: "First Attributed Doc" });
+    const res1 = await handleDashboardRoute(req1, makeUrl("/api/dashboard/docs"), app, COOKIE_ACTOR);
+    const body1 = await parseRes(res1!);
+    const doc1 = (body1.data as Record<string, unknown>).doc as Record<string, unknown>;
+    expect(doc1.created_by).toBe("agent:dashboard-human");
+
+    process.env["LORE_ACTOR"] = "agent:second-dashboard-human";
+    const req2 = jsonReq("POST", "/api/dashboard/docs", { type: "prd", title: "Second Attributed Doc" });
+    const res2 = await handleDashboardRoute(req2, makeUrl("/api/dashboard/docs"), app, COOKIE_ACTOR);
+    const body2 = await parseRes(res2!);
+    const doc2 = (body2.data as Record<string, unknown>).doc as Record<string, unknown>;
+    expect(doc2.created_by).toBe("agent:second-dashboard-human");
+    expect(doc2.created_by).not.toBe(doc1.created_by);
   });
 });

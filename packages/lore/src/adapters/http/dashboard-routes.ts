@@ -61,7 +61,7 @@ import type { ActorContext } from "./auth.js";
 import type { DocPatch, LinkType, Telemetry } from "@lore/core";
 import { createDocInputSchema, docTypeSchema } from "@lore/core";
 import { jsonOk, jsonError, loreErrorResponse, parseJsonBody, isOriginAllowed, emitDashboardTelemetry } from "./middleware.js";
-import { ALLOWED_ORIGINS } from "./auth.js";
+import { ALLOWED_ORIGINS, resolveDocWriteOpts } from "./auth.js";
 import { checkConcurrency, resolveExpectedVersion, buildConflictPayload } from "./concurrency.js";
 import { runCalibrationHook } from "../../flows/calibration-hook.js";
 import { handleDashboardConfigPatch, handleDashboardMachineConfigPatch } from "./config-routes.js";
@@ -249,10 +249,12 @@ async function handleDashboardCreate(
     );
   }
 
-  // SPEC-079 G2 — thread the resolved cookie-session actor through as the
-  // create's audit actor (mirrors the reviewer-identity convention this file
-  // already uses for approve/reject below: owner when set, else the api key name).
-  const result = await app.corpusService.create(parsed.data, { by: actor.owner ?? actor.name });
+  // adr-dashboard-cookie-session-writes-attribute-author-via — resolveDocWriteOpts
+  // (auth.ts) resolves the author via the SAME chain the CLI uses ($LORE_ACTOR →
+  // session tier → OS username of the `lore serve` process), NOT the static
+  // "dashboard-local"/"admin" bootstrap-key identity the reviewer field below
+  // still uses (a deliberately separate, out-of-scope concern — see auth.ts).
+  const result = await app.corpusService.create(parsed.data, resolveDocWriteOpts(actor));
   if (!result.ok) return loreErrorResponse(result.error);
 
   emitDashboardTelemetry(app, "create", { doc_id: result.value.id, type: result.value.type });
@@ -307,12 +309,14 @@ async function handleDashboardPatch(
 
   // Layer 2 — see this function's JSDoc. `expectedVersion` is derived from the
   // request's own headers, independent of the (possibly already-stale-by-now)
-  // `currentDoc` snapshot above. `by` (SPEC-079 G2) threads the resolved cookie-
-  // session actor through as the update's audit actor.
+  // `currentDoc` snapshot above. resolveDocWriteOpts (auth.ts,
+  // adr-dashboard-cookie-session-writes-attribute-author-via) threads the
+  // resolved actor through as BOTH the update's audit actor and (opted-in for
+  // cookie sessions) the new version snapshot's `created_by`.
   const expectedVersion = resolveExpectedVersion(req);
   const result = await app.corpusService.set(id, patch, {
     ...(expectedVersion !== undefined ? { expectedVersion } : {}),
-    by: actor.owner ?? actor.name,
+    ...resolveDocWriteOpts(actor),
   });
   if (!result.ok) {
     if (result.error.code === "STALE_VERSION") {
@@ -460,10 +464,9 @@ async function handleDashboardCreateLink(
     return jsonError({ code: "VALIDATION_ERROR", field: "type", message: "'type' must be a non-empty string" }, 422);
   }
 
-  // SPEC-079 G2 — thread the resolved cookie-session actor through as the link's audit actor.
-  const result = await app.corpusService.link(fromId, to.trim(), type.trim() as LinkType, {
-    by: actor.owner ?? actor.name,
-  });
+  // adr-dashboard-cookie-session-writes-attribute-author-via — resolveDocWriteOpts
+  // (auth.ts) is the single cookie-vs-bearer attribution policy seam.
+  const result = await app.corpusService.link(fromId, to.trim(), type.trim() as LinkType, resolveDocWriteOpts(actor));
   if (!result.ok) return loreErrorResponse(result.error);
 
   return jsonOk({ ok: true }, 201);
@@ -479,7 +482,7 @@ async function handleDashboardDeleteLink(
   app: App,
   actor: ActorContext,
 ): Promise<Response> {
-  const result = await app.corpusService.unlink(fromId, toId, { by: actor.owner ?? actor.name });
+  const result = await app.corpusService.unlink(fromId, toId, resolveDocWriteOpts(actor));
   if (!result.ok) return loreErrorResponse(result.error);
 
   return new Response(null, { status: 204 });
@@ -500,8 +503,9 @@ async function handleDashboardDelete(
 ): Promise<Response> {
   const confirm = new URL(req.url).searchParams.get("confirm") === "true";
 
-  // SPEC-079 G2 — thread the resolved cookie-session actor through as the delete's audit actor.
-  const result = await app.corpusService.delete(id, confirm, { by: actor.owner ?? actor.name });
+  // adr-dashboard-cookie-session-writes-attribute-author-via — resolveDocWriteOpts
+  // (auth.ts) is the single cookie-vs-bearer attribution policy seam.
+  const result = await app.corpusService.delete(id, confirm, resolveDocWriteOpts(actor));
   if (!result.ok) return loreErrorResponse(result.error);
 
   emitDashboardTelemetry(app, "delete", { doc_id: result.value.id });
