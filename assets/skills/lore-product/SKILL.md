@@ -126,6 +126,18 @@ Each mode produces structured output that feeds the next mode. Handoffs are **ex
 - Cross-cutting concerns checklist is mandatory for all mode outputs
 - Anti-patterns: skipping validation, feature-first thinking, no success metrics, building without traceability
 
+## PRD Update Flow (SPEC-080 — outline authoring, product round)
+
+Updating the living root PRD is `prd` mode ("PRD UPDATE" in `references/mode-prd.md`) — it is NEVER a wholesale `lore set` content edit. Since SPEC-080, the PRD body is a rendered projection of `extra.outline[]`; hand-editing the body section-by-section is retired.
+
+1. **Domain detail first** — the full narrative lives in a linked spec, not in the PRD body:
+   - New domain → `lore create spec --kind domain-overview --parent <prd>` (full review lifecycle: draft → in-review → approved; fast-track disallowed for this kind).
+   - Existing domain → `lore set <domain-doc>` (normal CAS update, targeting the domain spec, never the PRD body).
+2. **Bounded outline entry** — `lore outline set <prd> --section <key> --title … --direction … --decision-pointers <adr-slugs> --constraints … --links <domain-doc-slug>:detail …` records the summary + the `rel="detail"` link back to the domain doc. This is the sole dedicated writer for `prd.extra.outline[]`; a direct `lore set` patch touching `extra.outline` is rejected (VALIDATION_ERROR naming `lore outline`).
+3. **Landing-spec chain unchanged** — feature/tech/design specs still parent to the PRD and flow into plan/task exactly as before.
+
+⛔ **Never edit the root PRD body wholesale** via `lore set <prd> --content …` — that clobbers the rendered outline projection and reintroduces the 100KB-append-per-round failure mode SPEC-080 retired. Detail belongs in the domain doc; the PRD carries only the bounded outline entry + links.
+
 ## Exit Criteria (all modes)
 
 Every mode must satisfy before declaring "done":
