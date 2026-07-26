@@ -1,16 +1,33 @@
 /**
  * AuditService — read/verify surface over the already-LIVE `audit` table
- * (SPEC-035 §2, §5). Zero audit-storage schema changes: this service only adds a
- * query pass-through and a completeness oracle on top of `StoreInterface.queryAudit`
- * / `listAllVersions`, both of which predate this spec.
+ * (SPEC-035 §2, §5; chain-integrity + anchor surface added SPEC-079 G3).
+ * Zero audit-storage schema changes beyond migration-009's additive
+ * `prev_hash`/`entry_hash` columns: this service adds a query pass-through,
+ * a versions⋈audit completeness oracle, a tamper-evident hash-chain walk,
+ * and an external-anchor cross-check on top of `StoreInterface.queryAudit` /
+ * `listAllVersions` / `listAuditChain`.
  *
  * Public surface:
  *   query(filters)        → thin delegation to store.queryAudit
- *   verify(opts?)          → versions⋈audit completeness oracle (D5, D9)
+ *   verify(opts?)          → versions⋈audit completeness oracle (D5, D9) PLUS
+ *                            a whole-table chain-integrity walk and an
+ *                            optional external-anchor cross-check (SPEC-079 G3)
+ *   getChainHead()         → `(head_id, head_hash, entry_count)` for `lore audit
+ *                            anchor` to persist — VALIDATION_ERROR on an empty
+ *                            audit table (SPEC-079 G3, never a silent empty anchor)
  *
  * @invariant Stateless — holds only a StoreInterface. No telemetry (audit reads are
  *   a CLI-invoked oracle, not a hot instrumented path — mirrors VersionService, which
  *   is also un-instrumented).
+ * @invariant SPEC-079 G3 — `verify()`'s chain-integrity walk covers the ENTIRE
+ *   `audit` table in `id` ASC order via `store.listAuditChain()`, regardless of
+ *   the `since` watermark that bounds the completeness join. A hash chain is
+ *   only meaningful end-to-end: bounding it by `since` would let an attacker
+ *   rewrite history strictly before the watermark undetected on every future
+ *   run. The external anchor (`.lore/audit-anchor.json`, written by
+ *   `lore audit anchor`, read and passed in by the CLI as `opts.anchor`) is
+ *   the ONLY thing that pins the chain against a full-history rewrite/rewind —
+ *   see `checkAuditAnchor`'s doc comment.
  * @invariant verify()'s join key is `(doc_id, version)` PLUS an action-family check —
  *   NOT a literal string-equality match on `audit.action === versions.action`, and NOT
  *   "any audit entry carrying this version satisfies any versions row at that version"
@@ -43,10 +60,11 @@
  * Source: SPEC-035 §2, §5
  */
 
-import { ok, type LoreError, type Result } from "@lore/core";
+import { err, ok, type LoreError, type Result } from "@lore/core";
 import type { DocId, VersionAction } from "@lore/core";
-import type { AuditFilters, StoreInterface } from "../store/store-interface.js";
+import type { AuditChainEntry, AuditFilters, StoreInterface } from "../store/store-interface.js";
 import type { AuditEntry } from "@lore/core";
+import { computeAuditEntryHash } from "../store/store-shared.js";
 
 // ─── Public Types ────────────────────────────────────────────────────────────
 
@@ -103,12 +121,168 @@ export interface AuditMiss {
   created_at: string;
 }
 
+// ─── Tamper-evident chain walk + external anchor (SPEC-079 G3) ─────────────
+
+/**
+ * The FIRST chain-integrity break found by {@link walkAuditChain}, in `id` ASC
+ * order — later breaks (if any) are never reported in the same pass; a fixed
+ * break must be re-verified to surface the next one. `reason` is exhaustive:
+ *   - `"unchained_row"` — `prev_hash`/`entry_hash` is NULL on this row. Legal
+ *     ONLY on the contiguous pre-migration-009 prefix of a not-yet-migrated
+ *     DB; post-migration (every corpus this service ever runs against) it is
+ *     always a tamper/corruption finding.
+ *   - `"prev_link_mismatch"` — this row's stored `prev_hash` does not equal
+ *     the immediately preceding chain entry's `entry_hash` (or, for the very
+ *     first row, is not the genesis value `""`). Produced by a DELETED row
+ *     (the next surviving row's `prev_hash` now points at a hash that's no
+ *     longer the walker's current head) or an APPENDED forged row with a
+ *     fabricated `prev_hash`.
+ *   - `"hash_mismatch"` — this row's own `entry_hash` does not equal
+ *     {@link computeAuditEntryHash} recomputed over its (unchanged) `prev_hash`
+ *     and content fields. Produced by an in-place UPDATE of a row's content
+ *     (actor/action/details/etc.) without recomputing its stored hash.
+ */
+export interface AuditChainBreak {
+  id: number;
+  reason: "hash_mismatch" | "prev_link_mismatch" | "unchained_row";
+}
+
+/**
+ * Result of {@link walkAuditChain} — the whole-table hash-chain-integrity walk
+ * folded into {@link AuditVerifyResult.chain}. `checked` counts every row the
+ * walk examined, INCLUDING the breaking row when `clean` is `false` (so
+ * `checked` is always the 1-based position of `break.id` within the chain on
+ * a dirty result, and the total chain length on a clean one).
+ */
+export interface AuditChainVerifyResult {
+  clean: boolean;
+  checked: number;
+  break?: AuditChainBreak;
+}
+
+/**
+ * The `(head_id, head_hash)` pair `lore audit anchor` persists to
+ * `.lore/audit-anchor.json` (plus `entry_count`/`anchored_at`, irrelevant to
+ * the cross-check itself) — passed into {@link AuditService.verify} as
+ * `opts.anchor` by the CLI when that file is present. This service never
+ * reads the file itself (services have no fs access, SPEC-079 G3 design) —
+ * the CLI adapter reads/parses it, mirroring how `lore.tree.yaml` is loaded
+ * by the CLI and handed to `getReviewBundle` as an already-parsed value.
+ */
+export interface AuditAnchorRef {
+  head_id: number;
+  head_hash: string;
+}
+
+/**
+ * Result of {@link checkAuditAnchor} — folded into
+ * {@link AuditVerifyResult.anchor}. Three states, never a boolean, so a
+ * caller can never mistake "no anchor was ever set" for "the anchor was
+ * checked and found clean" — an absent anchor is a FACT about this corpus's
+ * configuration, not a passing check:
+ *   - `"absent"` — no anchor file was supplied (`opts.anchor` omitted). No
+ *     anchor cross-check ran; this is NEVER folded into `clean: true` as if
+ *     it were a pass.
+ *   - `"clean"` — a chain entry with `id === head_id` exists and its stored
+ *     `entry_hash` equals `head_hash`.
+ *   - `"anchor_mismatch"` — the anchored row is gone (`"row_missing"` — the
+ *     chain was rewound/truncated past the anchor point) or its hash no
+ *     longer matches (`"hash_mismatch"` — the anchored row was rewritten
+ *     in place after being anchored).
+ */
+export type AuditAnchorVerifyResult =
+  | { status: "absent" }
+  | { status: "clean"; head_id: number; head_hash: string }
+  | {
+      status: "anchor_mismatch";
+      head_id: number;
+      head_hash: string;
+      reason: "row_missing" | "hash_mismatch";
+    };
+
+/**
+ * `(head_id, head_hash, entry_count)` for the current chain head — the
+ * value {@link AuditService.getChainHead} resolves for `lore audit anchor`
+ * to persist (plus its own `anchored_at` timestamp, which is an adapter
+ * concern, not a service one).
+ */
+export interface AuditChainHead {
+  head_id: number;
+  head_hash: string;
+  entry_count: number;
+}
+
+/**
+ * Walks a full `id`-ASC audit chain (as returned by
+ * `StoreInterface.listAuditChain()`) and reports the FIRST break, if any.
+ * Pure — no IO, no store access; `AuditService.verify` is its only caller.
+ * See {@link AuditChainBreak}'s doc comment for the three break reasons and
+ * the precedence between them (checked in the order below: a NULL hash pair
+ * is checked before either comparison, since a missing hash can't be
+ * compared against anything; a bad `prev_hash` link is checked before
+ * recomputing THIS row's own hash, since a chain sample gathered under a
+ * DIFFERENT `prev_hash` context — content is identical but predecessor
+ * changed — would otherwise spuriously report `hash_mismatch` on a row that
+ * is not itself the rewritten one).
+ */
+export function walkAuditChain(chain: readonly AuditChainEntry[]): AuditChainVerifyResult {
+  let expectedPrevHash = "";
+  for (let i = 0; i < chain.length; i++) {
+    const entry = chain[i] as AuditChainEntry;
+    const checked = i + 1;
+
+    if (entry.entry_hash === null || entry.prev_hash === null) {
+      return { clean: false, checked, break: { id: entry.id, reason: "unchained_row" } };
+    }
+    if (entry.prev_hash !== expectedPrevHash) {
+      return { clean: false, checked, break: { id: entry.id, reason: "prev_link_mismatch" } };
+    }
+    if (computeAuditEntryHash(entry, expectedPrevHash) !== entry.entry_hash) {
+      return { clean: false, checked, break: { id: entry.id, reason: "hash_mismatch" } };
+    }
+    expectedPrevHash = entry.entry_hash;
+  }
+  return { clean: true, checked: chain.length };
+}
+
+/**
+ * Cross-checks an optional external anchor against the current chain. Pure —
+ * no IO. See {@link AuditAnchorVerifyResult}'s doc comment for the three
+ * states.
+ */
+export function checkAuditAnchor(
+  chain: readonly AuditChainEntry[],
+  anchor: AuditAnchorRef | undefined,
+): AuditAnchorVerifyResult {
+  if (anchor === undefined) return { status: "absent" };
+
+  const anchoredRow = chain.find((entry) => entry.id === anchor.head_id);
+  if (anchoredRow === undefined) {
+    return { status: "anchor_mismatch", head_id: anchor.head_id, head_hash: anchor.head_hash, reason: "row_missing" };
+  }
+  if (anchoredRow.entry_hash !== anchor.head_hash) {
+    return { status: "anchor_mismatch", head_id: anchor.head_id, head_hash: anchor.head_hash, reason: "hash_mismatch" };
+  }
+  return { status: "clean", head_id: anchor.head_id, head_hash: anchor.head_hash };
+}
+
 /** Result of {@link AuditService.verify}. */
 export interface AuditVerifyResult {
   clean: boolean;
   misses: AuditMiss[];
   /** The watermark this verify pass was bounded by — surfaced for CLI/MCP display. */
   since: string;
+  /**
+   * Whole-table hash-chain-integrity walk (SPEC-079 G3) — NOT bounded by
+   * `since`; see {@link AuditService}'s class-level `@invariant`.
+   */
+  chain: AuditChainVerifyResult;
+  /**
+   * External-anchor cross-check (SPEC-079 G3) — `{status: "absent"}` when
+   * `opts.anchor` was omitted (no `.lore/audit-anchor.json` on disk, or the
+   * caller chose not to pass it). Never silently folded into a pass.
+   */
+  anchor: AuditAnchorVerifyResult;
 }
 
 /** Options for {@link AuditService.verify}. */
@@ -121,6 +295,12 @@ export interface VerifyOpts {
    * while still allowing per-call overrides (e.g. `--since` on `lore audit --verify`).
    */
   since?: string;
+  /**
+   * The parsed `.lore/audit-anchor.json` head ref, if the CLI found one on
+   * disk — see {@link AuditAnchorRef}. Omitted → the anchor cross-check
+   * reports `{status: "absent"}`, never a silent pass.
+   */
+  anchor?: AuditAnchorRef;
 }
 
 // ─── AuditService ────────────────────────────────────────────────────────────
@@ -166,13 +346,25 @@ export class AuditService {
    * audit entry from an unrelated action family (e.g. `"judge"`) sharing the same
    * version never satisfies the oracle.
    *
-   * @param opts - `{ since? }` — override watermark; defaults to `this.verifySince`
-   * @returns Result<AuditVerifyResult, LoreError> — `clean: true` iff `misses` is empty
+   * SPEC-079 G3: ALSO recomputes the whole-table hash chain
+   * ({@link walkAuditChain}, unbounded by `since` — see this class's own
+   * `@invariant`) and, when `opts.anchor` is supplied, cross-checks it against
+   * the chain ({@link checkAuditAnchor}). `clean` is the conjunction of all
+   * three: `misses.length === 0 AND chain.clean AND anchor.status !==
+   * "anchor_mismatch"` — a corpus can be version-complete yet still report
+   * `clean: false` on a chain break or anchor mismatch, and vice versa.
+   *
+   * @param opts - `{ since?, anchor? }` — `since` overrides the completeness
+   *   watermark (defaults to `this.verifySince`); `anchor` is the parsed
+   *   `.lore/audit-anchor.json` head ref, if the CLI found one on disk.
+   * @returns Result<AuditVerifyResult, LoreError>
    *
    * @example
    * const result = await auditService.verify();
    * if (result.ok && !result.value.clean) {
    *   for (const miss of result.value.misses) console.error(miss);
+   *   if (!result.value.chain.clean) console.error(result.value.chain.break);
+   *   if (result.value.anchor.status === "anchor_mismatch") console.error(result.value.anchor);
    * }
    */
   async verify(opts?: VerifyOpts): Promise<Result<AuditVerifyResult, LoreError>> {
@@ -185,40 +377,83 @@ export class AuditService {
       (v) => VERIFIABLE_VERSION_ACTIONS.has(v.action) && v.created_at >= since,
     );
 
-    if (candidates.length === 0) {
-      return ok({ clean: true, misses: [], since });
-    }
+    let misses: AuditMiss[] = [];
+    if (candidates.length > 0) {
+      const auditResult = await this.store.queryAudit({ since });
+      if (!auditResult.ok) return auditResult;
 
-    const auditResult = await this.store.queryAudit({ since });
-    if (!auditResult.ok) return auditResult;
-
-    // reason: build the (doc_id, version) -> {audit actions seen} index once —
-    // O(audit) — rather than querying per-versions-row (O(versions * audit)). See
-    // @invariant above re: the join key being (doc_id, version) PLUS an action-family
-    // check, never bare version-equality (which would let an unrelated action like
-    // "judge" incidentally satisfy a missing create/update/approve/reject/restore entry).
-    const auditActionsByPair = new Map<string, Set<string>>();
-    for (const entry of auditResult.value) {
-      if (entry.doc_id === undefined) continue;
-      const detailVersion = entry.details?.["version"];
-      if (typeof detailVersion === "number") {
-        const key = `${entry.doc_id}::${detailVersion}`;
-        const actions = auditActionsByPair.get(key) ?? new Set<string>();
-        actions.add(entry.action);
-        auditActionsByPair.set(key, actions);
+      // reason: build the (doc_id, version) -> {audit actions seen} index once —
+      // O(audit) — rather than querying per-versions-row (O(versions * audit)). See
+      // @invariant above re: the join key being (doc_id, version) PLUS an action-family
+      // check, never bare version-equality (which would let an unrelated action like
+      // "judge" incidentally satisfy a missing create/update/approve/reject/restore entry).
+      const auditActionsByPair = new Map<string, Set<string>>();
+      for (const entry of auditResult.value) {
+        if (entry.doc_id === undefined) continue;
+        const detailVersion = entry.details?.["version"];
+        if (typeof detailVersion === "number") {
+          const key = `${entry.doc_id}::${detailVersion}`;
+          const actions = auditActionsByPair.get(key) ?? new Set<string>();
+          actions.add(entry.action);
+          auditActionsByPair.set(key, actions);
+        }
       }
+
+      misses = candidates.filter((v) => {
+        const family = VERSION_ACTION_AUDIT_FAMILY[v.action];
+        const seenActions = auditActionsByPair.get(`${v.doc_id}::${v.version}`);
+        return !(seenActions !== undefined && [...family].some((a) => seenActions.has(a)));
+      }).map((v) => ({ doc_id: v.doc_id, version: v.version, action: v.action, created_at: v.created_at }));
     }
 
-    const misses: AuditMiss[] = [];
-    for (const v of candidates) {
-      const family = VERSION_ACTION_AUDIT_FAMILY[v.action];
-      const seenActions = auditActionsByPair.get(`${v.doc_id}::${v.version}`);
-      const satisfied = seenActions !== undefined && [...family].some((a) => seenActions.has(a));
-      if (!satisfied) {
-        misses.push({ doc_id: v.doc_id, version: v.version, action: v.action, created_at: v.created_at });
-      }
+    // SPEC-079 G3 — the chain walk covers the WHOLE table, never bounded by
+    // `since` (see this class's `@invariant`).
+    const chainResult = await this.store.listAuditChain();
+    if (!chainResult.ok) return chainResult;
+
+    const chain = walkAuditChain(chainResult.value);
+    const anchor = checkAuditAnchor(chainResult.value, opts?.anchor);
+
+    const clean = misses.length === 0 && chain.clean && anchor.status !== "anchor_mismatch";
+
+    return ok({ clean, misses, since, chain, anchor });
+  }
+
+  /**
+   * Resolves the current chain head for `lore audit anchor` to persist to
+   * `.lore/audit-anchor.json` (SPEC-079 G3). This service never touches the
+   * filesystem — the CLI adapter does the actual write; this method only
+   * supplies the value.
+   *
+   * @returns `err(VALIDATION_ERROR)` when the audit table is empty (there is
+   *   nothing to anchor — never a silent/degenerate anchor); otherwise the
+   *   current `(head_id, head_hash, entry_count)`.
+   */
+  async getChainHead(): Promise<Result<AuditChainHead, LoreError>> {
+    const chainResult = await this.store.listAuditChain();
+    if (!chainResult.ok) return chainResult;
+
+    const chain = chainResult.value;
+    if (chain.length === 0) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "audit_chain",
+        message: "Cannot anchor: the audit table is empty — nothing to pin a trust root to.",
+      });
     }
 
-    return ok({ clean: misses.length === 0, misses, since });
+    const head = chain[chain.length - 1] as AuditChainEntry;
+    if (head.entry_hash === null) {
+      // reason: unreachable against a post-migration-009 corpus (D4 — every
+      // row is backfilled with a real hash) but a broken chain must never
+      // be silently anchored, so this is checked rather than asserted away.
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "audit_chain",
+        message: `Cannot anchor: chain head (audit row id ${head.id}) has no entry_hash — run \`lore audit --verify\` to locate the break first.`,
+      });
+    }
+
+    return ok({ head_id: head.id, head_hash: head.entry_hash, entry_count: chain.length });
   }
 }

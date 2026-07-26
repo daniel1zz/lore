@@ -2,8 +2,13 @@ dist/
 node_modules/
 # .lore/ contents are local (db, WAL, key) EXCEPT export-index.json —
 # SPEC-021: the corpus↔file ID map is git-tracked and team-shared.
+# audit-anchor.json (SPEC-079 G3) is the SAME kind of exception — the
+# external trust root for `lore audit --verify`'s tamper-detection chain
+# must be git-tracked so a chain rewrite before the anchor point is
+# detectable from git history, not just from the (also-rewritable) DB file.
 .lore/*
 !.lore/export-index.json
+!.lore/audit-anchor.json
 *.db
 *.sqlite
 .DS_Store
