@@ -36,8 +36,9 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
 import { join, resolve } from "path";
 import { tmpdir } from "os";
 import { createApp } from "../../src/app.js";
+import type { App } from "../../src/app.js";
 import { saveConfig } from "@lore/core/node";
-import type { CreateDocInput } from "@lore/core";
+import type { CreateDocInput, LoreConfig } from "@lore/core";
 
 // ─── Command type (mirrors assess-ai.bun.test.ts) ────────────────────────────
 
@@ -153,6 +154,37 @@ async function createPrdOnly(): Promise<{ prdSlug: string }> {
   }
 }
 
+/**
+ * Create a PRD + child spec declaring `extra.spec_kind = kind` (task-lore-gate-spec-
+ * promote-cli-pre-flight-is-not-spec-kind AC2 fixture — the CLI must resolve THIS
+ * declared kind, not always fall back to the "feature" default `createSpec` above
+ * implicitly exercises).
+ */
+async function createSpecWithKind(kind: string): Promise<{ specId: string; specSlug: string }> {
+  const app = createApp(join(tmpDir, ".lore", "lore.db"));
+  try {
+    const prdResult = await app.corpusService.create({
+      type: "prd",
+      title: `Gate Spec-Promote ${kind} PRD`,
+      content: "PRD body for gate spec-promote spec_kind parity tests.",
+    } as CreateDocInput);
+    if (!prdResult.ok) throw new Error(`prd create failed: ${JSON.stringify(prdResult.error)}`);
+
+    const specResult = await app.corpusService.create({
+      type: "spec",
+      title: `Gate Spec-Promote ${kind} Target Spec`,
+      parent_id: prdResult.value.id,
+      content: "## Overview\n\nSpec body for gate spec-promote spec_kind parity tests.\n",
+      extra: { spec_kind: kind },
+    } as CreateDocInput);
+    if (!specResult.ok) throw new Error(`spec create failed: ${JSON.stringify(specResult.error)}`);
+
+    return { specId: specResult.value.id, specSlug: specResult.value.slug };
+  } finally {
+    app.close();
+  }
+}
+
 /** Add one structured acceptance criterion (verify.mode=human — simplest valid shape). */
 async function addAcceptanceCriterion(specId: string, id = "AC-PROMO-1"): Promise<void> {
   const app = createApp(join(tmpDir, ".lore", "lore.db"));
@@ -236,6 +268,41 @@ function writeAcQuantifiableDisabledConfig() {
     },
   } as never);
 }
+
+/**
+ * Write config.yaml declaring the `domain-overview` verification profile's
+ * `min_acs: 0` (SPEC-058, the same entry `lore setup --project`'s template seeds —
+ * task-lore-gate-spec-promote-cli-pre-flight-is-not-spec-kind AC2), ALSO pointing
+ * `ai.provider` at a nonexistent binary (same "ghost binary" idiom as the other
+ * config-writing helpers above) so the post-pass judge-advisory attempt fails fast.
+ */
+function writeDomainOverviewProfileConfig() {
+  saveConfig(tmpDir, {
+    project: { name: "gate-spec-promote-test", author: "tester" },
+    workflow: { verification_profiles: { "domain-overview": { min_acs: 0 } } },
+    ai: {
+      provider: "claude-cli",
+      providers: {
+        "claude-cli": { command: "ghost-ai-binary-not-installed-xyz", args: [], timeout_ms: 5000 },
+      },
+      templates: {},
+      telemetry: false,
+    },
+  } as never);
+}
+
+/**
+ * The SAME `domain-overview: {min_acs: 0}` profile as {@link writeDomainOverviewProfileConfig}'s
+ * on-disk config, as a typed `LoreConfig` object — used to open a SECOND, service-layer
+ * gate-enforced `App` (via `createApp(dbPath, config)`, mirroring
+ * `gate-enforcer-service-layer.bun.test.ts`'s `openApp` idiom) so a test can assert the
+ * CLI pre-flight and `CorpusService.set`'s spec-promote gate reach the IDENTICAL verdict
+ * for the same spec — the parity this task's fix establishes.
+ */
+const DOMAIN_OVERVIEW_PROFILE_CONFIG = {
+  project: { name: "gate-spec-promote-test", author: "tester" },
+  workflow: { verification_profiles: { "domain-overview": { min_acs: 0 } } },
+} as unknown as LoreConfig;
 
 /**
  * Directly patches a spec's `extra.acceptance_criteria` via `CorpusService.set`
@@ -560,5 +627,111 @@ describe("lore gate spec-promote — STATE: LORE_GATE_BYPASS=1", () => {
     }
 
     expect(process.exitCode).toBe(0);
+  });
+});
+
+// ─── AC2 (parity fix): CLI resolves specKind + verificationProfile ──────────
+// task-lore-gate-spec-promote-cli-pre-flight-is-not-spec-kind — before this fix,
+// `runSpecPromoteGate` never populated `ctx.specKind`/`ctx.verificationProfile`, so a
+// domain-overview spec with `min_acs: 0` (SPEC-058) that already promotes cleanly
+// through `CorpusService.set`/`ReviewService.approve` was still denied by `lore gate
+// spec-promote` with the spec_kind-agnostic default floor-1 message. Each case below
+// asserts the CLI outcome AND, in the same test, the service-layer outcome for the
+// identical spec/config — proving they now agree.
+
+describe("lore gate spec-promote — AC2 (parity fix): CLI resolves specKind + verificationProfile", () => {
+  it("HAPPY: domain-overview spec with 0 ACs + min_acs:0 profile passes the CLI gate, matching the service layer", async () => {
+    const { specId, specSlug } = await createSpecWithKind("domain-overview");
+    writeDomainOverviewProfileConfig();
+
+    const cmd = await importGateSpecPromoteCommand();
+    const output = captureOutput();
+    try {
+      await cmd.run({ args: { spec: specSlug } });
+    } finally {
+      output.restore();
+    }
+
+    expect(process.exitCode).toBe(0);
+    expect(output.stdout.join("\n")).toContain("gate: pass");
+
+    // ── Service-layer parity: the SAME draft→approved transition through
+    // CorpusService.set (the sibling gated write path ReviewService.approve also
+    // uses) must reach the IDENTICAL verdict against the SAME config profile.
+    const gatedApp = createApp(join(tmpDir, ".lore", "lore.db"), DOMAIN_OVERVIEW_PROFILE_CONFIG) as App;
+    try {
+      const setResult = await gatedApp.corpusService.set(specId, { status: "approved" });
+      expect(setResult.ok).toBe(true);
+    } finally {
+      gatedApp.close();
+    }
+  });
+
+  it('NEGATIVE: feature-kind spec with 0 ACs is denied, message names floor 1 and kind "feature" — matching the service layer', async () => {
+    const { specId, specSlug } = await createSpecWithKind("feature");
+    // reason: the domain-overview profile entry must NOT leak a waived floor onto an
+    // unrelated spec_kind — feature has no entry of its own, so it keeps the default
+    // floor of 1 (acCountMeetsFloor's DEFAULT_MIN_ACS).
+    writeDomainOverviewProfileConfig();
+
+    const cmd = await importGateSpecPromoteCommand();
+    const output = captureOutput();
+    try {
+      await cmd.run({ args: { spec: specSlug } });
+    } finally {
+      output.restore();
+    }
+
+    expect(process.exitCode).toBe(4);
+    const stderrText = output.stderr.join("");
+    expect(stderrText).toContain("needs >= 1");
+    expect(stderrText).toContain('spec_kind "feature"');
+
+    // ── Service-layer parity: the SAME 0-AC feature spec is ALSO denied by
+    // CorpusService.set's spec-promote gate against the SAME config.
+    const gatedApp = createApp(join(tmpDir, ".lore", "lore.db"), DOMAIN_OVERVIEW_PROFILE_CONFIG) as App;
+    try {
+      const setResult = await gatedApp.corpusService.set(specId, { status: "approved" });
+      expect(setResult.ok).toBe(false);
+      if (!setResult.ok) {
+        expect(setResult.error.code).toBe("VALIDATION_ERROR");
+      }
+    } finally {
+      gatedApp.close();
+    }
+  });
+
+  it("BOUNDARY: domain-overview spec with exactly 1 AC still passes (min_acs:0 is a floor waiver, not a cap)", async () => {
+    const { specId, specSlug } = await createSpecWithKind("domain-overview");
+    await addAcceptanceCriterion(specId, "AC-DOMAIN-1");
+    writeDomainOverviewProfileConfig();
+
+    const cmd = await importGateSpecPromoteCommand();
+    const output = captureOutput();
+    try {
+      await cmd.run({ args: { spec: specSlug } });
+    } finally {
+      output.restore();
+    }
+
+    expect(process.exitCode).toBe(0);
+  });
+
+  it("REGRESSION: with no verification_profiles config at all, a feature-kind spec with 0 ACs is still denied with the pre-existing message", async () => {
+    const { specSlug } = await createSpecWithKind("feature");
+    writeAiConfig("ghost-ai-binary-not-installed-xyz"); // reason: see AC4 suite's identical comment
+
+    const cmd = await importGateSpecPromoteCommand();
+    const output = captureOutput();
+    try {
+      await cmd.run({ args: { spec: specSlug } });
+    } finally {
+      output.restore();
+    }
+
+    expect(process.exitCode).toBe(4);
+    const stderrText = output.stderr.join("");
+    expect(stderrText).toContain("no structured acceptance criteria");
+    expect(stderrText).toContain('spec_kind "feature"');
   });
 });

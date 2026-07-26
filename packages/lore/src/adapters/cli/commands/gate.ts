@@ -17,11 +17,19 @@
  *
  * `lore gate spec-promote --spec <id-or-slug>` gates an ALREADY-CREATED spec ahead of
  * approval — the deterministic zone here is narrower than spec-create's: does the spec
- * declare ≥1 structured acceptance criterion (`spec.extra.acceptance_criteria`, SPEC-038,
- * counted via `AcService.listCriteria` — the same SSOT `lore ac list` reads)?
- *   - 0 declared → exit 4, "no acceptance criteria" message (deterministic, hard block).
- *   - ≥1 declared → "gate: pass", exit 0, ALWAYS (the AC-count check is the only thing
- *     that can fail this gate).
+ * declare ≥ its resolved `spec_kind`'s AC-count floor (`spec.extra.acceptance_criteria`,
+ * SPEC-038, counted via `AcService.listCriteria` — the same SSOT `lore ac list` reads;
+ * SPEC-058 `workflow.verification_profiles.<kind>.min_acs`, default 1, resolved from
+ * the target spec's OWN `extra.spec_kind` — task-lore-gate-spec-promote-cli-pre-flight-
+ * is-not-spec-kind, the SAME resolution `CorpusService.set`/`ReviewService.approve`
+ * already apply on their own spec-promote gate call sites), AND every declared
+ * criterion passes `acQuantifiable`, AND (when the resolved profile declares
+ * `required_oracles`) `oracleCoverage`?
+ *   - floor not met → exit 4, "no structured acceptance criteria" message naming the
+ *     resolved floor + kind (deterministic, hard block).
+ *   - floor met but `acQuantifiable`/`oracleCoverage` fails → exit 4, naming the
+ *     offending AC/oracle.
+ *   - all three pass → "gate: pass", exit 0.
  * After a pass, the command makes a SECOND, PURELY ADVISORY attempt: it runs the
  * SPEC-034 AI judge (`CorpusService.getReviewBundle` → `runDeterministicChecks` →
  * `AIProviderService.judgeDoc`, same call shape `lore review` uses) and prints a
@@ -161,11 +169,14 @@ import {
   resolveGateEnabled,
   resolveAnchorOverlapGateEnabled,
   resolveAcQuantifiableGateEnabled,
+  resolveOracleCoverageGateEnabled,
+  resolveVerificationProfile,
   specAcceptanceCriteriaSchema,
+  SPEC_KINDS,
 } from "@lore/core";
 import type { App } from "../../../app.js";
 import type { AcService } from "../../../service/ac-service.js";
-import type { LoreConfig, LoreError, NewReviewJudgment } from "@lore/core";
+import type { LoreConfig, LoreError, NewReviewJudgment, SpecKind } from "@lore/core";
 import type { RecordGateSkip } from "../../../service/gate-enforcer.js";
 import {
   renderDocMarkdown,
@@ -981,26 +992,43 @@ async function runPhaseClaimGate(
 }
 
 /**
- * Runs the `spec-promote` deterministic zone (≥1 declared acceptance criterion, AND —
- * CLI-preflight parity fix, AC-Quantifiability Gate spec §Design — every declared
- * criterion must pass `acQuantifiable`) against an already-created spec, then makes a
- * best-effort, exit-code-inert judge advisory attempt (module header, INV2). The
- * deterministic outcome is settled and printed BEFORE the advisory attempt runs, so a
- * slow/unreachable AI provider can never delay or flip the gate's verdict — it can
- * only add a trailing stderr note.
+ * Runs the `spec-promote` deterministic zone (a `spec_kind`-resolved AC-count floor —
+ * SPEC-058 min_acs, default 1 — AND every declared criterion must pass `acQuantifiable`
+ * AND, when a verification profile declares `required_oracles`, `oracleCoverage`)
+ * against an already-created spec, then makes a best-effort, exit-code-inert judge
+ * advisory attempt (module header, INV2). The deterministic outcome is settled and
+ * printed BEFORE the advisory attempt runs, so a slow/unreachable AI provider can never
+ * delay or flip the gate's verdict — it can only add a trailing stderr note.
  *
  * `criteria` (from `AcService.listCriteria`, the SAME SSOT `lore ac list` reads) is
  * already the exact `AcceptanceCriterion[]` shape `GateContext.acceptanceCriteria`
  * needs — no re-parse required here, unlike `runSpecCreateGate`'s untyped candidate
  * JSON.
  *
+ * `specKind`/`verificationProfile` resolution (task-lore-gate-spec-promote-cli-pre-
+ * flight-is-not-spec-kind, SPEC-058 CLI/service-layer parity fix) mirrors the SAME
+ * pattern `CorpusService.set` (`effectiveSpecKind`) and `ReviewService.approve`
+ * (`resolveSpecKindOrDefault`) already apply on their own spec-promote gate call
+ * sites: a raw `extra.spec_kind` string outside {@link SPEC_KINDS} (or absent —
+ * `AcService.listCriteria`'s success above already proved the doc resolves and is a
+ * spec) falls back to `"feature"`, the SAME default `CorpusService._createImpl`
+ * applies at spec-creation time. This is the ONE store read the CLI pays that the two
+ * service call sites don't — they already have the target `DocRecord` in hand from
+ * their own write path, the CLI doesn't. `verificationProfile` is resolved exactly
+ * ONCE per invocation from that resolved `specKind` and threaded onto BOTH
+ * `acCountMeetsFloor` and `oracleCoverage` (both read `ctx.verificationProfile` —
+ * `checkSpecPromote`, checkpoint-registry.ts) — before this fix neither predicate here
+ * ever saw a resolved profile, so `oracleCoverage` silently vacuous-passed regardless
+ * of `workflow.verification_profiles.<kind>.required_oracles` config.
+ *
  * @param app - Wired `App` (from `loadLoreApp()`).
  * @param specIdOrSlug - Spec document ULID or slug to gate.
  * @param config - `loadLoreApp()`'s resolved project config — forwarded to
- *   `resolveAcQuantifiableGateEnabled` so this pre-flight gate honors the SAME
- *   `workflow.gates."spec-promote".ac_quantifiable.enabled` sub-key
- *   `GateEnforcer.isAcQuantifiableEnabled()` reads; no second, independently-drifting
- *   config read.
+ *   `resolveAcQuantifiableGateEnabled`/`resolveOracleCoverageGateEnabled`/
+ *   `resolveVerificationProfile` so this pre-flight gate honors the SAME
+ *   `workflow.gates."spec-promote".*` sub-keys and `workflow.verification_profiles.*`
+ *   entries `GateEnforcer`'s service-layer path reads; no second, independently-
+ *   drifting config read.
  */
 async function runSpecPromoteGate(
   app: App,
@@ -1014,13 +1042,33 @@ async function runSpecPromoteGate(
     return;
   }
 
+  // reason: task-lore-gate-spec-promote-cli-pre-flight-is-not-spec-kind — the
+  // `listResult.ok` check above already proved `specIdOrSlug` resolves to an
+  // existing `spec` doc (AcService.listCriteria rejects non-spec targets), so this
+  // second lookup cannot newly fail on a target this call would otherwise reject.
+  const specResult = await app.corpusService.get(specIdOrSlug);
+  if (!specResult.ok) {
+    process.stderr.write(formatError(specResult.error) + "\n");
+    process.exitCode = exitCode(specResult.error);
+    return;
+  }
+  const rawSpecKind = specResult.value.doc.extra["spec_kind"];
+  const specKind: SpecKind =
+    typeof rawSpecKind === "string" && (SPEC_KINDS as readonly string[]).includes(rawSpecKind)
+      ? (rawSpecKind as SpecKind)
+      : "feature";
+  const verificationProfile = resolveVerificationProfile(config, specKind);
+
   const { criteria } = listResult.value;
   const checkpoint = requireCheckpoint("spec-promote");
   const ctx: GateContext = {
     acceptanceCriteriaCount: criteria.length,
     specIdOrSlug,
+    specKind,
     acceptanceCriteria: criteria,
     acQuantifiableEnabled: resolveAcQuantifiableGateEnabled(config, "spec-promote"),
+    verificationProfile,
+    oracleCoverageEnabled: resolveOracleCoverageGateEnabled(config),
   };
   const results = checkpoint.check(ctx);
 
