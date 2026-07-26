@@ -17,7 +17,9 @@
  *
  * Test plan (six-dimension coverage):
  *   HAPPY — two pending docs with different judgments (approve + null) both
- *     render, each with the correct judgment badge text.
+ *     render; the approve row shows its judgment badge text, the null-judgment
+ *     row renders NO judgment badge at all (see the title-priority addendum
+ *     below — "unreviewed" was removed as pure noise).
  *   NEGATIVE — n/a beyond the ERROR/BOUNDARY cases below.
  *   BOUNDARY — an empty pending queue renders "No documents pending review."
  *     and never calls apiGetJudgments; a queue of 10 docs still only renders
@@ -122,7 +124,11 @@ describe("PendingPanel", () => {
       expect(await screen.findByText("Doc One")).toBeInTheDocument();
       expect(screen.getByText("Doc Two")).toBeInTheDocument();
       expect(screen.getByText("approve 0.93")).toBeInTheDocument();
-      expect(screen.getByText("unreviewed")).toBeInTheDocument();
+      // "Doc Two" has judgment === null — no badge renders for it at all
+      // (title-priority follow-up: "unreviewed" is every unjudged row's
+      // default and conveyed no differentiating information while eating
+      // width the title needs more).
+      expect(screen.queryByText("unreviewed")).not.toBeInTheDocument();
     });
   });
 
@@ -303,11 +309,12 @@ describe("PendingPanel", () => {
       expect(meta).toBeInTheDocument();
       expect(meta).toHaveAttribute("title", metaText);
 
-      expect(screen.getByText("unreviewed")).toBeInTheDocument();
+      // judgment === null here — no badge at all (title-priority follow-up).
+      expect(screen.queryByText("unreviewed")).not.toBeInTheDocument();
       expect(screen.getByText("task")).toBeInTheDocument();
     });
 
-    it("keeps the title as the primary (flex-1, min-w-0) element and the meta badge as the shrinkable one", async () => {
+    it("keeps the title as the primary, GUARANTEED-minimum-width element (min-w-[10ch] flex-1) and the meta badge as the harder-capped shrinkable one", async () => {
       const doc = makePendingDoc({
         id: "01HDOC00000000000000000002",
         type: "task",
@@ -321,12 +328,84 @@ describe("PendingPanel", () => {
 
       const title = await screen.findByText("Short Title");
       expect(title).toHaveClass("flex-1");
-      expect(title).toHaveClass("min-w-0");
+      // reason (title-priority follow-up): a bare `min-w-0` let the flexbox
+      // shrink algorithm collapse the title to 1-2 characters under real
+      // overflow, since `flex-1`'s 0% basis contributes zero weight to the
+      // shrink-distribution pool — the OTHER (nonzero-basis) siblings kept
+      // their natural size while title alone shrank toward 0. `min-w-[10ch]`
+      // is a real CSS min-width floor the shrink algorithm cannot cross.
+      expect(title).toHaveClass("min-w-[10ch]");
+      expect(title).not.toHaveClass("min-w-0");
       expect(title).toHaveClass("truncate");
 
       const meta = screen.getByText("claimed:agent:worker-sse");
       expect(meta).toHaveClass("truncate");
       expect(meta).toHaveClass("min-w-0");
+      // reason: capped tighter (40% -> 25%) so meta yields more room to the
+      // title up front, since meta is the one flex sibling designed to
+      // absorb overflow via its own shrink.
+      expect(meta).toHaveClass("max-w-[25%]");
+    });
+  });
+
+  describe("title-priority follow-up (post-merge browser verification, ISSUE-001 round 2)", () => {
+    it("omits the judgment badge entirely when judgment is null, reclaiming width for the title", async () => {
+      const doc = makePendingDoc({
+        id: "01HDOC00000000000000000003",
+        type: "knowledge",
+        title: "Research — SSE fan-out capacity",
+        meta: { t: "knowledge", sub_type: "research" },
+      });
+      mockedGetPending.mockResolvedValue([doc]);
+      mockedGetJudgments.mockResolvedValue({ latest: null, history: [] });
+
+      renderWithClient(<PendingPanel />);
+
+      await screen.findByText("Research — SSE fan-out capacity");
+      expect(screen.queryByText("unreviewed")).not.toBeInTheDocument();
+      // The type + meta badges are untouched by this change — only the
+      // judgment badge is conditionally omitted.
+      expect(screen.getByText("knowledge")).toBeInTheDocument();
+      expect(screen.getByText("research")).toBeInTheDocument();
+    });
+
+    it("still renders a REAL (non-null) judgment badge — only the null/'unreviewed' case is omitted", async () => {
+      const doc = makePendingDoc({
+        id: "01HDOC00000000000000000004",
+        type: "spec",
+        title: "Escalated Spec Row",
+      });
+      mockedGetPending.mockResolvedValue([doc]);
+      mockedGetJudgments.mockResolvedValue({
+        latest: makeJudgment({ decision: "escalate", blocking_questions: ["Is this in scope?"] }),
+        history: [],
+      });
+
+      renderWithClient(<PendingPanel />);
+
+      await screen.findByText("Escalated Spec Row");
+      expect(screen.getByText("escalate +1Q")).toBeInTheDocument();
+    });
+
+    it("shows at least the ~10-character AC threshold of the seeded title even with a type badge, meta badge, and un-truncated container width all present", async () => {
+      // Regression pin for the exact post-merge finding: the title text
+      // itself is never shortened/altered by this component (only CSS
+      // truncation applies visually) — this asserts the DOM node's full
+      // text content starts with the AC's literal ≥10-char example.
+      const doc = makePendingDoc({
+        id: "01HDOC00000000000000000005",
+        type: "knowledge",
+        title: "Research — SSE fan-out capacity",
+        meta: { t: "knowledge", sub_type: "research" },
+      });
+      mockedGetPending.mockResolvedValue([doc]);
+      mockedGetJudgments.mockResolvedValue({ latest: null, history: [] });
+
+      renderWithClient(<PendingPanel />);
+
+      const title = await screen.findByText("Research — SSE fan-out capacity");
+      expect(title.textContent?.startsWith("Research —")).toBe(true);
+      expect((title.textContent ?? "").length).toBeGreaterThanOrEqual(10);
     });
   });
 });
