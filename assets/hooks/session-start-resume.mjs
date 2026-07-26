@@ -2,18 +2,27 @@
 /**
  * session-start-resume.mjs — SessionStart hook.
  *
- * Phase C: corpus-workflow governance injection — reads the `lore setup`-
- *          installed snippet at <claude-dir>/governance/corpus-workflow.md
- *          and injects it ONLY when the session's resolved corpus root has
- *          .lore/ (computed after Phase D, which may redirect the root to a
- *          worktree's main checkout). Unified 2026-07-17: the previous
- *          source (prompt/global-instructions.md) was NEVER written by
- *          `lore setup` (it installs under governance/) — the phase was a
- *          reader without a writer, product-wide dead code. A machine whose
- *          personal CLAUDE.md already carries the discipline simply has no
- *          governance file installed → fail-open skip, no double injection.
- *          The former subagent-roster block was REMOVED the same day: the
- *          harness natively lists custom agents from ~/.claude/agents.
+ * Phase C: governance-prose injection (`lore governance`) — SPEC-083 D2:
+ *          spawns the resolved `lore` binary's `governance` verb (the SAME
+ *          binary Phase E already spawns for `lore bootstrap`) and injects
+ *          its stdout verbatim, ONLY when the session's resolved corpus root
+ *          has .lore/ (computed after Phase D, which may redirect the root
+ *          to a worktree's main checkout). Replaces the pre-SPEC-083
+ *          file-read of an INSTALLED governance-snippet snapshot under
+ *          `<claude-dir>/governance/` — that installed copy could silently
+ *          drift out of sync with the
+ *          running binary across an unreinstalled upgrade (the exact defect
+ *          SPEC-083 fixes: the binary now emits its own governance prose at
+ *          runtime, from its OWN assets root, so prose and binary version
+ *          can never diverge). Fail-open is UNCHANGED: a missing `lore`
+ *          binary, non-zero exit, or empty stdout silently skips this phase
+ *          — never blocks session start, never double-injects. Unified
+ *          2026-07-17: the ORIGINAL previous source
+ *          (prompt/global-instructions.md) was NEVER written by `lore setup`
+ *          (it installs under governance/) — the phase was a reader without
+ *          a writer, product-wide dead code. The former subagent-roster
+ *          block was REMOVED the same day: the harness natively lists custom
+ *          agents from ~/.claude/agents.
  * Phase D: linked-worktree seat detection (SPEC-047) — auto-injects the
  *          seat-briefing.md discipline block for sessions opened inside a
  *          linked git worktree of a lore-governed repo
@@ -151,7 +160,7 @@ try {
 const degradations = [];
 
 // Phase C is computed AFTER Phase D (it needs the resolved corpus root);
-// see "Phase C: corpus-workflow governance" below. Declared here so the
+// see "Phase C: governance-prose injection" below. Declared here so the
 // compose order (workflow first) is unaffected.
 let workflowBlock = '';
 
@@ -245,15 +254,25 @@ try {
   // Fail-open — any git/fs error here must never block session start.
 }
 
-// ── Phase C: corpus-workflow governance (lore-governed sessions) ───
-// Source path = what `lore setup` actually installs. Injection is gated on
-// the RESOLVED corpus root (Phase D may have redirected it to a worktree's
-// main checkout) having .lore/ — non-lore projects get nothing.
+// ── Phase C: governance-prose injection (lore-governed sessions) ───
+// SPEC-083 D2 — source is now the RUNTIME `lore governance` verb (never an
+// installed file snapshot). Injection is gated on the RESOLVED corpus root
+// (Phase D may have redirected it to a worktree's main checkout) having
+// .lore/ — non-lore projects get nothing. `cwd: bootstrapCwd` mirrors Phase
+// E's own spawn (below) even though `lore governance` itself needs no
+// corpus — one consistent invocation shape. Fail-open: a missing binary
+// (ENOENT), non-zero exit, or empty stdout leaves `workflowBlock` at its
+// initial `''` — identical in effect to the pre-SPEC-083 missing-file case.
 try {
   if (existsSync(join(bootstrapCwd, '.lore'))) {
-    const governancePath = join(dirname(AGENTS_DIR), 'governance', 'corpus-workflow.md');
-    if (existsSync(governancePath)) {
-      workflowBlock = readFileSync(governancePath, 'utf8');
+    const governanceResult = spawnSync('lore', ['governance'], {
+      cwd: bootstrapCwd,
+      encoding: 'utf8',
+      timeout: 5000,
+    });
+    if (governanceResult.status === 0 && typeof governanceResult.stdout === 'string'
+        && governanceResult.stdout.length > 0) {
+      workflowBlock = governanceResult.stdout;
     }
   }
 } catch { /* fail-open — governance injection must never block session start */ }

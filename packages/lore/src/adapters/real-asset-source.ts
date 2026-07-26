@@ -36,6 +36,13 @@
  *   - `AssetFile.kind` is derived from the top-level directory name alone:
  *     `skills → "skill"`, `agents → "agent"`, `hooks → "hook"`,
  *     `governance → "governance"` (`TOP_LEVEL_KIND_MAP`).
+ *   - SPEC-083 D3: `GOVERNANCE_INSTALL_EXCLUSIONS` skips
+ *     `governance/corpus-workflow.md` specifically -- that file stays in the
+ *     walked `assets/governance/` tree (still fingerprinted by the embedded
+ *     assets manifest) but is never yielded into the `AssetPayload`, so
+ *     `lore setup` neither writes nor manifest-tracks it. The runtime
+ *     `lore governance` verb reads it straight from the binary's own
+ *     assets root instead -- see that command's module header.
  *   - `AssetFile.executable` records the SOURCE file's on-disk owner-execute
  *     bit (`mode & 0o100 !== 0`), set ONLY when `true` (omitted, never
  *     `false` — see `assetFileSchema`'s doc in `@lore/core`). `SetupService`
@@ -81,6 +88,22 @@ import type { AssetFile, AssetOwnership, AssetPayload, SetupEntryKind } from "@l
 
 /** Placeholder token substituted for the real target dir by `SetupService.resolvePayload`. */
 const CLAUDE_DIR_PLACEHOLDER = "{{CLAUDE_DIR}}";
+
+/**
+ * Governance-dir files excluded from the MACHINE install set (SPEC-083 D3).
+ * `corpus-workflow.md` is retired from `<claude-dir>/governance/` — the new
+ * bootstrap-stage `lore governance` verb (SPEC-083 D1) prints it straight
+ * from the binary's OWN `assets/` tree at read time, so an installed,
+ * setup-time-snapshotted copy can no longer drift out of sync with the
+ * binary. The file itself still lives under `assets/governance/` (this
+ * port's `load()` never walks anything else) and is still fingerprinted by
+ * the embedded assets manifest (`scripts/embed-assets-manifest.mjs` walks
+ * `assets/` directly, not through this port) — only ITS INSTALLATION is
+ * retired here. `seat-briefing.md` is explicitly OUT of this exclusion
+ * (SPEC-083 Scope "Out") — Phase D of the session-start hook still reads it
+ * as an installed file.
+ */
+const GOVERNANCE_INSTALL_EXCLUSIONS = new Set<string>(["corpus-workflow.md"]);
 
 import type { AssetSource } from "../service/setup-service.js";
 
@@ -164,6 +187,13 @@ export class RealAssetSource implements AssetSource {
       }
 
       for (const relPath of relPaths) {
+        // SPEC-083 D3 — skip the retired governance install exclusions (currently
+        // just corpus-workflow.md); every other governance file (seat-briefing.md)
+        // and every file in the other three walked dirs is unaffected.
+        if (topDir === "governance" && GOVERNANCE_INSTALL_EXCLUSIONS.has(relPath)) {
+          continue;
+        }
+
         const fullPath = join(dirPath, relPath);
         let content: string;
         let mode: number;

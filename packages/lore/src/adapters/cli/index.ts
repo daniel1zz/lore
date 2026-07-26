@@ -79,6 +79,9 @@ const main = defineCommand({
     anchor: () => import("./commands/anchor.js").then(wrapDefault("anchor")),
     invalidate: () => import("./commands/invalidate.js").then(wrapDefault("invalidate")),
     setup: () => import("./commands/setup.js").then(wrapDefault("setup")),
+    // governance (SPEC-083 D1) — bootstrap-stage, no corpus required; see
+    // commands/governance.ts's module header.
+    governance: () => import("./commands/governance.js").then(wrapDefault("governance")),
     outline: () => import("./commands/outline.js").then(wrapDefault("outline")),
     seat: () => import("./commands/seat.js").then(wrapDefault("seat")),
     "report-issue": () => import("./commands/report-issue.js").then(wrapDefault("report-issue")),
