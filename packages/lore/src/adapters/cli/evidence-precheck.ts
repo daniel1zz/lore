@@ -14,6 +14,12 @@
  *   - findMissingOracleFiles(command, opts) — compose both extractors with an
  *     injected existence port to report which extracted tokens resolve to no
  *     file anywhere plausible
+ *   - findMissingOracleFilesForEvidence(input) — additionally composes the
+ *     "test"/"e2e" + "pass" oracle/result gate on top of findMissingOracleFiles,
+ *     so both the CLI (`commands/evidence.ts`) and MCP (`../mcp/tools.ts`'s
+ *     `lore_evidence_add`) adapters share ONE decision of which calls are even
+ *     in scope for this precheck (task-mcp-lore-evidence-add-bypasses-the-
+ *     oracle-file-existence)
  *
  * Design: token EXTRACTION and existence-port CHECKING both live here so the
  * whole precheck is unit-testable with a fake `fileExists` — no real
@@ -184,4 +190,63 @@ export function findMissingOracleFiles(
     if (!existsSomewhere) missing.push(token);
   }
   return missing;
+}
+
+/**
+ * Composes the "does this evidence-add call even need the missing-oracle-file
+ * precheck" gate (only a self-reported `test`/`e2e` oracle claiming `pass` is
+ * in scope — see this module's header) with `findMissingOracleFiles` itself.
+ *
+ * Both CLI adapter callers of the precheck (`commands/evidence.ts`) AND MCP
+ * adapter callers (`../mcp/tools.ts`'s `lore_evidence_add` handler — defect:
+ * task-mcp-lore-evidence-add-bypasses-the-oracle-file-existence, an MCP call
+ * used to bypass the precheck entirely because it never routed through this
+ * CLI command) apply the SAME oracle/result gate before deciding whether to
+ * block a call; this function is the single place that gate is expressed, so
+ * neither adapter can drift on which oracle/result combinations it covers.
+ *
+ * @param input.oracle - the oracle kind as received from the caller (CLI
+ *   `--oracle` / MCP `oracle` arg) — deliberately untyped `string` so this
+ *   helper stays agnostic of either adapter's own (structurally identical but
+ *   independently declared) enum type
+ * @param input.result - the result as received (CLI `--result` / MCP `result`
+ *   arg), same untyped-`string` reasoning
+ * @param input.command - the exact command string, passed straight through to
+ *   `findMissingOracleFiles`
+ * @param input.cwd - absolute current working directory
+ * @param input.corpusRoot - absolute discovered corpus root; omitted or equal
+ *   to `cwd` means only `cwd` is tried
+ * @param input.fileExists - injected existence check (real caller:
+ *   `fs.existsSync`)
+ * @returns the subset of extracted tokens that resolve nowhere plausible;
+ *   `[]` when the oracle/result combination is out of this precheck's scope
+ *   (every other oracle kind, or `result !== "pass"`) OR every extracted
+ *   token exists somewhere — the caller never blocks on an empty result
+ * @example
+ *   findMissingOracleFilesForEvidence({
+ *     oracle: "tsc", result: "pass", command: "bun run typecheck",
+ *     cwd: "/repo", fileExists: () => false,
+ *   })
+ *   // => [] — oracle "tsc" is out of scope, fileExists is never even called
+ */
+export function findMissingOracleFilesForEvidence(input: {
+  oracle: string;
+  result: string;
+  command: string;
+  cwd: string;
+  corpusRoot?: string;
+  fileExists: FileExistsPort;
+}): string[] {
+  if (input.oracle !== "test" && input.oracle !== "e2e") return [];
+  if (input.result !== "pass") return [];
+  return findMissingOracleFiles(input.command, {
+    cwd: input.cwd,
+    // reason: exactOptionalPropertyTypes — conditionally spread rather than
+    // pass `corpusRoot: input.corpusRoot` verbatim, since `input.corpusRoot`'s
+    // type is `string | undefined` (an explicit `undefined` call-site value is
+    // legal here) while findMissingOracleFiles's own `corpusRoot?: string`
+    // rejects an explicit `undefined` under this tsconfig.
+    ...(input.corpusRoot !== undefined ? { corpusRoot: input.corpusRoot } : {}),
+    fileExists: input.fileExists,
+  });
 }

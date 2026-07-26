@@ -15,14 +15,23 @@
  *   HAPPY:      each of the 4 tools succeeds and returns { doc } / { ready };
  *               lore_evidence_add's optional ac_ref (SPEC-038 §4) is threaded
  *               through to the EvidenceInput passed to the service (adapter
- *               boundary only — see the "ac_ref" describe block below for why)
+ *               boundary only — see the "ac_ref" describe block below for why);
+ *               lore_evidence_add's missing-oracle-file precheck lets an
+ *               EXISTING referenced file through (see the dedicated describe
+ *               block below)
  *   NEGATIVE:   lore_claim conflict envelope; lore_ready on a non-plan doc
- *   BOUNDARY:   lore_ready on an empty plan → { ready: [] }
- *   ERROR:      isError=true + LoreError JSON on failure (all 4 tools)
+ *   BOUNDARY:   lore_ready on an empty plan → { ready: [] }; the precheck's
+ *               e2e oracle also gates (not just test)
+ *   ERROR:      isError=true + LoreError JSON on failure (all 4 tools);
+ *               lore_evidence_add's missing-oracle-file precheck blocks a
+ *               self-reported test/e2e pass citing a nonexistent file
+ *               (task-mcp-lore-evidence-add-bypasses-the-oracle-file-existence)
  *   STATE:      claim → release → re-claim state machine round-trip via MCP
  *   REGRESSION: `by` is required (schema rejects/omits — MCP callers always pass
  *               it explicitly, unlike the CLI's env/OS-username fallback);
- *               omitting ac_ref leaves it absent from the service call arg
+ *               omitting ac_ref leaves it absent from the service call arg;
+ *               the precheck never blocks manual oracle, result=fail, or a
+ *               non-test-oracle command with no extractable token
  *
  * @spec_ref AC-WF-10 AC-ACODE-3 AC-ACODE-8
  */
@@ -360,6 +369,191 @@ describe("lore_evidence_add", () => {
         const entry = spy.captured();
         expect(entry).toBeDefined();
         expect(entry && "ac_ref" in entry).toBe(false);
+      } finally {
+        spy.restore();
+      }
+    });
+  });
+});
+
+// ─── lore_evidence_add — missing-oracle-file precheck ─────────────────────────
+//
+// Regression coverage for task-mcp-lore-evidence-add-bypasses-the-oracle-file-
+// existence: `lore_evidence_add` used to call `TaskWorkflowService.addEvidence`
+// directly, never routing through the CLI's `lore evidence` command — so an
+// MCP-originated self-reported `oracle: "test"|"e2e"`, `result: "pass"` call
+// citing a nonexistent test file recorded cleanly. The handler now runs the
+// SAME shared gate (`findMissingOracleFilesForEvidence`,
+// `../../../src/adapters/cli/evidence-precheck.ts`) BEFORE calling the
+// service, resolved against the REAL filesystem (`existsSync`) relative to
+// `process.cwd()` — vitest's cwd is the repo root (`vitest.config.ts` lives
+// there, see root `vitest.config.ts`), so these cases reference real
+// repo-relative paths rather than an injected fake (the handler has no
+// fileExists injection seam of its own; the pure gate/extraction logic
+// itself is already exhaustively unit-tested fileExists-injected in
+// `evidence-precheck.test.ts` — this file only proves the MCP adapter wires
+// it in correctly, mirroring `cli-evidence-oracle-precheck.bun.test.ts`'s
+// scope note for the CLI side).
+describe("lore_evidence_add — missing-oracle-file precheck", () => {
+  const call = () => getToolHandler(server, "lore_evidence_add");
+  // A file that genuinely exists in the repo, referenced relative to the
+  // vitest cwd (repo root) — this test file itself.
+  const EXISTING_TEST_FILE = "packages/lore/tests/unit/adapters/mcp-tools-task-workflow.test.ts";
+  const MISSING_TEST_FILE = "packages/lore/tests/unit/adapters/ghost-nonexistent-oracle-file.test.ts";
+
+  function spyOnAddEvidence(): { called: () => boolean; restore: () => void } {
+    const original = app.taskWorkflowService.addEvidence.bind(app.taskWorkflowService);
+    let wasCalled = false;
+    app.taskWorkflowService.addEvidence = ((idOrSlug: string, entry: EvidenceInput, now?: () => string) => {
+      wasCalled = true;
+      return original(idOrSlug, entry, now);
+    }) as typeof app.taskWorkflowService.addEvidence;
+    return {
+      called: () => wasCalled,
+      restore: () => {
+        app.taskWorkflowService.addEvidence = original;
+      },
+    };
+  }
+
+  describe("happy path", () => {
+    it("AC-1.H1: oracle test + result pass citing an EXISTING file records normally", async () => {
+      const planId = await createPlan();
+      const taskId = await createTask(planId);
+      const spy = spyOnAddEvidence();
+
+      try {
+        const result = await call()({
+          id_or_slug: taskId,
+          oracle: "test",
+          command: `bunx vitest run ${EXISTING_TEST_FILE}`,
+          result: "pass",
+          recorded_by: "alice",
+        });
+        expect(result.isError).toBeFalsy();
+        expect(spy.called()).toBe(true);
+        const data = parseResult(result) as { doc: DocRecord };
+        const evidenceArr = data.doc.extra["verification_evidence"] as unknown[];
+        expect(evidenceArr).toHaveLength(1);
+      } finally {
+        spy.restore();
+      }
+    });
+  });
+
+  describe("error handling", () => {
+    it("AC-1.E1: oracle test + result pass citing a MISSING file → isError, VALIDATION_ERROR, service never called", async () => {
+      const planId = await createPlan();
+      const taskId = await createTask(planId);
+      const spy = spyOnAddEvidence();
+
+      try {
+        const result = await call()({
+          id_or_slug: taskId,
+          oracle: "test",
+          command: `bunx vitest run ${MISSING_TEST_FILE}`,
+          result: "pass",
+          recorded_by: "alice",
+        });
+        expect(result.isError).toBe(true);
+        expect(spy.called()).toBe(false);
+        const error = parseResult(result) as { code: string; field: string; message: string; value: string };
+        expect(error.code).toBe("VALIDATION_ERROR");
+        expect(error.field).toBe("command");
+        expect(error.message).toContain(MISSING_TEST_FILE);
+
+        const docResult = await corpusService.get(taskId);
+        expect(docResult.ok).toBe(true);
+        if (docResult.ok) {
+          const evidence = docResult.value.doc.extra["verification_evidence"] as unknown[] | undefined;
+          expect(evidence ?? []).toHaveLength(0);
+        }
+      } finally {
+        spy.restore();
+      }
+    });
+  });
+
+  describe("boundary values", () => {
+    it("AC-1.B1: e2e oracle (not just test) also gates on a missing referenced file", async () => {
+      const planId = await createPlan();
+      const taskId = await createTask(planId);
+      const spy = spyOnAddEvidence();
+
+      try {
+        const result = await call()({
+          id_or_slug: taskId,
+          oracle: "e2e",
+          command: `bunx playwright test ${MISSING_TEST_FILE}`,
+          result: "pass",
+          recorded_by: "alice",
+        });
+        expect(result.isError).toBe(true);
+        expect(spy.called()).toBe(false);
+        const error = parseResult(result) as { code: string };
+        expect(error.code).toBe("VALIDATION_ERROR");
+      } finally {
+        spy.restore();
+      }
+    });
+  });
+
+  describe("regression", () => {
+    it("AC-1.REG1: manual oracle with the same missing-file command is unaffected (records normally)", async () => {
+      const planId = await createPlan();
+      const taskId = await createTask(planId);
+      const spy = spyOnAddEvidence();
+
+      try {
+        const result = await call()({
+          id_or_slug: taskId,
+          oracle: "manual",
+          command: `bunx vitest run ${MISSING_TEST_FILE}`,
+          result: "pass",
+          recorded_by: "alice",
+        });
+        expect(result.isError).toBeFalsy();
+        expect(spy.called()).toBe(true);
+      } finally {
+        spy.restore();
+      }
+    });
+
+    it("AC-1.REG2: result fail with a missing referenced file is unaffected (records normally)", async () => {
+      const planId = await createPlan();
+      const taskId = await createTask(planId);
+      const spy = spyOnAddEvidence();
+
+      try {
+        const result = await call()({
+          id_or_slug: taskId,
+          oracle: "test",
+          command: `bunx vitest run ${MISSING_TEST_FILE}`,
+          result: "fail",
+          recorded_by: "alice",
+        });
+        expect(result.isError).toBeFalsy();
+        expect(spy.called()).toBe(true);
+      } finally {
+        spy.restore();
+      }
+    });
+
+    it("AC-1.REG3: a non-test oracle (tsc) referencing no extractable token is unaffected (fail-open, pre-existing happy-path behavior)", async () => {
+      const planId = await createPlan();
+      const taskId = await createTask(planId);
+      const spy = spyOnAddEvidence();
+
+      try {
+        const result = await call()({
+          id_or_slug: taskId,
+          oracle: "tsc",
+          command: "bun run typecheck",
+          result: "pass",
+          recorded_by: "alice",
+        });
+        expect(result.isError).toBeFalsy();
+        expect(spy.called()).toBe(true);
       } finally {
         spy.restore();
       }
