@@ -580,3 +580,54 @@ export function attestationFloor(
   }
   return { ok: true };
 }
+
+/** `prdOutlineSynced`'s single machine-readable failure reason. */
+export const PRD_SYNC_NOT_SYNCED_REASON = "PRD_OUTLINE_NOT_SYNCED";
+
+/**
+ * The `PredicateResult.field` value `prdOutlineSynced`'s failure carries (SPEC-080
+ * C4) — deliberately the SHORT suffix (mirrors `ATTESTATION_FLOOR_FIELD`/
+ * `PLAN_CLOSE_FIELD`'s shape, not the fully-qualified `gate:plan-close:...` form):
+ * `GateEnforcer.enforce` composes the caller-facing `LoreError.field` as
+ * `gate:<checkpoint>:<field>`, so this constant's value becomes
+ * `"gate:plan-close:prd-outline-synced"` — the EXACT string SPEC-080 T5r's RED
+ * suite (`plan-close-prd-sync.test.ts`) pins on `result.error.field` — only once
+ * composed by the enforcer, never written out in full here.
+ */
+export const PRD_SYNC_FIELD = "prd-outline-synced";
+
+/**
+ * `plan-close`'s domain-doc sync predicate (SPEC-080 §C4) — default-OFF
+ * (`workflow.gates."plan-close".prd_sync.enabled`, resolved by the CALLER via
+ * `GateEnforcer.isPrdSyncEnabled`; this predicate itself takes no config, module
+ * invariant: no store, no IO, no config access). The CALLER
+ * (`CorpusService.set`) does ALL the IO this predicate would otherwise need:
+ * resolving the plan's ancestor spec, walking its `parent`/`implements` edge to
+ * a domain doc, deriving the plan's execution window (`[earliest task-claim
+ * `at` (fallback plan `created_at`), close-write `now`)`, start-inclusive
+ * end-exclusive — SPEC-080 C4), reading the domain doc's version history, and
+ * checking a valid `extra.prd_sync_exempt` — collapsing all of that into ONE
+ * boolean this predicate switches on. `checkPlanClose` (`checkpoint-registry.ts`)
+ * only pushes this predicate's result when BOTH `ctx.prdSyncEnabled === true`
+ * AND `ctx.prdSyncSynced !== undefined` — the latter is the caller's own
+ * "applicable at all" signal (absent for a plan with no spec-tier ancestor,
+ * mirroring `plan-promote`'s `hasSpecParent` vacuous-pass shape); a plan WITH a
+ * valid exemption is passed in here already pre-resolved to `synced: true` by
+ * the caller (an exemption bypasses the content-diff check entirely, it does
+ * not become a THIRD outcome this predicate has to know about).
+ *
+ * @param synced - Pre-computed by the caller: `true` when >= 1 domain-doc
+ *   version's content differs from its predecessor within the plan's execution
+ *   window, OR a valid `extra.prd_sync_exempt` is present; `false` otherwise.
+ * @returns `{ok: true}` when `synced`; `{ok: false, reason:
+ *   "PRD_OUTLINE_NOT_SYNCED", field: "prd-outline-synced"}` otherwise.
+ * @example
+ * prdOutlineSynced(true);  // => { ok: true }
+ * prdOutlineSynced(false); // => { ok: false, reason: "PRD_OUTLINE_NOT_SYNCED", field: "prd-outline-synced" }
+ */
+export function prdOutlineSynced(synced: boolean): PredicateResult {
+  if (synced) {
+    return { ok: true };
+  }
+  return { ok: false, reason: PRD_SYNC_NOT_SYNCED_REASON, field: PRD_SYNC_FIELD };
+}

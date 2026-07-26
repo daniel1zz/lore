@@ -259,6 +259,18 @@ const GateCheckpointConfigSchema = z
      * untouched. Inert on every other checkpoint.
      */
     requires_uat: z.object({ enabled: z.boolean().optional() }).strict().optional(),
+    /**
+     * `plan-close`-ONLY sub-predicate override (SPEC-080 §C4) — DEFAULT-OFF,
+     * the opposite polarity of every other sub-predicate key on this schema
+     * (`anchor_overlap`/`ac_quantifiable`/`oracle_coverage`/`requires_uat` all
+     * default ENABLED, an explicit `false` disables them). `prdOutlineSynced`
+     * instead requires an EXPLICIT `enabled: true` to run at all (SPEC-080
+     * Migration Plan Phase 0: "plan-close predicate behind default-OFF knob")
+     * — every pre-existing `.lore/config.yaml` (written before this field
+     * existed) stays byte-identical, and a corpus opts in only after its
+     * migration has landed enough domain docs to sync against.
+     */
+    prd_sync: z.object({ enabled: z.boolean().optional() }).strict().optional(),
   })
   .strict();
 
@@ -858,6 +870,34 @@ export function resolveOracleCoverageGateEnabled(config: LoreConfig | undefined)
  */
 export function resolveRequiresUatGateEnabled(config: LoreConfig | undefined): boolean {
   return config?.workflow?.gates?.["plan-promote"]?.requires_uat?.enabled !== false;
+}
+
+/**
+ * Resolve whether `plan-close`'s `prdOutlineSynced` sub-predicate specifically is
+ * enabled, per `workflow.gates."plan-close".prd_sync.enabled` (SPEC-080 §C4).
+ * Narrower than {@link resolveGateEnabled}`(config, "plan-close")`, which governs
+ * the WHOLE checkpoint (`prdOutlineSynced` AND `uatP0Accepted`/`attestationFloor`
+ * together). Hardcoded to `"plan-close"` (mirrors {@link
+ * resolveAnchorOverlapGateEnabled}'s single-checkpoint shape) — SPEC-080 wires
+ * this predicate on exactly one checkpoint.
+ *
+ * DELIBERATELY THE OPPOSITE DEFAULT of every sibling `resolve*GateEnabled`
+ * function on this checkpoint family: absence of the whole config, the
+ * `workflow` section, the `gates` map, the `"plan-close"` entry, OR the nested
+ * `prd_sync` key ALL mean "disabled" — only an EXPLICIT `prd_sync.enabled: true`
+ * turns this predicate on (SPEC-080 Migration Plan Phase 0: "plan-close
+ * predicate behind default-OFF knob").
+ *
+ * @param config - Parsed LoreConfig, or undefined when no config file was loaded
+ * @returns `true` iff `workflow.gates."plan-close".prd_sync.enabled === true`; `false` otherwise
+ * @example
+ *   resolvePrdSyncGateEnabled(undefined) // => false
+ *   resolvePrdSyncGateEnabled({
+ *     project, workflow: { gates: { "plan-close": { prd_sync: { enabled: true } } } },
+ *   }) // => true
+ */
+export function resolvePrdSyncGateEnabled(config: LoreConfig | undefined): boolean {
+  return config?.workflow?.gates?.["plan-close"]?.prd_sync?.enabled === true;
 }
 
 /**

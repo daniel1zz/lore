@@ -95,12 +95,14 @@ import {
   oracleCoverage,
   requiresUatDeclared,
   attestationFloor,
+  prdOutlineSynced,
   ANCHOR_OVERLAP_FIELD,
   AC_QUANTIFIABLE_FIELD,
   ORACLE_COVERAGE_FIELD,
   REQUIRES_UAT_FIELD,
   PLAN_CLOSE_FIELD,
   ATTESTATION_FLOOR_FIELD,
+  PRD_SYNC_FIELD,
   type PredicateResult,
   type SiblingClaimInfo,
 } from "./gate-predicates.js";
@@ -317,6 +319,39 @@ export interface GateContext {
    * ctx built without this field (e.g. a hand-built test fixture).
    */
   readonly attestationMinRatio?: number;
+
+  // -- plan-close: check() + feed() (SPEC-080 §C4, prdOutlineSynced) --
+  /**
+   * Whether the `prdOutlineSynced` sub-predicate is enabled at all
+   * (`workflow.gates."plan-close".prd_sync.enabled`, resolved by the CALLER via
+   * `GateEnforcer.isPrdSyncEnabled` — module invariant: no config access here).
+   * DEFAULT-OFF, the opposite polarity of every other per-predicate knob on this
+   * checkpoint (SPEC-080 Migration Plan Phase 0: "plan-close predicate behind
+   * default-OFF knob") — `undefined`/`false` means the predicate never runs,
+   * regardless of `prdSyncSynced`.
+   */
+  readonly prdSyncEnabled?: boolean;
+  /**
+   * Pre-computed by the CALLER (`CorpusService.set`): `true` when the closing
+   * plan's linked domain doc carries >= 1 version whose content differs from
+   * its predecessor within the plan's execution window, OR the plan carries a
+   * valid `extra.prd_sync_exempt`; `false` when neither holds. `undefined`
+   * means "not applicable" — the plan has no spec-tier ancestor to resolve a
+   * domain doc from at all (mirrors `hasSpecParent`'s vacuous-pass shape) —
+   * `checkPlanClose` only pushes `prdOutlineSynced`'s result when this field IS
+   * defined (as well as `prdSyncEnabled === true`).
+   */
+  readonly prdSyncSynced?: boolean;
+  /**
+   * The resolved domain doc's slug, for the feeding-pack message only — present
+   * iff the caller successfully resolved a domain doc from the plan's ancestor
+   * spec (`parent` or `implements` edge), regardless of whether its content
+   * turned out synced. `undefined` when no domain doc resolved (e.g. the
+   * ancestor spec declares no `implements` link and its own parent isn't a
+   * spec) — the feeding pack degrades to a link-first recovery message instead
+   * of naming a doc that doesn't exist.
+   */
+  readonly prdSyncDomainDocSlug?: string;
 }
 
 /**
@@ -718,7 +753,7 @@ function feedPhaseClaim(ctx: GateContext, failures: PredicateResult[]): string {
 const DEFAULT_ATTESTATION_MIN_RATIO = 0.5;
 
 /**
- * `plan-close`'s two predicates (SPEC-054 + SPEC-069 §Design Decisions D1):
+ * `plan-close`'s three predicates (SPEC-054 + SPEC-069 §Design Decisions D1 + SPEC-080 §C4):
  *
  *   - `uatP0Accepted` — OPT-IN (SPEC-054): only runs when the plan declared
  *     `ctx.requiresUat === true`; `ctx.requiresUat !== true` skips it entirely
@@ -729,10 +764,16 @@ const DEFAULT_ATTESTATION_MIN_RATIO = 0.5;
  *     `extra.attestation_exempt: true` + a non-empty reason). Deliberately NOT
  *     gated by `ctx.requiresUat` — a plan that never opted into UAT still owes
  *     an honest attestation floor over whatever evidence it DOES carry.
+ *   - `prdOutlineSynced` — OPT-IN, default-OFF (SPEC-080 §C4): only runs when
+ *     `ctx.prdSyncEnabled === true` AND `ctx.prdSyncSynced !== undefined` (the
+ *     latter is the caller's own "a spec-tier ancestor resolved, so this
+ *     predicate is even applicable" signal — a plan hanging off a `prd`
+ *     directly, or unparented, never has this field set, mirroring
+ *     `plan-promote`'s `hasSpecParent` vacuous-pass shape).
  *
- * Both predicates, when they run, are pushed into the SAME results array (this
- * module's "run every predicate, don't short-circuit on the first failure"
- * contract) — a plan can fail EITHER, BOTH, or neither independently.
+ * All three predicates, when they run, are pushed into the SAME results array
+ * (this module's "run every predicate, don't short-circuit on the first
+ * failure" contract) — a plan can fail ANY subset of them independently.
  */
 function checkPlanClose(ctx: GateContext): PredicateResult[] {
   const results: PredicateResult[] = [];
@@ -743,6 +784,9 @@ function checkPlanClose(ctx: GateContext): PredicateResult[] {
     results.push(
       attestationFloor(ctx.planTasksAttestation, ctx.attestationMinRatio ?? DEFAULT_ATTESTATION_MIN_RATIO),
     );
+  }
+  if (ctx.prdSyncEnabled === true && ctx.prdSyncSynced !== undefined) {
+    results.push(prdOutlineSynced(ctx.prdSyncSynced));
   }
   return results;
 }
@@ -785,25 +829,78 @@ function feedAttestationFloor(ctx: GateContext, failures: PredicateResult[]): st
 }
 
 /**
- * `plan-close`'s feeding message — dispatches between two independent failure
- * families (SPEC-054's `uatP0Accepted` and SPEC-069's `attestationFloor`, both
- * on `checkPlanClose`, see that function's own JSDoc):
+ * Renders the `prdOutlineSynced`-specific feeding pack (SPEC-080 §C4) — names
+ * all three repair verbs the spec's own text calls for (`lore outline set`,
+ * `lore set <domain-doc>`, `lore outline exempt`), degrading to a link-first
+ * message when the caller never resolved a domain doc at all
+ * (`ctx.prdSyncDomainDocSlug` absent — no ancestor-spec `parent`/`implements`
+ * edge to a domain doc exists yet). Pointers only (domain doc slug, never its
+ * content), mirroring `feedAttestationFloor`'s "recompute the recovery text
+ * from ctx" shape.
+ */
+function feedPrdOutlineSynced(ctx: GateContext, failures: PredicateResult[]): string {
+  const plan = ctx.targetIdOrSlug ?? "<plan>";
+  const domainDoc = ctx.prdSyncDomainDocSlug;
+  const recovery =
+    domainDoc !== undefined
+      ? `Recovery: update the outline entry (\`lore outline set <prd> --section <key> ...\`) ` +
+        `and/or the linked domain doc's narrative (\`lore set ${domainDoc} --content ...\`) — ` +
+        `or, if this plan genuinely made no domain-narrative-affecting change, record an ` +
+        `exemption via \`lore outline exempt ${plan} --reason "..."\`.`
+      : `No domain doc is linked from this plan's ancestor spec (via \`parent\` or ` +
+        `\`implements\`). Recovery: link one via \`lore outline set <prd> --section <key> ` +
+        `--links <domain-doc-slug>:detail\`, or, if this plan genuinely has no domain ` +
+        `narrative to sync, record an exemption via \`lore outline exempt ${plan} --reason ` +
+        `"..."\`.`;
+  const pack = buildFeedingPack({
+    ruleSource: "corpus (domain doc content diff)",
+    ruleMarkdown:
+      `Required for plan-close: the plan's linked domain doc must carry at least one ` +
+      `version whose content differs from its predecessor within the plan's execution ` +
+      `window (SPEC-080 C4). ${recovery}`,
+    missing: selectFailures(failures).map((f) => f.reason),
+  });
+  return renderFeedingPack(pack);
+}
+
+/**
+ * `plan-close`'s feeding message — dispatches between THREE independent failure
+ * families (SPEC-054's `uatP0Accepted`, SPEC-069's `attestationFloor`, SPEC-080's
+ * `prdOutlineSynced`, all on `checkPlanClose`, see that function's own JSDoc):
  *
- *   - ONLY `attestationFloor` failed → {@link feedAttestationFloor} alone (the
- *     dedicated, `lore verify`-naming message).
- *   - `uatP0Accepted` failed (with or without `attestationFloor` also failing)
- *     → the pre-existing `lore uat record`-naming message, UNCHANGED wording
- *     when attestation passed (REGRESSION: byte-identical to pre-SPEC-069 —
- *     `uat-service.test.ts`'s `.toContain("lore uat record")` assertions and
- *     `requires-uat-gate.test.ts`'s STATE scenario both pin this), with one
- *     extra sentence appended when attestation ALSO failed.
+ *   - ONLY `prdOutlineSynced` failed → {@link feedPrdOutlineSynced} alone.
+ *   - ONLY `attestationFloor` failed (with or without `prdOutlineSynced` also
+ *     failing) → {@link feedAttestationFloor}, with one extra sentence
+ *     appended when `prdOutlineSynced` ALSO failed — REGRESSION: byte-identical
+ *     to pre-SPEC-080 when `prdOutlineSynced` didn't fail (every pre-existing
+ *     `attestation-floor.test.ts` scenario never sets `prdSyncEnabled`, so
+ *     `prdSyncFailed` is always `false` there).
+ *   - `uatP0Accepted` failed (with or without the other two also failing) →
+ *     the pre-existing `lore uat record`-naming message, UNCHANGED wording
+ *     when both the other predicates passed (REGRESSION: byte-identical to
+ *     pre-SPEC-069/-080 — `uat-service.test.ts`'s `.toContain("lore uat
+ *     record")` assertions and `requires-uat-gate.test.ts`'s STATE scenario
+ *     both pin this), with one extra sentence per OTHER failing predicate.
  */
 function feedPlanClose(ctx: GateContext, failures: PredicateResult[]): string {
   const uatFailed = failures.some((f) => !f.ok && f.field === PLAN_CLOSE_FIELD);
   const attestationFailed = failures.some((f) => !f.ok && f.field === ATTESTATION_FLOOR_FIELD);
+  const prdSyncFailed = failures.some((f) => !f.ok && f.field === PRD_SYNC_FIELD);
+
+  if (prdSyncFailed && !uatFailed && !attestationFailed) {
+    return feedPrdOutlineSynced(ctx, failures);
+  }
 
   if (attestationFailed && !uatFailed) {
-    return feedAttestationFloor(ctx, failures);
+    const attestationText = feedAttestationFloor(ctx, failures);
+    if (!prdSyncFailed) {
+      return attestationText;
+    }
+    return (
+      `${attestationText}\n\nAdditionally, the domain-doc sync predicate is unmet — see ` +
+      `\`lore outline exempt ${ctx.targetIdOrSlug ?? "<plan>"} --reason "..."\` or update the ` +
+      `linked domain doc.`
+    );
   }
 
   const uncovered = ctx.uatUncoveredP0 ?? [];
@@ -815,6 +912,10 @@ function feedPlanClose(ctx: GateContext, failures: PredicateResult[]): string {
     ? ` Additionally, the execution-time attestation floor is unmet — see ` +
       `\`lore verify ${ctx.targetIdOrSlug ?? "<plan>"}\`.`
     : "";
+  const prdSyncNote = prdSyncFailed
+    ? ` Additionally, the domain-doc sync predicate is unmet — see \`lore outline exempt ` +
+      `${ctx.targetIdOrSlug ?? "<plan>"} --reason "..."\` or update the linked domain doc.`
+    : "";
   const pack = buildFeedingPack({
     ruleSource: "corpus (UAT verdict)",
     ruleMarkdown:
@@ -822,7 +923,7 @@ function feedPlanClose(ctx: GateContext, failures: PredicateResult[]): string {
       `archived after a linked UAT verdict shows P0 acceptance (verdict not "reject", no ` +
       `rejected P0 journey, no uncovered P0 requirement, no UIUX blocker).${detail} ` +
       `Recovery: run acceptance (\`/lore-uat\`) then \`lore uat record ` +
-      `${ctx.targetIdOrSlug ?? "<plan>"} --json-file <verdict.json>\`.${attestationNote}`,
+      `${ctx.targetIdOrSlug ?? "<plan>"} --json-file <verdict.json>\`.${attestationNote}${prdSyncNote}`,
     missing: selectFailures(failures).map((f) => f.reason),
   });
   return renderFeedingPack(pack);

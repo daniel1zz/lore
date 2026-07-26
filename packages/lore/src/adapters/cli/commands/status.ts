@@ -45,6 +45,7 @@ import {
   type OutlineBudgetLike,
   type PrdBudgetBreach,
 } from "../../../service/prd-budget-check.js";
+import { renderExemptPlansSection } from "../../../flows/status-prd-sync-flow.js";
 
 /** All CallerSurface values in a stable display order. */
 const ALL_SURFACES: ReadonlyArray<CallerSurface> = [
@@ -628,6 +629,17 @@ export default defineCommand({
         console.log("\n⚠ Invalidated feeding sources:");
         for (const warning of status.invalidated_feeding_source_warnings) {
           console.log(`  - ${warning}`);
+        }
+      }
+
+      // SPEC-080 §C4 — exempt-plans surfacing (AC-080-5). `[]` renders NO lines
+      // at all (see renderExemptPlansSection's own JSDoc), so a corpus with zero
+      // prd_sync_exempt plans prints byte-identically to pre-SPEC-080.
+      const exemptPlansLines = renderExemptPlansSection(status.exempt_plans);
+      if (exemptPlansLines.length > 0) {
+        console.log("");
+        for (const line of exemptPlansLines) {
+          console.log(line);
         }
       }
 

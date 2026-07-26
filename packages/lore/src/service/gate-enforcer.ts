@@ -72,6 +72,7 @@ import {
   resolveAcQuantifiableGateEnabled,
   resolveOracleCoverageGateEnabled,
   resolveRequiresUatGateEnabled,
+  resolvePrdSyncGateEnabled,
   resolveVerificationProfile,
   resolveAttestationMinRatio,
   type AuditEntry,
@@ -474,6 +475,27 @@ export class GateEnforcer {
    */
   isRequiresUatEnabled(): boolean {
     return resolveRequiresUatGateEnabled(this.config);
+  }
+
+  /**
+   * Whether `plan-close`'s `prdOutlineSynced` sub-predicate specifically is
+   * enabled (`workflow.gates."plan-close".prd_sync.enabled`, SPEC-080 §C4) —
+   * NARROWER than `isEnabled("plan-close")`, which governs the WHOLE
+   * checkpoint. A caller building `GateContext.prdSyncEnabled`
+   * (`CorpusService.set`) consults this, not `isEnabled`.
+   *
+   * DELIBERATELY THE OPPOSITE DEFAULT of `isTaskClaimAnchorOverlapEnabled` /
+   * `isAcQuantifiableEnabled` / `isOracleCoverageEnabled` / `isRequiresUatEnabled`
+   * above — those all default ENABLED (an explicit `false` turns them off);
+   * this one defaults DISABLED (an explicit `true` turns it on), per
+   * `resolvePrdSyncGateEnabled`'s own JSDoc.
+   *
+   * @returns `true` iff the sub-key is explicitly enabled; `false` otherwise.
+   * @example
+   * enforcer.isPrdSyncEnabled(); // => false unless config explicitly enables it
+   */
+  isPrdSyncEnabled(): boolean {
+    return resolvePrdSyncGateEnabled(this.config);
   }
 
   /**

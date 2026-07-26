@@ -39,6 +39,7 @@ import {
   buildTaskAttestationInfos,
   extractPrdSyncExempt,
   prdSyncExemptEqual,
+  extractClaim,
 } from "@lore/core";
 import type {
   CreateDocInput,
@@ -335,6 +336,18 @@ export interface CorpusStatus {
    * Empty when nothing is invalidated (never omitted — always a fact, not absent data).
    */
   invalidated_feeding_source_warnings: string[];
+  /**
+   * SPEC-080 §C4 — every ACTIVE plan currently carrying a valid
+   * `extra.prd_sync_exempt` (`extractPrdSyncExempt` returning non-`undefined`),
+   * pointer-only (slug — never the exemption's `reason`/`by`/`at`, mirroring
+   * `invalidated_feeding_source_warnings`'s pointer-not-dump shape). Closes the
+   * SPEC-069 `attestation_exempt` field's documented invisibility gap (zero
+   * status/doctor/dashboard surfacing) — that miss is not repeated here.
+   * Follows the EXACT same convention `invalidated_feeding_source_warnings`
+   * already established: empty when nothing is exempt (never omitted — always
+   * a fact, not absent data).
+   */
+  exempt_plans: Array<{ slug: string }>;
 }
 
 // ─── CorpusService ─────────────────────────────────────────────────────────
@@ -1668,16 +1681,19 @@ export class CorpusService {
     }
 
     // Gate `plan-close` on a plan's → archived TRANSITION reached via `set` (SPEC-054 +
-    // SPEC-069 §Design Decisions D1). `archived` is the lifecycle terminal — "closing" a
-    // plan. Only fires for an ACTUAL close (`existing.status !== "archived"`, so
-    // re-archiving is a no-op that never re-blocks). Two independent sub-gates share this
-    // block:
+    // SPEC-069 §Design Decisions D1 + SPEC-080 §C4). `archived` is the lifecycle
+    // terminal — "closing" a plan. Only fires for an ACTUAL close
+    // (`existing.status !== "archived"`, so re-archiving is a no-op that never
+    // re-blocks). Three independent sub-gates share this block:
     //   - `uatP0Accepted` (SPEC-054, OPT-IN): only evaluated when the plan declares
     //     `extra.requires_uat === true` — an opt-out plan archives unaffected (D2).
     //   - `attestationFloor` (SPEC-069, OPT-OUT): evaluated for EVERY closing plan unless
     //     it declares `extra.attestation_exempt: true` PLUS a non-empty
     //     `extra.attestation_exempt_reason` (a bare `attestation_exempt: true` with no
     //     reason is treated as NOT exempt — D1's "缺 reason 视同未豁免" rule).
+    //   - `prdOutlineSynced` (SPEC-080 §C4, OPT-IN via a DEFAULT-OFF config knob):
+    //     evaluated only when `GateEnforcer.isPrdSyncEnabled()` is true AND the plan
+    //     declares no valid `extra.prd_sync_exempt` — see the dedicated block below.
     if (
       existing.type === "plan" &&
       newStatus === "archived" &&
@@ -1694,6 +1710,8 @@ export class CorpusService {
         effectiveExtra["attestation_exempt"] === true &&
         typeof attestationExemptReason === "string" &&
         attestationExemptReason.trim().length > 0;
+      const prdSyncEnabled = this.gateEnforcer.isPrdSyncEnabled();
+      const prdSyncExempt = extractPrdSyncExempt({ extra: effectiveExtra }) !== undefined;
 
       let planCloseCtx: GateContext = { targetIdOrSlug: existing.slug };
 
@@ -1710,19 +1728,58 @@ export class CorpusService {
       }
 
       planCloseCtx = { ...planCloseCtx, attestationExempt };
+
+      // reason: SPEC-080 §C4 — the attestation-floor branch and the
+      // prdOutlineSynced branch both need `getPlanBundle` (the former for its
+      // tasks' evidence counts, the latter for its tasks' claim timestamps AND
+      // its resolved ancestor spec) — fetched AT MOST ONCE for this whole
+      // block, never once per sub-gate.
+      const needsBundle = !attestationExempt || (prdSyncEnabled && !prdSyncExempt);
+      const bundleResult = needsBundle ? await this.getPlanBundle(existing.id) : undefined;
+      if (bundleResult !== undefined && !bundleResult.ok) return bundleResult;
+
       if (!attestationExempt) {
-        const bundleResult = await this.getPlanBundle(existing.id);
-        if (!bundleResult.ok) return bundleResult;
         // reason: SPEC-075 D6 — the evidence/attested counting SSOT moved to
         // @lore/core's buildTaskAttestationInfos (evidence-panel.ts), which the
         // dashboard adjudication workbench's plan Evidence-panel branch also
         // calls; this call site no longer re-derives the same counts inline.
-        const planTasksAttestation = buildTaskAttestationInfos(bundleResult.value.tasks);
+        const planTasksAttestation = buildTaskAttestationInfos(bundleResult!.value.tasks);
         planCloseCtx = {
           ...planCloseCtx,
           planTasksAttestation,
           attestationMinRatio: this.gateEnforcer.resolveAttestationMinRatio(),
         };
+      }
+
+      planCloseCtx = { ...planCloseCtx, prdSyncEnabled };
+      if (prdSyncEnabled) {
+        if (prdSyncExempt) {
+          planCloseCtx = { ...planCloseCtx, prdSyncSynced: true };
+        } else {
+          const bundle = bundleResult!.value;
+          // reason: `bundle.spec` is undefined for a PRD-parented or unparented
+          // plan (getPlanBundle's own contract) — mirrors `hasSpecParent`'s
+          // "no upstream spec edge, nothing to gate" vacuous-pass shape:
+          // `prdSyncSynced` is left unset, and `checkPlanClose` only pushes
+          // `prdOutlineSynced`'s result when that field IS set.
+          if (bundle.spec !== undefined) {
+            const domainDocResult = await this.resolvePrdSyncDomainDoc(bundle.spec);
+            if (!domainDocResult.ok) return domainDocResult;
+            const domainDoc = domainDocResult.value;
+            let synced = false;
+            if (domainDoc !== null) {
+              const windowOpen = this.resolvePrdSyncWindowOpen(bundle.tasks, existing.created_at);
+              const diffResult = await this.hasPrdSyncContentDiffInWindow(domainDoc.id, windowOpen, now);
+              if (!diffResult.ok) return diffResult;
+              synced = diffResult.value;
+            }
+            planCloseCtx = {
+              ...planCloseCtx,
+              prdSyncSynced: synced,
+              ...(domainDoc !== null ? { prdSyncDomainDocSlug: domainDoc.slug } : {}),
+            };
+          }
+        }
       }
 
       const gateResult = this.gateEnforcer.enforce("plan-close", planCloseCtx);
@@ -2205,6 +2262,152 @@ export class CorpusService {
       verdict: latest.verdict,
       docSlug: latest.doc.slug,
     });
+  }
+
+  /**
+   * Resolves the domain doc a plan-close's `prdOutlineSynced` predicate (SPEC-080
+   * §C4) should diff against, from an already-resolved ancestor spec: SPEC-080's own
+   * text says "linked (parent or implements) to a domain doc" — read here as (1) the
+   * ancestor spec's OWN `parent_id`, when that parent doc is itself type `"spec"`
+   * (one tier up, e.g. a landing spec parented directly under a domain-overview spec)
+   * or (2) failing that, the FIRST `"implements"`-typed outgoing link the ancestor
+   * spec declares, when its target is itself type `"spec"`. Both checks require type
+   * `"spec"` (never `"prd"`) — a landing spec's parent is very commonly the root PRD
+   * itself, which must never be mistaken for a domain doc. `domain-overview` (SPEC-080
+   * §C2) isn't declared in `SPEC_KINDS` yet (a separate task's scope) — a plain
+   * `spec`-typed doc stands in, matching SPEC-080 T5r's own RED-suite fixture.
+   *
+   * @param spec - The plan's resolved ancestor spec (`PlanBundle.spec`).
+   * @returns `ok(DocRecord)` when a domain doc resolved; `ok(null)` — a FACT, never an
+   *   error — when neither relation resolves one (no ancestor-spec parent at all, a
+   *   non-spec parent, no `implements` link, or an unresolvable/soft-deleted/non-spec
+   *   link target).
+   */
+  private async resolvePrdSyncDomainDoc(spec: DocRecord): Promise<Result<DocRecord | null, LoreError>> {
+    if (spec.parent_id !== null) {
+      const parentResult = await this.store.find(spec.parent_id);
+      if (!parentResult.ok) return parentResult;
+      const parent = parentResult.value;
+      if (parent !== null && parent.deleted_at === null && parent.type === "spec") {
+        return ok(parent);
+      }
+    }
+
+    const linksResult = await this.store.findLinks(spec.id, "out");
+    if (!linksResult.ok) return linksResult;
+    const implementsLink = linksResult.value.find((l) => l.link_type === "implements");
+    if (implementsLink === undefined) {
+      return ok(null);
+    }
+
+    const targetResult = await this.store.find(implementsLink.to_id);
+    if (!targetResult.ok) return targetResult;
+    const target = targetResult.value;
+    if (target === null || target.deleted_at !== null || target.type !== "spec") {
+      return ok(null);
+    }
+    return ok(target);
+  }
+
+  /**
+   * Resolves the plan-close `prdOutlineSynced` predicate's window-OPEN bound
+   * (SPEC-080 §C4): the EARLIEST `extra.claim.at` across the plan's tasks, falling
+   * back to the plan's OWN `created_at` when no task ever recorded a claim. Pure (no
+   * IO) given the already-fetched `tasks` array from `getPlanBundle` — `extractClaim`
+   * (`@lore/core`) degrades a claim-less task to `undefined`, filtered out here. ISO
+   * 8601 timestamps compare correctly via plain string `<` (same convention the rest
+   * of this codebase's window/staleness logic relies on).
+   *
+   * @param tasks - The closing plan's tasks (`PlanBundle.tasks`).
+   * @param planCreatedAt - The plan's own `created_at`, the fallback bound.
+   */
+  private resolvePrdSyncWindowOpen(tasks: DocRecord[], planCreatedAt: string): string {
+    const claimTimes = tasks
+      .map((task) => extractClaim(task)?.at)
+      .filter((at): at is string => at !== undefined);
+    if (claimTimes.length === 0) {
+      return planCreatedAt;
+    }
+    return claimTimes.reduce((earliest, at) => (at < earliest ? at : earliest));
+  }
+
+  /**
+   * Whether the domain doc `domainDocId` was substantively edited within
+   * `[windowOpen, windowClose]` (SPEC-080 §C4: "`[earliest-claim-at (fallback
+   * plan created_at), close-write)`, start-inclusive end-exclusive" — the
+   * CLOSE bound is compared INCLUSIVELY here, see below).
+   *
+   * "Substantively edited" is judged against the RAW content string the
+   * caller submitted (`details.patch.content` on the doc's `"update"` audit
+   * entries — `CorpusService.set`'s audit write always stamps the untouched
+   * `parsedPatch.data` under `details.patch`, the SAME raw shape SPEC-035
+   * §2's completeness oracle already reads back out of audit), compared
+   * against the doc's STORED content immediately before that write (the
+   * version numbered one less than the update's own, read from
+   * `findVersions`) — deliberately NEVER the post-canonicalisation
+   * `VersionRecord.content` alone. Two DIFFERENT raw inputs can collapse onto
+   * the SAME stored bytes — `canonicaliseBody`'s full `.trim()` erases a
+   * single appended trailing space, for instance — and SPEC-080 §C4's own RED
+   * suite drives EXACTLY that "whitespace-only edit" scenario, expecting it
+   * to satisfy this predicate (a documented residual gameability: "converts
+   * silent drift into a visible, audited, diff-inspectable act", not a bug to
+   * defend against). A TRUE no-op resave (the caller resubmits the doc's own
+   * current canonicalised content byte-for-byte) still correctly yields
+   * `false` here — `rawContent === predecessorContent` in that case — so this
+   * stays a genuine content-authored check, not a bare version-bump proxy
+   * (T3's rejection: "a content-blind predicate would be trivially
+   * gameable"). A doc's own creation (`"create"`-action audit entry, no
+   * `"update"` counterpart) is structurally excluded by the `action:
+   * "update"` filter below — the "no predecessor to diff against" case.
+   *
+   * The CLOSE bound is compared INCLUSIVELY (`<=`, not the spec prose's
+   * literal `<`) — `windowClose` is the plan-close write's own `now`,
+   * captured via `new Date().toISOString()` at millisecond resolution; a
+   * domain-doc edit performed (via a fully-awaited prior `set()` call)
+   * IMMEDIATELY before the plan-close call, as every RED-suite HAPPY scenario
+   * does, routinely lands in the SAME millisecond under `InMemoryStore`'s
+   * near-zero IO latency — an exclusive close would then spuriously deny a
+   * plan whose domain doc genuinely WAS updated moments earlier. No audit
+   * entry can ever be timestamped strictly AFTER `windowClose` within this
+   * same synchronous gate check (it is captured before any further writes in
+   * this call), so inclusive-vs-exclusive at the exact boundary instant is
+   * unobservable in practice — this is a tie-breaking implementation choice,
+   * not a widening of the window's real semantics.
+   *
+   * @param domainDocId - The resolved domain doc's id.
+   * @param windowOpen - Window-open bound (inclusive), from {@link resolvePrdSyncWindowOpen}.
+   * @param windowClose - Window-close bound (inclusive, see above) — the plan-close
+   *   write's own `now` (the SAME timestamp its own version/audit rows use).
+   */
+  private async hasPrdSyncContentDiffInWindow(
+    domainDocId: DocId,
+    windowOpen: string,
+    windowClose: string,
+  ): Promise<Result<boolean, LoreError>> {
+    const versionsResult = await this.store.findVersions(domainDocId);
+    if (!versionsResult.ok) return versionsResult;
+    const contentByVersion = new Map<number, string>();
+    for (const version of versionsResult.value) {
+      contentByVersion.set(version.version, version.content);
+    }
+
+    const auditResult = await this.store.queryAudit({ doc_id: domainDocId, action: "update" });
+    if (!auditResult.ok) return auditResult;
+
+    for (const entry of auditResult.value) {
+      if (entry.timestamp < windowOpen || entry.timestamp > windowClose) continue;
+      const patch = entry.details?.["patch"] as Record<string, unknown> | undefined;
+      const rawContent = patch?.["content"];
+      if (typeof rawContent !== "string") continue;
+      const entryVersion = entry.details?.["version"];
+      if (typeof entryVersion !== "number") continue;
+      const predecessorContent = contentByVersion.get(entryVersion - 1);
+      if (predecessorContent === undefined) continue;
+      if (rawContent !== predecessorContent) {
+        return ok(true);
+      }
+    }
+    return ok(false);
   }
 
   /**
@@ -2698,6 +2901,14 @@ export class CorpusService {
       }
     }
 
+    // SPEC-080 §C4 — exempt-plans surfacing (see CorpusStatus.exempt_plans's own
+    // JSDoc for why this exists). Pointer-only; sourced via the SAME
+    // `extractPrdSyncExempt` (`@lore/core`) the plan-close gate itself consults —
+    // never a second hand-rolled `extra.prd_sync_exempt` shape check.
+    const exemptPlans = activeDocs
+      .filter((d) => d.type === "plan" && extractPrdSyncExempt(d) !== undefined)
+      .map((d) => ({ slug: d.slug }));
+
     return ok({
       total_docs: activeDocs.length,
       by_type,
@@ -2705,6 +2916,7 @@ export class CorpusService {
       last_updated: lastUpdated,
       db_size_bytes: dbSizeResult.value,
       invalidated_feeding_source_warnings: invalidatedFeedingSourceWarnings,
+      exempt_plans: exemptPlans,
     });
   }
 
