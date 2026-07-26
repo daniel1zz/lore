@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "906d136ede8da48a075eee2f1f26d03f36503dfa2d57f9cd87514d4a6d408606",
+  tree_digest: "b5a685193550886d81046242bf35f827207db1c695c7642fde40a45c255fecf9",
   entries: [
   { path: "agents/lore-explorer.md", kind: "agent", ownership: "managed", sha256: "18b80554da11704960849d5b68ea9ef763bdc88315ebe89acc26a1e86d7e5629" },
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "324340b8173cae8e3133968185fdf882b81daee2115c988f7506e1bc968a5364" },
@@ -217,7 +217,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "skills/lore-product-lens/references/positioning-lens.md", kind: "skill", ownership: "managed", sha256: "26e0c1f661a66c88a6aee32ebb8e74fd98e25ad6c2ef46cc69e15e53b5b816f5" },
   { path: "skills/lore-product-lens/references/scenario-lens.md", kind: "skill", ownership: "managed", sha256: "34d7957de041e7625c8bd30846827e57a8819cf0278b980de2ca8722bfc9b20c" },
   { path: "skills/lore-product-lens/references/user-group-lens.md", kind: "skill", ownership: "managed", sha256: "386dde29e4c9fe6baa36987536b47f8afa11e5de106bafa3a3ff05d59ac5c838" },
-  { path: "skills/lore-product/SKILL.md", kind: "skill", ownership: "managed", sha256: "b9b87b2f95a9583671419523b253efdfde58dd73f950742c29243484fed454de" },
+  { path: "skills/lore-product/SKILL.md", kind: "skill", ownership: "managed", sha256: "870170524f6b7dd278e4dccd2a6f684ca260b0765708e9e075667a73db5677a9" },
   { path: "skills/lore-product/references/cross-cutting-concerns.md", kind: "skill", ownership: "managed", sha256: "2ce5df794538dae19f9f343c636cb873a35737a88d362aeab6979b6964b788d0" },
   { path: "skills/lore-product/references/ideation-methods.md", kind: "skill", ownership: "managed", sha256: "1e559994ce4dd148dd1439fc7e8f34c279f0d07a5964f4f98b3cd5e49ebccfeb" },
   { path: "skills/lore-product/references/impact-mapping.md", kind: "skill", ownership: "managed", sha256: "c55d6c1ad113e8bd50cd0ccef4470d963f9373a602ea7457bd60a74fde18f11d" },
