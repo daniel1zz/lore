@@ -180,10 +180,10 @@ describe("lore status --check-prd-budget: discriminator (flag does not exist yet
 
   afterEach(() => cleanupDir(tmpDir));
 
-  it("currently exits 2 as an unknown CLI option (SPEC-051/073 strict flags) — the RED baseline for every scenario below", () => {
+  it("is a declared flag (SPEC-051/073 strict seam) — never the exit-2 Unknown-option RED baseline it started as", () => {
     const result = runLore(["status", "--check-prd-budget"], tmpDir);
-    expect(result.exitCode).toBe(2);
-    expect(result.stderr).toMatch(/Unknown option/);
+    expect(result.exitCode).not.toBe(2);
+    expect(result.stderr).not.toMatch(/Unknown option/);
   });
 });
 
