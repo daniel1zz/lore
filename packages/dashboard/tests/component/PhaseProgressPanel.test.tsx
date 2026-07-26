@@ -107,9 +107,10 @@ describe("PhaseProgressPanel", () => {
   });
 
   describe("boundary", () => {
-    it("renders the explicit empty state for zero phases", () => {
+    it("renders the explicit empty state for zero phases with honest copy (ISSUE-007: never asserts the PLAN has no phases, only that no phase DOCUMENT exists)", () => {
       render(<PhaseProgressPanel phases={[]} />);
-      expect(screen.getByText("This plan has no phases yet.")).toBeInTheDocument();
+      expect(screen.getByText("No phase documents for this plan.")).toBeInTheDocument();
+      expect(screen.queryByText(/this plan has no phases/i)).not.toBeInTheDocument();
       expect(screen.queryByLabelText("Phase progress")).not.toBeInTheDocument();
     });
 

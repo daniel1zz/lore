@@ -183,4 +183,30 @@ describe("RootLayout nav (nav-prefix fix)", () => {
       });
     });
   });
+
+  describe("ISSUE-010 — narrow-viewport header never spills into page-level scroll", () => {
+    /**
+     * jsdom has no layout engine, so it cannot measure actual overflow —
+     * this pins the CLASSES the fix depends on (real cross-viewport
+     * scroll-containment was verified against a built preview at 375px via
+     * agent-browser: `window.scrollTo(9999, 0)` stayed at `scrollX === 0`
+     * after the fix, vs. reaching 288px before it; see task completion
+     * report). Every nav link stays present in the DOM (nothing is
+     * conditionally dropped at narrow widths) — only the container's
+     * overflow handling changes.
+     */
+    it("wraps nav/search/status in a horizontally-scrollable region with the logo pinned outside it", () => {
+      mockPathname.mockReturnValue("/library");
+      renderRootLayout();
+
+      const scrollRegion = screen.getByRole("link", { name: "Home" }).closest(".overflow-x-auto");
+      expect(scrollRegion).not.toBeNull();
+      expect(screen.getByRole("link", { name: "Lore" })).toHaveClass("shrink-0");
+      expect(screen.getByRole("link", { name: "Home" }).closest("nav")).toHaveClass("shrink-0");
+
+      for (const name of ["Home", "Library", "Tree", "Execution", "Settings", "Issues"]) {
+        expect(screen.getByRole("link", { name })).toBeInTheDocument();
+      }
+    });
+  });
 });

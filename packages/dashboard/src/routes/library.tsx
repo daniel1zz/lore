@@ -24,10 +24,11 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DocCard } from "@/components/DocCard";
 import { NewDocModal } from "@/components/NewDocModal";
-import { Badge } from "@/components/ui/badge";
+import { badgeVariants } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiList } from "@/lib/api";
 import { queryKeys, useProjectParam } from "@/lib/project-api";
+import { cn } from "@/lib/utils";
 import { docTypeSchema, docStatusSchema } from "@lore/core";
 import type { DocType, DocStatus, DocRecord } from "@lore/core";
 import { librarySearchSchema, tagsFromParam, tagsToParam, type LibrarySearch } from "@/lib/library-search";
@@ -37,6 +38,37 @@ import { toast } from "sonner";
 import { apiCreateDoc, DashboardApiError } from "@/api/mutations";
 import type { CreateDocPayload } from "@/api/mutations";
 import { Plus } from "lucide-react";
+
+/**
+ * FilterChip — one keyboard/screen-reader-accessible toggle chip for the
+ * type/status/tag filter rows below (ISSUE-002). Renders a real
+ * `<button type="button" aria-pressed>` styled with the SAME `badgeVariants`
+ * classes the read-only `Badge` component uses elsewhere, so it is visually
+ * identical to the pre-fix `<Badge onClick>` divs — only the underlying
+ * element and its a11y semantics change (reachable by Tab, activatable with
+ * Enter/Space, announced as a toggle button with its pressed state, and
+ * showing `badgeVariants`' built-in focus ring once actually focusable).
+ */
+function FilterChip({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}): React.ReactElement {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={cn(badgeVariants({ variant: active ? "default" : "outline" }), "cursor-pointer")}
+    >
+      {children}
+    </button>
+  );
+}
 
 export const Route = createFileRoute("/library")({
   validateSearch: (search) => librarySearchSchema.parse(search),
@@ -148,6 +180,10 @@ export function LibraryPageBody({
     try {
       const newDoc = await apiCreateDoc(project, payload);
       void queryClient.invalidateQueries({ queryKey: queryKeys.scope(project, ["docs", "list"]) });
+      // reason: ISSUE-005 — the header's "N docs" badge (`__root.tsx`) reads
+      // its own `["status"]`-keyed query; without this the count stayed
+      // stale until a full page reload re-mounted the root layout.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.scope(project, ["status"]) });
       setShowCreateModal(false);
       toast.success(`Created ${newDoc.slug}`);
       onDocCreated(newDoc);
@@ -177,44 +213,37 @@ export function LibraryPageBody({
         </button>
       </div>
 
-      <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by type">
-        <Badge
-          variant={selectedType === undefined ? "default" : "outline"}
-          className="cursor-pointer"
-          onClick={() => selectType(undefined)}
-        >
-          All
-        </Badge>
-        {DOC_TYPES.map((type) => (
-          <Badge
-            key={type}
-            variant={selectedType === type ? "default" : "outline"}
-            className="cursor-pointer"
-            onClick={() => selectType(type)}
-          >
-            {type}
-          </Badge>
-        ))}
+      {/* reason: ISSUE-002 — the group's own visible label ("Type") plus the
+          existing `aria-label` together satisfy "row group labels ... visually
+          or via aria-label on a role=group wrapper" for sighted AND
+          screen-reader users; the two rows no longer both start with an
+          unlabeled "All" chip. */}
+      <div className="space-y-1.5">
+        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Type</span>
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by type">
+          <FilterChip active={selectedType === undefined} onClick={() => selectType(undefined)}>
+            All
+          </FilterChip>
+          {DOC_TYPES.map((type) => (
+            <FilterChip key={type} active={selectedType === type} onClick={() => selectType(type)}>
+              {type}
+            </FilterChip>
+          ))}
+        </div>
       </div>
 
-      <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by status">
-        <Badge
-          variant={selectedStatus === undefined ? "default" : "outline"}
-          className="cursor-pointer"
-          onClick={() => selectStatus(undefined)}
-        >
-          All
-        </Badge>
-        {DOC_STATUSES.map((status) => (
-          <Badge
-            key={status}
-            variant={selectedStatus === status ? "default" : "outline"}
-            className="cursor-pointer"
-            onClick={() => selectStatus(status)}
-          >
-            {status}
-          </Badge>
-        ))}
+      <div className="space-y-1.5">
+        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Status</span>
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by status">
+          <FilterChip active={selectedStatus === undefined} onClick={() => selectStatus(undefined)}>
+            All
+          </FilterChip>
+          {DOC_STATUSES.map((status) => (
+            <FilterChip key={status} active={selectedStatus === status} onClick={() => selectStatus(status)}>
+              {status}
+            </FilterChip>
+          ))}
+        </div>
       </div>
 
       {tagVocabulary.length > 0 && (
@@ -223,14 +252,9 @@ export function LibraryPageBody({
             Tags (all of)
           </span>
           {tagVocabulary.map(({ tag, count }) => (
-            <Badge
-              key={tag}
-              variant={selectedTags.includes(tag) ? "default" : "outline"}
-              className="cursor-pointer"
-              onClick={() => toggleTag(tag)}
-            >
+            <FilterChip key={tag} active={selectedTags.includes(tag)} onClick={() => toggleTag(tag)}>
               {tag} <span className="text-muted-foreground ml-1">{count}</span>
-            </Badge>
+            </FilterChip>
           ))}
         </div>
       )}

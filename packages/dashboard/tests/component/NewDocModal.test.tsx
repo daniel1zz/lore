@@ -222,8 +222,10 @@ describe("NewDocModal", () => {
       const user = userEvent.setup();
       renderModal();
 
-      // docType initializes to "spec" — the notice is visible immediately,
-      // before any interaction (AC-1: visible explanation, no silent 4xx).
+      // docType initializes to "knowledge" (ISSUE-003) — no notice yet.
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+
+      await selectType(user, "spec");
       expect(screen.getByRole("status")).toHaveTextContent("lore create spec");
       expect(screen.getByRole("status")).toHaveTextContent("/lore-design");
       expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
@@ -234,6 +236,32 @@ describe("NewDocModal", () => {
       await selectType(user, "spec");
       expect(screen.getByRole("status")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
+    });
+
+    it("ISSUE-003: defaults to 'knowledge' — the form opens immediately submittable, not on the blocked 'spec' type", () => {
+      renderModal();
+
+      expect(screen.getByLabelText("Type")).toHaveValue("knowledge");
+      // The knowledge-only sub_type field renders immediately (proves the
+      // type state, not just the <select> DOM value).
+      expect(screen.getByLabelText("Sub-type")).toBeInTheDocument();
+      // No CLI/skill-only notice, and Create is disabled ONLY by the empty
+      // title — filling it in makes the form submittable without ever
+      // touching the Type dropdown.
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
+    });
+
+    it("ISSUE-003 regression: the default 'knowledge' type is submittable with just a title", async () => {
+      const user = userEvent.setup();
+      const { onCreate } = renderModal();
+
+      await user.type(screen.getByLabelText(/Title/), "My First Note");
+      expect(screen.getByRole("button", { name: "Create" })).toBeEnabled();
+      await user.click(screen.getByRole("button", { name: "Create" }));
+
+      expect(onCreate).toHaveBeenCalledTimes(1);
+      expect(onCreate.mock.calls[0]?.[0]).toMatchObject({ type: "knowledge", title: "My First Note" });
     });
   });
 

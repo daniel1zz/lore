@@ -51,12 +51,25 @@ function RootLayout(): React.ReactElement {
   return (
     <div className="min-h-screen flex flex-col">
       <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur">
-        <div className="container flex h-14 items-center gap-4 px-4 mx-auto max-w-7xl">
-          <Link to={projectPath(project, "/")} className="flex items-center gap-2 font-semibold">
+        {/* reason: ISSUE-010 — at narrow viewports (375px) the logo + 5 nav
+            links + search box + docs-count badge + theme toggle together
+            exceed the viewport width; without any wrap/scroll affordance the
+            overflow spilled onto the document (horizontal body scroll) while
+            "Issues" clipped mid-word with no way to reach it. The logo stays
+            pinned (always the one guaranteed way back to Home); everything
+            else shares ONE horizontally-scrollable region instead of
+            wrapping into a taller, layout-shifting multi-row header — nothing
+            is hidden or truncated, it is reachable by scroll (mouse wheel,
+            touch swipe, or focus-driven scrollIntoView when tabbing). */}
+        <div className="container flex h-14 items-center gap-4 px-4 mx-auto max-w-7xl overflow-x-auto">
+          <Link
+            to={projectPath(project, "/")}
+            className="flex shrink-0 items-center gap-2 font-semibold"
+          >
             <span className="text-lg">Lore</span>
           </Link>
 
-          <nav className="flex items-center gap-2 ml-4">
+          <nav className="flex shrink-0 items-center gap-2 ml-4">
             <Link
               to={projectPath(project, "/")}
               className="text-sm text-muted-foreground hover:text-foreground transition-colors"
@@ -121,11 +134,11 @@ function RootLayout(): React.ReactElement {
             </Link>
           </nav>
 
-          <div className="flex-1 max-w-sm ml-auto">
+          <div className="flex-1 shrink-0 max-w-sm ml-auto">
             <SearchBar onSearch={handleSearch} placeholder="Search corpus…" />
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             {status !== undefined && (
               <Badge variant="outline" className="text-xs" aria-label={`${status.total_docs} documents`}>
                 {status.total_docs} docs

@@ -106,7 +106,13 @@ function humanizeValidationIssue(issue: z.ZodIssue, docType: DocType): string {
  * )}
  */
 export function NewDocModal({ onCreate, isPending, error, onClose }: NewDocModalProps): React.ReactElement {
-  const [docType, setDocType] = useState<DocType>("spec");
+  // reason: ISSUE-003 — "spec" is the one type TYPES_BLOCKED_AT_CREATE always
+  // refuses (see module doc comment), so defaulting to it made the form's
+  // very first render a dead end (visible warning notice + disabled Create).
+  // "knowledge" needs no parent/extra beyond its own sub_type dropdown
+  // (defaulted below) and is never blocked, so opening the modal now lands
+  // in an immediately-submittable state.
+  const [docType, setDocType] = useState<DocType>("knowledge");
   const [title, setTitle] = useState("");
   const [parentId, setParentId] = useState("");
   const [decisionStatus, setDecisionStatus] = useState<"proposed" | "accepted" | "deprecated" | "superseded">("proposed");

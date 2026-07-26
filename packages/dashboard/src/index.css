@@ -1,6 +1,18 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
+/* reason: Tailwind v4's `dark:` variant defaults to the `prefers-color-scheme`
+ * MEDIA QUERY, not the `.dark` CLASS `useTheme()` (src/lib/theme.ts) toggles on
+ * `documentElement`. Without this override, every `dark:*` utility in the app
+ * (dark:prose-invert, dark:border-l-*, ...) tracks the OS-level preference
+ * instead of the in-app theme choice: on an OS set to dark, `dark:prose-invert`
+ * fired even while the app rendered its LIGHT theme (`--background`/`--foreground`
+ * driven correctly via the `.dark` class below), painting the dark-mode inverted
+ * (near-white) prose foreground onto a white body — ~1.4:1 contrast, WCAG AA
+ * needs 4.5:1 (ISSUE-009). This is the official class-based override
+ * (https://tailwindcss.com/docs/dark-mode#toggling-dark-mode-manually). */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* Tailwind v4 needs every utility (border-border, bg-background, etc.) declared
  * here for `@apply` to resolve. `hsl(var(--token))` keeps the values driven by
  * the `:root` + `.dark` blocks below. */
@@ -77,6 +89,24 @@
 @layer base {
   * {
     @apply border-border;
+  }
+  /* reason: ISSUE-010 — the app shell composes several independently-scrollable
+   * regions (the header's own `overflow-x-auto` nav strip at narrow viewports).
+   * A CSS quirk lets a sticky-positioned descendant's contained horizontal
+   * overflow still inflate `html`/`body`'s layout-overflow extent even though
+   * that overflow is visually clipped/scrolled within its own container —
+   * verified empirically (`document.documentElement.scrollWidth` stayed wider
+   * than `clientWidth` and the page remained draggable to `scrollX > 0` even
+   * after the descendant's own scroll container measurably clipped its box to
+   * the viewport width). `overflow-x: hidden` on the true scrolling elements
+   * (html + body) is the standard, spec-documented guard against ANY
+   * page-level horizontal scroll (MDN "Prevent horizontal overflow") — content
+   * that legitimately needs to scroll horizontally still does so within its
+   * own declared `overflow-x-auto` region; this only forecloses the OUTER
+   * page from ever growing a second, redundant horizontal scrollbar. */
+  html,
+  body {
+    @apply overflow-x-hidden;
   }
   body {
     @apply bg-background text-foreground;
