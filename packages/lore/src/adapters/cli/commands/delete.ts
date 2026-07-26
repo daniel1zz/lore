@@ -4,7 +4,7 @@
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError } from "../utils.js";
+import { exitCode, formatError, resolveActor } from "../utils.js";
 
 export default defineCommand({
   meta: {
@@ -25,11 +25,19 @@ export default defineCommand({
       type: "boolean",
       description: "Output as JSON",
     },
+    by: {
+      type: "string",
+      description:
+        "Actor identity to attribute this delete to (SPEC-079 G2). Defaults to " +
+        "$LORE_ACTOR env var, then session tier, then OS username.",
+    },
   },
   async run({ args }) {
     const { app } = loadLoreApp();
     try {
-      const result = await app.corpusService.delete(args.id, args.confirm ?? false);
+      const result = await app.corpusService.delete(args.id, args.confirm ?? false, {
+        by: resolveActor(args.by),
+      });
 
       if (!result.ok) {
         process.stderr.write(formatError(result.error) + "\n");

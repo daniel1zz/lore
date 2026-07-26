@@ -17,6 +17,11 @@
  *     for the SAME barrel-isolation reason as the other two (pinyin-pro is
  *     ~931KB unpacked, must stay unreachable from the browser bundle), even
  *     though this one performs no filesystem IO of its own.
+ *   - resolveActorWithSource / ActorSource / ResolvedActor (actor-resolution-
+ *     node.ts, SPEC-079 G2) — the `--by`/`$LORE_ACTOR`/session-tier/OS-username
+ *     precedence chain, relocated here from the CLI adapter so `CorpusService`
+ *     can apply the identical fallback when a caller omits `opts.by`. Grouped
+ *     here for the SAME reason (its OS-fallback tier calls `os.userInfo()`).
  *
  * Invariants:
  *   - Import via `@lore/core/node`, never via relative path into another package.
@@ -35,3 +40,4 @@
 export * from "./config-node.js";
 export * from "./telemetry-node.js";
 export * from "./slugify-node.js";
+export * from "./actor-resolution-node.js";

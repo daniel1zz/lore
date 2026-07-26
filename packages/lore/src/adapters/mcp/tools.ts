@@ -203,7 +203,13 @@ export const LoreGetSchema = z.object({
   include_navigation: z.boolean().optional(),
 });
 
-/** Input schema for lore_set. */
+/**
+ * Input schema for lore_set. `by` (SPEC-079 G2, OPTIONAL — mirrors lore_create's
+ * pre-existing optional `by`, not the required-`by` shape of task-workflow tools
+ * like lore_claim) attributes the resulting audit entry to the caller's actor
+ * identity; omitted falls back to CorpusService's own env-chain resolution
+ * (`resolveActorWithSource`) rather than the literal "system".
+ */
 export const LoreSetSchema = z.object({
   id_or_slug: z.string(),
   title: z.string().optional(),
@@ -212,12 +218,14 @@ export const LoreSetSchema = z.object({
   tags: z.array(z.string()).optional(),
   extra: z.record(z.unknown()).optional(),
   slug: z.string().optional(),
+  by: z.string().optional(),
 });
 
-/** Input schema for lore_delete. */
+/** Input schema for lore_delete. `by` — see {@link LoreSetSchema.by}'s SPEC-079 G2 note. */
 export const LoreDeleteSchema = z.object({
   id_or_slug: z.string(),
   confirm: z.literal(true),
+  by: z.string().optional(),
 });
 
 /**
@@ -271,7 +279,7 @@ export const LoreTreeSchema = z.object({
   depth: z.number().int().positive().optional(),
 });
 
-/** Input schema for lore_link. */
+/** Input schema for lore_link. `by` — see {@link LoreSetSchema.by}'s SPEC-079 G2 note. */
 export const LoreLinkSchema = z.object({
   from: z.string(),
   to: z.string(),
@@ -287,6 +295,7 @@ export const LoreLinkSchema = z.object({
     ])
     .optional()
     .default("relates-to"),
+  by: z.string().optional(),
 });
 
 /** Input schema for lore_log. */
@@ -940,7 +949,12 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
       return textContent(payload);
     }
 
-    const result = await corpusService.create(resolvedCreateInput);
+    // SPEC-079 G2 — thread the caller-supplied actor (optional; omitted falls
+    // back to CorpusService's own env-chain resolution).
+    const result = await corpusService.create(
+      resolvedCreateInput,
+      by !== undefined ? { by } : undefined,
+    );
     if (!result.ok) return errorContent(result.error);
     const { id, slug, type, status, version, orphan_advisory } = result.value;
     const payload: Record<string, unknown> = { id, slug, type, status, version };
@@ -979,15 +993,22 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
 
   // lore_set
   registerToolWithArgs(server, "lore_set", "Patch (update) an existing document", LoreSetSchema, async (args) => {
-    const { id_or_slug, ...patch } = args;
-    const result = await corpusService.set(id_or_slug, patch);
+    // reason: `by` (SPEC-079 G2) is destructured OUT of the patch — it's an actor
+    // identity for the audit entry, not a doc field; docPatchSchema doesn't declare
+    // it, so leaving it inside `patch` would just be silently stripped there instead.
+    const { id_or_slug, by, ...patch } = args;
+    const result = await corpusService.set(id_or_slug, patch, by !== undefined ? { by } : undefined);
     if (!result.ok) return errorContent(result.error);
     return textContent({ doc: result.value, version: result.value.version });
   });
 
   // lore_delete
   registerToolWithArgs(server, "lore_delete", "Soft-delete a document (requires confirm: true)", LoreDeleteSchema, async (args) => {
-    const result = await corpusService.delete(args.id_or_slug, args.confirm);
+    const result = await corpusService.delete(
+      args.id_or_slug,
+      args.confirm,
+      args.by !== undefined ? { by: args.by } : undefined,
+    );
     if (!result.ok) return errorContent(result.error);
     return textContent(result.value);
   });
@@ -1064,7 +1085,12 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
     // reason: args.type is declared `optional().default()` — TypeScript may widen to include
     // undefined due to ZodDefault inference quirk; the ?? fallback ensures a valid LinkType.
     const linkType = (args.type ?? "relates-to") as LinkType;
-    const result = await corpusService.link(args.from, args.to, linkType);
+    const result = await corpusService.link(
+      args.from,
+      args.to,
+      linkType,
+      args.by !== undefined ? { by: args.by } : undefined,
+    );
     if (!result.ok) return errorContent(result.error);
     return textContent({ link: result.value });
   });
@@ -1926,12 +1952,11 @@ async function executeBatchOp(
         file_anchors: fileAnchors,
         requires_uat: requiresUat,
         supersedes: _supersedes,
-        by: _by,
+        by,
         ...createInput
       } = parsed.data;
       void _ai;
       void _supersedes;
-      void _by;
       let mergedExtra = createInput.extra;
       if (fileAnchors !== undefined) {
         mergedExtra = { ...(mergedExtra ?? {}), file_anchors: fileAnchors };
@@ -1943,7 +1968,8 @@ async function executeBatchOp(
         ...createInput,
         ...(mergedExtra !== undefined ? { extra: mergedExtra } : {}),
       };
-      const r = await corpusService.create(resolvedCreateInput);
+      // SPEC-079 G2 — thread the caller-supplied actor through to the batch create too.
+      const r = await corpusService.create(resolvedCreateInput, by !== undefined ? { by } : undefined);
       return r.ok ? { ok: true, value: r.value } : { ok: false, error: r.error };
     }
     case "get": {
@@ -1955,14 +1981,17 @@ async function executeBatchOp(
     case "set": {
       const parsed = LoreSetSchema.safeParse(args);
       if (!parsed.success) return { ok: false, error: zodIssueToLoreError(parsed.error, "set") };
-      const { id_or_slug: idOrSlug, ...patch } = parsed.data;
-      const r = await corpusService.set(idOrSlug, patch);
+      // reason: `by` (SPEC-079 G2) is destructured out of the patch — same reason as
+      // the single-op lore_set handler above.
+      const { id_or_slug: idOrSlug, by, ...patch } = parsed.data;
+      const r = await corpusService.set(idOrSlug, patch, by !== undefined ? { by } : undefined);
       return r.ok ? { ok: true, value: r.value } : { ok: false, error: r.error };
     }
     case "delete": {
       const idOrSlug = args["id_or_slug"];
       if (typeof idOrSlug !== "string") return { ok: false, error: "id_or_slug required" };
-      const r = await corpusService.delete(idOrSlug, args["confirm"] === true);
+      const by = typeof args["by"] === "string" ? args["by"] : undefined;
+      const r = await corpusService.delete(idOrSlug, args["confirm"] === true, by !== undefined ? { by } : undefined);
       return r.ok ? { ok: true, value: r.value } : { ok: false, error: r.error };
     }
     case "list": {
@@ -1978,8 +2007,13 @@ async function executeBatchOp(
     case "link": {
       const parsed = LoreLinkSchema.safeParse(args);
       if (!parsed.success) return { ok: false, error: zodIssueToLoreError(parsed.error, "link") };
-      const { from, to, type } = parsed.data;
-      const r = await corpusService.link(from, to, type as Parameters<typeof corpusService.link>[2]);
+      const { from, to, type, by } = parsed.data;
+      const r = await corpusService.link(
+        from,
+        to,
+        type as Parameters<typeof corpusService.link>[2],
+        by !== undefined ? { by } : undefined,
+      );
       return r.ok ? { ok: true, value: r.value } : { ok: false, error: r.error };
     }
     default:

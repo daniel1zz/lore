@@ -204,7 +204,9 @@ export default defineCommand({
     by: {
       type: "string",
       description:
-        "[only meaningful with --supersedes] Actor identity for the invalidate step; defaults to $LORE_ACTOR env var, then OS username.",
+        "Actor identity to attribute this create to (SPEC-079 G2) — also used " +
+        "for the --supersedes invalidate step, when present. Defaults to " +
+        "$LORE_ACTOR env var, then session tier, then OS username.",
     },
     ai: {
       type: "boolean",
@@ -496,6 +498,11 @@ export default defineCommand({
       let doc;
       let supersedeError: LoreError | undefined;
 
+      // SPEC-079 G2 — resolved once, reused as the create's own audit actor
+      // (both branches below) and, when --supersedes is set, the invalidate
+      // step's actor too.
+      const resolvedActor = resolveActor(args.by);
+
       if (args.supersedes !== undefined) {
         if (app.validityService === undefined) {
           process.stderr.write("Error: ValidityService not wired on this App instance.\n");
@@ -509,7 +516,7 @@ export default defineCommand({
           },
           createInput,
           args.supersedes,
-          resolveActor(args.by),
+          resolvedActor,
         );
         if (!orchResult.ok) {
           process.stderr.write(formatError(orchResult.error) + "\n");
@@ -519,7 +526,7 @@ export default defineCommand({
         doc = orchResult.value.doc;
         supersedeError = orchResult.value.supersedeError;
       } else {
-        const result = await app.corpusService.create(createInput);
+        const result = await app.corpusService.create(createInput, { by: resolvedActor });
         if (!result.ok) {
           process.stderr.write(formatError(result.error) + "\n");
           process.exitCode = exitCode(result.error);

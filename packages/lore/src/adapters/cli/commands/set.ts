@@ -61,7 +61,7 @@
 import { readFileSync } from "node:fs";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError } from "../utils.js";
+import { exitCode, formatError, resolveActor } from "../utils.js";
 import { openEditor } from "../editor.js";
 import type { DocStatus, Priority, SpecKind } from "@lore/core";
 import { SPEC_KINDS } from "@lore/core";
@@ -116,6 +116,12 @@ export default defineCommand({
     json: {
       type: "boolean",
       description: "Output as JSON",
+    },
+    by: {
+      type: "string",
+      description:
+        "Actor identity to attribute this update to (SPEC-079 G2). Defaults to " +
+        "$LORE_ACTOR env var, then session tier, then OS username.",
     },
     regenerate: {
       type: "boolean",
@@ -222,6 +228,7 @@ export default defineCommand({
       }
     }
 
+    const resolvedActor = resolveActor(args.by);
     const { app, defaults } = loadLoreApp();
     try {
       // ─── Step 2: AI mutation path (SPEC-019) ──────────────────────────────────
@@ -334,7 +341,11 @@ export default defineCommand({
         // approved→draft demotion is handled automatically inside the service layer
         // (SPEC-019 AC-SET-AI-4 / SPEC-022 AC-DASH-WRITE-5 shared bypass).
         const prevStatus = doc.status;
-        const setResult = await app.corpusService.set(args.id, { content: newContent });
+        const setResult = await app.corpusService.set(
+          args.id,
+          { content: newContent },
+          { by: resolvedActor },
+        );
 
         if (!setResult.ok) {
           process.stderr.write(formatError(setResult.error) + "\n");
@@ -455,7 +466,7 @@ export default defineCommand({
         patch["content"] = newContent;
       }
 
-      const result = await app.corpusService.set(args.id, patch);
+      const result = await app.corpusService.set(args.id, patch, { by: resolvedActor });
 
       if (!result.ok) {
         process.stderr.write(formatError(result.error) + "\n");

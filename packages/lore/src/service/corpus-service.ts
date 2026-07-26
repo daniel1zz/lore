@@ -12,7 +12,7 @@ import type { LoreError } from "@lore/core";
 // invariant (packages/core/src/CLAUDE.md) — this service file is always
 // server-side, same precedent config-service.ts/global-config-service.ts
 // already set for direct `@lore/core/node` imports.
-import { containsCjk, getTransliterateCjk } from "@lore/core/node";
+import { containsCjk, getTransliterateCjk, resolveActorWithSource } from "@lore/core/node";
 import {
   adrExtraSchema,
   canonicaliseBody,
@@ -393,6 +393,23 @@ export class CorpusService {
     this.telemetry.record(event);
   }
 
+  /**
+   * Resolve the acting identity for a write (SPEC-079 G2 actor fidelity) —
+   * the SAME `--by`/`$LORE_ACTOR`/session-tier/OS-username precedence chain
+   * the CLI's `resolveActor` already applies (`resolveActorWithSource`,
+   * `@lore/core/node`), reused here so a service-layer write (through the
+   * CLI, MCP, or HTTP dashboard) is never silently attributed to the literal
+   * `"system"` when its caller doesn't (or can't) supply `opts.by`.
+   *
+   * @param by - Explicit actor value threaded from the caller's `opts.by`
+   *   (adapters resolve their own surface's actor identity and pass it
+   *   here); `undefined` falls through to the env chain.
+   * @returns The resolved actor string — never empty.
+   */
+  private resolveWriteActor(by?: string): string {
+    return resolveActorWithSource(by, process.env).actor;
+  }
+
   // ── Resolve ──────────────────────────────────────────────────────────────
 
   /**
@@ -430,9 +447,12 @@ export class CorpusService {
    *   `VALIDATION_ERROR` — see {@link createHandoffDoc} for the sole legitimate
    *   creation path for that sub_type (SPEC-041 §3 D4).
    */
-  async create(input: CreateDocInput): Promise<Result<CreateDocResult, LoreError>> {
+  async create(
+    input: CreateDocInput,
+    opts?: { by?: string },
+  ): Promise<Result<CreateDocResult, LoreError>> {
     const startMs = Date.now();
-    const result = await this._createImpl(input);
+    const result = await this._createImpl(input, opts);
     this.recordTelemetryEvent("create", startMs, result, { type: input.type });
     return result;
   }
@@ -480,7 +500,7 @@ export class CorpusService {
 
   private async _createImpl(
     input: CreateDocInput,
-    opts?: { allowHandoff?: boolean; allowUat?: boolean },
+    opts?: { allowHandoff?: boolean; allowUat?: boolean; by?: string },
   ): Promise<Result<CreateDocResult, LoreError>> {
     const parsed = createDocInputSchema.safeParse(input);
     if (!parsed.success) {
@@ -511,6 +531,9 @@ export class CorpusService {
     }
 
     const data = parsed.data;
+
+    // SPEC-079 G2 — resolved once per call, reused for this create's audit entry.
+    const resolvedActor = this.resolveWriteActor(opts?.by);
 
     // Write-path exclusivity for knowledge sub_type "handoff" (SPEC-041 §3 D4).
     // reason: a Zod superRefine presence check (knowledgeExtraSchema, schemas.ts) can
@@ -918,7 +941,11 @@ export class CorpusService {
       },
       {
         timestamp: now,
-        actor: "system",
+        // SPEC-079 G2 — resolved actor (--by > $LORE_ACTOR > session tier > OS
+        // username), never the literal "system". `doc.created_by`/the versions
+        // row above are OUT of this spec's scope (unchanged, still "system") —
+        // see corpus-service.ts's SPEC-079 note at the top of this method.
+        actor: resolvedActor,
         session_id: id,
         action: "create",
         doc_id: id,
@@ -1228,7 +1255,7 @@ export class CorpusService {
   async set(
     idOrSlug: string,
     patch: DocPatch,
-    opts?: { expectedVersion?: number },
+    opts?: { expectedVersion?: number; by?: string },
   ): Promise<Result<DocRecord, LoreError>> {
     const parsedPatch = docPatchSchema.safeParse(patch);
     if (!parsedPatch.success) {
@@ -1673,7 +1700,10 @@ export class CorpusService {
       versionRecord,
       {
         timestamp: now,
-        actor: "system",
+        // SPEC-079 G2 — resolved actor, never the literal "system" (see the
+        // matching note on the create() audit entry above; versionRecord's
+        // own `created_by` stays "system", out of this spec's scope).
+        actor: this.resolveWriteActor(opts?.by),
         session_id: existing.id,
         action: "update",
         doc_id: existing.id,
@@ -1697,6 +1727,7 @@ export class CorpusService {
   async delete(
     idOrSlug: string,
     confirm: boolean,
+    opts?: { by?: string },
   ): Promise<Result<{ id: DocId; recoverable_until: string }, LoreError>> {
     if (!confirm) {
       // Resolve ID for the error even without confirm
@@ -1736,7 +1767,10 @@ export class CorpusService {
     };
     const auditEntry: AuditEntry = {
       timestamp: now,
-      actor: "system",
+      // SPEC-079 G2 — resolved actor, never the literal "system" (see the
+      // matching note on create()'s audit entry above; the versions row's
+      // own `created_by` stays "system", out of this spec's scope).
+      actor: this.resolveWriteActor(opts?.by),
       session_id: id,
       action: "delete",
       doc_id: id,
@@ -2344,14 +2378,22 @@ export class CorpusService {
    * Create a link between two documents.
    * For type='parent', also updates docs.parent_id on the 'from' doc.
    * Telemetry: records one event with link_type and from/to ids on success.
+   *
+   * @invariant SPEC-079 G1 (relationship provenance) — on success, writes
+   *   exactly ONE audit entry (`action: "link"`, `doc_id` = the FROM doc,
+   *   `details: {to_id, link_type}`) — AUDIT-ONLY, no `versions` row (a link
+   *   is not a doc-content snapshot). `linkRecord.created_by` carries the
+   *   SAME resolved actor (`opts.by` > env chain) rather than the literal
+   *   `"system"` (G2).
    */
   async link(
     fromIdOrSlug: string,
     toIdOrSlug: string,
     type: LinkType,
+    opts?: { by?: string },
   ): Promise<Result<LinkRecord, LoreError>> {
     const startMs = Date.now();
-    const result = await this._linkImpl(fromIdOrSlug, toIdOrSlug, type);
+    const result = await this._linkImpl(fromIdOrSlug, toIdOrSlug, type, opts);
     this.recordTelemetryEvent("link", startMs, result, { link_type: type });
     return result;
   }
@@ -2360,6 +2402,7 @@ export class CorpusService {
     fromIdOrSlug: string,
     toIdOrSlug: string,
     type: LinkType,
+    opts?: { by?: string },
   ): Promise<Result<LinkRecord, LoreError>> {
     const fromResult = await this.resolve(fromIdOrSlug);
     if (!fromResult.ok) return fromResult;
@@ -2408,12 +2451,15 @@ export class CorpusService {
     }
 
     const now = new Date().toISOString();
+    // SPEC-079 G2 — resolved once, reused for both the LinkRecord's
+    // created_by and this call's audit entry below.
+    const resolvedActor = this.resolveWriteActor(opts?.by);
     const linkRecord: LinkRecord = {
       from_id: fromResult.value,
       to_id: toResult.value,
       link_type: type,
       created_at: now,
-      created_by: "system",
+      created_by: resolvedActor,
     };
 
     const addResult = await this.store.addLink(linkRecord);
@@ -2428,6 +2474,22 @@ export class CorpusService {
       if (!updateResult.ok) return updateResult;
     }
 
+    // SPEC-079 G1 — relationship provenance: one audit entry per successful
+    // link(), audit-only (no versions row — a link is not a doc-content
+    // snapshot, so it deliberately joins no VERSION_ACTION_AUDIT_FAMILY member,
+    // audit-service.ts). session_id follows the pre-existing doc-id-valued
+    // convention (unchanged by this spec, out of scope) — keyed on the FROM doc,
+    // same as doc_id.
+    const auditResult = await this.store.appendAuditEntry({
+      timestamp: now,
+      actor: resolvedActor,
+      session_id: fromResult.value,
+      action: "link",
+      doc_id: fromResult.value,
+      details: { to_id: toResult.value, link_type: type },
+    });
+    if (!auditResult.ok) return auditResult;
+
     return ok(addResult.value);
   }
 
@@ -2436,10 +2498,18 @@ export class CorpusService {
   /**
    * Remove links between two documents.
    * Removes all link types between the pair.
+   *
+   * @invariant SPEC-079 G1 (relationship provenance) — when at least one
+   *   link was actually removed, writes exactly ONE audit entry
+   *   (`action: "unlink"`, `doc_id` = the FROM doc, `details: {to_id,
+   *   link_type}` where `link_type` is the FULL array of removed types, not
+   *   one entry per type). A no-op call (no matching link between the pair)
+   *   writes no audit entry — there is no real state change to attribute.
    */
   async unlink(
     fromIdOrSlug: string,
     toIdOrSlug: string,
+    opts?: { by?: string },
   ): Promise<Result<void, LoreError>> {
     const fromResult = await this.resolve(fromIdOrSlug);
     if (!fromResult.ok) return fromResult;
@@ -2451,6 +2521,7 @@ export class CorpusService {
     const linksResult = await this.store.findLinks(fromResult.value, "out");
     if (!linksResult.ok) return linksResult;
 
+    const removedTypes: LinkType[] = [];
     for (const link of linksResult.value) {
       if (link.to_id === toResult.value) {
         const removeResult = await this.store.removeLink(
@@ -2459,7 +2530,20 @@ export class CorpusService {
           link.link_type,
         );
         if (!removeResult.ok) return removeResult;
+        removedTypes.push(link.link_type);
       }
+    }
+
+    if (removedTypes.length > 0) {
+      const auditResult = await this.store.appendAuditEntry({
+        timestamp: new Date().toISOString(),
+        actor: this.resolveWriteActor(opts?.by),
+        session_id: fromResult.value,
+        action: "unlink",
+        doc_id: fromResult.value,
+        details: { to_id: toResult.value, link_type: removedTypes },
+      });
+      if (!auditResult.ok) return auditResult;
     }
 
     return ok(undefined);

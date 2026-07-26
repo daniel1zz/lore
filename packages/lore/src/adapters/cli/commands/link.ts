@@ -16,7 +16,7 @@
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError } from "../utils.js";
+import { exitCode, formatError, resolveActor } from "../utils.js";
 import type { LinkType } from "@lore/core";
 
 const VALID_LINK_TYPES: LinkType[] = [
@@ -61,9 +61,16 @@ export default defineCommand({
       type: "boolean",
       description: "Output as JSON",
     },
+    by: {
+      type: "string",
+      description:
+        "Actor identity to attribute this link to (SPEC-079 G2). Defaults to " +
+        "$LORE_ACTOR env var, then session tier, then OS username.",
+    },
   },
   async run({ args }) {
     const hasInfer = args.infer === true;
+    const resolvedActor = resolveActor(args.by);
 
     const { app } = loadLoreApp();
     try {
@@ -125,7 +132,9 @@ export default defineCommand({
         }
 
         // Create the link with the inferred type (CorpusService.link enforces cycle check → exit 4)
-        const linkResult = await app.corpusService.link(args.from, args.to, inferredType);
+        const linkResult = await app.corpusService.link(args.from, args.to, inferredType, {
+          by: resolvedActor,
+        });
         if (!linkResult.ok) {
           process.stderr.write(formatError(linkResult.error) + "\n");
           process.exitCode = exitCode(linkResult.error);
@@ -154,7 +163,9 @@ export default defineCommand({
         process.exit(2);
       }
 
-      const result = await app.corpusService.link(args.from, args.to, linkType);
+      const result = await app.corpusService.link(args.from, args.to, linkType, {
+        by: resolvedActor,
+      });
 
       if (!result.ok) {
         process.stderr.write(formatError(result.error) + "\n");
