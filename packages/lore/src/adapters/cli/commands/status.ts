@@ -37,8 +37,14 @@ import {
   type CodeDriftPayload,
 } from "../../../flows/drift-flow.js";
 import { buildRealFsProbe } from "../../real-fs-probe.js";
-import { resolveDriftEnabled, SPEC_KINDS } from "@lore/core";
-import type { CallerSurface, LoreConfig } from "@lore/core";
+import { resolveDriftEnabled, SPEC_KINDS, outlineEntrySchema, outlineBudgetSchema } from "@lore/core";
+import type { CallerSurface, LoreConfig, OutlineBudget } from "@lore/core";
+import { z } from "zod";
+import {
+  checkPrdBudget,
+  type OutlineBudgetLike,
+  type PrdBudgetBreach,
+} from "../../../service/prd-budget-check.js";
 
 /** All CallerSurface values in a stable display order. */
 const ALL_SURFACES: ReadonlyArray<CallerSurface> = [
@@ -86,6 +92,57 @@ function computeAiDefaults(app: ReturnType<typeof loadLoreApp>["app"]): Record<s
  */
 function configuredVerificationProfileKinds(config: LoreConfig | undefined): string[] {
   return SPEC_KINDS.filter((kind) => config?.workflow?.verification_profiles?.[kind] !== undefined);
+}
+
+/**
+ * Maps `@lore/core`'s `OutlineBudget` (SPEC-080 C3 corpus-governed schema,
+ * field names `core_max_chars`/`domain_max_chars`/`whole_body_max_chars`)
+ * onto `prd-budget-check.ts`'s own pure-fn input shape (`OutlineBudgetLike`,
+ * field names `core_chars`/`domain_chars`/`whole_doc_chars`) — the two
+ * modules deliberately do not share field names (see `prd-budget-check.ts`'s
+ * module header), so this adapter is the ONE place the mapping happens.
+ *
+ * @param core - A Zod-validated `prd.extra.outline_budget`, or `undefined`
+ *   when the PRD declares none (checkPrdBudget then falls back to the
+ *   SPEC-080 C3 stated defaults for every field).
+ * @returns The equivalent `Partial<OutlineBudgetLike>`, or `undefined`.
+ */
+function toOutlineBudgetLike(core: OutlineBudget | undefined): Partial<OutlineBudgetLike> | undefined {
+  if (core === undefined) return undefined;
+  return {
+    core_chars: core.core_max_chars,
+    domain_chars: core.domain_max_chars,
+    whole_doc_chars: core.whole_body_max_chars,
+    extra_prose_chars: core.extra_prose_chars,
+  };
+}
+
+/** Text rendering for one PRD's budget breaches — used by `renderPrdBudgetSection`. */
+function renderPrdBudgetBreach(prdSlug: string, breach: PrdBudgetBreach): void {
+  const sectionSuffix = breach.section !== undefined ? ` (${breach.section})` : "";
+  console.log(`  - ${prdSlug} [${breach.kind}]${sectionSuffix}: ${breach.detail}`);
+}
+
+/**
+ * Text rendering for the `--check-prd-budget` section (SPEC-080 C3) — used
+ * regardless of whether `--check-tree`/`--check-drift`/`--check-requirements`
+ * were ALSO requested (every requested section always prints fully).
+ */
+function renderPrdBudgetSection(payload: {
+  checked: number;
+  consistent: boolean;
+  prds: Array<{ slug: string; whole_doc_chars: number; breaches: PrdBudgetBreach[] }>;
+}): void {
+  if (payload.consistent) {
+    console.log(`PRD budget: within budget (${payload.checked} PRD(s) checked).`);
+    return;
+  }
+  console.log(`PRD budget: BREACHED (${payload.checked} PRD(s) checked):`);
+  for (const prd of payload.prds) {
+    for (const breach of prd.breaches) {
+      renderPrdBudgetBreach(prd.slug, breach);
+    }
+  }
 }
 
 /**
@@ -143,14 +200,20 @@ export default defineCommand({
       description:
         "Verify every PRD requirement is covered by a descendant spec AC (SPEC-055). Uncovered P0 → exit 3. Composes with --check-tree/--check-drift.",
     },
+    "check-prd-budget": {
+      type: "boolean",
+      description:
+        "Verify every PRD's rendered body/outline-entry/extra-prose char budgets (SPEC-080 C3). Breach → exit 3. Composes with --check-tree/--check-drift/--check-requirements.",
+    },
   },
   async run({ args }) {
     const checkTreeRequested = args["check-tree"] === true;
     const checkDriftRequested = args["check-drift"] === true;
     const checkRequirementsRequested = args["check-requirements"] === true;
+    const checkPrdBudgetRequested = args["check-prd-budget"] === true;
 
-    // ── check-tree / check-drift / check-requirements branch (D5 restructure) ────
-    if (checkTreeRequested || checkDriftRequested || checkRequirementsRequested) {
+    // ── check-tree / check-drift / check-requirements / check-prd-budget branch (D5 restructure) ────
+    if (checkTreeRequested || checkDriftRequested || checkRequirementsRequested || checkPrdBudgetRequested) {
       const { app, config } = loadLoreApp();
       try {
         // ---- Tree section — value-returning, no early process.exit (D5) ----
@@ -327,9 +390,79 @@ export default defineCommand({
           };
         }
 
-        // ---- Exit precedence (D5, pinned; SPEC-055 folds requirements into the drift tier) ----
+        // ---- PRD budget section (SPEC-080 C3) ----
+        // reason: mirrors the requirements section immediately above — aggregate across
+        // every PRD in the corpus, zero-LLM, zero fs probing. Detail-link target facts
+        // (AC-080-10) are pre-resolved here via `corpusService.get` (a doc lookup, not a
+        // filesystem probe) and handed to the pure `checkPrdBudget` as caller-injected
+        // data — the check module itself never touches the store.
+        let prdBudgetPayload:
+          | {
+              checked: number;
+              consistent: boolean;
+              prds: Array<{ slug: string; whole_doc_chars: number; breaches: PrdBudgetBreach[] }>;
+            }
+          | undefined;
+        let prdBudgetInconsistent = false;
+        if (checkPrdBudgetRequested) {
+          const prdsResult = await app.corpusService.list({ type: "prd" });
+          if (!prdsResult.ok) {
+            process.stderr.write(formatError(prdsResult.error) + "\n");
+            process.exitCode = exitCode(prdsResult.error);
+            return;
+          }
+          const prds: Array<{ slug: string; whole_doc_chars: number; breaches: PrdBudgetBreach[] }> = [];
+          for (const prdSummary of prdsResult.value.docs) {
+            const getResult = await app.corpusService.get(prdSummary.id);
+            if (!getResult.ok) {
+              process.stderr.write(formatError(getResult.error) + "\n");
+              process.exitCode = exitCode(getResult.error);
+              return;
+            }
+            const doc = getResult.value.doc;
+
+            const outlineParse = z.array(outlineEntrySchema).safeParse(doc.extra["outline"]);
+            const outline = outlineParse.success ? outlineParse.data : undefined;
+
+            const budgetParse = outlineBudgetSchema.safeParse(doc.extra["outline_budget"]);
+            const budget = budgetParse.success ? toOutlineBudgetLike(budgetParse.data) : undefined;
+
+            let detailLinkTargets: Record<string, boolean> | undefined;
+            if (outline !== undefined) {
+              const detailSlugs = new Set<string>();
+              for (const entry of outline) {
+                for (const link of entry.links) {
+                  if (link.rel === "detail") detailSlugs.add(link.slug);
+                }
+              }
+              detailLinkTargets = {};
+              for (const slug of detailSlugs) {
+                const targetResult = await app.corpusService.get(slug);
+                detailLinkTargets[slug] = targetResult.ok && targetResult.value.doc.deleted_at === null;
+              }
+            }
+
+            const checkResult = checkPrdBudget({
+              raw_body: doc.content,
+              outline,
+              extra: doc.extra,
+              budget,
+              detail_link_targets: detailLinkTargets,
+            });
+
+            prds.push({ slug: doc.slug, whole_doc_chars: checkResult.whole_doc_chars, breaches: checkResult.breaches });
+            if (!checkResult.consistent) prdBudgetInconsistent = true;
+          }
+          prdBudgetPayload = {
+            checked: prds.length,
+            consistent: !prdBudgetInconsistent,
+            prds,
+          };
+        }
+
+        // ---- Exit precedence (D5, pinned; SPEC-055/SPEC-080 fold into the drift tier) ----
         let finalExit: number;
-        if (treeInconsistent || driftInconsistent || requirementsInconsistent) {
+        if (treeInconsistent || driftInconsistent || requirementsInconsistent || prdBudgetInconsistent) {
           finalExit = 3;
         } else if (blueprintUnarmable) {
           finalExit = 4;
@@ -348,6 +481,7 @@ export default defineCommand({
           const data: Record<string, unknown> = { ...treeData };
           if (driftPayload !== undefined) data["code_drift"] = driftPayload;
           if (requirementsPayload !== undefined) data["requirement_coverage"] = requirementsPayload;
+          if (prdBudgetPayload !== undefined) data["prd_budget"] = prdBudgetPayload;
           console.log(JSON.stringify({ ok: true, data }, null, 2));
         } else {
           for (const line of treeRenderLines) console.log(line);
@@ -364,6 +498,7 @@ export default defineCommand({
               }
             }
           }
+          if (prdBudgetPayload !== undefined) renderPrdBudgetSection(prdBudgetPayload);
         }
 
         process.exitCode = finalExit;
