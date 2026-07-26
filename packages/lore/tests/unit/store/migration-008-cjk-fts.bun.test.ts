@@ -97,11 +97,15 @@ describe("migration-008 (CJK bigram shadow columns for FTS5)", () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("HAPPY: a fresh :memory: DB migrates straight to user_version 8 with the shadow columns present", () => {
+  it("HAPPY: a fresh :memory: DB migrates straight to user_version 9 (migration-009 is now the head) with the shadow columns present", () => {
     const store = new SQLiteStore(":memory:");
     const db = store.getDatabase();
 
-    expect(userVersion(db)).toBe(8);
+    // reason: migration-009 (SPEC-079 G3 audit hash chain) is now the head —
+    // a fresh store runs every migration up to it, not just through
+    // migration-008. This test's own concern (CJK shadow columns present)
+    // is unaffected — asserted directly below.
+    expect(userVersion(db)).toBe(9);
     const cols = tableColumnNames(db, "docs");
     expect(cols).toContain("fts_title");
     expect(cols).toContain("fts_content");
@@ -150,14 +154,15 @@ describe("migration-008 (CJK bigram shadow columns for FTS5)", () => {
     rawDb.close();
 
     // Reopening via SQLiteStore should detect currentVersion (7) < 8 and
-    // apply migration-008 — never throw, never touch the pre-existing row's
-    // title/content, and make it CJK-searchable via the store's real
+    // apply migration-008, then migration-009 (SPEC-079 G3 audit hash chain,
+    // currentVersion 8 < 9) — never throw, never touch the pre-existing
+    // row's title/content, and make it CJK-searchable via the store's real
     // search() (not raw SQL) — proving the shadow columns AND the query-side
     // expansion in escapeFtsQuery both work end to end.
     const store = new SQLiteStore(dbPath);
     const db = store.getDatabase();
 
-    expect(userVersion(db)).toBe(8);
+    expect(userVersion(db)).toBe(9);
     const cols = tableColumnNames(db, "docs");
     expect(cols).toContain("fts_title");
     expect(cols).toContain("fts_content");
@@ -195,7 +200,7 @@ describe("migration-008 (CJK bigram shadow columns for FTS5)", () => {
     expect(() => {
       const secondOpen = new SQLiteStore(dbPath);
       const db = secondOpen.getDatabase();
-      expect(userVersion(db)).toBe(8);
+      expect(userVersion(db)).toBe(9);
       expect(tableColumnNames(db, "docs")).toContain("fts_title");
       secondOpen.close();
     }).not.toThrow();

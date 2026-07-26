@@ -17,6 +17,10 @@ import {
   MIGRATION_008_ADD_COLUMNS_SQL,
   MIGRATION_008_FTS_REBUILD_SQL,
 } from "./migrations/migration-008.js";
+import {
+  MIGRATION_009_ADD_COLUMNS_SQL,
+  MIGRATION_009_FINALIZE_SQL,
+} from "./migrations/migration-009.js";
 // SPEC-072 (upstream issue reporting) §3 Structure — re-exported here (beside
 // the migration chain it describes) from a bun:sqlite-free sibling module so
 // vitest-reachable code (e.g. flows/upstream-probe.ts, a later phase of this
@@ -45,6 +49,7 @@ import {
   type Result,
 } from "@lore/core";
 import type {
+  AuditChainEntry,
   AuditFilters,
   CalibrationRecordWithPromptVersion,
   CalibrationWindowFilter,
@@ -54,6 +59,7 @@ import type {
   UpdateOpts,
 } from "./store-interface.js";
 import {
+  type AuditChainRow,
   type AuditRow,
   type CalibrationRowWithPromptVersion,
   type DocRow,
@@ -61,8 +67,11 @@ import {
   type JudgmentRow,
   type LinkRow,
   type VersionRow,
+  computeAuditEntryHash,
   computeFtsShadowValues,
   escapeFtsQuery,
+  parseJson,
+  rowToAuditChainEntry,
   rowToAuditEntry,
   rowToCalibrationRecordWithPromptVersion,
   rowToDocRecord,
@@ -276,6 +285,67 @@ export class SQLiteStore implements StoreInterface {
           this.db.exec("ROLLBACK;");
         } catch {
           // reason: same as migration-004/005/006/007 — safe to ignore, see above.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 9) {
+      // reason: migration-009 is a THREE-PHASE sequence (ADD COLUMN → JS
+      // per-row hash-chain backfill → PRAGMA user_version bump), NOT a
+      // single self-contained SQL string — mirrors migration-008's shape
+      // exactly (see migration-009.ts's module JSDoc for why). This block
+      // owns the transaction wrapper the SQL constants deliberately do NOT
+      // embed themselves, same catch/ROLLBACK rethrow shape as every
+      // migration above for the "bun:sqlite doesn't auto-rollback a caught
+      // mid-transaction throw" reason documented on this method's own JSDoc.
+      try {
+        this.db.run("BEGIN IMMEDIATE");
+        this.db.exec(MIGRATION_009_ADD_COLUMNS_SQL);
+
+        const rows = this.db
+          .query(
+            "SELECT id, timestamp, actor, session_id, action, doc_id, details FROM audit ORDER BY id ASC",
+          )
+          .all() as {
+          id: number;
+          timestamp: string;
+          actor: string;
+          session_id: string;
+          action: string;
+          doc_id: string | null;
+          details: string;
+        }[];
+        const backfillStmt = this.db.prepare(
+          "UPDATE audit SET prev_hash = ?, entry_hash = ? WHERE id = ?",
+        );
+        // reason: threads a running prevHash through the whole legacy
+        // table in id ASC order — the SAME chain-construction order every
+        // future appendAuditEntrySync extends (see migration-009.ts's
+        // module JSDoc). Genesis prevHash is "" for the table's very first
+        // row (or the whole loop is a no-op on a fresh empty table).
+        let prevHash = "";
+        for (const row of rows) {
+          const entry = {
+            timestamp: row.timestamp,
+            actor: row.actor,
+            session_id: row.session_id,
+            action: row.action,
+            ...(row.doc_id !== null ? { doc_id: row.doc_id } : {}),
+            details: parseJson<Record<string, unknown>>(row.details, {}),
+          };
+          const entryHash = computeAuditEntryHash(entry, prevHash);
+          backfillStmt.run(prevHash, entryHash, row.id);
+          prevHash = entryHash;
+        }
+
+        this.db.exec(MIGRATION_009_FINALIZE_SQL);
+        this.db.run("COMMIT");
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-004/005/006/007/008 — safe to ignore, see above.
         }
         throw error;
       }
@@ -1018,14 +1088,34 @@ export class SQLiteStore implements StoreInterface {
    * Synchronous core of {@link appendAuditEntry} — see {@link insertDocSync}'s
    * JSDoc for why this split exists (both composite provenance methods reuse
    * it inside a transaction).
+   *
+   * SPEC-079 G3 — reads the current chain head (`entry_hash` of the highest
+   * `id` row, or `""` if the table is empty) and computes this entry's own
+   * `entry_hash` via {@link computeAuditEntryHash} BEFORE inserting, so
+   * `prev_hash`/`entry_hash` are always populated together with the row
+   * itself. This method assumes it runs INSIDE an already-open transaction
+   * (either {@link appendAuditEntry}'s own `BEGIN IMMEDIATE` wrapper for a
+   * standalone call, or the outer transaction one of the three
+   * `*WithProvenance` methods already holds) — the head-read and the insert
+   * happen back-to-back with no intervening `await` on this single
+   * synchronous `bun:sqlite` connection, and the surrounding transaction is
+   * what makes that atomic against a second PROCESS writing the same file
+   * concurrently (bun:sqlite's `BEGIN IMMEDIATE` takes the write lock
+   * immediately, so a second writer's own `BEGIN IMMEDIATE` blocks — up to
+   * `PRAGMA busy_timeout` — until this one commits or rolls back).
    */
   private appendAuditEntrySync(entry: AuditEntry): Result<void, LoreError> {
     try {
+      const headRow = this.db
+        .query("SELECT entry_hash FROM audit ORDER BY id DESC LIMIT 1")
+        .get() as { entry_hash: string | null } | null;
+      const prevHash = headRow?.entry_hash ?? "";
+      const entryHash = computeAuditEntryHash(entry, prevHash);
       this.db
         .prepare(
           `INSERT INTO audit
-             (timestamp, actor, session_id, action, doc_id, details)
-           VALUES (?, ?, ?, ?, ?, ?)`,
+             (timestamp, actor, session_id, action, doc_id, details, prev_hash, entry_hash)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           entry.timestamp,
@@ -1034,6 +1124,8 @@ export class SQLiteStore implements StoreInterface {
           entry.action,
           entry.doc_id ?? null,
           JSON.stringify(entry.details ?? {}),
+          prevHash,
+          entryHash,
         );
       return ok(undefined);
     } catch (e) {
@@ -1041,8 +1133,39 @@ export class SQLiteStore implements StoreInterface {
     }
   }
 
+  /**
+   * @see StoreInterface.appendAuditEntry
+   *
+   * Wraps {@link appendAuditEntrySync} in its OWN `BEGIN IMMEDIATE`/`COMMIT`
+   * — unlike the three `*WithProvenance` methods (which already hold an
+   * outer transaction when they call the sync helper), a standalone
+   * `appendAuditEntry` call has no existing transaction, so the head-read +
+   * insert sequencing this method's JSDoc describes needs one opened here.
+   */
   async appendAuditEntry(entry: AuditEntry): Promise<Result<void, LoreError>> {
-    return this.appendAuditEntrySync(entry);
+    try {
+      this.db.run("BEGIN IMMEDIATE");
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+    try {
+      const result = this.appendAuditEntrySync(entry);
+      if (!result.ok) {
+        this.db.run("ROLLBACK");
+        return result;
+      }
+      this.db.run("COMMIT");
+      return result;
+    } catch (e) {
+      try {
+        this.db.run("ROLLBACK");
+      } catch {
+        // reason: ROLLBACK itself throws only when there is no open
+        // transaction to roll back — safe to ignore, `e` below is what the
+        // caller needs. Mirrors insertWithProvenance's identical guard.
+      }
+      return wrapStoreError(e);
+    }
   }
 
   // ── Provenance-atomic composite writes (BUG-002) ──────────────────────────
@@ -1236,6 +1359,20 @@ export class SQLiteStore implements StoreInterface {
 
       const rows = this.db.prepare(sql).all(...params) as AuditRow[];
       return ok(rows.map(rowToAuditEntry));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  /**
+   * @see StoreInterface.listAuditChain
+   */
+  async listAuditChain(): Promise<Result<AuditChainEntry[], LoreError>> {
+    try {
+      const rows = this.db
+        .query("SELECT * FROM audit ORDER BY id ASC")
+        .all() as AuditChainRow[];
+      return ok(rows.map(rowToAuditChainEntry));
     } catch (e) {
       return wrapStoreError(e);
     }

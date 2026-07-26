@@ -28,6 +28,7 @@ import {
   type Result,
 } from "@lore/core";
 import type {
+  AuditChainEntry,
   AuditFilters,
   CalibrationRecordWithPromptVersion,
   CalibrationWindowFilter,
@@ -36,6 +37,7 @@ import type {
   StoreInterface,
   UpdateOpts,
 } from "./store-interface.js";
+import { computeAuditEntryHash } from "./store-shared.js";
 
 // ─── InMemoryStore ─────────────────────────────────────────────────────────────
 
@@ -43,7 +45,16 @@ export class InMemoryStore implements StoreInterface {
   private readonly docs = new Map<DocId, DocRecord>();
   private links: LinkRecord[] = [];
   private readonly versions: VersionRecord[] = [];
-  private readonly audit: AuditEntry[] = [];
+  /**
+   * SPEC-079 G3 — every entry carries its hash-chain fields (`id`/
+   * `prev_hash`/`entry_hash`) alongside the plain {@link AuditEntry} fields,
+   * mirroring the real stores' `audit` table columns. `queryAudit` (the
+   * public read path) strips the chain fields back off via
+   * {@link toPlainAuditEntry} so its return type stays a genuine
+   * `AuditEntry[]` — {@link listAuditChain} is the only public method that
+   * exposes this array's chain fields.
+   */
+  private readonly auditChain: AuditChainEntry[] = [];
   private readonly judgments: ReviewJudgment[] = [];
   private readonly calibrationRecords: CalibrationRecord[] = [];
 
@@ -568,13 +579,44 @@ export class InMemoryStore implements StoreInterface {
 
   // ── Audit ─────────────────────────────────────────────────────────────────
 
+  /**
+   * Strips the SPEC-079 G3 hash-chain fields (`id`/`prev_hash`/`entry_hash`)
+   * off an internal {@link AuditChainEntry}, returning a genuine
+   * `AuditEntry` — {@link queryAudit}'s public contract never exposes chain
+   * hashes (see `store-shared.ts::AuditChainEntry`'s JSDoc for why: no
+   * caller may ever read a value it could plausibly forge and resupply).
+   */
+  private toPlainAuditEntry(entry: AuditChainEntry): AuditEntry {
+    const { id: _id, prev_hash: _prevHash, entry_hash: _entryHash, ...rest } = entry;
+    return rest;
+  }
+
+  /**
+   * @see StoreInterface.appendAuditEntry
+   *
+   * SPEC-079 G3 — reads the current chain head (the last-pushed entry's
+   * `entry_hash`, or `""` if `auditChain` is empty) and computes this
+   * entry's own `entry_hash` via `computeAuditEntryHash` before pushing.
+   * InMemoryStore is single-threaded, synchronous JS with no `await`
+   * between the head-read and the push, so — unlike SQLiteStore/TursoStore,
+   * which need an explicit transaction to guard against a concurrent
+   * PROCESS — there is no real concurrency window here for the chain to fork.
+   */
   async appendAuditEntry(entry: AuditEntry): Promise<Result<void, LoreError>> {
-    this.audit.push({ ...entry });
+    const head = this.auditChain[this.auditChain.length - 1];
+    const prevHash = head?.entry_hash ?? "";
+    const entryHash = computeAuditEntryHash(entry, prevHash);
+    this.auditChain.push({
+      ...entry,
+      id: this.auditChain.length + 1,
+      prev_hash: prevHash,
+      entry_hash: entryHash,
+    });
     return ok(undefined);
   }
 
   async queryAudit(filters: AuditFilters): Promise<Result<AuditEntry[], LoreError>> {
-    let results = this.audit.filter((entry) => {
+    let results = this.auditChain.filter((entry) => {
       if (filters.doc_id !== undefined && entry.doc_id !== filters.doc_id)
         return false;
       if (filters.actor !== undefined && entry.actor !== filters.actor)
@@ -593,7 +635,18 @@ export class InMemoryStore implements StoreInterface {
       results = results.slice(0, filters.limit);
     }
 
-    return ok(results.map((e) => ({ ...e })));
+    return ok(results.map((e) => this.toPlainAuditEntry(e)));
+  }
+
+  /**
+   * @see StoreInterface.listAuditChain
+   */
+  async listAuditChain(): Promise<Result<AuditChainEntry[], LoreError>> {
+    // reason: auditChain is already in id ASC order by construction — every
+    // appendAuditEntry call pushes to the end, so array order IS insertion
+    // (chain-construction) order. No sort needed, mirroring the real
+    // stores' `ORDER BY id ASC`.
+    return ok(this.auditChain.map((e) => ({ ...e })));
   }
 
   // ── Review Judgments ─────────────────────────────────────────────────────────

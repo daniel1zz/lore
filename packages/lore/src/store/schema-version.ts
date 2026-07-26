@@ -14,8 +14,8 @@
  *     test` instead).
  *   - The value MUST equal the highest migration number in
  *     `sqlite-store.ts::runMigrations`'s `if (currentVersion < N)` chain.
- *     Confirmed by reading that chain directly (as of migration-008): the
- *     chain runs `< 1` through `< 8`, so the ceiling is 8.
+ *     Confirmed by reading that chain directly (as of migration-009): the
+ *     chain runs `< 1` through `< 9`, so the ceiling is 9.
  *   - Bump this constant in the SAME commit that adds a new `migration-NNN`
  *     and its corresponding `if (currentVersion < NNN)` branch — the two are
  *     the same fact stated twice (migration chain ceiling vs. the value
@@ -33,4 +33,4 @@
  */
 
 /** The SQLite corpus schema's current migration ceiling (highest applied `migration-NNN`). */
-export const LATEST_SCHEMA_VERSION = 8;
+export const LATEST_SCHEMA_VERSION = 9;

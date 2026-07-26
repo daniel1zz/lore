@@ -12,7 +12,13 @@
  * Source: SPEC-009 §3.1; AC-STORE-TURSO-001
  */
 
-import { createClient, type Client, type InValue, type Row } from "@libsql/client";
+import {
+  createClient,
+  type Client,
+  type InValue,
+  type Row,
+  type Transaction,
+} from "@libsql/client";
 import { MIGRATION_001_SQL } from "./migrations/migration-001.js";
 import { MIGRATION_002_SQL } from "./migrations/migration-002.js";
 import { MIGRATION_003_SQL } from "./migrations/migration-003.js";
@@ -24,6 +30,10 @@ import {
   MIGRATION_008_ADD_COLUMNS_SQL,
   MIGRATION_008_FTS_REBUILD_SQL,
 } from "./migrations/migration-008.js";
+import {
+  MIGRATION_009_ADD_COLUMNS_SQL,
+  MIGRATION_009_FINALIZE_SQL,
+} from "./migrations/migration-009.js";
 import type {
   AuditEntry,
   CalibrationRecord,
@@ -45,6 +55,7 @@ import {
   type Result,
 } from "@lore/core";
 import type {
+  AuditChainEntry,
   AuditFilters,
   CalibrationRecordWithPromptVersion,
   CalibrationWindowFilter,
@@ -54,8 +65,11 @@ import type {
   UpdateOpts,
 } from "./store-interface.js";
 import {
+  computeAuditEntryHash,
   computeFtsShadowValues,
   escapeFtsQuery,
+  parseJson,
+  rowToAuditChainEntry,
   rowToAuditEntry,
   rowToCalibrationRecordWithPromptVersion,
   rowToDocRecord,
@@ -64,6 +78,7 @@ import {
   rowToSearchHit,
   rowToVersionRecord,
   wrapStoreError,
+  type AuditChainRow,
   type AuditRow,
   type CalibrationRowWithPromptVersion,
   type DocRow,
@@ -169,6 +184,19 @@ function libsqlRowToAuditRow(row: Row): AuditRow {
     action: rowStr(row, "action"),
     doc_id: rowStrOrNull(row, "doc_id"),
     details: rowStr(row, "details") || "{}",
+  };
+}
+
+/**
+ * `libsqlRowToAuditRow` plus the SPEC-079 G3 hash-chain columns (`id`,
+ * `prev_hash`, `entry_hash`) — the libsql-row analog of {@link AuditChainRow}.
+ */
+function libsqlRowToAuditChainRow(row: Row): AuditChainRow {
+  return {
+    ...libsqlRowToAuditRow(row),
+    id: rowNum(row, "id"),
+    prev_hash: rowStrOrNull(row, "prev_hash"),
+    entry_hash: rowStrOrNull(row, "entry_hash"),
   };
 }
 
@@ -344,6 +372,61 @@ export class TursoStore implements StoreInterface {
             // reason: rollback throws only when the transaction is already
             // closed — safe to ignore, `e` below is what the caller needs
             // (mirrors insertWithProvenance's identical rollback guard).
+          }
+          throw e;
+        } finally {
+          tx.close();
+        }
+      }
+
+      if (currentVersion < 9) {
+        // reason: migration-009 (SPEC-079 G3 audit hash chain) is a
+        // THREE-PHASE sequence (ADD COLUMN → JS per-row hash-chain backfill
+        // → PRAGMA user_version bump) for the identical reason migration-008
+        // is — see migration-009.ts's module JSDoc. Same interactive
+        // `client.transaction("write")` shape as migration-008's own block
+        // above (a real Transaction with execute/executeMultiple/commit/
+        // rollback/close).
+        const tx = await this.client.transaction("write");
+        try {
+          await tx.executeMultiple(MIGRATION_009_ADD_COLUMNS_SQL);
+
+          const rs = await tx.execute(
+            "SELECT id, timestamp, actor, session_id, action, doc_id, details FROM audit ORDER BY id ASC",
+          );
+          // reason: threads a running prevHash through the whole legacy
+          // table in id ASC order — the SAME chain-construction order every
+          // future appendAuditEntryTx extends (see migration-009.ts's
+          // module JSDoc). Genesis prevHash is "" for the table's very
+          // first row (or the whole loop is a no-op on an empty table).
+          let prevHash = "";
+          for (const row of rs.rows) {
+            const docId = rowStrOrNull(row, "doc_id");
+            const entry: AuditEntry = {
+              timestamp: rowStr(row, "timestamp"),
+              actor: rowStr(row, "actor"),
+              session_id: rowStr(row, "session_id"),
+              action: rowStr(row, "action"),
+              ...(docId !== null ? { doc_id: docId } : {}),
+              details: parseJson<Record<string, unknown>>(rowStr(row, "details") || "{}", {}),
+            };
+            const entryHash = computeAuditEntryHash(entry, prevHash);
+            await tx.execute({
+              sql: "UPDATE audit SET prev_hash = ?, entry_hash = ? WHERE id = ?",
+              args: [prevHash, entryHash, rowNum(row, "id")] as InValue[],
+            });
+            prevHash = entryHash;
+          }
+
+          await tx.executeMultiple(MIGRATION_009_FINALIZE_SQL);
+          await tx.commit();
+        } catch (e) {
+          try {
+            await tx.rollback();
+          } catch {
+            // reason: rollback throws only when the transaction is already
+            // closed — safe to ignore, `e` below is what the caller needs
+            // (mirrors migration-008's identical rollback guard).
           }
           throw e;
         } finally {
@@ -725,6 +808,44 @@ export class TursoStore implements StoreInterface {
     }
   }
 
+  /**
+   * SPEC-079 G3 — the async-transaction analog of SQLiteStore's synchronous
+   * `appendAuditEntrySync`: reads the current chain head (`entry_hash` of
+   * the highest-`id` row, or `""` if the table is empty) via `tx`, computes
+   * this entry's `entry_hash` (`computeAuditEntryHash`), and inserts the
+   * chained row — all through the SAME already-open `tx`. MUST be called
+   * with a transaction already open (either `appendAuditEntry`'s own
+   * standalone wrapper below, or the outer transaction one of the three
+   * `*WithProvenance` methods already holds) so the head-read and insert are
+   * atomic against a concurrent writer's OWN transaction (libsql's
+   * `"write"` transaction mode serializes concurrent writers at the
+   * client/connection level — a second `transaction("write")` blocks until
+   * this one commits or rolls back). Throws on failure like every other
+   * `tx.execute` call in this file — callers already wrap this in their own
+   * try/catch with a rollback-on-catch.
+   */
+  private async appendAuditEntryTx(tx: Transaction, entry: AuditEntry): Promise<void> {
+    const headRs = await tx.execute("SELECT entry_hash FROM audit ORDER BY id DESC LIMIT 1");
+    const headRow = headRs.rows[0];
+    const prevHash = headRow ? (rowStrOrNull(headRow, "entry_hash") ?? "") : "";
+    const entryHash = computeAuditEntryHash(entry, prevHash);
+    await tx.execute({
+      sql: `INSERT INTO audit
+             (timestamp, actor, session_id, action, doc_id, details, prev_hash, entry_hash)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        entry.timestamp,
+        entry.actor,
+        entry.session_id,
+        entry.action,
+        entry.doc_id ?? null,
+        JSON.stringify(entry.details ?? {}),
+        prevHash,
+        entryHash,
+      ] as InValue[],
+    });
+  }
+
   // ── Provenance-atomic composite writes (BUG-002) ─────────────────────────
   //
   // Unlike SQLiteStore (BEGIN IMMEDIATE/COMMIT/ROLLBACK strings run through
@@ -804,19 +925,7 @@ export class TursoStore implements StoreInterface {
         ] as InValue[],
       });
 
-      await tx.execute({
-        sql: `INSERT INTO audit
-               (timestamp, actor, session_id, action, doc_id, details)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-        args: [
-          audit.timestamp,
-          audit.actor,
-          audit.session_id,
-          audit.action,
-          audit.doc_id ?? null,
-          JSON.stringify(audit.details ?? {}),
-        ] as InValue[],
-      });
+      await this.appendAuditEntryTx(tx, audit);
 
       await tx.commit();
       return ok(doc);
@@ -981,19 +1090,7 @@ export class TursoStore implements StoreInterface {
         ] as InValue[],
       });
 
-      await tx.execute({
-        sql: `INSERT INTO audit
-               (timestamp, actor, session_id, action, doc_id, details)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-        args: [
-          audit.timestamp,
-          audit.actor,
-          audit.session_id,
-          audit.action,
-          audit.doc_id ?? null,
-          JSON.stringify(audit.details ?? {}),
-        ] as InValue[],
-      });
+      await this.appendAuditEntryTx(tx, audit);
 
       await tx.commit();
       return ok(updated);
@@ -1056,19 +1153,7 @@ export class TursoStore implements StoreInterface {
         ] as InValue[],
       });
 
-      await tx.execute({
-        sql: `INSERT INTO audit
-               (timestamp, actor, session_id, action, doc_id, details)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-        args: [
-          audit.timestamp,
-          audit.actor,
-          audit.session_id,
-          audit.action,
-          audit.doc_id ?? null,
-          JSON.stringify(audit.details ?? {}),
-        ] as InValue[],
-      });
+      await this.appendAuditEntryTx(tx, audit);
 
       await tx.commit();
       return ok(undefined);
@@ -1415,23 +1500,34 @@ export class TursoStore implements StoreInterface {
 
   // ── Audit ─────────────────────────────────────────────────────────────
 
+  /**
+   * @see StoreInterface.appendAuditEntry
+   *
+   * Opens its OWN `"write"` transaction around {@link appendAuditEntryTx} —
+   * unlike the three `*WithProvenance` methods (which already hold an outer
+   * transaction when they call that helper), a standalone `appendAuditEntry`
+   * call has no existing transaction, so the head-read + insert atomicity
+   * that helper's JSDoc describes needs one opened here.
+   */
   async appendAuditEntry(entry: AuditEntry): Promise<Result<void, LoreError>> {
     try {
       await this.ensureReady();
-      await this.client.execute({
-        sql: `INSERT INTO audit
-               (timestamp, actor, session_id, action, doc_id, details)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-        args: [
-          entry.timestamp,
-          entry.actor,
-          entry.session_id,
-          entry.action,
-          entry.doc_id ?? null,
-          JSON.stringify(entry.details ?? {}),
-        ] as InValue[],
-      });
-      return ok(undefined);
+      const tx = await this.client.transaction("write");
+      try {
+        await this.appendAuditEntryTx(tx, entry);
+        await tx.commit();
+        return ok(undefined);
+      } catch (e) {
+        try {
+          await tx.rollback();
+        } catch {
+          // reason: rollback throws only when the transaction is already
+          // closed — safe to ignore, `e` below is what the caller needs.
+        }
+        throw e;
+      } finally {
+        tx.close();
+      }
     } catch (e) {
       return wrapStoreError(e);
     }
@@ -1474,6 +1570,19 @@ export class TursoStore implements StoreInterface {
 
       const rs = await this.client.execute({ sql, args: params });
       return ok(rs.rows.map((row) => rowToAuditEntry(libsqlRowToAuditRow(row))));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  /**
+   * @see StoreInterface.listAuditChain
+   */
+  async listAuditChain(): Promise<Result<AuditChainEntry[], LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute("SELECT * FROM audit ORDER BY id ASC");
+      return ok(rs.rows.map((row) => rowToAuditChainEntry(libsqlRowToAuditChainRow(row))));
     } catch (e) {
       return wrapStoreError(e);
     }
