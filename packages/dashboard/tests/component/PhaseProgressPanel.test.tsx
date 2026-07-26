@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 /**
- * Tests for PhaseProgressPanel — SPEC-077 S2 execution-page phase scorecards.
+ * Tests for PhaseProgressPanel — SPEC-077 S2 execution-page phase scorecards,
+ * extended by `adr-planphasestatus-projects-declared-extra-phases-alongside`
+ * to cover the `source`-discriminated union (`"phase-doc"` | `"declared"`).
  * @spec_ref AC-077-3
  *
  * Fixtures mirror the REAL `GET /api/phase-status/:planIdOrSlug` response
@@ -8,19 +10,25 @@
  * phase-workflow-service.ts`) — a prior version of this file asserted against
  * an invented shape (`name`/`checklist: []`/`dropped_item_names`/`trust_label`)
  * that never matched the server and caused a live `/execution` page crash
- * (SPEC-077 T2 client-shape-drift fix).
+ * (SPEC-077 T2 client-shape-drift fix). This extension pins the SECOND live
+ * crash: a `source: "declared"` entry has no `checklist_items`/`ac_scope`/
+ * `phase_id`, and the pre-fix component read them unconditionally.
  *
  * Test plan (six-dimension coverage):
  *   HAPPY:
- *     - renders one scorecard per phase with "a/b attested" counts
- *     - renders per-item checklist state and trust badges verbatim
- *     - renders dropped item names derived from dropped-state checklist_items
+ *     - phase-doc: renders one scorecard per phase with "a/b attested" counts
+ *     - phase-doc: renders per-item checklist state and trust badges verbatim
+ *     - phase-doc: renders dropped item names derived from dropped-state checklist_items
+ *     - declared: renders title, task count, evidence pass/fail chips, AC-coverage badges
+ *     - mixed list: renders both a phase-doc and a declared entry together
  *   NEGATIVE:
- *     - a non-vacuous phase renders no "vacuous" badge
- *     - a phase with an empty checklist_items renders no checklist list
+ *     - phase-doc: a non-vacuous phase renders no "vacuous" badge
+ *     - phase-doc: a phase with an empty checklist_items renders no checklist list
+ *     - declared: a non-orphaned phase renders no "not declared on plan" badge
  *   BOUNDARY:
- *     - zero phases renders the explicit empty state
- *     - a phase with zero dropped-state items renders no "Dropped:" text
+ *     - zero phases renders the explicit empty state ("This plan has no phases.")
+ *     - phase-doc: a phase with zero dropped-state items renders no "Dropped:" text
+ *     - declared: zero ac_coverage entries renders no AC-coverage list
  *   ERROR:
  *     - n/a (pure render of an already-typed projection; no fallible IO here)
  *   STATE:
@@ -30,16 +38,20 @@
  *       independent of the phase's ac_scope/checklist contents
  *     - trust labels render VERBATIM (whatever string the projection sends), never
  *       recomputed/renamed by the component
+ *     - a declared-only fixture renders WITHOUT THROWING (the crash regression pin —
+ *       no `checklist_items`/`ac_scope`/`phase_id` access on a declared entry)
+ *     - an orphaned declared phase renders the "not declared on plan" badge
  */
 
 import "@testing-library/jest-dom/vitest";
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
-import type { PhaseScorecard } from "../../src/lib/api";
+import type { DeclaredPhaseScorecard, PhaseScorecard } from "../../src/lib/api";
 import { PhaseProgressPanel } from "../../src/components/PhaseProgressPanel";
 
 function makeScorecard(overrides: Partial<PhaseScorecard> = {}): PhaseScorecard {
   return {
+    source: "phase-doc",
     phase_id: "01PHASE0000000000000000000",
     phase_slug: "phase-phase-1",
     phase_title: "Phase 1",
@@ -51,6 +63,18 @@ function makeScorecard(overrides: Partial<PhaseScorecard> = {}): PhaseScorecard 
     blocking: [],
     claim: null,
     task_count: 0,
+    ...overrides,
+  };
+}
+
+function makeDeclaredScorecard(overrides: Partial<DeclaredPhaseScorecard> = {}): DeclaredPhaseScorecard {
+  return {
+    source: "declared",
+    phase_title: "Declared Phase",
+    orphaned: false,
+    task_count: 3,
+    evidence: { pass: 2, fail: 0 },
+    ac_coverage: [],
     ...overrides,
   };
 }
@@ -92,6 +116,43 @@ describe("PhaseProgressPanel", () => {
       );
       expect(screen.getByText("Dropped: CHK-2, CHK-3")).toBeInTheDocument();
     });
+
+    it("renders a declared phase's title, task count, evidence chips, and AC-coverage badges", () => {
+      render(
+        <PhaseProgressPanel
+          phases={[
+            makeDeclaredScorecard({
+              phase_title: "Rollout",
+              task_count: 4,
+              evidence: { pass: 3, fail: 1 },
+              ac_coverage: [
+                { ac_id: "AC-1", mode: "script", pass: 1, fail: 0, refs: [], attested_pass: 1, attested_fail: 0 },
+                { ac_id: "AC-2", mode: "script", pass: 0, fail: 1, refs: [], attested_pass: 0, attested_fail: 1 },
+              ],
+            }),
+          ]}
+        />,
+      );
+      expect(screen.getByText("Rollout")).toBeInTheDocument();
+      expect(screen.getByText("4 tasks")).toBeInTheDocument();
+      expect(screen.getByText("3 pass")).toBeInTheDocument();
+      expect(screen.getByText("1 fail")).toBeInTheDocument();
+      expect(screen.getByText("AC-1: attested_pass")).toBeInTheDocument();
+      expect(screen.getByText("AC-2: fail")).toBeInTheDocument();
+    });
+
+    it("renders both a phase-doc and a declared entry together in a mixed list", () => {
+      render(
+        <PhaseProgressPanel
+          phases={[
+            makeScorecard({ phase_id: "phase-a", phase_title: "Phase Doc A" }),
+            makeDeclaredScorecard({ phase_title: "Declared B" }),
+          ]}
+        />,
+      );
+      expect(screen.getByText("Phase Doc A")).toBeInTheDocument();
+      expect(screen.getByText("Declared B")).toBeInTheDocument();
+    });
   });
 
   describe("negative", () => {
@@ -104,13 +165,17 @@ describe("PhaseProgressPanel", () => {
       const { container } = render(<PhaseProgressPanel phases={[makeScorecard({ checklist_items: [] })]} />);
       expect(container.querySelector("ul")).toBeNull();
     });
+
+    it("renders no 'not declared on plan' badge for a non-orphaned declared phase", () => {
+      render(<PhaseProgressPanel phases={[makeDeclaredScorecard({ orphaned: false })]} />);
+      expect(screen.queryByText("not declared on plan")).not.toBeInTheDocument();
+    });
   });
 
   describe("boundary", () => {
-    it("renders the explicit empty state for zero phases with honest copy (ISSUE-007: never asserts the PLAN has no phases, only that no phase DOCUMENT exists)", () => {
+    it("renders the explicit empty state for zero phases (truthful now that both phase sources project)", () => {
       render(<PhaseProgressPanel phases={[]} />);
-      expect(screen.getByText("No phase documents for this plan.")).toBeInTheDocument();
-      expect(screen.queryByText(/this plan has no phases/i)).not.toBeInTheDocument();
+      expect(screen.getByText("This plan has no phases.")).toBeInTheDocument();
       expect(screen.queryByLabelText("Phase progress")).not.toBeInTheDocument();
     });
 
@@ -125,6 +190,11 @@ describe("PhaseProgressPanel", () => {
         />,
       );
       expect(screen.queryByText(/Dropped:/)).not.toBeInTheDocument();
+    });
+
+    it("renders no AC-coverage list for a declared phase with zero ac_coverage entries", () => {
+      const { container } = render(<PhaseProgressPanel phases={[makeDeclaredScorecard({ ac_coverage: [] })]} />);
+      expect(container.querySelector("ul")).toBeNull();
     });
   });
 
@@ -149,6 +219,18 @@ describe("PhaseProgressPanel", () => {
       render(<PhaseProgressPanel phases={[scorecard]} />);
       expect(screen.getByText("manual")).toBeInTheDocument();
       expect(screen.getByText("blocking")).toBeInTheDocument();
+    });
+
+    it("renders a declared-only fixture WITHOUT THROWING (crash regression pin — no checklist_items/ac_scope/phase_id access)", () => {
+      expect(() =>
+        render(<PhaseProgressPanel phases={[makeDeclaredScorecard({ phase_title: "Declared Only" })]} />),
+      ).not.toThrow();
+      expect(screen.getByText("Declared Only")).toBeInTheDocument();
+    });
+
+    it("renders the 'not declared on plan' badge for an orphaned declared phase", () => {
+      render(<PhaseProgressPanel phases={[makeDeclaredScorecard({ orphaned: true })]} />);
+      expect(screen.getByText("not declared on plan")).toBeInTheDocument();
     });
   });
 });
