@@ -86,6 +86,10 @@ export function DocPageBody({ id }: { id: string }): React.ReactElement {
     // SPEC-027 AC-DH-6.
     queryClient.removeQueries({ queryKey: queryKeys.scope(project, ["doc", id]) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.scope(project, ["docs", "list"]) });
+    // reason: ISSUE-005 symmetry — a delete changes the total doc count just
+    // as much as a create does; without this the header's "N docs" badge
+    // stayed stale here too until a full reload.
+    void queryClient.invalidateQueries({ queryKey: queryKeys.scope(project, ["status"]) });
     void navigate(homeTarget);
   }
 

@@ -93,7 +93,17 @@ export function HomeBody(): React.ReactElement {
   const error = treeError ?? prdError;
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+    // reason: ISSUE-010 — `grid` with no `grid-template-columns` at the base
+    // breakpoint sizes its single implicit column via `auto` (max-content of
+    // its children), not `minmax(0, 1fr)`. An unbreakable child (e.g. a long
+    // claimed-by string in PendingPanel's meta badge) then stretches that
+    // column past the viewport, overflowing the page horizontally at narrow
+    // widths even though the layout was already conceptually "one column".
+    // `grid-cols-1` makes the base-breakpoint track an explicit
+    // `minmax(0, 1fr)` (matching `lg:`'s main-column track), so it can never
+    // grow past its container; `lg:grid-cols-[...]` still overrides it at
+    // the wider breakpoint.
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
       <div className="space-y-4 min-w-0">
         <header>
           <h1 className="text-2xl font-bold">{prd?.doc.title ?? "Project Overview"}</h1>

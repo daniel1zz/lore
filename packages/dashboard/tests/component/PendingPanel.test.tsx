@@ -268,4 +268,65 @@ describe("PendingPanel", () => {
       });
     });
   });
+
+  describe("ISSUE-001: row layout with a long title and a long claim-actor meta string", () => {
+    it("renders the full title AND the full meta text in the DOM — CSS truncation must never drop data", async () => {
+      const longTitle = "Retrofit the SSE overlay reconnect handshake for T2 event replay ordering guarantees";
+      const doc = makePendingDoc({
+        id: "01HDOC00000000000000000001",
+        type: "task",
+        title: longTitle,
+        meta: {
+          t: "task",
+          claimed_by: "agent:worker-sse",
+          evidence_pass: 3,
+          evidence_fail: 0,
+        },
+      });
+      mockedGetPending.mockResolvedValue([doc]);
+      mockedGetJudgments.mockResolvedValue({ latest: null, history: [] });
+
+      renderWithClient(<PendingPanel />);
+
+      // The title's full (untruncated) text is present in the DOM — `truncate`
+      // is CSS-only (overflow/ellipsis), never a data-dropping transform.
+      const title = await screen.findByText(longTitle);
+      expect(title).toBeInTheDocument();
+      expect(title).toHaveAttribute("title", longTitle);
+
+      // The meta badge's full claim+evidence text renders too — previously
+      // this and the judgment badge visually overlapped ("...worker-ssunreviewed")
+      // because neither had real width constraints; both must independently
+      // be present, distinct DOM nodes.
+      const metaText = "claimed:agent:worker-sse ✔3/✘0";
+      const meta = screen.getByText(metaText);
+      expect(meta).toBeInTheDocument();
+      expect(meta).toHaveAttribute("title", metaText);
+
+      expect(screen.getByText("unreviewed")).toBeInTheDocument();
+      expect(screen.getByText("task")).toBeInTheDocument();
+    });
+
+    it("keeps the title as the primary (flex-1, min-w-0) element and the meta badge as the shrinkable one", async () => {
+      const doc = makePendingDoc({
+        id: "01HDOC00000000000000000002",
+        type: "task",
+        title: "Short Title",
+        meta: { t: "task", claimed_by: "agent:worker-sse", evidence_pass: 0, evidence_fail: 0 },
+      });
+      mockedGetPending.mockResolvedValue([doc]);
+      mockedGetJudgments.mockResolvedValue({ latest: null, history: [] });
+
+      renderWithClient(<PendingPanel />);
+
+      const title = await screen.findByText("Short Title");
+      expect(title).toHaveClass("flex-1");
+      expect(title).toHaveClass("min-w-0");
+      expect(title).toHaveClass("truncate");
+
+      const meta = screen.getByText("claimed:agent:worker-sse");
+      expect(meta).toHaveClass("truncate");
+      expect(meta).toHaveClass("min-w-0");
+    });
+  });
 });

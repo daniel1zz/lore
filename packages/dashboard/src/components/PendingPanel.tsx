@@ -17,10 +17,17 @@
  *     typecheck here. A plain anchor works as normal same-origin navigation once
  *     F3's route lands (SPA history-fallback already serves index.html for
  *     unknown client paths).
- *   - Each row's type badge + `formatTypeMetaLabel` meta badge (SPEC-036 §2 D3
- *     pending-queue extension) sit in a `min-w-0` flex group ahead of the title
- *     button, mirroring `TriageQueue`'s row layout, so the title's `truncate`
- *     still has room to shrink instead of being pushed off by the badges.
+ *   - Row layout gives the TITLE primary flex-1 width (min readable share) —
+ *     the type badge and judgment badge are `shrink-0` (short, fixed-shape
+ *     content), while the meta badge (SPEC-036 §2 D3 pending-queue extension,
+ *     e.g. a long `claimed:agent:<worker>` string) is allowed to shrink AND
+ *     truncate on its own, capped at 40% of the row. Every text-bearing
+ *     element gets a `title` attribute carrying its untruncated value.
+ *     Previously the type+meta badges were `shrink-0` and the title lacked
+ *     `min-w-0`, so a long meta string forced the row past its available
+ *     width; the title (a flex item with no `min-w-0`) never actually shrank
+ *     below its own intrinsic content size either, so its overflowing text
+ *     painted on top of the judgment badge to its right (ISSUE-001).
  * Side-effect class: IO (fetch via TanStack Query)
  * Source: SPEC-033 §2.2
  */
@@ -95,28 +102,30 @@ export function PendingPanel({ project = null, onNavigate }: PendingPanelProps):
           {data.map(({ doc, judgment }) => {
             const metaLabel = doc.meta !== undefined ? formatTypeMetaLabel(doc.meta) : null;
             return (
-              <li key={doc.id} className="flex items-center justify-between gap-2 text-sm">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <Badge variant="outline" className="text-xs shrink-0">
-                    {doc.type}
-                  </Badge>
-                  {metaLabel !== null && (
-                    <Badge
-                      variant={doc.meta !== undefined ? metaBadgeVariant(doc.meta) : "outline"}
-                      className="text-xs shrink-0"
-                    >
-                      {metaLabel}
-                    </Badge>
-                  )}
-                  <button
-                    type="button"
-                    className="text-left text-primary hover:underline truncate"
-                    onClick={() => onNavigate?.(doc.id)}
+              <li key={doc.id} className="flex items-center gap-2 text-sm">
+                <Badge variant="outline" className="text-xs shrink-0">
+                  {doc.type}
+                </Badge>
+                <button
+                  type="button"
+                  className="min-w-0 flex-1 truncate text-left text-primary hover:underline"
+                  onClick={() => onNavigate?.(doc.id)}
+                  title={doc.title}
+                >
+                  {doc.title}
+                </button>
+                {metaLabel !== null && (
+                  <Badge
+                    variant={doc.meta !== undefined ? metaBadgeVariant(doc.meta) : "outline"}
+                    className="min-w-0 max-w-[40%] shrink truncate text-xs"
+                    title={metaLabel}
                   >
-                    {doc.title}
-                  </button>
-                </div>
-                <JudgmentBadge judgment={judgment} docVersion={doc.version} />
+                    {metaLabel}
+                  </Badge>
+                )}
+                <span className="shrink-0">
+                  <JudgmentBadge judgment={judgment} docVersion={doc.version} />
+                </span>
               </li>
             );
           })}

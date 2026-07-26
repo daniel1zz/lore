@@ -26,7 +26,18 @@
  *     the real projection — names are DERIVED here from `checklist_items`
  *     entries whose `state === "dropped"` (a dropped item is excluded from
  *     the satisfied/blocking accounting, per `computePhaseCompletion`).
- *   - Zero phases renders an explicit empty state, never a blank section.
+ *   - Zero phases renders an explicit empty state, never a blank section. The
+ *     copy says "No phase documents for this plan" (ISSUE-007), NOT "This
+ *     plan has no phases yet" — `phases` here is ALWAYS the SPEC-056
+ *     phase-DOCUMENT projection (`GET /api/phase-status`, migration-created
+ *     only), never the far more common `extra.phases` declaration array a
+ *     plan can carry without ever having a phase doc. This panel is PURE
+ *     PROPS with no fetch of its own (see the invariant above) and
+ *     `ExecutionPage` does not fetch the full plan doc either (only
+ *     `DocSummary`s for the plan selector, which carry `meta.phase_count`
+ *     but not phase NAMES) — so asserting "this plan has no phases" here
+ *     would be actively false for the common case: a plan that declares
+ *     phases via `lore phase add` but has no phase document yet.
  * Side-effect class: pure
  * Source: SPEC-077 §Scope S2, AC-077-3; SPEC-056 §Design Decisions D3
  *
@@ -62,7 +73,7 @@ export function PhaseProgressPanel({ phases }: PhaseProgressPanelProps): React.R
   if (phases.length === 0) {
     return (
       <p className="text-sm text-muted-foreground" aria-label="Phase progress (empty)">
-        This plan has no phases yet.
+        No phase documents for this plan.
       </p>
     );
   }
