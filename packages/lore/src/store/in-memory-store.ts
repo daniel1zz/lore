@@ -38,11 +38,7 @@ import type {
   StoreInterface,
   UpdateOpts,
 } from "./store-interface.js";
-import {
-  buildOrdinalAllocationExhaustedError,
-  computeAuditEntryHash,
-  ORDINAL_ALLOCATION_MAX_ATTEMPTS,
-} from "./store-shared.js";
+import { allocateWithBoundedRetry, computeAuditEntryHash } from "./store-shared.js";
 
 // ─── InMemoryStore ─────────────────────────────────────────────────────────────
 
@@ -107,25 +103,27 @@ export class InMemoryStore implements StoreInterface {
 
   /**
    * @see StoreInterface.insertWithAllocatedOrdinal
-   * Mirrors SQLiteStore's algorithm exactly (MAX+1 computed once, ≤3
-   * successive candidates on collision) — no real transaction primitive
-   * needed (synchronous Map mutation, no I/O to roll back).
+   * Delegates its bounded-retry mechanics to the shared
+   * {@link allocateWithBoundedRetry} seam (`store-shared.ts`) — no real
+   * transaction primitive needed (synchronous Map mutation, no I/O to roll
+   * back), so `tryAttempt` just checks {@link hasOrdinalCollision} before
+   * delegating to the plain {@link insert}.
    */
   async insertWithAllocatedOrdinal(doc: DocRecord): Promise<Result<DocRecord, LoreError>> {
     const base = this.maxOrdinalForType(doc.type);
-    for (let attempt = 0; attempt < ORDINAL_ALLOCATION_MAX_ATTEMPTS; attempt++) {
-      const candidate = base + 1 + attempt;
-      if (this.hasOrdinalCollision(doc.type, candidate)) continue;
-      return this.insert({ ...doc, ordinal: candidate });
-    }
-    return err(buildOrdinalAllocationExhaustedError(doc.type));
+    return allocateWithBoundedRetry<DocRecord>(base, doc.type, async (candidate) => {
+      if (this.hasOrdinalCollision(doc.type, candidate)) return { kind: "collision" };
+      const insertResult = await this.insert({ ...doc, ordinal: candidate });
+      if (insertResult.ok) return { kind: "success", value: insertResult.value };
+      return { kind: "error", error: insertResult.error };
+    });
   }
 
   /**
    * @see StoreInterface.allocateOrdinalForExisting
    * UPDATE-scoped sibling — refuses a row that already carries an ordinal
-   * (checked before the CAS comparison), then applies the SAME bounded
-   * MAX+1 retry loop.
+   * (checked before the CAS comparison), then delegates to the SAME shared
+   * {@link allocateWithBoundedRetry} seam.
    */
   async allocateOrdinalForExisting(
     id: DocId,
@@ -151,14 +149,12 @@ export class InMemoryStore implements StoreInterface {
     }
 
     const base = this.maxOrdinalForType(current.type);
-    for (let attempt = 0; attempt < ORDINAL_ALLOCATION_MAX_ATTEMPTS; attempt++) {
-      const candidate = base + 1 + attempt;
-      if (this.hasOrdinalCollision(current.type, candidate)) continue;
+    return allocateWithBoundedRetry<DocRecord>(base, current.type, async (candidate) => {
+      if (this.hasOrdinalCollision(current.type, candidate)) return { kind: "collision" };
       const updated: DocRecord = { ...current, ordinal: candidate, version: expectedVersion + 1 };
       this.docs.set(id, updated);
-      return ok({ ...updated });
-    }
-    return err(buildOrdinalAllocationExhaustedError(current.type));
+      return { kind: "success", value: { ...updated } };
+    });
   }
 
   /**

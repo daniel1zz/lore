@@ -6,13 +6,15 @@
  * twin (`ordinal-allocation.contract.test.ts`) iterates the SAME imported
  * case table under vitest (AC-084-2).
  *
- * RED STATE (2026-07-26): `StoreInterface.insertWithAllocatedOrdinal` /
- * `allocateOrdinalForExisting` do not exist yet on `SQLiteStore` — every
- * case below calls one of them and MUST fail with a `TypeError: ... is not
- * a function` (missing-method class), never a self-inflicted assertion bug.
- * This file is the RED oracle for the not-yet-written T2 store
- * implementation; paired impl lands the two methods + the `ordinal` column
- * + partial unique index (migration N).
+ * T2 (schema migration + store-atomic allocation methods) has landed:
+ * `SQLiteStore.insertWithAllocatedOrdinal`/`allocateOrdinalForExisting` are
+ * real. Five of the six cases below exercise them end-to-end; the
+ * `retry_exhaustion` case exercises the shared `allocateWithBoundedRetry`
+ * seam (`store-shared.ts`) directly with an injected always-colliding
+ * attempt — see `ordinal-allocation-cases.ts`'s design note for why
+ * external pre-insertion can never observe a genuine exhaustion (MAX+1 read
+ * live over the same partial index the UNIQUE constraint enforces is, by
+ * construction, never already taken).
  *
  * @spec_ref AC-084-1
  */
@@ -20,6 +22,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { DocRecord } from "@lore/core";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
+import {
+  allocateWithBoundedRetry,
+  ORDINAL_ALLOCATION_MAX_ATTEMPTS,
+} from "../../../src/store/store-shared.js";
 import {
   EXPECTED_ORDINAL_ALLOCATION_CASE_COUNT,
   ORDINAL_ALLOCATION_CASES,
@@ -148,20 +154,23 @@ async function runOrdinalAllocationCase(
     }
 
     case "retry_exhaustion": {
-      // Pre-occupy THREE consecutive slots — exceeds the ≤3 bounded retry
-      // budget the store owns internally.
-      for (const n of [1, 2, 3]) {
-        const pre = await store.insert(makeDoc({ type: testCase.docType, ordinal: n }));
-        expect(pre.ok).toBe(true);
-      }
-
-      const result = await storeAny.insertWithAllocatedOrdinal(
-        makeDoc({ type: testCase.docType, ordinal: null }),
-      );
+      // Honest exhaustion oracle (see ordinal-allocation-cases.ts's design
+      // note): external pre-insertion can NEVER force a real collision
+      // against a live MAX(ordinal)+1 read, so exhaustion is exercised
+      // directly at the shared bounded-retry seam with an injected
+      // always-colliding attempt — no fake concurrency, no test-only hook
+      // on SQLiteStore's public surface.
+      let attempts = 0;
+      const result = await allocateWithBoundedRetry<DocRecord>(0, testCase.docType, async () => {
+        attempts += 1;
+        return { kind: "collision" };
+      });
+      expect(attempts).toBe(ORDINAL_ALLOCATION_MAX_ATTEMPTS);
       expect(result.ok).toBe(false);
       if (result.ok) return;
-      expect(result.error?.code).toBe("STORE_ERROR");
-      expect(result.error?.message ?? "").toContain("ORDINAL_ALLOCATION_EXHAUSTED");
+      expect(result.error.code).toBe("STORE_ERROR");
+      if (result.error.code !== "STORE_ERROR") return;
+      expect(result.error.message).toContain("ORDINAL_ALLOCATION_EXHAUSTED");
       break;
     }
 

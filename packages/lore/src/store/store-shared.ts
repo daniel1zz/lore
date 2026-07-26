@@ -34,6 +34,7 @@ import type {
 import {
   err,
   extractValidity,
+  ok,
   SNIPPET_MARK_CLOSE,
   SNIPPET_MARK_OPEN,
   type LoreError,
@@ -419,13 +420,24 @@ export function rowToCalibrationRecordWithPromptVersion(
 // `insertWithAllocatedOrdinal`/`allocateOrdinalForExisting` each compute a
 // candidate ordinal via `MAX(ordinal WHERE type=?) + 1` ONCE per call, then
 // on a `(type, ordinal)` uniqueness violation try successive `+1` candidates
-// WITHOUT re-querying the table (see `ordinal-allocation-cases.ts`'s module
-// JSDoc for why a fresh per-attempt MAX query would self-heal around any
-// pre-existing row and could never reproduce a genuine collision under
-// bun:sqlite's single-connection model). These three constants/helpers are
-// the ONE definition of "how many attempts" and "what does exhaustion look
-// like", shared by SQLiteStore/TursoStore/InMemoryStore so the bounded-retry
-// contract can never drift per implementation.
+// WITHOUT re-querying the table. This is the shared contract every impl
+// delegates its retry mechanics to (`allocateWithBoundedRetry` below).
+//
+// Forceability boundary (confirmed by orchestrator adjudication after
+// reading SPEC-084 D2/D9): because `base` is `MAX(ordinal)` read live over
+// the SAME partial index the UNIQUE constraint enforces (D9: includes
+// soft-deleted rows), any row visible to that index is ALSO visible to this
+// MAX read — `MAX(ordinal)+1` is by construction never already taken.
+// Externally pre-inserting rows via a store's plain `insert()` can
+// therefore NEVER force a genuine collision here; exhaustion-by-pre-
+// insertion is structurally unobservable under a single connection. This is
+// NOT a implementation gap to "fix" by caching/staling `base` — that would
+// (a) produce false exhaustion in production against real pre-existing
+// corpus data and (b) contradict D2's literal "MAX+1 over the partial
+// index" text. See `ordinal-allocation-cases.ts`'s design note for the full
+// proof and `allocateWithBoundedRetry`'s own JSDoc for how exhaustion is
+// exercised HONESTLY (an injected always-colliding attempt at this exact
+// seam) instead.
 
 /** Bounded retry budget for both ordinal-allocation store methods (SPEC-084 §Module Boundary). */
 export const ORDINAL_ALLOCATION_MAX_ATTEMPTS = 3;
@@ -458,13 +470,99 @@ export function buildOrdinalAllocationExhaustedError(docType: string): LoreError
   };
 }
 
-export function wrapStoreError(e: unknown): Result<never, LoreError> {
-  const message =
-    e instanceof Error ? e.message : "Unknown store error";
-  if (e instanceof Error) {
-    return err({ code: "STORE_ERROR", message, cause: e });
+/**
+ * Outcome of ONE ordinal-allocation attempt at a specific candidate value —
+ * fed to {@link allocateWithBoundedRetry} by each StoreInterface impl's
+ * `insertWithAllocatedOrdinal`/`allocateOrdinalForExisting`.
+ *
+ * - `"success"` — the attempt committed; carries the resulting value.
+ * - `"collision"` — a `(type, ordinal)` UNIQUE violation on THIS candidate
+ *   only — the loop retries with the next candidate.
+ * - `"error"` — any OTHER failure (`DUPLICATE_SLUG`, `STALE_VERSION`, a
+ *   driver error unrelated to the ordinal index, etc.) — propagates
+ *   immediately, never retried.
+ */
+export type OrdinalAttemptOutcome<T> =
+  | { kind: "success"; value: T }
+  | { kind: "collision" }
+  | { kind: "error"; error: LoreError };
+
+/**
+ * THE single bounded-retry seam for SPEC-084 ordinal allocation (Plan
+ * Invariant 2: `insertWithAllocatedOrdinal`/`allocateOrdinalForExisting` are
+ * the ONLY two allocation call sites, and BOTH delegate their retry
+ * mechanics here — no MAX+1-with-retry arithmetic exists anywhere else in
+ * the codebase; the three StoreInterface impls no longer re-derive "how
+ * many attempts, what counts as retryable, what does exhaustion look like"
+ * independently).
+ *
+ * Computes each candidate as `base + 1 + attemptIndex` (never re-querying
+ * MAX mid-loop — see {@link isOrdinalUniqueViolationMessage}'s JSDoc: a
+ * fresh per-attempt MAX query can never observe a genuine collision under a
+ * live partial index, because `MAX(ordinal)+1` is by construction never
+ * already taken by an existing row — SPEC-084 D2/D9). `tryAttempt` is the
+ * ONLY store-specific part (an INSERT for `insertWithAllocatedOrdinal`, a
+ * CAS-guarded UPDATE for `allocateOrdinalForExisting`).
+ *
+ * @remark Forceability boundary (orchestrator adjudication, confirming the
+ *   proof in `ordinal-allocation-cases.ts`'s design note): because MAX is
+ *   read live over the SAME partial index the UNIQUE constraint enforces
+ *   (including soft-deleted rows, D9), any row visible to that index is
+ *   ALSO visible to this function's own `base` computation — an externally
+ *   pre-inserted row can therefore NEVER force a genuine collision here,
+ *   and "exhaustion via pre-insertion" is structurally unobservable under a
+ *   single connection. This is deliberately NOT "fixed" by making `base`
+ *   stale/cached (that would produce false exhaustion in production against
+ *   real pre-existing corpus data, and contradicts D2's "MAX+1 over the
+ *   partial index" text). The ordinal-allocation contract suite's
+ *   `retry_exhaustion` case therefore exercises exhaustion HONESTLY by
+ *   calling this function directly with an injected, always-`"collision"`
+ *   `tryAttempt` — the only place a genuine 3-strikes exhaustion can be
+ *   observed without fake concurrency or a test-only hook on the store
+ *   classes' public surface.
+ *
+ * @param base - `MAX(ordinal WHERE type=?)` (0 if none), computed ONCE by
+ *   the caller before this loop starts.
+ * @param docType - fed into {@link buildOrdinalAllocationExhaustedError}'s
+ *   message on exhaustion.
+ * @param tryAttempt - runs ONE allocation attempt at `candidate`; returns an
+ *   {@link OrdinalAttemptOutcome}.
+ * @returns `ok(value)` on the first successful attempt; the attempt's OWN
+ *   error immediately on a non-collision failure; `err(STORE_ERROR)`
+ *   (message containing `ORDINAL_ALLOCATION_EXHAUSTED`) after
+ *   {@link ORDINAL_ALLOCATION_MAX_ATTEMPTS} consecutive collisions.
+ */
+export async function allocateWithBoundedRetry<T>(
+  base: number,
+  docType: string,
+  tryAttempt: (candidate: number) => Promise<OrdinalAttemptOutcome<T>>,
+): Promise<Result<T, LoreError>> {
+  for (let attempt = 0; attempt < ORDINAL_ALLOCATION_MAX_ATTEMPTS; attempt++) {
+    const candidate = base + 1 + attempt;
+    const outcome = await tryAttempt(candidate);
+    if (outcome.kind === "success") return ok(outcome.value);
+    if (outcome.kind === "error") return err(outcome.error);
+    // else "collision" — loop retries with the next candidate.
   }
-  return err({ code: "STORE_ERROR", message });
+  return err(buildOrdinalAllocationExhaustedError(docType));
+}
+
+/**
+ * Pure core of {@link wrapStoreError} — builds the bare {@link LoreError}
+ * without wrapping it in a `Result`. Extracted so callers that already need
+ * a plain `LoreError` value (e.g. an {@link OrdinalAttemptOutcome}'s
+ * `error` field inside a `catch` block) don't have to unwrap
+ * `wrapStoreError`'s `Result<never, LoreError>` return type (whose `ok:
+ * true` branch has no `.error` — TS can't narrow it away without an
+ * explicit `if`, which would be pure boilerplate at every call site).
+ */
+export function toStoreError(e: unknown): LoreError {
+  const message = e instanceof Error ? e.message : "Unknown store error";
+  return e instanceof Error ? { code: "STORE_ERROR", message, cause: e } : { code: "STORE_ERROR", message };
+}
+
+export function wrapStoreError(e: unknown): Result<never, LoreError> {
+  return err(toStoreError(e));
 }
 
 // ─── Tamper-evident audit hash chain (SPEC-079 G3) ─────────────────────────

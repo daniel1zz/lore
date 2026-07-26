@@ -67,12 +67,11 @@ import type {
   UpdateOpts,
 } from "./store-interface.js";
 import {
-  buildOrdinalAllocationExhaustedError,
+  allocateWithBoundedRetry,
   computeAuditEntryHash,
   computeFtsShadowValues,
   escapeFtsQuery,
   isOrdinalUniqueViolationMessage,
-  ORDINAL_ALLOCATION_MAX_ATTEMPTS,
   parseJson,
   rowToAuditChainEntry,
   rowToAuditEntry,
@@ -82,6 +81,7 @@ import {
   rowToReviewJudgment,
   rowToSearchHit,
   rowToVersionRecord,
+  toStoreError,
   wrapStoreError,
   type AuditChainRow,
   type AuditRow,
@@ -528,9 +528,10 @@ export class TursoStore implements StoreInterface {
 
   /**
    * @see StoreInterface.insertWithAllocatedOrdinal
-   * Mirrors SQLiteStore's algorithm (MAX+1 computed once via the SAME
-   * interactive `client.transaction("write")` shape `insertWithProvenance`
-   * uses, ≤3 successive candidates on a `(type, ordinal)` UNIQUE violation).
+   * MAX+1 computed once via the SAME interactive `client.transaction("write")`
+   * shape `insertWithProvenance` uses, then delegated to the shared
+   * {@link allocateWithBoundedRetry} seam (`store-shared.ts`) for the
+   * bounded-attempt/exhaustion mechanics.
    */
   async insertWithAllocatedOrdinal(doc: DocRecord): Promise<Result<DocRecord, LoreError>> {
     await this.ensureReady();
@@ -546,8 +547,7 @@ export class TursoStore implements StoreInterface {
       const tagsJson = JSON.stringify(doc.tags);
       const shadow = computeFtsShadowValues(doc.title, doc.content, tagsJson);
 
-      for (let attempt = 0; attempt < ORDINAL_ALLOCATION_MAX_ATTEMPTS; attempt++) {
-        const candidate = base + 1 + attempt;
+      const result = await allocateWithBoundedRetry<DocRecord>(base, doc.type, async (candidate) => {
         try {
           await tx.execute({
             sql: `INSERT INTO docs
@@ -578,24 +578,25 @@ export class TursoStore implements StoreInterface {
               candidate,
             ] as InValue[],
           });
-          await tx.commit();
-          return ok({ ...doc, ordinal: candidate });
+          return { kind: "success", value: { ...doc, ordinal: candidate } };
         } catch (e) {
           const msg = e instanceof Error ? e.message : "";
           if (msg.includes("UNIQUE constraint failed: docs.slug")) {
-            await tx.rollback();
-            return err({ code: "DUPLICATE_SLUG", slug: doc.slug, existing_id: doc.id });
+            return { kind: "error", error: { code: "DUPLICATE_SLUG", slug: doc.slug, existing_id: doc.id } };
           }
-          if (!isOrdinalUniqueViolationMessage(msg)) {
-            await tx.rollback();
-            return wrapStoreError(e);
+          if (isOrdinalUniqueViolationMessage(msg)) {
+            return { kind: "collision" };
           }
-          // else: ordinal collision — loop retries with the next candidate.
+          return { kind: "error", error: toStoreError(e) };
         }
-      }
+      });
 
-      await tx.rollback();
-      return err(buildOrdinalAllocationExhaustedError(doc.type));
+      if (result.ok) {
+        await tx.commit();
+      } else {
+        await tx.rollback();
+      }
+      return result;
     } catch (e) {
       try {
         await tx.rollback();
@@ -612,8 +613,8 @@ export class TursoStore implements StoreInterface {
   /**
    * @see StoreInterface.allocateOrdinalForExisting
    * UPDATE-scoped sibling — refuses a row that already carries an ordinal
-   * (checked before the CAS comparison), then applies the SAME bounded
-   * MAX+1 retry loop via a conditional UPDATE.
+   * (checked before the CAS comparison), then delegates to the SAME shared
+   * {@link allocateWithBoundedRetry} seam via a conditional UPDATE.
    */
   async allocateOrdinalForExisting(
     id: DocId,
@@ -658,36 +659,41 @@ export class TursoStore implements StoreInterface {
       const base = maxRow ? rowNumOrNull(maxRow, "maxOrdinal") ?? 0 : 0;
       const newVersion = expectedVersion + 1;
 
-      for (let attempt = 0; attempt < ORDINAL_ALLOCATION_MAX_ATTEMPTS; attempt++) {
-        const candidate = base + 1 + attempt;
-        try {
-          const updateRs = await tx.execute({
-            sql: "UPDATE docs SET ordinal = ?, version = ? WHERE id = ? AND version = ? AND ordinal IS NULL",
-            args: [candidate, newVersion, id, expectedVersion] as InValue[],
-          });
-          if (updateRs.rowsAffected > 0) {
-            await tx.commit();
-            return ok({ ...current, ordinal: candidate, version: newVersion });
+      const result = await allocateWithBoundedRetry<DocRecord>(
+        base,
+        current.type,
+        async (candidate) => {
+          try {
+            const updateRs = await tx.execute({
+              sql: "UPDATE docs SET ordinal = ?, version = ? WHERE id = ? AND version = ? AND ordinal IS NULL",
+              args: [candidate, newVersion, id, expectedVersion] as InValue[],
+            });
+            if (updateRs.rowsAffected > 0) {
+              return {
+                kind: "success",
+                value: { ...current, ordinal: candidate, version: newVersion },
+              };
+            }
+            return {
+              kind: "error",
+              error: { code: "STALE_VERSION", id, expected: expectedVersion, actual: current.version },
+            };
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : "";
+            if (isOrdinalUniqueViolationMessage(msg)) {
+              return { kind: "collision" };
+            }
+            return { kind: "error", error: toStoreError(e) };
           }
-          await tx.rollback();
-          return err({
-            code: "STALE_VERSION",
-            id,
-            expected: expectedVersion,
-            actual: current.version,
-          });
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : "";
-          if (!isOrdinalUniqueViolationMessage(msg)) {
-            await tx.rollback();
-            return wrapStoreError(e);
-          }
-          // else: ordinal collision — loop retries with the next candidate.
-        }
-      }
+        },
+      );
 
-      await tx.rollback();
-      return err(buildOrdinalAllocationExhaustedError(current.type));
+      if (result.ok) {
+        await tx.commit();
+      } else {
+        await tx.rollback();
+      }
+      return result;
     } catch (e) {
       try {
         await tx.rollback();

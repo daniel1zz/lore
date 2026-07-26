@@ -69,12 +69,11 @@ import {
   type JudgmentRow,
   type LinkRow,
   type VersionRow,
-  buildOrdinalAllocationExhaustedError,
+  allocateWithBoundedRetry,
   computeAuditEntryHash,
   computeFtsShadowValues,
   escapeFtsQuery,
   isOrdinalUniqueViolationMessage,
-  ORDINAL_ALLOCATION_MAX_ATTEMPTS,
   parseJson,
   rowToAuditChainEntry,
   rowToAuditEntry,
@@ -84,6 +83,7 @@ import {
   rowToReviewJudgment,
   rowToSearchHit,
   rowToVersionRecord,
+  toStoreError,
   wrapStoreError,
 } from "./store-shared.js";
 
@@ -447,13 +447,13 @@ export class SQLiteStore implements StoreInterface {
    * @see StoreInterface.insertWithAllocatedOrdinal
    *
    * Transaction-scoped: `SELECT MAX(ordinal)+1 WHERE type=?` computed ONCE,
-   * then up to {@link ORDINAL_ALLOCATION_MAX_ATTEMPTS} successive `+1`
-   * candidates on a `(type, ordinal)` UNIQUE violation — see
-   * `store-shared.ts::isOrdinalUniqueViolationMessage`'s JSDoc for why the
-   * base is computed once and never re-queried mid-loop. `BEGIN IMMEDIATE`
-   * gets its own try/catch (mirrors `insertWithProvenance`'s identical
-   * split) so a synchronous open-transaction throw returns `err(STORE_ERROR)`
-   * without attempting a ROLLBACK on a transaction that never opened.
+   * then delegated to the shared {@link allocateWithBoundedRetry} seam
+   * (`store-shared.ts`) for the bounded-attempt/exhaustion mechanics — see
+   * that function's JSDoc for why the base is computed once and never
+   * re-queried mid-loop. `BEGIN IMMEDIATE` gets its own try/catch (mirrors
+   * `insertWithProvenance`'s identical split) so a synchronous
+   * open-transaction throw returns `err(STORE_ERROR)` without attempting a
+   * ROLLBACK on a transaction that never opened.
    */
   async insertWithAllocatedOrdinal(doc: DocRecord): Promise<Result<DocRecord, LoreError>> {
     try {
@@ -467,28 +467,29 @@ export class SQLiteStore implements StoreInterface {
         .get(doc.type) as { maxOrdinal: number | bigint | null };
       const base = maxRow.maxOrdinal === null ? 0 : Number(maxRow.maxOrdinal);
 
-      for (let attempt = 0; attempt < ORDINAL_ALLOCATION_MAX_ATTEMPTS; attempt++) {
-        const candidate = base + 1 + attempt;
+      const result = await allocateWithBoundedRetry<DocRecord>(base, doc.type, async (candidate) => {
         const insertResult = this.insertDocSync({ ...doc, ordinal: candidate });
         if (insertResult.ok) {
-          this.db.run("COMMIT");
-          return insertResult;
+          return { kind: "success", value: insertResult.value };
         }
         if (
-          insertResult.error.code !== "STORE_ERROR" ||
-          !isOrdinalUniqueViolationMessage(insertResult.error.message)
+          insertResult.error.code === "STORE_ERROR" &&
+          isOrdinalUniqueViolationMessage(insertResult.error.message)
         ) {
-          // reason: a non-ordinal failure (e.g. DUPLICATE_SLUG, or a driver
-          // error unrelated to the ordinal index) must propagate immediately
-          // — retrying with a different ordinal candidate would never fix it.
-          this.db.run("ROLLBACK");
-          return insertResult;
+          return { kind: "collision" };
         }
-        // else: ordinal collision — loop retries with the next candidate.
-      }
+        // reason: a non-ordinal failure (e.g. DUPLICATE_SLUG, or a driver
+        // error unrelated to the ordinal index) must propagate immediately
+        // — retrying with a different ordinal candidate would never fix it.
+        return { kind: "error", error: insertResult.error };
+      });
 
-      this.db.run("ROLLBACK");
-      return err(buildOrdinalAllocationExhaustedError(doc.type));
+      if (result.ok) {
+        this.db.run("COMMIT");
+      } else {
+        this.db.run("ROLLBACK");
+      }
+      return result;
     } catch (e) {
       try {
         this.db.run("ROLLBACK");
@@ -509,9 +510,9 @@ export class SQLiteStore implements StoreInterface {
    * comparison, so an already-numbered row is refused regardless of whether
    * `expectedVersion` happens to match — SPEC-084's "the store method itself
    * refuses a row that already has one" immutability guard), then CAS-guards
-   * on `expectedVersion` (mismatch → `STALE_VERSION`), then applies the SAME
-   * bounded MAX+1 retry loop as {@link insertWithAllocatedOrdinal} via a
-   * conditional `UPDATE ... WHERE id = ? AND version = ? AND ordinal IS NULL`.
+   * on `expectedVersion` (mismatch → `STALE_VERSION`), then delegates to the
+   * SAME shared {@link allocateWithBoundedRetry} seam via a conditional
+   * `UPDATE ... WHERE id = ? AND version = ? AND ordinal IS NULL`.
    */
   async allocateOrdinalForExisting(
     id: DocId,
@@ -557,44 +558,50 @@ export class SQLiteStore implements StoreInterface {
       const base = maxRow.maxOrdinal === null ? 0 : Number(maxRow.maxOrdinal);
       const newVersion = expectedVersion + 1;
 
-      for (let attempt = 0; attempt < ORDINAL_ALLOCATION_MAX_ATTEMPTS; attempt++) {
-        const candidate = base + 1 + attempt;
-        try {
-          const result = this.db
-            .prepare(
-              "UPDATE docs SET ordinal = ?, version = ? WHERE id = ? AND version = ? AND ordinal IS NULL",
-            )
-            .run(candidate, newVersion, id, expectedVersion);
+      const result = await allocateWithBoundedRetry<DocRecord>(
+        base,
+        current.type,
+        async (candidate) => {
+          try {
+            const updateResult = this.db
+              .prepare(
+                "UPDATE docs SET ordinal = ?, version = ? WHERE id = ? AND version = ? AND ordinal IS NULL",
+              )
+              .run(candidate, newVersion, id, expectedVersion);
 
-          if (result.changes > 0) {
-            this.db.run("COMMIT");
-            return ok({ ...current, ordinal: candidate, version: newVersion });
+            if (updateResult.changes > 0) {
+              return {
+                kind: "success",
+                value: { ...current, ordinal: candidate, version: newVersion },
+              };
+            }
+            // reason: zero rows affected under an already-open BEGIN
+            // IMMEDIATE transaction (which holds the write lock for this
+            // connection's whole call) means the row changed between our
+            // SELECT and this UPDATE only if some OTHER code path mutated
+            // it — unreachable in practice on a single-connection store,
+            // but treated as a stale read rather than silently retried
+            // forever.
+            return {
+              kind: "error",
+              error: { code: "STALE_VERSION", id, expected: expectedVersion, actual: current.version },
+            };
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : "";
+            if (isOrdinalUniqueViolationMessage(msg)) {
+              return { kind: "collision" };
+            }
+            return { kind: "error", error: toStoreError(e) };
           }
-          // reason: zero rows affected under an already-open BEGIN IMMEDIATE
-          // transaction (which holds the write lock for this connection's
-          // whole call) means the row changed between our SELECT and this
-          // UPDATE only if some OTHER code path mutated it — unreachable in
-          // practice on a single-connection store, but treated as a stale
-          // read rather than silently retried forever.
-          this.db.run("ROLLBACK");
-          return err({
-            code: "STALE_VERSION",
-            id,
-            expected: expectedVersion,
-            actual: current.version,
-          });
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : "";
-          if (!isOrdinalUniqueViolationMessage(msg)) {
-            this.db.run("ROLLBACK");
-            return wrapStoreError(e);
-          }
-          // else: ordinal collision — loop retries with the next candidate.
-        }
+        },
+      );
+
+      if (result.ok) {
+        this.db.run("COMMIT");
+      } else {
+        this.db.run("ROLLBACK");
       }
-
-      this.db.run("ROLLBACK");
-      return err(buildOrdinalAllocationExhaustedError(current.type));
+      return result;
     } catch (e) {
       try {
         this.db.run("ROLLBACK");
