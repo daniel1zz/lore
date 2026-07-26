@@ -40,6 +40,8 @@ import {
   extractPrdSyncExempt,
   prdSyncExemptEqual,
   extractClaim,
+  ORDINAL_REGISTRY,
+  isSelfDeclaredOrdinalTitle,
 } from "@lore/core";
 import type {
   CreateDocInput,
@@ -875,6 +877,23 @@ export class CorpusService {
         ? { ...specKindDefaultedExtra, file_anchors: normalizedFileAnchors }
         : specKindDefaultedExtra;
 
+    // SPEC-084 §Changed semantics "Allocation timing" — WHETHER to allocate a
+    // store-atomic ordinal is decided HERE (service layer); HOW (MAX+1 +
+    // insert + bounded retry, transaction-scoped) lives entirely in
+    // `store.insertWithAllocatedOrdinal` (SPEC-084 D1) — this service never
+    // computes a candidate ordinal itself, only the boolean gate. Eligible
+    // iff `data.type` is a registry key AND the resolved kind (same
+    // `resolvedExtra["spec_kind"]` the spec-create gate ctx above reads) is
+    // not one of that entry's `exemptKinds` (data, not logic — SPEC-084 D4).
+    const ordinalRegistryEntry = ORDINAL_REGISTRY[data.type];
+    const candidateOrdinalKind =
+      typeof resolvedExtra["spec_kind"] === "string" ? resolvedExtra["spec_kind"] : undefined;
+    const isExemptOrdinalKind =
+      ordinalRegistryEntry?.exemptKinds !== undefined &&
+      candidateOrdinalKind !== undefined &&
+      ordinalRegistryEntry.exemptKinds.includes(candidateOrdinalKind);
+    const shouldAllocateOrdinal = ordinalRegistryEntry !== undefined && !isExemptOrdinalKind;
+
     // Gate `spec-create` (retro follow-up item 8, defense-in-depth): the SAME
     // deterministic checkpoint `lore gate spec-create` runs as a pre-flight hook
     // shell-out, now also enforced HERE so MCP `lore_create` / HTTP dashboard create /
@@ -958,6 +977,14 @@ export class CorpusService {
       deleted_at: null,
       tags: data.tags ?? [],
       extra: resolvedExtra,
+      // reason: SPEC-084 §Module Boundary — explicit `null` (never a bare
+      // `undefined`) for every create, eligible or not. `insertWithAllocatedOrdinal`
+      // (below, eligible path only) IGNORES/OVERWRITES this input value with the
+      // real allocated candidate per its own StoreInterface contract, so this
+      // literal only matters for the non-eligible branch — where it must read as
+      // a real `null` (not an absent key) for callers like `formatDocDisplayId`
+      // and this suite's own `.ordinal).toBeNull()` assertion.
+      ordinal: null,
     };
 
     // BUG-002 (audit finding) — insert + version-1 snapshot + create audit entry
@@ -969,37 +996,60 @@ export class CorpusService {
     // insertWithProvenance's JSDoc on StoreInterface for the per-store atomicity
     // mechanism (SQLite: BEGIN IMMEDIATE/COMMIT/ROLLBACK; Turso: a real
     // client.transaction(); InMemory: manual undo-on-failure).
-    const insertResult = await this.store.insertWithProvenance(
-      doc,
-      {
-        doc_id: id,
-        version: 1,
-        content: doc.content,
-        extra: doc.extra,
-        status: doc.status,
-        title: doc.title,
-        action: "create",
-        created_at: now,
-        created_by: doc.created_by,
-        // SPEC-072 D1/D2 — version rows write the doc's slug from now on.
-        slug: doc.slug,
-      },
-      {
-        timestamp: now,
-        // SPEC-079 G2 — resolved actor (--by > $LORE_ACTOR > session tier > OS
-        // username), never the literal "system". `doc.created_by`/the versions
-        // row above are OUT of this spec's scope (unchanged, still "system") —
-        // see corpus-service.ts's SPEC-079 note at the top of this method.
-        actor: resolvedActor,
-        session_id: id,
-        action: "create",
-        doc_id: id,
-        // reason: SPEC-035 §2 — every audit writer stamps the version its action
-        // produced (`details.version`), so AuditService.verify can join versions⋈audit
-        // on an exact (doc_id, version) pair. Creation always produces version 1.
-        details: { type: doc.type, slug: doc.slug, version: 1 },
-      },
-    );
+    const creationVersion: VersionRecord = {
+      doc_id: id,
+      version: 1,
+      content: doc.content,
+      extra: doc.extra,
+      status: doc.status,
+      title: doc.title,
+      action: "create",
+      created_at: now,
+      created_by: doc.created_by,
+      // SPEC-072 D1/D2 — version rows write the doc's slug from now on.
+      slug: doc.slug,
+    };
+    const creationAudit: AuditEntry = {
+      timestamp: now,
+      // SPEC-079 G2 — resolved actor (--by > $LORE_ACTOR > session tier > OS
+      // username), never the literal "system". `doc.created_by`/the versions
+      // row above are OUT of this spec's scope (unchanged, still "system") —
+      // see corpus-service.ts's SPEC-079 note at the top of this method.
+      actor: resolvedActor,
+      session_id: id,
+      action: "create",
+      doc_id: id,
+      // reason: SPEC-035 §2 — every audit writer stamps the version its action
+      // produced (`details.version`), so AuditService.verify can join versions⋈audit
+      // on an exact (doc_id, version) pair. Creation always produces version 1.
+      details: { type: doc.type, slug: doc.slug, version: 1 },
+    };
+
+    let insertResult: Result<DocRecord, LoreError>;
+    if (shouldAllocateOrdinal) {
+      // reason: SPEC-084 D1 — `insertWithAllocatedOrdinal` is scoped to the
+      // INSERT alone (its own StoreInterface JSDoc mirrors plain `insert`,
+      // never `insertWithProvenance`'s three-way atomic composite — T2's
+      // frozen store contract has no ordinal-aware provenance composite).
+      // The version snapshot and create-audit entry are therefore written as
+      // two subsequent, independently-awaited calls — the SAME sequence
+      // `insertWithProvenance` replaced for BUG-002, reintroduced ONLY on
+      // this narrower numbered-type path because no wider composite exists
+      // to call instead. A failure on either subsequent step leaves the doc
+      // persisted with a missing version/audit row; this narrow gap is
+      // accepted pending a future ordinal-aware provenance composite on
+      // StoreInterface (out of this task's anchors, which are service-layer
+      // wiring only).
+      const allocResult = await this.store.insertWithAllocatedOrdinal(doc);
+      if (!allocResult.ok) return allocResult;
+      const versionResult = await this.store.insertVersion(creationVersion);
+      if (!versionResult.ok) return versionResult;
+      const auditResult = await this.store.appendAuditEntry(creationAudit);
+      if (!auditResult.ok) return auditResult;
+      insertResult = allocResult;
+    } else {
+      insertResult = await this.store.insertWithProvenance(doc, creationVersion, creationAudit);
+    }
     if (!insertResult.ok) return insertResult;
 
     // Provenance auto-write (IoC vertical-slice tech-spec §4.1 P4, "governs" edge from
@@ -1369,7 +1419,26 @@ export class CorpusService {
       version: newVersion,
       updated_at: now,
     };
-    if (parsedPatch.data.title !== undefined) docPatch.title = parsedPatch.data.title;
+    if (parsedPatch.data.title !== undefined) {
+      // SPEC-084 §Changed semantics D6 "same re-check on set" — createDocInputSchema's
+      // superRefine (schemas.ts) only guards the CREATE path; `docPatchSchema.title`
+      // is untyped prose, so a rename must be independently re-checked here, or
+      // `lore set --title "SPEC-099 — …"` reintroduces the exact self-declared-number
+      // race the store-atomic allocator exists to kill. Applies regardless of the
+      // doc's CURRENT (or incoming) spec_kind — isSelfDeclaredOrdinalTitle's own
+      // contract restricts purely on `type`, since an exempt-kind doc can still flip
+      // to numbered later and must never have carried a squatted title in the interim.
+      if (isSelfDeclaredOrdinalTitle(existing.type, parsedPatch.data.title)) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "title",
+          message:
+            "title must not self-declare a SPEC-/ADR- number — the ordinal is allocated automatically; write the bare title",
+          value: parsedPatch.data.title,
+        });
+      }
+      docPatch.title = parsedPatch.data.title;
+    }
     // reason: canonicalise content at write time (same invariant as _createImpl).
     // Ensures corpus always stores normalised body; sync-docs roundtrip is then lossless.
     // Source: SPEC-021 §4; empty content stays "".
@@ -1835,6 +1904,41 @@ export class CorpusService {
       slug: docPatch.slug ?? existing.slug,
     };
 
+    // SPEC-084 §Changed semantics "Kind-flip semantics" — a spec_kind
+    // transition FROM an exempt kind TO a numbered one must allocate an
+    // ordinal at this write; the reverse (numbered→exempt) KEEPS whatever
+    // ordinal already exists (never retracted/changed/reassigned — the
+    // store method itself refuses a row that already carries one). Only
+    // `ORDINAL_REGISTRY.spec` declares `exemptKinds` today, so this block is
+    // a no-op for every other type/entry (`kindOrdinalEntry?.exemptKinds`
+    // guards that). `versionRecord.extra` above already IS the final
+    // post-patch extra (docPatch.extra when the caller supplied one, else
+    // unchanged existing.extra) — reused here rather than re-deriving it.
+    const kindOrdinalEntry = ORDINAL_REGISTRY[existing.type];
+    let shouldAllocateOrdinalOnKindFlip = false;
+    if (
+      kindOrdinalEntry?.exemptKinds !== undefined &&
+      (existing.ordinal === null || existing.ordinal === undefined)
+    ) {
+      // reason: the only registry entry with `exemptKinds` today is `spec`,
+      // whose kind field is `extra.spec_kind` and whose absent/malformed
+      // value already defaults to "feature" at create time (`_createImpl`'s
+      // spec_kind default, mirrored — not re-derived — here). A future
+      // ORDINAL_REGISTRY entry adding `exemptKinds` for a type with a
+      // differently-named kind field would need this block widened.
+      const resolveOrdinalKind = (extra: Record<string, unknown>): string => {
+        const raw = extra["spec_kind"];
+        return typeof raw === "string" && (SPEC_KINDS as readonly string[]).includes(raw)
+          ? raw
+          : "feature";
+      };
+      const existingKind = resolveOrdinalKind(existing.extra);
+      const finalKind = resolveOrdinalKind(versionRecord.extra);
+      const wasExemptKind = kindOrdinalEntry.exemptKinds.includes(existingKind);
+      const isNowExemptKind = kindOrdinalEntry.exemptKinds.includes(finalKind);
+      shouldAllocateOrdinalOnKindFlip = wasExemptKind && !isNowExemptKind;
+    }
+
     const updateResult = await this.store.updateWithProvenance(
       existing.id,
       docPatch,
@@ -1854,6 +1958,24 @@ export class CorpusService {
       },
     );
     if (!updateResult.ok) return updateResult;
+
+    if (shouldAllocateOrdinalOnKindFlip) {
+      // reason: SPEC-084 D1 — `allocateOrdinalForExisting` is the UPDATE-scoped
+      // sibling of `insertWithAllocatedOrdinal`; it CAS-guards on the version
+      // `updateWithProvenance` above just produced (not `existing.version` —
+      // the patch write already bumped it by one) and bumps it again by one
+      // on success. Two version bumps for what was conceptually one `set()`
+      // call is an accepted consequence of the frozen T2 store contract
+      // having no single call that does both the patch AND the ordinal
+      // allocation atomically (same documented tradeoff as _createImpl's
+      // numbered-type path above).
+      const allocResult = await this.store.allocateOrdinalForExisting(
+        existing.id,
+        updateResult.value.version,
+      );
+      if (!allocResult.ok) return allocResult;
+      return ok(allocResult.value);
+    }
 
     return ok(updateResult.value);
   }

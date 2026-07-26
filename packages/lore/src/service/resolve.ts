@@ -8,7 +8,7 @@
  * Public surface: `resolveDoc`, `resolveDocId`.
  * Side-effect class: IO (delegates to the injected `StoreInterface`).
  */
-import { err, ok, type LoreError, type Result } from "@lore/core";
+import { err, ok, parseOrdinalRef, type LoreError, type Result } from "@lore/core";
 import type { DocId, DocRecord } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 
@@ -32,15 +32,21 @@ const FULL_ULID_LENGTH = 26;
  *
  * Resolution order: (1) exact 26-char ULID match via `store.find`, or exact
  * slug match via `store.findBySlug` for anything shorter/longer; (2) on a
- * miss, if the input is SHAPED like a truncated ID (`ID_PREFIX_REGEX`), a
+ * miss, if the input parses as an ordinal reference (`parseOrdinalRef`, e.g.
+ * `"SPEC-84"` / `"adr-007"`), a direct lookup via `store.findByTypeOrdinal`
+ * (SPEC-084 §Module Boundary) — a match resolves immediately, a miss falls
+ * through to (3) (an ordinal-ref-shaped string like `"SPEC-84"` never matches
+ * `ID_PREFIX_REGEX` below anyway, since it contains a literal hyphen); (3) if
+ * the input is SHAPED like a truncated ID (`ID_PREFIX_REGEX`), a
  * unique-prefix lookup via `store.findByIdPrefix` — exactly one candidate
  * resolves, two or more is `VALIDATION_ERROR` (ambiguous, lists every
- * candidate), zero falls through to (3); (3) `DOC_NOT_FOUND`, with a
+ * candidate), zero falls through to (4); (4) `DOC_NOT_FOUND`, with a
  * truncation diagnostic appended to `suggestions` when the input was
  * prefix-shaped.
  *
  * @param store - storage abstraction (any `StoreInterface` implementation)
- * @param idOrSlug - full ULID, slug, or a 6-25 char ID prefix
+ * @param idOrSlug - full ULID, slug, ordinal reference (`SPEC-84`), or a
+ *   6-25 char ID prefix
  * @returns the resolved `DocRecord`, or `DOC_NOT_FOUND` / `VALIDATION_ERROR`
  *   (ambiguous prefix) / a propagated store error
  */
@@ -55,6 +61,20 @@ export async function resolveDoc(
   if (!findResult.ok) return findResult;
   if (findResult.value !== null) {
     return ok(findResult.value);
+  }
+
+  // SPEC-084 §Module Boundary — ordinal-ref resolution step, BEFORE the
+  // SPEC-065 id-prefix fallback below (an unambiguous `{registered-prefix}-
+  // {digits}` shape never needs prefix disambiguation). A parse miss (input
+  // isn't ordinal-ref-shaped at all) OR a lookup miss (well-formed reference
+  // to a nonexistent doc) both fall through unchanged to the id-prefix step.
+  const ordinalRef = parseOrdinalRef(idOrSlug);
+  if (ordinalRef !== null) {
+    const ordinalResult = await store.findByTypeOrdinal(ordinalRef.type, ordinalRef.ordinal);
+    if (!ordinalResult.ok) return ordinalResult;
+    if (ordinalResult.value !== null) {
+      return ok(ordinalResult.value);
+    }
   }
 
   const looksLikeIdPrefix = ID_PREFIX_REGEX.test(idOrSlug);
