@@ -281,7 +281,13 @@ describe("registry-free npm install simulation — HAPPY", () => {
       expect(setupDryRunJson.data.plan.writes.length).toBeGreaterThan(0);
       // A specific, stable governance asset — proves the STAGED assets/ tree (not an
       // empty/missing one) was actually walked from the real installed package dir.
-      expect(setupDryRunJson.data.plan.writes.some((w) => w.path.includes("corpus-workflow.md"))).toBe(true);
+      // SPEC-083 D3: governance/corpus-workflow.md is retired from the install set
+      // (the runtime `lore governance` verb reads it from the binary's own assets
+      // root instead) — seat-briefing.md is the remaining installed governance file
+      // and is asserted present INSTEAD, while corpus-workflow.md is asserted absent
+      // (proving the retirement, not just silence on the old assertion).
+      expect(setupDryRunJson.data.plan.writes.some((w) => w.path.includes("seat-briefing.md"))).toBe(true);
+      expect(setupDryRunJson.data.plan.writes.some((w) => w.path.includes("corpus-workflow.md"))).toBe(false);
     },
     600_000,
   );
