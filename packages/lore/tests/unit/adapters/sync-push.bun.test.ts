@@ -45,7 +45,11 @@ import {
   MIGRATION_008_ADD_COLUMNS_SQL,
   MIGRATION_008_FTS_REBUILD_SQL,
 } from "../../../src/store/migrations/migration-008.js";
-import { computeFtsShadowValues } from "../../../src/store/store-shared.js";
+import {
+  MIGRATION_009_ADD_COLUMNS_SQL,
+  MIGRATION_009_FINALIZE_SQL,
+} from "../../../src/store/migrations/migration-009.js";
+import { computeFtsShadowValues, computeAuditEntryHash } from "../../../src/store/store-shared.js";
 
 // ─── Fixture Helpers ─────────────────────────────────────────────────────────
 
@@ -139,6 +143,54 @@ async function applyMigrationsToClient(client: Client, localStore: SQLiteStore):
     throw e;
   } finally {
     tx008.close();
+  }
+
+  // migration-009 is likewise a THREE-PHASE sequence (ADD COLUMN -> JS
+  // per-row audit hash-chain backfill -> PRAGMA user_version bump) — see
+  // migration-009.ts's module JSDoc. This mirrors turso-store.ts's
+  // initSchema() `currentVersion < 9` block verbatim (same
+  // client.transaction("write") interactive-transaction API, same
+  // executeMultiple/execute calls, same id-ASC prevHash threading with a ""
+  // genesis for the first row / a no-op on an empty table).
+  const tx009 = await client.transaction("write");
+  try {
+    await tx009.executeMultiple(MIGRATION_009_ADD_COLUMNS_SQL);
+
+    const rs009 = await tx009.execute(
+      "SELECT id, timestamp, actor, session_id, action, doc_id, details FROM audit ORDER BY id ASC",
+    );
+    let prevHash = "";
+    for (const row of rs009.rows) {
+      const docId = row["doc_id"] === null ? null : String(row["doc_id"]);
+      const entry: AuditEntry = {
+        timestamp: String(row["timestamp"]),
+        actor: String(row["actor"]),
+        session_id: String(row["session_id"]),
+        action: String(row["action"]),
+        ...(docId !== null ? { doc_id: docId } : {}),
+        details: JSON.parse(String(row["details"] ?? "{}")) as Record<string, unknown>,
+      };
+      const entryHash = computeAuditEntryHash(entry, prevHash);
+      await tx009.execute({
+        sql: "UPDATE audit SET prev_hash = ?, entry_hash = ? WHERE id = ?",
+        args: [prevHash, entryHash, Number(row["id"])],
+      });
+      prevHash = entryHash;
+    }
+
+    await tx009.executeMultiple(MIGRATION_009_FINALIZE_SQL);
+    await tx009.commit();
+  } catch (e) {
+    try {
+      await tx009.rollback();
+    } catch {
+      // reason: rollback throws only when the transaction is already
+      // closed — safe to ignore, `e` below is what the caller needs
+      // (mirrors migration-008's identical rollback guard, tx008 above).
+    }
+    throw e;
+  } finally {
+    tx009.close();
   }
 
   // ─── Parity guard ────────────────────────────────────────────────────────
