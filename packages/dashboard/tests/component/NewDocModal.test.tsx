@@ -366,4 +366,149 @@ describe("NewDocModal", () => {
       expect(screen.getByLabelText(/Title/)).not.toBeDisabled();
     });
   });
+
+  // ─── ISSUE-004 — searchable parent-document picker ─────────────────────────
+  describe("ISSUE-004: searchable parent picker", () => {
+    const plan1 = {
+      id: "01PLAN10000000000000000001",
+      slug: "plan-auth-rollout",
+      type: "plan" as const,
+      title: "Auth rollout plan",
+      status: "approved" as const,
+      updated_at: "2026-07-01T00:00:00.000Z",
+      tags: [],
+      priority: "medium" as const,
+    };
+    const plan2 = {
+      id: "01PLAN20000000000000000002",
+      slug: "plan-billing",
+      type: "plan" as const,
+      title: "Billing plan",
+      status: "approved" as const,
+      updated_at: "2026-07-01T00:00:00.000Z",
+      tags: [],
+      priority: "medium" as const,
+    };
+    const adr1 = {
+      id: "01ADR100000000000000000003",
+      slug: "adr-auth-decision",
+      type: "adr" as const,
+      title: "Auth decision",
+      status: "approved" as const,
+      updated_at: "2026-07-01T00:00:00.000Z",
+      tags: [],
+      priority: "medium" as const,
+    };
+    const docs = [plan1, plan2, adr1];
+
+    describe("happy path", () => {
+      it("filters suggestions by title/slug and excludes a matching doc of an invalid parent type", async () => {
+        const user = userEvent.setup();
+        renderModal({ docs });
+
+        await selectType(user, "task"); // task's only valid parent type is "plan"
+        const parentInput = screen.getByLabelText(/Parent ID/);
+        await user.type(parentInput, "auth");
+
+        // plan1 ("Auth rollout plan") matches both title and parent-type — shown.
+        expect(screen.getByRole("option", { name: "Auth rollout plan — plan-auth-rollout (plan)" })).toBeInTheDocument();
+        // adr1 ("Auth decision") matches the TEXT query but adr is not a valid
+        // parent for task — excluded (no new client-side rule, reuses
+        // @lore/core's isValidParentType).
+        expect(screen.queryByText(/Auth decision/)).not.toBeInTheDocument();
+        // plan2 ("Billing plan") doesn't match the "auth" query — excluded.
+        expect(screen.queryByText(/Billing plan/)).not.toBeInTheDocument();
+      });
+
+      it("selecting a suggestion fills the field with that doc's slug, which then submits", async () => {
+        const user = userEvent.setup();
+        const { onCreate } = renderModal({ docs });
+
+        await selectType(user, "task");
+        await user.type(screen.getByLabelText(/Title/), "My Task");
+        await user.type(screen.getByLabelText(/Parent ID/), "auth");
+        await user.click(screen.getByRole("option", { name: "Auth rollout plan — plan-auth-rollout (plan)" }));
+
+        expect(screen.getByLabelText(/Parent ID/)).toHaveValue("plan-auth-rollout");
+
+        await user.type(screen.getByLabelText(/Plan ID/), "01PLAN10000000000000000001");
+        await user.click(screen.getByRole("button", { name: "Create" }));
+
+        expect(onCreate).toHaveBeenCalledTimes(1);
+        expect(onCreate.mock.calls[0]?.[0].parent_id).toBe("plan-auth-rollout");
+      });
+    });
+
+    describe("boundary: raw paste still submits", () => {
+      it("a typed/pasted parent id that matches no suggestion is still fully submittable", async () => {
+        const user = userEvent.setup();
+        const { onCreate } = renderModal({ docs });
+
+        await selectType(user, "task");
+        await user.type(screen.getByLabelText(/Title/), "My Task");
+        // Paste-equivalent: type a raw ULID that isn't in `docs` at all.
+        await user.type(screen.getByLabelText(/Parent ID/), "01ZZZRAWPASTE00000000000001");
+        await user.type(screen.getByLabelText(/Plan ID/), "01PLAN10000000000000000001");
+        await user.click(screen.getByRole("button", { name: "Create" }));
+
+        expect(onCreate).toHaveBeenCalledTimes(1);
+        expect(onCreate.mock.calls[0]?.[0].parent_id).toBe("01ZZZRAWPASTE00000000000001");
+      });
+
+      it("with no docs supplied at all (default []), the field stays a plain typable/submittable input", async () => {
+        const user = userEvent.setup();
+        const { onCreate } = renderModal(); // no `docs` override — defaults to []
+
+        await selectType(user, "task");
+        await user.type(screen.getByLabelText(/Title/), "My Task");
+        await user.type(screen.getByLabelText(/Parent ID/), "01HPARENT000000000000000001");
+        await user.type(screen.getByLabelText(/Plan ID/), "01PLAN10000000000000000001");
+        await user.click(screen.getByRole("button", { name: "Create" }));
+
+        expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+        expect(onCreate).toHaveBeenCalledTimes(1);
+        expect(onCreate.mock.calls[0]?.[0].parent_id).toBe("01HPARENT000000000000000001");
+      });
+    });
+
+    describe("state: keyboard path", () => {
+      it("ArrowDown moves aria-activedescendant onto a suggestion and Enter selects the highlighted one", async () => {
+        const user = userEvent.setup();
+        renderModal({ docs });
+
+        await selectType(user, "task");
+        const parentInput = screen.getByLabelText(/Parent ID/);
+        // "auth" matches exactly one valid-parent-type candidate (plan1) —
+        // adr1 also contains "auth" in its title but is excluded (wrong
+        // parent type), and plan2 doesn't match at all.
+        await user.type(parentInput, "auth");
+        expect(parentInput).toHaveAttribute("aria-expanded", "true");
+        const onlyOption = screen.getByRole("option", { name: "Auth rollout plan — plan-auth-rollout (plan)" });
+
+        await user.keyboard("{ArrowDown}");
+        expect(parentInput).toHaveAttribute("aria-activedescendant", onlyOption.id);
+
+        await user.keyboard("{Enter}");
+        expect(parentInput).toHaveValue("plan-auth-rollout");
+        expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      });
+
+      it("Escape closes only the suggestion popup — the modal itself only closes on a SECOND Escape", async () => {
+        const user = userEvent.setup();
+        const { onClose } = renderModal({ docs });
+
+        await selectType(user, "task");
+        const parentInput = screen.getByLabelText(/Parent ID/);
+        await user.type(parentInput, "plan");
+        expect(screen.getByRole("listbox")).toBeInTheDocument();
+
+        await user.keyboard("{Escape}");
+        expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+        expect(onClose).not.toHaveBeenCalled();
+
+        await user.keyboard("{Escape}");
+        expect(onClose).toHaveBeenCalledTimes(1);
+      });
+    });
+  });
 });

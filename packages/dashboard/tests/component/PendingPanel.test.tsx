@@ -24,7 +24,7 @@
  *   BOUNDARY — an empty pending queue renders "No documents pending review."
  *     and never calls apiGetJudgments; a queue of 10 docs still only renders
  *     8 rows and apiGetJudgments is called exactly 8 times (bounded fan-out).
- *   ERROR — apiGetPendingReview rejecting renders the failure message.
+ *   ERROR — fetchReviewQueueRows rejecting renders the failure message.
  *   STATE — loading state shows skeletons before data resolves; clicking a
  *     title calls onNavigate with that doc's id.
  *   REGRESSION — n/a (no known prior regression to pin here).
@@ -44,7 +44,7 @@
  *     of its own distinct from the existing panel-limit boundary tests.
  *   ERROR — N/A: meta rendering is synchronous over already-fetched row data; the
  *     existing "error" describe block below covers this component's one async failure
- *     surface (apiGetPendingReview rejecting).
+ *     surface (fetchReviewQueueRows rejecting).
  *   STATE — n/a: the meta badge is static per fetched row, no interactive transition.
  *   REGRESSION — a meta-carrying row remains clickable and still calls onNavigate with
  *     the correct id (meta rendering doesn't swallow or shift the click target).
@@ -55,21 +55,24 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { PendingDocRow } from "../../src/lib/api";
 import type { ReviewJudgment } from "@lore/core";
 
 vi.mock("@/lib/api", () => ({
-  apiGetPendingReview: vi.fn(),
   apiGetJudgments: vi.fn(),
 }));
+vi.mock("@/lib/review-queue", () => ({
+  fetchReviewQueueRows: vi.fn(),
+}));
 
-import { apiGetPendingReview, apiGetJudgments } from "@/lib/api";
+import { apiGetJudgments } from "@/lib/api";
+import { fetchReviewQueueRows } from "@/lib/review-queue";
+import type { ReviewQueueDocRow } from "@/lib/review-queue";
 import { PendingPanel } from "../../src/components/PendingPanel";
 
-const mockedGetPending = vi.mocked(apiGetPendingReview);
+const mockedFetchQueue = vi.mocked(fetchReviewQueueRows);
 const mockedGetJudgments = vi.mocked(apiGetJudgments);
 
-function makePendingDoc(overrides: Partial<PendingDocRow> & { id: string }): PendingDocRow {
+function makePendingDoc(overrides: Partial<ReviewQueueDocRow> & { id: string }): ReviewQueueDocRow {
   return {
     type: "spec",
     title: "Untitled",
@@ -104,7 +107,7 @@ function renderWithClient(ui: React.ReactElement) {
 }
 
 beforeEach(() => {
-  mockedGetPending.mockReset();
+  mockedFetchQueue.mockReset();
   mockedGetJudgments.mockReset();
 });
 
@@ -113,7 +116,7 @@ describe("PendingPanel", () => {
     it("renders two pending docs with their distinct judgment badges", async () => {
       const doc1 = makePendingDoc({ id: "01HDOC00000000000000000001", title: "Doc One", version: 2 });
       const doc2 = makePendingDoc({ id: "01HDOC00000000000000000002", title: "Doc Two", version: 5 });
-      mockedGetPending.mockResolvedValue([doc1, doc2]);
+      mockedFetchQueue.mockResolvedValue([doc1, doc2]);
       mockedGetJudgments.mockImplementation(async (_project: string | null, docId: string) => {
         if (docId === doc1.id) return { latest: makeJudgment({ doc_version: 2, decision: "approve" }), history: [] };
         return { latest: null, history: [] };
@@ -134,7 +137,7 @@ describe("PendingPanel", () => {
 
   describe("boundary: empty queue", () => {
     it('renders "No documents pending review." and never calls apiGetJudgments', async () => {
-      mockedGetPending.mockResolvedValue([]);
+      mockedFetchQueue.mockResolvedValue([]);
 
       renderWithClient(<PendingPanel />);
 
@@ -148,7 +151,7 @@ describe("PendingPanel", () => {
       const docs = Array.from({ length: 10 }, (_, i) =>
         makePendingDoc({ id: `01HDOC0000000000000000${String(i).padStart(4, "0")}`, title: `Doc ${i}` }),
       );
-      mockedGetPending.mockResolvedValue(docs);
+      mockedFetchQueue.mockResolvedValue(docs);
       mockedGetJudgments.mockResolvedValue({ latest: null, history: [] });
 
       renderWithClient(<PendingPanel />);
@@ -162,8 +165,8 @@ describe("PendingPanel", () => {
   });
 
   describe("error", () => {
-    it("renders a failure message when apiGetPendingReview rejects", async () => {
-      mockedGetPending.mockRejectedValue(new Error("network down"));
+    it("renders a failure message when fetchReviewQueueRows rejects", async () => {
+      mockedFetchQueue.mockRejectedValue(new Error("network down"));
 
       renderWithClient(<PendingPanel />);
 
@@ -173,8 +176,8 @@ describe("PendingPanel", () => {
 
   describe("state", () => {
     it("shows loading skeletons before data resolves", async () => {
-      let resolvePending!: (docs: PendingDocRow[]) => void;
-      mockedGetPending.mockImplementation(
+      let resolvePending!: (docs: ReviewQueueDocRow[]) => void;
+      mockedFetchQueue.mockImplementation(
         () =>
           new Promise((resolve) => {
             resolvePending = resolve;
@@ -191,7 +194,7 @@ describe("PendingPanel", () => {
 
     it("calls onNavigate with the clicked document's id", async () => {
       const doc1 = makePendingDoc({ id: "01HDOC00000000000000000001", title: "Doc One" });
-      mockedGetPending.mockResolvedValue([doc1]);
+      mockedFetchQueue.mockResolvedValue([doc1]);
       mockedGetJudgments.mockResolvedValue({ latest: null, history: [] });
       const onNavigate = vi.fn();
       const user = userEvent.setup();
@@ -220,7 +223,7 @@ describe("PendingPanel", () => {
           title: "Adr Row",
           meta: { t: "adr", decision_status: "accepted" },
         });
-        mockedGetPending.mockResolvedValue([planDoc, adrDoc]);
+        mockedFetchQueue.mockResolvedValue([planDoc, adrDoc]);
         mockedGetJudgments.mockResolvedValue({ latest: null, history: [] });
 
         renderWithClient(<PendingPanel />);
@@ -239,7 +242,7 @@ describe("PendingPanel", () => {
           type: "spec",
           title: "No Meta Row",
         });
-        mockedGetPending.mockResolvedValue([doc]);
+        mockedFetchQueue.mockResolvedValue([doc]);
         mockedGetJudgments.mockResolvedValue({ latest: null, history: [] });
 
         renderWithClient(<PendingPanel />);
@@ -259,7 +262,7 @@ describe("PendingPanel", () => {
           title: "Meta Row",
           meta: { t: "knowledge", sub_type: "reference" },
         });
-        mockedGetPending.mockResolvedValue([doc]);
+        mockedFetchQueue.mockResolvedValue([doc]);
         mockedGetJudgments.mockResolvedValue({ latest: null, history: [] });
         const onNavigate = vi.fn();
         const user = userEvent.setup();
@@ -289,7 +292,7 @@ describe("PendingPanel", () => {
           evidence_fail: 0,
         },
       });
-      mockedGetPending.mockResolvedValue([doc]);
+      mockedFetchQueue.mockResolvedValue([doc]);
       mockedGetJudgments.mockResolvedValue({ latest: null, history: [] });
 
       renderWithClient(<PendingPanel />);
@@ -321,7 +324,7 @@ describe("PendingPanel", () => {
         title: "Short Title",
         meta: { t: "task", claimed_by: "agent:worker-sse", evidence_pass: 0, evidence_fail: 0 },
       });
-      mockedGetPending.mockResolvedValue([doc]);
+      mockedFetchQueue.mockResolvedValue([doc]);
       mockedGetJudgments.mockResolvedValue({ latest: null, history: [] });
 
       renderWithClient(<PendingPanel />);
@@ -356,7 +359,7 @@ describe("PendingPanel", () => {
         title: "Research — SSE fan-out capacity",
         meta: { t: "knowledge", sub_type: "research" },
       });
-      mockedGetPending.mockResolvedValue([doc]);
+      mockedFetchQueue.mockResolvedValue([doc]);
       mockedGetJudgments.mockResolvedValue({ latest: null, history: [] });
 
       renderWithClient(<PendingPanel />);
@@ -375,7 +378,7 @@ describe("PendingPanel", () => {
         type: "spec",
         title: "Escalated Spec Row",
       });
-      mockedGetPending.mockResolvedValue([doc]);
+      mockedFetchQueue.mockResolvedValue([doc]);
       mockedGetJudgments.mockResolvedValue({
         latest: makeJudgment({ decision: "escalate", blocking_questions: ["Is this in scope?"] }),
         history: [],
@@ -398,7 +401,7 @@ describe("PendingPanel", () => {
         title: "Research — SSE fan-out capacity",
         meta: { t: "knowledge", sub_type: "research" },
       });
-      mockedGetPending.mockResolvedValue([doc]);
+      mockedFetchQueue.mockResolvedValue([doc]);
       mockedGetJudgments.mockResolvedValue({ latest: null, history: [] });
 
       renderWithClient(<PendingPanel />);
@@ -406,6 +409,49 @@ describe("PendingPanel", () => {
       const title = await screen.findByText("Research — SSE fan-out capacity");
       expect(title.textContent?.startsWith("Research —")).toBe(true);
       expect((title.textContent ?? "").length).toBeGreaterThanOrEqual(10);
+    });
+  });
+
+  describe("ISSUE-008: draft + in-review merged queue", () => {
+    it("renders both an in-review row and a draft row, each with a distinguishing status label", async () => {
+      const inReviewDoc = makePendingDoc({
+        id: "01HDOC00000000000000000010",
+        title: "In Review Row",
+        status: "in-review",
+      });
+      const draftDoc = makePendingDoc({
+        id: "01HDOC00000000000000000011",
+        title: "Draft Row",
+        status: "draft",
+      });
+      // reason: PendingPanel never independently re-sorts — the merge/order
+      // decision belongs entirely to fetchReviewQueueRows (unit-tested in
+      // tests/unit/lib/review-queue.test.ts). Mocking it here already
+      // in-review-first proves the panel renders rows in EXACTLY the order
+      // it receives them.
+      mockedFetchQueue.mockResolvedValue([inReviewDoc, draftDoc]);
+      mockedGetJudgments.mockResolvedValue({ latest: null, history: [] });
+
+      renderWithClient(<PendingPanel />);
+
+      await screen.findByText("In Review Row");
+      await screen.findByText("Draft Row");
+      expect(screen.getByText("in-review")).toBeInTheDocument();
+      expect(screen.getByText("draft")).toBeInTheDocument();
+
+      // Row order in the DOM matches the mocked (already-merged) order —
+      // no independent client-side re-sort on top.
+      const titles = screen.getAllByText(/Row$/).map((el) => el.textContent);
+      expect(titles).toEqual(["In Review Row", "Draft Row"]);
+    });
+
+    it("passes fetchReviewQueueRows a project argument but no author/type/since opts by default (no behavior change for existing callers)", async () => {
+      mockedFetchQueue.mockResolvedValue([]);
+
+      renderWithClient(<PendingPanel />);
+
+      await screen.findByText("No documents pending review.");
+      expect(mockedFetchQueue).toHaveBeenCalledWith(null);
     });
   });
 });

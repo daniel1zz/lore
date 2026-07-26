@@ -6,8 +6,14 @@
  *   questions, adjudicate buttons) — this panel is read-only and capped.
  * Public surface: PendingPanel, PendingPanelProps
  * Invariants:
- *   - Shows at most PENDING_PANEL_LIMIT docs, in the order `GET /api/review/pending`
- *     returns them (no independent client-side sort — same queue order as `lore pending`).
+ *   - Rows come from {@link fetchReviewQueueRows} — `draft` AND `in-review`
+ *     docs, `in-review` sorted ahead of `draft` (ADR
+ *     adr-dashboard-review-queues-include-in-review-docs-ahead-of, dogfood
+ *     ISSUE-008). Shows at most PENDING_PANEL_LIMIT rows of that merged,
+ *     already-ordered list — no independent client-side re-sort on top.
+ *   - Every row renders a read-only `StatusPill` (no `onTransition`) so the
+ *     two included statuses are visually distinguishable — the SAME status
+ *     color-coding `DocDetail`'s header uses, not a bespoke badge.
  *   - Per-doc judgment fetches run in parallel (`Promise.all`), bounded by
  *     PENDING_PANEL_LIMIT so this never becomes an unbounded fan-out.
  *   - Empty queue and fetch-error both render a labeled state, never a blank panel.
@@ -51,11 +57,13 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
-import { apiGetPendingReview, apiGetJudgments } from "@/lib/api";
-import type { PendingDocRow } from "@/lib/api";
+import { apiGetJudgments } from "@/lib/api";
+import { fetchReviewQueueRows } from "@/lib/review-queue";
+import type { ReviewQueueDocRow } from "@/lib/review-queue";
 import type { ReviewJudgment } from "@lore/core";
 import { JudgmentBadge } from "@/components/judgment-badge";
 import { formatTypeMetaLabel, metaBadgeVariant } from "@/lib/type-meta-label";
+import { StatusPill } from "@/components/StatusPill";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { queryKeys } from "@/lib/project-api";
@@ -70,12 +78,12 @@ export interface PendingPanelProps {
 }
 
 interface PendingRow {
-  doc: PendingDocRow;
+  doc: ReviewQueueDocRow;
   judgment: ReviewJudgment | null;
 }
 
 async function fetchPendingWithJudgments(project: string | null): Promise<PendingRow[]> {
-  const docs = (await apiGetPendingReview(project)).slice(0, PENDING_PANEL_LIMIT);
+  const docs = (await fetchReviewQueueRows(project)).slice(0, PENDING_PANEL_LIMIT);
   const judgments = await Promise.all(docs.map((doc) => apiGetJudgments(project, doc.id)));
   return docs.map((doc, index) => ({ doc, judgment: judgments[index]?.latest ?? null }));
 }
@@ -124,6 +132,9 @@ export function PendingPanel({ project = null, onNavigate }: PendingPanelProps):
                 <Badge variant="outline" className="text-xs shrink-0">
                   {doc.type}
                 </Badge>
+                <span className="shrink-0">
+                  <StatusPill status={doc.status} />
+                </span>
                 <button
                   type="button"
                   className="min-w-[10ch] flex-1 truncate text-left text-primary hover:underline"

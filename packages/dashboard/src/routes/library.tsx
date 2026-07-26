@@ -299,6 +299,10 @@ export function LibraryPageBody({
           isPending={isCreating}
           error={createError}
           onClose={() => setShowCreateModal(false)}
+          // reason: ISSUE-004 — reuse this page's ALREADY-fetched unfiltered
+          // list (the tag-vocabulary source above) as the parent-picker's
+          // suggestion pool; no extra network request issued by the modal.
+          docs={unfilteredData?.docs ?? []}
         />
       )}
     </div>
