@@ -2556,6 +2556,138 @@
     "01KXG6G6CTXWHYC6R1K04AK6Z6": {
       "human_id": "KN-160",
       "file_path": "docs/requirements/knowledge/KN-160-convergence-backfill-code-anchor-adoption-armed-ga.md"
+    },
+    "01KYEQXPMAQHKEK65MPE6FCCXS": {
+      "human_id": "TASK-310",
+      "file_path": "docs/requirements/task/TASK-310-spec-promote-base-1-ac-rule-is-spec-kind-agnostic.md"
+    },
+    "01KYEQXP754K8GQST0KCDAC5XF": {
+      "human_id": "TASK-311",
+      "file_path": "docs/requirements/task/TASK-311-attestation-floor-feeding-pack-names-tasks-but-the.md"
+    },
+    "01KYEQWT5RAAWECDR705EGK23F": {
+      "human_id": "KN-161",
+      "file_path": "docs/requirements/knowledge/KN-161-handoff-agent-main-orchestrator.md"
+    },
+    "01KYEQWSSE2K5XNWGYSNB58SCS": {
+      "human_id": "KN-162",
+      "file_path": "docs/requirements/knowledge/KN-162-spec-080-triple-numbering-collision-resolution.md"
+    },
+    "01KYEQV4NKKREAG94F9FGGW90K": {
+      "human_id": "KN-163",
+      "file_path": "docs/requirements/knowledge/KN-163-assessment-implementation-spec-080-bootstrap.md"
+    },
+    "01KYEQQQV56VRQ80V3TE5SMQM4": {
+      "human_id": "KN-164",
+      "file_path": "docs/requirements/knowledge/KN-164-assessment-implementation-spec-080-prd-as-outline.md"
+    },
+    "01KYEQN3PJMGA4KMEFVXDF2V6Z": {
+      "human_id": "KN-165",
+      "file_path": "docs/requirements/knowledge/KN-165-assessment-implementation-spec-080-prd-as-outline.md"
+    },
+    "01KYEQGSDA691XE0Q0QRRNXHNW": {
+      "human_id": "KN-166",
+      "file_path": "docs/requirements/knowledge/KN-166-uat-plan-implementation-spec-080-prd-as-outline.md"
+    },
+    "01KYEQ8384Y5XZ7XDS0ZF0W6Y7": {
+      "human_id": "KN-167",
+      "file_path": "docs/requirements/knowledge/KN-167-assessment-implementation-spec-081-gate-skip.md"
+    },
+    "01KYEK3FV5Y46J2CM72EGFC69V": {
+      "human_id": "SPEC-091",
+      "file_path": "docs/requirements/spec/SPEC-091-081-audit-hardening-part-2-gate-skip-observability.md"
+    },
+    "01KYEK43VMSMWCHY42N4HD5TXM": {
+      "human_id": "PLAN-075",
+      "file_path": "docs/requirements/plan/PLAN-075-implementation-spec-081-gate-skip-observability-pu.md"
+    },
+    "01KYEK4502H5XAXQ7TARD303WM": {
+      "human_id": "TASK-312",
+      "file_path": "docs/requirements/task/TASK-312-t2-pre-push-chain-check-both-hook-copies-parity-te.md"
+    },
+    "01KYEK44KKVSXP311EX61EAB2B": {
+      "human_id": "TASK-313",
+      "file_path": "docs/requirements/task/TASK-313-t1-gateenforcer-skip-audit-port-lore-gate-env-bypa.md"
+    },
+    "01KYEK8J63TNRFVJPKB3RAJTVN": {
+      "human_id": "TASK-314",
+      "file_path": "docs/requirements/task/TASK-314-dashboard-declared-phase-rendering-mirror-server.md"
+    },
+    "01KYENFCAVX7C37T3689DA53K2": {
+      "human_id": "ADR-008",
+      "file_path": "docs/requirements/adr/ADR-008-spec-kind-as-a-field-on-spec-taxonomy-option-c-not.md"
+    },
+    "01KYENFBYX90AXT5E1NBPATMXT": {
+      "human_id": "ADR-009",
+      "file_path": "docs/requirements/adr/ADR-009-dashboard-positioned-as-general-admin-console-owne.md"
+    },
+    "01KYENED6N2NT4Y5GQT67ECBY5": {
+      "human_id": "SPEC-092",
+      "file_path": "docs/requirements/spec/SPEC-092-output-contract-document-taxonomy-domain-overview.md"
+    },
+    "01KYENECTCAJDTCJFTJW94KA77": {
+      "human_id": "SPEC-093",
+      "file_path": "docs/requirements/spec/SPEC-093-provenance-domain-overview.md"
+    },
+    "01KYEK3F2S861RYZ6C3NV3Y55E": {
+      "human_id": "TASK-315",
+      "file_path": "docs/requirements/task/TASK-315-backend-attribution-and-phase-projection-cookie-wr.md"
+    },
+    "01KYEN775Y0F3M8M71P24Z8J1R": {
+      "human_id": "SPEC-094",
+      "file_path": "docs/requirements/spec/SPEC-094-autonomous-feedback-loop-ai-review-data-driven-sel.md"
+    },
+    "01KYEN7WD20P4EV6ZHKTZD60JP": {
+      "human_id": "SPEC-095",
+      "file_path": "docs/requirements/spec/SPEC-095-session-layer-multi-session-collaboration-context.md"
+    },
+    "01KYEN7XX5J25PEY9X11SH836G": {
+      "human_id": "SPEC-096",
+      "file_path": "docs/requirements/spec/SPEC-096-distribution-adoption-phased-spike-gated-one-step.md"
+    },
+    "01KYEN7ZDFF9CEE6ZN6J48BXM2": {
+      "human_id": "SPEC-097",
+      "file_path": "docs/requirements/spec/SPEC-097-phase-execution-model-plan-phase-checklist-superse.md"
+    },
+    "01KYEN80YH9F95KVTEPMJKHRBX": {
+      "human_id": "SPEC-098",
+      "file_path": "docs/requirements/spec/SPEC-098-extension-hooks-system-direction-pointer-only-no.md"
+    },
+    "01KYEN82CATW2VDHSB9RR9XTQG": {
+      "human_id": "SPEC-099",
+      "file_path": "docs/requirements/spec/SPEC-099-upstream-issue-feedback-loop-consumer-reported-def.md"
+    },
+    "01KYEN83SNWBSPY495FRHVM0XM": {
+      "human_id": "SPEC-100",
+      "file_path": "docs/requirements/spec/SPEC-100-dashboard-console-admin-console-evolution-adjudica.md"
+    },
+    "01KYEN857ZRXXQJN58YTTCVE4F": {
+      "human_id": "SPEC-101",
+      "file_path": "docs/requirements/spec/SPEC-101-dashboard-multi-project-single-instance-switcher-o.md"
+    },
+    "01KYEN3EX8HRGQG24HM8QZ2ETY": {
+      "human_id": "SPEC-102",
+      "file_path": "docs/requirements/spec/SPEC-102-memory-hygiene-knowledge-trustworthiness-over-time.md"
+    },
+    "01KYEMQK4YXBFB5S49DCCMBS0H": {
+      "human_id": "KN-168",
+      "file_path": "docs/requirements/knowledge/KN-168-triple-spec-080-numbering-collision-across-concurr.md"
+    },
+    "01KYEK3E0SF09WG5SHSHJ8JV9S": {
+      "human_id": "TASK-316",
+      "file_path": "docs/requirements/task/TASK-316-dashboard-frontend-ux-pair-newdocmodal-searchable.md"
+    },
+    "01KYEK2XMV3QNX6CVG0JD6ZGMC": {
+      "human_id": "ADR-010",
+      "file_path": "docs/requirements/adr/ADR-010-dashboard-review-queues-include-in-review-docs-ahe.md"
+    },
+    "01KYEK2X8QZKC214ZFFD69SZS7": {
+      "human_id": "ADR-011",
+      "file_path": "docs/requirements/adr/ADR-011-planphasestatus-projects-declared-extra-phases-alo.md"
+    },
+    "01KYEK2WWA8SRETJVYVTBNSTNE": {
+      "human_id": "ADR-012",
+      "file_path": "docs/requirements/adr/ADR-012-dashboard-cookie-session-writes-attribute-author-v.md"
     }
   }
 }
