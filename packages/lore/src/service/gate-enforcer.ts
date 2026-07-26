@@ -30,14 +30,30 @@
  *   real `GateEnforcer` and wires it into all three services — mirrors the existing
  *   `Telemetry` / `claimTtlMinutes?` optional-DI shape those same three services already
  *   use for the identical "absent in bare tests, present in production" reason.
- * @invariant `enforce()` is a PURE function of `(this.config, checkpoint, ctx)` — no
- *   store access, no IO, no `bun:sqlite`, no wall-clock reads. Resolving a candidate's
- *   parent-doc type, counting a spec's declared acceptance criteria, and walking a
- *   plan/task's ancestor-spec chain are all the CALLING service's responsibility
- *   (`CorpusService._createImpl`/`set`, `ReviewService.approve`,
+ * @invariant `enforce()`'s RETURN VALUE is a PURE function of `(this.config, checkpoint,
+ *   ctx)` — no store access, no IO, no `bun:sqlite`, no wall-clock read EVER
+ *   influences what it returns, and it stays fully SYNCHRONOUS (no new `await`). Resolving
+ *   a candidate's parent-doc type, counting a spec's declared acceptance criteria, and
+ *   walking a plan/task's ancestor-spec chain are all the CALLING service's
+ *   responsibility (`CorpusService._createImpl`/`set`, `ReviewService.approve`,
  *   `TaskWorkflowService.claim`) — the exact same division of labor `gate.ts` already
  *   has between its own IO-performing `runXGate` functions and `checkpointRegistry`'s
  *   pure `check`/`feed` callbacks.
+ * @invariant SPEC-080 G4 (gate-skip observability) is a deliberate, BOUNDED exception
+ *   layered on top of the invariant above: when a checkpoint is disabled by config,
+ *   `enforce()` additionally fires a BEST-EFFORT, FIRE-AND-FORGET `gate_skipped` audit
+ *   write through the optional `recordGateSkip` constructor port (see `recordSkip()`
+ *   below). The write is never awaited — `enforce()`'s own call sites (`CorpusService`,
+ *   `ReviewService`, `TaskWorkflowService`, `PhaseWorkflowService` — none of them in
+ *   this task's file anchors) keep calling it synchronously, unchanged — and its
+ *   outcome (success, a rejected promise, or a synchronously-thrown error from a
+ *   misbehaving port) can NEVER change what `enforce()` returns: a write failure
+ *   degrades to a `process.stderr` warning only (D1, "observability never changes gate
+ *   outcomes"). When `recordGateSkip` is `undefined` (every bare test construction —
+ *   the ~3700 unit tests this class's OTHER invariant above already documents),
+ *   `recordSkip()` returns immediately without reading the wall clock, `process.env`,
+ *   or touching the port at all — `enforce()` stays byte-identical to pre-SPEC-080
+ *   behavior for every one of those constructions.
  * @invariant The `LoreError` this returns is always `VALIDATION_ERROR` — the existing
  *   code every other cross-entity / business-rule rejection in this codebase already
  *   uses (see `CorpusService._createImpl`'s phase/spec_kind cross-entity checks). No new
@@ -58,6 +74,7 @@ import {
   resolveRequiresUatGateEnabled,
   resolveVerificationProfile,
   resolveAttestationMinRatio,
+  type AuditEntry,
   type LoreConfig,
   type LoreError,
   type Result,
@@ -65,6 +82,7 @@ import {
   type VerificationProfile,
 } from "@lore/core";
 import type { PlanBundle } from "@lore/core";
+import { resolveActorWithSource } from "@lore/core/node";
 import {
   checkpointRegistry,
   isCheckpointBlocked,
@@ -72,6 +90,110 @@ import {
   type GateCheckpoint,
   type GateContext,
 } from "./checkpoint-registry.js";
+
+/**
+ * Which escape hatch produced a `gate_skipped` audit entry (SPEC-080 G4 D2) —
+ * `"config_disabled"` when `workflow.gates.<checkpoint>.enabled === false` short-
+ * circuited `GateEnforcer.enforce()` (this module); `"env_bypass"` when
+ * `LORE_GATE_BYPASS=1` short-circuited `../adapters/cli/commands/gate.ts` BEFORE it
+ * ever reached this class (the CLI's own escape hatch — `GateEnforcer` never honors
+ * `LORE_GATE_BYPASS` itself, see this module's header). Both mechanisms share this
+ * one entry shape (`buildGateSkipAuditEntry` below) so a `lore audit` reader never
+ * has to reconcile two independently-drifting `details` shapes for "a gate was
+ * skipped."
+ */
+export type GateSkipMechanism = "config_disabled" | "env_bypass";
+
+/**
+ * Narrow injected port for writing a `gate_skipped` audit entry — bound to
+ * `store.appendAuditEntry` in `app.ts` (SPEC-080 G4), same narrow-port shape as
+ * `service/config-service.ts`'s `AppendConfigAuditEntry`. Kept as a bare function
+ * type (not the whole `StoreInterface`) so `GateEnforcer` gains no new IO surface
+ * beyond "append one audit row" — mirrors `GateDependencies.getPlanBundle`'s
+ * identically-narrow shape one field up.
+ */
+export type RecordGateSkip = (entry: AuditEntry) => Promise<Result<void, LoreError>>;
+
+/**
+ * Fixed `session_id` sentinel for every `gate_skipped` audit row — a gate skip has
+ * no owning doc/session identity to anchor to (the checkpoint may run before any
+ * candidate doc exists, e.g. `spec-create`), so every row shares this sentinel
+ * rather than inventing a per-call value that would carry no real grouping meaning
+ * — same rationale as `config-service.ts`'s `CONFIG_AUDIT_SESSION_ID`.
+ */
+const GATE_SKIP_AUDIT_SESSION_ID = "gate-skip";
+
+/** Audit action string stamped on every `gate_skipped` entry (SPEC-080 G4 D2). */
+const GATE_SKIP_AUDIT_ACTION = "gate_skipped";
+
+/**
+ * Pure builder for a `gate_skipped` audit entry — the ONE shape both this module's
+ * config-disabled skip and the CLI's `LORE_GATE_BYPASS=1` escape hatch
+ * (`../adapters/cli/gate-bypass-audit.js`) produce, so `lore audit` never has to
+ * reconcile two independently-authored `gate_skipped` shapes. Takes `nowIso`/`actor`
+ * as plain parameters rather than reading the wall clock or resolving the actor
+ * chain itself — this function stays pure and importable from a vitest-safe module
+ * (the CLI bypass path is exercised by `tests/integration/cli/gate-bypass-audit.test.ts`,
+ * which must never import `bun:sqlite`).
+ *
+ * @param checkpoint - Which checkpoint was skipped.
+ * @param mechanism - Which escape hatch produced the skip.
+ * @param nowIso - ISO 8601 timestamp, resolved by the caller (`new Date().toISOString()`).
+ * @param actor - Resolved actor identity, e.g. `resolveActorWithSource(undefined,
+ *   process.env).actor` (the SAME chain `CorpusService`'s SPEC-079 G2 writes use).
+ * @param target - The target doc's id/slug as the calling checkpoint's `GateContext`
+ *   supplied it (`specIdOrSlug`/`targetIdOrSlug`), when one was available — absent
+ *   for checkpoints gating a not-yet-created candidate (e.g. `spec-create`).
+ * @returns A ready-to-append `AuditEntry` — `doc_id`/`details.target` both omitted
+ *   (never a placeholder) when `target` is `undefined`.
+ * @example
+ * buildGateSkipAuditEntry("task-claim", "config_disabled", "2026-07-26T00:00:00Z", "alice", "task-x");
+ *   // => { timestamp: "2026-07-26T00:00:00Z", actor: "alice", session_id: "gate-skip",
+ *   //      action: "gate_skipped", doc_id: "task-x",
+ *   //      details: { checkpoint: "task-claim", mechanism: "config_disabled", target: "task-x" } }
+ */
+export function buildGateSkipAuditEntry(
+  checkpoint: GateCheckpoint,
+  mechanism: GateSkipMechanism,
+  nowIso: string,
+  actor: string,
+  target?: string,
+): AuditEntry {
+  return {
+    timestamp: nowIso,
+    actor,
+    session_id: GATE_SKIP_AUDIT_SESSION_ID,
+    action: GATE_SKIP_AUDIT_ACTION,
+    ...(target !== undefined ? { doc_id: target } : {}),
+    details: {
+      checkpoint,
+      mechanism,
+      ...(target !== undefined ? { target } : {}),
+    },
+  };
+}
+
+/**
+ * Formats an unknown thrown/rejected value as a human-readable one-line reason —
+ * shared by this module's `recordSkip()` and the CLI's `LORE_GATE_BYPASS=1` bypass
+ * path (`../adapters/cli/gate-bypass-audit.js`), both of which must degrade an
+ * arbitrary caught value (an `Error`, a string, anything) to a stderr-printable
+ * reason without ever throwing themselves.
+ */
+export function describeThrown(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Formats a `LoreError` as a human-readable one-line reason — `LoreError` is a
+ * discriminated union and not every variant carries a `message` field (e.g.
+ * `DOC_NOT_FOUND` only has `id`/`suggestions`), so this narrows the same way
+ * `adapters/cli/loader.ts`'s existing `"message" in globalResult.error` check
+ * already does, falling back to the bare `code` when no `message` is present.
+ */
+export function describeLoreError(error: LoreError): string {
+  return "message" in error ? error.message : error.code;
+}
 
 /**
  * The gate-related constructor dependency bundle for `ReviewService` and
@@ -109,8 +231,18 @@ export class GateEnforcer {
    *   does. Not pre-resolved into per-checkpoint booleans at construction time: a
    *   single stored config reference lets one `GateEnforcer` instance serve all five
    *   checkpoints without re-deriving anything at construction.
+   * @param recordGateSkip - OPTIONAL SPEC-080 G4 port for auditing a config-disabled
+   *   skip — wired ONLY in `app.ts`'s production composition root
+   *   (`store.appendAuditEntry.bind(store)`, the exact `RecordGateSkip` shape).
+   *   Every pre-existing bare `new GateEnforcer(config)` construction (every unit
+   *   test in this codebase) omits it, so `enforce()`'s config-disabled branch stays
+   *   a zero-IO synchronous early return, byte-identical to pre-SPEC-080 behavior —
+   *   see `recordSkip()`'s own doc comment and this class's SPEC-080 module invariant.
    */
-  constructor(private readonly config: LoreConfig | undefined) {}
+  constructor(
+    private readonly config: LoreConfig | undefined,
+    private readonly recordGateSkip?: RecordGateSkip,
+  ) {}
 
   /**
    * Runs `checkpoint`'s deterministic predicates (`checkpointRegistry[checkpoint].check`)
@@ -131,6 +263,11 @@ export class GateEnforcer {
    */
   enforce(checkpoint: GateCheckpoint, ctx: GateContext): Result<void, LoreError> {
     if (!resolveGateEnabled(this.config, checkpoint)) {
+      // reason: SPEC-080 G4 — fire-and-forget, best-effort audit trace of the skip.
+      // NEVER awaited (this method must stay synchronous — see the SPEC-080 class
+      // invariant above) and its outcome can never influence the `ok(undefined)`
+      // returned on the very next line.
+      this.recordSkip(checkpoint, ctx, "config_disabled");
       return ok(undefined);
     }
 
@@ -182,6 +319,70 @@ export class GateEnforcer {
       message: `Gate "${checkpoint}" blocked: ${reasons.join(", ")}\n\n${feedText}`,
       value: reasons,
     });
+  }
+
+  /**
+   * SPEC-080 G4 — best-effort, fire-and-forget `gate_skipped` audit write for a
+   * config-disabled checkpoint skip. A no-op (zero IO, no wall-clock/`process.env`
+   * read) when `recordGateSkip` was not wired at construction. Otherwise resolves
+   * the target doc id/slug the calling checkpoint's `ctx` has in hand
+   * (`specIdOrSlug` for `spec-promote`, `targetIdOrSlug` for `plan-promote`/
+   * `task-claim`/`phase-claim`/`plan-close` — `undefined` for `spec-create`, which
+   * gates a not-yet-created candidate with no id of its own yet) and the current
+   * actor via the SAME `resolveActorWithSource` chain `CorpusService`'s SPEC-079 G2
+   * writes use, builds the entry via the shared pure `buildGateSkipAuditEntry`, and
+   * fires the write WITHOUT awaiting it — `enforce()` must stay synchronous (see
+   * the class's SPEC-080 module invariant). Any failure — a rejected promise, a
+   * `Result.err`, or the port throwing synchronously instead of returning a
+   * promise at all — degrades to one `process.stderr` warning line and otherwise
+   * changes nothing: the skip this call is auditing has ALREADY succeeded by the
+   * time this method runs (D1, "observability never changes gate outcomes").
+   *
+   * @param checkpoint - Which checkpoint was skipped.
+   * @param ctx - The `GateContext` the caller built for this `enforce()` call —
+   *   read only for its optional target-id fields, never for predicate state
+   *   (the checkpoint's predicates never even ran on this branch).
+   * @param mechanism - Always `"config_disabled"` from this class's one call site
+   *   (`enforce()`'s early return) — parameterized rather than hardcoded so this
+   *   method and `buildGateSkipAuditEntry` share one signature shape with the CLI
+   *   bypass path's equivalent call, even though that path never runs through
+   *   this instance method (see `../adapters/cli/gate-bypass-audit.js`).
+   */
+  private recordSkip(checkpoint: GateCheckpoint, ctx: GateContext, mechanism: GateSkipMechanism): void {
+    if (this.recordGateSkip === undefined) return;
+
+    const target = ctx.specIdOrSlug ?? ctx.targetIdOrSlug;
+    const nowIso = new Date().toISOString();
+    const actor = resolveActorWithSource(undefined, process.env).actor;
+    const entry = buildGateSkipAuditEntry(checkpoint, mechanism, nowIso, actor, target);
+
+    try {
+      Promise.resolve(this.recordGateSkip(entry))
+        .then((result) => {
+          if (!result.ok) {
+            this.warnGateSkipAuditFailure(checkpoint, describeLoreError(result.error));
+          }
+        })
+        .catch((error: unknown) => {
+          this.warnGateSkipAuditFailure(checkpoint, describeThrown(error));
+        });
+    } catch (error) {
+      // reason: a port that throws SYNCHRONOUSLY (rather than returning a
+      // rejected promise) never reaches the `.catch` above — caught here so a
+      // misbehaving injected port can never propagate out of `enforce()`.
+      this.warnGateSkipAuditFailure(checkpoint, describeThrown(error));
+    }
+  }
+
+  /**
+   * Single stderr-warning formatter for a failed gate-skip audit write (SPEC-080
+   * D1) — kept as one method so every failure branch in `recordSkip()` (rejected
+   * promise, `Result.err`, synchronous throw) prints the identical message shape.
+   */
+  private warnGateSkipAuditFailure(checkpoint: GateCheckpoint, reason: string): void {
+    process.stderr.write(
+      `gate-skip audit not recorded for checkpoint "${checkpoint}": ${reason}\n`,
+    );
   }
 
   /**

@@ -64,10 +64,24 @@
  *     ctx-builder every one of these call sites uses.
  *
  * `LORE_GATE_BYPASS=1` short-circuits to exit 0 before ANY parsing or checking, for
- * ALL FIVE subcommands — an escape hatch for callers that must not be blocked
- * (documented, not silent: every invocation under bypass still goes through the CLI,
- * so it is audit-log-visible at the shell/process level even though this command
- * itself performs no corpus writes).
+ * ALL FIVE subcommands — an escape hatch for callers that must not be blocked. It
+ * keeps its unconditional exit-0 guarantee (SPEC-080 §Design Decisions D3), but now
+ * (SPEC-080 G4) makes ONE best-effort attempt to open the corpus and write a
+ * `gate_skipped` audit entry (mechanism `"env_bypass"`) BEFORE exiting —
+ * `../gate-bypass-audit.js::runGateEnvBypassAudit` holds this decision logic
+ * (never throws, never blocks the exit). When the corpus is unreachable (no
+ * `.lore/lore.db` discoverable, or the store fails to open), it prints one
+ * `gate bypass NOT audited: <reason>` stderr line and STILL exits 0 — the escape
+ * hatch's reliability contract is unchanged, only its silence is removed.
+ *
+ * `.lore/config.yaml`'s `workflow.gates.<checkpoint>.enabled` is a SEPARATE gate-skip
+ * mechanism (mechanism `"config_disabled"`) with its OWN, service-layer-shared audit
+ * trace — see `GateEnforcer.enforce`'s config-disabled branch
+ * (`../../../service/gate-enforcer.js`); this CLI file's `isGateDisabledByConfig`
+ * below is a pre-flight-only check with no service-layer counterpart to reuse, so it
+ * does NOT write a `gate_skipped` entry itself (SPEC-080 §Scope only covers the two
+ * mechanisms named above, and this CLI-side config check is a documented pre-existing
+ * escape hatch distinct from `GateEnforcer`'s own).
  *
  * `.lore/config.yaml`'s `workflow.gates.<checkpoint>.enabled` (SPEC-0XX, `@lore/core`
  * `resolveGateEnabled`) is a SECOND, narrower escape hatch — it disables exactly ONE
@@ -152,6 +166,7 @@ import {
 import type { App } from "../../../app.js";
 import type { AcService } from "../../../service/ac-service.js";
 import type { LoreConfig, LoreError, NewReviewJudgment } from "@lore/core";
+import type { RecordGateSkip } from "../../../service/gate-enforcer.js";
 import {
   renderDocMarkdown,
   resolveParentDoc,
@@ -164,6 +179,53 @@ import { requirePhaseWorkflowService } from "../phase-wiring.js";
 // identical note).
 import { buildReportIssueHint } from "../report-issue-hint.js";
 import { resolveFeedbackUpstreamCfg } from "../report-issue-wiring.js";
+// reason: SPEC-080 G4 — `../gate-bypass-audit.js` is itself vitest-safe (no
+// bun:sqlite import), but this file's OWN use of it needs a real store, hence the
+// direct SQLiteStore import here rather than going through `loadLoreApp()` (which
+// calls `process.exit(1)` on a missing corpus — the bypass path must never do
+// that, see `openBypassRecordGateSkip` below).
+import { SQLiteStore } from "../../../store/sqlite-store.js";
+import { findLoreDbPathQuiet, runGateEnvBypassAudit } from "../gate-bypass-audit.js";
+
+/**
+ * Real `GateBypassAuditDeps.openRecordGateSkip` wiring for the `LORE_GATE_BYPASS=1`
+ * escape hatch (SPEC-080 G4) — deliberately bypasses `loadLoreApp()` (which calls
+ * `process.exit(1)` on a missing/corrupted corpus, breaking this path's own
+ * unconditional exit-0 guarantee) in favor of a minimal, defensive open: discover
+ * `.lore/lore.db` via `findLoreDbPathQuiet()` (returns `undefined`, never exits, on
+ * a miss) and construct a bare `SQLiteStore` directly — this bypass audit needs
+ * nothing beyond `appendAuditEntry`, not the full `App` composition root (AI
+ * provider registry, telemetry, etc.), so there is strictly less that can go wrong
+ * on this already-defensive path. A `SQLiteStore` construction failure (e.g. a
+ * corrupted `.lore/lore.db`, mirrors `loader.ts`'s identical SPEC-073 catch)
+ * degrades to `null` — "unreachable" — rather than throwing, though
+ * `runGateEnvBypassAudit` also tolerates a throw from this port if one ever
+ * slipped through. The opened store is deliberately left open (not `.close()`d) —
+ * this CLI invocation exits immediately after via `process.exitCode = 0`, and the
+ * OS reclaims the file descriptor at process exit; the write itself is already
+ * awaited by `runGateEnvBypassAudit` before that exit, so no data loss window
+ * exists.
+ */
+async function openBypassRecordGateSkip(): Promise<RecordGateSkip | null> {
+  const dbPath = findLoreDbPathQuiet();
+  if (dbPath === undefined) return null;
+  try {
+    const store = new SQLiteStore(dbPath);
+    return store.appendAuditEntry.bind(store);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * One-line call-site wrapper around `runGateEnvBypassAudit` binding the real
+ * `openBypassRecordGateSkip` port — every one of this file's FIVE
+ * `LORE_GATE_BYPASS=1` branches calls this instead of repeating the deps object
+ * literal five times.
+ */
+async function auditGateBypass(checkpoint: GateCheckpoint): Promise<void> {
+  await runGateEnvBypassAudit(checkpoint, { openRecordGateSkip: openBypassRecordGateSkip });
+}
 
 /**
  * Looks up `checkpoint` in `flows/feed-flow.ts::CHECKPOINT_PRODUCED_TYPE` — the SINGLE
@@ -255,8 +317,10 @@ export default defineCommand({
         },
       },
       async run({ args }) {
-        // LORE_GATE_BYPASS=1: exit 0 before ANY parsing or checking (module header).
+        // LORE_GATE_BYPASS=1: exit 0 before ANY parsing or checking (module header;
+        // SPEC-080 G4 — best-effort env_bypass audit trace, exit-0 unconditional).
         if (process.env["LORE_GATE_BYPASS"] === "1") {
+          await auditGateBypass("spec-create");
           process.exitCode = 0;
           return;
         }
@@ -308,8 +372,10 @@ export default defineCommand({
         },
       },
       async run({ args }) {
-        // LORE_GATE_BYPASS=1: exit 0 before ANY parsing or checking (module header).
+        // LORE_GATE_BYPASS=1: exit 0 before ANY parsing or checking (module header;
+        // SPEC-080 G4 — best-effort env_bypass audit trace, exit-0 unconditional).
         if (process.env["LORE_GATE_BYPASS"] === "1") {
+          await auditGateBypass("spec-promote");
           process.exitCode = 0;
           return;
         }
@@ -340,8 +406,10 @@ export default defineCommand({
         },
       },
       async run({ args }) {
-        // LORE_GATE_BYPASS=1: exit 0 before ANY parsing or checking (module header).
+        // LORE_GATE_BYPASS=1: exit 0 before ANY parsing or checking (module header;
+        // SPEC-080 G4 — best-effort env_bypass audit trace, exit-0 unconditional).
         if (process.env["LORE_GATE_BYPASS"] === "1") {
+          await auditGateBypass("plan-promote");
           process.exitCode = 0;
           return;
         }
@@ -381,8 +449,10 @@ export default defineCommand({
         },
       },
       async run({ args }) {
-        // LORE_GATE_BYPASS=1: exit 0 before ANY parsing or checking (module header).
+        // LORE_GATE_BYPASS=1: exit 0 before ANY parsing or checking (module header;
+        // SPEC-080 G4 — best-effort env_bypass audit trace, exit-0 unconditional).
         if (process.env["LORE_GATE_BYPASS"] === "1") {
+          await auditGateBypass("task-claim");
           process.exitCode = 0;
           return;
         }
@@ -424,8 +494,10 @@ export default defineCommand({
         },
       },
       async run({ args }) {
-        // LORE_GATE_BYPASS=1: exit 0 before ANY parsing or checking (module header).
+        // LORE_GATE_BYPASS=1: exit 0 before ANY parsing or checking (module header;
+        // SPEC-080 G4 — best-effort env_bypass audit trace, exit-0 unconditional).
         if (process.env["LORE_GATE_BYPASS"] === "1") {
+          await auditGateBypass("phase-claim");
           process.exitCode = 0;
           return;
         }
