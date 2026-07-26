@@ -27,6 +27,7 @@ import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import { AuditService } from "../../../src/service/audit-service.js";
+import { resolveActorWithSource } from "@lore/core/node";
 import type { CreateDocInput, VersionRecord, AuditEntry } from "@lore/core";
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
@@ -99,7 +100,14 @@ describe("HAPPY — a CorpusService.create() write satisfies verify() out of the
     expect(result.value).toHaveLength(1);
     const entry = result.value[0] as AuditEntry;
     expect(entry.action).toBe("create");
-    expect(entry.actor).toBe("system");
+    // SPEC-079 G2 (actor fidelity) — the audit entry's actor is now the
+    // resolved actor (opts.by > $LORE_ACTOR > session tier > OS username),
+    // never the literal "system". `createPlan` passes no `by`, so the
+    // expected value is whatever the SAME env-chain resolution yields at
+    // test time (this test never mutates process.env, so it's stable within
+    // a single run — see audit-actor-fidelity.test.ts for the full env-chain
+    // coverage this asymmetry is dedicated to).
+    expect(entry.actor).toBe(resolveActorWithSource(undefined, process.env).actor);
     expect(entry.details?.["version"]).toBe(1);
   });
 

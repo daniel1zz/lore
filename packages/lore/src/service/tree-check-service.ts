@@ -16,6 +16,7 @@ import type { DocType, DocId, DocRecord } from "@lore/core";
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import { isValidParentType, ROOT_TYPES } from "@lore/core";
 import { ancestorChainWalk } from "@lore/core";
+import { resolveActorWithSource } from "@lore/core/node";
 
 // ─── Public Types ──────────────────────────────────────────────────────────
 
@@ -148,7 +149,26 @@ export class TreeCheckService {
 
   // ── fix ───────────────────────────────────────────────────────────────────
 
-  async fix(blueprint: TreeBlueprint): Promise<Result<FixReport, LoreError>> {
+  /**
+   * @invariant SPEC-079 G1 (relationship provenance) — every APPLIED repair
+   *   (an entry landing in `FixReport.fixed`, never a `skipped` one) writes
+   *   exactly one audit entry (`action: "tree-fix"`, `doc_id` = the fixed
+   *   doc, `details: {kind, doc_id, old_parent_id, new_parent_id}` — the
+   *   repair descriptor). Audit-only, mirroring `link`/`unlink` (SPEC-079
+   *   G1): a tree-fix is a `parent_id` correction the `store.update` call
+   *   right above it already versions via the doc's own `version` bump — see
+   *   that call for the actual state write; this entry is provenance on top
+   *   of it, not a second copy of the state.
+   * @param opts.by - Optional explicit actor (no adapter currently threads
+   *   one — `lore status --check-tree --fix` is this method's sole
+   *   production caller and passes none); omitted falls back to the SAME
+   *   `--by`/`$LORE_ACTOR`/session-tier/OS-username env chain
+   *   `CorpusService`'s writes use (`resolveActorWithSource`, SPEC-079 G2).
+   */
+  async fix(
+    blueprint: TreeBlueprint,
+    opts?: { by?: string },
+  ): Promise<Result<FixReport, LoreError>> {
     const checkR = await this.checkTree(blueprint);
     if (checkR.ok === false) return checkR;
 
@@ -178,6 +198,10 @@ export class TreeCheckService {
     const fixed: FixedItem[] = [];
     // Start skipped with phantom cycles detected in pre-fix state
     const skipped: SkippedItem[] = [...phantomSkips];
+
+    // SPEC-079 G2 — resolved once for the whole run, reused for every
+    // applied repair's audit entry below.
+    const resolvedActor = resolveActorWithSource(opts?.by, process.env).actor;
 
     for (const drift of fixableDrifts) {
       const doc = drift.actual!;
@@ -224,6 +248,24 @@ export class TreeCheckService {
       });
 
       if (updateR.ok === false) return updateR;
+
+      // SPEC-079 G1 — relationship provenance: one audit entry per applied
+      // tree-fix repair (audit-only, mirrors link/unlink — the store.update
+      // call above already versions the actual parent_id state change).
+      const auditResult = await this.store.appendAuditEntry({
+        timestamp: new Date().toISOString(),
+        actor: resolvedActor,
+        session_id: doc.id,
+        action: "tree-fix",
+        doc_id: doc.id,
+        details: {
+          kind: drift.kind,
+          doc_id: doc.id,
+          old_parent_id: doc.parent_id,
+          new_parent_id: candidate.id,
+        },
+      });
+      if (!auditResult.ok) return auditResult;
 
       fixed.push({
         id: doc.id,

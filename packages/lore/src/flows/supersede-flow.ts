@@ -42,7 +42,10 @@ import type { InvalidateOpts, InvalidateResult } from "../service/validity-servi
  * `ValidityService` itself (testable with plain fakes, no store, no spawning).
  */
 export interface SupersedeOrchestrationDeps {
-  create: (input: CreateDocInput) => Promise<Result<DocRecord, LoreError>>;
+  create: (
+    input: CreateDocInput,
+    opts?: { by?: string },
+  ) => Promise<Result<DocRecord, LoreError>>;
   invalidate: (idOrSlug: string, opts: InvalidateOpts) => Promise<Result<InvalidateResult, LoreError>>;
 }
 
@@ -62,7 +65,10 @@ export interface SupersedeOrchestrationResult {
  * @param deps - Injected `create`/`invalidate` service calls.
  * @param input - Candidate document to create (same shape `CorpusService.create` takes).
  * @param supersedes - ID or slug of the existing knowledge/adr doc being superseded.
- * @param by - Resolved actor identity for the invalidate step.
+ * @param by - Resolved actor identity for the invalidate step — also threaded to
+ *   `deps.create` as `opts.by` (SPEC-079 G2), so the newly created doc's own
+ *   audit entry carries the SAME resolved actor rather than falling back to
+ *   the env chain independently of what the invalidate step used.
  * @returns `err()` only when `create()` itself fails; otherwise `ok({doc, supersedeError?})`.
  * @example
  * const result = await createWithSupersedes(
@@ -82,7 +88,7 @@ export async function createWithSupersedes(
   supersedes: string,
   by: string,
 ): Promise<Result<SupersedeOrchestrationResult, LoreError>> {
-  const createResult = await deps.create(input);
+  const createResult = await deps.create(input, { by });
   if (!createResult.ok) return createResult;
   const doc = createResult.value;
 

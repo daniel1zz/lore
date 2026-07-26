@@ -82,8 +82,20 @@ afterEach(() => {
   }
 });
 
+// SPEC-079 G2 (actor fidelity) — `--by test-actor` makes the resulting create
+// audit entry's actor DETERMINISTIC regardless of this test process's own
+// ambient env (a real dev/CI shell may have $LORE_ACTOR or
+// $CLAUDE_CODE_SESSION_ID set, which CorpusService's env-chain fallback would
+// otherwise pick up — see corpus-service.ts's resolveWriteActor). Before
+// SPEC-079, every create's audit entry hardcoded the literal "system"; now it
+// carries the resolved actor, so this fixture pins an explicit one.
+const TEST_ACTOR = "test-actor";
+
 function createPrd(title: string): string {
-  const r = runLore(["create", "prd", "--title", title, "--no-ai", "--content", "body"], tmpDir);
+  const r = runLore(
+    ["create", "prd", "--title", title, "--no-ai", "--content", "body", "--by", TEST_ACTOR],
+    tmpDir,
+  );
   if (r.exitCode !== 0) throw new Error(`create prd failed: ${r.stderr}`);
   const m = r.stdout.match(/Slug:\s+(\S+)/);
   const slug = m?.[1];
@@ -94,13 +106,13 @@ function createPrd(title: string): string {
 // ─── HAPPY — lore audit <doc> ─────────────────────────────────────────────────
 
 describe("lore audit <doc> — HAPPY", () => {
-  it("non-JSON output exits 0 and shows the create entry (actor system, action create)", () => {
+  it(`non-JSON output exits 0 and shows the create entry (actor ${TEST_ACTOR}, action create)`, () => {
     const slug = createPrd("Audit CLI PRD");
 
     const result = runLore(["audit", slug], tmpDir);
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("system");
+    expect(result.stdout).toContain(TEST_ACTOR);
     expect(result.stdout.toLowerCase()).toContain("create");
   });
 
@@ -119,7 +131,7 @@ describe("lore audit <doc> — HAPPY", () => {
     expect(parsed.data?.entries?.length).toBeGreaterThan(0);
     const createEntry = parsed.data?.entries?.find((e) => e.action === "create");
     expect(createEntry).toBeDefined();
-    expect(createEntry?.actor).toBe("system");
+    expect(createEntry?.actor).toBe(TEST_ACTOR);
     expect(createEntry?.details?.["version"]).toBe(1);
   });
 });
@@ -136,15 +148,16 @@ describe("lore audit <doc> — NEGATIVE", () => {
 // ─── BOUNDARY — filters narrow the result set ────────────────────────────────
 
 describe("lore audit --actor/--action filters", () => {
-  it("--actor system --action create --json returns only matching entries", () => {
+  it(`--actor ${TEST_ACTOR} --action create --json returns only matching entries`, () => {
     const slugOne = createPrd("Filter PRD One");
     const slugTwo = createPrd("Filter PRD Two");
     void slugTwo;
 
-    // Approve one doc so an "approve" (actor "system", but different action) entry also exists.
+    // Approve one doc so an "approve" (actor "system" — ReviewService is untouched
+    // by SPEC-079 T1, out of scope) entry also exists, alongside the two creates.
     runLore(["approve", slugOne], tmpDir);
 
-    const result = runLore(["audit", "--actor", "system", "--action", "create", "--json"], tmpDir);
+    const result = runLore(["audit", "--actor", TEST_ACTOR, "--action", "create", "--json"], tmpDir);
 
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.stdout) as {
@@ -156,7 +169,7 @@ describe("lore audit --actor/--action filters", () => {
     expect(entries.length).toBeGreaterThan(0);
     for (const entry of entries) {
       expect(entry.action).toBe("create");
-      expect(entry.actor).toBe("system");
+      expect(entry.actor).toBe(TEST_ACTOR);
     }
   });
 

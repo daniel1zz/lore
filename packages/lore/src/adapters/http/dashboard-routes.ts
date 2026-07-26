@@ -249,7 +249,10 @@ async function handleDashboardCreate(
     );
   }
 
-  const result = await app.corpusService.create(parsed.data);
+  // SPEC-079 G2 — thread the resolved cookie-session actor through as the
+  // create's audit actor (mirrors the reviewer-identity convention this file
+  // already uses for approve/reject below: owner when set, else the api key name).
+  const result = await app.corpusService.create(parsed.data, { by: actor.owner ?? actor.name });
   if (!result.ok) return loreErrorResponse(result.error);
 
   emitDashboardTelemetry(app, "create", { doc_id: result.value.id, type: result.value.type });
@@ -304,13 +307,13 @@ async function handleDashboardPatch(
 
   // Layer 2 — see this function's JSDoc. `expectedVersion` is derived from the
   // request's own headers, independent of the (possibly already-stale-by-now)
-  // `currentDoc` snapshot above.
+  // `currentDoc` snapshot above. `by` (SPEC-079 G2) threads the resolved cookie-
+  // session actor through as the update's audit actor.
   const expectedVersion = resolveExpectedVersion(req);
-  const result = await app.corpusService.set(
-    id,
-    patch,
-    expectedVersion !== undefined ? { expectedVersion } : undefined,
-  );
+  const result = await app.corpusService.set(id, patch, {
+    ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+    by: actor.owner ?? actor.name,
+  });
   if (!result.ok) {
     if (result.error.code === "STALE_VERSION") {
       const latestResult = await app.corpusService.get(id);
@@ -442,6 +445,7 @@ async function handleDashboardCreateLink(
   req: Request,
   fromId: string,
   app: App,
+  actor: ActorContext,
 ): Promise<Response> {
   const body = await parseJsonBody(req);
   if (body === null || typeof body !== "object") {
@@ -456,7 +460,10 @@ async function handleDashboardCreateLink(
     return jsonError({ code: "VALIDATION_ERROR", field: "type", message: "'type' must be a non-empty string" }, 422);
   }
 
-  const result = await app.corpusService.link(fromId, to.trim(), type.trim() as LinkType);
+  // SPEC-079 G2 — thread the resolved cookie-session actor through as the link's audit actor.
+  const result = await app.corpusService.link(fromId, to.trim(), type.trim() as LinkType, {
+    by: actor.owner ?? actor.name,
+  });
   if (!result.ok) return loreErrorResponse(result.error);
 
   return jsonOk({ ok: true }, 201);
@@ -470,8 +477,9 @@ async function handleDashboardDeleteLink(
   fromId: string,
   toId: string,
   app: App,
+  actor: ActorContext,
 ): Promise<Response> {
-  const result = await app.corpusService.unlink(fromId, toId);
+  const result = await app.corpusService.unlink(fromId, toId, { by: actor.owner ?? actor.name });
   if (!result.ok) return loreErrorResponse(result.error);
 
   return new Response(null, { status: 204 });
@@ -488,10 +496,12 @@ async function handleDashboardDelete(
   req: Request,
   id: string,
   app: App,
+  actor: ActorContext,
 ): Promise<Response> {
   const confirm = new URL(req.url).searchParams.get("confirm") === "true";
 
-  const result = await app.corpusService.delete(id, confirm);
+  // SPEC-079 G2 — thread the resolved cookie-session actor through as the delete's audit actor.
+  const result = await app.corpusService.delete(id, confirm, { by: actor.owner ?? actor.name });
   if (!result.ok) return loreErrorResponse(result.error);
 
   emitDashboardTelemetry(app, "delete", { doc_id: result.value.id });
@@ -669,11 +679,11 @@ export async function handleDashboardRoute(
     case "reject":
       return handleDashboardReject(req, match.id, app, actor);
     case "createLink":
-      return handleDashboardCreateLink(req, match.id, app);
+      return handleDashboardCreateLink(req, match.id, app, actor);
     case "deleteLink":
-      return handleDashboardDeleteLink(match.id, match.linkId, app);
+      return handleDashboardDeleteLink(match.id, match.linkId, app, actor);
     case "deleteDoc":
-      return handleDashboardDelete(req, match.id, app);
+      return handleDashboardDelete(req, match.id, app, actor);
     case "restore":
       return handleDashboardRestore(req, match.id, app);
     case "configPatch":

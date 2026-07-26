@@ -261,13 +261,13 @@ export async function handleApiRoute(
 
   // POST /api/links
   if (method === "POST" && path === "/api/links") {
-    return handleCreateLink(req, app);
+    return handleCreateLink(req, app, actor);
   }
 
   // /api/docs/:idOrSlug  (with optional suffix)
   const docsMatch = matchDocsPath(path);
   if (docsMatch !== null) {
-    return handleDocRoute(req, method, docsMatch, url, app);
+    return handleDocRoute(req, method, docsMatch, url, app, actor);
   }
 
   // GET /api/judgments/:docId
@@ -303,7 +303,7 @@ export async function handleApiRoute(
   // DELETE /api/links/:from/:to
   const linksDeleteMatch = matchLinksDeletePath(path);
   if (linksDeleteMatch !== null && method === "DELETE") {
-    return handleDeleteLink(linksDeleteMatch.from, linksDeleteMatch.to, app);
+    return handleDeleteLink(linksDeleteMatch.from, linksDeleteMatch.to, app, actor);
   }
 
   // /api/review/:id/approve or /api/review/:id/reject
@@ -383,7 +383,9 @@ async function handleCreateDoc(req: Request, app: App, actor: ActorContext): Pro
   const _callerSurface = actor.callerSurface ?? "http_token"; // default to safest (AI off)
   void _callerSurface; // referenced above for documentation; suppress lint warning
 
-  const result = await app.corpusService.create(body as CreateDocInput);
+  // SPEC-079 G2 — thread the resolved actor (bearer key name or cookie session's
+  // owner) through as the create's audit actor instead of the literal "system".
+  const result = await app.corpusService.create(body as CreateDocInput, { by: actor.name });
   if (!result.ok) return loreErrorResponse(result.error);
   return jsonOk(result.value, 201);
 }
@@ -623,7 +625,7 @@ async function handleCalibrationStats(url: URL, app: App): Promise<Response> {
   return jsonOk(result.value);
 }
 
-async function handleCreateLink(req: Request, app: App): Promise<Response> {
+async function handleCreateLink(req: Request, app: App, actor: ActorContext): Promise<Response> {
   const body = await parseJsonBody(req);
   if (body === null || typeof body !== "object") {
     return jsonError({ code: "VALIDATION_ERROR", field: "body", message: "Request body must be JSON" }, 422);
@@ -632,13 +634,14 @@ async function handleCreateLink(req: Request, app: App): Promise<Response> {
   if (typeof from !== "string" || typeof to !== "string" || typeof type !== "string") {
     return jsonError({ code: "VALIDATION_ERROR", field: "body", message: "Required fields: from, to, type" }, 422);
   }
-  const result = await app.corpusService.link(from, to, type as LinkType);
+  // SPEC-079 G2 — thread the resolved actor through as the link's audit actor.
+  const result = await app.corpusService.link(from, to, type as LinkType, { by: actor.name });
   if (!result.ok) return loreErrorResponse(result.error);
   return jsonOk(result.value, 201);
 }
 
-async function handleDeleteLink(from: string, to: string, app: App): Promise<Response> {
-  const result = await app.corpusService.unlink(from, to);
+async function handleDeleteLink(from: string, to: string, app: App, actor: ActorContext): Promise<Response> {
+  const result = await app.corpusService.unlink(from, to, { by: actor.name });
   if (!result.ok) return loreErrorResponse(result.error);
   return jsonOk({ ok: true });
 }
@@ -740,10 +743,11 @@ async function handleDocRoute(
   match: DocsPathMatch,
   url: URL,
   app: App,
+  actor: ActorContext,
 ): Promise<Response> {
   switch (match.type) {
     case "doc":
-      return handleSingleDoc(req, method, match.idOrSlug, app);
+      return handleSingleDoc(req, method, match.idOrSlug, app, actor);
     case "log":
       return handleVersionLog(match.idOrSlug, url, app);
     case "diff":
@@ -754,7 +758,13 @@ async function handleDocRoute(
   }
 }
 
-async function handleSingleDoc(req: Request, method: string, idOrSlug: string, app: App): Promise<Response> {
+async function handleSingleDoc(
+  req: Request,
+  method: string,
+  idOrSlug: string,
+  app: App,
+  actor: ActorContext,
+): Promise<Response> {
   if (method === "GET") {
     const resolveMdx = new URL(req.url).searchParams.get("resolveMdx") === "true";
     const result = await app.corpusService.get(idOrSlug);
@@ -782,7 +792,8 @@ async function handleSingleDoc(req: Request, method: string, idOrSlug: string, a
     if (body === null || typeof body !== "object") {
       return jsonError({ code: "VALIDATION_ERROR", field: "body", message: "Request body must be JSON" }, 422);
     }
-    const result = await app.corpusService.set(idOrSlug, body as DocPatch);
+    // SPEC-079 G2 — thread the resolved actor through as the update's audit actor.
+    const result = await app.corpusService.set(idOrSlug, body as DocPatch, { by: actor.name });
     if (!result.ok) return loreErrorResponse(result.error);
     return jsonOk(result.value);
   }
@@ -790,7 +801,7 @@ async function handleSingleDoc(req: Request, method: string, idOrSlug: string, a
   if (method === "DELETE") {
     const confirmStr = new URL(req.url).searchParams.get("confirm");
     const confirm = confirmStr === "true";
-    const result = await app.corpusService.delete(idOrSlug, confirm);
+    const result = await app.corpusService.delete(idOrSlug, confirm, { by: actor.name });
     if (!result.ok) return loreErrorResponse(result.error);
     return jsonOk(result.value);
   }
