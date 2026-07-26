@@ -13,28 +13,45 @@
  *                      fallback), merging evidence/claims/anchors. Idempotent — a second run
  *                      performs zero new writes. Thin pipe over `PhaseMigrationService.migrateTasks`.
  *                      (SPEC-056 §Design Decisions D6/D6a, AC-P-5)
+ *   prd-to-outline --prd <id-or-slug> [--section <key> (repeatable)] [--dry-run]
+ *                      Relocates one or more `## `-level-2 sections of a root PRD's body into
+ *                      dedicated `domain-overview` child specs, verbatim. Idempotent — a section
+ *                      already migrated (or already fully covered by a pre-existing, invariant-
+ *                      passing child doc) performs zero writes on re-run. `--dry-run` computes the
+ *                      full per-section verdict report with zero writes. Thin pipe over
+ *                      `OutlineMigrationService.migrateSection`, looped once per `--section`.
+ *                      (SPEC-080 §Migration Plan Phase 1, AC-080-7)
  */
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
 import { requirePhaseMigrationService } from "../phase-wiring.js";
+import type { SectionMigrationVerdict } from "../../../service/outline-migration-service.js";
 
 export default defineCommand({
   meta: {
     name: "migrate",
     description:
-      "Corpus migration: `v1 --from <path>` (v1 import), `phases` (phase schema sweep), `spec-kind` (spec_kind mistype audit), or `tasks-to-phases` (task→phase doc-type sweep)",
+      "Corpus migration: `v1 --from <path>` (v1 import), `phases` (phase schema sweep), `spec-kind` (spec_kind mistype audit), `tasks-to-phases` (task→phase doc-type sweep), or `prd-to-outline` (per-section PRD→outline domain relocation)",
   },
   args: {
     version: {
       type: "positional",
-      description: "Migration action: v1 | phases | spec-kind | tasks-to-phases",
+      description: "Migration action: v1 | phases | spec-kind | tasks-to-phases | prd-to-outline",
       required: true,
     },
     from: {
       type: "string",
       description: "[v1 only] Source directory path containing v1 markdown files",
+    },
+    prd: {
+      type: "string",
+      description: "[prd-to-outline only] The root PRD's id or slug",
+    },
+    section: {
+      type: "string",
+      description: "[prd-to-outline only] Section key to migrate (repeatable; omit to migrate every domain section found in the PRD body)",
     },
     "dry-run": {
       type: "boolean",
@@ -59,12 +76,100 @@ export default defineCommand({
       args.version !== "v1" &&
       args.version !== "phases" &&
       args.version !== "spec-kind" &&
-      args.version !== "tasks-to-phases"
+      args.version !== "tasks-to-phases" &&
+      args.version !== "prd-to-outline"
     ) {
       process.stderr.write(
-        `Error: Unknown migration action '${args.version}'. Supported: v1, phases, spec-kind, tasks-to-phases.\n`,
+        `Error: Unknown migration action '${args.version}'. Supported: v1, phases, spec-kind, tasks-to-phases, prd-to-outline.\n`,
       );
       process.exit(2);
+    }
+
+    // ── prd-to-outline action ─────────────────────────────────────────────
+    if (args.version === "prd-to-outline") {
+      if (!args.prd) {
+        process.stderr.write("Error: --prd <id-or-slug> is required for `migrate prd-to-outline`.\n");
+        process.exit(2);
+      }
+
+      const dryRun = args["dry-run"] ?? false;
+      const { app } = loadLoreApp();
+      try {
+        if (app.outlineMigrationService === undefined) {
+          process.stderr.write("Internal error: OutlineMigrationService not wired on App\n");
+          process.exitCode = 1;
+          return;
+        }
+        const service = app.outlineMigrationService;
+
+        const prdResult = await app.corpusService.get(args.prd);
+        if (!prdResult.ok) {
+          process.stderr.write(formatError(prdResult.error) + "\n");
+          process.exitCode = exitCode(prdResult.error);
+          return;
+        }
+        const prd = prdResult.value.doc;
+
+        // A section key may be declared 0, 1, or N times (citty collapses
+        // repeated `--section` occurrences into a string array; a single
+        // occurrence stays a bare string).
+        const requestedSections =
+          args.section === undefined ? [] : Array.isArray(args.section) ? args.section : [args.section];
+
+        if (requestedSections.length === 0) {
+          process.stderr.write(
+            "Error: at least one --section <key> is required for `migrate prd-to-outline` (no auto-discovery — declare which sections to migrate).\n",
+          );
+          process.exit(2);
+        }
+
+        const verdicts: SectionMigrationVerdict[] = [];
+        let refused: { section: string; code: string; message: string; failed_invariants: string[] } | undefined;
+
+        for (const section of requestedSections) {
+          const result = await service.migrateSection(prd.id, section, { dryRun });
+          if (!result.ok) {
+            refused = {
+              section: result.error.section,
+              code: result.error.code,
+              message: result.error.message,
+              failed_invariants: result.error.failed_invariants,
+            };
+            break;
+          }
+          verdicts.push(result.value);
+        }
+
+        if (args.json) {
+          console.log(JSON.stringify({ ok: refused === undefined, data: { verdicts, refused } }, null, 2));
+          process.exitCode = refused === undefined ? 0 : 4;
+          return;
+        }
+
+        const label = dryRun ? "PRD→outline migration (dry-run)" : "PRD→outline migration";
+        console.log(`${label} — ${prd.slug}`);
+        console.log("─".repeat(40));
+        for (const verdict of verdicts) {
+          const statusLabel = verdict.already_migrated ? "already migrated" : verdict.passed ? "migrated" : "FAILED";
+          console.log(`[${statusLabel}] ${verdict.section} (writes: ${verdict.writes_performed})`);
+          if (verdict.failed_invariants.length > 0) {
+            console.log(`  failed invariants: ${verdict.failed_invariants.join(", ")}`);
+          }
+        }
+        if (refused !== undefined) {
+          console.log(`\nRefused on section '${refused.section}': ${refused.code} — ${refused.message}`);
+          if (refused.failed_invariants.length > 0) {
+            console.log(`  failed invariants: ${refused.failed_invariants.join(", ")}`);
+          }
+        }
+        if (dryRun && refused === undefined) {
+          console.log("\nRe-run without --dry-run to apply changes.");
+        }
+        process.exitCode = refused === undefined ? 0 : 4;
+      } finally {
+        app.close();
+      }
+      return;
     }
 
     // ── tasks-to-phases action ────────────────────────────────────────────
