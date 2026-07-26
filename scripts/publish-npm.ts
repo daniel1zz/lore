@@ -74,7 +74,7 @@ import {
   README_SOURCE_PATH,
   type PublishPlan,
 } from "../packages/lore/src/distribution/assemble.js";
-import { RealAssetSource } from "../packages/lore/src/adapters/real-asset-source.js";
+import { RealAssetSource, RETIRED_FROM_INSTALL_PATHS } from "../packages/lore/src/adapters/real-asset-source.js";
 import { formatError } from "../packages/lore/src/adapters/cli/utils.js";
 
 /** Repo root, resolved from this file's own location (works whether invoked via `bun run` or a dynamic test import). */
@@ -439,6 +439,28 @@ async function realAssemble(): Promise<Result<PublishPlan, LoreError>> {
   const assetFiles = loaded.value.files
     .filter((file) => file.kind !== "settings-hook")
     .map((file) => `assets/${file.path}`);
+
+  // SPEC-085 D3 byproduct fix: `RealAssetSource.load()`'s payload is the
+  // MACHINE INSTALL SET view — it deliberately EXCLUDES files retired from
+  // `<claude-dir>/...` installation (`RETIRED_FROM_INSTALL_PATHS`:
+  // governance/corpus-workflow.md, governance/seat-briefing.md). But the
+  // npm package's OWN `assets/` tree is a SEPARATE concern: the bootstrap-
+  // stage `lore governance` verb (and its `--seat-briefing` flag) reads
+  // these exact files directly off the BINARY'S OWN assets root at runtime
+  // (`resolveAssetsRoot`/`readGovernanceAsset`), completely independent of
+  // what `lore setup` ever installs. Reusing the install-set list verbatim
+  // for "what ships in the package" would silently ship an npm package
+  // whose `lore governance` verb 404s (VALIDATION_ERROR, exit 4) on a real
+  // install — SPEC-085 D3 surfaced this because retiring the SECOND
+  // (last-remaining) governance file emptied the directory entirely,
+  // turning a previously-silent one-file gap into a hard ENOENT during
+  // `lore setup --dry-run` staging verification. Both retired files are
+  // added back here, explicitly, so "which files are installed" and "which
+  // files ship inside the package" stay two independently correct answers
+  // over the SAME assets/ tree.
+  for (const retiredPath of RETIRED_FROM_INSTALL_PATHS) {
+    assetFiles.push(`assets/${retiredPath}`);
+  }
 
   const planResult = buildPublishPlan({
     version: versionResult.value,

@@ -1,5 +1,5 @@
 /**
- * session-seat-injection.test.ts — SPEC-047 AC-047-B.
+ * session-seat-injection.test.ts — SPEC-047 AC-047-B, reworked for SPEC-085 D2.
  *
  * Behavioral test for the SessionStart hook's linked-worktree seat detection
  * (assets/hooks/session-start-resume.mjs, Phase D). Every case spawns the
@@ -9,25 +9,42 @@
  * repo's own .lore/ from tests" rule; a stubbed `lore` also sidesteps it
  * for reads).
  *
+ * SPEC-085 D2 rework: Phase D no longer reads `governance/seat-briefing.md`
+ * off disk at two candidate paths — it spawns the SAME resolved `lore`
+ * binary Phase C/E already spawn, running `governance --seat-briefing`, and
+ * substitutes placeholders into whatever stdout that call returns. The
+ * `lore` stub (`makeLoreStub`) below therefore answers `governance
+ * --seat-briefing` the same way the real binary does (SPEC-085 D1): emits a
+ * configured template on stdout at a configured exit code. Omitting the
+ * template option reproduces the natural "binary ran but returned nothing
+ * useful" fail-open shape with zero extra stub logic.
+ *
  * Coverage:
- *   HAPPY:      linked worktree + briefing found at claude-dir → <session-seat>
- *               injected with the sanitized actor + main-checkout path;
- *               `lore bootstrap` is spawned with cwd = main checkout
+ *   HAPPY:      linked worktree + stub answers `governance --seat-briefing`
+ *               with the real SSOT template → <session-seat> injected with
+ *               the sanitized actor + main-checkout path; `lore bootstrap`
+ *               is spawned with cwd = main checkout
  *   NEGATIVE:   main-checkout session (not a linked worktree) → NO
- *               <session-seat> block, exit 0 (byte-identical-in-shape to
- *               pre-SPEC-047 behavior for this session type)
- *   BOUNDARY:   briefing found only via the main-checkout assets/ fallback
- *               (claude-dir copy absent) still injects; detached HEAD
- *               derives `worktree-<shortsha>` instead of literal "HEAD"
- *   ERROR:      briefing absent at BOTH locations → fail-open (exit 0, no
- *               <session-seat>, one stderr skip note) — never throws/hangs
+ *               <session-seat> block, exit 0, and the `governance
+ *               --seat-briefing` spawn never happens at all (byte-identical-
+ *               in-shape to pre-SPEC-047 behavior for this session type)
+ *   BOUNDARY:   the `governance --seat-briefing` spawn runs with cwd = main
+ *               checkout (not the worktree cwd) — the SAME invariant Phase
+ *               E's `lore bootstrap` spawn already pins, now asserted for
+ *               this NEW Phase D child process too; detached HEAD derives
+ *               `worktree-<shortsha>` instead of literal "HEAD"
+ *   ERROR:      `governance --seat-briefing` returns empty stdout (exit 0)
+ *               → fail-open (exit 0, no <session-seat>, one stderr skip
+ *               note); a NON-ZERO exit with content on stdout is equally
+ *               fail-open (content must never be trusted from a failed
+ *               call) — never throws/hangs either way
  *   STATE:      an exotic branch name (`feat/x_y`) sanitizes to
  *               `agent:feat-x-y` (slashes/underscores collapsed to single
  *               hyphens, no leading/trailing hyphen)
  *   REGRESSION: a non-worktree, non-git cwd (no `.git` at all) behaves
  *               exactly as fail-open — no throw, no seat block
  *
- * @spec_ref AC-047-B
+ * @spec_ref AC-047-B, AC-085-3
  */
 
 import { describe, it, expect, afterEach } from "vitest";
@@ -46,6 +63,8 @@ const HOOK_PATH = join(REPO_ROOT, "assets", "hooks", "session-start-resume.mjs")
 if (!existsSync(HOOK_PATH)) {
   throw new Error(`test fixture bug: resolved HOOK_PATH does not exist: ${HOOK_PATH}`);
 }
+
+const SEAT_BRIEFING_TEMPLATE = readFileSync(join(REPO_ROOT, "assets", "governance", "seat-briefing.md"), "utf8");
 
 const cleanupDirs: string[] = [];
 
@@ -72,16 +91,47 @@ function initGitRepo(dir: string, initialBranch = "main"): void {
   execFileSync("git", ["commit", "-q", "-m", "init"], { cwd: dir, stdio: "pipe" });
 }
 
-/** Writes an executable `lore` stub on its own dir, returning that dir for PATH prepending. */
-function makeLoreStub(logPath: string): string {
+interface LoreStubOptions {
+  /**
+   * Stdout to emit for `governance --seat-briefing` (SPEC-085 D1's runtime
+   * verb). Omit to simulate the "binary ran but returned nothing useful"
+   * fail-open shape (empty stdout, exit 0) with zero extra stub logic.
+   */
+  briefingContent?: string;
+  /** Exit code for the `governance --seat-briefing` branch (default 0). */
+  briefingExitCode?: number;
+}
+
+/**
+ * Writes an executable `lore` stub on its own dir, returning that dir for
+ * PATH prepending. Logs every invocation (cwd + full argv) to `logPath` so
+ * tests can assert BOTH the spawn args and the spawn cwd. Answers
+ * `bootstrap` with a stub JSON payload (Phase E) and `governance
+ * --seat-briefing` with `opts.briefingContent` at `opts.briefingExitCode`
+ * (Phase D, SPEC-085 D2) — mirroring the real `lore governance
+ * --seat-briefing` verb's contract (SPEC-085 D1).
+ */
+function makeLoreStub(logPath: string, opts: LoreStubOptions = {}): string {
+  const { briefingContent, briefingExitCode = 0 } = opts;
   const stubDir = mkScratchDir("seat-lore-stub-");
   const stubPath = join(stubDir, "lore");
+  let briefingEmitLine = "";
+  if (briefingContent !== undefined) {
+    const briefingFile = join(stubDir, "briefing-content.txt");
+    writeFileSync(briefingFile, briefingContent);
+    briefingEmitLine = `cat "${briefingFile}"`;
+  }
   writeFileSync(
     stubPath,
     `#!/bin/bash
 printf '%s\\t%s\\n' "$PWD" "$*" >> "${logPath}"
 if [ "$1" = "bootstrap" ]; then
   echo '{"ok":true,"data":{"stub":true}}'
+  exit 0
+fi
+if [ "$1" = "governance" ] && [ "$2" = "--seat-briefing" ]; then
+  ${briefingEmitLine}
+  exit ${briefingExitCode}
 fi
 exit 0
 `,
@@ -116,10 +166,10 @@ function parseAdditionalContext(stdout: string): string {
   return parsed?.hookSpecificOutput?.additionalContext ?? "";
 }
 
-// ─── HAPPY — linked worktree + claude-dir briefing ────────────────────────────
+// ─── HAPPY — linked worktree + binary answers governance --seat-briefing ──────
 
 describe("session-seat-injection — HAPPY", () => {
-  it("linked worktree with briefing at claude-dir injects <session-seat> with sanitized actor + main-checkout path, and spawns bootstrap with cwd=main checkout", () => {
+  it("linked worktree with the binary answering governance --seat-briefing injects <session-seat> with sanitized actor + main-checkout path, and spawns bootstrap with cwd=main checkout", () => {
     const mainRepo = mkScratchDir("seat-main-");
     initGitRepo(mainRepo);
     mkdirSync(join(mainRepo, ".lore"));
@@ -132,12 +182,8 @@ describe("session-seat-injection — HAPPY", () => {
     execFileSync("git", ["worktree", "add", "-b", "feat/x_y", worktreeDir], { cwd: mainRepo, stdio: "pipe" });
 
     const claudeDir = mkScratchDir("seat-claude-dir-");
-    mkdirSync(join(claudeDir, "governance"), { recursive: true });
-    const template = readFileSync(join(REPO_ROOT, "assets", "governance", "seat-briefing.md"), "utf8");
-    writeFileSync(join(claudeDir, "governance", "seat-briefing.md"), template);
-
     const logPath = join(mkScratchDir("seat-log-"), "lore-calls.log");
-    const stubDir = makeLoreStub(logPath);
+    const stubDir = makeLoreStub(logPath, { briefingContent: SEAT_BRIEFING_TEMPLATE });
 
     const result = runHook({
       cwd: worktreeDir,
@@ -158,30 +204,32 @@ describe("session-seat-injection — HAPPY", () => {
     expect(ctx).not.toContain("{{BRANCH}}");
     expect(ctx).not.toContain("{{MAIN_CHECKOUT}}");
 
+    const log = readFileSync(logPath, "utf8").trim().split("\n");
+
+    // Phase D's new spawn: `governance --seat-briefing` as a literal argv pair.
+    const governanceCall = log.find((line) => line.includes("governance"));
+    expect(governanceCall).toBeDefined();
+    expect(governanceCall).toContain("governance --seat-briefing");
+
     // Phase E's `lore bootstrap` spawn must run with cwd = main checkout,
     // not the worktree — the corpus lives there.
-    const log = readFileSync(logPath, "utf8").trim().split("\n");
     const bootstrapCall = log.find((line) => line.includes("bootstrap"));
     expect(bootstrapCall).toBeDefined();
     expect(bootstrapCall!.startsWith(`${mainRepoReal}\t`)).toBe(true);
   });
 });
 
-// ─── NEGATIVE — main-checkout session gets no seat block ──────────────────────
+// ─── NEGATIVE — main-checkout session gets no seat block, no spawn at all ─────
 
 describe("session-seat-injection — NEGATIVE", () => {
-  it("a main-checkout (non-worktree) session injects NO <session-seat> block", () => {
+  it("a main-checkout (non-worktree) session injects NO <session-seat> block and never spawns governance --seat-briefing", () => {
     const mainRepo = mkScratchDir("seat-main-");
     initGitRepo(mainRepo);
     mkdirSync(join(mainRepo, ".lore"));
 
     const claudeDir = mkScratchDir("seat-claude-dir-");
-    mkdirSync(join(claudeDir, "governance"), { recursive: true });
-    const template = readFileSync(join(REPO_ROOT, "assets", "governance", "seat-briefing.md"), "utf8");
-    writeFileSync(join(claudeDir, "governance", "seat-briefing.md"), template);
-
     const logPath = join(mkScratchDir("seat-log-"), "lore-calls.log");
-    const stubDir = makeLoreStub(logPath);
+    const stubDir = makeLoreStub(logPath, { briefingContent: SEAT_BRIEFING_TEMPLATE });
 
     const result = runHook({
       cwd: mainRepo,
@@ -194,29 +242,32 @@ describe("session-seat-injection — NEGATIVE", () => {
     expect(result.status).toBe(0);
     const ctx = parseAdditionalContext(result.stdout!);
     expect(ctx).not.toContain("<session-seat>");
-    expect(result.stderr).not.toContain("seat-briefing.md");
+    expect(result.stderr).not.toContain("seat-briefing");
+
+    // Phase C still spawns bare `governance` (no flag) for this .lore-having
+    // main-checkout session — only the Phase D `--seat-briefing` spawn must
+    // be absent, since Phase D's whole branch is gated on being inside a
+    // linked worktree (commonDirAbs !== gitDirAbs), which this session isn't.
+    const log = readFileSync(logPath, "utf8").trim().split("\n").filter(Boolean);
+    expect(log.some((line) => line.includes("--seat-briefing"))).toBe(false);
   });
 });
 
-// ─── BOUNDARY — main-checkout assets/ fallback + detached HEAD ────────────────
+// ─── BOUNDARY — spawn cwd = main checkout + detached HEAD ─────────────────────
 
 describe("session-seat-injection — BOUNDARY", () => {
-  it("briefing found only via the main-checkout assets/ fallback (claude-dir copy absent) still injects", () => {
+  it("the governance --seat-briefing spawn runs with cwd = main checkout, not the worktree", () => {
     const mainRepo = mkScratchDir("seat-main-");
     initGitRepo(mainRepo);
     mkdirSync(join(mainRepo, ".lore"));
-    mkdirSync(join(mainRepo, "assets", "governance"), { recursive: true });
-    const template = readFileSync(join(REPO_ROOT, "assets", "governance", "seat-briefing.md"), "utf8");
-    writeFileSync(join(mainRepo, "assets", "governance", "seat-briefing.md"), template);
+    const mainRepoReal = realpathSync(mainRepo);
 
     const worktreeDir = join(mkScratchDir("seat-wt-parent-"), "wt");
-    execFileSync("git", ["worktree", "add", "-b", "feat/fallback", worktreeDir], { cwd: mainRepo, stdio: "pipe" });
+    execFileSync("git", ["worktree", "add", "-b", "feat/cwd-check", worktreeDir], { cwd: mainRepo, stdio: "pipe" });
 
-    // claude-dir override points at a dir with NO governance/seat-briefing.md.
-    const claudeDir = mkScratchDir("seat-claude-dir-empty-");
-
+    const claudeDir = mkScratchDir("seat-claude-dir-");
     const logPath = join(mkScratchDir("seat-log-"), "lore-calls.log");
-    const stubDir = makeLoreStub(logPath);
+    const stubDir = makeLoreStub(logPath, { briefingContent: SEAT_BRIEFING_TEMPLATE });
 
     const result = runHook({
       cwd: worktreeDir,
@@ -227,9 +278,10 @@ describe("session-seat-injection — BOUNDARY", () => {
     });
 
     expect(result.status).toBe(0);
-    const ctx = parseAdditionalContext(result.stdout!);
-    expect(ctx).toContain("<session-seat>");
-    expect(ctx).toContain("agent:feat-fallback");
+    const log = readFileSync(logPath, "utf8").trim().split("\n");
+    const governanceCall = log.find((line) => line.includes("governance"));
+    expect(governanceCall).toBeDefined();
+    expect(governanceCall!.startsWith(`${mainRepoReal}\t`)).toBe(true);
   });
 
   it("detached HEAD in the worktree derives worktree-<shortsha> instead of literal HEAD", () => {
@@ -244,12 +296,8 @@ describe("session-seat-injection — BOUNDARY", () => {
     execFileSync("git", ["checkout", "--detach", sha], { cwd: worktreeDir, stdio: "pipe" });
 
     const claudeDir = mkScratchDir("seat-claude-dir-");
-    mkdirSync(join(claudeDir, "governance"), { recursive: true });
-    const template = readFileSync(join(REPO_ROOT, "assets", "governance", "seat-briefing.md"), "utf8");
-    writeFileSync(join(claudeDir, "governance", "seat-briefing.md"), template);
-
     const logPath = join(mkScratchDir("seat-log-"), "lore-calls.log");
-    const stubDir = makeLoreStub(logPath);
+    const stubDir = makeLoreStub(logPath, { briefingContent: SEAT_BRIEFING_TEMPLATE });
 
     const result = runHook({
       cwd: worktreeDir,
@@ -267,10 +315,10 @@ describe("session-seat-injection — BOUNDARY", () => {
   });
 });
 
-// ─── ERROR — briefing absent everywhere → fail-open, never throws/hangs ───────
+// ─── ERROR — governance --seat-briefing failure shapes → fail-open ────────────
 
 describe("session-seat-injection — ERROR", () => {
-  it("briefing absent at both claude-dir and main-checkout assets/ → exit 0, no <session-seat>, one stderr skip note", () => {
+  it("governance --seat-briefing returns empty stdout (exit 0) → exit 0, no <session-seat>, one stderr skip note", () => {
     const mainRepo = mkScratchDir("seat-main-");
     initGitRepo(mainRepo);
     mkdirSync(join(mainRepo, ".lore"));
@@ -279,8 +327,9 @@ describe("session-seat-injection — ERROR", () => {
     execFileSync("git", ["worktree", "add", "-b", "feat/no-briefing", worktreeDir], { cwd: mainRepo, stdio: "pipe" });
 
     const claudeDir = mkScratchDir("seat-claude-dir-empty-");
-
     const logPath = join(mkScratchDir("seat-log-"), "lore-calls.log");
+    // No briefingContent — the stub answers governance --seat-briefing with
+    // empty stdout at exit 0, the natural "unavailable" shape.
     const stubDir = makeLoreStub(logPath);
 
     const result = runHook({
@@ -294,8 +343,34 @@ describe("session-seat-injection — ERROR", () => {
     expect(result.status).toBe(0);
     const ctx = parseAdditionalContext(result.stdout!);
     expect(ctx).not.toContain("<session-seat>");
-    expect(result.stderr).toContain("seat-briefing.md");
+    expect(result.stderr).toContain("seat-briefing unavailable");
     expect(result.stderr).toContain("linked worktree detected");
+  });
+
+  it("governance --seat-briefing exits non-zero even WITH stdout content → fail-open, content never trusted from a failed call", () => {
+    const mainRepo = mkScratchDir("seat-main-");
+    initGitRepo(mainRepo);
+    mkdirSync(join(mainRepo, ".lore"));
+
+    const worktreeDir = join(mkScratchDir("seat-wt-parent-"), "wt");
+    execFileSync("git", ["worktree", "add", "-b", "feat/nonzero-exit", worktreeDir], { cwd: mainRepo, stdio: "pipe" });
+
+    const claudeDir = mkScratchDir("seat-claude-dir-empty-");
+    const logPath = join(mkScratchDir("seat-log-"), "lore-calls.log");
+    const stubDir = makeLoreStub(logPath, { briefingContent: SEAT_BRIEFING_TEMPLATE, briefingExitCode: 1 });
+
+    const result = runHook({
+      cwd: worktreeDir,
+      extraEnv: {
+        PATH: `${stubDir}:${process.env.PATH}`,
+        CLAUDE_AGENTS_DIR_OVERRIDE: join(claudeDir, "agents"),
+      },
+    });
+
+    expect(result.status).toBe(0);
+    const ctx = parseAdditionalContext(result.stdout!);
+    expect(ctx).not.toContain("<session-seat>");
+    expect(result.stderr).toContain("seat-briefing unavailable");
   });
 });
 
@@ -311,12 +386,8 @@ describe("session-seat-injection — STATE", () => {
     execFileSync("git", ["worktree", "add", "-b", "feat/x_y", worktreeDir], { cwd: mainRepo, stdio: "pipe" });
 
     const claudeDir = mkScratchDir("seat-claude-dir-");
-    mkdirSync(join(claudeDir, "governance"), { recursive: true });
-    const template = readFileSync(join(REPO_ROOT, "assets", "governance", "seat-briefing.md"), "utf8");
-    writeFileSync(join(claudeDir, "governance", "seat-briefing.md"), template);
-
     const logPath = join(mkScratchDir("seat-log-"), "lore-calls.log");
-    const stubDir = makeLoreStub(logPath);
+    const stubDir = makeLoreStub(logPath, { briefingContent: SEAT_BRIEFING_TEMPLATE });
 
     const result = runHook({
       cwd: worktreeDir,
@@ -341,12 +412,8 @@ describe("session-seat-injection — REGRESSION", () => {
     const plainDir = mkScratchDir("seat-plain-");
 
     const claudeDir = mkScratchDir("seat-claude-dir-");
-    mkdirSync(join(claudeDir, "governance"), { recursive: true });
-    const template = readFileSync(join(REPO_ROOT, "assets", "governance", "seat-briefing.md"), "utf8");
-    writeFileSync(join(claudeDir, "governance", "seat-briefing.md"), template);
-
     const logPath = join(mkScratchDir("seat-log-"), "lore-calls.log");
-    const stubDir = makeLoreStub(logPath);
+    const stubDir = makeLoreStub(logPath, { briefingContent: SEAT_BRIEFING_TEMPLATE });
 
     const result = runHook({
       cwd: plainDir,
@@ -390,9 +457,10 @@ function loadGoldenPairs(): GoldenPair[] {
   return raw.pairs;
 }
 
-/** Sets up a linked worktree on `branch` with a claude-dir briefing present, runs
- *  the hook, and returns `{ctx, bootstrapCall}` — the same fixture shape the HAPPY
- *  block above uses, factored out for reuse across many golden-pair cases. */
+/** Sets up a linked worktree on `branch` with the stub answering
+ *  governance --seat-briefing, runs the hook, and returns `{ctx, bootstrapCall}`
+ *  — the same fixture shape the HAPPY block above uses, factored out for reuse
+ *  across many golden-pair cases. */
 function runHookInSeatWorktree(branch: string): { ctx: string; bootstrapCall: string | undefined } {
   const mainRepo = mkScratchDir("seat-main-");
   initGitRepo(mainRepo);
@@ -402,12 +470,8 @@ function runHookInSeatWorktree(branch: string): { ctx: string; bootstrapCall: st
   execFileSync("git", ["worktree", "add", "-b", branch, worktreeDir], { cwd: mainRepo, stdio: "pipe" });
 
   const claudeDir = mkScratchDir("seat-claude-dir-");
-  mkdirSync(join(claudeDir, "governance"), { recursive: true });
-  const template = readFileSync(join(REPO_ROOT, "assets", "governance", "seat-briefing.md"), "utf8");
-  writeFileSync(join(claudeDir, "governance", "seat-briefing.md"), template);
-
   const logPath = join(mkScratchDir("seat-log-"), "lore-calls.log");
-  const stubDir = makeLoreStub(logPath);
+  const stubDir = makeLoreStub(logPath, { briefingContent: SEAT_BRIEFING_TEMPLATE });
 
   const result = runHook({
     cwd: worktreeDir,
@@ -437,12 +501,8 @@ describe("session-seat-injection — SPEC-057 seat signal on lore bootstrap (AC-
     mkdirSync(join(mainRepo, ".lore"));
 
     const claudeDir = mkScratchDir("seat-claude-dir-");
-    mkdirSync(join(claudeDir, "governance"), { recursive: true });
-    const template = readFileSync(join(REPO_ROOT, "assets", "governance", "seat-briefing.md"), "utf8");
-    writeFileSync(join(claudeDir, "governance", "seat-briefing.md"), template);
-
     const logPath = join(mkScratchDir("seat-log-"), "lore-calls.log");
-    const stubDir = makeLoreStub(logPath);
+    const stubDir = makeLoreStub(logPath, { briefingContent: SEAT_BRIEFING_TEMPLATE });
 
     const result = runHook({
       cwd: mainRepo,

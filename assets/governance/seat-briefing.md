@@ -28,7 +28,8 @@ This session opened inside a linked git worktree of a lore-governed repo. The co
 
 ## On exit or interruption
 
-- Open work not yet landed → `lore create knowledge --sub-type handoff --title "Handoff — {{ACTOR}}" --by {{ACTOR}}` (or `lore handoff --by {{ACTOR}}` where available) before the seat closes.
+- Open work not yet landed → `lore handoff --by {{ACTOR}} [--plan <plan>] --decision "<judgment>[@confidence]" --next "<next step>"` before the seat closes — the writer-identity guard rejects any `lore create knowledge` attempt at this doc type, naming `lore handoff` as the sole writer.
+- After writing a handoff, ALWAYS report its ticket to the user: the handoff slug plus the paste-ready resume command `lore feed session-resume --handoff <slug>`.
 
 ## Opening move
 

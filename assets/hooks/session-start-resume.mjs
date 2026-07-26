@@ -24,8 +24,15 @@
  *          block was REMOVED the same day: the harness natively lists custom
  *          agents from ~/.claude/agents.
  * Phase D: linked-worktree seat detection (SPEC-047) — auto-injects the
- *          seat-briefing.md discipline block for sessions opened inside a
- *          linked git worktree of a lore-governed repo
+ *          seat-briefing discipline block for sessions opened inside a
+ *          linked git worktree of a lore-governed repo. SPEC-085 D2: the
+ *          template source is now the RUNTIME `lore governance
+ *          --seat-briefing` verb (the SAME resolved binary Phase C/E spawn),
+ *          never an installed file snapshot — the pre-SPEC-085 two-candidate
+ *          lookup (`<claude-dir>/governance/seat-briefing.md`, then
+ *          `<main-checkout>/assets/governance/seat-briefing.md`) is retired
+ *          along with the install-set entry (D3). Placeholder substitution
+ *          and the fail-open contract are unchanged.
  * Phase E: lore bootstrap injection (corpus pointer set, when the resolved
  *          corpus root — main checkout for a linked worktree, cwd otherwise —
  *          has .lore/). SPEC-080 D3 — this hook is a BLIND PIPE: it spawns
@@ -226,25 +233,38 @@ try {
           .replace(/^-|-$/g, '');
         const actor = `agent:${actorSlug}`;
 
-        // "claude-dir" per the hook's existing home-resolution convention:
-        // AGENTS_DIR is always <claude-dir>/agents (default or override), so
-        // its dirname is <claude-dir> under either default or test override.
-        const claudeDir = dirname(AGENTS_DIR);
-        const briefingCandidates = [
-          join(claudeDir, 'governance', 'seat-briefing.md'),
-          join(mainCheckout, 'assets', 'governance', 'seat-briefing.md'),
-        ];
-        const briefingPath = briefingCandidates.find((p) => existsSync(p));
-        if (briefingPath) {
-          const template = readFileSync(briefingPath, 'utf8');
-          seatBlock = template
+        // SPEC-085 D2 — source is now the RUNTIME `lore governance --seat-briefing`
+        // verb (never an installed file snapshot under `<claude-dir>/governance/`
+        // or the worktree's `assets/governance/`, both retired from the install
+        // set by D3). Same binary Phase C/E already spawn as bare `'lore'`, same
+        // invocation shape (`cwd: mainCheckout` — the corpus root Phase D just
+        // resolved). Fail-open: a missing binary (ENOENT), non-zero exit, or
+        // empty stdout leaves `seatBlock` at its initial `''` and prints a
+        // same-shaped stderr notice — identical fail-open contract to the
+        // pre-SPEC-085 missing-file case, never blocks session start.
+        let briefingTemplate = '';
+        try {
+          const briefingResult = spawnSync('lore', ['governance', '--seat-briefing'], {
+            cwd: mainCheckout,
+            encoding: 'utf8',
+            timeout: 5000,
+          });
+          if (briefingResult.status === 0 && typeof briefingResult.stdout === 'string'
+              && briefingResult.stdout.length > 0) {
+            briefingTemplate = briefingResult.stdout;
+          }
+        } catch { /* fail-open — seat-briefing injection must never block session start */ }
+
+        if (briefingTemplate) {
+          seatBlock = briefingTemplate
             .split('{{ACTOR}}').join(actor)
             .split('{{BRANCH}}').join(branch)
             .split('{{MAIN_CHECKOUT}}').join(mainCheckout);
         } else {
           process.stderr.write(
-            'session-start-resume: linked worktree detected but no seat-briefing.md found '
-            + `(checked ${briefingCandidates.join(', ')}); skipping seat injection\n`,
+            'session-start-resume: linked worktree detected but seat-briefing unavailable '
+            + "from binary ('lore governance --seat-briefing' failed or returned empty); "
+            + 'skipping seat injection\n',
           );
         }
       }

@@ -279,14 +279,18 @@ describe("registry-free npm install simulation — HAPPY", () => {
       expect(setupDryRunJson.ok).toBe(true);
       expect(setupDryRunJson.data.targetDir).toBe(setupDryRunTargetDir);
       expect(setupDryRunJson.data.plan.writes.length).toBeGreaterThan(0);
-      // A specific, stable governance asset — proves the STAGED assets/ tree (not an
+      // A specific, stable hook asset — proves the STAGED assets/ tree (not an
       // empty/missing one) was actually walked from the real installed package dir.
-      // SPEC-083 D3: governance/corpus-workflow.md is retired from the install set
-      // (the runtime `lore governance` verb reads it from the binary's own assets
-      // root instead) — seat-briefing.md is the remaining installed governance file
-      // and is asserted present INSTEAD, while corpus-workflow.md is asserted absent
-      // (proving the retirement, not just silence on the old assertion).
-      expect(setupDryRunJson.data.plan.writes.some((w) => w.path.includes("seat-briefing.md"))).toBe(true);
+      // SPEC-083 D3 (extended by SPEC-085 D3): BOTH governance/corpus-workflow.md
+      // and governance/seat-briefing.md are retired from the install set — the
+      // runtime `lore governance` verb (and its `--seat-briefing` flag, SPEC-085
+      // D1) read them from the binary's own assets root instead, so the
+      // `governance/` install directory is now empty. session-start-resume.mjs
+      // (a core hook, never retired) is the stable presence proof instead, while
+      // BOTH governance files are asserted absent (proving the retirement, not
+      // just silence on the old assertion).
+      expect(setupDryRunJson.data.plan.writes.some((w) => w.path.includes("session-start-resume.mjs"))).toBe(true);
+      expect(setupDryRunJson.data.plan.writes.some((w) => w.path.includes("seat-briefing.md"))).toBe(false);
       expect(setupDryRunJson.data.plan.writes.some((w) => w.path.includes("corpus-workflow.md"))).toBe(false);
     },
     600_000,

@@ -1,12 +1,18 @@
 /**
- * AC-083-2 — SPEC-083 D3 retirement pins: the MACHINE install asset set
- * yields zero `governance/corpus-workflow.md` entries while
- * `governance/seat-briefing.md` remains, and the session-start hook's
- * SOURCE contains zero `corpus-workflow` occurrences while spawning the
- * `governance` verb (SPEC-083 D2). A pure `node:fs` + `RealAssetSource`
- * suite — `RealAssetSource` imports only `node:crypto`/`node:fs`/`node:path`
- * plus `@lore/core` (no `bun:sqlite`), so it is vitest-resolvable directly,
- * same as its own sibling `real-setup-ports.test.ts`.
+ * AC-083-2 (extended by AC-085-2) — SPEC-083 D3 retirement pins, extended by
+ * SPEC-085 D3: the MACHINE install asset set now yields ZERO
+ * `governance/corpus-workflow.md` AND ZERO `governance/seat-briefing.md`
+ * entries (both governance files are retired from install — the runtime
+ * `lore governance` verb and its `--seat-briefing` flag serve both at read
+ * time, SPEC-085 D1), the session-start hook's SOURCE contains zero
+ * `corpus-workflow` occurrences and zero seat-briefing PATH-READ occurrences
+ * while spawning `governance --seat-briefing` (SPEC-085 D2), and the SSOT
+ * seat-briefing template itself contains zero writer-guard-rejected `create
+ * knowledge --sub-type handoff` occurrences (SPEC-085 D4). A pure `node:fs`
+ * + `RealAssetSource` suite — `RealAssetSource` imports only
+ * `node:crypto`/`node:fs`/`node:path` plus `@lore/core` (no `bun:sqlite`),
+ * so it is vitest-resolvable directly, same as its own sibling
+ * `real-setup-ports.test.ts`.
  *
  * **2026-07-26 regression addendum**: a post-merge full-suite run on main
  * found that the D3 exclusion originally lived ONLY inside
@@ -23,43 +29,52 @@
  * `RealAssetSource.load()` and `buildCheckEmbeddedManifest` (now exported
  * too, for this pin) consume — the CHECK-EMBEDDED-MANIFEST describe block
  * below pins that second consumer directly, closing the exact blind spot the
- * original suite had.
+ * original suite had. SPEC-085 D3 adds `seat-briefing.md` to the SAME SSOT
+ * set, proving the single-declaration fix generalizes to a second file with
+ * zero extra plumbing.
  *
  * Coverage:
  *   HAPPY:      RealAssetSource.load() against the real repo assets/ tree
- *               yields zero corpus-workflow.md entries and exactly one
- *               seat-briefing.md entry (still installed, unaffected); the
- *               CHECK-EMBEDDED-MANIFEST view (`buildCheckEmbeddedManifest`)
- *               independently yields zero corpus-workflow.md entries too
- *   NEGATIVE:   the exclusion is NOT a blanket "drop everything under
- *               governance/" bug — at least one governance-kind file
- *               (seat-briefing.md) still survives BOTH the install walk and
- *               the check-embedded-manifest view
- *   BOUNDARY:   the excluded path is matched by its EXACT relative name
- *               (`governance/corpus-workflow.md`), not a bare filename
- *               substring — a synthetic `governance/nested/corpus-workflow.md`
- *               fixture (different relative path) is NOT excluded, proving
- *               the exclusion isn't an overly broad `.includes("corpus-workflow")`
- *               check that could accidentally swallow an unrelated file
+ *               yields ZERO `governance/` entries at all (both retired
+ *               files gone); the CHECK-EMBEDDED-MANIFEST view
+ *               (`buildCheckEmbeddedManifest`) independently agrees
+ *   NEGATIVE:   the exclusion is NOT a blanket "drop the whole assets/ tree"
+ *               bug — sibling top-level kinds (skills/agents/hooks) still
+ *               have entries in BOTH the install walk and the
+ *               check-embedded-manifest view
+ *   BOUNDARY:   the excluded paths are matched by their EXACT relative name,
+ *               not a bare filename substring — synthetic
+ *               `governance/nested/corpus-workflow.md` and
+ *               `governance/nested/seat-briefing.md` fixtures (different
+ *               relative paths) are NOT excluded, proving the exclusion
+ *               isn't an overly broad substring check that could
+ *               accidentally swallow an unrelated file
  *   ERROR:      (no new error path — RealAssetSource's existing STORE_ERROR
  *               behavior on an unreadable directory is unchanged by this
  *               task and already covered by real-setup-ports.test.ts)
  *   STATE:      the hook source's `corpus-workflow` occurrence count is
- *               EXACTLY zero (not "fewer than before") and its `governance`
- *               verb spawn argument is asserted as a literal array element,
- *               not a loose substring match; the check-embedded-manifest's
- *               `tree_digest` is UNCHANGED by the entries filter (still the
- *               whole-tree digest, proving the filter narrows `entries` only)
- *   REGRESSION: the retired file still physically EXISTS under
- *               assets/governance/ (SPEC-083 D3 — it stays as the runtime
- *               verb's SSOT, only its INSTALLATION is retired) — proves this
- *               suite is testing an install-set exclusion, not an accidental
- *               file deletion; the two consumers (install walk +
- *               check-embedded-manifest) are cross-checked against the SAME
- *               `isRetiredFromInstall` predicate, not two independently
- *               maintained lists that could silently re-diverge
+ *               EXACTLY zero, its seat-briefing.md PATH-READ occurrence
+ *               count is EXACTLY zero (the former two-candidate `join(...,
+ *               'seat-briefing.md')` lookup is gone), and it spawns
+ *               `governance --seat-briefing` as a literal argv pair; the
+ *               check-embedded-manifest's `tree_digest` is UNCHANGED by the
+ *               entries filter (still the whole-tree digest, proving the
+ *               filter narrows `entries` only); the SSOT seat-briefing
+ *               template's `create knowledge --sub-type handoff` occurrence
+ *               count is EXACTLY zero
+ *   REGRESSION: both retired files still physically EXIST under
+ *               assets/governance/ (SPEC-083/085 D3 — they stay as the
+ *               runtime verb's SSOT, only their INSTALLATION is retired) —
+ *               proves this suite is testing an install-set exclusion, not
+ *               an accidental file deletion; the two consumers (install walk
+ *               + check-embedded-manifest) are cross-checked against the
+ *               SAME `isRetiredFromInstall` predicate, not two independently
+ *               maintained lists that could silently re-diverge; every
+ *               occurrence-count assertion carries a REGRESSION-control
+ *               fixture proving it isn't vacuously true
  *
- * @spec_ref SPEC-083 §Acceptance Criteria AC-083-2
+ * @spec_ref SPEC-083 §Acceptance Criteria AC-083-2, SPEC-085 §Acceptance
+ *   Criteria AC-085-2
  */
 
 import { describe, it, expect } from "vitest";
@@ -75,11 +90,13 @@ import { buildCheckEmbeddedManifest } from "../../src/adapters/cli/setup-check.j
 const REPO_ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..", "..");
 const ASSETS_ROOT = join(REPO_ROOT, "assets");
 const SESSION_START_HOOK_PATH = join(ASSETS_ROOT, "hooks", "session-start-resume.mjs");
+const SEAT_BRIEFING_SSOT_PATH = join(ASSETS_ROOT, "governance", "seat-briefing.md");
 
-const RETIRED_PATH = "governance/corpus-workflow.md";
-const SURVIVING_PATH = "governance/seat-briefing.md";
+const RETIRED_PATH_CORPUS_WORKFLOW = "governance/corpus-workflow.md";
+const RETIRED_PATH_SEAT_BRIEFING = "governance/seat-briefing.md";
+const RETIRED_PATHS = [RETIRED_PATH_CORPUS_WORKFLOW, RETIRED_PATH_SEAT_BRIEFING];
 
-// ─── HAPPY — RealAssetSource.load() excludes corpus-workflow.md, keeps seat-briefing.md ─
+// ─── HAPPY — RealAssetSource.load() excludes BOTH governance files (SPEC-085 D3) ─
 
 describe("setup-governance-retirement — HAPPY (RealAssetSource install set)", () => {
   it("RealAssetSource.load() against the real repo assets/ tree yields zero governance/corpus-workflow.md entries", async () => {
@@ -89,18 +106,27 @@ describe("setup-governance-retirement — HAPPY (RealAssetSource install set)", 
     if (!result.ok) return;
 
     const paths = result.value.files.map((f) => f.path);
-    expect(paths).not.toContain(RETIRED_PATH);
+    expect(paths).not.toContain(RETIRED_PATH_CORPUS_WORKFLOW);
   });
 
-  it("RealAssetSource.load() still yields exactly one governance/seat-briefing.md entry", async () => {
+  it("RealAssetSource.load() yields zero governance/seat-briefing.md entries (SPEC-085 D3)", async () => {
     const source = new RealAssetSource(ASSETS_ROOT);
     const result = await source.load();
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    const matches = result.value.files.filter((f) => f.path === SURVIVING_PATH);
-    expect(matches.length).toBe(1);
-    expect(matches[0]?.kind).toBe("governance");
+    const paths = result.value.files.map((f) => f.path);
+    expect(paths).not.toContain(RETIRED_PATH_SEAT_BRIEFING);
+  });
+
+  it("RealAssetSource.load() yields ZERO governance-kind entries at all (both retirements together empty the install directory)", async () => {
+    const source = new RealAssetSource(ASSETS_ROOT);
+    const result = await source.load();
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const governanceFiles = result.value.files.filter((f) => f.kind === "governance");
+    expect(governanceFiles.length).toBe(0);
   });
 });
 
@@ -113,13 +139,19 @@ describe("setup-governance-retirement — HAPPY (check-embedded-manifest view)",
   it("buildCheckEmbeddedManifest() yields zero governance/corpus-workflow.md entries", () => {
     const manifest = buildCheckEmbeddedManifest();
     const paths = manifest.entries.map((e) => e.path);
-    expect(paths).not.toContain(RETIRED_PATH);
+    expect(paths).not.toContain(RETIRED_PATH_CORPUS_WORKFLOW);
   });
 
-  it("buildCheckEmbeddedManifest() still yields exactly one governance/seat-briefing.md entry", () => {
+  it("buildCheckEmbeddedManifest() yields zero governance/seat-briefing.md entries (SPEC-085 D3)", () => {
     const manifest = buildCheckEmbeddedManifest();
-    const matches = manifest.entries.filter((e) => e.path === SURVIVING_PATH);
-    expect(matches.length).toBe(1);
+    const paths = manifest.entries.map((e) => e.path);
+    expect(paths).not.toContain(RETIRED_PATH_SEAT_BRIEFING);
+  });
+
+  it("buildCheckEmbeddedManifest() yields ZERO governance-kind entries at all", () => {
+    const manifest = buildCheckEmbeddedManifest();
+    const governanceEntries = manifest.entries.filter((e) => e.kind === "governance");
+    expect(governanceEntries.length).toBe(0);
   });
 
   it("every buildCheckEmbeddedManifest() entry independently satisfies !isRetiredFromInstall (cross-check against the shared predicate, not a hand-duplicated list)", () => {
@@ -142,27 +174,32 @@ describe("setup-governance-retirement — STATE (check-embedded-manifest tree_di
     // proves the fix didn't achieve "missing excluded" by also shrinking the
     // digest input, which would break the SEPARATE assets_digest equality
     // check `planUpdate` performs elsewhere.
-    expect(manifest.entries.map((e) => e.path)).not.toContain(RETIRED_PATH);
+    expect(manifest.entries.map((e) => e.path)).not.toContain(RETIRED_PATH_CORPUS_WORKFLOW);
+    expect(manifest.entries.map((e) => e.path)).not.toContain(RETIRED_PATH_SEAT_BRIEFING);
   });
 });
 
-// ─── NEGATIVE — exclusion is scoped, not a blanket governance/ wipe ────────
+// ─── NEGATIVE — exclusion is scoped to governance/, not a blanket assets/ wipe ─
 
 describe("setup-governance-retirement — NEGATIVE", () => {
-  it("at least one governance-kind file still survives the walk (not a blanket exclusion)", async () => {
+  it("sibling top-level kinds (skills/agents/hooks) still have entries in the install walk (not a blanket assets/ exclusion)", async () => {
     const source = new RealAssetSource(ASSETS_ROOT);
     const result = await source.load();
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    const governanceFiles = result.value.files.filter((f) => f.kind === "governance");
-    expect(governanceFiles.length).toBeGreaterThan(0);
+    for (const kind of ["skill", "agent", "hook"] as const) {
+      const matches = result.value.files.filter((f) => f.kind === kind);
+      expect(matches.length).toBeGreaterThan(0);
+    }
   });
 
-  it("at least one governance-kind entry still survives buildCheckEmbeddedManifest() too (not a blanket exclusion)", () => {
+  it("sibling top-level kinds still have entries in buildCheckEmbeddedManifest() too (not a blanket assets/ exclusion)", () => {
     const manifest = buildCheckEmbeddedManifest();
-    const governanceEntries = manifest.entries.filter((e) => e.kind === "governance");
-    expect(governanceEntries.length).toBeGreaterThan(0);
+    for (const kind of ["skill", "agent", "hook"] as const) {
+      const matches = manifest.entries.filter((e) => e.kind === kind);
+      expect(matches.length).toBeGreaterThan(0);
+    }
   });
 });
 
@@ -192,9 +229,31 @@ describe("setup-governance-retirement — BOUNDARY (exact-path exclusion)", () =
       rmSync(tmpRoot, { recursive: true, force: true });
     }
   });
+
+  it("a synthetic nested seat-briefing.md (different relative path) is NOT excluded (SPEC-085 D3)", async () => {
+    const tmpRoot = mkdtempSync(join(tmpdir(), "governance-retirement-boundary-"));
+    try {
+      const nestedDir = join(tmpRoot, "governance", "nested");
+      mkdirSync(nestedDir, { recursive: true });
+      writeFileSync(join(nestedDir, "seat-briefing.md"), "nested fixture, must survive\n");
+      for (const dir of ["skills", "agents", "hooks"]) {
+        mkdirSync(join(tmpRoot, dir), { recursive: true });
+      }
+
+      const source = new RealAssetSource(tmpRoot);
+      const result = await source.load();
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+
+      const paths = result.value.files.map((f) => f.path);
+      expect(paths).toContain("governance/nested/seat-briefing.md");
+    } finally {
+      rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
 });
 
-// ─── STATE — hook source: zero corpus-workflow occurrences, spawns governance ──
+// ─── STATE — hook source: zero path-read occurrences, spawns the runtime verb ──
 
 describe("setup-governance-retirement — STATE (session-start-resume.mjs hook source)", () => {
   it("the hook source contains ZERO 'corpus-workflow' occurrences", () => {
@@ -203,12 +262,24 @@ describe("setup-governance-retirement — STATE (session-start-resume.mjs hook s
     expect(occurrences).toBe(0);
   });
 
+  it("the hook source contains ZERO seat-briefing.md path-read occurrences (the old two-candidate join(...) lookup is gone)", () => {
+    const content = readFileSync(SESSION_START_HOOK_PATH, "utf8");
+    expect(content).not.toContain("join(claudeDir, 'governance', 'seat-briefing.md')");
+    expect(content).not.toContain("join(mainCheckout, 'assets', 'governance', 'seat-briefing.md')");
+    expect(content).not.toContain("readFileSync(briefingPath");
+  });
+
   it("the hook spawns the 'governance' verb as a literal argv element", () => {
     const content = readFileSync(SESSION_START_HOOK_PATH, "utf8");
     expect(content).toContain("spawnSync('lore', ['governance'");
   });
 
-  it("REGRESSION control: the occurrence-count assertion is not vacuously true — a synthetic fixture carrying the marker IS flagged", () => {
+  it("the hook passes --seat-briefing as a spawn argument to the governance verb (SPEC-085 D2)", () => {
+    const content = readFileSync(SESSION_START_HOOK_PATH, "utf8");
+    expect(content).toContain("spawnSync('lore', ['governance', '--seat-briefing']");
+  });
+
+  it("REGRESSION control: the corpus-workflow occurrence-count assertion is not vacuously true — a synthetic fixture carrying the marker IS flagged", () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "governance-retirement-state-control-"));
     try {
       const tmpFile = join(tmpDir, "fixture-hook.mjs");
@@ -220,12 +291,67 @@ describe("setup-governance-retirement — STATE (session-start-resume.mjs hook s
       rmSync(tmpDir, { recursive: true, force: true });
     }
   });
+
+  it("REGRESSION control: the seat-briefing path-read assertion is not vacuously true — a synthetic fixture carrying the OLD join(...) pattern IS flagged", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "governance-retirement-state-control-"));
+    try {
+      const tmpFile = join(tmpDir, "fixture-hook.mjs");
+      writeFileSync(
+        tmpFile,
+        "const briefingPath = join(claudeDir, 'governance', 'seat-briefing.md');\n"
+        + "const template = readFileSync(briefingPath, 'utf8');\n",
+      );
+      const content = readFileSync(tmpFile, "utf8");
+      expect(content).toContain("join(claudeDir, 'governance', 'seat-briefing.md')");
+      expect(content).toContain("readFileSync(briefingPath");
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
 });
 
-// ─── REGRESSION — the retired file still exists on disk (SSOT, not deleted) ──
+// ─── STATE — SSOT seat-briefing template: zero writer-guard-rejected calls ────
 
-describe("setup-governance-retirement — REGRESSION (file stays on disk as the runtime verb's SSOT)", () => {
+describe("setup-governance-retirement — STATE (seat-briefing.md SSOT content, SPEC-085 D4)", () => {
+  it("assets/governance/seat-briefing.md contains ZERO 'create knowledge --sub-type handoff' occurrences", () => {
+    const content = readFileSync(SEAT_BRIEFING_SSOT_PATH, "utf8");
+    const occurrences = content.split("create knowledge --sub-type handoff").length - 1;
+    expect(occurrences).toBe(0);
+  });
+
+  it("assets/governance/seat-briefing.md instructs 'lore handoff --by' as the exit-path verb", () => {
+    const content = readFileSync(SEAT_BRIEFING_SSOT_PATH, "utf8");
+    expect(content).toContain("lore handoff --by");
+  });
+
+  it("REGRESSION control: the occurrence-count assertion is not vacuously true — a synthetic fixture carrying the marker IS flagged", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "governance-retirement-state-control-"));
+    try {
+      const tmpFile = join(tmpDir, "fixture-briefing.md");
+      writeFileSync(tmpFile, "lore create knowledge --sub-type handoff --title x\n");
+      const content = readFileSync(tmpFile, "utf8");
+      const occurrences = content.split("create knowledge --sub-type handoff").length - 1;
+      expect(occurrences).toBeGreaterThan(0);
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ─── REGRESSION — both retired files still exist on disk (SSOT, not deleted) ──
+
+describe("setup-governance-retirement — REGRESSION (files stay on disk as the runtime verb's SSOT)", () => {
   it("assets/governance/corpus-workflow.md still physically exists (install-set exclusion, not a file deletion)", () => {
-    expect(existsSync(join(ASSETS_ROOT, RETIRED_PATH))).toBe(true);
+    expect(existsSync(join(ASSETS_ROOT, RETIRED_PATH_CORPUS_WORKFLOW))).toBe(true);
+  });
+
+  it("assets/governance/seat-briefing.md still physically exists (install-set exclusion, not a file deletion)", () => {
+    expect(existsSync(join(ASSETS_ROOT, RETIRED_PATH_SEAT_BRIEFING))).toBe(true);
+  });
+
+  it("both retired paths are members of RETIRED_FROM_INSTALL_PATHS (cross-check, not a hand-duplicated list)", () => {
+    for (const path of RETIRED_PATHS) {
+      expect(isRetiredFromInstall(path)).toBe(true);
+    }
   });
 });
