@@ -42,6 +42,7 @@
  */
 
 import type {
+  AcCoverageFact,
   AuditEntry,
   ConfigEffect,
   DocRecord,
@@ -839,15 +840,18 @@ export interface PhaseScorecardChecklistItem {
 }
 
 /**
- * One phase's execution scorecard — SPEC-077 S2 `PhaseProgressPanel` projection.
- * Mirrors the server's `PhaseScorecard` (`packages/lore/src/service/
+ * One SPEC-056 phase-DOC's execution scorecard — SPEC-077 S2 `PhaseProgressPanel`
+ * projection. Mirrors the server's `PhaseScorecard` (`packages/lore/src/service/
  * phase-workflow-service.ts`, the `GET /api/phase-status/:planIdOrSlug`
- * response's SSOT) field-for-field. There is NO `dropped_item_names` field on
- * the real response — dropped item names are derived client-side from
- * `checklist_items` entries whose `state === "dropped"` (see
- * `PhaseProgressPanel.tsx`'s `droppedItemNames` helper).
+ * response's SSOT) field-for-field, incl. the `source: "phase-doc"`
+ * discriminant added by `adr-planphasestatus-projects-declared-extra-phases-
+ * alongside`. There is NO `dropped_item_names` field on the real response —
+ * dropped item names are derived client-side from `checklist_items` entries
+ * whose `state === "dropped"` (see `PhaseProgressPanel.tsx`'s
+ * `droppedItemNames` helper).
  */
 export interface PhaseScorecard {
+  source: "phase-doc";
   phase_id: string;
   phase_slug: string;
   phase_title: string;
@@ -864,10 +868,44 @@ export interface PhaseScorecard {
   task_count: number;
 }
 
-/** Response shape of the NEW `GET /api/phase-status/:planIdOrSlug` route (SPEC-077 S3). */
+/**
+ * One SPEC-023 DECLARED phase (`plan.extra.phases[]`) with no corresponding
+ * SPEC-056 phase doc — mirrors the server's `DeclaredPhaseScorecard`
+ * (`packages/lore/src/service/phase-workflow-service.ts`) field-for-field
+ * (`adr-planphasestatus-projects-declared-extra-phases-alongside`).
+ * Deliberately has NO `checklist`/`checklist_items`/`claim`/`phase_id`/`state`/
+ * `vacuous` — those are phase-DOC-only concepts (see the server type's own
+ * JSDoc for why). `ac_coverage` is `AcCoverageFact[]` (`@lore/core`,
+ * `acceptance.ts`) — the SAME shape `SpecAcCoveragePanel` already renders,
+ * never a locally-invented summary shape.
+ */
+export interface DeclaredPhaseScorecard {
+  source: "declared";
+  phase_title: string;
+  /** `true` when this phase name is absent from the plan's CURRENT `extra.phases[]` — an orphaned task-phase reference. */
+  orphaned: boolean;
+  /** Count of `task`-typed plan children whose `extra.phase` names this phase. */
+  task_count: number;
+  /** Sum of `verification_evidence[].result` across every task grouped here. */
+  evidence: { pass: number; fail: number };
+  /** AC-scope coverage for this phase's tasks, computed server-side via `computeAcCoverage` — never recomputed here. */
+  ac_coverage: AcCoverageFact[];
+}
+
+/**
+ * One `planPhaseStatus` entry — a discriminated union (tag: `source`) of the
+ * two phase-authoring paths this corpus supports, mirroring the server's
+ * `PlanPhaseEntry` (`adr-planphasestatus-projects-declared-extra-phases-
+ * alongside`). A client that only ever saw `PhaseScorecard` entries before
+ * this ADR must branch on `source` to keep rendering correctly now that the
+ * array is mixed — see `PhaseProgressPanel.tsx`.
+ */
+export type PlanPhaseEntry = PhaseScorecard | DeclaredPhaseScorecard;
+
+/** Response shape of the `GET /api/phase-status/:planIdOrSlug` route (SPEC-077 S3, extended by adr-planphasestatus-projects-declared-extra-phases-alongside). */
 export interface PhaseStatusResponse {
   plan: { id: string; slug: string; title: string };
-  phases: PhaseScorecard[];
+  phases: PlanPhaseEntry[];
 }
 
 /**
