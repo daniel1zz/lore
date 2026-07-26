@@ -14,6 +14,7 @@ import type {
   DocType,
   LinkRecord,
   LinkType,
+  OrdinalDocType,
   ReviewJudgment,
   ReviewJudgmentKind,
   Slug,
@@ -23,6 +24,7 @@ import {
   err,
   extractValidity,
   ok,
+  ORDINAL_REGISTERED_TYPES,
   SNIPPET_MARK_CLOSE,
   SNIPPET_MARK_OPEN,
   type LoreError,
@@ -155,6 +157,46 @@ export class InMemoryStore implements StoreInterface {
       this.docs.set(id, updated);
       return { kind: "success", value: { ...updated } };
     });
+  }
+
+  /**
+   * @see StoreInterface.assignOrdinalForRepair
+   * SPEC-084 D7's internal repair-migration path — direct assignment of the
+   * caller-computed target, never a `MAX(ordinal)+1` allocation. Reuses
+   * {@link hasOrdinalCollision} (which already scans EVERY doc regardless of
+   * soft-delete state, mirroring the real stores' partial-unique-index
+   * semantics) for the loud, no-retry collision check.
+   */
+  async assignOrdinalForRepair(id: DocId, ordinal: number): Promise<Result<DocRecord, LoreError>> {
+    const current = this.docs.get(id);
+    if (!current) {
+      return err({ code: "DOC_NOT_FOUND", id });
+    }
+    if (!ORDINAL_REGISTERED_TYPES.includes(current.type as OrdinalDocType)) {
+      return err({
+        code: "STORE_ERROR",
+        message: `assignOrdinalForRepair refuses doc ${id}: type "${current.type}" is not an ordinal-registered type`,
+      });
+    }
+    if (current.ordinal !== null && current.ordinal !== undefined) {
+      if (current.ordinal === ordinal) {
+        // Idempotent no-op — a repeat repair call at the SAME target succeeds without a write.
+        return ok({ ...current });
+      }
+      return err({
+        code: "STORE_ERROR",
+        message: `doc ${id} already carries ordinal ${current.ordinal}; assignOrdinalForRepair refuses to overwrite it with a DIFFERENT value ${ordinal}`,
+      });
+    }
+    if (this.hasOrdinalCollision(current.type, ordinal)) {
+      return err({
+        code: "STORE_ERROR",
+        message: `assignOrdinalForRepair collision: another doc of type "${current.type}" already carries ordinal ${ordinal}`,
+      });
+    }
+    const updated: DocRecord = { ...current, ordinal, version: current.version + 1 };
+    this.docs.set(id, updated);
+    return ok({ ...updated });
   }
 
   /**

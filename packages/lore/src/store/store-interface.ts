@@ -211,6 +211,45 @@ export interface StoreInterface {
     expectedVersion: number,
   ): Promise<Result<DocRecord, LoreError>>;
 
+  /**
+   * Directly assigns the EXACT `ordinal` value passed in — the ONLY store
+   * write path that does NOT compute `MAX(ordinal)+1` (SPEC-084 D7: "repair
+   * migration uses an internal store path"). Deliberately NOT exposed via
+   * CLI/MCP/HTTP and not for any other caller — `insertWithAllocatedOrdinal`/
+   * `allocateOrdinalForExisting` remain the only two ALLOCATION sites (Plan
+   * Invariant 2); this is a distinct, sanctioned TARGETED-ASSIGNMENT path
+   * used exclusively by `OrdinalMigrationService`'s one-shot repair, whose
+   * own dry-run-computed target must reproduce byte-identically once
+   * applied, on any claimed-number topology (including one with real
+   * historical gaps a MAX+1 sweep could never reconstruct).
+   *
+   * No bounded retry: a repair target colliding with a live row means the
+   * migration's OWN plan is wrong (its `taken` bookkeeping already computed
+   * the target to be collision-free against the current corpus state), not
+   * a transient race worth retrying around — the partial `(type, ordinal)`
+   * UNIQUE index remains the sole uniqueness authority, and any violation
+   * propagates loud and immediate. No CAS `expectedVersion` parameter
+   * either — the repair migration is a single-process, non-concurrent
+   * sweep (the same argument `insertWithAllocatedOrdinal`'s own JSDoc
+   * makes), and its own `versionByDocId` bookkeeping already sequences
+   * this write before any later title-strip write on the same doc.
+   *
+   * @param id - Doc id to assign an ordinal to.
+   * @param ordinal - The EXACT target value (never MAX+1-derived by this
+   *   method itself — the caller has already resolved it).
+   * @returns `ok(doc)` with `ordinal` populated, `version` incremented by 1,
+   *   on a fresh assignment; `ok(doc)` UNCHANGED (no write) when `doc`
+   *   already carries this SAME value (idempotent no-op — a repeat repair
+   *   call); `DOC_NOT_FOUND` if `id` doesn't exist; `STORE_ERROR` if the doc
+   *   already carries a DIFFERENT ordinal, if `doc.type` is not an
+   *   ordinal-registered type, or on a genuine `(type, ordinal)` collision.
+   * @see SPEC-084 §Module Boundary D7
+   */
+  assignOrdinalForRepair(
+    id: DocId,
+    ordinal: number,
+  ): Promise<Result<DocRecord, LoreError>>;
+
   /** Find doc by ULID. Returns null (not error) if not found. */
   find(id: DocId): Promise<Result<DocRecord | null, LoreError>>;
 

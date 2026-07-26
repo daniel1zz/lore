@@ -8,26 +8,64 @@
  *
  *   1. **Ordinal backfill** — every `spec`/`adr` doc NOT in an exempt
  *      `spec_kind` (`ORDINAL_REGISTRY`, `@lore/core`) whose `ordinal` column
- *      is still `null` gets one, via the store's OWN sanctioned UPDATE-scoped
- *      allocation method ({@link StoreInterface.allocateOrdinalForExisting},
- *      SPEC-084 D1) — this module NEVER writes an arbitrary caller-chosen
- *      ordinal value anywhere (SPEC-084 D7's "no public --ordinal/--number
- *      flag ANYWHERE" reads as a stronger invariant than "no CLI flag": no
- *      code path, including this one-shot repair, injects a specific number
- *      into the `ordinal` column — every write is an ALLOCATION, i.e.
- *      store-computed MAX+1). What this migration DOES control is
- *      **priority order**: per type, eligible docs are sorted by
- *      (title-declared number ascending, undeclared last; `created_at`
- *      ascending; `id` ascending as a final deterministic tiebreak) BEFORE
- *      being fed one-at-a-time into `allocateOrdinalForExisting`. Since that
- *      method always assigns `MAX(ordinal WHERE type=?) + 1` and this
- *      migration is a single-process, non-concurrent sweep, processing in
- *      priority order reproduces the historically-correct numbers for every
- *      doc that never collided, and gives "next free" (the running MAX+1 at
- *      the moment it's this doc's turn) to every collision loser — exactly
- *      the live-incident worked example (SPEC-084 §One-shot repair
- *      migration): the earliest of three same-titled "SPEC-080" docs keeps
- *      080, the next collision loser gets 081, the next gets 082.
+ *      is still `null` gets one. A LIVE run assigns it via the store's OWN
+ *      sanctioned repair-migration path ({@link StoreInterface.assignOrdinalForRepair},
+ *      SPEC-084 D7 — "repair migration uses an internal store path"): a
+ *      DIRECT UPDATE-scoped write of THIS module's own computed target
+ *      (below), never a `MAX(ordinal)+1` allocation — the partial
+ *      `(type, ordinal)` UNIQUE index remains the sole uniqueness authority,
+ *      and a genuine collision propagates loud and immediate (this
+ *      migration's own `taken` bookkeeping already guarantees the target is
+ *      collision-free against the current corpus state; a violation would
+ *      mean the migration's OWN plan is wrong, not a transient race).
+ *      `insertWithAllocatedOrdinal`/`allocateOrdinalForExisting` remain the
+ *      only two ALLOCATION (MAX+1) call sites (Plan Invariant 2) —
+ *      `assignOrdinalForRepair` is a distinct, sanctioned TARGETED-ASSIGNMENT
+ *      path used exclusively here.
+ *
+ *      **Declared-number CLAIM semantics (2026-07-27 fix)** — a title- or
+ *      export-index-declared number is a CLAIM to be honored, not a hint a
+ *      dense renumber may discard. Per type, every eligible doc is
+ *      classified into one of three buckets:
+ *        - **Tier 1** — the title self-declares a number
+ *          (`extractTitleDeclaredOrdinal`).
+ *        - **Tier 2** — no title-declared number, but the doc's EXISTING
+ *          `.lore/export-index.json` mapping's `human_id` parses as this
+ *          doc's type prefix + a number (`extractExportIndexDeclaredOrdinal`)
+ *          — this is what keeps legacy pre-title-convention docs (the
+ *          original v1 numbering, e.g. early SPEC-0xx/ADR-0xx entries whose
+ *          titles never carried the number) in place; without this tier
+ *          they would all present as "undeclared" and be shoved to the back
+ *          of the queue, incorrectly bumping every genuinely-numbered doc
+ *          created since (the exact defect a live dry run against this
+ *          corpus proved — see the git history / retro knowledge doc for
+ *          the empirical trace).
+ *        - **Unclaimed** — neither.
+ *
+ *      Each tier is internally ordered by `created_at` ascending (`id`
+ *      ascending final tiebreak) and a per-type `taken: Set<number>` cascade
+ *      is walked **tier 1 entirely, then tier 2 entirely, then unclaimed**:
+ *      a claimant's TARGET is its declared number if free, else the next
+ *      free integer ≥ its declared number (`nextFreeOrdinalAtOrAbove`) —
+ *      tier 1 always wins a same-number collision against a tier-2 claim
+ *      processed after it, and multiple same-tier claimants of the same
+ *      number cascade forward in `created_at` order (the pre-existing
+ *      triple-collision behavior, generalized to recognize tier 2). An
+ *      unclaimed doc's target is the next integer STRICTLY ABOVE the
+ *      highest ordinal claimed/assigned so far — it never fills a lower gap
+ *      a claimed number skipped over (D9's "don't mint a false reference"
+ *      spirit).
+ *
+ *      This per-type TARGET is computed ONCE and is what BOTH a dry run
+ *      reports (`reassignments[].new_ordinal`) AND what a live `--apply`
+ *      run persists via `assignOrdinalForRepair` — the two are equal BY
+ *      CONSTRUCTION, on any claimed-number topology (dense or genuinely
+ *      gapped), never merely by luck of a dense corpus (2026-07-27
+ *      adjudication follow-up: an earlier revision fed the target through
+ *      `allocateOrdinalForExisting`'s MAX+1-only mechanism instead, which
+ *      only reproduced the target when the type-space happened to be
+ *      dense — REJECTED, since the live corpus has real historical gaps in
+ *      its claimed-number set).
  *   2. **Title strip** — every `spec`/`adr` doc (exempt kind or not — the
  *      title-purity rule is independent of whether a doc actually receives
  *      an ordinal, SPEC-084 D6) whose title still self-declares a number
@@ -54,10 +92,10 @@
  *
  * Dry-run (the CLI default) executes the identical read-only planning logic
  * for all three steps and performs ZERO store/filesystem writes — the
- * ordinal-backfill step's "planned" value for a live run is derived from the
- * SAME `MAX+1`-per-priority-position arithmetic the live run's sequential
- * `allocateOrdinalForExisting` calls will produce (no separate, divergently-
- * maintained preview algorithm).
+ * ordinal-backfill step's reported value IS the computed claim TARGET
+ * step 1 describes, the SAME value a live `--apply` run persists via
+ * `assignOrdinalForRepair` (equal by construction, not by coincidence of a
+ * dense corpus).
  *
  * Per-doc errors do NOT abort the whole run (mirrors `ExportDocsService`'s
  * documented "other docs still process" precedent) — collected into
@@ -93,6 +131,7 @@ import type {
   DocStatus,
   DocType,
   ExportIndex,
+  ExportIndexMapping,
   LoreError,
   Result,
 } from "@lore/core";
@@ -126,11 +165,23 @@ export interface OrdinalReassignmentEntry {
   doc_id: string;
   type: DocType;
   title: string;
-  /** The number the title itself declared, or `null` if it declared none. */
+  /**
+   * The number this doc's WINNING claim declared, or `null` if it declared
+   * none (an "unclaimed" doc). Tier-agnostic: a title-declared (tier 1)
+   * number if present, else an export-index-declared (tier 2) number, else
+   * `null` — see `claim_source` for which one it was.
+   */
   declared_ordinal: number | null;
-  /** `formatDocDisplayId` of `declared_ordinal`, or `null`. What the title CLAIMED. */
+  /** Which source this doc's claim (if any) came from — `null` for an unclaimed doc. */
+  claim_source: "title" | "export_index" | null;
+  /** `formatDocDisplayId` of `declared_ordinal`, or `null`. What this doc's claim declared. */
   old_display: string | null;
-  /** The ordinal actually assigned (live run: store-returned; dry-run: simulated). */
+  /**
+   * The ordinal actually assigned — the computed claim TARGET (module
+   * header step 1) in BOTH modes: dry-run reports it directly, and a live
+   * `--apply` run persists this EXACT value via `assignOrdinalForRepair`
+   * (never a store-derived MAX+1 value that could diverge from the report).
+   */
   new_ordinal: number;
   /** `formatDocDisplayId` of `new_ordinal`. What the doc's identity IS after this run. */
   new_display: string;
@@ -182,6 +233,14 @@ export interface OrdinalMigrationReport {
   /** Count of actual store/filesystem writes performed — always `0` for a dry run
    *  and for an idempotent second `--apply` run with nothing left to converge. */
   writes_performed: number;
+  /**
+   * `reassignments.filter(r => !r.changed).length` — every doc whose
+   * declared claim already equalled its assigned number (an `[UNCHANGED]`
+   * row per the report's explicit UNCHANGED/CHANGED split).
+   */
+  unchanged_count: number;
+  /** `reassignments.filter(r => r.changed).length` — the complement of {@link unchanged_count}. */
+  changed_count: number;
   /** Per-doc failures that did NOT abort the run (mirrors `ExportDocsService`'s
    *  "errors do not abort the whole run" precedent) — empty on a clean run. */
   errors: string[];
@@ -245,23 +304,68 @@ function stripTitleOrdinalPrefix(type: DocType, title: string): string {
 }
 
 /**
- * Deterministic priority ordering for ordinal-backfill candidates of ONE
- * type: title-declared number ascending (undeclared sorts LAST — an
- * undeclared doc should never steal a low number from a genuinely-numbered
- * one), then `created_at` ascending, then `id` ascending as a final
- * tiebreak for full determinism (SPEC-084 §One-shot repair migration step 1
- * "created_at priority").
+ * Extracts the number a doc's EXISTING `.lore/export-index.json` mapping
+ * declares for its own type's prefix (e.g. `human_id: "SPEC-025"` → `25`),
+ * tolerating zero-padding the same way {@link extractTitleDeclaredOrdinal}
+ * does. This is the tier-2 claim source (2026-07-27 backfill-semantics
+ * fix) — a doc whose TITLE declares no number but whose export mapping
+ * already declares one (legacy pre-title-convention docs) still gets to
+ * CLAIM that number, at lower precedence than a tier-1 title claim. Returns
+ * `undefined` when there is no mapping for this doc, the doc's type isn't
+ * in {@link ORDINAL_REGISTRY}, or the mapping's `human_id` doesn't parse as
+ * this type's prefix + a number.
  */
-function compareOrdinalCandidates(a: DocRecord, b: DocRecord): number {
-  const da = extractTitleDeclaredOrdinal(a.type, a.title);
-  const db = extractTitleDeclaredOrdinal(b.type, b.title);
-  const na = da ?? Number.POSITIVE_INFINITY;
-  const nb = db ?? Number.POSITIVE_INFINITY;
-  if (na !== nb) return na - nb;
+function extractExportIndexDeclaredOrdinal(
+  type: DocType,
+  mapping: ExportIndexMapping | undefined,
+): number | undefined {
+  if (mapping === undefined) return undefined;
+  const entry = ORDINAL_REGISTRY[type];
+  if (entry === undefined) return undefined;
+  const pattern = new RegExp(`^${entry.prefix}-0*(\\d+)$`);
+  const match = pattern.exec(mapping.human_id.trim());
+  if (match === null) return undefined;
+  const raw = match[1];
+  return raw === undefined ? undefined : Number.parseInt(raw, 10);
+}
+
+/**
+ * The smallest integer ≥ `candidate` not already in `taken` — the cascade
+ * primitive behind "declared number if free, else next free ≥ declared"
+ * (SPEC-084 backfill-semantics fix). Also used, with `candidate =
+ * maxOrdinal + 1`, for an unclaimed doc's "next free strictly above the
+ * highest claim so far" assignment (in that case `taken` never actually
+ * blocks the candidate — the caller has already ensured `candidate` exceeds
+ * every member of `taken`).
+ */
+function nextFreeOrdinalAtOrAbove(candidate: number, taken: ReadonlySet<number>): number {
+  let n = candidate;
+  while (taken.has(n)) n += 1;
+  return n;
+}
+
+/**
+ * Deterministic tiebreak ordering used WITHIN one claim tier (or within the
+ * unclaimed bucket) of one type: `created_at` ascending, `id` ascending as
+ * a final tiebreak for full determinism when two docs share a timestamp
+ * (SPEC-084 §One-shot repair migration step 1 "created_at priority"). Does
+ * NOT consider declared number — cross-tier/cross-value ordering is
+ * `migrateOrdinals`'s tier-1-then-tier-2-then-unclaimed structure, not this
+ * function's concern.
+ */
+function compareByCreatedAtThenId(a: DocRecord, b: DocRecord): number {
   if (a.created_at !== b.created_at) return a.created_at < b.created_at ? -1 : 1;
   if (a.id < b.id) return -1;
   if (a.id > b.id) return 1;
   return 0;
+}
+
+/** One eligible doc's resolved claim — `source: null` means "unclaimed"
+ *  (neither a title nor an export-index number), in which case `number` is
+ *  always `null` too (kept in lockstep, never independently nullable). */
+interface DocClaim {
+  source: "title" | "export_index" | null;
+  number: number | null;
 }
 
 /**
@@ -397,10 +501,18 @@ export class OrdinalMigrationService {
       const docsOfType = fetchResult.value;
       allDocs.push(...docsOfType);
 
-      let runningMax = 0;
+      // `taken` seeds the cascade with every ordinal this type already has
+      // (pre-existing, non-null) — a fresh claim can never collide with a
+      // doc numbered before this migration ran. `maxOrdinal` tracks the
+      // running high-water mark across BOTH pre-existing rows and every
+      // claim resolved below, feeding the unclaimed bucket's "strictly
+      // above" rule.
+      const taken = new Set<number>();
+      let maxOrdinal = 0;
       for (const d of docsOfType) {
         if (typeof d.ordinal === "number") {
-          if (d.ordinal > runningMax) runningMax = d.ordinal;
+          taken.add(d.ordinal);
+          if (d.ordinal > maxOrdinal) maxOrdinal = d.ordinal;
           finalOrdinalByDocId.set(d.id, { type: d.type, ordinal: d.ordinal });
         }
       }
@@ -408,42 +520,110 @@ export class OrdinalMigrationService {
       const eligible = docsOfType.filter(
         (d) => !isExemptFromOrdinal(d) && (d.ordinal === null || d.ordinal === undefined),
       );
-      eligible.sort(compareOrdinalCandidates);
+
+      // Classify every eligible doc into a claim tier (2026-07-27 backfill-
+      // semantics fix — see module header). A tier-2 doc's mapping is read
+      // from the export index LOADED ABOVE, before any reconcile-step
+      // mutation, so backfill priority is never affected by step 3's writes.
+      const tier1: DocRecord[] = [];
+      const tier2: DocRecord[] = [];
+      const unclaimed: DocRecord[] = [];
+      const claimByDocId = new Map<string, DocClaim>();
 
       for (const doc of eligible) {
-        const declared = extractTitleDeclaredOrdinal(doc.type, doc.title);
-        const oldDisplay = declared !== undefined ? formatDocDisplayId({ type: doc.type, ordinal: declared }) : null;
-        const plannedOrdinal = runningMax + 1;
+        const titleDeclared = extractTitleDeclaredOrdinal(doc.type, doc.title);
+        if (titleDeclared !== undefined) {
+          tier1.push(doc);
+          claimByDocId.set(doc.id, { source: "title", number: titleDeclared });
+          continue;
+        }
+        const indexDeclared = extractExportIndexDeclaredOrdinal(doc.type, index.mappings[doc.id]);
+        if (indexDeclared !== undefined) {
+          tier2.push(doc);
+          claimByDocId.set(doc.id, { source: "export_index", number: indexDeclared });
+          continue;
+        }
+        unclaimed.push(doc);
+        claimByDocId.set(doc.id, { source: null, number: null });
+      }
 
-        if (dryRun) {
-          runningMax = plannedOrdinal;
-          finalOrdinalByDocId.set(doc.id, { type: doc.type, ordinal: plannedOrdinal });
+      tier1.sort(compareByCreatedAtThenId);
+      tier2.sort(compareByCreatedAtThenId);
+      unclaimed.sort(compareByCreatedAtThenId);
+
+      // Resolve each doc's TARGET ordinal — pure arithmetic, no store
+      // dependency. Tier 1 is resolved entirely before tier 2 (a title
+      // claim always wins a same-number collision against an export-index
+      // claim), then unclaimed docs each take the next integer strictly
+      // above everything claimed so far.
+      const targetOrdinalByDocId = new Map<string, number>();
+      for (const doc of [...tier1, ...tier2]) {
+        const claim = claimByDocId.get(doc.id) as DocClaim;
+        const target = nextFreeOrdinalAtOrAbove(claim.number as number, taken);
+        taken.add(target);
+        if (target > maxOrdinal) maxOrdinal = target;
+        targetOrdinalByDocId.set(doc.id, target);
+      }
+      for (const doc of unclaimed) {
+        maxOrdinal += 1;
+        taken.add(maxOrdinal);
+        targetOrdinalByDocId.set(doc.id, maxOrdinal);
+      }
+
+      const feedOrder = [...tier1, ...tier2, ...unclaimed];
+
+      if (dryRun) {
+        // Pure simulation — the computed target IS the report, and (per the
+        // module header) the EXACT value a live run persists via
+        // `assignOrdinalForRepair` — equal by construction, no store call
+        // needed to know what a live run will do.
+        for (const doc of feedOrder) {
+          const claim = claimByDocId.get(doc.id) as DocClaim;
+          const target = targetOrdinalByDocId.get(doc.id) as number;
+          const oldDisplay =
+            claim.number !== null ? formatDocDisplayId({ type: doc.type, ordinal: claim.number }) : null;
+          finalOrdinalByDocId.set(doc.id, { type: doc.type, ordinal: target });
           reassignments.push({
             doc_id: doc.id,
             type: doc.type,
             title: doc.title,
-            declared_ordinal: declared ?? null,
+            declared_ordinal: claim.number,
+            claim_source: claim.source,
             old_display: oldDisplay,
-            new_ordinal: plannedOrdinal,
-            new_display: formatDocDisplayId({ type: doc.type, ordinal: plannedOrdinal }) as string,
-            changed: declared !== plannedOrdinal,
+            new_ordinal: target,
+            new_display: formatDocDisplayId({ type: doc.type, ordinal: target }) as string,
+            changed: claim.number !== target,
           });
-          continue;
         }
+        continue;
+      }
 
-        const allocResult = await this.store.allocateOrdinalForExisting(doc.id, doc.version);
+      // Live apply: `assignOrdinalForRepair` (SPEC-084 D7's internal repair
+      // path) writes THIS doc's own already-computed `target` directly —
+      // never a store-derived MAX+1 value. Feed order no longer affects the
+      // outcome (each write is an independent targeted assignment, not a
+      // running counter), so `feedOrder` (tier1/tier2/unclaimed, unchanged
+      // from the dry-run computation above) is reused as-is.
+      for (const doc of feedOrder) {
+        const claim = claimByDocId.get(doc.id) as DocClaim;
+        const target = targetOrdinalByDocId.get(doc.id) as number;
+        const oldDisplay =
+          claim.number !== null ? formatDocDisplayId({ type: doc.type, ordinal: claim.number }) : null;
+
+        const allocResult = await this.store.assignOrdinalForRepair(doc.id, target);
         if (!allocResult.ok) {
           errors.push(
-            `ordinal allocation failed for ${doc.id} (${doc.slug}): ${describeLoreError(allocResult.error)}`,
+            `ordinal repair-assignment failed for ${doc.id} (${doc.slug}) target ${target}: ${describeLoreError(allocResult.error)}`,
           );
           continue;
         }
         const updated = allocResult.value;
         const actualOrdinal = updated.ordinal as number;
-        runningMax = actualOrdinal > runningMax ? actualOrdinal : runningMax;
         finalOrdinalByDocId.set(doc.id, { type: doc.type, ordinal: actualOrdinal });
         versionByDocId.set(doc.id, updated.version);
-        writesPerformed += 1;
+        // `assignOrdinalForRepair` is a no-op success (unchanged version) on
+        // a same-value repeat call — only count a REAL write.
+        if (updated.version !== doc.version) writesPerformed += 1;
 
         const auditResult = await this.store.appendAuditEntry({
           timestamp: nowIso,
@@ -465,11 +645,12 @@ export class OrdinalMigrationService {
           doc_id: doc.id,
           type: doc.type,
           title: doc.title,
-          declared_ordinal: declared ?? null,
+          declared_ordinal: claim.number,
+          claim_source: claim.source,
           old_display: oldDisplay,
           new_ordinal: actualOrdinal,
           new_display: formatDocDisplayId({ type: doc.type, ordinal: actualOrdinal }) as string,
-          changed: declared !== actualOrdinal,
+          changed: claim.number !== actualOrdinal,
         });
       }
     }
@@ -594,6 +775,16 @@ export class OrdinalMigrationService {
     }
     const bijective = keySet.size === finalOrdinalByDocId.size;
 
+    // Explicit UNCHANGED/CHANGED split (module header step 4) — derived
+    // once from the same `reassignments[].changed` flag every per-doc
+    // report row already carries, never a second independently-computed
+    // count.
+    let changedCount = 0;
+    for (const r of reassignments) {
+      if (r.changed) changedCount += 1;
+    }
+    const unchangedCount = reassignments.length - changedCount;
+
     return ok({
       dry_run: dryRun,
       reassignments,
@@ -602,6 +793,8 @@ export class OrdinalMigrationService {
       bijective,
       numbered_doc_count: finalOrdinalByDocId.size,
       writes_performed: writesPerformed,
+      unchanged_count: unchangedCount,
+      changed_count: changedCount,
       errors,
     });
   }
