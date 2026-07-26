@@ -998,14 +998,15 @@ export function createApp(
   // enforces the four IoC vertical-slice checkpoints (spec-create/spec-promote/
   // plan-promote/task-claim) for EVERY caller of the gated service methods, not only
   // ones that shell out to `lore gate` first (MCP/HTTP/direct-service callers used to
-  // bypass every checkpoint). Constructed once here (mirrors aiProviderService —
-  // an already-built instance, not raw config, flows down to build*) with the
-  // resolved LoreConfig itself: `GateEnforcer.enforce` re-derives per-checkpoint
-  // enablement from it on every call via `resolveGateEnabled`, the SAME config knob
+  // bypass every checkpoint). Built per-branch below (not once here) because SPEC-080
+  // G4's OPTIONAL `recordGateSkip` port needs the ACTUAL store instance
+  // (`store.appendAuditEntry.bind(store)`) — SQLiteStore vs TursoStore is only known
+  // after the branch below resolves, so `gateEnforcer` can't be constructed until
+  // then. `GateEnforcer.enforce` re-derives per-checkpoint enablement from the
+  // resolved `LoreConfig` on every call via `resolveGateEnabled`, the SAME config knob
   // `lore gate` already honors (`workflow.gates.<checkpoint>.enabled`). Enforcement is
   // ON by default — a corpus opts a specific checkpoint OUT via config, never the
   // reverse.
-  const gateEnforcer = new GateEnforcer(config);
 
   // No config supplied or sync section absent / disabled → local-only SQLiteStore
   if (
@@ -1013,8 +1014,17 @@ export function createApp(
     config.sync === undefined ||
     !config.sync.enabled
   ) {
+    const sqliteStore = new SQLiteStore(dbPath);
+    // reason: SPEC-080 G4 — `store.appendAuditEntry` already returns
+    // `Promise<Result<void, LoreError>>`, exactly the `RecordGateSkip` shape
+    // `GateEnforcer`'s constructor expects, so no adapter shim is needed. Every
+    // bare `new GateEnforcer(config)` test construction elsewhere in this
+    // codebase omits this 2nd arg and stays unwired (gate-enforcer.ts's own
+    // SPEC-080 module invariant) — this is the ONLY production wiring site for
+    // the local-store branch.
+    const gateEnforcer = new GateEnforcer(config, sqliteStore.appendAuditEntry.bind(sqliteStore));
     return buildAppFromSqlite(
-      new SQLiteStore(dbPath),
+      sqliteStore,
       telemetry,
       aiProviderService,
       aiDefaultPerSurface,
@@ -1053,6 +1063,9 @@ export function createApp(
       authToken,
       syncInterval: config.sync.interval,
     });
+    // reason: SPEC-080 G4 — same wiring as the SQLite branch above, bound to the
+    // TursoStore instance (also implements `StoreInterface.appendAuditEntry`).
+    const gateEnforcer = new GateEnforcer(config, store.appendAuditEntry.bind(store));
     return {
       ok: true,
       value: buildAppFromTurso(
