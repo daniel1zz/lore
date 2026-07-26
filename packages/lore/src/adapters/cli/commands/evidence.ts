@@ -67,6 +67,16 @@
  * legitimate "pass" outcome — the repair is either author the file, fix the
  * path, or record with `--oracle manual` for a genuinely manual check.
  *
+ * The oracle/result gate ("only test/e2e + pass is in scope") plus the
+ * `findMissingOracleFiles` composition live in
+ * `../evidence-precheck.js::findMissingOracleFilesForEvidence` — the SAME
+ * function the MCP adapter's `lore_evidence_add` handler calls
+ * (`../../mcp/tools.js`, fixed 2026-07-26, defect: task-mcp-lore-evidence-
+ * add-bypasses-the-oracle-file-existence). Before that fix, `lore_evidence_add`
+ * called `TaskWorkflowService`/`PhaseWorkflowService` directly and never
+ * routed through this command, so an MCP-originated self-reported pass could
+ * bypass the precheck entirely.
+ *
  * Source: SPEC-025 §4 AC-WF-1, AC-WF-2; SPEC-038 §4, §7 D3; SPEC-056 §Design Decisions D8
  */
 
@@ -77,7 +87,7 @@ import { ORACLE_KINDS, tailChars, type LoreError, type OracleKind } from "@lore/
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 import { requirePhaseWorkflowService } from "../phase-wiring.js";
-import { findMissingOracleFiles } from "../evidence-precheck.js";
+import { findMissingOracleFilesForEvidence } from "../evidence-precheck.js";
 
 const VALID_RESULTS = ["pass", "fail"] as const;
 
@@ -161,33 +171,35 @@ export default defineCommand({
     try {
       // reason: missing-oracle-file precheck (see module header) — only test/e2e
       // pass claims are checked; every other oracle/result combination is
-      // completely unaffected (byte-identical to pre-precheck behavior).
-      if (
-        (args.oracle === "test" || args.oracle === "e2e") &&
-        args.result === "pass"
-      ) {
-        const missing = findMissingOracleFiles(args.command as string, {
-          cwd: process.cwd(),
-          // reason: dbPath is <corpusRoot>/.lore/lore.db — the corpus root is two
-          // levels up. Distinct from cwd whenever the invocation runs from a
-          // subdirectory of the corpus (or a linked worktree, SPEC-063).
-          corpusRoot: dirname(dirname(dbPath)),
-          fileExists: existsSync,
-        });
-        if (missing.length > 0) {
-          const precheckError: LoreError = {
-            code: "VALIDATION_ERROR",
-            field: "command",
-            message:
-              `Oracle file(s) not found: ${missing.join(", ")}. ` +
-              "Author the oracle file or fix the path in --command; " +
-              "use --oracle manual for genuinely manual checks.",
-            value: args.command,
-          };
-          process.stderr.write(formatError(precheckError) + "\n");
-          process.exitCode = exitCode(precheckError);
-          return;
-        }
+      // completely unaffected (byte-identical to pre-precheck behavior). The
+      // oracle/result gate + findMissingOracleFiles composition itself lives in
+      // findMissingOracleFilesForEvidence (../evidence-precheck.js) — shared
+      // verbatim with the MCP adapter's lore_evidence_add handler, so the two
+      // surfaces cannot drift on which calls are in scope.
+      const missing = findMissingOracleFilesForEvidence({
+        oracle: args.oracle as string,
+        result: args.result as string,
+        command: args.command as string,
+        cwd: process.cwd(),
+        // reason: dbPath is <corpusRoot>/.lore/lore.db — the corpus root is two
+        // levels up. Distinct from cwd whenever the invocation runs from a
+        // subdirectory of the corpus (or a linked worktree, SPEC-063).
+        corpusRoot: dirname(dirname(dbPath)),
+        fileExists: existsSync,
+      });
+      if (missing.length > 0) {
+        const precheckError: LoreError = {
+          code: "VALIDATION_ERROR",
+          field: "command",
+          message:
+            `Oracle file(s) not found: ${missing.join(", ")}. ` +
+            "Author the oracle file or fix the path in --command; " +
+            "use --oracle manual for genuinely manual checks.",
+          value: args.command,
+        };
+        process.stderr.write(formatError(precheckError) + "\n");
+        process.exitCode = exitCode(precheckError);
+        return;
       }
 
       const by = resolveActor(typeof args.by === "string" ? args.by : undefined);

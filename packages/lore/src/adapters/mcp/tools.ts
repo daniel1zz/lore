@@ -42,6 +42,13 @@
  * or ANY non-special checkpoint carrying `task`/`phase`) is rejected up front with
  * `VALIDATION_ERROR` instead of silently ignoring the extraneous field.
  *
+ * `lore_evidence_add` gains the missing-oracle-file precheck (defect:
+ * task-mcp-lore-evidence-add-bypasses-the-oracle-file-existence) — a self-reported
+ * `oracle: "test"|"e2e"`, `result: "pass"` call referencing a test-file token that
+ * does not exist on disk now returns `isError` `VALIDATION_ERROR` BEFORE the
+ * task/phase dispatch, via the SAME shared gate + extractor the CLI's `lore evidence`
+ * command uses (`findMissingOracleFilesForEvidence`, `../cli/evidence-precheck.js`).
+ *
  * Architecture: Tools with input use the `registerToolWithArgs` helper defined below, which:
  *   1. Calls `server.tool(name, desc, handler)` in 3-arg form (avoids ZodRawShapeCompat type bomb)
  *   2. Immediately patches `_registeredTools[name].inputSchema = schema` on the registered tool
@@ -106,7 +113,9 @@ import { loadTreeBlueprint } from "../../flows/blueprint-flow.js";
 import { buildRealFsProbe } from "../real-fs-probe.js";
 import { buildAssessSummaryText } from "./assess-render.js";
 import { requirePhaseWorkflowService, getPhaseStatus, buildPhaseFeedFlowDeps } from "../cli/phase-wiring.js";
+import { findMissingOracleFilesForEvidence } from "../cli/evidence-precheck.js";
 import { IssueReportService } from "../../service/issue-report-service.js";
+import { existsSync } from "node:fs";
 
 // ─── Schema Constants ────────────────────────────────────────────────────────
 // Each schema is a `z.object(...)` instance (AnySchema), NOT an inline ZodRawShape literal.
@@ -1284,6 +1293,41 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
   // non-phase target, REGRESSION); retry via phaseWorkflowService ONLY on its own
   // {field: "type", value: "phase"} rejection.
   registerToolWithArgs(server, "lore_evidence_add", "Append an oracle verification record to a task or phase", LoreEvidenceAddSchema, async (args) => {
+    // reason: missing-oracle-file precheck (defect: task-mcp-lore-evidence-add-
+    // bypasses-the-oracle-file-existence) — this handler used to call the
+    // TaskWorkflowService/PhaseWorkflowService directly, never routing through
+    // `commands/evidence.ts`, so an MCP-originated self-reported `test`/`e2e`
+    // pass citing a missing oracle file recorded cleanly. Mirrors the CLI
+    // precheck exactly (same shared gate + extractor,
+    // `findMissingOracleFilesForEvidence`, `../cli/evidence-precheck.js`) and
+    // runs BEFORE the task/phase dispatch below so BOTH target types are
+    // gated by ONE check, not two independently-written ones. `app.repoRoot`
+    // is the corpus root (`dirname(dirname(dbPath))`, same value the CLI
+    // passes as `corpusRoot` — see App's own JSDoc); always wired in
+    // production, optional only for hand-built test App stubs.
+    const missingOracleFiles = findMissingOracleFilesForEvidence({
+      oracle: args.oracle,
+      result: args.result,
+      command: args.command,
+      cwd: process.cwd(),
+      // reason: exactOptionalPropertyTypes — app.repoRoot is `string | undefined`;
+      // conditionally spread rather than pass it verbatim (see evidence-precheck.ts's
+      // matching comment on its own forwarding call).
+      ...(app.repoRoot !== undefined ? { corpusRoot: app.repoRoot } : {}),
+      fileExists: existsSync,
+    });
+    if (missingOracleFiles.length > 0) {
+      return errorContent({
+        code: "VALIDATION_ERROR",
+        field: "command",
+        message:
+          `Oracle file(s) not found: ${missingOracleFiles.join(", ")}. ` +
+          'Author the oracle file or fix the path in "command"; ' +
+          'use oracle: "manual" for genuinely manual checks.',
+        value: args.command,
+      });
+    }
+
     const evidenceInput = {
       oracle: args.oracle,
       command: args.command,

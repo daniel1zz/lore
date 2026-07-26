@@ -20,7 +20,12 @@
  *               phase) → isError, VALIDATION_ERROR
  *   BOUNDARY:   lore_evidence_add on a TASK target stays byte-identical (never
  *               reaches PhaseWorkflowService)
- *   ERROR:      lore_phase_status on a non-existent id → isError, DOC_NOT_FOUND
+ *   ERROR:      lore_phase_status on a non-existent id → isError, DOC_NOT_FOUND;
+ *               lore_evidence_add on a phase target with oracle test + result pass
+ *               citing a MISSING file → isError, VALIDATION_ERROR on field "command",
+ *               PhaseWorkflowService.addEvidence never called (task-mcp-lore-evidence-
+ *               add-bypasses-the-oracle-file-existence AC-2 — the missing-oracle-file
+ *               precheck gates BEFORE the task-vs-phase dispatch, not per-branch)
  *   STATE:      lore_evidence_add(checklist_ref) → lore_phase_status reflects
  *               nothing changes for AC scope (checklist_ref never satisfies
  *               ac_scope — a separate id namespace)
@@ -29,6 +34,7 @@
  *
  * Source: spec-spec-056-phase-execution-model-phase-doc-type-computed-comp
  *   task-skill-implement-cli-mcp-surfaces-checklist-ref-evidence
+ *   task-mcp-lore-evidence-add-bypasses-the-oracle-file-existence
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
@@ -41,7 +47,7 @@ import { OutlineService } from "../../../src/service/outline-service.js";
 import { MigrationService } from "../../../src/service/migration-service.js";
 import { TreeCheckService } from "../../../src/service/tree-check-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
-import { buildPhaseServices } from "../../../src/adapters/cli/phase-wiring.js";
+import { buildPhaseServices, requirePhaseWorkflowService } from "../../../src/adapters/cli/phase-wiring.js";
 import { NoOpTelemetry, ok } from "@lore/core";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import type { App } from "../../../src/app.js";
@@ -307,5 +313,61 @@ describe("lore_evidence_add — SPEC-056 target-type dispatch", () => {
     const evidence = data.doc.extra["verification_evidence"] as Array<Record<string, unknown>>;
     expect(evidence).toHaveLength(1);
     expect(evidence[0]?.["checklist_ref"]).toBeUndefined();
+  });
+});
+
+// ─── lore_evidence_add — missing-oracle-file precheck gates BEFORE dispatch ────
+//
+// task-mcp-lore-evidence-add-bypasses-the-oracle-file-existence AC-2: the
+// precheck must run BEFORE the task-vs-phase target-type dispatch (ONCE, not
+// duplicated per branch) — a self-reported test/e2e pass citing a missing
+// file on a PHASE target must be rejected the SAME way a task target is,
+// without ever reaching PhaseWorkflowService (or TaskWorkflowService's own
+// {field:"type", value:"phase"} probe). Vitest's cwd is the repo root
+// (`vitest.config.ts` lives there), so the missing-path token below is
+// resolved for real via `existsSync` — see `mcp-tools-task-workflow.test.ts`'s
+// matching describe block for the fuller rationale.
+describe("lore_evidence_add — missing-oracle-file precheck gates the phase branch too", () => {
+  const call = () => getToolHandler(server, "lore_evidence_add");
+  const MISSING_TEST_FILE = "packages/lore/tests/unit/adapters/ghost-nonexistent-oracle-file.test.ts";
+
+  it("AC-2.E1: a phase target with oracle test + result pass citing a MISSING file → isError, VALIDATION_ERROR on field \"command\" (never reaches PhaseWorkflowService)", async () => {
+    const plan = await createPlan();
+    const phaseSlug = await createPhase(plan, {
+      extra: {
+        plan_id: plan.id,
+        checklist: [{ id: "CHK-1", statement: "script check", bind: { kind: "script", oracle: "test", command: "bun test" } }],
+      },
+    });
+
+    const phaseWorkflowService = requirePhaseWorkflowService(app);
+    const originalPhaseAddEvidence = phaseWorkflowService.addEvidence.bind(phaseWorkflowService);
+    let phaseServiceCalled = false;
+    phaseWorkflowService.addEvidence = ((...callArgs: Parameters<typeof originalPhaseAddEvidence>) => {
+      phaseServiceCalled = true;
+      return originalPhaseAddEvidence(...callArgs);
+    }) as typeof phaseWorkflowService.addEvidence;
+
+    try {
+      const result = await call()({
+        id_or_slug: phaseSlug,
+        oracle: "test",
+        command: `bunx vitest run ${MISSING_TEST_FILE}`,
+        result: "pass",
+        recorded_by: "alice",
+        checklist_ref: "CHK-1",
+      });
+      expect(result.isError).toBe(true);
+      const error = parseResult(result) as { code: string; field: string; message: string };
+      // reason: field "command" (not "checklist_ref") proves the precheck fired BEFORE
+      // any phase-specific validation — a checklist_ref rejection would carry field
+      // "checklist_ref" instead (see the NEGATIVE test above).
+      expect(error.code).toBe("VALIDATION_ERROR");
+      expect(error.field).toBe("command");
+      expect(error.message).toContain(MISSING_TEST_FILE);
+      expect(phaseServiceCalled).toBe(false);
+    } finally {
+      phaseWorkflowService.addEvidence = originalPhaseAddEvidence;
+    }
   });
 });
