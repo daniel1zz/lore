@@ -793,11 +793,39 @@ function checkPlanClose(ctx: GateContext): PredicateResult[] {
 
 /**
  * Renders the attestation-floor-specific feeding pack (SPEC-069 §Design Decisions
- * D1) — names every offending task (carries `verification_evidence` but ZERO
- * runner-attested entries), the plan-wide attested ratio against the configured
- * floor, and the literal recovery command (`lore verify <plan>` — the exact
- * substring AC-069-1 pins). Pointers only (task slug/title, never body content),
- * mirroring `feedAnchorOverlap`'s "recompute offending items from ctx" shape.
+ * D1; recovery text rewritten by task-attestation-floor-feeding-pack-names-tasks-
+ * but-the, 2026-07-26) — names every offending task (carries `verification_evidence`
+ * but ZERO runner-attested entries), the plan-wide attested ratio against the
+ * configured floor, and the literal recovery command (`lore verify <plan>` — the
+ * exact substring AC-069-1 pins). Pointers only (task slug/title, never body
+ * content), mirroring `feedAnchorOverlap`'s "recompute offending items from ctx"
+ * shape.
+ *
+ * @remarks PLAN-LEVEL EXEMPTION ONLY (2026-07-26 incident fix) — `checkPlanClose`
+ *   reads `ctx.attestationExempt` / the exemption reason from the CLOSING PLAN's
+ *   OWN `extra.attestation_exempt(_reason)` (see `checkPlanClose`'s own JSDoc); it
+ *   never looks at anything on a task doc. The PRE-FIX pack listed offending tasks
+ *   with no such caveat, and an operator (observed 2026-07-26, SPEC-080 close-out)
+ *   followed the pattern set by "the pack names the offending item" and wrote
+ *   `extra.attestation_exempt` onto a TASK — a silently dead write this gate never
+ *   reads, so the plan stayed blocked with no error explaining why. The offending-
+ *   task list below is kept (still real diagnostic value — it tells the operator
+ *   WHICH tasks are dragging the ratio down / missing attestation), but the
+ *   recovery text now says explicitly where the exempt fields belong, and — like
+ *   `feedRequiresUat`'s fixed shape (SPEC-076 wholesale-replace guard, same
+ *   incident class one checkpoint over) — instructs a fetch-merge-set flow rather
+ *   than a bare `lore set --extra` literal that would clobber the plan's other
+ *   structured `extra` keys (`phases`, `claim`, `verification_evidence`; also now
+ *   independently rejected by `CorpusService.set`'s dropped-field guard, but this
+ *   pack is the FIRST line of defense — don't tell the caller to do the
+ *   destructive thing in the first place).
+ *
+ *   The canonical "genuinely no oracle to attest against" rationale class named
+ *   here is a RED/TDD task whose Expected-state is a currently-failing,
+ *   time-bound test (red before green) — evidence exists (the failing run WAS
+ *   recorded) but attesting it would misrepresent an intentionally-red state as
+ *   verified; that is a PLAN-LEVEL judgment call about the whole plan's execution
+ *   window, not a per-task field.
  */
 function feedAttestationFloor(ctx: GateContext, failures: PredicateResult[]): string {
   const tasks = ctx.planTasksAttestation ?? [];
@@ -810,7 +838,9 @@ function feedAttestationFloor(ctx: GateContext, failures: PredicateResult[]): st
   const offendingLine =
     offending.length > 0
       ? `Task(s) with self-reported-only evidence (zero runner-attested entries): ` +
-        `${offending.map((t) => `${t.slug} — "${t.title}"`).join(", ")}. `
+        `${offending.map((t) => `${t.slug} — "${t.title}"`).join(", ")}. Listed for ` +
+        `DIAGNOSTIC purposes only — the exemption below is PLAN-level; do NOT write ` +
+        `\`extra.attestation_exempt\` onto any of these tasks, this gate never reads it there. `
       : "";
   const pack = buildFeedingPack({
     ruleSource: "corpus (task verification_evidence)",
@@ -820,10 +850,27 @@ function feedAttestationFloor(ctx: GateContext, failures: PredicateResult[]): st
       `ratio must be >= ${minRatio} (currently ${ratio.toFixed(2)}). ${offendingLine}` +
       `Recovery: run \`lore verify ${plan}\` to record attested evidence against each ` +
       `task's declared script-mode acceptance criteria (declare one first via ` +
-      `\`lore ac add <spec> <id> --mode script ...\` if none exists yet) — or, if this ` +
-      `plan genuinely has no oracle to attest against, set \`extra.attestation_exempt: ` +
-      `true\` plus a reason via the MCP \`lore_set\` tool.`,
+      `\`lore ac add <spec> <id> --mode script ...\` if none exists yet). If this plan ` +
+      `genuinely has no oracle to attest against for some of its tasks — the canonical ` +
+      `case is a RED/TDD task whose Expected state is a currently-failing, time-bound ` +
+      `test (red before green: the evidence is real, attesting it would misrepresent an ` +
+      `intentionally-red state as verified) — the exemption is declared on the PLAN ` +
+      `ITSELF, never on a task: set \`extra.attestation_exempt: true\` plus a non-empty ` +
+      `\`extra.attestation_exempt_reason\` on ${plan}. \`extra\` REPLACES the whole field ` +
+      `wholesale on \`lore_set\` (it does NOT merge) — first fetch the current extra via ` +
+      `\`lore get ${plan} --json\` (read \`.extra\`), merge ` +
+      `\`{"attestation_exempt": true, "attestation_exempt_reason": "<why>"}\` into it ` +
+      `while KEEPING every existing key (e.g. \`phases\`), then call the MCP \`lore_set\` ` +
+      `tool with the FULL merged object as \`extra\` on ${plan}. \`lore set\` (CLI) has no ` +
+      `dedicated flag for this field yet.`,
     missing: selectFailures(failures).map((f) => f.reason),
+    // reason: the plan-level-only fetch-merge-set instruction plus the offending-
+    // task diagnostic list routinely exceeds `DEFAULT_FEEDING_MAX_CHARS` (800) —
+    // this is synthesized guidance text, not a slice of an arbitrary-length doc
+    // (the thing the default budget protects against), so a wider explicit budget
+    // is safe here. 2200 covers the fixed instructional text (~1050 chars) plus
+    // several offending tasks' `slug — "title"` pairs before truncating.
+    maxChars: 2200,
   });
   return renderFeedingPack(pack);
 }
