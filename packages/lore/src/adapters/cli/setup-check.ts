@@ -53,12 +53,19 @@
  *     excluded" invariant — `RealAssetSource` is this check's install-time
  *     counterpart, and the two must agree on scope or a fresh converged
  *     install would spuriously report every project-kind entry `missing`).
- *     `tree_digest` is carried through UNCHANGED (still the WHOLE-tree
- *     digest, project entries included) — it is compared only for EQUALITY
- *     against `installed.assets_digest` (itself the whole-tree digest
- *     stamped at the last successful install/converge, per
- *     `setup-manifest.ts`'s own module doc), never re-derived from this
- *     filtered subset.
+ *     **SPEC-083 D3**: the SAME filter ALSO drops every path
+ *     `real-asset-source.ts`'s exported `isRetiredFromInstall` names (e.g.
+ *     `governance/corpus-workflow.md`) — that predicate is `RealAssetSource`'s
+ *     OWN install-time exclusion, imported here rather than re-declared, so
+ *     the two enumerations structurally cannot drift apart again (they did
+ *     once: `isRetiredFromInstall` originally existed only inside
+ *     `RealAssetSource.load()`'s walk, so this check classified the excluded
+ *     file `missing` on every freshly converged target). `tree_digest` is
+ *     carried through UNCHANGED (still the WHOLE-tree digest, project AND
+ *     retired entries included) — it is compared only for EQUALITY against
+ *     `installed.assets_digest` (itself the whole-tree digest stamped at the
+ *     last successful install/converge, per `setup-manifest.ts`'s own module
+ *     doc), never re-derived from this filtered subset.
  *   - `RealSetupCheckProbe.listManagedPaths()` walks the SAME four top-level
  *     directories `RealAssetSource` walks (`skills`/`agents`/`hooks`/
  *     `governance`) — this is the orphan-discovery surface; a nonexistent
@@ -111,6 +118,7 @@ import { loadConfig } from "@lore/core/node";
 import { EMBEDDED_ASSETS_MANIFEST, LORE_BINARY_VERSION } from "../../generated/assets-manifest.js";
 import type { EmbeddedAssetEntry } from "../../generated/assets-manifest.js";
 import { RealSetupFsWriter } from "../real-setup-fs.js";
+import { isRetiredFromInstall } from "../real-asset-source.js";
 import { MANIFEST_FILENAME } from "../../service/setup-service.js";
 import { exitCode, formatError } from "./utils.js";
 
@@ -177,8 +185,20 @@ export interface SetupCheckReport {
 
 // ─── Embedded manifest scoping (see module doc) ────────────────────────────
 
-/** The machine-installer-relevant view of the embedded asset manifest — `kind: "project"` entries excluded. See module doc. */
-function buildCheckEmbeddedManifest(): {
+/**
+ * The machine-installer-relevant view of the embedded asset manifest —
+ * `kind: "project"` entries excluded (see module doc), PLUS every path
+ * `isRetiredFromInstall` names (SPEC-083 D3, `../real-asset-source.js` —
+ * the SAME predicate `RealAssetSource.load()` uses to exclude those paths
+ * from what it actually installs). Both filters must agree: the embedded
+ * manifest still fingerprints every real file under `assets/` (it ships with
+ * the package regardless of install scope), so a path this check's
+ * classifier doesn't ALSO know to skip would report `missing` on every
+ * freshly converged target forever (the 2026-07-26 regression this shared
+ * import fixes — see `isRetiredFromInstall`'s own doc for why a
+ * hand-duplicated literal path here was rejected instead).
+ */
+export function buildCheckEmbeddedManifest(): {
   binary_version: string;
   tree_digest: string;
   entries: readonly EmbeddedAssetEntry[];
@@ -186,7 +206,9 @@ function buildCheckEmbeddedManifest(): {
   return {
     binary_version: LORE_BINARY_VERSION,
     tree_digest: EMBEDDED_ASSETS_MANIFEST.tree_digest,
-    entries: EMBEDDED_ASSETS_MANIFEST.entries.filter((entry) => entry.kind !== "project"),
+    entries: EMBEDDED_ASSETS_MANIFEST.entries.filter(
+      (entry) => entry.kind !== "project" && !isRetiredFromInstall(entry.path),
+    ),
   };
 }
 
