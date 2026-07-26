@@ -4,12 +4,14 @@
  * Source: SPEC-005 §3, SPEC-001 §3.2
  */
 
-import type { DocId, DocRecord, DocType, DocTypeMeta, Slug, SpecKind } from "@lore/core";
+import type { DocId, DocRecord, DocType, DocTypeMeta, Slug, SpecKind, Validity } from "@lore/core";
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import {
   getAllowedTransitions,
   isValidTransition,
   deriveTypeMeta,
+  extractValidity,
+  isInvalidated,
   specAcceptanceCriteriaSchema,
   SPEC_KINDS,
 } from "@lore/core";
@@ -36,6 +38,16 @@ import type { GateDependencies } from "./gate-enforcer.js";
  *   truncated 10-char id column (SPEC-065's whole premise: an id a surface
  *   PRINTS must be a valid INPUT to `resolveDoc`'s prefix resolution — the
  *   slug always was, but wasn't SHOWN here before this field existed).
+ * @invariant `validity` (SPEC-043 D3 pending-queue extension, task
+ *   `task-lore-pending-does-not-filter-invalidated-docs-an`) is the doc's
+ *   extracted `extra.validity`, hoisted to a top-level field the SAME way
+ *   `SearchHit.validity` is (never a full `extra` blob) — present iff the doc
+ *   carries validity metadata at all (regardless of whether it's currently
+ *   invalidated), absent for every doc type `ValidityService` never writes to.
+ *   It exists so the CLI can render the `[invalid]` badge (`formatValidityBadge`,
+ *   the SAME renderer `lore list --include-invalid` uses) without a second
+ *   per-doc fetch — `pending()` already holds the full `DocRecord` this is
+ *   extracted from.
  */
 export interface PendingDoc {
   id: DocId;
@@ -48,6 +60,7 @@ export interface PendingDoc {
   version: number;
   change_summary?: string;
   meta?: DocTypeMeta;
+  validity?: Validity;
 }
 
 export interface PendingFilters {
@@ -57,6 +70,16 @@ export interface PendingFilters {
   type?: DocType;
   /** ISO 8601 — only docs updated at or after this time */
   since?: string;
+  /**
+   * SPEC-043 D3 — include invalidated docs in the result (excluded by default).
+   * Mirrors `ListFilters.include_invalid` (`corpus-service.ts`) — `lore pending`
+   * is a review-QUEUE list-surface, the same read-surface class `list`/`search`
+   * already apply this filter to. Default `false`/absent: an invalidated draft
+   * (e.g. a duplicate superseded by its canonical version) is excluded from the
+   * queue rather than sitting there forever — `draft` has no `->archived`
+   * lifecycle exit, so filtering is the only way this queue self-cleans.
+   */
+  include_invalid?: boolean;
 }
 
 export interface ApproveOpts {
@@ -181,8 +204,18 @@ export class ReviewService {
   /**
    * Return all documents with status='draft' matching optional filters.
    * Source: SPEC-005 §3, AC row 1.
+   *
+   * @param filters - author/type/since filters plus SPEC-043 D3's `include_invalid`
+   *   escape (default false — see {@link PendingFilters.include_invalid}).
+   * @param now - Time seam (D3) — drives the default invalidated-doc exclusion;
+   *   defaults to `() => new Date().toISOString()`. Mirrors `CorpusService.list`'s
+   *   identical `now` seam so both surfaces flip visibility at the SAME injected
+   *   instant in tests, rather than each reading the wall clock independently.
    */
-  async pending(filters?: PendingFilters): Promise<Result<PendingDoc[], LoreError>> {
+  async pending(
+    filters?: PendingFilters,
+    now: () => string = defaultNow,
+  ): Promise<Result<PendingDoc[], LoreError>> {
     const storeFilters: import("../store/store-interface.js").StoreFilters = {
       status: "draft",
       ...(filters?.author !== undefined ? { created_by: filters.author } : {}),
@@ -193,7 +226,21 @@ export class ReviewService {
     const result = await this.store.findMany(storeFilters);
     if (!result.ok) return result;
 
-    const pendingDocs: PendingDoc[] = result.value.map((doc) =>
+    // SPEC-043 D3 — `pending` is a review-QUEUE list-surface, the same read-surface
+    // class `CorpusService.list`/`search` already filter: an invalidated draft (e.g.
+    // a duplicate superseded by its canonical version) has no lifecycle exit (no
+    // draft->archived transition exists) and would otherwise sit in this queue
+    // forever. Excluded by default; `include_invalid` restores it, badged by the
+    // CLI (`formatValidityBadge`, `lore list --include-invalid`'s own renderer).
+    // `isInvalidated` is a structural no-op for any doc type ValidityService never
+    // writes `extra.validity` on — this filter naturally scopes itself.
+    const nowIso = now();
+    const visibleDocs =
+      filters?.include_invalid === true
+        ? result.value
+        : result.value.filter((doc) => !isInvalidated(doc, nowIso));
+
+    const pendingDocs: PendingDoc[] = visibleDocs.map((doc) =>
       toPendingDoc(
         doc,
         this.claimTtlMinutes !== undefined ? { claimTtlMinutes: this.claimTtlMinutes } : undefined,
@@ -465,6 +512,13 @@ export class ReviewService {
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
 /**
+ * Default time seam for `pending()`'s SPEC-043 D3 invalidated-doc filter —
+ * mirrors `corpus-service.ts`'s identical `defaultNow` (independent copies,
+ * both trivial one-liners; not worth a cross-service import for this).
+ */
+const defaultNow = (): string => new Date().toISOString();
+
+/**
  * Coerces a raw `extra.spec_kind` value to a valid {@link SpecKind}, falling
  * back to `"feature"` (SPEC-058 D2) — the SAME default `CorpusService.
  * _createImpl` applies at spec-creation time when the field is absent, never a
@@ -491,6 +545,7 @@ function resolveSpecKindOrDefault(raw: unknown): SpecKind {
  */
 function toPendingDoc(doc: DocRecord, opts?: { claimTtlMinutes?: number }): PendingDoc {
   const meta = deriveTypeMeta(doc, opts);
+  const validity = extractValidity(doc);
   return {
     id: doc.id,
     slug: doc.slug,
@@ -501,5 +556,6 @@ function toPendingDoc(doc: DocRecord, opts?: { claimTtlMinutes?: number }): Pend
     updated_at: doc.updated_at,
     version: doc.version,
     ...(meta !== undefined ? { meta } : {}),
+    ...(validity !== undefined ? { validity } : {}),
   };
 }

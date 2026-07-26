@@ -32,6 +32,7 @@ function makePendingDoc(overrides: Partial<PendingDoc> & { id: string; slug: str
     updated_at: overrides.updated_at ?? "2026-07-20T00:00:00.000Z",
     version: overrides.version ?? 1,
     ...(overrides.meta !== undefined ? { meta: overrides.meta } : {}),
+    ...(overrides.validity !== undefined ? { validity: overrides.validity } : {}),
   };
 }
 
@@ -156,5 +157,122 @@ describe("lore pending — table output (SPEC-065 D3)", () => {
       "Ver",
       "AI Judgment",
     ]);
+  });
+});
+
+// ─── SPEC-043 D3 — [invalid] badge (task-lore-pending-does-not-filter-invalidated-docs-an) ───
+
+describe("lore pending — [invalid] badge on the Title cell (SPEC-043 D3)", () => {
+  const nowIso = "2026-07-26T00:00:00.000Z";
+
+  // ── HAPPY ──────────────────────────────────────────────────────────────
+
+  it("HAPPY: a doc carrying an already-past invalid_at renders the Title cell with an [invalid] suffix", () => {
+    const docs: PendingDoc[] = [
+      makePendingDoc({
+        id: "01HZBADGEAAAAAAAAAAAAAAAAA",
+        slug: "knowledge-invalid-doc",
+        type: "knowledge",
+        title: "Invalid Doc",
+        validity: { invalid_at: "2026-06-01T00:00:00.000Z" },
+      }),
+    ];
+    const rows = buildPendingTableRows(docs, new Map(), nowIso);
+    const titleColumnIndex = PENDING_TABLE_HEADERS.indexOf("Title");
+    expect(rows[0]?.[titleColumnIndex]).toBe("Invalid Doc [invalid]");
+  });
+
+  // ── NEGATIVE ───────────────────────────────────────────────────────────
+
+  it("NEGATIVE: a doc whose validity.invalid_at is still in the future is NOT badged", () => {
+    const docs: PendingDoc[] = [
+      makePendingDoc({
+        id: "01HZBADGEBBBBBBBBBBBBBBBBB",
+        slug: "knowledge-future-invalid",
+        type: "knowledge",
+        title: "Future Invalidation",
+        validity: { invalid_at: "2099-01-01T00:00:00.000Z" },
+      }),
+    ];
+    const rows = buildPendingTableRows(docs, new Map(), nowIso);
+    const titleColumnIndex = PENDING_TABLE_HEADERS.indexOf("Title");
+    expect(rows[0]?.[titleColumnIndex]).toBe("Future Invalidation");
+  });
+
+  // ── BOUNDARY ───────────────────────────────────────────────────────────
+
+  it("BOUNDARY: invalid_at exactly equal to nowIso IS badged (isInvalidated flips at equality)", () => {
+    const docs: PendingDoc[] = [
+      makePendingDoc({
+        id: "01HZBADGECCCCCCCCCCCCCCCCC",
+        slug: "knowledge-boundary-invalid",
+        type: "knowledge",
+        title: "Boundary Doc",
+        validity: { invalid_at: nowIso },
+      }),
+    ];
+    const rows = buildPendingTableRows(docs, new Map(), nowIso);
+    const titleColumnIndex = PENDING_TABLE_HEADERS.indexOf("Title");
+    expect(rows[0]?.[titleColumnIndex]).toBe("Boundary Doc [invalid]");
+  });
+
+  // ── ERROR ──────────────────────────────────────────────────────────────
+
+  it("ERROR: a doc with no validity field at all renders without throwing and without a badge", () => {
+    const docs: PendingDoc[] = [
+      makePendingDoc({ id: "01HZBADGEDDDDDDDDDDDDDDDDD", slug: "prd-no-validity", title: "Plain Doc" }),
+    ];
+    expect(() => buildPendingTableRows(docs, new Map(), nowIso)).not.toThrow();
+    const rows = buildPendingTableRows(docs, new Map(), nowIso);
+    const titleColumnIndex = PENDING_TABLE_HEADERS.indexOf("Title");
+    expect(rows[0]?.[titleColumnIndex]).toBe("Plain Doc");
+  });
+
+  // ── STATE ──────────────────────────────────────────────────────────────
+
+  it("STATE: the SAME doc renders unbadged before its invalid_at and badged after, as nowIso moves forward", () => {
+    const doc = makePendingDoc({
+      id: "01HZBADGEEEEEEEEEEEEEEEEE",
+      slug: "knowledge-state-doc",
+      type: "knowledge",
+      title: "State Doc",
+      validity: { invalid_at: "2026-06-01T00:00:00.000Z" },
+    });
+    const titleColumnIndex = PENDING_TABLE_HEADERS.indexOf("Title");
+
+    const before = buildPendingTableRows([doc], new Map(), "2026-05-01T00:00:00.000Z");
+    expect(before[0]?.[titleColumnIndex]).toBe("State Doc");
+
+    const after = buildPendingTableRows([doc], new Map(), "2026-07-01T00:00:00.000Z");
+    expect(after[0]?.[titleColumnIndex]).toBe("State Doc [invalid]");
+  });
+
+  // ── REGRESSION ─────────────────────────────────────────────────────────
+
+  it("REGRESSION: a non-invalidated doc's row is byte-identical whether or not an invalidated doc shares the same batch", () => {
+    const plainDoc = makePendingDoc({
+      id: "01HZBADGEFFFFFFFFFFFFFFFFF",
+      slug: "prd-plain-doc",
+      title: "Plain Batch Doc",
+    });
+    const invalidDoc = makePendingDoc({
+      id: "01HZBADGEGGGGGGGGGGGGGGGGG",
+      slug: "knowledge-invalid-sibling",
+      type: "knowledge",
+      title: "Invalid Sibling",
+      validity: { invalid_at: "2026-06-01T00:00:00.000Z" },
+    });
+
+    const rowsAlone = buildPendingTableRows([plainDoc], new Map(), nowIso);
+    const rowsWithSibling = buildPendingTableRows([plainDoc, invalidDoc], new Map(), nowIso);
+
+    expect(rowsWithSibling[0]).toEqual(rowsAlone[0]);
+  });
+
+  it("REGRESSION: omitting nowIso still renders without throwing (default-now convenience path)", () => {
+    const docs: PendingDoc[] = [
+      makePendingDoc({ id: "01HZBADGEHHHHHHHHHHHHHHHHH", slug: "prd-default-now", title: "Default Now Doc" }),
+    ];
+    expect(() => buildPendingTableRows(docs, new Map())).not.toThrow();
   });
 });
