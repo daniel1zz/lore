@@ -18,6 +18,11 @@
 # entry to opt it out of the floor, or delete this whole `verification_profiles`
 # key to disable the feature for this corpus entirely (an absent/null profile
 # resolves to a vacuous pass for every spec_kind).
+#
+# `min_acs` (task-spec-promote-base-1-ac-rule-is-spec-kind-agnostic-spec-080)
+# overrides the `spec-promote` gate's base "≥1 declared acceptance criterion"
+# floor per spec_kind — `0` is legal (a narrative kind needs no declared ACs at
+# all); omitting `min_acs` keeps the default floor of 1.
 workflow:
   verification_profiles:
     design:
@@ -33,3 +38,10 @@ workflow:
     tech:
       required_oracles:
         - test
+    domain-overview:
+      # domain-overview specs are a domain's full narrative (vision, staged
+      # commitments, owner-decision context, SPEC-080 C2) — not an
+      # implementation contract, so they carry neither an oracle-coverage
+      # floor (no `required_oracles` declared at all) nor an acceptance-
+      # criteria-count floor.
+      min_acs: 0

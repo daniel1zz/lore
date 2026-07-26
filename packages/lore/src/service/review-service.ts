@@ -130,6 +130,11 @@ export class ReviewService {
       return this.gate.enforcer.enforce("spec-promote", {
         acceptanceCriteriaCount,
         specIdOrSlug: doc.slug,
+        // reason: task-spec-promote-base-1-ac-rule-is-spec-kind-agnostic-spec-080
+        // AC4 — feedSpecPromote's denial message names the RESOLVED kind, never a
+        // hardcoded default; this is the SAME specKind already computed above for
+        // verificationProfile, never a second lookup.
+        specKind,
         ...(parsed.success ? { acceptanceCriteria: parsed.data } : {}),
         acQuantifiableEnabled: this.gate.enforcer.isAcQuantifiableEnabled("spec-promote"),
         verificationProfile: this.gate.enforcer.resolveVerificationProfile(specKind),

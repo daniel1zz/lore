@@ -22,6 +22,10 @@ import {
   upstreamApproved,
   upstreamHasAcceptanceCriteria,
   attestationFloor,
+  acCountMeetsFloor,
+  NO_ACCEPTANCE_CRITERIA_REASON,
+  AC_COUNT_FIELD,
+  DEFAULT_MIN_ACS,
 } from "../../../src/service/gate-predicates.js";
 
 describe("gate-predicates", () => {
@@ -388,6 +392,77 @@ describe("gate-predicates", () => {
         taskInfo({ slug: "task-b", evidenceCount: 1, attestedCount: 1 }),
       ];
       expect(attestationFloor(tasks, 0.5)).toEqual({ ok: true });
+    });
+  });
+
+  // task-spec-promote-base-1-ac-rule-is-spec-kind-agnostic-spec-080 (option (a),
+  // profile-aware AC floor) — spec-promote's base predicate, replacing the old
+  // unconditional `count > 0` check `checkSpecPromote` used to inline.
+  describe("acCountMeetsFloor", () => {
+    // HAPPY — a profile explicitly waiving the floor (min_acs: 0) passes with zero ACs
+    it("passes with zero declared ACs when the profile's min_acs is 0", () => {
+      expect(acCountMeetsFloor(0, { min_acs: 0 })).toEqual({ ok: true });
+    });
+
+    // HAPPY — a profile with an oracle floor but no min_acs still defaults to 1, satisfied
+    it("passes when count meets the default floor of 1 and the profile declares no min_acs", () => {
+      expect(acCountMeetsFloor(1, { required_oracles: ["e2e"] })).toEqual({ ok: true });
+    });
+
+    // NEGATIVE — no profile at all (kind unconfigured) still requires >= 1 (REGRESSION target)
+    it("fails with zero ACs and no profile at all (unconditional pre-existing default)", () => {
+      expect(acCountMeetsFloor(0, null)).toEqual({
+        ok: false,
+        reason: NO_ACCEPTANCE_CRITERIA_REASON,
+        field: AC_COUNT_FIELD,
+      });
+      expect(acCountMeetsFloor(0, undefined)).toEqual({
+        ok: false,
+        reason: NO_ACCEPTANCE_CRITERIA_REASON,
+        field: AC_COUNT_FIELD,
+      });
+    });
+
+    // NEGATIVE — a profile present but declaring no min_acs still requires >= 1
+    it("fails with zero ACs when the profile omits min_acs (kind with no knob)", () => {
+      expect(acCountMeetsFloor(0, { required_oracles: ["test"] })).toEqual({
+        ok: false,
+        reason: NO_ACCEPTANCE_CRITERIA_REASON,
+        field: AC_COUNT_FIELD,
+      });
+    });
+
+    // BOUNDARY — a configured min_acs is exactly met
+    it("passes when count exactly equals a configured min_acs > 1", () => {
+      expect(acCountMeetsFloor(2, { min_acs: 2 })).toEqual({ ok: true });
+    });
+
+    // BOUNDARY — one short of a configured min_acs fails
+    it("fails when count is exactly one short of a configured min_acs", () => {
+      expect(acCountMeetsFloor(1, { min_acs: 2 })).toEqual({
+        ok: false,
+        reason: NO_ACCEPTANCE_CRITERIA_REASON,
+        field: AC_COUNT_FIELD,
+      });
+    });
+
+    // BOUNDARY — DEFAULT_MIN_ACS is the literal 1, never a magic number re-derived elsewhere
+    it("DEFAULT_MIN_ACS is 1", () => {
+      expect(DEFAULT_MIN_ACS).toBe(1);
+    });
+
+    // REGRESSION — feature/tech/design kinds (no min_acs ever declared for them in
+    // this codebase's shipped template) keep the exact pre-existing ">= 1" behavior
+    // byte-compatible: 0 ACs blocks, 1 AC passes, regardless of which oracle floor
+    // the profile itself declares.
+    it("REGRESSION: a feature-kind-shaped profile (required_oracles: ['test'], no min_acs) blocks 0 ACs and passes 1", () => {
+      const featureProfile = { required_oracles: ["test" as const] };
+      expect(acCountMeetsFloor(0, featureProfile)).toEqual({
+        ok: false,
+        reason: NO_ACCEPTANCE_CRITERIA_REASON,
+        field: AC_COUNT_FIELD,
+      });
+      expect(acCountMeetsFloor(1, featureProfile)).toEqual({ ok: true });
     });
   });
 });

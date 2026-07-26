@@ -299,7 +299,11 @@ describe("GateEnforcer — spec-promote (via ReviewService.approve, default conf
       expect(result.ok).toBe(false);
       if (!result.ok) {
         expect(result.error.code).toBe("VALIDATION_ERROR");
-        expect((result.error as { field?: string }).field).toBe("gate:spec-promote");
+        // reason: task-spec-promote-base-1-ac-rule-is-spec-kind-agnostic-spec-080 —
+        // the base AC-count check (`acCountMeetsFloor`) now carries a `field`
+        // sub-discriminator (`AC_COUNT_FIELD`), same as every other spec-promote
+        // sub-predicate — see gate-enforcer.test.ts's identical update for detail.
+        expect((result.error as { field?: string }).field).toBe("gate:spec-promote:acceptance-criteria-count");
         expect((result.error as { message?: string }).message).toContain("NO_ACCEPTANCE_CRITERIA");
       }
     } finally {

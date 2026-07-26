@@ -213,7 +213,15 @@ describe("GateEnforcer", () => {
       });
       expect(result.ok).toBe(false);
       if (result.ok) return;
-      expect((result.error as { field?: string }).field).toBe("gate:spec-promote");
+      // reason: task-spec-promote-base-1-ac-rule-is-spec-kind-agnostic-spec-080 —
+      // the base AC-count check is now `acCountMeetsFloor`, which (like every OTHER
+      // spec-promote sub-predicate: acQuantifiable, oracleCoverage) carries an
+      // explicit `field` sub-discriminator (`AC_COUNT_FIELD`), so the composed field
+      // gains the `:acceptance-criteria-count` suffix per this module's OWN
+      // documented "field sub-discriminator" convention (see `enforce()`'s header
+      // comment above `fieldSuffix`) — no longer the bare `"gate:spec-promote"` a
+      // field-less inline check produced pre-fix.
+      expect((result.error as { field?: string }).field).toBe("gate:spec-promote:acceptance-criteria-count");
       expect((result.error as { value?: unknown }).value).toEqual(["NO_ACCEPTANCE_CRITERIA"]);
       const message = (result.error as { message?: string }).message ?? "";
       expect(message).toContain('Gate "spec-promote" blocked: NO_ACCEPTANCE_CRITERIA');

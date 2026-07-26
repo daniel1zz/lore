@@ -6,7 +6,14 @@
  *   - verificationProfileSchema / VerificationProfile — one `spec_kind`'s declared
  *     floor: which oracle kinds its acceptance criteria must be script-bound to,
  *     plus an optional `required_uat` flag consumed by the SEPARATE `plan-promote`
- *     `requiresUat` predicate (`packages/lore/src/service/gate-predicates.ts`).
+ *     `requiresUat` predicate (`packages/lore/src/service/gate-predicates.ts`), and
+ *     an optional `min_acs` — the profile-aware acceptance-criteria-COUNT floor
+ *     `spec-promote`'s base predicate consults (task-spec-promote-base-1-ac-rule-
+ *     is-spec-kind-agnostic-spec-080, option (a)): `0` is legal (a narrative kind
+ *     like `domain-overview` needs no declared ACs at all, SPEC-080 C2), an absent
+ *     `min_acs` (or an absent profile entirely) keeps the pre-existing "≥1" floor —
+ *     see `gate-predicates.ts::acCountMeetsFloor`'s own JSDoc for the exact default
+ *     resolution rule.
  *   - CoverageFinding — one `checkOracleCoverage` miss (which oracle kind, and a
  *     human-readable repair hint).
  *   - resolveVerificationProfile(config, specKind) — profile lookup; `null` means
@@ -48,19 +55,49 @@ import type { LoreConfig } from "./config.js";
 
 /**
  * One `spec_kind`'s verification-profile floor — the oracle kinds its declared
- * acceptance criteria must be script-bound to, plus an optional UAT requirement.
+ * acceptance criteria must be script-bound to, plus an optional UAT requirement
+ * and an optional declared-acceptance-criteria-COUNT floor (`min_acs`).
  *
  * @example
  * verificationProfileSchema.parse({ required_oracles: ["e2e"], required_uat: true });
  * @example
- * verificationProfileSchema.safeParse({ required_oracles: [] }); // => success: false (min 1)
+ * verificationProfileSchema.safeParse({ required_oracles: [] }); // => success: false (min 1, WHEN present)
  * @example
  * verificationProfileSchema.safeParse({ required_oracles: ["browser-tap"] }); // => success: false
+ * @example
+ * verificationProfileSchema.parse({ required_oracles: ["e2e"], min_acs: 0 }); // => 0 is legal
+ * @example
+ * verificationProfileSchema.safeParse({ required_oracles: ["e2e"], min_acs: -1 }); // => success: false
+ * @example
+ * verificationProfileSchema.parse({ min_acs: 0 }); // => `required_oracles` OMITTED entirely is
+ *   legal too (task-spec-promote-base-1-ac-rule-is-spec-kind-agnostic-spec-080) — a
+ *   spec_kind (e.g. `domain-overview`) may opt into ONLY the AC-count floor, no
+ *   oracle floor at all. Distinct from `required_oracles: []`, which stays rejected.
  */
 export const verificationProfileSchema = z
   .object({
-    required_oracles: z.array(z.enum(ORACLE_KINDS)).min(1),
+    /**
+     * Which oracle kinds this spec_kind's acceptance criteria must be script-bound
+     * to. OPTIONAL as of task-spec-promote-base-1-ac-rule-is-spec-kind-agnostic-
+     * spec-080 (previously required) — a profile entry declaring ONLY `min_acs`
+     * (no oracle floor at all) is now legal. `.min(1)` still applies WHENEVER the
+     * field IS present — `required_oracles: []` remains a schema-level validation
+     * error, unchanged from SPEC-058's original public-interface sketch; only
+     * omitting the key entirely is the newly-legal state. `checkOracleCoverage`
+     * treats an absent `required_oracles` as `[]` (vacuous pass — zero required
+     * oracles, zero possible findings).
+     */
+    required_oracles: z.array(z.enum(ORACLE_KINDS)).min(1).optional(),
     required_uat: z.boolean().optional(),
+    /**
+     * Overrides `spec-promote`'s base "≥1 declared acceptance criterion" floor
+     * for this spec_kind (task-spec-promote-base-1-ac-rule-is-spec-kind-agnostic-
+     * spec-080). `0` is a LEGAL value — distinct from omitting the field, which
+     * keeps the pre-existing default floor of 1 (see `gate-predicates.ts::
+     * acCountMeetsFloor`). A negative value is a schema-level validation error,
+     * never silently clamped.
+     */
+    min_acs: z.number().int().min(0).optional(),
   })
   .strict();
 
@@ -123,7 +160,9 @@ export function resolveVerificationProfile(
  * @param profile - The already-resolved verification profile to check against.
  * @returns One {@link CoverageFinding} per `profile.required_oracles` entry with
  *   zero satisfying `script`-mode ACs, in `profile.required_oracles` order;
- *   `[]` when every required oracle is covered.
+ *   `[]` when every required oracle is covered, OR when `profile.required_oracles`
+ *   is absent entirely (task-spec-promote-base-1-ac-rule-is-spec-kind-agnostic-
+ *   spec-080 — a profile declaring ONLY `min_acs` has no oracle floor to fail).
  * @example
  * checkOracleCoverage(
  *   [{ id: "AC-1", statement: "x", verify: { mode: "script", oracle: "e2e", command: "bun run e2e" } }],
@@ -134,6 +173,8 @@ export function resolveVerificationProfile(
  *   [{ id: "AC-1", statement: "x", verify: { mode: "ai", rubric: "P95 < 200ms" } }],
  *   { required_oracles: ["e2e"] },
  * ); // => [{ missing_oracle: "e2e", hint: "…" }] — ai-mode never satisfies a floor
+ * @example
+ * checkOracleCoverage([], { min_acs: 0 }); // => [] — no required_oracles declared at all
  */
 export function checkOracleCoverage(
   criteria: AcceptanceCriterion[],
@@ -150,7 +191,7 @@ export function checkOracleCoverage(
   }
 
   const findings: CoverageFinding[] = [];
-  for (const oracle of profile.required_oracles) {
+  for (const oracle of profile.required_oracles ?? []) {
     if (!covered.has(oracle)) {
       findings.push({
         missing_oracle: oracle,

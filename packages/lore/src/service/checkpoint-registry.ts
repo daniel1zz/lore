@@ -62,6 +62,11 @@
  *   Config-reading (which the module's first invariant forbids here) is
  *   delegated to `GateEnforcer.resolveVerificationProfile`/`isOracleCoverage
  *   Enabled`/`isRequiresUatEnabled`, called by the caller BEFORE building ctx.
+ *   `spec-promote`'s BASE predicate, `acCountMeetsFloor` (task-spec-promote-base-
+ *   1-ac-rule-is-spec-kind-agnostic-spec-080), ALSO reads the SAME
+ *   `ctx.verificationProfile` the candidate spec's `oracleCoverage` already
+ *   consumes — `profile.min_acs` (absent → the pre-existing default floor of 1,
+ *   `DEFAULT_MIN_ACS`), never a second, independently-resolved profile field.
  *
  * Source: IoC vertical-slice tech-spec §4.1/§5.1/§11; SPEC-042 §Design Decisions D5;
  *   SPEC-058 §Module Boundary, §Design Decisions D2-D5.
@@ -91,6 +96,7 @@ import {
   upstreamHasAcceptanceCriteria,
   noAnchorOverlap,
   acQuantifiable,
+  acCountMeetsFloor,
   uatP0Accepted,
   oracleCoverage,
   requiresUatDeclared,
@@ -98,6 +104,8 @@ import {
   prdOutlineSynced,
   ANCHOR_OVERLAP_FIELD,
   AC_QUANTIFIABLE_FIELD,
+  NO_ACCEPTANCE_CRITERIA_REASON,
+  DEFAULT_MIN_ACS,
   ORACLE_COVERAGE_FIELD,
   REQUIRES_UAT_FIELD,
   PLAN_CLOSE_FIELD,
@@ -472,19 +480,18 @@ function feedSpecCreate(ctx: GateContext, failures: PredicateResult[]): string {
   return renderFeedingPack(pack);
 }
 
-/** Machine-readable reason code for spec-promote's single predicate. */
-const NO_ACCEPTANCE_CRITERIA_REASON = "NO_ACCEPTANCE_CRITERIA";
-
 /**
- * spec-promote's single predicate: at least one structured acceptance criterion must
- * already be declared on the target spec (`ctx.acceptanceCriteriaCount`, counted by
- * `gate.ts` via `AcService.listCriteria` before this is called — that count IS the
- * only thing that can fail this gate, per `gate.ts`'s module header).
+ * spec-promote's base predicate: a candidate/target spec must declare at least its
+ * `spec_kind`'s resolved floor (`ctx.verificationProfile?.min_acs`, default
+ * {@link DEFAULT_MIN_ACS} — task-spec-promote-base-1-ac-rule-is-spec-kind-agnostic-
+ * spec-080) of structured acceptance criteria (`ctx.acceptanceCriteriaCount`,
+ * counted by `gate.ts` via `AcService.listCriteria` before this is called).
+ * Delegates the actual floor comparison to `acCountMeetsFloor` (`gate-predicates.ts`)
+ * — this function only supplies the pre-fetched `ctx` fields.
  */
 function checkSpecPromote(ctx: GateContext): PredicateResult[] {
   const count = ctx.acceptanceCriteriaCount ?? 0;
-  const results: PredicateResult[] =
-    count > 0 ? [{ ok: true }] : [{ ok: false, reason: NO_ACCEPTANCE_CRITERIA_REASON }];
+  const results: PredicateResult[] = [acCountMeetsFloor(count, ctx.verificationProfile)];
   if (ctx.acQuantifiableEnabled !== false) {
     results.push(acQuantifiable(ctx.acceptanceCriteria));
   }
@@ -498,12 +505,20 @@ function checkSpecPromote(ctx: GateContext): PredicateResult[] {
  * spec-promote's feeding message. The base "no structured acceptance criteria"
  * text is identical to `gate.ts`'s former inline stderr message (trailing newline
  * included) whenever that's the only failure — byte-for-byte behavior-preserving on
- * that path. When `acQuantifiable` also (or instead) failed, appends the per-AC
- * detail lines (`acQuantifiableDetailLines`) naming every offending AC id, its
- * abstract word, and the fix.
+ * that path, MODULO the appended `(needs >= N for spec_kind "K")` clause
+ * (task-spec-promote-base-1-ac-rule-is-spec-kind-agnostic-spec-080 AC4 — the
+ * denial must name the RESOLVED floor and kind, never a hardcoded "1"). `N`
+ * mirrors `acCountMeetsFloor`'s own default-resolution rule exactly; `K` falls
+ * back to `"unknown"` (never a fabricated kind) when the caller didn't populate
+ * `ctx.specKind` — mirrors this function's pre-existing `ctx.specIdOrSlug ??
+ * "unknown"` convention. When `acQuantifiable` also (or instead) failed, appends
+ * the per-AC detail lines (`acQuantifiableDetailLines`) naming every offending AC
+ * id, its abstract word, and the fix.
  */
 function feedSpecPromote(ctx: GateContext, failures: PredicateResult[]): string {
-  const base = `Error: spec "${ctx.specIdOrSlug ?? "unknown"}" has no structured acceptance criteria — add via \`lore ac add\`.\n`;
+  const floor = ctx.verificationProfile?.min_acs ?? DEFAULT_MIN_ACS;
+  const kind = ctx.specKind ?? "unknown";
+  const base = `Error: spec "${ctx.specIdOrSlug ?? "unknown"}" has no structured acceptance criteria (needs >= ${floor} for spec_kind "${kind}") — add via \`lore ac add\`.\n`;
   const acLines = acQuantifiableDetailLines(ctx, failures);
   const oracleLines = oracleCoverageDetailLines(ctx, failures);
   const detailLines = [...acLines, ...oracleLines];
