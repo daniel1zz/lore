@@ -123,6 +123,57 @@ describe("attestationFloor — AC-069-1: zero attested entries blocks plan-close
   });
 });
 
+// ─── Regression (2026-07-26 fix): the feeding pack states the PLAN-level repair,
+// never a task-level one — task-attestation-floor-feeding-pack-names-tasks-but-the ──
+
+describe("feedAttestationFloor — the pack's exemption instruction is PLAN-level only", () => {
+  it("names the plan-level extra.attestation_exempt field, a fetch-merge-set recovery flow, and explicitly forbids writing the exempt fields onto a task", async () => {
+    const { corpusService } = makeHarness(attestationConfig());
+    const plan = await makeApprovedPlan(corpusService);
+    const task = await makeTask(corpusService, plan, "Fabrication-risk task", [
+      selfReportedEntry("bun test"),
+    ]);
+
+    const result = await corpusService.set(plan.id, { status: "archived" });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    const message = (result.error as { message?: string }).message ?? "";
+
+    // AC-069-1 REGRESSION — diagnostic task naming + the `lore verify` recovery
+    // command are both retained unchanged by this fix.
+    expect(message).toContain(task.slug);
+    expect(message).toContain("lore verify");
+
+    // The pack still names the plan-level field literally...
+    expect(message).toContain("extra.attestation_exempt");
+    expect(message).toContain("extra.attestation_exempt_reason");
+    // ...declared "on the PLAN ITSELF, never on a task" — the exemption target is
+    // unambiguous, not merely implied by proximity to the offending-task list.
+    expect(message).toContain("on the PLAN ITSELF, never on a task");
+
+    // ...via a fetch-merge-set flow (SPEC-076 wholesale-replace guard precedent,
+    // mirrors feedRequiresUat's fixed shape in the same file) — never a bare
+    // `lore set --extra` literal that would clobber the plan's other extra keys.
+    expect(message).toContain("does NOT merge");
+    expect(message).toContain("lore get");
+    expect(message).toContain("--json");
+    expect(message).toContain("KEEPING every existing key");
+
+    // The pack MUST NOT instruct the operator to write the exempt fields onto a
+    // task — it explicitly says the opposite, naming the task list as
+    // diagnostic-only and stating this gate never reads an exempt field there.
+    expect(message).toContain("do NOT write");
+    expect(message).toContain("never reads it there");
+    expect(message).not.toMatch(/set\s+`?extra\.attestation_exempt`?[^.]*\bon(to)?\b[^.]*\btask/i);
+
+    // Names RED/TDD tasks' time-bound (red-before-green) oracles as the canonical
+    // "genuinely no oracle to attest against" exemption rationale class.
+    expect(message).toContain("RED/TDD");
+    expect(message).toContain("time-bound");
+  });
+});
+
 // ─── AC-069-2: attested evidence meeting the floor → SUCCEED ─────────────────
 
 describe("attestationFloor — AC-069-2: attested evidence meeting the floor unblocks the same transition", () => {
