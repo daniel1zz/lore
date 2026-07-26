@@ -42,18 +42,42 @@
  *
  * Exit codes: 0 = success, 2 = argument error (both/neither output-tail flags
  *   given inconsistently), 3 = DOC_NOT_FOUND, 4 = VALIDATION_ERROR (not a task/phase,
- *   50-entry cap reached, bad oracle/result value, unknown ac_ref/checklist_ref),
- *   5 = STALE_VERSION.
+ *   50-entry cap reached, bad oracle/result value, unknown ac_ref/checklist_ref, OR
+ *   a missing oracle file per the precheck below), 5 = STALE_VERSION.
+ *
+ * Missing-oracle-file precheck (defect: task-lore-evidence-self-reported-pass-
+ * lacks-oracle-file, AC-080-3 incident) — a self-reported `--oracle test|e2e
+ * --result pass` used to record cleanly even when the test file named in
+ * `--command` did not exist on disk; only `lore verify`'s SPEC-061 zero-match
+ * guard caught the gap, two verify rounds later. BEFORE calling the service,
+ * when `oracle` is `test`/`e2e` AND `result` is `pass`, this adapter extracts
+ * test-file-like path tokens from `command` (`../evidence-precheck.js`,
+ * vitest-safe / DI'd existence port) and checks each against `process.cwd()`,
+ * a `cd <dir> &&` prefix target (if the command has one), and the discovered
+ * corpus root (when distinct from cwd). A command referencing NO extractable
+ * test-file token is a deliberate fail-open — it cannot be checked, so it is
+ * left alone (same "cannot demand what isn't referenced" logic every other
+ * oracle kind and every `fail` result already gets, unconditionally). A
+ * command whose extracted token(s) exist nowhere plausible fails loud with
+ * `VALIDATION_ERROR` (exit 4) BEFORE the service call — the same synthetic
+ * error is rendered via the shared `formatError`/`exitCode` pair every other
+ * `LoreError` in this file uses, so the failure mode is presentationally
+ * identical to a service-rejected write even though no service call happens.
+ * There is deliberately NO escape-hatch flag: a missing test file has no
+ * legitimate "pass" outcome — the repair is either author the file, fix the
+ * path, or record with `--oracle manual` for a genuinely manual check.
  *
  * Source: SPEC-025 §4 AC-WF-1, AC-WF-2; SPEC-038 §4, §7 D3; SPEC-056 §Design Decisions D8
  */
 
-import { readFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
+import { dirname } from "path";
 import { defineCommand } from "citty";
-import { ORACLE_KINDS, tailChars, type OracleKind } from "@lore/core";
+import { ORACLE_KINDS, tailChars, type LoreError, type OracleKind } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 import { requirePhaseWorkflowService } from "../phase-wiring.js";
+import { findMissingOracleFiles } from "../evidence-precheck.js";
 
 const VALID_RESULTS = ["pass", "fail"] as const;
 
@@ -133,8 +157,39 @@ export default defineCommand({
       }
     }
 
-    const { app } = loadLoreApp();
+    const { app, dbPath } = loadLoreApp();
     try {
+      // reason: missing-oracle-file precheck (see module header) — only test/e2e
+      // pass claims are checked; every other oracle/result combination is
+      // completely unaffected (byte-identical to pre-precheck behavior).
+      if (
+        (args.oracle === "test" || args.oracle === "e2e") &&
+        args.result === "pass"
+      ) {
+        const missing = findMissingOracleFiles(args.command as string, {
+          cwd: process.cwd(),
+          // reason: dbPath is <corpusRoot>/.lore/lore.db — the corpus root is two
+          // levels up. Distinct from cwd whenever the invocation runs from a
+          // subdirectory of the corpus (or a linked worktree, SPEC-063).
+          corpusRoot: dirname(dirname(dbPath)),
+          fileExists: existsSync,
+        });
+        if (missing.length > 0) {
+          const precheckError: LoreError = {
+            code: "VALIDATION_ERROR",
+            field: "command",
+            message:
+              `Oracle file(s) not found: ${missing.join(", ")}. ` +
+              "Author the oracle file or fix the path in --command; " +
+              "use --oracle manual for genuinely manual checks.",
+            value: args.command,
+          };
+          process.stderr.write(formatError(precheckError) + "\n");
+          process.exitCode = exitCode(precheckError);
+          return;
+        }
+      }
+
       const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
       const evidenceInput = {
         // reason: cast — CLI arg strings are validated by evidenceEntrySchema server-side;
