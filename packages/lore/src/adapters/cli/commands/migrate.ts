@@ -21,8 +21,17 @@
  *                      full per-section verdict report with zero writes. Thin pipe over
  *                      `OutlineMigrationService.migrateSection`, looped once per `--section`.
  *                      (SPEC-080 §Migration Plan Phase 1, AC-080-7)
+ *   ordinals [--apply] One-shot SPEC-084 repair migration: backfills the store-allocated
+ *                      `ordinal` column for every spec/adr doc from its title-declared number
+ *                      (created_at priority, collisions get next-free), strips the now-redundant
+ *                      number prefix from titles, and reconciles `.lore/export-index.json`'s
+ *                      `human_id` field to match. Dry-run is the DEFAULT (no `--apply` needed to
+ *                      preview); `--apply` executes. Idempotent — a second `--apply` run performs
+ *                      zero writes. Thin pipe over `OrdinalMigrationService.migrateOrdinals`.
+ *                      (SPEC-084 §One-shot repair migration, AC-084-4)
  */
 
+import { dirname } from "path";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
@@ -33,12 +42,12 @@ export default defineCommand({
   meta: {
     name: "migrate",
     description:
-      "Corpus migration: `v1 --from <path>` (v1 import), `phases` (phase schema sweep), `spec-kind` (spec_kind mistype audit), `tasks-to-phases` (task→phase doc-type sweep), or `prd-to-outline` (per-section PRD→outline domain relocation)",
+      "Corpus migration: `v1 --from <path>` (v1 import), `phases` (phase schema sweep), `spec-kind` (spec_kind mistype audit), `tasks-to-phases` (task→phase doc-type sweep), `prd-to-outline` (per-section PRD→outline domain relocation), or `ordinals` (SPEC-084 ordinal repair migration)",
   },
   args: {
     version: {
       type: "positional",
-      description: "Migration action: v1 | phases | spec-kind | tasks-to-phases | prd-to-outline",
+      description: "Migration action: v1 | phases | spec-kind | tasks-to-phases | prd-to-outline | ordinals",
       required: true,
     },
     from: {
@@ -56,6 +65,10 @@ export default defineCommand({
     "dry-run": {
       type: "boolean",
       description: "Analyse and report without writing to database",
+    },
+    apply: {
+      type: "boolean",
+      description: "[ordinals only] Execute the migration (default is dry-run/preview-only)",
     },
     "skip-secret-scan": {
       type: "boolean",
@@ -77,12 +90,93 @@ export default defineCommand({
       args.version !== "phases" &&
       args.version !== "spec-kind" &&
       args.version !== "tasks-to-phases" &&
-      args.version !== "prd-to-outline"
+      args.version !== "prd-to-outline" &&
+      args.version !== "ordinals"
     ) {
       process.stderr.write(
-        `Error: Unknown migration action '${args.version}'. Supported: v1, phases, spec-kind, tasks-to-phases, prd-to-outline.\n`,
+        `Error: Unknown migration action '${args.version}'. Supported: v1, phases, spec-kind, tasks-to-phases, prd-to-outline, ordinals.\n`,
       );
       process.exit(2);
+    }
+
+    // ── ordinals action ───────────────────────────────────────────────────
+    if (args.version === "ordinals") {
+      const dryRun = !(args.apply ?? false);
+      const { app, dbPath } = loadLoreApp();
+      // reason: export-index.json lives at <projectDir>/.lore/export-index.json —
+      // same derivation ExportDocsService's own CLI command uses (dbPath = <projectDir>/.lore/lore.db).
+      const projectDir = dirname(dirname(dbPath));
+      try {
+        if (app.ordinalMigrationService === undefined) {
+          process.stderr.write("Internal error: OrdinalMigrationService not wired on App\n");
+          process.exitCode = 1;
+          return;
+        }
+
+        const result = await app.ordinalMigrationService.migrateOrdinals({ dryRun, projectDir });
+        if (!result.ok) {
+          if (args.json) {
+            console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
+          } else {
+            process.stderr.write(formatError(result.error) + "\n");
+          }
+          process.exitCode = exitCode(result.error);
+          return;
+        }
+
+        const report = result.value;
+        if (args.json) {
+          console.log(JSON.stringify({ ok: true, data: report }, null, 2));
+          process.exitCode = report.errors.length > 0 ? 4 : 0;
+          return;
+        }
+
+        const label = dryRun ? "Ordinal migration (dry-run)" : "Ordinal migration complete";
+        console.log(label);
+        console.log("─".repeat(40));
+        console.log(`Numbered docs:        ${report.numbered_doc_count}`);
+        console.log(`Bijective:            ${report.bijective ? "yes" : "NO — see errors below"}`);
+        console.log(`Writes performed:     ${report.writes_performed}`);
+
+        if (report.reassignments.length > 0) {
+          console.log("\nOrdinal assignments (old → new):");
+          for (const r of report.reassignments) {
+            const oldLabel = r.old_display ?? "(no declared number)";
+            const marker = r.changed ? "CHANGED" : "kept";
+            console.log(`  [${marker}] ${r.doc_id}  ${oldLabel} → ${r.new_display}  "${r.title}"`);
+          }
+        }
+
+        if (report.title_strips.length > 0) {
+          console.log("\nTitle prefix strips:");
+          for (const t of report.title_strips) {
+            console.log(`  ${t.doc_id}  "${t.old_title}" → "${t.new_title}" (status: ${t.status_before})`);
+          }
+        }
+
+        if (report.export_index_reconciles.length > 0) {
+          console.log("\nExport-index human_id reconciles (file renames NOT executed — review and apply):");
+          for (const e of report.export_index_reconciles) {
+            console.log(`  ${e.doc_id}  ${e.old_human_id} → ${e.new_human_id}`);
+            console.log(`    ${e.rename_command}`);
+          }
+        }
+
+        if (report.errors.length > 0) {
+          console.log("\nErrors:");
+          for (const e of report.errors) {
+            console.log(`  ${e}`);
+          }
+        }
+
+        if (dryRun) {
+          console.log("\nRe-run with --apply to execute.");
+        }
+        process.exitCode = report.errors.length > 0 ? 4 : 0;
+      } finally {
+        app.close();
+      }
+      return;
     }
 
     // ── prd-to-outline action ─────────────────────────────────────────────
