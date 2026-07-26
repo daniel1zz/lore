@@ -74,6 +74,7 @@ import type { TreeBlueprint } from "@lore/core";
 import type { GateEnforcer } from "./gate-enforcer.js";
 import type { GateContext } from "./checkpoint-registry.js";
 import { computeArmedGates } from "./checkpoint-registry.js";
+import { resolveDoc, ULID_REGEX } from "./resolve.js";
 
 /**
  * `checkpointRegistry`'s `"spec-create"` checkpoint always produces a `"spec"` doc
@@ -92,26 +93,20 @@ const SPEC_CREATE_FEEDING_SCOPE = "spec";
 // ─── Local types (mirror SPEC-001 §3.1 interfaces) ────────────────────────
 
 /**
- * ULID regex — 25 OR 26 uppercase/digit chars.
+ * Check if input looks like a ULID.
  *
- * @invariant A REAL system-generated ULID (the `ulid()` package output stored on every
- *   `DocRecord.id`/`parent_id`) is ALWAYS exactly 26 characters — this pattern's
- *   `{25,26}` widening (from the originally-strict `{26}`) exists SOLELY to tolerate
- *   hand-typed test-fixture pseudo-IDs that are one character short (a pattern already
- *   present across this codebase's test suites, e.g. `phase-workflow-service.test.ts`'s
- *   `"01HPLAN000000000000000000"`, 25 chars — SPEC-056 T4 discovery: `getPlanBundle`'s
- *   `this.resolve()` call previously misrouted such a fixture to a SLUG lookup
- *   (`findBySlug`), which always fails for an uppercase pseudo-ID, silently producing
- *   `DOC_NOT_FOUND` instead of the intended id lookup). Widening is safe (never changes
- *   behavior for a REAL 26-char ULID, and can never misclassify a legitimate slug — the
- *   slug grammar, `slugSchema` in `@lore/core`, is lowercase-leading and never matches
- *   this uppercase+digit charset regardless of length).
+ * Delegates to `resolve.ts`'s exported `ULID_REGEX` — the SAME widened
+ * (`{25,26}` chars, any letter) pattern `resolveDoc` itself tests input
+ * against (task-skill-implement-fix-corpusservice-resolve-duplicate; the
+ * widening's own rationale, incl. the SPEC-056 T4 test-fixture discovery
+ * this class of check exists for, now lives on `ULID_REGEX`'s JSDoc — this
+ * function is a thin, non-duplicating wrapper, not a second definition).
+ * Used only by `resolve()` below, to pick which fuzzy-suggestion helper
+ * (`buildSuggestions` vs `buildSlugSuggestions`) enriches a bare
+ * `DOC_NOT_FOUND` miss.
  */
-const ULID_RE = /^[0-9A-Z]{25,26}$/;
-
-/** Check if input looks like a ULID */
 function isUlid(input: string): boolean {
-  return ULID_RE.test(input);
+  return ULID_REGEX.test(input);
 }
 
 /**
@@ -456,25 +451,47 @@ export class CorpusService {
 
   /**
    * Resolve any string input to a DocId.
-   * ULID format → find by id. Otherwise → find by slug.
-   * If not found, return DOC_NOT_FOUND with fuzzy suggestions (substring on slugs).
+   *
+   * Delegates the actual resolution to `resolveDoc` (`./resolve.js`) — the
+   * SAME SSOT every other service (`ReviewService`, `TaskWorkflowService`,
+   * `AcService`, etc., per `service/CLAUDE.md`) already resolves
+   * id-or-slug arguments through. This method used to duplicate that
+   * resolution logic by hand (exact ULID/slug match only) and had drifted
+   * out of sync with it — missing BOTH the SPEC-084 ordinal-ref step
+   * (`"SPEC-84"` → `parseOrdinalRef` → `store.findByTypeOrdinal`) and the
+   * SPEC-065 unique id-prefix fallback, so `dist/lore get ADR-1` /
+   * `set`/`delete` on an ordinal-style reference — or a truncated id-prefix
+   * — exited `DOC_NOT_FOUND` even though the doc existed
+   * (task-skill-implement-fix-corpusservice-resolve-duplicate).
+   *
+   * @invariant On a `DOC_NOT_FOUND` miss `resolveDoc` did NOT already
+   *   annotate with its own prefix-truncation diagnostic, this method
+   *   enriches the error with CorpusService's pre-existing, richer
+   *   substring-fuzzy suggestions (`buildSuggestions`/`buildSlugSuggestions`
+   *   below) — a legitimate CorpusService-specific UX behavior (surfaced via
+   *   `describeLoreError`'s "Did you mean one of: …?", CLI `utils.ts`),
+   *   deliberately preserved rather than silently dropped by this
+   *   delegation. When `resolveDoc` DID supply a diagnostic (the input was
+   *   prefix-shaped), that diagnostic wins — it is more specific than a
+   *   generic fuzzy match.
    */
   async resolve(input: string): Promise<Result<DocId, LoreError>> {
-    if (isUlid(input)) {
-      const findResult = await this.store.find(input);
-      if (!findResult.ok) return findResult;
-      if (findResult.value !== null) return ok(findResult.value.id);
+    const result = await resolveDoc(this.store, input);
+    if (result.ok) return ok(result.value.id);
 
-      const suggestions = await this.buildSuggestions(input);
-      return err({ code: "DOC_NOT_FOUND", id: input, suggestions });
+    if (
+      result.error.code === "DOC_NOT_FOUND" &&
+      !(result.error.suggestions && result.error.suggestions.length > 0)
+    ) {
+      const suggestions = isUlid(input)
+        ? await this.buildSuggestions(input)
+        : await this.buildSlugSuggestions(input);
+      if (suggestions.length > 0) {
+        return err({ ...result.error, suggestions });
+      }
     }
 
-    const slugResult = await this.store.findBySlug(input);
-    if (!slugResult.ok) return slugResult;
-    if (slugResult.value !== null) return ok(slugResult.value.id);
-
-    const suggestions = await this.buildSlugSuggestions(input);
-    return err({ code: "DOC_NOT_FOUND", id: input, suggestions });
+    return result;
   }
 
   // ── Create ───────────────────────────────────────────────────────────────
@@ -3102,7 +3119,8 @@ export class CorpusService {
 
   /**
    * Build substring-match suggestions from all doc IDs.
-   * Used when a ULID lookup fails.
+   * Used by `resolve()` to enrich a ULID-shaped `DOC_NOT_FOUND` miss that
+   * `resolveDoc` did not already annotate with its own prefix diagnostic.
    */
   private async buildSuggestions(query: string): Promise<string[]> {
     const allResult = await this.store.findMany({});
@@ -3116,7 +3134,8 @@ export class CorpusService {
 
   /**
    * Build substring-match suggestions from all slugs.
-   * Used when a slug lookup fails.
+   * Used by `resolve()` to enrich a non-ULID-shaped `DOC_NOT_FOUND` miss that
+   * `resolveDoc` did not already annotate with its own prefix diagnostic.
    */
   private async buildSlugSuggestions(query: string): Promise<string[]> {
     const allResult = await this.store.findMany({});

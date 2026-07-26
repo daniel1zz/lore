@@ -12,7 +12,32 @@ import { err, ok, parseOrdinalRef, type LoreError, type Result } from "@lore/cor
 import type { DocId, DocRecord } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 
-const ULID_REGEX = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
+/**
+ * ULID-shape detector — 25 OR 26 chars, digits + ANY letter (not just
+ * Crockford's base32 subset), case-insensitive.
+ *
+ * @invariant A REAL system-generated ULID (`ulidx`'s output, stored on every
+ *   `DocRecord.id`/`parent_id`) is ALWAYS exactly 26 Crockford-base32 chars
+ *   (excludes I/L/O/U). This pattern is DELIBERATELY wider than that —
+ *   task-skill-implement-fix-corpusservice-resolve-duplicate ported this
+ *   widening here from a since-deleted CorpusService-local copy, itself
+ *   introduced by the SPEC-056 T4 discovery: hand-typed test-fixture
+ *   pseudo-IDs (e.g. `"01HPLAN000000000000000000"`, 25 chars, containing an
+ *   `L`) previously fell through the strict-Crockford/26-char regex,
+ *   misrouting an id lookup to `findBySlug` (which always misses an
+ *   uppercase input) and silently producing `DOC_NOT_FOUND` instead of the
+ *   intended `find`. Widening is safe for every REAL caller: it never
+ *   changes behavior for a genuine 26-char ULID, and it can never
+ *   misclassify a legitimate slug — `slugSchema` (`@lore/core`) requires a
+ *   lowercase-leading `{type}-{kebab-name}` shape, which always contains a
+ *   `-` this charset (`[0-9A-Z]`) never matches, regardless of length.
+ *
+ * Exported so `CorpusService.resolve` (a public method that predates and
+ * still wraps this SSOT for its own richer NOT_FOUND-suggestion behavior,
+ * see `corpus-service.ts`) can reuse this exact pattern instead of keeping
+ * its own copy.
+ */
+export const ULID_REGEX = /^[0-9A-Z]{25,26}$/i;
 
 /**
  * Shape of a truncated-but-not-yet-disambiguated identifier: shorter than a
@@ -30,8 +55,9 @@ const FULL_ULID_LENGTH = 26;
 /**
  * Resolves a caller-supplied identifier to its `DocRecord`.
  *
- * Resolution order: (1) exact 26-char ULID match via `store.find`, or exact
- * slug match via `store.findBySlug` for anything shorter/longer; (2) on a
+ * Resolution order: (1) exact ULID-shaped match (`ULID_REGEX`, 25-26 chars)
+ * via `store.find`, or exact slug match via `store.findBySlug` otherwise;
+ * (2) on a
  * miss, if the input parses as an ordinal reference (`parseOrdinalRef`, e.g.
  * `"SPEC-84"` / `"adr-007"`), a direct lookup via `store.findByTypeOrdinal`
  * (SPEC-084 §Module Boundary) — a match resolves immediately, a miss falls
@@ -117,6 +143,16 @@ export async function resolveDoc(
   });
 }
 
+/**
+ * `resolveDoc`, projected to just the resolved `DocId` — for callers that
+ * only need the id (e.g. to pass into a further store call) and don't want
+ * to carry the full `DocRecord` around.
+ *
+ * @param store - storage abstraction (any `StoreInterface` implementation)
+ * @param idOrSlug - full ULID, slug, ordinal reference (`SPEC-84`), or a
+ *   6-25 char ID prefix — same accepted shapes as `resolveDoc`
+ * @returns the resolved `DocId`, or the same error `resolveDoc` would return
+ */
 export async function resolveDocId(
   store: StoreInterface,
   idOrSlug: string,
