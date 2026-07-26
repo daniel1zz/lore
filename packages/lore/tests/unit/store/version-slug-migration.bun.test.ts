@@ -114,11 +114,11 @@ describe("migration-007 (versions.slug nullable column)", () => {
     const store = new SQLiteStore(":memory:");
     const db = store.getDatabase();
 
-    // reason: migration-008 (CJK bigram shadow columns) is now the head — a
-    // fresh store runs every migration up to it, not just through
+    // reason: migration-009 (SPEC-079 G3 audit hash chain) is now the head —
+    // a fresh store runs every migration up to it, not just through
     // migration-007. This test's own concern (versions.slug present) is
     // unaffected — asserted directly below.
-    expect(userVersion(db)).toBe(8);
+    expect(userVersion(db)).toBe(9);
     expect(tableColumnNames(db, "versions")).toContain("slug");
 
     store.close();
@@ -224,12 +224,13 @@ describe("migration-007 (versions.slug nullable column)", () => {
     rawDb.close();
 
     // Reopening via SQLiteStore should detect currentVersion (6) < 7 and
-    // apply migration-007, then migration-008 (currentVersion 7 < 8) — never
-    // throw, never touch the pre-existing rows.
+    // apply migration-007, then migration-008 (currentVersion 7 < 8), then
+    // migration-009 (SPEC-079 G3 audit hash chain, currentVersion 8 < 9) —
+    // never throw, never touch the pre-existing rows.
     const store = new SQLiteStore(dbPath);
     const db = store.getDatabase();
 
-    expect(userVersion(db)).toBe(8);
+    expect(userVersion(db)).toBe(9);
     expect(tableColumnNames(db, "versions")).toContain("slug");
 
     const preservedDoc = db
@@ -255,7 +256,7 @@ describe("migration-007 (versions.slug nullable column)", () => {
     expect(() => {
       const secondOpen = new SQLiteStore(dbPath);
       const db = secondOpen.getDatabase();
-      expect(userVersion(db)).toBe(8);
+      expect(userVersion(db)).toBe(9);
       expect(tableColumnNames(db, "versions")).toContain("slug");
       secondOpen.close();
     }).not.toThrow();

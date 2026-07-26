@@ -21,6 +21,7 @@ import type {
   VersionRecord,
 } from "@lore/core";
 import type { LoreError, Result } from "@lore/core";
+import type { AuditChainEntry } from "./store-shared.js";
 
 /**
  * Re-exported for backward compatibility — every store + the service layer
@@ -30,6 +31,14 @@ import type { LoreError, Result } from "@lore/core";
  * module.
  */
 export type { SearchHit };
+
+/**
+ * Re-exported so consumers of {@link StoreInterface.listAuditChain} (e.g. a
+ * future `lore audit --verify` chain-walk service) have a single import
+ * surface — `StoreInterface` and the type its own method returns living in
+ * the same module, mirroring the `SearchHit` precedent above.
+ */
+export type { AuditChainEntry };
 
 // ─── Update Options ────────────────────────────────────────────────────────
 
@@ -434,11 +443,35 @@ export interface StoreInterface {
 
   // ── Audit ──────────────────────────────────────────────────────────────
 
-  /** Append an immutable audit entry. */
+  /**
+   * Append an immutable audit entry — extends the SPEC-079 G3 tamper-evident
+   * hash chain. Implementations MUST read the current chain head (the
+   * highest-`id` row's `entry_hash`, or `""` if the table is empty) and
+   * compute this entry's `entry_hash` (`computeAuditEntryHash`,
+   * `store-shared.ts`) INSIDE the same transaction/serialized write as the
+   * insert itself — concurrent writers reading a stale head and both
+   * extending from it would fork the chain into two branches, silently
+   * defeating the tamper-evidence property.
+   */
   appendAuditEntry(entry: AuditEntry): Promise<Result<void, LoreError>>;
 
   /** Query audit log with filters. */
   queryAudit(filters: AuditFilters): Promise<Result<AuditEntry[], LoreError>>;
+
+  /**
+   * Return every audit row in `id` ASC order, INCLUDING its hash-chain
+   * fields (`id`/`prev_hash`/`entry_hash`) — the read surface `lore audit
+   * --verify`'s chain walk (a separate task) recomputes and validates
+   * against. Unlike {@link queryAudit} (timestamp DESC, filtered, and
+   * deliberately silent about hash fields so no caller can ever forge one),
+   * this is the ONLY place `prev_hash`/`entry_hash` are readable. `id` ASC
+   * is the canonical chain-construction order — the SAME order
+   * migration-009's backfill and every live `appendAuditEntry` extend the
+   * chain in. A NULL `prev_hash`/`entry_hash` pair on any returned row is a
+   * verify-time finding (`"unchained_row"`), never legal post-migration-009
+   * steady state (see migration-009.ts's module JSDoc).
+   */
+  listAuditChain(): Promise<Result<AuditChainEntry[], LoreError>>;
 
   // ── Review Judgments ───────────────────────────────────────────────────
   // SPEC-034 §2, §3. Dual use: production write path for JudgmentService

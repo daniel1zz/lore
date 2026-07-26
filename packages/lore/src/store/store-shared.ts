@@ -14,6 +14,7 @@
  * Source: SPEC-002 §7.1; SPEC-009 §3.1
  */
 
+import { createHash } from "node:crypto";
 import type {
   AuditEntry,
   CalibrationRecord,
@@ -95,6 +96,24 @@ export interface AuditRow {
   action: string;
   doc_id: string | null;
   details: string;
+}
+
+/**
+ * Raw row from the `audit` table INCLUDING its SPEC-079 G3 hash-chain
+ * columns (`id`, `prev_hash`, `entry_hash`) — a superset of {@link AuditRow}.
+ * `id` is the table's own `INTEGER PRIMARY KEY AUTOINCREMENT` (may be
+ * `bigint` from libsql; callers MUST `Number()` it, mirroring every other
+ * bigint-bearing row type in this file). `prev_hash`/`entry_hash` are
+ * nullable at the COLUMN level (migration-009 added them nullable) but are
+ * populated for every row from migration-009's backfill onward — a NULL
+ * pair on a row read back through this type is itself a tamper/corruption
+ * finding for `lore audit --verify`'s chain walk (a separate task), never a
+ * legal steady state post-migration.
+ */
+export interface AuditChainRow extends AuditRow {
+  id: number | bigint;
+  prev_hash: string | null;
+  entry_hash: string | null;
 }
 
 /**
@@ -284,6 +303,39 @@ export function rowToAuditEntry(row: AuditRow): AuditEntry {
 }
 
 /**
+ * A single audit row with its SPEC-079 G3 hash-chain fields attached — the
+ * shape {@link StoreInterface.listAuditChain} returns. Deliberately NOT part
+ * of the public {@link AuditEntry} write/read contract (`appendAuditEntry`/
+ * `queryAudit`): keeping `prev_hash`/`entry_hash` off `AuditEntry` means no
+ * caller can ever construct or forge a chain entry — the hashes are
+ * computed store-side only, by {@link computeAuditEntryHash}, at insert
+ * time. `id` is the row's position in `id ASC` chain-construction order.
+ * `prev_hash`/`entry_hash` are typed nullable to mirror the physical column
+ * (see {@link AuditChainRow}'s JSDoc) — a null pair is a verify-time finding,
+ * not a value any correctly-functioning write path produces.
+ */
+export interface AuditChainEntry extends AuditEntry {
+  id: number;
+  prev_hash: string | null;
+  entry_hash: string | null;
+}
+
+/**
+ * Maps a raw {@link AuditChainRow} to an {@link AuditChainEntry} — the
+ * hash-chain-aware analog of {@link rowToAuditEntry}, reusing it for the
+ * shared `AuditEntry` fields and layering `id`/`prev_hash`/`entry_hash` on
+ * top.
+ */
+export function rowToAuditChainEntry(row: AuditChainRow): AuditChainEntry {
+  return {
+    id: Number(row.id),
+    ...rowToAuditEntry(row),
+    prev_hash: row.prev_hash,
+    entry_hash: row.entry_hash,
+  };
+}
+
+/**
  * Maps a raw `review_judgments` row to a ReviewJudgment. Reassembles `judge` from its 3
  * denormalized columns. `kind` reads as `'review'` via `??` when the stored value is
  * undefined (SPEC-044 D3/review S10 — a direct-`insertJudgment` legacy/test fixture that
@@ -357,6 +409,101 @@ export function wrapStoreError(e: unknown): Result<never, LoreError> {
     return err({ code: "STORE_ERROR", message, cause: e });
   }
   return err({ code: "STORE_ERROR", message });
+}
+
+// ─── Tamper-evident audit hash chain (SPEC-079 G3) ─────────────────────────
+//
+// Every audit row is hash-chained to its predecessor: `entry_hash =
+// sha256(canonicalJson({timestamp, actor, session_id, action, doc_id, details,
+// prev_hash}))`, genesis `prev_hash = ""`. The pure functions below are
+// server-only (import `node:crypto`) and deliberately live here, not in
+// `@lore/core` — that package's default barrel must stay browser-safe (see
+// this package's own module CLAUDE.md), and `node:crypto` is a Node
+// builtin the dashboard bundle must never see. All three stores
+// (SQLiteStore, TursoStore, InMemoryStore) call `computeAuditEntryHash` at
+// EVERY audit insert point, reading the current chain head inside the same
+// transaction/serialized write as the insert so concurrent writers cannot
+// fork the chain — see each store's `appendAuditEntrySync`/
+// `appendAuditEntryTx`/`appendAuditEntry` for the read-head-then-insert
+// sequencing.
+
+/**
+ * Recursively sorts the keys of a plain object (and every nested plain
+ * object), leaving arrays' ELEMENT ORDER untouched (array order is semantic
+ * — sorting it would change meaning, not just serialization — whereas
+ * object key order is never semantic in JSON) and primitives unchanged.
+ * Used ONLY to canonicalize `AuditEntry.details` before hashing — the outer
+ * hash payload's own field order is fixed by {@link canonicalAuditPayload}'s
+ * literal object construction, which needs no sorting since it is never
+ * caller-supplied.
+ */
+function sortObjectKeysDeep(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(sortObjectKeysDeep);
+  }
+  if (value !== null && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) =>
+      a < b ? -1 : a > b ? 1 : 0,
+    );
+    const sorted: Record<string, unknown> = {};
+    for (const [key, val] of entries) {
+      sorted[key] = sortObjectKeysDeep(val);
+    }
+    return sorted;
+  }
+  return value;
+}
+
+/**
+ * Builds the deterministic canonical JSON string a chain entry's hash is
+ * computed over. Field order in the emitted object is FIXED (this function
+ * constructs it, never the caller) — only the caller-supplied `details`
+ * blob needs {@link sortObjectKeysDeep}, since two semantically-identical
+ * `details` objects can differ in property insertion order across call
+ * sites (e.g. link-provenance vs actor-fidelity writers).
+ *
+ * @param entry - The audit entry being chained (hash fields never read from it).
+ * @param prevHash - The chain head's `entry_hash` at insert time, or `""` for
+ *   the genesis row (the first audit row ever written to this table).
+ * @returns A JSON string; feed directly to a hash function or compare
+ *   payloads across processes for equality.
+ * @example
+ *   canonicalAuditPayload(
+ *     { timestamp: "2026-01-01T00:00:00.000Z", actor: "agent:x", session_id: "s1",
+ *       action: "create", doc_id: "d1", details: { b: 2, a: 1 } },
+ *     "",
+ *   )
+ *   // => '{"timestamp":"2026-01-01T00:00:00.000Z","actor":"agent:x","session_id":"s1","action":"create","doc_id":"d1","details":{"a":1,"b":2},"prev_hash":""}'
+ */
+export function canonicalAuditPayload(entry: AuditEntry, prevHash: string): string {
+  const payload = {
+    timestamp: entry.timestamp,
+    actor: entry.actor,
+    session_id: entry.session_id,
+    action: entry.action,
+    doc_id: entry.doc_id ?? null,
+    details: sortObjectKeysDeep(entry.details ?? {}),
+    prev_hash: prevHash,
+  };
+  return JSON.stringify(payload);
+}
+
+/**
+ * Computes the sha256 hex digest an audit row's `entry_hash` column stores —
+ * the ONLY place a chain hash is ever produced. Every store insert path
+ * (`appendAuditEntry` and the three `*WithProvenance` composites) and
+ * migration-009's backfill loop call this with the SAME two arguments:
+ * the entry being written and the current chain head's hash (or `""` for
+ * the genesis row) — never any other input shape, so two independently
+ * migrated/live corpora over the identical audit history produce byte-
+ * identical chains.
+ *
+ * @param entry - The audit entry being chained.
+ * @param prevHash - The chain head's `entry_hash`, or `""` for genesis.
+ * @returns 64-character lowercase hex sha256 digest.
+ */
+export function computeAuditEntryHash(entry: AuditEntry, prevHash: string): string {
+  return createHash("sha256").update(canonicalAuditPayload(entry, prevHash)).digest("hex");
 }
 
 // ─── CJK bigram expansion for FTS5 (unicode61 contiguous-run limitation) ───

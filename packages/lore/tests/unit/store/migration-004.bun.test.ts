@@ -99,11 +99,12 @@ describe("migration-004 (widen links.link_type CHECK to accept 'governs') — at
     // reason: SPEC-044 T1 added migration-005 (review_judgments.kind +
     // superseded_candidate); SPEC-056 added migration-006 (docs.type CHECK
     // widening); SPEC-072 added migration-007 (versions.slug); the CJK
-    // bigram shadow-column migration added migration-008 — a FRESH store now
-    // runs every migration up to the current head, so user_version is 8,
-    // not 4. migration-004's own concern (the widened links.link_type CHECK)
-    // is asserted below via the 'governs' insert, unaffected.
-    expect(userVersion(db)).toBe(8);
+    // bigram shadow-column migration added migration-008; SPEC-079 G3 added
+    // migration-009 (audit hash chain) — a FRESH store now runs every
+    // migration up to the current head, so user_version is 9, not 4.
+    // migration-004's own concern (the widened links.link_type CHECK) is
+    // asserted below via the 'governs' insert, unaffected.
+    expect(userVersion(db)).toBe(9);
 
     insertDoc(db, "01HGOVERNSSKILL00000001", "skill-doc");
     insertDoc(db, "01HGOVERNSARTIFACT00001", "artifact-doc");
