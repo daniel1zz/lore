@@ -76,6 +76,7 @@ import { SessionService } from "./service/session-service.js";
 import { ValidityService } from "./service/validity-service.js";
 import { DriftCheckService } from "./service/drift-check-service.js";
 import { OutlineMigrationService } from "./service/outline-migration-service.js";
+import { OrdinalMigrationService } from "./service/ordinal-migration-service.js";
 import { SeatService } from "./service/seat-service.js";
 import { RealGitPort } from "./adapters/real-git-port.js";
 import { ConfigService } from "./service/config-service.js";
@@ -334,6 +335,22 @@ export interface App {
    * Source: SPEC-080 §Migration Plan Phase 1, §Acceptance Criteria AC-080-7.
    */
   outlineMigrationService?: OutlineMigrationService;
+  /**
+   * OrdinalMigrationService — one-shot SPEC-084 repair migration
+   * (`lore migrate ordinals [--apply]`). Store-only, no telemetry, no gate
+   * (a one-shot migration path, same `PhaseMigrationService`/
+   * `OutlineMigrationService` rationale), same DI shape as
+   * `outlineMigrationService`.
+   *
+   * Optional for the same "pre-existing hand-built App test stubs stay
+   * valid" reason `outlineMigrationService`/`driftCheckService` are; always
+   * present in production — both `buildAppFromSqlite` and
+   * `buildAppFromTurso` wire it unconditionally; the CLI guards
+   * `app.ordinalMigrationService === undefined` before use (mirrors
+   * `app.outlineMigrationService`'s inline-guard convention).
+   * Source: SPEC-084 §One-shot repair migration, §Acceptance Criteria AC-084-4.
+   */
+  ordinalMigrationService?: OrdinalMigrationService;
   /**
    * UatService — the sole write orchestrator for a structured UAT verdict
    * (`lore uat record`, SPEC-054). Narrow injected ports (`corpusService.createUatDoc` /
@@ -600,6 +617,10 @@ function buildAppFromSqlite(
     // no AI, no telemetry, same shape as PhaseMigrationService/DriftCheckService.
     // SPEC-080 §Migration Plan Phase 1.
     outlineMigrationService: new OutlineMigrationService(store),
+    // reason: OrdinalMigrationService depends only on StoreInterface — stateless,
+    // no AI, no telemetry, same shape as OutlineMigrationService/PhaseMigrationService.
+    // SPEC-084 §One-shot repair migration.
+    ordinalMigrationService: new OrdinalMigrationService(store),
     // reason: SeatService (SPEC-057) — real GitPort over the SAME repoRoot
     // VerifyRunnerService already receives (captured at composition time, never a
     // second `process.cwd()` read); getReadyReport is bound to
@@ -846,6 +867,10 @@ function buildAppFromTurso(
     // no AI, no telemetry, same shape as PhaseMigrationService/DriftCheckService.
     // SPEC-080 §Migration Plan Phase 1.
     outlineMigrationService: new OutlineMigrationService(store),
+    // reason: OrdinalMigrationService depends only on StoreInterface — stateless,
+    // no AI, no telemetry, same shape as OutlineMigrationService/PhaseMigrationService.
+    // SPEC-084 §One-shot repair migration.
+    ordinalMigrationService: new OrdinalMigrationService(store),
     // reason: SeatService (SPEC-057) — real GitPort over the SAME repoRoot
     // VerifyRunnerService already receives (captured at composition time, never a
     // second `process.cwd()` read); getReadyReport is bound to
