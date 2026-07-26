@@ -155,6 +155,62 @@ export interface StoreInterface {
   /** Insert a new doc. Fails with DUPLICATE_SLUG if slug already exists. */
   insert(doc: DocRecord): Promise<Result<DocRecord, LoreError>>;
 
+  /**
+   * Atomically allocate the next free display ordinal for `doc.type` and
+   * insert it — the SOLE insert-scoped ordinal-allocation site (SPEC-084 D1;
+   * the sibling {@link allocateOrdinalForExisting} is the UPDATE-scoped one
+   * for the exempt→numbered kind-flip transition — never use one where the
+   * other belongs).
+   *
+   * Transaction-scoped: `SELECT MAX(ordinal)+1 WHERE type=?` computed ONCE,
+   * then insert; on a `(type, ordinal)` UNIQUE-index violation, retry up to
+   * 3 bounded attempts with the next successive candidate (never
+   * re-querying MAX mid-loop — a fresh per-attempt query would self-heal
+   * around any pre-existing row and could never surface a genuine
+   * collision under a single-connection store). `doc.ordinal` on the INPUT
+   * is ignored/overwritten — callers pass a doc whose type is eligible for
+   * numbering (per `ORDINAL_REGISTRY`, out of this method's concern — the
+   * SERVICE layer decides WHETHER to call this at all).
+   *
+   * @returns `ok(insertedDoc)` with `ordinal` populated on success; the SAME
+   *   `DUPLICATE_SLUG`/`STORE_ERROR` shapes {@link insert} would return for a
+   *   non-ordinal failure (propagated immediately, never retried); on
+   *   retry-budget exhaustion, `err(STORE_ERROR)` whose `message` contains
+   *   the literal token `ORDINAL_ALLOCATION_EXHAUSTED` — never a silent NULL
+   *   ordinal.
+   * @see SPEC-084 §Module Boundary, §Retry-exhaustion failure shape
+   */
+  insertWithAllocatedOrdinal(doc: DocRecord): Promise<Result<DocRecord, LoreError>>;
+
+  /**
+   * Atomically allocate the next free display ordinal for an EXISTING doc
+   * and persist it via a CAS-guarded UPDATE — the exempt→numbered kind-flip
+   * sibling of {@link insertWithAllocatedOrdinal} (SPEC-084 D1). Refuses a
+   * row that ALREADY carries a non-null `ordinal` (checked before the CAS
+   * comparison, so an already-numbered row is refused regardless of whether
+   * `expectedVersion` happens to match the row's current version — ordinals
+   * are immutable once assigned) and bumps `version` by exactly 1 on
+   * success, mirroring {@link update}'s optimistic-locking contract.
+   *
+   * Same bounded-retry/exhaustion shape as {@link insertWithAllocatedOrdinal}
+   * (MAX+1 computed once, ≤3 successive candidates on a UNIQUE violation).
+   *
+   * @param id - Doc id to allocate an ordinal for (must currently have
+   *   `ordinal: null`).
+   * @param expectedVersion - CAS guard; mismatch (and `ordinal` is still
+   *   null) returns `{code: "STALE_VERSION", id, expected, actual}`.
+   * @returns `ok(updatedDoc)` with `ordinal` populated and `version`
+   *   incremented; `DOC_NOT_FOUND` if `id` doesn't exist; the "already
+   *   carries an ordinal" refusal (`STORE_ERROR`) if it does; `STALE_VERSION`
+   *   on a version mismatch; or the SAME `ORDINAL_ALLOCATION_EXHAUSTED`
+   *   shape as {@link insertWithAllocatedOrdinal} on retry-budget exhaustion.
+   * @see SPEC-084 §Changed semantics "Kind-flip semantics"
+   */
+  allocateOrdinalForExisting(
+    id: DocId,
+    expectedVersion: number,
+  ): Promise<Result<DocRecord, LoreError>>;
+
   /** Find doc by ULID. Returns null (not error) if not found. */
   find(id: DocId): Promise<Result<DocRecord | null, LoreError>>;
 
@@ -188,6 +244,30 @@ export interface StoreInterface {
    *   particular guaranteed order (the caller only branches on `length`).
    */
   findByIdPrefix(prefix: string): Promise<Result<DocRecord[], LoreError>>;
+
+  /**
+   * Find the doc whose `(type, ordinal)` pair matches — the read side of
+   * SPEC-084's store-allocated ordinal identity, feeding `resolveDoc`'s
+   * ordinal-ref resolution step (`parseOrdinalRef` match, e.g. `"SPEC-84"` →
+   * `{type: "spec", ordinal: 84}`, out of this method's concern). Same
+   * 3-impl shape as {@link findByIdPrefix} (SPEC-065 precedent).
+   *
+   * UNLIKE {@link findByIdPrefix} (discovery-shaped, excludes soft-deleted),
+   * this is a direct-address lookup by a UNIQUE key (the partial index
+   * enforces at most one row per `(type, ordinal)` pair INCLUDING
+   * soft-deleted rows, SPEC-084 D9) — it does NOT filter `deleted_at`,
+   * mirroring {@link find}/{@link findByIds}'s direct-address contract: a
+   * soft-deleted doc's ordinal still resolves to it (the number is never
+   * reassigned to a different doc), consistent with "never reused."
+   *
+   * @param type - Doc type to scope the lookup to (an `ORDINAL_REGISTRY` key).
+   * @param ordinal - The numeric ordinal to look up (no zero-padding at this
+   *   layer — callers normalize via `parseOrdinalRef` first).
+   * @returns `ok(doc)` if a match exists, `ok(null)` otherwise (never an
+   *   error for "not found" — mirrors {@link find}/{@link findBySlug}).
+   * @see SPEC-084 §Module Boundary
+   */
+  findByTypeOrdinal(type: DocType, ordinal: number): Promise<Result<DocRecord | null, LoreError>>;
 
   /**
    * Batch-find docs by id, in ONE round trip. `WHERE id IN (...)` — avoids the N+1

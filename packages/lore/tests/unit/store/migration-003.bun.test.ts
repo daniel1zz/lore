@@ -57,9 +57,10 @@ describe("migration-003 (review_judgments + calibration_records)", () => {
     // reason: SPEC-044 T1 added migration-005; SPEC-056 added migration-006 (docs.type
     // CHECK widening); SPEC-072 added migration-007 (versions.slug); the CJK bigram
     // shadow-column migration added migration-008; SPEC-079 G3 added migration-009
-    // (audit hash chain) — a fresh store now runs every migration up to the current
-    // head (9), not just through migration-003/004.
-    expect(userVersion).toBe(9);
+    // (audit hash chain); SPEC-084 added migration-010 (docs.ordinal) — a fresh store
+    // now runs every migration up to the current head (10), not just through
+    // migration-003/004.
+    expect(userVersion).toBe(10);
 
     const tableNames = db
       .query("SELECT name FROM sqlite_master WHERE type = 'table'")
@@ -132,8 +133,9 @@ describe("migration-003 (review_judgments + calibration_records)", () => {
     };
     // reason: SPEC-044 T1 added migration-005; SPEC-056 added migration-006; SPEC-072
     // added migration-007; migration-008 (CJK bigram shadow columns); SPEC-079 G3 added
-    // migration-009 (audit hash chain) is now the head — see HAPPY test's comment above.
-    expect(postUpgradeVersion).toBe(9);
+    // migration-009 (audit hash chain); SPEC-084 added migration-010 (docs.ordinal),
+    // now the head — see HAPPY test's comment above.
+    expect(postUpgradeVersion).toBe(10);
 
     const tableNames = db
       .query("SELECT name FROM sqlite_master WHERE type = 'table'")
@@ -161,8 +163,9 @@ describe("migration-003 (review_judgments + calibration_records)", () => {
       };
       // reason: SPEC-044 T1 added migration-005; SPEC-056 added migration-006; SPEC-072
       // added migration-007; migration-008; SPEC-079 G3 added migration-009 (audit hash
-      // chain), now the head — see HAPPY test's comment above.
-      expect(userVersion).toBe(9);
+      // chain); SPEC-084 added migration-010 (docs.ordinal), now the head — see HAPPY
+      // test's comment above.
+      expect(userVersion).toBe(10);
       secondOpen.close();
     }).not.toThrow();
   });

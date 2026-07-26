@@ -21,6 +21,7 @@ import {
   MIGRATION_009_ADD_COLUMNS_SQL,
   MIGRATION_009_FINALIZE_SQL,
 } from "./migrations/migration-009.js";
+import { MIGRATION_010_SQL } from "./migrations/migration-010.js";
 // SPEC-072 (upstream issue reporting) §3 Structure — re-exported here (beside
 // the migration chain it describes) from a bun:sqlite-free sibling module so
 // vitest-reachable code (e.g. flows/upstream-probe.ts, a later phase of this
@@ -33,6 +34,7 @@ import type {
   CalibrationRecord,
   DocId,
   DocRecord,
+  DocType,
   LinkRecord,
   LinkType,
   ReviewJudgment,
@@ -67,9 +69,12 @@ import {
   type JudgmentRow,
   type LinkRow,
   type VersionRow,
+  buildOrdinalAllocationExhaustedError,
   computeAuditEntryHash,
   computeFtsShadowValues,
   escapeFtsQuery,
+  isOrdinalUniqueViolationMessage,
+  ORDINAL_ALLOCATION_MAX_ATTEMPTS,
   parseJson,
   rowToAuditChainEntry,
   rowToAuditEntry,
@@ -350,6 +355,25 @@ export class SQLiteStore implements StoreInterface {
         throw error;
       }
     }
+
+    if (currentVersion < 10) {
+      // reason: mirrors migration-007's catch/ROLLBACK wrapper (see
+      // migration-010.ts's own JSDoc @invariant) — a plain nullable `ADD
+      // COLUMN` plus a `CREATE UNIQUE INDEX` plus the trailing `PRAGMA
+      // user_version` bump, wrapped in one BEGIN/COMMIT so a crash between
+      // them can't leave the corpus with the column but not the index (or
+      // vice versa) while user_version already reads 10.
+      try {
+        this.db.exec(MIGRATION_010_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-004/005/006/007/008/009 — safe to ignore, see above.
+        }
+        throw error;
+      }
+    }
   }
 
   // ── Document CRUD ─────────────────────────────────────────────────────────
@@ -376,8 +400,8 @@ export class SQLiteStore implements StoreInterface {
           `INSERT INTO docs
              (id, slug, type, role, title, status, priority, content,
               parent_id, extra, tags, version, created_at, updated_at,
-              created_by, deleted_at, fts_title, fts_content, fts_tags)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              created_by, deleted_at, fts_title, fts_content, fts_tags, ordinal)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           doc.id,
@@ -399,6 +423,7 @@ export class SQLiteStore implements StoreInterface {
           shadow.fts_title,
           shadow.fts_content,
           shadow.fts_tags,
+          doc.ordinal ?? null,
         );
       return ok(doc);
     } catch (e) {
@@ -416,6 +441,168 @@ export class SQLiteStore implements StoreInterface {
 
   async insert(doc: DocRecord): Promise<Result<DocRecord, LoreError>> {
     return this.insertDocSync(doc);
+  }
+
+  /**
+   * @see StoreInterface.insertWithAllocatedOrdinal
+   *
+   * Transaction-scoped: `SELECT MAX(ordinal)+1 WHERE type=?` computed ONCE,
+   * then up to {@link ORDINAL_ALLOCATION_MAX_ATTEMPTS} successive `+1`
+   * candidates on a `(type, ordinal)` UNIQUE violation — see
+   * `store-shared.ts::isOrdinalUniqueViolationMessage`'s JSDoc for why the
+   * base is computed once and never re-queried mid-loop. `BEGIN IMMEDIATE`
+   * gets its own try/catch (mirrors `insertWithProvenance`'s identical
+   * split) so a synchronous open-transaction throw returns `err(STORE_ERROR)`
+   * without attempting a ROLLBACK on a transaction that never opened.
+   */
+  async insertWithAllocatedOrdinal(doc: DocRecord): Promise<Result<DocRecord, LoreError>> {
+    try {
+      this.db.run("BEGIN IMMEDIATE");
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+    try {
+      const maxRow = this.db
+        .prepare("SELECT MAX(ordinal) as maxOrdinal FROM docs WHERE type = ?")
+        .get(doc.type) as { maxOrdinal: number | bigint | null };
+      const base = maxRow.maxOrdinal === null ? 0 : Number(maxRow.maxOrdinal);
+
+      for (let attempt = 0; attempt < ORDINAL_ALLOCATION_MAX_ATTEMPTS; attempt++) {
+        const candidate = base + 1 + attempt;
+        const insertResult = this.insertDocSync({ ...doc, ordinal: candidate });
+        if (insertResult.ok) {
+          this.db.run("COMMIT");
+          return insertResult;
+        }
+        if (
+          insertResult.error.code !== "STORE_ERROR" ||
+          !isOrdinalUniqueViolationMessage(insertResult.error.message)
+        ) {
+          // reason: a non-ordinal failure (e.g. DUPLICATE_SLUG, or a driver
+          // error unrelated to the ordinal index) must propagate immediately
+          // — retrying with a different ordinal candidate would never fix it.
+          this.db.run("ROLLBACK");
+          return insertResult;
+        }
+        // else: ordinal collision — loop retries with the next candidate.
+      }
+
+      this.db.run("ROLLBACK");
+      return err(buildOrdinalAllocationExhaustedError(doc.type));
+    } catch (e) {
+      try {
+        this.db.run("ROLLBACK");
+      } catch {
+        // reason: ROLLBACK itself throws only when there is no open
+        // transaction to roll back — safe to ignore, `e` below is what the
+        // caller needs. Mirrors insertWithProvenance's identical guard.
+      }
+      return wrapStoreError(e);
+    }
+  }
+
+  /**
+   * @see StoreInterface.allocateOrdinalForExisting
+   *
+   * The UPDATE-scoped sibling of {@link insertWithAllocatedOrdinal} — refuses
+   * a row that already carries an ordinal (checked BEFORE the CAS version
+   * comparison, so an already-numbered row is refused regardless of whether
+   * `expectedVersion` happens to match — SPEC-084's "the store method itself
+   * refuses a row that already has one" immutability guard), then CAS-guards
+   * on `expectedVersion` (mismatch → `STALE_VERSION`), then applies the SAME
+   * bounded MAX+1 retry loop as {@link insertWithAllocatedOrdinal} via a
+   * conditional `UPDATE ... WHERE id = ? AND version = ? AND ordinal IS NULL`.
+   */
+  async allocateOrdinalForExisting(
+    id: DocId,
+    expectedVersion: number,
+  ): Promise<Result<DocRecord, LoreError>> {
+    try {
+      this.db.run("BEGIN IMMEDIATE");
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+    try {
+      const existingRow = this.db
+        .prepare("SELECT * FROM docs WHERE id = ?")
+        .get(id) as DocRow | null;
+
+      if (!existingRow) {
+        this.db.run("ROLLBACK");
+        return err({ code: "DOC_NOT_FOUND", id });
+      }
+
+      const current = rowToDocRecord(existingRow);
+      if (current.ordinal !== null && current.ordinal !== undefined) {
+        this.db.run("ROLLBACK");
+        return err({
+          code: "STORE_ERROR",
+          message: `doc ${id} already carries ordinal ${current.ordinal}; allocateOrdinalForExisting refuses to overwrite an already-allocated ordinal`,
+        });
+      }
+
+      if (current.version !== expectedVersion) {
+        this.db.run("ROLLBACK");
+        return err({
+          code: "STALE_VERSION",
+          id,
+          expected: expectedVersion,
+          actual: current.version,
+        });
+      }
+
+      const maxRow = this.db
+        .prepare("SELECT MAX(ordinal) as maxOrdinal FROM docs WHERE type = ?")
+        .get(current.type) as { maxOrdinal: number | bigint | null };
+      const base = maxRow.maxOrdinal === null ? 0 : Number(maxRow.maxOrdinal);
+      const newVersion = expectedVersion + 1;
+
+      for (let attempt = 0; attempt < ORDINAL_ALLOCATION_MAX_ATTEMPTS; attempt++) {
+        const candidate = base + 1 + attempt;
+        try {
+          const result = this.db
+            .prepare(
+              "UPDATE docs SET ordinal = ?, version = ? WHERE id = ? AND version = ? AND ordinal IS NULL",
+            )
+            .run(candidate, newVersion, id, expectedVersion);
+
+          if (result.changes > 0) {
+            this.db.run("COMMIT");
+            return ok({ ...current, ordinal: candidate, version: newVersion });
+          }
+          // reason: zero rows affected under an already-open BEGIN IMMEDIATE
+          // transaction (which holds the write lock for this connection's
+          // whole call) means the row changed between our SELECT and this
+          // UPDATE only if some OTHER code path mutated it — unreachable in
+          // practice on a single-connection store, but treated as a stale
+          // read rather than silently retried forever.
+          this.db.run("ROLLBACK");
+          return err({
+            code: "STALE_VERSION",
+            id,
+            expected: expectedVersion,
+            actual: current.version,
+          });
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : "";
+          if (!isOrdinalUniqueViolationMessage(msg)) {
+            this.db.run("ROLLBACK");
+            return wrapStoreError(e);
+          }
+          // else: ordinal collision — loop retries with the next candidate.
+        }
+      }
+
+      this.db.run("ROLLBACK");
+      return err(buildOrdinalAllocationExhaustedError(current.type));
+    } catch (e) {
+      try {
+        this.db.run("ROLLBACK");
+      } catch {
+        // reason: same as insertWithAllocatedOrdinal — safe to ignore, see above.
+      }
+      return wrapStoreError(e);
+    }
   }
 
   async find(id: DocId): Promise<Result<DocRecord | null, LoreError>> {
@@ -455,6 +642,26 @@ export class SQLiteStore implements StoreInterface {
         .prepare("SELECT * FROM docs WHERE id LIKE ? AND deleted_at IS NULL")
         .all(`${prefix}%`) as DocRow[];
       return ok(rows.map(rowToDocRecord));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  /**
+   * @see StoreInterface.findByTypeOrdinal
+   * Direct-address lookup — deliberately does NOT filter `deleted_at`
+   * (mirrors `find`/`findByIds`), unlike the discovery-shaped
+   * {@link findByIdPrefix} above.
+   */
+  async findByTypeOrdinal(
+    type: DocType,
+    ordinal: number,
+  ): Promise<Result<DocRecord | null, LoreError>> {
+    try {
+      const row = this.db
+        .prepare("SELECT * FROM docs WHERE type = ? AND ordinal = ?")
+        .get(type, ordinal) as DocRow | null;
+      return ok(row ? rowToDocRecord(row) : null);
     } catch (e) {
       return wrapStoreError(e);
     }

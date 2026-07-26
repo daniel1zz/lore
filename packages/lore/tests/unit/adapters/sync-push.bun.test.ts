@@ -49,6 +49,7 @@ import {
   MIGRATION_009_ADD_COLUMNS_SQL,
   MIGRATION_009_FINALIZE_SQL,
 } from "../../../src/store/migrations/migration-009.js";
+import { MIGRATION_010_SQL } from "../../../src/store/migrations/migration-010.js";
 import { computeFtsShadowValues, computeAuditEntryHash } from "../../../src/store/store-shared.js";
 
 // ─── Fixture Helpers ─────────────────────────────────────────────────────────
@@ -192,6 +193,12 @@ async function applyMigrationsToClient(client: Client, localStore: SQLiteStore):
   } finally {
     tx009.close();
   }
+
+  // migration-010 (SPEC-084 docs.ordinal + partial unique index) is a
+  // SINGLE self-contained SQL string (mirrors migration-007's shape, no
+  // JS-level backfill loop needed) — a plain executeMultiple call, same as
+  // migrations 001-007 above.
+  await client.executeMultiple(MIGRATION_010_SQL);
 
   // ─── Parity guard ────────────────────────────────────────────────────────
   // Assert the remote fixture's PRAGMA user_version matches the REAL

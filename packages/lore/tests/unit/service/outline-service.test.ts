@@ -611,10 +611,18 @@ describe("OutlineService.resolve", () => {
         // reason: SPEC-065 D2 — new required StoreInterface method; mechanical
         // addition (same class of fix as every other explicit delegate here).
         findByIdPrefix: (prefix) => store.findByIdPrefix(prefix),
+        // reason: SPEC-084 — new required StoreInterface method; mechanical
+        // addition (same class of fix as every other explicit delegate here).
+        findByTypeOrdinal: (type, ordinal) => store.findByTypeOrdinal(type, ordinal),
         // reason: N+1 batch fix — new required StoreInterface method; mechanical
         // addition (same class of fix as every other explicit delegate above).
         findByIds: (ids) => store.findByIds(ids),
         insert: (doc) => store.insert(doc),
+        // reason: SPEC-084 — new required StoreInterface methods; mechanical
+        // addition (same class of fix as every other explicit delegate above).
+        insertWithAllocatedOrdinal: (doc) => store.insertWithAllocatedOrdinal(doc),
+        allocateOrdinalForExisting: (id, expectedVersion) =>
+          store.allocateOrdinalForExisting(id, expectedVersion),
         update: (id, patch) => store.update(id, patch),
         softDelete: (id) => store.softDelete(id),
         // reason: BUG-002 audit fix — new required StoreInterface methods; mechanical

@@ -64,6 +64,13 @@ export interface DocRow {
   updated_at: string;
   created_by: string;
   deleted_at: string | null;
+  /**
+   * SPEC-084 store-allocated display ordinal — nullable at the column level
+   * (migration-010 added it nullable, zero backfill). `null` for exempt
+   * kinds/types; `number`/`bigint` (libsql) otherwise. Never reused after
+   * soft-delete (D9) — callers MUST NOT filter this column by `deleted_at`.
+   */
+  ordinal: number | bigint | null;
 }
 
 export interface LinkRow {
@@ -257,6 +264,11 @@ export function rowToDocRecord(row: DocRow): DocRecord {
     updated_at: row.updated_at,
     created_by: row.created_by,
     deleted_at: row.deleted_at,
+    // reason: SPEC-084 — the column always exists post-migration-010, so
+    // (unlike VersionRow.slug's absence-tolerant omission) this key is
+    // ALWAYS present on the returned DocRecord, typed `number | null`, never
+    // a placeholder. `Number()` normalizes libsql's possible `bigint`.
+    ordinal: row.ordinal === null ? null : Number(row.ordinal),
   };
 }
 
@@ -401,6 +413,50 @@ export function rowToCalibrationRecordWithPromptVersion(
 }
 
 // ─── Error helpers ──────────────────────────────────────────────────────────
+
+// ─── SPEC-084 ordinal allocation (shared across all 3 StoreInterface impls) ─
+//
+// `insertWithAllocatedOrdinal`/`allocateOrdinalForExisting` each compute a
+// candidate ordinal via `MAX(ordinal WHERE type=?) + 1` ONCE per call, then
+// on a `(type, ordinal)` uniqueness violation try successive `+1` candidates
+// WITHOUT re-querying the table (see `ordinal-allocation-cases.ts`'s module
+// JSDoc for why a fresh per-attempt MAX query would self-heal around any
+// pre-existing row and could never reproduce a genuine collision under
+// bun:sqlite's single-connection model). These three constants/helpers are
+// the ONE definition of "how many attempts" and "what does exhaustion look
+// like", shared by SQLiteStore/TursoStore/InMemoryStore so the bounded-retry
+// contract can never drift per implementation.
+
+/** Bounded retry budget for both ordinal-allocation store methods (SPEC-084 §Module Boundary). */
+export const ORDINAL_ALLOCATION_MAX_ATTEMPTS = 3;
+
+/**
+ * True when a driver-level UNIQUE-constraint error message names the
+ * `idx_docs_type_ordinal` partial index's columns — i.e. this failure is an
+ * ordinal collision, not some OTHER constraint violation (e.g.
+ * `docs.slug`) that must propagate immediately instead of being retried.
+ * SQLite/libsql both report `UNIQUE constraint failed: docs.type, docs.ordinal`
+ * (table.column form, not the index name) — mirrors the existing
+ * `msg.includes("UNIQUE constraint failed: docs.slug")` precedent in both
+ * stores' `insert()`.
+ */
+export function isOrdinalUniqueViolationMessage(message: string): boolean {
+  return message.includes("docs.ordinal");
+}
+
+/**
+ * The literal, assertable exhaustion failure (SPEC-084 §Module Boundary
+ * "Retry-exhaustion failure shape") — a named `STORE_ERROR` whose message
+ * contains the token `ORDINAL_ALLOCATION_EXHAUSTED`, NEVER a silent NULL
+ * ordinal. Shared so the exact wording can't drift between the two
+ * allocation methods or the three store implementations.
+ */
+export function buildOrdinalAllocationExhaustedError(docType: string): LoreError {
+  return {
+    code: "STORE_ERROR",
+    message: `ORDINAL_ALLOCATION_EXHAUSTED: exhausted ${ORDINAL_ALLOCATION_MAX_ATTEMPTS} bounded retry attempts allocating an ordinal for type "${docType}"`,
+  };
+}
 
 export function wrapStoreError(e: unknown): Result<never, LoreError> {
   const message =

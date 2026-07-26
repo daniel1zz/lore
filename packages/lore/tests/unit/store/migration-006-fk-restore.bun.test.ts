@@ -115,7 +115,7 @@ describe("migration-006 mid-transaction failure — PRAGMA foreign_keys restore 
     // a fresh store runs every migration up to it, not just through
     // migration-006. This test's own concern (FK enforcement restored after
     // migration-006) is unaffected — asserted directly below.
-    expect(userVersion(db)).toBe(9);
+    expect(userVersion(db)).toBe(10);
     expect(foreignKeysEnabled(db)).toBe(true);
 
     store.close();
