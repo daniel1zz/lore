@@ -103,6 +103,11 @@ function makeDoc(
     deleted_at: overrides.deleted_at ?? null,
     tags: overrides.tags ?? [],
     extra: overrides.extra ?? {},
+    // SPEC-084 T5 — ordinal is optional on DocRecord and omitted entirely (rather than
+    // spread as `undefined`) when the caller doesn't pass one, matching every pre-existing
+    // fixture in this file (which never set it and must keep exercising the pre-migration
+    // NULL-ordinal legacy fallback path unchanged).
+    ...(overrides.ordinal !== undefined ? { ordinal: overrides.ordinal } : {}),
   };
 }
 
@@ -1513,5 +1518,278 @@ describe("REGRESSION — titles with no self-declared number or a foreign prefix
     // match `^PLAN-(\d+)\b`, so allocation falls through to the plain sequential counter.
     expect(index.mappings[docId]!.human_id).toBe("PLAN-001");
     expect(index.mappings[docId]!.human_id).not.toMatch(/^SPEC-/);
+  });
+});
+
+// ─── SPEC-084 T5 — export read-switch + SPEC-021 A1 retirement for numbered types ─────
+//
+// A "numbered type" (spec/adr, per @lore/core's ORDINAL_REGISTRY) with a store-allocated
+// `ordinal` column value composes its human_id via `formatDocDisplayId` (a pure column
+// read — NO title parsing, NO sequential counter, NEVER a silent renumber) instead of the
+// Amendment A1 legacy allocator above. `formatDocDisplayId` deliberately does NOT
+// zero-pad (SPEC-084 D5) — "SPEC-84", not "SPEC-084" — a real behavioral divergence from
+// the legacy path's 3-digit padding, verified explicitly below.
+
+describe("HAPPY — numbered-type doc with an allocated ordinal uses the column, not the legacy allocator (AC-084-6 T5-1)", () => {
+  it("spec with ordinal=84 exports human_id SPEC-84 (unpadded) and a matching file_path", async () => {
+    const store = new InMemoryStore();
+    const service = makeExportService(store);
+    const projectDir = makeTempProjectDir();
+
+    const docId = "01J0000000000000000000T5S1";
+    await insertDoc(store, makeDoc({
+      id: docId,
+      type: "spec",
+      title: "Ordinal Allocated Feature",
+      slug: "spec-ordinal-allocated-feature",
+      ordinal: 84,
+    }));
+
+    const result = await service.exportDocs({ projectDir, dryRun: false });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const index = readExportIndex(projectDir);
+    expect(index.mappings[docId]!.human_id).toBe("SPEC-84");
+    // No zero-padding (SPEC-084 D5) — the legacy allocator above always produced SPEC-084.
+    expect(index.mappings[docId]!.human_id).not.toBe("SPEC-084");
+    expect(index.mappings[docId]!.file_path).toMatch(/^docs\/requirements\/spec\/SPEC-84-/);
+
+    const filePath = result.value.created[0]!;
+    const content = readFileSync(join(projectDir, filePath), "utf8");
+    const fm = parseFrontmatterScalars(content);
+    expect(fm["id"]).toBe("SPEC-84");
+
+    // A doc with an allocated ordinal never hits the legacy fallback — no warning.
+    expect(result.value.ordinal_warnings).toHaveLength(0);
+  });
+
+  it("adr with ordinal=3 exports human_id ADR-3 via the same column-derived branch", async () => {
+    const store = new InMemoryStore();
+    const service = makeExportService(store);
+    const projectDir = makeTempProjectDir();
+
+    const docId = "01J0000000000000000000T5A1";
+    await insertDoc(store, makeDoc({
+      id: docId,
+      type: "adr",
+      title: "Adopt Ordinal Allocation",
+      slug: "adr-adopt-ordinal-allocation",
+      ordinal: 3,
+      extra: { decision_status: "accepted" },
+    }));
+
+    const result = await service.exportDocs({ projectDir, dryRun: false });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const index = readExportIndex(projectDir);
+    expect(index.mappings[docId]!.human_id).toBe("ADR-3");
+    expect(index.mappings[docId]!.file_path).toMatch(/^docs\/requirements\/adr\/ADR-3-/);
+    expect(result.value.ordinal_warnings).toHaveLength(0);
+  });
+
+  it("re-exporting an ordinal-derived doc twice converges (idempotent, skipped_clean second run)", async () => {
+    const store = new InMemoryStore();
+    const service = makeExportService(store);
+    const projectDir = makeTempProjectDir();
+
+    const docId = "01J0000000000000000000T5S2";
+    await insertDoc(store, makeDoc({
+      id: docId,
+      type: "spec",
+      title: "Stable Ordinal Spec",
+      slug: "spec-stable-ordinal-spec",
+      ordinal: 12,
+      content: "# Stable\n\nUnchanged body.",
+    }));
+
+    const first = await service.exportDocs({ projectDir, dryRun: false });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.value.created).toHaveLength(1);
+    expect(first.value.repaired).toHaveLength(0);
+
+    const second = await service.exportDocs({ projectDir, dryRun: false });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.value.created).toHaveLength(0);
+    expect(second.value.skipped_clean).toHaveLength(1);
+    expect(second.value.repaired).toHaveLength(0);
+    expect(second.value.ordinal_warnings).toHaveLength(0);
+  });
+});
+
+describe("NEGATIVE — numbered-type doc with a NULL ordinal falls back to the legacy path with a loud report warning (AC-084-6 T5-2)", () => {
+  it("spec with no ordinal column value gets the legacy zero-padded id AND a named ordinal_warnings entry", async () => {
+    const store = new InMemoryStore();
+    const service = makeExportService(store);
+    const projectDir = makeTempProjectDir();
+
+    const docId = "01J0000000000000000000T5W1";
+    await insertDoc(store, makeDoc({
+      id: docId,
+      type: "spec",
+      title: "Unmigrated Legacy Spec",
+      slug: "spec-unmigrated-legacy-spec",
+      // ordinal deliberately omitted — simulates a pre-`lore migrate ordinals` doc.
+    }));
+
+    const result = await service.exportDocs({ projectDir, dryRun: false });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const index = readExportIndex(projectDir);
+    // Legacy path still allocates — zero-padded, sequential — never blocked, never a
+    // fabricated ordinal-shaped id.
+    expect(index.mappings[docId]!.human_id).toBe("SPEC-001");
+
+    // But the gap is named loudly, not silently perpetuated.
+    expect(result.value.ordinal_warnings).toHaveLength(1);
+    expect(result.value.ordinal_warnings[0]).toContain(docId);
+    expect(result.value.ordinal_warnings[0]).toContain("Unmigrated Legacy Spec");
+    expect(result.value.ordinal_warnings[0]).toContain("lore migrate ordinals");
+  });
+
+  it("adr with no ordinal column value also warns (adr has no kind-exemption at all)", async () => {
+    const store = new InMemoryStore();
+    const service = makeExportService(store);
+    const projectDir = makeTempProjectDir();
+
+    const docId = "01J0000000000000000000T5W2";
+    await insertDoc(store, makeDoc({
+      id: docId,
+      type: "adr",
+      title: "Unmigrated Legacy Decision",
+      slug: "adr-unmigrated-legacy-decision",
+      extra: { decision_status: "proposed" },
+    }));
+
+    const result = await service.exportDocs({ projectDir, dryRun: false });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.ordinal_warnings).toHaveLength(1);
+    expect(result.value.ordinal_warnings[0]).toContain(docId);
+    expect(result.value.ordinal_warnings[0]).toContain("lore migrate ordinals");
+  });
+});
+
+describe("BOUNDARY — a permanently kind-exempt numbered-type doc (domain-overview) never warns (AC-084-6 T5-3)", () => {
+  it("a domain-overview spec with a NULL ordinal takes the legacy path silently — no ordinal_warnings entry", async () => {
+    const store = new InMemoryStore();
+    const service = makeExportService(store);
+    const projectDir = makeTempProjectDir();
+
+    const docId = "01J0000000000000000000T5E1";
+    await insertDoc(store, makeDoc({
+      id: docId,
+      type: "spec",
+      title: "Domain Overview Doc",
+      slug: "spec-domain-overview-doc",
+      extra: { spec_kind: "domain-overview" },
+      // ordinal omitted — domain-overview specs are PERMANENTLY exempt (never allocated),
+      // not merely "not yet migrated" — so this must never trigger a warning.
+    }));
+
+    const result = await service.exportDocs({ projectDir, dryRun: false });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // Still gets an id via the legacy allocator (exempt docs still need SOME file identity).
+    const index = readExportIndex(projectDir);
+    expect(index.mappings[docId]!.human_id).toBe("SPEC-001");
+
+    // No warning — this is a permanent, by-design NULL, not a migration gap.
+    expect(result.value.ordinal_warnings).toHaveLength(0);
+  });
+});
+
+describe("REGRESSION — a non-numbered type is byte-identical even if an ordinal-shaped field is present (AC-084-6 T5-4)", () => {
+  it("a plan doc (not in ORDINAL_REGISTRY) with an ordinal value set is completely ignored by both new branches", async () => {
+    const store = new InMemoryStore();
+    const service = makeExportService(store);
+    const projectDir = makeTempProjectDir();
+
+    const docId = "01J0000000000000000000T5R1";
+    await insertDoc(store, makeDoc({
+      id: docId,
+      type: "plan",
+      title: "Plan With Stray Ordinal Field",
+      slug: "plan-with-stray-ordinal-field",
+      // "plan" is not a numbered type at all — ORDINAL_REGISTRY has no entry for it, so
+      // this value must never influence allocation, and must never trigger a warning.
+      ordinal: 999,
+    }));
+
+    const result = await service.exportDocs({ projectDir, dryRun: false });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const index = readExportIndex(projectDir);
+    // Plain sequential PLAN-001 — the stray ordinal:999 never surfaces anywhere.
+    expect(index.mappings[docId]!.human_id).toBe("PLAN-001");
+    expect(index.mappings[docId]!.human_id).not.toContain("999");
+    expect(index.mappings[docId]!.file_path).not.toContain("999");
+    expect(result.value.ordinal_warnings).toHaveLength(0);
+  });
+});
+
+describe("STATE — an existing export-index mapping for a numbered doc reconciles to the column on the next export run (AC-084-6 T5-5)", () => {
+  it("a doc previously exported under a legacy allocation, now carrying an allocated ordinal, is reconciled + logged in repaired[]", async () => {
+    const store = new InMemoryStore();
+    const service = makeExportService(store);
+    const projectDir = makeTempProjectDir();
+
+    const docId = "01J0000000000000000000T5R2";
+    await insertDoc(store, makeDoc({
+      id: docId,
+      type: "spec",
+      title: "Since Migrated Spec",
+      slug: "spec-since-migrated-spec",
+      // The store now carries a real allocated ordinal — as if `lore migrate ordinals`
+      // ran after this doc's LAST export under the legacy allocator below.
+      ordinal: 40,
+    }));
+
+    // Pre-seed export-index.json + an on-disk file reflecting the STALE legacy mapping
+    // (as if a prior export run happened before the ordinal column was backfilled).
+    const staleFilePath = "docs/requirements/spec/SPEC-007-since-migrated-spec.md";
+    writeExportIndex(projectDir, {
+      version: 1,
+      mappings: {
+        [docId]: { human_id: "SPEC-007", file_path: staleFilePath },
+      },
+    });
+    mkdirSync(join(projectDir, "docs/requirements/spec"), { recursive: true });
+    writeFileSync(join(projectDir, staleFilePath), "---\nid: SPEC-007\n---\n\nstale legacy body\n", "utf8");
+
+    const result = await service.exportDocs({ projectDir, dryRun: false });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // Loud, repaired-family log entry — mirrors repairCollisions' loudness contract.
+    expect(result.value.repaired).toHaveLength(1);
+    expect(result.value.repaired[0]).toContain("ordinal-reconcile");
+    expect(result.value.repaired[0]).toContain(docId);
+
+    const index = readExportIndex(projectDir);
+    expect(index.mappings[docId]!.human_id).toBe("SPEC-40");
+    expect(index.mappings[docId]!.file_path).toMatch(/^docs\/requirements\/spec\/SPEC-40-/);
+    expect(index.mappings[docId]!.file_path).not.toBe(staleFilePath);
+
+    // A fresh file is written at the corrected path...
+    expect(existsSync(join(projectDir, index.mappings[docId]!.file_path))).toBe(true);
+    // ...and the stale file from the legacy allocation is left on disk, untouched — this
+    // module never silently deletes a file it previously wrote.
+    expect(existsSync(join(projectDir, staleFilePath))).toBe(true);
+    expect(readFileSync(join(projectDir, staleFilePath), "utf8")).toContain("stale legacy body");
+
+    // Second run: already converged — no further reconcile, no repeat warning.
+    const second = await service.exportDocs({ projectDir, dryRun: false });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.value.repaired).toHaveLength(0);
+    expect(second.value.ordinal_warnings).toHaveLength(0);
   });
 });

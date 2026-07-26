@@ -36,6 +36,32 @@
  *     can never collide, and the sequential fallback skips any number the set already holds.
  *     Title-match reconcile (the path above) and existing index mappings are untouched by
  *     this amendment; it applies only to the new-allocation branch.
+ *   - SPEC-084 T5 — Amendment A1's title-parse + sequential-fallback allocator above is
+ *     RETIRED for "numbered types" (spec/adr, per `@lore/core`'s `ORDINAL_REGISTRY`) once a
+ *     doc carries a store-allocated `ordinal` column value: `buildOrExtendIndex`'s main
+ *     allocation loop checks `ORDINAL_REGISTRY[doc.type] !== undefined && typeof doc.ordinal
+ *     === "number"` FIRST, and when true composes `human_id` via `formatDocDisplayId` (a
+ *     pure read of the column — no title parsing, no counter, never a silent renumber) and
+ *     derives `file_path` from that id, skipping the legacy branch entirely. A numbered-type
+ *     doc whose `ordinal` is still `null`/`undefined` (pre-`lore migrate ordinals` legacy, OR
+ *     permanently kind-exempt e.g. a `domain-overview` spec) falls through to the UNCHANGED
+ *     Amendment A1 legacy path — but when it is NOT kind-exempt, `buildOrExtendIndex` also
+ *     appends a LOUD entry to the new `ordinalWarnings` return (surfaced as
+ *     `ExportReport.ordinal_warnings`) naming `lore migrate ordinals`, so the gap is visible
+ *     in every export run rather than silently perpetuated. Non-numbered types (prd, plan,
+ *     task, knowledge, phase) never enter either new branch — `ORDINAL_REGISTRY[doc.type]`
+ *     is `undefined` for them — and keep this exact legacy path byte-identical.
+ *   - SPEC-084 T5 — existing `.lore/export-index.json` mappings for numbered-type docs
+ *     reconcile to the column on the next export run: `reconcileOrdinalMappings` (run
+ *     alongside `repairCollisions`, same "strip the stale mapping and let it be freshly
+ *     reallocated" strategy, logged into the SAME `ExportReport.repaired` array — a
+ *     `repaired`-family entry, mirroring `repairCollisions`' loudness) detects a mapped doc
+ *     whose `ordinal` is now a number but whose recorded `human_id` no longer matches
+ *     `formatDocDisplayId(doc)` (e.g. it was exported under a legacy allocation before
+ *     `lore migrate ordinals` backfilled the column) and deletes the stale mapping so the
+ *     column-derived branch above re-derives it fresh. The doc's previously-written file at
+ *     the stale path is left on disk (this module never deletes files it wrote) — a fresh
+ *     file is created at the corrected path on the same run.
  *   - Corrupted indexes self-heal. If .lore/export-index.json already contains two doc ids
  *     mapped to the same file_path (e.g. written by the bug above, or hand-edited), the next
  *     export run detects it, keeps exactly one canonical owner (content match, else earliest
@@ -94,6 +120,8 @@ import {
   slugify,
   DOC_TYPE_ROLE_MAP,
   splitFrontmatter,
+  formatDocDisplayId,
+  ORDINAL_REGISTRY,
 } from "@lore/core";
 // reason: getTransliterateCjk/containsCjk (SPEC-068 D1, hotfix 2026-07-23) are
 // Node-only-subpath-gated purely for the browser-safety barrel-isolation
@@ -173,8 +201,27 @@ export interface ExportReport {
    * Human-readable log of index self-heal repairs performed this run (empty when the index
    * was already consistent). Each entry names the doc id that was stripped of its (corrupted,
    * collided) mapping and reallocated a fresh human_id + file_path. Never silent.
+   *
+   * SPEC-084 T5 — ALSO carries "ordinal-reconcile" entries: a numbered-type (spec/adr) doc
+   * whose store-allocated `ordinal` column has since been populated but whose existing
+   * mapping still reflects a stale legacy (title-parse/sequential) human_id is stripped here
+   * too, so it is freshly reallocated from the column on this same run. Same array, same
+   * "never silent" loudness contract as the collision self-heal above — see
+   * `reconcileOrdinalMappings`.
    */
   repaired: string[];
+  /**
+   * SPEC-084 T5 — loud warnings for numbered-type (spec/adr) docs that are NOT kind-exempt
+   * (see `@lore/core`'s `ORDINAL_REGISTRY[type].exemptKinds`, e.g. `domain-overview` specs)
+   * but still carry a `null`/`undefined` `ordinal` column value at export time — i.e. a doc
+   * predating the SPEC-084 `lore migrate ordinals` repair migration. Such a doc still gets a
+   * human_id via the retired Amendment A1 legacy allocator (title-parse + sequential
+   * fallback) so export never blocks or invents a number silently, but every run names the
+   * exact doc + the repair command instead of quietly perpetuating the gap. Always present,
+   * empty when every numbered-type doc in this run already carries an allocated ordinal (or
+   * is legitimately kind-exempt).
+   */
+  ordinal_warnings: string[];
 }
 
 /**
@@ -288,7 +335,7 @@ export class ExportDocsService {
 
     const indexResult = await buildOrExtendIndex(indexPath, docsBaseDir, allDocs, opts.projectDir);
     if (!indexResult.ok) return indexResult;
-    const { index, repaired } = indexResult.value;
+    const { index, repaired, ordinalWarnings } = indexResult.value;
 
     // Save index (atomically) before writing any files — all human IDs are now allocated.
     if (!opts.dryRun) {
@@ -313,6 +360,7 @@ export class ExportDocsService {
       overwritten: [],
       errors: [],
       repaired,
+      ordinal_warnings: ordinalWarnings,
     };
 
     // Builds the complete file content (frontmatter + spliced body) for a doc — shared by
@@ -544,43 +592,67 @@ function maxNumberForPrefix(prefix: string, humanIds: string[]): number {
 /**
  * Build or extend the export index: allocate human IDs for new corpus docs.
  *
- * Algorithm (SPEC-021 §9.3, §9.4; Amendment A1 for step 5b):
+ * Algorithm (SPEC-021 §9.3, §9.4; Amendment A1 for step 5b — RETIRED for numbered types by
+ * SPEC-084 T5, see step 5a's ordinal branch below):
  *   1. Load existing index.
  *   2. Self-heal: repair any (human_id, file_path) collision between two different
  *      doc ids already in the index (see repairCollisions) — logged, never silent.
+ *   2b. SPEC-084 T5 — reconcile: for a numbered-type (spec/adr) doc already mapped whose
+ *       store-allocated `ordinal` column no longer matches its recorded human_id (i.e. it
+ *       was exported under the legacy allocator before `lore migrate ordinals` backfilled
+ *       the column), strip the stale mapping the same way step 2 does — logged into the
+ *       SAME repair array (see reconcileOrdinalMappings).
  *   3. Scan files per type dir — build title → humanId/filePath map.
  *   4. Seed per-type next-number counters from index + file scan.
  *   5. For each corpus doc not in index:
- *      a. Match by title to scanned file → inherit its ID + filePath, UNLESS that
+ *      a. SPEC-084 T5 — if `doc.type` is a numbered type (`ORDINAL_REGISTRY[doc.type]`
+ *         defined) AND `doc.ordinal` is an allocated number: human_id = `formatDocDisplayId`
+ *         (pure column read, no title parsing, no counter) — skip b/c entirely.
+ *      b. Match by title to scanned file → inherit its ID + filePath, UNLESS that
  *         filePath is already claimed by a different doc id this pass (usedFilePaths) —
  *         titles are not unique across docs (only slug is), so this guard is required.
- *      b. Else: try the doc's self-declared number — `doc.title` matched against
+ *      c. Else: try the doc's self-declared number — `doc.title` matched against
  *         `^{PREFIX}-(\d+)\b` where PREFIX is keyed to `doc.type` (Amendment A1). Adopt
  *         the normalized `{PREFIX}-{NNN}` id iff not already held by an existing mapping
  *         or an earlier allocation this pass (usedHumanIds); otherwise allocate the next
  *         sequential number, skipping any already in usedHumanIds. Either way, compute a
  *         new filePath deduped against usedFilePaths with a -2/-3/... suffix (mirrors
- *         slugifyWithCollision).
- *   6. Return mutated index (caller must save it atomically) plus the repair log.
+ *         slugifyWithCollision). Steps b/c are the RETIRED-for-numbered-types legacy path —
+ *         still exercised by non-numbered types always, and by numbered types ONLY while
+ *         `doc.ordinal` is `null`/`undefined` (pre-migration, or permanently kind-exempt).
+ *         SPEC-084 T5 — a numbered-type doc reaching b/c that is NOT kind-exempt (see
+ *         `ORDINAL_REGISTRY[doc.type].exemptKinds`) additionally appends a loud entry to the
+ *         returned `ordinalWarnings`, naming `lore migrate ordinals` — never a silently
+ *         invented number.
+ *   6. Return mutated index (caller must save it atomically) plus the repair log and the
+ *      ordinal-fallback warning log.
  *
  * @param indexPath - Absolute path to .lore/export-index.json.
  * @param docsBaseDir - Absolute path to docs/requirements/.
  * @param docs - All active corpus docs to reconcile.
  * @param projectDir - Absolute project root (for resolving file_path during self-heal).
- * @returns ok({index, repaired}) with all docs mapped; err on allocation exhaustion or store failure.
+ * @returns ok({index, repaired, ordinalWarnings}) with all docs mapped; err on allocation
+ *   exhaustion or store failure.
  */
 async function buildOrExtendIndex(
   indexPath: string,
   docsBaseDir: string,
   docs: DocRecord[],
   projectDir: string,
-): Promise<Result<{ index: ExportIndex; repaired: string[] }, LoreError>> {
+): Promise<Result<{ index: ExportIndex; repaired: string[]; ordinalWarnings: string[] }, LoreError>> {
   const index = loadIndex(indexPath);
 
   // Self-heal BEFORE seeding counters/usedFilePaths so repaired (stripped) doc ids are
   // treated as brand-new allocations below, and the counter/collision state reflects
   // only the surviving, consistent mappings.
   const repaired = repairCollisions(index, projectDir, docs);
+  // SPEC-084 T5 — same "strip stale mapping, let it be freshly reallocated" strategy, for
+  // numbered-type docs whose column has since diverged from their recorded human_id. Runs
+  // AFTER collision self-heal (operates on whatever mappings survived that pass) and BEFORE
+  // the counter/usedFilePaths seeding below, so a reconciled doc is treated as unmapped.
+  repaired.push(...reconcileOrdinalMappings(index, docs));
+
+  const ordinalWarnings: string[] = [];
 
   // Collect all existing human IDs from the index for next-number seeding.
   const existingHumanIds = Object.values(index.mappings).map((m) => m.human_id);
@@ -623,6 +695,40 @@ async function buildOrExtendIndex(
   // Assign human IDs to corpus docs not yet in the index.
   for (const doc of docs) {
     if (index.mappings[doc.id] !== undefined) continue; // already mapped
+
+    // SPEC-084 T5 — column-derived branch: a numbered type (spec/adr) with an allocated
+    // ordinal composes its human_id from the column via formatDocDisplayId (pure read, no
+    // title parsing, no counter, never a silent renumber) and skips the legacy path (title-
+    // match / title-declared-number / sequential fallback) entirely — the column is
+    // authoritative once it holds a value.
+    if (isOrdinalEligibleType(doc.type) && typeof doc.ordinal === "number") {
+      const humanId = formatDocDisplayId(doc);
+      if (humanId !== null) {
+        const truncatedKebab = await computeExportKebabStem(doc);
+        const dirRelPath = `docs/requirements/${TYPE_DIR[doc.type]}`;
+        const filePathResult = allocateUniqueFilePath(dirRelPath, humanId, truncatedKebab, usedFilePaths);
+        if (!filePathResult.ok) return filePathResult;
+        const filePath = filePathResult.value;
+
+        usedFilePaths.add(filePath);
+        usedHumanIds.add(humanId);
+        index.mappings[doc.id] = { human_id: humanId, file_path: filePath };
+        continue;
+      }
+    }
+
+    // SPEC-084 T5 — a numbered type still lacking an allocated ordinal (pre-`lore migrate
+    // ordinals`) falls through to the legacy path below like any non-numbered type, but
+    // (unless it is permanently kind-exempt, e.g. a domain-overview spec) the gap is named
+    // loudly rather than silently perpetuated — never a fabricated number.
+    if (isOrdinalEligibleType(doc.type) && !isOrdinalExemptKind(doc)) {
+      const warning =
+        `${doc.type} doc "${doc.title}" (id ${doc.id}) has no store-allocated SPEC-084 ` +
+        `ordinal yet — falling back to legacy title/sequential human_id allocation for this ` +
+        `export run. Run \`lore migrate ordinals\` to backfill its ordinal.`;
+      ordinalWarnings.push(warning);
+      process.stderr.write(`⚠ ordinal-fallback: ${warning}\n`);
+    }
 
     const typeTitleMap = titleMaps.get(doc.type);
 
@@ -679,20 +785,7 @@ async function buildOrExtendIndex(
     usedHumanIds.add(humanId);
 
     // Compute file name from human ID + slugified title (minus type prefix).
-    // reason: slugify() produces "{type}-{kebab}" — strip the type prefix to get
-    // just the kebab portion for the filename, keeping SPEC-025 prefix only from humanId.
-    // Only awaited when the title actually contains CJK — an ASCII-only title
-    // never pays the pinyin-pro load cost (SPEC-068 D1 hotfix). reason:
-    // exactOptionalPropertyTypes forbids `{ transliterate: undefined }` — omit
-    // the key entirely rather than spread an undefined-valued property.
-    const slugOpts = containsCjk(doc.title) ? { transliterate: await getTransliterateCjk() } : undefined;
-    const fullSlug = slugify(doc.type, doc.title, slugOpts);
-    const typePrefix = `${doc.type}-`;
-    const kebabPart = fullSlug.startsWith(typePrefix)
-      ? fullSlug.slice(typePrefix.length)
-      : fullSlug;
-    // Limit filename length to avoid filesystem issues.
-    const truncatedKebab = kebabPart.slice(0, 50).replace(/-+$/, "");
+    const truncatedKebab = await computeExportKebabStem(doc);
 
     const dirRelPath = `docs/requirements/${TYPE_DIR[doc.type]}`;
     const filePathResult = allocateUniqueFilePath(dirRelPath, humanId, truncatedKebab, usedFilePaths);
@@ -703,7 +796,106 @@ async function buildOrExtendIndex(
     index.mappings[doc.id] = { human_id: humanId, file_path: filePath };
   }
 
-  return ok({ index, repaired });
+  return ok({ index, repaired, ordinalWarnings });
+}
+
+/**
+ * Computes the truncated kebab-case filename stem (no human_id prefix, no extension) for a
+ * doc's export file_path — shared by BOTH the legacy Amendment A1 allocation branch and the
+ * SPEC-084 T5 column-derived ordinal branch in `buildOrExtendIndex`'s main loop, so the two
+ * paths never independently re-derive (and potentially diverge on) the same slug/truncation
+ * logic. Extracted verbatim from the pre-SPEC-084 T5 inline computation — no behavior change.
+ *
+ * reason: slugify() produces "{type}-{kebab}" — strip the type prefix to get just the kebab
+ * portion for the filename, keeping the human_id prefix as the sole numbering source. The
+ * CJK transliteration hook is only awaited when the title actually contains CJK — an
+ * ASCII-only title never pays the pinyin-pro load cost (SPEC-068 D1 hotfix).
+ *
+ * @param doc - The doc whose title is being slugified for its export filename.
+ * @returns Truncated (≤50 char) kebab stem with no trailing hyphen.
+ */
+async function computeExportKebabStem(doc: DocRecord): Promise<string> {
+  // reason: exactOptionalPropertyTypes forbids `{ transliterate: undefined }` — omit the key
+  // entirely rather than spread an undefined-valued property.
+  const slugOpts = containsCjk(doc.title) ? { transliterate: await getTransliterateCjk() } : undefined;
+  const fullSlug = slugify(doc.type, doc.title, slugOpts);
+  const typePrefix = `${doc.type}-`;
+  const kebabPart = fullSlug.startsWith(typePrefix) ? fullSlug.slice(typePrefix.length) : fullSlug;
+  // Limit filename length to avoid filesystem issues.
+  return kebabPart.slice(0, 50).replace(/-+$/, "");
+}
+
+/**
+ * True when `type` is a store-allocated "numbered type" per `@lore/core`'s
+ * `ORDINAL_REGISTRY` (currently spec/adr) — the SPEC-084 T5 gate that decides whether a doc
+ * is even ELIGIBLE for the column-derived human_id branch (regardless of whether this
+ * particular doc actually carries an allocated ordinal yet). Non-numbered types (prd, plan,
+ * task, knowledge, phase) always return false here and take the unmodified legacy path.
+ *
+ * @param type - The doc type to check.
+ */
+function isOrdinalEligibleType(type: DocType): boolean {
+  return ORDINAL_REGISTRY[type] !== undefined;
+}
+
+/**
+ * True when `doc` is a numbered type but PERMANENTLY exempt from ordinal allocation for its
+ * declared `extra.spec_kind` (e.g. a `domain-overview` spec, SPEC-080 taxonomy) — per
+ * `@lore/core`'s `ORDINAL_REGISTRY[doc.type].exemptKinds`. Distinguishes a doc that will
+ * NEVER receive an ordinal (legitimate, no warning) from one that simply hasn't been
+ * migrated yet (SPEC-084 T5's loud `ordinalWarnings` case). Only meaningful when
+ * {@link isOrdinalEligibleType} is already true for `doc.type` — callers check that first.
+ *
+ * @param doc - The doc to check (reads `doc.type` and `doc.extra["spec_kind"]`).
+ */
+function isOrdinalExemptKind(doc: DocRecord): boolean {
+  const entry = ORDINAL_REGISTRY[doc.type];
+  if (entry?.exemptKinds === undefined) return false;
+  const specKind = typeof doc.extra["spec_kind"] === "string" ? doc.extra["spec_kind"] : undefined;
+  return specKind !== undefined && entry.exemptKinds.includes(specKind);
+}
+
+/**
+ * Reconciles existing `.lore/export-index.json` mappings for numbered-type (spec/adr) docs
+ * whose store-allocated `ordinal` column has since been populated (SPEC-084) but whose
+ * recorded `human_id`/`file_path` still reflects the retired Amendment A1 legacy allocator
+ * — e.g. a doc originally exported under a legacy `SPEC-007` allocation before
+ * `lore migrate ordinals` backfilled its real `ordinal` column to 40.
+ *
+ * Repair strategy mirrors `repairCollisions`: DELETE the stale mapping entry rather than
+ * mutate it in place here, so there remains exactly one code path (the column-derived branch
+ * in `buildOrExtendIndex`'s main loop) that ever WRITES a column-derived mapping. The doc's
+ * previously-exported file at the stale path is left on disk — this module never silently
+ * deletes a file it wrote; the next Phase 2 write creates a fresh file at the corrected path.
+ *
+ * @param index - Loaded export index (mutated in place: stale entries removed).
+ * @param docs - All active corpus docs currently being reconciled.
+ * @returns Human-readable repair log lines (empty when nothing needed reconciling).
+ */
+function reconcileOrdinalMappings(index: ExportIndex, docs: DocRecord[]): string[] {
+  const repairLog: string[] = [];
+  const docById = new Map(docs.map((d) => [d.id, d]));
+
+  for (const [docId, mapping] of Object.entries(index.mappings)) {
+    const doc = docById.get(docId);
+    if (doc === undefined) continue; // orphan entry — not this reconciler's concern
+    if (!isOrdinalEligibleType(doc.type)) continue;
+    if (typeof doc.ordinal !== "number") continue; // not yet migrated — nothing to reconcile against
+
+    const correctHumanId = formatDocDisplayId(doc);
+    if (correctHumanId === null) continue; // unreachable given the ordinal-number check above
+    if (mapping.human_id === correctHumanId) continue; // already converged
+
+    delete index.mappings[docId];
+    const line =
+      `ordinal-reconcile: doc ${docId} ("${doc.title}") was mapped to ${mapping.human_id} / ` +
+      `${mapping.file_path} — reconciling to its store-allocated ordinal ${correctHumanId} ` +
+      `(a fresh file will be written; the stale file at the old path is left on disk)`;
+    repairLog.push(line);
+    process.stderr.write(`⚠ export-index ordinal-reconcile: ${line}\n`);
+  }
+
+  return repairLog;
 }
 
 /**
