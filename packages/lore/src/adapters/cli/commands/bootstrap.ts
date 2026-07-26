@@ -1,5 +1,6 @@
 /**
- * lore bootstrap [--by <name>] [--json] — SPEC-041 S1 volatile session pointer-set.
+ * lore bootstrap [--by <name>] [--json] [--injection] — SPEC-041 S1 volatile
+ * session pointer-set, plus the SPEC-080 tier-1 injection projection.
  *
  * A fresh session (an AI agent or a human) queries this ONE deterministic, read-only
  * verb to learn the volatile delta since the static layer (CLAUDE.md/AGENTS.md
@@ -13,14 +14,33 @@
  * utils.ts::resolveActor. Only filters `my_claims`; every other field is
  * corpus-wide regardless of `by`.
  *
+ * **`--injection` (SPEC-080 §Module Boundary CLI bullet, D3, D5)** — renders the
+ * SAME `BootstrapReportWithStaleness` through `@lore/core`'s
+ * `buildBootstrapInjection`, printing its compact `json` verbatim (never the
+ * `{ok, data}` envelope plain `--json` uses — the hook is a blind pipe, D3, and
+ * expects exactly this string on stdout). Budgets resolve from
+ * `workflow.bootstrap_injection.*` via `resolveBootstrapInjectionBudgets(config)`,
+ * the SAME `config` this command already threads through from `loadLoreApp()` for
+ * telemetry (`app.ts` needs no change — `loadLoreApp()` already resolves and
+ * returns the parsed project config; there is exactly one config-resolution path
+ * here, mirroring the `claimTtlMinutes` DI precedent SPEC-080 names). **Combined
+ * `--injection --json` decision**: `--injection` takes precedence and produces the
+ * SAME compact injection payload as `--injection` alone — never a rejection. The
+ * SessionStart hook only ever spawns `--injection` on its own, so the two flags
+ * have no real combined use case; erroring on a harmless overlap would just be
+ * one more exit-2 path for callers to special-case. Plain `--json` and the human
+ * text format are BYTE-UNCHANGED by this addition (`--injection` is a strict
+ * additive branch ahead of the existing `if (args.json)` check).
+ *
  * Exit codes: 0 = success (including an empty corpus — `root: null`, every array
  *   `[]`, AC-SL-10), non-zero only on an underlying store error.
  *
- * Source: SPEC-041 §3 D1, D2
+ * Source: SPEC-041 §3 D1, D2; SPEC-080 §Module Boundary, D3, D5
  */
 
 import { defineCommand } from "citty";
 import type { BootstrapReport } from "@lore/core";
+import { buildBootstrapInjection, resolveBootstrapInjectionBudgets } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, relativeTime, resolveActor } from "../utils.js";
 import { buildStalenessFlowDeps, listFreshStalenessEscalates } from "../../../flows/staleness-flow.js";
@@ -154,6 +174,15 @@ export default defineCommand({
       type: "boolean",
       description: "Output the raw BootstrapReport as JSON",
     },
+    injection: {
+      type: "boolean",
+      description:
+        "SPEC-080 tier-1 injection projection — print buildBootstrapInjection's compact " +
+        "JSON (resume_hint/my_claims/active_sessions/armed_gates/root/pending_reviews/" +
+        "active_plans/latest_handoffs/corpus/omitted[/budget_exceeded]) instead of the " +
+        "full report. Takes precedence over --json when both are given (same compact " +
+        "injection payload either way — see this file's module header).",
+    },
     "seat-branch": {
       type: "string",
       description:
@@ -171,7 +200,7 @@ export default defineCommand({
     },
   },
   async run({ args }) {
-    const { app } = loadLoreApp();
+    const { app, config } = loadLoreApp();
     try {
       if (app.sessionService === undefined) {
         process.stderr.write("Error: SessionService not wired on this App instance.\n");
@@ -227,7 +256,15 @@ export default defineCommand({
         },
       };
 
-      if (args.json) {
+      if (args.injection) {
+        // SPEC-080 D3, D5 — resolve budgets from the SAME config loadLoreApp() already
+        // parsed (one resolution path, claimTtlMinutes DI precedent), then print the
+        // projection's compact json verbatim. Takes precedence over --json (module
+        // header's "Combined --injection --json decision").
+        const budgets = resolveBootstrapInjectionBudgets(config);
+        const { json } = buildBootstrapInjection(reportWithStaleness, budgets);
+        console.log(json);
+      } else if (args.json) {
         console.log(JSON.stringify({ ok: true, data: reportWithStaleness }, null, 2));
       } else {
         console.log(formatBootstrapReport(reportWithStaleness, by));
