@@ -14,14 +14,20 @@
  */
 
 /**
- * The three spec kinds a `spec` document's `extra.spec_kind` may take:
+ * The four spec kinds a `spec` document's `extra.spec_kind` may take:
  * - `"feature"` — user-facing feature behavior spec (default when the field is
  *   absent at creation — see `CorpusService._createImpl`).
  * - `"tech"` — internal technical / infrastructure spec with no direct
  *   user-facing behavior (e.g. monorepo skeleton, sync protocol).
  * - `"design"` — UI/UX design spec.
+ * - `"domain-overview"` — a domain's full narrative (vision, staged
+ *   commitments, owner-decision context), summarized by a `prd.extra.outline[]`
+ *   entry and linked back via `rel: "detail"` (SPEC-080 C2). Carries an
+ *   explicitly LIGHTER SPEC-058 verification-profile floor (no AC requirement
+ *   — narrative, not an implementation contract) and disallows fast-track
+ *   review (full draft → in-review → approved lifecycle only).
  */
-export const SPEC_KINDS = ["feature", "tech", "design"] as const;
+export const SPEC_KINDS = ["feature", "tech", "design", "domain-overview"] as const;
 
 /** Derived TypeScript union for a spec document's `extra.spec_kind`. */
 export type SpecKind = (typeof SPEC_KINDS)[number];
