@@ -19,6 +19,11 @@
  *   - prdSyncExemptSchema / PrdSyncExempt — `plan.extra.prd_sync_exempt` (C4):
  *     the audited, required-reason exemption from the plan-close sync
  *     predicate.
+ *   - renderOutlineContent(outline) — deterministic Markdown rendering of a
+ *     `prd.extra.outline[]` array for the PRD's `content` field. `extra.outline`
+ *     is the SSOT; `content` is generated ONLY by this function at write time
+ *     (same render-projection convention as `renderHandoffContent` in
+ *     `session.ts` / `renderAssessmentContent` in `assessment.ts`).
  *
  * Invariants:
  *   - `outlineEntrySchema` is the SINGLE-ENTRY shape written by `lore outline
@@ -49,6 +54,7 @@
  */
 
 import { z } from "zod";
+import type { DocRecord } from "./types.js";
 
 // ─── Outline Entry Tiers ────────────────────────────────────────────────────
 
@@ -192,3 +198,101 @@ export const prdSyncExemptSchema = z.object({
 
 /** Derived TypeScript type for a plan's sync exemption. */
 export type PrdSyncExempt = z.infer<typeof prdSyncExemptSchema>;
+
+/**
+ * Defensive `extra`-shape guard — mirrors `validity.ts`'s private `safeExtra`
+ * (duplicated, not imported, to keep this module dependency-free of that one;
+ * same convention `task-workflow.ts`'s `safeTaskExtra` established).
+ */
+function safeExtra(extra: unknown): Record<string, unknown> {
+  return extra !== null && typeof extra === "object" && !Array.isArray(extra)
+    ? (extra as Record<string, unknown>)
+    : {};
+}
+
+/**
+ * Extracts and validates `plan.extra.prd_sync_exempt` from a DocRecord-shaped
+ * input. Returns `undefined` when absent or malformed (defensive — `extra` is
+ * untyped storage; matches `extractValidity`/`extractClaim`'s degrade-to-
+ * undefined contract).
+ */
+export function extractPrdSyncExempt(doc: Pick<DocRecord, "extra">): PrdSyncExempt | undefined {
+  const raw = safeExtra(doc.extra)["prd_sync_exempt"];
+  if (raw === undefined || raw === null) return undefined;
+  const parsed = prdSyncExemptSchema.safeParse(raw);
+  return parsed.success ? parsed.data : undefined;
+}
+
+/**
+ * Deep-equality over two (possibly absent) {@link PrdSyncExempt} values — used
+ * by `CorpusService.set`'s SPEC-080 C4 writer guard to detect whether a
+ * patch's `extra.prd_sync_exempt` differs from the plan's current one (added,
+ * changed, OR dropped → rejected, naming `lore outline exempt`). Mirrors
+ * `validityEqual`'s exact shape (`validity.ts`) — the SAME "unconditional
+ * dedicated-writer rule" precedent (SPEC-043 D10) this field's guard is
+ * explicitly modeled after (SPEC-080 C4: "mirrors `attestation_exempt` ...
+ * dedicated writer verb; `CorpusService.set` rejects direct patches").
+ */
+export function prdSyncExemptEqual(a: PrdSyncExempt | undefined, b: PrdSyncExempt | undefined): boolean {
+  if (a === undefined && b === undefined) return true;
+  if (a === undefined || b === undefined) return false;
+  return a.reason === b.reason && a.by === b.by && a.at === b.at;
+}
+
+// ─── Render Projection ──────────────────────────────────────────────────────
+
+/**
+ * Deterministic Markdown rendering of a `prd.extra.outline[]` array for the root
+ * PRD's `content` field (SPEC-080 §Downstream Handoff, T7) — `extra.outline` is
+ * the SSOT, `content` is a GENERATED projection of it, never hand-edited
+ * directly. Two calls with the same input always produce the same string (no
+ * IO, no wall-clock reads, no randomness) — same render-projection convention
+ * as `renderHandoffContent` (`session.ts`) / `renderAssessmentContent`
+ * (`assessment.ts`).
+ *
+ * Renders one `## {title}` heading per entry, in array (declaration) order —
+ * NOT re-sorted — followed by the entry's bounded `direction` summary and any
+ * declared `constraints[]` / `decision_pointers[]` / `links[]` as bullet
+ * lists. An empty `outline` array renders to the empty string (never throws).
+ *
+ * @param outline - Ordered outline entries (`PrdOutlineService.outlineSet`'s
+ *   patched array, or a doc's raw `extra.outline` after schema validation).
+ * @returns Markdown body text — empty string for an empty array.
+ * @example
+ * renderOutlineContent([
+ *   { section: "sync", title: "Sync Predicate", tier: "domain",
+ *     direction: "Bounded summary.", decision_pointers: [], constraints: [],
+ *     links: [{ slug: "spec-domain-sync-detail", rel: "detail" }] },
+ * ]).startsWith("## Sync Predicate"); // => true
+ */
+export function renderOutlineContent(outline: OutlineEntry[]): string {
+  if (outline.length === 0) return "";
+
+  const lines: string[] = [];
+  for (const entry of outline) {
+    lines.push(`## ${entry.title}`);
+    lines.push("");
+    lines.push(entry.direction);
+    lines.push("");
+
+    if (entry.constraints.length > 0) {
+      lines.push("**Constraints:**");
+      for (const constraint of entry.constraints) lines.push(`- ${constraint}`);
+      lines.push("");
+    }
+
+    if (entry.decision_pointers.length > 0) {
+      lines.push("**Decisions:**");
+      for (const adrSlug of entry.decision_pointers) lines.push(`- ${adrSlug}`);
+      lines.push("");
+    }
+
+    if (entry.links.length > 0) {
+      lines.push("**Links:**");
+      for (const link of entry.links) lines.push(`- [${link.rel}] ${link.slug}`);
+      lines.push("");
+    }
+  }
+
+  return lines.join("\n").trimEnd() + "\n";
+}

@@ -66,6 +66,7 @@ import { StalenessProbeService } from "./service/staleness-probe-service.js";
 import { AuditService } from "./service/audit-service.js";
 import { AcService } from "./service/ac-service.js";
 import { RequirementService } from "./service/requirement-service.js";
+import { PrdOutlineService } from "./service/prd-outline-service.js";
 import { UatService } from "./service/uat-service.js";
 import { VerifyRunnerService } from "./service/verify-runner-service.js";
 import { executeVerifySpawnSpec } from "./service/verify-executor.js";
@@ -327,6 +328,14 @@ export interface App {
    * `acService`; always wired in production.
    */
   requirementService?: RequirementService;
+  /**
+   * PrdOutlineService — the sole structured writer for a PRD's outline
+   * (`lore outline set/list/rm`, SPEC-080 C1) and a plan's audited plan-close
+   * sync exemption (`lore outline exempt`, SPEC-080 C4). Store-only, same
+   * optional-DI shape as `acService`/`requirementService`; always wired in
+   * production.
+   */
+  prdOutlineService?: PrdOutlineService;
   /**
    * SeatService — thin `GitPort` orchestration for the `lore seat` verb family
    * (`enter`/`list`/`resume`/`remove`, SPEC-057). Wired here with the REAL `GitPort`
@@ -606,6 +615,9 @@ function buildAppFromSqlite(
     // brake (SPEC-059 §Scope) — one resolution path (resolveRequirementQuantifiableEnabled
     // at createApp), mirroring claimTtlMinutes's identical "resolve once, thread down" shape.
     requirementService: new RequirementService(store, requirementQuantifiableEnabled),
+    // reason: PrdOutlineService is store-only, same shape as AcService/
+    // RequirementService (SPEC-080 C1, C4).
+    prdOutlineService: new PrdOutlineService(store),
     // reason: UatService takes narrow injected ports (SPEC-054) — the guarded
     // createUatDoc seam, resolve, and store.addLink — never the full CorpusService.
     uatService: new UatService({
@@ -842,6 +854,9 @@ function buildAppFromTurso(
     // brake (SPEC-059 §Scope) — one resolution path (resolveRequirementQuantifiableEnabled
     // at createApp), mirroring claimTtlMinutes's identical "resolve once, thread down" shape.
     requirementService: new RequirementService(store, requirementQuantifiableEnabled),
+    // reason: PrdOutlineService is store-only, same shape as AcService/
+    // RequirementService (SPEC-080 C1, C4).
+    prdOutlineService: new PrdOutlineService(store),
     // reason: UatService takes narrow injected ports (SPEC-054) — the guarded
     // createUatDoc seam, resolve, and store.addLink — never the full CorpusService.
     uatService: new UatService({

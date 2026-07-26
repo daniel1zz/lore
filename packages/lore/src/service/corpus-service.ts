@@ -37,6 +37,8 @@ import {
   computeRequirementCoverage,
   SPEC_KINDS,
   buildTaskAttestationInfos,
+  extractPrdSyncExempt,
+  prdSyncExemptEqual,
 } from "@lore/core";
 import type {
   CreateDocInput,
@@ -1388,6 +1390,22 @@ export class CorpusService {
       }
     }
 
+    // Dedicated-writer guard: extra.outline (SPEC-080 C1) — STRONGER than the
+    // drop-only guard immediately above: ANY direct patch whose `extra` carries
+    // an "outline" key is rejected outright, even a byte-identical restate of
+    // the doc's current outline (no value-equality escape hatch, unlike the
+    // extra.validity guard below which tolerates a same-value restate). Only
+    // `lore outline set` (PrdOutlineService's single-entry CAS patch) may ever
+    // touch this field.
+    if (parsedPatch.data.extra !== undefined && Object.prototype.hasOwnProperty.call(parsedPatch.data.extra, "outline")) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "extra.outline",
+        message: "extra.outline cannot be changed via `lore set` — use `lore outline set` instead",
+        value: parsedPatch.data.extra["outline"],
+      });
+    }
+
     // Cross-entity phase validation when updating a task's extra.phase (AC-PHASE-3, SPEC-023 §4).
     // reason: same constraint as create — must validate phase against parent plan at write time.
     if (existing.type === "task" && parsedPatch.data.extra !== undefined) {
@@ -1551,6 +1569,28 @@ export class CorpusService {
           field: "extra.validity",
           message: "extra.validity cannot be changed via `lore set` — use `lore invalidate` instead",
           value: parsedPatch.data.extra["validity"],
+        });
+      }
+    }
+
+    // plan.extra.prd_sync_exempt dedicated-writer guard (SPEC-080 C4) — mirrors
+    // extra.validity's D10 shape immediately above, not the phases/claim/
+    // verification_evidence "drop-only" shape: a patch whose extra.prd_sync_exempt
+    // DIFFERS from the plan's CURRENT one — added where none existed, changed to a
+    // different value, OR dropped — is rejected outright. Only `lore outline exempt`
+    // (PrdOutlineService.exempt) may ever change this field. A patch that RESTATES
+    // the current exemption verbatim (or that never mentions the key at all, on a
+    // plan with no exemption) is a no-op by this check and proceeds normally.
+    if (existing.type === "plan" && parsedPatch.data.extra !== undefined) {
+      const incomingExempt = extractPrdSyncExempt({ extra: parsedPatch.data.extra });
+      const currentExempt = extractPrdSyncExempt(existing);
+      if (!prdSyncExemptEqual(incomingExempt, currentExempt)) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "extra.prd_sync_exempt",
+          message:
+            "extra.prd_sync_exempt cannot be changed via `lore set` — use `lore outline exempt` instead",
+          value: parsedPatch.data.extra["prd_sync_exempt"],
         });
       }
     }
