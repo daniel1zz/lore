@@ -8,12 +8,20 @@
  *
  *   1. **Ordinal backfill** — every `spec`/`adr` doc NOT in an exempt
  *      `spec_kind` (`ORDINAL_REGISTRY`, `@lore/core`) whose `ordinal` column
- *      is still `null` gets one, via the store's OWN sanctioned UPDATE-scoped
- *      allocation method ({@link StoreInterface.allocateOrdinalForExisting},
- *      SPEC-084 D1) for a LIVE run — this module never writes an arbitrary
- *      value directly to the `ordinal` column itself (that method always
- *      assigns `MAX(ordinal WHERE type=?) + 1`, no override parameter
- *      exists on any of the three store implementations).
+ *      is still `null` gets one. A LIVE run assigns it via the store's OWN
+ *      sanctioned repair-migration path ({@link StoreInterface.assignOrdinalForRepair},
+ *      SPEC-084 D7 — "repair migration uses an internal store path"): a
+ *      DIRECT UPDATE-scoped write of THIS module's own computed target
+ *      (below), never a `MAX(ordinal)+1` allocation — the partial
+ *      `(type, ordinal)` UNIQUE index remains the sole uniqueness authority,
+ *      and a genuine collision propagates loud and immediate (this
+ *      migration's own `taken` bookkeeping already guarantees the target is
+ *      collision-free against the current corpus state; a violation would
+ *      mean the migration's OWN plan is wrong, not a transient race).
+ *      `insertWithAllocatedOrdinal`/`allocateOrdinalForExisting` remain the
+ *      only two ALLOCATION (MAX+1) call sites (Plan Invariant 2) —
+ *      `assignOrdinalForRepair` is a distinct, sanctioned TARGETED-ASSIGNMENT
+ *      path used exclusively here.
  *
  *      **Declared-number CLAIM semantics (2026-07-27 fix)** — a title- or
  *      export-index-declared number is a CLAIM to be honored, not a hint a
@@ -48,23 +56,16 @@
  *      a claimed number skipped over (D9's "don't mint a false reference"
  *      spirit).
  *
- *      **Known store-mechanism limit** — this per-type TARGET is exactly
- *      what a **dry run** reports (`reassignments[].new_ordinal`), since
- *      dry-run computation is pure arithmetic with no store dependency. A
- *      **live `--apply` run** cannot inject an arbitrary target directly
- *      (see above): it feeds the SAME docs to `allocateOrdinalForExisting`
- *      in ascending-TARGET order, so a type-space that is dense (or made
- *      dense once every claim, of either tier, is accounted for — the
- *      normal, expected shape of this corpus's real numbering) reconstructs
- *      the target exactly. Only when a GENUINE historical gap exists in the
- *      combined claimed-number set (an integer no doc, of either tier,
- *      ever claims) can a live run's actually-assigned ordinal trail the
- *      computed target for docs claimed above that gap — the store simply
- *      cannot skip an unclaimed integer it has no way to "spend" on. This
- *      is NEVER silent: `reassignments[].changed` reflects the doc's REAL
- *      persisted value the same way it already reflects a genuine
- *      collision bump, so an operator reviewing a live-run report sees
- *      every divergence from what was declared, for whichever reason.
+ *      This per-type TARGET is computed ONCE and is what BOTH a dry run
+ *      reports (`reassignments[].new_ordinal`) AND what a live `--apply`
+ *      run persists via `assignOrdinalForRepair` — the two are equal BY
+ *      CONSTRUCTION, on any claimed-number topology (dense or genuinely
+ *      gapped), never merely by luck of a dense corpus (2026-07-27
+ *      adjudication follow-up: an earlier revision fed the target through
+ *      `allocateOrdinalForExisting`'s MAX+1-only mechanism instead, which
+ *      only reproduced the target when the type-space happened to be
+ *      dense — REJECTED, since the live corpus has real historical gaps in
+ *      its claimed-number set).
  *   2. **Title strip** — every `spec`/`adr` doc (exempt kind or not — the
  *      title-purity rule is independent of whether a doc actually receives
  *      an ordinal, SPEC-084 D6) whose title still self-declares a number
@@ -91,10 +92,10 @@
  *
  * Dry-run (the CLI default) executes the identical read-only planning logic
  * for all three steps and performs ZERO store/filesystem writes — the
- * ordinal-backfill step's reported value is the computed claim TARGET
- * described above (steps 1's "Known store-mechanism limit" paragraph is the
- * one documented case where a live run's actually-persisted value can trail
- * this report, and it is always surfaced via `changed`, never silently).
+ * ordinal-backfill step's reported value IS the computed claim TARGET
+ * step 1 describes, the SAME value a live `--apply` run persists via
+ * `assignOrdinalForRepair` (equal by construction, not by coincidence of a
+ * dense corpus).
  *
  * Per-doc errors do NOT abort the whole run (mirrors `ExportDocsService`'s
  * documented "other docs still process" precedent) — collected into
@@ -175,17 +176,16 @@ export interface OrdinalReassignmentEntry {
   claim_source: "title" | "export_index" | null;
   /** `formatDocDisplayId` of `declared_ordinal`, or `null`. What this doc's claim declared. */
   old_display: string | null;
-  /** The ordinal actually assigned (live run: store-returned; dry-run: the computed target). */
+  /**
+   * The ordinal actually assigned — the computed claim TARGET (module
+   * header step 1) in BOTH modes: dry-run reports it directly, and a live
+   * `--apply` run persists this EXACT value via `assignOrdinalForRepair`
+   * (never a store-derived MAX+1 value that could diverge from the report).
+   */
   new_ordinal: number;
   /** `formatDocDisplayId` of `new_ordinal`. What the doc's identity IS after this run. */
   new_display: string;
-  /**
-   * `true` iff `declared_ordinal !== new_ordinal` — a genuine collision/
-   * backfill move (dry-run), OR (live-apply only) the store-mechanism-limit
-   * divergence documented on the module header ("Known store-mechanism
-   * limit") when a real historical gap prevented reconstructing the exact
-   * declared number.
-   */
+  /** `true` iff `declared_ordinal !== new_ordinal` — a genuine collision/backfill move. */
   changed: boolean;
 }
 
@@ -573,9 +573,10 @@ export class OrdinalMigrationService {
       const feedOrder = [...tier1, ...tier2, ...unclaimed];
 
       if (dryRun) {
-        // Pure simulation — the computed target IS the report (see module
-        // header's "Known store-mechanism limit" for why a live run may
-        // not always reach the identical persisted value).
+        // Pure simulation — the computed target IS the report, and (per the
+        // module header) the EXACT value a live run persists via
+        // `assignOrdinalForRepair` — equal by construction, no store call
+        // needed to know what a live run will do.
         for (const doc of feedOrder) {
           const claim = claimByDocId.get(doc.id) as DocClaim;
           const target = targetOrdinalByDocId.get(doc.id) as number;
@@ -597,25 +598,22 @@ export class OrdinalMigrationService {
         continue;
       }
 
-      // Live apply: `allocateOrdinalForExisting` always assigns
-      // `MAX(ordinal) + 1` (SPEC-084 D1 — no override parameter exists).
-      // Feeding docs in ASCENDING-TARGET order reconstructs the computed
-      // target exactly whenever the type-space is dense enough for the
-      // running max to already equal `target - 1` at each doc's turn (the
-      // normal shape of this corpus's real numbering); see the module
-      // header for the one documented divergence case.
-      const applyOrder = [...feedOrder].sort(
-        (a, b) => (targetOrdinalByDocId.get(a.id) as number) - (targetOrdinalByDocId.get(b.id) as number),
-      );
-      for (const doc of applyOrder) {
+      // Live apply: `assignOrdinalForRepair` (SPEC-084 D7's internal repair
+      // path) writes THIS doc's own already-computed `target` directly —
+      // never a store-derived MAX+1 value. Feed order no longer affects the
+      // outcome (each write is an independent targeted assignment, not a
+      // running counter), so `feedOrder` (tier1/tier2/unclaimed, unchanged
+      // from the dry-run computation above) is reused as-is.
+      for (const doc of feedOrder) {
         const claim = claimByDocId.get(doc.id) as DocClaim;
+        const target = targetOrdinalByDocId.get(doc.id) as number;
         const oldDisplay =
           claim.number !== null ? formatDocDisplayId({ type: doc.type, ordinal: claim.number }) : null;
 
-        const allocResult = await this.store.allocateOrdinalForExisting(doc.id, doc.version);
+        const allocResult = await this.store.assignOrdinalForRepair(doc.id, target);
         if (!allocResult.ok) {
           errors.push(
-            `ordinal allocation failed for ${doc.id} (${doc.slug}): ${describeLoreError(allocResult.error)}`,
+            `ordinal repair-assignment failed for ${doc.id} (${doc.slug}) target ${target}: ${describeLoreError(allocResult.error)}`,
           );
           continue;
         }
@@ -623,7 +621,9 @@ export class OrdinalMigrationService {
         const actualOrdinal = updated.ordinal as number;
         finalOrdinalByDocId.set(doc.id, { type: doc.type, ordinal: actualOrdinal });
         versionByDocId.set(doc.id, updated.version);
-        writesPerformed += 1;
+        // `assignOrdinalForRepair` is a no-op success (unchanged version) on
+        // a same-value repeat call — only count a REAL write.
+        if (updated.version !== doc.version) writesPerformed += 1;
 
         const auditResult = await this.store.appendAuditEntry({
           timestamp: nowIso,

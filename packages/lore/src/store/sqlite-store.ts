@@ -37,6 +37,7 @@ import type {
   DocType,
   LinkRecord,
   LinkType,
+  OrdinalDocType,
   ReviewJudgment,
   ReviewJudgmentKind,
   Slug,
@@ -45,6 +46,7 @@ import type {
 import {
   err,
   ok,
+  ORDINAL_REGISTERED_TYPES,
   SNIPPET_MARK_CLOSE,
   SNIPPET_MARK_OPEN,
   type LoreError,
@@ -607,6 +609,81 @@ export class SQLiteStore implements StoreInterface {
         this.db.run("ROLLBACK");
       } catch {
         // reason: same as insertWithAllocatedOrdinal — safe to ignore, see above.
+      }
+      return wrapStoreError(e);
+    }
+  }
+
+  /**
+   * @see StoreInterface.assignOrdinalForRepair
+   *
+   * SPEC-084 D7's internal repair-migration path — a DIRECT UPDATE-scoped
+   * assignment of the caller-computed target, never a `MAX(ordinal)+1`
+   * allocation. No {@link allocateWithBoundedRetry} involvement: a genuine
+   * `(type, ordinal)` UNIQUE violation on the target propagates loud and
+   * immediate (the migration's own bookkeeping computed this target to be
+   * free — a collision here means ITS plan is wrong, not a transient race).
+   */
+  async assignOrdinalForRepair(id: DocId, ordinal: number): Promise<Result<DocRecord, LoreError>> {
+    try {
+      this.db.run("BEGIN IMMEDIATE");
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+    try {
+      const existingRow = this.db
+        .prepare("SELECT * FROM docs WHERE id = ?")
+        .get(id) as DocRow | null;
+
+      if (!existingRow) {
+        this.db.run("ROLLBACK");
+        return err({ code: "DOC_NOT_FOUND", id });
+      }
+
+      const current = rowToDocRecord(existingRow);
+
+      if (!ORDINAL_REGISTERED_TYPES.includes(current.type as OrdinalDocType)) {
+        this.db.run("ROLLBACK");
+        return err({
+          code: "STORE_ERROR",
+          message: `assignOrdinalForRepair refuses doc ${id}: type "${current.type}" is not an ordinal-registered type`,
+        });
+      }
+
+      if (current.ordinal !== null && current.ordinal !== undefined) {
+        if (current.ordinal === ordinal) {
+          // Idempotent no-op — a repeat repair call at the SAME target
+          // succeeds without touching the row (mirrors migration
+          // idempotency elsewhere in this codebase).
+          this.db.run("ROLLBACK");
+          return ok(current);
+        }
+        this.db.run("ROLLBACK");
+        return err({
+          code: "STORE_ERROR",
+          message: `doc ${id} already carries ordinal ${current.ordinal}; assignOrdinalForRepair refuses to overwrite it with a DIFFERENT value ${ordinal}`,
+        });
+      }
+
+      const newVersion = current.version + 1;
+      try {
+        this.db
+          .prepare("UPDATE docs SET ordinal = ?, version = ? WHERE id = ? AND ordinal IS NULL")
+          .run(ordinal, newVersion, id);
+      } catch (e) {
+        this.db.run("ROLLBACK");
+        return wrapStoreError(e);
+      }
+
+      this.db.run("COMMIT");
+      return ok({ ...current, ordinal, version: newVersion });
+    } catch (e) {
+      try {
+        this.db.run("ROLLBACK");
+      } catch {
+        // reason: ROLLBACK itself throws only when there is no open
+        // transaction to roll back — safe to ignore (mirrors
+        // insertWithAllocatedOrdinal's identical guard).
       }
       return wrapStoreError(e);
     }

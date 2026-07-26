@@ -43,6 +43,7 @@ import type {
   DocType,
   LinkRecord,
   LinkType,
+  OrdinalDocType,
   ReviewJudgment,
   ReviewJudgmentKind,
   Slug,
@@ -51,6 +52,7 @@ import type {
 import {
   err,
   ok,
+  ORDINAL_REGISTERED_TYPES,
   SNIPPET_MARK_CLOSE,
   SNIPPET_MARK_OPEN,
   type LoreError,
@@ -700,6 +702,80 @@ export class TursoStore implements StoreInterface {
       } catch {
         // reason: rollback throws only when the transaction is already
         // closed — safe to ignore (mirrors insertWithAllocatedOrdinal's guard).
+      }
+      return wrapStoreError(e);
+    } finally {
+      tx.close();
+    }
+  }
+
+  /**
+   * @see StoreInterface.assignOrdinalForRepair
+   *
+   * SPEC-084 D7's internal repair-migration path — a DIRECT UPDATE-scoped
+   * assignment of the caller-computed target, never a `MAX(ordinal)+1`
+   * allocation. No {@link allocateWithBoundedRetry} involvement: a genuine
+   * `(type, ordinal)` UNIQUE violation on the target propagates loud and
+   * immediate (the migration's own bookkeeping computed this target to be
+   * free — a collision here means ITS plan is wrong, not a transient race).
+   */
+  async assignOrdinalForRepair(id: DocId, ordinal: number): Promise<Result<DocRecord, LoreError>> {
+    await this.ensureReady();
+    const tx = await this.client.transaction("write");
+    try {
+      const existingRs = await tx.execute({
+        sql: "SELECT * FROM docs WHERE id = ?",
+        args: [id],
+      });
+      const existingRow = existingRs.rows[0];
+      if (!existingRow) {
+        await tx.rollback();
+        return err({ code: "DOC_NOT_FOUND", id });
+      }
+
+      const current = rowToDocRecord(libsqlRowToDocRow(existingRow));
+
+      if (!ORDINAL_REGISTERED_TYPES.includes(current.type as OrdinalDocType)) {
+        await tx.rollback();
+        return err({
+          code: "STORE_ERROR",
+          message: `assignOrdinalForRepair refuses doc ${id}: type "${current.type}" is not an ordinal-registered type`,
+        });
+      }
+
+      if (current.ordinal !== null && current.ordinal !== undefined) {
+        if (current.ordinal === ordinal) {
+          // Idempotent no-op — a repeat repair call at the SAME target
+          // succeeds without touching the row.
+          await tx.rollback();
+          return ok(current);
+        }
+        await tx.rollback();
+        return err({
+          code: "STORE_ERROR",
+          message: `doc ${id} already carries ordinal ${current.ordinal}; assignOrdinalForRepair refuses to overwrite it with a DIFFERENT value ${ordinal}`,
+        });
+      }
+
+      const newVersion = current.version + 1;
+      try {
+        await tx.execute({
+          sql: "UPDATE docs SET ordinal = ?, version = ? WHERE id = ? AND ordinal IS NULL",
+          args: [ordinal, newVersion, id] as InValue[],
+        });
+      } catch (e) {
+        await tx.rollback();
+        return wrapStoreError(e);
+      }
+
+      await tx.commit();
+      return ok({ ...current, ordinal, version: newVersion });
+    } catch (e) {
+      try {
+        await tx.rollback();
+      } catch {
+        // reason: rollback throws only when the transaction is already
+        // closed — safe to ignore (mirrors allocateOrdinalForExisting's guard).
       }
       return wrapStoreError(e);
     } finally {

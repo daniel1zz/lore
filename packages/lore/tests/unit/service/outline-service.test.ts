@@ -623,6 +623,10 @@ describe("OutlineService.resolve", () => {
         insertWithAllocatedOrdinal: (doc) => store.insertWithAllocatedOrdinal(doc),
         allocateOrdinalForExisting: (id, expectedVersion) =>
           store.allocateOrdinalForExisting(id, expectedVersion),
+        // reason: SPEC-084 D7 repair-migration path — new required StoreInterface
+        // method; mechanical addition (same class of fix as every other explicit
+        // delegate here).
+        assignOrdinalForRepair: (id, ordinal) => store.assignOrdinalForRepair(id, ordinal),
         update: (id, patch) => store.update(id, patch),
         softDelete: (id) => store.softDelete(id),
         // reason: BUG-002 audit fix — new required StoreInterface methods; mechanical

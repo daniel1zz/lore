@@ -326,23 +326,23 @@ describe("OrdinalMigrationService.migrateOrdinals (SPEC-084, AC-084-4)", () => {
  * Each test gets its own fresh store/throwaway dir (no shared `specA..E`
  * fixture) so its numbering space is genuinely isolated.
  *
- * Known store-mechanism limit (see `ordinal-migration-service.ts`'s module
- * header): `allocateOrdinalForExisting` only ever assigns `MAX(ordinal) + 1`
- * — it cannot inject an arbitrary target. A dry run's report is pure
- * arithmetic and always matches the adjudicated declared-number-preserving
- * semantics; a live `--apply` run reconstructs that SAME target only when
- * the combined claimed-number set is dense enough for the running store
- * max to already equal `target - 1` at each doc's turn. Fixtures (a) and
- * (d) below have a genuine, deliberate GAP in their claimed numbers (27→35,
- * 1→5) — un-reachable by ANY live sequential-MAX+1 feed order — so those
- * two are asserted dry-run-only, with an inline comment at each site
- * explaining why. Fixtures (b) and (c) are deliberately built dense from 1
- * so they exercise the SAME assertions against BOTH `dryRun: true` and a
- * real `--apply` run, proving the fix is not merely a report-time fiction.
+ * 2026-07-27 ADJUDICATION FOLLOW-UP: an earlier revision of this fix fed
+ * the computed target through `allocateOrdinalForExisting`'s MAX+1-only
+ * mechanism for a live `--apply` run, which only reconstructed the target
+ * when the claimed-number set happened to be dense — REJECTED by the
+ * orchestrator (the live corpus has real historical gaps; "report says X,
+ * apply does Y" violates the plan's R5 mitigation that the two must be
+ * equal BY CONSTRUCTION). The fix now routes the apply path through
+ * `StoreInterface.assignOrdinalForRepair` (SPEC-084 D7's sanctioned
+ * internal repair-migration path — a direct targeted assignment, never a
+ * MAX+1 allocation), so EVERY fixture below — including the genuinely
+ * gapped ones (a)/(d) — asserts a REAL `--apply` run persists the
+ * identical numbers the dry-run report predicted.
  *
  * Six-dimension coverage:
  *   HAPPY:      (a) three non-colliding declared numbers with real gaps
- *               between them are preserved verbatim.
+ *               between them are preserved verbatim, in BOTH dry-run and a
+ *               real `--apply` run (gaps 28-34/36-83 are never filled).
  *   BOUNDARY:   (b) the worked-example cascade shape — two same-number
  *               collisions bump forward, and a third doc's OWN declared
  *               number collides with where the second bump landed.
@@ -350,11 +350,16 @@ describe("OrdinalMigrationService.migrateOrdinals (SPEC-084, AC-084-4)", () => {
  *               free, and lose precedence to a tier-1 (title) claim on the
  *               same number (bumped forward, never silently dropped).
  *   ERROR:      (d) an unclaimed doc never recycles a real historical gap
- *               below the highest claimed/assigned number.
+ *               below the highest claimed/assigned number, in BOTH modes.
  *   NEGATIVE:   every fixture asserts `changed` precisely — a doc that
- *               keeps its declared number is NEVER reported `changed:true`.
- *   REGRESSION: fixtures (b)/(c) additionally assert the identical numbers
- *               persist through a REAL `--apply` run (not just the report).
+ *               keeps its declared number is NEVER reported `changed:true`;
+ *               a dedicated case additionally proves `assignOrdinalForRepair`
+ *               refuses a target already held by another live row — loud
+ *               error, zero writes (a migration-plan bug, never silently
+ *               resolved).
+ *   REGRESSION: EVERY fixture asserts the identical numbers persist through
+ *               a REAL `--apply` run (not just the report) — dry-run and
+ *               apply are equal by construction on any topology.
  *
  * Source: SPEC-084 §One-shot repair migration, orchestrator-adjudicated
  * declared-number-claim algorithm (task-skill-implement-fix-ordinal-
@@ -386,13 +391,13 @@ describe("OrdinalMigrationService.migrateOrdinals — declared-number claims pre
       expect(result.ok).toBe(true);
     }
 
-    // Dry-run only — 27→35 and 35→84 are genuine historical gaps (nothing
-    // claims 28-34 or 36-83), which no live sequential-MAX+1 feed order can
-    // reach from a virgin store (see this describe block's header).
-    const result = await service.migrateOrdinals({ dryRun: true, projectDir });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    const report = result.value;
+    // 27, 35, 84 are genuine historical gaps (nothing claims 28-34 or
+    // 36-83) — `assignOrdinalForRepair` (SPEC-084 D7) writes each doc's own
+    // target directly, so a live --apply run reconstructs them exactly too.
+    const dryResult = await service.migrateOrdinals({ dryRun: true, projectDir });
+    expect(dryResult.ok).toBe(true);
+    if (!dryResult.ok) return;
+    const report = dryResult.value;
 
     const byId = new Map(report.reassignments.map((r) => [r.doc_id, r]));
     expect(byId.get(docLow.id)).toMatchObject({
@@ -416,6 +421,24 @@ describe("OrdinalMigrationService.migrateOrdinals — declared-number claims pre
     expect(report.unchanged_count).toBe(3);
     expect(report.changed_count).toBe(0);
     expect(report.bijective).toBe(true);
+
+    // REGRESSION: a real --apply run persists the IDENTICAL numbers — dry
+    // run and apply are equal by construction, gaps preserved on-disk too.
+    const applyResult = await service.migrateOrdinals({ dryRun: false, projectDir });
+    expect(applyResult.ok).toBe(true);
+    if (!applyResult.ok) return;
+    expect(applyResult.value.errors).toEqual([]);
+    const applyById = new Map(applyResult.value.reassignments.map((r) => [r.doc_id, r]));
+    expect(applyById.get(docLow.id)?.new_ordinal).toBe(27);
+    expect(applyById.get(docMid.id)?.new_ordinal).toBe(35);
+    expect(applyById.get(docHigh.id)?.new_ordinal).toBe(84);
+
+    const freshLow = await store.find(docLow.id);
+    expect(freshLow.ok && freshLow.value?.ordinal).toBe(27);
+    const freshMid = await store.find(docMid.id);
+    expect(freshMid.ok && freshMid.value?.ordinal).toBe(35);
+    const freshHigh = await store.find(docHigh.id);
+    expect(freshHigh.ok && freshHigh.value?.ordinal).toBe(84);
   });
 
   // ── (b) BOUNDARY: worked-example cascade shape (dense — both modes) ────
@@ -528,12 +551,13 @@ describe("OrdinalMigrationService.migrateOrdinals — declared-number claims pre
       expect(result.ok).toBe(true);
     }
 
-    // Dry-run only — 2,3,4 are a genuine gap between the two declared
-    // numbers (nothing claims them), unreachable by a live sequential feed.
-    const result = await service.migrateOrdinals({ dryRun: true, projectDir });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    const byId = new Map(result.value.reassignments.map((r) => [r.doc_id, r]));
+    // 2,3,4 are a genuine gap between the two declared numbers (nothing
+    // claims them) — `assignOrdinalForRepair` writes each target directly,
+    // so a live --apply run never fills that gap either.
+    const dryResult = await service.migrateOrdinals({ dryRun: true, projectDir });
+    expect(dryResult.ok).toBe(true);
+    if (!dryResult.ok) return;
+    const byId = new Map(dryResult.value.reassignments.map((r) => [r.doc_id, r]));
 
     expect(byId.get(docClaimLow.id)).toMatchObject({ declared_ordinal: 1, new_ordinal: 1, changed: false });
     expect(byId.get(docClaimHigh.id)).toMatchObject({ declared_ordinal: 5, new_ordinal: 5, changed: false });
@@ -547,5 +571,48 @@ describe("OrdinalMigrationService.migrateOrdinals — declared-number claims pre
       new_ordinal: 6,
       changed: true,
     });
+
+    // REGRESSION: a real --apply run persists the IDENTICAL numbers — the
+    // gap (2,3,4) stays permanently unoccupied on-disk, never recycled.
+    const applyResult = await service.migrateOrdinals({ dryRun: false, projectDir });
+    expect(applyResult.ok).toBe(true);
+    if (!applyResult.ok) return;
+    expect(applyResult.value.errors).toEqual([]);
+
+    const freshLow = await store.find(docClaimLow.id);
+    expect(freshLow.ok && freshLow.value?.ordinal).toBe(1);
+    const freshHigh = await store.find(docClaimHigh.id);
+    expect(freshHigh.ok && freshHigh.value?.ordinal).toBe(5);
+    const freshUnclaimed = await store.find(docUnclaimed.id);
+    expect(freshUnclaimed.ok && freshUnclaimed.value?.ordinal).toBe(6);
+  });
+
+  // ── NEGATIVE: assignOrdinalForRepair refuses a target held by another live row ─
+  it("(negative) assignOrdinalForRepair targeting an ordinal already held by another live row refuses loud, zero writes", async () => {
+    const docHolder = makeSpecDoc({ title: "SPEC-9 — Already numbered", created_at: "2026-05-01T00:00:00.000Z" });
+    const insertHolder = await store.insert(docHolder);
+    expect(insertHolder.ok).toBe(true);
+    // Directly assign 9 to docHolder via the SAME repair path this suite is
+    // exercising — establishes a live row genuinely occupying ordinal 9.
+    const seedAssign = await store.assignOrdinalForRepair(docHolder.id, 9);
+    expect(seedAssign.ok).toBe(true);
+
+    const docChallenger = makeSpecDoc({ title: "SPEC-9 — Different doc, same target", created_at: "2026-05-02T00:00:00.000Z" });
+    const insertChallenger = await store.insert(docChallenger);
+    expect(insertChallenger.ok).toBe(true);
+
+    // A migration-plan bug: something computed target 9 for docChallenger
+    // even though docHolder already legitimately occupies it. This MUST be
+    // a loud, immediate error — never silently resolved to a different number.
+    const collisionResult = await store.assignOrdinalForRepair(docChallenger.id, 9);
+    expect(collisionResult.ok).toBe(false);
+    if (collisionResult.ok) return;
+    expect(collisionResult.error.code).toBe("STORE_ERROR");
+
+    // Zero writes — docChallenger's ordinal is still null, docHolder's is untouched.
+    const freshChallenger = await store.find(docChallenger.id);
+    expect(freshChallenger.ok && (freshChallenger.value?.ordinal ?? null)).toBe(null);
+    const freshHolder = await store.find(docHolder.id);
+    expect(freshHolder.ok && freshHolder.value?.ordinal).toBe(9);
   });
 });
