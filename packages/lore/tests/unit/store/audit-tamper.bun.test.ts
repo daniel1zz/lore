@@ -446,6 +446,65 @@ describe("audit hash chain — adversarial tamper detection (SPEC-079 G3)", () =
     after.store.close();
   });
 
+  // ─── G6 (SPEC-080): genesis-row DELETE pin ─────────────────────────────────
+  //
+  // T4's weakness report #3 predicted this specific shape but left it
+  // reasoned-only, not test-pinned: `walkAuditChain`'s `expectedPrevHash`
+  // walk always STARTS at `""` (see this file's genesis BOUNDARY test above
+  // and the function's own doc comment), so deleting the genesis row does
+  // NOT make the chain look empty/clean — the row that survives as the new
+  // first entry still carries its ORIGINAL `prev_hash`, which was stamped
+  // against the now-deleted genesis row's `entry_hash` and therefore was
+  // never `""` to begin with. The walk reports `prev_link_mismatch` at that
+  // surviving row's own id, same as any other broken-predecessor attack.
+
+  it("G6: deleting the genesis audit row makes the new first row report prev_link_mismatch (its stored prev_hash is not \"\")", async () => {
+    const handle = openFileStore();
+    tempDir = handle.tempDir;
+
+    await handle.store.appendAuditEntry(makeAudit({ action: "create" }));
+    await handle.store.appendAuditEntry(makeAudit({ action: "update" }));
+    await handle.store.appendAuditEntry(makeAudit({ action: "link" }));
+    handle.store.close();
+
+    const rowsBefore = rawAuditRows(handle.dbPath);
+    expect(rowsBefore).toHaveLength(3);
+    expect(rowsBefore[0]!.prev_hash).toBe(""); // the genesis row itself
+    const genesisId = rowsBefore[0]!.id;
+    const newFirstId = rowsBefore[1]!.id;
+    // Sanity: the row that will become the new first row already has a
+    // non-empty prev_hash BEFORE the attack — proves the assertion below
+    // is testing the deletion's effect, not a tautology of fresh data.
+    expect(rowsBefore[1]!.prev_hash).not.toBe("");
+
+    tamperRaw(handle.dbPath, (db) => {
+      db.query("DELETE FROM audit WHERE id = ?").run(genesisId);
+    });
+
+    // Confirm the genesis row is actually gone — a no-op tamper script would
+    // otherwise make the "detected" assertion below vacuously true.
+    const rowsAfter = rawAuditRows(handle.dbPath);
+    expect(rowsAfter).toHaveLength(2);
+    expect(rowsAfter.some((r) => r.id === genesisId)).toBe(false);
+    expect(rowsAfter[0]!.id).toBe(newFirstId);
+    // The new first row's own stored prev_hash is UNCHANGED by the delete —
+    // it still points at the (now-deleted) genesis row's entry_hash, which
+    // was never "".
+    expect(rowsAfter[0]!.prev_hash).not.toBe("");
+    expect(rowsAfter[0]!.prev_hash).not.toBeNull();
+
+    const { store, audit } = openAuditService(handle.dbPath);
+    const result = await audit.verify();
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.chain.clean).toBe(false);
+      expect(result.value.chain.break).toEqual({ id: newFirstId, reason: "prev_link_mismatch" });
+      expect(result.value.chain.checked).toBe(1);
+      expect(result.value.clean).toBe(false);
+    }
+    store.close();
+  });
+
   // ─── ERROR: NULL-ing a row's hashes → unchained_row ────────────────────────
 
   it("ERROR: setting a row's prev_hash/entry_hash to NULL in place yields unchained_row at that row's id", async () => {
