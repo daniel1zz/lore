@@ -101,12 +101,14 @@ import {
   computeAcCoverage,
   computePhaseCompletion,
   specAcceptanceCriteriaSchema,
+  extractDeclaredPhases,
   type EvidenceEntry,
   type TaskClaim,
   type ChecklistItem,
   type BlockerInfo,
   type AcceptanceCriterion,
   type PhaseCompletionState,
+  type AcCoverageFact,
 } from "@lore/core";
 import type { DocId, DocRecord, DocStatus } from "@lore/core";
 import { NoOpTelemetry, type Telemetry, type TelemetryEvent, type TaskWorkflowEventName } from "@lore/core";
@@ -227,8 +229,17 @@ export interface PhaseScorecardChecklistItem {
   trust: "manual" | "attested";
 }
 
-/** One phase's computed completion scorecard, as rendered for a plan-wide listing (`planPhaseStatus`). */
+/**
+ * One SPEC-056 `phase`-DOC's computed completion scorecard, as rendered for a
+ * plan-wide listing (`planPhaseStatus`). `source: "phase-doc"` (adr-
+ * planphasestatus-projects-declared-extra-phases-alongside) is ADDITIVE — every
+ * other field is byte-identical to the pre-existing shape; it exists so a
+ * consumer of the now-mixed `phases[]` array can discriminate this entry from
+ * a {@link DeclaredPhaseScorecard} without re-deriving "has a checklist" as a
+ * proxy for provenance.
+ */
 export interface PhaseScorecard {
+  source: "phase-doc";
   phase_id: string;
   phase_slug: string;
   phase_title: string;
@@ -252,10 +263,111 @@ export interface PhaseScorecard {
   task_count: number;
 }
 
+/**
+ * One SPEC-023 DECLARED phase (`plan.extra.phases[]`) with NO corresponding
+ * SPEC-056 `phase` doc, projected as its own scorecard entry (adr-
+ * planphasestatus-projects-declared-extra-phases-alongside, ISSUE-007) — the
+ * far more common phase-authoring path (`lore phase add`) was previously
+ * invisible to `planPhaseStatus` entirely. Deliberately has NO `checklist`/
+ * `checklist_items`/`claim` section (declared phases have none — checklists
+ * and claim leases are `phase`-DOC-only concepts) and NO `state`/`vacuous`
+ * (those come from `computePhaseCompletion`, which is itself checklist-driven
+ * — a declared phase's "done-ness" is read here as raw AC-coverage + evidence
+ * counts, the client decides how to render a verdict from them).
+ */
+export interface DeclaredPhaseScorecard {
+  source: "declared";
+  phase_title: string;
+  /**
+   * `true` when `phase_title` is NOT present in the plan's OWN CURRENT
+   * `extra.phases[]` — every task grouped into this entry declares
+   * `extra.phase` naming a phase the plan no longer declares (SPEC-023's
+   * write-time validation only checked membership AT THE TIME the task was
+   * written; a later `lore phase rm`/`rename` can leave tasks pointing at a
+   * name absent from both `extra.phases[]` and every phase-doc title). Never
+   * silently dropped — projected here instead of vanishing, so the dashboard
+   * can render an explicit "orphaned phase reference" state. `false` for
+   * every entry derived from a name still present in `extra.phases[]`
+   * (including one with zero tasks — see `task_count`'s own doc).
+   */
+  orphaned: boolean;
+  /** Count of `task`-typed plan children whose `extra.phase` names this phase. */
+  task_count: number;
+  /** Sum of `verification_evidence[].result` across every task grouped here. */
+  evidence: { pass: number; fail: number };
+  /**
+   * AC-scope coverage for this phase's tasks, computed via the SAME
+   * `computeAcCoverage` (`@lore/core`) the evidence panel's `SpecEvidencePanel`
+   * uses (SPEC-075 D2) — never a second, independently-derived coverage
+   * calculation. Empty when the plan has no spec parent or the parent spec
+   * declares no acceptance criteria (mirrors the phase-doc branch's identical
+   * `criteria` resolution above).
+   */
+  ac_coverage: AcCoverageFact[];
+}
+
+/**
+ * One entry in `planPhaseStatus`'s plan-wide phase listing — a discriminated
+ * union (tag: `source`) of the two phase-authoring paths this corpus supports:
+ * a SPEC-056 `phase` DOC ({@link PhaseScorecard}) or a SPEC-023 DECLARED phase
+ * with no such doc ({@link DeclaredPhaseScorecard}). Additive shape change
+ * (adr-planphasestatus-projects-declared-extra-phases-alongside) — a client
+ * that only ever saw phase-doc entries before this ADR must branch on `source`
+ * to keep rendering correctly now that the array is mixed.
+ */
+export type PlanPhaseEntry = PhaseScorecard | DeclaredPhaseScorecard;
+
 /** The `GET /api/phase-status/:planIdOrSlug` response payload (SPEC-077 S3, pinned shape). */
 export interface PlanPhaseStatusReport {
   plan: { id: string; slug: string; title: string };
-  phases: PhaseScorecard[];
+  phases: PlanPhaseEntry[];
+}
+
+/**
+ * Builds one {@link DeclaredPhaseScorecard} for `planPhaseStatus`
+ * (adr-planphasestatus-projects-declared-extra-phases-alongside) — pure,
+ * shared by both call sites (a declared-but-empty phase, and an orphaned
+ * task-phase-name group) so the evidence pass/fail rollup and AC-coverage
+ * derivation are never duplicated between them.
+ *
+ * @param phaseTitle - The phase name this scorecard reports on (either a
+ *   `plan.extra.phases[].name` entry, or a task-supplied `extra.phase` string
+ *   matching neither a declared phase nor a phase-doc title).
+ * @param orphaned - See {@link DeclaredPhaseScorecard.orphaned}.
+ * @param tasksInPhase - Every `task`-typed plan child whose `extra.phase`
+ *   equals `phaseTitle` (possibly `[]` — a declared phase with zero tasks yet
+ *   is a normal, non-error state, mirroring a phase-doc with zero checklist
+ *   items).
+ * @param criteria - The parent spec's declared acceptance criteria (already
+ *   resolved once per `planPhaseStatus` call, never per-phase).
+ */
+function buildDeclaredPhaseScorecard(
+  phaseTitle: string,
+  orphaned: boolean,
+  tasksInPhase: DocRecord[],
+  criteria: AcceptanceCriterion[],
+): DeclaredPhaseScorecard {
+  let pass = 0;
+  let fail = 0;
+  for (const task of tasksInPhase) {
+    for (const entry of readEvidence(task)) {
+      if (entry.result === "pass") pass += 1;
+      else if (entry.result === "fail") fail += 1;
+    }
+  }
+
+  return {
+    source: "declared",
+    phase_title: phaseTitle,
+    orphaned,
+    task_count: tasksInPhase.length,
+    evidence: { pass, fail },
+    // reason: SAME core helper the evidence panel's SpecEvidencePanel uses
+    // (SPEC-075 D2, evidence-panel.ts) — never a second, forked AC-coverage
+    // calculation. Scoped to THIS phase's own tasks only, mirroring the
+    // phase-doc branch's identical `computeAcCoverage(criteria, [phase])` scoping.
+    ac_coverage: computeAcCoverage(criteria, tasksInPhase),
+  };
 }
 
 // ─── PhaseWorkflowService ──────────────────────────────────────────────────
@@ -861,10 +973,26 @@ export class PhaseWorkflowService {
    * coverage scoping exactly, so the two surfaces never disagree on what "done"
    * means for the same phase.
    *
+   * adr-planphasestatus-projects-declared-extra-phases-alongside (ISSUE-007):
+   * additively projects the plan's SPEC-023 DECLARED phases (`extra.phases[]`) that
+   * have NO corresponding SPEC-056 `phase` doc — the far more common
+   * `lore phase add` authoring path was previously invisible here entirely, making
+   * the dashboard's Phase Progress panel permanently empty for a normally-authored
+   * plan. A declared name matching a `phase` doc's title is intentionally NOT
+   * double-projected (that name's completeness picture already comes from the
+   * richer phase-doc branch below, checklist and all). Every `task`-typed plan
+   * child is grouped by its OWN `extra.phase` string exactly once (`tasksByPhaseName`)
+   * — reused for BOTH the phase-doc branch's pre-existing legacy `task_count`
+   * lookup AND the new declared-phase branch's task roster, never scanned twice. A
+   * task's phase name that matches NEITHER a declared phase NOR a phase-doc title
+   * (a plan whose declared phases changed after some tasks were written) is
+   * projected too, `orphaned: true` — never silently dropped.
+   *
    * @param planIdOrSlug - Plan document ULID or slug
    * @param now - Time seam (D10); drives claim staleness + `computePhaseCompletion`
    * @returns `ok({plan, phases})` — `phases: []` for a plan with zero `phase`
-   *   children (not an error, mirrors `ready()`'s empty-children handling)
+   *   children AND zero declared phases AND zero orphaned task-phase references
+   *   (not an error, mirrors `ready()`'s empty-children handling)
    * @throws DOC_NOT_FOUND (unresolvable plan), VALIDATION_ERROR (resolved doc is not
    *   type `plan`, naming the actual type — mirrors `ready()`'s identical check; or a
    *   corpus-integrity fault from a malformed phase's `computePhaseCompletion` call,
@@ -906,21 +1034,25 @@ export class PhaseWorkflowService {
 
     const phaseChildren = children.filter((doc) => doc.type === "phase");
 
-    // reason: legacy SPEC-023 string-linkage — a `task`-typed plan child names its
-    // phase by `extra.phase` (a plain string matching `plan.extra.phases[].name`),
-    // distinct from the SPEC-056 `phase` doc type this method otherwise reports on.
-    // Counted here (single pass, no per-phase re-scan) purely as a
-    // transitional/diagnostic signal — see `PhaseScorecard.task_count`'s own JSDoc.
-    const legacyTaskCountByPhaseName = new Map<string, number>();
+    // reason: SPEC-023 string-linkage — a `task`-typed plan child names its phase by
+    // `extra.phase` (a plain string matching either `plan.extra.phases[].name` OR a
+    // SPEC-056 `phase` doc's title). Grouped here ONCE (single pass, no per-phase
+    // re-scan) and reused for BOTH: the phase-doc branch's pre-existing legacy
+    // `task_count` lookup below, AND the NEW declared-phase branch's task roster
+    // (adr-planphasestatus-projects-declared-extra-phases-alongside) — see
+    // `PhaseScorecard.task_count`'s own JSDoc for the phase-doc-branch semantics.
+    const tasksByPhaseName = new Map<string, DocRecord[]>();
     for (const doc of children) {
       if (doc.type !== "task") continue;
       const phaseName = doc.extra["phase"];
       if (typeof phaseName !== "string") continue;
-      legacyTaskCountByPhaseName.set(phaseName, (legacyTaskCountByPhaseName.get(phaseName) ?? 0) + 1);
+      const bucket = tasksByPhaseName.get(phaseName);
+      if (bucket === undefined) tasksByPhaseName.set(phaseName, [doc]);
+      else bucket.push(doc);
     }
 
     const nowIso = now();
-    const phases: PhaseScorecard[] = [];
+    const phases: PlanPhaseEntry[] = [];
     for (const phase of phaseChildren) {
       const acScope = readAcScope(phase);
       const checklist = readChecklist(phase);
@@ -946,6 +1078,7 @@ export class PhaseWorkflowService {
       const checklistSatisfied = checklist.length - checklistBlocking.length - completion.dropped_named.length;
 
       phases.push({
+        source: "phase-doc",
         phase_id: phase.id,
         phase_slug: phase.slug,
         phase_title: phase.title,
@@ -965,8 +1098,33 @@ export class PhaseWorkflowService {
           claim !== undefined
             ? { by: claim.by, at: claim.at, stale: isClaimStale(claim, nowIso, this.claimTtlMinutes) }
             : null,
-        task_count: legacyTaskCountByPhaseName.get(phase.title) ?? 0,
+        task_count: (tasksByPhaseName.get(phase.title) ?? []).length,
       });
+    }
+
+    // ── Declared phases with no phase doc (adr-planphasestatus-projects-declared-
+    // extra-phases-alongside) ────────────────────────────────────────────────
+    const phaseDocTitles = new Set(phaseChildren.map((doc) => doc.title));
+    const declaredPhases = extractDeclaredPhases(plan);
+    const declaredPhaseNames = new Set(declaredPhases.map((p) => p.name));
+
+    for (const declaredPhase of declaredPhases) {
+      if (phaseDocTitles.has(declaredPhase.name)) continue; // already reported above
+      phases.push(
+        buildDeclaredPhaseScorecard(
+          declaredPhase.name,
+          false,
+          tasksByPhaseName.get(declaredPhase.name) ?? [],
+          criteria,
+        ),
+      );
+    }
+
+    // Orphaned task-phase references: a name that matches NEITHER a declared
+    // phase NOR a phase-doc title. Never silently dropped.
+    for (const [phaseName, tasksInPhase] of tasksByPhaseName) {
+      if (declaredPhaseNames.has(phaseName) || phaseDocTitles.has(phaseName)) continue;
+      phases.push(buildDeclaredPhaseScorecard(phaseName, true, tasksInPhase, criteria));
     }
 
     return ok({ plan: { id: plan.id, slug: plan.slug, title: plan.title }, phases });

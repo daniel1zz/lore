@@ -4,7 +4,7 @@
  */
 
 import { z } from "zod";
-import type { DocStatus, DocType, Slug } from "./types.js";
+import type { DocRecord, DocStatus, DocType, Slug } from "./types.js";
 import { DECISION_STATUSES, KNOWLEDGE_SUB_TYPES } from "./types.js";
 import { evidenceEntrySchema, taskClaimSchema } from "./task-workflow.js";
 import { assessmentResultSchema } from "./assessment.js";
@@ -321,6 +321,37 @@ export const planPhaseSchema = z.object({
 
 /** Derived TypeScript type for a declared plan phase. */
 export type PlanPhase = z.infer<typeof planPhaseSchema>;
+
+/**
+ * Extracts and validates a plan's declared `extra.phases[]` array. Returns `[]`
+ * when absent, malformed, or not an array — mirrors the "extract, tolerate
+ * malformed" shape `task-workflow.ts::extractEvidence`/`extractClaim` and
+ * `phase-workflow-service.ts`'s own `readAcScope`/`readChecklist` already use
+ * (`z.array(schema).safeParse`, never a hand-rolled type guard).
+ *
+ * Exported from `@lore/core` (rather than living as a service-local private
+ * helper, `phase-service.ts`'s pre-existing `extractPhases`) so a SECOND
+ * service — `PhaseWorkflowService.planPhaseStatus` (adr-planphasestatus-
+ * projects-declared-extra-phases-alongside) — can read the SAME declared-phase
+ * list without a forbidden cross-service import (services never import each
+ * other; `@lore/core` is the shared leaf dependency both may reach).
+ * `phase-service.ts`'s own `extractPhases` is untouched (out of scope; a
+ * behaviorally-narrower manual type guard, not re-derived here to avoid an
+ * unrelated behavior change to that file).
+ *
+ * @param plan - A `plan`-typed DocRecord (caller's responsibility to check
+ *   `type === "plan"` first — this function does not validate doc type).
+ * @returns Every entry in `extra.phases` that parses as a valid {@link PlanPhase}
+ *   (non-empty `name`, optional `description`); `[]` on absence/malformed shape.
+ * @example
+ *   extractDeclaredPhases(planDoc); // => [{name: "Phase 1"}, {name: "Phase 2"}]
+ */
+export function extractDeclaredPhases(plan: DocRecord): PlanPhase[] {
+  const raw = plan.extra["phases"];
+  if (!Array.isArray(raw)) return [];
+  const parsed = z.array(planPhaseSchema).safeParse(raw);
+  return parsed.success ? parsed.data : [];
+}
 
 /**
  * `plan.extra.ac_scope` — the subset of the parent spec's declared `AC-*` ids this plan

@@ -191,6 +191,7 @@ async function createVacuousPhase(ctx: TestContext): Promise<{ id: string; title
 }
 
 interface PhaseScorecardBody {
+  source: string;
   phase_id: string;
   phase_title: string;
   state: string;
@@ -200,6 +201,53 @@ interface PhaseScorecardBody {
   checklist_items: Array<{ id: string; state: string; trust: string }>;
   claim: unknown;
   task_count: number;
+}
+
+/**
+ * Declared-phase scorecard shape (adr-planphasestatus-projects-declared-extra-
+ * phases-alongside, ISSUE-007) — no checklist/claim/state, since declared
+ * phases (SPEC-023 `plan.extra.phases[]`) are not `phase` docs.
+ */
+interface DeclaredPhaseScorecardBody {
+  source: "declared";
+  phase_title: string;
+  orphaned: boolean;
+  task_count: number;
+  evidence: { pass: number; fail: number };
+  ac_coverage: Array<{ ac_id: string; pass: number; fail: number }>;
+}
+
+/** Declares `plan.extra.phases` on the seed plan (SPEC-023 `lore phase add` shape). */
+async function declarePlanPhases(ctx: TestContext, names: string[]): Promise<void> {
+  const result = await ctx.app.corpusService.set(ctx.planId, {
+    extra: { phases: names.map((name) => ({ name })) },
+  });
+  if (!result.ok) throw new Error(`Failed to declare phases: ${JSON.stringify(result.error)}`);
+}
+
+/** Creates a task under the seed plan naming `phaseName` via `extra.phase`. */
+async function createTaskInPhase(
+  ctx: TestContext,
+  phaseName: string,
+  opts?: { evidence?: Array<{ result: "pass" | "fail"; ac_ref?: string }> },
+): Promise<{ id: string }> {
+  const verification_evidence = (opts?.evidence ?? []).map((e, i) => ({
+    oracle: "test",
+    command: `bun test ${i}`,
+    result: e.result,
+    recorded_at: "2026-07-26T00:00:00.000Z",
+    recorded_by: "agent:t",
+    ...(e.ac_ref !== undefined ? { ac_ref: e.ac_ref } : {}),
+  }));
+  const result = await ctx.app.corpusService.create({
+    type: "task",
+    title: `Task in ${phaseName}`,
+    parent_id: ctx.planId,
+    content: "## Task",
+    extra: { plan_id: ctx.planId, phase: phaseName, verification_evidence },
+  } as unknown as CreateDocInput);
+  if (!result.ok) throw new Error(`Failed to create seed task: ${JSON.stringify(result.error)}`);
+  return { id: result.value.id };
 }
 
 describe("GET /api/phase-status/:planIdOrSlug (SPEC-077 S3)", () => {
@@ -313,6 +361,115 @@ describe("GET /api/phase-status/:planIdOrSlug (SPEC-077 S3)", () => {
       expect(body.ok).toBe(false);
       expect(body.error.code).toBe("VALIDATION_ERROR");
       expect(body.error.message).toContain("task");
+    });
+  });
+
+  // ─── Declared phases (adr-planphasestatus-projects-declared-extra-phases-alongside) ───
+  describe("declared phases — SPEC-023 extra.phases with no phase doc", () => {
+    it("every existing phase-doc scorecard now carries source:'phase-doc' (additive REGRESSION pin)", async () => {
+      await createDonePhase(ctx);
+      const res = await fetch(`${ctx.baseUrl}/api/phase-status/${ctx.planId}`, {
+        headers: { Authorization: `Bearer ${ctx.rawKey}` },
+      });
+      const body = (await res.json()) as { data: { phases: PhaseScorecardBody[] } };
+      expect(body.data.phases).toHaveLength(1);
+      expect(body.data.phases[0]?.source).toBe("phase-doc");
+    });
+
+    it("a declared-only plan (no phase docs) yields a declared scorecard with task/evidence/AC rollups", async () => {
+      await declarePlanPhases(ctx, ["Declared Only Phase"]);
+      await createTaskInPhase(ctx, "Declared Only Phase", {
+        evidence: [
+          { result: "pass", ac_ref: "AC-1" },
+          { result: "fail" },
+        ],
+      });
+      await createTaskInPhase(ctx, "Declared Only Phase", { evidence: [{ result: "pass" }] });
+
+      const res = await fetch(`${ctx.baseUrl}/api/phase-status/${ctx.planId}`, {
+        headers: { Authorization: `Bearer ${ctx.rawKey}` },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: { phases: DeclaredPhaseScorecardBody[] } };
+      expect(body.data.phases).toHaveLength(1);
+
+      const declared = body.data.phases[0];
+      expect(declared?.source).toBe("declared");
+      expect(declared?.phase_title).toBe("Declared Only Phase");
+      expect(declared?.orphaned).toBe(false);
+      expect(declared?.task_count).toBe(2);
+      expect(declared?.evidence).toEqual({ pass: 2, fail: 1 });
+      const acFact = declared?.ac_coverage.find((f) => f.ac_id === "AC-1");
+      expect(acFact?.pass).toBe(1);
+      expect(acFact?.fail).toBe(0);
+    });
+
+    it("a declared phase with zero tasks yet is a normal state, not an error", async () => {
+      await declarePlanPhases(ctx, ["Empty Declared Phase"]);
+
+      const res = await fetch(`${ctx.baseUrl}/api/phase-status/${ctx.planId}`, {
+        headers: { Authorization: `Bearer ${ctx.rawKey}` },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: { phases: DeclaredPhaseScorecardBody[] } };
+      expect(body.data.phases).toHaveLength(1);
+      expect(body.data.phases[0]?.task_count).toBe(0);
+      expect(body.data.phases[0]?.evidence).toEqual({ pass: 0, fail: 0 });
+      expect(body.data.phases[0]?.orphaned).toBe(false);
+    });
+
+    it("a mixed plan (one phase-doc + one declared-only phase) yields BOTH sources, never double-projecting the phase-doc's own name", async () => {
+      const phaseDoc = await createDonePhase(ctx); // title "Backend slice"
+      await declarePlanPhases(ctx, [phaseDoc.title, "Frontend slice"]);
+      await createTaskInPhase(ctx, "Frontend slice");
+
+      const res = await fetch(`${ctx.baseUrl}/api/phase-status/${ctx.planId}`, {
+        headers: { Authorization: `Bearer ${ctx.rawKey}` },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: { phases: Array<PhaseScorecardBody | DeclaredPhaseScorecardBody> };
+      };
+      expect(body.data.phases).toHaveLength(2); // NOT 3 — "Backend slice" is not double-projected
+
+      const byTitle = new Map(body.data.phases.map((p) => [p.phase_title, p]));
+      expect(byTitle.get(phaseDoc.title)?.source).toBe("phase-doc");
+      expect(byTitle.get("Frontend slice")?.source).toBe("declared");
+    });
+
+    it("a task's extra.phase naming a phase absent from BOTH extra.phases[] and every phase-doc title surfaces as orphaned:true, never silently dropped", async () => {
+      // Declare the phase, write a task against it, then remove the declaration —
+      // simulating "the plan's declared phases changed after the task was written"
+      // (SPEC-023 write-time validation only checks membership AT WRITE TIME).
+      await declarePlanPhases(ctx, ["Soon Removed Phase"]);
+      await createTaskInPhase(ctx, "Soon Removed Phase", { evidence: [{ result: "pass" }] });
+      await declarePlanPhases(ctx, []); // the plan no longer declares any phase
+
+      const res = await fetch(`${ctx.baseUrl}/api/phase-status/${ctx.planId}`, {
+        headers: { Authorization: `Bearer ${ctx.rawKey}` },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: { phases: DeclaredPhaseScorecardBody[] } };
+      expect(body.data.phases).toHaveLength(1);
+      expect(body.data.phases[0]?.source).toBe("declared");
+      expect(body.data.phases[0]?.phase_title).toBe("Soon Removed Phase");
+      expect(body.data.phases[0]?.orphaned).toBe(true);
+      expect(body.data.phases[0]?.task_count).toBe(1);
+    });
+
+    it("a phase-doc-only plan (pre-existing seed, no extra.phases declared) stays byte-identical to before this ADR (REGRESSION)", async () => {
+      await createDonePhase(ctx);
+      const res = await fetch(`${ctx.baseUrl}/api/phase-status/${ctx.planId}`, {
+        headers: { Authorization: `Bearer ${ctx.rawKey}` },
+      });
+      const body = (await res.json()) as { data: { phases: PhaseScorecardBody[] } };
+      // Exactly the pre-existing phase-doc scorecard — no declared/orphaned entries
+      // fabricated for a plan that never declared extra.phases at all.
+      expect(body.data.phases).toHaveLength(1);
+      expect(body.data.phases[0]?.ac_scope).toEqual({ total: 1, attested: 1, blocking: [] });
+      expect(body.data.phases[0]?.checklist_items).toEqual([
+        { id: "CHK-1", statement: "manual smoke test passes", state: "satisfied", trust: "manual" },
+      ]);
     });
   });
 });

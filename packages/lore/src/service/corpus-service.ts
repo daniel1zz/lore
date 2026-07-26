@@ -136,6 +136,31 @@ const ORPHAN_ADVISORY_TYPES: ReadonlySet<DocType> = new Set(["adr", "plan", "kno
 export type CreateDocResult = DocRecord & { readonly orphan_advisory?: string };
 
 /**
+ * Actor-attribution options shared by every mutating `CorpusService` method that
+ * writes an audit-trail `actor` and/or a `created_by` field (`create`/`set`/`delete`).
+ *
+ * - `by` — explicit actor value threaded from the caller's own resolution (CLI's
+ *   `resolveActor`, an MCP tool's required `by` arg, or an HTTP bearer token's
+ *   API-key name). `undefined` falls through to `resolveWriteActor`'s env chain
+ *   (`resolveActorWithSource`: `$LORE_ACTOR` → session tier → OS username).
+ * - `attributeCreatedBy` — when `true`, the SAME resolved actor ALSO stamps
+ *   `doc.created_by` (create only) and `versionRecord.created_by`
+ *   (create/set/delete), instead of the historical literal `"system"` default
+ *   SPEC-079 G2 deliberately left in place. Opt-in and additive: every
+ *   pre-existing caller that omits it keeps the exact byte-for-byte `"system"`
+ *   behavior regression-pinned by `audit-actor-fidelity.test.ts`. Wired ONLY
+ *   from the HTTP adapter's cookie-session write paths (`adr-dashboard-cookie-
+ *   session-writes-attribute-author-via`) — a human using the dashboard on the
+ *   SAME machine as `lore serve` (SPEC-016's local-bootstrap model) has an
+ *   honest fallback identity (OS username) that a bearer-token agent caller
+ *   does not; bearer/CLI/MCP writes are UNCHANGED (never pass this flag).
+ */
+export interface WriteActorOpts {
+  readonly by?: string;
+  readonly attributeCreatedBy?: boolean;
+}
+
+/**
  * Names a structured `extra` field that a `lore set` / HTTP PATCH / MCP `lore_set`
  * patch would silently DROP, plus the dedicated writer that should be used instead.
  * `null` means no drop detected — the common case.
@@ -451,7 +476,7 @@ export class CorpusService {
    */
   async create(
     input: CreateDocInput,
-    opts?: { by?: string },
+    opts?: WriteActorOpts,
   ): Promise<Result<CreateDocResult, LoreError>> {
     const startMs = Date.now();
     const result = await this._createImpl(input, opts);
@@ -502,7 +527,7 @@ export class CorpusService {
 
   private async _createImpl(
     input: CreateDocInput,
-    opts?: { allowHandoff?: boolean; allowUat?: boolean; by?: string },
+    opts?: WriteActorOpts & { allowHandoff?: boolean; allowUat?: boolean },
   ): Promise<Result<CreateDocResult, LoreError>> {
     const parsed = createDocInputSchema.safeParse(input);
     if (!parsed.success) {
@@ -910,7 +935,12 @@ export class CorpusService {
       parent_id: resolvedParentId,
       created_at: now,
       updated_at: now,
-      created_by: "system",
+      // reason: literal "system" is the historical default (SPEC-079 G2 left it
+      // out of scope); `opts.attributeCreatedBy` (cookie-session HTTP writes
+      // only, see WriteActorOpts) opts into the SAME resolved actor already
+      // computed above for the audit entry — see `adr-dashboard-cookie-session-
+      // writes-attribute-author-via`.
+      created_by: opts?.attributeCreatedBy === true ? resolvedActor : "system",
       version: 1,
       deleted_at: null,
       tags: data.tags ?? [],
@@ -1257,7 +1287,7 @@ export class CorpusService {
   async set(
     idOrSlug: string,
     patch: DocPatch,
-    opts?: { expectedVersion?: number; by?: string },
+    opts?: WriteActorOpts & { expectedVersion?: number },
   ): Promise<Result<DocRecord, LoreError>> {
     const parsedPatch = docPatchSchema.safeParse(patch);
     if (!parsedPatch.success) {
@@ -1710,6 +1740,12 @@ export class CorpusService {
     // BUG-003 (audit finding) fix: `expected_version` is `opts?.expectedVersion ??
     // existing.version` — see this method's own JSDoc `@param opts.expectedVersion`
     // for the full race this closes.
+    //
+    // reason: resolved ONCE, reused for both the version snapshot's `created_by`
+    // (when `opts.attributeCreatedBy` opts in — see WriteActorOpts) and the audit
+    // entry's `actor` below — a single source of truth for "who made this write",
+    // never two independently-resolved values that could disagree.
+    const resolvedActor = this.resolveWriteActor(opts?.by);
     const versionRecord: VersionRecord = {
       doc_id: existing.id,
       version: newVersion,
@@ -1719,7 +1755,11 @@ export class CorpusService {
       title: docPatch.title ?? existing.title,
       action: "update",
       created_at: now,
-      created_by: "system",
+      // reason: literal "system" is the historical default (SPEC-079 G2 left it
+      // out of scope); `opts.attributeCreatedBy` (cookie-session HTTP writes
+      // only) opts into the resolved actor — see `adr-dashboard-cookie-session-
+      // writes-attribute-author-via`.
+      created_by: opts?.attributeCreatedBy === true ? resolvedActor : "system",
       // reason: SPEC-072 D1 — `slug` follows the EXACT same "state as of this
       // version" convention as content/extra/status/title above (docPatch's
       // new value when the patch changed it, else the unchanged existing
@@ -1740,10 +1780,8 @@ export class CorpusService {
       versionRecord,
       {
         timestamp: now,
-        // SPEC-079 G2 — resolved actor, never the literal "system" (see the
-        // matching note on the create() audit entry above; versionRecord's
-        // own `created_by` stays "system", out of this spec's scope).
-        actor: this.resolveWriteActor(opts?.by),
+        // SPEC-079 G2 — resolved actor, never the literal "system".
+        actor: resolvedActor,
         session_id: existing.id,
         action: "update",
         doc_id: existing.id,
@@ -1767,7 +1805,7 @@ export class CorpusService {
   async delete(
     idOrSlug: string,
     confirm: boolean,
-    opts?: { by?: string },
+    opts?: WriteActorOpts,
   ): Promise<Result<{ id: DocId; recoverable_until: string }, LoreError>> {
     if (!confirm) {
       // Resolve ID for the error even without confirm
@@ -1782,6 +1820,9 @@ export class CorpusService {
     const id = resolveResult.value;
     const now = new Date().toISOString();
     const recoverableUntil = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    // reason: resolved ONCE, reused for both the version sentinel's `created_by`
+    // (when `opts.attributeCreatedBy` opts in) and the audit entry's `actor` below.
+    const resolvedActor = this.resolveWriteActor(opts?.by);
 
     // BUG-002 (audit finding) — soft-delete + version-0 sentinel + delete audit
     // entry as ONE atomic composite write (StoreInterface.softDeleteWithProvenance),
@@ -1803,14 +1844,16 @@ export class CorpusService {
       title: "",
       action: "delete",
       created_at: now,
-      created_by: "system",
+      // reason: literal "system" is the historical default (SPEC-079 G2 left it
+      // out of scope); `opts.attributeCreatedBy` (cookie-session HTTP writes
+      // only) opts into the resolved actor — see `adr-dashboard-cookie-session-
+      // writes-attribute-author-via`.
+      created_by: opts?.attributeCreatedBy === true ? resolvedActor : "system",
     };
     const auditEntry: AuditEntry = {
       timestamp: now,
-      // SPEC-079 G2 — resolved actor, never the literal "system" (see the
-      // matching note on create()'s audit entry above; the versions row's
-      // own `created_by` stays "system", out of this spec's scope).
-      actor: this.resolveWriteActor(opts?.by),
+      // SPEC-079 G2 — resolved actor, never the literal "system".
+      actor: resolvedActor,
       session_id: id,
       action: "delete",
       doc_id: id,

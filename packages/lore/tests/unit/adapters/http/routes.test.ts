@@ -62,7 +62,7 @@
  *       Only service-layer validation errors are testable here.
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { InMemoryStore } from "../../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../../src/service/corpus-service.js";
 import { ReviewService } from "../../../../src/service/review-service.js";
@@ -125,8 +125,22 @@ function makeApp(): App {
   };
 }
 
-/** Fixed actor for all route calls — routes don't use it but signature requires it. */
+/**
+ * Fixed actor for all route calls. No `callerSurface` set — `resolveDocWriteOpts`
+ * (auth.ts) treats an absent/non-"http_cookie" surface as the bearer-token path,
+ * so write routes attribute via `{ by: actor.name }` exactly as before
+ * adr-dashboard-cookie-session-writes-attribute-author-via (see the "author
+ * attribution" describe block below for the cookie-surface counterpart).
+ */
 const TEST_ACTOR: ActorContext = { name: "test-agent", session_id: "test-session-id" };
+
+/** Cookie-session actor — exercises the v1 dual-auth routes' cookie branch. */
+const TEST_COOKIE_ACTOR: ActorContext = {
+  name: "dashboard-local",
+  session_id: "test-cookie-session-id",
+  owner: "admin",
+  callerSurface: "http_cookie" as const,
+};
 
 function makeGetRequest(path: string): { req: Request; url: URL } {
   const url = new URL(`http://localhost${path}`);
@@ -360,6 +374,42 @@ describe("POST /api/docs", () => {
       expect(raw.ok).toBe(false);
       expect(raw.error).toBeDefined();
       expect(raw.data).toBeUndefined();
+    });
+  });
+
+  // ─── Author attribution (adr-dashboard-cookie-session-writes-attribute-author-via) ──
+  describe("author attribution", () => {
+    const ORIGINAL_LORE_ACTOR = process.env["LORE_ACTOR"];
+
+    beforeEach(() => {
+      process.env["LORE_ACTOR"] = "agent:v1-dashboard-human";
+    });
+
+    afterEach(() => {
+      if (ORIGINAL_LORE_ACTOR === undefined) delete process.env["LORE_ACTOR"];
+      else process.env["LORE_ACTOR"] = ORIGINAL_LORE_ACTOR;
+    });
+
+    it("REGRESSION — bearer-token actor keeps doc.created_by as the literal 'system' (unchanged attribution)", async () => {
+      const { req, url } = makePostRequest("/api/docs", { type: "prd", title: "Bearer Attribution PRD" });
+      const res = await handleApiRoute(req, url, app, TEST_ACTOR);
+      expect(res!.status).toBe(201);
+      const body = await parseResponse(res!);
+      const doc = body.data as Record<string, unknown>;
+      expect(doc.created_by).toBe("system");
+    });
+
+    it("a cookie-session actor's create resolves doc.created_by via the actor chain, never 'system' or the static bootstrap identity", async () => {
+      const { req, url } = makePostRequest("/api/docs", { type: "prd", title: "Cookie Attribution PRD" });
+      const res = await handleApiRoute(req, url, app, TEST_COOKIE_ACTOR);
+      expect(res!.status).toBe(201);
+      const body = await parseResponse(res!);
+      const doc = body.data as Record<string, unknown>;
+
+      expect(doc.created_by).toBe("agent:v1-dashboard-human");
+      expect(doc.created_by).not.toBe("system");
+      expect(doc.created_by).not.toBe("admin");
+      expect(doc.created_by).not.toBe("dashboard-local");
     });
   });
 });
