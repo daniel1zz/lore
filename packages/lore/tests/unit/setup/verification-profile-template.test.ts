@@ -122,7 +122,7 @@ describe("lore-config-template.yaml — HAPPY (asset content)", () => {
     const parsed = yaml.parse(raw) as Record<string, unknown>;
 
     const profiles = (parsed.workflow as Record<string, unknown> | undefined)?.["verification_profiles"] as
-      | Record<string, { required_oracles?: string[] }>
+      | Record<string, { required_oracles?: string[]; min_acs?: number }>
       | undefined;
     expect(profiles).toBeDefined();
     if (!profiles) return;
@@ -130,6 +130,21 @@ describe("lore-config-template.yaml — HAPPY (asset content)", () => {
     expect(profiles.design?.required_oracles).toContain("e2e");
     expect(profiles.feature?.required_oracles).toContain("test");
     expect(profiles.tech?.required_oracles).toContain("test");
+  });
+
+  // task-spec-promote-base-1-ac-rule-is-spec-kind-agnostic-spec-080 AC3 — the
+  // seeded template carries a domain-overview entry waiving the AC-count floor.
+  it("carries a domain-overview -> min_acs: 0 block with no required_oracles", () => {
+    const raw = readFileSync(TEMPLATE_PATH, "utf-8");
+    const parsed = yaml.parse(raw) as Record<string, unknown>;
+    const profiles = (parsed.workflow as Record<string, unknown> | undefined)?.["verification_profiles"] as
+      | Record<string, { required_oracles?: string[]; min_acs?: number }>
+      | undefined;
+    expect(profiles).toBeDefined();
+    if (!profiles) return;
+
+    expect(profiles["domain-overview"]?.min_acs).toBe(0);
+    expect(profiles["domain-overview"]?.required_oracles).toBeUndefined();
   });
 });
 
@@ -163,7 +178,7 @@ describe("lore-config-template.yaml — HAPPY (schema-dependent, deferred)", () 
       unknown
     >;
 
-    for (const kind of ["design", "feature", "tech"]) {
+    for (const kind of ["design", "feature", "tech", "domain-overview"]) {
       const result = mod.verificationProfileSchema.safeParse(profiles[kind]);
       expect(result.success).toBe(true);
     }
@@ -358,11 +373,12 @@ describe("scaffoldProject — HAPPY (config-template seeding integration)", () =
     const parsed = yaml.parse(readFileSync(configPath, "utf-8")) as Record<string, unknown>;
     const profiles = (parsed.workflow as Record<string, unknown>)["verification_profiles"] as Record<
       string,
-      { required_oracles?: string[] }
+      { required_oracles?: string[]; min_acs?: number }
     >;
     expect(profiles.design?.required_oracles).toContain("e2e");
     expect(profiles.feature?.required_oracles).toContain("test");
     expect(profiles.tech?.required_oracles).toContain("test");
+    expect(profiles["domain-overview"]?.min_acs).toBe(0);
   });
 });
 

@@ -446,6 +446,71 @@ export function oracleCoverage(
   return { ok: false, reason: ORACLE_COVERAGE_REASON, field: ORACLE_COVERAGE_FIELD };
 }
 
+/**
+ * `acCountMeetsFloor`'s single machine-readable failure reason — the SAME literal
+ * `checkSpecPromote` used before this predicate existed (`NO_ACCEPTANCE_CRITERIA`),
+ * kept unchanged so every pre-existing feed()/message consumer keeps matching on it.
+ */
+export const NO_ACCEPTANCE_CRITERIA_REASON = "NO_ACCEPTANCE_CRITERIA";
+
+/** The `PredicateResult.field` value `acCountMeetsFloor`'s failure carries. */
+export const AC_COUNT_FIELD = "acceptance-criteria-count";
+
+/**
+ * Default acceptance-criteria-count floor `spec-promote` enforces when a
+ * spec_kind's verification profile is absent entirely, OR present but doesn't
+ * declare `min_acs` (task-spec-promote-base-1-ac-rule-is-spec-kind-agnostic-
+ * spec-080) — the pre-existing, unconditional "≥1" rule this predicate replaces.
+ */
+export const DEFAULT_MIN_ACS = 1;
+
+/**
+ * `spec-promote`'s base acceptance-criteria-COUNT floor predicate
+ * (task-spec-promote-base-1-ac-rule-is-spec-kind-agnostic-spec-080, option (a)) —
+ * a candidate/target spec must declare at least `profile.min_acs` structured
+ * acceptance criteria, where the floor is resolved PER spec_kind rather than a
+ * single hardcoded `1`. Before this predicate existed, `checkSpecPromote` inlined
+ * an unconditional `count > 0` check that fired identically for every spec_kind —
+ * SPEC-080 C2 promises a `domain-overview` spec (narrative, not an implementation
+ * contract) needs no declared ACs at all, which the old unconditional rule could
+ * never express.
+ *
+ * Deliberately takes the already-resolved profile (never a config read itself —
+ * module invariant: no store, no IO, no config access), mirroring `oracleCoverage`'s
+ * shape — the two predicates share the SAME `ctx.verificationProfile` field
+ * (`checkSpecPromote`), resolved once by the caller via `GateEnforcer.
+ * resolveVerificationProfile`.
+ *
+ * @param count - The candidate/target spec's declared acceptance-criteria count
+ *   (`ctx.acceptanceCriteriaCount ?? 0` at the call site — an omitted count is
+ *   BOUNDARY-equivalent to an explicit `0`, never treated as "unknown, pass").
+ * @param profile - The target spec's OWN `spec_kind`'s resolved verification
+ *   profile, or `null`/`undefined` when unconfigured — both cases (no profile at
+ *   all, OR a profile with no `min_acs` entry) resolve to {@link DEFAULT_MIN_ACS}.
+ *   A profile whose `min_acs` is explicitly `0` legally waives the floor entirely
+ *   (SPEC-080 C2's domain-overview case) — `0` and "absent" are NOT the same value.
+ * @returns `{ok: true}` when `count >= floor`; `{ok: false, reason:
+ *   "NO_ACCEPTANCE_CRITERIA", field: "acceptance-criteria-count"}` otherwise.
+ * @example
+ * acCountMeetsFloor(0, { required_oracles: ["e2e"], min_acs: 0 }); // => { ok: true } — waived floor
+ * @example
+ * acCountMeetsFloor(0, null); // => { ok: false, reason: "NO_ACCEPTANCE_CRITERIA", field: "acceptance-criteria-count" } — default floor 1
+ * @example
+ * acCountMeetsFloor(1, { required_oracles: ["e2e"] }); // => { ok: true } — profile present, no min_acs, default floor 1 met
+ * @example
+ * acCountMeetsFloor(1, { required_oracles: ["e2e"], min_acs: 2 }); // => { ok: false, ... } — one short of the configured floor
+ */
+export function acCountMeetsFloor(
+  count: number,
+  profile: VerificationProfile | null | undefined,
+): PredicateResult {
+  const floor = profile?.min_acs ?? DEFAULT_MIN_ACS;
+  if (count >= floor) {
+    return { ok: true };
+  }
+  return { ok: false, reason: NO_ACCEPTANCE_CRITERIA_REASON, field: AC_COUNT_FIELD };
+}
+
 /** `requiresUatDeclared`'s single machine-readable failure reason. */
 export const REQUIRES_UAT_NOT_DECLARED_REASON = "REQUIRES_UAT_NOT_DECLARED";
 

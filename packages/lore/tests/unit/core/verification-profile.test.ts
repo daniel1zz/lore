@@ -218,3 +218,49 @@ describe("verificationProfileSchema — ERROR: unknown oracle kind", () => {
     expect(result.success).toBe(true);
   });
 });
+
+// ─── task-spec-promote-base-1-ac-rule-is-spec-kind-agnostic-spec-080 (option (a)) ──
+// min_acs — the profile-aware `spec-promote` AC-count floor — plus `required_oracles`
+// becoming optional so a `min_acs`-only profile entry (e.g. `domain-overview`) is
+// expressible without a meaningless oracle-coverage floor bolted on.
+
+describe("verificationProfileSchema — min_acs (task-spec-promote-base-1-ac-rule-is-spec-kind-agnostic-spec-080)", () => {
+  // HAPPY — 0 is a legal, distinct-from-absent value
+  it("accepts min_acs: 0 alongside required_oracles", () => {
+    const result = mod.verificationProfileSchema.safeParse({ required_oracles: ["e2e"], min_acs: 0 });
+    expect(result.success).toBe(true);
+  });
+
+  // HAPPY — required_oracles is now OPTIONAL: a min_acs-only profile (the
+  // domain-overview shape — no oracle floor at all) is legal
+  it("accepts a profile declaring ONLY min_acs, with required_oracles omitted entirely", () => {
+    const result = mod.verificationProfileSchema.safeParse({ min_acs: 0 });
+    expect(result.success).toBe(true);
+  });
+
+  // BOUNDARY — an EMPTY required_oracles array stays rejected (distinct from
+  // omitting the field) — the pre-existing min(1)-when-present rule is unchanged
+  it("still rejects an EMPTY required_oracles array even alongside min_acs (distinct from omission)", () => {
+    const result = mod.verificationProfileSchema.safeParse({ required_oracles: [], min_acs: 0 });
+    expect(result.success).toBe(false);
+  });
+
+  // NEGATIVE — a negative min_acs is a schema-level error, never silently clamped
+  it("rejects a negative min_acs", () => {
+    const result = mod.verificationProfileSchema.safeParse({ required_oracles: ["e2e"], min_acs: -1 });
+    expect(result.success).toBe(false);
+  });
+
+  // NEGATIVE — a non-integer min_acs is rejected
+  it("rejects a non-integer min_acs", () => {
+    const result = mod.verificationProfileSchema.safeParse({ required_oracles: ["e2e"], min_acs: 1.5 });
+    expect(result.success).toBe(false);
+  });
+
+  // BOUNDARY — checkOracleCoverage on a required_oracles-less profile yields zero
+  // findings regardless of declared criteria (nothing to satisfy)
+  it("checkOracleCoverage returns [] for a profile with no required_oracles at all", () => {
+    const criteria: AcceptanceCriterion[] = [];
+    expect(mod.checkOracleCoverage(criteria, { min_acs: 0 } as never)).toEqual([]);
+  });
+});

@@ -212,6 +212,94 @@ describe("oracleCoverage — profile resolution is per-spec_kind", () => {
   });
 });
 
+// ─── task-spec-promote-base-1-ac-rule-is-spec-kind-agnostic-spec-080: min_acs ──
+// (option (a), profile-aware AC-count floor) — end-to-end through the REAL
+// CorpusService.set / ReviewService.approve gate paths, mirroring the matched-pair
+// pattern above. This is the exact real-world scenario the defect report describes:
+// a migrated domain-overview spec with zero declared ACs, blocked pre-fix.
+
+function domainOverviewConfig(overrides?: Record<string, unknown>): LoreConfig {
+  return {
+    project: { name: "t", author: "t" },
+    workflow: {
+      verification_profiles: { "domain-overview": { min_acs: 0 } },
+      ...overrides,
+    },
+  } as unknown as LoreConfig;
+}
+
+describe("acCountMeetsFloor — spec-promote min_acs (CorpusService.set / ReviewService.approve)", () => {
+  // HAPPY — a domain-overview spec with ZERO declared ACs promotes cleanly
+  it("promotes a domain-overview spec with zero declared ACs when its profile's min_acs is 0", async () => {
+    const { corpusService, store } = makeCorpusService(domainOverviewConfig());
+    const prd = await createPrd(corpusService);
+    const spec = await insertRawSpec(store, prd.id, "domain-overview", []);
+
+    const result = await corpusService.set(spec.id, { status: "approved" });
+    expect(result.ok).toBe(true);
+  });
+
+  // HAPPY — same scenario via ReviewService.approve, the OTHER spec-promote write path
+  it("ReviewService.approve also promotes the same AC-less domain-overview spec", async () => {
+    const store = new InMemoryStore();
+    const corpusService = new CorpusService(store);
+    const enforcer = new GateEnforcer(domainOverviewConfig());
+    const reviewService = new ReviewService(store, undefined, {
+      enforcer,
+      getPlanBundle: corpusService.getPlanBundle.bind(corpusService),
+    });
+    const prd = await mustCreate(corpusService, { type: "prd", title: "PRD", content: "# PRD" } as CreateDocInput);
+    const spec = await insertRawSpec(store, prd.id, "domain-overview", []);
+
+    const result = await reviewService.approve(spec.id);
+    expect(result.ok).toBe(true);
+  });
+
+  // NEGATIVE — a DIFFERENT spec_kind with no min_acs knob at all is still blocked at 0 ACs,
+  // proving the fix is per-spec_kind and not a global disable of the base floor
+  it("a feature-kind spec (no min_acs configured anywhere) is still blocked at zero declared ACs", async () => {
+    const { corpusService, store } = makeCorpusService(domainOverviewConfig());
+    const prd = await createPrd(corpusService);
+    const spec = await insertRawSpec(store, prd.id, "feature", []);
+
+    const result = await corpusService.set(spec.id, { status: "approved" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect((result.error as { field?: string }).field).toBe("gate:spec-promote:acceptance-criteria-count");
+    }
+  });
+
+  // BOUNDARY — a configured min_acs of 2 blocks a spec with only 1 declared AC
+  it("blocks a spec one short of a configured min_acs of 2", async () => {
+    const { corpusService, store } = makeCorpusService(
+      domainOverviewConfig({ verification_profiles: { design: { min_acs: 2 } } }),
+    );
+    const prd = await createPrd(corpusService);
+    const spec = await insertRawSpec(store, prd.id, "design", [NON_E2E_AC]);
+
+    const result = await corpusService.set(spec.id, { status: "approved" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      const message = (result.error as { message?: string }).message ?? "";
+      // AC4 — the denial names the RESOLVED floor and kind, never a hardcoded "1".
+      expect(message).toContain("needs >= 2");
+      expect(message).toContain('spec_kind "design"');
+    }
+  });
+
+  // BOUNDARY — the SAME configured min_acs of 2 passes once exactly met
+  it("promotes the same spec_kind once declared ACs exactly meet a configured min_acs of 2", async () => {
+    const { corpusService, store } = makeCorpusService(
+      domainOverviewConfig({ verification_profiles: { design: { min_acs: 2 } } }),
+    );
+    const prd = await createPrd(corpusService);
+    const spec = await insertRawSpec(store, prd.id, "design", [NON_E2E_AC, E2E_AC]);
+
+    const result = await corpusService.set(spec.id, { status: "approved" });
+    expect(result.ok).toBe(true);
+  });
+});
+
 // ─── AC-V-2: config escape (oracle_coverage.enabled: false) ─────────────────
 
 describe("oracleCoverage — config escape", () => {

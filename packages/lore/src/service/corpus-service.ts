@@ -1672,6 +1672,11 @@ export class CorpusService {
       const gateResult = this.gateEnforcer.enforce("spec-promote", {
         acceptanceCriteriaCount,
         specIdOrSlug: existing.slug,
+        // reason: task-spec-promote-base-1-ac-rule-is-spec-kind-agnostic-spec-080
+        // AC4 — feedSpecPromote's denial message names the RESOLVED kind, never a
+        // hardcoded default; this is the SAME effectiveSpecKind already computed
+        // above for verificationProfile, never a second lookup.
+        specKind: effectiveSpecKind,
         ...(parsed.success ? { acceptanceCriteria: parsed.data } : {}),
         acQuantifiableEnabled: this.gateEnforcer.isAcQuantifiableEnabled("spec-promote"),
         verificationProfile: this.gateEnforcer.resolveVerificationProfile(effectiveSpecKind),

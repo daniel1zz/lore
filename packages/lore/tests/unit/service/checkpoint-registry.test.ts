@@ -178,6 +178,87 @@ describe("checkpointRegistry", () => {
       expect(text).toContain("no structured acceptance criteria");
       expect(text).toContain("lore ac add");
     });
+
+    // task-spec-promote-base-1-ac-rule-is-spec-kind-agnostic-spec-080 — profile-aware
+    // AC floor wired end-to-end through the checkpoint (not just the bare predicate).
+
+    // HAPPY — a spec_kind whose profile waives the floor (min_acs: 0) promotes AC-less
+    it("check() passes with zero declared ACs when ctx.verificationProfile.min_acs is 0", () => {
+      const ctx: GateContext = {
+        acceptanceCriteriaCount: 0,
+        specIdOrSlug: "spec-domain",
+        specKind: "domain-overview",
+        verificationProfile: { min_acs: 0 },
+      };
+      const results = checkpoint.check(ctx);
+      expect(isCheckpointBlocked(results)).toBe(false);
+    });
+
+    // NEGATIVE — a spec_kind with NO min_acs knob (profile present for oracle
+    // coverage only) still requires >= 1, byte-compatible with pre-existing behavior
+    it("check() still fails with zero ACs when the profile declares no min_acs", () => {
+      const ctx: GateContext = {
+        acceptanceCriteriaCount: 0,
+        specIdOrSlug: "spec-design",
+        specKind: "design",
+        verificationProfile: { required_oracles: ["e2e"] },
+      };
+      const results = checkpoint.check(ctx);
+      expect(isCheckpointBlocked(results)).toBe(true);
+    });
+
+    // BOUNDARY — a configured min_acs of 2 is exactly met
+    it("check() passes at the exact boundary of a configured min_acs of 2", () => {
+      const ctx: GateContext = {
+        acceptanceCriteriaCount: 2,
+        specIdOrSlug: "spec-x",
+        verificationProfile: { min_acs: 2 },
+      };
+      expect(isCheckpointBlocked(checkpoint.check(ctx))).toBe(false);
+    });
+
+    // BOUNDARY — one short of a configured min_acs of 2 fails
+    it("check() fails one short of a configured min_acs of 2", () => {
+      const ctx: GateContext = {
+        acceptanceCriteriaCount: 1,
+        specIdOrSlug: "spec-x",
+        verificationProfile: { min_acs: 2 },
+      };
+      expect(isCheckpointBlocked(checkpoint.check(ctx))).toBe(true);
+    });
+
+    // REGRESSION — feature/tech/design kinds (no min_acs declared) keep the exact
+    // pre-existing ">= 1" behavior byte-compatible when NO verificationProfile is
+    // resolved at all (the pre-SPEC-058-profile-aware-floor shape every existing
+    // caller without a configured profile still exercises).
+    it("REGRESSION: check() with no verificationProfile in ctx behaves exactly as before (>= 1)", () => {
+      expect(isCheckpointBlocked(checkpoint.check({ acceptanceCriteriaCount: 0 }))).toBe(true);
+      expect(isCheckpointBlocked(checkpoint.check({ acceptanceCriteriaCount: 1 }))).toBe(false);
+    });
+
+    // HAPPY — feed() names the RESOLVED floor and kind (AC4), not a hardcoded "1"
+    it("feed() names the resolved floor and spec_kind for a below-floor design spec", () => {
+      const ctx: GateContext = {
+        acceptanceCriteriaCount: 0,
+        specIdOrSlug: "spec-design",
+        specKind: "design",
+        verificationProfile: { required_oracles: ["e2e"], min_acs: 2 },
+      };
+      const results = checkpoint.check(ctx);
+      const text = checkpoint.feed(ctx, selectFailures(results));
+      expect(text).toContain("needs >= 2");
+      expect(text).toContain('spec_kind "design"');
+    });
+
+    // BOUNDARY — feed() falls back to "unknown" for the kind when ctx.specKind is
+    // absent, never fabricating a kind the caller never supplied
+    it("feed() names spec_kind \"unknown\" when ctx.specKind was never populated", () => {
+      const ctx: GateContext = { acceptanceCriteriaCount: 0, specIdOrSlug: "spec-x" };
+      const results = checkpoint.check(ctx);
+      const text = checkpoint.feed(ctx, selectFailures(results));
+      expect(text).toContain("needs >= 1");
+      expect(text).toContain('spec_kind "unknown"');
+    });
   });
 
   describe("plan-promote checkpoint", () => {
