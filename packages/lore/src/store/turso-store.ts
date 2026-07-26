@@ -34,11 +34,13 @@ import {
   MIGRATION_009_ADD_COLUMNS_SQL,
   MIGRATION_009_FINALIZE_SQL,
 } from "./migrations/migration-009.js";
+import { MIGRATION_010_SQL } from "./migrations/migration-010.js";
 import type {
   AuditEntry,
   CalibrationRecord,
   DocId,
   DocRecord,
+  DocType,
   LinkRecord,
   LinkType,
   ReviewJudgment,
@@ -65,9 +67,11 @@ import type {
   UpdateOpts,
 } from "./store-interface.js";
 import {
+  allocateWithBoundedRetry,
   computeAuditEntryHash,
   computeFtsShadowValues,
   escapeFtsQuery,
+  isOrdinalUniqueViolationMessage,
   parseJson,
   rowToAuditChainEntry,
   rowToAuditEntry,
@@ -77,6 +81,7 @@ import {
   rowToReviewJudgment,
   rowToSearchHit,
   rowToVersionRecord,
+  toStoreError,
   wrapStoreError,
   type AuditChainRow,
   type AuditRow,
@@ -126,6 +131,18 @@ function rowNum(row: Row, col: string): number {
 }
 
 /**
+ * Like {@link rowNum} but for a nullable numeric column (e.g. `docs.ordinal`,
+ * SPEC-084) — `null`/`undefined` map to `null`, NEVER `0` (a real ordinal
+ * value), unlike {@link rowNum}'s "absent means 0" convention which is only
+ * safe for columns where 0 isn't a legal value.
+ */
+function rowNumOrNull(row: Row, col: string): number | null {
+  const v = row[col];
+  if (v === null || v === undefined) return null;
+  return Number(v);
+}
+
+/**
  * Convert a libsql Row (column-named access) to a DocRow-shaped plain object.
  * Row-boundary guard — this is the only `as`-cast site for libsql rows.
  */
@@ -147,6 +164,7 @@ function libsqlRowToDocRow(row: Row): DocRow {
     updated_at: rowStr(row, "updated_at"),
     created_by: rowStr(row, "created_by"),
     deleted_at: rowStrOrNull(row, "deleted_at"),
+    ordinal: rowNumOrNull(row, "ordinal"),
   };
 }
 
@@ -433,6 +451,16 @@ export class TursoStore implements StoreInterface {
           tx.close();
         }
       }
+
+      if (currentVersion < 10) {
+        // reason: migration-010 (SPEC-084 docs.ordinal + partial unique
+        // index) is a SINGLE self-contained SQL string (mirrors
+        // migration-007's shape) — no JS-level backfill loop needed (zero
+        // backfill of existing rows, D2 precedent), so a plain
+        // `executeMultiple` call is sufficient, unlike migrations 008/009's
+        // interactive-transaction three-phase sequences above.
+        await this.client.executeMultiple(MIGRATION_010_SQL);
+      }
     })();
 
     return this._schemaInitPromise;
@@ -458,8 +486,8 @@ export class TursoStore implements StoreInterface {
         sql: `INSERT INTO docs
                (id, slug, type, role, title, status, priority, content,
                 parent_id, extra, tags, version, created_at, updated_at,
-                created_by, deleted_at, fts_title, fts_content, fts_tags)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                created_by, deleted_at, fts_title, fts_content, fts_tags, ordinal)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [
           doc.id,
           doc.slug,
@@ -480,6 +508,7 @@ export class TursoStore implements StoreInterface {
           shadow.fts_title,
           shadow.fts_content,
           shadow.fts_tags,
+          doc.ordinal ?? null,
         ] as InValue[],
       });
 
@@ -493,6 +522,208 @@ export class TursoStore implements StoreInterface {
       if (msg.includes("UNIQUE constraint failed: docs.id")) {
         return wrapStoreError(e);
       }
+      return wrapStoreError(e);
+    }
+  }
+
+  /**
+   * @see StoreInterface.insertWithAllocatedOrdinal
+   * MAX+1 computed once via the SAME interactive `client.transaction("write")`
+   * shape `insertWithProvenance` uses, then delegated to the shared
+   * {@link allocateWithBoundedRetry} seam (`store-shared.ts`) for the
+   * bounded-attempt/exhaustion mechanics.
+   */
+  async insertWithAllocatedOrdinal(doc: DocRecord): Promise<Result<DocRecord, LoreError>> {
+    await this.ensureReady();
+    const tx = await this.client.transaction("write");
+    try {
+      const maxRs = await tx.execute({
+        sql: "SELECT MAX(ordinal) as maxOrdinal FROM docs WHERE type = ?",
+        args: [doc.type] as InValue[],
+      });
+      const maxRow = maxRs.rows[0];
+      const base = maxRow ? rowNumOrNull(maxRow, "maxOrdinal") ?? 0 : 0;
+
+      const tagsJson = JSON.stringify(doc.tags);
+      const shadow = computeFtsShadowValues(doc.title, doc.content, tagsJson);
+
+      const result = await allocateWithBoundedRetry<DocRecord>(base, doc.type, async (candidate) => {
+        try {
+          await tx.execute({
+            sql: `INSERT INTO docs
+                   (id, slug, type, role, title, status, priority, content,
+                    parent_id, extra, tags, version, created_at, updated_at,
+                    created_by, deleted_at, fts_title, fts_content, fts_tags, ordinal)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            args: [
+              doc.id,
+              doc.slug,
+              doc.type,
+              doc.role,
+              doc.title,
+              doc.status,
+              doc.priority,
+              doc.content,
+              doc.parent_id ?? null,
+              JSON.stringify(doc.extra),
+              tagsJson,
+              doc.version,
+              doc.created_at,
+              doc.updated_at,
+              doc.created_by,
+              doc.deleted_at ?? null,
+              shadow.fts_title,
+              shadow.fts_content,
+              shadow.fts_tags,
+              candidate,
+            ] as InValue[],
+          });
+          return { kind: "success", value: { ...doc, ordinal: candidate } };
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : "";
+          if (msg.includes("UNIQUE constraint failed: docs.slug")) {
+            return { kind: "error", error: { code: "DUPLICATE_SLUG", slug: doc.slug, existing_id: doc.id } };
+          }
+          if (isOrdinalUniqueViolationMessage(msg)) {
+            return { kind: "collision" };
+          }
+          return { kind: "error", error: toStoreError(e) };
+        }
+      });
+
+      if (result.ok) {
+        await tx.commit();
+      } else {
+        await tx.rollback();
+      }
+      return result;
+    } catch (e) {
+      try {
+        await tx.rollback();
+      } catch {
+        // reason: rollback throws only when the transaction is already
+        // closed — safe to ignore (mirrors insertWithProvenance's guard).
+      }
+      return wrapStoreError(e);
+    } finally {
+      tx.close();
+    }
+  }
+
+  /**
+   * @see StoreInterface.allocateOrdinalForExisting
+   * UPDATE-scoped sibling — refuses a row that already carries an ordinal
+   * (checked before the CAS comparison), then delegates to the SAME shared
+   * {@link allocateWithBoundedRetry} seam via a conditional UPDATE.
+   */
+  async allocateOrdinalForExisting(
+    id: DocId,
+    expectedVersion: number,
+  ): Promise<Result<DocRecord, LoreError>> {
+    await this.ensureReady();
+    const tx = await this.client.transaction("write");
+    try {
+      const existingRs = await tx.execute({
+        sql: "SELECT * FROM docs WHERE id = ?",
+        args: [id],
+      });
+      const existingRow = existingRs.rows[0];
+      if (!existingRow) {
+        await tx.rollback();
+        return err({ code: "DOC_NOT_FOUND", id });
+      }
+
+      const current = rowToDocRecord(libsqlRowToDocRow(existingRow));
+      if (current.ordinal !== null && current.ordinal !== undefined) {
+        await tx.rollback();
+        return err({
+          code: "STORE_ERROR",
+          message: `doc ${id} already carries ordinal ${current.ordinal}; allocateOrdinalForExisting refuses to overwrite an already-allocated ordinal`,
+        });
+      }
+      if (current.version !== expectedVersion) {
+        await tx.rollback();
+        return err({
+          code: "STALE_VERSION",
+          id,
+          expected: expectedVersion,
+          actual: current.version,
+        });
+      }
+
+      const maxRs = await tx.execute({
+        sql: "SELECT MAX(ordinal) as maxOrdinal FROM docs WHERE type = ?",
+        args: [current.type] as InValue[],
+      });
+      const maxRow = maxRs.rows[0];
+      const base = maxRow ? rowNumOrNull(maxRow, "maxOrdinal") ?? 0 : 0;
+      const newVersion = expectedVersion + 1;
+
+      const result = await allocateWithBoundedRetry<DocRecord>(
+        base,
+        current.type,
+        async (candidate) => {
+          try {
+            const updateRs = await tx.execute({
+              sql: "UPDATE docs SET ordinal = ?, version = ? WHERE id = ? AND version = ? AND ordinal IS NULL",
+              args: [candidate, newVersion, id, expectedVersion] as InValue[],
+            });
+            if (updateRs.rowsAffected > 0) {
+              return {
+                kind: "success",
+                value: { ...current, ordinal: candidate, version: newVersion },
+              };
+            }
+            return {
+              kind: "error",
+              error: { code: "STALE_VERSION", id, expected: expectedVersion, actual: current.version },
+            };
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : "";
+            if (isOrdinalUniqueViolationMessage(msg)) {
+              return { kind: "collision" };
+            }
+            return { kind: "error", error: toStoreError(e) };
+          }
+        },
+      );
+
+      if (result.ok) {
+        await tx.commit();
+      } else {
+        await tx.rollback();
+      }
+      return result;
+    } catch (e) {
+      try {
+        await tx.rollback();
+      } catch {
+        // reason: rollback throws only when the transaction is already
+        // closed — safe to ignore (mirrors insertWithAllocatedOrdinal's guard).
+      }
+      return wrapStoreError(e);
+    } finally {
+      tx.close();
+    }
+  }
+
+  /**
+   * @see StoreInterface.findByTypeOrdinal
+   * Direct-address lookup — does NOT filter soft-deleted (mirrors `find`).
+   */
+  async findByTypeOrdinal(
+    type: DocType,
+    ordinal: number,
+  ): Promise<Result<DocRecord | null, LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute({
+        sql: "SELECT * FROM docs WHERE type = ? AND ordinal = ?",
+        args: [type, ordinal] as InValue[],
+      });
+      const row = rs.rows[0];
+      return ok(row ? rowToDocRecord(libsqlRowToDocRow(row)) : null);
+    } catch (e) {
       return wrapStoreError(e);
     }
   }

@@ -11,6 +11,7 @@ import type {
   CalibrationRecord,
   DocId,
   DocRecord,
+  DocType,
   LinkRecord,
   LinkType,
   ReviewJudgment,
@@ -37,7 +38,7 @@ import type {
   StoreInterface,
   UpdateOpts,
 } from "./store-interface.js";
-import { computeAuditEntryHash } from "./store-shared.js";
+import { allocateWithBoundedRetry, computeAuditEntryHash } from "./store-shared.js";
 
 // ─── InMemoryStore ─────────────────────────────────────────────────────────────
 
@@ -79,6 +80,97 @@ export class InMemoryStore implements StoreInterface {
 
     this.docs.set(doc.id, { ...doc });
     return ok(doc);
+  }
+
+  /** MAX(ordinal) over every doc of `type` (including soft-deleted, SPEC-084 D9) — 0 when none carry a non-null ordinal yet. */
+  private maxOrdinalForType(type: DocType): number {
+    let max = 0;
+    for (const doc of this.docs.values()) {
+      if (doc.type === type && typeof doc.ordinal === "number" && doc.ordinal > max) {
+        max = doc.ordinal;
+      }
+    }
+    return max;
+  }
+
+  /** True when some doc of `type` (any deleted state) already occupies `ordinal`. */
+  private hasOrdinalCollision(type: DocType, ordinal: number): boolean {
+    for (const doc of this.docs.values()) {
+      if (doc.type === type && doc.ordinal === ordinal) return true;
+    }
+    return false;
+  }
+
+  /**
+   * @see StoreInterface.insertWithAllocatedOrdinal
+   * Delegates its bounded-retry mechanics to the shared
+   * {@link allocateWithBoundedRetry} seam (`store-shared.ts`) — no real
+   * transaction primitive needed (synchronous Map mutation, no I/O to roll
+   * back), so `tryAttempt` just checks {@link hasOrdinalCollision} before
+   * delegating to the plain {@link insert}.
+   */
+  async insertWithAllocatedOrdinal(doc: DocRecord): Promise<Result<DocRecord, LoreError>> {
+    const base = this.maxOrdinalForType(doc.type);
+    return allocateWithBoundedRetry<DocRecord>(base, doc.type, async (candidate) => {
+      if (this.hasOrdinalCollision(doc.type, candidate)) return { kind: "collision" };
+      const insertResult = await this.insert({ ...doc, ordinal: candidate });
+      if (insertResult.ok) return { kind: "success", value: insertResult.value };
+      return { kind: "error", error: insertResult.error };
+    });
+  }
+
+  /**
+   * @see StoreInterface.allocateOrdinalForExisting
+   * UPDATE-scoped sibling — refuses a row that already carries an ordinal
+   * (checked before the CAS comparison), then delegates to the SAME shared
+   * {@link allocateWithBoundedRetry} seam.
+   */
+  async allocateOrdinalForExisting(
+    id: DocId,
+    expectedVersion: number,
+  ): Promise<Result<DocRecord, LoreError>> {
+    const current = this.docs.get(id);
+    if (!current) {
+      return err({ code: "DOC_NOT_FOUND", id });
+    }
+    if (current.ordinal !== null && current.ordinal !== undefined) {
+      return err({
+        code: "STORE_ERROR",
+        message: `doc ${id} already carries ordinal ${current.ordinal}; allocateOrdinalForExisting refuses to overwrite an already-allocated ordinal`,
+      });
+    }
+    if (current.version !== expectedVersion) {
+      return err({
+        code: "STALE_VERSION",
+        id,
+        expected: expectedVersion,
+        actual: current.version,
+      });
+    }
+
+    const base = this.maxOrdinalForType(current.type);
+    return allocateWithBoundedRetry<DocRecord>(base, current.type, async (candidate) => {
+      if (this.hasOrdinalCollision(current.type, candidate)) return { kind: "collision" };
+      const updated: DocRecord = { ...current, ordinal: candidate, version: expectedVersion + 1 };
+      this.docs.set(id, updated);
+      return { kind: "success", value: { ...updated } };
+    });
+  }
+
+  /**
+   * @see StoreInterface.findByTypeOrdinal
+   * Direct-address lookup — does NOT filter soft-deleted (mirrors `find`).
+   */
+  async findByTypeOrdinal(
+    type: DocType,
+    ordinal: number,
+  ): Promise<Result<DocRecord | null, LoreError>> {
+    for (const doc of this.docs.values()) {
+      if (doc.type === type && doc.ordinal === ordinal) {
+        return ok({ ...doc });
+      }
+    }
+    return ok(null);
   }
 
   async find(id: DocId): Promise<Result<DocRecord | null, LoreError>> {

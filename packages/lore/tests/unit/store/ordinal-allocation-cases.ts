@@ -15,29 +15,45 @@
  * silently-shrunk table (or a silently-filtered iteration loop) fails loud
  * instead of a vacuous 0-cases-passed run.
  *
- * ─── Design note: how "forced collision" / "retry exhaustion" are forced ───
- * bun:sqlite is a single connection — there is no way to inject a genuine
- * concurrent writer between this call's internal MAX-read and its INSERT
- * (SPEC-084's own text: "the DB constraint IS the race oracle — honest under
- * bun:sqlite's single-connection model, no fake concurrency"). For a
- * DB-constraint violation to be forceable AT ALL from outside the atomic
- * `insertWithAllocatedOrdinal` call, its bounded-retry loop must compute its
- * starting candidate ONCE (`MAX(ordinal) + 1` over ALL rows for that type,
- * including soft-deleted ones per the partial-unique-index design) and then
- * try successive candidates (`+1` each retry) WITHOUT re-querying the table —
- * otherwise a fresh per-attempt MAX query would always self-heal around any
- * pre-inserted row and no violation could ever be observed, no matter how
- * many rows are pre-occupied. This case table's `preInsertOrdinals`/
- * expectations encode exactly that black-box contract:
- *   - pre-occupy 1 slot at (current-max + 1) → first attempt collides,
- *     second attempt (current-max + 2) succeeds → NOT an exhaustion.
- *   - pre-occupy 3 consecutive slots at (current-max + 1..3) → all 3
- *     bounded attempts collide → `ORDINAL_ALLOCATION_EXHAUSTED`.
- * Both contract test files pre-insert these rows via the store's PLAIN
- * `insert()` (bypassing the allocator entirely — simulating rows that exist
- * for reasons other than this allocator call, e.g. the repair migration or a
- * prior allocator call), then call `insertWithAllocatedOrdinal`/
- * `allocateOrdinalForExisting` and assert on the OBSERVABLE result only.
+ * ─── Design note: the TRUE forceability boundary (corrected 2026-07-27) ───
+ * An EARLIER version of this note claimed a bounded-retry loop that computes
+ * its starting candidate ONCE and never re-queries mid-loop would let a
+ * pre-inserted row force an observable collision. That claim was WRONG, and
+ * self-contradicted this same file's `cross_type_coexistence` case (SPEC-084
+ * D2/D9, confirmed by orchestrator adjudication after re-reading the spec):
+ * `base` is `MAX(ordinal WHERE type=?)` read LIVE over the SAME partial
+ * index the `(type, ordinal)` UNIQUE constraint enforces (D9: includes
+ * soft-deleted rows) — so ANY row visible to that index, including one
+ * inserted moments earlier via the store's plain `insert()` bypass, is ALSO
+ * visible to this MAX read. `MAX(ordinal)+1` is therefore, BY CONSTRUCTION,
+ * NEVER already taken by an existing row of that type. Pre-inserting rows
+ * before calling `insertWithAllocatedOrdinal`/`allocateOrdinalForExisting`
+ * can shift WHERE the next free slot lands (exercised by
+ * `forced_collision_lands_next_free` and `cross_type_coexistence` below,
+ * both asserting an OBSERVABLE landing position only) but can NEVER force
+ * the bounded retry loop to actually collide — "exhaustion via external
+ * pre-insertion" is structurally unobservable under a single connection,
+ * confirmed empirically: both runners land at `MAX+1` immediately whenever
+ * this was tried, never exhausting.
+ *
+ * This is deliberately NOT "fixed" by making `base` stale/cached across
+ * calls — that would (a) produce FALSE exhaustion in production the moment
+ * real pre-existing corpus data occupies the low end of a type's ordinal
+ * range, and (b) contradict SPEC-084 D2's literal "MAX+1 over the partial
+ * index" text (rejecting a counters-table/cached-sequence design). The
+ * store implementation is correct as written; only this design note (and
+ * the `retry_exhaustion` case's mechanics below) needed correcting.
+ *
+ * `retry_exhaustion` therefore exercises the bounded-retry budget and
+ * exhaustion shape at the ONLY seam where it is honestly observable: it
+ * drives `allocateWithBoundedRetry` (`store-shared.ts`) DIRECTLY with an
+ * injected `tryAttempt` that always reports `{kind: "collision"}`, asserts
+ * the injected fn was called exactly `ORDINAL_ALLOCATION_MAX_ATTEMPTS`
+ * times, and asserts the resulting `err(STORE_ERROR)` whose message
+ * contains `ORDINAL_ALLOCATION_EXHAUSTED` — no fake concurrency, no
+ * test-only hook added to either store class's public surface. The other
+ * five cases still exercise the real `SQLiteStore`/`InMemoryStore` methods
+ * end-to-end (they assert landing positions, never exhaustion).
  *
  * @spec_ref AC-084-1, AC-084-2 (SPEC-084 §Test Plan "Contract suite")
  */
@@ -48,7 +64,10 @@ export type OrdinalCaseDocType = "spec" | "adr";
 export type OrdinalAllocationCaseKind =
   /** Pre-insert ONE colliding slot → the allocator lands on the next free ordinal. */
   | "forced_collision_lands_next_free"
-  /** Pre-insert THREE consecutive colliding slots → bounded retries exhaust loudly. */
+  /** Drives `allocateWithBoundedRetry` directly with an injected always-colliding
+   *  `tryAttempt` → asserts exactly `ORDINAL_ALLOCATION_MAX_ATTEMPTS` calls and a
+   *  loud `ORDINAL_ALLOCATION_EXHAUSTED` error (see this file's design note above
+   *  for why external pre-insertion can never observe this). */
   | "retry_exhaustion"
   /** A soft-deleted doc's ordinal is never handed to a later create of the same type. */
   | "soft_deleted_ordinal_never_reused"
@@ -74,7 +93,7 @@ export const ORDINAL_ALLOCATION_CASES: readonly OrdinalAllocationCase[] = [
     docType: "spec",
   },
   {
-    name: "retry exhaustion: three consecutive pre-inserted (adr, N..N+2) rows exhaust the bounded retry budget → err(STORE_ERROR) containing ORDINAL_ALLOCATION_EXHAUSTED",
+    name: "retry exhaustion: allocateWithBoundedRetry driven directly with an injected always-colliding attempt → exactly 3 attempts, err(STORE_ERROR) containing ORDINAL_ALLOCATION_EXHAUSTED",
     kind: "retry_exhaustion",
     docType: "adr",
   },

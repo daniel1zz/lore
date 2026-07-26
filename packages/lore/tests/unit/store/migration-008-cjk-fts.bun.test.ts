@@ -97,15 +97,15 @@ describe("migration-008 (CJK bigram shadow columns for FTS5)", () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("HAPPY: a fresh :memory: DB migrates straight to user_version 9 (migration-009 is now the head) with the shadow columns present", () => {
+  it("HAPPY: a fresh :memory: DB migrates straight to user_version 10 (migration-010 is now the head) with the shadow columns present", () => {
     const store = new SQLiteStore(":memory:");
     const db = store.getDatabase();
 
-    // reason: migration-009 (SPEC-079 G3 audit hash chain) is now the head —
-    // a fresh store runs every migration up to it, not just through
+    // reason: migration-010 (SPEC-084 docs.ordinal) is now the head — a
+    // fresh store runs every migration up to it, not just through
     // migration-008. This test's own concern (CJK shadow columns present)
     // is unaffected — asserted directly below.
-    expect(userVersion(db)).toBe(9);
+    expect(userVersion(db)).toBe(10);
     const cols = tableColumnNames(db, "docs");
     expect(cols).toContain("fts_title");
     expect(cols).toContain("fts_content");
@@ -162,7 +162,7 @@ describe("migration-008 (CJK bigram shadow columns for FTS5)", () => {
     const store = new SQLiteStore(dbPath);
     const db = store.getDatabase();
 
-    expect(userVersion(db)).toBe(9);
+    expect(userVersion(db)).toBe(10);
     const cols = tableColumnNames(db, "docs");
     expect(cols).toContain("fts_title");
     expect(cols).toContain("fts_content");
@@ -200,7 +200,7 @@ describe("migration-008 (CJK bigram shadow columns for FTS5)", () => {
     expect(() => {
       const secondOpen = new SQLiteStore(dbPath);
       const db = secondOpen.getDatabase();
-      expect(userVersion(db)).toBe(9);
+      expect(userVersion(db)).toBe(10);
       expect(tableColumnNames(db, "docs")).toContain("fts_title");
       secondOpen.close();
     }).not.toThrow();

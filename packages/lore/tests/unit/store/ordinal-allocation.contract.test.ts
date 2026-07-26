@@ -14,10 +14,14 @@
  * an INDEPENDENT literal (not derived from the table) so a silently-shrunk
  * table trips a real mismatch instead of a vacuous self-comparison.
  *
- * RED STATE (2026-07-26): `StoreInterface.insertWithAllocatedOrdinal` /
- * `allocateOrdinalForExisting` do not exist yet on `InMemoryStore` — every
- * case below MUST fail with a `TypeError: ... is not a function`
- * (missing-method class), never a self-inflicted assertion bug.
+ * T2 (schema migration + store-atomic allocation methods) has landed:
+ * `InMemoryStore.insertWithAllocatedOrdinal`/`allocateOrdinalForExisting`
+ * are real. Five of the six cases below exercise them end-to-end; the
+ * `retry_exhaustion` case exercises the shared `allocateWithBoundedRetry`
+ * seam (`store-shared.ts`) directly with an injected always-colliding
+ * attempt, mirroring the SQLiteStore twin byte-for-byte — see
+ * `ordinal-allocation-cases.ts`'s design note for why external
+ * pre-insertion can never observe a genuine exhaustion.
  *
  * @spec_ref AC-084-2
  */
@@ -25,6 +29,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { DocRecord } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import {
+  allocateWithBoundedRetry,
+  ORDINAL_ALLOCATION_MAX_ATTEMPTS,
+} from "../../../src/store/store-shared.js";
 import {
   EXPECTED_ORDINAL_ALLOCATION_CASE_COUNT,
   ORDINAL_ALLOCATION_CASES,
@@ -140,18 +148,24 @@ async function runOrdinalAllocationCase(
     }
 
     case "retry_exhaustion": {
-      for (const n of [1, 2, 3]) {
-        const pre = await store.insert(makeDoc({ type: testCase.docType, ordinal: n }));
-        expect(pre.ok).toBe(true);
-      }
-
-      const result = await storeAny.insertWithAllocatedOrdinal(
-        makeDoc({ type: testCase.docType, ordinal: null }),
-      );
+      // Honest exhaustion oracle (see ordinal-allocation-cases.ts's design
+      // note): external pre-insertion can NEVER force a real collision
+      // against a live MAX(ordinal)+1 read, so exhaustion is exercised
+      // directly at the shared bounded-retry seam with an injected
+      // always-colliding attempt — no fake concurrency, no test-only hook
+      // on InMemoryStore's public surface. Mirrors the SQLiteStore twin
+      // byte-for-byte (AC-084-2 mechanical parity).
+      let attempts = 0;
+      const result = await allocateWithBoundedRetry<DocRecord>(0, testCase.docType, async () => {
+        attempts += 1;
+        return { kind: "collision" };
+      });
+      expect(attempts).toBe(ORDINAL_ALLOCATION_MAX_ATTEMPTS);
       expect(result.ok).toBe(false);
       if (result.ok) return;
-      expect(result.error?.code).toBe("STORE_ERROR");
-      expect(result.error?.message ?? "").toContain("ORDINAL_ALLOCATION_EXHAUSTED");
+      expect(result.error.code).toBe("STORE_ERROR");
+      if (result.error.code !== "STORE_ERROR") return;
+      expect(result.error.message).toContain("ORDINAL_ALLOCATION_EXHAUSTED");
       break;
     }
 

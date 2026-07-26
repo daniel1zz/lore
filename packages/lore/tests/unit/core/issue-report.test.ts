@@ -206,11 +206,11 @@ describe("buildIssueReportExtra", () => {
 // ─── LATEST_SCHEMA_VERSION ──────────────────────────────────────────────────
 // STATE: the constant equals the highest migration number applied by
 // sqlite-store.ts::runMigrations — confirmed by reading the migration chain
-// directly (`if (currentVersion < N)` runs through migration-009 as of the
-// SPEC-079 G3 audit hash-chain migration, so the ceiling is 9).
+// directly (`if (currentVersion < N)` runs through migration-010 as of the
+// SPEC-084 docs.ordinal migration, so the ceiling is 10).
 describe("LATEST_SCHEMA_VERSION", () => {
-  it("LATEST_SCHEMA_VERSION equals 9 — the highest migration number in sqlite-store.ts's runMigrations chain", () => {
-    expect(LATEST_SCHEMA_VERSION).toBe(9);
+  it("LATEST_SCHEMA_VERSION equals 10 — the highest migration number in sqlite-store.ts's runMigrations chain", () => {
+    expect(LATEST_SCHEMA_VERSION).toBe(10);
   });
 
   it("LATEST_SCHEMA_VERSION is importable without touching bun:sqlite (pure module)", () => {
