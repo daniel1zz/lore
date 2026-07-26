@@ -1,6 +1,8 @@
 /**
  * lore bootstrap [--by <name>] [--json] [--injection] — SPEC-041 S1 volatile
- * session pointer-set, plus the SPEC-080 tier-1 injection projection.
+ * session pointer-set, plus the SPEC-080(bootstrap-injection; corpus slug
+ * spec-080-bootstrap-injection-projection-tier-1-tier-2-payload) tier-1
+ * injection projection.
  *
  * A fresh session (an AI agent or a human) queries this ONE deterministic, read-only
  * verb to learn the volatile delta since the static layer (CLAUDE.md/AGENTS.md
@@ -14,7 +16,7 @@
  * utils.ts::resolveActor. Only filters `my_claims`; every other field is
  * corpus-wide regardless of `by`.
  *
- * **`--injection` (SPEC-080 §Module Boundary CLI bullet, D3, D5)** — renders the
+ * **`--injection` (SPEC-080(bootstrap-injection) §Module Boundary CLI bullet, D3, D5)** — renders the
  * SAME `BootstrapReportWithStaleness` through `@lore/core`'s
  * `buildBootstrapInjection`, printing its compact `json` verbatim (never the
  * `{ok, data}` envelope plain `--json` uses — the hook is a blind pipe, D3, and
@@ -23,7 +25,7 @@
  * the SAME `config` this command already threads through from `loadLoreApp()` for
  * telemetry (`app.ts` needs no change — `loadLoreApp()` already resolves and
  * returns the parsed project config; there is exactly one config-resolution path
- * here, mirroring the `claimTtlMinutes` DI precedent SPEC-080 names). **Combined
+ * here, mirroring the `claimTtlMinutes` DI precedent SPEC-080(bootstrap-injection) names). **Combined
  * `--injection --json` decision**: `--injection` takes precedence and produces the
  * SAME compact injection payload as `--injection` alone — never a rejection. The
  * SessionStart hook only ever spawns `--injection` on its own, so the two flags
@@ -35,7 +37,7 @@
  * Exit codes: 0 = success (including an empty corpus — `root: null`, every array
  *   `[]`, AC-SL-10), non-zero only on an underlying store error.
  *
- * Source: SPEC-041 §3 D1, D2; SPEC-080 §Module Boundary, D3, D5
+ * Source: SPEC-041 §3 D1, D2; SPEC-080(bootstrap-injection) §Module Boundary, D3, D5
  */
 
 import { defineCommand } from "citty";
@@ -177,7 +179,7 @@ export default defineCommand({
     injection: {
       type: "boolean",
       description:
-        "SPEC-080 tier-1 injection projection — print buildBootstrapInjection's compact " +
+        "SPEC-080(bootstrap-injection) tier-1 injection projection — print buildBootstrapInjection's compact " +
         "JSON (resume_hint/my_claims/active_sessions/armed_gates/root/pending_reviews/" +
         "active_plans/latest_handoffs/corpus/omitted[/budget_exceeded]) instead of the " +
         "full report. Takes precedence over --json when both are given (same compact " +
@@ -257,7 +259,7 @@ export default defineCommand({
       };
 
       if (args.injection) {
-        // SPEC-080 D3, D5 — resolve budgets from the SAME config loadLoreApp() already
+        // SPEC-080(bootstrap-injection) D3, D5 — resolve budgets from the SAME config loadLoreApp() already
         // parsed (one resolution path, claimTtlMinutes DI precedent), then print the
         // projection's compact json verbatim. Takes precedence over --json (module
         // header's "Combined --injection --json decision").
