@@ -12,6 +12,21 @@
  *   the implicit calibration hook on approve/reject).
  * Public surface: TriageQueue, TriageQueueProps
  * Invariants:
+ *   - Rows come from {@link fetchReviewQueueRows} — `draft` AND `in-review`
+ *     docs, `in-review` sorted ahead of `draft` (ADR
+ *     adr-dashboard-review-queues-include-in-review-docs-ahead-of, dogfood
+ *     ISSUE-008); each row renders a read-only `StatusPill` so the two
+ *     statuses stay visually distinguishable. The Approve action is gated by
+ *     `getAllowedTransitions(doc.status).includes("approved")` — never a
+ *     hardcoded assumption — though both statuses this queue ever contains
+ *     satisfy it today (`VALID_TRANSITIONS`: `draft → {in-review, approved}`,
+ *     `in-review → {approved, draft}`). Reject stays unconditionally offered
+ *     for every row: `ReviewService.reject`'s `canReject` check is
+ *     `status === "draft" || status === "in-review"` — NOT modeled in
+ *     `VALID_TRANSITIONS` (a draft doc rejecting "to draft" is a same-status
+ *     no-op status-wise, so it's absent from that graph) — which is exactly
+ *     the full set of statuses this merged queue ever contains by
+ *     construction, so no separate transition check is needed there.
  *   - "Escalated only" filters to FRESH escalations only — `judgment.decision
  *     === "escalate" AND judgment.doc_version === doc.version` — a stale
  *     escalation (doc edited since judged) is no longer a trustworthy signal
@@ -63,12 +78,15 @@
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { apiGetPendingReview, apiGetJudgments } from "@/lib/api";
-import type { PendingDocRow } from "@/lib/api";
+import { apiGetJudgments } from "@/lib/api";
+import { fetchReviewQueueRows } from "@/lib/review-queue";
+import type { ReviewQueueDocRow } from "@/lib/review-queue";
+import { getAllowedTransitions } from "@lore/core";
 import type { ReviewJudgment } from "@lore/core";
 import { JudgmentBadge } from "@/components/judgment-badge";
 import { JudgmentDrilldown } from "@/components/JudgmentDrilldown";
 import { formatTypeMetaLabel, metaBadgeVariant } from "@/lib/type-meta-label";
+import { StatusPill } from "@/components/StatusPill";
 import { apiApproveDoc, apiRejectDoc, DashboardApiError } from "@/api/mutations";
 import { useTriageKeyboard } from "@/lib/use-triage-keyboard";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -94,12 +112,12 @@ export interface TriageQueueProps {
 }
 
 interface TriageRow {
-  doc: PendingDocRow;
+  doc: ReviewQueueDocRow;
   judgment: ReviewJudgment | null;
 }
 
 async function fetchTriageQueue(project: string | null): Promise<TriageRow[]> {
-  const docs = await apiGetPendingReview(project);
+  const docs = await fetchReviewQueueRows(project);
   const judgments = await Promise.all(docs.map((doc) => apiGetJudgments(project, doc.id)));
   return docs.map((doc, index) => ({ doc, judgment: judgments[index]?.latest ?? null }));
 }
@@ -147,7 +165,15 @@ export function TriageQueue({ project = null, onNavigate }: TriageQueueProps): R
   const { selectedId } = useTriageKeyboard({
     itemIds: rowIds,
     enabled: adjudicatingId === null,
-    onApprove: (docId) => void handleAdjudicate(docId, "approve"),
+    // reason: mirrors the mouse-driven Approve button's `canApprove` gate
+    // below — the keyboard fast path must not offer a transition
+    // `getAllowedTransitions` doesn't allow either.
+    onApprove: (docId) => {
+      const row = rows.find((r) => r.doc.id === docId);
+      if (row !== undefined && getAllowedTransitions(row.doc.status).includes("approved")) {
+        void handleAdjudicate(docId, "approve");
+      }
+    },
     onReject: (docId) => openAdjudicate(docId),
     onExpand: (docId) => setExpandedQuestionsId((prev) => (prev === docId ? null : docId)),
     onOpen: (docId) => onNavigate?.(docId),
@@ -229,6 +255,10 @@ export function TriageQueue({ project = null, onNavigate }: TriageQueueProps): R
             const isSubmitting = submittingId === doc.id;
             const blockingQuestions = judgment?.blocking_questions ?? [];
             const metaLabel = doc.meta !== undefined ? formatTypeMetaLabel(doc.meta) : null;
+            // reason: never hardcode which transition the Approve action
+            // performs — see the module doc comment for why Reject needs no
+            // equivalent check within this queue's row-status domain.
+            const canApprove = getAllowedTransitions(doc.status).includes("approved");
 
             return (
               <div
@@ -243,6 +273,9 @@ export function TriageQueue({ project = null, onNavigate }: TriageQueueProps): R
                     <Badge variant="outline" className="text-xs shrink-0">
                       {doc.type}
                     </Badge>
+                    <span className="shrink-0">
+                      <StatusPill status={doc.status} />
+                    </span>
                     {metaLabel !== null && (
                       <Badge
                         variant={doc.meta !== undefined ? metaBadgeVariant(doc.meta) : "outline"}
@@ -306,14 +339,16 @@ export function TriageQueue({ project = null, onNavigate }: TriageQueueProps): R
                       aria-label={`Calibration note for ${doc.title}`}
                       disabled={isSubmitting}
                     />
-                    <button
-                      type="button"
-                      className="text-xs px-2 py-1 bg-primary text-primary-foreground rounded hover:bg-primary/90 disabled:opacity-50"
-                      onClick={() => void handleAdjudicate(doc.id, "approve")}
-                      disabled={isSubmitting}
-                    >
-                      {isSubmitting ? "…" : "Approve"}
-                    </button>
+                    {canApprove && (
+                      <button
+                        type="button"
+                        className="text-xs px-2 py-1 bg-primary text-primary-foreground rounded hover:bg-primary/90 disabled:opacity-50"
+                        onClick={() => void handleAdjudicate(doc.id, "approve")}
+                        disabled={isSubmitting}
+                      >
+                        {isSubmitting ? "…" : "Approve"}
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="text-xs px-2 py-1 border border-destructive text-destructive rounded hover:bg-destructive/10 disabled:opacity-50"

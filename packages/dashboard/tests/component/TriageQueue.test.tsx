@@ -62,15 +62,16 @@
 
 import "@testing-library/jest-dom/vitest";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { PendingDocRow } from "../../src/lib/api";
 import type { ReviewJudgment } from "@lore/core";
 
 vi.mock("@/lib/api", () => ({
-  apiGetPendingReview: vi.fn(),
   apiGetJudgments: vi.fn(),
+}));
+vi.mock("@/lib/review-queue", () => ({
+  fetchReviewQueueRows: vi.fn(),
 }));
 
 const toastSuccess = vi.fn();
@@ -93,16 +94,18 @@ vi.mock("../../src/api/mutations", async (importOriginal) => {
   };
 });
 
-import { apiGetPendingReview, apiGetJudgments } from "@/lib/api";
+import { apiGetJudgments } from "@/lib/api";
+import { fetchReviewQueueRows } from "@/lib/review-queue";
+import type { ReviewQueueDocRow } from "@/lib/review-queue";
 import { apiApproveDoc, apiRejectDoc } from "../../src/api/mutations";
 import { TriageQueue } from "../../src/components/TriageQueue";
 
-const mockedGetPending = vi.mocked(apiGetPendingReview);
+const mockedFetchQueue = vi.mocked(fetchReviewQueueRows);
 const mockedGetJudgments = vi.mocked(apiGetJudgments);
 const mockedApprove = vi.mocked(apiApproveDoc);
 const mockedReject = vi.mocked(apiRejectDoc);
 
-function makePendingDoc(overrides: Partial<PendingDocRow> & { id: string }): PendingDocRow {
+function makePendingDoc(overrides: Partial<ReviewQueueDocRow> & { id: string }): ReviewQueueDocRow {
   return {
     type: "spec",
     title: "Untitled",
@@ -137,7 +140,7 @@ function renderWithClient(ui: React.ReactElement) {
 }
 
 beforeEach(() => {
-  mockedGetPending.mockReset();
+  mockedFetchQueue.mockReset();
   mockedGetJudgments.mockReset();
   mockedApprove.mockReset();
   mockedReject.mockReset();
@@ -153,7 +156,7 @@ describe("TriageQueue", () => {
       const staleEscalation = makePendingDoc({ id: "01HDOC00000000000000000002", title: "Stale Escalation", version: 3 });
       const approved = makePendingDoc({ id: "01HDOC00000000000000000003", title: "Just Approved", version: 1 });
 
-      mockedGetPending.mockResolvedValue([freshEscalation, staleEscalation, approved]);
+      mockedFetchQueue.mockResolvedValue([freshEscalation, staleEscalation, approved]);
       mockedGetJudgments.mockImplementation(async (_project: string | null, docId: string) => {
         if (docId === freshEscalation.id) {
           return {
@@ -189,7 +192,7 @@ describe("TriageQueue", () => {
   describe("state: blocking-questions expansion", () => {
     it("reveals the indented blocking-questions list only after the expand toggle is clicked", async () => {
       const doc = makePendingDoc({ id: "01HDOC00000000000000000001", title: "Escalated Doc", version: 2 });
-      mockedGetPending.mockResolvedValue([doc]);
+      mockedFetchQueue.mockResolvedValue([doc]);
       mockedGetJudgments.mockResolvedValue({
         latest: makeJudgment({
           doc_version: 2,
@@ -215,7 +218,7 @@ describe("TriageQueue", () => {
   describe("state: adjudicate panel", () => {
     it("reveals the calibration-note input and Approve/Reject buttons after clicking Adjudicate", async () => {
       const doc = makePendingDoc({ id: "01HDOC00000000000000000001", title: "Some Doc" });
-      mockedGetPending.mockResolvedValue([doc]);
+      mockedFetchQueue.mockResolvedValue([doc]);
       mockedGetJudgments.mockResolvedValue({ latest: null, history: [] });
 
       const user = userEvent.setup();
@@ -235,7 +238,7 @@ describe("TriageQueue", () => {
   describe("happy path: calibration note passes through", () => {
     it("calls apiApproveDoc with the trimmed calibration note", async () => {
       const doc = makePendingDoc({ id: "01HDOC00000000000000000001", title: "Some Doc" });
-      mockedGetPending.mockResolvedValue([doc]);
+      mockedFetchQueue.mockResolvedValue([doc]);
       mockedGetJudgments.mockResolvedValue({ latest: null, history: [] });
       mockedApprove.mockResolvedValue({ doc: {} as never, warnings: [] });
 
@@ -252,7 +255,7 @@ describe("TriageQueue", () => {
 
     it("omits calibrationNote entirely when the note is left blank", async () => {
       const doc = makePendingDoc({ id: "01HDOC00000000000000000001", title: "Some Doc" });
-      mockedGetPending.mockResolvedValue([doc]);
+      mockedFetchQueue.mockResolvedValue([doc]);
       mockedGetJudgments.mockResolvedValue({ latest: null, history: [] });
       mockedReject.mockResolvedValue({ doc: {} as never, warnings: [] });
 
@@ -270,7 +273,7 @@ describe("TriageQueue", () => {
   describe("regression: warnings surface", () => {
     it("fires toast.warning in addition to toast.success when the response carries warnings", async () => {
       const doc = makePendingDoc({ id: "01HDOC00000000000000000001", title: "Some Doc" });
-      mockedGetPending.mockResolvedValue([doc]);
+      mockedFetchQueue.mockResolvedValue([doc]);
       mockedGetJudgments.mockResolvedValue({ latest: null, history: [] });
       mockedApprove.mockResolvedValue({ doc: {} as never, warnings: ["Calibration write failed: disk full"] });
 
@@ -289,7 +292,7 @@ describe("TriageQueue", () => {
   describe("error", () => {
     it("surfaces a toast.error and keeps the adjudicate panel open when apiApproveDoc rejects", async () => {
       const doc = makePendingDoc({ id: "01HDOC00000000000000000001", title: "Some Doc" });
-      mockedGetPending.mockResolvedValue([doc]);
+      mockedFetchQueue.mockResolvedValue([doc]);
       mockedGetJudgments.mockResolvedValue({ latest: null, history: [] });
       mockedApprove.mockRejectedValue(new Error("network down"));
 
@@ -320,7 +323,7 @@ describe("TriageQueue", () => {
           title: "Task Row",
           meta: { t: "task", claimed_by: "alice", claim_stale: false, evidence_pass: 2, evidence_fail: 1 },
         });
-        mockedGetPending.mockResolvedValue([knowledgeDoc, taskDoc]);
+        mockedFetchQueue.mockResolvedValue([knowledgeDoc, taskDoc]);
         mockedGetJudgments.mockResolvedValue({ latest: null, history: [] });
 
         renderWithClient(<TriageQueue />);
@@ -340,7 +343,7 @@ describe("TriageQueue", () => {
           title: "Empty Task Meta",
           meta: { t: "task", evidence_pass: 0, evidence_fail: 0 },
         });
-        mockedGetPending.mockResolvedValue([doc]);
+        mockedFetchQueue.mockResolvedValue([doc]);
         mockedGetJudgments.mockResolvedValue({ latest: null, history: [] });
 
         renderWithClient(<TriageQueue />);
@@ -360,7 +363,7 @@ describe("TriageQueue", () => {
           type: "spec",
           title: "No Meta Row",
         });
-        mockedGetPending.mockResolvedValue([doc]);
+        mockedFetchQueue.mockResolvedValue([doc]);
         mockedGetJudgments.mockResolvedValue({ latest: null, history: [] });
 
         renderWithClient(<TriageQueue />);
@@ -387,7 +390,7 @@ describe("TriageQueue", () => {
           title: "Approved Doc",
           version: 1,
         });
-        mockedGetPending.mockResolvedValue([freshEscalation, approved]);
+        mockedFetchQueue.mockResolvedValue([freshEscalation, approved]);
         mockedGetJudgments.mockImplementation(async (_project: string | null, docId: string) => {
           if (docId === freshEscalation.id) {
             return { latest: makeJudgment({ doc_version: 2, decision: "escalate" }), history: [] };
@@ -411,9 +414,9 @@ describe("TriageQueue", () => {
   });
 
   describe("state — project scoping (SPEC-078 T13, AC-078-7/AC-078-8)", () => {
-    it("scopes apiGetPendingReview/apiGetJudgments and the query cache key to the passed project", async () => {
+    it("scopes fetchReviewQueueRows/apiGetJudgments and the query cache key to the passed project", async () => {
       const doc = makePendingDoc({ id: "01HDOC00000000000000000001", title: "Acme Doc" });
-      mockedGetPending.mockResolvedValue([doc]);
+      mockedFetchQueue.mockResolvedValue([doc]);
       mockedGetJudgments.mockResolvedValue({ latest: null, history: [] });
 
       const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -425,11 +428,104 @@ describe("TriageQueue", () => {
 
       await screen.findByText("Acme Doc");
 
-      expect(mockedGetPending).toHaveBeenCalledWith("acme");
+      expect(mockedFetchQueue).toHaveBeenCalledWith("acme");
       expect(mockedGetJudgments).toHaveBeenCalledWith("acme", doc.id);
 
       const keys = client.getQueryCache().getAll().map((q) => q.queryKey);
       expect(keys).toContainEqual(["project:acme", "pending", "triage-queue"]);
+    });
+  });
+
+  describe("ISSUE-008: draft + in-review merged queue", () => {
+    it("renders an in-review row and a draft row, each with a distinguishing status label and an Approve action", async () => {
+      const inReviewDoc = makePendingDoc({
+        id: "01HDOC00000000000000000020",
+        title: "In Review Doc",
+        status: "in-review",
+      });
+      const draftDoc = makePendingDoc({
+        id: "01HDOC00000000000000000021",
+        title: "Draft Doc",
+        status: "draft",
+      });
+      // reason: TriageQueue never independently re-sorts — order is whatever
+      // fetchReviewQueueRows returns (unit-pinned in
+      // tests/unit/lib/review-queue.test.ts). Mocking it in-review-first
+      // proves the queue renders rows in exactly that order.
+      mockedFetchQueue.mockResolvedValue([inReviewDoc, draftDoc]);
+      mockedGetJudgments.mockResolvedValue({ latest: null, history: [] });
+
+      renderWithClient(<TriageQueue />);
+
+      await screen.findByText("In Review Doc");
+      expect(screen.getByText("Draft Doc")).toBeInTheDocument();
+      expect(screen.getByText("in-review")).toBeInTheDocument();
+      expect(screen.getByText("draft")).toBeInTheDocument();
+
+      // reason: getAllowedTransitions(status).includes("approved") is true
+      // for BOTH draft and in-review (VALID_TRANSITIONS) — the Approve
+      // action must render for both rows, never hardcoded to draft only.
+      const reviewButtons = screen.getAllByText("Review");
+      expect(reviewButtons).toHaveLength(2);
+    });
+
+    it("approves an in-review row via the mouse-driven Review -> Approve flow", async () => {
+      const inReviewDoc = makePendingDoc({
+        id: "01HDOC00000000000000000022",
+        title: "In Review Doc",
+        status: "in-review",
+      });
+      mockedFetchQueue.mockResolvedValue([inReviewDoc]);
+      mockedGetJudgments.mockResolvedValue({ latest: null, history: [] });
+      mockedApprove.mockResolvedValue({ doc: {} as never, warnings: [] });
+
+      const user = userEvent.setup();
+      renderWithClient(<TriageQueue />);
+
+      await screen.findByText("In Review Doc");
+      await user.click(screen.getByText("Review"));
+      await user.click(screen.getByText("Approve"));
+
+      await waitFor(() => expect(mockedApprove).toHaveBeenCalledWith(null, inReviewDoc.id, {}));
+    });
+
+    it("rejects an in-review row via the mouse-driven Review -> Reject flow (in-review -> draft, ReviewService.reject's canReject domain)", async () => {
+      const inReviewDoc = makePendingDoc({
+        id: "01HDOC00000000000000000023",
+        title: "In Review Doc",
+        status: "in-review",
+      });
+      mockedFetchQueue.mockResolvedValue([inReviewDoc]);
+      mockedGetJudgments.mockResolvedValue({ latest: null, history: [] });
+      mockedReject.mockResolvedValue({ doc: {} as never, warnings: [] });
+
+      const user = userEvent.setup();
+      renderWithClient(<TriageQueue />);
+
+      await screen.findByText("In Review Doc");
+      await user.click(screen.getByText("Review"));
+      await user.click(screen.getByText("Reject"));
+
+      await waitFor(() => expect(mockedReject).toHaveBeenCalledWith(null, inReviewDoc.id, undefined, {}));
+    });
+
+    it("keyboard 'a' (via j then a) approves an in-review row exactly like a draft row — the getAllowedTransitions gate never blocks it", async () => {
+      const inReviewDoc = makePendingDoc({
+        id: "01HDOC00000000000000000024",
+        title: "In Review Doc",
+        status: "in-review",
+      });
+      mockedFetchQueue.mockResolvedValue([inReviewDoc]);
+      mockedGetJudgments.mockResolvedValue({ latest: null, history: [] });
+      mockedApprove.mockResolvedValue({ doc: {} as never, warnings: [] });
+
+      renderWithClient(<TriageQueue />);
+
+      await screen.findByText("In Review Doc");
+      fireEvent.keyDown(document, { key: "j" });
+      fireEvent.keyDown(document, { key: "a" });
+
+      await waitFor(() => expect(mockedApprove).toHaveBeenCalledWith(null, inReviewDoc.id, {}));
     });
   });
 });

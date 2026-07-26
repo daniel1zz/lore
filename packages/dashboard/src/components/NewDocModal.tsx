@@ -25,15 +25,50 @@
  *     a spec: the form renders a visible notice naming the real authoring paths
  *     (`lore create spec` CLI / `/lore-design` skill) and disables Create,
  *     instead of letting the user hit a silent 4xx from the service-layer gate.
+ *   - The "Parent ID" field is a searchable combobox (dogfood 2026-07-26
+ *     ISSUE-004), not a bare text input — but the underlying `<input>` is
+ *     STILL the field's own value: typing/pasting a raw ULID or slug and
+ *     submitting works exactly as before, whether or not any suggestion is
+ *     ever opened. Suggestions come from the optional `docs` prop (the
+ *     Library page's already-cached, already-fetched unfiltered `apiList`
+ *     query — no extra request issued by this component) filtered by
+ *     `filterParentSuggestions` (`@/lib/parent-suggestions`, pure — parent
+ *     type validity via `@lore/core`'s existing `isValidParentType`, never a
+ *     new client-side rule) against the input's current text, matched
+ *     against BOTH title and slug. Selecting a suggestion fills the field
+ *     with that doc's `slug`.
+ *     Design choice — native `<datalist>` vs a hand-rolled combobox listbox:
+ *     a `<datalist>`'s built-in suggestion-narrowing algorithm is NOT
+ *     specified to match on hidden/secondary text the way this field needs
+ *     (title AND slug) — browsers are free to filter only against the
+ *     `<option>`'s `value` attribute, which would silently hide a
+ *     title-only match depending on engine, an unverifiable-without-a-real-
+ *     browser-per-engine risk. A perfect datalist would beat a half-correct
+ *     combobox, but this exact requirement (dual-field substring match) is
+ *     the one datalist cannot be made to satisfy deterministically across
+ *     engines — so this is a minimal hand-rolled listbox with COMPLETE ARIA
+ *     instead: the input carries `role="combobox"` /
+ *     `aria-autocomplete="list"` / `aria-expanded` / `aria-controls` /
+ *     `aria-activedescendant`; the popup is `role="listbox"` with
+ *     `role="option"` rows and `aria-selected`; Down/Up move the highlighted
+ *     option (wrapping), Enter selects the highlighted option (or falls
+ *     through to the form's own submit when the popup is closed), Escape
+ *     closes the popup WITHOUT closing the whole modal (`e.stopPropagation()`
+ *     — a second Escape, with the popup already closed, still closes the
+ *     modal via the document-level listener below). Options use
+ *     `onMouseDown={preventDefault}` (not `onClick`) so a mouse selection
+ *     never blurs the input first — the standard combobox click pattern.
  * Side-effect class: IO (calls onCreate callback)
- * Source: SPEC-022 §9.2, AC-DASH-WRITE-10
+ * Source: SPEC-022 §9.2, AC-DASH-WRITE-10; dogfood 2026-07-26 ISSUE-004
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useId } from "react";
 import { X } from "lucide-react";
-import type { DocType, LinkType } from "@lore/core";
+import type { DocSummary, DocType, LinkType } from "@lore/core";
 import { createDocInputSchema } from "@lore/core";
 import type { CreateDocPayload } from "@/api/mutations";
+import { filterParentSuggestions, formatParentSuggestionLabel } from "@/lib/parent-suggestions";
+import { cn } from "@/lib/utils";
 import type { z } from "zod";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -47,6 +82,13 @@ export interface NewDocModalProps {
   error?: string | null;
   /** Close the modal. */
   onClose: () => void;
+  /**
+   * Candidate documents for the "Parent ID" searchable picker (dogfood
+   * ISSUE-004) — the Library page's already-cached unfiltered `apiList`
+   * query. Defaults to `[]` (no suggestions; the field stays a fully
+   * typable/submittable plain text input, same as before this feature).
+   */
+  docs?: DocSummary[];
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -105,7 +147,13 @@ function humanizeValidationIssue(issue: z.ZodIssue, docType: DocType): string {
  *   />
  * )}
  */
-export function NewDocModal({ onCreate, isPending, error, onClose }: NewDocModalProps): React.ReactElement {
+export function NewDocModal({
+  onCreate,
+  isPending,
+  error,
+  onClose,
+  docs = [],
+}: NewDocModalProps): React.ReactElement {
   // reason: ISSUE-003 — "spec" is the one type TYPES_BLOCKED_AT_CREATE always
   // refuses (see module doc comment), so defaulting to it made the form's
   // very first render a dead end (visible warning notice + disabled Create).
@@ -120,6 +168,26 @@ export function NewDocModal({ onCreate, isPending, error, onClose }: NewDocModal
   const [planId, setPlanId] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
 
+  // reason: ISSUE-004 — searchable parent picker state. `parentSuggestionsOpen`
+  // is independent of `parentId` being non-empty — the popup opens on focus
+  // (showing a starter list) and stays open while typing, closing only on
+  // blur/Escape/selection.
+  const [parentSuggestionsOpen, setParentSuggestionsOpen] = useState(false);
+  const [highlightedSuggestion, setHighlightedSuggestion] = useState(0);
+  const parentListboxId = useId();
+
+  const parentSuggestions = useMemo(
+    () => filterParentSuggestions(docs, docType, parentId),
+    [docs, docType, parentId],
+  );
+
+  // reason: the highlighted row must never point past the end of a shrinking
+  // list — every keystroke reshapes `parentSuggestions` via the memo above,
+  // so re-clamp on every change rather than only on explicit Up/Down presses.
+  useEffect(() => {
+    setHighlightedSuggestion((prev) => (parentSuggestions.length === 0 ? 0 : Math.min(prev, parentSuggestions.length - 1)));
+  }, [parentSuggestions]);
+
   // Close on Escape.
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent): void {
@@ -128,6 +196,50 @@ export function NewDocModal({ onCreate, isPending, error, onClose }: NewDocModal
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
+
+  function selectParentSuggestion(doc: DocSummary): void {
+    setParentId(doc.slug);
+    setParentSuggestionsOpen(false);
+    setHighlightedSuggestion(0);
+  }
+
+  function handleParentKeyDown(e: React.KeyboardEvent<HTMLInputElement>): void {
+    if (e.key === "Escape") {
+      if (parentSuggestionsOpen) {
+        // reason: close ONLY the suggestion popup — stopPropagation keeps the
+        // native event from reaching the document-level listener above, so
+        // the whole modal doesn't also close on this same keypress. A second,
+        // separate Escape (popup already closed) falls through and closes it.
+        e.stopPropagation();
+        e.preventDefault();
+        setParentSuggestionsOpen(false);
+      }
+      return;
+    }
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (!parentSuggestionsOpen) {
+        setParentSuggestionsOpen(true);
+        setHighlightedSuggestion(0);
+        return;
+      }
+      setHighlightedSuggestion((prev) => (parentSuggestions.length === 0 ? 0 : (prev + 1) % parentSuggestions.length));
+      return;
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!parentSuggestionsOpen) return;
+      setHighlightedSuggestion((prev) =>
+        parentSuggestions.length === 0 ? 0 : (prev - 1 + parentSuggestions.length) % parentSuggestions.length,
+      );
+      return;
+    }
+    if (e.key === "Enter" && parentSuggestionsOpen && parentSuggestions.length > 0) {
+      e.preventDefault();
+      const chosen = parentSuggestions[highlightedSuggestion];
+      if (chosen !== undefined) selectParentSuggestion(chosen);
+    }
+  }
 
   function buildPayload(): CreateDocPayload {
     const base: CreateDocPayload = {
@@ -244,9 +356,13 @@ export function NewDocModal({ onCreate, isPending, error, onClose }: NewDocModal
           />
         </div>
 
-        {/* Parent ID — required for spec/task */}
+        {/* Parent ID — required for spec/task. Searchable combobox (ISSUE-004):
+            the input's own typed/pasted value is ALWAYS what gets submitted;
+            the listbox below is a pure convenience overlay. See the module
+            doc comment for the datalist-vs-custom-combobox design choice and
+            the full ARIA contract. */}
         {(TYPES_REQUIRING_PARENT.includes(docType) || parentId !== "") && (
-          <div className="space-y-1">
+          <div className="space-y-1 relative">
             <label className="text-sm font-medium" htmlFor="parent-id">
               Parent ID
               {TYPES_REQUIRING_PARENT.includes(docType) && (
@@ -258,8 +374,54 @@ export function NewDocModal({ onCreate, isPending, error, onClose }: NewDocModal
               className="w-full border rounded px-3 py-2 text-sm"
               placeholder="ULID or slug of parent doc"
               value={parentId}
-              onChange={(e) => setParentId(e.target.value)}
+              onChange={(e) => {
+                setParentId(e.target.value);
+                setParentSuggestionsOpen(true);
+              }}
+              onFocus={() => setParentSuggestionsOpen(true)}
+              onBlur={() => setParentSuggestionsOpen(false)}
+              onKeyDown={handleParentKeyDown}
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded={parentSuggestionsOpen && parentSuggestions.length > 0}
+              aria-controls={parentListboxId}
+              aria-activedescendant={
+                parentSuggestionsOpen && parentSuggestions.length > 0
+                  ? `${parentListboxId}-option-${highlightedSuggestion}`
+                  : undefined
+              }
+              autoComplete="off"
             />
+            {parentSuggestionsOpen && parentSuggestions.length > 0 && (
+              <ul
+                id={parentListboxId}
+                role="listbox"
+                aria-label="Parent document suggestions"
+                className="absolute z-10 mt-1 w-full max-h-48 overflow-auto rounded border bg-popover shadow-md text-sm"
+              >
+                {parentSuggestions.map((doc, index) => (
+                  <li
+                    key={doc.id}
+                    id={`${parentListboxId}-option-${index}`}
+                    role="option"
+                    aria-selected={index === highlightedSuggestion}
+                    className={cn(
+                      "px-3 py-1.5 cursor-pointer truncate",
+                      index === highlightedSuggestion ? "bg-accent text-accent-foreground" : "",
+                    )}
+                    // reason: preventDefault on mousedown stops the input from
+                    // blurring BEFORE the click registers — the standard
+                    // combobox click pattern (blur would otherwise close the
+                    // listbox first and drop the click).
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => selectParentSuggestion(doc)}
+                    title={formatParentSuggestionLabel(doc)}
+                  >
+                    {formatParentSuggestionLabel(doc)}
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         )}
 
