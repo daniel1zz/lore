@@ -35,6 +35,7 @@ import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { SessionService } from "../../../src/service/session-service.js";
+import { buildBootstrapInjection } from "@lore/core";
 import type { BootstrapReport, CreateDocInput, DocRecord, LoreError, Result } from "@lore/core";
 
 function makeSessionService(store: InMemoryStore) {
@@ -244,5 +245,134 @@ describe("SessionService.bootstrap — unresolvable seat branch (ERROR/BOUNDARY,
     if (!result.ok) return;
     expect(result.value.resume_hint).toEqual({ plan_slug: planB.slug, handoff_slug: handoffB.slug });
     expect(result.value.seat_unresolved).toBe(true);
+  });
+});
+
+// ─── SPEC-080 service→projection seam: omitted-plan fixture (AC-080-2, STATE) ──
+//
+// `buildBootstrapInjection` (packages/core/src/session.ts) is a PURE projection
+// downstream of `SessionService.bootstrap` — it caps `active_plans` for
+// REPORTING but must never feed back into what the report itself derived
+// (`active_sessions` is computed by `bootstrap` over EVERY active plan's
+// tasks, before any injection cap applies). This fixture proves that by
+// construction: 3 actionable plans (each with >=1 ready task), only the
+// 3rd-newest-by-`last_activity_at` plan's task holds a fresh claim, and
+// `maxActivePlans: 2` caps the projected `active_plans` to the 2 newest —
+// dropping exactly the claim-holding plan from `payload.active_plans` while
+// `payload.active_sessions` (untouched by the projection, per SPEC-080
+// §Explicitly unchanged) still lists that claim's session.
+
+describe("SessionService.bootstrap -> buildBootstrapInjection — omitted-plan fixture (STATE, AC-080-2)", () => {
+  it("caps active_plans to maxActivePlans while active_sessions still lists the omitted plan's fresh claim", async () => {
+    const store = new InMemoryStore();
+    const { corpusService, sessionService } = makeSessionService(store);
+
+    // Three actionable plans (each gets exactly one non-terminal task, which
+    // is "ready" per evaluateReadiness regardless of claim state — same
+    // technique the HAPPY fixture in session-bootstrap.test.ts uses).
+    const planNewest = await mustCreate(corpusService, {
+      type: "plan",
+      title: "Plan Newest",
+      content: "# Newest",
+    } as CreateDocInput);
+    const planMiddle = await mustCreate(corpusService, {
+      type: "plan",
+      title: "Plan Middle",
+      content: "# Middle",
+    } as CreateDocInput);
+    const planOldest = await mustCreate(corpusService, {
+      type: "plan",
+      title: "Plan Oldest (claim holder)",
+      content: "# Oldest",
+    } as CreateDocInput);
+
+    const taskNewest = await mustCreate(corpusService, {
+      type: "task",
+      title: "Ready Task Newest",
+      parent_id: planNewest.id,
+      content: "# T",
+      extra: { plan_id: planNewest.id },
+    } as CreateDocInput);
+    const taskMiddle = await mustCreate(corpusService, {
+      type: "task",
+      title: "Ready Task Middle",
+      parent_id: planMiddle.id,
+      content: "# T",
+      extra: { plan_id: planMiddle.id },
+    } as CreateDocInput);
+    const taskOldest = await mustCreate(corpusService, {
+      type: "task",
+      title: "Claimed Task Oldest",
+      parent_id: planOldest.id,
+      content: "# T",
+      extra: { plan_id: planOldest.id },
+    } as CreateDocInput);
+
+    // Pin last_activity_at ordering explicitly via `updated_at`
+    // (deriveLastActivityAt = max(updated_at) over a plan + its tasks) — same
+    // explicit-timestamp-pinning technique buildTwoPlanCorpusWithHandoffs
+    // above uses for created_at, needed because InMemoryStore's real-clock
+    // timestamps are too coarse to guarantee a strict 3-way ordering across
+    // sequential awaits in a fast test run.
+    const NEWEST_AT = "2026-01-20T00:00:00.000Z";
+    const MIDDLE_AT = "2026-01-15T00:00:00.000Z";
+    const OLDEST_AT = "2026-01-10T00:00:00.000Z";
+
+    const patchPlanNewest = await store.update(planNewest.id, { updated_at: NEWEST_AT });
+    if (!patchPlanNewest.ok) throw new Error(JSON.stringify(patchPlanNewest.error));
+    const patchTaskNewest = await store.update(taskNewest.id, { updated_at: NEWEST_AT });
+    if (!patchTaskNewest.ok) throw new Error(JSON.stringify(patchTaskNewest.error));
+
+    const patchPlanMiddle = await store.update(planMiddle.id, { updated_at: MIDDLE_AT });
+    if (!patchPlanMiddle.ok) throw new Error(JSON.stringify(patchPlanMiddle.error));
+    const patchTaskMiddle = await store.update(taskMiddle.id, { updated_at: MIDDLE_AT });
+    if (!patchTaskMiddle.ok) throw new Error(JSON.stringify(patchTaskMiddle.error));
+
+    const patchPlanOldest = await store.update(planOldest.id, { updated_at: OLDEST_AT });
+    if (!patchPlanOldest.ok) throw new Error(JSON.stringify(patchPlanOldest.error));
+
+    // The oldest (3rd-newest) plan's task holds the corpus's ONLY fresh
+    // claim — `updated_at` stays pinned old for last_activity_at ordering
+    // while `claim.at` is real "now" so the claim itself is not stale.
+    const freshClaimAt = new Date().toISOString();
+    const patchTaskOldest = await store.update(taskOldest.id, {
+      updated_at: OLDEST_AT,
+      extra: { plan_id: planOldest.id, claim: { by: "carol", at: freshClaimAt } },
+    });
+    if (!patchTaskOldest.ok) throw new Error(JSON.stringify(patchTaskOldest.error));
+
+    const bootstrapResult = await sessionService.bootstrap("alice");
+    expect(bootstrapResult.ok).toBe(true);
+    if (!bootstrapResult.ok) return;
+    const report = bootstrapResult.value;
+
+    // Sanity on the report itself (pre-projection): all 3 plans actionable,
+    // sorted newest-first, and active_sessions already carries the claim —
+    // this is the "complete report" the projection must consume as-is.
+    expect(report.active_plans).toHaveLength(3);
+    expect(report.active_plans.map((p) => p.slug)).toEqual([planNewest.slug, planMiddle.slug, planOldest.slug]);
+    expect(report.active_sessions.some((s) => s.task_slugs.includes(taskOldest.slug))).toBe(true);
+
+    const { payload } = buildBootstrapInjection(report, {
+      maxActivePlans: 2,
+      maxHandoffs: 3,
+      maxPendingSlugs: 3,
+      charBudget: 8000,
+    });
+
+    // Projection caps active_plans to the 2 newest, dropping exactly the
+    // claim-holding (3rd-newest) plan.
+    expect(payload.active_plans).toHaveLength(2);
+    expect(payload.active_plans.map((p) => p.slug)).toEqual([planNewest.slug, planMiddle.slug]);
+    expect(payload.active_plans.some((p) => p.slug === planOldest.slug)).toBe(false);
+    expect(payload.omitted.active_plans).toBe(1);
+
+    // active_sessions is untouched by the projection (SPEC-080 §Explicitly
+    // unchanged) — the omitted plan's claim/session is still fully present,
+    // proving reporting caps never feed derivation.
+    expect(payload.active_sessions).toEqual(report.active_sessions);
+    expect(payload.active_sessions.some((s) => s.task_slugs.includes(taskOldest.slug))).toBe(true);
+    const oldestSession = payload.active_sessions.find((s) => s.task_slugs.includes(taskOldest.slug));
+    expect(oldestSession?.by).toBe("carol");
   });
 });
