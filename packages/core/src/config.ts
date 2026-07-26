@@ -47,6 +47,7 @@ import { TelemetryConfigSchema } from "./telemetry.js";
 import { AiConfigSchema } from "./ai.js";
 import { verificationProfileSchema } from "./verification-profile.js";
 import { SPEC_KINDS } from "./spec-kind.js";
+import type { BootstrapInjectionBudgets } from "./session.js";
 
 // ─── Shared Defaults Schema ───────────────────────────────────────────────────
 
@@ -405,6 +406,35 @@ const WorkflowConfigSchema = z
       })
       .strict()
       .optional(),
+    /**
+     * `lore bootstrap --injection`'s tier-1 payload trimming knobs (SPEC-080
+     * §Public Interface `BootstrapInjectionBudgets`) — count caps + char
+     * budget consumed by `buildBootstrapInjection` (`session.ts`). Unlike
+     * `task_feed` above (whose fields are optional/no-default because the
+     * FLOW module owns the default constant), every field here carries its
+     * own Zod-level default — the `claim_ttl_minutes` DI precedent: `app.ts`
+     * resolves this section via `resolveBootstrapInjectionBudgets` below and
+     * threads the result into `buildBootstrapInjection` as a plain scalar
+     * object, never a raw config passthrough (SPEC-080 §Module Boundary).
+     *
+     * @invariant Absence of the whole `workflow` section, or of
+     *   `bootstrap_injection` within it, or of an individual field, ALL fall
+     *   back to that field's own schema default (5 / 3 / 3 / 8000) — same
+     *   "absence = default" shape as `staleness`/`drift`/`attestation` above.
+     */
+    bootstrap_injection: z
+      .object({
+        /** Max `active_plans[]` entries kept in the injection payload. Default: 5. */
+        max_active_plans: z.number().int().positive().default(5),
+        /** Max `latest_handoffs[]` entries kept in the injection payload. Default: 3. */
+        max_handoffs: z.number().int().positive().default(3),
+        /** Max `pending_reviews.slugs[]` entries kept in the injection payload. Default: 3. */
+        max_pending_slugs: z.number().int().positive().default(3),
+        /** Compact-serialized char budget the payload is trimmed against. Default: 8000. */
+        char_budget: z.number().int().positive().default(8000),
+      })
+      .strict()
+      .default({}),
   })
   .strict();
 
@@ -1011,6 +1041,35 @@ export function resolveRequirementQuantifiableEnabled(config: LoreConfig | undef
  */
 export function resolveSetupCheckReminderEnabled(config: LoreConfig | undefined): boolean {
   return config?.setup?.check_reminder !== false;
+}
+
+/**
+ * Resolve the effective `workflow.bootstrap_injection.*` budgets as a
+ * `BootstrapInjectionBudgets` (SPEC-080 §Public Interface) from an optional
+ * LoreConfig. Mirrors {@link resolveStalenessDefaults} exactly — absence of
+ * the whole config, the `workflow` section, or `workflow.bootstrap_injection`
+ * specifically all fall back to the schema defaults ({5, 3, 3, 8000}).
+ *
+ * @param config - Parsed LoreConfig, or undefined when no config file was loaded
+ * @returns `{maxActivePlans, maxHandoffs, maxPendingSlugs, charBudget}` — the
+ *   exact scalar shape `buildBootstrapInjection` (`session.ts`) accepts as
+ *   its `budgets` parameter (the `claim_ttl_minutes` DI precedent: a caller
+ *   resolves this ONCE and threads the plain object, never a raw config
+ *   passthrough).
+ * @example
+ *   resolveBootstrapInjectionBudgets(undefined)
+ *   // => { maxActivePlans: 5, maxHandoffs: 3, maxPendingSlugs: 3, charBudget: 8000 }
+ *   resolveBootstrapInjectionBudgets({ ..., workflow: { bootstrap_injection: { char_budget: 4000 } } })
+ *   // => { maxActivePlans: 5, maxHandoffs: 3, maxPendingSlugs: 3, charBudget: 4000 }
+ */
+export function resolveBootstrapInjectionBudgets(config: LoreConfig | undefined): BootstrapInjectionBudgets {
+  const section = (config?.workflow ?? WorkflowConfigSchema.parse({})).bootstrap_injection;
+  return {
+    maxActivePlans: section.max_active_plans,
+    maxHandoffs: section.max_handoffs,
+    maxPendingSlugs: section.max_pending_slugs,
+    charBudget: section.char_budget,
+  };
 }
 
 // ─── Pure Parse Helpers ────────────────────────────────────────────────────

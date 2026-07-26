@@ -25,6 +25,13 @@
  *   - deriveLastActivityAt(plan, tasks) — max `updated_at` across a plan and its
  *     child tasks; populates each `bootstrap.active_plans[]` entry's required
  *     `last_activity_at` (SPEC-069 §Design Decisions D6, D7)
+ *   - buildBootstrapInjection(report, budgets) — SPEC-080 §Projection Contract:
+ *     the SOLE owner of ALL tier-1 injection trimming (selection, count caps,
+ *     char budget, omission accounting). Projects a full `BootstrapReport` down
+ *     to the small, truncation-safe payload the SessionStart hook injects.
+ *   - bootstrapInjectionSchema / BootstrapInjection — the projection's OWN Zod
+ *     schema + type (SPEC-080 §Module Boundary) — never a patch on
+ *     `bootstrapReportSchema`.
  *
  * Invariants:
  *   - No IO, no wall-clock reads, no randomness — `renderHandoffContent` is deterministic:
@@ -41,8 +48,15 @@
  *     the CALLER (a `nowIso` + `ttlMinutes` pair is passed in, mirroring
  *     `evaluateReadiness`'s identical D10 time-seam discipline) — this module never
  *     reads a wall clock itself.
+ *   - `buildBootstrapInjection` is the SOLE trimming owner (SPEC-080 D1, D2):
+ *     count caps AND the char-budget rule both live inside this one function,
+ *     sharing ONE `omitted` ledger — never a second, independent truncation
+ *     policy elsewhere (that duplication is the exact bug class SPEC-080 fixes).
+ *     It NEVER mid-JSON-slices its output — an over-budget payload with nothing
+ *     left to drop returns intact with `budget_exceeded: true` instead.
  *
- * Source: SPEC-041 §3 D2, D3; SPEC-042 §Design Decisions D1.
+ * Source: SPEC-041 §3 D2, D3; SPEC-042 §Design Decisions D1; SPEC-080 §Projection
+ * Contract, §Public Interface, §Design Decisions D1-D8.
  */
 
 import { z } from "zod";
@@ -497,3 +511,242 @@ export const bootstrapReportSchema = z.object({
 
 /** Derived TypeScript type for the S1 bootstrap pointer-set. */
 export type BootstrapReport = z.infer<typeof bootstrapReportSchema>;
+
+// ─── Bootstrap Injection Projection (SPEC-080 §Projection Contract) ───────
+
+/**
+ * The literal field order of the SPEC-080 §Projection Contract (positions
+ * 1-9; `omitted`/`budget_exceeded` are always the final two keys, appended
+ * separately by {@link buildBootstrapInjection} after this set is exhausted).
+ * Doubles as the OCP membership test: any `BootstrapReport` key NOT in this
+ * set — including a schema-known-but-unlisted field like `seat_unresolved`,
+ * not only a genuinely future one — is "unknown" for projection purposes and
+ * gets appended between `corpus` and `omitted` in original report order (D8).
+ */
+const BOOTSTRAP_INJECTION_KNOWN_KEYS: ReadonlySet<string> = new Set([
+  "resume_hint",
+  "my_claims",
+  "active_sessions",
+  "armed_gates",
+  "root",
+  "pending_reviews",
+  "active_plans",
+  "latest_handoffs",
+  "corpus",
+]);
+
+/**
+ * The single typed omission ledger (SPEC-080 D2) — every drop from ANY
+ * trimming stage (dead/over-cap plans, over-cap pending slugs, over-cap
+ * handoffs, char-budget entry drops) lands in exactly one of these four
+ * counters. No free-text markers anywhere else in the payload.
+ */
+export const bootstrapInjectionOmittedSchema = z.object({
+  active_plans: z.number().int().min(0),
+  latest_handoffs: z.number().int().min(0),
+  pending_slugs: z.number().int().min(0),
+  budget_drops: z.number().int().min(0),
+});
+
+/** Derived TypeScript type for the injection payload's omission ledger. */
+export type BootstrapInjectionOmitted = z.infer<typeof bootstrapInjectionOmittedSchema>;
+
+/**
+ * The projection's OWN Zod schema (SPEC-080 §Module Boundary) — deliberately
+ * NOT a patch on {@link bootstrapReportSchema}: the two payloads diverge
+ * (`armed_gates` condenses to `string[]`, `active_plans`/`latest_handoffs`
+ * shrink, `omitted`/`budget_exceeded` are new). Declared field order mirrors
+ * the contract for readability; it does NOT by itself guarantee the runtime
+ * `Object.keys(payload)` order — that is `buildBootstrapInjection`'s job via
+ * explicit object-literal key insertion order (JS preserves string-key
+ * insertion order; Zod parsing does not reorder in a way this module relies
+ * on for its own output).
+ *
+ * @invariant Deliberately does NOT declare an unknown-field passthrough —
+ *   `buildBootstrapInjection`'s D8 unknown-field appending is a payload-shape
+ *   behavior, not a schema-validation guarantee. A genuinely new
+ *   `BootstrapReport` field reaching this schema unhandled strips on
+ *   `.parse()` (plain `z.object`, not `.strict()`/`.passthrough()`) — adding
+ *   a new report field is expected to land a companion schema update here,
+ *   the same "schema and shape move together" discipline `active_sessions`
+ *   (`bootstrapReportSchema`) already documents.
+ */
+export const bootstrapInjectionSchema = z.object({
+  resume_hint: bootstrapResumeHintSchema.nullable(),
+  my_claims: z.array(bootstrapMyClaimSchema),
+  active_sessions: z.array(readySessionSchema),
+  /** Condensed to checkpoint names only (D7) — feeding-source detail is tier-2 (SPEC-049 self-carries it at denial time). */
+  armed_gates: z.array(z.string()),
+  root: bootstrapRootSchema.nullable(),
+  pending_reviews: bootstrapPendingReviewsSchema,
+  active_plans: z.array(bootstrapActivePlanSchema),
+  latest_handoffs: z.array(bootstrapLatestHandoffSchema),
+  corpus: bootstrapCorpusStatsSchema,
+  omitted: bootstrapInjectionOmittedSchema,
+  /** Present (`true`) iff the count-capped payload still exceeded `charBudget` after entry drops. Absent (never `false`) otherwise — same present-iff-true convention as `bootstrapReportSchema.seat_unresolved`. */
+  budget_exceeded: z.literal(true).optional(),
+});
+
+/**
+ * Derived TypeScript type for the SPEC-080 tier-1 injection payload. A
+ * genuinely unknown `BootstrapReport` field appended per the D8 OCP rule is
+ * NOT representable in this static type (there is no way to type "the
+ * literal contract keys plus whatever else was on the input" without an
+ * index signature that would weaken every other field's precision) — see
+ * {@link buildBootstrapInjection}'s own cast comment for why that gap is
+ * accepted rather than worked around.
+ */
+export type BootstrapInjection = z.infer<typeof bootstrapInjectionSchema>;
+
+/**
+ * Trimming knobs for {@link buildBootstrapInjection} (SPEC-080 §Public
+ * Interface). Plain interface, not Zod-derived — this shape never crosses an
+ * untrusted boundary directly; it is always assembled by a trusted caller
+ * (config resolution in `packages/core/src/config.ts`'s
+ * `resolveBootstrapInjectionBudgets`, or a test fixture) and handed straight
+ * to a pure function, mirroring `evaluateReadiness`'s `nowIso`/`ttlMinutes`
+ * scalar-parameter precedent rather than `handoffExtraSchema`'s
+ * boundary-validated shape.
+ */
+export interface BootstrapInjectionBudgets {
+  /** Max `active_plans[]` entries kept in the payload. */
+  maxActivePlans: number;
+  /** Max `latest_handoffs[]` entries kept in the payload. */
+  maxHandoffs: number;
+  /** Max `pending_reviews.slugs[]` entries kept in the payload. */
+  maxPendingSlugs: number;
+  /** Compact-serialized length ceiling the char-budget rule trims against. */
+  charBudget: number;
+}
+
+/** Return shape of {@link buildBootstrapInjection}. */
+export interface BootstrapInjectionResult {
+  /** The ordered, capped, budget-trimmed payload (SPEC-080 §Projection Contract). */
+  payload: BootstrapInjection;
+  /** Compact (no-whitespace) JSON serialization of `payload`. */
+  json: string;
+}
+
+/**
+ * Projects a full `BootstrapReport` down to the small, truncation-safe
+ * tier-1 payload the SessionStart hook injects (SPEC-080 §Projection
+ * Contract, §Public Interface). Pure — no IO, no wall-clock reads, no
+ * randomness; the SOLE owner of ALL tier-1 trimming (SPEC-080 D1, D2):
+ * selection, count caps, and the char-budget rule all live here, sharing one
+ * `omitted` ledger.
+ *
+ * Pipeline (each stage feeds the next; nothing is trimmed twice):
+ *  1. `armed_gates` condenses to `string[]` of checkpoint names (D7).
+ *  2. `pending_reviews.slugs` caps at `budgets.maxPendingSlugs` (`count`
+ *     stays untouched — it reports the TRUE queue size, not the sample size).
+ *  3. `active_plans` keeps only `ready>0 ∨ claimed>0` entries (D4), sorted
+ *     `last_activity_at` descending, capped at `budgets.maxActivePlans`.
+ *  4. `latest_handoffs` caps at `budgets.maxHandoffs` (input is already
+ *     newest-first — upstream-sorted, this function never re-sorts it).
+ *  5. Every `report` key NOT in the SPEC-080 §Projection Contract's 9-field
+ *     ordered list (D8 OCP rule) is appended between `corpus` and `omitted`,
+ *     in original report order — this covers both a genuinely future field
+ *     and an already-known-but-unlisted one (e.g. `seat_unresolved`).
+ *  6. The char-budget rule runs LAST, on the compact-serialized length of
+ *     the payload built by steps 1-5: while over `budgets.charBudget`, drop
+ *     one WHOLE trailing entry — from `latest_handoffs` first, then from
+ *     `active_plans` once `latest_handoffs` is empty — incrementing
+ *     `omitted.budget_drops` per drop. NEVER a mid-JSON character slice.
+ *     Both arrays empty and still over budget → `budget_exceeded: true` is
+ *     set and the payload is returned INTACT (no field is ever truncated
+ *     mid-value to force it under budget).
+ *
+ * @param report - A `bootstrapReportSchema`-valid pointer-set, typically
+ *   `SessionService.bootstrap`'s return value.
+ * @param budgets - Count caps + char budget (SPEC-080 defaults: 5/3/3/8000
+ *   — see `resolveBootstrapInjectionBudgets` in `config.ts`).
+ * @returns `{payload, json}` — `payload` is the ordered, trimmed object;
+ *   `json` is its compact (no-whitespace) serialization, `json.length` at
+ *   most `budgets.charBudget` unless `payload.budget_exceeded` is `true`.
+ * @example
+ * const { payload, json } = buildBootstrapInjection(report, {
+ *   maxActivePlans: 5, maxHandoffs: 3, maxPendingSlugs: 3, charBudget: 8000,
+ * });
+ * Object.keys(payload);
+ * // => ["resume_hint","my_claims","active_sessions","armed_gates","root",
+ * //     "pending_reviews","active_plans","latest_handoffs","corpus","omitted"]
+ */
+export function buildBootstrapInjection(
+  report: BootstrapReport,
+  budgets: BootstrapInjectionBudgets,
+): BootstrapInjectionResult {
+  const armedGates = report.armed_gates.map((gate) => gate.checkpoint);
+
+  const cappedPendingSlugs = report.pending_reviews.slugs.slice(0, budgets.maxPendingSlugs);
+  const pendingSlugsDropped = report.pending_reviews.slugs.length - cappedPendingSlugs.length;
+
+  // reason: dead plans (ready=0 AND claimed=0) are excluded regardless of
+  // recency (D4) BEFORE the count cap applies, so `active_plans.length -
+  // keptPlans.length` below folds BOTH the dead-plan exclusion and any cap
+  // overflow into one omitted count without double-bookkeeping (SPEC-080
+  // §Test Plan NEGATIVE + BOUNDARY cases both key off this single formula).
+  const actionablePlans = report.active_plans
+    .filter((plan) => plan.task_counts.ready > 0 || plan.task_counts.claimed > 0)
+    .sort((a, b) => (a.last_activity_at < b.last_activity_at ? 1 : a.last_activity_at > b.last_activity_at ? -1 : 0));
+  const keptPlans = actionablePlans.slice(0, budgets.maxActivePlans);
+  const activePlansDropped = report.active_plans.length - keptPlans.length;
+
+  const keptHandoffs = report.latest_handoffs.slice(0, budgets.maxHandoffs);
+  const handoffsDropped = report.latest_handoffs.length - keptHandoffs.length;
+
+  // reason: built as a loosely-typed working record (not `BootstrapInjection`
+  // directly) because step 5 below assigns keys the static type can't name
+  // (the D8 OCP unknown-field escape hatch) — cast to the public type once
+  // construction is complete, right before returning.
+  const payload: Record<string, unknown> = {
+    resume_hint: report.resume_hint,
+    my_claims: report.my_claims,
+    active_sessions: report.active_sessions,
+    armed_gates: armedGates,
+    root: report.root,
+    pending_reviews: { count: report.pending_reviews.count, slugs: cappedPendingSlugs },
+    active_plans: keptPlans,
+    latest_handoffs: keptHandoffs,
+    corpus: report.corpus,
+  };
+
+  for (const key of Object.keys(report)) {
+    if (!BOOTSTRAP_INJECTION_KNOWN_KEYS.has(key)) {
+      payload[key] = (report as unknown as Record<string, unknown>)[key];
+    }
+  }
+
+  const omitted: BootstrapInjectionOmitted = {
+    active_plans: activePlansDropped,
+    latest_handoffs: handoffsDropped,
+    pending_slugs: pendingSlugsDropped,
+    budget_drops: 0,
+  };
+  payload.omitted = omitted;
+
+  let workingHandoffs = keptHandoffs;
+  let workingPlans = keptPlans;
+  let json = JSON.stringify(payload);
+
+  while (json.length > budgets.charBudget && (workingHandoffs.length > 0 || workingPlans.length > 0)) {
+    if (workingHandoffs.length > 0) {
+      workingHandoffs = workingHandoffs.slice(0, -1);
+      payload.latest_handoffs = workingHandoffs;
+    } else {
+      workingPlans = workingPlans.slice(0, -1);
+      payload.active_plans = workingPlans;
+    }
+    omitted.budget_drops += 1;
+    json = JSON.stringify(payload);
+  }
+
+  if (json.length > budgets.charBudget) {
+    // reason: nothing left to drop — the char-budget rule forbids a
+    // mid-JSON slice (SPEC-080 §Projection Contract), so the payload is
+    // returned intact and the anomaly is signaled instead of hidden.
+    payload.budget_exceeded = true;
+    json = JSON.stringify(payload);
+  }
+
+  return { payload: payload as unknown as BootstrapInjection, json };
+}
