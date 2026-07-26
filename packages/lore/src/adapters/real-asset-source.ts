@@ -95,22 +95,25 @@ const CLAUDE_DIR_PLACEHOLDER = "{{CLAUDE_DIR}}";
 
 /**
  * SINGLE SOURCE OF TRUTH for files retired from the MACHINE install set
- * (SPEC-083 D3) while still shipping/fingerprinted under `assets/`. Keyed by
- * the FULL path relative to `assetsRoot` (e.g. `"governance/corpus-workflow.md"`)
- * — the SAME shape both `AssetFile.path` (this port, below) and
- * `EmbeddedAssetEntry.path` (`../generated/assets-manifest.js`, built by
- * `scripts/embed-assets-manifest.mjs` walking `assets/` directly) use.
+ * (SPEC-083 D3, extended by SPEC-085 D3) while still shipping/fingerprinted
+ * under `assets/`. Keyed by the FULL path relative to `assetsRoot` (e.g.
+ * `"governance/corpus-workflow.md"`) — the SAME shape both `AssetFile.path`
+ * (this port, below) and `EmbeddedAssetEntry.path`
+ * (`../generated/assets-manifest.js`, built by `scripts/embed-assets-manifest.mjs`
+ * walking `assets/` directly) use.
  *
- * `corpus-workflow.md` is retired from `<claude-dir>/governance/` — the new
+ * `corpus-workflow.md` is retired from `<claude-dir>/governance/` — the
  * bootstrap-stage `lore governance` verb (SPEC-083 D1) prints it straight
  * from the binary's OWN `assets/` tree at read time, so an installed,
  * setup-time-snapshotted copy can no longer drift out of sync with the
- * binary. The file itself still lives under `assets/governance/` (this
- * port's `load()` never walks anything else) and is still fingerprinted by
- * the embedded assets manifest — only ITS INSTALLATION is retired here.
- * `seat-briefing.md` is explicitly OUT of this exclusion (SPEC-083 Scope
- * "Out") — Phase D of the session-start hook still reads it as an installed
- * file.
+ * binary. `seat-briefing.md` is retired the same way (SPEC-085 D3) — the
+ * SAME verb's `--seat-briefing` flag (SPEC-085 D1) now serves it at runtime,
+ * and Phase D of the session-start hook spawns that flag instead of reading
+ * an installed copy (SPEC-085 D2). Both files still live under
+ * `assets/governance/` (this port's `load()` never walks anything else) and
+ * are still fingerprinted by the embedded assets manifest — only THEIR
+ * INSTALLATION is retired here; the `governance/` install directory is now
+ * empty (no governance files are written to `<claude-dir>/governance/`).
  *
  * **Two independent consumers, one declaration** (2026-07-26 regression fix):
  * this port's own `load()` walk (below) AND `setup-check.ts`'s
@@ -123,9 +126,14 @@ const CLAUDE_DIR_PLACEHOLDER = "{{CLAUDE_DIR}}";
  * check's classifier to skip it) even though the file was NEVER supposed to
  * be installed. A hand-duplicated literal path string in `setup-check.ts`
  * would have "fixed" the symptom while recreating the exact two-declarations-
- * of-one-fact defect this export exists to prevent.
+ * of-one-fact defect this export exists to prevent. SPEC-085 D3 rides the
+ * SAME single-declaration fix: adding `seat-briefing.md` here is the ONLY
+ * edit needed for both consumers to agree.
  */
-export const RETIRED_FROM_INSTALL_PATHS = new Set<string>(["governance/corpus-workflow.md"]);
+export const RETIRED_FROM_INSTALL_PATHS = new Set<string>([
+  "governance/corpus-workflow.md",
+  "governance/seat-briefing.md",
+]);
 
 /**
  * Predicate form of {@link RETIRED_FROM_INSTALL_PATHS} — `path` is the FULL
@@ -137,7 +145,7 @@ export const RETIRED_FROM_INSTALL_PATHS = new Set<string>(["governance/corpus-wo
  * @throws Never.
  * @example
  * isRetiredFromInstall("governance/corpus-workflow.md"); // => true
- * isRetiredFromInstall("governance/seat-briefing.md"); // => false
+ * isRetiredFromInstall("governance/seat-briefing.md"); // => true
  * isRetiredFromInstall("governance/nested/corpus-workflow.md"); // => false (different path)
  */
 export function isRetiredFromInstall(path: string): boolean {
@@ -228,10 +236,10 @@ export class RealAssetSource implements AssetSource {
       for (const relPath of relPaths) {
         const assetRelPath = `${topDir}/${relPath}`;
 
-        // SPEC-083 D3 — skip files retired from the install set (currently just
-        // governance/corpus-workflow.md); every other file (incl.
-        // governance/seat-briefing.md) is unaffected. See RETIRED_FROM_INSTALL_PATHS's
-        // doc for why this is a full-path, not bare-filename, exclusion.
+        // SPEC-083 D3 / SPEC-085 D3 — skip files retired from the install set
+        // (governance/corpus-workflow.md, governance/seat-briefing.md); every
+        // other file is unaffected. See RETIRED_FROM_INSTALL_PATHS's doc for
+        // why this is a full-path, not bare-filename, exclusion.
         if (isRetiredFromInstall(assetRelPath)) {
           continue;
         }

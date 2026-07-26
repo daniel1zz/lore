@@ -2,8 +2,18 @@
  * `lore governance` — SPEC-083 D1: prints the corpus-workflow governance
  * prose (`assets/governance/corpus-workflow.md`) verbatim to stdout, exit 0.
  *
- * Public surface: default export, a citty `CommandDef` with zero args (no
- * positionals, no `--json` — the payload IS text, per the spec's D1 note).
+ * SPEC-085 D1: gains one boolean flag, `--seat-briefing` — prints
+ * `assets/governance/seat-briefing.md` verbatim instead (the RAW template,
+ * `{{ACTOR}}`/`{{BRANCH}}`/`{{MAIN_CHECKOUT}}` placeholders intact —
+ * substitution stays the session-start hook's job, unchanged). Bare
+ * `lore governance` (no flag) MUST stay byte-identical to the SPEC-083
+ * behaviour — this is a REGRESSION pin, not a reinterpretation. The flag is
+ * declared in `args` below so the SPEC-051 strict seam (undeclared flags
+ * rejected exit 2) covers it with zero extra edits.
+ *
+ * Public surface: default export, a citty `CommandDef` with one boolean flag
+ * (no positionals, no `--json` — the payload IS text, per the spec's D1
+ * note).
  *
  * Bootstrap-stage exemption (mirrors `commands/setup.ts`'s own documented
  * exemption, `adapters/cli/CLAUDE.md`'s "Key Invariants" #4 — "Document the
@@ -53,6 +63,13 @@ import { writeAllSync } from "../stdio-sync.js";
 /** Repo-relative path (under `assetsRoot`) of the governance prose this command prints. */
 const GOVERNANCE_ASSET_REL_PATH = "governance/corpus-workflow.md";
 
+/**
+ * Repo-relative path (under `assetsRoot`) of the seat-briefing template
+ * printed by `--seat-briefing` (SPEC-085 D1). Raw template — placeholders
+ * are NOT substituted here; that stays the session-start hook's job.
+ */
+const SEAT_BRIEFING_ASSET_REL_PATH = "governance/seat-briefing.md";
+
 // ─── Repo-root resolution (dev mode only — mirrors commands/setup.ts's own
 // identical derivation verbatim: packages/lore/src/adapters/cli/commands/
 // governance.ts -> repo root is 6 levels up. Compiled mode never uses this —
@@ -62,16 +79,21 @@ const MODULE_DIR = fileURLToPath(new URL(".", import.meta.url));
 const REPO_ROOT = join(MODULE_DIR, "..", "..", "..", "..", "..", "..");
 
 /**
- * Reads the governance asset's raw text off disk, given a resolved
- * `assetsRoot` (the SAME root `resolveAssetsRoot` computes for `lore setup`).
+ * Reads a governance asset's raw text off disk, given a resolved
+ * `assetsRoot` (the SAME root `resolveAssetsRoot` computes for `lore setup`)
+ * and a repo-relative path under it.
  *
  * @param assetsRoot - Absolute path to the repo's `assets/` tree.
+ * @param relPath - Repo-relative path under `assetsRoot` to read.
  * @returns `{ok: true, value: <file contents>}`, or `{ok: false, error}`
  *   naming the unreadable path (never throws).
  * @throws Never.
  */
-export function readGovernanceAsset(assetsRoot: string): { ok: true; value: string } | { ok: false; error: LoreError } {
-  const assetPath = join(assetsRoot, GOVERNANCE_ASSET_REL_PATH);
+export function readGovernanceAsset(
+  assetsRoot: string,
+  relPath: string = GOVERNANCE_ASSET_REL_PATH,
+): { ok: true; value: string } | { ok: false; error: LoreError } {
+  const assetPath = join(assetsRoot, relPath);
   try {
     return { ok: true, value: readFileSync(assetPath, "utf8") };
   } catch (cause) {
@@ -94,10 +116,19 @@ export default defineCommand({
     name: "governance",
     description:
       "Print the corpus-workflow governance prose (assets/governance/corpus-workflow.md) " +
-      "verbatim to stdout — bootstrap-stage, no corpus required (SPEC-083 D1)",
+      "verbatim to stdout — bootstrap-stage, no corpus required (SPEC-083 D1). " +
+      "--seat-briefing prints the raw seat-briefing template instead (SPEC-085 D1).",
   },
-  args: {},
-  run() {
+  args: {
+    "seat-briefing": {
+      type: "boolean",
+      description:
+        "Print governance/seat-briefing.md verbatim (raw template, placeholders intact) " +
+        "instead of the corpus-workflow prose (SPEC-085 D1)",
+      default: false,
+    },
+  },
+  run({ args }) {
     // Mirrors commands/setup.ts's own path-context resolution verbatim (see
     // setup-args.ts's module doc for the full `/$bunfs/` empirical chain) —
     // this command and `lore setup` must resolve the SAME assets/ tree.
@@ -108,7 +139,8 @@ export default defineCommand({
     };
     const assetsRoot = resolveAssetsRoot(pathCtx);
 
-    const result = readGovernanceAsset(assetsRoot);
+    const relPath = args["seat-briefing"] ? SEAT_BRIEFING_ASSET_REL_PATH : GOVERNANCE_ASSET_REL_PATH;
+    const result = readGovernanceAsset(assetsRoot, relPath);
     if (!result.ok) {
       process.stderr.write(formatError(result.error) + "\n");
       process.exitCode = exitCode(result.error);

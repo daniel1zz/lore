@@ -383,12 +383,14 @@ const DECLARED_FILES_IN_SCOPE = [
   "hooks/lore-gate-g3-plan-promote.sh",
   "hooks/lore-gate-g4-task-claim.sh",
   "hooks/lib/turn-state.mjs",
-  // governance/corpus-workflow.md is DELIBERATELY ABSENT here (SPEC-083 D3):
-  // it still exists under assets/governance/ (assets-ssot.test.ts's
-  // DECLARED_FILES still lists it) but RealAssetSource.load() no longer
-  // yields it into the AssetPayload — the runtime `lore governance` verb
-  // reads it straight from the binary's own assets root instead.
-  "governance/seat-briefing.md",
+  // governance/corpus-workflow.md AND governance/seat-briefing.md are
+  // DELIBERATELY ABSENT here (SPEC-083 D3, extended by SPEC-085 D3): both
+  // still exist under assets/governance/ (assets-ssot.test.ts's
+  // DECLARED_FILES still lists them) but RealAssetSource.load() no longer
+  // yields EITHER into the AssetPayload — the runtime `lore governance`
+  // verb (and its `--seat-briefing` flag, SPEC-085 D1) reads them straight
+  // from the binary's own assets root instead. The `governance/` install
+  // directory is now empty.
   // settings.json — SYNTHETIC settings-hook entry (no real file on disk under
   // assets/), appended by RealAssetSource.load() from
   // buildHookSettingsEntries("{{CLAUDE_DIR}}") (settings.json auto-registration
