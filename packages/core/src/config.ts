@@ -419,7 +419,9 @@ const WorkflowConfigSchema = z
       .strict()
       .optional(),
     /**
-     * `lore bootstrap --injection`'s tier-1 payload trimming knobs (SPEC-080
+     * `lore bootstrap --injection`'s tier-1 payload trimming knobs
+     * (SPEC-080(bootstrap-injection; corpus slug
+     * spec-080-bootstrap-injection-projection-tier-1-tier-2-payload)
      * §Public Interface `BootstrapInjectionBudgets`) — count caps + char
      * budget consumed by `buildBootstrapInjection` (`session.ts`). Unlike
      * `task_feed` above (whose fields are optional/no-default because the
@@ -427,7 +429,7 @@ const WorkflowConfigSchema = z
      * own Zod-level default — the `claim_ttl_minutes` DI precedent: `app.ts`
      * resolves this section via `resolveBootstrapInjectionBudgets` below and
      * threads the result into `buildBootstrapInjection` as a plain scalar
-     * object, never a raw config passthrough (SPEC-080 §Module Boundary).
+     * object, never a raw config passthrough (SPEC-080(bootstrap-injection) §Module Boundary).
      *
      * @invariant Absence of the whole `workflow` section, or of
      *   `bootstrap_injection` within it, or of an individual field, ALL fall
@@ -1085,7 +1087,7 @@ export function resolveSetupCheckReminderEnabled(config: LoreConfig | undefined)
 
 /**
  * Resolve the effective `workflow.bootstrap_injection.*` budgets as a
- * `BootstrapInjectionBudgets` (SPEC-080 §Public Interface) from an optional
+ * `BootstrapInjectionBudgets` (SPEC-080(bootstrap-injection) §Public Interface) from an optional
  * LoreConfig. Mirrors {@link resolveStalenessDefaults} exactly — absence of
  * the whole config, the `workflow` section, or `workflow.bootstrap_injection`
  * specifically all fall back to the schema defaults ({5, 3, 3, 8000}).

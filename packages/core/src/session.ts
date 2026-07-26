@@ -25,13 +25,14 @@
  *   - deriveLastActivityAt(plan, tasks) — max `updated_at` across a plan and its
  *     child tasks; populates each `bootstrap.active_plans[]` entry's required
  *     `last_activity_at` (SPEC-069 §Design Decisions D6, D7)
- *   - buildBootstrapInjection(report, budgets) — SPEC-080 §Projection Contract:
- *     the SOLE owner of ALL tier-1 injection trimming (selection, count caps,
- *     char budget, omission accounting). Projects a full `BootstrapReport` down
- *     to the small, truncation-safe payload the SessionStart hook injects.
+ *   - buildBootstrapInjection(report, budgets) — SPEC-080(bootstrap-injection)
+ *     §Projection Contract: the SOLE owner of ALL tier-1 injection trimming
+ *     (selection, count caps, char budget, omission accounting). Projects a
+ *     full `BootstrapReport` down to the small, truncation-safe payload the
+ *     SessionStart hook injects.
  *   - bootstrapInjectionSchema / BootstrapInjection — the projection's OWN Zod
- *     schema + type (SPEC-080 §Module Boundary) — never a patch on
- *     `bootstrapReportSchema`.
+ *     schema + type (SPEC-080(bootstrap-injection) §Module Boundary) — never a
+ *     patch on `bootstrapReportSchema`.
  *
  * Invariants:
  *   - No IO, no wall-clock reads, no randomness — `renderHandoffContent` is deterministic:
@@ -48,14 +49,17 @@
  *     the CALLER (a `nowIso` + `ttlMinutes` pair is passed in, mirroring
  *     `evaluateReadiness`'s identical D10 time-seam discipline) — this module never
  *     reads a wall clock itself.
- *   - `buildBootstrapInjection` is the SOLE trimming owner (SPEC-080 D1, D2):
- *     count caps AND the char-budget rule both live inside this one function,
- *     sharing ONE `omitted` ledger — never a second, independent truncation
- *     policy elsewhere (that duplication is the exact bug class SPEC-080 fixes).
+ *   - `buildBootstrapInjection` is the SOLE trimming owner
+ *     (SPEC-080(bootstrap-injection) D1, D2): count caps AND the char-budget
+ *     rule both live inside this one function, sharing ONE `omitted` ledger —
+ *     never a second, independent truncation policy elsewhere (that
+ *     duplication is the exact bug class SPEC-080(bootstrap-injection) fixes).
  *     It NEVER mid-JSON-slices its output — an over-budget payload with nothing
  *     left to drop returns intact with `budget_exceeded: true` instead.
  *
- * Source: SPEC-041 §3 D2, D3; SPEC-042 §Design Decisions D1; SPEC-080 §Projection
+ * Source: SPEC-041 §3 D2, D3; SPEC-042 §Design Decisions D1;
+ * SPEC-080(bootstrap-injection; corpus slug
+ * spec-080-bootstrap-injection-projection-tier-1-tier-2-payload) §Projection
  * Contract, §Public Interface, §Design Decisions D1-D8.
  */
 
@@ -512,10 +516,10 @@ export const bootstrapReportSchema = z.object({
 /** Derived TypeScript type for the S1 bootstrap pointer-set. */
 export type BootstrapReport = z.infer<typeof bootstrapReportSchema>;
 
-// ─── Bootstrap Injection Projection (SPEC-080 §Projection Contract) ───────
+// ─── Bootstrap Injection Projection (SPEC-080(bootstrap-injection) §Projection Contract) ───
 
 /**
- * The literal field order of the SPEC-080 §Projection Contract (positions
+ * The literal field order of the SPEC-080(bootstrap-injection) §Projection Contract (positions
  * 1-9; `omitted`/`budget_exceeded` are always the final two keys, appended
  * separately by {@link buildBootstrapInjection} after this set is exhausted).
  * Doubles as the OCP membership test: any `BootstrapReport` key NOT in this
@@ -536,7 +540,7 @@ const BOOTSTRAP_INJECTION_KNOWN_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * The single typed omission ledger (SPEC-080 D2) — every drop from ANY
+ * The single typed omission ledger (SPEC-080(bootstrap-injection) D2) — every drop from ANY
  * trimming stage (dead/over-cap plans, over-cap pending slugs, over-cap
  * handoffs, char-budget entry drops) lands in exactly one of these four
  * counters. No free-text markers anywhere else in the payload.
@@ -552,7 +556,7 @@ export const bootstrapInjectionOmittedSchema = z.object({
 export type BootstrapInjectionOmitted = z.infer<typeof bootstrapInjectionOmittedSchema>;
 
 /**
- * The projection's OWN Zod schema (SPEC-080 §Module Boundary) — deliberately
+ * The projection's OWN Zod schema (SPEC-080(bootstrap-injection) §Module Boundary) — deliberately
  * NOT a patch on {@link bootstrapReportSchema}: the two payloads diverge
  * (`armed_gates` condenses to `string[]`, `active_plans`/`latest_handoffs`
  * shrink, `omitted`/`budget_exceeded` are new). Declared field order mirrors
@@ -588,7 +592,7 @@ export const bootstrapInjectionSchema = z.object({
 });
 
 /**
- * Derived TypeScript type for the SPEC-080 tier-1 injection payload. A
+ * Derived TypeScript type for the SPEC-080(bootstrap-injection) tier-1 injection payload. A
  * genuinely unknown `BootstrapReport` field appended per the D8 OCP rule is
  * NOT representable in this static type (there is no way to type "the
  * literal contract keys plus whatever else was on the input" without an
@@ -599,7 +603,7 @@ export const bootstrapInjectionSchema = z.object({
 export type BootstrapInjection = z.infer<typeof bootstrapInjectionSchema>;
 
 /**
- * Trimming knobs for {@link buildBootstrapInjection} (SPEC-080 §Public
+ * Trimming knobs for {@link buildBootstrapInjection} (SPEC-080(bootstrap-injection) §Public
  * Interface). Plain interface, not Zod-derived — this shape never crosses an
  * untrusted boundary directly; it is always assembled by a trusted caller
  * (config resolution in `packages/core/src/config.ts`'s
@@ -621,7 +625,7 @@ export interface BootstrapInjectionBudgets {
 
 /** Return shape of {@link buildBootstrapInjection}. */
 export interface BootstrapInjectionResult {
-  /** The ordered, capped, budget-trimmed payload (SPEC-080 §Projection Contract). */
+  /** The ordered, capped, budget-trimmed payload (SPEC-080(bootstrap-injection) §Projection Contract). */
   payload: BootstrapInjection;
   /** Compact (no-whitespace) JSON serialization of `payload`. */
   json: string;
@@ -629,9 +633,9 @@ export interface BootstrapInjectionResult {
 
 /**
  * Projects a full `BootstrapReport` down to the small, truncation-safe
- * tier-1 payload the SessionStart hook injects (SPEC-080 §Projection
+ * tier-1 payload the SessionStart hook injects (SPEC-080(bootstrap-injection) §Projection
  * Contract, §Public Interface). Pure — no IO, no wall-clock reads, no
- * randomness; the SOLE owner of ALL tier-1 trimming (SPEC-080 D1, D2):
+ * randomness; the SOLE owner of ALL tier-1 trimming (SPEC-080(bootstrap-injection) D1, D2):
  * selection, count caps, and the char-budget rule all live here, sharing one
  * `omitted` ledger.
  *
@@ -643,7 +647,7 @@ export interface BootstrapInjectionResult {
  *     `last_activity_at` descending, capped at `budgets.maxActivePlans`.
  *  4. `latest_handoffs` caps at `budgets.maxHandoffs` (input is already
  *     newest-first — upstream-sorted, this function never re-sorts it).
- *  5. Every `report` key NOT in the SPEC-080 §Projection Contract's 9-field
+ *  5. Every `report` key NOT in the SPEC-080(bootstrap-injection) §Projection Contract's 9-field
  *     ordered list (D8 OCP rule) is appended between `corpus` and `omitted`,
  *     in original report order — this covers both a genuinely future field
  *     and an already-known-but-unlisted one (e.g. `seat_unresolved`).
@@ -658,7 +662,7 @@ export interface BootstrapInjectionResult {
  *
  * @param report - A `bootstrapReportSchema`-valid pointer-set, typically
  *   `SessionService.bootstrap`'s return value.
- * @param budgets - Count caps + char budget (SPEC-080 defaults: 5/3/3/8000
+ * @param budgets - Count caps + char budget (SPEC-080(bootstrap-injection) defaults: 5/3/3/8000
  *   — see `resolveBootstrapInjectionBudgets` in `config.ts`).
  * @returns `{payload, json}` — `payload` is the ordered, trimmed object;
  *   `json` is its compact (no-whitespace) serialization, `json.length` at
@@ -683,7 +687,7 @@ export function buildBootstrapInjection(
   // reason: dead plans (ready=0 AND claimed=0) are excluded regardless of
   // recency (D4) BEFORE the count cap applies, so `active_plans.length -
   // keptPlans.length` below folds BOTH the dead-plan exclusion and any cap
-  // overflow into one omitted count without double-bookkeeping (SPEC-080
+  // overflow into one omitted count without double-bookkeeping (SPEC-080(bootstrap-injection)
   // §Test Plan NEGATIVE + BOUNDARY cases both key off this single formula).
   const actionablePlans = report.active_plans
     .filter((plan) => plan.task_counts.ready > 0 || plan.task_counts.claimed > 0)
@@ -742,7 +746,7 @@ export function buildBootstrapInjection(
 
   if (json.length > budgets.charBudget) {
     // reason: nothing left to drop — the char-budget rule forbids a
-    // mid-JSON slice (SPEC-080 §Projection Contract), so the payload is
+    // mid-JSON slice (SPEC-080(bootstrap-injection) §Projection Contract), so the payload is
     // returned intact and the anomaly is signaled instead of hidden.
     payload.budget_exceeded = true;
     json = JSON.stringify(payload);
