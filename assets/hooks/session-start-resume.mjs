@@ -19,7 +19,17 @@
  *          linked git worktree of a lore-governed repo
  * Phase E: lore bootstrap injection (corpus pointer set, when the resolved
  *          corpus root — main checkout for a linked worktree, cwd otherwise —
- *          has .lore/)
+ *          has .lore/). SPEC-080 D3 — this hook is a BLIND PIPE: it spawns
+ *          `lore bootstrap --injection`, trims stdout, and wraps it verbatim
+ *          in the markdown fence with ZERO knowledge of the payload's field
+ *          names or shape (the binary side owns the tier-1 projection
+ *          contract entirely, `buildBootstrapInjection` in `@lore/core`).
+ *          `INJECTION_BACKSTOP_CAP` (12000 chars) is a pure safety backstop,
+ *          not a truncation policy — the projection is already
+ *          char-budgeted binary-side, so exceeding this cap signals a
+ *          binary-side bug. On overflow the hook drops the bootstrap block
+ *          ENTIRELY (never slices stdout) and records a degradation entry
+ *          naming the observed length.
  * Phase F: session-start advisory — cache-first asset-freshness check
  *          (SPEC-076 §C6). Reads `<claude-dir>/.lore-setup-check.json`
  *          (written by `lore setup --check`, T4 of SPEC-076) — a fresh
@@ -81,7 +91,13 @@ const AGENTS_DIR = process.env.CLAUDE_AGENTS_DIR_OVERRIDE
   || join(homedir(), '.claude', 'agents');
 const SESSION_STATE_BASE = process.env.CLAUDE_STATE_BASE_OVERRIDE
   || join(homedir(), '.claude', 'session-state');
-const BOOTSTRAP_CHAR_CAP = 8000;
+// SPEC-080 D3 — a pure safety backstop on the ALREADY char-budgeted tier-1
+// injection payload (`buildBootstrapInjection`, `@lore/core`), never a
+// second truncation policy: exceeding it means the binary side is not
+// honoring its own budget, so the hook drops the whole block rather than
+// mid-JSON-slicing (which would violate the projection contract's
+// no-mid-JSON-slice rule at this layer too).
+const INJECTION_BACKSTOP_CAP = 12000;
 
 // Phase F (SPEC-076 §C6) — cache filename is a DELIBERATE literal duplicate of
 // `adapters/cli/setup-check.ts`'s private `CHECK_CACHE_FILENAME` constant of
@@ -252,7 +268,7 @@ if (existsSync(join(bootstrapCwd, '.lore'))) {
   // SPEC-057 AC-S-4 — `--seat-branch <branch>` is appended ONLY for a linked-worktree
   // session with a resolved corpus root (`seatBranchForBootstrap` non-null); a
   // main-checkout session's spawn args stay byte-unchanged (REGRESSION).
-  const bootstrapArgs = ['bootstrap', '--json'];
+  const bootstrapArgs = ['bootstrap', '--injection'];
   if (seatBranchForBootstrap !== null) {
     bootstrapArgs.push('--seat-branch', seatBranchForBootstrap);
   }
@@ -262,22 +278,25 @@ if (existsSync(join(bootstrapCwd, '.lore'))) {
     timeout: 10000,
     env: { ...process.env, CLAUDECODE: '1' }, // agent surface → AI defaults off (SPEC-024)
   });
-  let parsed = null;
-  if (r.status === 0 && r.stdout) {
-    try { parsed = JSON.parse(r.stdout); } catch {}
-  }
-  if (parsed?.ok && parsed.data) {
-    let json = JSON.stringify(parsed.data, null, 2);
-    if (json.length > BOOTSTRAP_CHAR_CAP) {
-      json = `${json.slice(0, BOOTSTRAP_CHAR_CAP)}\n… (truncated — run \`lore bootstrap --json\` for the full set)`;
-    }
-    bootstrapBlock = `## Lore Bootstrap (hook-injected)
+  const stdout = r.status === 0 && typeof r.stdout === 'string' ? r.stdout.trim() : '';
+  if (stdout) {
+    // Blind pipe (SPEC-080 D3) — the binary owns the payload shape entirely;
+    // this hook never parses, re-serializes, or inspects a single field name.
+    if (stdout.length > INJECTION_BACKSTOP_CAP) {
+      degradations.push({
+        component: 'lore bootstrap',
+        reason: `injection payload ${stdout.length} chars exceeds ${INJECTION_BACKSTOP_CAP} backstop `
+          + '— binary-side bug, run `lore setup` / investigate',
+      });
+    } else {
+      bootstrapBlock = `## Lore Bootstrap (hook-injected)
 
 Corpus pointer set — deep-dive via \`lore get <slug>\`, \`lore tree <plan>\`, \`lore ready <plan> --json\`. Do NOT re-run \`lore bootstrap\` yourself.
 
 \`\`\`json
-${json}
+${stdout}
 \`\`\``;
+    }
   } else {
     const reason = r.error?.code === 'ENOENT'
       ? 'lore binary not on PATH (expected: symlink of <lore-repo>/dist/lore)'
