@@ -105,7 +105,7 @@ const CONFIG_PATTERNS = [
   /\.toml$/,
   /\.env(\..+)?$/,
   /\.config\.(ts|js|mjs|cjs)$/,
-  /\/(hooks|\.claude|\.github|\.vscode|\.docman|\.lore)\//,
+  /\/(hooks|\.claude|\.github|\.vscode|\.lore)\//,
 ];
 if (CONFIG_PATTERNS.some(re => re.test(filePath))) {
   process.exit(0);
