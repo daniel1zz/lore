@@ -7,6 +7,14 @@
  * `CorpusService.getReviewBundle`'s per-link find loop). `--escalated` narrows
  * the list to docs whose LATEST judgment is a fresh (non-stale) escalation,
  * and additionally prints each doc's `blocking_questions` as indented bullets.
+ *
+ * SPEC-043 D3 (task `task-lore-pending-does-not-filter-invalidated-docs-an`):
+ * `ReviewService.pending` excludes invalidated docs by default — an
+ * invalidated draft (e.g. a superseded duplicate) has no lifecycle exit
+ * (`draft` never transitions to `archived`) and would otherwise sit in this
+ * queue forever. `--include-invalid` restores them, badged `[invalid]` on the
+ * Title column (`../pending-render.js::buildPendingTableRows`, the SAME
+ * `formatValidityBadge` renderer `lore list --include-invalid` uses).
  */
 
 import { defineCommand } from "citty";
@@ -44,6 +52,10 @@ export default defineCommand({
       type: "boolean",
       description: "Show only docs whose latest AI judgment is a fresh escalation, with blocking questions",
     },
+    "include-invalid": {
+      type: "boolean",
+      description: "Include invalidated docs (excluded by default), badged [invalid]. Source: SPEC-043 D3.",
+    },
     json: {
       type: "boolean",
       description: "Output as JSON",
@@ -56,6 +68,7 @@ export default defineCommand({
       if (args.author !== undefined) filters["author"] = args.author;
       if (args.type !== undefined) filters["type"] = args.type as DocType;
       if (args.since !== undefined) filters["since"] = args.since;
+      if (args["include-invalid"] === true) filters["include_invalid"] = true;
 
       const result = await app.reviewService.pending(filters);
 

@@ -578,6 +578,223 @@ describe("ReviewService", () => {
         });
       });
     });
+
+    // ── validity filtering (SPEC-043 D3) ────────────────────────────────────
+    // Source: task-lore-pending-does-not-filter-invalidated-docs-an. `pending`
+    // is a review-QUEUE list-surface; an invalidated draft (e.g. a duplicate
+    // superseded by its canonical version) has no lifecycle exit (`draft` never
+    // transitions to `archived`) and would otherwise sit here forever.
+    // HAPPY:      excluded by default; --include-invalid restores it, carrying
+    //             its `validity` field for CLI badge rendering
+    // NEGATIVE:   a future valid_at does NOT exclude a doc (only invalid_at filters)
+    // BOUNDARY:   invalidated mid-queue (no caching between two reads); zero
+    //             pending at all; every pending draft invalidated
+    // ERROR:      malformed extra.validity does not throw — degrades to "not
+    //             invalidated" rather than propagating a store/parse failure
+    // STATE:      moving the injected `now` across invalid_at flips visibility
+    // REGRESSION: a non-invalidated doc's fields are byte-identical whether or
+    //             not an invalidated sibling exists in the same batch;
+    //             PendingDoc.validity is omitted (not a fabricated key) absent
+    //             validity metadata
+    describe("validity filtering (SPEC-043 D3)", () => {
+      describe("happy path", () => {
+        it("excludes an invalidated draft by default", async () => {
+          const invalidated = makeDoc({
+            status: "draft",
+            type: "knowledge",
+            extra: { sub_type: "ideation", validity: { invalid_at: "2026-06-01T00:00:00.000Z" } },
+          });
+          const valid = makeDoc({ status: "draft", type: "knowledge", extra: { sub_type: "ideation" } });
+          await store.insert(invalidated);
+          await store.insert(valid);
+
+          const result = await service.pending(undefined, () => "2026-07-01T00:00:00.000Z");
+
+          expect(result.ok).toBe(true);
+          if (!result.ok) return;
+          const ids = result.value.map((d) => d.id);
+          expect(ids).not.toContain(invalidated.id);
+          expect(ids).toContain(valid.id);
+        });
+
+        it("--include-invalid restores the invalidated draft, carrying its validity field for badge rendering", async () => {
+          const invalidAt = "2026-06-01T00:00:00.000Z";
+          const invalidated = makeDoc({
+            status: "draft",
+            type: "knowledge",
+            extra: { sub_type: "ideation", validity: { invalid_at: invalidAt } },
+          });
+          await store.insert(invalidated);
+
+          const result = await service.pending({ include_invalid: true }, () => "2026-07-01T00:00:00.000Z");
+
+          expect(result.ok).toBe(true);
+          if (!result.ok) return;
+          expect(result.value).toHaveLength(1);
+          expect(result.value[0]!.id).toBe(invalidated.id);
+          expect(result.value[0]!.validity?.invalid_at).toBe(invalidAt);
+        });
+      });
+
+      describe("negative", () => {
+        it("a future valid_at does NOT exclude a doc (only invalid_at filters)", async () => {
+          const doc = makeDoc({
+            status: "draft",
+            type: "knowledge",
+            extra: { sub_type: "ideation", validity: { valid_at: "2099-01-01T00:00:00.000Z" } },
+          });
+          await store.insert(doc);
+
+          const result = await service.pending();
+
+          expect(result.ok).toBe(true);
+          if (!result.ok) return;
+          expect(result.value.map((d) => d.id)).toContain(doc.id);
+        });
+      });
+
+      describe("boundary values", () => {
+        it("a doc invalidated AFTER an initial pending() read is excluded on the next read (no caching, mid-queue invalidation)", async () => {
+          const doc = makeDoc({ status: "draft", type: "knowledge", extra: { sub_type: "ideation" } });
+          await store.insert(doc);
+
+          const before = await service.pending();
+          expect(before.ok).toBe(true);
+          if (!before.ok) return;
+          expect(before.value.map((d) => d.id)).toContain(doc.id);
+
+          // Simulate `lore invalidate` landing between two pending() reads.
+          const updateResult = await store.update(
+            doc.id,
+            { extra: { ...doc.extra, validity: { invalid_at: "2026-06-01T00:00:00.000Z" } } },
+            { expected_version: doc.version },
+          );
+          expect(updateResult.ok).toBe(true);
+
+          const after = await service.pending(undefined, () => "2026-07-01T00:00:00.000Z");
+          expect(after.ok).toBe(true);
+          if (!after.ok) return;
+          expect(after.value.map((d) => d.id)).not.toContain(doc.id);
+        });
+
+        it("returns an empty array when zero drafts are pending (store empty)", async () => {
+          const result = await service.pending();
+          expect(result.ok).toBe(true);
+          if (!result.ok) return;
+          expect(result.value).toHaveLength(0);
+        });
+
+        it("returns an empty array by default when EVERY pending draft is invalidated; --include-invalid restores all of them", async () => {
+          const d1 = makeDoc({
+            status: "draft",
+            type: "knowledge",
+            extra: { sub_type: "ideation", validity: { invalid_at: "2026-06-01T00:00:00.000Z" } },
+          });
+          const d2 = makeDoc({
+            status: "draft",
+            type: "adr",
+            extra: { decision_status: "proposed", validity: { invalid_at: "2026-06-01T00:00:00.000Z" } },
+          });
+          await store.insert(d1);
+          await store.insert(d2);
+
+          const now = () => "2026-07-01T00:00:00.000Z";
+          const defaultResult = await service.pending(undefined, now);
+          expect(defaultResult.ok).toBe(true);
+          if (!defaultResult.ok) return;
+          expect(defaultResult.value).toHaveLength(0);
+
+          const includeInvalidResult = await service.pending({ include_invalid: true }, now);
+          expect(includeInvalidResult.ok).toBe(true);
+          if (!includeInvalidResult.ok) return;
+          expect(includeInvalidResult.value.map((d) => d.id).sort()).toEqual([d1.id, d2.id].sort());
+        });
+      });
+
+      describe("error handling (resilience)", () => {
+        it("a malformed extra.validity (wrong shape) does not throw — degrades to 'not invalidated', doc stays visible", async () => {
+          const doc = makeDoc({
+            status: "draft",
+            type: "knowledge",
+            extra: { sub_type: "ideation", validity: "not-an-object" },
+          });
+          await store.insert(doc);
+
+          const result = await service.pending();
+
+          expect(result.ok).toBe(true);
+          if (!result.ok) return;
+          expect(result.value.map((d) => d.id)).toContain(doc.id);
+          expect(result.value[0]!.validity).toBeUndefined();
+        });
+      });
+
+      describe("state", () => {
+        it("moving the injected `now` across invalid_at flips pending() visibility", async () => {
+          const invalidAt = "2026-06-01T00:00:00.000Z";
+          const doc = makeDoc({
+            status: "draft",
+            type: "knowledge",
+            extra: { sub_type: "ideation", validity: { invalid_at: invalidAt } },
+          });
+          await store.insert(doc);
+
+          const beforeBoundary = await service.pending(undefined, () => "2026-05-01T00:00:00.000Z");
+          expect(beforeBoundary.ok).toBe(true);
+          if (!beforeBoundary.ok) return;
+          expect(beforeBoundary.value.map((d) => d.id)).toContain(doc.id);
+
+          const afterBoundary = await service.pending(undefined, () => "2026-07-01T00:00:00.000Z");
+          expect(afterBoundary.ok).toBe(true);
+          if (!afterBoundary.ok) return;
+          expect(afterBoundary.value.map((d) => d.id)).not.toContain(doc.id);
+        });
+      });
+
+      describe("regression", () => {
+        it("a non-invalidated doc's PendingDoc fields are byte-identical whether or not an invalidated sibling exists in the same batch", async () => {
+          const valid = makeDoc({
+            status: "draft",
+            type: "prd",
+            title: "Valid Doc",
+            created_by: "alice",
+            version: 2,
+            updated_at: "2026-06-05T10:00:00.000Z",
+          });
+          await store.insert(valid);
+
+          const withoutInvalidSibling = await service.pending();
+          expect(withoutInvalidSibling.ok).toBe(true);
+          if (!withoutInvalidSibling.ok) return;
+
+          const invalidated = makeDoc({
+            status: "draft",
+            type: "knowledge",
+            extra: { sub_type: "ideation", validity: { invalid_at: "2026-06-01T00:00:00.000Z" } },
+          });
+          await store.insert(invalidated);
+
+          const withInvalidSibling = await service.pending(undefined, () => "2026-07-01T00:00:00.000Z");
+          expect(withInvalidSibling.ok).toBe(true);
+          if (!withInvalidSibling.ok) return;
+
+          const validRowBefore = withoutInvalidSibling.value.find((d) => d.id === valid.id);
+          const validRowAfter = withInvalidSibling.value.find((d) => d.id === valid.id);
+          expect(validRowAfter).toEqual(validRowBefore);
+          expect(withInvalidSibling.value.map((d) => d.id)).not.toContain(invalidated.id);
+        });
+
+        it("PendingDoc.validity is absent (not a fabricated undefined key) for a doc with no validity metadata", async () => {
+          const doc = makeDoc({ status: "draft", type: "prd" });
+          await store.insert(doc);
+
+          const result = await service.pending();
+          expect(result.ok).toBe(true);
+          if (!result.ok) return;
+          expect("validity" in result.value[0]!).toBe(false);
+        });
+      });
+    });
   });
 
   // ── approve ───────────────────────────────────────────────────────────────
