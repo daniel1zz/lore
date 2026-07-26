@@ -36,13 +36,17 @@
  *   - `AssetFile.kind` is derived from the top-level directory name alone:
  *     `skills → "skill"`, `agents → "agent"`, `hooks → "hook"`,
  *     `governance → "governance"` (`TOP_LEVEL_KIND_MAP`).
- *   - SPEC-083 D3: `GOVERNANCE_INSTALL_EXCLUSIONS` skips
- *     `governance/corpus-workflow.md` specifically -- that file stays in the
- *     walked `assets/governance/` tree (still fingerprinted by the embedded
- *     assets manifest) but is never yielded into the `AssetPayload`, so
- *     `lore setup` neither writes nor manifest-tracks it. The runtime
- *     `lore governance` verb reads it straight from the binary's own
- *     assets root instead -- see that command's module header.
+ *   - SPEC-083 D3: `isRetiredFromInstall`/`RETIRED_FROM_INSTALL_PATHS` (exported
+ *     SSOT, see their own doc comment) skip `governance/corpus-workflow.md`
+ *     specifically -- that file stays in the walked `assets/governance/` tree
+ *     (still fingerprinted by the embedded assets manifest) but is never
+ *     yielded into the `AssetPayload`, so `lore setup` neither writes nor
+ *     manifest-tracks it. The runtime `lore governance` verb reads it
+ *     straight from the binary's own assets root instead -- see that
+ *     command's module header. `setup-check.ts`'s `buildCheckEmbeddedManifest`
+ *     imports this SAME predicate to filter the EMBEDDED manifest it
+ *     classifies against -- see this predicate's own doc for why a
+ *     hand-duplicated literal there was rejected.
  *   - `AssetFile.executable` records the SOURCE file's on-disk owner-execute
  *     bit (`mode & 0o100 !== 0`), set ONLY when `true` (omitted, never
  *     `false` — see `assetFileSchema`'s doc in `@lore/core`). `SetupService`
@@ -90,20 +94,55 @@ import type { AssetFile, AssetOwnership, AssetPayload, SetupEntryKind } from "@l
 const CLAUDE_DIR_PLACEHOLDER = "{{CLAUDE_DIR}}";
 
 /**
- * Governance-dir files excluded from the MACHINE install set (SPEC-083 D3).
+ * SINGLE SOURCE OF TRUTH for files retired from the MACHINE install set
+ * (SPEC-083 D3) while still shipping/fingerprinted under `assets/`. Keyed by
+ * the FULL path relative to `assetsRoot` (e.g. `"governance/corpus-workflow.md"`)
+ * — the SAME shape both `AssetFile.path` (this port, below) and
+ * `EmbeddedAssetEntry.path` (`../generated/assets-manifest.js`, built by
+ * `scripts/embed-assets-manifest.mjs` walking `assets/` directly) use.
+ *
  * `corpus-workflow.md` is retired from `<claude-dir>/governance/` — the new
  * bootstrap-stage `lore governance` verb (SPEC-083 D1) prints it straight
  * from the binary's OWN `assets/` tree at read time, so an installed,
  * setup-time-snapshotted copy can no longer drift out of sync with the
  * binary. The file itself still lives under `assets/governance/` (this
  * port's `load()` never walks anything else) and is still fingerprinted by
- * the embedded assets manifest (`scripts/embed-assets-manifest.mjs` walks
- * `assets/` directly, not through this port) — only ITS INSTALLATION is
- * retired here. `seat-briefing.md` is explicitly OUT of this exclusion
- * (SPEC-083 Scope "Out") — Phase D of the session-start hook still reads it
- * as an installed file.
+ * the embedded assets manifest — only ITS INSTALLATION is retired here.
+ * `seat-briefing.md` is explicitly OUT of this exclusion (SPEC-083 Scope
+ * "Out") — Phase D of the session-start hook still reads it as an installed
+ * file.
+ *
+ * **Two independent consumers, one declaration** (2026-07-26 regression fix):
+ * this port's own `load()` walk (below) AND `setup-check.ts`'s
+ * `buildCheckEmbeddedManifest` (which filters the EMBEDDED manifest — a
+ * SEPARATE data source that also fingerprints every file under `assets/`)
+ * BOTH exclude via {@link isRetiredFromInstall}. Before this export existed,
+ * the exclusion lived ONLY in this port's walk — `lore setup --check`
+ * classified `governance/corpus-workflow.md` `missing` on every freshly
+ * converged target (the embedded manifest still listed it, nothing told the
+ * check's classifier to skip it) even though the file was NEVER supposed to
+ * be installed. A hand-duplicated literal path string in `setup-check.ts`
+ * would have "fixed" the symptom while recreating the exact two-declarations-
+ * of-one-fact defect this export exists to prevent.
  */
-const GOVERNANCE_INSTALL_EXCLUSIONS = new Set<string>(["corpus-workflow.md"]);
+export const RETIRED_FROM_INSTALL_PATHS = new Set<string>(["governance/corpus-workflow.md"]);
+
+/**
+ * Predicate form of {@link RETIRED_FROM_INSTALL_PATHS} — `path` is the FULL
+ * path relative to `assetsRoot`, never a bare filename (a bare-filename check
+ * would risk excluding an unrelated same-named file nested elsewhere).
+ *
+ * @param path - a full `assetsRoot`-relative path, e.g. `"governance/corpus-workflow.md"`.
+ * @returns `true` iff `path` is retired from the machine install set.
+ * @throws Never.
+ * @example
+ * isRetiredFromInstall("governance/corpus-workflow.md"); // => true
+ * isRetiredFromInstall("governance/seat-briefing.md"); // => false
+ * isRetiredFromInstall("governance/nested/corpus-workflow.md"); // => false (different path)
+ */
+export function isRetiredFromInstall(path: string): boolean {
+  return RETIRED_FROM_INSTALL_PATHS.has(path);
+}
 
 import type { AssetSource } from "../service/setup-service.js";
 
@@ -187,10 +226,13 @@ export class RealAssetSource implements AssetSource {
       }
 
       for (const relPath of relPaths) {
-        // SPEC-083 D3 — skip the retired governance install exclusions (currently
-        // just corpus-workflow.md); every other governance file (seat-briefing.md)
-        // and every file in the other three walked dirs is unaffected.
-        if (topDir === "governance" && GOVERNANCE_INSTALL_EXCLUSIONS.has(relPath)) {
+        const assetRelPath = `${topDir}/${relPath}`;
+
+        // SPEC-083 D3 — skip files retired from the install set (currently just
+        // governance/corpus-workflow.md); every other file (incl.
+        // governance/seat-briefing.md) is unaffected. See RETIRED_FROM_INSTALL_PATHS's
+        // doc for why this is a full-path, not bare-filename, exclusion.
+        if (isRetiredFromInstall(assetRelPath)) {
           continue;
         }
 
@@ -210,7 +252,7 @@ export class RealAssetSource implements AssetSource {
 
         const isExecutable = (mode & 0o100) !== 0;
         files.push({
-          path: `${topDir}/${relPath}`,
+          path: assetRelPath,
           kind,
           content,
           sha256: sha256Hex(content),
