@@ -129,11 +129,27 @@ const CLAUDE_DIR_PLACEHOLDER = "{{CLAUDE_DIR}}";
  * of-one-fact defect this export exists to prevent. SPEC-085 D3 rides the
  * SAME single-declaration fix: adding `seat-briefing.md` here is the ONLY
  * edit needed for both consumers to agree.
+ *
+ * `skills/lore-init-context/SKILL.md` (added
+ * spec-context-verb-family-two-zone-claude-md-anatomy-lore D10) is a
+ * DIFFERENT retirement shape from the three `governance/*` entries above: the
+ * `lore-init-context` skill is superseded outright by this spec's `context`
+ * verb family (generation/refresh now live in `lore` itself, not a prompted
+ * skill), so its source file is ALSO deleted from `assets/skills/` entirely —
+ * this port's walk therefore never even encounters that path anymore. The
+ * membership entry here is kept anyway (harmless, since `isRetiredFromInstall`
+ * only ever narrows an already-produced candidate list) so
+ * `setup-check.ts`'s `buildCheckEmbeddedManifest` keeps classifying any
+ * STALE embedded-manifest/`.lore-setup-manifest.json` record of this path
+ * (from an install predating this retirement) the same way it already
+ * classifies the governance trio, rather than needing a second, divergent
+ * "file never existed" code path for this one entry.
  */
 export const RETIRED_FROM_INSTALL_PATHS = new Set<string>([
   "governance/corpus-workflow.md",
   "governance/seat-briefing.md",
   "governance/claude-md-contract.md",
+  "skills/lore-init-context/SKILL.md",
 ]);
 
 /**

@@ -155,6 +155,18 @@
  *     install; this task's own Scope-Alt). `SetupFsReader.listDir` (the port
  *     method this needs) is OPTIONAL/additive — a reader that doesn't
  *     implement it makes pruning a silent no-op, never an error.
+ *   - **spec-context-verb-family-two-zone-claude-md-anatomy-lore D10 —
+ *     `plan.removals` now-empty-directory sweep.** `install()`'s file-based
+ *     `plan.removals` (e.g. a retired asset like
+ *     `skills/lore-init-context/SKILL.md` orphan-pruned via
+ *     `RETIRED_FROM_INSTALL_PATHS`, `real-asset-source.ts`) previously left
+ *     its now-empty parent directory behind — `uninstall`'s AC-046-F sweep
+ *     had no equivalent here. `install()` now runs the SAME
+ *     `computeAncestorDirsDeepestFirst` + `removeDirIfEmpty` sweep over
+ *     `committedRemovals` that `uninstall` already runs over its own
+ *     `removedPaths` — same empty-only, deepest-first, no-directory-
+ *     provenance-tracking contract (see that bullet's "Known simplification"
+ *     note, which now applies here too).
  *
  * Side-effect class: IO (delegates ALL of it to the four injected ports —
  *   this class itself makes no direct `fs`/`child_process` calls).
@@ -601,6 +613,18 @@ export class SetupService {
       for (const removedPath of plan.removals) {
         await this.writer.remove(path.join(opts.targetDir, removedPath));
         committedRemovals.push(removedPath);
+      }
+
+      // Mirror `uninstall`'s AC-046-F empty-directory sweep for orphan-pruned
+      // paths too (SPEC-context-verb-family-two-zone-claude-md-anatomy-lore
+      // D10 — a retired path like `skills/lore-init-context/SKILL.md` leaves
+      // its now-empty `skills/lore-init-context/` directory behind otherwise;
+      // `install`'s `plan.removals` was the one removal source this sweep
+      // didn't yet cover). Same empty-only, deepest-first, no-provenance-
+      // tracking contract as `uninstall`'s identical sweep — see this
+      // module's doc "Known simplification" note.
+      for (const dir of computeAncestorDirsDeepestFirst(opts.targetDir, committedRemovals)) {
+        await this.writer.removeDirIfEmpty(dir);
       }
     } catch (cause) {
       return err(describeWriterFailure("install", cause, { committedBackups, committedWrites, committedRemovals }));

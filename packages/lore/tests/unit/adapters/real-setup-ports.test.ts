@@ -162,8 +162,8 @@ const DECLARED_FILES_IN_SCOPE = [
   "skills/lore-auto-wire/references/tools/selfhosted-pg.md",
   "skills/lore-auto-wire/scripts/check-tools.sh",
   "skills/lore-auto-wire/scripts/fix-path.sh",
-  // skills/lore-init-context (vendored, converged from zz-init-context, 2026-07-17)
-  "skills/lore-init-context/SKILL.md",
+  // skills/lore-init-context RETIRED (spec-context-verb-family-two-zone-claude-md-anatomy-lore D10):
+  // no longer installed — see RETIRED_FROM_INSTALL_PATHS, real-asset-source.ts.
   // skills/lore-uat (vendored, converged from zz-uat, 2026-07-17)
   "skills/lore-uat/SKILL.md",
   "skills/lore-uat/references/drivers.md",
@@ -382,6 +382,8 @@ const DECLARED_FILES_IN_SCOPE = [
   "hooks/lore-gate-g2-spec-promote.sh",
   "hooks/lore-gate-g3-plan-promote.sh",
   "hooks/lore-gate-g4-task-claim.sh",
+  // claude-md-guard (PostToolUse CLAUDE.md admission check, spec-context-verb-family-two-zone-claude-md-anatomy-lore D10/D11)
+  "hooks/claude-md-guard.sh",
   "hooks/lib/turn-state.mjs",
   // governance/corpus-workflow.md AND governance/seat-briefing.md are
   // DELIBERATELY ABSENT here (SPEC-083 D3, extended by SPEC-085 D3): both
@@ -405,6 +407,7 @@ const DECLARED_EXECUTABLE_PATHS = new Set([
   "hooks/lore-gate-g2-spec-promote.sh",
   "hooks/lore-gate-g3-plan-promote.sh",
   "hooks/lore-gate-g4-task-claim.sh",
+  "hooks/claude-md-guard.sh",
   "hooks/session-start-resume.mjs",
   "hooks/subagent-context.mjs",
   "hooks/pre-no-general-agent-gate.mjs",
