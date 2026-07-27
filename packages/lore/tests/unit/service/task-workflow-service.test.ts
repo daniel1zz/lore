@@ -300,6 +300,78 @@ describe("NEGATIVE — foreign fresh claim → CLAIM_CONFLICT (AC-WF-3)", () => 
   });
 });
 
+// ─── NEGATIVE/REGRESSION — claim --worktree blank rejection (AC-WH-2) ────────
+// spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M2: an empty
+// or whitespace-only `--worktree` satisfies "the flag was explicitly passed"
+// while persisting a value that defeats SPEC-042 D1 session derivation and
+// `noAnchorOverlap` grouping (`(by, machine, worktree)`) — must fail loud
+// BEFORE any write, naming the flag. Omitted/non-empty values are unchanged.
+
+describe("NEGATIVE — claim --worktree empty or whitespace-only rejected (AC-WH-2)", () => {
+  it("empty string worktree → VALIDATION_ERROR naming the flag, doc unchanged", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", worktree: "" });
+    expect(claimResult.ok).toBe(false);
+    if (claimResult.ok) return;
+    expect(claimResult.error.code).toBe("VALIDATION_ERROR");
+    if (claimResult.error.code !== "VALIDATION_ERROR") return;
+    expect(claimResult.error.field).toBe("worktree");
+
+    const doc = await corpusService.get(taskId);
+    expect(doc.ok).toBe(true);
+    if (!doc.ok) return;
+    expect(doc.value.doc.extra["claim"]).toBeUndefined();
+    expect(doc.value.doc.version).toBe(1); // create only — no claim write landed
+  });
+
+  it("whitespace-only worktree (spaces/tabs) → VALIDATION_ERROR naming the flag, doc unchanged", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", worktree: "   \t  " });
+    expect(claimResult.ok).toBe(false);
+    if (claimResult.ok) return;
+    expect(claimResult.error.code).toBe("VALIDATION_ERROR");
+    if (claimResult.error.code !== "VALIDATION_ERROR") return;
+    expect(claimResult.error.field).toBe("worktree");
+
+    const doc = await corpusService.get(taskId);
+    expect(doc.ok).toBe(true);
+    if (!doc.ok) return;
+    expect(doc.value.doc.extra["claim"]).toBeUndefined();
+    expect(doc.value.doc.version).toBe(1);
+  });
+
+  it("REGRESSION — omitted worktree still claims successfully with no worktree key stored", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice" });
+    expect(claimResult.ok).toBe(true);
+    if (!claimResult.ok) return;
+    const claim = claimResult.value.extra["claim"] as Record<string, unknown>;
+    expect(claim.by).toBe("alice");
+    expect("worktree" in claim).toBe(false);
+  });
+
+  it("REGRESSION — non-empty worktree still claims successfully and stores the value verbatim", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", worktree: "feature-branch" });
+    expect(claimResult.ok).toBe(true);
+    if (!claimResult.ok) return;
+    const claim = claimResult.value.extra["claim"] as Record<string, unknown>;
+    expect(claim.worktree).toBe("feature-branch");
+  });
+});
+
 describe("NEGATIVE — non-holder release rejected (AC-WF-6)", () => {
   it("release by a non-holder without --force → CLAIM_CONFLICT, claim remains intact", async () => {
     const { corpusService, taskWorkflowService } = makeServices();

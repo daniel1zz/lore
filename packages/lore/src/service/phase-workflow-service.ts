@@ -124,6 +124,7 @@ import type {
   AnchorConflict,
   ReadyReport,
 } from "./task-workflow-service.js";
+import { rejectBlankClaimWorktree } from "./task-workflow-service.js";
 
 /**
  * Re-exported verbatim from `./task-workflow-service.js` (SPEC-056 D1/P1) — never
@@ -698,6 +699,14 @@ export class PhaseWorkflowService {
     opts: ClaimOpts,
     now: () => string,
   ): Promise<Result<DocRecord, LoreError>> {
+    // reason: AC-WH-2 (spec-workflow-hardening-evidence-red-vocabulary-claim-
+    // worktree §M2) — SSOT shared with TaskWorkflowService._claimImpl via the
+    // imported `rejectBlankClaimWorktree`, never re-derived here. Validated
+    // BEFORE resolvePhase so a blank --worktree fails loud and persists
+    // nothing regardless of whether the target phase exists.
+    const worktreeCheck = rejectBlankClaimWorktree(opts.worktree);
+    if (!worktreeCheck.ok) return worktreeCheck;
+
     const phaseResult = await this.resolvePhase(idOrSlug);
     if (!phaseResult.ok) return phaseResult;
     const phase = phaseResult.value;

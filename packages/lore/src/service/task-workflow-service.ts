@@ -234,6 +234,36 @@ function ageMinutesBetween(nowIso: string, atIso: string): number {
 }
 
 /**
+ * Rejects an explicitly-passed `--worktree` that is empty or whitespace-only
+ * (spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M2, AC-WH-2).
+ * `undefined` (flag omitted) is legal and passes through untouched — only a
+ * PRESENT-but-blank value is rejected, because that value would otherwise
+ * satisfy "the flag was explicitly declared" (SPEC-042 D2's ALWAYS-explicit
+ * requirement) while persisting a string that defeats SPEC-042 D1 session
+ * derivation and `noAnchorOverlap`'s `(by, machine, worktree)` grouping key —
+ * every fresh claim with a blank worktree would silently group together
+ * regardless of which actual worktree each session runs in. Exported (not
+ * module-private) because `PhaseWorkflowService.claim` duplicates the same
+ * claim shape and must share this ONE validation instead of re-deriving it
+ * (SSOT — see that module's own `_claimImpl`).
+ *
+ * @param worktree - `ClaimOpts.worktree` as received, before any other claim logic runs
+ * @returns `ok(undefined)` when omitted or non-blank; `err(VALIDATION_ERROR)` naming
+ *   the `worktree` field when present but blank
+ */
+export function rejectBlankClaimWorktree(worktree: string | undefined): Result<void, LoreError> {
+  if (worktree !== undefined && worktree.trim() === "") {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "worktree",
+      message: "--worktree must not be empty or whitespace-only",
+      value: worktree,
+    });
+  }
+  return ok(undefined);
+}
+
+/**
  * Rejects any candidate task anchor containing `#` — the SPEC code-anchor grammar's
  * delimiter (`path[#Symbol]`, SPEC-045 §Design Decisions D1/D6) is not valid on a
  * TASK's `file_anchors`, which is always a plain repo-relative path/dir scope.
@@ -572,6 +602,12 @@ export class TaskWorkflowService {
     opts: ClaimOpts,
     now: () => string,
   ): Promise<Result<DocRecord, LoreError>> {
+    // reason: AC-WH-2 — validated BEFORE resolveTask so a blank --worktree
+    // fails loud and persists nothing regardless of whether the target task
+    // exists (this is an opts-shape defect, not a doc-lookup concern).
+    const worktreeCheck = rejectBlankClaimWorktree(opts.worktree);
+    if (!worktreeCheck.ok) return worktreeCheck;
+
     const taskResult = await this.resolveTask(idOrSlug);
     if (!taskResult.ok) return taskResult;
     const task = taskResult.value;
