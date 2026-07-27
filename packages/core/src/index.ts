@@ -72,3 +72,5 @@ export * from "./plan-update.js";
 export * from "./outline.js";
 export * from "./ordinal.js";
 export * from "./archive-candidates.js";
+export * from "./memory-markers.js";
+export * from "./fs-ports.js";
