@@ -1005,14 +1005,16 @@ export class CorpusService {
     };
 
     // BUG-002 (audit finding) — insert + version-1 snapshot + create audit entry
-    // as ONE atomic composite write (StoreInterface.insertWithProvenance): the
-    // pre-fix code ran these as three independent `await`s, so a version/audit
-    // failure after a successful insert left a PERMANENTLY orphaned doc (zero
-    // version history, zero audit trail, no signal to the caller that partial
-    // state landed). All three writes now commit or roll back together — see
-    // insertWithProvenance's JSDoc on StoreInterface for the per-store atomicity
-    // mechanism (SQLite: BEGIN IMMEDIATE/COMMIT/ROLLBACK; Turso: a real
-    // client.transaction(); InMemory: manual undo-on-failure).
+    // as ONE atomic composite write (StoreInterface.insertWithProvenance /
+    // insertWithAllocatedOrdinalAndProvenance): the pre-fix code ran these as
+    // three independent `await`s, so a version/audit failure after a
+    // successful insert left a PERMANENTLY orphaned doc (zero version
+    // history, zero audit trail, no signal to the caller that partial state
+    // landed). All three writes now commit or roll back together for BOTH
+    // the numbered and non-numbered create paths — see insertWithProvenance's
+    // JSDoc on StoreInterface for the per-store atomicity mechanism (SQLite:
+    // BEGIN IMMEDIATE/COMMIT/ROLLBACK; Turso: a real client.transaction();
+    // InMemory: manual undo-on-failure).
     const creationVersion: VersionRecord = {
       doc_id: id,
       version: 1,
@@ -1042,31 +1044,16 @@ export class CorpusService {
       details: { type: doc.type, slug: doc.slug, version: 1 },
     };
 
-    let insertResult: Result<DocRecord, LoreError>;
-    if (shouldAllocateOrdinal) {
-      // reason: SPEC-084 D1 — `insertWithAllocatedOrdinal` is scoped to the
-      // INSERT alone (its own StoreInterface JSDoc mirrors plain `insert`,
-      // never `insertWithProvenance`'s three-way atomic composite — T2's
-      // frozen store contract has no ordinal-aware provenance composite).
-      // The version snapshot and create-audit entry are therefore written as
-      // two subsequent, independently-awaited calls — the SAME sequence
-      // `insertWithProvenance` replaced for BUG-002, reintroduced ONLY on
-      // this narrower numbered-type path because no wider composite exists
-      // to call instead. A failure on either subsequent step leaves the doc
-      // persisted with a missing version/audit row; this narrow gap is
-      // accepted pending a future ordinal-aware provenance composite on
-      // StoreInterface (out of this task's anchors, which are service-layer
-      // wiring only).
-      const allocResult = await this.store.insertWithAllocatedOrdinal(doc);
-      if (!allocResult.ok) return allocResult;
-      const versionResult = await this.store.insertVersion(creationVersion);
-      if (!versionResult.ok) return versionResult;
-      const auditResult = await this.store.appendAuditEntry(creationAudit);
-      if (!auditResult.ok) return auditResult;
-      insertResult = allocResult;
-    } else {
-      insertResult = await this.store.insertWithProvenance(doc, creationVersion, creationAudit);
-    }
+    // reason: SPEC-084 D1 follow-up (closes the BUG-002 window this method's
+    // numbered path had reintroduced) — `insertWithAllocatedOrdinalAndProvenance`
+    // is the ordinal-aware sibling of `insertWithProvenance`, combining the
+    // MAX+1/bounded-retry allocation with the doc+version+audit atomicity in
+    // ONE transaction. The numbered and non-numbered branches now share the
+    // SAME atomicity guarantee; only WHICH store method allocates the
+    // ordinal differs.
+    const insertResult: Result<DocRecord, LoreError> = shouldAllocateOrdinal
+      ? await this.store.insertWithAllocatedOrdinalAndProvenance(doc, creationVersion, creationAudit)
+      : await this.store.insertWithProvenance(doc, creationVersion, creationAudit);
     if (!insertResult.ok) return insertResult;
 
     // Provenance auto-write (IoC vertical-slice tech-spec §4.1 P4, "governs" edge from

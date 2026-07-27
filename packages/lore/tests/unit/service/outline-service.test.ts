@@ -632,6 +632,11 @@ describe("OutlineService.resolve", () => {
         // reason: BUG-002 audit fix — new required StoreInterface methods; mechanical
         // addition (same class of fix as every other explicit delegate above).
         insertWithProvenance: (doc, version, audit) => store.insertWithProvenance(doc, version, audit),
+        // reason: task-skill-implement-ordinal-aware-provenance-composite —
+        // new required StoreInterface method; mechanical addition (same
+        // class of fix as every other explicit delegate above).
+        insertWithAllocatedOrdinalAndProvenance: (doc, version, audit) =>
+          store.insertWithAllocatedOrdinalAndProvenance(doc, version, audit),
         updateWithProvenance: (id, patch, opts, version, audit) =>
           store.updateWithProvenance(id, patch, opts, version, audit),
         softDeleteWithProvenance: (id, version, audit) => store.softDeleteWithProvenance(id, version, audit),

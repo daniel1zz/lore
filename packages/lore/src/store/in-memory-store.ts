@@ -422,6 +422,47 @@ export class InMemoryStore implements StoreInterface {
   }
 
   /**
+   * @see StoreInterface.insertWithAllocatedOrdinalAndProvenance
+   *
+   * Same manual-undo technique as {@link insertWithProvenance} (no real
+   * transaction primitive — plain Map/Array mutation) layered on top of
+   * {@link insertWithAllocatedOrdinal}'s bounded-retry allocation: dispatches
+   * through `this.insertWithAllocatedOrdinal(doc)` → `this.insertVersion(...)`
+   * → `this.appendAuditEntry(...)` (polymorphic `this.<method>` calls, NOT a
+   * private raw helper — mirrors `insertWithProvenance`'s identical
+   * rationale, so a failure-injecting subclass overriding `insertVersion`/
+   * `appendAuditEntry` is honored here too). A later-step failure deletes
+   * the doc row the allocation step just wrote (keyed by the ACTUAL
+   * allocated id, from the alloc result — never the caller's pre-allocation
+   * `doc` object) so the candidate ordinal is never left occupying a live
+   * row; `maxOrdinalForType`'s next read for this type therefore recomputes
+   * the SAME candidate on a subsequent call — the ordinal is not burned.
+   */
+  async insertWithAllocatedOrdinalAndProvenance(
+    doc: DocRecord,
+    version: VersionRecord,
+    audit: AuditEntry,
+  ): Promise<Result<DocRecord, LoreError>> {
+    const allocResult = await this.insertWithAllocatedOrdinal(doc);
+    if (!allocResult.ok) return allocResult;
+
+    const versionResult = await this.insertVersion(version);
+    if (!versionResult.ok) {
+      this.docs.delete(allocResult.value.id);
+      return versionResult;
+    }
+
+    const auditResult = await this.appendAuditEntry(audit);
+    if (!auditResult.ok) {
+      this.docs.delete(allocResult.value.id);
+      this.removeVersionEntry(version);
+      return auditResult;
+    }
+
+    return ok(allocResult.value);
+  }
+
+  /**
    * @see StoreInterface.updateWithProvenance
    */
   async updateWithProvenance(

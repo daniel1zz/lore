@@ -1255,6 +1255,124 @@ export class TursoStore implements StoreInterface {
   }
 
   /**
+   * @see StoreInterface.insertWithAllocatedOrdinalAndProvenance
+   *
+   * Combines {@link insertWithAllocatedOrdinal}'s MAX+1/bounded-retry
+   * allocation with {@link insertWithProvenance}'s doc+version+audit
+   * atomicity — ONE interactive `client.transaction("write")` wraps the MAX
+   * query, the bounded-retry insert loop, and the subsequent version/audit
+   * inserts. A version or audit failure rolls back the WHOLE transaction,
+   * including the just-succeeded ordinal-numbered doc insert — the ordinal
+   * candidate is therefore never burned (a retry of this same call
+   * recomputes the identical `MAX(ordinal)+1`, since the rolled-back row
+   * never raised that type's MAX).
+   */
+  async insertWithAllocatedOrdinalAndProvenance(
+    doc: DocRecord,
+    version: VersionRecord,
+    audit: AuditEntry,
+  ): Promise<Result<DocRecord, LoreError>> {
+    await this.ensureReady();
+    const tx = await this.client.transaction("write");
+    try {
+      const maxRs = await tx.execute({
+        sql: "SELECT MAX(ordinal) as maxOrdinal FROM docs WHERE type = ?",
+        args: [doc.type] as InValue[],
+      });
+      const maxRow = maxRs.rows[0];
+      const base = maxRow ? rowNumOrNull(maxRow, "maxOrdinal") ?? 0 : 0;
+
+      const tagsJson = JSON.stringify(doc.tags);
+      const shadow = computeFtsShadowValues(doc.title, doc.content, tagsJson);
+
+      const allocResult = await allocateWithBoundedRetry<DocRecord>(base, doc.type, async (candidate) => {
+        try {
+          await tx.execute({
+            sql: `INSERT INTO docs
+                   (id, slug, type, role, title, status, priority, content,
+                    parent_id, extra, tags, version, created_at, updated_at,
+                    created_by, deleted_at, fts_title, fts_content, fts_tags, ordinal)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            args: [
+              doc.id,
+              doc.slug,
+              doc.type,
+              doc.role,
+              doc.title,
+              doc.status,
+              doc.priority,
+              doc.content,
+              doc.parent_id ?? null,
+              JSON.stringify(doc.extra),
+              tagsJson,
+              doc.version,
+              doc.created_at,
+              doc.updated_at,
+              doc.created_by,
+              doc.deleted_at ?? null,
+              shadow.fts_title,
+              shadow.fts_content,
+              shadow.fts_tags,
+              candidate,
+            ] as InValue[],
+          });
+          return { kind: "success", value: { ...doc, ordinal: candidate } };
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : "";
+          if (msg.includes("UNIQUE constraint failed: docs.slug")) {
+            return { kind: "error", error: { code: "DUPLICATE_SLUG", slug: doc.slug, existing_id: doc.id } };
+          }
+          if (isOrdinalUniqueViolationMessage(msg)) {
+            return { kind: "collision" };
+          }
+          return { kind: "error", error: toStoreError(e) };
+        }
+      });
+
+      if (!allocResult.ok) {
+        await tx.rollback();
+        return allocResult;
+      }
+
+      await tx.execute({
+        sql: `INSERT INTO versions
+               (doc_id, version, content, extra, status, title,
+                action, created_at, created_by, change_summary, slug)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          version.doc_id,
+          version.version,
+          version.content,
+          JSON.stringify(version.extra),
+          version.status,
+          version.title,
+          version.action,
+          version.created_at,
+          version.created_by,
+          version.change_summary ?? null,
+          version.slug ?? null,
+        ] as InValue[],
+      });
+
+      await this.appendAuditEntryTx(tx, audit);
+
+      await tx.commit();
+      return ok(allocResult.value);
+    } catch (e) {
+      try {
+        await tx.rollback();
+      } catch {
+        // reason: rollback throws only when the transaction is already
+        // closed — safe to ignore, `e` below is what the caller needs.
+        // Mirrors insertWithProvenance's identical guard.
+      }
+      return wrapStoreError(e);
+    } finally {
+      tx.close();
+    }
+  }
+
+  /**
    * @see StoreInterface.updateWithProvenance
    */
   async updateWithProvenance(

@@ -1514,6 +1514,88 @@ export class SQLiteStore implements StoreInterface {
   }
 
   /**
+   * @see StoreInterface.insertWithAllocatedOrdinalAndProvenance
+   *
+   * Combines {@link insertWithAllocatedOrdinal}'s MAX+1/bounded-retry
+   * allocation with {@link insertWithProvenance}'s doc+version+audit
+   * atomicity — ONE `BEGIN IMMEDIATE`/`COMMIT`/`ROLLBACK` block wraps the
+   * MAX query, the bounded-retry insert loop (via the shared
+   * `allocateWithBoundedRetry` seam), and the subsequent version/audit
+   * inserts. A version or audit failure rolls back the WHOLE transaction,
+   * including the just-succeeded ordinal-numbered doc insert — the ordinal
+   * candidate is therefore never burned (a retry of this same call
+   * recomputes the identical `MAX(ordinal)+1`, since the rolled-back row
+   * never raised that type's MAX).
+   */
+  async insertWithAllocatedOrdinalAndProvenance(
+    doc: DocRecord,
+    version: VersionRecord,
+    audit: AuditEntry,
+  ): Promise<Result<DocRecord, LoreError>> {
+    // `BEGIN IMMEDIATE` gets its OWN try/catch — see insertWithProvenance's
+    // identical split for why (a synchronous open-transaction throw means no
+    // transaction was ever opened, so the body's ROLLBACK-on-catch must not
+    // run for it).
+    try {
+      this.db.run("BEGIN IMMEDIATE");
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+    try {
+      const maxRow = this.db
+        .prepare("SELECT MAX(ordinal) as maxOrdinal FROM docs WHERE type = ?")
+        .get(doc.type) as { maxOrdinal: number | bigint | null };
+      const base = maxRow.maxOrdinal === null ? 0 : Number(maxRow.maxOrdinal);
+
+      const allocResult = await allocateWithBoundedRetry<DocRecord>(base, doc.type, async (candidate) => {
+        const insertResult = this.insertDocSync({ ...doc, ordinal: candidate });
+        if (insertResult.ok) {
+          return { kind: "success", value: insertResult.value };
+        }
+        if (
+          insertResult.error.code === "STORE_ERROR" &&
+          isOrdinalUniqueViolationMessage(insertResult.error.message)
+        ) {
+          return { kind: "collision" };
+        }
+        // reason: a non-ordinal failure (e.g. DUPLICATE_SLUG) must propagate
+        // immediately — retrying with a different ordinal candidate would
+        // never fix it. Mirrors insertWithAllocatedOrdinal's identical guard.
+        return { kind: "error", error: insertResult.error };
+      });
+
+      if (!allocResult.ok) {
+        this.db.run("ROLLBACK");
+        return allocResult;
+      }
+
+      const versionResult = this.insertVersionSync(version);
+      if (!versionResult.ok) {
+        this.db.run("ROLLBACK");
+        return versionResult;
+      }
+
+      const auditResult = this.appendAuditEntrySync(audit);
+      if (!auditResult.ok) {
+        this.db.run("ROLLBACK");
+        return auditResult;
+      }
+
+      this.db.run("COMMIT");
+      return ok(allocResult.value);
+    } catch (e) {
+      try {
+        this.db.run("ROLLBACK");
+      } catch {
+        // reason: ROLLBACK itself throws only when there is no open
+        // transaction to roll back — safe to ignore, `e` below is what the
+        // caller needs. Mirrors insertWithProvenance's identical catch/ROLLBACK guard.
+      }
+      return wrapStoreError(e);
+    }
+  }
+
+  /**
    * @see StoreInterface.updateWithProvenance
    */
   async updateWithProvenance(
