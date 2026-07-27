@@ -45,19 +45,27 @@
  *     rather than whole-file: the shipped `CLAUDE.md.template` asset is
  *     itself wrapped in a `# ─── lore governance (managed) ───` /
  *     `# ─── end lore governance ───` marker pair (mirrors `.gitignore`'s
- *     marker-embedded-in-the-shipped-asset convention). `computeClaudeMdCandidate`
- *     resolves three legacy on-disk forms to one candidate each: absent ->
- *     the template verbatim (already marker-wrapped); byte-identical to the
- *     OLD SPEC-060 D4 un-marked stub -> also fully replaced by the wrapped
- *     form (it was lore's own prior output — nothing of the user's to
- *     lose); anything else (genuinely user-authored/modified) -> the
- *     marker-wrapped section is APPENDED at the end, every existing byte
- *     preserved untouched. A file that already contains a valid marker pair
- *     (a prior converge run's own output) has ONLY that span spliced out
- *     and replaced — everything outside the markers stays byte-identical,
- *     which is what makes a second consecutive run byte-identical too
- *     (idempotency falls out of the splice, not a special case). See that
- *     function's own doc comment for the full decision tree.
+ *     marker-embedded-in-the-shipped-asset convention). **SPEC-context-verb-
+ *     family D4 (splice SSOT)**: `computeClaudeMdSplice` delegates the actual
+ *     zone-splice math to `service/context-projection.ts::spliceManagedSections`
+ *     (the SAME pure module `flows/context-flow.ts` uses) — the shipped
+ *     template's whole managed body becomes ONE section (`CLAUDE_MD_SECTION_ID`),
+ *     resolving three legacy on-disk forms to one candidate each: absent ->
+ *     the template verbatim, now WRAPPED AND FINGERPRINTED by the shared
+ *     splice; byte-identical to the OLD SPEC-060 D4 un-marked stub -> treated
+ *     as an empty effective input so the shared splice creates a fresh
+ *     (fingerprinted) zone in its place (it was lore's own prior output —
+ *     nothing of the user's to lose); anything else (genuinely
+ *     user-authored/modified, or an already marker-wrapped zone from a PRIOR
+ *     run of this same refactored flow) is passed through to
+ *     `spliceManagedSections` verbatim, which appends/rebuilds/protects the
+ *     zone per its own five-state contract (created/updated/unchanged/
+ *     diverged_skip/appended — see that function's doc comment). A zone
+ *     wrapped by a PRE-this-refactor lore build (no fingerprint comment
+ *     inside) is a legacy shape the shared parser does not tolerate — it
+ *     fails loud (`VALIDATION_ERROR`), surfaced as `"failed"` by
+ *     `runClaudeMdStep`, same as any other structurally malformed input; see
+ *     `computeClaudeMdSplice`'s own doc comment for the full decision tree.
  * Because BOTH candidates may legitimately be classified `write` even when
  * their target was already present (unlike hooks/tree_yaml, which exclude a
  * present-and-different path from `candidates` entirely and so never reach
@@ -157,12 +165,17 @@
  *
  * Side-effect class: IO (delegates entirely to the injected ports)
  * Source: SPEC-046 §Design, §Scope; task AC-046-C. SPEC-060 §Design, D1. SPEC-076 §C1 D7.
+ *   SPEC-context-verb-family-two-zone-claude-md-anatomy-lore §Design Decisions D4
+ *   (splice SSOT — this flow consumes `spliceManagedSections`, it no longer
+ *   carries its own marker-splice implementation).
  */
 
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
-import { err, ok, planInstall, setupManifestSchema } from "@lore/core";
+import { CLAUDE_MD_MARKER_START, CLAUDE_MD_MARKER_END, err, ok, planInstall, setupManifestSchema } from "@lore/core";
 import type { AssetFile, LoreError, Result, SetupEntry, SetupEntryKind, SetupManifest } from "@lore/core";
+import { spliceManagedSections } from "../service/context-projection.js";
+import type { ManagedSection, SpliceResult } from "../service/context-projection.js";
 
 // ─── Ports (constructed by the adapter, injected here) ─────────────────────
 
@@ -313,7 +326,7 @@ export interface ProjectScaffoldReport {
    * computed candidate differs from disk (see `backups` below);
    * `"skipped"` means the computed candidate already matched what's on disk
    * byte-for-byte (a repeat converge with nothing to change). See
-   * `computeClaudeMdCandidate`'s doc comment for the full decision tree.
+   * `computeClaudeMdSplice`'s doc comment for the full decision tree.
    */
   claude_md: SimpleStepResult;
   git_hooks_path: GitHooksPathResult;
@@ -368,13 +381,15 @@ const GITIGNORE_MARKER = "# --- lore ---";
  * stub, marker-section rewrite (SPEC-076 D7, migrated off SPEC-060 D4's
  * blanket backup-then-overwrite). The shipped asset is itself wrapped in
  * `CLAUDE_MD_MARKER_START`/`CLAUDE_MD_MARKER_END` (mirrors `GITIGNORE_MARKER`'s
- * marker-embedded-in-the-asset convention) — see `computeClaudeMdCandidate`.
+ * marker-embedded-in-the-asset convention) — see `computeClaudeMdSplice`.
+ * The two marker constants themselves are imported from `@lore/core`
+ * (SPEC-context-verb-family D4/D5 — the shared `spliceManagedSections` splice
+ * SSOT owns this vocabulary now; this flow no longer declares its own copy).
  */
 const CLAUDE_MD_ASSET_NAME = "CLAUDE.md.template";
 const CLAUDE_MD_TARGET_NAME = "CLAUDE.md";
-/** Opening/closing markers bounding the section of `CLAUDE.md` lore owns — everything outside is the user's, untouched (SPEC-076 D7). */
-const CLAUDE_MD_MARKER_START = "# ─── lore governance (managed) ───";
-const CLAUDE_MD_MARKER_END = "# ─── end lore governance ───";
+/** Stable section id this flow's single governance blob is spliced under (SPEC-context-verb-family D4) — the shared module's per-section fingerprint is keyed by this id. */
+const CLAUDE_MD_SECTION_ID = "governance";
 
 // ─── SPEC-060 D1 — repo-level install ledger constants ─────────────────────
 
@@ -854,103 +869,96 @@ async function runGitignoreStep(
 /**
  * Splits a marker-wrapped `CLAUDE.md.template` asset into its managed
  * BODY — everything strictly between the marker pair, exclusive of both
- * marker lines and their own trailing newlines. Used ONLY by
- * `computeClaudeMdCandidate` to derive the SPEC-060 D4 legacy-stub
- * comparison target from the CURRENT shipped template, rather than
- * duplicating that historical prose as a second hand-maintained string in
- * this module.
+ * marker lines and their own trailing newlines. This is an ASSET-framing
+ * concern (unwrapping the shipped file so its bare prose can be handed to
+ * `spliceManagedSections` as one section's body) — NOT the zone-splice math
+ * itself; that lives entirely in `service/context-projection.ts` now
+ * (SPEC-context-verb-family D4). Used by `computeClaudeMdSplice` both to
+ * build the section body it hands to the shared splice AND to derive the
+ * SPEC-060 D4 legacy-stub comparison target from the CURRENT shipped
+ * template, rather than duplicating that historical prose as a second
+ * hand-maintained string in this module.
  *
- * @throws If `template` doesn't start with `CLAUDE_MD_MARKER_START` and end
- *   with `CLAUDE_MD_MARKER_END` — a malformed shipped asset, never a
- *   runtime/user-data condition. `runClaudeMdStep`'s try/catch converts this
- *   into the same `"failed"` step outcome any other asset-load failure gets.
+ * @param requireWrapped - When `true`, a `template` that doesn't match the
+ *   expected wrapper throws. When `false` (used ONLY for the fresh-install
+ *   `existing === null` path — see `computeClaudeMdSplice`), an unwrapped
+ *   `template` is tolerated verbatim as its own bare body instead: this
+ *   mirrors the flow's pre-refactor behavior, which never validated the
+ *   shipped template's wrapper shape on a from-scratch install (only the
+ *   legacy-stub comparison path, reached exclusively when `existing !==
+ *   null`, ever required it) — preserved here so a test/asset fixture that
+ *   ships an unwrapped stub for a brand-new repo keeps working exactly as
+ *   before.
+ * @throws If `requireWrapped` and `template` doesn't start with
+ *   `CLAUDE_MD_MARKER_START` and end with `CLAUDE_MD_MARKER_END` — a
+ *   malformed shipped asset, never a runtime/user-data condition.
+ *   `runClaudeMdStep`'s try/catch converts this into the same `"failed"`
+ *   step outcome any other asset-load failure gets.
  */
-function splitManagedClaudeMdTemplate(template: string): string {
+function splitManagedClaudeMdTemplate(template: string, requireWrapped: boolean): string {
   const startLine = `${CLAUDE_MD_MARKER_START}\n`;
   const endLine = `${CLAUDE_MD_MARKER_END}\n`;
-  if (!template.startsWith(startLine) || !template.endsWith(endLine)) {
+  if (template.startsWith(startLine) && template.endsWith(endLine)) {
+    return template.slice(startLine.length, template.length - endLine.length);
+  }
+  if (requireWrapped) {
     throw new Error("CLAUDE.md.template asset is not wrapped in the expected lore governance markers");
   }
-  return template.slice(startLine.length, template.length - endLine.length);
+  return template;
 }
 
 /**
- * Locates an EXISTING marker-wrapped span inside on-disk `existing` content,
- * if present — byte offsets `{start, end}` spanning from the first
- * `CLAUDE_MD_MARKER_START` occurrence through the matching
- * `CLAUDE_MD_MARKER_END` occurrence PLUS its own trailing newline (absorbed
- * here so `computeClaudeMdCandidate`'s splice never duplicates it —
- * `template` itself always supplies that trailing newline). Returns `null`
- * when no valid ordered marker pair is found, so the caller falls through to
- * the legacy-stub / append decision instead.
- */
-function findClaudeMdManagedRange(existing: string): { start: number; end: number } | null {
-  const start = existing.indexOf(CLAUDE_MD_MARKER_START);
-  if (start === -1) return null;
-  const endMarkerIdx = existing.indexOf(CLAUDE_MD_MARKER_END, start + CLAUDE_MD_MARKER_START.length);
-  if (endMarkerIdx === -1) return null;
-  let end = endMarkerIdx + CLAUDE_MD_MARKER_END.length;
-  if (existing[end] === "\n") end += 1;
-  return { start, end };
-}
-
-/**
- * SPEC-076 D7 — computes the `CLAUDE.md` write candidate from whatever is
- * (or isn't) currently on disk, resolving three legacy on-disk forms plus
- * the idempotent-reconverge case to exactly one candidate each:
+ * SPEC-context-verb-family D4 (splice SSOT) — computes the `CLAUDE.md` write
+ * candidate by delegating the actual zone-splice math to
+ * `service/context-projection.ts::spliceManagedSections`, the SAME pure
+ * module `flows/context-flow.ts` uses for `lore context init`/`refresh`.
+ * This flow no longer carries its own marker-splice implementation — the
+ * shipped template's whole managed body becomes ONE section
+ * (`CLAUDE_MD_SECTION_ID`), and the shared function assigns it a fresh
+ * fingerprint hash whenever it creates or updates that section (installed
+ * `CLAUDE.md` files GAIN a per-section fingerprint comment they never
+ * carried before this refactor — a deliberate, accepted output-format
+ * change, not a defect).
  *
- *   1. Already marker-wrapped (a prior converge run's own output, OR an
- *      earlier form-(c) append that already introduced the markers) — ONLY
- *      the governed span is spliced out and replaced with the fresh
- *      `template`; everything before/after is preserved byte-for-byte. This
- *      is what makes a second consecutive run over the SAME `template`
- *      reproduce byte-identical output (idempotency needs no separate case),
- *      and what confines a later template content change to the governed
- *      span alone, never the user's surrounding text.
- *   2. No CLAUDE.md on disk at all — `template` (already marker-wrapped in
- *      the shipped asset) becomes the whole file, verbatim.
- *   3. On disk, byte-identical to the SPEC-060 D4 legacy un-marked stub
- *      (`splitManagedClaudeMdTemplate(template)`, i.e. today's managed body
- *      with the markers stripped back off) — lore's own prior output, so it
- *      is fully replaced by the marker-wrapped form exactly like case 2 (a
- *      byte-identical match here PROVES nothing of the user's is at stake;
- *      an unmatched/ambiguous stub safely falls through to case 4 instead —
- *      the Scope-Alt-sanctioned safe direction, an extra marker block rather
- *      than content loss).
- *   4. On disk, anything else (genuinely user-authored or user-modified) —
- *      the marker-wrapped section is APPENDED at the end; every existing
- *      byte is preserved untouched. A leading newline separator is inserted
- *      only when `existing` is non-empty and doesn't already end in one
- *      (mirrors `runGitignoreStep`'s append rule).
+ * Exactly ONE setup-project-flow-specific concern stays HERE as a thin
+ * adapter (never forking the shared splice math itself):
+ *   - SPEC-060 D4 legacy-stub migration: an on-disk file byte-identical to
+ *     the CURRENT template's bare body (the OLD un-marked stub, markers
+ *     never applied) is treated as an EMPTY effective input, so the shared
+ *     splice creates a fresh (fingerprinted) zone in its place — lore's own
+ *     prior output, nothing of the user's is at stake.
  *
- * Never writes to disk or mutates any input — `runClaudeMdStep`'s try/catch
- * is the only boundary that turns a thrown error (case 3's helper, on a
- * malformed shipped asset) into a `"failed"` step result. `planInstall`'s
- * ordinary "differs -> write + backup" rule then applies uniformly to
- * whatever candidate this produces — R3's "mandatory backup first" falls out
- * of that generic rule, zero extra logic needed here.
+ * Every other on-disk shape is handed to `spliceManagedSections` verbatim:
+ * absent -> a fresh (fingerprinted) zone, the whole file; genuinely
+ * user-authored/no-zone content -> the fingerprinted zone is APPENDED,
+ * every existing byte preserved; an already marker-wrapped zone from a
+ * PRIOR run of this SAME refactored flow -> only the governed span is
+ * rebuilt (unchanged/updated/diverged_skip per the shared five-state
+ * contract — see that function's own doc comment). A zone wrapped by a
+ * PRE-this-refactor lore build (no fingerprint comment inside) is a legacy
+ * shape the shared parser does not tolerate by design (fail loud, never a
+ * partial splice) — its `VALIDATION_ERROR` is returned here unchanged, for
+ * `runClaudeMdStep` to surface as `"failed"` exactly like any other
+ * structurally malformed input, rather than this flow re-deriving zone
+ * boundaries itself to paper over it (that would fork the splice math the
+ * SSOT refactor exists to eliminate).
+ *
+ * @throws Only via `splitManagedClaudeMdTemplate`, and ONLY when `existing
+ *   !== null` — a malformed SHIPPED asset (mirrors the pre-refactor
+ *   behavior's own validation scope, see that function's `requireWrapped`
+ *   doc). Never throws for any `existing` shape itself; a structurally
+ *   broken `existing` zone comes back as `Result.err` instead (see above).
  */
-function computeClaudeMdCandidate(existing: string | null, template: string): string {
-  if (existing !== null) {
-    const managedRange = findClaudeMdManagedRange(existing);
-    if (managedRange !== null) {
-      return existing.slice(0, managedRange.start) + template + existing.slice(managedRange.end);
-    }
-  }
-
-  if (existing === null) return template;
-
-  const legacyBody = splitManagedClaudeMdTemplate(template);
-  if (existing === legacyBody) return template;
-
-  const separator = existing.length === 0 ? "" : existing.endsWith("\n") ? "" : "\n";
-  return `${existing}${separator}${template}`;
+function computeClaudeMdSplice(existing: string | null, template: string): Result<SpliceResult, LoreError> {
+  const templateBody = splitManagedClaudeMdTemplate(template, existing !== null);
+  const effectiveExisting = existing === null || existing === templateBody ? "" : existing;
+  return spliceManagedSections(effectiveExisting, [{ id: CLAUDE_MD_SECTION_ID, body: templateBody } satisfies ManagedSection]);
 }
 
 /**
  * Classifies the repo-root `CLAUDE.md` stub (SPEC-076 D7, migrated off
  * SPEC-060 D4's blanket backup-then-overwrite) — NEVER writes to disk
- * itself. Candidate content is computed by `computeClaudeMdCandidate` — see
+ * itself. Candidate content is computed by `computeClaudeMdSplice` — see
  * that function's doc comment for the full decision tree.
  */
 async function runClaudeMdStep(
@@ -965,7 +973,11 @@ async function runClaudeMdStep(
     }
     const template = assetResult.value;
     const existing = deps.fs.readFile(targetAbsPath);
-    const content = computeClaudeMdCandidate(existing, template);
+    const spliced = computeClaudeMdSplice(existing, template);
+    if (!spliced.ok) {
+      return { terminal: { status: "failed", detail: describeError(spliced.error) } };
+    }
+    const content = spliced.value.content;
     return {
       pending: { path: CLAUDE_MD_TARGET_NAME, kind: PROJECT_ASSET_KIND, content, sha256: sha256Hex(content) },
     };
