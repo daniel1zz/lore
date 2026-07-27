@@ -18,17 +18,44 @@
  *   - `root` is repo-relative (never a leading `/`, never a `..` segment) —
  *     `""` means "the whole tree the injected `fs` represents". A malformed
  *     `root` fails loud with `VALIDATION_ERROR` before any `fs` call.
- *   - Directories named `.git`, `node_modules`, `.claude`, `.lore`,
- *     `.lore-backups`, `dist`, or `coverage` are never descended into, at any
- *     depth — mirrors `adapters/real-memory-file-probe.ts`'s own exclusion
- *     set. That set is module-private there (a real-`node:fs` walker, a
- *     DIFFERENT layer from this port-based one), so it cannot be imported
- *     here without creating a `service/` -> `adapters/` dependency edge
- *     (backwards per the module boundary's "core <- service <- flows <-
- *     adapters" direction) — this is an independent, intentionally
- *     equivalent list at this module's own layer, not a second copy of the
- *     SAME implementation (that one walks real `node:fs`; this one walks an
- *     injected `FsReadPort`, exercised in tests against `InMemoryFsPort`).
+ *   - Walk hygiene (AC-CTX-9, spec-context-verb-family-two-zone-claude-md-
+ *     anatomy-lore; root cause: knowledge-retro-context-refresh-module-
+ *     index-walk-pollutes). A directory is excluded from both recording AND
+ *     further recursion when ANY of the following holds:
+ *       1. Its basename starts with `.` (every dot-directory, at any depth,
+ *          regardless of the static denylist below — `.serena`, `.claude`
+ *          local caches, etc. are never "modules").
+ *       2. Its basename is exactly one of `EXCLUDED_DIR_BASENAMES` (see
+ *          below) — mirrors `adapters/real-memory-file-probe.ts`'s own
+ *          exclusion set. That set is module-private there (a real-`node:fs`
+ *          walker, a DIFFERENT layer from this port-based one), so it cannot
+ *          be imported here without creating a `service/` -> `adapters/`
+ *          dependency edge (backwards per the module boundary's "core <-
+ *          service <- flows <- adapters" direction) — this is an
+ *          independent, intentionally equivalent list at this module's own
+ *          layer, not a second copy of the SAME implementation. EXACT-MATCH
+ *          ONLY, never a prefix/substring test — `dist-npm` resembles the
+ *          denylisted `dist` but is a distinct basename and is NOT excluded
+ *          by this rule (the contiguous-substring-assumption trap the retro
+ *          names); a repo that gitignores it is excluded via rule 3 instead.
+ *       3. It is matched by `.gitignore` semantics: root and per-directory
+ *          `.gitignore` files are read via `FsReadPort.readFile` (never
+ *          `child_process`/`git`) and parsed with the `ignore` npm package
+ *          (a mature, spec-compliant matcher). Each directory that owns a
+ *          `.gitignore` contributes one matcher layer, scoped to that
+ *          directory's own subtree; testing a candidate directory checks
+ *          every ANCESTOR layer (root-to-nearest) with the candidate's path
+ *          made relative to that layer's own base directory — a deeper
+ *          layer's rule (including a negation) can override a shallower
+ *          layer's verdict for the SAME path, but a directory already
+ *          excluded by an ancestor's layer is never recursed into, so its
+ *          own (possibly negating) `.gitignore` is never even read — this
+ *          is what makes "a parent directory exclusion cannot be re-included
+ *          by a nested negation" hold (gitignore(5); pinned by this module's
+ *          own BOUNDARY test), without any special-cased negation logic.
+ *     The static denylist (rule 2) is retained unconditionally as a fallback
+ *     for repos with no `.gitignore` at all — rules 1-3 are independent, not
+ *     mutually exclusive fallback tiers.
  *   - A directory is discovered by `listDir` returning at least one entry
  *     for it — `FsReadPort` has no `isDirectory` primitive (by design, D9:
  *     a narrow 3-read-method contract), so a childless directory (real or
@@ -57,6 +84,7 @@
  */
 
 import { z } from "zod";
+import ignoreFactory, { type Ignore } from "ignore";
 import { err, ok } from "@lore/core";
 import type { FsReadPort, LoreError, MemoryFileBudgets, Result } from "@lore/core";
 
@@ -168,10 +196,75 @@ async function hasAnyMemoryFile(fs: FsReadPort, dir: string, filenames: readonly
 }
 
 /**
+ * `.gitignore` name recognized at every directory level — same convention
+ * `git` itself uses, no per-project override (this module's own boundary
+ * scope, see header rule 3).
+ */
+const GITIGNORE_FILENAME = ".gitignore";
+
+/**
+ * One directory's own `.gitignore` matcher, scoped to that directory (module
+ * header rule 3) — `baseDir` is the repo-relative directory the `.gitignore`
+ * file lives in; `matcher.ignores`/`.test` are always called with a path made
+ * relative to `baseDir`, never to `root`.
+ */
+interface GitignoreLayer {
+  baseDir: string;
+  matcher: Ignore;
+}
+
+/**
+ * Reads `dir`'s own `.gitignore` (if any) and returns a {@link GitignoreLayer}
+ * scoped to it, or `null` when `dir` has no `.gitignore` — the ONLY place
+ * this module reads `.gitignore` content, via the injected `FsReadPort`
+ * (module header rule 3: never `child_process`/`git`).
+ */
+async function loadGitignoreLayer(fs: FsReadPort, dir: string): Promise<GitignoreLayer | null> {
+  const content = await fs.readFile(joinRepoPath(dir, GITIGNORE_FILENAME));
+  if (content === null) return null;
+  return { baseDir: dir, matcher: ignoreFactory().add(content) };
+}
+
+/**
+ * `true` iff `childPath` is excluded by any of `layers`' `.gitignore` rules.
+ * Iterates layers in root-to-nearest order (the order {@link walkModuleIndex}
+ * accumulates them in) so a deeper layer's explicit verdict (ignore or
+ * negation) overrides a shallower one for the same path — matching
+ * gitignore(5) precedence — while a directory already excluded by an
+ * ancestor layer is never itself recursed into, so it never contributes its
+ * own layer (module header rule 3's negation-cannot-escape-ancestor-
+ * exclusion guarantee).
+ */
+function isExcludedByGitignore(childPath: string, layers: readonly GitignoreLayer[]): boolean {
+  let verdict = false;
+  for (const layer of layers) {
+    const relPath =
+      layer.baseDir.length === 0
+        ? childPath
+        : childPath.startsWith(`${layer.baseDir}/`)
+          ? childPath.slice(layer.baseDir.length + 1)
+          : null;
+    if (relPath === null || relPath.length === 0) continue;
+
+    // Directory-only patterns (e.g. "build/") only match with a trailing
+    // slash on the tested path — the `ignore` package tests literal pattern
+    // shape, it does not itself know `relPath` names a directory.
+    const test = layer.matcher.test(`${relPath}/`);
+    if (test.ignored) verdict = true;
+    else if (test.unignored) verdict = false;
+  }
+  return verdict;
+}
+
+/**
  * Recursively walks `dir` (starting at `root`), recording every discovered
  * subdirectory (see module header for how "directory" is inferred from
  * `FsReadPort`'s narrow surface) into `out`, until `MAX_MODULE_INDEX_ENTRIES`
- * is reached.
+ * is reached. `layers` carries the accumulated `.gitignore` matchers for
+ * every ancestor directory (root-to-nearest) that owns one (module header
+ * rule 3) — the caller passes the layer set already covering `dir` itself;
+ * this function loads and appends `dir`'s own `.gitignore` only when
+ * recursing into a specific child.
  */
 async function walkModuleIndex(
   fs: FsReadPort,
@@ -179,14 +272,18 @@ async function walkModuleIndex(
   dir: string,
   filenames: readonly string[],
   out: ModuleIndexEntry[],
+  layers: readonly GitignoreLayer[],
 ): Promise<void> {
   if (out.length >= MAX_MODULE_INDEX_ENTRIES) return;
 
   const entries = await fs.listDir(dir);
   for (const entry of entries) {
-    if (EXCLUDED_DIR_BASENAMES.has(entry)) continue;
+    if (entry.startsWith(".")) continue; // every dot-directory (and dot-file, harmlessly) skipped by default — module header rule 1
+    if (EXCLUDED_DIR_BASENAMES.has(entry)) continue; // exact-match static fallback — module header rule 2
 
     const childPath = joinRepoPath(dir, entry);
+    if (isExcludedByGitignore(childPath, layers)) continue; // module header rule 3
+
     const grandchildren = await fs.listDir(childPath);
     if (grandchildren.length === 0) continue; // indistinguishable from a plain file — never recorded (module header)
 
@@ -195,7 +292,9 @@ async function walkModuleIndex(
     out.push({ path: relPath, hasMemoryFile });
     if (out.length >= MAX_MODULE_INDEX_ENTRIES) return;
 
-    await walkModuleIndex(fs, root, childPath, filenames, out);
+    const childLayer = await loadGitignoreLayer(fs, childPath);
+    const childLayers = childLayer !== null ? [...layers, childLayer] : layers;
+    await walkModuleIndex(fs, root, childPath, filenames, out, childLayers);
   }
 }
 
@@ -231,8 +330,11 @@ export async function collectContextFacts(
 
   const commands = await readCommands(fs, root);
 
+  const rootLayer = await loadGitignoreLayer(fs, root);
+  const rootLayers = rootLayer !== null ? [rootLayer] : [];
+
   const moduleIndex: ModuleIndexEntry[] = [];
-  await walkModuleIndex(fs, root, root, budgetsCfg.filenames, moduleIndex);
+  await walkModuleIndex(fs, root, root, budgetsCfg.filenames, moduleIndex, rootLayers);
 
   return ok({ moduleIndex, commands });
 }

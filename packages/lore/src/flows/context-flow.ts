@@ -52,6 +52,22 @@
  *     module vitest-testable with plain fakes"); the ONLY config value
  *     `collectContextFacts` reads is `.filenames` (default `["CLAUDE.md"]`),
  *     which is not a realistic per-project override target.
+ *   - `runContextRefresh` pre-write admission (AC-CTX-8, root cause:
+ *     knowledge-retro-context-refresh-module-index-walk-pollutes): AFTER
+ *     splicing and appending the trailing newline but BEFORE calling
+ *     `deps.fs.writeFile`, the spliced candidate is run through
+ *     `claude-md-check.ts`'s `lintMemoryFiles` — the SAME ceiling-check
+ *     implementation `lore status --check-claude-md` consumes (SSOT: never a
+ *     second inline size check here) — against `resolveMemoryFileBudgets(undefined)`,
+ *     the same defaults `collectContextFacts` already reads. Any finding
+ *     (root role, `max_lines` or `max_bytes`) refuses the whole call with
+ *     `err(VALIDATION_ERROR)` naming every breach and performs NO write — a
+ *     within-budget splice is unaffected (byte-identical to pre-check
+ *     behavior). `runContextInit` does NOT run this check: its own
+ *     already-exists refusal is the narrower, pre-existing guard for that
+ *     verb (out of this AC's scope), and `--force` (init-only) never
+ *     bypasses `runContextRefresh`'s check either, since refresh has no
+ *     `--force` option to bypass with.
  *
  * Side-effect class: IO (exclusively via the injected `FsWritePort`)
  *
@@ -62,6 +78,7 @@
 import { err, ok, resolveMemoryFileBudgets } from "@lore/core";
 import type { FsWritePort, LoreError, Result } from "@lore/core";
 import { collectContextFacts, type ContextFacts } from "../service/context-facts.js";
+import { lintMemoryFiles } from "../service/claude-md-check.js";
 import { spliceManagedSections, type ManagedSection, type SpliceResult } from "../service/context-projection.js";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -245,9 +262,11 @@ export async function runContextInit(
  * @param deps - `{ fs }` — the injected filesystem write capability.
  * @param root - Repo-relative directory to collect facts from (typically `""`).
  * @returns `ok(report)` on success. `err(VALIDATION_ERROR)` when no
- *   `CLAUDE.md` exists yet (naming `lore context init`), or when
+ *   `CLAUDE.md` exists yet (naming `lore context init`), when
  *   `collectContextFacts`/`spliceManagedSections` fail loud (malformed
- *   `root`, a structurally broken existing managed zone).
+ *   `root`, a structurally broken existing managed zone), or when the
+ *   spliced candidate would breach the root claude-md ceiling (AC-CTX-8,
+ *   module header) — that last case performs NO write.
  * @example
  * const result = await runContextRefresh({ fs: realFs }, "");
  * // result.value.sections // => [{ id: "module-index", state: "unchanged" }, ...]
@@ -266,7 +285,8 @@ export async function runContextRefresh(
     });
   }
 
-  const factsResult = await collectContextFacts(deps.fs, root, resolveMemoryFileBudgets(undefined));
+  const budgets = resolveMemoryFileBudgets(undefined);
+  const factsResult = await collectContextFacts(deps.fs, root, budgets);
   if (!factsResult.ok) return factsResult;
 
   const sections = renderContextSections(factsResult.value);
@@ -275,6 +295,22 @@ export async function runContextRefresh(
   if (!spliceResult.ok) return spliceResult;
 
   const finalContent = ensureTrailingNewline(spliceResult.value.content);
+
+  // AC-CTX-8 pre-write admission — SSOT: the SAME check `lore status
+  // --check-claude-md` runs, never a second inline size check (module
+  // header). Runs on the SPLICED candidate, before any write.
+  const findings = lintMemoryFiles([{ path: CLAUDE_MD_PATH, role: "root", content: finalContent }], budgets);
+  if (findings.length > 0) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "path",
+      message:
+        `refusing to write ${CLAUDE_MD_PATH} — the spliced candidate breaches its ceiling: ` +
+        findings.map((finding) => finding.message).join("; "),
+      value: CLAUDE_MD_PATH,
+    });
+  }
+
   await deps.fs.writeFile(CLAUDE_MD_PATH, finalContent);
 
   return ok({ path: CLAUDE_MD_PATH, sections: spliceResult.value.perSection });
