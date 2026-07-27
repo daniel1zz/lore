@@ -133,6 +133,7 @@ const CLAUDE_DIR_PLACEHOLDER = "{{CLAUDE_DIR}}";
 export const RETIRED_FROM_INSTALL_PATHS = new Set<string>([
   "governance/corpus-workflow.md",
   "governance/seat-briefing.md",
+  "governance/claude-md-contract.md",
 ]);
 
 /**
