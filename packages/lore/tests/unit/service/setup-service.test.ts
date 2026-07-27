@@ -53,6 +53,7 @@ import {
   type AssetSource,
   type SetupFsReader,
   type SetupFsWriter,
+  type McpAddOutcome,
   type McpRegistrar,
 } from "../../../src/service/setup-service.js";
 
@@ -165,9 +166,9 @@ class PoisonedWriter implements SetupFsWriter {
 class OkMcpRegistrar implements McpRegistrar {
   readonly addCalls: string[] = [];
   removeCalls = 0;
-  async add(binPath: string): Promise<Result<void, LoreError>> {
+  async add(binPath: string): Promise<Result<McpAddOutcome, LoreError>> {
     this.addCalls.push(binPath);
-    return ok(undefined);
+    return ok("added");
   }
   async remove(): Promise<Result<void, LoreError>> {
     this.removeCalls += 1;
@@ -175,8 +176,21 @@ class OkMcpRegistrar implements McpRegistrar {
   }
 }
 
+/** Resolves `ok("already_registered")` on `add` — the idempotent-reclassification path
+ * (task-lore-setup-mcp-add-step-is-non-idempotent-already-exists). */
+class AlreadyRegisteredMcpRegistrar implements McpRegistrar {
+  readonly addCalls: string[] = [];
+  async add(binPath: string): Promise<Result<McpAddOutcome, LoreError>> {
+    this.addCalls.push(binPath);
+    return ok("already_registered");
+  }
+  async remove(): Promise<Result<void, LoreError>> {
+    return ok(undefined);
+  }
+}
+
 class FailingMcpRegistrar implements McpRegistrar {
-  async add(): Promise<Result<void, LoreError>> {
+  async add(): Promise<Result<McpAddOutcome, LoreError>> {
     return err({ code: "STORE_ERROR", message: "claude binary not found on PATH" });
   }
   async remove(): Promise<Result<void, LoreError>> {
@@ -430,6 +444,21 @@ describe("ERROR", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("expected ok");
     expect(result.value.mcp).toBe("failed");
+    expect(result.value.written.length).toBeGreaterThan(0);
+    expect(fs.store.has(path.join(TARGET_DIR, "skills/lore/SKILL.md"))).toBe(true);
+  });
+
+  it("MCP registrar 'already_registered' outcome is idempotent success — receipt.mcp is 'already_registered', not 'failed', overall Result stays ok (task-lore-setup-mcp-add-step-is-non-idempotent-already-exists)", async () => {
+    const fs = new MapFs();
+    const mcp = new AlreadyRegisteredMcpRegistrar();
+    const service = new SetupService(new FixedAssetSource(buildPayload()), fs, fs, mcp);
+
+    const result = await service.install({ targetDir: TARGET_DIR, binPath: "/usr/local/bin/lore" });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.value.mcp).toBe("already_registered");
+    expect(mcp.addCalls).toEqual(["/usr/local/bin/lore"]);
     expect(result.value.written.length).toBeGreaterThan(0);
     expect(fs.store.has(path.join(TARGET_DIR, "skills/lore/SKILL.md"))).toBe(true);
   });

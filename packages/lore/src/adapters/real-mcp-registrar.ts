@@ -31,7 +31,17 @@
  *   - A non-zero exit is `err(VALIDATION_ERROR)` carrying up to 500 chars of
  *     stderr (mirrors `claude-cli-provider.ts`'s stderr-tail truncation
  *     precedent, at a smaller cap since this is a short CLI subcommand, not a
- *     generation call).
+ *     generation call) — EXCEPT `add()`'s one documented reclassification
+ *     below (idempotency fix, task-lore-setup-mcp-add-step-is-non-idempotent-
+ *     already-exists): `claude mcp add` exits 1 with a stderr message
+ *     containing "already exists" when the `lore` MCP server is already
+ *     registered at user scope — a SECOND `lore setup` run against an
+ *     already-converged machine is the expected steady state (SPEC-076 I2
+ *     idempotency), not a failure. `add()` treats this ONE stderr shape as
+ *     `ok("already_registered")`; every other non-zero exit (missing `claude`,
+ *     a genuinely different stderr) still resolves `err(...)` unchanged.
+ *     `remove()` keeps its original all-non-zero-exits-are-errors contract —
+ *     this task's repro and Scope are add-only.
  *   - argv is built EXCLUSIVELY via `buildMcpAddArgs`/`buildMcpRemoveArgs` —
  *     this class never inlines `["mcp", "add", ...]` itself, so the argv
  *     contract stays defined in exactly one (pure, vitest-tested) place.
@@ -51,7 +61,7 @@ import { spawn } from "node:child_process";
 import { buildMcpAddArgs, buildMcpRemoveArgs, err, ok } from "@lore/core";
 import type { Result, LoreError } from "@lore/core";
 
-import type { McpRegistrar } from "../service/setup-service.js";
+import type { McpAddOutcome, McpRegistrar } from "../service/setup-service.js";
 
 const CLAUDE_COMMAND = "claude";
 const STDERR_TAIL_MAX_CHARS = 500;
@@ -67,15 +77,36 @@ function manualRemoveCommand(): string {
 }
 
 /**
- * Runs `claude` with the given argv and reports the outcome as a `Result`.
- * Shared by `add`/`remove` — the only difference between the two public
- * methods is which argv builder + manual-command renderer they pass in.
+ * Detects `claude mcp add`'s "already in desired state" stderr shape (observed
+ * literal text: `MCP server lore already exists in user config`). A non-zero
+ * exit matching this is an idempotent no-op, not a failure — see this
+ * module's header comment ("A non-zero exit is `err(...)` — EXCEPT `add()`'s
+ * one documented reclassification").
  */
-function runClaudeMcpCommand(
+function isAlreadyRegisteredStderr(stderr: string): boolean {
+  return /already exists/i.test(stderr);
+}
+
+/**
+ * Runs `claude` with the given argv and reports the outcome as a `Result<T, LoreError>`.
+ * Shared by `add`/`remove` — the only differences between the two public
+ * methods are which argv builder + manual-command renderer they pass in, and
+ * (`add` only) the `reclassifyNonZeroExit` idempotency check.
+ *
+ * @param onExitZero - Value to resolve `ok(...)` with on a clean (exit 0) run.
+ * @param reclassifyNonZeroExit - Optional: given the captured stderr of a
+ *   non-zero exit, return a value to resolve `ok(...)` with instead of
+ *   treating it as a hard failure, or `undefined` to fall through to the
+ *   normal `err(...)` path. Omitted entirely by `remove()` — every non-zero
+ *   exit there stays a hard failure.
+ */
+function runClaudeMcpCommand<T>(
   args: string[],
   manualCommand: string,
   env: NodeJS.ProcessEnv,
-): Promise<Result<void, LoreError>> {
+  onExitZero: T,
+  reclassifyNonZeroExit?: (stderr: string) => T | undefined,
+): Promise<Result<T, LoreError>> {
   return new Promise((resolve) => {
     const child = spawn(CLAUDE_COMMAND, args, { stdio: ["ignore", "pipe", "pipe"], env });
 
@@ -106,6 +137,11 @@ function runClaudeMcpCommand(
       if (settled) return;
       settled = true;
       if (exitCode !== 0) {
+        const reclassified = reclassifyNonZeroExit?.(stderr);
+        if (reclassified !== undefined) {
+          resolve(ok(reclassified));
+          return;
+        }
         resolve(
           err({
             code: "VALIDATION_ERROR",
@@ -118,7 +154,7 @@ function runClaudeMcpCommand(
         );
         return;
       }
-      resolve(ok(undefined));
+      resolve(ok(onExitZero));
     });
   });
 }
@@ -141,11 +177,13 @@ export class RealMcpRegistrar implements McpRegistrar {
    */
   constructor(private readonly env: NodeJS.ProcessEnv = process.env) {}
 
-  async add(binPath: string): Promise<Result<void, LoreError>> {
-    return runClaudeMcpCommand(buildMcpAddArgs(binPath), manualAddCommand(binPath), this.env);
+  async add(binPath: string): Promise<Result<McpAddOutcome, LoreError>> {
+    return runClaudeMcpCommand(buildMcpAddArgs(binPath), manualAddCommand(binPath), this.env, "added", (stderr) =>
+      isAlreadyRegisteredStderr(stderr) ? "already_registered" : undefined,
+    );
   }
 
   async remove(): Promise<Result<void, LoreError>> {
-    return runClaudeMcpCommand(buildMcpRemoveArgs(), manualRemoveCommand(), this.env);
+    return runClaudeMcpCommand(buildMcpRemoveArgs(), manualRemoveCommand(), this.env, undefined);
   }
 }

@@ -105,7 +105,7 @@ import { defineCommand } from "citty";
 import { err, ok } from "@lore/core";
 import type { LoreError, Result } from "@lore/core";
 
-import { SetupService, type McpRegistrar, type SetupReceipt } from "../../../service/setup-service.js";
+import { SetupService, type McpAddOutcome, type McpRegistrar, type SetupReceipt } from "../../../service/setup-service.js";
 import { ProjectSetupService } from "../../../service/project-setup-service.js";
 import {
   PROJECT_MANIFEST_RELATIVE_PATH,
@@ -153,7 +153,7 @@ const REPO_ROOT = join(MODULE_DIR, "..", "..", "..", "..", "..", "..");
 /**
  * Wraps a real `McpRegistrar`, remembering the last `add`/`remove` failure's
  * message so it can be threaded into `SetupRenderCtx.mcpErrorTail` — SPEC-046
- * deliberately keeps `SetupReceipt.mcp` a bare tri-state marker with no error
+ * deliberately keeps `SetupReceipt.mcp` a bare marker with no error
  * detail of its own (see `setup-render.ts`'s module doc), so the CLI adapter
  * is the one place that can hold onto the real `LoreError.message` from the
  * SAME call `SetupService` already made, without a second registration
@@ -168,7 +168,7 @@ class CapturingMcpRegistrar implements McpRegistrar {
     return this.lastErrorMessage;
   }
 
-  async add(binPath: string): Promise<Result<void, LoreError>> {
+  async add(binPath: string): Promise<Result<McpAddOutcome, LoreError>> {
     const result = await this.inner.add(binPath);
     if (!result.ok) this.lastErrorMessage = describeLoreError(result.error);
     return result;

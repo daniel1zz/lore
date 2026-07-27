@@ -81,6 +81,16 @@ describe("renderInstallReceipt", () => {
       expect(out).toContain("claude mcp add -s user lore -- /usr/local/bin/lore --mcp-server");
     });
 
+    it("shows MCP as skipped (already registered) — task-lore-setup-mcp-add-step-is-non-idempotent-already-exists", () => {
+      const receipt = baseReceipt({ written: [entry("skills/lore/SKILL.md", "skill")], mcp: "already_registered" });
+
+      const out = renderInstallReceipt(receipt, CTX);
+
+      expect(out).toContain("MCP: skipped (already registered)");
+      expect(out).not.toContain("MCP: registered ✓");
+      expect(out).not.toContain("MCP: failed");
+    });
+
     it("shows MCP as failed with the caller-supplied stderr tail present in output", () => {
       const receipt = baseReceipt({ written: [entry("skills/lore/SKILL.md", "skill")], mcp: "failed" });
 
