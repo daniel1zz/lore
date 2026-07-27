@@ -547,6 +547,80 @@ export async function allocateWithBoundedRetry<T>(
   return err(buildOrdinalAllocationExhaustedError(docType));
 }
 
+// ─── Parent-cycle detection (SPEC-002 §4.3 write-time tree constraint) ─────
+
+/**
+ * Runaway backstop for {@link detectParentCycleViaAncestry}'s ancestor walk —
+ * mirrors `CorpusService.get`'s `ANCESTOR_DEPTH_CAP` (corpus-service.ts).
+ * The corpus's own tree contract caps real depth far below this; it only
+ * exists to terminate a walk over a pre-existing corrupted `parent_id` chain
+ * in stored data (the `seen` guard below catches that case first in
+ * practice — this is defense in depth, not the primary guard).
+ */
+export const PARENT_CYCLE_DEPTH_CAP = 1000;
+
+/**
+ * Detects whether adding a `parent`-type link `fromId → toId` would create a
+ * cycle in the doc tree, by walking each node's "effective parent" upward
+ * from `toId` looking for `fromId`.
+ *
+ * @remark Source-agnostic by design — this function does not itself decide
+ *   what a doc's "parent" is; that is entirely the injected `getParentId`
+ *   callback's job. Both stores blend TWO sources per hop (see their own
+ *   `detectParentCycle` JSDoc for why): the `links` table's outgoing
+ *   `parent` edge when one exists, falling back to `docs.parent_id`
+ *   otherwise. The blend closes a spec-corpus-schema §4.3 audit finding —
+ *   `CorpusService.create`'s `--parent` path writes ONLY `docs.parent_id`
+ *   (no `links` row), so a walk that consulted `links` alone was blind to
+ *   cycles closed against a create-time parent edge — while preserving
+ *   pre-existing behavior for chains built purely via `addLink` (which does
+ *   NOT itself write `docs.parent_id`; only `CorpusService._linkImpl`'s
+ *   separate post-`addLink` `store.update` does).
+ * @param fromId - the doc that would become the child (link's `from_id`)
+ * @param toId - the doc that would become the parent (link's `to_id`)
+ * @param getParentId - looks up a doc's current effective parent id (`null`
+ *   if the doc has no parent or does not exist). Injected so this same walk
+ *   serves both `SQLiteStore` (synchronous `bun:sqlite` read, resolved
+ *   instantly as a promise) and `TursoStore` (`@libsql/client`, natively
+ *   async).
+ * @returns `err(LINK_CYCLE)` with the discovered path (`fromId` first) when
+ *   `fromId === toId` (self-link) or `fromId` appears in `toId`'s ancestor
+ *   chain; `ok(undefined)` otherwise.
+ */
+export async function detectParentCycleViaAncestry(
+  fromId: string,
+  toId: string,
+  getParentId: (id: string) => Promise<string | null>,
+): Promise<Result<void, LoreError>> {
+  if (fromId === toId) {
+    return err({ code: "LINK_CYCLE", path: [fromId] });
+  }
+
+  const path: string[] = [fromId, toId];
+  const seen = new Set<string>([toId]);
+  let current = toId;
+  let depth = 0;
+
+  while (depth < PARENT_CYCLE_DEPTH_CAP) {
+    const parentId = await getParentId(current);
+    if (parentId === null) break;
+
+    if (parentId === fromId) {
+      return err({ code: "LINK_CYCLE", path: [...path, parentId] });
+    }
+    // reason: pre-existing corrupted parent_id cycle guard — new writes
+    // can no longer create one after this fix, but stored data predating it
+    // must not spin this walk forever.
+    if (seen.has(parentId)) break;
+    seen.add(parentId);
+    path.push(parentId);
+    current = parentId;
+    depth++;
+  }
+
+  return ok(undefined);
+}
+
 /**
  * Pure core of {@link wrapStoreError} — builds the bare {@link LoreError}
  * without wrapping it in a `Result`. Extracted so callers that already need

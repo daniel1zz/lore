@@ -74,6 +74,7 @@ import {
   allocateWithBoundedRetry,
   computeAuditEntryHash,
   computeFtsShadowValues,
+  detectParentCycleViaAncestry,
   escapeFtsQuery,
   isOrdinalUniqueViolationMessage,
   parseJson,
@@ -1034,7 +1035,7 @@ export class SQLiteStore implements StoreInterface {
   async addLink(link: LinkRecord): Promise<Result<LinkRecord, LoreError>> {
     try {
       if (link.link_type === "parent") {
-        const cycleResult = this.detectParentCycle(link.from_id, link.to_id);
+        const cycleResult = await this.detectParentCycle(link.from_id, link.to_id);
         if (!cycleResult.ok) return cycleResult;
       }
 
@@ -1068,41 +1069,42 @@ export class SQLiteStore implements StoreInterface {
 
   /**
    * Detect whether adding a parent link from_id → to_id would create a cycle.
-   * Walks the parent chain from to_id upward; if from_id appears, it's a cycle.
-   * A self-link (from_id === to_id) is always a cycle, checked up front —
-   * the chain walk below only detects fromId re-appearing via an EXISTING
-   * outgoing parent link on toId, so it misses a bare self-reference on a
-   * doc with no prior outgoing parent link. Mirrors InMemoryStore.
+   * Delegates to {@link detectParentCycleViaAncestry} (store-shared.ts) for the
+   * walk/depth-cap/self-link logic; this store's per-hop lookup resolves each
+   * node's "effective parent" as the `links` table's outgoing `parent` edge
+   * when one exists, falling back to `docs.parent_id` otherwise.
+   *
+   * @remark Both sources must be consulted. `addLink` itself (this method)
+   *   never writes `docs.parent_id` — only `CorpusService._linkImpl` does,
+   *   in a SEPARATE `store.update` call after `addLink` succeeds — so a
+   *   chain built purely via `addLink` (e.g. this file's own
+   *   AC-STORE-005.03/.04 tests) has NO `parent_id` to walk; the `links`
+   *   branch handles that. Conversely, `CorpusService.create`'s `--parent`
+   *   path writes ONLY `docs.parent_id`, never an `addLink` call — the
+   *   `parent_id` fallback branch handles THAT (spec-corpus-schema §4.3
+   *   audit finding: the old links-only walk was blind to exactly this
+   *   edge, letting `lore link <root> <child> --type parent` silently
+   *   persist a cycle when `child` was already `root`'s descendant purely
+   *   via `parent_id`). The single `COALESCE` query below tries `links`
+   *   first (preserving pre-fix behavior for links-only chains) and only
+   *   reads `docs.parent_id` when no `links` edge exists for that node.
    */
-  private detectParentCycle(
+  private async detectParentCycle(
     fromId: DocId,
     toId: DocId,
-  ): Result<void, LoreError> {
-    if (fromId === toId) {
-      return err({ code: "LINK_CYCLE", path: [fromId] });
-    }
-
-    const path: string[] = [fromId, toId];
-    let current = toId;
-
-    while (true) {
+  ): Promise<Result<void, LoreError>> {
+    return detectParentCycleViaAncestry(fromId, toId, async (id) => {
       const row = this.db
         .prepare(
-          `SELECT to_id FROM links WHERE from_id = ? AND link_type = 'parent' LIMIT 1`,
+          `SELECT COALESCE(
+             (SELECT to_id FROM links WHERE from_id = docs.id AND link_type = 'parent' LIMIT 1),
+             docs.parent_id
+           ) AS parent_id
+           FROM docs WHERE docs.id = ?`,
         )
-        .get(current) as { to_id: string } | null;
-
-      if (!row) break;
-
-      const parentId = row.to_id;
-      if (parentId === fromId) {
-        return err({ code: "LINK_CYCLE", path: [...path, parentId] });
-      }
-      path.push(parentId);
-      current = parentId;
-    }
-
-    return ok(undefined);
+        .get(id) as { parent_id: string | null } | null;
+      return row?.parent_id ?? null;
+    });
   }
 
   async removeLink(
