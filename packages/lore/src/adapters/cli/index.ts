@@ -82,6 +82,9 @@ const main = defineCommand({
     // governance (SPEC-083 D1) — bootstrap-stage, no corpus required; see
     // commands/governance.ts's module header.
     governance: () => import("./commands/governance.js").then(wrapDefault("governance")),
+    // context (spec-context-verb-family-two-zone-claude-md-anatomy-lore) — init/refresh
+    // the two-zone root CLAUDE.md; see commands/context.ts's module header.
+    context: () => import("./commands/context.js").then(wrapDefault("context")),
     outline: () => import("./commands/outline.js").then(wrapDefault("outline")),
     seat: () => import("./commands/seat.js").then(wrapDefault("seat")),
     "report-issue": () => import("./commands/report-issue.js").then(wrapDefault("report-issue")),
