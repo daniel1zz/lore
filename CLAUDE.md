@@ -211,6 +211,7 @@ All feature specs live under `docs/requirements/spec/`; the corpus is the SSOT �
 - `SPEC-084` — corpus-allocated ordinal identity: `docs.ordinal` column + partial unique index, store-atomic allocation (`insertWithAllocatedOrdinal`/`allocateOrdinalForExisting`/`assignOrdinalForRepair` D7 path), prose-pure titles both write paths, `resolveDoc` ordinal-ref step, export column-read (SPEC-021 A1 retired), `lore migrate ordinals` repair (executed live 2026-07-27: 94 kept / 12 changed, triple-080 collision resolved 80=bootstrap-injection/81=PRD-as-outline/82=audit-hardening-2)
 - `SPEC-085` — seat-briefing runtime injection: `lore governance --seat-briefing` (raw template, hook substitutes placeholders), Phase D spawns the verb, `governance/` install dir retired entirely; npm packaged-asset list stays install-set-independent
 - `SPEC-096` — session-start handoff neutrality: injection drops `resume_hint` (seat-scoped runs keep it), handoff derivation filters archived/deprecated/invalidated docs, corpus-workflow prose = neutral open-thread directory + never-self-resume prohibition
+- `SPEC-097` — lifecycle archival: plan-close cascade (unclaimed tasks + plan handoffs, per-doc audit), `lore archive --sweep/--apply` (rules superseded_handoff/expired_handoff/done_plan_straggler; knowledge/adr excluded), injection `archive_candidates` present-iff-positive; `draft→archived` legal for task/knowledge only (type-scoped `isValidTransition`)
 
 ## AI Default Behavior by Caller Surface (SPEC-024)
 
