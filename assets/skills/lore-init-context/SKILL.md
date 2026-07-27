@@ -49,6 +49,8 @@ Before any scanning, verify:
 Optional but recommended:
 4. **Git repo?** — not required, but if absent, warn the user that generated files will not be version-controlled until they `git init`.
 
+5. **Contract consumption** — check whether `lore` is on PATH. If it is, run `lore governance claude-md` and conform every file this skill generates (root and module) to that contract — it is the single SSOT for what goes in a project CLAUDE.md and what stays out; never copy or paraphrase it here. If `lore` is not on PATH, proceed with the generic structure below and recommend the user run `lore setup` to install it.
+
 ---
 
 ## Step 1: Project Scan
@@ -297,42 +299,9 @@ If any verify step failed, list it under a `Failures:` section above the totals.
 
 ---
 
-## What Goes In vs What Stays Out
+## Content Contract
 
-### Include (static knowledge — changes monthly or less)
-- Design intent and architectural rationale
-- Invariants ("FileStore is source of truth, IndexStore is derived")
-- Module boundaries and responsibilities
-- Build/test/dev commands
-- Coding patterns specific to this module
-- Key design decisions with the WHY
-- Cross-module dependency relationships
-
-### Exclude (dynamic state, noise, or code-readable details)
-- Runtime state: active plans, task counts, health scores
-- File listings: AI can `ls` and `find` on its own
-- Method signatures and parameter lists: AI reads these from source directly
-- Complete API inventories: a brief category summary is fine; listing every function is not
-- Metrics: line counts, coverage %, doc counts
-- Behavioral directives: "MANDATORY: do X" (ineffective as push — AI prioritizes user intent)
-- Anything changing faster than monthly
-
-### Anti-patterns (observed from real runs — avoid these)
-
-- **Method catalog**: listing every exported function with its signature. AI reads source for this.
-- **Recursive sub-module files**: creating CLAUDE.md for `tools/create/`, `tools/validate-plan/` etc. One `tools/CLAUDE.md` with subsections is enough.
-- **Container CLAUDE.md**: writing `src/adapters/CLAUDE.md` when `src/adapters/` only contains subdirectories. Push down to children. (See Sub-Container Pattern.)
-- **Rewriting root CLAUDE.md without consent**: when drift is found, ask via AskUserQuestion before rewriting. Default to preservation if the user is silent.
-- **Data flow diagrams**: step-by-step "request enters here, goes to X, then Y" belongs in a design doc, not CLAUDE.md.
-- **Dependency lists**: "Key runtime: X, Y, Z" — AI reads package.json for this.
-- **Plain-text user prompts**: asking "Generate for these modules? (add/remove/rename OK)" as free text instead of AskUserQuestion. AI ends up parsing free-form replies — use the tool.
-
-### Style rules
-
-- Imperative voice. Short sentences.
-- One concrete example beats three abstract rules.
-- Link to sibling CLAUDE.md instead of duplicating info.
-- Each CLAUDE.md should be glanceable in one screenful.
+What goes in a CLAUDE.md versus what stays out, the section taxonomy, and style rules are governed by the SSOT contract, not by this skill — see Step 0's contract-consumption preflight (`lore governance claude-md`). When `lore` is unavailable, fall back to the generic structure in Steps 3-4 below and recommend `lore setup`.
 
 ---
 
@@ -359,3 +328,9 @@ The `<!-- auto:... -->` markers protect user-written content from being overwrit
 ```
 
 Everything outside markers is treated as user-owned. Drift-fix mode (Q2 = "Rewrite drifted sections") is the only exception, and only with explicit user consent through AskUserQuestion.
+
+---
+
+## Step 6: Contract Oracle
+
+After generating (or updating) files, if `lore` is on PATH run `lore status --check-claude-md`. Exit 3 means one or more generated files violate the deterministic line/byte ceiling from the contract — treat this as a failure and fix the offending file(s) before reporting done. Exit 0 (or `lore` absent) means this oracle passed or does not apply.
