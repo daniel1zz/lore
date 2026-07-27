@@ -73,6 +73,21 @@ describe("pre-push hook pair — content parity + audit-verify wiring (SPEC-080 
     expect(assetHook).toContain("lore audit --verify");
   });
 
+  // RED (AC-CMC-4, spec-project-claude-md-content-contract-governance-injected):
+  // the paired implementation task (task-skill-implement-pre-push-pair-check-
+  // step-assets-manifest) has not landed as of this test's authoring — neither
+  // hook copy invokes `lore status --check-claude-md` yet, confirmed empirically
+  // against this worktree's on-disk hook files. This case is therefore RED now
+  // and flips GREEN once that task appends the check-claude-md step to both
+  // copies (mirroring the audit --verify case immediately above, which pins the
+  // SAME invariant for the SPEC-080/081 G5 step).
+  it("HAPPY: both hook copies invoke `lore status --check-claude-md` (AC-CMC-4)", () => {
+    const repoHook = readFileSync(REPO_HOOK_PATH, "utf8");
+    const assetHook = readFileSync(ASSET_HOOK_PATH, "utf8");
+    expect(repoHook).toContain("--check-claude-md");
+    expect(assetHook).toContain("--check-claude-md");
+  });
+
   it("NEGATIVE: the byte-identity check is not a tautological always-pass", () => {
     const repoHook = readFileSync(REPO_HOOK_PATH, "utf8");
     const divergent = `${repoHook}\n# an unsanctioned local edit`;
