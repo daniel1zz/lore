@@ -513,6 +513,22 @@ export function parsePositiveIntArg(
  * team; machine/worktree stay JSON-only surfaces (`lore ready --json` /
  * `lore_ready`), never rendered in this compact text badge.
  *
+ * Evidence-count segment classification (spec-workflow-hardening-evidence-
+ * red-vocabulary-claim-worktree §M1, AC-WH-1): the LAST evidence entry's
+ * `result` decides the glyph — `pass` → `✔n`, `fail` → `✘n`, and anything
+ * else (`expected-fail` / `inconclusive`) → a DISTINCT non-green marker.
+ * Reusing plain `✔n` for those two would render a deliberate RED-phase pin or
+ * an inconclusive oracle run as if it had actually passed — the bug this task
+ * fixes. Glyphs are deliberately the SAME ones `commands/ac.ts::coverageBadge`
+ * already uses for the identical two states (`⚑R` expected-fail, `⚑?`
+ * inconclusive, SPEC-061 §Scope D5 / this spec §M1) so a reader learns one
+ * vocabulary across both badge renderers — only the numeral placement differs
+ * (`⚑R{n}`/`⚑?{n}` suffix here, vs. `⚑R({n})`/`⚑?({n})` parenthetical there),
+ * matching this function's own pre-existing `✔{n}`/`✘{n}` suffix convention
+ * rather than ac.ts's separate aggregate-count parenthetical shape (this
+ * function counts the total evidence array length, not distinct pass/fail
+ * tallies, so the two shapes were never rendering the same quantity).
+ *
  * @param doc - Full task DocRecord (must include `extra` — DocSummary lacks it)
  * @param nowIso - Current time (ISO 8601) for claim staleness computation
  * @param ttlMinutes - Claim TTL in minutes — pass `app.taskWorkflowService.claimTtlMinutes`
@@ -520,7 +536,8 @@ export function parsePositiveIntArg(
  *   bracketed badge string with a leading space, ready to append to a row label
  * @example
  *   formatWorkflowBadge(task, new Date().toISOString(), 120)
- *   // " [claimed:alice@b1 ✔3]" or " [claimed:bob (stale) ✘1]" or ""
+ *   // " [claimed:alice@b1 ✔3]" or " [claimed:bob (stale) ✘1]" or
+ *   // " [⚑R1]" (last result expected-fail) or " [⚑?1]" (last result inconclusive) or ""
  */
 export function formatWorkflowBadge(doc: DocRecord, nowIso: string, ttlMinutes: number): string {
   const parts: string[] = [];
@@ -541,7 +558,29 @@ export function formatWorkflowBadge(doc: DocRecord, nowIso: string, ttlMinutes: 
     if (parsedEvidence.success && parsedEvidence.data.length > 0) {
       const last = parsedEvidence.data[parsedEvidence.data.length - 1];
       if (last !== undefined) {
-        parts.push(last.result === "fail" ? `✘${parsedEvidence.data.length}` : `✔${parsedEvidence.data.length}`);
+        const count = parsedEvidence.data.length;
+        let glyph: string;
+        switch (last.result) {
+          case "pass":
+            glyph = `✔${count}`;
+            break;
+          case "fail":
+            glyph = `✘${count}`;
+            break;
+          case "inconclusive":
+            glyph = `⚑?${count}`;
+            break;
+          case "expected-fail":
+            glyph = `⚑R${count}`;
+            break;
+          default: {
+            // exhaustive check — TypeScript should warn if a new result value is added
+            const _exhaustive: never = last.result;
+            glyph = `⚑?${count}`;
+            void _exhaustive;
+          }
+        }
+        parts.push(glyph);
       }
     }
   }
