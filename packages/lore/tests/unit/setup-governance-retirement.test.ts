@@ -91,6 +91,7 @@ const REPO_ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..",
 const ASSETS_ROOT = join(REPO_ROOT, "assets");
 const SESSION_START_HOOK_PATH = join(ASSETS_ROOT, "hooks", "session-start-resume.mjs");
 const SEAT_BRIEFING_SSOT_PATH = join(ASSETS_ROOT, "governance", "seat-briefing.md");
+const CORPUS_WORKFLOW_SSOT_PATH = join(ASSETS_ROOT, "governance", "corpus-workflow.md");
 
 const RETIRED_PATH_CORPUS_WORKFLOW = "governance/corpus-workflow.md";
 const RETIRED_PATH_SEAT_BRIEFING = "governance/seat-briefing.md";
@@ -331,6 +332,83 @@ describe("setup-governance-retirement — STATE (seat-briefing.md SSOT content, 
       writeFileSync(tmpFile, "lore create knowledge --sub-type handoff --title x\n");
       const content = readFileSync(tmpFile, "utf8");
       const occurrences = content.split("create knowledge --sub-type handoff").length - 1;
+      expect(occurrences).toBeGreaterThan(0);
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ─── STATE — corpus-workflow.md handoff-neutrality content (AC-096-3) ──────
+//
+// spec-session-start-handoff-neutrality D4 — the FEED section's bootstrap
+// bullet must describe `latest_handoffs` as a neutral open-thread directory
+// and explicitly prohibit an agent from self-initiating a resume off an
+// injected handoff pointer; the CLOSE section's handoff bullet must drop the
+// stale "session-start auto-injected resume_hint is only a fallback
+// discovery aid" phrasing (stale after D1 dropped resume_hint from the
+// injection). Keyed on short, stable lone tokens (never a long remembered
+// phrase) per the contiguous-substring lesson — each token below is
+// independently meaningful, so a future light rewording of the surrounding
+// sentence would still be caught by SOME assertion rather than the whole
+// suite silently degrading to no-match.
+
+describe("setup-governance-retirement — STATE (corpus-workflow.md handoff-neutrality content, spec-session-start-handoff-neutrality D4)", () => {
+  it("HAPPY: the FEED bullet describes latest_handoffs as a neutral open-thread directory", () => {
+    const content = readFileSync(CORPUS_WORKFLOW_SSOT_PATH, "utf8");
+    expect(content).toContain("NEUTRAL");
+    expect(content).toContain("open thread");
+  });
+
+  it("HAPPY: the FEED bullet prohibits self-initiated resumption from an injected handoff pointer", () => {
+    const content = readFileSync(CORPUS_WORKFLOW_SSOT_PATH, "utf8");
+    expect(content).toContain("NEVER start resuming");
+    expect(content).toContain("own initiative");
+  });
+
+  it("HAPPY: the FEED bullet names the ticket-or-explicit-instruction exception to the prohibition", () => {
+    const content = readFileSync(CORPUS_WORKFLOW_SSOT_PATH, "utf8");
+    expect(content).toContain("pasted ticket");
+    expect(content).toContain("explicit instruction");
+  });
+
+  it("HAPPY: the CLOSE bullet names the handoff ticket as the sole sanctioned resumption path", () => {
+    const content = readFileSync(CORPUS_WORKFLOW_SSOT_PATH, "utf8");
+    expect(content).toContain("sanctioned resumption path");
+  });
+
+  it("NEGATIVE: zero occurrences of the retired resume_hint field name anywhere in the file", () => {
+    const content = readFileSync(CORPUS_WORKFLOW_SSOT_PATH, "utf8");
+    const occurrences = content.split("resume_hint").length - 1;
+    expect(occurrences).toBe(0);
+  });
+
+  it("NEGATIVE: zero occurrences of the stale 'fallback discovery aid' phrasing (D1 made resume_hint no longer even present ambiently)", () => {
+    const content = readFileSync(CORPUS_WORKFLOW_SSOT_PATH, "utf8");
+    const occurrences = content.split("fallback discovery aid").length - 1;
+    expect(occurrences).toBe(0);
+  });
+
+  it("REGRESSION control: the resume_hint occurrence-count assertion is not vacuously true — a synthetic fixture carrying the marker IS flagged", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "governance-retirement-neutrality-control-"));
+    try {
+      const tmpFile = join(tmpDir, "fixture-corpus-workflow.md");
+      writeFileSync(tmpFile, "Session bootstrap is hook-injected (`resume_hint` / `latest_handoffs`)\n");
+      const content = readFileSync(tmpFile, "utf8");
+      const occurrences = content.split("resume_hint").length - 1;
+      expect(occurrences).toBeGreaterThan(0);
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("REGRESSION control: the fallback-discovery-aid occurrence-count assertion is not vacuously true — a synthetic fixture carrying the stale phrase IS flagged", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "governance-retirement-neutrality-control-"));
+    try {
+      const tmpFile = join(tmpDir, "fixture-corpus-workflow.md");
+      writeFileSync(tmpFile, "the session-start auto-injected resume_hint is only a fallback discovery aid.\n");
+      const content = readFileSync(tmpFile, "utf8");
+      const occurrences = content.split("fallback discovery aid").length - 1;
       expect(occurrences).toBeGreaterThan(0);
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });

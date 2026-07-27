@@ -376,3 +376,195 @@ describe("SessionService.bootstrap -> buildBootstrapInjection — omitted-plan f
     expect(oldestSession?.by).toBe("carol");
   });
 });
+
+// ─── SessionService.bootstrap — D3 derivation hygiene filter (AC-096-2) ────────
+//
+// spec-session-start-handoff-neutrality D3 — a handoff doc that is
+// archived/deprecated, or invalidated per `extra.validity` (SPEC-043's
+// `isInvalidated` SSOT predicate), must be excluded from BOTH
+// `latest_handoffs` and `resume_hint` — the SAME single `handoffPairs`
+// derivation site both fields build from, so archiving/invalidating a
+// handoff is an effective cleanup action everywhere it surfaces.
+
+describe("SessionService.bootstrap — D3 handoff derivation hygiene (archived/deprecated/invalidated exclusion, AC-096-2)", () => {
+  it("NEGATIVE: an archived handoff doc is excluded from latest_handoffs and resume_hint", async () => {
+    const store = new InMemoryStore();
+    const { corpusService, sessionService } = makeSessionService(store);
+    const plan = await mustCreate(corpusService, { type: "plan", title: "Plan Archived", content: "# P" } as CreateDocInput);
+    const handoff = await sessionService.writeHandoff({
+      by: "alice",
+      plan_ref: plan.slug,
+      task_refs: [],
+      modified_files: [],
+      key_decisions: [],
+      next_steps: ["continue"],
+    });
+    if (!handoff.ok) throw new Error(JSON.stringify(handoff.error));
+
+    const patched = await store.update(handoff.value.id, { status: "archived" });
+    if (!patched.ok) throw new Error(JSON.stringify(patched.error));
+
+    const result = await sessionService.bootstrap("alice");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.latest_handoffs).toEqual([]);
+    expect(result.value.resume_hint).toBeNull();
+  });
+
+  it("NEGATIVE: a deprecated handoff doc is excluded from latest_handoffs and resume_hint", async () => {
+    const store = new InMemoryStore();
+    const { corpusService, sessionService } = makeSessionService(store);
+    const plan = await mustCreate(corpusService, { type: "plan", title: "Plan Deprecated", content: "# P" } as CreateDocInput);
+    const handoff = await sessionService.writeHandoff({
+      by: "alice",
+      plan_ref: plan.slug,
+      task_refs: [],
+      modified_files: [],
+      key_decisions: [],
+      next_steps: ["continue"],
+    });
+    if (!handoff.ok) throw new Error(JSON.stringify(handoff.error));
+
+    const patched = await store.update(handoff.value.id, { status: "deprecated" });
+    if (!patched.ok) throw new Error(JSON.stringify(patched.error));
+
+    const result = await sessionService.bootstrap("alice");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.latest_handoffs).toEqual([]);
+    expect(result.value.resume_hint).toBeNull();
+  });
+
+  it("NEGATIVE: a handoff doc invalidated via extra.validity.invalid_at is excluded from latest_handoffs and resume_hint", async () => {
+    const store = new InMemoryStore();
+    const { corpusService, sessionService } = makeSessionService(store);
+    const plan = await mustCreate(corpusService, { type: "plan", title: "Plan Invalidated", content: "# P" } as CreateDocInput);
+    const handoff = await sessionService.writeHandoff({
+      by: "alice",
+      plan_ref: plan.slug,
+      task_refs: [],
+      modified_files: [],
+      key_decisions: [],
+      next_steps: ["continue"],
+    });
+    if (!handoff.ok) throw new Error(JSON.stringify(handoff.error));
+
+    // reason: `extra` is REPLACED wholesale by `store.update` (never merged) —
+    // the existing handoff extra must be spread forward alongside the new
+    // `validity` block, or `extractHandoffExtra` would stop recognizing this
+    // doc as a handoff at all, making the D3 filter irrelevant to the outcome.
+    const patched = await store.update(handoff.value.id, {
+      extra: { ...handoff.value.extra, validity: { invalid_at: "2020-01-01T00:00:00.000Z" } },
+    });
+    if (!patched.ok) throw new Error(JSON.stringify(patched.error));
+
+    const result = await sessionService.bootstrap("alice");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.latest_handoffs).toEqual([]);
+    expect(result.value.resume_hint).toBeNull();
+  });
+
+  it("STATE: draft and approved handoffs are BOTH retained", async () => {
+    const store = new InMemoryStore();
+    const { corpusService, sessionService } = makeSessionService(store);
+    const planDraft = await mustCreate(corpusService, { type: "plan", title: "Plan Draft Handoff", content: "# P" } as CreateDocInput);
+    const planApproved = await mustCreate(corpusService, { type: "plan", title: "Plan Approved Handoff", content: "# P" } as CreateDocInput);
+
+    const draftHandoff = await sessionService.writeHandoff({
+      by: "alice",
+      plan_ref: planDraft.slug,
+      task_refs: [],
+      modified_files: [],
+      key_decisions: [],
+      next_steps: ["continue draft"],
+    });
+    if (!draftHandoff.ok) throw new Error(JSON.stringify(draftHandoff.error));
+    expect(draftHandoff.value.status).toBe("draft");
+
+    const approvedHandoff = await sessionService.writeHandoff({
+      by: "bob",
+      plan_ref: planApproved.slug,
+      task_refs: [],
+      modified_files: [],
+      key_decisions: [],
+      next_steps: ["continue approved"],
+    });
+    if (!approvedHandoff.ok) throw new Error(JSON.stringify(approvedHandoff.error));
+    const patched = await store.update(approvedHandoff.value.id, { status: "approved" });
+    if (!patched.ok) throw new Error(JSON.stringify(patched.error));
+
+    const result = await sessionService.bootstrap("alice");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const handoffSlugs = result.value.latest_handoffs.map((h) => h.handoff_slug);
+    expect(handoffSlugs).toContain(draftHandoff.value.slug);
+    expect(handoffSlugs).toContain(approvedHandoff.value.slug);
+    expect(result.value.resume_hint).not.toBeNull();
+  });
+
+  it("BOUNDARY: an invalidated-then-undone handoff (extra.validity present, invalid_at absent) is retained", async () => {
+    const store = new InMemoryStore();
+    const { corpusService, sessionService } = makeSessionService(store);
+    const plan = await mustCreate(corpusService, { type: "plan", title: "Plan Undone", content: "# P" } as CreateDocInput);
+    const handoff = await sessionService.writeHandoff({
+      by: "alice",
+      plan_ref: plan.slug,
+      task_refs: [],
+      modified_files: [],
+      key_decisions: [],
+      next_steps: ["continue"],
+    });
+    if (!handoff.ok) throw new Error(JSON.stringify(handoff.error));
+
+    // reason: ValidityService's `--undo` clears invalid_at/invalidated_by/reason
+    // but KEEPS valid_at (module header, validity-service.ts D2) — this is that
+    // post-undo shape, reproduced directly at the store layer.
+    const patched = await store.update(handoff.value.id, {
+      extra: { ...handoff.value.extra, validity: { valid_at: "2026-01-01T00:00:00.000Z" } },
+    });
+    if (!patched.ok) throw new Error(JSON.stringify(patched.error));
+
+    const result = await sessionService.bootstrap("alice");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.latest_handoffs.map((h) => h.handoff_slug)).toContain(handoff.value.slug);
+    expect(result.value.resume_hint).toEqual({ plan_slug: plan.slug, handoff_slug: handoff.value.slug });
+  });
+
+  it("REGRESSION: an archived/invalidated NON-handoff knowledge doc never participates in handoff derivation — a genuine handoff is unaffected", async () => {
+    const store = new InMemoryStore();
+    const { corpusService, sessionService } = makeSessionService(store);
+    const plan = await mustCreate(corpusService, { type: "plan", title: "Plan With Genuine Handoff", content: "# P" } as CreateDocInput);
+    const handoff = await sessionService.writeHandoff({
+      by: "alice",
+      plan_ref: plan.slug,
+      task_refs: [],
+      modified_files: [],
+      key_decisions: [],
+      next_steps: ["continue"],
+    });
+    if (!handoff.ok) throw new Error(JSON.stringify(handoff.error));
+
+    // A plain (non-handoff) knowledge doc, archived AND invalidated — neither
+    // condition should ever reach the handoff-derivation code path at all
+    // (`extractHandoffExtra` already excludes it before D3's filter runs).
+    const otherKnowledge = await mustCreate(corpusService, {
+      type: "knowledge",
+      title: "Unrelated reference doc",
+      content: "# Unrelated",
+      extra: { sub_type: "reference" },
+    } as CreateDocInput);
+    const archivedPatch = await store.update(otherKnowledge.id, {
+      status: "archived",
+      extra: { sub_type: "reference", validity: { invalid_at: "2020-01-01T00:00:00.000Z" } },
+    });
+    if (!archivedPatch.ok) throw new Error(JSON.stringify(archivedPatch.error));
+
+    const result = await sessionService.bootstrap("alice");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.latest_handoffs.map((h) => h.handoff_slug)).toEqual([handoff.value.slug]);
+    expect(result.value.resume_hint).toEqual({ plan_slug: plan.slug, handoff_slug: handoff.value.slug });
+  });
+});

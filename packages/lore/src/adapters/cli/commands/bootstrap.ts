@@ -34,10 +34,23 @@
  * text format are BYTE-UNCHANGED by this addition (`--injection` is a strict
  * additive branch ahead of the existing `if (args.json)` check).
  *
+ * **`resume_hint` neutrality (spec-session-start-handoff-neutrality D1, D2)** —
+ * the injection payload OMITS `resume_hint` entirely for an ordinary session
+ * (the user is the router; an ambient "resume this" guess misdirects every
+ * session but one in a multi-session workflow). The ONE exception is a
+ * seat-scoped call (`--seat-branch` given AND `SessionService.bootstrap`
+ * resolved it to a live plan, i.e. `result.value.seat_unresolved` is NOT
+ * `true`) — that hint derives from the session's own worktree branch, not a
+ * corpus-wide guess, so `seatScoped` is computed HERE (this command holds
+ * both halves of the signal) and threaded into `buildBootstrapInjection` as
+ * its third argument. Plain `--json`'s full `BootstrapReport` is unaffected —
+ * `resume_hint` still appears there unconditionally, same as before.
+ *
  * Exit codes: 0 = success (including an empty corpus — `root: null`, every array
  *   `[]`, AC-SL-10), non-zero only on an underlying store error.
  *
- * Source: SPEC-041 §3 D1, D2; SPEC-080(bootstrap-injection) §Module Boundary, D3, D5
+ * Source: SPEC-041 §3 D1, D2; SPEC-080(bootstrap-injection) §Module Boundary, D3, D5;
+ * spec-session-start-handoff-neutrality §Design Decisions D1, D2
  */
 
 import { defineCommand } from "citty";
@@ -180,10 +193,13 @@ export default defineCommand({
       type: "boolean",
       description:
         "SPEC-080(bootstrap-injection) tier-1 injection projection — print buildBootstrapInjection's compact " +
-        "JSON (resume_hint/my_claims/active_sessions/armed_gates/root/pending_reviews/" +
+        "JSON ([resume_hint/]my_claims/active_sessions/armed_gates/root/pending_reviews/" +
         "active_plans/latest_handoffs/corpus/omitted[/budget_exceeded]) instead of the " +
-        "full report. Takes precedence over --json when both are given (same compact " +
-        "injection payload either way — see this file's module header).",
+        "full report. resume_hint appears ONLY for a seat-scoped call (--seat-branch " +
+        "resolved to a live plan) — an ordinary session omits it entirely " +
+        "(spec-session-start-handoff-neutrality D1, D2). Takes precedence over --json " +
+        "when both are given (same compact injection payload either way — see this " +
+        "file's module header).",
     },
     "seat-branch": {
       type: "string",
@@ -264,7 +280,16 @@ export default defineCommand({
         // projection's compact json verbatim. Takes precedence over --json (module
         // header's "Combined --injection --json decision").
         const budgets = resolveBootstrapInjectionBudgets(config);
-        const { json } = buildBootstrapInjection(reportWithStaleness, budgets);
+        // spec-session-start-handoff-neutrality D1, D2 — "seat-scoped" (resume_hint
+        // survives the injection) can ONLY be computed HERE: this command already
+        // holds both halves of the signal (whether `--seat-branch` was given at
+        // all, and whether SessionService resolved it to a live plan via the
+        // ABSENCE of `seat_unresolved: true`) — the seat signal deliberately never
+        // round-trips through `BootstrapReport` itself (D1's "do not touch the
+        // full report's schema/shape" constraint), so `buildBootstrapInjection`
+        // cannot re-derive this from `report` alone.
+        const seatScoped = seat !== undefined && result.value.seat_unresolved !== true;
+        const { json } = buildBootstrapInjection(reportWithStaleness, budgets, seatScoped);
         console.log(json);
       } else if (args.json) {
         console.log(JSON.stringify({ ok: true, data: reportWithStaleness }, null, 2));

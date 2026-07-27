@@ -25,11 +25,19 @@
  *   - deriveLastActivityAt(plan, tasks) — max `updated_at` across a plan and its
  *     child tasks; populates each `bootstrap.active_plans[]` entry's required
  *     `last_activity_at` (SPEC-069 §Design Decisions D6, D7)
- *   - buildBootstrapInjection(report, budgets) — SPEC-080(bootstrap-injection)
+ *   - buildBootstrapInjection(report, budgets, seatScoped?) — SPEC-080(bootstrap-injection)
  *     §Projection Contract: the SOLE owner of ALL tier-1 injection trimming
  *     (selection, count caps, char budget, omission accounting). Projects a
  *     full `BootstrapReport` down to the small, truncation-safe payload the
- *     SessionStart hook injects.
+ *     SessionStart hook injects. `resume_hint` is DROPPED entirely for an
+ *     ordinary (non-seat-scoped) session (spec-session-start-handoff-neutrality
+ *     D1) — the user is the router, an ambient "resume this" guess misdirects
+ *     every session but one in a multi-session workflow. `seatScoped: true`
+ *     (caller-computed — the seat signal never round-trips through
+ *     `BootstrapReport` itself, D1's "do not touch the full report's
+ *     schema/shape" constraint) is the ONE exception: a seat's resume hint
+ *     derives from the session's OWN worktree branch (SPEC-057), not a
+ *     corpus-wide guess, so it is retained (D2).
  *   - bootstrapInjectionSchema / BootstrapInjection — the projection's OWN Zod
  *     schema + type (SPEC-080(bootstrap-injection) §Module Boundary) — never a
  *     patch on `bootstrapReportSchema`.
@@ -60,7 +68,10 @@
  * Source: SPEC-041 §3 D2, D3; SPEC-042 §Design Decisions D1;
  * SPEC-080(bootstrap-injection; corpus slug
  * spec-080-bootstrap-injection-projection-tier-1-tier-2-payload) §Projection
- * Contract, §Public Interface, §Design Decisions D1-D8.
+ * Contract, §Public Interface, §Design Decisions D1-D8;
+ * spec-session-start-handoff-neutrality-injection-drops-resume §Design
+ * Decisions D1, D2 (resume_hint dropped from the injection except for a
+ * seat-scoped session).
  */
 
 import { z } from "zod";
@@ -574,9 +585,14 @@ export type BootstrapInjectionOmitted = z.infer<typeof bootstrapInjectionOmitted
  *   a new report field is expected to land a companion schema update here,
  *   the same "schema and shape move together" discipline `active_sessions`
  *   (`bootstrapReportSchema`) already documents.
+ * @invariant `resume_hint` is OPTIONAL here (unlike `bootstrapReportSchema`'s
+ *   unconditional `.nullable()`) — spec-session-start-handoff-neutrality D1:
+ *   an ordinary session's payload omits the key entirely, a seat-scoped
+ *   session's payload keeps it (`null` when the seat's own plan has no
+ *   handoffs yet).
  */
 export const bootstrapInjectionSchema = z.object({
-  resume_hint: bootstrapResumeHintSchema.nullable(),
+  resume_hint: bootstrapResumeHintSchema.nullable().optional(),
   my_claims: z.array(bootstrapMyClaimSchema),
   active_sessions: z.array(readySessionSchema),
   /** Condensed to checkpoint names only (D7) — feeding-source detail is tier-2 (SPEC-049 self-carries it at denial time). */
@@ -640,6 +656,12 @@ export interface BootstrapInjectionResult {
  * `omitted` ledger.
  *
  * Pipeline (each stage feeds the next; nothing is trimmed twice):
+ *  0. `resume_hint` is included ONLY when `seatScoped` is `true`
+ *     (spec-session-start-handoff-neutrality D1, D2) — an ordinary session's
+ *     payload omits the key entirely (the user is the router; an ambient
+ *     "resume this" guess misdirects every session but one). A seat-scoped
+ *     session's hint derives from the session's OWN worktree branch, not a
+ *     corpus-wide guess, so it survives untouched.
  *  1. `armed_gates` condenses to `string[]` of checkpoint names (D7).
  *  2. `pending_reviews.slugs` caps at `budgets.maxPendingSlugs` (`count`
  *     stays untouched — it reports the TRUE queue size, not the sample size).
@@ -664,20 +686,37 @@ export interface BootstrapInjectionResult {
  *   `SessionService.bootstrap`'s return value.
  * @param budgets - Count caps + char budget (SPEC-080(bootstrap-injection) defaults: 5/3/3/8000
  *   — see `resolveBootstrapInjectionBudgets` in `config.ts`).
+ * @param seatScoped - `true` when the caller resolved a SPEC-057 seat signal
+ *   AND it matched a live plan (`report.seat_unresolved` was NOT set to
+ *   `true` for that call) — computed by the caller (`commands/bootstrap.ts`),
+ *   never derivable from `report` alone: the seat signal deliberately never
+ *   round-trips through `BootstrapReport` itself
+ *   (spec-session-start-handoff-neutrality D1 — the full report's schema/shape
+ *   stays untouched beyond D3's data-hygiene fix). Defaults to `false`
+ *   (ordinary session — `resume_hint` omitted) so every pre-existing caller
+ *   that never passes this argument gets the new, safer default automatically.
  * @returns `{payload, json}` — `payload` is the ordered, trimmed object;
  *   `json` is its compact (no-whitespace) serialization, `json.length` at
  *   most `budgets.charBudget` unless `payload.budget_exceeded` is `true`.
  * @example
+ * // Ordinary session (default) — resume_hint key is entirely absent.
  * const { payload, json } = buildBootstrapInjection(report, {
  *   maxActivePlans: 5, maxHandoffs: 3, maxPendingSlugs: 3, charBudget: 8000,
  * });
  * Object.keys(payload);
+ * // => ["my_claims","active_sessions","armed_gates","root",
+ * //     "pending_reviews","active_plans","latest_handoffs","corpus","omitted"]
+ * @example
+ * // Seat-scoped session — resume_hint retained at its contract position.
+ * const seatResult = buildBootstrapInjection(report, budgets, true);
+ * Object.keys(seatResult.payload);
  * // => ["resume_hint","my_claims","active_sessions","armed_gates","root",
  * //     "pending_reviews","active_plans","latest_handoffs","corpus","omitted"]
  */
 export function buildBootstrapInjection(
   report: BootstrapReport,
   budgets: BootstrapInjectionBudgets,
+  seatScoped = false,
 ): BootstrapInjectionResult {
   const armedGates = report.armed_gates.map((gate) => gate.checkpoint);
 
@@ -702,8 +741,14 @@ export function buildBootstrapInjection(
   // directly) because step 5 below assigns keys the static type can't name
   // (the D8 OCP unknown-field escape hatch) — cast to the public type once
   // construction is complete, right before returning.
+  //
+  // reason: `resume_hint` is the FIRST key assigned only when `seatScoped` —
+  // conditionally spreading it in BEFORE the rest of the literal preserves
+  // its contract position-1 slot when present, while an ordinary session's
+  // payload starts at `my_claims` with the key entirely absent (never
+  // present-as-null) — spec-session-start-handoff-neutrality D1, D2.
   const payload: Record<string, unknown> = {
-    resume_hint: report.resume_hint,
+    ...(seatScoped ? { resume_hint: report.resume_hint } : {}),
     my_claims: report.my_claims,
     active_sessions: report.active_sessions,
     armed_gates: armedGates,

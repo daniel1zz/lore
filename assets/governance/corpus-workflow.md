@@ -7,7 +7,7 @@ Discipline lives in the corpus, not in the prompt: deterministic gates intercept
 
 ## FEED — pull governance before you produce
 
-- Session bootstrap is hook-injected where configured (`resume_hint` / `latest_handoffs` / `my_claims` / `armed_gates` / `active_sessions`) — consume it directly, do not re-fetch it yourself.
+- Session bootstrap is hook-injected where configured (`latest_handoffs` / `my_claims` / `armed_gates` / `active_sessions`) — consume it directly, do not re-fetch it yourself. `latest_handoffs` is a NEUTRAL directory of open threads across every plan, not a pointer to "the" thread — the user is the router. NEVER start resuming work from an injected handoff pointer on your own initiative; resume ONLY on the user's pasted ticket (`lore feed session-resume --handoff <slug>`) or an explicit instruction.
 - Resuming interrupted work: `lore feed session-resume [--by <actor>] [--plan <plan>]`.
 - Before producing any artifact: `lore feed <checkpoint>` (e.g. `spec-create --parent <prd>`) pulls the governing rules slice plus upstream summaries — pull proactively, do not wait for a gate to reject you first.
 - Search first: `lore search "<topic>" --json` / `lore get <slug>` / `lore tree [<plan>]` — link to an existing doc with `lore link` instead of duplicating it.
@@ -32,7 +32,7 @@ Discipline lives in the corpus, not in the prompt: deterministic gates intercept
 - Spec implementation landed → `lore anchor add <spec> <impl-path[#Symbol]>` to arm the doc-code drift oracle (declare anchors after landing, not during planning — an undeclared path reads as an instant false `file_missing`).
 - Superseded knowledge → `lore invalidate <doc> --superseded-by <new> --reason "<why>"` — never leave it quietly stale.
 - Session interrupted or ending with open work → `lore handoff --by <actor> [--plan <plan>] --decision "<judgment>[@confidence]" --next "<next step>"` (NOT `lore create knowledge --sub-type handoff` — the writer-identity guard rejects that path, naming `lore handoff` as the sole writer). The next session consumes it via `lore feed session-resume`.
-- After writing a handoff, ALWAYS report its ticket to the user: the handoff slug plus the paste-ready resume command `lore feed session-resume --handoff <slug>` — the user hands that to the next session for exact context pickup; the session-start auto-injected `resume_hint` is only a fallback discovery aid.
+- After writing a handoff, ALWAYS report its ticket to the user: the handoff slug plus the paste-ready resume command `lore feed session-resume --handoff <slug>` — the user hands that ticket to the next session for exact context pickup. This ticket is the ONLY sanctioned resumption path; session-start injection never selects a thread for you.
 - Maintenance cadence: `lore pending` (review queue) / `lore review --staleness --list` (stale candidates) / `lore status --check-tree --check-drift` (structure and code-anchor drift).
 - Suspect a lore defect itself (gate false-deny, wrong/misleading output, a crash)? Re-verify your own input first. Still confirmed → `lore report-issue --title <t> --expected <e> --actual <a>` (needs `feedback.upstream` configured). Check `lore report-issue --list` for a prior filing before re-reporting the same symptom.
 

@@ -210,9 +210,15 @@ function seedCorpus(dir: string): SeededCorpus {
   return { prdSlug, planASlug, planBSlug, planCSlug };
 }
 
-/** The SPEC-080 §Projection Contract's literal field-order list (positions 1-9; `omitted`/`budget_exceeded` are always the final two keys). */
+/**
+ * The SPEC-080 §Projection Contract's literal field-order list for an
+ * ORDINARY (non-seat-scoped) session — positions 1-8; `omitted` is always
+ * the final key. `resume_hint` is ABSENT here (never present-as-null) per
+ * spec-session-start-handoff-neutrality D1: the user is the router, an
+ * ambient "resume this" guess misdirects every session but one in a
+ * multi-session workflow.
+ */
 const INJECTION_CONTRACT_ORDER = [
-  "resume_hint",
   "my_claims",
   "active_sessions",
   "armed_gates",
@@ -222,6 +228,17 @@ const INJECTION_CONTRACT_ORDER = [
   "latest_handoffs",
   "corpus",
   "omitted",
+] as const;
+
+/**
+ * The SAME contract, SEAT-SCOPED — `resume_hint` is retained at its
+ * position-1 slot when `--seat-branch` resolves to a live plan
+ * (spec-session-start-handoff-neutrality D2): that hint derives from the
+ * session's own worktree branch, not a corpus-wide guess.
+ */
+const SEAT_SCOPED_INJECTION_CONTRACT_ORDER = [
+  "resume_hint",
+  ...INJECTION_CONTRACT_ORDER,
 ] as const;
 
 /** Plain `bootstrap --json`'s `data` payload — the untouched `BootstrapReport` shape, REGRESSION-pinned as an exact 9-key set. */
@@ -246,6 +263,7 @@ beforeAll(() => {
 
 describe("AC-080-3: compiled dist/lore bootstrap --injection / --json default-budget contract", () => {
   let dir: string;
+  let seeded: SeededCorpus;
 
   beforeAll(() => {
     dir = mkdtempSync(join(tmpdir(), "lore-t6-bootstrap-injection-"));
@@ -253,7 +271,7 @@ describe("AC-080-3: compiled dist/lore bootstrap --injection / --json default-bu
     // genuine os.tmpdir() path is never a prefix of REPO_ROOT.
     expect(dir.startsWith(REPO_ROOT)).toBe(false);
     initCorpus(dir);
-    seedCorpus(dir);
+    seeded = seedCorpus(dir);
   });
 
   afterAll(() => {
@@ -281,6 +299,15 @@ describe("AC-080-3: compiled dist/lore bootstrap --injection / --json default-bu
     expect(raw).not.toContain("\n");
 
     expect(Object.keys(parsed)).toEqual([...INJECTION_CONTRACT_ORDER]);
+
+    // NEGATIVE (spec-session-start-handoff-neutrality D1): an ordinary
+    // (no --seat-branch) session's injection carries ZERO resume_hint keys —
+    // never present, not even as null. Checked both structurally
+    // (Object.keys/hasOwnProperty) and textually (raw stdout) so a
+    // regression can't slip through via a differently-cased or
+    // differently-nested reintroduction.
+    expect(parsed).not.toHaveProperty("resume_hint");
+    expect(raw).not.toContain("resume_hint");
 
     const activePlans = parsed["active_plans"] as Array<{ slug: string }>;
     const activePlanSlugs = activePlans.map((p) => p.slug);
@@ -331,6 +358,45 @@ describe("AC-080-3: compiled dist/lore bootstrap --injection / --json default-bu
     expect(injectionOnly.exitCode).toBe(0);
     expect(combined.exitCode).toBe(0);
     expect(combined.stdout).toBe(injectionOnly.stdout);
+  });
+
+  it("HAPPY: a --seat-branch that resolves to a live plan retains resume_hint at its contract position-1 slot, scoped to that plan's own newest handoff (spec-session-start-handoff-neutrality D2)", () => {
+    const shortSlug = seeded.planASlug.replace(/^plan-/, "");
+    const result = runLore(["bootstrap", "--injection", "--seat-branch", `plan/${shortSlug}`], dir);
+    expect(result.exitCode).toBe(0);
+
+    const raw = result.stdout.trim();
+    const parsed = JSON.parse(raw) as { resume_hint?: { plan_slug: string | null; handoff_slug: string } };
+
+    expect(Object.keys(parsed)).toEqual([...SEAT_SCOPED_INJECTION_CONTRACT_ORDER]);
+    expect(parsed.resume_hint).toBeDefined();
+    // reason: the seat's OWN plan (Plan A) has its own handoff — a
+    // wrongly-unscoped implementation would instead surface the
+    // corpus-global newest handoff, which per the fixture's HandoffB write
+    // order (written after HandoffA in seedCorpus) would belong to Plan B —
+    // the exact failure mode this assertion is designed to catch.
+    expect(parsed.resume_hint?.plan_slug).toBe(seeded.planASlug);
+  });
+
+  it("NEGATIVE: an unresolvable --seat-branch (no matching plan) is treated as ordinary — resume_hint is still absent from the injection", () => {
+    const result = runLore(
+      ["bootstrap", "--injection", "--seat-branch", "plan/nonexistent-slug-xyz"],
+      dir,
+    );
+    expect(result.exitCode).toBe(0);
+
+    const raw = result.stdout.trim();
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    // reason: an unresolvable seat branch also sets `seat_unresolved: true`
+    // on the report (SPEC-057 D3), which reaches the injection via the D8
+    // OCP unknown-field mechanism, appended between corpus and omitted — a
+    // SEPARATE, already-covered contract concern (SPEC-080), not something
+    // this D1/D2 case re-pins. Filtering it out isolates the assertion this
+    // test actually owns: resume_hint's absence.
+    const { seat_unresolved: _seatUnresolved, ...withoutSeatUnresolved } = parsed;
+    expect(Object.keys(withoutSeatUnresolved)).toEqual([...INJECTION_CONTRACT_ORDER]);
+    expect(parsed).not.toHaveProperty("resume_hint");
+    expect(parsed["seat_unresolved"]).toBe(true);
   });
 });
 
