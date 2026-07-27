@@ -189,10 +189,18 @@ export const specAcceptanceCriteriaSchema = z
  *   `"inconclusive"` ref satisfies neither, so it is counted in NEITHER
  *   bucket with NO special-casing required (it still appears in `refs`, for
  *   audit visibility).
+ * @invariant `result` also includes `"expected-fail"` (spec-workflow-hardening-
+ *   evidence-red-vocabulary-claim-worktree §M1, AC-WH-1) — a SELF-REPORTED
+ *   (never runner-issued) value recording a deliberate RED-phase oracle run
+ *   that fails by design, before its implementation lands. Mirrors
+ *   `"inconclusive"`'s exact same "satisfies neither `pass`/`fail` filter"
+ *   property below — an `"expected-fail"` ref is counted in NEITHER bucket,
+ *   NO special-casing required, and is NEVER counted as passing/green by this
+ *   or any other consumer of the evidence log.
  */
 export interface EvidenceRefLite {
   task_id: string;
-  result: "pass" | "fail" | "inconclusive";
+  result: "pass" | "fail" | "inconclusive" | "expected-fail";
   attested?: boolean;
 }
 

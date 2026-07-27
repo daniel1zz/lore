@@ -203,6 +203,72 @@ describe("HAPPY — claim → evidence → release → ready round-trip (AC-WF-1
   });
 });
 
+// ─── HAPPY — expected-fail evidence result (AC-WH-1) ────────────────────────
+// spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M1: a
+// deliberate RED-phase oracle run (fails by design, before its implementation
+// lands) must be recordable without laundering it into a dishonest "pass" or
+// an indistinguishable-from-a-real-regression "fail".
+
+describe("HAPPY — expected-fail evidence result accepted, stored verbatim (AC-WH-1)", () => {
+  it("addEvidence accepts result: \"expected-fail\" (no special guard, unlike runner-only \"inconclusive\") and stores it verbatim", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const result = await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({
+        oracle: "test",
+        command: "bunx vitest run new-feature.test.ts",
+        result: "expected-fail",
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const entries = result.value.extra["verification_evidence"] as Array<Record<string, unknown>>;
+    expect(entries).toHaveLength(1);
+    // Verbatim — not coerced toward "pass" or "fail".
+    expect(entries[0]?.["result"]).toBe("expected-fail");
+  });
+
+  it("ready()'s latest_evidence.result reports expected-fail verbatim and never affects the ready boolean (D3: blocker-status-driven only)", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const added = await taskWorkflowService.addEvidence(taskId, evidence({ result: "expected-fail" }));
+    expect(added.ok).toBe(true);
+
+    const readyResult = await taskWorkflowService.ready(planId);
+    expect(readyResult.ok).toBe(true);
+    if (!readyResult.ok) return;
+    const record = readyResult.value.records.find((r) => r.task.id === taskId);
+    expect(record?.latest_evidence?.result).toBe("expected-fail");
+    // No blockers on this task — readiness is unaffected by the evidence result value.
+    expect(record?.ready).toBe(true);
+  });
+
+  it("REGRESSION: a mixed pass-then-expected-fail evidence log still reports the LAST entry's result verbatim in latest_evidence", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
+    const second = await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({ command: "bunx vitest run red.test.ts", result: "expected-fail" }),
+    );
+    expect(second.ok).toBe(true);
+
+    const readyResult = await taskWorkflowService.ready(planId);
+    expect(readyResult.ok).toBe(true);
+    if (!readyResult.ok) return;
+    const record = readyResult.value.records.find((r) => r.task.id === taskId);
+    expect(record?.latest_evidence?.result).toBe("expected-fail");
+    expect(record?.evidence_count).toBe(2);
+  });
+});
+
 // ─── NEGATIVE ─────────────────────────────────────────────────────────────────
 
 describe("NEGATIVE — foreign fresh claim → CLAIM_CONFLICT (AC-WF-3)", () => {

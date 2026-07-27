@@ -381,8 +381,16 @@ export const LoreBatchSchema = z.object({
  */
 const EVIDENCE_ORACLE_ENUM = z.enum(ORACLE_KINDS);
 
-/** Oracle outcomes accepted by lore_evidence_add. */
-const EVIDENCE_RESULT_ENUM = z.enum(["pass", "fail"]);
+/**
+ * Oracle outcomes accepted by lore_evidence_add. `"expected-fail"` (spec-
+ * workflow-hardening-evidence-red-vocabulary-claim-worktree §M1, AC-WH-1)
+ * records a deliberate RED-phase oracle run that fails by design — stored
+ * verbatim, never counted as passing by any downstream consumer (mirrors
+ * `"inconclusive"`'s "satisfies neither pass nor fail filter" property,
+ * `@lore/core`'s task-workflow.ts). `"inconclusive"` itself stays excluded
+ * here — it is runner-issued only (`lore_verify`'s sole write path).
+ */
+const EVIDENCE_RESULT_ENUM = z.enum(["pass", "fail", "expected-fail"]);
 
 /**
  * Input schema for lore_claim.

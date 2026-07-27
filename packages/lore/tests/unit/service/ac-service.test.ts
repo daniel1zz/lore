@@ -426,3 +426,88 @@ describe("REGRESSION — listCriteria's coverage null/[] distinction (no plan vs
     }
   });
 });
+
+// ─── STATE — expected-fail evidence in AC-coverage aggregation (AC-WH-1) ────
+// spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M1: AC-coverage
+// aggregation (computeAcCoverage, consumed here via listCriteria) must classify
+// "expected-fail" evidence as non-passing — mirrors "inconclusive"'s existing
+// "satisfies neither pass nor fail filter" treatment, never counted as green.
+
+describe("STATE — expected-fail evidence never counted as passing by AC-coverage aggregation (AC-WH-1)", () => {
+  it("an AC referenced ONLY by expected-fail evidence has pass:0, fail:0, with the raw ref preserved verbatim in refs[]", async () => {
+    const { store, corpusService, acService } = makeServices();
+    const { specId, planId } = await createSpecWithPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+    await acService.addCriterion(specId, criterion());
+
+    const taskBefore = await store.find(taskId);
+    if (!taskBefore.ok || taskBefore.value === null) throw new Error("task fetch failed");
+    await store.update(taskId, {
+      extra: {
+        ...taskBefore.value.extra,
+        verification_evidence: [
+          {
+            oracle: "test",
+            command: "bunx vitest run red.test.ts",
+            result: "expected-fail",
+            recorded_at: new Date().toISOString(),
+            recorded_by: "tester",
+            ac_ref: "AC-X-1",
+          },
+        ],
+      },
+    });
+
+    const result = await acService.listCriteria(specId);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const fact = result.value.coverage?.find((f) => f.ac_id === "AC-X-1");
+    expect(fact).toBeDefined();
+    expect(fact?.pass).toBe(0);
+    expect(fact?.fail).toBe(0);
+    expect(fact?.attested_pass).toBe(0);
+    expect(fact?.attested_fail).toBe(0);
+    expect(fact?.refs).toEqual([{ task_id: taskId, result: "expected-fail" }]);
+  });
+
+  it("a real pass entry alongside an expected-fail entry on the same AC counts exactly one pass, never two (no accidental match)", async () => {
+    const { store, corpusService, acService } = makeServices();
+    const { specId, planId } = await createSpecWithPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+    await acService.addCriterion(specId, criterion());
+
+    const taskBefore = await store.find(taskId);
+    if (!taskBefore.ok || taskBefore.value === null) throw new Error("task fetch failed");
+    await store.update(taskId, {
+      extra: {
+        ...taskBefore.value.extra,
+        verification_evidence: [
+          {
+            oracle: "test",
+            command: "bunx vitest run x.test.ts",
+            result: "pass",
+            recorded_at: new Date().toISOString(),
+            recorded_by: "tester",
+            ac_ref: "AC-X-1",
+          },
+          {
+            oracle: "test",
+            command: "bunx vitest run red.test.ts",
+            result: "expected-fail",
+            recorded_at: new Date().toISOString(),
+            recorded_by: "tester",
+            ac_ref: "AC-X-1",
+          },
+        ],
+      },
+    });
+
+    const result = await acService.listCriteria(specId);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const fact = result.value.coverage?.find((f) => f.ac_id === "AC-X-1");
+    expect(fact?.pass).toBe(1);
+    expect(fact?.fail).toBe(0);
+    expect(fact?.refs).toHaveLength(2);
+  });
+});
