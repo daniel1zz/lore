@@ -752,6 +752,84 @@ describe("TursoStore", () => {
       expect(result.error.code).toBe("LINK_CYCLE");
     });
 
+    it("AC-STORE-005.11 (REGRESSION, audit 2026-07-27 spec-corpus-schema §4.3): 2-node parent cycle formed via docs.parent_id only (no links row — mirrors `lore create --parent`) is rejected on link close", async () => {
+      const root = makeDoc({ slug: "prd-turso-pid-cycle-root" });
+      await store.insert(root);
+      // `lore create --parent` writes ONLY docs.parent_id — never an
+      // addLink call, so no row lands in `links`. Reproduced here by
+      // setting parent_id directly on the inserted doc instead of going
+      // through addLink, exactly like CorpusService.create's --parent path.
+      const child = makeDoc({ slug: "prd-turso-pid-cycle-child", parent_id: root.id });
+      await store.insert(child);
+
+      // Sanity: the links table has NO row for this pair.
+      const outLinks = await store.findLinks(child.id, "out");
+      expect(outLinks.ok).toBe(true);
+      if (outLinks.ok) expect(outLinks.value).toHaveLength(0);
+
+      // Attempt to close the cycle: root's parent = child.
+      const result = await store.addLink(makeLink(root.id, child.id, "parent"));
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error.code).toBe("LINK_CYCLE");
+    });
+
+    it("AC-STORE-005.12 (REGRESSION): deeper 3-node parent cycle via docs.parent_id-only chain (zero links rows) is rejected", async () => {
+      const a = makeDoc({ slug: "prd-turso-pid-3c-a" });
+      await store.insert(a);
+      const b = makeDoc({ slug: "prd-turso-pid-3c-b", parent_id: a.id });
+      await store.insert(b);
+      const c = makeDoc({ slug: "prd-turso-pid-3c-c", parent_id: b.id });
+      await store.insert(c);
+
+      const links = await store.findLinks(a.id, "in");
+      expect(links.ok).toBe(true);
+      if (links.ok) expect(links.value).toHaveLength(0);
+
+      // a → c would close a→c→b→a.
+      const result = await store.addLink(makeLink(a.id, c.id, "parent"));
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error.code).toBe("LINK_CYCLE");
+    });
+
+    it("AC-STORE-005.13 (HAPPY / legal reparent): a doc with an existing docs.parent_id-only ancestor chain can be relinked to an unrelated parent", async () => {
+      const a = makeDoc({ slug: "prd-turso-pid-legal-a" });
+      await store.insert(a);
+      const b = makeDoc({ slug: "prd-turso-pid-legal-b", parent_id: a.id });
+      await store.insert(b);
+      const unrelated = makeDoc({ slug: "prd-turso-pid-legal-unrelated" });
+      await store.insert(unrelated);
+
+      // b is not an ancestor of `unrelated` — no cycle; must succeed.
+      const result = await store.addLink(makeLink(b.id, unrelated.id, "parent"));
+      expect(result.ok).toBe(true);
+    });
+
+    it("AC-STORE-005.14 (STATE/ERROR): a rejected cycle-closing link leaves docs.parent_id and the links table unchanged, and reports a well-formed path", async () => {
+      const root = makeDoc({ slug: "prd-turso-pid-noop-root" });
+      await store.insert(root);
+      const child = makeDoc({ slug: "prd-turso-pid-noop-child", parent_id: root.id });
+      await store.insert(child);
+
+      const result = await store.addLink(makeLink(root.id, child.id, "parent"));
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error.code).toBe("LINK_CYCLE");
+      if (result.error.code !== "LINK_CYCLE") return;
+      expect(result.error.path[0]).toBe(root.id);
+      expect(result.error.path).toContain(child.id);
+
+      // No partial write: root's parent_id is still null, no links row exists.
+      const rootAfter = await store.find(root.id);
+      expect(rootAfter.ok).toBe(true);
+      if (rootAfter.ok) expect(rootAfter.value?.parent_id).toBeNull();
+
+      const outLinks = await store.findLinks(root.id, "out");
+      expect(outLinks.ok).toBe(true);
+      if (outLinks.ok) expect(outLinks.value).toHaveLength(0);
+    });
+
     it("AC-STORE-005.10: self-referencing parent link A→A rejected with LINK_CYCLE", async () => {
       const a = makeDoc({ slug: "prd-turso-self-cyc-a" });
       await store.insert(a);
