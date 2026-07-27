@@ -21,7 +21,7 @@ citty-based CLI adapter. 32 subcommands, each in its own `commands/<name>.ts`, l
 ## Patterns
 
 - Subcommands are lazy ES module imports (`index.ts`'s `subCommands` map) — cold-start stays cheap.
-- `findLoreDbPath` walks `cwd` → root for `.lore/lore.db`; exits 1 + `lore init` hint when absent.
+- `findLoreDbPath` walks `cwd` → root for `.lore/lore.db`; on a miss, falls back to the MAIN checkout's corpus when cwd is inside a linked git worktree (`git rev-parse --git-common-dir` vs `--git-dir`, SPEC M4) — no local `.lore/` needed inside a fresh `git worktree add` tree; still absent → exits 1 + `lore init` hint. `gate-bypass-audit.ts::findLoreDbPathQuiet` shares the same fallback (`findMainCheckoutLoreDb`), degrading to `undefined` instead of exiting.
 - Output helpers live in `utils.ts` (`formatTable`, `formatTree`, `formatNavigation`, `relativeTime`) — pure, no `process.exit`, reusable from tests.
 - `formatError` renders multi-line stderr with contextual hints; add a case per new `LoreError` code.
 

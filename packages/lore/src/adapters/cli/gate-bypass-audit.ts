@@ -5,16 +5,19 @@
  * split out (`../../CLAUDE.md`'s testability-split pattern): `commands/gate.ts`
  * transitively imports `loader.ts` (`bun:sqlite` via `app.ts`), which vitest
  * cannot resolve, but this file imports only `@lore/core`/`@lore/core/node` +
- * `node:fs`/`node:path`, so `tests/integration/cli/gate-bypass-audit.test.ts`
- * can exercise the decision logic directly.
+ * `node:fs`/`node:path` + `utils.ts` (also vitest-safe, no `bun:sqlite`), so
+ * `tests/integration/cli/gate-bypass-audit.test.ts` can exercise the decision
+ * logic directly.
  *
  * Public surface:
  *   - GateBypassAuditDeps — injected port shape (`openRecordGateSkip`)
  *   - runGateEnvBypassAudit(checkpoint, deps) — attempt-write-or-degrade logic
  *   - findLoreDbPathQuiet() — same `.lore/lore.db` upward walk as
- *     `utils.ts::findLoreDbPath`, but returns `undefined` on a miss instead of
- *     `process.exit(1)` — the bypass path's exit-0 guarantee (SPEC-080 D3) must
- *     survive an absent corpus, so this walk may never terminate the process.
+ *     `utils.ts::findLoreDbPath`, PLUS the same SPEC M4 main-checkout
+ *     git-common-dir fallback (`utils.ts::findMainCheckoutLoreDb`) — but
+ *     returns `undefined` on a miss instead of `process.exit(1)` — the
+ *     bypass path's exit-0 guarantee (SPEC-080 D3) must survive an absent
+ *     corpus, so this walk may never terminate the process.
  *
  * @invariant D1/D3 (SPEC-080 §Design Decisions) — this module NEVER changes the
  *   bypass's outcome. `runGateEnvBypassAudit` never throws and never rejects:
@@ -41,6 +44,7 @@ import {
   type RecordGateSkip,
 } from "../../service/gate-enforcer.js";
 import type { GateCheckpoint } from "../../service/checkpoint-registry.js";
+import { findMainCheckoutLoreDb } from "./utils.js";
 
 /**
  * Injected port for the ONE piece of this module's decision logic that needs
@@ -115,24 +119,33 @@ function warnBypassNotAudited(reason: string): void {
 /**
  * Walks `cwd` → filesystem root looking for `.lore/lore.db`, same traversal as
  * `utils.ts::findLoreDbPath` — but returns `undefined` on a miss instead of
- * printing an error and calling `process.exit(1)`. The env-bypass audit path
- * must NEVER terminate the process itself (SPEC-080 D3, "the bypass's exit-0
- * guarantee is preserved unconditionally") — an absent corpus is exactly the
+ * printing an error and calling `process.exit(1)`. When that walk-up misses
+ * AND cwd is inside a linked git worktree, falls back to the MAIN checkout's
+ * `.lore/lore.db` via `utils.ts::findMainCheckoutLoreDb` (SPEC M4 —
+ * spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M4,
+ * AC-WH-4) — the SAME fallback `findLoreDbPath` applies, reused here rather
+ * than re-implemented so the two discovery paths never independently drift.
+ * The env-bypass audit path must NEVER terminate the process itself
+ * (SPEC-080 D3, "the bypass's exit-0 guarantee is preserved unconditionally")
+ * — an absent corpus (still absent after the fallback) is exactly the
  * "unreachable" case `runGateEnvBypassAudit` degrades gracefully, not a fatal
  * CLI error.
  *
- * @returns The discovered `.lore/lore.db` absolute path, or `undefined` when
- *   no `.lore` directory is found walking up from `process.cwd()`.
+ * @returns The discovered `.lore/lore.db` absolute path (local walk-up or the
+ *   main-checkout fallback), or `undefined` when neither resolves from
+ *   `process.cwd()`.
  */
 export function findLoreDbPathQuiet(): string | undefined {
-  let dir = process.cwd();
+  const startDir = process.cwd();
+  let dir = startDir;
   while (true) {
     const candidate = join(dir, ".lore", "lore.db");
     if (existsSync(candidate)) {
       return candidate;
     }
     const parent = dirname(dir);
-    if (parent === dir) return undefined; // reached filesystem root
+    if (parent === dir) break; // reached filesystem root
     dir = parent;
   }
+  return findMainCheckoutLoreDb(startDir);
 }
