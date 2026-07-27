@@ -36,6 +36,17 @@
  * AC-061-G2 case proving an attested-pass fact still renders `⚑✔` unaffected by the
  * new branch (it is checked strictly AFTER pass/fail, never before).
  * @spec_ref AC-061-G2
+ *
+ * spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M1 addition
+ * (task-t5-close-ac-wh-1-rendering-clause-oracle-coverage-assess, closing the
+ * 2026-07-27 assess major gap on AC-WH-1): a further `describe` block below covers
+ * the NEW `⚑R` expected-fail-only badge. Before this task's `coverageBadge` change,
+ * an AC whose only evidence was `"expected-fail"` fell all the way to `·` — the SAME
+ * rendering as an AC no oracle has ever run against, which is exactly the gap the
+ * assessment flagged ("stored verbatim with distinct rendering" was asserted only in
+ * prose, no renderer had actually changed). These are RED-first: they fail against
+ * pre-change `coverageBadge` (falls to `·`) and pass once the `⚑R` branch lands.
+ * @spec_ref AC-WH-1
  */
 
 import { describe, it, expect } from "bun:test";
@@ -172,5 +183,95 @@ describe("coverageBadge — SPEC-061 inconclusive badge — REGRESSION", () => {
   it("an attested-pass fact still renders ⚑✔ unaffected by the new inconclusive branch (pre-existing SPEC-039 HAPPY case, re-asserted)", () => {
     const coverage = [fact({ pass: 2, fail: 0, attested_pass: 1 })];
     expect(coverageBadge(coverage, "AC-1")).toBe("⚑✔(2/0, 1 attested)");
+  });
+});
+
+// ─── spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M1 — ⚑R
+//     expected-fail badge (task-t5-close-ac-wh-1-rendering-clause-oracle-coverage-
+//     assess, AC-WH-1 assess major gap close-out) ──────────────────────────────
+
+describe("coverageBadge — AC-WH-1 expected-fail badge — HAPPY", () => {
+  it("AC-WH-1.H1: an AC whose only evidence is expected-fail renders ⚑R(n), distinct from · (RED-first: fails pre-change, falls to ·)", () => {
+    const coverage = [
+      fact({
+        pass: 0,
+        fail: 0,
+        refs: [
+          { task_id: "t1", result: "expected-fail" },
+          { task_id: "t2", result: "expected-fail" },
+        ],
+      }),
+    ];
+    expect(coverageBadge(coverage, "AC-1")).toBe("⚑R(2)");
+  });
+});
+
+describe("coverageBadge — AC-WH-1 expected-fail badge — BOUNDARY", () => {
+  it("AC-WH-1.B1: exactly one expected-fail ref renders ⚑R(1)", () => {
+    const coverage = [fact({ pass: 0, fail: 0, refs: [{ task_id: "t1", result: "expected-fail" }] })];
+    expect(coverageBadge(coverage, "AC-1")).toBe("⚑R(1)");
+  });
+});
+
+describe("coverageBadge — AC-WH-1 expected-fail badge — STATE", () => {
+  it("AC-WH-1.S1: a real pass alongside an expected-fail ref renders the pass badge, never ⚑R (pass/fail precedence)", () => {
+    const coverage = [
+      fact({
+        pass: 1,
+        fail: 0,
+        attested_pass: 0,
+        refs: [
+          { task_id: "t1", result: "pass" },
+          { task_id: "t2", result: "expected-fail" },
+        ],
+      }),
+    ];
+    expect(coverageBadge(coverage, "AC-1")).toBe("✔(1/0)");
+  });
+
+  it("AC-WH-1.S2: a real fail alongside an expected-fail ref renders the fail badge, never ⚑R (fail precedence)", () => {
+    const coverage = [
+      fact({
+        pass: 0,
+        fail: 1,
+        attested_fail: 0,
+        refs: [
+          { task_id: "t1", result: "fail" },
+          { task_id: "t2", result: "expected-fail" },
+        ],
+      }),
+    ];
+    expect(coverageBadge(coverage, "AC-1")).toBe("✘(0/1)");
+  });
+
+  it("AC-WH-1.S3: an inconclusive ref alongside an expected-fail ref (no pass/fail) renders ⚑? not ⚑R — inconclusive is checked first (an oracle that ran but couldn't attest a result outranks a self-declared RED pin)", () => {
+    const coverage = [
+      fact({
+        pass: 0,
+        fail: 0,
+        refs: [
+          { task_id: "t1", result: "inconclusive" },
+          { task_id: "t2", result: "expected-fail" },
+        ],
+      }),
+    ];
+    expect(coverageBadge(coverage, "AC-1")).toBe("⚑?(1)");
+  });
+});
+
+describe("coverageBadge — AC-WH-1 expected-fail badge — REGRESSION", () => {
+  it("AC-WH-1.REG1: a zero-evidence fact (empty refs) still renders bare '·', unaffected by the new expected-fail branch", () => {
+    const coverage = [fact({ pass: 0, fail: 0, refs: [] })];
+    expect(coverageBadge(coverage, "AC-1")).toBe("·");
+  });
+
+  it("AC-WH-1.REG2: an attested-pass fact still renders ⚑✔ unaffected by the new expected-fail branch", () => {
+    const coverage = [fact({ pass: 2, fail: 0, attested_pass: 1 })];
+    expect(coverageBadge(coverage, "AC-1")).toBe("⚑✔(2/0, 1 attested)");
+  });
+
+  it("AC-WH-1.REG3: an inconclusive-only fact still renders ⚑? unaffected by the new expected-fail branch (SPEC-061 behavior preserved)", () => {
+    const coverage = [fact({ pass: 0, fail: 0, refs: [{ task_id: "t1", result: "inconclusive" }] })];
+    expect(coverageBadge(coverage, "AC-1")).toBe("⚑?(1)");
   });
 });
