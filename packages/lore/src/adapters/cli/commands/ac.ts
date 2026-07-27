@@ -12,7 +12,11 @@
  *                                   §2 D8) and either badge appends "(n attested)".
  *                                   An AC with only `inconclusive` evidence renders
  *                                   `⚑?` (SPEC-061 §Scope D5) — distinct from `·`
- *                                   (never verified at all).
+ *                                   (never verified at all). An AC with only
+ *                                   `expected-fail` evidence renders `⚑R` (spec-
+ *                                   workflow-hardening-evidence-red-vocabulary-claim-
+ *                                   worktree §M1, AC-WH-1) — distinct from both `·`
+ *                                   and `⚑?`; NEVER counted as green.
  *   rm   <spec> <id> [--force]     Remove a criterion (exit 4 if evidence still
  *                                   references it, unless --force).
  *
@@ -26,7 +30,8 @@
  *
  * Source: SPEC-038 §4, §6 AC-ACODE-7; SPEC-039 §2 D8 (attested coverage annotation);
  *   SPEC-061 §Scope D5 (inconclusive badge); SPEC-070 AC-070-12 (shared fail-first
- *   precedence via @lore/core's deriveAcCoverageState)
+ *   precedence via @lore/core's deriveAcCoverageState); spec-workflow-hardening-
+ *   evidence-red-vocabulary-claim-worktree §M1 AC-WH-1 (expected-fail badge)
  */
 
 import { defineCommand } from "citty";
@@ -335,8 +340,23 @@ function describeVerify(verify: AcceptanceCriterion["verify"]): string {
  * every other badge shape. This branch is checked LAST (after fail/pass), so an AC that
  * somehow has both a real pass/fail AND an inconclusive entry still renders its
  * pass/fail badge — an inconclusive result never masks a real attested outcome.
+ *
+ * spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M1 (AC-WH-1, review
+ * gap — assess `01KYHYMQ…`): when the derived state is STILL `"none"` (no pass, no
+ * fail, no inconclusive ref), but `fact.refs` holds at least one `"expected-fail"`
+ * entry, renders `⚑R(n)` — n is the expected-fail ref count, `R` for the deliberate
+ * RED-phase pin this value records (never runner-issued, always self-reported, see
+ * `EvidenceRefLite`'s own JSDoc). Checked AFTER the inconclusive branch — an oracle
+ * that genuinely ran but couldn't attest a result (inconclusive) is a more urgent
+ * signal than a self-declared "not built yet" pin (expected-fail), so a fact somehow
+ * carrying both renders `⚑?`, not `⚑R`. Distinct from BOTH `·` (no oracle run has ever
+ * referenced this AC at all) and `⚑?` (an oracle DID run but produced no trustworthy
+ * signal) — `⚑R` means an oracle ran, failed BY DESIGN, and nobody has since recorded
+ * a real pass/fail. Conflating this with `·` would hide a known, intentional RED state
+ * behind "never verified"; conflating it with a real `✘` would misreport a deliberate
+ * pre-implementation stub as an unexpected failure.
  * `·` is reserved for TRUE zero-evidence (no `fact`, or `fact.refs` entirely empty) —
- * never conflated with "ran but inconclusive".
+ * never conflated with "ran but inconclusive" or "ran, expected-fail".
  *
  * Exported (unlike this file's other render helpers) so its deterministic formatting is
  * directly vitest-unit-testable without spawning the CLI or a real store (SPEC-039 §6).
@@ -358,6 +378,10 @@ export function coverageBadge(coverage: AcListResult["coverage"], acId: string):
   const inconclusiveCount = fact.refs.filter((r) => r.result === "inconclusive").length;
   if (inconclusiveCount > 0) {
     return `⚑?(${inconclusiveCount})`;
+  }
+  const expectedFailCount = fact.refs.filter((r) => r.result === "expected-fail").length;
+  if (expectedFailCount > 0) {
+    return `⚑R(${expectedFailCount})`;
   }
   return "·";
 }

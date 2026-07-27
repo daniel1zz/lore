@@ -355,4 +355,76 @@ describe("summarizeForAdjudicationBar", () => {
       status: "none",
     });
   });
+
+  // ─── spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M1
+  //     (AC-WH-1, task-t5-close-ac-wh-1-rendering-clause-oracle-coverage-assess) —
+  //     classification assertions the 2026-07-27 assess flagged as untested. These
+  //     are REGRESSION pins on EXISTING-correct behavior, not new-behavior
+  //     assertions: `result === "pass"`/`result === "fail"` filters already exclude
+  //     "expected-fail" from both buckets by construction (same property
+  //     `"inconclusive"` already had) — no code in this file changed for this task,
+  //     only the assertions below are new. ────────────────────────────────────
+  it("AC-WH-1 REGRESSION: a task panel whose only evidence is expected-fail reduces to status none, never pass or fail", () => {
+    const expectedFailEntry: EvidenceEntry = {
+      oracle: "test",
+      command: "bun test",
+      result: "expected-fail",
+      recorded_at: "2026-07-27T00:00:00.000Z",
+      recorded_by: "agent:t",
+    };
+    const panel: EvidencePanelProjection = {
+      doc_type: "task",
+      evidence: [expectedFailEntry],
+      ac_refs: [],
+    };
+    expect(summarizeForAdjudicationBar(panel)).toEqual({
+      doc_type: "task",
+      evidence_count: 1,
+      attested_count: 0,
+      pass_count: 0,
+      fail_count: 0,
+      status: "none",
+    });
+  });
+
+  it("AC-WH-1 REGRESSION: an expected-fail entry alongside a real fail still reduces to fail-first status, never masked", () => {
+    const expectedFailEntry: EvidenceEntry = {
+      oracle: "test",
+      command: "bun test",
+      result: "expected-fail",
+      recorded_at: "2026-07-27T00:00:00.000Z",
+      recorded_by: "agent:t",
+    };
+    const panel: EvidencePanelProjection = {
+      doc_type: "task",
+      evidence: [attestedEntry("a", "fail"), expectedFailEntry],
+      ac_refs: [],
+    };
+    const summary = summarizeForAdjudicationBar(panel);
+    expect(summary.status).toBe("fail");
+    // reason: evidence_count includes the expected-fail entry (it IS a recorded
+    // evidence entry), but pass_count/fail_count must not — expected-fail
+    // contributes to neither bucket, matching "inconclusive"'s exact same property.
+    expect(summary.evidence_count).toBe(2);
+    expect(summary.pass_count).toBe(0);
+    expect(summary.fail_count).toBe(1);
+  });
+
+  it("AC-WH-1 REGRESSION: a spec panel's coverage aggregation never counts expected-fail refs toward pass_count or fail_count (computeAcCoverage's own exclusion, re-asserted at this read site)", () => {
+    // AcCoverageFact.pass/fail are computeAcCoverage's own counts — an AC whose
+    // criterion has ONLY expected-fail refs surfaces here as pass:0, fail:0 (never
+    // green), which is exactly what this read site must not misclassify.
+    const coverage: AcCoverageFact[] = [
+      { ac_id: "AC-1", mode: "script", pass: 0, fail: 0, refs: [], attested_pass: 0, attested_fail: 0 },
+    ];
+    const panel: EvidencePanelProjection = { doc_type: "spec", criteria: [], coverage, task_count: 1 };
+    expect(summarizeForAdjudicationBar(panel)).toEqual({
+      doc_type: "spec",
+      evidence_count: 0,
+      attested_count: 0,
+      pass_count: 0,
+      fail_count: 0,
+      status: "none",
+    });
+  });
 });
