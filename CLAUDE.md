@@ -204,11 +204,12 @@ All feature specs live under `docs/requirements/spec/`; the corpus is the SSOT �
 - `SPEC-077` — dashboard execution read surface: `/execution` route + `GET /api/phase-status/:plan`; execution verbs stay CLI-only
 - `SPEC-078` — dashboard multi-project: machine-config `dashboard.projects` mounts, `MountRegistry`, `/api/p/:name/*` rewrite shim, machine-scope auth
 - `SPEC-079` — audit hardening: link/unlink/tree-fix audit provenance, `--by` actor fidelity across surfaces, tamper-evident audit hash chain + `lore audit anchor`
-- `SPEC-080` — PRD-as-outline: root PRD body = projection of `prd.extra.outline[]` (sole writer `lore outline`), `domain-overview` spec kind, `lore status --check-prd-budget`, plan-close domain-doc sync predicate
-- `SPEC-081` — audit hardening part 2 (AC ids `AC-080-*`): `gate_skipped` audit on config-disabled/env-bypass, pre-push `lore audit --verify` (parity-pinned pair), genesis-row tamper pin
+- `SPEC-080` — bootstrap-injection projection: tier-1 session-start injection via pure `buildBootstrapInjection` + `lore bootstrap --injection`, hook Phase E shape-blind pipe
+- `SPEC-081` — PRD-as-outline (pre-migration label 080): root PRD body = projection of `prd.extra.outline[]` (sole writer `lore outline`), `domain-overview` spec kind, `lore status --check-prd-budget`, plan-close domain-doc sync predicate
+- `SPEC-082` — audit hardening part 2 (pre-migration label 081, AC ids `AC-080-*`): `gate_skipped` audit on config-disabled/env-bypass, pre-push `lore audit --verify` (parity-pinned pair), genesis-row tamper pin
 - `SPEC-083` — governance prose runtime injection: `lore governance` verb replaces the installed corpus-workflow.md (retirement SSOT `RETIRED_FROM_INSTALL_PATHS`)
+- `SPEC-084` — corpus-allocated ordinal identity: `docs.ordinal` column + partial unique index, store-atomic allocation (`insertWithAllocatedOrdinal`/`allocateOrdinalForExisting`/`assignOrdinalForRepair` D7 path), prose-pure titles both write paths, `resolveDoc` ordinal-ref step, export column-read (SPEC-021 A1 retired), `lore migrate ordinals` repair (executed live 2026-07-27: 94 kept / 12 changed, triple-080 collision resolved 80=bootstrap-injection/81=PRD-as-outline/82=audit-hardening-2)
 - `SPEC-085` — seat-briefing runtime injection: `lore governance --seat-briefing` (raw template, hook substitutes placeholders), Phase D spawns the verb, `governance/` install dir retired entirely; npm packaged-asset list stays install-set-independent
-- `SPEC-080 (bootstrap-injection projection)` — tier-1 session-start injection via pure `buildBootstrapInjection` + `lore bootstrap --injection`, hook Phase E shape-blind pipe (⚠ renumber pending — triple-080 collision, see `knowledge-triple-spec-080-numbering-collision-across-concurrent`)
 
 ## AI Default Behavior by Caller Surface (SPEC-024)
 
