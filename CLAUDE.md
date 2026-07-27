@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+⛔ Before hand-editing this file, read its content contract: `lore governance claude-md` prints what belongs here vs. the corpus, and the line/byte ceiling enforced by `lore status --check-claude-md`.
+
 ## What This Is
 
 **Lore** — AI-native shared knowledge/memory platform for AI-first teams (3-5 people + multiple AI agents). Single binary (`lore`) with three adapters: citty CLI (default), MCP server (`--mcp-server`), and HTTP server (`lore serve`). Storage is local SQLite via `bun:sqlite` by default; with `sync.enabled` it switches to a Turso embedded replica (`@libsql/client`) for multi-machine visibility. Delivers a typed, navigable corpus of PRDs, specs, ADRs, plans, knowledge, and tasks, with MDX placeholder resolution, version history, review workflow, tree-structure conformance checks, telemetry, and v1 migration.
@@ -30,7 +32,7 @@ Building Lore is itself run **through** the Lore-governed workflow (corpus chain
 - **`lore assess --diff`**: derive the range from the plan's own first task commit — a too-wide range silently converts unrelated work into false scope-drift findings.
 - **Serialize Playwright suites** against a fixed dev-server port — concurrent runs contend and produce phantom "browser has been closed" failures.
 - **Main-checkout oracle runs need actor identity** (`LORE_ACTOR=agent:main-orchestrator`) — mechanized as the resolveActor OS-fallback advisory (SPEC-035 hotfix).
-- **Spec close-outs append ONE index line to CLAUDE.md, never the as-built narrative** — the Specs section re-bloated 26.7KB→52.8KB within 4 days of the boundary-ADR compression via per-spec close-out paragraphs; detail goes to the corpus (spec doc / assessment / retro).
+- **Spec close-outs write NOTHING to CLAUDE.md** — even one-line index entries proved a bloat attractor (26.7KB→52.8KB in 4 days via close-out clauses; then a 73-line/10.4KB index vs a constant byte ceiling); the corpus is the only spec index (`adr-claude-md-specs-section-is-pointer-only-per-spec-index`).
 
 ## Commands
 
@@ -135,83 +137,9 @@ Enforced via Zod `superRefine` in `packages/core/src/schemas.ts`.
 
 ## Specs
 
-All feature specs live under `docs/requirements/spec/`; the corpus is the SSOT — find any spec via `lore search "SPEC-0NN"` or `lore get <spec-slug>`. When implementing or changing behaviour in a module, read the relevant spec first.
+The corpus is the ONLY spec index — resolve by ordinal (`lore get SPEC-0NN`), full-text search (`lore search "<topic>"`), enumeration (`lore list --type spec`), or grep the exported mirrors under `docs/requirements/spec/`. When implementing or changing behaviour in a module, read the governing spec first.
 
-⛔ **Entry contract** (per `adr-claude-md-carries-only-standing-discipline-histories-archive`): each spec gets ONE index line here — scope keywords only, never as-built narrative (deviations, byproducts, fix dates → corpus: spec doc / assessment / retro). The pre-2026-07-26 verbose entries are frozen verbatim in corpus doc `knowledge-claude-md-specs-section-as-built-narratives-frozen`; SPEC-025+ implementation-time notes also in `docs/claude-md-archive/spec-implementation-notes.md`.
-
-- `SPEC-001` — service layer + DI pattern
-- `SPEC-002` — corpus schema, types, lifecycle
-- `SPEC-003` — CLI adapter (22 commands, exit codes, output format)
-- `SPEC-004` — PRD-as-living-root (MDX placeholders)
-- `SPEC-005` — review workflow
-- `SPEC-006` — version history
-- `SPEC-007` — v1 migration
-- `SPEC-008` — MCP adapter (16 `lore_*` tools)
-- `SPEC-009` — Turso embedded-replica sync (D-007 fail-loud)
-- `SPEC-010` — HTTP API + API key auth
-- `SPEC-011` — HTTP route layout
-- `SPEC-012` — telemetry (JSONL, opt-in)
-- `SPEC-013` — FTS5 resilience + eval scenarios
-- `SPEC-014` — monorepo skeleton (Bun workspaces, @lore/core + @lore/lore + @lore/dashboard)
-- `SPEC-015` — dashboard read-only skeleton (Vite + React + shadcn; list/search/tree/detail)
-- `SPEC-016` — cookie auth via CLI-managed local bootstrap (`lore dashboard` + sessions table)
-- `SPEC-019` — AI assistance in `lore set` (`--regenerate` / `--refine` / `--refine-stdin`) and `lore link --infer`
-- `SPEC-020` — HTTP-backed AI provider (`ai.provider: "http"`) — Anthropic Messages API; `${ENV_VAR}` headers
-- `SPEC-021` — `lore export-docs` reverse sync (corpus → .md files); `.lore/export-index.json` is git-tracked
-- `SPEC-022` — dashboard write UI: cookie-gated write routes, CodeMirror 6, If-Match + ConflictModal, History tab
-- `SPEC-024` — default --no-ai for agent/MCP execution paths (AI surface defaults; see section below)
-- `SPEC-025` — task execution workflow: append-only `extra.verification_evidence`, advisory claim lease, computed readiness
-- `SPEC-026` — `lore assess <plan>`: LLM-as-judge plan-outcome assessment → assessment knowledge doc
-- `SPEC-032` — output-contract mechanization: `extra.spec_kind`, `lore.tree.yaml` arms `--check-tree`, `upstream_unapproved` advisory
-- `SPEC-034` — structured review judgment + triage: `JudgmentService`, deterministic pre-checks before the LLM, triage badges
-- `SPEC-035` — audit trail + calibration: `AuditService`, `lore audit --verify`, Wilson bounds (`lore calibration --stats`)
-- `SPEC-038` — AC-as-code: typed `spec.extra.acceptance_criteria` (script/ai/human), `lore ac add/list/rm`, evidence `ac_ref`
-- `SPEC-039` — trusted runner `lore verify`: attested exit-code-derived evidence, env allowlist, command-provenance approval
-- `SPEC-042` — session registry + file-anchor claim safety: derived sessions, `extra.file_anchors`, anchor-overlap rejected at claim
-- `SPEC-043` — bi-temporal invalidation: `extra.validity`, `lore invalidate` sole writer, `--supersedes`
-- `SPEC-044` — staleness probes: `lore review --staleness`, report-only escalation with literal repair command
-- `SPEC-045` — doc-code drift oracle: `spec.extra.code_anchors`, `lore status --check-drift` (exit 3), `lore anchor add/rm/list`
-- `SPEC-046` — distribution part 1: `assets/` SSOT tree + `lore setup` installer, vendored skills, auto-registered governance hooks
-- `SPEC-047` — session seat auto-briefing: SessionStart hook detects linked worktree, redirects bootstrap cwd to main checkout
-- `SPEC-048` — distribution part 2: npm single-platform publish, TTY postinstall nudge, Bun fd1 truncation fix
-- `SPEC-049` — gate denials carry the feeding pack: `GateEnforcer` renders checkpoint `feed` into the VALIDATION_ERROR message
-- `SPEC-050` — gate hooks cross-corpus false-deny fix: `TARGET_CWD` parsing, lookup-anomaly fail-open, command-position triggers
-- `SPEC-051` — CLI strict flags: undeclared flags rejected exit 2, one seam wraps all commands
-- `SPEC-052` — AC-quantifiability gate: `lintAcQuantifiability` at `lore ac add` + spec-create/spec-promote
-- `SPEC-053` — AI-advisory AC-vagueness supplement on `lore review <spec>` (advisory only, never decision-driving)
-- `SPEC-054` — UAT-verdict-as-plan-close-gate: `lore uat record/show` (sole writer `UatService`), opt-in `extra.requires_uat`
-- `SPEC-055` — requirement→AC completeness oracle: `prd.extra.requirements`, `lore requirement add/list/rm`, `ac add --covers`
-- `SPEC-056` — phase execution model: `phase` doc type (migration-created only), `PhaseWorkflowService`, claim/evidence dispatch by type
-- `SPEC-057` — two-tier worktree seat model: `lore seat enter/list/resume/remove` over injected `GitPort`
-- `SPEC-058` — verification profiles: per-spec_kind oracle-coverage + `min_acs` floors on spec-promote (profile-aware in service AND `lore gate` CLI pre-flight), `requiresUat` on plan-promote
-- `SPEC-059` — requirement-layer quantifiability lint: shared `lintStatement`, enforced at `lore requirement add`
-- `SPEC-060` — `lore setup --project` scaffold completion: repo ledger + backups, `--uninstall` via ledger, root CLAUDE.md stub
-- `SPEC-061` — attestation completeness guard: under/zero-match + `-t` matched-case counting + `dist/lore` build-freshness → runner-issued `inconclusive`
-- `SPEC-062` — config write layer: `ConfigService` (validate-then-write, CAS, audit), `CONFIG_DENY_KEYS` structurally unwritable over HTTP
-- `SPEC-063` — verify execution-root correctness under linked worktrees (`resolveVerifyExecutionRoot`, attested `execution_root`)
-- `SPEC-064` — dashboard Settings UI: two-scope config editing (team vs machine) with precedence + blast-radius disclosure
-- `SPEC-065` — CLI ergonomics: unique ID-prefix resolution in `resolveDoc` (all surfaces), `lore create task` flag aggregation
-- `SPEC-066` — git-safety-gate heredoc awareness: `stripHeredocs` before segmentation, fail-closed fallback to raw text
-- `SPEC-067` — AI-surface robustness: 180s claude-cli timeout, fail-loud partial provider entries, truncation-aware assess confidence
-- `SPEC-068` — CJK-aware slugify (lazy pinyin-pro via `@lore/core/node`) + `lore set --slug` repair path; compiled-binary e2e pinned
-- `SPEC-069` — attestation floor on plan-close (plan-level `extra.attestation_exempt` opt-out) + ad-hoc planless tasks (`lore create task --adhoc` / `--linkage`, `lore ready --adhoc`)
-- `SPEC-070` — deterministic task dispatch bundle: `lore feed task-start` (derivation in CLI wiring, render-only flow, `workflow.task_feed.*` budgets)
-- `SPEC-071` — execution liveness: session-tier actor resolution (`agent:session-<id8>`), evidence auto-renews same-holder claims, `active_plans[].last_activity_at` (AC ids stay `AC-069-*`)
-- `SPEC-072` — version snapshots capture `slug` (migration-007, absence-tolerant; `lore restore` never restores slug)
-- `SPEC-073` — strict-flag hardening: single-dash multi-char tokens fail loud exit 2 with `Did you mean --X?`; usage renders aliases double-dash
-- `SPEC-075` — dashboard adjudication workbench + route telemetry: core `evidence-panel.ts` projection, `GET /api/evidence-panel/:id`, AdjudicationBar, triage keyboard
-- `SPEC-076` — distribution integration: embedded assets manifest + tree digest, per-asset `ownership`, five-state `planUpdate`, `lore setup --check`, diverged-skip converge, marker-section CLAUDE.md rewrite
-- `SPEC-077` — dashboard execution read surface: `/execution` route + `GET /api/phase-status/:plan`; execution verbs stay CLI-only
-- `SPEC-078` — dashboard multi-project: machine-config `dashboard.projects` mounts, `MountRegistry`, `/api/p/:name/*` rewrite shim, machine-scope auth
-- `SPEC-079` — audit hardening: link/unlink/tree-fix audit provenance, `--by` actor fidelity across surfaces, tamper-evident audit hash chain + `lore audit anchor`
-- `SPEC-080` — bootstrap-injection projection: tier-1 session-start injection via pure `buildBootstrapInjection` + `lore bootstrap --injection`, hook Phase E shape-blind pipe
-- `SPEC-081` — PRD-as-outline (pre-migration label 080): root PRD body = projection of `prd.extra.outline[]` (sole writer `lore outline`), `domain-overview` spec kind, `lore status --check-prd-budget`, plan-close domain-doc sync predicate
-- `SPEC-082` — audit hardening part 2 (pre-migration label 081, AC ids `AC-080-*`): `gate_skipped` audit on config-disabled/env-bypass, pre-push `lore audit --verify` (parity-pinned pair), genesis-row tamper pin
-- `SPEC-083` — governance prose runtime injection: `lore governance` verb replaces the installed corpus-workflow.md (retirement SSOT `RETIRED_FROM_INSTALL_PATHS`)
-- `SPEC-084` — corpus-allocated ordinal identity: `docs.ordinal` column + partial unique index, store-atomic allocation (`insertWithAllocatedOrdinal`/`allocateOrdinalForExisting`/`assignOrdinalForRepair` D7 path), prose-pure titles both write paths, `resolveDoc` ordinal-ref step, export column-read (SPEC-021 A1 retired), `lore migrate ordinals` repair (executed live 2026-07-27: 94 kept / 12 changed, triple-080 collision resolved 80=bootstrap-injection/81=PRD-as-outline/82=audit-hardening-2)
-- `SPEC-085` — seat-briefing runtime injection: `lore governance --seat-briefing` (raw template, hook substitutes placeholders), Phase D spawns the verb, `governance/` install dir retired entirely; npm packaged-asset list stays install-set-independent
-- `SPEC-096` — session-start handoff neutrality: injection drops `resume_hint` (seat-scoped runs keep it), handoff derivation filters archived/deprecated/invalidated docs, corpus-workflow prose = neutral open-thread directory + never-self-resume prohibition
-- `SPEC-097` — lifecycle archival: plan-close cascade (unclaimed tasks + plan handoffs, per-doc audit), `lore archive --sweep/--apply` (rules superseded_handoff/expired_handoff/done_plan_straggler; knowledge/adr excluded), injection `archive_candidates` present-iff-positive; `draft→archived` legal for task/knowledge only (type-scoped `isValidTransition`)
+⛔ Pointer-only section (per `adr-claude-md-specs-section-is-pointer-only-per-spec-index`): NO per-spec index lines here, ever — spec close-outs write NOTHING to this file. The retired 73-line index is reconstructible from the corpus and preserved in git history.
 
 ## AI Default Behavior by Caller Surface (SPEC-024)
 
