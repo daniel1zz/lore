@@ -24,8 +24,14 @@
  * every ordinary corpus command uses) — but it never calls `loadLoreApp()`
  * or touches the corpus DB (SPEC's own "No store/DB dependency anywhere in
  * the context path" module-boundary invariant). Config (`.lore/config.yaml`)
- * is read directly via `@lore/core/node`'s `loadConfig`, only for the `ai.*`
- * section `--ai` orchestration needs.
+ * is read directly via `@lore/core/node`'s `loadConfig`, ONCE per invocation
+ * (both topics — `refresh` included, not just `init`): for `init`'s own
+ * `ai.*` section `--ai` orchestration needs, AND (AC-CTX-8) to resolve the
+ * effective `context.memory_files.*` budgets via
+ * `resolveContextMemoryFileBudgets` — the SAME config-aware resolution
+ * `commands/status.ts`'s `--check-claude-md` uses — threaded into both
+ * `runContextRefresh`/`runContextInit`'s `ContextFlowDeps.budgets` and
+ * `resolveInitNarrative`'s own facts collection, never re-resolved inline.
  *
  * Public surface: default export, a citty `CommandDef`.
  *
@@ -63,8 +69,8 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { defineCommand } from "citty";
-import { AiConfigSchema, resolveMemoryFileBudgets } from "@lore/core";
-import type { CallerSurface, FsWritePort, LoreError } from "@lore/core";
+import { AiConfigSchema, contextConfigSchema, resolveMemoryFileBudgets } from "@lore/core";
+import type { CallerSurface, FsWritePort, LoreError, MemoryFileBudgets } from "@lore/core";
 import { loadConfig } from "@lore/core/node";
 import { exitCode, findLoreDbPath, formatError } from "../utils.js";
 import { collectContextFacts } from "../../../service/context-facts.js";
@@ -95,6 +101,43 @@ function detectContextCliSurface(): CallerSurface {
     return "agent";
   }
   return "cli";
+}
+
+/**
+ * Resolves the effective `context.memory_files.*` budgets for this `lore
+ * context` invocation from an already-attempted `loadConfig(repoRoot)`
+ * result — mirrors `commands/status.ts`'s own private
+ * `resolveClaudeMdBudgets` verbatim (SAME config-only tolerance: a
+ * `.lore/config.yaml` that fails whole-`LoreConfig` validation everywhere
+ * else, e.g. no `lore init` run yet, still yields its own `context:` block
+ * — re-validated via `contextConfigSchema` — before falling back to schema
+ * defaults). Duplicated here rather than imported: `status.ts` doesn't
+ * export its helper, and this command has its own already-loaded
+ * `configResult` to reuse (a re-import would either re-read the file or
+ * force `status.ts` to export a private-by-design helper for one caller).
+ *
+ * AC-CTX-8 (spec-context-verb-family-two-zone-claude-md-anatomy-lore): this
+ * is the ONE resolution locus per `lore context` invocation — its result is
+ * threaded into `runContextRefresh`/`runContextInit`'s `ContextFlowDeps` AND
+ * into {@link resolveInitNarrative}'s own facts collection, never
+ * re-resolved inline anywhere else in this module.
+ *
+ * @param configResult - The already-attempted `loadConfig(repoRoot)` result
+ *   for this invocation (never re-read here — one fs read per invocation).
+ * @returns The resolved budgets — schema defaults when no config was found
+ *   or usable.
+ */
+function resolveContextMemoryFileBudgets(configResult: ReturnType<typeof loadConfig>): MemoryFileBudgets {
+  if (configResult.ok) return resolveMemoryFileBudgets(configResult.value);
+
+  const { error } = configResult;
+  if (error.code === "VALIDATION_ERROR" && typeof error.value === "object" && error.value !== null) {
+    const contextCandidate = (error.value as Record<string, unknown>)["context"];
+    const contextParse = contextConfigSchema.safeParse(contextCandidate);
+    if (contextParse.success) return contextParse.data.memory_files;
+  }
+
+  return resolveMemoryFileBudgets(undefined);
 }
 
 /**
@@ -137,16 +180,23 @@ function buildRealFsPort(repoRoot: string): FsWritePort {
  * (registry build, missing active provider, `generate()` failure, empty
  * output) resolves to `undefined`, which the flow interprets as "use the
  * skeleton placeholder" (D3).
+ *
+ * @param budgets - This invocation's already-resolved
+ *   {@link resolveContextMemoryFileBudgets} value — threaded in rather than
+ *   re-resolved here so a single `lore context init` call has exactly ONE
+ *   budgets resolution locus (AC-CTX-8), shared with the `runContextInit`
+ *   call this function's caller makes right after.
  */
 async function resolveInitNarrative(
   fsPort: FsWritePort,
   repoRoot: string,
   useAi: boolean,
   aiConfig: ReturnType<typeof AiConfigSchema.parse>,
+  budgets: MemoryFileBudgets,
 ): Promise<string | undefined> {
   if (!useAi) return undefined;
 
-  const factsResult = await collectContextFacts(fsPort, "", resolveMemoryFileBudgets(undefined));
+  const factsResult = await collectContextFacts(fsPort, "", budgets);
   if (!factsResult.ok) return undefined;
 
   const registryResult = buildProviderRegistry(aiConfig);
@@ -241,8 +291,16 @@ export default defineCommand({
     const fsPort = buildRealFsPort(repoRoot);
     const json = args.json === true;
 
+    // ONE config load + budgets resolution per invocation (AC-CTX-8) — reused
+    // below by `init`'s AI-orchestration config needs (`config?.ai?.*`) as well
+    // as by both verbs' `ContextFlowDeps.budgets` and `resolveInitNarrative`'s
+    // facts collection. See `resolveContextMemoryFileBudgets`'s own doc.
+    const configResult = loadConfig(repoRoot);
+    const config = configResult.ok ? configResult.value : undefined;
+    const budgets = resolveContextMemoryFileBudgets(configResult);
+
     if (topic === "refresh") {
-      const result = await runContextRefresh({ fs: fsPort }, "");
+      const result = await runContextRefresh({ fs: fsPort, budgets }, "");
       renderOutcome(json, result);
       return;
     }
@@ -262,13 +320,11 @@ export default defineCommand({
         ? false
         : (args.ai as boolean | undefined);
 
-    const configResult = loadConfig(repoRoot);
-    const config = configResult.ok ? configResult.value : undefined;
     const surface = detectContextCliSurface();
     const { ai: useAi } = resolveAiDefault(explicitAi, surface, config?.ai?.default_per_surface);
     const aiConfig = config?.ai ?? AiConfigSchema.parse({});
 
-    const narrative = await resolveInitNarrative(fsPort, repoRoot, useAi, aiConfig);
+    const narrative = await resolveInitNarrative(fsPort, repoRoot, useAi, aiConfig, budgets);
     if (narrative === undefined) {
       process.stderr.write(
         "Warning: no usable AI provider — writing a skeleton narrative placeholder instead of an AI-generated one.\n",
@@ -276,7 +332,7 @@ export default defineCommand({
     }
 
     const result = await runContextInit(
-      { fs: fsPort },
+      { fs: fsPort, budgets },
       "",
       narrative !== undefined ? { narrative, force: args.force === true } : { force: args.force === true },
     );
