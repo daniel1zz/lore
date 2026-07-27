@@ -15,7 +15,7 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
-import { OutlineService } from "../../../src/service/outline-service.js";
+import { OutlineService, renderResolvedToMarkdown } from "../../../src/service/outline-service.js";
 import type { DocRecord } from "@lore/core";
 import type { StoreInterface } from "../../../src/store/store-interface.js";
 
@@ -424,6 +424,44 @@ describe("OutlineService.resolve", () => {
 
       expect(warning.component).toBe("ScriptInjection");
       expect(warning.message).toContain("ScriptInjection");
+
+      // audit T2 — spec-prd-as-living-root §4: the whitelist is a security
+      // validation boundary, so an unknown component's TAG BYTES must not survive
+      // into rendered text. Asserting the warnings array alone (above) is
+      // insufficient — it under-asserts, because pre-fix `renderResolvedToMarkdown`
+      // only ever spliced `resolvedComponents` positions and left warning-only
+      // ranges (i.e. every unknown component) untouched in the projected markdown.
+      const rendered = renderResolvedToMarkdown(result.value);
+      expect(rendered).not.toContain("<ScriptInjection");
+      expect(rendered).not.toContain("ScriptInjection");
+      expect(rendered).toBe("");
+    });
+
+    it("strips unknown component from rendered text while surrounding prose survives", async () => {
+      // audit T2 — a stripped tag must not swallow adjacent legitimate content, and
+      // a whitelisted component in the same doc must still render normally
+      // (mixed-content regression for the merged splice walk). Uses corpus.prd,
+      // which buildCorpus() gives 3 real spec children, so <ChildrenOf /> is
+      // expected to render an actual bullet list, not the "no children" empty state.
+      const doc = makeDoc({
+        ...corpus.prd,
+        content: "# Heading\n\nBefore. <ScriptInjection /> After.\n\n<ChildrenOf />",
+      });
+
+      const result = await service.resolve(doc);
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+
+      expect(result.value.warnings).toHaveLength(1);
+      expect(result.value.resolvedComponents).toHaveLength(1);
+
+      const rendered = renderResolvedToMarkdown(result.value);
+      expect(rendered).not.toContain("ScriptInjection");
+      expect(rendered).toContain("# Heading");
+      expect(rendered).toContain("Before.");
+      expect(rendered).toContain("After.");
+      expect(rendered).toContain("[spec] Auth Spec (draft)");
     });
 
     it("Embed with nonexistent id — graceful null, no crash", async () => {

@@ -14,6 +14,14 @@
  * here, so the banner format (and its wiring) can never drift between the two
  * sites. `--raw` skips this branch entirely — raw output is always the stored
  * bytes, banner never included (REGRESSION).
+ *
+ * Non-whitelisted component warnings (spec-prd-as-living-root §4, audit T2): the
+ * SAME `resolveResult` already fetched for `resolved_components` also carries
+ * `warnings` (unknown-component-stripped notices) — printed to stderr here, one line
+ * per warning, in addition to the JSON path's existing `resolved_components` array.
+ * Human-readable AND `--json` output both get this stderr surface (the JSON body
+ * itself is unchanged — warnings are a diagnostic side-channel, not response data).
+ * `--raw` skips this entirely (no resolution attempted, REGRESSION).
  */
 
 import { defineCommand } from "citty";
@@ -64,6 +72,9 @@ export default defineCommand({
         const resolveResult = await app.outlineService.resolve(doc);
         if (resolveResult.ok) {
           resolvedComponents = resolveResult.value.resolvedComponents;
+          for (const warning of resolveResult.value.warnings) {
+            process.stderr.write(`Warning: ${warning.message}\n`);
+          }
         }
         // SPEC-043 D4 — banner-prefixed, MDX-spliced body via the SAME shared
         // renderDocMarkdown `lore feed`'s pack uses (T2 wiring site 1/3) — never a

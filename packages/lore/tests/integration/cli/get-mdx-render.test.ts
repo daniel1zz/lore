@@ -12,10 +12,16 @@
  *                       whitelisted placeholder, while `data.doc.content` stays
  *                       the raw, unspliced source (SSOT preserved for API
  *                       consumers — only the human-readable stdout is spliced)
+ *   NEGATIVE (audit T2, spec-prd-as-living-root §4): `lore get <id>` on a doc
+ *                       containing a non-whitelisted component (e.g.
+ *                       `<ScriptInjection />`) strips the tag entirely from
+ *                       stdout AND surfaces the strip as a warning on stderr —
+ *                       the whitelist is a security validation boundary, so the
+ *                       tag's bytes must never survive into rendered output.
  *   REGRESSION:        a doc with NO placeholders renders identically whether
  *                       --raw is passed or not
  *
- * @spec_ref AC-3, AC-7 — SPEC-032 §3.3
+ * @spec_ref AC-3, AC-7 — SPEC-032 §3.3; audit T2 — spec-prd-as-living-root §4
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -190,6 +196,53 @@ describe("STATE — `lore get --json` exposes non-empty resolved_components (AC-
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.stdout) as { data: Record<string, unknown> };
     expect(parsed.data).not.toHaveProperty("resolved_components");
+  });
+});
+
+// ─── NEGATIVE: non-whitelisted component stripped + stderr warning (audit T2) ─
+
+describe("NEGATIVE — `lore get` strips a non-whitelisted component and warns on stderr (audit T2)", () => {
+  it("stdout has the tag removed, not passed through verbatim", () => {
+    const prdSlug = createPrd(
+      "Root With Injection",
+      "# Root With Injection\n\nBefore. <ScriptInjection /> After.",
+      tmpDir,
+    );
+
+    const result = runLore(["get", prdSlug], tmpDir);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).not.toContain("ScriptInjection");
+    expect(result.stdout).toContain("Before.");
+    expect(result.stdout).toContain("After.");
+  });
+
+  it("stderr carries the strip warning naming the unknown component", () => {
+    const prdSlug = createPrd(
+      "Root With Injection Stderr",
+      "# Root With Injection Stderr\n\n<ScriptInjection />",
+      tmpDir,
+    );
+
+    const result = runLore(["get", prdSlug], tmpDir);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toContain("ScriptInjection");
+    expect(result.stderr.toLowerCase()).toContain("warning");
+  });
+
+  it("--raw preserves the literal tag and emits no stderr warning", () => {
+    const prdSlug = createPrd(
+      "Root With Injection Raw",
+      "# Root With Injection Raw\n\n<ScriptInjection />",
+      tmpDir,
+    );
+
+    const result = runLore(["get", prdSlug, "--raw"], tmpDir);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("<ScriptInjection />");
+    expect(result.stderr).not.toContain("ScriptInjection");
   });
 });
 
