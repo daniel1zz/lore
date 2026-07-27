@@ -1,9 +1,14 @@
 /**
- * lore status — corpus stats and health check.
+ * lore status — repository and corpus statistics and health check.
  * With --check-tree: validate corpus against lore.tree.yaml blueprint.
  * With --check-tree --fix: auto-fix orphan/misplaced drift.
  * With --check-drift: verify spec-declared code_anchors against the working tree
  *   (SPEC-045 §Design Decisions D5) — deterministic, zero LLM calls.
+ * With --check-claude-md: lint project memory files (CLAUDE.md by default)
+ *   against corpus-governed line/byte ceilings (spec-project-claude-md-
+ *   content-contract-governance-injected §D9) — see that branch's own inline
+ *   comment for why it is dispatched BEFORE every other flag reaches
+ *   `loadLoreApp`.
  * With --json: output check result(s) as a JSON envelope.
  *
  * --check-tree and --check-drift COMPOSE (SPEC-045 D5 restructure — neither check
@@ -19,6 +24,13 @@
  * disabled (workflow.drift.enabled=false) + an inconsistent tree → the drift
  * section prints its explicit "disabled" note, the tree section prints its
  * drifts, exit 3 (tree drift alone already wins).
+ *
+ * --check-claude-md is a SEPARATE, standalone dispatch — it does NOT compose
+ * with --check-tree/--check-drift/--check-requirements/--check-prd-budget in
+ * one combined run (spec Module Boundary invariant 2: this check must never
+ * reach `loadLoreApp`/`bun:sqlite`, so it cannot share the app-backed branch
+ * those four flags fold into). Passing --check-claude-md alongside any of
+ * those flags runs ONLY the memory-file check; see that branch for exit codes.
  */
 
 import { defineCommand } from "citty";
@@ -37,8 +49,15 @@ import {
   type CodeDriftPayload,
 } from "../../../flows/drift-flow.js";
 import { buildRealFsProbe } from "../../real-fs-probe.js";
-import { resolveDriftEnabled, SPEC_KINDS, outlineEntrySchema, outlineBudgetSchema } from "@lore/core";
-import type { CallerSurface, LoreConfig, OutlineBudget } from "@lore/core";
+import {
+  contextConfigSchema,
+  resolveDriftEnabled,
+  resolveMemoryFileBudgets,
+  SPEC_KINDS,
+  outlineEntrySchema,
+  outlineBudgetSchema,
+} from "@lore/core";
+import type { CallerSurface, LoreConfig, MemoryFileBudgets, OutlineBudget } from "@lore/core";
 import { z } from "zod";
 import {
   checkPrdBudget,
@@ -46,6 +65,15 @@ import {
   type PrdBudgetBreach,
 } from "../../../service/prd-budget-check.js";
 import { renderExemptPlansSection } from "../../../flows/status-prd-sync-flow.js";
+// reason: loadConfig reads `.lore/config.yaml` via plain Node fs — only
+// reachable via the `@lore/core/node` subpath (browser-safety split,
+// packages/core/src/CLAUDE.md). NOT a bun:sqlite dependency, so it's safe to
+// call from the --check-claude-md branch below, which per the spec's Module
+// Boundary invariant 2 must NEVER reach loadLoreApp/bun:sqlite — mirrors
+// setup-check.ts's identical precedent for this exact import.
+import { loadConfig } from "@lore/core/node";
+import { discoverMemoryFiles } from "../../real-memory-file-probe.js";
+import { lintMemoryFiles, type MemoryFileFinding } from "../../../service/claude-md-check.js";
 
 /** All CallerSurface values in a stable display order. */
 const ALL_SURFACES: ReadonlyArray<CallerSurface> = [
@@ -173,10 +201,54 @@ function renderDriftSection(payload: CodeDriftPayload): void {
   }
 }
 
+/**
+ * Text rendering for one `--check-claude-md` finding — always names `path`
+ * (the finding's own `message` already does this; the extra prefixed line
+ * below additionally surfaces the repair pointer once per run, not per
+ * finding, see the caller).
+ */
+function renderClaudeMdFinding(finding: MemoryFileFinding): void {
+  console.log(`  - ${finding.message}`);
+}
+
+/**
+ * Resolves the effective `context.memory_files.*` budgets for
+ * `--check-claude-md` from `<cwd>/.lore/config.yaml`, tolerating a config
+ * file that is invalid EVERYWHERE ELSE (spec-project-claude-md-content-
+ * contract-governance-injected Module Boundary invariant 2 — this check must
+ * work "config-only", independent of whether the rest of `LoreConfig` has
+ * ever been validated, e.g. via `lore init`). `loadConfig` validates the
+ * WHOLE `LoreConfig` (requires `project.name`/`project.author`); a caller
+ * who has hand-authored a `.lore/config.yaml` containing ONLY a `context:`
+ * block (no `lore init` run yet) would otherwise have that section silently
+ * ignored. On a `VALIDATION_ERROR` whose `value` still carries the raw
+ * parsed YAML object (a schema violation — never a malformed-YAML string or
+ * a missing-file `STORE_ERROR`, neither of which carries a usable `value`),
+ * this re-validates JUST the `context` sub-tree via `contextConfigSchema`
+ * before falling back to the schema defaults.
+ *
+ * @param cwd - Directory to resolve `.lore/config.yaml` from.
+ * @returns The resolved budgets — schema defaults when no config was found
+ *   or usable (root 300L/30720B, module 200L/16384B, `enabled: true`).
+ */
+function resolveClaudeMdBudgets(cwd: string): MemoryFileBudgets {
+  const configResult = loadConfig(cwd);
+  if (configResult.ok) return resolveMemoryFileBudgets(configResult.value);
+
+  const { error } = configResult;
+  if (error.code === "VALIDATION_ERROR" && typeof error.value === "object" && error.value !== null) {
+    const contextCandidate = (error.value as Record<string, unknown>)["context"];
+    const contextParse = contextConfigSchema.safeParse(contextCandidate);
+    if (contextParse.success) return contextParse.data.memory_files;
+  }
+
+  return resolveMemoryFileBudgets(undefined);
+}
+
 export default defineCommand({
   meta: {
     name: "status",
-    description: "Corpus statistics and health check",
+    description: "Repository and corpus statistics and health check",
   },
   args: {
     json: {
@@ -206,12 +278,46 @@ export default defineCommand({
       description:
         "Verify every PRD's rendered body/outline-entry/extra-prose char budgets (SPEC-080 C3). Breach → exit 3. Composes with --check-tree/--check-drift/--check-requirements.",
     },
+    "check-claude-md": {
+      type: "boolean",
+      description:
+        "Lint project memory files (CLAUDE.md by default) against corpus-governed line/byte ceilings. Config-only, never loads the corpus DB. Breach → exit 3.",
+    },
   },
   async run({ args }) {
     const checkTreeRequested = args["check-tree"] === true;
     const checkDriftRequested = args["check-drift"] === true;
     const checkRequirementsRequested = args["check-requirements"] === true;
     const checkPrdBudgetRequested = args["check-prd-budget"] === true;
+    const checkClaudeMdRequested = args["check-claude-md"] === true;
+
+    // ── check-claude-md branch (spec-project-claude-md-content-contract-governance-injected §D9) ──
+    // reason: MUST short-circuit BEFORE loadLoreApp — the spec's Module
+    // Boundary invariant 2 requires this check to work with NO `.lore/` at
+    // all, and to stay unaffected by a `.lore/` that carries a config file
+    // but no SQLite DB. `loadLoreApp` (below, in every other branch) opens
+    // `bun:sqlite`, which would violate that invariant outright. This
+    // dispatch is therefore hoisted above the app-backed
+    // check-tree/check-drift/check-requirements/check-prd-budget branch and
+    // returns before that branch is ever reached.
+    if (checkClaudeMdRequested) {
+      const budgets = resolveClaudeMdBudgets(process.cwd());
+      const files = discoverMemoryFiles(process.cwd(), budgets.filenames);
+      const findings = lintMemoryFiles(files, budgets);
+
+      if (args.json) {
+        console.log(JSON.stringify({ ok: true, data: { claude_md: { findings } } }, null, 2));
+      } else if (findings.length === 0) {
+        console.log("CLAUDE.md: within budget (0 findings).");
+      } else {
+        console.log(`CLAUDE.md: BREACHED (${findings.length} finding(s)):`);
+        for (const finding of findings) renderClaudeMdFinding(finding);
+        console.log("  fix: trim the file, or run `lore governance claude-md` for the content contract.");
+      }
+
+      process.exitCode = findings.length > 0 ? 3 : 0;
+      return;
+    }
 
     // ── check-tree / check-drift / check-requirements / check-prd-budget branch (D5 restructure) ────
     if (checkTreeRequested || checkDriftRequested || checkRequirementsRequested || checkPrdBudgetRequested) {
