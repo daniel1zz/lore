@@ -95,6 +95,7 @@ import {
   upstreamApproved,
   upstreamHasAcceptanceCriteria,
   noAnchorOverlap,
+  actorIdentityGuard,
   acQuantifiable,
   acCountMeetsFloor,
   uatP0Accepted,
@@ -103,6 +104,7 @@ import {
   attestationFloor,
   prdOutlineSynced,
   ANCHOR_OVERLAP_FIELD,
+  ACTOR_IDENTITY_FIELD,
   AC_QUANTIFIABLE_FIELD,
   NO_ACCEPTANCE_CRITERIA_REASON,
   DEFAULT_MIN_ACS,
@@ -278,6 +280,29 @@ export interface GateContext {
    * as every other gate config knob).
    */
   readonly anchorOverlapEnabled?: boolean;
+  /**
+   * How `candidateBy` was resolved (spec claim-time-actor-identity-guard-zero-
+   * evidence-release-advis, AC-IDENTITY-REJECT) — populated UNCONDITIONALLY by
+   * a caller that resolved it (`TaskWorkflowService.enforceClaimGate` from
+   * `ClaimOpts.identitySource`); `undefined` for every caller that doesn't
+   * (`PhaseWorkflowService`, `lore gate task-claim`'s CLI pre-flight dry-run) —
+   * `actorIdentityGuard` treats `undefined` as an automatic pass, same as any
+   * non-`"os-fallback"` value. A plain `string`, not the `ActorSource` type
+   * (`@lore/core/node`) — this module stays free of that Node-only import
+   * (mirrors `gate-predicates.ts`'s own `OS_DEFAULT_IDENTITY_SOURCE` JSDoc).
+   */
+  readonly candidateIdentitySource?: string;
+  /** The candidate claim's own `worktree` (SPEC-042 D2), consumed by `actorIdentityGuard`. */
+  readonly candidateWorktree?: string;
+  /** The candidate claim's own `machine` (SPEC-042 D2), consumed by `actorIdentityGuard`. */
+  readonly candidateMachine?: string;
+  /**
+   * `workflow.gates."task-claim".actor_identity.enabled` resolved by the
+   * CALLER (AC-IDENTITY-ESCAPE) — `false` skips `actorIdentityGuard` entirely,
+   * leaving `noAnchorOverlap`/`upstreamApproved` untouched. Absent means
+   * enabled (same default philosophy as `anchorOverlapEnabled`).
+   */
+  readonly actorIdentityEnabled?: boolean;
 
   // -- plan-close: check() + feed() (SPEC-054) --
   /**
@@ -579,11 +604,29 @@ function checkPlanPromote(ctx: GateContext): PredicateResult[] {
  * short-circuit `checkPlanPromote` also uses. See this module's fourth
  * invariant for why these two predicates deliberately do NOT share one
  * short-circuit.
+ *
+ * `actorIdentityGuard` (spec claim-time-actor-identity-guard-zero-evidence-
+ * release-advis, AC-IDENTITY-REJECT) runs alongside `noAnchorOverlap`,
+ * subject only to its own `ctx.actorIdentityEnabled` knob (AC-IDENTITY-
+ * ESCAPE) — NOT gated by `hasSpecParent` either, same rationale: a top-level/
+ * prd-parented plan is exactly where orchestrator discipline was previously
+ * the ONLY protection against the identity-collapse failure mode.
  */
 function checkTaskClaim(ctx: GateContext): PredicateResult[] {
   const results: PredicateResult[] = [];
   if (ctx.anchorOverlapEnabled !== false) {
     results.push(noAnchorOverlap(ctx.candidateBy, ctx.candidateAnchors, ctx.siblingClaims));
+  }
+  if (ctx.actorIdentityEnabled !== false) {
+    results.push(
+      actorIdentityGuard(
+        ctx.candidateBy,
+        ctx.candidateIdentitySource,
+        ctx.candidateWorktree,
+        ctx.candidateMachine,
+        ctx.siblingClaims,
+      ),
+    );
   }
   if (ctx.hasSpecParent === true) {
     results.push(upstreamApproved(ctx.parentSpec, "spec"));
@@ -719,10 +762,53 @@ function feedAnchorOverlap(
 }
 
 /**
+ * Renders the actor-identity-collision-specific feeding pack (spec claim-time-
+ * actor-identity-guard-zero-evidence-release-advis, AC-IDENTITY-REJECT) —
+ * names the conflicting sibling's slug/holder/worktree and the concrete
+ * recovery (export a distinct `LORE_ACTOR`, or pass `--by` explicitly).
+ * Mirrors `feedAnchorOverlap`'s "recompute the offending sibling from ctx"
+ * shape — pointers only, never sibling body content.
+ *
+ * @param checkpointLabel - `"task-claim"` or `"phase-claim"` (SPEC-056 D2/D7),
+ *   threaded through so one function renders both checkpoints' label.
+ */
+function feedActorIdentity(
+  ctx: GateContext,
+  failures: PredicateResult[],
+  checkpointLabel: string,
+): string {
+  let conflictLine = "(no specific conflicting sibling could be identified)";
+  for (const sibling of ctx.siblingClaims ?? []) {
+    if (sibling.stale) continue;
+    if (sibling.by !== ctx.candidateBy) continue;
+    conflictLine =
+      `Conflicting task: ${sibling.slug} — "${sibling.title}" — held by the SAME untraceable ` +
+      `identity "${sibling.by}" from a different worktree/machine (worktree: ` +
+      `${sibling.worktree ?? "(unknown)"}). Recovery: export a distinct ` +
+      `LORE_ACTOR=agent:<branch-or-slug> for THIS session (or pass --by explicitly) and retry ` +
+      `the claim.`;
+    break;
+  }
+  const pack = buildFeedingPack({
+    ruleSource: "corpus (sibling task claims)",
+    ruleMarkdown:
+      `Required for ${checkpointLabel}: an actor resolved via the untraceable OS-username ` +
+      `fallback must not collide with a FRESH claim held under the IDENTICAL "by" from a ` +
+      `different worktree/machine in the same plan — that pattern means two DIFFERENT sessions ` +
+      `silently collapsed onto one identity (SPEC-042 D10). ${conflictLine}`,
+    missing: selectFailures(failures).map((f) => f.reason),
+  });
+  return renderFeedingPack(pack);
+}
+
+/**
  * `task-claim`'s (and, since SPEC-056 D2/D7, `phase-claim`'s) feeding message —
  * dispatches to {@link feedAnchorOverlap} when the anchor-overlap predicate
  * failed (SPEC-042 D5 — its own dedicated, conflict-detail-bearing message),
- * else falls back to the upstream-spec-approval message. Checkpoint-agnostic
+ * to {@link feedActorIdentity} when the actor-identity predicate failed (AC-
+ * IDENTITY-REJECT — checked SECOND, after anchor-overlap, so a claim failing
+ * BOTH keeps anchor-overlap's pre-existing message, REGRESSION-safe), else
+ * falls back to the upstream-spec-approval message. Checkpoint-agnostic
  * (`checkpointLabel` threaded through) so `feedTaskClaim`/`feedPhaseClaim`
  * below are both thin one-line wrappers over this shared implementation —
  * SPEC-056's CONTRACT NOTE §2 ("ONE-LINE registry addition, not a
@@ -736,6 +822,10 @@ function feedTaskOrPhaseClaim(
   const anchorFailed = failures.some((f) => !f.ok && f.field === ANCHOR_OVERLAP_FIELD);
   if (anchorFailed) {
     return feedAnchorOverlap(ctx, failures, checkpointLabel);
+  }
+  const identityFailed = failures.some((f) => !f.ok && f.field === ACTOR_IDENTITY_FIELD);
+  if (identityFailed) {
+    return feedActorIdentity(ctx, failures, checkpointLabel);
   }
   return feedUpstreamSpecCheckpoint(
     ctx,
@@ -1097,6 +1187,13 @@ export function buildAnchorGateContext(
       at: claim.at,
       stale: isClaimStale(claim, nowIso, ttlMinutes),
       anchors: extractFileAnchors(sibling),
+      // reason: claim-time-actor-identity-guard-zero-evidence-release-advis
+      // AC-IDENTITY-REJECT — `actorIdentityGuard` needs each sibling's own
+      // worktree/machine to establish "different execution context"; omitted
+      // (not `undefined`-valued) when the sibling's own claim never declared
+      // one, matching `TaskClaim`'s own optional-field shape (`@lore/core`).
+      ...(claim.worktree !== undefined ? { worktree: claim.worktree } : {}),
+      ...(claim.machine !== undefined ? { machine: claim.machine } : {}),
     });
   }
   return { candidateBy, candidateAnchors, siblingClaims };

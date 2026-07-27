@@ -69,6 +69,7 @@ import {
   ok,
   resolveGateEnabled,
   resolveAnchorOverlapGateEnabled,
+  resolveActorIdentityGateEnabled,
   resolveAcQuantifiableGateEnabled,
   resolveOracleCoverageGateEnabled,
   resolveRequiresUatGateEnabled,
@@ -421,6 +422,23 @@ export class GateEnforcer {
    */
   isTaskClaimAnchorOverlapEnabled(): boolean {
     return resolveAnchorOverlapGateEnabled(this.config);
+  }
+
+  /**
+   * Whether `task-claim`'s claim-time actor-identity-collision guard
+   * specifically is enabled (`workflow.gates."task-claim".actor_identity
+   * .enabled`, spec claim-time-actor-identity-guard-zero-evidence-release-
+   * advis AC-IDENTITY-ESCAPE) — NARROWER than `isEnabled("task-claim")`,
+   * which governs the WHOLE checkpoint. A caller building `GateContext.
+   * actorIdentityEnabled` (`TaskWorkflowService.enforceClaimGate`) consults
+   * this, not `isEnabled`. Mirrors `isTaskClaimAnchorOverlapEnabled`'s shape.
+   *
+   * @returns `false` when the sub-key is explicitly disabled; `true` otherwise.
+   * @example
+   * enforcer.isTaskClaimActorIdentityEnabled(); // => false when config disables it
+   */
+  isTaskClaimActorIdentityEnabled(): boolean {
+    return resolveActorIdentityGateEnabled(this.config);
   }
 
   /**

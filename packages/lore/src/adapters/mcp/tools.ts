@@ -115,6 +115,7 @@ import { buildAssessSummaryText } from "./assess-render.js";
 import { requirePhaseWorkflowService, getPhaseStatus, buildPhaseFeedFlowDeps } from "../cli/phase-wiring.js";
 import { findMissingOracleFilesForEvidence } from "../cli/evidence-precheck.js";
 import { IssueReportService } from "../../service/issue-report-service.js";
+import { hasZeroReleaseEvidence, ZERO_EVIDENCE_RELEASE_WARNING } from "../../service/task-workflow-service.js";
 import { existsSync } from "node:fs";
 
 // ─── Schema Constants ────────────────────────────────────────────────────────
@@ -1273,6 +1274,13 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
       ...(args.branch !== undefined ? { branch: args.branch } : {}),
       ...(args.machine !== undefined ? { machine: args.machine } : {}),
       ...(args.worktree !== undefined ? { worktree: args.worktree } : {}),
+      // reason: claim-time-actor-identity-guard-zero-evidence-release-advis
+      // AC-IDENTITY-REJECT — MCP's `by` is a REQUIRED, always-explicit tool
+      // argument (no $LORE_ACTOR/OS-username fallback chain like the CLI, per
+      // this module's own "MCP callers pass actor identity explicitly"
+      // invariant), so its identity source is always "explicit" — never the
+      // "os-fallback" tier `actorIdentityGuard` reacts to.
+      identitySource: "explicit",
       steal: args.steal === true,
       // reason: MCP callers are always agents (SPEC-024) — the caller-surface discriminator
       // for AC-WF-11 telemetry is hardcoded here rather than threaded through args.
@@ -1291,6 +1299,13 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
       source: "mcp",
     });
     if (!result.ok) return errorContent(result.error);
+    // reason: AC-RELEASE-ADVISORY — same `hasZeroReleaseEvidence` check the CLI's
+    // `commands/release.ts` applies; `warnings` is omitted entirely (not an empty
+    // array) on the >=1-evidence path — REGRESSION: byte-identical to pre-AC-
+    // RELEASE-ADVISORY output.
+    if (hasZeroReleaseEvidence(result.value)) {
+      return textContent({ doc: result.value, warnings: [ZERO_EVIDENCE_RELEASE_WARNING] });
+    }
     return textContent({ doc: result.value });
   });
 

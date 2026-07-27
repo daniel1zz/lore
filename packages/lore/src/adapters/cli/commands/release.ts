@@ -19,13 +19,22 @@
  * Exit codes: 0 = success, 3 = DOC_NOT_FOUND, 4 = VALIDATION_ERROR (not a task/phase /
  *   no active claim), 5 = CLAIM_CONFLICT | STALE_VERSION.
  *
- * Source: SPEC-025 §4 AC-WF-6; SPEC-056 §Design Decisions D2
+ * Zero-evidence advisory (spec claim-time-actor-identity-guard-zero-evidence-release-
+ * advis, AC-RELEASE-ADVISORY): a release on a doc with NO `verification_evidence`
+ * entries still exits 0 (advisory, never a hard block — exploration/spike tasks
+ * legitimately release with none) but prints a stderr warning line and, on `--json`,
+ * adds a `warnings[]` array to `data`. A release with >=1 evidence entry omits
+ * `warnings[]` entirely — byte-identical to pre-AC-RELEASE-ADVISORY output.
+ *
+ * Source: SPEC-025 §4 AC-WF-6; SPEC-056 §Design Decisions D2; spec claim-time-actor-
+ *   identity-guard-zero-evidence-release-advis §AC-RELEASE-ADVISORY
  */
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 import { requirePhaseWorkflowService } from "../phase-wiring.js";
+import { hasZeroReleaseEvidence, ZERO_EVIDENCE_RELEASE_WARNING } from "../../../service/task-workflow-service.js";
 
 export default defineCommand({
   meta: {
@@ -82,8 +91,22 @@ export default defineCommand({
         return;
       }
 
+      // reason: AC-RELEASE-ADVISORY — computed on the doc `release()` already
+      // returned (release() never touches verification_evidence, zero extra
+      // reads). `warnings` stays `[]` (never added to the JSON envelope) on
+      // the >=1-evidence path — REGRESSION: byte-identical to pre-AC-RELEASE-
+      // ADVISORY output.
+      const warnings = hasZeroReleaseEvidence(result.value) ? [ZERO_EVIDENCE_RELEASE_WARNING] : [];
+      for (const warning of warnings) {
+        process.stderr.write(`⚠ ${warning}\n`);
+      }
+
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: { doc: result.value } }, null, 2));
+        const data: Record<string, unknown> = { doc: result.value };
+        if (warnings.length > 0) {
+          data["warnings"] = warnings;
+        }
+        console.log(JSON.stringify({ ok: true, data }, null, 2));
         return;
       }
 

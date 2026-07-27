@@ -95,6 +95,7 @@
 import { z } from "zod";
 import { err, ok, type Result } from "@lore/core";
 import type { LoreError } from "@lore/core";
+import type { ActorSource } from "@lore/core/node";
 import {
   evidenceEntrySchema,
   taskClaimSchema,
@@ -140,6 +141,19 @@ export interface ClaimOpts {
    * session-grouping key.
    */
   worktree?: string;
+  /**
+   * How `by` was resolved (spec claim-time-actor-identity-guard-zero-evidence-
+   * release-advis, AC-IDENTITY-REJECT) — CLI: `resolveActorWithIdentitySource`'s
+   * `--by` flag > `$LORE_ACTOR` > SPEC-071 session tier > OS-username-fallback
+   * chain (`ActorSource`, `@lore/core/node`); MCP: always `"explicit"` (`by` is
+   * a required, always-explicit tool argument, SPEC-024). `undefined` (a caller
+   * that never resolved/threaded one — e.g. a hand-built test `ClaimOpts`)
+   * behaves identically to any non-`"os-fallback"` value: `actorIdentityGuard`
+   * (`gate-predicates.ts`) is a vacuous pass. GATE-CONTEXT-ONLY — never
+   * persisted onto the written `TaskClaim` (spec §Scope: "OUT: storing
+   * identity source on the doc").
+   */
+  identitySource?: ActorSource;
   /** Override even a fresh (non-stale) claim held by someone else. */
   steal?: boolean;
   /**
@@ -278,6 +292,47 @@ function readEvidence(task: DocRecord): EvidenceEntry[] {
   if (!Array.isArray(raw)) return [];
   const parsed = z.array(evidenceEntrySchema).safeParse(raw);
   return parsed.success ? parsed.data : [];
+}
+
+/**
+ * Zero-evidence release advisory text (spec claim-time-actor-identity-guard-
+ * zero-evidence-release-advis, AC-RELEASE-ADVISORY) — the SAME string every
+ * surface (`commands/release.ts` stderr line + `--json` `warnings[]`, MCP
+ * `lore_release`'s `warnings[]`) renders, so the three never independently
+ * drift on wording. Advisory-ONLY (SPEC-025 evidence discipline is enforced
+ * only by implementer prompts today — exploration/spike tasks legitimately
+ * release with zero evidence) — never blocks the release write itself.
+ */
+export const ZERO_EVIDENCE_RELEASE_WARNING =
+  "Released with zero verification evidence recorded — exploration/spike tasks may " +
+  "legitimately have none; if this was meant to be verified work, run `lore evidence` " +
+  "before releasing next time.";
+
+/**
+ * `true` when `task` carries NO `verification_evidence` entries at all (spec
+ * claim-time-actor-identity-guard-zero-evidence-release-advis, AC-RELEASE-
+ * ADVISORY) — the release advisory's sole trigger condition. PURE read over a
+ * `DocRecord` already in hand (`release()`'s own return value — `release()`
+ * never touches `extra.verification_evidence`, so the PRE- and POST-release
+ * doc read identically here) — zero extra store calls, callable from any
+ * adapter (CLI/MCP) on whichever `DocRecord` a successful `claim`/`release`
+ * call returned, task OR phase (a phase doc uses the identical `extra`
+ * field). Exported (not `release()`-internal) so the CLI (`commands/
+ * release.ts`) and MCP (`lore_release`) can apply the SAME check to render
+ * their own surface-specific warning without re-deriving the evidence-empty
+ * rule independently.
+ *
+ * @param task - The DocRecord a `claim`/`release` call returned.
+ * @returns `true` iff `task.extra.verification_evidence` is absent, malformed, or `[]`.
+ * @example
+ * hasZeroReleaseEvidence({ extra: {} } as DocRecord); // => true
+ * @example
+ * hasZeroReleaseEvidence({
+ *   extra: { verification_evidence: [{ oracle: "test", result: "pass", command: "x", recorded_at: "T0" }] },
+ * } as DocRecord); // => false
+ */
+export function hasZeroReleaseEvidence(task: DocRecord): boolean {
+  return readEvidence(task).length === 0;
 }
 
 /** Computes age in whole minutes between two ISO timestamps (nowIso - atIso). */
@@ -712,7 +767,7 @@ export class TaskWorkflowService {
     // the exact same "now", within one claim() call.
     const nowIso = now();
 
-    const gateResult = await this.enforceClaimGate(task, opts.by, nowIso);
+    const gateResult = await this.enforceClaimGate(task, opts, nowIso);
     if (!gateResult.ok) return gateResult;
 
     const existingClaim = readClaim(task);
@@ -784,7 +839,7 @@ export class TaskWorkflowService {
     // caller observing success) — documented, not eliminated: closing it fully would
     // need a corpus-level lock/daemon, explicitly out of scope (task anchor: "⛔
     // 不引入 daemon/锁表/mutex 行").
-    const postWriteGateResult = await this.enforceClaimGate(task, opts.by, nowIso);
+    const postWriteGateResult = await this.enforceClaimGate(task, opts, nowIso);
     if (!postWriteGateResult.ok) {
       const rollbackResult = await this.rollbackClaim(writeResult.value, existingClaim, opts.by, now);
       if (!rollbackResult.ok) {
@@ -1518,14 +1573,17 @@ export class TaskWorkflowService {
    * `gate` dependency (see constructor JSDoc).
    *
    * @param task - The task `claim()` is about to write a lease onto.
-   * @param by - The actor attempting the claim (SPEC-042 D5 — feeds
-   *   `noAnchorOverlap`'s "different actor" test; unrelated to gating).
+   * @param opts - The FULL `claim()` opts — `.by` feeds `noAnchorOverlap`'s
+   *   "different actor" test; `.identitySource`/`.worktree`/`.machine` (spec
+   *   claim-time-actor-identity-guard-zero-evidence-release-advis, AC-
+   *   IDENTITY-REJECT) feed `actorIdentityGuard`'s collision-signature test —
+   *   all read straight from `opts`, no extra IO.
    * @param nowIso - The SAME "now" `_claimImpl` resolved before calling this
    *   (D5 seam pinning) — drives sibling claim staleness, never re-resolved here.
    */
   private async enforceClaimGate(
     task: DocRecord,
-    by: string,
+    opts: ClaimOpts,
     nowIso: string,
   ): Promise<Result<void, LoreError>> {
     if (this.gate === undefined) {
@@ -1541,6 +1599,7 @@ export class TaskWorkflowService {
       return ok(undefined);
     }
 
+    const by = opts.by;
     let ctx: ReturnType<typeof buildUpstreamSpecContext> &
       Partial<ReturnType<typeof buildAnchorGateContext>>;
     if (task.parent_id === null) {
@@ -1563,6 +1622,15 @@ export class TaskWorkflowService {
       ...ctx,
       targetIdOrSlug: task.slug,
       anchorOverlapEnabled: this.gate.enforcer.isTaskClaimAnchorOverlapEnabled(),
+      actorIdentityEnabled: this.gate.enforcer.isTaskClaimActorIdentityEnabled(),
+      // reason: `exactOptionalPropertyTypes` — `GateContext`'s optional string
+      // fields reject an EXPLICIT `undefined` value on a present key, so an
+      // omitted `opts.*` field must omit the ctx key entirely rather than
+      // assign it `undefined` (mirrors this codebase's established
+      // `...(x !== undefined ? {y: x} : {})` pattern elsewhere).
+      ...(opts.identitySource !== undefined ? { candidateIdentitySource: opts.identitySource } : {}),
+      ...(opts.worktree !== undefined ? { candidateWorktree: opts.worktree } : {}),
+      ...(opts.machine !== undefined ? { candidateMachine: opts.machine } : {}),
     });
   }
 
