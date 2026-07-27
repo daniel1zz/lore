@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "62be64638973fe5c3eaf79300fecc4252367f5b66ef4c6f5d3198ace1de4c492",
+  tree_digest: "336165ff943800542686eb0a45994123a4ef5c039ce4d056e3add5f46eaf69bb",
   entries: [
   { path: "agents/lore-explorer.md", kind: "agent", ownership: "managed", sha256: "18b80554da11704960849d5b68ea9ef763bdc88315ebe89acc26a1e86d7e5629" },
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "324340b8173cae8e3133968185fdf882b81daee2115c988f7506e1bc968a5364" },
@@ -65,7 +65,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "hooks/stop-doc-sync.mjs", kind: "hook", ownership: "managed", sha256: "c7ca05c553446b1174839832989014741e8af9bd1c9c5f89aedb4b19a6836061" },
   { path: "hooks/subagent-context.mjs", kind: "hook", ownership: "managed", sha256: "03b512da45147aab2bcac2bb441b7e066b22a4e2e2df781a0b625c7963176587" },
   { path: "hooks/subagent-stop-commit-guard.mjs", kind: "hook", ownership: "managed", sha256: "19de55e36e53490b8386acf19de9efef4c89f96a8d6d7ac1160b60156bd201d8" },
-  { path: "project/CLAUDE.md.template", kind: "project", ownership: "merged", sha256: "75809ddf39450dc3538fff4bbdf55b8ff2a4ac0849f567ee3e7950f0213e5249" },
+  { path: "project/CLAUDE.md.template", kind: "project", ownership: "merged", sha256: "9ab0003f8db621250b4ddda8df938bc6b6224dc6d98f7057cd407b9a4412b359" },
   { path: "project/g1-spec-create.sh", kind: "project", ownership: "managed", sha256: "b8f2f6375aade6adef2a6b1ca0fa9fd28b2cea0c2cd641d880e45cfb5b567ac7" },
   { path: "project/g2-spec-promote.sh", kind: "project", ownership: "managed", sha256: "3386b00dee751df114773359650d8aa0649096c3c0a80112036ef84b1347503e" },
   { path: "project/g3-plan-promote.sh", kind: "project", ownership: "managed", sha256: "0aeb2ad0d151fee4dc22ceb85c28f859ccd44599a1f1a301a1edc3887eb0d88f" },
@@ -179,7 +179,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "skills/lore-improve-codebase-architecture/INTERFACE-DESIGN.md", kind: "skill", ownership: "managed", sha256: "678c3e34f1339015053212b3316bf0b676c70aa251050a0613667d4e755fb35e" },
   { path: "skills/lore-improve-codebase-architecture/LANGUAGE.md", kind: "skill", ownership: "managed", sha256: "6feca2140439c54a774749e8367f18350899ff69c777144ed2248cd4407949fa" },
   { path: "skills/lore-improve-codebase-architecture/SKILL.md", kind: "skill", ownership: "managed", sha256: "9a43b8eefe64cb99f4385c55efc346ba544648ad989a6d513ba329442a4ac38a" },
-  { path: "skills/lore-init-context/SKILL.md", kind: "skill", ownership: "managed", sha256: "abd35e871df8da2856c759dc68d5b7692df79740b3e7d166c89999c88089d1bd" },
+  { path: "skills/lore-init-context/SKILL.md", kind: "skill", ownership: "managed", sha256: "920a686fee5bc2e379f70b02a53c2c32cb2e21f400e9abfb177de814ae421fcc" },
   { path: "skills/lore-iterative-review/SKILL.md", kind: "skill", ownership: "managed", sha256: "ea9840130607302cbccb12b6270b6358a202e5685e1b39525b582517197a6766" },
   { path: "skills/lore-iterative-review/references/fix-agent-prompt.md", kind: "skill", ownership: "managed", sha256: "05e77fd19a9515e7467ac9f91d0fc601bf1386e2cbee2731873c1bc8b1097f4b" },
   { path: "skills/lore-iterative-review/references/reviewer-prompts.md", kind: "skill", ownership: "managed", sha256: "c68db2c4f0d27f7659786d49b6305596087b41e5e9776f36ca651ed2a9eeb6b0" },
