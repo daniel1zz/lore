@@ -63,6 +63,10 @@ const main = defineCommand({
     claim: () => import("./commands/claim.js").then(wrapDefault("claim")),
     release: () => import("./commands/release.js").then(wrapDefault("release")),
     evidence: () => import("./commands/evidence.js").then(wrapDefault("evidence")),
+    // done (spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M3) —
+    // evidence-validated atomic lifecycle walk to archived; see commands/done.ts's
+    // module header.
+    done: () => import("./commands/done.js").then(wrapDefault("done")),
     ready: () => import("./commands/ready.js").then(wrapDefault("ready")),
     assess: () => import("./commands/assess.js").then(wrapDefault("assess")),
     audit: () => import("./commands/audit.js").then(wrapDefault("audit")),

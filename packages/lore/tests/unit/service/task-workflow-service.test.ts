@@ -1248,3 +1248,266 @@ describe("REGRESSION — recordVerifiedEvidence telemetry emits meta.attested ==
   });
 });
 
+// ─── done() — atomic evidence-validated lifecycle walk (AC-WH-3) ────────────
+// spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M3: `lore done`
+// validates ≥1 result:pass evidence + no fresh foreign claim, then walks
+// VALID_TRANSITIONS to archived — one audited step at a time — and flips
+// dependent blocks-link readiness in the SAME corpus state. Idempotent on an
+// already-terminal doc.
+
+describe("HAPPY — done() walks a released task to archived, one audit row per step (AC-WH-3)", () => {
+  it("claim → evidence(pass) → release → done archives the task via draft -> approved -> active -> archived", async () => {
+    const { corpusService, taskWorkflowService, store } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    await taskWorkflowService.claim(taskId, { by: "alice" });
+    await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
+    await taskWorkflowService.release(taskId, { by: "alice" });
+
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    expect(doneResult.ok).toBe(true);
+    if (!doneResult.ok) return;
+    expect(doneResult.value.already_done).toBe(false);
+    expect(doneResult.value.transitions).toEqual(["approved", "active", "archived"]);
+    expect(doneResult.value.task.status).toBe("archived");
+
+    const doc = await corpusService.get(taskId);
+    expect(doc.ok).toBe(true);
+    if (!doc.ok) return;
+    expect(doc.value.doc.status).toBe("archived");
+
+    // one audit row per lifecycle step (3 steps: draft->approved, approved->active,
+    // active->archived) — each carries the step's from/to in `details`.
+    const auditResult = await store.queryAudit({ doc_id: taskId });
+    expect(auditResult.ok).toBe(true);
+    if (!auditResult.ok) return;
+    const doneSteps = auditResult.value.filter((e) => e.details?.["done"] === true);
+    expect(doneSteps).toHaveLength(3);
+    expect(doneSteps.map((e) => e.details?.["status_to"])).toEqual(["approved", "active", "archived"]);
+    expect(doneSteps.every((e) => e.action === "update")).toBe(true);
+  });
+
+  it("a dependent blocks-linked task flips to ready:true in the same corpus state", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const blockerId = await createTask(corpusService, planId, "Blocker Task");
+    const blockedId = await createTask(corpusService, planId, "Blocked Task");
+
+    const linkResult = await corpusService.link(blockerId, blockedId, "blocks");
+    expect(linkResult.ok).toBe(true);
+
+    const before = await taskWorkflowService.ready(planId);
+    expect(before.ok).toBe(true);
+    if (!before.ok) return;
+    const blockedBefore = before.value.records.find((r) => r.task.id === blockedId);
+    expect(blockedBefore?.ready).toBe(false);
+
+    await taskWorkflowService.addEvidence(blockerId, evidence({ result: "pass" }));
+    const doneResult = await taskWorkflowService.done(blockerId, { by: "alice" });
+    expect(doneResult.ok).toBe(true);
+
+    const after = await taskWorkflowService.ready(planId);
+    expect(after.ok).toBe(true);
+    if (!after.ok) return;
+    const blockedAfter = after.value.records.find((r) => r.task.id === blockedId);
+    expect(blockedAfter?.ready).toBe(true);
+    expect(blockedAfter?.unmet_blockers).toEqual([]);
+  });
+
+  it("a task already at approved (skipping draft) walks only active -> archived (2 steps)", async () => {
+    const { corpusService, taskWorkflowService, store } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+    await corpusService.set(taskId, { status: "approved" });
+    await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
+
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    expect(doneResult.ok).toBe(true);
+    if (!doneResult.ok) return;
+    expect(doneResult.value.transitions).toEqual(["active", "archived"]);
+
+    const auditResult = await store.queryAudit({ doc_id: taskId });
+    expect(auditResult.ok).toBe(true);
+    if (!auditResult.ok) return;
+    expect(auditResult.value.filter((e) => e.details?.["done"] === true)).toHaveLength(2);
+  });
+});
+
+describe("NEGATIVE — done() refuses without a result:pass evidence entry (AC-WH-3)", () => {
+  it("no evidence at all → VALIDATION_ERROR, doc status unchanged", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    expect(doneResult.ok).toBe(false);
+    if (doneResult.ok) return;
+    expect(doneResult.error.code).toBe("VALIDATION_ERROR");
+
+    const doc = await corpusService.get(taskId);
+    expect(doc.ok).toBe(true);
+    if (!doc.ok) return;
+    expect(doc.value.doc.status).toBe("draft");
+  });
+
+  it("only an expected-fail evidence entry (M1 vocabulary) → VALIDATION_ERROR, never counted as passing", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    await taskWorkflowService.addEvidence(taskId, evidence({ result: "expected-fail" }));
+
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    expect(doneResult.ok).toBe(false);
+    if (doneResult.ok) return;
+    expect(doneResult.error.code).toBe("VALIDATION_ERROR");
+
+    const doc = await corpusService.get(taskId);
+    expect(doc.ok).toBe(true);
+    if (!doc.ok) return;
+    expect(doc.value.doc.status).toBe("draft");
+  });
+
+  it("only a fail evidence entry → VALIDATION_ERROR", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    await taskWorkflowService.addEvidence(taskId, evidence({ result: "fail" }));
+
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    expect(doneResult.ok).toBe(false);
+    if (doneResult.ok) return;
+    expect(doneResult.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("a mix of expected-fail/fail entries with no pass among them → VALIDATION_ERROR", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    await taskWorkflowService.addEvidence(taskId, evidence({ result: "expected-fail" }));
+    await taskWorkflowService.addEvidence(taskId, evidence({ result: "fail", command: "run 2" }));
+
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    expect(doneResult.ok).toBe(false);
+    if (doneResult.ok) return;
+    expect(doneResult.error.code).toBe("VALIDATION_ERROR");
+  });
+});
+
+describe("NEGATIVE — done() refuses under a fresh foreign claim (AC-WH-3)", () => {
+  it("a fresh claim held by a DIFFERENT actor refuses done with VALIDATION_ERROR naming the holder", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
+    await taskWorkflowService.claim(taskId, { by: "bob" });
+
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    expect(doneResult.ok).toBe(false);
+    if (doneResult.ok) return;
+    expect(doneResult.error.code).toBe("VALIDATION_ERROR");
+    if (doneResult.error.code !== "VALIDATION_ERROR") return;
+    expect(doneResult.error.value).toBe("bob");
+
+    const doc = await corpusService.get(taskId);
+    expect(doc.ok).toBe(true);
+    if (!doc.ok) return;
+    expect(doc.value.doc.status).toBe("draft");
+  });
+
+  it("a fresh claim held by the SAME actor calling done does NOT block", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
+    await taskWorkflowService.claim(taskId, { by: "alice" });
+
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    expect(doneResult.ok).toBe(true);
+  });
+
+  it("a STALE foreign claim does NOT block done (freshness via injected now)", async () => {
+    const { corpusService, taskWorkflowService } = makeServices(1); // 1-minute TTL
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const t0 = () => "2026-07-27T10:00:00.000Z";
+    await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }), t0);
+    await taskWorkflowService.claim(taskId, { by: "bob" }, t0);
+
+    // 5 minutes later — well past the 1-minute TTL, so bob's claim is stale.
+    const tLater = () => "2026-07-27T10:05:00.000Z";
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" }, tLater);
+    expect(doneResult.ok).toBe(true);
+  });
+});
+
+describe("STATE — done() is an idempotent no-op once terminal (AC-WH-3)", () => {
+  it("a second done() call after archival returns already_done:true, empty transitions, unchanged doc", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
+    const first = await taskWorkflowService.done(taskId, { by: "alice" });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const versionAfterFirst = first.value.task.version;
+
+    const second = await taskWorkflowService.done(taskId, { by: "alice" });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.value.already_done).toBe(true);
+    expect(second.value.transitions).toEqual([]);
+    expect(second.value.task.status).toBe("archived");
+    expect(second.value.task.version).toBe(versionAfterFirst); // no write happened
+  });
+
+  it("a doc already at deprecated (a different terminal status) is also a no-op naming 'deprecated'", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+    // deprecated is only reachable from approved (VALID_TRANSITIONS) — route legally.
+    await corpusService.set(taskId, { status: "approved" });
+    await corpusService.set(taskId, { status: "deprecated" });
+
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    expect(doneResult.ok).toBe(true);
+    if (!doneResult.ok) return;
+    expect(doneResult.value.already_done).toBe(true);
+    expect(doneResult.value.transitions).toEqual([]);
+    expect(doneResult.value.task.status).toBe("deprecated");
+  });
+});
+
+describe("REGRESSION — done() telemetry emits exactly one task.done event per call (AC-WH-3)", () => {
+  it("emits task.done on success, with already_done in meta", async () => {
+    const { corpusService, taskWorkflowService, telemetry } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+    await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
+    telemetry.events.length = 0;
+
+    await taskWorkflowService.done(taskId, { by: "alice", source: "cli" });
+    expect(telemetry.events).toHaveLength(1);
+    expect(telemetry.last?.method).toBe("task.done");
+    expect(telemetry.last?.meta).toMatchObject({ already_done: false, source: "cli" });
+  });
+
+  it("a failed done() (no passing evidence) emits no telemetry event", async () => {
+    const { corpusService, taskWorkflowService, telemetry } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+    telemetry.events.length = 0;
+
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    expect(doneResult.ok).toBe(false);
+    expect(telemetry.events).toHaveLength(0);
+  });
+});
+

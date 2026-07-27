@@ -23,6 +23,12 @@
  *   claim(idOrSlug, opts, now?)            → acquire/refresh/steal the advisory lease
  *                                             (phase docs only)
  *   release(idOrSlug, opts, now?)          → clear the advisory lease (phase docs only)
+ *   done(idOrSlug, opts, now?)             → evidence-validated atomic lifecycle walk
+ *                                             to `archived` (spec-workflow-hardening-
+ *                                             evidence-red-vocabulary-claim-worktree
+ *                                             §M3, phase-doc-typed sibling of
+ *                                             TaskWorkflowService.done); idempotent on
+ *                                             an already-terminal phase doc
  *   addEvidence(idOrSlug, entry, now?)     → append one SELF-REPORTED oracle
  *                                             verification record (phase docs only)
  *   recordChecklistVerifiedEvidence(idOrSlug, entry, nowIso) → append a RUNNER-ATTESTED
@@ -47,6 +53,13 @@
  * @invariant Every successful write bumps the phase doc's version and appends one
  *   VersionRecord (action: "update") so `lore log` shows who claimed/released/added
  *   evidence and when.
+ * @invariant `done()` is the ONLY method here that writes `status` — every other method
+ *   touches `extra` exclusively (see the next @invariant). Mirrors
+ *   `TaskWorkflowService.done` exactly: shares that module's exported
+ *   `computeArchiveWalk` (SSOT, same precedent as `rejectBlankClaimWorktree` below),
+ *   walks it ONE STEP AT A TIME via this service's OWN `writeTaskStatus` (own CAS write
+ *   / versions row / audit entry per step), refuses with no passing evidence or a fresh
+ *   foreign claim, and is an idempotent no-op on an already-terminal phase doc.
  * @invariant claim/release/addEvidence touch ONLY extra.claim / extra.verification_evidence
  *   — never content, title, or status. Bounded exception (SPEC-069 §Design Decisions
  *   D4/D5, mirrors TaskWorkflowService): when the evidence recorder IS the current
@@ -92,6 +105,7 @@ import {
   taskClaimSchema,
   checklistItemSchema,
   isClaimStale,
+  isValidTransition,
   evaluateReadiness,
   buildTaskClaim,
   renewClaimForEvidence,
@@ -123,15 +137,26 @@ import type {
   VerifiedEvidenceInput,
   AnchorConflict,
   ReadyReport,
+  DoneOpts,
+  DoneResult,
 } from "./task-workflow-service.js";
-import { rejectBlankClaimWorktree } from "./task-workflow-service.js";
+import { rejectBlankClaimWorktree, computeArchiveWalk } from "./task-workflow-service.js";
 
 /**
  * Re-exported verbatim from `./task-workflow-service.js` (SPEC-056 D1/P1) — never
  * redeclared here. See each type's own JSDoc in that module for the full contract;
  * this file's methods below consume them structurally unchanged.
  */
-export type { ClaimOpts, ReleaseOpts, EvidenceInput, VerifiedEvidenceInput, AnchorConflict, ReadyReport };
+export type {
+  ClaimOpts,
+  ReleaseOpts,
+  EvidenceInput,
+  VerifiedEvidenceInput,
+  AnchorConflict,
+  ReadyReport,
+  DoneOpts,
+  DoneResult,
+};
 
 // ─── Internal Helpers ──────────────────────────────────────────────────────
 // Small, pure, module-private — duplicated from task-workflow-service.ts rather than
@@ -892,6 +917,104 @@ export class PhaseWorkflowService {
     });
   }
 
+  // ── done ─────────────────────────────────────────────────────────────────
+
+  /**
+   * Evidence-validated, atomic-from-the-caller's-perspective lifecycle walk to
+   * `"archived"` — the phase-doc-typed sibling of `TaskWorkflowService.done`
+   * (spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M3). See that
+   * method's own JSDoc for the full contract (refusal conditions, idempotent no-op
+   * shape, "atomic from the caller's perspective" meaning, retry semantics) — reused
+   * VERBATIM here except for the target doc type. Refuses a legacy `task`-typed target
+   * with `VALIDATION_ERROR` (D2 write-path asymmetry, same as claim/release/addEvidence
+   * above — write paths never extend `ready()`'s READ tolerance).
+   *
+   * @param idOrSlug - Phase document ULID or slug
+   * @param opts - `{ by, source? }`
+   * @param now - Time seam (D10)
+   * @returns `DoneResult` — see that type's own JSDoc
+   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a phase / no passing evidence / fresh
+   *   foreign claim / illegal lifecycle step), STALE_VERSION
+   */
+  async done(
+    idOrSlug: string,
+    opts: DoneOpts,
+    now: () => string = defaultNow,
+  ): Promise<Result<DoneResult, LoreError>> {
+    const startMs = Date.now();
+    const result = await this._doneImpl(idOrSlug, opts, now);
+    this.recordEvent("task.done", startMs, result, opts.source, {
+      by: opts.by,
+      already_done: result.ok ? result.value.already_done : false,
+    });
+    return result;
+  }
+
+  private async _doneImpl(
+    idOrSlug: string,
+    opts: DoneOpts,
+    now: () => string,
+  ): Promise<Result<DoneResult, LoreError>> {
+    const phaseResult = await this.resolvePhase(idOrSlug);
+    if (!phaseResult.ok) return phaseResult;
+    let phase = phaseResult.value;
+
+    if (phase.status === "archived" || phase.status === "deprecated") {
+      return ok({ task: phase, already_done: true, transitions: [] });
+    }
+
+    const evidence = readEvidence(phase);
+    if (!evidence.some((e) => e.result === "pass")) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "extra.verification_evidence",
+        message:
+          `Phase "${phase.slug}" holds no result:pass evidence entry — lore done requires ` +
+          `at least one passing oracle verification before archiving ("expected-fail", ` +
+          `"fail", and "inconclusive" entries never count)`,
+        value: evidence.map((e) => e.result),
+      });
+    }
+
+    const nowIso = now();
+    const claim = readClaim(phase);
+    if (claim !== undefined && claim.by !== opts.by && !isClaimStale(claim, nowIso, this.claimTtlMinutes)) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "extra.claim",
+        message:
+          `Phase "${phase.slug}" is held by a fresh claim from "${claim.by}" — lore done ` +
+          `refuses to archive a phase out from under an active session`,
+        value: claim.by,
+      });
+    }
+
+    const walk = computeArchiveWalk(phase.status);
+    const transitions: DocStatus[] = [];
+    for (const nextStatus of walk) {
+      if (!isValidTransition(phase.status, nextStatus)) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "status",
+          message: `Illegal lifecycle step ${phase.status} -> ${nextStatus} while archiving "${phase.slug}"`,
+          value: { from: phase.status, to: nextStatus },
+        });
+      }
+      const stepResult = await this.writePhaseStatus(
+        phase,
+        nextStatus,
+        nowIso,
+        opts.by,
+        `lore done: ${phase.status} → ${nextStatus}`,
+      );
+      if (!stepResult.ok) return stepResult;
+      phase = stepResult.value;
+      transitions.push(nextStatus);
+    }
+
+    return ok({ task: phase, already_done: false, transitions });
+  }
+
   // ── ready ────────────────────────────────────────────────────────────────
 
   /**
@@ -1323,11 +1446,69 @@ export class PhaseWorkflowService {
   }
 
   /**
+   * Shared write path for ONE {@link done} lifecycle step — CAS-guarded store.update on
+   * `status` only. Mirrors `TaskWorkflowService.writeTaskStatus` exactly (see that
+   * method's own JSDoc for why the audit `action` stays `"update"` rather than a new
+   * `"done"` label).
+   */
+  private async writePhaseStatus(
+    phase: DocRecord,
+    newStatus: DocStatus,
+    nowIso: string,
+    actor: string,
+    changeSummary: string,
+  ): Promise<Result<DocRecord, LoreError>> {
+    const newVersion = phase.version + 1;
+    const updateResult = await this.store.update(
+      phase.id,
+      { status: newStatus, updated_at: nowIso, version: newVersion },
+      { expected_version: phase.version },
+    );
+    if (!updateResult.ok) return updateResult;
+
+    const versionResult = await this.store.insertVersion({
+      doc_id: phase.id,
+      version: newVersion,
+      content: updateResult.value.content,
+      extra: updateResult.value.extra,
+      status: updateResult.value.status,
+      title: updateResult.value.title,
+      action: "update",
+      created_at: nowIso,
+      created_by: actor,
+      change_summary: changeSummary,
+      slug: updateResult.value.slug,
+    });
+    if (!versionResult.ok) return versionResult;
+
+    const auditResult = await this.store.appendAuditEntry({
+      timestamp: nowIso,
+      actor,
+      session_id: `done-${phase.id}`,
+      action: "update",
+      doc_id: phase.id,
+      details: {
+        by: actor,
+        status_from: phase.status,
+        status_to: newStatus,
+        version: newVersion,
+        done: true,
+      },
+    });
+    if (!auditResult.ok) return auditResult;
+
+    return ok(updateResult.value);
+  }
+
+  /**
    * Records exactly one telemetry event per successful write. Never throws — delegates
    * to Telemetry.record() which swallows IO errors. Failed writes emit nothing.
+   *
+   * `eventName` accepts `"task.done"` in addition to `TaskWorkflowEventName`'s own
+   * members — see `TaskWorkflowService.recordEvent`'s identical widening for why.
    */
   private recordEvent<T>(
-    eventName: TaskWorkflowEventName,
+    eventName: TaskWorkflowEventName | "task.done",
     startMs: number,
     result: Result<T, LoreError>,
     source: string | undefined,

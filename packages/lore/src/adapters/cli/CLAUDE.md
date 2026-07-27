@@ -33,7 +33,7 @@ One line per command group — mechanism/design-decision detail lives in the arc
 - `create` — doc creation; `--anchor`/`--code-anchor` at creation time, `--supersedes` composes create+invalidate.
 - `status` — health snapshot; `--check-tree`/`--check-drift`/`--check-requirements`/`--check-claude-md`/`--check-prd-budget` deterministic CI oracles, composable exit precedence.
 - `pending` `approve` `reject` `review` — review workflow (SPEC-005/034); `review` adds structured AI judgment + `--staleness` probes (SPEC-044); approve/reject implicitly capture calibration (SPEC-035).
-- `claim` `release` `evidence` `ready` — task/phase execution workflow (SPEC-025/042/056); target-type dispatch tries `TaskWorkflowService` first, falls back to phase workflow only on a `type: "phase"` validation rejection.
+- `claim` `release` `evidence` `ready` `done` — task/phase execution workflow (SPEC-025/042/056; `done` per spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M3); target-type dispatch tries `TaskWorkflowService` first, falls back to phase workflow only on a `type: "phase"` validation rejection. `done` additionally validates ≥1 `result: "pass"` evidence entry and no fresh foreign claim before walking `VALID_TRANSITIONS` to `archived` one audited step at a time (idempotent no-op on an already-terminal doc).
 - `phase` — `add/list/rm/rename` (plan-level `extra.phases[]`, SPEC-023) plus `status/checklist/track` (phase-document verbs, SPEC-056).
 - `assess` — LLM-as-judge plan-outcome assessment (SPEC-026); no non-AI mode.
 - `audit` `calibration` — audit-trail query + `--verify` chain-integrity walk (SPEC-035/079), `audit anchor` pins `.lore/audit-anchor.json`; calibration stats are read-only.
