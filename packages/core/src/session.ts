@@ -522,6 +522,21 @@ export const bootstrapReportSchema = z.object({
    *   dedicated round-trip regression test pins this.
    */
   active_sessions: z.array(readySessionSchema),
+  /**
+   * The COUNT of current `computeArchiveCandidates` (R2-R4 sweep rule engine,
+   * `archive-candidates.ts`) results — NOT the candidates themselves (this
+   * schema carries pointers/counts, never doc-shaped payloads, the same
+   * discipline every other field here already follows). Always present
+   * (required, unlike `seat_unresolved`'s present-iff-true convention) — a
+   * plain `0` when nothing is due is itself a meaningful fact, not an
+   * anomaly to hide. `buildBootstrapInjection` is what applies the
+   * present-iff-POSITIVE trim for the SMALLER tier-1 injection payload (see
+   * that function's own doc) — this full report field always exists.
+   *
+   * Source: spec-lifecycle-archival-plan-close-cascade-deterministic
+   *   §Design Decisions D4.
+   */
+  archive_candidates: z.number().int().min(0),
 });
 
 /** Derived TypeScript type for the S1 bootstrap pointer-set. */
@@ -548,6 +563,16 @@ const BOOTSTRAP_INJECTION_KNOWN_KEYS: ReadonlySet<string> = new Set([
   "active_plans",
   "latest_handoffs",
   "corpus",
+  // reason: unlike `seat_unresolved` (deliberately absent from this set —
+  // it's ALREADY present-iff-true on `report` itself, so the D8 blind-copy
+  // loop below does the right thing for free), `archive_candidates` is
+  // ALWAYS present on `report` as a plain required number (even `0`).
+  // Blind-copying it would leak a `0` into every ordinary injection payload,
+  // breaking the present-iff-POSITIVE contract
+  // (spec-lifecycle-archival-plan-close-cascade-deterministic D4) — so it is
+  // "known" here specifically to OPT OUT of the blind-copy loop and get its
+  // own conditional handling below instead.
+  "archive_candidates",
 ]);
 
 /**
@@ -602,6 +627,18 @@ export const bootstrapInjectionSchema = z.object({
   active_plans: z.array(bootstrapActivePlanSchema),
   latest_handoffs: z.array(bootstrapLatestHandoffSchema),
   corpus: bootstrapCorpusStatsSchema,
+  /**
+   * Present ONLY when `report.archive_candidates > 0` (positioned right after
+   * `corpus`, before `omitted` — the same slot the D8 unknown-field loop would
+   * place it were it not opted out of that loop, see `BOOTSTRAP_INJECTION_KNOWN_KEYS`'s
+   * own comment). Absent (never `0`) when there is nothing due — same
+   * present-iff-true FAMILY of convention as `budget_exceeded`/
+   * `bootstrapReportSchema.seat_unresolved`, applied to a count instead of a
+   * boolean (hence `min(1)`, not `min(0)`, on the optional schema below).
+   *
+   * Source: spec-lifecycle-archival-plan-close-cascade-deterministic §Design Decisions D4.
+   */
+  archive_candidates: z.number().int().min(1).optional(),
   omitted: bootstrapInjectionOmittedSchema,
   /** Present (`true`) iff the count-capped payload still exceeded `charBudget` after entry drops. Absent (never `false`) otherwise — same present-iff-true convention as `bootstrapReportSchema.seat_unresolved`. */
   budget_exceeded: z.literal(true).optional(),
@@ -757,6 +794,13 @@ export function buildBootstrapInjection(
     active_plans: keptPlans,
     latest_handoffs: keptHandoffs,
     corpus: report.corpus,
+    // reason: present-iff-POSITIVE (spec-lifecycle-archival-plan-close-cascade-deterministic
+    // D4) — assigned here, in the object literal, at the EXACT slot the D8
+    // unknown-field loop below would have placed it (between `corpus` and
+    // `omitted`) had it not been opted out via `BOOTSTRAP_INJECTION_KNOWN_KEYS`.
+    // A `0` count omits the key entirely rather than assigning `0` — same
+    // convention as `resume_hint`'s conditional spread above.
+    ...(report.archive_candidates > 0 ? { archive_candidates: report.archive_candidates } : {}),
   };
 
   for (const key of Object.keys(report)) {

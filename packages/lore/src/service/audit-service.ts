@@ -99,6 +99,14 @@ const VERIFIABLE_VERSION_ACTIONS: ReadonlySet<VersionAction> = new Set([
  * versions row `action: "update"`, audit entry `action: "invalidate"` (`"invalidate"`
  * added SPEC-043 D7, same shared-helper precedent).
  *
+ * `"archive-cascade"`/`"archive-sweep"` (spec-lifecycle-archival-plan-close-cascade-deterministic
+ * §Design Decisions D2/D3) are the SAME precedent applied a third time:
+ * `CorpusService.cascadeArchiveOnPlanClose`/`archiveSweepCandidate` both write a
+ * versions row under `action: "update"` (VersionAction has no "cascade"/"sweep"
+ * member) but audit under the more specific action so the R1 cascade and the
+ * `lore archive --apply` sweep are each independently distinguishable in the audit
+ * log from a plain `lore set --status archived`.
+ *
  * Keyed over the FULL `VersionAction` union (not just `VERIFIABLE_VERSION_ACTIONS`) so
  * the lookup at the call site never needs an `as`-cast; `delete` maps to an empty set
  * since it's excluded from the reconcile walk upstream and is never looked up in
@@ -106,7 +114,16 @@ const VERIFIABLE_VERSION_ACTIONS: ReadonlySet<VersionAction> = new Set([
  */
 const VERSION_ACTION_AUDIT_FAMILY: Readonly<Record<VersionAction, ReadonlySet<string>>> = {
   create: new Set(["create"]),
-  update: new Set(["update", "claim", "release", "evidence", "anchors", "invalidate"]),
+  update: new Set([
+    "update",
+    "claim",
+    "release",
+    "evidence",
+    "anchors",
+    "invalidate",
+    "archive-cascade",
+    "archive-sweep",
+  ]),
   approve: new Set(["approve"]),
   reject: new Set(["reject"]),
   restore: new Set(["restore"]),

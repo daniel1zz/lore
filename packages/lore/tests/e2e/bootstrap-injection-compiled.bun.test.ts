@@ -241,7 +241,15 @@ const SEAT_SCOPED_INJECTION_CONTRACT_ORDER = [
   ...INJECTION_CONTRACT_ORDER,
 ] as const;
 
-/** Plain `bootstrap --json`'s `data` payload — the untouched `BootstrapReport` shape, REGRESSION-pinned as an exact 9-key set. */
+/**
+ * Plain `bootstrap --json`'s `data` payload — the untouched `BootstrapReport`
+ * shape, REGRESSION-pinned as an exact 10-key set. `archive_candidates` (SPEC
+ * spec-lifecycle-archival-plan-close-cascade-deterministic §Design Decisions
+ * D4) is the newest, LAST-inserted key (`session-service.ts::bootstrap`'s own
+ * `report` object literal appends it after `active_sessions`) — unlike the
+ * INJECTION projection's present-iff-positive trim, the full report ALWAYS
+ * carries this field as a plain required number (even `0`).
+ */
 const PLAIN_BOOTSTRAP_REPORT_KEYS = [
   "root",
   "active_plans",
@@ -252,6 +260,7 @@ const PLAIN_BOOTSTRAP_REPORT_KEYS = [
   "resume_hint",
   "corpus",
   "active_sessions",
+  "archive_candidates",
 ] as const;
 
 beforeAll(() => {
@@ -328,9 +337,16 @@ describe("AC-080-3: compiled dist/lore bootstrap --injection / --json default-bu
       budget_drops: 0,
     });
     expect(parsed["budget_exceeded"]).toBeUndefined();
+
+    // AC-097-4: this fixture has zero archive candidates (no archived/deprecated
+    // plan, no aged/superseded handoff) — present-iff-positive means the key is
+    // ENTIRELY ABSENT from the injection, not present as `0` (zero-candidate
+    // shape stays byte-stable vs the pre-existing SPEC-080(bootstrap-injection) key order).
+    expect(parsed).not.toHaveProperty("archive_candidates");
+    expect(raw).not.toContain("archive_candidates");
   });
 
-  it("REGRESSION: plain --json on the same corpus has exactly the literal 9-key BootstrapReport set", () => {
+  it("REGRESSION: plain --json on the same corpus has exactly the literal 10-key BootstrapReport set", () => {
     const result = runLore(["bootstrap", "--json"], dir);
     expect(result.exitCode).toBe(0);
 
@@ -338,11 +354,15 @@ describe("AC-080-3: compiled dist/lore bootstrap --injection / --json default-bu
     expect(envelope.ok).toBe(true);
 
     const keys = Object.keys(envelope.data);
-    expect(keys).toHaveLength(9);
+    expect(keys).toHaveLength(10);
     expect(keys).toEqual([...PLAIN_BOOTSTRAP_REPORT_KEYS]);
     // Never touched by the injection projection: no condensed armed_gates
     // string[], no omitted ledger.
     expect(envelope.data["omitted"]).toBeUndefined();
+    // AC-097-4: the FULL report always carries the field, even at `0` — the
+    // present-iff-positive trim is an INJECTION-only behavior (buildBootstrapInjection),
+    // never applied to the plain report itself.
+    expect(envelope.data["archive_candidates"]).toBe(0);
   });
 
   it("NEGATIVE: --injectoin (typo) exits 2 (SPEC-051 strict-flags), never a silent no-op", () => {
@@ -458,5 +478,93 @@ describe("AC-080-6: workflow.bootstrap_injection config knobs reach the projecti
     expect(result.stdout.trim().length).toBeLessThanOrEqual(2000);
     expect(parsed.omitted.budget_drops).toBe(0);
     expect(parsed.budget_exceeded).toBeUndefined();
+  });
+});
+
+describe("AC-097-4: archive_candidates injection surfacing (spec-lifecycle-archival-plan-close-cascade-deterministic D4)", () => {
+  let dir: string;
+  let planSlug: string;
+
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), "lore-t6-archive-candidates-"));
+    expect(dir.startsWith(REPO_ROOT)).toBe(false);
+    initCorpus(dir);
+
+    // Disable plan-close so this fixture (out of THIS suite's scope — it's
+    // about the INJECTION surfacing, not the gate) can archive a plan with
+    // zero ceremony.
+    const cfgPath = join(dir, ".lore", "config.yaml");
+    writeFileSync(cfgPath, 'workflow:\n  gates:\n    "plan-close":\n      enabled: false\n', "utf8");
+
+    const prdResult = runLore(["create", "prd", "--title", "Archive Candidates PRD", "--content", "root", "--no-ai"], dir);
+    expect(prdResult.exitCode).toBe(0);
+    const prdSlug = parseSlug(prdResult.stdout);
+
+    const planResult = runLore(
+      ["create", "plan", "--title", "Archive Candidates Plan", "--parent", prdSlug, "--content", "x", "--no-ai"],
+      dir,
+    );
+    expect(planResult.exitCode).toBe(0);
+    planSlug = parseSlug(planResult.stdout);
+
+    expect(runLore(["set", planSlug, "--status", "approved"], dir).exitCode).toBe(0);
+    expect(runLore(["set", planSlug, "--status", "archived"], dir).exitCode).toBe(0);
+
+    // Created AFTER the plan archived — a genuine R4 done_plan_straggler
+    // candidate, never touched by the R1 cascade.
+    const taskResult = runLore(
+      [
+        "create",
+        "task",
+        "--title",
+        "Injection Straggler Task",
+        "--parent",
+        planSlug,
+        "--plan-id",
+        planSlug,
+        "--content",
+        "x",
+        "--no-ai",
+      ],
+      dir,
+    );
+    expect(taskResult.exitCode).toBe(0);
+    // reason: the created slug is only used implicitly (it's what makes
+    // archive_candidates positive) — no per-doc identity assertion needed
+    // for this suite, which is scoped to the INJECTION SHAPE, not R4's own
+    // rule-attribution (that's archive-candidates.test.ts's job).
+    parseSlug(taskResult.stdout);
+  });
+
+  afterAll(() => {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      /* best-effort cleanup */
+    }
+  });
+
+  it("HAPPY: --injection includes archive_candidates (positive count) positioned between corpus and omitted", () => {
+    const result = runLore(["bootstrap", "--injection"], dir);
+    expect(result.exitCode).toBe(0);
+
+    const raw = result.stdout.trim();
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+
+    const corpusIdx = Object.keys(parsed).indexOf("corpus");
+    const archiveIdx = Object.keys(parsed).indexOf("archive_candidates");
+    const omittedIdx = Object.keys(parsed).indexOf("omitted");
+    expect(archiveIdx).toBeGreaterThan(corpusIdx);
+    expect(archiveIdx).toBeLessThan(omittedIdx);
+
+    expect(parsed["archive_candidates"]).toBe(1);
+  });
+
+  it("REGRESSION: plain --json also carries archive_candidates: 1 on the same corpus", () => {
+    const result = runLore(["bootstrap", "--json"], dir);
+    expect(result.exitCode).toBe(0);
+    const envelope = JSON.parse(result.stdout) as { ok: boolean; data: Record<string, unknown> };
+    expect(envelope.ok).toBe(true);
+    expect(envelope.data["archive_candidates"]).toBe(1);
   });
 });

@@ -85,6 +85,9 @@ const main = defineCommand({
     outline: () => import("./commands/outline.js").then(wrapDefault("outline")),
     seat: () => import("./commands/seat.js").then(wrapDefault("seat")),
     "report-issue": () => import("./commands/report-issue.js").then(wrapDefault("report-issue")),
+    // archive (spec-lifecycle-archival-plan-close-cascade-deterministic D3) —
+    // deterministic sweep/apply verb; see commands/archive.ts's module header.
+    archive: () => import("./commands/archive.js").then(wrapDefault("archive")),
   },
 });
 

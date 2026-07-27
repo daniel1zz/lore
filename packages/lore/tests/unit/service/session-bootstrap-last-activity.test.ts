@@ -207,6 +207,7 @@ describe("bootstrapReportSchema.parse — NEGATIVE fail-loud (AC-069-6, D7)", ()
       resume_hint: null,
       corpus: { total_docs: 0, last_updated: null },
       active_sessions: [],
+      archive_candidates: 0,
     };
 
     expect(() => bootstrapReportSchema.parse(report)).toThrow();
@@ -230,6 +231,7 @@ describe("bootstrapReportSchema.parse — NEGATIVE fail-loud (AC-069-6, D7)", ()
       resume_hint: null,
       corpus: { total_docs: 0, last_updated: null },
       active_sessions: [],
+      archive_candidates: 0,
     };
 
     const parsed = bootstrapReportSchema.parse(report);
