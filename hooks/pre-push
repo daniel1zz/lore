@@ -1,9 +1,11 @@
 #!/bin/sh
 # Corpus conformance gate (lore-doctor recurrence prevention, 2026-07-14).
 # Blocks push when tree structure or code anchors drift from the corpus blueprint,
-# when the audit hash chain has been tampered with (SPEC-080 G5), or when the
+# when the audit hash chain has been tampered with (SPEC-080 G5), when the
 # root PRD outline exceeds its tiered char budgets (SPEC-080 Phase 3, armed
-# 2026-07-26 after 5 observed clean plan-closes; threshold was 2).
+# 2026-07-26 after 5 observed clean plan-closes; threshold was 2), or when a
+# project memory file (CLAUDE.md) exceeds its corpus-governed line/byte
+# ceiling (AC-CMC-4, spec-project-claude-md-content-contract-governance-injected).
 # Fail-open contract (same as g1-g4 gate shims): no lore binary / no .lore -> allow.
 # Bypass: git push --no-verify
 command -v lore >/dev/null 2>&1 || exit 0
@@ -25,6 +27,12 @@ lore status --check-prd-budget
 code=$?
 if [ "$code" -ne 0 ]; then
   echo "pre-push: PRD outline budget check failed (exit $code) — tighten the over-budget section(s) (lore status --check-prd-budget) or push with --no-verify" >&2
+  exit 1
+fi
+lore status --check-claude-md
+code=$?
+if [ "$code" -ne 0 ]; then
+  echo "pre-push: CLAUDE.md budget check failed (exit $code) — trim the over-ceiling file(s) (lore status --check-claude-md) or run \`lore governance claude-md\` for the content contract, or push with --no-verify" >&2
   exit 1
 fi
 exit 0
