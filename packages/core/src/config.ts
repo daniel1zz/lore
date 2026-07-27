@@ -608,6 +608,64 @@ const SetupConfigSchema = z
 /** `lore setup` distribution-convergence config section. Source: SPEC-076 §C6, D5. */
 export type SetupConfig = z.infer<typeof SetupConfigSchema>;
 
+// ─── Context Config Schema ─────────────────────────────────────────────────
+
+/**
+ * `context.memory_files.*` — the ONLY home of the project-CLAUDE.md line/byte
+ * ceiling numbers (spec-project-claude-md-content-contract-governance-injected
+ * §D1/D8: "zod defaults ONLY; config.yaml overrides; prose cites the command" —
+ * deliberately anti-dual-write. `packages/lore/src/service/claude-md-check.ts`'s
+ * `lintMemoryFiles` (downstream task) consumes {@link resolveMemoryFileBudgets}'s
+ * return value; it MUST NOT hardcode these numbers itself.
+ *
+ * Field-level `.default(...)` on every leaf (the `bootstrap_injection`
+ * precedent above, NOT the `task_feed` no-default precedent) means a config
+ * author can override a single field — say `root.max_lines` — without
+ * restating its siblings; every untouched field/block still resolves to its
+ * own schema default.
+ *
+ * @invariant `.strict()` at both the `context` and `memory_files` levels
+ *   rejects unknown keys (typos, e.g. `rootMaxLines`) at config-parse time
+ *   rather than silently ignoring them.
+ * @invariant Two metrics per role (`max_lines` primary + `max_bytes`
+ *   backstop, spec §D2) — a role's block is never bytes-only or lines-only.
+ */
+export const contextConfigSchema = z
+  .object({
+    memory_files: z
+      .object({
+        /** `false` disables the memory-file line/byte ceiling lint entirely. Default: true. */
+        enabled: z.boolean().default(true),
+        /** Filenames the discovery probe treats as project memory files. Default: `["CLAUDE.md"]`. */
+        filenames: z.array(z.string()).default(["CLAUDE.md"]),
+        /** Ceiling for the repo-root memory file (looser than the module ceiling — spec §D3). */
+        root: z
+          .object({
+            max_lines: z.number().int().positive().default(300),
+            max_bytes: z.number().int().positive().default(30720),
+          })
+          .strict()
+          .default({}),
+        /** Ceiling for per-module memory files (tighter than the root ceiling — spec §D3). */
+        module: z
+          .object({
+            max_lines: z.number().int().positive().default(200),
+            max_bytes: z.number().int().positive().default(16384),
+          })
+          .strict()
+          .default({}),
+      })
+      .strict()
+      .default({}),
+  })
+  .strict();
+
+/** Project memory-file governance config section. Source: spec-project-claude-md-content-contract-governance-injected §D1/D8. */
+export type ContextConfig = z.infer<typeof contextConfigSchema>;
+
+/** The resolved shape `resolveMemoryFileBudgets` returns — one role's ceiling pair, plus enable flag and tracked filenames. */
+export type MemoryFileBudgets = ContextConfig["memory_files"];
+
 // ─── Root Config Schema ────────────────────────────────────────────────────
 
 /**
@@ -674,6 +732,13 @@ export const LoreConfigSchema = z
      * default (`true` — advisory enabled).
      */
     setup: SetupConfigSchema.optional(),
+    /**
+     * Project memory-file (CLAUDE.md) governance configuration
+     * (spec-project-claude-md-content-contract-governance-injected §D1/D8).
+     * When absent, {@link resolveMemoryFileBudgets} returns the schema
+     * defaults (root 300L/30720B, module 200L/16384B, enabled: true).
+     */
+    context: contextConfigSchema.optional(),
   })
   .strict();
 
@@ -1112,6 +1177,32 @@ export function resolveBootstrapInjectionBudgets(config: LoreConfig | undefined)
     maxPendingSlugs: section.max_pending_slugs,
     charBudget: section.char_budget,
   };
+}
+
+/**
+ * Resolve the effective `context.memory_files.*` budgets as a
+ * {@link MemoryFileBudgets} from an optional LoreConfig
+ * (spec-project-claude-md-content-contract-governance-injected §D1/D8).
+ * Mirrors {@link resolveStalenessDefaults}/{@link resolveDriftEnabled} —
+ * absence of the whole config, the `context` section, or
+ * `context.memory_files` specifically all fall back to the schema defaults
+ * (root 300L/30720B, module 200L/16384B, enabled: true,
+ * filenames: ["CLAUDE.md"]). Unlike {@link resolveBootstrapInjectionBudgets},
+ * this returns the section's own snake_case shape verbatim — no
+ * camelCase projection — since `packages/lore/src/service/claude-md-check.ts`'s
+ * `lintMemoryFiles` (downstream task) is the sole consumer and the spec's
+ * `MemoryFileFinding` shape is itself snake_case-free-form.
+ *
+ * @param config - Parsed LoreConfig, or undefined when no config file was loaded
+ * @returns `{enabled, filenames, root: {max_lines, max_bytes}, module: {max_lines, max_bytes}}`
+ * @example
+ *   resolveMemoryFileBudgets(undefined)
+ *   // => { enabled: true, filenames: ["CLAUDE.md"], root: {max_lines: 300, max_bytes: 30720}, module: {max_lines: 200, max_bytes: 16384} }
+ *   resolveMemoryFileBudgets({ ..., context: { memory_files: { enabled: false } } })
+ *   // => { enabled: false, filenames: ["CLAUDE.md"], root: {max_lines: 300, max_bytes: 30720}, module: {max_lines: 200, max_bytes: 16384} }
+ */
+export function resolveMemoryFileBudgets(config: LoreConfig | undefined): MemoryFileBudgets {
+  return (config?.context ?? contextConfigSchema.parse({})).memory_files;
 }
 
 // ─── Pure Parse Helpers ────────────────────────────────────────────────────
