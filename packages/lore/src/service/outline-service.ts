@@ -81,7 +81,18 @@ export interface ResolvedComponent {
   position: { start: number; end: number };
 }
 
-/** Warning from resolution (unknown component, missing data, etc.) */
+/**
+ * Warning from resolution (unknown component, missing data, etc.).
+ *
+ * @invariant `renderResolvedToMarkdown` treats EVERY warning's `position` range as
+ * text to REMOVE from the rendered output (spliced to `""`, same descending-offset
+ * walk used for `resolvedComponents`) — currently the only warning producer is the
+ * non-whitelisted-component branch in `resolve()` (spec-prd-as-living-root §4 frames
+ * the whitelist as a security validation boundary, so an unknown tag's bytes must
+ * never survive into rendered text, audit T2). A future warning kind that should
+ * NOT be stripped (e.g. purely advisory, tag-preserving) would need a discriminator
+ * field here — do not add one speculatively before such a case exists.
+ */
 export interface ResolutionWarning {
   message: string;
   component: string;
@@ -1078,14 +1089,32 @@ function renderAcceptanceCriteriaBlock(criteria: AcceptanceCriterion[], coverage
 }
 
 /**
+ * One in-place text replacement, keyed by the original `[start, end)` byte range
+ * it overwrites. Shared shape for both `resolvedComponents` (replaced by their
+ * rendering) and `warnings` (replaced by `""` — stripped, audit T2) so both splice
+ * sources can be merged into a single descending-offset walk.
+ */
+interface TextSplice {
+  start: number;
+  end: number;
+  replacement: string;
+}
+
+/**
  * Splice a resolve() result's structured component data back into the document's
  * markdown body — the "text projection" step resolve() alone never performs.
  *
- * Walks `resolvedComponents` in DESCENDING `position.start` order. Byte offsets
- * stay valid throughout because `resolve()`'s regex matches are non-overlapping
- * (each is consumed once by `COMPONENT_REGEX.exec`'s advancing lastIndex) and a
- * descending walk never mutates content before an offset it still needs to read.
- * Pure — no store access, no IO; operates only on already-resolved data.
+ * Merges TWO splice sources into one DESCENDING-`start`-order walk: `resolvedComponents`
+ * (each replaced by its `renderComponentMarkdown` rendering) and `warnings` (each
+ * replaced by `""` — a non-whitelisted component's tag bytes are REMOVED, never passed
+ * through verbatim; spec-prd-as-living-root §4 frames the whitelist as a security
+ * validation boundary, so a stripped tag surviving into rendered text is itself the
+ * defect, audit T2). Byte offsets stay valid throughout because `resolve()`'s regex
+ * matches are non-overlapping (each is consumed once by `COMPONENT_REGEX.exec`'s
+ * advancing lastIndex, and a component match is EITHER pushed to `resolvedComponents`
+ * OR to `warnings`, never both) and a descending walk never mutates content before an
+ * offset it still needs to read. Pure — no store access, no IO; operates only on
+ * already-resolved data.
  *
  * Additionally appends SPEC-038 §6's structured-AC checklist (see
  * `renderAcceptanceCriteriaBlock`) after the spliced body when `resolved` carries an
@@ -1102,21 +1131,31 @@ function renderAcceptanceCriteriaBlock(criteria: AcceptanceCriterion[], coverage
  *
  * @param resolved - Output of `OutlineService.resolve()` for one document.
  * @returns Markdown with every whitelisted placeholder replaced by its rendering,
- *   plus the AC checklist and/or Code anchors list when declared; unchanged
- *   `resolved.content` when there are no resolved components and no declared
- *   acceptance criteria / code anchors.
+ *   every non-whitelisted placeholder tag REMOVED, plus the AC checklist and/or Code
+ *   anchors list when declared; unchanged `resolved.content` when there are no
+ *   resolved components, no warnings, and no declared acceptance criteria / code
+ *   anchors.
  * @example
  *   const resolved = await outlineService.resolve(doc);
  *   if (resolved.ok) console.log(renderResolvedToMarkdown(resolved.value));
  */
 export function renderResolvedToMarkdown(resolved: ResolvedDoc): string {
   let content = resolved.content;
-  const byPositionDescending = [...resolved.resolvedComponents].sort(
-    (a, b) => b.position.start - a.position.start,
+  const componentSplices: TextSplice[] = resolved.resolvedComponents.map((component) => ({
+    start: component.position.start,
+    end: component.position.end,
+    replacement: renderComponentMarkdown(component),
+  }));
+  const strippedSplices: TextSplice[] = resolved.warnings.map((warning) => ({
+    start: warning.position.start,
+    end: warning.position.end,
+    replacement: "",
+  }));
+  const byPositionDescending = [...componentSplices, ...strippedSplices].sort(
+    (a, b) => b.start - a.start,
   );
-  for (const component of byPositionDescending) {
-    const rendering = renderComponentMarkdown(component);
-    content = content.slice(0, component.position.start) + rendering + content.slice(component.position.end);
+  for (const splice of byPositionDescending) {
+    content = content.slice(0, splice.start) + splice.replacement + content.slice(splice.end);
   }
   if (resolved.acceptanceCriteria !== undefined && resolved.acceptanceCriteria.criteria.length > 0) {
     content += renderAcceptanceCriteriaBlock(
