@@ -25,28 +25,54 @@
  * computation is... tracked in `current` but absent from `payload`"). Once
  * `lore-init-context` is added to `RETIRED_FROM_INSTALL_PATHS`
  * (`real-asset-source.ts`), `RealAssetSource.load()` stops yielding
- * `skills/lore-init-context/SKILL.md` at all, so a SECOND converge run over
- * a target that has it from a PRIOR install classifies it as an orphan and
- * removes it. Fixture strategy: install ONCE against the CURRENT (pre-
- * retirement) real `assets/` tree — this simulates "a previously-installed
- * lore-init-context skill" using the actual on-disk shape `lore setup`
- * itself produces (real manifest, real file), not a hand-rolled synthetic
- * shape that could drift from what the installer actually writes — then
- * converge a SECOND time and assert the file is gone.
+ * `skills/lore-init-context/SKILL.md` at all — for EVERY call, including a
+ * truly fresh one, since that port is a pure function of `assets/`'s file
+ * tree with zero knowledge of a given target's install history.
+ *
+ * ⛔ Fixture strategy, REVISED from this suite's original RED-phase design
+ * (empirically proven inconsistent — see below): the original plan was
+ * "install ONCE against the CURRENT (pre-retirement) real `assets/` tree...
+ * then converge a SECOND time and assert the file is gone" using ONLY
+ * `lore setup`'s real installer for both calls. That is unsatisfiable the
+ * moment the retirement fix and this test run from the SAME worktree/binary:
+ * `RealAssetSource.load()` is a pure, target-agnostic function, so a
+ * "fresh" call and a "converge" call against an UNCHANGED `assets/` tree
+ * necessarily see the IDENTICAL payload — there is no in-process way for
+ * call 1 to write the file and call 2 to see it as absent-from-payload
+ * without something on disk changing in between (confirmed empirically: a
+ * naive `freshInstall` + `freshInstall` never once wrote the file, since
+ * it's excluded from the very first call). The scenario this suite genuinely
+ * needs to model — "a machine that has `lore-init-context` installed by an
+ * OLDER, pre-retirement `lore` release, now upgrades and converges" —
+ * inherently spans TWO DIFFERENT BINARY VERSIONS, which a single `bun test`
+ * process running ONE binary cannot literally reproduce by calling the
+ * installer twice.
+ *
+ * `seedPriorSkillInstall` (below) resolves this the same way any migration
+ * test seeds a "before" state it cannot organically produce with current
+ * code: `freshInstall` runs the REAL, CURRENT installer first (so every
+ * OTHER file — the sibling managed file the NEGATIVE case checks, the
+ * manifest's own shape — is genuinely what `lore setup` produces), then this
+ * helper reads that REAL manifest back, appends ONE additional entry (same
+ * `setupEntrySchema` shape every other entry uses, computed the identical
+ * way `SetupService` computes it — sha256 of the actual bytes written) and
+ * writes the skill file itself — reproducing exactly what an OLDER release's
+ * install would have additionally left on disk, without hand-rolling an
+ * unrelated manifest shape from scratch.
  *
  * Coverage dimensions:
- *   HAPPY:      fixture-sanity control — a fresh install DOES write
- *               `skills/lore-init-context/SKILL.md` today (proves the
- *               fixture itself is real, not accidentally already retired).
- *   BOUNDARY:   the true RED case — a SECOND converge run over that target
- *               must remove the file. FAILS today (retirement not wired).
+ *   HAPPY:      a fresh install, from a target with NO prior state, never
+ *               writes `skills/lore-init-context/SKILL.md` — confirms the
+ *               retirement is effective from the very first install, not
+ *               only on a converge over a previously-seeded target.
+ *   BOUNDARY:   the true case — a SECOND converge run over a target seeded
+ *               with a simulated prior (pre-retirement) install must remove
+ *               the file.
  *   STATE:      the `--dry-run --json` plan explicitly lists the skill file
- *               under `data.plan.removals` once installed. FAILS today
- *               (payload still yields it, so the removals plan is empty).
+ *               under `data.plan.removals` once seeded.
  *   NEGATIVE:   the same converge run does NOT remove a sibling managed file
  *               (`agents/lore-implementer.md`) — proves this isn't a
- *               blanket "wipe everything" regression once retirement DOES
- *               land; passes both before and after.
+ *               blanket "wipe everything" regression.
  *   ERROR:      n/a beyond the shared CLI-usage mutex already covered by
  *               `setup-converge-diverged.bun.test.ts`'s own ERROR dimension
  *               for this same command surface.
@@ -60,7 +86,8 @@
  */
 
 import { afterEach, describe, expect, it } from "bun:test";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -134,36 +161,70 @@ function freshInstall(scratch: string, targetDir: string): void {
   }
 }
 
-// ─── HAPPY (fixture sanity) ─────────────────────────────────────────────────
+const MANIFEST_FILENAME = ".lore-setup-manifest.json";
 
-describe("init-context skill retirement — HAPPY (fixture sanity)", () => {
-  it("a fresh install writes skills/lore-init-context/SKILL.md today — the fixture genuinely simulates a prior, not-yet-retired install", () => {
+/**
+ * Simulates "this target already has `lore-init-context` installed by an
+ * OLDER, pre-retirement `lore` release" — see this module's header for why a
+ * real double-`freshInstall` cannot organically produce this state once the
+ * retirement fix and this test share one binary. MUST run AFTER a real
+ * `freshInstall` against the SAME `targetDir` (this reads that install's
+ * genuine `.lore-setup-manifest.json` and appends to it, rather than
+ * fabricating the whole manifest shape from nothing).
+ *
+ * @param targetDir - The `--claude-dir` target `freshInstall` already ran against.
+ */
+function seedPriorSkillInstall(targetDir: string): void {
+  const skillDir = join(targetDir, "skills", "lore-init-context");
+  mkdirSync(skillDir, { recursive: true });
+  const content = "# Context Layer Initialization\n\n(simulated pre-retirement install fixture)\n";
+  writeFileSync(join(skillDir, "SKILL.md"), content);
+
+  const manifestPath = join(targetDir, MANIFEST_FILENAME);
+  const manifestRaw = readFileSync(manifestPath, "utf8");
+  const manifest = JSON.parse(manifestRaw) as { entries: Array<Record<string, unknown>> };
+  manifest.entries.push({
+    path: SKILL_RELATIVE_PATH,
+    kind: "skill",
+    sha256: createHash("sha256").update(content, "utf8").digest("hex"),
+    written_at: new Date(0).toISOString(),
+    ownership: "managed",
+  });
+  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+}
+
+// ─── HAPPY (retirement effective from a clean install) ─────────────────────
+
+describe("init-context skill retirement — HAPPY", () => {
+  it("a fresh install, from a target with no prior state, never writes skills/lore-init-context/SKILL.md", () => {
     const scratch = makeScratchDir("lore-init-context-retirement-happy-");
     const targetDir = join(scratch, ".claude");
     freshInstall(scratch, targetDir);
 
-    expect(existsSync(join(targetDir, SKILL_RELATIVE_PATH))).toBe(true);
+    expect(existsSync(join(targetDir, SKILL_RELATIVE_PATH))).toBe(false);
   });
 });
 
-// ─── BOUNDARY (RED — the retirement case) ──────────────────────────────────
+// ─── BOUNDARY (the retirement case) ────────────────────────────────────────
 
-describe("init-context skill retirement — BOUNDARY (RED)", () => {
-  it("a SECOND converge run over a previously-installed target removes skills/lore-init-context/SKILL.md — FAILS today because lore-init-context is not yet in RETIRED_FROM_INSTALL_PATHS", () => {
+describe("init-context skill retirement — BOUNDARY", () => {
+  it("a converge run over a target seeded with a simulated prior install removes skills/lore-init-context/SKILL.md", () => {
     const scratch = makeScratchDir("lore-init-context-retirement-boundary-");
     const targetDir = join(scratch, ".claude");
     freshInstall(scratch, targetDir);
-    expect(existsSync(join(targetDir, SKILL_RELATIVE_PATH))).toBe(true); // sanity: it's really there before the converge
+    seedPriorSkillInstall(targetDir);
+    expect(existsSync(join(targetDir, SKILL_RELATIVE_PATH))).toBe(true); // sanity: the seed really landed before the converge
 
     runSetup(["--claude-dir", targetDir, "--yes"], scratch);
 
     expect(existsSync(join(targetDir, SKILL_RELATIVE_PATH))).toBe(false);
   });
 
-  it("the whole skills/lore-init-context/ directory is pruned once its only file is removed — FAILS today (directory survives, still populated)", () => {
+  it("the whole skills/lore-init-context/ directory is pruned once its only file is removed", () => {
     const scratch = makeScratchDir("lore-init-context-retirement-boundary-dir-");
     const targetDir = join(scratch, ".claude");
     freshInstall(scratch, targetDir);
+    seedPriorSkillInstall(targetDir);
 
     runSetup(["--claude-dir", targetDir, "--yes"], scratch);
 
@@ -171,13 +232,14 @@ describe("init-context skill retirement — BOUNDARY (RED)", () => {
   });
 });
 
-// ─── STATE (RED — the dry-run plan) ────────────────────────────────────────
+// ─── STATE (dry-run plan) ───────────────────────────────────────────────────
 
-describe("init-context skill retirement — STATE (RED, dry-run removals plan)", () => {
-  it("`--dry-run --json`'s plan.removals lists skills/lore-init-context/SKILL.md once installed — FAILS today (payload still yields it, so removals is empty)", () => {
+describe("init-context skill retirement — STATE (dry-run removals plan)", () => {
+  it("`--dry-run --json`'s plan.removals lists skills/lore-init-context/SKILL.md once seeded", () => {
     const scratch = makeScratchDir("lore-init-context-retirement-state-");
     const targetDir = join(scratch, ".claude");
     freshInstall(scratch, targetDir);
+    seedPriorSkillInstall(targetDir);
 
     const dryRun = runSetup(["--claude-dir", targetDir, "--dry-run", "--json"], scratch);
     expect(dryRun.exitCode).toBe(0);

@@ -725,7 +725,7 @@ function buildPlaceholderHookPayload(): AssetPayload {
 }
 
 describe("{{CLAUDE_DIR}} settings-hook placeholder resolution", () => {
-  it("resolves {{CLAUDE_DIR}} to the real targetDir in every registered hook command, all 9 hook files registered, matchers/events correct, existing foreign hook preserved", async () => {
+  it("resolves {{CLAUDE_DIR}} to the real targetDir in every registered hook command, all 10 hook files registered, matchers/events correct, existing foreign hook preserved", async () => {
     const fs = new MapFs();
     fs.seed(
       path.join(TARGET_DIR, "settings.json"),
@@ -762,7 +762,7 @@ describe("{{CLAUDE_DIR}} settings-hook placeholder resolution", () => {
       );
     }
 
-    // All 9 distinct hook files are present in the merged command set.
+    // All 10 distinct hook files are present in the merged command set.
     const distinctFiles = new Set(loreCommands.map((c) => c.split("/hooks/")[1]));
     expect([...distinctFiles].sort()).toEqual(
       [
@@ -775,6 +775,7 @@ describe("{{CLAUDE_DIR}} settings-hook placeholder resolution", () => {
         "stop-doc-sync.mjs",
         "subagent-context.mjs",
         "subagent-stop-commit-guard.mjs",
+        "claude-md-guard.sh",
       ].sort(),
     );
 

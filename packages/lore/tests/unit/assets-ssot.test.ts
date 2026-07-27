@@ -154,7 +154,13 @@ const DECLARED_FILES = [
   "skills/lore-auto-wire/references/tools/selfhosted-pg.md",
   "skills/lore-auto-wire/scripts/check-tools.sh",
   "skills/lore-auto-wire/scripts/fix-path.sh",
-  // skills/lore-init-context (vendored, converged from zz-init-context, 2026-07-17)
+  // skills/lore-init-context (vendored, converged from zz-init-context, 2026-07-17).
+  // RETIRED FROM INSTALL (spec-context-verb-family-two-zone-claude-md-anatomy-lore
+  // D10): still ships/fingerprinted under assets/ (this is a disk-level manifest —
+  // see real-asset-source.ts's RETIRED_FROM_INSTALL_PATHS doc comment for the
+  // governance-file precedent this mirrors), but `lore setup` no longer installs
+  // it — see real-setup-ports.test.ts's DECLARED_FILES_IN_SCOPE, which is the
+  // payload-level list and DELIBERATELY excludes this path.
   "skills/lore-init-context/SKILL.md",
   // skills/lore-uat (vendored, converged from zz-uat, 2026-07-17)
   "skills/lore-uat/SKILL.md",
@@ -363,7 +369,7 @@ const DECLARED_FILES = [
   "agents/lore-explorer.md",
   "agents/lore-implementer.md",
   "agents/lore-reviewer.md",
-  // hooks (7 .mjs + 4 .sh gates + 1 shared lib module)
+  // hooks (7 .mjs + 4 .sh gates + 1 admission-check .sh + 1 shared lib module)
   "hooks/session-start-resume.mjs",
   "hooks/stop-doc-sync.mjs",
   "hooks/subagent-context.mjs",
@@ -377,6 +383,8 @@ const DECLARED_FILES = [
   "hooks/lore-gate-g2-spec-promote.sh",
   "hooks/lore-gate-g3-plan-promote.sh",
   "hooks/lore-gate-g4-task-claim.sh",
+  // claude-md-guard (PostToolUse CLAUDE.md admission check, spec-context-verb-family-two-zone-claude-md-anatomy-lore D10/D11)
+  "hooks/claude-md-guard.sh",
   "hooks/lib/turn-state.mjs",
   // project (4 .sh gates + pre-push + tree.yaml template + verification-profile config template, SPEC-058 D6)
   "project/g1-spec-create.sh",

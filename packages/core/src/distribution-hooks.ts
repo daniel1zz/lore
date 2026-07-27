@@ -10,7 +10,7 @@
  * copied hook file actually RUN was left to the human, an inert-until-wired
  * gap noted in the root CLAUDE.md's SPEC-046 dogfood-log entry for
  * `pre-bash-git-safety-gate.mjs`. This module is the declared list that
- * closes that gap: nine hooks classified "core governance + security" are
+ * closes that gap: ten hooks classified "core governance + security" are
  * auto-registered; two orchestration-POLICY hooks
  * (`pre-subagent-gate.mjs`, `pre-no-general-agent-gate.mjs`) are deliberately
  * EXCLUDED — they encode this specific team's subagent-dispatch discipline,
@@ -32,6 +32,16 @@
  * an uncommitted, unpushed worktree. It is fail-open by construction (see the
  * hook's own module header) so a mis-registration cannot itself wedge a
  * session, matching the risk profile of the other eight.
+ *
+ * `claude-md-guard.sh` (added D10/D11,
+ * spec-context-verb-family-two-zone-claude-md-anatomy-lore) joins the set for
+ * the same reason as the pair above: it is a data/governance backstop, not a
+ * routing policy — it fires on PostToolUse Edit|Write, fast-paths away from
+ * every non-`CLAUDE.md` edit, and only ever runs `lore status --check-
+ * claude-md` (the sole budget measurement point) against a repo that
+ * actually owns a `.lore/` corpus. Fail-open by construction (see the hook's
+ * own module header) on every anomaly — a mis-registration cannot itself
+ * block an unrelated Edit/Write.
  *
  * Public surface:
  *   - HookRunner — the closed `"node" | "bash"` interpreter set
@@ -128,6 +138,9 @@ export const HOOK_REGISTRATIONS: readonly HookRegistration[] = [
 
   // subagent-stop-commit-guard.mjs — blocks a worktree subagent from terminating with unpersisted (uncommitted or unbranched) work.
   { file: "subagent-stop-commit-guard.mjs", runner: "node", event: "SubagentStop" },
+
+  // claude-md-guard.sh — CLAUDE.md two-zone admission check on Edit|Write (delegates the actual ceiling measurement to `lore status --check-claude-md`).
+  { file: "claude-md-guard.sh", runner: "bash", event: "PostToolUse", matcher: "Edit|Write" },
 ] as const;
 
 /** Strips exactly one trailing `/` (never more — a caller-malformed `claudeDir` with repeated trailing slashes is out of scope). */
