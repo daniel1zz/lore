@@ -46,21 +46,27 @@
  *     unchanged re-splice (refresh with no drift) stays byte-identical
  *     across repeated calls (idempotent: the helper only adds a newline
  *     when one isn't already there).
- *   - Both verbs use `resolveMemoryFileBudgets(undefined)` (schema
- *     defaults) for `collectContextFacts`'s budgets — `ContextFlowDeps`
- *     deliberately carries no `LoreConfig`/store dependency (D9: "keeps this
- *     module vitest-testable with plain fakes"); the ONLY config value
- *     `collectContextFacts` reads is `.filenames` (default `["CLAUDE.md"]`),
- *     which is not a realistic per-project override target.
+ *   - Both verbs resolve `collectContextFacts`'s budgets via
+ *     `resolveFlowBudgets(deps)`: `deps.budgets` when the CLI adapter
+ *     (`adapters/cli/commands/context.ts`) threaded one (config-aware,
+ *     mirroring `commands/status.ts`'s own `.lore/config.yaml` resolution —
+ *     AC-CTX-8: "same budget source as `lore status --check-claude-md`"),
+ *     else `resolveMemoryFileBudgets(undefined)` (schema defaults) —
+ *     `ContextFlowDeps` still carries no `LoreConfig`/store dependency
+ *     itself (D9: "keeps this module vitest-testable with plain fakes");
+ *     the CLI adapter is the ONE locus that ever reads `.lore/config.yaml`
+ *     for this invocation, this module only ever consumes the already-
+ *     resolved `MemoryFileBudgets` value it was handed.
  *   - `runContextRefresh` pre-write admission (AC-CTX-8, root cause:
  *     knowledge-retro-context-refresh-module-index-walk-pollutes): AFTER
  *     splicing and appending the trailing newline but BEFORE calling
  *     `deps.fs.writeFile`, the spliced candidate is run through
  *     `claude-md-check.ts`'s `lintMemoryFiles` — the SAME ceiling-check
  *     implementation `lore status --check-claude-md` consumes (SSOT: never a
- *     second inline size check here) — against `resolveMemoryFileBudgets(undefined)`,
- *     the same defaults `collectContextFacts` already reads. Any finding
- *     (root role, `max_lines` or `max_bytes`) refuses the whole call with
+ *     second inline size check here) — against the SAME `resolveFlowBudgets(deps)`
+ *     value `collectContextFacts` already used for this call (never a second,
+ *     independently-resolved budgets value). Any finding (root role,
+ *     `max_lines` or `max_bytes`) refuses the whole call with
  *     `err(VALIDATION_ERROR)` naming every breach and performs NO write — a
  *     within-budget splice is unaffected (byte-identical to pre-check
  *     behavior). `runContextInit` does NOT run this check: its own
@@ -76,7 +82,7 @@
  */
 
 import { err, ok, resolveMemoryFileBudgets } from "@lore/core";
-import type { FsWritePort, LoreError, Result } from "@lore/core";
+import type { FsWritePort, LoreError, MemoryFileBudgets, Result } from "@lore/core";
 import { collectContextFacts, type ContextFacts } from "../service/context-facts.js";
 import { lintMemoryFiles } from "../service/claude-md-check.js";
 import { spliceManagedSections, type ManagedSection, type SpliceResult } from "../service/context-projection.js";
@@ -105,9 +111,29 @@ const SKELETON_NARRATIVE =
 
 // ─── Public shapes ──────────────────────────────────────────────────────────
 
-/** The `{ fs }` dependency every context-flow verb takes — see module header's "no config/store" invariant. */
+/** The dependency bundle every context-flow verb takes — see module header's "no config/store" invariant. */
 export interface ContextFlowDeps {
   fs: FsWritePort;
+  /**
+   * Resolved `context.memory_files.*` budgets for this invocation — threaded
+   * in by the CLI adapter (config-aware, AC-CTX-8: same source as `lore
+   * status --check-claude-md`). Optional so existing callers that construct
+   * `{ fs }` alone (this module's own vitest suite, any other in-process
+   * caller) keep resolving to schema defaults unchanged — see
+   * {@link resolveFlowBudgets}.
+   */
+  budgets?: MemoryFileBudgets;
+}
+
+/**
+ * Resolves the effective budgets for one `runContextInit`/`runContextRefresh`
+ * call: `deps.budgets` when the caller threaded one, else schema defaults
+ * (`resolveMemoryFileBudgets(undefined)`) — the ONE fallback locus both verbs
+ * share, so `collectContextFacts` and the AC-CTX-8 admission check (refresh
+ * only) are never resolved against two different values in the same call.
+ */
+function resolveFlowBudgets(deps: ContextFlowDeps): MemoryFileBudgets {
+  return deps.budgets ?? resolveMemoryFileBudgets(undefined);
 }
 
 /** Options accepted by {@link runContextInit}. */
@@ -234,7 +260,7 @@ export async function runContextInit(
     });
   }
 
-  const factsResult = await collectContextFacts(deps.fs, root, resolveMemoryFileBudgets(undefined));
+  const factsResult = await collectContextFacts(deps.fs, root, resolveFlowBudgets(deps));
   if (!factsResult.ok) return factsResult;
 
   const sections = renderContextSections(factsResult.value);
@@ -285,7 +311,7 @@ export async function runContextRefresh(
     });
   }
 
-  const budgets = resolveMemoryFileBudgets(undefined);
+  const budgets = resolveFlowBudgets(deps);
   const factsResult = await collectContextFacts(deps.fs, root, budgets);
   if (!factsResult.ok) return factsResult;
 

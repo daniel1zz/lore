@@ -13,7 +13,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { CLAUDE_MD_MARKER_END, CLAUDE_MD_MARKER_START, InMemoryFsPort } from "@lore/core";
+import { CLAUDE_MD_MARKER_END, CLAUDE_MD_MARKER_START, InMemoryFsPort, resolveMemoryFileBudgets } from "@lore/core";
 import { runContextInit, runContextRefresh } from "../../../src/flows/context-flow.js";
 
 describe("runContextInit", () => {
@@ -201,6 +201,54 @@ describe("runContextRefresh", () => {
 
     const after = await fs.readFile("CLAUDE.md");
     expect(after).toBe(before);
+  });
+
+  // ─── AC-CTX-8 config gap: threaded `deps.budgets` must be the admission
+  // source, never the schema-default fallback ─────────────────────────────
+  // AC-CTX-8 requires `runContextRefresh` to admit against the SAME budget
+  // source as `lore status --check-claude-md` (config-aware, e.g. this
+  // repo's `.lore/config.yaml` override root.max_lines: 220). Before the
+  // fix, both `collectContextFacts` and the admission check always called
+  // `resolveMemoryFileBudgets(undefined)` internally — a config override
+  // tightening `root.max_lines` below a candidate's size (while the
+  // candidate stays under the schema DEFAULT of 300) was silently ignored
+  // and the write proceeded anyway.
+  it("NEGATIVE: an injected budgets override tightening root.max_lines below the DEFAULT ceiling causes refresh to refuse", async () => {
+    const fs = new InMemoryFsPort({});
+    await runContextInit({ fs }, "", {});
+
+    // Zero-module baseline is 15 lines (see the BOUNDARY case above); 50
+    // modules lands at 65 lines — comfortably under the schema DEFAULT
+    // root ceiling (300) but over a config-overridden root.max_lines: 60.
+    await growModuleIndex(fs, 50);
+    const before = await fs.readFile("CLAUDE.md");
+
+    const defaultBudgets = resolveMemoryFileBudgets(undefined);
+    const tightenedBudgets = { ...defaultBudgets, root: { ...defaultBudgets.root, max_lines: 60 } };
+
+    // RED under pre-fix src: `runContextRefresh` ignored `deps.budgets`
+    // entirely (always called `resolveMemoryFileBudgets(undefined)`
+    // internally), so this returned ok:true and wrote the file — the exact
+    // config-plumbing gap AC-CTX-8 names.
+    const refreshResult = await runContextRefresh({ fs, budgets: tightenedBudgets }, "");
+    expect(refreshResult.ok).toBe(false);
+    if (refreshResult.ok) return;
+    expect(refreshResult.error.code).toBe("VALIDATION_ERROR");
+    if (refreshResult.error.code !== "VALIDATION_ERROR") return;
+    expect(refreshResult.error.message).toMatch(/ceiling/i);
+
+    const after = await fs.readFile("CLAUDE.md");
+    expect(after).toBe(before);
+  });
+
+  it("REGRESSION: the same candidate under an untightened (default) budgets override still writes", async () => {
+    const fs = new InMemoryFsPort({});
+    await runContextInit({ fs }, "", {});
+    await growModuleIndex(fs, 50);
+
+    const defaultBudgets = resolveMemoryFileBudgets(undefined);
+    const refreshResult = await runContextRefresh({ fs, budgets: defaultBudgets }, "");
+    expect(refreshResult.ok).toBe(true);
   });
 
   it("STATE: a within-budget refresh writes exactly as before the admission check existed", async () => {
