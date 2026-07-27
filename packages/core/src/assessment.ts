@@ -453,8 +453,11 @@ const evidenceRefLiteSchema = z.object({
   // SPEC-061 §Scope D5 — mirrors acceptance.ts's EvidenceRefLite.result widening
   // (a runner-issued "inconclusive" verdict never counts as attested_pass/fail
   // there; this Zod mirror must accept the same value or assigning a real
-  // computeAcCoverage() result here fails to typecheck).
-  result: z.enum(["pass", "fail", "inconclusive"]),
+  // computeAcCoverage() result here fails to typecheck). "expected-fail" (spec-
+  // workflow-hardening-evidence-red-vocabulary-claim-worktree §M1, AC-WH-1) is
+  // the self-reported RED-phase sibling of "inconclusive" — same widening
+  // requirement, same "never counted as passing" property.
+  result: z.enum(["pass", "fail", "inconclusive", "expected-fail"]),
   attested: z.boolean().optional(),
 });
 

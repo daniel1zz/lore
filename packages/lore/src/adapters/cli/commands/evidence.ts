@@ -1,8 +1,19 @@
 /**
  * lore evidence <task> --oracle <tsc|test|lint|build|e2e|manual|other>
- *   --command "<cmd>" --result <pass|fail>
+ *   --command "<cmd>" --result <pass|fail|expected-fail>
  *   [--output-tail <text> | --output-tail-file <path>] [--by <name>] [--ac <id>]
  *   [--checklist-ref <id>]
+ *
+ * `--result expected-fail` (spec-workflow-hardening-evidence-red-vocabulary-claim-
+ * worktree §M1, AC-WH-1) records a deliberate RED-phase oracle run — a test that
+ * fails BY DESIGN because its implementation hasn't landed yet. It is stored
+ * verbatim (never coerced toward `pass`/`fail`) and is NEVER counted as passing
+ * by any downstream consumer (`lore verify` summaries, `lore assess` evidence
+ * facts, or AC-coverage aggregation via `computeAcCoverage` — the exact same
+ * "satisfies neither pass nor fail filter" property `"inconclusive"` already has,
+ * `@lore/core`'s task-workflow.ts). Unlike `"inconclusive"` (runner-issued only,
+ * rejected here), `expected-fail` is a NORMAL self-reported value — no special
+ * guard rejects it.
  *
  * Appends one oracle verification record to the target document's
  * `extra.verification_evidence` (append-only, capped at 50 entries). Bumps the doc
@@ -89,7 +100,7 @@ import { exitCode, formatError, resolveActor } from "../utils.js";
 import { requirePhaseWorkflowService } from "../phase-wiring.js";
 import { findMissingOracleFilesForEvidence } from "../evidence-precheck.js";
 
-const VALID_RESULTS = ["pass", "fail"] as const;
+const VALID_RESULTS = ["pass", "fail", "expected-fail"] as const;
 
 export default defineCommand({
   meta: {

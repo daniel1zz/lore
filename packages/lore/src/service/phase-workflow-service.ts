@@ -473,6 +473,10 @@ export class PhaseWorkflowService {
         value: entry.result,
       });
     }
+    // reason: "expected-fail" (spec-workflow-hardening-evidence-red-vocabulary-claim-
+    // worktree §M1, AC-WH-1) is deliberately NOT rejected here — unlike "inconclusive"
+    // above, it is a normal self-reported RED-phase value, accepted by the shared
+    // evidenceEntrySchema below and never counted as passing by any consumer.
 
     return this.appendEvidenceEntry(idOrSlug, entry, entry.recorded_by, now);
   }

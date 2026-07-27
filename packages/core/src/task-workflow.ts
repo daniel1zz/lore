@@ -3,7 +3,10 @@
  * Pure, browser-safe module: no IO, no Date.now() calls (callers pass nowIso).
  *
  * Public surface:
- *   - evidenceEntrySchema / EvidenceEntry — one oracle verification record
+ *   - evidenceEntrySchema / EvidenceEntry — one oracle verification record;
+ *     `result` is `"pass" | "fail" | "inconclusive" | "expected-fail"` — the last
+ *     two are non-green, non-special-cased-away values (see their own @invariant
+ *     comments below) never counted as passing by any consumer
  *   - ATTESTATION_RUNNERS / AttestationRunner — enum of trusted runners allowed to
  *     write `EvidenceEntry.attestation` (SPEC-039 §2 D1)
  *   - taskClaimSchema / TaskClaim — advisory execution lease {by, at, branch?}
@@ -25,7 +28,8 @@
  * Side-effect class: pure
  *
  * Source: SPEC-025 §3 D1-D3, D9, D10; §8.2, §8.3; SPEC-039 §2 D1, D4; SPEC-039 §M2;
- *   SPEC-061 §Scope D2, D4
+ *   SPEC-061 §Scope D2, D4; spec-workflow-hardening-evidence-red-vocabulary-claim-
+ *   worktree §M1 (AC-WH-1, `"expected-fail"` result value)
  */
 
 import { z } from "zod";
@@ -131,6 +135,20 @@ export type AttestationRunner = (typeof ATTESTATION_RUNNERS)[number];
  *   (`acceptance.ts`) never counts an `inconclusive` entry as `attested_pass`/`attested_fail`
  *   — it satisfies neither `=== "pass"` nor `=== "fail"` filter by construction, no special
  *   casing needed there.
+ * @invariant `result: "expected-fail"` (spec-workflow-hardening-evidence-red-vocabulary-
+ *   claim-worktree §M1) is the OPPOSITE restriction from `"inconclusive"`: it is
+ *   SELF-REPORTED ONLY (a normal `lore evidence`/`lore_evidence_add` input value, never
+ *   runner-issued), recording a RED-phase oracle run that fails BY DESIGN — a test
+ *   written before its implementation lands, executed to confirm it fails for the
+ *   right reason. It exists so a session never has to launder a deliberate RED result
+ *   into a semantically-dishonest `"pass"` (the failure was expected, not a bug) or a
+ *   confusing bare `"fail"` (indistinguishable from a real regression) just to record
+ *   that the run happened. Every consumer that classifies evidence by exact-string
+ *   comparison against `"pass"`/`"fail"` (`computeAcCoverage` in `acceptance.ts`,
+ *   `evidence-panel.ts`'s pass/fail tallies, `doc-type-meta.ts`'s `evidence_pass`/
+ *   `evidence_fail` counts) already excludes `"expected-fail"` from BOTH buckets by
+ *   construction — mirrors `"inconclusive"`'s identical "satisfies neither filter, no
+ *   special-casing needed" property. NEVER counted as passing/green anywhere.
  * @invariant `attestation.completeness`/`attestation.executed_files` (SPEC-061 §Scope D4)
  *   are BOTH optional and present-iff-computed: only a `script:test` AC whose process
  *   exited 0 ever gets a completeness verdict computed at all (`VerifyRunnerService`); every
@@ -172,7 +190,7 @@ export type AttestationRunner = (typeof ATTESTATION_RUNNERS)[number];
 export const evidenceEntrySchema = z.object({
   oracle: z.enum(ORACLE_KINDS),
   command: z.string().min(1),
-  result: z.enum(["pass", "fail", "inconclusive"]),
+  result: z.enum(["pass", "fail", "inconclusive", "expected-fail"]),
   output_tail: z.string().max(4000).optional(),
   recorded_at: z.string(),
   recorded_by: z.string().min(1),
@@ -446,8 +464,14 @@ export interface ReadyRecord {
   unmet_blockers: Array<{ id: DocId; slug: string; status: DocStatus }>;
   /** Present iff task.extra.claim is set; annotated with computed staleness/age. */
   claim?: TaskClaim & { stale: boolean; age_minutes: number };
-  /** Result + timestamp of the most recently appended evidence entry, if any. */
-  latest_evidence?: { result: "pass" | "fail" | "inconclusive"; recorded_at: string };
+  /**
+   * Result + timestamp of the most recently appended evidence entry, if any.
+   * `result` is reported VERBATIM — an `"expected-fail"` entry (spec-workflow-
+   * hardening-evidence-red-vocabulary-claim-worktree §M1) surfaces here exactly as
+   * recorded, never coerced toward `"pass"`/`"fail"`; it does not affect `ready`
+   * (readiness is blocker-status-driven only, D3 — evidence is advisory here).
+   */
+  latest_evidence?: { result: "pass" | "fail" | "inconclusive" | "expected-fail"; recorded_at: string };
   /** Total number of verification_evidence entries recorded on the task. */
   evidence_count: number;
   /**

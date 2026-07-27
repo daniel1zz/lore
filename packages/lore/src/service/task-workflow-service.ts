@@ -152,6 +152,10 @@ export interface ReleaseOpts {
  * guard's own runner-issued verdict, written only via {@link TaskWorkflowService.recordVerifiedEvidence};
  * `_addEvidenceImpl`'s runtime check (mirroring the `attestation` guard) is what actually
  * stops an `as EvidenceInput`-cast candidate from smuggling it past this type exclusion.
+ * `result` DOES include `"expected-fail"` (spec-workflow-hardening-evidence-red-vocabulary-
+ * claim-worktree §M1, AC-WH-1) — the opposite of `"inconclusive"`: a NORMAL self-reported
+ * value (RED-phase evidence, fails by design), accepted here with no special guard, stored
+ * verbatim, never counted as passing by any downstream consumer.
  */
 export type EvidenceInput = Omit<EvidenceEntry, "recorded_at" | "attestation" | "result"> & {
   result: Exclude<EvidenceEntry["result"], "inconclusive">;
