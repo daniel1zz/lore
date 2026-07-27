@@ -108,6 +108,8 @@ import type {
   ReleaseOpts,
   EvidenceInput,
   ReadyReport,
+  DoneOpts,
+  DoneResult,
 } from "../../../src/service/task-workflow-service.js";
 import { NoOpTelemetry } from "@lore/core";
 import type { DocRecord, DocType, Result, LoreError, Telemetry } from "@lore/core";
@@ -126,6 +128,7 @@ const PHASE_WORKFLOW_SERVICE_MODULE_PATH = [
 interface PhaseWorkflowServiceInstance {
   claim(idOrSlug: string, opts: ClaimOpts, now?: () => string): Promise<Result<DocRecord, LoreError>>;
   release(idOrSlug: string, opts: ReleaseOpts, now?: () => string): Promise<Result<DocRecord, LoreError>>;
+  done(idOrSlug: string, opts: DoneOpts, now?: () => string): Promise<Result<DoneResult, LoreError>>;
   addEvidence(
     idOrSlug: string,
     entry: EvidenceInput,
@@ -435,5 +438,90 @@ describe("PhaseWorkflowService — REGRESSION §5: anchor-overlap gate field 'ga
     if (second.ok) return;
     expect(second.error.code).toBe("VALIDATION_ERROR");
     expect((second.error as { field?: string }).field).toBe("gate:phase-claim:anchor-overlap");
+  });
+});
+
+// ─── done() — phase-doc-typed sibling of TaskWorkflowService.done (AC-WH-3) ──
+// spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M3 — same
+// contract as TaskWorkflowService.done, scoped to phase docs. Full six-dimension
+// coverage lives on TaskWorkflowService's own suite (the shared `computeArchiveWalk`
+// SSOT + identical validation order) — this is a targeted parity check that the
+// phase-doc mirror behaves identically, not a duplicate exhaustive suite.
+
+describe("PhaseWorkflowService — HAPPY: done() walks a released phase doc to archived", () => {
+  it("evidence(pass) + done archives the phase via draft -> approved -> active -> archived, one audit row per step", async () => {
+    const { store, service } = makeServices();
+    await mustInsert(store, makePlanRecord());
+    await mustInsert(store, makePhaseRecord());
+
+    await service.addEvidence("phase-one", {
+      oracle: "test",
+      command: "bun test",
+      result: "pass",
+      recorded_by: "agent:p1",
+    });
+
+    const doneResult = await service.done("phase-one", { by: "agent:p1" });
+    expect(doneResult.ok).toBe(true);
+    if (!doneResult.ok) return;
+    expect(doneResult.value.already_done).toBe(false);
+    expect(doneResult.value.transitions).toEqual(["approved", "active", "archived"]);
+    expect(doneResult.value.task.status).toBe("archived");
+
+    const auditResult = await store.queryAudit({ doc_id: "01HPHASE00000000000000001" });
+    expect(auditResult.ok).toBe(true);
+    if (!auditResult.ok) return;
+    expect(auditResult.value.filter((e) => e.details?.["done"] === true)).toHaveLength(3);
+  });
+});
+
+describe("PhaseWorkflowService — NEGATIVE: done() refuses without passing evidence or under a fresh foreign claim", () => {
+  it("no evidence at all → VALIDATION_ERROR, doc unchanged", async () => {
+    const { store, service } = makeServices();
+    await mustInsert(store, makePlanRecord());
+    await mustInsert(store, makePhaseRecord());
+
+    const doneResult = await service.done("phase-one", { by: "agent:p1" });
+    expect(doneResult.ok).toBe(false);
+    if (doneResult.ok) return;
+    expect(doneResult.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("a fresh claim held by a different actor refuses done()", async () => {
+    const { store, service } = makeServices();
+    await mustInsert(store, makePlanRecord());
+    await mustInsert(store, makePhaseRecord());
+
+    await service.addEvidence("phase-one", {
+      oracle: "test",
+      command: "bun test",
+      result: "pass",
+      recorded_by: "agent:p1",
+    });
+    await service.claim("phase-one", { by: "agent:p2" });
+
+    const doneResult = await service.done("phase-one", { by: "agent:p1" });
+    expect(doneResult.ok).toBe(false);
+    if (doneResult.ok) return;
+    expect(doneResult.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("a second done() call after archival is an idempotent no-op", async () => {
+    const { store, service } = makeServices();
+    await mustInsert(store, makePlanRecord());
+    await mustInsert(store, makePhaseRecord());
+    await service.addEvidence("phase-one", {
+      oracle: "test",
+      command: "bun test",
+      result: "pass",
+      recorded_by: "agent:p1",
+    });
+    await service.done("phase-one", { by: "agent:p1" });
+
+    const second = await service.done("phase-one", { by: "agent:p1" });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.value.already_done).toBe(true);
+    expect(second.value.transitions).toEqual([]);
   });
 });

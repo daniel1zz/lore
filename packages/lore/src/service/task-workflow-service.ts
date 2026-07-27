@@ -15,6 +15,11 @@
  *                                             CLI/MCP surface, VerifyRunnerService-only
  *   claim(idOrSlug, opts, now?)            → acquire/refresh/steal the advisory lease
  *   release(idOrSlug, opts, now?)          → clear the advisory lease
+ *   done(idOrSlug, opts, now?)             → evidence-validated atomic lifecycle walk
+ *                                             to `archived` (spec-workflow-hardening-
+ *                                             evidence-red-vocabulary-claim-worktree
+ *                                             §M3, AC-WH-3); idempotent on an
+ *                                             already-terminal task
  *   ready(planIdOrSlug, now?)              → computed readiness report (zero writes)
  *   readyAdhoc(now?)                       → OPEN ad-hoc (planless) task listing (zero
  *                                             writes, SPEC-069 D2) — the `--adhoc`
@@ -65,9 +70,26 @@
  *   (accepted residual — loud, retriable; see `rollbackClaim`'s JSDoc for why a
  *   deterministic tiebreak was rejected). No lock table / daemon / mutex row was added.
  *
+ * @invariant `done()` is the ONLY method that writes `status` (every other method here
+ *   touches `extra` exclusively via `writeTaskExtra` — see that method's own
+ *   @invariant). It walks {@link computeArchiveWalk}'s canonical multi-step path to
+ *   `"archived"` ONE STEP AT A TIME via the sibling `writeTaskStatus` (own CAS write,
+ *   own versions row, own audit entry per step — AC-WH-3's "one audit row per
+ *   lifecycle step"), never the type-scoped single-hop `draft -> archived` shortcut
+ *   `DRAFT_TO_ARCHIVED_ALLOWED_TYPES` (`packages/core/src/schemas.ts`) grants task
+ *   docs — that shortcut belongs to the ARCHIVE-SWEEP mechanism (spec-lifecycle-
+ *   archival-plan-close-cascade-deterministic §D3), a DIFFERENT, REJECTED alternative
+ *   for `done` (spec-workflow-hardening-evidence-red-vocabulary-claim-worktree
+ *   §Overview "(c)"). "Atomic" describes the caller's experience (one command) not a
+ *   single store transaction — see `done()`'s own JSDoc for the mid-walk-failure
+ *   contract. Refuses (VALIDATION_ERROR) with no passing (`result: "pass"`) evidence
+ *   or a fresh foreign claim; an already-terminal task is an idempotent no-op, never
+ *   an error — see `DoneResult`'s own JSDoc.
+ *
  * Side-effect class: IO (reads/writes via StoreInterface; emits telemetry).
  * Source: SPEC-025 §3 D2, D3, D5, D7, D8, D10; §4 AC-WF-1..11; §8.2, §8.3; SPEC-038 §4, §7 D4;
- *         SPEC-039 §2 D2, §4 AC-VRF-2; BUG-011 (anchor-overlap gate TOCTOU hardening)
+ *         SPEC-039 §2 D2, §4 AC-VRF-2; BUG-011 (anchor-overlap gate TOCTOU hardening);
+ *         spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M3, AC-WH-3
  */
 
 import { z } from "zod";
@@ -77,6 +99,7 @@ import {
   evidenceEntrySchema,
   taskClaimSchema,
   isClaimStale,
+  isValidTransition,
   evaluateReadiness,
   buildTaskClaim,
   renewClaimForEvidence,
@@ -139,6 +162,35 @@ export interface ReleaseOpts {
   force?: boolean;
   /** See {@link ClaimOpts.source}. */
   source?: string;
+}
+
+/** Options for {@link TaskWorkflowService.done} / {@link PhaseWorkflowService.done}. */
+export interface DoneOpts {
+  /**
+   * Resolved actor identity — recorded on EVERY lifecycle step's version history
+   * entry and audit row this call produces, and checked against a fresh claim's
+   * `by` (a fresh claim held by a DIFFERENT actor refuses the whole call).
+   */
+  by: string;
+  /** See {@link ClaimOpts.source}. */
+  source?: string;
+}
+
+/**
+ * {@link TaskWorkflowService.done}'s return shape (spec-workflow-hardening-evidence-red-
+ * vocabulary-claim-worktree §M3, AC-WH-3).
+ *
+ * `already_done: true` marks the IDEMPOTENT NO-OP branch — `idOrSlug` was ALREADY at a
+ * terminal status (`archived`/`deprecated`) before this call; `task` is the doc
+ * UNCHANGED (no write happened) and `transitions` is `[]`. `already_done: false` marks a
+ * real walk: `transitions` lists every status stepped through, IN ORDER, ending in
+ * `"archived"` — one entry per audited write {@link TaskWorkflowService.done}'s own
+ * JSDoc describes.
+ */
+export interface DoneResult {
+  task: DocRecord;
+  already_done: boolean;
+  transitions: DocStatus[];
 }
 
 /**
@@ -261,6 +313,48 @@ export function rejectBlankClaimWorktree(worktree: string | undefined): Result<v
     });
   }
   return ok(undefined);
+}
+
+/**
+ * Computes the canonical sanctioned lifecycle path from `from` to `"archived"`, used by
+ * {@link TaskWorkflowService.done} and (via re-export) `PhaseWorkflowService.done`
+ * (spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M3) — mirrors the
+ * `rejectBlankClaimWorktree` SSOT-export precedent above rather than duplicating this
+ * logic per-service.
+ *
+ * Every returned status is one step of the walk; each is a sanctioned edge in the BASE
+ * `VALID_TRANSITIONS` graph (`packages/core/src/schemas.ts`) — deliberately NOT the
+ * type-scoped `draft -> archived` single-hop shortcut `DRAFT_TO_ARCHIVED_ALLOWED_TYPES`
+ * grants `task`/`knowledge` docs (that shortcut serves the ARCHIVE-SWEEP mechanism,
+ * spec-lifecycle-archival-plan-close-cascade-deterministic §D3 — a DIFFERENT, REJECTED
+ * alternative for `done`, see that spec's §Overview "(c)"). `done()` re-validates each
+ * step against `isValidTransition` immediately before writing it (belt-and-suspenders —
+ * a future edit to `VALID_TRANSITIONS` that silently removes one of these edges fails
+ * loud there, not here).
+ *
+ * Skips the `in-review` review-workflow detour when `from` is `"draft"` — the base graph
+ * already permits `draft -> approved` directly, and `lore done` is not a human review
+ * action.
+ *
+ * @param from - The document's CURRENT status (never `"archived"`/`"deprecated"` in
+ *   practice — `done()`'s own idempotent-no-op branch short-circuits before this is
+ *   called in that case; both cases return `[]` here anyway, defensively)
+ * @returns Ordered array of statuses to walk through, ending in `"archived"`; `[]` when
+ *   `from` is already terminal
+ */
+export function computeArchiveWalk(from: DocStatus): DocStatus[] {
+  switch (from) {
+    case "draft":
+    case "in-review":
+      return ["approved", "active", "archived"];
+    case "approved":
+      return ["active", "archived"];
+    case "active":
+      return ["archived"];
+    case "archived":
+    case "deprecated":
+      return [];
+  }
 }
 
 /**
@@ -828,6 +922,130 @@ export class TaskWorkflowService {
       previous_holder: existingClaim.by,
       ...(opts.reason !== undefined ? { reason: opts.reason } : {}),
     });
+  }
+
+  // ── done ─────────────────────────────────────────────────────────────────
+
+  /**
+   * Evidence-validated, atomic-from-the-caller's-perspective lifecycle walk to
+   * `"archived"` (spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M3,
+   * AC-WH-3) — closes the gap the EXECUTE loop (claim → evidence → release) leaves: a
+   * released task stays `draft`, which readiness's `blocks`-link computation never
+   * treats as "met" (only `archived`/`deprecated` are terminal).
+   *
+   * Refuses (VALIDATION_ERROR) when:
+   *   - the task holds no `result: "pass"` evidence entry — `"expected-fail"` (M1),
+   *     `"fail"`, and `"inconclusive"` never count, regardless of how many of them exist;
+   *   - a FRESH claim (same `isClaimStale` freshness test `claim()`/`ready()` use) is
+   *     held by a DIFFERENT actor than `opts.by` — a STALE claim, or a fresh claim held
+   *     by `opts.by` itself, never blocks.
+   *
+   * An ALREADY-terminal task (`status` is `archived` or `deprecated`) is an IDEMPOTENT
+   * NO-OP: returns `{already_done: true, transitions: [], task}` with the doc completely
+   * UNCHANGED — never an error. A second `lore done` call after a first one succeeded
+   * must never fail.
+   *
+   * Otherwise walks {@link computeArchiveWalk}'s canonical multi-step path ONE STEP AT A
+   * TIME, each step its own CAS-guarded {@link writeTaskStatus} write (own version bump,
+   * own versions row, own audit entry — "one audit row per lifecycle step", AC-WH-3).
+   * "Atomic from the caller's perspective" means ONE COMMAND, not one store transaction:
+   * a mid-walk failure (e.g. `STALE_VERSION` from a concurrent writer) surfaces loud
+   * immediately, leaving the doc at whatever intermediate status the last successful
+   * step reached — the caller can safely retry `lore done`, which re-validates
+   * evidence/claim against the doc's CURRENT status and resumes the walk (never
+   * re-running an already-committed step, since `computeArchiveWalk` is re-derived from
+   * the freshly-read `task.status` each call).
+   *
+   * @param idOrSlug - Task document ULID or slug
+   * @param opts - `{ by, source? }`
+   * @param now - Time seam (D10) — ONE reading shared by every step's timestamp
+   * @returns `DoneResult` — see that type's own JSDoc
+   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a task / no passing evidence / fresh
+   *   foreign claim / illegal lifecycle step — the last one structurally unreachable
+   *   given `computeArchiveWalk`'s own base-graph-only steps, kept as a fail-loud guard
+   *   rather than a non-null assertion), STALE_VERSION
+   */
+  async done(
+    idOrSlug: string,
+    opts: DoneOpts,
+    now: () => string = defaultNow,
+  ): Promise<Result<DoneResult, LoreError>> {
+    const startMs = Date.now();
+    const result = await this._doneImpl(idOrSlug, opts, now);
+    this.recordEvent("task.done", startMs, result, opts.source, {
+      by: opts.by,
+      already_done: result.ok ? result.value.already_done : false,
+    });
+    return result;
+  }
+
+  private async _doneImpl(
+    idOrSlug: string,
+    opts: DoneOpts,
+    now: () => string,
+  ): Promise<Result<DoneResult, LoreError>> {
+    const taskResult = await this.resolveTask(idOrSlug);
+    if (!taskResult.ok) return taskResult;
+    let task = taskResult.value;
+
+    // reason: idempotent no-op BEFORE any evidence/claim validation — a second `lore
+    // done` on an already-archived task must succeed even if, say, its evidence log
+    // somehow no longer holds a pass (it can't be edited post-archival in practice, but
+    // this ordering makes that irrelevant rather than a latent footgun).
+    if (task.status === "archived" || task.status === "deprecated") {
+      return ok({ task, already_done: true, transitions: [] });
+    }
+
+    const evidence = readEvidence(task);
+    if (!evidence.some((e) => e.result === "pass")) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "extra.verification_evidence",
+        message:
+          `Task "${task.slug}" holds no result:pass evidence entry — lore done requires ` +
+          `at least one passing oracle verification before archiving ("expected-fail", ` +
+          `"fail", and "inconclusive" entries never count)`,
+        value: evidence.map((e) => e.result),
+      });
+    }
+
+    const nowIso = now();
+    const claim = readClaim(task);
+    if (claim !== undefined && claim.by !== opts.by && !isClaimStale(claim, nowIso, this.claimTtlMinutes)) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "extra.claim",
+        message:
+          `Task "${task.slug}" is held by a fresh claim from "${claim.by}" — lore done ` +
+          `refuses to archive a task out from under an active session`,
+        value: claim.by,
+      });
+    }
+
+    const walk = computeArchiveWalk(task.status);
+    const transitions: DocStatus[] = [];
+    for (const nextStatus of walk) {
+      if (!isValidTransition(task.status, nextStatus)) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "status",
+          message: `Illegal lifecycle step ${task.status} -> ${nextStatus} while archiving "${task.slug}"`,
+          value: { from: task.status, to: nextStatus },
+        });
+      }
+      const stepResult = await this.writeTaskStatus(
+        task,
+        nextStatus,
+        nowIso,
+        opts.by,
+        `lore done: ${task.status} → ${nextStatus}`,
+      );
+      if (!stepResult.ok) return stepResult;
+      task = stepResult.value;
+      transitions.push(nextStatus);
+    }
+
+    return ok({ task, already_done: false, transitions });
   }
 
   // ── Anchor Mutations (SPEC-042 D3) ──────────────────────────────────────────
@@ -1440,12 +1658,83 @@ export class TaskWorkflowService {
   }
 
   /**
+   * Shared write path for ONE {@link done} lifecycle step — CAS-guarded store.update on
+   * `status` only, followed by one insertVersion snapshot and one audit entry. This is
+   * the ONLY write path in this service touching `status` — {@link writeTaskExtra}
+   * (claim/release/evidence/anchors) touches `extra` exclusively; the two partition the
+   * doc's mutable surface between them and are never combined into one write.
+   *
+   * The audit entry's `action` is deliberately `"update"` (NOT a new `"done"` label) —
+   * `AuditService.verify`'s completeness join keys off `VERSION_ACTION_AUDIT_FAMILY`
+   * (`audit-service.ts`, out of this task's declared file anchors), which recognizes
+   * `"update"` but has no `"done"` member; `details.status_from`/`details.status_to`
+   * disambiguate this call from a plain `lore set --status` write for any audit-log
+   * reader, mirroring the `archive-cascade`/`archive-sweep` precedent's OWN comment in
+   * `corpus-service.ts` for why the versions-row action and the audit-entry action can
+   * diverge under this exact-version join.
+   */
+  private async writeTaskStatus(
+    task: DocRecord,
+    newStatus: DocStatus,
+    nowIso: string,
+    actor: string,
+    changeSummary: string,
+  ): Promise<Result<DocRecord, LoreError>> {
+    const newVersion = task.version + 1;
+    const updateResult = await this.store.update(
+      task.id,
+      { status: newStatus, updated_at: nowIso, version: newVersion },
+      { expected_version: task.version },
+    );
+    if (!updateResult.ok) return updateResult;
+
+    const versionResult = await this.store.insertVersion({
+      doc_id: task.id,
+      version: newVersion,
+      content: updateResult.value.content,
+      extra: updateResult.value.extra,
+      status: updateResult.value.status,
+      title: updateResult.value.title,
+      action: "update",
+      created_at: nowIso,
+      created_by: actor,
+      change_summary: changeSummary,
+      slug: updateResult.value.slug,
+    });
+    if (!versionResult.ok) return versionResult;
+
+    const auditResult = await this.store.appendAuditEntry({
+      timestamp: nowIso,
+      actor,
+      session_id: `done-${task.id}`,
+      action: "update",
+      doc_id: task.id,
+      details: {
+        by: actor,
+        status_from: task.status,
+        status_to: newStatus,
+        version: newVersion,
+        done: true,
+      },
+    });
+    if (!auditResult.ok) return auditResult;
+
+    return ok(updateResult.value);
+  }
+
+  /**
    * Records exactly one telemetry event per successful write (AC-WF-11).
    * Never throws — delegates to Telemetry.record() which swallows IO errors.
    * Failed writes do not emit an event (the AC scopes emission to "successful ... write").
+   *
+   * `eventName` accepts `"task.done"` in addition to `TaskWorkflowEventName`'s own
+   * members (`@lore/core`'s `telemetry.ts`, out of this task's declared file anchors) —
+   * widened locally rather than editing that SSOT type, since `TelemetryEvent.method`
+   * itself is `z.string()` (unconstrained at the schema level; `TaskWorkflowEventName`
+   * only exists to exhaustively check THIS service's own call sites at compile time).
    */
   private recordEvent<T>(
-    eventName: TaskWorkflowEventName,
+    eventName: TaskWorkflowEventName | "task.done",
     startMs: number,
     result: Result<T, LoreError>,
     source: string | undefined,
