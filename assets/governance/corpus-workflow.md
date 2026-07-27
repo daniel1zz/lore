@@ -33,7 +33,7 @@ Discipline lives in the corpus, not in the prompt: deterministic gates intercept
 - Superseded knowledge → `lore invalidate <doc> --superseded-by <new> --reason "<why>"` — never leave it quietly stale.
 - Session interrupted or ending with open work → `lore handoff --by <actor> [--plan <plan>] --decision "<judgment>[@confidence]" --next "<next step>"` (NOT `lore create knowledge --sub-type handoff` — the writer-identity guard rejects that path, naming `lore handoff` as the sole writer). The next session consumes it via `lore feed session-resume`.
 - After writing a handoff, ALWAYS report its ticket to the user: the handoff slug plus the paste-ready resume command `lore feed session-resume --handoff <slug>` — the user hands that ticket to the next session for exact context pickup. This ticket is the ONLY sanctioned resumption path; session-start injection never selects a thread for you.
-- Maintenance cadence: `lore pending` (review queue) / `lore review --staleness --list` (stale candidates) / `lore status --check-tree --check-drift` (structure and code-anchor drift).
+- Maintenance cadence: `lore pending` (review queue) / `lore review --staleness --list` (stale candidates) / `lore status --check-tree --check-drift` (structure and code-anchor drift) / `lore archive --sweep` (execution-scoped docs due for archival — apply with `lore archive --apply`).
 - Suspect a lore defect itself (gate false-deny, wrong/misleading output, a crash)? Re-verify your own input first. Still confirmed → `lore report-issue --title <t> --expected <e> --actual <a>` (needs `feedback.upstream` configured). Check `lore report-issue --list` for a prior filing before re-reporting the same symptom.
 
 </corpus-workflow>

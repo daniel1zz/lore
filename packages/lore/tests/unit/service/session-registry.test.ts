@@ -359,6 +359,7 @@ describe("SessionService.bootstrap — active_sessions (SPEC-042 D8)", () => {
           newest_at: "2026-07-11T10:00:00.000Z",
         },
       ],
+      archive_candidates: 0,
     };
     const parsed = bootstrapReportSchema.parse(report);
     expect(parsed.active_sessions).toEqual(report.active_sessions);

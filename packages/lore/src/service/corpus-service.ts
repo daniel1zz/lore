@@ -42,6 +42,7 @@ import {
   extractClaim,
   ORDINAL_REGISTRY,
   isSelfDeclaredOrdinalTitle,
+  computePlanCloseCascadeTargets,
 } from "@lore/core";
 import type {
   CreateDocInput,
@@ -51,6 +52,7 @@ import type {
   SpecKind,
   VersionRecord,
   AuditEntry,
+  ArchiveCandidateRule,
 } from "@lore/core";
 import {
   DOC_TYPE_ROLE_MAP,
@@ -345,6 +347,25 @@ export interface CorpusStatus {
    * a fact, not absent data).
    */
   exempt_plans: Array<{ slug: string }>;
+}
+
+/**
+ * Result of the R1 plan-close cascade `set()` runs inline immediately after a
+ * plan's OWN archival write commits (spec-lifecycle-archival-plan-close-cascade-deterministic
+ * §Design Decisions D2). Spliced onto the returned `DocRecord` as an
+ * additional `cascade` property (see `set()`'s own JSDoc for why this is a
+ * backward-compatible widening rather than a `set()` signature change) —
+ * present ONLY for an actual plan→archived transition, absent for every other
+ * `set()` call (never present-as-empty).
+ *
+ * @invariant `failed`/`skipped` are LOUD, never silent — a cascade failure on
+ *   one doc never rolls back the plan's own archival (D2), but it is always
+ *   itemized here rather than swallowed.
+ */
+export interface PlanCloseCascadeResult {
+  readonly archived: ReadonlyArray<{ doc_id: DocId; slug: string; kind: "task" | "handoff" }>;
+  readonly skipped: ReadonlyArray<{ doc_id: DocId; slug: string; reason: string }>;
+  readonly failed: ReadonlyArray<{ doc_id: DocId; slug: string; reason: string }>;
 }
 
 // ─── CorpusService ─────────────────────────────────────────────────────────
@@ -1351,11 +1372,21 @@ export class CorpusService {
    *   succeeding. Omitted (the pre-existing default) → behavior is BYTE-IDENTICAL
    *   to before this fix (CAS against this call's own fresh `existing.version`).
    */
+  /**
+   * @returns `ok(doc)` — `doc` is the updated `DocRecord`. For an ACTUAL plan→archived
+   *   transition (SPEC-lifecycle-archival R1), `doc` carries an ADDITIONAL `cascade`
+   *   property (`PlanCloseCascadeResult`) reporting which direct child tasks/handoffs
+   *   were archived, skipped (fresh claim), or failed — see `cascadeArchiveOnPlanClose`'s
+   *   JSDoc. Absent for every other call (never present-as-empty). This is a
+   *   backward-compatible WIDENING of the pre-existing `DocRecord` return shape (an
+   *   additional optional field), not a breaking signature change — every caller that
+   *   only reads standard `DocRecord` fields is unaffected.
+   */
   async set(
     idOrSlug: string,
     patch: DocPatch,
     opts?: WriteActorOpts & { expectedVersion?: number },
-  ): Promise<Result<DocRecord, LoreError>> {
+  ): Promise<Result<DocRecord & { cascade?: PlanCloseCascadeResult }, LoreError>> {
     const parsedPatch = docPatchSchema.safeParse(patch);
     if (!parsedPatch.success) {
       const issue = parsedPatch.error.issues[0];
@@ -1405,13 +1436,13 @@ export class CorpusService {
     if (
       !isApprovedAutoResetToDraft &&
       newStatus !== existing.status &&
-      !isValidTransition(existing.status, newStatus)
+      !isValidTransition(existing.status, newStatus, existing.type)
     ) {
       return err({
         code: "INVALID_TRANSITION",
         from: existing.status,
         to: newStatus,
-        allowed: getAllowedTransitions(existing.status),
+        allowed: getAllowedTransitions(existing.status, existing.type),
       });
     }
 
@@ -1772,13 +1803,18 @@ export class CorpusService {
     //   - `prdOutlineSynced` (SPEC-080 §C4, OPT-IN via a DEFAULT-OFF config knob):
     //     evaluated only when `GateEnforcer.isPrdSyncEnabled()` is true AND the plan
     //     declares no valid `extra.prd_sync_exempt` — see the dedicated block below.
-    if (
-      existing.type === "plan" &&
-      newStatus === "archived" &&
-      existing.status !== "archived" &&
-      this.gateEnforcer &&
-      this.gateEnforcer.isEnabled("plan-close")
-    ) {
+    //
+    // reason: `isPlanClosing` is reused below (after the write commits) to fire the
+    // R1 plan-close cascade (spec-lifecycle-archival-plan-close-cascade-deterministic
+    // §Design Decisions D2) — deliberately NOT gated on `this.gateEnforcer`/
+    // `isEnabled("plan-close")` the way the sub-gate block immediately below is: the
+    // cascade is a data-integrity mechanism independent of whether the ADVISORY
+    // plan-close gate itself is configured on, so a corpus running with the gate
+    // disabled still gets its execution-scoped docs cleaned up on close.
+    const isPlanClosing =
+      existing.type === "plan" && newStatus === "archived" && existing.status !== "archived";
+
+    if (isPlanClosing && this.gateEnforcer && this.gateEnforcer.isEnabled("plan-close")) {
       const effectiveExtra = (parsedPatch.data.extra !== undefined
         ? parsedPatch.data.extra
         : existing.extra) as Record<string, unknown>;
@@ -1981,7 +2017,201 @@ export class CorpusService {
       return ok(allocResult.value);
     }
 
+    // R1 plan-close cascade (spec-lifecycle-archival-plan-close-cascade-deterministic
+    // §Design Decisions D2) — runs in the SAME logical operation as the plan's own
+    // archival write, immediately after it commits. Never rolls back the plan's own
+    // write on a per-doc cascade failure (D2) — `cascade` is spliced onto the
+    // returned doc as an ADDITIONAL property (see `PlanCloseCascadeResult`'s own
+    // JSDoc), never a `set()` signature change, so every pre-existing caller that
+    // only reads `DocRecord` fields stays byte-identical.
+    if (isPlanClosing) {
+      const cascade = await this.cascadeArchiveOnPlanClose(updateResult.value, now, resolvedActor);
+      return ok({ ...updateResult.value, cascade });
+    }
+
     return ok(updateResult.value);
+  }
+
+  /**
+   * Archives a plan's direct `task`/`handoff` children per the R1 cascade rule
+   * (`computePlanCloseCascadeTargets`, `@lore/core`) — called ONLY from `set()`
+   * immediately after a plan's own → archived write commits. Each cascaded doc gets
+   * its OWN status write + audit entry (`action: "archive-cascade"`, distinguishable
+   * from a plain `lore set --status archived` in the audit log); a write failure on
+   * one doc is collected into `failed` and never aborts the loop or the caller's
+   * already-committed plan archival (D2 — loud, never silent, never a rollback).
+   *
+   * @param plan - The plan doc AFTER its own archival write committed (`updateResult.value`).
+   * @param nowIso - The SAME `now` `set()` resolved for its own write — one clock
+   *   reading for the whole logical operation.
+   * @param actor - The SAME resolved actor `set()`'s own audit entry used.
+   */
+  private async cascadeArchiveOnPlanClose(
+    plan: DocRecord,
+    nowIso: string,
+    actor: string,
+  ): Promise<PlanCloseCascadeResult> {
+    const tasksResult = await this.store.findMany({ parent_id: plan.id, type: "task" });
+    const handoffsResult = await this.store.findMany({ parent_id: plan.id, type: "knowledge" });
+    if (!tasksResult.ok || !handoffsResult.ok) {
+      // reason: an enumeration failure here is a store-level fault, not a per-doc
+      // outcome — reported as a single failed entry keyed to the plan itself rather
+      // than silently returning an empty (and therefore misleadingly "nothing to do")
+      // cascade result.
+      return {
+        archived: [],
+        skipped: [],
+        failed: [
+          {
+            doc_id: plan.id,
+            slug: plan.slug,
+            reason: "failed to enumerate plan children for cascade",
+          },
+        ],
+      };
+    }
+
+    const handoffChildren = handoffsResult.value.filter((doc) => {
+      const parsed = knowledgeExtraSchema.safeParse(doc.extra);
+      return parsed.success && parsed.data.sub_type === "handoff";
+    });
+    const children = [...tasksResult.value, ...handoffChildren];
+
+    // reason: 120 mirrors WorkflowConfigSchema's own claim_ttl_minutes default —
+    // the same fallback `deriveTypeMeta`'s bare-constructor callers implicitly rely
+    // on elsewhere in this file when `claimTtlMinutes` DI is absent.
+    const plan_ = computePlanCloseCascadeTargets(children, nowIso, this.claimTtlMinutes ?? 120);
+
+    const archived: Array<{ doc_id: DocId; slug: string; kind: "task" | "handoff" }> = [];
+    const failed: Array<{ doc_id: DocId; slug: string; reason: string }> = [];
+
+    for (const target of plan_.toArchive) {
+      const doc = children.find((c) => c.id === target.doc_id);
+      if (doc === undefined) {
+        // reason: can't happen — `target.doc_id` was derived FROM `children` by
+        // `computePlanCloseCascadeTargets` above; kept as a fail-loud guard rather
+        // than a non-null assertion so a future refactor of either side can't
+        // silently reintroduce a mismatch.
+        failed.push({ doc_id: target.doc_id, slug: target.slug, reason: "cascade target not found in children" });
+        continue;
+      }
+      if (!isValidTransition(doc.status, "archived", doc.type)) {
+        failed.push({
+          doc_id: doc.id,
+          slug: doc.slug,
+          reason: `invalid transition ${doc.status} -> archived`,
+        });
+        continue;
+      }
+
+      const newVersion = doc.version + 1;
+      const versionRecord: VersionRecord = {
+        doc_id: doc.id,
+        version: newVersion,
+        content: doc.content,
+        extra: doc.extra,
+        status: "archived",
+        title: doc.title,
+        action: "update",
+        created_at: nowIso,
+        created_by: actor,
+        slug: doc.slug,
+      };
+      const writeResult = await this.store.updateWithProvenance(
+        doc.id,
+        { status: "archived", version: newVersion, updated_at: nowIso },
+        { expected_version: doc.version },
+        versionRecord,
+        {
+          timestamp: nowIso,
+          actor,
+          session_id: doc.id,
+          // reason: distinguishable audit action (SPEC-lifecycle-archival D2) —
+          // versions row stays `action: "update"` (VersionAction has no "cascade"
+          // member); the AUDIT entry's `action` is free-form (AuditEntry.action:
+          // string), mirroring the pre-existing TaskWorkflowService/ValidityService
+          // "update" versions-row + specific-audit-action precedent
+          // (claim/release/evidence/anchors/invalidate, audit-service.ts's
+          // VERSION_ACTION_AUDIT_FAMILY). "archive-cascade" is added to that same
+          // family below so `lore audit --verify`'s completeness join recognizes it.
+          action: "archive-cascade",
+          doc_id: doc.id,
+          details: { plan_id: plan.id, plan_slug: plan.slug, kind: target.kind, version: newVersion },
+        },
+      );
+      if (!writeResult.ok) {
+        failed.push({ doc_id: doc.id, slug: doc.slug, reason: `write failed: ${writeResult.error.code}` });
+        continue;
+      }
+      archived.push({ doc_id: doc.id, slug: doc.slug, kind: target.kind });
+    }
+
+    return { archived, skipped: plan_.skipped, failed };
+  }
+
+  /**
+   * Applies one `lore archive --apply` sweep candidate (`ArchiveCandidateRule` R2-R4,
+   * `computeArchiveCandidates` @lore/core) — a status write to `archived` audited under
+   * `action: "archive-sweep"` (distinguishable from both a plain `lore set` and the R1
+   * cascade's `archive-cascade`). Unlike the cascade above, this is a PUBLIC entry
+   * point: the `lore archive --apply` CLI command resolves candidates itself (same
+   * `computeArchiveCandidates` call the `--sweep` report uses) and calls this once per
+   * candidate, so the CLI can print an individual per-doc outcome line.
+   *
+   * @param doc - The FULL candidate doc (the CLI already has it in hand from
+   *   `corpusService.listFull({})` — no redundant re-fetch here).
+   * @param rule - Which R2-R4 rule flagged this candidate (recorded in the audit details).
+   * @param reason - The candidate's human-readable reason (recorded in the audit details).
+   * @param opts - Standard `WriteActorOpts` — actor resolution mirrors every other
+   *   write method on this service (D5: "never `system`").
+   * @returns `ok(DocRecord)` of the archived doc, or `err(INVALID_TRANSITION)` /
+   *   the underlying store error on failure — never throws.
+   */
+  async archiveSweepCandidate(
+    doc: DocRecord,
+    rule: ArchiveCandidateRule,
+    reason: string,
+    opts?: WriteActorOpts,
+  ): Promise<Result<DocRecord, LoreError>> {
+    if (!isValidTransition(doc.status, "archived", doc.type)) {
+      return err({
+        code: "INVALID_TRANSITION",
+        from: doc.status,
+        to: "archived",
+        allowed: getAllowedTransitions(doc.status, doc.type),
+      });
+    }
+
+    const now = new Date().toISOString();
+    const resolvedActor = this.resolveWriteActor(opts?.by);
+    const newVersion = doc.version + 1;
+    const versionRecord: VersionRecord = {
+      doc_id: doc.id,
+      version: newVersion,
+      content: doc.content,
+      extra: doc.extra,
+      status: "archived",
+      title: doc.title,
+      action: "update",
+      created_at: now,
+      created_by: resolvedActor,
+      slug: doc.slug,
+    };
+    const writeResult = await this.store.updateWithProvenance(
+      doc.id,
+      { status: "archived", version: newVersion, updated_at: now },
+      { expected_version: doc.version },
+      versionRecord,
+      {
+        timestamp: now,
+        actor: resolvedActor,
+        session_id: doc.id,
+        action: "archive-sweep",
+        doc_id: doc.id,
+        details: { rule, reason, version: newVersion },
+      },
+    );
+    return writeResult;
   }
 
   // ── Delete ───────────────────────────────────────────────────────────────

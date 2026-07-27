@@ -40,6 +40,7 @@ import {
   deriveResumeHint,
   parseSeatBranch,
   isInvalidated,
+  computeArchiveCandidates,
 } from "@lore/core";
 import type {
   BootstrapReport,
@@ -412,6 +413,17 @@ export class SessionService {
         ? allDocs.reduce((latest, d) => (d.updated_at > latest ? d.updated_at : latest), allDocs[0]!.updated_at)
         : null;
 
+    // spec-lifecycle-archival-plan-close-cascade-deterministic §Design Decisions D4 —
+    // ONE derivation site: the SAME computeArchiveCandidates (R2-R4 sweep rule
+    // engine) `lore archive --sweep`/`--apply` calls, over the SAME `allDocs` this
+    // method already fetched above (no extra store round-trip). R1 (cascade) is
+    // deliberately excluded — it fires automatically at plan-close, needing no
+    // discovery surfacing.
+    const archiveCandidatesCount = computeArchiveCandidates(allDocs, nowIso, {
+      handoffTtlMinutes: this.deps.handoffTtlMinutes,
+      claimTtlMinutes: this.deps.claimTtlMinutes,
+    }).length;
+
     const report: BootstrapReport = {
       root,
       active_plans: activePlans,
@@ -426,6 +438,7 @@ export class SessionService {
       ...(seatUnresolved ? { seat_unresolved: true as const } : {}),
       corpus: { total_docs: allDocs.length, last_updated: lastUpdated },
       active_sessions: activeSessions,
+      archive_candidates: archiveCandidatesCount,
     };
 
     // reason: self-consistency assertion, not user-input validation —
