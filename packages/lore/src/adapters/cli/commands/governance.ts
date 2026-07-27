@@ -1,19 +1,38 @@
 /**
- * `lore governance` — SPEC-083 D1: prints the corpus-workflow governance
- * prose (`assets/governance/corpus-workflow.md`) verbatim to stdout, exit 0.
+ * `lore governance [topic]` — SPEC-083 D1 origin, extended by
+ * spec-project-claude-md-content-contract-governance-injected §Design
+ * Decisions D6 into a positional TOPIC REGISTRY: `corpus-workflow` (default,
+ * bare `lore governance`) | `seat-briefing` | `claude-md`. Prints the
+ * resolved topic's governance prose asset verbatim to stdout, exit 0.
  *
- * SPEC-085 D1: gains one boolean flag, `--seat-briefing` — prints
- * `assets/governance/seat-briefing.md` verbatim instead (the RAW template,
- * `{{ACTOR}}`/`{{BRANCH}}`/`{{MAIN_CHECKOUT}}` placeholders intact —
- * substitution stays the session-start hook's job, unchanged). Bare
- * `lore governance` (no flag) MUST stay byte-identical to the SPEC-083
- * behaviour — this is a REGRESSION pin, not a reinterpretation. The flag is
- * declared in `args` below so the SPEC-051 strict seam (undeclared flags
- * rejected exit 2) covers it with zero extra edits.
+ * Registry (topic → repo-relative path under `assetsRoot`):
+ *   - `corpus-workflow` (default) → `assets/governance/corpus-workflow.md`
+ *   - `seat-briefing`             → `assets/governance/seat-briefing.md`
+ *   - `claude-md`                 → `assets/governance/claude-md-contract.md`
  *
- * Public surface: default export, a citty `CommandDef` with one boolean flag
- * (no positionals, no `--json` — the payload IS text, per the spec's D1
- * note).
+ * Legacy `--seat-briefing` boolean flag (SPEC-085 D1) is now a DEPRECATED
+ * ALIAS for the positional form `lore governance seat-briefing` — same byte
+ * output, PLUS exactly one deprecation line on stderr (D6). It stays
+ * declared in `args` (not removed) so the SPEC-051/073 strict-flag seam
+ * keeps accepting it with zero extra edits.
+ *
+ * Conflict handling (D6 — "More than one topic resolved... exit 2"): this
+ * command resolves the FULL set of distinct topics requested across BOTH
+ * input channels — every positional token actually passed (via `args._`,
+ * the SAME "citty maps exactly one token per declared positional, but the
+ * full raw list survives on `_`" mechanism `commands/anchor.ts`'s
+ * `collectVariadicPositionals` documents) plus, when the legacy flag is set,
+ * the literal `"seat-briefing"` topic. More than one DISTINCT topic in that
+ * set (two differing positional tokens, or the flag conflicting with a
+ * different positional) is a usage error — exit 2, message names every
+ * distinct topic requested. This deliberately subsumes the "third boolean
+ * flag" failure mode D6 rejects (`--seat-briefing --claude-md` used to
+ * silently pick one) as a single distinct-topic-count check, not two
+ * special-cased branches.
+ *
+ * Public surface: default export, a citty `CommandDef` with ONE optional
+ * positional (`topic`) and the legacy boolean flag (no `--json` — the
+ * payload IS text, per SPEC-083's D1 note).
  *
  * Bootstrap-stage exemption (mirrors `commands/setup.ts`'s own documented
  * exemption, `adapters/cli/CLAUDE.md`'s "Key Invariants" #4 — "Document the
@@ -44,11 +63,16 @@
  *     bytes (no trailing newline injection) — the hook's byte-parity
  *     contract (AC-083-1: stdout byte-identical to the source file) depends
  *     on this command never touching `console.log` (which appends `\n`).
+ *   - A usage error (multi-topic conflict, unknown topic name) is written to
+ *     stderr and exits 2 BEFORE any asset is read — never a partial print.
  *
  * Side-effect class: IO (one synchronous file read via `node:fs`, one
- *   synchronous stdout write via `writeAllSync`) — no corpus, no network.
+ *   synchronous stdout write via `writeAllSync`, occasional stderr writes for
+ *   deprecation/usage-error text) — no corpus, no network.
  *
- * Source: SPEC-083 §Design Decisions D1.
+ * Source: SPEC-083 §Design Decisions D1;
+ *   spec-project-claude-md-content-contract-governance-injected §Design
+ *   Decisions D6.
  */
 
 import { readFileSync } from "node:fs";
@@ -60,15 +84,28 @@ import { resolveAssetsRoot, type SetupPathContext } from "../setup-args.js";
 import { exitCode, formatError } from "../utils.js";
 import { writeAllSync } from "../stdio-sync.js";
 
-/** Repo-relative path (under `assetsRoot`) of the governance prose this command prints. */
-const GOVERNANCE_ASSET_REL_PATH = "governance/corpus-workflow.md";
+/** A registered `lore governance` topic name. */
+type GovernanceTopic = "corpus-workflow" | "seat-briefing" | "claude-md";
+
+/** Default topic when no positional/flag resolves one — SPEC-083 D1 back-compat. */
+const DEFAULT_GOVERNANCE_TOPIC: GovernanceTopic = "corpus-workflow";
 
 /**
- * Repo-relative path (under `assetsRoot`) of the seat-briefing template
- * printed by `--seat-briefing` (SPEC-085 D1). Raw template — placeholders
- * are NOT substituted here; that stays the session-start hook's job.
+ * Topic → repo-relative asset path registry (D6). SSOT for every topic this
+ * command can serve; adding a topic means adding one entry here.
  */
-const SEAT_BRIEFING_ASSET_REL_PATH = "governance/seat-briefing.md";
+const GOVERNANCE_TOPIC_ASSETS: Record<GovernanceTopic, string> = {
+  "corpus-workflow": "governance/corpus-workflow.md",
+  "seat-briefing": "governance/seat-briefing.md",
+  "claude-md": "governance/claude-md-contract.md",
+};
+
+/**
+ * Deprecation line printed to stderr, EXACTLY once, when the legacy
+ * `--seat-briefing` flag is used — never printed for the positional form.
+ */
+const SEAT_BRIEFING_FLAG_DEPRECATION_MESSAGE =
+  "Deprecated: --seat-briefing is deprecated, use `lore governance seat-briefing` instead.";
 
 // ─── Repo-root resolution (dev mode only — mirrors commands/setup.ts's own
 // identical derivation verbatim: packages/lore/src/adapters/cli/commands/
@@ -77,6 +114,43 @@ const SEAT_BRIEFING_ASSET_REL_PATH = "governance/seat-briefing.md";
 // instead, same as `lore setup`.) ─────────────────────────────────────────
 const MODULE_DIR = fileURLToPath(new URL(".", import.meta.url));
 const REPO_ROOT = join(MODULE_DIR, "..", "..", "..", "..", "..", "..");
+
+/**
+ * Reads every positional argument actually passed on the command line
+ * (citty maps exactly ONE token per declared `type: "positional"` arg,
+ * `.shift()`-ing off a COPY of `parsed._` — the full raw list, including
+ * every token beyond the first, survives untouched on `args._`; see
+ * `commands/anchor.ts`'s `collectVariadicPositionals` for the same
+ * mechanism documented against the same citty internals).
+ *
+ * @param args - The citty-parsed args object (proxies through to `parsed._`).
+ * @returns Every positional token passed, in order (may be empty).
+ */
+function collectPositionalTopics(args: Record<string, unknown>): string[] {
+  const all = (args as { _?: unknown[] })._ ?? [];
+  return all.map(String);
+}
+
+/**
+ * Resolves the set of distinct topics this invocation requested, across
+ * both the positional token(s) and the legacy `--seat-briefing` flag.
+ *
+ * @param positionalTopics - Every positional token passed (from `args._`).
+ * @param legacyFlag - Whether `--seat-briefing` was passed.
+ * @returns Distinct topic strings requested, in first-seen order. Untyped —
+ *   an entry may not be a registered `GovernanceTopic` (that validation
+ *   happens after the conflict check, so an unknown-topic error message
+ *   never gets shadowed by a spurious "multiple topics" message when only
+ *   one bad token was actually passed).
+ */
+function resolveDistinctTopicsRequested(positionalTopics: string[], legacyFlag: boolean): string[] {
+  const seen: string[] = [];
+  for (const topic of positionalTopics) {
+    if (!seen.includes(topic)) seen.push(topic);
+  }
+  if (legacyFlag && !seen.includes("seat-briefing")) seen.push("seat-briefing");
+  return seen;
+}
 
 /**
  * Reads a governance asset's raw text off disk, given a resolved
@@ -91,7 +165,7 @@ const REPO_ROOT = join(MODULE_DIR, "..", "..", "..", "..", "..", "..");
  */
 export function readGovernanceAsset(
   assetsRoot: string,
-  relPath: string = GOVERNANCE_ASSET_REL_PATH,
+  relPath: string = GOVERNANCE_TOPIC_ASSETS[DEFAULT_GOVERNANCE_TOPIC],
 ): { ok: true; value: string } | { ok: false; error: LoreError } {
   const assetPath = join(assetsRoot, relPath);
   try {
@@ -115,20 +189,52 @@ export default defineCommand({
   meta: {
     name: "governance",
     description:
-      "Print the corpus-workflow governance prose (assets/governance/corpus-workflow.md) " +
-      "verbatim to stdout — bootstrap-stage, no corpus required (SPEC-083 D1). " +
-      "--seat-briefing prints the raw seat-briefing template instead (SPEC-085 D1).",
+      "Print a governance prose asset verbatim to stdout — bootstrap-stage, no corpus required. " +
+      "Topic registry: corpus-workflow (default) | seat-briefing | claude-md (D6). " +
+      "--seat-briefing is a deprecated alias for the positional `seat-briefing` form (SPEC-085 D1).",
   },
   args: {
+    topic: {
+      type: "positional",
+      description: "Governance topic to print: corpus-workflow (default) | seat-briefing | claude-md",
+      required: false,
+    },
     "seat-briefing": {
       type: "boolean",
       description:
-        "Print governance/seat-briefing.md verbatim (raw template, placeholders intact) " +
-        "instead of the corpus-workflow prose (SPEC-085 D1)",
+        "DEPRECATED — alias for the positional `seat-briefing` topic form (`lore governance seat-briefing`). " +
+        "Still prints governance/seat-briefing.md verbatim, plus one deprecation line on stderr.",
       default: false,
     },
   },
   run({ args }) {
+    const legacyFlag = args["seat-briefing"] === true;
+    const positionalTopics = collectPositionalTopics(args);
+    const distinctTopics = resolveDistinctTopicsRequested(positionalTopics, legacyFlag);
+
+    if (distinctTopics.length > 1) {
+      process.stderr.write(
+        `Error: lore governance accepts at most one topic (requested: ${distinctTopics.join(", ")})\n`,
+      );
+      process.exitCode = 2;
+      return;
+    }
+
+    const requestedTopic = distinctTopics[0];
+    let topic: GovernanceTopic;
+    if (requestedTopic === undefined) {
+      topic = DEFAULT_GOVERNANCE_TOPIC;
+    } else if (requestedTopic in GOVERNANCE_TOPIC_ASSETS) {
+      topic = requestedTopic as GovernanceTopic;
+    } else {
+      const knownTopics = Object.keys(GOVERNANCE_TOPIC_ASSETS).join(", ");
+      process.stderr.write(
+        `Error: unknown governance topic "${requestedTopic}" (known topics: ${knownTopics})\n`,
+      );
+      process.exitCode = 2;
+      return;
+    }
+
     // Mirrors commands/setup.ts's own path-context resolution verbatim (see
     // setup-args.ts's module doc for the full `/$bunfs/` empirical chain) —
     // this command and `lore setup` must resolve the SAME assets/ tree.
@@ -139,12 +245,19 @@ export default defineCommand({
     };
     const assetsRoot = resolveAssetsRoot(pathCtx);
 
-    const relPath = args["seat-briefing"] ? SEAT_BRIEFING_ASSET_REL_PATH : GOVERNANCE_ASSET_REL_PATH;
-    const result = readGovernanceAsset(assetsRoot, relPath);
+    const result = readGovernanceAsset(assetsRoot, GOVERNANCE_TOPIC_ASSETS[topic]);
     if (!result.ok) {
       process.stderr.write(formatError(result.error) + "\n");
       process.exitCode = exitCode(result.error);
       return;
+    }
+
+    // The deprecation line is written AFTER a successful read (never on a
+    // failed-read path) — a failed read already exits non-zero with its own
+    // message, and D6 only requires the deprecation line when the legacy
+    // flag actually served content.
+    if (legacyFlag) {
+      process.stderr.write(SEAT_BRIEFING_FLAG_DEPRECATION_MESSAGE + "\n");
     }
 
     writeAllSync(1, result.value);
