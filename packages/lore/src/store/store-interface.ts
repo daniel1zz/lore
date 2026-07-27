@@ -393,6 +393,54 @@ export interface StoreInterface {
   ): Promise<Result<DocRecord, LoreError>>;
 
   /**
+   * The ordinal-aware sibling of {@link insertWithProvenance} — atomically
+   * ALLOCATES a store-computed display ordinal for `doc.type` (the SAME
+   * `MAX(ordinal)+1` + bounded-retry mechanics {@link insertWithAllocatedOrdinal}
+   * uses, delegated to the shared `allocateWithBoundedRetry` seam,
+   * `store-shared.ts`) AND writes the resulting doc together with its
+   * creation {@link VersionRecord} and {@link AuditEntry} — all in ONE
+   * transaction (BUG-002 window closure for `CorpusService._createImpl`'s
+   * numbered path, SPEC-084 follow-up).
+   *
+   * Before this method existed, the numbered-type create path ran
+   * `insertWithAllocatedOrdinal` (insert-only) followed by two independent
+   * `await`s (`insertVersion`, `appendAuditEntry`) — reintroducing the exact
+   * partial-write window BUG-002 closed for the non-numbered path (a crash
+   * or failure between those awaits left a doc row with an allocated ordinal
+   * but zero version/audit history). This method closes that window the same
+   * way {@link insertWithProvenance} closed it for non-numbered types: on ANY
+   * failure (ordinal-allocation exhaustion, a non-ordinal insert failure, a
+   * version-insert failure, or an audit-append failure), NOTHING is
+   * observable afterward — `find(doc.id)` returns `null`, and the allocated
+   * ordinal candidate is NOT burned (a subsequent successful call for the
+   * same `doc.type` computes the SAME `MAX(ordinal)+1` candidate again,
+   * since the failed attempt's row never committed and therefore never
+   * raised that type's `MAX(ordinal)`).
+   *
+   * `doc.ordinal` on the INPUT is ignored/overwritten, identically to
+   * {@link insertWithAllocatedOrdinal} — callers pass a doc whose type is
+   * ordinal-eligible per `ORDINAL_REGISTRY` (the SERVICE layer's concern,
+   * not this method's).
+   *
+   * @param doc - The doc row to insert (ordinal candidate is store-computed;
+   *   same contract as {@link insertWithAllocatedOrdinal} otherwise)
+   * @param version - The version-1 snapshot (same contract as {@link insertVersion})
+   * @param audit - The `action: "create"` audit entry (same contract as {@link appendAuditEntry})
+   * @returns `ok(insertedDoc)` with `ordinal` populated on success; on
+   *   failure, the SAME error shapes {@link insertWithAllocatedOrdinal} or
+   *   {@link insertWithProvenance} would individually return for the step
+   *   that failed (`DUPLICATE_SLUG`, a version/audit `STORE_ERROR`, or the
+   *   `ORDINAL_ALLOCATION_EXHAUSTED` retry-budget message) — never a new
+   *   error shape.
+   * @see SPEC-084 §Module Boundary; BUG-002 (audit finding) — corpus-service.ts `_createImpl`
+   */
+  insertWithAllocatedOrdinalAndProvenance(
+    doc: DocRecord,
+    version: VersionRecord,
+    audit: AuditEntry,
+  ): Promise<Result<DocRecord, LoreError>>;
+
+  /**
    * Atomically apply a patch to an existing doc together with its update
    * {@link VersionRecord} and {@link AuditEntry} — the composite analog of
    * {@link update} for `CorpusService.set`'s write path (BUG-002).
