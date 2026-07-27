@@ -26,6 +26,7 @@ import {
   isInvalidated,
 } from "@lore/core";
 import { resolveActorWithSource } from "@lore/core/node";
+import type { ResolvedActor } from "@lore/core/node";
 import type { DocRecord, LoreError, ReviewJudgment, ValidityCarrier } from "@lore/core";
 import type { TreeNode } from "../../service/corpus-service.js";
 import type { DocWithNavigation } from "../../service/corpus-service.js";
@@ -369,6 +370,26 @@ export function resetActorFallbackWarningForTests(): void {
  *   resolveActor("alice")   // => "alice" (never warns)
  */
 export function resolveActor(explicit?: string): string {
+  return resolveActorWithIdentitySource(explicit).actor;
+}
+
+/**
+ * `resolveActor`'s full-fidelity sibling (spec claim-time-actor-identity-
+ * guard-zero-evidence-release-advis, AC-IDENTITY-REJECT) — same resolution
+ * chain, same once-per-process OS-fallback advisory, but returns the FULL
+ * `{actor, source}` pair instead of discarding `source`. `commands/claim.ts`
+ * uses this (not bare `resolveActor`) to thread `ClaimOpts.identitySource`
+ * into the claim-time actor-identity-collision guard — every OTHER caller
+ * (`release`/`evidence`/`anchor`/etc.) keeps calling plain `resolveActor`
+ * unchanged, since only `claim` needs the resolution tier.
+ *
+ * @param explicit - Value of the --by flag, if the user passed one
+ * @returns `{actor, source}` — `actor` matches `resolveActor(explicit)` exactly
+ * @example
+ *   resolveActorWithIdentitySource(undefined) // => {actor: "<OS username>", source: "os-fallback"} (warns once)
+ *   resolveActorWithIdentitySource("alice")   // => {actor: "alice", source: "explicit"} (never warns)
+ */
+export function resolveActorWithIdentitySource(explicit?: string): ResolvedActor {
   const resolved = resolveActorWithSource(explicit);
   if (resolved.source === "os-fallback" && !warnedActorFallback) {
     warnedActorFallback = true;
@@ -378,7 +399,7 @@ export function resolveActor(explicit?: string): string {
         "(or ai:<...>) for a traceable actor.\n",
     );
   }
-  return resolved.actor;
+  return resolved;
 }
 
 // ─── Actor Flag Alias Resolution (SPEC-051 D2) ─────────────────────────────

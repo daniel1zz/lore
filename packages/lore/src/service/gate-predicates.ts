@@ -242,6 +242,12 @@ export function upstreamHasAcceptanceCriteria(
  * `claimTtlMinutes` `_claimImpl` uses for the target claim's own conflict check,
  * so this predicate itself never reads a wall clock (module invariant: no store,
  * no IO, no wall-clock reads).
+ *
+ * `worktree`/`machine` (claim-time-actor-identity-guard-zero-evidence-release-advis,
+ * AC-IDENTITY-REJECT) mirror the SAME optional `TaskClaim.worktree`/`.machine`
+ * fields (`@lore/core`, SPEC-042 D2) — `undefined` when the sibling's own claim
+ * never declared one (legacy claim, or an MCP caller that omitted it). Consumed
+ * ONLY by `actorIdentityGuard` below; `noAnchorOverlap` never reads them.
  */
 export interface SiblingClaimInfo {
   slug: string;
@@ -250,6 +256,8 @@ export interface SiblingClaimInfo {
   at: string;
   stale: boolean;
   anchors: string[];
+  worktree?: string;
+  machine?: string;
 }
 
 /** `noAnchorOverlap`'s single machine-readable failure reason. */
@@ -298,6 +306,112 @@ export function noAnchorOverlap(
     if (sibling.anchors.length === 0) continue;
     if (anchorsOverlap(anchors, sibling.anchors).overlaps) {
       return { ok: false, reason: ANCHOR_OVERLAP_REASON, field: ANCHOR_OVERLAP_FIELD };
+    }
+  }
+  return { ok: true };
+}
+
+/** `actorIdentityGuard`'s single machine-readable failure reason. */
+export const ACTOR_IDENTITY_COLLISION_REASON = "ACTOR_IDENTITY_COLLISION";
+
+/** The `PredicateResult.field` value `actorIdentityGuard`'s failure carries
+ *  (spec claim-time-actor-identity-guard-zero-evidence-release-advis, AC-IDENTITY-REJECT). */
+export const ACTOR_IDENTITY_FIELD = "actor-identity";
+
+/**
+ * The identity-resolution tier `actorIdentityGuard` treats as an "untraceable
+ * default" — the governing spec's own `os_default` vocabulary, spelled here as
+ * the literal `ActorSource` value (`@lore/core/node`, `actor-resolution-node.ts`)
+ * `resolveActorWithSource` returns when resolution falls through explicit `--by`
+ * / `$LORE_ACTOR` / the SPEC-071 session tier all the way to `os.userInfo()
+ * .username`. Declared as a plain string literal (not an imported type) so this
+ * module keeps its module-header invariant of zero `@lore/core/node` dependency
+ * — the Node-only resolution chain lives one layer up, in the CALLER that
+ * resolves `candidateIdentitySource` before building a `GateContext`.
+ */
+export const OS_DEFAULT_IDENTITY_SOURCE = "os-fallback";
+
+/**
+ * `task-claim`'s claim-time actor-identity collision guard (spec claim-time-
+ * actor-identity-guard-zero-evidence-release-advis, AC-IDENTITY-REJECT) —
+ * SPEC-042's `noAnchorOverlap` and its session registry both key on the
+ * resolved `by` string alone; when every concurrent agent silently falls
+ * through to the SAME OS-username default, distinct sessions collapse onto one
+ * identity and `noAnchorOverlap` can never tell them apart (SPEC-042 D10, the
+ * documented failure mode this predicate closes). This predicate detects that
+ * SPECIFIC collision signature at claim time, conservatively (spec §Scope:
+ * "REJECT only on a collision signature"):
+ *
+ *   1. The CANDIDATE's own actor must have resolved via the untraceable
+ *      OS-username fallback tier ({@link OS_DEFAULT_IDENTITY_SOURCE}) — an
+ *      explicit `--by`, `$LORE_ACTOR`, or the SPEC-071 session tier NEVER
+ *      trips this predicate, regardless of what any sibling holds (AC-
+ *      IDENTITY-REJECT's "distinct explicit identities never trip it").
+ *   2. AND a FRESH sibling claim in the same plan must hold the byte-IDENTICAL
+ *      `by` string. Since the candidate's own `by` in that case IS
+ *      `os.userInfo().username`, an identical sibling `by` means the sibling
+ *      landed on that same OS username too — the shared literal string IS the
+ *      collision signature, so the sibling's own resolution tier never needs
+ *      to be independently stored (the governing spec's "OUT: storing
+ *      identity source on the doc" scope note — identity source stays
+ *      gate-context-only, for the CANDIDATE claim of THIS call only).
+ *   3. AND that sibling's `worktree` or `machine` — whichever dimension has
+ *      data on BOTH sides — must provably DIFFER from the candidate's own:
+ *      two DIFFERENT execution contexts holding the identical untraceable
+ *      identity. When neither dimension is comparable (missing on either
+ *      side), this predicate does NOT trip — conservative by construction,
+ *      mirroring `noAnchorOverlap`'s own "no ERROR path" vacuous-pass shape.
+ *
+ * A solo human/agent holding multiple tasks from ONE worktree (same `by`, same
+ * `worktree`) never trips it — `worktreeDiffers`/`machineDiffers` are both
+ * `false` in that case (spec §Scope: "A solo human holding multiple tasks in
+ * one worktree never trips it").
+ *
+ * @param candidateBy - The actor attempting the claim.
+ * @param candidateIdentitySource - How `candidateBy` was resolved, compared
+ *   against {@link OS_DEFAULT_IDENTITY_SOURCE}; any other value (including
+ *   `undefined` — the caller never resolved/threaded one) is an automatic pass.
+ * @param candidateWorktree - The candidate claim's own `worktree` (SPEC-042 D2), if declared.
+ * @param candidateMachine - The candidate claim's own `machine` (SPEC-042 D2), if declared.
+ * @param siblingClaims - Every OTHER task in the same plan holding a claim
+ *   (fresh or stale — staleness filtered HERE, mirrors `noAnchorOverlap`).
+ * @returns `{ok: true}` when no fresh, `by`-identical, provably-different-context
+ *   sibling exists (or the candidate wasn't OS-default-resolved at all);
+ *   `{ok: false, reason: "ACTOR_IDENTITY_COLLISION", field: "actor-identity"}` otherwise.
+ * @example
+ * actorIdentityGuard("daniel", "os-fallback", "/repo/.worktrees/t2", undefined, [
+ *   { slug: "task-1", title: "T1", by: "daniel", at: "T0", stale: false, anchors: [],
+ *     worktree: "/repo/.worktrees/t1" },
+ * ]); // => { ok: false, reason: "ACTOR_IDENTITY_COLLISION", field: "actor-identity" }
+ * @example
+ * actorIdentityGuard("agent:t2", "explicit", "/repo/.worktrees/t2", undefined, [
+ *   { slug: "task-1", title: "T1", by: "daniel", at: "T0", stale: false, anchors: [],
+ *     worktree: "/repo/.worktrees/t1" },
+ * ]); // => { ok: true } — candidate used an explicit identity, never trips
+ */
+export function actorIdentityGuard(
+  candidateBy: string | undefined,
+  candidateIdentitySource: string | undefined,
+  candidateWorktree: string | undefined,
+  candidateMachine: string | undefined,
+  siblingClaims: readonly SiblingClaimInfo[] | undefined,
+): PredicateResult {
+  if (candidateIdentitySource !== OS_DEFAULT_IDENTITY_SOURCE) {
+    return { ok: true };
+  }
+  for (const sibling of siblingClaims ?? []) {
+    if (sibling.stale) continue;
+    if (sibling.by !== candidateBy) continue;
+    const worktreeDiffers =
+      sibling.worktree !== undefined &&
+      candidateWorktree !== undefined &&
+      sibling.worktree !== candidateWorktree;
+    const machineDiffers =
+      sibling.machine !== undefined &&
+      candidateMachine !== undefined &&
+      sibling.machine !== candidateMachine;
+    if (worktreeDiffers || machineDiffers) {
+      return { ok: false, reason: ACTOR_IDENTITY_COLLISION_REASON, field: ACTOR_IDENTITY_FIELD };
     }
   }
   return { ok: true };

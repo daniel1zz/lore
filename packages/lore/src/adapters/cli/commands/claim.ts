@@ -50,7 +50,7 @@
 import { hostname } from "os";
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, resolveActor } from "../utils.js";
+import { exitCode, formatError, resolveActorWithIdentitySource } from "../utils.js";
 import { requirePhaseWorkflowService } from "../phase-wiring.js";
 
 export default defineCommand({
@@ -92,13 +92,19 @@ export default defineCommand({
   async run({ args }) {
     const { app } = loadLoreApp();
     try {
-      const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
+      const resolvedActor = resolveActorWithIdentitySource(typeof args.by === "string" ? args.by : undefined);
+      const by = resolvedActor.actor;
       const machine = typeof args.machine === "string" ? args.machine : hostname();
       const claimOpts = {
         by,
         ...(typeof args.branch === "string" ? { branch: args.branch } : {}),
         machine,
         ...(typeof args.worktree === "string" ? { worktree: args.worktree } : {}),
+        // reason: claim-time-actor-identity-guard-zero-evidence-release-advis
+        // AC-IDENTITY-REJECT — threads the resolved tier into the task-claim
+        // gate's collision-signature test (`TaskWorkflowService.enforceClaimGate`);
+        // every other CLI verb keeps using plain `resolveActor` unchanged.
+        identitySource: resolvedActor.source,
         steal: args.steal === true,
         source: app.callerSurface,
       };
