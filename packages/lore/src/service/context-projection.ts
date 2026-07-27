@@ -25,7 +25,15 @@
  *     writes `next`'s sections into the Z1 zone (creating or appending it
  *     if absent), preserving every Z2 byte, and refusing to touch a
  *     section whose stored fingerprint hash no longer matches its stored
- *     body (a hand-edit) rather than silently overwriting it.
+ *     body (a hand-edit) rather than silently overwriting it. A pre-existing
+ *     marker zone that carries ZERO fingerprint comments anywhere in its
+ *     interior (every pre-fingerprinting-era install shape — the template
+ *     shipped before this refactor never wrote one) is a recognized LEGACY
+ *     zone, not a structural error: the whole interior is discarded and
+ *     replaced wholesale by `next`, each section freshly fingerprinted and
+ *     reported `"updated"` — a one-way adoption into fingerprinted form (see
+ *     the Invariants section below for the exact boundary against a
+ *     genuinely malformed fingerprint attempt, which still fails loud).
  *
  * Invariants:
  *   - `next` is the FULL declarative section list for the zone on every
@@ -50,9 +58,21 @@
  *     convention) — this exact-separator round-trip is what makes
  *     `spliceManagedSections(spliceManagedSections(x, s).value.content, s)`
  *     byte-identical to its own input (splice idempotency, AC-CTX-1).
- *   - A start marker found with no matching end marker, or a fingerprint
- *     comment line that doesn't parse where one is structurally expected,
- *     both fail loud with `VALIDATION_ERROR` — never a partial splice.
+ *   - A start marker found with no matching end marker fails loud with
+ *     `VALIDATION_ERROR` — never a partial splice. Inside an otherwise
+ *     well-formed zone, a line that LOOKS like an attempted fingerprint
+ *     comment (starts with the `<!-- lore:managed` prefix) but doesn't fully
+ *     match the grammar is structural damage (a corrupted fingerprint, e.g.
+ *     a non-hex/wrong-length hash) and also fails loud with
+ *     `VALIDATION_ERROR` — this is the ONE case `spliceManagedSections`
+ *     never treats as legacy adoption, no matter how many other fingerprints
+ *     are absent. A zone whose interior contains no such attempt anywhere is
+ *     legacy adoption instead (see the `spliceManagedSections` bullet
+ *     above) — `parseManagedSections` itself still reports `VALIDATION_ERROR`
+ *     for both shapes (it has no adoption behavior of its own); the
+ *     legacy/malformed distinction is drawn only inside
+ *     `spliceManagedSections`, which is the sole write path this adoption
+ *     applies to.
  *
  * Side-effect class: pure (no IO, no store, no wall-clock reads). Uses
  * `node:crypto`'s `createHash` for sha256 — safe here because this file is
@@ -307,6 +327,61 @@ function buildAppendedZone(existing: string, next: ManagedSection[]): SpliceResu
 }
 
 /**
+ * Matches a line that LOOKS like an attempt at a fingerprint comment (the
+ * `<!-- lore:managed ...` prefix), whether or not it fully satisfies the
+ * strict grammar `parseManagedSectionFingerprint` enforces. Used ONLY to
+ * distinguish "legacy zone, never fingerprinted" (zero attempts anywhere)
+ * from "corrupted fingerprint" (an attempt present but malformed) — see
+ * `isLegacyZoneInterior`'s doc comment.
+ */
+const FINGERPRINT_ATTEMPT_PREFIX = /^<!-- lore:managed\b/;
+
+/**
+ * Returns the Z1 zone's interior lines (excluding both marker lines
+ * themselves) — the same slice `parseManagedSections` walks, exposed here so
+ * `isLegacyZoneInterior` can scan it independently of that function's
+ * strict-parse control flow.
+ */
+function zoneInteriorLines(existing: string, zone: ZoneLocation): string[] {
+  const zoneOuterText = existing.slice(zone.zoneStart, zone.zoneEndExclusive);
+  const lines = zoneOuterText.split(/\r?\n/);
+  return lines.slice(1, lines.length - 1);
+}
+
+/**
+ * A zone is LEGACY ADOPTION material when its interior contains ZERO lines
+ * that even attempt the fingerprint-comment prefix — every pre-fingerprint
+ * lore build wrote a zone shaped exactly like this (plain prose between the
+ * markers, no per-section bookkeeping at all). The moment ONE interior line
+ * attempts the prefix and still fails to fully parse, this is NOT legacy —
+ * it's a corrupted fingerprint on an already-fingerprinted zone, and
+ * `buildRebuiltZone` must keep surfacing the original `VALIDATION_ERROR`
+ * rather than silently discarding whatever partial bookkeeping exists.
+ */
+function isLegacyZoneInterior(existing: string, zone: ZoneLocation): boolean {
+  return zoneInteriorLines(existing, zone).every((line) => !FINGERPRINT_ATTEMPT_PREFIX.test(line.trim()));
+}
+
+/**
+ * Legacy-adoption splice: `existing`'s ENTIRE zone interior is discarded
+ * (there is no stored per-section state worth preserving — a legacy zone
+ * was never fingerprinted, so there is nothing to diff against) and
+ * replaced wholesale by `next`, each section freshly hashed. Every section
+ * is reported `"updated"` (never `"created"`) — this is a REPLACE of
+ * pre-existing managed content, not the creation of a new zone, mirroring
+ * the pre-refactor SPEC-076 D7 wholesale-overwrite behavior this one-way
+ * migration path preserves.
+ */
+function buildLegacyAdoptedZone(existing: string, zone: ZoneLocation, next: ManagedSection[]): SpliceResult {
+  const zoneText = renderZoneText(hashFresh(next));
+  const z2Before = existing.slice(0, zone.zoneStart);
+  const z2After = existing.slice(zone.zoneEndExclusive + zone.absorbedSeparator.length);
+  const content = `${z2Before}${zoneText}${zone.absorbedSeparator}${z2After}`;
+  const perSection = next.map((section) => ({ id: section.id, state: "updated" as const }));
+  return { content, perSection };
+}
+
+/**
  * Resolves one requested section against its stored counterpart (if any),
  * producing both the `StoredSection` to serialize and the per-section
  * splice state — the core five-state decision (minus "appended", which
@@ -334,10 +409,24 @@ function resolveSection(
   return { resolved: { id: requested.id, hash: sha256Hash8(requested.body), body: requested.body }, state: "updated" };
 }
 
-/** An existing, well-formed zone is rebuilt in `next`'s order — see the module header's `next`-is-declarative invariant. */
+/**
+ * An existing, well-formed zone is rebuilt in `next`'s order — see the
+ * module header's `next`-is-declarative invariant. A zone `parseManagedSections`
+ * can't parse (interior doesn't start with a fingerprint line where one is
+ * structurally expected) is routed to `buildLegacyAdoptedZone` when its
+ * interior contains no fingerprint-comment ATTEMPT anywhere (a pre-fingerprint
+ * legacy shape); any other parse failure — an attempted-but-malformed
+ * fingerprint present somewhere in the interior — still propagates
+ * `VALIDATION_ERROR` unchanged, never silently adopted.
+ */
 function buildRebuiltZone(existing: string, zone: ZoneLocation, next: ManagedSection[]): Result<SpliceResult, LoreError> {
   const parsed = parseManagedSections(existing);
-  if (!parsed.ok) return parsed;
+  if (!parsed.ok) {
+    if (isLegacyZoneInterior(existing, zone)) {
+      return ok(buildLegacyAdoptedZone(existing, zone, next));
+    }
+    return parsed;
+  }
   const storedById = new Map(parsed.value.sections.map((section) => [section.id, section] as const));
 
   const resolutions = next.map((requested) => resolveSection(requested, storedById.get(requested.id)));

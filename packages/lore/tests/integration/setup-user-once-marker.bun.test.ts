@@ -55,6 +55,7 @@ import {
   type ProjectFsPort,
   type ProjectScaffoldFlowDeps,
 } from "../../src/flows/setup-project-flow.js";
+import { spliceManagedSections, type ManagedSection } from "../../src/service/context-projection.js";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -78,11 +79,31 @@ const GITIGNORE_BLOCK = "# --- lore ---\n.DS_Store\nnode_modules/\ndist/\ncovera
 const MARKER_START = "# ─── lore governance (managed) ───";
 const MARKER_END = "# ─── end lore governance ───";
 const CLAUDE_MD_BODY = "# CLAUDE.md\n\nLore-governed workflow stub.\n\n## Module Index\n";
+// This is the RAW shipped-asset shape — never fingerprinted (mirrors
+// `assets/project/CLAUDE.md.template` itself, which carries no `<!--
+// lore:managed -->` comment either). Fingerprints are stamped only by
+// `spliceManagedSections` at write time.
 const CLAUDE_MD_TEMPLATE = `${MARKER_START}\n${CLAUDE_MD_BODY}${MARKER_END}\n`;
 // A second, DIFFERENT template body — used by the BOUNDARY case to prove a
 // content change only ever touches the governed span on a re-converge.
 const CLAUDE_MD_BODY_V2 = "# CLAUDE.md\n\nLore-governed workflow stub (v2, updated prose).\n";
 const CLAUDE_MD_TEMPLATE_V2 = `${MARKER_START}\n${CLAUDE_MD_BODY_V2}${MARKER_END}\n`;
+// `runClaudeMdStep` hands the template's bare body to `spliceManagedSections`
+// as ONE section under this id (mirrors `setup-project-flow.ts`'s own
+// module-private `CLAUDE_MD_SECTION_ID` constant).
+const CLAUDE_MD_SECTION_ID = "governance";
+
+/** Splices `sections` into `existing` via the REAL shared splice function, failing the test loudly on an unexpected splice error — derives the exact fingerprinted bytes `runClaudeMdStep` itself would produce instead of hand-typing them. */
+function spliceOrThrow(existing: string, sections: ManagedSection[]): string {
+  const result = spliceManagedSections(existing, sections);
+  if (!result.ok) throw new Error(`fixture splice failed unexpectedly: ${JSON.stringify(result.error)}`);
+  return result.value.content;
+}
+
+/** What `runClaudeMdStep` writes on a from-scratch install (`existing === ""`) — freshly fingerprinted. */
+const EXPECTED_FRESH_CLAUDE_MD = spliceOrThrow("", [{ id: CLAUDE_MD_SECTION_ID, body: CLAUDE_MD_BODY }]);
+/** Same, for the v2 template body (BOUNDARY case's second converge). */
+const EXPECTED_FRESH_CLAUDE_MD_V2 = spliceOrThrow("", [{ id: CLAUDE_MD_SECTION_ID, body: CLAUDE_MD_BODY_V2 }]);
 
 interface FakeFile {
   content: string;
@@ -229,7 +250,7 @@ describe("setup-user-once-marker — CLAUDE.md marker rewrite (SPEC-076 D7) — 
     if (!result.ok) return;
 
     expect(result.value.claude_md.status).toBe("done");
-    expect(fs.readFile(CLAUDE_MD_PATH)).toBe(CLAUDE_MD_TEMPLATE);
+    expect(fs.readFile(CLAUDE_MD_PATH)).toBe(EXPECTED_FRESH_CLAUDE_MD);
     expect(result.value.backups).toEqual([]);
     expect(fs.backupCalls).toBe(0);
   });
@@ -247,12 +268,12 @@ describe("setup-user-once-marker — CLAUDE.md marker rewrite (SPEC-076 D7) — 
     if (!result.ok) return;
 
     expect(result.value.claude_md.status).toBe("done");
-    expect(fs.readFile(CLAUDE_MD_PATH)).toBe(CLAUDE_MD_TEMPLATE);
+    expect(fs.readFile(CLAUDE_MD_PATH)).toBe(EXPECTED_FRESH_CLAUDE_MD);
     // "Bytes outside the markers" is the empty string both before (the whole
     // file WAS the body, no markers existed yet) and after (nothing sits
     // outside the wrapped template) — trivially byte-identical.
-    expect(CLAUDE_MD_TEMPLATE.startsWith(MARKER_START)).toBe(true);
-    expect(CLAUDE_MD_TEMPLATE.endsWith(`${MARKER_END}\n`)).toBe(true);
+    expect(EXPECTED_FRESH_CLAUDE_MD.startsWith(MARKER_START)).toBe(true);
+    expect(EXPECTED_FRESH_CLAUDE_MD.endsWith(MARKER_END)).toBe(true);
   });
 
   it("AC-076-4 form (c): genuinely user-authored content is preserved byte-for-byte, the managed section is APPENDED, backed up first", async () => {
@@ -272,7 +293,7 @@ describe("setup-user-once-marker — CLAUDE.md marker rewrite (SPEC-076 D7) — 
     expect(afterFirst.startsWith(original)).toBe(true);
     // The section between the markers equals the new template exactly.
     const managedSection = afterFirst.slice(original.length + (original.endsWith("\n") ? 0 : 1));
-    expect(managedSection).toBe(CLAUDE_MD_TEMPLATE);
+    expect(managedSection).toBe(EXPECTED_FRESH_CLAUDE_MD);
 
     // R3: a mandatory backup was written before the append.
     const expectedBackupPath = `.lore/.lore-backups/${FIXED_NOW}/CLAUDE.md`;
@@ -305,10 +326,12 @@ describe("setup-user-once-marker — CLAUDE.md marker rewrite (SPEC-076 D7) — 
     expect(first.ok).toBe(true);
     if (!first.ok) return;
     const afterFirst = fs.readFile(CLAUDE_MD_PATH) as string;
-    expect(afterFirst).toBe(`${original}${CLAUDE_MD_TEMPLATE}`);
+    expect(afterFirst).toBe(`${original}${EXPECTED_FRESH_CLAUDE_MD}`);
 
     // Second converge: the SHIPPED template's body has changed (v2) —
-    // only the governed span should be replaced.
+    // only the governed span should be replaced. The zone from the first
+    // converge is already fingerprinted (not legacy), so this is a normal
+    // "updated" rebuild, not adoption.
     const second = await scaffoldProject(
       makeDeps(fs, { claudeMdTemplate: CLAUDE_MD_TEMPLATE_V2 }),
       { repoDir: REPO_DIR },
@@ -319,10 +342,10 @@ describe("setup-user-once-marker — CLAUDE.md marker rewrite (SPEC-076 D7) — 
 
     expect(second.value.claude_md.status).toBe("done");
     const afterSecond = fs.readFile(CLAUDE_MD_PATH) as string;
-    expect(afterSecond).toBe(`${original}${CLAUDE_MD_TEMPLATE_V2}`);
+    expect(afterSecond).toBe(`${original}${EXPECTED_FRESH_CLAUDE_MD_V2}`);
     // The prefix (everything outside the markers) is unchanged across both runs.
     expect(afterSecond.startsWith(original)).toBe(true);
-    expect(afterSecond.slice(original.length)).toBe(CLAUDE_MD_TEMPLATE_V2);
+    expect(afterSecond.slice(original.length)).toBe(EXPECTED_FRESH_CLAUDE_MD_V2);
   });
 });
 

@@ -42,6 +42,7 @@ import {
   type ProjectFsPort,
   type ProjectScaffoldFlowDeps,
 } from "../../../src/flows/setup-project-flow.js";
+import { spliceManagedSections, type ManagedSection } from "../../../src/service/context-projection.js";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -58,11 +59,33 @@ const TREE_YAML_CONTENT = "root: prd\n";
 const GITIGNORE_BLOCK = "# --- lore ---\n.DS_Store\nnode_modules/\ndist/\ncoverage/\n.agent-worktree-marker\n.lore/lore.db*\n";
 // Mirrors the shipped `assets/project/CLAUDE.md.template`'s own marker pair
 // verbatim (module-private constants, not imported — same convention this
-// file already used for its OTHER fixture constants).
+// file already used for its OTHER fixture constants). This is the RAW asset
+// shape — never fingerprinted (see `assets/project/CLAUDE.md.template`
+// itself): fingerprints are stamped only by `spliceManagedSections` at write
+// time, never baked into the shipped template.
 const CLAUDE_MD_MARKER_START = "# ─── lore governance (managed) ───";
 const CLAUDE_MD_MARKER_END = "# ─── end lore governance ───";
 const CLAUDE_MD_BODY = "# CLAUDE.md\n\nLore-governed workflow stub.\n\n## Module Index\n";
 const CLAUDE_MD_TEMPLATE = `${CLAUDE_MD_MARKER_START}\n${CLAUDE_MD_BODY}${CLAUDE_MD_MARKER_END}\n`;
+// `runClaudeMdStep` hands the template's bare body to `spliceManagedSections`
+// as ONE section under this id (mirrors `setup-project-flow.ts`'s own
+// module-private `CLAUDE_MD_SECTION_ID` constant — not imported, same
+// convention as every other fixture constant in this file).
+const CLAUDE_MD_SECTION_ID = "governance";
+
+/** Splices `sections` into `existing` via the REAL shared splice function, failing the test loudly (not silently) on an unexpected splice error — used to derive the exact fingerprinted bytes `runClaudeMdStep` itself would produce, rather than hand-typing them (which would silently drift from the real hash/format the moment either changes). */
+function spliceOrThrow(existing: string, sections: ManagedSection[]): string {
+  const result = spliceManagedSections(existing, sections);
+  if (!result.ok) throw new Error(`fixture splice failed unexpectedly: ${JSON.stringify(result.error)}`);
+  return result.value.content;
+}
+
+const CLAUDE_MD_SECTIONS: ManagedSection[] = [{ id: CLAUDE_MD_SECTION_ID, body: CLAUDE_MD_BODY }];
+
+/** What `runClaudeMdStep` writes on a from-scratch install (`existing === ""`) — freshly fingerprinted. */
+const EXPECTED_FRESH_CLAUDE_MD = spliceOrThrow("", CLAUDE_MD_SECTIONS);
+/** What `runClaudeMdStep` writes when adopting a legacy (fingerprint-less) marker zone byte-identical to `CLAUDE_MD_TEMPLATE`. */
+const EXPECTED_ADOPTED_CLAUDE_MD = spliceOrThrow(CLAUDE_MD_TEMPLATE, CLAUDE_MD_SECTIONS);
 
 interface FakeFile {
   content: string;
@@ -165,7 +188,7 @@ describe("setup-project-flow — CLAUDE.md marker-section rewrite (SPEC-076 D7) 
     if (!result.ok) return;
 
     expect(result.value.claude_md.status).toBe("done");
-    expect(fs.readFile(CLAUDE_MD_PATH)).toBe(CLAUDE_MD_TEMPLATE);
+    expect(fs.readFile(CLAUDE_MD_PATH)).toBe(EXPECTED_FRESH_CLAUDE_MD);
     expect(result.value.backups).toEqual([]);
     expect(fs.backupCalls).toBe(0);
   });
@@ -196,7 +219,7 @@ describe("setup-project-flow — CLAUDE.md marker-section rewrite (SPEC-076 D7) 
 // ─── BOUNDARY ────────────────────────────────────────────────────────────────
 
 describe("setup-project-flow — CLAUDE.md marker-section rewrite (SPEC-076 D7) — BOUNDARY", () => {
-  it("pre-existing CLAUDE.md byte-identical to the (marker-wrapped) template: skipped, no backup", async () => {
+  it("pre-existing CLAUDE.md is a LEGACY (fingerprint-less) marker zone byte-identical to the template: adopted (done, backed up), never 'failed'", async () => {
     const fs = new InMemoryProjectFs();
     fs.files.set(CLAUDE_MD_PATH, { content: CLAUDE_MD_TEMPLATE, mode: 0o644 });
 
@@ -204,10 +227,27 @@ describe("setup-project-flow — CLAUDE.md marker-section rewrite (SPEC-076 D7) 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    expect(result.value.claude_md.status).toBe("skipped");
-    expect(result.value.backups).toEqual([]);
-    expect(fs.backupCalls).toBe(0);
-    expect(fs.readFile(CLAUDE_MD_PATH)).toBe(CLAUDE_MD_TEMPLATE);
+    // Legacy adoption: every pre-fingerprinting-era install has exactly this
+    // shape (marker zone present, no `<!-- lore:managed -->` comment inside).
+    // The zone is discarded and rebuilt fingerprinted, so bytes DO change —
+    // this must never surface as "failed" (the pre-fix VALIDATION_ERROR bug),
+    // and the differing on-disk bytes are backed up before being overwritten
+    // (same rule any other differing pre-existing content gets).
+    expect(result.value.claude_md.status).toBe("done");
+    expect(fs.readFile(CLAUDE_MD_PATH)).toBe(EXPECTED_ADOPTED_CLAUDE_MD);
+    const expectedBackupPath = `.lore/.lore-backups/${FIXED_NOW}/CLAUDE.md`;
+    expect(result.value.backups).toEqual([expectedBackupPath]);
+    expect(fs.readFile(`${REPO_DIR}/${expectedBackupPath}`)).toBe(CLAUDE_MD_TEMPLATE);
+    expect(fs.backupCalls).toBe(1);
+
+    // A second run over the now-fingerprinted output is a normal idempotent
+    // re-converge — proving the adoption is truly one-way.
+    const second = await scaffoldProject(makeDeps(fs), { repoDir: REPO_DIR }, fixedNow);
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.value.claude_md.status).toBe("skipped");
+    expect(second.value.backups).toEqual([]);
+    expect(fs.readFile(CLAUDE_MD_PATH)).toBe(EXPECTED_ADOPTED_CLAUDE_MD);
   });
 });
 
@@ -245,9 +285,11 @@ describe("setup-project-flow — CLAUDE.md marker-section rewrite (SPEC-076 D7) 
     if (!first.ok) return;
 
     expect(first.value.claude_md.status).toBe("done");
-    // Every original byte survives as an exact prefix; the managed section is appended after it.
+    // Every original byte survives as an exact prefix; the managed section is
+    // appended after it, freshly fingerprinted (the appended zone is always
+    // brand new — there's no legacy zone to adopt when none existed at all).
     const afterFirst = fs.readFile(CLAUDE_MD_PATH) as string;
-    expect(afterFirst).toBe(`${original}${CLAUDE_MD_TEMPLATE}`);
+    expect(afterFirst).toBe(`${original}${EXPECTED_FRESH_CLAUDE_MD}`);
 
     // Exactly one backup, at the deterministic destination path, byte-identical to the pre-run file.
     const expectedBackupPath = `.lore/.lore-backups/${FIXED_NOW}/CLAUDE.md`;

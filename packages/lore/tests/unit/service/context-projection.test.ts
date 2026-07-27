@@ -394,6 +394,89 @@ describe("context-projection splice suite (RED — packages/lore/src/service/con
     }
   });
 
+  it("STATE: legacy adoption — a marker zone with ZERO fingerprint comments is replaced wholesale and fingerprinted, state 'updated'", async () => {
+    const { spliceManagedSections } = await loadContextProjection();
+    // Shape of every pre-fingerprinting-era install: markers present, plain
+    // prose interior, no `<!-- lore:managed ... -->` comment anywhere.
+    const legacyBody = "# CLAUDE.md\n\nLore-governed workflow stub.\n\n## Module Index\n";
+    const existing = `${ZONE_START}\n${legacyBody}${ZONE_END}\n`;
+
+    const result = spliceManagedSections(existing, [{ id: "governance", body: legacyBody }]);
+    const { content, perSection } = expectOk(result);
+
+    expect(perSection).toEqual([{ id: "governance", state: "updated" }]);
+    expect(content).toContain(fingerprintLine("governance", sha256_8(legacyBody)));
+    expect(content).toContain(legacyBody);
+    expect(content).toContain(ZONE_START);
+    expect(content).toContain(ZONE_END);
+
+    // A second splice over this now-fingerprinted output is a normal
+    // "unchanged" re-run — proving the adoption is truly one-way and the
+    // result is a well-formed zone from here on.
+    const second = expectOk(spliceManagedSections(content, [{ id: "governance", body: legacyBody }]));
+    expect(second.perSection).toEqual([{ id: "governance", state: "unchanged" }]);
+    expect(second.content).toBe(content);
+  });
+
+  it("STATE: legacy adoption — Z2 prose surrounding a fingerprint-less zone is preserved byte-for-byte", async () => {
+    const { spliceManagedSections } = await loadContextProjection();
+    const legacyBody = "Old, never-fingerprinted body.";
+    const existing = `${PROSE_BEFORE}${ZONE_START}\n${legacyBody}\n${ZONE_END}\n${PROSE_AFTER}`;
+
+    const newBody = "Freshly rendered replacement body.";
+    const result = spliceManagedSections(existing, [{ id: "module-index", body: newBody }]);
+    const { content, perSection } = expectOk(result);
+
+    expect(perSection).toEqual([{ id: "module-index", state: "updated" }]);
+    expect(content).toContain(PROSE_BEFORE);
+    expect(content).toContain(PROSE_AFTER);
+    expect(content).toContain(newBody);
+    expect(content).not.toContain(legacyBody);
+    expect(content).toContain(fingerprintLine("module-index", sha256_8(newBody)));
+  });
+
+  it("STATE: legacy adoption — multiple requested sections all land 'updated', each freshly fingerprinted", async () => {
+    const { spliceManagedSections } = await loadContextProjection();
+    const legacyBody = "Single-blob legacy content, no per-section structure at all.";
+    const existing = `${ZONE_START}\n${legacyBody}\n${ZONE_END}\n`;
+
+    const sections: ManagedSection[] = [
+      { id: "module-index", body: "- packages/core\n- packages/lore" },
+      { id: "command-table", body: "bun run build" },
+    ];
+    const result = spliceManagedSections(existing, sections);
+    const { content, perSection } = expectOk(result);
+
+    expect(perSection).toEqual([
+      { id: "module-index", state: "updated" },
+      { id: "command-table", state: "updated" },
+    ]);
+    for (const s of sections) {
+      expect(content).toContain(fingerprintLine(s.id, sha256_8(s.body)));
+      expect(content).toContain(s.body);
+    }
+    expect(content).not.toContain(legacyBody);
+  });
+
+  it("NEGATIVE/ERROR: an ATTEMPTED-but-malformed fingerprint inside an otherwise fingerprint-less zone is NOT adopted — VALIDATION_ERROR stays (structural damage, not legacy)", async () => {
+    const { spliceManagedSections } = await loadContextProjection();
+    // Only ONE interior line even attempts the fingerprint prefix, and it's
+    // corrupt (non-hex hash) — this must NOT be treated as legacy adoption
+    // even though most of the zone looks like plain legacy prose.
+    const existing = [
+      ZONE_START,
+      "<!-- lore:managed section=alpha hash=NOTHEX -->",
+      "Alpha body",
+      ZONE_END,
+    ].join("\n") + "\n";
+
+    const result = spliceManagedSections(existing, [{ id: "alpha", body: "New body" }]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("VALIDATION_ERROR");
+    }
+  });
+
   it("NEGATIVE/ERROR: malformed fingerprint line (non-8-hex hash) -> parseManagedSections fails loud with VALIDATION_ERROR", async () => {
     const { parseManagedSections } = await loadContextProjection();
     const malformed =
