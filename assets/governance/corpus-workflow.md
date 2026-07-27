@@ -23,6 +23,7 @@ Discipline lives in the corpus, not in the prompt: deterministic gates intercept
 - `lore ready <plan> --json` to see readiness / sessions / anchor_conflicts, then pick a ready task.
 - `lore claim <task> --by <actor>`. For concurrent worktree dispatch, give every agent a distinct identity (`LORE_ACTOR=agent:<branch-or-slug>`) and have each implementer claim from inside its own worktree (`--worktree` declared explicitly).
 - External oracles only (tsc / test / browser, etc.) — never let an LLM self-grade its own work.
+- Shared mutable state must be re-evidenced in the turn you assert it: claims, readiness, sessions, and sibling-plan progress drift under concurrent sessions — an earlier-in-context query result is a snapshot ("as of then"), never current state. Re-query before any progressive-tense claim ("still open", "currently claimed").
 - Oracle passes → `lore evidence <task> --oracle <tsc|test|lint|build|e2e|manual> --command "<cmd>" --result pass`. For script-bound ACs, prefer `lore verify <plan>` (attested: the exit code decides pass/fail, never self-reported).
 - Done → `lore release <task>`. Readiness is always computed, never hand-marked by anyone.
 

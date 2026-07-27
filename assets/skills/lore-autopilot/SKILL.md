@@ -137,6 +137,7 @@ When `lore ready <plan>` returns no ready tasks and nothing is in flight:
    Verify: {attested pass/fail per AC} | Assess: {verdict or skipped}
    Worktrees: all merged + cleaned
    ```
+   ⛔ **Every shared-state claim in the report must be derived from queries run AFTER closure, in this same turn** — `lore ready`/`lore status`/`git worktree list` NOW, never from earlier-in-context tool output. This is a multi-session workspace: a `lore tree` snapshot from hours ago is another session's history, not current state (live incident 2026-07-27: a "Phase 3 has 3 open tasks" claim about a SIBLING plan was hours stale — that plan had been completed and archived by a parallel session). Mentioning OTHER plans' status is optional; if you do, query them fresh or say "as of {time of my last look}".
 
 ## Stop Conditions
 
