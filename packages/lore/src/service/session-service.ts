@@ -39,6 +39,7 @@ import {
   deriveLastActivityAt,
   deriveResumeHint,
   parseSeatBranch,
+  isInvalidated,
 } from "@lore/core";
 import type {
   BootstrapReport,
@@ -185,6 +186,13 @@ export class SessionService {
    * READ-ONLY — see module invariants. Still git-free: `seat` is caller-resolved data,
    * never derived here (SessionService's documented git-free invariant, D6).
    *
+   * @invariant spec-session-start-handoff-neutrality D3 — a handoff doc that is
+   *   `archived`/`deprecated`, or invalidated per `extra.validity`
+   *   (`isInvalidated`, SPEC-043's SSOT predicate), is excluded from BOTH
+   *   `latest_handoffs` and `resume_hint` at the single `handoffPairs`
+   *   derivation site below — archiving/invalidating a handoff is an
+   *   effective cleanup action everywhere it surfaces.
+   *
    * @param by - The requesting actor's identity — filters `my_claims` to this actor.
    * @param now - Caller-supplied current-time seam (never `Date.now()` directly),
    *   mirroring `TaskWorkflowService.ready`'s `now` parameter shape.
@@ -319,10 +327,23 @@ export class SessionService {
 
     // Latest handoff per plan grouping (null group = parentless or PRD-parented) + a
     // corpus-wide resume hint (the single newest handoff overall).
+    //
+    // reason: spec-session-start-handoff-neutrality D3 — a handoff doc whose
+    // status is archived/deprecated, or which is invalidated per
+    // `extra.validity` (SPEC-043's `isInvalidated` SSOT predicate, the SAME
+    // one every other read surface calls — never a second hand-rolled
+    // interpretation), is dropped HERE, at the single derivation site both
+    // `latest_handoffs` and `resume_hint` build from below. Archiving or
+    // invalidating a handoff therefore becomes an effective cleanup action
+    // everywhere it surfaces (the full report AND the tier-1 injection),
+    // closing the "manual cleanup is currently ineffective" byproduct gap.
     const planIds = new Set(plans.map((p) => p.id));
     const handoffPairs = allDocs
       .map((doc) => ({ doc, handoff: extractHandoffExtra(doc) }))
-      .filter((p): p is { doc: DocRecord; handoff: HandoffExtra } => p.handoff !== null);
+      .filter((p): p is { doc: DocRecord; handoff: HandoffExtra } => p.handoff !== null)
+      .filter(
+        (p) => p.doc.status !== "archived" && p.doc.status !== "deprecated" && !isInvalidated(p.doc, nowIso),
+      );
 
     const groups = new Map<DocId | null, Array<{ doc: DocRecord; handoff: HandoffExtra }>>();
     for (const pair of handoffPairs) {

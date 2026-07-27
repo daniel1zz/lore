@@ -7,9 +7,13 @@
  * export the names this file imports — never because of a fixture/assertion bug.
  *
  * Contract pinned here (SPEC-080 §Projection Contract):
- *   - literal payload key order: resume_hint, my_claims, active_sessions,
+ *   - literal payload key order: [resume_hint,] my_claims, active_sessions,
  *     armed_gates, root, pending_reviews, active_plans, latest_handoffs, corpus,
- *     omitted (+ budget_exceeded present-iff-true, ALWAYS last)
+ *     omitted (+ budget_exceeded present-iff-true, ALWAYS last). `resume_hint`
+ *     is present ONLY when the caller passes `seatScoped: true` — an ordinary
+ *     session's default call omits it entirely
+ *     (spec-session-start-handoff-neutrality D1, D2 — see the two HAPPY cases
+ *     below, added by that follow-on task).
  *   - active_plans selection: ready>0 OR claimed>0, sorted last_activity_at desc,
  *     capped at maxActivePlans, drops counted in omitted.active_plans
  *   - armed_gates condensed to string[] of checkpoint names only
@@ -126,8 +130,32 @@ const EMPTY_REPORT: BootstrapReport = {
 // ─── HAPPY — field order, compact json, armed_gates condensation ─────────────
 
 describe("SPEC-080 AC-080-1 HAPPY — buildBootstrapInjection field order + compaction", () => {
-  it("HAPPY: representative report + default budgets -> literal key order, compact json", () => {
+  it("HAPPY: representative report + default budgets, ordinary (non-seat) session -> literal key order minus resume_hint, compact json", () => {
+    // spec-session-start-handoff-neutrality D1 — an ordinary session (no
+    // `seatScoped` argument, defaults false) omits resume_hint entirely.
     const result = buildBootstrapInjection(BASE_REPORT, DEFAULT_BUDGETS);
+    expect(Object.keys(result.payload)).toEqual([
+      "my_claims",
+      "active_sessions",
+      "armed_gates",
+      "root",
+      "pending_reviews",
+      "active_plans",
+      "latest_handoffs",
+      "corpus",
+      "omitted",
+    ]);
+    expect(result.payload).not.toHaveProperty("resume_hint");
+    expect(result.json).not.toContain("resume_hint");
+    expect(result.json).not.toContain("\n  ");
+    expect(JSON.parse(result.json)).toEqual(result.payload);
+  });
+
+  it("HAPPY: seatScoped=true retains resume_hint at its contract position-1 slot", () => {
+    // spec-session-start-handoff-neutrality D2 — a seat-scoped session's hint
+    // derives from the session's own worktree branch, not a corpus-wide
+    // guess, so it survives untouched.
+    const result = buildBootstrapInjection(BASE_REPORT, DEFAULT_BUDGETS, true);
     expect(Object.keys(result.payload)).toEqual([
       "resume_hint",
       "my_claims",
@@ -140,6 +168,7 @@ describe("SPEC-080 AC-080-1 HAPPY — buildBootstrapInjection field order + comp
       "corpus",
       "omitted",
     ]);
+    expect(result.payload.resume_hint).toEqual(BASE_REPORT.resume_hint);
     expect(result.json).not.toContain("\n  ");
     expect(JSON.parse(result.json)).toEqual(result.payload);
   });
@@ -237,19 +266,24 @@ describe("SPEC-080 AC-080-1 BOUNDARY — char-budget rule", () => {
   });
 
   it("BOUNDARY: single oversized field with active_plans/latest_handoffs already empty -> budget_exceeded=true, payload intact, no mid-JSON slice", () => {
-    const hugeSlug = "x".repeat(20_000);
+    // reason: the huge value lives in `root.title` (a non-droppable field),
+    // NOT `resume_hint` — an ordinary (non-seat-scoped) session omits
+    // resume_hint from the payload entirely (spec-session-start-handoff-
+    // neutrality D1), so it can no longer be the mechanism this BOUNDARY case
+    // uses to force `budget_exceeded`.
+    const hugeTitle = "x".repeat(20_000);
     const report: BootstrapReport = {
       ...BASE_REPORT,
       active_plans: [],
       latest_handoffs: [],
-      resume_hint: { plan_slug: null, handoff_slug: hugeSlug },
+      root: { slug: "prd-root", title: hugeTitle },
     };
     const result = buildBootstrapInjection(report, { ...DEFAULT_BUDGETS, charBudget: 100 });
     expect(result.payload.budget_exceeded).toBe(true);
-    expect(result.payload.resume_hint?.handoff_slug).toBe(hugeSlug);
+    expect(result.payload.root?.title).toBe(hugeTitle);
     // reason: the char-budget rule forbids a mid-JSON slice — the full oversized
     // value must survive intact in both the payload object and its serialization.
-    expect(result.json).toContain(hugeSlug);
+    expect(result.json).toContain(hugeTitle);
   });
 });
 
