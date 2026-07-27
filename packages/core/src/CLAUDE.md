@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Foundational types, error model, runtime validation, lifecycle rules, config, and telemetry. Pure modules with no I/O except `config.ts` (file read/write) and `telemetry.ts` (append-only JSONL). Published as `@lore/core` workspace package; depends on no other `@lore/*` package.
+Foundational types, error model, runtime validation, lifecycle rules, config, and telemetry. Pure modules with no I/O except `config.ts` (file read/write) and `telemetry.ts` (append-only JSONL). Published as `@lore/core` workspace package; depends on no other `@lore/*` package. Browser-safe distribution leaves: `memory-markers.ts` (CLAUDE.md managed-section markers + fingerprint grammar) and `fs-ports.ts` (`FsReadPort`/`FsWritePort` interfaces + `InMemoryFsPort` test double).
 
 ## Key Invariants
 

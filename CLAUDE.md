@@ -64,7 +64,7 @@ cd packages/lore && bun test tests/unit/store/sqlite-store.bun.test.ts
 ### Layer Stack
 
 ```
-packages/lore/src/adapters/cli/   ← citty CLI (default entry, 31 subcommands)
+packages/lore/src/adapters/cli/   ← citty CLI (default entry, 32 subcommands)
 packages/lore/src/adapters/mcp/   ← MCP stdio server (entered via --mcp-server flag)
 packages/lore/src/adapters/http/  ← Bun.serve HTTP + bearer-auth (lore serve) + sync-push
 packages/lore/src/app.ts          ← composition root: createApp(dbPath, config?) → App | Result<App>

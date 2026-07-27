@@ -2,7 +2,7 @@
 
 ## Purpose
 
-citty-based CLI adapter. 31 subcommands, each in its own `commands/<name>.ts`, lazily imported by `index.ts`. Thin adapter only — no business logic; every command resolves args, calls a service via the App composition root, formats the result, and exits. Full pre-compression file (mechanism detail, per-spec design decisions, module headers to read) is archived verbatim: `lore get knowledge-module-claude-md-snapshot-packages-lore-src-adapters`.
+citty-based CLI adapter. 32 subcommands, each in its own `commands/<name>.ts`, lazily imported by `index.ts`. Thin adapter only — no business logic; every command resolves args, calls a service via the App composition root, formats the result, and exits. Full pre-compression file (mechanism detail, per-spec design decisions, module headers to read) is archived verbatim: `lore get knowledge-module-claude-md-snapshot-packages-lore-src-adapters`.
 
 ## Key Invariants
 
