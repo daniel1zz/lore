@@ -35,7 +35,7 @@
  *     writer/reader port resolved entries in a different sequence) render
  *     byte-identically. This is the module's REGRESSION guarantee.
  *   - `ctx.mcpErrorTail` is an ADDITIVE, OPTIONAL field beyond `{targetDir, binPath}` —
- *     `SetupReceipt.mcp: "failed"` (`setup-service.ts`) is a bare tri-state marker with
+ *     `SetupReceipt.mcp: "failed"` (`setup-service.ts`) is a bare marker with
  *     no error detail of its own (by design: MCP failure never aborts the run, see that
  *     module's invariants). This renderer's `"failed"` branch can show a caller-supplied
  *     stderr/error tail when the CLI adapter has one on hand (e.g. the
@@ -117,14 +117,21 @@ function renderPathList(paths: readonly string[], emptyLabel: string): string[] 
 
 /**
  * Renders the MCP outcome line. `direction` disambiguates `SetupReceipt.mcp`'s shared
- * tri-state enum — `"registered"` means "add succeeded" for an install and "remove
+ * enum — `"registered"` means "add succeeded" for an install and "remove
  * succeeded" for an uninstall (see `SetupReceipt`'s per-field JSDoc on `setup-service.ts`).
+ * `"already_registered"` (install() only — task-lore-setup-mcp-add-step-is-non-idempotent-
+ * already-exists) is rendered as a DISTINCT skip line rather than folded into
+ * `"registered"` — an operator diffing two runs' receipts should be able to tell "this
+ * run freshly registered it" apart from "it was already registered, nothing changed".
  */
 function renderMcpLine(mcp: SetupReceipt["mcp"], ctx: SetupRenderCtx, direction: "install" | "uninstall"): string {
   const prefix = direction === "install" ? "MCP" : "MCP removal";
 
   if (mcp === "registered") {
     return direction === "install" ? `${prefix}: registered ✓` : `${prefix}: de-registered ✓`;
+  }
+  if (mcp === "already_registered") {
+    return `${prefix}: skipped (already registered)`;
   }
   if (mcp === "skipped") {
     return direction === "install"

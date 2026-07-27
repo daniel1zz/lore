@@ -270,13 +270,27 @@ export interface SetupFsWriter {
 }
 
 /**
+ * Outcome of a successful {@link McpRegistrar.add} call: `"added"` — the
+ * registration was freshly created this run; `"already_registered"` — the
+ * registrar detected the `lore` MCP server was ALREADY registered at user
+ * scope (e.g. `claude mcp add`'s exit-1 "already exists" collision) and
+ * treated that as the desired end state rather than a failure — an
+ * idempotent re-run of `lore setup` must not fail merely because a prior run
+ * already converged (SPEC-076 I2 idempotency spirit;
+ * task-lore-setup-mcp-add-step-is-non-idempotent-already-exists). Both
+ * values map to `SetupReceipt.mcp` (`"registered"` / `"already_registered"`
+ * respectively) — see that field's own JSDoc.
+ */
+export type McpAddOutcome = "added" | "already_registered";
+
+/**
  * Registers/de-registers the `lore` MCP server with the `claude` CLI at user
  * scope. The production implementation shells `claude mcp add`/`claude mcp
  * remove` (argv built by `@lore/core`'s `buildMcpAddArgs`/`buildMcpRemoveArgs`)
  * — a downstream task, not this one.
  */
 export interface McpRegistrar {
-  add(binPath: string): Promise<Result<void, LoreError>>;
+  add(binPath: string): Promise<Result<McpAddOutcome, LoreError>>;
   remove(): Promise<Result<void, LoreError>>;
 }
 
@@ -309,12 +323,16 @@ export interface SetupReceipt {
   backups: string[];
   /**
    * Outcome of the MCP registrar step this run: `"registered"` — the add/remove
-   * call succeeded; `"failed"` — it was attempted and threw/returned `err`
+   * call succeeded (install: a FRESH registration this run); `"already_registered"`
+   * — install() only, the registrar found the `lore` MCP server was already
+   * registered at user scope and treated that as success (idempotent re-run,
+   * see {@link McpAddOutcome}) rather than `"failed"`; `"failed"` — it was
+   * attempted and threw/returned `err` for a genuinely different reason
    * (file-asset work still completed; the CLI adapter maps this to a non-zero
    * exit); `"skipped"` — uninstall found no tracked `mcp` manifest entry, so no
    * de-registration was attempted.
    */
-  mcp: "registered" | "skipped" | "failed";
+  mcp: "registered" | "already_registered" | "skipped" | "failed";
   /** Absolute path to `.lore-setup-manifest.json` under the target dir. */
   manifestPath: string;
   /**
@@ -607,7 +625,13 @@ export class SetupService {
     let mcp: SetupReceipt["mcp"];
     let mcpEntry: SetupEntry | undefined;
     if (mcpResult.ok) {
-      mcp = "registered";
+      // reason: task-lore-setup-mcp-add-step-is-non-idempotent-already-exists — an
+      // "already_registered" outcome (RealMcpRegistrar detected `claude mcp add`'s
+      // idempotent "already exists" collision) is still a REGISTERED end state, just
+      // one this run didn't freshly create; the receipt's `mcp` field says so
+      // explicitly rather than collapsing it into a plain `"registered"` (which would
+      // read as "just added" to an operator diffing two runs).
+      mcp = mcpResult.value === "already_registered" ? "already_registered" : "registered";
       const shaOfBin = sha256Hex(opts.binPath);
       const writtenAt = previousMcpEntry?.sha256 === shaOfBin ? previousMcpEntry.written_at : nowIso;
       // reason: SPEC-076 D8 — the mcp entry is never emitted by an AssetSource (it has no
