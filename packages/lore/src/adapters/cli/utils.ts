@@ -16,7 +16,8 @@
  */
 
 import { existsSync } from "fs";
-import { join, dirname } from "path";
+import { join, dirname, resolve as resolvePath } from "path";
+import { spawnSync } from "node:child_process";
 import { z } from "zod";
 import {
   evidenceEntrySchema,
@@ -34,13 +35,86 @@ const evidenceArraySchema = z.array(evidenceEntrySchema);
 // ─── DB Discovery (used only by loader.ts) ──────────────────────────────────
 
 /**
- * Walk up from cwd looking for .lore/lore.db.
+ * Resolves the MAIN checkout's `.lore/lore.db` when `dir` sits inside a
+ * LINKED git worktree (SPEC M4 —
+ * spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M4,
+ * AC-WH-4). A fresh `git worktree add` tree never materializes `.lore/`
+ * (gitignored, untracked, never checked out into a linked worktree) — the
+ * primary walk-up in {@link findLoreDbPath} / `findLoreDbPathQuiet`
+ * (`gate-bypass-audit.ts`) always misses there. This is the fallback of
+ * last resort, consulted ONLY after that walk-up already failed.
+ *
+ * Shells `git rev-parse --git-common-dir` and `--git-dir` from `dir` — in a
+ * linked worktree these differ (`--git-common-dir` points at the MAIN repo's
+ * shared `.git`, `--git-dir` at this worktree's own
+ * `.git/worktrees/<name>`); in a primary checkout (or a non-worktree repo)
+ * they resolve to the SAME path, so no fallback root exists distinct from
+ * the one the primary walk-up already tried. Mirrors the identical
+ * git-common-dir-vs-git-dir differencing fact
+ * `commands/verify.ts#gatherVerifyGitFacts` gathers for SPEC-063's execution-
+ * root resolution — same two-command probe, different consumer.
+ *
+ * ANY probe failure (not a git repo, `git` missing, nonzero exit, empty/
+ * whitespace-only stdout, a thrown `spawnSync` error) degrades to
+ * `undefined` — this function never throws, so callers can treat "no
+ * fallback available" identically to "not a linked worktree at all".
+ *
+ * @param dir - Directory the primary walk-up already failed to resolve
+ *   `.lore/lore.db` from (`process.cwd()` in production).
+ * @returns The main checkout's `.lore/lore.db` absolute path, when that
+ *   checkout's `.lore/` directory actually contains one; otherwise `undefined`.
+ */
+export function findMainCheckoutLoreDb(dir: string): string | undefined {
+  try {
+    const commonDirRaw = spawnSync("git", ["rev-parse", "--git-common-dir"], {
+      cwd: dir,
+      encoding: "utf8",
+      timeout: 5000,
+    });
+    const gitDirRaw = spawnSync("git", ["rev-parse", "--git-dir"], {
+      cwd: dir,
+      encoding: "utf8",
+      timeout: 5000,
+    });
+    if (
+      commonDirRaw.status !== 0 ||
+      gitDirRaw.status !== 0 ||
+      !commonDirRaw.stdout?.trim() ||
+      !gitDirRaw.stdout?.trim()
+    ) {
+      return undefined;
+    }
+
+    const commonDirAbs = resolvePath(dir, commonDirRaw.stdout.trim());
+    const gitDirAbs = resolvePath(dir, gitDirRaw.stdout.trim());
+    if (commonDirAbs === gitDirAbs) {
+      // Primary checkout (or a non-worktree repo) — not a linked worktree,
+      // no distinct fallback root to try.
+      return undefined;
+    }
+
+    // Linked worktree confirmed: commonDirAbs is the MAIN repo's shared
+    // `.git` directory — its parent is the main checkout root.
+    const mainCheckoutRoot = dirname(commonDirAbs);
+    const candidate = join(mainCheckoutRoot, ".lore", "lore.db");
+    return existsSync(candidate) ? candidate : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Walk up from cwd looking for .lore/lore.db. When that walk-up misses AND
+ * cwd is inside a linked git worktree, falls back to the MAIN checkout's
+ * `.lore/lore.db` via {@link findMainCheckoutLoreDb} (SPEC M4, AC-WH-4) —
+ * still absent there too → the existing loud failure, unchanged.
  * Exits with code 1 if not found (suggests `lore init`).
  *
  * @returns absolute path to the lore.db file
  */
 export function findLoreDbPath(): string {
-  let dir = process.cwd();
+  const startDir = process.cwd();
+  let dir = startDir;
 
   // Walk up to filesystem root
   while (true) {
@@ -51,6 +125,11 @@ export function findLoreDbPath(): string {
     const parent = dirname(dir);
     if (parent === dir) break; // reached root
     dir = parent;
+  }
+
+  const mainCheckoutDb = findMainCheckoutLoreDb(startDir);
+  if (mainCheckoutDb !== undefined) {
+    return mainCheckoutDb;
   }
 
   process.stderr.write(
