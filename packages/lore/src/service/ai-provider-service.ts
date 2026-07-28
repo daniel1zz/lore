@@ -330,9 +330,10 @@ function applyGroundingConfidenceDowngrade(
  * via TypeScript structural typing (`"modelId" in provider`-style), not a core interface change,
  * per task-t3-hardening-reachable-override-escape-real-ai-provenance's file-anchor scope. A
  * provider that starts exposing a public `modelId` property satisfies this automatically,
- * with no further change needed here. NONE of the current provider implementations
- * (`ClaudeCliProvider`, `HttpAIProvider`, `InMemoryAIProvider`) implement it yet — see
- * {@link AIProviderService._resolveAiProvenance}'s own JSDoc for what that means today.
+ * with no further change needed here. `HttpAIProvider` implements it (its configured
+ * `cfg.model`); `ClaudeCliProvider` deliberately does not — it shells out to `claude -p`
+ * and cannot know which model served the call — and `InMemoryAIProvider` is a test double.
+ * See {@link AIProviderService._resolveAiProvenance}'s own JSDoc for what that means today.
  */
 interface ModelAwareProvider {
   readonly modelId?: string;
