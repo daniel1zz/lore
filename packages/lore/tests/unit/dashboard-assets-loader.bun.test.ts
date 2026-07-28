@@ -1,0 +1,226 @@
+/**
+ * RED scenarios for the dashboard assets loader (spec
+ * spec-dashboard-production-packaging-one-command-lore-dashboard, DD-1).
+ *
+ * TDD-Role: red. Paired implementation task (GREEN target):
+ * task-skill-implement-f5a-build-step-embed-manifest-and-committed-loader,
+ * which creates the committed loader at
+ * `packages/lore/src/adapters/http/dashboard-assets-loader.ts`. As of THIS
+ * task that module does not exist yet — every scenario that touches it fails
+ * with "Cannot find module ... dashboard-assets-loader.ts" (missing
+ * implementation), never a test-authoring bug.
+ *
+ * Contract under test (defined here; the paired implementation must honor
+ * it verbatim):
+ *
+ *   export function loadDashboardAssets(
+ *     modulePath?: string,
+ *   ): Promise<
+ *     | { available: true; manifest: DashboardAssetsManifest }
+ *     | { available: false; reason: string }
+ *   >;
+ *
+ *   interface DashboardAssetsManifest {
+ *     stamp: { digest: string; builtAt: string; skipped?: boolean };
+ *     entries: Record<
+ *       string, // urlPath, e.g. "/index.html"
+ *       { embedded: unknown; contentType: string; immutable: boolean }
+ *     >;
+ *   }
+ *
+ * `modulePath` is an optional TEST SEAM: when supplied, the loader performs
+ * its guarded dynamic import against THAT path instead of the real
+ * git-ignored `packages/lore/src/generated/dashboard-assets.ts`. The
+ * injected fixture module must export `DASHBOARD_ASSETS_MANIFEST` matching
+ * `DashboardAssetsManifest` above. The loader is responsible for turning a
+ * filesystem path into a valid dynamic-import specifier (e.g. via
+ * `pathToFileURL(path).href`) — callers pass a plain absolute path.
+ *
+ * Never throws: `{ available: false }` covers BOTH "module absent" and any
+ * other guarded-import failure — the loader always resolves, it never
+ * rejects and never lets a thrown error escape to the caller.
+ *
+ * The loader itself must have NO static import of the generated module (a
+ * static `import` would break fresh-clone `bun run typecheck`, which never
+ * builds the dashboard first) — enforced structurally by the third scenario
+ * below, which is allowed to be GREEN even in this RED run.
+ */
+
+import { describe, it, expect, afterEach } from "bun:test";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
+
+// ─── Paths ──────────────────────────────────────────────────────────────────
+
+// packages/lore/tests/unit/ -> repo root is four levels up.
+const REPO_ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..", "..");
+
+const LOADER_MODULE_PATH = join(
+  REPO_ROOT,
+  "packages",
+  "lore",
+  "src",
+  "adapters",
+  "http",
+  "dashboard-assets-loader.ts",
+);
+
+const GENERATED_MANIFEST_PATH = join(
+  REPO_ROOT,
+  "packages",
+  "lore",
+  "src",
+  "generated",
+  "dashboard-assets.ts",
+);
+
+// ─── Loader import (DYNAMIC, variable specifier) ───────────────────────────
+//
+// The loader module does not exist yet in this RED task. A *static* import
+// specifier (`import { loadDashboardAssets } from "../../src/adapters/http/
+// dashboard-assets-loader.js"`) would fail `bun run typecheck` outright
+// (TS2307 "Cannot find module") rather than fail the *test*, which would
+// violate this task's own AC-F5A-6-adjacent structural scenario (typecheck
+// must stay green). Routing the specifier through a variable — the same
+// pattern used by tests/unit/distribution/publish-pipeline.test.ts — keeps
+// resolution entirely at runtime, so tsc never inspects it.
+
+type LoadDashboardAssetsResult =
+  | { available: true; manifest: unknown }
+  | { available: false; reason: string };
+
+type LoadDashboardAssetsFn = (modulePath?: string) => Promise<LoadDashboardAssetsResult>;
+
+async function importLoader(): Promise<{ loadDashboardAssets: LoadDashboardAssetsFn }> {
+  const mod = (await import(/* @vite-ignore */ LOADER_MODULE_PATH)) as {
+    loadDashboardAssets?: LoadDashboardAssetsFn;
+  };
+  if (typeof mod.loadDashboardAssets !== "function") {
+    throw new Error(
+      "packages/lore/src/adapters/http/dashboard-assets-loader.ts must export loadDashboardAssets()",
+    );
+  }
+  return { loadDashboardAssets: mod.loadDashboardAssets };
+}
+
+// ─── Fixture cleanup ────────────────────────────────────────────────────────
+
+const fixtureDirs: string[] = [];
+
+afterEach(() => {
+  while (fixtureDirs.length > 0) {
+    const dir = fixtureDirs.pop();
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+function writeFixtureManifest(source: string): string {
+  const dir = mkdtempSync(join(tmpdir(), "dashboard-assets-loader-fixture-"));
+  fixtureDirs.push(dir);
+  const modulePath = join(dir, "fixture-manifest.mjs");
+  writeFileSync(modulePath, source, "utf8");
+  return modulePath;
+}
+
+// ─── Scenarios ──────────────────────────────────────────────────────────────
+
+describe("dashboard-assets-loader", () => {
+  it("returns { available: false, reason } naming `bun run build` when the generated manifest module is absent, and never throws", async () => {
+    const { loadDashboardAssets } = await importLoader();
+
+    // Deterministic "absent" regardless of this checkout's build state: the
+    // real generated path is git-ignored and only produced by `bun run
+    // build`, but we don't want this scenario's pass/fail to depend on
+    // whether a stray build happened to run earlier in this session.
+    const absentDir = mkdtempSync(join(tmpdir(), "dashboard-assets-loader-absent-"));
+    fixtureDirs.push(absentDir);
+    const absentModulePath = join(absentDir, "does-not-exist.mjs");
+
+    let thrown: unknown = null;
+    let result: LoadDashboardAssetsResult | undefined;
+    try {
+      result = await loadDashboardAssets(absentModulePath);
+    } catch (e) {
+      thrown = e;
+    }
+
+    expect(thrown).toBeNull();
+    expect(result).toBeDefined();
+    expect(result?.available).toBe(false);
+    if (result && !result.available) {
+      expect(result.reason).toContain("bun run build");
+    }
+  });
+
+  it("returns { available: true, manifest } exposing urlPath -> { embedded, contentType, immutable } and the build stamp { digest, builtAt } for a fixture manifest with two entries", async () => {
+    const { loadDashboardAssets } = await importLoader();
+
+    const fixtureModulePath = writeFixtureManifest(
+      [
+        "export const DASHBOARD_ASSETS_MANIFEST = {",
+        '  stamp: { digest: "deadbeefcafe", builtAt: "2026-07-28T00:00:00.000Z" },',
+        "  entries: {",
+        '    "/index.html": { embedded: "index.html", contentType: "text/html", immutable: false },',
+        '    "/assets/app-abc123.js": { embedded: "assets/app-abc123.js", contentType: "application/javascript", immutable: true },',
+        "  },",
+        "};",
+        "",
+      ].join("\n"),
+    );
+
+    const result = await loadDashboardAssets(fixtureModulePath);
+
+    expect(result.available).toBe(true);
+    if (result.available) {
+      const manifest = result.manifest as {
+        stamp: { digest: string; builtAt: string };
+        entries: Record<string, { embedded: unknown; contentType: string; immutable: boolean }>;
+      };
+
+      expect(manifest.stamp.digest).toBe("deadbeefcafe");
+      expect(manifest.stamp.builtAt).toBe("2026-07-28T00:00:00.000Z");
+
+      expect(Object.keys(manifest.entries).sort()).toEqual([
+        "/assets/app-abc123.js",
+        "/index.html",
+      ]);
+      expect(manifest.entries["/index.html"]).toEqual({
+        embedded: "index.html",
+        contentType: "text/html",
+        immutable: false,
+      });
+      expect(manifest.entries["/assets/app-abc123.js"]).toEqual({
+        embedded: "assets/app-abc123.js",
+        contentType: "application/javascript",
+        immutable: true,
+      });
+    }
+  });
+
+  it(
+    "bun run typecheck exits 0 on a checkout with no generated manifest (the loader has no static import of the generated module) — structural invariant, allowed GREEN in this RED run",
+    () => {
+      // Precondition sanity: this checkout genuinely has no generated
+      // manifest right now (it is git-ignored and only produced by `bun run
+      // build`) — otherwise this scenario would prove nothing.
+      expect(existsSync(GENERATED_MANIFEST_PATH)).toBe(false);
+
+      const result = spawnSync("bun", ["run", "typecheck"], {
+        cwd: REPO_ROOT,
+        encoding: "utf8",
+        maxBuffer: 16 * 1024 * 1024,
+      });
+
+      if (result.status !== 0) {
+        throw new Error(
+          `bun run typecheck exited ${String(result.status)}\n--- stdout ---\n${result.stdout}\n--- stderr ---\n${result.stderr}`,
+        );
+      }
+      expect(result.status).toBe(0);
+    },
+    120_000,
+  );
+});
