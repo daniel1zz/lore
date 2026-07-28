@@ -76,6 +76,10 @@ export interface TraceStatsOpts {
   includeRawQueries?: boolean;
 }
 
+/**
+ * Read-only aggregation surface for `lore trace stats` (SPEC-102) — see this
+ * module's own header for the full "store-only, no writes" invariant.
+ */
 export class TraceStatsService {
   constructor(private readonly store: StoreInterface) {}
 
@@ -119,27 +123,91 @@ export class TraceStatsService {
 }
 
 /**
+ * Reverse index of {@link CHECKPOINT_SUCCESS_ACTIONS}: audit `action` ->
+ * the checkpoint(s) it counts as a "retry success" for. Built ONCE at
+ * module load (the source table is a small fixed constant, never
+ * per-`stats()`-call) — see {@link buildMaxRetrySuccessTimestamps}'s header
+ * for why this is what makes the O(n+m) shape possible (SPEC-102 hardening
+ * T4 item 3).
+ */
+const ACTION_TO_CHECKPOINTS: ReadonlyMap<string, readonly string[]> = (() => {
+  const index = new Map<string, string[]>();
+  for (const [checkpoint, actions] of Object.entries(CHECKPOINT_SUCCESS_ACTIONS)) {
+    for (const action of actions) {
+      const bucket = index.get(action) ?? [];
+      bucket.push(checkpoint);
+      index.set(action, bucket);
+    }
+  }
+  return index;
+})();
+
+/**
+ * Join key for the `(checkpoint, actor)` -> max-success-timestamp map.
+ * Double-colon separated (matches this codebase's other composite-key
+ * conventions) — checkpoint names are a small fixed set of kebab-case
+ * identifiers (`GateCheckpoint`) and never contain `::`, so no
+ * checkpoint/actor pair can collide across the boundary.
+ */
+function retryKey(checkpoint: string, actor: string): string {
+  return `${checkpoint}::${actor}`;
+}
+
+/**
+ * One pass over `auditEntries` (O(m), m = audit rows in the `--since`
+ * window): for every entry whose `action` is a "success" action for one or
+ * more checkpoints (via {@link ACTION_TO_CHECKPOINTS}), tracks the MAX
+ * `timestamp` seen per `(checkpoint, actor)` pair.
+ *
+ * This is what lets {@link computeDenyRetryGap} answer "was this deny
+ * retried successfully" — "does ANY qualifying audit entry have
+ * `timestamp > deny.ts`" — with a single map lookup + comparison instead of
+ * an `auditEntries.some(...)` scan per deny: the pre-fix shape was
+ * `denies.length * auditEntries.length` (the CLI's `--since` defaults to the
+ * Unix epoch, so `auditEntries.length` grows with the corpus's ENTIRE audit
+ * history on every `lore trace stats` invocation). Since ISO-8601 timestamps
+ * sort lexicographically (D1), "max > deny.ts" is exactly equivalent to "at
+ * least one entry exceeds deny.ts" — if the max exceeds it, that entry
+ * itself witnesses the predicate; if the max doesn't, no entry can.
+ */
+function buildMaxRetrySuccessTimestamps(auditEntries: readonly AuditEntry[]): Map<string, string> {
+  const maxByKey = new Map<string, string>();
+  for (const entry of auditEntries) {
+    const checkpoints = ACTION_TO_CHECKPOINTS.get(entry.action);
+    if (checkpoints === undefined) continue;
+    for (const checkpoint of checkpoints) {
+      const key = retryKey(checkpoint, entry.actor);
+      const current = maxByKey.get(key);
+      if (current === undefined || entry.timestamp > current) {
+        maxByKey.set(key, entry.timestamp);
+      }
+    }
+  }
+  return maxByKey;
+}
+
+/**
  * Pure computation over already-fetched denies/audit rows — see this
  * module's class-level `@invariant` for the "computed, never stored"
- * rationale.
+ * rationale. Exported (only) so
+ * `tests/unit/service/trace-stats-service.test.ts` can assert this O(n+m)
+ * shape's output is IDENTICAL, deny-for-deny, to the pre-refactor
+ * `auditEntries.some(...)`-per-deny scan (SPEC-102 hardening T4 item 3 —
+ * proven by equality, not by inspection).
  */
-function computeDenyRetryGap(
+export function computeDenyRetryGap(
   denies: readonly TraceGateDenyEvent[],
   auditEntries: readonly AuditEntry[],
 ): TraceDenyRetryGap[] {
+  const maxRetrySuccessTimestamps = buildMaxRetrySuccessTimestamps(auditEntries);
   const byCheckpoint = new Map<string, { denies: number; retried: number }>();
 
   for (const deny of denies) {
     const bucket = byCheckpoint.get(deny.checkpoint) ?? { denies: 0, retried: 0 };
     bucket.denies += 1;
 
-    const successActions = CHECKPOINT_SUCCESS_ACTIONS[deny.checkpoint] ?? [];
-    const hasRetry = auditEntries.some(
-      (entry) =>
-        entry.actor === deny.actor &&
-        entry.timestamp > deny.ts &&
-        successActions.includes(entry.action),
-    );
+    const maxTimestamp = maxRetrySuccessTimestamps.get(retryKey(deny.checkpoint, deny.actor));
+    const hasRetry = maxTimestamp !== undefined && maxTimestamp > deny.ts;
     if (hasRetry) bucket.retried += 1;
 
     byCheckpoint.set(deny.checkpoint, bucket);

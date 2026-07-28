@@ -267,10 +267,17 @@ export default defineCommand({
       const handler = SPECIAL_CHECKPOINT_HANDLERS[args.checkpoint as string];
       if (handler !== undefined) {
         await handler(app, args, config);
-        // reason: SPEC-102 — only trace a SUCCESSFUL serve; each handler sets
-        // its own process.exitCode (0 on success, non-zero via exitCode() on
-        // an unresolvable target).
-        if (process.exitCode === 0) {
+        // reason: SPEC-102 hardening (T4 item 1) — only trace a SUCCESSFUL
+        // serve. Node's OWN default for `process.exitCode` is `undefined`,
+        // never `0` — a strict `=== 0` check is a latent trap for any FUTURE
+        // handler added to `SPECIAL_CHECKPOINT_HANDLERS` that succeeds
+        // without explicitly assigning `process.exitCode = 0` (the natural
+        // way to write a success path). Every CURRENT handler
+        // (`handleSessionResume`/`handlePhaseStart`/`handleTaskStart`) DOES
+        // assign 0 explicitly, so this was never a live bug — but the
+        // invariant this predicate must enforce is "did NOT fail", not
+        // "was 0 literally assigned", so unset must read as success.
+        if ((process.exitCode ?? 0) === 0) {
           const target = typeof args.target === "string" ? [args.target] : [];
           recordFeedTrace(app, checkpointName, target);
         }

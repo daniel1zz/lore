@@ -20,6 +20,21 @@
  *               citty's own arg validation (out of this spec's scope).
  *   REGRESSION: AC-TRACE-6 — running `lore trace stats` twice in a row never
  *               changes the underlying `trace_events` row count.
+ *
+ * SPEC-102 hardening (T4 items 1+2): NO oracle previously asserted a
+ * `kind='feed'` row is ever written — `feed.ts` gated the trace write on
+ * `process.exitCode === 0`, a strict equality Node never guarantees (its
+ * OWN default is `undefined`). Every CURRENT checkpoint handler happens to
+ * assign `0` explicitly, so this was a LATENT trap, not a live bug — but no
+ * test would have caught a future handler that succeeds the natural way
+ * (returning without assigning `process.exitCode`). The
+ * "AC-TRACE-4/5/6 regression gate" describe block below adds the missing
+ * HAPPY assertion (a successful `lore feed session-resume` produces a
+ * `kind='feed'` row with the right `checkpoint` column) — proven RED-first
+ * against the pre-fix `=== 0` predicate with a handler that leaves
+ * `process.exitCode` unset (see this task's completion report for the
+ * manual repro; not re-encoded as a permanent test since it requires
+ * temporarily un-fixing production code).
  */
 
 import { afterEach, describe, expect, it } from "bun:test";
@@ -69,6 +84,19 @@ function traceEventCount(dir: string): number {
   try {
     const row = db.query("SELECT COUNT(*) as count FROM trace_events").get() as { count: number };
     return row.count;
+  } finally {
+    db.close();
+  }
+}
+
+/** Every `kind='feed'` row's `checkpoint` column, oldest first — SPEC-102 hardening T4 item 2. */
+function feedTraceCheckpoints(dir: string): string[] {
+  const db = new Database(join(dir, ".lore", "lore.db"), { readonly: true });
+  try {
+    const rows = db
+      .query("SELECT checkpoint FROM trace_events WHERE kind = 'feed' ORDER BY id ASC")
+      .all() as { checkpoint: string | null }[];
+    return rows.map((row) => row.checkpoint ?? "");
   } finally {
     db.close();
   }
@@ -255,5 +283,34 @@ describe("AC-TRACE-6: running lore trace stats twice yields identical trace_even
     const second = runLore(["trace", "stats", "--json"], tmpDir);
     expect(second.exitCode).toBe(0);
     expect(traceEventCount(tmpDir)).toBe(countBefore);
+  });
+});
+
+describe("SPEC-102 hardening T4 item 1+2: a successful lore feed writes a kind='feed' row", () => {
+  it("HAPPY: lore feed session-resume on a fresh corpus produces a kind='feed' row carrying its checkpoint", () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "lore-trace-feed-row-"));
+    initCorpus(tmpDir);
+
+    const feedResult = runLore(["feed", "session-resume", "--json"], tmpDir);
+    expect(feedResult.exitCode).toBe(0);
+
+    expect(feedTraceCheckpoints(tmpDir)).toEqual(["session-resume"]);
+  });
+
+  it("HAPPY: lore feed phase-start and task-start ALSO write their own kind='feed' checkpoint rows", () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "lore-trace-feed-row-multi-"));
+    initCorpus(tmpDir);
+
+    // Generic (non-special-checkpoint) path — always exit 0 (module header, feed.ts) —
+    // covers the OTHER `recordFeedTrace` call site (outside the dispatch table).
+    const specCreateResult = runLore(["feed", "spec-create", "--json"], tmpDir);
+    expect(specCreateResult.exitCode).toBe(0);
+
+    // "session-resume" exercises the SPECIAL_CHECKPOINT_HANDLERS dispatch path
+    // this task's item 1 fix touches (feed.ts's `(process.exitCode ?? 0) === 0`).
+    const sessionResumeResult = runLore(["feed", "session-resume", "--json"], tmpDir);
+    expect(sessionResumeResult.exitCode).toBe(0);
+
+    expect(feedTraceCheckpoints(tmpDir)).toEqual(["spec-create", "session-resume"]);
   });
 });
