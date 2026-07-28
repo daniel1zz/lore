@@ -44,7 +44,7 @@ One line per command group — mechanism/design-decision detail lives in the arc
 - `bootstrap` `handoff` — S1 session pointer-set (read-only) and the sole write path for `knowledge/handoff` docs (SPEC-041).
 - `anchor` `invalidate` — dedicated writers for `extra.file_anchors`/`extra.code_anchors` (dispatches by target doc type) and `extra.validity` (bi-temporal invalidation, SPEC-043).
 - `sync` `sync-docs` `export-docs` — Turso replica management, one-shot dir→corpus scaffold (SPEC-018), corpus→`.md` reverse sync (SPEC-021).
-- `serve` `dashboard` `agent` `eval` — HTTP adapter mount, in-process dashboard (Vite child + bootstrap cookie, SPEC-016), API-key management (NOT an MCP launcher — MCP is the top-level `--mcp-server` flag), evaluation scenarios.
+- `serve` `dashboard` `agent` `eval` — HTTP adapter mount, in-process dashboard (packaged single-process by default: embedded static assets + one-time-nonce bootstrap redirect; `--dev` retains the Vite-child + injected-token topology of SPEC-016), API-key management (NOT an MCP launcher — MCP is the top-level `--mcp-server` flag), evaluation scenarios.
 
 ## Links
 
