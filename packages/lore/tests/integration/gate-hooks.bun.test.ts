@@ -36,6 +36,7 @@ import { mkdirSync, rmSync, readFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { assertFreshBinary } from "./helpers/assert-fresh-binary";
+import { saveConfig } from "@lore/core/node";
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
 
@@ -559,6 +560,16 @@ describe("hooks/g3-plan-promote.sh", () => {
   beforeAll(() => {
     tmpDir = makeTempDir("g3");
     initCorpus(tmpDir);
+    // SPEC-103 §Mechanisms M2 — `review-judgment` is a SEPARATE, ADDITIVE checkpoint on
+    // `ReviewService.approve` for spec/adr docs (default `judgment_required_types:
+    // ["spec","adr"]`) this fixture predates. This block's HAPPY/REGRESSION cases below
+    // approve `specSlug` via the real CLI (`approveViaCli`) purely to exercise g3's OWN
+    // concern (plan-promote gating on ancestor-spec approval), so disable M2 here —
+    // mirrors `gate-spec-promote.bun.test.ts`'s `judgment_required_types: []` precedent.
+    saveConfig(tmpDir, {
+      project: { name: "gate-hooks-g3-test", author: "tester" },
+      workflow: { review: { judgment_required_types: [] } },
+    } as never);
     prdSlug = createPrd(tmpDir, "g3-prd");
     specSlug = createSpec(tmpDir, prdSlug, "G3 Target Spec");
     planSlug = createPlan(tmpDir, specSlug, "G3 Plan");

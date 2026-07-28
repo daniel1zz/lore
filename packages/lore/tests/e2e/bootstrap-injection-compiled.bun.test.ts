@@ -34,11 +34,13 @@
  * — dead, excluded from the injection's `active_plans` regardless of the
  * `max_active_plans` cap, SPEC-080 D4) — plus one handoff on each of Plan
  * A/Plan B (two distinct per-plan handoff groups, `SessionService.bootstrap`
- * groups by parent plan and keeps only the newest per group). Nothing is
- * ever approved, so every one of the 8 created docs (prd + 3 plans + 2 tasks
- * + 2 handoffs) stays `status: "draft"` — a ready-made non-trivial pending
- * queue with zero extra authoring, closing this suite's "pending drafts"
- * seeding requirement for free.
+ * groups by parent plan and keeps only the newest per group). Per SPEC-103
+ * M1, the ledger sub_type `handoff` fast-tracks draft→approved at create, so
+ * the 2 handoff docs land `status: "approved"` immediately and never enter
+ * the pending queue; the other 6 created docs (prd + 3 plans + 2 tasks) are
+ * never approved and stay `status: "draft"` — a ready-made non-trivial
+ * pending queue with zero extra authoring, closing this suite's "pending
+ * drafts" seeding requirement for free.
  *
  * Coverage:
  *   HAPPY:      `--injection` (default budgets) parses as COMPACT JSON whose
@@ -327,13 +329,16 @@ describe("AC-080-3: compiled dist/lore bootstrap --injection / --json default-bu
     // Single typed omission ledger (SPEC-080 D2) — default budgets (5/3/3/8000)
     // never cap either actionable plan or handoff below what's kept, but
     // active_plans folds in the dead-plan exclusion (3 total active plans -
-    // 2 kept actionable ones = 1) and pending_slugs caps the 8 draft docs
-    // down to the default max_pending_slugs=3 (5 dropped) — both per
-    // buildBootstrapInjection's documented single-formula omission math.
+    // 2 kept actionable ones = 1). pending_slugs caps the pending QUEUE, which
+    // per SPEC-103 M1 no longer includes the 2 handoff docs (ledger sub_type
+    // `handoff` fast-tracks draft→approved at create, leaving the queue) — 6
+    // draft docs (prd + 3 plans + 2 tasks) capped at the default
+    // max_pending_slugs=3 (3 dropped) — both per buildBootstrapInjection's
+    // documented single-formula omission math.
     expect(parsed["omitted"]).toEqual({
       active_plans: 1,
       latest_handoffs: 0,
-      pending_slugs: 5,
+      pending_slugs: 3,
       budget_drops: 0,
     });
     expect(parsed["budget_exceeded"]).toBeUndefined();
@@ -467,11 +472,13 @@ describe("AC-080-6: workflow.bootstrap_injection config knobs reach the projecti
     expect(parsed.latest_handoffs).toHaveLength(1);
     expect(parsed.omitted.latest_handoffs).toBe(1);
 
-    // max_pending_slugs: 1 — sample capped to 1, true queue size (8 draft
-    // docs: prd + 3 plans + 2 tasks + 2 handoffs) untouched in `count`.
+    // max_pending_slugs: 1 — sample capped to 1, true queue size (6 draft
+    // docs: prd + 3 plans + 2 tasks; the 2 handoffs are excluded per SPEC-103
+    // M1 — ledger sub_type `handoff` fast-tracks draft→approved at create,
+    // so they never enter the pending queue) untouched in `count`.
     expect(parsed.pending_reviews.slugs).toHaveLength(1);
-    expect(parsed.pending_reviews.count).toBe(8);
-    expect(parsed.omitted.pending_slugs).toBe(7);
+    expect(parsed.pending_reviews.count).toBe(6);
+    expect(parsed.omitted.pending_slugs).toBe(5);
 
     // char_budget: 2000 — this fixture's capped payload is well under 2000
     // chars, so the budget rule never needs to drop a whole entry.

@@ -102,7 +102,7 @@ afterEach(() => {
 // ─── HAPPY ───────────────────────────────────────────────────────────────────
 
 describe("lore handoff — HAPPY", () => {
-  it("flags path: --plan/--by/--file/--decision/--next → exit 0, writes a draft knowledge/handoff doc", () => {
+  it("flags path: --plan/--by/--file/--decision/--next → exit 0, writes a fast-tracked approved knowledge/handoff doc", () => {
     const planSlug = createPlan(tmpDir, "Handoff Flags Plan");
 
     const result = runLore(
@@ -127,7 +127,8 @@ describe("lore handoff — HAPPY", () => {
     const parsed = JSON.parse(result.stdout) as { ok: boolean; data: { slug: string; type: string; status: string; extra: Record<string, unknown> } };
     expect(parsed.ok).toBe(true);
     expect(parsed.data.type).toBe("knowledge");
-    expect(parsed.data.status).toBe("draft");
+    // SPEC-103 M1: ledger sub_types (assessment/retro/handoff/uat) fast-track draft→approved at create.
+    expect(parsed.data.status).toBe("approved");
     expect(parsed.data.extra["sub_type"]).toBe("handoff");
   });
 
