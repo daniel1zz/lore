@@ -341,7 +341,14 @@ describe("lore set — AC-SET-1: editor opens when no flags provided", () => {
     process.env["EDITOR"] = noopScript;
 
     const setMod = await import("../../../src/adapters/cli/commands/set.js");
-    const setCmd = (setMod as { default?: { run?: RunnableCommand["run"] } }).default;
+    // reason: set.ts exports a second top-level binding (APPROVED_DEMOTION_ADVISORY,
+    // spec-plan-closure-must-be-loud-terminality-divergence-silent DD-3) alongside its
+    // default command export. That module shape makes citty's generated
+    // `CommandContext<Args>` structurally incomparable to this naive
+    // `{ default?: { run?: ... } }` cast target (TS2352 "may be a mistake because
+    // neither type sufficiently overlaps with the other"). Cast through `unknown`
+    // first, exactly as TS's own diagnostic recommends.
+    const setCmd = (setMod as unknown as { default?: { run?: RunnableCommand["run"] } }).default;
     if (!setCmd) throw new Error("set command not exported");
 
     const out2 = captureOutput();
@@ -387,7 +394,14 @@ describe("lore set — AC-SET-1: editor opens when no flags provided", () => {
     process.env["EDITOR"] = writeEditorScript(scriptDir, "changer.sh", "updated body");
 
     const setMod = await import("../../../src/adapters/cli/commands/set.js");
-    const setCmd = (setMod as { default?: { run?: RunnableCommand["run"] } }).default;
+    // reason: set.ts exports a second top-level binding (APPROVED_DEMOTION_ADVISORY,
+    // spec-plan-closure-must-be-loud-terminality-divergence-silent DD-3) alongside its
+    // default command export. That module shape makes citty's generated
+    // `CommandContext<Args>` structurally incomparable to this naive
+    // `{ default?: { run?: ... } }` cast target (TS2352 "may be a mistake because
+    // neither type sufficiently overlaps with the other"). Cast through `unknown`
+    // first, exactly as TS's own diagnostic recommends.
+    const setCmd = (setMod as unknown as { default?: { run?: RunnableCommand["run"] } }).default;
     if (!setCmd) throw new Error("set command not exported");
 
     const out2 = captureOutput();
@@ -439,7 +453,14 @@ describe("lore set — AC-SET-2: any flag bypasses editor", () => {
     process.env["EDITOR"] = failScript;
 
     const setMod = await import("../../../src/adapters/cli/commands/set.js");
-    const setCmd = (setMod as { default?: { run?: RunnableCommand["run"] } }).default;
+    // reason: set.ts exports a second top-level binding (APPROVED_DEMOTION_ADVISORY,
+    // spec-plan-closure-must-be-loud-terminality-divergence-silent DD-3) alongside its
+    // default command export. That module shape makes citty's generated
+    // `CommandContext<Args>` structurally incomparable to this naive
+    // `{ default?: { run?: ... } }` cast target (TS2352 "may be a mistake because
+    // neither type sufficiently overlaps with the other"). Cast through `unknown`
+    // first, exactly as TS's own diagnostic recommends.
+    const setCmd = (setMod as unknown as { default?: { run?: RunnableCommand["run"] } }).default;
     if (!setCmd) throw new Error("set command not exported");
 
     const out2 = captureOutput();
@@ -490,7 +511,14 @@ describe("lore set — AC-SET-3: editor error produces exit code 4", () => {
     process.env["EDITOR"] = failScript;
 
     const setMod = await import("../../../src/adapters/cli/commands/set.js");
-    const setCmd = (setMod as { default?: { run?: RunnableCommand["run"] } }).default;
+    // reason: set.ts exports a second top-level binding (APPROVED_DEMOTION_ADVISORY,
+    // spec-plan-closure-must-be-loud-terminality-divergence-silent DD-3) alongside its
+    // default command export. That module shape makes citty's generated
+    // `CommandContext<Args>` structurally incomparable to this naive
+    // `{ default?: { run?: ... } }` cast target (TS2352 "may be a mistake because
+    // neither type sufficiently overlaps with the other"). Cast through `unknown`
+    // first, exactly as TS's own diagnostic recommends.
+    const setCmd = (setMod as unknown as { default?: { run?: RunnableCommand["run"] } }).default;
     if (!setCmd) throw new Error("set command not exported");
 
     const out2 = captureOutput();
