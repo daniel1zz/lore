@@ -1,0 +1,360 @@
+/**
+ * TDD-RED suite for `lore dashboard`'s packaged-mode default flip (DD-5, AC-F5A-5).
+ * Paired-Impl: "[Skill:implement] F5a lore dashboard packaged-mode default flip"
+ * (task-skill-implement-f5a-lore-dashboard-packaged-mode-default-flip).
+ *
+ * Every scenario below is EXPECTED TO FAIL against the CURRENT `commands/dashboard.ts`:
+ * that file unconditionally spawns a Vite dev-server child and blocks — there is no
+ * `--dev` flag, no packaged-mode default, no DD-1 asset-availability guard, and no
+ * stdout handshake. The paired implementation task must make these RED, then GREEN.
+ *
+ * Spawn strategy: the CLI is run FROM SOURCE (`bun <worktree>/packages/lore/src/index.ts
+ * dashboard ...`), never the compiled `dist/lore` binary — this suite intentionally never
+ * runs `bun run build`, because "no built dashboard assets" is exactly the precondition
+ * AC-F5A-5 describes. `cwd` is always a throwaway `mkdtemp` corpus this suite `lore
+ * init`s itself — NEVER this repo's own `.lore/` (root CLAUDE.md pollution-incident
+ * rule). Because that throwaway corpus dir is NOT a Bun workspace root (no `packages/`,
+ * no `bun.lock`), the current implementation's `bun run --filter @lore/dashboard dev`
+ * spawn attempt fails fast with "No packages matched the filter" instead of genuinely
+ * blocking for 15s — this is a welcome, deterministic side effect of the exact cwd the
+ * task bundle prescribes, not a workaround; it does not change what each scenario proves
+ * (see each `it()`'s own comment for the precise RED reason). Every spawn still carries a
+ * hard `timeout` + `killSignal: "SIGTERM"` (Context Digest requirement) as a defensive
+ * backstop in case a future edit to this file, or an unexpected environment, resurrects a
+ * real block — a timeout hit is itself reported as a RED failure, never a silent hang.
+ *
+ * Isolation: `HOME`, `LORE_STATE_HOME`, `LORE_CONFIG_HOME` are all redirected into the
+ * throwaway fixture tree per test (mirrors `tests/integration/cli/dashboard-sigterm.bun
+ * .test.ts`) so the machine-scope dashboard-auth store and `~/.config/lore/config.yaml`
+ * are never touched. Ports are randomized per test in a high, non-default range (never
+ * 8787 / 5173) to avoid colliding with any other concurrent worktree suite on this
+ * machine.
+ *
+ * Seams this task DEFINES for the paired implementation to consume (or deliberately
+ * replace with an equivalent — the binding contract is the marker FORMAT, not the env
+ * var name):
+ *   - `LORE_DASHBOARD_ASSETS_FIXTURE=1` — hermetic "pretend packaged assets are
+ *     available" signal for the "handshake" scenario. The current CLI does not read this
+ *     env var at all, so this scenario is RED-BY-MISSING-SEAM: it pins the stdout
+ *     handshake marker format (`LORE_DASHBOARD_URL=<nonce-url>`, DD-2's
+ *     `/auth/bootstrap?nonce=<n>` shape) the implementation must emit before blocking,
+ *     however it chooses to simulate asset availability.
+ *   - `LORE_DASHBOARD_DEBUG_ALLOWLIST=1` — debug-log signal for the "dev retention"
+ *     scenario, pinning the marker format `LORE_DASHBOARD_ALLOWLIST=<json array of
+ *     origin strings>`. RED-BY-MISSING-SEAM: `--dev` is not even a recognized flag today
+ *     (citty exits 2, "Unknown option: --dev"), so no such line can appear.
+ *
+ * @spec_ref spec-dashboard-production-packaging-one-command-lore-dashboard DD-5, AC-F5A-5
+ * @spec_ref task-skill-test-f5a-cli-packaged-mode-red-scenarios
+ */
+
+import { afterEach, describe, expect, it } from "bun:test";
+import { mkdtempSync, rmSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
+
+// ─── Paths ──────────────────────────────────────────────────────────────────
+
+// tests/integration/ -> tests/ -> packages/lore/ (this file's own package root).
+const PACKAGE_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
+const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
+
+// ─── Types ──────────────────────────────────────────────────────────────────
+
+interface RunResult {
+  readonly exitCode: number | null;
+  readonly signalCode: string | null;
+  readonly stdout: string;
+  readonly stderr: string;
+  /** True iff the bounded spawn timeout fired (process was killed, not a natural exit). */
+  readonly timedOut: boolean;
+}
+
+interface Fixture {
+  readonly corpusDir: string;
+  readonly stateDir: string;
+  readonly configDir: string;
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+/** A random port in a high, non-default range — never 8787 (api) or 5173 (vite default). */
+function randomPort(): number {
+  return 24000 + Math.floor(Math.random() * 5000);
+}
+
+/**
+ * Builds a throwaway corpus + isolated machine-scope state/config dirs, and `lore init`s
+ * the corpus. Never touches this repo's own `.lore/`, the real machine dashboard-auth
+ * store, or the real `~/.config/lore/config.yaml`.
+ */
+function makeFixture(): Fixture {
+  const corpusDir = mkdtempSync(join(tmpdir(), "lore-dashboard-cmd-corpus-"));
+  const stateDir = mkdtempSync(join(tmpdir(), "lore-dashboard-cmd-state-"));
+  const configDir = mkdtempSync(join(tmpdir(), "lore-dashboard-cmd-config-"));
+
+  const initResult = Bun.spawnSync(["bun", INDEX_TS, "init"], {
+    cwd: corpusDir,
+    env: { ...process.env, HOME: corpusDir, LORE_STATE_HOME: stateDir, LORE_CONFIG_HOME: configDir, CLAUDECODE: "1" },
+    timeout: 15_000,
+    killSignal: "SIGTERM",
+    maxBuffer: 4 * 1024 * 1024,
+  });
+  if (initResult.exitCode !== 0) {
+    throw new Error(`lore init failed (fixture setup): ${initResult.stderr.toString()}`);
+  }
+
+  return { corpusDir, stateDir, configDir };
+}
+
+function cleanupFixture(fixture: Fixture): void {
+  for (const dir of [fixture.corpusDir, fixture.stateDir, fixture.configDir]) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      /* best-effort cleanup */
+    }
+  }
+}
+
+/**
+ * True iff a NEW listener can bind `port` on 127.0.0.1 (i.e. nothing else holds it).
+ * Mirrors `tests/integration/cli/dashboard-sigterm.bun.test.ts`'s helper of the same name.
+ */
+function isPortFree(port: number): boolean {
+  try {
+    const listener = Bun.listen({ hostname: "127.0.0.1", port, socket: { data() {} } });
+    listener.stop(true);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Runs `bun <INDEX_TS> dashboard --no-open ...args` from source against `fixture`, with a
+ * hard bound so the CURRENT blocking implementation can never hang this suite. Exit code
+ * is read directly off the `spawnSync` result (never through a shell pipe) per this
+ * task's AC.
+ */
+function runDashboard(
+  args: string[],
+  fixture: Fixture,
+  envExtra: Record<string, string> = {},
+  timeoutMs = 15_000,
+): RunResult {
+  const result = Bun.spawnSync(["bun", INDEX_TS, "dashboard", "--no-open", ...args], {
+    cwd: fixture.corpusDir,
+    env: {
+      ...process.env,
+      HOME: fixture.corpusDir,
+      LORE_STATE_HOME: fixture.stateDir,
+      LORE_CONFIG_HOME: fixture.configDir,
+      CLAUDECODE: "1",
+      ...envExtra,
+    },
+    timeout: timeoutMs,
+    killSignal: "SIGTERM",
+    maxBuffer: 4 * 1024 * 1024,
+  });
+
+  return {
+    exitCode: result.exitCode,
+    signalCode: result.signalCode ?? null,
+    stdout: result.stdout.toString(),
+    stderr: result.stderr.toString(),
+    // reason: on a timeout-triggered kill, Bun's spawnSync reports exitCode === null and
+    // signalCode === the killSignal we passed ("SIGTERM") — verified empirically (`sleep
+    // 5` spawned with `timeout: 500` yields exactly this pair). A process that caught
+    // SIGTERM itself and called `process.exit(n)` reports a non-null exitCode and
+    // signalCode === null, so this check does not misclassify a graceful signal-triggered
+    // shutdown as a hang.
+    timedOut: result.exitCode === null && result.signalCode === "SIGTERM",
+  };
+}
+
+// ─── Cleanup ────────────────────────────────────────────────────────────────
+
+// reason: track every port this suite has bound so `afterEach` can assert (and, if a
+// future edit reintroduces a real hang, best-effort reap) any straggler — Context Digest:
+// "never leave orphan vite/bun processes". Each test pushes its own ports before spawning.
+let portsInUse: number[] = [];
+
+afterEach(() => {
+  // Best-effort: kill any process still listening on a port this test used. Under the
+  // scenarios below the current implementation always exits before `runDashboard`
+  // returns (spawnSync is synchronous), so this is a defensive backstop, not the primary
+  // cleanup path.
+  for (const port of portsInUse) {
+    const lsof = Bun.spawnSync(["lsof", "-ti", `tcp:${port}`], { timeout: 3_000 });
+    const pids = lsof.stdout
+      .toString()
+      .trim()
+      .split("\n")
+      .filter((s) => s !== "")
+      .map((s) => Number.parseInt(s, 10))
+      .filter((n) => Number.isFinite(n));
+    for (const pid of pids) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        /* already gone */
+      }
+    }
+  }
+  portsInUse = [];
+});
+
+// ─── Scenario 1: source-run guard (AC-F5A-5) ───────────────────────────────
+
+describe("source-run guard (AC-F5A-5) — packaged mode without built assets", () => {
+  it(
+    "RED: exits non-zero naming BOTH 'bun run build' and '--dev'; never mentions vite (no spawn attempt); no residual port listener",
+    () => {
+      const fixture = makeFixture();
+      const apiPort = randomPort();
+      const dashPort = apiPort + 1;
+      portsInUse.push(apiPort, dashPort);
+
+      try {
+        const result = runDashboard(["--api-port", String(apiPort), "--dashboard-port", String(dashPort)], fixture);
+
+        if (result.timedOut) {
+          throw new Error(
+            "hung: current impl blocks (vite topology) — packaged-mode guard not implemented",
+          );
+        }
+
+        // AC: exit code != 0.
+        expect(result.exitCode).not.toBe(0);
+
+        // AC: stderr names BOTH remediation paths. Currently RED — the CLI has no
+        // packaged-mode guard at all, so neither string appears anywhere in its output
+        // (the actual failure today is an unrelated Vite-workspace-resolution error).
+        expect(result.stderr).toContain("bun run build");
+        expect(result.stderr).toContain("--dev");
+
+        // AC: "no vite process is spawned; no silent fallback" — a packaged-mode guard
+        // that fires BEFORE attempting the vite topology must never mention vite in its
+        // failure output. Currently RED — today's stderr DOES mention Vite (it is the
+        // literal, if misleading, root cause of today's accidental non-zero exit).
+        expect(result.stderr.toLowerCase()).not.toContain("vite");
+
+        // No residual listener from this run.
+        expect(isPortFree(apiPort)).toBe(true);
+        expect(isPortFree(dashPort)).toBe(true);
+      } finally {
+        cleanupFixture(fixture);
+      }
+    },
+    20_000,
+  );
+});
+
+// ─── Scenario 2: handshake (AC-F5A-5 / DD-2) ───────────────────────────────
+
+describe("handshake — machine-readable nonce URL on stdout before blocking", () => {
+  it(
+    "RED-by-missing-seam: no LORE_DASHBOARD_URL=<nonce-url> handshake line is ever emitted",
+    () => {
+      const fixture = makeFixture();
+      const apiPort = randomPort();
+      const dashPort = apiPort + 1;
+      portsInUse.push(apiPort, dashPort);
+
+      try {
+        // reason: LORE_DASHBOARD_ASSETS_FIXTURE=1 is a seam this task DEFINES (see file
+        // header) for the paired impl to optionally honor as a hermetic "assets are
+        // available" signal. The current CLI reads no such env var — it is passed
+        // regardless, to document the intended contract, and has zero effect on today's
+        // behavior.
+        const result = runDashboard(
+          ["--api-port", String(apiPort), "--dashboard-port", String(dashPort)],
+          fixture,
+          { LORE_DASHBOARD_ASSETS_FIXTURE: "1" },
+        );
+
+        if (result.timedOut) {
+          throw new Error(
+            "hung: current impl blocks (vite topology) — packaged-mode handshake not implemented",
+          );
+        }
+
+        // AC: stdout emits a parseable handshake line containing the nonce URL, BEFORE
+        // blocking. Marker format this task pins: `LORE_DASHBOARD_URL=<url>`, where <url>
+        // matches DD-2's one-time nonce redirect shape
+        // (`http://localhost:<apiPort>/auth/bootstrap?nonce=<n>`).
+        const handshake = /^LORE_DASHBOARD_URL=(\S+)$/m.exec(result.stdout);
+        expect(handshake).not.toBeNull();
+
+        // Once the seam exists, the captured URL must actually carry the nonce query
+        // param and the resolved apiPort — pinned here so the paired impl can't satisfy
+        // the marker with an empty or unrelated value. Unreachable today (handshake is
+        // null, the assertion above already failed the test) — documents the full
+        // contract for when it is reachable.
+        if (handshake !== null) {
+          expect(handshake[1]).toContain(`:${apiPort}`);
+          expect(handshake[1]).toContain("/auth/bootstrap?nonce=");
+        }
+      } finally {
+        cleanupFixture(fixture);
+      }
+    },
+    20_000,
+  );
+});
+
+// ─── Scenario 3: dev retention (AC-F5A-5 / DD-3) ───────────────────────────
+
+describe("dev retention — --dev selects the vite-child path and threads the real --dashboard-port", () => {
+  it(
+    "RED-by-missing-seam: --dev is not a recognized flag; no allowlist debug line names the real dashboard port (never the 5173 literal)",
+    () => {
+      const fixture = makeFixture();
+      const apiPort = randomPort();
+      // reason: deliberately far from the 5173 default so a hardcoded-5173 regression
+      // would be caught the moment the debug seam exists — this value must show up in the
+      // allowlist debug line, and 5173 must not.
+      const dashPort = apiPort + 137;
+      portsInUse.push(apiPort, dashPort);
+
+      try {
+        // reason: LORE_DASHBOARD_DEBUG_ALLOWLIST=1 is a seam this task DEFINES (see file
+        // header) for the paired impl to optionally honor: print
+        // `LORE_DASHBOARD_ALLOWLIST=<json array of origin strings>` before blocking, under
+        // --dev, so the allowlist's actual contents are assertable without a live network
+        // probe.
+        const result = runDashboard(
+          ["--dev", "--api-port", String(apiPort), "--dashboard-port", String(dashPort)],
+          fixture,
+          { LORE_DASHBOARD_DEBUG_ALLOWLIST: "1" },
+        );
+
+        if (result.timedOut) {
+          throw new Error(
+            "hung: current impl blocks (vite topology) — --dev flag / debug seam not implemented",
+          );
+        }
+
+        // Today: citty rejects the unrecognized --dev flag outright (exit 2, "Unknown
+        // option: --dev") — proof that no vite-child path selection exists yet at all,
+        // let alone one that threads the real port into a computed allowlist.
+        const debugLine = /LORE_DASHBOARD_ALLOWLIST=(.+)/.exec(result.stdout + result.stderr);
+        expect(debugLine).not.toBeNull();
+
+        // Unreachable today (debugLine is null, the assertion above already failed) —
+        // documents the full port-threading contract for when the seam lands: the
+        // allowlist must contain the REAL --dashboard-port and must NEVER contain the
+        // retired 5173 hardcode.
+        if (debugLine !== null) {
+          const allowlist = JSON.parse(debugLine[1]!) as string[];
+          expect(allowlist.some((origin) => origin.includes(String(dashPort)))).toBe(true);
+          expect(allowlist.some((origin) => origin.includes("5173"))).toBe(false);
+        }
+      } finally {
+        cleanupFixture(fixture);
+      }
+    },
+    20_000,
+  );
+});
