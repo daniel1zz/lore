@@ -43,11 +43,20 @@
  * The loader itself must have NO static import of the generated module (a
  * static `import` would break fresh-clone `bun run typecheck`, which never
  * builds the dashboard first) — enforced structurally by the third scenario
- * below, which is allowed to be GREEN even in this RED run.
+ * below (a source-level regex check that is deterministic regardless of
+ * whether the generated module happens to exist in this checkout), and the
+ * consequence (typecheck holding either way) is exercised end-to-end by the
+ * fourth scenario. Neither scenario reads the generated module's on-disk
+ * presence/absence as a precondition — see
+ * knowledge-a-test-that-reads-its-precondition-from-ambient-state and
+ * task-skill-test-sweep-the-ambient-precondition-class-dashboard for why:
+ * `bun run build` is REQUIRED before any `.bun.test.ts` suite that spawns
+ * `dist/lore` can run, so a "the generated module must be ABSENT" precondition
+ * fails on every legitimately built checkout.
  */
 
 import { describe, it, expect, afterEach } from "bun:test";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -66,15 +75,6 @@ const LOADER_MODULE_PATH = join(
   "adapters",
   "http",
   "dashboard-assets-loader.ts",
-);
-
-const GENERATED_MANIFEST_PATH = join(
-  REPO_ROOT,
-  "packages",
-  "lore",
-  "src",
-  "generated",
-  "dashboard-assets.ts",
 );
 
 // ─── Loader import (DYNAMIC, variable specifier) ───────────────────────────
@@ -200,14 +200,28 @@ describe("dashboard-assets-loader", () => {
     }
   });
 
-  it(
-    "bun run typecheck exits 0 on a checkout with no generated manifest (the loader has no static import of the generated module) — structural invariant, allowed GREEN in this RED run",
-    () => {
-      // Precondition sanity: this checkout genuinely has no generated
-      // manifest right now (it is git-ignored and only produced by `bun run
-      // build`) — otherwise this scenario would prove nothing.
-      expect(existsSync(GENERATED_MANIFEST_PATH)).toBe(false);
+  it("has no static import of the generated manifest module (source-level structural invariant — deterministic and independent of this checkout's build state, unlike an existsSync precondition)", () => {
+    const source = readFileSync(LOADER_MODULE_PATH, "utf8");
 
+    // A static ES import DECLARATION (`import ... from "...generated/
+    // dashboard-assets..."` or a bare side-effect `import "...";`) would fail
+    // `bun run typecheck` outright on a fresh clone (TS2307, module absent).
+    // The loader's REAL production access path is a *dynamic* `import(...)`
+    // expression with a literal string argument (required so `bun build
+    // --compile` can statically discover and embed it — see this module's
+    // doc comment) — that is deliberately NOT a static import declaration
+    // and must NOT trip this check. The regex below only matches the
+    // declaration form: `import` not immediately followed by `(`, eventually
+    // reaching a quoted specifier that names the generated module.
+    const staticImportOfGenerated =
+      /^\s*import\s+(?!\()[^;]*?["'][^"']*generated\/dashboard-assets[^"']*["']/m;
+
+    expect(staticImportOfGenerated.test(source)).toBe(false);
+  });
+
+  it(
+    "bun run typecheck exits 0 regardless of whether the generated manifest module exists in this checkout (the loader has no static import of it — verified by the prior scenario — so the fresh-clone typecheck contract holds identically before and after `bun run build`)",
+    () => {
       const result = spawnSync("bun", ["run", "typecheck"], {
         cwd: REPO_ROOT,
         encoding: "utf8",
