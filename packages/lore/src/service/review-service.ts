@@ -17,7 +17,7 @@ import {
 } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
-import { buildUpstreamSpecContext } from "./checkpoint-registry.js";
+import { buildUpstreamSpecContext, type GateContext } from "./checkpoint-registry.js";
 import type { GateDependencies } from "./gate-enforcer.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────
@@ -87,6 +87,27 @@ export interface ApproveOpts {
   reviewer?: string;
 }
 
+/**
+ * `approve()`'s return shape — the approved `DocRecord` PLUS an additive,
+ * observability-only field (spec-verify-reachability-plan-promote-early-warning
+ * §Scope M1, task T2 "wire the advisory into the LIVE enforcement path"). Every
+ * pre-existing field/behavior of `DocRecord` is unchanged; MCP/HTTP callers that
+ * only ever read `DocRecord`'s own fields (id/slug/version/etc.) keep working
+ * without modification (structural subtyping — `ApproveResult` IS-A `DocRecord`).
+ *
+ * @invariant `reachability_advisories` NEVER influences whether `approve()`
+ *   succeeds or what status/version the doc ends up at (D1 — advisory never
+ *   changes the outcome). It is populated ONLY for a just-approved `plan` doc
+ *   whose `plan-promote` checkpoint found `lore verify` structurally
+ *   unreachable for it — every other case (non-plan doc, reachable plan, no
+ *   `gate` dependency wired, `plan-promote` disabled by config) OMITS the field
+ *   entirely rather than writing an empty array, so `"reachability_advisories"
+ *   in result` doubles as the "was there anything to warn about" check.
+ */
+export interface ApproveResult extends DocRecord {
+  reachability_advisories?: string[];
+}
+
 export interface RejectOpts {
   /** Reviewer identity — defaults to "system" if omitted */
   reviewer?: string;
@@ -133,14 +154,21 @@ export class ReviewService {
    * Gates `doc`'s draft→approved TRANSITION (retro follow-up item 8, defense-in-depth) —
    * `spec-promote` for a `spec` doc, `plan-promote` for a `plan` doc. Any other doc
    * type has no registered promote-time checkpoint and passes through untouched. A
-   * no-op (`ok(undefined)`) when this service wasn't constructed with a `gate`
-   * dependency (see constructor JSDoc).
+   * no-op (`ok({ reachabilityAdvisories: [] })`) when this service wasn't constructed
+   * with a `gate` dependency (see constructor JSDoc).
    *
    * @param doc - The doc `approve()` is about to transition to "approved".
+   * @returns On success, `reachabilityAdvisories` (spec-verify-reachability-plan-
+   *   promote-early-warning §Scope M1) — `[]` for every case except a `plan` doc
+   *   whose `plan-promote` checkpoint is enabled and found `lore verify`
+   *   structurally unreachable for it. Computed via `GateEnforcer.
+   *   planPromoteReachabilityAdvisories`, a SEPARATE call from `enforce()` right
+   *   below it — the advisory can never influence whether this method returns
+   *   `ok`/`err` (D1).
    */
-  private async enforceApprovalGate(doc: DocRecord): Promise<Result<void, LoreError>> {
+  private async enforceApprovalGate(doc: DocRecord): Promise<Result<ApprovalGateOutcome, LoreError>> {
     if (this.gate === undefined) {
-      return ok(undefined);
+      return ok({ reachabilityAdvisories: [] });
     }
 
     if (doc.type === "spec") {
@@ -150,7 +178,7 @@ export class ReviewService {
       // spec_kind's configured profile; an absent/invalid value falls back to
       // "feature", the same create-time default `_createImpl` applies.
       const specKind = resolveSpecKindOrDefault(doc.extra["spec_kind"]);
-      return this.gate.enforcer.enforce("spec-promote", {
+      const enforceResult = this.gate.enforcer.enforce("spec-promote", {
         acceptanceCriteriaCount,
         specIdOrSlug: doc.slug,
         // reason: task-spec-promote-base-1-ac-rule-is-spec-kind-agnostic-spec-080
@@ -163,6 +191,11 @@ export class ReviewService {
         verificationProfile: this.gate.enforcer.resolveVerificationProfile(specKind),
         oracleCoverageEnabled: this.gate.enforcer.isOracleCoverageEnabled(),
       });
+      if (!enforceResult.ok) return enforceResult;
+      // reason: M1's early-warning advisory is a `plan-promote`-only signal
+      // (spec-verify-reachability-plan-promote-early-warning §Scope) — a spec
+      // approval has no plan-close attestation floor of its own to warn about.
+      return ok({ reachabilityAdvisories: [] });
     }
 
     if (doc.type === "plan") {
@@ -170,9 +203,11 @@ export class ReviewService {
       // isGateDisabledByConfig-before-runPlanPromoteGate order. Without this early-out,
       // a disabled plan-promote gate could still be blocked by a broken ancestor-spec
       // lookup, violating "disabled === byte-identical to pre-GateEnforcer behavior"
-      // (adversarial review, retro item 8 follow-up).
+      // (adversarial review, retro item 8 follow-up). A disabled checkpoint also
+      // never surfaces the reachability advisory — mirrors `enforce()`'s own
+      // config-disabled early return never running `checkpointDef.check`.
       if (!this.gate.enforcer.isEnabled("plan-promote")) {
-        return ok(undefined);
+        return ok({ reachabilityAdvisories: [] });
       }
 
       const bundleResult = await this.gate.getPlanBundle(doc.id);
@@ -189,16 +224,30 @@ export class ReviewService {
           ? this.gate.enforcer.resolveVerificationProfile(resolveSpecKindOrDefault(parentSpec.extra["spec_kind"]))
           : null;
       const planRequiresUat = doc.extra["requires_uat"] === true;
-      return this.gate.enforcer.enforce("plan-promote", {
+      // reason: spec-verify-reachability-plan-promote-early-warning §Scope M1 —
+      // `parentSpecScriptAcCount` is computed HERE (not folded into
+      // `buildUpstreamSpecContext`, whose exact-shape output is byte-pinned by
+      // `checkpoint-registry.test.ts`'s regression assertion for EVERY caller,
+      // including `task-claim`, which never reads this field at all) from the
+      // SAME resolved `parentSpec` `ctx` already carries.
+      const planPromoteCtx: GateContext = {
         ...ctx,
+        ...(parentSpec !== undefined
+          ? { parentSpecScriptAcCount: countScriptModeAcceptanceCriteria(parentSpec) }
+          : {}),
         targetIdOrSlug: doc.slug,
         verificationProfile,
         planRequiresUat,
         requiresUatEnabled: this.gate.enforcer.isRequiresUatEnabled(),
+      };
+      const enforceResult = this.gate.enforcer.enforce("plan-promote", planPromoteCtx);
+      if (!enforceResult.ok) return enforceResult;
+      return ok({
+        reachabilityAdvisories: [...this.gate.enforcer.planPromoteReachabilityAdvisories(planPromoteCtx)],
       });
     }
 
-    return ok(undefined);
+    return ok({ reachabilityAdvisories: [] });
   }
 
   /**
@@ -282,7 +331,7 @@ export class ReviewService {
   async approve(
     id: string,
     opts?: ApproveOpts,
-  ): Promise<Result<DocRecord, LoreError>> {
+  ): Promise<Result<ApproveResult, LoreError>> {
     const findResult = await this.resolveDoc(id);
     if (!findResult.ok) return findResult;
 
@@ -299,6 +348,12 @@ export class ReviewService {
 
     const gateResult = await this.enforceApprovalGate(doc);
     if (!gateResult.ok) return gateResult;
+    // reason: spec-verify-reachability-plan-promote-early-warning §Scope M1 —
+    // this is the PRE-write reading; the ASYNC2-002 post-write re-check below
+    // (plan doc + gate wired) overwrites it with a FRESHER read against the
+    // just-committed doc, since that IS the authoritative final state a caller
+    // observes. Neither read ever influences whether this method returns ok/err.
+    let reachabilityAdvisories = gateResult.value.reachabilityAdvisories;
 
     const reviewer = opts?.reviewer ?? "system";
     const now = new Date().toISOString();
@@ -364,9 +419,18 @@ export class ReviewService {
         }
         return postGateResult;
       }
+      reachabilityAdvisories = postGateResult.value.reachabilityAdvisories;
     }
 
-    return ok(updatedDoc);
+    // reason: spec-verify-reachability-plan-promote-early-warning §Scope M1 —
+    // `reachability_advisories` is OMITTED (never an empty array) when there is
+    // nothing to warn about, so `"reachability_advisories" in result` doubles as
+    // the "was there anything to warn about" check for a caller (see
+    // `ApproveResult`'s own JSDoc).
+    return ok({
+      ...updatedDoc,
+      ...(reachabilityAdvisories.length > 0 ? { reachability_advisories: reachabilityAdvisories } : {}),
+    });
   }
 
   /**
@@ -532,6 +596,46 @@ function resolveSpecKindOrDefault(raw: unknown): SpecKind {
   return typeof raw === "string" && (SPEC_KINDS as readonly string[]).includes(raw)
     ? (raw as SpecKind)
     : "feature";
+}
+
+/**
+ * `enforceApprovalGate`'s private return shape — the `plan-promote` reachability
+ * advisory lines (spec-verify-reachability-plan-promote-early-warning §Scope M1)
+ * computed ALONGSIDE the gate verdict, never folded into it. Not exported — an
+ * implementation detail of how `approve()` threads advisories from
+ * `enforceApprovalGate`'s pre-write AND post-write (ASYNC2-002) calls out to its
+ * own `ApproveResult` return value.
+ */
+interface ApprovalGateOutcome {
+  readonly reachabilityAdvisories: string[];
+}
+
+/**
+ * Counts `verify.mode === "script"` acceptance criteria declared on `spec.extra
+ * .acceptance_criteria` — the `GateContext.parentSpecScriptAcCount` field
+ * `verifyReachability` consumes (spec-verify-reachability-plan-promote-early-
+ * warning §Scope M1/M2, `checkpoint-registry.ts`'s own field JSDoc). Computed
+ * HERE rather than folded into `buildUpstreamSpecContext` (`checkpoint-
+ * registry.ts`) — that function's exact-shape output is byte-pinned by
+ * `checkpoint-registry.test.ts`'s `toEqual` regression assertion for EVERY
+ * caller of it, including `task-claim`, which never reads this field at all;
+ * adding a always-defined field there would break that pin.
+ *
+ * @param spec - The resolved ancestor spec `DocRecord` (`PlanBundle.spec`).
+ * @returns The count of script-mode ACs; `0` for a spec with no/invalid
+ *   `extra.acceptance_criteria` — a concrete `0`, not `undefined`, since
+ *   `verifyReachability` treats the two identically anyway (gate-predicates.ts's
+ *   own module invariant on this parameter).
+ * @example
+ * countScriptModeAcceptanceCriteria({ extra: { acceptance_criteria: [
+ *   { id: "AC-1", statement: "x", verify: { mode: "script", oracle: "test", command: "bun test" } },
+ *   { id: "AC-2", statement: "y", verify: { mode: "human" } },
+ * ] } } as DocRecord); // => 1
+ */
+function countScriptModeAcceptanceCriteria(spec: DocRecord): number {
+  const parsed = specAcceptanceCriteriaSchema.safeParse(spec.extra["acceptance_criteria"]);
+  if (!parsed.success) return 0;
+  return parsed.data.filter((criterion) => criterion.verify.mode === "script").length;
 }
 
 /**
