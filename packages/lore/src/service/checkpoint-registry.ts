@@ -88,6 +88,7 @@ import {
   type TaskAttestationInfo,
   type VerificationProfile,
   type ReviewDecision,
+  specAcceptanceCriteriaSchema,
 } from "@lore/core";
 import {
   parentLegal,
@@ -661,16 +662,35 @@ function checkPlanPromote(ctx: GateContext): PredicateResult[] {
 /**
  * Human-readable explanation for one {@link ReachabilityResult.why} value —
  * the ONE place this prose is written (spec-verify-reachability-plan-promote-
- * early-warning §Design Decisions D2), consumed by BOTH
- * `planPromoteReachabilityAdvisory` and `feedAttestationFloor`'s unreachable
- * branch so the two surfaces never drift apart on wording.
+ * early-warning §Design Decisions D2; `"unknown"` branch added by spec-plan-
+ * closure-must-be-loud-terminality-divergence-silent §Design Decisions
+ * DD-4(b)), consumed by BOTH `planPromoteReachabilityAdvisory` and
+ * `feedAttestationFloor`'s unreachable branch so the two surfaces never drift
+ * apart on wording.
+ *
+ * ⛔ The `"unknown"` branch MUST NOT assert a definite corpus fact — DD-4(b)'s
+ * whole point is that "the caller never told me" and "I checked and there is
+ * none" are different claims, and only the latter may be rendered as a
+ * negative statement about the corpus. Do not "simplify" this back to a
+ * two-way ternary; that is precisely the class bug this branch removes.
  */
 function describeReachabilityWhy(why: Exclude<ReachabilityResult["why"], null>): string {
-  return why === "parent-not-spec"
-    ? "this plan has no spec-tier ancestor at all — `lore verify` requires one to " +
-        "resolve script-mode acceptance criteria from"
-    : "this plan's ancestor spec declares zero script-mode acceptance criteria — " +
-        "`lore verify` has nothing to run";
+  if (why === "parent-not-spec") {
+    return (
+      "this plan has no spec-tier ancestor at all — `lore verify` requires one to " +
+      "resolve script-mode acceptance criteria from"
+    );
+  }
+  if (why === "no-script-acs") {
+    return (
+      "this plan's ancestor spec declares zero script-mode acceptance criteria — " +
+      "`lore verify` has nothing to run"
+    );
+  }
+  return (
+    "whether this plan has a spec-tier ancestor could not be determined — the caller " +
+    "never resolved that fact, so `lore verify` reachability is unknown, not disproven"
+  );
 }
 
 /**
@@ -1119,8 +1139,16 @@ function feedAttestationFloor(ctx: GateContext, failures: PredicateResult[]): st
         `DIAGNOSTIC purposes only — the exemption below is PLAN-level; do NOT write ` +
         `\`extra.attestation_exempt\` onto any of these tasks, this gate never reads it there. `
       : "";
+  // reason: DD-4(b) — thread `ctx.hasSpecParent`'s THREE-way shape through
+  // verbatim rather than collapsing it to a boolean-derived "spec"/null pair.
+  // `undefined` (the caller never populated this optional field — exactly
+  // what the pre-DD-4(a) plan-close call site did) must reach
+  // `verifyReachability` as `undefined` so it can report the `"unknown"`
+  // outcome; only an EXPLICIT `hasSpecParent === false` (the caller resolved
+  // that there is no spec-tier ancestor) may collapse to `null`
+  // ("parent-not-spec"). Do not simplify this back to a two-way ternary.
   const reachability = verifyReachability(
-    ctx.hasSpecParent === true ? "spec" : null,
+    ctx.hasSpecParent === true ? "spec" : ctx.hasSpecParent === false ? null : undefined,
     ctx.parentSpecScriptAcCount,
   );
   const recoveryText = reachability.reachable
@@ -1478,6 +1506,41 @@ export function buildUpstreamSpecContext(spec: DocRecord | undefined): GateConte
     },
     parentSpecPointer: { slug: spec.slug, title: spec.title, status: spec.status },
   };
+}
+
+/**
+ * Counts `verify.mode === "script"` acceptance criteria declared on `spec.extra
+ * .acceptance_criteria` — the `GateContext.parentSpecScriptAcCount` field
+ * `verifyReachability` consumes (spec-verify-reachability-plan-promote-early-
+ * warning §Scope M1/M2, this module's own field JSDoc). RELOCATED here from
+ * `review-service.ts` (spec-plan-closure-must-be-loud-terminality-divergence-
+ * silent §Design Decisions DD-4(a)) — `CorpusService.set`'s plan-close branch
+ * needs this SAME derivation and `CorpusService` may never import from
+ * `ReviewService` (`service/CLAUDE.md`'s "no cross-service imports"
+ * invariant); this module is gate infrastructure, not a tracked service, so
+ * both already import from it (mirrors `buildUpstreamSpecContext`'s own
+ * relocation history one section up). Computed as a SEPARATE function rather
+ * than folded into `buildUpstreamSpecContext`'s return shape — that
+ * function's exact-shape output is byte-pinned by `checkpoint-registry.test
+ * .ts`'s `toEqual` regression assertion for EVERY caller of it, including
+ * `task-claim`, which never reads this field at all; adding an always-defined
+ * field there would break that pin.
+ *
+ * @param spec - The resolved ancestor spec `DocRecord` (`PlanBundle.spec`).
+ * @returns The count of script-mode ACs; `0` for a spec with no/invalid
+ *   `extra.acceptance_criteria` — a concrete `0`, not `undefined`, since
+ *   `verifyReachability` treats the two identically anyway (gate-predicates.ts's
+ *   own module invariant on this parameter).
+ * @example
+ * countScriptModeAcceptanceCriteria({ extra: { acceptance_criteria: [
+ *   { id: "AC-1", statement: "x", verify: { mode: "script", oracle: "test", command: "bun test" } },
+ *   { id: "AC-2", statement: "y", verify: { mode: "human" } },
+ * ] } } as DocRecord); // => 1
+ */
+export function countScriptModeAcceptanceCriteria(spec: DocRecord): number {
+  const parsed = specAcceptanceCriteriaSchema.safeParse(spec.extra["acceptance_criteria"]);
+  if (!parsed.success) return 0;
+  return parsed.data.filter((criterion) => criterion.verify.mode === "script").length;
 }
 
 /**

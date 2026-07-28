@@ -77,7 +77,11 @@ import type { TreeBlueprint } from "@lore/core";
 import type { GateEnforcer } from "./gate-enforcer.js";
 import type { TraceRecorder } from "./trace-recorder.js";
 import type { GateContext } from "./checkpoint-registry.js";
-import { computeArmedGates } from "./checkpoint-registry.js";
+import {
+  computeArmedGates,
+  buildUpstreamSpecContext,
+  countScriptModeAcceptanceCriteria,
+} from "./checkpoint-registry.js";
 import { attestationExemptKindValid } from "./gate-predicates.js";
 import { resolveDoc, ULID_REGEX } from "./resolve.js";
 
@@ -1928,6 +1932,34 @@ export class CorpusService {
       const needsBundle = !attestationExempt || !exemptKindValid || (prdSyncEnabled && !prdSyncExempt);
       const bundleResult = needsBundle ? await this.getPlanBundle(existing.id) : undefined;
       if (bundleResult !== undefined && !bundleResult.ok) return bundleResult;
+
+      // reason: spec-plan-closure-must-be-loud-terminality-divergence-silent
+      // §Design Decisions DD-4(a) — the live 2026-07-28 incident's root cause.
+      // `getPlanBundle` has ALREADY resolved `bundle.spec` (the plan's
+      // ancestor spec, or `undefined` when it has none) whenever `bundleResult`
+      // is fetched above; this call site used to just drop that resolved fact
+      // on the floor, leaving `hasSpecParent`/`parentSpecScriptAcCount`
+      // permanently unset on `planCloseCtx` — which `verifyReachability`
+      // (DD-4(b), gate-predicates.ts) then read as `undefined`, an outcome it
+      // used to conflate with "resolved a genuinely non-spec parent" and
+      // render as the false claim "no spec-tier ancestor at all". Threading
+      // `buildUpstreamSpecContext(bundle.spec)` here — the SAME derivation
+      // `plan-promote`/`task-claim` already use — makes this ctx a RESOLVED
+      // fact (`hasSpecParent: true` or `false`, never left absent) whenever a
+      // bundle was fetched at all; `countScriptModeAcceptanceCriteria` is the
+      // SAME script-AC counter `ReviewService`'s plan-promote branch uses
+      // (relocated to checkpoint-registry.ts for this exact reuse — see that
+      // function's own JSDoc), never a second hand-rolled counter.
+      if (bundleResult !== undefined) {
+        const bundle = bundleResult.value;
+        planCloseCtx = {
+          ...planCloseCtx,
+          ...buildUpstreamSpecContext(bundle.spec),
+          ...(bundle.spec !== undefined
+            ? { parentSpecScriptAcCount: countScriptModeAcceptanceCriteria(bundle.spec) }
+            : {}),
+        };
+      }
 
       if (!attestationExempt || !exemptKindValid) {
         // reason: SPEC-075 D6 — the evidence/attested counting SSOT moved to
