@@ -119,11 +119,15 @@ After all 5 agents return, synthesize:
 - Schedule follow-up research to validate changes
 
 ### Recommend one of:
+- **Opportunity mapping** (`/lore-product opportunity`) — research surfaced customer needs; turn them into an OST rather than straight into requirements. A pattern needs ≥3 independent sources to become an opportunity
+- **Validate** (`/lore-product validate`) — research surfaced a testable bet; run the cheapest disproving experiment
 - **Update PRD** (`/lore-product prd`) — research reveals gaps in existing requirements
 - **New Discovery** (`/lore-product discovery`) — research reveals new opportunity
 - **Design Iteration** — findings are UX-specific, route to design skill
 - **More Research** — insufficient data, design next study
 - **No Action** — findings confirm current direction (document as validation)
+
+📎 Interview instrument (question wording, 30-min script, commitment-currency ask, evidence tiering of findings): [interview-protocol.md](interview-protocol.md).
 
 ## Research Rigor Checklist
 

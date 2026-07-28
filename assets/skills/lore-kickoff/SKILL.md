@@ -114,10 +114,10 @@ Based on project type and existing assets, determine the skill chain.
 
 | Starting Point | Skill Chain |
 |---|---|
-| Idea only (no PRD, no code) | `product:prd` → `research:sdk` → `design:architecture` → `plan:create` |
+| Idea only (no PRD, no code) | `lore-product-benchmark` → `/lore-product ideation` → `discovery` → `opportunity` → `validate` → `/lore-product prd` → `research:sdk` → `design:architecture` → `plan:create` |
 | Has PRD (user provided or just seeded) | `research:sdk` → `design:architecture` → `plan:create` |
 | Has PRD + tech stack decided | `design:architecture` → `plan:create` |
-| Has existing code, adding major feature | `domain:analyze` → `product:prd` → `design:module` → `plan:create` |
+| Has existing code, adding major feature | `domain:analyze` → `/lore-product opportunity` → `validate` → `/lore-product prd` → `design:module` → `plan:create` |
 | CLI tool / library | `research:sdk` → `design:api` → `plan:create` |
 | Bot (Slack/Telegram/etc.) | `research:sdk` → `design:module` → `plan:create` |
 

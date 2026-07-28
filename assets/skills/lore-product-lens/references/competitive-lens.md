@@ -6,19 +6,29 @@ You evaluate how the product compares to its alternatives and whether it has a s
 
 No product exists in a vacuum. Users always have alternatives — including doing nothing, using spreadsheets, or building their own. Understanding the competitive landscape reveals whether the product is a must-have or a nice-to-have, and where it needs to improve to win.
 
+## ⛔ Input Requirement (HARD — read before scoring anything)
+
+This lens MUST be driven by a **Feature Matrix** from `lore-product-benchmark`, not by what you can recall about the category.
+
+1. `lore search "{category} benchmark" --json` — use an existing teardown if ≤2 quarters old
+2. None found → run `lore-product-benchmark` first, or state plainly that this dimension is running **unsourced** and cap its confidence accordingly
+
+⛔ **Recalled competitor knowledge is E6 evidence** (see `lore-product/references/mode-validate.md`). A competitive score built on it reads as analysis and is a guess: model recall averages everything ever written about a category and cannot distinguish what shipped last month from what was deprecated two years ago. Every competitor claim below needs a URL or a captured observation.
+
 ## Sub-Criteria
 
 ### 1. Competitive Landscape Mapping (weight: 20%)
 - Who are the direct competitors (same problem, same approach)?
 - Who are the indirect competitors (same problem, different approach)?
-- What's the "do nothing" alternative and how painful is it?
-- Method: infer from product category, tech stack, target market. Search for similar tools if needed.
+- What's the "do nothing" alternative and how painful is it? (spreadsheets, a script, a Notion template — most products lose to these, not to the leader)
+- Method: take the benchmark selection + substitutes from the Feature Matrix. Verify each still exists and is actively maintained before scoring it as a threat.
 
 ### 2. Feature Parity Analysis (weight: 25%)
 - Which table-stakes features does this product have vs lack?
-- Table stakes = features users expect in this category (if competitors all have it, it's table stakes)
-- Where does this product exceed the competition?
-- Evidence: compare feature sets against top 2-3 known competitors
+- Table stakes = the Feature Matrix `table-stakes` rows (present in ALL benchmarks AND absence breaks the core job) — do NOT re-derive this from intuition
+- Where does this product exceed the competition? Map to the matrix's `differentiator` rows
+- ⛔ Do not score a missing `trap` row as a gap — traps are deliberate non-goals; penalising them pushes the product toward feature parity, which is arriving second with no reason to switch
+- Evidence: cite the matrix row and its source URL for every parity claim
 
 ### 3. Moat Assessment (weight: 25%)
 - Network effects: does the product become more valuable as more people use it?

@@ -1,13 +1,29 @@
 # Mode: Ideation
 
-**Purpose**: Multi-role parallel brainstorming for divergent, comprehensive idea generation
+**Purpose**: Multi-role parallel brainstorming for divergent, comprehensive idea generation — grounded in what the market already shipped, and converging on a derived feature set rather than a wish list.
+
+## Phase 0: Benchmark Grounding Gate (HARD — before any brainstorm)
+
+⛔ **REFUSE to run the role brainstorm from a blank slate.** Role agents reasoning without a benchmark produce a plausible average of the category — generic ideas that feel insightful and are untethered to what ships today.
+
+Required before Phase 2, unless the user explicitly waives it:
+
+1. Run `lore-product-benchmark` (or `lore search "{category} benchmark" --json` if a teardown ≤2 quarters old already exists) to obtain a **Feature Matrix** — table-stakes / differentiator / trap / gap rows, each with a source URL.
+2. Pass the matrix to every role agent as shared context.
+
+> | 🚩 AI rationalization | Reality |
+> |---|---|
+> | "I know this category well, a teardown is overkill" | Model recall is a blurry average of everything read, not today's shipped reality. It is E6-grade at best. |
+> | "The user described the product clearly, so I have enough" | Their description says what they want; the matrix says what users already have and will compare against. |
+
+Waived by the user → record it, and tag the resulting ideas `⚠️ ungrounded` so downstream modes know the feature set never met the market.
 
 ## Phase 1: Context Intake
 
 1. **Acknowledge** the vision
 2. **Probe** (brief): What triggered this? Who has this problem? Any constraints?
 3. Distill a **1-paragraph brief** summarizing the idea, target user, and known constraints
-   - This brief is the shared input for all role agents
+   - This brief plus the Feature Matrix is the shared input for all role agents
 
 ## Phase 2: Multi-Role Parallel Brainstorm
 
@@ -72,13 +88,30 @@ After all 6 agents return, synthesize into a structured report:
 | Devil's Advocate | ... | ... | ... |
 | Investor | ... | ... | ... |
 
-## Phase 4: Next Steps
+## Phase 4: Convergence Gate (HARD — brainstorm output is not a feature list)
+
+⛔ **Ideation MUST NOT hand a feature list to PRD.** Six roles produce opportunities, concerns, and suggestions — divergent material. Treating that pile as scope is how a product ends up as whatever the loudest role said.
+
+Before exiting, convert the divergent output into structured input for the next stage:
+
+| Brainstorm artifact | Converts to | Destination |
+|--------------------|-------------|-------------|
+| Cross-role opportunities + benchmark `gap` rows | Candidate **opportunities** (customer needs, not features) | `/lore-product opportunity` — the OST derives solutions |
+| Kill Risks + unvalidated assumptions | Hypotheses with kill conditions | `/lore-product validate` |
+| Market/competitive concerns | Discovery brief | `/lore-product discovery` |
+
+Restate each candidate opportunity as a **user need, not a product noun** — apply the solution-in-disguise detector in [mode-opportunity.md](mode-opportunity.md). "Add a template gallery" is not an opportunity; "starting from empty is intimidating and people stall" is.
+
+## Phase 5: Next Steps
 
 Based on synthesis, recommend one of:
-- **Proceed to Discovery** (`/lore-product discovery`) — idea has enough signal, validate assumptions
+- **Proceed to Opportunity** (`/lore-product opportunity`) — enough signal and evidence to derive the feature set from an outcome
+- **Proceed to Discovery** (`/lore-product discovery`) — market/competitive reality still unknown, validate before deriving scope
 - **Pivot & Re-brainstorm** — fundamental issues found, re-run with adjusted brief
 - **Park** — timing/market/feasibility issues, save for future re-evaluation
 - **Kill** — fatal flaws identified, not worth pursuing
+
+⛔ **Never recommend jumping straight to PRD from ideation.** Nothing has been derived or validated yet; a PRD written here is a transcript of the brainstorm.
 
 ## Configuration
 

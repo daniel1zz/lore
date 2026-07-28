@@ -1,6 +1,6 @@
 ---
 name: lore-product-lens
-description: "Multi-dimensional product review via parallel subagents. Evaluates a product across 6 lenses: scenario coverage, user group fitness, core feature completeness, market positioning, competitive analysis, and business viability. Use when user says 'review this product', 'product audit', 'product review', 'evaluate product', 'product health check', '产品审视', '产品评审', '产品分析', or wants a structured multi-angle assessment of any product, project, or feature set. Also triggers on 'product lens', 'multi-dimensional review', '多维度评审'. Even if the user only mentions one dimension (e.g., 'how's our positioning'), invoke this skill — it will let them scope down."
+description: "Multi-dimensional product review via parallel subagents. Evaluates a product across 6 lenses: scenario coverage, user group fitness, core feature completeness, market positioning, competitive analysis, and business viability. Use when user says 'review this product', 'product audit', 'product review', 'evaluate product', 'product health check', '产品审视', '产品评审', '产品分析', or wants a structured multi-angle assessment of any product, project, or feature set. Also triggers on 'product lens', 'multi-dimensional review', '多维度评审'. Even if the user only mentions one dimension (e.g., 'how's our positioning'), invoke this skill — it will let them scope down. Produces a scored matrix plus a MANDATORY routing phase that files every finding back into the lore corpus as an opportunity, ADR, PRD outline update, or task — a review that ends at a report is treated as incomplete."
 ---
 
 # Product Lens — Multi-Dimensional Product Review
@@ -193,3 +193,29 @@ Merge all action items from subagents, deduplicate, and rank by:
 - Sources analyzed: {list of files/docs}
 - Context completeness: {intake warnings if any}
 ```
+
+## Phase 4: Feedback Loop (MANDATORY — a review that only produces a report has failed)
+
+⛔ **Do not end at the report.** A scoring matrix nobody routes back into the corpus is a one-off opinion: the gaps it found reappear next quarter because nothing changed upstream. Every finding must land somewhere that governs future work.
+
+### 4.1 Route each action item
+
+| Finding type | Destination | Command |
+|-------------|-------------|---------|
+| Uncovered scenario / underserved user segment | **Opportunity candidate** (a need, not a feature) | `/lore-product opportunity` — feeds Level 2 of the OST |
+| Missing capability vs competitors | Verify first — competitor claims in a review are E6 unless sourced | `lore-product-benchmark` to confirm, then opportunity |
+| Positioning / messaging gap | PRD outline section update | `lore outline set <prd> --section positioning ...` |
+| Contradiction between stated strategy and shipped product | **ADR** — one of the two must change | `lore create adr` |
+| Assumption the review proved wrong | Invalidate the doc that asserted it | `lore invalidate <doc> --superseded-by <report> --reason "..."` |
+| Confirmed defect / UX breakage | Task on the active plan | `lore create task --anchor <path>` |
+
+### 4.2 Persist the report
+
+```bash
+lore create knowledge --sub-type retro --title '{product} Product Lens {date}' --content ...
+lore link <report> <prd> --type=relates-to
+```
+
+### 4.3 Close the loop explicitly
+
+End the run by stating, in one block: how many findings were raised, how many were routed (and where), and how many were **deliberately dropped with a reason**. ⛔ Silent attrition — findings that appear in the report and are never mentioned again — is the failure mode this phase exists to prevent; a dropped finding must be dropped on the record, not by omission.

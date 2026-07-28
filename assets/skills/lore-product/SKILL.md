@@ -1,22 +1,39 @@
 ---
 name: lore-product
-description: "Use when user says 'write a PRD', 'product requirements', 'roadmap', 'user research', 'ideation', 'feature discovery', 'tech assessment', '写需求', '产品规划', or when creating product-level documentation before design/implementation."
+description: "Product work from idea to PRD across 9 modes: ideation, discovery, opportunity (derive the feature set via an Opportunity Solution Tree), validate (run four-risk experiments and grade the evidence), decompose (expand a validated solution into a user story map), prd, ux-research, roadmap, tech-assessment. Use when user says 'write a PRD', 'product requirements', 'roadmap', 'user research', 'ideation', 'feature discovery', 'tech assessment', 'what should we build', 'is this worth building', 'validate this idea', '写需求', '产品规划', '该做什么功能', '验证一下这个功能', or when creating product-level documentation before design/implementation."
 ---
 
 # Product - Mode: $0
 
-⛔ **Validate the mode BEFORE any file read.** `$0` must be EXACTLY one of: `ideation | discovery | prd | ux-research | roadmap | tech-assessment`. If `$0` is empty, a prose sentence, or any other word (e.g. `update`) → do NOT read `references/mode-$0.md` (guaranteed 404) — use AskUserQuestion to pick a mode from the table below. Note: updating an existing/living PRD is `prd` mode (mode-prd.md explicitly handles "PRD UPDATE"); there is no `update` mode.
+⛔ **Validate the mode BEFORE any file read.** `$0` must be EXACTLY one of: `ideation | discovery | opportunity | validate | decompose | prd | ux-research | roadmap | tech-assessment`. If `$0` is empty, a prose sentence, or any other word (e.g. `update`) → do NOT read `references/mode-$0.md` (guaranteed 404) — use AskUserQuestion to pick a mode from the table below. Note: updating an existing/living PRD is `prd` mode (mode-prd.md explicitly handles "PRD UPDATE"); there is no `update` mode.
 
 Only after validation passes: Read `references/mode-$0.md`.
 
 | Mode | Reference | Focus |
 |------|-----------|-------|
-| `ideation` | `references/mode-ideation.md` | Idea generation and evaluation |
-| `discovery` | `references/mode-discovery.md` | Problem/solution discovery |
+| `ideation` | `references/mode-ideation.md` | Idea generation and evaluation (benchmark-grounded) |
+| `discovery` | `references/mode-discovery.md` | Market/problem validation with a quantified Problem Score |
+| `opportunity` | `references/mode-opportunity.md` | **Derive the feature set** — Opportunity Solution Tree |
+| `validate` | `references/mode-validate.md` | **Execute experiments** — four risks, evidence-graded Validation Ledger |
+| `decompose` | `references/mode-decompose.md` | **Expand a validated solution** into a user story map; requirements are read off it |
 | `prd` | `references/mode-prd.md` | Product Requirements Document |
 | `ux-research` | `references/mode-ux-research.md` | User research planning and synthesis |
 | `roadmap` | `references/mode-roadmap.md` | Product roadmap |
 | `tech-assessment` | `references/mode-tech-assessment.md` | Technical feasibility assessment |
+
+## The Two Questions This Skill Exists To Answer
+
+Two failures dominate AI-assisted product work, and each has one mode that owns it:
+
+| Failure | Symptom | Owner |
+|---------|---------|-------|
+| **"The AI keeps asking me what to build"** | Feature lists come from whoever is in the room; the AI transcribes rather than derives | `opportunity` — features are *derived* from an outcome through evidenced needs, never invented |
+| **"It says validated but it's guesswork"** | A validation plan is written and never executed; requirements enter the PRD with the confidence of facts | `validate` — experiments actually run, results graded E1-E6, failures reported |
+| **"The output is coarse"** | A one-line feature yields a one-line requirement; the twenty decisions inside it get invented while drafting the PRD | `decompose` — a story map with unhappy paths forced onto it; requirements are read off, not thought up |
+
+⛔ Skipping these three is what makes the output feel thorough and *be* shallow. They are where product work stops being a document-generation exercise.
+
+**Worked examples exist — read the relevant one before producing that artifact.** Output granularity anchors on the exemplar the model has seen, and these are calibrated to the expected depth: `references/example-ost.md` (includes a deliberately bad tree), `references/example-validation-ledger.md` (the expensive experiment fails), `lore-product-benchmark/references/example-feature-matrix.md`.
 
 ## Cross-Cutting References (used by ALL modes)
 
@@ -29,14 +46,16 @@ Only after validation passes: Read `references/mode-$0.md`.
 | [ideation-methods.md](references/ideation-methods.md) | Method selection, challenge techniques, validation | Brainstorming, prioritization, quick validation |
 | [strategic-thinking.md](references/strategic-thinking.md) | Porter's, TAM/SAM/SOM, Strategy Canvas, Moat analysis | Market analysis, positioning, strategic decisions |
 
-## ⛔ Brainstorming-First Gate (HARD — checked before any mode)
+## ⛔ Evidence-First Gate (HARD — checked before any mode)
 
-Before entering ANY product mode, verify:
-1. Was `superpowers:brainstorming` invoked this session? → If NO and this is NEW feature work → invoke it first
-2. Did the user explicitly skip brainstorming? → If YES → proceed
-3. Is this a PRD update (not new creation)? → If YES → proceed
+Before entering ANY product mode, verify the mode's inputs are **evidence, not recall**:
+1. Does this mode require market/competitor facts? → the Feature Matrix from `lore-product-benchmark` must exist and be ≤2 quarters old
+2. Does it require user pain claims? → each carries an E1-E6 tier (see `references/mode-validate.md`); E6-only claims are marked `⚠️ unevidenced`
+3. Is this a PRD update, or an explicit user waiver? → proceed, and record which evidence was skipped
 
-This gate prevents the #1 workflow failure: AI autopiloting through the entire Product→Design→Plan chain without validating user intent. Brainstorming is the ONLY stage that explores "what does the user ACTUALLY want" before we commit to a direction.
+⛔ **Model recall is E6.** It generates candidates to verify; it is never a source. The moment a mode's output rests on "I know this category", the entire downstream chain inherits a guess and hides it behind structure.
+
+This gate prevents the #1 workflow failure: AI autopiloting through the whole Product→Design→Plan chain, producing confident artifacts nobody ever checked against reality.
 
 ## Strategic Mindset
 Act as strategic product partner, not order taker. Challenge assumptions.
@@ -72,18 +91,51 @@ Each mode produces structured output that feeds the next mode. Handoffs are **ex
 **Handoff trigger**: Ideation recommends "Proceed to Discovery"
 **Handoff action**: Pass refined idea statement + validation roadmap as discovery brief
 
-### discovery → prd
+### discovery → opportunity
 
-| Output (discovery) | Input (prd) |
+| Output (discovery) | Input (opportunity) |
+|--------------------|---------------------|
+| Problem Score ≥250 with tiered evidence | Proof the outcome is worth pursuing |
+| Evidence-backed user pain | Opportunity candidates (needs, not features) |
+| Competitive landscape + Adopt-First result | Solution-space constraints, non-goals |
+| Unvalidated assumptions | Experiment backlog seeds |
+
+**Handoff trigger**: Discovery recommends "Go → Opportunity"
+**Handoff action**: `lore link <ost> <discovery-doc> --type=implements`
+
+### opportunity → validate
+
+| Output (opportunity) | Input (validate) |
+|---------------------|------------------|
+| Selected branch: opportunity + ≥3 solutions | The set to test |
+| Per-solution experiment with kill condition | The test plan to execute |
+| Rejected branches with reasons | Guard against re-litigating settled ideas |
+
+**Handoff trigger**: One branch selected
+**Handoff action**: Run the experiments — this is execution, not documentation
+
+### validate → decompose → prd
+
+| Output (validate) | Input (decompose) |
+|-------------------|-------------------|
+| Solutions `✅ validated` on value + usability | The only things legal to map — mapping a refuted solution is elaborate fiction |
+| Refuted solutions | PRD non-goals, carrying the number that killed them |
+
+| Output (decompose) | Input (prd) |
 |--------------------|-------------|
-| Market Reality Score | PRD strategic context |
-| Evidence-backed user pain | PRD problem statement |
-| Competitive landscape | PRD non-goals (don't compete here) |
-| Validated assumptions | PRD requirements foundation |
-| Adopt-First Gate result | PRD scope (adopt vs build) |
+| Above-the-line story map rows | One requirement each, provenance already attached |
+| Unhappy-path rows (empty / error / return / overload) | Requirements tagged `⚠️ unvalidated` — validation tested the happy path only |
+| Below-the-line rows | Next slice, recorded so they are not rediscovered mid-build as "new requirements" |
 
-**Handoff trigger**: Discovery recommends "Go → PRD"
-**Handoff action**: Link discovery doc as `derived-from` source for PRD
+| Output (validate) | Input (prd) |
+|-------------------|-------------|
+| Validation Ledger rows (`validated` / `refuted` / `unvalidated`) | Per-requirement `validation` field — copied, never re-asserted |
+| Problem Score + dimension evidence | PRD problem statement |
+| Refuted solutions | PRD non-goals, with the evidence that killed them |
+| OST leaf ids | Per-requirement `source` field |
+
+**Handoff trigger**: Experiments executed (or explicitly marked not-run)
+**Handoff action**: `lore link <prd> <ledger> --type=implements`; every P0 `unvalidated` resolved per mode-prd Phase 1C
 
 ### ux-research ↔ all modes (bidirectional)
 
@@ -119,12 +171,32 @@ Each mode produces structured output that feeds the next mode. Handoffs are **ex
 | Unvalidated impact hypotheses | Discovery (what to validate next) |
 
 ## Flow Constraints
-- PRD is mandatory gate before technical/design work
-- Recommended flow: ideation → discovery → prd
+
+**Canonical chain (new product / new feature bet):**
+
+```
+lore-product-benchmark → ideation → discovery → opportunity → validate → decompose → prd → design → plan
+   (what exists)        (diverge)  (worth it?)  (derive what) (does it    (what it    (record)
+                                                              work?)      actually is)
+```
+
+- ⛔ **`discovery → prd` is not a legal edge.** Discovery proves a problem is worth solving; it never establishes what to build. Skipping `opportunity` is exactly how a feature list ends up being whatever the author thought of.
+- ⛔ **`opportunity → prd` skipping `validate` is not legal either** unless every carried requirement is marked `⚠️ unvalidated` or `🎲 accepted bet` in the PRD.
+- ⛔ **`validate → prd` skipping `decompose` is illegal when the change adds a step to the user's journey** — that is exactly when the surrounding steps break in ways nobody enumerated.
+- **Short-circuit allowed** for a Minimal PRD (improvement, <2wk, low risk, no new user-facing bet, touching a single existing step): benchmark + opportunity + decompose may be waived; the `validation` field stays mandatory.
+- PRD is a mandatory gate before technical/design work
 - Impact Map can be created at any point but MUST exist before roadmap
 - UX Research can be triggered by any mode when evidence is insufficient
 - Cross-cutting concerns checklist is mandatory for all mode outputs
 - Anti-patterns: skipping validation, feature-first thinking, no success metrics, building without traceability
+
+### Sibling skills in the `lore-product-*` family
+
+| Skill | Role in the chain |
+|-------|------------------|
+| `lore-product-benchmark` | Upstream of everything — evidence-backed Feature Matrix of what already ships |
+| `lore-product-lens` | Downstream audit — 6-dimension review of a built/in-flight product; its findings re-enter as opportunities |
+| `lore-product-to-prd` | Shortcut — synthesizes an existing conversation into a PRD + issue tracker entries. ⛔ Bypasses this chain by construction, so its output inherits `⚠️ unvalidated` on every requirement |
 
 ## PRD Update Flow (SPEC-080 — outline authoring, product round)
 

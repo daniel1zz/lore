@@ -5,23 +5,32 @@
 > **Templates**: `~/.claude/templates/prd-full.md` | `~/.claude/templates/prd-minimal.md`
 > **Detailed Guide**: [prd-guide.md](prd-guide.md)
 
-## Phase 0: Brainstorming Gate (HARD — before ANY PRD work)
+## Phase 0: Upstream Chain Gate (HARD — before ANY PRD work)
 
-⛔ **REFUSE to start PRD drafting** unless one of these is true:
-1. `superpowers:brainstorming` was already invoked this session (check conversation history)
-2. User explicitly said "skip brainstorm" / "跳过头脑风暴" / provided a complete brief with problem+users+scope
-3. This is a PRD UPDATE (existing PRD being revised), not a new PRD
+A PRD **records** decisions; it is not where they get made. If the requirements are first conceived while drafting this document, they are the author's guesses wearing the authority of a spec.
 
-If none apply → invoke `Skill("superpowers:brainstorming")` FIRST. Brainstorming surfaces:
-- User's actual intent (which may differ from their stated request)
-- Priority dimensions (what matters MOST vs nice-to-have)
-- Hidden constraints and non-obvious requirements
-- Alternative approaches the user hasn't considered
+⛔ **REFUSE to start PRD drafting** unless the upstream artifacts exist (`lore search` to confirm, don't assume):
+
+| Required upstream | Produced by | Supplies |
+|------------------|-------------|----------|
+| Feature Matrix | `lore-product-benchmark` | Table-stakes floor + explicit traps (non-goals) |
+| Opportunity Solution Tree | `/lore-product opportunity` | The derived feature candidates, each traced to an evidenced need |
+| Validation Ledger | `/lore-product validate` | Per-requirement `validated` / `unvalidated` / `accepted bet` status |
+| Story map | `/lore-product decompose` | The requirement rows themselves, incl. empty/error/return paths. Required whenever the change adds a step to the user's journey |
+
+**Exceptions** (each must be stated explicitly in the PRD, not assumed silently):
+1. **PRD UPDATE** of an existing document → proceed; the chain ran when it was created
+2. **Minimal PRD** (improvement, <2wk, low risk, no new user-facing bet, touching a single existing journey step) → benchmark + OST + story map may be waived; validation status is still mandatory
+3. **User explicitly waives** ("跳过" / "skip the chain") → proceed, and mark every requirement `⚠️ unvalidated` with a `source: user directive`
+
+Missing an artifact with no exception → route to the producing mode first and say which one is missing. Do not "cover it inline" — the whole point of the chain is that PRD drafting is the wrong place to invent, derive, or validate.
 
 > | 🚩 AI rationalization | Reality |
 > |---|---|
-> | "User gave a clear screenshot + direction, brainstorming is overkill" | Clear input ≠ validated intent. A screenshot shows WHAT, not WHY or WHICH PARTS matter. |
-> | "I can infer the requirements from the benchmark" | Inference ≠ alignment. 10 minutes of questions prevents 2 hours of wrong-direction work. |
+> | "The user gave a clear direction, the chain is overkill" | Clear input tells you WHAT they pictured, not which parts matter or whether anyone else wants it. |
+> | "I can infer the requirements from the benchmark" | Inference ≠ derivation ≠ validation. The benchmark is a `source`; it never establishes that our users need the row. |
+> | "I'll just write the PRD and validate afterwards" | Nothing gets validated after a PRD exists — the document becomes the commitment. That is the failure mode this gate blocks. |
+> | "Running the chain costs more than just writing it" | It costs less than building the wrong thing, which is the alternative being compared against. |
 
 ## Phase 1: Context & Draft
 
@@ -53,6 +62,30 @@ After ST analysis and before drafting the full PRD, present **3-5 key decisions*
 - **Explicitly mark which decisions came from user (Phase 1A) vs AI analysis**
 
 Output: **Draft PRD** for stakeholder review.
+
+### Phase 1C: Provenance & Validation Gate (HARD)
+
+⛔ **Every requirement carries two mandatory fields.** A requirement that cannot fill them was invented during PRD drafting — which is the one place it must never be invented, because the PRD is where guesses acquire the authority of decisions.
+
+| Field | Allowed values | Meaning |
+|-------|---------------|---------|
+| `source` | OST leaf id · benchmark matrix row · user decision (Phase 1A) · regulatory/technical constraint | Where this requirement came from |
+| `validation` | `✅ validated` (experiment ran and passed) · `⚠️ unvalidated` (not tested) · `🎲 accepted bet` (user explicitly chose to proceed untested) | What we actually know |
+
+⛔ **`validation` is copied from the Validation Ledger, never asserted here.** Reasoning your way to "validated" during PRD writing is the precise failure [mode-validate.md](mode-validate.md) exists to block.
+
+**P0 rule (HARD)**: a P0 requirement whose value risk is `⚠️ unvalidated` must be one of:
+1. Demoted below P0, or
+2. Preceded by a validation task in the downstream plan, or
+3. Escalated to the user via `AskUserQuestion` and, if they choose to proceed, recorded as `🎲 accepted bet` — using that word, in the PRD.
+
+⛔ **Never silently promote `unvalidated` to `validated`** because the idea is compelling, the stakeholder review liked it, or the schedule is tight.
+
+> | 🚩 AI rationalization | Reality |
+> |---|---|
+> | "This feature is obviously needed, validation is ceremony" | Obviousness is the feeling that precedes most shipped-and-unused features. Mark it `🎲 accepted bet` and move on — the label costs nothing and is the record. |
+> | "The benchmark has it, so it's validated" | Benchmark presence proves someone else shipped it, not that our users want it. That is `source`, not `validation`. |
+> | "5 stakeholder agents approved it" | Agents review the document's structural quality. None of them are a user, and none of them ran an experiment. |
 
 ## Phase 2: Multi-Stakeholder Parallel Review
 
@@ -137,6 +170,8 @@ Use `AskUserQuestion`:
 | Risks | Assumptions and risks documented? |
 | Downstream | Can design/eng/QA work from this? |
 | **User Alignment** | **Key decisions confirmed by user (Phase 1A)?** |
+| **Provenance** | **Every requirement has a `source` (OST leaf / benchmark row / user decision / constraint)?** |
+| **Validation** | **Every requirement tagged validated / unvalidated / accepted bet, copied from the Ledger — and no P0 left silently unvalidated?** |
 
 ## Writing Principles
 - Describe problem better than solution
@@ -180,8 +215,10 @@ See [jtbd-framework.md](jtbd-framework.md) for framework details.
 
 1. **Search first**: `lore search "{feature}" --type prd --json` — may need update, not new doc
 2. **Create**: `lore create prd --title '{feature}' --tags '{feature}' --content ...`
-3. **Link upstream**: `lore link <prd> <discovery-or-ideation-doc> --type=implements`
+3. **Link upstream (all that exist)**: `lore link <prd> <ost-doc> --type=implements` · `lore link <prd> <validation-ledger> --type=implements` · `lore link <prd> <benchmark-teardown> --type=relates-to`
 4. **Quality check**: Run checklist before marking `in-review` (`lore set <prd> --status in-review`)
+
+⛔ A PRD with no upstream links is a claim that its requirements came from nowhere. If the chain genuinely was waived, record that as the reason rather than leaving the links absent and unexplained.
 
 ## Triggers
 "Write PRD", "Document requirements", "Spec this feature", "Create product spec"

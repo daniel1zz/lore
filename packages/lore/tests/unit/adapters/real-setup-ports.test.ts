@@ -120,15 +120,21 @@ const DECLARED_FILES_IN_SCOPE = [
   // skills/lore-product (vendored upstream workflow skill, 2026-07-17)
   "skills/lore-product/SKILL.md",
   "skills/lore-product/references/cross-cutting-concerns.md",
+  "skills/lore-product/references/example-ost.md",
+  "skills/lore-product/references/example-validation-ledger.md",
   "skills/lore-product/references/ideation-methods.md",
   "skills/lore-product/references/impact-mapping.md",
+  "skills/lore-product/references/interview-protocol.md",
   "skills/lore-product/references/jtbd-framework.md",
+  "skills/lore-product/references/mode-decompose.md",
   "skills/lore-product/references/mode-discovery.md",
   "skills/lore-product/references/mode-ideation.md",
+  "skills/lore-product/references/mode-opportunity.md",
   "skills/lore-product/references/mode-prd.md",
   "skills/lore-product/references/mode-roadmap.md",
   "skills/lore-product/references/mode-tech-assessment.md",
   "skills/lore-product/references/mode-ux-research.md",
+  "skills/lore-product/references/mode-validate.md",
   "skills/lore-product/references/prd-guide.md",
   "skills/lore-product/references/product-design.md",
   "skills/lore-product/references/product-wisdom.md",
@@ -272,6 +278,11 @@ const DECLARED_FILES_IN_SCOPE = [
   "skills/lore-operate/references/prometheus-patterns.md",
   "skills/lore-operate/references/runbook-template.md",
   "skills/lore-operate/references/sre-methodology.md",
+  // skills/lore-product-benchmark (authored 2026-07-28 — evidence-backed Feature Matrix, upstream of the lore-product chain)
+  "skills/lore-product-benchmark/SKILL.md",
+  "skills/lore-product-benchmark/references/example-feature-matrix.md",
+  // skills/lore-product-to-prd (ex-lore-to-prd, renamed 2026-07-28 into the lore-product-* family)
+  "skills/lore-product-to-prd/SKILL.md",
   // skills/lore-product-lens (vendored upstream workflow skill, 2026-07-17)
   "skills/lore-product-lens/SKILL.md",
   "skills/lore-product-lens/references/business-lens.md",
@@ -348,8 +359,6 @@ const DECLARED_FILES_IN_SCOPE = [
   "skills/lore-test/references/test-maintainability.md",
   // skills/lore-to-issues (vendored upstream workflow skill, 2026-07-17)
   "skills/lore-to-issues/SKILL.md",
-  // skills/lore-to-prd (vendored upstream workflow skill, 2026-07-17)
-  "skills/lore-to-prd/SKILL.md",
   // skills/lore-triage (vendored upstream workflow skill, 2026-07-17)
   "skills/lore-triage/SKILL.md",
   "skills/lore-triage/AGENT-BRIEF.md",

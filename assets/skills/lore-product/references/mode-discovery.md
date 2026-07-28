@@ -41,12 +41,14 @@ Use WebSearch and available research tools to investigate this opportunity from 
 
 Provide:
 1. **Key Findings** (3-5): Specific data points, names, numbers. Not generic observations.
-2. **Evidence Quality**: Per finding — Strong (data-backed) / Moderate (multiple sources) / Weak (inference)
+2. **Evidence Tier**: Per finding, tag E1-E6 using the Evidence Ladder in [mode-validate.md](mode-validate.md)
+   (E1 observed behavior · E2 money spent · E3 time invested · E4 past-behavior quotes · E5 public complaints · E6 stated intent).
+   ⛔ An untagged finding is inadmissible. ⛔ A finding you could only produce from model recall is E6 — go verify it or drop it.
 3. **Signal vs Noise**: Most important signal found? What looked important but isn't?
 4. **Critical Question**: The ONE question that must be answered before proceeding
 5. **Verdict**: green light / yellow flag / red flag — with 1-sentence reasoning
 
-Keep output concise (400 words max). Cite sources. Be specific, not generic.
+Keep output concise (400 words max). Cite sources with URLs. Be specific, not generic.
 ```
 
 ## Phase 3: Synthesis
@@ -58,13 +60,23 @@ After all 5 agents return, synthesize:
 1. **Evidence Convergence** — findings corroborated by 3+ roles (highest confidence)
 2. **Contradictions** — where roles disagree (investigate further or flag as risk)
 3. **Existing Solution Landscape** — SaaS + OSS options discovered across all roles
-4. **Market Reality Score** (aggregate):
+4. **Problem Score (quantified — replaces subjective verdicts)**
+
+   Score the core problem on four dimensions, 1-5 each, per the rubric in [mode-validate.md](mode-validate.md).
+   ⛔ **Every score cites a finding and its evidence tier.** An uncited dimension is not scored "3 by default" — it is scored `unknown` and the gap is reported.
+
+   **Score = Frequency × Intensity × Workarounds × WTP** → **≥250** proceed · **100-249** close the weakest dimension first · **<100** reframe or walk away.
+
+   Multiplicative on purpose: an additive average lets a strong market story bury the fact that nobody has ever tried to solve the problem themselves.
+
+5. **Market Reality Score** (aggregate, secondary to the Problem Score):
    - Market attractiveness (Market Analyst + Business Model)
-   - User pain intensity (Target User Proxy)
    - Competitive defensibility (Competitive Intelligence)
    - Risk profile (Risk Assessor)
-5. **Unvalidated Assumptions** — ranked by impact x cost-to-validate
-6. **Validation Roadmap** — ordered experiments, cheapest/fastest first
+6. **Unvalidated Assumptions** — ranked by impact x cost-to-validate
+7. **Validation Roadmap** — ordered experiments, cheapest/fastest first, each with its **kill condition stated up front**
+
+⛔ The roadmap is a commitment to run experiments, not a deliverable in itself. It is executed in `/lore-product validate` — see the flow constraint below.
 
 ### Verdict Summary Table
 
@@ -82,10 +94,12 @@ If mature existing solutions found → recommend adoption over building. Hard ga
 ## Phase 4: Recommendation
 
 Based on synthesis, output one of:
-- **Go → PRD** (`/lore-product prd`) — strong signal across roles, risks manageable
-- **Validate first** — specific experiments needed before committing (list them)
+- **Go → Opportunity** (`/lore-product opportunity`) — Problem Score ≥250 with cited evidence; derive the feature set from the outcome via an OST
+- **Validate first** (`/lore-product validate`) — Problem Score 100-249, or the score rests on E5/E6 evidence; run the cheapest disproving experiments before committing
 - **Pivot** — core idea has issues but adjacent opportunity identified
-- **No-go** — multiple red flags, recommend parking or killing
+- **No-go** — Problem Score <100 or multiple red flags; recommend parking or killing
+
+⛔ **"Go → PRD" is not an option here.** Discovery establishes that a problem is worth solving; it does not establish *what to build*. Routing discovery directly into a PRD is what produces feature lists invented by the author — the failure this chain exists to prevent.
 
 ## JTBD Integration (RECOMMENDED)
 
@@ -110,16 +124,20 @@ Well-funded incumbents, low willingness to pay, high CAC, winner-take-all favori
 ## Interview Anti-Patterns (reference)
 Leading questions, asking about future behavior ("would you use X?"), pitching during discovery, only talking to fans
 
+📎 Actually talking to users — question wording, the 30-minute script, the commitment-currency ask, and what is legitimately substitutable when real users are unreachable: [interview-protocol.md](interview-protocol.md).
+
 ## Exit Criteria
 
 Discovery is complete when:
 - [ ] All 5 role analyses returned and synthesized
-- [ ] Market Reality Score computed with evidence quality ratings
+- [ ] Every finding carries an E1-E6 evidence tier with a source
+- [ ] **Problem Score computed** (F × I × W × P), each dimension citing a tiered finding; `unknown` dimensions reported, not defaulted
+- [ ] Market Reality Score computed
 - [ ] Adopt-First Gate evaluated (existing solutions assessed)
-- [ ] Unvalidated assumptions ranked and validation plan created
+- [ ] Unvalidated assumptions ranked; each validation-roadmap item has a kill condition
 - [ ] Cross-cutting concerns checklist passed
 - [ ] Output persisted in the lore corpus with upstream links
-- [ ] Clear recommendation provided: Go / Validate / Pivot / No-go
+- [ ] Clear recommendation provided: Opportunity / Validate / Pivot / No-go
 
 ## Persist Output
 - Artifact: `lore create knowledge --sub-type research --title '{topic} Discovery' --content ...`

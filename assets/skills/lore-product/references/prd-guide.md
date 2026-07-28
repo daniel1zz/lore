@@ -7,7 +7,7 @@
 | 1. Context | metadata, executive_summary, problem_statement, strategic_context | id:`PRD-{NNN}`, status:`draft\|review\|approved\|deprecated`, priority:`P0\|P1\|P2` |
 | 2. Users | target_users, user_journey | primary/secondary/excluded users; current vs target journey with emotions |
 | 3. Solution | goals_and_metrics (OKR+SMART), non_goals, solution_overview | metric + baseline + target + measurement |
-| 4. Requirements | functional (FR-{PRD}-{NNN}), non_functional | P0=MVP must, P1=should, P2=nice; NFR: perf/security/scale/a11y/i18n/compliance |
+| 4. Requirements | functional (FR-{PRD}-{NNN}), non_functional | P0=MVP must, P1=should, P2=nice; NFR: perf/security/scale/a11y/i18n/compliance; **every FR carries `source` (OST leaf / benchmark row / user decision / constraint) + `validation` (`✅ validated` / `⚠️ unvalidated` / `🎲 accepted bet`, copied from the Validation Ledger — never asserted while drafting)** |
 | 5. Acceptance | Given-When-Then format | One behavior per AC, testable, no subjective words, include edge cases |
 | 6. Risks | assumptions, risks, dependencies | assumption→if_wrong→validation; risk→likelihood×impact→mitigation→owner |
 | 7. Validation | before/during/after build; kill_criteria; release_criteria | Kill: e.g. "30d post-launch, metric <10% lift" |
@@ -30,13 +30,16 @@
 ## Minimum Viable PRD
 
 Use when: feature improvement, <2wk dev, low risk, easily reversible.
-Required: metadata, problem_statement (1-2 para), 1 goal+metric, ≥2 non_goals, P0 requirements+AC, success_criteria.
+Required: metadata, problem_statement (1-2 para), 1 goal+metric, ≥2 non_goals, P0 requirements+AC+`source`+`validation`, success_criteria.
+
+⛔ The Minimal PRD waives the benchmark and opportunity stages — it does NOT waive `source`/`validation`. "Low risk" describes blast radius, not certainty about whether anyone wants it.
 
 ## PRD Quality Checklist
 
 - Problem user-centric with evidence? No solution smuggling?
 - Goals AND Non-goals clear? MVP scope minimized?
 - Every FR has ID + priority + AC? ACs testable (Given-When-Then)?
+- Every FR has `source` + `validation`? No P0 left silently `⚠️ unvalidated` (demoted / validation task queued / recorded as `🎲 accepted bet` in the user's own words)?
 - Metrics SMART with baseline+target? Measurement method defined?
 - Assumptions + risks documented with mitigations?
 - Downstream teams (design/eng/QA) can work from this?

@@ -1,9 +1,11 @@
 ---
-name: lore-to-prd
-description: Turn the current conversation context into a PRD and publish it to the project issue tracker. Use when user wants to create a PRD from the current context.
+name: lore-product-to-prd
+description: "Turn an ALREADY-CONVERGED conversation into a PRD and publish it to the project issue tracker, synthesizing only what is already known — it interviews nobody, derives nothing, and validates nothing, so every requirement it emits is tagged unvalidated. Use when the user wants to capture a discussion that has already settled. NOT for a new product or a new user-facing bet — that is `/lore-product prd`, which enforces the benchmark → opportunity → validate chain."
 ---
 
 This skill takes the current conversation context and codebase understanding and produces a PRD. Do NOT interview the user — just synthesize what you already know.
+
+⛔ **This skill deliberately bypasses the `lore-product` chain** (benchmark → ideation → discovery → opportunity → validate). It synthesizes what is already in the conversation; it derives nothing and validates nothing. Therefore every requirement it emits inherits `validation: ⚠️ unvalidated`, and the PRD must say so. For a new product or a new user-facing bet, run `/lore-product prd` instead — this skill is for capturing a discussion that has already converged.
 
 The issue tracker and triage label vocabulary should have been provided to you — run `/setup-matt-pocock-skills` if not.
 
@@ -40,6 +42,12 @@ A LONG, numbered list of user stories. Each user story should be in the format o
 </user-story-example>
 
 This list of user stories should be extremely extensive and cover all aspects of the feature.
+
+Each story carries a validation tag, so the document cannot be mistaken for a validated one:
+
+`1. As an <actor>, I want a <feature>, so that <benefit>  — validation: ⚠️ unvalidated (source: conversation)`
+
+⛔ Every story emitted by this skill is `⚠️ unvalidated` by construction — nothing here ran an experiment. Do not upgrade a tag because the conversation sounded confident; conversational conviction is E6 evidence. If a story genuinely rests on a real experiment or on observed behaviour, cite that evidence inline instead.
 
 ## Implementation Decisions
 
