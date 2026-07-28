@@ -89,7 +89,11 @@ async function makeApprovedPlan(app: App): Promise<DocRecord> {
     // reason: bypasses the attestationFloor plan-close sub-gate (SPEC-069) —
     // out of THIS test's scope, mirrors attestation-floor.test.ts's own
     // exempt-plan fixtures.
-    extra: { attestation_exempt: true, attestation_exempt_reason: "cascade test — evidence out of scope" },
+    extra: {
+      attestation_exempt: true,
+      attestation_exempt_reason: "cascade test — evidence out of scope",
+      attestation_exempt_kind: "no-oracle",
+    },
   } as CreateDocInput);
   const approved = await app.corpusService.set(plan.id, { status: "approved" });
   if (!approved.ok) throw new Error(`plan approve failed (setup): ${JSON.stringify(approved.error)}`);
