@@ -49,6 +49,7 @@
 
 import { hostname } from "os";
 import { defineCommand } from "citty";
+import type { ActorSource } from "@lore/core/node";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActorWithIdentitySource } from "../utils.js";
 import { requirePhaseWorkflowService } from "../phase-wiring.js";
@@ -104,7 +105,19 @@ export default defineCommand({
         // AC-IDENTITY-REJECT — threads the resolved tier into the task-claim
         // gate's collision-signature test (`TaskWorkflowService.enforceClaimGate`);
         // every other CLI verb keeps using plain `resolveActor` unchanged.
-        identitySource: resolvedActor.source,
+        //
+        // SPEC-104 adds a fifth resolution tier, `"worktree-derived"`, to
+        // utils.ts's own (wider) `ActorSource` — `@lore/core/node`'s
+        // `ActorSource` (the type `ClaimOpts.identitySource` is declared
+        // against, in `task-workflow-service.ts`) is intentionally left
+        // unwidened: this task's declared file anchors are `utils.ts` +
+        // `commands/claim.ts` only, and widening a shared core type is a
+        // separate, out-of-anchor concern. The cast below is functionally
+        // inert: `gate-predicates.ts::actorIdentityGuard` only ever compares
+        // `candidateIdentitySource` against the `"os-fallback"` literal —
+        // every OTHER string (including `"worktree-derived"`) is already an
+        // automatic pass, identical to `"explicit"`/`"env"`/`"session"` today.
+        identitySource: resolvedActor.source as ActorSource,
         steal: args.steal === true,
         source: app.callerSurface,
       };
