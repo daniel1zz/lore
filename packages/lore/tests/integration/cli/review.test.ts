@@ -265,16 +265,17 @@ describe("lore review --pending — mixed outcomes (deterministic-reject succeed
         failed: number;
       };
     };
-    // 3 pending docs: the plan itself (draft, no parent → fails parent_contract — a plan
-    // is not a ROOT_TYPE), the evidence-less task (fails evidence_completeness), and the
-    // clean PRD (passes all deterministic checks, reaches the AI judge, which fails via
-    // the stub). Both deterministic-reject judgments RECORD successfully (success, despite
+    // 2 pending docs (SPEC-103 M3: the evidence-less task is a ledger-tier doc, hidden
+    // from the pending queue by default): the plan itself (draft, no parent → fails
+    // parent_contract — a plan is not a ROOT_TYPE) and the clean PRD (passes all
+    // deterministic checks, reaches the AI judge, which fails via the stub). The plan's
+    // deterministic-reject judgment RECORDS successfully (success, despite
     // decision=reject) — only the PRD's AI path is a genuine failure.
-    expect(parsed.data.total).toBe(3);
+    expect(parsed.data.total).toBe(2);
     expect(parsed.data.failed).toBe(1);
     const succeeded = parsed.data.results.filter((r) => r.judgment !== undefined);
     const failed = parsed.data.results.filter((r) => r.error !== undefined);
-    expect(succeeded).toHaveLength(2);
+    expect(succeeded).toHaveLength(1);
     expect(failed).toHaveLength(1);
     for (const s of succeeded) expect(s.judgment?.decision).toBe("reject");
     expect(failed[0]?.error?.code).toBe("AI_PROVIDER_ERROR");
