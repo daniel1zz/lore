@@ -23,10 +23,11 @@
  *     type, so a caller-supplied store only has to promise minting; this module enforces
  *     at `createDashboardHandler` construction time (loud, once, never per request) that
  *     any injected store actually was built by `createNonceStore` (has `consume`) — see
- *     `resolveNonceStore`. This revision's `/auth/bootstrap` handler does NOT yet reject
- *     subresource/iframe navigations (DD-3's `Sec-Fetch-*` guard) — that guard lands in a
- *     follow-up commit — and does NOT yet guard `machineAuth()` throws with a named `503`
- *     (Failure Modes degradation guard, also a follow-up commit).
+ *     `resolveNonceStore`. `/auth/bootstrap` rejects subresource/iframe navigations
+ *     (DD-3's `Sec-Fetch-Dest`/`Sec-Fetch-Mode` guard — see `isRejectedNavigation`) BEFORE
+ *     ever touching the nonce store, so a rejected embed attempt never burns a legitimate
+ *     token. This revision does NOT yet guard `machineAuth()` throws with a named `503`
+ *     (Failure Modes degradation guard — lands in a follow-up commit).
  *   - Cache-Control: manifest entries with `immutable: true` get a long-lived immutable
  *     directive; everything else (`/index.html`, the SPA fallback) gets `no-cache` — it
  *     carries no secret (DD-2), so freshness beats caching.
@@ -200,6 +201,22 @@ export interface DashboardHandler {
   handle(req: Request, url: URL): Promise<Response | null>;
 }
 
+/**
+ * Reject anything that is not a top-level browser navigation (DD-3: the nonce endpoint's
+ * own guard, since it is deliberately EXEMPT from Origin checking — Origin is a POST-CSRF
+ * concept and this is a GET navigation). A `Sec-Fetch-Dest` other than `"document"`, or a
+ * `Sec-Fetch-Mode` other than `"navigate"`, signals a subresource/iframe/fetch-initiated
+ * request — reject it. Both headers are OPTIONAL (older browsers / non-browser callers
+ * send neither) — absence never rejects, only a present-and-wrong value does.
+ */
+function isRejectedNavigation(req: Request): boolean {
+  const dest = req.headers.get("Sec-Fetch-Dest");
+  if (dest !== null && dest !== "document") return true;
+  const mode = req.headers.get("Sec-Fetch-Mode");
+  if (mode !== null && mode !== "navigate") return true;
+  return false;
+}
+
 /** api_keys.name the redeemed session is attributed to — the same "dashboard-local"
  * identity `POST /api/auth/local-bootstrap` (`routes.ts::handleLocalBootstrap`) uses. */
 const BOOTSTRAP_SESSION_OWNER = "dashboard-local";
@@ -231,6 +248,16 @@ async function handleNonceBootstrap(
   config: DashboardServingConfig,
   nonces: NonceStoreWithConsume,
 ): Promise<Response> {
+  if (isRejectedNavigation(req)) {
+    return jsonError(
+      {
+        code: "FORBIDDEN",
+        message: "Bootstrap nonce redemption must be a top-level navigation, not a subresource/iframe request.",
+      },
+      403,
+    );
+  }
+
   const token = url.searchParams.get("nonce");
   const outcome = token !== null ? nonces.consume(token) : "unknown";
   if (outcome !== "granted") {
