@@ -205,6 +205,19 @@ export interface DoneResult {
   task: DocRecord;
   already_done: boolean;
   transitions: DocStatus[];
+  /**
+   * Present ONLY when this call performed a real archive walk (never on the
+   * `already_done: true` idempotent no-op branch) AND that walk made the
+   * task's parent PLAN's every child task terminal (`archived`/`deprecated`)
+   * while the plan itself is still non-terminal (spec-plan-closure-must-be-
+   * loud-terminality-divergence-silent DD-2, AC-CLOSURE-3). A pure FACT — no
+   * plan document is read-modify-written to produce it, and `done()` never
+   * writes the plan (Invariant 1: `done` announces, it never closes; the
+   * `plan-close` gate remains the sole path to actually archiving the plan).
+   * `undefined` for: a non-last task, an adhoc/planless task (no `plan`-typed
+   * parent), or a plan that is already terminal.
+   */
+  plan_now_fully_terminal?: { plan_slug: string };
 }
 
 /**
@@ -410,6 +423,14 @@ export function computeArchiveWalk(from: DocStatus): DocStatus[] {
     case "deprecated":
       return [];
   }
+}
+
+/** Terminal document statuses — mirrors DD-1's `plan-terminality` drift definition
+ *  (spec-plan-closure-must-be-loud-terminality-divergence-silent). Kept local to this
+ *  file (not imported from `tree-check-service.ts`) — SRP: this is `done()`'s own
+ *  read-only fact computation, not the drift detector. */
+function isTerminalStatus(status: DocStatus): boolean {
+  return status === "archived" || status === "deprecated";
 }
 
 /**
@@ -1100,7 +1121,19 @@ export class TaskWorkflowService {
       transitions.push(nextStatus);
     }
 
-    return ok({ task, already_done: false, transitions });
+    // reason: DD-2 fact computation runs ONLY after a real walk (never the
+    // idempotent-no-op branch above, which returns before this point) — an
+    // already-terminal task on a second `lore done` call produces no fresh
+    // "last task" signal since nothing changed this call.
+    const planFactResult = await this.computePlanNowFullyTerminal(task);
+    if (!planFactResult.ok) return planFactResult;
+
+    return ok({
+      task,
+      already_done: false,
+      transitions,
+      ...(planFactResult.value !== undefined ? { plan_now_fully_terminal: planFactResult.value } : {}),
+    });
   }
 
   // ── Anchor Mutations (SPEC-042 D3) ──────────────────────────────────────────
@@ -1536,6 +1569,45 @@ export class TaskWorkflowService {
       });
     }
     return ok(doc);
+  }
+
+  /**
+   * Computes DD-2's `DoneResult.plan_now_fully_terminal` fact (spec-plan-closure-
+   * must-be-loud-terminality-divergence-silent, AC-CLOSURE-3) — a READ-ONLY check,
+   * never a write: `done()`'s own Invariant 1 forbids this service from touching the
+   * plan document. Returns `undefined` (not an error) for every case that does not
+   * warrant the advisory: `archivedTask.parent_id === null`, a parent that fails to
+   * resolve or is not `type: "plan"` (adhoc tasks auto-parent to the root PRD —
+   * `CorpusService._createImpl`'s adhoc block), a plan that is ALREADY terminal
+   * (nothing left to announce), or a plan with ≥1 still-non-terminal child task.
+   *
+   * @param archivedTask - The task DocRecord AFTER `_doneImpl`'s walk wrote it to
+   *   `"archived"` — its `parent_id` is unchanged by that walk (only `status`/
+   *   `version`/`updated_at` are touched), so this reads that same field.
+   * @returns `ok({ plan_slug })` when every child task under the parent plan is now
+   *   terminal and the plan itself is not; `ok(undefined)` otherwise; `err(...)` only
+   *   on a genuine store failure reading the parent or siblings (propagated, not
+   *   swallowed — a store error here must not silently masquerade as "no advisory").
+   */
+  private async computePlanNowFullyTerminal(
+    archivedTask: DocRecord,
+  ): Promise<Result<{ plan_slug: string } | undefined, LoreError>> {
+    if (archivedTask.parent_id === null) return ok(undefined);
+
+    const parentResult = await this.store.find(archivedTask.parent_id);
+    if (!parentResult.ok) return parentResult;
+    const plan = parentResult.value;
+    if (plan === null || plan.type !== "plan") return ok(undefined);
+    if (isTerminalStatus(plan.status)) return ok(undefined);
+
+    const siblingsResult = await this.store.findMany({ parent_id: plan.id, type: "task" });
+    if (!siblingsResult.ok) return siblingsResult;
+    const siblings = siblingsResult.value;
+
+    const allTerminal = siblings.length > 0 && siblings.every((t) => isTerminalStatus(t.status));
+    if (!allTerminal) return ok(undefined);
+
+    return ok({ plan_slug: plan.slug });
   }
 
   /**

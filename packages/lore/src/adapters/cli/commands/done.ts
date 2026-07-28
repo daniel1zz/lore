@@ -35,7 +35,7 @@ import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 import { requirePhaseWorkflowService } from "../phase-wiring.js";
-import { formatDoneMessage } from "../done-render.js";
+import { formatDoneMessage, formatLastTaskAdvisory } from "../done-render.js";
 
 export default defineCommand({
   meta: {
@@ -81,6 +81,16 @@ export default defineCommand({
         process.stderr.write(formatError(result.error) + "\n");
         process.exitCode = exitCode(result.error);
         return;
+      }
+
+      // reason: DD-2 last-task advisory (spec-plan-closure-must-be-loud-terminality-
+      // divergence-silent, AC-CLOSURE-3) — stderr-only side channel, printed in BOTH
+      // --json and human-readable modes, never altering stdout's normal success
+      // output. No once-per-process guard (unlike resolveActorWithIdentitySource's
+      // precedent) — this fires at most once per plan, ever.
+      const lastTaskAdvisory = formatLastTaskAdvisory(result.value);
+      if (lastTaskAdvisory !== undefined) {
+        process.stderr.write(lastTaskAdvisory + "\n");
       }
 
       if (args.json) {
