@@ -93,6 +93,7 @@ import {
   type GateCheckpoint,
   type GateContext,
 } from "./checkpoint-registry.js";
+import type { TraceRecorder } from "./trace-recorder.js";
 
 /**
  * Which escape hatch produced a `gate_skipped` audit entry (SPEC-080 G4 D2) —
@@ -241,10 +242,16 @@ export class GateEnforcer {
    *   test in this codebase) omits it, so `enforce()`'s config-disabled branch stays
    *   a zero-IO synchronous early return, byte-identical to pre-SPEC-080 behavior —
    *   see `recordSkip()`'s own doc comment and this class's SPEC-080 module invariant.
+   * @param traceRecorder - OPTIONAL SPEC-102 read/deny-instrumentation port — when
+   *   present, a BLOCKED `enforce()` call fires a fire-and-forget `kind="gate_deny"`
+   *   trace row (`layer: "service"`) via `TraceRecorder.recordGateDeny`. Absent (the
+   *   default) → zero trace writes, byte-identical to pre-SPEC-102 behavior — same
+   *   "absent in bare tests, present in production" shape as `recordGateSkip`.
    */
   constructor(
     private readonly config: LoreConfig | undefined,
     private readonly recordGateSkip?: RecordGateSkip,
+    private readonly traceRecorder?: TraceRecorder,
   ) {}
 
   /**
@@ -316,6 +323,17 @@ export class GateEnforcer {
     // by convention. A trailing newline (spec-promote's `feed` ends with one) is
     // trimmed so the `\n\n`-separated pack block never grows a blank third line.
     const feedText = checkpointDef.feed(ctx, failures).replace(/\n+$/, "");
+    // reason: SPEC-102 D7 — service-layer deny, layer="service" (disambiguates
+    // from the hook-layer `lore gate` CLI deny path, which fires its own
+    // `recordGateDeny(..., "hook")` call — the two layers see different
+    // traffic and would otherwise double-count the SAME checkpoint). Fired
+    // AFTER the blocked verdict is fully computed, never influencing it —
+    // `traceRecorder` absent in every bare test construction (mirrors
+    // `recordGateSkip`'s identical optional-DI shape one section up).
+    if (this.traceRecorder !== undefined) {
+      const actor = resolveActorWithSource(undefined, process.env).actor;
+      this.traceRecorder.recordGateDeny(actor, checkpoint, reasons, ctx.specIdOrSlug ?? ctx.targetIdOrSlug, "service");
+    }
     return err({
       code: "VALIDATION_ERROR",
       field,
