@@ -26,8 +26,13 @@
  *     `resolveNonceStore`. `/auth/bootstrap` rejects subresource/iframe navigations
  *     (DD-3's `Sec-Fetch-Dest`/`Sec-Fetch-Mode` guard — see `isRejectedNavigation`) BEFORE
  *     ever touching the nonce store, so a rejected embed attempt never burns a legitimate
- *     token. This revision does NOT yet guard `machineAuth()` throws with a named `503`
- *     (Failure Modes degradation guard — lands in a follow-up commit).
+ *     token.
+ *   - `machineAuth` (DD-2) is invoked LAZILY and ONLY inside the `/auth/bootstrap` branch,
+ *     guarded by try/catch — a throw (or an omitted resolver) degrades that ONE route to a
+ *     named `503`, never a blanket `500`, and NEVER blocks static serving (Failure Modes
+ *     table: "Machine-auth store unavailable"). A missing/unreadable embedded asset
+ *     (Failure Modes table: "Embedded asset read failure") answers a named `500` for THAT
+ *     asset only, likewise never an uncaught throw.
  *   - Cache-Control: manifest entries with `immutable: true` get a long-lived immutable
  *     directive; everything else (`/index.html`, the SPA fallback) gets `no-cache` — it
  *     carries no secret (DD-2), so freshness beats caching.
@@ -270,12 +275,27 @@ async function handleNonceBootstrap(
     );
   }
 
-  // reason: machineAuth() resolution is NOT YET guarded here — a missing resolver or a
-  // throw inside it currently propagates to Bun.serve's global error() handler (a
-  // generic 500), and an omitted resolver throws a plain "not a function" TypeError via
-  // this non-null assertion. The named-503 degradation guard (Failure Modes table) lands
-  // in a follow-up commit.
-  const stores = config.machineAuth!();
+  // Failure Modes table: "Machine-auth store unavailable" — guarded HERE, lazily, per
+  // request, ONLY on this nonce-redemption path (never for plain static serving above).
+  // An omitted resolver is equivalent to a throwing one: both degrade to a named 503,
+  // never a blanket 500.
+  let stores: MachineAuthStores;
+  try {
+    if (config.machineAuth === undefined) {
+      throw new Error("No machine-auth resolver configured for this server instance.");
+    }
+    stores = config.machineAuth();
+  } catch (error) {
+    const cause = error instanceof Error ? error.message : String(error);
+    return jsonError(
+      {
+        code: "MACHINE_AUTH_UNAVAILABLE",
+        message: `Dashboard session store unavailable: ${cause}. Resolve the underlying storage issue, then re-run 'lore dashboard'.`,
+      },
+      503,
+    );
+  }
+
   const { session_id } = stores.sessionStore.create(BOOTSTRAP_SESSION_OWNER);
   const headers = new Headers({ Location: "/" });
   headers.append("Set-Cookie", buildSessionCookieHeader(req, session_id));
@@ -284,9 +304,21 @@ async function handleNonceBootstrap(
 
 /**
  * Serve one embedded/on-disk manifest entry's bytes.
+ * Guards the Failure Modes table's "Embedded asset read failure" row: a missing file at
+ * the recorded path answers a named `500` for THIS asset only, never an uncaught throw
+ * that would fall through Bun.serve's generic error() handler for every other request.
  */
 async function serveManifestEntry(entry: DashboardAssetsManifestEntry): Promise<Response> {
   const file = Bun.file(entry.embedded);
+  const exists = await file.exists();
+  if (!exists) {
+    process.stderr.write(`[dashboard] embedded asset missing at "${entry.embedded}"\n`);
+    return jsonError(
+      { code: "INTERNAL_ERROR", message: `Dashboard asset unavailable: ${entry.embedded}` },
+      500,
+    );
+  }
+
   const cacheControl = entry.immutable ? "public, max-age=31536000, immutable" : "no-cache";
   return new Response(file, {
     status: 200,
