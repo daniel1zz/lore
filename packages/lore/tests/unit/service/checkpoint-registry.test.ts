@@ -19,6 +19,7 @@ import {
   isNonPlanParentError,
   type GateContext,
 } from "../../../src/service/checkpoint-registry.js";
+import { verifyReachability } from "../../../src/service/gate-predicates.js";
 import type { DocRecord, LoreError } from "@lore/core";
 
 describe("checkpointRegistry", () => {
@@ -567,5 +568,77 @@ describe("checkpointRegistry", () => {
       };
       expect(isNonPlanParentError(error)).toBe(false);
     });
+  });
+});
+
+/**
+ * RED/TDD scenarios for spec-plan-closure-must-be-loud-terminality-divergence-
+ * silent §Design Decisions DD-4(b) — AC-CLOSURE-5.
+ *
+ * Ground truth (live 2026-07-28 incident): a plan whose `parent_id` WAS an
+ * approved tech spec declaring script-mode ACs was told by the plan-close deny
+ * pack that it "has no spec-tier ancestor at all" — a DEFINITE claim rendered
+ * from a field (`GateContext.hasSpecParent`) the real caller never populated at
+ * all. `verifyReachability(planParentType, ...)` today maps ANY
+ * `planParentType !== "spec"` — including `undefined` ("caller told me
+ * nothing") — onto the SAME `why: "parent-not-spec"` a caller-resolved,
+ * genuinely-non-spec parent (e.g. `"prd"`) also produces. Absence of evidence
+ * must never render as evidence of absence.
+ *
+ * `describeReachabilityWhy` (the sole place the "no spec-tier ancestor" /
+ * "zero script-mode acceptance criteria" prose is written) is module-private
+ * to checkpoint-registry.ts — exercised here indirectly through the exported
+ * `checkpointRegistry["plan-close"].feed()` path (`feedAttestationFloor`), the
+ * SAME live call site DD-4(b) targets, mirroring
+ * `feed-attestation-reachability.test.ts`'s established fixture shape.
+ *
+ * Coverage dimensions: HAPPY / NEGATIVE / BOUNDARY / STATE.
+ *
+ * @spec_ref spec-plan-closure-must-be-loud-terminality-divergence-silent
+ *   §Design Decisions DD-4(b), §Acceptance Criteria AC-CLOSURE-5
+ */
+describe("reachability unknown vs known-false (verifyReachability / describeReachabilityWhy)", () => {
+  // HAPPY — the caller never supplied a parent type at all (`undefined`) must
+  // resolve to an UNKNOWN outcome, distinct from the definite "parent-not-spec"
+  // claim — this is the exact gap DD-4(b) closes.
+  it("HAPPY: verifyReachability(undefined, ...) reports an unknown outcome, not parent-not-spec", () => {
+    const result = verifyReachability(undefined, undefined);
+    expect(result.why).not.toBe("parent-not-spec");
+    expect(result.reachable).toBe(false);
+  });
+
+  // NEGATIVE — a caller-RESOLVED, genuinely non-spec parent type is a true
+  // negative and must keep reporting parent-not-spec; the fix must not blur
+  // "known false" into "unknown".
+  it("NEGATIVE: verifyReachability('prd', 0) still reports parent-not-spec (true negative preserved)", () => {
+    expect(verifyReachability("prd", 0)).toEqual({ reachable: false, why: "parent-not-spec" });
+  });
+
+  // BOUNDARY — a resolved spec parent with zero declared script-mode ACs is
+  // unchanged by this fix.
+  it("BOUNDARY: verifyReachability('spec', 0) still reports no-script-acs unchanged", () => {
+    expect(verifyReachability("spec", 0)).toEqual({ reachable: false, why: "no-script-acs" });
+  });
+
+  // STATE — the live incident shape: a plan-close ctx that never populated
+  // `hasSpecParent`/`parentSpecScriptAcCount` at all (exactly what
+  // `CorpusService.set`'s real plan-close call site does today, pre-fix) must
+  // render NEITHER definite reachability claim in the feeding pack.
+  it("STATE: plan-close feed for an unknown-reachability ctx renders neither definite reachability claim", () => {
+    const planClose = checkpointRegistry["plan-close"];
+    if (planClose === undefined) {
+      throw new Error("plan-close checkpoint not registered — test fixture assumption broken");
+    }
+    const ctx: GateContext = {
+      targetIdOrSlug: "plan-example",
+      attestationMinRatio: 0.5,
+      planTasksAttestation: [{ slug: "task-1", title: "Task One", evidenceCount: 3, attestedCount: 0 }],
+      // hasSpecParent / parentSpecScriptAcCount deliberately OMITTED — mirrors
+      // the live bug: plan-close's real caller never populates these today.
+    };
+    const failures = planClose.check(ctx).filter((r) => !r.ok);
+    const text = planClose.feed(ctx, failures);
+    expect(text).not.toContain("no spec-tier ancestor");
+    expect(text).not.toContain("zero script-mode");
   });
 });
