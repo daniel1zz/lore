@@ -193,6 +193,102 @@ export interface CalibrationRowWithPromptVersion extends CalibrationRow {
   judge_kind: string;
 }
 
+// ─── Trace Events (SPEC-102, migration-011) ────────────────────────────────
+// SSOT for this store-layer family — mirrors the AuditRow/AuditEntry split
+// one section up: a raw DB row type here, a domain input/record pair here
+// too (re-exported by store-interface.ts, never redefined there), and a
+// pure row→domain mapper beside the other `rowTo*` functions below.
+
+/** Raw row from the `trace_events` table (migration-011.ts, SPEC-102 §Schema). */
+export interface TraceEventRow {
+  id: number | bigint;
+  ts: string;
+  actor: string;
+  surface: string;
+  session_id: string;
+  kind: string;
+  doc_id: string | null;
+  checkpoint: string | null;
+  hit_count: number | bigint | null;
+  details: string;
+}
+
+/**
+ * Insert-shape for one `trace_events` row — the seam
+ * `StoreInterface.insertTraceEvent` accepts. `ts` is REQUIRED here (the
+ * caller — `TraceRecorder`, a later task — resolves `new Date().toISOString()`
+ * once per event so store implementations never read the wall clock
+ * themselves); `id` is store-assigned (`AUTOINCREMENT`), never supplied by a
+ * caller — hence absent from this input shape entirely.
+ *
+ * `kind`/`surface` are deliberately plain `string`, not a Zod-validated
+ * union, AT THIS LAYER (SPEC-102 D2 — no `CHECK` constraint, forward-compat
+ * for new kinds without a migration) — `TraceRecorder`'s own Zod schema
+ * (`@lore/core`, a later task) is where kind/surface validation actually
+ * happens, before a caller ever reaches this store method.
+ */
+export interface TraceEventInput {
+  /** ISO 8601 with ms — resolved by the CALLER, never by the store. */
+  ts: string;
+  actor: string;
+  surface: string;
+  /** SAME derivation source as audit writes — never reconstructed here. */
+  session_id: string;
+  /** e.g. `get`/`search`/`feed`/`context_bundle`/`gate_deny` — no CHECK (D2). */
+  kind: string;
+  /** `get` rows: the doc read. Absent for every other kind. No FK (D4). */
+  doc_id?: string;
+  /** `gate_deny`/`feed` rows only. */
+  checkpoint?: string;
+  /** `search` rows only. */
+  hit_count?: number;
+  /** JSON-serializable event detail (search→query, feed→docs_served[], gate_deny→predicates_failed/target_slug/layer). Defaults to `{}`. */
+  details?: Record<string, unknown>;
+}
+
+/** A persisted `trace_events` row — {@link TraceEventInput} plus its store-assigned `id`. */
+export interface TraceEventRecord extends TraceEventInput {
+  id: number;
+}
+
+/**
+ * The lower bound every trace-stats query is scoped to (SPEC-102 §Access
+ * Patterns & Indexes) — mirrors `CalibrationWindowFilter`'s "always bounded"
+ * rule: there is no "all time, unbounded" stats query, `since` is REQUIRED
+ * on every read below (never optional — an unbounded full-table scan is not
+ * a shape any named query in the spec's access-pattern table needs).
+ */
+export interface TraceStatsWindow {
+  /** ISO 8601 — only rows at/after this timestamp are considered. */
+  since: string;
+}
+
+/**
+ * One row of the deny-by-checkpoint breakdown, LAYER-disambiguated
+ * (SPEC-102 D7 — hook-layer `lore gate` denies and service-layer
+ * `GateEnforcer` denies are counted separately for the identical checkpoint,
+ * since the two layers see different traffic and would otherwise double-count).
+ */
+export interface TraceDenyByCheckpoint {
+  checkpoint: string;
+  layer: string;
+  count: number;
+}
+
+/** One `gate_deny` trace row, projected for the deny→retry-success gap's read-side join against the audit table. */
+export interface TraceGateDenyEvent {
+  ts: string;
+  actor: string;
+  checkpoint: string;
+}
+
+/** One `search` trace row's raw query text — returned ONLY behind `lore trace stats --raw-queries` (SPEC-102 §Security & Privacy). */
+export interface TraceRawSearchQuery {
+  ts: string;
+  actor: string;
+  query: string;
+}
+
 // ─── JSON helpers ──────────────────────────────────────────────────────────
 
 export function parseJson<T>(raw: string, fallback: T): T {
@@ -311,6 +407,30 @@ export function rowToAuditEntry(row: AuditRow): AuditEntry {
     session_id: row.session_id,
     action: row.action,
     ...(row.doc_id !== null ? { doc_id: row.doc_id } : {}),
+    details: parseJson(row.details, {}),
+  };
+}
+
+/**
+ * Maps a raw {@link TraceEventRow} to a {@link TraceEventRecord} — mirrors
+ * {@link rowToAuditEntry}'s "nullable column → optional field" shape
+ * (`doc_id`/`checkpoint`/`hit_count` are all NULL for kinds that don't
+ * populate them; each is omitted from the returned object rather than
+ * present with `null`, matching every other optional-field convention in
+ * this file). `id`/`hit_count` are `Number()`-coerced since libsql may
+ * return either as `bigint`.
+ */
+export function rowToTraceEvent(row: TraceEventRow): TraceEventRecord {
+  return {
+    id: Number(row.id),
+    ts: row.ts,
+    actor: row.actor,
+    surface: row.surface,
+    session_id: row.session_id,
+    kind: row.kind,
+    ...(row.doc_id !== null ? { doc_id: row.doc_id } : {}),
+    ...(row.checkpoint !== null ? { checkpoint: row.checkpoint } : {}),
+    ...(row.hit_count !== null ? { hit_count: Number(row.hit_count) } : {}),
     details: parseJson(row.details, {}),
   };
 }

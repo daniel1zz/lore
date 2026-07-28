@@ -111,11 +111,11 @@ describe("migration-006 mid-transaction failure — PRAGMA foreign_keys restore 
     const store = new SQLiteStore(":memory:");
     const db = store.getDatabase();
 
-    // reason: migration-009 (SPEC-079 G3 audit hash chain) is now the head —
-    // a fresh store runs every migration up to it, not just through
+    // reason: migration-011 (SPEC-102 trace_events) is now the head — a
+    // fresh store runs every migration up to it, not just through
     // migration-006. This test's own concern (FK enforcement restored after
     // migration-006) is unaffected — asserted directly below.
-    expect(userVersion(db)).toBe(10);
+    expect(userVersion(db)).toBe(11);
     expect(foreignKeysEnabled(db)).toBe(true);
 
     store.close();

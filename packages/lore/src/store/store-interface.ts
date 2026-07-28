@@ -141,6 +141,27 @@ export type CalibrationRecordWithPromptVersion = CalibrationRecord & {
   judge_kind: ReviewJudgmentKind;
 };
 
+// ─── Trace Events (SPEC-102) ────────────────────────────────────────────────
+// Domain shapes live in store-shared.ts (mirrors AuditChainEntry — the SSOT
+// for a row-shape-adjacent type shared by SQLiteStore/TursoStore/InMemoryStore
+// is store-shared.ts; this module re-exports so a consumer of
+// StoreInterface's trace methods has ONE import surface for both).
+export type {
+  TraceDenyByCheckpoint,
+  TraceEventInput,
+  TraceEventRecord,
+  TraceGateDenyEvent,
+  TraceRawSearchQuery,
+  TraceStatsWindow,
+} from "./store-shared.js";
+import type {
+  TraceDenyByCheckpoint,
+  TraceEventInput,
+  TraceGateDenyEvent,
+  TraceRawSearchQuery,
+  TraceStatsWindow,
+} from "./store-shared.js";
+
 // ─── Interface ─────────────────────────────────────────────────────────────
 
 /**
@@ -714,6 +735,49 @@ export interface StoreInterface {
   queryCalibrationWindow(
     filter: CalibrationWindowFilter,
   ): Promise<Result<CalibrationRecordWithPromptVersion[], LoreError>>;
+
+  // ── Trace Events (SPEC-102) ─────────────────────────────────────────────
+  // Fire-and-forget contract: `insertTraceEvent`'s Result IS returned (never
+  // silently swallowed by the store itself — StoreInterface methods always
+  // report their outcome), but the CALLER (`TraceRecorder`, a later task) is
+  // the one that ignores a failed write rather than propagating it into the
+  // traced operation's own Result. Never hash-chained (unlike `audit`), never
+  // replicated to Turso (D3 — absent from `sync-push.ts`'s REPLICATED_TABLES).
+
+  /** Insert one trace_events row. Never fails the caller's traced operation — see the section header. */
+  insertTraceEvent(event: TraceEventInput): Promise<Result<void, LoreError>>;
+
+  /** Row counts grouped by `kind`, since `window.since` (idx_trace_kind_ts). Absent kinds are omitted (never present with 0). */
+  countTraceEventsByKind(window: TraceStatsWindow): Promise<Result<Record<string, number>, LoreError>>;
+
+  /** `gate_deny` row counts grouped by `(checkpoint, details.layer)`, since `window.since` (idx_trace_kind_ts + checkpoint column; SPEC-102 D7 layer disambiguation). */
+  countTraceDenyByCheckpoint(window: TraceStatsWindow): Promise<Result<TraceDenyByCheckpoint[], LoreError>>;
+
+  /** Count of `kind='search'` rows with `hit_count = 0`, since `window.since` (idx_trace_kind_ts). */
+  countTraceZeroHitSearches(window: TraceStatsWindow): Promise<Result<number, LoreError>>;
+
+  /** Count of non-deleted docs with NO `kind='get'` trace row since `window.since` (idx_trace_doc). */
+  countNeverReadDocs(window: TraceStatsWindow): Promise<Result<number, LoreError>>;
+
+  /** Every `gate_deny` row since `window.since`, for the deny→retry-success gap's read-side audit join (idx_trace_kind_actor). Computed by the caller — never stored. */
+  listTraceGateDenies(window: TraceStatsWindow): Promise<Result<TraceGateDenyEvent[], LoreError>>;
+
+  /** Raw `details.query` text for every `kind='search'` row since `window.since` — ONLY consulted behind `--raw-queries` (SPEC-102 §Security & Privacy). */
+  listTraceRawSearchQueries(window: TraceStatsWindow): Promise<Result<TraceRawSearchQuery[], LoreError>>;
+
+  /**
+   * One BOUNDED batch delete of rows older than `cutoffIso`
+   * (`DELETE WHERE id IN (SELECT id FROM trace_events WHERE ts < ? LIMIT
+   * batchSize)`, idx_trace_ts) — the CALLER loops this until it returns 0
+   * (SPEC-102 §Migration Strategy "retention prune"), this method itself
+   * runs exactly one batch, never an unbounded DELETE.
+   *
+   * @param cutoffIso - ISO 8601; rows with `ts < cutoffIso` are eligible.
+   * @param batchSize - Max rows deleted by this call. Default 50000.
+   * @returns `ok(count)` — rows actually deleted by this one batch (0 means
+   *   nothing left to prune, the caller's loop-termination signal).
+   */
+  pruneTraceEvents(cutoffIso: string, batchSize?: number): Promise<Result<number, LoreError>>;
 
   // ── Lifecycle ──────────────────────────────────────────────────────────
 

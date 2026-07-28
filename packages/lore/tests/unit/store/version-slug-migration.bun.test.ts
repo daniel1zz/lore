@@ -118,7 +118,7 @@ describe("migration-007 (versions.slug nullable column)", () => {
     // fresh store runs every migration up to it, not just through
     // migration-007. This test's own concern (versions.slug present) is
     // unaffected — asserted directly below.
-    expect(userVersion(db)).toBe(10);
+    expect(userVersion(db)).toBe(11);
     expect(tableColumnNames(db, "versions")).toContain("slug");
 
     store.close();
@@ -231,7 +231,7 @@ describe("migration-007 (versions.slug nullable column)", () => {
     const store = new SQLiteStore(dbPath);
     const db = store.getDatabase();
 
-    expect(userVersion(db)).toBe(10);
+    expect(userVersion(db)).toBe(11);
     expect(tableColumnNames(db, "versions")).toContain("slug");
 
     const preservedDoc = db
@@ -257,7 +257,7 @@ describe("migration-007 (versions.slug nullable column)", () => {
     expect(() => {
       const secondOpen = new SQLiteStore(dbPath);
       const db = secondOpen.getDatabase();
-      expect(userVersion(db)).toBe(10);
+      expect(userVersion(db)).toBe(11);
       expect(tableColumnNames(db, "versions")).toContain("slug");
       secondOpen.close();
     }).not.toThrow();

@@ -147,6 +147,25 @@ function disableAllGates(dir: string): void {
   );
 }
 
+/**
+ * Disables SPEC-102 trace recording/pruning for this corpus — this suite's
+ * "byte-unchanged corpus DB" idempotency oracle (`hashDbState`, below) hashes
+ * the WHOLE db file, and `trace_events` rows (fresh timestamps on every real
+ * CLI invocation, e.g. this suite's own `runLore(["get", ...])`/`--dry-run`
+ * calls) would otherwise make two back-to-back invocations byte-DIFFERENT
+ * even when the ordinal-migration logic under test wrote nothing — a false
+ * regression this suite exists to catch would look identical to a genuine
+ * one. Disabling trace here scopes the oracle back to its actual concern
+ * (ordinal migration idempotency), not an unrelated observability side effect.
+ */
+function disableTraceRecording(dir: string): void {
+  appendFileSync(
+    join(dir, ".lore", "config.yaml"),
+    ["trace:", "  enabled: false", ""].join("\n"),
+    "utf8",
+  );
+}
+
 function dbPathFor(dir: string): string {
   return join(dir, ".lore", "lore.db");
 }
@@ -248,6 +267,7 @@ describe("AC-084-5: compiled dist/lore migrate ordinals — dry-run/apply/idempo
     expect(dir.startsWith(REPO_ROOT)).toBe(false);
     initCorpus(dir);
     disableAllGates(dir);
+    disableTraceRecording(dir);
     dbPath = dbPathFor(dir);
 
     const prdResult = runLore(

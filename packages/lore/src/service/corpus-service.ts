@@ -74,6 +74,7 @@ import type { PlanBundle } from "@lore/core";
 import type { ReviewBundle } from "@lore/core";
 import type { TreeBlueprint } from "@lore/core";
 import type { GateEnforcer } from "./gate-enforcer.js";
+import type { TraceRecorder } from "./trace-recorder.js";
 import type { GateContext } from "./checkpoint-registry.js";
 import { computeArmedGates } from "./checkpoint-registry.js";
 import { attestationExemptKindValid } from "./gate-predicates.js";
@@ -391,12 +392,19 @@ export class CorpusService {
    *   default) → ungated, byte-identical to pre-GateEnforcer behavior — this is what
    *   keeps every bare `new CorpusService(store)` unit test construction green. Only
    *   `app.ts`'s production composition root wires a real instance.
+   * @param traceRecorder - OPTIONAL SPEC-102 read-instrumentation port — when present,
+   *   `get`/`search` fire a fire-and-forget trace row via `TraceRecorder.recordGet`/
+   *   `recordSearch` (`./trace-recorder.js`) AFTER the store call succeeds, never
+   *   before and never on a failed lookup. Absent (the default) → zero trace writes,
+   *   byte-identical to pre-SPEC-102 behavior — same "absent in bare tests, present in
+   *   production" shape as `gateEnforcer`.
    */
   constructor(
     private readonly store: StoreInterface,
     telemetry: Telemetry = new NoOpTelemetry(),
     private readonly claimTtlMinutes?: number,
     private readonly gateEnforcer?: GateEnforcer,
+    private readonly traceRecorder?: TraceRecorder,
   ) {
     this.telemetry = telemetry;
   }
@@ -1253,6 +1261,14 @@ export class CorpusService {
     const startMs = Date.now();
     const result = await this._getImpl(idOrSlug, _opts);
     this.recordTelemetryEvent("get", startMs, result, { idOrSlug });
+    // reason: SPEC-102 — fire-and-forget trace row AFTER the store call
+    // succeeds, never before and never on a failed lookup (a NOT_FOUND/
+    // STORE_ERROR result records nothing — "get" traces a REAL doc read).
+    // `traceRecorder` is absent in every bare test construction, mirroring
+    // `gateEnforcer`'s identical optional-DI shape.
+    if (result.ok && this.traceRecorder !== undefined) {
+      this.traceRecorder.recordGet(this.resolveWriteActor(undefined), result.value.doc.id);
+    }
     return result;
   }
 
@@ -2454,6 +2470,13 @@ export class CorpusService {
 
     const result = ok({ results: visibleHits });
     this.recordTelemetryEvent("search", startMs, result, { query_length: query.length, hits: visibleHits.length });
+    // reason: SPEC-102 — fire-and-forget trace row with the REAL hit count
+    // (post SPEC-043 D3 invalidated-hit filtering — `visibleHits.length`, the
+    // same count a caller actually sees), never the raw pre-filter store hit
+    // count. `traceRecorder` absent in bare test constructions (mirrors `get`).
+    if (this.traceRecorder !== undefined) {
+      this.traceRecorder.recordSearch(this.resolveWriteActor(undefined), query, visibleHits.length);
+    }
     return result;
   }
 

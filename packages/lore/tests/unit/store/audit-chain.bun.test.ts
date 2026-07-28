@@ -401,7 +401,7 @@ describe("migration-009 (audit hash chain backfill)", () => {
     const store = new SQLiteStore(":memory:");
     const db = store.getDatabase();
 
-    expect(userVersion(db)).toBe(10);
+    expect(userVersion(db)).toBe(11);
     const cols = tableColumnNames(db, "audit");
     expect(cols).toContain("prev_hash");
     expect(cols).toContain("entry_hash");
@@ -473,7 +473,7 @@ describe("migration-009 (audit hash chain backfill)", () => {
     const store = new SQLiteStore(dbPath);
     const db = store.getDatabase();
 
-    expect(userVersion(db)).toBe(10);
+    expect(userVersion(db)).toBe(11);
     expect(tableColumnNames(db, "audit")).toContain("prev_hash");
     expect(tableColumnNames(db, "audit")).toContain("entry_hash");
 
@@ -533,7 +533,7 @@ describe("migration-009 (audit hash chain backfill)", () => {
     expect(() => {
       const secondOpen = new SQLiteStore(dbPath);
       const db = secondOpen.getDatabase();
-      expect(userVersion(db)).toBe(10);
+      expect(userVersion(db)).toBe(11);
       expect(tableColumnNames(db, "audit")).toContain("prev_hash");
       secondOpen.close();
     }).not.toThrow();

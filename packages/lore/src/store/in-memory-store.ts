@@ -38,6 +38,12 @@ import type {
   SearchHit,
   StoreFilters,
   StoreInterface,
+  TraceDenyByCheckpoint,
+  TraceEventInput,
+  TraceEventRecord,
+  TraceGateDenyEvent,
+  TraceRawSearchQuery,
+  TraceStatsWindow,
   UpdateOpts,
 } from "./store-interface.js";
 import { allocateWithBoundedRetry, computeAuditEntryHash } from "./store-shared.js";
@@ -60,6 +66,8 @@ export class InMemoryStore implements StoreInterface {
   private readonly auditChain: AuditChainEntry[] = [];
   private readonly judgments: ReviewJudgment[] = [];
   private readonly calibrationRecords: CalibrationRecord[] = [];
+  /** SPEC-102 — mirrors `trace_events`; never hash-chained, id is a plain 1-based sequence (insertion order). */
+  private readonly traceEvents: TraceEventRecord[] = [];
 
   // ── Document CRUD ─────────────────────────────────────────────────────────
 
@@ -922,6 +930,104 @@ export class InMemoryStore implements StoreInterface {
     }
 
     return ok(projected);
+  }
+
+  // ── Trace Events (SPEC-102) ─────────────────────────────────────────────
+
+  async insertTraceEvent(event: TraceEventInput): Promise<Result<void, LoreError>> {
+    this.traceEvents.push({
+      id: this.traceEvents.length + 1,
+      ...event,
+      details: event.details ?? {},
+    });
+    return ok(undefined);
+  }
+
+  async countTraceEventsByKind(window: TraceStatsWindow): Promise<Result<Record<string, number>, LoreError>> {
+    const counts: Record<string, number> = {};
+    for (const e of this.traceEvents) {
+      if (e.ts < window.since) continue;
+      counts[e.kind] = (counts[e.kind] ?? 0) + 1;
+    }
+    return ok(counts);
+  }
+
+  async countTraceDenyByCheckpoint(
+    window: TraceStatsWindow,
+  ): Promise<Result<TraceDenyByCheckpoint[], LoreError>> {
+    const buckets = new Map<string, number>();
+    for (const e of this.traceEvents) {
+      if (e.kind !== "gate_deny" || e.ts < window.since) continue;
+      const checkpoint = e.checkpoint ?? "unknown";
+      const details = e.details ?? {};
+      const layer = typeof details["layer"] === "string" ? (details["layer"] as string) : "unknown";
+      const key = `${checkpoint} ${layer}`;
+      buckets.set(key, (buckets.get(key) ?? 0) + 1);
+    }
+    return ok(
+      [...buckets.entries()].map(([key, count]) => {
+        const [checkpoint = "unknown", layer = "unknown"] = key.split(" ");
+        return { checkpoint, layer, count };
+      }),
+    );
+  }
+
+  async countTraceZeroHitSearches(window: TraceStatsWindow): Promise<Result<number, LoreError>> {
+    const count = this.traceEvents.filter(
+      (e) => e.kind === "search" && e.hit_count === 0 && e.ts >= window.since,
+    ).length;
+    return ok(count);
+  }
+
+  async countNeverReadDocs(window: TraceStatsWindow): Promise<Result<number, LoreError>> {
+    const readDocIds = new Set(
+      this.traceEvents
+        .filter((e) => e.kind === "get" && e.doc_id !== undefined && e.ts >= window.since)
+        .map((e) => e.doc_id as string),
+    );
+    let count = 0;
+    for (const doc of this.docs.values()) {
+      if (doc.deleted_at !== null) continue;
+      if (!readDocIds.has(doc.id)) count++;
+    }
+    return ok(count);
+  }
+
+  async listTraceGateDenies(window: TraceStatsWindow): Promise<Result<TraceGateDenyEvent[], LoreError>> {
+    const rows = this.traceEvents
+      .filter((e) => e.kind === "gate_deny" && e.ts >= window.since)
+      .sort((a, b) => a.ts.localeCompare(b.ts))
+      .map((e) => ({ ts: e.ts, actor: e.actor, checkpoint: e.checkpoint ?? "unknown" }));
+    return ok(rows);
+  }
+
+  async listTraceRawSearchQueries(
+    window: TraceStatsWindow,
+  ): Promise<Result<TraceRawSearchQuery[], LoreError>> {
+    const rows = this.traceEvents
+      .filter((e) => e.kind === "search" && e.ts >= window.since)
+      .sort((a, b) => b.ts.localeCompare(a.ts))
+      .map((e) => {
+        const details = e.details ?? {};
+        return {
+          ts: e.ts,
+          actor: e.actor,
+          query: typeof details["query"] === "string" ? (details["query"] as string) : "",
+        };
+      });
+    return ok(rows);
+  }
+
+  async pruneTraceEvents(cutoffIso: string, batchSize = 50_000): Promise<Result<number, LoreError>> {
+    let deleted = 0;
+    for (let i = this.traceEvents.length - 1; i >= 0 && deleted < batchSize; i--) {
+      const e = this.traceEvents[i];
+      if (e !== undefined && e.ts < cutoffIso) {
+        this.traceEvents.splice(i, 1);
+        deleted++;
+      }
+    }
+    return ok(deleted);
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────

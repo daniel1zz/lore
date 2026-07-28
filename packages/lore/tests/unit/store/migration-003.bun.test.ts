@@ -4,8 +4,8 @@
  * cleanly on a fresh DB and on an existing pre-migration-003 DB, idempotently.
  *
  * Six-dimension coverage for this file:
- *   HAPPY:      fresh DB migrates straight to the current user_version (4, once
- *               migration-004 landed — see note below) with both new tables
+ *   HAPPY:      fresh DB migrates straight to the current user_version (11, as
+ *               of migration-011 — see note below) with both new tables
  *               and their indexes present
  *   NEGATIVE:   n/a — migration SQL has no invalid-input surface (no user input)
  *   BOUNDARY:   a db already at user_version 2 (pre-migration-003) is the exact
@@ -18,11 +18,11 @@
  *
  * NOTE: this suite asserts the CURRENT `PRAGMA user_version` a fresh SQLiteStore
  * lands on, which by construction tracks whatever the newest migration constant
- * sets it to (currently 4, migration-004 — see migrations/migration-004.ts). It
+ * sets it to (currently 11, migration-011 — see migrations/migration-011.ts). It
  * is not re-scoped to "exactly migration-003's effects"; it deliberately doubles
  * as the store's "opening a brand-new DB never throws and lands on the latest
  * schema version" regression oracle. Update the literal version number here
- * when a new migration ships, same as this task did going 3 -> 4.
+ * when a new migration ships, same as every prior migration task has.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -60,7 +60,7 @@ describe("migration-003 (review_judgments + calibration_records)", () => {
     // (audit hash chain); SPEC-084 added migration-010 (docs.ordinal) — a fresh store
     // now runs every migration up to the current head (10), not just through
     // migration-003/004.
-    expect(userVersion).toBe(10);
+    expect(userVersion).toBe(11);
 
     const tableNames = db
       .query("SELECT name FROM sqlite_master WHERE type = 'table'")
@@ -135,7 +135,7 @@ describe("migration-003 (review_judgments + calibration_records)", () => {
     // added migration-007; migration-008 (CJK bigram shadow columns); SPEC-079 G3 added
     // migration-009 (audit hash chain); SPEC-084 added migration-010 (docs.ordinal),
     // now the head — see HAPPY test's comment above.
-    expect(postUpgradeVersion).toBe(10);
+    expect(postUpgradeVersion).toBe(11);
 
     const tableNames = db
       .query("SELECT name FROM sqlite_master WHERE type = 'table'")
@@ -165,7 +165,7 @@ describe("migration-003 (review_judgments + calibration_records)", () => {
       // added migration-007; migration-008; SPEC-079 G3 added migration-009 (audit hash
       // chain); SPEC-084 added migration-010 (docs.ordinal), now the head — see HAPPY
       // test's comment above.
-      expect(userVersion).toBe(10);
+      expect(userVersion).toBe(11);
       secondOpen.close();
     }).not.toThrow();
   });

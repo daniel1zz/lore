@@ -74,3 +74,4 @@ export * from "./ordinal.js";
 export * from "./archive-candidates.js";
 export * from "./memory-markers.js";
 export * from "./fs-ports.js";
+export * from "./trace.js";

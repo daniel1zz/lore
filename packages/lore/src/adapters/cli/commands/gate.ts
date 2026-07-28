@@ -641,8 +641,10 @@ async function runSpecCreateGate(
     ...(parentMarkdown !== undefined ? { parentMarkdown } : {}),
   };
 
-  console.log(checkpoint.feed(feedCtx, selectFailures(results)));
+  const failures = selectFailures(results);
+  console.log(checkpoint.feed(feedCtx, failures));
   emitGateReportIssueHint(config);
+  recordHookGateDeny(app, "spec-create", failures, undefined);
   process.exitCode = 4;
 }
 
@@ -672,6 +674,38 @@ function requireCheckpoint(cp: GateCheckpoint): CheckpointDef {
     throw new Error(`Internal error: gate checkpoint "${cp}" not registered`);
   }
   return checkpoint;
+}
+
+/**
+ * SPEC-102 D7 — fires the HOOK-layer `kind="gate_deny"` trace row for one of
+ * this file's five `isCheckpointBlocked` branches. `layer: "hook"`
+ * disambiguates from `GateEnforcer.enforce`'s own `layer: "service"` deny
+ * (the two layers see different traffic: `lore gate` PRE-EMPTS a blocked
+ * service call entirely, so recording both is deliberate, not double-counting
+ * the SAME event). A no-op when `app.traceRecorder` is absent (trace.enabled
+ * resolves false) — mirrors every other optional-DI trace call site.
+ *
+ * @param actor - Explicit actor when this checkpoint's runner already has one
+ *   (`task-claim`/`phase-claim`'s `by` param); `undefined` falls back to
+ *   `resolveActor()`'s own `--by`/$LORE_ACTOR/OS-username chain — the SAME
+ *   resolution every other actor-needing call in this file already uses.
+ */
+function recordHookGateDeny(
+  app: App,
+  checkpoint: GateCheckpoint,
+  failures: ReturnType<typeof selectFailures>,
+  targetIdOrSlug: string | undefined,
+  actor?: string,
+): void {
+  if (app.traceRecorder === undefined) return;
+  const resolvedActor = actor ?? resolveActor();
+  app.traceRecorder.recordGateDeny(
+    resolvedActor,
+    checkpoint,
+    failures.map((f) => f.reason),
+    targetIdOrSlug,
+    "hook",
+  );
 }
 
 /**
@@ -734,8 +768,10 @@ async function runPlanPromoteGate(
   const results = checkpoint.check(ctx);
 
   if (isCheckpointBlocked(results)) {
-    console.log(checkpoint.feed(ctx, selectFailures(results)));
+    const failures = selectFailures(results);
+    console.log(checkpoint.feed(ctx, failures));
     emitGateReportIssueHint(config);
+    recordHookGateDeny(app, "plan-promote", failures, planIdOrSlug);
     process.exitCode = 4;
     return;
   }
@@ -889,8 +925,10 @@ async function runTaskClaimGate(
   const results = checkpoint.check(ctx);
 
   if (isCheckpointBlocked(results)) {
-    console.log(checkpoint.feed(ctx, selectFailures(results)));
+    const failures = selectFailures(results);
+    console.log(checkpoint.feed(ctx, failures));
     emitGateReportIssueHint(config);
+    recordHookGateDeny(app, "task-claim", failures, taskIdOrSlug, by);
     process.exitCode = 4;
     return;
   }
@@ -981,8 +1019,10 @@ async function runPhaseClaimGate(
   const results = checkpoint.check(ctx);
 
   if (isCheckpointBlocked(results)) {
-    console.log(checkpoint.feed(ctx, selectFailures(results)));
+    const failures = selectFailures(results);
+    console.log(checkpoint.feed(ctx, failures));
     emitGateReportIssueHint(config);
+    recordHookGateDeny(app, "phase-claim", failures, phaseIdOrSlug, by);
     process.exitCode = 4;
     return;
   }
@@ -1073,8 +1113,10 @@ async function runSpecPromoteGate(
   const results = checkpoint.check(ctx);
 
   if (isCheckpointBlocked(results)) {
-    process.stderr.write(checkpoint.feed(ctx, selectFailures(results)));
+    const failures = selectFailures(results);
+    process.stderr.write(checkpoint.feed(ctx, failures));
     emitGateReportIssueHint(config);
+    recordHookGateDeny(app, "spec-promote", failures, specIdOrSlug);
     process.exitCode = 4;
     return;
   }

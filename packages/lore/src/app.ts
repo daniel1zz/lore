@@ -38,6 +38,8 @@ import {
   resolveVerifyRequireCommandApproval,
   resolveRequirementQuantifiableEnabled,
   resolveAttestationMinRatio,
+  resolveTraceEnabled,
+  resolveTraceRetentionDays,
   type LoreConfig,
   type VerifyEnvConfig,
   AiConfigSchema,
@@ -71,6 +73,9 @@ import { UatService } from "./service/uat-service.js";
 import { VerifyRunnerService } from "./service/verify-runner-service.js";
 import { executeVerifySpawnSpec } from "./service/verify-executor.js";
 import { GateEnforcer } from "./service/gate-enforcer.js";
+import { TraceRecorder } from "./service/trace-recorder.js";
+import { TraceStatsService } from "./service/trace-stats-service.js";
+import { pruneTraceEventsOpportunistically } from "./service/trace-retention.js";
 import { VerificationProjectionService } from "./service/verification-projection-service.js";
 import { SessionService } from "./service/session-service.js";
 import { ValidityService } from "./service/validity-service.js";
@@ -410,6 +415,43 @@ export interface App {
    */
   globalConfigService?: GlobalConfigService;
   /**
+   * TraceStatsService — read-only aggregation surface for `lore trace stats`
+   * (SPEC-102). Store-only, no telemetry, same DI shape as `AuditService`
+   * (stateless, IO-reads-only). Always constructed over `store` regardless of
+   * `trace.enabled` — a disabled corpus simply reports all-zero counts (no
+   * rows were ever written), never a missing service.
+   * Optional for the same "pre-existing hand-built App test stubs stay valid"
+   * reason as `driftCheckService`/`acService`; always wired in production.
+   * Source: SPEC-102 §Acceptance Criteria AC-TRACE-4.
+   */
+  traceStatsService?: TraceStatsService;
+  /**
+   * SPEC-102 OPTIONAL read/deny-instrumentation port — the SAME instance
+   * wired into `CorpusService`/`GateEnforcer` (service-layer deny). Exposed
+   * on `App` so the CLI adapter can fire the HOOK-layer deny trace
+   * (`kind="gate_deny"`, `layer="hook"`) from `commands/gate.ts`'s own six
+   * `isCheckpointBlocked` branches — the ONLY consumer that needs a direct
+   * reference (SPEC-102 D7: hook-layer and service-layer denies are counted
+   * separately, since `lore gate` pre-empts the service call entirely on a
+   * block). `undefined` when `trace.enabled` resolves `false`.
+   */
+  traceRecorder?: TraceRecorder;
+  /**
+   * SPEC-102 §Migration Strategy "retention prune" — fires the opportunistic,
+   * BOUNDED-BATCH trace retention prune loop WITHOUT awaiting it
+   * (fire-and-forget, mirrors `TraceRecorder`'s own contract). Bound in
+   * `createApp` to `store.pruneTraceEvents` (local-only mode) or
+   * `localTraceStore.pruneTraceEvents` (Turso mode — the SAME separate local
+   * handle `TraceRecorder` writes through, never `this.client`). Absent when
+   * `trace.enabled` resolves `false` — nothing is pruned (mirrors
+   * `traceRecorder`'s identical "absent disables the feature" shape).
+   * Called ONCE by `loader.ts`'s `loadLoreApp()` at CLI startup — MCP/HTTP
+   * adapters (long-lived processes, not a per-invocation "startup") don't call it.
+   * Optional for the same "pre-existing hand-built App test stubs stay valid"
+   * reason as `driftCheckService`/`acService`.
+   */
+  pruneTraceEventsOpportunistically?(): void;
+  /**
    * The corpus root — `dirname(dirname(dbPath))` (`dbPath` is always
    * `<repoRoot>/.lore/lore.db`), the SAME value threaded into
    * `VerifyRunnerService`'s `config.repoRoot` (SPEC-039 §2) and
@@ -490,6 +532,22 @@ export interface App {
  *   resolved value `GateEnforcer.resolveAttestationMinRatio` feeds `attestationFloor`,
  *   so the dashboard's plan Evidence-panel and the `plan-close` gate can never
  *   disagree on which floor a plan is measured against.
+ * @param traceRecorder - SPEC-102 OPTIONAL read/deny-instrumentation port —
+ *   constructed once in `createApp` (same "already-built instance" shape as
+ *   `gateEnforcer`) ONLY when `trace.enabled` resolves `true`; `undefined`
+ *   when trace recording is disabled by config. Wired into `CorpusService`
+ *   (get/search) — `gateEnforcer` above already carries its OWN reference to
+ *   the SAME instance (constructed in `createApp` before `gateEnforcer`
+ *   itself, since `GateEnforcer`'s constructor needs it too).
+ * @param surfaceBox - The SAME mutable `{current: CallerSurface}` box
+ *   `createApp` constructed `traceRecorder`'s `getSurface` closure over
+ *   (SPEC-102) — this function's `App.callerSurface` getter/setter read/write
+ *   THIS box directly (replacing the previous function-local `let
+ *   _callerSurface`) so a `TraceRecorder` built before this function runs
+ *   still observes the surface an adapter sets AFTER `createApp` returns.
+ *   Defaults to a fresh box for every pre-existing caller that doesn't pass
+ *   one (bare test constructions, `createApp` callers with trace disabled) —
+ *   behaviorally identical to the old function-local variable in that case.
  */
 function buildAppFromSqlite(
   store: SQLiteStore,
@@ -506,19 +564,19 @@ function buildAppFromSqlite(
   gateEnforcer: GateEnforcer = new GateEnforcer(undefined),
   requirementQuantifiableEnabled: boolean = true,
   attestationMinRatio: number = resolveAttestationMinRatio(undefined),
+  traceRecorder?: TraceRecorder,
+  surfaceBox: { current: CallerSurface } = { current: "cli" },
+  pruneTrigger?: () => void,
 ): App {
-  // reason: SPEC-024 §9.1 — callerSurface must be mutable so adapters can set it at startup.
-  // Using a let variable closed over by the getter/setter ensures reads always see the current
-  // value without exposing it as plain data (where external code could mistake it for an
-  // immutable snapshot). Default "cli" is the safest: AI on, unchanged from SPEC-017 behavior.
-  let _callerSurface: CallerSurface = "cli";
   const db = store.getDatabase();
   // reason: claimTtlMinutes flows into DocSummary.meta's task.claim_stale (SPEC-036 §2
   // D3) — same resolved value TaskWorkflowService below uses, one resolution path
   // (resolveClaimTtlMinutes at the bottom of this file).
   // reason: 4th arg wires GateEnforcer (retro follow-up item 8, defense-in-depth) —
   // CorpusService gates spec-create (_createImpl) and spec-promote reached via `set`.
-  const corpusService = new CorpusService(store, telemetry, claimTtlMinutes, gateEnforcer);
+  // 5th arg wires SPEC-102's OPTIONAL TraceRecorder (undefined when trace.enabled
+  // resolves false) — CorpusService.get/search fire a fire-and-forget trace row.
+  const corpusService = new CorpusService(store, telemetry, claimTtlMinutes, gateEnforcer, traceRecorder);
   const outlineService = new OutlineService(store);
   // reason: own telemetry wiring restores parity with CorpusService (D8) — TaskWorkflowService
   // never routes writes through CorpusService (cross-service calls forbidden). SPEC-025 §3 D5, D8.
@@ -708,6 +766,17 @@ function buildAppFromSqlite(
       resolveGlobalConfigPath() ?? resolveGlobalConfigWritePath(),
       store.appendAuditEntry.bind(store),
     ),
+    // reason: TraceStatsService (SPEC-102) is store-only, no telemetry, same
+    // shape as AuditService/DriftCheckService — always constructed regardless
+    // of trace.enabled (a disabled corpus just reports all-zero counts).
+    traceStatsService: new TraceStatsService(store),
+    // reason: SPEC-102 — exposes the SAME TraceRecorder instance wired into
+    // CorpusService/gateEnforcer above, so commands/gate.ts can fire the
+    // hook-layer deny trace directly (see this field's App JSDoc).
+    ...(traceRecorder !== undefined ? { traceRecorder } : {}),
+    // reason: SPEC-102 §Migration Strategy — fire-and-forget prune trigger,
+    // bound in createApp; undefined when trace.enabled resolves false.
+    ...(pruneTrigger !== undefined ? { pruneTraceEventsOpportunistically: pruneTrigger } : {}),
     // reason: SPEC-063 §Design Decisions D1 — exposed so the CLI adapter can read
     // the corpus root as `resolveVerifyExecutionRoot`'s `corpusRoot` input, the
     // SAME value already threaded into VerifyRunnerService's config.repoRoot below.
@@ -715,11 +784,14 @@ function buildAppFromSqlite(
     // reason: telemetry exposed on App so dashboard route handlers can emit source-tagged events
     // without requiring service-layer signature changes (SPEC-022 §9.6).
     telemetry,
-    // SPEC-024: callerSurface getter/setter + resolveAiDefault
-    get callerSurface(): CallerSurface { return _callerSurface; },
-    set callerSurface(s: CallerSurface) { _callerSurface = s; },
+    // SPEC-024: callerSurface getter/setter + resolveAiDefault — reads/writes
+    // `surfaceBox` directly (SPEC-102) so a `TraceRecorder` built in `createApp`
+    // BEFORE this function ran still observes the surface an adapter sets AFTER
+    // `createApp` returns (see this function's `surfaceBox` param JSDoc).
+    get callerSurface(): CallerSurface { return surfaceBox.current; },
+    set callerSurface(s: CallerSurface) { surfaceBox.current = s; },
     resolveAiDefault(explicit: boolean | undefined) {
-      return resolveAiDefault(explicit, _callerSurface, aiDefaultPerSurface);
+      return resolveAiDefault(explicit, surfaceBox.current, aiDefaultPerSurface);
     },
     close: () => { telemetry.close(); store.close(); },
   };
@@ -756,6 +828,18 @@ function buildAppFromSqlite(
  *   defense-in-depth) — see `buildAppFromSqlite`'s identical parameter JSDoc.
  * @param attestationMinRatio - `workflow.attestation.min_ratio` floor — see
  *   `buildAppFromSqlite`'s identical parameter JSDoc.
+ * @param traceRecorder - SPEC-102 OPTIONAL read/deny-instrumentation port —
+ *   see `buildAppFromSqlite`'s identical parameter JSDoc. In Turso mode this
+ *   is constructed by `createApp` over a SEPARATE local `bun:sqlite` handle
+ *   on the replica FILE (`localTraceStore`, below) — trace writes NEVER route
+ *   through `this.client` (the libsql/remote-syncing connection), mirroring
+ *   `ApiKeyStore`'s identical "separate local handle on the replica file"
+ *   precedent one field up (SPEC-102 D3).
+ * @param surfaceBox - See `buildAppFromSqlite`'s identical parameter JSDoc.
+ * @param localTraceStore - The SAME `SQLiteStore` instance `traceRecorder`'s
+ *   `insert` port is bound to (when trace is enabled) — threaded through so
+ *   `close()` can release this SECOND connection on the replica file
+ *   alongside `apiKeyDb`. `undefined` when trace is disabled (nothing to close).
  */
 function buildAppFromTurso(
   store: TursoStore,
@@ -773,16 +857,19 @@ function buildAppFromTurso(
   gateEnforcer: GateEnforcer = new GateEnforcer(undefined),
   requirementQuantifiableEnabled: boolean = true,
   attestationMinRatio: number = resolveAttestationMinRatio(undefined),
+  traceRecorder?: TraceRecorder,
+  surfaceBox: { current: CallerSurface } = { current: "cli" },
+  localTraceStore?: SQLiteStore,
+  pruneTrigger?: () => void,
 ): App {
-  // reason: SPEC-024 §9.1 — same mutable callerSurface pattern as buildAppFromSqlite.
-  let _callerSurface: CallerSurface = "cli";
   const apiKeyDb = new Database(dbPath);
   // reason: claimTtlMinutes flows into DocSummary.meta's task.claim_stale (SPEC-036 §2
   // D3) — same resolved value TaskWorkflowService below uses, one resolution path
   // (resolveClaimTtlMinutes at the bottom of this file).
   // reason: 4th arg wires GateEnforcer (retro follow-up item 8) — see buildAppFromSqlite's
-  // identical comment.
-  const corpusService = new CorpusService(store, telemetry, claimTtlMinutes, gateEnforcer);
+  // identical comment. 5th arg wires SPEC-102's OPTIONAL TraceRecorder — see
+  // buildAppFromSqlite's identical comment.
+  const corpusService = new CorpusService(store, telemetry, claimTtlMinutes, gateEnforcer, traceRecorder);
   const outlineService = new OutlineService(store);
   // reason: extracted to a local (see buildAppFromSqlite's identical comment) so
   // VerifyRunnerService can bind its recordVerifiedEvidence method below. 5th arg
@@ -944,6 +1031,20 @@ function buildAppFromTurso(
       resolveGlobalConfigPath() ?? resolveGlobalConfigWritePath(),
       store.appendAuditEntry.bind(store),
     ),
+    // reason: TraceStatsService (SPEC-102) reads from `store` (the TursoStore
+    // embedded replica, local reads) — same shape as buildAppFromSqlite's
+    // identical field. Deliberately NOT `localTraceStore`: stats reads are
+    // just as valid over the replica's local view, and this keeps ONE
+    // TraceStatsService construction shape across both branches.
+    traceStatsService: new TraceStatsService(store),
+    // reason: SPEC-102 — exposes the SAME TraceRecorder instance wired into
+    // CorpusService/gateEnforcer above, so commands/gate.ts can fire the
+    // hook-layer deny trace directly (see this field's App JSDoc).
+    ...(traceRecorder !== undefined ? { traceRecorder } : {}),
+    // reason: SPEC-102 §Migration Strategy — fire-and-forget prune trigger,
+    // bound in createApp (Turso mode: bound to localTraceStore); undefined
+    // when trace.enabled resolves false.
+    ...(pruneTrigger !== undefined ? { pruneTraceEventsOpportunistically: pruneTrigger } : {}),
     // reason: SPEC-063 §Design Decisions D1 — exposed so the CLI adapter can read
     // the corpus root as `resolveVerifyExecutionRoot`'s `corpusRoot` input, the
     // SAME value already threaded into VerifyRunnerService's config.repoRoot below.
@@ -951,13 +1052,17 @@ function buildAppFromTurso(
     // reason: telemetry exposed on App so dashboard route handlers can emit source-tagged events
     // without requiring service-layer signature changes (SPEC-022 §9.6).
     telemetry,
-    // SPEC-024: callerSurface getter/setter + resolveAiDefault
-    get callerSurface(): CallerSurface { return _callerSurface; },
-    set callerSurface(s: CallerSurface) { _callerSurface = s; },
+    // SPEC-024: callerSurface getter/setter + resolveAiDefault — see
+    // buildAppFromSqlite's identical `surfaceBox` comment.
+    get callerSurface(): CallerSurface { return surfaceBox.current; },
+    set callerSurface(s: CallerSurface) { surfaceBox.current = s; },
     resolveAiDefault(explicit: boolean | undefined) {
-      return resolveAiDefault(explicit, _callerSurface, aiDefaultPerSurface);
+      return resolveAiDefault(explicit, surfaceBox.current, aiDefaultPerSurface);
     },
-    close: () => { telemetry.close(); store.close(); apiKeyDb.close(); },
+    // reason: closes the SEPARATE local trace-write handle (SPEC-102 D3)
+    // alongside apiKeyDb/store — a leaked connection on the replica file
+    // would keep a WAL lock held past this App's lifetime.
+    close: () => { telemetry.close(); store.close(); apiKeyDb.close(); localTraceStore?.close(); },
   };
 }
 
@@ -1076,6 +1181,21 @@ export function createApp(
   // ON by default — a corpus opts a specific checkpoint OUT via config, never the
   // reverse.
 
+  // SPEC-102 — the mutable box a TraceRecorder's `getSurface` port (built
+  // BELOW, before `buildAppFromSqlite`/`buildAppFromTurso` run) reads at fire
+  // time. Shared with the built App's own `callerSurface` getter/setter (both
+  // build functions accept it as `surfaceBox`) so an adapter setting
+  // `app.callerSurface` AFTER `createApp` returns is observed by trace writes
+  // too — see `buildAppFromSqlite`'s `surfaceBox` param JSDoc for the full
+  // sequencing rationale (a TraceRecorder needs this box to exist before
+  // either build function's own local surface state does).
+  const surfaceBox: { current: CallerSurface } = { current: "cli" };
+
+  // Trace recording/pruning config (SPEC-102 §Scope) — resolved once here,
+  // read by BOTH store branches below.
+  const traceEnabled = resolveTraceEnabled(config);
+  const traceRetentionDays = resolveTraceRetentionDays(config);
+
   // No config supplied or sync section absent / disabled → local-only SQLiteStore
   if (
     config === undefined ||
@@ -1083,14 +1203,34 @@ export function createApp(
     !config.sync.enabled
   ) {
     const sqliteStore = new SQLiteStore(dbPath);
+    // reason: SPEC-102 — local-only mode has no separate replica file; trace
+    // writes route through the SAME sqliteStore every other corpus write
+    // uses. `undefined` when trace.enabled resolves false — every
+    // TraceRecorder call site (CorpusService/GateEnforcer) already treats
+    // this as "untraced", byte-identical to pre-SPEC-102 behavior.
+    const traceRecorder = traceEnabled
+      ? new TraceRecorder(sqliteStore.insertTraceEvent.bind(sqliteStore), () => surfaceBox.current)
+      : undefined;
+    // reason: SPEC-102 §Migration Strategy — fire-and-forget, never awaited
+    // (the `void` discards the returned promise deliberately; a startup
+    // prune failure must never delay or fail the CLI command that triggered
+    // it — pruneTraceEventsOpportunistically's own module invariant never throws).
+    const pruneTrigger = traceEnabled
+      ? () => { void pruneTraceEventsOpportunistically(sqliteStore.pruneTraceEvents.bind(sqliteStore), traceRetentionDays); }
+      : undefined;
     // reason: SPEC-080 G4 — `store.appendAuditEntry` already returns
     // `Promise<Result<void, LoreError>>`, exactly the `RecordGateSkip` shape
     // `GateEnforcer`'s constructor expects, so no adapter shim is needed. Every
     // bare `new GateEnforcer(config)` test construction elsewhere in this
     // codebase omits this 2nd arg and stays unwired (gate-enforcer.ts's own
     // SPEC-080 module invariant) — this is the ONLY production wiring site for
-    // the local-store branch.
-    const gateEnforcer = new GateEnforcer(config, sqliteStore.appendAuditEntry.bind(sqliteStore));
+    // the local-store branch. 3rd arg wires SPEC-102's OPTIONAL TraceRecorder
+    // — a BLOCKED enforce() fires a kind="gate_deny" trace row (layer="service").
+    const gateEnforcer = new GateEnforcer(
+      config,
+      sqliteStore.appendAuditEntry.bind(sqliteStore),
+      traceRecorder,
+    );
     return buildAppFromSqlite(
       sqliteStore,
       telemetry,
@@ -1106,6 +1246,9 @@ export function createApp(
       gateEnforcer,
       requirementQuantifiableEnabled,
       attestationMinRatio,
+      traceRecorder,
+      surfaceBox,
+      pruneTrigger,
     );
   }
 
@@ -1131,9 +1274,34 @@ export function createApp(
       authToken,
       syncInterval: config.sync.interval,
     });
+    // reason: SPEC-102 D3 — trace writes in Turso mode go through a SEPARATE
+    // local `bun:sqlite` handle on the SAME replica file `apiKeyDb`/
+    // `sessionStore` already open (`buildAppFromTurso`'s identical
+    // precedent), NEVER through `store` (the libsql/remote-syncing client) —
+    // this is what keeps trace_events local-only even though it physically
+    // lives in the same file the embedded replica syncs. `new SQLiteStore`
+    // (not a bare `Database`) is used deliberately here — it already
+    // implements the full trace insert/query/prune surface (this file's own
+    // migration chain has already run against this SAME file via `store`'s
+    // `initSchema`, so re-running it here is a no-op idempotent PRAGMA
+    // user_version check, not a duplicate migration). `undefined` when
+    // trace.enabled resolves false — nothing is opened, nothing to close.
+    const localTraceStore = traceEnabled ? new SQLiteStore(dbPath) : undefined;
+    const traceRecorder =
+      localTraceStore !== undefined
+        ? new TraceRecorder(localTraceStore.insertTraceEvent.bind(localTraceStore), () => surfaceBox.current)
+        : undefined;
+    // reason: SPEC-102 §Migration Strategy — same fire-and-forget shape as the
+    // SQLite branch, bound to the SEPARATE localTraceStore handle (never `store`).
+    const pruneTrigger =
+      localTraceStore !== undefined
+        ? () => { void pruneTraceEventsOpportunistically(localTraceStore.pruneTraceEvents.bind(localTraceStore), traceRetentionDays); }
+        : undefined;
     // reason: SPEC-080 G4 — same wiring as the SQLite branch above, bound to the
     // TursoStore instance (also implements `StoreInterface.appendAuditEntry`).
-    const gateEnforcer = new GateEnforcer(config, store.appendAuditEntry.bind(store));
+    // 3rd arg wires SPEC-102's OPTIONAL TraceRecorder — see the SQLite branch's
+    // identical comment.
+    const gateEnforcer = new GateEnforcer(config, store.appendAuditEntry.bind(store), traceRecorder);
     return {
       ok: true,
       value: buildAppFromTurso(
@@ -1152,6 +1320,10 @@ export function createApp(
         gateEnforcer,
         requirementQuantifiableEnabled,
         attestationMinRatio,
+        traceRecorder,
+        surfaceBox,
+        localTraceStore,
+        pruneTrigger,
       ),
     };
   } catch (e) {

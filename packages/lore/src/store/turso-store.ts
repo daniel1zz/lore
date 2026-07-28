@@ -35,6 +35,7 @@ import {
   MIGRATION_009_FINALIZE_SQL,
 } from "./migrations/migration-009.js";
 import { MIGRATION_010_SQL } from "./migrations/migration-010.js";
+import { MIGRATION_011_SQL } from "./migrations/migration-011.js";
 import type {
   AuditEntry,
   CalibrationRecord,
@@ -66,6 +67,11 @@ import type {
   SearchHit,
   StoreFilters,
   StoreInterface,
+  TraceDenyByCheckpoint,
+  TraceEventInput,
+  TraceGateDenyEvent,
+  TraceRawSearchQuery,
+  TraceStatsWindow,
   UpdateOpts,
 } from "./store-interface.js";
 import {
@@ -463,6 +469,21 @@ export class TursoStore implements StoreInterface {
         // `executeMultiple` call is sufficient, unlike migrations 008/009's
         // interactive-transaction three-phase sequences above.
         await this.client.executeMultiple(MIGRATION_010_SQL);
+      }
+
+      if (currentVersion < 11) {
+        // reason: migration-011 (trace_events + its four indexes, SPEC-102)
+        // is pure additive `CREATE TABLE/INDEX IF NOT EXISTS` — mirrors
+        // migration-001..003/010's single self-contained `executeMultiple`
+        // shape, no interactive transaction needed. Note: TursoStore's own
+        // remote/replica connection is NEVER where trace writes land
+        // (SPEC-102 D3) — `app.ts`'s composition root opens a SEPARATE local
+        // `bun:sqlite` handle on this store's replica FILE for trace reads/
+        // writes, so this table exists locally on the replica but this
+        // migration path (running against `this.client`) applying it here
+        // too is harmless idempotent schema parity, never a write path any
+        // TraceRecorder actually uses.
+        await this.client.executeMultiple(MIGRATION_011_SQL);
       }
     })();
 
@@ -2011,6 +2032,160 @@ export class TursoStore implements StoreInterface {
       await this.ensureReady();
       const rs = await this.client.execute("SELECT * FROM audit ORDER BY id ASC");
       return ok(rs.rows.map((row) => rowToAuditChainEntry(libsqlRowToAuditChainRow(row))));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  // ── Trace Events (SPEC-102) ──────────────────────────────────────────────
+  // reason: local-only by design (D3) — this class's `trace_events` methods
+  // exist for StoreInterface conformance/tests; production trace writes route
+  // through a SEPARATE local bun:sqlite handle on the replica file (`app.ts`'s
+  // composition root, ApiKeyStore precedent), never through `this.client`.
+  // `trace_events` is absent from `sync-push.ts`'s REPLICATED_TABLES either way.
+
+  async insertTraceEvent(event: TraceEventInput): Promise<Result<void, LoreError>> {
+    try {
+      await this.ensureReady();
+      await this.client.execute({
+        sql: `INSERT INTO trace_events (ts, actor, surface, session_id, kind, doc_id, checkpoint, hit_count, details)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          event.ts,
+          event.actor,
+          event.surface,
+          event.session_id,
+          event.kind,
+          event.doc_id ?? null,
+          event.checkpoint ?? null,
+          event.hit_count ?? null,
+          JSON.stringify(event.details ?? {}),
+        ] as InValue[],
+      });
+      return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async countTraceEventsByKind(window: TraceStatsWindow): Promise<Result<Record<string, number>, LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute({
+        sql: "SELECT kind, COUNT(*) as count FROM trace_events WHERE ts >= ? GROUP BY kind",
+        args: [window.since],
+      });
+      const counts: Record<string, number> = {};
+      for (const row of rs.rows) counts[rowStr(row, "kind")] = rowNum(row, "count");
+      return ok(counts);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async countTraceDenyByCheckpoint(
+    window: TraceStatsWindow,
+  ): Promise<Result<TraceDenyByCheckpoint[], LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute({
+        sql: `SELECT checkpoint, json_extract(details, '$.layer') as layer, COUNT(*) as count
+              FROM trace_events
+              WHERE kind = 'gate_deny' AND ts >= ?
+              GROUP BY checkpoint, layer`,
+        args: [window.since],
+      });
+      return ok(
+        rs.rows.map((row) => ({
+          checkpoint: rowStrOrNull(row, "checkpoint") ?? "unknown",
+          layer: rowStrOrNull(row, "layer") ?? "unknown",
+          count: rowNum(row, "count"),
+        })),
+      );
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async countTraceZeroHitSearches(window: TraceStatsWindow): Promise<Result<number, LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute({
+        sql: "SELECT COUNT(*) as count FROM trace_events WHERE kind = 'search' AND hit_count = 0 AND ts >= ?",
+        args: [window.since],
+      });
+      return ok(rs.rows[0] ? rowNum(rs.rows[0], "count") : 0);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async countNeverReadDocs(window: TraceStatsWindow): Promise<Result<number, LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute({
+        sql: `SELECT COUNT(*) as count FROM docs
+              WHERE deleted_at IS NULL
+              AND id NOT IN (
+                SELECT DISTINCT doc_id FROM trace_events
+                WHERE kind = 'get' AND doc_id IS NOT NULL AND ts >= ?
+              )`,
+        args: [window.since],
+      });
+      return ok(rs.rows[0] ? rowNum(rs.rows[0], "count") : 0);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async listTraceGateDenies(window: TraceStatsWindow): Promise<Result<TraceGateDenyEvent[], LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute({
+        sql: "SELECT ts, actor, checkpoint FROM trace_events WHERE kind = 'gate_deny' AND ts >= ? ORDER BY ts ASC",
+        args: [window.since],
+      });
+      return ok(
+        rs.rows.map((row) => ({
+          ts: rowStr(row, "ts"),
+          actor: rowStr(row, "actor"),
+          checkpoint: rowStrOrNull(row, "checkpoint") ?? "unknown",
+        })),
+      );
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async listTraceRawSearchQueries(
+    window: TraceStatsWindow,
+  ): Promise<Result<TraceRawSearchQuery[], LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute({
+        sql: "SELECT ts, actor, details FROM trace_events WHERE kind = 'search' AND ts >= ? ORDER BY ts DESC",
+        args: [window.since],
+      });
+      return ok(
+        rs.rows.map((row) => ({
+          ts: rowStr(row, "ts"),
+          actor: rowStr(row, "actor"),
+          query: parseJson<{ query?: string }>(rowStr(row, "details") || "{}", {}).query ?? "",
+        })),
+      );
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async pruneTraceEvents(cutoffIso: string, batchSize = 50_000): Promise<Result<number, LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute({
+        sql: "DELETE FROM trace_events WHERE id IN (SELECT id FROM trace_events WHERE ts < ? LIMIT ?)",
+        args: [cutoffIso, batchSize],
+      });
+      return ok(Number(rs.rowsAffected));
     } catch (e) {
       return wrapStoreError(e);
     }
