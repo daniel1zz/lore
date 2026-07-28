@@ -41,6 +41,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { assertFreshBinary } from "./helpers/assert-fresh-binary";
+import { saveConfig } from "@lore/core/node";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -201,6 +202,21 @@ describe("AC-P2-8: authoring is free, every COMMIT transition gates on real upst
     expect(taskBlocked.stdout).toContain("UPSTREAM_NOT_APPROVED");
 
     // -- 4. STATE: add ≥1 AC, then approve the spec --
+    // SPEC-103 §Mechanisms M2 — `review-judgment` is a SEPARATE, ADDITIVE checkpoint on
+    // `ReviewService.approve` for spec/adr docs (default `judgment_required_types:
+    // ["spec","adr"]`) this fixture predates. The `lore approve` call below exercises
+    // the P2 commit-gate walk (plan-promote/task-claim), not M2's own review-judgment
+    // semantics, so disable M2 here — mirrors `gate-hooks.bun.test.ts`'s and
+    // `gate-spec-promote.bun.test.ts`'s `judgment_required_types: []` precedent. Scoped
+    // to THIS test only (not `beforeEach`): the sibling BOUNDARY test below appends a
+    // second raw `workflow:` block via `disableGateInConfig`, and YAML rejects duplicate
+    // top-level mapping keys — writing this via `saveConfig` in `beforeEach` would break
+    // that test's config file.
+    saveConfig(tmpDir, {
+      project: { name: "p2-e2e-closed-loop-test", author: "tester" },
+      workflow: { review: { judgment_required_types: [] } },
+    } as never);
+
     const acResult = runLore(
       ["ac", "add", specSlug, "AC-P2-8-1", "--statement", "The gated behaviour works as declared.", "--mode", "human"],
       tmpDir,

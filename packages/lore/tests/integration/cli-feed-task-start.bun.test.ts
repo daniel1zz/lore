@@ -33,6 +33,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import yaml from "yaml";
 import { assertFreshBinary } from "./helpers/assert-fresh-binary";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -95,11 +96,25 @@ function parseSlug(stdout: string): string {
   return slug;
 }
 
-/** Appends a `workflow.<key path>` override to `.lore/config.yaml`. */
+/**
+ * Merges a `workflow: {...}` YAML fragment into `.lore/config.yaml`, one
+ * `workflow.*` sub-key at a time (shallow merge over the top-level `workflow`
+ * map). Parse-merge-rewrite rather than a raw string append: a second
+ * top-level `workflow:` block appended as text produces a DUPLICATE mapping
+ * key, which `js-yaml`/the `yaml` package rejects outright on load — this
+ * function stays call-composable (createFullChain's M2 review-judgment
+ * override below, plus this file's own STATE-test task_feed override, both
+ * land in the SAME file without colliding).
+ */
 function appendWorkflowConfig(dir: string, yamlFragment: string): void {
   const cfgPath = join(dir, ".lore", "config.yaml");
-  const existing = readFileSync(cfgPath, "utf8");
-  writeFileSync(cfgPath, existing + yamlFragment, "utf8");
+  const existing = yaml.parse(readFileSync(cfgPath, "utf8")) as Record<string, unknown>;
+  const fragment = yaml.parse(yamlFragment) as { workflow?: Record<string, unknown> };
+  const mergedWorkflow = {
+    ...(existing["workflow"] as Record<string, unknown> | undefined),
+    ...fragment.workflow,
+  };
+  writeFileSync(cfgPath, yaml.stringify({ ...existing, workflow: mergedWorkflow }), "utf8");
 }
 
 /** Creates a prd -> spec (1 declared script-mode AC, approved) -> plan -> task chain, with anchors + evidence + a fresh claim. */
@@ -151,6 +166,16 @@ function createFullChain(dir: string): {
     dir,
   );
   expect(acResult.exitCode).toBe(0);
+
+  // SPEC-103 §Mechanisms M2 — `review-judgment` is a SEPARATE, ADDITIVE
+  // checkpoint on `ReviewService.approve` for spec/adr docs (default
+  // `judgment_required_types: ["spec","adr"]`) this fixture predates. The
+  // spec approve below exists purely to make this suite's task-start pack
+  // reachable end to end, not to exercise M2's own review-judgment
+  // semantics, so disable M2 here — mirrors `gate-hooks.bun.test.ts`'s /
+  // `gate-spec-promote.bun.test.ts`'s `judgment_required_types: []`
+  // precedent.
+  appendWorkflowConfig(dir, "\nworkflow:\n  review:\n    judgment_required_types: []\n");
 
   const approveResult = runLore(["approve", specSlug], dir);
   expect(approveResult.exitCode).toBe(0);

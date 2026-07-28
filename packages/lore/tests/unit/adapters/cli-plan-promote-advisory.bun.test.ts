@@ -40,6 +40,7 @@ import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { assertFreshBinary } from "../../integration/helpers/assert-fresh-binary";
+import { saveConfig } from "@lore/core/node";
 
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root (5 levels up).
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -182,6 +183,19 @@ describe("lore approve <plan-under-reachable-spec> — no advisory (AC-VRW-5b)",
       tmpDir,
     );
     expect(acResult.exitCode).toBe(0);
+
+    // SPEC-103 §Mechanisms M2 — `review-judgment` is a SEPARATE, ADDITIVE
+    // checkpoint on `ReviewService.approve` for spec/adr docs (default
+    // `judgment_required_types: ["spec","adr"]`) this fixture predates. The
+    // spec approve below exists purely to make the ancestor spec REACHABLE
+    // for the plan-promote advisory this suite actually tests (AC-VRW-5b),
+    // not to exercise M2's own review-judgment semantics, so disable M2 here
+    // — mirrors `gate-hooks.bun.test.ts`'s / `gate-spec-promote.bun.test.ts`'s
+    // `judgment_required_types: []` precedent.
+    saveConfig(tmpDir, {
+      project: { name: "cli-plan-promote-advisory-test", author: "tester" },
+      workflow: { review: { judgment_required_types: [] } },
+    } as never);
 
     const specApprove = runLore(["approve", specSlug], tmpDir);
     expect(specApprove.exitCode).toBe(0);
