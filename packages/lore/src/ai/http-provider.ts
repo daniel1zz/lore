@@ -5,7 +5,9 @@
  *
  * Public surface:
  *   - ResolvedHttpConfig — AiHttpConfig with headers values already substituted from env
- *   - HttpAIProvider — class implementing AIProvider via fetch() + AbortController
+ *   - HttpAIProvider — class implementing AIProvider via fetch() + AbortController;
+ *     exposes a readonly `modelId` (the configured, resolved model id) satisfying the
+ *     `ModelAwareProvider` structural capability declared in `../service/ai-provider-service.ts`
  *
  * Invariants:
  *   - All ${ENV_VAR} patterns in headers are resolved BEFORE the constructor is called;
@@ -16,10 +18,16 @@
  *   - Response body is validated via aiHttpResponseSchema.safeParse() before extraction;
  *     schema mismatch → AI_PROVIDER_ERROR (not a thrown ZodError)
  *   - Token/secret values from resolved headers MUST NOT appear in error messages (D-004)
+ *   - `modelId` is a REAL, resolved model id (`cfg.model`, validated non-empty by
+ *     `AiHttpConfigSchema.min(1).default("claude-opus-4-8")`) — never the registry `name`.
+ *     This is what lets `AIProviderService._resolveAiProvenance` stamp `ai_provenance.model`
+ *     with a real value instead of omitting it entirely when this provider is active
+ *     (SPEC-103 AC-TIER-10, task-t4-give-modelawareprovider-its-real-implementor).
  *
  * Side-effect class: IO (fetch(), AbortController, performance.now())
  *
- * Source: SPEC-020 §9.3, §9.4, §9.5 (AC-HTTP-4 through AC-HTTP-8, AC-HTTP-CORE-1)
+ * Source: SPEC-020 §9.3, §9.4, §9.5 (AC-HTTP-4 through AC-HTTP-8, AC-HTTP-CORE-1);
+ *   SPEC-103 AC-TIER-10 (modelId)
  */
 
 import { ok, err, aiHttpResponseSchema } from "@lore/core";
@@ -60,8 +68,27 @@ export type ResolvedHttpConfig = AiHttpConfig;
  * const provider = new HttpAIProvider("http", resolvedConfig);
  * const result = await provider.generate({ prompt: "Write a PRD…", doc_type: "prd", title: "X" });
  * if (result.ok) console.log(result.value.content);
+ * provider.modelId; // → resolvedConfig.model, e.g. "claude-opus-4-8"
  */
 export class HttpAIProvider implements AIProvider {
+  /**
+   * The REAL, resolved model id sent as `model` in every request body — a copy of
+   * `cfg.model` at construction time, never mutated afterward. Always a non-empty string:
+   * `AiHttpConfigSchema` validates `model` as `z.string().min(1).default("claude-opus-4-8")`
+   * before this constructor ever runs.
+   *
+   * Public and readonly (rather than a getter over the private `cfg`) so this satisfies the
+   * `ModelAwareProvider` structural capability (`../service/ai-provider-service.ts`) via plain
+   * property access — `AIProviderService._resolveAiProvenance` reads it off any active
+   * provider that happens to expose it, with no HttpAIProvider-specific branch required.
+   *
+   * @invariant Deliberately NOT added on `ClaudeCliProvider` (shells out to `claude -p`; the
+   *   CLI binary's served model is genuinely unobservable from here) or `InMemoryAIProvider`
+   *   (test double — a fabricated value would recreate the dishonest-tuple defect this
+   *   capability exists to remove). Omission on those two providers is correct, not a gap.
+   */
+  public readonly modelId: string;
+
   constructor(
     /** Registry key — returned in GenerateOutput.provider_name */
     public readonly name: string,
@@ -70,7 +97,9 @@ export class HttpAIProvider implements AIProvider {
      * strings by buildProviderRegistry before this constructor is called (AC-HTTP-3).
      */
     private readonly cfg: ResolvedHttpConfig,
-  ) {}
+  ) {
+    this.modelId = cfg.model;
+  }
 
   /**
    * POST the prompt to the configured Anthropic Messages endpoint.
