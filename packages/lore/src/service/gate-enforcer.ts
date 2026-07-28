@@ -88,6 +88,7 @@ import { resolveActorWithSource } from "@lore/core/node";
 import {
   checkpointRegistry,
   isCheckpointBlocked,
+  planPromoteReachabilityAdvisory,
   selectFailures,
   type GateCheckpoint,
   type GateContext,
@@ -321,6 +322,41 @@ export class GateEnforcer {
       message: `Gate "${checkpoint}" blocked: ${reasons.join(", ")}\n\n${feedText}`,
       value: reasons,
     });
+  }
+
+  /**
+   * `plan-promote` EARLY-WARNING reachability advisory lines for `ctx`
+   * (spec-verify-reachability-plan-promote-early-warning §Scope M1) — a SEPARATE
+   * call from `enforce("plan-promote", ctx)`, never folded into it. Writer
+   * (`checkpoint-registry.ts`'s `planPromoteReachabilityAdvisory`) existed with
+   * unit coverage but ZERO production consumer before this method — a post-merge
+   * live probe found `dist/lore approve <plan-under-prd>` printing nothing. This
+   * is the wiring: `ReviewService.enforceApprovalGate` calls this ALONGSIDE
+   * `enforce()`, never in place of it, so the two can never disagree (they share
+   * the identical `ctx`) and this call can never influence `enforce()`'s verdict
+   * (D1 — advisory NEVER changes the outcome, mirrors the SPEC-080 G4
+   * `gate_skipped` audit trail this class already carries as a non-blocking
+   * side channel).
+   *
+   * @param ctx - The SAME `GateContext` the caller built for
+   *   `enforce("plan-promote", ctx)` — reads only `hasSpecParent`/
+   *   `parentSpecScriptAcCount`/`targetIdOrSlug`, ignores every other field.
+   * @returns `[]` when the plan is `lore verify`-reachable (nothing to warn
+   *   about); a single-element array with the advisory text otherwise. Never
+   *   consults `this.config`/`isEnabled` itself — a caller that wants "no
+   *   checkpoint, no advisory" skips calling this at all when
+   *   `isEnabled("plan-promote")` is `false` (mirrors `enforce()`'s own
+   *   config-disabled early return never running `checkpointDef.check`).
+   * @example
+   * enforcer.planPromoteReachabilityAdvisories({ hasSpecParent: false });
+   *   // => ["ADVISORY (does not block this promote): ..."]
+   * @example
+   * enforcer.planPromoteReachabilityAdvisories({ hasSpecParent: true, parentSpecScriptAcCount: 2 });
+   *   // => []
+   */
+  planPromoteReachabilityAdvisories(ctx: GateContext): readonly string[] {
+    const advisory = planPromoteReachabilityAdvisory(ctx);
+    return advisory === null ? [] : [advisory];
   }
 
   /**

@@ -67,6 +67,17 @@ export default defineCommand({
 
       const doc = result.value;
 
+      // reason: spec-verify-reachability-plan-promote-early-warning §Scope M1
+      // — the `plan-promote` reachability EARLY-WARNING advisory, rendered to
+      // stderr, NEVER to stdout/exit code (D1: advisory never changes the
+      // outcome — this doc is already approved by the time this runs, exit
+      // stays 0 regardless of whether any advisory lines print). Absent field
+      // (the common case: non-plan approval, reachable plan, or no advisory
+      // dependency wired) prints nothing at all.
+      for (const advisory of doc.reachability_advisories ?? []) {
+        process.stderr.write(`${advisory}\n`);
+      }
+
       // reason: ReviewService.approve() bumps doc.version by 1 as part of the
       // draft → approved transition — the version the human was reviewing
       // (and that a judgment would be pinned to) is one less than the
