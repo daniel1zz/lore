@@ -84,6 +84,51 @@ function projectStateErrorCode(state: MountEntry["state"]): string {
   return `PROJECT_${state.toUpperCase().replace(/-/g, "_")}`;
 }
 
+/** `GET /api/health`'s `dashboard` field shape (Observability section, spec-dashboard-
+ * production-packaging-one-command-lore-dashboard: "`dashboard: { embedded, digest,
+ * builtAt, skipped? }`"). `exactOptionalPropertyTypes` means `digest`/`builtAt`/`skipped`
+ * must be OMITTED, never assigned `undefined`, when `embedded` is `false` — see
+ * {@link resolveDashboardHealthStamp}. */
+interface DashboardHealthStamp {
+  embedded: boolean;
+  digest?: string;
+  builtAt?: string;
+  skipped?: boolean;
+}
+
+/**
+ * Resolve the DD-1 dashboard build stamp for `GET /api/health` (Observability section,
+ * AC-F5A-1/AC-F5A-8). `config.dashboard` is `HttpConfig.dashboard` — `undefined` for a
+ * server instance with dashboard serving disabled entirely (plain `lore serve`,
+ * `--dev`), which this function treats identically to "configured but the DD-1
+ * loader/fixture currently reports assets unavailable" (a fresh clone before `bun run
+ * build`): both collapse to `{ embedded: false }`, NEVER a fabricated `digest`/`builtAt`
+ * (Failure Modes table: "Source-run packaged mode without built assets" must never
+ * silently fake freshness).
+ *
+ * @param dashboard - `HttpConfig.dashboard`, or `undefined` when this server instance
+ *   has dashboard serving disabled.
+ * @returns Never rejects — `DashboardServingConfig.assets()` is contractually always
+ *   resolved (`static-serving.ts`'s own `DashboardAssetsResult` never a thrown error), so
+ *   this function trusts that contract rather than adding a redundant try/catch.
+ */
+async function resolveDashboardHealthStamp(
+  dashboard: DashboardServingConfig | undefined,
+): Promise<DashboardHealthStamp> {
+  if (dashboard === undefined) return { embedded: false };
+
+  const assetsResult = await dashboard.assets();
+  if (!assetsResult.available) return { embedded: false };
+
+  const { digest, builtAt, skipped } = assetsResult.manifest.stamp;
+  return {
+    embedded: true,
+    digest,
+    builtAt,
+    ...(skipped === true ? { skipped: true } : {}),
+  };
+}
+
 /**
  * Resolve + authenticate + delegate ONE project-addressed request (SPEC-078 D4).
  *
@@ -190,6 +235,8 @@ async function dispatchProjectRequest(
  * Start the Lore HTTP server.
  * Mounts:
  *   GET  /health                       — unauthenticated health check
+ *   GET  /api/health                   — unauthenticated health check + DD-1 dashboard
+ *                                          build stamp (Observability section)
  *   POST /api/auth/local-bootstrap     — open route; own auth (X-Lore-Token + Origin)
  *   *    /api/*                        — API routes (cookie OR bearer token required)
  *   GET  /auth/bootstrap               — packaged-mode nonce redemption (DD-2), only when
@@ -273,6 +320,23 @@ export function startHttpServer(app: App, config: HttpConfig = {}): ReturnType<t
 
       // All /api/* routes require authentication, EXCEPT /api/auth/local-bootstrap which has own auth.
       if (url.pathname.startsWith("/api/")) {
+        // reason: GET /api/health is a second, /api-namespaced health probe (Observability
+        // section) that ALSO carries the DD-1 dashboard build stamp — unlike the top-level
+        // /health above (a pre-existing, deliberately minimal liveness probe, untouched by
+        // this task), this route reports whether the embedded dashboard bundle is available
+        // and, if so, its freshness digest. Runs BEFORE the bearer/cookie auth gate below
+        // (like local-bootstrap) — a health probe must never itself require a session.
+        if (req.method === "GET" && url.pathname === "/api/health") {
+          const dashboard = await resolveDashboardHealthStamp(config.dashboard);
+          return applyCorsOrigin(
+            new Response(JSON.stringify({ ok: true, status: "healthy", dashboard }), {
+              headers: { "Content-Type": "application/json" },
+            }),
+            origin,
+            allowedOrigins,
+          );
+        }
+
         // reason: POST /api/auth/local-bootstrap bypasses authenticateRequest — it uses X-Lore-Token
         // + Origin allowlist for its own auth. It must run BEFORE the bearer/cookie gate to avoid
         // a chicken-and-egg deadlock (no session yet → no auth → can't bootstrap). SPEC-016 §3.2.

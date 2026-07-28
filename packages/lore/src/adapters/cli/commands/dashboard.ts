@@ -33,12 +33,22 @@
  *     this command blocks on shutdown — a machine-readable marker other tooling (this
  *     task's own RED suite; a future orchestrator) can scan for without racing the browser
  *     launch.
- *   - Packaged mode never calls `ensureLocalApiKey`: DD-2 replaced the injected
- *     `VITE_LORE_BOOTSTRAP_TOKEN` flow with a one-time nonce redeemed straight into a
- *     `lore_sid` cookie session — no bearer key is minted or read on this path. `--dev`
- *     keeps the pre-existing bootstrap-key flow byte-unchanged (`runDevMode` still calls
- *     `ensureLocalApiKey` and injects the raw key into the Vite child's env), which is why
- *     the helper stays exported from this module.
+ *   - Packaged mode DOES call `ensureLocalApiKey` (task-skill-implement-f5a-fix-packaged-
+ *     mode-session-auth-add-api, GAP-1 fix) — but ONLY for its side effect of ensuring
+ *     the machine-scope "dashboard-local" `api_keys` ROW exists, never to read or serve
+ *     the raw key it returns. Without that row, `SessionStore.resolve()`'s `INNER JOIN
+ *     api_keys ... WHERE revoked_at IS NULL` (sessions.ts) finds nothing for ANY session
+ *     minted by `GET /auth/bootstrap`, so every subsequent `/api/*` request from the
+ *     freshly "authenticated" browser 401s — the packaged UI loaded as an empty shell
+ *     reading no data. This does NOT reopen DD-2's rejected request-time-injection
+ *     design: DD-2's invariant is that the key is never SERVED over HTTP / never
+ *     embedded in the built artifact — not that it never exists. The key already existed
+ *     in `--dev` mode; this fix just makes packaged mode provision the same row (and
+ *     reuse the same `<baseDir>/local-key` cache file) without ever reading its value
+ *     back out. `--dev` keeps the pre-existing bootstrap-key flow byte-unchanged
+ *     (`runDevMode` still calls `ensureLocalApiKey` AND injects the raw key into the
+ *     Vite child's env — packaged mode never does the injection half), which is why the
+ *     helper stays exported from this module.
  *   - Packaged mode's Origin allowlist (DD-3) is API-origin-only — `localhost`/`127.0.0.1`
  *     at `apiPort`, computed inline (NOT `buildAllowedOrigins`, which always also includes
  *     a dashboard-port pair — irrelevant and misleading in a single-origin topology).
@@ -279,6 +289,13 @@ async function runPackagedMode(args: {
 
   const { app } = loadLoreApp();
   const machineAuth = createMachineAuthStores();
+
+  // GAP-1 fix (see this file's header): ensure the machine-scope "dashboard-local"
+  // api_keys ROW exists before any nonce is minted, so a session `GET /auth/bootstrap`
+  // creates later can actually resolve. The raw key this returns is intentionally
+  // discarded — packaged mode's nonce flow never reads or serves it (DD-2 unchanged).
+  await ensureLocalApiKey(machineAuth.apiKeyStore, machineAuth.baseDir);
+
   const mountRegistry = await buildMountRegistry();
 
   // DD-3: packaged mode is single-origin — the api origin only, never a dashboard-port
