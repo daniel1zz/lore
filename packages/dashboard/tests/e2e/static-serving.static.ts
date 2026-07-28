@@ -43,7 +43,8 @@
  */
 
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -139,6 +140,65 @@ function computeFreshDashboardSourceDigest(): string {
   return sha256Hex(Buffer.from(joined, "utf8"));
 }
 
+// ─── Real-artifact secret-free scan (AC-F5A-3) ────────────────────────────────────────
+//
+// `packages/lore/tests/integration/static-serving.bun.test.ts`'s "secret-free" describe
+// block only ever serves a FIXTURE manifest (`writeFixtureAssets` writes two throwaway
+// files under an `mkdtemp` dir, never `packages/dashboard/dist/**`) — so "the built
+// artifact is secret-free" has never actually been checked against what `bun run build`
+// really produces. This section adds that missing real-artifact oracle: a grep-style scan
+// over `packages/dashboard/dist/**` (the harness's own fresh build — `global-setup-
+// static.ts` step 1 runs `bun run build` before this suite's server is spawned) for the
+// two markers AC-F5A-3 names, PLUS a live-server check over actual HTTP response bodies.
+//
+// Two independently-derived patterns — NOT the vacuous "does the file contain the bare
+// substring __LORE_BOOTSTRAP_TOKEN__" check, which would forever false-positive on this
+// codebase's own by-design shared source: `packages/dashboard/src/lib/bootstrap.ts`
+// (`window.__LORE_BOOTSTRAP_TOKEN__` READ access + `delete`) compiles into the SAME dist
+// bundle in packaged mode because DD-2 keeps `packages/dashboard/src/**` byte-identical
+// across the `--dev`/packaged topologies ("SPA changes: zero" — this spec's own DD-2
+// text; confirmed empirically: `grep -o '__LORE_BOOTSTRAP_TOKEN__.\{20\}'
+// packages/dashboard/dist/assets/*.js` after a real `bun run build` shows only bare
+// property reads/`delete`, never an assignment). What AC-F5A-3 and this spec's STRIDE
+// row ("built artifact carries no token mechanism") actually forbid is the INJECTED
+// mechanism — the dev-only vite plugin (`vite.config.ts`'s `loreBootstrapTokenPlugin`,
+// `apply: "serve"` so it never runs during `vite build`) writes exactly
+// `window.__LORE_BOOTSTRAP_TOKEN__=` immediately followed by a `JSON.stringify`'d (hence
+// double-quoted) token value — that assignment shape is the actual secret-carrying
+// mechanism, and is what this pattern targets.
+const INJECTED_BOOTSTRAP_TOKEN_PATTERN = /__LORE_BOOTSTRAP_TOKEN__\s*=\s*"/;
+
+// Machine-scope local-key format, mirrors `packages/lore/src/adapters/http/auth.ts`'s
+// `generateApiKey()` verbatim (KEY_PREFIX = "lore_ak_" + 64 lowercase hex chars from 32
+// random bytes) — grep-verified against that file rather than imported, for the same
+// "independent oracle" reason `computeFreshDashboardSourceDigest` above reimplements
+// rather than imports its production counterpart: a format-based pattern also catches
+// THIS run's own real machine key if it were ever echoed (a value-equality check against
+// a key minted in an unrelated throwaway store would not — this suite has no access to
+// `global-setup-static.ts`'s private `stateDir` mkdtemp path, by design of this file's
+// read-only anchor, so a format oracle is both the only available and the more general
+// option).
+const LOCAL_KEY_PATTERN = /lore_ak_[0-9a-f]{64}/;
+
+interface SecretMarkerHit {
+  file: string;
+  marker: "bootstrap-token" | "local-key";
+}
+
+/** Scans every regular file under `rootDir` (via `walkFilesRelative`) for either secret
+ * marker pattern. Returns every hit (empty array = clean). Used both against the real
+ * `dist/` (expected clean) and against a throwaway negative-control copy (expected NOT
+ * clean — see "packaged serve"'s real-artifact test below). */
+function scanTreeForSecretMarkers(rootDir: string): SecretMarkerHit[] {
+  const hits: SecretMarkerHit[] = [];
+  for (const rel of walkFilesRelative(rootDir)) {
+    const content = readFileSync(join(rootDir, rel), "utf8");
+    if (INJECTED_BOOTSTRAP_TOKEN_PATTERN.test(content)) hits.push({ file: rel, marker: "bootstrap-token" });
+    if (LOCAL_KEY_PATTERN.test(content)) hits.push({ file: rel, marker: "local-key" });
+  }
+  return hits;
+}
+
 // ─── (a) "packaged serve" — AC-F5A-1 ───────────────────────────────────────────────
 
 test.describe("packaged serve", () => {
@@ -199,6 +259,79 @@ test.describe("packaged serve", () => {
       // also degrades silently here; the port probe above remains authoritative.
       void err;
     }
+  });
+
+  // Real-artifact secret-free oracle (AC-F5A-3) — see this file's "Real-artifact
+  // secret-free scan" section header for why the two patterns are shaped the way they
+  // are, and why this is the FIRST run of this suite to grep the real `dist/**` rather
+  // than a fixture manifest.
+  test("real built dist and live server responses carry no bootstrap-token injection or local-key material", async ({
+    request,
+  }) => {
+    const distDir = join(DASHBOARD_ROOT, "dist");
+    if (!existsSync(distDir)) {
+      throw new Error(
+        `${distDir} does not exist — this suite's own globalSetup runs 'bun run build' ` +
+          `before spawning the server, so a missing dist/ here means that step silently ` +
+          `failed to produce output.`,
+      );
+    }
+
+    // (1) Real dist/** — expected CLEAN. This is the actual shipped artifact, not a
+    // fixture: the harness's own fresh 'bun run build' (global-setup-static.ts step 1).
+    const realHits = scanTreeForSecretMarkers(distDir);
+    expect(realHits, `secret marker(s) found in the real built dist:\n${JSON.stringify(realHits, null, 2)}`).toEqual(
+      [],
+    );
+
+    // (2) Negative control — proves the matcher above is not vacuous. A scan over a
+    // fixed set of files that can NEVER find anything is worthless (this repo's own
+    // documented false-oracle history — see root CLAUDE.md's "contiguous-substring
+    // assumption" lesson). Operates on a throwaway `mkdtemp` COPY of dist, never the
+    // real dist directory, and the synthetic values below are format-conformant filler
+    // (never a real minted key / real token) injected into a brand-new file inside that
+    // copy — nothing here is written back into `packages/dashboard/dist`.
+    const negControlDir = mkdtempSync(join(tmpdir(), "lore-e2e-static-dist-negctrl-"));
+    try {
+      cpSync(distDir, negControlDir, { recursive: true });
+      const SYNTHETIC_LOCAL_KEY = `lore_ak_${"0".repeat(64)}`; // format-conformant filler, not a real key
+      writeFileSync(
+        join(negControlDir, "__negative-control-injected.js"),
+        `window.__LORE_BOOTSTRAP_TOKEN__="synthetic-negative-control-value";\n` +
+          `const leaked = "${SYNTHETIC_LOCAL_KEY}";\n`,
+        "utf8",
+      );
+      const negControlHits = scanTreeForSecretMarkers(negControlDir);
+      expect(
+        negControlHits.some((h) => h.marker === "bootstrap-token"),
+        "negative control: matcher must flag the synthetic injected bootstrap-token " +
+          "assignment it was just fed — a scan that can never fail is worthless",
+      ).toBe(true);
+      expect(
+        negControlHits.some((h) => h.marker === "local-key"),
+        "negative control: matcher must flag the synthetic local-key-shaped string it " +
+          "was just fed — a scan that can never fail is worthless",
+      ).toBe(true);
+    } finally {
+      rmSync(negControlDir, { recursive: true, force: true });
+    }
+
+    // (3) Live server — GET / and a deep SPA-fallback route, over the real spawned
+    // packaged server (DD-4 route priority: any non-/api path falls back to index.html).
+    const rootRes = await request.get("/");
+    expect(rootRes.status()).toBe(200);
+    const rootBody = await rootRes.text();
+    expect(INJECTED_BOOTSTRAP_TOKEN_PATTERN.test(rootBody), "GET / body must not carry an injected bootstrap-token assignment").toBe(false);
+    expect(LOCAL_KEY_PATTERN.test(rootBody), "GET / body must not carry local-key-shaped material").toBe(false);
+
+    const deepRes = await request.get("/some/deep/route/never/a/real/asset");
+    expect(deepRes.status()).toBe(200);
+    const deepBody = await deepRes.text();
+    expect(
+      INJECTED_BOOTSTRAP_TOKEN_PATTERN.test(deepBody),
+      "SPA-fallback deep-route body must not carry an injected bootstrap-token assignment",
+    ).toBe(false);
+    expect(LOCAL_KEY_PATTERN.test(deepBody), "SPA-fallback deep-route body must not carry local-key-shaped material").toBe(false);
   });
 });
 
