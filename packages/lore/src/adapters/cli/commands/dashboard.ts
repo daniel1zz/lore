@@ -20,9 +20,14 @@
  *     paths (`bun run build` / `--dev`) with zero side effects and zero listening sockets
  *     (spec Failure Modes table: "Source-run packaged mode without built assets" — no
  *     silent fallback to the dev topology). See `resolveAssets`'s own doc comment for the
- *     `LORE_DASHBOARD_ASSETS_FIXTURE=1` hermetic test seam
- *     (task-skill-test-f5a-cli-packaged-mode-red-scenarios) that lets the paired RED suite
- *     exercise the "assets available" branch without a real `bun run build`.
+ *     `LORE_DASHBOARD_ASSETS_FIXTURE` hermetic test seam
+ *     (task-skill-test-f5a-cli-packaged-mode-red-scenarios): `=1` lets a test exercise the
+ *     "assets available" branch without a real `bun run build`; `=0`
+ *     (task-skill-test-f5a-source-run-guard-test-must-control-its-own) lets the "source-run
+ *     guard" test exercise the "assets unavailable" branch DETERMINISTICALLY regardless of
+ *     whether `packages/lore/src/generated/dashboard-assets.ts` happens to exist in the
+ *     ambient checkout — see `resolveAssets` for why ambient state must never leak into
+ *     this branch's oracle.
  *   - Packaged mode's stdout handshake (`LORE_DASHBOARD_URL=<nonce-url>`, matching DD-2's
  *     `/auth/bootstrap?nonce=<n>` shape) is written BEFORE the browser is opened and BEFORE
  *     this command blocks on shutdown — a machine-readable marker other tooling (this
@@ -190,9 +195,35 @@ function resolveFixtureManifest(): DashboardAssetsManifest {
 }
 
 /**
+ * The `LORE_DASHBOARD_ASSETS_FIXTURE=0` reason string — a named constant (rather than an
+ * inline literal at the single call site below) so the paired test can assert against the
+ * SAME string instead of a re-typed copy that could silently drift from it.
+ */
+const FORCE_UNAVAILABLE_REASON =
+  "LORE_DASHBOARD_ASSETS_FIXTURE=0 forces the unavailable-assets branch " +
+  "(test-only determinism seam — see dashboard-command.bun.test.ts's 'source-run guard' " +
+  "scenario). Run 'bun run build' to generate real assets, or use 'lore dashboard --dev'.";
+
+/**
  * Resolve the DD-1 embedded dashboard assets manifest for packaged-mode serving.
- * Honors the `LORE_DASHBOARD_ASSETS_FIXTURE=1` test seam (see `resolveFixtureManifest`);
- * otherwise delegates to the committed loader (`dashboard-assets-loader.ts`), which never
+ *
+ * Honors two `LORE_DASHBOARD_ASSETS_FIXTURE` test seams, checked BEFORE the real loader so
+ * neither one ever reaches the filesystem:
+ *   - `="1"` — pretend assets ARE available (see `resolveFixtureManifest`).
+ *   - `="0"` — pretend assets are NOT available, unconditionally. This is the fix for
+ *     task-skill-test-f5a-source-run-guard-test-must-control-its-own: the "source-run
+ *     guard" scenario (AC-F5A-5) must assert the unavailable-assets exit path
+ *     deterministically, but without this seam `resolveAssets` would fall through to the
+ *     real loader — which reads `packages/lore/src/generated/dashboard-assets.ts` off
+ *     disk, an AMBIENT checkout artifact `bun run build` may or may not have produced. A
+ *     test cannot control that precondition by deleting the file itself (order-dependent,
+ *     breaks concurrently running suites per this task's own boundary) — an explicit env
+ *     seam is the only deterministic control point. `unset`/anything else falls through
+ *     unchanged to the real loader, so a real user's packaged launch — which never sets
+ *     this var — is never affected: this branch is unreachable outside a test process that
+ *     opts in.
+ *
+ * Otherwise delegates to the committed loader (`dashboard-assets-loader.ts`), which never
  * throws and never silently falls back — see that module's own doc comment.
  *
  * @returns `{ available: false, reason }` naming `bun run build` / `--dev` on any failure,
@@ -201,6 +232,9 @@ function resolveFixtureManifest(): DashboardAssetsManifest {
 async function resolveAssets(): Promise<DashboardAssetsResult> {
   if (process.env.LORE_DASHBOARD_ASSETS_FIXTURE === "1") {
     return { available: true, manifest: resolveFixtureManifest() };
+  }
+  if (process.env.LORE_DASHBOARD_ASSETS_FIXTURE === "0") {
+    return { available: false, reason: FORCE_UNAVAILABLE_REASON };
   }
   const loaded = await loadDashboardAssets();
   if (!loaded.available) return loaded;
