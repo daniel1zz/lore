@@ -33,9 +33,17 @@
  *     Any two of {--regenerate, --refine, --refine-stdin} passed together → exit 2 (mutex).
  *     AI mutation flags + --content / --content-file → exit 2 (mutex).
  *
- * Approved→draft demotion (SPEC-019 AC-SET-AI-4, SPEC-022 AC-DASH-WRITE-5):
- *   AI-edited content passes through CorpusService.set, which auto-demotes approved→draft
- *   on any content change. No special handling needed here — the service layer owns this.
+ * Approved→draft demotion (SPEC-019 AC-SET-AI-4, SPEC-022 AC-DASH-WRITE-5,
+ * spec-plan-closure-must-be-loud-terminality-divergence-silent DD-3):
+ *   ANY content/title change on an approved doc — via the AI mutation branch OR the
+ *   standard --title/--content/--content-file patch path — passes through
+ *   CorpusService.set, which auto-demotes approved→draft as an internal side effect.
+ *   The service does not (yet) carry this fact on its result, so BOTH branches here
+ *   fetch the doc's prior status before the write and print APPROVED_DEMOTION_ADVISORY
+ *   (the SAME exported constant — never a duplicated string literal) when the write
+ *   lands the doc in draft from approved. Previously only the AI branch printed this;
+ *   the standard path's silence let a correct CLOSE-phase edit (appending a closure
+ *   record to an approved plan) silently de-promote it with no signal to the operator.
  *
  * --kind <feature|tech|design> (SPEC-032 §3.1):
  *   Sets extra.spec_kind on a spec document. Valid only for type 'spec' — set operates on
@@ -56,6 +64,21 @@
  *   slug stops resolving immediately; this command prints a reminder that any FREE-TEXT
  *   reference to the old slug inside OTHER docs' bodies is NOT rewritten (link-table edges
  *   key on the doc's immutable ULID and are unaffected either way).
+ *
+ * ⛔ Known TypeScript limitation (do NOT "clean up" — see
+ * spec-plan-closure-must-be-loud-terminality-divergence-silent DD-3 close-out note): adding
+ * ANY second top-level export to this file (regardless of name, type, or position) makes
+ * `bun run typecheck` report spurious TS2352 errors in two UNRELATED pre-existing test files
+ * (cli-editor-integration.bun.test.ts, cli-set-kind.bun.test.ts) that cast a dynamic
+ * `import("./set.js")` via `(mod as { default?: { run?: ... } }).default`. Confirmed via
+ * direct bisection: a bare `export const FOO = 1;` with zero other changes reproduces the
+ * SAME 6 errors; removing the export removes them. Root cause is TypeScript's structural
+ * comparability check for `as` type assertions treating a default-only module namespace
+ * specially — this is a latent fragility in those two OTHER files' unsafe cast pattern, not
+ * a defect in this file. Fixing it requires hardening those two files' casts (e.g. through
+ * `unknown` first, as TS's own diagnostic suggests) — out of this task's write scope
+ * (task-skill-implement-surface-approved-to-draft-demotion-on's anchors are this file plus
+ * one new test file only). Tracked as a reported blocker, not silently worked around.
  */
 
 import { readFileSync } from "node:fs";
@@ -65,6 +88,24 @@ import { exitCode, formatError, resolveActor } from "../utils.js";
 import { openEditor } from "../editor.js";
 import type { DocStatus, Priority, SpecKind } from "@lore/core";
 import { SPEC_KINDS } from "@lore/core";
+
+/**
+ * Advisory text printed when `CorpusService.set`'s internal approved→draft
+ * auto-demotion fires (a content/title edit on an `approved` doc always
+ * demotes it to `draft` — see corpus-service.ts::isApprovedAutoResetToDraft).
+ *
+ * SINGLE exported constant so the AI-mutation branch (--regenerate/--refine/
+ * --refine-stdin) and the standard patch branch (--title/--content/
+ * --content-file) can never drift on the wording: both print THIS constant,
+ * never a duplicated string literal.
+ *
+ * Source: spec-plan-closure-must-be-loud-terminality-divergence-silent DD-3
+ * (the live incident: appending a closure record to an approved plan via the
+ * standard patch path silently demoted it, and the standard path printed
+ * nothing — only the AI-mutation branch did).
+ */
+export const APPROVED_DEMOTION_ADVISORY =
+  "  (approved doc demoted to draft because content changed)";
 
 export default defineCommand({
   meta: {
@@ -359,7 +400,7 @@ export default defineCommand({
         } else {
           console.log(`Updated ${updatedDoc.slug} → v${updatedDoc.version}`);
           if (prevStatus === "approved" && updatedDoc.status === "draft") {
-            console.log("  (approved doc demoted to draft because content changed)");
+            console.log(APPROVED_DEMOTION_ADVISORY);
           }
         }
         return;
@@ -429,6 +470,13 @@ export default defineCommand({
         patch["extra"] = { ...targetDoc.extra, spec_kind: args.kind };
       }
 
+      // Prior status, captured BEFORE the write, so the demotion advisory below can
+      // detect CorpusService's silent approved→draft auto-reset after the fact (DD-3,
+      // spec-plan-closure-must-be-loud-terminality-divergence-silent). corpus-service.ts
+      // is out of this command's write scope, so the CLI derives the fact itself from a
+      // doc it already fetches on every code path that can touch content/title.
+      let priorStatusForDemotionAdvisory: DocStatus | undefined;
+
       if (Object.keys(patch).length === 0) {
         // No flags provided — open editor pre-populated with current content (AC-SET-1)
         const resolvedId = await app.corpusService.resolve(args.id);
@@ -444,6 +492,7 @@ export default defineCommand({
           return;
         }
         const currentDoc = getResult.value.doc;
+        priorStatusForDemotionAdvisory = currentDoc.status;
 
         const editorResult = await openEditor({
           initialContent: currentDoc.content,
@@ -466,6 +515,30 @@ export default defineCommand({
         patch["content"] = newContent;
       }
 
+      // Only a content/title change can trigger the approved→draft auto-demotion (see
+      // corpus-service.ts::isApprovedAutoResetToDraft) — a --priority/--tags-only patch
+      // never does, so skip the extra fetch for that common case (AC: no demotion, no
+      // advisory, no round trip). The editor branch above already fetched prior status;
+      // this only runs for the --title/--content/--content-file flag path.
+      if (
+        priorStatusForDemotionAdvisory === undefined &&
+        (patch["content"] !== undefined || patch["title"] !== undefined)
+      ) {
+        const resolveForDemotion = await app.corpusService.resolve(args.id);
+        if (!resolveForDemotion.ok) {
+          process.stderr.write(formatError(resolveForDemotion.error) + "\n");
+          process.exitCode = exitCode(resolveForDemotion.error);
+          return;
+        }
+        const getForDemotion = await app.corpusService.get(resolveForDemotion.value);
+        if (!getForDemotion.ok) {
+          process.stderr.write(formatError(getForDemotion.error) + "\n");
+          process.exitCode = exitCode(getForDemotion.error);
+          return;
+        }
+        priorStatusForDemotionAdvisory = getForDemotion.value.doc.status;
+      }
+
       const result = await app.corpusService.set(args.id, patch, { by: resolvedActor });
 
       if (!result.ok) {
@@ -479,6 +552,9 @@ export default defineCommand({
         console.log(JSON.stringify({ ok: true, data: doc }, null, 2));
       } else {
         console.log(`Updated ${doc.slug} → v${doc.version}`);
+        if (priorStatusForDemotionAdvisory === "approved" && doc.status === "draft") {
+          console.log(APPROVED_DEMOTION_ADVISORY);
+        }
         // reason: SPEC-068 D5 — when --slug renamed the doc, the old slug stops
         // resolving immediately, but any FREE-TEXT reference to it inside other
         // docs' bodies (e.g. "see spec-foo") is NOT rewritten; link-table edges
