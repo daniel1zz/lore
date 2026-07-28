@@ -22,7 +22,10 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 
 const REPO_ROOT = resolve(import.meta.dir, "../../../../..");
 
@@ -86,5 +89,77 @@ describe("bun run test:changed CLI — --list HEAD (AC-TC-2)", () => {
     expect(result.exitCode).not.toBe(0);
     const stderr = result.stderr.toString("utf8");
     expect(stderr).toMatch(/changed-tests: \[git\]/);
+  });
+});
+
+describe("getChangedFiles porcelain-path parsing — modified (' M') files are not corrupted (SPEC-104 fallout T2)", () => {
+  /**
+   * Isolated synthetic repo (mkdtemp, NEVER this repo's own git state) — a
+   * minimal two-package scaffold matching what `loadFileMap`/
+   * `loadCoreAliasMap` require: `packages/core/package.json` (the exports
+   * SSOT `loadCoreAliasMap` unconditionally reads on every invocation) plus
+   * one `packages/lore/src` file and its `packages/lore/tests` consumer,
+   * wired by a real relative import so the reverse-dependency BFS has an
+   * edge to walk. `--list HEAD` (as in the suite above) keeps the git diff
+   * itself empty (`HEAD...HEAD`), so selection is driven ONLY by `git status
+   * --porcelain`'s report of the uncommitted, UNSTAGED modification made
+   * below — the exact ` M `-prefixed line shape the porcelain-parser bug
+   * corrupts (a leading-space status line, trimmed before its fixed 3-char
+   * offset slice, loses the path's first character).
+   */
+  function makeFixtureRepo(): string {
+    const root = mkdtempSync(join(tmpdir(), "lore-changed-tests-porcelain-"));
+    execFileSync("git", ["init", "-q"], { cwd: root });
+    execFileSync("git", ["config", "user.email", "porcelain-fixture@example.com"], { cwd: root });
+    execFileSync("git", ["config", "user.name", "Porcelain Fixture"], { cwd: root });
+
+    mkdirSync(join(root, "packages", "core"), { recursive: true });
+    writeFileSync(
+      join(root, "packages", "core", "package.json"),
+      JSON.stringify({ exports: { ".": "./src/index.ts", "./node": "./src/node.ts" } }),
+    );
+    mkdirSync(join(root, "packages", "lore", "src"), { recursive: true });
+    mkdirSync(join(root, "packages", "lore", "tests"), { recursive: true });
+    writeFileSync(join(root, "packages", "lore", "src", "thing.ts"), "export const thing = 1;\n");
+    writeFileSync(
+      join(root, "packages", "lore", "tests", "thing.test.ts"),
+      'import { thing } from "../src/thing.js";\nexport const _use = thing;\n',
+    );
+
+    execFileSync("git", ["add", "-A"], { cwd: root });
+    execFileSync("git", ["commit", "-q", "-m", "seed"], { cwd: root });
+
+    // Unstaged modification — `git status --porcelain` reports this as
+    // ` M packages/lore/src/thing.ts` (leading space + M + space, then the
+    // path): exactly the shape the parser-order bug corrupts.
+    writeFileSync(join(root, "packages", "lore", "src", "thing.ts"), "export const thing = 2;\n");
+
+    return root;
+  }
+
+  it("REGRESSION: a modified-unstaged (' M') source file's test consumer is selected, not silently dropped", () => {
+    const fixtureRoot = makeFixtureRepo();
+    try {
+      const result = Bun.spawnSync(["bun", join(REPO_ROOT, "scripts", "changed-tests.ts"), "--list", "HEAD"], {
+        cwd: fixtureRoot,
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+
+      const stdout = result.stdout.toString("utf8");
+      const stderr = result.stderr.toString("utf8");
+      expect(result.exitCode, `expected exit 0, stderr:\n${stderr}`).toBe(0);
+
+      // The modified src file's own reverse-dependent test must show up in
+      // the vitest accounting — proof the ' M'-prefixed path survived intact.
+      // A corrupted path fails `fileMap.has()` and vanishes SILENTLY:
+      // "vitest: selected 0", no WARNING line (`zeroSelectionWarning` only
+      // fires when >=1 KNOWN-changed file selected zero tests — a dropped,
+      // unrecognized path never becomes "known-changed" in the first place).
+      expect(stdout).toMatch(/^vitest: selected [1-9]\d*$/m);
+      expect(stdout).toContain("packages/lore/tests/thing.test.ts");
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
   });
 });

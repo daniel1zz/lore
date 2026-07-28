@@ -390,10 +390,18 @@ function getChangedFiles(repoRoot: string, baseRef: string): string[] {
   // living in a freshly-added directory would be invisible to the changed set, which
   // is exactly the "silent partial" this script exists to prevent (module header D3).
   // `--untracked-files=all` forces per-file listing regardless of directory novelty.
+  // reason: `parsePorcelainPath` assumes the UNTRIMMED 3-char status-prefix
+  // format (` M path`, `?? path`, ...) — trimming BEFORE slicing shifts a
+  // leading-space ` M`/` D`/` A` (modified-in-worktree, not staged) line's
+  // fixed offset by one, truncating the path's first character (e.g.
+  // "packages/lore/src/adapters/cli/utils.ts" -> corrupted, silently missing
+  // `fileMap.has()` and dropped from the changed-set — no error, no
+  // WARNING, since `zeroSelectionWarning` only fires when nothing else was
+  // selected either). Filter blank lines on the RAW line (an empty string's
+  // `.length` is 0 either way) and slice on the RAW line — never trim first.
   const statusOut = runGit(["status", "--porcelain", "--untracked-files=all"], repoRoot);
   const statusFiles = statusOut
     .split("\n")
-    .map((l) => l.trim())
     .filter((l) => l.length > 0)
     .map(parsePorcelainPath);
 
