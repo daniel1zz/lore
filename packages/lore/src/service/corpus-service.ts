@@ -1865,6 +1865,12 @@ export class CorpusService {
     //   - `prdOutlineSynced` (SPEC-080 §C4, OPT-IN via a DEFAULT-OFF config knob):
     //     evaluated only when `GateEnforcer.isPrdSyncEnabled()` is true AND the plan
     //     declares no valid `extra.prd_sync_exempt` — see the dedicated block below.
+    //   - `assessmentFreshness` (SPEC-106, OPT-OUT): evaluated for EVERY closing plan
+    //     unless it declares `extra.assessment_freshness_exempt: true` PLUS a
+    //     non-empty `extra.assessment_freshness_exempt_reason` (mirrors
+    //     `attestation_exempt`'s flag+reason shape exactly, D4 — no separate "exempt
+    //     kind" taxonomy for this one). Vacuous pass when the plan has no linked
+    //     assessment or no evidence/done task activity at all (D5).
     //
     // reason: `isPlanClosing` is reused below (after the write commits) to fire the
     // R1 plan-close cascade (spec-lifecycle-archival-plan-close-cascade-deterministic
@@ -1898,6 +1904,15 @@ export class CorpusService {
       const exemptKindValid = attestationExemptKindValid(attestationExempt, attestationExemptKind).ok;
       const prdSyncEnabled = this.gateEnforcer.isPrdSyncEnabled();
       const prdSyncExempt = extractPrdSyncExempt({ extra: effectiveExtra }) !== undefined;
+      // reason: SPEC-106 §Design Decisions D4 — mirrors `attestationExempt`'s
+      // flag-plus-non-empty-reason resolution EXACTLY (a bare
+      // `assessment_freshness_exempt: true` with no reason is NOT exempt); there
+      // is no separate "exempt kind" taxonomy for this predicate.
+      const assessmentFreshnessExemptReason = effectiveExtra["assessment_freshness_exempt_reason"];
+      const assessmentFreshnessExempt =
+        effectiveExtra["assessment_freshness_exempt"] === true &&
+        typeof assessmentFreshnessExemptReason === "string" &&
+        assessmentFreshnessExemptReason.trim().length > 0;
 
       let planCloseCtx: GateContext = { targetIdOrSlug: existing.slug };
 
@@ -2003,6 +2018,13 @@ export class CorpusService {
             };
           }
         }
+      }
+
+      planCloseCtx = { ...planCloseCtx, assessmentFreshnessExempt };
+      if (!assessmentFreshnessExempt) {
+        const freshnessResult = await this.getAssessmentFreshness(existing.id);
+        if (!freshnessResult.ok) return freshnessResult;
+        planCloseCtx = { ...planCloseCtx, ...freshnessResult.value };
       }
 
       const gateResult = this.gateEnforcer.enforce("plan-close", planCloseCtx);
@@ -2802,6 +2824,117 @@ export class CorpusService {
       uncoveredP0: latest.verdict.requirement_coverage.uncovered_p0,
       verdict: latest.verdict,
       docSlug: latest.doc.slug,
+    });
+  }
+
+  /**
+   * Resolves a plan's newest linked (`informs`) assessment doc's `created_at`
+   * (SPEC-106 §Design Decisions D2) — walks the plan's INCOMING `informs` links
+   * (mirrors {@link getLatestUatVerdict}'s exact shape, narrowed to
+   * `sub_type === "assessment"` instead of `"uat"`) and returns the most recent
+   * one. Assessment docs are write-once (`lore assess` never edits one after
+   * creation, `commands/assess.ts`), so `created_at` is the correct freshness
+   * timestamp for this doc — unlike a TASK's `updated_at`, which
+   * {@link getAssessmentFreshness} deliberately never reads.
+   *
+   * @returns `undefined` when no assessment is linked to the plan at all — the
+   *   "no assessment yet" vacuous-pass case `assessmentFreshness`
+   *   (gate-predicates.ts) treats identically to "no task activity".
+   */
+  private async resolveNewestAssessmentAt(planId: string): Promise<Result<string | undefined, LoreError>> {
+    const linksResult = await this.store.findLinks(planId, "in");
+    if (!linksResult.ok) return linksResult;
+    const informsSources = linksResult.value
+      .filter((link) => link.link_type === "informs" && link.to_id === planId)
+      .map((link) => link.from_id);
+
+    let newest: string | undefined;
+    for (const sourceId of informsSources) {
+      const docResult = await this.store.find(sourceId);
+      if (!docResult.ok) return docResult;
+      const doc = docResult.value;
+      if (doc === null || doc.deleted_at !== null || doc.type !== "knowledge") continue;
+      const parsedExtra = knowledgeExtraSchema.safeParse(doc.extra);
+      if (!parsedExtra.success || parsedExtra.data.sub_type !== "assessment") continue;
+      if (newest === undefined || doc.created_at > newest) {
+        newest = doc.created_at;
+      }
+    }
+    return ok(newest);
+  }
+
+  /**
+   * Resolves the newest `evidence`/`done` AUDIT-row timestamp among `tasks`
+   * (SPEC-106 §Design Decisions D2) — deliberately AUDIT rows, never doc
+   * `updated_at` (the latter moves on cosmetic edits — anchor adds, link
+   * writes, a bare status change — that carry no new outcome information an
+   * assessment would need to re-judge, AC-FRESH-3). "Evidence" activity is any
+   * audit row with `action === "evidence"` (`TaskWorkflowService.addEvidence`'s
+   * `writeTaskExtra` call); "done" activity is any row with
+   * `action === "update"` AND `details.done === true` (`TaskWorkflowService
+   * .done`'s `writeTaskStatus` call deliberately shares the generic "update"
+   * action label with an unrelated `lore set --status` write — see that
+   * method's own JSDoc — so `details.done` is the only reliable
+   * discriminator). One `queryAudit` call per task — bounded by the plan's own
+   * task set, never a corpus-wide scan (SPEC-106's own NFR).
+   *
+   * @returns `undefined` when `tasks` is empty, or none of them carry any
+   *   evidence/done audit row — the "no task activity" vacuous-pass case.
+   */
+  private async resolveNewestTaskActivityAt(tasks: DocRecord[]): Promise<Result<string | undefined, LoreError>> {
+    let newest: string | undefined;
+    for (const task of tasks) {
+      const auditResult = await this.store.queryAudit({ doc_id: task.id });
+      if (!auditResult.ok) return auditResult;
+      for (const entry of auditResult.value) {
+        const isEvidence = entry.action === "evidence";
+        const isDone = entry.action === "update" && entry.details?.["done"] === true;
+        if (!isEvidence && !isDone) continue;
+        if (newest === undefined || entry.timestamp > newest) {
+          newest = entry.timestamp;
+        }
+      }
+    }
+    return ok(newest);
+  }
+
+  /**
+   * Resolves the two facts the `plan-close` gate's `assessmentFreshness`
+   * predicate (gate-predicates.ts) needs, AND the ONLY read `lore assess` itself
+   * consults for its own non-blocking staleness advisory (SPEC-106 §Design
+   * Decisions D2/D3/D5) — one shared computation, never two independently
+   * maintained copies (mirrors this module's `buildUpstreamSpecContext`
+   * precedent one tier over in `checkpoint-registry.ts`). Read-side only, never
+   * stored (D5) — a persisted `assessment_stale` field would itself go stale.
+   *
+   * @param planIdOrSlug - The plan to resolve freshness facts for.
+   * @returns `ok({newestAssessmentAt?, newestTaskActivityAt?})` — either or both
+   *   keys OMITTED (not `undefined`-valued) when unresolved, so a caller
+   *   spreading this into a `GateContext` never overwrites an already-set field
+   *   with an explicit `undefined`.
+   */
+  async getAssessmentFreshness(
+    planIdOrSlug: string,
+  ): Promise<Result<{ newestAssessmentAt?: string; newestTaskActivityAt?: string }, LoreError>> {
+    const resolveResult = await this.resolve(planIdOrSlug);
+    if (!resolveResult.ok) return resolveResult;
+    const planId = resolveResult.value;
+
+    const newestAssessmentResult = await this.resolveNewestAssessmentAt(planId);
+    if (!newestAssessmentResult.ok) return newestAssessmentResult;
+
+    const tasksResult = await this.store.findMany({ parent_id: planId, type: "task" });
+    if (!tasksResult.ok) return tasksResult;
+    const phasesResult = await this.store.findMany({ parent_id: planId, type: "phase" });
+    if (!phasesResult.ok) return phasesResult;
+    const tasks = [...tasksResult.value, ...phasesResult.value];
+
+    const newestActivityResult = await this.resolveNewestTaskActivityAt(tasks);
+    if (!newestActivityResult.ok) return newestActivityResult;
+
+    return ok({
+      ...(newestAssessmentResult.value !== undefined ? { newestAssessmentAt: newestAssessmentResult.value } : {}),
+      ...(newestActivityResult.value !== undefined ? { newestTaskActivityAt: newestActivityResult.value } : {}),
     });
   }
 
