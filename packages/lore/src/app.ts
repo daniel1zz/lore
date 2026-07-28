@@ -577,6 +577,15 @@ function buildAppFromSqlite(
   // gets the SAME "default" reading `resolveLedgerAutoApprove(undefined)` would.
   ledgerAutoApprove: boolean = true,
   judgmentRequiredTypes: readonly string[] = ["spec", "adr"],
+  // SPEC-102 hardening (T4 item 4) — the SAME mutable box `pruneTrigger`
+  // (above) writes its in-flight promise into; `close()` below reads it so
+  // an in-flight prune batch is waited out before the store handle it uses
+  // is actually released (see `pruneTrigger`'s construction-site comment in
+  // `createApp` for the full race this closes). `undefined` for every
+  // pre-existing bare test construction that omits it (nothing to wait for
+  // — `close()` falls back to closing immediately, byte-identical to
+  // pre-hardening behavior).
+  pruneState?: { inFlight?: Promise<void> },
 ): App {
   const db = store.getDatabase();
   // reason: claimTtlMinutes flows into DocSummary.meta's task.claim_stale (SPEC-036 §2
@@ -817,7 +826,20 @@ function buildAppFromSqlite(
     resolveAiDefault(explicit: boolean | undefined) {
       return resolveAiDefault(explicit, surfaceBox.current, aiDefaultPerSurface);
     },
-    close: () => { telemetry.close(); store.close(); },
+    // SPEC-102 hardening (T4 item 4) — if a prune batch is IN FLIGHT
+    // (`pruneState.inFlight` set), wait for it to settle before releasing
+    // the handles it reads/writes through, instead of racing a `DELETE`
+    // against an already-closed `store`. Still non-blocking from the
+    // command's own perspective: `close()` itself returns immediately
+    // (`void`), it only defers WHEN the underlying handles actually close.
+    close: () => {
+      const releaseHandles = () => { telemetry.close(); store.close(); };
+      if (pruneState?.inFlight !== undefined) {
+        void pruneState.inFlight.finally(releaseHandles);
+      } else {
+        releaseHandles();
+      }
+    },
   };
 }
 
@@ -893,6 +915,10 @@ function buildAppFromTurso(
   // gets the SAME "default" reading `resolveLedgerAutoApprove(undefined)` would.
   ledgerAutoApprove: boolean = true,
   judgmentRequiredTypes: readonly string[] = ["spec", "adr"],
+  // SPEC-102 hardening (T4 item 4) — see `buildAppFromSqlite`'s identical
+  // parameter JSDoc; the SAME mutable box `pruneTrigger` (above) writes its
+  // in-flight promise into, read by `close()` below.
+  pruneState?: { inFlight?: Promise<void> },
 ): App {
   const apiKeyDb = new Database(dbPath);
   // reason: claimTtlMinutes flows into DocSummary.meta's task.claim_stale (SPEC-036 §2
@@ -1108,7 +1134,24 @@ function buildAppFromTurso(
     // reason: closes the SEPARATE local trace-write handle (SPEC-102 D3)
     // alongside apiKeyDb/store — a leaked connection on the replica file
     // would keep a WAL lock held past this App's lifetime.
-    close: () => { telemetry.close(); store.close(); apiKeyDb.close(); localTraceStore?.close(); },
+    // SPEC-102 hardening (T4 item 4) — see `buildAppFromSqlite`'s identical
+    // `close` comment; waits out an in-flight prune batch (bound to
+    // `localTraceStore`, the SAME separate local handle the batch reads/
+    // writes through) before releasing every handle, instead of racing a
+    // `DELETE` against an already-closed `localTraceStore`.
+    close: () => {
+      const releaseHandles = () => {
+        telemetry.close();
+        store.close();
+        apiKeyDb.close();
+        localTraceStore?.close();
+      };
+      if (pruneState?.inFlight !== undefined) {
+        void pruneState.inFlight.finally(releaseHandles);
+      } else {
+        releaseHandles();
+      }
+    },
   };
 }
 
@@ -1262,12 +1305,28 @@ export function createApp(
     const traceRecorder = traceEnabled
       ? new TraceRecorder(sqliteStore.insertTraceEvent.bind(sqliteStore), () => surfaceBox.current)
       : undefined;
-    // reason: SPEC-102 §Migration Strategy — fire-and-forget, never awaited
-    // (the `void` discards the returned promise deliberately; a startup
-    // prune failure must never delay or fail the CLI command that triggered
-    // it — pruneTraceEventsOpportunistically's own module invariant never throws).
+    // reason: SPEC-102 §Migration Strategy — fire-and-forget from the
+    // CALLER's perspective (loader.ts never awaits `pruneTrigger()`, so a
+    // startup prune never delays or fails the CLI command that triggered
+    // it). SPEC-102 hardening (T4 item 4): the returned promise is now
+    // tracked in `pruneState` (rather than discarded via `void`) so
+    // `close()` below can wait for an IN-FLIGHT batch to settle before the
+    // store handle it reads/writes through is actually released — without
+    // this, a command whose own work finishes quickly could call
+    // `app.close()` while a later batch of the bounded prune loop is still
+    // pending, and that batch's next `DELETE` would race a closed handle
+    // (swallowed by pruneTraceEventsOpportunistically's own never-throws
+    // invariant, but silently leaving old rows unpruned until the NEXT
+    // invocation — not a correctness bug, but "the prune ran to completion"
+    // was never actually guaranteed).
+    const pruneState: { inFlight?: Promise<void> } = {};
     const pruneTrigger = traceEnabled
-      ? () => { void pruneTraceEventsOpportunistically(sqliteStore.pruneTraceEvents.bind(sqliteStore), traceRetentionDays); }
+      ? () => {
+          pruneState.inFlight = pruneTraceEventsOpportunistically(
+            sqliteStore.pruneTraceEvents.bind(sqliteStore),
+            traceRetentionDays,
+          );
+        }
       : undefined;
     // reason: SPEC-080 G4 — `store.appendAuditEntry` already returns
     // `Promise<Result<void, LoreError>>`, exactly the `RecordGateSkip` shape
@@ -1302,6 +1361,7 @@ export function createApp(
       pruneTrigger,
       ledgerAutoApprove,
       judgmentRequiredTypes,
+      pruneState,
     );
   }
 
@@ -1344,11 +1404,20 @@ export function createApp(
       localTraceStore !== undefined
         ? new TraceRecorder(localTraceStore.insertTraceEvent.bind(localTraceStore), () => surfaceBox.current)
         : undefined;
-    // reason: SPEC-102 §Migration Strategy — same fire-and-forget shape as the
-    // SQLite branch, bound to the SEPARATE localTraceStore handle (never `store`).
+    // reason: SPEC-102 §Migration Strategy — same fire-and-forget-from-the-
+    // CALLER's-perspective shape as the SQLite branch, bound to the SEPARATE
+    // localTraceStore handle (never `store`). SPEC-102 hardening (T4 item
+    // 4): tracks the in-flight promise in `pruneState` (see the SQLite
+    // branch's identical comment) instead of discarding it via `void`.
+    const pruneState: { inFlight?: Promise<void> } = {};
     const pruneTrigger =
       localTraceStore !== undefined
-        ? () => { void pruneTraceEventsOpportunistically(localTraceStore.pruneTraceEvents.bind(localTraceStore), traceRetentionDays); }
+        ? () => {
+            pruneState.inFlight = pruneTraceEventsOpportunistically(
+              localTraceStore.pruneTraceEvents.bind(localTraceStore),
+              traceRetentionDays,
+            );
+          }
         : undefined;
     // reason: SPEC-080 G4 — same wiring as the SQLite branch above, bound to the
     // TursoStore instance (also implements `StoreInterface.appendAuditEntry`).
@@ -1379,6 +1448,7 @@ export function createApp(
         pruneTrigger,
         ledgerAutoApprove,
         judgmentRequiredTypes,
+        pruneState,
       ),
     };
   } catch (e) {
