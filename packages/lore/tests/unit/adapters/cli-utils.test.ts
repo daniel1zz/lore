@@ -5,8 +5,12 @@
  * relativeTime, resolveActorAlias (SPEC-051 D2).
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from "vitest";
 import { userInfo } from "os";
+import { mkdtempSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   exitCode,
   formatError,
@@ -535,11 +539,40 @@ describe("parsePositiveIntArg", () => {
 // `knowledge-session-process-review-2026-07-22-spec-062-064-continu`,
 // AC-AUDIT-ACTOR-1) ─────────────────────────────────────────────────────────
 
+/**
+ * SPEC-104 makes `resolveActorWithSource`'s (and, via
+ * `resolveActorWithIdentitySource`, `resolveActor`'s) default `cwd` load-
+ * bearing: an ambient cwd sitting inside a linked git worktree — this repo's
+ * OWN standard subagent-dispatch pattern — now correctly resolves
+ * `agent:<branch>` (`worktree-derived`) instead of falling through to the
+ * OS-fallback tier these os-fallback assertions expect. Every os-fallback
+ * case below pins cwd to a fixture with a real `.git` DIRECTORY (a "main
+ * checkout" shape, per `detectWorktreeDerivedActor`'s own contract, which
+ * treats a `.git` directory as "not a linked worktree") — never relies on
+ * the ambient test-process cwd (`knowledge-spec-104-fallout-changed-tests-ts-porcelain-path-bug`).
+ */
+function makeNonWorktreeCwdFixture(): string {
+  const dir = mkdtempSync(join(tmpdir(), "lore-cli-utils-non-worktree-"));
+  execFileSync("git", ["init", "-q"], { cwd: dir });
+  execFileSync("git", ["config", "user.email", "cli-utils-fixture@example.com"], { cwd: dir });
+  execFileSync("git", ["config", "user.name", "CLI Utils Fixture"], { cwd: dir });
+  return dir;
+}
+
 describe("resolveActorWithSource", () => {
   const OS_USERNAME = userInfo().username;
   const ORIGINAL_LORE_ACTOR = process.env["LORE_ACTOR"];
   const ORIGINAL_CLAUDE_CODE_SESSION_ID = process.env["CLAUDE_CODE_SESSION_ID"];
   const ORIGINAL_CLAUDE_SESSION_ID = process.env["CLAUDE_SESSION_ID"];
+  let nonWorktreeCwd: string;
+
+  beforeAll(() => {
+    nonWorktreeCwd = makeNonWorktreeCwdFixture();
+  });
+
+  afterAll(() => {
+    rmSync(nonWorktreeCwd, { recursive: true, force: true });
+  });
 
   // Ambient Claude Code shells export CLAUDE_CODE_SESSION_ID, which the SPEC-069
   // session tier resolves ahead of os-fallback — clear both session vars before
@@ -582,7 +615,7 @@ describe("resolveActorWithSource", () => {
 
     it("returns {source: os-fallback, actor: OS username} when neither is provided", () => {
       delete process.env["LORE_ACTOR"];
-      expect(resolveActorWithSource(undefined)).toEqual({
+      expect(resolveActorWithSource(undefined, undefined, nonWorktreeCwd)).toEqual({
         actor: OS_USERNAME,
         source: "os-fallback",
       });
@@ -597,7 +630,7 @@ describe("resolveActorWithSource", () => {
 
     it("treats a whitespace-only $LORE_ACTOR as absent, falling through to OS username", () => {
       process.env["LORE_ACTOR"] = "   ";
-      expect(resolveActorWithSource(undefined)).toEqual({
+      expect(resolveActorWithSource(undefined, undefined, nonWorktreeCwd)).toEqual({
         actor: OS_USERNAME,
         source: "os-fallback",
       });
@@ -614,7 +647,7 @@ describe("resolveActorWithSource", () => {
       process.env["LORE_ACTOR"] = "agent:frank";
       expect(resolveActorWithSource(undefined).source).toBe("env");
       delete process.env["LORE_ACTOR"];
-      expect(resolveActorWithSource(undefined)).toEqual({
+      expect(resolveActorWithSource(undefined, undefined, nonWorktreeCwd)).toEqual({
         actor: OS_USERNAME,
         source: "os-fallback",
       });
@@ -657,8 +690,28 @@ describe("resolveActor — OS-fallback advisory side effect (AC-AUDIT-ACTOR-1)",
   const ORIGINAL_CLAUDE_CODE_SESSION_ID = process.env["CLAUDE_CODE_SESSION_ID"];
   const ORIGINAL_CLAUDE_SESSION_ID = process.env["CLAUDE_SESSION_ID"];
   let stderrSpy: ReturnType<typeof spyOnStderrWrite>;
+  // `resolveActor` (unlike `resolveActorWithSource`) has no `cwd` parameter —
+  // it always reads `process.cwd()` via `resolveActorWithIdentitySource`'s
+  // default. Every os-fallback assertion in this block needs the SAME
+  // non-worktree-cwd guarantee `makeNonWorktreeCwdFixture` gives
+  // `resolveActorWithSource` above, so this describe chdir's the real
+  // process cwd into that fixture for its duration (restored in `afterEach`,
+  // mirroring `actor-worktree-derivation.bun.test.ts`'s own
+  // chdir/restore-in-afterEach pattern for its `claim` command test).
+  let nonWorktreeCwd: string;
+  let originalCwd: string;
+
+  beforeAll(() => {
+    nonWorktreeCwd = makeNonWorktreeCwdFixture();
+  });
+
+  afterAll(() => {
+    rmSync(nonWorktreeCwd, { recursive: true, force: true });
+  });
 
   beforeEach(() => {
+    originalCwd = process.cwd();
+    process.chdir(nonWorktreeCwd);
     resetActorFallbackWarningForTests();
     stderrSpy = spyOnStderrWrite();
     // Ambient Claude Code shells export CLAUDE_CODE_SESSION_ID, which the SPEC-069
@@ -671,6 +724,7 @@ describe("resolveActor — OS-fallback advisory side effect (AC-AUDIT-ACTOR-1)",
 
   afterEach(() => {
     stderrSpy.mockRestore();
+    process.chdir(originalCwd);
     if (ORIGINAL_LORE_ACTOR === undefined) {
       delete process.env["LORE_ACTOR"];
     } else {

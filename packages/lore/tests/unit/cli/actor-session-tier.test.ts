@@ -31,7 +31,11 @@
  * Runner: vitest (pure fn, no bun:sqlite, no IO).
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   resolveActorWithSource,
   resolveActor,
@@ -39,7 +43,36 @@ import {
   type ActorSource,
 } from "../../../src/adapters/cli/utils.js";
 
+/**
+ * SPEC-104 fallout (`knowledge-spec-104-fallout-changed-tests-ts-porcelain-path-bug`):
+ * `resolveActorWithSource`'s default `cwd` is now load-bearing — an ambient
+ * cwd sitting inside a linked git worktree (this repo's OWN standard
+ * subagent-dispatch pattern) correctly resolves `agent:<branch>` instead of
+ * falling through to the os-fallback tier every "os-fallback" assertion in
+ * this file expects. This fixture is a real `.git` DIRECTORY (a "main
+ * checkout" shape, per `detectWorktreeDerivedActor`'s own contract), pinned
+ * explicitly as the 3rd `cwd` argument wherever an os-fallback result is
+ * asserted — never relying on the ambient test-process cwd.
+ */
+function makeNonWorktreeCwdFixture(): string {
+  const dir = mkdtempSync(join(tmpdir(), "lore-actor-session-tier-non-worktree-"));
+  execFileSync("git", ["init", "-q"], { cwd: dir });
+  execFileSync("git", ["config", "user.email", "actor-session-tier-fixture@example.com"], { cwd: dir });
+  execFileSync("git", ["config", "user.name", "Actor Session Tier Fixture"], { cwd: dir });
+  return dir;
+}
+
 describe("SPEC-069 AC-069-1: resolveActorWithSource session tier", () => {
+  let nonWorktreeCwd: string;
+
+  beforeAll(() => {
+    nonWorktreeCwd = makeNonWorktreeCwdFixture();
+  });
+
+  afterAll(() => {
+    rmSync(nonWorktreeCwd, { recursive: true, force: true });
+  });
+
   describe("HAPPY", () => {
     it("--by explicit wins even with LORE_ACTOR and a session id both present in env", () => {
       const result = resolveActorWithSource("alice", {
@@ -66,7 +99,7 @@ describe("SPEC-069 AC-069-1: resolveActorWithSource session tier", () => {
     });
 
     it("falls through to os-fallback when neither --by, $LORE_ACTOR, nor any session var is set", () => {
-      const result = resolveActorWithSource(undefined, {});
+      const result = resolveActorWithSource(undefined, {}, nonWorktreeCwd);
       expect(result.source).toBe("os-fallback");
       expect(result.actor.length).toBeGreaterThan(0);
     });
@@ -102,42 +135,42 @@ describe("SPEC-069 AC-069-1: resolveActorWithSource session tier", () => {
     });
 
     it("a whitespace-only session id falls through to os-fallback", () => {
-      const result = resolveActorWithSource(undefined, { CLAUDE_CODE_SESSION_ID: "   " });
+      const result = resolveActorWithSource(undefined, { CLAUDE_CODE_SESSION_ID: "   " }, nonWorktreeCwd);
       expect(result.source).toBe("os-fallback");
     });
 
     it("an empty-string session id falls through to os-fallback", () => {
-      const result = resolveActorWithSource(undefined, { CLAUDE_CODE_SESSION_ID: "" });
+      const result = resolveActorWithSource(undefined, { CLAUDE_CODE_SESSION_ID: "" }, nonWorktreeCwd);
       expect(result.source).toBe("os-fallback");
     });
 
     it("a non-whitespace session id that sanitizes to empty (\"---\") falls through to os-fallback without throwing", () => {
       expect(() =>
-        resolveActorWithSource(undefined, { CLAUDE_CODE_SESSION_ID: "---" }),
+        resolveActorWithSource(undefined, { CLAUDE_CODE_SESSION_ID: "---" }, nonWorktreeCwd),
       ).not.toThrow();
-      const result = resolveActorWithSource(undefined, { CLAUDE_CODE_SESSION_ID: "---" });
+      const result = resolveActorWithSource(undefined, { CLAUDE_CODE_SESSION_ID: "---" }, nonWorktreeCwd);
       expect(result.source).toBe("os-fallback");
       expect(result.actor.length).toBeGreaterThan(0);
     });
 
     it("a non-whitespace session id that sanitizes to empty (\"!!!\") falls through to os-fallback without throwing", () => {
       expect(() =>
-        resolveActorWithSource(undefined, { CLAUDE_CODE_SESSION_ID: "!!!" }),
+        resolveActorWithSource(undefined, { CLAUDE_CODE_SESSION_ID: "!!!" }, nonWorktreeCwd),
       ).not.toThrow();
-      const result = resolveActorWithSource(undefined, { CLAUDE_CODE_SESSION_ID: "!!!" });
+      const result = resolveActorWithSource(undefined, { CLAUDE_CODE_SESSION_ID: "!!!" }, nonWorktreeCwd);
       expect(result.source).toBe("os-fallback");
       expect(result.actor.length).toBeGreaterThan(0);
     });
 
     it("the CLAUDE_SESSION_ID alias also degrades to os-fallback on a sanitize-to-empty value, not a throw", () => {
-      const result = resolveActorWithSource(undefined, { CLAUDE_SESSION_ID: "___" });
+      const result = resolveActorWithSource(undefined, { CLAUDE_SESSION_ID: "___" }, nonWorktreeCwd);
       expect(result.source).toBe("os-fallback");
     });
   });
 
   describe("NEGATIVE — omitted env keys never crash, missing means absent", () => {
     it("an env object with unrelated keys only still falls through to os-fallback", () => {
-      const result = resolveActorWithSource(undefined, { PATH: "/usr/bin", HOME: "/home/x" });
+      const result = resolveActorWithSource(undefined, { PATH: "/usr/bin", HOME: "/home/x" }, nonWorktreeCwd);
       expect(result.source).toBe("os-fallback");
     });
   });
@@ -161,8 +194,16 @@ describe("SPEC-069 AC-069-1: resolveActorWithSource session tier", () => {
   // requires real env vars. Full save/restore keeps this file parallel-safe.
   describe("ERROR — resolveActor's stderr advisory path still fires on the degrade route", () => {
     const ORIGINAL_ENV = { ...process.env };
+    // `resolveActor` (unlike `resolveActorWithSource`) has no `cwd` parameter
+    // — it always reads real `process.cwd()`. chdir into the same non-
+    // worktree fixture for this test's duration (restored in `afterEach`) so
+    // the os-fallback degrade path asserted below isn't shadowed by
+    // worktree-derivation when this suite runs inside a linked worktree.
+    let originalCwd: string;
 
     beforeEach(() => {
+      originalCwd = process.cwd();
+      process.chdir(nonWorktreeCwd);
       delete process.env["LORE_ACTOR"];
       delete process.env["CLAUDE_CODE_SESSION_ID"];
       delete process.env["CLAUDE_SESSION_ID"];
@@ -170,6 +211,7 @@ describe("SPEC-069 AC-069-1: resolveActorWithSource session tier", () => {
     });
 
     afterEach(() => {
+      process.chdir(originalCwd);
       process.env = { ...ORIGINAL_ENV };
       resetActorFallbackWarningForTests();
     });
