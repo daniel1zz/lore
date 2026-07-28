@@ -54,7 +54,11 @@ interface RunResult {
 function runLore(args: string[], cwd: string): RunResult {
   const proc = Bun.spawnSync([LORE_BIN, ...args], {
     cwd,
-    env: { ...process.env, HOME: cwd, EDITOR: "true" },
+    // Hermetic actor identity: without it, environments that strip CLAUDECODE
+    // (e.g. `lore verify`'s env allowlist) fall to the OS username and emit an
+    // unrelated actor-traceability warning on stderr, breaking the exact
+    // empty-stderr assertion below.
+    env: { ...process.env, HOME: cwd, EDITOR: "true", LORE_ACTOR: "agent:e2e-advisory-probe" },
   });
   return {
     stdout: proc.stdout.toString(),
