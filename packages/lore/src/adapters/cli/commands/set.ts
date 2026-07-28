@@ -65,20 +65,22 @@
  *   reference to the old slug inside OTHER docs' bodies is NOT rewritten (link-table edges
  *   key on the doc's immutable ULID and are unaffected either way).
  *
- * ⛔ Known TypeScript limitation (do NOT "clean up" — see
- * spec-plan-closure-must-be-loud-terminality-divergence-silent DD-3 close-out note): adding
- * ANY second top-level export to this file (regardless of name, type, or position) makes
- * `bun run typecheck` report spurious TS2352 errors in two UNRELATED pre-existing test files
- * (cli-editor-integration.bun.test.ts, cli-set-kind.bun.test.ts) that cast a dynamic
- * `import("./set.js")` via `(mod as { default?: { run?: ... } }).default`. Confirmed via
- * direct bisection: a bare `export const FOO = 1;` with zero other changes reproduces the
- * SAME 6 errors; removing the export removes them. Root cause is TypeScript's structural
- * comparability check for `as` type assertions treating a default-only module namespace
- * specially — this is a latent fragility in those two OTHER files' unsafe cast pattern, not
- * a defect in this file. Fixing it requires hardening those two files' casts (e.g. through
- * `unknown` first, as TS's own diagnostic suggests) — out of this task's write scope
- * (task-skill-implement-surface-approved-to-draft-demotion-on's anchors are this file plus
- * one new test file only). Tracked as a reported blocker, not silently worked around.
+ * ⛔ TypeScript cast rule for tests importing this file (do NOT "clean up" — see
+ * spec-plan-closure-must-be-loud-terminality-divergence-silent DD-3): this file has TWO
+ * top-level exports (`default`, `APPROVED_DEMOTION_ADVISORY`). Any test that does
+ * `await import("./set.js")` and narrows the result with `as { default?: { run?: ... } }`
+ * (a pattern several sibling `commands/*.ts`-importing tests use) MUST cast through
+ * `unknown` first: `mod as unknown as { default?: {...} }`. Without the `unknown` hop, TS
+ * reports TS2352 ("may be a mistake because neither type sufficiently overlaps with the
+ * other") — confirmed via bisection that this file having ≥2 exports (regardless of which
+ * export, its name, type, or position) is what triggers it; citty's generated
+ * `CommandContext<Args>` type is what makes the naive cast target structurally
+ * incomparable once there's more than one export to resolve. Already fixed at every site
+ * that imports `set.js` this way: `cli-editor-integration.bun.test.ts`,
+ * `cli-set-kind.bun.test.ts`, `cli-set-demotion-advisory.bun.test.ts`. If a NEW test adds
+ * another `import("./set.js")` + naive `as {...}` cast, it needs the SAME `unknown` hop —
+ * this is a standing constraint on any consumer of this module's dynamic-import type, not
+ * a one-off fix.
  */
 
 import { readFileSync } from "node:fs";

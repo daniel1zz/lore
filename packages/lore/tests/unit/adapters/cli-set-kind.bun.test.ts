@@ -78,7 +78,14 @@ async function importCreateCommand(): Promise<RunnableCommand> {
 
 async function importSetCommand(): Promise<RunnableCommand> {
   const mod = await import("../../../src/adapters/cli/commands/set.js");
-  const cmd = (mod as { default?: { run?: RunnableCommand["run"] } }).default;
+  // reason: set.ts exports a second top-level binding (APPROVED_DEMOTION_ADVISORY,
+  // spec-plan-closure-must-be-loud-terminality-divergence-silent DD-3) alongside its
+  // default command export. That module shape makes citty's generated
+  // `CommandContext<Args>` structurally incomparable to this naive
+  // `{ default?: { run?: ... } }` cast target (TS2352 "may be a mistake because neither
+  // type sufficiently overlaps with the other"). Cast through `unknown` first, exactly
+  // as TS's own diagnostic recommends.
+  const cmd = (mod as unknown as { default?: { run?: RunnableCommand["run"] } }).default;
   if (!cmd?.run) throw new Error("set command not exported");
   return cmd as RunnableCommand;
 }
