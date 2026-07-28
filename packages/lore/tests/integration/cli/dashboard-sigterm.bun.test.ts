@@ -20,6 +20,16 @@
  * the NEGATIVE pid (`process.kill(-pid, signal)`), which the kernel delivers to every
  * process in that group. This suite is what caught that gap and is what now pins it.
  *
+ * DD-5 restore (task-skill-test-f5a-restore-dashboard-sigterm-test-to-dev, spec
+ * spec-dashboard-production-packaging-one-command-lore-dashboard): `spec-dashboard-
+ * production-packaging-one-command-lore-dashboard` DD-5 flipped `lore dashboard`'s DEFAULT
+ * from this two-process Vite topology to a single-process packaged mode with ZERO
+ * descendant processes. Every `spawnDashboard` call below now passes `--dev` explicitly so
+ * this suite keeps exercising the Vite-child descendant-teardown behavior it was written
+ * for — the packaged-mode default is structurally out of scope for THIS suite (it has no
+ * descendant to snapshot/kill/verify-gone at all; that topology's own SIGTERM/SIGINT
+ * cleanliness, if ever pinned, belongs in a separate packaged-mode test).
+ *
  * Requires `bun run build` to have run first — `assertFreshBinary` (same helper
  * `slugify-compiled.bun.test.ts` uses) fails loud before any test runs if `dist/lore` is
  * missing or older than the newest `.ts` source under `packages/{lore,core}/src`.
@@ -209,7 +219,22 @@ interface DashboardHandle {
   dashPort: number;
 }
 
-/** Spawns the compiled dashboard against a throwaway project-root farm + corpus. */
+/**
+ * Spawns the compiled dashboard against a throwaway project-root farm + corpus, forcing
+ * the `--dev` two-process Vite topology.
+ *
+ * spec-dashboard-production-packaging-one-command-lore-dashboard DD-5 flipped `lore
+ * dashboard`'s DEFAULT to packaged mode (in-process HTTP server, embedded static assets,
+ * ZERO descendant processes). This suite's entire premise — snapshot the Vite-child
+ * descendant-PID tree, signal the parent, assert every descendant is gone — only exercises
+ * anything under the pre-DD-5 dev topology, where `bun run --filter @lore/dashboard dev`
+ * (and the real `vite` node process it further spawns) exist as children in the first
+ * place. Every `spawnDashboard` call in this file MUST pass `--dev` explicitly: without
+ * it, `descendantPids(proc.pid)` would stay empty for the packaged-mode default, and this
+ * suite would either hang on the `descendantsAppeared` wait (until its own 15s timeout) or,
+ * worse, degrade into a vacuously-true assertion that teaches nothing about teardown at
+ * all — see this file's header comment on the observed sub-3s "2 pass 0 fail" false-green.
+ */
 function spawnDashboard(farmDir: string, stateDir: string, configDir: string): DashboardHandle {
   // reason: randomized high range — minimizes collision with any other concurrent
   // worktree suite's ports on this machine (standing lesson: serialize/avoid fixed
@@ -218,7 +243,16 @@ function spawnDashboard(farmDir: string, stateDir: string, configDir: string): D
   const dashPort = apiPort + 1;
 
   const proc = Bun.spawn(
-    [LORE_BIN, "dashboard", "--no-open", "--api-port", String(apiPort), "--dashboard-port", String(dashPort)],
+    [
+      LORE_BIN,
+      "dashboard",
+      "--dev",
+      "--no-open",
+      "--api-port",
+      String(apiPort),
+      "--dashboard-port",
+      String(dashPort),
+    ],
     {
       cwd: farmDir,
       env: {
@@ -236,8 +270,31 @@ function spawnDashboard(farmDir: string, stateDir: string, configDir: string): D
   return { proc, apiPort, dashPort };
 }
 
+/**
+ * Minimum plausible wall time for one full spawn -> ready -> descendant-appear -> signal
+ * -> descendant-gone -> port-free cycle against the REAL `--dev` Vite topology.
+ *
+ * Anti-false-oracle guard (task-skill-test-f5a-restore-dashboard-sigterm-test-to-dev): the
+ * T3 implementer observed this exact file intermittently reporting "2 pass 0 fail" in
+ * ~2 SECONDS TOTAL (both scenarios combined) — far too fast to have spawned a real Vite
+ * dev server, polled for it, signaled it, and polled again for its exit. `bun run --filter
+ * @lore/dashboard dev` alone (before Vite even starts pre-bundling) reliably costs real
+ * wall time (workspace-filter resolution + process fork/exec), so a scenario that genuinely
+ * short-circuited (e.g. a packaged-mode-style zero-descendant run) would return in single-
+ * digit-to-low-double-digit ms, not hundreds. Measured across repeated genuine `--dev` runs
+ * on this machine, per-scenario wall time ranged ~900ms–2.6s (SIGTERM: 905ms–2586ms; SIGINT:
+ * 1155ms–1184ms) — this floor is set well below that observed range (not at its low end) to
+ * avoid flaking on faster hardware/less-contended runs while still catching a genuinely
+ * skipped polling path. The PRIMARY non-flaky proof that the polling path executed is the
+ * explicit `descendantsBeforeSignal.length` assertion below (it cannot pass without a real
+ * live descendant PID existing); this wall-time check is a secondary belt-and-suspenders
+ * guard, logged unconditionally so `bun test` output always reports the observed time.
+ */
+const MIN_PLAUSIBLE_SCENARIO_MS = 300;
+
 /** Runs one full spawn -> ready -> signal -> assert-teardown cycle. Shared by both tests. */
 async function runSignalTeardownScenario(signal: "SIGTERM" | "SIGINT"): Promise<void> {
+  const scenarioStart = Date.now();
   const farmDir = makeProjectRootFarm();
   const stateDir = mkdtempSync(join(tmpdir(), `lore-dashboard-${signal.toLowerCase()}-state-`));
   const configDir = mkdtempSync(join(tmpdir(), `lore-dashboard-${signal.toLowerCase()}-config-`));
@@ -260,6 +317,11 @@ async function runSignalTeardownScenario(signal: "SIGTERM" | "SIGINT"): Promise<
       const descendantsAppeared = await waitUntil(() => descendantPids(proc!.pid).length > 0, 15_000, 200);
       expect(descendantsAppeared).toBe(true);
       const descendantsBeforeSignal = descendantPids(proc.pid);
+      // Explicit descendant-COUNT assertion (not just the boolean poll result above) — the
+      // `--dev` topology's real `bun run --filter @lore/dashboard dev` process (and,
+      // transitively, the further `vite` child it spawns) must show up as ≥1 tracked PID,
+      // or there is nothing for the SIGTERM/SIGINT teardown assertions below to prove.
+      expect(descendantsBeforeSignal.length).toBeGreaterThan(0);
 
       proc.kill(signal);
       await proc.exited;
@@ -275,6 +337,14 @@ async function runSignalTeardownScenario(signal: "SIGTERM" | "SIGINT"): Promise<
       const dashPortFree = await waitUntil(() => isPortFree(dashPort), 15_000, 200);
       expect(apiPortFree).toBe(true);
       expect(dashPortFree).toBe(true);
+
+      // Anti-false-oracle guard — see MIN_PLAUSIBLE_SCENARIO_MS's doc comment. Logged
+      // unconditionally (visible in `bun test` output for evidence) and asserted so a
+      // future regression that silently short-circuits the polling above fails LOUD
+      // instead of reporting a suspiciously fast green.
+      const scenarioElapsedMs = Date.now() - scenarioStart;
+      console.log(`[dashboard-sigterm] ${signal} scenario wall time: ${scenarioElapsedMs}ms`);
+      expect(scenarioElapsedMs).toBeGreaterThan(MIN_PLAUSIBLE_SCENARIO_MS);
     } finally {
       // Reap any straggler descendant regardless of test outcome.
       for (const pid of descendantPids(proc.pid)) {
