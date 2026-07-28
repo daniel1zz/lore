@@ -39,6 +39,18 @@
  *     handshake marker format (`LORE_DASHBOARD_URL=<nonce-url>`, DD-2's
  *     `/auth/bootstrap?nonce=<n>` shape) the implementation must emit before blocking,
  *     however it chooses to simulate asset availability.
+ *   - `LORE_DASHBOARD_ASSETS_FIXTURE=0` — the complementary "pretend packaged assets are
+ *     NOT available" signal, added for task-skill-test-f5a-source-run-guard-test-must-
+ *     control-its-own. The "source-run guard" scenario below asserts the unavailable-
+ *     assets exit path, but on a checkout where `bun run build` has already produced
+ *     `packages/lore/src/generated/dashboard-assets.ts`, the real loader would find real
+ *     assets and the guard would never fire — the scenario would then silently observe
+ *     the WRONG branch instead of failing loud. This seam makes the precondition
+ *     deterministic in both environments: `=0` forces `resolveAssets` to report
+ *     unavailable regardless of ambient build state (see `commands/dashboard.ts::
+ *     resolveAssets`'s own doc comment for why this can never affect a real user's
+ *     packaged launch — the branch is opt-in-only, unreachable unless a caller explicitly
+ *     sets this exact value).
  *   - `LORE_DASHBOARD_DEBUG_ALLOWLIST=1` — debug-log signal for the "dev retention"
  *     scenario, pinning the marker format `LORE_DASHBOARD_ALLOWLIST=<json array of
  *     origin strings>`. RED-BY-MISSING-SEAM: `--dev` is not even a recognized flag today
@@ -46,6 +58,7 @@
  *
  * @spec_ref spec-dashboard-production-packaging-one-command-lore-dashboard DD-5, AC-F5A-5
  * @spec_ref task-skill-test-f5a-cli-packaged-mode-red-scenarios
+ * @spec_ref task-skill-test-f5a-source-run-guard-test-must-control-its-own
  */
 
 import { afterEach, describe, expect, it } from "bun:test";
@@ -209,7 +222,7 @@ afterEach(() => {
 
 describe("source-run guard (AC-F5A-5) — packaged mode without built assets", () => {
   it(
-    "RED: exits non-zero naming BOTH 'bun run build' and '--dev'; never mentions vite (no spawn attempt); no residual port listener",
+    "exits non-zero naming BOTH 'bun run build' and '--dev'; never mentions vite (no spawn attempt); no residual port listener",
     () => {
       const fixture = makeFixture();
       const apiPort = randomPort();
@@ -217,27 +230,39 @@ describe("source-run guard (AC-F5A-5) — packaged mode without built assets", (
       portsInUse.push(apiPort, dashPort);
 
       try {
-        const result = runDashboard(["--api-port", String(apiPort), "--dashboard-port", String(dashPort)], fixture);
+        // reason: LORE_DASHBOARD_ASSETS_FIXTURE=0 (task-skill-test-f5a-source-run-guard-
+        // test-must-control-its-own) forces resolveAssets's unavailable-assets branch
+        // deterministically. Without it this scenario would silently inherit ambient
+        // checkout state: on a checkout where `bun run build` has already run,
+        // packages/lore/src/generated/dashboard-assets.ts exists, the real loader would
+        // find it, packaged mode would start normally and exit 0, and the `not.toBe(0)`
+        // assertion below would fail — exactly the attested-on-main failure this task
+        // fixes. This precondition must hold identically whether or not that generated
+        // file happens to exist in the checkout; see this file's header for the seam
+        // contract and `commands/dashboard.ts::resolveAssets` for why the seam cannot
+        // leak into a real user's launch.
+        const result = runDashboard(
+          ["--api-port", String(apiPort), "--dashboard-port", String(dashPort)],
+          fixture,
+          { LORE_DASHBOARD_ASSETS_FIXTURE: "0" },
+        );
 
         if (result.timedOut) {
           throw new Error(
-            "hung: current impl blocks (vite topology) — packaged-mode guard not implemented",
+            "hung: packaged-mode guard did not fire before some blocking call",
           );
         }
 
         // AC: exit code != 0.
         expect(result.exitCode).not.toBe(0);
 
-        // AC: stderr names BOTH remediation paths. Currently RED — the CLI has no
-        // packaged-mode guard at all, so neither string appears anywhere in its output
-        // (the actual failure today is an unrelated Vite-workspace-resolution error).
+        // AC: stderr names BOTH remediation paths.
         expect(result.stderr).toContain("bun run build");
         expect(result.stderr).toContain("--dev");
 
-        // AC: "no vite process is spawned; no silent fallback" — a packaged-mode guard
-        // that fires BEFORE attempting the vite topology must never mention vite in its
-        // failure output. Currently RED — today's stderr DOES mention Vite (it is the
-        // literal, if misleading, root cause of today's accidental non-zero exit).
+        // AC: "no vite process is spawned; no silent fallback" — the packaged-mode guard
+        // fires BEFORE attempting the vite topology, so its failure output must never
+        // mention vite.
         expect(result.stderr.toLowerCase()).not.toContain("vite");
 
         // No residual listener from this run.
