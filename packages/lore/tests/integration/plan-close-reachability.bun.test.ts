@@ -1,0 +1,270 @@
+/**
+ * RED/TDD REGRESSION anchor for spec-plan-closure-must-be-loud-terminality-
+ * divergence-silent §Design Decisions DD-4 — AC-CLOSURE-6.
+ *
+ * Live 2026-07-28 incident, reproduced end to end: a plan whose `parent_id` WAS
+ * an approved tech spec declaring >= 1 script-mode acceptance criterion, closed
+ * via `lore set <plan> --status archived` while its only task carried
+ * self-reported-only evidence (zero runner-attested entries — `lore verify` was
+ * never run), was DENIED on attestation grounds as expected, but the deny
+ * message ALSO told the operator this plan "has no spec-tier ancestor at all" —
+ * a provably false claim that would have sent the operator toward reparenting a
+ * CORRECT corpus, or declaring a `pipeline-unreachable` exemption that doesn't
+ * apply. Root cause: `CorpusService.set`'s plan-close `GateContext` never
+ * populates `hasSpecParent`/`parentSpecScriptAcCount` even though
+ * `getPlanBundle` has already resolved the ancestor spec for this exact branch
+ * (DD-4(a)), and `verifyReachability` collapses "caller told me nothing" onto
+ * the same definite claim as "caller resolved a genuinely non-spec parent"
+ * (DD-4(b)).
+ *
+ * bun test (not vitest): spawns the real compiled `dist/lore` binary against a
+ * THROWAWAY corpus (`mkdtemp` + `lore init`, cwd inside it) — mirrors
+ * `cli-feed-task-start.bun.test.ts`'s harness, the closest in-repo template for
+ * a full-binary subprocess CLI test. ⛔ Never touches the repo's own `.lore/`
+ * corpus (project CLAUDE.md hard rule) — every test operates inside its own
+ * `mkdtempSync` directory, and `dist/lore` runs with `cwd` and `HOME` both
+ * pointed at it.
+ *
+ * `assertFreshBinary` fails loud if `dist/lore` is missing or older than the
+ * newest `.ts` source under `packages/{lore,core}/src` — this suite spawns the
+ * COMPILED binary directly, so a stale artifact would otherwise let the test
+ * silently validate old logic against new source (`bun run build` first).
+ *
+ * Coverage dimension: REGRESSION (the live incident, reproduced verbatim —
+ * this file's sole purpose is anchoring that exact shape; no other dimension
+ * applies to a single-scenario regression anchor).
+ *
+ * @spec_ref spec-plan-closure-must-be-loud-terminality-divergence-silent
+ *   §Design Decisions DD-4, §Acceptance Criteria AC-CLOSURE-6
+ */
+
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
+import yaml from "yaml";
+import { assertFreshBinary } from "./helpers/assert-fresh-binary";
+
+// ─── Types ──────────────────────────────────────────────────────────────────
+
+interface RunResult {
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly exitCode: number;
+}
+
+// ─── Paths ──────────────────────────────────────────────────────────────────
+
+// tests/integration/ -> packages/lore/ -> packages/ -> repo root (4 levels up).
+const PROJECT_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
+const LORE_BIN = join(PROJECT_ROOT, "dist", "lore");
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/** Runs the compiled `dist/lore` binary directly (real e2e binary, not `bun run src/`). */
+function runLore(args: string[], cwd: string): RunResult {
+  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+    cwd,
+    env: { ...process.env, HOME: cwd, LORE_ACTOR: "agent:plan-close-reachability-test" },
+  });
+  return {
+    stdout: proc.stdout.toString(),
+    stderr: proc.stderr.toString(),
+    exitCode: proc.exitCode ?? 1,
+  };
+}
+
+function initCorpus(dir: string): void {
+  const result = runLore(["init"], dir);
+  if (result.exitCode !== 0) {
+    throw new Error(`lore init failed: ${result.stderr}`);
+  }
+}
+
+function parseSlug(stdout: string): string {
+  const match = stdout.match(/Slug:\s+(\S+)/);
+  const slug = match?.[1];
+  if (slug === undefined) {
+    throw new Error(`could not parse slug from create output: ${stdout}`);
+  }
+  return slug;
+}
+
+/**
+ * Merges a `workflow: {...}` YAML fragment into `.lore/config.yaml` (shallow
+ * merge over the top-level `workflow` map) — mirrors
+ * `cli-feed-task-start.bun.test.ts`'s helper of the same name/shape, used here
+ * only to disable SPEC-103 M2's review-judgment checkpoint so the spec-approve
+ * step below is reachable without an unrelated judgment fixture.
+ */
+function appendWorkflowConfig(dir: string, yamlFragment: string): void {
+  const cfgPath = join(dir, ".lore", "config.yaml");
+  const existing = yaml.parse(readFileSync(cfgPath, "utf8")) as Record<string, unknown>;
+  const fragment = yaml.parse(yamlFragment) as { workflow?: Record<string, unknown> };
+  const mergedWorkflow = {
+    ...(existing["workflow"] as Record<string, unknown> | undefined),
+    ...fragment.workflow,
+  };
+  writeFileSync(cfgPath, yaml.stringify({ ...existing, workflow: mergedWorkflow }), "utf8");
+}
+
+/**
+ * Builds the exact live-incident shape: PRD -> approved tech spec declaring
+ * one script-mode AC -> approved plan -> one task carrying self-reported-only
+ * evidence (a `pass` recorded via plain `lore evidence`, never runner-attested
+ * via `lore verify`).
+ */
+function createFixtureChain(dir: string): { planSlug: string } {
+  const prdResult = runLore(
+    ["create", "prd", "--title", "AC-CLOSURE-6 Regression PRD", "--content", "PRD body.", "--no-ai"],
+    dir,
+  );
+  expect(prdResult.exitCode).toBe(0);
+  const prdSlug = parseSlug(prdResult.stdout);
+
+  const specResult = runLore(
+    [
+      "create",
+      "spec",
+      "--title",
+      "AC-CLOSURE-6 Regression Spec",
+      "--parent",
+      prdSlug,
+      "--kind",
+      "tech",
+      "--content",
+      "## Overview\n\nRegression fixture spec for plan-close reachability (DD-4).\n",
+      "--no-ai",
+    ],
+    dir,
+  );
+  expect(specResult.exitCode).toBe(0);
+  const specSlug = parseSlug(specResult.stdout);
+
+  const acResult = runLore(
+    [
+      "ac",
+      "add",
+      specSlug,
+      "AC-CLOSURE-6-1",
+      "--statement",
+      "The plan-close reachability regression is reproduced end to end.",
+      "--mode",
+      "script",
+      "--oracle",
+      "test",
+      "--command",
+      "bun test",
+    ],
+    dir,
+  );
+  expect(acResult.exitCode).toBe(0);
+
+  // reason: SPEC-103 M2's review-judgment checkpoint defaults spec/adr into
+  // `judgment_required_types` — disabled here (mirrors
+  // cli-feed-task-start.bun.test.ts) since this suite exercises plan-close
+  // reachability, not review-judgment.
+  appendWorkflowConfig(dir, "\nworkflow:\n  review:\n    judgment_required_types: []\n");
+
+  const approveSpecResult = runLore(["approve", specSlug], dir);
+  expect(approveSpecResult.exitCode).toBe(0);
+
+  const planResult = runLore(
+    [
+      "create",
+      "plan",
+      "--title",
+      "AC-CLOSURE-6 Regression Plan",
+      "--parent",
+      specSlug,
+      "--content",
+      "## Plan\n\nRegression fixture plan.\n",
+      "--no-ai",
+    ],
+    dir,
+  );
+  expect(planResult.exitCode).toBe(0);
+  const planSlug = parseSlug(planResult.stdout);
+
+  // draft -> approved is the fast-track edge (VALID_TRANSITIONS); the plan's
+  // ancestor spec is already approved with a declared script-mode AC, so
+  // plan-promote's own predicates are satisfied.
+  const approvePlanResult = runLore(["approve", planSlug], dir);
+  expect(approvePlanResult.exitCode).toBe(0);
+
+  const taskResult = runLore(
+    [
+      "create",
+      "task",
+      "--title",
+      "AC-CLOSURE-6 Regression Task",
+      "--parent",
+      planSlug,
+      "--plan-id",
+      planSlug,
+      "--content",
+      "Estimate: S\nApproach: reproduce the plan-close reachability regression.",
+      "--no-ai",
+    ],
+    dir,
+  );
+  expect(taskResult.exitCode).toBe(0);
+  const taskSlug = parseSlug(taskResult.stdout);
+
+  // Self-reported-only evidence — a plain `lore evidence` call, never run
+  // through `lore verify`, so this entry carries zero runner attestation.
+  const evidenceResult = runLore(
+    ["evidence", taskSlug, "--oracle", "test", "--command", "bun test", "--result", "pass"],
+    dir,
+  );
+  expect(evidenceResult.exitCode).toBe(0);
+
+  return { planSlug };
+}
+
+// ─── Project-level state ──────────────────────────────────────────────────────
+
+let tmpDir: string;
+
+beforeAll(() => {
+  assertFreshBinary(LORE_BIN, [
+    join(PROJECT_ROOT, "packages", "lore", "src"),
+    join(PROJECT_ROOT, "packages", "core", "src"),
+  ]);
+});
+
+beforeEach(() => {
+  tmpDir = mkdtempSync(join(tmpdir(), "lore-plan-close-reachability-test-"));
+  initCorpus(tmpDir);
+});
+
+afterEach(() => {
+  try {
+    rmSync(tmpDir, { recursive: true, force: true });
+  } catch {
+    // best-effort
+  }
+});
+
+// ─── REGRESSION — the live 2026-07-28 incident, reproduced end to end ──────
+
+describe("REGRESSION — plan parented to an approved tech spec with >=1 script-mode AC (AC-CLOSURE-6)", () => {
+  it("denies `lore set <plan> --status archived` on attestation grounds and NEVER claims 'no spec-tier ancestor'", () => {
+    const { planSlug } = createFixtureChain(tmpDir);
+
+    const archiveResult = runLore(["set", planSlug, "--status", "archived"], tmpDir);
+
+    // DENIES — the plan's only task carries self-reported-only evidence, so
+    // the attestation floor (SPEC-069) is genuinely unmet. This is the
+    // CORRECT, expected denial — the regression is about its WORDING, not
+    // about whether it denies at all.
+    expect(archiveResult.exitCode).not.toBe(0);
+    expect(archiveResult.stderr).toContain("ATTESTATION_FLOOR_NOT_MET");
+
+    // The live incident's exact defect: plan-close's GateContext never
+    // populated hasSpecParent/parentSpecScriptAcCount for this plan, even
+    // though its parent IS an approved tech spec declaring a script-mode AC —
+    // so the deny pack asserted a claim it was never in a position to make.
+    expect(archiveResult.stderr).not.toContain("no spec-tier ancestor");
+  });
+});
