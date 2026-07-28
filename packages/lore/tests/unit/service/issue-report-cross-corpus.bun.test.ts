@@ -279,9 +279,12 @@ describe("AC-072-1: round-trip lands a draft ad-hoc task with all 7 issue_report
     const upstreamDocId = data.data.upstream_doc_id;
     expect(upstreamDocId).toBeTruthy();
 
-    // Appears in upstream pending queue as a draft task.
+    // Appears in upstream pending queue as a draft task. SPEC-103 M3 hides task-type
+    // docs from the DEFAULT queue ("pending = promises"); `--all` restores them — this
+    // test's concern (the filed report shows up with its issue_report fields) is
+    // orthogonal to M3's filtering behavior.
     const pending = runJson<{ ok: true; data: { docs: Array<{ id: string; type: string; status: string }> } }>(
-      ["pending"],
+      ["pending", "--all"],
       { cwd: upstream.root },
     );
     expect(pending.result.exitCode).toBe(0);

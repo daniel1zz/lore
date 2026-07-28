@@ -240,11 +240,14 @@ describe("ReviewService", () => {
         });
 
         // Distinct sub_type value from the case above — defeats a hardcoded/constant projection.
+        // SPEC-103 M3 — "assessment" is a ledger sub_type, hidden from the default queue;
+        // `{ all: true }` restores it so this meta-PROJECTION assertion (unrelated to M3's
+        // own filtering concern) still observes the doc.
         it("knowledge doc projects extra.sub_type='assessment' into meta", async () => {
           const doc = makeDoc({ status: "draft", type: "knowledge", extra: { sub_type: "assessment" } });
           await store.insert(doc);
 
-          const result = await service.pending();
+          const result = await service.pending({ all: true });
 
           expect(result.ok).toBe(true);
           if (!result.ok) return;
@@ -303,7 +306,9 @@ describe("ReviewService", () => {
           });
           await store.insert(doc);
 
-          const result = await service.pending();
+          // SPEC-103 M3 — task is hidden from the default queue; `{ all: true }` restores
+          // it (unrelated to this test's actual concern: meta evidence-count projection).
+          const result = await service.pending({ all: true });
 
           expect(result.ok).toBe(true);
           if (!result.ok) return;
@@ -327,7 +332,8 @@ describe("ReviewService", () => {
           });
           await store.insert(doc);
 
-          const result = await service.pending();
+          // SPEC-103 M3 — see the sibling "2 pass / 1 fail" case's identical comment.
+          const result = await service.pending({ all: true });
 
           expect(result.ok).toBe(true);
           if (!result.ok) return;
@@ -424,7 +430,8 @@ describe("ReviewService", () => {
           });
           await store.insert(doc);
 
-          const result = await service.pending();
+          // SPEC-103 M3 — task is hidden from the default queue; `{ all: true }` restores it.
+          const result = await service.pending({ all: true });
 
           expect(result.ok).toBe(true);
           if (!result.ok) return;
@@ -445,7 +452,8 @@ describe("ReviewService", () => {
           });
           await store.insert(doc);
 
-          const result = await service.pending();
+          // SPEC-103 M3 — task is hidden from the default queue; `{ all: true }` restores it.
+          const result = await service.pending({ all: true });
 
           expect(result.ok).toBe(true);
           if (!result.ok) return;
@@ -480,7 +488,8 @@ describe("ReviewService", () => {
           await store.insert(freshDoc);
           await store.insert(staleDoc);
 
-          const result = await ttlService.pending();
+          // SPEC-103 M3 — task is hidden from the default queue; `{ all: true }` restores it.
+          const result = await ttlService.pending({ all: true });
 
           expect(result.ok).toBe(true);
           if (!result.ok) return;
@@ -527,7 +536,8 @@ describe("ReviewService", () => {
           });
           await store.insert(doc);
 
-          const before = await service.pending();
+          // SPEC-103 M3 — task is hidden from the default queue; `{ all: true }` restores it.
+          const before = await service.pending({ all: true });
           expect(before.ok).toBe(true);
           if (!before.ok) return;
           expect(before.value[0]!.meta).toMatchObject({ evidence_pass: 0, evidence_fail: 0 });
@@ -542,7 +552,7 @@ describe("ReviewService", () => {
           });
           expect(updateResult.ok).toBe(true);
 
-          const after = await service.pending();
+          const after = await service.pending({ all: true });
           expect(after.ok).toBe(true);
           if (!after.ok) return;
           expect(after.value[0]!.meta).toMatchObject({ evidence_pass: 1, evidence_fail: 0 });

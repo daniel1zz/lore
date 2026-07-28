@@ -40,6 +40,13 @@ export default defineCommand({
       type: "string",
       description: "Optional note recorded as the calibration record's delta_reasons[0]",
     },
+    "override-judgment": {
+      type: "string",
+      description:
+        "SPEC-103 M2 audited escape — id of an existing review_judgments row on this doc " +
+        "whose blocking verdict (or absence) to override. Skips the judgment-required " +
+        "gate for this call only; recorded on the approve audit entry as override_judgment_id.",
+    },
     json: {
       type: "boolean",
       description: "Output as JSON",
@@ -57,7 +64,12 @@ export default defineCommand({
         process.exit(2);
       }
       const reviewer = resolveActor(aliasResolution.value);
-      const result = await app.reviewService.approve(args.id as DocId, { reviewer });
+      const result = await app.reviewService.approve(args.id as DocId, {
+        reviewer,
+        ...(typeof args["override-judgment"] === "string"
+          ? { overrideJudgmentId: args["override-judgment"] }
+          : {}),
+      });
 
       if (!result.ok) {
         process.stderr.write(formatError(result.error) + "\n");

@@ -4,6 +4,13 @@
  * lore review --staleness [--limit] [--min-age-days] [--fail-on-candidate] [--json]
  * lore review <doc> --staleness [--fail-on-candidate] [--json]
  * lore review --staleness --list [--json]
+ * lore review backfill-ledger [--by] [--json]
+ *
+ * `backfill-ledger` (SPEC-103 §Mechanisms M2, §Design Decisions D3) is a reserved
+ * positional verb, intercepted BEFORE any of the AI-judge/staleness logic below:
+ * an idempotent one-shot sweep that fast-tracks every EXISTING draft ledger
+ * knowledge doc (assessment/retro/handoff/uat) to `approved` — no AI call, no
+ * flag-mutex interaction with `--pending`/`--staleness`/`--ai`.
  *
  * Structured AI review judgment (SPEC-034 §4) PLUS staleness probing (SPEC-044
  * §Design Decisions D6, D7, D9, D11). Orchestration pipe for the pre-existing REGULAR
@@ -266,6 +273,41 @@ export default defineCommand({
     },
   },
   async run({ args }) {
+    // SPEC-103 §Mechanisms M2, §Design Decisions D3 — `lore review backfill-ledger`
+    // reserved positional verb: idempotent one-shot ledger fast-track backfill,
+    // entirely orthogonal to the AI-judge review/staleness-probe pipeline below (no
+    // AI call, no flag mutex interaction) — intercepted FIRST, before Step 1's mutex
+    // checks (which would otherwise misinterpret "backfill-ledger" as a doc
+    // id/slug and fall through to a DOC_NOT_FOUND resolution attempt).
+    if (args.doc === "backfill-ledger") {
+      const { app } = loadLoreApp();
+      try {
+        const actor = resolveActor(typeof args.by === "string" ? args.by : undefined);
+        const result = await app.reviewService.backfillLedger({ actor });
+        if (!result.ok) {
+          process.stderr.write(formatError(result.error) + "\n");
+          process.exitCode = exitCode(result.error);
+          return;
+        }
+        if (args.json) {
+          console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
+        } else if (result.value.fast_tracked.length === 0) {
+          console.log("No draft ledger docs to backfill — already up to date.");
+        } else {
+          console.log(
+            `Fast-tracked ${result.value.fast_tracked.length} ledger doc(s): ` +
+              result.value.fast_tracked.join(", "),
+          );
+        }
+        for (const failure of result.value.failed) {
+          process.stderr.write(`Warning: failed to fast-track ${failure.slug}: ${failure.reason}\n`);
+        }
+        return;
+      } finally {
+        app.close();
+      }
+    }
+
     // ─── Step 1: argument mutex checks (synchronous, before any IO) ───────────
     const rawArgv = process.argv;
     const hasExplicitAi = rawArgv.includes("--ai");

@@ -91,6 +91,11 @@ const ALL_GATES_DISABLED_CONFIG = {
       "plan-promote": { enabled: false },
       "task-claim": { enabled: false },
     },
+    // SPEC-103 §Mechanisms M2 — `review-judgment` is a SEPARATE checkpoint from the
+    // four above (not covered by `gates."spec-promote".enabled` etc.); disabled here
+    // too so "ALL gates disabled" stays true to its name for every test that approves
+    // a spec/plan under this config.
+    review: { judgment_required_types: [] },
   },
 } as unknown as LoreConfig;
 
@@ -98,6 +103,20 @@ const ALL_GATES_DISABLED_CONFIG = {
 function openApp(config?: LoreConfig): App {
   return config === undefined ? createApp(dbPath()) : (createApp(dbPath(), config) as App);
 }
+
+/**
+ * SPEC-103 §Mechanisms M2 — this whole file predates the judgment-required gate, which
+ * is a SEPARATE, ADDITIVE checkpoint on `ReviewService.approve` for spec/adr docs
+ * (default `workflow.review.judgment_required_types: ["spec","adr"]`). Every test below
+ * that approves a spec/plan to exercise spec-promote/plan-promote/task-claim's OWN
+ * concern (not M2's) uses this config to isolate that concern — mirrors this file's own
+ * `ALL_GATES_DISABLED_CONFIG` precedent, disabling only the ORTHOGONAL new gate rather
+ * than every checkpoint.
+ */
+const JUDGMENT_NOT_REQUIRED_CONFIG = {
+  project: { name: "gate-enforcer-service-layer-test", author: "tester" },
+  workflow: { review: { judgment_required_types: [] } },
+} as unknown as LoreConfig;
 
 // ─── spec-create ──────────────────────────────────────────────────────────────
 
@@ -291,7 +310,7 @@ describe("GateEnforcer — spec-promote (via ReviewService.approve, default conf
   }
 
   it("NEGATIVE: approving a spec with ZERO declared acceptance criteria is BLOCKED", async () => {
-    const app = openApp();
+    const app = openApp(JUDGMENT_NOT_REQUIRED_CONFIG);
     try {
       const spec = await createSkeletalSpec(app);
       const result = await app.reviewService.approve(spec.id);
@@ -312,7 +331,7 @@ describe("GateEnforcer — spec-promote (via ReviewService.approve, default conf
   });
 
   it("HAPPY: approving a spec with ≥1 declared acceptance criterion PASSES", async () => {
-    const app = openApp();
+    const app = openApp(JUDGMENT_NOT_REQUIRED_CONFIG);
     try {
       const spec = await createSkeletalSpec(app);
       if (app.acService === undefined) throw new Error("AcService not wired");
@@ -384,7 +403,7 @@ describe("GateEnforcer — plan-promote (via ReviewService.approve, default conf
   });
 
   it("HAPPY: approving a plan whose ancestor spec is approved (+AC) PASSES", async () => {
-    const app = openApp();
+    const app = openApp(JUDGMENT_NOT_REQUIRED_CONFIG);
     try {
       const { specId, planId } = await createSpecParentedPlan(app);
       if (app.acService === undefined) throw new Error("AcService not wired");
@@ -466,7 +485,7 @@ describe("GateEnforcer — task-claim (via TaskWorkflowService.claim, default co
   });
 
   it("HAPPY: claiming a task whose plan's ancestor spec is approved PASSES", async () => {
-    const app = openApp();
+    const app = openApp(JUDGMENT_NOT_REQUIRED_CONFIG);
     try {
       const { specId, taskId } = await createSpecParentedTask(app);
       if (app.acService === undefined) throw new Error("AcService not wired");

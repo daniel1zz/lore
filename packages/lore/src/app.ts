@@ -40,6 +40,8 @@ import {
   resolveAttestationMinRatio,
   resolveTraceEnabled,
   resolveTraceRetentionDays,
+  resolveLedgerAutoApprove,
+  resolveJudgmentRequiredTypes,
   type LoreConfig,
   type VerifyEnvConfig,
   AiConfigSchema,
@@ -567,6 +569,14 @@ function buildAppFromSqlite(
   traceRecorder?: TraceRecorder,
   surfaceBox: { current: CallerSurface } = { current: "cli" },
   pruneTrigger?: () => void,
+  // SPEC-103 §Mechanisms M1/M2 — resolved config values (`resolveLedgerAutoApprove`/
+  // `resolveJudgmentRequiredTypes`, `@lore/core`), threaded the SAME way every other
+  // resolved-config-value param above is (`claimTtlMinutes` precedent) — never a raw
+  // `LoreConfig` reference passed into either service. Defaults mirror the Zod
+  // schema's own defaults so a caller that omits them (bare test construction) still
+  // gets the SAME "default" reading `resolveLedgerAutoApprove(undefined)` would.
+  ledgerAutoApprove: boolean = true,
+  judgmentRequiredTypes: readonly string[] = ["spec", "adr"],
 ): App {
   const db = store.getDatabase();
   // reason: claimTtlMinutes flows into DocSummary.meta's task.claim_stale (SPEC-036 §2
@@ -576,7 +586,14 @@ function buildAppFromSqlite(
   // CorpusService gates spec-create (_createImpl) and spec-promote reached via `set`.
   // 5th arg wires SPEC-102's OPTIONAL TraceRecorder (undefined when trace.enabled
   // resolves false) — CorpusService.get/search fire a fire-and-forget trace row.
-  const corpusService = new CorpusService(store, telemetry, claimTtlMinutes, gateEnforcer, traceRecorder);
+  const corpusService = new CorpusService(
+    store,
+    telemetry,
+    claimTtlMinutes,
+    gateEnforcer,
+    traceRecorder,
+    ledgerAutoApprove,
+  );
   const outlineService = new OutlineService(store);
   // reason: own telemetry wiring restores parity with CorpusService (D8) — TaskWorkflowService
   // never routes writes through CorpusService (cross-service calls forbidden). SPEC-025 §3 D5, D8.
@@ -627,10 +644,17 @@ function buildAppFromSqlite(
     // extension), not a second config read. 3rd arg wires GateEnforcer (retro follow-up
     // item 8) — approve() gates spec-promote (spec docs) and plan-promote (plan docs,
     // via the same corpusService.getPlanBundle port TaskWorkflowService above uses).
-    reviewService: new ReviewService(store, claimTtlMinutes, {
-      enforcer: gateEnforcer,
-      getPlanBundle: corpusService.getPlanBundle.bind(corpusService),
-    }),
+    // reason: SPEC-103 §Mechanisms M2 — 4th/5th args wire the judgment-required
+    // gate's IO dependency (judgmentService, constructed above) and its resolved
+    // per-type config value (judgmentRequiredTypes), mirroring the claimTtlMinutes/
+    // gateEnforcer resolved-value DI shape every other optional dependency here uses.
+    reviewService: new ReviewService(
+      store,
+      claimTtlMinutes,
+      { enforcer: gateEnforcer, getPlanBundle: corpusService.getPlanBundle.bind(corpusService) },
+      judgmentService,
+      judgmentRequiredTypes,
+    ),
     versionService: new VersionService(store),
     outlineService,
     migrationService: new MigrationService(store),
@@ -861,6 +885,14 @@ function buildAppFromTurso(
   surfaceBox: { current: CallerSurface } = { current: "cli" },
   localTraceStore?: SQLiteStore,
   pruneTrigger?: () => void,
+  // SPEC-103 §Mechanisms M1/M2 — resolved config values (`resolveLedgerAutoApprove`/
+  // `resolveJudgmentRequiredTypes`, `@lore/core`), threaded the SAME way every other
+  // resolved-config-value param above is (`claimTtlMinutes` precedent) — never a raw
+  // `LoreConfig` reference passed into either service. Defaults mirror the Zod
+  // schema's own defaults so a caller that omits them (bare test construction) still
+  // gets the SAME "default" reading `resolveLedgerAutoApprove(undefined)` would.
+  ledgerAutoApprove: boolean = true,
+  judgmentRequiredTypes: readonly string[] = ["spec", "adr"],
 ): App {
   const apiKeyDb = new Database(dbPath);
   // reason: claimTtlMinutes flows into DocSummary.meta's task.claim_stale (SPEC-036 §2
@@ -869,7 +901,14 @@ function buildAppFromTurso(
   // reason: 4th arg wires GateEnforcer (retro follow-up item 8) — see buildAppFromSqlite's
   // identical comment. 5th arg wires SPEC-102's OPTIONAL TraceRecorder — see
   // buildAppFromSqlite's identical comment.
-  const corpusService = new CorpusService(store, telemetry, claimTtlMinutes, gateEnforcer, traceRecorder);
+  const corpusService = new CorpusService(
+    store,
+    telemetry,
+    claimTtlMinutes,
+    gateEnforcer,
+    traceRecorder,
+    ledgerAutoApprove,
+  );
   const outlineService = new OutlineService(store);
   // reason: extracted to a local (see buildAppFromSqlite's identical comment) so
   // VerifyRunnerService can bind its recordVerifiedEvidence method below. 5th arg
@@ -907,10 +946,17 @@ function buildAppFromTurso(
     // path feeds PendingDoc.meta's task.claim_stale too (SPEC-036 §2 D3 pending-queue
     // extension), not a second config read. 3rd arg wires GateEnforcer — see
     // buildAppFromSqlite's identical comment.
-    reviewService: new ReviewService(store, claimTtlMinutes, {
-      enforcer: gateEnforcer,
-      getPlanBundle: corpusService.getPlanBundle.bind(corpusService),
-    }),
+    // reason: SPEC-103 §Mechanisms M2 — 4th/5th args wire the judgment-required
+    // gate's IO dependency (judgmentService, constructed above) and its resolved
+    // per-type config value (judgmentRequiredTypes), mirroring the claimTtlMinutes/
+    // gateEnforcer resolved-value DI shape every other optional dependency here uses.
+    reviewService: new ReviewService(
+      store,
+      claimTtlMinutes,
+      { enforcer: gateEnforcer, getPlanBundle: corpusService.getPlanBundle.bind(corpusService) },
+      judgmentService,
+      judgmentRequiredTypes,
+    ),
     versionService: new VersionService(store),
     outlineService,
     migrationService: new MigrationService(store),
@@ -1160,6 +1206,11 @@ export function createApp(
   // can never disagree on which floor a plan is measured against.
   const attestationMinRatio = resolveAttestationMinRatio(config);
 
+  // Tiered-review config (SPEC-103 §Mechanisms M1/M2) — defaults to `true` /
+  // `["spec","adr"]` when config/workflow/review section absent.
+  const ledgerAutoApprove = resolveLedgerAutoApprove(config);
+  const judgmentRequiredTypes = resolveJudgmentRequiredTypes(config);
+
   // reason: dbPath is always "<repoRoot>/.lore/lore.db" (findLoreDbPath's contract,
   // adapters/cli/utils.ts) — two levels up recovers the project root `lore verify`
   // spawns commands from (SPEC-039 §2). Computed here rather than added as a new
@@ -1249,6 +1300,8 @@ export function createApp(
       traceRecorder,
       surfaceBox,
       pruneTrigger,
+      ledgerAutoApprove,
+      judgmentRequiredTypes,
     );
   }
 
@@ -1324,6 +1377,8 @@ export function createApp(
         surfaceBox,
         localTraceStore,
         pruneTrigger,
+        ledgerAutoApprove,
+        judgmentRequiredTypes,
       ),
     };
   } catch (e) {

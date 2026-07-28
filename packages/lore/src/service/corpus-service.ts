@@ -43,6 +43,7 @@ import {
   ORDINAL_REGISTRY,
   isSelfDeclaredOrdinalTitle,
   computePlanCloseCascadeTargets,
+  isLedgerKnowledgeSubType,
 } from "@lore/core";
 import type {
   CreateDocInput,
@@ -398,6 +399,16 @@ export class CorpusService {
    *   before and never on a failed lookup. Absent (the default) → zero trace writes,
    *   byte-identical to pre-SPEC-102 behavior — same "absent in bare tests, present in
    *   production" shape as `gateEnforcer`.
+   * @param ledgerAutoApprove - OPTIONAL SPEC-103 §Mechanisms M1 kill switch — resolved
+   *   config value (`resolveLedgerAutoApprove`, `@lore/core`, default `true`). When
+   *   `true`, `_createImpl` fast-tracks a ledger knowledge doc (assessment/retro/
+   *   handoff/uat, `isLedgerKnowledgeSubType`) draft→approved in the SAME create write,
+   *   and `set` applies the atomic reset→re-fast-track (D4) on an edit to an approved
+   *   ledger doc. Absent/`undefined` (every bare `new CorpusService(store)` unit-test
+   *   construction) → feature OFF, byte-identical to pre-SPEC-103 behavior — same
+   *   "absent in bare tests, present in production" shape as `gateEnforcer`/
+   *   `traceRecorder`; only `app.ts`'s composition root resolves and wires the real
+   *   config-default-`true` value.
    */
   constructor(
     private readonly store: StoreInterface,
@@ -405,6 +416,7 @@ export class CorpusService {
     private readonly claimTtlMinutes?: number,
     private readonly gateEnforcer?: GateEnforcer,
     private readonly traceRecorder?: TraceRecorder,
+    private readonly ledgerAutoApprove?: boolean,
   ) {
     this.telemetry = telemetry;
   }
@@ -924,6 +936,18 @@ export class CorpusService {
         ? { ...specKindDefaultedExtra, file_anchors: normalizedFileAnchors }
         : specKindDefaultedExtra;
 
+    // SPEC-103 §Mechanisms M1 — ledger fast-track (D1: knowledge sub_types
+    // assessment/retro/handoff/uat ONLY; `task` is deliberately excluded, see
+    // `isLedgerKnowledgeSubType`'s own JSDoc). Reads `resolvedExtra` — the SAME
+    // object that becomes `doc.extra` below — never a second, independently-derived
+    // sub_type source. `this.ledgerAutoApprove === true` (not `!== false`) means
+    // every bare unit-test construction (the field defaults to `undefined`) keeps
+    // this OFF, byte-identical to pre-SPEC-103 behavior (constructor JSDoc).
+    const shouldLedgerFastTrack =
+      this.ledgerAutoApprove === true &&
+      data.type === "knowledge" &&
+      isLedgerKnowledgeSubType(resolvedExtra["sub_type"]);
+
     // SPEC-084 §Changed semantics "Allocation timing" — WHETHER to allocate a
     // store-atomic ordinal is decided HERE (service layer); HOW (MAX+1 +
     // insert + bounded retry, transaction-scoped) lives entirely in
@@ -1005,7 +1029,10 @@ export class CorpusService {
       type: data.type,
       role,
       title: data.title,
-      status: "draft",
+      // SPEC-103 §Mechanisms M1 — a fast-tracked ledger doc lands "approved" in
+      // THIS same write; every other doc (including a ledger sub_type when the
+      // kill switch is off) keeps the pre-existing "draft" default.
+      status: shouldLedgerFastTrack ? "approved" : "draft",
       priority: data.priority ?? "medium",
       // reason: canonicalise at write time so corpus content is always normalised.
       // Prevents roundtrip whitespace drift between export-docs and sync-docs.
@@ -1071,7 +1098,15 @@ export class CorpusService {
       // reason: SPEC-035 §2 — every audit writer stamps the version its action
       // produced (`details.version`), so AuditService.verify can join versions⋈audit
       // on an exact (doc_id, version) pair. Creation always produces version 1.
-      details: { type: doc.type, slug: doc.slug, version: 1 },
+      // `auto: "ledger-fast-track"` (SPEC-103 M1, AC-TIER-1) marks the ONE audit row
+      // this create write produces as the fast-track event — never a second row for
+      // create (unlike `set`'s edit-reset case, which needs two, see D4).
+      details: {
+        type: doc.type,
+        slug: doc.slug,
+        version: 1,
+        ...(shouldLedgerFastTrack ? { auto: "ledger-fast-track" } : {}),
+      },
     };
 
     // reason: SPEC-084 D1 follow-up (closes the BUG-002 window this method's
@@ -2037,6 +2072,56 @@ export class CorpusService {
       },
     );
     if (!updateResult.ok) return updateResult;
+
+    // SPEC-103 §Mechanisms M1, §Design Decisions D4 — uniform edit-reset semantics:
+    // an edit to an approved ledger doc (assessment/retro/handoff/uat) still applies
+    // the SAME approved→draft reset every other type gets (the write immediately
+    // above, unchanged), THEN atomically re-fast-tracks it back to approved in a
+    // SECOND `updateWithProvenance` call within this SAME `set()` invocation — both
+    // steps audited (this row's `details.auto = "ledger-fast-track"` names the
+    // second step; the first write's own "update" audit row, already committed
+    // above, is unchanged and untagged). One extra audit row + version bump is the
+    // accepted cost (D4 rationale: "bypass-the-reset alternative rejected — history
+    // inconsistency") — version history stays exactly as type-uniform as every other
+    // approved-doc content/title edit, just with one additional row appended.
+    // `effectiveExtraForLedger` mirrors this method's pre-existing `effectiveExtra`
+    // pattern (spec-promote branch above): the patch's own `extra` when supplied,
+    // else the doc's unchanged existing extra — never a second, divergent read.
+    if (isApprovedAutoResetToDraft && this.ledgerAutoApprove === true) {
+      const effectiveExtraForLedger = (docPatch.extra ?? existing.extra) as Record<string, unknown>;
+      if (existing.type === "knowledge" && isLedgerKnowledgeSubType(effectiveExtraForLedger["sub_type"])) {
+        const resetVersion = updateResult.value.version;
+        const refastVersion = resetVersion + 1;
+        const refastVersionRecord: VersionRecord = {
+          doc_id: existing.id,
+          version: refastVersion,
+          content: updateResult.value.content,
+          extra: updateResult.value.extra,
+          status: "approved",
+          title: updateResult.value.title,
+          action: "update",
+          created_at: now,
+          created_by: versionRecord.created_by,
+          slug: updateResult.value.slug,
+        };
+        const refastResult = await this.store.updateWithProvenance(
+          existing.id,
+          { status: "approved", version: refastVersion, updated_at: now },
+          { expected_version: resetVersion },
+          refastVersionRecord,
+          {
+            timestamp: now,
+            actor: resolvedActor,
+            session_id: existing.id,
+            action: "update",
+            doc_id: existing.id,
+            details: { auto: "ledger-fast-track", version: refastVersion, reset_version: resetVersion },
+          },
+        );
+        if (!refastResult.ok) return refastResult;
+        return ok(refastResult.value);
+      }
+    }
 
     if (shouldAllocateOrdinalOnKindFlip) {
       // reason: SPEC-084 D1 — `allocateOrdinalForExisting` is the UPDATE-scoped

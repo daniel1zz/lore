@@ -301,7 +301,14 @@ function writeDomainOverviewProfileConfig() {
  */
 const DOMAIN_OVERVIEW_PROFILE_CONFIG = {
   project: { name: "gate-spec-promote-test", author: "tester" },
-  workflow: { verification_profiles: { "domain-overview": { min_acs: 0 } } },
+  workflow: {
+    verification_profiles: { "domain-overview": { min_acs: 0 } },
+    // SPEC-103 §Mechanisms M2 — `review-judgment` is a SEPARATE, ADDITIVE checkpoint
+    // (default `judgment_required_types: ["spec","adr"]`) this fixture predates;
+    // disabled here so this file's `reviewService.approve()` calls stay scoped to
+    // the verification-profile/spec-promote parity concern this file actually tests.
+    review: { judgment_required_types: [] },
+  },
 } as unknown as LoreConfig;
 
 /**
