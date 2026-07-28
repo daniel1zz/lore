@@ -12,7 +12,7 @@
 
 import type { StoreInterface } from "../store/store-interface.js";
 import type { TreeBlueprint, TreeNodeSpec } from "@lore/core";
-import type { DocType, DocId, DocRecord } from "@lore/core";
+import type { DocType, DocId, DocRecord, DocStatus } from "@lore/core";
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import { isValidParentType, ROOT_TYPES } from "@lore/core";
 import { ancestorChainWalk } from "@lore/core";
@@ -20,7 +20,20 @@ import { resolveActorWithSource } from "@lore/core/node";
 
 // ─── Public Types ──────────────────────────────────────────────────────────
 
-export type DriftKind = "missing" | "extra" | "misplaced" | "cycle" | "orphan";
+/**
+ * `"plan-terminality"` (spec-plan-closure-must-be-loud-terminality-divergence-
+ * silent DD-1) is deliberately EXCLUDED from `fix()`'s fixable-kind filter
+ * below — auto-transitioning a plan to `archived` would fire the `plan-close`
+ * governance gate from inside a repair command. It is reported only; the
+ * remediation command is left for a human/agent to run deliberately.
+ */
+export type DriftKind =
+  | "missing"
+  | "extra"
+  | "misplaced"
+  | "cycle"
+  | "orphan"
+  | "plan-terminality";
 
 export interface TreeDrift {
   kind: DriftKind;
@@ -141,6 +154,36 @@ export class TreeCheckService {
       }
     }
 
+    // Step 4.5: plan-terminality drifts (DD-1, spec-plan-closure-must-be-loud-
+    // terminality-divergence-silent) — a `plan` doc whose OWN status is not
+    // yet terminal while every child `task` doc IS terminal. This is the
+    // "work finished but the plan was never walked through VALID_TRANSITIONS
+    // to close it" signal that let a session report a plan closed while its
+    // own doc sat in `draft` and the `plan-close` gate never fired.
+    //
+    // ⛔ Vacuous guard: a plan with ZERO child tasks is never flagged — "no
+    // evidence of non-terminality" is not "proof the plan is done". A
+    // detector that fired on every freshly-created plan would be strictly
+    // worse than shipping no detector at all.
+    for (const d of allDocs) {
+      if (d.type !== "plan") continue;
+      if (cyclic.has(d.id)) continue; // cyclic tree state is already reported via `cycle`
+      if (isTerminalDocStatus(d.status)) continue; // nothing to announce — already closed
+
+      const childTasks = allDocs.filter((c) => c.type === "task" && c.parent_id === d.id);
+      if (childTasks.length === 0) continue; // vacuous guard — DD-1 boundary case
+      if (!childTasks.every((c) => isTerminalDocStatus(c.status))) continue;
+
+      drifts.push({
+        kind: "plan-terminality",
+        actual: { id: d.id, slug: d.slug, type: d.type, parent_id: d.parent_id },
+        detail:
+          `Plan ${d.slug} has all ${childTasks.length} child task(s) terminal ` +
+          `(archived/deprecated) but the plan itself is still "${d.status}". ` +
+          `The plan-close gate never evaluated it. Run: lore set ${d.slug} --status archived`,
+      });
+    }
+
     // Step 5: blueprint walk — missing/extra
     walkBlueprint(blueprint.root, null, allDocs, byId, cyclic, misplacedIds, drifts);
 
@@ -173,6 +216,10 @@ export class TreeCheckService {
     if (checkR.ok === false) return checkR;
 
     const { drifts } = checkR.value;
+    // ⛔ `"plan-terminality"` is deliberately absent from this allow-list — see
+    // the `DriftKind` JSDoc. Auto-transitioning a plan here would fire the
+    // `plan-close` governance gate from inside a repair command; it is
+    // reported by `checkTree()` above but never auto-fixed.
     const fixableDrifts = drifts.filter(
       (d) => (d.kind === "orphan" || d.kind === "misplaced") && d.actual !== undefined,
     );
@@ -391,6 +438,18 @@ function detectPhantomParentCycles(
   }
 
   return phantomSkips;
+}
+
+/**
+ * A doc's status is terminal — `VALID_TRANSITIONS[status]` is empty
+ * (`packages/core/src/schemas.ts`) — iff it is `archived` or `deprecated`.
+ * Local to this module (mirrors the same inline check in
+ * `packages/core/src/task-workflow.ts`'s `evaluateReadiness`); not imported
+ * from `archive-candidates.ts`'s private `TERMINAL_STATUSES`, which is not
+ * exported from `@lore/core`.
+ */
+function isTerminalDocStatus(status: DocStatus): boolean {
+  return status === "archived" || status === "deprecated";
 }
 
 /**
