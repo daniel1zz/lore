@@ -766,16 +766,25 @@ export function attestationFloor(
 }
 
 /**
- * The two structural reasons `lore verify` cannot run against a plan
- * (spec-verify-reachability-plan-promote-early-warning §Scope M1) — `null`
- * when reachable. A discriminated companion to `ReachabilityResult.reachable`
- * rather than a bare boolean: callers (the `plan-promote` advisory, `plan-
- * close`'s `feedAttestationFloor` branch) render DIFFERENT prose per reason,
- * so collapsing this to `boolean` would force them to re-derive it themselves
- * — the exact "two parallel reachability computations" shape §Design
- * Decisions D2 forbids.
+ * The structural reasons `lore verify` cannot run against a plan
+ * (spec-verify-reachability-plan-promote-early-warning §Scope M1; `"unknown"`
+ * added by spec-plan-closure-must-be-loud-terminality-divergence-silent
+ * §Design Decisions DD-4(b)) — `null` when reachable. A discriminated
+ * companion to `ReachabilityResult.reachable` rather than a bare boolean:
+ * callers (the `plan-promote` advisory, `plan-close`'s `feedAttestationFloor`
+ * branch) render DIFFERENT prose per reason, so collapsing this to `boolean`
+ * would force them to re-derive it themselves — the exact "two parallel
+ * reachability computations" shape §Design Decisions D2 forbids.
+ *
+ * `"unknown"` is distinct from `"parent-not-spec"` on purpose (DD-4(b)): the
+ * former means "the caller never told me whether this plan has a spec-tier
+ * ancestor" (an absent optional field), the latter means "the caller RESOLVED
+ * an ancestor and it is genuinely not a spec" (a determined fact). Collapsing
+ * both onto `"parent-not-spec"` is exactly the "absence of evidence rendered
+ * as evidence of absence" bug DD-4(b) closes — a gate must never assert a
+ * corpus fact it was never given.
  */
-export type ReachabilityWhy = "parent-not-spec" | "no-script-acs" | null;
+export type ReachabilityWhy = "parent-not-spec" | "no-script-acs" | "unknown" | null;
 
 /** Return shape of {@link verifyReachability}. */
 export interface ReachabilityResult {
@@ -798,13 +807,15 @@ export interface ReachabilityResult {
  * `planPromoteReachabilityAdvisory`) and `plan-close`'s `feedAttestationFloor`
  * branch — they can never disagree about whether a given plan is reachable.
  *
- * @param planParentType - The plan's resolved ancestor-spec doc type, or
- *   `null`/`undefined` when no spec-tier ancestor resolved at all (mirrors
- *   `GateContext.hasSpecParent`'s vacuous-pass shape elsewhere in this
- *   checkpoint family — the caller passes `"spec"` when `hasSpecParent` is
- *   `true`, `null` otherwise). Anything other than the literal `"spec"` is
- *   `"parent-not-spec"` — there is no partial credit for "close but not a
- *   spec" (e.g. a `prd`-parented or unparented plan).
+ * @param planParentType - The plan's resolved ancestor-spec doc type. THREE
+ *   distinct inputs, not two (DD-4(b)): `"spec"` when `hasSpecParent` is
+ *   `true`; `null` when the caller RESOLVED that there is no spec-tier
+ *   ancestor (a determined fact — mirrors `GateContext.hasSpecParent ===
+ *   false`); `undefined` when the caller never populated the field at all
+ *   (mirrors `GateContext.hasSpecParent` being absent/undefined — "I don't
+ *   know", not "I checked and there isn't one"). Any other string (a
+ *   caller-RESOLVED, genuinely non-spec type, e.g. `"prd"`) is treated the
+ *   same as `null` — there is no partial credit for "close but not a spec".
  * @param parentSpecScriptAcCount - Count of `verify.mode === "script"`
  *   acceptance criteria declared on the resolved ancestor spec (NOT the total
  *   AC count `upstreamHasAcceptanceCriteria` already checks — a spec can
@@ -813,10 +824,14 @@ export interface ReachabilityResult {
  *   never resolved a spec, or resolved one with no declared criteria at all)
  *   is treated identically to `0`.
  * @returns `{reachable: true, why: null}` when `planParentType === "spec"` AND
- *   `parentSpecScriptAcCount` is `>= 1`; `{reachable: false, why:
- *   "parent-not-spec"}` when `planParentType !== "spec"`; `{reachable: false,
- *   why: "no-script-acs"}` when the parent IS a spec but declares zero
- *   script-mode criteria.
+ *   `parentSpecScriptAcCount` is `>= 1`; `{reachable: false, why: "unknown"}`
+ *   when `planParentType === undefined` (caller never told us); `{reachable:
+ *   false, why: "parent-not-spec"}` when `planParentType` is `null` or any
+ *   non-`"spec"` string (caller resolved a genuinely non-spec/absent
+ *   ancestor); `{reachable: false, why: "no-script-acs"}` when the parent IS
+ *   a spec but declares zero script-mode criteria.
+ * @example
+ * verifyReachability(undefined, undefined); // => { reachable: false, why: "unknown" } — caller never asked
  * @example
  * verifyReachability(null, undefined);      // => { reachable: false, why: "parent-not-spec" }
  * @example
@@ -832,6 +847,14 @@ export function verifyReachability(
   planParentType: string | null | undefined,
   parentSpecScriptAcCount: number | undefined,
 ): ReachabilityResult {
+  // reason: DD-4(b) — `undefined` means "the caller never populated this
+  // field", a DISTINCT outcome from `null`/a resolved non-spec string ("the
+  // caller resolved a genuinely non-spec ancestor"). Collapsing the two would
+  // reintroduce the exact class bug this fix removes: rendering absence of
+  // information as a definite negative corpus fact.
+  if (planParentType === undefined) {
+    return { reachable: false, why: "unknown" };
+  }
   if (planParentType !== "spec") {
     return { reachable: false, why: "parent-not-spec" };
   }

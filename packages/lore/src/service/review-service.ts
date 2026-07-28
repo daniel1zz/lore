@@ -32,7 +32,11 @@ import {
 } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
-import { buildUpstreamSpecContext, type GateContext } from "./checkpoint-registry.js";
+import {
+  buildUpstreamSpecContext,
+  countScriptModeAcceptanceCriteria,
+  type GateContext,
+} from "./checkpoint-registry.js";
 import type { GateDependencies } from "./gate-enforcer.js";
 import type { JudgmentService } from "./judgment-service.js";
 
@@ -945,33 +949,16 @@ interface ApprovalGateOutcome {
   readonly reachabilityAdvisories: string[];
 }
 
-/**
- * Counts `verify.mode === "script"` acceptance criteria declared on `spec.extra
- * .acceptance_criteria` — the `GateContext.parentSpecScriptAcCount` field
- * `verifyReachability` consumes (spec-verify-reachability-plan-promote-early-
- * warning §Scope M1/M2, `checkpoint-registry.ts`'s own field JSDoc). Computed
- * HERE rather than folded into `buildUpstreamSpecContext` (`checkpoint-
- * registry.ts`) — that function's exact-shape output is byte-pinned by
- * `checkpoint-registry.test.ts`'s `toEqual` regression assertion for EVERY
- * caller of it, including `task-claim`, which never reads this field at all;
- * adding a always-defined field there would break that pin.
- *
- * @param spec - The resolved ancestor spec `DocRecord` (`PlanBundle.spec`).
- * @returns The count of script-mode ACs; `0` for a spec with no/invalid
- *   `extra.acceptance_criteria` — a concrete `0`, not `undefined`, since
- *   `verifyReachability` treats the two identically anyway (gate-predicates.ts's
- *   own module invariant on this parameter).
- * @example
- * countScriptModeAcceptanceCriteria({ extra: { acceptance_criteria: [
- *   { id: "AC-1", statement: "x", verify: { mode: "script", oracle: "test", command: "bun test" } },
- *   { id: "AC-2", statement: "y", verify: { mode: "human" } },
- * ] } } as DocRecord); // => 1
- */
-function countScriptModeAcceptanceCriteria(spec: DocRecord): number {
-  const parsed = specAcceptanceCriteriaSchema.safeParse(spec.extra["acceptance_criteria"]);
-  if (!parsed.success) return 0;
-  return parsed.data.filter((criterion) => criterion.verify.mode === "script").length;
-}
+// reason: `countScriptModeAcceptanceCriteria` RELOCATED to `checkpoint-
+// registry.ts` (spec-plan-closure-must-be-loud-terminality-divergence-silent
+// §Design Decisions DD-4(a)) — `CorpusService.set`'s plan-close branch needs
+// the SAME derivation for `GateContext.parentSpecScriptAcCount` and
+// `CorpusService` may never import from `ReviewService` (this module's own
+// "no cross-service imports" invariant, see `service/CLAUDE.md`). Moved
+// beside its sibling `buildUpstreamSpecContext` — a non-service gate-
+// infrastructure module both `CorpusService` and `ReviewService` already
+// import from — rather than duplicated (SSOT: one script-mode-AC counter for
+// the whole codebase). Imported below, not redefined.
 
 /**
  * Projects a full DocRecord to the {@link PendingDoc} row shape, wrapping
