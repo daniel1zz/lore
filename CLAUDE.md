@@ -34,6 +34,7 @@ Building Lore is itself run **through** the Lore-governed workflow (corpus chain
 - **Main-checkout oracle runs need actor identity** (`LORE_ACTOR=agent:main-orchestrator`) — mechanized as the resolveActor OS-fallback advisory (SPEC-035 hotfix).
 - **Distribution-first fixes**: an improvement landed only on a machine-local or personal surface (`~/.claude/*`, installed copies) does not exist for consumers — every discipline/hook/skill/prose/number change must name its delivery surface (assets/ SSOT → manifest → setup/binary; config schema for numbers) before it counts as done; a dev symlink into assets/ is a shadow, not a pipeline (`adr-distribution-first-every-improvement-names-its-consumer`).
 - **Spec close-outs write NOTHING to CLAUDE.md** — even one-line index entries proved a bloat attractor (26.7KB→52.8KB in 4 days via close-out clauses; then a 73-line/10.4KB index vs a constant byte ceiling); the corpus is the only spec index (`adr-claude-md-specs-section-is-pointer-only-per-spec-index`).
+- **A full-suite verdict requires a CLEAN tree at a named commit** — `git status --porcelain` empty (or run it in an isolated worktree). A dirty concurrent checkout turns another session's in-flight edits and a missing/stale `dist/lore` into phantom regressions of your own: same commit measured 20+ failures dirty vs 4 (all foreign RED tests) clean.
 
 ## Commands
 
