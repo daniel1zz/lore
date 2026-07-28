@@ -76,6 +76,7 @@ import type { TreeBlueprint } from "@lore/core";
 import type { GateEnforcer } from "./gate-enforcer.js";
 import type { GateContext } from "./checkpoint-registry.js";
 import { computeArmedGates } from "./checkpoint-registry.js";
+import { attestationExemptKindValid } from "./gate-predicates.js";
 import { resolveDoc, ULID_REGEX } from "./resolve.js";
 
 /**
@@ -1799,7 +1800,10 @@ export class CorpusService {
     //   - `attestationFloor` (SPEC-069, OPT-OUT): evaluated for EVERY closing plan unless
     //     it declares `extra.attestation_exempt: true` PLUS a non-empty
     //     `extra.attestation_exempt_reason` (a bare `attestation_exempt: true` with no
-    //     reason is treated as NOT exempt — D1's "缺 reason 视同未豁免" rule).
+    //     reason is treated as NOT exempt — D1's "缺 reason 视同未豁免" rule) PLUS a valid
+    //     `extra.attestation_exempt_kind` (spec-verify-reachability-plan-promote-early-
+    //     warning §Scope M3 / §Design Decisions D3 — a missing/invalid kind does NOT
+    //     satisfy the floor, `attestationFloor` still runs as if not exempt).
     //   - `prdOutlineSynced` (SPEC-080 §C4, OPT-IN via a DEFAULT-OFF config knob):
     //     evaluated only when `GateEnforcer.isPrdSyncEnabled()` is true AND the plan
     //     declares no valid `extra.prd_sync_exempt` — see the dedicated block below.
@@ -1824,6 +1828,16 @@ export class CorpusService {
         effectiveExtra["attestation_exempt"] === true &&
         typeof attestationExemptReason === "string" &&
         attestationExemptReason.trim().length > 0;
+      // reason: spec-verify-reachability-plan-promote-early-warning §Scope M3 —
+      // the raw, UNVALIDATED kind is threaded through to `checkPlanClose`
+      // (`attestationExemptKindValid` there is the SOLE fail-loud enforcement
+      // point); `exemptKindValid` here is only a local optimization signal for
+      // whether `getPlanBundle` needs fetching below, re-deriving the SAME
+      // predicate rather than duplicating its enum logic.
+      const attestationExemptKindRaw = effectiveExtra["attestation_exempt_kind"];
+      const attestationExemptKind =
+        typeof attestationExemptKindRaw === "string" ? attestationExemptKindRaw : undefined;
+      const exemptKindValid = attestationExemptKindValid(attestationExempt, attestationExemptKind).ok;
       const prdSyncEnabled = this.gateEnforcer.isPrdSyncEnabled();
       const prdSyncExempt = extractPrdSyncExempt({ extra: effectiveExtra }) !== undefined;
 
@@ -1841,18 +1855,27 @@ export class CorpusService {
         };
       }
 
-      planCloseCtx = { ...planCloseCtx, attestationExempt };
+      planCloseCtx = {
+        ...planCloseCtx,
+        attestationExempt,
+        ...(attestationExemptKind !== undefined ? { attestationExemptKind } : {}),
+      };
 
       // reason: SPEC-080 §C4 — the attestation-floor branch and the
       // prdOutlineSynced branch both need `getPlanBundle` (the former for its
       // tasks' evidence counts, the latter for its tasks' claim timestamps AND
       // its resolved ancestor spec) — fetched AT MOST ONCE for this whole
-      // block, never once per sub-gate.
-      const needsBundle = !attestationExempt || (prdSyncEnabled && !prdSyncExempt);
+      // block, never once per sub-gate. `!exemptKindValid` (spec-verify-
+      // reachability-plan-promote-early-warning §Scope M3) joins the SAME
+      // condition `checkPlanClose` uses to decide whether `attestationFloor`
+      // itself runs — a plan claiming exemption with an invalid/missing kind
+      // still needs its tasks' evidence counts for the feeding pack's
+      // offending-task diagnostics.
+      const needsBundle = !attestationExempt || !exemptKindValid || (prdSyncEnabled && !prdSyncExempt);
       const bundleResult = needsBundle ? await this.getPlanBundle(existing.id) : undefined;
       if (bundleResult !== undefined && !bundleResult.ok) return bundleResult;
 
-      if (!attestationExempt) {
+      if (!attestationExempt || !exemptKindValid) {
         // reason: SPEC-075 D6 — the evidence/attested counting SSOT moved to
         // @lore/core's buildTaskAttestationInfos (evidence-panel.ts), which the
         // dashboard adjudication workbench's plan Evidence-panel branch also

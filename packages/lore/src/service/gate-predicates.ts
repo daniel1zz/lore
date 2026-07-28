@@ -39,6 +39,10 @@
  *   single incoming criterion at `lore ac add` time. This predicate re-lints the
  *   WHOLE declared set as the gate-layer backstop; the two enforcement points never
  *   maintain independent wordlists or measurable-token heuristics.
+ * @invariant `attestationExemptKindValid`'s notion of "valid exemption kind" is
+ *   sourced exclusively from `attestationExemptKindSchema` (`@lore/core`,
+ *   schemas.ts) — never a locally hardcoded literal union, same precedent as
+ *   `specKindValid`/`SPEC_KINDS` above.
  */
 
 import {
@@ -50,6 +54,7 @@ import {
   lintAcQuantifiability,
   checkOracleCoverage,
   deriveAttestationSummary,
+  attestationExemptKindSchema,
   type AcceptanceCriterion,
   type DocType,
   type TaskAttestationInfo,
@@ -756,6 +761,134 @@ export function attestationFloor(
   const summary = deriveAttestationSummary(tasks ?? [], minRatio);
   if (!summary.meets_floor) {
     return { ok: false, reason: ATTESTATION_FLOOR_REASON, field: ATTESTATION_FLOOR_FIELD };
+  }
+  return { ok: true };
+}
+
+/**
+ * The two structural reasons `lore verify` cannot run against a plan
+ * (spec-verify-reachability-plan-promote-early-warning §Scope M1) — `null`
+ * when reachable. A discriminated companion to `ReachabilityResult.reachable`
+ * rather than a bare boolean: callers (the `plan-promote` advisory, `plan-
+ * close`'s `feedAttestationFloor` branch) render DIFFERENT prose per reason,
+ * so collapsing this to `boolean` would force them to re-derive it themselves
+ * — the exact "two parallel reachability computations" shape §Design
+ * Decisions D2 forbids.
+ */
+export type ReachabilityWhy = "parent-not-spec" | "no-script-acs" | null;
+
+/** Return shape of {@link verifyReachability}. */
+export interface ReachabilityResult {
+  /** `true` iff `lore verify <plan>` can structurally run against this plan. */
+  readonly reachable: boolean;
+  /** Which precondition is unmet; `null` iff `reachable`. */
+  readonly why: ReachabilityWhy;
+}
+
+/**
+ * Whether `lore verify` (`VerifyRunnerService.verifyPlan`) can structurally run
+ * against a plan, given its resolved ancestor-spec facts — the SAME two
+ * preconditions `verifyPlan` itself enforces (`verify-runner-service.ts`:
+ * `spec === undefined` ⇒ `"plan has no parent spec — nothing to verify"`; zero
+ * script-mode criteria ⇒ nothing for the runner to execute), reflected here as
+ * a pure, store-free PREDICTION of that outcome rather than a duplicate
+ * enforcement path. Two independent callers consume this ONE derivation
+ * (spec-verify-reachability-plan-promote-early-warning §Design Decisions D2):
+ * `plan-promote`'s early-warning advisory (`checkpoint-registry.ts`'s
+ * `planPromoteReachabilityAdvisory`) and `plan-close`'s `feedAttestationFloor`
+ * branch — they can never disagree about whether a given plan is reachable.
+ *
+ * @param planParentType - The plan's resolved ancestor-spec doc type, or
+ *   `null`/`undefined` when no spec-tier ancestor resolved at all (mirrors
+ *   `GateContext.hasSpecParent`'s vacuous-pass shape elsewhere in this
+ *   checkpoint family — the caller passes `"spec"` when `hasSpecParent` is
+ *   `true`, `null` otherwise). Anything other than the literal `"spec"` is
+ *   `"parent-not-spec"` — there is no partial credit for "close but not a
+ *   spec" (e.g. a `prd`-parented or unparented plan).
+ * @param parentSpecScriptAcCount - Count of `verify.mode === "script"`
+ *   acceptance criteria declared on the resolved ancestor spec (NOT the total
+ *   AC count `upstreamHasAcceptanceCriteria` already checks — a spec can
+ *   satisfy THAT predicate with only `ai`/`human`-mode criteria and still be
+ *   zero-script-AC, i.e. `lore verify`-unreachable). `undefined` (the caller
+ *   never resolved a spec, or resolved one with no declared criteria at all)
+ *   is treated identically to `0`.
+ * @returns `{reachable: true, why: null}` when `planParentType === "spec"` AND
+ *   `parentSpecScriptAcCount` is `>= 1`; `{reachable: false, why:
+ *   "parent-not-spec"}` when `planParentType !== "spec"`; `{reachable: false,
+ *   why: "no-script-acs"}` when the parent IS a spec but declares zero
+ *   script-mode criteria.
+ * @example
+ * verifyReachability(null, undefined);      // => { reachable: false, why: "parent-not-spec" }
+ * @example
+ * verifyReachability("prd", 3);             // => { reachable: false, why: "parent-not-spec" }
+ * @example
+ * verifyReachability("spec", 0);            // => { reachable: false, why: "no-script-acs" }
+ * @example
+ * verifyReachability("spec", undefined);    // => { reachable: false, why: "no-script-acs" } — boundary
+ * @example
+ * verifyReachability("spec", 2);            // => { reachable: true, why: null }
+ */
+export function verifyReachability(
+  planParentType: string | null | undefined,
+  parentSpecScriptAcCount: number | undefined,
+): ReachabilityResult {
+  if (planParentType !== "spec") {
+    return { reachable: false, why: "parent-not-spec" };
+  }
+  if ((parentSpecScriptAcCount ?? 0) < 1) {
+    return { reachable: false, why: "no-script-acs" };
+  }
+  return { reachable: true, why: null };
+}
+
+/** `attestationExemptKindValid`'s single machine-readable failure reason. */
+export const ATTESTATION_EXEMPT_KIND_INVALID_REASON = "ATTESTATION_EXEMPT_KIND_INVALID";
+
+/** The `PredicateResult.field` value `attestationExemptKindValid`'s failure carries. */
+export const ATTESTATION_EXEMPT_KIND_FIELD = "attestation-exempt-kind";
+
+/**
+ * `plan-close`'s exemption-kind-taxonomy predicate (spec-verify-reachability-
+ * plan-promote-early-warning §Scope M3 / §Design Decisions D3) — a bare
+ * `extra.attestation_exempt: true` with no typed `extra.attestation_exempt_kind`
+ * is exactly the silent-fallback shape this repo bans (see the project-level
+ * "no silent fallback" discipline); this predicate refuses it rather than
+ * letting the exemption quietly satisfy the floor. Vacuous PASS when `exempt`
+ * is not `true` at all — this predicate has nothing to say about a plan that
+ * never claimed an exemption (mirrors `attestationFloor`'s own opt-out shape
+ * one level up, `checkPlanClose` in `checkpoint-registry.ts`).
+ *
+ * @invariant Validity is sourced exclusively from `attestationExemptKindSchema`
+ *   (`@lore/core`, schemas.ts) via `.safeParse` — never a locally hardcoded
+ *   literal union, mirroring `specKindValid`'s `SPEC_KINDS` precedent (this
+ *   module's own JSDoc header, first invariant).
+ * @param exempt - `ctx.attestationExempt === true` from the caller (the SAME
+ *   pre-resolved boolean `checkPlanClose` already reads to decide whether to
+ *   run `attestationFloor` at all).
+ * @param kind - The plan's raw, UNVALIDATED `extra.attestation_exempt_kind`
+ *   value, or `undefined` when absent.
+ * @returns `{ok: true}` when `exempt` is not `true`, OR `kind` is a valid
+ *   `attestationExemptKindSchema` member; `{ok: false, reason:
+ *   "ATTESTATION_EXEMPT_KIND_INVALID", field: "attestation-exempt-kind"}`
+ *   when `exempt === true` and `kind` is missing or not a valid member.
+ * @example
+ * attestationExemptKindValid(true, "red-tdd");  // => { ok: true }
+ * @example
+ * attestationExemptKindValid(true, undefined);  // => { ok: false, reason: "ATTESTATION_EXEMPT_KIND_INVALID", field: "attestation-exempt-kind" }
+ * @example
+ * attestationExemptKindValid(true, "bogus");    // => { ok: false, reason: "ATTESTATION_EXEMPT_KIND_INVALID", field: "attestation-exempt-kind" }
+ * @example
+ * attestationExemptKindValid(false, undefined); // => { ok: true } — not exempt, not applicable
+ */
+export function attestationExemptKindValid(
+  exempt: boolean,
+  kind: string | undefined,
+): PredicateResult {
+  if (exempt !== true) {
+    return { ok: true };
+  }
+  if (!attestationExemptKindSchema.safeParse(kind).success) {
+    return { ok: false, reason: ATTESTATION_EXEMPT_KIND_INVALID_REASON, field: ATTESTATION_EXEMPT_KIND_FIELD };
   }
   return { ok: true };
 }
