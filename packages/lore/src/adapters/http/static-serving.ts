@@ -67,9 +67,14 @@ export interface DashboardAssetsManifestEntry {
   immutable: boolean;
 }
 
-/** The DD-1 embedded-assets manifest: a build stamp plus every servable urlPath. */
+/** The DD-1 embedded-assets manifest: a build stamp plus every servable urlPath.
+ * `stamp.skipped` mirrors `dashboard-assets-loader.ts`'s identically-optional field
+ * (`scripts/build.ts`'s `--skip-dashboard` emergency escape hatch, DD-1 build-tax
+ * control) — carried here, rather than dropped, so `index.ts`'s `GET /api/health`
+ * handler can surface it (Observability section: "`skipped: true` when `--skip-
+ * dashboard` was used — loud"). */
 export interface DashboardAssetsManifest {
-  stamp: { digest: string; builtAt: string };
+  stamp: { digest: string; builtAt: string; skipped?: boolean };
   /** Keyed by urlPath, e.g. `"/index.html"`, `"/assets/app-abc123.js"`. */
   entries: Record<string, DashboardAssetsManifestEntry>;
 }
