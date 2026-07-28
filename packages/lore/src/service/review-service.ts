@@ -121,6 +121,22 @@ export interface ApproveOpts {
    * never silently ignored.
    */
   overrideJudgmentId?: string;
+  /**
+   * task-t3-hardening-reachable-override-escape-real-ai-provenance — sibling escape to
+   * `overrideJudgmentId` for the ONE denial it structurally cannot reach: `NO_JUDGMENT_REASON`
+   * when `review_judgments` has ZERO rows for this doc (ANY version) — there is no id anywhere
+   * to name (the most common judgment-required denial: a doc that has never been reviewed at
+   * all). Legal ONLY in that exact zero-judgment-ever state, checked against the SAME
+   * `judgmentService.listFor` read `overrideJudgmentId` uses (not merely "current version has
+   * none" — a doc with an OLDER-version judgment still has a real id to name, so THAT case is
+   * rejected loud here, pointing the caller at `overrideJudgmentId` instead — the two flags
+   * never overlap in what they legalize). Mutually exclusive with `overrideJudgmentId` (passing
+   * both is rejected loud, never silently resolved by one winning). When accepted, skips the
+   * `review-judgment` checkpoint for this call exactly like `overrideJudgmentId` does, and
+   * records `details.override_no_judgment: true` on the SAME approve audit entry — audited,
+   * named, never a silent bypass.
+   */
+  overrideNoJudgment?: boolean;
 }
 
 /**
@@ -225,8 +241,9 @@ export class ReviewService {
 
     // SPEC-103 §Mechanisms M2 — runs BEFORE the type-specific branches below (and
     // for ANY doc type, not just spec/plan) since it is orthogonal to spec-promote/
-    // plan-promote's own predicates. `opts.skipJudgmentGate` is set ONLY by
-    // `approve()`'s `--override-judgment` path (D3's audited escape) — every other
+    // plan-promote's own predicates. `opts.skipJudgmentGate` is set by `approve()`'s
+    // `--override-judgment` OR `--override-no-judgment` path (D3's audited escapes,
+    // task-t3-hardening-reachable-override-escape-real-ai-provenance) — every other
     // gate on this method still runs unchanged even when this one is skipped.
     if (opts?.skipJudgmentGate !== true) {
       const judgmentGateResult = await this.enforceJudgmentRequiredGate(doc);
@@ -549,6 +566,19 @@ export class ReviewService {
       });
     }
 
+    // task-t3-hardening-reachable-override-escape-real-ai-provenance — the two override
+    // flags are mutually exclusive input (never "one silently wins"): a caller naming both
+    // is ambiguous about WHICH escape it means, so this is rejected loud before either
+    // branch below runs.
+    if (opts?.overrideJudgmentId !== undefined && opts?.overrideNoJudgment === true) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "override-judgment",
+        message: "specify at most one of --override-judgment / --override-no-judgment, not both",
+        value: { overrideJudgmentId: opts.overrideJudgmentId, overrideNoJudgment: opts.overrideNoJudgment },
+      });
+    }
+
     // SPEC-103 §Mechanisms M2, §Design Decisions D3 — `--override-judgment`'s
     // audited escape: validates the given id resolves to an EXISTING
     // `review_judgments` row for THIS doc (any version — the blocking judgment may
@@ -579,7 +609,41 @@ export class ReviewService {
       overriddenJudgmentId = targetJudgment.id;
     }
 
-    const gateResult = await this.enforceApprovalGate(doc, { skipJudgmentGate: overriddenJudgmentId !== undefined });
+    // task-t3-hardening-reachable-override-escape-real-ai-provenance — `--override-no-judgment`'s
+    // audited escape: covers the denial `overrideJudgmentId` structurally cannot reach (see
+    // `ApproveOpts.overrideNoJudgment`'s own JSDoc) — legal ONLY when `review_judgments` has
+    // ZERO rows for this doc at ALL (any version). A doc with even one older-version judgment
+    // has a real id to name and MUST use `overrideJudgmentId` instead — rejected loud here
+    // rather than silently accepted, so the audit trail always names the MOST SPECIFIC escape
+    // actually used.
+    let overrodeNoJudgment = false;
+    if (opts?.overrideNoJudgment === true) {
+      if (this.judgmentService === undefined) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "override-no-judgment",
+          message: "--override-no-judgment requires judgment-service wiring, which this ReviewService instance lacks",
+          value: opts.overrideNoJudgment,
+        });
+      }
+      const allJudgmentsResult = await this.judgmentService.listFor(doc.id, "review");
+      if (!allJudgmentsResult.ok) return allJudgmentsResult;
+      if (allJudgmentsResult.value.length > 0) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "override-no-judgment",
+          message:
+            `doc "${doc.slug}" already has ${allJudgmentsResult.value.length} judgment(s) recorded — ` +
+            `name one of them via --override-judgment instead of --override-no-judgment`,
+          value: allJudgmentsResult.value.length,
+        });
+      }
+      overrodeNoJudgment = true;
+    }
+
+    const gateResult = await this.enforceApprovalGate(doc, {
+      skipJudgmentGate: overriddenJudgmentId !== undefined || overrodeNoJudgment,
+    });
     if (!gateResult.ok) return gateResult;
     // reason: spec-verify-reachability-plan-promote-early-warning §Scope M1 —
     // this is the PRE-write reading; the ASYNC2-002 post-write re-check below
@@ -628,12 +692,16 @@ export class ReviewService {
       // SPEC-103 D3 — `override_judgment_id` (present iff `--override-judgment` was
       // used) rides on this SAME audit row rather than a second entry — one audited
       // event, "approved, and here's the escape hatch that let it through."
+      // task-t3-hardening-reachable-override-escape-real-ai-provenance — `override_no_judgment`
+      // (present iff `--override-no-judgment` was used) rides on the SAME row for the SAME
+      // reason; the two are mutually exclusive (validated above), so at most one is ever present.
       details: {
         reviewer,
         from_status: doc.status,
         to_status: "approved",
         version: nextVersion,
         ...(overriddenJudgmentId !== undefined ? { override_judgment_id: overriddenJudgmentId } : {}),
+        ...(overrodeNoJudgment ? { override_no_judgment: true } : {}),
       },
     });
     if (!auditResult.ok) return auditResult;
@@ -647,7 +715,7 @@ export class ReviewService {
     // override decision doesn't change between the pre- and post-write checks.
     if (this.gate !== undefined && doc.type === "plan") {
       const postGateResult = await this.enforceApprovalGate(updatedDoc, {
-        skipJudgmentGate: overriddenJudgmentId !== undefined,
+        skipJudgmentGate: overriddenJudgmentId !== undefined || overrodeNoJudgment,
       });
       if (!postGateResult.ok) {
         const rollbackResult = await this.rollbackApproval(updatedDoc, doc.status, reviewer);

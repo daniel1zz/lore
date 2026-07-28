@@ -113,6 +113,8 @@ import {
 } from "@lore/core";
 import {
   BUILT_IN_TEMPLATES,
+  GENERATE_PROMPT_VERSION,
+  getGenerateTemplateSet,
   LINK_INFERENCE_TEMPLATE,
   REFINE_TEMPLATE,
   renderTemplate,
@@ -322,13 +324,19 @@ function applyGroundingConfidenceDowngrade(
  * const result = await svc.generate({ doc_type: "prd", title: "My PRD" });
  */
 /**
- * `generate()`'s `ai_provenance.prompt_version` sentinel (SPEC-103 §Mechanisms M1) —
- * `BUILT_IN_TEMPLATES` (`../ai/templates.js`) has no per-version registry today (unlike
- * `ASSESS_PROMPT_VERSION`/`REVIEW_PROMPT_VERSION`/`STALENESS_PROMPT_VERSION`, each backed
- * by a keyed template map); this constant is the honest placeholder until one exists —
- * bump it whenever `BUILT_IN_TEMPLATES`'s create-path prompt shape changes materially.
+ * Structural (duck-typed) capability a provider MAY expose: a REAL, resolved model
+ * identifier — e.g. `HttpAIProvider`'s configured `ai.http.model`. Deliberately NOT added to
+ * `AIProvider` itself (`@lore/core/ai.ts`) — this is a narrow, additive extension point checked
+ * via TypeScript structural typing (`"modelId" in provider`-style), not a core interface change,
+ * per task-t3-hardening-reachable-override-escape-real-ai-provenance's file-anchor scope. A
+ * provider that starts exposing a public `modelId` property satisfies this automatically,
+ * with no further change needed here. NONE of the current provider implementations
+ * (`ClaudeCliProvider`, `HttpAIProvider`, `InMemoryAIProvider`) implement it yet — see
+ * {@link AIProviderService._resolveAiProvenance}'s own JSDoc for what that means today.
  */
-const GENERATE_PROMPT_VERSION = "v1";
+interface ModelAwareProvider {
+  readonly modelId?: string;
+}
 
 export class AIProviderService {
   constructor(
@@ -443,7 +451,14 @@ export class AIProviderService {
     ai_default_source?: AiDefaultSource;
   }): Promise<Result<GenerateOutput, LoreError>> {
     const userOverride = args.doc_type in this.templates;
-    const tpl = this.templates[args.doc_type] ?? BUILT_IN_TEMPLATES[args.doc_type];
+    // reason: task-t3-hardening — resolved via getGenerateTemplateSet(GENERATE_PROMPT_VERSION)
+    // rather than indexing BUILT_IN_TEMPLATES directly, so the template set actually rendered
+    // and the prompt_version stamped into ai_provenance below can never drift apart (SSOT).
+    // The lookup is unreachable-in-practice (GENERATE_PROMPT_VERSION always has a registered
+    // entry) — same precedent as assessPlan's getAssessTemplate call below.
+    const templateSetResult = getGenerateTemplateSet(GENERATE_PROMPT_VERSION);
+    if (!templateSetResult.ok) return templateSetResult;
+    const tpl = this.templates[args.doc_type] ?? templateSetResult.value[args.doc_type];
 
     // reason: exactOptionalPropertyTypes=true prohibits assigning undefined to optional prop.
     // Use conditional spread to only include parent_title when it is present.
@@ -473,11 +488,13 @@ export class AIProviderService {
     // reason: SPEC-103 §Mechanisms M1 — ai_provenance recorded at THIS generation seam
     // only (the `lore create --ai` path); regenerateContent/refineContent deliberately
     // do not stamp it (see GenerateOutput.ai_provenance's own JSDoc, @lore/core/ai.ts).
-    // `model` mirrors `provider` (this.active) — same "no per-provider model accessor
-    // exists yet" honesty precedent judgeDoc's `judge.model` already documents below.
+    // task-t3-hardening — sourced via `_resolveAiProvenance()`: a REAL model id when the
+    // active provider exposes one, OMITTED entirely otherwise (never a fabricated value —
+    // see that method's own JSDoc for the honesty rationale and its current scope limits).
+    const aiProvenance = this._resolveAiProvenance();
     return ok({
       ...result.value,
-      ai_provenance: { provider: this.active, model: this.active, prompt_version: GENERATE_PROMPT_VERSION },
+      ...(aiProvenance !== undefined ? { ai_provenance: aiProvenance } : {}),
     });
   }
 
@@ -1142,6 +1159,31 @@ export class AIProviderService {
     const t0 = performance.now();
     const result = await provider.generate(input);
     return { result, duration_ms: Math.round(performance.now() - t0) };
+  }
+
+  /**
+   * Resolve `generate()`'s `ai_provenance` tuple (SPEC-103 I1, task-t3-hardening-reachable-
+   * override-escape-real-ai-provenance) — HONESTLY: `model` is the active provider's REAL
+   * resolved model id ({@link ModelAwareProvider}), never a copy of `provider` (the registry
+   * name). No silent fallback: when the active provider does not expose `modelId` (true of
+   * every CURRENT provider — `ClaudeCliProvider` spawns an uninspectable CLI binary,
+   * `HttpAIProvider`/`InMemoryAIProvider` have not been wired to expose one within this task's
+   * anchor scope), this returns `undefined` — `ai_provenance` is OMITTED from `GenerateOutput`
+   * entirely rather than stamped with a value that "looks like data" but isn't (the exact
+   * honesty gap this method exists to close). An omitted `ai_provenance` is an ALREADY
+   * spec-blessed state (SPEC-103 §Mechanisms M2 I1: "a provenance-less doc passes on
+   * judgment-required alone" — the collision check is simply N/A, not a new failure mode).
+   *
+   * @returns A real `{provider, model, prompt_version}` tuple when the active provider exposes
+   *   `modelId`; `undefined` otherwise (never a fabricated value)
+   */
+  private _resolveAiProvenance(): { provider: string; model: string; prompt_version: string } | undefined {
+    const provider = this.providers.get(this.active) as (AIProvider & Partial<ModelAwareProvider>) | undefined;
+    const modelId = provider?.modelId;
+    if (modelId === undefined || modelId.trim() === "") {
+      return undefined;
+    }
+    return { provider: this.active, model: modelId, prompt_version: GENERATE_PROMPT_VERSION };
   }
 
   /**

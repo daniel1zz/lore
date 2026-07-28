@@ -1,11 +1,11 @@
 /**
  * SPEC-103 §Mechanisms M2/M3 — judgment-required promote (anti-lottery worst-
- * decision-wins, `--override-judgment` audited escape) + ledger backfill, exercised
- * end-to-end against the COMPILED `dist/lore` binary (`Bun.spawnSync`) over a
- * THROWAWAY corpus created via `mkdtemp(os.tmpdir())` — genuinely outside this
- * repo's own working tree, never touching the repo's own `.lore/` corpus (project
- * CLAUDE.md hard rule). Requires `bun run build` to have run first —
- * `assertFreshBinary` fails loud before any test runs otherwise.
+ * decision-wins, `--override-judgment`/`--override-no-judgment` audited escapes) +
+ * ledger backfill, exercised end-to-end against the COMPILED `dist/lore` binary
+ * (`Bun.spawnSync`) over a THROWAWAY corpus created via `mkdtemp(os.tmpdir())` —
+ * genuinely outside this repo's own working tree, never touching the repo's own
+ * `.lore/` corpus (project CLAUDE.md hard rule). Requires `bun run build` to have
+ * run first — `assertFreshBinary` fails loud before any test runs otherwise.
  *
  * Judgment rows are seeded via a DIRECT `bun:sqlite` insert into `review_judgments`
  * (mirrors `trace-stats.bun.test.ts`'s `insertRawTraceRow` precedent) rather than
@@ -23,12 +23,17 @@
  *   BOUNDARY:   AC-TIER-8 — a second backfill run is a no-op (zero fast_tracked)
  *   ERROR:      `--override-judgment` with a non-existent judgment id (implicit —
  *               covered by the same VALIDATION_ERROR path AC-TIER-5's happy override
- *               exercises the success side of)
+ *               exercises the success side of); `--override-no-judgment` rejected loud
+ *               when the doc already has a judgment (points the caller at
+ *               `--override-judgment` instead — task-t3-hardening)
  *   STATE:      AC-TIER-5 — a reject judgment on version N cannot be outrolled by a
  *               LATER approve-judgment on that SAME version (worst-decision-wins);
  *               only a version bump + fresh approve-judgment unlocks
  *   REGRESSION: AC-TIER-5 — `--override-judgment` approves despite the blocking
- *               reject, with an audit row recording the overridden judgment id
+ *               reject, with an audit row recording the overridden judgment id;
+ *               `--override-no-judgment` approves a NEVER-judged doc (the NO_JUDGMENT
+ *               denial `--override-judgment` cannot reach — task-t3-hardening) with an
+ *               audit row recording `override_no_judgment: true`
  *
  * @spec_ref SPEC-103 §Acceptance Criteria AC-TIER-4, AC-TIER-5, AC-TIER-8
  */
@@ -334,6 +339,50 @@ describe("AC-TIER-5 anti-lottery worst-decision-wins", () => {
 
     const auditDetails = latestApproveAuditDetails(tmpDir, spec.id);
     expect(auditDetails["override_judgment_id"]).toBe(rejectJudgmentId);
+  });
+
+  // task-t3-hardening-reachable-override-escape-real-ai-provenance — `--override-judgment`
+  // requires an id resolving to an EXISTING review_judgments row; a doc that has NEVER been
+  // judged has no id anywhere to supply, so the escape hatch was structurally unreachable for
+  // the most common denial (NO_JUDGMENT, exercised by AC-TIER-4's own first test). This proves
+  // the sibling `--override-no-judgment` flag reaches it instead.
+  it("--override-no-judgment approves a doc that has never been judged, with an audit row recording it", () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "lore-tiered-review-ac5d-"));
+    initCorpus(tmpDir);
+    const prd = createPrd(tmpDir);
+    const spec = createSpecWithAc(tmpDir, prd.slug, "Spec Never Judged");
+
+    // Zero judgments ever recorded for this doc — NO_JUDGMENT_REASON, the state
+    // `--override-judgment` cannot unlock (there is no id to name).
+    const blocked = runLore(["approve", spec.slug], tmpDir);
+    expect(blocked.exitCode).toBe(4);
+    expect(blocked.stderr).toContain("lore review");
+
+    const overridden = runLore(["approve", spec.slug, "--override-no-judgment"], tmpDir);
+    expect(overridden.exitCode).toBe(0);
+
+    const doc = getDoc(tmpDir, spec.slug);
+    expect(doc.status).toBe("approved");
+
+    const auditDetails = latestApproveAuditDetails(tmpDir, spec.id);
+    expect(auditDetails["override_no_judgment"]).toBe(true);
+    // Mutually exclusive with the named-id escape — never both present on one audit row.
+    expect(auditDetails["override_judgment_id"]).toBeUndefined();
+  });
+
+  it("--override-no-judgment is rejected loud when the doc already has a judgment recorded", () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "lore-tiered-review-ac5e-"));
+    initCorpus(tmpDir);
+    const prd = createPrd(tmpDir);
+    const spec = createSpecWithAc(tmpDir, prd.slug, "Spec Already Judged, Wrong Escape");
+    insertRawJudgment(tmpDir, { docId: spec.id, docVersion: spec.version, decision: "reject" });
+
+    const result = runLore(["approve", spec.slug, "--override-no-judgment"], tmpDir);
+    expect(result.exitCode).toBe(4);
+    expect(result.stderr).toContain("--override-judgment");
+
+    const doc = getDoc(tmpDir, spec.slug);
+    expect(doc.status).toBe("draft");
   });
 });
 

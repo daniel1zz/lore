@@ -13,7 +13,9 @@
  *               land draft on create; a spec approve with a provenance-colliding-only
  *               judgment denies
  *   BOUNDARY:   a provenance-less doc passes on judgment-required alone (no
- *               ai_provenance to compare against at all)
+ *               ai_provenance to compare against at all); generate() omits
+ *               ai_provenance entirely when the active provider exposes no real
+ *               model id (task-t3-hardening — no silent fallback to provider name)
  *   ERROR:      approve() denies (VALIDATION_ERROR, exit-4-mapped) with zero
  *               judgments for the current version
  *   STATE:      editing an approved spec (non-ledger) still resets to draft
@@ -32,14 +34,37 @@ import { JudgmentService } from "../../../src/service/judgment-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { AIProviderService } from "../../../src/service/ai-provider-service.js";
 import { InMemoryAIProvider } from "../../../src/ai/in-memory-provider.js";
+import { GENERATE_PROMPT_VERSION } from "../../../src/ai/templates.js";
 import type {
   AIProvider,
   CreateDocInput,
   DocRecord,
+  GenerateInput,
+  GenerateOutput,
+  LoreError,
   NewReviewJudgment,
+  Result,
   Telemetry,
   TelemetryEvent,
 } from "@lore/core";
+import { ok } from "@lore/core";
+
+/**
+ * task-t3-hardening-reachable-override-escape-real-ai-provenance — a minimal AIProvider
+ * test double that ALSO exposes a real `modelId` (the structural `ModelAwareProvider`
+ * capability `AIProviderService` duck-types against, see its own JSDoc). Deliberately
+ * NOT added to `InMemoryAIProvider` itself — that file is outside this task's declared
+ * anchors; this is a narrow, test-local object satisfying `AIProvider` structurally.
+ */
+function makeModelAwareProvider(name: string, modelId: string): AIProvider & { modelId: string } {
+  return {
+    name,
+    modelId,
+    async generate(_input: GenerateInput): Promise<Result<GenerateOutput, LoreError>> {
+      return ok({ content: "# Generated", duration_ms: 0, exit_code: 0, provider_name: name });
+    },
+  };
+}
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 
@@ -367,24 +392,43 @@ describe("AC-TIER-3 pending filter — task + ledger sub_types hidden by default
 // ─── AC-TIER-6: I1 provenance collision + provenance-less pass ────────────────
 
 describe("AC-TIER-6 provenance write half (AIProviderService.generate)", () => {
-  it("generate() overlays ai_provenance {provider, model, prompt_version} on success", async () => {
-    const provider = new InMemoryAIProvider("in-memory");
-    provider.setMode({ kind: "ok", content: "# Generated" });
+  const budgets = { max_plan_chars: 8000, max_spec_chars: 12000, max_task_chars: 4000, max_diff_chars: 24000 };
+
+  // task-t3-hardening-reachable-override-escape-real-ai-provenance — the honesty-gap fix:
+  // when the active provider exposes a REAL modelId, it is used verbatim (never the provider
+  // registry name), and prompt_version comes from the GENERATE_PROMPT_VERSION registry
+  // constant imported here (not re-typed as a literal) — proving it is genuinely
+  // registry-sourced, not a hardcoded string duplicated between prod and test.
+  it("generate() sources a real per-provider model id and a registry-sourced prompt_version when the provider exposes one", async () => {
+    const provider = makeModelAwareProvider("model-aware-fake", "test-model-x7-20260101");
     const providers = new Map([[provider.name, provider]]) as unknown as ReadonlyMap<string, AIProvider>;
     const telemetry = makeTelemetry();
-    const service = new AIProviderService(providers, provider.name, {}, telemetry, false, 8000, {
-      max_plan_chars: 8000,
-      max_spec_chars: 12000,
-      max_task_chars: 4000,
-      max_diff_chars: 24000,
-    });
+    const service = new AIProviderService(providers, provider.name, {}, telemetry, false, 8000, budgets);
 
     const result = await service.generate({ doc_type: "knowledge", title: "x" });
     if (!result.ok) throw new Error(`generate failed: ${JSON.stringify(result.error)}`);
     expect(result.value.ai_provenance).toBeDefined();
-    expect(result.value.ai_provenance?.provider).toBe("in-memory");
-    expect(result.value.ai_provenance?.model).toBe("in-memory");
-    expect(typeof result.value.ai_provenance?.prompt_version).toBe("string");
+    expect(result.value.ai_provenance?.provider).toBe("model-aware-fake");
+    // The whole point of the fix: model is the REAL modelId, distinct from provider name.
+    expect(result.value.ai_provenance?.model).toBe("test-model-x7-20260101");
+    expect(result.value.ai_provenance?.model).not.toBe(provider.name);
+    expect(result.value.ai_provenance?.prompt_version).toBe(GENERATE_PROMPT_VERSION);
+  });
+
+  // BOUNDARY/no-silent-fallback: no CURRENT provider implementation (InMemoryAIProvider
+  // included) exposes modelId — generate() must OMIT ai_provenance entirely rather than
+  // substitute the provider name as a fake "model" (the exact defect this task fixes).
+  it("generate() omits ai_provenance when the active provider exposes no model id", async () => {
+    const provider = new InMemoryAIProvider("in-memory");
+    provider.setMode({ kind: "ok", content: "# Generated" });
+    const providers = new Map([[provider.name, provider]]) as unknown as ReadonlyMap<string, AIProvider>;
+    const telemetry = makeTelemetry();
+    const service = new AIProviderService(providers, provider.name, {}, telemetry, false, 8000, budgets);
+
+    const result = await service.generate({ doc_type: "knowledge", title: "x" });
+    if (!result.ok) throw new Error(`generate failed: ${JSON.stringify(result.error)}`);
+    expect(result.value.ai_provenance).toBeUndefined();
+    expect("ai_provenance" in result.value).toBe(false);
   });
 });
 
@@ -458,6 +502,80 @@ describe("AC-TIER-6 gate half — I1 provenance collision", () => {
     expect(approveResult.error.code).toBe("VALIDATION_ERROR");
     const message = (approveResult.error as { message?: string }).message ?? "";
     expect(message).toContain("lore review");
+  });
+});
+
+// ─── AC-TIER-5 (service-level sub-case): zero-judgment reachable override ─────
+// task-t3-hardening-reachable-override-escape-real-ai-provenance — `--override-judgment`
+// requires the given id to resolve to an EXISTING review_judgments row on the doc; a doc
+// that has NEVER been judged (the NO_JUDGMENT denial exercised right above) has no id
+// anywhere to supply, making the escape hatch structurally unreachable for the most common
+// case. `overrideNoJudgment` is the sibling escape that reaches it. CLI-integration coverage
+// (audit row via the compiled binary) lives in tiered-review-gate.bun.test.ts.
+describe("AC-TIER-5 zero-judgment reachable override (ReviewService.approve)", () => {
+  it("overrideNoJudgment approves a never-judged doc and records details.override_no_judgment", async () => {
+    const { corpusService, reviewService } = makeApp({ judgmentRequiredTypes: ["spec"] });
+    const prd = await mustCreate(corpusService, { type: "prd", title: "Root", content: "# PRD" } as CreateDocInput);
+    const spec = await mustCreate(corpusService, {
+      type: "spec",
+      title: "A spec",
+      parent_id: prd.id,
+      content: "## Overview\n\nBody.",
+      extra: { spec_kind: "feature", acceptance_criteria: [SCRIPT_AC] },
+    } as CreateDocInput);
+
+    // Confirm the doc is genuinely in the NO_JUDGMENT state --override-judgment cannot reach.
+    const blocked = await reviewService.approve(spec.id);
+    expect(blocked.ok).toBe(false);
+
+    const approveResult = await reviewService.approve(spec.id, { overrideNoJudgment: true });
+    expect(approveResult.ok).toBe(true);
+    if (!approveResult.ok) return;
+    expect(approveResult.value.status).toBe("approved");
+  });
+
+  it("overrideNoJudgment is rejected loud when the doc already has a judgment recorded", async () => {
+    const { corpusService, judgmentService, reviewService } = makeApp({ judgmentRequiredTypes: ["spec"] });
+    const prd = await mustCreate(corpusService, { type: "prd", title: "Root", content: "# PRD" } as CreateDocInput);
+    const spec = await mustCreate(corpusService, {
+      type: "spec",
+      title: "A spec",
+      parent_id: prd.id,
+      content: "## Overview\n\nBody.",
+      extra: { spec_kind: "feature", acceptance_criteria: [SCRIPT_AC] },
+    } as CreateDocInput);
+
+    const judgmentResult = await judgmentService.record(
+      makeNewJudgment({ doc_id: spec.id, doc_version: spec.version, decision: "reject" }),
+    );
+    if (!judgmentResult.ok) throw new Error("record judgment failed");
+
+    const approveResult = await reviewService.approve(spec.id, { overrideNoJudgment: true });
+    expect(approveResult.ok).toBe(false);
+    if (approveResult.ok) return;
+    expect(approveResult.error.code).toBe("VALIDATION_ERROR");
+    const message = (approveResult.error as { message?: string }).message ?? "";
+    expect(message).toContain("--override-judgment");
+  });
+
+  it("passing both overrideJudgmentId and overrideNoJudgment is rejected loud", async () => {
+    const { corpusService, reviewService } = makeApp({ judgmentRequiredTypes: ["spec"] });
+    const prd = await mustCreate(corpusService, { type: "prd", title: "Root", content: "# PRD" } as CreateDocInput);
+    const spec = await mustCreate(corpusService, {
+      type: "spec",
+      title: "A spec",
+      parent_id: prd.id,
+      content: "## Overview\n\nBody.",
+      extra: { spec_kind: "feature", acceptance_criteria: [SCRIPT_AC] },
+    } as CreateDocInput);
+
+    const approveResult = await reviewService.approve(spec.id, {
+      overrideJudgmentId: "some-id",
+      overrideNoJudgment: true,
+    });
+    expect(approveResult.ok).toBe(false);
+    if (approveResult.ok) return;
+    expect(approveResult.error.code).toBe("VALIDATION_ERROR");
   });
 });
 
