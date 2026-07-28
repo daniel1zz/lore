@@ -252,3 +252,72 @@ describe("lore status --check-tree — REGRESSION (check-only has no side effect
     expect(second.exitCode).toBe(0);
   });
 });
+
+// ─── PLAN-TERMINALITY (AC-CLOSURE-2, spec-plan-closure-must-be-loud-terminality-divergence-silent DD-1) ──
+//
+// `lore verify` marked AC-CLOSURE-2 INCONCLUSIVE because its oracle command
+// (`bunx vitest run check-tree.test.ts -t "plan-terminality"`) matched ZERO
+// tests — the detector's unit behavior was covered (tree-check-service.bun.test.ts)
+// but the CLI-surface contract this AC actually asserts was not. These two
+// scenarios are that missing CLI-surface coverage.
+
+/**
+ * Build a corpus with a plan-terminality drift: prd -> spec -> plan -> task,
+ * where the task is archived (`draft -> archived` is a sanctioned direct edge
+ * for `task` docs — DRAFT_TO_ARCHIVED_ALLOWED_TYPES, packages/core/src/schemas.ts)
+ * but the plan itself is left in `draft` — every child task terminal, the plan
+ * is not. Mirrors the deeply-nested shape AC-2.CLI.H2 already exercises.
+ */
+function buildPlanTerminalityDriftCorpus(): { plan: string; task: string } {
+  const { spec } = buildConformantCorpus();
+  const plan = createDoc("plan", ["--parent", spec]);
+  const task = createDoc("task", ["--parent", plan, "--plan-id", plan]);
+
+  const archiveResult = runLore(["set", task, "--status", "archived"], tmpDir);
+  if (archiveResult.exitCode !== 0) {
+    throw new Error(`archiving fixture task failed: ${archiveResult.stderr}`);
+  }
+
+  return { plan, task };
+}
+
+/** Read a doc's `status`/`version` via `lore get <id> --json`. */
+function getDocStatusAndVersion(idOrSlug: string): { status: string; version: number } {
+  const r = runLore(["get", idOrSlug, "--json"], tmpDir);
+  if (r.exitCode !== 0) throw new Error(`get ${idOrSlug} failed: ${r.stderr}`);
+  const parsed = JSON.parse(r.stdout);
+  return { status: parsed.data.doc.status, version: parsed.data.doc.version };
+}
+
+describe("lore status --check-tree — plan-terminality drift", () => {
+  it("AC-CLOSURE-2.plan-terminality.check: nonzero exit, output names the plan slug AND the literal remediation command", () => {
+    armBlueprint();
+    const { plan } = buildPlanTerminalityDriftCorpus();
+
+    const result = runLore(["status", "--check-tree"], tmpDir);
+
+    expect(result.exitCode).toBe(3);
+    expect(result.stdout).toContain(plan);
+    expect(result.stdout).toContain(`lore set ${plan} --status archived`);
+  });
+
+  it("AC-CLOSURE-2.plan-terminality.fix: --fix still reports the drift afterwards and leaves the plan doc's status and version unchanged (Invariant 1 — --fix must never fire plan-close)", () => {
+    armBlueprint();
+    const { plan } = buildPlanTerminalityDriftCorpus();
+
+    const before = getDocStatusAndVersion(plan);
+
+    const result = runLore(["status", "--check-tree", "--fix"], tmpDir);
+
+    // The drift must still be reported after --fix — plan-terminality is
+    // deliberately excluded from the fixable-kind filter (tree-check-service.ts
+    // fix()) because auto-transitioning a plan would fire the plan-close
+    // governance gate from inside a repair command.
+    expect(result.stdout).toContain("plan-terminality");
+    expect(result.stdout).toContain(plan);
+
+    const after = getDocStatusAndVersion(plan);
+    expect(after.status).toBe(before.status);
+    expect(after.version).toBe(before.version);
+  });
+});
