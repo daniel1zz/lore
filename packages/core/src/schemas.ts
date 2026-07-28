@@ -427,6 +427,37 @@ export const planExtraSchema = z
     }
   });
 
+/**
+ * Zod schema for a plan's `extra.attestation_exempt_kind`
+ * (spec-verify-reachability-plan-promote-early-warning §Scope M3) — REQUIRED
+ * whenever `extra.attestation_exempt === true` (enforced by
+ * `gate-predicates.ts::attestationExemptKindValid`, consumed by
+ * `checkpoint-registry.ts::checkPlanClose`). Distinguishes WHY a closing plan
+ * cannot/does not carry runner-attested evidence, so audit readers can tell
+ * "unverified" apart from "verified but unattestable":
+ *   - `"red-tdd"`: canonical case — a red/TDD task's Expected state is a
+ *     currently-failing, time-bound test; attesting it would misrepresent an
+ *     intentionally-red state as verified.
+ *   - `"no-oracle"`: no oracle exists at all for the exempted work (nothing
+ *     to run, so nothing attestable in principle).
+ *   - `"pipeline-unreachable"`: oracles exist and ran, but `lore verify` is
+ *     structurally unreachable for this plan (no ancestor spec, or the
+ *     ancestor spec declares zero script-mode acceptance criteria) — see
+ *     `gate-predicates.ts::verifyReachability`.
+ *   - `"other"`: any other plan-level rationale, still requiring a non-empty
+ *     free-text `extra.attestation_exempt_reason` alongside it.
+ *
+ * Deliberately no `.optional()` default / legacy fallback at this schema
+ * level — `attestationExemptKindValid` is the fail-loud enforcement point;
+ * this schema only defines what a VALID value looks like once one is given.
+ */
+export const attestationExemptKindSchema = z.enum([
+  "red-tdd",
+  "no-oracle",
+  "pipeline-unreachable",
+  "other",
+]);
+
 export const prdExtraSchema = z
   .object({
     /**

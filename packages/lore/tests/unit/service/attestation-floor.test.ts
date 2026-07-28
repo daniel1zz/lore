@@ -235,7 +235,30 @@ describe("attestationFloor — AC-069-3: workflow.attestation.min_ratio is honor
 // ─── AC-069-4: extra.attestation_exempt bypasses the floor entirely ──────────
 
 describe("attestationFloor — AC-069-4: attestation_exempt with a reason bypasses the floor", () => {
-  it("AC-069-4: a plan declaring attestation_exempt true plus a reason closes despite zero attested evidence", async () => {
+  it("AC-069-4: a plan declaring attestation_exempt true plus a reason and a valid typed kind closes despite zero attested evidence", async () => {
+    const { corpusService } = makeHarness(attestationConfig());
+    const plan = await makeApprovedPlan(corpusService, {
+      attestation_exempt: true,
+      attestation_exempt_reason: "no automatable oracle exists for this plan's scope",
+      // reason: spec-verify-reachability-plan-promote-early-warning §Scope M3 —
+      // `attestation_exempt_kind` is now REQUIRED alongside the reason; "no-oracle"
+      // is the taxonomy member matching this fixture's stated rationale.
+      attestation_exempt_kind: "no-oracle",
+    });
+    await makeTask(corpusService, plan, "Unattested task", [selfReportedEntry("bun test")]);
+
+    const result = await corpusService.set(plan.id, { status: "archived" });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.status).toBe("archived");
+    }
+  });
+
+  // NEGATIVE (spec-verify-reachability-plan-promote-early-warning §Scope M3) — a
+  // reason alone, with NO typed `attestation_exempt_kind`, no longer satisfies the
+  // floor: the exemption is fail-loud-required to name its own kind.
+  it("attestation_exempt true WITH a reason but WITHOUT a kind is not treated as a satisfying exemption — still blocked", async () => {
     const { corpusService } = makeHarness(attestationConfig());
     const plan = await makeApprovedPlan(corpusService, {
       attestation_exempt: true,
@@ -245,9 +268,27 @@ describe("attestationFloor — AC-069-4: attestation_exempt with a reason bypass
 
     const result = await corpusService.set(plan.id, { status: "archived" });
 
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.value.status).toBe("archived");
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect((result.error as { field?: string }).field).toBe("gate:plan-close:attestation-exempt-kind");
+    }
+  });
+
+  // NEGATIVE — an invalid (not-a-member) kind is likewise refused.
+  it("attestation_exempt true with an invalid attestation_exempt_kind is not treated as a satisfying exemption — still blocked", async () => {
+    const { corpusService } = makeHarness(attestationConfig());
+    const plan = await makeApprovedPlan(corpusService, {
+      attestation_exempt: true,
+      attestation_exempt_reason: "no automatable oracle exists for this plan's scope",
+      attestation_exempt_kind: "bogus-kind",
+    });
+    await makeTask(corpusService, plan, "Unattested task", [selfReportedEntry("bun test")]);
+
+    const result = await corpusService.set(plan.id, { status: "archived" });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect((result.error as { field?: string }).field).toBe("gate:plan-close:attestation-exempt-kind");
     }
   });
 

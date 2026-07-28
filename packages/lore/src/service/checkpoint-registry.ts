@@ -103,6 +103,8 @@ import {
   requiresUatDeclared,
   attestationFloor,
   prdOutlineSynced,
+  verifyReachability,
+  attestationExemptKindValid,
   ANCHOR_OVERLAP_FIELD,
   ACTOR_IDENTITY_FIELD,
   AC_QUANTIFIABLE_FIELD,
@@ -112,9 +114,11 @@ import {
   REQUIRES_UAT_FIELD,
   PLAN_CLOSE_FIELD,
   ATTESTATION_FLOOR_FIELD,
+  ATTESTATION_EXEMPT_KIND_FIELD,
   PRD_SYNC_FIELD,
   type PredicateResult,
   type SiblingClaimInfo,
+  type ReachabilityResult,
 } from "./gate-predicates.js";
 import { buildFeedingPack, renderFeedingPack } from "./gate-feeding.js";
 
@@ -249,6 +253,18 @@ export interface GateContext {
     extra: Record<string, unknown>;
     deleted_at: string | null;
   };
+  /**
+   * Count of `verify.mode === "script"` acceptance criteria declared on
+   * `parentSpec` (spec-verify-reachability-plan-promote-early-warning §Scope
+   * M1/M2) — the SAME field `verifyReachability` consumes for BOTH
+   * `plan-promote`'s early-warning advisory (`planPromoteReachabilityAdvisory`
+   * below) and `plan-close`'s `feedAttestationFloor` branch (§Design Decisions
+   * D2: one shared derivation, never two). `undefined` when `hasSpecParent` is
+   * not `true`, or the caller never resolved it — `verifyReachability` treats
+   * that identically to `0` (module invariant on that function, gate-
+   * predicates.ts).
+   */
+  readonly parentSpecScriptAcCount?: number;
 
   // -- plan-promote / task-claim: feed() --
   /**
@@ -329,11 +345,24 @@ export interface GateContext {
    * `extra.attestation_exempt_reason` — a bare `attestation_exempt: true` with
    * no reason string is treated as NOT exempt, resolved by the caller,
    * `CorpusService.set`). `true` short-circuits `attestationFloor` out of
-   * `checkPlanClose` entirely (the same "opt-out ⇒ vacuous pass" shape
-   * `hasSpecParent`/`requiresUat` use elsewhere in this module) — the exempt
-   * plan closes regardless of its tasks' evidence/attestation state.
+   * `checkPlanClose` — PROVIDED `attestationExemptKind` also validates (see
+   * that field's own JSDoc; spec-verify-reachability-plan-promote-early-
+   * warning §Scope M3 / §Design Decisions D3) — the same "opt-out ⇒ vacuous
+   * pass" shape `hasSpecParent`/`requiresUat` use elsewhere in this module.
+   * An exempt claim with a missing/invalid kind does NOT satisfy the floor:
+   * `attestationFloor` still runs (as if not exempt) AND
+   * `attestationExemptKindValid`'s own failure is pushed alongside it — either
+   * one alone is enough to keep the checkpoint blocked.
    */
   readonly attestationExempt?: boolean;
+  /**
+   * The closing plan's raw, UNVALIDATED `extra.attestation_exempt_kind`
+   * (spec-verify-reachability-plan-promote-early-warning §Scope M3) —
+   * meaningless when `attestationExempt` is not `true`. Validated by
+   * `attestationExemptKindValid` (gate-predicates.ts) against
+   * `attestationExemptKindSchema`'s four members (`@lore/core`, schemas.ts).
+   */
+  readonly attestationExemptKind?: string;
   /**
    * Every task (or SPEC-056 phase doc) in the closing plan, with its own
    * evidence/attested counts (`CorpusService.set`, built from `getPlanBundle`
@@ -594,6 +623,82 @@ function checkPlanPromote(ctx: GateContext): PredicateResult[] {
     results.push(requiresUatDeclared(ctx.verificationProfile, ctx.planRequiresUat === true));
   }
   return results;
+}
+
+/**
+ * Human-readable explanation for one {@link ReachabilityResult.why} value —
+ * the ONE place this prose is written (spec-verify-reachability-plan-promote-
+ * early-warning §Design Decisions D2), consumed by BOTH
+ * `planPromoteReachabilityAdvisory` and `feedAttestationFloor`'s unreachable
+ * branch so the two surfaces never drift apart on wording.
+ */
+function describeReachabilityWhy(why: Exclude<ReachabilityResult["why"], null>): string {
+  return why === "parent-not-spec"
+    ? "this plan has no spec-tier ancestor at all — `lore verify` requires one to " +
+        "resolve script-mode acceptance criteria from"
+    : "this plan's ancestor spec declares zero script-mode acceptance criteria — " +
+        "`lore verify` has nothing to run";
+}
+
+/**
+ * `plan-promote`'s EARLY-WARNING advisory (spec-verify-reachability-plan-
+ * promote-early-warning §Scope M1 / §Design Decisions D1) — a SEPARATE output
+ * from `checkPlanPromote`'s verdict, never folded into its `PredicateResult[]`
+ * (mirrors `GateEnforcer`'s `gate_skipped` audit entry: best-effort,
+ * NEVER-blocking observability — "advisory never changes the outcome"). A
+ * plan can be perfectly promotable (approved ancestor spec, >=1 declared AC)
+ * and STILL be `lore verify`-unreachable (its ancestor spec has zero
+ * script-mode ACs) — exactly the late-failure gap this spec closes: the
+ * incompatibility used to surface only hours later, at plan-close
+ * (`ATTESTATION_FLOOR_NOT_MET`), with no earlier signal at all.
+ *
+ * Consumes the SAME `verifyReachability` derivation `feedAttestationFloor`
+ * uses at plan-close (§Design Decisions D2 — one shared computation, never
+ * two) — `ctx.hasSpecParent`/`ctx.parentSpecScriptAcCount`, the identical
+ * fields a plan-close caller populates for its own branch.
+ *
+ * @returns `null` when `verifyReachability` reports `reachable: true`
+ *   (nothing to warn about — the common case, every pre-existing
+ *   `plan-promote` caller that never populated the new fields gets `null`
+ *   here too, since `hasSpecParent` absent/false reads as `"parent-not-spec"`
+ *   ... — see the REMARK below for why that's still correct); an advisory
+ *   string naming the plan-close consequence and the two real options
+ *   otherwise.
+ * @remarks A plan with NO spec ancestor at all (`hasSpecParent !== true`) is
+ *   ALSO `lore verify`-unreachable by definition (`verifyPlan` itself refuses
+ *   it: "plan has no parent spec — nothing to verify") — this advisory fires
+ *   for that case too, same as the zero-script-AC case. This is orthogonal to
+ *   `checkPlanPromote`'s own "no spec tier ⇒ vacuous PASS" short-circuit
+ *   (third module invariant): that short-circuit is about whether
+ *   plan-promote's HARD gate applies at all; this advisory is about a
+ *   DIFFERENT, later concern (plan-close attestation) that applies
+ *   regardless of whether plan-promote itself blocked.
+ * @example
+ * planPromoteReachabilityAdvisory({ hasSpecParent: false }); // => advisory string, why: "parent-not-spec"
+ * @example
+ * planPromoteReachabilityAdvisory({ hasSpecParent: true, parentSpecScriptAcCount: 0 }); // => advisory string, why: "no-script-acs"
+ * @example
+ * planPromoteReachabilityAdvisory({ hasSpecParent: true, parentSpecScriptAcCount: 2 }); // => null
+ */
+export function planPromoteReachabilityAdvisory(ctx: GateContext): string | null {
+  const reachability = verifyReachability(
+    ctx.hasSpecParent === true ? "spec" : null,
+    ctx.parentSpecScriptAcCount,
+  );
+  if (reachability.reachable) {
+    return null;
+  }
+  const plan = ctx.targetIdOrSlug ?? "<plan>";
+  return (
+    `ADVISORY (does not block this promote): \`lore verify\` will be structurally ` +
+    `unreachable for ${plan} — ${describeReachabilityWhy(reachability.why as Exclude<ReachabilityResult["why"], null>)}. ` +
+    `At plan-close, the attestation floor (SPEC-069) will have no \`lore verify\` path ` +
+    `to satisfy it. Two real options before that happens: (1) parent this plan under a ` +
+    `spec that declares >= 1 script-mode acceptance criterion (\`lore ac add <spec> <id> ` +
+    `--mode script ...\`), or (2) plan on declaring a typed exemption at close time ` +
+    `(\`extra.attestation_exempt: true\` + \`extra.attestation_exempt_reason\` + ` +
+    `\`extra.attestation_exempt_kind: "pipeline-unreachable"\`).`
+  );
 }
 
 /**
@@ -858,17 +963,27 @@ function feedPhaseClaim(ctx: GateContext, failures: PredicateResult[]): string {
 const DEFAULT_ATTESTATION_MIN_RATIO = 0.5;
 
 /**
- * `plan-close`'s three predicates (SPEC-054 + SPEC-069 §Design Decisions D1 + SPEC-080 §C4):
+ * `plan-close`'s predicates (SPEC-054 + SPEC-069 §Design Decisions D1 +
+ * SPEC-080 §C4 + spec-verify-reachability-plan-promote-early-warning §Scope
+ * M3):
  *
  *   - `uatP0Accepted` — OPT-IN (SPEC-054): only runs when the plan declared
  *     `ctx.requiresUat === true`; `ctx.requiresUat !== true` skips it entirely
  *     (same "opt-out ⇒ no gate" shape `checkPlanPromote` uses for
  *     `hasSpecParent`, third module invariant).
  *   - `attestationFloor` — OPT-OUT (SPEC-069 D1): runs for EVERY closing plan
- *     UNLESS `ctx.attestationExempt === true` (a plan explicitly declaring
- *     `extra.attestation_exempt: true` + a non-empty reason). Deliberately NOT
- *     gated by `ctx.requiresUat` — a plan that never opted into UAT still owes
- *     an honest attestation floor over whatever evidence it DOES carry.
+ *     UNLESS `ctx.attestationExempt === true` AND `attestationExemptKindValid`
+ *     ALSO passes (spec-verify-reachability-plan-promote-early-warning §Design
+ *     Decisions D3 — a bare `attestation_exempt: true` with no valid typed
+ *     `attestation_exempt_kind` does NOT satisfy the floor: `attestationFloor`
+ *     still runs as if not exempt). Deliberately not gated by `ctx.requiresUat`
+ *     — a plan that never opted into UAT still owes an honest attestation
+ *     floor over whatever evidence it DOES carry.
+ *   - `attestationExemptKindValid` — pushed ONLY when it fails (its own PASS
+ *     carries no extra signal beyond `attestationFloor` already running or
+ *     not) — a plan claiming exemption with a missing/invalid kind is denied
+ *     by THIS predicate's own failure, independent of whatever
+ *     `attestationFloor` itself concludes from the evidence.
  *   - `prdOutlineSynced` — OPT-IN, default-OFF (SPEC-080 §C4): only runs when
  *     `ctx.prdSyncEnabled === true` AND `ctx.prdSyncSynced !== undefined` (the
  *     latter is the caller's own "a spec-tier ancestor resolved, so this
@@ -876,16 +991,26 @@ const DEFAULT_ATTESTATION_MIN_RATIO = 0.5;
  *     directly, or unparented, never has this field set, mirroring
  *     `plan-promote`'s `hasSpecParent` vacuous-pass shape).
  *
- * All three predicates, when they run, are pushed into the SAME results array
- * (this module's "run every predicate, don't short-circuit on the first
- * failure" contract) — a plan can fail ANY subset of them independently.
+ * Every predicate that runs is pushed into the SAME results array (this
+ * module's "run every predicate, don't short-circuit on the first failure"
+ * contract) — a plan can fail ANY subset of them independently.
  */
 function checkPlanClose(ctx: GateContext): PredicateResult[] {
   const results: PredicateResult[] = [];
   if (ctx.requiresUat === true) {
     results.push(uatP0Accepted(ctx.uatVerdictPresent === true, ctx.uatP0Accepted === true));
   }
-  if (ctx.attestationExempt !== true) {
+  const exemptKind = attestationExemptKindValid(ctx.attestationExempt === true, ctx.attestationExemptKind);
+  // reason: exemptKind is pushed BEFORE attestationFloor (when both fail) so
+  // `GateEnforcer.enforce`'s "first failure with a defined field wins" rule
+  // (gate-enforcer.ts) surfaces the more ACTIONABLE cause — "your exemption
+  // kind is missing/invalid" pinpoints the fix directly, vs. "attestation
+  // ratio too low" which would misdirect an operator who already believes
+  // they declared a valid exemption.
+  if (!exemptKind.ok) {
+    results.push(exemptKind);
+  }
+  if (ctx.attestationExempt !== true || !exemptKind.ok) {
     results.push(
       attestationFloor(ctx.planTasksAttestation, ctx.attestationMinRatio ?? DEFAULT_ATTESTATION_MIN_RATIO),
     );
@@ -931,6 +1056,20 @@ function checkPlanClose(ctx: GateContext): PredicateResult[] {
  *   recorded) but attesting it would misrepresent an intentionally-red state as
  *   verified; that is a PLAN-LEVEL judgment call about the whole plan's execution
  *   window, not a per-task field.
+ *
+ * @remarks REACHABILITY-AWARE (spec-verify-reachability-plan-promote-early-
+ *   warning §Scope M2 / §Design Decisions D2) — the pack branches on the SAME
+ *   `verifyReachability` derivation `planPromoteReachabilityAdvisory` consumes
+ *   at plan-promote time. REACHABLE branch: the `Recovery: run \`lore verify
+ *   ...\`` sentence through the end is BYTE-IDENTICAL to the pre-existing text
+ *   (AC-VRW-2 regression pin — do not edit without updating
+ *   `feed-attestation-reachability.test.ts`'s fixture). UNREACHABLE branch:
+ *   that sentence is REPLACED by a precondition explanation (why `lore verify`
+ *   cannot run for THIS plan) plus the two real options; the exemption-
+ *   mechanics paragraph below it is kept verbatim (duplicated in source
+ *   rather than extracted into a shared constant, deliberately — a shared
+ *   constant refactor is exactly the kind of "helpful cleanup" that could
+ *   silently perturb the byte-pinned reachable branch).
  */
 function feedAttestationFloor(ctx: GateContext, failures: PredicateResult[]): string {
   const tasks = ctx.planTasksAttestation ?? [];
@@ -947,12 +1086,13 @@ function feedAttestationFloor(ctx: GateContext, failures: PredicateResult[]): st
         `DIAGNOSTIC purposes only — the exemption below is PLAN-level; do NOT write ` +
         `\`extra.attestation_exempt\` onto any of these tasks, this gate never reads it there. `
       : "";
-  const pack = buildFeedingPack({
-    ruleSource: "corpus (task verification_evidence)",
-    ruleMarkdown:
-      `Required for plan-close: every task carrying verification_evidence must carry ` +
-      `at least one runner-issued (attested) entry, and the plan-wide attested-evidence ` +
-      `ratio must be >= ${minRatio} (currently ${ratio.toFixed(2)}). ${offendingLine}` +
+  const reachability = verifyReachability(
+    ctx.hasSpecParent === true ? "spec" : null,
+    ctx.parentSpecScriptAcCount,
+  );
+  const recoveryText = reachability.reachable
+    ? // reason: BYTE-PINNED (AC-VRW-2 regression) — see this function's own
+      // @remarks above. Do not touch this branch's text.
       `Recovery: run \`lore verify ${plan}\` to record attested evidence against each ` +
       `task's declared script-mode acceptance criteria (declare one first via ` +
       `\`lore ac add <spec> <id> --mode script ...\` if none exists yet). If this plan ` +
@@ -967,7 +1107,33 @@ function feedAttestationFloor(ctx: GateContext, failures: PredicateResult[]): st
       `\`{"attestation_exempt": true, "attestation_exempt_reason": "<why>"}\` into it ` +
       `while KEEPING every existing key (e.g. \`phases\`), then call the MCP \`lore_set\` ` +
       `tool with the FULL merged object as \`extra\` on ${plan}. \`lore set\` (CLI) has no ` +
-      `dedicated flag for this field yet.`,
+      `dedicated flag for this field yet.`
+    : `Precondition unmet: \`lore verify\` cannot run for ${plan} — ` +
+      `${describeReachabilityWhy(reachability.why as Exclude<ReachabilityResult["why"], null>)} — ` +
+      `so no attested evidence can ever be recorded against it via that path. Two real ` +
+      `options: (1) reparent this plan under a spec that declares >= 1 script-mode ` +
+      `acceptance criterion (\`lore ac add <spec> <id> --mode script ...\`), or (2) declare ` +
+      `a typed exemption on this plan (the canonical kind for this case is ` +
+      `\`attestation_exempt_kind: "pipeline-unreachable"\` — see below). If this plan ` +
+      `genuinely has no oracle to attest against for some of its tasks — the canonical ` +
+      `case is a RED/TDD task whose Expected state is a currently-failing, time-bound ` +
+      `test (red before green: the evidence is real, attesting it would misrepresent an ` +
+      `intentionally-red state as verified) — the exemption is declared on the PLAN ` +
+      `ITSELF, never on a task: set \`extra.attestation_exempt: true\` plus a non-empty ` +
+      `\`extra.attestation_exempt_reason\` on ${plan}. \`extra\` REPLACES the whole field ` +
+      `wholesale on \`lore_set\` (it does NOT merge) — first fetch the current extra via ` +
+      `\`lore get ${plan} --json\` (read \`.extra\`), merge ` +
+      `\`{"attestation_exempt": true, "attestation_exempt_reason": "<why>"}\` into it ` +
+      `while KEEPING every existing key (e.g. \`phases\`), then call the MCP \`lore_set\` ` +
+      `tool with the FULL merged object as \`extra\` on ${plan}. \`lore set\` (CLI) has no ` +
+      `dedicated flag for this field yet.`;
+  const pack = buildFeedingPack({
+    ruleSource: "corpus (task verification_evidence)",
+    ruleMarkdown:
+      `Required for plan-close: every task carrying verification_evidence must carry ` +
+      `at least one runner-issued (attested) entry, and the plan-wide attested-evidence ` +
+      `ratio must be >= ${minRatio} (currently ${ratio.toFixed(2)}). ${offendingLine}` +
+      recoveryText,
     missing: selectFailures(failures).map((f) => f.reason),
     // reason: the plan-level-only fetch-merge-set instruction plus the offending-
     // task diagnostic list routinely exceeds `DEFAULT_FEEDING_MAX_CHARS` (800) —
@@ -1036,7 +1202,15 @@ function feedPrdOutlineSynced(ctx: GateContext, failures: PredicateResult[]): st
  */
 function feedPlanClose(ctx: GateContext, failures: PredicateResult[]): string {
   const uatFailed = failures.some((f) => !f.ok && f.field === PLAN_CLOSE_FIELD);
-  const attestationFailed = failures.some((f) => !f.ok && f.field === ATTESTATION_FLOOR_FIELD);
+  // reason: an invalid/missing exemption kind (spec-verify-reachability-plan-
+  // promote-early-warning §Scope M3) is routed to the SAME feeding pack as a
+  // plain attestation-floor failure — "the exemption does not satisfy the
+  // floor" IS an attestation-floor failure, just with a different immediate
+  // cause; two separate feeding-pack branches for the same underlying concern
+  // would duplicate the recovery instructions and risk them drifting apart.
+  const attestationFailed = failures.some(
+    (f) => !f.ok && (f.field === ATTESTATION_FLOOR_FIELD || f.field === ATTESTATION_EXEMPT_KIND_FIELD),
+  );
   const prdSyncFailed = failures.some((f) => !f.ok && f.field === PRD_SYNC_FIELD);
 
   if (prdSyncFailed && !uatFailed && !attestationFailed) {
