@@ -47,6 +47,15 @@ export default defineCommand({
         "whose blocking verdict (or absence) to override. Skips the judgment-required " +
         "gate for this call only; recorded on the approve audit entry as override_judgment_id.",
     },
+    "override-no-judgment": {
+      type: "boolean",
+      description:
+        "task-t3-hardening audited escape — sibling of --override-judgment for the ONE " +
+        "denial it cannot reach: NO_JUDGMENT with zero review_judgments rows for this doc " +
+        "at all (there is no id to name). Legal only in that exact zero-judgment-ever state; " +
+        "recorded on the approve audit entry as override_no_judgment. Mutually exclusive " +
+        "with --override-judgment.",
+    },
     json: {
       type: "boolean",
       description: "Output as JSON",
@@ -69,6 +78,7 @@ export default defineCommand({
         ...(typeof args["override-judgment"] === "string"
           ? { overrideJudgmentId: args["override-judgment"] }
           : {}),
+        ...(args["override-no-judgment"] === true ? { overrideNoJudgment: true } : {}),
       });
 
       if (!result.ok) {

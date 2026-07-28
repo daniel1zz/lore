@@ -403,8 +403,11 @@ export class CorpusService {
    *   config value (`resolveLedgerAutoApprove`, `@lore/core`, default `true`). When
    *   `true`, `_createImpl` fast-tracks a ledger knowledge doc (assessment/retro/
    *   handoff/uat, `isLedgerKnowledgeSubType`) draft→approved in the SAME create write,
-   *   and `set` applies the atomic reset→re-fast-track (D4) on an edit to an approved
-   *   ledger doc. Absent/`undefined` (every bare `new CorpusService(store)` unit-test
+   *   and `set` applies the reset→re-fast-track (D4) on an edit to an approved ledger
+   *   doc as TWO separate, individually-atomic writes within the same `set()` call —
+   *   NOT one cross-write transaction (see `set`'s own inline comment at the
+   *   re-fast-track call site for the accepted residual this leaves). Absent/`undefined`
+   *   (every bare `new CorpusService(store)` unit-test
    *   construction) → feature OFF, byte-identical to pre-SPEC-103 behavior — same
    *   "absent in bare tests, present in production" shape as `gateEnforcer`/
    *   `traceRecorder`; only `app.ts`'s composition root resolves and wires the real
@@ -2076,12 +2079,26 @@ export class CorpusService {
     // SPEC-103 §Mechanisms M1, §Design Decisions D4 — uniform edit-reset semantics:
     // an edit to an approved ledger doc (assessment/retro/handoff/uat) still applies
     // the SAME approved→draft reset every other type gets (the write immediately
-    // above, unchanged), THEN atomically re-fast-tracks it back to approved in a
-    // SECOND `updateWithProvenance` call within this SAME `set()` invocation — both
-    // steps audited (this row's `details.auto = "ledger-fast-track"` names the
-    // second step; the first write's own "update" audit row, already committed
-    // above, is unchanged and untagged). One extra audit row + version bump is the
-    // accepted cost (D4 rationale: "bypass-the-reset alternative rejected — history
+    // above, unchanged), THEN re-fast-tracks it back to approved via a SECOND
+    // `updateWithProvenance` call within this SAME `set()` invocation — both steps
+    // audited (this row's `details.auto = "ledger-fast-track"` names the second step;
+    // the first write's own "update" audit row, already committed above, is unchanged
+    // and untagged).
+    //
+    // reason: task-t3-hardening-reachable-override-escape-real-ai-provenance (verify-first
+    // finding) — this is honestly TWO SEPARATE, individually-atomic `updateWithProvenance`
+    // writes, NOT one cross-write transaction/CAS spanning both. Each call is atomic on its
+    // own (doc patch + version row + audit row as one composite write, per StoreInterface's
+    // own contract) but there is no shared transaction wrapping the pair: a crash/failure
+    // in the gap between the reset write above committing and this re-fast-track write
+    // starting leaves the doc "draft" at `resetVersion`, with only the untagged "update"
+    // audit row — recoverable by a subsequent `set()`/`approve()` call, never silently lost,
+    // but NOT the atomic guarantee the word "atomically" previously (incorrectly) claimed
+    // here. This is an ACCEPTED residual (same class of window `ReviewService.approve`'s own
+    // JSDoc documents for its post-write plan-promote re-check) — closing it fully would need
+    // a NEW `StoreInterface` primitive for a two-row atomic write, out of this task's scope
+    // (current frozen T2 store contract has no such call). One extra audit row + version bump
+    // is the accepted cost (D4 rationale: "bypass-the-reset alternative rejected — history
     // inconsistency") — version history stays exactly as type-uniform as every other
     // approved-doc content/title edit, just with one additional row appended.
     // `effectiveExtraForLedger` mirrors this method's pre-existing `effectiveExtra`
