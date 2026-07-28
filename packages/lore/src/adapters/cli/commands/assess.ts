@@ -6,9 +6,11 @@
  * code diff to the configured AI provider; persists the structured judgment as a
  * `knowledge` doc (sub_type="assessment") linked to the plan via an `informs` link.
  *
- * Flow (SPEC-026 §8.3, SPEC-028 AC-AE-1): resolve → corpusService.getPlanBundle →
- * (zero tasks → exit 4, before any AI call) → diff acquisition (--diff shells `git diff
- * <range>`; --diff-file reads a file; both → exit 2) → pre-flight diff-budget warning
+ * Flow (SPEC-026 §8.3, SPEC-028 AC-AE-1, SPEC-106): resolve → corpusService.getPlanBundle →
+ * (zero tasks → exit 4, before any AI call) → staleness advisory (corpusService
+ * .getAssessmentFreshness + gate-predicates.assessmentFreshness, stderr-only, NEVER
+ * blocking — SPEC-106 D3) → diff acquisition (--diff shells `git diff <range>`;
+ * --diff-file reads a file; both → exit 2) → pre-flight diff-budget warning
  * (stderr-only, fires when diffText exceeds ai.assess.max_diff_chars, BEFORE the provider
  * call) → AI surface-brake check → aiProviderService.assessPlan → corpusService.create
  * (knowledge, sub_type=assessment) → corpusService.link (informs) → human render
@@ -24,8 +26,16 @@
  * is a non-blocking advisory printed after the summary in text mode, and surfaced under a
  * stable `data.scope_warning` key in `--json` output — never affects verdict/exit code.
  *
+ * Staleness advisory (SPEC-106 §Design Decisions D2/D3/D5, AC-FRESH-4): this run's OWN
+ * write always proceeds regardless of what the advisory found — `lore assess` is the
+ * remedy for a stale assessment (an assessment whose own follow-up hardening merged
+ * after it ran), so gating it on that condition would be a deadlock. The SAME
+ * freshness facts feed `plan-close`'s (checkpoint-registry.ts) BLOCKING
+ * `assessmentFreshness` predicate — one shared computation (`CorpusService
+ * .getAssessmentFreshness`), never two.
+ *
  * Source: SPEC-026 §3 D1-D5; §4 AC-ASSESS-1, AC-ASSESS-6, AC-ASSESS-8, AC-ASSESS-9;
- * SPEC-028 AC-AE-1; task-assess-diff-range-scope-mismatch-warning
+ * SPEC-028 AC-AE-1; task-assess-diff-range-scope-mismatch-warning; SPEC-106 AC-FRESH-4
  */
 
 import { spawnSync } from "node:child_process";
@@ -36,6 +46,7 @@ import { exitCode, formatError } from "../utils.js";
 import { isAssessAiBraked } from "../../../ai/resolve-ai.js";
 import { renderAssessmentContent } from "@lore/core";
 import { formatAssessmentSummary } from "../assess-render.js";
+import { assessmentFreshness } from "../../../service/gate-predicates.js";
 
 export default defineCommand({
   meta: {
@@ -110,6 +121,30 @@ export default defineCommand({
         process.stderr.write(formatError(noTasksError) + "\n");
         process.exitCode = exitCode(noTasksError);
         return;
+      }
+
+      // ─── Step 2.5: staleness advisory (SPEC-106 §Design Decisions D3) ─────────
+      // reason: `lore assess` is the REMEDY for a stale assessment (D2's motivating
+      // incident: an assessment whose own follow-up hardening merged after it ran) —
+      // gating this command on the condition it cures would be a deadlock, so this is
+      // a loud, non-blocking stderr advisory only. Runs BEFORE the (possibly slow/
+      // costly) AI call so the operator sees it as early as possible; a genuine
+      // resolve/store failure here still propagates as a real error (this is IO
+      // failure handling, not a staleness gate) — it never silently swallows.
+      const freshnessResult = await app.corpusService.getAssessmentFreshness(bundle.plan.id);
+      if (!freshnessResult.ok) {
+        process.stderr.write(formatError(freshnessResult.error) + "\n");
+        process.exitCode = exitCode(freshnessResult.error);
+        return;
+      }
+      const freshness = freshnessResult.value;
+      const freshnessCheck = assessmentFreshness(freshness.newestAssessmentAt, freshness.newestTaskActivityAt);
+      if (!freshnessCheck.ok) {
+        process.stderr.write(
+          `Warning: the stored assessment for '${bundle.plan.slug}' (recorded ${freshness.newestAssessmentAt}) ` +
+            `is already stale — newer task activity was recorded at ${freshness.newestTaskActivityAt}. This run ` +
+            `will still produce and save a fresh assessment (\`lore assess\` never refuses; it is the remedy).\n`,
+        );
       }
 
       // ─── Step 3: diff acquisition (CLI layer only — SPEC-026 §3 D3) ───────────

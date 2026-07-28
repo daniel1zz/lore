@@ -943,3 +943,61 @@ export function prdOutlineSynced(synced: boolean): PredicateResult {
   }
   return { ok: false, reason: PRD_SYNC_NOT_SYNCED_REASON, field: PRD_SYNC_FIELD };
 }
+
+/** `assessmentFreshness`'s single machine-readable failure reason. */
+export const ASSESSMENT_STALE_REASON = "ASSESSMENT_STALE";
+
+/** The `PredicateResult.field` value `assessmentFreshness`'s failure carries (SPEC-106). */
+export const ASSESSMENT_FRESHNESS_FIELD = "assessment-freshness";
+
+/**
+ * `plan-close`'s assessment-freshness predicate (SPEC-106 §Design Decisions D1/D2/D5) —
+ * a plan's stored `lore assess` judgment must not predate task activity that landed
+ * AFTER it: an assessment that surfaced defects and triggered hardening work, where
+ * that hardening then merges, leaves the corpus's permanent quality record describing
+ * an intermediate state (the motivating incident, `knowledge-session-process-review-
+ * 2026-07-28-grill-to-shipped` §V1). Opt-OUT, not opt-in (mirrors `attestationFloor`'s
+ * shape one level up, `checkPlanClose` in `checkpoint-registry.ts`) — runs for every
+ * closing plan unless `ctx.assessmentFreshnessExempt === true` (D4, flag + non-empty
+ * reason — a bare flag alone is NOT exempt, same shape `attestation_exempt` uses).
+ *
+ * D2: staleness is measured against AUDIT rows (`evidence`/`done` actions on the
+ * plan's tasks), never a doc's `updated_at` — the latter moves on cosmetic edits
+ * (anchor adds, link writes, a bare status change) that carry no new outcome
+ * information the assessment would need to re-judge (AC-FRESH-3). Both timestamps
+ * are pre-resolved by the CALLER (`CorpusService.getAssessmentFreshness` — module
+ * invariant: no store, no IO here) as ISO-8601 strings, compared lexicographically —
+ * the SAME convention `getLatestUatVerdict`/`resolvePrdSyncWindowOpen` already use
+ * for ISO-8601 ordering in this codebase.
+ *
+ * @param newestAssessmentAt - The plan's newest linked assessment doc's `created_at`,
+ *   or `undefined` when NO assessment is linked at all.
+ * @param newestTaskActivityAt - The newest `evidence`/`done` audit-row timestamp
+ *   among the plan's tasks, or `undefined` when none of them carry any such row.
+ * @returns `{ok: true}` when either input is `undefined` (D5 — a vacuous pass from
+ *   missing data is never invented into a denial, AC-FRESH-2) OR
+ *   `newestTaskActivityAt <= newestAssessmentAt`; `{ok: false, reason:
+ *   "ASSESSMENT_STALE", field: "assessment-freshness"}` when task activity landed
+ *   strictly AFTER the newest assessment.
+ * @example
+ * assessmentFreshness(undefined, "2026-07-28T12:00:00.000Z"); // => { ok: true } — no assessment yet
+ * @example
+ * assessmentFreshness("2026-07-28T11:52:00.000Z", undefined); // => { ok: true } — no task activity
+ * @example
+ * assessmentFreshness("2026-07-28T11:52:00.000Z", "2026-07-28T12:23:00.000Z");
+ *   // => { ok: false, reason: "ASSESSMENT_STALE", field: "assessment-freshness" }
+ * @example
+ * assessmentFreshness("2026-07-28T12:23:00.000Z", "2026-07-28T11:52:00.000Z"); // => { ok: true }
+ */
+export function assessmentFreshness(
+  newestAssessmentAt: string | undefined,
+  newestTaskActivityAt: string | undefined,
+): PredicateResult {
+  if (newestAssessmentAt === undefined || newestTaskActivityAt === undefined) {
+    return { ok: true };
+  }
+  if (newestTaskActivityAt > newestAssessmentAt) {
+    return { ok: false, reason: ASSESSMENT_STALE_REASON, field: ASSESSMENT_FRESHNESS_FIELD };
+  }
+  return { ok: true };
+}

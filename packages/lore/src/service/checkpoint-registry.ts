@@ -106,6 +106,7 @@ import {
   prdOutlineSynced,
   verifyReachability,
   attestationExemptKindValid,
+  assessmentFreshness,
   ANCHOR_OVERLAP_FIELD,
   ACTOR_IDENTITY_FIELD,
   AC_QUANTIFIABLE_FIELD,
@@ -117,6 +118,7 @@ import {
   ATTESTATION_FLOOR_FIELD,
   ATTESTATION_EXEMPT_KIND_FIELD,
   PRD_SYNC_FIELD,
+  ASSESSMENT_FRESHNESS_FIELD,
   type PredicateResult,
   type SiblingClaimInfo,
   type ReachabilityResult,
@@ -424,6 +426,39 @@ export interface GateContext {
    * of naming a doc that doesn't exist.
    */
   readonly prdSyncDomainDocSlug?: string;
+
+  // -- plan-close: check() + feed() (SPEC-106, assessment freshness) --
+  /**
+   * Whether the closing plan is EXEMPTED from the assessment-freshness predicate
+   * (`extra.assessment_freshness_exempt === true` AND a non-empty
+   * `extra.assessment_freshness_exempt_reason` — a bare
+   * `assessment_freshness_exempt: true` with no reason is treated as NOT exempt,
+   * resolved by the CALLER, `CorpusService.set` — mirrors `attestationExempt`'s
+   * flag-plus-reason shape EXACTLY, SPEC-106 §Design Decisions D4). `true`
+   * short-circuits `assessmentFreshness` out of `checkPlanClose` entirely — unlike
+   * `attestationExempt`, there is no separate "exempt kind" taxonomy for this
+   * predicate (D4 names only flag + reason).
+   */
+  readonly assessmentFreshnessExempt?: boolean;
+  /**
+   * The plan's newest linked (`informs`) assessment doc's `created_at`
+   * (`CorpusService.getAssessmentFreshness`) — `undefined` when NO assessment is
+   * linked to the plan at all. Assessment docs are write-once (`lore assess` never
+   * edits one after creation), so `created_at` is the correct freshness timestamp —
+   * unlike a task's `updated_at`, which this predicate deliberately never reads
+   * (D2). Populated only when `assessmentFreshnessExempt` is not `true` (mirrors
+   * `planTasksAttestation`'s "skip the IO when exempt" shape).
+   */
+  readonly newestAssessmentAt?: string;
+  /**
+   * The newest `evidence`/`done` AUDIT-row timestamp among the closing plan's
+   * tasks (`CorpusService.getAssessmentFreshness`) — `undefined` when none of them
+   * carry any such row. Deliberately AUDIT rows, never doc `updated_at` (D2): the
+   * latter moves on cosmetic edits (anchor adds, link writes, a bare status
+   * change) that carry no new outcome information an assessment would need to
+   * re-judge (AC-FRESH-3).
+   */
+  readonly newestTaskActivityAt?: string;
 
   // -- review-judgment: check() + feed() (SPEC-103 §Mechanisms M2) --
   /**
@@ -1023,6 +1058,12 @@ const DEFAULT_ATTESTATION_MIN_RATIO = 0.5;
  *     predicate is even applicable" signal — a plan hanging off a `prd`
  *     directly, or unparented, never has this field set, mirroring
  *     `plan-promote`'s `hasSpecParent` vacuous-pass shape).
+ *   - `assessmentFreshness` — OPT-OUT (SPEC-106 D1): runs for EVERY closing plan
+ *     UNLESS `ctx.assessmentFreshnessExempt === true` (D4 — flag + non-empty
+ *     reason, resolved by the caller; mirrors `attestationExempt`'s shape, but
+ *     with NO separate "exempt kind" taxonomy). Vacuous pass when the plan has
+ *     no linked assessment or no evidence/done task activity at all (D5,
+ *     AC-FRESH-2) — this predicate never invents a denial from missing data.
  *
  * Every predicate that runs is pushed into the SAME results array (this
  * module's "run every predicate, don't short-circuit on the first failure"
@@ -1050,6 +1091,9 @@ function checkPlanClose(ctx: GateContext): PredicateResult[] {
   }
   if (ctx.prdSyncEnabled === true && ctx.prdSyncSynced !== undefined) {
     results.push(prdOutlineSynced(ctx.prdSyncSynced));
+  }
+  if (ctx.assessmentFreshnessExempt !== true) {
+    results.push(assessmentFreshness(ctx.newestAssessmentAt, ctx.newestTaskActivityAt));
   }
   return results;
 }
@@ -1180,6 +1224,47 @@ function feedAttestationFloor(ctx: GateContext, failures: PredicateResult[]): st
 }
 
 /**
+ * Renders the `assessmentFreshness`-specific feeding pack (SPEC-106) — names the
+ * plan's stale assessment timestamp against the newer task activity that outdated
+ * it, and the EXACT re-run command (`lore assess <plan>`, AC-FRESH-1's own
+ * requirement) rather than a paraphrase. Pointers only (timestamps, never the
+ * assessment doc's content), mirroring `feedAttestationFloor`'s "recompute the
+ * recovery text from ctx" shape.
+ */
+function feedAssessmentFreshness(ctx: GateContext, failures: PredicateResult[]): string {
+  const plan = ctx.targetIdOrSlug ?? "<plan>";
+  const newestAssessment = ctx.newestAssessmentAt ?? "unknown";
+  const newestActivity = ctx.newestTaskActivityAt ?? "unknown";
+  const pack = buildFeedingPack({
+    ruleSource: "corpus (assessment vs. task audit activity)",
+    ruleMarkdown:
+      `Required for plan-close: the plan's stored assessment (recorded ${newestAssessment}) predates ` +
+      `evidence/done activity recorded at ${newestActivity} on this plan's tasks — the assessment ` +
+      `describes an intermediate state, not the plan's current outcome (SPEC-106). Recovery: run ` +
+      `\`lore assess ${plan}\` to produce a fresh assessment reflecting the latest task activity, then ` +
+      `retry the close. If this plan's activity since the last assessment is genuinely immaterial to its ` +
+      `judged outcome, declare \`extra.assessment_freshness_exempt: true\` plus a non-empty ` +
+      `\`extra.assessment_freshness_exempt_reason\` on ${plan} instead (fetch-merge-set via the MCP ` +
+      `\`lore_set\` tool — \`extra\` REPLACES the whole field wholesale, it does NOT merge).`,
+    missing: selectFailures(failures).map((f) => f.reason),
+  });
+  return renderFeedingPack(pack);
+}
+
+/**
+ * The additional sentence {@link feedPlanClose} appends to whichever OTHER
+ * predicate's feeding pack it renders, when `assessmentFreshness` ALSO failed
+ * alongside it (SPEC-106) — mirrors the pre-existing `attestationNote`/
+ * `prdSyncNote` "additionally unmet" pattern one level up in that function.
+ */
+function assessmentFreshnessNote(ctx: GateContext): string {
+  return (
+    ` Additionally, this plan's stored assessment is now stale — see \`lore assess ` +
+    `${ctx.targetIdOrSlug ?? "<plan>"}\` to produce a fresh one before closing.`
+  );
+}
+
+/**
  * Renders the `prdOutlineSynced`-specific feeding pack (SPEC-080 §C4) — names
  * all three repair verbs the spec's own text calls for (`lore outline set`,
  * `lore set <domain-doc>`, `lore outline exempt`), degrading to a link-first
@@ -1215,21 +1300,24 @@ function feedPrdOutlineSynced(ctx: GateContext, failures: PredicateResult[]): st
 }
 
 /**
- * `plan-close`'s feeding message — dispatches between THREE independent failure
+ * `plan-close`'s feeding message — dispatches between FOUR independent failure
  * families (SPEC-054's `uatP0Accepted`, SPEC-069's `attestationFloor`, SPEC-080's
- * `prdOutlineSynced`, all on `checkPlanClose`, see that function's own JSDoc):
+ * `prdOutlineSynced`, SPEC-106's `assessmentFreshness`, all on `checkPlanClose`,
+ * see that function's own JSDoc):
  *
+ *   - ONLY `assessmentFreshness` failed → {@link feedAssessmentFreshness} alone.
  *   - ONLY `prdOutlineSynced` failed → {@link feedPrdOutlineSynced} alone.
- *   - ONLY `attestationFloor` failed (with or without `prdOutlineSynced` also
- *     failing) → {@link feedAttestationFloor}, with one extra sentence
- *     appended when `prdOutlineSynced` ALSO failed — REGRESSION: byte-identical
- *     to pre-SPEC-080 when `prdOutlineSynced` didn't fail (every pre-existing
- *     `attestation-floor.test.ts` scenario never sets `prdSyncEnabled`, so
- *     `prdSyncFailed` is always `false` there).
- *   - `uatP0Accepted` failed (with or without the other two also failing) →
+ *   - ONLY `attestationFloor` failed (with or without `prdOutlineSynced`/
+ *     `assessmentFreshness` also failing) → {@link feedAttestationFloor}, with
+ *     one extra sentence appended per OTHER also-failing predicate — REGRESSION:
+ *     byte-identical to pre-SPEC-106 when `assessmentFreshness` didn't fail
+ *     (every pre-existing `attestation-floor.test.ts` scenario never sets
+ *     `newestAssessmentAt`/`newestTaskActivityAt`, so `assessmentStaleFailed` is
+ *     always `false` there).
+ *   - `uatP0Accepted` failed (with or without the other three also failing) →
  *     the pre-existing `lore uat record`-naming message, UNCHANGED wording
- *     when both the other predicates passed (REGRESSION: byte-identical to
- *     pre-SPEC-069/-080 — `uat-service.test.ts`'s `.toContain("lore uat
+ *     when every other predicate passed (REGRESSION: byte-identical to
+ *     pre-SPEC-069/-080/-106 — `uat-service.test.ts`'s `.toContain("lore uat
  *     record")` assertions and `requires-uat-gate.test.ts`'s STATE scenario
  *     both pin this), with one extra sentence per OTHER failing predicate.
  */
@@ -1245,20 +1333,26 @@ function feedPlanClose(ctx: GateContext, failures: PredicateResult[]): string {
     (f) => !f.ok && (f.field === ATTESTATION_FLOOR_FIELD || f.field === ATTESTATION_EXEMPT_KIND_FIELD),
   );
   const prdSyncFailed = failures.some((f) => !f.ok && f.field === PRD_SYNC_FIELD);
+  const assessmentStaleFailed = failures.some((f) => !f.ok && f.field === ASSESSMENT_FRESHNESS_FIELD);
+  const assessmentNote = assessmentStaleFailed ? assessmentFreshnessNote(ctx) : "";
+
+  if (assessmentStaleFailed && !uatFailed && !attestationFailed && !prdSyncFailed) {
+    return feedAssessmentFreshness(ctx, failures);
+  }
 
   if (prdSyncFailed && !uatFailed && !attestationFailed) {
-    return feedPrdOutlineSynced(ctx, failures);
+    return feedPrdOutlineSynced(ctx, failures) + assessmentNote;
   }
 
   if (attestationFailed && !uatFailed) {
     const attestationText = feedAttestationFloor(ctx, failures);
     if (!prdSyncFailed) {
-      return attestationText;
+      return attestationText + assessmentNote;
     }
     return (
       `${attestationText}\n\nAdditionally, the domain-doc sync predicate is unmet — see ` +
       `\`lore outline exempt ${ctx.targetIdOrSlug ?? "<plan>"} --reason "..."\` or update the ` +
-      `linked domain doc.`
+      `linked domain doc.${assessmentNote}`
     );
   }
 
@@ -1282,7 +1376,7 @@ function feedPlanClose(ctx: GateContext, failures: PredicateResult[]): string {
       `archived after a linked UAT verdict shows P0 acceptance (verdict not "reject", no ` +
       `rejected P0 journey, no uncovered P0 requirement, no UIUX blocker).${detail} ` +
       `Recovery: run acceptance (\`/lore-uat\`) then \`lore uat record ` +
-      `${ctx.targetIdOrSlug ?? "<plan>"} --json-file <verdict.json>\`.${attestationNote}${prdSyncNote}`,
+      `${ctx.targetIdOrSlug ?? "<plan>"} --json-file <verdict.json>\`.${attestationNote}${prdSyncNote}${assessmentNote}`,
     missing: selectFailures(failures).map((f) => f.reason),
   });
   return renderFeedingPack(pack);
