@@ -100,6 +100,11 @@ import { buildPhaseStartPack, PHASE_START_CHECKPOINT } from "../../flows/phase-f
 import { buildTaskStartPack, TASK_START_CHECKPOINT } from "../../flows/task-feed-flow.js";
 import { buildTaskFeedFlowDeps, resolveTaskStartBudgets } from "../cli/task-feed-wiring.js";
 import { createWithSupersedes, renderSupersedeRepairMessage } from "../../flows/supersede-flow.js";
+// reason: SPEC-102 — resolveActorWithSource lives in @lore/core/node (node:os
+// only, no bun:sqlite) — safe to import here without breaking this file's
+// vitest-reachability (mirrors this module's own precedent of lazy-importing
+// ONLY bun:sqlite-tainted deps, not every Node-adjacent one).
+import { resolveActorWithSource } from "@lore/core/node";
 import { computeValidityState } from "../../flows/validity-state.js";
 import {
   buildStalenessBatchJsonPayload,
@@ -1209,6 +1214,12 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
     const relatedAdrs = navigation.related.filter((r) => r.type === "adr");
     const plansResult = await corpusService.list({ type: "plan", status: "active" });
     const activePlans = plansResult.ok ? plansResult.value.docs : [];
+
+    // reason: SPEC-102 — a SEPARATE kind="context_bundle" trace row, distinct
+    // from the kind="get" row `corpusService.get` above already fired
+    // (a different consumption pattern — the whole navigation bundle, not a
+    // single doc read). A no-op when trace.enabled resolves false.
+    app.traceRecorder?.recordContextBundle(resolveActorWithSource(undefined, process.env).actor);
 
     return textContent({ target: doc, linked_specs: linkedSpecs, related_adrs: relatedAdrs, active_plans: activePlans });
   });

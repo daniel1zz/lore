@@ -489,6 +489,35 @@ const AuditConfigSchema = z
 /** Audit completeness-oracle config section. Source: SPEC-035 §2 D5. */
 export type AuditConfig = z.infer<typeof AuditConfigSchema>;
 
+// ─── Trace Section Schema ───────────────────────────────────────────────────
+
+/**
+ * Read/deny observability configuration (SPEC-102 §Scope) — an independent
+ * `trace.*` section, mirroring the `audit.*`/`verify.*` precedent above
+ * rather than nesting under `workflow` — trace instrumentation is a distinct
+ * feature (fire-and-forget read/deny tracing, `lore trace stats`) that
+ * evolves independently from claim leases/verify's config surface.
+ *
+ * @invariant `enabled` defaults to `true` (SPEC-102 "default ON") — a corpus
+ *   opts OUT via explicit `trace: { enabled: false }`, never the reverse.
+ *   `false` disables BOTH recording (every `TraceRecorder` call site becomes
+ *   a no-op — `app.ts` simply never wires a `TraceRecorder` instance) AND
+ *   the opportunistic retention prune at CLI startup (§Migration Strategy).
+ * @invariant `retention_days` defaults to 90 — the age threshold the CLI
+ *   startup prune's cutoff (`now - retention_days`) is computed against.
+ */
+const TraceConfigSchema = z
+  .object({
+    /** `false` disables trace recording AND retention pruning entirely. Default: true. */
+    enabled: z.boolean().default(true),
+    /** Trace rows older than this many days are eligible for retention pruning. Default: 90. */
+    retention_days: z.number().int().positive().default(90),
+  })
+  .strict();
+
+/** Read/deny trace observability config section. Source: SPEC-102 §Scope. */
+export type TraceConfig = z.infer<typeof TraceConfigSchema>;
+
 // ─── Feedback Section Schema ────────────────────────────────────────────────
 
 /**
@@ -749,6 +778,12 @@ export const LoreConfigSchema = z
      * defaults (root 300L/30720B, module 200L/16384B, enabled: true).
      */
     context: contextConfigSchema.optional(),
+    /**
+     * Read/deny trace observability configuration (SPEC-102).
+     * When absent, {@link resolveTraceEnabled}/{@link resolveTraceRetentionDays}
+     * return the schema defaults (enabled: true, retention_days: 90).
+     */
+    trace: TraceConfigSchema.optional(),
   })
   .strict();
 
@@ -1015,6 +1050,37 @@ export function resolvePrdSyncGateEnabled(config: LoreConfig | undefined): boole
  */
 export function resolveAuditVerifySince(config: LoreConfig | undefined): string {
   return (config?.audit ?? AuditConfigSchema.parse({})).verify_since;
+}
+
+/**
+ * Resolve whether trace recording (and its opportunistic retention prune) is
+ * enabled, from an optional LoreConfig. Mirrors {@link resolveClaimTtlMinutes} —
+ * absence of the whole config or the `trace` section both fall back to the
+ * schema default (`true` — SPEC-102 "default ON").
+ *
+ * @param config - Parsed LoreConfig, or undefined when no config file was loaded
+ * @returns Effective trace.enabled value
+ * @example
+ *   resolveTraceEnabled(undefined) // => true
+ *   resolveTraceEnabled({ ..., trace: { enabled: false } }) // => false
+ */
+export function resolveTraceEnabled(config: LoreConfig | undefined): boolean {
+  return (config?.trace ?? TraceConfigSchema.parse({})).enabled;
+}
+
+/**
+ * Resolve the effective trace retention window, in days, from an optional
+ * LoreConfig. Mirrors {@link resolveClaimTtlMinutes} — absence of the whole
+ * config or the `trace` section both fall back to the schema default (90).
+ *
+ * @param config - Parsed LoreConfig, or undefined when no config file was loaded
+ * @returns Effective trace.retention_days value
+ * @example
+ *   resolveTraceRetentionDays(undefined) // => 90
+ *   resolveTraceRetentionDays({ ..., trace: { retention_days: 30 } }) // => 30
+ */
+export function resolveTraceRetentionDays(config: LoreConfig | undefined): number {
+  return (config?.trace ?? TraceConfigSchema.parse({})).retention_days;
 }
 
 /**

@@ -313,5 +313,14 @@ export function loadLoreApp(): {
   // resolves per-request in ActorContext — see SPEC-024 §9.2.
   app.callerSurface = detectCliSurface();
 
+  // SPEC-102 §Migration Strategy — opportunistic bounded-batch trace
+  // retention prune, fired ONCE per CLI invocation (not MCP/HTTP — those are
+  // long-lived processes, not a per-invocation "startup"). Absent when
+  // trace.enabled resolves false (createApp never wires this port then).
+  // Fire-and-forget: never awaited, so it adds ZERO latency to command
+  // dispatch — the CLI process's own event loop keeps it running until it
+  // settles or the process exits, whichever comes first.
+  app.pruneTraceEventsOpportunistically?.();
+
   return { app, dbPath, defaults, config: telemetryOnlyConfig };
 }

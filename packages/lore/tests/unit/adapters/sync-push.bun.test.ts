@@ -50,6 +50,7 @@ import {
   MIGRATION_009_FINALIZE_SQL,
 } from "../../../src/store/migrations/migration-009.js";
 import { MIGRATION_010_SQL } from "../../../src/store/migrations/migration-010.js";
+import { MIGRATION_011_SQL } from "../../../src/store/migrations/migration-011.js";
 import { computeFtsShadowValues, computeAuditEntryHash } from "../../../src/store/store-shared.js";
 
 // ─── Fixture Helpers ─────────────────────────────────────────────────────────
@@ -199,6 +200,15 @@ async function applyMigrationsToClient(client: Client, localStore: SQLiteStore):
   // JS-level backfill loop needed) — a plain executeMultiple call, same as
   // migrations 001-007 above.
   await client.executeMultiple(MIGRATION_010_SQL);
+
+  // migration-011 (SPEC-102 trace_events + its four indexes) is pure
+  // additive CREATE TABLE/INDEX IF NOT EXISTS — mirrors migration-001..003's
+  // un-wrapped shape, a plain executeMultiple call. NOTE: trace_events is
+  // NEVER added to sync-push.ts's own REPLICATED_TABLES set (SPEC-102 D3) —
+  // this fixture mirrors SQLiteStore's full migration CHAIN for the
+  // user_version parity guard below, which is a separate concern from "which
+  // tables sync-push actually replicates."
+  await client.executeMultiple(MIGRATION_011_SQL);
 
   // ─── Parity guard ────────────────────────────────────────────────────────
   // Assert the remote fixture's PRAGMA user_version matches the REAL

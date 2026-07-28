@@ -91,7 +91,7 @@ import { buildTaskStartPack, TASK_START_CHECKPOINT } from "../../../flows/task-f
 import { buildPhaseFeedFlowDeps } from "../phase-wiring.js";
 import { buildTaskFeedFlowDeps, resolveTaskStartBudgets } from "../task-feed-wiring.js";
 import { renderTaskStartPack } from "../task-feed-render.js";
-import { exitCode, formatError } from "../utils.js";
+import { exitCode, formatError, resolveActor } from "../utils.js";
 
 /** Loosely-typed view of the args this command's dispatch table needs — mirrors citty's parsed-args shape. */
 interface FeedArgs {
@@ -199,6 +199,21 @@ const SPECIAL_CHECKPOINT_HANDLERS: Readonly<Record<string, CheckpointHandler>> =
   [TASK_START_CHECKPOINT]: handleTaskStart,
 };
 
+/**
+ * SPEC-102 — fires a fire-and-forget `kind="feed"` trace row for a successful
+ * `lore feed <checkpoint>` serve (checkpoint packs + session-resume, per
+ * SPEC-102 §Scope). `docsServed` is best-effort (whatever doc ids this call
+ * site cheaply has in hand — the target for phase-start/task-start, the
+ * `--parent` doc for the generic path) — SPEC-102 D6 keeps this in `details`
+ * JSON rather than a junction table, so an incomplete list here is a
+ * documented non-goal, not a correctness gap. A no-op when
+ * `app.traceRecorder` is absent (trace.enabled resolves false).
+ */
+function recordFeedTrace(app: App, checkpoint: string, docsServed: readonly string[]): void {
+  if (app.traceRecorder === undefined) return;
+  app.traceRecorder.recordFeed(resolveActor(), checkpoint, docsServed);
+}
+
 // SPEC-070 Fix F7: fail loud, at module init, if the shared SPECIAL_FEED_CHECKPOINTS
 // descriptor (flows/feed-flow.ts, the SSOT the MCP `lore_feed` handler ALSO consumes)
 // names a checkpoint this file has no handler for — the CLI dispatch table's own
@@ -248,9 +263,17 @@ export default defineCommand({
   async run({ args }) {
     const { app, config } = loadLoreApp();
     try {
+      const checkpointName = typeof args.checkpoint === "string" ? args.checkpoint : String(args.checkpoint);
       const handler = SPECIAL_CHECKPOINT_HANDLERS[args.checkpoint as string];
       if (handler !== undefined) {
         await handler(app, args, config);
+        // reason: SPEC-102 — only trace a SUCCESSFUL serve; each handler sets
+        // its own process.exitCode (0 on success, non-zero via exitCode() on
+        // an unresolvable target).
+        if (process.exitCode === 0) {
+          const target = typeof args.target === "string" ? [args.target] : [];
+          recordFeedTrace(app, checkpointName, target);
+        }
         return;
       }
 
@@ -269,6 +292,8 @@ export default defineCommand({
       // reason: feed is advisory context, never a gate — exit 0 always, regardless of
       // whether a governing skill was found (module header).
       process.exitCode = 0;
+      const docsServed = typeof args.parent === "string" ? [args.parent] : [];
+      recordFeedTrace(app, checkpointName, docsServed);
     } finally {
       app.close();
     }

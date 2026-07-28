@@ -31,6 +31,7 @@ import { z } from "zod";
  */
 export const TRACE_EVENT_KINDS = ["get", "search", "feed", "context_bundle", "gate_deny"] as const;
 
+/** One of {@link TRACE_EVENT_KINDS} — the `trace_events.kind` column's currently-known value set. */
 export type TraceEventKind = (typeof TRACE_EVENT_KINDS)[number];
 
 /** Zod enum over {@link TRACE_EVENT_KINDS} — the `TraceRecorder` seam's typo guard, NOT a DB CHECK (D2). */
