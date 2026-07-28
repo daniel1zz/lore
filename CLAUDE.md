@@ -46,6 +46,7 @@ bun run typecheck         # tsc --noEmit for all packages + scripts
 bun run test:vitest       # bunx vitest run — covers non-bun:sqlite files
 bun run test:bun          # cd packages/lore && bun test .bun.test
 bun run test              # both runners in sequence
+bun run test:changed [<base>]  # deterministic worktree oracle: transitive reverse-dep selection across BOTH runners (default base: merge-base main HEAD); --list to preview
 
 # Run a single vitest test file
 bunx vitest run packages/lore/tests/unit/service/corpus-service.test.ts
