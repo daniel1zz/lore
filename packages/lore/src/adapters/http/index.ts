@@ -12,6 +12,7 @@ import { handleApiRoute, handleLocalBootstrap } from "./routes.js";
 import { jsonError, corsPreflightResponse, applyCorsOrigin } from "./middleware.js";
 import { createMachineAuthStores, type MachineAuthStores } from "./machine-auth.js";
 import { handleGetProjects } from "./projects-route.js";
+import { createDashboardHandler, type DashboardServingConfig } from "./static-serving.js";
 // reason: TYPE-ONLY import — the bun-only MountRegistry RUNTIME (`../../mount/mount-registry.js`,
 // T5) transitively imports `bun:sqlite`; this file only ever consumes the pure interface
 // contract (`../../mount/types.js`, T3), never constructs a registry itself. The production
@@ -49,6 +50,16 @@ export interface HttpConfig {
    * that actual origin 403s and the SPA never mints a session cookie.
    */
   allowedOrigins?: readonly string[];
+  /**
+   * Packaged-mode dashboard static serving + nonce auth (spec-dashboard-production-
+   * packaging-one-command-lore-dashboard DD-1..DD-4) — omitted (the default): this
+   * server behaves EXACTLY as before this field existed, every non-`/api` request still
+   * falls through to the pre-existing generic `404`. Supplied: `GET /auth/bootstrap`,
+   * exact static asset matches, and the SPA fallback are all dispatched per DD-4's order,
+   * strictly AFTER the untouched `/api/*` branch above (unknown `/api/*` never falls
+   * through to a static/SPA response). See `static-serving.ts` for the full contract.
+   */
+  dashboard?: DashboardServingConfig;
 }
 
 /**
@@ -181,6 +192,11 @@ async function dispatchProjectRequest(
  *   GET  /health                       — unauthenticated health check
  *   POST /api/auth/local-bootstrap     — open route; own auth (X-Lore-Token + Origin)
  *   *    /api/*                        — API routes (cookie OR bearer token required)
+ *   GET  /auth/bootstrap               — packaged-mode nonce redemption (DD-2), only when
+ *                                          `config.dashboard` is supplied
+ *   GET  <static/SPA>                  — packaged-mode dashboard serving (DD-4), only when
+ *                                          `config.dashboard` is supplied; every non-`/api`
+ *                                          path is otherwise the pre-existing generic 404
  * Returns the server instance (Bun.Server).
  */
 export function startHttpServer(app: App, config: HttpConfig = {}): ReturnType<typeof Bun.serve> {
@@ -215,6 +231,13 @@ export function startHttpServer(app: App, config: HttpConfig = {}): ReturnType<t
     if (machineAuth === undefined) machineAuth = createMachineAuthStores();
     return machineAuth;
   }
+
+  // reason: DD-4 — built ONCE per server instance (never per-request) so the dashboard
+  // handler's internal nonce store's mints survive across requests. `undefined` when
+  // `config.dashboard` is omitted — the ENTIRE dashboard branch below is then unreachable,
+  // every non-`/api` request takes the exact pre-existing generic-404 path (byte-identical
+  // to this field never having existed, mirroring SPEC-078's registry-less-mode guarantee).
+  const dashboardHandler = config.dashboard !== undefined ? createDashboardHandler(config.dashboard) : undefined;
 
   // reason: explicitly typed (rather than `const server = Bun.serve({...})`) because
   // the `fetch` handler below reads `server.port` (SPEC-078 D7 — the REAL bound port,
@@ -307,6 +330,17 @@ export function startHttpServer(app: App, config: HttpConfig = {}): ReturnType<t
         }
 
         return applyCorsOrigin(response, origin, allowedOrigins);
+      }
+
+      // DD-4 — dashboard static serving + `/auth/bootstrap`, strictly AFTER the `/api/*`
+      // branch above (an unknown `/api/*` route already returned its JSON 404 and never
+      // reaches here). Undefined `dashboardHandler` (dashboard serving disabled) leaves
+      // this whole block inert — falls straight to the pre-existing generic 404 below.
+      if (dashboardHandler !== undefined) {
+        const dashboardResponse = await dashboardHandler.handle(req, url);
+        if (dashboardResponse !== null) {
+          return applyCorsOrigin(dashboardResponse, origin, allowedOrigins);
+        }
       }
 
       return applyCorsOrigin(jsonError({ code: "NOT_FOUND", message: "Not Found" }, 404), origin, allowedOrigins);
