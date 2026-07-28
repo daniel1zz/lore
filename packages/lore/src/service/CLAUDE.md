@@ -45,7 +45,7 @@ Full pre-compression mechanism walkthroughs (per-spec design decisions, byproduc
 | `VersionService` | Version log, unified diff (`diff` pkg), restore (append-only) |
 | `OutlineService` | MDX placeholder resolution (whitelisted components) + `renderResolvedToMarkdown` text-projection splice |
 | `MigrationService` | One-shot v1→v2 import (YAML-frontmatter MD → store) |
-| `TreeCheckService` | Drift detection (missing/extra/misplaced/cycle/orphan), auto-fix, parent_id↔link reconciliation |
+| `TreeCheckService` | Drift detection (missing/extra/misplaced/cycle/orphan/plan-terminality), auto-fix, parent_id↔link reconciliation. ⛔ `plan-terminality` (plan non-terminal while ≥1 child task exists and ALL are terminal) is deliberately NOT auto-fixable — transitioning a plan would fire the `plan-close` governance gate from inside a repair command; it is reported with its remediation command only |
 | `AIProviderService` | AI provider dispatch + template render; `assessPlan` (plan judge), `judgeDoc` (review judge) |
 | `SyncDocsService` | One-way file→corpus reconciler for spec files |
 | `PhaseService` | add/list/remove/rename/migrate on `plan.extra.phases` |
