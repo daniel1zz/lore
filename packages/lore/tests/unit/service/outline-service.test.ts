@@ -711,6 +711,16 @@ describe("OutlineService.resolve", () => {
         latestJudgmentsByDocIds: (docIds, kind) => store.latestJudgmentsByDocIds(docIds, kind),
         insertCalibrationRecord: (r) => store.insertCalibrationRecord(r),
         queryCalibrationWindow: (f) => store.queryCalibrationWindow(f),
+        // reason: SPEC-102 — new required StoreInterface methods; mechanical
+        // addition (same class of fix as every other explicit delegate above).
+        insertTraceEvent: (event) => store.insertTraceEvent(event),
+        countTraceEventsByKind: (window) => store.countTraceEventsByKind(window),
+        countTraceDenyByCheckpoint: (window) => store.countTraceDenyByCheckpoint(window),
+        countTraceZeroHitSearches: (window) => store.countTraceZeroHitSearches(window),
+        countNeverReadDocs: (window) => store.countNeverReadDocs(window),
+        listTraceGateDenies: (window) => store.listTraceGateDenies(window),
+        listTraceRawSearchQueries: (window) => store.listTraceRawSearchQueries(window),
+        pruneTraceEvents: (cutoffIso, batchSize) => store.pruneTraceEvents(cutoffIso, batchSize),
         close: () => store.close(),
         dbSizeBytes: () => store.dbSizeBytes(),
       };

@@ -22,6 +22,7 @@ import {
   MIGRATION_009_FINALIZE_SQL,
 } from "./migrations/migration-009.js";
 import { MIGRATION_010_SQL } from "./migrations/migration-010.js";
+import { MIGRATION_011_SQL } from "./migrations/migration-011.js";
 // SPEC-072 (upstream issue reporting) §3 Structure — re-exported here (beside
 // the migration chain it describes) from a bun:sqlite-free sibling module so
 // vitest-reachable code (e.g. flows/upstream-probe.ts, a later phase of this
@@ -60,6 +61,11 @@ import type {
   SearchHit,
   StoreFilters,
   StoreInterface,
+  TraceDenyByCheckpoint,
+  TraceEventInput,
+  TraceGateDenyEvent,
+  TraceRawSearchQuery,
+  TraceStatsWindow,
   UpdateOpts,
 } from "./store-interface.js";
 import {
@@ -376,6 +382,15 @@ export class SQLiteStore implements StoreInterface {
         }
         throw error;
       }
+    }
+
+    if (currentVersion < 11) {
+      // reason: mirrors migration-001/002/003's UN-wrapped shape (see
+      // migration-011.ts's own JSDoc @invariant) — pure additive `CREATE
+      // TABLE IF NOT EXISTS`/`CREATE INDEX IF NOT EXISTS`, no ALTER on any
+      // existing table, safe to re-run statement-by-statement even
+      // half-applied. No BEGIN IMMEDIATE/catch/ROLLBACK wrapper needed.
+      this.db.exec(MIGRATION_011_SQL);
     }
   }
 
@@ -1915,6 +1930,155 @@ export class SQLiteStore implements StoreInterface {
 
       const rows = this.db.prepare(sql).all(...params) as CalibrationRowWithPromptVersion[];
       return ok(rows.map(rowToCalibrationRecordWithPromptVersion));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  // ── Trace Events (SPEC-102) ─────────────────────────────────────────────
+
+  async insertTraceEvent(event: TraceEventInput): Promise<Result<void, LoreError>> {
+    try {
+      this.db.run(
+        `INSERT INTO trace_events (ts, actor, surface, session_id, kind, doc_id, checkpoint, hit_count, details)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          event.ts,
+          event.actor,
+          event.surface,
+          event.session_id,
+          event.kind,
+          event.doc_id ?? null,
+          event.checkpoint ?? null,
+          event.hit_count ?? null,
+          JSON.stringify(event.details ?? {}),
+        ],
+      );
+      return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async countTraceEventsByKind(window: TraceStatsWindow): Promise<Result<Record<string, number>, LoreError>> {
+    try {
+      const rows = this.db
+        .query("SELECT kind, COUNT(*) as count FROM trace_events WHERE ts >= ? GROUP BY kind")
+        .all(window.since) as { kind: string; count: number | bigint }[];
+      const counts: Record<string, number> = {};
+      for (const row of rows) counts[row.kind] = Number(row.count);
+      return ok(counts);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async countTraceDenyByCheckpoint(
+    window: TraceStatsWindow,
+  ): Promise<Result<TraceDenyByCheckpoint[], LoreError>> {
+    try {
+      // reason: json_extract(details, '$.layer') pulls SPEC-102 D7's layer
+      // discriminator out of the JSON details blob — GROUP BY on both
+      // checkpoint and the extracted layer keeps hook-layer and
+      // service-layer denies for the SAME checkpoint from double-counting
+      // into one bucket.
+      const rows = this.db
+        .query(
+          `SELECT checkpoint, json_extract(details, '$.layer') as layer, COUNT(*) as count
+           FROM trace_events
+           WHERE kind = 'gate_deny' AND ts >= ?
+           GROUP BY checkpoint, layer`,
+        )
+        .all(window.since) as { checkpoint: string | null; layer: string | null; count: number | bigint }[];
+      return ok(
+        rows.map((row) => ({
+          checkpoint: row.checkpoint ?? "unknown",
+          layer: row.layer ?? "unknown",
+          count: Number(row.count),
+        })),
+      );
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async countTraceZeroHitSearches(window: TraceStatsWindow): Promise<Result<number, LoreError>> {
+    try {
+      const row = this.db
+        .query(
+          "SELECT COUNT(*) as count FROM trace_events WHERE kind = 'search' AND hit_count = 0 AND ts >= ?",
+        )
+        .get(window.since) as { count: number | bigint };
+      return ok(Number(row.count));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async countNeverReadDocs(window: TraceStatsWindow): Promise<Result<number, LoreError>> {
+    try {
+      // reason: SPEC-102 §Access Patterns "never-read docs" — non-deleted
+      // docs with no kind='get' trace row since the window start. idx_trace_doc
+      // (partial, doc_id IS NOT NULL) backs the inner subquery.
+      const row = this.db
+        .query(
+          `SELECT COUNT(*) as count FROM docs
+           WHERE deleted_at IS NULL
+           AND id NOT IN (
+             SELECT DISTINCT doc_id FROM trace_events
+             WHERE kind = 'get' AND doc_id IS NOT NULL AND ts >= ?
+           )`,
+        )
+        .get(window.since) as { count: number | bigint };
+      return ok(Number(row.count));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async listTraceGateDenies(window: TraceStatsWindow): Promise<Result<TraceGateDenyEvent[], LoreError>> {
+    try {
+      const rows = this.db
+        .query(
+          "SELECT ts, actor, checkpoint FROM trace_events WHERE kind = 'gate_deny' AND ts >= ? ORDER BY ts ASC",
+        )
+        .all(window.since) as { ts: string; actor: string; checkpoint: string | null }[];
+      return ok(
+        rows.map((row) => ({ ts: row.ts, actor: row.actor, checkpoint: row.checkpoint ?? "unknown" })),
+      );
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async listTraceRawSearchQueries(
+    window: TraceStatsWindow,
+  ): Promise<Result<TraceRawSearchQuery[], LoreError>> {
+    try {
+      const rows = this.db
+        .query(
+          "SELECT ts, actor, details FROM trace_events WHERE kind = 'search' AND ts >= ? ORDER BY ts DESC",
+        )
+        .all(window.since) as { ts: string; actor: string; details: string }[];
+      return ok(
+        rows.map((row) => ({
+          ts: row.ts,
+          actor: row.actor,
+          query: parseJson<{ query?: string }>(row.details, {}).query ?? "",
+        })),
+      );
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async pruneTraceEvents(cutoffIso: string, batchSize = 50_000): Promise<Result<number, LoreError>> {
+    try {
+      const result = this.db.run(
+        "DELETE FROM trace_events WHERE id IN (SELECT id FROM trace_events WHERE ts < ? LIMIT ?)",
+        [cutoffIso, batchSize],
+      );
+      return ok(result.changes);
     } catch (e) {
       return wrapStoreError(e);
     }
