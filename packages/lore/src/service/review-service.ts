@@ -4,7 +4,20 @@
  * Source: SPEC-005 §3, SPEC-001 §3.2
  */
 
-import type { DocId, DocRecord, DocType, DocTypeMeta, Slug, SpecKind, Validity } from "@lore/core";
+import type {
+  AuditEntry,
+  DocId,
+  DocRecord,
+  DocType,
+  DocTypeMeta,
+  JudgeIdentity,
+  ReviewDecision,
+  ReviewJudgment,
+  Slug,
+  SpecKind,
+  Validity,
+  VersionRecord,
+} from "@lore/core";
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import {
   getAllowedTransitions,
@@ -12,6 +25,8 @@ import {
   deriveTypeMeta,
   extractValidity,
   isInvalidated,
+  isLedgerKnowledgeSubType,
+  judgeIdentitySchema,
   specAcceptanceCriteriaSchema,
   SPEC_KINDS,
 } from "@lore/core";
@@ -19,6 +34,7 @@ import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
 import { buildUpstreamSpecContext, type GateContext } from "./checkpoint-registry.js";
 import type { GateDependencies } from "./gate-enforcer.js";
+import type { JudgmentService } from "./judgment-service.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────
 
@@ -80,11 +96,31 @@ export interface PendingFilters {
    * lifecycle exit, so filtering is the only way this queue self-cleans.
    */
   include_invalid?: boolean;
+  /**
+   * SPEC-103 §Mechanisms M3 — restore the FULL draft list, including `task`-type docs
+   * and ledger knowledge sub_types (assessment/retro/handoff/uat), both of which are
+   * EXCLUDED by default (see {@link ReviewService.pending}'s own JSDoc). Mirrors
+   * `include_invalid`'s "default hides, opt-in restores" shape — a DIFFERENT axis
+   * (queue-relevance vs. validity), so the two flags compose independently.
+   */
+  all?: boolean;
 }
 
 export interface ApproveOpts {
   /** Reviewer identity — defaults to "system" if omitted */
   reviewer?: string;
+  /**
+   * SPEC-103 §Mechanisms M2, §Design Decisions D3 — the audited escape hatch for
+   * the anti-lottery worst-decision-wins gate: the id of an EXISTING `review_judgments`
+   * row for this doc (any version) whose blocking verdict (reject/escalate, or simply
+   * "no independent judgment") the caller is deliberately overriding. When present,
+   * `approve` skips the `review-judgment` checkpoint entirely for this call (every
+   * OTHER gate — spec-promote/plan-promote — still runs unchanged) and records
+   * `details.override_judgment_id` on the SAME approve audit entry. A value that
+   * doesn't resolve to a judgment ON THIS DOC is rejected loud (`VALIDATION_ERROR`) —
+   * never silently ignored.
+   */
+  overrideJudgmentId?: string;
 }
 
 /**
@@ -139,11 +175,24 @@ export class ReviewService {
    *   spec's approval + AC status, via `getPlanBundle`) before writing the transition.
    *   Absent (the default) → ungated, byte-identical to pre-GateEnforcer behavior —
    *   keeps every bare `new ReviewService(store)` unit test construction green.
+   * @param judgmentService - OPTIONAL SPEC-103 §Mechanisms M2 dependency — reads
+   *   `review_judgments` rows for the `review-judgment` checkpoint's worst-decision-
+   *   wins computation. Absent (every bare unit-test construction) → M2 never runs
+   *   (see `enforceJudgmentRequiredGate`'s own guard), byte-identical to pre-SPEC-103
+   *   behavior. Only `app.ts`'s composition root wires the real instance.
+   * @param judgmentRequiredTypes - OPTIONAL SPEC-103 M2 resolved config value
+   *   (`resolveJudgmentRequiredTypes`, `@lore/core`, default `["spec","adr"]`) — which
+   *   `DocType`s the `review-judgment` checkpoint applies to. Absent/`undefined`
+   *   (every bare unit-test construction) → treated as `[]` (no type gated), same
+   *   "absent in bare tests, present in production" DI shape as every other optional
+   *   constructor dependency on this class.
    */
   constructor(
     private readonly store: StoreInterface,
     private readonly claimTtlMinutes?: number,
     private readonly gate?: GateDependencies,
+    private readonly judgmentService?: JudgmentService,
+    private readonly judgmentRequiredTypes?: readonly string[],
   ) {}
 
   private async resolveDoc(idOrSlug: string): Promise<Result<DocRecord, LoreError>> {
@@ -166,9 +215,22 @@ export class ReviewService {
    *   below it — the advisory can never influence whether this method returns
    *   `ok`/`err` (D1).
    */
-  private async enforceApprovalGate(doc: DocRecord): Promise<Result<ApprovalGateOutcome, LoreError>> {
+  private async enforceApprovalGate(
+    doc: DocRecord,
+    opts?: { skipJudgmentGate?: boolean },
+  ): Promise<Result<ApprovalGateOutcome, LoreError>> {
     if (this.gate === undefined) {
       return ok({ reachabilityAdvisories: [] });
+    }
+
+    // SPEC-103 §Mechanisms M2 — runs BEFORE the type-specific branches below (and
+    // for ANY doc type, not just spec/plan) since it is orthogonal to spec-promote/
+    // plan-promote's own predicates. `opts.skipJudgmentGate` is set ONLY by
+    // `approve()`'s `--override-judgment` path (D3's audited escape) — every other
+    // gate on this method still runs unchanged even when this one is skipped.
+    if (opts?.skipJudgmentGate !== true) {
+      const judgmentGateResult = await this.enforceJudgmentRequiredGate(doc);
+      if (!judgmentGateResult.ok) return judgmentGateResult;
     }
 
     if (doc.type === "spec") {
@@ -251,6 +313,59 @@ export class ReviewService {
   }
 
   /**
+   * SPEC-103 §Mechanisms M2 — the `review-judgment` checkpoint's IO-performing half:
+   * reads `review_judgments` for `doc`, partitions them into "collided with `doc.extra
+   * .ai_provenance`" (I1) vs. "independent", and dispatches to `GateEnforcer.enforce
+   * ("review-judgment", ctx)` — the PURE decision (worst-decision-wins, D3) lives
+   * entirely in `checkReviewJudgment` (`checkpoint-registry.ts`).
+   *
+   * A no-op (`ok(undefined)`) when: this service has no `gate`/`judgmentService`
+   * wired (bare test construction, byte-identical to pre-SPEC-103 behavior), OR
+   * `doc.type` is not in `judgmentRequiredTypes` (M2's own per-type kill switch —
+   * an empty `judgmentRequiredTypes` disables this for EVERY type, AC-TIER-7).
+   *
+   * @param doc - The doc `approve()` is about to transition to "approved" — read at
+   *   its CURRENT (pre-write) version, the version judgments are matched against.
+   */
+  private async enforceJudgmentRequiredGate(doc: DocRecord): Promise<Result<void, LoreError>> {
+    if (this.gate === undefined || this.judgmentService === undefined) {
+      return ok(undefined);
+    }
+    const requiredTypes = this.judgmentRequiredTypes ?? [];
+    if (!requiredTypes.includes(doc.type)) {
+      return ok(undefined);
+    }
+
+    const judgmentsResult = await this.judgmentService.listFor(doc.id, "review");
+    if (!judgmentsResult.ok) return judgmentsResult;
+    const currentVersionJudgments = judgmentsResult.value.filter((j) => j.doc_version === doc.version);
+
+    // reason: I1 (SPEC-103) — `extra.ai_provenance` is user/AI-authored data, not a
+    // trusted shape; a malformed/absent value means the collision check is simply
+    // N/A (every current-version judgment counts as independent), never a second
+    // error path.
+    const provenanceParsed = judgeIdentitySchema.safeParse(doc.extra["ai_provenance"]);
+    const aiProvenance: JudgeIdentity | undefined = provenanceParsed.success ? provenanceParsed.data : undefined;
+
+    let provenanceCollision = false;
+    const independentDecisions: ReviewDecision[] = [];
+    for (const judgment of currentVersionJudgments) {
+      if (aiProvenance !== undefined && judgeIdentitiesEqual(judgment.judge, aiProvenance)) {
+        provenanceCollision = true;
+        continue;
+      }
+      independentDecisions.push(judgment.decision);
+    }
+
+    const ctx: GateContext = {
+      targetIdOrSlug: doc.slug,
+      reviewJudgmentDecisions: independentDecisions,
+      reviewJudgmentProvenanceCollision: provenanceCollision,
+    };
+    return this.gate.enforcer.enforce("review-judgment", ctx);
+  }
+
+  /**
    * Return all documents with status='draft' matching optional filters.
    * Source: SPEC-005 §3, AC row 1.
    *
@@ -260,6 +375,15 @@ export class ReviewService {
    *   defaults to `() => new Date().toISOString()`. Mirrors `CorpusService.list`'s
    *   identical `now` seam so both surfaces flip visibility at the SAME injected
    *   instant in tests, rather than each reading the wall clock independently.
+   * @invariant SPEC-103 §Mechanisms M3 — the default queue EXCLUDES `task`-type
+   *   docs and ledger knowledge sub_types (assessment/retro/handoff/uat,
+   *   `isLedgerKnowledgeSubType`): "pending = promises", not every draft row.
+   *   `filters.all === true` restores the FULL pre-SPEC-103 draft list (composes
+   *   independently with `include_invalid` — a different axis, queue-relevance vs.
+   *   validity). An explicit `filters.type` still narrows the underlying store
+   *   query either way; the M3 filter is a POST-filter on top of whatever the store
+   *   query already returned, so `--type task` without `--all` still yields `[]`
+   *   (the default hides task entirely, `--all` is the only way to see it).
    */
   async pending(
     filters?: PendingFilters,
@@ -284,10 +408,17 @@ export class ReviewService {
     // `isInvalidated` is a structural no-op for any doc type ValidityService never
     // writes `extra.validity` on — this filter naturally scopes itself.
     const nowIso = now();
-    const visibleDocs =
+    const invalidFiltered =
       filters?.include_invalid === true
         ? result.value
         : result.value.filter((doc) => !isInvalidated(doc, nowIso));
+
+    // SPEC-103 §Mechanisms M3 — "pending = promises": task docs and ledger
+    // knowledge sub_types are RECORDS/execution-workflow rows, not review-worthy
+    // promises, so they're hidden from the default queue. `filters.all === true`
+    // restores them.
+    const visibleDocs =
+      filters?.all === true ? invalidFiltered : invalidFiltered.filter((doc) => !isLedgerOrTaskDoc(doc));
 
     const pendingDocs: PendingDoc[] = visibleDocs.map((doc) =>
       toPendingDoc(
@@ -297,6 +428,78 @@ export class ReviewService {
     );
 
     return ok(pendingDocs);
+  }
+
+  /**
+   * SPEC-103 §Mechanisms M2, §Design Decisions D3 — one-shot idempotent backfill:
+   * fast-tracks every EXISTING draft ledger knowledge doc (assessment/retro/handoff/
+   * uat) to `approved`, audited identically to `CorpusService._createImpl`'s
+   * create-time fast-track (`details.auto = "ledger-fast-track"`, plus
+   * `details.backfill = true` distinguishing this one-shot sweep from a fresh
+   * create). Idempotent by construction: a doc already `approved` never matches the
+   * `status: "draft"` query below, so a second run finds zero candidates and reports
+   * zero changes (AC-TIER-8) — no separate "already backfilled" marker needed.
+   *
+   * Per-doc write failures are COLLECTED, not fatal (mirrors `lore review --pending`'s
+   * batch idiom) — one doc's CAS conflict must not abort the whole sweep.
+   *
+   * @param opts.actor - Attributed as the audit entry's `actor` — defaults to
+   *   `"system"` (same default `approve()`'s `reviewer` uses when the caller omits it).
+   * @returns `{fast_tracked: string[], failed: Array<{slug, reason}>}` — slugs of
+   *   every doc successfully fast-tracked, and any that failed to write.
+   */
+  async backfillLedger(
+    opts?: { actor?: string },
+  ): Promise<Result<{ fast_tracked: string[]; failed: Array<{ slug: string; reason: string }> }, LoreError>> {
+    const actor = opts?.actor ?? "system";
+    const draftsResult = await this.store.findMany({ status: "draft" });
+    if (!draftsResult.ok) return draftsResult;
+
+    const candidates = draftsResult.value.filter(
+      (doc) => doc.type === "knowledge" && isLedgerKnowledgeSubType(doc.extra["sub_type"]),
+    );
+
+    const fastTracked: string[] = [];
+    const failed: Array<{ slug: string; reason: string }> = [];
+
+    for (const doc of candidates) {
+      const now = new Date().toISOString();
+      const newVersion = doc.version + 1;
+      const versionRecord: VersionRecord = {
+        doc_id: doc.id,
+        version: newVersion,
+        content: doc.content,
+        extra: doc.extra,
+        status: "approved",
+        title: doc.title,
+        action: "update",
+        created_at: now,
+        created_by: actor,
+        slug: doc.slug,
+      };
+      const auditEntry: AuditEntry = {
+        timestamp: now,
+        actor,
+        session_id: `review-${doc.id}`,
+        action: "update",
+        doc_id: doc.id,
+        details: { auto: "ledger-fast-track", version: newVersion, backfill: true },
+      };
+      const writeResult = await this.store.updateWithProvenance(
+        doc.id,
+        { status: "approved", version: newVersion, updated_at: now },
+        { expected_version: doc.version },
+        versionRecord,
+        auditEntry,
+      );
+      if (writeResult.ok) {
+        fastTracked.push(doc.slug);
+      } else {
+        failed.push({ slug: doc.slug, reason: writeResult.error.code });
+      }
+    }
+
+    return ok({ fast_tracked: fastTracked, failed });
   }
 
   /**
@@ -346,7 +549,37 @@ export class ReviewService {
       });
     }
 
-    const gateResult = await this.enforceApprovalGate(doc);
+    // SPEC-103 §Mechanisms M2, §Design Decisions D3 — `--override-judgment`'s
+    // audited escape: validates the given id resolves to an EXISTING
+    // `review_judgments` row for THIS doc (any version — the blocking judgment may
+    // be from an OLDER version than the doc's current one) before skipping the
+    // `review-judgment` checkpoint. A non-resolving id is rejected loud, never
+    // silently ignored (this repo's "no silent fallback" discipline).
+    let overriddenJudgmentId: string | undefined;
+    if (opts?.overrideJudgmentId !== undefined) {
+      if (this.judgmentService === undefined) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "override-judgment",
+          message: "--override-judgment requires judgment-service wiring, which this ReviewService instance lacks",
+          value: opts.overrideJudgmentId,
+        });
+      }
+      const allJudgmentsResult = await this.judgmentService.listFor(doc.id, "review");
+      if (!allJudgmentsResult.ok) return allJudgmentsResult;
+      const targetJudgment = allJudgmentsResult.value.find((j) => j.id === opts.overrideJudgmentId);
+      if (targetJudgment === undefined) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "override-judgment",
+          message: `judgment "${opts.overrideJudgmentId}" was not found for doc "${doc.slug}"`,
+          value: opts.overrideJudgmentId,
+        });
+      }
+      overriddenJudgmentId = targetJudgment.id;
+    }
+
+    const gateResult = await this.enforceApprovalGate(doc, { skipJudgmentGate: overriddenJudgmentId !== undefined });
     if (!gateResult.ok) return gateResult;
     // reason: spec-verify-reachability-plan-promote-early-warning §Scope M1 —
     // this is the PRE-write reading; the ASYNC2-002 post-write re-check below
@@ -392,7 +625,16 @@ export class ReviewService {
       action: "approve",
       doc_id: doc.id,
       // reason: SPEC-035 §2 — join key for AuditService.verify's versions⋈audit walk.
-      details: { reviewer, from_status: doc.status, to_status: "approved", version: nextVersion },
+      // SPEC-103 D3 — `override_judgment_id` (present iff `--override-judgment` was
+      // used) rides on this SAME audit row rather than a second entry — one audited
+      // event, "approved, and here's the escape hatch that let it through."
+      details: {
+        reviewer,
+        from_status: doc.status,
+        to_status: "approved",
+        version: nextVersion,
+        ...(overriddenJudgmentId !== undefined ? { override_judgment_id: overriddenJudgmentId } : {}),
+      },
     });
     if (!auditResult.ok) return auditResult;
 
@@ -401,8 +643,12 @@ export class ReviewService {
     // plan (enforceApprovalGate is a no-op for every other combination, but the
     // explicit `doc.type === "plan"` guard here keeps a spec approval's cost/behavior
     // byte-identical — zero extra store round trip, not merely a zero-op call).
+    // `skipJudgmentGate` mirrors the pre-write call's own override state — an
+    // override decision doesn't change between the pre- and post-write checks.
     if (this.gate !== undefined && doc.type === "plan") {
-      const postGateResult = await this.enforceApprovalGate(updatedDoc);
+      const postGateResult = await this.enforceApprovalGate(updatedDoc, {
+        skipJudgmentGate: overriddenJudgmentId !== undefined,
+      });
       if (!postGateResult.ok) {
         const rollbackResult = await this.rollbackApproval(updatedDoc, doc.status, reviewer);
         if (!rollbackResult.ok) {
@@ -596,6 +842,27 @@ function resolveSpecKindOrDefault(raw: unknown): SpecKind {
   return typeof raw === "string" && (SPEC_KINDS as readonly string[]).includes(raw)
     ? (raw as SpecKind)
     : "feature";
+}
+
+/**
+ * SPEC-103 §Mechanisms M2 I1 — whether two judge identities are the SAME
+ * provider/model/prompt_version tuple (a "self-review" collision: the judgment was
+ * authored by the identical AI configuration that generated the doc's own content).
+ * Plain field-by-field equality — `JudgeIdentity` (`@lore/core`) has no nested
+ * structure requiring a deep-equal library.
+ */
+function judgeIdentitiesEqual(a: JudgeIdentity, b: JudgeIdentity): boolean {
+  return a.provider === b.provider && a.model === b.model && a.prompt_version === b.prompt_version;
+}
+
+/**
+ * SPEC-103 §Mechanisms M3 — "pending = promises": `true` for a `task`-type doc, or a
+ * `knowledge` doc whose `extra.sub_type` is a ledger sub_type (assessment/retro/
+ * handoff/uat, `isLedgerKnowledgeSubType`) — the two categories `pending()`'s default
+ * queue hides (both are records of workflow execution, not review-worthy promises).
+ */
+function isLedgerOrTaskDoc(doc: DocRecord): boolean {
+  return doc.type === "task" || (doc.type === "knowledge" && isLedgerKnowledgeSubType(doc.extra["sub_type"]));
 }
 
 /**

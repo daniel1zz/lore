@@ -87,6 +87,7 @@ import {
   // through gate-predicates.ts (see that file's own JSDoc for the type).
   type TaskAttestationInfo,
   type VerificationProfile,
+  type ReviewDecision,
 } from "@lore/core";
 import {
   parentLegal,
@@ -141,7 +142,16 @@ export type GateCheckpoint =
    * `feedTaskOrPhaseClaim` below) — see this module's fourth invariant and
    * `checkpointRegistry`'s registration for why no logic is duplicated.
    */
-  | "phase-claim";
+  | "phase-claim"
+  /**
+   * SPEC-103 §Mechanisms M2 — judgment-required promote: an approve of a doc whose
+   * `type` is in `workflow.review.judgment_required_types` (default `["spec","adr"]`)
+   * requires an independent `review_judgments` row for the CURRENT doc version
+   * (worst-decision-wins per version, D3; I1 provenance-collision check). A generic,
+   * type-agnostic checkpoint (unlike `spec-promote`, which is `spec`-only) — the SAME
+   * `check`/`feed` pair runs regardless of which configured type is being approved.
+   */
+  | "review-judgment";
 
 /**
  * Pre-fetched, checkpoint-agnostic input to a `CheckpointDef`'s `check` / `feed`
@@ -414,6 +424,29 @@ export interface GateContext {
    * of naming a doc that doesn't exist.
    */
   readonly prdSyncDomainDocSlug?: string;
+
+  // -- review-judgment: check() + feed() (SPEC-103 §Mechanisms M2) --
+  /**
+   * The doc's CURRENT-version `review_judgments` decisions, ALREADY narrowed by the
+   * caller (`ReviewService.enforceApprovalGate`) to exclude any judgment whose judge
+   * tuple collides with `doc.extra.ai_provenance` (I1) — `checkReviewJudgment` (this
+   * module) never itself reads a judge tuple or an ai_provenance value; it only sees
+   * the SURVIVING, independent decisions. `undefined`/`[]` means "no independent
+   * judgment exists for the current version" — see `reviewJudgmentProvenanceCollision`
+   * for how the feeding message distinguishes "none at all" from "only collided ones".
+   */
+  readonly reviewJudgmentDecisions?: ReviewDecision[];
+  /**
+   * `true` iff the caller found >=1 CURRENT-version judgment that collided with
+   * `doc.extra.ai_provenance` (I1) — populated REGARDLESS of whether any independent
+   * judgment also exists, but only changes `checkReviewJudgment`'s OUTCOME when
+   * `reviewJudgmentDecisions` is empty (a collision alongside a passing independent
+   * judgment is not itself a failure — I1 only excludes the colliding judgment from
+   * counting, it never demotes an otherwise-sufficient independent one). Consumed by
+   * `feedReviewJudgment` to name the collision explicitly (AC-TIER-6) rather than
+   * rendering the generic "no judgment at all" message.
+   */
+  readonly reviewJudgmentProvenanceCollision?: boolean;
 }
 
 /**
@@ -1255,6 +1288,134 @@ function feedPlanClose(ctx: GateContext, failures: PredicateResult[]): string {
   return renderFeedingPack(pack);
 }
 
+// ─── review-judgment (SPEC-103 §Mechanisms M2) ─────────────────────────────
+
+/** `checkReviewJudgment`'s failure when NO current-version judgment exists at all. */
+export const NO_JUDGMENT_REASON = "NO_JUDGMENT";
+
+/**
+ * `checkReviewJudgment`'s failure when every current-version judgment collided with
+ * `doc.extra.ai_provenance` (I1) — distinct from {@link NO_JUDGMENT_REASON} so
+ * `feedReviewJudgment` can name the collision explicitly rather than the generic
+ * "no judgment at all" message (AC-TIER-6).
+ */
+export const JUDGMENT_PROVENANCE_COLLISION_REASON = "JUDGMENT_PROVENANCE_COLLISION";
+
+/**
+ * `checkReviewJudgment`'s failure when the WORST independent current-version
+ * judgment is `"reject"` (SPEC-103 D3 anti-lottery — a reject can never be outrolled
+ * by a later approve on the SAME version).
+ */
+export const JUDGMENT_REJECTED_REASON = "JUDGMENT_REJECTED";
+
+/** `checkReviewJudgment`'s failure when the WORST independent current-version judgment is `"escalate"`. */
+export const JUDGMENT_ESCALATED_REASON = "JUDGMENT_ESCALATED";
+
+/** The `PredicateResult.field` value every `review-judgment` failure carries. */
+export const REVIEW_JUDGMENT_FIELD = "judgment-required";
+
+/**
+ * Decision precedence for SPEC-103 D3's worst-decision-wins anti-lottery rule:
+ * `reject` (2) > `escalate` (1) > `approve` (0). Exhaustive over {@link ReviewDecision}
+ * — a `never`-typed default branch would fail to compile if a fourth decision were
+ * ever added to `REVIEW_DECISIONS` (`@lore/core`, review-judgment.ts) without this
+ * table being updated too.
+ */
+const REVIEW_DECISION_RANK: Record<ReviewDecision, number> = { approve: 0, escalate: 1, reject: 2 };
+
+/**
+ * Picks the WORST (highest-rank) decision among `decisions` (SPEC-103 D3) — a reject
+ * or escalate on the current version can never be outrolled by a later approve on
+ * that SAME version, only by a version bump (a fresh `ctx.reviewJudgmentDecisions`
+ * array, since the caller re-derives it from the doc's NEW current version).
+ *
+ * @param decisions - Non-empty array of current-version, provenance-independent
+ *   review-judgment decisions (caller's precondition — `checkReviewJudgment` only
+ *   calls this when `decisions.length > 0`).
+ * @returns The single worst decision present.
+ * @example
+ * worstReviewDecision(["approve", "reject", "approve"]); // => "reject"
+ * worstReviewDecision(["approve", "escalate"]);           // => "escalate"
+ * worstReviewDecision(["approve"]);                       // => "approve"
+ */
+function worstReviewDecision(decisions: readonly ReviewDecision[]): ReviewDecision {
+  return decisions.reduce<ReviewDecision>(
+    (worst, d) => (REVIEW_DECISION_RANK[d] > REVIEW_DECISION_RANK[worst] ? d : worst),
+    "approve",
+  );
+}
+
+/**
+ * `review-judgment`'s single predicate (SPEC-103 §Mechanisms M2): the doc's CURRENT
+ * version must carry at least one independent (non-provenance-colliding) review
+ * judgment, and the WORST such judgment must be `"approve"` (D3 anti-lottery — see
+ * {@link worstReviewDecision}). Both `ctx.reviewJudgmentDecisions` (already filtered)
+ * and `ctx.reviewJudgmentProvenanceCollision` are pre-computed by the CALLER
+ * (`ReviewService.enforceApprovalGate`, which reads `review_judgments` + `doc.extra
+ * .ai_provenance` — module invariant: no store, no IO here).
+ *
+ * @returns `[{ok: true}]` when an independent judgment exists and its worst decision
+ *   is `"approve"`; a single-element failure array otherwise — `NO_JUDGMENT_REASON`
+ *   (nothing at all), `JUDGMENT_PROVENANCE_COLLISION_REASON` (only colliding
+ *   judgments existed), `JUDGMENT_REJECTED_REASON`, or `JUDGMENT_ESCALATED_REASON`.
+ * @example
+ * checkReviewJudgment({ reviewJudgmentDecisions: [] });
+ *   // => [{ ok: false, reason: "NO_JUDGMENT", field: "judgment-required" }]
+ * @example
+ * checkReviewJudgment({ reviewJudgmentDecisions: [], reviewJudgmentProvenanceCollision: true });
+ *   // => [{ ok: false, reason: "JUDGMENT_PROVENANCE_COLLISION", field: "judgment-required" }]
+ * @example
+ * checkReviewJudgment({ reviewJudgmentDecisions: ["reject", "approve"] });
+ *   // => [{ ok: false, reason: "JUDGMENT_REJECTED", field: "judgment-required" }]
+ * @example
+ * checkReviewJudgment({ reviewJudgmentDecisions: ["approve"] }); // => [{ ok: true }]
+ */
+function checkReviewJudgment(ctx: GateContext): PredicateResult[] {
+  const decisions = ctx.reviewJudgmentDecisions ?? [];
+  if (decisions.length === 0) {
+    return [
+      ctx.reviewJudgmentProvenanceCollision === true
+        ? { ok: false, reason: JUDGMENT_PROVENANCE_COLLISION_REASON, field: REVIEW_JUDGMENT_FIELD }
+        : { ok: false, reason: NO_JUDGMENT_REASON, field: REVIEW_JUDGMENT_FIELD },
+    ];
+  }
+  const worst = worstReviewDecision(decisions);
+  if (worst === "reject") {
+    return [{ ok: false, reason: JUDGMENT_REJECTED_REASON, field: REVIEW_JUDGMENT_FIELD }];
+  }
+  if (worst === "escalate") {
+    return [{ ok: false, reason: JUDGMENT_ESCALATED_REASON, field: REVIEW_JUDGMENT_FIELD }];
+  }
+  return [{ ok: true }];
+}
+
+/**
+ * `review-judgment`'s feeding message — names the exact recovery command
+ * (`lore review <doc>`, per SPEC-103 M2's own text) and, on a provenance-collision
+ * denial, explicitly calls out WHY the doc's existing judgment(s) didn't count
+ * (AC-TIER-6) rather than rendering the generic "no judgment at all" wording.
+ */
+function feedReviewJudgment(ctx: GateContext, failures: PredicateResult[]): string {
+  const target = ctx.targetIdOrSlug ?? "<doc>";
+  const collision = failures.some((f) => !f.ok && f.reason === JUDGMENT_PROVENANCE_COLLISION_REASON);
+  const ruleMarkdown = collision
+    ? `Required for review-judgment: an independent review judgment for the CURRENT ` +
+      `version of ${target} is required before approval. The only judgment(s) found for ` +
+      `this version were authored by the SAME provider/model/prompt_version as the doc's ` +
+      `own \`extra.ai_provenance\` (a self-review collision, SPEC-103 I1) and do not count. ` +
+      `Recovery: run \`lore review ${target}\` with an independent judge, or edit the doc ` +
+      `(version bump) and get a fresh judgment.`
+    : `Required for review-judgment: ${target} needs an independent, non-rejecting, ` +
+      `non-escalating review judgment for its CURRENT version before it may be approved. ` +
+      `Recovery: run \`lore review ${target}\`.`;
+  const pack = buildFeedingPack({
+    ruleSource: "corpus (review judgments)",
+    ruleMarkdown,
+    missing: selectFailures(failures).map((f) => f.reason),
+  });
+  return renderFeedingPack(pack);
+}
+
 /**
  * Structural signal for the SPEC-069 ad-hoc-task claim gap (task-fix-spec-069-gap-
  * adhoc-task-claim-structurally-impossible): `true` exactly when a `getPlanBundle`
@@ -1390,6 +1551,12 @@ export const checkpointRegistry: Partial<Record<GateCheckpoint, CheckpointDef>> 
   // impl `feedTaskClaim` uses) — the "ONE-LINE registry addition" the RED
   // suite's CONTRACT NOTE §2 calls for.
   "phase-claim": { id: "phase-claim", check: checkTaskClaim, feed: feedPhaseClaim },
+  // reason: SPEC-103 §Mechanisms M2 — generic, type-agnostic judgment-required
+  // checkpoint; NOT added to ALL_GATE_CHECKPOINTS below (that list mirrors the
+  // ORIGINAL IoC vertical-slice tech-spec's five checkpoints for SPEC-041/-043's
+  // bootstrap "armed gates" rendering — widening it is a separate concern this
+  // task's anchors don't cover).
+  "review-judgment": { id: "review-judgment", check: checkReviewJudgment, feed: feedReviewJudgment },
 };
 
 // ─── Armed Gates (SPEC-041 §3 bootstrap; SPEC-043 §Design Decisions D8) ────

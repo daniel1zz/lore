@@ -69,6 +69,13 @@ function createFixtureApp(path: string): App {
         "plan-promote": { enabled: false },
         "task-claim": { enabled: false },
       },
+      // SPEC-103 §Mechanisms M2 — `review-judgment` is a SEPARATE checkpoint from the
+      // four `gates.*` entries above (predates this fixture); this file's `approveDoc`
+      // helper fast-tracks docs to `approved` purely as SETUP state for plan-promote/
+      // task-claim scenarios this file actually tests, so M2 is disabled here too —
+      // otherwise every `approveDoc` call on a spec would need a seeded judgment for a
+      // concern this file was never testing.
+      review: { judgment_required_types: [] },
     },
   } as unknown as LoreConfig;
   return createApp(path, config) as App;

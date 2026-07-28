@@ -56,6 +56,13 @@ export default defineCommand({
       type: "boolean",
       description: "Include invalidated docs (excluded by default), badged [invalid]. Source: SPEC-043 D3.",
     },
+    all: {
+      type: "boolean",
+      description:
+        "SPEC-103 M3 — restore the full draft list, including task-type docs and ledger " +
+        "knowledge sub_types (assessment/retro/handoff/uat), both hidden by default " +
+        "('pending = promises').",
+    },
     json: {
       type: "boolean",
       description: "Output as JSON",
@@ -69,6 +76,7 @@ export default defineCommand({
       if (args.type !== undefined) filters["type"] = args.type as DocType;
       if (args.since !== undefined) filters["since"] = args.since;
       if (args["include-invalid"] === true) filters["include_invalid"] = true;
+      if (args.all === true) filters["all"] = true;
 
       const result = await app.reviewService.pending(filters);
 
