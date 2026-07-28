@@ -11,9 +11,13 @@
  * Public surface:
  *   - formatDoneMessage(result) — the ONE line `lore done` prints on success,
  *     covering both branches (idempotent no-op vs a real lifecycle walk)
+ *   - formatLastTaskAdvisory(result) — the stderr advisory `lore done` prints
+ *     when `result.plan_now_fully_terminal` is present (spec-plan-closure-must-
+ *     be-loud-terminality-divergence-silent DD-2, AC-CLOSURE-3)
  *
  * Side-effect class: pure.
- * Source: spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M3, AC-WH-3
+ * Source: spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M3, AC-WH-3;
+ *   spec-plan-closure-must-be-loud-terminality-divergence-silent DD-2, AC-CLOSURE-3
  */
 
 import type { DoneResult } from "../../service/task-workflow-service.js";
@@ -36,4 +40,29 @@ export function formatDoneMessage(result: DoneResult): string {
   }
   const path = result.transitions.join(" -> ");
   return `${slug} archived (v${result.task.version}): ${path}`;
+}
+
+/**
+ * Renders `lore done`'s DD-2 last-task advisory (spec-plan-closure-must-be-loud-
+ * terminality-divergence-silent, AC-CLOSURE-3) — printed to STDERR by
+ * `commands/done.ts` with a `⚠` prefix (same precedent as `utils.ts::
+ * resolveActorWithIdentitySource`'s actor-fallback advisory), but WITHOUT that
+ * precedent's once-per-process guard: this fires per plan completion, which is
+ * rare by construction (at most once per plan, ever).
+ *
+ * @param result - The service call's successful `DoneResult`
+ * @returns A string naming the plan slug and the literal next command
+ *   (`lore set <plan> --status archived`) when `result.plan_now_fully_terminal`
+ *   is present; `undefined` otherwise (non-last task, adhoc/planless task, or a
+ *   plan that is already terminal — see `TaskWorkflowService.
+ *   computePlanNowFullyTerminal`'s own JSDoc for the full undefined-case list)
+ */
+export function formatLastTaskAdvisory(result: DoneResult): string | undefined {
+  const fact = result.plan_now_fully_terminal;
+  if (fact === undefined) return undefined;
+  return (
+    `⚠ "${fact.plan_slug}" has no more non-terminal tasks — every child task is now ` +
+    `archived/deprecated. The plan itself is still open; the plan-close gate will ` +
+    `evaluate it once you run: lore set ${fact.plan_slug} --status archived`
+  );
 }
