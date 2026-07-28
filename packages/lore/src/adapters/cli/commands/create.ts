@@ -57,7 +57,7 @@ import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 import { openEditor } from "../editor.js";
-import type { DocType, KnowledgeSubType, LoreError, Priority } from "@lore/core";
+import type { DocType, JudgeIdentity, KnowledgeSubType, LoreError, Priority } from "@lore/core";
 import { KNOWLEDGE_SUB_TYPES, SPEC_KINDS } from "@lore/core";
 import { createWithSupersedes, renderSupersedeRepairMessage } from "../../../flows/supersede-flow.js";
 import {
@@ -378,6 +378,10 @@ export default defineCommand({
       // args.content === undefined means the flag was absent (citty does not set it).
       // args.content === "" means --content "" was passed explicitly → accepted as empty body.
       let resolvedContent: string | undefined = args.content;
+      // SPEC-103 §Mechanisms M1 — set ONLY by the AI-generation branch below (never
+      // invented for an editor/--content-authored doc); folded into `extra.ai_provenance`
+      // when building `createInput` further down.
+      let aiProvenance: JudgeIdentity | undefined;
       // reason: --content-file reads from disk and assigns as content, bypassing the mri
       // argv-terminator bug that drops content starting with `---` (Bug A fix, SPEC-003 §3.1).
       if (resolvedContent === undefined && args["content-file"] !== undefined) {
@@ -440,6 +444,7 @@ export default defineCommand({
           }
 
           resolvedContent = aiResult.value.content;
+          aiProvenance = aiResult.value.ai_provenance;
           if (showSpinner) {
             process.stderr.write(
               `✓ Generated ${aiResult.value.content.length} chars in ` +
@@ -481,6 +486,12 @@ export default defineCommand({
       // this transparently reduces to the pre-D4 `args.parent` passthrough.
       const inferredParentId = inferTaskParentId(args.parent, resolvedPlanId);
 
+      // SPEC-103 §Mechanisms M1 — fold the AI-generation seam's provenance tuple
+      // into `extra.ai_provenance` ONLY when `generate()` actually produced one
+      // (the AI path ran); never invented for an editor/--content-authored doc.
+      const extraWithProvenance =
+        aiProvenance !== undefined ? { ...(extra ?? {}), ai_provenance: aiProvenance } : extra;
+
       const createInput = {
         type: docType,
         title: args.title,
@@ -488,7 +499,7 @@ export default defineCommand({
         content: resolvedContent,
         priority: (args.priority as Priority) ?? "medium",
         ...(tags.length > 0 ? { tags } : {}),
-        ...(extra !== undefined ? { extra } : {}),
+        ...(extraWithProvenance !== undefined ? { extra: extraWithProvenance } : {}),
       };
 
       // SPEC-043 D11: --supersedes composes create() THEN ValidityService.invalidate()

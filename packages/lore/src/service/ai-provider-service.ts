@@ -321,6 +321,15 @@ function applyGroundingConfidenceDowngrade(
  * const svc = new AIProviderService(providers, "claude-cli", templates, telemetry, true, 8000, assessBudgets);
  * const result = await svc.generate({ doc_type: "prd", title: "My PRD" });
  */
+/**
+ * `generate()`'s `ai_provenance.prompt_version` sentinel (SPEC-103 §Mechanisms M1) —
+ * `BUILT_IN_TEMPLATES` (`../ai/templates.js`) has no per-version registry today (unlike
+ * `ASSESS_PROMPT_VERSION`/`REVIEW_PROMPT_VERSION`/`STALENESS_PROMPT_VERSION`, each backed
+ * by a keyed template map); this constant is the honest placeholder until one exists —
+ * bump it whenever `BUILT_IN_TEMPLATES`'s create-path prompt shape changes materially.
+ */
+const GENERATE_PROMPT_VERSION = "v1";
+
 export class AIProviderService {
   constructor(
     /** Immutable provider map from buildProviderRegistry — keyed by provider name */
@@ -459,7 +468,17 @@ export class AIProviderService {
       ai_default_source: args.ai_default_source,
     });
 
-    return result;
+    if (!result.ok) return result;
+
+    // reason: SPEC-103 §Mechanisms M1 — ai_provenance recorded at THIS generation seam
+    // only (the `lore create --ai` path); regenerateContent/refineContent deliberately
+    // do not stamp it (see GenerateOutput.ai_provenance's own JSDoc, @lore/core/ai.ts).
+    // `model` mirrors `provider` (this.active) — same "no per-provider model accessor
+    // exists yet" honesty precedent judgeDoc's `judge.model` already documents below.
+    return ok({
+      ...result.value,
+      ai_provenance: { provider: this.active, model: this.active, prompt_version: GENERATE_PROMPT_VERSION },
+    });
   }
 
   // ─── SPEC-019: set --regenerate ─────────────────────────────────────────────

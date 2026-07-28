@@ -230,6 +230,51 @@ export const KNOWLEDGE_SUB_TYPES = [
 /** Derived TypeScript union for a knowledge document's `extra.sub_type`. */
 export type KnowledgeSubType = (typeof KNOWLEDGE_SUB_TYPES)[number];
 
+/**
+ * The "ledger" subset of {@link KNOWLEDGE_SUB_TYPES} (SPEC-103 §Mechanisms M1, Design
+ * Decisions D1) — system-authored RECORDS of something that already happened
+ * (an assessment run, a retro, a session handoff, a UAT verdict), whose trust source is
+ * writer identity + the tamper-evident audit chain, not independent human/AI judgment.
+ * `CorpusService._createImpl`/`set` fast-track a doc in this set draft→approved in the
+ * same write (`workflow.review.ledger_auto_approve`, default true); `ReviewService.pending`
+ * excludes them by default (SPEC-103 M3); `lore review backfill-ledger` fast-tracks any
+ * pre-existing draft doc in this set.
+ *
+ * @invariant Deliberately EXCLUDES `"ideation"`, `"research"`, `"reference"` — these are
+ *   durable, judgment-worthy PROMISES (a proposal, a research conclusion, a reference
+ *   doc other work will cite), not records of a completed event; they keep the normal
+ *   draft→review→approved lifecycle. Also excludes `"prompt"`/`"skill"` (reusable
+ *   authored assets, not event records).
+ * @invariant `DocType` `"task"` is EXCLUDED from ledger fast-track entirely (SPEC-103 D1)
+ *   even though tasks default to `"draft"` at creation — `TaskWorkflowService`'s
+ *   claim/ready/done walk has implicit `"draft"`-anchored preconditions that an
+ *   approved-at-create task would silently corrupt. This constant is scoped to
+ *   `KnowledgeSubType` only; there is no analogous "ledger task" concept.
+ */
+export const LEDGER_KNOWLEDGE_SUB_TYPES = ["assessment", "retro", "handoff", "uat"] as const;
+
+/** Derived TypeScript union for a ledger-eligible knowledge `extra.sub_type` value. */
+export type LedgerKnowledgeSubType = (typeof LEDGER_KNOWLEDGE_SUB_TYPES)[number];
+
+/**
+ * Whether `subType` is a member of {@link LEDGER_KNOWLEDGE_SUB_TYPES} — the single
+ * predicate `CorpusService` (create/set fast-track) and `ReviewService` (pending filter,
+ * backfill) both consult, so the ledger set can never silently diverge between the two
+ * services (SPEC-103 SSOT).
+ *
+ * @param subType - A knowledge doc's raw `extra.sub_type` value (unvalidated — may be
+ *   `undefined`/malformed for a doc that failed `knowledgeExtraSchema`, though that
+ *   should not happen for a persisted doc).
+ * @returns `true` iff `subType` is a string member of {@link LEDGER_KNOWLEDGE_SUB_TYPES}.
+ * @example
+ * isLedgerKnowledgeSubType("retro");     // => true
+ * isLedgerKnowledgeSubType("ideation");  // => false
+ * isLedgerKnowledgeSubType(undefined);   // => false
+ */
+export function isLedgerKnowledgeSubType(subType: unknown): subType is LedgerKnowledgeSubType {
+  return typeof subType === "string" && (LEDGER_KNOWLEDGE_SUB_TYPES as readonly string[]).includes(subType);
+}
+
 /** Extra fields for knowledge documents */
 export interface KnowledgeExtra {
   /** Required — sub-classification of knowledge */

@@ -24,6 +24,7 @@
 import { z } from "zod";
 import { docTypeSchema } from "./schemas.js";
 import type { Result, LoreError } from "./errors.js";
+import type { JudgeIdentity } from "./review-judgment.js";
 
 // ─── DocTypeSchema (re-export alias for SPEC-017 consumers) ──────────────────
 
@@ -91,6 +92,17 @@ export interface GenerateOutput {
      */
     stop_reason?: string;
   };
+  /**
+   * Which provider/model/prompt-version produced `content` (SPEC-103 §Mechanisms M2 I1,
+   * `judgeIdentitySchema`'s shape reused verbatim — same "who authored this" tuple a
+   * review judgment's own `judge` field carries). Populated ONLY by
+   * `AIProviderService.generate()` (the `lore create --ai` seam, SPEC-017) — NOT by
+   * `regenerateContent`/`refineContent` (SPEC-019, which mutate an EXISTING already-
+   * provenanced doc; re-stamping provenance on every edit is out of this spec's scope).
+   * The caller (`adapters/cli/commands/create.ts`) folds this into the new doc's
+   * `extra.ai_provenance` — never invented for a non-AI (editor-authored) create.
+   */
+  ai_provenance?: JudgeIdentity;
 }
 
 // ─── AIProvider interface (type-only) ────────────────────────────────────────

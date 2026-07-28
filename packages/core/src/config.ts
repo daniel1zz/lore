@@ -459,6 +459,36 @@ const WorkflowConfigSchema = z
       })
       .strict()
       .default({}),
+    /**
+     * Tiered-review configuration (SPEC-103 §Mechanisms M1/M2, §Design Decisions) —
+     * two independent kill switches, both DEFAULT-ON per the spec's own default row,
+     * restoring pre-SPEC-103 (legacy) behavior only when EXPLICITLY overridden.
+     *
+     * @invariant `ledger_auto_approve: false` disables M1 entirely: `CorpusService.
+     *   _createImpl`/`set` never fast-track a ledger knowledge doc (assessment/retro/
+     *   handoff/uat) — it lands (and stays) `draft` exactly like every other type,
+     *   pre-SPEC-103 byte-identical.
+     * @invariant `judgment_required_types: []` disables M2 entirely: `ReviewService.
+     *   approve` never requires a `review_judgments` row for ANY type — pre-SPEC-103
+     *   byte-identical. A non-empty array is the SET of `DocType` values M2 gates;
+     *   typed as `string[]` (not `DocType[]`) for the SAME leaf-of-dependency-graph
+     *   reason `resolveGateEnabled`'s `checkpoint` param is a plain string — this
+     *   module must not import `DocType`'s consumer-side gate-checkpoint machinery.
+     * @invariant Absence of the whole `workflow` section, or of `review` within it,
+     *   or of an individual field, ALL fall back to that field's own schema default
+     *   (`true` / `["spec","adr"]`) — same "absence = default" shape as `staleness`/
+     *   `drift`/`attestation` above (SPEC-103's OWN stated default row, AC-TIER-7's
+     *   kill-switch test proves the EXPLICIT-override path, not this default path).
+     */
+    review: z
+      .object({
+        /** `false` disables M1 ledger fast-track entirely. Default: true. */
+        ledger_auto_approve: z.boolean().default(true),
+        /** `DocType` values M2's judgment-required gate applies to. Default: ["spec","adr"]. */
+        judgment_required_types: z.array(z.string()).default(["spec", "adr"]),
+      })
+      .strict()
+      .default({}),
   })
   .strict();
 
@@ -818,6 +848,50 @@ export function resolveClaimTtlMinutes(config: LoreConfig | undefined): number {
  */
 export function resolveHandoffTtlMinutes(config: LoreConfig | undefined): number {
   return (config?.workflow ?? WorkflowConfigSchema.parse({})).handoff_ttl_minutes;
+}
+
+/**
+ * Resolve the effective `workflow.review.ledger_auto_approve` value (SPEC-103 §Mechanisms
+ * M1). Mirrors {@link resolveAttestationMinRatio}'s fully-optional-chained shape (NOT
+ * {@link resolveClaimTtlMinutes}'s shallower one) — `review` is a NESTED optional-with-
+ * default sub-section, and many hand-built `LoreConfig` test fixtures across this codebase
+ * set `workflow: {...}` directly (never routed through `WorkflowConfigSchema.parse`), so
+ * `config.workflow` being present is NOT proof `config.workflow.review` is too. A `?.`-chain
+ * all the way to the leaf is required, or such a fixture throws on `.review` being
+ * `undefined` instead of degrading to the default (regression: 2026-07-28, `gate-enforcer-
+ * service-layer.bun.test.ts`/`gate-spec-promote.bun.test.ts` both construct exactly this
+ * shape).
+ *
+ * @param config - Parsed LoreConfig, or undefined when no config file was loaded
+ * @returns Effective `ledger_auto_approve` value
+ * @example
+ *   resolveLedgerAutoApprove(undefined) // => true
+ *   resolveLedgerAutoApprove({ ..., workflow: { review: { ledger_auto_approve: false } } }) // => false
+ *   resolveLedgerAutoApprove({ ..., workflow: { gates: {} } } as LoreConfig) // => true (no throw)
+ */
+export function resolveLedgerAutoApprove(config: LoreConfig | undefined): boolean {
+  return config?.workflow?.review?.ledger_auto_approve ?? WorkflowConfigSchema.parse({}).review.ledger_auto_approve;
+}
+
+/**
+ * Resolve the effective `workflow.review.judgment_required_types` value (SPEC-103
+ * §Mechanisms M2). Mirrors {@link resolveLedgerAutoApprove}'s fully-optional-chained
+ * shape (see that function's JSDoc for why the shallower {@link resolveClaimTtlMinutes}
+ * shape is unsafe for a NESTED optional-with-default sub-section) — the schema default is
+ * `["spec","adr"]`, and `[]` is the documented kill-switch (AC-TIER-7).
+ *
+ * @param config - Parsed LoreConfig, or undefined when no config file was loaded
+ * @returns Effective `judgment_required_types` array (never mutated in place by callers)
+ * @example
+ *   resolveJudgmentRequiredTypes(undefined) // => ["spec", "adr"]
+ *   resolveJudgmentRequiredTypes({ ..., workflow: { review: { judgment_required_types: [] } } }) // => []
+ *   resolveJudgmentRequiredTypes({ ..., workflow: { gates: {} } } as LoreConfig) // => ["spec","adr"] (no throw)
+ */
+export function resolveJudgmentRequiredTypes(config: LoreConfig | undefined): string[] {
+  return (
+    config?.workflow?.review?.judgment_required_types ??
+    WorkflowConfigSchema.parse({}).review.judgment_required_types
+  );
 }
 
 /**
