@@ -3,7 +3,7 @@
  * Purpose: bearer-token API key auth (existing) + cookie-based session auth (SPEC-016).
  * Public surface: ApiKeyStore, authenticateRequest, extractBearerToken, extractSessionCookie,
  *   generateApiKey, hashApiKey, ActorContext, ApiKeyRecord, ALLOWED_ORIGINS, buildAllowedOrigins,
- *   resolveDocWriteOpts.
+ *   buildSessionCookieHeader, resolveDocWriteOpts.
  * Invariants:
  *   - authenticateRequest is cookie-first: if lore_sid cookie present → resolve session;
  *     else if Bearer token present → existing API key validation path; else UNAUTHORIZED.
@@ -133,6 +133,59 @@ export function buildAllowedOrigins(apiPort: number, dashPort: number): readonly
  * Source: SPEC-016 §3.2
  */
 export const ALLOWED_ORIGINS = buildAllowedOrigins(8787, 5173);
+
+// ─── Session cookie ──────────────────────────────────────────────────────────
+
+/**
+ * Hostnames treated as guaranteed local dev — never crosses an untrusted network hop.
+ * `URL#hostname` serializes an IPv6 host WITH brackets (e.g. `[::1]`, not `::1`) per the
+ * WHATWG URL spec — both forms are listed defensively in case a future caller normalizes
+ * the value before this check runs.
+ *
+ * DUPLICATED (deliberately) from `routes.ts`'s private, identically-named constant:
+ * `routes.ts` is outside this task's (task-skill-implement-f5a-static-serving-nonce-
+ * endpoint-and) write-scope anchors, so `static-serving.ts`'s `GET /auth/bootstrap`
+ * handler cannot import `routes.ts`'s private helper without editing that file. Both
+ * copies encode the SAME local-dev-loopback rule; if it ever changes, both call sites
+ * (`routes.ts::isSecureRequestContext`, this module's `isSecureRequestContext`) need it.
+ */
+const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+
+/**
+ * Decide whether the current request is in a "secure" context — i.e. whether it is safe
+ * to mark the response cookie `Secure` without breaking plain-http local dev. Mirrors
+ * `routes.ts::isSecureRequestContext` byte-for-byte (see {@link LOOPBACK_HOSTNAMES}'s
+ * doc comment for why this is a deliberate duplicate rather than a shared import).
+ *
+ * `Secure` is added when EITHER holds: HTTPS (`X-Forwarded-Proto: https` or the request
+ * URL's own `https:` scheme) OR the request's hostname is not loopback. Omitted only for
+ * plain-http loopback (local `lore dashboard`/`lore serve` usage), since browsers
+ * silently drop `Secure` cookies sent over plain http.
+ */
+function isSecureRequestContext(req: Request): boolean {
+  const forwardedProto = req.headers.get("X-Forwarded-Proto");
+  const url = new URL(req.url);
+  const isHttps = forwardedProto !== null ? forwardedProto.toLowerCase() === "https" : url.protocol === "https:";
+  if (isHttps) return true;
+
+  return !LOOPBACK_HOSTNAMES.has(url.hostname);
+}
+
+/**
+ * Build the `Set-Cookie` header value for a `lore_sid` session cookie — the SAME
+ * attributes `routes.ts::handleLocalBootstrap` sets for `POST /api/auth/local-bootstrap`,
+ * so a packaged-mode nonce-redeemed session (`static-serving.ts`) is indistinguishable
+ * from a dev-mode bootstrap-token-redeemed one to every downstream `/api/*` consumer.
+ *
+ * @param req - The request being answered (used only to decide the `Secure` flag).
+ * @param sessionId - The `sessions.session_id` just created via `SessionStore.create`.
+ * @returns A single `Set-Cookie` header value: `HttpOnly; SameSite=Strict; Path=/api;
+ *   Max-Age=2592000` (30 days) plus `Secure` when {@link isSecureRequestContext} holds.
+ */
+export function buildSessionCookieHeader(req: Request, sessionId: string): string {
+  const secureFlag = isSecureRequestContext(req) ? "; Secure" : "";
+  return `lore_sid=${sessionId}; HttpOnly; SameSite=Strict; Path=/api; Max-Age=2592000${secureFlag}`;
+}
 
 // ─── Key generation ────────────────────────────────────────────────────────
 
