@@ -10,6 +10,7 @@
     "prebuild": "bunx @tanstack/router-cli generate",
     "typecheck": "bunx @tanstack/router-cli generate && tsc --noEmit",
     "test:e2e": "playwright test",
+    "test:e2e:static": "playwright test --config=tests/e2e/playwright.static.config.ts",
     "lint": "eslint src",
     "lint:api-factory-fixture": "! eslint tests/fixtures/eslint/raw-api-literal.fixture.ts"
   },
