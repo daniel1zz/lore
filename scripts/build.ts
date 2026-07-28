@@ -15,8 +15,10 @@
  * Bun embeds any .node file that appears as a static string literal require.
  */
 
-import { join, dirname } from "path";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { join, dirname, relative, sep } from "path";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "fs";
+import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import type { BunPlugin, PluginBuilder, OnLoadArgs } from "bun";
 import { resolvePlatform } from "./platform-map.js";
 import {
@@ -104,6 +106,254 @@ function makeLibsqlPlugin(nativeNodePath: string): BunPlugin {
       });
     },
   };
+}
+
+// ─── Dashboard production build step (spec-dashboard-production-packaging-
+// one-command-lore-dashboard, DD-1) ─────────────────────────────────────────
+//
+// Runs BEFORE the assets-manifest block and BEFORE Bun.build's compile step
+// below — same ordering rationale as that block: the generated module's
+// on-disk content at compile time is exactly what `bun build --compile`
+// embeds. Produces the git-ignored `packages/lore/src/generated/
+// dashboard-assets.ts`, consumed exclusively via the committed dynamic-
+// import loader at `packages/lore/src/adapters/http/dashboard-assets-loader.ts`
+// (never a static import — see that file's doc comment for the bundler-
+// embedding rationale that makes a literal specifier mandatory there).
+
+const dashboardRoot = join(root, "packages", "dashboard");
+const dashboardSrcDir = join(dashboardRoot, "src");
+const dashboardViteConfigPath = join(dashboardRoot, "vite.config.ts");
+const dashboardPkgJsonPath = join(dashboardRoot, "package.json");
+const dashboardDistDir = join(dashboardRoot, "dist");
+const DASHBOARD_GENERATED_PATH = join(root, "packages", "lore", "src", "generated", "dashboard-assets.ts");
+
+/** Literal, grep-assertable per the task AC — do not reword without updating the paired oracle. */
+const DASHBOARD_SHORT_CIRCUIT_MARKER = "dashboard: unchanged (digest match), skipping vite build";
+const DASHBOARD_BUILD_START_MARKER =
+  "dashboard: build starting (digest changed or no prior build), running vite build via package lifecycle";
+
+function sha256Hex(bytes: Buffer | string): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+/** Recursively collects every regular file under `dir`, as POSIX-relative paths (sorted). Empty array if `dir` is absent. */
+function walkFilesRelative(dir: string): string[] {
+  if (!existsSync(dir)) return [];
+  const out: string[] = [];
+  const walk = (current: string, prefix: string) => {
+    const dirents = readdirSync(current, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
+    for (const entry of dirents) {
+      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        walk(join(current, entry.name), rel);
+      } else if (entry.isFile()) {
+        out.push(rel);
+      }
+    }
+  };
+  walk(dir, "");
+  return out;
+}
+
+/** `true` iff `dashboardDistDir` exists and contains at least one file. */
+function dashboardDistIsPresent(): boolean {
+  return walkFilesRelative(dashboardDistDir).length > 0;
+}
+
+/**
+ * Content digest over `packages/dashboard/src/**` + `vite.config.ts` +
+ * `package.json` — the dashboard build's freshness identity (task
+ * Approach). sha256 per file over raw bytes, sorted-pair whole-tree digest
+ * (mirrors `embed-assets-manifest.mjs`'s `computeTreeDigest` — same
+ * rationale: filesystem walk order must never leak into the digest).
+ */
+function computeDashboardSourceDigest(): string {
+  const entries: { path: string; sha256: string }[] = [];
+  for (const rel of walkFilesRelative(dashboardSrcDir)) {
+    entries.push({ path: `src/${rel}`, sha256: sha256Hex(readFileSync(join(dashboardSrcDir, rel))) });
+  }
+  entries.push({ path: "vite.config.ts", sha256: sha256Hex(readFileSync(dashboardViteConfigPath)) });
+  entries.push({ path: "package.json", sha256: sha256Hex(readFileSync(dashboardPkgJsonPath)) });
+  entries.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  const joined = entries.map((e) => `${e.path} ${e.sha256}`).join("\n");
+  return sha256Hex(Buffer.from(joined, "utf8"));
+}
+
+/** Extracts a previously-generated dashboard-assets.ts source's embedded `stamp.digest`, or `undefined` if absent/corrupt. */
+function extractEmbeddedDashboardDigest(source: string): string | undefined {
+  const match = source.match(/digest:\s*"([0-9a-f]{64})"/);
+  return match ? match[1] : undefined;
+}
+
+const DASHBOARD_CONTENT_TYPE_BY_EXT: Record<string, string> = {
+  ".html": "text/html",
+  ".js": "application/javascript",
+  ".mjs": "application/javascript",
+  ".css": "text/css",
+  ".json": "application/json",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".ico": "image/x-icon",
+  ".webp": "image/webp",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".ttf": "font/ttf",
+  ".map": "application/json",
+  ".txt": "text/plain",
+  ".wasm": "application/wasm",
+};
+
+function contentTypeForDistPath(relPath: string): string {
+  const dot = relPath.lastIndexOf(".");
+  const ext = dot === -1 ? "" : relPath.slice(dot).toLowerCase();
+  return DASHBOARD_CONTENT_TYPE_BY_EXT[ext] ?? "application/octet-stream";
+}
+
+/**
+ * Renders the generated dashboard-assets.ts module source: one `with {
+ * type: "file" }` import per `packages/dashboard/dist/**` file, using a
+ * LITERAL relative specifier per entry (required for `bun build --compile`
+ * to embed each one — see dashboard-assets-loader.ts's doc comment), plus
+ * the `DASHBOARD_ASSETS_MANIFEST` export the loader's contract requires.
+ * `distFiles` are POSIX-relative paths under `dashboardDistDir`.
+ */
+function renderDashboardAssetsModule(
+  distFiles: string[],
+  stamp: { digest: string; builtAt: string; skipped?: boolean },
+): string {
+  const generatedDir = dirname(DASHBOARD_GENERATED_PATH);
+  const importLines: string[] = [];
+  const entryLines: string[] = [];
+  distFiles.forEach((rel, i) => {
+    const abs = join(dashboardDistDir, rel);
+    const relSpecifier = relative(generatedDir, abs).split(sep).join("/");
+    const specifier = relSpecifier.startsWith(".") ? relSpecifier : `./${relSpecifier}`;
+    const varName = `asset_${i}`;
+    // bun-types only ships ambient `with { type: "file" }` module
+    // declarations for a handful of extensions (.txt/.toml/.yaml/.json*/
+    // .html — see node_modules/bun-types/extensions.d.ts); an arbitrary
+    // vite dist file (.css, .js, nested asset extensions the dashboard
+    // build might emit later) has no such declaration, so a bare import
+    // fails tsc with TS2307/TS7016 whenever this generated file exists on
+    // disk — and packages/lore/tsconfig.json's broad `include: ["src/**/*"]`
+    // DOES type-check it even though nothing statically imports it
+    // elsewhere. `@ts-ignore` (never `@ts-expect-error`) suppresses that
+    // per-line without ever erroring "unused" for extensions bun-types DOES
+    // cover (e.g. .html) — the same asymmetric-safety rationale as the
+    // committed loader's default-path import.
+    importLines.push(
+      `// @ts-ignore -- see scripts/build.ts's renderDashboardAssetsModule doc comment`,
+    );
+    importLines.push(`import ${varName} from ${JSON.stringify(specifier)} with { type: "file" };`);
+    const urlPath = `/${rel}`;
+    const contentType = contentTypeForDistPath(rel);
+    const immutable = rel.startsWith("assets/");
+    entryLines.push(
+      `  ${JSON.stringify(urlPath)}: { embedded: ${varName}, contentType: ${JSON.stringify(contentType)}, immutable: ${immutable} },`,
+    );
+  });
+
+  const stampSrc =
+    stamp.skipped === true
+      ? `{ digest: ${JSON.stringify(stamp.digest)}, builtAt: ${JSON.stringify(stamp.builtAt)}, skipped: true }`
+      : `{ digest: ${JSON.stringify(stamp.digest)}, builtAt: ${JSON.stringify(stamp.builtAt)} }`;
+
+  return `/**
+ * AUTO-GENERATED by scripts/build.ts — DO NOT HAND-EDIT, DO NOT COMMIT.
+ * Git-ignored (spec-dashboard-production-packaging-one-command-lore-dashboard,
+ * DD-1 git contract): content churns with every hashed vite build filename.
+ * Regenerate: \`bun run build\` (or \`bun run build --skip-dashboard\` to reuse
+ * an existing packages/dashboard/dist without re-running vite — marks the
+ * stamp \`skipped: true\`, loud in \`/api/health\`).
+ *
+ * Consumed EXCLUSIVELY via the guarded dynamic import in the COMMITTED
+ * loader packages/lore/src/adapters/http/dashboard-assets-loader.ts — never
+ * import this module directly (breaks fresh-clone \`bun run typecheck\`).
+ */
+${importLines.join("\n")}
+
+export const DASHBOARD_ASSETS_MANIFEST = {
+  stamp: ${stampSrc},
+  entries: {
+${entryLines.join("\n")}
+  },
+};
+`;
+}
+
+/** Regenerates + writes `DASHBOARD_GENERATED_PATH` from the current `dashboardDistDir`, with a post-write digest self-check. */
+function writeDashboardAssetsModule(stamp: { digest: string; builtAt: string; skipped?: boolean }): void {
+  const distFiles = walkFilesRelative(dashboardDistDir);
+  const moduleSrc = renderDashboardAssetsModule(distFiles, stamp);
+  mkdirSync(dirname(DASHBOARD_GENERATED_PATH), { recursive: true });
+  writeFileSync(DASHBOARD_GENERATED_PATH, moduleSrc, "utf8");
+
+  const verifyDigest = extractEmbeddedDashboardDigest(readFileSync(DASHBOARD_GENERATED_PATH, "utf8"));
+  if (verifyDigest !== stamp.digest) {
+    throw new Error(
+      `[build] Post-write verification failed: ${DASHBOARD_GENERATED_PATH} embeds digest "${String(verifyDigest)}" ` +
+        `but the intended stamp digest is "${stamp.digest}". This must never happen — investigate ` +
+        `renderDashboardAssetsModule/extractEmbeddedDashboardDigest for a round-trip bug.`,
+    );
+  }
+  console.log(
+    `  Dashboard assets manifest: ${distFiles.length} files${stamp.skipped === true ? " (--skip-dashboard: reused existing dist/)" : ""}, digest ${stamp.digest} (verified fresh)`,
+  );
+}
+
+console.log(`Checking dashboard build freshness...`);
+const skipDashboardBuild = process.argv.includes("--skip-dashboard");
+const freshDashboardDigest = computeDashboardSourceDigest();
+const existingDashboardDigest = existsSync(DASHBOARD_GENERATED_PATH)
+  ? extractEmbeddedDashboardDigest(readFileSync(DASHBOARD_GENERATED_PATH, "utf8"))
+  : undefined;
+
+if (skipDashboardBuild) {
+  console.log(`dashboard: --skip-dashboard set, skipping vite build (stamp marked skipped)`);
+  if (!dashboardDistIsPresent()) {
+    throw new Error(
+      `[build] --skip-dashboard requires an existing packages/dashboard/dist build (none found at ${dashboardDistDir}). ` +
+        `Run 'bun run build' once without --skip-dashboard first.`,
+    );
+  }
+  writeDashboardAssetsModule({ digest: freshDashboardDigest, builtAt: new Date().toISOString(), skipped: true });
+} else if (existingDashboardDigest === freshDashboardDigest && dashboardDistIsPresent()) {
+  console.log(DASHBOARD_SHORT_CIRCUIT_MARKER);
+} else {
+  console.log(DASHBOARD_BUILD_START_MARKER);
+  const dashboardBuildResult = spawnSync("bun", ["run", "--filter", "@lore/dashboard", "build"], {
+    cwd: root,
+    stdio: "inherit",
+  });
+  if (dashboardBuildResult.status !== 0) {
+    throw new Error(
+      `[build] dashboard build failed (bun run --filter '@lore/dashboard' build exited ` +
+        `${String(dashboardBuildResult.status)}). See output above.`,
+    );
+  }
+  if (!dashboardDistIsPresent()) {
+    throw new Error(
+      `[build] dashboard build reported success but ${dashboardDistDir} is missing or empty. ` +
+        `Check packages/dashboard/vite.config.ts's build.outDir.`,
+    );
+  }
+  // Recompute AFTER the build, not before: `prebuild` regenerates the
+  // git-ignored packages/dashboard/src/routeTree.gen.ts on every invocation
+  // (TanStack Router codegen), so the pre-build snapshot in
+  // `freshDashboardDigest` never matches what's actually on disk once this
+  // build's own prebuild step has run. Storing that stale pre-build digest
+  // as the stamp would make the VERY NEXT run recompute a different digest
+  // (now including this run's routeTree.gen.ts) and rebuild again —
+  // defeating the two-consecutive-runs short-circuit contract even though
+  // nothing hand-written changed. The post-build digest is what the NEXT
+  // run's pre-build snapshot will actually reproduce (routeTree.gen.ts
+  // codegen is deterministic for unchanged routes), so it's the correct
+  // freshness identity to persist.
+  const postBuildDashboardDigest = computeDashboardSourceDigest();
+  writeDashboardAssetsModule({ digest: postBuildDashboardDigest, builtAt: new Date().toISOString() });
 }
 
 // ─── Main ────────────────────────────────────────────────────────────────────
