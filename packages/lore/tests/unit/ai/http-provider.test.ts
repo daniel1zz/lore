@@ -14,6 +14,11 @@
  *   - AC-HTTP-8:  200 but content[0].text is empty/whitespace → AI_PROVIDER_ERROR "empty output"
  *   - AC-HTTP-TEL-1: usage field populated from response
  *   - D-004:      resolved API key value must NOT appear in any error message
+ *   - AC-TIER-10 (SPEC-103, task-t4-give-modelawareprovider-its-real-implementor):
+ *       HttpAIProvider.modelId equals the configured model and satisfies the
+ *       ModelAwareProvider structural capability; an AIProviderService wired with a real
+ *       HttpAIProvider stamps ai_provenance.model with that REAL model id, not the
+ *       provider (registry) name.
  *
  * Adversarial focus:
  *   - Timeout: mock fetch respects AbortController signal to trigger the abort path
@@ -23,12 +28,24 @@
  *   - Whitespace-only text: `"   "` must fail with "empty output" (not succeed)
  *   - Two different inputs → two different outputs (anti-hardcoded-return)
  *
- * @spec_ref AC-HTTP-4, AC-HTTP-5, AC-HTTP-6, AC-HTTP-7, AC-HTTP-8, AC-HTTP-TEL-1
+ * Honest consequence (documented, not an oversight): on THIS repo's own corpus the active
+ * AI provider is `claude-cli` (ClaudeCliProvider), which deliberately does NOT implement
+ * ModelAwareProvider — it shells out to `claude -p` and cannot observe which model actually
+ * served the call. So on this corpus, `ai_provenance` stays omitted from every generate()
+ * call and SPEC-103's I1 provenance-collision check is genuinely N/A for claude-cli-generated
+ * docs. HttpAIProvider is the only CURRENT implementor of the capability; the tests below
+ * exercise it directly (real class, not a test double) to prove the capability is no longer
+ * dead abstraction — they do not change what happens on this corpus today.
+ *
+ * @spec_ref AC-HTTP-4, AC-HTTP-5, AC-HTTP-6, AC-HTTP-7, AC-HTTP-8, AC-HTTP-TEL-1, AC-TIER-10
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { HttpAIProvider } from "../../../src/ai/http-provider.js";
 import { AiHttpConfigSchema } from "@lore/core";
+import type { AIProvider, Telemetry } from "@lore/core";
+import { AIProviderService } from "../../../src/service/ai-provider-service.js";
+import { GENERATE_PROMPT_VERSION } from "../../../src/ai/templates.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -592,5 +609,109 @@ describe("HttpAIProvider.generate — network timeout (AC-HTTP-6)", () => {
     if (result.error.code !== "AI_PROVIDER_ERROR") throw new Error("Expected AI_PROVIDER_ERROR");
     // Should NOT classify as timeout
     expect(result.error.message.toLowerCase()).not.toContain("timeout");
+  });
+});
+
+// ─── modelId — ModelAwareProvider capability (SPEC-103 AC-TIER-10) ───────────
+
+describe("HttpAIProvider.modelId — ModelAwareProvider capability (AC-TIER-10)", () => {
+  it("modelId equals the configured model", () => {
+    const cfg = AiHttpConfigSchema.parse({
+      url: "https://api.test.invalid/v1/messages",
+      model: "claude-haiku-4",
+    });
+    const provider = new HttpAIProvider("http", cfg);
+    expect(provider.modelId).toBe("claude-haiku-4");
+  });
+
+  it("modelId falls back to AiHttpConfigSchema's default model when none is configured", () => {
+    // defaultCfg was parsed with no `model` key — AiHttpConfigSchema defaults it to
+    // "claude-opus-4-8" (packages/core/src/ai.ts). modelId must reflect the RESOLVED
+    // config value, not silently omit or diverge from what the schema actually produced.
+    const provider = new HttpAIProvider("http", defaultCfg);
+    expect(provider.modelId).toBe(defaultCfg.model);
+    expect(provider.modelId).toBe("claude-opus-4-8");
+  });
+
+  it("two providers built from different configs carry different modelId values (anti-hardcoded)", () => {
+    const cfgA = AiHttpConfigSchema.parse({ url: "https://api.test.invalid/v1/messages", model: "model-a" });
+    const cfgB = AiHttpConfigSchema.parse({ url: "https://api.test.invalid/v1/messages", model: "model-b" });
+    const providerA = new HttpAIProvider("http", cfgA);
+    const providerB = new HttpAIProvider("http", cfgB);
+    expect(providerA.modelId).toBe("model-a");
+    expect(providerB.modelId).toBe("model-b");
+    expect(providerA.modelId).not.toBe(providerB.modelId);
+  });
+
+  it("satisfies the ModelAwareProvider structural shape: an own, non-empty string property", () => {
+    const provider = new HttpAIProvider("http", defaultCfg);
+    expect(Object.prototype.hasOwnProperty.call(provider, "modelId")).toBe(true);
+    expect(typeof provider.modelId).toBe("string");
+    expect(provider.modelId.length).toBeGreaterThan(0);
+  });
+
+  it("modelId is independent of the provider (registry) name", () => {
+    const cfg = AiHttpConfigSchema.parse({
+      url: "https://api.test.invalid/v1/messages",
+      model: "claude-haiku-4",
+    });
+    const provider = new HttpAIProvider("my-registry-key", cfg);
+    expect(provider.name).toBe("my-registry-key");
+    expect(provider.modelId).toBe("claude-haiku-4");
+    expect(provider.modelId).not.toBe(provider.name);
+  });
+});
+
+// ─── AIProviderService wiring — ai_provenance.model is the REAL model id ─────
+// (SPEC-103 AC-TIER-10, task-t4-give-modelawareprovider-its-real-implementor)
+//
+// The `-t ai_provenance` slice of this describe/it block set is what proves the capability
+// introduced by task-t3-hardening is no longer dead abstraction: an AIProviderService wired
+// with a REAL HttpAIProvider instance (not a test double) stamps ai_provenance.model with
+// HttpAIProvider's actual configured model — never the provider (registry) name.
+
+describe("HttpAIProvider wired into AIProviderService — ai_provenance.model (AC-TIER-10)", () => {
+  const assessBudgets = { max_plan_chars: 8000, max_spec_chars: 12000, max_task_chars: 4000, max_diff_chars: 24000 };
+
+  function makeTelemetry(): Telemetry {
+    return { record: vi.fn(), emit: vi.fn(), close: vi.fn() };
+  }
+
+  it("generate() stamps ai_provenance.model with HttpAIProvider's real modelId, not its provider name", async () => {
+    vi.stubGlobal("fetch", successFetch("# Generated via HTTP"));
+    const cfg = AiHttpConfigSchema.parse({
+      url: "https://api.test.invalid/v1/messages",
+      model: "claude-haiku-4",
+    });
+    const provider = new HttpAIProvider("http", cfg);
+    const providers: ReadonlyMap<string, AIProvider> = new Map([[provider.name, provider]]);
+    const service = new AIProviderService(providers, provider.name, {}, makeTelemetry(), false, 8000, assessBudgets);
+
+    const result = await service.generate({ doc_type: "prd", title: "A Title" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(`generate failed: ${JSON.stringify(result.error)}`);
+
+    expect(result.value.ai_provenance).toBeDefined();
+    expect(result.value.ai_provenance?.provider).toBe("http");
+    // The whole point of AC-TIER-10: model is the REAL modelId, distinct from provider name.
+    expect(result.value.ai_provenance?.model).toBe("claude-haiku-4");
+    expect(result.value.ai_provenance?.model).not.toBe(provider.name);
+    expect(result.value.ai_provenance?.prompt_version).toBe(GENERATE_PROMPT_VERSION);
+  });
+
+  it("a differently-configured HttpAIProvider stamps a different ai_provenance.model (anti-hardcoded)", async () => {
+    vi.stubGlobal("fetch", successFetch("# Generated via HTTP"));
+    const cfg = AiHttpConfigSchema.parse({
+      url: "https://api.test.invalid/v1/messages",
+      model: "claude-opus-4-8",
+    });
+    const provider = new HttpAIProvider("http", cfg);
+    const providers: ReadonlyMap<string, AIProvider> = new Map([[provider.name, provider]]);
+    const service = new AIProviderService(providers, provider.name, {}, makeTelemetry(), false, 8000, assessBudgets);
+
+    const result = await service.generate({ doc_type: "prd", title: "A Title" });
+    if (!result.ok) throw new Error(`generate failed: ${JSON.stringify(result.error)}`);
+    expect(result.value.ai_provenance?.model).toBe("claude-opus-4-8");
+    expect(result.value.ai_provenance?.model).not.toBe("claude-haiku-4");
   });
 });
