@@ -104,8 +104,9 @@ export interface NonceStore {
 }
 
 /** Result of attempting to redeem a nonce — every non-`"granted"` outcome maps to the
- * SAME `410` response (DD-2: "the endpoint answers 410 for consumed/expired/unknown
- * nonces" — the caller never needs to distinguish which). */
+ * SAME `410` + `text/html` human-readable failure page (DD-2/AC-F5A-10: "the endpoint
+ * answers 410 for consumed/expired/unknown nonces" — the caller never needs to distinguish
+ * which; see {@link renderNonceFailurePage}). */
 type ConsumeNonceOutcome = "granted" | "unknown" | "expired" | "consumed";
 
 /** Internal capability surface actually returned by {@link createNonceStore} — a
@@ -231,8 +232,10 @@ function isRejectedNavigation(req: Request): boolean {
  * identity `POST /api/auth/local-bootstrap` (`routes.ts::handleLocalBootstrap`) uses. */
 const BOOTSTRAP_SESSION_OWNER = "dashboard-local";
 
-/** Human-readable reason text per {@link ConsumeNonceOutcome} failure branch (DD-2: the
- * 410 body must be actionable, naming the `lore dashboard` re-launch as the fix). */
+/** Human-readable reason sentence per {@link ConsumeNonceOutcome} failure branch — the ONE
+ * part of {@link renderNonceFailurePage}'s output that varies per outcome (DD-2/AC-F5A-10:
+ * the page itself, and its `410`/`text/html` shape, are identical across all three; only
+ * this one sentence differs). */
 function nonceFailureMessage(outcome: Exclude<ConsumeNonceOutcome, "granted">): string {
   switch (outcome) {
     case "unknown":
@@ -246,6 +249,56 @@ function nonceFailureMessage(outcome: Exclude<ConsumeNonceOutcome, "granted">): 
       return exhaustive;
     }
   }
+}
+
+/**
+ * Render the self-contained HTML page served for every non-`"granted"` nonce outcome
+ * (consumed/expired/unknown — AC-F5A-10/DD-2 collapse all three into ONE response shape:
+ * this same page structure, always `410`, always `Content-Type: text/html`; only the
+ * embedded {@link nonceFailureMessage} sentence differs). States the launch link is dead
+ * and names re-running `lore dashboard` as the fix (spec Failure Modes table).
+ *
+ * The `GET /api/auth/me` probe is CLIENT-SIDE (inline `<script>`), never server-side, by
+ * necessity, not convenience: `lore_sid` is scoped `Path=/api` (`auth.ts:187`, a deliberate
+ * minimal-exposure choice — `routes.ts:122`), so this `/auth/bootstrap` route NEVER
+ * receives the cookie on the request that renders this page. Probing from inside the
+ * loaded page — after the browser itself attaches the cookie to the follow-up fetch — is
+ * the only way to detect an already-authenticated browser and forward it to `/` instead of
+ * stranding it here. Widening the cookie's path to `/` was considered and rejected at
+ * planning time (spec security-narrative amendment + ADR); do not "simplify" this probe
+ * into a server-side cookie read.
+ *
+ * Served from a strict local origin (packaged `lore dashboard` only) — kept dependency-free
+ * on purpose: no external `fetch`/CDN/script src, only this one same-origin probe.
+ *
+ * @param reasonMessage - the outcome-specific sentence from {@link nonceFailureMessage}.
+ * @returns a complete `<!doctype html>` document as a string (never JSON-parseable, never
+ *   contains `"ok":false` — {@link handleNonceBootstrap}'s tests assert both, to catch a
+ *   future regression that quietly reintroduces the JSON envelope under an HTML label).
+ */
+function renderNonceFailurePage(reasonMessage: string): string {
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>lore dashboard — link no longer valid</title>
+<style>
+  body { font-family: system-ui, -apple-system, sans-serif; max-width: 34rem; margin: 4rem auto; padding: 0 1.5rem; color: #1a1a1a; line-height: 1.5; }
+  code { background: #eee; padding: 0.1rem 0.35rem; border-radius: 0.25rem; font-size: 0.95em; }
+</style>
+</head>
+<body>
+<h1>This dashboard link is no longer valid</h1>
+<p>${reasonMessage}</p>
+<p>Run <code>lore dashboard</code> again to open a fresh link.</p>
+<script>
+  fetch("/api/auth/me", { credentials: "same-origin" })
+    .then(function (res) { if (res.ok) { window.location.replace("/"); } })
+    .catch(function () {});
+</script>
+</body>
+</html>
+`;
 }
 
 /**
@@ -271,13 +324,15 @@ async function handleNonceBootstrap(
   const token = url.searchParams.get("nonce");
   const outcome = token !== null ? nonces.consume(token) : "unknown";
   if (outcome !== "granted") {
-    return jsonError(
-      {
-        code: "NONCE_INVALID",
-        message: `${nonceFailureMessage(outcome)} Relaunch 'lore dashboard' for a fresh link.`,
-      },
-      410,
-    );
+    // AC-F5A-10 / spec Failure Modes table: "Nonce consumed/expired/unknown -> 410 +
+    // human-readable page naming `lore dashboard` re-launch" — a bare JSON envelope here
+    // (the pre-fix behavior) puts raw `{"ok":false,...}` in the user's viewport when a
+    // launch link is replayed. See `renderNonceFailurePage`'s own doc comment for why the
+    // authenticated-forward probe below is client-side, not server-side.
+    return new Response(renderNonceFailurePage(nonceFailureMessage(outcome)), {
+      status: 410,
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
   }
 
   // Failure Modes table: "Machine-auth store unavailable" — guarded HERE, lazily, per
