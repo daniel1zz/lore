@@ -92,6 +92,12 @@ const main = defineCommand({
     outline: () => import("./commands/outline.js").then(wrapDefault("outline")),
     seat: () => import("./commands/seat.js").then(wrapDefault("seat")),
     "report-issue": () => import("./commands/report-issue.js").then(wrapDefault("report-issue")),
+    // issue / issues (spec-issue-closure-loop-computed-resolution-agent-reachable
+    // §D3/D4) — `issue resolve` writes the explicit rejected/wontfix terminal
+    // state; `issues` is the upstream-side pull-only listing with computed
+    // resolution. See each command file's own module header.
+    issue: () => import("./commands/issue.js").then(wrapDefault("issue")),
+    issues: () => import("./commands/issues.js").then(wrapDefault("issues")),
     // archive (spec-lifecycle-archival-plan-close-cascade-deterministic D3) —
     // deterministic sweep/apply verb; see commands/archive.ts's module header.
     archive: () => import("./commands/archive.js").then(wrapDefault("archive")),

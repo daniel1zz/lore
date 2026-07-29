@@ -2,8 +2,12 @@
  * lore link <from> <to> [--type <type>] [--infer] — create a link between two documents.
  *
  * Manual mode (default):
- *   Requires --type <link_type>. Valid types: parent | implements | informs |
- *   supersedes | relates-to | blocks | governs. Defaults to "relates-to" when omitted.
+ *   Requires --type <link_type>. Valid types are DERIVED from `linkTypeSchema.options`
+ *   (`@lore/core`) — never a second hand-maintained copy here (see VALID_LINK_TYPES'
+ *   own doc comment: a hardcoded array previously drifted out of sync with the schema
+ *   and silently rejected a valid, schema-accepted link type at the CLI layer before it
+ *   ever reached CorpusService — spec-issue-closure-loop-computed-resolution-agent-
+ *   reachable's SSOT-collapse fix). Defaults to "relates-to" when omitted.
  *
  * AI inference mode (SPEC-019 AC-LINK-AI-1):
  *   --infer: ask the AI provider to pick the link type from both documents' titles
@@ -17,17 +21,20 @@
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
+import { linkTypeSchema } from "@lore/core";
 import type { LinkType } from "@lore/core";
 
-const VALID_LINK_TYPES: LinkType[] = [
-  "parent",
-  "implements",
-  "informs",
-  "supersedes",
-  "relates-to",
-  "blocks",
-  "governs",
-];
+/**
+ * The CLI's accepted `--type` values — DERIVED from `linkTypeSchema.options`
+ * (schemas.ts), never re-listed by hand. Before this fix, this file carried
+ * its OWN independent array that had drifted behind the schema (missing
+ * `"resolves"`, the schema's 8th member) — a valid, schema-accepted link type
+ * was rejected here with exit 2 before `CorpusService.link`'s validated write
+ * path was ever reached. Deriving from the schema makes that class of drift
+ * structurally impossible: a 9th schema member is automatically valid here
+ * with zero edits to this file.
+ */
+const VALID_LINK_TYPES: readonly LinkType[] = linkTypeSchema.options;
 
 export default defineCommand({
   meta: {
