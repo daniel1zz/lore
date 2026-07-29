@@ -47,6 +47,17 @@
  *   VALIDATION_ERROR before any write. Evidence with no `ac_ref` never invokes the
  *   port — fully backward-compatible with pre-SPEC-038 callers. The same cross-entity
  *   check applies to `recordVerifiedEvidence` (shared implementation, see below).
+ * @invariant addEvidence rejects a placeholder/probe `command` (task task-reject-
+ *   placeholder-command-strings-at-evidence-write-time) — trimmed length < 3 and
+ *   not in `ALLOWED_SHORT_EVIDENCE_COMMANDS` fails loud with VALIDATION_ERROR
+ *   BEFORE any write (`rejectPlaceholderEvidenceCommand`). WRITE-PATH ONLY: the
+ *   shared `evidenceEntrySchema.command` stays `z.string().min(1)` deliberately
+ *   untouched, so a task whose evidence log already holds a historical placeholder
+ *   entry (recorded before this guard existed) still reads back EVERY entry
+ *   (`readEvidence`'s array-level `safeParse` is all-or-nothing — tightening the
+ *   shared schema would have silently zeroed that task's whole evidence array).
+ *   `recordVerifiedEvidence` is deliberately EXEMPT — its `command` is
+ *   runner-attested, never hand-typed.
  * @invariant `attestation` is runner-issued ONLY (SPEC-039 §2 D2, anti-spoofing) — the
  *   public `EvidenceInput` type (addEvidence) structurally EXCLUDES the field, but a
  *   caller can still smuggle it past the type system with an `as EvidenceInput`
@@ -461,6 +472,87 @@ function rejectHashInTaskAnchors(anchors: string[]): Result<void, LoreError> {
   return ok(undefined);
 }
 
+/**
+ * Genuine short commands exempted from {@link rejectPlaceholderEvidenceCommand}'s
+ * 3-character floor — real runnable commands that happen to be under 3 characters.
+ * Deliberately a closed, explicit list (never inferred from a heuristic like "looks
+ * like a known binary") — widening it is a conscious decision, not a side effect.
+ */
+const ALLOWED_SHORT_EVIDENCE_COMMANDS: ReadonlySet<string> = new Set([
+  "ls",
+  "go",
+  "sh",
+  "cd",
+  "hg",
+  "bc",
+  "dd",
+  "df",
+  "du",
+  "ps",
+  "rm",
+  "cp",
+  "mv",
+  "ln",
+  "id",
+  "wc",
+]);
+
+/**
+ * Rejects an `addEvidence` `command` that looks like a placeholder/probe string
+ * rather than a runnable command (task task-reject-placeholder-command-strings-
+ * at-evidence-write-time) — a 2026-07-29 incident recorded 3 evidence entries
+ * with commands `"x"`/`"x3"`/`"x4"` (all `result: "pass"`) on a real task while
+ * an agent was debugging shell quoting; evidence is append-only, so those
+ * entries can never be removed, and an auditor cannot distinguish them from
+ * real oracle runs except by reading the command text.
+ *
+ * WRITE-PATH ONLY, called from `_addEvidenceImpl` (the self-reported addEvidence
+ * path), never from the shared `appendEvidenceEntry`/`recordVerifiedEvidence`
+ * path — see this module's own header invariant for why `recordVerifiedEvidence`
+ * is deliberately exempt (its `command` is runner-attested, not hand-typed).
+ * Deliberately does NOT tighten the shared `evidenceEntrySchema.command`
+ * (`@lore/core`, `z.string().min(1)`): `readEvidence`'s `z.array(...).safeParse`
+ * is all-or-nothing — tightening the shared schema would silently zero an
+ * ENTIRE task's evidence array on next read the moment it already holds one
+ * placeholder entry recorded before this guard existed. This check therefore
+ * only ever screens the ONE new entry being appended, never re-validates
+ * history — a task carrying a historical `"x"` entry keeps reading it back
+ * intact, and can keep receiving new (non-placeholder) evidence.
+ *
+ * Rule (conservative — must not false-positive on real short commands): the
+ * TRIMMED command is rejected when it is shorter than 3 characters AND is not
+ * in {@link ALLOWED_SHORT_EVIDENCE_COMMANDS}. Rejects `"x"` (trimmed length 1)
+ * and `"x3"`/`"x4"` (trimmed length 2, neither allowlisted). Accepts `"ls"`
+ * (allowlisted), `"tsc"`, `"make"`, `"bun test"` (all 3+ chars).
+ *
+ * @param command - The raw `EvidenceInput.command` as received (untrimmed)
+ * @returns `ok(undefined)` when the command passes; `err(VALIDATION_ERROR)`
+ *   naming both the offending value and the rule when it looks like a
+ *   placeholder
+ * @example
+ * rejectPlaceholderEvidenceCommand("x"); // => err({ code: "VALIDATION_ERROR", field: "command", ... })
+ * @example
+ * rejectPlaceholderEvidenceCommand("ls"); // => ok(undefined) — allowlisted
+ * @example
+ * rejectPlaceholderEvidenceCommand("tsc"); // => ok(undefined) — 3+ chars
+ */
+function rejectPlaceholderEvidenceCommand(command: string): Result<void, LoreError> {
+  const trimmed = command.trim();
+  if (trimmed.length >= 3 || ALLOWED_SHORT_EVIDENCE_COMMANDS.has(trimmed)) {
+    return ok(undefined);
+  }
+  const allowlist = Array.from(ALLOWED_SHORT_EVIDENCE_COMMANDS).sort().join(", ");
+  return err({
+    code: "VALIDATION_ERROR",
+    field: "command",
+    message:
+      `evidence command "${command}" looks like a placeholder, not a runnable command — a ` +
+      `trimmed command shorter than 3 characters is rejected unless it is one of the ` +
+      `allowlisted short commands (${allowlist})`,
+    value: command,
+  });
+}
+
 // ─── TaskWorkflowService ───────────────────────────────────────────────────
 
 export class TaskWorkflowService {
@@ -618,6 +710,13 @@ export class TaskWorkflowService {
         value: entry.result,
       });
     }
+
+    // task-reject-placeholder-command-strings-at-evidence-write-time — see
+    // rejectPlaceholderEvidenceCommand's own JSDoc for the incident this defends
+    // against and why it is scoped to THIS self-reported path only (never the
+    // shared appendEvidenceEntry both addEvidence and recordVerifiedEvidence use).
+    const placeholderCheck = rejectPlaceholderEvidenceCommand(entry.command);
+    if (!placeholderCheck.ok) return placeholderCheck;
 
     return this.appendEvidenceEntry(idOrSlug, entry, entry.recorded_by, now);
   }

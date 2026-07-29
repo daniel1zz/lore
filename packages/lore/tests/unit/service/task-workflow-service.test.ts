@@ -1511,3 +1511,235 @@ describe("REGRESSION — done() telemetry emits exactly one task.done event per 
   });
 });
 
+// ─── Placeholder-command evidence write-time guard ───────────────────────────
+// (task-reject-placeholder-command-strings-at-evidence-write-time)
+//
+// A 2026-07-29 incident recorded 3 evidence probe entries with commands
+// "x"/"x3"/"x4" (all result: pass) on a real task while an agent was debugging
+// shell quoting. Evidence is append-only, so those entries can never be
+// removed — this guard stops NEW ones like them from landing at addEvidence
+// write time, WITHOUT retroactively invalidating evidence already stored:
+// `evidenceEntrySchema.command` (@lore/core) stays untouched on purpose,
+// because `readEvidence`'s `z.array(evidenceEntrySchema).safeParse` is
+// all-or-nothing — tightening the shared schema would silently zero an
+// ENTIRE task's evidence array on next read the moment it holds one
+// placeholder entry from before this guard existed.
+
+describe("HAPPY — genuine short/real commands are accepted, not flagged as placeholders", () => {
+  it("addEvidence accepts realistic command strings of varying length, including an allowlisted 2-char command", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    for (const command of ["ls", "tsc", "make", "bun test", "bun run typecheck"]) {
+      const result = await taskWorkflowService.addEvidence(taskId, evidence({ command }));
+      expect(result.ok).toBe(true);
+    }
+    const after = await corpusService.get(taskId);
+    expect(after.ok).toBe(true);
+    if (!after.ok) return;
+    expect((after.value.doc.extra["verification_evidence"] as unknown[]).length).toBe(5);
+  });
+});
+
+describe("NEGATIVE — placeholder command strings rejected at write time (VALIDATION_ERROR, doc unchanged)", () => {
+  it("addEvidence rejects \"x\", \"x3\", \"x4\" — the exact commands from the 2026-07-29 incident — each leaving its doc unchanged", async () => {
+    for (const command of ["x", "x3", "x4"]) {
+      const { corpusService, taskWorkflowService } = makeServices();
+      const planId = await createPlan(corpusService);
+      const taskId = await createTask(corpusService, planId);
+
+      const result = await taskWorkflowService.addEvidence(taskId, evidence({ command }));
+      expect(result.ok).toBe(false);
+      if (result.ok) continue;
+      expect(result.error.code).toBe("VALIDATION_ERROR");
+
+      const after = await corpusService.get(taskId);
+      expect(after.ok).toBe(true);
+      if (!after.ok) continue;
+      expect(after.value.doc.version).toBe(1); // create only — evidence write never happened
+      expect(after.value.doc.extra["verification_evidence"]).toBeUndefined();
+    }
+  });
+});
+
+describe("BOUNDARY — the 3-character floor and the short-command allowlist", () => {
+  it("a trimmed 2-character non-allowlisted command is rejected", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const result = await taskWorkflowService.addEvidence(taskId, evidence({ command: "ab" }));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("a trimmed exactly-3-character command is accepted", async () => {
+    const { taskWorkflowService, corpusService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const result = await taskWorkflowService.addEvidence(taskId, evidence({ command: "abc" }));
+    expect(result.ok).toBe(true);
+  });
+
+  it("every allowlisted 2-char short command is accepted", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+    const allowlist = ["ls", "go", "sh", "cd", "hg", "bc", "dd", "df", "du", "ps", "rm", "cp", "mv", "ln", "id", "wc"];
+
+    for (const command of allowlist) {
+      const result = await taskWorkflowService.addEvidence(taskId, evidence({ command }));
+      expect(result.ok).toBe(true);
+    }
+    const after = await corpusService.get(taskId);
+    expect(after.ok).toBe(true);
+    if (!after.ok) return;
+    expect((after.value.doc.extra["verification_evidence"] as unknown[]).length).toBe(allowlist.length);
+  });
+
+  it("a whitespace-padded placeholder (\"  x  \") is rejected — trimmed before measuring length", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const result = await taskWorkflowService.addEvidence(taskId, evidence({ command: "  x  " }));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+  });
+});
+
+describe("ERROR — rejection names both the offending value and the rule (fail loud, never silent)", () => {
+  it("VALIDATION_ERROR carries field \"command\", the exact offending value, and a message describing the rule", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const result = await taskWorkflowService.addEvidence(taskId, evidence({ command: "x3" }));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatchObject({ code: "VALIDATION_ERROR", field: "command", value: "x3" });
+    const message = (result.error as { message: string }).message;
+    expect(message).toContain("x3");
+    expect(message.toLowerCase()).toContain("placeholder");
+  });
+});
+
+describe("STATE — a rejected placeholder command never mutates already-stored evidence", () => {
+  it("existing real evidence entries and the doc version are unchanged after a rejected placeholder attempt", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    await taskWorkflowService.addEvidence(taskId, evidence({ command: "bun run typecheck" }));
+    const before = await corpusService.get(taskId);
+    expect(before.ok).toBe(true);
+    if (!before.ok) return;
+    const entriesBefore = before.value.doc.extra["verification_evidence"];
+    const versionBefore = before.value.doc.version;
+
+    const rejected = await taskWorkflowService.addEvidence(taskId, evidence({ command: "x" }));
+    expect(rejected.ok).toBe(false);
+
+    const after = await corpusService.get(taskId);
+    expect(after.ok).toBe(true);
+    if (!after.ok) return;
+    expect(after.value.doc.version).toBe(versionBefore);
+    expect(after.value.doc.extra["verification_evidence"]).toEqual(entriesBefore);
+  });
+});
+
+describe("REGRESSION — historical placeholder-command evidence remains fully readable (MANDATORY oracle)", () => {
+  it("a task whose stored evidence ALREADY contains command \"x\" (pre-seeded directly via the store, simulating pre-guard history) still reads back ALL entries via ready(), and new legitimate evidence still appends correctly", async () => {
+    const { store, corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    // Pre-seed historical evidence DIRECTLY through the store — bypassing
+    // TaskWorkflowService.addEvidence entirely — to simulate evidence recorded
+    // BEFORE this write-time guard existed. evidenceEntrySchema.command is
+    // deliberately untouched by this feature, so this legacy shape still parses.
+    const before = await corpusService.get(taskId);
+    expect(before.ok).toBe(true);
+    if (!before.ok) return;
+    const legacyEntries = [
+      {
+        oracle: "tsc",
+        command: "x",
+        result: "pass",
+        recorded_at: "2026-07-20T00:00:00.000Z",
+        recorded_by: "agent:probe",
+      },
+      {
+        oracle: "tsc",
+        command: "x3",
+        result: "pass",
+        recorded_at: "2026-07-20T00:01:00.000Z",
+        recorded_by: "agent:probe",
+      },
+      {
+        oracle: "tsc",
+        command: "x4",
+        result: "pass",
+        recorded_at: "2026-07-20T00:02:00.000Z",
+        recorded_by: "agent:probe",
+      },
+      {
+        oracle: "tsc",
+        command: "bun run typecheck",
+        result: "pass",
+        recorded_at: "2026-07-20T00:03:00.000Z",
+        recorded_by: "agent:real",
+      },
+    ];
+    const seeded = await store.update(taskId, {
+      extra: { ...before.value.doc.extra, verification_evidence: legacyEntries },
+    });
+    expect(seeded.ok).toBe(true);
+
+    // readEvidence is the exact function this guard's placement was chosen to
+    // never break — it is exercised internally by ready() (evidence_count /
+    // latest_evidence) and by addEvidence's own cap check below. This is the
+    // load-bearing assertion: all 4 legacy entries (including the placeholder
+    // ones) must still be visible, never silently zeroed by the all-or-nothing
+    // z.array(evidenceEntrySchema).safeParse inside readEvidence.
+    const readyBefore = await taskWorkflowService.ready(planId);
+    expect(readyBefore.ok).toBe(true);
+    if (!readyBefore.ok) return;
+    const recordBefore = readyBefore.value.records.find((r) => r.task.id === taskId);
+    expect(recordBefore?.evidence_count).toBe(4);
+    expect(recordBefore?.latest_evidence?.result).toBe("pass");
+
+    // A NEW legitimate addEvidence call on this task must still succeed — the
+    // write-time guard screens only the INCOMING entry, it never re-validates
+    // history, and readEvidence's cap check must see all 4 prior entries intact.
+    const appended = await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({ command: "bunx vitest run x.test.ts" }),
+    );
+    expect(appended.ok).toBe(true);
+    if (!appended.ok) return;
+    const entries = appended.value.extra["verification_evidence"] as Array<Record<string, unknown>>;
+    expect(entries).toHaveLength(5);
+    expect(entries[0]?.["command"]).toBe("x"); // legacy entry #1 preserved verbatim
+    expect(entries[1]?.["command"]).toBe("x3");
+    expect(entries[2]?.["command"]).toBe("x4");
+
+    // A NEW addEvidence call attempting a placeholder command IS still rejected —
+    // the guard is live going forward even though history holds placeholders.
+    const rejected = await taskWorkflowService.addEvidence(taskId, evidence({ command: "x5" }));
+    expect(rejected.ok).toBe(false);
+    if (rejected.ok) return;
+    expect(rejected.error.code).toBe("VALIDATION_ERROR");
+
+    // The doc must be unchanged by the rejected attempt (still 5 entries, not 6).
+    const after = await corpusService.get(taskId);
+    expect(after.ok).toBe(true);
+    if (!after.ok) return;
+    expect((after.value.doc.extra["verification_evidence"] as unknown[]).length).toBe(5);
+  });
+});
+
