@@ -11,11 +11,15 @@
  * Invariants:
  *   - Reads the SAME shared query (`useIssueReportsQuery`) as the nav badge
  *     and the Issues list page — one cache entry, one invalidation point.
+ *     `open_count` is the server's D8-computed count (resolution `"open"`
+ *     rows only, spec-issue-closure-loop-computed-resolution-agent-reachable
+ *     §D8) — this component makes NO independent count/filter decision of
+ *     its own, so it inherited the D8 fix with zero code changes here.
  *   - Zero open reports renders an EXPLICIT empty state ("No open issue
  *     reports"), never a blank region (AC-074-4).
  *   - Shows at most ISSUE_CARD_LIMIT titles even when open_count is larger.
  * Side-effect class: IO (fetch via TanStack Query)
- * Source: SPEC-074 §Scope, AC-074-4
+ * Source: SPEC-074 §Scope, AC-074-4; spec-issue-closure-loop-computed-resolution-agent-reachable §D8
  */
 
 import { useIssueReportsQuery } from "@/lib/issue-reports-query";

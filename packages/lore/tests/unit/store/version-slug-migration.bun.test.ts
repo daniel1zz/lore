@@ -114,11 +114,12 @@ describe("migration-007 (versions.slug nullable column)", () => {
     const store = new SQLiteStore(":memory:");
     const db = store.getDatabase();
 
-    // reason: migration-010 (SPEC-084 docs.ordinal) is now the head — a
-    // fresh store runs every migration up to it, not just through
-    // migration-007. This test's own concern (versions.slug present) is
-    // unaffected — asserted directly below.
-    expect(userVersion(db)).toBe(11);
+    // reason: migration-012 (spec-issue-closure-loop-computed-resolution-
+    // agent-reachable, links.link_type CHECK widened for "resolves") is now
+    // the head — a fresh store runs every migration up to it, not just
+    // through migration-007. This test's own concern (versions.slug present)
+    // is unaffected — asserted directly below.
+    expect(userVersion(db)).toBe(12);
     expect(tableColumnNames(db, "versions")).toContain("slug");
 
     store.close();
@@ -231,7 +232,7 @@ describe("migration-007 (versions.slug nullable column)", () => {
     const store = new SQLiteStore(dbPath);
     const db = store.getDatabase();
 
-    expect(userVersion(db)).toBe(11);
+    expect(userVersion(db)).toBe(12);
     expect(tableColumnNames(db, "versions")).toContain("slug");
 
     const preservedDoc = db
@@ -257,7 +258,7 @@ describe("migration-007 (versions.slug nullable column)", () => {
     expect(() => {
       const secondOpen = new SQLiteStore(dbPath);
       const db = secondOpen.getDatabase();
-      expect(userVersion(db)).toBe(11);
+      expect(userVersion(db)).toBe(12);
       expect(tableColumnNames(db, "versions")).toContain("slug");
       secondOpen.close();
     }).not.toThrow();

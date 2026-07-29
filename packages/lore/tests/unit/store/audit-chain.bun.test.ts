@@ -397,11 +397,16 @@ describe("migration-009 (audit hash chain backfill)", () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("HAPPY: a fresh :memory: DB migrates straight to user_version 9 with the chain columns present", () => {
+  it("HAPPY: a fresh :memory: DB migrates straight to the current head user_version with the chain columns present", () => {
     const store = new SQLiteStore(":memory:");
     const db = store.getDatabase();
 
-    expect(userVersion(db)).toBe(11);
+    // reason: migration-012 (spec-issue-closure-loop-computed-resolution-
+    // agent-reachable, links.link_type CHECK widened for "resolves") is now
+    // the head — a fresh store runs every migration up to it, not just
+    // through migration-009. This test's own concern (audit hash-chain
+    // columns present) is unaffected — asserted directly below.
+    expect(userVersion(db)).toBe(12);
     const cols = tableColumnNames(db, "audit");
     expect(cols).toContain("prev_hash");
     expect(cols).toContain("entry_hash");
@@ -473,7 +478,7 @@ describe("migration-009 (audit hash chain backfill)", () => {
     const store = new SQLiteStore(dbPath);
     const db = store.getDatabase();
 
-    expect(userVersion(db)).toBe(11);
+    expect(userVersion(db)).toBe(12);
     expect(tableColumnNames(db, "audit")).toContain("prev_hash");
     expect(tableColumnNames(db, "audit")).toContain("entry_hash");
 
@@ -533,7 +538,7 @@ describe("migration-009 (audit hash chain backfill)", () => {
     expect(() => {
       const secondOpen = new SQLiteStore(dbPath);
       const db = secondOpen.getDatabase();
-      expect(userVersion(db)).toBe(11);
+      expect(userVersion(db)).toBe(12);
       expect(tableColumnNames(db, "audit")).toContain("prev_hash");
       secondOpen.close();
     }).not.toThrow();

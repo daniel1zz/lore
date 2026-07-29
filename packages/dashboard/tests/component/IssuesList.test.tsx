@@ -83,6 +83,7 @@ beforeEach(() => {
         reported_at: "2026-07-01T00:00:00Z",
         possible_duplicates: [],
         status: "in-review",
+        resolution: "open",
       },
     ],
   });
@@ -125,6 +126,45 @@ describe("IssuesList (SPEC-078 T13)", () => {
       await user.click(await screen.findByTestId("issue-report-row"));
 
       expect(onNavigate).toHaveBeenCalledWith("01HISSUE0000000000000000001");
+    });
+  });
+
+  describe("D8 resolution rendering (spec-issue-closure-loop-computed-resolution-agent-reachable, AC-ICL-9)", () => {
+    it("renders the row's computed resolution, not its raw status", async () => {
+      mockUseRouterState.mockReturnValue("/issues");
+      renderList();
+
+      const badge = await screen.findByTestId("issue-report-resolution");
+      expect(badge).toHaveTextContent("open");
+      // reason: the row's `status` ("in-review", see beforeEach fixture) and
+      // its `resolution` ("open") are DIFFERENT fields — this pins that the
+      // component renders `resolution`, never falls back to `status`.
+      expect(badge).not.toHaveTextContent("in-review");
+    });
+
+    it("STATE: an unclosed escalation (status stays draft, resolution is fixed) renders 'fixed', not 'draft'", async () => {
+      mockedApiGetIssueReports.mockResolvedValue({
+        open_count: 0,
+        rows: [
+          {
+            id: "01HISSUE0000000000000000002",
+            slug: "task-escalation",
+            title: "Unclosed escalation",
+            reporter_project: "acme-agent",
+            reporter_actor: "agent:x",
+            lore_version: "1.0.0",
+            reported_at: "2026-07-02T00:00:00Z",
+            possible_duplicates: [],
+            status: "draft",
+            resolution: "fixed",
+          },
+        ],
+      });
+      mockUseRouterState.mockReturnValue("/issues");
+      renderList();
+
+      const badge = await screen.findByTestId("issue-report-resolution");
+      expect(badge).toHaveTextContent("fixed");
     });
   });
 });

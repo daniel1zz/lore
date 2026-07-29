@@ -44,31 +44,55 @@
  *     field is read DEFENSIVELY (malformed/legacy shape degrades a field to
  *     `""`/`[]`, never a thrown error), mirroring
  *     `packages/core/src/issue-report.ts::readReporterProject`'s guard shape.
- *   - `open_count` is always exactly `rows.length` — the same "one endpoint,
- *     no second count route" the spec's §Design calls for (the nav badge and
- *     the Issues page both poll this single projection).
+ *   - `open_count` is the count of rows whose COMPUTED `resolution` is
+ *     `"open"` (D8, spec-issue-closure-loop-computed-resolution-agent-reachable
+ *     — "the nav badge counts computed-open reports rather than draft
+ *     docs"). Pre-D8 this was always exactly `rows.length`; post-D8 `rows`
+ *     still holds every still-governed report (unchanged SPEC-074 filter —
+ *     see {@link IssueReportRow}'s doc comment for why a `"fixed"`/
+ *     `"resolving"` row deliberately stays IN `rows`) while `open_count` can
+ *     now be STRICTLY LESS than `rows.length` — that gap is the visible
+ *     signal for an unclosed escalation (D5(a)), not a bug. The nav badge and
+ *     the Issues page still both poll this SAME single projection (one
+ *     endpoint, no second count route).
  *   - Zero matching tasks → `{rows: [], open_count: 0}` with HTTP 200, never
  *     an error (AC-074-5) — an empty result is a fact, not a failure.
  *
- * Side-effect class: pure read (delegates to `CorpusService.listFull` and
- *   `AuditService.query`, both read-only store queries; this module performs
- *   no writes and no IO of its own).
+ * Side-effect class: pure read (delegates to `CorpusService.listFull`,
+ *   `CorpusService.getResolvesInEdgesForIssues`, and `AuditService.query`,
+ *   all read-only store queries; this module performs no writes and no IO of
+ *   its own).
  *
- * Source: SPEC-074 §Scope, §Design; AC-074-3, AC-074-5.
+ * Source: SPEC-074 §Scope, §Design (AC-074-3, AC-074-5);
+ *   spec-issue-closure-loop-computed-resolution-agent-reachable §D7 (AC-ICL-9).
  */
 
 import type { App } from "../../app.js";
 import { jsonOk, loreErrorResponse } from "./middleware.js";
 import type { AuditEntry, DocRecord } from "@lore/core";
+import { computeIssueResolution, type IssueResolution } from "../../service/issue-resolution.js";
 
 /**
- * One row of the `GET /api/issue-reports` projection — exactly the 9 fields
- * SPEC-074 §Design declares (the 8 report-identity fields plus lifecycle
- * `status`), nothing else. Never carries the full `extra.issue_report`
- * payload (e.g. `expected`/`actual`/`repro_command` are NOT projected here —
- * the dashboard's detail view reads those via the existing `GET
- * /api/docs/:id` route, per SPEC-074 §Design "detail view rendering the full
+ * One row of the `GET /api/issue-reports` projection — the 9 fields SPEC-074
+ * §Design declares (the 8 report-identity fields plus lifecycle `status`)
+ * PLUS `resolution` (D7, spec-issue-closure-loop-computed-resolution-agent-reachable).
+ * Never carries the full `extra.issue_report` payload (e.g.
+ * `expected`/`actual`/`repro_command` are NOT projected here — the
+ * dashboard's detail view reads those via the existing `GET /api/docs/:id`
+ * route, per SPEC-074 §Design "detail view rendering the full
  * extra.issue_report payload").
+ *
+ * `status` stays the RAW doc lifecycle status (draft/in-review/...) —
+ * unchanged meaning, kept for the same reasons SPEC-074 always projected it
+ * (e.g. the in-review badge). `resolution` is the NEW, orthogonal, COMPUTED
+ * field (D2: open/resolving/fixed/rejected/wontfix) — the two are
+ * INTENTIONALLY independent: a report can sit at `status: "draft"` (never
+ * manually archived, D5(a)/spec's "no auto-advancing the issue task's own
+ * status" non-goal) while its `resolution` is already `"fixed"` (a
+ * `resolves` edge landed on an `active`/`archived` fixing doc) — this is
+ * EXACTLY the "unclosed escalation" shape spec's Overview describes as the
+ * failure mode D7/D8 exist to make visible on the dashboard, not to hide by
+ * excluding the row.
  */
 export interface IssueReportRow {
   id: string;
@@ -80,6 +104,7 @@ export interface IssueReportRow {
   reported_at: string;
   possible_duplicates: string[];
   status: string;
+  resolution: IssueResolution;
 }
 
 /**
@@ -93,11 +118,15 @@ export interface IssueReportRow {
  * @param doc - a `task`-typed `DocRecord` already known to carry a non-null
  *   `extra.issue_report` object (callers check presence before calling this;
  *   see {@link hasOpenIssueReportShape})
+ * @param resolution - this doc's D2 computed resolution, already derived by
+ *   the caller via `computeIssueResolution` (this function does no
+ *   computation of its own — it is a pure structural projection, same as
+ *   every other field here)
  * @returns the projected row; every nested field that is missing or the
  *   wrong type degrades to `""` (or `[]` for `possible_duplicates`) rather
  *   than throwing — malformed upstream data must never crash this route
  */
-function projectIssueReportRow(doc: DocRecord): IssueReportRow {
+function projectIssueReportRow(doc: DocRecord, resolution: IssueResolution): IssueReportRow {
   const issueReport = (doc.extra as Record<string, unknown>)["issue_report"] as Record<string, unknown>;
 
   const readString = (key: string): string => {
@@ -120,6 +149,7 @@ function projectIssueReportRow(doc: DocRecord): IssueReportRow {
     reported_at: readString("reported_at"),
     possible_duplicates: duplicates,
     status: doc.status,
+    resolution,
   };
 }
 
@@ -211,9 +241,11 @@ function wasRejectedWithoutLaterApproval(
  * @param app - Wired application instance.
  * @returns 200 `{rows: IssueReportRow[], open_count: number}`, rows sorted
  *   `reported_at` descending (newest first — malformed/missing `reported_at`
- *   values sort last, never crash the sort); `open_count` is always
- *   `rows.length`. A store failure (either the `CorpusService.listFull` doc
- *   scan or either `AuditService.query` call) surfaces via the standard
+ *   values sort last, never crash the sort); `open_count` counts rows whose
+ *   computed `resolution` is `"open"` (D7/D8 — see {@link IssueReportRow}'s
+ *   doc comment; can be strictly less than `rows.length`). A store failure
+ *   (`CorpusService.listFull`, either `AuditService.query` call, or
+ *   `CorpusService.getResolvesInEdgesForIssues`) surfaces via the standard
  *   `loreErrorResponse` mapping (never this route's own error shape).
  */
 export async function handleGetIssueReports(app: App): Promise<Response> {
@@ -237,10 +269,28 @@ export async function handleGetIssueReports(app: App): Promise<Response> {
   const rejectedAt = latestAuditTimestampByDoc(rejectResult.value);
   const approvedAt = latestAuditTimestampByDoc(approveResult.value);
 
-  const rows = candidates
-    .filter((doc) => !wasRejectedWithoutLaterApproval(doc.id, rejectedAt, approvedAt))
-    .map(projectIssueReportRow)
+  const governedDocs = candidates.filter(
+    (doc) => !wasRejectedWithoutLaterApproval(doc.id, rejectedAt, approvedAt),
+  );
+
+  // D7 — one BATCHED lookup (two round trips total, see the method's own
+  // JSDoc) of every resolves in-edge + source-doc status across the WHOLE
+  // governed set, never one query per row.
+  const resolvesContextResult = await app.corpusService.getResolvesInEdgesForIssues(
+    governedDocs.map((doc) => doc.id),
+  );
+  if (!resolvesContextResult.ok) return loreErrorResponse(resolvesContextResult.error);
+  const resolvesContextById = resolvesContextResult.value;
+
+  const rows = governedDocs
+    .map((doc) => {
+      const resolvesContext = resolvesContextById.get(doc.id) ?? { resolvesInEdges: [], sourceDocs: [] };
+      const resolution = computeIssueResolution(doc, resolvesContext.resolvesInEdges, resolvesContext.sourceDocs);
+      return projectIssueReportRow(doc, resolution);
+    })
     .sort((a, b) => (a.reported_at < b.reported_at ? 1 : a.reported_at > b.reported_at ? -1 : 0));
 
-  return jsonOk({ rows, open_count: rows.length });
+  const openCount = rows.filter((row) => row.resolution === "open").length;
+
+  return jsonOk({ rows, open_count: openCount });
 }

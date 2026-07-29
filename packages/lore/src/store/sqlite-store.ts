@@ -23,6 +23,7 @@ import {
 } from "./migrations/migration-009.js";
 import { MIGRATION_010_SQL } from "./migrations/migration-010.js";
 import { MIGRATION_011_SQL } from "./migrations/migration-011.js";
+import { MIGRATION_012_SQL } from "./migrations/migration-012.js";
 // SPEC-072 (upstream issue reporting) §3 Structure — re-exported here (beside
 // the migration chain it describes) from a bun:sqlite-free sibling module so
 // vitest-reachable code (e.g. flows/upstream-probe.ts, a later phase of this
@@ -391,6 +392,23 @@ export class SQLiteStore implements StoreInterface {
       // existing table, safe to re-run statement-by-statement even
       // half-applied. No BEGIN IMMEDIATE/catch/ROLLBACK wrapper needed.
       this.db.exec(MIGRATION_011_SQL);
+    }
+
+    if (currentVersion < 12) {
+      // reason: mirrors migration-004's catch/ROLLBACK wrapper (see
+      // migration-012.ts's own JSDoc @invariant) — a `links` table-recreate
+      // widening the link_type CHECK constraint to accept "resolves", same
+      // shape as migration-004's "governs" widening.
+      try {
+        this.db.exec(MIGRATION_012_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-004/005/006/007/008/009/010 — safe to ignore, see above.
+        }
+        throw error;
+      }
     }
   }
 

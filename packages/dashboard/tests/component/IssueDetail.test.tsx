@@ -28,11 +28,11 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { DocRecord } from "@lore/core";
-import type { DocWithNavigation } from "@/lib/api";
+import type { DocWithNavigation, IssueReportsResponse } from "@/lib/api";
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
-  return { ...actual, apiGetDoc: vi.fn() };
+  return { ...actual, apiGetDoc: vi.fn(), apiGetIssueReports: vi.fn() };
 });
 
 vi.mock("@/api/mutations", async (importOriginal) => {
@@ -43,12 +43,26 @@ vi.mock("@/api/mutations", async (importOriginal) => {
 const toastSuccess = vi.fn();
 vi.mock("sonner", () => ({ toast: { success: (...args: unknown[]) => toastSuccess(...args), error: vi.fn() } }));
 
-import { apiGetDoc } from "@/lib/api";
+import { apiGetDoc, apiGetIssueReports } from "@/lib/api";
 import { apiApproveDoc } from "@/api/mutations";
 import { IssueDetail } from "@/components/IssueDetail";
 
 const mockedApiGetDoc = vi.mocked(apiGetDoc);
+const mockedApiGetIssueReports = vi.mocked(apiGetIssueReports);
 const mockedApprove = vi.mocked(apiApproveDoc);
+
+/**
+ * D8 (spec-issue-closure-loop-computed-resolution-agent-reachable) —
+ * `IssueDetail` now ALSO reads the shared issue-reports projection (for
+ * `resolution`), so every test in this file needs it mocked, not just the
+ * ones that care about the resolution badge. Defaults to an EMPTY
+ * projection (no matching row -> no resolution badge rendered) so the
+ * pre-existing project-scoping/adjudication tests below are unaffected;
+ * tests that DO care override this in their own `beforeEach`/call.
+ */
+function emptyIssueReports(): IssueReportsResponse {
+  return { open_count: 0, rows: [] };
+}
 
 function makeIssueDoc(overrides: Partial<DocRecord> = {}): DocWithNavigation {
   const doc: DocRecord = {
@@ -87,6 +101,7 @@ function renderDetail(project?: string | null) {
 beforeEach(() => {
   vi.clearAllMocks();
   mockedApiGetDoc.mockResolvedValue(makeIssueDoc());
+  mockedApiGetIssueReports.mockResolvedValue(emptyIssueReports());
   mockedApprove.mockResolvedValue(undefined as never);
 });
 
@@ -131,6 +146,41 @@ describe("IssueDetail (SPEC-078 T13)", () => {
 
       await waitFor(() => expect(mockedApprove).toHaveBeenCalledWith("acme", "01HISSUE0000000000000000001"));
       expect(toastSuccess).toHaveBeenCalledWith("Issue report approved");
+    });
+  });
+
+  describe("D8 resolution rendering (spec-issue-closure-loop-computed-resolution-agent-reachable, AC-ICL-9)", () => {
+    it("renders the computed resolution badge matched from the shared issue-reports projection", async () => {
+      mockedApiGetIssueReports.mockResolvedValue({
+        open_count: 0,
+        rows: [
+          {
+            id: "01HISSUE0000000000000000001",
+            slug: "task-issue-report",
+            title: "Bug: something broke",
+            reporter_project: "acme-agent",
+            reporter_actor: "agent:x",
+            lore_version: "1.0.0",
+            reported_at: "2026-07-01T00:00:00Z",
+            possible_duplicates: [],
+            status: "draft",
+            resolution: "fixed",
+          },
+        ],
+      });
+
+      renderDetail(null);
+      await screen.findByText("Bug: something broke");
+
+      const badge = await screen.findByTestId("issue-report-resolution");
+      expect(badge).toHaveTextContent("fixed");
+    });
+
+    it("NEGATIVE: renders no resolution badge when the report is absent from the shared projection", async () => {
+      renderDetail(null); // beforeEach already stubs an EMPTY issue-reports projection
+      await screen.findByText("Bug: something broke");
+
+      expect(screen.queryByTestId("issue-report-resolution")).not.toBeInTheDocument();
     });
   });
 });

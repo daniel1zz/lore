@@ -1,6 +1,7 @@
 /**
  * IssueDetail — single issue report detail view + in-place adjudication
- * (SPEC-074 AC-074-2, AC-074-3).
+ * (SPEC-074 AC-074-2, AC-074-3; D8 resolution rendering,
+ * spec-issue-closure-loop-computed-resolution-agent-reachable).
  * Purpose: renders the full `extra.issue_report` payload plus the doc's
  *   description body (`doc.content`), and composes the EXISTING SPEC-022
  *   cookie-gated dashboard-docs approve/reject write routes (via
@@ -24,20 +25,57 @@
  *   - If-Match / ConflictModal concurrency handling is NOT wired here, same
  *     documented precedent as `TriageQueue` — `apiApproveDoc`/`apiRejectDoc`
  *     never send `If-Match`; a 409 surfaces as a generic error toast.
+ *   - `resolution` (D8) is NOT part of `apiGetDoc`'s response (that route
+ *     serves every doc type; resolution is issue-report-specific) — it is
+ *     read from the SAME `GET /api/issue-reports` projection `IssuesList`/
+ *     the nav badge poll, queried here with a DIRECT `useQuery` (same
+ *     `issueReportsQueryKey(project)` cache key those callers use) rather
+ *     than the shared `useIssueReportsQuery()` hook — that hook derives
+ *     `project` from router state (`useProjectParam()`), which would
+ *     silently diverge from this component's own EXPLICIT `project` prop the
+ *     instant a caller ever passed one that didn't match the current route
+ *     (and unconditionally requires a `RouterProvider` in scope, which this
+ *     component's explicit-prop design deliberately does not otherwise
+ *     need). Matched by resolved doc id (never `reportId` directly, since
+ *     that prop may be a slug). A report absent from that projection (e.g.
+ *     already approved out of the still-governed set) renders NO resolution
+ *     badge rather than guessing one — `doc.status` alone is never treated
+ *     as a resolution stand-in.
  * Side-effect class: IO (fetch via TanStack Query, toast)
- * Source: SPEC-074 §Scope, §Design; AC-074-2, AC-074-3
+ * Source: SPEC-074 §Scope, §Design; AC-074-2, AC-074-3;
+ *   spec-issue-closure-loop-computed-resolution-agent-reachable §D8, AC-ICL-9
  */
 
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { apiGetDoc } from "@/lib/api";
+import { apiGetDoc, apiGetIssueReports, type IssueResolution } from "@/lib/api";
 import { apiApproveDoc, apiRejectDoc, DashboardApiError } from "@/api/mutations";
 import { issueReportsQueryKey } from "@/lib/issue-reports-query";
 import { queryKeys } from "@/lib/project-api";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Badge } from "@/components/ui/badge";
+import { Badge, type BadgeProps } from "@/components/ui/badge";
 import { ProjectIdentityLabel } from "@/components/ProjectIdentityLabel";
+
+/**
+ * Presentation-only resolution -> Badge variant mapping (D8) — same mapping
+ * as `IssuesList.tsx`'s own local copy, duplicated rather than shared per
+ * this codebase's "wait for the rule of three" convention (exactly two
+ * consumers).
+ */
+function resolutionBadgeVariant(resolution: IssueResolution): NonNullable<BadgeProps["variant"]> {
+  switch (resolution) {
+    case "open":
+      return "outline";
+    case "resolving":
+      return "secondary";
+    case "fixed":
+      return "default";
+    case "rejected":
+    case "wontfix":
+      return "destructive";
+  }
+}
 
 export interface IssueDetailProps {
   /** The issue report's task doc ULID or slug. */
@@ -82,6 +120,21 @@ export function IssueDetail({ reportId, project = null, onAdjudicated }: IssueDe
     queryKey: queryKeys.scope(project, ["doc", reportId]),
     queryFn: () => apiGetDoc(project, reportId),
   });
+
+  // D8 — resolution lives on the SAME `GET /api/issue-reports` projection
+  // the nav badge/list page poll (never re-derived here). Queried directly
+  // (not via `useIssueReportsQuery()`, which derives `project` from router
+  // state) so this stays scoped to the SAME explicit `project` prop this
+  // component's cache key/invalidation already use — see this file's module
+  // header. Matched by resolved doc id (NOT `reportId`, which may be a slug
+  // the caller passed in).
+  const { data: issueReportsData } = useQuery({
+    queryKey: issueReportsQueryKey(project),
+    queryFn: () => apiGetIssueReports(project),
+  });
+  const resolution: IssueResolution | undefined = issueReportsData?.rows.find(
+    (row) => row.id === data?.doc.id,
+  )?.resolution;
 
   async function invalidateAfterAdjudicate(): Promise<void> {
     await queryClient.invalidateQueries({ queryKey: queryKeys.scope(project, ["doc", reportId]) });
@@ -162,6 +215,15 @@ export function IssueDetail({ reportId, project = null, onAdjudicated }: IssueDe
           <Badge variant="outline" className="text-xs">
             {doc.status}
           </Badge>
+          {resolution !== undefined && (
+            <Badge
+              data-testid="issue-report-resolution"
+              variant={resolutionBadgeVariant(resolution)}
+              className="text-xs"
+            >
+              {resolution}
+            </Badge>
+          )}
         </div>
         <p className="text-sm text-muted-foreground">Reported {readString(issueReport, "reported_at")}</p>
       </header>
