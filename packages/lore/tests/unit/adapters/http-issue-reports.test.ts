@@ -1,6 +1,9 @@
 /**
  * Tests for SPEC-074 AC-074-5 — `GET /api/issue-reports` (dashboard Issues
- * triage read projection).
+ * triage read projection) — PLUS D7 (spec-issue-closure-loop-computed-
+ * resolution-agent-reachable, AC-ICL-9's HTTP half): every row additionally
+ * carries a computed `resolution`, and `open_count` counts computed-`"open"`
+ * rows rather than `rows.length` unconditionally.
  *
  * Harness: `InMemoryStore` + a real `CorpusService` (projection logic reads
  * `extra.issue_report`, which `CorpusService.listFull` exposes — no
@@ -20,9 +23,19 @@
  * `/api/*` route inherits rejects this route's path with 401 before
  * `handleGetIssueReports` ever runs.
  *
+ * D7 fixture recipe: a "fixing" doc is a plain task (via `createPlainTask`,
+ * NOT an issue report itself) linked to the issue task via
+ * `corpusService.link(fixingId, issueId, "resolves")`, then walked through
+ * `corpusService.set(id, {status: ...})` (draft -> approved -> active ->
+ * archived, all valid direct transitions — VALID_TRANSITIONS,
+ * packages/core/src/CLAUDE.md) to reach the source-doc status
+ * `computeIssueResolution` needs for each of "resolving" (approved, not yet
+ * active) vs "fixed" (active or archived).
+ *
  * Coverage dimensions: HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE / REGRESSION.
  *
- * Source: SPEC-074 §Acceptance Criteria AC-074-5.
+ * Source: SPEC-074 §Acceptance Criteria AC-074-5;
+ *   spec-issue-closure-loop-computed-resolution-agent-reachable §D7, AC-ICL-9.
  */
 
 import { describe, it, expect } from "vitest";
@@ -195,7 +208,42 @@ const ALL_ROW_KEYS = [
   "reported_at",
   "possible_duplicates",
   "status",
+  "resolution",
 ] as const;
+
+/**
+ * Creates a "fixing" doc (a plain task, NOT itself carrying `extra.issue_report`)
+ * and walks it through `draft -> approved -> active[-> archived]` (all valid
+ * direct transitions), then links it to `issueId` via `resolves`. Returns the
+ * fixing doc's id. `finalStatus` controls how far the walk goes:
+ *   - `"approved"` — stops before `active` (computeIssueResolution's
+ *     "resolving" case: an in-edge exists, no source doc is terminal yet).
+ *   - `"active"` / `"archived"` — reaches a terminal status (the "fixed" case).
+ */
+async function createResolvesFix(
+  cs: CorpusService,
+  planId: string,
+  issueId: string,
+  finalStatus: "approved" | "active" | "archived",
+): Promise<string> {
+  const fixId = await createPlainTask(cs, planId, "Fixing doc");
+
+  const approveResult = await cs.set(fixId, { status: "approved" });
+  if (!approveResult.ok) throw new Error(`Failed to approve fix doc: ${JSON.stringify(approveResult.error)}`);
+  if (finalStatus !== "approved") {
+    const activeResult = await cs.set(fixId, { status: "active" });
+    if (!activeResult.ok) throw new Error(`Failed to activate fix doc: ${JSON.stringify(activeResult.error)}`);
+  }
+  if (finalStatus === "archived") {
+    const archivedResult = await cs.set(fixId, { status: "archived" });
+    if (!archivedResult.ok) throw new Error(`Failed to archive fix doc: ${JSON.stringify(archivedResult.error)}`);
+  }
+
+  const linkResult = await cs.link(fixId, issueId, "resolves");
+  if (!linkResult.ok) throw new Error(`Failed to create resolves link: ${JSON.stringify(linkResult.error)}`);
+
+  return fixId;
+}
 
 // ─── HAPPY ───────────────────────────────────────────────────────────────────
 
@@ -252,6 +300,7 @@ describe("GET /api/issue-reports (AC-074-5)", () => {
     expect(row.reported_at).toBe("2026-07-20T00:00:00.000Z");
     expect(row.possible_duplicates).toEqual(["task-01ABC"]);
     expect(row.status).toBe("draft");
+    expect(row.resolution).toBe("open"); // D7 — no resolves in-edge yet
     expect(typeof body.data!.open_count).toBe("number");
     expect(body.data!.open_count).toBe(1);
   });
@@ -465,6 +514,79 @@ describe("GET /api/issue-reports (AC-074-5)", () => {
     },
   );
 
+  // ─── D7 (spec-issue-closure-loop-computed-resolution-agent-reachable, AC-ICL-9) ──
+
+  it("AC-ICL-9 HAPPY: a resolves in-edge from a non-terminal source computes 'resolving'", async () => {
+    const store = new InMemoryStore();
+    const app = makeApp(store);
+    const prdId = await createRootPrd(app.corpusService);
+    const planId = await createPlan(app.corpusService, prdId);
+    const issue = await createIssueReportTask(app.corpusService, planId, {
+      title: "Being worked on",
+      reported_at: "2026-07-20T00:00:00.000Z",
+    });
+    await createResolvesFix(app.corpusService, planId, issue.id, "approved");
+
+    const res = await getIssueReports(app);
+    const body = await parseRes(res);
+    expect(body.data!.rows.length).toBe(1);
+    expect(body.data!.rows[0]!.resolution).toBe("resolving");
+    expect(body.data!.open_count).toBe(0);
+  });
+
+  it("AC-ICL-9 HAPPY: a resolves in-edge from an archived source computes 'fixed'", async () => {
+    const store = new InMemoryStore();
+    const app = makeApp(store);
+    const prdId = await createRootPrd(app.corpusService);
+    const planId = await createPlan(app.corpusService, prdId);
+    const issue = await createIssueReportTask(app.corpusService, planId, {
+      title: "Actually fixed",
+      reported_at: "2026-07-20T00:00:00.000Z",
+    });
+    await createResolvesFix(app.corpusService, planId, issue.id, "archived");
+
+    const res = await getIssueReports(app);
+    const body = await parseRes(res);
+    expect(body.data!.rows.length).toBe(1);
+    expect(body.data!.rows[0]!.resolution).toBe("fixed");
+    expect(body.data!.open_count).toBe(0);
+  });
+
+  it("AC-ICL-9 STATE: an unclosed escalation — status stays 'draft' but resolution is 'fixed' — stays visible in rows while excluded from open_count", async () => {
+    const store = new InMemoryStore();
+    const app = makeApp(store);
+    const prdId = await createRootPrd(app.corpusService);
+    const planId = await createPlan(app.corpusService, prdId);
+    const stillOpen = await createIssueReportTask(app.corpusService, planId, {
+      title: "Still open",
+      reported_at: "2026-07-19T00:00:00.000Z",
+    });
+    const unclosedEscalation = await createIssueReportTask(app.corpusService, planId, {
+      title: "Unclosed escalation",
+      reported_at: "2026-07-20T00:00:00.000Z",
+    });
+    await createResolvesFix(app.corpusService, planId, unclosedEscalation.id, "active");
+
+    const res = await getIssueReports(app);
+    const body = await parseRes(res);
+
+    // Both reports are still-governed (neither approved/rejected) so BOTH
+    // remain in `rows` — the unclosed-escalation row is deliberately NOT
+    // hidden, per spec's Overview (a hidden row would reproduce the exact
+    // status-as-proxy failure D7/D8 remove).
+    expect(body.data!.rows.length).toBe(2);
+    const escalationRow = body.data!.rows.find((r) => r.id === unclosedEscalation.id);
+    expect(escalationRow?.status).toBe("draft"); // never auto-advanced (D5(a) non-goal)
+    expect(escalationRow?.resolution).toBe("fixed");
+    const stillOpenRow = body.data!.rows.find((r) => r.id === stillOpen.id);
+    expect(stillOpenRow?.resolution).toBe("open");
+
+    // open_count counts ONLY the genuinely-open row — this is the numeric
+    // proof that open_count is no longer a synonym for rows.length.
+    expect(body.data!.open_count).toBe(1);
+    expect(body.data!.open_count).toBeLessThan(body.data!.rows.length);
+  });
+
   // ─── REGRESSION ────────────────────────────────────────────────────────────
 
   it("AC-074-5 REGRESSION: an unrelated v1 GET route on the same dispatcher is unaffected by the new route", async () => {
@@ -479,7 +601,7 @@ describe("GET /api/issue-reports (AC-074-5)", () => {
     expect(unmatchedRes).toBeNull();
   });
 
-  it("AC-074-5 REGRESSION: open_count always equals rows.length (single-endpoint badge/page parity, SPEC-074 §Design)", async () => {
+  it("AC-074-5 REGRESSION: open_count still equals rows.length when no row has a resolves edge (pre-D7 baseline — every row computes 'open')", async () => {
     const store = new InMemoryStore();
     const app = makeApp(store);
     const prdId = await createRootPrd(app.corpusService);

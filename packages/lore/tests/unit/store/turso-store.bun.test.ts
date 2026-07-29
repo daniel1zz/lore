@@ -329,6 +329,27 @@ describe("TursoStore", () => {
       expect(result.value.link_type).toBe("governs");
     });
 
+    it("AC-ICL-1 (regression, migration-012): addLink accepts link_type='resolves'", async () => {
+      // reason: same store-level oracle shape as migration-004's "governs"
+      // regression test above — proves migration-012's widened CHECK
+      // (spec-issue-closure-loop-computed-resolution-agent-reachable §D1)
+      // actually applies to a freshly-created TursoStore DB, not just
+      // `linkTypeSchema`/`CorpusService.link()`'s Zod-level acceptance
+      // (discovered gap: those two already accepted "resolves" while the
+      // SQLite CHECK constraint itself still rejected it — see
+      // migration-012.ts's own module JSDoc).
+      const fix = makeDoc({ slug: "task-turso-resolves-fix" });
+      const issue = makeDoc({ slug: "task-turso-resolves-issue" });
+      await store.insert(fix);
+      await store.insert(issue);
+
+      const link = makeLink(fix.id, issue.id, "resolves");
+      const result = await store.addLink(link);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.link_type).toBe("resolves");
+    });
+
     it("AC-STORE-005.06: findLinks(out) returns outbound links", async () => {
       const a = makeDoc({ slug: "prd-turso-fl-a" });
       const b = makeDoc({ slug: "prd-turso-fl-b" });

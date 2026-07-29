@@ -111,11 +111,12 @@ describe("migration-006 mid-transaction failure — PRAGMA foreign_keys restore 
     const store = new SQLiteStore(":memory:");
     const db = store.getDatabase();
 
-    // reason: migration-011 (SPEC-102 trace_events) is now the head — a
-    // fresh store runs every migration up to it, not just through
-    // migration-006. This test's own concern (FK enforcement restored after
-    // migration-006) is unaffected — asserted directly below.
-    expect(userVersion(db)).toBe(11);
+    // reason: migration-012 (spec-issue-closure-loop-computed-resolution-
+    // agent-reachable, links.link_type CHECK widened for "resolves") is now
+    // the head — a fresh store runs every migration up to it, not just
+    // through migration-006. This test's own concern (FK enforcement
+    // restored after migration-006) is unaffected — asserted directly below.
+    expect(userVersion(db)).toBe(12);
     expect(foreignKeysEnabled(db)).toBe(true);
 
     store.close();

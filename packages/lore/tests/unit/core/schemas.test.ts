@@ -141,8 +141,21 @@ describe("Enum schemas", () => {
     }
   });
 
-  it("linkTypeSchema accepts all 7 link types", () => {
-    for (const lt of [
+  // reason: this case used to iterate ONLY its own fixed 7-entry list and
+  // check each still parses — that stayed trivially green through P1's
+  // schema change (adding "resolves" as an 8th member) because 7 old values
+  // still parse fine no matter how many NEW values the schema gains; it never
+  // compared its list against the schema's actual member set, so it never
+  // caught the drift (spec-issue-closure-loop-computed-resolution-agent-
+  // reachable's "Added after P1 landed" note). The fix: `expectedLinkTypes`
+  // stays a literal, hand-maintained array (deliberately NOT derived from
+  // `linkTypeSchema.options` — deriving the expectation from the same schema
+  // it's testing would make this assertion vacuous), and the exhaustiveness
+  // check below compares it against `linkTypeSchema.options` by VALUE. A
+  // future 9th member added to the schema without a matching update here now
+  // fails LOUD (length/member mismatch) instead of silently staying green.
+  it("linkTypeSchema accepts every declared link type (exhaustive — 8 as of spec-issue-closure-loop-computed-resolution-agent-reachable)", () => {
+    const expectedLinkTypes = [
       "parent",
       "implements",
       "informs",
@@ -150,7 +163,17 @@ describe("Enum schemas", () => {
       "relates-to",
       "blocks",
       "governs",
-    ]) {
+      "resolves",
+    ];
+
+    // Exhaustiveness: the schema's actual member set must equal this literal
+    // list exactly (same length, same members) — this is what makes the test
+    // catch drift in EITHER direction (a schema addition OR removal with no
+    // matching edit here), unlike the pre-fix version which only ever checked
+    // "do these 7 still parse".
+    expect([...linkTypeSchema.options].sort()).toEqual([...expectedLinkTypes].sort());
+
+    for (const lt of expectedLinkTypes) {
       expect(linkTypeSchema.safeParse(lt).success).toBe(true);
     }
   });

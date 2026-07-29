@@ -101,11 +101,12 @@ describe("migration-008 (CJK bigram shadow columns for FTS5)", () => {
     const store = new SQLiteStore(":memory:");
     const db = store.getDatabase();
 
-    // reason: migration-010 (SPEC-084 docs.ordinal) is now the head — a
-    // fresh store runs every migration up to it, not just through
-    // migration-008. This test's own concern (CJK shadow columns present)
-    // is unaffected — asserted directly below.
-    expect(userVersion(db)).toBe(11);
+    // reason: migration-012 (spec-issue-closure-loop-computed-resolution-
+    // agent-reachable, links.link_type CHECK widened for "resolves") is now
+    // the head — a fresh store runs every migration up to it, not just
+    // through migration-008. This test's own concern (CJK shadow columns
+    // present) is unaffected — asserted directly below.
+    expect(userVersion(db)).toBe(12);
     const cols = tableColumnNames(db, "docs");
     expect(cols).toContain("fts_title");
     expect(cols).toContain("fts_content");
@@ -162,7 +163,7 @@ describe("migration-008 (CJK bigram shadow columns for FTS5)", () => {
     const store = new SQLiteStore(dbPath);
     const db = store.getDatabase();
 
-    expect(userVersion(db)).toBe(11);
+    expect(userVersion(db)).toBe(12);
     const cols = tableColumnNames(db, "docs");
     expect(cols).toContain("fts_title");
     expect(cols).toContain("fts_content");
@@ -200,7 +201,7 @@ describe("migration-008 (CJK bigram shadow columns for FTS5)", () => {
     expect(() => {
       const secondOpen = new SQLiteStore(dbPath);
       const db = secondOpen.getDatabase();
-      expect(userVersion(db)).toBe(11);
+      expect(userVersion(db)).toBe(12);
       expect(tableColumnNames(db, "docs")).toContain("fts_title");
       secondOpen.close();
     }).not.toThrow();

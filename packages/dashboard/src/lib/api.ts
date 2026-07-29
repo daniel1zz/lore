@@ -645,12 +645,33 @@ export async function apiGetMachineConfig(
 // ─── SPEC-074: dashboard Issues triage projection ────────────────────────────
 
 /**
+ * A filed issue report's D2-computed resolution
+ * (spec-issue-closure-loop-computed-resolution-agent-reachable). Mirrors the
+ * SAME literal union `packages/lore/src/service/issue-resolution.ts`'s
+ * `IssueResolution` server type declares — duplicated here (not imported)
+ * because this package depends on `@lore/core` only (browser-safe boundary,
+ * `packages/dashboard/CLAUDE.md`), and `issue-resolution.ts` lives in the
+ * server-only `packages/lore/src` tree. A wire-contract type mirror across a
+ * network boundary, not a "third copy" of a validated list (that concern is
+ * `linkTypeSchema.options` / `LINK_TYPES`, an enumerable value the frontend
+ * DOES import) — there is nowhere browser-safe for the frontend to import
+ * this union's VALUES from, only its literal shape.
+ */
+export type IssueResolution = "open" | "resolving" | "fixed" | "rejected" | "wontfix";
+
+/**
  * One row of the `GET /api/issue-reports` projection. Mirrors `IssueReportRow`
  * (`packages/lore/src/adapters/http/issue-reports-routes.ts`) exactly — the 8
- * report-identity fields plus lifecycle `status`. Never carries the full
- * `extra.issue_report` payload (e.g. `expected`/`actual`/`repro_command`) —
- * the detail view reads those via the existing `GET /api/docs/:id` route
- * (`apiGetDoc`), per the server module's own doc comment.
+ * report-identity fields plus lifecycle `status` plus the D7 computed
+ * `resolution`. Never carries the full `extra.issue_report` payload (e.g.
+ * `expected`/`actual`/`repro_command`) — the detail view reads those via the
+ * existing `GET /api/docs/:id` route (`apiGetDoc`), per the server module's
+ * own doc comment.
+ *
+ * `status` and `resolution` are INTENTIONALLY independent (see the server
+ * type's own doc comment) — a row can render `status: "draft"` alongside
+ * `resolution: "fixed"` (an unclosed escalation, D5(a)); consumers must
+ * render `resolution`, never infer it from `status`.
  */
 export interface IssueReportRow {
   id: string;
@@ -662,9 +683,14 @@ export interface IssueReportRow {
   reported_at: string;
   possible_duplicates: string[];
   status: string;
+  resolution: IssueResolution;
 }
 
-/** Response shape of `GET /api/issue-reports`. `open_count` is always `rows.length`. */
+/**
+ * Response shape of `GET /api/issue-reports`. `open_count` counts rows whose
+ * `resolution` is `"open"` (D7/D8) — can be strictly less than `rows.length`
+ * once a row has resolved but not yet been archived (see `IssueReportRow`).
+ */
 export interface IssueReportsResponse {
   rows: IssueReportRow[];
   open_count: number;

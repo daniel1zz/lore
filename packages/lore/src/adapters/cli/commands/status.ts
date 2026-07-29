@@ -4,6 +4,10 @@
  * With --check-tree --fix: auto-fix orphan/misplaced drift.
  * With --check-drift: verify spec-declared code_anchors against the working tree
  *   (SPEC-045 §Design Decisions D5) — deterministic, zero LLM calls.
+ * With --check-issues: flag unclosed issue escalations (computed `fixed` while the
+ *   issue task itself is not `archived`) and stale open reports (computed `open` and
+ *   older than `feedback.stale_after_days`) — deterministic, report-only, mutates
+ *   nothing (spec-issue-closure-loop-computed-resolution-agent-reachable §D5).
  * With --check-claude-md: lint project memory files (CLAUDE.md by default)
  *   against corpus-governed line/byte ceilings (spec-project-claude-md-
  *   content-contract-governance-injected §D9) — see that branch's own inline
@@ -26,11 +30,12 @@
  * drifts, exit 3 (tree drift alone already wins).
  *
  * --check-claude-md is a SEPARATE, standalone dispatch — it does NOT compose
- * with --check-tree/--check-drift/--check-requirements/--check-prd-budget in
- * one combined run (spec Module Boundary invariant 2: this check must never
- * reach `loadLoreApp`/`bun:sqlite`, so it cannot share the app-backed branch
- * those four flags fold into). Passing --check-claude-md alongside any of
- * those flags runs ONLY the memory-file check; see that branch for exit codes.
+ * with --check-tree/--check-drift/--check-requirements/--check-prd-budget/
+ * --check-issues in one combined run (spec Module Boundary invariant 2: this
+ * check must never reach `loadLoreApp`/`bun:sqlite`, so it cannot share the
+ * app-backed branch those five flags fold into). Passing --check-claude-md
+ * alongside any of those flags runs ONLY the memory-file check; see that
+ * branch for exit codes.
  */
 
 import { defineCommand } from "citty";
@@ -51,13 +56,15 @@ import {
 import { buildRealFsProbe } from "../../real-fs-probe.js";
 import {
   contextConfigSchema,
+  ok,
   resolveDriftEnabled,
   resolveMemoryFileBudgets,
+  resolveStaleAfterDays,
   SPEC_KINDS,
   outlineEntrySchema,
   outlineBudgetSchema,
 } from "@lore/core";
-import type { CallerSurface, LoreConfig, MemoryFileBudgets, OutlineBudget } from "@lore/core";
+import type { CallerSurface, LoreConfig, LoreError, MemoryFileBudgets, OutlineBudget, Result } from "@lore/core";
 import { z } from "zod";
 import {
   checkPrdBudget,
@@ -65,6 +72,12 @@ import {
   type PrdBudgetBreach,
 } from "../../../service/prd-budget-check.js";
 import { renderExemptPlansSection } from "../../../flows/status-prd-sync-flow.js";
+import {
+  computeIssueResolution,
+  hasIssueReport,
+  type ResolutionSourceDocLike,
+  type ResolvesInEdgeLike,
+} from "../../../service/issue-resolution.js";
 // reason: loadConfig reads `.lore/config.yaml` via plain Node fs — only
 // reachable via the `@lore/core/node` subpath (browser-safety split,
 // packages/core/src/CLAUDE.md). NOT a bun:sqlite dependency, so it's safe to
@@ -201,6 +214,168 @@ function renderDriftSection(payload: CodeDriftPayload): void {
   }
 }
 
+// ── `--check-issues` detector (D5, spec-issue-closure-loop-computed-resolution-agent-reachable) ──
+
+/** One issue task flagged as an "unclosed escalation" (D5a shape (a)). */
+interface UnclosedEscalation {
+  id: string;
+  slug: string;
+  title: string;
+}
+
+/** One issue task flagged as a "stale open report" (D5a shape (b)). */
+interface StaleOpenReport {
+  id: string;
+  slug: string;
+  title: string;
+  reported_at: string;
+  age_days: number;
+}
+
+/** `--check-issues` result payload — mirrors the other check sections' `{checked, consistent, ...}` shape. */
+interface IssueCheckPayload {
+  checked: number;
+  consistent: boolean;
+  unclosed_escalations: UnclosedEscalation[];
+  stale_open: StaleOpenReport[];
+}
+
+/**
+ * Defensive `extra.issue_report.reported_at` reader — mirrors
+ * `packages/core/src/issue-report.ts::readReporterProject`'s guard shape
+ * (duplicated rather than imported: that reader is scoped to a different
+ * field for a different caller, and `extra.issue_report` is deliberately
+ * untyped passthrough — see that module's own header). A malformed/legacy
+ * `extra`, or an `issue_report` missing/mistyped `reported_at`, degrades to
+ * `undefined` rather than throwing.
+ */
+function readReportedAt(extra: unknown): string | undefined {
+  if (extra === null || typeof extra !== "object" || Array.isArray(extra)) return undefined;
+  const issueReport = (extra as Record<string, unknown>)["issue_report"];
+  if (issueReport === null || typeof issueReport !== "object" || Array.isArray(issueReport)) return undefined;
+  const reportedAt = (issueReport as Record<string, unknown>)["reported_at"];
+  return typeof reportedAt === "string" ? reportedAt : undefined;
+}
+
+/**
+ * D5 — `lore status --check-issues` detector. REPORT-ONLY: every call below
+ * is a read (`corpusService.listFull`/`corpusService.get`) — never a write
+ * (AC-ICL-6's byte-comparison oracle proves this at the test layer).
+ *
+ * Flags two shapes:
+ *   (a) unclosed escalation — {@link computeIssueResolution} (P1,
+ *       `issue-resolution.ts`, CONSUMED not reimplemented) returns `fixed`
+ *       (>=1 `resolves` in-edge whose source doc reached active/archived)
+ *       while the issue task's OWN status is not yet `archived` — the "code
+ *       shipped, task never closed" shape this whole spec exists to make
+ *       loud.
+ *   (b) stale open report — computed resolution is `open` (no `resolves`
+ *       edge at all) and `extra.issue_report.reported_at` is `staleAfterDays`
+ *       days old OR OLDER (INCLUSIVE boundary — mirrors `staleness.ts`'s
+ *       documented `age_days === min_age_days` INCLUDED precedent, SPEC-044
+ *       D1, so this codebase's two day-threshold detectors agree on what
+ *       "older than N days" means at the exact boundary).
+ *
+ * `resolvesInEdges`/`sourceDocs` are read via `corpusService.get(issueId)`'s
+ * `navigation.related` (the only doc-level "which docs link to me, by what
+ * type" surface a CLI command may call — adapters/cli carries no business
+ * logic, `packages/lore/src/service/CLAUDE.md`) filtered to `link_type ===
+ * "resolves"`. This relies on `CorpusService.link`'s write-time D1b
+ * validation (`corpus-service.ts`, "a resolves edge's to MUST be a task
+ * carrying extra.issue_report"): every `resolves`-typed entry on an issue
+ * task's OWN `related` list is therefore structurally an IN-edge (the issue
+ * task is always the `to` side in a well-formed corpus) — an issue task
+ * ALSO independently being the `from` side of a different resolves edge
+ * (double-duty fixing-artifact-that-is-itself-a-report) is a pathological
+ * state outside this detector's scope.
+ *
+ * @param app - Wired application instance (read-only calls only)
+ * @param staleAfterDays - Resolved `feedback.stale_after_days` (D5b)
+ * @returns `ok(payload)`; `err` only on an underlying store read failure
+ */
+async function computeIssueCheck(
+  app: ReturnType<typeof loadLoreApp>["app"],
+  staleAfterDays: number,
+): Promise<Result<IssueCheckPayload, LoreError>> {
+  const tasksResult = await app.corpusService.listFull({ type: "task" });
+  if (!tasksResult.ok) return tasksResult;
+
+  const issueTasks = tasksResult.value.docs.filter((doc) => hasIssueReport(doc.extra));
+
+  const unclosedEscalations: UnclosedEscalation[] = [];
+  const staleOpen: StaleOpenReport[] = [];
+  const nowMs = Date.now();
+
+  for (const issueTask of issueTasks) {
+    const getResult = await app.corpusService.get(issueTask.id);
+    if (!getResult.ok) return getResult;
+
+    const resolvesRelated = getResult.value.navigation.related.filter(
+      (related) => related.link_type === "resolves",
+    );
+    const resolvesInEdges: ResolvesInEdgeLike[] = resolvesRelated.map((related) => ({ from_id: related.id }));
+    const sourceDocs: ResolutionSourceDocLike[] = resolvesRelated.map((related) => ({
+      id: related.id,
+      status: related.status,
+    }));
+
+    const resolution = computeIssueResolution({ extra: issueTask.extra }, resolvesInEdges, sourceDocs);
+
+    if (resolution === "fixed" && issueTask.status !== "archived") {
+      unclosedEscalations.push({ id: issueTask.id, slug: issueTask.slug, title: issueTask.title });
+    }
+
+    if (resolution === "open") {
+      const reportedAt = readReportedAt(issueTask.extra);
+      if (reportedAt !== undefined) {
+        const ageDays = Math.floor((nowMs - new Date(reportedAt).getTime()) / 86_400_000);
+        if (Number.isFinite(ageDays) && ageDays >= staleAfterDays) {
+          staleOpen.push({
+            id: issueTask.id,
+            slug: issueTask.slug,
+            title: issueTask.title,
+            reported_at: reportedAt,
+            age_days: ageDays,
+          });
+        }
+      }
+    }
+  }
+
+  return ok({
+    checked: issueTasks.length,
+    consistent: unclosedEscalations.length === 0 && staleOpen.length === 0,
+    unclosed_escalations: unclosedEscalations,
+    stale_open: staleOpen,
+  });
+}
+
+/**
+ * Text rendering for the `--check-issues` section (D5) — used regardless of
+ * whether other sections were ALSO requested (every requested section always
+ * prints fully).
+ */
+function renderIssuesSection(payload: IssueCheckPayload): void {
+  if (payload.consistent) {
+    console.log(`Issue closure: consistent (${payload.checked} issue report(s) checked).`);
+    return;
+  }
+  const total = payload.unclosed_escalations.length + payload.stale_open.length;
+  console.log(`Issue closure: ${total} issue(s) flagged (${payload.checked} checked):`);
+  for (const row of payload.unclosed_escalations) {
+    console.log(
+      `  - ${row.slug} [unclosed escalation]: computed resolution is fixed but the issue task is not archived ` +
+        `(fix: \`lore done ${row.slug}\` or \`lore set ${row.slug} --status archived\` once verified)`,
+    );
+  }
+  for (const row of payload.stale_open) {
+    console.log(
+      `  - ${row.slug} [stale open]: reported ${row.reported_at}, ${row.age_days}d old, still open ` +
+        `(fix: triage via \`lore issue resolve ${row.slug} --state rejected|wontfix --reason <r>\`, or link a fixing doc via \`lore link ... --type resolves ${row.slug}\`)`,
+    );
+  }
+}
+
 /**
  * Text rendering for one `--check-claude-md` finding — always names `path`
  * (the finding's own `message` already does this; the extra prefixed line
@@ -278,6 +453,11 @@ export default defineCommand({
       description:
         "Verify every PRD's rendered body/outline-entry/extra-prose char budgets (SPEC-080 C3). Breach → exit 3. Composes with --check-tree/--check-drift/--check-requirements.",
     },
+    "check-issues": {
+      type: "boolean",
+      description:
+        "Flag unclosed issue escalations (computed fixed, task not archived) and stale open reports (older than feedback.stale_after_days). Report-only, mutates nothing. Breach → exit 3. Composes with --check-tree/--check-drift/--check-requirements/--check-prd-budget.",
+    },
     "check-claude-md": {
       type: "boolean",
       description:
@@ -289,6 +469,7 @@ export default defineCommand({
     const checkDriftRequested = args["check-drift"] === true;
     const checkRequirementsRequested = args["check-requirements"] === true;
     const checkPrdBudgetRequested = args["check-prd-budget"] === true;
+    const checkIssuesRequested = args["check-issues"] === true;
     const checkClaudeMdRequested = args["check-claude-md"] === true;
 
     // ── check-claude-md branch (spec-project-claude-md-content-contract-governance-injected §D9) ──
@@ -298,8 +479,8 @@ export default defineCommand({
     // but no SQLite DB. `loadLoreApp` (below, in every other branch) opens
     // `bun:sqlite`, which would violate that invariant outright. This
     // dispatch is therefore hoisted above the app-backed
-    // check-tree/check-drift/check-requirements/check-prd-budget branch and
-    // returns before that branch is ever reached.
+    // check-tree/check-drift/check-requirements/check-prd-budget/check-issues
+    // branch and returns before that branch is ever reached.
     if (checkClaudeMdRequested) {
       const budgets = resolveClaudeMdBudgets(process.cwd());
       const files = discoverMemoryFiles(process.cwd(), budgets.filenames);
@@ -319,8 +500,14 @@ export default defineCommand({
       return;
     }
 
-    // ── check-tree / check-drift / check-requirements / check-prd-budget branch (D5 restructure) ────
-    if (checkTreeRequested || checkDriftRequested || checkRequirementsRequested || checkPrdBudgetRequested) {
+    // ── check-tree / check-drift / check-requirements / check-prd-budget / check-issues branch (D5 restructure) ────
+    if (
+      checkTreeRequested ||
+      checkDriftRequested ||
+      checkRequirementsRequested ||
+      checkPrdBudgetRequested ||
+      checkIssuesRequested
+    ) {
       const { app, config } = loadLoreApp();
       try {
         // ---- Tree section — value-returning, no early process.exit (D5) ----
@@ -567,9 +754,33 @@ export default defineCommand({
           };
         }
 
-        // ---- Exit precedence (D5, pinned; SPEC-055/SPEC-080 fold into the drift tier) ----
+        // ---- Issues section (D5, spec-issue-closure-loop-computed-resolution-agent-reachable) ----
+        // reason: mirrors the requirements/prd-budget sections immediately above — store-only
+        // (plus one corpusService.get per issue task, same N-loop shape those two sections already
+        // use), zero-LLM, zero fs probing, REPORT-ONLY (see computeIssueCheck's own header).
+        let issuesPayload: IssueCheckPayload | undefined;
+        let issuesInconsistent = false;
+        if (checkIssuesRequested) {
+          const staleAfterDays = resolveStaleAfterDays(config);
+          const issuesResult = await computeIssueCheck(app, staleAfterDays);
+          if (!issuesResult.ok) {
+            process.stderr.write(formatError(issuesResult.error) + "\n");
+            process.exitCode = exitCode(issuesResult.error);
+            return;
+          }
+          issuesPayload = issuesResult.value;
+          issuesInconsistent = !issuesPayload.consistent;
+        }
+
+        // ---- Exit precedence (D5, pinned; SPEC-055/SPEC-080/issue-closure-loop fold into the drift tier) ----
         let finalExit: number;
-        if (treeInconsistent || driftInconsistent || requirementsInconsistent || prdBudgetInconsistent) {
+        if (
+          treeInconsistent ||
+          driftInconsistent ||
+          requirementsInconsistent ||
+          prdBudgetInconsistent ||
+          issuesInconsistent
+        ) {
           finalExit = 3;
         } else if (blueprintUnarmable) {
           finalExit = 4;
@@ -589,6 +800,7 @@ export default defineCommand({
           if (driftPayload !== undefined) data["code_drift"] = driftPayload;
           if (requirementsPayload !== undefined) data["requirement_coverage"] = requirementsPayload;
           if (prdBudgetPayload !== undefined) data["prd_budget"] = prdBudgetPayload;
+          if (issuesPayload !== undefined) data["issues"] = issuesPayload;
           console.log(JSON.stringify({ ok: true, data }, null, 2));
         } else {
           for (const line of treeRenderLines) console.log(line);
@@ -606,6 +818,7 @@ export default defineCommand({
             }
           }
           if (prdBudgetPayload !== undefined) renderPrdBudgetSection(prdBudgetPayload);
+          if (issuesPayload !== undefined) renderIssuesSection(issuesPayload);
         }
 
         process.exitCode = finalExit;
