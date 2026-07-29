@@ -61,6 +61,7 @@ import {
 } from "@lore/core";
 import type { UpstreamPort } from "../flows/upstream-context-flow.js";
 import type { ReceiptEntry, ReceiptLog } from "./receipt-log.js";
+import type { IssueResolution } from "./issue-resolution.js";
 
 /** Input to `IssueReportService.report` — the fields a caller (CLI/MCP) supplies. */
 export interface IssueReportInput {
@@ -94,15 +95,34 @@ export interface ReceiptStatusRow {
   title: string;
   at: string;
   /**
-   * Live upstream lifecycle status, or `"unreachable"` when the upstream
-   * corpus could not be validated/opened at all (SPEC-072 AC-072-10: history
-   * stays visible even when upstream is gone).
+   * D6 (spec-issue-closure-loop-computed-resolution-agent-reachable) — the
+   * DEFECT's computed resolution (`open | resolving | fixed | rejected |
+   * wontfix`, `computeIssueResolution` from `service/issue-resolution.ts`),
+   * or `"unreachable"` when the upstream corpus could not be validated/opened
+   * at all, OR when this receipt's doc no longer exists upstream (SPEC-072
+   * AC-072-10: history stays visible even when upstream is gone — preserved
+   * byte-for-byte).
    */
-  status: DocStatus | "unreachable";
+  status: IssueResolution | "unreachable";
+  /**
+   * D6 — the upstream doc's RAW lifecycle status, demoted to a debugging
+   * detail (no longer the primary signal `status` above now is — a `draft`
+   * issue task whose fix already shipped as an `active`/`archived` doc
+   * reports `status: "fixed"` here with `doc_status: "draft"`, never the
+   * reverse). Absent exactly when `status === "unreachable"` (no doc to read
+   * a status from).
+   */
+  doc_status?: DocStatus;
+  /**
+   * The reason recorded on an explicit `rejected`/`wontfix` terminal state
+   * (`lore issue resolve --state rejected|wontfix --reason <r>`, D3) —
+   * echoed here so the reporting agent learns WHY, not just that it isn't
+   * open anymore.
+   */
   rejection_reason?: string;
   /**
    * Non-blocking caveats about this row's data (e.g. a receipt line the
-   * local `ReceiptLog` had to skip as corrupt, or a status this service
+   * local `ReceiptLog` had to skip as corrupt, or a resolution this service
    * could only infer rather than confirm — see `list()`'s inline note on
    * `UpstreamPort`'s read surface).
    */
@@ -280,18 +300,26 @@ export class IssueReportService {
   }
 
   /**
-   * Joins the local receipt history with live upstream status.
+   * Joins the local receipt history with the upstream DEFECT's computed
+   * resolution (D6, spec-issue-closure-loop-computed-resolution-agent-reachable) —
+   * NOT the upstream doc's raw lifecycle status, which used to be (and would
+   * silently misreport a `draft` issue task whose fix already shipped as a
+   * SEPARATE `active`/`archived` doc as still `draft`; that exact shape
+   * misreported to a real consuming project for 9 days). Raw doc status is
+   * now a demoted debugging detail (`ReceiptStatusRow.doc_status`); an
+   * explicit `rejected`/`wontfix` reason is echoed via `rejection_reason`
+   * (D3's `lore issue resolve --reason`, read by `UpstreamPort.getResolution`).
    *
    * @param cfg - the consumer's `feedback.upstream.{corpus_path,root_prd}`
    * @returns `ok(rows[])` — an upstream that cannot be validated/opened at
    *   all degrades every row to `status: "unreachable"` rather than failing
    *   the whole call (SPEC-072 AC-072-10: "history stays visible, no
-   *   crash"); a receipt whose doc no longer exists upstream ALSO degrades
-   *   to `status: "unreachable"` (`UpstreamPort.getDocStatus`'s documented
-   *   `ok(null)` case — T5 replaced the prior best-effort "approved"
-   *   default with this real per-doc lookup); `err(...)` only for a
-   *   `receipts.read()` failure (a genuine local IO error, not an
-   *   upstream-reachability concern)
+   *   crash" — preserved byte-for-byte); a receipt whose doc no longer
+   *   exists upstream ALSO degrades to `status: "unreachable"`
+   *   (`UpstreamPort.getResolution`'s documented `ok(null)` case — same
+   *   contract T5's `getDocStatus` established, preserved byte-for-byte);
+   *   `err(...)` only for a `receipts.read()` failure (a genuine local IO
+   *   error, not an upstream-reachability concern)
    */
   async list(cfg: UpstreamCfg): Promise<Result<ReceiptStatusRow[], LoreError>> {
     const receiptsResult = this.deps.receipts.read();
@@ -306,7 +334,7 @@ export class IssueReportService {
     if (!upstreamResult.ok) {
       // reason: an upstream that can't be reached/validated must never hide
       // the LOCAL history — every row degrades to "unreachable" instead of
-      // propagating the rail error (AC-072-10).
+      // propagating the rail error (AC-072-10, preserved byte-for-byte).
       return ok(
         entries.map((entry) => ({
           upstream_doc_id: entry.upstream_doc_id,
@@ -322,8 +350,8 @@ export class IssueReportService {
     try {
       const rows = await Promise.all(
         entries.map(async (entry): Promise<ReceiptStatusRow> => {
-          const statusResult = await port.getDocStatus(entry.upstream_doc_id);
-          if (!statusResult.ok) {
+          const resolutionResult = await port.getResolution(entry.upstream_doc_id);
+          if (!resolutionResult.ok) {
             return {
               upstream_doc_id: entry.upstream_doc_id,
               title: entry.title,
@@ -331,11 +359,11 @@ export class IssueReportService {
               status: "unreachable",
               warnings: [
                 ...corruptWarning,
-                `could not determine live status: ${describeLoreError(statusResult.error)}`,
+                `could not determine resolution: ${describeLoreError(resolutionResult.error)}`,
               ],
             };
           }
-          const live = statusResult.value;
+          const live = resolutionResult.value;
           if (live === null) {
             return {
               upstream_doc_id: entry.upstream_doc_id,
@@ -349,7 +377,8 @@ export class IssueReportService {
             upstream_doc_id: entry.upstream_doc_id,
             title: entry.title,
             at: entry.at,
-            status: live.status,
+            status: live.resolution,
+            doc_status: live.status,
             ...(live.rejection_reason !== undefined ? { rejection_reason: live.rejection_reason } : {}),
             ...(corruptWarning.length > 0 ? { warnings: corruptWarning } : {}),
           };
