@@ -87,6 +87,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
 } from "node:fs";
@@ -410,7 +411,15 @@ describe("AC-OOB-2: --auto-config with a resolvable upstream provisions feedback
     const parsedConfig = readConfigParsed(consumerRoot);
     const feedbackParse = FeedbackConfigSchema.safeParse(parsedConfig.feedback);
     expect(feedbackParse.success).toBe(true);
-    expect(parsedConfig.feedback?.upstream?.corpus_path).toBe(install.installRoot);
+    // reason: expected value is realpath-resolved too — on macOS `os.tmpdir()`
+    // lives under `/var/...`, itself a symlink to `/private/var/...`; the
+    // resolver's Design-mandated walk (symlink → real path → enclosing repo
+    // root) correctly follows that OS-level symlink too (not just
+    // user-created ones), so the fair comparison is against the fully-resolved
+    // expected path, not the raw mkdtemp string. See the sibling suite
+    // (report-issue-wiring-provision.bun.test.ts) for the same reasoning
+    // against this same resolver.
+    expect(parsedConfig.feedback?.upstream?.corpus_path).toBe(realpathSync(install.installRoot));
     expect([install.rootPrdSlug, install.rootPrdId]).toContain(parsedConfig.feedback?.upstream?.root_prd);
 
     // Report lands as a draft task upstream.
@@ -451,7 +460,7 @@ describe("AC-OOB-2: --auto-config with a resolvable upstream provisions feedback
     expect(result.exitCode).toBe(0);
 
     const parsedConfig = readConfigParsed(consumerRoot);
-    expect(parsedConfig.feedback?.upstream?.corpus_path).toBe(install.installRoot);
+    expect(parsedConfig.feedback?.upstream?.corpus_path).toBe(realpathSync(install.installRoot));
   }, 30_000);
 });
 
@@ -559,7 +568,7 @@ describe("AC-OOB-4b: on an unconfigured corpus, the provisioning write preserves
     const after = readConfigParsed(consumerRoot);
     expect(after.project).toEqual(before.project);
     expect(after.workflow?.claim_ttl_minutes).toBe(999);
-    expect(after.feedback?.upstream?.corpus_path).toBe(install.installRoot);
+    expect(after.feedback?.upstream?.corpus_path).toBe(realpathSync(install.installRoot));
   }, 30_000);
 });
 
