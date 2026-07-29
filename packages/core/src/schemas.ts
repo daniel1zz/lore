@@ -74,6 +74,13 @@ export const linkTypeSchema = z.enum([
   // artifact's production (P4 provenance). Plain typed edge, no lifecycle
   // or validation coupling beyond the generic link rules above.
   "governs",
+  // "resolves": from = the doc that fixes a defect (spec | plan | task), to =
+  // an issue task (a task carrying extra.issue_report). Write-time validated
+  // in CorpusService.link (shared write path, D1b) — a target lacking
+  // extra.issue_report is rejected with VALIDATION_ERROR. Consumed by
+  // computeIssueResolution (issue-resolution.ts, D2) to derive fixed/resolving.
+  // Source: spec-issue-closure-loop-computed-resolution-agent-reachable §D1.
+  "resolves",
 ]);
 
 export const versionActionSchema = z.enum([

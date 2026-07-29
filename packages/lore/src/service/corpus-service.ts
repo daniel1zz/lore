@@ -84,6 +84,7 @@ import {
 } from "./checkpoint-registry.js";
 import { attestationExemptKindValid } from "./gate-predicates.js";
 import { resolveDoc, ULID_REGEX } from "./resolve.js";
+import { hasIssueReport } from "./issue-resolution.js";
 
 /**
  * `checkpointRegistry`'s `"spec-create"` checkpoint always produces a `"spec"` doc
@@ -3406,6 +3407,31 @@ export class CorpusService {
           child: fromDoc.type,
           parent: toDoc.type,
           allowed: [...allowedParents],
+        });
+      }
+    }
+
+    // D1b (spec-issue-closure-loop-computed-resolution-agent-reachable) —
+    // a `resolves` edge's `to` MUST be a task carrying `extra.issue_report`
+    // (an issue task). Enforced here, the shared link write path, so CLI,
+    // MCP, and HTTP are all covered by one implementation. `hasIssueReport`
+    // (issue-resolution.ts) is the same defensive presence predicate D2's
+    // `computeIssueResolution` builds on.
+    if (type === "resolves") {
+      const toDocResult = await this.store.find(toResult.value);
+      if (!toDocResult.ok) return toDocResult;
+      const toDoc = toDocResult.value;
+      if (toDoc === null || toDoc.deleted_at !== null) {
+        return err({ code: "DOC_NOT_FOUND", id: toResult.value });
+      }
+
+      if (toDoc.type !== "task" || !hasIssueReport(toDoc.extra)) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "to",
+          message:
+            "resolves edge target must be a task carrying extra.issue_report (an issue task)",
+          value: { id: toResult.value, type: toDoc.type },
         });
       }
     }
