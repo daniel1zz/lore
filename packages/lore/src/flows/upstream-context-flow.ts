@@ -15,13 +15,19 @@
  *     D6/D7, AC-ICL-7), on top of the original 4 — see that method's own
  *     JSDoc for why a per-doc computed-resolution lookup could not be
  *     derived from the original 4 ops. `getResolution` REPLACES the earlier
- *     T5 `getDocStatus` (SPEC-072 AC-072-10) — that op's audit-log
- *     reject-reason lookback answered "was this draft ever bounced by the
- *     REVIEW workflow" (`lore reject`), a narrower and now-superseded
- *     question; D6 needs "has the DEFECT itself been triaged terminal"
- *     (`lore issue resolve`) or fixed (a `resolves` edge to a terminal doc),
- *     which `getResolution` answers directly, folding the raw doc status in
- *     as a demoted debugging field rather than the primary signal.
+ *     T5 `getDocStatus` (SPEC-072 AC-072-10) — D6 needs "has the DEFECT
+ *     itself been triaged terminal" (`lore issue resolve`) or fixed (a
+ *     `resolves` edge to a terminal doc), which `getResolution` answers
+ *     directly, folding the raw doc status in as a demoted debugging field
+ *     rather than the primary signal. `getDocStatus`'s audit-log
+ *     reject-reason lookback ("was this draft ever bounced by the REVIEW
+ *     workflow") was DROPPED by that replacement, then RESTORED by P2
+ *     (spec-issue-closure-loop-computed-resolution-agent-reachable D2,
+ *     AC-ICL-11) once the drop proved to be a real regression: a
+ *     review-rejected report is indistinguishable from an untouched one by
+ *     `doc.status` alone (SPEC-005), so `getResolution` needs that same
+ *     lookback to feed `computeIssueResolution`'s `hasRecordedReviewRejection`
+ *     parameter — see `getResolution`'s own JSDoc.
  *   - `buildUpstreamContext(corpusRoot)` — resolves `corpusRoot/.lore/lore.db`,
  *     re-asserts its schema version against `LATEST_SCHEMA_VERSION` via a
  *     readonly probe BEFORE constructing a real (migrating) `SQLiteStore`,
@@ -116,9 +122,8 @@ export interface UpstreamPort {
    * Computed resolution (D2 `computeIssueResolution`, consumed verbatim from
    * `service/issue-resolution.ts` — never reimplemented here) for ONE
    * upstream issue-task doc by id, plus its raw lifecycle status (D6: demoted
-   * to a debugging detail, no longer the primary signal) and, when an
-   * explicit terminal state was recorded via `lore issue resolve
-   * --state rejected|wontfix --reason <r>`, that reason echoed back.
+   * to a debugging detail, no longer the primary signal) and, when a
+   * rejection reason is on record, that reason echoed back.
    *
    * Added AFTER the original 4 ops proved insufficient: none of
    * `resolveRootDoc`/`listOpenAdhocDrafts`/`searchDuplicates`/`createDraft`
@@ -130,16 +135,27 @@ export interface UpstreamPort {
    * same method the local-corpus surfaces `lore issues`/HTTP issue-reports
    * projection call) rather than re-deriving the join here.
    *
+   * P2 (AC-ICL-11) RESTORED the old T5 audit-log "most recent reject"
+   * lookback that D6 had dropped: `ReviewService.reject` never transitions a
+   * doc OFF `draft` (SPEC-005), so a review-rejected report is
+   * indistinguishable from an untouched one by `status` alone — the audit
+   * trail is the ONLY record. `computeIssueResolution`'s new
+   * `hasRecordedReviewRejection` parameter needs exactly this boolean, which
+   * only this store-backed caller can supply (the pure service module cannot
+   * query the audit table itself). ONE unified reason reader
+   * (`readResolutionReason` below, extended) surfaces the reason regardless
+   * of whether it came from an explicit D3 write or this audit-log fallback
+   * — there is no second `*_reason` field on the return type.
+   *
    * @param id - the upstream draft task's doc id (a `ReceiptEntry.upstream_doc_id`)
    * @returns `ok(null)` when no doc with this id exists upstream anymore
    *   (deleted, or never existed) — a fact, not an error, and the caller's
    *   documented "unreachable"-equivalent row case; `ok({status, resolution,
    *   rejection_reason?})` otherwise. `rejection_reason` is populated ONLY
-   *   when an explicit `rejected`/`wontfix` state is recorded at
-   *   `extra.issue_report.resolution` — this is D6's NEW reason source,
-   *   deliberately NOT the old T5 audit-log "most recent reject" lookback
-   *   (that answered a different, narrower question about the REVIEW
-   *   workflow, not the defect's own triage state; see this module's header).
+   *   when the computed `resolution` is itself `rejected`/`wontfix` — a
+   *   stale audit-log reason from BEFORE a later fix landed (resolution now
+   *   `fixed`/`resolving`) is never echoed, so no row ever shows a rejection
+   *   reason next to a resolution that isn't actually a rejection.
    */
   getResolution(
     id: string,
@@ -158,7 +174,10 @@ export interface UpstreamPort {
  * module-boundary reasoning: a malformed/legacy `extra` degrades to
  * "no reason", never throws; duplicated rather than imported since each
  * call site reads a different key). `lore issue resolve` is the sole writer
- * of this field (`adapters/cli/commands/issue.ts`, D3).
+ * of this field (`adapters/cli/commands/issue.ts`, D3). `getResolution`
+ * (below) is this reader's ONLY caller — it merges this D3-explicit source
+ * with the D2 audit-log reject-reason fallback into the SAME single
+ * `rejection_reason` output field, preferring this one when both exist.
  *
  * @param extra - the issue task's raw `extra` field
  * @returns the recorded reason string when `extra.issue_report.resolution.reason`
@@ -266,8 +285,38 @@ export function buildUpstreamContext(corpusRoot: string): Result<UpstreamPort, L
       if (!edgesResult.ok) return edgesResult;
       const ctx = edgesResult.value.get(doc.id) ?? { resolvesInEdges: [], sourceDocs: [] };
 
-      const resolution = computeIssueResolution({ extra: doc.extra }, ctx.resolvesInEdges, ctx.sourceDocs);
-      const reason = readResolutionReason(doc.extra);
+      // reason: D2's review-rejection precedence step needs the audit trail
+      // directly — ReviewService.reject (SPEC-005) never transitions a doc
+      // OFF `draft`, so `doc.status` alone can't distinguish "never
+      // reviewed" from "rejected back to draft". `queryAudit` orders by
+      // `timestamp DESC`, so index 0 (limit:1) is the MOST RECENT reject,
+      // correctly superseding an earlier one if the doc was rejected more
+      // than once — restores the exact lookback T5's `getDocStatus` used
+      // before D6 replaced it with this method (see this port's own
+      // `getResolution` JSDoc, "P2 RESTORED").
+      const auditResult = await store.queryAudit({ doc_id: doc.id, action: "reject", limit: 1 });
+      if (!auditResult.ok) return auditResult;
+      const latestReject = auditResult.value[0];
+
+      const resolution = computeIssueResolution(
+        { extra: doc.extra, status: doc.status },
+        ctx.resolvesInEdges,
+        ctx.sourceDocs,
+        latestReject !== undefined,
+      );
+
+      // ONE unified reason field regardless of origin: an explicit D3 write
+      // wins (mirrors computeIssueResolution's own precedence), else fall
+      // back to the audit-log reject reason — but ONLY when the computed
+      // resolution is ITSELF a rejection, so a stale reason from BEFORE a
+      // later fix landed is never echoed next to a `fixed`/`resolving`/
+      // `closed`/`open` row (AC-ICL-11: no row ever shows a rejection reason
+      // beside a resolution that isn't actually a rejection).
+      const auditReason = latestReject?.details?.["reason"];
+      const reason =
+        resolution === "rejected" || resolution === "wontfix"
+          ? (readResolutionReason(doc.extra) ?? (typeof auditReason === "string" ? auditReason : undefined))
+          : undefined;
 
       return ok({
         status: doc.status,

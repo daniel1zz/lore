@@ -10,12 +10,16 @@
  * rejected per §20 F4 (the spec's own "Out of scope"); an agent PULLS this on
  * demand, it is never pushed automatically.
  *
- * Default `--open` — resolution NOT IN {fixed, rejected, wontfix}, i.e.
- * `open` OR `resolving` (a fix in flight still needs eyes until it actually
- * lands). `--resolved` is the complement (fixed/rejected/wontfix). `--all`
- * shows every issue-report-carrying task regardless of resolution. The three
- * flags are mutually exclusive — passing more than one is a usage error
- * (exit 2), the same mutex shape SPEC-024's `--ai`/`--no-ai` pair uses.
+ * Default `--open` — resolution NOT IN {fixed, closed, rejected, wontfix},
+ * i.e. `open` OR `resolving` (a fix in flight still needs eyes until it
+ * actually lands). `--resolved` is the complement (fixed/closed/rejected/
+ * wontfix) — `closed` (P2, D2) covers an issue task whose OWN status reached
+ * `archived` with no `resolves` in-edge and no explicit terminal state ever
+ * recorded (every report closed BEFORE the computed-resolution mechanism
+ * existed has exactly this shape). `--all` shows every issue-report-carrying
+ * task regardless of resolution. The three flags are mutually exclusive —
+ * passing more than one is a usage error (exit 2), the same mutex shape
+ * SPEC-024's `--ai`/`--no-ai` pair uses.
  *
  * Built over `CorpusService.listFull({type: "task"})` — the SAME narrow
  * "extra survives" read `http/issue-reports-routes.ts`'s SPEC-074 dashboard
@@ -27,13 +31,16 @@
  * "every resolves edge across N docs in one call" read on the service
  * surface today, and adding one is out of this task's anchors (no service
  * file was assigned — see the task doc's "Added after P1 landed" section).
+ * `task` (from `listFull`) already carries `.status`, so `computeIssueResolution`
+ * (which now reads `issue.status` for the `closed` step) needs no extra wiring
+ * here beyond the P2 terminal-set update below.
  *
  * Exit codes: 0 success (including the zero-report empty-list case, per
  *   AC-ICL-5's explicit "empty list and exit 0" clause); 2 usage error
  *   (more than one of --open/--resolved/--all passed together).
  *
  * Source: spec-issue-closure-loop-computed-resolution-agent-reachable §D4,
- *   AC-ICL-5.
+ *   AC-ICL-5, AC-ICL-10.
  */
 
 import { defineCommand } from "citty";
@@ -45,9 +52,18 @@ import {
   type IssueResolution,
 } from "../../../service/issue-resolution.js";
 
-/** The 3 terminal resolutions `--open` excludes and `--resolved` selects (D2). */
+/**
+ * The 4 terminal resolutions `--open` excludes and `--resolved` selects
+ * (D2). `closed` (an issue archived with no traceable fix source ever
+ * recorded — the shape of every report closed BEFORE the computed-resolution
+ * mechanism existed) is terminal for the SAME reason `fixed`/`rejected`/
+ * `wontfix` are: none of them still need triage eyes. This is the single
+ * source for this terminal set — extend HERE, never re-list it at another
+ * call site.
+ */
 const TERMINAL_RESOLUTIONS: ReadonlySet<IssueResolution> = new Set<IssueResolution>([
   "fixed",
+  "closed",
   "rejected",
   "wontfix",
 ]);

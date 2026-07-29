@@ -11,7 +11,18 @@
  * Six-dimension coverage (HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE /
  * REGRESSION) applied across both ACs.
  *
- * @spec_ref spec-issue-closure-loop-computed-resolution-agent-reachable AC-ICL-1, AC-ICL-2
+ * P2 extension (task-p2-computed-closed-state-for-archived-issues-without-a):
+ *   `computeIssueResolution` gained the `closed` state and the
+ *   `hasRecordedReviewRejection` parameter (D2's full precedence — explicit
+ *   terminal state > resolves-edge computation > recorded review rejection >
+ *   archived doc status > open). The e2e/cross-corpus oracles for this
+ *   extension are AC-ICL-10 (`tests/e2e/issue-closed-state.bun.test.ts`) and
+ *   AC-ICL-11 (`tests/unit/service/issue-report-cross-corpus.bun.test.ts`);
+ *   the cases below cross-check the SAME precedence at the pure-function
+ *   layer, each precedence step asserted independently rather than inferred
+ *   from one combined fixture.
+ *
+ * @spec_ref spec-issue-closure-loop-computed-resolution-agent-reachable AC-ICL-1, AC-ICL-2, AC-ICL-10, AC-ICL-11
  */
 
 import { describe, it, expect } from "vitest";
@@ -168,9 +179,12 @@ describe("AC-ICL-1: resolves link type", () => {
 
 // ─── AC-ICL-2: computeIssueResolution ───────────────────────────────────────
 
+/** Module-scoped fixture builders — shared by AC-ICL-2's describe block AND
+ * the P2 precedence-extension blocks below (`closed`/`hasRecordedReviewRejection`). */
+const edge = (fromId: string): ResolvesInEdgeLike => ({ from_id: fromId });
+const doc = (id: string, status: DocStatus): ResolutionSourceDocLike => ({ id, status });
+
 describe("AC-ICL-2: computeIssueResolution", () => {
-  const edge = (fromId: string): ResolvesInEdgeLike => ({ from_id: fromId });
-  const doc = (id: string, status: DocStatus): ResolutionSourceDocLike => ({ id, status });
 
   it("AC-ICL-2 HAPPY: a resolves in-edge whose source is 'archived' computes 'fixed'", () => {
     const result = computeIssueResolution({ extra: {} }, [edge("spec-1")], [doc("spec-1", "archived")]);
@@ -240,5 +254,110 @@ describe("AC-ICL-2: computeIssueResolution", () => {
       ],
     );
     expect(result).toBe("fixed");
+  });
+});
+
+// ─── P2: computeIssueResolution's 'closed' state + recorded review        ──
+// ─── rejection — D2's full 5-level precedence, each step its OWN case     ──
+// ─── (task-p2-computed-closed-state-for-archived-issues-without-a)         ──
+
+describe("P2: computeIssueResolution — 'closed' state (archived issue, no edge, no explicit terminal)", () => {
+  it("HAPPY: issue's OWN status archived, no resolves in-edge, no explicit terminal state computes 'closed'", () => {
+    const result = computeIssueResolution({ extra: {}, status: "archived" }, [], []);
+    expect(result).toBe("closed");
+  });
+
+  it("NEGATIVE: a non-archived status with no edges stays 'open' — 'closed' is gated on status === 'archived' specifically", () => {
+    const result = computeIssueResolution({ extra: {}, status: "approved" }, [], []);
+    expect(result).toBe("open");
+  });
+
+  it("BOUNDARY: sweeps every DocStatus with no edges/no rejection — only 'archived' crosses into 'closed'", () => {
+    const statuses: DocStatus[] = ["draft", "in-review", "approved", "active", "archived", "deprecated"];
+    for (const status of statuses) {
+      const result = computeIssueResolution({ extra: {}, status }, [], []);
+      expect(result).toBe(status === "archived" ? "closed" : "open");
+    }
+  });
+
+  it("ERROR: `status` field omitted entirely never throws and degrades to 'open' (not 'closed')", () => {
+    expect(() => computeIssueResolution({ extra: {} }, [], [])).not.toThrow();
+    expect(computeIssueResolution({ extra: {} }, [], [])).toBe("open");
+  });
+
+  it("STATE: an explicit terminal state wins over 'closed' even when the issue is archived", () => {
+    const result = computeIssueResolution(
+      { extra: { issue_report: { resolution: { state: "wontfix", reason: "stale" } } }, status: "archived" },
+      [],
+      [],
+    );
+    expect(result).toBe("wontfix");
+  });
+
+  it("REGRESSION: a resolves-edge computation (even non-terminal 'resolving') wins over 'closed' when the issue is archived", () => {
+    const resolving = computeIssueResolution(
+      { extra: {}, status: "archived" },
+      [edge("spec-1")],
+      [doc("spec-1", "draft")],
+    );
+    expect(resolving).toBe("resolving");
+
+    const fixed = computeIssueResolution(
+      { extra: {}, status: "archived" },
+      [edge("spec-1")],
+      [doc("spec-1", "active")],
+    );
+    expect(fixed).toBe("fixed");
+  });
+});
+
+describe("P2: computeIssueResolution — recorded review rejection (hasRecordedReviewRejection)", () => {
+  it("HAPPY: no resolves in-edge + hasRecordedReviewRejection=true computes 'rejected' with no explicit write at all", () => {
+    const result = computeIssueResolution({ extra: {} }, [], [], true);
+    expect(result).toBe("rejected");
+  });
+
+  it("NEGATIVE: hasRecordedReviewRejection=false (the default) never produces 'rejected' by itself", () => {
+    expect(computeIssueResolution({ extra: {} }, [], [], false)).toBe("open");
+    expect(computeIssueResolution({ extra: {} }, [], [])).toBe("open");
+  });
+
+  it("BOUNDARY: hasRecordedReviewRejection=true wins over 'closed' — an archived issue with a recorded rejection is 'rejected', not 'closed'", () => {
+    const result = computeIssueResolution({ extra: {}, status: "archived" }, [], [], true);
+    expect(result).toBe("rejected");
+  });
+
+  it("ERROR: hasRecordedReviewRejection=true alongside a malformed extra never throws", () => {
+    expect(() =>
+      computeIssueResolution({ extra: "not-an-object" as unknown }, [], [], true),
+    ).not.toThrow();
+    expect(computeIssueResolution({ extra: "not-an-object" as unknown }, [], [], true)).toBe("rejected");
+  });
+
+  it("STATE: precedence is fully ordered — explicit state > resolves-edge > recorded rejection > archived > open, each demonstrated independently", () => {
+    // explicit state wins over a recorded rejection
+    expect(
+      computeIssueResolution(
+        { extra: { issue_report: { resolution: { state: "wontfix", reason: "n/a" } } } },
+        [],
+        [],
+        true,
+      ),
+    ).toBe("wontfix");
+
+    // a resolves-edge (even non-terminal) wins over a recorded rejection
+    expect(
+      computeIssueResolution({ extra: {} }, [edge("spec-1")], [doc("spec-1", "draft")], true),
+    ).toBe("resolving");
+
+    // a recorded rejection wins over archived-doc-status ('closed')
+    expect(computeIssueResolution({ extra: {}, status: "archived" }, [], [], true)).toBe("rejected");
+  });
+
+  it("REGRESSION: the 4th parameter defaults to false — every pre-existing 3-arg call site is unaffected", () => {
+    // Same fixtures as the pre-existing AC-ICL-2 HAPPY/NEGATIVE cases, called
+    // WITHOUT the new 4th argument — must resolve identically to before.
+    expect(computeIssueResolution({ extra: {} }, [edge("spec-1")], [doc("spec-1", "archived")])).toBe("fixed");
+    expect(computeIssueResolution({ extra: {} }, [], [])).toBe("open");
   });
 });
