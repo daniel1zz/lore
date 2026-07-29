@@ -22,8 +22,11 @@
  *   BOUNDARY:   AC-072-6 (rate cap at exactly OPEN_REPORT_CAP=10)
  *   ERROR:      AC-072-3 (root_prd mismatch), AC-072-4 (version skew),
  *               AC-072-5 (sync-enabled upstream), AC-072-11 (missing `by`)
- *   STATE:      AC-072-10 (reject reason persists; upstream removal degrades
- *               list rows to "unreachable" without crashing)
+ *   STATE:      AC-072-10 (a review-rejected report computes 'rejected' with
+ *               reason persisted, per D2's recorded-review-rejection
+ *               precedence step — spec-issue-closure-loop-computed-
+ *               resolution-agent-reachable AC-ICL-11; upstream removal
+ *               degrades list rows to "unreachable" without crashing)
  *   REGRESSION: AC-072-4/probe-purity fingerprinting (db/-wal byte-identical,
  *               -shm size invariant) pins the "no migration on a rejected
  *               upstream" invariant already covered at the unit level by
@@ -647,9 +650,22 @@ describe("AC-072-9: two concurrent report() calls yield two distinct tasks + two
 });
 
 // ─── AC-072-10: closure list — rejection reason + upstream-removed unreachable rows ──
+//
+// P2 (spec-issue-closure-loop-computed-resolution-agent-reachable AC-ICL-11)
+// reconciled this describe block's rejected-row expectation to the CORRECTED
+// semantics below. Before P2, `UpstreamPort.getResolution` computed
+// `resolution` with no knowledge of a review-workflow rejection (the SPEC-005
+// audit trail, not `doc.status`, is the only record — see the inline `reason:`
+// comment below), so a review-rejected report computed `open` while still
+// carrying a `rejection_reason` — a self-contradicting row §20 F3/F4 forbid.
+// This change is a SEMANTIC fix, not a test-green-washing edit: the row's
+// `status` field IS the computed resolution (`issue-report-service.ts`'s
+// `ReceiptStatusRow.status`, joined from `live.resolution` — never
+// `doc.status` directly), and `rejected` is the only value consistent with a
+// rejection reason being present at all.
 
 describe("AC-072-10: --list joins live upstream status; rejection reason surfaces; unreachable upstream degrades rows", () => {
-  it("AC-072-10: rejected row carries reason; removed upstream → status unreachable, exit 0, no crash", () => {
+  it("AC-072-10: rejected row computes 'rejected' (via the recorded review rejection, spec D2) and carries the reason; removed upstream → status unreachable, exit 0, no crash", () => {
     const { upstream, consumerRoot } = makeTwin("ac10");
     track(consumerRoot); // upstream.root is deliberately removed mid-test below
 
@@ -683,8 +699,16 @@ describe("AC-072-10: --list joins live upstream status; rejection reason surface
     const rejectedRow = listAfterReject.data.data.rows.find((r) => r.upstream_doc_id === upstreamDocId);
     expect(rejectedRow).toBeTruthy();
     // reason: ReviewService.reject never transitions a doc OFF draft (SPEC-005) —
-    // the audit trail, not doc.status, is the sole record of "rejected".
-    expect(rejectedRow?.status).toBe("draft");
+    // the audit trail, not doc.status, is the sole record of "rejected". P2
+    // (spec-issue-closure-loop-computed-resolution-agent-reachable D2) made
+    // computeIssueResolution read that audit trail directly via
+    // UpstreamPort.getResolution's restored reject-lookback, so the computed
+    // resolution is 'rejected' — never 'open' (the pre-P2 gap: a rejection
+    // reason present on a row computed 'open' was the exact self-contradiction
+    // §20 F3/F4 forbid) and never 'draft' (`status` here is the COMPUTED
+    // resolution, not the raw `doc.status` — that raw value is separately
+    // available as `doc_status` and stays 'draft', per SPEC-005, unasserted here).
+    expect(rejectedRow?.status).toBe("rejected");
     expect(rejectedRow?.rejection_reason).toBe("not a lore defect");
 
     // Remove the upstream corpus entirely.
