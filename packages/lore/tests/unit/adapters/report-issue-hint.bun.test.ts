@@ -160,7 +160,7 @@ afterEach(() => {
   }
 });
 
-describe("AC-073-1: gate-denial hint — configured consumer earns exactly 1 hint line, unconfigured is byte-identical to baseline", () => {
+describe("AC-073-1: gate-denial hint — configured consumer earns exactly 1 hint line; unconfigured now carries the SPEC-OOB provision-guidance line", () => {
   it("HAPPY: configured consumer's `lore gate spec-create` denial carries EXACTLY 1 hint line naming lore report-issue + the re-verify-first clause", () => {
     tmpDir = mkdtempSync(join(tmpdir(), "lore-hint-gate-cfg-"));
     initCorpus(tmpDir);
@@ -179,7 +179,7 @@ describe("AC-073-1: gate-denial hint — configured consumer earns exactly 1 hin
     expect(result.stdout).toContain("PARENT_REQUIRED");
   });
 
-  it("BOUNDARY: unconfigured consumer's IDENTICAL gate denial carries 0 hint lines — stderr is EMPTY, matching the pre-SPEC-073 baseline byte-for-byte", () => {
+  it("BOUNDARY: unconfigured consumer's IDENTICAL gate denial now carries exactly 1 provision-guidance line naming --auto-config (SPEC-OOB supersedes the old SPEC-073 byte-absent baseline)", () => {
     tmpDir = mkdtempSync(join(tmpdir(), "lore-hint-gate-unc-"));
     initCorpus(tmpDir);
     // deliberately NOT calling configureUpstream() — init's own default
@@ -191,10 +191,17 @@ describe("AC-073-1: gate-denial hint — configured consumer earns exactly 1 hin
     );
 
     expect(result.exitCode).toBe(4);
-    expect(countHintLines(result.stderr)).toBe(0);
-    // Pre-SPEC-073, this seam never wrote a single byte to stderr — the ONLY
-    // legitimate baseline for "byte-identical" is empty, not merely hint-free.
-    expect(result.stderr).toBe("");
+    // SPEC-OOB (task T5/T7) intentionally changed this seam: the unconfigured
+    // branch now emits a provision-guidance hint instead of staying byte-absent.
+    // AC-OOB-6 is the new authoritative baseline for this scenario — the old
+    // SPEC-073 empty-stderr expectation is superseded, not violated.
+    expect(countLinesContaining(result.stderr, PROVISION_TOKEN)).toBe(1);
+    // Structural check independent of token content: the entire stderr is
+    // exactly one non-empty physical line (mirrors the AC-OOB-6 idiom below).
+    expect(nonEmptyLineCount(result.stderr)).toBe(1);
+    expect(result.stderr).not.toBe("");
+    // The pre-existing feeding-pack content (stdout) is untouched by this seam.
+    expect(result.stdout).toContain("PARENT_REQUIRED");
   });
 });
 
@@ -245,7 +252,7 @@ describe("AC-073-3: internal-error hint — a corrupted .lore/lore.db earns exac
     expect(result.stderr).toContain(HINT_TOKEN);
   });
 
-  it("STATE: unconfigured consumer's SAME corrupted-db failure state carries 0 hint lines (underlying error message unchanged)", () => {
+  it("STATE: unconfigured consumer's SAME corrupted-db failure state now carries exactly 1 provision-guidance line naming --auto-config (underlying error message unchanged; SPEC-OOB supersedes the old SPEC-073 byte-absent baseline)", () => {
     tmpDir = mkdtempSync(join(tmpdir(), "lore-hint-corrupt-unc-"));
     initCorpus(tmpDir);
     corruptDb(tmpDir);
@@ -254,7 +261,7 @@ describe("AC-073-3: internal-error hint — a corrupted .lore/lore.db earns exac
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("Storage failure");
-    expect(countHintLines(result.stderr)).toBe(0);
+    expect(countLinesContaining(result.stderr, PROVISION_TOKEN)).toBe(1);
   });
 });
 
