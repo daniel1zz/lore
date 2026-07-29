@@ -40,7 +40,11 @@ export type LinkType =
   /** from = skill, to = artifact — the skill governed/fed that artifact's
    * production (P4 provenance). Plain typed edge, no lifecycle or
    * validation coupling beyond the generic link rules. */
-  | "governs";
+  | "governs"
+  /** from = the doc that fixes a defect (spec | plan | task), to = an issue
+   * task (a task carrying extra.issue_report). Write-time validated in
+   * CorpusService.link — see schemas.ts::linkTypeSchema's matching entry. */
+  | "resolves";
 
 export type VersionAction =
   | "create"
