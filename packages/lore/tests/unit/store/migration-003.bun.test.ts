@@ -57,10 +57,12 @@ describe("migration-003 (review_judgments + calibration_records)", () => {
     // reason: SPEC-044 T1 added migration-005; SPEC-056 added migration-006 (docs.type
     // CHECK widening); SPEC-072 added migration-007 (versions.slug); the CJK bigram
     // shadow-column migration added migration-008; SPEC-079 G3 added migration-009
-    // (audit hash chain); SPEC-084 added migration-010 (docs.ordinal) — a fresh store
-    // now runs every migration up to the current head (10), not just through
+    // (audit hash chain); SPEC-084 added migration-010 (docs.ordinal); SPEC-102 added
+    // migration-011 (trace_events); spec-issue-closure-loop-computed-resolution-agent-reachable
+    // added migration-012 (links.link_type CHECK widened for "resolves") — a fresh
+    // store now runs every migration up to the current head (12), not just through
     // migration-003/004.
-    expect(userVersion).toBe(11);
+    expect(userVersion).toBe(12);
 
     const tableNames = db
       .query("SELECT name FROM sqlite_master WHERE type = 'table'")
@@ -133,9 +135,10 @@ describe("migration-003 (review_judgments + calibration_records)", () => {
     };
     // reason: SPEC-044 T1 added migration-005; SPEC-056 added migration-006; SPEC-072
     // added migration-007; migration-008 (CJK bigram shadow columns); SPEC-079 G3 added
-    // migration-009 (audit hash chain); SPEC-084 added migration-010 (docs.ordinal),
-    // now the head — see HAPPY test's comment above.
-    expect(postUpgradeVersion).toBe(11);
+    // migration-009 (audit hash chain); SPEC-084 added migration-010 (docs.ordinal);
+    // SPEC-102 added migration-011; spec-issue-closure-loop-computed-resolution-agent-reachable
+    // added migration-012, now the head — see HAPPY test's comment above.
+    expect(postUpgradeVersion).toBe(12);
 
     const tableNames = db
       .query("SELECT name FROM sqlite_master WHERE type = 'table'")
@@ -163,9 +166,10 @@ describe("migration-003 (review_judgments + calibration_records)", () => {
       };
       // reason: SPEC-044 T1 added migration-005; SPEC-056 added migration-006; SPEC-072
       // added migration-007; migration-008; SPEC-079 G3 added migration-009 (audit hash
-      // chain); SPEC-084 added migration-010 (docs.ordinal), now the head — see HAPPY
-      // test's comment above.
-      expect(userVersion).toBe(11);
+      // chain); SPEC-084 added migration-010 (docs.ordinal); SPEC-102 added migration-011;
+      // spec-issue-closure-loop-computed-resolution-agent-reachable added migration-012,
+      // now the head — see HAPPY test's comment above.
+      expect(userVersion).toBe(12);
       secondOpen.close();
     }).not.toThrow();
   });

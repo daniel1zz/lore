@@ -47,6 +47,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { linkTypeSchema } from "@lore/core";
 import { LinksPanel } from "../../src/components/LinksPanel";
 import type { LinkEntry } from "../../src/components/LinksPanel";
 import type { SearchHit } from "../../src/lib/api";
@@ -135,15 +136,15 @@ describe("LinksPanel", () => {
       const select = screen.getByLabelText("Link type") as HTMLSelectElement;
       const optionValues = Array.from(select.options).map((o) => o.value);
 
-      expect(optionValues).toEqual([
-        "parent",
-        "implements",
-        "informs",
-        "supersedes",
-        "relates-to",
-        "blocks",
-        "governs",
-      ]);
+      // reason: asserted against the SSOT (`linkTypeSchema.options`, the SAME
+      // source `LinksPanel.tsx`'s own `LINK_TYPES` derives from), never a
+      // hardcoded literal — a literal array here was this test's OWN third
+      // copy of the link-type list (RED as of P1's `"resolves"` addition,
+      // spec-issue-closure-loop-computed-resolution-agent-reachable §D1) and
+      // would silently drift again at the NEXT added link type. Appending
+      // "resolves" to a literal would only reproduce the same defect one
+      // member later.
+      expect(optionValues).toEqual([...linkTypeSchema.options]);
       expect(optionValues).not.toContain("extends");
     });
   });

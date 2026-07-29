@@ -51,6 +51,7 @@ import {
 } from "../../../src/store/migrations/migration-009.js";
 import { MIGRATION_010_SQL } from "../../../src/store/migrations/migration-010.js";
 import { MIGRATION_011_SQL } from "../../../src/store/migrations/migration-011.js";
+import { MIGRATION_012_SQL } from "../../../src/store/migrations/migration-012.js";
 import { computeFtsShadowValues, computeAuditEntryHash } from "../../../src/store/store-shared.js";
 
 // ─── Fixture Helpers ─────────────────────────────────────────────────────────
@@ -209,6 +210,12 @@ async function applyMigrationsToClient(client: Client, localStore: SQLiteStore):
   // user_version parity guard below, which is a separate concern from "which
   // tables sync-push actually replicates."
   await client.executeMultiple(MIGRATION_011_SQL);
+
+  // migration-012 (spec-issue-closure-loop-computed-resolution-agent-reachable,
+  // widen links.link_type CHECK to accept "resolves") is a `links`
+  // table-recreate, same shape as migration-004's "governs" widening — a
+  // plain executeMultiple call, same as migrations 001-007/010 above.
+  await client.executeMultiple(MIGRATION_012_SQL);
 
   // ─── Parity guard ────────────────────────────────────────────────────────
   // Assert the remote fixture's PRAGMA user_version matches the REAL

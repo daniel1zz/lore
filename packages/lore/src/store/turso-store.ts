@@ -36,6 +36,7 @@ import {
 } from "./migrations/migration-009.js";
 import { MIGRATION_010_SQL } from "./migrations/migration-010.js";
 import { MIGRATION_011_SQL } from "./migrations/migration-011.js";
+import { MIGRATION_012_SQL } from "./migrations/migration-012.js";
 import type {
   AuditEntry,
   CalibrationRecord,
@@ -484,6 +485,16 @@ export class TursoStore implements StoreInterface {
         // too is harmless idempotent schema parity, never a write path any
         // TraceRecorder actually uses.
         await this.client.executeMultiple(MIGRATION_011_SQL);
+      }
+
+      if (currentVersion < 12) {
+        // reason: migration-012 (widen links.link_type CHECK to accept
+        // "resolves") is a `links` table-recreate, same shape as
+        // migration-004's "governs" widening — `executeMultiple` is
+        // sufficient (libsql's embedded-replica client auto-rollbacks a
+        // mid-string throw, see migration-004.ts's own @invariant), no
+        // interactive transaction needed.
+        await this.client.executeMultiple(MIGRATION_012_SQL);
       }
     })();
 

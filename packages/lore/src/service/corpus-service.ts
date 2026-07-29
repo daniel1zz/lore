@@ -84,7 +84,7 @@ import {
 } from "./checkpoint-registry.js";
 import { attestationExemptKindValid } from "./gate-predicates.js";
 import { resolveDoc, ULID_REGEX } from "./resolve.js";
-import { hasIssueReport } from "./issue-resolution.js";
+import { hasIssueReport, type ResolvesInEdgeLike, type ResolutionSourceDocLike } from "./issue-resolution.js";
 
 /**
  * `checkpointRegistry`'s `"spec-create"` checkpoint always produces a `"spec"` doc
@@ -3533,6 +3533,87 @@ export class CorpusService {
     }
 
     return ok(undefined);
+  }
+
+  /**
+   * D7 (spec-issue-closure-loop-computed-resolution-agent-reachable) — the
+   * ONE cross-doc read-orchestration locus (per this module's own "never
+   * duplicated into an adapter" convention, see `service/CLAUDE.md`) for
+   * gathering what `computeIssueResolution` (`issue-resolution.ts`) needs for
+   * a SET of issue task ids: every `resolves` in-edge targeting any of them,
+   * plus the lifecycle status of each edge's source doc. Read-only
+   * counterpart to `link()`'s resolves-edge write validation above (D1b) —
+   * same module, same `resolves` concept, opposite direction (read vs write).
+   *
+   * Batched in exactly two round trips total, never one per issue:
+   * `findLinksByToIds` (all in-edges across the whole `issueIds` set) then
+   * `findByIds` (all distinct source docs the edges reference) — the same
+   * "batch the join, don't N+1" shape `get()`'s own `related` navigation
+   * uses above (SPEC review M6) and `TaskWorkflowService`/`PhaseWorkflowService`
+   * use for `blocks`-link readiness (`findLinksByToIds` call sites).
+   *
+   * Deliberately NOT folded into `get()`'s `navigation.related` (which mixes
+   * BOTH link directions with no direction tag on each entry) — `resolves`
+   * in-edges only would be ambiguous to recover from that shape whenever a
+   * candidate doc also happens to be the FROM side of an unrelated `resolves`
+   * edge (schema-legal: `link()`'s D1b check only constrains the TO side).
+   *
+   * Consumed today by the HTTP issue-reports projection
+   * (`adapters/http/issue-reports-routes.ts` D7); the CLI equivalents
+   * (`lore issues`, `lore status --check-issues`) are a separate task's scope
+   * and are expected to call this SAME method rather than re-deriving the
+   * join — see this module's "never duplicated into an adapter" invariant.
+   *
+   * @param issueIds - candidate issue task ids. This method applies NO
+   *   `extra.issue_report` presence filter itself — callers already know
+   *   which ids are issue tasks (e.g. via `hasIssueReport`); passing a
+   *   non-issue id here is harmless (it just gets an empty in-edge list back)
+   *   but is the caller's responsibility to have already filtered.
+   * @returns `ok(map)` — `map` has ONE entry per `issueId` passed in (an id
+   *   with zero resolves in-edges still maps to `{resolvesInEdges: [],
+   *   sourceDocs: []}`, never absent), ready to hand straight to
+   *   `computeIssueResolution`. `ok(new Map())` immediately when `issueIds`
+   *   is empty (no store round trip). Propagates the first store error from
+   *   either batched call.
+   * @example
+   *   const ctxById = await corpusService.getResolvesInEdgesForIssues(["task-1"]);
+   *   // ctxById.value.get("task-1") -> {resolvesInEdges: [...], sourceDocs: [...]}
+   */
+  async getResolvesInEdgesForIssues(
+    issueIds: DocId[],
+  ): Promise<
+    Result<Map<DocId, { resolvesInEdges: ResolvesInEdgeLike[]; sourceDocs: ResolutionSourceDocLike[] }>, LoreError>
+  > {
+    if (issueIds.length === 0) return ok(new Map());
+
+    const linksResult = await this.store.findLinksByToIds(issueIds, "resolves");
+    if (!linksResult.ok) return linksResult;
+
+    const edgesByIssueId = new Map<DocId, ResolvesInEdgeLike[]>();
+    for (const id of issueIds) edgesByIssueId.set(id, []);
+    for (const link of linksResult.value) {
+      edgesByIssueId.get(link.to_id)?.push({ from_id: link.from_id });
+    }
+
+    const sourceIds = Array.from(new Set(linksResult.value.map((link) => link.from_id)));
+    const sourceDocsResult =
+      sourceIds.length > 0 ? await this.store.findByIds(sourceIds) : ok(new Map<DocId, DocRecord>());
+    if (!sourceDocsResult.ok) return sourceDocsResult;
+
+    const result = new Map<
+      DocId,
+      { resolvesInEdges: ResolvesInEdgeLike[]; sourceDocs: ResolutionSourceDocLike[] }
+    >();
+    for (const id of issueIds) {
+      const resolvesInEdges = edgesByIssueId.get(id) ?? [];
+      const sourceDocs = resolvesInEdges
+        .map((edge) => sourceDocsResult.value.get(edge.from_id))
+        .filter((doc): doc is DocRecord => doc !== undefined)
+        .map((doc) => ({ id: doc.id, status: doc.status }));
+      result.set(id, { resolvesInEdges, sourceDocs });
+    }
+
+    return ok(result);
   }
 
   // ── Status ───────────────────────────────────────────────────────────────
