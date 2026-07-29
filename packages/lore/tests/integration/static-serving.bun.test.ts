@@ -63,6 +63,25 @@
  * @spec_ref spec-dashboard-production-packaging-one-command-lore-dashboard DD-2 DD-3 DD-4
  *   AC-F5A-3 AC-F5A-4 AC-F5A-7
  * @task_ref task-skill-test-f5a-static-serving-and-nonce-red-scenarios
+ *
+ * ─── AC-F5A-10 addendum (RED, task-red-failing-tests-for-no-open-suppression-nonce-
+ * failure) — "nonce failure page" describe block below ──────────────────────────────────
+ *
+ * The spec's own Failure Modes table already mandates: "Nonce consumed/expired/unknown ->
+ * 410 + human-readable page naming `lore dashboard` re-launch". `handleNonceBootstrap`
+ * (static-serving.ts) instead returns `jsonError(...)` for every one of those three
+ * outcomes — a bare `{"ok":false,...}` envelope, never HTML. This is an implementation
+ * deviation from an already-approved spec, not a new design decision (see the governing
+ * plan's "Why" section). Every NEGATIVE/BOUNDARY case in the "nonce failure page" describe
+ * below is expected to fail against the current `jsonError` response; the HAPPY and
+ * REGRESSION cases in that same describe pin the CURRENT (correct) response shapes the
+ * paired GREEN task must not disturb while fixing the failure-page defect — a blanket
+ * "convert every response on this endpoint to HTML" implementation must fail the REGRESSION
+ * cases (Sec-Fetch guard 403 JSON, AC-F5A-7's 503 JSON) just as loudly as the current bug
+ * fails the NEGATIVE/BOUNDARY ones.
+ *
+ * @spec_ref spec-dashboard-production-packaging-one-command-lore-dashboard AC-F5A-10
+ * @spec_ref task-red-failing-tests-for-no-open-suppression-nonce-failure
  */
 
 import { afterEach, describe, expect, it } from "bun:test";
@@ -416,5 +435,207 @@ describe("auth-store degradation", () => {
     expect(body.error.code.length).toBeGreaterThan(0);
     expect(typeof body.error.message).toBe("string");
     expect(body.error.message.length).toBeGreaterThan(0);
+  });
+});
+
+// ─── Scenario: nonce failure page (AC-F5A-10) ──────────────────────────────────────────
+
+describe("nonce failure page", () => {
+  const cleanups: Array<() => void> = [];
+  afterEach(() => {
+    while (cleanups.length > 0) cleanups.pop()?.();
+  });
+
+  /**
+   * Shared assertion body for every consumed/expired/unknown outcome (DD-2: "the endpoint
+   * answers 410 for consumed/expired/unknown nonces" — the caller never needs to
+   * distinguish which; the spec's Failure Modes table demands the SAME human-readable page
+   * for all three). Fails today against `jsonError(...)`'s bare JSON envelope.
+   */
+  async function assertHumanReadableFailurePage(res: Response): Promise<void> {
+    expect(res.status).toBe(410);
+    expect(res.headers.get("content-type") ?? "").toContain("text/html");
+
+    const body = await res.text();
+    // Must be an actual HTML document, not a JSON envelope wearing an html Content-Type.
+    expect(body.toLowerCase()).toContain("<html");
+    expect(() => JSON.parse(body)).toThrow();
+    expect(body).not.toContain('"ok":false');
+    // Must name the `lore dashboard` relaunch as the fix (Failure Modes table wording).
+    expect(body).toContain("lore dashboard");
+    // Must carry a client-side probe against GET /api/auth/me, forwarding an
+    // already-authenticated browser to `/` instead of stranding it on a dead end (the
+    // constraint DD-2 documents: `lore_sid` is Path=/api, so /auth/bootstrap can never see
+    // the cookie server-side).
+    expect(body).toContain("/api/auth/me");
+  }
+
+  it("HAPPY: successful redemption still answers 302 with Set-Cookie and Location: / (unchanged by the failure-page fix)", async () => {
+    const fixtureDir = mkdtempSync(join(tmpdir(), "lore-static-serving-fixture-"));
+    cleanups.push(() => rmSync(fixtureDir, { recursive: true, force: true }));
+    const { manifest } = writeFixtureAssets(fixtureDir);
+
+    const machineAuth = makeMachineAuth();
+    cleanups.push(machineAuth.cleanup);
+
+    const { createNonceStore } = await importStaticServing();
+    const nonceStore = createNonceStore({ ttlMs: 60_000 });
+
+    const ctx = await makeServer({
+      assets: async () => ({ available: true, manifest }),
+      nonces: nonceStore,
+      machineAuth: () => machineAuth.stores,
+    });
+    cleanups.push(ctx.cleanup);
+
+    const nonce = nonceStore.mint();
+    const res = await fetch(`${ctx.baseUrl}/auth/bootstrap?nonce=${nonce}`, { redirect: "manual" });
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/");
+    expect(res.headers.get("set-cookie") ?? "").toContain("lore_sid=");
+  });
+
+  it("NEGATIVE/BOUNDARY: a consumed (replayed) nonce answers a human-readable HTML 410 page, never the JSON envelope", async () => {
+    const fixtureDir = mkdtempSync(join(tmpdir(), "lore-static-serving-fixture-"));
+    cleanups.push(() => rmSync(fixtureDir, { recursive: true, force: true }));
+    const { manifest } = writeFixtureAssets(fixtureDir);
+
+    const machineAuth = makeMachineAuth();
+    cleanups.push(machineAuth.cleanup);
+
+    const { createNonceStore } = await importStaticServing();
+    const nonceStore = createNonceStore({ ttlMs: 60_000 });
+
+    const ctx = await makeServer({
+      assets: async () => ({ available: true, manifest }),
+      nonces: nonceStore,
+      machineAuth: () => machineAuth.stores,
+    });
+    cleanups.push(ctx.cleanup);
+
+    const nonce = nonceStore.mint();
+    // First redemption succeeds and consumes the token (single-use, DD-2).
+    const first = await fetch(`${ctx.baseUrl}/auth/bootstrap?nonce=${nonce}`, { redirect: "manual" });
+    expect(first.status).toBe(302);
+
+    // Replay of the SAME, now-consumed token.
+    const replay = await fetch(`${ctx.baseUrl}/auth/bootstrap?nonce=${nonce}`, { redirect: "manual" });
+    await assertHumanReadableFailurePage(replay);
+  });
+
+  it("NEGATIVE/BOUNDARY: an expired nonce answers a human-readable HTML 410 page, never the JSON envelope", async () => {
+    const fixtureDir = mkdtempSync(join(tmpdir(), "lore-static-serving-fixture-"));
+    cleanups.push(() => rmSync(fixtureDir, { recursive: true, force: true }));
+    const { manifest } = writeFixtureAssets(fixtureDir);
+
+    const { createNonceStore } = await importStaticServing();
+    // Injectable TTL seam (this file's header contract) — a 1ms TTL lets this scenario
+    // observe "expired" deterministically without a real 60s sleep.
+    const nonceStore = createNonceStore({ ttlMs: 1 });
+
+    const ctx = await makeServer({
+      assets: async () => ({ available: true, manifest }),
+      nonces: nonceStore,
+      // A failed (non-"granted") nonce redemption must NEVER touch machineAuth — a
+      // throwing stub here turns any regression that does into a loud test failure
+      // instead of a silently-passing test.
+      machineAuth: () => {
+        throw new Error("machineAuth must not be invoked for a non-granted nonce outcome");
+      },
+    });
+    cleanups.push(ctx.cleanup);
+
+    const nonce = nonceStore.mint();
+    // Let the 1ms TTL lapse — no real sleep, just enough wall time for Date.now() to move.
+    await new Promise((resolve) => setTimeout(resolve, 15));
+
+    const res = await fetch(`${ctx.baseUrl}/auth/bootstrap?nonce=${nonce}`, { redirect: "manual" });
+    await assertHumanReadableFailurePage(res);
+  });
+
+  it("NEGATIVE/BOUNDARY: an unknown (never-minted) nonce answers a human-readable HTML 410 page, never the JSON envelope", async () => {
+    const fixtureDir = mkdtempSync(join(tmpdir(), "lore-static-serving-fixture-"));
+    cleanups.push(() => rmSync(fixtureDir, { recursive: true, force: true }));
+    const { manifest } = writeFixtureAssets(fixtureDir);
+
+    const { createNonceStore } = await importStaticServing();
+    const nonceStore = createNonceStore({ ttlMs: 60_000 });
+
+    const ctx = await makeServer({
+      assets: async () => ({ available: true, manifest }),
+      nonces: nonceStore,
+      machineAuth: () => {
+        throw new Error("machineAuth must not be invoked for a non-granted nonce outcome");
+      },
+    });
+    cleanups.push(ctx.cleanup);
+
+    const res = await fetch(`${ctx.baseUrl}/auth/bootstrap?nonce=never-minted-red-f5a-10`, { redirect: "manual" });
+    await assertHumanReadableFailurePage(res);
+  });
+
+  it("REGRESSION: the Sec-Fetch-Dest iframe guard still answers 403 JSON before the nonce store is touched (never HTML)", async () => {
+    const fixtureDir = mkdtempSync(join(tmpdir(), "lore-static-serving-fixture-"));
+    cleanups.push(() => rmSync(fixtureDir, { recursive: true, force: true }));
+    const { manifest } = writeFixtureAssets(fixtureDir);
+
+    const { createNonceStore } = await importStaticServing();
+    const nonceStore = createNonceStore({ ttlMs: 60_000 });
+
+    const ctx = await makeServer({
+      assets: async () => ({ available: true, manifest }),
+      nonces: nonceStore,
+      // The Sec-Fetch guard fires BEFORE the nonce store (and, a fortiori, machineAuth)
+      // is ever touched — a throwing stub proves that ordering.
+      machineAuth: () => {
+        throw new Error("machineAuth must not be invoked for a rejected navigation");
+      },
+    });
+    cleanups.push(ctx.cleanup);
+
+    const nonce = nonceStore.mint();
+    const res = await fetch(`${ctx.baseUrl}/auth/bootstrap?nonce=${nonce}`, {
+      redirect: "manual",
+      headers: { "Sec-Fetch-Dest": "iframe" },
+    });
+
+    expect(res.status).toBe(403);
+    expect(res.headers.get("content-type") ?? "").toContain("application/json");
+    const body = (await res.json()) as { ok: boolean; error: { code: string } };
+    expect(body.ok).toBe(false);
+    expect(typeof body.error.code).toBe("string");
+
+    // The nonce must still be redeemable afterward — proof the rejected iframe attempt
+    // never burned it.
+    const legitimate = await fetch(`${ctx.baseUrl}/auth/bootstrap?nonce=${nonce}`, { redirect: "manual" });
+    expect(legitimate.status).not.toBe(403);
+  });
+
+  it("REGRESSION: the machine-auth-unavailable path still answers 503 JSON (AC-F5A-7 shape unchanged, never HTML)", async () => {
+    const fixtureDir = mkdtempSync(join(tmpdir(), "lore-static-serving-fixture-"));
+    cleanups.push(() => rmSync(fixtureDir, { recursive: true, force: true }));
+    const { manifest } = writeFixtureAssets(fixtureDir);
+
+    const { createNonceStore } = await importStaticServing();
+    const nonceStore = createNonceStore({ ttlMs: 60_000 });
+
+    const ctx = await makeServer({
+      assets: async () => ({ available: true, manifest }),
+      nonces: nonceStore,
+      machineAuth: () => {
+        throw new Error("EACCES: permission denied, open 'dashboard-auth.db'");
+      },
+    });
+    cleanups.push(ctx.cleanup);
+
+    const nonce = nonceStore.mint();
+    const res = await fetch(`${ctx.baseUrl}/auth/bootstrap?nonce=${nonce}`, { redirect: "manual" });
+
+    expect(res.status).toBe(503);
+    expect(res.headers.get("content-type") ?? "").toContain("application/json");
+    const body = (await res.json()) as { ok: boolean; error: { code: string } };
+    expect(body.ok).toBe(false);
+    expect(typeof body.error.code).toBe("string");
   });
 });

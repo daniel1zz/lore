@@ -59,18 +59,42 @@
  * @spec_ref spec-dashboard-production-packaging-one-command-lore-dashboard DD-5, AC-F5A-5
  * @spec_ref task-skill-test-f5a-cli-packaged-mode-red-scenarios
  * @spec_ref task-skill-test-f5a-source-run-guard-test-must-control-its-own
+ *
+ * ─── AC-F5A-9 addendum (RED, task-red-failing-tests-for-no-open-suppression-nonce-
+ * failure) — "--no-open honours the flag by suppressing the browser opener" ───────────
+ *
+ * `citty@0.1.6`'s bundled mri parser (`node_modules/citty/dist/index.mjs:170`) rewrites
+ * ANY `--no-X` token into `out[X] = false`, so the literal key `"no-open"` never exists in
+ * `args` — both `runPackagedMode` (`commands/dashboard.ts:329`) and `runDevMode` (:650) read
+ * `args["no-open"]`, get `undefined`, and open the browser unconditionally. The scenario
+ * below does NOT assert on parsed argv (that would encode the bug as the expectation) — it
+ * intercepts the actual OPENER process via a `PATH`-shimmed `open` executable that appends
+ * its argv to a log file, exactly like the reproduction that found this defect. Unlike every
+ * other scenario in this file (which deliberately runs FROM SOURCE to exercise the
+ * "assets-not-built" precondition), this scenario spawns the COMPILED `dist/lore` binary
+ * against a real embedded manifest (`bun run build` must have run first —
+ * `assertFreshBinary` fails loud otherwise) — packaged mode's browser-open call site is only
+ * reachable once assets actually resolve as available, and `LORE_DASHBOARD_ASSETS_FIXTURE`
+ * is a from-source-only seam this scenario has no need for.
+ *
+ * @spec_ref spec-dashboard-production-packaging-one-command-lore-dashboard AC-F5A-9
+ * @spec_ref task-red-failing-tests-for-no-open-suppression-nonce-failure
  */
 
-import { afterEach, describe, expect, it } from "bun:test";
-import { mkdtempSync, rmSync } from "fs";
-import { join } from "path";
+import { afterEach, beforeAll, describe, expect, it } from "bun:test";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { dirname, join } from "path";
 import { tmpdir } from "os";
+import { assertFreshBinary } from "./helpers/assert-fresh-binary";
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
 
 // tests/integration/ -> tests/ -> packages/lore/ (this file's own package root).
 const PACKAGE_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
+// packages/lore/ -> packages/ -> repo root (2 levels up from PACKAGE_ROOT).
+const REPO_ROOT = dirname(dirname(PACKAGE_ROOT));
+const DIST_LORE = join(REPO_ROOT, "dist", "lore");
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -381,5 +405,229 @@ describe("dev retention — --dev selects the vite-child path and threads the re
       }
     },
     20_000,
+  );
+});
+
+// ─── Scenario 4: --no-open opener interception (AC-F5A-9, compiled binary) ─────────────
+//
+// This scenario spawns the COMPILED `dist/lore` binary (packaged mode, the default — no
+// `--dev`), never `bun run <INDEX_TS>` — packaged mode needs a REAL embedded assets
+// manifest to ever reach the browser-open call site, and `bun run build` (which this
+// worktree already ran) is what produces it. `assertFreshBinary` fails loud, before any
+// spawn, if the binary is missing or stale relative to source.
+
+/** Executable-`open`-shim fixture: a PATH-prependable dir whose `open` script appends its
+ * argv to `logFile` instead of doing anything real. Never trusts parsed argv — this is the
+ * actual opener the CLI's `openBrowser()` (`commands/dashboard.ts`) resolves via `PATH`
+ * lookup on darwin (`spawn("open", [url], ...)`). */
+interface OpenShim {
+  readonly shimDir: string;
+  readonly logFile: string;
+  cleanup(): void;
+}
+
+function createOpenShim(): OpenShim {
+  const shimDir = mkdtempSync(join(tmpdir(), "lore-no-open-shim-"));
+  const logFile = join(shimDir, "open-invocations.log");
+  const openScriptPath = join(shimDir, "open");
+  writeFileSync(openScriptPath, `#!/bin/sh\necho "OPEN_CALLED args=$*" >> "${logFile}"\n`);
+  chmodSync(openScriptPath, 0o755);
+  return {
+    shimDir,
+    logFile,
+    cleanup: () => {
+      try {
+        rmSync(shimDir, { recursive: true, force: true });
+      } catch {
+        /* best-effort cleanup */
+      }
+    },
+  };
+}
+
+/** Reads `logFile`'s content, or `""` if the shim was never invoked (file never created —
+ * that is the expected outcome for a correctly-suppressed `--no-open` run). */
+function readShimLog(logFile: string): string {
+  return existsSync(logFile) ? readFileSync(logFile, "utf8") : "";
+}
+
+/**
+ * Structural shape this file needs from a `Bun.spawn(...)` result — deliberately NOT
+ * `ReturnType<typeof Bun.spawn>`: that utility type resolves the function's generic I/O
+ * type parameters to their unconstrained union (not the call site's actual `"pipe"`
+ * literals), which widens `.stdout` to `number | ReadableStream | undefined` and breaks
+ * every consumer expecting a concrete `ReadableStream`. Declaring variables against this
+ * narrower interface instead lets the real `Bun.spawn(...)` call sites (which DO pass
+ * literal `stdout: "pipe"` options) infer their own concrete, correctly-typed return value,
+ * which then structurally satisfies this interface.
+ */
+interface DashboardProcessHandle {
+  readonly stdout: ReadableStream<Uint8Array>;
+  readonly exited: Promise<number>;
+  readonly killed: boolean;
+  kill(signal?: number | NodeJS.Signals): void;
+}
+
+/**
+ * Reads `stream` incrementally until `LORE_DASHBOARD_URL=<url>` (packaged mode's
+ * machine-readable stdout handshake, written BEFORE the browser-open call and BEFORE the
+ * process blocks for SIGINT/SIGTERM) appears, or `timeoutMs` elapses.
+ */
+async function waitForDashboardHandshake(
+  stream: ReadableStream<Uint8Array>,
+  timeoutMs: number,
+): Promise<{ url: string; stdoutSoFar: string }> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const deadline = Date.now() + timeoutMs;
+  try {
+    for (;;) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        throw new Error(
+          `handshake "LORE_DASHBOARD_URL=" not observed within ${timeoutMs}ms; stdout so far:\n${buffer}`,
+        );
+      }
+      const outcome = await Promise.race([
+        reader.read(),
+        new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), remaining)),
+      ]);
+      if (outcome === "timeout") {
+        throw new Error(
+          `handshake "LORE_DASHBOARD_URL=" not observed within ${timeoutMs}ms; stdout so far:\n${buffer}`,
+        );
+      }
+      const { value, done } = outcome;
+      if (done) {
+        throw new Error(`process stdout closed before the handshake appeared; stdout so far:\n${buffer}`);
+      }
+      buffer += decoder.decode(value, { stream: true });
+      const match = /^LORE_DASHBOARD_URL=(\S+)$/m.exec(buffer);
+      if (match) return { url: match[1]!, stdoutSoFar: buffer };
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+/** Sends SIGTERM and waits for exit, escalating to SIGKILL if the process is unresponsive. */
+async function killAndWait(proc: DashboardProcessHandle, timeoutMs = 8_000): Promise<void> {
+  if (proc.killed) return;
+  try {
+    proc.kill("SIGTERM");
+  } catch {
+    /* already gone */
+  }
+  const exited = await Promise.race([
+    proc.exited.then(() => true),
+    new Promise<boolean>((resolve) => setTimeout(() => resolve(false), timeoutMs)),
+  ]);
+  if (!exited) {
+    try {
+      proc.kill("SIGKILL");
+    } catch {
+      /* already gone */
+    }
+    await proc.exited;
+  }
+}
+
+describe("--no-open honours the flag by suppressing the browser opener (AC-F5A-9, packaged mode, compiled binary)", () => {
+  beforeAll(() => {
+    assertFreshBinary(DIST_LORE, [join(REPO_ROOT, "packages", "lore", "src"), join(REPO_ROOT, "packages", "core", "src")]);
+  });
+
+  it(
+    "no-open: --no-open spawns ZERO browser-opener invocations; the control run (same command, no --no-open) spawns exactly ONE — proving the shim itself is live",
+    async () => {
+      const fixture = makeFixture();
+      const suppressedShim = createOpenShim();
+      const controlShim = createOpenShim();
+
+      let suppressedProc: DashboardProcessHandle | undefined;
+      let controlProc: DashboardProcessHandle | undefined;
+
+      try {
+        // ── Suppressed case: --no-open must yield ZERO opener invocations ──────────
+        const suppressedPort = randomPort();
+        suppressedProc = Bun.spawn(
+          [DIST_LORE, "dashboard", "--api-port", String(suppressedPort), "--no-open"],
+          {
+            cwd: fixture.corpusDir,
+            env: {
+              ...process.env,
+              HOME: fixture.corpusDir,
+              LORE_STATE_HOME: fixture.stateDir,
+              LORE_CONFIG_HOME: fixture.configDir,
+              CLAUDECODE: "1",
+              PATH: `${suppressedShim.shimDir}:${process.env.PATH ?? ""}`,
+            },
+            stdout: "pipe",
+            stderr: "pipe",
+          },
+        );
+
+        const suppressedHandshake = await waitForDashboardHandshake(suppressedProc.stdout, 15_000);
+        expect(suppressedHandshake.url).toContain(`:${suppressedPort}`);
+        expect(suppressedHandshake.url).toContain("/auth/bootstrap?nonce=");
+
+        // Grace window for the (buggy) opener spawn to have fired and the shim script
+        // to have flushed its log line — the real invocation, if it happens, is
+        // effectively instantaneous (a trivial shell echo), so this is generous.
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+
+        await killAndWait(suppressedProc);
+
+        const suppressedLog = readShimLog(suppressedShim.logFile);
+        // THE assertion: --no-open must suppress the opener entirely. This FAILS against
+        // current `commands/dashboard.ts` (both `runPackagedMode`/`runDevMode` read
+        // `args["no-open"]`, which citty/mri never populates — see this file's header
+        // addendum) — the log instead contains exactly one OPEN_CALLED line, identical to
+        // the control case below.
+        expect(suppressedLog).toBe("");
+
+        // ── Control case: WITHOUT --no-open, the opener must fire exactly once ─────
+        const controlPort = randomPort();
+        controlProc = Bun.spawn([DIST_LORE, "dashboard", "--api-port", String(controlPort)], {
+          cwd: fixture.corpusDir,
+          env: {
+            ...process.env,
+            HOME: fixture.corpusDir,
+            LORE_STATE_HOME: fixture.stateDir,
+            LORE_CONFIG_HOME: fixture.configDir,
+            CLAUDECODE: "1",
+            PATH: `${controlShim.shimDir}:${process.env.PATH ?? ""}`,
+          },
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+
+        const controlHandshake = await waitForDashboardHandshake(controlProc.stdout, 15_000);
+        expect(controlHandshake.url).toContain(`:${controlPort}`);
+
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+
+        await killAndWait(controlProc);
+
+        const controlLog = readShimLog(controlShim.logFile);
+        const controlInvocations = controlLog
+          .split("\n")
+          .filter((line) => line.startsWith("OPEN_CALLED"));
+        // Proves the shim itself is live and the grace window is sufficient — a
+        // "suppressedLog === ''" result above is only meaningful relative to this control
+        // actually recording exactly one call.
+        expect(controlInvocations.length).toBe(1);
+        expect(controlLog).toContain(`:${controlPort}`);
+        expect(controlLog).toContain("/auth/bootstrap?nonce=");
+      } finally {
+        if (suppressedProc !== undefined) await killAndWait(suppressedProc);
+        if (controlProc !== undefined) await killAndWait(controlProc);
+        suppressedShim.cleanup();
+        controlShim.cleanup();
+        cleanupFixture(fixture);
+      }
+    },
+    45_000,
   );
 });
