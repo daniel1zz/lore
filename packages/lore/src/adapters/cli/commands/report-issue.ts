@@ -6,9 +6,14 @@
  * Files a structured lore-defect report directly into a configured upstream
  * corpus (SPEC-072), landing there as a draft ad-hoc task in the upstream
  * pending-review queue. `--list` shows this consumer corpus's filed history,
- * joined LIVE with upstream status (including rejection reasons, T5
- * `UpstreamPort.getDocStatus`) — a separate read-only mode, mutually
- * exclusive with the report-filing flags.
+ * joined LIVE with the upstream DEFECT's computed resolution (D6,
+ * spec-issue-closure-loop-computed-resolution-agent-reachable; including
+ * rejection/wontfix reasons, `UpstreamPort.getResolution`) — a separate
+ * read-only mode, mutually exclusive with the report-filing flags. The raw
+ * upstream doc status is demoted to a secondary debugging column
+ * (`doc_status`); it is NOT the primary signal a reporting agent should read
+ * anymore (a `draft` issue task whose fix shipped as a separate archived doc
+ * now correctly prints `fixed`, not `draft`).
  *
  * `--list` and any of `--title`/`--description`/`--expected`/`--actual`/
  * `--repro-command` together is a usage error (exit 2, checked BEFORE any
@@ -238,12 +243,16 @@ export default defineCommand({
           return;
         }
 
-        const headers = ["Doc ID", "Title", "Filed At", "Status", "Rejection Reason"];
+        // reason: "Resolution" (D6's computed resolution) is now the PRIMARY
+        // signal; "Doc Status" (the upstream doc's raw lifecycle status) is
+        // demoted to a debugging detail, per this file's own header.
+        const headers = ["Doc ID", "Title", "Filed At", "Resolution", "Doc Status", "Reason"];
         const rows = result.value.map((row) => [
           row.upstream_doc_id,
           row.title,
           row.at,
           row.status,
+          row.doc_status ?? "",
           row.rejection_reason ?? "",
         ]);
         console.log(formatTable(headers, rows));
