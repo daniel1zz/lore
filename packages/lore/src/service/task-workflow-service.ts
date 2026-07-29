@@ -711,6 +711,21 @@ export class TaskWorkflowService {
       });
     }
 
+    // task-fix-ordering-regression-placeholder-command-guard-preempts — resolve
+    // and doc-type-validate the target BEFORE the placeholder-command check so a
+    // wrong-doc-type call (e.g. `lore evidence` against a PLAN) still surfaces
+    // "Expected a task document", not a command-format complaint. Regression: the
+    // placeholder check used to run first and, since it validates only the raw
+    // `command` string (never the target doc), any short filler command on a
+    // non-task doc reported the placeholder error instead of the doc-type error —
+    // the LESS actionable message won by accident of ordering. `appendEvidenceEntry`
+    // below re-resolves the same doc; a duplicate store read is acceptable here,
+    // correctness over one extra read (see the task's own exit condition: the
+    // wrong-doc-type message must win, and this call must never let a wrong-type
+    // target retry into phase-dispatch handling).
+    const targetCheck = await this.resolveTask(idOrSlug);
+    if (!targetCheck.ok) return targetCheck;
+
     // task-reject-placeholder-command-strings-at-evidence-write-time — see
     // rejectPlaceholderEvidenceCommand's own JSDoc for the incident this defends
     // against and why it is scoped to THIS self-reported path only (never the
