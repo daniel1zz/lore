@@ -19,11 +19,11 @@
  * (`../../src/service/issue-resolution.js`) is CONSUMED via `issues.ts`,
  * never reimplemented here.
  *
- * Shares the SAME KNOWN GAP `issue-closure.bun.test.ts` documents (migration
- * never widened `links.link_type`'s CHECK constraint for `"resolves"`) —
- * the two precedence cases below that need a real `resolves` edge reuse
- * `widenLinkTypeCheckForResolvesTestOnly`, duplicated rather than imported
- * (test-only helper, not a production module).
+ * A fresh `lore init` corpus already accepts `resolves` edges via the real
+ * migration path (`migration-012`, `packages/lore/src/store/migrations/
+ * migration-012.ts` — see `issue-closure.bun.test.ts`'s module header for the
+ * historical gap it closed) — the precedence cases below write real
+ * `resolves` edges via `dist/lore link --type resolves`, no widening needed.
  *
  * Coverage (six-dimension):
  *   HAPPY: an archived issue with no edge/no explicit state computes
@@ -50,7 +50,6 @@
  */
 
 import { afterEach, beforeAll, describe, expect, it } from "bun:test";
-import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -118,41 +117,6 @@ function parseJson<T = unknown>(stdout: string): JsonEnvelope<T> {
     return JSON.parse(stdout) as JsonEnvelope<T>;
   } catch {
     throw new Error(`could not parse JSON from stdout: ${stdout}`);
-  }
-}
-
-/**
- * ⚠ TEST-ONLY workaround for the SAME known gap `issue-closure.bun.test.ts`
- * documents — widens `links.link_type`'s CHECK constraint on THIS throwaway
- * corpus's `.lore/lore.db` to accept `"resolves"`, mirroring migration-004's
- * exact table-recreate DDL shape. Deliberately does NOT touch
- * `PRAGMA user_version` — this db is discarded at test end.
- */
-function widenLinkTypeCheckForResolvesTestOnly(dbPath: string): void {
-  const db = new Database(dbPath);
-  try {
-    db.exec(`
-      BEGIN IMMEDIATE;
-      DROP TABLE IF EXISTS links_new;
-      CREATE TABLE links_new (
-        from_id     TEXT NOT NULL REFERENCES docs(id),
-        to_id       TEXT NOT NULL REFERENCES docs(id),
-        link_type   TEXT NOT NULL CHECK(link_type IN ('parent','implements','informs','supersedes','relates-to','blocks','governs','resolves')),
-        created_at  TEXT NOT NULL,
-        created_by  TEXT NOT NULL,
-        PRIMARY KEY (from_id, to_id, link_type)
-      );
-      INSERT INTO links_new (from_id, to_id, link_type, created_at, created_by)
-        SELECT from_id, to_id, link_type, created_at, created_by FROM links;
-      DROP TABLE links;
-      ALTER TABLE links_new RENAME TO links;
-      CREATE INDEX idx_links_from ON links(from_id);
-      CREATE INDEX idx_links_to   ON links(to_id);
-      CREATE INDEX idx_links_type ON links(link_type);
-      COMMIT;
-    `);
-  } finally {
-    db.close();
   }
 }
 
@@ -337,7 +301,6 @@ describe("AC-ICL-10: archived issue with no resolves in-edge and no explicit ter
   it("AC-ICL-10 STATE: a resolves edge on an archived issue WINS over 'closed' (both terminal 'fixed' and non-terminal 'resolving' sources), and a draft->archived transition moves an issue from --open into --resolved as 'closed'", async () => {
     const dir = freshDir("lore-issue-closed-state-");
     initCorpus(dir);
-    widenLinkTypeCheckForResolvesTestOnly(dbPathFor(dir));
 
     const store = new SQLiteStore(dbPathFor(dir));
     const cs = new CorpusService(store);

@@ -21,30 +21,18 @@
  * (`../../src/service/issue-resolution.js`) is CONSUMED via `issue.ts`/
  * `issues.ts`, never reimplemented here or there.
  *
- * ⛔ KNOWN GAP discovered while building this suite (NOT one of AC-ICL-3/4/5,
- * and NOT fixed by this task — `packages/lore/src/store/migrations/**` and
- * `sqlite-store.ts` are OUTSIDE this task's file anchors): migration-004
- * widened `links.link_type`'s CHECK constraint to accept `"governs"`, but no
- * migration ever widened it further for `"resolves"` — `linkTypeSchema`
- * (`@lore/core`) gained `"resolves"` as its 8th member (P1), yet the SQLite
- * DDL layer never followed. Confirmed via direct reproduction: on a FRESH
- * `lore init` corpus, `dist/lore link --type resolves <a> <b>` fails with
- * `CHECK constraint failed: link_type IN ('parent','implements','informs',
- * 'supersedes','relates-to','blocks','governs')` — a DIFFERENT failure from
- * the CLI-layer `VALID_LINK_TYPES` bug this task's `link.ts` SSOT-collapse
- * fix addresses (that fix is NECESSARY — without it this command fails even
- * EARLIER, at exit 2, before ever reaching the store — but it is not
- * SUFFICIENT against a real corpus). This also blocks the sibling P3 task
- * ("e2e closure proof + live backlog closure"), which depends on the exact
- * same command against the team's real corpus. `widenLinkTypeCheckForResolvesTestOnly`
- * below widens the CHECK constraint on THIS SUITE'S OWN throwaway corpora
- * only (mirrors migration-004's exact table-recreate DDL, substituting the
- * widened list, deliberately WITHOUT touching `PRAGMA user_version`) so this
- * suite can still prove `issue.ts`/`issues.ts`'s read-side wiring
- * (`get().navigation.related` -> `computeIssueResolution`) end to end — it is
- * a TEST-ONLY workaround, not a substitute for the still-missing production
- * migration (flagged in this task's completion report for a dedicated
- * follow-up task).
+ * Historical note: an earlier version of this suite carried a test-only
+ * SQLite CHECK-widening helper because migration-004 widened
+ * `links.link_type`'s CHECK constraint to accept `"governs"` but no migration
+ * yet widened it for `"resolves"` — `linkTypeSchema` (`@lore/core`) had
+ * already accepted `"resolves"` as its 8th member (P1), but every REAL
+ * (non-`InMemoryStore`) write of a `resolves` edge failed the CHECK
+ * constraint. `migration-012` (`packages/lore/src/store/migrations/
+ * migration-012.ts`) closed that gap by widening the CHECK constraint on the
+ * real migration path (mirroring migration-004's exact table-recreate DDL).
+ * A fresh `lore init` corpus therefore already accepts `resolves` edges with
+ * no widening step — every case below writes real `resolves` edges via
+ * `dist/lore link --type resolves` against a normally-migrated corpus.
  *
  * Coverage (six-dimension, spread across the three AC groups):
  *   AC-ICL-3: HAPPY (fixed rejected, writes nothing) / NEGATIVE (fixed
@@ -56,15 +44,14 @@
  *     NEGATIVE (non-issue target rejected, unchanged) / BOUNDARY (empty
  *     --reason rejected) / ERROR (nonexistent issue) / STATE (explicit state
  *     wins over a resolves-edge computation that would otherwise be
- *     "fixed" — KNOWN-GAP workaround) / REGRESSION (sibling extra fields
- *     survive the RMW write).
+ *     "fixed") / REGRESSION (sibling extra fields survive the RMW write).
  *   AC-ICL-5: HAPPY (--all lists exactly the issue tasks with correct
- *     open/resolving/fixed resolutions, excludes a plain task — KNOWN-GAP
- *     workaround for resolving/fixed) / BOUNDARY (default --open excludes
- *     all 3 terminal states, includes open+resolving) / ERROR (zero-report
- *     corpus -> empty list, exit 0) / STATE (resolving an open report moves
- *     it from --open into --resolved) / REGRESSION (mutex flag violation
- *     exits 2; no-flag default matches --open exactly).
+ *     open/resolving/fixed resolutions, excludes a plain task) / BOUNDARY
+ *     (default --open excludes all 3 terminal states, includes
+ *     open+resolving) / ERROR (zero-report corpus -> empty list, exit 0) /
+ *     STATE (resolving an open report moves it from --open into --resolved)
+ *     / REGRESSION (mutex flag violation exits 2; no-flag default matches
+ *     --open exactly).
  *
  * @spec_ref spec-issue-closure-loop-computed-resolution-agent-reachable §D3,
  *   §D4, AC-ICL-3, AC-ICL-4, AC-ICL-5;
@@ -72,7 +59,6 @@
  */
 
 import { afterEach, beforeAll, describe, expect, it } from "bun:test";
-import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -148,45 +134,6 @@ function parseJson<T = unknown>(stdout: string): JsonEnvelope<T> {
     return JSON.parse(stdout) as JsonEnvelope<T>;
   } catch {
     throw new Error(`could not parse JSON from stdout: ${stdout}`);
-  }
-}
-
-/**
- * ⚠ TEST-ONLY workaround for the KNOWN GAP documented in this file's module
- * header — widens `links.link_type`'s CHECK constraint on THIS throwaway
- * corpus's `.lore/lore.db` to accept `"resolves"`, mirroring migration-004's
- * exact table-recreate DDL shape (`packages/lore/src/store/migrations/
- * migration-004.ts`) with `'resolves'` appended to the `IN (...)` list.
- * Deliberately does NOT touch `PRAGMA user_version` — this db is discarded
- * at test end, and leaving the version counter alone avoids any chance of
- * colliding with a real future migration-012. NOT a substitute for that
- * still-missing production migration; see this file's module header.
- */
-function widenLinkTypeCheckForResolvesTestOnly(dbPath: string): void {
-  const db = new Database(dbPath);
-  try {
-    db.exec(`
-      BEGIN IMMEDIATE;
-      DROP TABLE IF EXISTS links_new;
-      CREATE TABLE links_new (
-        from_id     TEXT NOT NULL REFERENCES docs(id),
-        to_id       TEXT NOT NULL REFERENCES docs(id),
-        link_type   TEXT NOT NULL CHECK(link_type IN ('parent','implements','informs','supersedes','relates-to','blocks','governs','resolves')),
-        created_at  TEXT NOT NULL,
-        created_by  TEXT NOT NULL,
-        PRIMARY KEY (from_id, to_id, link_type)
-      );
-      INSERT INTO links_new (from_id, to_id, link_type, created_at, created_by)
-        SELECT from_id, to_id, link_type, created_at, created_by FROM links;
-      DROP TABLE links;
-      ALTER TABLE links_new RENAME TO links;
-      CREATE INDEX idx_links_from ON links(from_id);
-      CREATE INDEX idx_links_to   ON links(to_id);
-      CREATE INDEX idx_links_type ON links(link_type);
-      COMMIT;
-    `);
-  } finally {
-    db.close();
   }
 }
 
@@ -481,10 +428,9 @@ describe("AC-ICL-4: lore issue resolve --state rejected|wontfix --reason persist
     expect(result.exitCode).not.toBe(0);
   });
 
-  it("STATE [KNOWN-GAP workaround]: an explicit terminal state WINS over a resolves-edge computation that would otherwise be 'fixed'", async () => {
+  it("STATE: an explicit terminal state WINS over a resolves-edge computation that would otherwise be 'fixed'", async () => {
     const dir = freshDir("lore-issue-closure-4-state-precedence-");
     initCorpus(dir);
-    widenLinkTypeCheckForResolvesTestOnly(dbPathFor(dir));
 
     const store = new SQLiteStore(dbPathFor(dir));
     const cs = new CorpusService(store);
@@ -546,10 +492,9 @@ describe("AC-ICL-4: lore issue resolve --state rejected|wontfix --reason persist
 // ─── AC-ICL-5: lore issues --json listing + computed resolution ────────────
 
 describe("AC-ICL-5: lore issues --json lists exactly issue-report-carrying tasks with computed resolution", () => {
-  it("HAPPY [KNOWN-GAP workaround for resolving/fixed]: --all lists exactly the 3 issue tasks with correct resolutions, excludes a plain task entirely", async () => {
+  it("HAPPY: --all lists exactly the 3 issue tasks with correct resolutions, excludes a plain task entirely", async () => {
     const dir = freshDir("lore-issue-closure-5-happy-");
     initCorpus(dir);
-    widenLinkTypeCheckForResolvesTestOnly(dbPathFor(dir));
 
     const store = new SQLiteStore(dbPathFor(dir));
     const cs = new CorpusService(store);
@@ -592,10 +537,9 @@ describe("AC-ICL-5: lore issues --json lists exactly issue-report-carrying tasks
     expect(openRow.age).toMatch(/ago$/);
   });
 
-  it("BOUNDARY [KNOWN-GAP workaround]: default (--open) excludes fixed/rejected/wontfix but includes open+resolving", async () => {
+  it("BOUNDARY: default (--open) excludes fixed/rejected/wontfix but includes open+resolving", async () => {
     const dir = freshDir("lore-issue-closure-5-boundary-");
     initCorpus(dir);
-    widenLinkTypeCheckForResolvesTestOnly(dbPathFor(dir));
 
     const store = new SQLiteStore(dbPathFor(dir));
     const cs = new CorpusService(store);
