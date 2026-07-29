@@ -269,7 +269,7 @@ async function resolveAssets(): Promise<DashboardAssetsResult> {
  */
 async function runPackagedMode(args: {
   "api-port"?: string;
-  "no-open"?: boolean;
+  open?: boolean;
 }): Promise<never> {
   // DD-5 / Failure Modes table: this guard is the FIRST thing packaged mode does — no
   // corpus load, no store open, no port parsed, no listener bound — so an unavailable-
@@ -326,7 +326,10 @@ async function runPackagedMode(args: {
   process.stdout.write(`LORE_DASHBOARD_URL=${bootstrapUrl}\n`);
   process.stdout.write(`\nDashboard ready: ${bootstrapUrl}\n`);
 
-  if (!args["no-open"]) {
+  // reason: `args.open` (not `args["no-open"]`) — see the flag definition's own `reason:`
+  // comment below for why the declared name and the read site must agree with citty/mri's
+  // negation rewrite.
+  if (args.open !== false) {
     openBrowser(bootstrapUrl);
   }
 
@@ -444,7 +447,7 @@ function killableProcessGroup(child: ReturnType<typeof spawn>): KillableChild {
 async function runDevMode(args: {
   "api-port"?: string;
   "dashboard-port"?: string;
-  "no-open"?: boolean;
+  open?: boolean;
 }): Promise<never> {
   const { app, dbPath } = loadLoreApp();
   const loreDir = dirname(dbPath);
@@ -647,7 +650,9 @@ async function runDevMode(args: {
   const dashUrl = `http://localhost:${dashPort}/`;
   process.stdout.write(`\nDashboard ready: ${dashUrl}\n`);
 
-  if (!args["no-open"]) {
+  // reason: `args.open` — see the flag definition's `reason:` comment (below) on citty/mri's
+  // `--no-X` negation rewrite.
+  if (args.open !== false) {
     openBrowser(dashUrl);
   }
 
@@ -683,9 +688,26 @@ export default defineCommand({
       type: "boolean",
       description: "Use the Vite dev-server two-process topology instead of the packaged default",
     },
-    "no-open": {
+    // reason: declared as "open" (default true), NOT "no-open" — citty@0.1.6's bundled
+    // mri parser (node_modules/citty/dist/index.mjs:170, `arg.substring(j, j+3) === "no-"`)
+    // rewrites ANY `--no-X` CLI token into `out[X] = false`, so a literal `--no-open`
+    // invocation lands in `args.open`, never `args["no-open"]` (which would stay
+    // permanently `undefined` even when the user types `--no-open`). Declaring the flag
+    // itself as "open" — with `default: true` — makes `args.open` agree with what citty
+    // actually produces in BOTH directions: absent → `true` (browser opens, the required
+    // default), `--no-open` → `false` (mri's negation form). `--no-open` stays the ONLY
+    // user-facing spelling (documented; AC-F5A-1's e2e oracle and the static e2e harness
+    // both invoke it) — `strict-flags.ts::findUnknownFlag` already special-cases
+    // `--no-<declared-boolean-name>` as a legal negation of a positively-named flag, so
+    // `--open` is simply never advertised/described to users even though it would also
+    // parse. See task-green-honour-no-open-serve-human-readable-nonce-failure /
+    // knowledge-retro-a-silently-inert-cli-flag-is-the-fifth-false for the full
+    // reproduction (previously: both read sites tested `args["no-open"]`, always
+    // `undefined`, always falsy, browser opened unconditionally).
+    open: {
       type: "boolean",
-      description: "Skip opening the browser",
+      default: true,
+      description: "Open the browser automatically (default: true; pass --no-open to skip)",
     },
   },
   async run({ args }) {
