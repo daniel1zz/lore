@@ -1,5 +1,7 @@
 /**
- * @spec_ref SPEC-073 §Design, §Acceptance Criteria AC-073-1/2/3
+ * @spec_ref SPEC-073 §Design, §Acceptance Criteria AC-073-1/2/3; SPEC-OOB (out-of-box
+ *   reporting channel — report-issue self-provisions its upstream config) §Acceptance
+ *   Criteria AC-OOB-6
  *
  * e2e regression oracle for `buildReportIssueHint` (`report-issue-hint.ts`) and its
  * two wiring seams — `loader.ts`'s internal-error branches (`errClass: "internal"`)
@@ -21,6 +23,18 @@
  * pre-computed `boolean` (presence, not validity) from
  * `report-issue-wiring.ts::resolveFeedbackUpstreamCfg`.
  *
+ * AC-OOB-6 (RED, plan-implementation-out-of-box-reporting-channel-self-provision §T2):
+ * SPEC-073 deliberately made the unconfigured branch byte-absent — combined with
+ * SPEC-072's config being provisioned by no init/setup path, a fresh consumer is
+ * NEVER told the reporting channel exists (the self-lock the SPEC-OOB spec closes).
+ * The AC-OOB-6 case below asserts BOTH directions in one `-t 'AC-OOB-6'`-addressable
+ * test: an unconfigured consumer's gate-denial stderr must gain exactly 1
+ * provision-guidance line (today 0 — the RED half, failing until T5 changes
+ * `buildReportIssueHint`'s unconfigured branch), AND a configured consumer's
+ * gate-denial stderr must stay byte-identical to the AC-073-1 baseline wording (the
+ * regression floor — a one-directional test would let the fix silently break the
+ * already-working configured path).
+ *
  * Coverage dimensions: HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE / REGRESSION.
  */
 
@@ -30,6 +44,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { saveConfig } from "@lore/core/node";
 import { assertFreshBinary } from "../../integration/helpers/assert-fresh-binary";
+import { buildReportIssueHint } from "../../../src/adapters/cli/report-issue-hint.js";
 
 // tests/unit/adapters/ -> tests/unit/ -> tests/ -> packages/lore/ -> packages/ -> repo root (5 levels up).
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -39,6 +54,14 @@ const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 const HINT_TOKEN = "lore report-issue";
 /** Re-verify-first clause token (SPEC-073 §Design) — distinguishes the real hint from a coincidental substring match elsewhere in stderr. */
 const REVERIFY_TOKEN = "re-checking";
+/**
+ * Provision-guidance token (SPEC-OOB §Design + task-t5-unlock-the-spec-073-hint-s-
+ * unconfigured-branch: "pointing at the provision path (the --auto-config command)")
+ * — the literal flag every future unconfigured-branch hint must name, distinguishing
+ * the NEW self-provision guidance line from the pre-existing configured-branch hint
+ * (which carries {@link HINT_TOKEN} + {@link REVERIFY_TOKEN} but never this token).
+ */
+const PROVISION_TOKEN = "--auto-config";
 
 interface RunResult {
   readonly stdout: string;
@@ -67,6 +90,16 @@ function runLore(args: string[], cwd: string): RunResult {
 /** Counts lines containing {@link HINT_TOKEN} — the AC's "EXACTLY 1 hint line" assertion. */
 function countHintLines(text: string): number {
   return text.split("\n").filter((line) => line.includes(HINT_TOKEN)).length;
+}
+
+/** Generic "count lines containing `token`" helper for AC-OOB-6's provision-guidance assertion. */
+function countLinesContaining(text: string, token: string): number {
+  return text.split("\n").filter((line) => line.includes(token)).length;
+}
+
+/** Counts non-empty physical lines — a structural "exactly 1 line" check independent of token content. */
+function nonEmptyLineCount(text: string): number {
+  return text.split("\n").filter((line) => line.length > 0).length;
 }
 
 function initCorpus(tmpDir: string): void {
@@ -222,6 +255,76 @@ describe("AC-073-3: internal-error hint — a corrupted .lore/lore.db earns exac
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("Storage failure");
     expect(countHintLines(result.stderr)).toBe(0);
+  });
+});
+
+describe("AC-OOB-6: self-lock broken, both directions — unconfigured gate-denial gains exactly 1 provision-guidance line, configured gate-denial stays byte-identical to the AC-073-1 baseline", () => {
+  it("AC-OOB-6: unconfigured consumer earns exactly 1 --auto-config provision-guidance line (RED — today 0); configured consumer's hint stays byte-identical to the SPEC-073 baseline (regression floor)", () => {
+    // ---- Direction 1: UNCONFIGURED consumer — the self-lock scenario. ----
+    // Deliberately NOT calling configureUpstream(): a fresh consumer whose
+    // `.lore/config.yaml` has no `feedback.upstream` at all is exactly the state
+    // SPEC-OOB names as unreachable — the promotion mechanism's trigger condition
+    // (upstreamConfigured) is exactly the configuration nothing ever provisions.
+    tmpDir = mkdtempSync(join(tmpdir(), "lore-hint-oob6-unc-"));
+    initCorpus(tmpDir);
+
+    const unconfigured = runLore(
+      ["gate", "spec-create", "--input-json", '{"type":"spec","title":"x","content":""}'],
+      tmpDir,
+    );
+    // Clean up this half's throwaway dir now — the second half below reassigns
+    // `tmpDir` to a fresh mkdtemp for `afterEach` to catch; doing it manually here
+    // means a mid-test failure still leaves at most one leaked dir behind.
+    rmSync(tmpDir, { recursive: true, force: true });
+
+    expect(unconfigured.exitCode).toBe(4);
+    // RED: `buildReportIssueHint(errClass, false)` unconditionally returns `null`
+    // today (see report-issue-hint.ts: `if (errClass === null || !upstreamConfigured)
+    // return null`), so `emitGateReportIssueHint` writes nothing and this stderr is
+    // byte-EMPTY (0 lines) — this is a missing-behaviour failure, not a wording typo.
+    // It stays RED until T5 (GREEN) changes the unconfigured branch to return a
+    // provision-guidance line naming `--auto-config`.
+    expect(countLinesContaining(unconfigured.stderr, PROVISION_TOKEN)).toBe(1);
+    // Independent structural condition (not just "the token appears somewhere"):
+    // the ENTIRE stderr is exactly one non-empty physical line.
+    expect(nonEmptyLineCount(unconfigured.stderr)).toBe(1);
+    expect(unconfigured.stderr).not.toBe("");
+
+    // ---- Direction 2: CONFIGURED consumer — the AC-073-1 regression floor. ----
+    tmpDir = mkdtempSync(join(tmpdir(), "lore-hint-oob6-cfg-"));
+    initCorpus(tmpDir);
+    configureUpstream(tmpDir);
+
+    const configured = runLore(
+      ["gate", "spec-create", "--input-json", '{"type":"spec","title":"x","content":""}'],
+      tmpDir,
+    );
+
+    // `buildReportIssueHint` is the single wording SSOT (SPEC-073 §Design) — pin the
+    // CLI's actual stderr against the SSOT's own current output, not a copied
+    // literal, so wording drift in the SSOT is caught wherever it happens.
+    const expectedConfiguredHint = buildReportIssueHint("gate", true);
+    if (expectedConfiguredHint === null) {
+      throw new Error(
+        "buildReportIssueHint('gate', true) returned null — the configured branch " +
+          "must never be byte-absent; SSOT contract broken",
+      );
+    }
+
+    expect(configured.exitCode).toBe(4);
+    // Byte-identical: `emitGateReportIssueHint` writes ONLY `hint + "\n"` to
+    // stderr on a gate denial (verified against commands/gate.ts — the feeding
+    // pack goes to stdout via console.log), so the entire stderr content is
+    // pinned exactly, not merely "contains the hint".
+    expect(configured.stderr).toBe(expectedConfiguredHint + "\n");
+    expect(countHintLines(configured.stderr)).toBe(1);
+    expect(configured.stderr.toLowerCase()).toContain(REVERIFY_TOKEN);
+
+    // The two directions must render genuinely DIFFERENT text — a stub that
+    // ignores `upstreamConfigured` and always emits the configured wording (or
+    // vice versa) would defeat direction 1's provision-token check only by
+    // coincidence; explicitly reject that shape.
+    expect(unconfigured.stderr).not.toBe(configured.stderr);
   });
 });
 
