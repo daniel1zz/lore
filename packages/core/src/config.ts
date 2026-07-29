@@ -570,6 +570,14 @@ export type TraceConfig = z.infer<typeof TraceConfigSchema>;
  *   id (see `issue-report.ts::matchRootPrd`) — deliberately untyped as a
  *   plain non-empty string rather than two separate optional fields, since
  *   the consumer author only ever knows one or the other at config time.
+ * @invariant `stale_after_days` (D5b, spec-issue-closure-loop-computed-
+ *   resolution-agent-reachable) is INDEPENDENT of `upstream` — it governs the
+ *   UPSTREAM-side `lore status --check-issues` stale-open-report detector
+ *   (D5), which has nothing to do with whether THIS corpus is configured to
+ *   FILE reports elsewhere. Defaults to 14 so an upstream corpus that never
+ *   sets `feedback` at all still gets a meaningful staleness threshold — the
+ *   number lives here, never hardcoded in the detector or in prose (standing
+ *   content-contract rule, CLAUDE.md).
  */
 export const FeedbackConfigSchema = z
   .object({
@@ -584,6 +592,8 @@ export const FeedbackConfigSchema = z
       })
       .strict()
       .optional(),
+    /** Days past which an OPEN issue report is flagged stale by `lore status --check-issues` (D5b). Default: 14. */
+    stale_after_days: z.number().int().positive().default(14),
   })
   .strict();
 
@@ -788,11 +798,15 @@ export const LoreConfigSchema = z
      */
     verify: VerifyConfigSchema.optional(),
     /**
-     * Upstream issue-reporting configuration (SPEC-072).
-     * When absent, `lore report-issue` fails loud (VALIDATION_ERROR naming
-     * both `feedback.upstream.corpus_path` and `feedback.upstream.root_prd`)
-     * — there is no AI-provider-style "defaults to a built-in behavior"
-     * fallback, since configuring this section IS the consent act.
+     * Upstream issue-reporting configuration (SPEC-072) + `check-issues`
+     * stale-report threshold (D5b). When `upstream` is absent, `lore
+     * report-issue` fails loud (VALIDATION_ERROR naming both
+     * `feedback.upstream.corpus_path` and `feedback.upstream.root_prd`) —
+     * there is no AI-provider-style "defaults to a built-in behavior"
+     * fallback, since configuring THAT sub-section is the consent act.
+     * `stale_after_days` is independent and always resolves to a default
+     * (14) via {@link resolveStaleAfterDays} even when this whole `feedback`
+     * section is absent.
      */
     feedback: FeedbackConfigSchema.optional(),
     /**
@@ -1240,6 +1254,45 @@ export function resolveStalenessDefaults(
  */
 export function resolveDriftEnabled(config: LoreConfig | undefined): boolean {
   return (config?.workflow ?? WorkflowConfigSchema.parse({})).drift.enabled;
+}
+
+/**
+ * Resolve the effective `feedback.stale_after_days` threshold (D5b,
+ * spec-issue-closure-loop-computed-resolution-agent-reachable) from an
+ * optional LoreConfig — the age (in days) past which `lore status
+ * --check-issues` flags a computed-`open` issue report as stale.
+ *
+ * @invariant Reads via BRACKET notation (`config?.["feedback"]?.[...]`), not
+ *   dot notation, DELIBERATELY — `tests/unit/adapters/feedback-read-site-
+ *   invariant.test.ts` mechanically asserts `resolveFeedbackUpstreamCfg`
+ *   (`report-issue-wiring.ts`) is the SOLE dot-notation `.feedback` reader
+ *   across `packages/lore/src`/`packages/core/src`, guarding SPEC-072's
+ *   "nobody else reads `feedback.upstream` directly" invariant. That scanner
+ *   already documents bracket notation as an out-of-scope escape valve for a
+ *   genuinely different concern (its own header cites `provisionFeedbackUpstream`'s
+ *   write-path idempotency check as precedent) — `stale_after_days` is exactly
+ *   that: an unrelated sibling field under the same `feedback` section, read
+ *   for a different feature (D5's staleness detector), not the upstream-
+ *   provisioning concern that invariant polices. Using dot notation here would
+ *   silently trip that unrelated test.
+ * @invariant Falls back to the schema default (14) whenever the value is
+ *   absent or not a number — covers both "no `feedback` section at all" and a
+ *   hand-built `LoreConfig` test fixture that sets `feedback: { upstream:
+ *   {...} }` directly without routing through `FeedbackConfigSchema.parse`
+ *   (mirrors {@link resolveAttestationMinRatio}'s "must not throw on a
+ *   partially-shaped test fixture" reasoning).
+ *
+ * @param config - Parsed LoreConfig, or undefined when no config file was loaded
+ * @returns Effective `feedback.stale_after_days` value
+ * @example
+ *   resolveStaleAfterDays(undefined) // => 14
+ *   resolveStaleAfterDays({ ..., feedback: { stale_after_days: 30 } }) // => 30
+ *   resolveStaleAfterDays({ ..., feedback: { upstream: { corpus_path: "x", root_prd: "y" } } } as LoreConfig) // => 14 (no throw)
+ */
+export function resolveStaleAfterDays(config: LoreConfig | undefined): number {
+  const feedback = config?.["feedback"];
+  const staleAfterDays = feedback?.["stale_after_days"];
+  return typeof staleAfterDays === "number" ? staleAfterDays : FeedbackConfigSchema.parse({}).stale_after_days;
 }
 
 /**
