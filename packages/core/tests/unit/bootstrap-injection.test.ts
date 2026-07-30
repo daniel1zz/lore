@@ -133,8 +133,11 @@ describe("SPEC-080 AC-080-1 HAPPY — buildBootstrapInjection field order + comp
   it("HAPPY: representative report + default budgets, ordinary (non-seat) session -> literal key order minus resume_hint, compact json", () => {
     // spec-session-start-handoff-neutrality D1 — an ordinary session (no
     // `seatScoped` argument, defaults false) omits resume_hint entirely.
+    // spec-context-provenance-injected-corpus-global-state-and-a D1 —
+    // scope_declaration now leads unconditionally, before my_claims.
     const result = buildBootstrapInjection(BASE_REPORT, DEFAULT_BUDGETS);
     expect(Object.keys(result.payload)).toEqual([
+      "scope_declaration",
       "my_claims",
       "active_sessions",
       "armed_gates",
@@ -151,12 +154,14 @@ describe("SPEC-080 AC-080-1 HAPPY — buildBootstrapInjection field order + comp
     expect(JSON.parse(result.json)).toEqual(result.payload);
   });
 
-  it("HAPPY: seatScoped=true retains resume_hint at its contract position-1 slot", () => {
+  it("HAPPY: seatScoped=true retains resume_hint immediately after the leading scope_declaration", () => {
     // spec-session-start-handoff-neutrality D2 — a seat-scoped session's hint
     // derives from the session's own worktree branch, not a corpus-wide
-    // guess, so it survives untouched.
+    // guess, so it survives untouched. spec-context-provenance-injected-corpus-global-state-and-a
+    // D1 — scope_declaration still leads even the seat-scoped hint.
     const result = buildBootstrapInjection(BASE_REPORT, DEFAULT_BUDGETS, true);
     expect(Object.keys(result.payload)).toEqual([
+      "scope_declaration",
       "resume_hint",
       "my_claims",
       "active_sessions",

@@ -41,19 +41,24 @@
  *     key — before `resume_hint` itself — is now `scope_declaration`
  *     (spec-context-provenance-injected-corpus-global-state-and-a D1):
  *     always `BOOTSTRAP_SCOPE_DECLARATION`, never dropped by the trimmer and
- *     never mid-sliced. Degenerate case: when the declaration's own length
- *     alone meets or exceeds `budgets.charBudget`, the normal pipeline is
- *     skipped entirely and the return is the minimal
- *     `{scope_declaration, omitted (zeroed), budget_exceeded: true}` — a
- *     payload whose boundary is unstated is strictly worse than one carrying
- *     a boundary and no data.
+ *     never mid-sliced. There is deliberately NO short-circuit for a small
+ *     `budgets.charBudget` — over-budget behavior is SPEC-080(bootstrap-injection)'s
+ *     existing, unchanged rule (drop trailing `latest_handoffs` then
+ *     `active_plans`, then return the payload INTACT with
+ *     `budget_exceeded: true`). An earlier draft of this spec added a
+ *     short-circuit that discarded every OTHER field once the declaration
+ *     alone approached the budget; it was removed on measurement — it broke
+ *     SPEC-080(bootstrap-injection)'s own BOUNDARY oracle (oversized single field,
+ *     both droppable arrays empty) and required a fabricated all-zero
+ *     `omitted` ledger plus a schema cast-gap for a shape the schema
+ *     rejected. The declaration buys nothing by discarding data — it just
+ *     participates in the same char measurement as everything else.
  *   - bootstrapInjectionSchema / BootstrapInjection — the projection's OWN Zod
  *     schema + type (SPEC-080(bootstrap-injection) §Module Boundary) — never a
- *     patch on `bootstrapReportSchema`. Validates the ORDINARY (non-degenerate)
- *     shape only — see {@link buildBootstrapInjection}'s own doc for why the
- *     rare degenerate-case return is a deliberate, documented gap from this
- *     schema (same accepted-gap precedent as the D8 OCP unknown-field escape
- *     hatch on `BootstrapInjection` itself).
+ *     patch on `bootstrapReportSchema`. Every payload {@link buildBootstrapInjection}
+ *     can return validates against this schema — there is no accepted gap
+ *     (see the retired short-circuit note above for the shape that USED to
+ *     require one).
  *   - BOOTSTRAP_SCOPE_DECLARATION / REQUIRED_DISCLAIMER_TOKENS — the injection
  *     payload's leading self-description and the disclaimer obligations it
  *     discharges (D1). BOOTSTRAP_FRAMING_LINE — the boundary line
@@ -96,10 +101,12 @@
  *   - The leading `scope_declaration` field (spec-context-provenance-injected-corpus-global-state-and-a
  *     D1) is NEVER a candidate for the char-budget drop loop and NEVER
  *     mid-sliced — it is the one field whose absence would change the
- *     meaning of every other field. The one narrow exception is the
- *     degenerate short-circuit (declaration length alone >= `charBudget`),
- *     which returns the declaration UNTOUCHED alongside a minimal ledger —
- *     it still never slices or drops the declaration itself.
+ *     meaning of every other field. NO EXCEPTION: even when the declaration
+ *     alone is close to or exceeds `budgets.charBudget`, the payload is
+ *     still returned INTACT (every data field present) with
+ *     `budget_exceeded: true`, per SPEC-080(bootstrap-injection)'s own
+ *     "sacrifice budget, never content" rule — see D1's own note above for
+ *     why an earlier short-circuit here was measured wrong and removed.
  *
  * Source: SPEC-041 §3 D2, D3; SPEC-042 §Design Decisions D1;
  * SPEC-080(bootstrap-injection; corpus slug
@@ -109,8 +116,9 @@
  * Decisions D1, D2 (resume_hint dropped from the injection except for a
  * seat-scoped session);
  * spec-context-provenance-injected-corpus-global-state-and-a §Design
- * Decisions D1 (leading scope declaration + degenerate case), D6 (no AC may
- * assert against remembered wording).
+ * Decisions D1 (leading scope declaration, no short-circuit — SPEC-080's
+ * existing over-budget rule applies unchanged), D6 (no AC may assert
+ * against remembered wording).
  */
 
 import { z } from "zod";
@@ -677,9 +685,13 @@ export const REQUIRED_DISCLAIMER_TOKENS: readonly string[] = [
  * @invariant Every AC/test asserts this by `===` identity against the
  *   constant, never a remembered substring (D6).
  * @invariant Participates in {@link buildBootstrapInjection}'s char budget
- *   but is NEVER a candidate for its drop loop and NEVER mid-sliced — see
- *   that function's own doc for the degenerate case this forces when the
- *   budget can't even fit this string alone.
+ *   like every other field, but is NEVER a candidate for its drop loop and
+ *   NEVER mid-sliced. There is no special case for a tiny `charBudget`: if
+ *   the budget can't be met even after dropping every droppable entry, the
+ *   whole payload — including this declaration — is returned INTACT with
+ *   `budget_exceeded: true`, the same SPEC-080(bootstrap-injection)
+ *   "never sacrifice content for budget" rule every other field already
+ *   follows.
  */
 export const BOOTSTRAP_SCOPE_DECLARATION =
   `SCOPE: this payload is a ${DISCLAIMER_TOKEN_GLOBAL} snapshot spanning ${DISCLAIMER_TOKEN_ALL_PLANS}, ` +
@@ -776,18 +788,15 @@ export type BootstrapInjectionOmitted = z.infer<typeof bootstrapInjectionOmitted
  *   session's payload keeps it (`null` when the seat's own plan has no
  *   handoffs yet).
  * @invariant `scope_declaration` is REQUIRED and unconditional — it is the
- *   ONE field present on every ordinary call regardless of `seatScoped`
- *   (spec-context-provenance-injected-corpus-global-state-and-a D1). This
- *   schema validates the ORDINARY shape only: the rare degenerate-case
- *   return (declaration length alone >= `budgets.charBudget`) is a
- *   deliberately narrower shape — `{scope_declaration, omitted,
- *   budget_exceeded}` with every other field absent — that this schema will
- *   correctly REJECT on `.parse()`. That is intentional, not a bug: no
- *   production code path parses `buildBootstrapInjection`'s output through
- *   this schema at runtime (it exists for shape documentation + the
- *   ordinary-path round-trip test), so the gap costs nothing today and
- *   mirrors the already-accepted D8 OCP unknown-field gap on
- *   {@link BootstrapInjection} below.
+ *   ONE field present on EVERY call regardless of `seatScoped` or budget
+ *   (spec-context-provenance-injected-corpus-global-state-and-a D1). There
+ *   is no narrower shape to accommodate: `buildBootstrapInjection` has no
+ *   short-circuit, so every payload it can possibly return — including the
+ *   over-budget-and-still-intact case — validates against this schema. An
+ *   earlier draft added a degenerate short-circuit that DID produce a
+ *   narrower shape this schema had to special-case around (a documented
+ *   reject-gap); it was removed on measurement (see that function's own
+ *   doc), and this schema was restored to a truthful, gap-free contract.
  */
 export const bootstrapInjectionSchema = z.object({
   scope_declaration: z.string(),
@@ -825,18 +834,11 @@ export const bootstrapInjectionSchema = z.object({
  * literal contract keys plus whatever else was on the input" without an
  * index signature that would weaken every other field's precision) — see
  * {@link buildBootstrapInjection}'s own cast comment for why that gap is
- * accepted rather than worked around.
- *
- * @invariant A SECOND, narrower accepted gap (spec-context-provenance-injected-corpus-global-state-and-a
- *   D1): the rare degenerate-case return value —
- *   `{scope_declaration, omitted, budget_exceeded: true}` with every other
- *   field absent — is also cast through this type rather than modeled as a
- *   union. A union would be the "more correct" static shape, but every
- *   existing consumer of this type (the CLI command, the session-service
- *   test suite) destructures specific ordinary-path fields WITHOUT
- *   narrowing; a union would force those consumers — outside this module —
- *   to add dead narrowing code for a branch they never hit. Kept as a cast,
- *   same accepted-gap precedent as the D8 OCP note above.
+ * accepted rather than worked around. This is the ONLY accepted gap on this
+ * type — spec-context-provenance-injected-corpus-global-state-and-a D1's
+ * `scope_declaration` field introduces no second one: `buildBootstrapInjection`
+ * has no short-circuit, so it never returns a shape narrower than this type
+ * describes.
  */
 export type BootstrapInjection = z.infer<typeof bootstrapInjectionSchema>;
 
@@ -878,20 +880,24 @@ export interface BootstrapInjectionResult {
  * `omitted` ledger.
  *
  * Pipeline (each stage feeds the next; nothing is trimmed twice):
- *  -1. DEGENERATE SHORT-CIRCUIT (spec-context-provenance-injected-corpus-global-state-and-a
- *     D1): if `BOOTSTRAP_SCOPE_DECLARATION.length >= budgets.charBudget` —
- *     the budget can't even fit the declaration alone — every stage below
- *     is skipped and this function returns the minimal
- *     `{scope_declaration, omitted (all-zero), budget_exceeded: true}`
- *     immediately. The zeroed ledger is deliberate, not a placeholder: the
- *     per-field counting pipeline never ran in this branch, so a nonzero
- *     count would be fabricated rather than measured — `budget_exceeded:
- *     true` is the caller's signal that every other field is genuinely
- *     absent, not merely empty.
- *  0. `scope_declaration` (the leading key, D1) is ALWAYS set to
- *     `BOOTSTRAP_SCOPE_DECLARATION` — before `resume_hint` itself. It
- *     participates in the char-budget measurement below but is NEVER a
- *     candidate for the drop loop and NEVER mid-sliced.
+ *  0. `scope_declaration` (the leading key, spec-context-provenance-injected-corpus-global-state-and-a
+ *     D1) is ALWAYS set to `BOOTSTRAP_SCOPE_DECLARATION` — before
+ *     `resume_hint` itself, unconditionally, on every call. It participates
+ *     in the char-budget measurement in step 6 below exactly like every
+ *     other field, but is NEVER a candidate for that step's drop loop and
+ *     NEVER mid-sliced. There is deliberately NO short-circuit for a small
+ *     `budgets.charBudget`: an earlier draft of this spec short-circuited to
+ *     a minimal `{scope_declaration, omitted, budget_exceeded}` payload
+ *     whenever the declaration alone approached the budget, discarding
+ *     every other field to buy the declaration's survival. That was removed
+ *     on measurement — it is the exact "sacrifice content to fit the
+ *     budget" behavior SPEC-080(bootstrap-injection)'s own char-budget rule
+ *     (step 6) forbids, merely at field granularity instead of character
+ *     granularity, and it fired on ANY `charBudget` below the declaration's
+ *     length regardless of how small the actual report was. The correct,
+ *     current behavior is: the declaration rides through steps 1-6
+ *     unchanged, and step 6's existing exhaust-then-flag fallback handles
+ *     an unmeetable budget the same way it always has.
  *  0.5. `resume_hint` is included ONLY when `seatScoped` is `true`
  *     (spec-session-start-handoff-neutrality D1, D2) — an ordinary session's
  *     payload omits the key entirely (the user is the router; an ambient
@@ -950,34 +956,20 @@ export interface BootstrapInjectionResult {
  * // => ["scope_declaration","resume_hint","my_claims","active_sessions","armed_gates","root",
  * //     "pending_reviews","active_plans","latest_handoffs","corpus","omitted"]
  * @example
- * // Degenerate case — charBudget can't even fit the declaration alone.
- * const tiny = buildBootstrapInjection(report, { ...budgets, charBudget: 10 });
- * Object.keys(tiny.payload); // => ["scope_declaration","omitted","budget_exceeded"]
- * tiny.payload.budget_exceeded; // => true
+ * // Unmeetable budget (e.g. a single oversized field, both droppable arrays
+ * // empty) — SPEC-080(bootstrap-injection)'s existing rule: payload returned
+ * // INTACT (every field, including scope_declaration, still present) with
+ * // budget_exceeded: true. No field is ever dropped to buy this outcome.
+ * const overBudget = buildBootstrapInjection(report, { ...budgets, charBudget: 10 });
+ * overBudget.payload.budget_exceeded; // => true
+ * overBudget.payload.scope_declaration; // => BOOTSTRAP_SCOPE_DECLARATION (unsliced)
+ * Object.keys(overBudget.payload); // => same 10 keys as the ordinary example above
  */
 export function buildBootstrapInjection(
   report: BootstrapReport,
   budgets: BootstrapInjectionBudgets,
   seatScoped = false,
 ): BootstrapInjectionResult {
-  // reason: degenerate short-circuit (spec-context-provenance-injected-corpus-global-state-and-a
-  // D1) — when the budget can't even fit the declaration alone, no amount
-  // of trimming the fields below can bring the payload under budget while
-  // still carrying the declaration. Skip the whole normal pipeline (steps
-  // 0-6 in this function's own doc) and return the minimal, honest shape
-  // instead: the declaration UNCUT, plus a zeroed ledger (this branch never
-  // runs the per-field counting pipeline, so any nonzero count here would
-  // be fabricated, not measured) and `budget_exceeded: true` so the caller
-  // can tell every other field is genuinely absent, not merely empty.
-  if (BOOTSTRAP_SCOPE_DECLARATION.length >= budgets.charBudget) {
-    const degeneratePayload: Record<string, unknown> = {
-      scope_declaration: BOOTSTRAP_SCOPE_DECLARATION,
-      omitted: { active_plans: 0, latest_handoffs: 0, pending_slugs: 0, budget_drops: 0 },
-      budget_exceeded: true,
-    };
-    return { payload: degeneratePayload as unknown as BootstrapInjection, json: JSON.stringify(degeneratePayload) };
-  }
-
   const armedGates = report.armed_gates.map((gate) => gate.checkpoint);
 
   const cappedPendingSlugs = report.pending_reviews.slugs.slice(0, budgets.maxPendingSlugs);

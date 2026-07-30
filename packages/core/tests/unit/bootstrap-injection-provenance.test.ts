@@ -1,15 +1,22 @@
 /**
- * RED-then-GREEN unit suite for the D1 leading `scope_declaration` field and
- * its D1 degenerate case, plus the 5 exported provenance constants —
- * spec-context-provenance-injected-corpus-global-state-and-a, task
- * task-t1-core-constants-leading-scope-field-in (T1), AC-CP-1 / AC-CP-2.
+ * RED-then-GREEN unit suite for the D1 leading `scope_declaration` field,
+ * plus the 5 exported provenance constants —
+ * spec-context-provenance-injected-corpus-global-state-and-a (v38, corrected),
+ * task task-t1-core-constants-leading-scope-field-in (T1), AC-CP-1 / AC-CP-2.
  *
- * Written BEFORE `BOOTSTRAP_SCOPE_DECLARATION` / `REQUIRED_DISCLAIMER_TOKENS`
- * / `BOOTSTRAP_FRAMING_LINE` / `RESUME_SCOPE_CLOSURE` / `SOURCE_CATEGORY_TOKENS`
- * / the exported `BOOTSTRAP_INJECTION_KNOWN_KEYS` exist in
- * `packages/core/src/session.ts`, and before `buildBootstrapInjection` emits
- * a leading `scope_declaration` key — every test here is expected to fail at
- * import time (missing export) until the paired implementation lands.
+ * CORRECTED (v38): D1's original short-circuit — discarding every other
+ * field once the declaration alone approached `budgets.charBudget` — was a
+ * spec defect. It contradicted SPEC-080(bootstrap-injection)'s own
+ * char-budget rule ("payload returned INTACT" on an unmeetable budget) at
+ * field granularity instead of character granularity, and it fired on ANY
+ * `char_budget` below the declaration's length regardless of the actual
+ * report's size (`char_budget` is `positive()` with no floor — a reachable
+ * config). There is NO short-circuit: `scope_declaration` leads
+ * unconditionally, participates in the char measurement like every other
+ * field, is never a drop candidate, and an unmeetable budget still returns
+ * the FULL payload intact with `budget_exceeded: true` — SPEC-080's
+ * pre-existing rule, unchanged. AC-CP-2's fixture (below) now pins SPEC-080's
+ * own construction: both droppable arrays empty + one oversized field.
  *
  * D6 discipline (binding on this file): no assertion here keys off a
  * remembered substring. Every assertion is either `===`/`toBe` identity
@@ -21,12 +28,14 @@
  *               the three sibling-consumed constants are well-formed
  *   NEGATIVE:   empty-corpus report still leads with the declaration;
  *               negative control proving `.toContain` actually discriminates
- *   BOUNDARY:   charBudget below/at/one-above the declaration's own length
- *               (AC-CP-2 + the two edges either side of it)
+ *   BOUNDARY:   AC-CP-2 — oversized field + empty droppable arrays against an
+ *               unmeetable budget; a companion test proves there is no
+ *               threshold effect at the declaration's own length (the exact
+ *               regression the v38 spec correction targets)
  *   ERROR:      bootstrapInjectionSchema accepts+round-trips the ordinary
- *               shape (now including the required scope_declaration field);
- *               the SAME schema deliberately REJECTS the degenerate shape
- *               (documented type/reality gap, see session.ts's own doc)
+ *               shape; a second case proves the schema is now GAP-FREE — it
+ *               also accepts the over-budget-and-intact shape, since there is
+ *               no narrower shape left for it to reject
  *   STATE:      purity — repeated calls are byte-identical, no mutation of
  *               the shared constants across calls
  *   REGRESSION: an ordinary in-budget projection's pre-existing field order
@@ -196,62 +205,71 @@ describe("NEGATIVE", () => {
   });
 });
 
-// ─── AC-CP-2 BOUNDARY — degenerate short-circuit ─────────────────────────────
+// ─── AC-CP-2 BOUNDARY — unmeetable budget, payload returned intact (no short-circuit) ──
 
-describe("AC-CP-2 BOUNDARY — degenerate short-circuit", () => {
-  it("BOUNDARY budget-exceeded: charBudget below the declaration's own length yields declaration + omitted + budget_exceeded only, ledger never naming the declaration", () => {
-    const belowBudget = BOOTSTRAP_SCOPE_DECLARATION.length - 1;
-    const result = buildBootstrapInjection(FULL_REPORT, { ...DEFAULT_BUDGETS, charBudget: belowBudget });
+describe("AC-CP-2 BOUNDARY — unmeetable budget, payload returned intact", () => {
+  it("BOUNDARY budget-exceeded: oversized field with both droppable arrays empty exceeds the budget -> budget_exceeded true, EVERY data field intact, declaration present and unsliced at position 1, ledger never naming the declaration", () => {
+    // reason: SPEC-080(bootstrap-injection)'s own pinned construction (v38
+    // spec correction) — a report whose droppable arrays (active_plans,
+    // latest_handoffs) are already empty, carrying one oversized field
+    // (root.title), projected against a budget it structurally cannot meet.
+    const hugeTitle = "x".repeat(20_000);
+    const report: BootstrapReport = {
+      ...FULL_REPORT,
+      active_plans: [],
+      latest_handoffs: [],
+      root: { slug: "prd-root", title: hugeTitle },
+    };
+    const result = buildBootstrapInjection(report, { ...DEFAULT_BUDGETS, charBudget: 100 });
 
     expect(result.payload.budget_exceeded).toBe(true);
+
+    // Declaration: present, unsliced, still leading.
+    expect(Object.keys(result.payload)[0]).toBe("scope_declaration");
     expect(result.payload.scope_declaration).toBe(BOOTSTRAP_SCOPE_DECLARATION);
     expect(result.json).toContain(BOOTSTRAP_SCOPE_DECLARATION);
 
-    // reason: the omission ledger must never itself carry a field naming the
-    // declaration — only the 4 pre-existing SPEC-080 counters are legal keys.
+    // EVERY other data field intact — SPEC-080's "never sacrifice content
+    // for budget" rule, NOT the retired D1 short-circuit that discarded them.
+    expect(result.payload.my_claims).toEqual(report.my_claims);
+    expect(result.payload.active_sessions).toEqual(report.active_sessions);
+    expect(result.payload.armed_gates).toEqual(["spec-create", "task-claim"]);
+    expect(result.payload.root).toEqual({ slug: "prd-root", title: hugeTitle });
+    expect(result.json).toContain(hugeTitle);
+    expect(result.payload.pending_reviews).toEqual({ count: 2, slugs: ["doc-a", "doc-b"] });
+    expect(result.payload.active_plans).toEqual([]);
+    expect(result.payload.latest_handoffs).toEqual([]);
+    expect(result.payload.corpus).toEqual(report.corpus);
+    expect(result.payload.archive_candidates).toBe(3);
+
+    // Omission ledger: only the 4 pre-existing SPEC-080 counters — never a
+    // field naming the declaration.
     expect(Object.keys(result.payload.omitted)).toEqual(STANDARD_OMITTED_KEYS);
-    expect(result.payload.omitted).toEqual({
-      active_plans: 0,
-      latest_handoffs: 0,
-      pending_slugs: 0,
-      budget_drops: 0,
-    });
-
-    // reason: "and nothing else" (D1) — every ordinary content field is
-    // absent, not merely empty, in the degenerate shape.
-    expect(Object.keys(result.payload)).toEqual(["scope_declaration", "omitted", "budget_exceeded"]);
   });
 
-  it("BOUNDARY: charBudget exactly equal to the declaration's length still triggers the degenerate branch (meets, not just exceeds)", () => {
+  it("BOUNDARY: a charBudget below the declaration's own length triggers NO special case — same exhaust-then-flag pipeline as any other tiny budget, never an annihilated payload", () => {
+    // reason: this is the EXACT regression the v38 spec correction targets —
+    // this charBudget value used to trip the retired degenerate short-circuit
+    // and discard every field but the declaration. It must now behave
+    // identically to any other unmeetable budget: drop handoffs, then plans,
+    // then flag — nothing else is ever removed.
     const result = buildBootstrapInjection(FULL_REPORT, {
       ...DEFAULT_BUDGETS,
-      charBudget: BOOTSTRAP_SCOPE_DECLARATION.length,
+      charBudget: BOOTSTRAP_SCOPE_DECLARATION.length - 1,
     });
-    expect(result.payload).toEqual({
-      scope_declaration: BOOTSTRAP_SCOPE_DECLARATION,
-      omitted: { active_plans: 0, latest_handoffs: 0, pending_slugs: 0, budget_drops: 0 },
-      budget_exceeded: true,
-    });
-  });
-
-  it("BOUNDARY: charBudget one char above the declaration's length takes the ordinary pipeline, which can still independently end in budget_exceeded via the pre-existing exhaust-then-flag fallback", () => {
-    const result = buildBootstrapInjection(FULL_REPORT, {
-      ...DEFAULT_BUDGETS,
-      charBudget: BOOTSTRAP_SCOPE_DECLARATION.length + 1,
-    });
-    // reason: ordinary (non-degenerate) shape — my_claims etc. are present,
-    // proving this branch did NOT take the degenerate short-circuit even
-    // though it too ends up over budget.
-    expect(result.payload).toHaveProperty("my_claims");
-    expect(result.payload).toHaveProperty("active_plans");
-    expect(result.payload.scope_declaration).toBe(BOOTSTRAP_SCOPE_DECLARATION);
+    expect(result.payload.latest_handoffs).toEqual([]);
+    expect(result.payload.active_plans).toEqual([]);
     expect(result.payload.budget_exceeded).toBe(true);
+    expect(result.payload).toHaveProperty("my_claims");
+    expect(result.payload).toHaveProperty("root");
+    expect(result.payload).toHaveProperty("archive_candidates");
+    expect(result.payload.scope_declaration).toBe(BOOTSTRAP_SCOPE_DECLARATION);
   });
 });
 
-// ─── ERROR — schema acceptance + deliberate divergence ───────────────────────
+// ─── ERROR — schema acceptance, no accepted gap ──────────────────────────────
 
-describe("ERROR — bootstrapInjectionSchema", () => {
+describe("ERROR — bootstrapInjectionSchema (truthful contract, gap-free)", () => {
   it("ERROR: bootstrapInjectionSchema accepts and round-trips the ordinary-shape payload including the new required scope_declaration field", () => {
     const result = buildBootstrapInjection(FULL_REPORT, DEFAULT_BUDGETS);
     const parsed = bootstrapInjectionSchema.parse(result.payload);
@@ -259,13 +277,20 @@ describe("ERROR — bootstrapInjectionSchema", () => {
     expect(parsed.scope_declaration).toBe(BOOTSTRAP_SCOPE_DECLARATION);
   });
 
-  it("ERROR: bootstrapInjectionSchema deliberately rejects the degenerate-case payload shape (documented type/reality gap, session.ts's own doc)", () => {
-    const result = buildBootstrapInjection(FULL_REPORT, {
-      ...DEFAULT_BUDGETS,
-      charBudget: BOOTSTRAP_SCOPE_DECLARATION.length - 1,
-    });
+  it("ERROR: bootstrapInjectionSchema also accepts the over-budget-and-intact payload — there is no longer any shape buildBootstrapInjection returns that this schema rejects", () => {
+    const hugeTitle = "x".repeat(20_000);
+    const report: BootstrapReport = {
+      ...FULL_REPORT,
+      active_plans: [],
+      latest_handoffs: [],
+      root: { slug: "prd-root", title: hugeTitle },
+    };
+    const result = buildBootstrapInjection(report, { ...DEFAULT_BUDGETS, charBudget: 100 });
     const parsed = bootstrapInjectionSchema.safeParse(result.payload);
-    expect(parsed.success).toBe(false);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data).toEqual(result.payload);
+    }
   });
 });
 
