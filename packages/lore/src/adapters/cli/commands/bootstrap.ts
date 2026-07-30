@@ -18,9 +18,17 @@
  *
  * **`--injection` (SPEC-080(bootstrap-injection) §Module Boundary CLI bullet, D3, D5)** — renders the
  * SAME `BootstrapReportWithStaleness` through `@lore/core`'s
- * `buildBootstrapInjection`, printing its compact `json` verbatim (never the
- * `{ok, data}` envelope plain `--json` uses — the hook is a blind pipe, D3, and
- * expects exactly this string on stdout). Budgets resolve from
+ * `buildBootstrapInjection`, then prints exactly TWO lines to stdout: (1) the
+ * `BOOTSTRAP_FRAMING_LINE` scope-boundary constant (verbatim, `@lore/core`,
+ * spec-context-provenance-injected-corpus-global-state-and-a D2), (2) the
+ * projection's compact `json` (never the `{ok, data}` envelope plain `--json`
+ * uses). D2's rationale: an installed hook file drifts independently of the
+ * binary, so the boundary prose describing this payload must ship in the SAME
+ * artifact as the payload — the hook (still a blind pipe, D3) relays both
+ * lines verbatim inside its markdown fence, with zero knowledge of either
+ * line's content or the JSON's field names. AC-CP-3 asserts stdout line 1 by
+ * `===` identity against the exported constant — never a remembered
+ * substring. Budgets resolve from
  * `workflow.bootstrap_injection.*` via `resolveBootstrapInjectionBudgets(config)`,
  * the SAME `config` this command already threads through from `loadLoreApp()` for
  * telemetry (`app.ts` needs no change — `loadLoreApp()` already resolves and
@@ -55,7 +63,7 @@
 
 import { defineCommand } from "citty";
 import type { BootstrapReport } from "@lore/core";
-import { buildBootstrapInjection, resolveBootstrapInjectionBudgets } from "@lore/core";
+import { BOOTSTRAP_FRAMING_LINE, buildBootstrapInjection, resolveBootstrapInjectionBudgets } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, relativeTime, resolveActor } from "../utils.js";
 import { buildStalenessFlowDeps, listFreshStalenessEscalates } from "../../../flows/staleness-flow.js";
@@ -192,13 +200,14 @@ export default defineCommand({
     injection: {
       type: "boolean",
       description:
-        "SPEC-080(bootstrap-injection) tier-1 injection projection — print buildBootstrapInjection's compact " +
+        "SPEC-080(bootstrap-injection) tier-1 injection projection — print the BOOTSTRAP_FRAMING_LINE " +
+        "scope-boundary constant on line 1, then buildBootstrapInjection's compact " +
         "JSON ([resume_hint/]my_claims/active_sessions/armed_gates/root/pending_reviews/" +
-        "active_plans/latest_handoffs/corpus/omitted[/budget_exceeded]) instead of the " +
+        "active_plans/latest_handoffs/corpus/omitted[/budget_exceeded]) on line 2, instead of the " +
         "full report. resume_hint appears ONLY for a seat-scoped call (--seat-branch " +
         "resolved to a live plan) — an ordinary session omits it entirely " +
         "(spec-session-start-handoff-neutrality D1, D2). Takes precedence over --json " +
-        "when both are given (same compact injection payload either way — see this " +
+        "when both are given (same two-line output either way — see this " +
         "file's module header).",
     },
     "seat-branch": {
@@ -279,6 +288,17 @@ export default defineCommand({
         // parsed (one resolution path, claimTtlMinutes DI precedent), then print the
         // projection's compact json verbatim. Takes precedence over --json (module
         // header's "Combined --injection --json decision").
+        //
+        // spec-context-provenance-injected-corpus-global-state-and-a D2 — the
+        // BOOTSTRAP_FRAMING_LINE scope-boundary constant is printed FIRST, as its
+        // own stdout line, ahead of the JSON payload. This is a deliberate,
+        // binary-side stdout-shape change (the SessionStart hook's Phase E used to
+        // author this boundary prose itself, in an installed asset file that drifts
+        // independently of the binary — the exact defect class SPEC-083 already
+        // retired for governance prose). The hook remains a blind pipe (D3): it
+        // relays BOTH lines verbatim inside its markdown fence, never parsing
+        // either. A consumer that wants ONLY the JSON reads stdout from its second
+        // line onward.
         const budgets = resolveBootstrapInjectionBudgets(config);
         // spec-session-start-handoff-neutrality D1, D2 — "seat-scoped" (resume_hint
         // survives the injection) can ONLY be computed HERE: this command already
@@ -290,6 +310,7 @@ export default defineCommand({
         // cannot re-derive this from `report` alone.
         const seatScoped = seat !== undefined && result.value.seat_unresolved !== true;
         const { json } = buildBootstrapInjection(reportWithStaleness, budgets, seatScoped);
+        console.log(BOOTSTRAP_FRAMING_LINE);
         console.log(json);
       } else if (args.json) {
         console.log(JSON.stringify({ ok: true, data: reportWithStaleness }, null, 2));

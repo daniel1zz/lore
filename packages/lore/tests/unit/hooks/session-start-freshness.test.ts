@@ -492,7 +492,12 @@ describe("session-start-freshness — REGRESSION", () => {
 
     expect(result.status).toBe(0);
     const ctx = parseAdditionalContext(result.stdout as string);
-    const bootstrapIdx = ctx.indexOf("Lore Bootstrap");
+    // spec-context-provenance-injected-corpus-global-state-and-a D2 retired
+    // the hook's own "## Lore Bootstrap (hook-injected)" header text — Phase
+    // E now just fence-wraps whatever the (stubbed) `lore bootstrap` call
+    // printed, so the marker for "where the bootstrap block landed" is the
+    // stub's own JSON content, not hook-authored prose.
+    const bootstrapIdx = ctx.indexOf('"stub":true');
     const advisoryIdx = ctx.indexOf("⚠ lore assets outdated");
     expect(bootstrapIdx).toBeGreaterThanOrEqual(0);
     expect(advisoryIdx).toBeGreaterThan(bootstrapIdx);

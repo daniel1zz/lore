@@ -33,19 +33,28 @@
  *          `<main-checkout>/assets/governance/seat-briefing.md`) is retired
  *          along with the install-set entry (D3). Placeholder substitution
  *          and the fail-open contract are unchanged.
- * Phase E: lore bootstrap injection (corpus pointer set, when the resolved
- *          corpus root — main checkout for a linked worktree, cwd otherwise —
- *          has .lore/). SPEC-080 D3 — this hook is a BLIND PIPE: it spawns
- *          `lore bootstrap --injection`, trims stdout, and wraps it verbatim
- *          in the markdown fence with ZERO knowledge of the payload's field
- *          names or shape (the binary side owns the tier-1 projection
- *          contract entirely, `buildBootstrapInjection` in `@lore/core`).
- *          `INJECTION_BACKSTOP_CAP` (12000 chars) is a pure safety backstop,
- *          not a truncation policy — the projection is already
- *          char-budgeted binary-side, so exceeding this cap signals a
- *          binary-side bug. On overflow the hook drops the bootstrap block
- *          ENTIRELY (never slices stdout) and records a degradation entry
- *          naming the observed length.
+ * Phase E: lore bootstrap injection (corpus-global state snapshot, when the
+ *          resolved corpus root — main checkout for a linked worktree, cwd
+ *          otherwise — has .lore/). SPEC-080 D3, strengthened by
+ *          spec-context-provenance-injected-corpus-global-state-and-a D2 —
+ *          this hook is a BLIND PIPE: it spawns `lore bootstrap --injection`,
+ *          trims stdout, and wraps it verbatim in a markdown fence with ZERO
+ *          knowledge of the payload's field names, shape, or even its line
+ *          count (the binary side owns the tier-1 projection contract
+ *          entirely, `buildBootstrapInjection` in `@lore/core`, AND — as of
+ *          D2 — the scope-boundary prose describing that payload, printed by
+ *          `commands/bootstrap.ts` as stdout's own first line). This hook no
+ *          longer authors ANY header or description text of its own for this
+ *          block — an installed hook file drifts independently of the
+ *          binary, so prose describing a payload must ship in the SAME
+ *          artifact as the payload (the exact drift class SPEC-083 already
+ *          retired for governance prose). `INJECTION_BACKSTOP_CAP` (12000
+ *          chars) is a pure safety backstop, not a truncation policy — the
+ *          projection is already char-budgeted binary-side, so exceeding
+ *          this cap (measured against the WHOLE trimmed stdout, boundary
+ *          line included) signals a binary-side bug. On overflow the hook
+ *          drops the bootstrap block ENTIRELY (never slices stdout) and
+ *          records a degradation entry naming the observed length.
  * Phase F: session-start advisory — cache-first asset-freshness check
  *          (SPEC-076 §C6). Reads `<claude-dir>/.lore-setup-check.json`
  *          (written by `lore setup --check`, T4 of SPEC-076) — a fresh
@@ -298,10 +307,10 @@ try {
 } catch { /* fail-open — governance injection must never block session start */ }
 
 // ── Phase E: lore bootstrap injection ──────────────────────────────
-// Corpus pointer set (root doc, active plans + task counts, pending
-// reviews, active sessions, stale candidates). Only when the resolved
-// corpus root (main checkout for a linked worktree, cwd otherwise) has
-// .lore/.
+// Corpus-global state snapshot (root doc, active plans + task counts,
+// pending reviews, active sessions, stale candidates). Only when the
+// resolved corpus root (main checkout for a linked worktree, cwd
+// otherwise) has .lore/.
 let bootstrapBlock = '';
 if (existsSync(join(bootstrapCwd, '.lore'))) {
   // SPEC-057 AC-S-4 — `--seat-branch <branch>` is appended ONLY for a linked-worktree
@@ -319,8 +328,12 @@ if (existsSync(join(bootstrapCwd, '.lore'))) {
   });
   const stdout = r.status === 0 && typeof r.stdout === 'string' ? r.stdout.trim() : '';
   if (stdout) {
-    // Blind pipe (SPEC-080 D3) — the binary owns the payload shape entirely;
-    // this hook never parses, re-serializes, or inspects a single field name.
+    // Blind pipe (SPEC-080 D3, spec-context-provenance-injected-corpus-global-state-and-a
+    // D2) — the binary owns the payload shape AND its own framing prose
+    // entirely; this hook never parses, re-serializes, or inspects a single
+    // line or field. `stdout` is now TWO lines (boundary line, then compact
+    // JSON) but this hook does not know or care — it fence-wraps whatever
+    // came back, verbatim, exactly as it always has.
     if (stdout.length > INJECTION_BACKSTOP_CAP) {
       degradations.push({
         component: 'lore bootstrap',
@@ -328,11 +341,7 @@ if (existsSync(join(bootstrapCwd, '.lore'))) {
           + '— binary-side bug, run `lore setup` / investigate',
       });
     } else {
-      bootstrapBlock = `## Lore Bootstrap (hook-injected)
-
-Corpus pointer set — deep-dive via \`lore get <slug>\`, \`lore tree <plan>\`, \`lore ready <plan> --json\`. Do NOT re-run \`lore bootstrap\` yourself.
-
-\`\`\`json
+      bootstrapBlock = `\`\`\`
 ${stdout}
 \`\`\``;
     }
