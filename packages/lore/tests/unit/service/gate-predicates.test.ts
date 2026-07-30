@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { SPEC_KINDS, type TaskAttestationInfo } from "@lore/core";
+import { SPEC_KINDS, type TaskAttestationInfo, type AcCoverageFact } from "@lore/core";
 import {
   parentLegal,
   specKindValid,
@@ -27,6 +27,15 @@ import {
   AC_COUNT_FIELD,
   DEFAULT_MIN_ACS,
 } from "../../../src/service/gate-predicates.js";
+
+// Amendment A (task-t3-domain-doc-sync-requires-attribution-to-the-closing-
+// plan, spec-plan-close-predicates-measure-invariants-an-applicability §D3) —
+// `attestationFloor`'s `acCoverage` 4th parameter lost its `= []` default (a
+// silent opt-out of the per-claimed-AC coverage conjunct). Every fixture below
+// that declares no acceptance criteria at all passes this NAMED constant
+// instead of a bare `[]`, so the intent ("this fixture never declared any
+// ACs") is visible at each call site rather than implicit.
+const NO_DECLARED_ACS: readonly AcCoverageFact[] = [];
 
 describe("gate-predicates", () => {
   describe("parentLegal", () => {
@@ -354,7 +363,7 @@ describe("gate-predicates", () => {
         taskInfo({ slug: "task-a", evidenceCount: 10, attestedCount: 10 }),
         taskInfo({ slug: "task-b", evidenceCount: 1, attestedCount: 0 }),
       ];
-      expect(attestationFloor(tasks, 0.5, "plan-x")).toEqual({
+      expect(attestationFloor(tasks, 0.5, "plan-x", NO_DECLARED_ACS)).toEqual({
         ok: false,
         reason: "ATTESTATION_FLOOR_NOT_MET",
         field: "attestation-floor",
@@ -368,7 +377,7 @@ describe("gate-predicates", () => {
         taskInfo({ slug: "task-a", evidenceCount: 4, attestedCount: 1 }),
         taskInfo({ slug: "task-b", evidenceCount: 1, attestedCount: 1 }),
       ];
-      expect(attestationFloor(tasks, 0.5, "plan-x")).toEqual({
+      expect(attestationFloor(tasks, 0.5, "plan-x", NO_DECLARED_ACS)).toEqual({
         ok: false,
         reason: "ATTESTATION_FLOOR_NOT_MET",
         field: "attestation-floor",
@@ -385,17 +394,17 @@ describe("gate-predicates", () => {
     // slice that changed the behavior — a stale assertion here would silently
     // re-legalize the old shape.
     it("AC-PCI: a vacuous plan (no evidence anywhere) is notApplicable, never a silent pass", () => {
-      expect(attestationFloor(undefined, 0.5, "plan-x")).toEqual({
+      expect(attestationFloor(undefined, 0.5, "plan-x", NO_DECLARED_ACS)).toEqual({
         notApplicable: true,
         reason: "no-evidence",
         referent: "plan-x",
       });
-      expect(attestationFloor([], 0.9, "plan-y")).toEqual({
+      expect(attestationFloor([], 0.9, "plan-y", NO_DECLARED_ACS)).toEqual({
         notApplicable: true,
         reason: "no-evidence",
         referent: "plan-y",
       });
-      expect(attestationFloor([taskInfo({ evidenceCount: 0, attestedCount: 0 })], 1, "plan-z")).toEqual({
+      expect(attestationFloor([taskInfo({ evidenceCount: 0, attestedCount: 0 })], 1, "plan-z", NO_DECLARED_ACS)).toEqual({
         notApplicable: true,
         reason: "no-evidence",
         referent: "plan-z",
@@ -404,7 +413,7 @@ describe("gate-predicates", () => {
 
     it("AC-075-11: a ratio exactly equal to minRatio passes (boundary, >= not >)", () => {
       const tasks: TaskAttestationInfo[] = [taskInfo({ slug: "task-a", evidenceCount: 2, attestedCount: 1 })];
-      expect(attestationFloor(tasks, 0.5, "plan-x")).toEqual({ ok: true });
+      expect(attestationFloor(tasks, 0.5, "plan-x", NO_DECLARED_ACS)).toEqual({ ok: true });
     });
 
     it("AC-075-11: fully attested evidence at/above the floor with no zero-attested task passes", () => {
@@ -412,9 +421,40 @@ describe("gate-predicates", () => {
         taskInfo({ slug: "task-a", evidenceCount: 2, attestedCount: 2 }),
         taskInfo({ slug: "task-b", evidenceCount: 1, attestedCount: 1 }),
       ];
-      expect(attestationFloor(tasks, 0.5, "plan-x")).toEqual({ ok: true });
+      expect(attestationFloor(tasks, 0.5, "plan-x", NO_DECLARED_ACS)).toEqual({ ok: true });
+    });
+
+    // ERROR (type-level, Amendment A) — `acCoverage` is a REQUIRED 4th
+    // positional parameter (no default) as of this task: a call omitting it
+    // must fail `tsc`, proving the requirement is STRUCTURAL, not
+    // conventional (a reviewer remembering to pass it). A runtime `it()`
+    // cannot express "this must not compile" — JS has no arity enforcement,
+    // so actually INVOKING a call missing a required arg would throw at
+    // runtime (`deriveAttestationSummary`'s `acCoverage.filter` on
+    // `undefined`) rather than prove anything about the type system. This
+    // repo's own precedent for a type-level invariant checked exclusively by
+    // `bun run typecheck` is `postinstall.test.ts`'s `@ts-expect-error`
+    // fixture — same pattern here, via a NEVER-INVOKED function so the
+    // offending line is type-checked but never executed.
+    it("ERROR (type-level): a call omitting acCoverage must not compile — structural requirement, not conventional", () => {
+      expect(typeof typeAssertion_attestationFloorRequiresAcCoverage).toBe("function");
     });
   });
+
+  /**
+   * Intentionally NEVER INVOKED — see the "ERROR (type-level)" test above.
+   * Its sole purpose is for `bun run typecheck` (the primary oracle for
+   * Amendment A, task-t3-domain-doc-sync-requires-attribution-to-the-closing-
+   * plan) to fail on the line below if `acCoverage` ever regains a default
+   * value: the `@ts-expect-error` directive itself becomes a compile error
+   * ("Unused '@ts-expect-error' directive") the moment the call it annotates
+   * stops being a type error.
+   */
+  function typeAssertion_attestationFloorRequiresAcCoverage(): void {
+    // @ts-expect-error — acCoverage is REQUIRED (4th positional parameter, no
+    // default); a call omitting it must not compile.
+    attestationFloor([], 0.5, "plan-x");
+  }
 
   // task-spec-promote-base-1-ac-rule-is-spec-kind-agnostic-spec-080 (option (a),
   // profile-aware AC floor) — spec-promote's base predicate, replacing the old
