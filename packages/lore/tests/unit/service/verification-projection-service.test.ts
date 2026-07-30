@@ -31,6 +31,7 @@ import { ulid } from "ulidx";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { VerificationProjectionService } from "../../../src/service/verification-projection-service.js";
+import { computeAcCoverage, deriveClaimedAcCoverage } from "@lore/core";
 import type { AcceptanceCriterion, CreateDocInput, DocRecord, EvidenceEntry } from "@lore/core";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -283,6 +284,7 @@ describe("VerificationProjectionService — BOUNDARY (AC-075-3)", () => {
         attested: 0,
         ratio: null,
         min_ratio: 0.5,
+        claimed_ac_coverage: { claimed_acs: [], unattested_acs: [], meets_coverage: true },
         meets_floor: true,
         zero_attested_tasks: [],
       },
@@ -427,5 +429,33 @@ describe("VerificationProjectionService — REGRESSION: constructor minRatio is 
     }
     expect(strictResult.value.attestation.meets_floor).toBe(false);
     expect(lenientResult.value.attestation.meets_floor).toBe(true);
+  });
+});
+
+// ─── AC-PCI-13: ratio disabled render — null min_ratio passes through ───────
+// ─── verbatim, and claimed_ac_coverage equals the gate's own facts ──────────
+
+describe("VerificationProjectionService — AC-PCI-13: ratio disabled render", () => {
+  it("AC-PCI-13 ratio disabled render: a service constructed with null min_ratio renders it verbatim (never coerced to 0/0.5), and the plan panel's claimed_ac_coverage equals deriveClaimedAcCoverage(computeAcCoverage(...)) over the same fixture", async () => {
+    const { corpusService, store } = makeHarness();
+    const prd = await makePrd(corpusService);
+    const spec = await makeSpec(corpusService, prd, [AC_1]);
+    const plan = await makePlan(corpusService, spec);
+    const task = await makeTask(corpusService, plan, "Task", [
+      selfReportedEntry("bun test", { ac_ref: "AC-1" }),
+    ]);
+
+    const disabledService = new VerificationProjectionService(store, null);
+    const result = await disabledService.evidencePanel(plan.slug);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    if (result.value.doc_type !== "plan") throw new Error("expected plan doc_type");
+    expect(result.value.attestation.min_ratio).toBeNull();
+
+    const expectedCoverage = deriveClaimedAcCoverage(computeAcCoverage([AC_1], [task]));
+    expect(result.value.attestation.claimed_ac_coverage).toEqual(expectedCoverage);
+    // AC-1 was claimed (>=1 ref) but the only ref is self-reported — unattested.
+    expect(result.value.attestation.claimed_ac_coverage.unattested_acs).toEqual(["AC-1"]);
   });
 });

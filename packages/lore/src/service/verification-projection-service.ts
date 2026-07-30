@@ -115,12 +115,17 @@ export class VerificationProjectionService {
    * @param store - Storage abstraction (same instance passed to every other
    *   service).
    * @param minRatio - The configured `workflow.attestation.min_ratio` floor
-   *   (`resolveAttestationMinRatio(config)`, `@lore/core`) — resolved ONCE by
-   *   the composition root (`app.ts`), never re-read from config here.
+   *   (`resolveAttestationMinRatio(config)`, `@lore/core`), or `null` when
+   *   unconfigured (spec-plan-close-predicates-measure-invariants-an-
+   *   applicability §D4) — resolved ONCE by the composition root (`app.ts`),
+   *   never re-read from config here, and passed through to
+   *   `deriveAttestationSummary` VERBATIM (never coerced to `0`/`0.5`) so the
+   *   panel and the gate can never disagree on whether the ratio conjunct is
+   *   even live.
    */
   constructor(
     private readonly store: StoreInterface,
-    private readonly minRatio: number,
+    private readonly minRatio: number | null,
   ) {}
 
   /**
@@ -179,8 +184,27 @@ export class VerificationProjectionService {
         const tasksResult = await resolvePlanTasks(this.store, doc.id);
         if (!tasksResult.ok) return tasksResult;
 
+        // reason: spec-plan-close-predicates-measure-invariants-an-applicability
+        // §D3/AC-PCI-13 — the panel's `claimed_ac_coverage` must equal
+        // `deriveClaimedAcCoverage(computeAcCoverage(...))` over the SAME
+        // declared criteria + tasks the `plan-close` gate uses, so the two
+        // surfaces can never disagree. `doc.parent_id` resolves the plan's
+        // immediate ancestor (mirrors `CorpusService.set`'s `bundle.spec`
+        // shape); criteria stay `[]` when there is no spec-tier ancestor at
+        // all — a plan with nothing upstream has nothing to claim against.
+        let criteria: AcceptanceCriterion[] = [];
+        if (doc.parent_id !== null) {
+          const parentResult = await this.store.find(doc.parent_id);
+          if (!parentResult.ok) return parentResult;
+          const parent = parentResult.value;
+          if (parent !== null && parent.type === "spec") {
+            criteria = extractSpecCriteria(parent);
+          }
+        }
+        const acCoverage = computeAcCoverage(criteria, tasksResult.value);
+
         const taskAttestationInfos = buildTaskAttestationInfos(tasksResult.value);
-        const attestation = deriveAttestationSummary(taskAttestationInfos, this.minRatio);
+        const attestation = deriveAttestationSummary(taskAttestationInfos, this.minRatio, acCoverage);
         return ok({ doc_type: "plan", attestation, tasks: taskAttestationInfos });
       }
 

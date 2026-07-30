@@ -2,8 +2,10 @@
  * Tests for SPEC-069 §Design Decisions D1 — the `attestationFloor` predicate on the
  * existing `plan-close` checkpoint (SPEC-054's home): a plan's → archived TRANSITION
  * (`CorpusService.set`) is DENIED when any of its tasks carries `verification_evidence`
- * but zero runner-attested entries, OR the plan-wide attested-evidence ratio falls
- * below `workflow.attestation.min_ratio` (default 0.5) — unless the plan is exempted
+ * but zero runner-attested entries, OR (spec-plan-close-predicates-measure-invariants-
+ * an-applicability §D3) a claimed script-mode acceptance criterion has zero attested
+ * evidence, OR (§D4, opt-in only) the plan-wide attested-evidence ratio falls below an
+ * EXPLICITLY configured `workflow.attestation.min_ratio` — unless the plan is exempted
  * (`extra.attestation_exempt: true` + a non-empty `extra.attestation_exempt_reason`).
  *
  * Deterministic, zero-LLM — no AI provider anywhere on this path. Mirrors
@@ -15,30 +17,42 @@
  * Coverage dimensions: HAPPY / NEGATIVE / BOUNDARY / STATE / REGRESSION.
  *
  * Source: spec-spec-068-execution-time-attestation-floor-ad-hoc-task-chann
- *   §Acceptance Criteria AC-069-1..AC-069-4, §Design Decisions D1.
+ *   §Acceptance Criteria AC-069-1..AC-069-4, §Design Decisions D1;
+ *   spec-plan-close-predicates-measure-invariants-an-applicability §D3/§D4,
+ *   §Acceptance Criteria AC-PCI-7, AC-PCI-8.
  */
 
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
-import type { CreateDocInput, DocRecord, EvidenceEntry, LoreConfig } from "@lore/core";
+import type {
+  AcceptanceCriterion,
+  CreateDocInput,
+  DocRecord,
+  EvidenceEntry,
+  LoreConfig,
+} from "@lore/core";
+import { resolveAttestationMinRatio } from "@lore/core";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
-/** A self-reported (never attested) `pass` evidence entry — the fabrication-risk shape. */
-function selfReportedEntry(command: string): EvidenceEntry {
+/** A self-reported (never attested) `pass` evidence entry — the fabrication-risk shape.
+ *  Accepts `opts` (e.g. `ac_ref`) so callers can attribute an entry to a declared AC
+ *  without a second helper — mirrors `verification-projection-service.test.ts`'s shape. */
+function selfReportedEntry(command: string, opts: Partial<EvidenceEntry> = {}): EvidenceEntry {
   return {
     oracle: "test",
     command,
     result: "pass",
     recorded_at: "2026-07-23T00:00:00.000Z",
     recorded_by: "agent:t",
+    ...opts,
   };
 }
 
 /** A runner-issued (attested) `pass` evidence entry — the SPEC-039 §2 D1 sole-injection shape. */
-function attestedEntry(command: string): EvidenceEntry {
+function attestedEntry(command: string, opts: Partial<EvidenceEntry> = {}): EvidenceEntry {
   return {
     oracle: "test",
     command,
@@ -46,6 +60,7 @@ function attestedEntry(command: string): EvidenceEntry {
     recorded_at: "2026-07-23T00:00:00.000Z",
     recorded_by: "agent:t",
     attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 100, timed_out: false },
+    ...opts,
   };
 }
 
@@ -67,6 +82,66 @@ async function mustCreate(cs: CorpusService, input: CreateDocInput): Promise<Doc
   const result = await cs.create(input);
   if (!result.ok) throw new Error(`create failed: ${JSON.stringify(result.error)}`);
   return result.value;
+}
+
+/** Root PRD — the ancestor a governing spec is parented under. */
+async function makePrd(cs: CorpusService): Promise<DocRecord> {
+  return mustCreate(cs, { type: "prd", title: "Root PRD", content: "# PRD\n\nroot" } as CreateDocInput);
+}
+
+/** A governing spec declaring the given criteria — the plan's ancestor for per-claimed-AC coverage. */
+async function makeSpecWithAc(
+  cs: CorpusService,
+  prd: DocRecord,
+  criteria: AcceptanceCriterion[],
+): Promise<DocRecord> {
+  return mustCreate(cs, {
+    type: "spec",
+    title: "Governing spec",
+    parent_id: prd.id,
+    content: "## Spec\n\nbody",
+    extra: { acceptance_criteria: criteria },
+  } as CreateDocInput);
+}
+
+/** Creates a plan parented under `spec` (its ancestor for per-claimed-AC coverage),
+ *  fast-tracked straight to `approved`. */
+async function makeApprovedPlanUnderSpec(
+  cs: CorpusService,
+  spec: DocRecord,
+  extra: Record<string, unknown> = {},
+): Promise<DocRecord> {
+  const created = await mustCreate(cs, {
+    type: "plan",
+    title: "Test plan",
+    parent_id: spec.id,
+    content: "## Plan\n\nbody",
+    extra,
+  } as CreateDocInput);
+  const approved = await cs.set(created.id, { status: "approved" });
+  if (!approved.ok) throw new Error(`plan approve failed (setup): ${JSON.stringify(approved.error)}`);
+  return approved.value;
+}
+
+/** A single declared script-mode AC, and a fixture evidence log achieving EXACTLY a
+ *  0.36 plan-wide attested ratio (9/25) while (a) the one task carrying evidence has
+ *  >=1 attested entry (condition 1 passes) and (b) the AC is claimed with >=1 attested
+ *  ref (condition 2 passes) — isolating the ratio conjunct (condition 3) as the ONLY
+ *  one an explicit `min_ratio` can trip. Matches the motivating measurement recorded
+ *  in the task packet: a plan with honest red->green self-reported entries dominating
+ *  its trail, but every claimed AC fully attested. */
+const AC_X1: AcceptanceCriterion = {
+  id: "AC-X-1",
+  statement: "the export command writes a file to the target path",
+  verify: { mode: "script", oracle: "test", command: "bun test export" },
+};
+
+function buildRatio036Evidence(): EvidenceEntry[] {
+  return [
+    attestedEntry("bun test export", { ac_ref: "AC-X-1" }),
+    ...Array.from({ length: 8 }, (_, i) => attestedEntry(`bun test misc ${i}`)),
+    ...Array.from({ length: 16 }, (_, i) => selfReportedEntry(`bun test filler ${i}`)),
+  ];
 }
 
 /** Creates a plan, already promoted to `approved` (fast-track draft->approved is a
@@ -192,10 +267,18 @@ describe("attestationFloor — AC-069-2: attested evidence meeting the floor unb
 });
 
 // ─── AC-069-3: workflow.attestation.min_ratio is honored ─────────────────────
+//
+// reason: spec-plan-close-predicates-measure-invariants-an-applicability §D4
+// flips `min_ratio`'s default from an always-on 0.5 to UNCONFIGURED (`null`,
+// the ratio conjunct does not run at all) — an UNCONFIGURED config no longer
+// implies a 0.5 floor, so this scenario's floor is now EXPLICITLY configured
+// (`attestationConfig(0.5)`) rather than relying on the old "default" to
+// supply it. AC-PCI-7's own suite below covers the NEW unconfigured-means-
+// disabled behavior for this exact fixture shape.
 
 describe("attestationFloor — AC-069-3: workflow.attestation.min_ratio is honored", () => {
-  it("AC-069-3: a plan-wide ratio of 0.4 fails the default 0.5 floor (every task individually attested at least once)", async () => {
-    const { corpusService } = makeHarness(attestationConfig());
+  it("AC-069-3: a plan-wide ratio of 0.4 fails an EXPLICITLY configured 0.5 floor (every task individually attested at least once)", async () => {
+    const { corpusService } = makeHarness(attestationConfig(0.5));
     const plan = await makeApprovedPlan(corpusService);
     // Task A: 4 entries, 1 attested. Task B: 1 entry, 1 attested. Total 5/2 => ratio 0.4.
     // Every task carries >=1 attested entry, so ONLY the ratio condition trips this case.
@@ -358,5 +441,63 @@ describe("attestationFloor — REGRESSION: the whole-checkpoint escape hatch sti
     const result = await corpusService.set(plan.id, { status: "archived" });
 
     expect(result.ok).toBe(true);
+  });
+});
+
+// ─── AC-PCI-7: ratio disabled by default — per-claimed-AC coverage is the ────
+// ─── new default teeth, resolveAttestationMinRatio resolves null when unset ─
+
+describe("attestationFloor — AC-PCI-7: ratio disabled by default, per-claimed-AC coverage is the default teeth", () => {
+  it("AC-PCI-7 ratio disabled: resolveAttestationMinRatio returns null for a config declaring no min_ratio, and a plan at attested ratio 0.36 with every claimed AC attested transitions to archived through the real plan-close gate with no exemption field set", async () => {
+    const unconfigured = attestationConfig();
+    expect(resolveAttestationMinRatio(unconfigured)).toBeNull();
+    expect(resolveAttestationMinRatio(undefined)).toBeNull();
+
+    const { corpusService } = makeHarness(unconfigured);
+    const prd = await makePrd(corpusService);
+    const spec = await makeSpecWithAc(corpusService, prd, [AC_X1]);
+    const plan = await makeApprovedPlanUnderSpec(corpusService, spec);
+    await makeTask(corpusService, plan, "Task at ratio 0.36", buildRatio036Evidence());
+
+    const result = await corpusService.set(plan.id, { status: "archived" });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.status).toBe("archived");
+      expect(result.value.extra["attestation_exempt"]).toBeUndefined();
+    }
+  });
+});
+
+// ─── AC-PCI-8: an explicit ratio still enforces, AND-ed with per-claimed-AC ──
+// ─── coverage — never a substitute for it ────────────────────────────────────
+
+describe("attestationFloor — AC-PCI-8: an explicit ratio still enforces, AND-ed with per-claimed-AC coverage", () => {
+  it("AC-PCI-8 explicit ratio: min_ratio 0.5 still denies the same 0.36-ratio plan (ratio conjunct AND-ed with coverage), and an explicit 0 permits it — both via the real plan-close gate, never the predicate in isolation", async () => {
+    const strict = makeHarness(attestationConfig(0.5));
+    const prdStrict = await makePrd(strict.corpusService);
+    const specStrict = await makeSpecWithAc(strict.corpusService, prdStrict, [AC_X1]);
+    const planStrict = await makeApprovedPlanUnderSpec(strict.corpusService, specStrict);
+    await makeTask(strict.corpusService, planStrict, "Task at ratio 0.36", buildRatio036Evidence());
+
+    const deniedResult = await strict.corpusService.set(planStrict.id, { status: "archived" });
+
+    expect(deniedResult.ok).toBe(false);
+    if (!deniedResult.ok) {
+      expect((deniedResult.error as { field?: string }).field).toBe("gate:plan-close:attestation-floor");
+    }
+
+    const lenient = makeHarness(attestationConfig(0));
+    const prdLenient = await makePrd(lenient.corpusService);
+    const specLenient = await makeSpecWithAc(lenient.corpusService, prdLenient, [AC_X1]);
+    const planLenient = await makeApprovedPlanUnderSpec(lenient.corpusService, specLenient);
+    await makeTask(lenient.corpusService, planLenient, "Task at ratio 0.36", buildRatio036Evidence());
+
+    const permittedResult = await lenient.corpusService.set(planLenient.id, { status: "archived" });
+
+    expect(permittedResult.ok).toBe(true);
+    if (permittedResult.ok) {
+      expect(permittedResult.value.status).toBe("archived");
+    }
   });
 });

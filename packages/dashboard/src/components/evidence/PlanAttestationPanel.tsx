@@ -14,15 +14,25 @@
  *     case) renders an EXPLICIT "not applicable" copy — NEVER "0%". A
  *     fabricated 0% would misleadingly read as "every entry failed
  *     attestation" when the true state is "nothing has been verified yet".
+ *   - `attestation.min_ratio === null` (spec-plan-close-predicates-measure-
+ *     invariants-an-applicability §D4 — the ratio conjunct UNCONFIGURED)
+ *     renders the literal text "ratio conjunct disabled" — NEVER a fabricated
+ *     "0%" (would read as "0% required") or "50%" (would claim an enforcement
+ *     that is not happening).
  *   - `zero_attested_tasks` (per-task floor condition 1 failures) renders as
  *     its own labeled list — the SAME slugs the `plan-close` gate's feeding
  *     pack names, so a reviewer sees exactly which tasks to fix.
+ *   - `claimed_ac_coverage.unattested_acs` (§D3 condition 2 failures) renders as
+ *     its own labeled list, mirroring `zero_attested_tasks` — the SAME AC ids
+ *     the gate's feeding pack names.
  *   - Zero task children → an explicit empty state (AC-075-3), distinct from
  *     "zero evidence on existing tasks" (which renders the vacuous-pass
  *     ratio:null copy above, not this empty state).
  * Side-effect class: pure
  * Source: SPEC-075 §Module Boundary D7, AC-075-2, AC-075-3; SPEC-069 §Design
- *   Decisions D1 (attestationFloor, the gate this panel explains)
+ *   Decisions D1 (attestationFloor, the gate this panel explains);
+ *   spec-plan-close-predicates-measure-invariants-an-applicability §D3
+ *   (per-claimed-AC coverage), §D4 (ratio conjunct default flip)
  *
  * @example
  * <PlanAttestationPanel panel={{doc_type: "plan", attestation: {...}, tasks: [...]}} />
@@ -40,6 +50,18 @@ export interface PlanAttestationPanelProps {
 function formatRatio(ratio: number | null): string {
   if (ratio === null) return "not applicable — no evidence recorded yet";
   return `${Math.round(ratio * 100)}%`;
+}
+
+/**
+ * Formats `AttestationSummary.min_ratio` — `null` (the conjunct is unconfigured,
+ * §D4) renders the literal, standalone text "ratio conjunct disabled" (no
+ * surrounding punctuation, so an exact-text query matches it directly), never a
+ * fabricated "0%" or a numeric floor that implies an enforcement that is not
+ * happening.
+ */
+function formatFloor(minRatio: number | null): string {
+  if (minRatio === null) return "ratio conjunct disabled";
+  return `floor ${Math.round(minRatio * 100)}%`;
 }
 
 /**
@@ -67,7 +89,7 @@ export function PlanAttestationPanel({ panel }: PlanAttestationPanelProps): Reac
           <span className="text-sm">
             Attested ratio: <span className="font-medium">{formatRatio(attestation.ratio)}</span>
           </span>
-          <span className="text-xs text-muted-foreground">(floor {Math.round(attestation.min_ratio * 100)}%)</span>
+          <span className="text-xs text-muted-foreground">{formatFloor(attestation.min_ratio)}</span>
         </div>
         <p className="text-xs text-muted-foreground">
           {attestation.attested} / {attestation.total_evidence} evidence entries attested
@@ -79,6 +101,18 @@ export function PlanAttestationPanel({ panel }: PlanAttestationPanelProps): Reac
               {attestation.zero_attested_tasks.map((slug) => (
                 <li key={slug} className="font-mono">
                   {slug}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {attestation.claimed_ac_coverage.unattested_acs.length > 0 && (
+          <div aria-label="Unattested claimed acceptance criteria">
+            <p className="text-xs font-medium text-destructive">Claimed acceptance criteria with no attested evidence:</p>
+            <ul className="list-disc list-inside text-xs text-muted-foreground">
+              {attestation.claimed_ac_coverage.unattested_acs.map((acId) => (
+                <li key={acId} className="font-mono">
+                  {acId}
                 </li>
               ))}
             </ul>

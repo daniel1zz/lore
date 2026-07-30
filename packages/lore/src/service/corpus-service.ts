@@ -44,6 +44,7 @@ import {
   isSelfDeclaredOrdinalTitle,
   computePlanCloseCascadeTargets,
   isLedgerKnowledgeSubType,
+  computeAcCoverage,
 } from "@lore/core";
 import type {
   CreateDocInput,
@@ -1984,10 +1985,30 @@ export class CorpusService {
         // dashboard adjudication workbench's plan Evidence-panel branch also
         // calls; this call site no longer re-derives the same counts inline.
         const planTasksAttestation = buildTaskAttestationInfos(bundleResult!.value.tasks);
+        // reason: spec-plan-close-predicates-measure-invariants-an-applicability
+        // §D3/§D5 — per-claimed-AC attested-coverage facts, computed via the
+        // SAME `computeAcCoverage` (@lore/core) AND the SAME declared-criteria
+        // extraction (`specAcceptanceCriteriaSchema.safeParse` over
+        // `spec.extra.acceptance_criteria`) that `countScriptModeAcceptanceCriteria`
+        // (checkpoint-registry.ts, reused a few lines above via
+        // `buildUpstreamSpecContext`) already applies to the SAME resolved
+        // `bundle.spec` — no hand-rolled second extraction. `[]` when the plan
+        // has no spec-tier ancestor at all (`bundle.spec === undefined`),
+        // mirroring `parentSpecScriptAcCount`'s "populate only when relevant"
+        // shape: a plan with nothing upstream has nothing to claim against.
+        const declaredAcParsed = specAcceptanceCriteriaSchema.safeParse(
+          bundleResult!.value.spec?.extra["acceptance_criteria"],
+        );
+        const declaredCriteria = declaredAcParsed.success ? declaredAcParsed.data : [];
+        const planClaimedAcCoverage =
+          bundleResult!.value.spec !== undefined
+            ? computeAcCoverage(declaredCriteria, bundleResult!.value.tasks)
+            : [];
         planCloseCtx = {
           ...planCloseCtx,
           planTasksAttestation,
           attestationMinRatio: this.gateEnforcer.resolveAttestationMinRatio(),
+          planClaimedAcCoverage,
         };
       }
 

@@ -375,23 +375,37 @@ const WorkflowConfigSchema = z
       .strict()
       .default({}),
     /**
-     * `plan-close`'s execution-time attestation-floor sub-predicate config
-     * (SPEC-069 §Design Decisions D1) — the minimum plan-wide fraction of a
-     * closing plan's `verification_evidence` entries (aggregated across every
-     * task) that must be runner-issued (`attestation` present) before the plan
-     * may transition to `archived`. Nested under `workflow` (not
-     * `gates.<checkpoint>`) because it is a NUMBER, not an `enabled` toggle —
-     * `GateCheckpointConfigSchema`'s existing sub-predicate shape only carries
-     * boolean switches; whether the predicate runs AT ALL is still
-     * `workflow.gates."plan-close".enabled` (the whole-checkpoint knob,
-     * unchanged). Absence of the whole `workflow` section, or of `attestation`
-     * within it, both fall back to the schema default (0.5) — same
-     * "absence = default floor" shape as `staleness`/`drift` above.
+     * `plan-close`'s OPT-IN execution-time attestation-ratio sub-predicate config
+     * (spec-plan-close-predicates-measure-invariants-an-applicability §D4,
+     * superseding SPEC-069 §Design Decisions D1's always-on `0.5` default) — the
+     * minimum plan-wide fraction of a closing plan's `verification_evidence`
+     * entries (aggregated across every task) that must be runner-issued
+     * (`attestation` present) before the plan may transition to `archived`.
+     * Nested under `workflow` (not `gates.<checkpoint>`) because it is a NUMBER,
+     * not an `enabled` toggle — `GateCheckpointConfigSchema`'s existing
+     * sub-predicate shape only carries boolean switches; whether the WHOLE
+     * checkpoint runs at all is still `workflow.gates."plan-close".enabled`
+     * (unchanged).
+     *
+     * `min_ratio` deliberately carries NO Zod `.default(...)` — the field is
+     * `undefined` when absent, never a silently-resurrected `0.5`. A Zod default
+     * would make "absent" and "explicitly 0.5" indistinguishable at every read
+     * site, which is the exact migration hazard §D4 closes: this predicate's
+     * per-claimed-AC attested-coverage conjunct (the new default teeth) already
+     * runs unconditionally, so the ratio is now an opt-in ADDITIONAL conjunct, on
+     * only when a team explicitly writes this value. Absence of the whole
+     * `workflow` section, or of `attestation` within it, both resolve to
+     * `undefined` here too (`resolveAttestationMinRatio` is the sole seam that
+     * turns that into the caller-visible `null`).
      */
     attestation: z
       .object({
-        /** Minimum plan-wide attested-evidence ratio required to close. Default: 0.5. */
-        min_ratio: z.number().min(0).max(1).default(0.5),
+        /**
+         * Minimum plan-wide attested-evidence ratio required to close. No default
+         * — absent means the ratio conjunct does not run at all (see this field's
+         * parent JSDoc).
+         */
+        min_ratio: z.number().min(0).max(1).optional(),
       })
       .strict()
       .default({}),
@@ -1296,10 +1310,16 @@ export function resolveStaleAfterDays(config: LoreConfig | undefined): number {
 }
 
 /**
- * Resolve the effective `workflow.attestation.min_ratio` floor (SPEC-069 §Design
- * Decisions D1) from an optional LoreConfig. Absence of the whole config, the
- * `workflow` section, or `workflow.attestation` specifically all fall back to the
- * schema default (0.5).
+ * Resolve the effective `workflow.attestation.min_ratio` floor from an optional
+ * LoreConfig — `null` when UNCONFIGURED (spec-plan-close-predicates-measure-
+ * invariants-an-applicability §D4, superseding SPEC-069 §Design Decisions D1's
+ * `0.5` schema default). Absence of the whole config, the `workflow` section, or
+ * `workflow.attestation` specifically, or an unset `min_ratio` within it, ALL
+ * resolve to `null` — the ratio conjunct is OPT-IN, and only an EXPLICITLY
+ * configured value ever turns it on. This is the deliberate migration rule: a
+ * Zod-level default here would make "absent" and "explicitly 0.5" indistinguishable
+ * at every read site, silently keeping the old always-on behavior alive under a
+ * new name.
  *
  * Deliberately fully-optional-chained (`config?.workflow?.attestation?.min_ratio`)
  * rather than {@link resolveDriftEnabled}'s `config?.workflow ?? schemaDefault`
@@ -1313,18 +1333,18 @@ export function resolveStaleAfterDays(config: LoreConfig | undefined): number {
  * predicate's caller (`GateEnforcer.resolveAttestationMinRatio`, now on the
  * `plan-close` checkpoint's ALWAYS-evaluated attestation-floor sub-predicate,
  * unlike the narrower sub-knobs those other `resolve*` functions serve) with such
- * a fixture must degrade to the default, not throw on `.attestation` being
- * `undefined`.
+ * a fixture must degrade to `null`, not throw on `.attestation` being `undefined`.
  *
  * @param config - Parsed LoreConfig, or undefined when no config file was loaded
- * @returns Effective `workflow.attestation.min_ratio` value
+ * @returns The explicitly configured `workflow.attestation.min_ratio`, or `null`
+ *   when unconfigured (the ratio conjunct does not run at all).
  * @example
- *   resolveAttestationMinRatio(undefined) // => 0.5
+ *   resolveAttestationMinRatio(undefined) // => null
  *   resolveAttestationMinRatio({ ..., workflow: { attestation: { min_ratio: 0.3 } } }) // => 0.3
- *   resolveAttestationMinRatio({ ..., workflow: { gates: {} } } as LoreConfig) // => 0.5 (no throw)
+ *   resolveAttestationMinRatio({ ..., workflow: { gates: {} } } as LoreConfig) // => null (no throw)
  */
-export function resolveAttestationMinRatio(config: LoreConfig | undefined): number {
-  return config?.workflow?.attestation?.min_ratio ?? WorkflowConfigSchema.parse({}).attestation.min_ratio;
+export function resolveAttestationMinRatio(config: LoreConfig | undefined): number | null {
+  return config?.workflow?.attestation?.min_ratio ?? null;
 }
 
 /**
