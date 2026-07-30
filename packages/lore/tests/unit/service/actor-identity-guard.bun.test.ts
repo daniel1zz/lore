@@ -260,7 +260,14 @@ describe("checkpointRegistry['task-claim'] — actorIdentityGuard wiring (pure)"
     expect(failures).toHaveLength(1);
     expect(failures[0]?.field).toBe(ACTOR_IDENTITY_FIELD);
 
-    const feedText = def.feed(ctx, results);
+    // reason: task-t1-applicability-verdict-in-the-predicate-s-own-type-both —
+    // `check()`'s static return type widened to `ApplicablePredicateResult[]`
+    // (shared across every checkpoint); `task-claim` itself never produces a
+    // not-applicable member, so `selectFailures` (already imported/used above)
+    // narrows this back to `feed`'s expected `PredicateResult[]` shape —
+    // semantically identical to passing the raw array, since `feed` already
+    // re-filters on `!f.ok` internally.
+    const feedText = def.feed(ctx, selectFailures(results));
     expect(feedText).toContain("task-one");
     expect(feedText).toContain("daniel");
     expect(feedText).toContain("LORE_ACTOR");

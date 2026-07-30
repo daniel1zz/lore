@@ -89,10 +89,12 @@ import {
   checkpointRegistry,
   isCheckpointBlocked,
   planPromoteReachabilityAdvisory,
+  planPromotePrdSyncAdvisory,
   selectFailures,
   type GateCheckpoint,
   type GateContext,
 } from "./checkpoint-registry.js";
+import { isNotApplicable, type PredicateNotApplicable } from "./gate-predicates.js";
 import type { TraceRecorder } from "./trace-recorder.js";
 
 /**
@@ -172,6 +174,109 @@ export function buildGateSkipAuditEntry(
     details: {
       checkpoint,
       mechanism,
+      ...(target !== undefined ? { target } : {}),
+    },
+  };
+}
+
+/**
+ * A typed classification for a gate advisory message (spec-plan-close-
+ * predicates-measure-invariants-an-applicability §Design Decisions D2) — the
+ * enforcer boundary's vocabulary for "this is worth surfacing but must NEVER
+ * block". `"verify-reachability"` is `planPromoteReachabilityAdvisory`'s
+ * PRE-EXISTING class (unchanged — still surfaced only via
+ * `ApproveResult.reachability_advisories`); `"prd-sync-domain-doc"` tags BOTH
+ * `plan-promote`'s new early-warning advisory (`planPromotePrdSyncAdvisory`,
+ * surfaced via `ApproveResult.prd_sync_advisories`) AND a plan-close
+ * `prdOutlineSynced` not-applicable verdict (`reason: "referent-absent"`) when
+ * `enforce()` audits it — the SAME underlying corpus fact ("this ancestor spec
+ * resolves no domain doc"), observed at two different times; `"attestation-
+ * not-applicable"` tags a plan-close `attestationFloor` not-applicable verdict
+ * (`reason: "no-evidence"`). Never widens an EXISTING field's meaning — each
+ * kind lands on its own key/audit-detail value.
+ */
+export type GateAdvisoryKind = "verify-reachability" | "prd-sync-domain-doc" | "attestation-not-applicable";
+
+/** One gate-produced advisory — see {@link GateAdvisoryKind} for the kind vocabulary. */
+export interface GateAdvisory {
+  readonly kind: GateAdvisoryKind;
+  readonly message: string;
+}
+
+/**
+ * Maps a {@link PredicateNotApplicable}'s `reason` to its {@link GateAdvisoryKind}
+ * — the two are 1:1 today (`"referent-absent"` is `prdOutlineSynced`'s only
+ * not-applicable reason, `"no-evidence"` is `attestationFloor`'s only one), so
+ * this reason IS the discriminator `GateEnforcer.enforce`'s partition uses to
+ * classify a not-applicable verdict without needing to know which predicate
+ * function produced it. Exhaustive `never`-checked default — a future third
+ * `NotApplicableReason` fails typecheck here until this mapping is updated.
+ */
+function notApplicableAdvisoryKind(reason: PredicateNotApplicable["reason"]): GateAdvisoryKind {
+  if (reason === "referent-absent") return "prd-sync-domain-doc";
+  if (reason === "no-evidence") return "attestation-not-applicable";
+  const exhaustive: never = reason;
+  throw new Error(`Internal error: unhandled NotApplicableReason "${String(exhaustive)}"`);
+}
+
+/** Audit `session_id` sentinel for every `gate_not_applicable` row — mirrors
+ *  {@link GATE_SKIP_AUDIT_SESSION_ID}'s "own identity, not conflated with a
+ *  different event class" rationale. */
+const GATE_NOT_APPLICABLE_AUDIT_SESSION_ID = "gate-not-applicable";
+
+/** Audit action string stamped on every not-applicable-predicate audit row
+ *  (spec-plan-close-predicates-measure-invariants-an-applicability §Design
+ *  Decisions D2) — a DISTINCT event class from `gate_skipped` (a config-disabled
+ *  checkpoint never even ran its predicates; this fires from an ENABLED
+ *  checkpoint whose predicate ran and found its referent absent). */
+const GATE_NOT_APPLICABLE_AUDIT_ACTION = "gate_not_applicable";
+
+/**
+ * Pure builder for a `gate_not_applicable` audit entry — mirrors
+ * {@link buildGateSkipAuditEntry}'s exact shape/rationale (SPEC-080 G4's
+ * "observability never changes the outcome" precedent), naming the absent
+ * referent and the advisory kind.
+ *
+ * @param checkpoint - Which checkpoint's predicate produced the verdict.
+ * @param advisory - The typed advisory this not-applicable verdict maps to.
+ * @param referent - The `PredicateNotApplicable.referent` naming the absent fact.
+ * @param nowIso - ISO 8601 timestamp, resolved by the caller.
+ * @param actor - Resolved actor identity.
+ * @param target - The target doc's id/slug, when the calling checkpoint's
+ *   `GateContext` supplied one — absent for a not-yet-created candidate.
+ * @example
+ * buildNotApplicableAuditEntry(
+ *   "plan-close",
+ *   { kind: "prd-sync-domain-doc", message: "..." },
+ *   "spec-x",
+ *   "2026-07-30T00:00:00.000Z",
+ *   "alice",
+ *   "plan-y",
+ * );
+ *   // => { timestamp: "2026-07-30T00:00:00.000Z", actor: "alice",
+ *   //      session_id: "gate-not-applicable", action: "gate_not_applicable",
+ *   //      doc_id: "plan-y",
+ *   //      details: { checkpoint: "plan-close", kind: "prd-sync-domain-doc",
+ *   //                 referent: "spec-x", target: "plan-y" } }
+ */
+export function buildNotApplicableAuditEntry(
+  checkpoint: GateCheckpoint,
+  advisory: GateAdvisory,
+  referent: string,
+  nowIso: string,
+  actor: string,
+  target?: string,
+): AuditEntry {
+  return {
+    timestamp: nowIso,
+    actor,
+    session_id: GATE_NOT_APPLICABLE_AUDIT_SESSION_ID,
+    action: GATE_NOT_APPLICABLE_AUDIT_ACTION,
+    ...(target !== undefined ? { doc_id: target } : {}),
+    details: {
+      checkpoint,
+      kind: advisory.kind,
+      referent,
       ...(target !== undefined ? { target } : {}),
     },
   };
@@ -294,6 +399,15 @@ export class GateEnforcer {
     }
 
     const results = checkpointDef.check(ctx);
+    // reason: spec-plan-close-predicates-measure-invariants-an-applicability
+    // §Design Decisions D1/D2 — a not-applicable verdict NEVER denies (see
+    // `isCheckpointBlocked`'s own narrowing); it is ALWAYS surfaced as a
+    // best-effort, never-blocking audit row so the vacuous pass is never
+    // invisible to an auditor. Fired BEFORE the blocking decision below is even
+    // computed — mirrors `recordSkip`'s "observability never changes the
+    // outcome" contract exactly (a throwing/rejecting port degrades to one
+    // stderr warning, never surfaces here).
+    this.recordNotApplicable(checkpoint, ctx, results.filter(isNotApplicable));
     if (!isCheckpointBlocked(results)) {
       return ok(undefined);
     }
@@ -378,6 +492,32 @@ export class GateEnforcer {
   }
 
   /**
+   * `plan-promote` EARLY-WARNING domain-doc advisory lines for `ctx`
+   * (spec-plan-close-predicates-measure-invariants-an-applicability, task T1
+   * item 9) — mirrors {@link planPromoteReachabilityAdvisories}'s exact shape: a
+   * SEPARATE call from `enforce("plan-promote", ctx)`, never folded into it, so
+   * it can never influence whether that call returns ok/err. `ReviewService.
+   * enforceApprovalGate` calls this ALONGSIDE `planPromoteReachabilityAdvisories`
+   * and surfaces the result on its OWN `ApproveResult.prd_sync_advisories` key —
+   * `reachability_advisories` keeps carrying ONLY the verify-reachability class.
+   *
+   * @param ctx - The SAME `GateContext` the caller built for
+   *   `enforce("plan-promote", ctx)` — reads only `prdSyncEnabled`,
+   *   `hasSpecParent`, `prdSyncDomainDocResolved`, and
+   *   `parentSpecPointer`/`targetIdOrSlug` (for the message).
+   * @returns `[]` when there is nothing to warn about (see
+   *   `planPromotePrdSyncAdvisory`'s own JSDoc for the exact conditions); a
+   *   single-element array with the advisory text otherwise.
+   * @example
+   * enforcer.planPromotePrdSyncAdvisories({ prdSyncEnabled: false, hasSpecParent: true });
+   *   // => []
+   */
+  planPromotePrdSyncAdvisories(ctx: GateContext): readonly string[] {
+    const advisory = planPromotePrdSyncAdvisory(ctx);
+    return advisory === null ? [] : [advisory];
+  }
+
+  /**
    * SPEC-080 G4 — best-effort, fire-and-forget `gate_skipped` audit write for a
    * config-disabled checkpoint skip. A no-op (zero IO, no wall-clock/`process.env`
    * read) when `recordGateSkip` was not wired at construction. Otherwise resolves
@@ -387,12 +527,8 @@ export class GateEnforcer {
    * gates a not-yet-created candidate with no id of its own yet) and the current
    * actor via the SAME `resolveActorWithSource` chain `CorpusService`'s SPEC-079 G2
    * writes use, builds the entry via the shared pure `buildGateSkipAuditEntry`, and
-   * fires the write WITHOUT awaiting it — `enforce()` must stay synchronous (see
-   * the class's SPEC-080 module invariant). Any failure — a rejected promise, a
-   * `Result.err`, or the port throwing synchronously instead of returning a
-   * promise at all — degrades to one `process.stderr` warning line and otherwise
-   * changes nothing: the skip this call is auditing has ALREADY succeeded by the
-   * time this method runs (D1, "observability never changes gate outcomes").
+   * fires the write via {@link fireAndForgetAudit} — `enforce()` must stay
+   * synchronous (see the class's SPEC-080 module invariant).
    *
    * @param checkpoint - Which checkpoint was skipped.
    * @param ctx - The `GateContext` the caller built for this `enforce()` call —
@@ -405,39 +541,104 @@ export class GateEnforcer {
    *   this instance method (see `../adapters/cli/gate-bypass-audit.js`).
    */
   private recordSkip(checkpoint: GateCheckpoint, ctx: GateContext, mechanism: GateSkipMechanism): void {
-    if (this.recordGateSkip === undefined) return;
+    const port = this.recordGateSkip;
+    if (port === undefined) return;
 
     const target = ctx.specIdOrSlug ?? ctx.targetIdOrSlug;
     const nowIso = new Date().toISOString();
     const actor = resolveActorWithSource(undefined, process.env).actor;
     const entry = buildGateSkipAuditEntry(checkpoint, mechanism, nowIso, actor, target);
+    this.fireAndForgetAudit(port, entry, (reason) => this.warnAuditWriteFailure(checkpoint, "gate-skip", reason));
+  }
 
+  /**
+   * SPEC design decisions D2 (spec-plan-close-predicates-measure-invariants-an-
+   * applicability) — best-effort, fire-and-forget `gate_not_applicable` audit
+   * write, ONE row per `PredicateNotApplicable` verdict `enforce()`'s
+   * `checkpointDef.check(ctx)` call produced. A no-op (zero IO) when
+   * `recordGateSkip` was not wired at construction, OR `notApplicable` is empty
+   * (the common case — only `plan-close`'s `prdOutlineSynced`/`attestationFloor`
+   * can ever produce one today). Each verdict's `reason` maps to a
+   * {@link GateAdvisoryKind} via `notApplicableAdvisoryKind`, naming the absent
+   * `referent` on the audit row. Fires via the SAME {@link fireAndForgetAudit}
+   * dance `recordSkip` uses — a throwing/rejecting `recordGateSkip` port can
+   * NEVER alter `enforce()`'s returned `Result` (D1's "observability never
+   * changes the outcome", extended to this new event class).
+   *
+   * @param checkpoint - Which checkpoint's predicate produced the verdict(s).
+   * @param ctx - The `GateContext` the caller built for this `enforce()` call —
+   *   read only for its optional target-id fields.
+   * @param notApplicable - The not-applicable subset of `checkpointDef.check(ctx)`'s
+   *   result — `[]` is the common case (zero IO in that case).
+   */
+  private recordNotApplicable(
+    checkpoint: GateCheckpoint,
+    ctx: GateContext,
+    notApplicable: readonly PredicateNotApplicable[],
+  ): void {
+    const port = this.recordGateSkip;
+    if (port === undefined || notApplicable.length === 0) return;
+
+    const target = ctx.specIdOrSlug ?? ctx.targetIdOrSlug;
+    const nowIso = new Date().toISOString();
+    const actor = resolveActorWithSource(undefined, process.env).actor;
+
+    for (const result of notApplicable) {
+      const advisory: GateAdvisory = {
+        kind: notApplicableAdvisoryKind(result.reason),
+        message:
+          `ADVISORY (does not block "${checkpoint}"): a predicate's referent is absent — ` +
+          `${result.referent} (reason: ${result.reason}).`,
+      };
+      const entry = buildNotApplicableAuditEntry(checkpoint, advisory, result.referent, nowIso, actor, target);
+      this.fireAndForgetAudit(port, entry, (reason) => this.warnAuditWriteFailure(checkpoint, "gate-not-applicable", reason));
+    }
+  }
+
+  /**
+   * Fires `port(entry)` without awaiting it, degrading ANY failure mode — a
+   * rejected promise, a resolved `Result.err`, or the port throwing
+   * SYNCHRONOUSLY instead of returning a promise at all — to a single
+   * `onFailure(reason)` call, and otherwise changing nothing (D1,
+   * "observability never changes gate outcomes"). The ONE fire-and-forget dance
+   * both `recordSkip` (`gate_skipped`) and `recordNotApplicable`
+   * (`gate_not_applicable`) need, factored so it exists in exactly one place.
+   * `port` is passed explicitly (never re-read from `this.recordGateSkip`) so
+   * this method carries no implicit precondition on caller ordering.
+   */
+  private fireAndForgetAudit(port: RecordGateSkip, entry: AuditEntry, onFailure: (reason: string) => void): void {
     try {
-      Promise.resolve(this.recordGateSkip(entry))
+      Promise.resolve(port(entry))
         .then((result) => {
           if (!result.ok) {
-            this.warnGateSkipAuditFailure(checkpoint, describeLoreError(result.error));
+            onFailure(describeLoreError(result.error));
           }
         })
         .catch((error: unknown) => {
-          this.warnGateSkipAuditFailure(checkpoint, describeThrown(error));
+          onFailure(describeThrown(error));
         });
     } catch (error) {
       // reason: a port that throws SYNCHRONOUSLY (rather than returning a
       // rejected promise) never reaches the `.catch` above — caught here so a
       // misbehaving injected port can never propagate out of `enforce()`.
-      this.warnGateSkipAuditFailure(checkpoint, describeThrown(error));
+      onFailure(describeThrown(error));
     }
   }
 
   /**
-   * Single stderr-warning formatter for a failed gate-skip audit write (SPEC-080
-   * D1) — kept as one method so every failure branch in `recordSkip()` (rejected
-   * promise, `Result.err`, synchronous throw) prints the identical message shape.
+   * Single stderr-warning formatter for a failed best-effort audit write
+   * (SPEC-080 D1) — kept as one method so every failure branch across BOTH
+   * `recordSkip()` and `recordNotApplicable()` prints a consistently-shaped
+   * message, disambiguated by `auditKind` so a reader can tell which event
+   * class failed to record.
    */
-  private warnGateSkipAuditFailure(checkpoint: GateCheckpoint, reason: string): void {
+  private warnAuditWriteFailure(
+    checkpoint: GateCheckpoint,
+    auditKind: "gate-skip" | "gate-not-applicable",
+    reason: string,
+  ): void {
     process.stderr.write(
-      `gate-skip audit not recorded for checkpoint "${checkpoint}": ${reason}\n`,
+      `${auditKind} audit not recorded for checkpoint "${checkpoint}": ${reason}\n`,
     );
   }
 

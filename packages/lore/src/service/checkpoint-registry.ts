@@ -120,7 +120,9 @@ import {
   ATTESTATION_EXEMPT_KIND_FIELD,
   PRD_SYNC_FIELD,
   ASSESSMENT_FRESHNESS_FIELD,
+  isNotApplicable,
   type PredicateResult,
+  type ApplicablePredicateResult,
   type SiblingClaimInfo,
   type ReachabilityResult,
 } from "./gate-predicates.js";
@@ -410,13 +412,21 @@ export interface GateContext {
    * Pre-computed by the CALLER (`CorpusService.set`): `true` when the closing
    * plan's linked domain doc carries >= 1 version whose content differs from
    * its predecessor within the plan's execution window, OR the plan carries a
-   * valid `extra.prd_sync_exempt`; `false` when neither holds. `undefined`
-   * means "not applicable" — the plan has no spec-tier ancestor to resolve a
-   * domain doc from at all (mirrors `hasSpecParent`'s vacuous-pass shape) —
-   * `checkPlanClose` only pushes `prdOutlineSynced`'s result when this field IS
-   * defined (as well as `prdSyncEnabled === true`).
+   * valid `extra.prd_sync_exempt`; `false` when a domain doc resolved but
+   * neither of those hold; `null` (spec-plan-close-predicates-measure-
+   * invariants-an-applicability §Design Decisions D1/D6) when the plan's
+   * ancestor spec resolves NO domain doc AT ALL (`resolvePrdSyncDomainDoc`
+   * returned `ok(null)`, a FACT about the corpus graph, never a violation) —
+   * `checkPlanClose` pushes `prdOutlineSynced`'s NOT-APPLICABLE verdict for
+   * this case, instead of the pre-fix `false` that rendered domain-doc absence
+   * as an unclearable denial. `undefined` means a DIFFERENT thing — "not
+   * applicable at the checkpoint level" — the plan has no spec-tier ancestor
+   * to resolve a domain doc from in the first place (mirrors `hasSpecParent`'s
+   * vacuous-pass shape); `checkPlanClose` only pushes `prdOutlineSynced`'s
+   * result at all when this field IS defined (`null` or a boolean, as well as
+   * `prdSyncEnabled === true`).
    */
-  readonly prdSyncSynced?: boolean;
+  readonly prdSyncSynced?: boolean | null;
   /**
    * The resolved domain doc's slug, for the feeding-pack message only — present
    * iff the caller successfully resolved a domain doc from the plan's ancestor
@@ -427,6 +437,22 @@ export interface GateContext {
    * of naming a doc that doesn't exist.
    */
   readonly prdSyncDomainDocSlug?: string;
+  /**
+   * `plan-promote`'s EARLY-WARNING domain-doc signal (spec-plan-close-
+   * predicates-measure-invariants-an-applicability, task T1 item 9) — whether
+   * the plan's ancestor spec resolves a prd-sync domain doc AT ALL
+   * (`resolvePrdSyncDomainDoc(store, spec) !== null`), regardless of whether
+   * its content is in-window-synced (that is `plan-close`'s concern, via
+   * `prdSyncSynced`, not `plan-promote`'s). Populated by the CALLER
+   * (`ReviewService.enforceApprovalGate`) ONLY when `prdSyncEnabled` is `true`
+   * AND `hasSpecParent` is `true` — the two preconditions
+   * `planPromotePrdSyncAdvisory` itself gates on before ever reading this
+   * field, mirroring `parentSpecScriptAcCount`'s "populate only when relevant"
+   * shape. Consumed ONLY by `planPromotePrdSyncAdvisory`; `checkPlanPromote`'s
+   * own blocking predicates never read it (advisory never changes the
+   * outcome).
+   */
+  readonly prdSyncDomainDocResolved?: boolean;
 
   // -- plan-close: check() + feed() (SPEC-106, assessment freshness) --
   /**
@@ -494,9 +520,17 @@ export interface CheckpointDef {
   readonly id: GateCheckpoint;
   /**
    * Runs every deterministic predicate for this checkpoint against `ctx`, returning
-   * ALL results (passes and failures) in a fixed order. PURE — see module invariant.
+   * ALL results (passes, failures, AND not-applicable verdicts) in a fixed order.
+   * PURE — see module invariant. The return type is the WIDEST possible shape
+   * (`ApplicablePredicateResult[]`) because this ONE field type is shared across
+   * every registered checkpoint — only `plan-close` (`checkPlanClose`) ever
+   * actually produces a `PredicateNotApplicable` member (via `prdOutlineSynced`/
+   * `attestationFloor`); every other checkpoint's `check` function keeps
+   * returning bare `PredicateResult[]`, which is structurally assignable here
+   * unchanged (function return-type covariance) — spec-plan-close-predicates-
+   * measure-invariants-an-applicability §Design Decisions D1.
    */
-  readonly check: (ctx: GateContext) => PredicateResult[];
+  readonly check: (ctx: GateContext) => ApplicablePredicateResult[];
   /**
    * Renders the feeding-pack text to print when this checkpoint is blocked.
    * `failures` is expected to be the failing subset of some `check(ctx)` call
@@ -512,28 +546,43 @@ export interface CheckpointDef {
  * apply it, so it can never drift between a checkpoint's `check` output and the
  * exit-code decision built on top of it.
  *
- * @param results - The full output of some `CheckpointDef.check(ctx)` call.
+ * @param results - The full output of some `CheckpointDef.check(ctx)` call —
+ *   accepts the widened `ApplicablePredicateResult[]` shape so every checkpoint's
+ *   `.check()` output (whether or not it can ever contain a not-applicable
+ *   member) can be passed here directly, without the caller narrowing first.
  * @returns `true` when at least one result is `{ok: false}`; `false` otherwise
- *   (including the empty-array case — vacuously not blocked).
+ *   (including the empty-array case, and a `PredicateNotApplicable` member —
+ *   spec-plan-close-predicates-measure-invariants-an-applicability §Design
+ *   Decisions D1/D2: a not-applicable verdict NEVER blocks).
  * @example
  * isCheckpointBlocked([{ok: true}, {ok: false, reason: "X"}]); // => true
  * isCheckpointBlocked([{ok: true}]);                            // => false
+ * @example
+ * isCheckpointBlocked([{notApplicable: true, reason: "referent-absent", referent: "spec-x"}]); // => false
  */
-export function isCheckpointBlocked(results: PredicateResult[]): boolean {
-  return results.some((r) => !r.ok);
+export function isCheckpointBlocked(results: ApplicablePredicateResult[]): boolean {
+  return results.some((r) => !isNotApplicable(r) && !r.ok);
 }
 
 /**
  * Narrows `results` to only its failing entries, preserving order — the `failures`
- * shape a `CheckpointDef.feed` expects.
+ * shape a `CheckpointDef.feed` expects. A `PredicateNotApplicable` member is NEVER
+ * a failure (spec-plan-close-predicates-measure-invariants-an-applicability
+ * §Design Decisions D1) — it is excluded here the same way a `{ok: true}` pass
+ * already was, so every pre-existing caller of this function (every checkpoint
+ * that can never produce a not-applicable member) sees byte-identical behavior.
  *
  * @example
  * selectFailures([{ok: true}, {ok: false, reason: "X"}]); // => [{ok: false, reason: "X"}]
+ * @example
+ * selectFailures([{notApplicable: true, reason: "no-evidence", referent: "plan-x"}]); // => []
  */
 export function selectFailures(
-  results: PredicateResult[],
+  results: ApplicablePredicateResult[],
 ): Array<{ ok: false; reason: string; field?: string }> {
-  return results.filter((r): r is { ok: false; reason: string; field?: string } => !r.ok);
+  return results.filter(
+    (r): r is { ok: false; reason: string; field?: string } => !isNotApplicable(r) && !r.ok,
+  );
 }
 
 /**
@@ -786,6 +835,61 @@ export function planPromoteReachabilityAdvisory(ctx: GateContext): string | null
     `--mode script ...\`), or (2) plan on declaring a typed exemption at close time ` +
     `(\`extra.attestation_exempt: true\` + \`extra.attestation_exempt_reason\` + ` +
     `\`extra.attestation_exempt_kind: "pipeline-unreachable"\`).`
+  );
+}
+
+/**
+ * `plan-promote`'s domain-doc EARLY-WARNING advisory (spec-plan-close-
+ * predicates-measure-invariants-an-applicability, task T1 item 9) — mirrors
+ * {@link planPromoteReachabilityAdvisory}'s exact shape: a SEPARATE output from
+ * `checkPlanPromote`'s verdict, never folded into its `PredicateResult[]`
+ * (advisory never changes the outcome). Fires when `prd_sync` is enabled AND
+ * the plan's ancestor spec resolves NO domain doc at all — the same corpus
+ * fact `plan-close`'s `prdOutlineSynced` would later find itself NOT-APPLICABLE
+ * against (§Design Decisions D1/D6), surfaced here EARLY (at promote time)
+ * rather than only discovered as a close-time advisory, per the governing
+ * ADR's own reasoning that a plan with nothing to verify/sync must be flagged
+ * when it is promoted, not discovered later.
+ *
+ * @param ctx - Reads only `prdSyncEnabled`, `hasSpecParent`,
+ *   `prdSyncDomainDocResolved`, and `parentSpecPointer`/`targetIdOrSlug` (for
+ *   the message) — ignores every other field.
+ * @returns `null` when `prdSyncEnabled` is not `true`, OR `hasSpecParent` is
+ *   not `true` (nothing to resolve a domain doc FROM — `plan-close`'s own
+ *   `prdSyncSynced` field would never even be populated in that case either),
+ *   OR `prdSyncDomainDocResolved` is `true`; an advisory string naming the
+ *   ancestor spec and the `lore link ... --type implements` wiring command
+ *   otherwise (including when the caller never populated
+ *   `prdSyncDomainDocResolved` at all — an unresolved fact is conservatively
+ *   treated the same as "no domain doc resolved", mirroring this module's
+ *   existing bias toward surfacing rather than silently suppressing an
+ *   advisory).
+ * @example
+ * planPromotePrdSyncAdvisory({ prdSyncEnabled: false, hasSpecParent: true }); // => null
+ * @example
+ * planPromotePrdSyncAdvisory({
+ *   prdSyncEnabled: true, hasSpecParent: true, prdSyncDomainDocResolved: true,
+ * }); // => null
+ * @example
+ * planPromotePrdSyncAdvisory({
+ *   prdSyncEnabled: true, hasSpecParent: true, prdSyncDomainDocResolved: false,
+ *   parentSpecPointer: { slug: "spec-x", title: "X", status: "approved" },
+ * }); // => advisory string naming "spec-x"
+ */
+export function planPromotePrdSyncAdvisory(ctx: GateContext): string | null {
+  if (ctx.prdSyncEnabled !== true || ctx.hasSpecParent !== true) {
+    return null;
+  }
+  if (ctx.prdSyncDomainDocResolved === true) {
+    return null;
+  }
+  const spec = ctx.parentSpecPointer?.slug ?? "<spec>";
+  return (
+    `ADVISORY (does not block this promote): this plan's ancestor spec "${spec}" resolves ` +
+    `no domain doc for the prd-sync predicate (no \`parent\`/\`implements\` edge to another ` +
+    `spec) — at plan-close, \`prdOutlineSynced\` will be NOT-APPLICABLE rather than enforced ` +
+    `against it. Wire one via \`lore link ${spec} <domain-spec> --type implements\`, or ignore ` +
+    `this if the ancestor spec genuinely has no domain-level narrative to sync.`
   );
 }
 
@@ -1087,10 +1191,17 @@ const DEFAULT_ATTESTATION_MIN_RATIO = 0.5;
  *
  * Every predicate that runs is pushed into the SAME results array (this
  * module's "run every predicate, don't short-circuit on the first failure"
- * contract) — a plan can fail ANY subset of them independently.
+ * contract) — a plan can fail ANY subset of them independently. A
+ * `PredicateNotApplicable` member (from `attestationFloor`'s zero-evidence case
+ * or `prdOutlineSynced`'s absent-domain-doc case) is pushed into this SAME
+ * array too (spec-plan-close-predicates-measure-invariants-an-applicability
+ * §Design Decisions D1) — `GateEnforcer.enforce` is the ONE consumer that
+ * partitions it back out; `isCheckpointBlocked`/`selectFailures` already treat
+ * it as non-blocking, so this function's own "run every predicate" contract
+ * needs no special-casing for it.
  */
-function checkPlanClose(ctx: GateContext): PredicateResult[] {
-  const results: PredicateResult[] = [];
+function checkPlanClose(ctx: GateContext): ApplicablePredicateResult[] {
+  const results: ApplicablePredicateResult[] = [];
   if (ctx.requiresUat === true) {
     results.push(uatP0Accepted(ctx.uatVerdictPresent === true, ctx.uatP0Accepted === true));
   }
@@ -1106,11 +1217,15 @@ function checkPlanClose(ctx: GateContext): PredicateResult[] {
   }
   if (ctx.attestationExempt !== true || !exemptKind.ok) {
     results.push(
-      attestationFloor(ctx.planTasksAttestation, ctx.attestationMinRatio ?? DEFAULT_ATTESTATION_MIN_RATIO),
+      attestationFloor(
+        ctx.planTasksAttestation,
+        ctx.attestationMinRatio ?? DEFAULT_ATTESTATION_MIN_RATIO,
+        ctx.targetIdOrSlug ?? "<plan>",
+      ),
     );
   }
   if (ctx.prdSyncEnabled === true && ctx.prdSyncSynced !== undefined) {
-    results.push(prdOutlineSynced(ctx.prdSyncSynced));
+    results.push(prdOutlineSynced(ctx.prdSyncSynced, ctx.parentSpecPointer?.slug ?? "<spec>"));
   }
   if (ctx.assessmentFreshnessExempt !== true) {
     results.push(assessmentFreshness(ctx.newestAssessmentAt, ctx.newestTaskActivityAt));
