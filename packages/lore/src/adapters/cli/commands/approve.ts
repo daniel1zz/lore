@@ -100,6 +100,22 @@ export default defineCommand({
         process.stderr.write(`${advisory}\n`);
       }
 
+      // reason: task-t7-lore-approve-renders-the-prd-sync-advisory-to-stderr,
+      // spec-plan-close-predicates-measure-invariants-an-applicability §D2 — the
+      // `prd_sync` plan-promote EARLY-WARNING advisory, rendered on the SAME
+      // channel with the SAME never-changes-the-outcome contract as the
+      // `reachability_advisories` loop directly above (D1: exit stays 0
+      // regardless of whether any advisory lines print). Kept as its OWN loop
+      // over its OWN field — never concatenated with `reachability_advisories`
+      // into one merged list — because the two keys carry DISTINCT advisory
+      // classes (`reachability_advisories` stays scoped to `lore verify`
+      // reachability only; a merged loop would blur that boundary for a future
+      // reader). Absent field (non-plan approval, or a plan whose ancestor spec
+      // resolves a domain doc, or the `prd_sync` gate disabled) prints nothing.
+      for (const advisory of doc.prd_sync_advisories ?? []) {
+        process.stderr.write(`${advisory}\n`);
+      }
+
       // reason: ReviewService.approve() bumps doc.version by 1 as part of the
       // draft → approved transition — the version the human was reviewing
       // (and that a judgment would be pinned to) is one less than the
