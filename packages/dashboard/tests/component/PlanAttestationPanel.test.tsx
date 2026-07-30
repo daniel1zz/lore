@@ -35,6 +35,7 @@ function makeSummary(overrides: Partial<AttestationSummary> = {}): AttestationSu
     attested: 2,
     ratio: 0.5,
     min_ratio: 0.5,
+    claimed_ac_coverage: { claimed_acs: [], unattested_acs: [], meets_coverage: true },
     meets_floor: true,
     zero_attested_tasks: [],
     ...overrides,
@@ -115,6 +116,37 @@ describe("PlanAttestationPanel", () => {
         <PlanAttestationPanel panel={{ doc_type: "plan", attestation: makeSummary({ ratio: 0.5 }), tasks: [makeTaskInfo()] }} />,
       );
       expect(screen.getByText("50%")).toBeInTheDocument();
+    });
+  });
+
+  describe("ratio disabled render (AC-PCI-14)", () => {
+    it("AC-PCI-14 ratio disabled render: renders the literal text 'ratio conjunct disabled' when min_ratio is null, and the rendered output contains neither '0%' nor '50%'", () => {
+      render(
+        <PlanAttestationPanel
+          panel={{
+            doc_type: "plan",
+            // reason: ratio deliberately set to 0.75 (never 0 or 0.5) so this
+            // test isolates the FLOOR field's own null-rendering — a coincidental
+            // "50%"/"0%" from the UNRELATED attested-ratio field would make a
+            // bare absence assertion ambiguous.
+            attestation: makeSummary({ min_ratio: null, ratio: 0.75, meets_floor: true }),
+            tasks: [makeTaskInfo()],
+          }}
+        />,
+      );
+      expect(screen.getByText("ratio conjunct disabled")).toBeInTheDocument();
+      expect(screen.queryByText("0%")).not.toBeInTheDocument();
+      expect(screen.queryByText("50%")).not.toBeInTheDocument();
+    });
+
+    it("AC-PCI-14 ratio disabled render: renders the numeric floor percentage when min_ratio is explicitly configured", () => {
+      render(
+        <PlanAttestationPanel
+          panel={{ doc_type: "plan", attestation: makeSummary({ min_ratio: 0.3 }), tasks: [makeTaskInfo()] }}
+        />,
+      );
+      expect(screen.getByText(/30%/)).toBeInTheDocument();
+      expect(screen.queryByText("ratio conjunct disabled")).not.toBeInTheDocument();
     });
   });
 });

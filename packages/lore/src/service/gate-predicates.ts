@@ -55,6 +55,7 @@ import {
   checkOracleCoverage,
   deriveAttestationSummary,
   attestationExemptKindSchema,
+  type AcCoverageFact,
   type AcceptanceCriterion,
   type DocType,
   type TaskAttestationInfo,
@@ -772,9 +773,10 @@ export const ATTESTATION_FLOOR_FIELD = "attestation-floor";
 
 /**
  * `plan-close`'s execution-time attestation-floor predicate (SPEC-069 §Design
- * Decisions D1) — opt-OUT, not opt-in (unlike `uatP0Accepted`, this predicate
- * runs for every closing plan unless exempted; see `checkPlanClose` in
- * `checkpoint-registry.ts`). Two independent conditions, EITHER of which
+ * Decisions D1, extended by spec-plan-close-predicates-measure-invariants-an-
+ * applicability §D3) — opt-OUT, not opt-in (unlike `uatP0Accepted`, this
+ * predicate runs for every closing plan unless exempted; see `checkPlanClose`
+ * in `checkpoint-registry.ts`). Three independent conditions, ANY of which
  * blocks:
  *
  *   1. every task that carries ANY `verification_evidence` must carry at
@@ -782,8 +784,16 @@ export const ATTESTATION_FLOOR_FIELD = "attestation-floor";
  *      entries and ZERO attested ones is undetectable fabrication risk, even
  *      if some OTHER task in the plan is fully attested and keeps the
  *      plan-wide ratio above the floor;
- *   2. the plan-wide attested-evidence ratio (total attested entries / total
- *      evidence entries, across every task) must be ≥ `minRatio`.
+ *   2. every CLAIMED-AND-ATTESTABLE acceptance criterion (declared script-mode,
+ *      carrying >= 1 evidence reference — `acCoverage`'s own
+ *      `deriveClaimedAcCoverage` projection) must carry >= 1 runner-attested
+ *      entry — the DEFAULT conjunct (§D3, replacing the plan-wide ratio as the
+ *      primary signal: it catches "this claimed AC was never runner-attested",
+ *      a proxy the ratio alone could not see);
+ *   3. the plan-wide attested-evidence ratio (total attested entries / total
+ *      evidence entries, across every task) must be ≥ `minRatio` — OPT-IN:
+ *      only evaluated when `minRatio` is non-`null` (§D4's default-off
+ *      migration). AND-ed with 1-2 when configured, never a substitute.
  *
  * A plan with NO evidence at all on any task (`totalEvidence === 0`) is
  * NOT-APPLICABLE (spec-plan-close-predicates-measure-invariants-an-
@@ -811,14 +821,25 @@ export const ATTESTATION_FLOOR_FIELD = "attestation-floor";
  *   shape).
  * @param minRatio - The configured floor (`workflow.attestation.min_ratio`,
  *   resolved by the CALLER via `GateEnforcer.resolveAttestationMinRatio` —
- *   this predicate never reads config itself).
+ *   this predicate never reads config itself), or `null` when unconfigured
+ *   (condition 3 does not run at all — §D4).
  * @param referent - The closing plan's slug (or id) — carried on the
  *   `PredicateNotApplicable` result when there is zero evidence to attest,
  *   ignored otherwise.
+ * @param acCoverage - `computeAcCoverage`'s own output (the plan's governing
+ *   spec's declared criteria aggregated over the plan's tasks), for condition
+ *   2. OPTIONAL, defaulting to `[]` — unlike `deriveAttestationSummary`'s own
+ *   REQUIRED third parameter, this predicate's only PRODUCTION caller
+ *   (`checkPlanClose`) always resolves and passes the real facts; the default
+ *   exists so pre-existing bare-predicate test fixtures that never modeled AC
+ *   declarations at all keep compiling unchanged — they have nothing claimed,
+ *   so condition 2 is vacuously satisfied for them, which is the truthful
+ *   reading of "this fixture never declared any acceptance criteria."
  * @returns `{notApplicable: true, reason: "no-evidence", referent}` when
  *   `deriveAttestationSummary`'s `total_evidence === 0`; `{ok: true}` when
  *   there IS evidence and every evidence-bearing task has ≥1 attested entry
- *   AND the plan-wide ratio meets `minRatio`; `{ok: false, reason:
+ *   AND every claimed-and-attestable AC has ≥1 attested entry AND (minRatio is
+ *   `null` OR the plan-wide ratio meets it); `{ok: false, reason:
  *   "ATTESTATION_FLOOR_NOT_MET", field: "attestation-floor"}` otherwise.
  * @example
  * attestationFloor([
@@ -831,13 +852,21 @@ export const ATTESTATION_FLOOR_FIELD = "attestation-floor";
  * @example
  * attestationFloor(undefined, 0.5, "plan-x");
  *   // => { notApplicable: true, reason: "no-evidence", referent: "plan-x" } — no evidence anywhere
+ * @example
+ * attestationFloor(
+ *   [{ slug: "task-1", title: "T1", evidenceCount: 1, attestedCount: 1 }],
+ *   null,
+ *   "plan-x",
+ *   [{ ac_id: "AC-1", mode: "script", pass: 1, fail: 0, refs: [{task_id: "task-1", result: "pass"}], attested_pass: 0, attested_fail: 0 }],
+ * ); // => { ok: false, reason: "ATTESTATION_FLOOR_NOT_MET", field: "attestation-floor" } — AC-1 claimed but never attested, ratio conjunct disabled
  */
 export function attestationFloor(
   tasks: readonly TaskAttestationInfo[] | undefined,
-  minRatio: number,
+  minRatio: number | null,
   referent: string,
+  acCoverage: readonly AcCoverageFact[] = [],
 ): ApplicablePredicateResult {
-  const summary = deriveAttestationSummary(tasks ?? [], minRatio);
+  const summary = deriveAttestationSummary(tasks ?? [], minRatio, acCoverage);
   if (summary.total_evidence === 0) {
     return { notApplicable: true, reason: "no-evidence", referent };
   }

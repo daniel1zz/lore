@@ -1,47 +1,62 @@
 /**
  * Tests for @lore/core evidence-panel — buildTaskAttestationInfos,
- * deriveAttestationSummary, EvidencePanelProjection, summarizeForAdjudicationBar.
- * Pure functions, no IO.
+ * deriveAttestationSummary, deriveClaimedAcCoverage, EvidencePanelProjection,
+ * summarizeForAdjudicationBar. Pure functions, no IO.
  *
  * Six-dimension coverage for this file:
  *   HAPPY:      buildTaskAttestationInfos derives evidenceCount/attestedCount per
  *               task; deriveAttestationSummary aggregates a mixed fully-attested
- *               set to meets_floor:true; summarizeForAdjudicationBar reduces every
- *               EvidencePanelProjection branch to the expected chip summary
+ *               set to meets_floor:true; deriveClaimedAcCoverage derives the
+ *               claimed script-mode set (AC-PCI-5); summarizeForAdjudicationBar
+ *               reduces every EvidencePanelProjection branch to the expected chip
+ *               summary
  *   NEGATIVE:   a task with malformed extra.verification_evidence (non-array) does
  *               not throw and contributes zero counts (extractEvidence's own
  *               fail-closed behavior); a zero-attested task blocks even when the
- *               plan-wide ratio alone would pass (AC-075-11 condition 1)
+ *               plan-wide ratio alone would pass (AC-075-11 condition 1); an
+ *               ai-mode/human-mode criterion with refs is excluded from the
+ *               claimed set (AC-PCI-5)
  *   BOUNDARY:   empty tasks array; ratio exactly equal to minRatio passes
  *               (AC-075-11 condition 2 boundary, `>=` not `>`); a single task with
- *               zero evidence entries
+ *               zero evidence entries; an empty coverage input yields a vacuously
+ *               true claimed-AC coverage
  *   ERROR:      n/a beyond the malformed-input NEGATIVE case above — every public
  *               function here is total (never throws) by construction
  *   STATE:      zero_attested_tasks accumulates every offending task's slug (not
  *               just the first); a below-floor ratio blocks even when EVERY task
  *               individually carries >=1 attested entry (AC-075-11 condition 2
- *               tested independently of condition 1)
+ *               tested independently of condition 1); an unattested claimed AC
+ *               blocks meets_floor even when every other condition passes
+ *               (AC-PCI-6, the new default-teeth conjunct)
  *   REGRESSION: deriveAttestationSummary's vacuous-pass branch (total_evidence===0)
  *               yields ratio:null (never a fabricated 0) and meets_floor:true,
  *               matching gate-predicates.ts::attestationFloor's pre-delegation
  *               early-return behavior
  *
  * @spec_ref SPEC-075 §Design Decisions D2, D6, D10; AC-075-11 (parity with
- *   gate-predicates.ts::attestationFloor, both condition classes)
+ *   gate-predicates.ts::attestationFloor, both condition classes);
+ *   spec-plan-close-predicates-measure-invariants-an-applicability §D3,
+ *   AC-PCI-5, AC-PCI-6
  */
 
 import { describe, it, expect } from "vitest";
 import {
   buildTaskAttestationInfos,
   deriveAttestationSummary,
+  deriveClaimedAcCoverage,
   summarizeForAdjudicationBar,
   type AttestationSummary,
+  type ClaimedAcCoverage,
   type EvidencePanelProjection,
   type TaskAttestationInfo,
 } from "./evidence-panel.js";
 import type { AcCoverageFact, AcceptanceCriterion } from "./acceptance.js";
 import type { EvidenceEntry } from "./task-workflow.js";
 import type { DocId, DocRecord } from "./types.js";
+
+/** Vacuous claimed-AC coverage — the fixture value for every pre-existing test
+ *  in this file that never modeled AC declarations at all. */
+const EMPTY_COVERAGE: ClaimedAcCoverage = { claimed_acs: [], unattested_acs: [], meets_coverage: true };
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -169,34 +184,44 @@ describe("buildTaskAttestationInfos", () => {
 describe("deriveAttestationSummary", () => {
   it("HAPPY: a fully-attested set at/above the floor yields meets_floor:true with a numeric ratio", () => {
     const infos = [taskInfo({ slug: "t1", evidenceCount: 2, attestedCount: 2 })];
-    const summary = deriveAttestationSummary(infos, 0.5);
+    const summary = deriveAttestationSummary(infos, 0.5, []);
     expect(summary).toEqual<AttestationSummary>({
       total_evidence: 2,
       attested: 2,
       ratio: 1,
       min_ratio: 0.5,
+      claimed_ac_coverage: EMPTY_COVERAGE,
       meets_floor: true,
       zero_attested_tasks: [],
     });
   });
 
   it("REGRESSION: vacuous pass — no evidence anywhere yields ratio:null (never a fabricated 0), meets_floor:true", () => {
-    expect(deriveAttestationSummary([], 0.5)).toEqual<AttestationSummary>({
+    expect(deriveAttestationSummary([], 0.5, [])).toEqual<AttestationSummary>({
       total_evidence: 0,
       attested: 0,
       ratio: null,
       min_ratio: 0.5,
+      claimed_ac_coverage: EMPTY_COVERAGE,
       meets_floor: true,
       zero_attested_tasks: [],
     });
     const zeroEvidenceTask = taskInfo({ slug: "never-run", evidenceCount: 0, attestedCount: 0 });
-    expect(deriveAttestationSummary([zeroEvidenceTask], 0.5).ratio).toBeNull();
+    expect(deriveAttestationSummary([zeroEvidenceTask], 0.5, []).ratio).toBeNull();
   });
 
   it("BOUNDARY: ratio exactly equal to minRatio passes (>=, not >)", () => {
     const infos = [taskInfo({ slug: "t1", evidenceCount: 2, attestedCount: 1 })];
-    const summary = deriveAttestationSummary(infos, 0.5);
+    const summary = deriveAttestationSummary(infos, 0.5, []);
     expect(summary.ratio).toBe(0.5);
+    expect(summary.meets_floor).toBe(true);
+  });
+
+  it("BOUNDARY: minRatio null disables the ratio conjunct entirely — a below-floor ratio no longer blocks on its own", () => {
+    const infos = [taskInfo({ slug: "t1", evidenceCount: 10, attestedCount: 1 })];
+    const summary = deriveAttestationSummary(infos, null, []);
+    expect(summary.ratio).toBe(0.1);
+    expect(summary.min_ratio).toBeNull();
     expect(summary.meets_floor).toBe(true);
   });
 
@@ -209,14 +234,15 @@ describe("deriveAttestationSummary", () => {
       taskInfo({ slug: "task-a", evidenceCount: 10, attestedCount: 10 }),
       taskInfo({ slug: "task-b", evidenceCount: 1, attestedCount: 0 }),
     ];
-    const summary = deriveAttestationSummary(infos, 0.5);
+    const summary = deriveAttestationSummary(infos, 0.5, []);
     expect(summary.ratio).toBeCloseTo(10 / 11, 5);
     expect(summary.meets_floor).toBe(false);
     expect(summary.zero_attested_tasks).toEqual(["task-b"]);
   });
 
-  // ─── AC-075-11 condition 2: ratio below floor blocks even when every task
-  //     individually carries >=1 attested entry ───────────────────────────
+  // ─── AC-075-11 condition 2 (renumbered condition 3 post-AC-PCI): ratio below
+  //     floor blocks even when every task individually carries >=1 attested
+  //     entry ─────────────────────────────────────────────────────────────
   it("NEGATIVE AC-075-11: a below-floor ratio blocks even when every task has >=1 attested entry", () => {
     // Task A: 4 entries, 1 attested. Task B: 1 entry, 1 attested. Total 5 evidence / 2 attested = 0.4 < 0.5.
     // Neither task has zero attested entries — ONLY the ratio condition trips this case.
@@ -224,7 +250,7 @@ describe("deriveAttestationSummary", () => {
       taskInfo({ slug: "task-a", evidenceCount: 4, attestedCount: 1 }),
       taskInfo({ slug: "task-b", evidenceCount: 1, attestedCount: 1 }),
     ];
-    const summary = deriveAttestationSummary(infos, 0.5);
+    const summary = deriveAttestationSummary(infos, 0.5, []);
     expect(summary.ratio).toBe(0.4);
     expect(summary.zero_attested_tasks).toEqual([]);
     expect(summary.meets_floor).toBe(false);
@@ -236,9 +262,115 @@ describe("deriveAttestationSummary", () => {
       taskInfo({ slug: "good", evidenceCount: 1, attestedCount: 1 }),
       taskInfo({ slug: "bad-2", evidenceCount: 2, attestedCount: 0 }),
     ];
-    const summary = deriveAttestationSummary(infos, 0.1);
+    const summary = deriveAttestationSummary(infos, 0.1, []);
     expect(summary.zero_attested_tasks).toEqual(["bad-1", "bad-2"]);
     expect(summary.meets_floor).toBe(false);
+  });
+
+  // ─── AC-PCI-6: coverage conjunct — the new default-teeth condition blocks
+  //     independently of the per-task and ratio conditions ─────────────────
+  it("STATE coverage conjunct (AC-PCI-6): meets_floor is false when every task is attested and the ratio meets an explicit floor, but one claimed script-mode AC has zero attested refs", () => {
+    const infos = [
+      taskInfo({ slug: "task-a", evidenceCount: 2, attestedCount: 2 }),
+      taskInfo({ slug: "task-b", evidenceCount: 2, attestedCount: 2 }),
+    ];
+    const acCoverage: AcCoverageFact[] = [
+      {
+        ac_id: "AC-1",
+        mode: "script",
+        pass: 1,
+        fail: 0,
+        refs: [{ task_id: "task-a", result: "pass", attested: true }],
+        attested_pass: 1,
+        attested_fail: 0,
+      },
+      {
+        ac_id: "AC-2",
+        mode: "script",
+        pass: 1,
+        fail: 0,
+        refs: [{ task_id: "task-b", result: "pass" }],
+        attested_pass: 0,
+        attested_fail: 0,
+      },
+    ];
+    const summary = deriveAttestationSummary(infos, 0.5, acCoverage);
+    expect(summary.ratio).toBe(1);
+    expect(summary.zero_attested_tasks).toEqual([]);
+    expect(summary.claimed_ac_coverage.unattested_acs).toEqual(["AC-2"]);
+    expect(summary.meets_floor).toBe(false);
+  });
+});
+
+// ─── deriveClaimedAcCoverage (AC-PCI-5) ──────────────────────────────────────
+
+function acFact(overrides: Partial<AcCoverageFact> & { ac_id: string }): AcCoverageFact {
+  return {
+    mode: "script",
+    pass: 0,
+    fail: 0,
+    refs: [],
+    attested_pass: 0,
+    attested_fail: 0,
+    ...overrides,
+  };
+}
+
+describe("deriveClaimedAcCoverage", () => {
+  it("HAPPY claimed set (AC-PCI-5): claimed_acs contains exactly the script-mode criteria carrying >=1 evidence ref, excluding ai/human-mode criteria even when they carry refs", () => {
+    const coverage: AcCoverageFact[] = [
+      acFact({
+        ac_id: "AC-1",
+        refs: [{ task_id: "t1", result: "pass", attested: true }],
+        attested_pass: 1,
+      }),
+      acFact({ ac_id: "AC-2", mode: "ai", refs: [{ task_id: "t1", result: "pass" }] }),
+      acFact({ ac_id: "AC-3", mode: "human", refs: [{ task_id: "t1", result: "pass" }] }),
+    ];
+    const result = deriveClaimedAcCoverage(coverage);
+    expect(result.claimed_acs).toEqual(["AC-1"]);
+    expect(result.unattested_acs).toEqual([]);
+    expect(result.meets_coverage).toBe(true);
+  });
+
+  it("NEGATIVE claimed set (AC-PCI-5): a script-mode criterion with zero evidence refs is excluded from claimed_acs entirely", () => {
+    const coverage: AcCoverageFact[] = [
+      acFact({ ac_id: "AC-1", refs: [] }),
+      acFact({ ac_id: "AC-2", refs: [{ task_id: "t1", result: "pass", attested: true }], attested_pass: 1 }),
+    ];
+    const result = deriveClaimedAcCoverage(coverage);
+    expect(result.claimed_acs).toEqual(["AC-2"]);
+  });
+
+  it("NEGATIVE claimed set (AC-PCI-5): an evidence ac_ref naming an undeclared id never appears in claimed_acs or unattested_acs — computeAcCoverage's own output already excludes dangling refs structurally, so a coverage array simulating that (one row per DECLARED criterion only) never surfaces the dangling id here", () => {
+    // computeAcCoverage emits one row per DECLARED criterion; a dangling ac_ref
+    // (an id no longer declared) is dropped BEFORE this function ever sees the
+    // data — there is no "AC-DANGLING" row in coverage at all, by construction.
+    const coverage: AcCoverageFact[] = [
+      acFact({ ac_id: "AC-1", refs: [{ task_id: "t1", result: "pass", attested: true }], attested_pass: 1 }),
+    ];
+    const result = deriveClaimedAcCoverage(coverage);
+    expect(result.claimed_acs).not.toContain("AC-DANGLING");
+    expect(result.unattested_acs).not.toContain("AC-DANGLING");
+  });
+
+  it("BOUNDARY claimed set (AC-PCI-5): an empty coverage array yields an empty claimed set, vacuously meets_coverage true", () => {
+    expect(deriveClaimedAcCoverage([])).toEqual<ReturnType<typeof deriveClaimedAcCoverage>>({
+      claimed_acs: [],
+      unattested_acs: [],
+      meets_coverage: true,
+    });
+  });
+
+  it("STATE claimed set (AC-PCI-5): unattested_acs names every claimed AC with zero attested refs, counting a runner-issued fail as attested (never attested_pass alone)", () => {
+    const coverage: AcCoverageFact[] = [
+      acFact({ ac_id: "AC-FAIL-ATTESTED", refs: [{ task_id: "t1", result: "fail", attested: true }], attested_fail: 1 }),
+      acFact({ ac_id: "AC-SELF-REPORTED", refs: [{ task_id: "t1", result: "pass" }] }),
+    ];
+    const result = deriveClaimedAcCoverage(coverage);
+    expect(result.claimed_acs).toEqual(["AC-FAIL-ATTESTED", "AC-SELF-REPORTED"]);
+    expect(result.unattested_acs).toEqual(["AC-SELF-REPORTED"]);
+    expect(result.meets_coverage).toBe(false);
   });
 });
 
@@ -313,6 +445,7 @@ describe("summarizeForAdjudicationBar", () => {
         attested: 2,
         ratio: 0.4,
         min_ratio: 0.5,
+        claimed_ac_coverage: EMPTY_COVERAGE,
         meets_floor: false,
         zero_attested_tasks: [],
       },
@@ -336,6 +469,7 @@ describe("summarizeForAdjudicationBar", () => {
         attested: 0,
         ratio: null,
         min_ratio: 0.5,
+        claimed_ac_coverage: EMPTY_COVERAGE,
         meets_floor: true,
         zero_attested_tasks: [],
       },

@@ -18,11 +18,17 @@
  *     perform (per-task `extractEvidence(task).length` / `.filter(attestation !==
  *     undefined).length`) — that call site now calls this function instead of
  *     re-deriving the same counts locally.
- *   - deriveAttestationSummary(infos, minRatio) — reproduces BOTH of
- *     `attestationFloor`'s existing conditions (per-task zero-attested AND
- *     plan-wide ratio floor) as a renderable fact object, rather than a bare
- *     pass/fail predicate result. `gate-predicates.ts::attestationFloor` now
- *     delegates to this function — byte-identical gate behavior (AC-075-11).
+ *   - deriveAttestationSummary(infos, minRatio, acCoverage) — reproduces ALL
+ *     THREE of `attestationFloor`'s conditions (per-task zero-attested AND
+ *     per-claimed-AC attested coverage AND an OPT-IN plan-wide ratio floor) as
+ *     a renderable fact object, rather than a bare pass/fail predicate result.
+ *     `gate-predicates.ts::attestationFloor` now delegates to this function —
+ *     byte-identical gate behavior (AC-075-11, extended by
+ *     spec-plan-close-predicates-measure-invariants-an-applicability §D3/D4).
+ *   - deriveClaimedAcCoverage(coverage) — the per-claimed-AC attested-coverage
+ *     fact (§D3's "condition 2, the default teeth"): which declared script-mode
+ *     acceptance criteria were actually CLAIMED (>=1 evidence reference) by this
+ *     plan's tasks, and which of those remain unattested.
  *   - summarizeForAdjudicationBar(panel) — compact chip-summary projection shared by
  *     the (not-yet-built, T3-scope) AdjudicationBar UI component.
  *
@@ -32,16 +38,33 @@
  *     vacuous-pass case (a pure-planning plan/task with no evidence at all) has no
  *     meaningful ratio to report, and `0` would misleadingly render as "0% attested"
  *     rather than "not applicable".
+ *   - `AttestationSummary.min_ratio` is `number | null` (spec-plan-close-predicates-
+ *     measure-invariants-an-applicability §D4) — `null` means the ratio conjunct is
+ *     UNCONFIGURED and therefore does not run at all; a caller must never coerce
+ *     `null` to `0` (would misrender as "0% required") or to `0.5` (would claim an
+ *     enforcement that is not happening).
  *   - `deriveAttestationSummary`'s vacuous-pass branch (`total_evidence === 0`)
  *     always yields `meets_floor: true` and `zero_attested_tasks: []` — mirrors
  *     `attestationFloor`'s own early-return for the same case (SPEC-069 §Scope,
- *     "the floor only constrains a plan that claims to have been verified").
+ *     "the floor only constrains a plan that claims to have been verified"); it
+ *     still reports the REAL `claimed_ac_coverage` facts (a facts function never
+ *     fabricates a vacuous coverage value), it simply never lets them affect
+ *     `meets_floor` in that branch — the predicate layer reports this case as
+ *     NOT-APPLICABLE regardless of `meets_floor`'s value here.
+ *   - `deriveClaimedAcCoverage` never filters by declared-id membership itself —
+ *     its INPUT (`computeAcCoverage`'s own output) already emits exactly one row
+ *     per DECLARED criterion (`acceptance.ts`'s own contract), so a dangling
+ *     `ac_ref` naming an undeclared id is excluded STRUCTURALLY, before this
+ *     function ever sees the data. Adding a second exclusion filter here would be
+ *     redundant and risk silently diverging from that upstream contract.
  *
  * Side-effect class: pure
  *
  * Source: SPEC-075 (dashboard adjudication workbench + route telemetry) §Design
  *   Decisions D2, D6, D10; SPEC-069 §Design Decisions D1 (attestationFloor, the
- *   predicate this module's math must stay byte-identical to).
+ *   predicate this module's math must stay byte-identical to);
+ *   spec-plan-close-predicates-measure-invariants-an-applicability §D3
+ *   (per-claimed-AC coverage as the default conjunct), §D4 (ratio default flip).
  */
 
 import type { AcCoverageFact, AcceptanceCriterion } from "./acceptance.js";
@@ -94,13 +117,79 @@ export function buildTaskAttestationInfos(tasks: readonly DocRecord[]): TaskAtte
   });
 }
 
+// ─── Per-Claimed-AC Attested Coverage (spec-plan-close-predicates-measure- ──
+// ─── invariants-an-applicability §D3) ───────────────────────────────────────
+
+/**
+ * Per-claimed-AC attested-coverage facts — the "default teeth" conjunct
+ * (§D3 condition 2) that replaces a plan-wide evidence ratio as the primary
+ * signal: not "how much of this plan's evidence is attested" but "was EVERY
+ * acceptance criterion this plan actually claimed ever runner-attested".
+ */
+export interface ClaimedAcCoverage {
+  /**
+   * Declared script-mode criteria carrying >= 1 evidence reference, in
+   * declaration order (the order {@link computeAcCoverage}'s own output
+   * preserves). `ai`/`human`-mode criteria are excluded — `lore verify`
+   * structurally cannot attest them, so demanding their attestation would be
+   * a permanent false block (§D3(b)). A dangling `ac_ref` naming an
+   * undeclared id can never appear here — {@link computeAcCoverage} emits one
+   * row per DECLARED criterion only, so this array's input already excludes
+   * dangling refs structurally (see this module's header invariant).
+   */
+  claimed_acs: string[];
+  /**
+   * Subset of `claimed_acs` whose evidence carries ZERO runner attestation
+   * (`attested_pass + attested_fail === 0` — never `attested_pass` alone, per
+   * the spec's pinned counting rule: a runner-issued fail still proves the
+   * runner ran that AC's registered command).
+   */
+  unattested_acs: string[];
+  /** `unattested_acs.length === 0` — vacuously `true` when `claimed_acs` is empty. */
+  meets_coverage: boolean;
+}
+
+/**
+ * Derives {@link ClaimedAcCoverage} from {@link computeAcCoverage}'s own output —
+ * never re-implements any counting (this module's header invariant). Because
+ * `computeAcCoverage` emits exactly one row per DECLARED criterion, a dangling
+ * `ac_ref` (evidence naming an id no longer declared) never appears in `coverage`
+ * at all — this function needs no extra filter for that case.
+ *
+ * @param coverage - {@link computeAcCoverage}'s output (typically a plan's
+ *   governing spec's declared criteria aggregated over the plan's tasks).
+ * @returns The claimed set (script-mode, >=1 ref), its unattested subset, and
+ *   whether every claimed criterion is attested. `{claimed_acs: [],
+ *   unattested_acs: [], meets_coverage: true}` for an empty `coverage` input —
+ *   a plan/spec pairing with nothing claimed has nothing to fail on.
+ * @example
+ * deriveClaimedAcCoverage([
+ *   { ac_id: "AC-1", mode: "script", pass: 1, fail: 0, refs: [{task_id: "t", result: "pass", attested: true}], attested_pass: 1, attested_fail: 0 },
+ *   { ac_id: "AC-2", mode: "script", pass: 1, fail: 0, refs: [{task_id: "t", result: "pass"}], attested_pass: 0, attested_fail: 0 },
+ *   { ac_id: "AC-3", mode: "human", pass: 0, fail: 0, refs: [], attested_pass: 0, attested_fail: 0 },
+ * ]);
+ * // => { claimed_acs: ["AC-1", "AC-2"], unattested_acs: ["AC-2"], meets_coverage: false }
+ * // (AC-3 excluded: human-mode; AC-3 also carries zero refs, so it would be
+ * //  excluded on that ground alone even if it were script-mode)
+ */
+export function deriveClaimedAcCoverage(coverage: readonly AcCoverageFact[]): ClaimedAcCoverage {
+  const claimed = coverage.filter((fact) => fact.mode === "script" && fact.refs.length > 0);
+  const claimed_acs = claimed.map((fact) => fact.ac_id);
+  const unattested_acs = claimed
+    .filter((fact) => fact.attested_pass + fact.attested_fail === 0)
+    .map((fact) => fact.ac_id);
+  return { claimed_acs, unattested_acs, meets_coverage: unattested_acs.length === 0 };
+}
+
 // ─── Attestation Ratio Math ─────────────────────────────────────────────────
 
 /**
- * Renderable plan-wide attestation facts — the same two conditions
- * `gate-predicates.ts::attestationFloor` (SPEC-069) gates on, expressed as data
- * rather than a bare pass/fail verdict, so the dashboard Evidence tab can show
- * WHY a plan is blocked, not just THAT it is.
+ * Renderable plan-wide attestation facts — the same conditions
+ * `gate-predicates.ts::attestationFloor` gates on (SPEC-069's per-task
+ * zero-attested check, plus spec-plan-close-predicates-measure-invariants-an-
+ * applicability §D3's per-claimed-AC coverage and opt-in ratio), expressed as
+ * data rather than a bare pass/fail verdict, so the dashboard Evidence tab can
+ * show WHY a plan is blocked, not just THAT it is.
  */
 export interface AttestationSummary {
   /** Sum of `evidenceCount` across every input task. */
@@ -113,12 +202,21 @@ export interface AttestationSummary {
    * meaningful ratio, not a 0% ratio).
    */
   ratio: number | null;
-  /** The configured floor this summary was evaluated against. */
-  min_ratio: number;
   /**
-   * `true` when BOTH conditions clear: no evidence-bearing task has zero
-   * attested entries, AND `ratio >= min_ratio` (or the vacuous-pass case,
-   * `total_evidence === 0`, which is always `true`).
+   * The configured floor this summary was evaluated against, or `null` when
+   * `workflow.attestation.min_ratio` is UNCONFIGURED (spec-plan-close-
+   * predicates-measure-invariants-an-applicability §D4 — the ratio conjunct's
+   * default flipped to off). `null` means condition 3 (the ratio check) never
+   * runs at all — never coerce this to `0` or `0.5` at a render site.
+   */
+  min_ratio: number | null;
+  /** The per-claimed-AC attested-coverage facts (§D3 condition 2, the default teeth). */
+  claimed_ac_coverage: ClaimedAcCoverage;
+  /**
+   * `true` when EVERY applicable condition clears: no evidence-bearing task has
+   * zero attested entries, AND `claimed_ac_coverage.meets_coverage`, AND
+   * (`min_ratio === null` OR `ratio >= min_ratio`) — or the vacuous-pass case,
+   * `total_evidence === 0`, which is always `true` regardless of the other two.
    */
   meets_floor: boolean;
   /** Slugs of every task carrying evidence but zero attested entries. */
@@ -126,57 +224,82 @@ export interface AttestationSummary {
 }
 
 /**
- * Reproduces BOTH of `attestationFloor`'s existing conditions (SPEC-069 §Design
- * Decisions D1) as a renderable {@link AttestationSummary} fact object:
+ * Reproduces ALL THREE of `attestationFloor`'s conditions
+ * (spec-plan-close-predicates-measure-invariants-an-applicability §D3, extending
+ * SPEC-069 §Design Decisions D1) as a renderable {@link AttestationSummary} fact
+ * object:
  *
  *   1. every task that carries ANY `verification_evidence` must carry at least
  *      one runner-issued (attested) entry — a task with N self-reported entries
  *      and ZERO attested ones is undetectable fabrication risk, even if the
  *      plan-wide ratio is otherwise healthy;
- *   2. the plan-wide attested-evidence ratio (total attested / total evidence,
- *      across every task) must be >= `minRatio`.
+ *   2. every CLAIMED-AND-ATTESTABLE acceptance criterion (`acCoverage`'s own
+ *      `deriveClaimedAcCoverage` projection) must carry >= 1 runner-attested
+ *      entry — the DEFAULT conjunct (§D3, "the default teeth");
+ *   3. the plan-wide attested-evidence ratio (total attested / total evidence,
+ *      across every task) must be >= `minRatio` — OPT-IN: only evaluated when
+ *      `minRatio` is non-`null` (§D4's default-off migration). An explicitly
+ *      configured floor is AND-ed with conditions 1-2, never a substitute for
+ *      them.
  *
  * A plan with NO evidence at all on any task (`total_evidence === 0`) is a
  * vacuous PASS (`meets_floor: true`, `ratio: null`) — the "pure-planning plan"
  * carve-out (SPEC-069 §Scope): the floor only constrains a plan that claims to
- * have been verified, never one that never ran any oracle at all.
+ * have been verified, never one that never ran any oracle at all. This early
+ * return still reports the REAL `claimed_ac_coverage` facts (this function
+ * never fabricates data), it simply never lets them affect `meets_floor` here —
+ * `gate-predicates.ts::attestationFloor` reports the zero-evidence case as
+ * NOT-APPLICABLE regardless of what this function's `meets_floor` says.
  *
  * `gate-predicates.ts::attestationFloor` delegates to this function — its
  * `{ok: false}` case fires exactly when `meets_floor` here is `false`
- * (AC-075-11 byte-identical-gate-behavior parity).
+ * (AC-075-11 byte-identical-gate-behavior parity, extended by AC-PCI-6).
  *
  * @param infos - Every task's (or phase's) attestation facts, typically
  *   {@link buildTaskAttestationInfos}'s output. An empty array is treated
  *   identically to the vacuous-pass case.
- * @param minRatio - The configured floor (`workflow.attestation.min_ratio`).
+ * @param minRatio - The configured floor (`workflow.attestation.min_ratio`), or
+ *   `null` when unconfigured — `null` means condition 3 never runs at all.
+ * @param acCoverage - {@link computeAcCoverage}'s own output (the plan's
+ *   governing spec's declared criteria aggregated over the plan's tasks) —
+ *   REQUIRED (not optional): an optional parameter here would let a caller
+ *   silently opt out of the coverage conjunct, exactly the failure mode this
+ *   spec closes. Pass `[]` for a caller with no spec-tier ancestor to resolve
+ *   criteria from (vacuously `meets_coverage: true`, never a fabricated block).
  * @example
  * deriveAttestationSummary(
  *   [{ slug: "task-1", title: "T1", evidenceCount: 3, attestedCount: 0 }],
  *   0.5,
+ *   [],
  * );
  * // => { total_evidence: 3, attested: 0, ratio: 0, min_ratio: 0.5,
+ * //      claimed_ac_coverage: { claimed_acs: [], unattested_acs: [], meets_coverage: true },
  * //      meets_floor: false, zero_attested_tasks: ["task-1"] }
  * @example
- * deriveAttestationSummary([], 0.5);
+ * deriveAttestationSummary([], 0.5, []);
  * // => { total_evidence: 0, attested: 0, ratio: null, min_ratio: 0.5,
+ * //      claimed_ac_coverage: { claimed_acs: [], unattested_acs: [], meets_coverage: true },
  * //      meets_floor: true, zero_attested_tasks: [] } — vacuous pass
  * @example
  * deriveAttestationSummary(
  *   [{ slug: "task-1", title: "T1", evidenceCount: 2, attestedCount: 1 }],
- *   0.5,
+ *   null,
+ *   [{ ac_id: "AC-1", mode: "script", pass: 1, fail: 0, refs: [{task_id: "task-1", result: "pass"}], attested_pass: 0, attested_fail: 0 }],
  * );
- * // => { total_evidence: 2, attested: 1, ratio: 0.5, min_ratio: 0.5,
- * //      meets_floor: true, zero_attested_tasks: [] } — boundary: ratio === minRatio passes
+ * // => meets_floor: false — AC-1 was claimed (>=1 ref) but never attested,
+ * //    even though the ratio conjunct is disabled (minRatio: null)
  */
 export function deriveAttestationSummary(
   infos: readonly TaskAttestationInfo[],
-  minRatio: number,
+  minRatio: number | null,
+  acCoverage: readonly AcCoverageFact[],
 ): AttestationSummary {
   const totalEvidence = infos.reduce((sum, t) => sum + t.evidenceCount, 0);
   const attested = infos.reduce((sum, t) => sum + t.attestedCount, 0);
   const zeroAttestedTasks = infos
     .filter((t) => t.evidenceCount > 0 && t.attestedCount === 0)
     .map((t) => t.slug);
+  const claimedAcCoverage = deriveClaimedAcCoverage(acCoverage);
 
   if (totalEvidence === 0) {
     return {
@@ -184,18 +307,23 @@ export function deriveAttestationSummary(
       attested: 0,
       ratio: null,
       min_ratio: minRatio,
+      claimed_ac_coverage: claimedAcCoverage,
       meets_floor: true,
       zero_attested_tasks: [],
     };
   }
 
   const ratio = attested / totalEvidence;
-  const meetsFloor = zeroAttestedTasks.length === 0 && ratio >= minRatio;
+  const meetsFloor =
+    zeroAttestedTasks.length === 0 &&
+    claimedAcCoverage.meets_coverage &&
+    (minRatio === null || ratio >= minRatio);
   return {
     total_evidence: totalEvidence,
     attested,
     ratio,
     min_ratio: minRatio,
+    claimed_ac_coverage: claimedAcCoverage,
     meets_floor: meetsFloor,
     zero_attested_tasks: zeroAttestedTasks,
   };

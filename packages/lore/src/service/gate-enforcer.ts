@@ -793,19 +793,20 @@ export class GateEnforcer {
   }
 
   /**
-   * Resolves `plan-close`'s execution-time attestation-floor ratio
-   * (`workflow.attestation.min_ratio`, SPEC-069 §Design Decisions D1) against
-   * this enforcer's own `LoreConfig` — the single config-reading seam a caller
-   * building `GateContext.attestationMinRatio` (`CorpusService.set`) consults,
-   * mirroring `resolveVerificationProfile`'s "GateEnforcer owns the one config
-   * reference" shape.
+   * Resolves `plan-close`'s OPT-IN execution-time attestation-ratio conjunct
+   * (`workflow.attestation.min_ratio`, spec-plan-close-predicates-measure-
+   * invariants-an-applicability §D4, superseding SPEC-069 §Design Decisions D1's
+   * always-on default) against this enforcer's own `LoreConfig` — the single
+   * config-reading seam a caller building `GateContext.attestationMinRatio`
+   * (`CorpusService.set`) consults, mirroring `resolveVerificationProfile`'s
+   * "GateEnforcer owns the one config reference" shape.
    *
-   * @returns The configured floor, or the schema default (0.5) when
-   *   unconfigured.
+   * @returns The explicitly configured floor, or `null` when unconfigured — the
+   *   ratio conjunct does not run at all in that case.
    * @example
-   * enforcer.resolveAttestationMinRatio(); // => 0.5 by default, 0.3 when configured
+   * enforcer.resolveAttestationMinRatio(); // => null by default, 0.3 when configured
    */
-  resolveAttestationMinRatio(): number {
+  resolveAttestationMinRatio(): number | null {
     return resolveAttestationMinRatio(this.config);
   }
 }

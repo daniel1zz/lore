@@ -79,7 +79,9 @@ import {
   isClaimStale,
   lintAcQuantifiability,
   checkOracleCoverage,
+  deriveClaimedAcCoverage,
   type AcceptanceCriterion,
+  type AcCoverageFact,
   type DocRecord,
   type LoreError,
   // reason: SPEC-075 D6 — TaskAttestationInfo's home MOVED to @lore/core
@@ -388,14 +390,33 @@ export interface GateContext {
    */
   readonly planTasksAttestation?: TaskAttestationInfo[];
   /**
-   * The resolved `workflow.attestation.min_ratio` floor (SPEC-069, default
-   * 0.5) — resolved by the CALLER via `GateEnforcer.resolveAttestationMinRatio`
+   * The resolved `workflow.attestation.min_ratio` floor, or `null` when
+   * UNCONFIGURED (spec-plan-close-predicates-measure-invariants-an-
+   * applicability §D4, superseding SPEC-069's always-on `0.5` default) —
+   * resolved by the CALLER via `GateEnforcer.resolveAttestationMinRatio`
    * (module invariant: no config access here, mirrors `verificationProfile`'s
-   * caller-resolved shape). `undefined` falls back to `attestationFloor`'s own
-   * default-matching literal in `checkPlanClose` below — only exercised by a
-   * ctx built without this field (e.g. a hand-built test fixture).
+   * caller-resolved shape). `undefined` (a ctx built without this field, e.g.
+   * a hand-built test fixture) falls back to `DEFAULT_ATTESTATION_MIN_RATIO`
+   * in `checkPlanClose`/`feedAttestationFloor` below, which is now itself
+   * `null` — a `?? 0.5` fallback anywhere on this path would resurrect the
+   * exact flipped default §D4 retires.
    */
-  readonly attestationMinRatio?: number;
+  readonly attestationMinRatio?: number | null;
+  /**
+   * Per-claimed-AC attested-coverage facts (spec-plan-close-predicates-
+   * measure-invariants-an-applicability §D3, condition 2 — the DEFAULT
+   * conjunct) — `computeAcCoverage`'s own output (`@lore/core`, acceptance.ts)
+   * over the closing plan's governing spec's declared criteria aggregated
+   * across the plan's tasks. Resolved by the CALLER (`CorpusService.set`):
+   * `computeAcCoverage(<declared criteria>, <plan's tasks>)` when the plan has
+   * a spec-tier ancestor, `[]` when it does not (mirrors
+   * `parentSpecScriptAcCount`'s "populate only when relevant" shape — a plan
+   * with no spec-tier ancestor has nothing to claim against). `undefined`
+   * (the exempt case, or a ctx built without this field) is treated
+   * identically to `[]` by `attestationFloor` itself, same shape as
+   * `planTasksAttestation`.
+   */
+  readonly planClaimedAcCoverage?: readonly AcCoverageFact[];
 
   // -- plan-close: check() + feed() (SPEC-080 §C4, prdOutlineSynced) --
   /**
@@ -1145,14 +1166,19 @@ function feedPhaseClaim(ctx: GateContext, failures: PredicateResult[]): string {
 }
 
 /**
- * `plan-close`'s default attestation-floor ratio (SPEC-069) — MUST match
- * `WorkflowConfigSchema`'s `workflow.attestation.min_ratio` Zod default (`@lore/core`,
- * config.ts) exactly. Production callers always resolve `ctx.attestationMinRatio` via
- * `GateEnforcer.resolveAttestationMinRatio` (which reads that same schema default when
- * unconfigured), so this constant is only ever exercised by a hand-built `GateContext`
- * (a direct `attestationFloor`/`checkPlanClose` unit test) that omits the field.
+ * `plan-close`'s attestation-ratio-conjunct fallback (spec-plan-close-predicates-
+ * measure-invariants-an-applicability §D4) — MUST match `resolveAttestationMinRatio`'s
+ * (`@lore/core`, config.ts) own "unconfigured" resolution exactly: `null`, meaning
+ * the ratio conjunct does NOT run at all when unconfigured. This is a DELIBERATE
+ * departure from the pre-§D4 `0.5` literal — a `?? 0.5` anywhere on this path would
+ * silently resurrect the always-on ratio floor §D4's migration retires. Production
+ * callers always resolve `ctx.attestationMinRatio` via
+ * `GateEnforcer.resolveAttestationMinRatio` (which reads that same `null`-when-
+ * unconfigured resolution), so this constant is only ever exercised by a hand-built
+ * `GateContext` (a direct `attestationFloor`/`checkPlanClose` unit test) that omits
+ * the field.
  */
-const DEFAULT_ATTESTATION_MIN_RATIO = 0.5;
+const DEFAULT_ATTESTATION_MIN_RATIO: number | null = null;
 
 /**
  * `plan-close`'s predicates (SPEC-054 + SPEC-069 §Design Decisions D1 +
@@ -1221,6 +1247,7 @@ function checkPlanClose(ctx: GateContext): ApplicablePredicateResult[] {
         ctx.planTasksAttestation,
         ctx.attestationMinRatio ?? DEFAULT_ATTESTATION_MIN_RATIO,
         ctx.targetIdOrSlug ?? "<plan>",
+        ctx.planClaimedAcCoverage ?? [],
       ),
     );
   }
@@ -1236,12 +1263,15 @@ function checkPlanClose(ctx: GateContext): ApplicablePredicateResult[] {
 /**
  * Renders the attestation-floor-specific feeding pack (SPEC-069 §Design Decisions
  * D1; recovery text rewritten by task-attestation-floor-feeding-pack-names-tasks-
- * but-the, 2026-07-26) — names every offending task (carries `verification_evidence`
- * but ZERO runner-attested entries), the plan-wide attested ratio against the
- * configured floor, and the literal recovery command (`lore verify <plan>` — the
- * exact substring AC-069-1 pins). Pointers only (task slug/title, never body
- * content), mirroring `feedAnchorOverlap`'s "recompute offending items from ctx"
- * shape.
+ * but-the, 2026-07-26; AC diagnostics added by spec-plan-close-predicates-measure-
+ * invariants-an-applicability §D5) — names every offending task (carries
+ * `verification_evidence` but ZERO runner-attested entries), every claimed-but-
+ * unattested acceptance criterion id, the plan-wide attested ratio against the
+ * configured floor (ONLY when the ratio conjunct is actually configured — §D5:
+ * naming a floor that is not enforcing would misdirect an operator), and the
+ * literal recovery command (`lore verify <plan>` — the exact substring AC-069-1
+ * pins). Pointers only (task slug/title, AC ids, never body content), mirroring
+ * `feedAnchorOverlap`'s "recompute offending items from ctx" shape.
  *
  * @remarks PLAN-LEVEL EXEMPTION ONLY (2026-07-26 incident fix) — `checkPlanClose`
  *   reads `ctx.attestationExempt` / the exemption reason from the CLOSING PLAN's
@@ -1290,6 +1320,11 @@ function feedAttestationFloor(ctx: GateContext, failures: PredicateResult[]): st
   const totalAttested = tasks.reduce((sum, t) => sum + t.attestedCount, 0);
   const ratio = totalEvidence > 0 ? totalAttested / totalEvidence : 0;
   const minRatio = ctx.attestationMinRatio ?? DEFAULT_ATTESTATION_MIN_RATIO;
+  // reason: spec-plan-close-predicates-measure-invariants-an-applicability §D5 —
+  // names every claimed-but-unattested AC id, computed from the SAME
+  // `deriveClaimedAcCoverage` (@lore/core) the predicate itself delegates to via
+  // `deriveAttestationSummary` — never a second hand-rolled derivation.
+  const claimedCoverage = deriveClaimedAcCoverage(ctx.planClaimedAcCoverage ?? []);
   const plan = ctx.targetIdOrSlug ?? "<plan>";
   const offendingLine =
     offending.length > 0
@@ -1297,6 +1332,23 @@ function feedAttestationFloor(ctx: GateContext, failures: PredicateResult[]): st
         `${offending.map((t) => `${t.slug} — "${t.title}"`).join(", ")}. Listed for ` +
         `DIAGNOSTIC purposes only — the exemption below is PLAN-level; do NOT write ` +
         `\`extra.attestation_exempt\` onto any of these tasks, this gate never reads it there. `
+      : "";
+  // reason: §D5 — names every unattested claimed AC id; empty when the caller
+  // never resolved claimed-AC coverage (or every claimed AC IS attested), so a
+  // ctx fixture that predates this field (e.g. feed-attestation-reachability
+  // .test.ts's byte-pinned fixture) renders no extra text here at all.
+  const unattestedAcsLine =
+    claimedCoverage.unattested_acs.length > 0
+      ? `Claimed acceptance criteria with zero runner-attested evidence: ` +
+        `${claimedCoverage.unattested_acs.join(", ")}. `
+      : "";
+  // reason: §D5 — printed ONLY when the ratio conjunct is actually configured
+  // (minRatio !== null); naming a floor that is not being enforced would
+  // misdirect an operator into thinking the ratio is the live blocking cause.
+  // MUST contain the literal substring "attested ratio" (AC-PCI-9) when printed.
+  const ratioLine =
+    minRatio !== null
+      ? `The plan-wide attested ratio must be >= ${minRatio} (currently ${ratio.toFixed(2)}). `
       : "";
   // reason: DD-4(b) — thread `ctx.hasSpecParent`'s THREE-way shape through
   // verbatim rather than collapsing it to a boolean-derived "spec"/null pair.
@@ -1351,8 +1403,9 @@ function feedAttestationFloor(ctx: GateContext, failures: PredicateResult[]): st
     ruleSource: "corpus (task verification_evidence)",
     ruleMarkdown:
       `Required for plan-close: every task carrying verification_evidence must carry ` +
-      `at least one runner-issued (attested) entry, and the plan-wide attested-evidence ` +
-      `ratio must be >= ${minRatio} (currently ${ratio.toFixed(2)}). ${offendingLine}` +
+      `at least one runner-issued (attested) entry, and every claimed acceptance ` +
+      `criterion (a declared script-mode AC with >= 1 evidence reference) must carry ` +
+      `at least one runner-attested entry. ${unattestedAcsLine}${ratioLine}${offendingLine}` +
       recoveryText,
     missing: selectFailures(failures).map((f) => f.reason),
     // reason: the plan-level-only fetch-merge-set instruction plus the offending-
