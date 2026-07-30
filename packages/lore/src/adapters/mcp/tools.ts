@@ -1741,6 +1741,15 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
         }
       }
 
+      // reason: `textContent(result.value)` JSON-stringifies the whole
+      // `ResumeFeedOutcome`, whose `.feed` field already carries the
+      // `RESUME_SCOPE_CLOSURE` boundary block
+      // (spec-context-provenance-injected-corpus-global-state-and-a D3)
+      // whenever a ticket was actually found — woven in by
+      // `../../flows/feed-flow.js::renderResumeFeed`, the SAME function
+      // `commands/feed.ts`'s CLI `handleSessionResume` relies on for its own
+      // stdout print. Do not re-append or re-derive the closure text here —
+      // that would let this surface silently diverge from the CLI's.
       if (args.checkpoint === SESSION_RESUME_CHECKPOINT) {
         const result = await buildResumeFeed(app, {
           ...(args.plan !== undefined ? { plan: args.plan } : {}),

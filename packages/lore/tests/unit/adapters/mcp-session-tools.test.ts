@@ -30,9 +30,24 @@
  *   STATE:      lore_handoff → lore_feed session-resume round trip via MCP (the
  *               just-written handoff is what resume surfaces)
  *   REGRESSION: lore_bootstrap/lore_handoff payload shapes deep-equal the CLI's
- *               SessionService-driven --json output for the same seeded corpus
+ *               SessionService-driven --json output for the same seeded corpus;
+ *               the MCP `lore_feed` session-resume response's `feed` field
+ *               carries the exported `RESUME_SCOPE_CLOSURE` constant verbatim
+ *               (identity) and names every `BOOTSTRAP_INJECTION_KNOWN_KEYS`
+ *               member — spec-context-provenance-injected-corpus-global-state-and-a
+ *               §Design Decisions D3, AC-CP-4, task
+ *               task-t3-scope-closure-on-the-resume-ticket-cli-stdout-and-mcp.
+ *               This is the MCP-surface half of AC-CP-4's "both surfaces"
+ *               requirement — the CLI-stdout half is pinned by
+ *               `tests/integration/cli-feed-task-start.bun.test.ts`, and the
+ *               pure render-function mechanics by
+ *               `tests/unit/flows/feed-flow-resume-closure.test.ts`. The
+ *               pre-existing BOUNDARY test below ("no handoff recorded yet")
+ *               is deliberately left asserting the exact
+ *               `"(no handoff recorded)"` text — that advisory note is not a
+ *               resume ticket, so it carries no scope to close.
  *
- * @spec_ref SPEC-041 §4 AC-SL-6
+ * @spec_ref SPEC-041 §4 AC-SL-6; spec-context-provenance-injected-corpus-global-state-and-a §Design Decisions D3
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
@@ -46,7 +61,7 @@ import { MigrationService } from "../../../src/service/migration-service.js";
 import { TreeCheckService } from "../../../src/service/tree-check-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import { SessionService } from "../../../src/service/session-service.js";
-import { NoOpTelemetry, ok } from "@lore/core";
+import { BOOTSTRAP_INJECTION_KNOWN_KEYS, NoOpTelemetry, ok, RESUME_SCOPE_CLOSURE } from "@lore/core";
 import type { BootstrapReport, DocRecord, HandoffExtra } from "@lore/core";
 import type { App } from "../../../src/app.js";
 import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
@@ -334,6 +349,40 @@ describe("lore_feed session-resume dispatch (SPEC-041 §3 D5)", () => {
     expect(feedData.resume.found).toBe(true);
     expect(feedData.feed).toContain(handoffDoc.slug);
     expect(feedData.feed).toContain("wire SessionService into app.ts");
+  });
+
+  it("REGRESSION (AC-CP-4, MCP surface): the derivation-path call (no --handoff, only --plan) carries RESUME_SCOPE_CLOSURE verbatim and names every BOOTSTRAP_INJECTION_KNOWN_KEYS member", async () => {
+    const plan = await createPlan("Plan A");
+    const handoffCall = getToolHandler(server, "lore_handoff");
+    const handoffResult = await handoffCall({ ...VALID_HANDOFF, plan_ref: plan.slug });
+    expect(handoffResult.isError).toBeFalsy();
+
+    // reason: no `handoff` field supplied — this is the SAME derivation path
+    // (newest-wins over `plan`) the task's REGRESSION requirement names,
+    // never the direct `--handoff <slug>` shortcut.
+    const feedCall = getToolHandler(server, "lore_feed");
+    const feedResult = await feedCall({ checkpoint: "session-resume", plan: plan.slug });
+
+    expect(feedResult.isError).toBeFalsy();
+    const feedData = parseResult(feedResult) as { resume: { found: boolean }; feed: string };
+    expect(feedData.resume.found).toBe(true);
+    // reason: identity against the exported constant (D6), not a remembered
+    // substring — proves the MCP `feed` field (JSON-stringified alongside the
+    // rest of `ResumeFeedOutcome` by `textContent`, tools.ts) really carries
+    // the SAME text `renderResumeFeed` produces for the CLI surface.
+    expect(feedData.feed.includes(RESUME_SCOPE_CLOSURE)).toBe(true);
+    for (const key of BOOTSTRAP_INJECTION_KNOWN_KEYS) {
+      expect(RESUME_SCOPE_CLOSURE.includes(key)).toBe(true);
+    }
+  });
+
+  it("REGRESSION (AC-CP-4): a non-resume checkpoint (spec-create) must NOT gain the scope-closure block", async () => {
+    const feedCall = getToolHandler(server, "lore_feed");
+    const result = await feedCall({ checkpoint: "spec-create" });
+
+    expect(result.isError).toBeFalsy();
+    const data = parseResult(result) as { feed: string };
+    expect(data.feed.includes(RESUME_SCOPE_CLOSURE)).toBe(false);
   });
 
   it("NEGATIVE: unresolvable --plan → isError with VALIDATION_ERROR (not an advisory degrade, unlike buildFeed's checkpoint lookup)", async () => {

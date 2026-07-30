@@ -114,6 +114,14 @@ interface FeedArgs {
  */
 type CheckpointHandler = (app: App, args: FeedArgs, config: LoreConfig | undefined) => Promise<void>;
 
+// reason: `result.value.feed` already carries the `RESUME_SCOPE_CLOSURE`
+// boundary block (spec-context-provenance-injected-corpus-global-state-and-a
+// D3) whenever a ticket was actually found — woven in by
+// `../../../flows/feed-flow.js::renderResumeFeed`, the SAME function
+// `buildResumeFeed` calls to compute `.feed`. Print it verbatim; never
+// re-derive or re-append the closure text here — that would be the exact
+// dual-write drift the spec exists to close (`adapters/mcp/tools.ts`'s
+// session-resume branch inherits it the same way, via the same call).
 async function handleSessionResume(app: App, args: FeedArgs, _config: LoreConfig | undefined): Promise<void> {
   const result = await buildResumeFeed(app, {
     ...(typeof args.plan === "string" ? { plan: args.plan } : {}),
