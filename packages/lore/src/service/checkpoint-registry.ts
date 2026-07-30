@@ -129,6 +129,7 @@ import {
   type ReachabilityResult,
 } from "./gate-predicates.js";
 import { buildFeedingPack, renderFeedingPack } from "./gate-feeding.js";
+import { PREDICATE_CONTRACTS } from "./predicate-contracts.js";
 
 /**
  * The five gate checkpoints (four IoC vertical-slice tech-spec §5.1 + plan-close, SPEC-054). Not every member has
@@ -411,10 +412,19 @@ export interface GateContext {
    * `computeAcCoverage(<declared criteria>, <plan's tasks>)` when the plan has
    * a spec-tier ancestor, `[]` when it does not (mirrors
    * `parentSpecScriptAcCount`'s "populate only when relevant" shape — a plan
-   * with no spec-tier ancestor has nothing to claim against). `undefined`
-   * (the exempt case, or a ctx built without this field) is treated
-   * identically to `[]` by `attestationFloor` itself, same shape as
-   * `planTasksAttestation`.
+   * with no spec-tier ancestor has nothing to claim against).
+   *
+   * `undefined` is DELIBERATELY NOT treated identically to `[]` (Amendment A,
+   * spec-plan-close-predicates-measure-invariants-an-applicability, added
+   * after T2 landed) — `checkPlanClose` still evaluates `attestationFloor`'s
+   * conditions 1/3 with this fallback to `[]` (unaffected: they never read
+   * this field), but ALSO pushes a companion `PredicateNotApplicable`
+   * (reason `"referent-absent"`, referent `"planClaimedAcCoverage"`) when this
+   * field is genuinely absent — the caller-contract violation of never having
+   * resolved claimed-AC coverage at all, distinct from an explicitly-supplied
+   * `[]` (a resolved fact: "this plan claims no declared script-mode ACs").
+   * Only `CorpusService.set`'s hand-built test fixtures ever omit this field
+   * on a path that reaches this branch — the real caller always resolves it.
    */
   readonly planClaimedAcCoverage?: readonly AcCoverageFact[];
 
@@ -1218,10 +1228,12 @@ const DEFAULT_ATTESTATION_MIN_RATIO: number | null = null;
  * Every predicate that runs is pushed into the SAME results array (this
  * module's "run every predicate, don't short-circuit on the first failure"
  * contract) — a plan can fail ANY subset of them independently. A
- * `PredicateNotApplicable` member (from `attestationFloor`'s zero-evidence case
- * or `prdOutlineSynced`'s absent-domain-doc case) is pushed into this SAME
- * array too (spec-plan-close-predicates-measure-invariants-an-applicability
- * §Design Decisions D1) — `GateEnforcer.enforce` is the ONE consumer that
+ * `PredicateNotApplicable` member (from `attestationFloor`'s zero-evidence
+ * case, `prdOutlineSynced`'s absent-domain-doc case, or — Amendment A,
+ * spec-plan-close-predicates-measure-invariants-an-applicability — a companion
+ * entry naming `"planClaimedAcCoverage"` when the caller never resolved
+ * claimed-AC coverage at all) is pushed into this SAME array too (§Design
+ * Decisions D1) — `GateEnforcer.enforce` is the ONE consumer that
  * partitions it back out; `isCheckpointBlocked`/`selectFailures` already treat
  * it as non-blocking, so this function's own "run every predicate" contract
  * needs no special-casing for it.
@@ -1242,14 +1254,46 @@ function checkPlanClose(ctx: GateContext): ApplicablePredicateResult[] {
     results.push(exemptKind);
   }
   if (ctx.attestationExempt !== true || !exemptKind.ok) {
-    results.push(
-      attestationFloor(
-        ctx.planTasksAttestation,
-        ctx.attestationMinRatio ?? DEFAULT_ATTESTATION_MIN_RATIO,
-        ctx.targetIdOrSlug ?? "<plan>",
-        ctx.planClaimedAcCoverage ?? [],
-      ),
+    const floorResult = attestationFloor(
+      ctx.planTasksAttestation,
+      ctx.attestationMinRatio ?? DEFAULT_ATTESTATION_MIN_RATIO,
+      ctx.targetIdOrSlug ?? "<plan>",
+      // reason: Amendment A (spec-plan-close-predicates-measure-invariants-an-
+      // applicability, added after T2 landed) — this `?? []` still runs so
+      // `attestationFloor`'s conditions 1/3 (per-task attestation, plan-wide
+      // ratio) evaluate NORMALLY and stay byte-identical to before; it is
+      // conditions 2 (per-claimed-AC coverage) alone whose vacuous pass this
+      // fallback would otherwise fabricate silently. See the companion push
+      // below, which makes THAT specific omission visible instead of erasing
+      // it — the narrower fix than replacing this whole call, chosen because a
+      // caller building a `GateContext` with real task/evidence data but no
+      // `planClaimedAcCoverage` at all (several pre-existing test fixtures do)
+      // must keep getting a REAL per-task/ratio verdict, not a blanket
+      // not-applicable that would also swallow conditions 1/3's own outcome.
+      ctx.planClaimedAcCoverage ?? [],
     );
+    results.push(floorResult);
+    // reason: Amendment A — `ctx.planClaimedAcCoverage === undefined` here is a
+    // CALLER-CONTRACT VIOLATION (nobody resolved claimed-AC coverage at all),
+    // distinct from an explicitly-supplied `[]` (a resolved fact: "this plan
+    // claims no declared script-mode ACs", which still passes condition 2
+    // vacuously and correctly). Production's ONE caller (`CorpusService.set`,
+    // corpus-service.ts) ALWAYS resolves this field (to `[]` or real facts)
+    // whenever this branch runs — only a hand-built test `GateContext` can hit
+    // this. Pushing a SEPARATE `PredicateNotApplicable` (T1's type) makes the
+    // coverage conjunct's vacuous-pass-by-omission visible on
+    // `GateEnforcer.enforce`'s advisory/audit channel, without perturbing
+    // `floorResult` itself — the unknown-vs-determined conflation this
+    // codebase already fixed once at spec-plan-closure-must-be-loud-
+    // terminality-divergence-silent DD-4(b) (`ReachabilityWhy: "unknown"` vs
+    // `"parent-not-spec"`). Suppressed when `floorResult` is ALREADY
+    // not-applicable for an unrelated reason (zero evidence anywhere) — piling
+    // a second not-applicable verdict onto the same predicate concern would be
+    // redundant noise, not a new gap: there is nothing to evaluate at all in
+    // that case, coverage data or not.
+    if (ctx.planClaimedAcCoverage === undefined && !isNotApplicable(floorResult)) {
+      results.push({ notApplicable: true, reason: "referent-absent", referent: "planClaimedAcCoverage" });
+    }
   }
   if (ctx.prdSyncEnabled === true && ctx.prdSyncSynced !== undefined) {
     results.push(prdOutlineSynced(ctx.prdSyncSynced, ctx.parentSpecPointer?.slug ?? "<spec>"));
@@ -1461,18 +1505,27 @@ function assessmentFreshnessNote(ctx: GateContext): string {
 }
 
 /**
- * Renders the `prdOutlineSynced`-specific feeding pack (SPEC-080 §C4) — names
- * all three repair verbs the spec's own text calls for (`lore outline set`,
- * `lore set <domain-doc>`, `lore outline exempt`), degrading to a link-first
- * message when the caller never resolved a domain doc at all
- * (`ctx.prdSyncDomainDocSlug` absent — no ancestor-spec `parent`/`implements`
- * edge to a domain doc exists yet). Pointers only (domain doc slug, never its
- * content), mirroring `feedAttestationFloor`'s "recompute the recovery text
- * from ctx" shape.
+ * Renders the `prdOutlineSynced`-specific feeding pack (SPEC-080 §C4, contract
+ * pointer added by spec-plan-close-predicates-measure-invariants-an-
+ * applicability §D7/Deliver-4) — names all three repair verbs the spec's own
+ * text calls for (`lore outline set`, `lore set <domain-doc>`,
+ * `lore outline exempt`), degrading to a link-first message when the caller
+ * never resolved a domain doc at all (`ctx.prdSyncDomainDocSlug` absent — no
+ * ancestor-spec `parent`/`implements` edge to a domain doc exists yet).
+ * Pointers only (domain doc slug, never its content), mirroring
+ * `feedAttestationFloor`'s "recompute the recovery text from ctx" shape.
+ *
+ * Quotes a POINTER-SIZED slice of `PREDICATE_CONTRACTS[PRD_SYNC_FIELD]` (field
+ * + invariant + measured — never the full `known_false_*` lists, §D7's own
+ * "keep it pointer-sized" instruction) so the operator blocked on this
+ * predicate reads its invariant/measurement directly, without a second
+ * `lore gate --explain plan-close` round trip.
  */
 function feedPrdOutlineSynced(ctx: GateContext, failures: PredicateResult[]): string {
   const plan = ctx.targetIdOrSlug ?? "<plan>";
   const domainDoc = ctx.prdSyncDomainDocSlug;
+  const contract = PREDICATE_CONTRACTS[PRD_SYNC_FIELD];
+  const contractLine = `Contract (field: ${PRD_SYNC_FIELD}) — invariant: ${contract.invariant} Measured: ${contract.measured} `;
   const recovery =
     domainDoc !== undefined
       ? `Recovery: update the outline entry (\`lore outline set <prd> --section <key> ...\`) ` +
@@ -1489,8 +1542,16 @@ function feedPrdOutlineSynced(ctx: GateContext, failures: PredicateResult[]): st
     ruleMarkdown:
       `Required for plan-close: the plan's linked domain doc must carry at least one ` +
       `version whose content differs from its predecessor within the plan's execution ` +
-      `window (SPEC-080 C4). ${recovery}`,
+      `window (SPEC-080 C4). ${contractLine}${recovery}`,
     missing: selectFailures(failures).map((f) => f.reason),
+    // reason: this is synthesized guidance text (contract pointer + repair-verb
+    // recovery instructions), not a slice of an arbitrary-length doc — the
+    // thing `DEFAULT_FEEDING_MAX_CHARS` (800) protects against — so a wider
+    // explicit budget is safe here, mirroring `feedAttestationFloor`'s
+    // identical rationale. Without this, the §D7 contract pointer (~600 chars)
+    // pushes the mandatory `lore outline set`/`lore set`/`lore outline exempt`
+    // repair verbs past the default truncation point.
+    maxChars: 1800,
   });
   return renderFeedingPack(pack);
 }

@@ -144,9 +144,21 @@
  * (`../report-issue-hint.js::buildReportIssueHint`) with `loader.ts`'s `"internal"`
  * errClass sibling.
  *
+ * `lore gate plan-close --explain` (spec-plan-close-predicates-measure-invariants-
+ * an-applicability §D7) is a SIXTH subcommand, but NOT a pre-flight gate check like
+ * the five above — `plan-close`'s real predicates run only inside `CorpusService.set`'s
+ * archival transition (there is no candidate-plan pre-flight equivalent). It prints
+ * `PREDICATE_CONTRACTS` (`../../../service/predicate-contracts.js`) — every plan-close
+ * predicate's invariant, measured proxy, and known false-pass/false-block deltas — so an
+ * operator blocked on correctly-executed work reads the delta instead of reaching for an
+ * exemption. Purely additive and offline: no corpus read, no `LORE_GATE_BYPASS` check, no
+ * exit-code interaction with the other five subcommands.
+ *
  * Source: IoC vertical-slice tech-spec §4.1/§5.1/§11 ("deterministic zone" +
  * "active feeding" + INV2 "probabilistic zone is advisory-only")
  *         SPEC-073 §Design (error-path report-issue hint, "gate" errClass)
+ *         spec-plan-close-predicates-measure-invariants-an-applicability §D7
+ *         ("gate plan-close --explain")
  */
 
 import { defineCommand } from "citty";
@@ -197,6 +209,7 @@ import { resolveFeedbackUpstreamCfg } from "../report-issue-wiring.js";
 // that, see `openBypassRecordGateSkip` below).
 import { SQLiteStore } from "../../../store/sqlite-store.js";
 import { findLoreDbPathQuiet, runGateEnvBypassAudit } from "../gate-bypass-audit.js";
+import { renderPredicateContractsExplain } from "../../../service/predicate-contracts.js";
 
 /**
  * Real `GateBypassAuditDeps.openRecordGateSkip` wiring for the `LORE_GATE_BYPASS=1`
@@ -521,6 +534,50 @@ export default defineCommand({
         } finally {
           app.close();
         }
+      },
+    }),
+
+    "plan-close": defineCommand({
+      meta: {
+        name: "plan-close",
+        description:
+          "Additive, informational-only subcommand (spec-plan-close-predicates-measure-" +
+          "invariants-an-applicability §D7): `--explain` prints the plan-close predicate " +
+          "contract table (PREDICATE_CONTRACTS) — invariant, measured proxy, and known " +
+          "false-pass/false-block deltas per predicate. This is NOT a pre-flight gate " +
+          "check (unlike spec-create/spec-promote/plan-promote/task-claim/phase-claim " +
+          "above) — plan-close's real predicates run only at `lore set`'s archival " +
+          "transition, and this subcommand never touches the corpus.",
+      },
+      args: {
+        explain: {
+          type: "boolean",
+          description:
+            "Print every plan-close predicate's field/invariant/measured/known-delta " +
+            "contract (order matters: run as `lore gate plan-close --explain`, not " +
+            "`lore gate --explain plan-close` — citty resolves the checkpoint token as " +
+            "a subcommand name first, so a flag preceding it is dropped)",
+          default: false,
+        },
+      },
+      async run({ args }) {
+        // reason: unlike the five checkpoint subcommands above, this one never
+        // reads the corpus or runs a predicate — it is a pure, offline render
+        // of the static contract table, so it deliberately has no
+        // LORE_GATE_BYPASS / isGateDisabledByConfig / loadLoreApp call site.
+        if (!args.explain) {
+          process.stderr.write(
+            "gate plan-close: pass --explain to print the predicate contract table " +
+              "(plan-close has no other CLI pre-flight check yet — its real gate runs " +
+              "at `lore set`'s archival transition).\n",
+          );
+          process.exitCode = 2;
+          return;
+        }
+        // reason: matches this file's established stdout convention for the
+        // other five subcommands' pass/feed output (`console.log`, not
+        // `process.stdout.write`) — CLI surface.
+        console.log(renderPredicateContractsExplain("plan-close"));
       },
     }),
   },
