@@ -14,7 +14,10 @@
  *     `extra.handoff` (sub_type "handoff", SPEC-041 §3 D3)
  *   - renderHandoffContent(extra) — deterministic Markdown rendering of a `HandoffExtra`
  *     for the knowledge doc's `content` field (assessment-renderer precedent — `extra`
- *     is the SSOT, `content` is generated ONLY by this function)
+ *     is the SSOT, `content` is generated ONLY by this function). Also the SOLE
+ *     rendering site for the resume-ticket LOWER-bound ordinals (D1 below):
+ *     the cardinality line and every `KD<n>`/`NS<n>` item id are woven in here,
+ *     never re-derived by a consumer of the rendered `content`.
  *   - bootstrapReportSchema / BootstrapReport — the S1 pointer-set `SessionService.bootstrap`
  *     returns (SPEC-041 §3 D2) — every field is a slug/title/count/timestamp pointer,
  *     NEVER doc body content (IoC ADR boundary 2: pointers + summaries, never full dump)
@@ -84,12 +87,20 @@
  *     D8, D9). RESUME_SCOPE_CLOSURE above bounds a ticket from ABOVE (do not
  *     exceed scope); these bound it from BELOW (account for every printed
  *     item) — a SEPARATE constant from RESUME_SCOPE_CLOSURE, never merged
- *     into it (D3). This module owns ONLY the vocabulary: rendering the
- *     ordinal-tagged lines is sibling T2's job
- *     (`packages/lore/src/flows/feed-flow.ts::renderResumeRecord`), and
- *     parsing a disposition line back into a verdict is sibling T3's job
- *     (the `lore handoff` coverage-check verb, the SOLE parser of this
- *     grammar — D9).
+ *     into it (D3). `renderHandoffContent` (above) is the ONE place the
+ *     ordinal-tagged `KD<n>`/`NS<n>` lines and the cardinality line are
+ *     rendered — the SSOT projection point (spec D1 revision: an earlier
+ *     draft assigned this to `feed-flow.ts::renderResumeRecord`, which is
+ *     unbuildable — that function's parameter carries only a pre-rendered
+ *     `content: string`, never the structured arrays; widening it would have
+ *     obliged the consumer to re-render all seven `renderHandoffContent`
+ *     sections, a second implementation of the same SSOT).
+ *     `packages/lore/src/flows/feed-flow.ts` appends `RESUME_COVERAGE_FLOOR`
+ *     alongside `RESUME_SCOPE_CLOSURE` on the single-record resume-ticket
+ *     path only (D10 — never on the `multi_actor` branch). Parsing a
+ *     disposition line back into a verdict is sibling T3's job (the
+ *     `lore handoff` coverage-check verb, the SOLE parser of that grammar —
+ *     D9).
  *
  * Invariants:
  *   - No IO, no wall-clock reads, no randomness — `renderHandoffContent` is deterministic:
@@ -125,7 +136,9 @@
  *   - `renderResumeCoverageCardinalityLine` and `formatResumeItemId`
  *     (spec-resume-ticket-coverage-a-shipped-upper-bound-left-the) are pure:
  *     no IO, no wall-clock reads, no randomness — the same inputs always
- *     produce the same string.
+ *     produce the same string. `renderHandoffContent` calls both directly
+ *     (same module, no import needed) and remains itself pure/deterministic
+ *     after gaining the ordinal/cardinality lines (D1).
  *
  * Source: SPEC-041 §3 D2, D3; SPEC-042 §Design Decisions D1;
  * SPEC-080(bootstrap-injection; corpus slug
@@ -139,12 +152,14 @@
  * existing over-budget rule applies unchanged), D6 (no AC may assert
  * against remembered wording);
  * spec-resume-ticket-coverage-a-shipped-upper-bound-left-the §Design
- * Decisions D1 (ids/counts derive from the structured SSOT, never parsed
- * projection text), D3 (the lower-bound constant is separate from the
- * upper-bound one), D5 (the obligation is to account, not to complete),
- * D8 (zero cross-process state — this module contributes only pure
- * vocabulary, never a stored ledger), D9 (the coverage-check verb is the
- * sole grammar parser; this module only names the tokens).
+ * Decisions D1 (ids/counts derive from the structured SSOT, rendered ONLY by
+ * `renderHandoffContent` — this module — never re-derived or parsed by a
+ * consumer), D3 (the lower-bound constant is separate from the upper-bound
+ * one), D5 (the obligation is to account, not to complete), D8 (zero
+ * cross-process state), D9 (the coverage-check verb is the sole grammar
+ * parser; this module only names the disposition tokens), D10 (the floor
+ * binds on the single-record resume-ticket path only — `feed-flow.ts`'s
+ * job, not this module's).
  */
 
 import { z } from "zod";
@@ -256,6 +271,17 @@ export const DEGRADED_HANDOFF_MARKER =
  * function at write time (assessment-renderer precedent — `renderAssessmentContent`,
  * `assessment.ts`). Two calls with the same input always produce the same string.
  *
+ * @invariant spec-resume-ticket-coverage-a-shipped-upper-bound-left-the D1/D2 —
+ *   this is the SOLE rendering site for the resume-ticket LOWER-bound ordinals:
+ *   right after the header comes {@link renderResumeCoverageCardinalityLine}'s
+ *   output (the one line whose early position survives a lost-in-middle
+ *   truncation of everything below it), then every `## Key Decisions` row and
+ *   `## Next Steps` bullet carries its own `KD<n>`/`NS<n>` id
+ *   ({@link formatResumeItemId}, 1-based, array order). No other module
+ *   re-derives these ids from this function's OUTPUT (`renderResumeRecord`,
+ *   `feed-flow.ts`, prints `content` verbatim) — recovering them by parsing
+ *   text elsewhere would be a second, driftable rendering implementation of
+ *   the same SSOT (D1's own rationale for rejecting that shape).
  * @param extra - A `handoffExtraSchema`-valid handoff payload.
  * @returns Markdown body text.
  * @example
@@ -268,6 +294,8 @@ export function renderHandoffContent(extra: HandoffExtra): string {
   const lines: string[] = [];
 
   lines.push(`# Handoff — ${extra.by}`);
+  lines.push("");
+  lines.push(renderResumeCoverageCardinalityLine(extra.key_decisions.length, extra.next_steps.length));
   lines.push("");
 
   if (extra.degraded === true) {
@@ -295,12 +323,13 @@ export function renderHandoffContent(extra: HandoffExtra): string {
   lines.push("## Key Decisions");
   lines.push("");
   if (extra.key_decisions.length > 0) {
-    lines.push("| Judgment | Confidence |");
-    lines.push("|---|---|");
-    for (const d of extra.key_decisions) {
+    lines.push("| ID | Judgment | Confidence |");
+    lines.push("|---|---|---|");
+    extra.key_decisions.forEach((d, index) => {
+      const id = formatResumeItemId(RESUME_ITEM_ID_PREFIX_KEY_DECISION, index + 1);
       const confidence = d.confidence !== undefined ? `${d.confidence}` : "—";
-      lines.push(`| ${d.judgment.replace(/\|/g, "\\|")} | ${confidence} |`);
-    }
+      lines.push(`| ${id} | ${d.judgment.replace(/\|/g, "\\|")} | ${confidence} |`);
+    });
   } else {
     lines.push("(none)");
   }
@@ -321,7 +350,11 @@ export function renderHandoffContent(extra: HandoffExtra): string {
 
   lines.push("## Next Steps");
   lines.push("");
-  lines.push(extra.next_steps.map((s) => `- ${s}`).join("\n"));
+  lines.push(
+    extra.next_steps
+      .map((s, index) => `- ${formatResumeItemId(RESUME_ITEM_ID_PREFIX_NEXT_STEP, index + 1)}: ${s}`)
+      .join("\n"),
+  );
 
   return lines.join("\n");
 }
@@ -773,10 +806,14 @@ export const RESUME_SCOPE_CLOSURE =
 // disposition-line grammar so a consumer's per-item accounting is
 // machine-parseable (D5, D9), and a pure cardinality renderer so the printed
 // item count is identity-assertable without constructing a whole ticket
-// (D2, AC-RC-2). This module owns ONLY the vocabulary — rendering the
-// ordinal-tagged lines belongs to sibling T2
-// (`packages/lore/src/flows/feed-flow.ts::renderResumeRecord`), and parsing
-// a disposition line back into a verdict belongs to sibling T3 (the
+// (D2, AC-RC-2). `renderHandoffContent` (below) is the ONE place the
+// ordinal-tagged lines and the cardinality line are rendered — the SSOT
+// projection point, never re-rendered by a consumer (D1: an earlier draft
+// assigned this to `feed-flow.ts::renderResumeRecord`, unbuildable — that
+// function's parameter carries only a pre-rendered `content: string`, never
+// the structured arrays). `feed-flow.ts` appends RESUME_COVERAGE_FLOOR
+// alongside RESUME_SCOPE_CLOSURE on the single-record path only (D10).
+// Parsing a disposition line back into a verdict belongs to sibling T3 (the
 // `lore handoff` coverage-check verb, the SOLE parser of this grammar, D9).
 
 /**
@@ -808,11 +845,11 @@ export const RESUME_COVERAGE_FLOOR =
  * Item-id prefix for one `extra.key_decisions[]` entry (`KD<n>`, 1-based,
  * array order) — spec-resume-ticket-coverage-a-shipped-upper-bound-left-the
  * D1. Exported as a named constant, never inlined at a call site, so the
- * render path (sibling T2, `renderResumeRecord`) and the coverage-check verb
- * (sibling T3, the sole parser of this tag format, D9) cannot drift on the
- * prefix literal — the same "binary parses a format the binary emitted, no
- * second implementation to drift" discipline D8 states for the grammar as a
- * whole.
+ * render path (`renderHandoffContent`, this module) and the coverage-check
+ * verb (sibling T3, the sole parser of this tag format, D9) cannot drift on
+ * the prefix literal — the same "binary parses a format the binary emitted,
+ * no second implementation to drift" discipline D8 states for the grammar as
+ * a whole.
  */
 export const RESUME_ITEM_ID_PREFIX_KEY_DECISION = "KD";
 

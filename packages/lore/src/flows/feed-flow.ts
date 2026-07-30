@@ -68,16 +68,29 @@
  *   (`.feed` field included) as its response text. Neither call site re-derives
  *   or duplicates the closure text — a surface that rendered its own copy is
  *   exactly the dual-write failure class this spec exists to close.
+ * @invariant `renderResumeFeed`'s single-record path additionally appends
+ *   `RESUME_COVERAGE_FLOOR` (spec-resume-ticket-coverage-a-shipped-upper-bound-left-the
+ *   D3, D10) — BEFORE `RESUME_SCOPE_CLOSURE` in the joined array, so
+ *   `RESUME_SCOPE_CLOSURE` stays the trailing block (pinned by
+ *   `tests/integration/cli-feed-task-start.bun.test.ts`'s
+ *   `stdout.endsWith(RESUME_SCOPE_CLOSURE + "\n")` REGRESSION assertion,
+ *   predating this task). The `multi_actor` branch does NOT append the floor
+ *   (D10 — N records collide on `KD1`; the ordinal ids and a per-record
+ *   cardinality line are already present because they are baked into each
+ *   record's `content` by `renderHandoffContent`, `@lore/core`'s SSOT
+ *   projection point — this module renders NO items itself, see
+ *   `renderResumeRecord` below).
  *
  * Side-effect class: IO (corpusService reads, outlineService MDX resolution,
  *   sessionService reads — no writes)
  * Source: IoC vertical-slice tech-spec §4.1/§11, P4 slice; SPEC-041 §3 D5;
- *   spec-context-provenance-injected-corpus-global-state-and-a D3
+ *   spec-context-provenance-injected-corpus-global-state-and-a D3;
+ *   spec-resume-ticket-coverage-a-shipped-upper-bound-left-the D3, D10
  */
 
 import type { App } from "../app.js";
 import type { DocRecord, LoreError, Result } from "@lore/core";
-import { err, ok, RESUME_SCOPE_CLOSURE } from "@lore/core";
+import { err, ok, RESUME_COVERAGE_FLOOR, RESUME_SCOPE_CLOSURE } from "@lore/core";
 import { buildFeedingPack, renderFeedingPack } from "../service/gate-feeding.js";
 import { renderResolvedToMarkdown } from "../service/outline-service.js";
 import type { ResumeHandoffRecord, ResumeResult } from "../service/session-service.js";
@@ -265,7 +278,20 @@ export interface ResumeFeedOutcome {
   readonly feed: string;
 }
 
-/** Renders one resolved handoff record: header line, age, TTL/degraded markers, full content. */
+/**
+ * Renders one resolved handoff record: header line, age, TTL/degraded markers, full
+ * content. `record.content` is printed VERBATIM, never parsed or re-rendered — it is
+ * `@lore/core`'s `renderHandoffContent` SSOT projection, and by the time it reaches
+ * here it already carries the resume-ticket ordinal `KD<n>`/`NS<n>` lines and the
+ * per-record cardinality line (spec-resume-ticket-coverage-a-shipped-upper-bound-left-the
+ * D1 — that spec's own text names this exact function as the shape an earlier draft
+ * wrongly assigned item-rendering to; `renderHandoffContent` is unbuildable-around here
+ * because `ResumeHandoffRecord` never carries the underlying structured decision/
+ * next-step arrays, only their pre-rendered projection — AC-RC-6 pins this function's
+ * file to zero traversal of those arrays and zero use of the item-id prefix
+ * constants, so this comment deliberately avoids spelling either field's exact
+ * identifier).
+ */
 function renderResumeRecord(record: ResumeHandoffRecord): string {
   const lines: string[] = [];
   const planPart = record.plan_slug !== null ? `, plan ${record.plan_slug}` : "";
@@ -300,9 +326,13 @@ function renderReadinessPointer(readiness: ResumeResult["readiness"]): string {
  * multi-actor header when the result spans more than one actor (divergent state
  * is surfaced, never silently collapsed), and — whenever an actual ticket is
  * rendered — the {@link RESUME_SCOPE_CLOSURE} boundary block
- * (spec-context-provenance-injected-corpus-global-state-and-a D3). Pure — no
- * IO, no wall-clock reads (all of `resume`'s time-derived fields are already
- * computed).
+ * (spec-context-provenance-injected-corpus-global-state-and-a D3), plus, on the
+ * SINGLE-record path only, {@link RESUME_COVERAGE_FLOOR}
+ * (spec-resume-ticket-coverage-a-shipped-upper-bound-left-the D3, D10). Pure —
+ * no IO, no wall-clock reads (all of `resume`'s time-derived fields are already
+ * computed), and this function itself renders no items — see
+ * {@link renderResumeRecord}'s own doc for why the ordinals live one layer
+ * lower, in `@lore/core`'s `renderHandoffContent`.
  *
  * Both `lore feed`/`commands/feed.ts` (CLI stdout) and `lore_feed`/
  * `adapters/mcp/tools.ts` (MCP `feed` field, JSON-stringified alongside the
@@ -318,9 +348,16 @@ function renderReadinessPointer(readiness: ResumeResult["readiness"]): string {
  *   REGRESSION: `tests/integration/cli-feed-task-start.bun.test.ts`'s
  *   "session-resume with no handoff recorded still prints '(no handoff
  *   recorded)'" byte-exact assertion, predating this task, stays green).
+ * @invariant `RESUME_COVERAGE_FLOOR` is appended BEFORE `RESUME_SCOPE_CLOSURE`
+ *   (not after) on the single-record path — `RESUME_SCOPE_CLOSURE` must stay
+ *   the trailing block, pinned by the SAME integration file's
+ *   `stdout.endsWith(RESUME_SCOPE_CLOSURE + "\n")` REGRESSION assertion,
+ *   predating this task. The `multi_actor` branch never appends the floor
+ *   (D10) — only `RESUME_SCOPE_CLOSURE`, unchanged from before this task.
  * @param resume - A `SessionService.resume` result.
- * @returns `"(no handoff recorded)"` when `!resume.found`; otherwise the
- *   rendered ticket text followed by `RESUME_SCOPE_CLOSURE`.
+ * @returns `"(no handoff recorded)"` when `!resume.found`; a multi-actor
+ *   result ending in `RESUME_SCOPE_CLOSURE`; otherwise a single-record ticket
+ *   ending in `RESUME_COVERAGE_FLOOR` then `RESUME_SCOPE_CLOSURE`.
  */
 export function renderResumeFeed(resume: ResumeResult): string {
   if (!resume.found) {
@@ -338,7 +375,12 @@ export function renderResumeFeed(resume: ResumeResult): string {
   if (record === undefined) {
     return "(no handoff recorded)";
   }
-  return [renderResumeRecord(record), renderReadinessPointer(resume.readiness), RESUME_SCOPE_CLOSURE]
+  return [
+    renderResumeRecord(record),
+    renderReadinessPointer(resume.readiness),
+    RESUME_COVERAGE_FLOOR,
+    RESUME_SCOPE_CLOSURE,
+  ]
     .filter((s) => s !== "")
     .join("\n\n");
 }
