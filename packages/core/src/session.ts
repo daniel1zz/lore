@@ -37,10 +37,39 @@
  *     `BootstrapReport` itself, D1's "do not touch the full report's
  *     schema/shape" constraint) is the ONE exception: a seat's resume hint
  *     derives from the session's OWN worktree branch (SPEC-057), not a
- *     corpus-wide guess, so it is retained (D2).
+ *     corpus-wide guess, so it is retained (D2). The payload's literal FIRST
+ *     key — before `resume_hint` itself — is now `scope_declaration`
+ *     (spec-context-provenance-injected-corpus-global-state-and-a D1):
+ *     always `BOOTSTRAP_SCOPE_DECLARATION`, never dropped by the trimmer and
+ *     never mid-sliced. Degenerate case: when the declaration's own length
+ *     alone meets or exceeds `budgets.charBudget`, the normal pipeline is
+ *     skipped entirely and the return is the minimal
+ *     `{scope_declaration, omitted (zeroed), budget_exceeded: true}` — a
+ *     payload whose boundary is unstated is strictly worse than one carrying
+ *     a boundary and no data.
  *   - bootstrapInjectionSchema / BootstrapInjection — the projection's OWN Zod
  *     schema + type (SPEC-080(bootstrap-injection) §Module Boundary) — never a
- *     patch on `bootstrapReportSchema`.
+ *     patch on `bootstrapReportSchema`. Validates the ORDINARY (non-degenerate)
+ *     shape only — see {@link buildBootstrapInjection}'s own doc for why the
+ *     rare degenerate-case return is a deliberate, documented gap from this
+ *     schema (same accepted-gap precedent as the D8 OCP unknown-field escape
+ *     hatch on `BootstrapInjection` itself).
+ *   - BOOTSTRAP_SCOPE_DECLARATION / REQUIRED_DISCLAIMER_TOKENS — the injection
+ *     payload's leading self-description and the disclaimer obligations it
+ *     discharges (D1). BOOTSTRAP_FRAMING_LINE — the boundary line
+ *     `lore bootstrap --injection` prints binary-side (D2, sibling T2).
+ *     RESUME_SCOPE_CLOSURE — the resume ticket's scope-closure block (D3,
+ *     sibling T3), naming every `BOOTSTRAP_INJECTION_KNOWN_KEYS` member as
+ *     outside a ticket's scope. SOURCE_CATEGORY_TOKENS — the three source
+ *     categories (pasted ticket / session-start injection / this-turn query)
+ *     a status report must distinguish (D4, sibling T4). Every AC over these
+ *     constants asserts identity or exhaustive-set membership, never a
+ *     remembered substring (D6).
+ *   - BOOTSTRAP_INJECTION_KNOWN_KEYS — now exported (previously module-private)
+ *     so `RESUME_SCOPE_CLOSURE` above, and sibling tasks' own tests, can derive
+ *     the "every injected field" name list from this ONE set rather than a
+ *     hand-copied duplicate that can silently drift out of sync with the
+ *     projection contract.
  *
  * Invariants:
  *   - No IO, no wall-clock reads, no randomness — `renderHandoffContent` is deterministic:
@@ -64,6 +93,13 @@
  *     duplication is the exact bug class SPEC-080(bootstrap-injection) fixes).
  *     It NEVER mid-JSON-slices its output — an over-budget payload with nothing
  *     left to drop returns intact with `budget_exceeded: true` instead.
+ *   - The leading `scope_declaration` field (spec-context-provenance-injected-corpus-global-state-and-a
+ *     D1) is NEVER a candidate for the char-budget drop loop and NEVER
+ *     mid-sliced — it is the one field whose absence would change the
+ *     meaning of every other field. The one narrow exception is the
+ *     degenerate short-circuit (declaration length alone >= `charBudget`),
+ *     which returns the declaration UNTOUCHED alongside a minimal ledger —
+ *     it still never slices or drops the declaration itself.
  *
  * Source: SPEC-041 §3 D2, D3; SPEC-042 §Design Decisions D1;
  * SPEC-080(bootstrap-injection; corpus slug
@@ -71,7 +107,10 @@
  * Contract, §Public Interface, §Design Decisions D1-D8;
  * spec-session-start-handoff-neutrality-injection-drops-resume §Design
  * Decisions D1, D2 (resume_hint dropped from the injection except for a
- * seat-scoped session).
+ * seat-scoped session);
+ * spec-context-provenance-injected-corpus-global-state-and-a §Design
+ * Decisions D1 (leading scope declaration + degenerate case), D6 (no AC may
+ * assert against remembered wording).
  */
 
 import { z } from "zod";
@@ -552,8 +591,14 @@ export type BootstrapReport = z.infer<typeof bootstrapReportSchema>;
  * set — including a schema-known-but-unlisted field like `seat_unresolved`,
  * not only a genuinely future one — is "unknown" for projection purposes and
  * gets appended between `corpus` and `omitted` in original report order (D8).
+ *
+ * Exported (spec-context-provenance-injected-corpus-global-state-and-a D3,
+ * D4) so downstream constants/tests can derive "every injected field" from
+ * this ONE set — see {@link RESUME_SCOPE_CLOSURE} below — rather than a
+ * hand-copied field list that can silently drift out of sync with this
+ * projection contract.
  */
-const BOOTSTRAP_INJECTION_KNOWN_KEYS: ReadonlySet<string> = new Set([
+export const BOOTSTRAP_INJECTION_KNOWN_KEYS: ReadonlySet<string> = new Set([
   "resume_hint",
   "my_claims",
   "active_sessions",
@@ -574,6 +619,121 @@ const BOOTSTRAP_INJECTION_KNOWN_KEYS: ReadonlySet<string> = new Set([
   // own conditional handling below instead.
   "archive_candidates",
 ]);
+
+// ─── Scope Provenance Constants (spec-context-provenance-injected-corpus-global-state-and-a D1-D4) ───
+//
+// The 2026-07-30 incident this spec fixes: a corpus-global bootstrap
+// injection and a user-pasted single-handoff resume ticket landed in the
+// same context window with neither declaring its own scope, so a consumer
+// merged them and recommended two actions wholly outside the pasted
+// ticket's scope. Prose defenses (§FEED governance rule) already existed
+// and held — they didn't stop the trespass, which is what proves prose
+// recall is the wrong layer. These constants make scope self-describing
+// DATA instead: identity-asserted, never a remembered paraphrase (D6).
+
+// reason: each disclaimer phrase is defined exactly ONCE, as a named
+// binding — both REQUIRED_DISCLAIMER_TOKENS and BOOTSTRAP_SCOPE_DECLARATION
+// below are assembled from these same bindings (never a hand-typed
+// duplicate), so the declaration and the array the AC iterates against it
+// can never drift apart.
+const DISCLAIMER_TOKEN_GLOBAL = "corpus-global";
+const DISCLAIMER_TOKEN_ALL_PLANS = "every plan";
+const DISCLAIMER_TOKEN_ALL_ACTORS = "every actor";
+const DISCLAIMER_TOKEN_ALL_SESSIONS = "every concurrent session";
+const DISCLAIMER_TOKEN_NOT_WORKLIST = "NOT this session's worklist";
+const DISCLAIMER_TOKEN_NOT_TICKET = "NOT any handoff ticket's scope";
+
+/**
+ * Lone, unambiguous substrings {@link BOOTSTRAP_SCOPE_DECLARATION} MUST
+ * contain — one per disclaimer obligation the declaration discharges
+ * (spec-context-provenance-injected-corpus-global-state-and-a D1). Exported
+ * so AC-CP-1 (and this module's own tests) assert
+ * `BOOTSTRAP_SCOPE_DECLARATION.includes(token)` per member, rather than a
+ * remembered multi-word phrase — a contiguous-substring assumption built
+ * from memory silently degrades to a no-match, one of the five measured
+ * false-oracle vectors this repo's CLAUDE.md dogfood-eval-log tracks.
+ * Adding a fourth+ obligation means adding a token here AND weaving it into
+ * the declaration below — the AC fails until both happen.
+ */
+export const REQUIRED_DISCLAIMER_TOKENS: readonly string[] = [
+  DISCLAIMER_TOKEN_GLOBAL,
+  DISCLAIMER_TOKEN_ALL_PLANS,
+  DISCLAIMER_TOKEN_ALL_ACTORS,
+  DISCLAIMER_TOKEN_ALL_SESSIONS,
+  DISCLAIMER_TOKEN_NOT_WORKLIST,
+  DISCLAIMER_TOKEN_NOT_TICKET,
+];
+
+/**
+ * The text carried as the bootstrap injection payload's FIRST key
+ * (`scope_declaration`, {@link buildBootstrapInjection}) —
+ * spec-context-provenance-injected-corpus-global-state-and-a D1. Declares
+ * that the payload is a corpus-global snapshot spanning every
+ * plan/actor/concurrent session, that it is NOT the session's own worklist,
+ * and that it is NOT any pasted handoff ticket's scope. Built directly from
+ * {@link REQUIRED_DISCLAIMER_TOKENS}'s own bindings (never a hand-typed
+ * duplicate of them) so the two can never diverge.
+ *
+ * @invariant Every AC/test asserts this by `===` identity against the
+ *   constant, never a remembered substring (D6).
+ * @invariant Participates in {@link buildBootstrapInjection}'s char budget
+ *   but is NEVER a candidate for its drop loop and NEVER mid-sliced — see
+ *   that function's own doc for the degenerate case this forces when the
+ *   budget can't even fit this string alone.
+ */
+export const BOOTSTRAP_SCOPE_DECLARATION =
+  `SCOPE: this payload is a ${DISCLAIMER_TOKEN_GLOBAL} snapshot spanning ${DISCLAIMER_TOKEN_ALL_PLANS}, ` +
+  `${DISCLAIMER_TOKEN_ALL_ACTORS}, and ${DISCLAIMER_TOKEN_ALL_SESSIONS}. It is ${DISCLAIMER_TOKEN_NOT_WORKLIST}. ` +
+  `It is ${DISCLAIMER_TOKEN_NOT_TICKET}.`;
+
+/**
+ * The human/AI-readable boundary line `lore bootstrap --injection` prints
+ * alongside the payload (spec-context-provenance-injected-corpus-global-state-and-a
+ * D2, sibling T2) — emitted BINARY-side so it ships with every `lore`
+ * upgrade and can never diverge from an independently-updated hook copy
+ * (the exact drift class SPEC-083 already retired for governance-snapshot
+ * prose). Exported here so T2's CLI command and its own AC (AC-CP-3) can
+ * assert stdout by `===` identity against this one constant rather than
+ * re-typing the line at the call site.
+ */
+export const BOOTSTRAP_FRAMING_LINE =
+  "Lore bootstrap payload below is corpus-global state — not your worklist, not any handoff ticket's scope. See its scope_declaration field before acting on anything below.";
+
+/**
+ * The resume ticket's scope-closure boundary block (`lore feed
+ * session-resume`, sibling T3) —
+ * spec-context-provenance-injected-corpus-global-state-and-a D3. States that
+ * the ticket's scope is exactly the plan / modified files / next steps it
+ * printed, and names every corpus-global injected field — drawn from
+ * {@link BOOTSTRAP_INJECTION_KNOWN_KEYS} itself, NEVER a hand-copied field
+ * list that can drift out of sync with the projection contract — as OUTSIDE
+ * that scope.
+ *
+ * @invariant Field names are joined in the set's own (insertion) iteration
+ *   order — deterministic; this module still performs no IO, no
+ *   wall-clock reads, no randomness.
+ * @invariant A newly added injected field automatically fails AC-CP-4 (T3)
+ *   until this constant is regenerated to include it — since it is derived,
+ *   not hand-maintained, "regenerated" here just means re-running this
+ *   module (no manual edit needed).
+ */
+export const RESUME_SCOPE_CLOSURE =
+  "SCOPE CLOSURE: this ticket's scope is exactly the plan, modified files, and next steps printed above. " +
+  `It is NOT any of the corpus-global bootstrap injection fields: ${Array.from(BOOTSTRAP_INJECTION_KNOWN_KEYS).join(", ")}.`;
+
+/**
+ * The three source categories a status report must distinguish whenever it
+ * mixes corpus-global injected state with narrower context
+ * (spec-context-provenance-injected-corpus-global-state-and-a D4, sibling
+ * T4's FEED governance rule update). Exported as tokens — not prose — so
+ * the governance-rule AC (AC-CP-5) can iterate and assert each is named,
+ * rather than accept a paraphrase that silently drops one.
+ */
+export const SOURCE_CATEGORY_TOKENS: readonly string[] = [
+  "pasted ticket",
+  "session-start injection",
+  "this-turn query",
+];
 
 /**
  * The single typed omission ledger (SPEC-080(bootstrap-injection) D2) — every drop from ANY
@@ -615,8 +775,22 @@ export type BootstrapInjectionOmitted = z.infer<typeof bootstrapInjectionOmitted
  *   an ordinary session's payload omits the key entirely, a seat-scoped
  *   session's payload keeps it (`null` when the seat's own plan has no
  *   handoffs yet).
+ * @invariant `scope_declaration` is REQUIRED and unconditional — it is the
+ *   ONE field present on every ordinary call regardless of `seatScoped`
+ *   (spec-context-provenance-injected-corpus-global-state-and-a D1). This
+ *   schema validates the ORDINARY shape only: the rare degenerate-case
+ *   return (declaration length alone >= `budgets.charBudget`) is a
+ *   deliberately narrower shape — `{scope_declaration, omitted,
+ *   budget_exceeded}` with every other field absent — that this schema will
+ *   correctly REJECT on `.parse()`. That is intentional, not a bug: no
+ *   production code path parses `buildBootstrapInjection`'s output through
+ *   this schema at runtime (it exists for shape documentation + the
+ *   ordinary-path round-trip test), so the gap costs nothing today and
+ *   mirrors the already-accepted D8 OCP unknown-field gap on
+ *   {@link BootstrapInjection} below.
  */
 export const bootstrapInjectionSchema = z.object({
+  scope_declaration: z.string(),
   resume_hint: bootstrapResumeHintSchema.nullable().optional(),
   my_claims: z.array(bootstrapMyClaimSchema),
   active_sessions: z.array(readySessionSchema),
@@ -652,6 +826,17 @@ export const bootstrapInjectionSchema = z.object({
  * index signature that would weaken every other field's precision) — see
  * {@link buildBootstrapInjection}'s own cast comment for why that gap is
  * accepted rather than worked around.
+ *
+ * @invariant A SECOND, narrower accepted gap (spec-context-provenance-injected-corpus-global-state-and-a
+ *   D1): the rare degenerate-case return value —
+ *   `{scope_declaration, omitted, budget_exceeded: true}` with every other
+ *   field absent — is also cast through this type rather than modeled as a
+ *   union. A union would be the "more correct" static shape, but every
+ *   existing consumer of this type (the CLI command, the session-service
+ *   test suite) destructures specific ordinary-path fields WITHOUT
+ *   narrowing; a union would force those consumers — outside this module —
+ *   to add dead narrowing code for a branch they never hit. Kept as a cast,
+ *   same accepted-gap precedent as the D8 OCP note above.
  */
 export type BootstrapInjection = z.infer<typeof bootstrapInjectionSchema>;
 
@@ -693,7 +878,21 @@ export interface BootstrapInjectionResult {
  * `omitted` ledger.
  *
  * Pipeline (each stage feeds the next; nothing is trimmed twice):
- *  0. `resume_hint` is included ONLY when `seatScoped` is `true`
+ *  -1. DEGENERATE SHORT-CIRCUIT (spec-context-provenance-injected-corpus-global-state-and-a
+ *     D1): if `BOOTSTRAP_SCOPE_DECLARATION.length >= budgets.charBudget` —
+ *     the budget can't even fit the declaration alone — every stage below
+ *     is skipped and this function returns the minimal
+ *     `{scope_declaration, omitted (all-zero), budget_exceeded: true}`
+ *     immediately. The zeroed ledger is deliberate, not a placeholder: the
+ *     per-field counting pipeline never ran in this branch, so a nonzero
+ *     count would be fabricated rather than measured — `budget_exceeded:
+ *     true` is the caller's signal that every other field is genuinely
+ *     absent, not merely empty.
+ *  0. `scope_declaration` (the leading key, D1) is ALWAYS set to
+ *     `BOOTSTRAP_SCOPE_DECLARATION` — before `resume_hint` itself. It
+ *     participates in the char-budget measurement below but is NEVER a
+ *     candidate for the drop loop and NEVER mid-sliced.
+ *  0.5. `resume_hint` is included ONLY when `seatScoped` is `true`
  *     (spec-session-start-handoff-neutrality D1, D2) — an ordinary session's
  *     payload omits the key entirely (the user is the router; an ambient
  *     "resume this" guess misdirects every session but one). A seat-scoped
@@ -736,25 +935,49 @@ export interface BootstrapInjectionResult {
  *   `json` is its compact (no-whitespace) serialization, `json.length` at
  *   most `budgets.charBudget` unless `payload.budget_exceeded` is `true`.
  * @example
- * // Ordinary session (default) — resume_hint key is entirely absent.
+ * // Ordinary session (default) — resume_hint key is entirely absent;
+ * // scope_declaration leads (spec-context-provenance-injected-corpus-global-state-and-a D1).
  * const { payload, json } = buildBootstrapInjection(report, {
  *   maxActivePlans: 5, maxHandoffs: 3, maxPendingSlugs: 3, charBudget: 8000,
  * });
  * Object.keys(payload);
- * // => ["my_claims","active_sessions","armed_gates","root",
+ * // => ["scope_declaration","my_claims","active_sessions","armed_gates","root",
  * //     "pending_reviews","active_plans","latest_handoffs","corpus","omitted"]
  * @example
- * // Seat-scoped session — resume_hint retained at its contract position.
+ * // Seat-scoped session — resume_hint retained immediately after scope_declaration.
  * const seatResult = buildBootstrapInjection(report, budgets, true);
  * Object.keys(seatResult.payload);
- * // => ["resume_hint","my_claims","active_sessions","armed_gates","root",
+ * // => ["scope_declaration","resume_hint","my_claims","active_sessions","armed_gates","root",
  * //     "pending_reviews","active_plans","latest_handoffs","corpus","omitted"]
+ * @example
+ * // Degenerate case — charBudget can't even fit the declaration alone.
+ * const tiny = buildBootstrapInjection(report, { ...budgets, charBudget: 10 });
+ * Object.keys(tiny.payload); // => ["scope_declaration","omitted","budget_exceeded"]
+ * tiny.payload.budget_exceeded; // => true
  */
 export function buildBootstrapInjection(
   report: BootstrapReport,
   budgets: BootstrapInjectionBudgets,
   seatScoped = false,
 ): BootstrapInjectionResult {
+  // reason: degenerate short-circuit (spec-context-provenance-injected-corpus-global-state-and-a
+  // D1) — when the budget can't even fit the declaration alone, no amount
+  // of trimming the fields below can bring the payload under budget while
+  // still carrying the declaration. Skip the whole normal pipeline (steps
+  // 0-6 in this function's own doc) and return the minimal, honest shape
+  // instead: the declaration UNCUT, plus a zeroed ledger (this branch never
+  // runs the per-field counting pipeline, so any nonzero count here would
+  // be fabricated, not measured) and `budget_exceeded: true` so the caller
+  // can tell every other field is genuinely absent, not merely empty.
+  if (BOOTSTRAP_SCOPE_DECLARATION.length >= budgets.charBudget) {
+    const degeneratePayload: Record<string, unknown> = {
+      scope_declaration: BOOTSTRAP_SCOPE_DECLARATION,
+      omitted: { active_plans: 0, latest_handoffs: 0, pending_slugs: 0, budget_drops: 0 },
+      budget_exceeded: true,
+    };
+    return { payload: degeneratePayload as unknown as BootstrapInjection, json: JSON.stringify(degeneratePayload) };
+  }
+
   const armedGates = report.armed_gates.map((gate) => gate.checkpoint);
 
   const cappedPendingSlugs = report.pending_reviews.slugs.slice(0, budgets.maxPendingSlugs);
@@ -779,12 +1002,20 @@ export function buildBootstrapInjection(
   // (the D8 OCP unknown-field escape hatch) — cast to the public type once
   // construction is complete, right before returning.
   //
-  // reason: `resume_hint` is the FIRST key assigned only when `seatScoped` —
-  // conditionally spreading it in BEFORE the rest of the literal preserves
-  // its contract position-1 slot when present, while an ordinary session's
-  // payload starts at `my_claims` with the key entirely absent (never
-  // present-as-null) — spec-session-start-handoff-neutrality D1, D2.
+  // reason: `scope_declaration` is unconditionally the FIRST key assigned
+  // below (spec-context-provenance-injected-corpus-global-state-and-a D1) —
+  // it must lead even `resume_hint`, since it is the boundary a consumer
+  // reading top-down must meet before any data, including the seat-scoped
+  // resume pointer.
+  //
+  // reason: `resume_hint` is the FIRST key assigned after the declaration,
+  // only when `seatScoped` — conditionally spreading it in BEFORE the rest
+  // of the literal preserves its contract position after `scope_declaration`
+  // when present, while an ordinary session's payload continues at
+  // `my_claims` with the key entirely absent (never present-as-null) —
+  // spec-session-start-handoff-neutrality D1, D2.
   const payload: Record<string, unknown> = {
+    scope_declaration: BOOTSTRAP_SCOPE_DECLARATION,
     ...(seatScoped ? { resume_hint: report.resume_hint } : {}),
     my_claims: report.my_claims,
     active_sessions: report.active_sessions,
