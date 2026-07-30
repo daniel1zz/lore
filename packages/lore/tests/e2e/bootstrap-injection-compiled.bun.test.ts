@@ -70,7 +70,6 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { BOOTSTRAP_FRAMING_LINE } from "@lore/core";
 import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
 
 // ─── Path / spawn setup ─────────────────────────────────────────────────────
@@ -114,29 +113,6 @@ function parseSlug(stdout: string): string {
     throw new Error(`could not parse slug from create output: ${stdout}`);
   }
   return slug;
-}
-
-/**
- * `--injection`'s stdout is TWO lines (spec-context-provenance-injected-corpus-global-state-and-a
- * D2): the `BOOTSTRAP_FRAMING_LINE` scope-boundary constant, then the compact
- * JSON payload — printed as two separate `console.log` calls by
- * `commands/bootstrap.ts`. Splits them so every JSON-shape assertion below
- * keeps exercising exactly the payload it always has; the boundary line
- * itself is a separate stdout-shape concern, pinned once (the first HAPPY
- * test) rather than re-asserted in every case in this file.
- */
-function splitInjectionStdout(rawStdout: string): { framingLine: string; json: string } {
-  const trimmed = rawStdout.trim();
-  const newlineIdx = trimmed.indexOf("\n");
-  if (newlineIdx === -1) {
-    throw new Error(
-      `expected --injection stdout to carry a framing line followed by JSON on a second line, got: ${trimmed}`,
-    );
-  }
-  return {
-    framingLine: trimmed.slice(0, newlineIdx),
-    json: trimmed.slice(newlineIdx + 1),
-  };
 }
 
 interface SeededCorpus {
@@ -325,22 +301,15 @@ describe("AC-080-3: compiled dist/lore bootstrap --injection / --json default-bu
     }
   });
 
-  it("HAPPY: --injection prints the framing line then compact JSON in literal contract key order with the omitted ledger, dead plan excluded", () => {
+  it("HAPPY: --injection prints compact JSON in literal contract key order with the omitted ledger, dead plan excluded", () => {
     const result = runLore(["bootstrap", "--injection"], dir);
     expect(result.exitCode).toBe(0);
 
-    // spec-context-provenance-injected-corpus-global-state-and-a D2 — line 1
-    // is the BOOTSTRAP_FRAMING_LINE scope-boundary constant, emitted
-    // binary-side (never authored by the SessionStart hook) so it ships with
-    // every `lore` upgrade. Pinned by `===` identity, never a remembered
-    // substring.
-    const { framingLine, json: raw } = splitInjectionStdout(result.stdout);
-    expect(framingLine).toBe(BOOTSTRAP_FRAMING_LINE);
-
+    const raw = result.stdout.trim();
     const parsed = JSON.parse(raw) as Record<string, unknown>;
 
     // Compact serialization: re-stringifying the parsed object with no
-    // indentation reproduces the exact JSON-line string — proves both "no
+    // indentation reproduces the exact stdout string — proves both "no
     // pretty-printing whitespace" AND "key order is preserved end to end"
     // in one assertion (JS objects/JSON.stringify iterate string keys in
     // insertion order).
@@ -429,7 +398,7 @@ describe("AC-080-3: compiled dist/lore bootstrap --injection / --json default-bu
     const result = runLore(["bootstrap", "--injection", "--seat-branch", `plan/${shortSlug}`], dir);
     expect(result.exitCode).toBe(0);
 
-    const { json: raw } = splitInjectionStdout(result.stdout);
+    const raw = result.stdout.trim();
     const parsed = JSON.parse(raw) as { resume_hint?: { plan_slug: string | null; handoff_slug: string } };
 
     expect(Object.keys(parsed)).toEqual([...SEAT_SCOPED_INJECTION_CONTRACT_ORDER]);
@@ -449,7 +418,7 @@ describe("AC-080-3: compiled dist/lore bootstrap --injection / --json default-bu
     );
     expect(result.exitCode).toBe(0);
 
-    const { json: raw } = splitInjectionStdout(result.stdout);
+    const raw = result.stdout.trim();
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     // reason: an unresolvable seat branch also sets `seat_unresolved: true`
     // on the report (SPEC-057 D3), which reaches the injection via the D8
@@ -493,8 +462,7 @@ describe("AC-080-6: workflow.bootstrap_injection config knobs reach the projecti
     const result = runLore(["bootstrap", "--injection"], dir);
     expect(result.exitCode).toBe(0);
 
-    const { json: raw } = splitInjectionStdout(result.stdout);
-    const parsed = JSON.parse(raw) as {
+    const parsed = JSON.parse(result.stdout.trim()) as {
       active_plans: unknown[];
       latest_handoffs: unknown[];
       pending_reviews: { count: number; slugs: string[] };
@@ -521,12 +489,8 @@ describe("AC-080-6: workflow.bootstrap_injection config knobs reach the projecti
     expect(parsed.omitted.pending_slugs).toBe(5);
 
     // char_budget: 2000 — this fixture's capped payload is well under 2000
-    // chars, so the budget rule never needs to drop a whole entry. The
-    // char_budget knob bounds ONLY the JSON payload buildBootstrapInjection
-    // computes — spec-context-provenance-injected-corpus-global-state-and-a
-    // D2's framing line is a separate, CLI-level stdout line prepended AFTER
-    // that computation, so it is deliberately excluded from this measurement.
-    expect(raw.length).toBeLessThanOrEqual(2000);
+    // chars, so the budget rule never needs to drop a whole entry.
+    expect(result.stdout.trim().length).toBeLessThanOrEqual(2000);
     expect(parsed.omitted.budget_drops).toBe(0);
     expect(parsed.budget_exceeded).toBeUndefined();
   });
@@ -599,7 +563,7 @@ describe("AC-097-4: archive_candidates injection surfacing (spec-lifecycle-archi
     const result = runLore(["bootstrap", "--injection"], dir);
     expect(result.exitCode).toBe(0);
 
-    const { json: raw } = splitInjectionStdout(result.stdout);
+    const raw = result.stdout.trim();
     const parsed = JSON.parse(raw) as Record<string, unknown>;
 
     const corpusIdx = Object.keys(parsed).indexOf("corpus");

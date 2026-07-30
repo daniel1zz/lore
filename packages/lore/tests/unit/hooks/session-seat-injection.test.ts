@@ -166,6 +166,31 @@ function parseAdditionalContext(stdout: string): string {
   return parsed?.hookSpecificOutput?.additionalContext ?? "";
 }
 
+/**
+ * Finds a logged `lore` invocation by its EXACT leading argv tokens (e.g.
+ * `["bootstrap"]` or `["governance", "--seat-briefing"]`) — never a
+ * substring match on the raw log line. Phase E's `governance
+ * bootstrap-framing` spawn
+ * (spec-context-provenance-injected-corpus-global-state-and-a D2) shares the
+ * substring "bootstrap" with the `bootstrap` subcommand's own invocation,
+ * and "governance" with every other governance-topic call (bare
+ * `governance`, `governance --seat-briefing`) — a naive `line.includes(...)`
+ * filter silently grabs the wrong logged line once more than one candidate
+ * exists (this repo's own documented contiguous-substring false-oracle
+ * vector). Log format is `<cwd>\t<space-joined argv>` (see `makeLoreStub`).
+ *
+ * @param log - Log lines, one per invocation (`makeLoreStub`'s format).
+ * @param argvPrefix - The exact leading argv tokens to match, in order.
+ * @returns The first matching line, or `undefined` if none match.
+ */
+function findLoreCall(log: readonly string[], argvPrefix: readonly string[]): string | undefined {
+  return log.find((line) => {
+    const argvStr = line.split("\t")[1] ?? "";
+    const tokens = argvStr.split(" ");
+    return argvPrefix.every((tok, i) => tokens[i] === tok);
+  });
+}
+
 // ─── HAPPY — linked worktree + binary answers governance --seat-briefing ──────
 
 describe("session-seat-injection — HAPPY", () => {
@@ -207,13 +232,13 @@ describe("session-seat-injection — HAPPY", () => {
     const log = readFileSync(logPath, "utf8").trim().split("\n");
 
     // Phase D's new spawn: `governance --seat-briefing` as a literal argv pair.
-    const governanceCall = log.find((line) => line.includes("governance"));
+    const governanceCall = findLoreCall(log, ["governance", "--seat-briefing"]);
     expect(governanceCall).toBeDefined();
     expect(governanceCall).toContain("governance --seat-briefing");
 
     // Phase E's `lore bootstrap` spawn must run with cwd = main checkout,
     // not the worktree — the corpus lives there.
-    const bootstrapCall = log.find((line) => line.includes("bootstrap"));
+    const bootstrapCall = findLoreCall(log, ["bootstrap"]);
     expect(bootstrapCall).toBeDefined();
     expect(bootstrapCall!.startsWith(`${mainRepoReal}\t`)).toBe(true);
   });
@@ -279,7 +304,7 @@ describe("session-seat-injection — BOUNDARY", () => {
 
     expect(result.status).toBe(0);
     const log = readFileSync(logPath, "utf8").trim().split("\n");
-    const governanceCall = log.find((line) => line.includes("governance"));
+    const governanceCall = findLoreCall(log, ["governance", "--seat-briefing"]);
     expect(governanceCall).toBeDefined();
     expect(governanceCall!.startsWith(`${mainRepoReal}\t`)).toBe(true);
   });
@@ -484,7 +509,7 @@ function runHookInSeatWorktree(branch: string): { ctx: string; bootstrapCall: st
   expect(result.status).toBe(0);
   const ctx = parseAdditionalContext(result.stdout!);
   const log = readFileSync(logPath, "utf8").trim().split("\n");
-  const bootstrapCall = log.find((line) => line.includes("bootstrap"));
+  const bootstrapCall = findLoreCall(log, ["bootstrap"]);
   return { ctx, bootstrapCall };
 }
 
@@ -514,7 +539,7 @@ describe("session-seat-injection — SPEC-057 seat signal on lore bootstrap (AC-
 
     expect(result.status).toBe(0);
     const log = readFileSync(logPath, "utf8").trim().split("\n");
-    const bootstrapCall = log.find((line) => line.includes("bootstrap"));
+    const bootstrapCall = findLoreCall(log, ["bootstrap"]);
     expect(bootstrapCall).toBeDefined();
     expect(bootstrapCall).not.toContain("--seat-branch");
   });

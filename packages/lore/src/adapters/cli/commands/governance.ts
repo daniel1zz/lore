@@ -2,13 +2,23 @@
  * `lore governance [topic]` — SPEC-083 D1 origin, extended by
  * spec-project-claude-md-content-contract-governance-injected §Design
  * Decisions D6 into a positional TOPIC REGISTRY: `corpus-workflow` (default,
- * bare `lore governance`) | `seat-briefing` | `claude-md`. Prints the
- * resolved topic's governance prose asset verbatim to stdout, exit 0.
+ * bare `lore governance`) | `seat-briefing` | `claude-md` | `bootstrap-framing`
+ * (spec-context-provenance-injected-corpus-global-state-and-a D2). Prints the
+ * resolved topic's governance prose verbatim to stdout, exit 0.
  *
- * Registry (topic → repo-relative path under `assetsRoot`):
- *   - `corpus-workflow` (default) → `assets/governance/corpus-workflow.md`
- *   - `seat-briefing`             → `assets/governance/seat-briefing.md`
- *   - `claude-md`                 → `assets/governance/claude-md-contract.md`
+ * Registry (topic → source):
+ *   - `corpus-workflow`  (default) → file, `assets/governance/corpus-workflow.md`
+ *   - `seat-briefing`              → file, `assets/governance/seat-briefing.md`
+ *   - `claude-md`                  → file, `assets/governance/claude-md-contract.md`
+ *   - `bootstrap-framing`          → IN-MEMORY constant, `BOOTSTRAP_FRAMING_LINE`
+ *     (`@lore/core`) — the ONE topic with no backing asset file. It exists so
+ *     the SessionStart hook's Phase E can obtain the bootstrap-injection
+ *     scope-boundary line the SAME way Phase C/D already obtain their own
+ *     topics (one spawned verb, zero installed-file drift surface), even
+ *     though the line itself is a short constant rather than a governance
+ *     document. `GOVERNANCE_TOPIC_ASSETS` deliberately has NO entry for this
+ *     topic — `run()` special-cases it before ever touching `assetsRoot` or
+ *     `readGovernanceAsset`.
  *
  * Legacy `--seat-briefing` boolean flag (SPEC-085 D1) is now a DEPRECATED
  * ALIAS for the positional form `lore governance seat-briefing` — same byte
@@ -57,48 +67,82 @@
  *   - Never a silent empty print — an unreadable asset (missing file,
  *     permission error, nonexistent `assetsRoot`) surfaces as a
  *     `VALIDATION_ERROR` through the normal `exitCode()`/`formatError()`
- *     pipeline (exit 4), never a swallowed empty stdout.
+ *     pipeline (exit 4), never a swallowed empty stdout. `bootstrap-framing`
+ *     cannot hit this path at all — its content is a non-empty compile-time
+ *     constant, not a file read that can fail.
  *   - stdout is written via `writeAllSync` (the SAME non-blocking-fd1-safe
  *     primitive `installSyncStdio()` wires onto `console.*`) with ZERO added
  *     bytes (no trailing newline injection) — the hook's byte-parity
- *     contract (AC-083-1: stdout byte-identical to the source file) depends
- *     on this command never touching `console.log` (which appends `\n`).
+ *     contract (AC-083-1: stdout byte-identical to the source file; for
+ *     `bootstrap-framing`, byte-identical to the `BOOTSTRAP_FRAMING_LINE`
+ *     constant, which itself carries no trailing newline — unlike every
+ *     file-backed topic's asset) depends on this command never touching
+ *     `console.log` (which appends `\n`).
  *   - A usage error (multi-topic conflict, unknown topic name) is written to
  *     stderr and exits 2 BEFORE any asset is read — never a partial print.
  *
- * Side-effect class: IO (one synchronous file read via `node:fs`, one
- *   synchronous stdout write via `writeAllSync`, occasional stderr writes for
- *   deprecation/usage-error text) — no corpus, no network.
+ * Side-effect class: IO for the three file-backed topics (one synchronous
+ *   file read via `node:fs`, one synchronous stdout write via `writeAllSync`,
+ *   occasional stderr writes for deprecation/usage-error text) — no corpus,
+ *   no network. `bootstrap-framing` is PURE plus the same stdout write (no
+ *   file read at all).
  *
  * Source: SPEC-083 §Design Decisions D1;
  *   spec-project-claude-md-content-contract-governance-injected §Design
- *   Decisions D6.
+ *   Decisions D6;
+ *   spec-context-provenance-injected-corpus-global-state-and-a §Design
+ *   Decisions D2.
  */
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineCommand } from "citty";
-import type { LoreError } from "@lore/core";
+import { BOOTSTRAP_FRAMING_LINE, type LoreError } from "@lore/core";
 import { resolveAssetsRoot, type SetupPathContext } from "../setup-args.js";
 import { exitCode, formatError } from "../utils.js";
 import { writeAllSync } from "../stdio-sync.js";
 
 /** A registered `lore governance` topic name. */
-type GovernanceTopic = "corpus-workflow" | "seat-briefing" | "claude-md";
-
-/** Default topic when no positional/flag resolves one — SPEC-083 D1 back-compat. */
-const DEFAULT_GOVERNANCE_TOPIC: GovernanceTopic = "corpus-workflow";
+type GovernanceTopic = "corpus-workflow" | "seat-briefing" | "claude-md" | "bootstrap-framing";
 
 /**
- * Topic → repo-relative asset path registry (D6). SSOT for every topic this
- * command can serve; adding a topic means adding one entry here.
+ * Default topic when no positional/flag resolves one — SPEC-083 D1
+ * back-compat. Typed as the file-backed subset (never `bootstrap-framing`)
+ * so it can index `GOVERNANCE_TOPIC_ASSETS` directly without narrowing.
  */
-const GOVERNANCE_TOPIC_ASSETS: Record<GovernanceTopic, string> = {
+const DEFAULT_GOVERNANCE_TOPIC: Exclude<GovernanceTopic, "bootstrap-framing"> = "corpus-workflow";
+
+/**
+ * Topic → repo-relative asset path registry (D6). SSOT for every FILE-BACKED
+ * topic this command can serve; adding a file-backed topic means adding one
+ * entry here. `bootstrap-framing` deliberately has NO entry — it resolves
+ * from the in-memory `BOOTSTRAP_FRAMING_LINE` constant instead (see
+ * `KNOWN_GOVERNANCE_TOPICS` for the full topic set including it).
+ */
+const GOVERNANCE_TOPIC_ASSETS: Record<Exclude<GovernanceTopic, "bootstrap-framing">, string> = {
   "corpus-workflow": "governance/corpus-workflow.md",
   "seat-briefing": "governance/seat-briefing.md",
   "claude-md": "governance/claude-md-contract.md",
 };
+
+/**
+ * Every registered topic name, file-backed or not — the SSOT for "is this a
+ * known topic" (the unknown-topic error path) and for that error message's
+ * listing. Kept separate from `GOVERNANCE_TOPIC_ASSETS` because that map's
+ * keys are deliberately incomplete (it excludes `bootstrap-framing`).
+ */
+const KNOWN_GOVERNANCE_TOPICS: readonly GovernanceTopic[] = [
+  "corpus-workflow",
+  "seat-briefing",
+  "claude-md",
+  "bootstrap-framing",
+];
+
+/** Type guard narrowing an arbitrary requested-topic string to a registered `GovernanceTopic`. */
+function isKnownGovernanceTopic(topic: string): topic is GovernanceTopic {
+  return (KNOWN_GOVERNANCE_TOPICS as readonly string[]).includes(topic);
+}
 
 /**
  * Deprecation line printed to stderr, EXACTLY once, when the legacy
@@ -189,14 +233,16 @@ export default defineCommand({
   meta: {
     name: "governance",
     description:
-      "Print a governance prose asset verbatim to stdout — bootstrap-stage, no corpus required. " +
-      "Topic registry: corpus-workflow (default) | seat-briefing | claude-md (D6). " +
+      "Print a governance prose topic verbatim to stdout — bootstrap-stage, no corpus required. " +
+      "Topic registry: corpus-workflow (default) | seat-briefing | claude-md (D6) | " +
+      "bootstrap-framing (spec-context-provenance-injected-corpus-global-state-and-a D2). " +
       "--seat-briefing is a deprecated alias for the positional `seat-briefing` form (SPEC-085 D1).",
   },
   args: {
     topic: {
       type: "positional",
-      description: "Governance topic to print: corpus-workflow (default) | seat-briefing | claude-md",
+      description:
+        "Governance topic to print: corpus-workflow (default) | seat-briefing | claude-md | bootstrap-framing",
       required: false,
     },
     "seat-briefing": {
@@ -224,14 +270,26 @@ export default defineCommand({
     let topic: GovernanceTopic;
     if (requestedTopic === undefined) {
       topic = DEFAULT_GOVERNANCE_TOPIC;
-    } else if (requestedTopic in GOVERNANCE_TOPIC_ASSETS) {
-      topic = requestedTopic as GovernanceTopic;
+    } else if (isKnownGovernanceTopic(requestedTopic)) {
+      topic = requestedTopic;
     } else {
-      const knownTopics = Object.keys(GOVERNANCE_TOPIC_ASSETS).join(", ");
+      const knownTopics = KNOWN_GOVERNANCE_TOPICS.join(", ");
       process.stderr.write(
         `Error: unknown governance topic "${requestedTopic}" (known topics: ${knownTopics})\n`,
       );
       process.exitCode = 2;
+      return;
+    }
+
+    // spec-context-provenance-injected-corpus-global-state-and-a D2 —
+    // `bootstrap-framing` is the ONE topic with no backing asset file: it
+    // serves the in-memory `BOOTSTRAP_FRAMING_LINE` constant directly, never
+    // touching `assetsRoot` / `readGovernanceAsset` (there is nothing to fail
+    // to read, so this branch can never reach the VALIDATION_ERROR path
+    // below). The legacy-flag deprecation line is irrelevant here — that
+    // flag only ever aliases `seat-briefing`.
+    if (topic === "bootstrap-framing") {
+      writeAllSync(1, BOOTSTRAP_FRAMING_LINE);
       return;
     }
 

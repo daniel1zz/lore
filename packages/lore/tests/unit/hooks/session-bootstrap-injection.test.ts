@@ -1,19 +1,18 @@
 /**
  * session-bootstrap-injection.test.ts —
- * spec-context-provenance-injected-corpus-global-state-and-a D2, AC-CP-3.
+ * spec-context-provenance-injected-corpus-global-state-and-a D2, AC-CP-10.
  *
  * Behavioral test for the SessionStart hook's Phase E bootstrap-injection
- * relay (`assets/hooks/session-start-resume.mjs`), dedicated to the two
- * behaviors this task's change (moving the "## Lore Bootstrap
- * (hook-injected)" header + "Corpus pointer set …" sentence out of the hook
- * and into the binary's own `BOOTSTRAP_FRAMING_LINE` stdout line) is most
- * likely to silently regress: the fail-open contract (missing binary /
- * non-zero exit / empty stdout) and the `INJECTION_BACKSTOP_CAP`
- * overflow-drop contract. Every case spawns the REAL checked-in hook file as
- * a `node` subprocess against throwaway mkdtemp directories + a
- * PATH-stubbed `lore` binary — never the repo's own working tree or its
- * live `.lore/` corpus (CLAUDE.md's "never write to the repo's own .lore/
- * from tests" rule; mirrors `session-seat-injection.test.ts` /
+ * relay (`assets/hooks/session-start-resume.mjs`), dedicated to the
+ * behaviors this task's change is most likely to silently regress: the
+ * fail-open contract of BOTH independent spawns (missing binary / non-zero
+ * exit / empty stdout, for the framing-line spawn AND the JSON-payload spawn
+ * separately), the `INJECTION_BACKSTOP_CAP` overflow-drop contract, and the
+ * outside-fence/inside-fence composition itself. Every case spawns the REAL
+ * checked-in hook file as a `node` subprocess against throwaway mkdtemp
+ * directories + a PATH-stubbed `lore` binary — never the repo's own working
+ * tree or its live `.lore/` corpus (CLAUDE.md's "never write to the repo's
+ * own .lore/ from tests" rule; mirrors `session-seat-injection.test.ts` /
  * `session-start-freshness.test.ts`'s established fixture pattern).
  *
  * Every fixture cwd is a plain directory with only a `.lore` marker
@@ -22,33 +21,47 @@
  * stays the byte-unchanged `['bootstrap', '--injection']` (no
  * `--seat-branch`), isolating every assertion below to Phase E alone.
  *
+ * Design corrected mid-task (spec v46): an earlier draft of this file (and
+ * of `commands/bootstrap.ts`) had `--injection` print the framing line as
+ * its own stdout line ahead of the JSON, requiring this hook to split one
+ * mixed stream. That broke SPEC-080 AC-080-3's bare-JSON `--injection`
+ * contract and was reverted — the framing line is instead served by a
+ * SEPARATE verb, `lore governance bootstrap-framing`, spawned independently
+ * exactly as Phase C/D already spawn their own governance topics. This file
+ * tests the two-spawn, two-verbatim-relay design.
+ *
  * Coverage:
- *   HAPPY:      the (stubbed) binary's two-line stdout (framing line, then
- *               JSON) is relayed verbatim inside a bare fenced block, with
- *               NEITHER retired string anywhere in the hook's own source
- *               nor in the rendered `additionalContext`
+ *   HAPPY:      both spawns succeed — the governance topic's framing line
+ *               renders OUTSIDE a `\`\`\`json` fence, the bootstrap JSON
+ *               renders INSIDE it, in that order; neither retired string
+ *               appears in the rendered output
  *   NEGATIVE:   a literal, case-sensitive search of the checked-in hook
  *               source for both retired strings returns zero hits
- *   BOUNDARY:   stdout exceeding `INJECTION_BACKSTOP_CAP` (12000 chars) is
- *               dropped ENTIRELY — no fenced block, no partial/sliced
- *               fragment of the oversized content anywhere in the output —
- *               and a degradation entry names the observed length
+ *   BOUNDARY:   JSON stdout exceeding `INJECTION_BACKSTOP_CAP` (12000 chars)
+ *               drops the ENTIRE composed block — including a
+ *               successfully-fetched framing line — never sliced; a
+ *               degradation entry names the observed length
  *   ERROR:      the `lore` binary is genuinely unresolvable on PATH (a
  *               curated PATH containing no directory that provides a `lore`
  *               executable, not merely a stub answering with empty output)
  *               → fail-open: exit 0, no crash, no fenced block, a
  *               degradation entry naming "lore binary not on PATH"
- *   STATE:      the binary answers `bootstrap --injection` with a non-zero
- *               exit (even though it printed content) → fail-open, content
- *               never trusted from a failed call, no fenced block
+ *   STATE:      (a) the bootstrap spawn answers with a non-zero exit even
+ *               though it printed content, AND the governance-framing spawn
+ *               independently succeeds — fail-open discards the WHOLE
+ *               block, including the already-fetched framing line, never a
+ *               half-rendered "boundary line with no data below it"; (b)
+ *               the governance-framing spawn fails/empties while the
+ *               bootstrap spawn succeeds — the JSON fence still renders
+ *               ALONE (no leading framing line), and — matching Phase C/D's
+ *               own contract for their topics — NO degradation entry is
+ *               added for the missing framing line by itself
  *   REGRESSION: the pre-existing fail-open contract (non-zero exit AND
- *               empty-stdout-at-exit-0) and the backstop-overflow contract
- *               are BOTH still byte-identical in effect to before this
- *               task's change — this suite is the regression pin for both,
- *               since no prior test file covered Phase E's own degradation
- *               paths in isolation
+ *               empty-stdout-at-exit-0 for the bootstrap spawn) and the
+ *               backstop-overflow contract are BOTH still byte-identical in
+ *               effect to before this task's change
  *
- * @spec_ref AC-CP-3
+ * @spec_ref AC-CP-10
  */
 
 import { describe, it, expect, afterEach } from "vitest";
@@ -86,7 +99,7 @@ function mkScratchDir(prefix: string): string {
   return dir;
 }
 
-interface BootstrapStubOptions {
+interface LoreStubOptions {
   /**
    * stdout to print for the `bootstrap` subcommand (any argv). Omitted
    * entirely reproduces the "binary ran, exited 0, printed nothing" shape.
@@ -94,34 +107,57 @@ interface BootstrapStubOptions {
   bootstrapStdout?: string;
   /** Exit code for the `bootstrap` subcommand (default 0). */
   bootstrapExitCode?: number;
+  /**
+   * stdout to print for `governance bootstrap-framing`. Omitted entirely
+   * reproduces the same "ran, exited 0, printed nothing" fail-open shape
+   * Phase C/D already tolerate for their own governance topics.
+   */
+  framingStdout?: string;
+  /** Exit code for `governance bootstrap-framing` (default 0). */
+  framingExitCode?: number;
 }
 
 /**
  * Writes an executable `lore` stub on its own dir, returning that dir for
  * PATH prepending. Answers `bootstrap` (any args) with `opts.bootstrapStdout`
- * at `opts.bootstrapExitCode`; any other subcommand (e.g. Phase F's
- * detached `setup --check` refresh) is answered with a harmless empty
- * `exit 0` — this suite does not exercise Phase F, only isolates it.
- * Content is written to a companion file and `cat`-ed rather than embedded
- * inline in the script, so arbitrarily large fixtures (the BOUNDARY case)
- * need no shell escaping.
+ * at `opts.bootstrapExitCode`, and `governance bootstrap-framing` with
+ * `opts.framingStdout` at `opts.framingExitCode` — the two spawns Phase E
+ * now makes independently. Any other subcommand (e.g. Phase F's detached
+ * `setup --check` refresh, or Phase C's bare `governance`) is answered with
+ * a harmless empty `exit 0` — this suite does not exercise those phases,
+ * only isolates them. Content is written to companion files and `cat`-ed
+ * rather than embedded inline in the script, so arbitrarily large fixtures
+ * (the BOUNDARY case) need no shell escaping.
  */
-function makeLoreStub(opts: BootstrapStubOptions = {}): string {
-  const { bootstrapStdout, bootstrapExitCode = 0 } = opts;
+function makeLoreStub(opts: LoreStubOptions = {}): string {
+  const { bootstrapStdout, bootstrapExitCode = 0, framingStdout, framingExitCode = 0 } = opts;
   const stubDir = mkScratchDir("bootstrap-injection-lore-stub-");
   const stubPath = join(stubDir, "lore");
-  let emitLine = "";
+
+  let bootstrapEmitLine = "";
   if (bootstrapStdout !== undefined) {
     const contentFile = join(stubDir, "bootstrap-stdout.txt");
     writeFileSync(contentFile, bootstrapStdout);
-    emitLine = `cat "${contentFile}"`;
+    bootstrapEmitLine = `cat "${contentFile}"`;
   }
+
+  let framingEmitLine = "";
+  if (framingStdout !== undefined) {
+    const framingFile = join(stubDir, "framing-stdout.txt");
+    writeFileSync(framingFile, framingStdout);
+    framingEmitLine = `cat "${framingFile}"`;
+  }
+
   writeFileSync(
     stubPath,
     `#!/bin/bash
 if [ "$1" = "bootstrap" ]; then
-  ${emitLine}
+  ${bootstrapEmitLine}
   exit ${bootstrapExitCode}
+fi
+if [ "$1" = "governance" ] && [ "$2" = "bootstrap-framing" ]; then
+  ${framingEmitLine}
+  exit ${framingExitCode}
 fi
 exit 0
 `,
@@ -186,39 +222,65 @@ describe("session-bootstrap-injection — NEGATIVE", () => {
   });
 });
 
-// ─── HAPPY — binary's two-line stdout is relayed verbatim, fenced ─────────────
+// ─── HAPPY — framing line outside the fence, JSON inside it ───────────────────
 
 describe("session-bootstrap-injection — HAPPY", () => {
-  it("the framing line + JSON stdout is relayed verbatim inside a fence, with neither retired string in the rendered output", () => {
+  it("the governance framing line renders OUTSIDE a ```json fence, the bootstrap JSON renders INSIDE it, neither retired string present", () => {
     const cwd = mkLoreCwd();
     const jsonPayload = '{"scope_declaration":"x","my_claims":[]}';
-    const stubDir = makeLoreStub({ bootstrapStdout: `${BOOTSTRAP_FRAMING_LINE}\n${jsonPayload}` });
+    const stubDir = makeLoreStub({
+      bootstrapStdout: jsonPayload,
+      framingStdout: BOOTSTRAP_FRAMING_LINE,
+    });
 
     const result = runHook({ cwd, extraEnv: { PATH: `${stubDir}:${process.env.PATH}` } });
 
     expect(result.status).toBe(0);
     const ctx = parseAdditionalContext(result.stdout as string);
 
-    // Both lines the binary printed are present, verbatim, inside a fence —
-    // the hook authored neither of them.
-    expect(ctx).toContain("```\n");
-    expect(ctx).toContain(BOOTSTRAP_FRAMING_LINE);
-    expect(ctx).toContain(jsonPayload);
+    const fenceIdx = ctx.indexOf("```json");
+    const framingIdx = ctx.indexOf(BOOTSTRAP_FRAMING_LINE);
+    const jsonIdx = ctx.indexOf(jsonPayload);
+
+    expect(fenceIdx).toBeGreaterThanOrEqual(0);
+    expect(framingIdx).toBeGreaterThanOrEqual(0);
+    expect(jsonIdx).toBeGreaterThan(fenceIdx);
+    // The framing line sits BEFORE the fence opens — outside it, not inside.
+    expect(framingIdx).toBeLessThan(fenceIdx);
 
     // The two retired strings never appear anywhere in the rendered output,
     // not just the hook's own source (NEGATIVE, above, covers the source).
     expect(ctx).not.toContain("## Lore Bootstrap (hook-injected)");
     expect(ctx).not.toContain("Corpus pointer set");
   });
+
+  it("bare `--injection` stdout stays PURE compact JSON — this hook never mixes prose into that stream (SPEC-080 AC-080-3)", () => {
+    // This is a compositional invariant of the HOOK's own two-spawn design,
+    // not a claim about the CLI itself (that's bootstrap-injection-compiled.bun.test.ts's
+    // job) — proven here by a stub whose "bootstrap" branch answers with
+    // bare JSON and nothing else, matching the real command's contract.
+    const cwd = mkLoreCwd();
+    const jsonPayload = '{"a":1}';
+    const stubDir = makeLoreStub({ bootstrapStdout: jsonPayload, framingStdout: BOOTSTRAP_FRAMING_LINE });
+
+    const result = runHook({ cwd, extraEnv: { PATH: `${stubDir}:${process.env.PATH}` } });
+    expect(result.status).toBe(0);
+    const ctx = parseAdditionalContext(result.stdout as string);
+
+    // The fenced JSON content is EXACTLY the payload — no framing text leaked inside the fence.
+    const fenceStart = ctx.indexOf("```json\n") + "```json\n".length;
+    const fenceEnd = ctx.indexOf("\n```", fenceStart);
+    expect(ctx.slice(fenceStart, fenceEnd)).toBe(jsonPayload);
+  });
 });
 
-// ─── BOUNDARY — INJECTION_BACKSTOP_CAP overflow drops the whole block ─────────
+// ─── BOUNDARY — INJECTION_BACKSTOP_CAP overflow drops the whole composed block ─
 
 describe("session-bootstrap-injection — BOUNDARY", () => {
-  it("stdout exceeding the 12000-char backstop is dropped ENTIRELY (never sliced), with a degradation entry naming the length", () => {
+  it("JSON stdout exceeding the 12000-char backstop drops the ENTIRE block (framing line included), never sliced, with a degradation entry naming the length", () => {
     const cwd = mkLoreCwd();
     const oversized = "x".repeat(12005);
-    const stubDir = makeLoreStub({ bootstrapStdout: oversized });
+    const stubDir = makeLoreStub({ bootstrapStdout: oversized, framingStdout: BOOTSTRAP_FRAMING_LINE });
 
     const result = runHook({ cwd, extraEnv: { PATH: `${stubDir}:${process.env.PATH}` } });
 
@@ -230,6 +292,9 @@ describe("session-bootstrap-injection — BOUNDARY", () => {
     expect(ctx).not.toContain("x".repeat(50));
     // No fenced block at all — the whole thing is dropped, not truncated.
     expect(ctx).not.toContain("```");
+    // The already-fetched framing line is discarded too — a boundary line
+    // describing data that isn't shown would be misleading on its own.
+    expect(ctx).not.toContain(BOOTSTRAP_FRAMING_LINE);
 
     expect(ctx).toContain("Degradation Report");
     expect(ctx).toContain("lore bootstrap");
@@ -253,14 +318,15 @@ describe("session-bootstrap-injection — ERROR", () => {
   });
 });
 
-// ─── STATE — a non-zero exit is fail-open even with stdout content ────────────
+// ─── STATE — the two spawns fail independently of each other ──────────────────
 
 describe("session-bootstrap-injection — STATE", () => {
-  it("a non-zero exit from bootstrap --injection is fail-open — stdout content is never trusted from a failed call", () => {
+  it("(a) bootstrap exits non-zero while governance-framing succeeds — the WHOLE block is discarded, including the already-fetched framing line", () => {
     const cwd = mkLoreCwd();
     const stubDir = makeLoreStub({
-      bootstrapStdout: `${BOOTSTRAP_FRAMING_LINE}\n{"ok":true}`,
+      bootstrapStdout: '{"ok":true}',
       bootstrapExitCode: 1,
+      framingStdout: BOOTSTRAP_FRAMING_LINE,
     });
 
     const result = runHook({ cwd, extraEnv: { PATH: `${stubDir}:${process.env.PATH}` } });
@@ -272,16 +338,36 @@ describe("session-bootstrap-injection — STATE", () => {
     expect(ctx).toContain("Degradation Report");
     expect(ctx).toContain("lore bootstrap failed (exit 1)");
   });
+
+  it("(b) governance-framing fails/empties while bootstrap succeeds — the JSON fence renders ALONE, with NO degradation entry for the missing framing line (matches Phase C/D's own contract)", () => {
+    const cwd = mkLoreCwd();
+    const jsonPayload = '{"ok":true}';
+    // framingStdout omitted entirely -> the stub's governance branch exits 0
+    // printing nothing, the same "ran but returned nothing useful" shape
+    // Phase C/D already tolerate for their own topics.
+    const stubDir = makeLoreStub({ bootstrapStdout: jsonPayload });
+
+    const result = runHook({ cwd, extraEnv: { PATH: `${stubDir}:${process.env.PATH}` } });
+
+    expect(result.status).toBe(0);
+    const ctx = parseAdditionalContext(result.stdout as string);
+    expect(ctx).toContain(`\`\`\`json\n${jsonPayload}\n\`\`\``);
+    expect(ctx).not.toContain(BOOTSTRAP_FRAMING_LINE);
+    // The missing framing line is advisory, not critical — no degradation
+    // entry names it (Phase C's own workflowBlock failure is silent the
+    // same way).
+    expect(ctx).not.toContain("Degradation Report");
+  });
 });
 
-// ─── REGRESSION — fail-open (empty stdout at exit 0) is unchanged ─────────────
+// ─── REGRESSION — the bootstrap spawn's pre-existing fail-open is unchanged ───
 
 describe("session-bootstrap-injection — REGRESSION", () => {
-  it("exit 0 with empty stdout is fail-open — same pre-existing degradation message, no fenced block", () => {
+  it("exit 0 with empty bootstrap stdout is fail-open — same pre-existing degradation message, no fenced block", () => {
     const cwd = mkLoreCwd();
     // Omitting bootstrapStdout entirely reproduces "binary ran, exited 0,
     // printed nothing" — the pre-existing empty-stdout fail-open shape,
-    // byte-unchanged by this task's D2 change.
+    // byte-unchanged by this task's D2 correction.
     const stubDir = makeLoreStub({});
 
     const result = runHook({ cwd, extraEnv: { PATH: `${stubDir}:${process.env.PATH}` } });
