@@ -354,7 +354,7 @@ describe("gate-predicates", () => {
         taskInfo({ slug: "task-a", evidenceCount: 10, attestedCount: 10 }),
         taskInfo({ slug: "task-b", evidenceCount: 1, attestedCount: 0 }),
       ];
-      expect(attestationFloor(tasks, 0.5)).toEqual({
+      expect(attestationFloor(tasks, 0.5, "plan-x")).toEqual({
         ok: false,
         reason: "ATTESTATION_FLOOR_NOT_MET",
         field: "attestation-floor",
@@ -368,22 +368,43 @@ describe("gate-predicates", () => {
         taskInfo({ slug: "task-a", evidenceCount: 4, attestedCount: 1 }),
         taskInfo({ slug: "task-b", evidenceCount: 1, attestedCount: 1 }),
       ];
-      expect(attestationFloor(tasks, 0.5)).toEqual({
+      expect(attestationFloor(tasks, 0.5, "plan-x")).toEqual({
         ok: false,
         reason: "ATTESTATION_FLOOR_NOT_MET",
         field: "attestation-floor",
       });
     });
 
-    it("AC-075-11: a vacuous plan (no evidence anywhere) passes regardless of minRatio", () => {
-      expect(attestationFloor(undefined, 0.5)).toEqual({ ok: true });
-      expect(attestationFloor([], 0.9)).toEqual({ ok: true });
-      expect(attestationFloor([taskInfo({ evidenceCount: 0, attestedCount: 0 })], 1)).toEqual({ ok: true });
+    // reason: task-t1-applicability-verdict-in-the-predicate-s-own-type-both
+    // (spec-plan-close-predicates-measure-invariants-an-applicability §Design
+    // Decisions D1/D3) — a plan with NO evidence at all is no longer a SILENT
+    // vacuous `{ok: true}` pass; it is a `PredicateNotApplicable` value naming
+    // the plan referent, so `GateEnforcer.enforce` can surface it as an
+    // advisory + audit row instead of it disappearing into an
+    // indistinguishable-from-"everything attested" pass. Updated in the SAME
+    // slice that changed the behavior — a stale assertion here would silently
+    // re-legalize the old shape.
+    it("AC-PCI: a vacuous plan (no evidence anywhere) is notApplicable, never a silent pass", () => {
+      expect(attestationFloor(undefined, 0.5, "plan-x")).toEqual({
+        notApplicable: true,
+        reason: "no-evidence",
+        referent: "plan-x",
+      });
+      expect(attestationFloor([], 0.9, "plan-y")).toEqual({
+        notApplicable: true,
+        reason: "no-evidence",
+        referent: "plan-y",
+      });
+      expect(attestationFloor([taskInfo({ evidenceCount: 0, attestedCount: 0 })], 1, "plan-z")).toEqual({
+        notApplicable: true,
+        reason: "no-evidence",
+        referent: "plan-z",
+      });
     });
 
     it("AC-075-11: a ratio exactly equal to minRatio passes (boundary, >= not >)", () => {
       const tasks: TaskAttestationInfo[] = [taskInfo({ slug: "task-a", evidenceCount: 2, attestedCount: 1 })];
-      expect(attestationFloor(tasks, 0.5)).toEqual({ ok: true });
+      expect(attestationFloor(tasks, 0.5, "plan-x")).toEqual({ ok: true });
     });
 
     it("AC-075-11: fully attested evidence at/above the floor with no zero-attested task passes", () => {
@@ -391,7 +412,7 @@ describe("gate-predicates", () => {
         taskInfo({ slug: "task-a", evidenceCount: 2, attestedCount: 2 }),
         taskInfo({ slug: "task-b", evidenceCount: 1, attestedCount: 1 }),
       ];
-      expect(attestationFloor(tasks, 0.5)).toEqual({ ok: true });
+      expect(attestationFloor(tasks, 0.5, "plan-x")).toEqual({ ok: true });
     });
   });
 

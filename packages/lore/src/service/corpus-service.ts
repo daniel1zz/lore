@@ -83,6 +83,7 @@ import {
   countScriptModeAcceptanceCriteria,
 } from "./checkpoint-registry.js";
 import { attestationExemptKindValid } from "./gate-predicates.js";
+import { resolvePrdSyncDomainDoc } from "./prd-sync-domain-doc.js";
 import { resolveDoc, ULID_REGEX } from "./resolve.js";
 import { hasIssueReport, type ResolvesInEdgeLike, type ResolutionSourceDocLike } from "./issue-resolution.js";
 
@@ -2002,21 +2003,31 @@ export class CorpusService {
           // `prdSyncSynced` is left unset, and `checkPlanClose` only pushes
           // `prdOutlineSynced`'s result when that field IS set.
           if (bundle.spec !== undefined) {
-            const domainDocResult = await this.resolvePrdSyncDomainDoc(bundle.spec);
+            const domainDocResult = await resolvePrdSyncDomainDoc(this.store, bundle.spec);
             if (!domainDocResult.ok) return domainDocResult;
             const domainDoc = domainDocResult.value;
-            let synced = false;
-            if (domainDoc !== null) {
+            if (domainDoc === null) {
+              // reason: spec-plan-close-predicates-measure-invariants-an-
+              // applicability §Design Decisions D1/D6 — the ancestor spec
+              // resolving NO domain doc at all is a FACT about the corpus graph
+              // (`resolvePrdSyncDomainDoc`'s own "ok(null), a FACT, never an
+              // error" contract), not a violation two modules away. Passing
+              // `null` through (never a fabricated `false`) is what lets
+              // `prdOutlineSynced` return `notApplicable` instead of the
+              // pre-fix, no-correct-action-clears-it denial — the measured
+              // defect this fixes (`spec-context-provenance…`'s parent is the
+              // root PRD with no `implements` edge).
+              planCloseCtx = { ...planCloseCtx, prdSyncSynced: null };
+            } else {
               const windowOpen = this.resolvePrdSyncWindowOpen(bundle.tasks, existing.created_at);
               const diffResult = await this.hasPrdSyncContentDiffInWindow(domainDoc.id, windowOpen, now);
               if (!diffResult.ok) return diffResult;
-              synced = diffResult.value;
+              planCloseCtx = {
+                ...planCloseCtx,
+                prdSyncSynced: diffResult.value,
+                prdSyncDomainDocSlug: domainDoc.slug,
+              };
             }
-            planCloseCtx = {
-              ...planCloseCtx,
-              prdSyncSynced: synced,
-              ...(domainDoc !== null ? { prdSyncDomainDocSlug: domainDoc.slug } : {}),
-            };
           }
         }
       }
@@ -2937,51 +2948,6 @@ export class CorpusService {
       ...(newestAssessmentResult.value !== undefined ? { newestAssessmentAt: newestAssessmentResult.value } : {}),
       ...(newestActivityResult.value !== undefined ? { newestTaskActivityAt: newestActivityResult.value } : {}),
     });
-  }
-
-  /**
-   * Resolves the domain doc a plan-close's `prdOutlineSynced` predicate (SPEC-080
-   * §C4) should diff against, from an already-resolved ancestor spec: SPEC-080's own
-   * text says "linked (parent or implements) to a domain doc" — read here as (1) the
-   * ancestor spec's OWN `parent_id`, when that parent doc is itself type `"spec"`
-   * (one tier up, e.g. a landing spec parented directly under a domain-overview spec)
-   * or (2) failing that, the FIRST `"implements"`-typed outgoing link the ancestor
-   * spec declares, when its target is itself type `"spec"`. Both checks require type
-   * `"spec"` (never `"prd"`) — a landing spec's parent is very commonly the root PRD
-   * itself, which must never be mistaken for a domain doc. `domain-overview` (SPEC-080
-   * §C2) isn't declared in `SPEC_KINDS` yet (a separate task's scope) — a plain
-   * `spec`-typed doc stands in, matching SPEC-080 T5r's own RED-suite fixture.
-   *
-   * @param spec - The plan's resolved ancestor spec (`PlanBundle.spec`).
-   * @returns `ok(DocRecord)` when a domain doc resolved; `ok(null)` — a FACT, never an
-   *   error — when neither relation resolves one (no ancestor-spec parent at all, a
-   *   non-spec parent, no `implements` link, or an unresolvable/soft-deleted/non-spec
-   *   link target).
-   */
-  private async resolvePrdSyncDomainDoc(spec: DocRecord): Promise<Result<DocRecord | null, LoreError>> {
-    if (spec.parent_id !== null) {
-      const parentResult = await this.store.find(spec.parent_id);
-      if (!parentResult.ok) return parentResult;
-      const parent = parentResult.value;
-      if (parent !== null && parent.deleted_at === null && parent.type === "spec") {
-        return ok(parent);
-      }
-    }
-
-    const linksResult = await this.store.findLinks(spec.id, "out");
-    if (!linksResult.ok) return linksResult;
-    const implementsLink = linksResult.value.find((l) => l.link_type === "implements");
-    if (implementsLink === undefined) {
-      return ok(null);
-    }
-
-    const targetResult = await this.store.find(implementsLink.to_id);
-    if (!targetResult.ok) return targetResult;
-    const target = targetResult.value;
-    if (target === null || target.deleted_at !== null || target.type !== "spec") {
-      return ok(null);
-    }
-    return ok(target);
   }
 
   /**

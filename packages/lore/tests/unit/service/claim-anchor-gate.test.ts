@@ -151,7 +151,10 @@ describe("checkpointRegistry['task-claim'] — noAnchorOverlap (pure, SPEC-042 D
     expect(failures[0]?.field).toBe(ANCHOR_OVERLAP_FIELD);
     expect(failures[0]?.reason).toBe("ANCHOR_OVERLAP");
 
-    const feedText = def.feed(ctx, results);
+    // reason: task-t1-applicability-verdict-in-the-predicate-s-own-type-both —
+    // see actor-identity-guard.bun.test.ts's identical fix for why this passes
+    // `selectFailures(results)` rather than the raw (now widened) `results`.
+    const feedText = def.feed(ctx, selectFailures(results));
     expect(feedText).toContain("task-one");
     expect(feedText).toContain("agent:t1");
     expect(feedText).toContain("src/a"); // overlapping path pair mentions both sides

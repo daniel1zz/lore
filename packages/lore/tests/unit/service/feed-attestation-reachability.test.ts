@@ -26,7 +26,11 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { checkpointRegistry, type GateContext } from "../../../src/service/checkpoint-registry.js";
+import {
+  checkpointRegistry,
+  selectFailures,
+  type GateContext,
+} from "../../../src/service/checkpoint-registry.js";
 
 const planClose = checkpointRegistry["plan-close"];
 if (planClose === undefined) {
@@ -58,7 +62,14 @@ function baseFixtureCtx(overrides: Partial<GateContext>): GateContext {
 }
 
 const renderAttestationFloorFeed = (ctx: GateContext): string => {
-  const failures = planClose.check(ctx).filter((r) => !r.ok);
+  // reason: task-t1-applicability-verdict-in-the-predicate-s-own-type-both —
+  // `checkPlanClose`'s check() can now also return a `PredicateNotApplicable`
+  // member; `selectFailures` narrows those out (never a failure) the same way
+  // it already narrows out `{ok: true}` passes, so this fixture's raw
+  // `.filter((r) => !r.ok)` (which no longer compiles against the widened
+  // `ApplicablePredicateResult[]` return type) is replaced with the shared,
+  // notApplicable-aware helper rather than re-deriving the narrowing here.
+  const failures = selectFailures(planClose.check(ctx));
   return planClose.feed(ctx, failures);
 };
 

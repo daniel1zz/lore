@@ -74,6 +74,73 @@ import {
  */
 export type PredicateResult = { ok: true } | { ok: false; reason: string; field?: string };
 
+/**
+ * Why a predicate declared itself not-applicable (spec-plan-close-predicates-
+ * measure-invariants-an-applicability §Design Decisions D1) — `"referent-absent"`
+ * when the corpus fact the predicate would check (a domain doc, an ancestor spec)
+ * does not exist at all; `"no-evidence"` when the predicate has zero data points
+ * to evaluate (a plan with no verification evidence anywhere). Both are FACTS
+ * about the corpus, never encoded as a violation two modules away.
+ */
+export type NotApplicableReason = "referent-absent" | "no-evidence";
+
+/**
+ * A predicate's third verdict, distinct from pass/fail — "my referent is absent,
+ * so I do not apply" (spec-plan-close-predicates-measure-invariants-an-
+ * applicability §Design Decisions D1). Deliberately carries NO `ok` property:
+ * reading `.ok` off an {@link ApplicablePredicateResult} union is a TypeScript
+ * compile error until the caller narrows first (via {@link isNotApplicable}) —
+ * that omission IS the mechanism forcing every consumer of a possibly-
+ * inapplicable predicate to handle this third case explicitly, rather than
+ * silently routing it into whichever branch a `!result.ok` check happens to
+ * reach. Two alternatives were considered and REJECTED by the governing spec —
+ * a third `ok: "not-applicable"` value (truthy, so `if (!result.ok)` would
+ * silently treat it as PASS — the exact vacuous-pass defect class this fixes)
+ * and renaming `ok` to a three-valued `status` (forces re-examining ~128 sites
+ * across 7 modules for 26 predicates that can never be inapplicable) — do not
+ * "simplify" this shape back toward either.
+ */
+export interface PredicateNotApplicable {
+  readonly notApplicable: true;
+  readonly reason: NotApplicableReason;
+  /** The absent corpus fact this predicate would have checked (e.g. an ancestor
+   *  spec's slug, a plan's slug) — always non-empty, named for the advisory/audit
+   *  channels that surface it (`GateEnforcer.enforce`). */
+  readonly referent: string;
+}
+
+/**
+ * The full verdict space for a predicate that CAN be structurally inapplicable —
+ * `PredicateResult`'s existing pass/fail PLUS {@link PredicateNotApplicable}. Only
+ * `prdOutlineSynced` and `attestationFloor` (this module) return this union; every
+ * other predicate keeps returning bare `PredicateResult`, unchanged, since a
+ * `PredicateResult[]` is structurally assignable wherever `ApplicablePredicateResult[]`
+ * is expected (function return-type covariance) — the blast radius of this type is
+ * proportional to which predicates can actually be inapplicable, not to every
+ * consumer of the shared checkpoint machinery.
+ */
+export type ApplicablePredicateResult = PredicateResult | PredicateNotApplicable;
+
+/**
+ * Type guard narrowing an {@link ApplicablePredicateResult} to its not-applicable
+ * member — the ONE place `"notApplicable" in result` is spelled out. Every
+ * consumer that must tell {@link PredicateNotApplicable} apart from
+ * `PredicateResult` (`GateEnforcer.enforce`'s partition, `isCheckpointBlocked`/
+ * `selectFailures`'s narrowing in `checkpoint-registry.ts`) imports this rather
+ * than re-deriving the check, so the discriminator can never drift between call
+ * sites.
+ *
+ * @example
+ * isNotApplicable({ notApplicable: true, reason: "referent-absent", referent: "spec-x" }); // => true
+ * @example
+ * isNotApplicable({ ok: true }); // => false
+ */
+export function isNotApplicable(
+  result: ApplicablePredicateResult,
+): result is PredicateNotApplicable {
+  return "notApplicable" in result && result.notApplicable === true;
+}
+
 const SPEC_LEGAL_PARENT_TYPES: readonly DocType[] = PARENT_TYPE_CONTRACT.spec;
 
 /**
@@ -718,19 +785,25 @@ export const ATTESTATION_FLOOR_FIELD = "attestation-floor";
  *   2. the plan-wide attested-evidence ratio (total attested entries / total
  *      evidence entries, across every task) must be ≥ `minRatio`.
  *
- * A plan with NO evidence at all on any task (`totalEvidence === 0`) is a
- * vacuous PASS — this is the "pure-planning plan" carve-out (SPEC-069 §Scope):
- * the floor only constrains a plan that claims to have been verified, never
- * one that never ran any oracle at all.
+ * A plan with NO evidence at all on any task (`totalEvidence === 0`) is
+ * NOT-APPLICABLE (spec-plan-close-predicates-measure-invariants-an-
+ * applicability §Design Decisions D1/D3) rather than the silent vacuous PASS
+ * this predicate used to return for that case — this is still the "pure-
+ * planning plan" carve-out (SPEC-069 §Scope: the floor only constrains a plan
+ * that claims to have been verified, never one that never ran any oracle at
+ * all), but the FACT "this plan has zero evidence to attest" is now a value
+ * `GateEnforcer.enforce` can surface as an advisory + audit row instead of
+ * disappearing into an indistinguishable-from-"everything attested" pass.
  *
- * SPEC-075 §Design Decisions D6/AC-075-11: this predicate is now a THIN
- * delegate over `@lore/core`'s `deriveAttestationSummary` — the SAME two
- * conditions, now computed once in the SSOT the dashboard adjudication
- * workbench's Evidence tab also renders from, rather than re-implemented here.
- * `attestationFloor`'s own signature, reasons, and pass/fail outcomes are
- * byte-identical to before this delegation (every pre-existing caller,
- * including `attestation-floor.test.ts`'s end-to-end service-layer suite,
- * observes no behavior change).
+ * SPEC-075 §Design Decisions D6/AC-075-11: this predicate is a THIN delegate
+ * over `@lore/core`'s `deriveAttestationSummary` — the SAME conditions,
+ * computed once in the SSOT the dashboard adjudication workbench's Evidence
+ * tab also renders from, rather than re-implemented here. Every pre-existing
+ * caller's PASS/FAIL outcomes on non-zero-evidence input are byte-identical to
+ * before this task (only the zero-evidence branch's return VALUE changed, from
+ * `{ok: true}` to a `PredicateNotApplicable` — `attestation-floor.test.ts`'s
+ * REGRESSION suite for that branch is updated in the SAME slice, not left
+ * asserting the old shape).
  *
  * @param tasks - Every task (or phase) in the closing plan, with its own
  *   evidence/attested counts — `undefined` is treated identically to `[]`
@@ -739,26 +812,35 @@ export const ATTESTATION_FLOOR_FIELD = "attestation-floor";
  * @param minRatio - The configured floor (`workflow.attestation.min_ratio`,
  *   resolved by the CALLER via `GateEnforcer.resolveAttestationMinRatio` —
  *   this predicate never reads config itself).
- * @returns `{ok: true}` when there is no evidence at all, OR every
- *   evidence-bearing task has ≥1 attested entry AND the plan-wide ratio meets
- *   `minRatio`; `{ok: false, reason: "ATTESTATION_FLOOR_NOT_MET", field:
- *   "attestation-floor"}` otherwise.
+ * @param referent - The closing plan's slug (or id) — carried on the
+ *   `PredicateNotApplicable` result when there is zero evidence to attest,
+ *   ignored otherwise.
+ * @returns `{notApplicable: true, reason: "no-evidence", referent}` when
+ *   `deriveAttestationSummary`'s `total_evidence === 0`; `{ok: true}` when
+ *   there IS evidence and every evidence-bearing task has ≥1 attested entry
+ *   AND the plan-wide ratio meets `minRatio`; `{ok: false, reason:
+ *   "ATTESTATION_FLOOR_NOT_MET", field: "attestation-floor"}` otherwise.
  * @example
  * attestationFloor([
  *   { slug: "task-1", title: "T1", evidenceCount: 3, attestedCount: 0 },
- * ], 0.5); // => { ok: false, reason: "ATTESTATION_FLOOR_NOT_MET", field: "attestation-floor" }
+ * ], 0.5, "plan-x"); // => { ok: false, reason: "ATTESTATION_FLOOR_NOT_MET", field: "attestation-floor" }
  * @example
  * attestationFloor([
  *   { slug: "task-1", title: "T1", evidenceCount: 2, attestedCount: 2 },
- * ], 0.5); // => { ok: true }
+ * ], 0.5, "plan-x"); // => { ok: true }
  * @example
- * attestationFloor(undefined, 0.5); // => { ok: true } — no tasks, vacuous pass
+ * attestationFloor(undefined, 0.5, "plan-x");
+ *   // => { notApplicable: true, reason: "no-evidence", referent: "plan-x" } — no evidence anywhere
  */
 export function attestationFloor(
   tasks: readonly TaskAttestationInfo[] | undefined,
   minRatio: number,
-): PredicateResult {
+  referent: string,
+): ApplicablePredicateResult {
   const summary = deriveAttestationSummary(tasks ?? [], minRatio);
+  if (summary.total_evidence === 0) {
+    return { notApplicable: true, reason: "no-evidence", referent };
+  }
   if (!summary.meets_floor) {
     return { ok: false, reason: ATTESTATION_FLOOR_REASON, field: ATTESTATION_FLOOR_FIELD };
   }
@@ -953,14 +1035,31 @@ export const PRD_SYNC_FIELD = "prd-outline-synced";
  *
  * @param synced - Pre-computed by the caller: `true` when >= 1 domain-doc
  *   version's content differs from its predecessor within the plan's execution
- *   window, OR a valid `extra.prd_sync_exempt` is present; `false` otherwise.
- * @returns `{ok: true}` when `synced`; `{ok: false, reason:
- *   "PRD_OUTLINE_NOT_SYNCED", field: "prd-outline-synced"}` otherwise.
+ *   window, OR a valid `extra.prd_sync_exempt` is present; `false` when neither
+ *   holds; `null` (spec-plan-close-predicates-measure-invariants-an-
+ *   applicability §Design Decisions D1/D6) when the ancestor spec resolves NO
+ *   domain doc at ALL (`resolvePrdSyncDomainDoc` returned `ok(null)`, a FACT
+ *   about the corpus graph) — distinct from `false`, which means a domain doc
+ *   DOES exist but wasn't edited in-window.
+ * @param referent - The ancestor spec's slug (or id) this predicate's domain-doc
+ *   resolution is anchored to — carried on the `PredicateNotApplicable` result
+ *   when `synced` is `null`, ignored otherwise.
+ * @returns `{notApplicable: true, reason: "referent-absent", referent}` when
+ *   `synced` is `null`; `{ok: true}` when `synced` is `true`; `{ok: false,
+ *   reason: "PRD_OUTLINE_NOT_SYNCED", field: "prd-outline-synced"}` when
+ *   `synced` is `false`.
  * @example
- * prdOutlineSynced(true);  // => { ok: true }
- * prdOutlineSynced(false); // => { ok: false, reason: "PRD_OUTLINE_NOT_SYNCED", field: "prd-outline-synced" }
+ * prdOutlineSynced(true, "spec-x");  // => { ok: true }
+ * @example
+ * prdOutlineSynced(false, "spec-x"); // => { ok: false, reason: "PRD_OUTLINE_NOT_SYNCED", field: "prd-outline-synced" }
+ * @example
+ * prdOutlineSynced(null, "spec-x");
+ *   // => { notApplicable: true, reason: "referent-absent", referent: "spec-x" }
  */
-export function prdOutlineSynced(synced: boolean): PredicateResult {
+export function prdOutlineSynced(synced: boolean | null, referent: string): ApplicablePredicateResult {
+  if (synced === null) {
+    return { notApplicable: true, reason: "referent-absent", referent };
+  }
   if (synced) {
     return { ok: true };
   }

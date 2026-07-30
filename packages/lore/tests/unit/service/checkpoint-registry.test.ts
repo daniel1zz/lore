@@ -47,6 +47,14 @@ describe("checkpointRegistry", () => {
       expect(Array.isArray(results)).toBe(true);
       expect(results.length).toBeGreaterThan(0);
       for (const r of results) {
+        // reason: task-t1-applicability-verdict-in-the-predicate-s-own-type-both —
+        // `check()`'s static return type is now the shared `ApplicablePredicateResult[]`
+        // across every checkpoint, but `spec-create` itself never produces a
+        // `PredicateNotApplicable` member — narrow with a fail-loud guard rather
+        // than importing `isNotApplicable` just for this one assertion.
+        if ("notApplicable" in r) {
+          throw new Error("spec-create must never produce a not-applicable predicate result");
+        }
         expect(typeof r.ok).toBe("boolean");
       }
       expect(isCheckpointBlocked(results)).toBe(false);
@@ -636,7 +644,10 @@ describe("reachability unknown vs known-false (verifyReachability / describeReac
       // hasSpecParent / parentSpecScriptAcCount deliberately OMITTED — mirrors
       // the live bug: plan-close's real caller never populates these today.
     };
-    const failures = planClose.check(ctx).filter((r) => !r.ok);
+    // reason: task-t1-applicability-verdict-in-the-predicate-s-own-type-both —
+    // `checkPlanClose`'s check() can now also return a `PredicateNotApplicable`
+    // member; `selectFailures` (already imported above) narrows those out.
+    const failures = selectFailures(planClose.check(ctx));
     const text = planClose.feed(ctx, failures);
     expect(text).not.toContain("no spec-tier ancestor");
     expect(text).not.toContain("zero script-mode");

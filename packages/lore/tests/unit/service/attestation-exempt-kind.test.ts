@@ -31,6 +31,7 @@ import {
 import {
   checkpointRegistry,
   isCheckpointBlocked,
+  selectFailures,
   type GateContext,
 } from "../../../src/service/checkpoint-registry.js";
 
@@ -123,7 +124,7 @@ describe("checkPlanClose — 4-row exemption-kind outcome table", () => {
     const ctx = ctxWith({ attestationExempt: true });
     const results = planClose.check(ctx);
     expect(isCheckpointBlocked(results)).toBe(true);
-    expect(results.some((r) => !r.ok && r.field === ATTESTATION_EXEMPT_KIND_FIELD)).toBe(true);
+    expect(selectFailures(results).some((f) => f.field === ATTESTATION_EXEMPT_KIND_FIELD)).toBe(true);
   });
 
   // Row 3 — exempt + invalid kind → DENIED.
@@ -131,14 +132,14 @@ describe("checkPlanClose — 4-row exemption-kind outcome table", () => {
     const ctx = ctxWith({ attestationExempt: true, attestationExemptKind: "not-a-real-kind" });
     const results = planClose.check(ctx);
     expect(isCheckpointBlocked(results)).toBe(true);
-    expect(results.some((r) => !r.ok && r.field === ATTESTATION_EXEMPT_KIND_FIELD)).toBe(true);
+    expect(selectFailures(results).some((f) => f.field === ATTESTATION_EXEMPT_KIND_FIELD)).toBe(true);
   });
 
   // Row 4 — non-exempt → UNAFFECTED by this predicate (attestationFloor alone decides).
   it("row 4: exempt=false → attestationExemptKindValid contributes no failure either way (non-exempt, no evidence, vacuous floor PASS)", () => {
     const ctx = ctxWith({ attestationExempt: false });
     const results = planClose.check(ctx);
-    expect(results.some((r) => !r.ok && r.field === ATTESTATION_EXEMPT_KIND_FIELD)).toBe(false);
+    expect(selectFailures(results).some((f) => f.field === ATTESTATION_EXEMPT_KIND_FIELD)).toBe(false);
     // vacuous attestationFloor pass (no evidence at all) — overall PASS too.
     expect(isCheckpointBlocked(results)).toBe(false);
   });
@@ -150,8 +151,8 @@ describe("checkPlanClose — 4-row exemption-kind outcome table", () => {
     });
     const results = planClose.check(ctx);
     expect(isCheckpointBlocked(results)).toBe(true);
-    expect(results.some((r) => !r.ok && r.field === ATTESTATION_EXEMPT_KIND_FIELD)).toBe(false);
-    expect(results.some((r) => !r.ok && r.field === "attestation-floor")).toBe(true);
+    expect(selectFailures(results).some((f) => f.field === ATTESTATION_EXEMPT_KIND_FIELD)).toBe(false);
+    expect(selectFailures(results).some((f) => f.field === "attestation-floor")).toBe(true);
   });
 
   // REGRESSION — an exempt+valid-kind plan bypasses the floor even with
