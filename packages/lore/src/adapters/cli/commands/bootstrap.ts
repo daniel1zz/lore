@@ -20,7 +20,15 @@
  * SAME `BootstrapReportWithStaleness` through `@lore/core`'s
  * `buildBootstrapInjection`, printing its compact `json` verbatim (never the
  * `{ok, data}` envelope plain `--json` uses — the hook is a blind pipe, D3, and
- * expects exactly this string on stdout). Budgets resolve from
+ * expects exactly this string on stdout — SPEC-080 AC-080-3's bare-JSON
+ * contract is a documented public CLI shape, `lore bootstrap --injection | jq`
+ * being a real consumer, so this stream carries NOTHING else. The
+ * spec-context-provenance-injected-corpus-global-state-and-a D2 scope-boundary
+ * line is served from a SEPARATE verb, `lore governance bootstrap-framing`
+ * (`commands/governance.ts`) — the hook's Phase E spawns both independently
+ * rather than this command mixing prose into its JSON stream; see that
+ * module's header for why "one stream the hook must split" was rejected in
+ * favor of "two spawns, each relayed verbatim"). Budgets resolve from
  * `workflow.bootstrap_injection.*` via `resolveBootstrapInjectionBudgets(config)`,
  * the SAME `config` this command already threads through from `loadLoreApp()` for
  * telemetry (`app.ts` needs no change — `loadLoreApp()` already resolves and

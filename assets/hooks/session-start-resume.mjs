@@ -33,19 +33,43 @@
  *          `<main-checkout>/assets/governance/seat-briefing.md`) is retired
  *          along with the install-set entry (D3). Placeholder substitution
  *          and the fail-open contract are unchanged.
- * Phase E: lore bootstrap injection (corpus pointer set, when the resolved
- *          corpus root — main checkout for a linked worktree, cwd otherwise —
- *          has .lore/). SPEC-080 D3 — this hook is a BLIND PIPE: it spawns
- *          `lore bootstrap --injection`, trims stdout, and wraps it verbatim
- *          in the markdown fence with ZERO knowledge of the payload's field
- *          names or shape (the binary side owns the tier-1 projection
- *          contract entirely, `buildBootstrapInjection` in `@lore/core`).
- *          `INJECTION_BACKSTOP_CAP` (12000 chars) is a pure safety backstop,
- *          not a truncation policy — the projection is already
- *          char-budgeted binary-side, so exceeding this cap signals a
- *          binary-side bug. On overflow the hook drops the bootstrap block
- *          ENTIRELY (never slices stdout) and records a degradation entry
- *          naming the observed length.
+ * Phase E: lore bootstrap injection (corpus-global state snapshot, when the
+ *          resolved corpus root — main checkout for a linked worktree, cwd
+ *          otherwise — has .lore/). SPEC-080 D3, strengthened by
+ *          spec-context-provenance-injected-corpus-global-state-and-a D2 —
+ *          this hook is a BLIND PIPE, now via TWO independent spawns of the
+ *          SAME resolved binary rather than one mixed stream:
+ *            (E-a) `lore governance bootstrap-framing` — the scope-boundary
+ *                  line (`BOOTSTRAP_FRAMING_LINE`, `@lore/core`), fetched
+ *                  EXACTLY the same way Phase C fetches its own topic and
+ *                  Phase D fetches `seat-briefing`. Fail-open, same contract
+ *                  as those two phases: a missing binary, non-zero exit, or
+ *                  empty stdout leaves this line absent — never a
+ *                  degradation entry (advisory framing, not the payload).
+ *            (E-b) `lore bootstrap --injection` — UNCHANGED from before D2:
+ *                  bare compact JSON, nothing else, on stdout (SPEC-080
+ *                  AC-080-3's documented public CLI contract — a `| jq`
+ *                  consumer never sees a prose line prepended to its JSON).
+ *          The two are composed as ONE rendered block: E-a's line OUTSIDE
+ *          the markdown fence (the position the hook's own retired header
+ *          used to occupy), E-b's JSON INSIDE it. This hook still never
+ *          parses, re-serializes, or inspects either spawn's output — it
+ *          relays each verbatim and only decides WHERE the seam between them
+ *          goes, never what either side contains. (An earlier draft of this
+ *          hook printed the framing line as `bootstrap --injection`'s own
+ *          stdout line 1, requiring this hook to split one stream at a
+ *          newline — REJECTED: it broke SPEC-080 AC-080-3's bare-JSON
+ *          contract and made the hook parse-adjacent instead of purely
+ *          blind. Two spawns, two verbatim relays, is strictly the stronger
+ *          blind pipe.) `INJECTION_BACKSTOP_CAP` (12000 chars) remains a
+ *          pure safety backstop on E-b's JSON stdout alone (never E-a's much
+ *          shorter framing line) — the projection is already char-budgeted
+ *          binary-side, so exceeding this cap signals a binary-side bug. On
+ *          overflow the hook drops the ENTIRE composed block (framing line
+ *          included, even if E-a already succeeded) rather than slicing
+ *          stdout, and records a degradation entry naming the observed
+ *          length — a scope-boundary line with no data below it to bound
+ *          would be misleading, not merely incomplete.
  * Phase F: session-start advisory — cache-first asset-freshness check
  *          (SPEC-076 §C6). Reads `<claude-dir>/.lore-setup-check.json`
  *          (written by `lore setup --check`, T4 of SPEC-076) — a fresh
@@ -298,12 +322,39 @@ try {
 } catch { /* fail-open — governance injection must never block session start */ }
 
 // ── Phase E: lore bootstrap injection ──────────────────────────────
-// Corpus pointer set (root doc, active plans + task counts, pending
-// reviews, active sessions, stale candidates). Only when the resolved
-// corpus root (main checkout for a linked worktree, cwd otherwise) has
-// .lore/.
+// Corpus-global state snapshot (root doc, active plans + task counts,
+// pending reviews, active sessions, stale candidates). Only when the
+// resolved corpus root (main checkout for a linked worktree, cwd
+// otherwise) has .lore/.
 let bootstrapBlock = '';
 if (existsSync(join(bootstrapCwd, '.lore'))) {
+  // Phase E-a: the scope-boundary framing line
+  // (spec-context-provenance-injected-corpus-global-state-and-a D2) — spawns
+  // `lore governance bootstrap-framing`, the SAME resolved binary and the
+  // SAME verb Phase C/D already spawn for their own topics. Fail-open,
+  // IDENTICAL contract to those two phases: a missing binary, non-zero
+  // exit, or empty stdout leaves `framingLine` at `''` and the JSON-only
+  // block below still renders — this is advisory framing describing the
+  // payload, not the payload itself, so its own absence is never
+  // degradation-worthy on its own (mirrors Phase C's `workflowBlock`, which
+  // also pushes no degradation entry on failure).
+  let framingLine = '';
+  try {
+    const framingResult = spawnSync('lore', ['governance', 'bootstrap-framing'], {
+      cwd: bootstrapCwd,
+      encoding: 'utf8',
+      timeout: 5000,
+    });
+    if (framingResult.status === 0 && typeof framingResult.stdout === 'string'
+        && framingResult.stdout.length > 0) {
+      framingLine = framingResult.stdout;
+    }
+  } catch { /* fail-open — framing-line injection must never block session start */ }
+
+  // Phase E-b: the bootstrap --injection JSON payload — UNCHANGED single-stream
+  // contract (SPEC-080 D3, AC-080-3): bare compact JSON, nothing else, on
+  // stdout. Blind pipe — this hook never parses, re-serializes, or inspects
+  // a single field.
   // SPEC-057 AC-S-4 — `--seat-branch <branch>` is appended ONLY for a linked-worktree
   // session with a resolved corpus root (`seatBranchForBootstrap` non-null); a
   // main-checkout session's spawn args stay byte-unchanged (REGRESSION).
@@ -319,22 +370,23 @@ if (existsSync(join(bootstrapCwd, '.lore'))) {
   });
   const stdout = r.status === 0 && typeof r.stdout === 'string' ? r.stdout.trim() : '';
   if (stdout) {
-    // Blind pipe (SPEC-080 D3) — the binary owns the payload shape entirely;
-    // this hook never parses, re-serializes, or inspects a single field name.
     if (stdout.length > INJECTION_BACKSTOP_CAP) {
+      // Drops the ENTIRE composed block — including a successfully-fetched
+      // `framingLine` — never just the JSON half. A scope-boundary line with
+      // no data below it to bound would be misleading, not merely
+      // incomplete, so E-a's own success buys it no separate survival here.
       degradations.push({
         component: 'lore bootstrap',
         reason: `injection payload ${stdout.length} chars exceeds ${INJECTION_BACKSTOP_CAP} backstop `
           + '— binary-side bug, run `lore setup` / investigate',
       });
     } else {
-      bootstrapBlock = `## Lore Bootstrap (hook-injected)
-
-Corpus pointer set — deep-dive via \`lore get <slug>\`, \`lore tree <plan>\`, \`lore ready <plan> --json\`. Do NOT re-run \`lore bootstrap\` yourself.
-
-\`\`\`json
-${stdout}
-\`\`\``;
+      // D2 placement: the framing line goes OUTSIDE the markdown fence —
+      // exactly where this hook's own retired header used to sit — and the
+      // JSON payload stays INSIDE it, fence language tag restored to `json`
+      // now that the fenced content is strictly JSON again.
+      const fence = `\`\`\`json\n${stdout}\n\`\`\``;
+      bootstrapBlock = framingLine ? `${framingLine}\n\n${fence}` : fence;
     }
   } else {
     const reason = r.error?.code === 'ENOENT'
