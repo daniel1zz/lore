@@ -1,0 +1,225 @@
+/**
+ * RED suite (task-t4-plan-close-predicate-contract-table-lore-gate-explain) for
+ * spec-plan-close-predicates-measure-invariants-an-applicability §D7 — the
+ * `plan-close` predicate contract table (`PREDICATE_CONTRACTS`) and
+ * `lore gate --explain <checkpoint>`'s render function
+ * (`renderPredicateContractsExplain`), plus Amendment A's fix to
+ * `checkPlanClose`'s `ctx.planClaimedAcCoverage ?? []` silent fallback
+ * (checkpoint-registry.ts).
+ *
+ * Pure data/render-function tests only — no store, no IO, no `bun:sqlite` —
+ * hence vitest. `checkpointRegistry` is imported to exercise `checkPlanClose`/
+ * `feedPlanClose` (both module-private, reached only via the registry's
+ * `check`/`feed` fields) with constructed `GateContext` fixtures, mirroring
+ * `predicate-applicability.test.ts`'s established harness shape.
+ *
+ * Coverage dimensions: HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE / REGRESSION,
+ * split across two top-level concerns:
+ *   - "contract table" (AC-PCI-11's pinned test-name substring) — exhaustiveness
+ *     + `--explain` rendering.
+ *   - "Amendment A" (deliberately NOT matching "contract table") — the
+ *     undefined-vs-explicit-[] divergence in `checkPlanClose`.
+ *
+ * @spec_ref spec-plan-close-predicates-measure-invariants-an-applicability
+ *   §Design Decisions D7, §Acceptance Criteria AC-PCI-11; Amendment A
+ *   (task-t4-plan-close-predicate-contract-table-lore-gate-explain)
+ */
+
+import { describe, it, expect } from "vitest";
+import {
+  PLAN_CLOSE_FIELD,
+  ATTESTATION_FLOOR_FIELD,
+  ATTESTATION_EXEMPT_KIND_FIELD,
+  PRD_SYNC_FIELD,
+  ASSESSMENT_FRESHNESS_FIELD,
+} from "../../../src/service/gate-predicates.js";
+import {
+  PREDICATE_CONTRACTS,
+  renderPredicateContractsExplain,
+  type PlanCloseField,
+} from "../../../src/service/predicate-contracts.js";
+import {
+  checkpointRegistry,
+  selectFailures,
+  type GateContext,
+} from "../../../src/service/checkpoint-registry.js";
+
+const planClose = checkpointRegistry["plan-close"];
+if (planClose === undefined) {
+  throw new Error("plan-close checkpoint not registered — test fixture assumption broken");
+}
+
+// The TRUE source of "every field checkPlanClose can emit" — imported directly
+// from gate-predicates.ts (never hand-retyped string literals), so this array
+// can only drift from PREDICATE_CONTRACTS's key set, never from the predicates
+// that actually emit these fields.
+const EMITTED_PLAN_CLOSE_FIELDS: readonly PlanCloseField[] = [
+  PLAN_CLOSE_FIELD,
+  ATTESTATION_FLOOR_FIELD,
+  ATTESTATION_EXEMPT_KIND_FIELD,
+  PRD_SYNC_FIELD,
+  ASSESSMENT_FRESHNESS_FIELD,
+];
+
+// ─── contract table (AC-PCI-11) ─────────────────────────────────────────────
+
+describe("PREDICATE_CONTRACTS — contract table exhaustiveness (AC-PCI-11)", () => {
+  // HAPPY — the pinned contract: the table's key set equals the emitted-field
+  // constants, compared PROGRAMMATICALLY (both sides sourced from the same
+  // gate-predicates.ts constants) rather than against a hand-written list.
+  it("HAPPY: PREDICATE_CONTRACTS declares an entry for every field checkPlanClose can emit — contract table", () => {
+    expect(Object.keys(PREDICATE_CONTRACTS).sort()).toEqual(
+      [...EMITTED_PLAN_CLOSE_FIELDS].sort(),
+    );
+  });
+
+  // NEGATIVE — every entry carries non-empty invariant/measured prose (a
+  // contract with blank prose would be a silent placeholder, not a contract).
+  it("NEGATIVE: every contract entry has non-empty invariant and measured text — contract table", () => {
+    for (const field of EMITTED_PLAN_CLOSE_FIELDS) {
+      const contract = PREDICATE_CONTRACTS[field];
+      expect(contract.invariant.length).toBeGreaterThan(0);
+      expect(contract.measured.length).toBeGreaterThan(0);
+    }
+  });
+
+  // BOUNDARY — the two predicates the task body names explicit known deltas
+  // for carry them; the other three (no deltas recorded in the task body)
+  // carry EMPTY arrays, meaning "none recorded", never "none exist".
+  it("BOUNDARY: attestation-floor and prd-outline-synced carry their documented known deltas — contract table", () => {
+    const floor = PREDICATE_CONTRACTS[ATTESTATION_FLOOR_FIELD];
+    expect(floor.known_false_block.some((d) => d.includes("min_ratio"))).toBe(true);
+    expect(
+      floor.known_false_pass.some((d) => d.toLowerCase().includes("no acceptance criteria") || d.toLowerCase().includes("no ac")),
+    ).toBe(true);
+    expect(floor.known_false_pass.some((d) => d.includes("planClaimedAcCoverage"))).toBe(true);
+
+    const prdSync = PREDICATE_CONTRACTS[PRD_SYNC_FIELD];
+    expect(prdSync.known_false_pass.some((d) => d.includes("sibling plan"))).toBe(true);
+    expect(prdSync.known_false_block.some((d) => d.includes("domain-level capability"))).toBe(true);
+
+    for (const field of [PLAN_CLOSE_FIELD, ATTESTATION_EXEMPT_KIND_FIELD, ASSESSMENT_FRESHNESS_FIELD] as const) {
+      expect(PREDICATE_CONTRACTS[field].known_false_pass).toEqual([]);
+      expect(PREDICATE_CONTRACTS[field].known_false_block).toEqual([]);
+    }
+  });
+
+  // ERROR (misuse-shaped) — an unsupported checkpoint name never throws and
+  // never fabricates table content; it renders a one-line "not recorded" notice.
+  it("ERROR: renderPredicateContractsExplain for an unsupported checkpoint renders a graceful notice, never throws — contract table", () => {
+    expect(() => renderPredicateContractsExplain("spec-create")).not.toThrow();
+    const text = renderPredicateContractsExplain("spec-create");
+    expect(text).toContain("spec-create");
+    expect(text.toLowerCase()).toContain("no predicate contract table");
+  });
+
+  // STATE — `lore gate --explain plan-close` renders every predicate's field/
+  // invariant/measured/both delta lists.
+  it("STATE: renderPredicateContractsExplain('plan-close') prints every predicate's field/invariant/measured/deltas — contract table", () => {
+    const text = renderPredicateContractsExplain("plan-close");
+    for (const field of EMITTED_PLAN_CLOSE_FIELDS) {
+      expect(text).toContain(field);
+      expect(text).toContain(PREDICATE_CONTRACTS[field].invariant);
+      expect(text).toContain(PREDICATE_CONTRACTS[field].measured);
+    }
+    expect(text).toContain("known_false_pass");
+    expect(text).toContain("known_false_block");
+    expect(text).toContain("(none recorded)");
+  });
+
+  // REGRESSION — the feeding pack for a prd-outline-synced denial quotes a
+  // pointer-sized slice of its own contract (field + invariant + measured,
+  // never the full delta lists) — Deliver item 4, D7.
+  it("REGRESSION: the prd-outline-synced feeding pack quotes its own contract pointer — contract table", () => {
+    const ctx: GateContext = {
+      targetIdOrSlug: "plan-x",
+      attestationMinRatio: 0.5,
+      planTasksAttestation: [{ slug: "task-1", title: "T1", evidenceCount: 1, attestedCount: 1 }],
+      planClaimedAcCoverage: [],
+      prdSyncEnabled: true,
+      prdSyncSynced: false,
+      parentSpecPointer: { slug: "spec-x", title: "Spec X", status: "approved" },
+    };
+    const failures = selectFailures(planClose.check(ctx));
+    const text = planClose.feed(ctx, failures);
+    const contract = PREDICATE_CONTRACTS[PRD_SYNC_FIELD];
+    expect(text).toContain(contract.invariant);
+    expect(text).toContain(contract.measured);
+    // Pointer-sized — the full delta lists are NOT quoted into the pack.
+    for (const delta of [...contract.known_false_pass, ...contract.known_false_block]) {
+      expect(text).not.toContain(delta);
+    }
+  });
+});
+
+// ─── Amendment A — undefined vs explicit [] divergence ─────────────────────
+
+describe("checkPlanClose — planClaimedAcCoverage undefined is a caller-contract violation, not []", () => {
+  function realEvidenceCtx(overrides: Partial<GateContext>): GateContext {
+    return {
+      targetIdOrSlug: "plan-x",
+      attestationMinRatio: 0.5,
+      planTasksAttestation: [{ slug: "task-1", title: "T1", evidenceCount: 2, attestedCount: 2 }],
+      ...overrides,
+    };
+  }
+
+  // HAPPY — an OMITTED planClaimedAcCoverage field, alongside real evidence
+  // that would otherwise pass outright, produces an ADDITIONAL notApplicable
+  // entry naming "planClaimedAcCoverage" as the absent referent — the coverage
+  // conjunct is visibly UNEVALUATED, never silently vacuously satisfied.
+  it("omitted planClaimedAcCoverage pushes a companion notApplicable(referent-absent) entry alongside the real verdict", () => {
+    const ctx = realEvidenceCtx({});
+    const results = planClose.check(ctx);
+
+    expect(
+      results.some(
+        (r) => "notApplicable" in r && r.reason === "referent-absent" && r.referent === "planClaimedAcCoverage",
+      ),
+    ).toBe(true);
+    // The real per-task/ratio conditions still evaluate and still pass —
+    // Amendment A does not perturb conditions 1/3, only makes condition 2's
+    // omission visible.
+    expect(results.some((r) => "ok" in r && r.ok === true)).toBe(true);
+  });
+
+  // NEGATIVE — an EXPLICIT `[]` is a resolved fact ("this plan claims no
+  // declared script-mode ACs") and keeps meaning what it means: a vacuous pass
+  // on condition 2, NO companion notApplicable entry.
+  it("an explicit [] is a resolved fact — vacuous pass, no companion notApplicable entry", () => {
+    const ctx = realEvidenceCtx({ planClaimedAcCoverage: [] });
+    const results = planClose.check(ctx);
+
+    expect(
+      results.some((r) => "notApplicable" in r && r.referent === "planClaimedAcCoverage"),
+    ).toBe(false);
+    expect(results.some((r) => "ok" in r && r.ok === true)).toBe(true);
+  });
+
+  // BOUNDARY — when attestationFloor is ALREADY notApplicable for an unrelated
+  // reason (zero evidence anywhere on the plan), the companion entry is
+  // suppressed rather than piling a second not-applicable verdict onto the
+  // same predicate concern.
+  it("BOUNDARY: no companion entry when attestationFloor is already notApplicable (zero evidence)", () => {
+    const ctx: GateContext = { targetIdOrSlug: "plan-y", attestationMinRatio: 0.5, planTasksAttestation: [] };
+    const results = planClose.check(ctx);
+
+    const notApplicableEntries = results.filter((r) => "notApplicable" in r);
+    expect(notApplicableEntries).toHaveLength(1);
+    expect(notApplicableEntries[0]).toMatchObject({ reason: "no-evidence", referent: "plan-y" });
+  });
+
+  // ERROR (exemption-shaped) — a validly exempted plan never reaches the
+  // attestation branch at all; an omitted planClaimedAcCoverage on an exempt
+  // plan produces no companion entry (nothing was evaluated, nothing to flag).
+  it("ERROR: a validly exempted plan never pushes a companion entry regardless of planClaimedAcCoverage", () => {
+    const ctx = realEvidenceCtx({
+      attestationExempt: true,
+      attestationExemptKind: "pipeline-unreachable",
+    });
+    const results = planClose.check(ctx);
+
+    expect(results.some((r) => "notApplicable" in r)).toBe(false);
+    expect(results.some((r) => "ok" in r && r.ok === false && r.field === ATTESTATION_FLOOR_FIELD)).toBe(false);
+  });
+});
