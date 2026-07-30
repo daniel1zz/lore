@@ -42,6 +42,17 @@
  *
  * Source: spec-080-prd-as-outline-contract-structured-outline-domain §C4,
  *   §Acceptance Criteria AC-080-4, §Trade-off Decisions T3.
+ *
+ * EXTENDED (task-t3-domain-doc-sync-requires-attribution-to-the-closing-plan,
+ * spec-plan-close-predicates-measure-invariants-an-applicability §D6): every
+ * PASS scenario above that relies on a bare content diff now ALSO carries an
+ * explicit attributor (a `relates-to`/`informs` link, or the plan's own slug
+ * in the edited content) — see each test's own `reason:` comment — because a
+ * content diff alone no longer satisfies the predicate. The dedicated
+ * "attribution" describe block near the end of this file (AC-PCI-10, `-t
+ * 'attribution'`) is the CONTRACT for that new conjunct; these earlier blocks
+ * stay focused on the window/content-diff logic they always tested, now with
+ * attribution satisfied as an unremarkable setup step.
  */
 
 import { describe, it, expect } from "vitest";
@@ -123,6 +134,45 @@ async function makeLinkedAncestry(
   return { prd, domainDoc, featureSpec };
 }
 
+/** Alternate ancestry where the domain doc IS `featureSpec`'s OWN `parent_id`
+ *  (`resolvePrdSyncDomainDoc`'s FIRST resolution relation — "the ancestor
+ *  spec's own parent, when that parent is itself type spec") rather than
+ *  reached via an `implements` edge. Used ONLY by the "attribution" describe
+ *  block below (task-t3-…) to prove this OTHER structural relation is ALSO
+ *  not an attributor — spec-plan-close-predicates-measure-invariants-an-
+ *  applicability §D6 item 2's "dedicated negative test".
+ *
+ *  `PARENT_TYPE_CONTRACT.spec === ["prd"]` means a spec-under-spec `parent_id`
+ *  cannot be constructed through the public `create()` path at all (it would
+ *  fail with `INVALID_PARENT_TYPE`) — that policy lives in `CorpusService`,
+ *  not the store. `featureSpec` is created legally (parented under the PRD),
+ *  then its `parent_id` is rewritten directly via the raw `store` (bypassing
+ *  `CorpusService`'s policy layer on purpose) to force the structural shape
+ *  `resolvePrdSyncDomainDoc`'s first branch actually reads. */
+async function makeParentLinkedAncestry(
+  cs: CorpusService,
+  store: InMemoryStore,
+): Promise<{ prd: DocRecord; domainDoc: DocRecord; featureSpec: DocRecord }> {
+  const prd = await mustCreate(cs, { type: "prd", title: "Root PRD", content: "# PRD" } as CreateDocInput);
+  const domainDoc = await mustCreate(cs, {
+    type: "spec",
+    title: "Domain overview: shipping",
+    parent_id: prd.id,
+    content: "## Overview\n\nOriginal domain narrative (parent-linked).",
+  } as CreateDocInput);
+  const created = await mustCreate(cs, {
+    type: "spec",
+    title: "Feature spec: shipping label",
+    parent_id: prd.id,
+    content: "## Overview\n\nLanding feature spec, later re-parented under the domain doc.",
+  } as CreateDocInput);
+  const rewriteResult = await store.update(created.id, { parent_id: domainDoc.id });
+  if (!rewriteResult.ok) {
+    throw new Error(`parent_id rewrite failed (setup): ${JSON.stringify(rewriteResult.error)}`);
+  }
+  return { prd, domainDoc, featureSpec: rewriteResult.value };
+}
+
 /** Creates a plan parented under `featureSpec` (its ancestor spec), fast-tracked
  *  straight to `approved` (a valid single-hop transition — `approved -> archived`
  *  needs no intermediate `active` hop). */
@@ -202,6 +252,13 @@ describe("prdOutlineSynced — knob ON, a real content diff on the domain doc in
     await mustSet(corpusService, domainDoc.id, {
       content: "## Overview\n\nSubstantively rewritten domain narrative reflecting the landed feature.",
     });
+    // reason: T3 (§D6) — the content diff above names neither the plan nor its
+    // spec, so it needs an explicit attributor to satisfy the predicate; a
+    // `relates-to` edge is the cleanest one that leaves the "content diff"
+    // narrative this test is actually about untouched. See the dedicated
+    // "attribution" describe block below for the attribution conjunct itself.
+    const linkResult = await corpusService.link(domainDoc.id, plan.id, "relates-to");
+    if (!linkResult.ok) throw new Error(`link failed (setup): ${JSON.stringify(linkResult.error)}`);
 
     const result = await corpusService.set(plan.id, { status: "archived" });
 
@@ -226,6 +283,12 @@ describe("prdOutlineSynced — BOUNDARY: a whitespace-only content diff still sa
     await mustSet(corpusService, domainDoc.id, {
       content: "## Overview\n\nOriginal domain narrative. ",
     });
+    // reason: T3 (§D6) — see the sibling describe block above for why this
+    // attributor is needed; an `informs` edge (the OTHER accepted edge type,
+    // opposite direction) is used here instead of `relates-to` so this suite
+    // exercises both.
+    const linkResult = await corpusService.link(plan.id, domainDoc.id, "informs");
+    if (!linkResult.ok) throw new Error(`link failed (setup): ${JSON.stringify(linkResult.error)}`);
 
     const result = await corpusService.set(plan.id, { status: "archived" });
 
@@ -351,9 +414,12 @@ describe("prdOutlineSynced — BOUNDARY: no claim ever recorded opens the window
     // Task exists but carries NO extra.claim at all — the fallback-rule scenario.
     await makeTask(corpusService, plan, undefined);
     // Edited AFTER plan creation (real "now" strictly follows plan.created_at) —
-    // falls inside [plan.created_at, close) under the fallback rule.
+    // falls inside [plan.created_at, close) under the fallback rule. Names the
+    // plan's own slug (T3 §D6 content attribution) so this stays a genuine
+    // PASS once the attribution conjunct lands, rather than needing a
+    // separate link write.
     await mustSet(corpusService, domainDoc.id, {
-      content: "## Overview\n\nEdited post-creation, no claim ever existed.",
+      content: `## Overview\n\nEdited post-creation, no claim ever existed. See plan ${plan.slug}.`,
     });
 
     const result = await corpusService.set(plan.id, { status: "archived" });
@@ -395,6 +461,180 @@ describe("prdOutlineSynced — REGRESSION: a plan with no linkable ancestor spec
     } as CreateDocInput);
     const plan = await mustSet(corpusService, created.id, { status: "approved" });
     await makeTask(corpusService, plan, PAST_CLAIM_AT);
+
+    const result = await corpusService.set(plan.id, { status: "archived" });
+
+    expect(result.ok).toBe(true);
+  });
+});
+
+// ─── AC-PCI-10: domain-doc sync requires attribution to the closing plan ────
+//
+// task-t3-domain-doc-sync-requires-attribution-to-the-closing-plan,
+// spec-plan-close-predicates-measure-invariants-an-applicability §D6 — a
+// qualifying in-window content diff (the window/content-diff machinery
+// exercised exhaustively above, UNCHANGED here) now ALSO requires the edit to
+// be ATTRIBUTABLE to the closing plan: either the raw content names the plan
+// or its governing spec (by slug or id), or a `relates-to`/`informs` link
+// (either direction) connects the domain doc to the plan or the spec.
+// Structural relations (`parent_id`, `implements` — the very relations that
+// RESOLVED the domain doc) are explicitly NOT attributors.
+//
+// Coverage dimensions: HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE / REGRESSION.
+
+describe("prdOutlineSynced — attribution required for domain-doc sync (AC-PCI-10, §D6)", () => {
+  // HAPPY — content attribution via the closing plan's own slug.
+  it("HAPPY: passes once the in-window edit's raw content names the closing plan's slug", async () => {
+    const { corpusService } = makeHarness(prdSyncConfig(true));
+    const { domainDoc, featureSpec } = await makeLinkedAncestry(corpusService);
+    const plan = await makeApprovedPlan(corpusService, featureSpec);
+    await makeTask(corpusService, plan, PAST_CLAIM_AT);
+    await mustSet(corpusService, domainDoc.id, {
+      content: `## Overview\n\nRewritten to reflect ${plan.slug}.`,
+    });
+
+    const result = await corpusService.set(plan.id, { status: "archived" });
+
+    expect(result.ok).toBe(true);
+  });
+
+  // HAPPY — edge attribution via a `relates-to` link, content itself says nothing.
+  it("HAPPY: passes via a relates-to edge between the domain doc and the plan, even with unattributed content", async () => {
+    const { corpusService } = makeHarness(prdSyncConfig(true));
+    const { domainDoc, featureSpec } = await makeLinkedAncestry(corpusService);
+    const plan = await makeApprovedPlan(corpusService, featureSpec);
+    await makeTask(corpusService, plan, PAST_CLAIM_AT);
+    await mustSet(corpusService, domainDoc.id, {
+      content: "## Overview\n\nRewritten with no plan/spec mention at all.",
+    });
+    const linkResult = await corpusService.link(domainDoc.id, plan.id, "relates-to");
+    if (!linkResult.ok) throw new Error(`link failed (setup): ${JSON.stringify(linkResult.error)}`);
+
+    const result = await corpusService.set(plan.id, { status: "archived" });
+
+    expect(result.ok).toBe(true);
+  });
+
+  // HAPPY — edge attribution via `informs`, opposite link direction (plan -> domainDoc),
+  // proving edge attribution is direction-agnostic, not just link-type-agnostic.
+  it("HAPPY: passes via an informs edge from the plan to the domain doc (direction-agnostic)", async () => {
+    const { corpusService } = makeHarness(prdSyncConfig(true));
+    const { domainDoc, featureSpec } = await makeLinkedAncestry(corpusService);
+    const plan = await makeApprovedPlan(corpusService, featureSpec);
+    await makeTask(corpusService, plan, PAST_CLAIM_AT);
+    await mustSet(corpusService, domainDoc.id, {
+      content: "## Overview\n\nAnother unattributed-by-content rewrite.",
+    });
+    const linkResult = await corpusService.link(plan.id, domainDoc.id, "informs");
+    if (!linkResult.ok) throw new Error(`link failed (setup): ${JSON.stringify(linkResult.error)}`);
+
+    const result = await corpusService.set(plan.id, { status: "archived" });
+
+    expect(result.ok).toBe(true);
+  });
+
+  // NEGATIVE — a genuine in-window content diff with NO attributor at all
+  // (no plan/spec mention, no relates-to/informs edge) must deny, even though
+  // the exact same diff would have passed pre-T3.
+  it("NEGATIVE: denies an in-window content diff that names neither the plan nor its spec and carries no relates-to/informs edge", async () => {
+    const { corpusService } = makeHarness(prdSyncConfig(true));
+    const { domainDoc, featureSpec } = await makeLinkedAncestry(corpusService);
+    const plan = await makeApprovedPlan(corpusService, featureSpec);
+    await makeTask(corpusService, plan, PAST_CLAIM_AT);
+    await mustSet(corpusService, domainDoc.id, {
+      content: "## Overview\n\nA real, substantive rewrite that mentions neither.",
+    });
+
+    const result = await corpusService.set(plan.id, { status: "archived" });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect((result.error as { field?: string }).field).toBe("gate:plan-close:prd-outline-synced");
+    }
+  });
+
+  // BOUNDARY — the domain doc being the spec's OWN `parent_id` (the OTHER
+  // structural relation `resolvePrdSyncDomainDoc` uses to find a domain doc,
+  // dedicated ancestry via `makeParentLinkedAncestry`) must NOT satisfy
+  // attribution by itself — a parent_id structural relation is not a
+  // relates-to/informs edge, so it carries zero attribution weight.
+  it("BOUNDARY: a parent_id structural relation between spec and domain doc never satisfies attribution by itself", async () => {
+    const { store, corpusService } = makeHarness(prdSyncConfig(true));
+    const { domainDoc, featureSpec } = await makeParentLinkedAncestry(corpusService, store);
+    const plan = await makeApprovedPlan(corpusService, featureSpec);
+    await makeTask(corpusService, plan, PAST_CLAIM_AT);
+    await mustSet(corpusService, domainDoc.id, {
+      content: "## Overview\n\nEdited, relying only on the parent_id structural relation.",
+    });
+
+    const result = await corpusService.set(plan.id, { status: "archived" });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect((result.error as { field?: string }).field).toBe("gate:plan-close:prd-outline-synced");
+    }
+  });
+
+  // ERROR (misuse-shaped) — a link of an UNRELATED type ("blocks") between the
+  // domain doc and the plan must not be mistaken for an attributor: only
+  // relates-to/informs count, no other link type does, structural or not.
+  it("ERROR: an unrelated link type (blocks) between the domain doc and the plan does not satisfy attribution", async () => {
+    const { corpusService } = makeHarness(prdSyncConfig(true));
+    const { domainDoc, featureSpec } = await makeLinkedAncestry(corpusService);
+    const plan = await makeApprovedPlan(corpusService, featureSpec);
+    await makeTask(corpusService, plan, PAST_CLAIM_AT);
+    await mustSet(corpusService, domainDoc.id, {
+      content: "## Overview\n\nEdited, with only an unrelated blocks-type link present.",
+    });
+    const linkResult = await corpusService.link(domainDoc.id, plan.id, "blocks");
+    if (!linkResult.ok) throw new Error(`link failed (setup): ${JSON.stringify(linkResult.error)}`);
+
+    const result = await corpusService.set(plan.id, { status: "archived" });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect((result.error as { field?: string }).field).toBe("gate:plan-close:prd-outline-synced");
+    }
+  });
+
+  // STATE — the SAME plan, the SAME edit, transitions from denied to passed
+  // purely as a function of adding a relates-to edge in between the two
+  // close attempts (no other fact changes).
+  it("STATE: the same plan/edit moves from denied to passed once a relates-to edge is added", async () => {
+    const { corpusService } = makeHarness(prdSyncConfig(true));
+    const { domainDoc, featureSpec } = await makeLinkedAncestry(corpusService);
+    const plan = await makeApprovedPlan(corpusService, featureSpec);
+    await makeTask(corpusService, plan, PAST_CLAIM_AT);
+    await mustSet(corpusService, domainDoc.id, {
+      content: "## Overview\n\nEdited once, attribution added only later.",
+    });
+
+    const firstAttempt = await corpusService.set(plan.id, { status: "archived" });
+    expect(firstAttempt.ok).toBe(false);
+
+    const linkResult = await corpusService.link(domainDoc.id, plan.id, "relates-to");
+    if (!linkResult.ok) throw new Error(`link failed (setup): ${JSON.stringify(linkResult.error)}`);
+
+    const secondAttempt = await corpusService.set(plan.id, { status: "archived" });
+    expect(secondAttempt.ok).toBe(true);
+    if (secondAttempt.ok) {
+      expect(secondAttempt.value.status).toBe("archived");
+    }
+  });
+
+  // REGRESSION — spec-level attribution (the governing spec's slug, NOT the
+  // plan's) still satisfies the predicate. This PINS the §D6 documented
+  // residual (spec-level attribution cannot discriminate between sibling
+  // plans under the same spec) as ACCEPTED behavior, not a gap to silently
+  // close by dropping spec-level attributors.
+  it("REGRESSION: passes via the governing spec's own slug in content — the accepted §D6 residual, not a bug", async () => {
+    const { corpusService } = makeHarness(prdSyncConfig(true));
+    const { domainDoc, featureSpec } = await makeLinkedAncestry(corpusService);
+    const plan = await makeApprovedPlan(corpusService, featureSpec);
+    await makeTask(corpusService, plan, PAST_CLAIM_AT);
+    await mustSet(corpusService, domainDoc.id, {
+      content: `## Overview\n\nRewritten per ${featureSpec.slug}, not naming the plan at all.`,
+    });
 
     const result = await corpusService.set(plan.id, { status: "archived" });
 

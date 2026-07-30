@@ -19,7 +19,7 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { ok } from "@lore/core";
-import type { LoreConfig } from "@lore/core";
+import type { LoreConfig, AcCoverageFact } from "@lore/core";
 import {
   prdOutlineSynced,
   attestationFloor,
@@ -31,6 +31,15 @@ import {
   ATTESTATION_FLOOR_REASON,
   type PredicateResult,
 } from "../../../src/service/gate-predicates.js";
+
+// Amendment A (task-t3-domain-doc-sync-requires-attribution-to-the-closing-
+// plan, spec-plan-close-predicates-measure-invariants-an-applicability §D3) —
+// `attestationFloor`'s `acCoverage` 4th parameter lost its `= []` default (a
+// silent opt-out of the per-claimed-AC coverage conjunct). Every fixture below
+// that declares no acceptance criteria at all passes this NAMED constant
+// instead of a bare `[]`, so the intent ("this fixture never declared any
+// ACs") is visible at each call site rather than implicit.
+const NO_DECLARED_ACS: readonly AcCoverageFact[] = [];
 import {
   checkpointRegistry,
   isCheckpointBlocked,
@@ -80,7 +89,7 @@ describe("PredicateNotApplicable — notApplicable shape (AC-PCI-1)", () => {
   // BOUNDARY — attestationFloor's OWN not-applicable case (zero evidence anywhere)
   // shares the identical shape, with a DIFFERENT reason and the PLAN's referent.
   it("BOUNDARY: attestationFloor with zero evidence anywhere returns notApplicable naming the plan referent", () => {
-    const result = attestationFloor([], 0.5, "plan-x");
+    const result = attestationFloor([], 0.5, "plan-x", NO_DECLARED_ACS);
     expect(result).toEqual({ notApplicable: true, reason: "no-evidence", referent: "plan-x" });
     expect("ok" in result).toBe(false);
   });
@@ -88,13 +97,14 @@ describe("PredicateNotApplicable — notApplicable shape (AC-PCI-1)", () => {
   // STATE — attestationFloor transitions notApplicable -> fail -> pass purely as a
   // function of its `tasks` input (no evidence -> some evidence under floor -> evidence meeting floor).
   it("STATE: attestationFloor moves from notApplicable to fail to pass as evidence accumulates", () => {
-    const noEvidence = attestationFloor(undefined, 0.5, "plan-x");
+    const noEvidence = attestationFloor(undefined, 0.5, "plan-x", NO_DECLARED_ACS);
     expect(isNotApplicable(noEvidence)).toBe(true);
 
     const underFloor = attestationFloor(
       [{ slug: "task-1", title: "T1", evidenceCount: 4, attestedCount: 0 }],
       0.5,
       "plan-x",
+      NO_DECLARED_ACS,
     );
     expect(isNotApplicable(underFloor)).toBe(false);
     expect(underFloor).toEqual({ ok: false, reason: ATTESTATION_FLOOR_REASON, field: ATTESTATION_FLOOR_FIELD });
@@ -103,6 +113,7 @@ describe("PredicateNotApplicable — notApplicable shape (AC-PCI-1)", () => {
       [{ slug: "task-1", title: "T1", evidenceCount: 2, attestedCount: 2 }],
       0.5,
       "plan-x",
+      NO_DECLARED_ACS,
     );
     expect(isNotApplicable(meetsFloor)).toBe(false);
     expect(meetsFloor).toEqual({ ok: true });

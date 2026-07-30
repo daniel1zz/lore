@@ -828,13 +828,19 @@ export const ATTESTATION_FLOOR_FIELD = "attestation-floor";
  *   ignored otherwise.
  * @param acCoverage - `computeAcCoverage`'s own output (the plan's governing
  *   spec's declared criteria aggregated over the plan's tasks), for condition
- *   2. OPTIONAL, defaulting to `[]` — unlike `deriveAttestationSummary`'s own
- *   REQUIRED third parameter, this predicate's only PRODUCTION caller
- *   (`checkPlanClose`) always resolves and passes the real facts; the default
- *   exists so pre-existing bare-predicate test fixtures that never modeled AC
- *   declarations at all keep compiling unchanged — they have nothing claimed,
- *   so condition 2 is vacuously satisfied for them, which is the truthful
- *   reading of "this fixture never declared any acceptance criteria."
+ *   2. REQUIRED — no default (Amendment A, spec-plan-close-predicates-
+ *   measure-invariants-an-applicability §D3). A `= []` default here would be
+ *   a SILENT opt-out of condition 2 for any caller (present or future) that
+ *   forgets the argument: it would compile, run, and vacuously satisfy the
+ *   floor's newest default-teeth conjunct with no diagnostic anywhere — the
+ *   exact proxy-for-invariant defect class this whole spec exists to remove.
+ *   Every caller, production or test, must pass its OWN true fact: `[]` for a
+ *   fixture that genuinely declares no acceptance criteria (name that intent
+ *   with a constant, e.g. `NO_DECLARED_ACS`, never a bare `[]` sprinkled
+ *   ad-hoc), or the real `AcCoverageFact[]` otherwise. Mirrors
+ *   `deriveAttestationSummary`'s own already-required third parameter — this
+ *   predicate is a thin delegate over it and must not be looser than the
+ *   function it delegates to.
  * @returns `{notApplicable: true, reason: "no-evidence", referent}` when
  *   `deriveAttestationSummary`'s `total_evidence === 0`; `{ok: true}` when
  *   there IS evidence and every evidence-bearing task has ≥1 attested entry
@@ -844,13 +850,13 @@ export const ATTESTATION_FLOOR_FIELD = "attestation-floor";
  * @example
  * attestationFloor([
  *   { slug: "task-1", title: "T1", evidenceCount: 3, attestedCount: 0 },
- * ], 0.5, "plan-x"); // => { ok: false, reason: "ATTESTATION_FLOOR_NOT_MET", field: "attestation-floor" }
+ * ], 0.5, "plan-x", []); // => { ok: false, reason: "ATTESTATION_FLOOR_NOT_MET", field: "attestation-floor" }
  * @example
  * attestationFloor([
  *   { slug: "task-1", title: "T1", evidenceCount: 2, attestedCount: 2 },
- * ], 0.5, "plan-x"); // => { ok: true }
+ * ], 0.5, "plan-x", []); // => { ok: true }
  * @example
- * attestationFloor(undefined, 0.5, "plan-x");
+ * attestationFloor(undefined, 0.5, "plan-x", []);
  *   // => { notApplicable: true, reason: "no-evidence", referent: "plan-x" } — no evidence anywhere
  * @example
  * attestationFloor(
@@ -864,7 +870,7 @@ export function attestationFloor(
   tasks: readonly TaskAttestationInfo[] | undefined,
   minRatio: number | null,
   referent: string,
-  acCoverage: readonly AcCoverageFact[] = [],
+  acCoverage: readonly AcCoverageFact[],
 ): ApplicablePredicateResult {
   const summary = deriveAttestationSummary(tasks ?? [], minRatio, acCoverage);
   if (summary.total_evidence === 0) {

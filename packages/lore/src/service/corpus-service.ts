@@ -378,6 +378,24 @@ export interface PlanCloseCascadeResult {
   readonly failed: ReadonlyArray<{ doc_id: DocId; slug: string; reason: string }>;
 }
 
+/**
+ * The two candidate attributors `hasPrdSyncContentDiffInWindow` checks a
+ * qualifying domain-doc edit against (spec-plan-close-predicates-measure-
+ * invariants-an-applicability §D6) — the closing plan's own identifiers, and
+ * its governing (ancestor) spec's identifiers. Both `id` AND `slug` are
+ * carried per referent because a content author might reasonably type
+ * either one; edge attribution is matched purely by `id` (link rows are
+ * id-addressed). Module-private — never part of `CorpusService`'s public
+ * surface, this is plumbing between one gate-assembly call site and one
+ * private method.
+ */
+interface PrdSyncAttributionTargets {
+  readonly planId: DocId;
+  readonly planSlug: string;
+  readonly specId: DocId;
+  readonly specSlug: string;
+}
+
 // ─── CorpusService ─────────────────────────────────────────────────────────
 
 export class CorpusService {
@@ -2041,7 +2059,18 @@ export class CorpusService {
               planCloseCtx = { ...planCloseCtx, prdSyncSynced: null };
             } else {
               const windowOpen = this.resolvePrdSyncWindowOpen(bundle.tasks, existing.created_at);
-              const diffResult = await this.hasPrdSyncContentDiffInWindow(domainDoc.id, windowOpen, now);
+              // reason: spec-plan-close-predicates-measure-invariants-an-
+              // applicability §D6 — `existing` IS the closing plan (this whole
+              // block runs inside `isPlanClosing`'s `existing.type === "plan"`
+              // branch) and `bundle.spec` is its resolved ancestor spec (the
+              // SAME `bundle.spec !== undefined` guard this `else` branch is
+              // nested inside) — both already-resolved docs, no extra IO.
+              const diffResult = await this.hasPrdSyncContentDiffInWindow(domainDoc.id, windowOpen, now, {
+                planId: existing.id,
+                planSlug: existing.slug,
+                specId: bundle.spec.id,
+                specSlug: bundle.spec.slug,
+              });
               if (!diffResult.ok) return diffResult;
               planCloseCtx = {
                 ...planCloseCtx,
@@ -2997,7 +3026,11 @@ export class CorpusService {
    * Whether the domain doc `domainDocId` was substantively edited within
    * `[windowOpen, windowClose]` (SPEC-080 §C4: "`[earliest-claim-at (fallback
    * plan created_at), close-write)`, start-inclusive end-exclusive" — the
-   * CLOSE bound is compared INCLUSIVELY here, see below).
+   * CLOSE bound is compared INCLUSIVELY here, see below) AND that edit is
+   * ATTRIBUTABLE to the closing plan (spec-plan-close-predicates-measure-
+   * invariants-an-applicability §D6 — added by T3; the window and the
+   * content-diff judgment below are UNCHANGED from SPEC-080 §C4, attribution
+   * is an ADDITIONAL conjunct never a replacement).
    *
    * "Substantively edited" is judged against the RAW content string the
    * caller submitted (`details.patch.content` on the doc's `"update"` audit
@@ -3011,16 +3044,50 @@ export class CorpusService {
    * the SAME stored bytes — `canonicaliseBody`'s full `.trim()` erases a
    * single appended trailing space, for instance — and SPEC-080 §C4's own RED
    * suite drives EXACTLY that "whitespace-only edit" scenario, expecting it
-   * to satisfy this predicate (a documented residual gameability: "converts
-   * silent drift into a visible, audited, diff-inspectable act", not a bug to
-   * defend against). A TRUE no-op resave (the caller resubmits the doc's own
-   * current canonicalised content byte-for-byte) still correctly yields
-   * `false` here — `rawContent === predecessorContent` in that case — so this
-   * stays a genuine content-authored check, not a bare version-bump proxy
-   * (T3's rejection: "a content-blind predicate would be trivially
-   * gameable"). A doc's own creation (`"create"`-action audit entry, no
-   * `"update"` counterpart) is structurally excluded by the `action:
-   * "update"` filter below — the "no predecessor to diff against" case.
+   * to satisfy the content-diff half of this predicate (a documented residual
+   * gameability: "converts silent drift into a visible, audited,
+   * diff-inspectable act", not a bug to defend against). A TRUE no-op resave
+   * (the caller resubmits the doc's own current canonicalised content
+   * byte-for-byte) still correctly yields `false` here — `rawContent ===
+   * predecessorContent` in that case — so this stays a genuine
+   * content-authored check, not a bare version-bump proxy (T3's rejection: "a
+   * content-blind predicate would be trivially gameable"). A doc's own
+   * creation (`"create"`-action audit entry, no `"update"` counterpart) is
+   * structurally excluded by the `action: "update"` filter below — the "no
+   * predecessor to diff against" case.
+   *
+   * ATTRIBUTION (T3, §D6): a qualifying content diff satisfies this predicate
+   * ONLY when at least one of two attributors holds —
+   *   - **content attribution**: the update's raw submitted content contains
+   *     the closing plan's `slug` or `id`, OR the governing spec's `slug` or
+   *     `id`;
+   *   - **edge attribution**: a `relates-to` or `informs` link (either
+   *     direction) exists between the domain doc and the closing plan, or
+   *     between the domain doc and the governing spec — resolved ONCE per
+   *     call (a doc-level fact, not per audit entry) via
+   *     {@link hasPrdSyncEdgeAttribution} and AND-ed into every entry the loop
+   *     below considers.
+   * Structural relations are DELIBERATELY EXCLUDED from edge attribution: the
+   * domain doc being the governing spec's OWN `parent_id`, and the spec's
+   * `implements` edge to it, are the very relations {@link
+   * resolvePrdSyncDomainDoc} used to FIND the domain doc in the first place —
+   * accepting either as an attributor would make this conjunct vacuously true
+   * for every plan whose ancestry resolves a domain doc at all, reproducing
+   * the exact concurrent-session false-pass defect T3 fixes. Only `relates-to`
+   * and `informs` edges count; `parent`/`implements`/`blocks`/any other link
+   * type does not, structural or otherwise.
+   *
+   * KNOWN RESIDUAL (§D6, accepted per the upstream ADR, NOT fixed here — do
+   * not silently drop the spec-level attributor to "solve" it): spec-level
+   * attribution (a mention of, or edge to, the GOVERNING SPEC rather than the
+   * plan itself) cannot discriminate between SIBLING plans under that same
+   * spec — two concurrently-closing plans sharing one ancestor spec can both
+   * satisfy a spec-level attributor from the same edit. Plan-level
+   * attribution is strictly stronger and is what kills the measured
+   * concurrent-session false pass (two DIFFERENT sessions editing the SAME
+   * domain doc for DIFFERENT, unrelated plans); spec-level attribution is
+   * accepted as a coarser, still-real signal, recorded here as the residual
+   * rather than presented as full attribution.
    *
    * The CLOSE bound is compared INCLUSIVELY (`<=`, not the spec prose's
    * literal `<`) — `windowClose` is the plan-close write's own `now`,
@@ -3040,11 +3107,16 @@ export class CorpusService {
    * @param windowOpen - Window-open bound (inclusive), from {@link resolvePrdSyncWindowOpen}.
    * @param windowClose - Window-close bound (inclusive, see above) — the plan-close
    *   write's own `now` (the SAME timestamp its own version/audit rows use).
+   * @param attribution - The closing plan's and governing spec's `{id, slug}`
+   *   pairs — both content and edge attribution are checked against BOTH
+   *   referents (see KNOWN RESIDUAL above for why the spec-level half is
+   *   deliberately weaker, not deliberately absent).
    */
   private async hasPrdSyncContentDiffInWindow(
     domainDocId: DocId,
     windowOpen: string,
     windowClose: string,
+    attribution: PrdSyncAttributionTargets,
   ): Promise<Result<boolean, LoreError>> {
     const versionsResult = await this.store.findVersions(domainDocId);
     if (!versionsResult.ok) return versionsResult;
@@ -3056,6 +3128,13 @@ export class CorpusService {
     const auditResult = await this.store.queryAudit({ doc_id: domainDocId, action: "update" });
     if (!auditResult.ok) return auditResult;
 
+    // reason: a doc-level fact (not per-entry), resolved ONCE and AND-ed into
+    // every audit entry the loop below considers — see this method's own
+    // JSDoc "ATTRIBUTION" section.
+    const edgeAttributedResult = await this.hasPrdSyncEdgeAttribution(domainDocId, attribution);
+    if (!edgeAttributedResult.ok) return edgeAttributedResult;
+    const edgeAttributed = edgeAttributedResult.value;
+
     for (const entry of auditResult.value) {
       if (entry.timestamp < windowOpen || entry.timestamp > windowClose) continue;
       const patch = entry.details?.["patch"] as Record<string, unknown> | undefined;
@@ -3065,11 +3144,54 @@ export class CorpusService {
       if (typeof entryVersion !== "number") continue;
       const predecessorContent = contentByVersion.get(entryVersion - 1);
       if (predecessorContent === undefined) continue;
-      if (rawContent !== predecessorContent) {
+      if (rawContent === predecessorContent) continue;
+      const contentAttributed =
+        rawContent.includes(attribution.planSlug) ||
+        rawContent.includes(attribution.planId) ||
+        rawContent.includes(attribution.specSlug) ||
+        rawContent.includes(attribution.specId);
+      if (contentAttributed || edgeAttributed) {
         return ok(true);
       }
     }
     return ok(false);
+  }
+
+  /**
+   * Whether a `relates-to` or `informs` link (either direction) exists
+   * between `domainDocId` and either attribution referent (the closing plan
+   * or its governing spec) — the "edge attribution" half of {@link
+   * hasPrdSyncContentDiffInWindow}'s §D6 attribution conjunct. A doc-level
+   * fact independent of any particular audit entry, hence resolved once by
+   * the caller and reused across its whole loop.
+   *
+   * Deliberately EXCLUDES `parent`/`implements` (and every other link type):
+   * those are the structural relations {@link resolvePrdSyncDomainDoc} used
+   * to FIND `domainDocId` in the first place, so counting them here would
+   * make attribution vacuously true for every resolvable domain doc — see
+   * the "ATTRIBUTION" section of {@link hasPrdSyncContentDiffInWindow}'s
+   * JSDoc for the full rationale.
+   *
+   * @param domainDocId - The resolved domain doc's id.
+   * @param attribution - The closing plan's and governing spec's ids (slugs
+   *   are irrelevant here — link edges are id-addressed).
+   * @returns `ok(true)` iff at least one `relates-to`/`informs` link row
+   *   connects `domainDocId` to the plan's id or the spec's id, in either
+   *   direction.
+   */
+  private async hasPrdSyncEdgeAttribution(
+    domainDocId: DocId,
+    attribution: PrdSyncAttributionTargets,
+  ): Promise<Result<boolean, LoreError>> {
+    const linksResult = await this.store.findLinks(domainDocId, "both");
+    if (!linksResult.ok) return linksResult;
+    const attributorIds = new Set<DocId>([attribution.planId, attribution.specId]);
+    const attributed = linksResult.value.some(
+      (link) =>
+        (link.link_type === "relates-to" || link.link_type === "informs") &&
+        (attributorIds.has(link.from_id) || attributorIds.has(link.to_id)),
+    );
+    return ok(attributed);
   }
 
   /**
