@@ -26,7 +26,19 @@
  *                unchanged after the table-driven dispatch refactor (SPEC-070 D1);
  *                `phase-start`'s HAPPY path additionally gets a full byte-for-byte
  *                text-output pin (AC-070-18, review finding F9 — previously only
- *                its error paths were regression-pinned here).
+ *                its error paths were regression-pinned here). Additionally
+ *                (spec-context-provenance-injected-corpus-global-state-and-a
+ *                §Design Decisions D3, AC-CP-4, task
+ *                task-t3-scope-closure-on-the-resume-ticket-cli-stdout-and-mcp):
+ *                `lore feed session-resume` CLI stdout carries the exported
+ *                `RESUME_SCOPE_CLOSURE` constant verbatim (identity) once a real
+ *                handoff ticket is found via the ORDINARY derivation path (no
+ *                `--handoff` flag), and `spec-create`/`phase-start` output stays
+ *                closure-free — this is the CLI-stdout half of AC-CP-4's
+ *                "both surfaces" requirement (MCP half:
+ *                `tests/unit/adapters/mcp-session-tools.test.ts`; pure
+ *                render-function mechanics:
+ *                `tests/unit/flows/feed-flow-resume-closure.test.ts`).
  */
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
@@ -34,6 +46,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import yaml from "yaml";
+import { BOOTSTRAP_INJECTION_KNOWN_KEYS, RESUME_SCOPE_CLOSURE } from "@lore/core";
 import { assertFreshBinary } from "./helpers/assert-fresh-binary";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -238,6 +251,42 @@ function createFullChain(dir: string): {
   expect(claimResult.exitCode).toBe(0);
 
   return { prdSlug, specSlug, planSlug, taskSlug };
+}
+
+/**
+ * Creates a bare plan + a fast-tracked handoff against it (via the CLI `lore handoff`
+ * writer, SPEC-041) — the minimal fixture needed to exercise `lore feed
+ * session-resume`'s FOUND branch (spec-context-provenance-injected-corpus-global-state-and-a
+ * D3 scope-closure block). Returns the plan/handoff slugs for assertion use.
+ */
+function createHandoffChain(dir: string): { planSlug: string; handoffSlug: string } {
+  const planResult = runLore(
+    ["create", "plan", "--title", "T3 Resume Plan", "--content", "Plan body.", "--no-ai"],
+    dir,
+  );
+  expect(planResult.exitCode).toBe(0);
+  const planSlug = parseSlug(planResult.stdout);
+
+  const handoffResult = runLore(
+    [
+      "handoff",
+      "--plan",
+      planSlug,
+      "--by",
+      "alice",
+      "--file",
+      "a.ts",
+      "--decision",
+      "closure block verified@80",
+      "--next",
+      "confirm the CLI stdout closure",
+    ],
+    dir,
+  );
+  expect(handoffResult.exitCode).toBe(0);
+  const handoffSlug = parseSlug(handoffResult.stdout);
+
+  return { planSlug, handoffSlug };
 }
 
 /**
@@ -495,5 +544,35 @@ describe("REGRESSION — spec-create / session-resume / phase-start outputs are 
     const result = runLore(["feed", "totally-unknown-checkpoint"], tmpDir);
     expect(result.exitCode).toBe(0);
     expect(result.stdout.trim()).toBe("unknown checkpoint: totally-unknown-checkpoint");
+  });
+
+  it("REGRESSION (AC-CP-4, CLI stdout): the derivation-path call (no --handoff flag) carries RESUME_SCOPE_CLOSURE verbatim once a ticket is found", () => {
+    createHandoffChain(tmpDir);
+
+    // reason: no `--handoff <slug>` supplied — exercises the SAME newest-wins
+    // derivation path the task's REGRESSION requirement names, not the direct
+    // shortcut.
+    const result = runLore(["feed", "session-resume"], tmpDir);
+    expect(result.exitCode).toBe(0);
+    // reason: identity against the exported constant (D6), not a remembered
+    // substring — the stdout literally ENDS with the constant (the module's
+    // own `renderResumeFeed` invariant: closure is always the last block).
+    expect(result.stdout.endsWith(RESUME_SCOPE_CLOSURE + "\n")).toBe(true);
+    for (const key of BOOTSTRAP_INJECTION_KNOWN_KEYS) {
+      expect(RESUME_SCOPE_CLOSURE.includes(key)).toBe(true);
+    }
+  });
+
+  it("REGRESSION (AC-CP-4): spec-create / phase-start / an unknown checkpoint stay closure-free even once a resume ticket exists in the same corpus", () => {
+    createHandoffChain(tmpDir);
+
+    const specCreate = runLore(["feed", "spec-create"], tmpDir);
+    expect(specCreate.stdout.includes(RESUME_SCOPE_CLOSURE)).toBe(false);
+
+    const phaseStart = runLore(["feed", "phase-start"], tmpDir);
+    expect(phaseStart.stderr.includes(RESUME_SCOPE_CLOSURE)).toBe(false);
+
+    const unknown = runLore(["feed", "totally-unknown-checkpoint"], tmpDir);
+    expect(unknown.stdout.includes(RESUME_SCOPE_CLOSURE)).toBe(false);
   });
 });

@@ -31,7 +31,11 @@
  *   buildFeed(app, checkpoint, parentIdOrSlug?) — the full composition
  *   SESSION_RESUME_CHECKPOINT                — the `"session-resume"` checkpoint
  *                                               literal (SPEC-041 §3 D5)
- *   renderResumeFeed(resume)                 — pure `ResumeResult` → advisory text
+ *   renderResumeFeed(resume)                 — pure `ResumeResult` → advisory text,
+ *                                               closing with `RESUME_SCOPE_CLOSURE`
+ *                                               whenever a ticket is actually rendered
+ *                                               (spec-context-provenance-injected-corpus-global-state-and-a
+ *                                               D3)
  *   buildResumeFeed(app, opts)               — SPEC-041 S2 resume dispatch, called
  *                                               BEFORE `buildFeed`'s
  *                                               `CHECKPOINT_PRODUCED_TYPE` lookup
@@ -56,15 +60,24 @@
  *   treats an unresolvable `--plan`/`--handoff` target as a caller input error, not
  *   an advisory-degrade case (contrast with `resolveParentDoc`'s "unresolvable →
  *   null" for `buildFeed`'s optional `--parent`).
+ * @invariant `renderResumeFeed`'s `RESUME_SCOPE_CLOSURE` block is woven in at exactly
+ *   ONE place (spec-context-provenance-injected-corpus-global-state-and-a D3) —
+ *   `commands/feed.ts`'s `handleSessionResume` prints `buildResumeFeed`'s
+ *   `.feed` verbatim to stdout, and `adapters/mcp/tools.ts`'s `lore_feed`
+ *   session-resume branch JSON-stringifies the SAME `ResumeFeedOutcome`
+ *   (`.feed` field included) as its response text. Neither call site re-derives
+ *   or duplicates the closure text — a surface that rendered its own copy is
+ *   exactly the dual-write failure class this spec exists to close.
  *
  * Side-effect class: IO (corpusService reads, outlineService MDX resolution,
  *   sessionService reads — no writes)
- * Source: IoC vertical-slice tech-spec §4.1/§11, P4 slice; SPEC-041 §3 D5
+ * Source: IoC vertical-slice tech-spec §4.1/§11, P4 slice; SPEC-041 §3 D5;
+ *   spec-context-provenance-injected-corpus-global-state-and-a D3
  */
 
 import type { App } from "../app.js";
 import type { DocRecord, LoreError, Result } from "@lore/core";
-import { err, ok } from "@lore/core";
+import { err, ok, RESUME_SCOPE_CLOSURE } from "@lore/core";
 import { buildFeedingPack, renderFeedingPack } from "../service/gate-feeding.js";
 import { renderResolvedToMarkdown } from "../service/outline-service.js";
 import type { ResumeHandoffRecord, ResumeResult } from "../service/session-service.js";
@@ -283,13 +296,31 @@ function renderReadinessPointer(readiness: ResumeResult["readiness"]): string {
  * Renders a `ResumeResult` into the advisory text `lore feed session-resume` /
  * `lore_feed {checkpoint: "session-resume"}` print — the full handoff content(s)
  * (the one deliberate pointers-only exception, SPEC-041 §3 D5), an age line, a
- * TTL-warning marker when stale, a live readiness pointer block, and a
+ * TTL-warning marker when stale, a live readiness pointer block, a
  * multi-actor header when the result spans more than one actor (divergent state
- * is surfaced, never silently collapsed). Pure — no IO, no wall-clock reads (all
- * of `resume`'s time-derived fields are already computed).
+ * is surfaced, never silently collapsed), and — whenever an actual ticket is
+ * rendered — the {@link RESUME_SCOPE_CLOSURE} boundary block
+ * (spec-context-provenance-injected-corpus-global-state-and-a D3). Pure — no
+ * IO, no wall-clock reads (all of `resume`'s time-derived fields are already
+ * computed).
  *
+ * Both `lore feed`/`commands/feed.ts` (CLI stdout) and `lore_feed`/
+ * `adapters/mcp/tools.ts` (MCP `feed` field, JSON-stringified alongside the
+ * rest of `ResumeFeedOutcome`) print/return this SAME string via
+ * {@link buildResumeFeed} below — this is the ONE place the closure is woven
+ * in, so the two surfaces cannot drift on whether it's present (module
+ * invariant; the defect class this constant exists to close was measured
+ * exactly here, on a render path with two call sites).
+ *
+ * @invariant The closure is appended ONLY when a real ticket is rendered
+ *   (`resume.found === true`) — the `"(no handoff recorded)"` advisory note
+ *   is not itself a resume ticket, so it carries no scope to close (pinned
+ *   REGRESSION: `tests/integration/cli-feed-task-start.bun.test.ts`'s
+ *   "session-resume with no handoff recorded still prints '(no handoff
+ *   recorded)'" byte-exact assertion, predating this task, stays green).
  * @param resume - A `SessionService.resume` result.
- * @returns `"(no handoff recorded)"` when `!resume.found`; otherwise the rendered text.
+ * @returns `"(no handoff recorded)"` when `!resume.found`; otherwise the
+ *   rendered ticket text followed by `RESUME_SCOPE_CLOSURE`.
  */
 export function renderResumeFeed(resume: ResumeResult): string {
   if (!resume.found) {
@@ -299,13 +330,15 @@ export function renderResumeFeed(resume: ResumeResult): string {
     const records = resume.handoffs ?? [];
     const header = `${records.length} actors have handoffs`;
     const body = records.map(renderResumeRecord).join("\n\n");
-    return [header, "", body, renderReadinessPointer(resume.readiness)].filter((s) => s !== "").join("\n\n");
+    return [header, "", body, renderReadinessPointer(resume.readiness), RESUME_SCOPE_CLOSURE]
+      .filter((s) => s !== "")
+      .join("\n\n");
   }
   const record = resume.handoff;
   if (record === undefined) {
     return "(no handoff recorded)";
   }
-  return [renderResumeRecord(record), renderReadinessPointer(resume.readiness)]
+  return [renderResumeRecord(record), renderReadinessPointer(resume.readiness), RESUME_SCOPE_CLOSURE]
     .filter((s) => s !== "")
     .join("\n\n");
 }
