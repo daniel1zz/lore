@@ -214,13 +214,16 @@ function seedCorpus(dir: string): SeededCorpus {
 
 /**
  * The SPEC-080 §Projection Contract's literal field-order list for an
- * ORDINARY (non-seat-scoped) session — positions 1-8; `omitted` is always
- * the final key. `resume_hint` is ABSENT here (never present-as-null) per
- * spec-session-start-handoff-neutrality D1: the user is the router, an
+ * ORDINARY (non-seat-scoped) session — positions 1-9; `omitted` is always
+ * the final key. `scope_declaration` (spec-context-provenance-injected-corpus-global-state-and-a
+ * D1) leads unconditionally — the boundary a consumer reading top-down must
+ * meet before any data. `resume_hint` is ABSENT here (never present-as-null)
+ * per spec-session-start-handoff-neutrality D1: the user is the router, an
  * ambient "resume this" guess misdirects every session but one in a
  * multi-session workflow.
  */
 const INJECTION_CONTRACT_ORDER = [
+  "scope_declaration",
   "my_claims",
   "active_sessions",
   "armed_gates",
@@ -233,14 +236,19 @@ const INJECTION_CONTRACT_ORDER = [
 ] as const;
 
 /**
- * The SAME contract, SEAT-SCOPED — `resume_hint` is retained at its
- * position-1 slot when `--seat-branch` resolves to a live plan
- * (spec-session-start-handoff-neutrality D2): that hint derives from the
- * session's own worktree branch, not a corpus-wide guess.
+ * The SAME contract, SEAT-SCOPED — `resume_hint` is retained immediately
+ * AFTER `scope_declaration` (still position 2, not 1 — the declaration
+ * always leads even the seat-scoped hint) when `--seat-branch` resolves to
+ * a live plan (spec-session-start-handoff-neutrality D2): that hint derives
+ * from the session's own worktree branch, not a corpus-wide guess. Built by
+ * splicing `resume_hint` in after the leading declaration — NOT a naive
+ * `["resume_hint", ...INJECTION_CONTRACT_ORDER]` prepend, which would wrongly
+ * place `resume_hint` before `scope_declaration`.
  */
 const SEAT_SCOPED_INJECTION_CONTRACT_ORDER = [
+  "scope_declaration",
   "resume_hint",
-  ...INJECTION_CONTRACT_ORDER,
+  ...INJECTION_CONTRACT_ORDER.slice(1),
 ] as const;
 
 /**
