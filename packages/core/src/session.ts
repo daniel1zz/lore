@@ -75,6 +75,21 @@
  *     the "every injected field" name list from this ONE set rather than a
  *     hand-copied duplicate that can silently drift out of sync with the
  *     projection contract.
+ *   - RESUME_COVERAGE_FLOOR / RESUME_ITEM_ID_PREFIX_KEY_DECISION /
+ *     RESUME_ITEM_ID_PREFIX_NEXT_STEP / formatResumeItemId /
+ *     RESUME_DISPOSITION_MARKER / RESUME_DISPOSITION_DONE /
+ *     RESUME_DISPOSITION_DEFERRED_PREFIX / renderResumeCoverageCardinalityLine
+ *     — the resume ticket's LOWER-bound vocabulary
+ *     (spec-resume-ticket-coverage-a-shipped-upper-bound-left-the D1, D3, D5,
+ *     D8, D9). RESUME_SCOPE_CLOSURE above bounds a ticket from ABOVE (do not
+ *     exceed scope); these bound it from BELOW (account for every printed
+ *     item) — a SEPARATE constant from RESUME_SCOPE_CLOSURE, never merged
+ *     into it (D3). This module owns ONLY the vocabulary: rendering the
+ *     ordinal-tagged lines is sibling T2's job
+ *     (`packages/lore/src/flows/feed-flow.ts::renderResumeRecord`), and
+ *     parsing a disposition line back into a verdict is sibling T3's job
+ *     (the `lore handoff` coverage-check verb, the SOLE parser of this
+ *     grammar — D9).
  *
  * Invariants:
  *   - No IO, no wall-clock reads, no randomness — `renderHandoffContent` is deterministic:
@@ -107,6 +122,10 @@
  *     `budget_exceeded: true`, per SPEC-080(bootstrap-injection)'s own
  *     "sacrifice budget, never content" rule — see D1's own note above for
  *     why an earlier short-circuit here was measured wrong and removed.
+ *   - `renderResumeCoverageCardinalityLine` and `formatResumeItemId`
+ *     (spec-resume-ticket-coverage-a-shipped-upper-bound-left-the) are pure:
+ *     no IO, no wall-clock reads, no randomness — the same inputs always
+ *     produce the same string.
  *
  * Source: SPEC-041 §3 D2, D3; SPEC-042 §Design Decisions D1;
  * SPEC-080(bootstrap-injection; corpus slug
@@ -118,7 +137,14 @@
  * spec-context-provenance-injected-corpus-global-state-and-a §Design
  * Decisions D1 (leading scope declaration, no short-circuit — SPEC-080's
  * existing over-budget rule applies unchanged), D6 (no AC may assert
- * against remembered wording).
+ * against remembered wording);
+ * spec-resume-ticket-coverage-a-shipped-upper-bound-left-the §Design
+ * Decisions D1 (ids/counts derive from the structured SSOT, never parsed
+ * projection text), D3 (the lower-bound constant is separate from the
+ * upper-bound one), D5 (the obligation is to account, not to complete),
+ * D8 (zero cross-process state — this module contributes only pure
+ * vocabulary, never a stored ledger), D9 (the coverage-check verb is the
+ * sole grammar parser; this module only names the tokens).
  */
 
 import { z } from "zod";
@@ -732,6 +758,161 @@ export const BOOTSTRAP_FRAMING_LINE =
 export const RESUME_SCOPE_CLOSURE =
   "SCOPE CLOSURE: this ticket's scope is exactly the plan, modified files, and next steps printed above. " +
   `It is NOT any of the corpus-global bootstrap injection fields: ${Array.from(BOOTSTRAP_INJECTION_KNOWN_KEYS).join(", ")}.`;
+
+// ─── Resume Ticket Coverage Floor (spec-resume-ticket-coverage-a-shipped-upper-bound-left-the D1, D3, D5, D8, D9) ───
+//
+// RESUME_SCOPE_CLOSURE above bounds a resume ticket from ABOVE: what a
+// consumer must NOT treat as in-scope. It has no LOWER bound — nothing
+// asserts that a consumer accounted for EVERY item the ticket printed. The
+// 2026-07-30 handoff-40 incident measured a consumer silently dropping 3 of
+// 10 printed items (the tails of both arrays) while RESUME_SCOPE_CLOSURE was
+// present in the consumed output and obeyed — compliant on the upper bound,
+// wrong on a bound that did not exist. These constants are the vocabulary
+// for that lower bound: an id-tagging scheme so the render path and the
+// Stop-time coverage verb agree on a line's identity (D1), a
+// disposition-line grammar so a consumer's per-item accounting is
+// machine-parseable (D5, D9), and a pure cardinality renderer so the printed
+// item count is identity-assertable without constructing a whole ticket
+// (D2, AC-RC-2). This module owns ONLY the vocabulary — rendering the
+// ordinal-tagged lines belongs to sibling T2
+// (`packages/lore/src/flows/feed-flow.ts::renderResumeRecord`), and parsing
+// a disposition line back into a verdict belongs to sibling T3 (the
+// `lore handoff` coverage-check verb, the SOLE parser of this grammar, D9).
+
+/**
+ * The resume ticket's lower-bound declaration
+ * (spec-resume-ticket-coverage-a-shipped-upper-bound-left-the D3, D4) —
+ * states that every item the ticket printed (each `KD<n>`/`NS<n>` line) must
+ * be dispositioned before the session ends. Deliberately a SEPARATE exported
+ * constant from {@link RESUME_SCOPE_CLOSURE}, never merged into one string:
+ * the two constrain OPPOSITE directions (upper bound: do not exceed scope;
+ * lower bound: account for every item), and merging them would make the
+ * absence of either half undetectable by a single identity assertion —
+ * exactly the measured failure mode ("one direction present, the other
+ * absent") this spec exists to close (D3).
+ *
+ * @invariant States the ACCOUNTING obligation only (`done` or
+ *   `deferred:<reason>` — {@link RESUME_DISPOSITION_DONE} /
+ *   {@link RESUME_DISPOSITION_DEFERRED_PREFIX}), never a completion
+ *   obligation (D5) — a ticket whose items are all legitimately out of this
+ *   session's scope still closes cleanly once every item is deferred.
+ * @invariant Asserted by AC-RC-3 via `===` identity against this constant,
+ *   never a remembered substring (D7) — and via a distinctness assertion
+ *   against {@link RESUME_SCOPE_CLOSURE} proving the two never collapse into
+ *   one string.
+ */
+export const RESUME_COVERAGE_FLOOR =
+  "COVERAGE FLOOR: every item printed above (each KD<n> and NS<n> line) must be dispositioned — done, or deferred:<reason> — before this session ends. None may go unmentioned.";
+
+/**
+ * Item-id prefix for one `extra.key_decisions[]` entry (`KD<n>`, 1-based,
+ * array order) — spec-resume-ticket-coverage-a-shipped-upper-bound-left-the
+ * D1. Exported as a named constant, never inlined at a call site, so the
+ * render path (sibling T2, `renderResumeRecord`) and the coverage-check verb
+ * (sibling T3, the sole parser of this tag format, D9) cannot drift on the
+ * prefix literal — the same "binary parses a format the binary emitted, no
+ * second implementation to drift" discipline D8 states for the grammar as a
+ * whole.
+ */
+export const RESUME_ITEM_ID_PREFIX_KEY_DECISION = "KD";
+
+/**
+ * Item-id prefix for one `extra.next_steps[]` entry (`NS<n>`, 1-based, array
+ * order) — spec-resume-ticket-coverage-a-shipped-upper-bound-left-the D1.
+ * See {@link RESUME_ITEM_ID_PREFIX_KEY_DECISION}'s doc for why this is a
+ * named export rather than an inlined literal.
+ */
+export const RESUME_ITEM_ID_PREFIX_NEXT_STEP = "NS";
+
+/**
+ * Formats one ordinal item id from a prefix constant and a 1-based array
+ * index — the ONE place `${prefix}${oneBasedIndex}` is written, so
+ * {@link RESUME_ITEM_ID_PREFIX_KEY_DECISION} and
+ * {@link RESUME_ITEM_ID_PREFIX_NEXT_STEP} combine with an index identically
+ * everywhere they are used (render path, coverage verb, this module's own
+ * tests) — spec-resume-ticket-coverage-a-shipped-upper-bound-left-the D1.
+ * Pure — no IO, no wall-clock reads.
+ *
+ * @param prefix - {@link RESUME_ITEM_ID_PREFIX_KEY_DECISION} or
+ *   {@link RESUME_ITEM_ID_PREFIX_NEXT_STEP}.
+ * @param oneBasedIndex - The item's 1-based position in its source array.
+ * @returns The tag string.
+ * @example
+ * formatResumeItemId(RESUME_ITEM_ID_PREFIX_KEY_DECISION, 1); // => "KD1"
+ */
+export function formatResumeItemId(prefix: string, oneBasedIndex: number): string {
+  return `${prefix}${oneBasedIndex}`;
+}
+
+/**
+ * The disposition-line marker literal a consumer's per-item accounting is
+ * tagged with — modeled directly on the `**[DOC_SYNC]**` shape
+ * `assets/hooks/stop-doc-sync.mjs` already uses, which this harness has
+ * measured effective at blocking a turn on an unmet per-turn obligation
+ * (spec-resume-ticket-coverage-a-shipped-upper-bound-left-the, "Precedent
+ * for the enforcement shape"). A disposition line is expected to read
+ * `${RESUME_DISPOSITION_MARKER} <item-id>: <disposition>` — but this module
+ * does not itself write or parse that grammar; it only names the marker so
+ * the coverage-check verb (sibling T3, the SOLE parser of this grammar, D9)
+ * and this module's own tests key off one literal rather than a hand-typed
+ * copy that can drift from what a consumer is actually told to write.
+ */
+export const RESUME_DISPOSITION_MARKER = "**[RESUME_DISPOSITION]**";
+
+/**
+ * The "fully handled" disposition token
+ * (spec-resume-ticket-coverage-a-shipped-upper-bound-left-the D5) — paired
+ * with {@link RESUME_DISPOSITION_DEFERRED_PREFIX} as the two accepted
+ * dispositions. A disposition line reads
+ * `${RESUME_DISPOSITION_MARKER} <item-id>: ${RESUME_DISPOSITION_DONE}`.
+ */
+export const RESUME_DISPOSITION_DONE = "done";
+
+/**
+ * The "explicitly out of scope for this session" disposition token prefix
+ * (spec-resume-ticket-coverage-a-shipped-upper-bound-left-the D5) — a
+ * consumer appends its own free-text reason after the colon
+ * (`deferred:<reason>`). Requiring a reason, rather than accepting a bare
+ * `deferred`, costs one line and leaves the reason visible in the
+ * transcript — which is what lets the coverage gate arm unconditionally
+ * without becoming noise: a ticket whose items are all legitimately out of
+ * this session's scope still closes cleanly once every item carries its own
+ * deferral reason (D5). A disposition line reads
+ * `${RESUME_DISPOSITION_MARKER} <item-id>: ${RESUME_DISPOSITION_DEFERRED_PREFIX}<reason>`.
+ */
+export const RESUME_DISPOSITION_DEFERRED_PREFIX = "deferred:";
+
+/**
+ * Pure cardinality-line renderer
+ * (spec-resume-ticket-coverage-a-shipped-upper-bound-left-the D2, AC-RC-2) —
+ * the line stating how many items the ticket carries, computed from the two
+ * SSOT array lengths rather than derived from prose. Sits between the
+ * ticket's header and its first item line (D2 — a lost-in-middle truncation
+ * of later content cannot strip a line this early). Pure so AC-RC-2 can
+ * assert identity against this function's own output without constructing a
+ * whole ticket, and referentially transparent: the same two lengths always
+ * produce the same string.
+ *
+ * @param keyDecisionsCount - `extra.key_decisions.length`. `0` is a normal
+ *   input (e.g. a `degraded` handoff, see {@link DEGRADED_HANDOFF_MARKER}
+ *   above) with no special-cased branch — degraded handoffs are counted by
+ *   actual array length, same as any other (spec Out-of-scope).
+ * @param nextStepsCount - `extra.next_steps.length`.
+ * @returns The cardinality line.
+ * @example
+ * renderResumeCoverageCardinalityLine(4, 6);
+ * // => "SCOPE: 4 decisions + 6 next steps = 10 items to account for"
+ * @example
+ * renderResumeCoverageCardinalityLine(0, 1);
+ * // => "SCOPE: 0 decisions + 1 next steps = 1 items to account for"
+ */
+export function renderResumeCoverageCardinalityLine(
+  keyDecisionsCount: number,
+  nextStepsCount: number,
+): string {
+  const total = keyDecisionsCount + nextStepsCount;
+  return `SCOPE: ${keyDecisionsCount} decisions + ${nextStepsCount} next steps = ${total} items to account for`;
+}
 
 /**
  * The three source categories a status report must distinguish whenever it
