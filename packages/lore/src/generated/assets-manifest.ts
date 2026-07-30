@@ -45,13 +45,13 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "7dca4cc7b5f88d1daaab16f8ac19693baa62d6a16af0a8edb9efd1f64649ab99",
+  tree_digest: "6696a8a1c669378f0414aabb13ff89910d35bc19b5b257f2a88a51fd18e4a686",
   entries: [
   { path: "agents/lore-explorer.md", kind: "agent", ownership: "managed", sha256: "18b80554da11704960849d5b68ea9ef763bdc88315ebe89acc26a1e86d7e5629" },
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "324340b8173cae8e3133968185fdf882b81daee2115c988f7506e1bc968a5364" },
   { path: "agents/lore-reviewer.md", kind: "agent", ownership: "managed", sha256: "c3d3cfe853c49c38afca62d19cef4205a14374e62f6c8e2286f415fab3c822ee" },
   { path: "governance/claude-md-contract.md", kind: "governance", ownership: "managed", sha256: "179cd976ca2bc36996b8129cbcfd8ca66a1828b8b99889c9ebad471fb10206e0" },
-  { path: "governance/corpus-workflow.md", kind: "governance", ownership: "managed", sha256: "413419a688e41e42069a716e7fddcdd7c4bdaf1e5c5dc747a8394562df83690a" },
+  { path: "governance/corpus-workflow.md", kind: "governance", ownership: "managed", sha256: "9e66dcea11426dc943828dd64449adf303aa2295e7e5db0f215091f8d21966a3" },
   { path: "governance/seat-briefing.md", kind: "governance", ownership: "managed", sha256: "f9cb47c9bb7ec3af1644637e600156f8cb59f4ed9afbe538caa32a22f4107358" },
   { path: "hooks/claude-md-guard.sh", kind: "hook", ownership: "managed", sha256: "18286782787eaeb0e4b4d5bd4670fee515ac99886cf83d38cafaa53cf047c964" },
   { path: "hooks/lib/turn-state.mjs", kind: "hook", ownership: "managed", sha256: "a8f5214280d9c22835507e24e32ba6648bb1d8dd9646328553915e693518b1c9" },
@@ -64,6 +64,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "hooks/pre-subagent-gate.mjs", kind: "hook", ownership: "managed", sha256: "eff1c2d0cd8b92288d48e278040c6d014f1725eb54c69d21eab342f5924ccae4" },
   { path: "hooks/session-start-resume.mjs", kind: "hook", ownership: "managed", sha256: "3bc808352b75a7182828c61ce7f1ca89e1c3d7c16d090d808968864689b2a417" },
   { path: "hooks/stop-doc-sync.mjs", kind: "hook", ownership: "managed", sha256: "c7ca05c553446b1174839832989014741e8af9bd1c9c5f89aedb4b19a6836061" },
+  { path: "hooks/stop-handoff-coverage.mjs", kind: "hook", ownership: "managed", sha256: "d2751888f5fe102e919092ff443bd73536e6abbcb846e3425ad3a43e4da6ef47" },
   { path: "hooks/subagent-context.mjs", kind: "hook", ownership: "managed", sha256: "03b512da45147aab2bcac2bb441b7e066b22a4e2e2df781a0b625c7963176587" },
   { path: "hooks/subagent-stop-commit-guard.mjs", kind: "hook", ownership: "managed", sha256: "19de55e36e53490b8386acf19de9efef4c89f96a8d6d7ac1160b60156bd201d8" },
   { path: "project/CLAUDE.md.template", kind: "project", ownership: "merged", sha256: "9ab0003f8db621250b4ddda8df938bc6b6224dc6d98f7057cd407b9a4412b359" },
