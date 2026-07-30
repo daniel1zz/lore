@@ -148,6 +148,13 @@ describe("checkPlanClose — never a fail on an absent domain doc (AC-PCI-2)", (
       // assertions to the prd-sync predicate's own contribution, mirroring
       // attestation-exempt-kind.test.ts's isolation-via-fixture precedent.
       planTasksAttestation: [{ slug: "task-1", title: "T1", evidenceCount: 1, attestedCount: 1 }],
+      // reason: Amendment A (task-t3, §D3) — this group's fixtures pre-date the
+      // per-claimed-AC coverage conjunct and never meant to say anything about
+      // it; an explicit `NO_DECLARED_ACS` makes that intent visible instead of
+      // silently omitting the field, which — post-Amendment-A — pushes its OWN
+      // companion `notApplicable` verdict (referent "planClaimedAcCoverage")
+      // that these prd-sync-focused assertions never anticipated.
+      planClaimedAcCoverage: NO_DECLARED_ACS,
       prdSyncEnabled: true,
       parentSpecPointer: { slug: "spec-x", title: "Spec X", status: "approved" },
       ...overrides,
@@ -207,6 +214,10 @@ describe("checkPlanClose — never a fail on an absent domain doc (AC-PCI-2)", (
       targetIdOrSlug: "plan-x",
       attestationMinRatio: 0.5,
       planTasksAttestation: [{ slug: "task-1", title: "T1", evidenceCount: 1, attestedCount: 1 }],
+      // reason: Amendment A — see `baseCtx`'s identical comment above; this
+      // fixture is built directly (not via `baseCtx`) but carries the same
+      // "no declared ACs" intent explicitly.
+      planClaimedAcCoverage: NO_DECLARED_ACS,
       prdSyncEnabled: true,
     };
     const results = planClose.check(ctx);
@@ -245,6 +256,13 @@ describe("GateEnforcer.enforce — enforce advisory on plan-close not-applicable
       targetIdOrSlug: "plan-x",
       attestationMinRatio: 0.5,
       planTasksAttestation: [{ slug: "task-1", title: "T1", evidenceCount: 1, attestedCount: 1 }],
+      // reason: Amendment A — this describe block's fixtures isolate the
+      // prd-sync not-applicable path and never meant to say anything about
+      // per-claimed-AC coverage; an explicit `NO_DECLARED_ACS` makes that
+      // intent visible (see `baseCtx`'s identical comment in the AC-PCI-2
+      // describe block above) instead of also tripping the coverage
+      // companion `notApplicable` verdict this describe block isn't testing.
+      planClaimedAcCoverage: NO_DECLARED_ACS,
       prdSyncEnabled: true,
       prdSyncSynced: null,
       parentSpecPointer: { slug: "spec-x", title: "Spec X", status: "approved" },
@@ -325,6 +343,13 @@ describe("GateEnforcer.enforce — enforce advisory on plan-close not-applicable
       targetIdOrSlug: "plan-z",
       attestationMinRatio: 0.5,
       planTasksAttestation: [{ slug: "task-1", title: "T1", evidenceCount: 2, attestedCount: 2 }],
+      // reason: Amendment A — real, floor-meeting evidence with NO claimed ACs
+      // declared is the resolved fact this fixture means ("nothing to
+      // attest, but no claims outstanding either"); an explicit
+      // `NO_DECLARED_ACS` keeps this scenario a true "no not-applicable
+      // verdicts at all" case instead of tripping the coverage companion
+      // verdict, which is exactly what this test asserts never fires.
+      planClaimedAcCoverage: NO_DECLARED_ACS,
     };
 
     const result = enforcer.enforce("plan-close", ctx);
@@ -350,5 +375,70 @@ describe("GateEnforcer.enforce — enforce advisory on plan-close not-applicable
     expect(recordGateSkip).toHaveBeenCalledTimes(1);
     const entry = recordGateSkip.mock.calls[0]![0];
     expect(entry.action).toBe("gate_skipped");
+  });
+});
+
+// ─── T8 Part 2: notApplicableAdvisoryKind is keyed per-referent ───────────
+//
+// Task-level oracle (task-t8-repair-the-t3-t4-integration-regression-6-under,
+// not a new spec AC) — spec-plan-close-predicates-measure-invariants-an-
+// applicability §D2 says an inapplicable verdict's advisory kind must never
+// mislabel its subject. `gate-enforcer.ts`'s `notApplicableAdvisoryKind` used
+// to map EVERY `reason: "referent-absent"` to `"prd-sync-domain-doc"` — true
+// only while `prdOutlineSynced` was the sole producer of that reason. T4's
+// Amendment A companion push (`checkPlanClose`, checkpoint-registry.ts) now
+// ALSO produces `reason: "referent-absent"`, with `referent:
+// "planClaimedAcCoverage"` — a fixed sentinel, never a real spec slug — so
+// keying on `reason` alone conflates two unrelated audit subjects.
+describe("GateEnforcer.enforce — notApplicableAdvisoryKind is keyed per-referent (T8 Part 2)", () => {
+  // HAPPY — a SINGLE ctx that trips BOTH producers of `reason: "referent-
+  // absent"` simultaneously (an absent domain doc AND an unresolved
+  // planClaimedAcCoverage caller-contract violation) must record two audit
+  // rows carrying their OWN distinct kind — proving the mapping is per-
+  // referent, not per-reason, and that neither producer's kind leaks onto
+  // the other's row.
+  it("HAPPY: a domain-doc referent and a planClaimedAcCoverage referent map to distinct kinds on the SAME enforce() call", () => {
+    const recordGateSkip = vi.fn<RecordGateSkip>().mockResolvedValue(ok(undefined));
+    const enforcer = new GateEnforcer(undefined, recordGateSkip);
+    // reason: `planClaimedAcCoverage` is deliberately OMITTED (not `NO_DECLARED_ACS`)
+    // — that omission IS the Amendment A companion-push trigger under test,
+    // paired with a real absent domain doc (`prdSyncSynced: null`) so both
+    // "referent-absent" producers fire on the SAME `checkPlanClose` call.
+    const ctx: GateContext = {
+      targetIdOrSlug: "plan-x",
+      attestationMinRatio: 0.5,
+      planTasksAttestation: [{ slug: "task-1", title: "T1", evidenceCount: 1, attestedCount: 1 }],
+      prdSyncEnabled: true,
+      prdSyncSynced: null,
+      parentSpecPointer: { slug: "spec-y", title: "Spec Y", status: "approved" },
+    };
+
+    const result = enforcer.enforce("plan-close", ctx);
+
+    expect(result).toEqual({ ok: true, value: undefined });
+    expect(recordGateSkip).toHaveBeenCalledTimes(2);
+    const details = recordGateSkip.mock.calls.map(
+      (call) => call[0]!.details as { kind: string; referent: string },
+    );
+    const coverageEntry = details.find((d) => d.referent === "planClaimedAcCoverage");
+    const domainDocEntry = details.find((d) => d.referent === "spec-y");
+    expect(coverageEntry?.kind).toBe("attestation-not-applicable");
+    expect(domainDocEntry?.kind).toBe("prd-sync-domain-doc");
+  });
+
+  // NEGATIVE — attestationFloor's OWN zero-evidence not-applicable case
+  // (reason "no-evidence") must still map to "attestation-not-applicable",
+  // proving the per-referent fix did not disturb the pre-existing reason-
+  // keyed branch for the producer that has no competing referent.
+  it("NEGATIVE: attestationFloor's zero-evidence not-applicable still maps to attestation-not-applicable", () => {
+    const recordGateSkip = vi.fn<RecordGateSkip>().mockResolvedValue(ok(undefined));
+    const enforcer = new GateEnforcer(undefined, recordGateSkip);
+    const ctx: GateContext = { targetIdOrSlug: "plan-y", attestationMinRatio: 0.5, planTasksAttestation: [] };
+
+    enforcer.enforce("plan-close", ctx);
+
+    expect(recordGateSkip).toHaveBeenCalledTimes(1);
+    const entry = recordGateSkip.mock.calls[0]![0];
+    expect(entry.details).toMatchObject({ kind: "attestation-not-applicable", referent: "plan-y" });
   });
 });
