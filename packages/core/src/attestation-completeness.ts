@@ -16,6 +16,11 @@
  *     known summary line is present.
  *   - commandHasCaseFilter(command) — detects a `-t`/`--testNamePattern` case
  *     filter on the command (task "verify trust extensions" Part B).
+ *   - CASE_FILTER_FLAGS_DESCRIPTION / RUNNER_SUMMARY_FORMATS_DESCRIPTION — the
+ *     human-facing spelling of what the two rules above recognise, colocated
+ *     with them so a consumer's error message never retypes (and drifts from)
+ *     the vocabulary. Consumed by `lore evidence`'s filtered-pass guard
+ *     (`adapters/cli/evidence-precheck.ts`).
  *   - judgeCompleteness({declaredPaths, executedUnits, hasCaseFilter?}) — pure
  *     decision combining the counts into a {@link CompletenessVerdict}.
  *   - commandReferencesCompiledBinary(command) — detects whether the command
@@ -162,6 +167,27 @@ export function countExplicitPathArgs(command: string): number {
  */
 const CASE_FILTER_TOKENS = new Set(["-t", "--testNamePattern"]);
 const CASE_FILTER_EQUALS_PREFIX = "--testNamePattern=";
+
+/**
+ * Human-facing spelling of the flags {@link commandHasCaseFilter} recognises,
+ * for embedding in an operator-facing error message.
+ *
+ * // reason: this vocabulary lives HERE, beside the predicate that owns it,
+ * // rather than being retyped inside each consumer's message string — a
+ * // consumer that spells the flag itself is a second, drift-prone definition
+ * // of "which flags count as a case filter" (SPEC-061 AC-061-14 scans
+ * // `packages/lore/src` for exactly that literal and fails on any hit).
+ */
+export const CASE_FILTER_FLAGS_DESCRIPTION = "-t / --testNamePattern";
+
+/**
+ * Human-facing description of the runner-summary shapes
+ * {@link parseExecutedUnits} recognises, for telling an operator what a
+ * rejected output tail was missing. Colocated with the patterns themselves for
+ * the same reason as {@link CASE_FILTER_FLAGS_DESCRIPTION}.
+ */
+export const RUNNER_SUMMARY_FORMATS_DESCRIPTION =
+  'vitest\'s "Test Files … (N)" + "Tests … (N)" pair, or bun test\'s "Ran N tests across M files"';
 
 /**
  * Detects whether `command` carries a `-t`/`--testNamePattern` test-CASE-name

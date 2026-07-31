@@ -54,7 +54,24 @@
  * Exit codes: 0 = success, 2 = argument error (both/neither output-tail flags
  *   given inconsistently), 3 = DOC_NOT_FOUND, 4 = VALIDATION_ERROR (not a task/phase,
  *   50-entry cap reached, bad oracle/result value, unknown ac_ref/checklist_ref, OR
- *   a missing oracle file per the precheck below), 5 = STALE_VERSION.
+ *   a missing oracle file / an unproven filtered pass per the two prechecks
+ *   below), 5 = STALE_VERSION.
+ *
+ * Filtered-pass matched-count guard (SPEC-061 AC-061-11..14, decided by
+ * adr-lore-evidence-proves-a-filtered-pass-with-the-runner-s-own) — a
+ * `--result pass` whose `--command` carries a `-t` case filter used to record
+ * cleanly with no proof the filter matched anything, and a zero-match filter
+ * EXITS 0 with every test reported `skipped`. Such a call must now supply
+ * `--output-tail`/`--output-tail-file` containing the runner's own summary
+ * line; a missing, unparseable, count-less or zero-matched tail is refused
+ * with `VALIDATION_ERROR` (exit 4). Fail-CLOSED, unlike `lore verify`'s
+ * fail-OPEN `unknown_runner` — that runner observed the exit code itself,
+ * this command has observed nothing. Deliberately NO `--matched <n>` flag: a
+ * bare integer is as fabricable as the false `pass` it would gate. UNFILTERED
+ * commands are completely unaffected. The decision is
+ * `../evidence-precheck.js::findFilteredPassRefusal`, shared verbatim
+ * with MCP `lore_evidence_add` (AC-061-17) — the same CLI/MCP split the
+ * missing-oracle-file precheck already uses, for the same reason.
  *
  * Missing-oracle-file precheck (defect: task-lore-evidence-self-reported-pass-
  * lacks-oracle-file, AC-080-3 incident) — a self-reported `--oracle test|e2e
@@ -98,7 +115,10 @@ import { ORACLE_KINDS, tailChars, type LoreError, type OracleKind } from "@lore/
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 import { requirePhaseWorkflowService } from "../phase-wiring.js";
-import { findMissingOracleFilesForEvidence } from "../evidence-precheck.js";
+import {
+  findMissingOracleFilesForEvidence,
+  findFilteredPassRefusal,
+} from "../evidence-precheck.js";
 
 const VALID_RESULTS = ["pass", "fail", "expected-fail"] as const;
 
@@ -210,6 +230,24 @@ export default defineCommand({
         };
         process.stderr.write(formatError(precheckError) + "\n");
         process.exitCode = exitCode(precheckError);
+        return;
+      }
+
+      // reason: filtered-pass matched-count guard (see module header) — runs
+      // AFTER the missing-oracle-file precheck so a command naming a
+      // nonexistent file is refused for THAT reason first (the more
+      // fundamental fault), never confounded with this one. The decision
+      // itself lives in `../evidence-precheck.js` and is shared verbatim with
+      // the MCP `lore_evidence_add` handler, so neither surface can drift.
+      const filteredPassRefusal = findFilteredPassRefusal({
+        oracle: args.oracle as string,
+        result: args.result as string,
+        command: args.command as string,
+        ...(outputTail !== undefined ? { outputTail } : {}),
+      });
+      if (filteredPassRefusal !== null) {
+        process.stderr.write(formatError(filteredPassRefusal) + "\n");
+        process.exitCode = exitCode(filteredPassRefusal);
         return;
       }
 
