@@ -118,6 +118,11 @@ export const PREDICATE_CONTRACTS: Record<PlanCloseField, PredicateContract> = {
       "an unpopulated `planClaimedAcCoverage` ctx field used to fabricate an empty declared-" +
         "criteria set and pass the coverage conjunct vacuously (fixed here; recorded because " +
         "the delta is what the table exists to make readable)",
+      "a plan-wide run attests every claimed acceptance criterion regardless of which task's " +
+        "own declared scope it belongs to — measured across 8 tasks x 16 attested entries " +
+        "produced by 8 unrestricted `lore verify` runs on plan-implementation-plan-close-" +
+        "predicates-measure-invariants, the per-claimed-AC coverage conjunct passes while the " +
+        "invariant that EACH task's declared scope was actually exercised remains unproven",
     ],
     known_false_block: [
       "a plan whose claimed ACs are all attested but whose self-reported development evidence " +
