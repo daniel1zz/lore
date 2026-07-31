@@ -19,7 +19,8 @@
     "typecheck:lore-tests": "tsc --noEmit -p packages/lore/tsconfig.tests.json",
     "typecheck:scripts": "tsc --noEmit -p tsconfig.json",
     "typecheck:dashboard": "bun run --filter '@lore/dashboard' typecheck",
-    "check:ordinal-sites": "node scripts/check-ordinal-write-sites.mjs"
+    "check:ordinal-sites": "node scripts/check-ordinal-write-sites.mjs",
+    "check:test-budgets": "bun scripts/check-test-budgets.ts"
   },
   "devDependencies": {
     "bun-types": "^1.3.14",
