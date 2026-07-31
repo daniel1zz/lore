@@ -22,14 +22,24 @@
  *
  * @invariant `ArchiveCandidateTtlMinutes` carries TWO independently-configured
  *   TTLs (`handoffTtlMinutes`/`claimTtlMinutes`), not one shared value — the
- *   governing spec's own prose names R3's threshold `workflow.
- *   handoff_ttl_minutes` (default 10080) and R4's "unclaimed" check reuses
- *   `isClaimStale`, which is governed by the UNRELATED `workflow.
- *   claim_ttl_minutes` (default 120, two orders of magnitude smaller).
+ *   governing spec's own prose names the handoff-age threshold shared by R2
+ *   and R3 `workflow.handoff_ttl_minutes` (default 10080) and R4's
+ *   "unclaimed" check reuses `isClaimStale`, which is governed by the
+ *   UNRELATED `workflow.claim_ttl_minutes` (default 120, two orders of
+ *   magnitude smaller).
  *   Collapsing both onto one caller-supplied number would make R4 either
  *   never fire (handoff TTL is 84x larger) or fire prematurely (claim TTL is
  *   far too short for a handoff) — so this module accepts the two values
  *   explicitly rather than pretending they are one "ttlMinutes" scalar.
+ * @invariant BOTH handoff rules gate on the SAME `handoffTtlMinutes`
+ *   threshold with the SAME strict `>` comparison, evaluated against the
+ *   CANDIDATE doc's own `created_at` (`getAgeMinutes`, one derivation site).
+ *   R2 acquired that guard in spec-superseded-handoff-archival-has-no-recency-guard
+ *   (D1/D2): before it, a superseded handoff was a candidate at ANY age, so a
+ *   concurrently-live session's just-written ticket was proposed for archival
+ *   the moment another session wrote a handoff under the same actor. There is
+ *   deliberately no SECOND threshold — R2 and R3 ask the identical question
+ *   ("is this old enough that nobody is using it?").
  * @invariant Exclusions are structural, not special-cased: only `knowledge`
  *   docs with `extra.sub_type === "handoff"` and `task` docs are ever
  *   inspected — `adr`, `spec`, `prd`, `plan`, and every OTHER `knowledge`
@@ -83,6 +93,21 @@ interface HandoffInfo {
 }
 
 /**
+ * Age of a doc in whole-and-fractional minutes at `nowIso` — the ONE age
+ * derivation both handoff rules use (R2's recency guard and R3's expiry
+ * check), so their thresholds can never drift apart in shape or rounding.
+ *
+ * @param nowIso - Caller-injected current time (D10 — no wall-clock read here).
+ * @param createdAtIso - The doc's `created_at`.
+ * @returns Minutes elapsed; negative when `createdAtIso` is in the future
+ *   (a future-dated doc is therefore never old enough for either rule, which
+ *   is the safe direction: it stays out of the sweep).
+ */
+function getAgeMinutes(nowIso: string, createdAtIso: string): number {
+  return (Date.parse(nowIso) - Date.parse(createdAtIso)) / 60_000;
+}
+
+/**
  * Extracts every live, non-terminal `knowledge`/`sub_type: "handoff"` doc from
  * `docs` with its Zod-valid `HandoffExtra` payload. A doc that fails to parse
  * (malformed/legacy `extra`) is silently excluded — the same "tolerate, don't
@@ -121,8 +146,15 @@ function extractHandoffs(docs: readonly DocRecord[]): HandoffInfo[] {
  * @returns Every distinct candidate, R2 before R3 before R4, in `docs` order
  *   within each rule. A handoff already reported under R2 (superseded) is
  *   NEVER also reported under R3 (expired) even if both conditions hold —
- *   one candidate per doc, never a double-count (R2's `reason` already
- *   explains why it needs archiving).
+ *   one candidate per doc, never a double-count, and R2 wins the attribution
+ *   because supersession is the more specific, more actionable `reason`
+ *   (spec-superseded-handoff-archival-has-no-recency-guard D3).
+ *   A superseded handoff YOUNGER than `handoffTtlMinutes` is reported by
+ *   NEITHER rule: R2's recency guard protects it (D1/D2) and R3's own age
+ *   condition already excludes it, so a live session's ticket is unreachable
+ *   by the sweep. R2 nonetheless stays DISTINCT from R3 — it still reclaims an
+ *   old superseded handoff under an ACTIVE parent plan, which R3 (planless-or-
+ *   plan-terminal) never touches.
  * @example
  * computeArchiveCandidates(docs, "2026-07-27T00:00:00.000Z", { handoffTtlMinutes: 10080, claimTtlMinutes: 120 });
  * // => [{ doc_id: "...", slug: "knowledge-handoff-...", rule: "superseded_handoff", reason: "..." }, ...]
@@ -143,10 +175,11 @@ export function computeArchiveCandidates(
   const candidates: ArchiveCandidate[] = [];
   const handoffInfos = extractHandoffs(docs);
 
-  // R2 — superseded handoff: group by (plan_id, by); every non-newest member
-  // of a group with >=2 members is a candidate. Grouping key uses JSON.stringify
-  // over a [planId, by] tuple — mirrors deriveSessions' identical "null is a
-  // stable, distinct grouping value" convention (session.ts).
+  // R2 — superseded handoff: group by (plan_id, by); a non-newest member of a
+  // group with >=2 members is a candidate ONCE IT IS ITSELF OLDER than
+  // handoffTtlMinutes. Grouping key uses JSON.stringify over a [planId, by]
+  // tuple — mirrors deriveSessions' identical "null is a stable, distinct
+  // grouping value" convention (session.ts).
   const groups = new Map<string, HandoffInfo[]>();
   for (const info of handoffInfos) {
     const key = JSON.stringify([info.doc.parent_id, info.handoff.by]);
@@ -167,12 +200,29 @@ export function computeArchiveCandidates(
     }
     for (const info of group) {
       if (info.doc.id === newest.doc.id) continue;
+      // The recency guard reads THIS (superseded) doc's own age, NEVER
+      // `newest`'s. reason: what must not be archived is a possibly-live older
+      // ticket; the superseding doc's age is irrelevant and reading it would
+      // invert the protection — it would protect an ancient handoff whenever
+      // the newer one happens to be fresh, and expose a young one whenever the
+      // newer one is old. See spec-superseded-handoff-archival-has-no-recency-guard
+      // D2 (AC-R2-2 is the regression oracle for exactly this inversion).
+      const ageMinutes = getAgeMinutes(nowIso, info.doc.created_at);
+      // Strict `>`, identical to R3 — age EXACTLY at the TTL stays protected.
+      if (ageMinutes <= ttl.handoffTtlMinutes) continue;
+      // Only a doc actually FLAGGED here enters `supersededIds`. reason: the set
+      // is R3's skip list (D3 attribution precedence); adding a guard-protected
+      // young doc would suppress a rule that never applied to it anyway and
+      // would make the set mean "in a supersession group" instead of "already
+      // reported", which is what one-candidate-per-doc depends on.
       supersededIds.add(info.doc.id);
       candidates.push({
         doc_id: info.doc.id,
         slug: info.doc.slug,
         rule: "superseded_handoff",
-        reason: `superseded by newer handoff ${newest.doc.slug} for the same plan+actor pair`,
+        reason:
+          `superseded by newer handoff ${newest.doc.slug} for the same plan+actor pair, and its own age ` +
+          `${Math.floor(ageMinutes)}m exceeds handoff_ttl_minutes (${ttl.handoffTtlMinutes})`,
       });
     }
   }
@@ -182,7 +232,7 @@ export function computeArchiveCandidates(
   // above (one candidate per doc — review the module header invariant).
   for (const info of handoffInfos) {
     if (supersededIds.has(info.doc.id)) continue;
-    const ageMinutes = (Date.parse(nowIso) - Date.parse(info.doc.created_at)) / 60_000;
+    const ageMinutes = getAgeMinutes(nowIso, info.doc.created_at);
     if (ageMinutes <= ttl.handoffTtlMinutes) continue;
     const planId = info.doc.parent_id;
     const planStatus = parentPlanStatus(planId);
