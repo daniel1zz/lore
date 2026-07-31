@@ -559,6 +559,22 @@ export interface GateContext {
    * rendering the generic "no judgment at all" message.
    */
   readonly reviewJudgmentProvenanceCollision?: boolean;
+  /**
+   * Every `blocking_questions` entry carried by the caller's CURRENT-version,
+   * provenance-independent `escalate` judgments, in judgment order, concatenated
+   * verbatim (spec-an-escalate-blocks-approval-for-every-doc-type-and-the D4). Read
+   * ONLY by `feedReviewJudgment`, and only on a `JUDGMENT_ESCALATED` denial — a
+   * `reject`-worst denial renders the reject message and must never leak an
+   * escalate's questions into it.
+   *
+   * `[]` and `undefined` render IDENTICALLY (the explicit "no blocking questions were
+   * recorded" line, D4's defect case): the only production caller
+   * (`ReviewService.enforceJudgmentRequiredGate`) ALWAYS populates this field when it
+   * builds a `review-judgment` context, so an absent value cannot mean "the caller
+   * had questions but omitted them" — it can only mean the escalating judgment named
+   * none, which is the same state `[]` describes.
+   */
+  readonly reviewJudgmentBlockingQuestions?: readonly string[];
 }
 
 /**
@@ -1712,6 +1728,35 @@ export const JUDGMENT_REJECTED_REASON = "JUDGMENT_REJECTED";
 /** `checkReviewJudgment`'s failure when the WORST independent current-version judgment is `"escalate"`. */
 export const JUDGMENT_ESCALATED_REASON = "JUDGMENT_ESCALATED";
 
+/**
+ * `true` exactly when `error` is a `review-judgment` gate denial whose propagating
+ * reason is {@link JUDGMENT_ESCALATED_REASON} — the ONE verdict that gates EVERY doc
+ * type, not only the ones in `workflow.review.judgment_required_types`
+ * (spec-an-escalate-blocks-approval-for-every-doc-type-and-the D1).
+ *
+ * Lives here, beside the reason constant it looks for, so
+ * `ReviewService.enforceJudgmentRequiredGate` never string-matches a gate reason
+ * itself — the same "a LoreError-shape predicate belongs with the wiring that owns
+ * the shape" placement {@link isNonPlanParentError} already uses in this module.
+ * Keyed on `GateEnforcer.enforce`'s STRUCTURED `value: reasons` field (its own
+ * documented denial shape), never on the human-readable `message` prose. That coupling
+ * is pinned by an external oracle rather than by convention: an `enforce` that stopped
+ * populating `value` would make this answer `false` for a real escalate — turning the
+ * universal gate silently off for ungated types — and
+ * `tests/unit/service/review-judgment-escalate-scope.test.ts`'s AC-ESC-1 cases go RED
+ * the moment that happens.
+ *
+ * @param error - The `LoreError` a failed `enforce("review-judgment", ctx)` returned.
+ * @returns `false` for every non-`VALIDATION_ERROR` code, for a denial carrying no
+ *   reasons array, and for a `reject`/`NO_JUDGMENT`/provenance-collision denial —
+ *   those three stay scoped to the configured types (D1).
+ */
+export function isJudgmentEscalatedDenial(error: LoreError): boolean {
+  if (error.code !== "VALIDATION_ERROR") return false;
+  const reasons = error.value;
+  return Array.isArray(reasons) && reasons.includes(JUDGMENT_ESCALATED_REASON);
+}
+
 /** The `PredicateResult.field` value every `review-judgment` failure carries. */
 export const REVIEW_JUDGMENT_FIELD = "judgment-required";
 
@@ -1791,14 +1836,64 @@ function checkReviewJudgment(ctx: GateContext): PredicateResult[] {
 }
 
 /**
+ * Header of the escalate denial's blocking-questions section (D4) — a stable, greppable
+ * lead-in so a reader (and a test) can locate the questions in the rendered pack.
+ */
+const BLOCKING_QUESTIONS_HEADER = "Blocking questions from the escalating judgment (answer these, then re-review):";
+
+/**
+ * What the escalate denial says when the escalating judgment carried NO
+ * `blocking_questions` (spec-an-escalate-blocks-approval-for-every-doc-type-and-the
+ * D4) — an escalate asserts an outstanding human decision, so naming no question is
+ * itself a defect and is surfaced as one rather than as an empty section.
+ *
+ * `reviewJudgmentSchema` (`@lore/core`) forbids this combination, so it is only
+ * reachable for a row written straight to the store (a v1-migrated or hand-authored
+ * judgment) rather than through `JudgmentService.record`.
+ */
+const NO_BLOCKING_QUESTIONS_LINE =
+  "The escalating judgment recorded no blocking questions — an escalate that names no " +
+  "question is itself a defect (it asserts an outstanding human decision without saying " +
+  "which). Treat the judgment as unusable and obtain a fresh one.";
+
+/**
+ * Renders the `blocking_questions` block D4 requires: every entry VERBATIM on its own
+ * `- `-prefixed line (the same bullet shape `renderFeedingPack` uses for its `missing`
+ * list), bounded by ENTRY COUNT and never character-truncated.
+ *
+ * Deliberately rendered OUTSIDE `buildFeedingPack`'s `ruleMarkdown` (whose slice is cut
+ * to `gate-feeding.ts`'s `DEFAULT_FEEDING_MAX_CHARS`): folding the questions into it would
+ * character-truncate them mid-question, which is exactly what D4 forbids — a writer
+ * cannot answer half a question.
+ *
+ * @param questions - `ctx.reviewJudgmentBlockingQuestions`; `undefined` and `[]` both
+ *   render {@link NO_BLOCKING_QUESTIONS_LINE} (see that field's own JSDoc for why the
+ *   two states are indistinguishable by construction).
+ */
+function renderBlockingQuestions(questions: readonly string[] | undefined): string {
+  if (questions === undefined || questions.length === 0) {
+    return NO_BLOCKING_QUESTIONS_LINE;
+  }
+  return [BLOCKING_QUESTIONS_HEADER, ...questions.map((q) => `- ${q}`)].join("\n");
+}
+
+/**
  * `review-judgment`'s feeding message — names the exact recovery command
  * (`lore review <doc>`, per SPEC-103 M2's own text) and, on a provenance-collision
  * denial, explicitly calls out WHY the doc's existing judgment(s) didn't count
  * (AC-TIER-6) rather than rendering the generic "no judgment at all" wording.
+ *
+ * On a {@link JUDGMENT_ESCALATED_REASON} denial it ADDITIONALLY appends the escalating
+ * judgment's `blocking_questions` (spec-an-escalate-blocks-approval-for-every-doc-type-
+ * and-the D4, {@link renderBlockingQuestions}): a gate that blocks on "a human must
+ * decide" while withholding WHAT must be decided leaves the writer no path forward —
+ * measured on that spec's own governing ADR, where the denial named only
+ * `lore review <doc>` and the three questions had to be read out of SQLite by hand.
  */
 function feedReviewJudgment(ctx: GateContext, failures: PredicateResult[]): string {
   const target = ctx.targetIdOrSlug ?? "<doc>";
   const collision = failures.some((f) => !f.ok && f.reason === JUDGMENT_PROVENANCE_COLLISION_REASON);
+  const escalated = failures.some((f) => !f.ok && f.reason === JUDGMENT_ESCALATED_REASON);
   const ruleMarkdown = collision
     ? `Required for review-judgment: an independent review judgment for the CURRENT ` +
       `version of ${target} is required before approval. The only judgment(s) found for ` +
@@ -1806,15 +1901,29 @@ function feedReviewJudgment(ctx: GateContext, failures: PredicateResult[]): stri
       `own \`extra.ai_provenance\` (a self-review collision, SPEC-103 I1) and do not count. ` +
       `Recovery: run \`lore review ${target}\` with an independent judge, or edit the doc ` +
       `(version bump) and get a fresh judgment.`
-    : `Required for review-judgment: ${target} needs an independent, non-rejecting, ` +
-      `non-escalating review judgment for its CURRENT version before it may be approved. ` +
-      `Recovery: run \`lore review ${target}\`.`;
+    : // reason: the escalate branch is worded separately because it is the ONE verdict
+      // that gates EVERY doc type (D1) — including types `judgment_required_types` does
+      // not list, for which "needs a judgment" (the generic wording below) would be
+      // FALSE: their approval is blocked by the escalate that exists, not by a missing
+      // one. It also names the clearing path, which is answering the questions rather
+      // than re-rolling the judge (answering edits the doc, which bumps its version,
+      // which per-version judgment matching already requires a fresh judgment for).
+      escalated
+      ? `Required for review-judgment: a review judgment escalated ${target} — it asserts ` +
+        `an OUTSTANDING HUMAN DECISION, which blocks approval for EVERY doc type ` +
+        `regardless of \`workflow.review.judgment_required_types\`. Recovery: work the ` +
+        `blocking-questions section below (answering them edits the doc, bumping its ` +
+        `version, so a fresh judgment is required anyway), then run \`lore review ${target}\`.`
+      : `Required for review-judgment: ${target} needs an independent, non-rejecting, ` +
+        `non-escalating review judgment for its CURRENT version before it may be approved. ` +
+        `Recovery: run \`lore review ${target}\`.`;
   const pack = buildFeedingPack({
     ruleSource: "corpus (review judgments)",
     ruleMarkdown,
     missing: selectFailures(failures).map((f) => f.reason),
   });
-  return renderFeedingPack(pack);
+  const rendered = renderFeedingPack(pack);
+  return escalated ? `${rendered}\n\n${renderBlockingQuestions(ctx.reviewJudgmentBlockingQuestions)}` : rendered;
 }
 
 /**
