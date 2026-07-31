@@ -15,6 +15,15 @@
  *     `plan.extra.ac_scope`-style AC-id array may never DROP an id that
  *     already has recorded evidence referencing it (SPEC-056 §Design
  *     Decisions D4).
+ *   - acScopeArraySchema / MAX_AC_SCOPE_IDS — the `extra.ac_scope` array shape
+ *     shared by the phase tier (here) and the task tier (`taskExtraSchema`,
+ *     `schemas.ts`), where an EMPTY array is valid and distinct from absence.
+ *   - extractDeclaredAcScope(doc) — tolerant reader keeping absent (`undefined`)
+ *     distinguishable from explicitly-un-declared (`[]`).
+ *   - computeAcScopeEdit(prev, op, ids, evidence) / AcScopeEditOp — the SINGLE
+ *     `ac_scope` edit computation for BOTH doc tiers, and the one production
+ *     call site of `assertScopeFreeze` (spec-declared-scope-attestation-
+ *     contract-task-owned-ac-scope §Contract Details).
  *
  * Invariants:
  *   - No IO, no wall-clock reads — every caller supplies its own time/IDs.
@@ -64,6 +73,7 @@ import type { Result, LoreError } from "./errors.js";
 import { SCRIPT_ORACLES } from "./acceptance.js";
 import { evidenceEntrySchema, taskClaimSchema } from "./task-workflow.js";
 import type { EvidenceEntry } from "./task-workflow.js";
+import type { DocRecord } from "./types.js";
 
 // ─── Phase Kind Taxonomy ────────────────────────────────────────────────────
 
@@ -185,6 +195,42 @@ export const trackItemSchema = z.object({
 /** Derived TypeScript type for one phase track entry. */
 export type TrackItem = z.infer<typeof trackItemSchema>;
 
+// ─── Declared AC Scope (shared task + phase tier) ───────────────────────────
+
+/**
+ * Upper bound on a declared `ac_scope` array, for BOTH the task and phase
+ * tiers. Derived from `specAcceptanceCriteriaSchema`'s own `.max(50)`
+ * (`acceptance.ts`): a scope is a SUBSET of one spec's declared criteria, so it
+ * can never legitimately exceed the number of criteria that spec may declare.
+ * Bounded-growth defense, same rationale as `phaseExtraSchema.checklist`'s 100
+ * and `taskExtraSchema.verification_evidence`'s 50.
+ */
+export const MAX_AC_SCOPE_IDS = 50;
+
+/**
+ * The `extra.ac_scope` array shape shared by `phaseExtraSchema` (here) and
+ * `taskExtraSchema` (`schemas.ts`, which imports this) — the declared subset of
+ * the governing spec's AC ids a task/phase claims.
+ *
+ * @invariant An EMPTY array is VALID and semantically distinct from an absent
+ *   field: absent means nobody ever declared a scope, empty means an author
+ *   declared that this doc claims nothing. This is why it is NOT
+ *   `planAcScopeSchema` (`schemas.ts`), whose `.min(1)` forbids empty — the
+ *   plan tier has no un-declaration verb, the task/phase tier does
+ *   (`lore scope rm` of the final id, spec-declared-scope-attestation-contract-
+ *   task-owned-ac-scope §Contract Details).
+ * @invariant Ids are stored VERBATIM — no trimming, no case folding, no
+ *   AC-id-format regex. `assertScopeFreeze` and every downstream
+ *   intersection compare by exact string equality, so normalising here would
+ *   silently change which stored ids an evidence `ac_ref` matches. Only the
+ *   empty string is rejected (a shape error, not a normalisation).
+ * @invariant Cross-entity membership (every id actually declared on the
+ *   governing spec) is deliberately NOT checked here or at the writer — the
+ *   refusal belongs to the READ side (`lore verify`'s declared-scope
+ *   intersection), which is where an id that names nothing is actionable.
+ */
+export const acScopeArraySchema = z.array(z.string().min(1)).max(MAX_AC_SCOPE_IDS);
+
 // ─── Phase Extra Schema ─────────────────────────────────────────────────────
 
 /**
@@ -213,8 +259,12 @@ export const phaseExtraSchema = z
     /** Descriptive taxonomy — see {@link PHASE_KINDS}. */
     kind: z.enum(PHASE_KINDS).optional(),
     assignee: z.string().optional(),
-    /** Contract projection — the subset of the parent spec's AC ids this phase claims. */
-    ac_scope: z.array(z.string().min(1)).optional(),
+    /**
+     * Contract projection — the subset of the parent spec's AC ids this phase
+     * claims. See {@link acScopeArraySchema} (shared with `taskExtraSchema`)
+     * for why an EMPTY array is valid and distinct from absence.
+     */
+    ac_scope: acScopeArraySchema.optional(),
     /** Local oracle-bound gate items. */
     checklist: z.array(checklistItemSchema).max(100).optional(),
     /** Informational work log — mutable, non-attested (see {@link trackItemSchema}). */
@@ -297,4 +347,138 @@ export function assertScopeFreeze(
   }
 
   return ok(undefined);
+}
+
+// ─── Declared-Scope Edit (the single ac_scope mutation site, both tiers) ─────
+
+/**
+ * Reads a task's or phase's DECLARED `ac_scope`, preserving the
+ * absent-vs-empty distinction the contract rests on.
+ *
+ * `extra` is untyped storage, so a malformed value degrades to `undefined`
+ * ("nobody declared a readable scope") rather than throwing — the same
+ * extract-and-tolerate shape as `extractEvidence`/`extractClaim`
+ * (`task-workflow.ts`) and `extractFileAnchors` (`file-anchors.ts`). It lives
+ * HERE, beside {@link assertScopeFreeze} and {@link acScopeArraySchema},
+ * because the whole scope contract — shape, invariant, reader — is one unit
+ * serving both doc tiers.
+ *
+ * @param doc - a `task` or `phase` DocRecord
+ * @returns the declared ids; `[]` when an author explicitly un-declared the
+ *   scope; `undefined` when the field is absent or unreadable
+ *
+ * @example
+ * extractDeclaredAcScope(taskWithNoScope);      // => undefined
+ * extractDeclaredAcScope(taskWithEmptyScope);   // => []
+ * extractDeclaredAcScope(taskScopingTwoIds);    // => ["AC-1", "AC-2"]
+ */
+export function extractDeclaredAcScope(doc: DocRecord): string[] | undefined {
+  const raw = doc.extra["ac_scope"];
+  if (raw === undefined) return undefined;
+  const parsed = acScopeArraySchema.safeParse(raw);
+  return parsed.success ? parsed.data : undefined;
+}
+
+/** The two incremental `lore scope` mutations — read-merge-write, never replace. */
+export type AcScopeEditOp = "add" | "rm";
+
+/**
+ * Set UNION preserving `prev`'s order: appends each `id` exactly once, skipping
+ * ids `prev` already holds AND repeats within `ids` itself. Kept separate from
+ * {@link computeAcScopeEdit} so the "union" and "difference" halves read
+ * symmetrically at the one call site.
+ */
+function appendNewIds(prev: string[], ids: string[]): string[] {
+  const seen = new Set(prev);
+  const next = [...prev];
+  for (const id of ids) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    next.push(id);
+  }
+  return next;
+}
+
+/** Set DIFFERENCE preserving `prev`'s order. An id absent from `prev` is simply not there to remove. */
+function removeIds(prev: string[], ids: string[]): string[] {
+  const removing = new Set(ids);
+  return prev.filter((id) => !removing.has(id));
+}
+
+/**
+ * Computes the new `ac_scope` array for one incremental edit and enforces every
+ * invariant that guards it. This is the SINGLE place an `ac_scope` array is
+ * edited — `TaskWorkflowService.addAcScope`/`removeAcScope` and
+ * `PhaseWorkflowService.addAcScope`/`removeAcScope` both delegate here, so the
+ * two tiers cannot drift (spec-declared-scope-attestation-contract-task-owned-
+ * ac-scope §Contract Details: "`assertScopeFreeze` is wired HERE — it is the
+ * single place a scope array is edited, for tasks and phases alike").
+ *
+ * @invariant `add` is a set UNION that PRESERVES existing order and appends
+ *   only genuinely-new ids — re-adding a declared id is a no-op, never a
+ *   duplicate.
+ * @invariant `rm` yields an EMPTY array when the last id is removed, never an
+ *   absent field. Callers must write `[]` through verbatim.
+ * @invariant {@link assertScopeFreeze} runs on BOTH ops, not just `rm` — one
+ *   unconditional call site is what makes "no evidenced id can be dropped"
+ *   checkable by grep rather than by trusting each verb. (An `add` can never
+ *   trip it: a union removes nothing.)
+ * @invariant An empty `ids` argument is a LOUD error, not a silent no-op write
+ *   — a caller that computed an empty candidate list has a bug, and a
+ *   version-bumping write that changes nothing would hide it.
+ *
+ * @param prev - the doc's current declared ids (`[]` for an absent scope —
+ *   {@link extractDeclaredAcScope}`(doc) ?? []`)
+ * @param op - `"add"` (union) or `"rm"` (difference)
+ * @param ids - the candidate ids to add/remove, verbatim from the caller
+ * @param evidence - the doc's recorded `verification_evidence` entries, read
+ *   via `extractEvidence` — supplies the `ac_ref`s the freeze invariant guards
+ * @returns the array to store, or `err(VALIDATION_ERROR)` naming `ac_scope`
+ *
+ * @example
+ * computeAcScopeEdit(["AC-1"], "add", ["AC-1", "AC-2"], []); // => ok(["AC-1", "AC-2"])
+ * computeAcScopeEdit(["AC-1"], "rm", ["AC-1"], []);          // => ok([])
+ * computeAcScopeEdit(["AC-1"], "rm", ["AC-1"], [evidenceFor("AC-1")]); // => err(...)
+ */
+export function computeAcScopeEdit(
+  prev: string[],
+  op: AcScopeEditOp,
+  ids: string[],
+  evidence: EvidenceEntry[],
+): Result<string[], LoreError> {
+  if (ids.length === 0) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "ac_scope",
+      message: `no ac_scope id supplied to ${op} — name at least one acceptance-criterion id`,
+      value: ids,
+    });
+  }
+
+  const malformed = ids.filter((id) => id.trim() === "");
+  if (malformed.length > 0) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "ac_scope",
+      message: `ac_scope id must be a non-empty string — received ${malformed.length} blank id(s)`,
+      value: ids,
+    });
+  }
+
+  const next = op === "add" ? appendNewIds(prev, ids) : removeIds(prev, ids);
+
+  const shapeResult = acScopeArraySchema.safeParse(next);
+  if (!shapeResult.success) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "ac_scope",
+      message: `ac_scope would hold ${next.length} ids, exceeding the ${MAX_AC_SCOPE_IDS}-id cap (a scope is a subset of one spec's declared criteria)`,
+      value: next.length,
+    });
+  }
+
+  const freezeResult = assertScopeFreeze(prev, next, evidence);
+  if (!freezeResult.ok) return freezeResult;
+
+  return ok(next);
 }

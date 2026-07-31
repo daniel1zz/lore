@@ -116,6 +116,9 @@ import {
   computePhaseCompletion,
   specAcceptanceCriteriaSchema,
   extractDeclaredPhases,
+  computeAcScopeEdit,
+  extractDeclaredAcScope,
+  type AcScopeEditOp,
   type EvidenceEntry,
   type TaskClaim,
   type ChecklistItem,
@@ -136,6 +139,7 @@ import type {
   EvidenceInput,
   VerifiedEvidenceInput,
   AnchorConflict,
+  AnchorMutationOpts,
   ReadyReport,
   DoneOpts,
   DoneResult,
@@ -195,15 +199,16 @@ function readChecklist(doc: DocRecord): ChecklistItem[] {
 }
 
 /**
- * Reads and validates phase.extra.ac_scope. Returns [] when absent or malformed —
- * feeds `planPhaseStatus`'s (SPEC-077 S3) per-phase `computePhaseCompletion` call,
- * mirroring `readChecklist`'s own "extract, tolerate malformed" shape.
+ * Reads phase.extra.ac_scope, flattening absent and explicitly-un-declared to
+ * `[]` for the COMPUTE consumers (`planPhaseStatus`'s per-phase
+ * `computePhaseCompletion` call, SPEC-077 S3) that treat both as "no claimed
+ * ids". The absent-vs-empty distinction is preserved by the shared
+ * `extractDeclaredAcScope` (`@lore/core`) this now delegates to — the SAME
+ * reader the task tier and the `lore scope` writer use, so the two tiers cannot
+ * diverge on what a malformed value means.
  */
 function readAcScope(doc: DocRecord): string[] {
-  const raw = doc.extra["ac_scope"];
-  if (!Array.isArray(raw)) return [];
-  const parsed = z.array(z.string()).safeParse(raw);
-  return parsed.success ? parsed.data : [];
+  return extractDeclaredAcScope(doc) ?? [];
 }
 
 /** Computes age in whole minutes between two ISO timestamps (nowIso - atIso). */
@@ -1015,6 +1020,92 @@ export class PhaseWorkflowService {
     return ok({ task: phase, already_done: false, transitions });
   }
 
+  // ── Declared AC Scope Mutations (spec-declared-scope-attestation-contract) ──
+
+  /**
+   * Read-modify-write UNION on a phase's `extra.ac_scope` — the `lore scope add`
+   * command's phase-tier half. Mirrors `TaskWorkflowService.addAcScope` exactly
+   * (same shared `computeAcScopeEdit` computation, same option shape), which is
+   * what makes `lore scope` one verb serving both tiers rather than two verbs
+   * with drifting semantics.
+   *
+   * @param idOrSlug - Phase document ULID or slug
+   * @param acIds - Candidate AC ids to declare, verbatim (no trim/case folding)
+   * @param opts - `{ by, source? }`
+   * @param now - Time seam (D10)
+   * @returns The updated phase DocRecord
+   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a phase / blank id / >50-id cap),
+   *   STALE_VERSION
+   */
+  async addAcScope(
+    idOrSlug: string,
+    acIds: string[],
+    opts: AnchorMutationOpts,
+    now: () => string = defaultNow,
+  ): Promise<Result<DocRecord, LoreError>> {
+    return this.editAcScope(idOrSlug, "add", acIds, opts, now);
+  }
+
+  /**
+   * Read-modify-write DIFFERENCE on a phase's `extra.ac_scope` — the
+   * `lore scope rm` command's phase-tier half. Mirrors
+   * `TaskWorkflowService.removeAcScope`, including BOTH of its invariants:
+   * removing the last id stores an EMPTY ARRAY (never an absent key), and an id
+   * carrying evidence cannot be removed at all (`assertScopeFreeze`, reached via
+   * `computeAcScopeEdit`).
+   *
+   * @param idOrSlug - Phase document ULID or slug
+   * @param acIds - Candidate AC ids to un-declare
+   * @param opts - `{ by, source? }`
+   * @param now - Time seam (D10)
+   * @returns The updated phase DocRecord
+   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a phase / blank id / evidenced
+   *   id removal), STALE_VERSION
+   */
+  async removeAcScope(
+    idOrSlug: string,
+    acIds: string[],
+    opts: AnchorMutationOpts,
+    now: () => string = defaultNow,
+  ): Promise<Result<DocRecord, LoreError>> {
+    return this.editAcScope(idOrSlug, "rm", acIds, opts, now);
+  }
+
+  /**
+   * Shared resolve → compute → commit path for {@link addAcScope}/{@link removeAcScope}.
+   * See `TaskWorkflowService.editAcScope`'s reason comments for why the audit
+   * action is the generic `"update"` and why no telemetry event is emitted —
+   * both constraints apply identically here.
+   */
+  private async editAcScope(
+    idOrSlug: string,
+    op: AcScopeEditOp,
+    acIds: string[],
+    opts: AnchorMutationOpts,
+    now: () => string,
+  ): Promise<Result<DocRecord, LoreError>> {
+    const phaseResult = await this.resolvePhase(idOrSlug);
+    if (!phaseResult.ok) return phaseResult;
+    const phase = phaseResult.value;
+
+    const prev = extractDeclaredAcScope(phase) ?? [];
+    const editResult = computeAcScopeEdit(prev, op, acIds, readEvidence(phase));
+    if (!editResult.ok) return editResult;
+    const next = editResult.value;
+
+    const nowIso = now();
+    const newExtra: Record<string, unknown> = { ...phase.extra, ac_scope: next };
+    return this.writePhaseExtra(
+      phase,
+      newExtra,
+      nowIso,
+      opts.by,
+      `Declared ac_scope ${op === "add" ? "extended" : "reduced"} by ${opts.by} (${next.length} id(s))`,
+      "update",
+      { by: opts.by, scope_op: op, count: next.length },
+    );
+  }
+
   // ── ready ────────────────────────────────────────────────────────────────
 
   /**
@@ -1404,7 +1495,10 @@ export class PhaseWorkflowService {
     nowIso: string,
     actor: string,
     changeSummary: string,
-    auditAction: "claim" | "release" | "evidence",
+    // "update" is the generic member the ac_scope verbs pass — mirrors
+    // `TaskWorkflowService.writeTaskExtra`, see `editAcScope`'s reason comment
+    // there (`VERSION_ACTION_AUDIT_FAMILY`, `audit-service.ts`).
+    auditAction: "claim" | "release" | "evidence" | "update",
     auditDetails: Record<string, unknown>,
   ): Promise<Result<DocRecord, LoreError>> {
     const newVersion = phase.version + 1;

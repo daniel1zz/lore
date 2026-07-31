@@ -81,6 +81,10 @@ const main = defineCommand({
     uat: () => import("./commands/uat.js").then(wrapDefault("uat")),
     requirement: () => import("./commands/requirement.js").then(wrapDefault("requirement")),
     anchor: () => import("./commands/anchor.js").then(wrapDefault("anchor")),
+    // scope (spec-declared-scope-attestation-contract-task-owned-ac-scope) —
+    // dedicated writer for a task's/phase's `extra.ac_scope`, the anchor
+    // command's sibling; see commands/scope.ts's module header.
+    scope: () => import("./commands/scope.js").then(wrapDefault("scope")),
     invalidate: () => import("./commands/invalidate.js").then(wrapDefault("invalidate")),
     setup: () => import("./commands/setup.js").then(wrapDefault("setup")),
     // governance (SPEC-083 D1) — bootstrap-stage, no corpus required; see
