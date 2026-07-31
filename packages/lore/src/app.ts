@@ -19,7 +19,7 @@
 import { Database } from "bun:sqlite";
 import { dirname } from "node:path";
 import { SQLiteStore } from "./store/sqlite-store.js";
-import { TursoStore } from "./store/turso-store.js";
+import { TursoStore, probeTmpdirUsability } from "./store/turso-store.js";
 import { CorpusService } from "./service/corpus-service.js";
 import { ReviewService } from "./service/review-service.js";
 import { VersionService } from "./service/version-service.js";
@@ -1371,6 +1371,23 @@ export function createApp(
     // Propagate error as Result — caller must handle (CLI exits 1, not silently falls back)
     telemetry.close();
     return credResult;
+  }
+
+  // reason: spec-eager-libsql-load-makes-every-command-depend-on-a-healthy
+  // AC-LL-4's pinned ordering — credential validation FIRST (above), TMPDIR
+  // usability probe SECOND, native load (TursoStore construction, below)
+  // only after both. `probeTmpdirUsability` never rewrites TMPDIR itself (no
+  // silent fallback) — an unusable value is reported, never repaired. This
+  // branch is currently unreachable from any CLI command (`loader.ts` strips
+  // `config.sync` unconditionally before calling `createApp` — see that
+  // file's own comment), but keeping the composition root itself compliant
+  // with the invariant matters for any future direct caller (this is also
+  // where `AC-LL-5`/`AC-LL-7(c)`'s in-process tests exercise `createApp`
+  // directly, bypassing `loader.ts`).
+  const tmpdirError = probeTmpdirUsability();
+  if (tmpdirError !== null) {
+    telemetry.close();
+    return err(tmpdirError);
   }
 
   // Credentials valid — construct TursoStore (embedded replica, SPEC-009 §3, D-007).

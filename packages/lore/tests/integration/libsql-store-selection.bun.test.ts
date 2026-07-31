@@ -135,7 +135,13 @@ describe("createApp store selection — in-process (spec-eager-libsql-load-makes
       const asResult = result as Result<App, LoreError>;
       expect(asResult.ok).toBe(false);
       if (!asResult.ok) {
-        expect(asResult.error.code).toBe("STORE_ERROR");
+        // reason: resolveSyncCredentials (packages/core/src/config.ts) yields
+        // VALIDATION_ERROR for missing credentials, propagated verbatim by
+        // app.ts — the spec's original STORE_ERROR pin was corrected after
+        // T1's RED run measured this (see governing spec's "Error-code
+        // correction" note). STORE_ERROR remains correct for TursoStore
+        // *construction* failure, a different branch.
+        expect(asResult.error.code).toBe("VALIDATION_ERROR");
       }
     } finally {
       if (previous === undefined) delete process.env[tokenEnvName];
@@ -166,7 +172,9 @@ describe("createApp store selection — in-process (spec-eager-libsql-load-makes
       const asResult = result as Result<App, LoreError>;
       expect(asResult.ok).toBe(false);
       if (!asResult.ok) {
-        expect(asResult.error.code).toBe("STORE_ERROR");
+        // reason: same correction as AC-LL-7(c) above — missing credentials
+        // surface as VALIDATION_ERROR (resolveSyncCredentials), not STORE_ERROR.
+        expect(asResult.error.code).toBe("VALIDATION_ERROR");
       }
     } finally {
       if (previous === undefined) delete process.env[tokenEnvName];

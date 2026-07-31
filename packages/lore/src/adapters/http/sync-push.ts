@@ -7,7 +7,14 @@
  * report with local_rows / remote_rows counts.
  */
 
-import { createClient, type Client } from "@libsql/client";
+// reason: spec-eager-libsql-load-makes-every-command-depend-on-a-healthy —
+// `createClient` is a value used only inside `syncPush` below, loaded lazily
+// via `loadLibsqlClientModule` (`../../store/turso-store.js`, the shared
+// literal-specifier dynamic-import loader — see that function's header for
+// why not a top-level value import / `createRequire`). Only the TYPE is
+// imported at module load, which has no runtime effect.
+import type { Client } from "@libsql/client";
+import { loadLibsqlClientModule } from "../../store/turso-store.js";
 import { ok, err } from "@lore/core";
 import type { Result, LoreError } from "@lore/core";
 import { existsSync } from "node:fs";
@@ -136,6 +143,7 @@ export async function syncPush(
   let localClient: Client | null = null;
 
   try {
+    const { createClient } = await loadLibsqlClientModule();
     localClient = createClient({ url: `file:${localPath}` });
 
     const tableReports: TableReport[] = [];
