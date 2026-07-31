@@ -241,3 +241,207 @@ describe("git-safety-gate — SPEC-066 unterminated heredoc (D1, AC-066-5)", () 
     expect(stderr).toBe("");
   });
 });
+
+// ── argument-aware probes (AC-GS-1..5) ────────────────────────────────────────
+//
+// spec-git-safety-gate-probes-report-the-wrong-blast-radius. Measured on main
+// 2026-07-31: `git stash drop 'stash@{0}'` rendered `Segment : git stash drop ''`
+// and an assessment listing ALL 8 live stash entries; the unquoted form listed
+// all 8 too (the control that isolates argument-blindness from quoting).
+// `probeStash` was declared `probeStash(_inner, …)` and `probePathArg` declared
+// `inner` without reading it, so a one-entry drop and a one-file restore were
+// both reported with the blast radius of their whole-repository variants.
+//
+// The NEGATIVE half of each assertion is the load-bearing one: "names bravo"
+// passes against the defective all-entries output, "does not name alpha or
+// charlie" does not.
+//
+// Every stash assertion runs against a purpose-built mkdtemp repo whose stashes
+// this fixture creates. The repo's own stash list is shared mutable state that
+// holds other sessions' work and is never read or written here.
+
+/** The `Assessment:` block of a block message, without the Segment/Why/Safer lines. */
+function assessmentOf(stderr: string): string {
+  const m = stderr.match(/^Assessment:[\s\S]*?(?=\nSafer {3}: )/m);
+  return m ? m[0] : "";
+}
+
+describe("git-safety-gate — argument-aware probes (D1-D5)", () => {
+  let base: string;
+  let repo: string;
+
+  beforeAll(() => {
+    base = mkdtempSync(join(tmpdir(), "gsg-args-"));
+    repo = join(base, "repo");
+    mkdirSync(repo);
+    git(["init", "-q", "-b", "main"], repo);
+    git(["config", "user.email", "t@t"], repo);
+    git(["config", "user.name", "t"], repo);
+    writeFileSync(join(repo, "a.txt"), "v1\n");
+    writeFileSync(join(repo, "b.txt"), "v1\n");
+    git(["add", "."], repo);
+    git(["commit", "-qm", "init"], repo);
+    // Three distinct stash entries pushed oldest-first. The stash is LIFO, so
+    // stash@{0}=charlie, stash@{1}=bravo, stash@{2}=alpha — the message word is
+    // what each assertion keys on, so "the targeted entry" and "the others" are
+    // distinguishable by content rather than by position.
+    for (const message of ["alpha", "bravo", "charlie"]) {
+      writeFileSync(join(repo, "a.txt"), `${message}\n`);
+      git(["stash", "push", "-q", "-m", message], repo);
+    }
+    // Two distinct dirty tracked files: makes the path-scoped negative half
+    // (AC-GS-4) and the D2 whole-tree half (AC-GS-5) both non-vacuous.
+    writeFileSync(join(repo, "a.txt"), "dirty-a\n");
+    writeFileSync(join(repo, "b.txt"), "dirty-b\n");
+  });
+
+  afterAll(() => {
+    if (base) rmSync(base, { recursive: true, force: true });
+  });
+
+  // ── AC-GS-1 ────────────────────────────────────────────────────────────────
+  it("AC-GS-1: a targeted `git stash drop stash@{1}` names only the targeted stash entry, not the other two", () => {
+    const { code, stderr } = run("git stash drop stash@{1}", repo);
+    expect(code).toBe(2);
+    expect(stderr).toContain("bravo");
+    // Load-bearing: the pre-fix all-entries output satisfies the line above.
+    expect(stderr).not.toContain("alpha");
+    expect(stderr).not.toContain("charlie");
+  });
+
+  it("AC-GS-1 control: the fixture really carries three entries, so `names only the targeted stash entry` is not vacuous", () => {
+    const r = spawnSync("git", ["stash", "list"], { cwd: repo, encoding: "utf8" });
+    expect(r.status).toBe(0);
+    const lines = (r.stdout ?? "").trim().split("\n").filter(Boolean);
+    expect(lines).toHaveLength(3);
+    for (const message of ["alpha", "bravo", "charlie"]) expect(r.stdout).toContain(message);
+  });
+
+  // ── AC-GS-2 ────────────────────────────────────────────────────────────────
+  it("AC-GS-2: a quoted revision reaches the probe — same single-entry assessment as the unquoted form, and Segment prints raw (D5)", () => {
+    const quoted = run("git stash drop 'stash@{1}'", repo);
+    const unquoted = run("git stash drop stash@{1}", repo);
+    expect(quoted.code).toBe(2);
+    expect(quoted.stderr).toContain("bravo");
+    expect(quoted.stderr).not.toContain("alpha");
+    expect(quoted.stderr).not.toContain("charlie");
+    // D5: the block message reproduces what the user typed, not `git stash drop ''`.
+    expect(quoted.stderr).toContain("Segment : git stash drop 'stash@{1}'");
+    expect(quoted.stderr).not.toContain("git stash drop ''");
+    // Quoting must make no difference to the evidence. Compared on the
+    // Assessment block only — the Segment lines differ by construction.
+    const quotedAssessment = assessmentOf(quoted.stderr);
+    expect(quotedAssessment).not.toBe(""); // the comparison below cannot go vacuous
+    expect(quotedAssessment).toBe(assessmentOf(unquoted.stderr));
+  });
+
+  it("AC-GS-2 paired control: the rule still fires when a quoted trigger is what got blanked — matching keeps consuming the sanitized text while the probe reads the raw revision (quoted revision reaches the probe without weakening SPEC-066)", () => {
+    // The quoted env value carries a COMPLETE `git reset --hard` trigger. If
+    // matching were switched to raw text to obtain the probe's argument, the
+    // reset rule would fire here. It must not: the stash rule fires, on the
+    // sanitized `MSG='' git stash drop stash@{1}`, and the probe still reads
+    // the raw revision.
+    const { code, stderr } = run("MSG='git reset --hard' git stash drop stash@{1}", repo);
+    expect(code).toBe(2);
+    expect(stderr).toContain("git stash drop/clear destroys stashed work");
+    expect(stderr).not.toContain("discards working-tree changes");
+    expect(stderr).toContain("bravo");
+    expect(stderr).not.toContain("alpha");
+    expect(stderr).not.toContain("charlie");
+  });
+
+  it("AC-GS-2 paired control: a trigger reachable only inside a quoted literal never reaches command position (SPEC-066 preserved while a quoted revision reaches the probe)", () => {
+    // Argument position — SPEC-066 D2.
+    const argPosition = run("notify-send 'git stash drop stash@{0}'", repo);
+    expect(argPosition.code).toBe(0);
+    expect(argPosition.stderr).toBe("");
+    // A separator inside a quoted literal must not manufacture a new segment:
+    // raw-text segmentation would split this into `echo 'x` + `git stash drop
+    // stash@{0}'` and block.
+    const quotedSeparator = run("echo 'x && git stash drop stash@{0}'", repo);
+    expect(quotedSeparator.code).toBe(0);
+    expect(quotedSeparator.stderr).toBe("");
+  });
+
+  // ── AC-GS-3 ────────────────────────────────────────────────────────────────
+  it("AC-GS-3: verb dispatch — `git stash clear` reports every entry", () => {
+    const { code, stderr } = run("git stash clear", repo);
+    expect(code).toBe(2);
+    for (const message of ["alpha", "bravo", "charlie"]) expect(stderr).toContain(message);
+  });
+
+  it("AC-GS-3: verb dispatch — a bare `git stash drop` reports the stash@{0} entry alone, matching what git itself would drop", () => {
+    const { code, stderr } = run("git stash drop", repo);
+    expect(code).toBe(2);
+    expect(stderr).toContain("charlie"); // stash@{0}
+    expect(stderr).not.toContain("bravo");
+    expect(stderr).not.toContain("alpha");
+  });
+
+  it("AC-GS-3: verb dispatch — the closed verb set is pinned by an observable: `git stash pop` exits 0 with neither BLOCKED nor WOULD DESTROY", () => {
+    const { code, stderr } = run("git stash pop", repo);
+    expect(code).toBe(0);
+    expect(stderr).not.toContain("BLOCKED");
+    expect(stderr).not.toContain("WOULD DESTROY");
+  });
+
+  // ── AC-GS-4 ────────────────────────────────────────────────────────────────
+  it("AC-GS-4: `git restore <one-file>` reports only the named path", () => {
+    const { code, stderr } = run("git restore a.txt", repo);
+    expect(code).toBe(2);
+    expect(stderr).toContain("a.txt");
+    expect(stderr).not.toContain("b.txt"); // load-bearing
+  });
+
+  it("AC-GS-4: `git checkout -- <one-file>` reports only the named path", () => {
+    const { code, stderr } = run("git checkout -- b.txt", repo);
+    expect(code).toBe(2);
+    expect(stderr).toContain("b.txt");
+    expect(stderr).not.toContain("a.txt"); // load-bearing
+  });
+
+  it("AC-GS-4 control: both fixture files are dirty, so `reports only the named path` is not vacuous", () => {
+    const r = spawnSync("git", ["status", "--porcelain"], { cwd: repo, encoding: "utf8" });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("a.txt");
+    expect(r.stdout).toContain("b.txt");
+  });
+
+  // ── AC-GS-5 ────────────────────────────────────────────────────────────────
+  it("AC-GS-5 control: `git rev-parse --verify --quiet stash@{99}` rejects the token — a future git that resolves it turns THIS red instead of leaving `fallback widens` vacuous", () => {
+    const r = spawnSync("git", ["rev-parse", "--verify", "--quiet", "stash@{99}"], {
+      cwd: repo,
+      encoding: "utf8",
+    });
+    expect(r.status).not.toBe(0);
+  });
+
+  it("AC-GS-5: an unresolvable revision — the fallback widens to the whole stash and carries the literal [ARG-FALLBACK] marker", () => {
+    const { code, stderr } = run("git stash drop stash@{99}", repo);
+    expect(code).toBe(2);
+    expect(stderr).toContain("Assessment: [ARG-FALLBACK]");
+    for (const message of ["alpha", "bravo", "charlie"]) expect(stderr).toContain(message);
+  });
+
+  it("AC-GS-5: D2 — `git reset --hard` still reports the ENTIRE dirty tree; the fallback widens, it is never a licence to narrow an already-correct probe", () => {
+    const { code, stderr } = run("git reset --hard HEAD", repo);
+    expect(code).toBe(2);
+    expect(stderr).toMatch(/WOULD DESTROY \d+ uncommitted change/);
+    expect(stderr).toContain("a.txt");
+    expect(stderr).toContain("b.txt");
+    expect(stderr).not.toContain("[ARG-FALLBACK]");
+  });
+
+  // D1 side effect, measured against the pre-fix hook (exit 0 there, exit 2 here)
+  // rather than assumed. The retired two-pass blanking ran the double-quote regex
+  // over the WHOLE text first, so an apostrophe inside a double-quoted word let
+  // one `"…"` match span a `;` separator AND the trigger behind it: the text
+  // collapsed to a single `echo …` segment, which is print-like and never
+  // inspected. Recognising a complete quoted literal as one unit in a single
+  // left-to-right walk removes that class outright.
+  it("D1 REGRESSION: a mis-paired quote can no longer swallow a separator plus the trigger behind it (the pre-fix hook allowed this)", () => {
+    const { code, stderr } = run(`echo 'it"s fine' ; git reset --hard HEAD`, repo);
+    expect(code).toBe(2);
+    expect(stderr).toContain("discards working-tree changes");
+  });
+});

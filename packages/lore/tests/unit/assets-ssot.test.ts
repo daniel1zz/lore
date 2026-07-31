@@ -45,6 +45,8 @@ import { existsSync, statSync, readFileSync, readdirSync, mkdtempSync, mkdirSync
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
+import { createHash } from "node:crypto";
+import { EMBEDDED_ASSETS_MANIFEST } from "../../src/generated/assets-manifest.js";
 
 // ─── Locate the REAL repo-root assets/ tree ────────────────────────────────────
 // packages/lore/tests/unit/assets-ssot.test.ts -> repo root is 4 levels up.
@@ -823,5 +825,46 @@ describe("assets-ssot — REGRESSION (BUG-004: no test-runner blocking in sessio
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
+  });
+});
+
+// ─── DISTRIBUTION (AC-GS-6): the argument-aware git-safety-gate SHIPS ─────────
+//
+// spec-git-safety-gate-probes-report-the-wrong-blast-radius. A gate fix that
+// lands only in this repo's working tree does not exist for a consumer running
+// `lore setup`: setup installs from `assets/` and classifies freshness against
+// the sha256 embedded in `packages/lore/src/generated/assets-manifest.ts`. Two
+// independent halves, because they fail for different reasons:
+//
+//   1. sha256 parity — an edited hook whose manifest entry was never regenerated
+//      (the natural post-implementation state; `bun run build` regenerates it).
+//      The whole-tree equivalent lives in build/embed-assets-manifest.test.ts as
+//      a tree_digest comparison; this is the per-file, pointed form for the file
+//      whose staleness this spec's fix depends on.
+//   2. content markers — a manifest that is internally consistent but fingerprints
+//      the PRE-FIX bytes. sha parity alone cannot tell the two apart: hashing
+//      whatever is on disk is true of a stale file and a fixed one alike.
+describe("assets-ssot — DISTRIBUTION (AC-GS-6: argument-aware git-safety-gate reaches consumers)", () => {
+  const GATE_RELATIVE_PATH = "hooks/pre-bash-git-safety-gate.mjs";
+  const GATE_ABSOLUTE_PATH = join(ASSETS_ROOT, GATE_RELATIVE_PATH);
+
+  it("the embedded manifest sha256 for the git-safety-gate hook equals the sha256 of its bytes under assets/ on disk", () => {
+    const entry = EMBEDDED_ASSETS_MANIFEST.entries.find((e) => e.path === GATE_RELATIVE_PATH);
+    expect(entry, `${GATE_RELATIVE_PATH} must be declared in the embedded manifest`).toBeDefined();
+    const onDisk = createHash("sha256").update(readFileSync(GATE_ABSOLUTE_PATH)).digest("hex");
+    expect((entry as { sha256: string }).sha256).toBe(onDisk);
+  });
+
+  it("the shipped git-safety-gate carries the argument-aware probe behaviour, not the pre-fix argument-blind bytes", () => {
+    const content = readFileSync(GATE_ABSOLUTE_PATH, "utf8");
+    // D4's fixed marker, and the raw/sanitized split that D1 requires.
+    expect(content).toContain("[ARG-FALLBACK]");
+    expect(content).toContain("splitSegmentPairs");
+    // The pre-fix signatures: the parameter name `_inner` STATED that the stash
+    // probe never read its argument, and probePathArg took `inner` unread.
+    expect(content).not.toContain("function probeStash(_inner");
+    // D2: probeDirtyTree's argument-blindness is correct and must NOT have been
+    // "fixed" — its `_inner` signature is the one that stays.
+    expect(content).toContain("function probeDirtyTree(_inner");
   });
 });
