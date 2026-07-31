@@ -84,6 +84,7 @@ import {
   closeSync,
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readdirSync,
@@ -92,10 +93,12 @@ import {
   rmdirSync,
   rmSync,
   statSync,
+  unlinkSync,
   writeSync,
+  type Stats,
 } from "node:fs";
 import { createHash } from "node:crypto";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 
 import type { SetupFsReader, SetupFsWriter } from "../service/setup-service.js";
 
@@ -186,19 +189,108 @@ export class RealSetupFsWriter implements SetupFsWriter {
     chmodSync(destPath, srcMode);
   }
 
-  async remove(path: string): Promise<void> {
-    if (!existsSync(path)) return;
+  async remove(path: string, opts?: { boundary?: string }): Promise<void> {
+    const self = lstatOrNull(path);
+    if (self === null) return;
+
+    // D2 — a target that IS a link is unlinked. `rmSync` already happens to do
+    // this, but going through `unlinkSync` states the intent at the call site
+    // instead of relying on a recursive-force removal to be link-shaped.
+    if (self.isSymbolicLink()) {
+      unlinkSync(path);
+      return;
+    }
+
+    // D3/D4 — never reach THROUGH a link. Without this, a developer who
+    // symlinks an install subdirectory into their own repo has that repo's
+    // file deleted: `existsSync` (the previous guard) follows links, so the
+    // far-side file looked like an installed copy. Measured twice on this repo.
+    if (opts?.boundary !== undefined) {
+      const link = findSymlinkAncestor(path, opts.boundary);
+      if (link !== null) {
+        throw new Error(
+          `refusing to remove ${path}: ancestor ${link} is a symlink, so removing through it would delete the LINK TARGET's file, not an installed copy. ` +
+            `Nothing was removed. If the install really should own that path, unlink ${link} first.`,
+        );
+      }
+    }
+
     rmSync(path, { recursive: true, force: true });
   }
 
   async removeDirIfEmpty(path: string): Promise<void> {
+    const self = lstatOrNull(path);
+    if (self === null) return;
+
+    // D6 — a symlink is not a directory this sweep emptied, so it is left
+    // exactly as the developer created it. `rmdirSync` on a link raises
+    // ENOTDIR, which used to escape the swallow list and abort the whole run
+    // AFTER an irreversible removal had already committed.
+    if (self.isSymbolicLink()) return;
+
     try {
       rmdirSync(path);
     } catch (cause) {
-      if (isErrnoException(cause) && (cause.code === "ENOTEMPTY" || cause.code === "ENOENT")) return;
+      if (
+        isErrnoException(cause) &&
+        (cause.code === "ENOTEMPTY" || cause.code === "ENOENT" || cause.code === "ENOTDIR")
+      ) {
+        return;
+      }
       throw cause;
     }
   }
+}
+
+/**
+ * `lstatSync` narrowed to the port's "absent target is a no-op" contract —
+ * link-aware by construction, so a DANGLING link (whose target is gone) is
+ * still reported as present. `existsSync` cannot express that: it follows the
+ * link and answers `false`, which is why dangling links were previously
+ * skipped and left behind forever.
+ *
+ * @returns The `Stats` of the path itself, or `null` when nothing is there.
+ * @throws Any non-ENOENT stat failure (e.g. EACCES) — the same
+ *   fail-loud-on-the-unexpected split `RealSetupFsReader.read` uses.
+ */
+function lstatOrNull(path: string): Stats | null {
+  try {
+    return lstatSync(path);
+  } catch (cause) {
+    if (isErrnoException(cause) && cause.code === "ENOENT") return null;
+    throw cause;
+  }
+}
+
+/**
+ * Walks `target`'s ancestors upward, STRICTLY inside `boundary`, and returns
+ * the first one that is a symlink.
+ *
+ * The scan stops at `boundary` rather than at the filesystem root on purpose
+ * (spec D4): a developer whose entire `~/.claude` is itself a symlink is a
+ * legitimate setup with nothing to do with this defect, and scanning past the
+ * install root would refuse every removal for them.
+ *
+ * @param target - Absolute path being removed.
+ * @param boundary - Absolute install root; ancestors at or above it are not scanned.
+ * @returns The offending ancestor path, or `null` when the chain is link-free
+ *   (including when `target` sits directly in `boundary`, or outside it).
+ * @throws Any non-ENOENT stat failure encountered while walking.
+ */
+function findSymlinkAncestor(target: string, boundary: string): string | null {
+  const root = resolve(boundary);
+  const prefix = root + sep;
+  let current = dirname(resolve(target));
+
+  while (current !== root && current.startsWith(prefix)) {
+    const stats = lstatOrNull(current);
+    if (stats !== null && stats.isSymbolicLink()) return current;
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+
+  return null;
 }
 
 /** Narrow type guard for a Node `fs` errno exception (`{code: string}`), without importing `node:fs`'s internal error type. */

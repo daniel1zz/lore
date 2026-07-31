@@ -267,8 +267,19 @@ export interface SetupFsWriter {
   mkdir(path: string): Promise<void>;
   /** Copies the file currently at ABSOLUTE `src` into ABSOLUTE directory `destDir`, preserving its basename. */
   backup(src: string, destDir: string): Promise<void>;
-  /** Removes the file OR directory (recursively) at an ABSOLUTE path. A missing target is NOT an error. */
-  remove(path: string): Promise<void>;
+  /**
+   * Removes the file OR directory (recursively) at an ABSOLUTE path. A missing
+   * target is NOT an error.
+   *
+   * `opts.boundary` — the install root. When supplied, the implementation MUST
+   * refuse (throw) rather than remove a path any of whose ancestors inside that
+   * boundary is a symlink: following such a link deletes the LINK TARGET's file
+   * instead of an installed copy. Callers that join a path against `targetDir`
+   * should always pass it — omitting it silently restores the reach-through
+   * behaviour that deleted this repo's own source twice
+   * (spec-lore-setup-deletes-repo-source-through-dev-symlinks D3/D4).
+   */
+  remove(path: string, opts?: { boundary?: string }): Promise<void>;
   /**
    * Removes the directory at ABSOLUTE `path` IFF it is currently empty — NEVER
    * force/recursive (unlike {@link remove}). A path that still has entries, or
@@ -611,7 +622,7 @@ export class SetupService {
       }
 
       for (const removedPath of plan.removals) {
-        await this.writer.remove(path.join(opts.targetDir, removedPath));
+        await this.writer.remove(path.join(opts.targetDir, removedPath), { boundary: opts.targetDir });
         committedRemovals.push(removedPath);
       }
 
@@ -770,7 +781,7 @@ export class SetupService {
     // must hold even for this cleanup step); best-effort (advisory cache, fail-open).
     if (committedWrites.length > 0 || committedRemovals.length > 0 || manifestChanged) {
       try {
-        await this.writer.remove(path.join(opts.targetDir, CHECK_CACHE_FILENAME));
+        await this.writer.remove(path.join(opts.targetDir, CHECK_CACHE_FILENAME), { boundary: opts.targetDir });
       } catch {
         // reason: the check cache is purely advisory (SPEC-076 §C6) — a failed removal
         // (e.g. permission denied, or it never existed) does not invalidate this
@@ -821,7 +832,7 @@ export class SetupService {
 
     const toRemove = runDirNames.slice(0, runDirNames.length - BACKUP_RUNS_KEEP);
     for (const name of toRemove) {
-      await this.writer.remove(path.join(backupsDir, name));
+      await this.writer.remove(path.join(backupsDir, name), { boundary: backupsDir });
     }
   }
 
@@ -884,12 +895,12 @@ export class SetupService {
           await this.writer.write(fullPath, backupContent);
           restoredPaths.push(entry.path);
         } else {
-          await this.writer.remove(fullPath);
+          await this.writer.remove(fullPath, { boundary: opts.targetDir });
           removedPaths.push(entry.path);
         }
       }
 
-      await this.writer.remove(path.join(opts.targetDir, BACKUPS_DIRNAME));
+      await this.writer.remove(path.join(opts.targetDir, BACKUPS_DIRNAME), { boundary: opts.targetDir });
 
       // AC-046-F: prune now-empty directories our removed entries leave behind — see
       // module doc's uninstall bullet for the ancestor-derivation + empty-only contract.
@@ -910,7 +921,7 @@ export class SetupService {
     }
 
     try {
-      await this.writer.remove(manifestPath);
+      await this.writer.remove(manifestPath, { boundary: opts.targetDir });
     } catch (cause) {
       const reason = describeCaught(cause);
       return err({
