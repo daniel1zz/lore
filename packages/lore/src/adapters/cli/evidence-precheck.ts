@@ -20,6 +20,15 @@
  *     `lore_evidence_add`) adapters share ONE decision of which calls are even
  *     in scope for this precheck (task-mcp-lore-evidence-add-bypasses-the-
  *     oracle-file-existence)
+ *   - findFilteredPassProofGap(input) / findFilteredPassRefusal(input) —
+ *     the SECOND self-report guard hosted here (SPEC-061 AC-061-11..14, 17): a
+ *     `--result pass` whose `--command` carries a `-t` case filter must arrive
+ *     with the runner's own summary line as matched-count proof
+ *
+ * Both guards are ADJACENT but INDEPENDENT: the first asks "does the file this
+ * command names exist at all", the second asks "did the filter this command
+ * carries match anything". They share only the oracle/result scope gate
+ * (`isSelfReportedPassInScope`).
  *
  * Design: token EXTRACTION and existence-port CHECKING both live here so the
  * whole precheck is unit-testable with a fake `fileExists` — no real
@@ -32,8 +41,18 @@
  *
  * Side-effect class: pure (no IO, no fs, no process access) — vitest-safe.
  *
- * Source: task-lore-evidence-self-reported-pass-lacks-oracle-file
+ * Source: task-lore-evidence-self-reported-pass-lacks-oracle-file;
+ *   task-lore-evidence-must-refuse-a-t-filtered-pass-with-no (SPEC-061,
+ *   adr-lore-evidence-proves-a-filtered-pass-with-the-runner-s-own)
  */
+
+import {
+  CASE_FILTER_FLAGS_DESCRIPTION,
+  RUNNER_SUMMARY_FORMATS_DESCRIPTION,
+  commandHasCaseFilter,
+  parseExecutedUnits,
+  type LoreError,
+} from "@lore/core";
 
 /**
  * Matches a path-like token ending in a recognized test-file suffix
@@ -193,6 +212,22 @@ export function findMissingOracleFiles(
 }
 
 /**
+ * The oracle/result scope both self-report guards in this module share: only a
+ * `test`/`e2e` oracle claiming `pass` is a self-reported assertion that can be
+ * false-green. Every other oracle kind, and every `fail`/`expected-fail`
+ * result, is out of scope for BOTH guards and passes through untouched.
+ *
+ * @param input.oracle - the oracle kind as received (untyped `string` — see
+ *   {@link findMissingOracleFilesForEvidence}'s param docs for why)
+ * @param input.result - the result as received
+ * @returns `true` iff this call is a self-reported test/e2e pass
+ */
+function isSelfReportedPassInScope(input: { oracle: string; result: string }): boolean {
+  if (input.oracle !== "test" && input.oracle !== "e2e") return false;
+  return input.result === "pass";
+}
+
+/**
  * Composes the "does this evidence-add call even need the missing-oracle-file
  * precheck" gate (only a self-reported `test`/`e2e` oracle claiming `pass` is
  * in scope — see this module's header) with `findMissingOracleFiles` itself.
@@ -237,8 +272,7 @@ export function findMissingOracleFilesForEvidence(input: {
   corpusRoot?: string;
   fileExists: FileExistsPort;
 }): string[] {
-  if (input.oracle !== "test" && input.oracle !== "e2e") return [];
-  if (input.result !== "pass") return [];
+  if (!isSelfReportedPassInScope(input)) return [];
   return findMissingOracleFiles(input.command, {
     cwd: input.cwd,
     // reason: exactOptionalPropertyTypes — conditionally spread rather than
@@ -249,4 +283,174 @@ export function findMissingOracleFilesForEvidence(input: {
     ...(input.corpusRoot !== undefined ? { corpusRoot: input.corpusRoot } : {}),
     fileExists: input.fileExists,
   });
+}
+
+// ─── Filtered-Pass Matched-Count Proof (SPEC-061 AC-061-11..14, 17) ─────────
+
+/**
+ * Why a self-reported filtered `pass` carries no usable matched-count proof.
+ * Exhaustive — `null` from {@link findFilteredPassProofGap} means "no gap",
+ * never "unclassified".
+ *
+ *   - `"missing_tail"` — no output tail was supplied at all.
+ *   - `"unparseable_tail"` — a tail was supplied but carries no runner-summary
+ *     line the shared `@lore/core` parser recognises.
+ *   - `"no_matched_case_count"` — a runner summary WAS found, but it carries no
+ *     matched-CASE count (e.g. a vitest tail truncated to its "Test Files" line
+ *     only), so the one number that would prove the filter matched something is
+ *     absent.
+ *   - `"zero_match"` — the summary parsed, and it says the filter matched ZERO
+ *     cases: the exit-0 this `pass` rests on proves nothing.
+ */
+export type FilteredPassProofGap =
+  | "missing_tail"
+  | "unparseable_tail"
+  | "no_matched_case_count"
+  | "zero_match";
+
+/**
+ * Classifies whether a self-reported evidence write is a case-filtered `pass`
+ * lacking matched-count proof, and if so, why.
+ *
+ * Scope: only a `test`/`e2e` oracle claiming `pass`
+ * ({@link isSelfReportedPassInScope}) whose command carries a case filter
+ * (`commandHasCaseFilter`, imported — never re-derived here) is examined. An
+ * UNFILTERED command is never gated: a whole-file run whose path filter matches
+ * nothing exits 1 loudly, so the silent-green failure mode this guard exists for
+ * does not arise (adr-lore-evidence-proves-a-filtered-pass-with-the-runner-s-own
+ * §Consequences).
+ *
+ * // reason: fail-CLOSED — a missing or unreadable tail is a GAP, not a pass.
+ * // This deliberately inverts `judgeCompleteness`'s fail-OPEN posture inside
+ * // `lore verify` (`unknown_runner` never blocks there). The runner has
+ * // independently observed the exit code and can afford to be generous about
+ * // an unrecognised summary format; `lore evidence` has observed NOTHING —
+ * // the tail is its only evidence, so an unreadable tail is no evidence
+ * // (adr-lore-evidence-proves-a-filtered-pass-with-the-runner-s-own §Decision).
+ * // Do not "harmonise" the two postures; the asymmetry is the decision.
+ *
+ * @param input.oracle - oracle kind as received from the caller (CLI
+ *   `--oracle` / MCP `oracle`), untyped `string` for the same adapter-agnostic
+ *   reason as {@link findMissingOracleFilesForEvidence}
+ * @param input.result - result as received (CLI `--result` / MCP `result`)
+ * @param input.command - the exact command string being recorded
+ * @param input.outputTail - the resolved output tail (CLI `--output-tail` or
+ *   the tail of `--output-tail-file`; MCP `output_tail`), absent when none was
+ *   supplied
+ * @returns the {@link FilteredPassProofGap}, or `null` when the call is out of
+ *   scope OR the tail genuinely proves ≥1 matched case
+ *
+ * @example
+ * findFilteredPassProofGap({
+ *   oracle: "test", result: "pass",
+ *   command: "bunx vitest run a.test.ts -t 'AC-1'",
+ * })
+ * // => "missing_tail"
+ *
+ * @example
+ * findFilteredPassProofGap({
+ *   oracle: "test", result: "pass",
+ *   command: "bunx vitest run a.test.ts -t 'AC-1'",
+ *   outputTail: "Test Files  1 skipped (1)\nTests  46 skipped (46)\n",
+ * })
+ * // => "zero_match" — every case was skipped; the filter matched none
+ *
+ * @example
+ * findFilteredPassProofGap({
+ *   oracle: "test", result: "pass",
+ *   command: "bunx vitest run a.test.ts",
+ * })
+ * // => null — unfiltered, never gated
+ */
+export function findFilteredPassProofGap(input: {
+  oracle: string;
+  result: string;
+  command: string;
+  outputTail?: string;
+}): FilteredPassProofGap | null {
+  if (!isSelfReportedPassInScope(input)) return null;
+  if (!commandHasCaseFilter(input.command)) return null;
+
+  const tail = input.outputTail;
+  if (tail === undefined || tail.trim().length === 0) return "missing_tail";
+
+  const executedUnits = parseExecutedUnits(tail);
+  if (executedUnits === null) return "unparseable_tail";
+  if (executedUnits.tests === undefined) return "no_matched_case_count";
+  if (executedUnits.tests === 0) return "zero_match";
+
+  return null;
+}
+
+/**
+ * How an operator repairs any of the four gaps — appended verbatim to every
+ * refusal so the message always ends with the action, not just the diagnosis.
+ */
+const MATCHED_COUNT_REPAIR_HINT =
+  "Re-run the command, capture the runner's summary lines, and pass them via " +
+  "--output-tail (or --output-tail-file; MCP: output_tail); or record the run " +
+  "honestly with --result fail / expected-fail.";
+
+/** Per-gap diagnosis, in the operator's words. */
+const GAP_DIAGNOSIS: Readonly<Record<FilteredPassProofGap, string>> = {
+  missing_tail:
+    "no output tail was supplied at all, so nothing shows the filter matched a single case",
+  unparseable_tail:
+    `the supplied output tail carries no runner summary this classifier recognises (${RUNNER_SUMMARY_FORMATS_DESCRIPTION}), ` +
+    "so the matched-case count cannot be read — fail-closed: an unreadable tail is no evidence",
+  no_matched_case_count:
+    "the supplied output tail has a runner summary but no matched-CASE count in it (the case-count line looks truncated away), " +
+    "so the one number that would prove the filter matched something is absent",
+  zero_match:
+    "zero_match — the supplied output tail's runner summary reports 0 matched test cases, " +
+    "so the exit-0 this pass rests on proves nothing (fix the filter or the test title, then re-run)",
+};
+
+/**
+ * The single decision BOTH evidence-write surfaces call: the CLI
+ * (`commands/evidence.ts`) and the MCP `lore_evidence_add` handler
+ * (`../mcp/tools.ts`). Returns the refusal to render, or `null` to proceed.
+ *
+ * Returning the fully-formed {@link LoreError} — rather than a boolean the two
+ * adapters would each phrase for themselves — is what makes SPEC-061 AC-061-17's
+ * gate parity assertable by BEHAVIOUR: the two surfaces cannot drift on
+ * scope, code, field, or wording, because there is only one of each.
+ *
+ * // reason: `field: "output_tail"` on every gap, including `zero_match`,
+ * // where the command's filter is arguably at fault. The field names the
+ * // input the caller must CHANGE to make the write legal, which is the tail
+ * // in every case — a `zero_match` is repaired by re-running and supplying a
+ * // tail that shows matches, never by deleting the tail.
+ *
+ * @param input - same shape as {@link findFilteredPassProofGap}
+ * @returns a `VALIDATION_ERROR` (exit code 4 via `utils.ts::exitCode`) naming
+ *   the missing proof, or `null` when the write may proceed
+ *
+ * @example
+ * findFilteredPassRefusal({
+ *   oracle: "test", result: "pass",
+ *   command: "bunx vitest run a.test.ts -t 'AC-1'",
+ *   outputTail: "Test Files  1 passed (1)\nTests  3 passed (3)\n",
+ * })
+ * // => null — three cases genuinely matched
+ */
+export function findFilteredPassRefusal(input: {
+  oracle: string;
+  result: string;
+  command: string;
+  outputTail?: string;
+}): LoreError | null {
+  const gap = findFilteredPassProofGap(input);
+  if (gap === null) return null;
+
+  return {
+    code: "VALIDATION_ERROR",
+    field: "output_tail",
+    message:
+      `Filtered --result pass without matched-count proof: --command carries a ` +
+      `case-name filter (${CASE_FILTER_FLAGS_DESCRIPTION}) and ${GAP_DIAGNOSIS[gap]}. ` +
+      "A filter that matches nothing still exits 0 with every test reported skipped, " +
+      `so this pass is unproven. ${MATCHED_COUNT_REPAIR_HINT}`,
+    value: input.command,
+  };
 }

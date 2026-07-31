@@ -118,7 +118,10 @@ import { loadTreeBlueprint } from "../../flows/blueprint-flow.js";
 import { buildRealFsProbe } from "../real-fs-probe.js";
 import { buildAssessSummaryText } from "./assess-render.js";
 import { requirePhaseWorkflowService, getPhaseStatus, buildPhaseFeedFlowDeps } from "../cli/phase-wiring.js";
-import { findMissingOracleFilesForEvidence } from "../cli/evidence-precheck.js";
+import {
+  findMissingOracleFilesForEvidence,
+  findFilteredPassRefusal,
+} from "../cli/evidence-precheck.js";
 import { IssueReportService } from "../../service/issue-report-service.js";
 import { hasZeroReleaseEvidence, ZERO_EVIDENCE_RELEASE_WARNING } from "../../service/task-workflow-service.js";
 import { existsSync } from "node:fs";
@@ -1360,6 +1363,25 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
           'use oracle: "manual" for genuinely manual checks.',
         value: args.command,
       });
+    }
+
+    // reason: filtered-pass matched-count guard (SPEC-061 AC-061-17) — gate
+    // PARITY with the CLI is structural, not coincidental: both surfaces call
+    // the SAME `findFilteredPassRefusal`, which returns the fully-formed
+    // LoreError rather than a boolean, so scope/code/field/wording cannot drift
+    // between them. This is the same CLI+MCP sharing the missing-oracle-file
+    // precheck above already uses — an MCP-only bypass is exactly the defect
+    // task-mcp-lore-evidence-add-bypasses-the-oracle-file-existence recorded
+    // once already. Runs after that precheck for the same ordering reason the
+    // CLI documents.
+    const filteredPassRefusal = findFilteredPassRefusal({
+      oracle: args.oracle,
+      result: args.result,
+      command: args.command,
+      ...(args.output_tail !== undefined ? { outputTail: args.output_tail } : {}),
+    });
+    if (filteredPassRefusal !== null) {
+      return errorContent(filteredPassRefusal);
     }
 
     const evidenceInput = {
