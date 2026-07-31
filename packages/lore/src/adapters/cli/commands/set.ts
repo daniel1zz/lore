@@ -65,6 +65,25 @@
  *   reference to the old slug inside OTHER docs' bodies is NOT rewritten (link-table edges
  *   key on the doc's immutable ULID and are unaffected either way).
  *
+ * --decision-status accepted (spec-adr-decision-status-has-a-create-surface-and-no-cli-update
+ *   D1-D7): the single proposed→accepted writer for an `adr` document's `extra.decision_status`.
+ *   Type-scoped to 'adr' like --kind is to 'spec' — the type-scope check fetches the doc first
+ *   (set operates on an existing id/slug, not a --type flag). Read-merge-write: because
+ *   CorpusService.set replaces `extra` wholesale, this command merges
+ *   { ...existing.extra, decision_status: "accepted" } before patching, exactly like --kind's
+ *   spec_kind merge, so unrelated extra keys survive byte-identical. The closed value set
+ *   (ONLY "accepted" is writable; "deprecated"/"superseded" are owned by `lore invalidate`,
+ *   which writes extra.validity and decision_status TOGETHER; every other string is an
+ *   unrecognised value) is decided in decision-status-validation.ts (D6) — a pure,
+ *   vitest-reachable module — never re-typed here. Idempotent (D5): accepting an
+ *   already-"accepted" ADR is detected BEFORE the service call and short-circuits with no
+ *   patch at all, because CorpusService.set unconditionally bumps `version` on every call
+ *   (corpus-service.ts's `set` assembles `newVersion = existing.version + 1` regardless of
+ *   whether any field actually changed) — the only way to honour "no change happened" is to
+ *   never call it for a genuine no-op. Does NOT reset an approved doc to draft: this patch
+ *   only ever touches `extra`, never `content`/`title`, so CorpusService's
+ *   isApprovedAutoResetToDraft check (keyed on content/title) cannot fire.
+ *
  * ⛔ TypeScript cast rule for tests importing this file (do NOT "clean up" — see
  * spec-plan-closure-must-be-loud-terminality-divergence-silent DD-3): this file has TWO
  * top-level exports (`default`, `APPROVED_DEMOTION_ADVISORY`). Any test that does
@@ -90,6 +109,11 @@ import { exitCode, formatError, resolveActor } from "../utils.js";
 import { openEditor } from "../editor.js";
 import type { DocStatus, Priority, SpecKind } from "@lore/core";
 import { SPEC_KINDS } from "@lore/core";
+import {
+  ACCEPTED_DECISION_STATUS_VALUE,
+  checkDecisionStatusValue,
+  formatDecisionStatusRefusal,
+} from "../decision-status-validation.js";
 
 /**
  * Advisory text printed when `CorpusService.set`'s internal approved→draft
@@ -155,6 +179,13 @@ export default defineCommand({
         "New slug (repair path for a degenerate slug, e.g. a pre-SPEC-068 CJK title). " +
         "Must be unique; restating the current slug is a no-op. Does not reset an " +
         "approved doc to draft. Source: SPEC-068 D5",
+    },
+    "decision-status": {
+      type: "string",
+      description:
+        `[adr only] Accept a proposed decision. The only value writable through this ` +
+        `command is '${ACCEPTED_DECISION_STATUS_VALUE}'; 'deprecated'/'superseded' are owned ` +
+        `by 'lore invalidate'. Source: spec-adr-decision-status-has-a-create-surface-and-no-cli-update`,
     },
     json: {
       type: "boolean",
@@ -470,6 +501,67 @@ export default defineCommand({
         }
 
         patch["extra"] = { ...targetDoc.extra, spec_kind: args.kind };
+      }
+
+      // --decision-status accepted (spec-adr-decision-status-has-a-create-surface-and-no-cli-update
+      // D1-D7): mirrors --kind's shape exactly (type-scoped, read-merge-write) — see this
+      // command's module header. The closed value set is checked FIRST, before any store
+      // round trip, because checkDecisionStatusValue is a pure function of the raw flag value
+      // alone (D6) — an owned-transition/unrecognised-value refusal never needs the target doc.
+      if (args["decision-status"] !== undefined) {
+        const checkResult = checkDecisionStatusValue(args["decision-status"]);
+        if (checkResult.kind === "refused") {
+          process.stderr.write(formatDecisionStatusRefusal(checkResult) + "\n");
+          process.exit(2);
+        }
+
+        const resolveForDecisionStatus = await app.corpusService.resolve(args.id);
+        if (!resolveForDecisionStatus.ok) {
+          process.stderr.write(formatError(resolveForDecisionStatus.error) + "\n");
+          process.exitCode = exitCode(resolveForDecisionStatus.error);
+          return;
+        }
+        const getForDecisionStatus = await app.corpusService.get(resolveForDecisionStatus.value);
+        if (!getForDecisionStatus.ok) {
+          process.stderr.write(formatError(getForDecisionStatus.error) + "\n");
+          process.exitCode = exitCode(getForDecisionStatus.error);
+          return;
+        }
+        const targetDocForDecisionStatus = getForDecisionStatus.value.doc;
+
+        if (targetDocForDecisionStatus.type !== "adr") {
+          process.stderr.write(
+            `Error: --decision-status is only valid for type 'adr' (got '${targetDocForDecisionStatus.type}').\n`,
+          );
+          process.exitCode = 4;
+          return;
+        }
+
+        // Idempotence (D5, AC-DS-6): accepting an already-accepted ADR is a no-op — exit 0,
+        // no version bump, no audit row claiming a change. CorpusService.set unconditionally
+        // bumps `version` on EVERY call regardless of whether any field changed, so the only
+        // way to honour "no change happened" is to detect the no-op HERE and skip the call
+        // entirely (never assemble `patch["extra"]` for this branch).
+        const existingExtraForDecisionStatus = (targetDocForDecisionStatus.extra ?? {}) as Record<
+          string,
+          unknown
+        >;
+        if (existingExtraForDecisionStatus["decision_status"] === ACCEPTED_DECISION_STATUS_VALUE) {
+          if (args.json) {
+            console.log(JSON.stringify({ ok: true, data: targetDocForDecisionStatus }, null, 2));
+          } else {
+            console.log(
+              `Updated ${targetDocForDecisionStatus.slug} → v${targetDocForDecisionStatus.version}`,
+            );
+            console.log("  (decision_status already 'accepted' — no change)");
+          }
+          return;
+        }
+
+        patch["extra"] = {
+          ...targetDocForDecisionStatus.extra,
+          decision_status: ACCEPTED_DECISION_STATUS_VALUE,
+        };
       }
 
       // Prior status, captured BEFORE the write, so the demotion advisory below can
