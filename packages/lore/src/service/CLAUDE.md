@@ -57,7 +57,7 @@ Full pre-compression mechanism walkthroughs (per-spec design decisions, byproduc
 | `StalenessProbeService` | probeBatch/probeOne for `lore review --staleness`; never mutates the probed doc, collect-and-continue on partial failure |
 | `AuditService` | query (thin delegation) / verify (completeness join + hash-chain walk + anchor check) / getChainHead |
 | `AcService` | add/list/removeCriterion on `spec.extra.acceptance_criteria`; aggregates per-AC evidence coverage across child plans' tasks |
-| `VerifyRunnerService` | `verifyPlan` — trusted-runner orchestration for `lore verify` (command-provenance approval gate, env allowlist, attested evidence) |
+| `VerifyRunnerService` | `verifyPlan` — trusted-runner orchestration for `lore verify` (command-provenance approval gate, env allowlist, attested evidence, declared-scope selection + its pre-flight refusals) |
 | `SetupService` | planInstall/install/uninstall — global-machine installer over a resolved `targetDir`, manifest-authoritative |
 | `ProjectSetupService` | Thin wrapper over `scaffoldProject` — per-repo `lore setup --project` scaffold |
 | `GateEnforcer` | `enforce(checkpoint, ctx)` — service-layer runner for the six `lore gate` checkpoints |
