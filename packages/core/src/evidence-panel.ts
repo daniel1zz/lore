@@ -18,17 +18,26 @@
  *     perform (per-task `extractEvidence(task).length` / `.filter(attestation !==
  *     undefined).length`) — that call site now calls this function instead of
  *     re-deriving the same counts locally.
- *   - deriveAttestationSummary(infos, minRatio, acCoverage) — reproduces ALL
- *     THREE of `attestationFloor`'s conditions (per-task zero-attested AND
- *     per-claimed-AC attested coverage AND an OPT-IN plan-wide ratio floor) as
- *     a renderable fact object, rather than a bare pass/fail predicate result.
- *     `gate-predicates.ts::attestationFloor` now delegates to this function —
- *     byte-identical gate behavior (AC-075-11, extended by
- *     spec-plan-close-predicates-measure-invariants-an-applicability §D3/D4).
- *   - deriveClaimedAcCoverage(coverage) — the per-claimed-AC attested-coverage
- *     fact (§D3's "condition 2, the default teeth"): which declared script-mode
- *     acceptance criteria were actually CLAIMED (>=1 evidence reference) by this
- *     plan's tasks, and which of those remain unattested.
+ *   - deriveAttestationSummary(infos, minRatio, acCoverage) — the plan-wide
+ *     evidence facts (totals, ratio, the per-task zero-attested list, the
+ *     exercised-AC coverage) plus `meets_floor`, which as of
+ *     spec-declared-scope-attestation-contract-task-owned-ac-scope §Facts (D5)
+ *     carries the OPT-IN plan-wide ratio conjunct ALONE — that function's own
+ *     JSDoc names which conditions were demoted to reported facts and where the
+ *     declared-scope conjunct now lives.
+ *   - deriveClaimedAcCoverage(coverage) — the EXERCISED-AC coverage fact,
+ *     DESCRIPTIVE ONLY: which declared script-mode acceptance criteria this
+ *     plan's evidence actually referenced (>= 1 `ac_ref`), and which of those
+ *     remain unattested. Evidence-derived, so it must never define the scope it
+ *     is audited against — hence `exercised_acs`, not `claimed_acs`.
+ *   - deriveDeclaredScopeCoverage(tasks, coverage) — the DECLARED-scope coverage
+ *     fact (§Facts D4, the plan-close conjunct's input): the union over
+ *     evidence-bearing tasks of (`task.extra.ac_scope` ∩ the spec's declared
+ *     script-mode criteria), its unattested subset, and whether ANY
+ *     evidence-bearing task declared no scope at all.
+ *   - declaredScopeCoverageVerdict(coverage, referent) — the plan-close coverage
+ *     conjunct's three-valued verdict over that fact: a measured failure, an
+ *     APPLICABILITY verdict when the scope is undeclared, or a pass.
  *   - summarizeForAdjudicationBar(panel) — compact chip-summary projection shared by
  *     the (not-yet-built, T3-scope) AdjudicationBar UI component.
  *
@@ -57,6 +66,15 @@
  *     `ac_ref` naming an undeclared id is excluded STRUCTURALLY, before this
  *     function ever sees the data. Adding a second exclusion filter here would be
  *     redundant and risk silently diverging from that upstream contract.
+ *   - `ExercisedAcCoverage` (evidence-derived) and `DeclaredScopeCoverage`
+ *     (author-declared) are INDEPENDENT facts with NO fallback between them
+ *     (spec-declared-scope-attestation-contract-task-owned-ac-scope §Facts D4).
+ *     Neither is ever computed from, or substituted for, the other: the defect
+ *     that spec exists to remove is precisely evidence defining its own audit
+ *     scope. A fixture where they DISAGREE (evidence present, nothing declared)
+ *     is the oracle proving the independence (AC-VS-6) — never "reuse" one when
+ *     the other is unresolved; use {@link UNRESOLVED_DECLARED_SCOPE}, which
+ *     reports UNDECLARED.
  *
  * Side-effect class: pure
  *
@@ -64,7 +82,9 @@
  *   Decisions D2, D6, D10; SPEC-069 §Design Decisions D1 (attestationFloor, the
  *   predicate this module's math must stay byte-identical to);
  *   spec-plan-close-predicates-measure-invariants-an-applicability §D3
- *   (per-claimed-AC coverage as the default conjunct), §D4 (ratio default flip).
+ *   (per-claimed-AC coverage as the default conjunct), §D4 (ratio default flip);
+ *   spec-declared-scope-attestation-contract-task-owned-ac-scope §Facts (D4 —
+ *   the exercised/declared split; D5 — the demoted per-task floor).
  */
 
 import type { AcCoverageFact, AcceptanceCriterion } from "./acceptance.js";
@@ -117,35 +137,48 @@ export function buildTaskAttestationInfos(tasks: readonly DocRecord[]): TaskAtte
   });
 }
 
-// ─── Per-Claimed-AC Attested Coverage (spec-plan-close-predicates-measure- ──
-// ─── invariants-an-applicability §D3) ───────────────────────────────────────
+// ─── Exercised-AC Coverage (spec-plan-close-predicates-measure-invariants-an- ─
+// ─── applicability §D3, renamed by spec-declared-scope-attestation-contract- ──
+// ─── task-owned-ac-scope §Facts D4) ──────────────────────────────────────────
 
 /**
- * Per-claimed-AC attested-coverage facts — the "default teeth" conjunct
- * (§D3 condition 2) that replaces a plan-wide evidence ratio as the primary
- * signal: not "how much of this plan's evidence is attested" but "was EVERY
- * acceptance criterion this plan actually claimed ever runner-attested".
+ * EXERCISED-AC attested-coverage facts — which declared script-mode acceptance
+ * criteria this plan's EVIDENCE actually referenced, and which of those carry no
+ * runner attestation.
+ *
+ * DESCRIPTIVE ONLY as of spec-declared-scope-attestation-contract-task-owned-
+ * ac-scope §Facts (D4): this fact used to double as the plan-close coverage
+ * conjunct's input, which made the audited evidence define its own audit scope
+ * (a `lore verify <plan>` run with no `--ac` attested every declared AC onto one
+ * task, and the conjunct then read those very entries). The conjunct now reads
+ * {@link DeclaredScopeCoverage}; this fact stays for diagnostics and for the
+ * dashboard Evidence tab, and MUST NOT be re-wired into any gate verdict.
  */
 export interface ClaimedAcCoverage {
   /**
    * Declared script-mode criteria carrying >= 1 evidence reference, in
    * declaration order (the order {@link computeAcCoverage}'s own output
-   * preserves). `ai`/`human`-mode criteria are excluded — `lore verify`
-   * structurally cannot attest them, so demanding their attestation would be
-   * a permanent false block (§D3(b)). A dangling `ac_ref` naming an
-   * undeclared id can never appear here — {@link computeAcCoverage} emits one
-   * row per DECLARED criterion only, so this array's input already excludes
-   * dangling refs structurally (see this module's header invariant).
+   * preserves). Named `exercised_acs`, never `claimed_acs`: a task's CLAIM is
+   * what its author declared in `extra.ac_scope`
+   * ({@link DeclaredScopeCoverage.declared_acs}); this array only records what
+   * some evidence entry happened to reference. `ai`/`human`-mode criteria are
+   * excluded — `lore verify` structurally cannot attest them, so demanding
+   * their attestation would be a permanent false block (§D3(b)). A dangling
+   * `ac_ref` naming an undeclared id can never appear here —
+   * {@link computeAcCoverage} emits one row per DECLARED criterion only, so
+   * this array's input already excludes dangling refs structurally (see this
+   * module's header invariant).
    */
-  claimed_acs: string[];
+  exercised_acs: string[];
   /**
-   * Subset of `claimed_acs` whose evidence carries ZERO runner attestation
+   * Subset of `exercised_acs` whose evidence carries ZERO runner attestation
    * (`attested_pass + attested_fail === 0` — never `attested_pass` alone, per
    * the spec's pinned counting rule: a runner-issued fail still proves the
    * runner ran that AC's registered command).
    */
   unattested_acs: string[];
-  /** `unattested_acs.length === 0` — vacuously `true` when `claimed_acs` is empty. */
+  /** `unattested_acs.length === 0` — vacuously `true` when `exercised_acs` is
+   *  empty. Reported for rendering only: no gate verdict may read it (D4). */
   meets_coverage: boolean;
 }
 
@@ -158,38 +191,273 @@ export interface ClaimedAcCoverage {
  *
  * @param coverage - {@link computeAcCoverage}'s output (typically a plan's
  *   governing spec's declared criteria aggregated over the plan's tasks).
- * @returns The claimed set (script-mode, >=1 ref), its unattested subset, and
- *   whether every claimed criterion is attested. `{claimed_acs: [],
+ * @returns The exercised set (script-mode, >=1 ref), its unattested subset, and
+ *   whether every exercised criterion is attested. `{exercised_acs: [],
  *   unattested_acs: [], meets_coverage: true}` for an empty `coverage` input —
- *   a plan/spec pairing with nothing claimed has nothing to fail on.
+ *   a plan/spec pairing whose evidence references nothing has nothing to report.
  * @example
  * deriveClaimedAcCoverage([
  *   { ac_id: "AC-1", mode: "script", pass: 1, fail: 0, refs: [{task_id: "t", result: "pass", attested: true}], attested_pass: 1, attested_fail: 0 },
  *   { ac_id: "AC-2", mode: "script", pass: 1, fail: 0, refs: [{task_id: "t", result: "pass"}], attested_pass: 0, attested_fail: 0 },
  *   { ac_id: "AC-3", mode: "human", pass: 0, fail: 0, refs: [], attested_pass: 0, attested_fail: 0 },
  * ]);
- * // => { claimed_acs: ["AC-1", "AC-2"], unattested_acs: ["AC-2"], meets_coverage: false }
+ * // => { exercised_acs: ["AC-1", "AC-2"], unattested_acs: ["AC-2"], meets_coverage: false }
  * // (AC-3 excluded: human-mode; AC-3 also carries zero refs, so it would be
  * //  excluded on that ground alone even if it were script-mode)
  */
 export function deriveClaimedAcCoverage(coverage: readonly AcCoverageFact[]): ClaimedAcCoverage {
-  const claimed = coverage.filter((fact) => fact.mode === "script" && fact.refs.length > 0);
-  const claimed_acs = claimed.map((fact) => fact.ac_id);
-  const unattested_acs = claimed
+  const exercised = coverage.filter((fact) => fact.mode === "script" && fact.refs.length > 0);
+  const exercised_acs = exercised.map((fact) => fact.ac_id);
+  const unattested_acs = exercised
     .filter((fact) => fact.attested_pass + fact.attested_fail === 0)
     .map((fact) => fact.ac_id);
-  return { claimed_acs, unattested_acs, meets_coverage: unattested_acs.length === 0 };
+  return { exercised_acs, unattested_acs, meets_coverage: unattested_acs.length === 0 };
+}
+
+// ─── Declared-Scope Coverage (spec-declared-scope-attestation-contract-task- ──
+// ─── owned-ac-scope §Facts D4 — the plan-close coverage conjunct's input) ─────
+
+/**
+ * DECLARED-scope attested-coverage facts — the plan-close coverage conjunct's
+ * ONLY input (spec-declared-scope-attestation-contract-task-owned-ac-scope
+ * §Facts). Where {@link ClaimedAcCoverage} asks "which criteria did this plan's
+ * evidence happen to touch", this asks "which criteria did the plan's task
+ * AUTHORS declare they own, and were those runner-attested" — the audit scope is
+ * therefore declared independently of the evidence being audited.
+ */
+export interface DeclaredScopeCoverage {
+  /**
+   * Union over evidence-bearing tasks of (`task.extra.ac_scope` ∩ the spec's
+   * declared script-mode criteria), in DECLARATION order (the order
+   * {@link computeAcCoverage}'s own output preserves — never task order, so the
+   * value is stable under task reordering). The intersection is what excludes a
+   * dangling declared id (one the spec no longer declares) and an `ai`/`human`-
+   * mode id (which `lore verify` structurally cannot attest).
+   */
+  declared_acs: string[];
+  /**
+   * Subset of `declared_acs` whose evidence carries ZERO runner attestation
+   * (`attested_pass + attested_fail === 0` — a runner-issued FAIL counts as
+   * attested: it still proves the runner ran that AC's registered command).
+   */
+  unattested_acs: string[];
+  /**
+   * `true` iff at least one EVIDENCE-BEARING task carries no readable
+   * `ac_scope` at all. A task with no evidence is never consulted — it has
+   * nothing to audit, so its silence says nothing about scope. An EMPTY
+   * `ac_scope: []` is a DECLARATION ("this task claims nothing") and keeps this
+   * `false`; only an absent (or unreadable) field is undeclared — the authorial
+   * distinction the governing spec's §Contract Details pins.
+   */
+  scope_undeclared: boolean;
+  /** `unattested_acs.length === 0` — vacuously `true` when `declared_acs` is empty. */
+  meets_coverage: boolean;
+}
+
+/**
+ * The {@link DeclaredScopeCoverage} value a caller that never RESOLVED the fact
+ * must pass — it reports the scope as UNDECLARED, so an unresolved referent can
+ * only ever produce the (non-blocking, audited) applicability verdict, never a
+ * fabricated compliant declaration.
+ *
+ * Exists because the alternative — an ad-hoc `?? {scope_undeclared: false, …}`
+ * at each call site — would be a silent vacuous PASS of the conjunct: exactly
+ * the proxy-for-invariant defect the governing spec removes. Do not "simplify"
+ * a call site into building this shape inline with `scope_undeclared: false`.
+ */
+export const UNRESOLVED_DECLARED_SCOPE: DeclaredScopeCoverage = {
+  declared_acs: [],
+  unattested_acs: [],
+  scope_undeclared: true,
+  meets_coverage: true,
+};
+
+/** The machine-readable `reason` an undeclared scope produces — the single
+ *  definition site, widened into `gate-predicates.ts`'s `NotApplicableReason`
+ *  union by import so the two can never drift. */
+export const SCOPE_UNDECLARED_REASON = "scope-undeclared";
+
+/**
+ * The plan-close coverage conjunct's three-valued verdict — a MEASURED failure
+ * (some declared AC has zero attested evidence), an APPLICABILITY verdict (no
+ * task declared a scope, so there is no claim to audit), or a pass.
+ *
+ * The not-applicable member deliberately carries NO `ok` property, mirroring
+ * `gate-predicates.ts::PredicateNotApplicable`'s own shape: a consumer's
+ * `if (!verdict.ok)` cannot compile until it narrows, so the third case can
+ * never be silently routed into the pass branch. It is structurally assignable
+ * to `PredicateNotApplicable` once {@link SCOPE_UNDECLARED_REASON} is in that
+ * module's `NotApplicableReason` union, which is why `attestationFloor` can
+ * return this value directly rather than re-building it.
+ */
+export type DeclaredScopeCoverageVerdict =
+  | {
+      readonly notApplicable: true;
+      readonly reason: typeof SCOPE_UNDECLARED_REASON;
+      readonly referent: string;
+    }
+  | { readonly ok: true }
+  | { readonly ok: false; readonly unattested_acs: readonly string[] };
+
+/**
+ * Defensive three-valued `task.extra.ac_scope` read — `extra` is untyped
+ * storage, so a legacy/corrupted row may hold anything.
+ *
+ * Distinct on purpose from `assessment.ts`'s module-private `extractAcScope`,
+ * which collapses absent to `[]`: this module MUST tell "nobody declared a
+ * scope" (→ `undefined`, the applicability verdict) apart from "an author
+ * declared that this task claims nothing" (→ `[]`, a resolved declaration). A
+ * two-valued accessor cannot express that distinction, which is the whole
+ * subject of AC-VS-5/AC-VS-6 — do not consolidate the two readers.
+ *
+ * @param task - Any task (or phase) document; only its `extra.ac_scope` is read.
+ * @returns The declared id array, or `undefined` when the field is absent OR
+ *   unreadable (not an array, or an array containing a non-string). A malformed
+ *   value is reported AS undeclared — the loud direction: it surfaces as the
+ *   audited `scope-undeclared` advisory rather than as a compliant declaration.
+ *   Never throws.
+ * @example
+ * findDeclaredAcScope({ extra: { ac_scope: ["AC-1"] } } as DocRecord); // => ["AC-1"]
+ * @example
+ * findDeclaredAcScope({ extra: { ac_scope: [] } } as DocRecord);       // => []
+ * @example
+ * findDeclaredAcScope({ extra: {} } as DocRecord);                     // => undefined
+ */
+export function findDeclaredAcScope(task: DocRecord): string[] | undefined {
+  const extra: unknown = task.extra;
+  if (extra === null || typeof extra !== "object" || Array.isArray(extra)) return undefined;
+  const raw: unknown = (extra as Record<string, unknown>)["ac_scope"];
+  if (!Array.isArray(raw)) return undefined;
+  if (!raw.every((entry): entry is string => typeof entry === "string")) return undefined;
+  return raw;
+}
+
+/**
+ * Derives {@link DeclaredScopeCoverage} — the declared half of the coverage
+ * conjunct — from the plan's task documents and {@link computeAcCoverage}'s own
+ * output. Never re-implements attestation counting (this module's header
+ * invariant): the attested/unattested classification comes from `coverage`'s own
+ * `attested_pass`/`attested_fail`, exactly as {@link deriveClaimedAcCoverage}'s
+ * does.
+ *
+ * Only EVIDENCE-BEARING tasks contribute (a task with no evidence has nothing
+ * to audit, so neither its declaration nor its silence is meaningful here) —
+ * this is why a pure-planning task cannot drag a fully-declared plan into
+ * `scope_undeclared: true`.
+ *
+ * @param tasks - The plan's task (or phase) documents, as resolved by the caller
+ *   (`CorpusService.getPlanBundle`) — the ONLY source of `extra.ac_scope`, which
+ *   is why the gate predicate takes this fact precomputed rather than deriving it
+ *   (module invariant: predicates see no documents, this module sees no store).
+ * @param coverage - {@link computeAcCoverage}'s output over the plan's governing
+ *   spec's declared criteria; supplies both the declarable id set (its
+ *   script-mode rows) and each id's attestation counts. `[]` for a plan with no
+ *   spec-tier ancestor — nothing is declarable, so `declared_acs` is empty and
+ *   the conjunct is vacuously satisfied.
+ * @returns The declared union, its unattested subset, whether any
+ *   evidence-bearing task left its scope undeclared, and whether the conjunct is
+ *   satisfied. Never throws.
+ * @example
+ * // one task declaring AC-1 (attested) — a satisfied, resolved declaration
+ * deriveDeclaredScopeCoverage(
+ *   [{ extra: { ac_scope: ["AC-1"], verification_evidence: [attestedEntry] } } as DocRecord],
+ *   [{ ac_id: "AC-1", mode: "script", pass: 1, fail: 0, refs: [{task_id: "t", result: "pass", attested: true}], attested_pass: 1, attested_fail: 0 }],
+ * );
+ * // => { declared_acs: ["AC-1"], unattested_acs: [], scope_undeclared: false, meets_coverage: true }
+ * @example
+ * // the legacy shape: evidence, no declaration — the two facts DISAGREE (AC-VS-6)
+ * deriveDeclaredScopeCoverage(
+ *   [{ extra: { verification_evidence: [attestedEntry] } } as DocRecord],
+ *   [{ ac_id: "AC-1", mode: "script", pass: 1, fail: 0, refs: [{task_id: "t", result: "pass", attested: true}], attested_pass: 1, attested_fail: 0 }],
+ * );
+ * // => { declared_acs: [], unattested_acs: [], scope_undeclared: true, meets_coverage: true }
+ */
+export function deriveDeclaredScopeCoverage(
+  tasks: readonly DocRecord[],
+  coverage: readonly AcCoverageFact[],
+): DeclaredScopeCoverage {
+  const declarableIds = new Set(
+    coverage.filter((fact) => fact.mode === "script").map((fact) => fact.ac_id),
+  );
+  const declaredIds = new Set<string>();
+  let scopeUndeclared = false;
+  for (const task of tasks) {
+    if (extractEvidence(task).length === 0) continue;
+    const scope = findDeclaredAcScope(task);
+    if (scope === undefined) {
+      scopeUndeclared = true;
+      continue;
+    }
+    for (const id of scope) {
+      if (declarableIds.has(id)) declaredIds.add(id);
+    }
+  }
+  // reason: iterate `coverage` (not `declaredIds`) so both arrays come out in
+  // DECLARATION order — a Set preserves INSERTION order, which here would be
+  // task order and would make the fact's rendering depend on how the store
+  // happened to return the plan's tasks.
+  const declared = coverage.filter((fact) => declaredIds.has(fact.ac_id));
+  const unattested_acs = declared
+    .filter((fact) => fact.attested_pass + fact.attested_fail === 0)
+    .map((fact) => fact.ac_id);
+  return {
+    declared_acs: declared.map((fact) => fact.ac_id),
+    unattested_acs,
+    scope_undeclared: scopeUndeclared,
+    meets_coverage: unattested_acs.length === 0,
+  };
+}
+
+/**
+ * Maps a {@link DeclaredScopeCoverage} fact to the plan-close coverage
+ * conjunct's verdict.
+ *
+ * Precedence is FAIL > NOT-APPLICABLE > PASS, and the order matters: a plan
+ * where task A declares an unattested AC while task B declares nothing has BOTH
+ * a measured violation and an undeclared task. Reporting "inapplicable" there
+ * would erase A's real violation, so the measured failure is checked FIRST. Do
+ * not reorder these two branches.
+ *
+ * @param coverage - The declared-scope fact, from
+ *   {@link deriveDeclaredScopeCoverage} (or {@link UNRESOLVED_DECLARED_SCOPE}
+ *   when the caller never resolved it).
+ * @param referent - The closing plan's slug or id — carried on the
+ *   not-applicable verdict for the advisory/audit channels
+ *   (`GateEnforcer.enforce`), ignored on the other two.
+ * @returns `{ok: false, unattested_acs}` when some declared AC has zero attested
+ *   evidence; `{notApplicable: true, reason: "scope-undeclared", referent}` when
+ *   no violation is measurable because an evidence-bearing task declared no
+ *   scope; `{ok: true}` otherwise. NEVER `{ok: true}` for an undeclared scope —
+ *   that vacuous pass is the defect the governing spec removes.
+ * @example
+ * declaredScopeCoverageVerdict(UNRESOLVED_DECLARED_SCOPE, "plan-x");
+ * // => { notApplicable: true, reason: "scope-undeclared", referent: "plan-x" }
+ */
+export function declaredScopeCoverageVerdict(
+  coverage: DeclaredScopeCoverage,
+  referent: string,
+): DeclaredScopeCoverageVerdict {
+  if (!coverage.meets_coverage) return { ok: false, unattested_acs: coverage.unattested_acs };
+  if (coverage.scope_undeclared) {
+    return { notApplicable: true, reason: SCOPE_UNDECLARED_REASON, referent };
+  }
+  return { ok: true };
 }
 
 // ─── Attestation Ratio Math ─────────────────────────────────────────────────
 
 /**
- * Renderable plan-wide attestation facts — the same conditions
- * `gate-predicates.ts::attestationFloor` gates on (SPEC-069's per-task
- * zero-attested check, plus spec-plan-close-predicates-measure-invariants-an-
- * applicability §D3's per-claimed-AC coverage and opt-in ratio), expressed as
- * data rather than a bare pass/fail verdict, so the dashboard Evidence tab can
- * show WHY a plan is blocked, not just THAT it is.
+ * Renderable plan-wide attestation facts, expressed as data rather than a bare
+ * pass/fail verdict so the dashboard Evidence tab can show WHY a plan is
+ * blocked, not just THAT it is.
+ *
+ * Every field here is evidence-derived. `meets_floor` therefore carries only the
+ * conjunct that evidence facts can decide (the opt-in ratio) — the plan-close
+ * gate ANDs it with the DECLARED-scope conjunct, whose input
+ * ({@link DeclaredScopeCoverage}) needs each task's `extra.ac_scope`, a document
+ * fact `TaskAttestationInfo` deliberately does not carry. A consumer rendering a
+ * plan's gate verdict must combine both facts; `meets_floor` alone is NOT the
+ * gate verdict (see {@link deriveAttestationSummary}).
  */
 export interface AttestationSummary {
   /** Sum of `evidenceCount` across every input task. */
@@ -210,50 +478,65 @@ export interface AttestationSummary {
    * runs at all — never coerce this to `0` or `0.5` at a render site.
    */
   min_ratio: number | null;
-  /** The per-claimed-AC attested-coverage facts (§D3 condition 2, the default teeth). */
+  /**
+   * The EXERCISED-AC coverage facts — REPORTED, never gated on
+   * (spec-declared-scope-attestation-contract-task-owned-ac-scope §Facts D4; the
+   * field keeps its `claimed_ac_coverage` name because the dashboard's
+   * `PlanAttestationPanel` reads it by that key). The gating counterpart is
+   * {@link DeclaredScopeCoverage}.
+   */
   claimed_ac_coverage: ClaimedAcCoverage;
   /**
-   * `true` when EVERY applicable condition clears: no evidence-bearing task has
-   * zero attested entries, AND `claimed_ac_coverage.meets_coverage`, AND
-   * (`min_ratio === null` OR `ratio >= min_ratio`) — or the vacuous-pass case,
-   * `total_evidence === 0`, which is always `true` regardless of the other two.
+   * `true` when the RATIO conjunct clears: `min_ratio === null` (unconfigured, so
+   * it never runs) OR `ratio >= min_ratio` — or the vacuous-pass case,
+   * `total_evidence === 0`, which is always `true`.
+   *
+   * NOT the plan-close verdict on its own: the per-task zero-attested condition
+   * was DEMOTED to the reported `zero_attested_tasks` fact (§Facts D5) and the
+   * coverage conjunct now reads {@link DeclaredScopeCoverage}, which this
+   * function cannot see. Re-ANDing either of those back in here would restore a
+   * verdict that disagrees with the gate.
    */
   meets_floor: boolean;
-  /** Slugs of every task carrying evidence but zero attested entries. */
+  /**
+   * Slugs of every task carrying evidence but zero attested entries — the
+   * DEMOTED condition 1 (§Facts D5): still computed and reported for
+   * diagnostics/rendering, no longer part of `meets_floor`. Deleting this
+   * computation would lose the feeding pack's per-task diagnostics.
+   */
   zero_attested_tasks: string[];
 }
 
 /**
- * Reproduces ALL THREE of `attestationFloor`'s conditions
- * (spec-plan-close-predicates-measure-invariants-an-applicability §D3, extending
- * SPEC-069 §Design Decisions D1) as a renderable {@link AttestationSummary} fact
- * object:
+ * Derives the plan-wide evidence facts and the ONE conjunct they can decide, as
+ * a renderable {@link AttestationSummary}.
  *
- *   1. every task that carries ANY `verification_evidence` must carry at least
- *      one runner-issued (attested) entry — a task with N self-reported entries
- *      and ZERO attested ones is undetectable fabrication risk, even if the
- *      plan-wide ratio is otherwise healthy;
- *   2. every CLAIMED-AND-ATTESTABLE acceptance criterion (`acCoverage`'s own
- *      `deriveClaimedAcCoverage` projection) must carry >= 1 runner-attested
- *      entry — the DEFAULT conjunct (§D3, "the default teeth");
- *   3. the plan-wide attested-evidence ratio (total attested / total evidence,
- *      across every task) must be >= `minRatio` — OPT-IN: only evaluated when
- *      `minRatio` is non-`null` (§D4's default-off migration). An explicitly
- *      configured floor is AND-ed with conditions 1-2, never a substitute for
- *      them.
+ * `attestationFloor`'s three historical conditions now land in three different
+ * places (spec-declared-scope-attestation-contract-task-owned-ac-scope §Facts,
+ * superseding spec-plan-close-predicates-measure-invariants-an-applicability §D3
+ * and SPEC-069 §Design Decisions D1):
+ *
+ *   1. "every evidence-bearing task carries >= 1 attested entry" — DEMOTED to a
+ *      REPORTED fact (§Facts D5): still computed here as
+ *      `zero_attested_tasks`, no longer part of `meets_floor`. It blocked on a
+ *      per-task PROXY: a task can legitimately hold self-reported-only evidence
+ *      (a RED/TDD run) while every criterion the plan DECLARED is attested
+ *      elsewhere;
+ *   2. per-AC attested coverage — still gated, but over the DECLARED set
+ *      ({@link deriveDeclaredScopeCoverage} + {@link declaredScopeCoverageVerdict},
+ *      §Facts D4), NOT over `claimed_ac_coverage`, which is evidence-derived and
+ *      would let the audited evidence define its own audit scope;
+ *   3. the plan-wide attested-evidence ratio (total attested / total evidence)
+ *      must be >= `minRatio` — OPT-IN: evaluated only when `minRatio` is
+ *      non-`null`. This is the ONLY conjunct `meets_floor` still carries.
  *
  * A plan with NO evidence at all on any task (`total_evidence === 0`) is a
  * vacuous PASS (`meets_floor: true`, `ratio: null`) — the "pure-planning plan"
  * carve-out (SPEC-069 §Scope): the floor only constrains a plan that claims to
  * have been verified, never one that never ran any oracle at all. This early
  * return still reports the REAL `claimed_ac_coverage` facts (this function
- * never fabricates data), it simply never lets them affect `meets_floor` here —
- * `gate-predicates.ts::attestationFloor` reports the zero-evidence case as
- * NOT-APPLICABLE regardless of what this function's `meets_floor` says.
- *
- * `gate-predicates.ts::attestationFloor` delegates to this function — its
- * `{ok: false}` case fires exactly when `meets_floor` here is `false`
- * (AC-075-11 byte-identical-gate-behavior parity, extended by AC-PCI-6).
+ * never fabricates data); `gate-predicates.ts::attestationFloor` reports the
+ * zero-evidence case as NOT-APPLICABLE regardless of `meets_floor`'s value here.
  *
  * @param infos - Every task's (or phase's) attestation facts, typically
  *   {@link buildTaskAttestationInfos}'s output. An empty array is treated
@@ -263,9 +546,11 @@ export interface AttestationSummary {
  * @param acCoverage - {@link computeAcCoverage}'s own output (the plan's
  *   governing spec's declared criteria aggregated over the plan's tasks) —
  *   REQUIRED (not optional): an optional parameter here would let a caller
- *   silently opt out of the coverage conjunct, exactly the failure mode this
- *   spec closes. Pass `[]` for a caller with no spec-tier ancestor to resolve
- *   criteria from (vacuously `meets_coverage: true`, never a fabricated block).
+ *   silently drop the exercised-coverage facts from a rendered panel. Pass `[]`
+ *   for a caller with no spec-tier ancestor to resolve criteria from.
+ * @returns The facts object. `meets_floor` is the RATIO conjunct only — a caller
+ *   needing the plan-close verdict must AND it with
+ *   {@link declaredScopeCoverageVerdict} over the plan's declared scope.
  * @example
  * deriveAttestationSummary(
  *   [{ slug: "task-1", title: "T1", evidenceCount: 3, attestedCount: 0 }],
@@ -273,12 +558,13 @@ export interface AttestationSummary {
  *   [],
  * );
  * // => { total_evidence: 3, attested: 0, ratio: 0, min_ratio: 0.5,
- * //      claimed_ac_coverage: { claimed_acs: [], unattested_acs: [], meets_coverage: true },
+ * //      claimed_ac_coverage: { exercised_acs: [], unattested_acs: [], meets_coverage: true },
  * //      meets_floor: false, zero_attested_tasks: ["task-1"] }
+ * //    (meets_floor false via the RATIO 0 < 0.5, not via zero_attested_tasks)
  * @example
  * deriveAttestationSummary([], 0.5, []);
  * // => { total_evidence: 0, attested: 0, ratio: null, min_ratio: 0.5,
- * //      claimed_ac_coverage: { claimed_acs: [], unattested_acs: [], meets_coverage: true },
+ * //      claimed_ac_coverage: { exercised_acs: [], unattested_acs: [], meets_coverage: true },
  * //      meets_floor: true, zero_attested_tasks: [] } — vacuous pass
  * @example
  * deriveAttestationSummary(
@@ -286,8 +572,9 @@ export interface AttestationSummary {
  *   null,
  *   [{ ac_id: "AC-1", mode: "script", pass: 1, fail: 0, refs: [{task_id: "task-1", result: "pass"}], attested_pass: 0, attested_fail: 0 }],
  * );
- * // => meets_floor: false — AC-1 was claimed (>=1 ref) but never attested,
- * //    even though the ratio conjunct is disabled (minRatio: null)
+ * // => meets_floor: true — the ratio conjunct is disabled (minRatio null) and
+ * //    AC-1's unattested EXERCISED evidence is reported, never gated on; the
+ * //    declared-scope conjunct is what decides this plan's close.
  */
 export function deriveAttestationSummary(
   infos: readonly TaskAttestationInfo[],
@@ -314,10 +601,13 @@ export function deriveAttestationSummary(
   }
 
   const ratio = attested / totalEvidence;
-  const meetsFloor =
-    zeroAttestedTasks.length === 0 &&
-    claimedAcCoverage.meets_coverage &&
-    (minRatio === null || ratio >= minRatio);
+  // reason: the RATIO conjunct alone (spec-declared-scope-attestation-contract-
+  // task-owned-ac-scope §Facts D4/D5). `zeroAttestedTasks.length === 0` was
+  // demoted to a reported fact and `claimedAcCoverage.meets_coverage` is
+  // evidence-derived — AND-ing either back in would (a) resurrect a per-task
+  // proxy this spec deliberately removed and (b) make this value disagree with
+  // `attestationFloor`, whose coverage conjunct reads the DECLARED scope.
+  const meetsFloor = minRatio === null || ratio >= minRatio;
   return {
     total_evidence: totalEvidence,
     attested,

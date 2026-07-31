@@ -166,6 +166,16 @@ function createFixtureChain(dir: string): { planSlug: string } {
   // reachability, not review-judgment.
   appendWorkflowConfig(dir, "\nworkflow:\n  review:\n    judgment_required_types: []\n");
 
+  // reason: spec-declared-scope-attestation-contract-task-owned-ac-scope §Facts
+  // D5 demoted the per-task zero-attested condition, so this fixture's
+  // self-reported-only entry no longer denies the close by itself; the surviving
+  // conjunct reachable from a pure-CLI fixture is the OPT-IN ratio, configured
+  // here (1 entry, 0 attested => ratio 0 < 0.5). The denial this suite is about
+  // is still an ATTESTATION_FLOOR_NOT_MET denial rendering the reachability
+  // branch — which is what AC-CLOSURE-6 pins (its subject is the deny message's
+  // WORDING, per this file's header, not which conjunct produced it).
+  appendWorkflowConfig(dir, "\nworkflow:\n  attestation:\n    min_ratio: 0.5\n");
+
   const approveSpecResult = runLore(["approve", specSlug], dir);
   expect(approveSpecResult.exitCode).toBe(0);
 

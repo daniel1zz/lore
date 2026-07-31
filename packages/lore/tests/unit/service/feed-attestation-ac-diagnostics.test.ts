@@ -23,7 +23,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import type { TaskAttestationInfo } from "@lore/core";
+import type { DeclaredScopeCoverage, TaskAttestationInfo } from "@lore/core";
 import {
   checkpointRegistry,
   selectFailures,
@@ -35,17 +35,33 @@ if (planClose === undefined) {
   throw new Error("plan-close checkpoint not registered — test fixture assumption broken");
 }
 
-/** Forces `attestationFloor` to fail on its OWN per-task condition (condition 1),
- *  independent of the ratio/coverage conjuncts, so `feedAttestationFloor` always
- *  renders regardless of what this fixture's other fields configure. */
+/** A task carrying evidence with zero attestations — the shape the pack's
+ *  offending-task diagnostic list names. It no longer FAILS the floor on its own
+ *  (spec-declared-scope-attestation-contract-task-owned-ac-scope §Facts D5 demoted
+ *  that condition to a reported fact); `BLOCKING_DECLARED_SCOPE` below is what
+ *  makes the pack render. */
 const FAILING_TASK: TaskAttestationInfo[] = [
   { slug: "task-1", title: "Task One", evidenceCount: 1, attestedCount: 0 },
 ];
+
+/** Forces `attestationFloor` to fail on the DECLARED-scope coverage conjunct
+ *  (§Facts D4 — the post-demotion default teeth), independent of the ratio
+ *  conjunct, so `feedAttestationFloor` renders regardless of what this fixture's
+ *  other fields configure. An UNRESOLVED/undeclared scope would instead make the
+ *  floor `notApplicable`, and `selectFailures` would hand `feed` nothing — the pack
+ *  under test would never be produced. */
+const BLOCKING_DECLARED_SCOPE: DeclaredScopeCoverage = {
+  declared_acs: ["AC-DECLARED-1"],
+  unattested_acs: ["AC-DECLARED-1"],
+  scope_undeclared: false,
+  meets_coverage: false,
+};
 
 function baseCtx(overrides: Partial<GateContext>): GateContext {
   return {
     targetIdOrSlug: "plan-x",
     planTasksAttestation: FAILING_TASK,
+    planDeclaredScopeCoverage: BLOCKING_DECLARED_SCOPE,
     ...overrides,
   };
 }
@@ -133,6 +149,55 @@ describe("feedAttestationFloor — per-claimed-AC diagnostics (AC-PCI-9)", () =>
     });
     const text = renderAttestationFloorFeed(ctx);
     expect(text).not.toContain("Claimed acceptance criteria with zero runner-attested evidence");
+  });
+
+  // HAPPY (spec-declared-scope-attestation-contract-task-owned-ac-scope §Facts
+  // D4) — the pack names the DECLARED-scope ids as the BLOCKING cause, on a line
+  // worded distinctly from the exercised ("Claimed …") diagnostics line so a
+  // substring oracle can tell the two apart.
+  it("HAPPY: declared-scope naming — the pack names the blocking declared id on its own line, distinct from the exercised diagnostics line", () => {
+    const ctx = baseCtx({
+      planClaimedAcCoverage: [
+        {
+          ac_id: "AC-EXERCISED-1",
+          mode: "script",
+          pass: 1,
+          fail: 0,
+          refs: [{ task_id: "task-1", result: "pass" }],
+          attested_pass: 0,
+          attested_fail: 0,
+        },
+      ],
+    });
+    const text = renderAttestationFloorFeed(ctx);
+
+    expect(text).toContain("Declared-scope acceptance criteria with zero runner-attested evidence");
+    const declaredLine = text.match(
+      /Declared-scope acceptance criteria with zero runner-attested evidence: ([^.]*)\./,
+    );
+    expect(declaredLine).not.toBeNull();
+    expect(declaredLine?.[1] ?? "").toContain("AC-DECLARED-1");
+    expect(declaredLine?.[1] ?? "").not.toContain("AC-EXERCISED-1");
+    // The exercised line still renders its OWN ids — the two facts are reported
+    // side by side, never merged.
+    const exercisedLine = text.match(
+      /Claimed acceptance criteria with zero runner-attested evidence: ([^.]*)\./,
+    );
+    expect(exercisedLine?.[1] ?? "").toContain("AC-EXERCISED-1");
+    expect(exercisedLine?.[1] ?? "").not.toContain("AC-DECLARED-1");
+  });
+
+  // NEGATIVE — an UNRESOLVED declared scope renders no declared-scope line at all
+  // (there is nothing declared to name), and the pack is reached only because the
+  // ratio conjunct blocks.
+  it("NEGATIVE: declared-scope naming — an unresolved/undeclared scope renders no declared-scope line", () => {
+    const ctx: GateContext = {
+      targetIdOrSlug: "plan-x",
+      planTasksAttestation: FAILING_TASK,
+      attestationMinRatio: 0.5,
+    };
+    const text = renderAttestationFloorFeed(ctx);
+    expect(text).not.toContain("Declared-scope acceptance criteria");
   });
 
   it("HAPPY: unattested naming — the ratio line prints the literal substring 'attested ratio' when min_ratio is explicitly configured", () => {

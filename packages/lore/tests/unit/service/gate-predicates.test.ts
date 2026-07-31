@@ -14,7 +14,13 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { SPEC_KINDS, type TaskAttestationInfo, type AcCoverageFact } from "@lore/core";
+import {
+  SPEC_KINDS,
+  UNRESOLVED_DECLARED_SCOPE,
+  type TaskAttestationInfo,
+  type AcCoverageFact,
+  type DeclaredScopeCoverage,
+} from "@lore/core";
 import {
   parentLegal,
   specKindValid,
@@ -36,6 +42,29 @@ import {
 // instead of a bare `[]`, so the intent ("this fixture never declared any
 // ACs") is visible at each call site rather than implicit.
 const NO_DECLARED_ACS: readonly AcCoverageFact[] = [];
+
+// spec-declared-scope-attestation-contract-task-owned-ac-scope §Facts D4 —
+// `attestationFloor` gained a REQUIRED 5th parameter, the DECLARED-scope
+// coverage fact. Two named fixtures make each call site's intent explicit
+// (a bare literal would read as incidental):
+//   - SCOPE_DECLARED_AND_SATISFIED: every evidence-bearing task declared a scope
+//     and every declared AC is attested — isolates the OTHER conjuncts;
+//   - SCOPE_DECLARED_UNATTESTED: a declared AC with zero attested evidence — the
+//     conjunct's own blocking shape.
+// `UNRESOLVED_DECLARED_SCOPE` (@lore/core) covers the third case, "nobody
+// declared anything", which yields the notApplicable(scope-undeclared) verdict.
+const SCOPE_DECLARED_AND_SATISFIED: DeclaredScopeCoverage = {
+  declared_acs: ["AC-D-1"],
+  unattested_acs: [],
+  scope_undeclared: false,
+  meets_coverage: true,
+};
+const SCOPE_DECLARED_UNATTESTED: DeclaredScopeCoverage = {
+  declared_acs: ["AC-D-1"],
+  unattested_acs: ["AC-D-1"],
+  scope_undeclared: false,
+  meets_coverage: false,
+};
 
 describe("gate-predicates", () => {
   describe("parentLegal", () => {
@@ -356,28 +385,64 @@ describe("gate-predicates", () => {
       return { slug: "task-x", title: "Task X", evidenceCount: 0, attestedCount: 0, ...overrides };
     }
 
-    it("AC-075-11: a zero-attested task blocks even when the plan-wide ratio meets the floor", () => {
-      // Task A: 10 attested. Task B: 1 self-reported, 0 attested. Ratio ~0.91 (>= 0.5),
-      // but condition 1 (per-task zero-attested) must still block on Task B alone.
+    // REGRESSION (spec-declared-scope-attestation-contract-task-owned-ac-scope
+    // §Facts D5 SUPERSEDES AC-075-11 condition 1) — the per-task zero-attested
+    // condition is DEMOTED to a reported fact: this exact fixture, which used to
+    // be `{ok: false}`, now PASSES. Inverted in the same slice that demoted it;
+    // leaving the old expectation would re-legalize the per-task proxy.
+    it("D5 supersedes AC-075-11 condition 1: a zero-attested task no longer blocks when the ratio and the declared scope are satisfied", () => {
+      // Task A: 10 attested. Task B: 1 self-reported, 0 attested. Ratio ~0.91 (>= 0.5).
       const tasks: TaskAttestationInfo[] = [
         taskInfo({ slug: "task-a", evidenceCount: 10, attestedCount: 10 }),
         taskInfo({ slug: "task-b", evidenceCount: 1, attestedCount: 0 }),
       ];
-      expect(attestationFloor(tasks, 0.5, "plan-x", NO_DECLARED_ACS)).toEqual({
+      expect(attestationFloor(tasks, 0.5, "plan-x", NO_DECLARED_ACS, SCOPE_DECLARED_AND_SATISFIED)).toEqual({
+        ok: true,
+      });
+    });
+
+    it("AC-075-11: a below-floor ratio blocks even when every task has an attested entry", () => {
+      // Task A: 4 entries, 1 attested. Task B: 1 entry, 1 attested. Ratio 5/2=0.4 < 0.5.
+      // Neither task individually has zero attested entries and the declared scope
+      // is satisfied — ONLY the ratio conjunct trips this.
+      const tasks: TaskAttestationInfo[] = [
+        taskInfo({ slug: "task-a", evidenceCount: 4, attestedCount: 1 }),
+        taskInfo({ slug: "task-b", evidenceCount: 1, attestedCount: 1 }),
+      ];
+      expect(attestationFloor(tasks, 0.5, "plan-x", NO_DECLARED_ACS, SCOPE_DECLARED_AND_SATISFIED)).toEqual({
         ok: false,
         reason: "ATTESTATION_FLOOR_NOT_MET",
         field: "attestation-floor",
       });
     });
 
-    it("AC-075-11: a below-floor ratio blocks even when every task has an attested entry", () => {
-      // Task A: 4 entries, 1 attested. Task B: 1 entry, 1 attested. Ratio 5/2=0.4 < 0.5.
-      // Neither task individually has zero attested entries — condition 2 alone trips this.
-      const tasks: TaskAttestationInfo[] = [
-        taskInfo({ slug: "task-a", evidenceCount: 4, attestedCount: 1 }),
-        taskInfo({ slug: "task-b", evidenceCount: 1, attestedCount: 1 }),
-      ];
-      expect(attestationFloor(tasks, 0.5, "plan-x", NO_DECLARED_ACS)).toEqual({
+    // AC-VS-6 (predicate layer) — the coverage conjunct's three verdicts, keyed
+    // ONLY on the declared-scope fact: an unattested DECLARED id blocks; an
+    // undeclared scope is notApplicable, never a pass.
+    it("AC-VS-6: an unattested DECLARED-scope AC blocks, and an UNDECLARED scope is notApplicable(scope-undeclared) rather than a pass", () => {
+      const tasks: TaskAttestationInfo[] = [taskInfo({ slug: "task-a", evidenceCount: 2, attestedCount: 2 })];
+
+      expect(attestationFloor(tasks, null, "plan-x", NO_DECLARED_ACS, SCOPE_DECLARED_UNATTESTED)).toEqual({
+        ok: false,
+        reason: "ATTESTATION_FLOOR_NOT_MET",
+        field: "attestation-floor",
+      });
+
+      const undeclared = attestationFloor(tasks, null, "plan-x", NO_DECLARED_ACS, UNRESOLVED_DECLARED_SCOPE);
+      expect(undeclared).toEqual({
+        notApplicable: true,
+        reason: "scope-undeclared",
+        referent: "plan-x",
+      });
+      expect("ok" in undeclared).toBe(false);
+    });
+
+    // BOUNDARY (precedence) — a MEASURED ratio violation outranks the
+    // applicability verdict: an undeclared scope must never suppress a real
+    // violation (a new vacuous pass would be the regression).
+    it("AC-VS-6 precedence: a below-floor ratio still blocks even when the scope is undeclared", () => {
+      const tasks: TaskAttestationInfo[] = [taskInfo({ slug: "task-a", evidenceCount: 4, attestedCount: 1 })];
+      expect(attestationFloor(tasks, 0.5, "plan-x", NO_DECLARED_ACS, UNRESOLVED_DECLARED_SCOPE)).toEqual({
         ok: false,
         reason: "ATTESTATION_FLOOR_NOT_MET",
         field: "attestation-floor",
@@ -394,17 +459,17 @@ describe("gate-predicates", () => {
     // slice that changed the behavior — a stale assertion here would silently
     // re-legalize the old shape.
     it("AC-PCI: a vacuous plan (no evidence anywhere) is notApplicable, never a silent pass", () => {
-      expect(attestationFloor(undefined, 0.5, "plan-x", NO_DECLARED_ACS)).toEqual({
+      expect(attestationFloor(undefined, 0.5, "plan-x", NO_DECLARED_ACS, SCOPE_DECLARED_AND_SATISFIED)).toEqual({
         notApplicable: true,
         reason: "no-evidence",
         referent: "plan-x",
       });
-      expect(attestationFloor([], 0.9, "plan-y", NO_DECLARED_ACS)).toEqual({
+      expect(attestationFloor([], 0.9, "plan-y", NO_DECLARED_ACS, SCOPE_DECLARED_AND_SATISFIED)).toEqual({
         notApplicable: true,
         reason: "no-evidence",
         referent: "plan-y",
       });
-      expect(attestationFloor([taskInfo({ evidenceCount: 0, attestedCount: 0 })], 1, "plan-z", NO_DECLARED_ACS)).toEqual({
+      expect(attestationFloor([taskInfo({ evidenceCount: 0, attestedCount: 0 })], 1, "plan-z", NO_DECLARED_ACS, SCOPE_DECLARED_AND_SATISFIED)).toEqual({
         notApplicable: true,
         reason: "no-evidence",
         referent: "plan-z",
@@ -413,7 +478,7 @@ describe("gate-predicates", () => {
 
     it("AC-075-11: a ratio exactly equal to minRatio passes (boundary, >= not >)", () => {
       const tasks: TaskAttestationInfo[] = [taskInfo({ slug: "task-a", evidenceCount: 2, attestedCount: 1 })];
-      expect(attestationFloor(tasks, 0.5, "plan-x", NO_DECLARED_ACS)).toEqual({ ok: true });
+      expect(attestationFloor(tasks, 0.5, "plan-x", NO_DECLARED_ACS, SCOPE_DECLARED_AND_SATISFIED)).toEqual({ ok: true });
     });
 
     it("AC-075-11: fully attested evidence at/above the floor with no zero-attested task passes", () => {
@@ -421,7 +486,7 @@ describe("gate-predicates", () => {
         taskInfo({ slug: "task-a", evidenceCount: 2, attestedCount: 2 }),
         taskInfo({ slug: "task-b", evidenceCount: 1, attestedCount: 1 }),
       ];
-      expect(attestationFloor(tasks, 0.5, "plan-x", NO_DECLARED_ACS)).toEqual({ ok: true });
+      expect(attestationFloor(tasks, 0.5, "plan-x", NO_DECLARED_ACS, SCOPE_DECLARED_AND_SATISFIED)).toEqual({ ok: true });
     });
 
     // ERROR (type-level, Amendment A) — `acCoverage` is a REQUIRED 4th

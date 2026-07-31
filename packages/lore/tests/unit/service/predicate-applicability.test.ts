@@ -18,8 +18,8 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { ok } from "@lore/core";
-import type { LoreConfig, AcCoverageFact } from "@lore/core";
+import { ok, UNRESOLVED_DECLARED_SCOPE } from "@lore/core";
+import type { LoreConfig, AcCoverageFact, DeclaredScopeCoverage } from "@lore/core";
 import {
   prdOutlineSynced,
   attestationFloor,
@@ -40,6 +40,22 @@ import {
 // instead of a bare `[]`, so the intent ("this fixture never declared any
 // ACs") is visible at each call site rather than implicit.
 const NO_DECLARED_ACS: readonly AcCoverageFact[] = [];
+
+// spec-declared-scope-attestation-contract-task-owned-ac-scope §Facts D4 — the
+// coverage conjunct now reads the DECLARED scope (`attestationFloor`'s REQUIRED
+// 5th parameter). This suite's fixtures are about the APPLICABILITY plumbing, not
+// about scope declarations, so they pass a RESOLVED declaration that claims
+// nothing: `scope_undeclared: false` keeps the floor's verdict attributable to the
+// condition each test is actually exercising, instead of adding a second
+// notApplicable(scope-undeclared) verdict these assertions never anticipated.
+// `UNRESOLVED_DECLARED_SCOPE` (which reports UNDECLARED) is used explicitly where
+// a test means "nobody resolved the fact".
+const SCOPE_RESOLVED_CLAIMING_NOTHING: DeclaredScopeCoverage = {
+  declared_acs: [],
+  unattested_acs: [],
+  scope_undeclared: false,
+  meets_coverage: true,
+};
 import {
   checkpointRegistry,
   isCheckpointBlocked,
@@ -89,7 +105,7 @@ describe("PredicateNotApplicable — notApplicable shape (AC-PCI-1)", () => {
   // BOUNDARY — attestationFloor's OWN not-applicable case (zero evidence anywhere)
   // shares the identical shape, with a DIFFERENT reason and the PLAN's referent.
   it("BOUNDARY: attestationFloor with zero evidence anywhere returns notApplicable naming the plan referent", () => {
-    const result = attestationFloor([], 0.5, "plan-x", NO_DECLARED_ACS);
+    const result = attestationFloor([], 0.5, "plan-x", NO_DECLARED_ACS, SCOPE_RESOLVED_CLAIMING_NOTHING);
     expect(result).toEqual({ notApplicable: true, reason: "no-evidence", referent: "plan-x" });
     expect("ok" in result).toBe(false);
   });
@@ -97,7 +113,7 @@ describe("PredicateNotApplicable — notApplicable shape (AC-PCI-1)", () => {
   // STATE — attestationFloor transitions notApplicable -> fail -> pass purely as a
   // function of its `tasks` input (no evidence -> some evidence under floor -> evidence meeting floor).
   it("STATE: attestationFloor moves from notApplicable to fail to pass as evidence accumulates", () => {
-    const noEvidence = attestationFloor(undefined, 0.5, "plan-x", NO_DECLARED_ACS);
+    const noEvidence = attestationFloor(undefined, 0.5, "plan-x", NO_DECLARED_ACS, SCOPE_RESOLVED_CLAIMING_NOTHING);
     expect(isNotApplicable(noEvidence)).toBe(true);
 
     const underFloor = attestationFloor(
@@ -105,6 +121,7 @@ describe("PredicateNotApplicable — notApplicable shape (AC-PCI-1)", () => {
       0.5,
       "plan-x",
       NO_DECLARED_ACS,
+      SCOPE_RESOLVED_CLAIMING_NOTHING,
     );
     expect(isNotApplicable(underFloor)).toBe(false);
     expect(underFloor).toEqual({ ok: false, reason: ATTESTATION_FLOOR_REASON, field: ATTESTATION_FLOOR_FIELD });
@@ -114,6 +131,7 @@ describe("PredicateNotApplicable — notApplicable shape (AC-PCI-1)", () => {
       0.5,
       "plan-x",
       NO_DECLARED_ACS,
+      SCOPE_RESOLVED_CLAIMING_NOTHING,
     );
     expect(isNotApplicable(meetsFloor)).toBe(false);
     expect(meetsFloor).toEqual({ ok: true });
@@ -155,6 +173,7 @@ describe("checkPlanClose — never a fail on an absent domain doc (AC-PCI-2)", (
       // companion `notApplicable` verdict (referent "planClaimedAcCoverage")
       // that these prd-sync-focused assertions never anticipated.
       planClaimedAcCoverage: NO_DECLARED_ACS,
+      planDeclaredScopeCoverage: SCOPE_RESOLVED_CLAIMING_NOTHING,
       prdSyncEnabled: true,
       parentSpecPointer: { slug: "spec-x", title: "Spec X", status: "approved" },
       ...overrides,
@@ -218,6 +237,7 @@ describe("checkPlanClose — never a fail on an absent domain doc (AC-PCI-2)", (
       // fixture is built directly (not via `baseCtx`) but carries the same
       // "no declared ACs" intent explicitly.
       planClaimedAcCoverage: NO_DECLARED_ACS,
+      planDeclaredScopeCoverage: SCOPE_RESOLVED_CLAIMING_NOTHING,
       prdSyncEnabled: true,
     };
     const results = planClose.check(ctx);
@@ -263,6 +283,7 @@ describe("GateEnforcer.enforce — enforce advisory on plan-close not-applicable
       // describe block above) instead of also tripping the coverage
       // companion `notApplicable` verdict this describe block isn't testing.
       planClaimedAcCoverage: NO_DECLARED_ACS,
+      planDeclaredScopeCoverage: SCOPE_RESOLVED_CLAIMING_NOTHING,
       prdSyncEnabled: true,
       prdSyncSynced: null,
       parentSpecPointer: { slug: "spec-x", title: "Spec X", status: "approved" },
@@ -350,6 +371,7 @@ describe("GateEnforcer.enforce — enforce advisory on plan-close not-applicable
       // verdicts at all" case instead of tripping the coverage companion
       // verdict, which is exactly what this test asserts never fires.
       planClaimedAcCoverage: NO_DECLARED_ACS,
+      planDeclaredScopeCoverage: SCOPE_RESOLVED_CLAIMING_NOTHING,
     };
 
     const result = enforcer.enforce("plan-close", ctx);
@@ -404,10 +426,14 @@ describe("GateEnforcer.enforce — notApplicableAdvisoryKind is keyed per-refere
     // — that omission IS the Amendment A companion-push trigger under test,
     // paired with a real absent domain doc (`prdSyncSynced: null`) so both
     // "referent-absent" producers fire on the SAME `checkPlanClose` call.
+    // `planDeclaredScopeCoverage` IS supplied (resolved, claiming nothing): this
+    // test counts audit rows, and an unresolved declared scope would add a THIRD
+    // row (reason `scope-undeclared`) belonging to a different concern.
     const ctx: GateContext = {
       targetIdOrSlug: "plan-x",
       attestationMinRatio: 0.5,
       planTasksAttestation: [{ slug: "task-1", title: "T1", evidenceCount: 1, attestedCount: 1 }],
+      planDeclaredScopeCoverage: SCOPE_RESOLVED_CLAIMING_NOTHING,
       prdSyncEnabled: true,
       prdSyncSynced: null,
       parentSpecPointer: { slug: "spec-y", title: "Spec Y", status: "approved" },
@@ -424,6 +450,37 @@ describe("GateEnforcer.enforce — notApplicableAdvisoryKind is keyed per-refere
     const domainDocEntry = details.find((d) => d.referent === "spec-y");
     expect(coverageEntry?.kind).toBe("attestation-not-applicable");
     expect(domainDocEntry?.kind).toBe("prd-sync-domain-doc");
+  });
+
+  // BOUNDARY (spec-declared-scope-attestation-contract-task-owned-ac-scope
+  // §Facts D4) — the THIRD NotApplicableReason, `scope-undeclared`, is audited
+  // too: a plan with real, fully-attested evidence whose tasks declared no scope
+  // must produce exactly one `gate_not_applicable` row tagged
+  // "attestation-not-applicable" and naming the PLAN as referent (not the
+  // planClaimedAcCoverage sentinel), and enforce() must still return ok — an
+  // advisory that blocked would make this a gate, which D4 explicitly forbids.
+  it("BOUNDARY: an undeclared declared-scope is audited as attestation-not-applicable naming the plan, and never blocks", () => {
+    const recordGateSkip = vi.fn<RecordGateSkip>().mockResolvedValue(ok(undefined));
+    const enforcer = new GateEnforcer(undefined, recordGateSkip);
+    const ctx: GateContext = {
+      targetIdOrSlug: "plan-undeclared",
+      attestationMinRatio: 0.5,
+      planTasksAttestation: [{ slug: "task-1", title: "T1", evidenceCount: 2, attestedCount: 2 }],
+      planClaimedAcCoverage: NO_DECLARED_ACS,
+      planDeclaredScopeCoverage: UNRESOLVED_DECLARED_SCOPE,
+    };
+
+    const result = enforcer.enforce("plan-close", ctx);
+
+    expect(result).toEqual({ ok: true, value: undefined });
+    expect(recordGateSkip).toHaveBeenCalledTimes(1);
+    const entry = recordGateSkip.mock.calls[0]![0];
+    expect(entry.action).toBe("gate_not_applicable");
+    expect(entry.details).toMatchObject({
+      checkpoint: "plan-close",
+      kind: "attestation-not-applicable",
+      referent: "plan-undeclared",
+    });
   });
 
   // NEGATIVE — attestationFloor's OWN zero-evidence not-applicable case

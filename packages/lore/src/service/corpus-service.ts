@@ -37,6 +37,7 @@ import {
   computeRequirementCoverage,
   SPEC_KINDS,
   buildTaskAttestationInfos,
+  deriveDeclaredScopeCoverage,
   extractPrdSyncExempt,
   prdSyncExemptEqual,
   extractClaim,
@@ -2022,11 +2023,23 @@ export class CorpusService {
           bundleResult!.value.spec !== undefined
             ? computeAcCoverage(declaredCriteria, bundleResult!.value.tasks)
             : [];
+        // reason: spec-declared-scope-attestation-contract-task-owned-ac-scope
+        // §Facts D4 — the coverage conjunct's input is the DECLARED scope, not the
+        // evidence-derived coverage above. Only this call site holds the task
+        // DOCUMENTS that carry `extra.ac_scope`, so it resolves the fact and
+        // threads it through `GateContext`; the predicate layer stays pure. Always
+        // populated whenever this branch runs (never left absent, which
+        // `checkPlanClose` would have to read as "undeclared").
+        const planDeclaredScopeCoverage = deriveDeclaredScopeCoverage(
+          bundleResult!.value.tasks,
+          planClaimedAcCoverage,
+        );
         planCloseCtx = {
           ...planCloseCtx,
           planTasksAttestation,
           attestationMinRatio: this.gateEnforcer.resolveAttestationMinRatio(),
           planClaimedAcCoverage,
+          planDeclaredScopeCoverage,
         };
       }
 
