@@ -18,6 +18,23 @@
  *     upstream ad-hoc draft task `createDraft` writes.
  *   - `OPEN_REPORT_CAP` — the R-5d rate-cap ceiling (10).
  *
+ * Concurrency contract surface (spec-report-issue-has-no-specified-
+ * concurrency-contract-ac-072, §Contract Details) — the SSOT for the DECLARED
+ * observable behaviour of two concurrent `lore report-issue` invocations,
+ * shared by the enforcement path and by the e2e harness that measures it (D6:
+ * "the 50-run harness CALLS it rather than re-implementing the rule", so an
+ * e2e harness can never quietly disagree with the contract it enforces):
+ *   - `WRITE_CONTENTION_EXIT_CODE` — the declared CLI exit code (5).
+ *   - `UNKNOWN_CONTENDING_SOURCE` — the literal `unknown-source` (D5).
+ *   - `formatWriteContentionStderr` / `matchesWriteContentionTemplate` — the
+ *     declared 3-part stderr template's single renderer and its matcher.
+ *   - `isWriteContentionFailure` — is a store failure SQLite write contention
+ *     (as opposed to validation or any other store error)?
+ *   - `classifyConcurrencyOutcome` — the D2 verdict over a pair of
+ *     `{exitCode, stderr}` observations (AC-IC-1's oracle).
+ *   - `classifyForcedContentionOutcome` — the AC-IC-2 control's verdict:
+ *     did the fixture actually produce the declared loud failure?
+ *
  * Invariants:
  *   - `extra.issue_report` is deliberately NOT a Zod-validated field on the
  *     shared `taskExtraSchema` (SPEC-072 §11 Downstream Handoff, "P5
@@ -177,3 +194,391 @@ export function buildIssueReportExtra(p: IssueReportPayload): Record<string, unk
  * AC-072-6).
  */
 export const OPEN_REPORT_CAP = 10;
+
+// ─── Concurrency contract (spec-report-issue-has-no-specified-concurrency-contract-ac-072) ───
+//
+// Everything below is PURE (no IO, no clock, no randomness) and is the SSOT
+// for the contract's three literals — the exit code, the `unknown-source`
+// token, and the stderr template — plus the two classifiers that read them.
+// The enforcement path (`service/issue-report-service.ts` →
+// `adapters/cli/utils.ts`) and the 50-run e2e harness both consume THESE
+// functions; neither re-states the rule (D6).
+//
+// ⛔ D3: this file is one of the three enforcement paths `bun run
+// check:no-timer-retry` greps for the spec's banned timer/retry identifiers (it
+// reads the exact list from D3 itself, so this comment deliberately does not
+// restate them — writing one out here trips the check, as it did once already).
+// The mechanism is a DECLARED BOUNDED WAIT at the store edge (SQLite's
+// `busy_timeout`, declared via `feedback.upstream.write_wait_ms`), never a
+// timer-driven retry in this path.
+
+/**
+ * The DECLARED CLI exit code for a report-issue write refused by corpus write
+ * contention (§Contract Details "Declared exit code: 5").
+ *
+ * 5 is this codebase's pre-existing write-contention family — `STALE_VERSION`
+ * and `CLAIM_CONFLICT` already map to it in `adapters/cli/utils.ts::exitCode`
+ * under the recorded reason "someone else won the race, re-read and retry".
+ * A contended `report-issue` is that same class, so it JOINS the existing
+ * code rather than minting a new one. (The pre-contract behaviour was exit 1,
+ * via the generic `STORE_ERROR` mapping.)
+ */
+export const WRITE_CONTENTION_EXIT_CODE = 5;
+
+/**
+ * The literal the `Contending source:` field carries when the contending
+ * writer cannot be resolved (D5). SQLite exposes no lock-holder identity, so
+ * this is what the CLI prints today; the field exists — and this literal is
+ * REQUIRED rather than an omitted line — because without it "name the
+ * contender when available" is unfalsifiable: any nameless message could be
+ * defended as "not available".
+ */
+export const UNKNOWN_CONTENDING_SOURCE = "unknown-source";
+
+/** The declared template's three parts, matched INDEPENDENTLY (see {@link matchesWriteContentionTemplate}). */
+const WRITE_CONTENTION_HEADLINE_PATTERN =
+  /could not write to (\S[^\n]*?): another writer held it longer than the declared (\d+)ms bound\./;
+const CONTENDING_SOURCE_LINE_PATTERN = /^Contending source: (\S[^\n]*)$/m;
+const RETRY_LINE_PATTERN = /^Retry: (\S[^\n]*)$/m;
+
+/**
+ * SQLite write-contention markers. `code === "SQLITE_BUSY"` is what bun:sqlite
+ * sets on the thrown `SQLiteError`; the message markers cover a wrapped or
+ * re-thrown error that kept only its text (which is exactly what
+ * `store-shared.ts::toStoreError` produces: `{code: "STORE_ERROR", message}`).
+ */
+const SQLITE_BUSY_CODE = "SQLITE_BUSY";
+const LOCKED_DATABASE_MESSAGE_PATTERN = /database (?:is|table is) locked|SQLITE_BUSY/i;
+
+/**
+ * The compiled-binary native-module load race — two concurrent `dist/lore`
+ * processes dlopen'ing the same embedded `.node` file. Two INDEPENDENT tokens
+ * on purpose (a single remembered contiguous phrase silently degrades to
+ * no-match, and "no match" is indistinguishable from "clean"): the `dlopen(`
+ * call and the `.node` module extension.
+ */
+const DLOPEN_TOKEN_PATTERN = /dlopen\(/;
+const NATIVE_MODULE_TOKEN_PATTERN = /\.node\b/;
+
+/**
+ * POSITIVE evidence that a failure came from the CLI's own app-construction
+ * (startup) path rather than from the report write: `loader.ts` appends
+ * SPEC-073's report-issue hint to every `"internal"`-classified `loadLoreApp()`
+ * failure, and `commands/report-issue.ts`'s own error path never does.
+ *
+ * MEASURED, not assumed: with 50 natural pairs, 1 run failed at exit 1 with
+ * `Error: Storage failure: database is locked` PLUS this hint — the per-command
+ * STARTUP corpus write (`app.ts`'s unconditional `SessionStore` construction)
+ * losing a race on the CONSUMER corpus, which §Contract Details names as a
+ * contention source that does NOT belong to this contract.
+ *
+ * Two INDEPENDENT tokens (never one remembered phrase) present in BOTH hint
+ * variants — the configured and the unconfigured wording. If either token ever
+ * changes, such a run stops being excused and reads as NON-conforming: loud,
+ * which is the safe direction for a marker to fail in.
+ */
+const CLI_INTERNAL_ERROR_HINT_TOKEN_PATTERNS = [/<short-title>/, /re-checking/];
+
+/** Bun/Node stack frames — an UNCAUGHT throw, never one of this codebase's formatted `Result` errors. */
+const UNCAUGHT_STACK_FRAME_PATTERN = /\n\s+at\s/;
+
+/** The facts the declared stderr template interpolates. All caller-supplied — this module reads no ambient state. */
+export interface WriteContentionFacts {
+  /** The refusing operation, rendered verbatim as the message's subject (e.g. `"report-issue"`). */
+  readonly operation: string;
+  /** The corpus the write could not acquire — an absolute path, named so the reader knows WHICH corpus. */
+  readonly corpusPath: string;
+  /** The declared wait bound (ms) that expired — surfaced VERBATIM per D4, never rounded or re-derived. */
+  readonly boundMs: number;
+  /** Contending session / PID / host, or {@link UNKNOWN_CONTENDING_SOURCE} when unresolvable. */
+  readonly source: string;
+  /** The exact command line to re-run. */
+  readonly retryCommand: string;
+}
+
+/**
+ * Renders the DECLARED write-contention stderr template — the ONE place its
+ * wording exists (§Contract Details "Declared stderr template"). Three lines,
+ * three required parts: what could not be written and against which declared
+ * bound, WHO contended (or the `unknown-source` literal), and HOW to retry.
+ *
+ * @param facts - see {@link WriteContentionFacts}; every value is interpolated
+ *   verbatim, nothing is defaulted here (a missing fact is the caller's
+ *   fail-loud concern, not silently papered over with a placeholder)
+ * @returns the 3-line message WITHOUT a trailing newline (the CLI's stderr
+ *   writer appends one, matching every other `formatError` case)
+ * @example
+ *   formatWriteContentionStderr({
+ *     operation: "report-issue", corpusPath: "/repo/.lore/lore.db", boundMs: 2000,
+ *     source: UNKNOWN_CONTENDING_SOURCE, retryCommand: "lore report-issue --title x …",
+ *   })
+ *   // Error: report-issue could not write to /repo/.lore/lore.db: another writer held it longer than the declared 2000ms bound.
+ *   // Contending source: unknown-source
+ *   // Retry: lore report-issue --title x …
+ */
+export function formatWriteContentionStderr(facts: WriteContentionFacts): string {
+  return [
+    `Error: ${facts.operation} could not write to ${facts.corpusPath}: ` +
+      `another writer held it longer than the declared ${facts.boundMs}ms bound.`,
+    `Contending source: ${facts.source}`,
+    `Retry: ${facts.retryCommand}`,
+  ].join("\n");
+}
+
+/**
+ * Does `stderr` carry the declared template? Checked as THREE INDEPENDENT
+ * conditions (headline + source line + retry line), never as one contiguous
+ * substring — a matcher built from a remembered phrase degrades silently to
+ * no-match, and AC-IC-4 must be able to fail for a missing part rather than
+ * for a reworded sentence (root CLAUDE.md "contiguous-substring assumption").
+ *
+ * @param stderr - a process's full stderr buffer (extra surrounding lines are
+ *   tolerated: each part is matched per-line, not against the whole buffer)
+ * @returns `true` only when all three parts are present AND both the source
+ *   and retry fields are non-empty (a blank `Contending source:` names nothing
+ *   and is never conforming, D5)
+ * @example
+ *   matchesWriteContentionTemplate("Error: Storage failure: database is locked") // false
+ */
+export function matchesWriteContentionTemplate(stderr: string): boolean {
+  return (
+    WRITE_CONTENTION_HEADLINE_PATTERN.test(stderr) &&
+    CONTENDING_SOURCE_LINE_PATTERN.test(stderr) &&
+    RETRY_LINE_PATTERN.test(stderr)
+  );
+}
+
+/**
+ * Is this store failure SQLite WRITE CONTENTION (the `BEGIN IMMEDIATE`
+ * refusal at `PRAGMA busy_timeout` expiry) rather than validation or any
+ * other store error? §Contract Details settles the question the spec's
+ * Options Considered left open: the refusal is CONTENTION, surfaced as
+ * `SQLiteError { code: "SQLITE_BUSY", errno: 5, message: "database is locked" }`.
+ *
+ * @param failure - the observable fields of a caught driver error (or of a
+ *   `STORE_ERROR` plus its `cause`). `errno` is accepted for shape
+ *   completeness but DELIBERATELY NOT consulted: POSIX `EIO` is also 5, so an
+ *   errno-only rule would misclassify a disk error as contention — the code
+ *   and the message are the two non-ambiguous signals.
+ * @returns `true` when the driver code is `SQLITE_BUSY` or the message carries
+ *   a locked-database marker; `false` for every other store failure
+ * @example
+ *   isWriteContentionFailure({ code: "SQLITE_BUSY", message: "database is locked" }) // true
+ *   isWriteContentionFailure({ code: "SQLITE_ERROR", message: "no such table: docs" }) // false
+ */
+export function isWriteContentionFailure(failure: {
+  readonly message?: string;
+  readonly code?: string;
+  readonly errno?: number;
+}): boolean {
+  if (failure.code === SQLITE_BUSY_CODE) return true;
+  return typeof failure.message === "string" && LOCKED_DATABASE_MESSAGE_PATTERN.test(failure.message);
+}
+
+/** One invocation's OBSERVABLE outcome — the only two facts the contract is written in terms of. */
+export interface InvocationOutcome {
+  readonly exitCode: number;
+  readonly stderr: string;
+}
+
+/**
+ * The D2 verdict for a pair of concurrent invocations.
+ *
+ * `not_attributable` is neither pass nor fail: the run did not measure two
+ * competing corpus writers at all (§Contract Details "Two contention sources
+ * the T2 harness must account for" — a harness that attributes either one to
+ * the report-write contract "is measuring the wrong thing"). A harness MUST
+ * exclude-and-report these rather than counting them, and must keep its own
+ * cap on how many it tolerates.
+ */
+export type ConcurrencyVerdict =
+  | { readonly outcome: "conforming"; readonly shape: "both_succeeded" | "one_refused_loudly" }
+  | {
+      readonly outcome: "not_attributable";
+      readonly reason: "native_module_load_race" | "contention_outside_report_write";
+      readonly detail: string;
+    }
+  | { readonly outcome: "non_conforming"; readonly detail: string };
+
+/** Is this outcome the DECLARED loud failure — the declared exit code AND the declared template? */
+function isDeclaredLoudFailure(outcome: InvocationOutcome): boolean {
+  return outcome.exitCode === WRITE_CONTENTION_EXIT_CODE && matchesWriteContentionTemplate(outcome.stderr);
+}
+
+/** First line of `stderr` matching `pattern`, trimmed — the diagnostic quoted back in a verdict's `detail`. */
+function firstMatchingLine(stderr: string, pattern: RegExp): string {
+  return stderr.split("\n").find((line) => pattern.test(line))?.trim() ?? "";
+}
+
+/** Did this invocation die in the compiled binary's native-module load race (both tokens present)? */
+function hasNativeModuleLoadRace(outcome: InvocationOutcome): boolean {
+  return DLOPEN_TOKEN_PATTERN.test(outcome.stderr) && NATIVE_MODULE_TOKEN_PATTERN.test(outcome.stderr);
+}
+
+/**
+ * Did this invocation fail on a locked database from a layer OTHER than the
+ * report write? Every `lore` command writes its own corpus at startup
+ * (`app.ts`'s unconditional `SessionStore` construction), so two concurrent
+ * invocations contend at STARTUP as well, on the CONSUMER corpus — §Contract
+ * Details is explicit that attributing such a refusal to the report-write
+ * contract "is measuring the wrong thing".
+ *
+ * Requires POSITIVE evidence of that other layer — the CLI startup path's own
+ * hint, or an uncaught stack trace — rather than merely "a lock message that
+ * isn't the template". That asymmetry is deliberate: a bare
+ * `Error: Storage failure: database is locked` with NEITHER marker is exactly
+ * what a contended REPORT WRITE printed before this contract existed, so it
+ * must stay NON-conforming instead of being excused (which would let a removal
+ * of the enforcement pass as not-attributable).
+ */
+function hasContentionOutsideReportWrite(outcome: InvocationOutcome): boolean {
+  if (outcome.exitCode === 0) return false;
+  if (matchesWriteContentionTemplate(outcome.stderr)) return false;
+  if (!LOCKED_DATABASE_MESSAGE_PATTERN.test(outcome.stderr)) return false;
+  const hasStartupHint = CLI_INTERNAL_ERROR_HINT_TOKEN_PATTERNS.every((pattern) =>
+    pattern.test(outcome.stderr),
+  );
+  return hasStartupHint || UNCAUGHT_STACK_FRAME_PATTERN.test(outcome.stderr);
+}
+
+/**
+ * Classifies ONE run of the two-concurrent-invocation scenario against the D2
+ * observable invariant (AC-IC-1's oracle): the outcome is EITHER both
+ * succeeded, OR exactly one succeeded while the other failed with the
+ * declared code and the declared template. Anything else — including two
+ * non-zero exits, or a declared-code exit whose stderr does not match the
+ * template — is non-conforming.
+ *
+ * Evaluation order is significant and deliberate:
+ *   1. a native-module load race in EITHER invocation excludes the run (the
+ *      pair never became two competing writers);
+ *   2. both exit 0 → conforming;
+ *   3. exactly one exit 0 + the other a declared loud failure → conforming;
+ *   4. a locked-database failure from another layer excludes the run;
+ *   5. everything else is non-conforming, with the exit codes quoted back.
+ *
+ * @param first - one invocation's outcome
+ * @param second - the other invocation's outcome (the verdict is symmetric in
+ *   the two arguments — the contract never names a designated winner)
+ * @returns the verdict; `detail` on the failing/excluded branches always
+ *   carries enough text to diagnose the run without re-running it
+ * @example
+ *   classifyConcurrencyOutcome({exitCode: 0, stderr: ""}, {exitCode: 0, stderr: ""})
+ *   // { outcome: "conforming", shape: "both_succeeded" }
+ */
+export function classifyConcurrencyOutcome(
+  first: InvocationOutcome,
+  second: InvocationOutcome,
+): ConcurrencyVerdict {
+  for (const outcome of [first, second]) {
+    if (hasNativeModuleLoadRace(outcome)) {
+      return {
+        outcome: "not_attributable",
+        reason: "native_module_load_race",
+        detail: `compiled-binary native module load race: ${firstMatchingLine(outcome.stderr, DLOPEN_TOKEN_PATTERN)}`,
+      };
+    }
+  }
+
+  if (first.exitCode === 0 && second.exitCode === 0) {
+    return { outcome: "conforming", shape: "both_succeeded" };
+  }
+
+  const succeeded = [first, second].filter((outcome) => outcome.exitCode === 0);
+  const failed = [first, second].filter((outcome) => outcome.exitCode !== 0);
+  if (succeeded.length === 1 && failed.length === 1 && isDeclaredLoudFailure(failed[0] as InvocationOutcome)) {
+    return { outcome: "conforming", shape: "one_refused_loudly" };
+  }
+
+  for (const outcome of failed) {
+    if (hasContentionOutsideReportWrite(outcome)) {
+      return {
+        outcome: "not_attributable",
+        reason: "contention_outside_report_write",
+        detail:
+          "a locked-database refusal outside the report write (startup-phase corpus write): " +
+          firstMatchingLine(outcome.stderr, LOCKED_DATABASE_MESSAGE_PATTERN),
+      };
+    }
+  }
+
+  return {
+    outcome: "non_conforming",
+    detail:
+      `exit codes ${first.exitCode}/${second.exitCode} match neither declared state ` +
+      `(both 0, or exactly one 0 and the other ${WRITE_CONTENTION_EXIT_CODE} with the declared template): ` +
+      `first stderr: ${first.stderr.trim() || "(empty)"} | second stderr: ${second.stderr.trim() || "(empty)"}`,
+  };
+}
+
+/**
+ * The AC-IC-2 control's verdict. Its question is deliberately DIFFERENT from
+ * {@link classifyConcurrencyOutcome}'s: with contention FORCED by an
+ * externally-held open write transaction, the criterion is "did at least one
+ * invocation produce the declared loud failure", and the first invocation's
+ * status is explicitly unconstrained — the external lock blocks it too, so
+ * pinning it would encode the fixture's mechanics rather than the contract.
+ * A run in which BOTH invocations succeed FAILS the criterion: it shows the
+ * fixture never created contention.
+ */
+export type ForcedContentionVerdict =
+  | { readonly outcome: "detected"; readonly refused: 1 | 2 }
+  | { readonly outcome: "undetected"; readonly detail: string }
+  | {
+      readonly outcome: "not_attributable";
+      readonly reason: "native_module_load_race";
+      readonly detail: string;
+    };
+
+/**
+ * Classifies ONE forced-contention control run.
+ *
+ * A detected loud failure WINS over a native-module load race on the other
+ * invocation (the criterion is satisfied by one declared refusal, and the
+ * crashed sibling cannot un-observe it) — so the race check runs SECOND.
+ *
+ * @param first - one invocation's outcome
+ * @param second - the other invocation's outcome
+ * @returns `detected` (with how many invocations refused), `undetected` (the
+ *   criterion fails — `detail` says why, e.g. both succeeded), or
+ *   `not_attributable` when the run only produced a native-module load race
+ * @example
+ *   classifyForcedContentionOutcome({exitCode: 0, stderr: ""}, {exitCode: 0, stderr: ""})
+ *   // { outcome: "undetected", detail: "both invocations succeeded — …" }
+ */
+export function classifyForcedContentionOutcome(
+  first: InvocationOutcome,
+  second: InvocationOutcome,
+): ForcedContentionVerdict {
+  const firstRefused = isDeclaredLoudFailure(first);
+  const secondRefused = isDeclaredLoudFailure(second);
+  if (firstRefused && secondRefused) return { outcome: "detected", refused: 2 };
+  if (firstRefused || secondRefused) return { outcome: "detected", refused: 1 };
+
+  for (const outcome of [first, second]) {
+    if (hasNativeModuleLoadRace(outcome)) {
+      return {
+        outcome: "not_attributable",
+        reason: "native_module_load_race",
+        detail: `compiled-binary native module load race: ${firstMatchingLine(outcome.stderr, DLOPEN_TOKEN_PATTERN)}`,
+      };
+    }
+  }
+
+  if (first.exitCode === 0 && second.exitCode === 0) {
+    return {
+      outcome: "undetected",
+      detail:
+        "both invocations succeeded while an open write transaction was held — " +
+        "the fixture did not actually create contention",
+    };
+  }
+
+  return {
+    outcome: "undetected",
+    detail:
+      `neither invocation produced the declared loud failure (exit ${WRITE_CONTENTION_EXIT_CODE} + template): ` +
+      `exit codes ${first.exitCode}/${second.exitCode}, ` +
+      `first stderr: ${first.stderr.trim() || "(empty)"} | second stderr: ${second.stderr.trim() || "(empty)"}`,
+  };
+}

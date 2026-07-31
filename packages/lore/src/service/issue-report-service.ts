@@ -19,7 +19,13 @@
  *     parallel.
  *   - Any `createDraft` failure (validation, store, or otherwise) is
  *     returned VERBATIM — this service does not wrap, rename, or
- *     re-interpret it (SPEC-072 R-5e failure-transparency, AC-072-7).
+ *     re-interpret it (SPEC-072 R-5e failure-transparency, AC-072-7). ONE
+ *     documented narrowing: a `STORE_ERROR` that IS SQLite write contention
+ *     (`toWriteContentionError` below) is re-typed as `WRITE_CONTENTION` so the
+ *     CLI can render the declared message and exit code
+ *     (spec-report-issue-has-no-specified-concurrency-contract-ac-072). Nothing
+ *     is swallowed: the same fact gets a truthful classification, and every
+ *     other failure still propagates byte-identically.
  *   - `import type` ONLY from `../flows/*` — this file must stay reachable
  *     from vitest without ever touching `bun:sqlite` (AC-072-13's static
  *     import-graph pin; also enforced by this repo's `bun-only` composition
@@ -51,8 +57,10 @@ import {
   err,
   buildIssueReportExtra,
   countOpenReports,
+  isWriteContentionFailure,
   matchRootPrd,
   OPEN_REPORT_CAP,
+  UNKNOWN_CONTENDING_SOURCE,
   type DocStatus,
   type IssueReportPayload,
   type LoreConfig,
@@ -141,11 +149,24 @@ export interface IssueReportDeps {
   probe: (dbPath: string) => Result<{ user_version: number }, LoreError>;
   /** This install's `LATEST_SCHEMA_VERSION` — compared against `probe`'s result. */
   expectedSchemaVersion: number;
-  /** Opens the narrow `UpstreamPort` — see `../flows/upstream-context-flow.ts`. */
+  /**
+   * Opens the narrow `UpstreamPort` — see `../flows/upstream-context-flow.ts`.
+   * The wiring MUST open it with {@link IssueReportDeps.writeWaitMs} as the
+   * connection's bound, so the number this service reports on expiry is the
+   * number the connection actually applied (spec-report-issue-has-no-specified-
+   * concurrency-contract-ac-072 D4).
+   */
   openUpstream: (root: string) => Result<UpstreamPort, LoreError>;
   receipts: ReceiptLog;
   loreVersion: string;
   reporterProject: string;
+  /**
+   * The DECLARED bounded wait (ms) the upstream connection was opened with —
+   * `feedback.upstream.write_wait_ms`, resolved ONCE by the wiring
+   * (`@lore/core`'s `resolveUpstreamWriteWaitMs`). Surfaced VERBATIM in a
+   * `WRITE_CONTENTION` refusal; never re-derived here.
+   */
+  writeWaitMs: number;
   /** Wall-clock read, injected for determinism (no `new Date()` inside this service). */
   now: () => string;
 }
@@ -164,6 +185,66 @@ type UpstreamCfg = { corpus_path: string; root_prd: string };
 function describeLoreError(error: LoreError): string {
   if ("message" in error) return error.message;
   return error.code;
+}
+
+/**
+ * Defensive read of a driver error's own `code` off a `STORE_ERROR`'s `cause`
+ * (bun:sqlite sets `SQLiteError.code = "SQLITE_BUSY"` on write contention).
+ * A missing/odd cause degrades to `undefined` — never throws — because the
+ * message marker is an independent second signal (see `isWriteContentionFailure`).
+ *
+ * @param cause - the `cause` field of a `STORE_ERROR`, when present
+ * @returns the driver's error code string, or `undefined`
+ */
+function readDriverErrorCode(cause: Error | undefined): string | undefined {
+  if (cause === undefined) return undefined;
+  const code = (cause as Error & { code?: unknown }).code;
+  return typeof code === "string" ? code : undefined;
+}
+
+/**
+ * Re-classifies an upstream WRITE failure that is corpus write CONTENTION
+ * (SQLite refused `BEGIN IMMEDIATE` at `PRAGMA busy_timeout` expiry) into the
+ * typed `WRITE_CONTENTION` error the CLI renders as the declared 3-part message
+ * and maps to the declared exit code
+ * (spec-report-issue-has-no-specified-concurrency-contract-ac-072
+ * §Contract Details).
+ *
+ * This is the ONE documented narrowing of this service's
+ * "createDraft failures propagate VERBATIM" invariant: nothing is swallowed or
+ * renamed away — a contended write is RE-TYPED so its (otherwise identical)
+ * `STORE_ERROR` text stops reading as "the store is broken, exit 1" when the
+ * actual fact is "someone else held the corpus, re-run this". Every
+ * non-contention failure still propagates byte-identically.
+ *
+ * @param error - the failure `UpstreamPort.createDraft` returned
+ * @param upstreamDbPath - the contended corpus FILE (what a reader must know)
+ * @param boundMs - the declared bound the connection applied, surfaced verbatim
+ * @returns the typed contention error, or `undefined` when this failure is not
+ *   contention (caller then propagates the original error unchanged)
+ */
+function toWriteContentionError(
+  error: LoreError,
+  upstreamDbPath: string,
+  boundMs: number,
+): LoreError | undefined {
+  if (error.code !== "STORE_ERROR") return undefined;
+  const driverCode = readDriverErrorCode(error.cause);
+  const isContention = isWriteContentionFailure({
+    message: error.message,
+    ...(driverCode !== undefined ? { code: driverCode } : {}),
+  });
+  if (!isContention) return undefined;
+  return {
+    code: "WRITE_CONTENTION",
+    operation: "report-issue",
+    corpus_path: upstreamDbPath,
+    bound_ms: boundMs,
+    // reason: SQLite exposes no lock-holder identity, so the contender cannot be
+    // named from here — D5 requires the `unknown-source` LITERAL rather than an
+    // omitted field precisely so "unnamed" is falsifiable instead of defensible.
+    source: UNKNOWN_CONTENDING_SOURCE,
+  };
 }
 
 /**
@@ -271,7 +352,14 @@ export class IssueReportService {
         content: input.description,
         extra: buildIssueReportExtra(payload),
       });
-      if (!createResult.ok) return createResult;
+      if (!createResult.ok) {
+        const contention = toWriteContentionError(
+          createResult.error,
+          join(cfg.corpus_path, ".lore", "lore.db"),
+          this.deps.writeWaitMs,
+        );
+        return contention !== undefined ? err(contention) : createResult;
+      }
 
       // Step 9: receipts.append — strictly after step 8 succeeds.
       const appendResult = this.deps.receipts.append({

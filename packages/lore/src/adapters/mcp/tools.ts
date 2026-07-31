@@ -1948,7 +1948,11 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
       const { buildIssueReportDeps, resolveConsumerCorpusRoot, resolveFeedbackUpstreamCfg } =
         await import("../cli/report-issue-wiring.js");
       const corpusRoot = resolveConsumerCorpusRoot();
-      const deps = buildIssueReportDeps(corpusRoot);
+      // reason: the consumer config is threaded in explicitly (not defaulted)
+      // so `feedback.upstream.write_wait_ms` is honoured on THIS surface too —
+      // buildIssueReportDeps takes it positionally for exactly that reason
+      // (spec-report-issue-has-no-specified-concurrency-contract-ac-072 D4).
+      const deps = buildIssueReportDeps(corpusRoot, getConfig?.());
       const service = new IssueReportService(deps);
       const cfg = resolveFeedbackUpstreamCfg(getConfig?.());
 

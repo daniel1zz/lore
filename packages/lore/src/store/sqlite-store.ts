@@ -46,6 +46,7 @@ import type {
   VersionRecord,
 } from "@lore/core";
 import {
+  DEFAULT_WRITE_WAIT_MS,
   err,
   ok,
   ORDINAL_REGISTERED_TYPES,
@@ -99,11 +100,49 @@ import {
 
 // ─── SQLiteStore ─────────────────────────────────────────────────────────────
 
+/**
+ * Per-connection knobs a composition root may declare when opening a corpus.
+ * Deliberately explicit DI rather than a config read inside the store: the
+ * value that gets APPLIED must be the same value the caller can print on
+ * expiry (spec-report-issue-has-no-specified-concurrency-contract-ac-072 D4),
+ * and a store that silently loaded its own config could drift from whatever the
+ * caller believes it declared.
+ */
+export interface SQLiteStoreOptions {
+  /**
+   * The DECLARED bounded wait, applied as `PRAGMA busy_timeout` (ms). Absent →
+   * {@link DEFAULT_WRITE_WAIT_MS}. Read back via {@link SQLiteStore.writeWaitMs}
+   * so a caller reports the bound the connection actually carries.
+   */
+  readonly writeWaitMs?: number;
+}
+
 export class SQLiteStore implements StoreInterface {
   private readonly db: Database;
 
-  constructor(dbPath: string) {
+  /**
+   * The bounded wait (ms) THIS connection applied as `PRAGMA busy_timeout` —
+   * exposed so the layer that reports a contention refusal surfaces the applied
+   * number verbatim instead of re-deriving it from config (D4).
+   */
+  readonly writeWaitMs: number;
+
+  constructor(dbPath: string, options?: SQLiteStoreOptions) {
+    const declaredWriteWaitMs = options?.writeWaitMs ?? DEFAULT_WRITE_WAIT_MS;
+    // reason: fail loud at construction rather than interpolating a
+    // non-integer/negative/NaN into the PRAGMA below, where SQLite would report
+    // an opaque syntax error — and rather than silently clamping, which would
+    // make the bound printed on expiry differ from the bound applied (D4).
+    // `typeof x === "number"` (what config resolution can guarantee) still
+    // admits NaN and Infinity, so this check is not redundant with the type.
+    if (!Number.isInteger(declaredWriteWaitMs) || declaredWriteWaitMs < 0) {
+      throw new Error(
+        `SQLiteStore: writeWaitMs must be a non-negative integer number of milliseconds, got ${String(declaredWriteWaitMs)} ` +
+          "(check feedback.upstream.write_wait_ms in .lore/config.yaml)",
+      );
+    }
     this.db = new Database(dbPath);
+    this.writeWaitMs = declaredWriteWaitMs;
     this.init();
   }
 
@@ -124,14 +163,21 @@ export class SQLiteStore implements StoreInterface {
     this.db.run("PRAGMA foreign_keys = ON");
     // SPEC-078 D9: without a busy_timeout, a second writer contending for the
     // same corpus file (e.g. a concurrently-mounted dashboard instance) gets an
-    // IMMEDIATE `SQLITE_BUSY` throw instead of a bounded retry-with-backoff —
-    // this is per-CONNECTION state (bun:sqlite defaults every new `Database` to
-    // 0ms), so it must be set here on every SQLiteStore construction, not once
-    // globally. 2000ms mirrors the multi-project mount registry's tolerance for
-    // a brief overlapping write from another mounted instance; TursoStore is
-    // deliberately untouched — libsql's client handles write serialization at
-    // the replica-sync layer, not via SQLite's file-level busy handler.
-    this.db.run("PRAGMA busy_timeout = 2000");
+    // IMMEDIATE `SQLITE_BUSY` throw instead of waiting out the holder — this is
+    // per-CONNECTION state (bun:sqlite defaults every new `Database` to 0ms), so
+    // it must be set here on every SQLiteStore construction, not once globally.
+    // TursoStore is deliberately untouched — libsql's client handles write
+    // serialization at the replica-sync layer, not via SQLite's file-level busy
+    // handler.
+    //
+    // The NUMBER moved out of this file (spec-report-issue-has-no-specified-
+    // concurrency-contract-ac-072 D4): it is now `DEFAULT_WRITE_WAIT_MS` in
+    // `@lore/core`'s config module, overridable per connection via
+    // `SQLiteStoreOptions.writeWaitMs`, because the layer that REPORTS an expiry
+    // must print the very bound that was applied. Bind parameters are not
+    // allowed in a PRAGMA statement, so the value is interpolated — it is a
+    // number typed by `SQLiteStoreOptions`, never caller text.
+    this.db.run(`PRAGMA busy_timeout = ${this.writeWaitMs}`);
     this.runMigrations();
   }
 

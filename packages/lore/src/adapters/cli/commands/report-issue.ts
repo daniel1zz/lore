@@ -212,7 +212,7 @@ export default defineCommand({
     const { app, config } = loadLoreApp();
     try {
       const corpusRoot = resolveConsumerCorpusRoot();
-      const deps = buildIssueReportDeps(corpusRoot);
+      const deps = buildIssueReportDeps(corpusRoot, config);
       const service = new IssueReportService(deps);
       const cfg = resolveFeedbackUpstreamCfg(config);
       const autoConfig = args["auto-config"] === true;

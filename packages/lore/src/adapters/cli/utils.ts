@@ -4,6 +4,9 @@
  *
  * Public surface:
  *   - exitCode() / formatError() — error presentation
+ *   - buildRetryCommandLine() / currentRetryCommandLine() — the `Retry:` line of
+ *     the declared write-contention message (the only ambient `process.argv`
+ *     read in the error path; the reconstruction itself is pure)
  *   - formatTable() / formatTree() / formatNavigation() / relativeTime() — output helpers
  *
  * Note: DB discovery and App construction live in `loader.ts` to avoid
@@ -16,11 +19,12 @@
  */
 
 import { existsSync, readFileSync, statSync } from "fs";
-import { join, dirname, resolve as resolvePath } from "path";
+import { basename, join, dirname, resolve as resolvePath } from "path";
 import { spawnSync } from "node:child_process";
 import { z } from "zod";
 import {
   evidenceEntrySchema,
+  formatWriteContentionStderr,
   taskClaimSchema,
   isClaimStale,
   isInvalidated,
@@ -168,6 +172,11 @@ export function exitCode(error: LoreError): number {
     // "someone else won the race, re-read and retry" — mapped to the same exit code.
     // Source: SPEC-025 §4 AC-WF-3
     case "CLAIM_CONFLICT":
+    // reason: WRITE_CONTENTION is the SAME family one layer down — SQLite refused the
+    // write because another process held the corpus past the declared bound. 5 is the
+    // DECLARED code for it (spec-report-issue-has-no-specified-concurrency-contract-ac-072
+    // §Contract Details), deliberately joining this family rather than minting a new code.
+    case "WRITE_CONTENTION":
       return 5;
     case "AI_PROVIDER_ERROR":
       // reason: exit 6 reserved for AI provider failures — distinct from generic store/validation
@@ -292,6 +301,22 @@ export function formatError(error: LoreError, opts?: { aiHasNoFallback?: boolean
     }
     case "STORE_ERROR":
       return `Error: Storage failure: ${error.message}`;
+    case "WRITE_CONTENTION":
+      // reason: the wording lives in ONE place — `@lore/core`'s
+      // `formatWriteContentionStderr` — because the 50-run e2e harness matches
+      // against that same module's `matchesWriteContentionTemplate`. Rendering
+      // the three lines inline here would let the enforcement and the oracle
+      // drift apart silently (spec-report-issue-has-no-specified-concurrency-
+      // contract-ac-072 D6). The retry line is the ONLY part not carried on the
+      // error: it is this process's own invocation, which only the adapter
+      // layer can see.
+      return formatWriteContentionStderr({
+        operation: error.operation,
+        corpusPath: error.corpus_path,
+        boundMs: error.bound_ms,
+        source: error.source,
+        retryCommand: currentRetryCommandLine(),
+      });
     case "CLAIM_CONFLICT":
       return (
         `Error: Task ${error.id} is claimed by '${error.holder}' (claimed ${error.age_minutes}m ago).\n` +
@@ -310,6 +335,70 @@ export function formatError(error: LoreError, opts?: { aiHasNoFallback?: boolean
       return "Error: An unexpected error occurred.";
     }
   }
+}
+
+// ─── Retry command line (write-contention template's third part) ────────────
+
+/**
+ * Shell-quotes ONE argv entry for a copy-pasteable retry line: bare when it
+ * contains only characters no shell interprets, single-quoted otherwise (with
+ * embedded single quotes closed-escaped-reopened, the POSIX-portable form).
+ *
+ * @param arg - a raw `process.argv` entry
+ * @returns the same text, safe to paste into a POSIX shell
+ * @example
+ *   shellQuoteArg("--title")        // "--title"
+ *   shellQuoteArg("a b")            // "'a b'"
+ *   shellQuoteArg("it's")           // "'it'\\''s'"
+ */
+function shellQuoteArg(arg: string): string {
+  if (arg.length > 0 && /^[A-Za-z0-9_,.:/=@+-]+$/.test(arg)) return arg;
+  return `'${arg.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * Reconstructs the command line to RE-RUN this invocation — the `Retry:` part
+ * of the declared write-contention message
+ * (spec-report-issue-has-no-specified-concurrency-contract-ac-072
+ * §Contract Details). Pure: every ambient fact is a parameter, mirroring
+ * `report-issue-wiring.ts`'s `InstalledBinaryContext` split.
+ *
+ * Both numbers below are MEASURED, not assumed (probe: a `bun build --compile`
+ * binary invoked as `./probe report-issue --title 'a b'`):
+ *   - `process.argv` is `["bun", "/$bunfs/root/<entry>", ...userArgs]` in a
+ *     COMPILED binary and `[<bunPath>, <scriptPath>, ...userArgs]` from source,
+ *     so `slice(2)` is the user's own arguments in BOTH modes (the same slice
+ *     citty's `runMain` parses).
+ *   - `argv[0]` is the literal string `"bun"` even in a compiled binary, so it
+ *     can never supply the program name; `process.execPath` IS the compiled
+ *     binary's own path, so its basename is the installed command name.
+ *
+ * @param argv - `process.argv`
+ * @param execPath - `process.execPath`
+ * @returns e.g. `lore report-issue --title 'a b'`. Running from SOURCE (no
+ *   `/$bunfs/` entry) renders the canonical `lore` name rather than `bun`,
+ *   because the retry advice must name the command a caller can actually
+ *   re-run, not this process's dev-mode launcher.
+ * @example
+ *   buildRetryCommandLine(["bun", "/$bunfs/root/index.js", "report-issue"], "/usr/local/bin/lore")
+ *   // "lore report-issue"
+ */
+export function buildRetryCommandLine(argv: readonly string[], execPath: string): string {
+  const isCompiledBinary = argv[1]?.startsWith("/$bunfs/") === true;
+  const programName = isCompiledBinary ? basename(execPath) : "lore";
+  const userArgs = argv.slice(2).map(shellQuoteArg);
+  return [programName, ...userArgs].join(" ");
+}
+
+/**
+ * {@link buildRetryCommandLine} applied to THIS process's ambient argv — the
+ * single ambient read in this module's error-formatting path, isolated here so
+ * the reconstruction logic itself stays directly unit-testable.
+ *
+ * @returns this invocation's retry command line
+ */
+export function currentRetryCommandLine(): string {
+  return buildRetryCommandLine(process.argv, process.execPath);
 }
 
 // ─── Actor Resolution ───────────────────────────────────────────────────────

@@ -77,6 +77,7 @@ import {
   LoreConfigSchema,
   matchRootPrd,
   ok,
+  resolveUpstreamWriteWaitMs,
   type LoreConfig,
   type LoreError,
   type Result,
@@ -144,19 +145,37 @@ export function resolveFeedbackUpstreamCfg(config: LoreConfig | undefined): Upst
  *   `resolveConsumerCorpusRoot`) — receipts are written under
  *   `<corpusRoot>/.lore/issue-receipts.jsonl`, and `reporterProject` is
  *   derived from it
+ * @param consumerConfig - the CALLING corpus's own parsed config (the CLI's
+ *   `loadLoreApp()` result, MCP's `getConfig?.()`), or `undefined` when none
+ *   loaded. REQUIRED positionally — deliberately not optional — so a new
+ *   caller surface cannot silently skip the declared write-wait bound and
+ *   leave `feedback.upstream.write_wait_ms` inert on its path
+ *   (spec-report-issue-has-no-specified-concurrency-contract-ac-072 D4).
+ *   `undefined` resolves the documented default, never a silent zero.
  * @returns a fully-wired `IssueReportDeps` — construction is cheap (mirrors
  *   `ReceiptLog`'s own "cheap to construct per call" doc), so callers may
  *   build a fresh bundle per invocation rather than caching one
  */
-export function buildIssueReportDeps(corpusRoot: string): IssueReportDeps {
+export function buildIssueReportDeps(
+  corpusRoot: string,
+  consumerConfig: LoreConfig | undefined,
+): IssueReportDeps {
+  // The DECLARED write-wait bound, resolved ONCE here and used TWICE: as the
+  // upstream connection's `PRAGMA busy_timeout` and as the number
+  // `IssueReportService` surfaces verbatim when that bound expires. Resolving it
+  // in one place is what makes "the bound printed is the bound applied" true by
+  // construction rather than by convention
+  // (spec-report-issue-has-no-specified-concurrency-contract-ac-072 D4).
+  const writeWaitMs = resolveUpstreamWriteWaitMs(consumerConfig);
   return {
     loadUpstreamConfig: (root: string) => loadConfig(root),
     probe: probeUpstreamDb,
     expectedSchemaVersion: LATEST_SCHEMA_VERSION,
-    openUpstream: buildUpstreamContext,
+    openUpstream: (root: string) => buildUpstreamContext(root, { writeWaitMs }),
     receipts: new ReceiptLog(join(corpusRoot, ".lore", "issue-receipts.jsonl")),
     loreVersion: CLI_VERSION,
     reporterProject: `${basename(corpusRoot)} (${corpusRoot})`,
+    writeWaitMs,
     now: () => new Date().toISOString(),
   };
 }
