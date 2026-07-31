@@ -209,5 +209,15 @@ describe("lore approve <plan-under-reachable-spec> — no advisory (AC-VRW-5b)",
     const advisoryLines = result.stderr.split("\n").filter((line) => line.includes("ADVISORY"));
     expect(advisoryLines.length).toBe(0);
     expect(result.stderr).toBe("");
-  });
+  }, 20000);
+  // ^ explicit timeout (spec-a-test-case-s-timeout-budget-must-be-declared-when-its
+  // D1/AC-TB-4): this body calls the `runLore` spawn helper 4 direct times
+  // (create spec, ac add, approve spec, approve plan) plus one more via
+  // `createPlan`'s own `runLore` call and one more from the `beforeEach`
+  // `lore init` — 6 real `dist/lore` spawns total per run. Measured failure:
+  // 6222ms (original incident) / 6981ms (reproduced here under induced load,
+  // load average ~135) against bun:test's DEFAULT 5000ms budget — reads as a
+  // killed-child/empty-stderr failure, not a timeout, unless this budget is
+  // named. 20000ms gives >=3x headroom over both measured overruns without
+  // policing the number (the oracle only requires the argument be present).
 });
