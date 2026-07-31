@@ -39,6 +39,7 @@
 import {
   PLAN_CLOSE_FIELD,
   ATTESTATION_FLOOR_FIELD,
+  ATTESTATION_SCOPE_UNDECLARED_FIELD,
   ATTESTATION_EXEMPT_KIND_FIELD,
   PRD_SYNC_FIELD,
   ASSESSMENT_FRESHNESS_FIELD,
@@ -70,6 +71,7 @@ export interface PredicateContract {
 export const PLAN_CLOSE_FIELDS = [
   PLAN_CLOSE_FIELD,
   ATTESTATION_FLOOR_FIELD,
+  ATTESTATION_SCOPE_UNDECLARED_FIELD,
   ATTESTATION_EXEMPT_KIND_FIELD,
   PRD_SYNC_FIELD,
   ASSESSMENT_FRESHNESS_FIELD,
@@ -127,6 +129,30 @@ export const PREDICATE_CONTRACTS: Record<PlanCloseField, PredicateContract> = {
     known_false_block: [
       "a plan whose claimed ACs are all attested but whose self-reported development evidence " +
         "dominates the trail, when min_ratio is explicitly configured",
+    ],
+  },
+  [ATTESTATION_SCOPE_UNDECLARED_FIELD]: {
+    invariant:
+      "Work a closing plan reports as verified was audited against a scope its own task " +
+      "authors DECLARED — evidence must never be the thing that defines the set of criteria " +
+      "the evidence is judged against.",
+    measured:
+      "attestationFloor's third branch: reached only when the plan carries >= 1 verification " +
+      "evidence entry (the zero-evidence case returns notApplicable('no-evidence') first) AND " +
+      "deriveDeclaredScopeCoverage reports scope_undeclared — i.e. at least one EVIDENCE-BEARING " +
+      "task carries no readable extra.ac_scope. A task with no evidence is never consulted; an " +
+      "explicitly EMPTY ac_scope: [] is a declaration and satisfies this.",
+    known_false_pass: [
+      "one evidence-bearing task declaring a scope satisfies the conjunct for the WHOLE plan " +
+        "only if no OTHER evidence-bearing task is undeclared — but a task declaring a scope it " +
+        "did not actually exercise is indistinguishable here from one that did (the per-task " +
+        "declared-vs-exercised comparison is the attestation-floor field's own known delta)",
+    ],
+    known_false_block: [
+      "a legacy plan whose work predates the extra.ac_scope field entirely is denied at close " +
+        "even though its evidence may be sound — this is the deliberate one-time retroactive " +
+        "sweep (knowledge-retro-a-newly-built-gate-leaves-every-pre-existing); the audited " +
+        "recoveries are `lore scope add` or a typed plan-level attestation exemption",
     ],
   },
   [ATTESTATION_EXEMPT_KIND_FIELD]: {

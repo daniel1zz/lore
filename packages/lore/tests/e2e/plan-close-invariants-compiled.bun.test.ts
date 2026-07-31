@@ -287,6 +287,21 @@ function createTask(dir: string, planSlug: string, title: string): string {
   return parseSlug(r.stdout);
 }
 
+/**
+ * Declares a task's `extra.ac_scope` through the compiled binary's dedicated
+ * writer (`lore scope add` — there is deliberately no `lore set --ac-scope`,
+ * since `set` replaces `extra` wholesale).
+ *
+ * This suite's module header used to record that it "cannot author `ac_scope`
+ * through the binary yet"; that writer has since shipped, and
+ * task-plan-close-must-block-when-the-coverage-conjunct-is-scope makes an
+ * undeclared scope a DENIAL, so every scenario expecting a clean close must now
+ * declare what its task owns.
+ */
+function declareScope(dir: string, taskSlug: string, acId: string): RunResult {
+  return runLore(["scope", "add", taskSlug, acId], dir);
+}
+
 /** Records ATTESTED evidence via the trusted-runner path (SPEC-039) — the ONLY
  *  legitimate producer of an `attestation`-bearing entry; never hand-crafted. */
 function verifyAttested(dir: string, planSlug: string, taskSlug: string, acId: string): RunResult {
@@ -336,6 +351,11 @@ describe("AC-PCI-12: compiled close — throwaway corpus, dist/lore binary, one 
     const planSlug = createPlan(dir, specSlug, "T5 PCI-12 Plan A (clean close)");
     const taskSlug = createTask(dir, planSlug, "T5 PCI-12 Task A");
 
+    // The task DECLARES the criterion it owns before recording any evidence —
+    // the order a real workflow follows, and (post task-plan-close-must-block-
+    // when-the-coverage-conjunct-is-scope) a precondition of any clean close.
+    expect(declareScope(dir, taskSlug, AC_ID).exitCode).toBe(0);
+
     // Attested evidence for the claimed AC, via the trusted runner — never
     // hand-crafted.
     const verifyResult = verifyAttested(dir, planSlug, taskSlug, AC_ID);
@@ -380,25 +400,28 @@ describe("AC-PCI-12: compiled close — throwaway corpus, dist/lore binary, one 
   // through the compiled binary — `lore scope add` / `lore create task --ac-scope`
   // is a SIBLING task of this same spec; a compiled-binary oracle for the declared
   // conjunct belongs with that writer, not here.
-  it("compiled close — scenario B: an undeclared-scope plan is NOT blocked by its unattested exercised AC (D4), while an explicitly configured ratio floor still blocks the SAME command until evidence is attested (control proving the RIGHT cause)", () => {
-    const planSlug = createPlan(dir, specSlug, "T5 PCI-12 Plan B (undeclared scope)");
+  it("compiled close — scenario B: a declared-but-unattested scope blocks, while an explicitly configured ratio floor still blocks the SAME command until evidence is attested (control proving the RIGHT cause)", () => {
+    const planSlug = createPlan(dir, specSlug, "T5 PCI-12 Plan B (declared, unattested)");
     const taskSlug = createTask(dir, planSlug, "T5 PCI-12 Task B");
 
-    // Self-reported ONLY, and NO `ac_scope` declared on the task — the legacy
-    // shape every pre-`lore scope add` corpus has.
+    // REWRITTEN by task-plan-close-must-block-when-the-coverage-conjunct-is-
+    // scope. This half used to assert that an UNDECLARED scope with evidence
+    // ARCHIVES at exit 0 — the exact hole that let four plans through on
+    // 2026-07-31. That behaviour is now a denial and is pinned by AC-PCI-21's
+    // own describe block below; this half keeps the scenario's remaining
+    // distinct value: a DECLARED but unattested scope blocks on the
+    // attestation-floor field, which is a different cause and a different pack.
+    expect(declareScope(dir, taskSlug, AC_ID).exitCode).toBe(0);
     const evidenceResult = evidenceSelfReported(dir, taskSlug, AC_ID, AC_COMMAND);
     expect(evidenceResult.exitCode).toBe(0);
 
     const approveResult = approvePlan(dir, planSlug);
     expect(approveResult.exitCode).toBe(0);
 
-    // D4 — the coverage conjunct has no CLAIM to audit, so it reports
-    // not-applicable and the close proceeds. Deliberate and retroactive: arming a
-    // declared-scope conjunct must not retroactively deny every plan authored
-    // before the field existed.
-    const undeclaredResult = archivePlan(dir, planSlug);
-    expect(undeclaredResult.exitCode).toBe(0);
-    expect(undeclaredResult.stderr).not.toContain("gate:plan-close:attestation-floor");
+    const declaredUnattested = archivePlan(dir, planSlug);
+    expect(declaredUnattested.exitCode).toBe(4);
+    expect(declaredUnattested.stderr).toContain("gate:plan-close:attestation-floor");
+    expect(declaredUnattested.stderr).toContain(AC_ID);
 
     // CONTROL — the floor still has teeth through the compiled artifact. A THIRD
     // sibling plan, same corpus, with `workflow.attestation.min_ratio` now
@@ -409,6 +432,8 @@ describe("AC-PCI-12: compiled close — throwaway corpus, dist/lore binary, one 
     writeConfigWithRatioFloor(dir, 0.5);
     const controlPlanSlug = createPlan(dir, specSlug, "T5 PCI-12 Plan C (ratio floor)");
     const controlTaskSlug = createTask(dir, controlPlanSlug, "T5 PCI-12 Task C");
+    // Declared, so the ratio stays the only variable between the two runs below.
+    expect(declareScope(dir, controlTaskSlug, AC_ID).exitCode).toBe(0);
     expect(evidenceSelfReported(dir, controlTaskSlug, AC_ID, AC_COMMAND).exitCode).toBe(0);
     expect(approvePlan(dir, controlPlanSlug).exitCode).toBe(0);
 
@@ -423,5 +448,77 @@ describe("AC-PCI-12: compiled close — throwaway corpus, dist/lore binary, one 
     const unblockedResult = archivePlan(dir, controlPlanSlug);
     expect(unblockedResult.exitCode).toBe(0);
     expect(unblockedResult.stderr).not.toContain("attestation-floor");
+  });
+});
+
+/**
+ * AC-PCI-21 (task-plan-close-must-block-when-the-coverage-conjunct-is-scope) —
+ * the compiled-binary proof that the 2026-07-31 hole is closed, plus the control
+ * that closing it did not break the pure-planning path.
+ *
+ * Its OWN throwaway corpus, deliberately not the describe above's: that suite
+ * REWRITES `.lore/config.yaml` mid-run to add an explicit
+ * `workflow.attestation.min_ratio`, and under a configured ratio a self-reported
+ * plan is denied by the RATIO conjunct first (precedence: measured failure
+ * outranks the undeclared-scope denial). Sharing the corpus would therefore make
+ * this test's exit code depend on describe-execution order and, worse, let it
+ * pass while measuring the wrong cause.
+ */
+describe("AC-PCI-21: an undeclared scope carrying evidence is denied through the compiled binary", () => {
+  let dir: string;
+  let specSlug: string;
+
+  beforeAll(() => {
+    dir = trackDir(mkdtempSync(join(tmpdir(), "lore-pci21-")));
+    expect(dir.startsWith(REPO_ROOT)).toBe(false);
+    initCorpus(dir);
+
+    const prdSlug = createPrd(dir, "PCI-21 Root PRD");
+    specSlug = createSpec(dir, prdSlug, "PCI-21 Governing Spec");
+    addScriptAc(dir, specSlug, AC_ID, AC_COMMAND);
+
+    const approveSpec = runLore(["approve", specSlug], dir);
+    if (approveSpec.exitCode !== 0) {
+      throw new Error(`approve spec failed (setup): ${approveSpec.stderr}`);
+    }
+  });
+
+  // HAPPY (the deny) — the exact shape that archived four plans at exit 0.
+  it("PCI-21: a plan whose tasks carry evidence and declare no ac_scope exits NONZERO and names the missing declaration", () => {
+    const planSlug = createPlan(dir, specSlug, "PCI-21 Plan (evidence, undeclared)");
+    const taskSlug = createTask(dir, planSlug, "PCI-21 Task (undeclared)");
+
+    // Evidence recorded, `lore scope add` deliberately never called.
+    expect(evidenceSelfReported(dir, taskSlug, AC_ID, AC_COMMAND).exitCode).toBe(0);
+    expect(approvePlan(dir, planSlug).exitCode).toBe(0);
+
+    const denied = archivePlan(dir, planSlug);
+
+    expect(denied.exitCode).not.toBe(0);
+    // The field discriminates this cause from the attestation-floor one — a
+    // scripted caller must be able to tell "declare your scope" from "attest
+    // what you declared" without parsing prose.
+    expect(denied.stderr).toContain("gate:plan-close:attestation-scope-undeclared");
+    // …and the pack NAMES the missing declaration plus its writer.
+    expect(denied.stderr).toContain("ac_scope");
+    expect(denied.stderr).toContain("lore scope add");
+    expect(denied.stderr).toContain(taskSlug);
+  });
+
+  // CONTROL — the pure-planning path survives, in the SAME corpus and through
+  // the SAME command. Without this, the deny above would be indistinguishable
+  // from a gate that simply refuses every close.
+  it("PCI-21 control: the same corpus's zero-evidence plan still archives at exit 0", () => {
+    const planSlug = createPlan(dir, specSlug, "PCI-21 Plan (pure planning)");
+    // A task with NO evidence and, like the plan above, no `ac_scope`: the
+    // difference between the two cases is the EVIDENCE, nothing else.
+    createTask(dir, planSlug, "PCI-21 Task (no evidence)");
+
+    expect(approvePlan(dir, planSlug).exitCode).toBe(0);
+
+    const archived = archivePlan(dir, planSlug);
+
+    expect(archived.exitCode).toBe(0);
+    expect(archived.stderr).not.toContain("attestation-scope-undeclared");
   });
 });
