@@ -603,8 +603,12 @@ describe("AC-072-8: dedup boundary — fresh upstream yields empty possible_dupl
 // contract (D2): both
 // invocations wrote, OR exactly one wrote while the other refused with the
 // DECLARED exit code and stderr template — with the per-shape bookkeeping
-// (distinct ids, receipt lines, upstream task count) checked against whichever
-// of the two declared states actually occurred.
+// (distinct ids, loser template) checked against the FINAL attributable
+// attempt, while the CUMULATIVE corpus/receipt bookkeeping (`allSucceededIds`,
+// task-fix-the-spec-072-cross-corpus-database-is-locked-race) is checked
+// against every attempt the retry loop ran — an excluded
+// (`not_attributable`) attempt still performs a real, permanent write
+// whenever its surviving invocation completes normally.
 //
 // The verdict comes from `@lore/core`'s pure classifier, never from a rule
 // restated here (D6), so this case and the 50-run harness
@@ -631,12 +635,42 @@ describe("AC-072-9 / AC-IC-5: two concurrent report() calls conform to the speci
     // A run can end in a state that is neither conforming nor violating: the
     // compiled binary's native-module load race, or a locked-database refusal
     // from the per-command STARTUP corpus write — both recorded in the spec's
-    // §Contract Details as NOT belonging to this contract. Retry bounded times
-    // for an attributable run rather than reporting a false RED (or a false
-    // green by treating "not attributable" as a pass).
-    const MAX_ATTEMPTS = 5;
+    // §Contract Details as NOT belonging to this contract, and explicitly NOT
+    // to be "handled" with a retry/sleep/raised-timeout INSIDE a single
+    // invocation (D3). Retrying the whole two-invocation SCENARIO a bounded
+    // number of times — drawing a fresh independent sample, no delay between
+    // attempts — is the harness-level mechanism the spec itself sanctions for
+    // this ("account for" the two contention sources, not eliminate them).
+    // Raised from 5 to 20 (task-fix-the-spec-072-cross-corpus-database-is-
+    // locked-race): the SAME cold-start speedup that exposed the upstream-
+    // probe bug this task fixes also raises the two invocations' STARTUP-path
+    // overlap probability, so `contention_outside_report_write` alone was
+    // observed exhausting all 5 attempts on a loaded machine (measured: 4/5
+    // clean, 1/5 exhausted in a 5-run local sample). 20 keeps the same
+    // no-delay-between-attempts shape while making "every attempt excluded"
+    // astronomically unlikely even at a pessimistic 50% per-attempt exclusion
+    // rate (0.5^20 ~= 1e-6) — not a raised per-write timeout, not a sleep, a
+    // larger bounded sample count for an already-excluded, already-classified
+    // outcome.
+    const MAX_ATTEMPTS = 20;
     const excluded: string[] = [];
     let attributable: { first: RunResult; second: RunResult; shape: string } | undefined;
+    // Every invocation that actually landed an upstream write, across EVERY
+    // attempt the loop below runs — including `not_attributable`-excluded
+    // ones. `contention_outside_report_write`'s own definition (see
+    // `@lore/core`'s `hasContentionOutsideReportWrite`) is "one side lost a
+    // STARTUP-phase race on the CONSUMER corpus and died before ever reaching
+    // the upstream write" — the OTHER side's startup did NOT lose that race,
+    // so it typically runs its entire pipeline unimpeded and DOES write a
+    // real, permanent task. The fixture is a single `makeTwin` twin shared by
+    // every retry attempt (never reset in between), so a partial write from
+    // an EXCLUDED attempt is just as real and just as permanent as one from
+    // the eventually-attributable attempt — omitting it from the corpus/
+    // receipt bookkeeping below would silently undercount (task-fix-the-
+    // spec-072-cross-corpus-database-is-locked-race: observed 4-5 real tasks
+    // in the upstream after 2-3 excluded attempts, against a bookkeeping
+    // check that only knew about the final attempt's winners).
+    const allSucceededIds: string[] = [];
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS && attributable === undefined; attempt++) {
       const proc1 = spawnAsync(reportArgs(`Concurrent report A ${attempt}`, "desc A"), {
@@ -648,6 +682,13 @@ describe("AC-072-9 / AC-IC-5: two concurrent report() calls conform to the speci
         env: { LORE_ACTOR: "agent:ac9-b" },
       });
       const [first, second] = await Promise.all([waitFor(proc1), waitFor(proc2)]);
+      for (const run of [first, second]) {
+        if (run.exitCode === 0) {
+          allSucceededIds.push(
+            (JSON.parse(run.stdout) as { data: { upstream_doc_id: string } }).data.upstream_doc_id,
+          );
+        }
+      }
       const verdict = classifyConcurrencyOutcome(first, second);
       if (verdict.outcome === "not_attributable") {
         excluded.push(`attempt ${attempt}: ${verdict.reason} — ${verdict.detail}`);
@@ -688,26 +729,33 @@ describe("AC-072-9 / AC-IC-5: two concurrent report() calls conform to the speci
       expect(loser.stderr).not.toContain("Storage failure");
     }
 
-    // The upstream holds exactly one task per winner — a refusal wrote nothing.
+    // The upstream holds exactly one task per invocation that ever actually
+    // succeeded — across EVERY attempt this test ran, not only the final
+    // attributable one (see `allSucceededIds`'s own note above: an excluded
+    // attempt's surviving invocation still performs a real, permanent write).
+    // A refusal, attributable or not, wrote nothing.
+    expect(new Set(allSucceededIds).size).toBe(allSucceededIds.length);
     const taskCount = runJson<{ ok: true; data: { total: number } }>(["list", "--type", "task"], {
       cwd: upstream.root,
     });
-    expect(taskCount.data.data.total).toBe(winnerIds.length);
+    expect(taskCount.data.data.total).toBe(allSucceededIds.length);
 
-    // …and the local receipt log has exactly one JSON-parseable line per winner
-    // (receipts are appended STRICTLY after a successful upstream write).
+    // …and the local receipt log has exactly one JSON-parseable line per
+    // invocation that ever actually succeeded, for the same reason (receipts
+    // are appended STRICTLY after a successful upstream write, on every
+    // attempt, not only the final one).
     const receiptPath = join(consumerRoot, ".lore", "issue-receipts.jsonl");
     const lines = readFileSync(receiptPath, "utf8")
       .split("\n")
       .filter((line) => line.trim() !== "");
-    expect(lines).toHaveLength(winnerIds.length);
+    expect(lines).toHaveLength(allSucceededIds.length);
     const parsedIds = new Set<string>();
     for (const line of lines) {
       const parsed = JSON.parse(line) as { upstream_doc_id: string };
       expect(typeof parsed.upstream_doc_id).toBe("string");
       parsedIds.add(parsed.upstream_doc_id);
     }
-    expect(parsedIds).toEqual(new Set(winnerIds));
+    expect(parsedIds).toEqual(new Set(allSucceededIds));
   }, 120_000);
 });
 

@@ -63,7 +63,7 @@
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { err, ok, type Result } from "@lore/core";
+import { DEFAULT_WRITE_WAIT_MS, err, ok, type Result } from "@lore/core";
 import type { DocStatus, LoreError } from "@lore/core";
 import { probeUpstreamDb } from "./upstream-probe.js";
 import { SQLiteStore, LATEST_SCHEMA_VERSION } from "../store/sqlite-store.js";
@@ -201,7 +201,13 @@ function readResolutionReason(extra: unknown): string | undefined {
  * applied bound and the reported bound are the same value by construction.
  */
 export interface UpstreamContextOptions {
-  /** `PRAGMA busy_timeout` (ms) for the upstream connection. Absent → the store's own default. */
+  /**
+   * `PRAGMA busy_timeout` (ms), applied identically to BOTH the readonly
+   * schema-version probe AND the real write connection
+   * (task-fix-the-spec-072-cross-corpus-database-is-locked-race — the probe
+   * used to get none at all, letting a fast reader lose to a concurrent
+   * writer's `BEGIN IMMEDIATE` with zero wait). Absent → `DEFAULT_WRITE_WAIT_MS`.
+   */
   readonly writeWaitMs?: number;
 }
 
@@ -212,8 +218,10 @@ export interface UpstreamContextOptions {
  *
  * @param corpusRoot - the upstream repo ROOT (the shape `lore init`
  *   produces — i.e. the directory containing `.lore/`, NOT `.lore/` itself)
- * @param options - see {@link UpstreamContextOptions}; omitted → the store's
- *   own default bound (every pre-existing call site is unaffected)
+ * @param options - see {@link UpstreamContextOptions}; omitted →
+ *   `DEFAULT_WRITE_WAIT_MS`, applied to BOTH the probe and the store (every
+ *   pre-existing call site keeps the SAME store-side bound it always got;
+ *   the probe now shares it instead of getting none)
  * @returns `ok(UpstreamPort)` on a schema-version match; `err({code:
  *   "VALIDATION_ERROR", ...})` naming the resolved path (missing db) or both
  *   versions (mismatch) — no `SQLiteStore` is ever constructed on either
@@ -240,7 +248,19 @@ export function buildUpstreamContext(
     });
   }
 
-  const probeResult = probeUpstreamDb(dbPath);
+  // reason: resolved ONCE and reused for BOTH the probe below and the
+  // SQLiteStore construction further down — the probe (a readonly reader) and
+  // the store (the real writer) are opened against the exact same file, so
+  // they must wait out the SAME declared window or the probe stays racy for
+  // any caller that leaves `options` unset (the bug this task fixes: the
+  // probe previously got busy_timeout=0 in every case, while the store below
+  // already defaulted to DEFAULT_WRITE_WAIT_MS internally — a mismatch that
+  // let a fast reader lose to a concurrent writer's `BEGIN IMMEDIATE` with no
+  // wait at all). Byte-identical to the store's own pre-existing default for
+  // every caller (task-fix-the-spec-072-cross-corpus-database-is-locked-race).
+  const effectiveWriteWaitMs = options?.writeWaitMs ?? DEFAULT_WRITE_WAIT_MS;
+
+  const probeResult = probeUpstreamDb(dbPath, effectiveWriteWaitMs);
   if (!probeResult.ok) return probeResult;
 
   if (probeResult.value.user_version !== LATEST_SCHEMA_VERSION) {
@@ -256,14 +276,11 @@ export function buildUpstreamContext(
 
   // reason: narrow composition — SQLiteStore + CorpusService ONLY, no
   // Telemetry/AI-registry/GateEnforcer. See module header "Invariants".
-  // `writeWaitMs` is threaded from the CALLER's declared bound (never read from
-  // config here): the layer that reports an expiry must print the very bound
-  // this connection applied (spec-report-issue-has-no-specified-concurrency-
-  // contract-ac-072 D4).
-  const store = new SQLiteStore(
-    dbPath,
-    options?.writeWaitMs !== undefined ? { writeWaitMs: options.writeWaitMs } : undefined,
-  );
+  // `effectiveWriteWaitMs` is the SAME resolved bound the probe above just
+  // applied (never re-derived here): the layer that reports an expiry must
+  // print the very bound this connection applied (spec-report-issue-has-no-
+  // specified-concurrency-contract-ac-072 D4).
+  const store = new SQLiteStore(dbPath, { writeWaitMs: effectiveWriteWaitMs });
   const corpusService = new CorpusService(store);
 
   const port: UpstreamPort = {

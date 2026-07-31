@@ -20,12 +20,17 @@
  *   - Any `createDraft` failure (validation, store, or otherwise) is
  *     returned VERBATIM — this service does not wrap, rename, or
  *     re-interpret it (SPEC-072 R-5e failure-transparency, AC-072-7). ONE
- *     documented narrowing: a `STORE_ERROR` that IS SQLite write contention
- *     (`toWriteContentionError` below) is re-typed as `WRITE_CONTENTION` so the
- *     CLI can render the declared message and exit code
- *     (spec-report-issue-has-no-specified-concurrency-contract-ac-072). Nothing
- *     is swallowed: the same fact gets a truthful classification, and every
- *     other failure still propagates byte-identically.
+ *     documented narrowing, applied at THREE sites that each open a
+ *     connection against the same upstream file `createDraft` writes to
+ *     (`deps.probe`, `deps.openUpstream`'s internal TOCTOU re-probe, and
+ *     `createDraft` itself — task-fix-the-spec-072-cross-corpus-database-is-
+ *     locked-race extended this from `createDraft` alone): a `STORE_ERROR`
+ *     that IS SQLite write contention (`toWriteContentionError` below) is
+ *     re-typed as `WRITE_CONTENTION` so the CLI can render the declared
+ *     message and exit code
+ *     (spec-report-issue-has-no-specified-concurrency-contract-ac-072).
+ *     Nothing is swallowed: the same fact gets a truthful classification, and
+ *     every other failure still propagates byte-identically.
  *   - `import type` ONLY from `../flows/*` — this file must stay reachable
  *     from vitest without ever touching `bun:sqlite` (AC-072-13's static
  *     import-graph pin; also enforced by this repo's `bun-only` composition
@@ -203,21 +208,30 @@ function readDriverErrorCode(cause: Error | undefined): string | undefined {
 }
 
 /**
- * Re-classifies an upstream WRITE failure that is corpus write CONTENTION
- * (SQLite refused `BEGIN IMMEDIATE` at `PRAGMA busy_timeout` expiry) into the
- * typed `WRITE_CONTENTION` error the CLI renders as the declared 3-part message
- * and maps to the declared exit code
- * (spec-report-issue-has-no-specified-concurrency-contract-ac-072
+ * Re-classifies an upstream failure that is corpus write CONTENTION (SQLite
+ * refused `BEGIN IMMEDIATE`, OR a readonly reader's `PRAGMA` read collided
+ * with someone else's `BEGIN IMMEDIATE`, at `PRAGMA busy_timeout` expiry —
+ * `isWriteContentionFailure` recognizes both by the identical `SQLITE_BUSY`/
+ * "database is locked" signal) into the typed `WRITE_CONTENTION` error the
+ * CLI renders as the declared 3-part message and maps to the declared exit
+ * code (spec-report-issue-has-no-specified-concurrency-contract-ac-072
  * §Contract Details).
  *
  * This is the ONE documented narrowing of this service's
- * "createDraft failures propagate VERBATIM" invariant: nothing is swallowed or
- * renamed away — a contended write is RE-TYPED so its (otherwise identical)
- * `STORE_ERROR` text stops reading as "the store is broken, exit 1" when the
- * actual fact is "someone else held the corpus, re-run this". Every
- * non-contention failure still propagates byte-identically.
+ * "failures propagate VERBATIM" invariant, applied at every call site that
+ * opens a connection against the same upstream file `createDraft` writes to
+ * — `deps.probe`, `deps.openUpstream`'s internal TOCTOU re-probe, and
+ * `createDraft` itself (task-fix-the-spec-072-cross-corpus-database-is-
+ * locked-race: the probe sites used to propagate a bare `STORE_ERROR`
+ * instead, because nothing ever ran this reclassification over them).
+ * Nothing is swallowed or renamed away — a contended read or write is
+ * RE-TYPED so its (otherwise identical) `STORE_ERROR` text stops reading as
+ * "the store is broken, exit 1" when the actual fact is "someone else held
+ * the corpus, re-run this". Every non-contention failure still propagates
+ * byte-identically.
  *
- * @param error - the failure `UpstreamPort.createDraft` returned
+ * @param error - the failure `UpstreamPort.createDraft`, `deps.probe`, or
+ *   `deps.openUpstream` returned
  * @param upstreamDbPath - the contended corpus FILE (what a reader must know)
  * @param boundMs - the declared bound the connection applied, surfaced verbatim
  * @returns the typed contention error, or `undefined` when this failure is not
@@ -506,7 +520,17 @@ export class IssueReportService {
     // Step 4: probe.user_version !== expectedSchemaVersion.
     const dbPath = join(cfg.corpus_path, ".lore", "lore.db");
     const probeResult = this.deps.probe(dbPath);
-    if (!probeResult.ok) return probeResult;
+    if (!probeResult.ok) {
+      // reason: the readonly probe races the SAME upstream file a concurrent
+      // invocation's `createDraft` may be mid-`BEGIN IMMEDIATE` on — a
+      // busy_timeout expiry here is corpus write CONTENTION, not "the store
+      // is broken", so it gets the identical re-typing `createDraft`'s own
+      // contention failure gets below (task-fix-the-spec-072-cross-corpus-
+      // database-is-locked-race). Every non-contention probe failure (missing
+      // file, corrupt file) still propagates verbatim.
+      const contention = toWriteContentionError(probeResult.error, dbPath, this.deps.writeWaitMs);
+      return contention !== undefined ? err(contention) : probeResult;
+    }
     if (probeResult.value.user_version !== this.deps.expectedSchemaVersion) {
       return err({
         code: "VALIDATION_ERROR",
@@ -520,8 +544,13 @@ export class IssueReportService {
 
     // Open the narrow UpstreamPort (buildUpstreamContext re-runs its own
     // TOCTOU version re-check — SPEC-072 §7 Design Decisions "Schema precheck").
+    // That re-probe races the same file for the same reason the direct probe
+    // above does, so a contended failure here gets the SAME re-typing.
     const portResult = this.deps.openUpstream(cfg.corpus_path);
-    if (!portResult.ok) return portResult;
+    if (!portResult.ok) {
+      const contention = toWriteContentionError(portResult.error, dbPath, this.deps.writeWaitMs);
+      return contention !== undefined ? err(contention) : portResult;
+    }
     const port = portResult.value;
 
     // Step 5: root-PRD identity (R-5a).
