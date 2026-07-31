@@ -16,6 +16,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import type { RunnerTask } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, existsSync, readFileSync, lstatSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -35,6 +36,66 @@ const PROJECT_FLOW_SOURCE = new URL("../../../src/flows/setup-project-flow.ts", 
 
 /** Sentinel content — a test that deletes the far-side file cannot fake having preserved it. */
 const SSOT_CONTENT = "SSOT: this file lives in the developer's repo, not in the install tree\n";
+
+/**
+ * AC-SL-7's negative control lives in a non-`.test.ts` fixture because it
+ * asserts a COMPILE-TIME property (its oracle is `tsc`, not a runner). Nothing
+ * in a test run would notice if it were deleted, so the case below pins it.
+ */
+const TYPE_FIXTURE_SOURCE = new URL("./setup-fs-boundary-required.type-fixture.ts", import.meta.url);
+
+/** This file's own source — read by the membership floor to detect DISABLED cases (see below). */
+const OWN_SOURCE = new URL(import.meta.url);
+
+/**
+ * AC-SL-8 — monotonic floor on this suite's COLLECTED case count, set to the
+ * count measured when D8 landed.
+ *
+ * WHY A FLOOR AND NOT A TOTAL: an earlier revision of this spec hardcoded an
+ * exact total, which drifted silently as the suite grew and had to be chased on
+ * every addition. A floor lets the suite grow freely while still going red the
+ * moment a case is DELETED.
+ *
+ * WHY IT EXISTS AT ALL: an independent review found that AC-SL-4 ("the whole
+ * suite passes with zero failures") also passes if the suite SHRINKS — deleting
+ * the ancestor-refusal case leaves zero failures and exit 0, a passing oracle
+ * over an emptied guarantee. Zero failures says nothing about membership.
+ *
+ * Raise this ONLY when adding cases, never to accommodate a deletion: a red
+ * floor means a guarantee left the suite, and the fix is to restore the case,
+ * not to lower the number.
+ *
+ * MEASURED SCOPE — the count catches DELETION, not DISABLING. Verified both
+ * directions: physically removing one case reports "expected 20 to be greater
+ * than or equal to 21" (exit 1), but converting the same case to `it.skip`
+ * leaves it COLLECTED, so the count stays 21 and this assertion passes (exit 0).
+ * The count cannot be narrowed to non-skipped cases to fix that, because the
+ * AC's own oracle command runs this file under `-t`, which marks every unmatched
+ * case skipped too — the two are indistinguishable from inside the run. So
+ * disabling is covered by a SEPARATE source-level assertion in the same case
+ * below, and the two together span the hole.
+ */
+const SUITE_CASE_FLOOR = 21;
+
+/**
+ * Counts every COLLECTED case in a vitest task tree — not merely the executed
+ * ones.
+ *
+ * The distinction is load-bearing: AC-SL-8's own oracle command runs this file
+ * under `-t 'suite membership floor'`, so exactly ONE case executes while every
+ * other is collected-then-skipped. Counting executions would report 1 under that
+ * filter and make the floor unassertable (or worse, quietly satisfiable);
+ * counting collection sees the whole suite either way. Measured under both a
+ * filtered and an unfiltered run before this was wired.
+ */
+function countCollectedCases(tasks: readonly RunnerTask[]): number {
+  let total = 0;
+  for (const task of tasks) {
+    if (task.type === "test") total += 1;
+    else total += countCollectedCases(task.tasks);
+  }
+  return total;
+}
 
 describe("RealSetupFsWriter removal never resolves through a symlink", () => {
   let root: string;
@@ -236,6 +297,17 @@ describe("RealSetupFsWriter removal never resolves through a symlink", () => {
       const file = join(targetDir, "plain.md");
       writeFileSync(file, "installed\n");
       const writer = new RealSetupFsWriter();
+      // The `@ts-expect-error` below is LOAD-BEARING, not a suppression. D8 makes
+      // `boundary` a REQUIRED property, so this call is a compile error by design
+      // — while the RUNTIME tolerance stays reachable and stays tested, because a
+      // runtime that reinterpreted a missing boundary as "scan to the filesystem
+      // root" would refuse every removal for anyone whose install root is itself
+      // a symlink (the exact case D4 exists to avoid).
+      //
+      // It doubles as a negative control for AC-SL-7: if the signature is ever
+      // quietly reverted to optional, this directive becomes UNUSED and
+      // `bun run typecheck` fails with TS2578. Measured both directions.
+      // @ts-expect-error — D8: boundary is required at the type level; the runtime still tolerates its absence.
       await writer.remove(file);
       expect(existsSync(file)).toBe(false);
     });
@@ -309,8 +381,13 @@ describe("RealSetupFsWriter removal never resolves through a symlink", () => {
       removeProjectPath(plain, { boundary: repo });
       expect(existsSync(plain)).toBe(false);
 
-      // A missing target stays a no-op, and omitting the boundary still works.
-      expect(() => removeProjectPath(join(repo, "absent.md"))).not.toThrow();
+      // A missing target stays a no-op, and omitting the boundary still works at
+      // RUNTIME. Same load-bearing `@ts-expect-error` as the writer's twin above
+      // (D8 / AC-SL-7) — the type forbids it, the runtime tolerates it.
+      expect(() =>
+        // @ts-expect-error — D8: boundary is required at the type level; the runtime still tolerates its absence.
+        removeProjectPath(join(repo, "absent.md")),
+      ).not.toThrow();
     });
   });
 
@@ -350,6 +427,57 @@ describe("RealSetupFsWriter removal never resolves through a symlink", () => {
       mkdirSync(empty);
       await writer.removeDirIfEmpty(empty);
       expect(existsSync(empty)).toBe(false);
+    });
+  });
+
+  describe("REGRESSION — D8's enforcement cannot be silently emptied", () => {
+    it("suite membership floor — the collected case count never shrinks (AC-SL-8)", (ctx) => {
+      // AC-SL-4 asserts this suite passes with ZERO FAILURES, which an
+      // independent review showed is also true of a suite that SHRANK: delete
+      // the ancestor-refusal case and you still get zero failures and exit 0 —
+      // a green oracle over an emptied guarantee. Membership needs its own pin.
+      const collected = countCollectedCases(ctx.task.file.tasks);
+      expect(collected).toBeGreaterThanOrEqual(SUITE_CASE_FLOOR);
+
+      // Second, INDEPENDENT condition — the count above cannot see a DISABLED
+      // case (`it.skip` stays collected; measured: count still 21, still green),
+      // and it cannot be narrowed to non-skipped cases because this AC's own
+      // oracle runs under `-t`, which marks every unmatched case skipped as well.
+      // So disabling is caught at the source level instead. `it.only` is included
+      // because it silently EXCLUDES every other case in the file — the same
+      // emptied-guarantee outcome as deleting them, reached from the other side.
+      const ownText = readFileSync(OWN_SOURCE, "utf8");
+      // Control: a mistyped read or a moved file would make the assertion below
+      // pass vacuously against an empty/foreign string.
+      expect(ownText).toContain(`const SUITE_CASE_FLOOR = ${SUITE_CASE_FLOOR}`);
+      // Line-ANCHORED on purpose: a real call site is always `<indent>it.skip(`,
+      // whereas the prose above discusses these tokens mid-line after `//` or
+      // `*`. An unanchored pattern would match this file's own comments and fail
+      // instantly — a self-defeating assertion, not a guard.
+      const disabled = ownText.match(/^[ \t]*(?:it|test|describe)\.(?:skip|todo|only)\b/gm) ?? [];
+      expect(disabled).toEqual([]);
+    });
+
+    it("AC-SL-7's negative-control fixture is present and still discriminates", () => {
+      // The control for AC-SL-7 is a `tsc` artifact, so NO test run would notice
+      // if it were deleted — every test here would still pass while the AC
+      // silently became "a required signature also typechecks", which is
+      // vacuous. This case is that fixture's tripwire; the membership floor
+      // above is in turn the tripwire for this case being deleted.
+      const text = readFileSync(TYPE_FIXTURE_SOURCE, "utf8");
+
+      // The directives ARE the control: each asserts that a call omitting
+      // `boundary` is a compile error. Revert any signature to optional and they
+      // all become unused → TS2578 → `bun run typecheck` fails.
+      const directives = text.match(/@ts-expect-error/g) ?? [];
+      expect(directives.length).toBeGreaterThanOrEqual(5);
+
+      // Positive controls must survive too, and this is not symmetry for its own
+      // sake: without a call that DOES pass the boundary, a signature mangled
+      // into rejecting EVERYTHING would satisfy every directive above and let
+      // the fixture pass while the port was unusable.
+      const withBoundary = text.match(/\{\s*boundary:\s*BOUNDARY\s*\}/g) ?? [];
+      expect(withBoundary.length).toBeGreaterThanOrEqual(5);
     });
   });
 });

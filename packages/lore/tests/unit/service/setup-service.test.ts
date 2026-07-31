@@ -123,7 +123,18 @@ class MapFs implements SetupFsReader, SetupFsWriter {
     this.store.set(path.join(destDir, path.basename(src)), content);
   }
 
-  async remove(p: string): Promise<void> {
+  /**
+   * `_opts` is DECLARED even though this fake ignores it (D8 of
+   * spec-lore-setup-deletes-repo-source-through-dev-symlinks): TypeScript lets an
+   * implementation declare FEWER parameters than the port it satisfies, so a
+   * double typed `remove(p)` silently opts OUT of the required-boundary
+   * constraint — and a wrapper double could then drop the boundary with no
+   * compile error anywhere, making the type-level enforcement vacuous in test
+   * space. `MapFs` models paths as string keys and cannot represent a symlink at
+   * all, so the boundary has nothing to act on here; declaring it is about
+   * keeping the fake's SHAPE honest, not about behaviour.
+   */
+  async remove(p: string, _opts: { boundary: string }): Promise<void> {
     this.writerCalls.push(`remove:${p}`);
     const prefix = `${p}${path.sep}`;
     for (const key of [...this.store.keys()]) {
@@ -249,7 +260,8 @@ function makeRealFsPorts(): { reader: SetupFsReader; writer: SetupFsWriter } {
       await fsp.mkdir(destDir, { recursive: true });
       await fsp.copyFile(src, path.join(destDir, path.basename(src)));
     },
-    async remove(p: string): Promise<void> {
+    // Declares the required `boundary` (D8) — see `MapFs.remove`'s note.
+    async remove(p: string, _opts: { boundary: string }): Promise<void> {
       await fsp.rm(p, { recursive: true, force: true });
     },
     async removeDirIfEmpty(p: string): Promise<void> {

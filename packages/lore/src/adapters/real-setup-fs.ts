@@ -189,7 +189,7 @@ export class RealSetupFsWriter implements SetupFsWriter {
     chmodSync(destPath, srcMode);
   }
 
-  async remove(path: string, opts?: { boundary?: string }): Promise<void> {
+  async remove(path: string, opts: { boundary: string }): Promise<void> {
     const self = lstatOrNull(path);
     if (self === null) return;
 
@@ -205,6 +205,15 @@ export class RealSetupFsWriter implements SetupFsWriter {
     // symlinks an install subdirectory into their own repo has that repo's
     // file deleted: `existsSync` (the previous guard) follows links, so the
     // far-side file looked like an installed copy. Measured twice on this repo.
+    //
+    // D8 — the `undefined` branch is DELIBERATELY RETAINED even though `opts`
+    // is now a required parameter. The type checker constrains TypeScript
+    // callers only; a runtime that reinterpreted a missing boundary as "scan to
+    // the filesystem root" would refuse every removal for anyone whose install
+    // root is itself a symlink — the exact case D4 exists to avoid. The TYPE is
+    // the enforcement surface; this branch stays reachable and stays tested
+    // (`real-setup-fs-symlink.test.ts`, "omitting the boundary keeps the call
+    // working"). Do not "simplify" it away.
     if (opts?.boundary !== undefined) {
       const link = findSymlinkAncestor(path, opts.boundary);
       if (link !== null) {
@@ -358,12 +367,15 @@ export function backupProjectFile(src: string, destDir: string): void {
  * Lower probability than the machine-install case, identical failure mode.
  *
  * @param path - Absolute path to remove.
- * @param opts - `boundary` is the repo root; when supplied, a path whose
- *   ancestor inside it is a symlink is REFUSED rather than followed.
- * @throws When `opts.boundary` is given and an ancestor inside it is a symlink
- *   (nothing is removed), or on a genuine IO failure.
+ * @param opts - REQUIRED (D8). `boundary` is the repo root: a path whose
+ *   ancestor inside it is a symlink is REFUSED rather than followed. Required
+ *   so that a forgotten boundary is a COMPILE error at every call site rather
+ *   than a silent skip of the ancestor scan — enumeration by type checker
+ *   instead of by a remembered list of call sites.
+ * @throws When an ancestor inside `opts.boundary` is a symlink (nothing is
+ *   removed), or on a genuine IO failure.
  */
-export function removeProjectPath(path: string, opts?: { boundary?: string }): void {
+export function removeProjectPath(path: string, opts: { boundary: string }): void {
   const self = lstatOrNull(path);
   if (self === null) return;
 
@@ -372,6 +384,9 @@ export function removeProjectPath(path: string, opts?: { boundary?: string }): v
     return;
   }
 
+  // D8 — the `undefined` branch is retained on purpose; see the identical note
+  // in `RealSetupFsWriter.remove` for why a runtime that treated a missing
+  // boundary as "scan to the filesystem root" would be strictly worse.
   if (opts?.boundary !== undefined) {
     const link = findSymlinkAncestor(path, opts.boundary);
     if (link !== null) {

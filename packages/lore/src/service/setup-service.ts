@@ -271,15 +271,20 @@ export interface SetupFsWriter {
    * Removes the file OR directory (recursively) at an ABSOLUTE path. A missing
    * target is NOT an error.
    *
-   * `opts.boundary` — the install root. When supplied, the implementation MUST
+   * `opts.boundary` — the install root, REQUIRED (D8). The implementation MUST
    * refuse (throw) rather than remove a path any of whose ancestors inside that
    * boundary is a symlink: following such a link deletes the LINK TARGET's file
-   * instead of an installed copy. Callers that join a path against `targetDir`
-   * should always pass it — omitting it silently restores the reach-through
-   * behaviour that deleted this repo's own source twice
-   * (spec-lore-setup-deletes-repo-source-through-dev-symlinks D3/D4).
+   * instead of an installed copy.
+   *
+   * It is required rather than optional so that enumeration of removal call
+   * sites is done by the TYPE CHECKER, not by a remembered list: while it was
+   * optional the ancestor scan was silently skipped when absent, so one
+   * forgotten argument reinstated the reach-through deletion that destroyed
+   * this repo's own source twice, and no behavioural test of the writer could
+   * observe it — the omission lives in the CALLER
+   * (spec-lore-setup-deletes-repo-source-through-dev-symlinks D3/D4/D8).
    */
-  remove(path: string, opts?: { boundary?: string }): Promise<void>;
+  remove(path: string, opts: { boundary: string }): Promise<void>;
   /**
    * Removes the directory at ABSOLUTE `path` IFF it is currently empty — NEVER
    * force/recursive (unlike {@link remove}). A path that still has entries, or

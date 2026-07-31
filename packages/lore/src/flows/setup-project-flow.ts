@@ -213,8 +213,14 @@ export interface ProjectFsPort {
    * OPTIONAL (SPEC-060 D1/D2) — removes the file or directory (recursively)
    * at `path`. A missing target is a no-op. Same additive-capability
    * rationale as {@link backup}. MAY throw on a genuine IO failure.
+   *
+   * The METHOD is optional; its `opts.boundary` (the repo root) is NOT — D8 of
+   * spec-lore-setup-deletes-repo-source-through-dev-symlinks. An implementation
+   * MUST refuse a path whose ancestor inside that boundary is a symlink rather
+   * than follow it. Required so `tsc` — not a remembered list of call sites —
+   * enumerates every caller that forgot it.
    */
-  remove?(path: string, opts?: { boundary?: string }): void;
+  remove?(path: string, opts: { boundary: string }): void;
 }
 
 /**

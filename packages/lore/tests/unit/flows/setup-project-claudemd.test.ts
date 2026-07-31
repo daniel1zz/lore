@@ -113,7 +113,15 @@ class InMemoryProjectFs implements ProjectFsPort {
     const name = src.split("/").pop() as string;
     this.files.set(`${destDir}/${name}`, { ...file });
   }
-  remove(path: string): void {
+  /**
+   * `_opts` is DECLARED even though this fake ignores it (D8 of
+   * spec-lore-setup-deletes-repo-source-through-dev-symlinks): TypeScript lets an
+   * implementation declare FEWER parameters than the port it satisfies, so a
+   * double typed `remove(path)` silently opts OUT of the required-boundary
+   * constraint — and the wrapper below could then drop the boundary on its
+   * forward with no compile error, making the enforcement vacuous in test space.
+   */
+  remove(path: string, _opts: { boundary: string }): void {
     this.files.delete(path);
   }
 }
@@ -124,7 +132,8 @@ function withInjectedWriteFailure(base: InMemoryProjectFs, failOnPath: string): 
     readFile: (p) => base.readFile(p),
     mkdir: (p) => base.mkdir(p),
     backup: (s, d) => base.backup(s, d),
-    remove: (p) => base.remove(p),
+    // Forwards `opts` rather than dropping it (D8).
+    remove: (p, opts) => base.remove(p, opts),
     writeFile(path: string, content: string, mode: number): void {
       if (path === failOnPath) throw new Error(`injected write failure: ${path}`);
       base.writeFile(path, content, mode);

@@ -93,7 +93,12 @@ function makeFakeFs(initialFiles: Record<string, string> = {}): {
       // unconditional on any path, mirroring how the real fs port's mkdir is
       // always called just before a write (see uninstallProject's loop).
     },
-    remove(path: string): void {
+    // `opts` is declared even though this fake ignores it (D8): TypeScript lets
+    // an implementation declare FEWER parameters than the port it satisfies, so
+    // a fake typed `remove(path)` would silently opt OUT of the required-boundary
+    // constraint and let a wrapper double drop the boundary with no compile
+    // error — re-opening the hole in test space.
+    remove(path: string, _opts: { boundary: string }): void {
       // Mirrors the real SetupFsWriter/rmSync contract: removing a whole
       // "directory" (a path prefix) removes every tracked file under it too.
       files.delete(path);
@@ -232,12 +237,16 @@ describe("uninstallProject — ERROR", () => {
     let removeCalls = 0;
     const fs: ProjectFsRemovePort = {
       ...baseFs,
-      remove(path: string): void {
+      // FORWARDS `opts` rather than dropping it (D8). A wrapper double that
+      // silently discarded the boundary is precisely how the required-boundary
+      // constraint would go vacuous in test space: the real production wrapper
+      // shape is the same, so the fake must not model a laxer one.
+      remove(path: string, opts: { boundary: string }): void {
         removeCalls += 1;
         if (path === join(REPO_DIR, "lore.tree.yaml")) {
           throw new Error("injected remove failure");
         }
-        baseFs.remove(path);
+        baseFs.remove(path, opts);
       },
     };
 
@@ -274,7 +283,10 @@ function makeRealFs(): ProjectFsRemovePort {
     mkdir(path: string): void {
       mkdirSync(path, { recursive: true });
     },
-    remove(path: string): void {
+    // Declares the required `boundary` (D8) even though this real-fs double
+    // delegates straight to `rmSync` — see the in-memory fake above for why a
+    // narrower double would opt out of the constraint.
+    remove(path: string, _opts: { boundary: string }): void {
       rmSync(path, { recursive: true, force: true });
     },
   };

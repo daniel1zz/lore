@@ -146,7 +146,13 @@ class InMemoryProjectFs implements ProjectFsPort {
     this.clock += 1;
     this.files.set(`${destDir}/${name}`, { ...file, mtime: this.clock });
   }
-  remove(path: string): void {
+  /**
+   * `_opts` is DECLARED even though this fake ignores it (D8 of
+   * spec-lore-setup-deletes-repo-source-through-dev-symlinks): a double typed
+   * `remove(path)` silently opts OUT of the required-boundary constraint,
+   * re-opening in test space the hole the required parameter exists to close.
+   */
+  remove(path: string, _opts: { boundary: string }): void {
     this.files.delete(path);
   }
   /** Test-only helper — the mtime of `path`, or `undefined` if never written. */
@@ -161,7 +167,8 @@ function withInjectedWriteFailure(base: InMemoryProjectFs, failOnPath: string): 
     readFile: (p) => base.readFile(p),
     mkdir: (p) => base.mkdir(p),
     backup: (s, d) => base.backup(s, d),
-    remove: (p) => base.remove(p),
+    // Forwards `opts` rather than dropping it (D8).
+    remove: (p, opts) => base.remove(p, opts),
     writeFile(path: string, content: string, mode: number): void {
       if (path === failOnPath) throw new Error(`injected write failure: ${path}`);
       base.writeFile(path, content, mode);
@@ -174,7 +181,8 @@ function withInjectedBackupFailure(base: InMemoryProjectFs, failOnSrc: string): 
     exists: (p) => base.exists(p),
     readFile: (p) => base.readFile(p),
     mkdir: (p) => base.mkdir(p),
-    remove: (p) => base.remove(p),
+    // Forwards `opts` rather than dropping it (D8).
+    remove: (p, opts) => base.remove(p, opts),
     writeFile: (p, c, m) => base.writeFile(p, c, m),
     backup(src: string, destDir: string): void {
       if (src === failOnSrc) throw new Error(`injected backup failure: ${src}`);
