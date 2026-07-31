@@ -51,6 +51,21 @@
  *   - A version mismatch or missing db file returns BEFORE any `SQLiteStore`
  *     is constructed — zero migration side effect is ever observable on a
  *     rejected upstream corpus.
+ *   - **`buildUpstreamContext` NEVER THROWS** — the same guarantee
+ *     `upstream-probe.ts::probeUpstreamDb` makes for the readonly handle now
+ *     holds for the read-write one. `new SQLiteStore(...)` runs PRAGMAs and
+ *     migration DDL inside its CONSTRUCTOR, and bun:sqlite raises straight out
+ *     of it (`database is locked` when a concurrent writer holds the corpus),
+ *     so this function used to leak an exception past its own `Result` type —
+ *     every caller's `if (!result.ok)` rail was simply bypassed and the
+ *     process died with a raw stack trace (measured: 92 of ~300 attempts of
+ *     the SPEC-072 cross-corpus concurrency harness;
+ *     task-openvalidatedupstream-lets-a-synchronous-store-init-throw). It is
+ *     now caught and returned as `err({code: "STORE_ERROR", ...})`, message
+ *     and `cause` intact. This module CLASSIFIES nothing: deciding that a
+ *     given failure is write CONTENTION (and re-typing it to
+ *     `WRITE_CONTENTION`) stays with the caller that knows the declared bound
+ *     — `IssueReportService.openValidatedUpstream`.
  *
  * Side-effect class: IO (opens a real SQLite connection to the upstream
  * corpus on success; the probe-only rejection paths are read-only).
@@ -67,6 +82,7 @@ import { DEFAULT_WRITE_WAIT_MS, err, ok, type Result } from "@lore/core";
 import type { DocStatus, LoreError } from "@lore/core";
 import { probeUpstreamDb } from "./upstream-probe.js";
 import { SQLiteStore, LATEST_SCHEMA_VERSION } from "../store/sqlite-store.js";
+import { wrapStoreError } from "../store/store-shared.js";
 import { CorpusService } from "../service/corpus-service.js";
 import { computeIssueResolution, type IssueResolution } from "../service/issue-resolution.js";
 
@@ -225,7 +241,17 @@ export interface UpstreamContextOptions {
  * @returns `ok(UpstreamPort)` on a schema-version match; `err({code:
  *   "VALIDATION_ERROR", ...})` naming the resolved path (missing db) or both
  *   versions (mismatch) — no `SQLiteStore` is ever constructed on either
- *   rejection path
+ *   rejection path; `err({code: "STORE_ERROR", ...})` when opening the
+ *   read-write handle itself fails (write contention, corrupt file, a failed
+ *   migration), carrying the driver error's own message and `cause`
+ * @invariant NEVER THROWS — every bun:sqlite exception raised while
+ *   constructing the store is caught and returned as `err({code:
+ *   "STORE_ERROR", ...})`, the same guarantee {@link probeUpstreamDb} makes
+ *   for the readonly handle. Callers rail on the `Result` and nothing else;
+ *   before this held, a `database is locked` throw out of `SQLiteStore`'s
+ *   constructor sailed past every `if (!result.ok)` check and killed the
+ *   process (task-openvalidatedupstream-lets-a-synchronous-store-init-throw).
+ *   This function classifies NOTHING — see the inline note at the catch.
  * @example
  *   const ctx = buildUpstreamContext("/path/to/upstream/repo");
  *   if (ctx.ok) {
@@ -280,8 +306,43 @@ export function buildUpstreamContext(
   // applied (never re-derived here): the layer that reports an expiry must
   // print the very bound this connection applied (spec-report-issue-has-no-
   // specified-concurrency-contract-ac-072 D4).
-  const store = new SQLiteStore(dbPath, { writeWaitMs: effectiveWriteWaitMs });
-  const corpusService = new CorpusService(store);
+  //
+  // The try/catch is what makes this function's DECLARED `Result` return type
+  // TRUE (task-openvalidatedupstream-lets-a-synchronous-store-init-throw).
+  // `new SQLiteStore(...)` runs `init()`'s PRAGMAs and any pending migration
+  // DDL inside the constructor, and bun:sqlite raises straight out of it — so
+  // this Result-returning function could THROW, and every `if (!result.ok)`
+  // rail its callers had written was simply bypassed. Measured: the throw
+  // escaped to `IssueReportService.report` and killed the process with a raw
+  // `database is locked` stack trace (frames `run (bun:sqlite)` → `init` →
+  // `new SQLiteStore` → here), 92 times in ~300 attempts of the SPEC-072
+  // cross-corpus concurrency harness — where the contract requires the loser
+  // to REFUSE with the declared exit code and 3-part template.
+  //
+  // This is the SAME "never throws, always `err(...)`" invariant
+  // `upstream-probe.ts::probeUpstreamDb` already documents and upholds for the
+  // readonly handle, now held by the read-write handle too, and it is the
+  // narrow contract the repo's `Result<T, LoreError>` rule states: no
+  // exception crosses this boundary.
+  //
+  // ⛔ NOTHING is classified here. `wrapStoreError` preserves the driver
+  // error's `message` AND attaches the original as `cause` (so the
+  // `SQLITE_BUSY` code survives), and the CALLER decides what the failure
+  // means: `IssueReportService.openValidatedUpstream` runs the SAME
+  // `toWriteContentionError` narrowing over this `err(...)` that it already
+  // ran over the probe's, re-typing contention — and ONLY contention — into
+  // `WRITE_CONTENTION`. A non-contention failure (corrupt file, permissions, a
+  // failed migration) stays a `STORE_ERROR` carrying its original message and
+  // propagates verbatim, exactly as it must. Do NOT add a second
+  // classification site here.
+  let store: SQLiteStore;
+  let corpusService: CorpusService;
+  try {
+    store = new SQLiteStore(dbPath, { writeWaitMs: effectiveWriteWaitMs });
+    corpusService = new CorpusService(store);
+  } catch (error) {
+    return wrapStoreError(error);
+  }
 
   const port: UpstreamPort = {
     async resolveRootDoc() {

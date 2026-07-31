@@ -248,6 +248,63 @@ describe("SPEC-072 IssueReportService (RED — packages/lore/src/service/issue-r
     }
   });
 
+  // ── The openUpstream rail (task-openvalidatedupstream-lets-a-synchronous-store-init-throw) ──
+  //
+  // `deps.openUpstream` opens a READ-WRITE handle against the same file
+  // `createDraft` later writes to, so it contends for the same lock — and its
+  // constructor used to raise `database is locked` SYNCHRONOUSLY, sailing past
+  // this service's `if (!portResult.ok)` rail and killing the process with a
+  // raw stack trace (measured: 92 of ~300 attempts of the concurrency
+  // harness). The port now upholds its declared `Result` contract — the throw
+  // is caught where the handle is opened (`buildUpstreamContext`) and returned
+  // as the `STORE_ERROR` these two tests inject — so the classification below
+  // is reached at all. The failure shape used here is exactly what
+  // `store-shared.ts::wrapStoreError` builds from a caught bun:sqlite error:
+  // the driver's own message, plus the original error as `cause` (which is
+  // what carries the `SQLITE_BUSY` code through).
+  it("ERROR: a CONTENDED openUpstream failure is re-typed as WRITE_CONTENTION carrying the declared bound; createDraft is never reached and no receipt is written", async () => {
+    const { IssueReportService } = await importIssueReportService();
+    const sqliteBusy = Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY", errno: 5 });
+    const failure: LoreError = { code: "STORE_ERROR", message: "database is locked", cause: sqliteBusy };
+    const { deps, port } = makeFakeDeps({ openUpstream: vi.fn(() => err(failure)) });
+    const service = new IssueReportService(deps);
+
+    const result = await service.report(BASE_INPUT, BASE_CFG);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toEqual({
+        code: "WRITE_CONTENTION",
+        operation: "report-issue",
+        corpus_path: `${BASE_CFG.corpus_path}/.lore/lore.db`,
+        bound_ms: DECLARED_WRITE_WAIT_MS,
+        source: UNKNOWN_CONTENDING_SOURCE,
+      });
+    }
+    // Refused before the port ever existed: nothing was written anywhere.
+    expect(port.createDraft).not.toHaveBeenCalled();
+    expect(deps.receipts.append).not.toHaveBeenCalled();
+  });
+
+  it("NEGATIVE: a NON-contention openUpstream failure propagates VERBATIM — a corrupt or unreadable upstream must never masquerade as contention", async () => {
+    const { IssueReportService } = await importIssueReportService();
+    const failure: LoreError = {
+      code: "STORE_ERROR",
+      message: "file is not a database",
+      cause: Object.assign(new Error("file is not a database"), { code: "SQLITE_NOTADB" }),
+    };
+    const { deps } = makeFakeDeps({ openUpstream: vi.fn(() => err(failure)) });
+    const service = new IssueReportService(deps);
+
+    const result = await service.report(BASE_INPUT, BASE_CFG);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toEqual(failure);
+    }
+    expect(deps.receipts.append).not.toHaveBeenCalled();
+  });
+
   it("NEGATIVE: a non-contention store failure with a malformed cause still propagates VERBATIM (no accidental re-typing)", async () => {
     const { IssueReportService } = await importIssueReportService();
     const failure: LoreError = {

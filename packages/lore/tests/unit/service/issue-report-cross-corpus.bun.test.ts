@@ -62,6 +62,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -757,6 +758,184 @@ describe("AC-072-9 / AC-IC-5: two concurrent report() calls conform to the speci
     }
     expect(parsedIds).toEqual(new Set(allSucceededIds));
   }, 120_000);
+});
+
+// ─── A SYNCHRONOUS store-init throw refuses, it does not escape ──────────────
+//
+// task-openvalidatedupstream-lets-a-synchronous-store-init-throw. Both
+// re-typing sites in `openValidatedUpstream` (the `deps.probe` failure and the
+// `deps.openUpstream` failure) only ever saw the `Result`-RETURNING failure
+// path. `buildUpstreamContext` — the real `openUpstream` port — could instead
+// THROW synchronously out of `new SQLiteStore(...)`: `SQLiteStore.init()`
+// issues `PRAGMA journal_mode = WAL` as its FIRST statement, and bun:sqlite
+// raises `database is locked` (`code: "SQLITE_BUSY"`) straight out of the
+// constructor when that statement collides with another process's write lock.
+// Nothing caught it, so it escaped `openValidatedUpstream` → `report` and
+// killed the process with a raw stack trace — measured at 92 deaths across
+// ~300 attempts of the AC-IC-1 harness, with frames `run (bun:sqlite)` →
+// `init` → `new SQLiteStore` → `buildUpstreamContext` → `openValidatedUpstream`.
+//
+// Why THIS fixture (a rollback-journal upstream), and not simply "hold a lock":
+// the production window is a WAL cold-open race — two invocations opening the
+// same corpus with no live `-shm`, one of them needing wal-index recovery
+// while the other holds `BEGIN IMMEDIATE`. That window is inherently
+// PROBABILISTIC (measured 24 throws / 240 cold-open connections), so a test
+// built on it could pass while measuring nothing. Putting the upstream in
+// rollback-journal mode makes the SAME statement fail DETERMINISTICALLY and
+// for the same reason: `PRAGMA journal_mode = WAL` now has to genuinely SWITCH
+// modes, which needs the write lock the holder is sitting on. Two properties
+// make this fixture the right deterministic stand-in rather than a contrivance:
+//
+//   1. The readonly schema probe (`openValidatedUpstream` step 4) still
+//      SUCCEEDS against it — a holder's `BEGIN IMMEDIATE` takes a RESERVED
+//      lock, which still admits readers — so the invocation genuinely reaches
+//      `deps.openUpstream` and fails exactly where the defect lives. A holder
+//      that also blocked the probe would refuse one rail EARLIER and this test
+//      would pass without ever exercising the store-construction path.
+//   2. SQLite does NOT consult the busy handler for a journal-mode SWITCH
+//      (measured: throws at ~0ms whether `busy_timeout` is 0 or 2000, unlike
+//      the WAL-recovery path where the declared bound does eliminate it). So
+//      no bound, however large, can rescue this case — the ONLY thing standing
+//      between it and a raw stack trace is that a `Result`-returning boundary
+//      stops leaking exceptions. That makes this a pure oracle for the catch.
+//
+// The control below pairs with it: the byte-identical invocation against the
+// byte-identical rollback-journal fixture, with NO holder, exits 0 and files a
+// real report. Without that control a green refusal here would be
+// indistinguishable from a fixture that is simply broken.
+
+/** Puts an upstream corpus db into rollback-journal mode — see the section note above. */
+function setRollbackJournalMode(upstreamRoot: string): void {
+  assertUnderTmp(upstreamRoot);
+  const db = new Database(join(upstreamRoot, ".lore", "lore.db"));
+  const mode = (db.query("PRAGMA journal_mode = DELETE").get() as { journal_mode: string }).journal_mode;
+  db.close();
+  if (mode !== "delete") {
+    throw new Error(`fixture setup: expected journal_mode 'delete', got '${mode}'`);
+  }
+}
+
+/**
+ * Child-process write-lock holder. Deliberately self-contained (raw bun:sqlite
+ * only, zero coupling to this repo's module resolution) — same shape as
+ * `tests/unit/store/busy-timeout.bun.test.ts`'s holder. `BEGIN IMMEDIATE`
+ * takes the RESERVED lock immediately per SQLite's documented semantics (no
+ * write statement needed), and the transaction is ROLLED BACK, never
+ * committed, so the holder mutates nothing in the upstream corpus.
+ */
+const UPSTREAM_LOCK_HOLDER_SCRIPT = `
+import { Database } from "bun:sqlite";
+import { writeFileSync } from "node:fs";
+
+const [, , dbPath, markerPath, holdMsArg] = process.argv;
+const db = new Database(dbPath);
+db.exec("BEGIN IMMEDIATE");
+writeFileSync(markerPath, "locked");
+await Bun.sleep(Number(holdMsArg));
+db.exec("ROLLBACK");
+db.close();
+`;
+
+/** Polls for the holder's lock-acquired marker, or throws (never silently proceeds unlocked). */
+async function waitForLockMarker(markerPath: string, timeoutMs = 5_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!existsSync(markerPath)) {
+    if (Date.now() > deadline) {
+      throw new Error(`lock holder never signalled acquisition within ${timeoutMs}ms`);
+    }
+    await Bun.sleep(5);
+  }
+}
+
+/** A non-default declared bound, so "the bound reported is the bound declared" cannot pass by coincidence. */
+const DECLARED_UPSTREAM_WRITE_WAIT_MS = 1_500;
+
+function configureUpstreamWriteWaitMs(consumerRoot: string, ms: number): void {
+  assertUnderTmp(consumerRoot);
+  appendFileSync(join(consumerRoot, ".lore", "config.yaml"), `    write_wait_ms: ${ms}\n`);
+}
+
+const initThrowReportArgs = (title: string): string[] => [
+  "report-issue",
+  "--title",
+  title,
+  "--description",
+  "a report filed while the upstream corpus write lock is held by another process",
+  "--expected",
+  "the declared write-contention refusal",
+  "--actual",
+  "an uncaught SQLITE_BUSY stack trace",
+  "--json",
+];
+
+describe("a synchronous store-init throw is re-typed into the declared refusal instead of escaping", () => {
+  it("REGRESSION: report against a write-locked upstream refuses with the declared contention code + template, never a raw bun:sqlite stack trace", async () => {
+    const { upstream, consumerRoot } = makeTwin("initthrow");
+    track(upstream.root, consumerRoot);
+    configureUpstreamWriteWaitMs(consumerRoot, DECLARED_UPSTREAM_WRITE_WAIT_MS);
+    setRollbackJournalMode(upstream.root);
+
+    const holderDir = mkdtempSync(join(TMP_ROOT, "lore-lockholder-"));
+    track(holderDir);
+    const holderScriptPath = join(holderDir, "holder.mjs");
+    const markerPath = join(holderDir, "locked.marker");
+    writeFileSync(holderScriptPath, UPSTREAM_LOCK_HOLDER_SCRIPT);
+
+    const holderProc = Bun.spawn(
+      ["bun", holderScriptPath, join(upstream.root, ".lore", "lore.db"), markerPath, "8000"],
+      { stdout: "ignore", stderr: "pipe" },
+    );
+    await waitForLockMarker(markerPath);
+
+    const result = run(initThrowReportArgs("Report filed against a locked upstream"), {
+      cwd: consumerRoot,
+      env: { LORE_ACTOR: "agent:initthrow-reporter" },
+    });
+
+    const holderExitCode = await holderProc.exited;
+    expect(holderExitCode).toBe(0);
+
+    // The declared refusal — code AND template, from `@lore/core`'s own
+    // constants, never a number restated here.
+    expect(result.exitCode).toBe(WRITE_CONTENTION_EXIT_CODE);
+    expect(matchesWriteContentionTemplate(result.stderr)).toBe(true);
+
+    // …and NOT the pre-fix outcome. Two INDEPENDENT negative conditions rather
+    // than one remembered phrase: an uncaught bun:sqlite throw prints both the
+    // module name in its frames and an indented `at …` frame line.
+    expect(result.stderr).not.toContain("bun:sqlite");
+    expect(result.stderr).not.toMatch(/\n\s+at /);
+
+    // D4: the bound SURFACED is the bound DECLARED, verbatim — not a
+    // re-derived, rounded, or defaulted number.
+    expect(result.stderr).toContain(`${DECLARED_UPSTREAM_WRITE_WAIT_MS}ms bound`);
+
+    // A refusal writes nothing: no upstream task, no local receipt.
+    const taskCount = runJson<{ ok: true; data: { total: number } }>(["list", "--type", "task"], {
+      cwd: upstream.root,
+    });
+    expect(taskCount.data.data.total).toBe(0);
+    expect(existsSync(join(consumerRoot, ".lore", "issue-receipts.jsonl"))).toBe(false);
+  }, 60_000);
+
+  it("CONTROL: the byte-identical invocation against the byte-identical fixture, with NO holder, succeeds — proving the holder is what produced the refusal above", () => {
+    const { upstream, consumerRoot } = makeTwin("initthrow-control");
+    track(upstream.root, consumerRoot);
+    configureUpstreamWriteWaitMs(consumerRoot, DECLARED_UPSTREAM_WRITE_WAIT_MS);
+    setRollbackJournalMode(upstream.root);
+
+    const { result, data } = runJson<{ ok: true; data: { upstream_doc_id: string } }>(
+      initThrowReportArgs("Report filed against an unlocked upstream"),
+      { cwd: consumerRoot, env: { LORE_ACTOR: "agent:initthrow-control" } },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(data.data.upstream_doc_id).toBeTruthy();
+    const taskCount = runJson<{ ok: true; data: { total: number } }>(["list", "--type", "task"], {
+      cwd: upstream.root,
+    });
+    expect(taskCount.data.data.total).toBe(1);
+  }, 60_000);
 });
 
 // ─── AC-072-10: closure list — rejection reason + upstream-removed unreachable rows ──
