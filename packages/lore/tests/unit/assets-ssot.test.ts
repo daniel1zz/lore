@@ -378,9 +378,11 @@ const DECLARED_FILES = [
   "agents/lore-explorer.md",
   "agents/lore-implementer.md",
   "agents/lore-reviewer.md",
-  // hooks (7 .mjs + 4 .sh gates + 1 admission-check .sh + 1 shared lib module)
+  // hooks (8 .mjs + 4 .sh gates + 1 admission-check .sh + 1 shared lib module)
   "hooks/session-start-resume.mjs",
   "hooks/stop-doc-sync.mjs",
+  // stop-handoff-coverage (Stop-time resume-ticket coverage floor, spec-resume-ticket-coverage-a-shipped-upper-bound-left-the, 2026-07-31)
+  "hooks/stop-handoff-coverage.mjs",
   "hooks/subagent-context.mjs",
   "hooks/pre-subagent-gate.mjs",
   "hooks/pre-no-general-agent-gate.mjs",

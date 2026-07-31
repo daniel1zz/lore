@@ -12,15 +12,19 @@
  * the new hook plus the edited governance asset actually SHIP (installed
  * bytes + embedded manifest digests), not merely exist in `assets/`.
  *
- * Two ACs, each addressed by its own `-t` filter. MEASURED matched counts (a
+ * Three ACs, each addressed by its own `-t` filter. MEASURED matched counts (a
  * zero/partial-match filtered run is this repo's most-measured false-pass
  * vector, so the count is part of the contract, not a detail):
- *   `-t "both surfaces"`  -> 3 tests (the AC-RC-4 test plus the BOUNDARY and
- *                            REGRESSION tests, whose names also carry the
- *                            phrase because they too assert across BOTH
- *                            surfaces — all three are AC-RC-4 evidence, so
- *                            the wider match is intended, not accidental).
- *   `-t "install parity"` -> 1 test.
+ *   `-t "both surfaces"`       -> 3 tests (the AC-RC-4 test plus the BOUNDARY
+ *                                 and REGRESSION tests, whose names also carry
+ *                                 the phrase because they too assert across
+ *                                 BOTH surfaces — all three are AC-RC-4
+ *                                 evidence, so the wider match is intended,
+ *                                 not accidental).
+ *   `-t "install parity"`      -> 1 test.
+ *   `-t "stop hook registered"`-> 1 test (the phrase lives in that test's own
+ *                                 name, NOT in its describe, so the filter
+ *                                 cannot silently widen).
  * A run reporting any other count means a test was renamed or dropped; treat
  * it as a failed oracle, never as a pass.
  *
@@ -56,6 +60,24 @@
  *                     and a post-assertion perturbation of the installed copy
  *                     proving the byte comparison actually discriminates.
  *
+ *   "stop hook registered" (AC-RC-13) — installed is not WIRED. The same
+ *                     `lore setup --claude-dir <throwaway>` run's
+ *                     `settings.json` carries a Stop registration for the new
+ *                     hook, compared by deep equality against the entry
+ *                     DERIVED from the exported `HOOK_REGISTRATIONS` (via
+ *                     `buildHookSettingsEntries(targetDir)`) — never a
+ *                     hand-written command string, so a rename that misses the
+ *                     registry fails instead of drifting silently. Control
+ *                     against a vacuous pass: the SAME parsed file must also
+ *                     carry the incumbent `stop-doc-sync` Stop entry, so an
+ *                     unparsed/empty/hook-less settings file cannot read as
+ *                     "registered". Further liveness controls: a fabricated
+ *                     never-registered command and a right-command/wrong-event
+ *                     pair must both be ABSENT (so the containment comparison
+ *                     is proven to discriminate), and the registered command's
+ *                     target path must exist and be executable (a registration
+ *                     pointing at nothing never fires either).
+ *
  * Mode asymmetry is INTENTIONAL and deliberately not asserted as equality:
  * `SetupService` writes every `kind === "hook"` asset with the executable bit
  * (`setup-service.ts`, `write.kind === "hook" ? { executable: true }`) while
@@ -68,8 +90,9 @@
  *     A bare `lore setup` on a dev machine resolves removals THROUGH the dev
  *     symlinks in `~/.claude/` and deletes this repo's own `assets/` SSOT
  *     (measured twice, 2026-07-30; `spec-lore-setup-follows-a-dev-symlink-into-assets-and`).
- *     The "install parity" test asserts its target dir is neither inside this
- *     repo nor the real `~/.claude` BEFORE invoking setup.
+ *     The "install parity" and "stop hook registered" tests each assert their
+ *     target dir is neither inside this repo nor the real `~/.claude` BEFORE
+ *     invoking setup.
  *   - No scenario writes to this repo's own `.lore/` corpus (project CLAUDE.md
  *     hard rule). Every corpus write goes to a throwaway `mkdtemp` root
  *     outside the repo tree; the only repo-directed calls are the read-only
@@ -82,26 +105,35 @@
  *
  * Coverage dimensions:
  *   HAPPY:      both surfaces carry the full grammar; the hook installs
- *               byte-identical and both manifest digests are current.
+ *               byte-identical and both manifest digests are current; the fresh
+ *               install's settings.json carries the derived Stop registration.
  *   NEGATIVE:   the report builder answers FALSE for text with the floor
  *               removed / the ordinals stripped / the cardinality line
  *               altered; the installed-byte comparison answers FALSE once the
- *               installed copy is perturbed.
+ *               installed copy is perturbed; a never-registered command and a
+ *               right-command/wrong-event pair are both ABSENT from the parsed
+ *               settings.json.
  *   BOUNDARY:   each ordinal id tags EXACTLY ONE line (not "at least one");
  *               the cardinality line is identity-matched against the exported
- *               pure renderer applied to the fixture array lengths.
+ *               pure renderer applied to the fixture array lengths; the Stop
+ *               registration carries NO matcher (Stop does not scope by one).
  *   ERROR:      the MCP call is asserted non-error and the CLI exit code 0 —
- *               a failed dispatch cannot masquerade as absent grammar.
+ *               a failed dispatch cannot masquerade as absent grammar; the
+ *               settings.json flattener throws on every structural surprise
+ *               rather than returning a silently-empty list.
  *   STATE:      the installed hook carries the executable bit though its repo
  *               blob does not (install transforms mode, never content); the
- *               corpus's stored SSOT array lengths equal the fixture's.
+ *               corpus's stored SSOT array lengths equal the fixture's;
+ *               installed / registered / executable are asserted as three
+ *               separate states of the same file.
  *   REGRESSION: `RESUME_SCOPE_CLOSURE` is still the TRAILING block on both
  *               surfaces and is a DISTINCT string from the floor — the
  *               pre-existing upper bound was not disturbed or merged.
  *
  * @spec_ref spec-resume-ticket-coverage-a-shipped-upper-bound-left-the
- *   §Design Decisions D2, D3, D7, D8, D10; §Acceptance Criteria AC-RC-4,
- *   AC-RC-8. Task task-t4-governance-rule-manifest-regeneration-fresh-install-e2e.
+ *   §Design Decisions D2, D3, D6, D7, D8, D10; §Acceptance Criteria AC-RC-4,
+ *   AC-RC-8 (task task-t4-governance-rule-manifest-regeneration-fresh-install-e2e),
+ *   AC-RC-13 (task task-t6-wire-the-stop-hook-into-settings-json-auto-registration).
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
@@ -112,7 +144,9 @@ import { createHash } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
+  buildHookSettingsEntries,
   formatResumeItemId,
+  HOOK_REGISTRATIONS,
   renderResumeCoverageCardinalityLine,
   RESUME_COVERAGE_FLOOR,
   RESUME_DISPOSITION_DEFERRED_PREFIX,
@@ -636,5 +670,166 @@ describe("AC-RC-8: both changed assets actually SHIP — installed hook bytes + 
     const governanceVerb = Bun.spawnSync([LORE_BIN, "governance"], { cwd: REPO_ROOT });
     expect(governanceVerb.exitCode).toBe(0);
     expect(governanceVerb.stdout.toString()).toContain(feedSection.trimEnd());
+  });
+});
+
+// ─── AC-RC-13 — "stop hook registered" ──────────────────────────────────────
+
+/**
+ * Basename of the new hook asset, sliced from the same `HOOK_ASSET_REL` that
+ * AC-RC-8 installs and digests above — ONE naming site for the file, so an
+ * asset rename propagates into this AC's expectation instead of leaving a
+ * stale literal that still passes.
+ */
+const HOOK_ASSET_BASENAME = HOOK_ASSET_REL.slice(HOOK_ASSET_REL.lastIndexOf("/") + 1);
+
+/**
+ * The already-registered Stop hook this AC uses as its vacuous-pass CONTROL.
+ * If the positive half were asserted against an unparsed, empty, or hook-less
+ * `settings.json`, this assertion fails too — so "positive green" is only
+ * believable while the control is green, and a broken parse cannot masquerade
+ * as a missing registration (or vice versa).
+ */
+const CONTROL_STOP_HOOK_BASENAME = "stop-doc-sync.mjs";
+
+/** One flattened `hooks[event][].hooks[]` command, in `SettingsHookEntry` shape. */
+interface FlatSettingsHook {
+  readonly event: string;
+  readonly matcher?: string;
+  readonly command: string;
+}
+
+/**
+ * Flattens an on-disk `settings.json`'s nested `hooks[event][] → hooks[]`
+ * structure into the flat `{event, matcher?, command}` shape
+ * `buildHookSettingsEntries` returns, so the installed file and the registry
+ * SSOT are directly comparable by deep equality (never by substring).
+ *
+ * Fail-LOUD on every structural surprise instead of skipping it: a silently
+ * empty result is indistinguishable from "the registration is missing", which
+ * is the precise failure this AC exists to catch.
+ */
+function flattenSettingsHooks(settingsJsonText: string): FlatSettingsHook[] {
+  const parsed: unknown = JSON.parse(settingsJsonText);
+  if (typeof parsed !== "object" || parsed === null) {
+    throw new Error(`settings.json did not parse to an object: ${settingsJsonText.slice(0, 200)}`);
+  }
+  const hooks = (parsed as { hooks?: unknown }).hooks;
+  if (typeof hooks !== "object" || hooks === null) {
+    throw new Error('settings.json carries no "hooks" object — nothing was registered at all');
+  }
+  const flat: FlatSettingsHook[] = [];
+  for (const [event, groups] of Object.entries(hooks as Record<string, unknown>)) {
+    if (!Array.isArray(groups)) {
+      throw new Error(`settings.json hooks.${event} is not an array of matcher-groups`);
+    }
+    for (const group of groups) {
+      const matcher = (group as { matcher?: unknown }).matcher;
+      const groupHooks = (group as { hooks?: unknown }).hooks;
+      if (!Array.isArray(groupHooks)) {
+        throw new Error(`settings.json hooks.${event}[].hooks is not an array`);
+      }
+      for (const entry of groupHooks) {
+        const command = (entry as { command?: unknown }).command;
+        if (typeof command !== "string") {
+          throw new Error(`settings.json hooks.${event}[].hooks[].command is not a string`);
+        }
+        // Omit the key entirely when absent — never `matcher: undefined` — so
+        // deep equality against `buildHookSettingsEntries`' output is exact.
+        flat.push(matcher === undefined ? { event, command } : { event, matcher: String(matcher), command });
+      }
+    }
+  }
+  return flat;
+}
+
+describe("AC-RC-13: the shipped Stop hook is WIRED, not merely copied — settings.json auto-registration on a fresh install (spec §Delivery constraint, D6)", () => {
+  it("stop hook registered — the fresh install's settings.json carries the Stop entry DERIVED from HOOK_REGISTRATIONS, with the pre-existing stop-doc-sync entry as the vacuous-pass control", () => {
+    // ── (a) The registry SSOT declares it, as a matcher-less Stop hook ───────
+    // Registry membership is asserted FIRST and separately: T4 already proved
+    // the file installs byte-identically, so an installed-but-unregistered
+    // hook is silently inert — the exact state this AC was written against.
+    const registration = HOOK_REGISTRATIONS.find((r) => r.file === HOOK_ASSET_BASENAME);
+    if (registration === undefined) {
+      throw new Error(
+        `HOOK_REGISTRATIONS does not declare "${HOOK_ASSET_BASENAME}" — the hook installs under ` +
+          "<claude-dir>/hooks/ but no settings.json Stop entry ever invokes it, so it never fires. " +
+          `Declare it in packages/core/src/distribution-hooks.ts as ` +
+          `{ file: "${HOOK_ASSET_BASENAME}", runner: "node", event: "Stop" }.`,
+      );
+    }
+    expect(registration.event).toBe("Stop");
+    // Stop does not scope by matcher (mirrors the `stop-doc-sync.mjs` row) — a
+    // matcher here would narrow the hook to a tool name Stop never carries.
+    expect(registration.matcher).toBeUndefined();
+
+    // ── (b) Both expected entries DERIVED from the registry, never typed ─────
+    const scratch = makeThrowawayDir("lore-t6-settings-");
+    const targetDir = join(scratch, ".claude");
+    // ⛔ `--claude-dir` is mandatory (see this file's header): a bare
+    // `lore setup` resolves removals through `~/.claude/`'s dev symlinks and
+    // deletes this repo's own assets/ SSOT. Asserted BEFORE invoking setup.
+    expect(targetDir.startsWith(REPO_ROOT)).toBe(false);
+    expect(targetDir).not.toBe(join(homedir(), ".claude"));
+    expect(existsSync(targetDir)).toBe(false);
+
+    const derivedEntries = buildHookSettingsEntries(targetDir);
+    const expectedEntry = derivedEntries.find((e) => e.command.endsWith(`/hooks/${HOOK_ASSET_BASENAME}`));
+    const expectedControlEntry = derivedEntries.find((e) =>
+      e.command.endsWith(`/hooks/${CONTROL_STOP_HOOK_BASENAME}`),
+    );
+    if (expectedEntry === undefined || expectedControlEntry === undefined) {
+      throw new Error(
+        `buildHookSettingsEntries produced no entry for "${HOOK_ASSET_BASENAME}" and/or the ` +
+          `"${CONTROL_STOP_HOOK_BASENAME}" control — the registry and the builder disagree.`,
+      );
+    }
+
+    // ── (c) Fresh install into the throwaway claude-dir ─────────────────────
+    // `PATH: ""` forces `claude` ENOENT deterministically (MCP registration
+    // fails, so the run's exit code is non-zero and deliberately NOT asserted)
+    // while every asset and the settings merge still write — setup.test.ts's
+    // established convention, matching the install-parity test above.
+    const setupResult = Bun.spawnSync([LORE_BIN, "setup", "--claude-dir", targetDir, "--yes"], {
+      cwd: scratch,
+      env: { ...process.env, HOME: scratch, PATH: "" },
+    });
+    expect(setupResult.stdout.toString()).toContain("lore setup complete");
+
+    const settingsPath = join(targetDir, "settings.json");
+    expect(existsSync(settingsPath)).toBe(true);
+    const flatHooks = flattenSettingsHooks(readFileSync(settingsPath, "utf8"));
+
+    // ── (d) The control FIRST, then the positive, over the SAME parsed file ──
+    // Order is deliberate: the incumbent `stop-doc-sync` entry proves the
+    // parse+containment machinery finds a Stop registration that IS present,
+    // so when the positive below fails the diagnosis is unambiguous ("this
+    // hook is unregistered", never "the flattener is broken"). Measured under
+    // a binary built without the new registration: control green, positive red.
+    expect(flatHooks).toContainEqual(expectedControlEntry);
+    expect(flatHooks).toContainEqual(expectedEntry);
+    // The two must be DISTINCT entries — a control that collapsed onto the
+    // positive would make the pairing decorative.
+    expect(expectedEntry).not.toEqual(expectedControlEntry);
+
+    // ── (e) Liveness controls for the containment comparison ────────────────
+    // A flattener that answered "everything", or a comparison that degraded to
+    // a substring/prefix match, must NOT accept a command this build never
+    // registers, nor the right command under the wrong event.
+    expect(flatHooks).not.toContainEqual({
+      ...expectedEntry,
+      command: `${expectedEntry.command}.never-registered`,
+    });
+    expect(flatHooks).not.toContainEqual({ ...expectedEntry, event: `${expectedEntry.event}Absent` });
+
+    // ── (f) The registration is not DANGLING — its target really installed ──
+    // `command` is always `"<runner> <claudeDir>/hooks/<file>"`; the throwaway
+    // mkdtemp path never contains a space, so the first space splits it.
+    const registeredHookPath = expectedEntry.command.slice(expectedEntry.command.indexOf(" ") + 1);
+    expect(registeredHookPath).toBe(join(targetDir, "hooks", HOOK_ASSET_BASENAME));
+    expect(existsSync(registeredHookPath)).toBe(true);
+    // Installed AND registered AND executable are three different states; this
+    // AC exists because the first held while the second did not.
+    expect(statSync(registeredHookPath).mode & 0o100).not.toBe(0);
   });
 });

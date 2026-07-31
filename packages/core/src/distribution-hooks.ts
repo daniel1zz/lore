@@ -10,7 +10,7 @@
  * copied hook file actually RUN was left to the human, an inert-until-wired
  * gap noted in the root CLAUDE.md's SPEC-046 dogfood-log entry for
  * `pre-bash-git-safety-gate.mjs`. This module is the declared list that
- * closes that gap: ten hooks classified "core governance + security" are
+ * closes that gap: eleven hooks classified "core governance + security" are
  * auto-registered; two orchestration-POLICY hooks
  * (`pre-subagent-gate.mjs`, `pre-no-general-agent-gate.mjs`) are deliberately
  * EXCLUDED — they encode this specific team's subagent-dispatch discipline,
@@ -31,7 +31,7 @@
  * dispatch discipline still loses work identically if a subagent stops with
  * an uncommitted, unpushed worktree. It is fail-open by construction (see the
  * hook's own module header) so a mis-registration cannot itself wedge a
- * session, matching the risk profile of the other eight.
+ * session, matching the risk profile of the rest of the set.
  *
  * `claude-md-guard.sh` (added D10/D11,
  * spec-context-verb-family-two-zone-claude-md-anatomy-lore) joins the set for
@@ -42,6 +42,26 @@
  * actually owns a `.lore/` corpus. Fail-open by construction (see the hook's
  * own module header) on every anomaly — a mis-registration cannot itself
  * block an unrelated Edit/Write.
+ *
+ * `stop-handoff-coverage.mjs` (added 2026-07-31, owner classification decision
+ * of spec-resume-ticket-coverage-a-shipped-upper-bound-left-the) joins the
+ * governance set beside `stop-doc-sync.mjs`, its nearest sibling: both are
+ * turn-end accounting gates, differing only in WHAT must be accounted for
+ * (docs the turn made stale vs. resume-ticket items the turn left
+ * undispositioned). It constrains "the consumer accounts for every ticket
+ * item" — a governance invariant any team consuming resume tickets needs, not
+ * a statement about how this team routes subagents, which is what keeps it on
+ * the auto-registered side of the line the excluded orchestration-policy pair
+ * sits on. Registering it is what makes the spec's own Delivery constraint
+ * satisfiable: a fresh `lore init` + `lore setup` project must be unable to
+ * reach the original defect, and an INSTALLED-but-unregistered hook leaves
+ * that project in exactly the defect state (the hook file lands under
+ * `<claude-dir>/hooks/` and never fires) — the silent-inertness class the
+ * spec's D6 exists to forbid. Like every hook in this set, it is fail-open by
+ * construction (see the hook's own module header) and is a blind pipe to
+ * `lore handoff coverage-check`, holding no grammar of its own, so a
+ * mis-registration cannot wedge a session and a grammar change cannot
+ * strand it.
  *
  * Public surface:
  *   - HookRunner — the closed `"node" | "bash"` interpreter set
@@ -99,8 +119,9 @@ export interface HookRegistration {
 
 /**
  * The full declared "core governance + security" hook set (owner decision,
- * 2026-07-20; `subagent-stop-commit-guard.mjs` added 2026-07-21) — already
- * matcher-expanded, one entry per distinct `(event, matcher)` pair.
+ * 2026-07-20; `subagent-stop-commit-guard.mjs` added 2026-07-21;
+ * `stop-handoff-coverage.mjs` added 2026-07-31) — already matcher-expanded,
+ * one entry per distinct `(event, matcher)` pair.
  * Deliberately EXCLUDES `pre-subagent-gate.mjs` and
  * `pre-no-general-agent-gate.mjs` (orchestration-policy hooks, not
  * governance/security — see module doc).
@@ -132,6 +153,9 @@ export const HOOK_REGISTRATIONS: readonly HookRegistration[] = [
 
   // stop-doc-sync.mjs — doc-sync reminder gate on turn end.
   { file: "stop-doc-sync.mjs", runner: "node", event: "Stop" },
+
+  // stop-handoff-coverage.mjs — resume-ticket coverage floor on turn end: blind pipe to `lore handoff coverage-check` (no matcher; Stop does not scope by one).
+  { file: "stop-handoff-coverage.mjs", runner: "node", event: "Stop" },
 
   // subagent-context.mjs — per-agent-type directive + lore project context injection.
   { file: "subagent-context.mjs", runner: "node", event: "SubagentStart" },
