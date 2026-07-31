@@ -94,6 +94,103 @@ const MEASURED_STARTUP_PHASE_LOCK_ERROR =
   "`lore report-issue --title <short-title> --expected <what-you-expected> " +
   "--actual <what-happened>` to file it.\n";
 
+/**
+ * The GOVERNED write path dying on an uncaught throw, as the COMPILED BINARY
+ * prints it. Frame NAMES are verbatim from the measured trace recorded on
+ * task-the-concurrency-exclusion-classifier-excuses-governed-path (92 of ~300
+ * AC-IC-1 attempts): `run (bun:sqlite)` → `init` → `new Kr` → `Wy` →
+ * `openValidatedUpstream` → `report`. File offsets are illustrative — only the
+ * names carry the classification signal.
+ *
+ * `Kr` is the store class and `Wy` is `openUpstream`: `scripts/build.ts` builds
+ * with `minify: true`, which mangles function/class DECLARATION identifiers.
+ * `openValidatedUpstream` and `report` survive because they are METHODS of
+ * `IssueReportService` — Bun's minifier renames identifiers, never property
+ * keys. That is a structural property of the build, not luck, and it is what
+ * makes a governed-frame matcher usable against a compiled binary at all.
+ */
+const MEASURED_GOVERNED_PATH_UNCAUGHT_LOCK_CRASH = `
+SQLiteError: database is locked
+ errno: 5
+  code: "SQLITE_BUSY"
+
+      at run (bun:sqlite:336:21)
+      at init (/$bunfs/root/index.js:1041:28714)
+      at new Kr (/$bunfs/root/index.js:1041:28401)
+      at Wy (/$bunfs/root/index.js:1088:9137)
+      at openValidatedUpstream (/$bunfs/root/index.js:1088:14022)
+      at report (/$bunfs/root/index.js:1088:11655)
+`;
+
+/**
+ * The SAME governed-path throw as it prints from SOURCE (`bun run dev`), where
+ * nothing is minified and Bun prefixes methods with their class. Paired with
+ * the compiled fixture above so the matcher is proven against BOTH renderings
+ * (task constraint: prove it against a source-mode AND a minified trace).
+ */
+const SOURCE_MODE_GOVERNED_PATH_UNCAUGHT_LOCK_CRASH = `
+SQLiteError: database is locked
+ errno: 5
+  code: "SQLITE_BUSY"
+
+      at run (bun:sqlite:336:21)
+      at init (/repo/packages/lore/src/store/sqlite-store.ts:134:13)
+      at new SQLiteStore (/repo/packages/lore/src/store/sqlite-store.ts:98:5)
+      at openUpstream (/repo/packages/lore/src/adapters/cli/report-issue-wiring.ts:171:12)
+      at IssueReportService.openValidatedUpstream (/repo/packages/lore/src/service/issue-report-service.ts:512:39)
+      at IssueReportService.report (/repo/packages/lore/src/service/issue-report-service.ts:318:38)
+`;
+
+/** The governed path's THIRD frame — the upstream write itself, an object-literal method. */
+const GOVERNED_CREATE_DRAFT_UNCAUGHT_LOCK_CRASH = `
+SQLiteError: database is locked
+ errno: 5
+  code: "SQLITE_BUSY"
+
+      at run (bun:sqlite:336:21)
+      at insertWithProvenance (/$bunfs/root/index.js:1041:31880)
+      at createDraft (/$bunfs/root/index.js:1088:7714)
+`;
+
+/**
+ * NEGATIVE CONTROL — the per-command STARTUP corpus write dying uncaught, from
+ * SOURCE, naming no governed frame. §Contract Details: `buildAppFromSqlite`
+ * constructs `new SessionStore(db)` unconditionally and that constructor runs
+ * DDL + `pruneExpired()` against the CONSUMER corpus, before the command does
+ * anything the caller asked for. This contention is explicitly NOT governed by
+ * the report-write contract, so it must stay excluded.
+ */
+const STARTUP_PATH_UNCAUGHT_LOCK_CRASH_SOURCE_MODE = `
+SQLiteError: database is locked
+ errno: 5
+  code: "SQLITE_BUSY"
+
+      at exec (bun:sqlite:212:9)
+      at new SessionStore (/repo/packages/lore/src/store/session-store.ts:64:14)
+      at buildAppFromSqlite (/repo/packages/lore/src/app.ts:398:27)
+      at loadLoreApp (/repo/packages/lore/src/adapters/cli/loader.ts:231:18)
+`;
+
+/**
+ * NEGATIVE CONTROL — the SAME startup crash from the COMPILED BINARY. Every
+ * frame name here is a function/class declaration (`SessionStore`,
+ * `buildAppFromSqlite`, `loadLoreApp`), so `minify: true` mangles ALL of them.
+ * This is the fixture that decides the design: an allowlist keyed on
+ * startup-layer frame names cannot match anything here, so it would collapse
+ * the branch into "never excuses a compiled-binary startup crash" — i.e. into
+ * deleting the branch, which the task forbids.
+ */
+const STARTUP_PATH_UNCAUGHT_LOCK_CRASH_MINIFIED = `
+SQLiteError: database is locked
+ errno: 5
+  code: "SQLITE_BUSY"
+
+      at exec (bun:sqlite:212:9)
+      at new Qv (/$bunfs/root/index.js:1041:24188)
+      at Hn (/$bunfs/root/index.js:1041:26630)
+      at Zt (/$bunfs/root/index.js:1088:2044)
+`;
+
 const OK = { exitCode: 0, stderr: "" };
 
 // ─── AC-IC-6: the decision table ─────────────────────────────────────────────
@@ -181,6 +278,97 @@ describe("report-issue concurrency classifier (AC-IC-6, pure — no spawn)", () 
       classifyConcurrencyOutcome(OK, {
         exitCode: 1,
         stderr: MEASURED_STARTUP_PHASE_LOCK_ERROR.replace("<short-title>", "my-title"),
+      }).outcome,
+    ).toBe("non_conforming");
+  });
+
+  it("REGRESSION: an uncaught throw is excused only when it names no GOVERNED frame", () => {
+    // ── POSITIVE (the false-GREEN vector this case closes) ──────────────────
+    // Measured: 92 of ~300 AC-IC-1 attempts died with an uncaught
+    // `database is locked` thrown from `openValidatedUpstream` / `report` —
+    // the very write this contract governs. The classifier used to excuse
+    // every locked-database failure that merely CARRIED a stack trace, so the
+    // harness could report green while ~31% of its attempts hid a violation.
+    // By the contract the loser MUST refuse with the declared code + template;
+    // a raw throw out of the governed path is NON-conforming, full stop.
+    for (const governed of [
+      MEASURED_GOVERNED_PATH_UNCAUGHT_LOCK_CRASH,
+      SOURCE_MODE_GOVERNED_PATH_UNCAUGHT_LOCK_CRASH,
+      GOVERNED_CREATE_DRAFT_UNCAUGHT_LOCK_CRASH,
+    ]) {
+      expect(classifyConcurrencyOutcome(OK, { exitCode: 1, stderr: governed }).outcome).toBe(
+        "non_conforming",
+      );
+      // …in either position — the verdict is symmetric in the pair's order.
+      expect(classifyConcurrencyOutcome({ exitCode: 1, stderr: governed }, OK).outcome).toBe(
+        "non_conforming",
+      );
+    }
+
+    // ── NEGATIVE CONTROL (green BEFORE and AFTER the narrowing) ─────────────
+    // Proves the branch was NARROWED, not deleted: a genuine startup-layer
+    // uncaught throw carrying no governed frame is still excluded, in BOTH the
+    // source-mode and the fully-minified rendering. Without this half, "never
+    // excuses anything" would be indistinguishable from "narrowed correctly".
+    for (const startup of [
+      STARTUP_PATH_UNCAUGHT_LOCK_CRASH_SOURCE_MODE,
+      STARTUP_PATH_UNCAUGHT_LOCK_CRASH_MINIFIED,
+      STARTUP_UNCAUGHT_LOCK_CRASH,
+    ]) {
+      expect(classifyConcurrencyOutcome(OK, { exitCode: 1, stderr: startup })).toEqual({
+        outcome: "not_attributable",
+        reason: "contention_outside_report_write",
+        detail: expect.stringContaining("locked"),
+      });
+    }
+
+    // ── The two neighbouring paths stay exactly as they were ────────────────
+    // The `hasStartupHint` path is untouched: the CLI startup formatter's own
+    // two-token hint excuses a run with no stack trace at all.
+    expect(classifyConcurrencyOutcome(OK, { exitCode: 1, stderr: MEASURED_STARTUP_PHASE_LOCK_ERROR })).toEqual({
+      outcome: "not_attributable",
+      reason: "contention_outside_report_write",
+      detail: expect.stringContaining("locked"),
+    });
+    // And the bare lock message with NEITHER marker stays NON-conforming —
+    // that is what a contended report write printed before this contract
+    // existed, so excusing it would let a REMOVAL of the enforcement pass.
+    expect(
+      classifyConcurrencyOutcome(OK, { exitCode: 1, stderr: PRE_CHANGE_BARE_STORE_ERROR }).outcome,
+    ).toBe("non_conforming");
+
+    // BOUNDARY: the governed-frame check is gated on a lock marker being
+    // present at all — a governed frame in a NON-contention crash is still
+    // non-conforming, but via the generic branch, never silently excused.
+    expect(
+      classifyConcurrencyOutcome(OK, {
+        exitCode: 1,
+        stderr: "TypeError: undefined is not a function\n      at report (/$bunfs/root/index.js:1:1)\n",
+      }).outcome,
+    ).toBe("non_conforming");
+
+    // ── An ACCEPTED, DELIBERATE imprecision — pinned so it cannot be
+    // "cleaned up" into the unsafe direction ────────────────────────────────
+    // In SOURCE mode the frame lines carry real file paths, and the CLI command
+    // file is `commands/report-issue.ts`, so a genuine STARTUP crash raised
+    // while running report-issue matches the `report` token and reads
+    // NON-conforming. That is a false RED, and it is the direction this
+    // matcher is deliberately biased toward: a false RED costs one
+    // investigation (the verdict quotes the stderr back), while the false
+    // GREEN it replaces hid a real contract violation in ~31% of attempts.
+    // It also cannot fire where AC-IC-1 actually measures: the harness spawns
+    // the COMPILED binary, whose frames carry no file names at all
+    // (`/$bunfs/root/index.js`). ⛔ Do NOT narrow the `report` token to fix
+    // this — narrowing trades a loud false RED for a silent false GREEN.
+    expect(
+      classifyConcurrencyOutcome(OK, {
+        exitCode: 1,
+        stderr:
+          "SQLiteError: database is locked\n" +
+          "      at exec (bun:sqlite:212:9)\n" +
+          "      at new SessionStore (/repo/packages/lore/src/store/session-store.ts:64:14)\n" +
+          "      at loadLoreApp (/repo/packages/lore/src/adapters/cli/loader.ts:231:18)\n" +
+          "      at run (/repo/packages/lore/src/adapters/cli/commands/report-issue.ts:88:31)\n",
       }).outcome,
     ).toBe("non_conforming");
   });
