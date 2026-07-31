@@ -6,7 +6,7 @@
  * Dimension mapping:
  *   HAPPY:      buildHookSettingsEntries produces the correct
  *               command/event/matcher shape for a real claudeDir
- *   BOUNDARY:   HOOK_REGISTRATIONS is exactly the declared 10-hook / 16-entry
+ *   BOUNDARY:   HOOK_REGISTRATIONS is exactly the declared 11-hook / 17-entry
  *               (all matchers expanded) set; a trailing slash on claudeDir
  *               does not double up in the command string
  *   NEGATIVE:   pre-subagent-gate.mjs / pre-no-general-agent-gate.mjs are
@@ -30,6 +30,8 @@ const EXPECTED_FILES = [
   "lore-gate-g4-task-claim.sh",
   "session-start-resume.mjs",
   "stop-doc-sync.mjs",
+  // Stop-time resume-ticket coverage floor (spec-resume-ticket-coverage-a-shipped-upper-bound-left-the, 2026-07-31).
+  "stop-handoff-coverage.mjs",
   "subagent-context.mjs",
   "subagent-stop-commit-guard.mjs",
   "claude-md-guard.sh",
@@ -63,17 +65,30 @@ describe("HAPPY: buildHookSettingsEntries", () => {
       command: "bash /home/user/.claude/hooks/lore-gate-g4-task-claim.sh",
     });
   });
+
+  it("registers BOTH Stop hooks as distinct matcher-less entries — the coverage-floor hook joins stop-doc-sync rather than replacing it", () => {
+    const entries = buildHookSettingsEntries("/home/user/.claude");
+    const stopEntries = entries.filter((e) => e.event === "Stop");
+
+    // Asserted as a set comparison rather than two `find`s: a registration that
+    // OVERWROTE the incumbent (same event, one entry) would satisfy a lone
+    // `find` for the new hook while silently unwiring the doc-sync gate.
+    expect(stopEntries).toEqual([
+      { event: "Stop", command: "node /home/user/.claude/hooks/stop-doc-sync.mjs" },
+      { event: "Stop", command: "node /home/user/.claude/hooks/stop-handoff-coverage.mjs" },
+    ]);
+  });
 });
 
 describe("BOUNDARY: HOOK_REGISTRATIONS shape", () => {
-  it("declares exactly the 10 core-governance-and-security hook files", () => {
+  it("declares exactly the 11 core-governance-and-security hook files", () => {
     const files = [...new Set(HOOK_REGISTRATIONS.map((r) => r.file))].sort();
     expect(files).toEqual([...EXPECTED_FILES].sort());
   });
 
-  it("expands to exactly 16 entries (10 hooks, per-matcher expansion for the 4 gate hooks)", () => {
-    // pre-bash-git-safety-gate: 1, g1: 2, g2: 3, g3: 3, g4: 2, session-start: 1, stop-doc-sync: 1, subagent-context: 1, subagent-stop-commit-guard: 1, claude-md-guard: 1 = 16
-    expect(HOOK_REGISTRATIONS).toHaveLength(16);
+  it("expands to exactly 17 entries (11 hooks, per-matcher expansion for the 4 gate hooks)", () => {
+    // pre-bash-git-safety-gate: 1, g1: 2, g2: 3, g3: 3, g4: 2, session-start: 1, stop-doc-sync: 1, stop-handoff-coverage: 1, subagent-context: 1, subagent-stop-commit-guard: 1, claude-md-guard: 1 = 17
+    expect(HOOK_REGISTRATIONS).toHaveLength(17);
   });
 
   it("tolerates a trailing slash on claudeDir without a double slash in the command", () => {
