@@ -479,6 +479,15 @@ export const attestationExemptKindSchema = z.enum([
   "other",
 ]);
 
+/**
+ * The four permitted `extra.attestation_exempt_kind` values as a TypeScript
+ * union, derived from {@link attestationExemptKindSchema} rather than restated
+ * — the authoring surface (`lore plan exempt-attestation --kind`) types its
+ * accepted value against this, so the schema stays the ONE definition site for
+ * both the runtime check and the compile-time shape.
+ */
+export type AttestationExemptKind = z.infer<typeof attestationExemptKindSchema>;
+
 export const prdExtraSchema = z
   .object({
     /**

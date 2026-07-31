@@ -60,6 +60,11 @@ const main = defineCommand({
     "sync-docs": () => import("./commands/sync-docs.js").then(wrapDefault("sync-docs")),
     "export-docs": () => import("./commands/export-docs.js").then(wrapDefault("export-docs")),
     phase: () => import("./commands/phase.js").then(wrapDefault("phase")),
+    // plan (SPEC-069 §Design Decisions D1) — plan-level writers for the audited
+    // plan-close exemptions (`exempt-attestation` / `exempt-assessment-freshness`).
+    // Both were gate-read fields with NO authoring surface until this group
+    // existed; see commands/plan.ts's module header.
+    plan: () => import("./commands/plan.js").then(wrapDefault("plan")),
     claim: () => import("./commands/claim.js").then(wrapDefault("claim")),
     release: () => import("./commands/release.js").then(wrapDefault("release")),
     evidence: () => import("./commands/evidence.js").then(wrapDefault("evidence")),

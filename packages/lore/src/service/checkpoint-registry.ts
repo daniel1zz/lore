@@ -1562,22 +1562,30 @@ function feedAttestationFloor(ctx: GateContext, failures: PredicateResult[]): st
   );
   const recoveryText = reachability.reachable
     ? // reason: BYTE-PINNED (AC-VRW-2 regression) — see this function's own
-      // @remarks above. Do not touch this branch's text.
+      // @remarks above. Do not touch this branch's text WITHOUT re-capturing
+      // `feed-attestation-reachability.test.ts`'s fixture from the real
+      // function (never hand-typing it). Last deliberate re-capture: SPEC-069
+      // AC-069-8 — the exemption paragraph used to instruct a manual
+      // fetch-merge-set through `lore_set` and stated that "`lore set` (CLI)
+      // has no dedicated flag for this field yet". That became FALSE the
+      // moment `lore plan exempt-attestation` shipped, and a pack that still
+      // tells the operator to hand-merge a field WITH a dedicated writer is
+      // the very defect this spec closes, restated as guidance.
       `Recovery: run \`lore verify ${plan}\` to record attested evidence against each ` +
       `task's declared script-mode acceptance criteria (declare one first via ` +
       `\`lore ac add <spec> <id> --mode script ...\` if none exists yet). If this plan ` +
       `genuinely has no oracle to attest against for some of its tasks — the canonical ` +
       `case is a RED/TDD task whose Expected state is a currently-failing, time-bound ` +
       `test (red before green: the evidence is real, attesting it would misrepresent an ` +
-      `intentionally-red state as verified) — the exemption is declared on the PLAN ` +
-      `ITSELF, never on a task: set \`extra.attestation_exempt: true\` plus a non-empty ` +
-      `\`extra.attestation_exempt_reason\` on ${plan}. \`extra\` REPLACES the whole field ` +
-      `wholesale on \`lore_set\` (it does NOT merge) — first fetch the current extra via ` +
-      `\`lore get ${plan} --json\` (read \`.extra\`), merge ` +
-      `\`{"attestation_exempt": true, "attestation_exempt_reason": "<why>"}\` into it ` +
-      `while KEEPING every existing key (e.g. \`phases\`), then call the MCP \`lore_set\` ` +
-      `tool with the FULL merged object as \`extra\` on ${plan}. \`lore set\` (CLI) has no ` +
-      `dedicated flag for this field yet.`
+      `intentionally-red state as verified) — declare a TYPED exemption with its ` +
+      `DEDICATED WRITER: \`lore plan exempt-attestation ${plan} --reason "<why>" --kind ` +
+      `<red-tdd|no-oracle|pipeline-unreachable|other>\`. It authors ` +
+      `\`extra.attestation_exempt\` + \`extra.attestation_exempt_reason\` + ` +
+      `\`extra.attestation_exempt_kind\` on the PLAN ITSELF, never on a task, and it ` +
+      `READ-MERGE-WRITES \`extra\`, so \`phases\` and every other existing key survives ` +
+      `— do NOT hand-merge via \`lore set\`/\`lore_set\`, which REPLACE \`extra\` wholesale. ` +
+      `A blank reason is refused, so the audit trail always answers who exempted this ` +
+      `plan and why.`
     : `Precondition unmet: \`lore verify\` cannot run for ${plan} — ` +
       `${describeReachabilityWhy(reachability.why as Exclude<ReachabilityResult["why"], null>)} — ` +
       `so no attested evidence can ever be recorded against it via that path. Two real ` +
@@ -1588,15 +1596,15 @@ function feedAttestationFloor(ctx: GateContext, failures: PredicateResult[]): st
       `genuinely has no oracle to attest against for some of its tasks — the canonical ` +
       `case is a RED/TDD task whose Expected state is a currently-failing, time-bound ` +
       `test (red before green: the evidence is real, attesting it would misrepresent an ` +
-      `intentionally-red state as verified) — the exemption is declared on the PLAN ` +
-      `ITSELF, never on a task: set \`extra.attestation_exempt: true\` plus a non-empty ` +
-      `\`extra.attestation_exempt_reason\` on ${plan}. \`extra\` REPLACES the whole field ` +
-      `wholesale on \`lore_set\` (it does NOT merge) — first fetch the current extra via ` +
-      `\`lore get ${plan} --json\` (read \`.extra\`), merge ` +
-      `\`{"attestation_exempt": true, "attestation_exempt_reason": "<why>"}\` into it ` +
-      `while KEEPING every existing key (e.g. \`phases\`), then call the MCP \`lore_set\` ` +
-      `tool with the FULL merged object as \`extra\` on ${plan}. \`lore set\` (CLI) has no ` +
-      `dedicated flag for this field yet.`;
+      `intentionally-red state as verified) — declare a TYPED exemption with its ` +
+      `DEDICATED WRITER: \`lore plan exempt-attestation ${plan} --reason "<why>" --kind ` +
+      `<red-tdd|no-oracle|pipeline-unreachable|other>\`. It authors ` +
+      `\`extra.attestation_exempt\` + \`extra.attestation_exempt_reason\` + ` +
+      `\`extra.attestation_exempt_kind\` on the PLAN ITSELF, never on a task, and it ` +
+      `READ-MERGE-WRITES \`extra\`, so \`phases\` and every other existing key survives ` +
+      `— do NOT hand-merge via \`lore set\`/\`lore_set\`, which REPLACE \`extra\` wholesale. ` +
+      `A blank reason is refused, so the audit trail always answers who exempted this ` +
+      `plan and why.`;
   const pack = buildFeedingPack({
     ruleSource: "corpus (task verification_evidence)",
     ruleMarkdown:

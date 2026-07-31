@@ -107,6 +107,7 @@ import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 import { openEditor } from "../editor.js";
+import { formatAttestationExemptionNotice } from "../plan-exempt-validation.js";
 import type { DocStatus, Priority, SpecKind } from "@lore/core";
 import { SPEC_KINDS } from "@lore/core";
 import {
@@ -657,6 +658,17 @@ export default defineCommand({
           console.log(
             `  (note: free-text references to the old slug in other docs' bodies are not rewritten)`,
           );
+        }
+        // reason: SPEC-069 §Mechanism required item 3 — an exemption that is
+        // what ALLOWED a close must never be invisible; an unannounced
+        // exemption is the same failure as a vacuous predicate (the operator
+        // watches the plan archive cleanly and never learns that a declared
+        // exemption, not attested evidence, is why). Rendered on every
+        // successful plan → archived transition; `formatAttestationExemptionNotice`
+        // returns null unless the exemption is ACTIVE by the gate's own rule.
+        if (doc.type === "plan" && doc.status === "archived") {
+          const exemptionNotice = formatAttestationExemptionNotice(doc.extra);
+          if (exemptionNotice !== null) console.log(exemptionNotice);
         }
       }
     } finally {
