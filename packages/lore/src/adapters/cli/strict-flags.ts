@@ -351,7 +351,7 @@ async function resolveMaybe<T>(value: Resolvable<T> | undefined): Promise<T | un
  * (`index.ts`) calls this once per top-level command import instead of
  * editing every `commands/*.ts` file.
  *
- * Every command GROUP in this codebase (`gate`/`phase`/`anchor`/`ac`/
+ * Every command GROUP in this codebase (`gate`/`phase`/`anchor`/`scope`/`ac`/
  * `agent`/`eval`/`sync`) declares its nested `subCommands` as a plain object
  * literal — resolving synchronously — but this function follows citty's own
  * `Resolvable<T>` contract fully (function/promise/plain) for BOTH a

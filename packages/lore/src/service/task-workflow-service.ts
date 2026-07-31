@@ -119,6 +119,9 @@ import {
   normalizeFileAnchors,
   extractFileAnchors,
   anchorsOverlap,
+  computeAcScopeEdit,
+  extractDeclaredAcScope,
+  type AcScopeEditOp,
   type EvidenceEntry,
   type TaskClaim,
   type ReadyRecord,
@@ -1414,6 +1417,125 @@ export class TaskWorkflowService {
     );
   }
 
+  // ── Declared AC Scope Mutations (spec-declared-scope-attestation-contract) ──
+
+  /**
+   * Read-modify-write UNION on a task's `extra.ac_scope` — the `lore scope add`
+   * command's task-tier half.
+   *
+   * The merge computation and every invariant guarding it (including the
+   * `assertScopeFreeze` evidence-freeze check) live in the shared pure
+   * `computeAcScopeEdit` (`@lore/core`), which `PhaseWorkflowService.addAcScope`
+   * calls too — this method never re-derives scope semantics, exactly as the
+   * anchor verbs above never re-derive `normalizeFileAnchors`'s rules.
+   *
+   * @param idOrSlug - Task document ULID or slug
+   * @param acIds - Candidate AC ids to declare, verbatim (no trim/case folding)
+   * @param opts - `{ by, source? }` — same shape the anchor verbs take
+   * @param now - Time seam (D10)
+   * @returns The updated task DocRecord
+   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a task / blank id / >50-id cap),
+   *   STALE_VERSION
+   */
+  async addAcScope(
+    idOrSlug: string,
+    acIds: string[],
+    opts: AnchorMutationOpts,
+    now: () => string = defaultNow,
+  ): Promise<Result<DocRecord, LoreError>> {
+    return this.editAcScope(idOrSlug, "add", acIds, opts, now);
+  }
+
+  /**
+   * Read-modify-write DIFFERENCE on a task's `extra.ac_scope` — the
+   * `lore scope rm` command's task-tier half.
+   *
+   * @invariant Removing the LAST declared id stores an EMPTY ARRAY, never an
+   *   absent key — an explicit un-declaration ("this task claims nothing") is a
+   *   different authorial state from "nobody ever declared a scope", and
+   *   `lore verify` refuses the two with different messages. `computeAcScopeEdit`
+   *   returns `[]` and this method writes it through verbatim.
+   * @invariant An id that already carries evidence (`verification_evidence[].ac_ref`)
+   *   CANNOT be removed — `computeAcScopeEdit`'s `assertScopeFreeze` call refuses
+   *   with `VALIDATION_ERROR` (exit 4) before any store write.
+   *
+   * @param idOrSlug - Task document ULID or slug
+   * @param acIds - Candidate AC ids to un-declare
+   * @param opts - `{ by, source? }`
+   * @param now - Time seam (D10)
+   * @returns The updated task DocRecord
+   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a task / blank id / evidenced
+   *   id removal), STALE_VERSION
+   */
+  async removeAcScope(
+    idOrSlug: string,
+    acIds: string[],
+    opts: AnchorMutationOpts,
+    now: () => string = defaultNow,
+  ): Promise<Result<DocRecord, LoreError>> {
+    return this.editAcScope(idOrSlug, "rm", acIds, opts, now);
+  }
+
+  /**
+   * Shared resolve → compute → commit path for {@link addAcScope}/{@link removeAcScope}.
+   *
+   * reason: the audit action is the GENERIC `"update"`, not a bespoke
+   * `"scope"` label, because `AuditService.verify`'s completeness join accepts
+   * only actions listed in `VERSION_ACTION_AUDIT_FAMILY` (`audit-service.ts`)
+   * for a versions row stamped `"update"` — an unlisted label would make every
+   * scope write read as a MISSING audit entry and break `lore audit --verify`,
+   * which `hooks/pre-push` runs. `details.scope_op` carries the add/rm
+   * distinction instead, so nothing is lost.
+   */
+  private async editAcScope(
+    idOrSlug: string,
+    op: AcScopeEditOp,
+    acIds: string[],
+    opts: AnchorMutationOpts,
+    now: () => string,
+  ): Promise<Result<DocRecord, LoreError>> {
+    // reason: no `this.recordEvent(...)` here, unlike every sibling verb. The
+    // telemetry event NAME is a closed union (`TaskWorkflowEventName`,
+    // `@lore/core`'s telemetry module) with no scope member, and that module is
+    // outside this task's declared file anchors. Reusing
+    // `"task.anchors_updated"` would write a FALSE row into the telemetry sink
+    // — worse than silence, and indistinguishable afterwards from a real anchor
+    // edit. The durable observability path IS wired: `writeTaskExtra` below
+    // appends an audit entry carrying `details.scope_op`, queryable via
+    // `lore audit`. Adding a `task.scope_updated` member is the follow-up for
+    // whichever task owns that module.
+    return this._editAcScopeImpl(idOrSlug, op, acIds, opts.by, now);
+  }
+
+  private async _editAcScopeImpl(
+    idOrSlug: string,
+    op: AcScopeEditOp,
+    acIds: string[],
+    by: string,
+    now: () => string,
+  ): Promise<Result<DocRecord, LoreError>> {
+    const taskResult = await this.resolveTask(idOrSlug);
+    if (!taskResult.ok) return taskResult;
+    const task = taskResult.value;
+
+    const prev = extractDeclaredAcScope(task) ?? [];
+    const editResult = computeAcScopeEdit(prev, op, acIds, readEvidence(task));
+    if (!editResult.ok) return editResult;
+    const next = editResult.value;
+
+    const nowIso = now();
+    const newExtra: Record<string, unknown> = { ...task.extra, ac_scope: next };
+    return this.writeTaskExtra(
+      task,
+      newExtra,
+      nowIso,
+      by,
+      `Declared ac_scope ${op === "add" ? "extended" : "reduced"} by ${by} (${next.length} id(s))`,
+      "update",
+      { by, scope_op: op, count: next.length },
+    );
+  }
+
   // ── ready ────────────────────────────────────────────────────────────────
 
   /**
@@ -1870,7 +1992,10 @@ export class TaskWorkflowService {
     nowIso: string,
     actor: string,
     changeSummary: string,
-    auditAction: "claim" | "release" | "evidence" | "anchors",
+    // "update" is the generic member the ac_scope verbs pass — see
+    // `editAcScope`'s own reason comment for why a bespoke label was rejected
+    // (`VERSION_ACTION_AUDIT_FAMILY`, `audit-service.ts`).
+    auditAction: "claim" | "release" | "evidence" | "anchors" | "update",
     auditDetails: Record<string, unknown>,
   ): Promise<Result<DocRecord, LoreError>> {
     const newVersion = task.version + 1;

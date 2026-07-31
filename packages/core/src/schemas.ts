@@ -14,7 +14,7 @@ import { SPEC_KINDS } from "./spec-kind.js";
 import { specAcceptanceCriteriaSchema } from "./acceptance.js";
 import { handoffExtraSchema } from "./session.js";
 import { validitySchema } from "./validity.js";
-import { phaseExtraSchema } from "./phase.js";
+import { acScopeArraySchema, phaseExtraSchema } from "./phase.js";
 import { fnv1a32Hex } from "./slug-hash.js";
 import { isSelfDeclaredOrdinalTitle } from "./ordinal.js";
 
@@ -238,17 +238,18 @@ export const knowledgeExtraSchema = z
  *   the shared pure `normalizeFileAnchors` (`file-anchors.ts`), called at every
  *   write seam (create-time `--anchor`, `TaskWorkflowService.setAnchors`/
  *   `addAnchors`/`removeAnchors`) — never re-derived here (SPEC-042 §3 D3).
- *   DO NOT add a `.max()`/length cap to this field: `createDocInputSchema`'s
- *   superRefine re-parses the WHOLE `extra` object against this schema to
- *   detect a missing `plan_id` (`taskExtraSchema.safeParse(extra ?? {})`,
- *   below) — if THIS field fails for any other reason (e.g. a too-long anchor
- *   entry), that re-parse fails too, and the superRefine reports the
- *   misleading `"task requires extra.plan_id"` message even though `plan_id`
- *   is present and the real problem is `file_anchors`. Keeping this field
- *   permissive at the Zod layer means `createDocInputSchema.safeParse` always
- *   SUCCEEDS on a shape-valid task, letting `CorpusService._createImpl`'s
- *   dedicated `normalizeFileAnchors` call (which runs AFTER that top-level
- *   parse) be the one place that reports the real, field-specific error.
+ *   DO NOT add a `.max()`/length cap to this field — not because a cap would
+ *   misreport (see below), but because duplicating ONE of
+ *   `normalizeFileAnchors`'s bounds here would fork the SSOT: the Zod copy and
+ *   the pure-function copy would then both have to be kept in step. The single
+ *   field-specific error comes from `CorpusService._createImpl`'s dedicated
+ *   `normalizeFileAnchors` call, which runs AFTER the top-level parse.
+ *   HISTORICAL NOTE (fixed): this invariant used to cite a second reason — that
+ *   `createDocInputSchema`'s superRefine collapsed ANY `taskExtraSchema`
+ *   failure into the misleading `"task requires extra.plan_id"` message. That
+ *   branch now FORWARDS each real issue (matching the adr/knowledge branches),
+ *   so a strict field here would report itself correctly; `ac_scope` below
+ *   relies on exactly that. The SSOT reason above stands on its own.
  *   Written exclusively via the sanctioned seams; never through
  *   `CorpusService.set` (D3 — a wholesale-extra replace flag was deliberately
  *   not built for anchors).
@@ -305,6 +306,19 @@ export const taskExtraSchema = z
      * validation layer, same reason as above.
      */
     linkage: z.string().optional(),
+    /**
+     * Declared contract projection — the subset of the governing spec's AC ids
+     * THIS task claims (spec-declared-scope-attestation-contract-task-owned-
+     * ac-scope §Contract Details). See {@link acScopeArraySchema} (shared with
+     * `phaseExtraSchema`) for the shape and the empty-vs-absent contract.
+     *
+     * Written exclusively via `lore scope add|rm` (→ `computeAcScopeEdit`, the
+     * single edit site for both tiers) and `lore create task --ac-scope`. There
+     * is deliberately NO `lore set --ac-scope`: `set` replaces `extra`
+     * wholesale, the same reason `file_anchors`/`claim`/`verification_evidence`
+     * each have a dedicated writer.
+     */
+    ac_scope: acScopeArraySchema.optional(),
   })
   .passthrough()
   .superRefine((data, ctx) => {
@@ -610,28 +624,41 @@ export const createDocInputSchema = baseCreateDocInputSchema.superRefine(
       }
     }
 
-    // task requires extra.plan_id
+    // task requires extra.plan_id.
+    // reason: forward taskExtraSchema's own issues (mirroring the adr/knowledge
+    // branches above) instead of collapsing EVERY failure into the plan_id
+    // message — the SPEC-042 T1 bug class, twice-paid there. Before this, any
+    // other malformed task-extra field (e.g. a blank `ac_scope` id) reported
+    // "task requires extra.plan_id" even with plan_id present, which is how
+    // `file_anchors` ended up documented as "must stay permissive at the Zod
+    // layer" (see taskExtraSchema's own @invariant). The plan_id override keeps
+    // the well-known message for the field it actually names.
     if (type === "task") {
       const taskResult = taskExtraSchema.safeParse(extra ?? {});
       if (!taskResult.success) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "task requires extra.plan_id",
-          path: ["extra", "plan_id"],
-        });
+        for (const issue of taskResult.error.issues) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: issue.path[0] === "plan_id" ? "task requires extra.plan_id" : issue.message,
+            path: ["extra", ...issue.path],
+          });
+        }
       }
     }
 
     // phase requires extra.plan_id (SPEC-056 D1 — mirrors the task branch above;
-    // phase generalizes/supersedes task at the plan-execution tier)
+    // phase generalizes/supersedes task at the plan-execution tier, including
+    // that branch's issue-forwarding rationale)
     if (type === "phase") {
       const phaseResult = phaseExtraSchema.safeParse(extra ?? {});
       if (!phaseResult.success) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "phase requires extra.plan_id",
-          path: ["extra", "plan_id"],
-        });
+        for (const issue of phaseResult.error.issues) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: issue.path[0] === "plan_id" ? "phase requires extra.plan_id" : issue.message,
+            path: ["extra", ...issue.path],
+          });
+        }
       }
     }
 
