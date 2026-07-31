@@ -33,7 +33,13 @@ import type {
   EvidenceEntry,
   LoreConfig,
 } from "@lore/core";
-import { resolveAttestationMinRatio } from "@lore/core";
+import {
+  buildTaskAttestationInfos,
+  computeAcCoverage,
+  deriveAttestationSummary,
+  deriveDeclaredScopeCoverage,
+  resolveAttestationMinRatio,
+} from "@lore/core";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -159,31 +165,54 @@ async function makeApprovedPlan(cs: CorpusService, extra: Record<string, unknown
   return approved.value;
 }
 
+/** Creates a task under `plan`. `acScope` — when supplied — authors
+ *  `extra.ac_scope`, the DECLARED half of the coverage conjunct
+ *  (spec-declared-scope-attestation-contract-task-owned-ac-scope §Facts). Omitted
+ *  means the legacy shape: evidence with NO declaration, which makes the
+ *  coverage conjunct report `notApplicable(scope-undeclared)` rather than pass. */
 async function makeTask(
   cs: CorpusService,
   plan: DocRecord,
   title: string,
   evidence: EvidenceEntry[],
+  acScope?: string[],
 ): Promise<DocRecord> {
   return mustCreate(cs, {
     type: "task",
     title,
     parent_id: plan.id,
     content: "## Task\n\nbody",
-    extra: { plan_id: plan.id, verification_evidence: evidence },
+    extra: {
+      plan_id: plan.id,
+      verification_evidence: evidence,
+      ...(acScope !== undefined ? { ac_scope: acScope } : {}),
+    },
   } as CreateDocInput);
 }
 
 // ─── AC-069-1: zero attested evidence on an evidence-bearing task → DENY ─────
 
 describe("attestationFloor — AC-069-1: zero attested entries blocks plan-close", () => {
-  it("AC-069-1: a plan whose only task carries self-reported-only evidence is DENIED at archive; message names the task and contains lore verify", async () => {
+  // reason: spec-declared-scope-attestation-contract-task-owned-ac-scope §Facts
+  // D5 demoted the per-task zero-attested condition, so a task's unattested
+  // evidence ALONE no longer denies the close. This scenario's INTENT — "a
+  // self-reported-only trail is denied, and the pack names the offending task
+  // plus `lore verify`" — is preserved by making the task DECLARE the AC it
+  // claims (`ac_scope`), which is the conjunct that blocks post-D4. Without the
+  // declaration the plan is `notApplicable(scope-undeclared)`: visible, audited,
+  // and deliberately non-blocking.
+  it("AC-069-1: a plan whose only task carries self-reported-only evidence for its DECLARED AC is DENIED at archive; message names the task and contains lore verify", async () => {
     const { corpusService } = makeHarness(attestationConfig());
-    const plan = await makeApprovedPlan(corpusService);
-    const task = await makeTask(corpusService, plan, "Fabrication-risk task", [
-      selfReportedEntry("bun test"),
-      selfReportedEntry("bun test again"),
-    ]);
+    const prd = await makePrd(corpusService);
+    const spec = await makeSpecWithAc(corpusService, prd, [AC_X1]);
+    const plan = await makeApprovedPlanUnderSpec(corpusService, spec);
+    const task = await makeTask(
+      corpusService,
+      plan,
+      "Fabrication-risk task",
+      [selfReportedEntry("bun test", { ac_ref: "AC-X-1" }), selfReportedEntry("bun test again")],
+      ["AC-X-1"],
+    );
 
     const result = await corpusService.set(plan.id, { status: "archived" });
 
@@ -204,10 +233,18 @@ describe("attestationFloor — AC-069-1: zero attested entries blocks plan-close
 describe("feedAttestationFloor — the pack's exemption instruction is PLAN-level only", () => {
   it("names the plan-level extra.attestation_exempt field, a fetch-merge-set recovery flow, and explicitly forbids writing the exempt fields onto a task", async () => {
     const { corpusService } = makeHarness(attestationConfig());
-    const plan = await makeApprovedPlan(corpusService);
-    const task = await makeTask(corpusService, plan, "Fabrication-risk task", [
-      selfReportedEntry("bun test"),
-    ]);
+    // reason: post-§Facts D4 the pack only renders when something BLOCKS — the
+    // declared-but-unattested AC below is that cause (see AC-069-1's own comment).
+    const prd = await makePrd(corpusService);
+    const spec = await makeSpecWithAc(corpusService, prd, [AC_X1]);
+    const plan = await makeApprovedPlanUnderSpec(corpusService, spec);
+    const task = await makeTask(
+      corpusService,
+      plan,
+      "Fabrication-risk task",
+      [selfReportedEntry("bun test", { ac_ref: "AC-X-1" })],
+      ["AC-X-1"],
+    );
 
     const result = await corpusService.set(plan.id, { status: "archived" });
 
@@ -379,23 +416,47 @@ describe("attestationFloor — AC-069-4: attestation_exempt with a reason bypass
   // exempt (D1's "缺 reason 视同未豁免" rule) — the floor still blocks.
   it("AC-069-4: attestation_exempt true WITHOUT a reason is not treated as exempt — still blocked", async () => {
     const { corpusService } = makeHarness(attestationConfig());
-    const plan = await makeApprovedPlan(corpusService, { attestation_exempt: true });
-    await makeTask(corpusService, plan, "Unattested task", [selfReportedEntry("bun test")]);
+    // reason: the blocking cause is the DECLARED-but-unattested AC (§Facts D4) —
+    // this scenario is about the EXEMPTION not applying, so the floor must have a
+    // live blocking condition to fall back onto.
+    const prd = await makePrd(corpusService);
+    const spec = await makeSpecWithAc(corpusService, prd, [AC_X1]);
+    const plan = await makeApprovedPlanUnderSpec(corpusService, spec, { attestation_exempt: true });
+    await makeTask(
+      corpusService,
+      plan,
+      "Unattested task",
+      [selfReportedEntry("bun test", { ac_ref: "AC-X-1" })],
+      ["AC-X-1"],
+    );
 
     const result = await corpusService.set(plan.id, { status: "archived" });
 
     expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect((result.error as { field?: string }).field).toBe("gate:plan-close:attestation-floor");
+    }
   });
 
   // NEGATIVE — an empty-string reason is likewise not exempt (whitespace-only fails
   // the same "non-empty after trim" check).
   it("AC-069-4: attestation_exempt true with a whitespace-only reason is not treated as exempt — still blocked", async () => {
     const { corpusService } = makeHarness(attestationConfig());
-    const plan = await makeApprovedPlan(corpusService, {
+    // reason: same fixture shape as the WITHOUT-a-reason scenario above — the
+    // declared-but-unattested AC supplies the post-§Facts-D4 blocking cause.
+    const prd = await makePrd(corpusService);
+    const spec = await makeSpecWithAc(corpusService, prd, [AC_X1]);
+    const plan = await makeApprovedPlanUnderSpec(corpusService, spec, {
       attestation_exempt: true,
       attestation_exempt_reason: "   ",
     });
-    await makeTask(corpusService, plan, "Unattested task", [selfReportedEntry("bun test")]);
+    await makeTask(
+      corpusService,
+      plan,
+      "Unattested task",
+      [selfReportedEntry("bun test", { ac_ref: "AC-X-1" })],
+      ["AC-X-1"],
+    );
 
     const result = await corpusService.set(plan.id, { status: "archived" });
 
@@ -423,6 +484,28 @@ describe("attestationFloor — REGRESSION: a pure-planning plan (no evidence any
     const result = await corpusService.set(plan.id, { status: "archived" });
 
     expect(result.ok).toBe(true);
+  });
+
+  // STATE (spec-declared-scope-attestation-contract-task-owned-ac-scope §Facts
+  // D4, the RETROACTIVE policy) — the LEGACY shape: real evidence, none of it
+  // attested, and no task declaring an `ac_scope`. Post-D4 the coverage conjunct
+  // has no claim to audit, so the close proceeds and the fact is surfaced as an
+  // advisory + audit row (`notApplicable`, reason `scope-undeclared`) rather than
+  // as a block. This is deliberate: every pre-`lore scope add` plan in the corpus
+  // has this shape, and a newly-armed conjunct must not retroactively deny them.
+  it("a plan whose evidence-bearing tasks declare NO ac_scope archives — the coverage conjunct is not-applicable, never a silent pass or a retroactive block", async () => {
+    const { corpusService } = makeHarness(attestationConfig());
+    const prd = await makePrd(corpusService);
+    const spec = await makeSpecWithAc(corpusService, prd, [AC_X1]);
+    const plan = await makeApprovedPlanUnderSpec(corpusService, spec);
+    await makeTask(corpusService, plan, "Legacy undeclared task", [
+      selfReportedEntry("bun test", { ac_ref: "AC-X-1" }),
+    ]);
+
+    const result = await corpusService.set(plan.id, { status: "archived" });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.status).toBe("archived");
   });
 });
 
@@ -465,6 +548,83 @@ describe("attestationFloor — AC-PCI-7: ratio disabled by default, per-claimed-
     if (result.ok) {
       expect(result.value.status).toBe("archived");
       expect(result.value.extra["attestation_exempt"]).toBeUndefined();
+    }
+  });
+});
+
+// ─── AC-VS-7: condition 1 (per-task zero-attested) is a REPORTED fact, not a ─
+// ─── blocking conjunct — spec-declared-scope-attestation-contract-task-owned- ─
+// ─── ac-scope §Facts (D5): demoted, NOT deleted (its computation is kept) ─────
+
+describe("attestationFloor — AC-VS-7: condition one reported not blocking", () => {
+  it("condition one reported not blocking: task B's zero-attested evidence no longer denies plan-close once every DECLARED-scope AC is attested (by task A), while the attestation summary still lists task B in zero_attested_tasks", async () => {
+    // No `min_ratio` configured => condition 3 is not evaluated at all, so
+    // condition 1 is the ONLY conjunct in question for this fixture.
+    const config = attestationConfig();
+    expect(resolveAttestationMinRatio(config)).toBeNull();
+
+    const { corpusService } = makeHarness(config);
+    const prd = await makePrd(corpusService);
+    const spec = await makeSpecWithAc(corpusService, prd, [AC_X1]);
+    const plan = await makeApprovedPlanUnderSpec(corpusService, spec);
+    // Task A: the SOURCE of the attestation covering the declared scope.
+    const taskA = await makeTask(
+      corpusService,
+      plan,
+      "Task A",
+      [attestedEntry("bun test export", { ac_ref: "AC-X-1" })],
+      ["AC-X-1"],
+    );
+    // Task B: evidence of which NONE is attested — condition 1's offending shape.
+    const taskB = await makeTask(
+      corpusService,
+      plan,
+      "Task B",
+      [selfReportedEntry("bun test b"), selfReportedEntry("bun test b2")],
+      ["AC-X-1"],
+    );
+
+    const result = await corpusService.set(plan.id, { status: "archived" });
+
+    // DEMOTED: the same fixture was DENIED before D5 (AC-069-1's shape).
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.status).toBe("archived");
+
+    // Condition 2 is satisfied through the DECLARED set, never the exercised one.
+    const coverage = computeAcCoverage([AC_X1], [taskA, taskB]);
+    const declaredScope = deriveDeclaredScopeCoverage([taskA, taskB], coverage);
+    expect(declaredScope.declared_acs).toEqual(["AC-X-1"]);
+    expect(declaredScope.scope_undeclared).toBe(false);
+    expect(declaredScope.meets_coverage).toBe(true);
+
+    // NOT DELETED: the demoted condition's computation is still reported.
+    const summary = deriveAttestationSummary(buildTaskAttestationInfos([taskA, taskB]), null, coverage);
+    expect(summary.zero_attested_tasks).toEqual([taskB.slug]);
+    expect(summary.total_evidence).toBe(3);
+    expect(summary.attested).toBe(1);
+  });
+
+  // NEGATIVE control — the SAME two-task shape with the declared AC left
+  // unattested IS still denied: AC-VS-7's pass is condition 1's demotion, not a
+  // blanket relaxation of the floor.
+  it("condition one reported not blocking is not a blanket relaxation: the same fixture with its DECLARED AC unattested is still denied", async () => {
+    const { corpusService } = makeHarness(attestationConfig());
+    const prd = await makePrd(corpusService);
+    const spec = await makeSpecWithAc(corpusService, prd, [AC_X1]);
+    const plan = await makeApprovedPlanUnderSpec(corpusService, spec);
+    await makeTask(corpusService, plan, "Task A", [selfReportedEntry("bun test export", { ac_ref: "AC-X-1" })], [
+      "AC-X-1",
+    ]);
+    await makeTask(corpusService, plan, "Task B", [selfReportedEntry("bun test b")], ["AC-X-1"]);
+
+    const result = await corpusService.set(plan.id, { status: "archived" });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect((result.error as { field?: string }).field).toBe("gate:plan-close:attestation-floor");
+      // The feeding pack names the blocking DECLARED id, not merely the
+      // diagnostic task list.
+      expect((result.error as { message?: string }).message ?? "").toContain("AC-X-1");
     }
   });
 });

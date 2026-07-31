@@ -36,7 +36,9 @@
  *
  * Config: `workflow.gates."plan-close".prd_sync.enabled: true`, NO
  * `workflow.attestation.min_ratio` declared at all (§D4's "absent -> null ->
- * the ratio conjunct never runs" default), `workflow.review
+ * the ratio conjunct never runs" default) — scenario B's control REWRITES the
+ * config mid-suite to add an explicit floor, after scenario A has run —,
+ * `workflow.review
  * .judgment_required_types: []` (neutralizes the UNRELATED SPEC-103 review-
  * judgment gate for this suite's spec/adr approvals — `approve-advisory-
  * render.test.ts`'s own precedent for isolating that gate from a fixture that
@@ -49,14 +51,20 @@
  *     stderr, per D2's "loud on two channels" — the close-time audit row is
  *     the auditor's channel; the plan-promote advisory is the operator's, and
  *     the one this suite can observe from the CLI surface).
- *   "scenario B" — RED: the sibling plan's unattested claimed AC blocks at
- *     exit 4, naming the AC id and the `attestation-floor` gate field. CONTROL
- *     (requirement 4 of the task packet): the SAME corpus, the SAME `lore set
- *     ... --status archived` command, with the ONLY change being that the
- *     claimed AC now ALSO carries a runner-attested entry (via `lore verify`)
- *     — the denial disappears. Without this control, a "passes" result on the
- *     RED half alone would prove only that SOME precondition failed, not that
- *     THIS one did.
+ *   "scenario B" — REWRITTEN by spec-declared-scope-attestation-contract-task-
+ *     owned-ac-scope §Facts D4/D5. It used to pin "an unattested EXERCISED
+ *     (`claimed`) AC blocks at exit 4"; D4 retired that conjunct (the audited
+ *     evidence was defining its own audit scope) in favour of the DECLARED scope
+ *     (`task.extra.ac_scope`), reporting `notApplicable(scope-undeclared)` when no
+ *     evidence-bearing task declares one. The scenario now proves BOTH halves of
+ *     that change through the compiled artifact: an undeclared-scope plan with an
+ *     unattested exercised AC ARCHIVES (exit 0, no attestation-floor field), and —
+ *     as the CONTROL that the floor still has teeth — a sibling plan under an
+ *     explicitly configured `workflow.attestation.min_ratio` is DENIED at exit 4
+ *     until `lore verify` attests the SAME task's evidence, two runs of one
+ *     command differing only in that fact. The declared conjunct's own
+ *     compiled-binary oracle belongs with `lore scope add` (a sibling task of the
+ *     same spec) — this suite cannot author `ac_scope` through the binary yet.
  *
  * Freshness guard (repo CLAUDE.md "false-oracle vectors" #4 — a stale
  * `dist/lore` silently validates stale compiled logic against current
@@ -178,6 +186,30 @@ function writeConfig(dir: string): void {
   const result = saveConfig(dir, config);
   if (!result.ok) {
     throw new Error(`saveConfig failed: ${JSON.stringify(result.error)}`);
+  }
+}
+
+/**
+ * Rewrites `.lore/config.yaml` with the SAME keys as {@link writeConfig} plus an
+ * explicit `workflow.attestation.min_ratio` — scenario B's control needs the ONE
+ * blocking conjunct a pure-CLI fixture can still reach after
+ * spec-declared-scope-attestation-contract-task-owned-ac-scope §Facts D4/D5
+ * (the declared-scope conjunct needs `task.extra.ac_scope`, whose writer is a
+ * sibling task of that spec). Called mid-suite, AFTER scenario A has run, so
+ * scenario A keeps measuring the unconfigured-ratio default it is written against.
+ */
+function writeConfigWithRatioFloor(dir: string, minRatio: number): void {
+  const config: LoreConfig = {
+    project: { name: "t5-pci12-compiled-e2e", author: "t5-tester" },
+    workflow: {
+      gates: { "plan-close": { prd_sync: { enabled: true } } },
+      review: { judgment_required_types: [] },
+      attestation: { min_ratio: minRatio },
+    },
+  } as unknown as LoreConfig;
+  const result = saveConfig(dir, config);
+  if (!result.ok) {
+    throw new Error(`saveConfig (ratio floor) failed: ${JSON.stringify(result.error)}`);
   }
 }
 
@@ -337,36 +369,58 @@ describe("AC-PCI-12: compiled close — throwaway corpus, dist/lore binary, one 
     expect(archiveResult.stderr).not.toContain("attestation-floor");
   });
 
-  it("compiled close — scenario B: an unattested claimed AC blocks the sibling plan at exit 4 naming the AC id, and the SAME denial disappears once that AC is attested (control proving the RIGHT cause)", () => {
-    const planSlug = createPlan(dir, specSlug, "T5 PCI-12 Plan B (blocked then unblocked)");
+  // REWRITTEN (spec-declared-scope-attestation-contract-task-owned-ac-scope
+  // §Facts D4/D5) — this scenario used to pin "an unattested EXERCISED AC blocks".
+  // D4 retired that conjunct: the audited evidence was defining its own audit
+  // scope, so the coverage conjunct now reads the DECLARED scope
+  // (`task.extra.ac_scope`) and reports `notApplicable(scope-undeclared)` when no
+  // evidence-bearing task declared one. The scenario keeps its SHAPE (a RED half
+  // and a control proving the right cause) against the conjunct that still blocks
+  // from a pure-CLI fixture: the opt-in ratio. It cannot yet author `ac_scope`
+  // through the compiled binary — `lore scope add` / `lore create task --ac-scope`
+  // is a SIBLING task of this same spec; a compiled-binary oracle for the declared
+  // conjunct belongs with that writer, not here.
+  it("compiled close — scenario B: an undeclared-scope plan is NOT blocked by its unattested exercised AC (D4), while an explicitly configured ratio floor still blocks the SAME command until evidence is attested (control proving the RIGHT cause)", () => {
+    const planSlug = createPlan(dir, specSlug, "T5 PCI-12 Plan B (undeclared scope)");
     const taskSlug = createTask(dir, planSlug, "T5 PCI-12 Task B");
 
-    // Self-reported ONLY — the fabrication-risk shape the attestation-floor
-    // conjunct exists to catch.
+    // Self-reported ONLY, and NO `ac_scope` declared on the task — the legacy
+    // shape every pre-`lore scope add` corpus has.
     const evidenceResult = evidenceSelfReported(dir, taskSlug, AC_ID, AC_COMMAND);
     expect(evidenceResult.exitCode).toBe(0);
 
     const approveResult = approvePlan(dir, planSlug);
     expect(approveResult.exitCode).toBe(0);
 
-    // RED — the claimed-and-attestable AC has zero runner-attested evidence:
-    // blocked, naming both the AC id and the attestation-floor gate field.
-    const blockedResult = archivePlan(dir, planSlug);
+    // D4 — the coverage conjunct has no CLAIM to audit, so it reports
+    // not-applicable and the close proceeds. Deliberate and retroactive: arming a
+    // declared-scope conjunct must not retroactively deny every plan authored
+    // before the field existed.
+    const undeclaredResult = archivePlan(dir, planSlug);
+    expect(undeclaredResult.exitCode).toBe(0);
+    expect(undeclaredResult.stderr).not.toContain("gate:plan-close:attestation-floor");
+
+    // CONTROL — the floor still has teeth through the compiled artifact. A THIRD
+    // sibling plan, same corpus, with `workflow.attestation.min_ratio` now
+    // explicitly configured: the identical `lore set … --status archived` command
+    // is DENIED at exit 4 naming the attestation-floor field, and the denial
+    // disappears once the SAME task's evidence carries a runner attestation. Two
+    // runs of one command differing only in that fact prove the block's cause.
+    writeConfigWithRatioFloor(dir, 0.5);
+    const controlPlanSlug = createPlan(dir, specSlug, "T5 PCI-12 Plan C (ratio floor)");
+    const controlTaskSlug = createTask(dir, controlPlanSlug, "T5 PCI-12 Task C");
+    expect(evidenceSelfReported(dir, controlTaskSlug, AC_ID, AC_COMMAND).exitCode).toBe(0);
+    expect(approvePlan(dir, controlPlanSlug).exitCode).toBe(0);
+
+    const blockedResult = archivePlan(dir, controlPlanSlug);
     expect(blockedResult.exitCode).toBe(4);
-    expect(blockedResult.stderr).toContain(AC_ID);
     expect(blockedResult.stderr).toContain("gate:plan-close:attestation-floor");
     expect(blockedResult.stderr).toContain("lore verify");
 
-    // CONTROL (task packet requirement 4) — the SAME corpus, the SAME `lore
-    // set ... --status archived` command; the ONLY change is that the SAME
-    // claimed AC now ALSO carries a runner-attested entry. If the denial
-    // disappears ONLY because of this, the RED result above is proved to be
-    // caused by the unattested claimed AC specifically — not by some other
-    // precondition (a false-positive block would fail this half instead).
-    const verifyResult = verifyAttested(dir, planSlug, taskSlug, AC_ID);
+    const verifyResult = verifyAttested(dir, controlPlanSlug, controlTaskSlug, AC_ID);
     expect(verifyResult.exitCode).toBe(0);
 
-    const unblockedResult = archivePlan(dir, planSlug);
+    const unblockedResult = archivePlan(dir, controlPlanSlug);
     expect(unblockedResult.exitCode).toBe(0);
     expect(unblockedResult.stderr).not.toContain("attestation-floor");
   });

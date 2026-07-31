@@ -35,7 +35,7 @@ function makeSummary(overrides: Partial<AttestationSummary> = {}): AttestationSu
     attested: 2,
     ratio: 0.5,
     min_ratio: 0.5,
-    claimed_ac_coverage: { claimed_acs: [], unattested_acs: [], meets_coverage: true },
+    claimed_ac_coverage: { exercised_acs: [], unattested_acs: [], meets_coverage: true },
     meets_floor: true,
     zero_attested_tasks: [],
     ...overrides,

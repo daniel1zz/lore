@@ -429,9 +429,19 @@ describe("plan-close — AC-FRESH-5: assessment_freshness_exempt (flag + non-emp
 
 describe("plan-close — REGRESSION: assessmentFreshness composes with attestationFloor's feeding pack", () => {
   it("a plan failing BOTH the attestation floor and assessment freshness names both recovery paths in one denial", async () => {
-    const { store, corpusService, taskWorkflow } = makeHarness();
-    // Deliberately NOT attestation-exempt this time — a self-reported-only evidence
-    // entry trips attestationFloor too, alongside the stale assessment.
+    // reason: spec-declared-scope-attestation-contract-task-owned-ac-scope §Facts
+    // D5 demoted attestationFloor's per-task zero-attested condition, so a
+    // self-reported-only entry no longer trips the floor on its own. This
+    // composition regression needs the floor to FAIL for real, so the fixture now
+    // configures an explicit `min_ratio` (the surviving blocking conjunct that
+    // needs no spec-tier ancestor — this suite's plans are deliberately
+    // unparented): 1 entry, 0 attested => ratio 0 < 0.5.
+    const { store, corpusService, taskWorkflow } = makeHarness({
+      project: { name: "t", author: "t" },
+      workflow: { attestation: { min_ratio: 0.5 } },
+    } as unknown as LoreConfig);
+    // Deliberately NOT attestation-exempt this time — the floor must fire
+    // alongside the stale assessment.
     const plan = await makeApprovedPlan(corpusService, {}, /* isolateAttestation */ false);
     const task = await makeTask(corpusService, plan, "Doubly-failing task");
     await insertAssessmentDoc(store, corpusService, plan, "2026-07-28T11:00:00.000Z");

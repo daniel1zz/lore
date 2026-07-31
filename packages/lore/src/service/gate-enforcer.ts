@@ -76,6 +76,7 @@ import {
   resolvePrdSyncGateEnabled,
   resolveVerificationProfile,
   resolveAttestationMinRatio,
+  SCOPE_UNDECLARED_REASON,
   type AuditEntry,
   type LoreConfig,
   type LoreError,
@@ -198,6 +199,13 @@ export function buildGateSkipAuditEntry(
  * is NOT the discriminator between these two kinds; `notApplicableAdvisoryKind`
  * (below) keys on `referent` first. Never widens an EXISTING field's meaning —
  * each kind lands on its own key/audit-detail value.
+ *
+ * `"attestation-not-applicable"` ALSO tags `attestationFloor`'s `reason:
+ * "scope-undeclared"` verdict (spec-declared-scope-attestation-contract-task-
+ * owned-ac-scope §Facts D4) — the same predicate reporting the same class of fact
+ * ("this floor did not apply to this plan"), so it shares the kind rather than
+ * inventing a fourth; the machine-readable `reason` on the audit row is what
+ * distinguishes zero-evidence from undeclared-scope.
  */
 export type GateAdvisoryKind = "verify-reachability" | "prd-sync-domain-doc" | "attestation-not-applicable";
 
@@ -241,6 +249,12 @@ function notApplicableAdvisoryKind(result: PredicateNotApplicable): GateAdvisory
   if (result.referent === PLAN_CLAIMED_AC_COVERAGE_REFERENT) return "attestation-not-applicable";
   if (result.reason === "referent-absent") return "prd-sync-domain-doc";
   if (result.reason === "no-evidence") return "attestation-not-applicable";
+  // reason: spec-declared-scope-attestation-contract-task-owned-ac-scope §Facts
+  // D4 — `attestationFloor`'s undeclared-scope verdict rides the SAME advisory
+  // kind as its zero-evidence one (both are "this floor did not apply to this
+  // plan", surfaced as an advisory + audit row); its `referent` is the plan, so
+  // it never collides with the prd-sync branch above.
+  if (result.reason === SCOPE_UNDECLARED_REASON) return "attestation-not-applicable";
   const exhaustive: never = result.reason;
   throw new Error(`Internal error: unhandled NotApplicableReason "${String(exhaustive)}"`);
 }
@@ -613,7 +627,13 @@ export class GateEnforcer {
       const advisory: GateAdvisory = {
         kind: notApplicableAdvisoryKind(result),
         message:
-          `ADVISORY (does not block "${checkpoint}"): a predicate's referent is absent — ` +
+          // reason: "did not apply" rather than the earlier "referent is absent"
+          // — spec-declared-scope-attestation-contract-task-owned-ac-scope §Facts
+          // D4 added `scope-undeclared`, where the referent (the plan) very much
+          // EXISTS and it is the CLAIM that was never declared. The machine-
+          // readable `reason` is printed verbatim so the specific case stays
+          // greppable; only the prose generalized.
+          `ADVISORY (does not block "${checkpoint}"): a predicate did not apply — ` +
           `${result.referent} (reason: ${result.reason}).`,
       };
       const entry = buildNotApplicableAuditEntry(checkpoint, advisory, result.referent, nowIso, actor, target);

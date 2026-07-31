@@ -80,8 +80,10 @@ import {
   lintAcQuantifiability,
   checkOracleCoverage,
   deriveClaimedAcCoverage,
+  UNRESOLVED_DECLARED_SCOPE,
   type AcceptanceCriterion,
   type AcCoverageFact,
+  type DeclaredScopeCoverage,
   type DocRecord,
   type LoreError,
   // reason: SPEC-075 D6 — TaskAttestationInfo's home MOVED to @lore/core
@@ -427,6 +429,23 @@ export interface GateContext {
    * on a path that reaches this branch — the real caller always resolves it.
    */
   readonly planClaimedAcCoverage?: readonly AcCoverageFact[];
+  /**
+   * DECLARED-scope coverage facts (spec-declared-scope-attestation-contract-task-
+   * owned-ac-scope §Facts D4) — `deriveDeclaredScopeCoverage(<plan's tasks>,
+   * <planClaimedAcCoverage>)` (`@lore/core`), resolved by the CALLER
+   * (`CorpusService.set`) because only it holds the task DOCUMENTS that carry
+   * `extra.ac_scope`. This is the coverage conjunct's ONLY input; the
+   * evidence-derived `planClaimedAcCoverage` above is diagnostics-only.
+   *
+   * `undefined` (a caller that never resolved the fact — only hand-built test
+   * fixtures, never production) resolves to {@link UNRESOLVED_DECLARED_SCOPE},
+   * which reports the scope as UNDECLARED: the floor then returns
+   * `notApplicable(scope-undeclared)`, an audited advisory. It must NEVER default
+   * to a `scope_undeclared: false` literal — that would fabricate a compliant
+   * declaration and vacuously satisfy the conjunct, the exact defect §Facts D4
+   * removes.
+   */
+  readonly planDeclaredScopeCoverage?: DeclaredScopeCoverage;
 
   // -- plan-close: check() + feed() (SPEC-080 §C4, prdOutlineSynced) --
   /**
@@ -1271,6 +1290,13 @@ function checkPlanClose(ctx: GateContext): ApplicablePredicateResult[] {
       // must keep getting a REAL per-task/ratio verdict, not a blanket
       // not-applicable that would also swallow conditions 1/3's own outcome.
       ctx.planClaimedAcCoverage ?? [],
+      // reason: spec-declared-scope-attestation-contract-task-owned-ac-scope
+      // §Facts D4 — an unresolved declared-scope fact resolves to the NAMED
+      // sentinel that reports UNDECLARED, so the coverage conjunct degrades to
+      // its audited `notApplicable(scope-undeclared)` verdict. An inline
+      // `{scope_undeclared: false, …}` here would instead fabricate a compliant
+      // declaration and pass the conjunct vacuously.
+      ctx.planDeclaredScopeCoverage ?? UNRESOLVED_DECLARED_SCOPE,
     );
     results.push(floorResult);
     // reason: Amendment A — `ctx.planClaimedAcCoverage === undefined` here is a
@@ -1291,7 +1317,17 @@ function checkPlanClose(ctx: GateContext): ApplicablePredicateResult[] {
     // a second not-applicable verdict onto the same predicate concern would be
     // redundant noise, not a new gap: there is nothing to evaluate at all in
     // that case, coverage data or not.
-    if (ctx.planClaimedAcCoverage === undefined && !isNotApplicable(floorResult)) {
+    //
+    // reason: the suppression keys on the no-evidence reason SPECIFICALLY, not on
+    // "is not applicable at all" (spec-declared-scope-attestation-contract-task-
+    // owned-ac-scope §Facts D4 added a SECOND not-applicable reason,
+    // `"scope-undeclared"`). A plan with real evidence whose tasks declared no
+    // scope has plenty to evaluate — the caller's failure to resolve
+    // `planClaimedAcCoverage` at all is still its own distinct, reportable gap,
+    // so collapsing both reasons into one suppression would silently drop it.
+    const suppressCompanion =
+      isNotApplicable(floorResult) && floorResult.reason === "no-evidence";
+    if (ctx.planClaimedAcCoverage === undefined && !suppressCompanion) {
       results.push({ notApplicable: true, reason: "referent-absent", referent: "planClaimedAcCoverage" });
     }
   }
@@ -1386,6 +1422,19 @@ function feedAttestationFloor(ctx: GateContext, failures: PredicateResult[]): st
       ? `Claimed acceptance criteria with zero runner-attested evidence: ` +
         `${claimedCoverage.unattested_acs.join(", ")}. `
       : "";
+  // reason: spec-declared-scope-attestation-contract-task-owned-ac-scope §Facts
+  // D4 — the DECLARED-scope ids are the pack's only line naming the actual
+  // BLOCKING cause (the exercised line above is diagnostics: after D4 it can no
+  // longer deny a close). Worded distinctly from that line ("Declared-scope …"
+  // vs "Claimed …") so each remains independently assertable — a shared prefix
+  // would make the two indistinguishable to a substring oracle.
+  const declaredScope = ctx.planDeclaredScopeCoverage;
+  const unattestedDeclaredLine =
+    declaredScope !== undefined && declaredScope.unattested_acs.length > 0
+      ? `Declared-scope acceptance criteria with zero runner-attested evidence: ` +
+        `${declaredScope.unattested_acs.join(", ")} — these are the BLOCKING ids ` +
+        `(declared via \`extra.ac_scope\` on the plan's tasks). `
+      : "";
   // reason: §D5 — printed ONLY when the ratio conjunct is actually configured
   // (minRatio !== null); naming a floor that is not being enforced would
   // misdirect an operator into thinking the ratio is the live blocking cause.
@@ -1446,10 +1495,11 @@ function feedAttestationFloor(ctx: GateContext, failures: PredicateResult[]): st
   const pack = buildFeedingPack({
     ruleSource: "corpus (task verification_evidence)",
     ruleMarkdown:
-      `Required for plan-close: every task carrying verification_evidence must carry ` +
-      `at least one runner-issued (attested) entry, and every claimed acceptance ` +
-      `criterion (a declared script-mode AC with >= 1 evidence reference) must carry ` +
-      `at least one runner-attested entry. ${unattestedAcsLine}${ratioLine}${offendingLine}` +
+      `Required for plan-close: every acceptance criterion a task DECLARES it owns ` +
+      `(\`extra.ac_scope\` ∩ the governing spec's script-mode criteria) must carry at ` +
+      `least one runner-attested entry; a task carrying only self-reported evidence is ` +
+      `REPORTED below but no longer blocks on its own. ` +
+      `${unattestedDeclaredLine}${unattestedAcsLine}${ratioLine}${offendingLine}` +
       recoveryText,
     missing: selectFailures(failures).map((f) => f.reason),
     // reason: the plan-level-only fetch-merge-set instruction plus the offending-

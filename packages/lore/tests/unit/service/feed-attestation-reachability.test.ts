@@ -45,6 +45,17 @@ if (planClose === undefined) {
  * this constant deliberately — do not "fix" a failing assertion by editing
  * it to match a drifted production string.
  *
+ * RE-CAPTURED AGAIN (spec-declared-scope-attestation-contract-task-owned-ac-scope
+ * §Facts D4/D5): the base rule sentence now states the DECLARED-scope conjunct
+ * (`extra.ac_scope` ∩ the spec's script-mode criteria) and says explicitly that a
+ * self-reported-only task is REPORTED rather than blocking — the two behaviour
+ * changes D4/D5 make. Everything from "The plan-wide attested ratio" through the
+ * end — INCLUDING the `Recovery: run …` sentence this constant's name refers to —
+ * is UNCHANGED; re-captured by invoking the real post-change `feedAttestationFloor`
+ * against this exact fixture ctx (`recapture` scratch script), never hand-typed.
+ * This fixture reaches the pack via the RATIO conjunct (0.40 < 0.5), which is why
+ * it still renders without a resolved declared scope.
+ *
  * RE-CAPTURED (spec-plan-close-predicates-measure-invariants-an-applicability
  * §D5, task T2, AC-PCI-9): the PREFIX before "Task(s) with self-reported-only
  * evidence..." changed — the base rule sentence now names the per-claimed-AC
@@ -58,7 +69,7 @@ if (planClose === undefined) {
  * against this exact fixture ctx, never hand-typed.
  */
 const PRE_CHANGE_REACHABLE_TEXT =
-  "[source: corpus (task verification_evidence), trust: team-authored]\n\nMissing:\n- ATTESTATION_FLOOR_NOT_MET\n\n## Rule\nRequired for plan-close: every task carrying verification_evidence must carry at least one runner-issued (attested) entry, and every claimed acceptance criterion (a declared script-mode AC with >= 1 evidence reference) must carry at least one runner-attested entry. The plan-wide attested ratio must be >= 0.5 (currently 0.40). Task(s) with self-reported-only evidence (zero runner-attested entries): task-1 — \"Task One\". Listed for DIAGNOSTIC purposes only — the exemption below is PLAN-level; do NOT write `extra.attestation_exempt` onto any of these tasks, this gate never reads it there. Recovery: run `lore verify plan-example` to record attested evidence against each task's declared script-mode acceptance criteria (declare one first via `lore ac add <spec> <id> --mode script ...` if none exists yet). If this plan genuinely has no oracle to attest against for some of its tasks — the canonical case is a RED/TDD task whose Expected state is a currently-failing, time-bound test (red before green: the evidence is real, attesting it would misrepresent an intentionally-red state as verified) — the exemption is declared on the PLAN ITSELF, never on a task: set `extra.attestation_exempt: true` plus a non-empty `extra.attestation_exempt_reason` on plan-example. `extra` REPLACES the whole field wholesale on `lore_set` (it does NOT merge) — first fetch the current extra via `lore get plan-example --json` (read `.extra`), merge `{\"attestation_exempt\": true, \"attestation_exempt_reason\": \"<why>\"}` into it while KEEPING every existing key (e.g. `phases`), then call the MCP `lore_set` tool with the FULL merged object as `extra` on plan-example. `lore set` (CLI) has no dedicated flag for this field yet.";
+  "[source: corpus (task verification_evidence), trust: team-authored]\n\nMissing:\n- ATTESTATION_FLOOR_NOT_MET\n\n## Rule\nRequired for plan-close: every acceptance criterion a task DECLARES it owns (`extra.ac_scope` ∩ the governing spec's script-mode criteria) must carry at least one runner-attested entry; a task carrying only self-reported evidence is REPORTED below but no longer blocks on its own. The plan-wide attested ratio must be >= 0.5 (currently 0.40). Task(s) with self-reported-only evidence (zero runner-attested entries): task-1 — \"Task One\". Listed for DIAGNOSTIC purposes only — the exemption below is PLAN-level; do NOT write `extra.attestation_exempt` onto any of these tasks, this gate never reads it there. Recovery: run `lore verify plan-example` to record attested evidence against each task's declared script-mode acceptance criteria (declare one first via `lore ac add <spec> <id> --mode script ...` if none exists yet). If this plan genuinely has no oracle to attest against for some of its tasks — the canonical case is a RED/TDD task whose Expected state is a currently-failing, time-bound test (red before green: the evidence is real, attesting it would misrepresent an intentionally-red state as verified) — the exemption is declared on the PLAN ITSELF, never on a task: set `extra.attestation_exempt: true` plus a non-empty `extra.attestation_exempt_reason` on plan-example. `extra` REPLACES the whole field wholesale on `lore_set` (it does NOT merge) — first fetch the current extra via `lore get plan-example --json` (read `.extra`), merge `{\"attestation_exempt\": true, \"attestation_exempt_reason\": \"<why>\"}` into it while KEEPING every existing key (e.g. `phases`), then call the MCP `lore_set` tool with the FULL merged object as `extra` on plan-example. `lore set` (CLI) has no dedicated flag for this field yet.";
 
 /** The exact fixture ctx the pin above was captured against. */
 function baseFixtureCtx(overrides: Partial<GateContext>): GateContext {

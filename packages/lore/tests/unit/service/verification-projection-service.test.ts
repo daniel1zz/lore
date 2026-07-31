@@ -224,10 +224,15 @@ describe("VerificationProjectionService — HAPPY (AC-075-2)", () => {
     expect(result.value.attestation.total_evidence).toBe(2);
     expect(result.value.attestation.attested).toBe(1);
     expect(result.value.attestation.zero_attested_tasks).toEqual([fabricationRiskTask.slug]);
-    // reason: condition 1 (a zero-attested evidence-bearing task exists) fails the
-    // floor regardless of the plan-wide ratio (1/2 = 0.5, exactly at the default
-    // floor) — deriveAttestationSummary's own documented AND-of-both-conditions rule.
-    expect(result.value.attestation.meets_floor).toBe(false);
+    // reason: spec-declared-scope-attestation-contract-task-owned-ac-scope §Facts
+    // D5 DEMOTED the per-task zero-attested condition to a reported fact — the
+    // panel still SURFACES the offending task (the assertion above, which is what
+    // AC-075-2 is about), while `meets_floor` now carries the RATIO conjunct alone
+    // and this harness configures no `min_ratio` (unconfigured => the conjunct does
+    // not run). Inverted in the same slice that demoted the condition; the plan's
+    // gate verdict additionally depends on the DECLARED-scope conjunct, which this
+    // projection does not (yet) compute.
+    expect(result.value.attestation.meets_floor).toBe(true);
   });
 });
 
@@ -284,7 +289,7 @@ describe("VerificationProjectionService — BOUNDARY (AC-075-3)", () => {
         attested: 0,
         ratio: null,
         min_ratio: 0.5,
-        claimed_ac_coverage: { claimed_acs: [], unattested_acs: [], meets_coverage: true },
+        claimed_ac_coverage: { exercised_acs: [], unattested_acs: [], meets_coverage: true },
         meets_floor: true,
         zero_attested_tasks: [],
       },
