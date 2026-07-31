@@ -594,11 +594,13 @@ describe("AC-072-8: dedup boundary — fresh upstream yields empty possible_dupl
 // ─── AC-072-9: concurrency ────────────────────────────────────────────────────
 
 // AC-IC-5 (spec-report-issue-has-no-specified-concurrency-contract-ac-072):
-// this case used to assert `expect(r1.exitCode).toBe(0)` AND
-// `expect(r2.exitCode).toBe(0)` UNCONDITIONALLY — an ASSUMED contract that
-// nothing in report-issue's specification promised, failing roughly one run in
-// ten and teaching every reader to re-run instead of to read. Both unconditional
-// assertions are gone. What it asserts now is the SPECIFIED contract (D2): both
+// this case used to assert that BOTH invocations exited zero, unconditionally,
+// one assertion per process — an ASSUMED contract that nothing in report-issue's
+// specification promised, failing roughly one run in ten and teaching every
+// reader to re-run instead of to read. Both of those assertions are gone from
+// this file (deliberately not quoted here in their code form, so an auditor
+// grepping for them finds zero hits). What it asserts now is the SPECIFIED
+// contract (D2): both
 // invocations wrote, OR exactly one wrote while the other refused with the
 // DECLARED exit code and stderr template — with the per-shape bookkeeping
 // (distinct ids, receipt lines, upstream task count) checked against whichever
