@@ -482,12 +482,24 @@ const WorkflowConfigSchema = z
      *   _createImpl`/`set` never fast-track a ledger knowledge doc (assessment/retro/
      *   handoff/uat) — it lands (and stays) `draft` exactly like every other type,
      *   pre-SPEC-103 byte-identical.
-     * @invariant `judgment_required_types: []` disables M2 entirely: `ReviewService.
-     *   approve` never requires a `review_judgments` row for ANY type — pre-SPEC-103
-     *   byte-identical. A non-empty array is the SET of `DocType` values M2 gates;
-     *   typed as `string[]` (not `DocType[]`) for the SAME leaf-of-dependency-graph
-     *   reason `resolveGateEnabled`'s `checkpoint` param is a plain string — this
-     *   module must not import `DocType`'s consumer-side gate-checkpoint machinery.
+     * @invariant `judgment_required_types: []` disables M2 entirely — for every doc
+     *   type AND every review decision, `escalate` included: `ReviewService.approve`
+     *   requires no `review_judgments` row and honours none it finds, pre-SPEC-103
+     *   byte-identical. This is the operator's total off-switch and is checked BEFORE
+     *   the escalate path below.
+     * @invariant A NON-EMPTY `judgment_required_types` is the SET of `DocType` values
+     *   whose approval M2 gates on a `reject`, on a missing judgment, and on a
+     *   self-review provenance collision — that scoping is deliberate: an AI judge
+     *   disagreeing with a record of what happened (a retro, an assessment) must not
+     *   hold event capture hostage. It does NOT scope `escalate`
+     *   (spec-an-escalate-blocks-approval-for-every-doc-type-and-the D1): an escalate
+     *   asserts an outstanding HUMAN decision and carries the questions in
+     *   `blocking_questions`, so once this list is non-empty an escalate blocks
+     *   approval for EVERY doc type, listed or not, and the denial renders those
+     *   questions. Typed as `string[]` (not `DocType[]`) for the SAME
+     *   leaf-of-dependency-graph reason `resolveGateEnabled`'s `checkpoint` param is a
+     *   plain string — this module must not import `DocType`'s consumer-side
+     *   gate-checkpoint machinery.
      * @invariant Absence of the whole `workflow` section, or of `review` within it,
      *   or of an individual field, ALL fall back to that field's own schema default
      *   (`true` / `["spec","adr"]`) — same "absence = default" shape as `staleness`/
@@ -498,7 +510,11 @@ const WorkflowConfigSchema = z
       .object({
         /** `false` disables M1 ledger fast-track entirely. Default: true. */
         ledger_auto_approve: z.boolean().default(true),
-        /** `DocType` values M2's judgment-required gate applies to. Default: ["spec","adr"]. */
+        /**
+         * `DocType` values M2 gates on a `reject` / missing judgment / provenance
+         * collision. An `escalate` gates every type regardless (see the second
+         * `@invariant` above); `[]` disables M2 entirely. Default: ["spec","adr"].
+         */
         judgment_required_types: z.array(z.string()).default(["spec", "adr"]),
       })
       .strict()

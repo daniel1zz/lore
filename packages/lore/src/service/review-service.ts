@@ -35,6 +35,7 @@ import { resolveDoc } from "./resolve.js";
 import {
   buildUpstreamSpecContext,
   countScriptModeAcceptanceCriteria,
+  isJudgmentEscalatedDenial,
   type GateContext,
 } from "./checkpoint-registry.js";
 import { resolvePrdSyncDomainDoc } from "./prd-sync-domain-doc.js";
@@ -211,10 +212,14 @@ export class ReviewService {
    *   behavior. Only `app.ts`'s composition root wires the real instance.
    * @param judgmentRequiredTypes - OPTIONAL SPEC-103 M2 resolved config value
    *   (`resolveJudgmentRequiredTypes`, `@lore/core`, default `["spec","adr"]`) — which
-   *   `DocType`s the `review-judgment` checkpoint applies to. Absent/`undefined`
-   *   (every bare unit-test construction) → treated as `[]` (no type gated), same
-   *   "absent in bare tests, present in production" DI shape as every other optional
-   *   constructor dependency on this class.
+   *   `DocType`s the `review-judgment` checkpoint's `reject`/`NO_JUDGMENT`/provenance-
+   *   collision outcomes apply to. A `JUDGMENT_ESCALATED` outcome is NOT type-scoped:
+   *   it blocks approval for every doc type whenever this list is non-empty
+   *   (spec-an-escalate-blocks-approval-for-every-doc-type-and-the D1, see
+   *   `enforceJudgmentRequiredGate`). Absent/`undefined` (every bare unit-test
+   *   construction) → treated as `[]`, which is M2's TOTAL kill switch (escalate
+   *   included, D3) — same "absent in bare tests, present in production" DI shape as
+   *   every other optional constructor dependency on this class.
    */
   constructor(
     private readonly store: StoreInterface,
@@ -373,8 +378,23 @@ export class ReviewService {
    *
    * A no-op (`ok(undefined)`) when: this service has no `gate`/`judgmentService`
    * wired (bare test construction, byte-identical to pre-SPEC-103 behavior), OR
-   * `doc.type` is not in `judgmentRequiredTypes` (M2's own per-type kill switch —
-   * an empty `judgmentRequiredTypes` disables this for EVERY type, AC-TIER-7).
+   * `judgmentRequiredTypes` is EMPTY (M2's total kill switch, AC-TIER-7/AC-ESC-3 —
+   * checked FIRST, ahead of the escalate path below, so an operator who turned M2
+   * off gets it off for every decision including `escalate`).
+   *
+   * @invariant spec-an-escalate-blocks-approval-for-every-doc-type-and-the D1 — for a
+   *   `doc.type` OUTSIDE `judgmentRequiredTypes` (and a non-empty list), exactly ONE
+   *   denial propagates: `JUDGMENT_ESCALATED`. An escalate asserts an outstanding
+   *   HUMAN decision and carries the questions, so filing it away silently is the
+   *   measured harm this gate exists to prevent. The other three outcomes stay
+   *   SUPPRESSED for such types — `JUDGMENT_REJECTED` (a judge disagreeing with a
+   *   record of what happened must not hold event capture hostage), `NO_JUDGMENT`
+   *   (propagating it would require a judgment before ANY knowledge doc could be
+   *   approved — far beyond what the governing ADR authorises), and
+   *   `JUDGMENT_PROVENANCE_COLLISION` (the same precondition, one step in).
+   *   The verdict itself is never re-derived here: the type filter is applied to the
+   *   PREDICATE's outcome via `isJudgmentEscalatedDenial`, keeping
+   *   `checkReviewJudgment` the single decision authority (D2).
    *
    * @param doc - The doc `approve()` is about to transition to "approved" — read at
    *   its CURRENT (pre-write) version, the version judgments are matched against.
@@ -384,9 +404,16 @@ export class ReviewService {
       return ok(undefined);
     }
     const requiredTypes = this.judgmentRequiredTypes ?? [];
-    if (!requiredTypes.includes(doc.type)) {
+    // reason: D3 — the documented `judgment_required_types: []` kill switch
+    // short-circuits BEFORE the escalate path, so an empty list stays byte-identical
+    // to pre-SPEC-103 behavior for EVERY decision. The pre-existing AC-TIER-7 test
+    // covers only "[] + no judgment at all" and would NOT catch an escalate leaking
+    // past an empty list — `review-judgment-escalate-scope.test.ts`'s AC-ESC-3 is
+    // that guard, and it fails if this early return is moved below the enforce call.
+    if (requiredTypes.length === 0) {
       return ok(undefined);
     }
+    const typeIsGated = requiredTypes.includes(doc.type);
 
     const judgmentsResult = await this.judgmentService.listFor(doc.id, "review");
     if (!judgmentsResult.ok) return judgmentsResult;
@@ -401,20 +428,32 @@ export class ReviewService {
 
     let provenanceCollision = false;
     const independentDecisions: ReviewDecision[] = [];
+    // reason: D4 — the escalate denial renders these verbatim, so they are collected
+    // from the SAME independent-judgment walk the decisions come from (never a second
+    // read): a question that belongs to a provenance-colliding judgment is not part of
+    // the verdict and must not be presented as if it were.
+    const blockingQuestions: string[] = [];
     for (const judgment of currentVersionJudgments) {
       if (aiProvenance !== undefined && judgeIdentitiesEqual(judgment.judge, aiProvenance)) {
         provenanceCollision = true;
         continue;
       }
       independentDecisions.push(judgment.decision);
+      if (judgment.decision === "escalate") {
+        blockingQuestions.push(...judgment.blocking_questions);
+      }
     }
 
     const ctx: GateContext = {
       targetIdOrSlug: doc.slug,
       reviewJudgmentDecisions: independentDecisions,
       reviewJudgmentProvenanceCollision: provenanceCollision,
+      reviewJudgmentBlockingQuestions: blockingQuestions,
     };
-    return this.gate.enforcer.enforce("review-judgment", ctx);
+    const enforceResult = this.gate.enforcer.enforce("review-judgment", ctx);
+    if (enforceResult.ok || typeIsGated) return enforceResult;
+    // D1 — an ungated type: only the escalate verdict escapes the type list.
+    return isJudgmentEscalatedDenial(enforceResult.error) ? enforceResult : ok(undefined);
   }
 
   /**
