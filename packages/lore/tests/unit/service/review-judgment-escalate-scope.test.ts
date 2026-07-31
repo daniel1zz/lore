@@ -1,5 +1,5 @@
 /**
- * Tests for `spec-an-escalate-blocks-approval-for-every-doc-type-and-the` (D1-D4):
+ * Tests for `spec-an-escalate-blocks-approval-for-every-doc-type-and-the` (D1-D5):
  * the `escalate` VERDICT escapes `workflow.review.judgment_required_types` and blocks
  * approval for EVERY doc type, while `reject` / `NO_JUDGMENT` /
  * `JUDGMENT_PROVENANCE_COLLISION` stay scoped to the listed types — and the escalate
@@ -16,14 +16,16 @@
  *               preserved, not quietly universalised)
  *   BOUNDARY:   `judgment_required_types: []` still approves an escalate (the total
  *               kill switch short-circuits BEFORE the escalate path); a reject+escalate
- *               pair on an ungated type resolves by worst-decision-wins to the
- *               suppressed reject
+ *               pair on an ungated type BLOCKS on the escalate (D5), in either
+ *               recording order
  *   ERROR:      an escalating judgment carrying ZERO blocking_questions renders an
  *               explicit "none recorded" denial rather than an empty section
  *   STATE:      an ungated doc with NO judgment at all, and one whose only judgment
  *               collided with `extra.ai_provenance`, both still approve
- *   REGRESSION: gated types unaffected in both directions; the `config.ts` @invariant
- *               prose no longer claims the key governs M2 for ANY type
+ *   REGRESSION: gated types unaffected in both directions (incl. the reject+escalate
+ *               pair, which still blocks on the REJECT — the anti-lottery rule); the
+ *               `config.ts` @invariant prose no longer claims the key governs M2 for
+ *               ANY type
  *
  * @spec_ref spec-an-escalate-blocks-approval-for-every-doc-type-and-the
  */
@@ -41,6 +43,7 @@ import type {
   DocRecord,
   JudgeIdentity,
   NewReviewJudgment,
+  ReviewDecision,
   ReviewJudgment,
   Telemetry,
 } from "@lore/core";
@@ -210,30 +213,6 @@ describe("AC-ESC-2 reject on an ungated type still approves", () => {
     expect(approveResult.value.status).toBe("approved");
   });
 
-  it("BOUNDARY: reject alongside escalate on an ungated type resolves to the suppressed reject and approves", async () => {
-    const { corpusService, judgmentService, reviewService } = makeApp();
-    const prd = await makeRootPrd(corpusService);
-    const doc = await makeUngatedKnowledge(corpusService, prd);
-
-    const escalate = await judgmentService.record(
-      makeNewJudgment({
-        doc_id: doc.id,
-        doc_version: doc.version,
-        decision: "escalate",
-        blocking_questions: ["Should this be an ADR instead?"],
-      }),
-    );
-    if (!escalate.ok) throw new Error("record escalate failed");
-    const reject = await judgmentService.record(
-      makeNewJudgment({ doc_id: doc.id, doc_version: doc.version, decision: "reject" }),
-    );
-    if (!reject.ok) throw new Error("record reject failed");
-
-    // Worst-decision-wins (D3 of SPEC-103) makes the single propagating failure
-    // JUDGMENT_REJECTED, which stays scoped to the listed types — so this approves.
-    const approveResult = await reviewService.approve(doc.id);
-    expect(approveResult.ok).toBe(true);
-  });
 });
 
 // ─── AC-ESC-3: the [] kill switch survives ────────────────────────────────────
@@ -551,5 +530,102 @@ describe("AC-ESC-8 config invariant prose matches the shipped scoping", () => {
     expect(combined).toMatch(/reject/i);
     expect(combined).toMatch(/escalate/i);
     expect(combined).toContain("judgment_required_types: []");
+  });
+});
+
+// ─── AC-ESC-9: an escalate PRESENT blocks, even alongside a reject (D5) ───────
+
+/**
+ * D5 (spec amendment 2026-07-31). The INVERTED form of the BOUNDARY case this file
+ * previously pinned as passing: an ungated type carrying BOTH a `reject` and an
+ * `escalate` on the SAME version used to resolve by worst-decision-wins to the
+ * (type-suppressed) `reject` and APPROVE, losing the escalate. Adding a WEAKER,
+ * deliberately-suppressible signal must not destroy a STRONGER one — a control
+ * defeatable by adding noise is not a control.
+ *
+ * Reachable, not theoretical: `lore review` does not bump the doc version, so two
+ * runs against one version produce two same-version judgments that may disagree.
+ *
+ * The two CONTROL cases are the load-bearing half — they pin that the fix did NOT
+ * become "escalate outranks reject everywhere" (gated types must still block on the
+ * reject: the anti-lottery rule) and did NOT leak past the `[]` kill switch (D3).
+ */
+describe("AC-ESC-9 escalate present blocks even alongside a reject", () => {
+  const PAIR_QUESTION = "Should this be an ADR instead?";
+
+  /** Records `escalate` + `reject` on `doc`'s current version, in the given order. */
+  async function recordPair(
+    judgmentService: ReturnType<typeof makeApp>["judgmentService"],
+    doc: DocRecord,
+    order: readonly ReviewDecision[],
+  ): Promise<void> {
+    for (const decision of order) {
+      const recorded = await judgmentService.record(
+        makeNewJudgment({
+          doc_id: doc.id,
+          doc_version: doc.version,
+          decision,
+          ...(decision === "escalate" ? { blocking_questions: [PAIR_QUESTION] } : {}),
+        }),
+      );
+      if (!recorded.ok) throw new Error(`record ${decision} failed: ${JSON.stringify(recorded.error)}`);
+    }
+  }
+
+  it("an ungated type carrying BOTH a reject and an escalate is refused ON THE ESCALATE", async () => {
+    const { corpusService, judgmentService, reviewService } = makeApp();
+    const prd = await makeRootPrd(corpusService);
+    const doc = await makeUngatedKnowledge(corpusService, prd);
+    await recordPair(judgmentService, doc, ["escalate", "reject"]);
+
+    const approveResult = await reviewService.approve(doc.id);
+    expect(approveResult.ok).toBe(false);
+    if (approveResult.ok) return;
+    expect(approveResult.error.code).toBe("VALIDATION_ERROR");
+    expect(judgmentField(approveResult.error)).toContain("review-judgment");
+    const message = judgmentMessage(approveResult.error);
+    expect(message).toContain("JUDGMENT_ESCALATED");
+    // D4 must not regress: the denial still carries the ESCALATING judgment's questions.
+    expect(message.split("\n").map((l) => l.trim())).toContain(`- ${PAIR_QUESTION}`);
+  });
+
+  it("BOUNDARY: the block is order-independent — the reject recorded FIRST still blocks on the escalate", async () => {
+    const { corpusService, judgmentService, reviewService } = makeApp();
+    const prd = await makeRootPrd(corpusService);
+    const doc = await makeUngatedKnowledge(corpusService, prd);
+    await recordPair(judgmentService, doc, ["reject", "escalate"]);
+
+    const approveResult = await reviewService.approve(doc.id);
+    expect(approveResult.ok).toBe(false);
+    if (approveResult.ok) return;
+    expect(judgmentMessage(approveResult.error)).toContain("JUDGMENT_ESCALATED");
+  });
+
+  it("CONTROL: a GATED type with the same pair still blocks on the REJECT (worst-decision-wins intact)", async () => {
+    const { corpusService, judgmentService, reviewService } = makeApp();
+    const prd = await makeRootPrd(corpusService);
+    const spec = await makeSpec(corpusService, prd);
+    await recordPair(judgmentService, spec, ["escalate", "reject"]);
+
+    const approveResult = await reviewService.approve(spec.id);
+    expect(approveResult.ok).toBe(false);
+    if (approveResult.ok) return;
+    const message = judgmentMessage(approveResult.error);
+    expect(message).toContain("JUDGMENT_REJECTED");
+    // The anti-lottery rule: a reject on a gated type must never be out-rolled, so
+    // the gated denial must NOT have flipped to the escalate reason.
+    expect(message).not.toContain("JUDGMENT_ESCALATED");
+  });
+
+  it("CONTROL: an empty judgment_required_types still APPROVES the same pair (D3 short-circuits first)", async () => {
+    const { corpusService, judgmentService, reviewService } = makeApp({ judgmentRequiredTypes: [] });
+    const prd = await makeRootPrd(corpusService);
+    const doc = await makeUngatedKnowledge(corpusService, prd);
+    await recordPair(judgmentService, doc, ["escalate", "reject"]);
+
+    const approveResult = await reviewService.approve(doc.id);
+    expect(approveResult.ok).toBe(true);
+    if (!approveResult.ok) return;
+    expect(approveResult.value.status).toBe("approved");
   });
 });

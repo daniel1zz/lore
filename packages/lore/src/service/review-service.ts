@@ -395,6 +395,16 @@ export class ReviewService {
    *   The verdict itself is never re-derived here: the type filter is applied to the
    *   PREDICATE's outcome via `isJudgmentEscalatedDenial`, keeping
    *   `checkReviewJudgment` the single decision authority (D2).
+   * @invariant same spec, D5 — for an ungated type the question is "is ANY independent
+   *   current-version decision an `escalate`?", NOT "is the WORST one?". An escalate
+   *   PRESENT blocks even when a `reject` accompanies it on the same version
+   *   (reachable: `lore review` does not bump the version, so two runs against one
+   *   version can disagree). Enforced by narrowing the decision VECTOR handed to the
+   *   predicate for such types, not by reinterpreting its verdict — adding a weaker,
+   *   deliberately-suppressible signal must never destroy a stronger one, and a
+   *   control defeatable by adding noise is not a control. Unchanged by this: gated
+   *   types (the same pair still blocks on the REJECT — the anti-lottery rule) and the
+   *   `[]` kill switch, which still short-circuits above (D3).
    *
    * @param doc - The doc `approve()` is about to transition to "approved" — read at
    *   its CURRENT (pre-write) version, the version judgments are matched against.
@@ -444,15 +454,36 @@ export class ReviewService {
       }
     }
 
+    // reason: D5 — for an UNGATED type the question is "is ANY independent
+    // current-version decision an `escalate`?", never "is the WORST one?". Narrowing
+    // the vector to the only verdict that is policy-relevant for such types is what
+    // makes those two questions coincide: worst-decision-wins over an escalate-only
+    // vector yields `escalate` whenever one is present, so a co-recorded `reject`
+    // (suppressible opinion for these types, D1) can no longer out-rank and thereby
+    // DESTROY the escalate. The gated path keeps the FULL vector — there,
+    // worst-decision-wins is the anti-lottery rule and a reject must never be
+    // out-rolled. `checkReviewJudgment` stays the single decision authority either
+    // way (D2): the service selects which decisions are in policy scope for the
+    // type, the predicate alone decides what they mean.
+    const policyScopedDecisions = typeIsGated
+      ? independentDecisions
+      : independentDecisions.filter((decision) => decision === "escalate");
+
     const ctx: GateContext = {
       targetIdOrSlug: doc.slug,
-      reviewJudgmentDecisions: independentDecisions,
+      reviewJudgmentDecisions: policyScopedDecisions,
       reviewJudgmentProvenanceCollision: provenanceCollision,
       reviewJudgmentBlockingQuestions: blockingQuestions,
     };
     const enforceResult = this.gate.enforcer.enforce("review-judgment", ctx);
     if (enforceResult.ok || typeIsGated) return enforceResult;
-    // D1 — an ungated type: only the escalate verdict escapes the type list.
+    // D1 — an ungated type: only the escalate verdict escapes the type list. With the
+    // vector narrowed above, the remaining reachable denials are `NO_JUDGMENT` (no
+    // escalate present) and `JUDGMENT_PROVENANCE_COLLISION` (a colliding judgment and
+    // no independent escalate) — both suppressed here, which is exactly D1's
+    // precondition half (AC-ESC-7). Kept as an explicit filter rather than an
+    // `includes("escalate")` branch so the PREDICATE's outcome, not a service-side
+    // re-derivation, remains what decides.
     return isJudgmentEscalatedDenial(enforceResult.error) ? enforceResult : ok(undefined);
   }
 
