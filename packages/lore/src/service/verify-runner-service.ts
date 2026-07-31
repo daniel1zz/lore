@@ -14,6 +14,13 @@
  *      precedent, SPEC-038 §7 D4)
  *   ② core `resolveTargetTask` (`@lore/core`, pure) — explicit `--task` override wins;
  *      otherwise the plan's sole fresh (non-stale) claim; 0 or >1 candidates fail loud
+ *   ②.4 declared-scope selection + pre-flight refusal (`_selectDeclaredScopeCriteria`,
+ *      pure; core `extractDeclaredAcScope` + `isAcInDeclaredScope`) — the resolved
+ *      TASK's `extra.ac_scope` decides which declared criteria this run may touch:
+ *      a default run selects `ac_scope ∩ declared criteria`, an out-of-scope `--ac`
+ *      id refuses the WHOLE run, and an absent/empty/fully-dangling scope refuses
+ *      too. Every refusal is `VALIDATION_ERROR` (exit 4, stderr) raised BEFORE any
+ *      executor or `recordVerifiedEvidence` call — see that method's own table
  *   ②.5 M2 command-provenance approval gate (core `isApprovedVerifyCommand`, pure) —
  *      a command absent from the target task's evidence history is "new/changed" and
  *      requires explicit approval (interactive `opts.confirmUnapprovedCommand` or
@@ -78,8 +85,18 @@
  *   - A `spec` whose status is not `approved`/`active` still runs in full — this is
  *     advisory (`result.warnings`), never a hard gate (SPEC-039 §3 "draft spec 的
  *     AC → 执行 + stderr 警告行(不硬闸)").
- *   - `ai`/`human`-mode criteria in the (optionally `acIds`-filtered) selection are
- *     never executed — they are reported in `result.skipped`, never silently dropped.
+ *   - `ai`/`human`-mode criteria in the (declared-scope- and optionally
+ *     `acIds`-filtered) selection are never executed — they are reported in
+ *     `result.skipped`, never silently dropped.
+ *   - The target task's declared `ac_scope` is the ONLY thing that widens a default
+ *     run's write scope (step ②.4). This service never infers a scope from the
+ *     spec's full criteria list, and never from the task's existing evidence — the
+ *     latter is the circular "audited evidence defines its own audit scope" defect
+ *     `adr-lore-verify-s-attested-evidence-scope-belongs-to-the-task` removes.
+ *   - A run that would select ZERO criteria is a refusal, never an exit-0 no-op:
+ *     an absent scope (with no `--ac`), an empty scope, and a scope matching no
+ *     declared criterion all fail loud. A `skipped`-only outcome (an in-scope
+ *     `ai`/`human` criterion) is NOT zero-selection and stays a success.
  *   - `resolveVerifyEnv` is called EXACTLY ONCE per `verifyPlan` invocation (env
  *     doesn't vary per-AC) — never re-derived inside the per-AC loop.
  *   - `opts.confirmUnapprovedCommand` is a PER-CALL option, not constructor DI — the
@@ -111,10 +128,19 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { err, ok } from "@lore/core";
-import type { Result, LoreError, DocId, DocRecord, PlanBundle } from "@lore/core";
+import type {
+  Result,
+  LoreError,
+  AcceptanceCriterion,
+  DocId,
+  DocRecord,
+  PlanBundle,
+} from "@lore/core";
 import {
   specAcceptanceCriteriaSchema,
   resolveTargetTask,
+  extractDeclaredAcScope,
+  isAcInDeclaredScope,
   isApprovedVerifyCommand,
   countExplicitPathArgs,
   parseExecutedUnits,
@@ -136,6 +162,25 @@ import {
   type VerifyExecutionResult,
 } from "./verify-spawn.js";
 import type { VerifiedEvidenceInput } from "./task-workflow-service.js";
+
+// ─── Pinned refusal literals (declared-scope contract) ─────────────────────
+
+/**
+ * The repair command every scope refusal names. PINNED by
+ * `spec-declared-scope-attestation-contract-task-owned-ac-scope` §"Exit codes
+ * and pinned message literals" (AC-VS-3 matches this exact substring), so it is
+ * a named constant: reword the surrounding sentence freely, change THIS string
+ * and a declared AC goes red by construction.
+ */
+const SCOPE_WRITER_HINT = "lore scope add";
+
+/**
+ * The EMPTY-`ac_scope` refusal's pinned literal (AC-VS-5). Contractually ABSENT
+ * from the absent-scope message: "empty" (an author declared this task claims
+ * nothing) and "absent" (nobody ever declared a scope) are two states, and the
+ * two refusals must be distinguishable by a fixed string, not by wording taste.
+ */
+const EMPTY_SCOPE_LITERAL = "declares no acceptance criterion";
 
 // ─── Public Types ──────────────────────────────────────────────────────────
 
@@ -363,6 +408,111 @@ export class VerifyRunnerService {
   }
 
   /**
+   * Step ②.4 — the declared-scope pre-flight: decides WHICH declared criteria
+   * this run may touch, or REFUSES the whole run before any command executes.
+   * Pure over its arguments (no IO, no state) — the only reason it is a method
+   * rather than a free function is that its four refusals are part of this
+   * service's contract surface.
+   *
+   * Three-valued by construction, reading the task's declaration through
+   * `extractDeclaredAcScope` (`@lore/core`, which preserves absent-vs-empty):
+   *
+   * | declared `ac_scope` | `--ac` absent                     | `--ac` present                                    |
+   * |---|---|---|
+   * | ABSENT (`undefined`) | REFUSE, naming `lore scope add`  | run exactly the named ids (D2's stated escape)     |
+   * | EMPTY (`[]`)         | REFUSE (`declares no acceptance criterion`) | REFUSE, same message — an un-declaration claims nothing, with or without a flag |
+   * | POPULATED            | run `scope ∩ declared criteria`  | REFUSE if any named id is outside the scope, else run the named ids |
+   *
+   * A POPULATED scope whose ids match NO declared criterion is also refused: a
+   * run selecting zero criteria would attest nothing while exiting 0, which is
+   * the vacuous-pass shape this whole contract exists to remove. This is the
+   * READ-side refusal `acScopeArraySchema`'s invariant (`phase.ts`) delegates
+   * here — cross-entity membership is deliberately unchecked at the writer.
+   * A scope that matches SOME criteria is fine: an `ai`/`human`-mode criterion
+   * in scope is legitimately claimed and simply lands in `result.skipped`.
+   *
+   * @param criteria - every criterion declared on the parent spec (already
+   *   `specAcceptanceCriteriaSchema`-parsed, non-empty)
+   * @param task - the resolved target task, the SOLE owner of the declaration
+   * @param specSlug - parent spec slug, for the dangling-scope diagnostic only
+   * @param acIds - `opts.acIds`, already validated to name only declared ids
+   * @returns the criteria this run may execute/record, or a `VALIDATION_ERROR`
+   *   (CLI exit 4, stderr) whose message carries the pinned literal for its case
+   */
+  private _selectDeclaredScopeCriteria(
+    criteria: AcceptanceCriterion[],
+    task: DocRecord,
+    specSlug: string,
+    acIds: string[] | undefined,
+  ): Result<AcceptanceCriterion[], LoreError> {
+    const declared = extractDeclaredAcScope(task);
+    const selectNamed = (ids: string[]): AcceptanceCriterion[] => {
+      const idSet = new Set(ids);
+      return criteria.filter((c) => idSet.has(c.id));
+    };
+
+    if (declared === undefined) {
+      if (acIds !== undefined) return ok(selectNamed(acIds));
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "ac_scope",
+        message:
+          `task "${task.slug}" has no declared ac_scope, so lore verify cannot know which ` +
+          "acceptance criteria it claims — an unknown scope is never promoted to the spec's " +
+          `full scope. Declare it with '${SCOPE_WRITER_HINT} ${task.slug} <AC-ID>' ` +
+          "(repeatable), or name the criteria for this run explicitly with --ac <AC-ID>.",
+        value: task.slug,
+      });
+    }
+
+    if (declared.length === 0) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "ac_scope",
+        message:
+          `task "${task.slug}" ${EMPTY_SCOPE_LITERAL} — its ac_scope is an EMPTY array, an ` +
+          "explicit un-declaration (a different state from an absent field), so there is " +
+          `nothing for lore verify to attest. Re-declare with '${SCOPE_WRITER_HINT} ` +
+          `${task.slug} <AC-ID>' before verifying.`,
+        value: task.slug,
+      });
+    }
+
+    if (acIds !== undefined) {
+      const offending = acIds.filter((id) => !isAcInDeclaredScope(declared, id));
+      if (offending.length > 0) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "acIds",
+          message:
+            `--ac named acceptance criterion id(s) outside task "${task.slug}"'s declared ` +
+            `ac_scope: ${offending.join(", ")}. That task declares: ${declared.join(", ")}. ` +
+            "lore verify never attests an AC the target task does not claim — widen the " +
+            `declaration with '${SCOPE_WRITER_HINT} ${task.slug} ${offending.join(" ")}', or ` +
+            "retarget the run with --task.",
+          value: offending,
+        });
+      }
+      return ok(selectNamed(acIds));
+    }
+
+    const inScope = criteria.filter((c) => isAcInDeclaredScope(declared, c.id));
+    if (inScope.length === 0) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "ac_scope",
+        message:
+          `task "${task.slug}"'s declared ac_scope matches none of the acceptance criteria ` +
+          `on spec "${specSlug}" — scope ids: ${declared.join(", ")}. A run selecting zero ` +
+          "criteria would attest nothing while exiting 0, so it is refused: fix the scope " +
+          `('${SCOPE_WRITER_HINT}' / 'lore scope rm') or the spec's acceptance_criteria.`,
+        value: declared,
+      });
+    }
+    return ok(inScope);
+  }
+
+  /**
    * Runs a plan's declared script-mode acceptance criteria for real and records
    * runner-attested evidence for each. See the class-level JSDoc for the four-step
    * pipeline and the module-level invariants (launch-failure abort semantics, the
@@ -374,7 +524,9 @@ export class VerifyRunnerService {
    * @returns `VerifyPlanResult` — every recorded AC outcome, every skipped
    *   non-script AC, and any advisory warnings
    * @throws DOC_NOT_FOUND, VALIDATION_ERROR (plan has no parent spec / spec has no
-   *   structured acceptance_criteria / unknown acIds / target-task ambiguity),
+   *   structured acceptance_criteria / unknown acIds / target-task ambiguity / any
+   *   of step ②.4's four declared-scope refusals — absent, empty, out-of-scope
+   *   `--ac`, fully-dangling scope),
    *   STALE_VERSION (a concurrent writer raced an evidence write), STORE_ERROR
    *   (a script command failed to LAUNCH — the run aborts, no partial evidence
    *   ambiguity; the message lists every AC id already recorded before the abort),
@@ -412,9 +564,12 @@ export class VerifyRunnerService {
       });
     }
 
-    let selected = criteriaParsed.data;
+    // The pre-existing unknown-AC-id check stays HERE, ahead of target-task
+    // resolution: an id no spec criterion declares is a caller error regardless
+    // of which task the run would target (REGRESSION-pinned — the refusal names
+    // field "acIds" and fires even for an ambiguous target).
     if (opts.acIds !== undefined) {
-      const declaredIds = new Set(selected.map((c) => c.id));
+      const declaredIds = new Set(criteriaParsed.data.map((c) => c.id));
       const unknown = opts.acIds.filter((id) => !declaredIds.has(id));
       if (unknown.length > 0) {
         return err({
@@ -423,18 +578,6 @@ export class VerifyRunnerService {
           message: `unknown AC id(s) not declared on spec "${spec.slug}": ${unknown.join(", ")}`,
           value: unknown,
         });
-      }
-      const idSet = new Set(opts.acIds);
-      selected = selected.filter((c) => idSet.has(c.id));
-    }
-
-    const scriptCriteria: ScriptAcceptanceCriterion[] = [];
-    const skipped: VerifySkippedAc[] = [];
-    for (const criterion of selected) {
-      if (criterion.verify.mode === "script") {
-        scriptCriteria.push(criterion as ScriptAcceptanceCriterion);
-      } else {
-        skipped.push({ ac_id: criterion.id, mode: criterion.verify.mode });
       }
     }
 
@@ -448,6 +591,27 @@ export class VerifyRunnerService {
     });
     if (!targetResult.ok) return targetResult;
     const task = targetResult.value;
+
+    // ②.4 declared-scope selection + pre-flight refusal — MUST run after ② (the
+    // declaration lives on the resolved task) and BEFORE anything in step ③,
+    // so a refusal leaves zero executions and zero recorded entries.
+    const selectionResult = this._selectDeclaredScopeCriteria(
+      criteriaParsed.data,
+      task,
+      spec.slug,
+      opts.acIds,
+    );
+    if (!selectionResult.ok) return selectionResult;
+
+    const scriptCriteria: ScriptAcceptanceCriterion[] = [];
+    const skipped: VerifySkippedAc[] = [];
+    for (const criterion of selectionResult.value) {
+      if (criterion.verify.mode === "script") {
+        scriptCriteria.push(criterion as ScriptAcceptanceCriterion);
+      } else {
+        skipped.push({ ac_id: criterion.id, mode: criterion.verify.mode });
+      }
+    }
 
     const warnings: string[] = [];
     if (spec.status !== "approved" && spec.status !== "active") {
