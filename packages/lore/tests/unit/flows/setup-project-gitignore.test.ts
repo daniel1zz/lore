@@ -82,7 +82,14 @@ class InMemoryProjectFs implements ProjectFsPort {
     const name = src.split("/").pop() as string;
     this.files.set(`${destDir}/${name}`, { ...file });
   }
-  remove(path: string): void {
+  /**
+   * `_opts` is DECLARED even though this fake ignores it (D8 of
+   * spec-lore-setup-deletes-repo-source-through-dev-symlinks) — see the identical
+   * note in `setup-project-claudemd.test.ts`: a double typed `remove(path)` opts
+   * OUT of the required-boundary constraint and lets the wrapper below drop the
+   * boundary on its forward with no compile error.
+   */
+  remove(path: string, _opts: { boundary: string }): void {
     this.files.delete(path);
   }
 }
@@ -93,7 +100,8 @@ function withInjectedWriteFailure(base: InMemoryProjectFs, failOnPath: string): 
     readFile: (p) => base.readFile(p),
     mkdir: (p) => base.mkdir(p),
     backup: (s, d) => base.backup(s, d),
-    remove: (p) => base.remove(p),
+    // Forwards `opts` rather than dropping it (D8).
+    remove: (p, opts) => base.remove(p, opts),
     writeFile(path: string, content: string, mode: number): void {
       if (path === failOnPath) throw new Error(`injected write failure: ${path}`);
       base.writeFile(path, content, mode);

@@ -777,7 +777,11 @@ describe("RealSetupFsWriter.remove", () => {
     writeFileSync(target, "content");
 
     const writer = new RealSetupFsWriter();
-    await writer.remove(target);
+    // `boundary` is REQUIRED (D8 of
+    // spec-lore-setup-deletes-repo-source-through-dev-symlinks) — the scratch
+    // root is the natural boundary for these cases, and passing it means the
+    // ancestor scan actually runs here rather than being skipped.
+    await writer.remove(target, { boundary: root });
 
     expect(existsSync(target)).toBe(false);
   });
@@ -789,7 +793,7 @@ describe("RealSetupFsWriter.remove", () => {
     writeFileSync(join(target, "nested", "file.txt"), "content");
 
     const writer = new RealSetupFsWriter();
-    await writer.remove(target);
+    await writer.remove(target, { boundary: root });
 
     expect(existsSync(target)).toBe(false);
   });
@@ -797,7 +801,7 @@ describe("RealSetupFsWriter.remove", () => {
   it("BOUNDARY: a missing target is a no-op, not an error", async () => {
     const root = makeScratchDir("fs-writer-remove-missing-");
     const writer = new RealSetupFsWriter();
-    await expect(writer.remove(join(root, "does-not-exist"))).resolves.toBeUndefined();
+    await expect(writer.remove(join(root, "does-not-exist"), { boundary: root })).resolves.toBeUndefined();
   });
 });
 
