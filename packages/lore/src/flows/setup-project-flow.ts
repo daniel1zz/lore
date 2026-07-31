@@ -214,7 +214,7 @@ export interface ProjectFsPort {
    * at `path`. A missing target is a no-op. Same additive-capability
    * rationale as {@link backup}. MAY throw on a genuine IO failure.
    */
-  remove?(path: string): void;
+  remove?(path: string, opts?: { boundary?: string }): void;
 }
 
 /**
@@ -622,7 +622,14 @@ async function runManifestWriteSeam(
       if (deps.fs.remove === undefined) {
         throw new Error(`ProjectFsPort.remove is not implemented by this port — cannot remove now-undeclared "${removedPath}"`);
       }
-      deps.fs.remove(join(repoDir, removedPath));
+      // `boundary` is REQUIRED here, not decorative: without it removeProjectPath
+      // skips its ancestor-symlink scan and deletes THROUGH a developer's link
+      // (spec-lore-setup-deletes-repo-source-through-dev-symlinks D3/D4). This
+      // path fires on an ordinary `lore setup --project` re-run whenever a
+      // previously-tracked file drops out of the candidate set, so it is not an
+      // uninstall-only concern. A refusal lands in the catch below and leaves
+      // the path in place — the correct outcome for a best-effort sweep.
+      deps.fs.remove(join(repoDir, removedPath), { boundary: repoDir });
     } catch {
       // Best-effort: a removal failure just leaves a stale foreign file on disk.
       // The ledger no longer claims it either way (it's excluded below by

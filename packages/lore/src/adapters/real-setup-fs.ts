@@ -98,7 +98,7 @@ import {
   type Stats,
 } from "node:fs";
 import { createHash } from "node:crypto";
-import { basename, dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import type { SetupFsReader, SetupFsWriter } from "../service/setup-service.js";
 
@@ -279,8 +279,31 @@ function lstatOrNull(path: string): Stats | null {
  */
 function findSymlinkAncestor(target: string, boundary: string): string | null {
   const root = resolve(boundary);
+  const resolvedTarget = resolve(target);
+  const rel = relative(root, resolvedTarget);
+
+  // A target that does not resolve INSIDE the boundary means the caller paired a
+  // path with a boundary it does not belong to. Returning `null` there — the
+  // original behaviour — silently skips the ancestor scan, i.e. quietly drops the
+  // protection at exactly the moment the arguments stopped making sense. Review
+  // found this reachable on a case-insensitive filesystem (macOS APFS default):
+  // a boundary differing only in case makes the prefix comparison false, the scan
+  // is skipped, and a removal proceeds THROUGH a symlink. Every current call site
+  // derives both strings from one source so none can hit it today, but the
+  // primitive must fail loud rather than fail open.
+  if (rel.startsWith("..") || isAbsolute(rel)) {
+    throw new Error(
+      `refusing to remove ${target}: it does not resolve inside the declared boundary ${boundary} (relative path "${rel}"). ` +
+        `Nothing was removed. This is a caller error — the symlink-ancestor protection cannot be applied to a path outside its own boundary, ` +
+        `and skipping the check silently would reinstate the reach-through deletion this guard exists to prevent.`,
+    );
+  }
+
+  // The target IS the boundary — there are no ancestors inside it to scan.
+  if (rel === "") return null;
+
   const prefix = root + sep;
-  let current = dirname(resolve(target));
+  let current = dirname(resolvedTarget);
 
   while (current !== root && current.startsWith(prefix)) {
     const stats = lstatOrNull(current);

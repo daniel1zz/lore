@@ -31,6 +31,7 @@ import { RealSetupFsWriter, removeProjectPath } from "../../../src/adapters/real
  */
 const SETUP_SERVICE_SOURCE = new URL("../../../src/service/setup-service.ts", import.meta.url);
 const PROJECT_UNINSTALL_SOURCE = new URL("../../../src/flows/setup-project-uninstall.ts", import.meta.url);
+const PROJECT_FLOW_SOURCE = new URL("../../../src/flows/setup-project-flow.ts", import.meta.url);
 
 /** Sentinel content — a test that deletes the far-side file cannot fake having preserved it. */
 const SSOT_CONTENT = "SSOT: this file lives in the developer's repo, not in the install tree\n";
@@ -171,6 +172,49 @@ describe("RealSetupFsWriter removal never resolves through a symlink", () => {
     });
   });
 
+  describe("ERROR — a target outside its boundary fails loud instead of skipping the check", () => {
+    // The original code returned null here, which SKIPPED the ancestor scan —
+    // dropping the protection precisely when the arguments stopped making sense.
+    // Review found it reachable on a case-insensitive filesystem: a boundary
+    // differing only in case makes the prefix test false and the removal then
+    // proceeds through a symlink.
+    it("throws rather than removing when the path does not resolve inside the boundary", async () => {
+      const outside = join(root, "outside");
+      mkdirSync(outside, { recursive: true });
+      const file = join(outside, "f.md");
+      writeFileSync(file, "not ours\n");
+
+      const writer = new RealSetupFsWriter();
+      await expect(writer.remove(file, { boundary: targetDir })).rejects.toThrow(/does not resolve inside/i);
+      expect(existsSync(file)).toBe(true);
+    });
+
+    it("a boundary differing only in case is rejected, not silently unprotected", async () => {
+      const victim = join(repoDir, "cased-victim.md");
+      writeFileSync(victim, SSOT_CONTENT);
+      const dir = join(targetDir, "CasedDir");
+      mkdirSync(dir, { recursive: true });
+      const linkPath = join(dir, "link");
+      symlinkSync(repoDir, linkPath);
+
+      const writer = new RealSetupFsWriter();
+      // Same tree, boundary spelled with different case.
+      await expect(
+        writer.remove(join(linkPath, "cased-victim.md"), { boundary: targetDir.toUpperCase() }),
+      ).rejects.toThrow();
+      expect(existsSync(victim)).toBe(true);
+      expect(readFileSync(victim, "utf8")).toBe(SSOT_CONTENT);
+    });
+
+    it("a target EQUAL to the boundary is allowed (no ancestors inside it to scan)", async () => {
+      const selfDir = join(root, "self");
+      mkdirSync(join(selfDir, "child"), { recursive: true });
+      const writer = new RealSetupFsWriter();
+      await writer.remove(selfDir, { boundary: selfDir });
+      expect(existsSync(selfDir)).toBe(false);
+    });
+  });
+
   describe("STATE — ordinary installs are unaffected", () => {
     it("removes a real nested file and a real directory tree exactly as before", async () => {
       const dir = join(targetDir, "hooks", "nested");
@@ -208,6 +252,12 @@ describe("RealSetupFsWriter removal never resolves through a symlink", () => {
     it.each([
       { label: "setup-service.ts (machine install)", source: SETUP_SERVICE_SOURCE, pattern: /this\.writer\.remove\([^;]*\);/g },
       { label: "setup-project-uninstall.ts (per-repo scaffold)", source: PROJECT_UNINSTALL_SOURCE, pattern: /\bfs\.remove\([^;]*\);/g },
+      // Third file added after a second review found a FOURTH unprotected call
+      // site here — reachable from an ordinary `lore setup --project` re-run, not
+      // just uninstall. Two rounds of fixes and one review pass all enumerated
+      // call sites by memory of which files "the fix touched"; this pin exists so
+      // enumeration stops depending on that.
+      { label: "setup-project-flow.ts (scaffold write path)", source: PROJECT_FLOW_SOURCE, pattern: /\bdeps\.fs\.remove\([^;]*\);/g },
     ])("no removal call in $label omits the boundary option", ({ source, pattern }) => {
       const text = readFileSync(source, "utf8");
 

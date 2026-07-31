@@ -202,6 +202,62 @@ describe("pre-dispatch-isolation-gate", () => {
     });
   });
 
+  describe("REGRESSION — the gate is only enforcing if it is WIRED, and it fails open when it is not", () => {
+    /**
+     * Round-two review established two facts that make this test load-bearing:
+     *
+     * 1. Claude Code treats a hook exiting 1 — which is what BOTH a missing file
+     *    (MODULE_NOT_FOUND) and a syntax error produce — as a non-blocking error.
+     *    So a deleted, renamed, or corrupted gate silently reverts dispatch to the
+     *    "trust the dispatcher" regime that failed three times in one session,
+     *    leaving only a transcript line.
+     * 2. `gate-hooks.bun.test.ts` pins g1/g2/g3's settings.json wiring, but nothing
+     *    pinned THIS hook's. Since spec D5 deliberately keeps it out of
+     *    `lore setup`'s auto-registration, that config line is the ONLY thing
+     *    enforcing it, and a bad merge could drop it with zero test failures.
+     */
+    it("this repo's .claude/settings.json registers the gate on Agent|Task", () => {
+      const settingsPath = fileURLToPath(new URL("../../../../../.claude/settings.json", import.meta.url));
+      const settings = JSON.parse(readFileSync(settingsPath, "utf8")) as {
+        hooks?: { PreToolUse?: Array<{ matcher?: string; hooks?: Array<{ command?: string }> }> };
+      };
+      const groups = settings.hooks?.PreToolUse ?? [];
+      expect(groups.length).toBeGreaterThan(0);
+
+      const agentCommands = groups
+        .filter((g) => (g.matcher ?? "").includes("Agent"))
+        .flatMap((g) => (g.hooks ?? []).map((h) => h.command ?? ""));
+
+      // Control: the sibling gate is registered, so a wholesale settings.json
+      // restructure surfaces here rather than making the assertion vacuous.
+      expect(agentCommands.some((c) => c.includes("pre-no-general-agent-gate.mjs"))).toBe(true);
+      expect(agentCommands.some((c) => c.includes("pre-dispatch-isolation-gate.mjs"))).toBe(true);
+    });
+
+    it("the registered path actually exists on disk (a registration pointing nowhere exits 1 = non-blocking)", () => {
+      expect(readFileSync(HOOK_PATH, "utf8").length).toBeGreaterThan(0);
+    });
+  });
+
+  describe("BOUNDARY — an unborn HEAD must not block either", () => {
+    it("exits 0 in a freshly-initialised repo with zero commits", () => {
+      const repo = mkdtempSync(join(tmpdir(), "gate-unborn-"));
+      try {
+        execFileSync("git", ["-C", repo, "init", "--quiet"], { stdio: ["ignore", "pipe", "ignore"] });
+        const run = runHook({
+          tool_name: "Agent",
+          cwd: repo,
+          tool_input: { description: "d", prompt: "p", subagent_type: "lore-implementer", isolation: "worktree" },
+        });
+        // `rev-parse --short HEAD` exits 128 here; the diagnostic must swallow it.
+        expect(run.status).toBe(0);
+        expect(run.stderr).toBe("");
+      } finally {
+        rmSync(repo, { recursive: true, force: true });
+      }
+    });
+  });
+
   describe("STATE — the hook holds no grammar it should not", () => {
     it("carries no hardcoded branch name or integration tip", () => {
       const source = readFileSync(HOOK_PATH, "utf8");
