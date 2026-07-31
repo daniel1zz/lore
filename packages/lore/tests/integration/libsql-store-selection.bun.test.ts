@@ -122,7 +122,7 @@ describe("createApp store selection — in-process (spec-eager-libsql-load-makes
     app.close();
   });
 
-  it("AC-LL-7 (c): sync.enabled true with missing credentials yields err(STORE_ERROR), never a store instance", () => {
+  it("AC-LL-7 (c): sync.enabled true with missing credentials yields err(VALIDATION_ERROR), never a store instance", () => {
     const dir = makeTmpDir("ll7c");
     scratchDirs.push(dir);
     const dbPath = join(dir, "lore.db");
@@ -151,7 +151,7 @@ describe("createApp store selection — in-process (spec-eager-libsql-load-makes
 
   // ─── AC-LL-5: anti-downgrade invariant ───────────────────────────────────
 
-  it("AC-LL-5: sync.enabled true with LORE_SYNC_TOKEN absent yields err(STORE_ERROR), never a SQLiteStore-backed App", () => {
+  it("AC-LL-5: sync.enabled true with LORE_SYNC_TOKEN absent yields err(VALIDATION_ERROR), never a SQLiteStore-backed App", () => {
     const dir = makeTmpDir("ll5");
     scratchDirs.push(dir);
     const dbPath = join(dir, "lore.db");
