@@ -94,26 +94,41 @@ instead (Explore, lore-explorer, lore-reviewer, Plan, researcher).
 }
 
 // ─── Allowed. Report what is provable about the base (never blocks) ──────────
+/** Hard cap per git call. A PreToolUse hook sits in front of the dispatch, so a hung git (index.lock contention, a network-backed filesystem) would stall the whole tool call. */
+const GIT_TIMEOUT_MS = 2000;
+/** Cap on how many branch names the diagnostic prints — a repo with 200 branches must not bury the message it is attached to. */
+const MAX_BRANCHES_SHOWN = 5;
+
 try {
   const cwd = typeof payload.cwd === 'string' && payload.cwd.length > 0 ? payload.cwd : process.cwd();
-  const git = (args) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  const git = (args) =>
+    execFileSync('git', ['-C', cwd, ...args], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: GIT_TIMEOUT_MS,
+      maxBuffer: 1024 * 1024,
+    }).trim();
 
   const head = git(['rev-parse', '--short', 'HEAD']);
   const currentBranch = git(['rev-parse', '--abbrev-ref', 'HEAD']);
 
   // Branches that CONTAIN HEAD but are not HEAD itself are strictly ahead of it,
-  // so a worktree cut here would lack their commits.
+  // so a worktree cut here would lack their commits. In a detached HEAD,
+  // `--abbrev-ref` yields "HEAD", which matches no branch name, so nothing is
+  // filtered out and every containing branch is reported — correct for that case.
   const ahead = git(['branch', '--format=%(refname:short)', '--contains', 'HEAD'])
     .split('\n')
     .map((line) => line.trim())
     .filter((name) => name.length > 0 && name !== currentBranch);
 
   if (ahead.length > 0) {
-    process.stderr.write(`[DISPATCH_ISOLATION_GATE] allowed; base diagnostic: this worktree will be cut from ${currentBranch}@${head}, which is strictly BEHIND: ${ahead.join(', ')}. If the work needs code from one of those, have the agent \`git merge --ff-only <tip>\` and assert \`git log --oneline -1\` before it starts.\n`);
+    const shown = ahead.slice(0, MAX_BRANCHES_SHOWN).join(', ');
+    const overflow = ahead.length > MAX_BRANCHES_SHOWN ? ` (+${ahead.length - MAX_BRANCHES_SHOWN} more)` : '';
+    process.stderr.write(`[DISPATCH_ISOLATION_GATE] allowed; base diagnostic: this worktree will be cut from ${currentBranch}@${head}, which is strictly BEHIND: ${shown}${overflow}. If the work needs code from one of those, have the agent \`git merge --ff-only <tip>\` and assert \`git log --oneline -1\` before it starts.\n`);
   }
 } catch {
   // Diagnostics are best-effort by construction — never convert a git failure
-  // into a blocked dispatch.
+  // (not a repo, git absent, timeout, unborn HEAD) into a blocked dispatch.
 }
 
 process.exit(0);

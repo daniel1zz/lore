@@ -88,8 +88,17 @@ import type { ProjectFsPort } from "./setup-project-flow.js";
  * rather than editing `ProjectFsPort` itself.
  */
 export type ProjectFsRemovePort = ProjectFsPort & {
-  /** Removes the file OR directory (recursively) at `path`. A missing target is NOT an error. MAY throw on a genuine IO failure. */
-  remove(path: string): void;
+  /**
+   * Removes the file OR directory (recursively) at `path`. A missing target is
+   * NOT an error. MAY throw on a genuine IO failure.
+   *
+   * `opts.boundary` — the repo root. When supplied, the implementation MUST
+   * refuse (throw) rather than remove a path whose ancestor inside that
+   * boundary is a symlink: following such a link deletes the LINK TARGET's file
+   * instead of a scaffolded copy
+   * (spec-lore-setup-deletes-repo-source-through-dev-symlinks D3/D4).
+   */
+  remove(path: string, opts?: { boundary?: string }): void;
 };
 
 /** Per-call uninstall target — mirrors `ProjectScaffoldOptions`'s shape in `setup-project-flow.ts`. */
@@ -211,12 +220,12 @@ export async function uninstallProject(
         fs.writeFile(fullPath, backupContent, restoreModeForKind(entry.kind));
         restored.push(entry.path);
       } else {
-        fs.remove(fullPath);
+        fs.remove(fullPath, { boundary: opts.repoDir });
         removed.push(entry.path);
       }
     }
 
-    fs.remove(join(repoDir, PROJECT_BACKUPS_RELATIVE_DIRNAME));
+    fs.remove(join(repoDir, PROJECT_BACKUPS_RELATIVE_DIRNAME), { boundary: opts.repoDir });
   } catch (cause) {
     return err({
       code: "STORE_ERROR",
@@ -228,7 +237,7 @@ export async function uninstallProject(
   }
 
   try {
-    fs.remove(manifestPath);
+    fs.remove(manifestPath, { boundary: opts.repoDir });
   } catch (cause) {
     return err({
       code: "STORE_ERROR",

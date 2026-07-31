@@ -20,7 +20,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, existsSync, readFil
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { RealSetupFsWriter } from "../../../src/adapters/real-setup-fs.js";
+import { RealSetupFsWriter, removeProjectPath } from "../../../src/adapters/real-setup-fs.js";
 
 /**
  * The guard below is a SOURCE assertion, not a behavioural one, because the
@@ -30,6 +30,7 @@ import { RealSetupFsWriter } from "../../../src/adapters/real-setup-fs.js";
  * `RealSetupFsWriter` can catch that — the omission lives in the CALLER.
  */
 const SETUP_SERVICE_SOURCE = new URL("../../../src/service/setup-service.ts", import.meta.url);
+const PROJECT_UNINSTALL_SOURCE = new URL("../../../src/flows/setup-project-uninstall.ts", import.meta.url);
 
 /** Sentinel content — a test that deletes the far-side file cannot fake having preserved it. */
 const SSOT_CONTENT = "SSOT: this file lives in the developer's repo, not in the install tree\n";
@@ -196,17 +197,65 @@ describe("RealSetupFsWriter removal never resolves through a symlink", () => {
     });
   });
 
-  describe("REGRESSION — every SetupService removal call site declares its boundary", () => {
-    it("no writer.remove( call in setup-service.ts omits the boundary option", () => {
-      const source = readFileSync(SETUP_SERVICE_SOURCE, "utf8");
+  describe("REGRESSION — every removal call site declares its boundary", () => {
+    // `[^;]*` deliberately spans newlines (a negated character class matches \n),
+    // so a call reformatted across multiple lines is still captured.
+    it.each([
+      { label: "setup-service.ts (machine install)", source: SETUP_SERVICE_SOURCE, pattern: /await this\.writer\.remove\([^;]*\);/g },
+      { label: "setup-project-uninstall.ts (per-repo scaffold)", source: PROJECT_UNINSTALL_SOURCE, pattern: /\bfs\.remove\([^;]*\);/g },
+    ])("no removal call in $label omits the boundary option", ({ source, pattern }) => {
+      const text = readFileSync(source, "utf8");
 
-      // Control first: if this file stops containing removal calls at all (moved,
+      // Control first: if a file stops containing removal calls at all (moved,
       // renamed), the assertion below would pass vacuously.
-      const calls = source.match(/await this\.writer\.remove\([^;]*\);/g) ?? [];
+      const calls = text.match(pattern) ?? [];
       expect(calls.length).toBeGreaterThan(0);
 
       const missingBoundary = calls.filter((call) => !call.includes("boundary:"));
       expect(missingBoundary).toEqual([]);
+    });
+  });
+
+  describe("REGRESSION — removeProjectPath carries the same protection", () => {
+    // `lore setup --project --uninstall` feeds this sync twin repo-relative
+    // tracked paths. It shipped with the identical existsSync + rmSync shape, so
+    // fixing only the machine-install writer would have left half the defect.
+    it("refuses an ancestor symlink and leaves the far-side file intact", () => {
+      const victimDir = join(repoDir, "elsewhere");
+      mkdirSync(victimDir, { recursive: true });
+      const victim = join(victimDir, "hook.mjs");
+      writeFileSync(victim, SSOT_CONTENT);
+
+      const repo = join(root, "scaffolded-repo");
+      mkdirSync(join(repo, ".claude"), { recursive: true });
+      const linkPath = join(repo, ".claude", "hooks");
+      symlinkSync(victimDir, linkPath);
+
+      expect(() => removeProjectPath(join(linkPath, "hook.mjs"), { boundary: repo })).toThrow(/symlink/i);
+      expect(existsSync(victim)).toBe(true);
+      expect(readFileSync(victim, "utf8")).toBe(SSOT_CONTENT);
+      expect(lstatSync(linkPath).isSymbolicLink()).toBe(true);
+    });
+
+    it("unlinks a link target rather than following it, and still removes real paths", () => {
+      const realFile = join(repoDir, "real.md");
+      writeFileSync(realFile, SSOT_CONTENT);
+      const repo = join(root, "scaffold2");
+      mkdirSync(repo, { recursive: true });
+
+      const linkPath = join(repo, "linked.md");
+      symlinkSync(realFile, linkPath);
+      removeProjectPath(linkPath, { boundary: repo });
+      expect(existsSync(linkPath)).toBe(false);
+      expect(existsSync(realFile)).toBe(true);
+
+      const plain = join(repo, "plain.md");
+      writeFileSync(plain, "scaffolded\n");
+      removeProjectPath(plain, { boundary: repo });
+      expect(existsSync(plain)).toBe(false);
+
+      // A missing target stays a no-op, and omitting the boundary still works.
+      expect(() => removeProjectPath(join(repo, "absent.md"))).not.toThrow();
     });
   });
 

@@ -324,9 +324,40 @@ export function backupProjectFile(src: string, destDir: string): void {
  * Real, synchronous implementation of `ProjectFsPort.remove` (SPEC-060 D1/D2)
  * — removes the file or directory (recursively) at `path`; a missing target
  * is a no-op. Mirrors {@link RealSetupFsWriter.remove} exactly, minus the
- * `Promise` wrapper.
+ * `Promise` wrapper — INCLUDING its symlink safety
+ * (spec-lore-setup-deletes-repo-source-through-dev-symlinks D1-D4).
+ *
+ * The symlink rules are duplicated here rather than left to the machine-install
+ * writer because this function carries the SAME `existsSync` + `rmSync` shape
+ * that deleted this repo's own source: `lore setup --project --uninstall` feeds
+ * it repo-relative tracked paths, so a developer who symlinks any scaffolded
+ * path (`.claude/hooks`, say) elsewhere would have the link TARGET deleted.
+ * Lower probability than the machine-install case, identical failure mode.
+ *
+ * @param path - Absolute path to remove.
+ * @param opts - `boundary` is the repo root; when supplied, a path whose
+ *   ancestor inside it is a symlink is REFUSED rather than followed.
+ * @throws When `opts.boundary` is given and an ancestor inside it is a symlink
+ *   (nothing is removed), or on a genuine IO failure.
  */
-export function removeProjectPath(path: string): void {
-  if (!existsSync(path)) return;
+export function removeProjectPath(path: string, opts?: { boundary?: string }): void {
+  const self = lstatOrNull(path);
+  if (self === null) return;
+
+  if (self.isSymbolicLink()) {
+    unlinkSync(path);
+    return;
+  }
+
+  if (opts?.boundary !== undefined) {
+    const link = findSymlinkAncestor(path, opts.boundary);
+    if (link !== null) {
+      throw new Error(
+        `refusing to remove ${path}: ancestor ${link} is a symlink, so removing through it would delete the LINK TARGET's file, not a scaffolded copy. ` +
+          `Nothing was removed. If the scaffold really should own that path, unlink ${link} first.`,
+      );
+    }
+  }
+
   rmSync(path, { recursive: true, force: true });
 }
