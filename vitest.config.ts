@@ -68,6 +68,14 @@ export default defineConfig({
       "packages/dashboard/tests/**/*.test.tsx",
       "packages/dashboard/src/**/*.test.ts",
       "packages/dashboard/src/**/*.test.tsx",
+      // reason: task-t1-structural-test-budget-oracle (spec-a-test-case-s-
+      // timeout-budget-must-be-declared-when-its) — scripts/check-test-budgets.ts
+      // is unit-tested directly (no subprocess) from here. Verified empirically
+      // that an explicit `vitest run <path>` CLI argument does NOT add a file
+      // outside these globs to the discovered set (it only filters within it) —
+      // without this entry the AC oracle commands report "No test files found"
+      // and exit 1, which is a false negative, not a legitimate run.
+      "scripts/tests/**/*.test.ts",
     ],
     // reason: "**/*.pw.ts" (Playwright e2e specs, packages/dashboard/tests/e2e/**) already
     // fail to match the `include` globs above (which only list *.test.ts(x)), but this
