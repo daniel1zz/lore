@@ -546,6 +546,21 @@ export class IssueReportService {
     // TOCTOU version re-check — SPEC-072 §7 Design Decisions "Schema precheck").
     // That re-probe races the same file for the same reason the direct probe
     // above does, so a contended failure here gets the SAME re-typing.
+    //
+    // ⛔ This rail is only as good as `openUpstream`'s promise to RETURN its
+    // failures rather than throw them. That promise is not decoration: the
+    // port opens a read-write bun:sqlite handle, whose constructor runs
+    // `PRAGMA`/migration DDL and raises `database is locked` synchronously
+    // when it collides with a concurrent writer. It USED to escape right
+    // through this `if` and kill the process with a raw stack trace, in 92 of
+    // ~300 attempts of the concurrency harness (task-openvalidatedupstream-
+    // lets-a-synchronous-store-init-throw). It is now upheld where the handle
+    // is actually opened — `flows/upstream-context-flow.ts::buildUpstreamContext`
+    // catches and returns `err({code: "STORE_ERROR", ...})`, matching the
+    // never-throws guarantee `probeUpstreamDb` already made for the readonly
+    // handle — so the classification stays HERE, in one place, for both rails.
+    // A new `openUpstream` implementation MUST uphold the same guarantee; do
+    // not re-solve it with a second catch at this call site.
     const portResult = this.deps.openUpstream(cfg.corpus_path);
     if (!portResult.ok) {
       const contention = toWriteContentionError(portResult.error, dbPath, this.deps.writeWaitMs);

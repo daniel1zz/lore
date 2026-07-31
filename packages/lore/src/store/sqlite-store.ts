@@ -143,7 +143,24 @@ export class SQLiteStore implements StoreInterface {
     }
     this.db = new Database(dbPath);
     this.writeWaitMs = declaredWriteWaitMs;
-    this.init();
+    try {
+      this.init();
+    } catch (error) {
+      // reason: `init()` can legitimately fail on a corpus another process is
+      // writing (`PRAGMA journal_mode = WAL` → SQLITE_BUSY) — and since
+      // `buildUpstreamContext` now RECOVERS from that instead of letting it
+      // kill the process (task-openvalidatedupstream-lets-a-synchronous-store-
+      // init-throw), the half-constructed handle outlives the failure. This
+      // object is unreachable once the constructor throws, so nothing else can
+      // ever close it: closing here is the only way the fd and any file lock
+      // it holds are released before the caller carries on (the report-issue
+      // upstream-discovery path probes SEVERAL candidate corpora in one
+      // process, so a leaked locked handle per failed candidate is reachable,
+      // not theoretical). The original error is re-thrown UNCHANGED — this is
+      // resource cleanup, never a swallow or a re-typing.
+      this.db.close();
+      throw error;
+    }
   }
 
   /**
@@ -158,9 +175,6 @@ export class SQLiteStore implements StoreInterface {
   // ── Initialization ────────────────────────────────────────────────────────
 
   private init(): void {
-    // Enable WAL for better concurrent read performance
-    this.db.run("PRAGMA journal_mode = WAL");
-    this.db.run("PRAGMA foreign_keys = ON");
     // SPEC-078 D9: without a busy_timeout, a second writer contending for the
     // same corpus file (e.g. a concurrently-mounted dashboard instance) gets an
     // IMMEDIATE `SQLITE_BUSY` throw instead of waiting out the holder — this is
@@ -177,7 +191,31 @@ export class SQLiteStore implements StoreInterface {
     // must print the very bound that was applied. Bind parameters are not
     // allowed in a PRAGMA statement, so the value is interpolated — it is a
     // number typed by `SQLiteStoreOptions`, never caller text.
+    //
+    // ⛔ THIS MUST STAY THE FIRST STATEMENT ON THE CONNECTION (task-
+    // openvalidatedupstream-lets-a-synchronous-store-init-throw). It used to
+    // run THIRD, after `journal_mode`/`foreign_keys`, which left the bound
+    // armed one statement too late to matter: `PRAGMA journal_mode = WAL`
+    // below is the first statement that TOUCHES THE FILE (its prepare step
+    // reads the schema, which opens the pager and, on a cold WAL corpus with
+    // no live `-shm`, can require wal-index recovery), and it ran under
+    // bun:sqlite's default `busy_timeout = 0`. A concurrent writer's `BEGIN
+    // IMMEDIATE` therefore killed the whole process from inside this
+    // constructor with a bare `database is locked` — measured at 92 deaths
+    // across ~300 attempts of the SPEC-072 cross-corpus concurrency harness,
+    // and reproduced here at 24 throws / 240 cold-open connections, dropping
+    // to 0 / 240 with this ordering (negative control: the SAME reorder with
+    // the bound set to 0 still throws 31 / 240, so it is the DECLARED BOUND
+    // being armed early that fixes it, not the reorder by itself).
+    //
+    // A `busy_timeout` PRAGMA is pure per-connection VM state — it opens no
+    // file and can never fail — so nothing is lost by hoisting it, and this is
+    // the same NATIVE busy handler used everywhere else in this codepath,
+    // never a JS-level retry/sleep/backoff (`bun run check:no-timer-retry`).
     this.db.run(`PRAGMA busy_timeout = ${this.writeWaitMs}`);
+    // Enable WAL for better concurrent read performance
+    this.db.run("PRAGMA journal_mode = WAL");
+    this.db.run("PRAGMA foreign_keys = ON");
     this.runMigrations();
   }
 

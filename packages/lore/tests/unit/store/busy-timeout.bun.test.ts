@@ -65,6 +65,27 @@ db.exec("COMMIT");
 db.close();
 `;
 
+/**
+ * A holder that makes the CONTENDER's very FIRST statement lose, not just its
+ * eventual write. `BEGIN EXCLUSIVE` on a rollback-journal db takes the
+ * EXCLUSIVE file lock, which excludes even readers — so the contender cannot
+ * read the schema, and reading the schema is what preparing `PRAGMA
+ * journal_mode = WAL` requires. Deliberately ROLLED BACK, never committed: the
+ * fixture db is left unmutated.
+ */
+const EXCLUSIVE_HOLDER_SCRIPT = `
+import { Database } from "bun:sqlite";
+import { writeFileSync } from "node:fs";
+
+const [, , dbPath, markerPath, holdMsArg] = process.argv;
+const db = new Database(dbPath);
+db.exec("BEGIN EXCLUSIVE");
+writeFileSync(markerPath, "locked");
+await Bun.sleep(Number(holdMsArg));
+db.exec("ROLLBACK");
+db.close();
+`;
+
 const HOLD_MS = 300;
 const LOCK_WAIT_TIMEOUT_MS = 2000;
 
@@ -86,8 +107,11 @@ describe("SQLiteStore busy_timeout pragma (AC-078-2)", () => {
   let dbPath: string;
   let holderScriptPath: string;
   let markerPath: string;
+  /** Extra fixture dirs a single test made for itself (see `makeRollbackJournalCorpus`). */
+  let ownedTempDirs: string[] = [];
 
   beforeEach(() => {
+    ownedTempDirs = [];
     tempDir = mkdtempSync(join(tmpdir(), "lore-busy-timeout-"));
     dbPath = join(tempDir, "corpus.db");
     holderScriptPath = join(tempDir, "holder.mjs");
@@ -105,7 +129,9 @@ describe("SQLiteStore busy_timeout pragma (AC-078-2)", () => {
   });
 
   afterEach(() => {
-    rmSync(tempDir, { recursive: true, force: true });
+    for (const dir of [tempDir, ...ownedTempDirs]) {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("HAPPY: a fresh SQLiteStore connection reports PRAGMA busy_timeout = 2000", () => {
@@ -181,6 +207,97 @@ describe("SQLiteStore busy_timeout pragma (AC-078-2)", () => {
     expect(elapsed).toBeLessThan(HOLD_MS * 0.5);
 
     rawDb.close();
+  });
+
+  // ── The bound must be armed BEFORE the first file-touching statement ──────
+  //
+  // task-openvalidatedupstream-lets-a-synchronous-store-init-throw. The three
+  // tests above prove the bound governs WRITES. They cannot see the gap this
+  // one covers: `init()` used to issue `PRAGMA busy_timeout` THIRD, after
+  // `journal_mode`/`foreign_keys`, so every connection ran its first
+  // file-touching statement under bun:sqlite's default `busy_timeout = 0`.
+  // `PRAGMA journal_mode = WAL` is that statement (preparing it reads the
+  // schema, which opens the pager), and on a contended corpus it threw
+  // `database is locked` straight out of the SQLiteStore CONSTRUCTOR — before
+  // any of the above could apply. Measured in the wild: 92 process deaths
+  // across ~300 attempts of the SPEC-072 cross-corpus concurrency harness.
+  //
+  // The discriminator is TIME, not throw-vs-no-throw: a holder that outlasts
+  // the bound makes the contender fail either way. With the bound armed first
+  // it WAITS the declared window; with the bound armed third it fails in about
+  // a millisecond, having never applied the bound it declared. Measured on
+  // this exact fixture: 0ms (armed third) vs ~790ms (armed first, 700ms
+  // bound), stable across 4 trials of each.
+  //
+  // The fixture puts the corpus in ROLLBACK-JOURNAL mode so a plain
+  // `BEGIN EXCLUSIVE` deterministically blocks the contender's first
+  // statement: `PRAGMA journal_mode = WAL` then has to genuinely SWITCH modes,
+  // and even preparing it needs a schema read the holder's EXCLUSIVE lock
+  // denies. (The production window is the WAL cold-open recovery race, which
+  // is probabilistic — 24 throws per 240 cold-open connections — and therefore
+  // useless as a test oracle. Rollback-journal mode is a legal corpus state
+  // `init()` must handle regardless: setting WAL on every open is precisely
+  // what it is for.)
+  const DECLARED_BOUND_MS = 700;
+
+  /** Own temp corpus, switched to rollback-journal mode ON ITS OWN CONNECTION (a mode switch needs the lock, so it cannot be done from a second handle). */
+  function makeRollbackJournalCorpus(): string {
+    const dir = mkdtempSync(join(tmpdir(), "lore-busy-timeout-rollback-"));
+    ownedTempDirs.push(dir);
+    const path = join(dir, "corpus.db");
+    const setup = new SQLiteStore(path);
+    const mode = (
+      setup.getDatabase().query("PRAGMA journal_mode = DELETE").get() as { journal_mode: string }
+    ).journal_mode;
+    setup.close();
+    if (mode !== "delete") {
+      throw new Error(`fixture setup: expected journal_mode 'delete', got '${mode}'`);
+    }
+    return path;
+  }
+
+  it("REGRESSION: the declared bound is armed before the FIRST file-touching statement — a contended construction waits it out rather than failing instantly", async () => {
+    const rollbackDbPath = makeRollbackJournalCorpus();
+    const holderScript = join(tempDir, "exclusive-holder.mjs");
+    const holderMarker = join(tempDir, "exclusive.marker");
+    await Bun.write(holderScript, EXCLUSIVE_HOLDER_SCRIPT);
+    const HOLD_LONGER_THAN_BOUND_MS = 3000; // outlasts the bound, so expiry is certain
+
+    const holderProc = Bun.spawn(
+      ["bun", holderScript, rollbackDbPath, holderMarker, String(HOLD_LONGER_THAN_BOUND_MS)],
+      { stdout: "ignore", stderr: "pipe" },
+    );
+    await waitForMarker(holderMarker);
+
+    const t0 = performance.now();
+    let threw: unknown;
+    try {
+      new SQLiteStore(rollbackDbPath, { writeWaitMs: DECLARED_BOUND_MS }).close();
+    } catch (error) {
+      threw = error;
+    }
+    const elapsed = performance.now() - t0;
+    expect(await holderProc.exited).toBe(0);
+
+    // The construction still fails — the holder outlasts the bound, and SQLite
+    // owes no success. What matters is that it TRIED for the declared window.
+    expect(threw).toBeDefined();
+    expect(String((threw as Error).message)).toMatch(/locked|busy/i);
+    // Waited out (most of) the declared bound. Pre-fix this measured ~0ms,
+    // because `busy_timeout` had not been issued yet when the statement ran.
+    expect(elapsed).toBeGreaterThan(DECLARED_BOUND_MS * 0.5);
+  }, 15_000);
+
+  it("CONTROL: the identical construction against the identical fixture with NO holder succeeds immediately — the wait above is the holder's doing, not a fixed cost of opening a store", () => {
+    const rollbackDbPath = makeRollbackJournalCorpus();
+    const t0 = performance.now();
+    const store = new SQLiteStore(rollbackDbPath, { writeWaitMs: DECLARED_BOUND_MS });
+    const elapsed = performance.now() - t0;
+    expect(store.getDatabase().query("PRAGMA busy_timeout").get()).toEqual({
+      timeout: DECLARED_BOUND_MS,
+    });
+    store.close();
+    expect(elapsed).toBeLessThan(DECLARED_BOUND_MS * 0.5);
   });
 
   it("BOUNDARY: TursoStore source has no busy_timeout call (SPEC-078 D9 scope — libsql serializes writes at the replica-sync layer, not via SQLite's file-level busy handler)", () => {
