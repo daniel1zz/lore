@@ -231,7 +231,7 @@ describe("attestationFloor — AC-069-1: zero attested entries blocks plan-close
 // never a task-level one — task-attestation-floor-feeding-pack-names-tasks-but-the ──
 
 describe("feedAttestationFloor — the pack's exemption instruction is PLAN-level only", () => {
-  it("names the plan-level extra.attestation_exempt field, a fetch-merge-set recovery flow, and explicitly forbids writing the exempt fields onto a task", async () => {
+  it("names the plan-level extra.attestation_exempt field, its DEDICATED WRITER, and explicitly forbids writing the exempt fields onto a task", async () => {
     const { corpusService } = makeHarness(attestationConfig());
     // reason: post-§Facts D4 the pack only renders when something BLOCKS — the
     // declared-but-unattested AC below is that cause (see AC-069-1's own comment).
@@ -264,13 +264,24 @@ describe("feedAttestationFloor — the pack's exemption instruction is PLAN-leve
     // unambiguous, not merely implied by proximity to the offending-task list.
     expect(message).toContain("on the PLAN ITSELF, never on a task");
 
-    // ...via a fetch-merge-set flow (SPEC-076 wholesale-replace guard precedent,
-    // mirrors feedRequiresUat's fixed shape in the same file) — never a bare
-    // `lore set --extra` literal that would clobber the plan's other extra keys.
-    expect(message).toContain("does NOT merge");
-    expect(message).toContain("lore get");
-    expect(message).toContain("--json");
-    expect(message).toContain("KEEPING every existing key");
+    // ...via its DEDICATED WRITER. UPDATED (SPEC-069 AC-069-8): this case used
+    // to pin a manual fetch-merge-set flow ("does NOT merge" / "lore get
+    // --json" / "KEEPING every existing key"). That flow existed ONLY because
+    // `extra.attestation_exempt` had no writer, so the pack had to teach the
+    // operator to hand-merge around `lore set`'s wholesale replacement. With
+    // `lore plan exempt-attestation` shipping, repeating those instructions
+    // would route the operator back through the destructive path this very
+    // assertion block exists to steer away from. The INVARIANT is unchanged —
+    // the plan's other `extra` keys must survive — only its guarantor moved
+    // from the operator to the verb.
+    expect(message).toContain("lore plan exempt-attestation");
+    expect(message).toContain("--reason");
+    expect(message).toContain("--kind");
+    expect(message).toContain("READ-MERGE-WRITES");
+    // The wholesale-replace hazard is still named, now as the thing NOT to do.
+    expect(message).toContain("REPLACE `extra` wholesale");
+    // REGRESSION: never again claim the field has no dedicated flag.
+    expect(message).not.toContain("no dedicated flag for this field yet");
 
     // The pack MUST NOT instruct the operator to write the exempt fields onto a
     // task — it explicitly says the opposite, naming the task list as

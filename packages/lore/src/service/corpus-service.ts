@@ -1908,6 +1908,22 @@ export class CorpusService {
       const effectiveExtra = (parsedPatch.data.extra !== undefined
         ? parsedPatch.data.extra
         : existing.extra) as Record<string, unknown>;
+      // ─── PLAN-CLOSE GATE-READ EXTRA FIELDS (AC-069-12 scan region) ────────
+      // ⛔ Every plan-level `extra.*` field this block reads MUST have an
+      // authoring surface under `packages/lore/src/adapters`. A gate that
+      // demands a field no surface can author fails SILENT — measured: both
+      // `attestation_exempt` and `assessment_freshness_exempt` shipped
+      // gate-read with no writer, and with the only sanctioned opt-out
+      // unreachable, four plans were archived by riding a vacuous predicate
+      // instead. `tests/unit/cli/plan-exempt-attestation.test.ts` (AC-069-12)
+      // scans BETWEEN these two sentinels and fails when a field read here has
+      // no writer, so the next one fails a test instead of an incident.
+      // Adding a read here ⇒ add the writer AND its row in that test's
+      // AUTHORING_SURFACES map. Reads mediated by a helper (rather than a
+      // literal `effectiveExtra["…"]` subscript) must be registered in the same
+      // test's HELPER_READS map — an unregistered `extract*`/`resolve*` call in
+      // this region fails the scan by construction. Keep both sentinels intact:
+      // the scan THROWS (never silently passes) when it cannot find them.
       const requiresUat = effectiveExtra["requires_uat"] === true;
       const attestationExemptReason = effectiveExtra["attestation_exempt_reason"];
       const attestationExempt =
@@ -1935,6 +1951,7 @@ export class CorpusService {
         effectiveExtra["assessment_freshness_exempt"] === true &&
         typeof assessmentFreshnessExemptReason === "string" &&
         assessmentFreshnessExemptReason.trim().length > 0;
+      // ─── END PLAN-CLOSE GATE-READ EXTRA FIELDS ────────────────────────────
 
       let planCloseCtx: GateContext = { targetIdOrSlug: existing.slug };
 

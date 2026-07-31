@@ -71,6 +71,7 @@ import { AuditService } from "./service/audit-service.js";
 import { AcService } from "./service/ac-service.js";
 import { RequirementService } from "./service/requirement-service.js";
 import { PrdOutlineService } from "./service/prd-outline-service.js";
+import { PlanExemptionService } from "./service/plan-exemption-service.js";
 import { UatService } from "./service/uat-service.js";
 import { VerifyRunnerService } from "./service/verify-runner-service.js";
 import { executeVerifySpawnSpec } from "./service/verify-executor.js";
@@ -380,6 +381,13 @@ export interface App {
    * production.
    */
   prdOutlineService?: PrdOutlineService;
+  /**
+   * PlanExemptionService — the sole writer of a plan's audited plan-close
+   * exemptions (`lore plan exempt-attestation` / `exempt-assessment-freshness`,
+   * SPEC-069 D1 + SPEC-106 D4). Store-only, same optional-DI shape as
+   * `acService`/`prdOutlineService`; always wired in production.
+   */
+  planExemptionService?: PlanExemptionService;
   /**
    * SeatService — thin `GitPort` orchestration for the `lore seat` verb family
    * (`enter`/`list`/`resume`/`remove`, SPEC-057). Wired here with the REAL `GitPort`
@@ -754,6 +762,10 @@ function buildAppFromSqlite(
     // reason: PrdOutlineService is store-only, same shape as AcService/
     // RequirementService (SPEC-080 C1, C4).
     prdOutlineService: new PrdOutlineService(store),
+    // reason: PlanExemptionService is store-only, same shape as PrdOutlineService
+    // (SPEC-069 D1 + SPEC-106 D4) — the sole writer of the plan-close exemption
+    // fields, which were gate-read with no authoring surface before it existed.
+    planExemptionService: new PlanExemptionService(store),
     // reason: UatService takes narrow injected ports (SPEC-054) — the guarded
     // createUatDoc seam, resolve, and store.addLink — never the full CorpusService.
     uatService: new UatService({
@@ -1069,6 +1081,10 @@ function buildAppFromTurso(
     // reason: PrdOutlineService is store-only, same shape as AcService/
     // RequirementService (SPEC-080 C1, C4).
     prdOutlineService: new PrdOutlineService(store),
+    // reason: PlanExemptionService is store-only, same shape as PrdOutlineService
+    // (SPEC-069 D1 + SPEC-106 D4) — the sole writer of the plan-close exemption
+    // fields, which were gate-read with no authoring surface before it existed.
+    planExemptionService: new PlanExemptionService(store),
     // reason: UatService takes narrow injected ports (SPEC-054) — the guarded
     // createUatDoc seam, resolve, and store.addLink — never the full CorpusService.
     uatService: new UatService({
