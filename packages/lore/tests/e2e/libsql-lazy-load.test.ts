@@ -1,6 +1,6 @@
 /**
  * @spec_ref spec-eager-libsql-load-makes-every-command-depend-on-a-healthy
- *   AC-LL-1, AC-LL-2, AC-LL-3, AC-LL-4, AC-LL-8, AC-LL-9
+ *   AC-LL-1, AC-LL-2, AC-LL-3, AC-LL-4, AC-LL-8, AC-LL-9, AC-LL-10
  *
  * RED oracle (T1 of the "lazy libsql load + TMPDIR diagnostic" plan): proves
  * the defect described by the governing spec is observable on the CURRENT
@@ -32,6 +32,21 @@
  *     apart: credential-first must report the missing-credential error
  *     (naming the credential, first line silent on `TMPDIR`); probe-first
  *     would report the TMPDIR error instead.
+ *   - AC-LL-10 (task
+ *     `task-ac-ll-8-guards-the-loader-strip-not-the-no-sync-bearing`) covers
+ *     the proposition AC-LL-8 does NOT: AC-LL-8 proves `lore status` survives
+ *     a hostile `TMPDIR`, which holds only because `loader.ts` strips
+ *     `config.sync`. It says nothing about a NEW `createApp` call site
+ *     ELSEWHERE (`dashboard.ts`, `init.ts`, `flows/init-corpus.ts`,
+ *     `mount/mount-registry.ts`, or anything added tomorrow) handing a
+ *     sync-BEARING config straight to `app.ts`'s Turso branch. Add one and
+ *     every behavioural AC here stays green while the compiled binary throws
+ *     `Cannot find module '@libsql/client'` at runtime, because
+ *     `turso-store.ts::loadLibsqlClientModuleSync` (a `createRequire`
+ *     fallback) resolves only in source mode. AC-LL-10 is therefore a SOURCE
+ *     SCAN, not a behavioural run: it fails the moment an offending call site
+ *     is ADDED, not when someone happens to exercise the one command that
+ *     reaches it. It is purely additive — AC-LL-8 keeps guarding the strip.
  *
  * Defect: `packages/lore/src/app.ts` statically imports `TursoStore`, which
  * statically imports `@libsql/client` — so EVERY compiled-binary invocation
@@ -82,10 +97,18 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import { type SpawnSyncReturns, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+// AC-LL-10 only. The scan parses TypeScript with the compiler's OWN parser
+// rather than a hand-rolled comment/string stripper + regex: a regex scanner
+// desynchronises on a regex literal containing a quote or `//` and then blanks
+// live code, which hides a call site as SILENTLY as it hides a comment — i.e.
+// it fails toward false GREEN, the exact vector this AC exists to close.
+// `typescript` is already a workspace devDependency (it runs `bun run
+// typecheck`), so this adds no new dependency.
+import ts from "typescript";
 
 // packages/lore/tests/e2e -> tests -> lore -> packages -> <repo root>
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -325,4 +348,444 @@ describe("libsql lazy load — compiled binary e2e (spec-eager-libsql-load-makes
     },
     SPAWN_TIMEOUT_MS,
   );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AC-LL-10 — source-scan call-site pin
+//
+// Invariant: NO `createApp` call site under `packages/lore/src` passes a
+// sync-BEARING config. `app.ts`'s Turso branch holds a synchronous
+// `createRequire` fallback (`turso-store.ts::loadLibsqlClientModuleSync`) that
+// resolves ONLY in source mode; from the compiled binary it throws `Cannot find
+// module '@libsql/client'`. Today nothing but the call-site set keeps that
+// branch unreachable, and AC-LL-8 (a behavioural run) proves only that
+// `loader.ts` still strips `config.sync` — a different proposition.
+//
+// Classification (the spec's two permitted classes, everything else fails):
+//   (a) exactly ONE argument — the `createApp(dbPath)` overload, which cannot
+//       reach the Turso branch at all;
+//   (b) TWO arguments whose second is the literal `undefined`, or a bare
+//       identifier the SAME FILE binds from a rest-destructure discarding
+//       `sync` (`const { sync: _sync, ...configWithoutSync } = rawConfig`),
+//       including the alias hop `telemetryOnlyConfig = configWithoutSync as
+//       LoreConfig` that `loader.ts` actually uses.
+//
+// Deliberately NO exception/allowlist mechanism: if a future caller genuinely
+// needs a sync-bearing `createApp`, the correct fix is to make
+// `loadLibsqlClientModuleSync` unnecessary (finish the async conversion), not
+// to widen this scan.
+//
+// Out of scope by design: `scripts/**` (runs in source mode, where
+// `createRequire` resolves — it cannot reproduce the compiled-binary failure)
+// and `app.ts` itself (it DEFINES `createApp`).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const LORE_SRC_ROOT = join(REPO_ROOT, "packages", "lore", "src");
+/** Excluded from the scan because it DEFINES `createApp` (overload signatures + implementation). */
+const CREATE_APP_DEFINITION_FILE = join(LORE_SRC_ROOT, "app.ts");
+/** Spec-pinned floor for the liveness control: 5 call sites exist today. */
+const MIN_EXPECTED_CALL_SITES = 4;
+/** Floor for "the walker actually walked a tree", independent of `createApp` itself. */
+const MIN_EXPECTED_SCANNED_FILES = 50;
+/** Bound on alias-hop chasing (`X = restName`, `Y = X as T`, …). Today's depth is 1. */
+const MAX_ALIAS_HOP_ROUNDS = 8;
+
+type CreateAppCallClass =
+  /** (a) `createApp(dbPath)` — cannot reach the Turso branch. */
+  | "single-arg"
+  /** (b) second argument provably carries no `sync` key. */
+  | "sync-stripped"
+  /** Anything else — the failure this AC exists to catch. */
+  | "violation";
+
+interface CreateAppCallSite {
+  /** Repo-relative, forward-slashed — the `file` half of the required `file:line` report. */
+  file: string;
+  /** 1-based line of the `createApp` token. */
+  line: number;
+  argCount: number;
+  /** Source text of the second argument, or `undefined` when there isn't one. */
+  secondArgText: string | undefined;
+  classification: CreateAppCallClass;
+  /** Why it classified that way — rendered into the failure message. */
+  reason: string;
+  /** The call's own source text, whitespace-collapsed so a multi-line call reports on one line. */
+  text: string;
+}
+
+function isScannableSourceFile(fileName: string): boolean {
+  return (
+    fileName.endsWith(".ts") &&
+    !fileName.endsWith(".d.ts") &&
+    !/\.(test|spec)\.ts$/.test(fileName) &&
+    !/\.bun\.test\.ts$/.test(fileName)
+  );
+}
+
+/** Recursive walk; `app.ts` (the definition site) is the one excluded file. */
+function listScannedSourceFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      out.push(...listScannedSourceFiles(full));
+    } else if (entry.isFile() && isScannableSourceFile(entry.name) && full !== CREATE_APP_DEFINITION_FILE) {
+      out.push(full);
+    }
+  }
+  return out;
+}
+
+/** Strips the wrappers an assignment may carry between a binding and its source identifier. */
+function unwrapExpression(node: ts.Expression): ts.Expression {
+  let current = node;
+  for (;;) {
+    if (
+      ts.isParenthesizedExpression(current) ||
+      ts.isAsExpression(current) ||
+      ts.isSatisfiesExpression(current) ||
+      ts.isNonNullExpression(current)
+    ) {
+      current = current.expression;
+      continue;
+    }
+    return current;
+  }
+}
+
+/**
+ * For `const { sync: _sync, ...rest } = cfg` returns `"rest"`; `undefined` when the
+ * pattern does not BOTH bind `sync` away AND collect a rest element. Conservative by
+ * construction: an unrecognised shape yields `undefined`, which classifies the call as a
+ * violation (loud) rather than as sync-stripped (silent).
+ */
+function syncDiscardingRestName(pattern: ts.ObjectBindingPattern): string | undefined {
+  let bindsSyncKey = false;
+  let restName: string | undefined;
+  for (const element of pattern.elements) {
+    if (element.dotDotDotToken !== undefined) {
+      if (ts.isIdentifier(element.name)) restName = element.name.text;
+      continue;
+    }
+    const propertyName = element.propertyName;
+    let key: string | undefined;
+    if (propertyName === undefined) {
+      key = ts.isIdentifier(element.name) ? element.name.text : undefined;
+    } else if (ts.isIdentifier(propertyName) || ts.isStringLiteral(propertyName)) {
+      key = propertyName.text;
+    }
+    if (key === "sync") bindsSyncKey = true;
+  }
+  return bindsSyncKey && restName !== undefined ? restName : undefined;
+}
+
+/**
+ * Every identifier in ONE file that provably holds a config with `sync` removed:
+ * the rest bindings themselves, plus any identifier assigned from one of them
+ * (transitively, so `loader.ts`'s two-step `configWithoutSync` → `telemetryOnlyConfig`
+ * hop is recognised). File-scoped, exactly as the AC specifies ("the same file binds").
+ */
+function collectSyncStrippedBindings(sourceFile: ts.SourceFile): Set<string> {
+  const strippedNames = new Set<string>();
+
+  const collectRestBindings = (node: ts.Node): void => {
+    if (ts.isVariableDeclaration(node) && ts.isObjectBindingPattern(node.name)) {
+      const restName = syncDiscardingRestName(node.name);
+      if (restName !== undefined) strippedNames.add(restName);
+    }
+    ts.forEachChild(node, collectRestBindings);
+  };
+  collectRestBindings(sourceFile);
+
+  for (let round = 0; round < MAX_ALIAS_HOP_ROUNDS; round++) {
+    const sizeBefore = strippedNames.size;
+    const collectAliases = (node: ts.Node): void => {
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer !== undefined) {
+        const source = unwrapExpression(node.initializer);
+        if (ts.isIdentifier(source) && strippedNames.has(source.text)) strippedNames.add(node.name.text);
+      } else if (
+        ts.isBinaryExpression(node) &&
+        node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        ts.isIdentifier(node.left)
+      ) {
+        const source = unwrapExpression(node.right);
+        if (ts.isIdentifier(source) && strippedNames.has(source.text)) strippedNames.add(node.left.text);
+      }
+      ts.forEachChild(node, collectAliases);
+    };
+    collectAliases(sourceFile);
+    if (strippedNames.size === sizeBefore) break;
+  }
+
+  return strippedNames;
+}
+
+/** Module specifiers that resolve to the composition root — `../app.js`, `../../app.js`, … */
+const APP_MODULE_SPECIFIER = /(?:^|\/)app\.js$/;
+
+/**
+ * Every local name that refers to `app.ts`'s `createApp` in ONE file: the bare name plus any
+ * import alias (`import { createApp as makeApp } from "../app.js"`). Without this, an aliased
+ * import would be a silent MISS — and a miss is indistinguishable from a clean tree, which is
+ * the exact false-green shape this AC exists to close.
+ *
+ * Known boundary (documented, not silently assumed): a createApp reference passed through a
+ * local variable (`const fn = createApp; fn(dbPath, cfg)`) is not tracked. `X.createApp(…)`
+ * IS (that is `mount-registry.ts`'s injected-port shape).
+ */
+function collectCreateAppLocalNames(sourceFile: ts.SourceFile): Set<string> {
+  const names = new Set<string>(["createApp"]);
+  for (const statement of sourceFile.statements) {
+    if (!ts.isImportDeclaration(statement)) continue;
+    const specifier = statement.moduleSpecifier;
+    if (!ts.isStringLiteral(specifier) || !APP_MODULE_SPECIFIER.test(specifier.text)) continue;
+    const namedBindings = statement.importClause?.namedBindings;
+    if (namedBindings === undefined || !ts.isNamedImports(namedBindings)) continue;
+    for (const element of namedBindings.elements) {
+      if (element.propertyName?.text === "createApp") names.add(element.name.text);
+    }
+  }
+  return names;
+}
+
+/** `createApp(…)`, an aliased import of it, and `deps.createApp(…)` all count. */
+function isCreateAppCallee(expression: ts.LeftHandSideExpression, localNames: ReadonlySet<string>): boolean {
+  if (ts.isIdentifier(expression)) return localNames.has(expression.text);
+  if (ts.isPropertyAccessExpression(expression)) return expression.name.text === "createApp";
+  return false;
+}
+
+function collapseWhitespace(text: string): string {
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  return collapsed.length > 160 ? `${collapsed.slice(0, 157)}…` : collapsed;
+}
+
+/**
+ * THE classifier. Pure: source text in, classified call sites out — so the real repo scan
+ * and the synthetic liveness fixtures below go through the SAME code path (AC-LL-10's
+ * mandatory control 3). Line breaks are irrelevant to it: the parser sees an AST, so a
+ * call reformatted across five lines classifies identically to a one-liner.
+ */
+export function analyzeCreateAppCallSites(content: string, relPath: string): CreateAppCallSite[] {
+  const sourceFile = ts.createSourceFile(relPath, content, ts.ScriptTarget.ESNext, true, ts.ScriptKind.TS);
+  const strippedNames = collectSyncStrippedBindings(sourceFile);
+  const calleeNames = collectCreateAppLocalNames(sourceFile);
+  const sites: CreateAppCallSite[] = [];
+
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && isCreateAppCallee(node.expression, calleeNames)) {
+      const line = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
+      const args = node.arguments;
+      const secondArg = args.length >= 2 ? args[1] : undefined;
+      const secondArgText = secondArg === undefined ? undefined : collapseWhitespace(secondArg.getText(sourceFile));
+
+      let classification: CreateAppCallClass;
+      let reason: string;
+      if (args.length === 1) {
+        classification = "single-arg";
+        reason = "class (a): exactly one argument — the createApp(dbPath) overload, which never reaches the Turso branch";
+      } else if (args.length === 2 && secondArg !== undefined) {
+        if (ts.isIdentifier(secondArg) && secondArg.text === "undefined") {
+          classification = "sync-stripped";
+          reason = "class (b): second argument is the literal `undefined`";
+        } else if (ts.isIdentifier(secondArg) && strippedNames.has(secondArg.text)) {
+          classification = "sync-stripped";
+          reason =
+            `class (b): second argument \`${secondArg.text}\` is bound in this file from a ` +
+            "rest-destructure discarding `sync` (directly or through an assignment chain)";
+        } else {
+          classification = "violation";
+          reason =
+            `second argument \`${secondArgText ?? "?"}\` is neither the literal \`undefined\` nor an ` +
+            "identifier this file binds from a rest-destructure discarding `sync` — it may carry a " +
+            "`sync` section straight into app.ts's Turso branch, whose synchronous createRequire " +
+            "fallback throws `Cannot find module '@libsql/client'` from the compiled binary";
+        }
+      } else {
+        classification = "violation";
+        reason = `unexpected argument count ${String(args.length)} — createApp takes 1 or 2 arguments`;
+      }
+
+      sites.push({
+        file: relPath,
+        line,
+        argCount: args.length,
+        secondArgText,
+        classification,
+        reason,
+        text: collapseWhitespace(node.getText(sourceFile)),
+      });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+
+  return sites;
+}
+
+/** Walks the REAL `packages/lore/src` tree. Every precondition failure throws — never a quiet zero. */
+function scanLoreSrcForCreateAppCallSites(): { sites: CreateAppCallSite[]; fileCount: number } {
+  if (!existsSync(LORE_SRC_ROOT)) {
+    throw new Error(`AC-LL-10 scan: scan root ${LORE_SRC_ROOT} does not exist — the scan measured nothing`);
+  }
+  if (!existsSync(CREATE_APP_DEFINITION_FILE)) {
+    throw new Error(
+      `AC-LL-10 scan: ${CREATE_APP_DEFINITION_FILE} (the excluded createApp definition site) does not exist — ` +
+        "the exclusion is stale and may be silently excluding nothing, or createApp moved",
+    );
+  }
+  const files = listScannedSourceFiles(LORE_SRC_ROOT);
+  const sites: CreateAppCallSite[] = [];
+  for (const file of files) {
+    const relPath = relative(REPO_ROOT, file).split("\\").join("/");
+    sites.push(...analyzeCreateAppCallSites(readFileSync(file, "utf8"), relPath));
+  }
+  return { sites, fileCount: files.length };
+}
+
+function formatSites(sites: CreateAppCallSite[]): string {
+  if (sites.length === 0) return "  (none)";
+  return sites.map((s) => `  ${s.file}:${String(s.line)} — ${s.text}\n      → ${s.reason}`).join("\n");
+}
+
+/**
+ * Synthetic fixture for AC-LL-10's mandatory liveness control 3: a MULTI-LINE `createApp`
+ * call whose second argument is a sync-BEARING config identifier. Run through the same
+ * `analyzeCreateAppCallSites` the repo scan uses, it must report a violation — which proves
+ * (i) the scan is live (a scanner that matches nothing would report nothing here either),
+ * (ii) it is reformat-resistant, and (iii) the violation branch is reachable at all.
+ */
+const MULTILINE_SYNC_BEARING_FIXTURE = [
+  'import { createApp } from "../app.js";',
+  "",
+  "export function offendingFutureCaller(dbPath: string, rawConfig: LoreConfig): App {",
+  "  // Passes the RAW config, sync section intact — and is spread across four",
+  "  // lines, the reformat a line-oriented scanner would silently miss.",
+  "  const appOrResult = createApp(",
+  "    dbPath,",
+  "    rawConfig,",
+  "  );",
+  "  return appOrResult as App;",
+  "}",
+  "",
+].join("\n");
+
+/** The same multi-line shape, but sync-stripped through loader.ts's real two-step alias hop. */
+const MULTILINE_SYNC_STRIPPED_FIXTURE = [
+  'import { createApp } from "../app.js";',
+  "",
+  "export function compliantFutureCaller(dbPath: string, rawConfig: LoreConfig): App {",
+  "  const { sync: _sync, ...configWithoutSync } = rawConfig;",
+  "  const telemetryOnlyConfig = configWithoutSync as LoreConfig;",
+  "  const appOrResult = createApp(",
+  "    dbPath,",
+  "    telemetryOnlyConfig,",
+  "  );",
+  "  return appOrResult as App;",
+  "}",
+  "",
+].join("\n");
+
+/** An ALIASED import of the same function — a name-only matcher would miss this entirely. */
+const ALIASED_IMPORT_FIXTURE = [
+  'import { createApp as buildApp } from "../app.js";',
+  "",
+  "export function aliasedFutureCaller(dbPath: string, rawConfig: LoreConfig): App {",
+  "  return buildApp(dbPath, rawConfig) as App;",
+  "}",
+  "",
+].join("\n");
+
+/** Prose/JSDoc/strings that merely SHOW a two-argument call are not call sites (loader.ts really has one). */
+const PROSE_ONLY_FIXTURE = [
+  "/**",
+  " * Constructs App via createApp(dbPath, config) — this JSDoc line is prose,",
+  " * not a call site.",
+  " */",
+  "export function documentedOnly(): string {",
+  '  return "createApp(dbPath, rawConfig)";',
+  "  // const app = createApp(dbPath, rawConfig);",
+  "}",
+  "",
+].join("\n");
+
+describe("AC-LL-10 — no createApp call site passes a sync-bearing config (source-scan pin)", () => {
+  it("AC-LL-10 liveness control 1: the scan walks the real packages/lore/src tree and finds at least 4 createApp call sites", () => {
+    const { sites, fileCount } = scanLoreSrcForCreateAppCallSites();
+    expect(
+      fileCount,
+      `AC-LL-10 scan walked only ${String(fileCount)} source file(s) under ${LORE_SRC_ROOT} — a scan of an ` +
+        "empty/wrong tree reports zero violations for the same reason a clean tree does",
+    ).toBeGreaterThan(MIN_EXPECTED_SCANNED_FILES);
+    expect(
+      sites.length,
+      `AC-LL-10 found ${String(sites.length)} createApp call site(s); at least ${String(MIN_EXPECTED_CALL_SITES)} are ` +
+        "expected (5 exist today: adapters/cli/loader.ts, adapters/cli/commands/init.ts, " +
+        "adapters/cli/commands/dashboard.ts, flows/init-corpus.ts, mount/mount-registry.ts). Fewer means the " +
+        `matcher stopped matching, NOT that the invariant holds. Sites found:\n${formatSites(sites)}`,
+    ).toBeGreaterThanOrEqual(MIN_EXPECTED_CALL_SITES);
+  });
+
+  it("AC-LL-10 liveness control 2: loader.ts's two-argument call classifies as PROVABLY sync-stripped, not merely as lacking a second argument", () => {
+    const { sites } = scanLoreSrcForCreateAppCallSites();
+    const syncStripped = sites.filter((s) => s.classification === "sync-stripped");
+    expect(
+      syncStripped.length,
+      "AC-LL-10 classified ZERO call sites as class (b). A scan where every site trivially passes by having one " +
+        `argument never exercises the sync-stripped branch at all. Sites found:\n${formatSites(sites)}`,
+    ).toBeGreaterThanOrEqual(1);
+
+    const loaderSite = syncStripped.find((s) => s.file.endsWith("packages/lore/src/adapters/cli/loader.ts"));
+    expect(
+      loaderSite,
+      "AC-LL-10 expected adapters/cli/loader.ts's `createApp(dbPath, telemetryOnlyConfig)` to be recognised as " +
+        `provably sync-stripped (the loader.ts:240-241 rest-destructure + alias hop). Sites found:\n${formatSites(sites)}`,
+    ).toBeDefined();
+    expect(loaderSite?.argCount).toBe(2);
+    expect(loaderSite?.secondArgText).toBe("telemetryOnlyConfig");
+  });
+
+  it("AC-LL-10 liveness control 3: the SAME classifier reports a synthetic MULTI-LINE sync-bearing call as a violation", () => {
+    const sites = analyzeCreateAppCallSites(MULTILINE_SYNC_BEARING_FIXTURE, "fixture/multiline-sync-bearing.ts");
+    expect(sites.length, `expected exactly 1 call site in the fixture, got:\n${formatSites(sites)}`).toBe(1);
+    const site = sites[0];
+    expect(site?.classification).toBe("violation");
+    expect(site?.argCount).toBe(2);
+    expect(site?.secondArgText).toBe("rawConfig");
+    // The call's `createApp(` token is on fixture line 6; its arguments are on 7 and 8 —
+    // matching across line breaks is what makes this a violation rather than a miss.
+    expect(site?.line).toBe(6);
+  });
+
+  it("AC-LL-10 reformat control: the same MULTI-LINE shape with a provably sync-stripped second argument is NOT a violation", () => {
+    const sites = analyzeCreateAppCallSites(MULTILINE_SYNC_STRIPPED_FIXTURE, "fixture/multiline-sync-stripped.ts");
+    expect(sites.length, `expected exactly 1 call site in the fixture, got:\n${formatSites(sites)}`).toBe(1);
+    expect(sites[0]?.classification).toBe("sync-stripped");
+    expect(sites[0]?.secondArgText).toBe("telemetryOnlyConfig");
+  });
+
+  it("AC-LL-10 evasion control: a call through an ALIASED import of createApp is still scanned and still classified", () => {
+    const sites = analyzeCreateAppCallSites(ALIASED_IMPORT_FIXTURE, "fixture/aliased-import.ts");
+    expect(sites.length, `expected exactly 1 call site in the fixture, got:\n${formatSites(sites)}`).toBe(1);
+    expect(sites[0]?.classification).toBe("violation");
+    expect(sites[0]?.secondArgText).toBe("rawConfig");
+  });
+
+  it("AC-LL-10 false-positive control: prose, JSDoc and string literals showing createApp(dbPath, config) are not call sites", () => {
+    expect(analyzeCreateAppCallSites(PROSE_ONLY_FIXTURE, "fixture/prose-only.ts")).toEqual([]);
+  });
+
+  it("AC-LL-10: every createApp call site under packages/lore/src is either single-argument or passes a provably sync-stripped config", () => {
+    const { sites } = scanLoreSrcForCreateAppCallSites();
+    const violations = sites.filter((s) => s.classification === "violation");
+    expect(
+      violations.map((v) => `${v.file}:${String(v.line)}`),
+      "AC-LL-10 VIOLATION — a createApp call site may pass a sync-bearing config. app.ts's Turso branch falls back " +
+        "to a synchronous createRequire (`turso-store.ts::loadLibsqlClientModuleSync`) that resolves ONLY in source " +
+        "mode; from the compiled `dist/lore` binary it throws `Cannot find module '@libsql/client'`. Do NOT add an " +
+        "exception here — the correct fix is to make that synchronous fallback unnecessary (finish the async " +
+        `conversion), or to strip \`sync\` at the call site.\nOffending site(s):\n${formatSites(violations)}\n\n` +
+        `All call sites found:\n${formatSites(sites)}`,
+    ).toEqual([]);
+  });
 });
