@@ -279,8 +279,51 @@ const NATIVE_MODULE_TOKEN_PATTERN = /\.node\b/;
  */
 const CLI_INTERNAL_ERROR_HINT_TOKEN_PATTERNS = [/<short-title>/, /re-checking/];
 
-/** Bun/Node stack frames — an UNCAUGHT throw, never one of this codebase's formatted `Result` errors. */
+/**
+ * Bun/Node stack frames — the throw was UNCAUGHT, so it is not one of this
+ * codebase's formatted `Result` errors.
+ *
+ * ⛔ That is ALL this pattern establishes. It does NOT establish which layer
+ * threw: "not a formatted `Result` error" does not imply "not in the governed
+ * path". Treating the two as equivalent is exactly the false-GREEN vector
+ * task-the-concurrency-exclusion-classifier-excuses-governed-path closed —
+ * measured, 92 of ~300 AC-IC-1 attempts were EXCLUDED while carrying an
+ * uncaught `database is locked` thrown from `openValidatedUpstream`/`report`,
+ * so the harness could report green over a ~31% blind spot. The layer question
+ * is answered separately, by {@link GOVERNED_PATH_FRAME_TOKEN_PATTERNS}.
+ */
 const UNCAUGHT_STACK_FRAME_PATTERN = /\n\s+at\s/;
+
+/**
+ * POSITIVE evidence that an uncaught throw came from the write this contract
+ * GOVERNS, and therefore must never be excused: the contract says the loser
+ * refuses with the declared code plus template, so a raw throw out of this path
+ * is a violation, not a measurement of something else.
+ *
+ * Three INDEPENDENT lone-token conditions, never one remembered contiguous
+ * phrase (root CLAUDE.md "contiguous-substring assumption"). Each frame is its
+ * own regex so retiring or renaming one cannot silently disarm the other two.
+ *
+ * These names are matched anywhere in the buffer rather than anchored to a
+ * parsed `at <name> (…)` frame position ON PURPOSE. Anchoring would couple the
+ * matcher to Bun's stack-rendering grammar, and a grammar change would degrade
+ * it to no-match — which on THIS branch means "excused", i.e. it would fail
+ * back toward false GREEN. An over-broad match instead yields `non_conforming`:
+ * loud, diagnosable from the verdict's `detail`, and the safe direction.
+ *
+ * SURVIVES MINIFICATION, structurally rather than by luck: `scripts/build.ts`
+ * sets `minify: true`, which mangles function/class DECLARATION identifiers but
+ * never property keys. All three names are methods — `report` and
+ * `openValidatedUpstream` on `IssueReportService`, `createDraft` on the
+ * `UpstreamPort` object — which is why the measured COMPILED-binary trace reads
+ * `… → new Kr → Wy → openValidatedUpstream → report`: the store class and
+ * `openUpstream` were mangled, the methods were not.
+ */
+const GOVERNED_PATH_FRAME_TOKEN_PATTERNS = [
+  /\bopenValidatedUpstream\b/,
+  /\bcreateDraft\b/,
+  /\breport\b/,
+];
 
 /** The facts the declared stderr template interpolates. All caller-supplied — this module reads no ambient state. */
 export interface WriteContentionFacts {
@@ -424,12 +467,22 @@ function hasNativeModuleLoadRace(outcome: InvocationOutcome): boolean {
  * contract "is measuring the wrong thing".
  *
  * Requires POSITIVE evidence of that other layer — the CLI startup path's own
- * hint, or an uncaught stack trace — rather than merely "a lock message that
- * isn't the template". That asymmetry is deliberate: a bare
- * `Error: Storage failure: database is locked` with NEITHER marker is exactly
- * what a contended REPORT WRITE printed before this contract existed, so it
- * must stay NON-conforming instead of being excused (which would let a removal
- * of the enforcement pass as not-attributable).
+ * hint, or an uncaught stack trace naming NO governed frame — rather than
+ * merely "a lock message that isn't the template". That asymmetry is
+ * deliberate: a bare `Error: Storage failure: database is locked` with NEITHER
+ * marker is exactly what a contended REPORT WRITE printed before this contract
+ * existed, so it must stay NON-conforming instead of being excused (which would
+ * let a removal of the enforcement pass as not-attributable).
+ *
+ * The stack-trace arm is DENYLISTED by
+ * {@link GOVERNED_PATH_FRAME_TOKEN_PATTERNS} rather than allowlisted over
+ * startup-layer frames, and that choice is forced by the build: every
+ * startup-layer name (`SessionStore`, `buildAppFromSqlite`, `loadLoreApp`) is a
+ * function/class declaration and is therefore MANGLED by `minify: true`, so an
+ * allowlist could never match a compiled-binary startup crash — it would
+ * collapse this branch into excusing nothing, which is deleting it. The
+ * governed names survive minification (they are methods), so the denylist is
+ * the only form with real matching power on the artifact the harness spawns.
  */
 function hasContentionOutsideReportWrite(outcome: InvocationOutcome): boolean {
   if (outcome.exitCode === 0) return false;
@@ -438,7 +491,23 @@ function hasContentionOutsideReportWrite(outcome: InvocationOutcome): boolean {
   const hasStartupHint = CLI_INTERNAL_ERROR_HINT_TOKEN_PATTERNS.every((pattern) =>
     pattern.test(outcome.stderr),
   );
-  return hasStartupHint || UNCAUGHT_STACK_FRAME_PATTERN.test(outcome.stderr);
+  if (hasStartupHint) return true;
+  return (
+    UNCAUGHT_STACK_FRAME_PATTERN.test(outcome.stderr) && !hasGovernedPathFrame(outcome.stderr)
+  );
+}
+
+/**
+ * Does this stderr name a frame from the write path this contract governs?
+ *
+ * @param stderr - a failed invocation's full stderr buffer
+ * @returns `true` when ANY governed frame token appears — the conditions are
+ *   independent, so one surviving token is enough to refuse the excuse
+ * @example
+ *   hasGovernedPathFrame("…\n      at report (/$bunfs/root/index.js:1088:11655)\n") // true
+ */
+function hasGovernedPathFrame(stderr: string): boolean {
+  return GOVERNED_PATH_FRAME_TOKEN_PATTERNS.some((pattern) => pattern.test(stderr));
 }
 
 /**
