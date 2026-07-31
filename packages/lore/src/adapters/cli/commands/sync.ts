@@ -7,7 +7,6 @@
 import { defineCommand } from "citty";
 import { join, dirname } from "path";
 import { existsSync } from "fs";
-import { createClient } from "@libsql/client";
 import { resolveSyncCredentials } from "@lore/core";
 import type { LoreConfig } from "@lore/core";
 import type { Result, LoreError } from "@lore/core";
@@ -18,7 +17,12 @@ import { err, ok } from "@lore/core";
 import { loadConfig, saveConfig } from "@lore/core/node";
 import { formatError } from "../utils.js";
 import { syncPush, type PushReport } from "../../http/sync-push.js";
-import { TursoStore } from "../../../store/turso-store.js";
+import {
+  TursoStore,
+  buildTursoClientConfig,
+  loadLibsqlClientModule,
+  probeTmpdirUsability,
+} from "../../../store/turso-store.js";
 
 // ─── Push / Pull implementations ─────────────────────────────────────────────
 
@@ -31,6 +35,15 @@ export async function performPush(
   remoteUrl: string,
   authToken: string,
 ): Promise<Result<PushReport, LoreError>> {
+  // reason: spec-eager-libsql-load-makes-every-command-depend-on-a-healthy
+  // AC-LL-4 — callers (`syncPushCmd.run()`) already resolve credentials
+  // before calling this function; the TMPDIR probe runs SECOND, here, right
+  // before the native load `createClient` triggers (THIRD) — never a raw
+  // dlopen trace.
+  const tmpdirError = probeTmpdirUsability();
+  if (tmpdirError !== null) return err(tmpdirError);
+
+  const { createClient } = await loadLibsqlClientModule();
   const remoteClient = createClient({ url: remoteUrl, authToken });
   try {
     return await syncPush(localPath, remoteClient);
@@ -49,11 +62,21 @@ export async function performPull(
   remoteUrl: string,
   authToken: string,
 ): Promise<Result<{ frameNo: number; framesSynced: number } | void, LoreError>> {
-  const store = new TursoStore({
-    localPath,
-    remoteUrl,
-    authToken,
-  });
+  // reason: same ordering as performPush above — credential validation
+  // already ran in the caller, TMPDIR probe here, native load only after.
+  const tmpdirError = probeTmpdirUsability();
+  if (tmpdirError !== null) return err(tmpdirError);
+
+  const tursoConfig = { localPath, remoteUrl, authToken };
+  // reason: THIS function (already async) pre-resolves the native module via
+  // the literal-specifier dynamic-import loader — the ONLY mechanism proven
+  // safe from a compiled binary (see `turso-store.ts`'s loader headers) —
+  // and injects the built client into `TursoStore`'s constructor, which
+  // therefore never needs to resolve `@libsql/client` itself on this
+  // (real, compiled-binary-reachable) call path.
+  const { createClient } = await loadLibsqlClientModule();
+  const client = createClient(buildTursoClientConfig(tursoConfig));
+  const store = new TursoStore(tursoConfig, client);
   try {
     return await store.sync();
   } finally {

@@ -12,13 +12,14 @@
  * Source: SPEC-009 §3.1; AC-STORE-TURSO-001
  */
 
-import {
-  createClient,
-  type Client,
-  type InValue,
-  type Row,
-  type Transaction,
-} from "@libsql/client";
+// reason: spec-eager-libsql-load-makes-every-command-depend-on-a-healthy —
+// `createClient` is DELIBERATELY not imported as a value here (see
+// `loadLibsqlClientModule` below). Only types are imported at the top level;
+// types are fully erased at compile time, so this import has NO runtime
+// effect and does not touch `@libsql/client`'s native binding.
+import type { Client, InValue, Row, Transaction } from "@libsql/client";
+import { accessSync, constants as fsConstants } from "node:fs";
+import { createRequire } from "node:module";
 import { MIGRATION_001_SQL } from "./migrations/migration-001.js";
 import { MIGRATION_002_SQL } from "./migrations/migration-002.js";
 import { MIGRATION_003_SQL } from "./migrations/migration-003.js";
@@ -103,6 +104,108 @@ import {
   type VersionRow,
 } from "./store-shared.js";
 
+// ─── Deferred @libsql/client load (spec-eager-libsql-load-makes-every-command-depend-on-a-healthy) ──
+//
+// The embedded native `.node` binding must NOT be resolved merely by loading
+// this module — only genuinely constructing a `TursoStore` (or a raw
+// `createClient()` call elsewhere that reuses this loader) may trigger the
+// unpack-then-dlopen a compiled `bun build --compile` binary performs.
+//
+// This is a LITERAL-SPECIFIER dynamic `import()`, never
+// `createRequire(import.meta.url)("@libsql/client")`. `slugify-node.ts`'s
+// pinyin-pro hotfix (SPEC-068, 2026-07-23) measured that a `createRequire`
+// -based lazy require throws `Cannot find package '<name>'` from a compiled
+// binary's virtual `$bunfs/root` filesystem when run OUTSIDE the source repo
+// (no real `node_modules` to walk) — while a literal-specifier dynamic
+// `import()` is discovered and bundled by `bun build --compile` the SAME way
+// a static top-level import is, so it resolves correctly from any cwd, both
+// in source mode and compiled. Do not "simplify" this to `createRequire`.
+let cachedLibsqlModulePromise: Promise<typeof import("@libsql/client")> | null = null;
+
+/**
+ * Process-lifetime-cached loader — the dynamic import happens at most once.
+ * Exported so `adapters/cli/commands/sync.ts` / `adapters/http/sync-push.ts`
+ * (the other two `@libsql/client`-touching call sites, SPEC's Scope section)
+ * reuse the SAME literal-specifier dynamic-import mechanism rather than each
+ * re-declaring their own — they call `createClient` directly (no
+ * `TursoStore`), never via a top-level value import.
+ */
+export function loadLibsqlClientModule(): Promise<typeof import("@libsql/client")> {
+  if (cachedLibsqlModulePromise === null) {
+    cachedLibsqlModulePromise = import("@libsql/client");
+  }
+  return cachedLibsqlModulePromise;
+}
+
+// reason: SYNCHRONOUS fallback — `createRequire`, ONLY safe from source mode
+// (`bun test`/`bun run dev`, real `node_modules` reachable on disk). Empirically
+// re-verified while building this fix: BOTH `createRequire(import.meta.url)
+// ("@libsql/client")` and Bun's `import.meta.require("@libsql/client")` throw
+// `Cannot find module '@libsql/client' from '/$bunfs/root/...'` when run from
+// a `bun build --compile` binary — even from INSIDE the source repo, not only
+// "outside" as SPEC-068's pinyin-pro precedent phrased it. ONLY a
+// literal-specifier dynamic `import()` (`loadLibsqlClientModule` above)
+// resolves correctly from a compiled binary.
+//
+// `TursoStore`'s constructor uses THIS synchronous fallback ONLY when no
+// `injectedClient` is passed — which happens ONLY from `app.ts`'s createApp()
+// Turso branch (createApp() must stay synchronous, cannot `await` the async
+// loader above) and from bare test-fixture construction. Both are
+// UNREACHABLE from a compiled `dist/lore` binary: `adapters/cli/loader.ts`
+// strips `config.sync` unconditionally before calling `createApp`, so no CLI
+// command can ever reach createApp's Turso branch (adapters/cli/CLAUDE.md).
+// The ONE real compiled-binary-reachable caller of `new TursoStore(...)`
+// (`adapters/cli/commands/sync.ts::performPull`) is ALREADY an async
+// function — it pre-resolves the client via `loadLibsqlClientModule()` above
+// and passes it in as `injectedClient`, so it never touches this fallback.
+let cachedLibsqlModuleSync: typeof import("@libsql/client") | null = null;
+function loadLibsqlClientModuleSync(): typeof import("@libsql/client") {
+  if (cachedLibsqlModuleSync === null) {
+    const req = createRequire(import.meta.url);
+    cachedLibsqlModuleSync = req("@libsql/client") as typeof import("@libsql/client");
+  }
+  return cachedLibsqlModuleSync;
+}
+
+/**
+ * Synchronously probes whether `TMPDIR` (when set) points at a writable
+ * directory — the precondition a compiled binary needs before it can
+ * unpack-then-dlopen `@libsql/client`'s embedded native module. Call this
+ * AFTER credential validation and BEFORE the native load, at every call site
+ * that is about to genuinely need libsql (`TursoStore` construction here, or
+ * a raw `createClient()` call in `adapters/cli/commands/sync.ts` /
+ * `adapters/http/sync-push.ts`) — AC-LL-4's pinned ordering.
+ *
+ * `TMPDIR` absent or empty is NOT a failure — bun falls back to the system
+ * default tmpdir in that case (measured root cause, see the governing spec).
+ * Deliberately does NOT rewrite `TMPDIR` on the caller's behalf (no silent
+ * fallback, D-007's sibling invariant) — an unusable value is reported, never
+ * repaired.
+ *
+ * @returns `null` when TMPDIR is absent, empty, or a writable directory;
+ *   otherwise a `STORE_ERROR` `LoreError` whose message's FIRST LINE names
+ *   `TMPDIR` and the offending value verbatim, followed by a remediation line
+ *   containing the literal substring `export TMPDIR=` (AC-LL-4's four
+ *   substring rules).
+ */
+export function probeTmpdirUsability(): LoreError | null {
+  const tmpdir = process.env.TMPDIR;
+  if (tmpdir === undefined || tmpdir === "") return null;
+  try {
+    accessSync(tmpdir, fsConstants.W_OK);
+    return null;
+  } catch {
+    return {
+      code: "STORE_ERROR",
+      message:
+        `TMPDIR is set to an unusable directory: ${tmpdir}\n` +
+        "The Turso sync client needs to unpack a native module into a " +
+        "writable TMPDIR before it can load.\n" +
+        `Fix: export TMPDIR=/tmp   (or any writable directory you control), then retry.`,
+    } satisfies LoreError;
+  }
+}
+
 // ─── Config ────────────────────────────────────────────────────────────────
 
 export interface TursoConfig {
@@ -114,6 +217,27 @@ export interface TursoConfig {
   authToken?: string;
   /** Sync interval in seconds for embedded replica. Defaults to 60. */
   syncInterval?: number;
+}
+
+/**
+ * Pure helper — the `@libsql/client` `createClient()` options shape for a
+ * given `TursoConfig`, extracted once so `TursoStore`'s own (source-mode-only)
+ * synchronous fallback load AND `performPull`'s pre-resolved-client injection
+ * path (`adapters/cli/commands/sync.ts`, the REAL compiled-binary-reachable
+ * route) build the IDENTICAL options from ONE place, never duplicated.
+ */
+export function buildTursoClientConfig(
+  config: TursoConfig,
+): { url: string; syncUrl?: string; authToken?: string; syncInterval: number; readYourWrites: true } | { url: string } {
+  const url = `file:${config.localPath}`;
+  if (!config.remoteUrl) return { url };
+  return {
+    url,
+    ...(config.remoteUrl !== undefined ? { syncUrl: config.remoteUrl } : {}),
+    ...(config.authToken !== undefined ? { authToken: config.authToken } : {}),
+    syncInterval: config.syncInterval ?? 60,
+    readYourWrites: true,
+  };
 }
 
 // ─── Row extraction helpers ────────────────────────────────────────────────
@@ -288,21 +412,31 @@ export class TursoStore implements StoreInterface {
   private readonly client: Client;
   private readonly hasRemote: boolean;
 
-  constructor(config: TursoConfig) {
-    const url = `file:${config.localPath}`;
+  /**
+   * @param config - Local path + optional remote/auth/interval.
+   * @param injectedClient - OPTIONAL pre-constructed `@libsql/client` `Client`
+   *   (spec-eager-libsql-load-makes-every-command-depend-on-a-healthy). Pass
+   *   this from any COMPILED-BINARY-REACHABLE call site — build it via
+   *   `loadLibsqlClientModule()`'s literal-specifier dynamic import (already
+   *   async there, e.g. `adapters/cli/commands/sync.ts::performPull`) BEFORE
+   *   calling `new TursoStore(...)`, so this constructor never resolves
+   *   `@libsql/client` itself for that path. Omitted by `app.ts`'s
+   *   createApp() Turso branch (createApp() must stay synchronous — it
+   *   cannot `await` the dynamic-import loader) and by bare test-fixture
+   *   construction; both are UNREACHABLE from a compiled `dist/lore` binary
+   *   (`adapters/cli/loader.ts` strips `config.sync` unconditionally before
+   *   calling `createApp` — see that file's own comment / adapters/cli/
+   *   CLAUDE.md), so the synchronous `createRequire` fallback below
+   *   (`loadLibsqlClientModuleSync`) only ever runs under `bun test`/`bun run
+   *   dev` (real `node_modules` reachable) — see that function's header for
+   *   the empirical proof it fails from a compiled binary.
+   */
+  constructor(config: TursoConfig, injectedClient?: Client) {
     this.hasRemote = Boolean(config.remoteUrl);
-
-    this.client = createClient(
-      this.hasRemote
-        ? {
-            url,
-            ...(config.remoteUrl !== undefined ? { syncUrl: config.remoteUrl } : {}),
-            ...(config.authToken !== undefined ? { authToken: config.authToken } : {}),
-            syncInterval: config.syncInterval ?? 60,
-            readYourWrites: true,
-          }
-        : { url },
-    );
+    this.client =
+      injectedClient !== undefined
+        ? injectedClient
+        : loadLibsqlClientModuleSync().createClient(buildTursoClientConfig(config));
 
     // Schema init is async; run eagerly in constructor.
     // The promise is stored in _schemaInitPromise so ensureReady() can await it
