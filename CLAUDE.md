@@ -91,7 +91,7 @@ packages/lore/src/eval/           ← read-only evaluation scenarios (lore eval)
 **Store selection (D-007)** — `createApp(dbPath, config?)`:
 - No config / `sync.enabled !== true` → `SQLiteStore` (local-only, returned directly as `App`).
 - `sync.enabled: true` + `remote_url` + valid `LORE_SYNC_TOKEN` env var → `TursoStore` (embedded replica) wrapped in `Result<App>`.
-- Sync enabled but credentials missing or TursoStore construction fails → `err(STORE_ERROR)`. **No silent fallback** to SQLiteStore — offline writes must not land only-local.
+- Sync enabled, credentials missing → `err(VALIDATION_ERROR)` (from `resolveSyncCredentials`, propagated verbatim); TursoStore construction fails → `err(STORE_ERROR)`. **No silent fallback** to SQLiteStore — offline writes must not land only-local.
 
 **Import style (monorepo)** — path aliases `@core/*`, `@store/*`, `@service/*`, `@adapters/*` are retired. Cross-package imports use `@lore/core` (resolved via Bun workspaces). Intra-package imports within `packages/lore/` use relative `.js` paths. No `resolve.alias` in vitest.
 
