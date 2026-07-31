@@ -16,6 +16,9 @@
  *   - AcCoverageFact / EvidenceRefLite — computeAcCoverage's output row shapes
  *   - deriveAcCoverageState(fact) — the ONE fail-first coverage-precedence derivation
  *     (SPEC-070 AC-070-12, review finding F3) every rendering consumer shares
+ *   - isAcInDeclaredScope(declaredScope, acId) — the ONE declared-`ac_scope`
+ *     membership predicate (adr-lore-verify-s-attested-evidence-scope-belongs-to-the-task
+ *     §Public Interface), consumed by `lore verify`'s selection + refusals
  *
  * Invariants:
  *   - `id` format is `^AC-[A-Z0-9]+(-[A-Z0-9]+)*$` — matches every corpus-observed
@@ -324,4 +327,37 @@ export function deriveAcCoverageState(
   if (fact.attested_pass > 0) return "attested_pass";
   if (fact.pass > 0) return "pass";
   return "none";
+}
+
+// ─── Declared-Scope Membership (adr-lore-verify-s-attested-evidence-scope…) ──
+
+/**
+ * Whether one acceptance-criterion id falls inside a task's/phase's DECLARED
+ * `ac_scope` — the SINGLE membership decision `lore verify`'s selection and both
+ * of its scope refusals are built from (`VerifyRunnerService.verifyPlan`), and
+ * the one place the "exact string equality" rule for scope ids is stated.
+ *
+ * A boolean query, per CQS: no `Result`, no store, no config (ADR §Public
+ * Interface — "a pure predicate beside `computeAcCoverage`").
+ *
+ * @param declaredScope - the doc's declared ids, read via
+ *   `extractDeclaredAcScope` (`phase.ts`). The caller MUST have already
+ *   distinguished ABSENT (`undefined`) from EMPTY (`[]`) before calling: this
+ *   predicate takes an array, so it cannot tell "nobody declared a scope" from
+ *   "an author declared that this doc claims nothing" — and those two states
+ *   have DIFFERENT refusals (AC-VS-3 vs AC-VS-5). Passing `[]` here simply
+ *   answers `false` for every id.
+ * @param acId - one declared criterion's id (or one `--ac`-named id)
+ * @returns `true` iff `declaredScope` contains `acId` by EXACT string equality
+ *   — no trimming, no case folding, matching how `acScopeArraySchema` stores ids
+ *   verbatim and how `assertScopeFreeze` compares them. Normalising here would
+ *   silently change which stored ids an evidence `ac_ref` matches.
+ *
+ * @example
+ * isAcInDeclaredScope(["AC-VS-1", "AC-VS-2"], "AC-VS-2"); // => true
+ * isAcInDeclaredScope(["AC-VS-1"], "ac-vs-1");            // => false (exact match only)
+ * isAcInDeclaredScope([], "AC-VS-1");                     // => false (claims nothing)
+ */
+export function isAcInDeclaredScope(declaredScope: readonly string[], acId: string): boolean {
+  return declaredScope.includes(acId);
 }

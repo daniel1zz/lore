@@ -203,11 +203,31 @@ function createPlan(title: string, parentSlug: string): string {
   return extractSlug(r.stdout);
 }
 
-function createTask(planSlug: string, title: string): string {
-  const r = runLore(
-    ["create", "task", "--title", title, "--parent", planSlug, "--plan-id", planSlug, "--no-ai", "--content", "body"],
-    tmpDir,
-  );
+/**
+ * Creates the fixture task, declaring `acScope` via `--ac-scope` (repeatable).
+ *
+ * reason: post-`spec-declared-scope-attestation-contract-task-owned-ac-scope`
+ * (AC-VS-3), `lore verify` REFUSES exit 4 against a target task that declares no
+ * `ac_scope` — so every fixture whose test expects a run to EXECUTE must declare
+ * the ids that test's spec carries. Callers that expect a refusal BEFORE the scope
+ * pre-flight (ambiguous target task) deliberately pass none.
+ */
+function createTask(planSlug: string, title: string, acScope: readonly string[] = []): string {
+  const args = [
+    "create",
+    "task",
+    "--title",
+    title,
+    "--parent",
+    planSlug,
+    "--plan-id",
+    planSlug,
+    "--no-ai",
+    "--content",
+    "body",
+  ];
+  for (const acId of acScope) args.push("--ac-scope", acId);
+  const r = runLore(args, tmpDir);
   if (r.exitCode !== 0) throw new Error(`create task failed: ${r.stderr}`);
   return extractSlug(r.stdout);
 }
@@ -239,7 +259,11 @@ function buildFixture(
   const specSlug = createSpec(`${label} Spec`, prdSlug);
   for (const ac of acs) declareScriptAc(specSlug, ac.id, ac.command);
   const planSlug = createPlan(`${label} Plan`, specSlug);
-  const taskSlug = createTask(planSlug, `${label} Task`);
+  const taskSlug = createTask(
+    planSlug,
+    `${label} Task`,
+    acs.map((ac) => ac.id),
+  );
   return { specSlug, planSlug, taskSlug };
 }
 
@@ -352,7 +376,9 @@ describe("lore verify — BOUNDARY (no script ACs)", () => {
     const specSlug = createSpec("NoScript Spec", prdSlug);
     declareHumanAc(specSlug, "AC-VRF-HUMAN");
     const planSlug = createPlan("NoScript Plan", specSlug);
-    const taskSlug = createTask(planSlug, "NoScript Task");
+    // The human-mode AC IS in this task's declared scope — the run has nothing to
+    // EXECUTE (that is the boundary under test), which is a success, not a refusal.
+    const taskSlug = createTask(planSlug, "NoScript Task", ["AC-VRF-HUMAN"]);
 
     const result = runLore(["verify", planSlug, "--task", taskSlug], tmpDir);
 

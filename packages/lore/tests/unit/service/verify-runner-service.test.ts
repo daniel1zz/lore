@@ -93,8 +93,33 @@ function makeSpec(acceptanceCriteria: AcceptanceCriterion[], overrides: Partial<
   });
 }
 
+/**
+ * reason: post-`spec-declared-scope-attestation-contract-task-owned-ac-scope`
+ * (AC-VS-1/AC-VS-3), a DEFAULT `lore verify` run REFUSES a target task carrying
+ * no `extra.ac_scope`. Every case in this file exercises execution/attestation
+ * orchestration over the spec's FULL declared set, so the fixture task declares a
+ * scope covering every AC id used in this file — the declared-scope intersection
+ * then equals each test's declared criteria exactly, preserving the selection
+ * these tests were written against. Scope selection itself is covered in
+ * `verify-declared-scope.test.ts`, not here.
+ * ⛔ Adding a new AC id to a fixture in this file REQUIRES adding it here too:
+ * an id missing from this list is out of scope (a scope matching NO criterion
+ * refuses loudly; a partially-matching one silently drops the new id).
+ */
+const FIXTURE_AC_SCOPE = ["AC-1", "AC-2", "AC-3", "AC-AI-1", "AC-HUMAN-1"];
+
 function makeTask(id: string, overrides: Partial<DocRecord> = {}): DocRecord {
-  return makeDoc({ id, type: "task", title: `Task ${id}`, slug: id, parent_id: "plan-1", ...overrides });
+  return makeDoc({
+    id,
+    type: "task",
+    title: `Task ${id}`,
+    slug: id,
+    parent_id: "plan-1",
+    ...overrides,
+    // The declared scope is merged UNDER any caller-supplied `extra` keys
+    // (claim/verification_evidence), and an explicit `ac_scope` override still wins.
+    extra: { ac_scope: FIXTURE_AC_SCOPE, ...(overrides.extra ?? {}) },
+  });
 }
 
 function scriptAc(id: string, command = "run"): AcceptanceCriterion {

@@ -63,8 +63,27 @@ function makeSpec(acceptanceCriteria: AcceptanceCriterion[], overrides: Partial<
   });
 }
 
+/**
+ * reason: post-`spec-declared-scope-attestation-contract-task-owned-ac-scope`
+ * (AC-VS-1/AC-VS-3), a DEFAULT `lore verify` run REFUSES a target task carrying
+ * no `extra.ac_scope`. This file's cases are about execution-root resolution, not
+ * scope selection (that is `verify-declared-scope.test.ts`), so the fixture task
+ * declares a scope covering every AC id used here.
+ * ⛔ Adding a new AC id to a fixture in this file REQUIRES adding it here too.
+ */
+const FIXTURE_AC_SCOPE = ["AC-1"];
+
 function makeTask(id: string, overrides: Partial<DocRecord> = {}): DocRecord {
-  return makeDoc({ id, type: "task", title: `Task ${id}`, slug: id, parent_id: "plan-1", ...overrides });
+  return makeDoc({
+    id,
+    type: "task",
+    title: `Task ${id}`,
+    slug: id,
+    parent_id: "plan-1",
+    ...overrides,
+    // Merged UNDER any caller-supplied `extra` keys; an explicit override wins.
+    extra: { ac_scope: FIXTURE_AC_SCOPE, ...(overrides.extra ?? {}) },
+  });
 }
 
 function scriptAc(id: string, command = "run"): AcceptanceCriterion {
