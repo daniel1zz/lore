@@ -112,11 +112,20 @@ try {
   const head = git(['rev-parse', '--short', 'HEAD']);
   const currentBranch = git(['rev-parse', '--abbrev-ref', 'HEAD']);
 
-  // Branches that CONTAIN HEAD but are not HEAD itself are strictly ahead of it,
-  // so a worktree cut here would lack their commits. In a detached HEAD,
-  // `--abbrev-ref` yields "HEAD", which matches no branch name, so nothing is
-  // filtered out and every containing branch is reported — correct for that case.
-  const ahead = git(['branch', '--format=%(refname:short)', '--contains', 'HEAD'])
+  // Refs that CONTAIN HEAD but are not HEAD itself are strictly ahead of it, so
+  // a worktree cut here would lack their commits.
+  //
+  // `for-each-ref`, NOT `branch --contains`: the latter emits git's synthetic
+  // display row `(HEAD detached at <sha>)` in a detached worktree, and
+  // `--abbrev-ref HEAD` returns the literal "HEAD" there, so no filter on the
+  // current branch name removes it. That row would then be printed as a "branch
+  // strictly behind" and this message tells the agent to
+  // `git merge --ff-only <that>` — a command that cannot work, because the row
+  // is not a ref at all. Measured in a real detached worktree in this repo.
+  // `for-each-ref` enumerates only real refs, and including `refs/remotes`
+  // additionally covers a local branch sitting behind its upstream, which a
+  // heads-only scan reports as no diagnostic at all.
+  const ahead = git(['for-each-ref', '--contains', 'HEAD', '--format=%(refname:short)', 'refs/heads', 'refs/remotes'])
     .split('\n')
     .map((line) => line.trim())
     .filter((name) => name.length > 0 && name !== currentBranch);

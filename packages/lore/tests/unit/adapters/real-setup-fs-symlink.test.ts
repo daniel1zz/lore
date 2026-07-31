@@ -199,9 +199,14 @@ describe("RealSetupFsWriter removal never resolves through a symlink", () => {
 
   describe("REGRESSION — every removal call site declares its boundary", () => {
     // `[^;]*` deliberately spans newlines (a negated character class matches \n),
-    // so a call reformatted across multiple lines is still captured.
+    // so a call reformatted across multiple lines is still captured. The pattern
+    // deliberately does NOT require `await`: an earlier version keyed on it, and
+    // a fire-and-forget `void this.writer.remove(...)` was invisible to the scan
+    // while the test's own wording claimed to pin "no removal call site".
+    // Syntactic scans overclaim by default — keep the prefix as short as the
+    // call itself allows.
     it.each([
-      { label: "setup-service.ts (machine install)", source: SETUP_SERVICE_SOURCE, pattern: /await this\.writer\.remove\([^;]*\);/g },
+      { label: "setup-service.ts (machine install)", source: SETUP_SERVICE_SOURCE, pattern: /this\.writer\.remove\([^;]*\);/g },
       { label: "setup-project-uninstall.ts (per-repo scaffold)", source: PROJECT_UNINSTALL_SOURCE, pattern: /\bfs\.remove\([^;]*\);/g },
     ])("no removal call in $label omits the boundary option", ({ source, pattern }) => {
       const text = readFileSync(source, "utf8");
@@ -271,7 +276,12 @@ describe("RealSetupFsWriter removal never resolves through a symlink", () => {
       // Before the fix this threw ENOTDIR, which aborted the whole setup run
       // AFTER the irreversible deletion had already committed.
       await expect(writer.removeDirIfEmpty(linkPath)).resolves.toBeUndefined();
-      // Whatever it does, it must not have reached through into the repo.
+      // Pin the behaviour, do not merely tolerate it: the sweep's contract is
+      // "clean up directories our removals emptied", and a developer's symlink is
+      // not such a directory — so the LINK must still be there afterwards, and
+      // nothing may have been reached through into the repo. Left unpinned, this
+      // could silently drift into unlinking a link lore never created.
+      expect(lstatSync(linkPath).isSymbolicLink()).toBe(true);
       expect(existsSync(join(repoSubdir, "SKILL.md"))).toBe(true);
     });
 

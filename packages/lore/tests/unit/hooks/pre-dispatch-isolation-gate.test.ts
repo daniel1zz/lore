@@ -13,8 +13,10 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { spawnSync, execFileSync } from "node:child_process";
+import { readFileSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const HOOK_PATH = fileURLToPath(new URL("../../../../../assets/hooks/pre-dispatch-isolation-gate.mjs", import.meta.url));
@@ -148,6 +150,55 @@ describe("pre-dispatch-isolation-gate", () => {
         tool_input: { description: "d", prompt: "p", subagent_type: "lore-implementer", isolation: "worktree" },
       });
       expect(run.status).toBe(0);
+    });
+  });
+
+  describe("REGRESSION — the base diagnostic must not emit git's synthetic detached row", () => {
+    /**
+     * Found by review, reproduced live: `git branch --contains HEAD` emits git's
+     * own display row `(HEAD detached at <sha>)` in a detached worktree, and
+     * `rev-parse --abbrev-ref HEAD` returns the literal "HEAD" there, so no
+     * current-branch filter removes it. The row then appeared in the diagnostic
+     * as a ref "strictly behind" while the same message tells the agent to
+     * `git merge --ff-only <that>` — impossible, it is not a ref.
+     *
+     * Built from a real git repo rather than a fixture: the defect lives in git's
+     * output shape, which only real git produces.
+     */
+    it("reports only real refs when cwd is a detached HEAD", () => {
+      const repo = mkdtempSync(join(tmpdir(), "gate-detached-"));
+      const git = (...args: string[]): string =>
+        execFileSync("git", ["-C", repo, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+      try {
+        git("init", "--quiet");
+        git("config", "user.email", "t@example.com");
+        git("config", "user.name", "t");
+        writeFileSync(join(repo, "f.txt"), "a\n");
+        git("add", "f.txt");
+        git("commit", "--quiet", "-m", "first");
+        const first = git("rev-parse", "HEAD");
+        writeFileSync(join(repo, "f.txt"), "b\n");
+        git("commit", "--quiet", "-am", "second");
+        // Detach onto the FIRST commit so `main` strictly contains HEAD — the
+        // diagnostic must fire, which is what makes the assertion meaningful.
+        git("checkout", "--quiet", "--detach", first);
+
+        const run = runHook({
+          tool_name: "Agent",
+          cwd: repo,
+          tool_input: { description: "d", prompt: "p", subagent_type: "lore-implementer", isolation: "worktree" },
+        });
+
+        expect(run.status).toBe(0);
+        // Control: the diagnostic actually fired, so the negative below is not vacuous.
+        expect(run.stderr).toContain("strictly BEHIND");
+        expect(run.stderr).toContain("main");
+        // The defect itself.
+        expect(run.stderr).not.toContain("HEAD detached");
+        expect(run.stderr).not.toContain("(");
+      } finally {
+        rmSync(repo, { recursive: true, force: true });
+      }
     });
   });
 
