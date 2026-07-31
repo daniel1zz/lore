@@ -788,6 +788,23 @@ export const ATTESTATION_FLOOR_REASON = "ATTESTATION_FLOOR_NOT_MET";
 export const ATTESTATION_FLOOR_FIELD = "attestation-floor";
 
 /**
+ * `attestationFloor`'s SECOND machine-readable failure reason (task-plan-close-
+ * must-block-when-the-coverage-conjunct-is-scope) — the declared-scope coverage
+ * conjunct had no CLAIM to audit while the plan DID carry verification evidence.
+ *
+ * Deliberately NOT folded into {@link ATTESTATION_FLOOR_REASON}: the two denials
+ * need different recovery actions ("attest the criteria you declared" vs.
+ * "declare which criteria this work owns"), and a scripted caller reading
+ * `gate:plan-close:<field>` must be able to tell them apart without parsing
+ * prose — the same one-key-per-failure-class rule `GateAdvisoryKind` follows one
+ * module over.
+ */
+export const ATTESTATION_SCOPE_UNDECLARED_REASON = "ATTESTATION_SCOPE_UNDECLARED";
+
+/** The `PredicateResult.field` value {@link ATTESTATION_SCOPE_UNDECLARED_REASON} carries. */
+export const ATTESTATION_SCOPE_UNDECLARED_FIELD = "attestation-scope-undeclared";
+
+/**
  * `plan-close`'s execution-time attestation-floor predicate (SPEC-069 §Design
  * Decisions D1, extended by spec-plan-close-predicates-measure-invariants-an-
  * applicability §D3, re-scoped by spec-declared-scope-attestation-contract-task-
@@ -808,18 +825,25 @@ export const ATTESTATION_FLOOR_FIELD = "attestation-floor";
  *      script-mode criteria), i.e. `declaredScope`, NOT `acCoverage`'s
  *      evidence-derived exercised set — must carry >= 1 runner-attested entry.
  *      This is the DEFAULT conjunct. When NO evidence-bearing task declares a
- *      scope there is no claim to audit, and this predicate reports
- *      `notApplicable` with reason `"scope-undeclared"` (§Facts D4) rather than
- *      passing vacuously — an undeclared legacy plan stays visible AS
- *      undeclared;
+ *      scope there is no claim to audit — and because this branch is reachable
+ *      only AFTER the zero-evidence guard below, "no claim" there always means
+ *      "evidence exists but nothing was declared", so it DENIES with
+ *      {@link ATTESTATION_SCOPE_UNDECLARED_REASON} (task-plan-close-must-block-
+ *      when-the-coverage-conjunct-is-scope) instead of advising — PROVIDED the
+ *      governing spec declares at least one script-mode criterion, i.e. there
+ *      was something the task could have declared. The advisory shape §Facts D4
+ *      introduced survives for the two cases that genuinely have nothing to
+ *      audit: zero evidence anywhere (condition below), and nothing declarable;
  *   3. the plan-wide attested-evidence ratio (total attested entries / total
  *      evidence entries, across every task) must be ≥ `minRatio` — OPT-IN:
  *      only evaluated when `minRatio` is non-`null` (§D4's default-off
  *      migration). AND-ed with condition 2 when configured, never a substitute.
  *
- * Precedence: a measured FAILURE (2 or 3) outranks the `"scope-undeclared"`
- * applicability verdict, which outranks a pass — so an undeclared scope can never
- * suppress a real ratio or declared-coverage violation.
+ * Precedence: a measured FAILURE (2 or 3) outranks the undeclared-scope denial,
+ * which outranks a pass — so an undeclared scope can never MASK a real ratio or
+ * declared-coverage violation behind its own less specific reason. Both are
+ * denials now; the ordering decides which `field` (and therefore which recovery
+ * text) the operator is handed first.
  *
  * A plan with NO evidence at all on any task (`totalEvidence === 0`) is
  * NOT-APPLICABLE (spec-plan-close-predicates-measure-invariants-an-
@@ -840,8 +864,9 @@ export const ATTESTATION_FLOOR_FIELD = "attestation-floor";
  *
  * §Facts D5 changed OUTCOMES, not just shapes: a plan whose only fault is a
  * zero-attested task now CLOSES (condition 1 demoted), and a plan whose
- * evidence-bearing tasks declare no `ac_scope` is NOT-APPLICABLE instead of
- * blocked-or-passed. Every suite that pinned the old outcomes
+ * evidence-bearing tasks declare no `ac_scope` is DENIED (task-plan-close-must-
+ * block-when-the-coverage-conjunct-is-scope, superseding D4's advisory-only
+ * treatment of that case — an advisory there exited 0). Every suite that pinned the old outcomes
  * (`attestation-floor.test.ts`, `gate-predicates.test.ts`,
  * `predicate-applicability.test.ts`, the two `feed-attestation-*` suites) is
  * updated in the SAME slice — a stale assertion there would silently re-legalize
@@ -881,9 +906,13 @@ export const ATTESTATION_FLOOR_FIELD = "attestation-floor";
  *   `deriveAttestationSummary`'s `total_evidence === 0`; `{ok: false, reason:
  *   "ATTESTATION_FLOOR_NOT_MET", field: "attestation-floor"}` when a declared
  *   AC has zero attested evidence OR the configured ratio is not met;
- *   `{notApplicable: true, reason: "scope-undeclared", referent}` when nothing
- *   blocks but an evidence-bearing task declared no scope; `{ok: true}`
- *   otherwise.
+ *   `{ok: false, reason: "ATTESTATION_SCOPE_UNDECLARED", field:
+ *   "attestation-scope-undeclared"}` when nothing else blocks, an
+ *   evidence-bearing task declared no scope, AND `acCoverage` contains a
+ *   script-mode criterion that COULD have been declared;
+ *   `{notApplicable: true, reason: "scope-undeclared", referent}` when that last
+ *   condition fails (nothing was declarable, so the demand would have no
+ *   recovery); `{ok: true}` otherwise.
  * @example
  * const declaredAndAttested = { declared_acs: ["AC-1"], unattested_acs: [], scope_undeclared: false, meets_coverage: true };
  * attestationFloor([
@@ -904,7 +933,7 @@ export const ATTESTATION_FLOOR_FIELD = "attestation-floor";
  *   "plan-x",
  *   [],
  *   UNRESOLVED_DECLARED_SCOPE,
- * ); // => { notApplicable: true, reason: "scope-undeclared", referent: "plan-x" }
+ * ); // => { ok: false, reason: "ATTESTATION_SCOPE_UNDECLARED", ... } — evidence, nothing declared
  * @example
  * attestationFloor(
  *   [{ slug: "task-1", title: "T1", evidenceCount: 1, attestedCount: 1 }],
@@ -937,7 +966,47 @@ export function attestationFloor(
   if (!summary.meets_floor) {
     return { ok: false, reason: ATTESTATION_FLOOR_REASON, field: ATTESTATION_FLOOR_FIELD };
   }
-  if (!("ok" in coverage)) return coverage;
+  // reason: task-plan-close-must-block-when-the-coverage-conjunct-is-scope — an
+  // undeclared scope reaching HERE has already passed the `total_evidence === 0`
+  // guard above, so the plan provably CARRIES verification evidence. Work was
+  // verified against nothing declared, which is precisely the state this conjunct
+  // exists to catch, so it DENIES rather than advising.
+  //
+  // The applicability verdict is still the right shape for the OTHER half of the
+  // fact: `scope-undeclared` with ZERO evidence never reaches this line (it
+  // returns `notApplicable("no-evidence")` above), which keeps the pure-planning
+  // plan advisory. That split is the whole predicate — do not "simplify" it by
+  // folding this branch back into a bare `return coverage`.
+  //
+  // Measured 2026-07-31: four plans archived at exit 0 through this exact line,
+  // one `gate_not_applicable {"kind":"attestation-not-applicable"}` row each, 53
+  // evidence rows across 10 tasks, `attested_evidence_ratio 0.00` on all four —
+  // every blocking conjunct inapplicable, so an operator reading exit 0 could not
+  // tell a measured pass from a completely dark gate.
+  if (!("ok" in coverage)) {
+    // reason: the deny is withheld when the governing spec declares NO script-mode
+    // criterion, because then there was nothing the task COULD have declared and
+    // `lore scope add <task> <AC-ID>` has no id to name — a gate demanding a field
+    // no surface can author is a recorded silent-failure class in this repo, and a
+    // permanent false block is the same defect §D3 avoids for dangling/ai-mode
+    // refs. That case is already flagged UPSTREAM by plan-promote's
+    // verify-reachability advisory and recorded as `attestation-floor`'s first
+    // `known_false_pass`; it stays the audited advisory here.
+    //
+    // `acCoverage` is the honest source for "was anything declarable": it is
+    // `computeAcCoverage`'s output, which emits one fact per DECLARED criterion
+    // (refs or not), so its script-mode subset IS the declarable id set
+    // `deriveDeclaredScopeCoverage` intersects against. This reads it for
+    // APPLICABILITY only — the coverage VERDICT still comes solely from
+    // `declaredScope` (§Facts D4), which this branch never second-guesses.
+    const declarable = acCoverage.some((fact) => fact.mode === "script");
+    if (!declarable) return coverage;
+    return {
+      ok: false,
+      reason: ATTESTATION_SCOPE_UNDECLARED_REASON,
+      field: ATTESTATION_SCOPE_UNDECLARED_FIELD,
+    };
+  }
   return { ok: true };
 }
 

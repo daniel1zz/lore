@@ -88,6 +88,7 @@ import type { PlanBundle } from "@lore/core";
 import { resolveActorWithSource } from "@lore/core/node";
 import {
   checkpointRegistry,
+  describeCheckpointVacuity,
   isCheckpointBlocked,
   planPromoteReachabilityAdvisory,
   planPromotePrdSyncAdvisory,
@@ -95,7 +96,11 @@ import {
   type GateCheckpoint,
   type GateContext,
 } from "./checkpoint-registry.js";
-import { isNotApplicable, type PredicateNotApplicable } from "./gate-predicates.js";
+import {
+  isNotApplicable,
+  type ApplicablePredicateResult,
+  type PredicateNotApplicable,
+} from "./gate-predicates.js";
 import type { TraceRecorder } from "./trace-recorder.js";
 
 /**
@@ -249,11 +254,17 @@ function notApplicableAdvisoryKind(result: PredicateNotApplicable): GateAdvisory
   if (result.referent === PLAN_CLAIMED_AC_COVERAGE_REFERENT) return "attestation-not-applicable";
   if (result.reason === "referent-absent") return "prd-sync-domain-doc";
   if (result.reason === "no-evidence") return "attestation-not-applicable";
-  // reason: spec-declared-scope-attestation-contract-task-owned-ac-scope §Facts
-  // D4 — `attestationFloor`'s undeclared-scope verdict rides the SAME advisory
-  // kind as its zero-evidence one (both are "this floor did not apply to this
-  // plan", surfaced as an advisory + audit row); its `referent` is the plan, so
-  // it never collides with the prd-sync branch above.
+  // reason: RETAINED BUT CURRENTLY UNREACHED, deliberately. `attestationFloor`
+  // stopped producing this verdict (task-plan-close-must-block-when-the-coverage-
+  // conjunct-is-scope: an undeclared scope with evidence is now a DENIAL, not an
+  // advisory), so no predicate feeds it today. It stays because
+  // `SCOPE_UNDECLARED_REASON` remains a member of `NotApplicableReason` — the
+  // `never` check below makes this mapping mandatory for as long as that is true,
+  // and `@lore/core`'s `declaredScopeCoverageVerdict` still RETURNS that shape for
+  // its non-gate consumers. Deleting the branch would not remove dead code, it
+  // would break the build; deleting the union member is a `@lore/core` change with
+  // its own blast radius. If a future predicate surfaces an undeclared scope as an
+  // advisory again, this is already the correct kind for it.
   if (result.reason === SCOPE_UNDECLARED_REASON) return "attestation-not-applicable";
   const exhaustive: never = result.reason;
   throw new Error(`Internal error: unhandled NotApplicableReason "${String(exhaustive)}"`);
@@ -448,6 +459,14 @@ export class GateEnforcer {
     // outcome" contract exactly (a throwing/rejecting port degrades to one
     // stderr warning, never surfaces here).
     this.recordNotApplicable(checkpoint, ctx, results.filter(isNotApplicable));
+    // reason: task-plan-close-must-block-when-the-coverage-conjunct-is-scope M2 —
+    // a run whose every conjunct was inapplicable returns the SAME `ok` a measured
+    // pass returns, and no channel said so (the audit row records each verdict
+    // individually; nothing reported that they were ALL of them). Emitted on
+    // stderr, alongside `warnAuditWriteFailure`'s channel, so `lore done` /
+    // `lore set --status archived` shows it without altering stdout or the exit
+    // code — an observation, never an outcome, exactly like `recordSkip`.
+    this.warnVacuousCheckpoint(checkpoint, results);
     if (!isCheckpointBlocked(results)) {
       return ok(undefined);
     }
@@ -686,6 +705,32 @@ export class GateEnforcer {
     process.stderr.write(
       `${auditKind} audit not recorded for checkpoint "${checkpoint}": ${reason}\n`,
     );
+  }
+
+  /**
+   * Writes {@link describeCheckpointVacuity}'s notice to stderr when this run's
+   * every conjunct was inapplicable (task-plan-close-must-block-when-the-
+   * coverage-conjunct-is-scope, M2) — the operator-facing half of the signal
+   * whose auditor-facing half is the `gate_not_applicable` row.
+   *
+   * stderr, never stdout, and never the returned `Result`: an all-inapplicable
+   * run is still a PASS (a not-applicable verdict never denies — §D1), so this
+   * must not perturb the exit code or any machine-parsed stdout payload. Same
+   * channel and same "observability never changes the outcome" contract as
+   * {@link warnAuditWriteFailure}, and unlike the audit row it needs no wired
+   * port — a consumer that never configured `recordGateSkip` still sees it.
+   *
+   * @param checkpoint - The checkpoint just evaluated.
+   * @param results - The FULL `check(ctx)` output; the emptiness/vacuity
+   *   decision belongs to `describeCheckpointVacuity`, never to this method.
+   */
+  private warnVacuousCheckpoint(
+    checkpoint: GateCheckpoint,
+    results: readonly ApplicablePredicateResult[],
+  ): void {
+    const notice = describeCheckpointVacuity(checkpoint, results);
+    if (notice === null) return;
+    process.stderr.write(`${notice}\n`);
   }
 
   /**

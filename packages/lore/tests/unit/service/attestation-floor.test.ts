@@ -486,14 +486,20 @@ describe("attestationFloor — REGRESSION: a pure-planning plan (no evidence any
     expect(result.ok).toBe(true);
   });
 
-  // STATE (spec-declared-scope-attestation-contract-task-owned-ac-scope §Facts
-  // D4, the RETROACTIVE policy) — the LEGACY shape: real evidence, none of it
-  // attested, and no task declaring an `ac_scope`. Post-D4 the coverage conjunct
-  // has no claim to audit, so the close proceeds and the fact is surfaced as an
-  // advisory + audit row (`notApplicable`, reason `scope-undeclared`) rather than
-  // as a block. This is deliberate: every pre-`lore scope add` plan in the corpus
-  // has this shape, and a newly-armed conjunct must not retroactively deny them.
-  it("a plan whose evidence-bearing tasks declare NO ac_scope archives — the coverage conjunct is not-applicable, never a silent pass or a retroactive block", async () => {
+  // STATE — INVERTED by task-plan-close-must-block-when-the-coverage-conjunct-
+  // is-scope, superseding §Facts D4's retroactive-advisory policy.
+  //
+  // This scenario used to assert that the LEGACY shape (real evidence, no task
+  // declaring an `ac_scope`) ARCHIVES, on the reasoning that a newly-armed
+  // conjunct must not retroactively deny pre-`lore scope add` plans. Measured
+  // 2026-07-31: that advisory is precisely how four plans archived at exit 0
+  // with 53 evidence rows and zero runner attestation — "not retroactive" and
+  // "never enforced" turned out to be the same behaviour, because no plan in
+  // the corpus had ever declared a scope. The retroactive sweep is now accepted
+  // deliberately (knowledge-retro-a-newly-built-gate-leaves-every-pre-existing),
+  // with two audited recoveries: declare via `lore scope add`, or take a typed
+  // plan-level attestation exemption.
+  it("a plan whose evidence-bearing tasks declare NO ac_scope is DENIED — an undeclared claim is not an excused one", async () => {
     const { corpusService } = makeHarness(attestationConfig());
     const prd = await makePrd(corpusService);
     const spec = await makeSpecWithAc(corpusService, prd, [AC_X1]);
@@ -501,6 +507,39 @@ describe("attestationFloor — REGRESSION: a pure-planning plan (no evidence any
     await makeTask(corpusService, plan, "Legacy undeclared task", [
       selfReportedEntry("bun test", { ac_ref: "AC-X-1" }),
     ]);
+
+    const result = await corpusService.set(plan.id, { status: "archived" });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect((result.error as { field?: string }).field).toBe(
+        "gate:plan-close:attestation-scope-undeclared",
+      );
+      // The pack must name the missing DECLARATION and its writer — a denial
+      // whose recovery text only said "attest more" would misdirect an operator
+      // whose evidence is already attested.
+      const message = (result.error as { message?: string }).message ?? "";
+      expect(message).toContain("ac_scope");
+      expect(message).toContain("lore scope add");
+    }
+  });
+
+  // CONTROL for the inversion above — the SAME fixture, one field different:
+  // the task declares the AC it owns. Two runs differing only in the
+  // declaration prove the denial's cause is the missing declaration and not
+  // some unrelated conjunct that happens to be failing.
+  it("the identical fixture archives once its task declares the AC it owns", async () => {
+    const { corpusService } = makeHarness(attestationConfig());
+    const prd = await makePrd(corpusService);
+    const spec = await makeSpecWithAc(corpusService, prd, [AC_X1]);
+    const plan = await makeApprovedPlanUnderSpec(corpusService, spec);
+    await makeTask(
+      corpusService,
+      plan,
+      "Declared task",
+      [attestedEntry("bun test export", { ac_ref: "AC-X-1" })],
+      ["AC-X-1"],
+    );
 
     const result = await corpusService.set(plan.id, { status: "archived" });
 
@@ -540,7 +579,13 @@ describe("attestationFloor — AC-PCI-7: ratio disabled by default, per-claimed-
     const prd = await makePrd(corpusService);
     const spec = await makeSpecWithAc(corpusService, prd, [AC_X1]);
     const plan = await makeApprovedPlanUnderSpec(corpusService, spec);
-    await makeTask(corpusService, plan, "Task at ratio 0.36", buildRatio036Evidence());
+    // reason: the DECLARED scope is authored here (task-plan-close-must-block-
+    // when-the-coverage-conjunct-is-scope) — an evidence-bearing task that
+    // declares nothing is now DENIED, so leaving it undeclared would make this
+    // scenario measure the scope conjunct instead of the ratio conjunct it is
+    // named for. `AC-X-1` carries an attested entry in `buildRatio036Evidence`,
+    // so the declared conjunct is satisfied and the ratio is the only variable.
+    await makeTask(corpusService, plan, "Task at ratio 0.36", buildRatio036Evidence(), ["AC-X-1"]);
 
     const result = await corpusService.set(plan.id, { status: "archived" });
 
@@ -638,7 +683,12 @@ describe("attestationFloor — AC-PCI-8: an explicit ratio still enforces, AND-e
     const prdStrict = await makePrd(strict.corpusService);
     const specStrict = await makeSpecWithAc(strict.corpusService, prdStrict, [AC_X1]);
     const planStrict = await makeApprovedPlanUnderSpec(strict.corpusService, specStrict);
-    await makeTask(strict.corpusService, planStrict, "Task at ratio 0.36", buildRatio036Evidence());
+    // Both halves declare `AC-X-1` (see AC-PCI-7's own reason note) so the ONLY
+    // difference between the denied and permitted runs is `min_ratio` — an
+    // undeclared scope would deny BOTH and silently destroy the contrast.
+    await makeTask(strict.corpusService, planStrict, "Task at ratio 0.36", buildRatio036Evidence(), [
+      "AC-X-1",
+    ]);
 
     const deniedResult = await strict.corpusService.set(planStrict.id, { status: "archived" });
 
@@ -651,7 +701,9 @@ describe("attestationFloor — AC-PCI-8: an explicit ratio still enforces, AND-e
     const prdLenient = await makePrd(lenient.corpusService);
     const specLenient = await makeSpecWithAc(lenient.corpusService, prdLenient, [AC_X1]);
     const planLenient = await makeApprovedPlanUnderSpec(lenient.corpusService, specLenient);
-    await makeTask(lenient.corpusService, planLenient, "Task at ratio 0.36", buildRatio036Evidence());
+    await makeTask(lenient.corpusService, planLenient, "Task at ratio 0.36", buildRatio036Evidence(), [
+      "AC-X-1",
+    ]);
 
     const permittedResult = await lenient.corpusService.set(planLenient.id, { status: "archived" });
 

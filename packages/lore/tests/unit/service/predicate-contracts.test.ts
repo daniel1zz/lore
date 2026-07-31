@@ -29,6 +29,7 @@ import { describe, it, expect } from "vitest";
 import {
   PLAN_CLOSE_FIELD,
   ATTESTATION_FLOOR_FIELD,
+  ATTESTATION_SCOPE_UNDECLARED_FIELD,
   ATTESTATION_EXEMPT_KIND_FIELD,
   PRD_SYNC_FIELD,
   ASSESSMENT_FRESHNESS_FIELD,
@@ -56,6 +57,10 @@ if (planClose === undefined) {
 const EMITTED_PLAN_CLOSE_FIELDS: readonly PlanCloseField[] = [
   PLAN_CLOSE_FIELD,
   ATTESTATION_FLOOR_FIELD,
+  // task-plan-close-must-block-when-the-coverage-conjunct-is-scope — an
+  // undeclared scope carrying evidence is a DENIAL with its own field, so the
+  // contract table owes it an entry.
+  ATTESTATION_SCOPE_UNDECLARED_FIELD,
   ATTESTATION_EXEMPT_KIND_FIELD,
   PRD_SYNC_FIELD,
   ASSESSMENT_FRESHNESS_FIELD,

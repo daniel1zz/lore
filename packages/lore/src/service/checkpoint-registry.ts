@@ -121,6 +121,7 @@ import {
   REQUIRES_UAT_FIELD,
   PLAN_CLOSE_FIELD,
   ATTESTATION_FLOOR_FIELD,
+  ATTESTATION_SCOPE_UNDECLARED_FIELD,
   ATTESTATION_EXEMPT_KIND_FIELD,
   PRD_SYNC_FIELD,
   ASSESSMENT_FRESHNESS_FIELD,
@@ -648,6 +649,74 @@ export function selectFailures(
 ): Array<{ ok: false; reason: string; field?: string }> {
   return results.filter(
     (r): r is { ok: false; reason: string; field?: string } => !isNotApplicable(r) && !r.ok,
+  );
+}
+
+/**
+ * The literal token every vacuity notice opens with (task-plan-close-must-block-
+ * when-the-coverage-conjunct-is-scope, M2) — a LONE, greppable token so an
+ * operator, a log scan, or a test can key on it without matching a remembered
+ * phrase (repo CLAUDE.md's contiguous-substring lesson: a phrase-keyed matcher
+ * degrades silently to no-match, and no-match is indistinguishable from clean).
+ */
+export const VACUOUS_CHECKPOINT_NOTICE_PREFIX = "VACUOUS-GATE";
+
+/**
+ * Describes a checkpoint run in which EVERY conjunct returned `notApplicable` —
+ * the run measured NOTHING, yet is about to return the same `ok` a genuinely
+ * measured pass returns (task-plan-close-must-block-when-the-coverage-conjunct-
+ * is-scope, M2).
+ *
+ * This exists because "no failures" is a two-valued reading of a three-valued
+ * outcome: `selectFailures(results).length === 0` is true both for "every
+ * predicate ran and passed" and for "no predicate applied at all". Thirteen
+ * `gate_not_applicable` audit rows and zero denials in one session (2026-07-31)
+ * is a signature no surface reported, because every surface was reading the
+ * failure list. Callers must therefore assert this STRING, never re-derive the
+ * condition from an empty failure list — re-deriving it is the defect.
+ *
+ * ⛔ Known limit, stated rather than papered over: a conjunct that passes
+ * VACUOUSLY on its own internal carve-out (e.g. `assessmentFreshness` with no
+ * linked assessment) returns `{ok: true}` and therefore counts as APPLICABLE
+ * here, suppressing the notice. This detector is a floor — it catches a fully
+ * dark gate, not every partially dark one. Widening it would require each
+ * predicate to distinguish "passed" from "passed because there was nothing to
+ * check", which is the `PredicateNotApplicable` migration §Scope defers.
+ *
+ * @param checkpoint - The checkpoint whose predicates produced `results` —
+ *   named in the notice so a log line is self-describing.
+ * @param results - The FULL output of that checkpoint's `check(ctx)` call
+ *   (never a pre-filtered subset — filtering is what hides the condition).
+ * @returns The notice string when `results` is non-empty and every member is a
+ *   {@link PredicateNotApplicable}; `null` otherwise (including the empty-array
+ *   case: a checkpoint that ran no predicates at all is a DIFFERENT fact, and
+ *   reporting it as vacuity would cry wolf on every opt-out checkpoint).
+ * @example
+ * describeCheckpointVacuity("plan-close", [{ ok: true }]); // => null
+ * @example
+ * describeCheckpointVacuity("plan-close", [
+ *   { notApplicable: true, reason: "no-evidence", referent: "plan-x" },
+ * ]);
+ * // => 'VACUOUS-GATE: checkpoint "plan-close" returned no verdict — all 1 predicate(s) …'
+ */
+export function describeCheckpointVacuity(
+  checkpoint: GateCheckpoint,
+  results: readonly ApplicablePredicateResult[],
+): string | null {
+  if (results.length === 0) return null;
+  // reason: an explicit count comparison rather than `results.every(isNotApplicable)`
+  // — `every`'s `this is S[]` narrowing overload is easy to defeat with an
+  // incidental type change, and a silently un-narrowed callback here would
+  // degrade to "always vacuous". The count is unambiguous at runtime and at
+  // review time.
+  const inapplicable = results.filter(isNotApplicable);
+  if (inapplicable.length !== results.length) return null;
+
+  const verdicts = inapplicable.map((r) => `${r.reason}:${r.referent}`).join(", ");
+  return (
+    `${VACUOUS_CHECKPOINT_NOTICE_PREFIX}: checkpoint "${checkpoint}" returned no verdict — ` +
+    `all ${inapplicable.length} predicate(s) reported notApplicable (${verdicts}). ` +
+    `Nothing was measured, so this pass is not evidence of the checkpoint's invariant.`
   );
 }
 
@@ -1451,6 +1520,26 @@ function feedAttestationFloor(ctx: GateContext, failures: PredicateResult[]): st
         `${declaredScope.unattested_acs.join(", ")} — these are the BLOCKING ids ` +
         `(declared via \`extra.ac_scope\` on the plan's tasks). `
       : "";
+  // reason: task-plan-close-must-block-when-the-coverage-conjunct-is-scope —
+  // when the BLOCKING cause is an undeclared scope, the pack must name the
+  // missing DECLARATION and its writer, not just "attest more". Keyed on the
+  // FAILURE (not on `ctx.planDeclaredScopeCoverage`) so every pre-existing
+  // fixture — including `feed-attestation-reachability.test.ts`'s byte-pinned
+  // one — renders exactly as before. Inserted BEFORE the byte-pinned `Recovery:`
+  // sentence, per §D5's "new diagnostics go above the pinned tail".
+  const scopeUndeclaredFailed = failures.some(
+    (f) => !f.ok && f.field === ATTESTATION_SCOPE_UNDECLARED_FIELD,
+  );
+  const evidenceBearing = tasks.filter((t) => t.evidenceCount > 0);
+  const scopeUndeclaredLine = scopeUndeclaredFailed
+    ? `BLOCKING: this plan carries verification evidence but at least one evidence-bearing ` +
+      `task declares no \`extra.ac_scope\`, so the audited work was never matched against a ` +
+      `declared claim. Evidence-bearing task(s) to check: ` +
+      `${evidenceBearing.length > 0 ? evidenceBearing.map((t) => t.slug).join(", ") : "(none resolved)"}. ` +
+      `Declare what each one owns with \`lore scope add <task> <AC-ID>...\` (an explicitly ` +
+      `EMPTY declaration is legitimate — \`lore scope rm\` down to none records "claims ` +
+      `nothing" and satisfies this conjunct; SILENCE does not). `
+    : "";
   // reason: §D5 — printed ONLY when the ratio conjunct is actually configured
   // (minRatio !== null); naming a floor that is not being enforced would
   // misdirect an operator into thinking the ratio is the live blocking cause.
@@ -1515,16 +1604,20 @@ function feedAttestationFloor(ctx: GateContext, failures: PredicateResult[]): st
       `(\`extra.ac_scope\` ∩ the governing spec's script-mode criteria) must carry at ` +
       `least one runner-attested entry; a task carrying only self-reported evidence is ` +
       `REPORTED below but no longer blocks on its own. ` +
-      `${unattestedDeclaredLine}${unattestedAcsLine}${ratioLine}${offendingLine}` +
+      `${scopeUndeclaredLine}${unattestedDeclaredLine}${unattestedAcsLine}${ratioLine}${offendingLine}` +
       recoveryText,
     missing: selectFailures(failures).map((f) => f.reason),
     // reason: the plan-level-only fetch-merge-set instruction plus the offending-
     // task diagnostic list routinely exceeds `DEFAULT_FEEDING_MAX_CHARS` (800) —
     // this is synthesized guidance text, not a slice of an arbitrary-length doc
     // (the thing the default budget protects against), so a wider explicit budget
-    // is safe here. 2200 covers the fixed instructional text (~1050 chars) plus
-    // several offending tasks' `slug — "title"` pairs before truncating.
-    maxChars: 2200,
+    // is safe here. 2900 covers the fixed instructional text (~1050 chars), the
+    // undeclared-scope BLOCKING line and its task list (~520 chars, added by
+    // task-plan-close-must-block-when-the-coverage-conjunct-is-scope — raised
+    // from 2200 in the same edit, because a budget left at 2200 would silently
+    // truncate the byte-pinned `Recovery:` tail AC-VRW-2 asserts), plus several
+    // offending tasks' `slug — "title"` pairs before truncating.
+    maxChars: 2900,
   });
   return renderFeedingPack(pack);
 }
@@ -1653,7 +1746,17 @@ function feedPlanClose(ctx: GateContext, failures: PredicateResult[]): string {
   // cause; two separate feeding-pack branches for the same underlying concern
   // would duplicate the recovery instructions and risk them drifting apart.
   const attestationFailed = failures.some(
-    (f) => !f.ok && (f.field === ATTESTATION_FLOOR_FIELD || f.field === ATTESTATION_EXEMPT_KIND_FIELD),
+    (f) =>
+      !f.ok &&
+      (f.field === ATTESTATION_FLOOR_FIELD ||
+        f.field === ATTESTATION_EXEMPT_KIND_FIELD ||
+        // reason: task-plan-close-must-block-when-the-coverage-conjunct-is-scope
+        // — an undeclared scope IS an attestation-floor concern (same predicate,
+        // same recovery surface: declare, verify, or take the plan-level
+        // exemption), so it routes to the SAME pack rather than a fourth branch
+        // that would duplicate — and eventually contradict — those instructions.
+        // `feedAttestationFloor` renders the scope-specific line for it.
+        f.field === ATTESTATION_SCOPE_UNDECLARED_FIELD),
   );
   const prdSyncFailed = failures.some((f) => !f.ok && f.field === PRD_SYNC_FIELD);
   const assessmentStaleFailed = failures.some((f) => !f.ok && f.field === ASSESSMENT_FRESHNESS_FIELD);
