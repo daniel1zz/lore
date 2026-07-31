@@ -1,10 +1,37 @@
 /**
  * @spec_ref spec-eager-libsql-load-makes-every-command-depend-on-a-healthy
- *   AC-LL-1, AC-LL-2, AC-LL-3, AC-LL-4
+ *   AC-LL-1, AC-LL-2, AC-LL-3, AC-LL-4, AC-LL-8, AC-LL-9
  *
  * RED oracle (T1 of the "lazy libsql load + TMPDIR diagnostic" plan): proves
  * the defect described by the governing spec is observable on the CURRENT
  * (unfixed) `dist/lore` binary, before T2's implementation lands.
+ *
+ * AC-LL-8 and AC-LL-9 (T3 of the same plan) are NOT RED-before-GREEN oracles
+ * — they mechanize two coverage gaps `lore assess` found in the ALREADY
+ * CORRECT T2 implementation:
+ *
+ *   - AC-LL-8 turns a one-time hand audit ("every `createApp` call site was
+ *     enumerated and none passes a sync-bearing config to a CLI-reachable
+ *     path") into a standing oracle. `adapters/cli/loader.ts::loadLoreApp`
+ *     strips `config.sync` unconditionally BEFORE calling `createApp`
+ *     (loader.ts's own "Strip sync section" comment) — so a sync-enabled
+ *     corpus run through ANY `loadLoreApp`-routed command (`lore status`)
+ *     behaves identically to a SQLite-only corpus, even under a hostile
+ *     `TMPDIR`. `app.ts`'s Turso branch holds a synchronous `createRequire`
+ *     fallback for the no-injected-client case that is KNOWN to throw
+ *     `Cannot find module` from a compiled binary (see that branch's own
+ *     header comment) — today nothing but this strip keeps that branch
+ *     unreached from the CLI. If the strip is ever removed, this AC goes red
+ *     the moment `bun run build` + this test run.
+ *   - AC-LL-9 is the untested half of AC-LL-4's pinned ordering (credential
+ *     validation FIRST, TMPDIR probe SECOND, native load LAST). AC-LL-4's own
+ *     fixture supplies a VALID token, so it cannot distinguish
+ *     credential-first from probe-first — both orderings produce the same
+ *     "fails at TMPDIR" observable under a valid credential. Only a fixture
+ *     with credentials MISSING under the same bad `TMPDIR` can tell them
+ *     apart: credential-first must report the missing-credential error
+ *     (naming the credential, first line silent on `TMPDIR`); probe-first
+ *     would report the TMPDIR error instead.
  *
  * Defect: `packages/lore/src/app.ts` statically imports `TursoStore`, which
  * statically imports `@libsql/client` — so EVERY compiled-binary invocation
@@ -230,6 +257,71 @@ describe("libsql lazy load — compiled binary e2e (spec-eager-libsql-load-makes
       // required — only the first line is pinned.
       const firstLine = result.stderr.split("\n")[0] ?? "";
       expect(firstLine).toContain("TMPDIR");
+    },
+    SPAWN_TIMEOUT_MS,
+  );
+
+  // Unreachability guard (Gap 1 from the plan's `lore assess`, task
+  // T3). Fixture mirrors AC-LL-4's sync-enabled corpus, but the invocation
+  // is `lore status` — a command routed through `loadLoreApp`, which strips
+  // `config.sync` unconditionally (loader.ts:160) before ever calling
+  // `createApp`. That strip is the ONLY reason a sync-enabled corpus behaves
+  // identically to a SQLite-only one here: `app.ts`'s Turso branch (holding
+  // the synchronous `createRequire` fallback known to throw `Cannot find
+  // module` from a compiled binary — see that branch's own header comment)
+  // is never reached. Remove the strip and this test goes red immediately,
+  // regardless of which specific failure inside that branch fires first —
+  // the point of this AC is standing proof the branch stays unreached from
+  // the CLI, not a specific crash signature.
+  it(
+    "AC-LL-8: lore status on a sync-enabled corpus under TMPDIR=/nonexistent-tmpdir-probe still exits 0 and reports Total documents (createApp Turso-branch unreachability guard)",
+    () => {
+      const dir = makeCorpus();
+      const tokenEnvName = "LORE_SYNC_TOKEN";
+      writeSyncEnabledConfig(dir, tokenEnvName);
+      const result = runLore(["status"], dir, {
+        [tokenEnvName]: "probe-token-not-a-real-credential",
+        TMPDIR: "/nonexistent-tmpdir-probe",
+      });
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("Total documents");
+    },
+    SPAWN_TIMEOUT_MS,
+  );
+
+  // The untested half of AC-LL-4's pinned ordering (Gap 2 from the plan's
+  // `lore assess`, task T3). AC-LL-4 supplies a VALID token, so it cannot
+  // distinguish "credential validation runs first" from "TMPDIR probe runs
+  // first" — both orderings fail at TMPDIR under that fixture. Flipping
+  // credentials to MISSING under the SAME bad TMPDIR is the one observation
+  // that separates them: `lore sync push` calls `resolveSyncCredentials`
+  // before it ever calls `performPush` (which is what runs the TMPDIR
+  // probe) — see `commands/sync.ts`'s `syncPushCmd.run()`. A credential-first
+  // implementation must report the missing-credential failure; a
+  // probe-first implementation would report the TMPDIR failure instead.
+  it(
+    "AC-LL-9: lore sync push on a sync-enabled corpus with credentials MISSING under a bad TMPDIR reports the credential failure, not TMPDIR, first",
+    () => {
+      const dir = makeCorpus();
+      const tokenEnvName = "LORE_SYNC_TOKEN";
+      writeSyncEnabledConfig(dir, tokenEnvName);
+      const result = runLore(["sync", "push"], dir, {
+        // Explicitly absent — the runLore helper deletes any ambient value
+        // for this key from the child's env when the override is undefined.
+        [tokenEnvName]: undefined,
+        TMPDIR: "/nonexistent-tmpdir-probe",
+      });
+      // Credential resolution failure is a hard CLI exit, same as AC-LL-4's
+      // TMPDIR failure — sanity check that the process didn't silently
+      // succeed past the missing-credential state.
+      expect(result.status).not.toBe(0);
+      // stderr names the missing credential (the env var name).
+      expect(result.stderr).toContain(tokenEnvName);
+      // The distinguishing assertion: the FIRST line must not mention
+      // TMPDIR at all — a probe-first implementation would lead with the
+      // TMPDIR diagnostic instead of the credential one.
+      const firstLine = result.stderr.split("\n")[0] ?? "";
+      expect(firstLine).not.toContain("TMPDIR");
     },
     SPAWN_TIMEOUT_MS,
   );
