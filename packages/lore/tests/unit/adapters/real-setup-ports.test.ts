@@ -386,6 +386,10 @@ const DECLARED_FILES_IN_SCOPE = [
   "hooks/subagent-context.mjs",
   "hooks/pre-subagent-gate.mjs",
   "hooks/pre-no-general-agent-gate.mjs",
+  // pre-dispatch-isolation-gate (denies an implementation subagent dispatched
+  // without isolation:"worktree"; orchestration-policy, so deliberately NOT in
+  // HOOK_REGISTRATIONS — spec-dispatch-isolation-must-be-enforced-by-a-gate-and D5, 2026-07-31)
+  "hooks/pre-dispatch-isolation-gate.mjs",
   "hooks/pre-bash-git-safety-gate.mjs",
   // subagent-stop-commit-guard (SubagentStop data-loss backstop, SPEC-046 amendment, 2026-07-21)
   "hooks/subagent-stop-commit-guard.mjs",

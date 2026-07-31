@@ -378,7 +378,7 @@ const DECLARED_FILES = [
   "agents/lore-explorer.md",
   "agents/lore-implementer.md",
   "agents/lore-reviewer.md",
-  // hooks (8 .mjs + 4 .sh gates + 1 admission-check .sh + 1 shared lib module)
+  // hooks (9 .mjs + 4 .sh gates + 1 admission-check .sh + 1 shared lib module)
   "hooks/session-start-resume.mjs",
   "hooks/stop-doc-sync.mjs",
   // stop-handoff-coverage (Stop-time resume-ticket coverage floor, spec-resume-ticket-coverage-a-shipped-upper-bound-left-the, 2026-07-31)
@@ -386,6 +386,10 @@ const DECLARED_FILES = [
   "hooks/subagent-context.mjs",
   "hooks/pre-subagent-gate.mjs",
   "hooks/pre-no-general-agent-gate.mjs",
+  // pre-dispatch-isolation-gate (denies an implementation subagent dispatched
+  // without isolation:"worktree"; orchestration-policy, so deliberately NOT in
+  // HOOK_REGISTRATIONS — spec-dispatch-isolation-must-be-enforced-by-a-gate-and D5, 2026-07-31)
+  "hooks/pre-dispatch-isolation-gate.mjs",
   // pre-bash-git-safety-gate (state-aware destructive-git guard, 2026-07-20)
   "hooks/pre-bash-git-safety-gate.mjs",
   // subagent-stop-commit-guard (SubagentStop data-loss backstop, SPEC-046 amendment, 2026-07-21)
