@@ -601,6 +601,18 @@ export const FeedbackConfigSchema = z
         corpus_path: z.string().min(1),
         /** Expected upstream root-PRD slug OR id (R-5a identity pin, SPEC-072 §5 step 5). */
         root_prd: z.string().min(1),
+        /**
+         * The DECLARED bounded wait (ms) a `lore report-issue` write may spend
+         * waiting for another writer to release the upstream corpus, before
+         * refusing LOUDLY (spec-report-issue-has-no-specified-concurrency-
+         * contract-ac-072 D4 — "the wait bound is declared in config and
+         * surfaced on expiry"). Applied as the upstream connection's `PRAGMA
+         * busy_timeout` and echoed VERBATIM in the refusal message, so the
+         * number a reader sees in stderr is by construction the number that
+         * was applied. Absent → {@link DEFAULT_WRITE_WAIT_MS}, resolved by
+         * {@link resolveUpstreamWriteWaitMs} (never re-derived at a read site).
+         */
+        write_wait_ms: z.number().int().nonnegative().optional(),
         // P2 seam (named, NOT implemented, SPEC-072 §Extension Seams):
         // transport: z.enum(["sqlite","http"]).default("sqlite")
       })
@@ -1307,6 +1319,48 @@ export function resolveStaleAfterDays(config: LoreConfig | undefined): number {
   const feedback = config?.["feedback"];
   const staleAfterDays = feedback?.["stale_after_days"];
   return typeof staleAfterDays === "number" ? staleAfterDays : FeedbackConfigSchema.parse({}).stale_after_days;
+}
+
+/**
+ * The default DECLARED write-wait bound in milliseconds — the ONE home of this
+ * number (spec-report-issue-has-no-specified-concurrency-contract-ac-072 D4;
+ * originally SPEC-078 D9's hardcoded `PRAGMA busy_timeout = 2000` literal in
+ * `SQLiteStore.init`, moved here so the applied bound and the bound printed on
+ * expiry cannot drift apart). `SQLiteStore` applies it when its caller supplies
+ * no explicit override; `feedback.upstream.write_wait_ms` overrides it for the
+ * `lore report-issue` upstream connection.
+ *
+ * 2000ms mirrors the multi-project mount registry's tolerance for a brief
+ * overlapping write from another mounted instance (SPEC-078 D9's original
+ * reasoning, preserved verbatim).
+ */
+export const DEFAULT_WRITE_WAIT_MS = 2000;
+
+/**
+ * Resolve the effective `feedback.upstream.write_wait_ms` bound — the declared
+ * number of milliseconds a `lore report-issue` write waits for a contended
+ * upstream corpus before refusing loudly.
+ *
+ * @invariant Reads via BRACKET notation, for the SAME reason
+ *   {@link resolveStaleAfterDays} does: `tests/unit/adapters/feedback-read-site-
+ *   invariant.test.ts` pins `resolveFeedbackUpstreamCfg`
+ *   (`report-issue-wiring.ts`) as the SOLE dot-notation `.feedback` reader, and
+ *   this is a sibling field read for a different concern (the write-contention
+ *   contract, not upstream provisioning).
+ * @invariant Falls back to {@link DEFAULT_WRITE_WAIT_MS} whenever the value is
+ *   absent or not a number — this is a DECLARED default for an optional field,
+ *   not a silent fallback for a required one: the resolved value is always the
+ *   one actually applied to the connection AND the one printed on expiry.
+ *
+ * @param config - Parsed LoreConfig, or undefined when no config file was loaded
+ * @returns Effective wait bound in milliseconds
+ * @example
+ *   resolveUpstreamWriteWaitMs(undefined) // => 2000
+ *   resolveUpstreamWriteWaitMs({ ..., feedback: { upstream: { corpus_path: "x", root_prd: "y", write_wait_ms: 500 } } }) // => 500
+ */
+export function resolveUpstreamWriteWaitMs(config: LoreConfig | undefined): number {
+  const writeWaitMs = config?.["feedback"]?.["upstream"]?.["write_wait_ms"];
+  return typeof writeWaitMs === "number" ? writeWaitMs : DEFAULT_WRITE_WAIT_MS;
 }
 
 /**

@@ -60,6 +60,13 @@ export function loreErrorToStatus(error: LoreError): number {
     // reason: CLAIM_CONFLICT is a write-contention error like STALE_VERSION — same
     // HTTP semantics (409 Conflict). Source: SPEC-025 §4 AC-WF-3.
     case "CLAIM_CONFLICT":
+    // reason: WRITE_CONTENTION is the same family one layer down (SQLite refused the
+    // write because another process held the corpus past the declared bound) — 409, and
+    // the caller's correct response is identical: re-issue the request. No HTTP route
+    // produces it today (`lore report-issue` is CLI/MCP-only), but the mapping is stated
+    // here rather than left to the 500 catch-all, which would read as "the store broke".
+    // Source: spec-report-issue-has-no-specified-concurrency-contract-ac-072 §Contract Details.
+    case "WRITE_CONTENTION":
       return 409;
     case "DELETE_REQUIRES_CONFIRM":
       return 400;

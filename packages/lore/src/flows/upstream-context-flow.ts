@@ -195,12 +195,25 @@ function readResolutionReason(extra: unknown): string | undefined {
 }
 
 /**
+ * Per-connection options for the upstream corpus — currently only the DECLARED
+ * write-wait bound (spec-report-issue-has-no-specified-concurrency-contract-ac-072
+ * D4). Passed IN by the caller that also owns the refusal message, so the
+ * applied bound and the reported bound are the same value by construction.
+ */
+export interface UpstreamContextOptions {
+  /** `PRAGMA busy_timeout` (ms) for the upstream connection. Absent → the store's own default. */
+  readonly writeWaitMs?: number;
+}
+
+/**
  * Resolves `corpusRoot/.lore/lore.db`, re-asserts its schema version against
  * `LATEST_SCHEMA_VERSION` via a readonly probe, and — only on a match —
  * composes a narrow `UpstreamPort` over `SQLiteStore` + `CorpusService`.
  *
  * @param corpusRoot - the upstream repo ROOT (the shape `lore init`
  *   produces — i.e. the directory containing `.lore/`, NOT `.lore/` itself)
+ * @param options - see {@link UpstreamContextOptions}; omitted → the store's
+ *   own default bound (every pre-existing call site is unaffected)
  * @returns `ok(UpstreamPort)` on a schema-version match; `err({code:
  *   "VALIDATION_ERROR", ...})` naming the resolved path (missing db) or both
  *   versions (mismatch) — no `SQLiteStore` is ever constructed on either
@@ -212,7 +225,10 @@ function readResolutionReason(extra: unknown): string | undefined {
  *     ctx.value.close();
  *   }
  */
-export function buildUpstreamContext(corpusRoot: string): Result<UpstreamPort, LoreError> {
+export function buildUpstreamContext(
+  corpusRoot: string,
+  options?: UpstreamContextOptions,
+): Result<UpstreamPort, LoreError> {
   const dbPath = join(corpusRoot, ".lore", "lore.db");
 
   if (!existsSync(dbPath)) {
@@ -240,7 +256,14 @@ export function buildUpstreamContext(corpusRoot: string): Result<UpstreamPort, L
 
   // reason: narrow composition — SQLiteStore + CorpusService ONLY, no
   // Telemetry/AI-registry/GateEnforcer. See module header "Invariants".
-  const store = new SQLiteStore(dbPath);
+  // `writeWaitMs` is threaded from the CALLER's declared bound (never read from
+  // config here): the layer that reports an expiry must print the very bound
+  // this connection applied (spec-report-issue-has-no-specified-concurrency-
+  // contract-ac-072 D4).
+  const store = new SQLiteStore(
+    dbPath,
+    options?.writeWaitMs !== undefined ? { writeWaitMs: options.writeWaitMs } : undefined,
+  );
   const corpusService = new CorpusService(store);
 
   const port: UpstreamPort = {

@@ -38,7 +38,15 @@ import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "fs";
 import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
-import { ok, err, buildIssueReportExtra, type LoreConfig, type LoreError, type Result } from "@lore/core";
+import {
+  ok,
+  err,
+  buildIssueReportExtra,
+  UNKNOWN_CONTENDING_SOURCE,
+  type LoreConfig,
+  type LoreError,
+  type Result,
+} from "@lore/core";
 
 // ─── Locally-redeclared SPEC-072 §4 shapes (SUT modules don't exist yet) ────
 
@@ -67,6 +75,12 @@ interface LocalIssueReportDeps {
   receipts: LocalReceiptLog;
   loreVersion: string;
   reporterProject: string;
+  /**
+   * The DECLARED write-wait bound the upstream connection was opened with
+   * (spec-report-issue-has-no-specified-concurrency-contract-ac-072 D4) —
+   * surfaced verbatim in a `WRITE_CONTENTION` refusal.
+   */
+  writeWaitMs: number;
   now: () => string;
 }
 
@@ -118,6 +132,13 @@ const BASE_CFG: LocalCfg = { corpus_path: "/tmp/upstream-corpus", root_prd: "prd
 
 const NOW_ISO = "2026-07-24T00:00:00.000Z";
 
+/**
+ * A non-default declared bound, so the WRITE_CONTENTION cases below prove the
+ * service SURFACES the injected bound rather than a hardcoded 2000 that would
+ * look identical to the schema default.
+ */
+const DECLARED_WRITE_WAIT_MS = 1234;
+
 function makeFakePort(overrides: Partial<LocalUpstreamPort> = {}): LocalUpstreamPort {
   return {
     resolveRootDoc: vi.fn(async () => ok({ id: "01ROOTPRD", slug: "prd-lore" })),
@@ -145,6 +166,7 @@ function makeFakeDeps(
     receipts,
     loreVersion: "0.9.0",
     reporterProject: "consumer-a",
+    writeWaitMs: DECLARED_WRITE_WAIT_MS,
     now: () => NOW_ISO,
     ...overrides,
   };
@@ -168,6 +190,81 @@ describe("SPEC-072 IssueReportService (RED — packages/lore/src/service/issue-r
       expect(result.error).toEqual(failure);
     }
     expect(deps.receipts.append).not.toHaveBeenCalled();
+  });
+
+  // ── AC-IC-1/AC-IC-4 (spec-report-issue-has-no-specified-concurrency-contract-ac-072) ──
+  // A contended write is the ONE documented narrowing of the verbatim-propagation
+  // invariant asserted directly above: the same fact gets a truthful
+  // classification (contention, not "the store is broken"), which is what earns
+  // the declared exit code and the declared 3-part message. Everything else —
+  // including the `disk full` store error above — still propagates byte-identically.
+  it("ERROR: a CONTENDED createDraft failure is re-typed as WRITE_CONTENTION carrying the declared bound, corpus path and unknown-source; no receipt is written", async () => {
+    const { IssueReportService } = await importIssueReportService();
+    const sqliteBusy = Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY", errno: 5 });
+    const failure: LoreError = { code: "STORE_ERROR", message: "database is locked", cause: sqliteBusy };
+    const port = makeFakePort({ createDraft: vi.fn(async () => err(failure)) });
+    const { deps } = makeFakeDeps({ port });
+    const service = new IssueReportService(deps);
+
+    const result = await service.report(BASE_INPUT, BASE_CFG);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toEqual({
+        code: "WRITE_CONTENTION",
+        operation: "report-issue",
+        corpus_path: `${BASE_CFG.corpus_path}/.lore/lore.db`,
+        bound_ms: DECLARED_WRITE_WAIT_MS,
+        source: UNKNOWN_CONTENDING_SOURCE,
+      });
+    }
+    // Zero writes on a refusal — the receipt log must not record a report that
+    // never landed upstream.
+    expect(deps.receipts.append).not.toHaveBeenCalled();
+  });
+
+  it("BOUNDARY: contention detected from the driver CODE alone (a cause with SQLITE_BUSY but an unrecognisable message)", async () => {
+    const { IssueReportService } = await importIssueReportService();
+    const sqliteBusy = Object.assign(new Error("cannot start a transaction within a transaction"), {
+      code: "SQLITE_BUSY",
+    });
+    const port = makeFakePort({
+      createDraft: vi.fn(async () =>
+        err({
+          code: "STORE_ERROR",
+          message: "cannot start a transaction within a transaction",
+          cause: sqliteBusy,
+        } as LoreError),
+      ),
+    });
+    const { deps } = makeFakeDeps({ port });
+    const service = new IssueReportService(deps);
+
+    const result = await service.report(BASE_INPUT, BASE_CFG);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("WRITE_CONTENTION");
+    }
+  });
+
+  it("NEGATIVE: a non-contention store failure with a malformed cause still propagates VERBATIM (no accidental re-typing)", async () => {
+    const { IssueReportService } = await importIssueReportService();
+    const failure: LoreError = {
+      code: "STORE_ERROR",
+      message: "no such table: docs",
+      cause: Object.assign(new Error("no such table: docs"), { code: 42 }),
+    };
+    const port = makeFakePort({ createDraft: vi.fn(async () => err(failure)) });
+    const { deps } = makeFakeDeps({ port });
+    const service = new IssueReportService(deps);
+
+    const result = await service.report(BASE_INPUT, BASE_CFG);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toEqual(failure);
+    }
   });
 
   it("NEGATIVE: cfg unset (feedback.upstream not configured) → VALIDATION_ERROR naming both feedback.upstream.corpus_path and feedback.upstream.root_prd; no dep beyond config invoked", async () => {

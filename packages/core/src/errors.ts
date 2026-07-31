@@ -4,7 +4,7 @@
  * Source: SPEC-001 §5
  */
 
-/** Discriminated union of all service-layer errors. 13 error codes total (16 with AI_PROVIDER_ERROR + CLAIM_CONFLICT + NEEDS_APPROVAL). */
+/** Discriminated union of all service-layer errors. 13 error codes total (17 with AI_PROVIDER_ERROR + CLAIM_CONFLICT + NEEDS_APPROVAL + WRITE_CONTENTION). */
 export type LoreError =
   | { code: "DOC_NOT_FOUND"; id: string; suggestions?: string[] }
   | { code: "SLUG_NOT_FOUND"; slug: string; suggestions?: string[] }
@@ -67,6 +67,38 @@ export type LoreError =
       command: string;
       /** The acceptance criterion id the rejected command belongs to. */
       ac_id: string;
+    }
+  /**
+   * A corpus write was refused because ANOTHER WRITER held the database
+   * longer than the DECLARED bounded wait (`PRAGMA busy_timeout` expiry —
+   * SQLite's `SQLITE_BUSY` / errno 5 / "database is locked"). Contention, never
+   * validation: the write itself was well-formed and nothing was written.
+   *
+   * Distinct from `STORE_ERROR` (which maps to exit 1 and reads as "the store
+   * is broken") because the caller's correct response is different — re-run
+   * the command — and because a nondeterministic outcome needs a code a CI
+   * wrapper can branch on without parsing stderr.
+   *
+   * CLI exit code: 5, joining `STALE_VERSION`/`CLAIM_CONFLICT`'s
+   * write-contention family ("someone else won the race, re-read and retry").
+   * HTTP status: 409, same family. Rendered by
+   * `@lore/core`'s `formatWriteContentionStderr` — the SSOT for the declared
+   * 3-part message (path + declared bound, contending source or the
+   * `unknown-source` literal, retry command line).
+   *
+   * Source: spec-report-issue-has-no-specified-concurrency-contract-ac-072
+   *   §Contract Details (declared exit code + declared stderr template), D2, D4, D5
+   */
+  | {
+      code: "WRITE_CONTENTION";
+      /** The refusing operation, rendered as the message's subject (e.g. `"report-issue"`). */
+      operation: string;
+      /** Absolute path of the corpus file whose write lock could not be acquired. */
+      corpus_path: string;
+      /** The declared wait bound (ms) that expired — surfaced VERBATIM, never re-derived. */
+      bound_ms: number;
+      /** Contending session/PID/host, or the literal `unknown-source` when unresolvable. */
+      source: string;
     };
 
 /** Result type — success or failure. Use ok()/err() helpers to construct. */

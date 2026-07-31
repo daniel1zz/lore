@@ -194,6 +194,11 @@ function loreErrorMessage(error: LoreError): string {
       return `claim conflict: held by ${error.holder} (${error.age_minutes}m ago)`;
     case "NEEDS_APPROVAL":
       return `needs approval: ${error.ac_id} command "${error.command}" not approved`;
+    case "WRITE_CONTENTION":
+      return (
+        `write contention: ${error.operation} could not write ${error.corpus_path} within the ` +
+        `declared ${error.bound_ms}ms bound (contending source: ${error.source})`
+      );
   }
 }
 
