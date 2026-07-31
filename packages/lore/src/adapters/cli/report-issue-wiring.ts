@@ -160,16 +160,23 @@ export function buildIssueReportDeps(
   corpusRoot: string,
   consumerConfig: LoreConfig | undefined,
 ): IssueReportDeps {
-  // The DECLARED write-wait bound, resolved ONCE here and used TWICE: as the
-  // upstream connection's `PRAGMA busy_timeout` and as the number
-  // `IssueReportService` surfaces verbatim when that bound expires. Resolving it
-  // in one place is what makes "the bound printed is the bound applied" true by
-  // construction rather than by convention
-  // (spec-report-issue-has-no-specified-concurrency-contract-ac-072 D4).
+  // The DECLARED write-wait bound, resolved ONCE here and used on EVERY
+  // upstream connection this bundle can open: the standalone schema-version
+  // probe (`deps.probe`, step 4 of `openValidatedUpstream`), the TOCTOU
+  // re-probe + real write connection inside `openUpstream`/
+  // `buildUpstreamContext`, and the number `IssueReportService` surfaces
+  // verbatim when that bound expires. Resolving it in one place is what makes
+  // "the bound printed is the bound applied" true by construction rather than
+  // by convention (spec-report-issue-has-no-specified-concurrency-contract-
+  // ac-072 D4). Threading it into `probe` too closes
+  // task-fix-the-spec-072-cross-corpus-database-is-locked-race: that probe
+  // used to open with busy_timeout=0 regardless of this bound, so a reader
+  // racing a concurrent writer's `BEGIN IMMEDIATE` failed immediately with a
+  // bare "database is locked" instead of waiting out the declared window.
   const writeWaitMs = resolveUpstreamWriteWaitMs(consumerConfig);
   return {
     loadUpstreamConfig: (root: string) => loadConfig(root),
-    probe: probeUpstreamDb,
+    probe: (dbPath: string) => probeUpstreamDb(dbPath, writeWaitMs),
     expectedSchemaVersion: LATEST_SCHEMA_VERSION,
     openUpstream: (root: string) => buildUpstreamContext(root, { writeWaitMs }),
     receipts: new ReceiptLog(join(corpusRoot, ".lore", "issue-receipts.jsonl")),
