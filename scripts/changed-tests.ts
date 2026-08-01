@@ -427,13 +427,48 @@ export type TreeScanScope = "packages-test-tree" | "repo-tracked-text-source";
  * "real repo tree (task oracle)" suite use to prove their oracle actually
  * measures THIS checkout's own tree, never an injected fixture (both files'
  * OTHER `main(dir)` / `main(tmpDir)` calls pass an explicit argument and are
- * NOT this shape). Verified empirically (see task
- * `task-test-changed-s-fourth-invisible-edge-a-tree-scanning`): across every
- * `*.test.ts`/`*.bun.test.ts` file in `packages/**` + `scripts/**`, this
- * regex matches EXACTLY these two files today — not a hardcoded filename
- * list, a structural marker any FUTURE tree-scanning oracle earns for free by
- * following the same "prove it against the real tree" convention these two
- * already established.
+ * NOT this shape).
+ *
+ * Measured against the real, post-merge tree (task
+ * `task-test-changed-s-fourth-invisible-edge-a-tree-scanning`; re-verify with
+ * `grep -rlE '\bmain\(\)' --include='*.test.ts' packages scripts` before
+ * trusting any count here — this file's own earlier draft asserted "exactly
+ * two" from a PRE-merge grep and was wrong the moment it landed): THREE
+ * files match today, not two —
+ *   `scripts/tests/check-test-budgets.test.ts`,
+ *   `scripts/tests/check-no-nul-bytes.test.ts`, and
+ *   `packages/lore/tests/unit/scripts/changed-tests-selector.test.ts` (THIS
+ *   rule's own unit-test file).
+ * The third is a KNOWN, ACCEPTED over-selection, not a bug: that test file's
+ * source contains literal fixture STRINGS mimicking the two real oracles'
+ * content (to exercise `classifyTreeScanningOracle` without touching real
+ * files) — those strings happen to also contain a bare `main()` substring
+ * and, in several cases, the literal identifier `hasTextSourceExtension`
+ * (see `REPO_TRACKED_TEXT_SOURCE_MARKER_RE` below), so the file classifies
+ * as `"repo-tracked-text-source"`, the WIDEST scope, and gets selected on
+ * nearly any tracked text-source change alongside the two real oracles.
+ * Accepted rather than fixed, because: (1) over-selection is the SAFE
+ * direction this task's AC-2 explicitly prefers — one extra fast vitest file
+ * costs nothing measurable; (2) narrowing the marker (e.g. requiring it
+ * outside any string literal, or comment-stripping first) would reduce this
+ * function's recall against FUTURE real tree-scanning oracles for the sake
+ * of a cosmetic count, which is the wrong trade — see D2 elsewhere in this
+ * file for why a regex-based marker is deliberately not code-aware.
+ *
+ * Discriminating-power boundary (residual, must stay named — not left for a
+ * future reader to rediscover): this marker works only because BOTH known
+ * tree-scanning oracles happen to follow the same "prove it against the real
+ * tree via a bare `main()` call" convention. That convention is NOT
+ * enforced anywhere — a future tree-scanning oracle written as
+ * `main(repoRoot)` (always passing an argument, even the default) or as a
+ * differently-named entry point (`runCheck()`, `scan()`, ...) earns NO
+ * membership here and is silently invisible to rule (d), exactly like an
+ * untraced directory is invisible to `loadFileMap` until someone widens it.
+ * The mitigating floor is `classifyBinaryConsumer`'s existing rule (c): if
+ * such an oracle also happens to spawn `dist/lore`/`LORE_BIN`/`bun run
+ * <INDEX_TS>`, it is still caught there — but a purely in-process tree scan
+ * with a non-conventional entry point name has no fallback and needs its own
+ * marker added here when it appears.
  */
 const BARE_MAIN_INVOCATION_RE = /\bmain\(\)/;
 
