@@ -130,7 +130,13 @@ describe("deriveCommitSetForPlan — PRIMARY ORACLE: interleaved foreign history
     expect(naive).toContain("CONTENT_FOREIGN_BETA"); // interleaved foreign commit leaks into a naive range
     expect(naive).toContain("CONTENT_OWN_A_MARKER");
     expect(naive).toContain("CONTENT_OWN_B_MARKER");
-  });
+  }, 15000);
+  // ^ explicit timeout (spec-a-test-case-s-timeout-budget-must-be-declared-when-its
+  // D1/check-test-budgets): 8 direct spawn-helper calls (`initRepo` x1, `commit`
+  // x6, `naiveRangeDiff` x1 — each is itself a registered spawn helper because its
+  // own body directly calls `spawnSync`). Measured 513-546ms in isolation across
+  // 2 runs; 15000ms gives >=27x headroom for a concurrent-worktree load spike
+  // without policing the value.
 });
 
 // ─── CONTROL ───────────────────────────────────────────────────────────────────
@@ -159,7 +165,11 @@ describe("deriveCommitSetForPlan — CONTROL: contiguous commits (SPEC oracle #5
     expect(result.diff_text).toContain("diff --git a/y-b.txt b/y-b.txt");
     expect(naive).toContain("diff --git a/y-a.txt b/y-a.txt");
     expect(naive).toContain("diff --git a/y-b.txt b/y-b.txt");
-  });
+  }, 15000);
+  // ^ explicit timeout (spec-a-test-case-s-timeout-budget-must-be-declared-when-its
+  // D1/check-test-budgets): 5 direct spawn-helper calls (`initRepo` x1, `commit`
+  // x3, `naiveRangeDiff` x1). Measured 393-417ms in isolation across 2 runs;
+  // 15000ms gives >=35x headroom for a concurrent-worktree load spike.
 });
 
 // ─── BOUNDARY ──────────────────────────────────────────────────────────────────
@@ -207,7 +217,12 @@ describe("deriveCommitSetForPlan — BOUNDARY: ancestor pruning collapses a merg
     // element) should remain, not a duplicate-counted pair.
     expect(result.commits).toHaveLength(1);
     expect(result.diff_text).toContain("CONTENT_INNER");
-  });
+  }, 15000);
+  // ^ explicit timeout (spec-a-test-case-s-timeout-budget-must-be-declared-when-its
+  // D1/check-test-budgets): 7 direct spawn-helper calls (`initRepo` x1, `commit`
+  // x2, plus 4 direct `spawnSync` calls — checkout feature, checkout main,
+  // checkout master, merge). Measured 293-303ms in isolation across 2 runs;
+  // 15000ms gives >=49x headroom for a concurrent-worktree load spike.
 });
 
 // ─── NEGATIVE ──────────────────────────────────────────────────────────────────
@@ -264,5 +279,9 @@ describe("deriveCommitSetForPlan — REGRESSION: an unrelated later commit never
     expect(after.commits).toHaveLength(1);
     expect(after.diff_text).toContain("CONTENT_REG_OWN");
     expect(after.diff_text).not.toContain("CONTENT_REG_UNRELATED");
-  });
+  }, 15000);
+  // ^ explicit timeout (spec-a-test-case-s-timeout-budget-must-be-declared-when-its
+  // D1/check-test-budgets): 3 direct spawn-helper calls (`initRepo` x1, `commit`
+  // x2). Measured 198-221ms in isolation across 2 runs; 15000ms gives >=67x
+  // headroom for a concurrent-worktree load spike.
 });
