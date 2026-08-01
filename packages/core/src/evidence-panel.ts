@@ -39,7 +39,18 @@
  *     conjunct's three-valued verdict over that fact: a measured failure, an
  *     APPLICABILITY verdict when the scope is undeclared, or a pass.
  *   - summarizeForAdjudicationBar(panel) — compact chip-summary projection shared by
- *     the (not-yet-built, T3-scope) AdjudicationBar UI component.
+ *     the AdjudicationBar UI component.
+ *   - derivePlanCloseChipStatus(meetsFloor, declaredScopeVerdict) — the ONE
+ *     precedence combinator `summarizeForAdjudicationBar`'s `plan` branch
+ *     applies over the SAME two already-resolved facts the dashboard's
+ *     `PlanAttestationPanel.tsx::derivePlanAttestationBadgeState` combines
+ *     (FAIL > NOT-APPLICABLE > PASS) — task-adjudicationbar-s-compact-status-
+ *     chip-still-derives-from. Exported so the compact adjudication-bar chip
+ *     and the full attestation panel badge can never re-diverge again: both
+ *     read the SAME `meets_floor` + `declared_scope_verdict` facts through
+ *     the SAME precedence rule, merely rendered under different labels
+ *     (`"pass"`/`"fail"`/`"scope-undeclared"` here vs `"meets-floor"`/
+ *     `"below-floor"`/`"scope-undeclared"` on the panel).
  *
  * Invariants:
  *   - `AttestationSummary.ratio` is `null`, never a fabricated `0`, when
@@ -84,7 +95,11 @@
  *   spec-plan-close-predicates-measure-invariants-an-applicability §D3
  *   (per-claimed-AC coverage as the default conjunct), §D4 (ratio default flip);
  *   spec-declared-scope-attestation-contract-task-owned-ac-scope §Facts (D4 —
- *   the exercised/declared split; D5 — the demoted per-task floor).
+ *   the exercised/declared split; D5 — the demoted per-task floor);
+ *   task-meets-floor-renders-pass-while-the-declared-scope-conjunct (the
+ *   PlanAttestationPanel three-state badge fix); task-adjudicationbar-s-
+ *   compact-status-chip-still-derives-from (this module's matching fix for
+ *   the compact chip, so the two dashboard surfaces can no longer disagree).
  */
 
 import type { AcCoverageFact, AcceptanceCriterion } from "./acceptance.js";
@@ -693,7 +708,7 @@ export type EvidencePanelProjection =
 
 /**
  * Compact chip-summary counts + a single fail-first status verdict, derived from
- * an {@link EvidencePanelProjection} — the shape the (T3-scope) AdjudicationBar UI
+ * an {@link EvidencePanelProjection} — the shape the AdjudicationBar UI
  * component renders. Kept deliberately small and doc-type-agnostic on its output
  * side (a caller doesn't need to re-branch on `doc_type` to render a status chip).
  */
@@ -703,15 +718,82 @@ export interface AdjudicationBarSummary {
   attested_count: number;
   pass_count: number;
   fail_count: number;
-  /** Fail-first: any fail wins over any pass; no evidence at all is `"none"`. */
-  status: "pass" | "fail" | "none";
+  /**
+   * `task`/`spec`/`other`: fail-first — any fail wins over any pass; no
+   * evidence at all is `"none"`.
+   *
+   * `plan`: no evidence at all is `"none"` (the vacuous-pass case, unchanged);
+   * otherwise this is {@link derivePlanCloseChipStatus}'s three-valued verdict
+   * over `attestation.meets_floor` (the RATIO conjunct alone) AND
+   * `declared_scope_verdict` (the DECLARED-scope conjunct) — `"scope-undeclared"`
+   * is reachable ONLY here, and ONLY for `doc_type: "plan"`
+   * (task-adjudicationbar-s-compact-status-chip-still-derives-from). It must
+   * never collapse into `"pass"` (the exact defect this fix removes) nor into
+   * `"fail"` (an escalation this function does not attempt — see
+   * {@link derivePlanCloseChipStatus}'s own doc comment).
+   */
+  status: "pass" | "fail" | "none" | "scope-undeclared";
+}
+
+/**
+ * The precedence combinator behind `summarizeForAdjudicationBar`'s `plan`
+ * branch status (task-adjudicationbar-s-compact-status-chip-still-derives-from)
+ * — the SAME rule the dashboard's `PlanAttestationPanel.tsx::
+ * derivePlanAttestationBadgeState` applies over the SAME two facts, so the
+ * compact chip and the full attestation panel badge can never again disagree
+ * about which of the three states a plan is in.
+ *
+ * NOT a ratio/coverage re-derivation — both inputs are ALREADY-resolved facts
+ * (`AttestationSummary.meets_floor`, `declaredScopeCoverageVerdict`'s output);
+ * this is a precedence PICK over two enums, nothing more.
+ *
+ * Precedence is FAIL > NOT-APPLICABLE > PASS (mirrors
+ * `declaredScopeCoverageVerdict`'s own ordering, and
+ * `derivePlanAttestationBadgeState`'s): a measured failure on EITHER conjunct
+ * outranks the undeclared-scope not-applicable, which outranks a pass. An
+ * undeclared scope must never mask a genuinely failing ratio, and a passing
+ * ratio must never paper over an undeclared scope — `"scope-undeclared"` is a
+ * GENUINELY THIRD state, never collapsed into `"pass"` (the bug this function
+ * exists to remove) nor into `"fail"` (an escalation this function does not
+ * attempt: that would need a THIRD fact — whether the spec declares any
+ * script-mode AC at all — neither this function nor its panel-side sibling has).
+ *
+ * @param meetsFloor - `AttestationSummary.meets_floor` — the RATIO conjunct alone.
+ * @param declaredScopeVerdict - `declaredScopeCoverageVerdict`'s verdict over
+ *   the plan's `DeclaredScopeCoverage` (`PlanEvidencePanel.declared_scope_verdict`).
+ * @returns `"fail"` when either conjunct measurably fails, `"scope-undeclared"`
+ *   when neither measurably fails but the declared-scope conjunct is
+ *   not-applicable, `"pass"` when both conjuncts pass.
+ * @example
+ * derivePlanCloseChipStatus(true, { ok: true }); // => "pass"
+ * @example
+ * derivePlanCloseChipStatus(true, { notApplicable: true, reason: "scope-undeclared", referent: "plan-x" });
+ * // => "scope-undeclared" — NEVER "pass"
+ * @example
+ * derivePlanCloseChipStatus(false, { ok: true }); // => "fail"
+ * @example
+ * derivePlanCloseChipStatus(true, { ok: false, unattested_acs: ["AC-1"] }); // => "fail"
+ */
+export function derivePlanCloseChipStatus(
+  meetsFloor: boolean,
+  declaredScopeVerdict: DeclaredScopeCoverageVerdict,
+): "pass" | "fail" | "scope-undeclared" {
+  if (!meetsFloor) return "fail";
+  if ("ok" in declaredScopeVerdict && !declaredScopeVerdict.ok) return "fail";
+  if (!("ok" in declaredScopeVerdict)) return "scope-undeclared";
+  return "pass";
 }
 
 /**
  * Reduces an {@link EvidencePanelProjection} to a compact {@link AdjudicationBarSummary}.
  * Fail-first precedence (mirrors `acceptance.ts::deriveAcCoverageState`'s "a fail
- * always wins over any pass" rule): any failing evidence/coverage makes the status
- * `"fail"`, regardless of how much passing/attested evidence also exists.
+ * always wins over any pass" rule) for `task`/`spec`/`other`: any failing
+ * evidence/coverage makes the status `"fail"`, regardless of how much
+ * passing/attested evidence also exists. For `plan`, status instead comes from
+ * {@link derivePlanCloseChipStatus} (never `meets_floor` alone —
+ * task-adjudicationbar-s-compact-status-chip-still-derives-from), preserving
+ * the pre-existing `"none"` vacuous-pass rendering when there is no evidence
+ * at all.
  *
  * @example
  * summarizeForAdjudicationBar({ doc_type: "other" });
@@ -751,13 +833,22 @@ export function summarizeForAdjudicationBar(panel: EvidencePanelProjection): Adj
     }
     case "plan": {
       const { total_evidence, attested, meets_floor } = panel.attestation;
+      // reason: total_evidence === 0 stays the pre-existing vacuous-pass "none"
+      // render regardless of the declared-scope verdict — a plan with literally
+      // no evidence has no evidence-bearing task to consult, so
+      // deriveDeclaredScopeCoverage never marks it scope-undeclared either;
+      // collapsing this case into derivePlanCloseChipStatus's "pass" would
+      // misleadingly claim something was verified (task-adjudicationbar-s-
+      // compact-status-chip-still-derives-from, REGRESSION coverage).
+      const status =
+        total_evidence === 0 ? "none" : derivePlanCloseChipStatus(meets_floor, panel.declared_scope_verdict);
       return {
         doc_type: "plan",
         evidence_count: total_evidence,
         attested_count: attested,
         pass_count: 0,
         fail_count: 0,
-        status: total_evidence === 0 ? "none" : meets_floor ? "pass" : "fail",
+        status,
       };
     }
     case "other":

@@ -1,7 +1,7 @@
 /**
  * Tests for @lore/core evidence-panel — buildTaskAttestationInfos,
  * deriveAttestationSummary, deriveClaimedAcCoverage, deriveDeclaredScopeCoverage,
- * declaredScopeCoverageVerdict, EvidencePanelProjection,
+ * declaredScopeCoverageVerdict, derivePlanCloseChipStatus, EvidencePanelProjection,
  * summarizeForAdjudicationBar. Pure functions, no IO.
  *
  * Six-dimension coverage for this file:
@@ -11,21 +11,26 @@
  *               exercised script-mode set (AC-PCI-5); deriveDeclaredScopeCoverage
  *               resolves a declared+attested scope to an ok verdict (AC-VS-6
  *               control); summarizeForAdjudicationBar reduces every
- *               EvidencePanelProjection branch to the expected chip summary
+ *               EvidencePanelProjection branch to the expected chip summary;
+ *               derivePlanCloseChipStatus resolves both conjuncts passing to "pass"
  *   NEGATIVE:   a task with malformed extra.verification_evidence (non-array) does
  *               not throw and contributes zero counts (extractEvidence's own
  *               fail-closed behavior); an ai-mode/human-mode criterion with refs
  *               is excluded from the exercised set (AC-PCI-5); a DECLARED AC with
  *               zero attested refs fails the coverage conjunct even when another
  *               evidence-bearing task declared nothing (AC-VS-6, fail outranks
- *               not-applicable)
+ *               not-applicable); derivePlanCloseChipStatus returns "fail" for a
+ *               measurably-failing declared-scope conjunct even when the ratio
+ *               conjunct alone passes
  *   BOUNDARY:   empty tasks array; ratio exactly equal to minRatio passes
  *               (`>=` not `>`); a single task with zero evidence entries; an empty
  *               coverage input yields a vacuously true exercised-AC coverage; an
  *               EMPTY ac_scope is a declaration while an ABSENT one is not; a
  *               task with no evidence is never consulted for a declaration;
  *               declared ids outside the spec's script-mode set intersect away
- *               (AC-VS-6)
+ *               (AC-VS-6); derivePlanCloseChipStatus returns "scope-undeclared"
+ *               (never "pass") for a not-applicable declared-scope verdict, and a
+ *               failing ratio wins precedence over an undeclared scope
  *   ERROR:      a malformed ac_scope (non-array / non-string member) is reported AS
  *               undeclared and never throws (AC-VS-6) — every other public
  *               function here is total by construction
@@ -42,19 +47,27 @@
  *               no longer lower meets_floor — inverted here in the same slice that
  *               changed the behavior, superseding AC-075-11 condition 1 and
  *               AC-PCI-6; UNRESOLVED_DECLARED_SCOPE can never fabricate a
- *               compliant declaration
+ *               compliant declaration; summarizeForAdjudicationBar's plan branch
+ *               still reduces a zero-evidence plan to "none" (never "pass" or
+ *               "scope-undeclared") regardless of the declared-scope verdict
+ *               (task-adjudicationbar-s-compact-status-chip-still-derives-from)
  *
  * @spec_ref spec-declared-scope-attestation-contract-task-owned-ac-scope §Facts
  *   (D4 exercised-vs-declared split, D5 demoted per-task floor), AC-VS-6;
  *   SPEC-075 §Design Decisions D2, D6, D10;
  *   spec-plan-close-predicates-measure-invariants-an-applicability §D3, AC-PCI-5
- *   (AC-075-11 condition 1 and AC-PCI-6 are SUPERSEDED — see the REGRESSION rows)
+ *   (AC-075-11 condition 1 and AC-PCI-6 are SUPERSEDED — see the REGRESSION rows);
+ *   task-meets-floor-renders-pass-while-the-declared-scope-conjunct (the
+ *   PlanAttestationPanel three-state badge fix this file's plan-branch chip
+ *   tests mirror); task-adjudicationbar-s-compact-status-chip-still-derives-from
+ *   (this file's derivePlanCloseChipStatus + summarizeForAdjudicationBar tests)
  */
 
 import { describe, it, expect } from "vitest";
 import {
   buildTaskAttestationInfos,
   declaredScopeCoverageVerdict,
+  derivePlanCloseChipStatus,
   deriveAttestationSummary,
   deriveClaimedAcCoverage,
   deriveDeclaredScopeCoverage,
@@ -786,5 +799,113 @@ describe("summarizeForAdjudicationBar", () => {
       fail_count: 0,
       status: "none",
     });
+  });
+
+  // ─── task-adjudicationbar-s-compact-status-chip-still-derives-from ─────────
+  // The plan branch used to derive `status` from `meets_floor` ALONE, so a
+  // plan with an undeclared declared-scope conjunct rendered a PASSING chip
+  // here while `PlanAttestationPanel`'s badge (fixed by the sibling task
+  // task-meets-floor-renders-pass-while-the-declared-scope-conjunct) rendered
+  // "scope undeclared" — the two dashboard surfaces DISAGREED. These tests
+  // pin the fixed three-valued behavior; the first ("was the disagreement")
+  // documents exactly the fixture that used to prove the bug.
+  describe("plan branch — declared-scope conjunct chip status", () => {
+    const scopeUndeclaredVerdict: DeclaredScopeCoverageVerdict = {
+      notApplicable: true,
+      reason: "scope-undeclared",
+      referent: "plan-x",
+    };
+
+    /** A non-vacuous plan panel (total_evidence > 0) whose RATIO conjunct
+     *  alone passes — every field the declared-scope conjunct doesn't own is
+     *  fixed so each test below isolates that one conjunct's effect on `status`. */
+    function makeNonVacuousPlanPanel(
+      overrides: {
+        attestation?: Partial<AttestationSummary>;
+        declared_scope_verdict?: DeclaredScopeCoverageVerdict;
+      } = {},
+    ): EvidencePanelProjection {
+      return {
+        doc_type: "plan",
+        attestation: {
+          total_evidence: 4,
+          attested: 2,
+          ratio: 0.5,
+          min_ratio: 0.5,
+          claimed_ac_coverage: EMPTY_COVERAGE,
+          meets_floor: true,
+          zero_attested_tasks: [],
+          ...overrides.attestation,
+        },
+        tasks: [],
+        declared_scope_coverage: EMPTY_DECLARED_SCOPE,
+        declared_scope_verdict: overrides.declared_scope_verdict ?? DECLARED_SCOPE_OK,
+      };
+    }
+
+    it("HAPPY (this was the exact disagreement, now fixed): a scope-undeclared plan whose ratio conjunct alone passes reduces to status 'scope-undeclared', NEVER 'pass' — the same fixture PlanAttestationPanel renders as 'scope undeclared'", () => {
+      const panel = makeNonVacuousPlanPanel({ declared_scope_verdict: scopeUndeclaredVerdict });
+      const summary = summarizeForAdjudicationBar(panel);
+      expect(summary.status).toBe("scope-undeclared");
+      expect(summary.status).not.toBe("pass");
+    });
+
+    it("CONTROL (AC #3, guards against an unconditionally-negative chip): a plan that genuinely meets BOTH conjuncts still reduces to status 'pass' on the compact chip", () => {
+      const panel = makeNonVacuousPlanPanel({ declared_scope_verdict: DECLARED_SCOPE_OK });
+      expect(summarizeForAdjudicationBar(panel).status).toBe("pass");
+    });
+
+    it("NEGATIVE: a declared-but-unattested scope reduces to 'fail' even when the ratio conjunct alone passes", () => {
+      const panel = makeNonVacuousPlanPanel({
+        declared_scope_verdict: { ok: false, unattested_acs: ["AC-9"] },
+      });
+      expect(summarizeForAdjudicationBar(panel).status).toBe("fail");
+    });
+
+    it("BOUNDARY: a failing ratio conjunct wins precedence over an undeclared scope — reduces to 'fail', never 'scope-undeclared'", () => {
+      const panel = makeNonVacuousPlanPanel({
+        attestation: { meets_floor: false },
+        declared_scope_verdict: scopeUndeclaredVerdict,
+      });
+      expect(summarizeForAdjudicationBar(panel).status).toBe("fail");
+    });
+
+    it("REGRESSION: a vacuous (zero-evidence) plan still reduces to 'none', never 'pass' or 'scope-undeclared', regardless of the declared-scope verdict", () => {
+      const panel = makeNonVacuousPlanPanel({
+        attestation: { total_evidence: 0, attested: 0, ratio: null, meets_floor: true },
+        declared_scope_verdict: scopeUndeclaredVerdict,
+      });
+      expect(summarizeForAdjudicationBar(panel).status).toBe("none");
+    });
+  });
+});
+
+// ─── derivePlanCloseChipStatus ───────────────────────────────────────────────
+
+describe("derivePlanCloseChipStatus", () => {
+  it("HAPPY: both conjuncts pass => 'pass'", () => {
+    expect(derivePlanCloseChipStatus(true, { ok: true })).toBe("pass");
+  });
+
+  it("NEGATIVE: the ratio conjunct fails => 'fail' regardless of the declared-scope verdict", () => {
+    expect(
+      derivePlanCloseChipStatus(false, { notApplicable: true, reason: "scope-undeclared", referent: "plan-x" }),
+    ).toBe("fail");
+  });
+
+  it("NEGATIVE: the declared-scope conjunct measurably fails => 'fail' even though the ratio conjunct alone passes", () => {
+    expect(derivePlanCloseChipStatus(true, { ok: false, unattested_acs: ["AC-1"] })).toBe("fail");
+  });
+
+  it("BOUNDARY: the declared-scope conjunct is not-applicable => 'scope-undeclared', never 'pass'", () => {
+    expect(
+      derivePlanCloseChipStatus(true, { notApplicable: true, reason: "scope-undeclared", referent: "plan-x" }),
+    ).toBe("scope-undeclared");
+  });
+
+  it("BOUNDARY: a failing ratio conjunct wins precedence over an undeclared scope — 'fail', never 'scope-undeclared'", () => {
+    expect(
+      derivePlanCloseChipStatus(false, { notApplicable: true, reason: "scope-undeclared", referent: "plan-x" }),
+    ).toBe("fail");
   });
 });
