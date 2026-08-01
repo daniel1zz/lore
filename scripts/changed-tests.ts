@@ -74,6 +74,55 @@
  *          artifact). Pretending either kind were reachable by import tracing
  *          would silently rebuild the exact blind spot this script exists to
  *          close.
+ *      (d) tree-scanning oracles — a test that judges files it reaches by a
+ *          RUNTIME FILESYSTEM SCAN rather than any import edge
+ *          (`classifyTreeScanningOracle`; `tree-scan-oracle`), included
+ *          whenever >=1 file in the FULL raw changed-file list (not just the
+ *          traced universe — see below) falls within THAT test's own scan
+ *          scope (`isChangedFileInTreeScanScope`). Membership + scope are
+ *          derived from content markers already present in the test's own
+ *          source, never a hardcoded filename list — the same shape as (c)'s
+ *          `classifyBinaryConsumer`, and the same underlying escape as (c):
+ *          import tracing cannot see through a `readdirSync`/`git ls-files`
+ *          walk any more than it can see through a subprocess spawn (D2, now
+ *          measured a third time: `scripts/tests/check-test-budgets.test.ts`
+ *          scans `<repoRoot>/packages` for every `.test.ts`/`.bun.test.ts`
+ *          file via `scanRepoTree`, scope `"packages-test-tree"`;
+ *          `scripts/tests/check-no-nul-bytes.test.ts` scans every git-tracked
+ *          file in the ENTIRE repo via `git ls-files`, scope
+ *          `"repo-tracked-text-source"` — genuinely DIFFERENT scopes, so this
+ *          rule checks each qualifying test against its OWN scope rather than
+ *          firing all tree-scanning oracles off one shared trigger; a change
+ *          to a file outside BOTH scopes, e.g. a binary asset, selects
+ *          neither). Conservative in the direction this task requires:
+ *          over-selecting one extra whole-tree oracle costs one fast test
+ *          file; under-selecting it is exactly how 8 spawn-budget violations
+ *          reached `main` twice in one day (task
+ *          `task-test-changed-s-fourth-invisible-edge-a-tree-scanning`).
+ *
+ *      Rule (d)'s membership/scope derivation was one of three explicitly
+ *      weighed options (task requirement): (i) a CONTENT MARKER in the test
+ *      file, the same shape (c) already uses — CHOSEN, for the reason above;
+ *      (ii) selecting every tree-scanning oracle whenever ANY test file
+ *      changed, on the premise that "their scan scope IS the test tree" —
+ *      REJECTED, because it is only true for `"packages-test-tree"`;
+ *      `check-no-nul-bytes.test.ts`'s real scope is every git-tracked
+ *      TEXT-SOURCE file repo-wide (`.md`, `.json`, `.yaml`, ...), most of
+ *      which are not test files at all — this option would silently
+ *      UNDER-select exactly the class of change the second measured incident
+ *      involved; (iii) an explicit declaration the test (or its module)
+ *      exports — REJECTED as the primary mechanism because it would require
+ *      editing `scripts/check-test-budgets.ts` / `scripts/check-no-nul-bytes.ts`
+ *      to add a symbol whose only purpose is feeding this selector, when a
+ *      marker already present in each test's own content (a bare `main()`
+ *      call, and — for the wider scope only — an import of
+ *      `hasTextSourceExtension`) says the same thing for free. Where an
+ *      explicit export ALREADY exists for another reason, it is reused
+ *      rather than duplicated: `isChangedFileInTreeScanScope`'s
+ *      `"repo-tracked-text-source"` branch defers entirely to the imported
+ *      `hasTextSourceExtension` (`check-no-nul-bytes.ts`'s own allowlist,
+ *      never re-hardcoded here) — SSOT, in the spirit of option (iii),
+ *      without inventing a new export solely to satisfy this selector.
  *   4. Execution: selected vitest files run via one `bunx vitest run <files>`;
  *      selected bun files run via `cd packages/lore && bun test <files>`. If
  *      >=1 COMPILED binary-consumer was selected (as opposed to a source-only
@@ -130,6 +179,12 @@ import { join as osJoin } from "node:path";
 import { posix } from "node:path";
 import { spawnSync } from "node:child_process";
 import { z } from "zod";
+// reason: reuse (not re-hardcode) `check-no-nul-bytes.ts`'s OWN text-source
+// extension/dotfile allowlist for rule (d)'s "repo-tracked-text-source" scope
+// below — that oracle already exports this exact predicate for its own
+// `git ls-files` scan; importing it keeps the two lists SSOT-linked instead
+// of drifting apart the next time a text extension is added there.
+import { hasTextSourceExtension } from "./check-no-nul-bytes.js";
 
 /** Typed error for every git/graph/runner resolution failure this script can hit — never a bare `throw new Error`. */
 export class ChangedTestsError extends Error {
@@ -159,8 +214,8 @@ export interface ImportGraph {
   readonly reverse: ReadonlyMap<string, ReadonlySet<string>>;
 }
 
-/** Why a file was selected — precedence `changed-test` > `binary-consumer` > `transitive` (see `selectAffectedTests`). */
-export type SelectionReason = "changed-test" | "transitive" | "binary-consumer";
+/** Why a file was selected — precedence `changed-test` > `binary-consumer` > `tree-scan-oracle` > `transitive` (see `selectAffectedTests`). */
+export type SelectionReason = "changed-test" | "transitive" | "binary-consumer" | "tree-scan-oracle";
 /** Which runner executes this file, derived solely from the `.bun.test.ts` naming convention (`isBunTestFile`). */
 export type TestRunner = "vitest" | "bun";
 
@@ -351,13 +406,96 @@ export function isBinaryConsumerCandidate(path: string, content: string): boolea
 const LORE_OR_CORE_SRC_PREFIX_RE = /^packages\/(?:lore|core)\/src\//;
 
 /**
+ * Which real-tree scope a tree-scanning oracle test judges — see
+ * `classifyTreeScanningOracle` for how a test earns one of these, and
+ * `isChangedFileInTreeScanScope` for how a changed path is checked against
+ * it. `"packages-test-tree"` mirrors `scripts/check-test-budgets.ts`'s own
+ * documented scan root (`scanRepoTree` walks `<repoRoot>/packages` for every
+ * `.test.ts`/`.bun.test.ts` file, EXCLUDING `scripts/tests/` on purpose — see
+ * that function's header). `"repo-tracked-text-source"` mirrors
+ * `scripts/check-no-nul-bytes.ts`'s `main()`, which scans every git-tracked
+ * file in the ENTIRE repo matching {@link hasTextSourceExtension}'s allowlist
+ * — a strictly WIDER scope than `"packages-test-tree"`, not limited to
+ * `packages/` or to test files at all.
+ */
+export type TreeScanScope = "packages-test-tree" | "repo-tracked-text-source";
+
+/**
+ * A bare (zero-argument) invocation of the test's own imported `main` entry —
+ * the exact shape both `scripts/tests/check-test-budgets.test.ts`'s
+ * "main(): real repo tree" suite and `scripts/tests/check-no-nul-bytes.test.ts`'s
+ * "real repo tree (task oracle)" suite use to prove their oracle actually
+ * measures THIS checkout's own tree, never an injected fixture (both files'
+ * OTHER `main(dir)` / `main(tmpDir)` calls pass an explicit argument and are
+ * NOT this shape). Verified empirically (see task
+ * `task-test-changed-s-fourth-invisible-edge-a-tree-scanning`): across every
+ * `*.test.ts`/`*.bun.test.ts` file in `packages/**` + `scripts/**`, this
+ * regex matches EXACTLY these two files today — not a hardcoded filename
+ * list, a structural marker any FUTURE tree-scanning oracle earns for free by
+ * following the same "prove it against the real tree" convention these two
+ * already established.
+ */
+const BARE_MAIN_INVOCATION_RE = /\bmain\(\)/;
+
+/**
+ * Content marker unique to `check-no-nul-bytes.ts`'s public surface: a test
+ * that imports and directly drives {@link hasTextSourceExtension} is
+ * necessarily testing THAT oracle's repo-wide text-source scan, not some
+ * other tree-scanning oracle with a narrower scope. Naturally-occurring (the
+ * test already does this to cover `hasTextSourceExtension` itself, see its
+ * own "hasTextSourceExtension / hasNoExtension" describe block) rather than a
+ * marker invented solely for this selector, mirroring how rule (c)'s
+ * `dist/lore`/`LORE_BIN`/`INDEX_TS` markers are code that was already there
+ * for the CLI-spawn itself.
+ */
+const REPO_TRACKED_TEXT_SOURCE_MARKER_RE = /\bhasTextSourceExtension\b/;
+
+/**
+ * Classify `path`/`content` as a tree-scanning oracle test and, if so, which
+ * scope it judges — rule (d)'s membership + scope derivation, entirely from
+ * content markers already present in the test's own source (never a
+ * hardcoded filename list — AC-1 of
+ * `task-test-changed-s-fourth-invisible-edge-a-tree-scanning`). A file only
+ * qualifies if it is itself a test file (`isTestFile`) AND contains a bare
+ * `main()` invocation (`BARE_MAIN_INVOCATION_RE`) — proof it drives its
+ * module's real, unmocked full-tree scan, the same "reaches its subject by a
+ * means other than static import" shape rule (c) already handles for
+ * subprocess spawns (D2). Among qualifying files, one additionally importing
+ * `hasTextSourceExtension` is judged against the WIDER repo-tracked-text-source
+ * scope; any other qualifying file defaults to the narrower
+ * `"packages-test-tree"` scope — conservative in the SAFE direction only when
+ * the wider marker is absent (AC-2: a future tree-scanning oracle nobody has
+ * taught this function about yet still gets the narrower scope rather than
+ * being silently dropped, since `isTestFile` + bare `main()` alone already
+ * qualifies it).
+ */
+export function classifyTreeScanningOracle(path: string, content: string): TreeScanScope | undefined {
+  if (!isTestFile(path)) return undefined;
+  if (!BARE_MAIN_INVOCATION_RE.test(content)) return undefined;
+  return REPO_TRACKED_TEXT_SOURCE_MARKER_RE.test(content) ? "repo-tracked-text-source" : "packages-test-tree";
+}
+
+/**
+ * Does `changedPath` fall within `scope`'s real scan scope? `"packages-test-tree"`
+ * reuses this file's own `isTestFile` plus the SAME `packages/` scan-root
+ * prefix `scanRepoTree` documents (a structural prefix condition, not a
+ * per-file list — the same shape as `LORE_OR_CORE_SRC_PREFIX_RE` above).
+ * `"repo-tracked-text-source"` defers entirely to the imported
+ * `hasTextSourceExtension` — no re-hardcoded extension list here.
+ */
+export function isChangedFileInTreeScanScope(changedPath: string, scope: TreeScanScope): boolean {
+  if (scope === "repo-tracked-text-source") return hasTextSourceExtension(changedPath);
+  return changedPath.startsWith("packages/") && isTestFile(changedPath);
+}
+
+/**
  * Core selection algorithm (D1/D2/D3). Pure — takes the changed-file list and
  * a full file map (source + test) and returns the union selection with a
  * reason tag per file, plus the zero-selection warning flag. See module
  * header §Algorithm step 3 for the precedence rule: `changed-test` >
- * `binary-consumer` > `transitive` (a changed test file's reason is always
- * "changed-test" even if it also happens to be a binary-consumer or
- * transitively reachable).
+ * `binary-consumer` > `tree-scan-oracle` > `transitive` (a changed test
+ * file's reason is always "changed-test" even if it also happens to be a
+ * binary-consumer, tree-scanning oracle, or transitively reachable).
  */
 export function selectAffectedTests(params: {
   readonly changedFiles: readonly string[];
@@ -383,6 +521,25 @@ export function selectAffectedTests(params: {
       if (isBinaryConsumerCandidate(path, content) && reasonByPath.get(path) !== "changed-test") {
         reasonByPath.set(path, "binary-consumer");
       }
+    }
+  }
+
+  // (d) tree-scanning oracles — a test that scans the REAL repo tree at
+  // runtime (classifyTreeScanningOracle) is selected whenever ANY file in the
+  // FULL raw changedFiles list (not just knownChanged/fileMap-filtered — a
+  // "repo-tracked-text-source" scope reaches files entirely outside this
+  // selector's traced universe, e.g. a doc under docs/) falls within ITS OWN
+  // declared scan scope. Per-oracle, not a single blanket trigger for the
+  // whole set — a change that matches only the narrower scope must not also
+  // drag in an oracle whose scope excludes it (AC-3: no existing rule is
+  // weakened, and this rule itself must stay scoped, never "select every
+  // tree-scanning oracle on any change whatsoever").
+  for (const [path, content] of fileMap) {
+    if (reasonByPath.has(path)) continue; // (a)/(c) already decided this file
+    const scope = classifyTreeScanningOracle(path, content);
+    if (scope === undefined) continue;
+    if (changedFiles.some((f) => isChangedFileInTreeScanScope(f, scope))) {
+      reasonByPath.set(path, "tree-scan-oracle");
     }
   }
 
