@@ -690,14 +690,12 @@ describe("lore verify — SPEC-069 ad-hoc-task runner path", () => {
     const attestation = evidence[0]?.["attestation"] as Record<string, unknown> | undefined;
     expect(attestation?.["runner"]).toBe("lore-cli");
     expect(attestation?.["exit_code"]).toBe(0);
-    // reason: MEASURED gap, NAMED not silently dropped — TaskWorkflowService.
-    // appendEvidenceEntry's cross-entity ac_ref check requires task.parent_id to
-    // resolve to a plan, structurally impossible for an ad-hoc task (parent is
-    // the root PRD). The evidence above is still GENUINELY runner-attested (real
-    // exit_code/runner); only the ac_ref coverage-link is absent. Closing this
-    // needs a task-workflow-service.ts/corpus-service.ts change outside this
-    // task's file anchors — see the completion report for the follow-up shape.
-    expect(evidence[0]?.["ac_ref"]).toBeUndefined();
+    // reason: the ad-hoc runner path is now SHAPE-IDENTICAL to the plan-owned one
+    // (AC-069-15). appendEvidenceEntry used to cross-validate ac_ref through a
+    // plan-only parent_id walk — structurally impossible for an ad-hoc task, whose
+    // parent is the root PRD — and now branches on extra.adhoc to resolve declared
+    // ids via resolveAdhocGoverningAcIds instead, so the coverage-link is recorded.
+    expect(evidence[0]?.["ac_ref"]).toBe("AC-ADHOC-G1");
   });
 
   it("NEGATIVE: no PLAN positional and no --task → usage error, exit 2, names the requirement", () => {
