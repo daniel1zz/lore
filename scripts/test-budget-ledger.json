@@ -251,13 +251,13 @@
     },
     {
       "path": "packages/lore/tests/integration/gate-hooks.bun.test.ts",
-      "line": 346,
+      "line": 351,
       "spawnCount": 4,
       "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/integration/gate-hooks.bun.test.ts",
-      "line": 534,
+      "line": 539,
       "spawnCount": 3,
       "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
