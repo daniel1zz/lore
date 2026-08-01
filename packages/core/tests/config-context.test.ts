@@ -50,6 +50,7 @@ const DEFAULT_BUDGETS = {
   filenames: ["CLAUDE.md"],
   root: { max_lines: 300, max_bytes: 30720 },
   module: { max_lines: 200, max_bytes: 16384 },
+  warn_threshold_fraction: 0.9,
 };
 
 // ─── HAPPY ──────────────────────────────────────────────────────────────────
@@ -73,6 +74,7 @@ describe("resolveMemoryFileBudgets — HAPPY", () => {
           filenames: ["CLAUDE.md", "AGENTS.md"],
           root: { max_lines: 500, max_bytes: 51200 },
           module: { max_lines: 250, max_bytes: 20480 },
+          warn_threshold_fraction: 0.75,
         },
       },
     });
@@ -81,7 +83,50 @@ describe("resolveMemoryFileBudgets — HAPPY", () => {
       filenames: ["CLAUDE.md", "AGENTS.md"],
       root: { max_lines: 500, max_bytes: 51200 },
       module: { max_lines: 250, max_bytes: 20480 },
+      warn_threshold_fraction: 0.75,
     });
+  });
+});
+
+// ─── warn_threshold_fraction (task-lore-status-check-claude-md-reports-a-saturated-file-as) ──
+
+describe("resolveMemoryFileBudgets — warn_threshold_fraction", () => {
+  it("HAPPY: defaults to 0.9 when unset", () => {
+    const resolved = resolveMemoryFileBudgets(undefined);
+    expect(resolved.warn_threshold_fraction).toBe(0.9);
+  });
+
+  it("BOUNDARY: 0 and 1 are both accepted (inclusive range)", () => {
+    const lowParsed = LoreConfigSchema.parse({
+      project: MINIMAL_PROJECT,
+      context: { memory_files: { warn_threshold_fraction: 0 } },
+    });
+    expect(resolveMemoryFileBudgets(lowParsed).warn_threshold_fraction).toBe(0);
+
+    const highParsed = LoreConfigSchema.parse({
+      project: MINIMAL_PROJECT,
+      context: { memory_files: { warn_threshold_fraction: 1 } },
+    });
+    expect(resolveMemoryFileBudgets(highParsed).warn_threshold_fraction).toBe(1);
+  });
+
+  it("NEGATIVE: a value outside [0, 1] is rejected by contextConfigSchema", () => {
+    const tooHigh = contextConfigSchema.safeParse({ memory_files: { warn_threshold_fraction: 1.5 } });
+    expect(tooHigh.success).toBe(false);
+
+    const tooLow = contextConfigSchema.safeParse({ memory_files: { warn_threshold_fraction: -0.1 } });
+    expect(tooLow.success).toBe(false);
+  });
+
+  it("STATE: a custom fraction does not disturb sibling ceiling fields", () => {
+    const parsed = LoreConfigSchema.parse({
+      project: MINIMAL_PROJECT,
+      context: { memory_files: { warn_threshold_fraction: 0.5 } },
+    });
+    const resolved = resolveMemoryFileBudgets(parsed);
+    expect(resolved.warn_threshold_fraction).toBe(0.5);
+    expect(resolved.root).toEqual({ max_lines: 300, max_bytes: 30720 });
+    expect(resolved.module).toEqual({ max_lines: 200, max_bytes: 16384 });
   });
 });
 

@@ -39,6 +39,23 @@
  * check without touching content) / STRUCTURAL (import-graph never reaches the
  * DB layer).
  *
+ * ─── Headroom reporting addendum (task-lore-status-check-claude-md-reports-
+ * a-saturated-file-as) ───────────────────────────────────────────────────
+ * RED baseline empirically confirmed against this worktree's pre-task HEAD
+ * (`git stash` of the config.ts/claude-md-check.ts/status.ts implementation
+ * diff, then a live `bunx vitest run` of this exact file): a fixture at
+ * EXACTLY 5 bytes under the root byte ceiling (24571/24576 — the real
+ * incident's own numbers) produced `--json` output whose `data.claude_md`
+ * carried ONLY `{ findings: [] }` — no `headroom` key, no `warnings` key,
+ * `--check-claude-md`'s non-JSON stdout printed the single line
+ * `CLAUDE.md: within budget (0 findings).` with no margin shown anywhere.
+ * The new scenarios below assert the FIXED behavior: `headroom` numbers on
+ * every run (control-group scenario proves this stays silent-safe, never
+ * "always warns"), a `headroom_warning` advisory once a metric crosses
+ * `context.memory_files.warn_threshold_fraction`, exit code UNCHANGED (a
+ * warning is never a breach), and that the threshold is read from config
+ * (not a hardcoded fraction).
+ *
  * @spec_ref spec-project-claude-md-content-contract-governance-injected
  */
 
@@ -114,6 +131,46 @@ function nLineBody(lineCount: number): string {
     lines.push(`Line ${i}: standing discipline entry, not a status narrative.`);
   }
   return lines.join("\n") + "\n";
+}
+
+/**
+ * A CLAUDE.md body of exactly `byteCount` UTF-8 bytes (via `Buffer.byteLength`)
+ * and a small, ceiling-safe line count — pads the final line with single-byte
+ * ASCII filler, mirroring `claude-md-headroom.test.ts`'s `buildFixture`. Used
+ * to reproduce the incident's own exact numbers (24571/24576 bytes).
+ */
+function nByteBody(byteCount: number): string {
+  const base = nLineBody(20);
+  const baseBytes = Buffer.byteLength(base, "utf8");
+  if (baseBytes > byteCount) {
+    throw new Error(`nByteBody: base content (${baseBytes} bytes) already exceeds requested byteCount (${byteCount})`);
+  }
+  const deficit = byteCount - baseBytes;
+  return base.slice(0, -1) + "x".repeat(deficit) + "\n";
+}
+
+interface HeadroomMetricJson {
+  used: number;
+  ceiling: number;
+  remaining: number;
+  warn: boolean;
+}
+
+interface HeadroomReportJson {
+  path: string;
+  role: string;
+  lines: HeadroomMetricJson;
+  bytes: HeadroomMetricJson;
+}
+
+interface CheckClaudeMdJson {
+  data?: {
+    claude_md?: {
+      findings?: unknown[];
+      headroom?: HeadroomReportJson[];
+      warnings?: Array<{ kind: string; measured: number; message: string }>;
+    };
+  };
 }
 
 // ─── Scenario 1 (BOUNDARY): oversized CLAUDE.md, NO .lore/ — corpus-less ────
@@ -204,6 +261,127 @@ describe("lore status --check-claude-md: disabled via context.memory_files.enabl
     const result = runLore(["status", "--check-claude-md"], tmpDir);
 
     expect(result.exitCode).toBe(0);
+  });
+});
+
+// ─── Scenario 5 (THE INCIDENT): fixture 5 bytes under the root ceiling ──────
+// task-lore-status-check-claude-md-reports-a-saturated-file-as
+
+describe("lore status --check-claude-md: headroom reporting (the incident fixture, 5 bytes remaining)", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = makeTempDir("headroom-incident");
+  });
+
+  afterEach(() => cleanupDir(tmpDir));
+
+  it("--json reports headroom.bytes.remaining=5, warn=true, and a headroom_warning — exit code stays 0 (not a breach)", () => {
+    // Root byte ceiling default is 30720 (D3) — 5 bytes under it, mirroring
+    // the exact reproduction (24571/24576 in the repo's own real ceiling).
+    writeFileSync(join(tmpDir, "CLAUDE.md"), nByteBody(30720 - 5));
+
+    const result = runLore(["status", "--check-claude-md", "--json"], tmpDir);
+
+    expect(result.exitCode).toBe(0);
+    const parsed = JSON.parse(result.stdout) as CheckClaudeMdJson;
+    expect(parsed.data?.claude_md?.findings).toEqual([]);
+
+    const headroom = parsed.data?.claude_md?.headroom ?? [];
+    expect(headroom).toHaveLength(1);
+    expect(headroom[0]?.path).toBe("CLAUDE.md");
+    expect(headroom[0]?.bytes.used).toBe(30720 - 5);
+    expect(headroom[0]?.bytes.ceiling).toBe(30720);
+    expect(headroom[0]?.bytes.remaining).toBe(5);
+    expect(headroom[0]?.bytes.warn).toBe(true);
+
+    const warnings = parsed.data?.claude_md?.warnings ?? [];
+    expect(warnings.length).toBeGreaterThan(0);
+    expect(warnings.some((w) => w.kind === "headroom_warning" && w.message.includes("CLAUDE.md"))).toBe(true);
+  });
+
+  it("non-JSON stdout names the remaining count and an approaching-ceiling advisory, without changing the exit code", () => {
+    writeFileSync(join(tmpDir, "CLAUDE.md"), nByteBody(30720 - 5));
+
+    const result = runLore(["status", "--check-claude-md"], tmpDir);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("5 remaining");
+    expect(result.stdout.toLowerCase()).toContain("approaching ceiling");
+  });
+});
+
+// ─── Scenario 6 (CONTROL): comfortably-small file -> zero warnings ─────────
+
+describe("lore status --check-claude-md: headroom CONTROL (comfortably-small file never warns)", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = makeTempDir("headroom-control");
+  });
+
+  afterEach(() => cleanupDir(tmpDir));
+
+  it("--json reports headroom numbers but an EMPTY warnings array for a small, well-within-ceiling file", () => {
+    writeFileSync(join(tmpDir, "CLAUDE.md"), nLineBody(10));
+
+    const result = runLore(["status", "--check-claude-md", "--json"], tmpDir);
+
+    expect(result.exitCode).toBe(0);
+    const parsed = JSON.parse(result.stdout) as CheckClaudeMdJson;
+
+    const headroom = parsed.data?.claude_md?.headroom ?? [];
+    expect(headroom).toHaveLength(1);
+    expect(headroom[0]?.bytes.warn).toBe(false);
+    expect(headroom[0]?.lines.warn).toBe(false);
+    expect(headroom[0]?.bytes.remaining).toBeGreaterThan(0);
+    expect(headroom[0]?.lines.remaining).toBeGreaterThan(0);
+
+    // The CONTROL assertion: the near-ceiling band must not degrade into
+    // "always warns" — a comfortably-small file's warnings array is empty.
+    expect(parsed.data?.claude_md?.warnings).toEqual([]);
+  });
+});
+
+// ─── Scenario 7 (CONFIGURATION): warn_threshold_fraction is read from config,
+// never hardcoded — proven in BOTH directions ─────────────────────────────
+
+describe("lore status --check-claude-md: warn_threshold_fraction is a config knob, not a hardcoded number", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = makeTempDir("headroom-config");
+  });
+
+  afterEach(() => cleanupDir(tmpDir));
+
+  it("a threshold raised to 0.999999 silences the warning on the incident fixture (99.98% used, below the raised threshold)", () => {
+    mkdirSync(join(tmpDir, ".lore"), { recursive: true });
+    writeFileSync(
+      join(tmpDir, ".lore", "config.yaml"),
+      "context:\n  memory_files:\n    warn_threshold_fraction: 0.999999\n",
+    );
+    writeFileSync(join(tmpDir, "CLAUDE.md"), nByteBody(30720 - 5));
+
+    const result = runLore(["status", "--check-claude-md", "--json"], tmpDir);
+
+    expect(result.exitCode).toBe(0);
+    const parsed = JSON.parse(result.stdout) as CheckClaudeMdJson;
+    expect(parsed.data?.claude_md?.warnings).toEqual([]);
+    // Headroom numbers themselves are still reported — only the warn flag moved.
+    expect(parsed.data?.claude_md?.headroom?.[0]?.bytes.remaining).toBe(5);
+  });
+
+  it("a threshold lowered to 0.01 makes even the CONTROL (comfortably-small) fixture warn", () => {
+    mkdirSync(join(tmpDir, ".lore"), { recursive: true });
+    writeFileSync(join(tmpDir, ".lore", "config.yaml"), "context:\n  memory_files:\n    warn_threshold_fraction: 0.01\n");
+    writeFileSync(join(tmpDir, "CLAUDE.md"), nLineBody(10));
+
+    const result = runLore(["status", "--check-claude-md", "--json"], tmpDir);
+
+    expect(result.exitCode).toBe(0); // still advisory-only, never a breach
+    const parsed = JSON.parse(result.stdout) as CheckClaudeMdJson;
+    expect((parsed.data?.claude_md?.warnings ?? []).length).toBeGreaterThan(0);
   });
 });
 
