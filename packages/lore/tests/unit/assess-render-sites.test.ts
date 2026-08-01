@@ -30,6 +30,15 @@
  *               section headers at all three sites (parity)
  *
  * @spec_ref AC-ADF-13
+ *
+ * Additional coverage (task-lore-assess-derives-a-plan-s-commits-by-grepping-task AC #3):
+ * the CLI/MCP terminal render sites previously had NO "Unverifiable" section at all —
+ * `result.unverifiable[]` was persisted (core's `renderAssessmentContent` already rendered
+ * it) but silently absent from the terminal/MCP summary a human/agent actually reads
+ * first. Added as a presence-guarded block (mirrors every other SPEC-040 block's
+ * contract), so the AC #3 "not scored" wording forced by
+ * `ai-provider-service.ts::forceScopeFidelityUnverifiable` is now visible at every site,
+ * not just the persisted Markdown.
  */
 
 import { describe, it, expect } from "vitest";
@@ -90,6 +99,26 @@ function emptyDimensionScoresResult(): AssessmentResult {
   return { ...legacyResult(), dimension_scores: {} };
 }
 
+/** Result with an empty (but present) unverifiable array — boundary case (mirrors dimension_scores). */
+function emptyUnverifiableResult(): AssessmentResult {
+  return { ...legacyResult(), unverifiable: [] };
+}
+
+/** Result whose ONLY unverifiable entry carries the AC #3 forced "not scored" wording. */
+function forcedUnverifiableScopeResult(): AssessmentResult {
+  return {
+    ...legacyResult(),
+    unverifiable: [
+      {
+        material: "scope_fidelity dimension score",
+        reason:
+          "This plan's commit set could not be verified (deriveCommitSetForPlan reported " +
+          "unverifiable_convention_mismatch). scope_fidelity was NOT SCORED at all for this run.",
+      },
+    ],
+  };
+}
+
 /** Result with no ac_scores/gaps/recommendations at all — negative-space case. */
 function emptyArraysResult(): AssessmentResult {
   return { ...legacyResult(), ac_scores: [], gaps: [], recommendations: [] };
@@ -134,6 +163,21 @@ describe("assess render sites — HAPPY (typed fields render at every site)", ()
       expect(text).toContain("Add a negative-path test task.");
       expect(text).toContain("Closes the coverage gap.");
     });
+
+    // task-lore-assess-derives-a-plan-s-commits-by-grepping-task AC #3 — the
+    // "Unverifiable" section (material + reason) must render at EVERY site, not just
+    // core's persisted Markdown; typedResult() already carries one unverifiable[] entry.
+    it(`${site.name}: renders unverifiable materials (material + reason)`, () => {
+      const text = site.render(typedResult());
+      expect(text).toContain("AC-9 evidence doc");
+      expect(text).toContain("doc_id not found in bundle.");
+    });
+
+    it(`${site.name}: renders the AC #3 forced 'not scored' wording verbatim when present`, () => {
+      const text = site.render(forcedUnverifiableScopeResult());
+      expect(text).toContain("scope_fidelity dimension score");
+      expect(text.toLowerCase()).toContain("not scored");
+    });
   }
 });
 
@@ -162,6 +206,11 @@ describe("assess render sites — BOUNDARY", () => {
     it(`${site.name}: dimension_scores present but empty {} renders no Dimension Scores block`, () => {
       const text = site.render(emptyDimensionScoresResult());
       expect(text.toLowerCase()).not.toContain("dimension score");
+    });
+
+    it(`${site.name}: unverifiable present but empty [] renders no Unverifiable block`, () => {
+      const text = site.render(emptyUnverifiableResult());
+      expect(text.toLowerCase()).not.toContain("unverifiable");
     });
   }
 
@@ -220,7 +269,7 @@ describe("assess render sites — STATE (deterministic, repeated calls match)", 
 // ─── REGRESSION (legacy-only parity across all three sites) ─────────────────────
 
 describe("assess render sites — REGRESSION (legacy-only result has no typed-block markers anywhere)", () => {
-  const FORBIDDEN_MARKERS = ["Dimension Score", "Typed Gap", "Typed Recommendation", "Rubric Warning"];
+  const FORBIDDEN_MARKERS = ["Dimension Score", "Typed Gap", "Typed Recommendation", "Rubric Warning", "Unverifiable"];
 
   for (const site of SITES) {
     it(`${site.name}: a legacy-only AssessmentResult contains none of the SPEC-040 section markers`, () => {

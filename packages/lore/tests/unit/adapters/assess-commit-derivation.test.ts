@@ -30,6 +30,32 @@
  *               derivation, no hidden mutation of git state or of the returned shape).
  *   REGRESSION: an UNRELATED commit added after the matched ones (never mentioning any
  *               of the plan's task slugs) does not leak into a re-derived result.
+ *
+ * @spec_ref task-lore-assess-derives-a-plan-s-commits-by-grepping-task
+ *
+ * Additional six-dimension coverage for the `allTasksArchived` parameter / the
+ * `"unverifiable_convention_mismatch"` status (task-lore-assess-derives-a-plan-s-commits-
+ * by-grepping-task — a conventionally-worded commit carries no task slug, so a
+ * convention-mismatch plan and a genuinely commit-less plan both used to collapse into the
+ * SAME `"no_commits_found"` value; an all-archived plan with zero matches is a
+ * CONTRADICTION and must be a DISTINCT, named value):
+ *   HAPPY/RED-FIRST: a fixture plan whose task commits use CONVENTIONAL messages (no task
+ *               slug at all) with `allTasksArchived: true` derives
+ *               `"unverifiable_convention_mismatch"`, not `"no_commits_found"` — this test
+ *               was written and run against the PRE-FIX two-argument function first (it
+ *               failed: the third argument was silently ignored by plain-JS call
+ *               semantics and the old code always returned `"no_commits_found"`), then the
+ *               source was fixed to make it pass.
+ *   CONTROL:    the exact SAME zero-match fixture with `allTasksArchived: false`/omitted
+ *               still derives the pre-existing `"no_commits_found"` value, byte-identical
+ *               to the pre-fix behavior — the new parameter never affects the case it
+ *               doesn't apply to (AC #6, distinguishable-genuinely-commit-less control).
+ *   CONTROL:    a plan whose commits DO mention the slug derives the identical `"derived"`
+ *               commit list regardless of `allTasksArchived`'s value (AC #5 — the flag
+ *               only matters on a zero-match result, never overrides a real derivation).
+ *   BOUNDARY:   the two zero-match statuses are asserted by VALUE equality (not merely
+ *               falsy/truthy), and are asserted DISTINCT from each other on the same input
+ *               shape (AC #4).
  */
 
 import { describe, it, expect, afterEach } from "vitest";
@@ -284,4 +310,76 @@ describe("deriveCommitSetForPlan — REGRESSION: an unrelated later commit never
   // D1/check-test-budgets): 3 direct spawn-helper calls (`initRepo` x1, `commit`
   // x2). Measured 198-221ms in isolation across 2 runs; 15000ms gives >=67x
   // headroom for a concurrent-worktree load spike.
+});
+
+// ─── task-lore-assess-derives-a-plan-s-commits-by-grepping-task ──────────────────
+// HAPPY/RED-FIRST: convention-mismatch on an all-archived plan is a DISTINCT, named
+// value from genuine absence — never a shared silent empty.
+
+describe("deriveCommitSetForPlan — RED-FIRST: convention-mismatch (allTasksArchived) is DISTINCT from no_commits_found", () => {
+  it("an all-archived plan whose commits are conventionally-worded (no task slug) derives 'unverifiable_convention_mismatch', never 'no_commits_found'", () => {
+    const dir = initRepo();
+    // Conventional Commits messages — deliberately reference NEITHER task's slug, mirroring
+    // the measured defect (fix(evidence): ... never mentions the task slug it closes).
+    commit(dir, "a.txt", "content-a\n", "fix(evidence): self-reported fail must carry a non-empty output_tail");
+    commit(dir, "b.txt", "content-b\n", "feat(assess): add scope mismatch warning");
+
+    const result = deriveCommitSetForPlan(dir, ["task-conv-archived-a", "task-conv-archived-b"], true);
+
+    // AC #4: assert the VALUE, not mere falsiness/truthiness.
+    expect(result.status).toBe("unverifiable_convention_mismatch");
+    expect(result.status).not.toBe("no_commits_found");
+    expect(result.status).not.toBe("derived");
+    expect(result.commits).toEqual([]);
+    expect(result.tasks_without_commits).toEqual(["task-conv-archived-a", "task-conv-archived-b"]);
+    expect(result.diff_text).toBe("");
+  }, 15000);
+  // ^ explicit timeout (spec-a-test-case-s-timeout-budget-must-be-declared-when-its
+  // D1/check-test-budgets): 3 direct spawn-helper calls (`initRepo` x1, `commit` x2).
+  // Comparable to this file's other 3-spawn-call CONTROL cases (198-303ms measured);
+  // 15000ms gives ample headroom for a concurrent-worktree load spike.
+
+  // ─── CONTROL: the identical zero-match fixture WITHOUT allTasksArchived stays the
+  // pre-existing 'no_commits_found' — the new parameter never changes the case it
+  // doesn't apply to (AC #6: distinguishable from the mismatch state above).
+  it("CONTROL: the identical conventional-commit fixture without allTasksArchived (or false) still derives 'no_commits_found', distinguishably from the archived-mismatch case", () => {
+    const dir = initRepo();
+    commit(dir, "a.txt", "content-a\n", "fix(evidence): self-reported fail must carry a non-empty output_tail");
+    commit(dir, "b.txt", "content-b\n", "feat(assess): add scope mismatch warning");
+
+    const omitted = deriveCommitSetForPlan(dir, ["task-conv-not-archived-a", "task-conv-not-archived-b"]);
+    const explicitFalse = deriveCommitSetForPlan(dir, ["task-conv-not-archived-a", "task-conv-not-archived-b"], false);
+
+    for (const result of [omitted, explicitFalse]) {
+      expect(result.status).toBe("no_commits_found");
+      expect(result.status).not.toBe("unverifiable_convention_mismatch");
+      expect(result.commits).toEqual([]);
+      expect(result.diff_text).toBe("");
+    }
+  }, 15000);
+  // ^ explicit timeout (spec-a-test-case-s-timeout-budget-must-be-declared-when-its
+  // D1/check-test-budgets): 3 direct spawn-helper calls (`initRepo` x1, `commit` x2).
+  // Comparable to this file's other 3-spawn-call CONTROL cases (198-303ms measured);
+  // 15000ms gives ample headroom for a concurrent-worktree load spike.
+
+  // ─── CONTROL: a real, matched derivation is byte-identical regardless of
+  // allTasksArchived — the flag only ever matters on a ZERO-match result (AC #5).
+  it("CONTROL: a plan whose commits DO mention the task slug derives the identical 'derived' commit set whether allTasksArchived is true, false, or omitted", () => {
+    const dir = initRepo();
+    commit(dir, "base.txt", "base\n", "seed commit");
+    commit(dir, "own.txt", "CONTENT_ARCHIVED_MATCH\n", "implements task-conv-matched-a");
+
+    const withArchivedTrue = deriveCommitSetForPlan(dir, ["task-conv-matched-a"], true);
+    const withArchivedFalse = deriveCommitSetForPlan(dir, ["task-conv-matched-a"], false);
+    const omitted = deriveCommitSetForPlan(dir, ["task-conv-matched-a"]);
+
+    expect(withArchivedTrue.status).toBe("derived");
+    expect(withArchivedTrue).toEqual(withArchivedFalse);
+    expect(withArchivedTrue).toEqual(omitted);
+    expect(withArchivedTrue.diff_text).toContain("CONTENT_ARCHIVED_MATCH");
+  }, 15000);
+  // ^ explicit timeout (spec-a-test-case-s-timeout-budget-must-be-declared-when-its
+  // D1/check-test-budgets): 2 direct spawn-helper calls (`initRepo` x1, `commit` x2).
+  // Measured well under the seed-commit baseline of the CONTROL block above; 15000ms
+  // gives comparable headroom for a concurrent-worktree load spike.
 });

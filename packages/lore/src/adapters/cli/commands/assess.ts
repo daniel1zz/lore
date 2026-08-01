@@ -56,10 +56,25 @@
  * that was entirely this call site's own buffer ceiling. Every OTHER spawn failure
  * (non-zero exit, ENOENT, ...) still renders the pre-existing generic message, unchanged.
  *
+ * Convention-mismatch vs genuine absence (task-lore-assess-derives-a-plan-s-commits-by-
+ * grepping-task): auto-derivation now tells apart TWO zero-commit causes instead of
+ * folding them into one. This command computes `allTasksArchived` (every task's
+ * `status === "archived"`) from the ALREADY-LOADED bundle and passes it to
+ * `deriveCommitSetForPlan` — a zero-match result on an all-archived plan is a
+ * CONTRADICTION (archived tasks have merged work by definition) and comes back as the
+ * distinct `"unverifiable_convention_mismatch"` status, never silently folded into
+ * `"no_commits_found"` (which stays reserved for a plan that plausibly has no merged work
+ * yet). The distinct status is threaded to `aiProviderService.assessPlan` as
+ * `commitDerivationUnverifiable`, which forbids the judge's `scope_fidelity` dimension
+ * score from ever publishing in that state (SPEC-lore's own three-question ADR review;
+ * enforced at the SERVICE layer, `ai-provider-service.ts::forceScopeFidelityUnverifiable`
+ * — never by editing the prompt template).
+ *
  * Source: SPEC-026 §3 D1-D5; §4 AC-ASSESS-1, AC-ASSESS-6, AC-ASSESS-8, AC-ASSESS-9;
  * SPEC-028 AC-AE-1; task-assess-diff-range-scope-mismatch-warning; SPEC-106 AC-FRESH-4;
  * task-lore-assess-asks-the-caller-for-a-git-range-that-cannot-be;
- * task-lore-assess-diff-spawnsync-sets-no-maxbuffer-a-diff-over-1
+ * task-lore-assess-diff-spawnsync-sets-no-maxbuffer-a-diff-over-1;
+ * task-lore-assess-derives-a-plan-s-commits-by-grepping-task
  */
 
 import { spawnSync } from "node:child_process";
@@ -91,6 +106,13 @@ function formatDiffSourceLine(source: DiffSourceRecord): string {
             ? ` (${String(source.tasks_without_commits.length)} task(s) had no discoverable commits)`
             : "";
         return `Diff source: derived from ${String(source.commits.length)} commit(s) across this plan's tasks${gapNote}`;
+      }
+      if (source.status === "unverifiable_convention_mismatch") {
+        return (
+          "Diff source: unverifiable — every task in this plan is archived (merged work by " +
+          "definition) but no commit mentions any task slug; a commit-message CONVENTION " +
+          "MISMATCH, not evidence of missing work"
+        );
       }
       return "Diff source: none — could not derive any commits for this plan's tasks";
   }
@@ -203,6 +225,12 @@ export default defineCommand({
       const maxDiffChars = app.aiProviderService.assessMaxDiffChars;
       let diffText: string | undefined;
       let diffSource: DiffSourceRecord;
+      // reason: task-lore-assess-derives-a-plan-s-commits-by-grepping-task AC #3 — set ONLY
+      // by the auto-derived branch below when the derivation reports
+      // "unverifiable_convention_mismatch"; forwarded to assessPlan so the SERVICE layer
+      // (never this adapter, never the prompt template) forbids scope_fidelity from
+      // publishing an absence-based score in that state.
+      let commitDerivationUnverifiable = false;
       if (args.diff !== undefined) {
         // reason: Node's default maxBuffer (1 MiB) is an arbitrary constant unrelated to
         // this command's own diff-size budget — an ordinary multi-task-plan diff can
@@ -244,7 +272,14 @@ export default defineCommand({
         // default". A plan's commits are not contiguous in main under concurrency, so
         // there is no correct contiguous range to ask the caller for; this finds the
         // plan's own commits by CONTENT (exact task-slug match) instead of position.
-        const derivation = deriveCommitSetForPlan(process.cwd(), bundle.tasks.map((t) => t.slug));
+        //
+        // reason: task-lore-assess-derives-a-plan-s-commits-by-grepping-task — every task
+        // already `archived` means merged work exists BY DEFINITION (VALID_TRANSITIONS,
+        // @lore/core); a zero-match derivation in that state is a commit-message CONVENTION
+        // MISMATCH, not genuine absence, so it must be told apart from a plan that plausibly
+        // has no merged work yet.
+        const allTasksArchived = bundle.tasks.every((t) => t.status === "archived");
+        const derivation = deriveCommitSetForPlan(process.cwd(), bundle.tasks.map((t) => t.slug), allTasksArchived);
         diffSource = { mode: "auto_derived", ...derivation };
         if (derivation.status === "derived") {
           diffText = derivation.diff_text;
@@ -255,6 +290,15 @@ export default defineCommand({
               : "";
           process.stderr.write(
             `Derived diff from ${String(derivation.commits.length)} commit(s) across this plan's tasks${gapNote}.\n`,
+          );
+        } else if (derivation.status === "unverifiable_convention_mismatch") {
+          commitDerivationUnverifiable = true;
+          process.stderr.write(
+            `Warning: every one of this plan's ${String(bundle.tasks.length)} task(s) is already archived ` +
+              "(merged work exists by definition) but no commit mentions any of their slugs — this is a " +
+              "commit-message CONVENTION MISMATCH, not evidence of missing work. The scope_fidelity dimension " +
+              "will be reported unverifiable, never absence-scored, for this run. Pass --diff/--diff-file to " +
+              "supply a diff explicitly.\n",
           );
         } else {
           process.stderr.write(
@@ -303,9 +347,15 @@ export default defineCommand({
       }
 
       // ─── Step 5: invoke the judge ──────────────────────────────────────────────
+      // reason: task-lore-assess-derives-a-plan-s-commits-by-grepping-task AC #3 —
+      // `commitDerivationUnverifiable` is forwarded so the SERVICE layer forbids
+      // scope_fidelity from publishing an absence-based score in that state; `false`
+      // (the initialized default) on every OTHER path (explicit --diff/--diff-file, or a
+      // genuinely commit-less plan) is a true, deliberate value, not an omission.
       const assessResult = await app.aiProviderService.assessPlan(bundle, {
         ...(diffText !== undefined ? { diffText } : {}),
         source: app.callerSurface,
+        commitDerivationUnverifiable,
       });
       if (!assessResult.ok) {
         // reason: assess has no non-AI mode (SPEC-026 §3 D5) — the shared AI_PROVIDER_ERROR
