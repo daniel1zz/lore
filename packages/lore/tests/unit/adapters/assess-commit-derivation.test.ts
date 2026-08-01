@@ -333,7 +333,11 @@ describe("deriveCommitSetForPlan — RED-FIRST: convention-mismatch (allTasksArc
     expect(result.commits).toEqual([]);
     expect(result.tasks_without_commits).toEqual(["task-conv-archived-a", "task-conv-archived-b"]);
     expect(result.diff_text).toBe("");
-  });
+  }, 15000);
+  // ^ explicit timeout (spec-a-test-case-s-timeout-budget-must-be-declared-when-its
+  // D1/check-test-budgets): 3 direct spawn-helper calls (`initRepo` x1, `commit` x2).
+  // Comparable to this file's other 3-spawn-call CONTROL cases (198-303ms measured);
+  // 15000ms gives ample headroom for a concurrent-worktree load spike.
 
   // ─── CONTROL: the identical zero-match fixture WITHOUT allTasksArchived stays the
   // pre-existing 'no_commits_found' — the new parameter never changes the case it
@@ -352,7 +356,11 @@ describe("deriveCommitSetForPlan — RED-FIRST: convention-mismatch (allTasksArc
       expect(result.commits).toEqual([]);
       expect(result.diff_text).toBe("");
     }
-  });
+  }, 15000);
+  // ^ explicit timeout (spec-a-test-case-s-timeout-budget-must-be-declared-when-its
+  // D1/check-test-budgets): 3 direct spawn-helper calls (`initRepo` x1, `commit` x2).
+  // Comparable to this file's other 3-spawn-call CONTROL cases (198-303ms measured);
+  // 15000ms gives ample headroom for a concurrent-worktree load spike.
 
   // ─── CONTROL: a real, matched derivation is byte-identical regardless of
   // allTasksArchived — the flag only ever matters on a ZERO-match result (AC #5).
