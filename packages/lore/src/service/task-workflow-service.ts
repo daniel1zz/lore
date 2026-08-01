@@ -39,12 +39,15 @@
  *   CAS write as the evidence append — still `extra.claim` only, never a second write,
  *   never content/title/status. A foreign holder's claim is left byte-identical.
  * @invariant ready() performs zero writes — readiness is computed, never stored (D3).
- * @invariant addEvidence's optional `ac_ref` is cross-entity validated via the
- *   constructor-injected `resolveDeclaredAcIds` port (CorpusService owns the actual
- *   plan→spec graph walk — this service never gains that responsibility itself,
- *   SPEC-038 §7 D4). An `ac_ref` naming an id absent from the port's result (or a
- *   `null` result, meaning "parent spec has no structured AC") fails loud with
- *   VALIDATION_ERROR before any write. Evidence with no `ac_ref` never invokes the
+ * @invariant addEvidence's optional `ac_ref` is cross-entity validated via a
+ *   constructor-injected port (CorpusService owns the actual graph walk — this
+ *   service never gains that responsibility itself, SPEC-038 §7 D4) — `resolveDeclaredAcIds`
+ *   (plan→spec walk) for a plan-owned task, `resolveAdhocGoverningAcIds` (ac_scope→spec
+ *   search, task-an-ad-hoc-task-s-attested-evidence-cannot-carry-ac-ref) for an
+ *   `--adhoc` one (`task.extra.adhoc === true`) — the branch that decides which port
+ *   to consult. An `ac_ref` naming an id absent from the port's result (or, plan-owned
+ *   only, a `null` result meaning "parent spec has no structured AC") fails loud with
+ *   VALIDATION_ERROR before any write. Evidence with no `ac_ref` never invokes either
  *   port — fully backward-compatible with pre-SPEC-038 callers. The same cross-entity
  *   check applies to `recordVerifiedEvidence` (shared implementation, see below).
  * @invariant addEvidence rejects a placeholder/probe `command` (task task-reject-
@@ -582,6 +585,24 @@ export class TaskWorkflowService {
   ) => Promise<Result<Set<string> | null, LoreError>>;
 
   /**
+   * Narrow port resolving the AC ids declared on an `--adhoc` task's OWN governing
+   * spec — the ad-hoc sibling of {@link resolveDeclaredAcIds} (task-an-ad-hoc-task-
+   * s-attested-evidence-cannot-carry-ac-ref). Implemented by `CorpusService.
+   * resolveDeclaredAcIdsForAdhocTask` and injected here for the SAME reason
+   * `resolveDeclaredAcIds` is (services don't cross-import): an ad-hoc task's
+   * `parent_id` is structurally the root PRD (SPEC-069 D2), so `resolveDeclaredAcIds`'s
+   * plan-type requirement can never be satisfied for it — this port resolves via
+   * the task's own declared `ac_scope` instead of a plan→spec walk. Defaults to a
+   * stub that always refuses (`VALIDATION_ERROR`) so every pre-existing caller that
+   * constructs this service without this arg keeps compiling and behaving
+   * identically — the default is only ever consulted when an `ac_ref` is actually
+   * supplied to addEvidence for an `--adhoc` task, which no pre-existing caller does.
+   */
+  private readonly resolveAdhocGoverningAcIds: (
+    task: DocRecord,
+  ) => Promise<Result<Set<string>, LoreError>>;
+
+  /**
    * @param store - Storage abstraction (same instance passed to CorpusService)
    * @param telemetry - Telemetry sink (own wiring — D8; defaults to NoOp)
    * @param config - `{ claimTtlMinutes }` — see resolveClaimTtlMinutes in @lore/core
@@ -595,6 +616,11 @@ export class TaskWorkflowService {
    *   approved) before writing the lease. Absent (the default) → ungated,
    *   byte-identical to pre-GateEnforcer behavior — keeps every bare
    *   `new TaskWorkflowService(store, telemetry, config)` unit test construction green.
+   * @param resolveAdhocGoverningAcIds - task-an-ad-hoc-task-s-attested-evidence-
+   *   cannot-carry-ac-ref cross-entity port; production wiring is
+   *   `corpusService.resolveDeclaredAcIdsForAdhocTask.bind(corpusService)` (app.ts).
+   *   Defaults to an always-refusing stub (see the field's own JSDoc) — every
+   *   pre-existing bare construction that omits it keeps compiling unchanged.
    */
   constructor(
     private readonly store: StoreInterface,
@@ -604,10 +630,21 @@ export class TaskWorkflowService {
       planId: string,
     ) => Promise<Result<Set<string> | null, LoreError>> = async () => ok(null),
     private readonly gate?: GateDependencies,
+    resolveAdhocGoverningAcIds: (
+      task: DocRecord,
+    ) => Promise<Result<Set<string>, LoreError>> = async () =>
+      err({
+        code: "VALIDATION_ERROR",
+        field: "ac_ref",
+        message:
+          "ac_ref validation for an --adhoc task requires the resolveAdhocGoverningAcIds port, " +
+          "not wired on this TaskWorkflowService instance",
+      }),
   ) {
     this.telemetry = telemetry;
     this.claimTtlMinutes = config.claimTtlMinutes;
     this.resolveDeclaredAcIds = resolveDeclaredAcIds;
+    this.resolveAdhocGoverningAcIds = resolveAdhocGoverningAcIds;
   }
 
   // ── addEvidence ───────────────────────────────────────────────────────────
@@ -800,28 +837,52 @@ export class TaskWorkflowService {
     // Cross-entity ac_ref validation (SPEC-038 §4, §7 D4) — only when an ac_ref was
     // actually supplied. Pre-SPEC-038 evidence (no ac_ref) never reaches this branch.
     if (parsedEntry.data.ac_ref !== undefined) {
-      if (task.parent_id === null) {
-        return err({
-          code: "VALIDATION_ERROR",
-          field: "ac_ref",
-          message: `ac_ref "${parsedEntry.data.ac_ref}" cannot be validated — task has no parent plan`,
-          value: parsedEntry.data.ac_ref,
-        });
-      }
-      const declaredResult = await this.resolveDeclaredAcIds(task.parent_id);
-      if (!declaredResult.ok) return declaredResult;
-      const declared = declaredResult.value;
-      if (declared === null || !declared.has(parsedEntry.data.ac_ref)) {
-        const available =
-          declared !== null && declared.size > 0
-            ? Array.from(declared).sort().join(", ")
-            : "(none — parent spec has no structured acceptance_criteria)";
-        return err({
-          code: "VALIDATION_ERROR",
-          field: "ac_ref",
-          message: `ac_ref "${parsedEntry.data.ac_ref}" is not declared on the parent spec. Available ids: ${available}`,
-          value: parsedEntry.data.ac_ref,
-        });
+      if (task.extra["adhoc"] === true) {
+        // task-an-ad-hoc-task-s-attested-evidence-cannot-carry-ac-ref — an
+        // --adhoc task's parent is structurally the root PRD (SPEC-069 D2), so
+        // the plan-owned branch below (which hard-requires the resolved parent
+        // to be a `plan`) can NEVER succeed for it. Resolves the governing spec
+        // via the task's own declared ac_scope instead, through the injected
+        // `resolveAdhocGoverningAcIds` port (→ `CorpusService.
+        // resolveDeclaredAcIdsForAdhocTask` → shared `resolveGoverningSpecByAcScope`,
+        // the SAME search `VerifyRunnerService.verifyAdhocTask` runs) — the two
+        // surfaces can never disagree about which spec governs this task.
+        const declaredResult = await this.resolveAdhocGoverningAcIds(task);
+        if (!declaredResult.ok) return declaredResult;
+        const declared = declaredResult.value;
+        if (!declared.has(parsedEntry.data.ac_ref)) {
+          const available = declared.size > 0 ? Array.from(declared).sort().join(", ") : "(none)";
+          return err({
+            code: "VALIDATION_ERROR",
+            field: "ac_ref",
+            message: `ac_ref "${parsedEntry.data.ac_ref}" is not declared on the resolved governing spec. Available ids: ${available}`,
+            value: parsedEntry.data.ac_ref,
+          });
+        }
+      } else {
+        if (task.parent_id === null) {
+          return err({
+            code: "VALIDATION_ERROR",
+            field: "ac_ref",
+            message: `ac_ref "${parsedEntry.data.ac_ref}" cannot be validated — task has no parent plan`,
+            value: parsedEntry.data.ac_ref,
+          });
+        }
+        const declaredResult = await this.resolveDeclaredAcIds(task.parent_id);
+        if (!declaredResult.ok) return declaredResult;
+        const declared = declaredResult.value;
+        if (declared === null || !declared.has(parsedEntry.data.ac_ref)) {
+          const available =
+            declared !== null && declared.size > 0
+              ? Array.from(declared).sort().join(", ")
+              : "(none — parent spec has no structured acceptance_criteria)";
+          return err({
+            code: "VALIDATION_ERROR",
+            field: "ac_ref",
+            message: `ac_ref "${parsedEntry.data.ac_ref}" is not declared on the parent spec. Available ids: ${available}`,
+            value: parsedEntry.data.ac_ref,
+          });
+        }
       }
     }
 

@@ -19,6 +19,21 @@
  *               plan at all, but a non-null all-zero array once a plan exists with zero
  *               tasks — the null/[] distinction is the behavior under regression risk
  *
+ * task-an-ad-hoc-task-s-attested-evidence-cannot-carry-ac-ref adds
+ * `findAdhocGovernedTasks` — listCriteria's coverage additionally folds in
+ * `--adhoc` tasks whose declared ac_scope resolves unambiguously to the spec
+ * (own describe blocks below, search "ad-hoc"):
+ *   HAPPY:      an ad-hoc task's evidence counts toward coverage even with NO
+ *               child plan at all (coverage flips from null to non-null)
+ *   NEGATIVE:   an ad-hoc task whose ac_scope resolves to a DIFFERENT spec is
+ *               excluded from this spec's coverage (never cross-counted)
+ *   BOUNDARY:   an ad-hoc task with no declared ac_scope contributes nothing
+ *               and never errors listCriteria
+ *   STATE:      plan-owned tasks and governed ad-hoc tasks both contribute to
+ *               the SAME AcCoverageFact simultaneously
+ *   REGRESSION: a spec with zero plans AND zero ad-hoc tasks still yields
+ *               coverage: null (the pre-existing null/[] distinction, unchanged)
+ *
  * @spec_ref AC-ACODE-2 AC-ACODE-3 AC-ACODE-7
  */
 
@@ -75,6 +90,56 @@ async function createTask(cs: CorpusService, planId: string, title = "Test Task"
   } as CreateDocInput);
   if (!result.ok) throw new Error(`Failed to create task: ${JSON.stringify(result.error)}`);
   return result.value.id;
+}
+
+/**
+ * An `--adhoc` task (SPEC-069 D2) parented to the corpus root PRD, with a
+ * declared `ac_scope` — task-an-ad-hoc-task-s-attested-evidence-cannot-carry-
+ * ac-ref's `findAdhocGovernedTasks` describe blocks below. Callers must have
+ * already created a root PRD (createPrd) for the auto-parenting to succeed.
+ */
+async function createAdhocTask(
+  cs: CorpusService,
+  acScope: string[],
+  title = "Ad-hoc Task",
+): Promise<string> {
+  const result = await cs.create({
+    type: "task",
+    title,
+    content: "found mid-plan",
+    extra: { adhoc: true, ac_scope: acScope },
+  } as CreateDocInput);
+  if (!result.ok) throw new Error(`Failed to create adhoc task: ${JSON.stringify(result.error)}`);
+  return result.value.id;
+}
+
+/** Directly writes verification_evidence with an ac_ref onto an existing task (bypasses TaskWorkflowService — this file tests AcService's own read-side aggregation, not the write-path validation covered in task-workflow-service.test.ts). */
+async function recordEvidenceDirect(
+  store: InMemoryStore,
+  taskId: string,
+  acRef: string,
+  result: "pass" | "fail" = "pass",
+): Promise<void> {
+  const taskBefore = await store.find(taskId);
+  if (!taskBefore.ok || taskBefore.value === null) throw new Error("task fetch failed");
+  await store.update(taskId, {
+    extra: {
+      ...taskBefore.value.extra,
+      verification_evidence: [
+        ...(Array.isArray(taskBefore.value.extra["verification_evidence"])
+          ? (taskBefore.value.extra["verification_evidence"] as unknown[])
+          : []),
+        {
+          oracle: "test",
+          command: "bunx vitest run x.test.ts",
+          result,
+          recorded_at: new Date().toISOString(),
+          recorded_by: "tester",
+          ac_ref: acRef,
+        },
+      ],
+    },
+  });
 }
 
 /** Full spec→plan chain in one call, returning both ids (spec has no tasks yet). */
@@ -509,5 +574,126 @@ describe("STATE — expected-fail evidence never counted as passing by AC-covera
     expect(fact?.pass).toBe(1);
     expect(fact?.fail).toBe(0);
     expect(fact?.refs).toHaveLength(2);
+  });
+});
+
+// ─── listCriteria folds in --adhoc-governed tasks ────────────────────────────
+// (task-an-ad-hoc-task-s-attested-evidence-cannot-carry-ac-ref)
+//
+// `findAdhocGovernedTasks` reuses `resolveGoverningSpecByAcScope` (@lore/core) —
+// the SAME search VerifyRunnerService.verifyAdhocTask/CorpusService.
+// resolveDeclaredAcIdsForAdhocTask run — to decide whether an ad-hoc task's
+// evidence belongs to THIS spec's coverage, never a bare ac_ref string match.
+
+describe("HAPPY — an ad-hoc task's evidence flips coverage from null to non-null with NO child plan (AC-2)", () => {
+  it("a spec with zero plans but one governed ad-hoc task shows real pass/fail counts", async () => {
+    const { store, corpusService, acService } = makeServices();
+    const prdId = await createPrd(corpusService);
+    const specId = await createSpec(corpusService, prdId);
+    await acService.addCriterion(specId, criterion({ id: "AC-ADHOC-1" }));
+    const taskId = await createAdhocTask(corpusService, ["AC-ADHOC-1"]);
+    await recordEvidenceDirect(store, taskId, "AC-ADHOC-1", "pass");
+
+    const result = await acService.listCriteria(specId);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.coverage).not.toBeNull();
+    const fact = result.value.coverage?.find((f) => f.ac_id === "AC-ADHOC-1");
+    expect(fact?.pass).toBe(1);
+    expect(fact?.fail).toBe(0);
+    expect(fact?.refs).toEqual([{ task_id: taskId, result: "pass" }]);
+  });
+});
+
+describe("NEGATIVE — an ad-hoc task governed by a DIFFERENT spec is never cross-counted (AC-2 correctness)", () => {
+  it("an ad-hoc task whose ac_scope resolves to spec B contributes nothing to spec A's coverage", async () => {
+    const { store, corpusService, acService } = makeServices();
+    const prdId = await createPrd(corpusService);
+    const specAId = await createSpec(corpusService, prdId, "Spec A");
+    const specBId = await createSpec(corpusService, prdId, "Spec B");
+    await acService.addCriterion(specAId, criterion({ id: "AC-A-1" }));
+    await acService.addCriterion(specBId, criterion({ id: "AC-B-1" }));
+    const taskId = await createAdhocTask(corpusService, ["AC-B-1"]);
+    await recordEvidenceDirect(store, taskId, "AC-B-1", "pass");
+
+    const resultA = await acService.listCriteria(specAId);
+    expect(resultA.ok).toBe(true);
+    if (!resultA.ok) return;
+    // reason: spec A has zero child plans AND zero ad-hoc tasks GOVERNED by it
+    // (the one ad-hoc task in this corpus is governed by spec B) — coverage
+    // stays null, never a phantom non-null result contaminated by spec B's task.
+    expect(resultA.value.coverage).toBeNull();
+
+    const resultB = await acService.listCriteria(specBId);
+    expect(resultB.ok).toBe(true);
+    if (!resultB.ok) return;
+    expect(resultB.value.coverage).not.toBeNull();
+    expect(resultB.value.coverage?.find((f) => f.ac_id === "AC-B-1")?.pass).toBe(1);
+  });
+
+  it("an ad-hoc task whose ac_scope matches NO spec (or is ambiguous) is silently excluded, never an error", async () => {
+    const { corpusService, acService } = makeServices();
+    const prdId = await createPrd(corpusService);
+    const specId = await createSpec(corpusService, prdId);
+    await acService.addCriterion(specId, criterion({ id: "AC-REAL-1" }));
+    await createAdhocTask(corpusService, ["AC-NOWHERE-1"]); // matches no spec at all
+
+    const result = await acService.listCriteria(specId);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // reason: the dangling ad-hoc task's own scope never resolves to ANY spec,
+    // so it contributes to no spec's coverage — this spec still has zero
+    // plans/governed tasks, coverage stays null (not an error, not a crash).
+    expect(result.value.coverage).toBeNull();
+  });
+});
+
+describe("BOUNDARY — an ad-hoc task with no declared ac_scope contributes nothing and never errors listCriteria", () => {
+  it("an ad-hoc task created with an empty ac_scope array is skipped silently", async () => {
+    const { corpusService, acService } = makeServices();
+    const prdId = await createPrd(corpusService);
+    const specId = await createSpec(corpusService, prdId);
+    await acService.addCriterion(specId, criterion({ id: "AC-BOUND-1" }));
+    await createAdhocTask(corpusService, []); // declared, but empty
+
+    const result = await acService.listCriteria(specId);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.coverage).toBeNull();
+  });
+});
+
+describe("STATE — plan-owned tasks and governed ad-hoc tasks both contribute to the SAME AcCoverageFact", () => {
+  it("a plan task's pass + an ad-hoc task's fail on the same AC id both land in one fact", async () => {
+    const { store, corpusService, acService } = makeServices();
+    const { specId, planId } = await createSpecWithPlan(corpusService);
+    await acService.addCriterion(specId, criterion({ id: "AC-MIXED-1" }));
+    const planTaskId = await createTask(corpusService, planId);
+    await recordEvidenceDirect(store, planTaskId, "AC-MIXED-1", "pass");
+    const adhocTaskId = await createAdhocTask(corpusService, ["AC-MIXED-1"]);
+    await recordEvidenceDirect(store, adhocTaskId, "AC-MIXED-1", "fail");
+
+    const result = await acService.listCriteria(specId);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const fact = result.value.coverage?.find((f) => f.ac_id === "AC-MIXED-1");
+    expect(fact?.pass).toBe(1);
+    expect(fact?.fail).toBe(1);
+    expect(fact?.refs).toHaveLength(2);
+    expect(fact?.refs.map((r) => r.task_id).sort()).toEqual([adhocTaskId, planTaskId].sort());
+  });
+});
+
+describe("REGRESSION — zero plans AND zero ad-hoc tasks still yields coverage: null (pre-existing null/[] distinction)", () => {
+  it("a spec with no child plan and no ad-hoc task in the whole corpus → coverage is exactly null", async () => {
+    const { corpusService, acService } = makeServices();
+    const prdId = await createPrd(corpusService);
+    const specId = await createSpec(corpusService, prdId);
+    await acService.addCriterion(specId, criterion());
+
+    const result = await acService.listCriteria(specId);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.coverage).toBeNull();
   });
 });

@@ -624,12 +624,17 @@ function buildAppFromSqlite(
   // they're bundled). Extracted to a local (not built inline in the return literal
   // below, unlike most other services) because VerifyRunnerService needs to bind its
   // recordVerifiedEvidence method.
+  // reason: 6th arg wires task-an-ad-hoc-task-s-attested-evidence-cannot-carry-ac-ref's
+  // ad-hoc sibling port — CorpusService.resolveDeclaredAcIdsForAdhocTask resolves an
+  // --adhoc task's governing spec via its own declared ac_scope (never a plan→spec
+  // walk, structurally impossible for an --adhoc task).
   const taskWorkflowService = new TaskWorkflowService(
     store,
     telemetry,
     { claimTtlMinutes },
     corpusService.resolveDeclaredAcIds.bind(corpusService),
     { enforcer: gateEnforcer, getPlanBundle: corpusService.getPlanBundle.bind(corpusService) },
+    corpusService.resolveDeclaredAcIdsForAdhocTask.bind(corpusService),
   );
   // reason: SessionService (SPEC-041 §3 D1) — createHandoffDoc is CorpusService's
   // internal creation seam (the SOLE legitimate write path for knowledge/handoff
@@ -952,12 +957,15 @@ function buildAppFromTurso(
   // VerifyRunnerService can bind its recordVerifiedEvidence method below. 5th arg
   // wires GateEnforcer's {enforcer, getPlanBundle} bundle — see buildAppFromSqlite's
   // identical comment.
+  // reason: 6th arg wires task-an-ad-hoc-task-s-attested-evidence-cannot-carry-ac-ref's
+  // ad-hoc sibling port — see buildAppFromSqlite's identical comment.
   const taskWorkflowService = new TaskWorkflowService(
     store,
     telemetry,
     { claimTtlMinutes },
     corpusService.resolveDeclaredAcIds.bind(corpusService),
     { enforcer: gateEnforcer, getPlanBundle: corpusService.getPlanBundle.bind(corpusService) },
+    corpusService.resolveDeclaredAcIdsForAdhocTask.bind(corpusService),
   );
   // reason: SessionService (SPEC-041 §3 D1) — createHandoffDoc is CorpusService's
   // internal creation seam (the SOLE legitimate write path for knowledge/handoff

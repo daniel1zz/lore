@@ -31,7 +31,16 @@
  *   child plan of the spec has `verification_evidence[].ac_ref === acId`, UNLESS
  *   `opts.force` is true. A forced removal never touches task evidence — those
  *   `ac_ref` values become "dangling" (surfaced by `listCriteria`'s `dangling[]`,
- *   SPEC-038 §9 STATE dimension) rather than silently cleaned up.
+ *   SPEC-038 §9 STATE dimension) rather than silently cleaned up. NOT (yet) extended
+ *   to ad-hoc-governed tasks (see the next invariant) — a NAMED follow-up gap, since
+ *   this method's own safety check is currently scoped to child-plan tasks only.
+ * @invariant `listCriteria`'s coverage additionally folds in `--adhoc` tasks whose
+ *   declared `ac_scope` resolves UNAMBIGUOUSLY to this spec (task-an-ad-hoc-task-s-
+ *   attested-evidence-cannot-carry-ac-ref) — `findAdhocGovernedTasks` reuses the SAME
+ *   `resolveGoverningSpecByAcScope` search (`@lore/core`) `VerifyRunnerService.
+ *   verifyAdhocTask`/`CorpusService.resolveDeclaredAcIdsForAdhocTask` run, never a
+ *   bare string match on `ac_ref` (AC ids are unique only WITHIN one spec, never
+ *   globally — a coincidental cross-spec id collision must not double-count).
  * @invariant Writes are CAS-guarded (`store.update`'s `expected_version`) and produce
  *   exactly one `insertVersion` snapshot + one `appendAuditEntry` (action "update",
  *   actor "system") — same shape as `CorpusService.set`'s spec-extra write path, so
@@ -49,6 +58,8 @@ import {
   computeAcCoverage,
   extractEvidence,
   lintAcQuantifiability,
+  extractDeclaredAcScope,
+  resolveGoverningSpecByAcScope,
   type AcceptanceCriterion,
   type AcCoverageFact,
 } from "@lore/core";
@@ -64,9 +75,14 @@ export interface AcListResult {
   criteria: AcceptanceCriterion[];
   /**
    * Pass/fail coverage facts, one per declared criterion — present iff the spec has
-   * at least one child plan (regardless of whether that plan has any tasks yet).
-   * `null` means "no plan to aggregate against", NOT "zero coverage" — a spec with a
-   * plan that has zero tasks yields `[]`-shaped facts (0 pass, 0 fail), not `null`.
+   * at least one child plan (regardless of whether that plan has any tasks yet) OR
+   * at least one `--adhoc` task whose declared `ac_scope` resolves UNAMBIGUOUSLY to
+   * this spec (task-an-ad-hoc-task-s-attested-evidence-cannot-carry-ac-ref — an
+   * ad-hoc task has no structural plan/spec link, SPEC-069 D2, so its evidence is
+   * folded in via `resolveGoverningSpecByAcScope`, never a child-plan walk).
+   * `null` means "nothing to aggregate against", NOT "zero coverage" — a spec with a
+   * plan that has zero tasks (or an ad-hoc match with zero evidence) yields
+   * `[]`-shaped facts (0 pass, 0 fail), not `null`.
    */
   coverage: AcCoverageFact[] | null;
   /**
@@ -166,8 +182,8 @@ export class AcService {
 
   /**
    * Return the declared criteria for a spec, plus per-AC evidence coverage (when the
-   * spec has ≥1 child plan) and dangling `ac_ref` ids (evidence pointing at ids no
-   * longer declared).
+   * spec has ≥1 child plan OR ≥1 governed ad-hoc task) and dangling `ac_ref` ids
+   * (evidence pointing at ids no longer declared).
    *
    * @param specIdOrSlug - Spec document ULID or slug
    * @returns {@link AcListResult}
@@ -183,11 +199,16 @@ export class AcService {
     if (!plansResult.ok) return plansResult;
     const plans = plansResult.value;
 
-    const tasksResult = await this.findTasksUnderPlans(plans);
-    if (!tasksResult.ok) return tasksResult;
-    const tasks = tasksResult.value;
+    const planTasksResult = await this.findTasksUnderPlans(plans);
+    if (!planTasksResult.ok) return planTasksResult;
 
-    const coverage = plans.length > 0 ? computeAcCoverage(criteria, tasks) : null;
+    const adhocTasksResult = await this.findAdhocGovernedTasks(spec);
+    if (!adhocTasksResult.ok) return adhocTasksResult;
+
+    const tasks = [...planTasksResult.value, ...adhocTasksResult.value];
+
+    const coverage =
+      plans.length > 0 || adhocTasksResult.value.length > 0 ? computeAcCoverage(criteria, tasks) : null;
 
     const declaredIds = new Set(criteria.map((c) => c.id));
     const danglingSet = new Set<string>();
@@ -295,6 +316,56 @@ export class AcService {
       allTasks.push(...tasksResult.value);
     }
     return ok(allTasks);
+  }
+
+  /**
+   * The ad-hoc-task counterpart to {@link findTasksUnderPlans} (task-an-ad-hoc-
+   * task-s-attested-evidence-cannot-carry-ac-ref) — an `--adhoc` task (SPEC-069
+   * D2) has no structural plan/spec link to `spec` to walk via `parent_id`, so
+   * "does this ad-hoc task belong to THIS spec's coverage" is instead answered by
+   * running the SAME `resolveGoverningSpecByAcScope` search
+   * `VerifyRunnerService.verifyAdhocTask` / `CorpusService.
+   * resolveDeclaredAcIdsForAdhocTask` run over the corpus's FULL spec list, and
+   * checking whether the winning match IS `spec`.
+   *
+   * Deliberately NOT a bare string-equality match on `ac_ref` against `spec`'s
+   * declared ids: `AC-*` ids are unique only WITHIN one spec's declared criteria,
+   * never enforced globally (`specAcceptanceCriteriaSchema`) — two unrelated specs
+   * may coincidentally declare the identical id string, and an ad-hoc task's
+   * evidence must never be double-counted (or wrongly counted) against a spec its
+   * `ac_scope` was never actually resolved against at write time. An ad-hoc task
+   * whose scope is absent/empty, or resolves ambiguously/to no spec at all, is
+   * silently excluded here (not an error — `listCriteria` never fails loud over
+   * an unrelated ad-hoc task's own dangling scope; that task's own evidence log
+   * simply contributes to no spec's coverage).
+   *
+   * @param spec - The spec {@link listCriteria} is computing coverage for.
+   * @returns Every `--adhoc` task whose declared `ac_scope` resolves, unambiguously,
+   *   to `spec` — `[]` when none do (never an error for that reason alone).
+   */
+  private async findAdhocGovernedTasks(spec: DocRecord): Promise<Result<DocRecord[], LoreError>> {
+    const allTasksResult = await this.store.findMany({ type: "task" });
+    if (!allTasksResult.ok) return allTasksResult;
+    const adhocTasks = allTasksResult.value.filter((t) => t.extra["adhoc"] === true);
+    if (adhocTasks.length === 0) return ok([]);
+
+    const allSpecsResult = await this.store.findMany({ type: "spec" });
+    if (!allSpecsResult.ok) return allSpecsResult;
+    const allSpecs = allSpecsResult.value;
+
+    const governed: DocRecord[] = [];
+    for (const task of adhocTasks) {
+      const declared = extractDeclaredAcScope(task);
+      if (declared === undefined || declared.length === 0) continue;
+      const resolveResult = resolveGoverningSpecByAcScope(
+        declared,
+        allSpecs,
+        `ad-hoc task "${task.slug}"`,
+      );
+      if (!resolveResult.ok) continue;
+      if (resolveResult.value.spec.id === spec.id) governed.push(task);
+    }
+    return ok(governed);
   }
 
   /**

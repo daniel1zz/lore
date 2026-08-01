@@ -19,6 +19,13 @@
  *   - isAcInDeclaredScope(declaredScope, acId) — the ONE declared-`ac_scope`
  *     membership predicate (adr-lore-verify-s-attested-evidence-scope-belongs-to-the-task
  *     §Public Interface), consumed by `lore verify`'s selection + refusals
+ *   - resolveGoverningSpecByAcScope(declaredAcScope, candidateSpecs, subjectLabel) —
+ *     the ONE governing-spec search for a doc with no structural plan/spec link
+ *     (an `--adhoc` task, SPEC-069 D2) — finds the single spec whose declared
+ *     acceptance_criteria fully covers declaredAcScope, refusing loud on zero or
+ *     multiple matches. Shared by `VerifyRunnerService.verifyAdhocTask` and
+ *     `CorpusService.resolveDeclaredAcIdsForAdhocTask` so the two surfaces can
+ *     never disagree about which spec governs a given ad-hoc task.
  *
  * Invariants:
  *   - `id` format is `^AC-[A-Z0-9]+(-[A-Z0-9]+)*$` — matches every corpus-observed
@@ -42,6 +49,8 @@
  */
 
 import { z } from "zod";
+import { ok, err } from "./errors.js";
+import type { Result, LoreError } from "./errors.js";
 import type { DocRecord } from "./types.js";
 import { extractEvidence, type OracleKind } from "./task-workflow.js";
 
@@ -360,4 +369,108 @@ export function deriveAcCoverageState(
  */
 export function isAcInDeclaredScope(declaredScope: readonly string[], acId: string): boolean {
   return declaredScope.includes(acId);
+}
+
+// ─── Governing-Spec Resolution by Declared ac_scope ────────────────────────
+
+/**
+ * One resolved "this spec governs that ac_scope" match — the spec doc plus its
+ * already-schema-parsed acceptance criteria (avoids a second `safeParse` by the
+ * caller).
+ */
+export interface GoverningSpecMatch {
+  spec: DocRecord;
+  criteria: AcceptanceCriterion[];
+}
+
+/**
+ * Finds the ONE spec, among `candidateSpecs`, whose `acceptance_criteria` fully
+ * covers `declaredAcScope` — the SINGLE governing-spec search shared by every
+ * surface that needs to resolve which spec governs a doc with NO structural
+ * plan/spec link (an `--adhoc` task, SPEC-069 §Design Decisions D2, whose parent
+ * is the corpus root PRD by construction). Both `VerifyRunnerService.verifyAdhocTask`
+ * (`lore verify --task <adhoc-task>`) and `CorpusService.resolveDeclaredAcIdsForAdhocTask`
+ * (`lore evidence`'s `ac_ref` cross-entity validation) call this EXACT function —
+ * extracted here (task-an-ad-hoc-task-s-attested-evidence-cannot-carry-ac-ref) so
+ * the two surfaces can never disagree about which spec governs a given ad-hoc task.
+ *
+ * `AC-*` ids are unique only WITHIN one spec's declared criteria
+ * (`specAcceptanceCriteriaSchema`'s `superRefine`), never enforced globally — this
+ * function therefore NEVER guesses: zero or multiple fully-covering specs both
+ * refuse loud rather than picking one arbitrarily, which could silently attest a
+ * real command (or store a real evidence `ac_ref`) against the wrong spec's
+ * acceptance criteria.
+ *
+ * @param declaredAcScope - The doc's non-empty declared `ac_scope`. The caller
+ *   MUST have already distinguished ABSENT (`undefined`, via `extractDeclaredAcScope`,
+ *   phase.ts) and EMPTY (`[]`) from a real scope — this function does not
+ *   special-case an empty array beyond treating it as "covered by every
+ *   candidate spec" (`[].every(...)` is vacuously true), which would silently
+ *   "resolve" to whichever spec happens to be scanned first whenever ≥1
+ *   candidate exists. Callers must never pass an empty array in.
+ * @param candidateSpecs - Every `spec`-typed doc to search (caller-fetched, e.g.
+ *   `corpusService.listFull({type: "spec"}).docs` or `store.findMany({type: "spec"})`).
+ * @param subjectLabel - Human-readable subject for error messages, e.g.
+ *   `ad-hoc task "my-task-slug"` — keeps each caller's refusal worded for its
+ *   own context without duplicating the search/ambiguity logic itself.
+ * @returns `ok({spec, criteria})` for the ONE fully-covering spec.
+ * @throws (as `Result`) VALIDATION_ERROR field `ac_scope` — zero candidate specs
+ *   fully cover `declaredAcScope` ("matches no"), or more than one does
+ *   ("ambiguous", naming every matched spec's slug).
+ *
+ * @example
+ * resolveGoverningSpecByAcScope(["AC-1"], [specA, specB], 'ad-hoc task "t"');
+ * // => ok({ spec: specA, criteria: [...] }) when only specA declares AC-1 in full
+ */
+export function resolveGoverningSpecByAcScope(
+  declaredAcScope: readonly string[],
+  candidateSpecs: readonly DocRecord[],
+  subjectLabel: string,
+): Result<GoverningSpecMatch, LoreError> {
+  const declaredSet = new Set(declaredAcScope);
+  const matches: GoverningSpecMatch[] = [];
+  for (const candidate of candidateSpecs) {
+    const parsed = specAcceptanceCriteriaSchema.safeParse(candidate.extra["acceptance_criteria"]);
+    if (!parsed.success || parsed.data.length === 0) continue;
+    const specIds = new Set(parsed.data.map((c) => c.id));
+    const coversAll = [...declaredSet].every((id) => specIds.has(id));
+    if (coversAll) matches.push({ spec: candidate, criteria: parsed.data });
+  }
+
+  if (matches.length === 0) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "ac_scope",
+      message:
+        `${subjectLabel}'s declared ac_scope (${[...declaredAcScope].join(", ")}) matches no ` +
+        "spec's acceptance_criteria in full — cannot infer a governing spec without a " +
+        "structural plan/spec link (SPEC-069 D2). Ensure ac_scope names AC ids that all " +
+        "exist on exactly one spec.",
+      value: [...declaredAcScope],
+    });
+  }
+  if (matches.length > 1) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "ac_scope",
+      message:
+        `${subjectLabel}'s declared ac_scope (${[...declaredAcScope].join(", ")}) matches ` +
+        `${matches.length} specs (${matches.map((m) => m.spec.slug).join(", ")}) — ambiguous. ` +
+        "Never guess which spec governs a task; narrow the declared ac_scope to AC ids " +
+        "unique to a single spec.",
+      value: matches.map((m) => m.spec.slug),
+    });
+  }
+
+  const matched = matches[0];
+  if (matched === undefined) {
+    // Unreachable — `matches.length` is exactly 1 here (both the zero- and
+    // multi-match branches above already returned). Guards
+    // `noUncheckedIndexedAccess` without an unsafe non-null assertion.
+    return err({
+      code: "STORE_ERROR",
+      message: "internal error: governing-spec match lost between length check and read",
+    });
+  }
+  return ok(matched);
 }
