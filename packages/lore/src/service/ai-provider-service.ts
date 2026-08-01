@@ -370,6 +370,112 @@ function suppressUngroundedAbsenceFindings(
   };
 }
 
+/**
+ * task-lore-assess-derives-a-plan-s-commits-by-grepping-task AC #3 — forces
+ * `scope_fidelity` OUT of the persisted `dimension_scores` (and its `typed_gaps[]`
+ * siblings) whenever the CALLER (CLI/MCP) already knows this plan's diff/commit-set
+ * derivation landed in the `"unverifiable_convention_mismatch"` state
+ * (`assess-commit-derivation.ts::deriveCommitSetForPlan` — every task archived, yet zero
+ * commits matched: a contradiction, not evidence of no work). Runs REGARDLESS of the
+ * judge's own `based_on` label — unlike `suppressUngroundedAbsenceFindings` (T6, which
+ * only acts on a score the JUDGE self-labeled `based_on: "absence"` and only when the
+ * judge's OWN citations don't mention the dimension), this is a ground-truth-driven floor:
+ * no diff exists in this state, so no `scope_fidelity` claim — evidence-based or not — can
+ * be honest. The judge is never trusted to self-report which state it is in (same
+ * precedent as `judgeDoc`'s deterministic `checks` override, this file's header).
+ *
+ * ADR three-question review (adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the):
+ *   1. Proxy — `commitDerivationUnverifiable` is a proxy for "this plan's commit set could
+ *      not be established", not the property itself. A plan whose diff genuinely doesn't
+ *      touch anything relevant to scope would ALSO be forced unverifiable here even though
+ *      a human might judge "no scope drift" from other evidence (task file_anchors,
+ *      declared AC scope) — accepted: forbidding the SCORE, not the underlying judgment
+ *      inputs, is the narrowest fix that removes the false-major-finding harm without
+ *      inventing a second diff-independent scope heuristic here.
+ *   2. Silence — this function's entire existence closes a silence: a forcibly-removed
+ *      score is NEVER a bare omission — it is always paired with an explicit
+ *      `unverifiable[]` entry naming the dimension and stating in words that it was "not
+ *      scored" (AC #3's literal requirement), so a reader of the persisted record can never
+ *      mistake "removed" for "never existed" or "clean".
+ *   3. Opt-in — runs unconditionally whenever the caller passes
+ *      `commitDerivationUnverifiable: true`; the flag defaults to `undefined`/`false`
+ *      ONLY so pre-existing 2-arg `assessPlan(bundle, opts)` call sites (and any that omit
+ *      the field) keep compiling and behaving exactly as before — every call site that CAN
+ *      compute this fact (the CLI's `commands/assess.ts`, once wired) is expected to pass
+ *      it, not opt out of it. `packages/lore/src/adapters/mcp/tools.ts` does not yet pass
+ *      this flag (out of this task's file anchors — a concurrent session owns it); until
+ *      it does, the MCP surface keeps the pre-existing two-state behavior for this one
+ *      case, unchanged.
+ *
+ * @invariant Pure — returns the SAME `dimensionScores`/`unverifiable`/`typedGaps`
+ *   references when `commitDerivationUnverifiable` is not `true`, or `scope_fidelity` is
+ *   already absent from `dimensionScores` (mirrors `suppressUngroundedAbsenceFindings`'s
+ *   healthy-path identity precedent).
+ * @invariant Composes with `suppressUngroundedAbsenceFindings` — callers run this BEFORE
+ *   that function, on the RAW judge-parsed values, deliberately: it guarantees the AC #3
+ *   "not scored" wording is what a reader sees for `scope_fidelity` in this state, never
+ *   T6's differently-worded "ungrounded" message (which would otherwise win the race when
+ *   the judge ALSO happened to leave the score ungrounded by its own citations). When this
+ *   floor doesn't fire (flag false), the raw values pass through unchanged and T6 governs
+ *   exactly as before this function existed.
+ * @param commitDerivationUnverifiable - `true` iff the plan's commit derivation reported
+ *   `"unverifiable_convention_mismatch"` for this run.
+ * @param dimensionScores - The judge's raw, just-parsed `dimension_scores` (may be
+ *   `undefined`) — BEFORE `suppressUngroundedAbsenceFindings` runs.
+ * @param unverifiableEntries - The judge's raw `unverifiable[]` (may be `undefined`) —
+ *   BEFORE `suppressUngroundedAbsenceFindings` runs.
+ * @param typedGaps - The judge's raw `typed_gaps[]` (may be `undefined`) — BEFORE
+ *   `suppressUngroundedAbsenceFindings` runs.
+ * @returns The same three-field shape `suppressUngroundedAbsenceFindings` returns (its
+ *   caller feeds this function's output into that one next), with `scope_fidelity` forced
+ *   out when the flag is set and present.
+ *
+ * @example
+ * forceScopeFidelityUnverifiable(
+ *   true,
+ *   { scope_fidelity: { score: 85, confidence: 0.85, based_on: "evidence", reasoning: "looks fine" } },
+ *   undefined,
+ *   undefined,
+ * );
+ * // → { dimensionScores: undefined,
+ * //     unverifiable: [{ material: "scope_fidelity dimension score", reason: "...not scored..." }],
+ * //     typedGaps: undefined }
+ */
+function forceScopeFidelityUnverifiable(
+  commitDerivationUnverifiable: boolean,
+  dimensionScores: DimensionScores | undefined,
+  unverifiableEntries: UnverifiableEntry[] | undefined,
+  typedGaps: TypedGap[] | undefined,
+): {
+  dimensionScores: DimensionScores | undefined;
+  unverifiable: UnverifiableEntry[] | undefined;
+  typedGaps: TypedGap[] | undefined;
+} {
+  if (!commitDerivationUnverifiable || dimensionScores === undefined || !("scope_fidelity" in dimensionScores)) {
+    return { dimensionScores, unverifiable: unverifiableEntries, typedGaps };
+  }
+
+  const { scope_fidelity: _removed, ...remaining } = dimensionScores;
+  void _removed; // reason: destructured only to exclude it from `remaining`.
+
+  const forcedEntry: UnverifiableEntry = {
+    material: "scope_fidelity dimension score",
+    // reason: unverifiableEntrySchema.reason is capped at 200 chars (assessment.ts) — this
+    // wording is deliberately terse to stay under that cap while keeping the AC #3
+    // literal requirement ("not scored", asserted verbatim by tests).
+    reason:
+      "Commit set unverifiable (convention mismatch — plan archived, no commit " +
+      "referenced any task slug). scope_fidelity was NOT SCORED, regardless of what " +
+      "the judge reported.",
+  };
+
+  return {
+    dimensionScores: Object.keys(remaining).length > 0 ? remaining : undefined,
+    unverifiable: [...(unverifiableEntries ?? []), forcedEntry],
+    typedGaps: typedGaps === undefined ? undefined : typedGaps.filter((gap) => gap.dimension !== "scope_fidelity"),
+  };
+}
+
 // ─── AIProviderService ────────────────────────────────────────────────────────
 
 /**
@@ -810,6 +916,12 @@ export class AIProviderService {
    * @param bundle - {plan, spec?, tasks[]} from CorpusService.getPlanBundle
    * @param opts.diffText - Optional diff text (already acquired by the CLI layer)
    * @param opts.source - Caller surface, forwarded to telemetry as caller_surface
+   * @param opts.commitDerivationUnverifiable - task-lore-assess-derives-a-plan-s-commits-
+   *   by-grepping-task AC #3 — `true` when the caller's commit-set derivation
+   *   (`assess-commit-derivation.ts`) reported `"unverifiable_convention_mismatch"` for
+   *   this plan. Forces `scope_fidelity` out of the persisted `dimension_scores`
+   *   (see `forceScopeFidelityUnverifiable`), regardless of the judge's own output —
+   *   defaults to `false`/not forcing anything when omitted.
    * @returns Result<AssessmentResult, LoreError> — never throws
    *
    * @example
@@ -820,7 +932,8 @@ export class AIProviderService {
    * console.log(assessResult.value.verdict, assessResult.value.overall_score);
    *
    * Source: SPEC-026 §3 D1, D2; §4 AC-ASSESS-1, AC-ASSESS-3, AC-ASSESS-4, AC-ASSESS-5;
-   * SPEC-038 §5 AC-ACODE-4, AC-ACODE-5
+   * SPEC-038 §5 AC-ACODE-4, AC-ACODE-5; task-lore-assess-derives-a-plan-s-commits-by-
+   * grepping-task AC #3
    */
   async assessPlan(
     bundle: PlanBundle,
@@ -828,6 +941,7 @@ export class AIProviderService {
       // reason: explicit `| undefined` required by exactOptionalPropertyTypes.
       diffText?: string | undefined;
       source?: CallerSurface | undefined;
+      commitDerivationUnverifiable?: boolean | undefined;
     },
   ): Promise<Result<AssessmentResult, LoreError>> {
     const t0 = performance.now();
@@ -909,6 +1023,7 @@ export class AIProviderService {
           facts,
           sourceVersions,
           scopeWarning,
+          opts?.commitDerivationUnverifiable ?? false,
         ),
       );
     }
@@ -943,6 +1058,7 @@ export class AIProviderService {
           facts,
           sourceVersions,
           scopeWarning,
+          opts?.commitDerivationUnverifiable ?? false,
         ),
       );
     }
@@ -1369,6 +1485,10 @@ export class AIProviderService {
    * @param scopeWarning - Pre-computed diff-range scope-mismatch advisory (hotfix
    *   task-assess-diff-range-scope-mismatch-warning) — persisted unchanged when present;
    *   `undefined` omits the field entirely (additive-only, mirrors `facts`/`source_versions`)
+   * @param commitDerivationUnverifiable - task-lore-assess-derives-a-plan-s-commits-by-
+   *   grepping-task AC #3 — forces `scope_fidelity` out of the persisted `dimension_scores`
+   *   (see `forceScopeFidelityUnverifiable`) regardless of the judge's own output, when
+   *   the caller's commit-set derivation reported `"unverifiable_convention_mismatch"`.
    */
   private _finalizeAssessment(
     parsed: LlmAssessmentOutput,
@@ -1380,11 +1500,29 @@ export class AIProviderService {
     facts: AssessmentFacts,
     sourceVersions: SourceVersionRef[],
     scopeWarning: ScopeMismatchWarning | undefined,
+    commitDerivationUnverifiable: boolean,
   ): AssessmentResult {
     // reason: SPEC-040 D4 — grounding cross-check runs on the validated-but-not-yet-final
     // output; warnings are advisory-only and never fail the run.
     const groundingWarnings = computeGroundingWarnings(parsed, truncated);
     const rubricWarning = [...(parsed.rubric_warning ?? []), ...groundingWarnings];
+
+    // reason: task-lore-assess-derives-a-plan-s-commits-by-grepping-task AC #3 — runs
+    // BEFORE the grounding-based suppression below, not after: when the caller already
+    // knows this plan's commit derivation is unverifiable, `scope_fidelity` is forced out
+    // REGARDLESS of the judge's `based_on`/citations, with a dedicated "not scored"
+    // unverifiable[] entry (see `forceScopeFidelityUnverifiable`'s own JSDoc for the full
+    // ADR three-question review). Ordering matters: running this FIRST guarantees the
+    // AC #3 "not scored" wording is what a reader sees for scope_fidelity in this state,
+    // never T6's differently-worded "ungrounded" message (which would otherwise win the
+    // race when the judge ALSO happened to leave the score ungrounded by its own
+    // citations). A no-op (same references) when `commitDerivationUnverifiable` is false.
+    const forced = forceScopeFidelityUnverifiable(
+      commitDerivationUnverifiable,
+      parsed.dimension_scores,
+      parsed.unverifiable,
+      parsed.typed_gaps,
+    );
 
     // reason: spec-lore-assess-project-evidence-rows-instead-of-embedding-the D3/D4 —
     // suppress (not merely warn about) every ungrounded absence-based dimension_scores
@@ -1392,12 +1530,15 @@ export class AIProviderService {
     // SAME ungrounded-dimension set groundingWarnings above already identified
     // (findUngroundedAbsenceDimensions is the shared computation both call). Returns
     // parsed.dimension_scores/unverifiable/typed_gaps UNCHANGED (same references) when
-    // nothing is ungrounded — mirrors the AC-067-6 healthy-path identity precedent.
+    // nothing is ungrounded — mirrors the AC-067-6 healthy-path identity precedent. Runs
+    // on `forced`'s OUTPUT (not `parsed` directly) — when the floor above already removed
+    // `scope_fidelity`, this pass simply finds nothing left to do for that dimension
+    // (no double-processing, no duplicate unverifiable[] entry).
     const { dimensionScores, unverifiable, typedGaps } = suppressUngroundedAbsenceFindings(
-      parsed.dimension_scores,
-      parsed.unverifiable,
+      forced.dimensionScores,
+      forced.unverifiable,
       truncated,
-      parsed.typed_gaps,
+      forced.typedGaps,
     );
 
     // reason: SPEC-040 D3 — only substitute the legacy string arrays when the judge

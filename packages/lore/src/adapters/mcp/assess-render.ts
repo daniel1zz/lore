@@ -104,6 +104,19 @@ export function buildAssessSummaryText(result: AssessmentResult): string {
     lines.push("");
   }
 
+  // reason: task-lore-assess-derives-a-plan-s-commits-by-grepping-task AC #3 — previously
+  // absent from this MCP summary entirely (`result.unverifiable[]` was persisted but only
+  // core's `renderAssessmentContent` rendered it) — additive and presence-guarded, mirrors
+  // the CLI's assess-render.ts. This is where an agent reading `lore_assess`'s `summary`
+  // sees the AC #3 "not scored" wording `forceScopeFidelityUnverifiable`
+  // (ai-provider-service.ts) forces into `unverifiable[]`, not just the nested `result`
+  // JSON or the persisted Markdown doc.
+  if (result.unverifiable && result.unverifiable.length > 0) {
+    lines.push("Unverifiable:");
+    for (const u of result.unverifiable) lines.push(`- ${escapeCell(u.material)}: ${escapeCell(u.reason)}`);
+    lines.push("");
+  }
+
   if (result.rubric_warning && result.rubric_warning.length > 0) {
     lines.push("Rubric Warnings:");
     for (const w of result.rubric_warning) lines.push(`- ${w}`);

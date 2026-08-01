@@ -40,8 +40,22 @@
  * `"derived"` diff — that would be the false-green form of the very defect this module
  * exists to fix (`diff_available=true` on an empty diff reads as "audited").
  *
+ * `"unverifiable_convention_mismatch"` (task-lore-assess-derives-a-plan-s-commits-by-
+ * grepping-task): the ONE sub-case of "zero matched commits" that is NOT a legitimate
+ * absence — every one of this plan's tasks is already `archived`, which by the lifecycle
+ * graph (`VALID_TRANSITIONS`, `@lore/core`) means merged work exists. Zero matched commits
+ * in that state is a CONTRADICTION: it proves the `--grep=<slug>` convention this module
+ * relies on was not followed (a conventionally-worded commit, e.g. Conventional Commits,
+ * never mentions the task slug), not that no work happened. The caller passes
+ * `allTasksArchived` (computed from the DocRecord statuses it already holds — this module
+ * stays free of any `@lore/core`/DocStatus dependency, mirroring its existing pure
+ * git-log-wrapper scope) to distinguish this from genuine absence. See this function's own
+ * JSDoc for the ADR three-question review this status answers.
+ *
  * Source: task-lore-assess-asks-the-caller-for-a-git-range-that-cannot-be; SPEC-026 §3
- * D3 (diff acquisition is an adapter-layer concern, never the service layer).
+ * D3 (diff acquisition is an adapter-layer concern, never the service layer);
+ * task-lore-assess-derives-a-plan-s-commits-by-grepping-task;
+ * adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the
  */
 
 import { spawnSync } from "node:child_process";
@@ -63,13 +77,23 @@ export interface DerivedCommit {
  * Result of {@link deriveCommitSetForPlan} — always returned, never throws. `warnings`
  * collects non-fatal git-command failures (e.g. a transient `merge-base` error) —
  * informational only, never a reason to fail the whole derivation.
+ *
+ * @invariant `"no_commits_found"` and `"unverifiable_convention_mismatch"` are DISTINCT
+ *   values, never collapsed into one shared empty result (SPEC per
+ *   adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the Q2: "an empty result
+ *   and a clean result must not be the same value"). `"no_commits_found"` means "this
+ *   plan plausibly has no merged work yet" (a legitimate, scoreable absence);
+ *   `"unverifiable_convention_mismatch"` means "this plan's tasks are ALL archived
+ *   (merged work is a certainty) yet zero commits matched — the commit-message
+ *   convention was not followed, not that nothing happened" (a contradiction; the
+ *   dimension it would otherwise inform must be reported unverifiable, never scored).
  */
 export interface CommitDerivationResult {
-  status: "derived" | "no_commits_found";
+  status: "derived" | "no_commits_found" | "unverifiable_convention_mismatch";
   commits: DerivedCommit[];
   /** Task slugs for which NO commit anywhere in history mentioned them at all. */
   tasks_without_commits: string[];
-  /** Concatenated unified diff across every selected commit, oldest first. `""` when status is `"no_commits_found"`. */
+  /** Concatenated unified diff across every selected commit, oldest first. `""` unless status is `"derived"`. */
   diff_text: string;
   warnings: string[];
 }
@@ -238,18 +262,52 @@ function diffAgainstFirstParent(cwd: string, sha: string, warnings: string[]): s
  * Derives the commit set + assembled diff for a plan's own tasks. Never throws — every
  * git-command failure degrades to an empty match for that step, surfaced in `warnings`.
  *
+ * ADR three-question review (adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the),
+ * for the `allTasksArchived` → `"unverifiable_convention_mismatch"` branch specifically:
+ *   1. **Proxy** — "every task archived" is a proxy for "merged work exists", not the
+ *      property itself. Concrete input satisfying the proxy while the property still
+ *      somehow failed: none is known — the lifecycle graph (`VALID_TRANSITIONS`)
+ *      structurally requires a task to have passed through review/evidence gates to reach
+ *      `archived`, so this proxy is as strong as the lifecycle graph it reads. What it
+ *      does NOT distinguish (deliberately, per the task's own oracle) is genuinely-lost
+ *      history (squashed/rewritten) from a convention mismatch — both are real causes of
+ *      "cannot verify", and both get the identical honest answer.
+ *   2. **Silence** — this is precisely what closes: zero commits on an all-archived plan
+ *      used to collapse into the SAME `"no_commits_found"` value a genuinely-empty plan
+ *      gets, which downstream (`AIProviderService.assessPlan`) let an absence-based
+ *      `scope_fidelity` score publish as a real finding. `"unverifiable_convention_mismatch"`
+ *      is a distinct, named value a caller MUST branch on — never a bare boolean/empty
+ *      collapse.
+ *   3. **Opt-in** — unconditional whenever a caller passes `allTasksArchived: true`; the
+ *      parameter defaults to `undefined` (treated as `false`) ONLY so existing 2-arg call
+ *      sites keep compiling unchanged — every call site that CAN compute this fact (every
+ *      caller holds the bundle's `DocRecord[]`) is expected to pass it, not opt out of it.
+ *
  * @param cwd - Repository root to run git in (callers pass `process.cwd()` in
  *   production; tests pass a throwaway `git init` fixture directory).
  * @param taskSlugs - Every task-in-plan's slug (`bundle.tasks.map(t => t.slug)`).
+ * @param allTasksArchived - Whether EVERY task in the plan already has
+ *   `status === "archived"` (caller-computed — this module never imports `@lore/core`'s
+ *   `DocStatus` to stay a pure git wrapper). Optional; omitted/`undefined` behaves exactly
+ *   as before this parameter existed (a zero-match result is always `"no_commits_found"`).
  * @returns `status: "no_commits_found"` when NOT ONE task slug appears in ANY commit
- *   message reachable from `cwd`'s HEAD — a named, honest boundary state, never a
- *   silent empty `"derived"` diff.
+ *   message reachable from `cwd`'s HEAD AND `allTasksArchived` is not `true` — a named,
+ *   honest boundary state, never a silent empty `"derived"` diff. `status:
+ *   "unverifiable_convention_mismatch"` for that SAME zero-match condition when
+ *   `allTasksArchived` IS `true` — a distinct value, never collapsed with the above.
  *
  * @example
  * deriveCommitSetForPlan("/repo", ["task-own-a", "task-own-b"]);
  * // → { status: "derived", commits: [...], tasks_without_commits: [], diff_text: "...", warnings: [] }
+ * @example
+ * deriveCommitSetForPlan("/repo", ["task-archived-a"], true); // every task archived, zero matches
+ * // → { status: "unverifiable_convention_mismatch", commits: [], tasks_without_commits: ["task-archived-a"], diff_text: "", warnings: [] }
  */
-export function deriveCommitSetForPlan(cwd: string, taskSlugs: string[]): CommitDerivationResult {
+export function deriveCommitSetForPlan(
+  cwd: string,
+  taskSlugs: string[],
+  allTasksArchived?: boolean,
+): CommitDerivationResult {
   const warnings: string[] = [];
   const matchedBySha = new Map<string, { subject: string; taskSlugs: Set<string> }>();
   const tasksWithoutCommits: string[] = [];
@@ -272,7 +330,12 @@ export function deriveCommitSetForPlan(cwd: string, taskSlugs: string[]): Commit
 
   if (matchedBySha.size === 0) {
     return {
-      status: "no_commits_found",
+      // reason: zero matches on an all-archived plan is a CONTRADICTION (archived tasks
+      // have merged work by definition) — reported as a distinct, named "cannot verify"
+      // value, never silently folded into the same "no_commits_found" a genuinely
+      // commit-less (still in-progress) plan gets. See this function's own JSDoc/the
+      // module header for the ADR three-question review this answers.
+      status: allTasksArchived === true ? "unverifiable_convention_mismatch" : "no_commits_found",
       commits: [],
       tasks_without_commits: [...taskSlugs],
       diff_text: "",
