@@ -3,11 +3,18 @@
  * a-declared-acceptance D1-D6). Uses InMemoryStore + CorpusService (fixture builder
  * only) — no file I/O, no SQLite. Mirrors ac-service.test.ts's fixture-helper style.
  *
- * Dimension mapping (AC-ACS-1..9; AC-ACS-3 is CLI-layer, covered by
- * cli-ac-set.test.ts's zero-flag exit-2 test, and AC-ACS-7 belongs to the sibling
+ * Dimension mapping (AC-ACS-1..9 plus AC-ACS-10..12; AC-ACS-3 is CLI-layer, covered
+ * by cli-ac-set.test.ts's zero-flag exit-2 test, and AC-ACS-7 belongs to the sibling
  * dangling-ac_ref-detector task, not this file):
- *   HAPPY (AC-ACS-1):      setCriterion replaces the statement in place — id and
- *                          criterion count unchanged (the WRITE half only)
+ *   HAPPY (AC-ACS-1):      setCriterion's Result is ok for a valid edit (the exit-
+ *                          status claim only — see
+ *                          task-ac-acs-1-and-ac-acs-9-are-still-compound-after-the-split,
+ *                          which found the original "exits 0, id unchanged, count
+ *                          unchanged" statement was THREE claims behind one bound
+ *                          test and split it into AC-ACS-1/AC-ACS-10/AC-ACS-11)
+ *   HAPPY (AC-ACS-10):     the edited criterion's id is unchanged by the edit
+ *   HAPPY (AC-ACS-11):     the spec's declared criterion count is unchanged by an
+ *                          in-place edit (one replaced, none added or removed)
  *   HAPPY (AC-ACS-8):      a following listCriteria (lore ac list) round-trips the
  *                          new statement text for that id (the READ half only — split
  *                          from AC-ACS-1 by
@@ -18,10 +25,14 @@
  *                          bound message enumerates the declared ids, doc unchanged
  *   STATE (AC-ACS-4):      an approved spec demotes to draft on edit (the demotion
  *                          half only)
- *   STATE (AC-ACS-9):      a draft spec stays draft on edit, with no status-transition
- *                          recorded in the version log for that edit (consecutive
- *                          versions' `status` fields are equal — the non-demotion half,
- *                          split from AC-ACS-4 by the same task named above)
+ *   STATE (AC-ACS-9):      a draft spec's resulting status is still "draft" after the
+ *                          edit (the resulting-status claim only — split from the
+ *                          original "draft stays draft AND lore log records no
+ *                          status-transition entry" statement by the same task named
+ *                          above, into AC-ACS-9/AC-ACS-12)
+ *   STATE (AC-ACS-12):     `lore log`'s version history records NO status-transition
+ *                          entry for a draft-spec edit — consecutive versions'
+ *                          `status` fields are equal
  *   ERROR (AC-ACS-5):      a mode-inconsistent flag (--rubric against a script-mode
  *                          criterion) exits VALIDATION_ERROR naming both the flag and
  *                          the criterion's actual mode
@@ -30,7 +41,7 @@
  *                          untouched (guards the `lore set`-replaces-extra failure
  *                          mode this whole spec exists to avoid)
  *
- * @spec_ref AC-ACS-1 AC-ACS-2 AC-ACS-4 AC-ACS-5 AC-ACS-6 AC-ACS-8 AC-ACS-9
+ * @spec_ref AC-ACS-1 AC-ACS-2 AC-ACS-4 AC-ACS-5 AC-ACS-6 AC-ACS-8 AC-ACS-9 AC-ACS-10 AC-ACS-11 AC-ACS-12
  */
 
 import { describe, it, expect } from "vitest";
@@ -76,16 +87,29 @@ function scriptCriterion(overrides: Record<string, unknown> = {}): Record<string
 
 // ─── HAPPY ─────────────────────────────────────────────────────────────────────
 
-describe("HAPPY — setCriterion replaces the statement in place (AC-ACS-1)", () => {
-  it("replaces the statement in place", async () => {
-    const { store, corpusService, acService } = makeServices();
+describe("HAPPY — setCriterion returns ok, id unchanged, count unchanged (AC-ACS-1, AC-ACS-10, AC-ACS-11)", () => {
+  it("setCriterion returns ok on a valid edit", async () => {
+    const { corpusService, acService } = makeServices();
     const prdId = await createPrd(corpusService);
     const specId = await createSpec(corpusService, prdId);
     await acService.addCriterion(specId, scriptCriterion());
 
-    const before = await store.find(specId);
-    if (!before.ok || before.value === null) throw new Error("spec fetch failed");
-    const versionBefore = before.value.version;
+    const result = await acService.setCriterion(specId, "AC-X-1", {
+      statement: "Rejects malformed input with a specific field name in the error",
+    });
+
+    // AC-ACS-1 — the exit-status claim ONLY. The id-preserved and count-
+    // preserved claims are split out to AC-ACS-10/AC-ACS-11 below (the original
+    // statement bound all three to this one test title — see
+    // task-ac-acs-1-and-ac-acs-9-are-still-compound-after-the-split).
+    expect(result.ok).toBe(true);
+  });
+
+  it("setCriterion preserves the criterion id", async () => {
+    const { corpusService, acService } = makeServices();
+    const prdId = await createPrd(corpusService);
+    const specId = await createSpec(corpusService, prdId);
+    await acService.addCriterion(specId, scriptCriterion());
 
     const result = await acService.setCriterion(specId, "AC-X-1", {
       statement: "Rejects malformed input with a specific field name in the error",
@@ -93,18 +117,29 @@ describe("HAPPY — setCriterion replaces the statement in place (AC-ACS-1)", ()
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    // id unchanged, criterion count unchanged. (The READ half — a following
-    // `lore ac list` printing this new text — is AC-ACS-8, tested independently
-    // below; this test asserts only the WRITE half's own return value.)
-    expect(result.value).toHaveLength(1);
+    // AC-ACS-10 — the edited criterion's id is unchanged by the edit. (The
+    // exit-status claim is AC-ACS-1 above; the count-preserved claim is
+    // AC-ACS-11 below.)
     expect(result.value[0]?.id).toBe("AC-X-1");
-    expect(result.value[0]?.statement).toBe(
-      "Rejects malformed input with a specific field name in the error",
-    );
+  });
 
-    const after = await store.find(specId);
-    if (!after.ok || after.value === null) throw new Error("spec re-fetch failed");
-    expect(after.value.version).toBe(versionBefore + 1);
+  it("setCriterion preserves the criterion count", async () => {
+    const { corpusService, acService } = makeServices();
+    const prdId = await createPrd(corpusService);
+    const specId = await createSpec(corpusService, prdId);
+    await acService.addCriterion(specId, scriptCriterion());
+
+    const result = await acService.setCriterion(specId, "AC-X-1", {
+      statement: "Rejects malformed input with a specific field name in the error",
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // AC-ACS-11 — the spec's declared criterion count (array length) is
+    // unchanged by an in-place edit: one criterion replaced, none added or
+    // removed. (The exit-status claim is AC-ACS-1 above; the id-preserved
+    // claim is AC-ACS-10 above.)
+    expect(result.value).toHaveLength(1);
   });
 });
 
@@ -195,14 +230,16 @@ describe("STATE — demotes an approved spec to draft (AC-ACS-4)", () => {
 
 // ─── STATE (non-demotion half, split from AC-ACS-4) ─────────────────────────────
 
-describe("STATE — a draft spec is not transitioned by an edit (AC-ACS-9)", () => {
-  it("draft spec stays draft with no status-transition entry recorded", async () => {
+describe("STATE — a draft spec is not transitioned by an edit (AC-ACS-9, AC-ACS-12)", () => {
+  it("draft spec status stays draft after the edit", async () => {
     const { store, corpusService, acService } = makeServices();
 
-    // A DRAFT spec stays draft, and the version log records NO status-transition
-    // for this edit — consecutive versions' `status` fields must be equal (both
-    // "draft"), proving nothing transitioned. The demotion half (an APPROVED spec
-    // demoting to draft) is AC-ACS-4, tested independently above.
+    // AC-ACS-9 — the resulting status claim ONLY: a DRAFT spec's status is
+    // still "draft" after the edit. The demotion half (an APPROVED spec
+    // demoting to draft) is AC-ACS-4, tested independently above. The
+    // no-log-entry claim is split out to AC-ACS-12 below (the original
+    // statement bound both to this one test title — see
+    // task-ac-acs-1-and-ac-acs-9-are-still-compound-after-the-split).
     const prdId2 = await createPrd(corpusService, "Test PRD Draft");
     const draftSpecId = await createSpec(corpusService, prdId2, "Draft Spec");
     await acService.addCriterion(draftSpecId, scriptCriterion());
@@ -219,6 +256,23 @@ describe("STATE — a draft spec is not transitioned by an edit (AC-ACS-9)", () 
     const afterDraftEdit = await store.find(draftSpecId);
     if (!afterDraftEdit.ok || afterDraftEdit.value === null) throw new Error("spec re-fetch failed");
     expect(afterDraftEdit.value.status).toBe("draft");
+  });
+
+  it("no status-transition entry is recorded for a draft edit", async () => {
+    const { store, corpusService, acService } = makeServices();
+
+    // AC-ACS-12 — `lore log`'s version history records NO status-transition
+    // entry for this edit: consecutive versions' `status` fields are equal
+    // (both "draft"), proving nothing transitioned. The resulting-status
+    // claim is AC-ACS-9, tested independently above.
+    const prdId3 = await createPrd(corpusService, "Test PRD Draft Log");
+    const draftSpecId = await createSpec(corpusService, prdId3, "Draft Spec Log");
+    await acService.addCriterion(draftSpecId, scriptCriterion());
+
+    const editDraft = await acService.setCriterion(draftSpecId, "AC-X-1", {
+      statement: "An edited statement on a spec that was never approved",
+    });
+    expect(editDraft.ok).toBe(true);
 
     const versions = await store.findVersions(draftSpecId);
     expect(versions.ok).toBe(true);
@@ -226,8 +280,6 @@ describe("STATE — a draft spec is not transitioned by an edit (AC-ACS-9)", () 
     // versions are newest-first (mirrors ac-service.test.ts's existing convention).
     const latest = versions.value[0];
     const previous = versions.value[1];
-    expect(latest?.status).toBe("draft");
-    expect(previous?.status).toBe("draft");
     expect(latest?.status).toBe(previous?.status);
   });
 });
