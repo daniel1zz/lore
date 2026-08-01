@@ -24,11 +24,35 @@
  *   NEGATIVE:   neither `--sweep` nor `--apply` → exit 2 usage error
  *   BOUNDARY:   both `--sweep` AND `--apply` together → exit 2 usage error
  *   STATE:      after `--apply`, `lore get <task> --json` shows `status: "archived"`
- *   REGRESSION: an empty corpus's `--sweep` exits 0 with zero candidates
+ *   REGRESSION: an empty corpus's `--sweep` exits 0 with zero candidates; PLUS a
+ *               dedicated CONTROL pair (task-archive-sweep-gate-disable-is-
+ *               silently-inert-a-wholesale) pinning that `disablePlanCloseGate`
+ *               genuinely disables the `plan-close` checkpoint. The helper used to
+ *               `writeFileSync` (wholesale overwrite) `.lore/config.yaml`,
+ *               discarding the `project:` block `lore init` had just written;
+ *               `project` is a REQUIRED (non-`.optional()`) field in
+ *               `LoreConfigSchema` (`packages/core/src/config.ts`), so the
+ *               resulting file failed schema validation and `loadLoreApp`
+ *               (`packages/lore/src/adapters/cli/loader.ts`) silently fell back to
+ *               `rawConfig = undefined` (a documented SPEC-030 non-goal for
+ *               non-`ai` sections, deliberately NOT touched here) — the
+ *               gate-disable stanza was therefore never read and the checkpoint
+ *               stayed armed the whole time. Every OTHER assertion in this file
+ *               happened to pass either way: this suite's plan has no spec-tier
+ *               ancestor, so the only plan-close predicate that can ever fire
+ *               (the attestation floor) is vacuous regardless of the checkpoint's
+ *               enabled state — "gate armed" and "gate disabled" were
+ *               indistinguishable here. The CONTROL pair below uses a
+ *               `--requires-uat` plan instead (SPEC-054's `uatP0Accepted`
+ *               predicate, gated purely by the plan's OWN `extra.requires_uat`,
+ *               never by spec ancestry) specifically because it is the one
+ *               plan-close deny this suite can reach without any additional
+ *               config — it is what actually depends on the disable taking
+ *               effect.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { appendFileSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -61,12 +85,29 @@ function parseSlug(stdout: string): string {
   return slug;
 }
 
-/** Disables the plan-close gate wholesale — irrelevant to THIS suite's scope (the R2-R4 sweep verb, not R1's cascade/gate interplay). */
+/**
+ * Disables the plan-close gate — irrelevant to THIS suite's scope (the R2-R4
+ * sweep verb, not R1's cascade/gate interplay).
+ *
+ * APPENDS the override (never a wholesale `writeFileSync` overwrite): by the
+ * time any caller runs this, `lore init` has already written `.lore/config.yaml`
+ * with a REQUIRED top-level `project:` key (`LoreConfigSchema`, no `.optional()`
+ * on that field). An overwrite that omitted it produced a schema-invalid file
+ * that `loadLoreApp` silently treats as `rawConfig = undefined` (documented
+ * SPEC-030 non-goal) — the override below would then never be read and the
+ * checkpoint would stay armed while looking disabled (this file's own
+ * task-archive-sweep-gate-disable-is-silently-inert-a-wholesale regression).
+ * Appending a single top-level `workflow:` key is safe here specifically
+ * because `lore init`'s config never seeds one itself (`commands/init.ts`'s own
+ * module doc) — see `cli-drift.bun.test.ts`'s `disableAllGates` for the same
+ * precedent. Callers that need this ALONGSIDE another `workflow.*` override on
+ * the SAME file must use a parse-merge-rewrite helper instead (two raw
+ * `workflow:` keys is invalid YAML) — none of this file's tests do.
+ */
 function disablePlanCloseGate(dir: string): void {
-  const loreDir = join(dir, ".lore");
-  mkdirSync(loreDir, { recursive: true });
-  writeFileSync(
-    join(loreDir, "config.yaml"),
+  const configPath = join(dir, ".lore", "config.yaml");
+  appendFileSync(
+    configPath,
     ['workflow:', '  gates:', '    "plan-close":', "      enabled: false", ""].join("\n"),
     "utf8",
   );
@@ -177,5 +218,74 @@ describe("lore archive — REGRESSION (empty corpus)", () => {
     expect(result.exitCode).toBe(0);
     const payload = JSON.parse(result.stdout) as { data: { candidates: unknown[] } };
     expect(payload.data.candidates).toEqual([]);
+  });
+});
+
+// ─── REGRESSION — task-archive-sweep-gate-disable-is-silently-inert-a-wholesale ──
+//
+// A live CONTROL that `disablePlanCloseGate` genuinely disables the plan-close
+// checkpoint, not merely that this suite's OTHER tests stay green either way.
+// Uses a `--requires-uat` plan (SPEC-054's `uatP0Accepted` predicate, gated
+// purely by the plan's own `extra.requires_uat` — never by spec-tier ancestry)
+// specifically because it is the one plan-close deny this suite can reach
+// without any additional config, so it is the one assertion that actually
+// depends on `disablePlanCloseGate`'s override having been read at all.
+
+/** Creates a PRD -> `--requires-uat` plan (approved), with no linked UAT verdict. */
+function createRequiresUatPlan(dir: string): { planSlug: string } {
+  const prdResult = runLore(
+    ["create", "prd", "--title", "Gate Disable Control PRD", "--content", "root", "--no-ai"],
+    dir,
+  );
+  expect(prdResult.exitCode).toBe(0);
+  const prdSlug = parseSlug(prdResult.stdout);
+
+  const planResult = runLore(
+    [
+      "create",
+      "plan",
+      "--title",
+      "Gate Disable Control Plan",
+      "--parent",
+      prdSlug,
+      "--content",
+      "x",
+      "--no-ai",
+      "--requires-uat",
+    ],
+    dir,
+  );
+  expect(planResult.exitCode).toBe(0);
+  const planSlug = parseSlug(planResult.stdout);
+
+  const approveResult = runLore(["set", planSlug, "--status", "approved"], dir);
+  expect(approveResult.exitCode).toBe(0);
+
+  return { planSlug };
+}
+
+describe("lore archive — REGRESSION (CONTROL: disablePlanCloseGate genuinely disables plan-close)", () => {
+  it("NEGATIVE baseline: WITHOUT disablePlanCloseGate, a --requires-uat plan with no linked UAT verdict is DENIED at archive time (UAT_MISSING) — proves the scenario really would be blocked", () => {
+    const { planSlug } = createRequiresUatPlan(tmpDir);
+
+    const archiveResult = runLore(["set", planSlug, "--status", "archived"], tmpDir);
+
+    expect(archiveResult.exitCode).not.toBe(0);
+    expect(archiveResult.stderr).toContain("UAT_MISSING");
+  });
+
+  it("HAPPY (the control): WITH disablePlanCloseGate applied AFTER approval, the SAME scenario archives cleanly — the checkpoint is genuinely off, not just cosmetically", () => {
+    const { planSlug } = createRequiresUatPlan(tmpDir);
+
+    disablePlanCloseGate(tmpDir);
+
+    const archiveResult = runLore(["set", planSlug, "--status", "archived"], tmpDir);
+
+    expect(archiveResult.exitCode).toBe(0);
+
+    const getResult = runLore(["get", planSlug, "--json"], tmpDir);
+    expect(getResult.exitCode).toBe(0);
+    const getPayload = JSON.parse(getResult.stdout) as { data: { doc: { status: string } } };
+    expect(getPayload.data.doc.status).toBe("archived");
   });
 });
