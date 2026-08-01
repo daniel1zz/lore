@@ -34,8 +34,20 @@
  * `assessmentFreshness` predicate — one shared computation (`CorpusService
  * .getAssessmentFreshness`), never two.
  *
+ * Commit-set auto-derivation (task-lore-assess-asks-the-caller-for-a-git-range-that-
+ * cannot-be): when NEITHER `--diff` NOR `--diff-file` is passed, this command no longer
+ * defaults to "no diff" — it derives the plan's own commit set from git history itself
+ * (`../assess-commit-derivation.js::deriveCommitSetForPlan`), immune to the interleaving
+ * that makes a caller-supplied contiguous range wrong under concurrency. `--diff`/
+ * `--diff-file` remain explicit overrides, unchanged. Every run — explicit override,
+ * auto-derived, or "no commits found" — records its `diff_source` on the persisted
+ * `extra` (additive `knowledgeExtraSchema.passthrough()` key, no core schema change) and
+ * in the `--json` envelope, so `diff_available` alone is never the only signal an
+ * auditor has for telling a complete diff from a partial one.
+ *
  * Source: SPEC-026 §3 D1-D5; §4 AC-ASSESS-1, AC-ASSESS-6, AC-ASSESS-8, AC-ASSESS-9;
- * SPEC-028 AC-AE-1; task-assess-diff-range-scope-mismatch-warning; SPEC-106 AC-FRESH-4
+ * SPEC-028 AC-AE-1; task-assess-diff-range-scope-mismatch-warning; SPEC-106 AC-FRESH-4;
+ * task-lore-assess-asks-the-caller-for-a-git-range-that-cannot-be
  */
 
 import { spawnSync } from "node:child_process";
@@ -47,6 +59,30 @@ import { isAssessAiBraked } from "../../../ai/resolve-ai.js";
 import { renderAssessmentContent } from "@lore/core";
 import { formatAssessmentSummary } from "../assess-render.js";
 import { assessmentFreshness } from "../../../service/gate-predicates.js";
+import { deriveCommitSetForPlan, type DiffSourceRecord } from "../assess-commit-derivation.js";
+
+/** One-line stderr/text summary of how this run's diff (if any) was obtained. */
+function formatDiffSourceLine(source: DiffSourceRecord): string {
+  switch (source.mode) {
+    case "explicit_diff":
+      return `Diff source: --diff ${source.range} (explicit override)`;
+    case "explicit_diff_file":
+      return `Diff source: --diff-file ${source.path} (explicit override)`;
+    case "explicit_diff_text":
+      // reason: unreachable from the CLI (only MCP's diff_text override produces this
+      // variant) — kept so the switch stays exhaustively typed against the shared union.
+      return "Diff source: diff_text (explicit override)";
+    case "auto_derived":
+      if (source.status === "derived") {
+        const gapNote =
+          source.tasks_without_commits.length > 0
+            ? ` (${String(source.tasks_without_commits.length)} task(s) had no discoverable commits)`
+            : "";
+        return `Diff source: derived from ${String(source.commits.length)} commit(s) across this plan's tasks${gapNote}`;
+      }
+      return "Diff source: none — could not derive any commits for this plan's tasks";
+  }
+}
 
 export default defineCommand({
   meta: {
@@ -149,6 +185,7 @@ export default defineCommand({
 
       // ─── Step 3: diff acquisition (CLI layer only — SPEC-026 §3 D3) ───────────
       let diffText: string | undefined;
+      let diffSource: DiffSourceRecord;
       if (args.diff !== undefined) {
         const gitResult = spawnSync("git", ["diff", args.diff], { encoding: "utf8" });
         if (gitResult.error || gitResult.status !== 0) {
@@ -158,6 +195,7 @@ export default defineCommand({
           return;
         }
         diffText = gitResult.stdout;
+        diffSource = { mode: "explicit_diff", range: args.diff };
       } else if (args["diff-file"] !== undefined) {
         try {
           diffText = readFileSync(args["diff-file"], "utf8");
@@ -166,6 +204,33 @@ export default defineCommand({
           process.stderr.write(`Error: could not read --diff-file: ${message}\n`);
           process.exitCode = 2;
           return;
+        }
+        diffSource = { mode: "explicit_diff_file", path: args["diff-file"] };
+      } else {
+        // reason: task-lore-assess-asks-the-caller-for-a-git-range-that-cannot-be —
+        // replaces "no diff by default" with "derive it from the plan's own tasks by
+        // default". A plan's commits are not contiguous in main under concurrency, so
+        // there is no correct contiguous range to ask the caller for; this finds the
+        // plan's own commits by CONTENT (exact task-slug match) instead of position.
+        const derivation = deriveCommitSetForPlan(process.cwd(), bundle.tasks.map((t) => t.slug));
+        diffSource = { mode: "auto_derived", ...derivation };
+        if (derivation.status === "derived") {
+          diffText = derivation.diff_text;
+          const gapNote =
+            derivation.tasks_without_commits.length > 0
+              ? ` (${String(derivation.tasks_without_commits.length)} task(s) had no discoverable commits: ` +
+                `${derivation.tasks_without_commits.join(", ")})`
+              : "";
+          process.stderr.write(
+            `Derived diff from ${String(derivation.commits.length)} commit(s) across this plan's tasks${gapNote}.\n`,
+          );
+        } else {
+          process.stderr.write(
+            `Warning: could not derive any commits for this plan's ${String(bundle.tasks.length)} task(s) — ` +
+              "proceeding without a diff. This can mean the plan has no merged code changes yet, or its commit " +
+              "history was squashed/rewritten and no longer references the task slugs. Pass --diff/--diff-file " +
+              "to supply one explicitly.\n",
+          );
         }
       }
 
@@ -233,7 +298,11 @@ export default defineCommand({
         type: "knowledge",
         title: `Assessment: ${bundle.plan.title} (${dateStr})`,
         parent_id: bundle.plan.id,
-        extra: { sub_type: "assessment", assessment: result },
+        // reason: `diff_source` is additive on the passthrough `extra` object (never a
+        // core `assessmentResultSchema` change) — records HOW this run's diff (if any)
+        // was obtained, so `diff_available` alone is never the only auditable signal
+        // (task-lore-assess-asks-the-caller-for-a-git-range-that-cannot-be, AC #3).
+        extra: { sub_type: "assessment", assessment: result, diff_source: diffSource },
         content: renderAssessmentContent(result),
       });
       if (!createResult.ok) {
@@ -259,7 +328,10 @@ export default defineCommand({
       if (args.json) {
         console.log(
           JSON.stringify(
-            { ok: true, data: { assessment: assessmentDoc, result, scope_warning: result.scope_warning } },
+            {
+              ok: true,
+              data: { assessment: assessmentDoc, result, scope_warning: result.scope_warning, diff_source: diffSource },
+            },
             null,
             2,
           ),
@@ -273,6 +345,7 @@ export default defineCommand({
         console.log(result.scope_warning.message);
       }
       console.log("");
+      console.log(formatDiffSourceLine(diffSource));
       console.log(`Saved as ${assessmentDoc.slug} (linked to ${bundle.plan.slug} via informs)`);
     } finally {
       app.close();
