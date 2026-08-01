@@ -15,7 +15,11 @@
  * Six-dimension coverage:
  *   HAPPY:      a declared-only plan (extra.phases, no phase doc) yields ONE
  *               declared scorecard per name with correct task_count / evidence
- *               pass-fail rollup / ac_coverage (reusing computeAcCoverage)
+ *               pass-fail rollup / ac_coverage (reusing computeAcCoverage); a
+ *               phase whose only task evidence is expected-fail reports
+ *               evidence.expected_fail: 1, distinguishable from a phase with
+ *               zero evidence (task-two-more-evidence-consumers-erase-an-
+ *               expected-fail-row-doc)
  *   NEGATIVE:   a declared phase whose name ALSO matches a phase-doc title is
  *               NOT double-projected — the richer phase-doc scorecard wins
  *   BOUNDARY:   a declared phase with zero tasks yet renders task_count: 0 /
@@ -87,7 +91,7 @@ async function createTaskInPhase(
   corpusService: CorpusService,
   planId: string,
   phaseName: string,
-  evidence: Array<{ result: "pass" | "fail"; ac_ref?: string }> = [],
+  evidence: Array<{ result: "pass" | "fail" | "expected-fail" | "inconclusive"; ac_ref?: string }> = [],
 ): Promise<void> {
   const verification_evidence = evidence.map((e, i) => ({
     oracle: "test",
@@ -149,6 +153,29 @@ describe("planPhaseStatus — HAPPY: declared-only plan yields declared scorecar
     const acFact = entry.ac_coverage.find((f) => f.ac_id === "AC-1");
     expect(acFact?.pass).toBe(1);
     expect(acFact?.fail).toBe(0);
+  });
+
+  it("task-two-more-evidence-consumers-erase-an-expected-fail-row-doc: a declared phase whose ONLY task evidence is expected-fail reports evidence.expected_fail: 1, distinguishable from a phase with zero evidence (which never carries that key at all)", async () => {
+    const { corpusService, service, planId } = await makeFixture();
+    await declarePhases(corpusService, planId, ["Red Phase", "Empty Phase"]);
+    await createTaskInPhase(corpusService, planId, "Red Phase", [{ result: "expected-fail" }]);
+
+    const result = await service.planPhaseStatus(planId);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const byTitle = new Map(result.value.phases.map((p) => [p.phase_title, p]));
+    const redPhase = byTitle.get("Red Phase");
+    const emptyPhase = byTitle.get("Empty Phase");
+    if (redPhase === undefined || !isDeclared(redPhase)) throw new Error("expected declared Red Phase");
+    if (emptyPhase === undefined || !isDeclared(emptyPhase)) throw new Error("expected declared Empty Phase");
+
+    expect(redPhase.evidence).toEqual({ pass: 0, fail: 0, expected_fail: 1 });
+    expect(emptyPhase.evidence).toEqual({ pass: 0, fail: 0 });
+    // CONTROL: pairwise distinct, and the distinguishing key's presence is direct.
+    expect(redPhase.evidence).not.toEqual(emptyPhase.evidence);
+    expect("expected_fail" in redPhase.evidence).toBe(true);
+    expect("expected_fail" in emptyPhase.evidence).toBe(false);
   });
 
   it("multiple declared phases each get their own scorecard, tasks correctly partitioned by name", async () => {

@@ -24,6 +24,12 @@
  *     "scope undeclared" chip — never collapsed into the "pass" chip (the
  *     defect this fix removes) nor the "fail" chip (an escalation this
  *     component does not attempt).
+ *   - For a `task`/`spec` doc, `summary.status` can also be `"expected-fail"`/
+ *     `"inconclusive"` (task-two-more-evidence-consumers-erase-an-expected-
+ *     fail-row-doc) — rendered as their own neutral-outline chips, never
+ *     collapsed into "none" (the defect that fix removes: a doc whose only
+ *     evidence was a deliberate RED pin or an inconclusive run used to render
+ *     the exact same chip as a doc with zero evidence at all).
  *   - Approve/reject reuse `apiApproveDoc`/`apiRejectDoc` (SPEC-033 F1) with
  *     an optional `calibrationNote` — the EXACT write semantics and
  *     warnings-toast handling `TriageQueue.tsx`'s inline adjudicate block
@@ -61,12 +67,19 @@ function statusVariant(status: AdjudicationBarSummary["status"]): "secondary" | 
  *  definition site (mirrors `PlanAttestationPanel`'s `BADGE_COPY`). `"scope-
  *  undeclared"` renders as the space-separated "scope undeclared", the EXACT
  *  same copy the panel's badge uses, so a reader sees identical wording on
- *  both surfaces (task-adjudicationbar-s-compact-status-chip-still-derives-from). */
+ *  both surfaces (task-adjudicationbar-s-compact-status-chip-still-derives-from).
+ *  `"expected-fail"`/`"inconclusive"` (task/spec docs only — task-two-more-
+ *  evidence-consumers-erase-an-expected-fail-row-doc) render as their own
+ *  labeled chips instead of collapsing into "none", the exact defect that fix
+ *  removes: a task whose only evidence was a deliberate RED pin or an
+ *  inconclusive run used to tell the auditor there was no evidence at all. */
 const STATUS_LABEL: Record<AdjudicationBarSummary["status"], string> = {
   pass: "pass",
   fail: "fail",
   none: "none",
   "scope-undeclared": "scope undeclared",
+  "expected-fail": "expected fail",
+  inconclusive: "inconclusive",
 };
 
 export interface AdjudicationBarProps {

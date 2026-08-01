@@ -3,10 +3,21 @@
  * Pure, browser-safe module: no IO, no Date.now() calls (callers pass nowIso).
  *
  * Public surface:
+ *   - EVIDENCE_RESULTS / EvidenceResult — the `EvidenceEntry.result` vocabulary
+ *     SSOT (mirrors ORACLE_KINDS' "tuple + derived type, no independent literal-
+ *     array copies" shape)
  *   - evidenceEntrySchema / EvidenceEntry — one oracle verification record;
  *     `result` is `"pass" | "fail" | "inconclusive" | "expected-fail"` — the last
  *     two are non-green, non-special-cased-away values (see their own @invariant
  *     comments below) never counted as passing by any consumer
+ *   - classifyEvidenceResult(value) — narrows an untrusted string to
+ *     {@link EvidenceResult}, THROWING {@link UnknownEvidenceResultError} for any
+ *     value outside the vocabulary — never a silent default bucket
+ *   - tallyEvidenceResults(rows) — the ONE exhaustive pass/fail/expected-fail/
+ *     inconclusive counter every consumer that partitions evidence by outcome
+ *     must call, instead of hand-rolling `.filter((e) => e.result === "pass")`
+ *     style partitions that silently drop the non-green values into neither
+ *     bucket (task-two-more-evidence-consumers-erase-an-expected-fail-row-doc)
  *   - ATTESTATION_RUNNERS / AttestationRunner — enum of trusted runners allowed to
  *     write `EvidenceEntry.attestation` (SPEC-039 §2 D1)
  *   - taskClaimSchema / TaskClaim — advisory execution lease {by, at, branch?}
@@ -24,12 +35,21 @@
  *   - A blocker is satisfied iff its status is "archived" (D3). Any other status keeps
  *     the blocked task unready.
  *   - Readiness itself is never stored — this module is consulted at read time only.
+ *   - tallyEvidenceResults never drops a row: every input row's `result` lands in
+ *     exactly one of the four returned counts (their sum always equals
+ *     `rows.length`) — the exhaustive-partition property that removes the
+ *     hand-rolled-two-bucket-filter defect class this module's callers used to
+ *     each re-derive independently.
  *
  * Side-effect class: pure
  *
  * Source: SPEC-025 §3 D1-D3, D9, D10; §8.2, §8.3; SPEC-039 §2 D1, D4; SPEC-039 §M2;
  *   SPEC-061 §Scope D2, D4; spec-workflow-hardening-evidence-red-vocabulary-claim-
- *   worktree §M1 (AC-WH-1, `"expected-fail"` result value)
+ *   worktree §M1 (AC-WH-1, `"expected-fail"` result value);
+ *   task-two-more-evidence-consumers-erase-an-expected-fail-row-doc (EVIDENCE_RESULTS
+ *   extraction + classifyEvidenceResult/tallyEvidenceResults, the shared classifier
+ *   `doc-type-meta.ts`/`evidence-panel.ts`/`phase-workflow-service.ts` now call
+ *   instead of each hand-rolling their own pass/fail partition)
  */
 
 import { z } from "zod";
@@ -94,6 +114,23 @@ export const ATTESTATION_RUNNERS = ["lore-cli"] as const;
 export type AttestationRunner = (typeof ATTESTATION_RUNNERS)[number];
 
 /**
+ * `EvidenceEntry.result` vocabulary. SSOT for this enum — mirrors
+ * {@link ORACLE_KINDS}'s "tuple + derived type, no independent literal-array
+ * copies" precedent (SPEC-038 §7 D3). Every consumer that partitions evidence
+ * by outcome imports {@link tallyEvidenceResults} (built on this tuple) instead
+ * of redeclaring the four literals or hand-rolling a `.filter((e) => e.result
+ * === "pass")`-style two-bucket partition — the latter silently drops
+ * `"expected-fail"`/`"inconclusive"` rows into NEITHER bucket, making a task
+ * with a deliberate RED pin byte-identical to a task with no evidence at all
+ * (task-two-more-evidence-consumers-erase-an-expected-fail-row-doc, the second
+ * consecutive session two consumers were missed by this exact defect).
+ */
+export const EVIDENCE_RESULTS = ["pass", "fail", "inconclusive", "expected-fail"] as const;
+
+/** Derived TypeScript union for {@link EvidenceEntry.result}. */
+export type EvidenceResult = (typeof EVIDENCE_RESULTS)[number];
+
+/**
  * One oracle verification record, appended to task.extra.verification_evidence.
  * Append-only — entries are never edited or removed, only added (up to the 50-entry cap
  * enforced by taskExtraSchema in schemas.ts).
@@ -143,12 +180,19 @@ export type AttestationRunner = (typeof ATTESTATION_RUNNERS)[number];
  *   right reason. It exists so a session never has to launder a deliberate RED result
  *   into a semantically-dishonest `"pass"` (the failure was expected, not a bug) or a
  *   confusing bare `"fail"` (indistinguishable from a real regression) just to record
- *   that the run happened. Every consumer that classifies evidence by exact-string
- *   comparison against `"pass"`/`"fail"` (`computeAcCoverage` in `acceptance.ts`,
- *   `evidence-panel.ts`'s pass/fail tallies, `doc-type-meta.ts`'s `evidence_pass`/
- *   `evidence_fail` counts) already excludes `"expected-fail"` from BOTH buckets by
- *   construction — mirrors `"inconclusive"`'s identical "satisfies neither filter, no
- *   special-casing needed" property. NEVER counted as passing/green anywhere.
+ *   that the run happened. `computeAcCoverage`'s (`acceptance.ts`) `pass`/`fail`/
+ *   `attested_pass`/`attested_fail` filters exclude `"expected-fail"` from BOTH
+ *   buckets by exact-string construction — mirroring `"inconclusive"`'s identical
+ *   property — but that module's `refs[]` still carries the raw value through for
+ *   audit visibility, so nothing is actually lost there. `doc-type-meta.ts`'s
+ *   `evidence_pass`/`evidence_fail` and `evidence-panel.ts`'s pass/fail tallies used
+ *   to ALSO exclude it from both buckets, but with NO surviving raw-value channel —
+ *   an `"expected-fail"`-only task rendered byte-identical to a task with zero
+ *   evidence at all (task-two-more-evidence-consumers-erase-an-expected-fail-row-doc).
+ *   Both now call {@link tallyEvidenceResults} and surface the excluded count in a
+ *   dedicated field (`evidence_expected_fail` / `expected_fail_count`) instead of
+ *   letting it vanish. NEVER counted as passing/green anywhere, but never silently
+ *   erased either.
  * @invariant `attestation.completeness`/`attestation.executed_files` (SPEC-061 §Scope D4)
  *   are BOTH optional and present-iff-computed: only a `script:test` AC whose process
  *   exited 0 ever gets a completeness verdict computed at all (`VerifyRunnerService`); every
@@ -190,7 +234,7 @@ export type AttestationRunner = (typeof ATTESTATION_RUNNERS)[number];
 export const evidenceEntrySchema = z.object({
   oracle: z.enum(ORACLE_KINDS),
   command: z.string().min(1),
-  result: z.enum(["pass", "fail", "inconclusive", "expected-fail"]),
+  result: z.enum(EVIDENCE_RESULTS),
   output_tail: z.string().max(4000).optional(),
   recorded_at: z.string(),
   recorded_by: z.string().min(1),
@@ -251,6 +295,129 @@ export const evidenceEntrySchema = z.object({
 
 /** Derived TypeScript type for one verification evidence entry. */
 export type EvidenceEntry = z.infer<typeof evidenceEntrySchema>;
+
+// ─── Evidence Result Classifier (task-two-more-evidence-consumers-erase-an- ─
+// ─── expected-fail-row-doc) — the shared partition every result-tallying ────
+// ─── consumer must call instead of hand-rolling its own filter ─────────────
+
+/**
+ * Thrown by {@link classifyEvidenceResult} for any value outside
+ * {@link EVIDENCE_RESULTS} — the fail-loud counterpart to a silent default
+ * bucket. Carries the offending raw value for the caller/log to inspect.
+ */
+export class UnknownEvidenceResultError extends Error {
+  readonly value: unknown;
+
+  constructor(value: unknown) {
+    super(`Unrecognised evidence result: ${JSON.stringify(value)}`);
+    this.name = "UnknownEvidenceResultError";
+    this.value = value;
+  }
+}
+
+/**
+ * Type guard narrowing an untrusted value to {@link EvidenceResult}.
+ *
+ * @param value - Any value, typically an already-parsed `EvidenceEntry.result`
+ *   or a defensively-typed `string` read from a less-trusted source.
+ * @returns `true` iff `value` is exactly one of {@link EVIDENCE_RESULTS}.
+ */
+export function isEvidenceResult(value: unknown): value is EvidenceResult {
+  return typeof value === "string" && (EVIDENCE_RESULTS as readonly string[]).includes(value);
+}
+
+/**
+ * Narrows an untrusted string to {@link EvidenceResult} — the shared
+ * classifier every consumer that partitions evidence by outcome calls instead
+ * of a hand-rolled `.filter((e) => e.result === "pass")`-style comparison.
+ *
+ * In practice this never throws when called on an already-`evidenceEntrySchema`-
+ * parsed `EvidenceEntry.result` (Zod already narrowed it at the storage
+ * boundary) — the throw path exists for defensive re-validation of a value
+ * that bypassed that boundary (a hand-built fixture, a less-trusted read), so
+ * a future fifth vocabulary value — or plain data corruption — fails loud at
+ * the ONE classification site instead of silently landing in whichever
+ * bucket a hand-rolled `else` happened to pick.
+ *
+ * @param value - The raw `result` string to classify.
+ * @returns The narrowed {@link EvidenceResult}.
+ * @throws {UnknownEvidenceResultError} if `value` is not one of {@link EVIDENCE_RESULTS}.
+ * @example
+ * classifyEvidenceResult("pass"); // => "pass"
+ * @example
+ * classifyEvidenceResult("bogus"); // throws UnknownEvidenceResultError
+ */
+export function classifyEvidenceResult(value: string): EvidenceResult {
+  if (isEvidenceResult(value)) return value;
+  throw new UnknownEvidenceResultError(value);
+}
+
+/**
+ * Exhaustive 4-bucket count over {@link EVIDENCE_RESULTS} — every returned
+ * count sums to the input length; no row is ever dropped. `expected_fail`/
+ * `inconclusive` use underscores (not the hyphenated wire literal) to stay
+ * valid identifiers — mirrors `AttestationSummary`'s snake_case field
+ * convention (`evidence-panel.ts`).
+ */
+export interface EvidenceResultTally {
+  pass: number;
+  fail: number;
+  expected_fail: number;
+  inconclusive: number;
+}
+
+/**
+ * Tallies a set of evidence-like rows into the exhaustive 4-bucket
+ * {@link EvidenceResultTally} — the ONE partition every consumer that counts
+ * evidence by outcome calls, instead of independently re-deriving
+ * `.filter((e) => e.result === "pass")`/`"fail"` pairs that silently drop
+ * `"expected-fail"`/`"inconclusive"` rows into neither bucket (the exact
+ * defect task-two-more-evidence-consumers-erase-an-expected-fail-row-doc
+ * removes from `doc-type-meta.ts` and `evidence-panel.ts`).
+ *
+ * @param rows - Any rows carrying a `result` field — `EvidenceEntry[]`,
+ *   `EvidenceRefLite[]` (`acceptance.ts`), or an equivalent shape. Accepts the
+ *   narrow structural type (not `EvidenceEntry[]`) so `acceptance.ts`'s
+ *   `EvidenceRefLite[]` (which carries no `oracle`/`command`/`recorded_at`)
+ *   can be tallied without a throwaway cast.
+ * @returns Counts for all four vocabulary values; `pass + fail + expected_fail
+ *   + inconclusive === rows.length` always.
+ * @throws {UnknownEvidenceResultError} if any row's `result` is outside
+ *   {@link EVIDENCE_RESULTS} — never silently bucketed.
+ * @example
+ * tallyEvidenceResults([{ result: "expected-fail" }]);
+ * // => { pass: 0, fail: 0, expected_fail: 1, inconclusive: 0 }
+ * @example
+ * tallyEvidenceResults([]);
+ * // => { pass: 0, fail: 0, expected_fail: 0, inconclusive: 0 }
+ */
+export function tallyEvidenceResults(rows: readonly { result: string }[]): EvidenceResultTally {
+  const tally: EvidenceResultTally = { pass: 0, fail: 0, expected_fail: 0, inconclusive: 0 };
+  for (const row of rows) {
+    const classified = classifyEvidenceResult(row.result);
+    switch (classified) {
+      case "pass":
+        tally.pass += 1;
+        break;
+      case "fail":
+        tally.fail += 1;
+        break;
+      case "expected-fail":
+        tally.expected_fail += 1;
+        break;
+      case "inconclusive":
+        tally.inconclusive += 1;
+        break;
+      default: {
+        // Exhaustiveness gate — a fifth EVIDENCE_RESULTS member fails `tsc`
+        // here, never silently falls through uncounted.
+        const _exhaustive: never = classified;
+        void _exhaustive;
+      }
+    }
+  }
+  return tally;
+}
 
 // ─── Claim Schema ──────────────────────────────────────────────────────────
 

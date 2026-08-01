@@ -118,6 +118,7 @@ import {
   extractDeclaredPhases,
   computeAcScopeEdit,
   extractDeclaredAcScope,
+  tallyEvidenceResults,
   type AcScopeEditOp,
   type EvidenceEntry,
   type TaskClaim,
@@ -328,8 +329,19 @@ export interface DeclaredPhaseScorecard {
   orphaned: boolean;
   /** Count of `task`-typed plan children whose `extra.phase` names this phase. */
   task_count: number;
-  /** Sum of `verification_evidence[].result` across every task grouped here. */
-  evidence: { pass: number; fail: number };
+  /**
+   * Sum of `verification_evidence[].result` across every task grouped here,
+   * via `tallyEvidenceResults` (`@lore/core`, the shared classifier) — never a
+   * hand-rolled `.filter((e) => e.result === "pass")`/`"fail"` pair, which used
+   * to silently drop `expected_fail`/`inconclusive` rows into neither bucket
+   * (task-two-more-evidence-consumers-erase-an-expected-fail-row-doc).
+   * `expected_fail`/`inconclusive` are present iff > 0 (mirrors
+   * `DocTypeMeta`'s task-variant convention) — their PRESENCE distinguishes a
+   * phase-task-group carrying ONLY that vocabulary value from one with zero
+   * evidence at all, both of which would otherwise report `pass: 0, fail: 0`
+   * identically.
+   */
+  evidence: { pass: number; fail: number; expected_fail?: number; inconclusive?: number };
   /**
    * AC-scope coverage for this phase's tasks, computed via the SAME
    * `computeAcCoverage` (`@lore/core`) the evidence panel's `SpecEvidencePanel`
@@ -382,21 +394,28 @@ function buildDeclaredPhaseScorecard(
   tasksInPhase: DocRecord[],
   criteria: AcceptanceCriterion[],
 ): DeclaredPhaseScorecard {
-  let pass = 0;
-  let fail = 0;
-  for (const task of tasksInPhase) {
-    for (const entry of readEvidence(task)) {
-      if (entry.result === "pass") pass += 1;
-      else if (entry.result === "fail") fail += 1;
-    }
-  }
+  // reason: the shared classifier (task-workflow.ts) — never a hand-rolled
+  // `.filter((e) => e.result === "pass")`/`"fail"` pair, which silently drops
+  // "expected-fail"/"inconclusive" rows into neither bucket (task-two-more-
+  // evidence-consumers-erase-an-expected-fail-row-doc).
+  const allEvidence = tasksInPhase.flatMap((task) => readEvidence(task));
+  const tally = tallyEvidenceResults(allEvidence);
 
   return {
     source: "declared",
     phase_title: phaseTitle,
     orphaned,
     task_count: tasksInPhase.length,
-    evidence: { pass, fail },
+    evidence: {
+      pass: tally.pass,
+      fail: tally.fail,
+      // reason: present-iff-nonzero (mirrors DocTypeMeta's task-variant
+      // convention) — the field's mere PRESENCE distinguishes a phase-task-group
+      // carrying ONLY a deliberate RED/inconclusive row from one with zero
+      // evidence at all; both would otherwise report pass:0, fail:0 identically.
+      ...(tally.expected_fail > 0 ? { expected_fail: tally.expected_fail } : {}),
+      ...(tally.inconclusive > 0 ? { inconclusive: tally.inconclusive } : {}),
+    },
     // reason: SAME core helper the evidence panel's SpecEvidencePanel uses
     // (SPEC-075 D2, evidence-panel.ts) — never a second, forked AC-coverage
     // calculation. Scoped to THIS phase's own tasks only, mirroring the

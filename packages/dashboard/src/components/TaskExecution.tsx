@@ -23,7 +23,16 @@
  *   - A `fail` result renders the destructive Badge variant (the same
  *     "danger color" rule as `metaBadgeVariant`, applied directly here since
  *     evidence entries aren't `DocTypeMeta` — they ARE the source data
- *     `deriveTypeMeta` counts up).
+ *     `deriveTypeMeta` counts up); `pass` renders `secondary`; `expected-fail`/
+ *     `inconclusive` render the neutral `outline` variant (mirrors
+ *     `TaskEvidencePanel.tsx::resultVariant`'s identical 3-way rule) — NEVER
+ *     `destructive`, which would mischaracterize a deliberate RED pin or an
+ *     ambiguous runner outcome as an alarming genuine failure
+ *     (task-two-more-evidence-consumers-erase-an-expected-fail-row-doc,
+ *     found during that task's exhaustive consumer audit — this component
+ *     never dropped the raw `result` text, but its old bare
+ *     `result === "pass" ? secondary : destructive` ternary painted both
+ *     non-green values the same alarming red as a real failure).
  * Side-effect class: pure (renders received data; no IO of its own)
  * Source: SPEC-037 §1 D3, AC-37-5, AC-37-6
  */
@@ -77,7 +86,12 @@ export function TaskExecution({ task }: TaskExecutionProps): React.ReactElement 
                 <Badge variant="secondary" className="text-xs">
                   {entry.oracle}
                 </Badge>
-                <Badge variant={entry.result === "pass" ? "secondary" : "destructive"} className="text-xs">
+                <Badge
+                  variant={
+                    entry.result === "pass" ? "secondary" : entry.result === "fail" ? "destructive" : "outline"
+                  }
+                  className="text-xs"
+                >
                   {entry.result}
                 </Badge>
                 <span className="text-xs text-muted-foreground">{formatRelativeTime(entry.recorded_at)}</span>

@@ -35,6 +35,19 @@
  *
  * @spec_ref AC-WF-3, AC-WF-4, AC-WF-7, AC-WF-8, SPEC-032 §3.4; SPEC-039 §2 D1, D4;
  *   AC-VRF-1, AC-VRF-7; SPEC-039 §M2
+ *
+ * Also covers `classifyEvidenceResult`/`tallyEvidenceResults` (the shared
+ * evidence-result classifier, task-two-more-evidence-consumers-erase-an-
+ * expected-fail-row-doc) in its own six-dimension block near the end of this
+ * file: HAPPY (all four vocabulary values classify/tally correctly, mixed
+ * multi-row tally); NEGATIVE (an unrecognised value throws
+ * UnknownEvidenceResultError at the classifier, never a silent bucket);
+ * BOUNDARY (empty input yields an all-zero tally; a single-row tally for each
+ * of the four values); ERROR: n/a beyond the NEGATIVE throw (no Result
+ * channel at this layer, mirrors this file's other pure functions); STATE
+ * (tally is order-independent over a mixed sequence); REGRESSION
+ * (pass+fail+expected_fail+inconclusive always sums to input length; the
+ * classifier never mutates its input rows).
  */
 
 import { describe, it, expect } from "vitest";
@@ -45,8 +58,13 @@ import {
   evidenceEntrySchema,
   extractEvidence,
   ATTESTATION_RUNNERS,
+  EVIDENCE_RESULTS,
   resolveTargetTask,
   isApprovedVerifyCommand,
+  isEvidenceResult,
+  classifyEvidenceResult,
+  tallyEvidenceResults,
+  UnknownEvidenceResultError,
   type BlockerInfo,
 } from "./task-workflow.js";
 import type { DocId, DocRecord, LinkRecord } from "./types.js";
@@ -846,5 +864,120 @@ describe("evidenceEntrySchema.attestation.execution_root/execution_mode — REGR
   it("a legacy entry with NO attestation object at all still parses (the pre-SPEC-039 shape)", () => {
     const parsed = evidenceEntrySchema.safeParse(evidenceEntry("bun test"));
     expect(parsed.success).toBe(true);
+  });
+});
+
+// ─── classifyEvidenceResult / tallyEvidenceResults (task-two-more-evidence- ─
+// ─── consumers-erase-an-expected-fail-row-doc) ──────────────────────────────
+
+describe("isEvidenceResult / classifyEvidenceResult — HAPPY", () => {
+  it("recognises every EVIDENCE_RESULTS member", () => {
+    for (const value of EVIDENCE_RESULTS) {
+      expect(isEvidenceResult(value)).toBe(true);
+      expect(classifyEvidenceResult(value)).toBe(value);
+    }
+  });
+});
+
+describe("isEvidenceResult / classifyEvidenceResult — NEGATIVE", () => {
+  it("isEvidenceResult returns false for a value outside the vocabulary", () => {
+    expect(isEvidenceResult("bogus")).toBe(false);
+    expect(isEvidenceResult("Pass")).toBe(false); // case-sensitive — not a fuzzy match
+    expect(isEvidenceResult(123)).toBe(false);
+    expect(isEvidenceResult(undefined)).toBe(false);
+  });
+
+  it("classifyEvidenceResult THROWS UnknownEvidenceResultError for a value outside the vocabulary — never a silent default bucket", () => {
+    expect(() => classifyEvidenceResult("bogus")).toThrow(UnknownEvidenceResultError);
+    try {
+      classifyEvidenceResult("bogus");
+      expect.unreachable("classifyEvidenceResult must throw for an unrecognised value");
+    } catch (e) {
+      expect(e).toBeInstanceOf(UnknownEvidenceResultError);
+      expect((e as UnknownEvidenceResultError).value).toBe("bogus");
+    }
+  });
+});
+
+describe("tallyEvidenceResults — HAPPY", () => {
+  it("tallies one row of each of the four vocabulary values independently", () => {
+    expect(tallyEvidenceResults([{ result: "pass" }])).toEqual({
+      pass: 1,
+      fail: 0,
+      expected_fail: 0,
+      inconclusive: 0,
+    });
+    expect(tallyEvidenceResults([{ result: "fail" }])).toEqual({
+      pass: 0,
+      fail: 1,
+      expected_fail: 0,
+      inconclusive: 0,
+    });
+    expect(tallyEvidenceResults([{ result: "expected-fail" }])).toEqual({
+      pass: 0,
+      fail: 0,
+      expected_fail: 1,
+      inconclusive: 0,
+    });
+    expect(tallyEvidenceResults([{ result: "inconclusive" }])).toEqual({
+      pass: 0,
+      fail: 0,
+      expected_fail: 0,
+      inconclusive: 1,
+    });
+  });
+
+  it("tallies a mixed multi-row sequence covering all four values, none dropped", () => {
+    const rows = [
+      { result: "pass" },
+      { result: "fail" },
+      { result: "pass" },
+      { result: "expected-fail" },
+      { result: "inconclusive" },
+      { result: "expected-fail" },
+    ];
+    const tally = tallyEvidenceResults(rows);
+    expect(tally).toEqual({ pass: 2, fail: 1, expected_fail: 2, inconclusive: 1 });
+    // REGRESSION: exhaustive partition — every row landed in exactly one bucket.
+    expect(tally.pass + tally.fail + tally.expected_fail + tally.inconclusive).toBe(rows.length);
+  });
+});
+
+describe("tallyEvidenceResults — NEGATIVE", () => {
+  it("throws UnknownEvidenceResultError (not a silent zero/omitted bucket) when any row carries an unrecognised result", () => {
+    expect(() =>
+      tallyEvidenceResults([{ result: "pass" }, { result: "bogus" }]),
+    ).toThrow(UnknownEvidenceResultError);
+  });
+});
+
+describe("tallyEvidenceResults — BOUNDARY", () => {
+  it("an empty input yields an all-zero tally", () => {
+    expect(tallyEvidenceResults([])).toEqual({ pass: 0, fail: 0, expected_fail: 0, inconclusive: 0 });
+  });
+});
+
+describe("tallyEvidenceResults — STATE (order-independence)", () => {
+  it("the same multiset in a different order yields the identical tally", () => {
+    const a = [{ result: "fail" }, { result: "pass" }, { result: "expected-fail" }];
+    const b = [{ result: "expected-fail" }, { result: "pass" }, { result: "fail" }];
+    expect(tallyEvidenceResults(a)).toEqual(tallyEvidenceResults(b));
+  });
+});
+
+describe("tallyEvidenceResults — REGRESSION", () => {
+  it("never mutates its input rows array or its elements", () => {
+    const rows = [{ result: "pass" }, { result: "fail" }];
+    const snapshot = JSON.parse(JSON.stringify(rows));
+    tallyEvidenceResults(rows);
+    expect(rows).toEqual(snapshot);
+  });
+
+  it("sums to rows.length for every non-empty input, including a large repeated set", () => {
+    const rows = Array.from({ length: 50 }, (_, i) => ({
+      result: EVIDENCE_RESULTS[i % EVIDENCE_RESULTS.length]!,
+    }));
+    const tally = tallyEvidenceResults(rows);
+    expect(tally.pass + tally.fail + tally.expected_fail + tally.inconclusive).toBe(50);
   });
 });

@@ -318,6 +318,21 @@ export type DocTypeMeta =
       claim_stale?: boolean;
       evidence_pass: number;
       evidence_fail: number;
+      /**
+       * Present iff > 0 — count of self-reported deliberate RED (`"expected-fail"`)
+       * evidence rows (task-two-more-evidence-consumers-erase-an-expected-fail-row-doc).
+       * Never counted in `evidence_pass`/`evidence_fail`. Its PRESENCE is what
+       * distinguishes a task carrying ONLY this vocabulary value from a task with
+       * zero evidence at all — both would otherwise report `evidence_pass: 0,
+       * evidence_fail: 0` identically.
+       */
+      evidence_expected_fail?: number;
+      /**
+       * Present iff > 0 — count of runner-issued `"inconclusive"` (zero/under-match)
+       * evidence rows. Same distinguishing purpose as `evidence_expected_fail`, never
+       * counted in `evidence_pass`/`evidence_fail`.
+       */
+      evidence_inconclusive?: number;
     };
 
 /** Lightweight doc summary for listings, navigation, and trees */

@@ -22,16 +22,23 @@
  *     `deriveTypeMeta(doc, opts?: {claimTtlMinutes?: number})` with no nowIso parameter.
  *     Tests avoid flakiness by constructing claims far in the past/future rather than
  *     near "now".
+ *   - `task.evidence_pass`/`evidence_fail` come from {@link tallyEvidenceResults}
+ *     (`task-workflow.ts`), the shared classifier — never a hand-rolled
+ *     `.filter((e) => e.result === "pass")`/`"fail"` pair, which would silently drop
+ *     `"expected-fail"`/`"inconclusive"` rows into neither bucket. The tally's other
+ *     two buckets surface as `evidence_expected_fail`/`evidence_inconclusive`,
+ *     present iff > 0 (task-two-more-evidence-consumers-erase-an-expected-fail-row-doc).
  *
  * Side-effect class: pure (except the narrow Date.now() read noted above)
  *
- * Source: SPEC-036 §2 D3, §3 AC-36-7, AC-36-10
+ * Source: SPEC-036 §2 D3, §3 AC-36-7, AC-36-10;
+ *   task-two-more-evidence-consumers-erase-an-expected-fail-row-doc
  */
 
 import type { DocRecord, DocTypeMeta } from "./types.js";
 import { SPEC_KINDS, type SpecKind } from "./spec-kind.js";
 import { decisionStatusSchema, knowledgeSubTypeSchema, planExtraSchema } from "./schemas.js";
-import { extractClaim, extractEvidence, isClaimStale } from "./task-workflow.js";
+import { extractClaim, extractEvidence, isClaimStale, tallyEvidenceResults } from "./task-workflow.js";
 
 /**
  * Narrows an unknown value to a valid {@link SpecKind} — `SPEC_KINDS` is the SSOT tuple.
@@ -65,6 +72,16 @@ function safeExtra(doc: DocRecord): Record<string, unknown> {
  * @example
  * deriveTypeMeta({ ...taskDoc, extra: { claim: { by: "alice", at: "…" } } }, { claimTtlMinutes: 120 })
  * // => { t: "task", claimed_by: "alice", claim_stale: false, evidence_pass: 0, evidence_fail: 0 }
+ * @example
+ * // a task whose ONLY evidence is a deliberate RED pin — evidence_expected_fail is
+ * // PRESENT (1), distinguishing it from a task with zero evidence at all (which
+ * // would report the exact same evidence_pass:0, evidence_fail:0 with NEITHER new
+ * // field present) — task-two-more-evidence-consumers-erase-an-expected-fail-row-doc
+ * deriveTypeMeta({ ...taskDoc, extra: { verification_evidence: [{
+ *   oracle: "test", command: "bun test", result: "expected-fail",
+ *   recorded_at: "2026-08-01T00:00:00.000Z", recorded_by: "agent:t",
+ * }] } })
+ * // => { t: "task", evidence_pass: 0, evidence_fail: 0, evidence_expected_fail: 1 }
  */
 export function deriveTypeMeta(
   doc: DocRecord,
@@ -112,13 +129,24 @@ export function deriveTypeMeta(
         claim !== undefined && opts?.claimTtlMinutes !== undefined
           ? isClaimStale(claim, new Date().toISOString(), opts.claimTtlMinutes)
           : undefined;
+      // reason: the shared classifier (task-workflow.ts) — never a hand-rolled
+      // `.filter((e) => e.result === "pass")`/`"fail"` pair, which silently drops
+      // "expected-fail"/"inconclusive" rows into neither bucket (task-two-more-
+      // evidence-consumers-erase-an-expected-fail-row-doc).
+      const tally = tallyEvidenceResults(evidence);
 
       return {
         t: "task",
         ...(claim !== undefined ? { claimed_by: claim.by } : {}),
         ...(claimStale !== undefined ? { claim_stale: claimStale } : {}),
-        evidence_pass: evidence.filter((e) => e.result === "pass").length,
-        evidence_fail: evidence.filter((e) => e.result === "fail").length,
+        evidence_pass: tally.pass,
+        evidence_fail: tally.fail,
+        // reason: present-iff-nonzero (mirrors claimed_by/claim_stale above) —
+        // the field's mere PRESENCE is what distinguishes a task carrying ONLY a
+        // deliberate RED/inconclusive row from a task with zero evidence at all;
+        // both would otherwise report evidence_pass:0, evidence_fail:0 identically.
+        ...(tally.expected_fail > 0 ? { evidence_expected_fail: tally.expected_fail } : {}),
+        ...(tally.inconclusive > 0 ? { evidence_inconclusive: tally.inconclusive } : {}),
       };
     }
 
