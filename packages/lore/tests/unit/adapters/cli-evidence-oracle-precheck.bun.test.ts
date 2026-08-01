@@ -359,6 +359,7 @@ describe("lore evidence oracle precheck — REGRESSION", () => {
           command: "bunx vitest run does-not-exist.test.ts",
           result: "fail",
           by: "alice",
+          "output-tail": "AssertionError: expected 1 to equal 2",
         },
       });
 

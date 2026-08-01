@@ -229,6 +229,7 @@ describe("HAPPY — expected-fail evidence result accepted, stored verbatim (AC-
         oracle: "test",
         command: "bunx vitest run new-feature.test.ts",
         result: "expected-fail",
+        output_tail: "AssertionError: expected 1 to equal 2",
       }),
     );
     expect(result.ok).toBe(true);
@@ -244,7 +245,10 @@ describe("HAPPY — expected-fail evidence result accepted, stored verbatim (AC-
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    const added = await taskWorkflowService.addEvidence(taskId, evidence({ result: "expected-fail" }));
+    const added = await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({ result: "expected-fail", output_tail: "AssertionError: expected 1 to equal 2" }),
+    );
     expect(added.ok).toBe(true);
 
     const readyResult = await taskWorkflowService.ready(planId);
@@ -264,7 +268,11 @@ describe("HAPPY — expected-fail evidence result accepted, stored verbatim (AC-
     await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
     const second = await taskWorkflowService.addEvidence(
       taskId,
-      evidence({ command: "bunx vitest run red.test.ts", result: "expected-fail" }),
+      evidence({
+        command: "bunx vitest run red.test.ts",
+        result: "expected-fail",
+        output_tail: "AssertionError: expected 1 to equal 2",
+      }),
     );
     expect(second.ok).toBe(true);
 

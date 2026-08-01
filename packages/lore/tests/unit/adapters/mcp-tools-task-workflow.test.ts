@@ -531,6 +531,7 @@ describe("lore_evidence_add — missing-oracle-file precheck", () => {
           command: `bunx vitest run ${MISSING_TEST_FILE}`,
           result: "fail",
           recorded_by: "alice",
+          output_tail: "AssertionError: expected 1 to equal 2",
         });
         expect(result.isError).toBeFalsy();
         expect(spy.called()).toBe(true);

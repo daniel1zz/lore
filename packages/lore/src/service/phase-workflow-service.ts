@@ -144,7 +144,11 @@ import type {
   DoneOpts,
   DoneResult,
 } from "./task-workflow-service.js";
-import { rejectBlankClaimWorktree, computeArchiveWalk } from "./task-workflow-service.js";
+import {
+  rejectBlankClaimWorktree,
+  computeArchiveWalk,
+  rejectMissingNonPassOutputTail,
+} from "./task-workflow-service.js";
 
 /**
  * Re-exported verbatim from `./task-workflow-service.js` (SPEC-056 D1/P1) — never
@@ -508,6 +512,12 @@ export class PhaseWorkflowService {
     // worktree §M1, AC-WH-1) is deliberately NOT rejected here — unlike "inconclusive"
     // above, it is a normal self-reported RED-phase value, accepted by the shared
     // evidenceEntrySchema below and never counted as passing by any consumer.
+
+    // spec-evidence-output-tail-integrity-a-self-reported-non-pass §D1/§D3, AC-ETI-6
+    // — parity with TaskWorkflowService._addEvidenceImpl's own fourth guard; shared
+    // implementation imported above (SSOT), not re-derived here.
+    const tailCheck = rejectMissingNonPassOutputTail(entry.result, entry.output_tail);
+    if (!tailCheck.ok) return tailCheck;
 
     return this.appendEvidenceEntry(idOrSlug, entry, entry.recorded_by, now);
   }

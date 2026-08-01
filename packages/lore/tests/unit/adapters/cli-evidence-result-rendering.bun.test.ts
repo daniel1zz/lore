@@ -134,6 +134,7 @@ describe("lore evidence --result expected-fail rendering — HAPPY", () => {
           command: "bun run typecheck",
           result: "expected-fail",
           by: "alice",
+          "output-tail": "AssertionError: expected 1 to equal 2",
         },
       });
 
@@ -163,6 +164,7 @@ describe("lore evidence --result expected-fail rendering — NEGATIVE", () => {
           command: "bun run typecheck",
           result: "expected-fail",
           by: "alice",
+          "output-tail": "AssertionError: expected 1 to equal 2",
         },
       });
 
@@ -203,7 +205,14 @@ describe("lore evidence --result rendering — REGRESSION", () => {
 
     try {
       await cmd.run({
-        args: { task: taskSlug, oracle: "tsc", command: "bun run typecheck", result: "fail", by: "alice" },
+        args: {
+          task: taskSlug,
+          oracle: "tsc",
+          command: "bun run typecheck",
+          result: "fail",
+          by: "alice",
+          "output-tail": "AssertionError: expected 1 to equal 2",
+        },
       });
 
       const successLine = log.lines().find((l) => l.startsWith("Recorded"));

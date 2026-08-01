@@ -186,7 +186,10 @@ describe("TaskWorkflowService.release — zero-evidence advisory wiring (AC-RELE
     const { taskId } = await createPlanAndTask(corpusService);
 
     await taskWorkflowService.claim(taskId, { by: "alice" });
-    await taskWorkflowService.addEvidence(taskId, evidence({ result: "fail" }));
+    await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({ result: "fail", output_tail: "AssertionError: expected 1 to equal 2" }),
+    );
 
     const releaseResult = await taskWorkflowService.release(taskId, { by: "alice" });
     expect(releaseResult.ok).toBe(true);

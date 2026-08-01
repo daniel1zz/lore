@@ -117,7 +117,7 @@ describe("HAPPY — addEvidence appends one audit entry with action 'evidence' a
 
     const evidenceResult = await taskWorkflowService.addEvidence(
       taskId,
-      evidence({ oracle: "lint", command: "bun run lint", result: "fail" }),
+      evidence({ oracle: "lint", command: "bun run lint", result: "fail", output_tail: "3 errors" }),
     );
     expect(evidenceResult.ok).toBe(true);
     if (!evidenceResult.ok) return;
