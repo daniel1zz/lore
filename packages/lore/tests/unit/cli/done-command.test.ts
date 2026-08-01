@@ -33,7 +33,7 @@ import * as doneRenderModule from "../../../src/adapters/cli/done-render.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
-import type { DoneResult, EvidenceInput } from "../../../src/service/task-workflow-service.js";
+import type { DoneResult, EvidenceInput, VerifiedEvidenceInput } from "../../../src/service/task-workflow-service.js";
 import type { DocRecord, CreateDocInput } from "@lore/core";
 
 function makeTaskDoc(overrides: Partial<DocRecord> = {}): DocRecord {
@@ -250,6 +250,24 @@ describe("lore done — last non-terminal task advisory (AC-CLOSURE-3, DD-2)", (
     };
   }
 
+  /**
+   * A runner-attested `result: "pass"` row (SPEC-039 §2 D2) — mirrors
+   * task-workflow-service.test.ts's own `attestedPass()` helper. `done()`'s
+   * attestation floor (adr-lore-done-requires-a-runner-attested-pass-the-
+   * sixth-false) requires at least one of these; `evidence()` above (self-
+   * reported, structurally excludes `attestation`) alone no longer suffices.
+   */
+  function attestedPass(overrides: Partial<VerifiedEvidenceInput> = {}): VerifiedEvidenceInput {
+    return {
+      oracle: "tsc",
+      command: "bun run typecheck",
+      result: "pass",
+      recorded_by: "runner",
+      attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false },
+      ...overrides,
+    };
+  }
+
   /** DD-2's proposed `DoneResult` extension — `TaskWorkflowService.done` gains
    *  this fact, never a plan write. Declared here as a local intersection type
    *  (not editing `task-workflow-service.ts`, out of this RED task's boundary)
@@ -279,10 +297,12 @@ describe("lore done — last non-terminal task advisory (AC-CLOSURE-3, DD-2)", (
     const lastTask = await createTask(corpusService, plan.id, "Last Non-Terminal Task");
 
     await taskWorkflowService.addEvidence(alreadyDoneTask, evidence());
+    await taskWorkflowService.recordVerifiedEvidence(alreadyDoneTask, attestedPass(), "2026-07-27T09:00:00.000Z");
     const siblingDone = await taskWorkflowService.done(alreadyDoneTask, { by: "alice" });
     expect(siblingDone.ok).toBe(true);
 
     await taskWorkflowService.addEvidence(lastTask, evidence());
+    await taskWorkflowService.recordVerifiedEvidence(lastTask, attestedPass(), "2026-07-27T09:00:00.000Z");
     const doneResult = await taskWorkflowService.done(lastTask, { by: "alice" });
     expect(doneResult.ok).toBe(true);
     if (!doneResult.ok) return;
@@ -313,6 +333,7 @@ describe("lore done — last non-terminal task advisory (AC-CLOSURE-3, DD-2)", (
     void taskB; // reason: intentionally left non-terminal — that's what makes taskA "not the last"
 
     await taskWorkflowService.addEvidence(taskA, evidence());
+    await taskWorkflowService.recordVerifiedEvidence(taskA, attestedPass(), "2026-07-27T09:00:00.000Z");
     const doneResult = await taskWorkflowService.done(taskA, { by: "alice" });
     expect(doneResult.ok).toBe(true);
     if (!doneResult.ok) return;
@@ -343,6 +364,7 @@ describe("lore done — last non-terminal task advisory (AC-CLOSURE-3, DD-2)", (
     const alreadyDoneTask = await createTask(corpusService, advisoryPlan.id, "Already Archived Sibling");
     const lastTask = await createTask(corpusService, advisoryPlan.id, "Last Non-Terminal Task");
     await taskWorkflowService.addEvidence(alreadyDoneTask, evidence());
+    await taskWorkflowService.recordVerifiedEvidence(alreadyDoneTask, attestedPass(), "2026-07-27T09:00:00.000Z");
     await taskWorkflowService.done(alreadyDoneTask, { by: "alice" });
 
     const advisoryPlanBefore = await corpusService.get(advisoryPlan.id);
@@ -350,6 +372,7 @@ describe("lore done — last non-terminal task advisory (AC-CLOSURE-3, DD-2)", (
     if (!advisoryPlanBefore.ok) return;
 
     await taskWorkflowService.addEvidence(lastTask, evidence());
+    await taskWorkflowService.recordVerifiedEvidence(lastTask, attestedPass(), "2026-07-27T09:00:00.000Z");
     const advisoryDoneResult = await taskWorkflowService.done(lastTask, { by: "alice" });
     expect(advisoryDoneResult.ok).toBe(true);
 
@@ -369,6 +392,7 @@ describe("lore done — last non-terminal task advisory (AC-CLOSURE-3, DD-2)", (
     if (!noAdvisoryPlanBefore.ok) return;
 
     await taskWorkflowService.addEvidence(taskA, evidence());
+    await taskWorkflowService.recordVerifiedEvidence(taskA, attestedPass(), "2026-07-27T09:00:00.000Z");
     const noAdvisoryDoneResult = await taskWorkflowService.done(taskA, { by: "alice" });
     expect(noAdvisoryDoneResult.ok).toBe(true);
 
@@ -400,6 +424,7 @@ describe("lore done — last non-terminal task advisory (AC-CLOSURE-3, DD-2)", (
     const adhocId = adhocTask.value.id;
 
     await taskWorkflowService.addEvidence(adhocId, evidence());
+    await taskWorkflowService.recordVerifiedEvidence(adhocId, attestedPass(), "2026-07-27T09:00:00.000Z");
 
     let threw = false;
     let doneResult: Awaited<ReturnType<typeof taskWorkflowService.done>> | undefined;
@@ -430,6 +455,7 @@ describe("lore done — last non-terminal task advisory (AC-CLOSURE-3, DD-2)", (
     expect(toDeprecated.ok).toBe(true);
 
     await taskWorkflowService.addEvidence(lastTask, evidence());
+    await taskWorkflowService.recordVerifiedEvidence(lastTask, attestedPass(), "2026-07-27T09:00:00.000Z");
     const doneResult = await taskWorkflowService.done(lastTask, { by: "alice" });
     expect(doneResult.ok).toBe(true);
     if (!doneResult.ok) return;
