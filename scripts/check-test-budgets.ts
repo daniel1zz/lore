@@ -14,21 +14,30 @@
  * timeout (`it(name, fn, 10000)` or `it(name, fn, { timeout: 10000 })`).
  *
  * Public surface: `scanFile` (pure — given a repo-relative path and its
- * source text, returns the violations found in THAT file), `checkLedger`
- * (pure — cross-checks a scan's violations against the exemption ledger),
- * `parseLedgerFile` (pure — validates ledger JSON against its Zod schema),
- * and `main` (IO — walks `packages/**` for `.test.ts` / `.bun.test.ts`
- * files, loads the ledger from disk, and reports). `TestBudgetParseError`
+ * source text, returns the violations found in THAT file), `scanRepoTree`
+ * (IO — walks `packages/**` for `.test.ts` / `.bun.test.ts` files and
+ * `scanFile`s each one; the SAME computation `main` uses internally, exposed
+ * so a caller other than the CLI entrypoint — e.g. the ledger migration
+ * script, `scripts/migrate-test-budget-ledger-to-title-fingerprint.ts` — can
+ * derive a violation's CURRENT title/spawnCount by actually running this
+ * oracle, never by hand-transcribing it), `checkLedger` (pure — cross-checks
+ * a scan's violations against the exemption ledger), `parseLedgerFile` (pure
+ * — validates ledger JSON against its Zod schema), and `main` (IO — calls
+ * `scanRepoTree`, loads the ledger from disk, and reports). `TestBudgetParseError`
  * is the typed failure for source this script cannot lexically parse —
  * thrown, never swallowed (D5: parse failure is loud). `TestBudgetLedgerError`
  * is the typed failure for a ledger file this script cannot load or validate.
+ * `TestBudgetFingerprintCollisionError` is the typed failure for two
+ * violations in one file sharing an identical title+spawnCount fingerprint
+ * (see "Why the key is a title fingerprint, not a line" below).
  *
  * Side-effect class: `scanFile`, `checkLedger`, and `parseLedgerFile` are
- * pure (no IO). `main` reads files from disk (test sources + the ledger)
- * and writes to stdout/stderr. The `import.meta.main` guard below is the
- * CLI entrypoint; nothing at module scope has a side effect, so this file
- * is safe to `import` from a test for direct, subprocess-free unit coverage
- * (see `scripts/tests/check-test-budgets.test.ts`).
+ * pure (no IO). `scanRepoTree` and `main` read files from disk (test
+ * sources + the ledger); `main` also writes to stdout/stderr. The
+ * `import.meta.main` guard below is the CLI entrypoint; nothing at module
+ * scope has a side effect, so this file is safe to `import` from a test for
+ * direct, subprocess-free unit coverage (see
+ * `scripts/tests/check-test-budgets.test.ts`).
  *
  * ## Baseline + exemption ledger (`adr-a-newly-armed-structural-oracle-enforces-from-a-baseline`)
  *
@@ -43,32 +52,76 @@
  *
  *   1. **Baseline-scoped enforcement**: every violation present at
  *      ledger-landing time is recorded in `scripts/test-budget-ledger.json`
- *      (`LEDGER_RELATIVE_PATH`) with its measured `path`/`line`/`spawnCount`
- *      plus a `reason`. `checkLedger` partitions each scan's violations into
- *      `newViolations` (NOT in the ledger — new debt, always fails) and the
- *      ledger-covered rest (exempted). A violation is "in the ledger" iff a
- *      ledger entry's `(path, line)` matches AND its recorded `spawnCount`
- *      equals the violation's CURRENT spawn count — an exact match, not a
- *      fuzzy one, so a file edited near a ledgered test (shifting its line,
- *      or changing its spawn count) forces a ledger update rather than
- *      silently continuing to exempt a since-drifted violation.
+ *      (`LEDGER_RELATIVE_PATH`) with its measured `path`/`titleFingerprint`/
+ *      `spawnCount` plus a `reason` (and `line`, kept only as a
+ *      non-authoritative diagnostic hint — see "Why the key is a title
+ *      fingerprint, not a line" below). `checkLedger` partitions each scan's
+ *      violations into `newViolations` (NOT in the ledger — new debt, always
+ *      fails) and the ledger-covered rest (exempted). A violation is "in the
+ *      ledger" iff a ledger entry's `(path, titleFingerprint)` matches AND
+ *      its recorded `spawnCount` equals the violation's CURRENT spawn count
+ *      — an exact match on BOTH, not a fuzzy one and not path-alone, so a
+ *      test whose body genuinely changed (a different spawn count) forces a
+ *      ledger update rather than silently continuing to exempt a
+ *      since-drifted violation.
  *   2. **The ledger is DATA the oracle reads** (JSON, Zod-validated via
  *      `parseLedgerFile`), never a `--exclude` glob buried in this script —
  *      auditable, diffable, and impossible to silently widen.
- *   3. **Ledger completeness is asserted**: a ledger row whose `(path, line,
- *      spawnCount)` no longer matches any current violation (`orphanedEntries`)
- *      or whose `path` no longer exists on disk (`missingPathEntries`) makes
- *      this oracle exit non-zero, NAMING the offending row — the fail-loud
- *      control that stops the ledger from quietly outliving the debt it
- *      describes and becoming an unaudited suppression list. Retiring a
- *      violation (adding an explicit timeout) therefore REQUIRES removing its
- *      ledger row in the same commit; this is the ADR's documented,
- *      deliberate consequence, not a defect.
+ *   3. **Ledger completeness is asserted**: a ledger row whose `(path,
+ *      titleFingerprint, spawnCount)` no longer matches any current
+ *      violation (`orphanedEntries`) or whose `path` no longer exists on
+ *      disk (`missingPathEntries`) makes this oracle exit non-zero, NAMING
+ *      the offending row — the fail-loud control that stops the ledger from
+ *      quietly outliving the debt it describes and becoming an unaudited
+ *      suppression list. Retiring a violation (adding an explicit timeout)
+ *      therefore REQUIRES removing its ledger row in the same commit; this
+ *      is the ADR's documented, deliberate consequence, not a defect.
  *
  * The historical baseline commit is `48d3dbc` (recorded as `baseline_commit`
  * in the ledger file, for provenance only — the oracle itself never computes
  * a git diff against it; the ledger's CONTENT, not a git ref, is what defines
  * "already accounted for").
+ *
+ * ## Why the key is a title fingerprint, not a line
+ * (`task-key-test-budget-ledger-rows-on-a-test-title-fingerprint`,
+ * `knowledge-file-level-anchor-mutex-does-not-prevent-one-agent-s`)
+ *
+ * The ledger originally keyed each row on `(path, line, spawnCount)`. A
+ * ledger's OWNER declares `file_anchors` on the files it EDITS, never on the
+ * files its DATA merely cites — so a pure line-insertion by an unrelated,
+ * fully-disjoint concurrent session anywhere ABOVE a ledgered test shifted
+ * that test's line and broke the row, with zero git conflict and zero
+ * anchor overlap. This happened three times in ~24 hours (see the task and
+ * knowledge doc above for the incident log) and is mechanical, not
+ * accidental: a `line` is an accident of file layout, not the test's
+ * identity. The test's TITLE is its identity — `scanFile` already extracts
+ * it (`Violation.title`) as a human-readable string for every violation it
+ * reports, so no new extraction machinery was needed, only a different key.
+ *
+ * The fingerprint is the **raw, verbatim title string** — no hash, no
+ * normalization. A hash would make `git diff` on the ledger opaque (an
+ * auditor sees a 64-hex-char change with no way to tell what test it
+ * describes); the raw title is already an exact, stable key precisely
+ * because both the ledger-writer and the ledger-reader derive it via the
+ * SAME `scanFile` extraction path (masked-source, quote-stripped), so there
+ * is no whitespace/casing drift to normalize away. `spawnCount` remains part
+ * of the compound key (never dropped to "path + title only, any count") —
+ * criterion 3 above still requires an exact match, and the credit the
+ * knowledge doc gives this oracle for refusing to re-exempt by path alone
+ * stays true of the title-keyed form too, now doubly so: title alone would
+ * already usually disambiguate, but `spawnCount` still gates a same-titled
+ * test whose BODY changed shape.
+ *
+ * `line` is retained in the schema purely as a diagnostic hint for humans
+ * skimming the ledger (kept fresh at migration time) — it is NEVER read by
+ * `checkLedger`'s matching logic. Two test cases with the byte-identical
+ * title string in the same file are legal in both runners and would make a
+ * bare `(path, title)` key ambiguous; `checkLedger` therefore requires
+ * `(path, title, spawnCount)` to be collision-free across the CURRENT scan
+ * and throws `TestBudgetFingerprintCollisionError` (loud, deterministic —
+ * never "first match wins") the moment two violations in the same file
+ * share both title AND spawn count, before any ledger matching is
+ * attempted. See `findFirstFingerprintCollision` and its tests.
  *
  * ## D1 — declaration, never the number
  *
@@ -150,13 +203,20 @@
  *       else — an unparseable file must never read as merely "no violations
  *       found", and a partial scan is never cross-checked against the ledger).
  *   4 — the scan itself failed outside a single file's parse (e.g. the
- *       `packages/` directory is unreadable, or the ledger file is missing /
- *       malformed / fails Zod validation — `TestBudgetLedgerError`).
+ *       `packages/` directory is unreadable, the ledger file is missing /
+ *       malformed / fails Zod validation — `TestBudgetLedgerError` — or two
+ *       violations in the same file share an identical `(title, spawnCount)`
+ *       fingerprint, making title-keyed ledger matching ambiguous —
+ *       `TestBudgetFingerprintCollisionError`, see "Why the key is a title
+ *       fingerprint, not a line" above).
  *   5 — the exemption ledger itself is unsound: >=1 row no longer matches a
- *       real violation (`orphanedEntries` — the debt was fixed but the row
- *       wasn't retired) or names a path that no longer exists
- *       (`missingPathEntries`). This is criterion 3's fail-loud control —
- *       see the module header's "Baseline + exemption ledger" section.
+ *       real violation (`orphanedEntries` — since rows now key on the
+ *       test's TITLE rather than its line, this means the test case was
+ *       actually renamed, removed, or fixed — never merely that an
+ *       unrelated insertion shifted its line) or names a path that no
+ *       longer exists (`missingPathEntries`). This is criterion 3's
+ *       fail-loud control — see the module header's "Baseline + exemption
+ *       ledger" section.
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -201,11 +261,24 @@ export interface Violation {
 /** Repo-relative path to the exemption ledger — DATA the oracle reads (module header §Baseline + exemption ledger), never a suppression list embedded in this script. */
 export const LEDGER_RELATIVE_PATH = "scripts/test-budget-ledger.json";
 
-/** One recorded exemption: a violation present at ledger-landing time, with its measured location/quantity and why it is exempt. The four fields an auditor needs — nothing more. */
+/**
+ * One recorded exemption: a violation present at ledger-landing time, with
+ * its measured identity/quantity and why it is exempt.
+ *
+ * `titleFingerprint` + `spawnCount` are the ONLY fields `checkLedger` uses to
+ * match a row against a current violation (see the module header's "Why the
+ * key is a title fingerprint, not a line"). `line` is REQUIRED so every row
+ * stays human-auditable at write time, but it is a non-authoritative
+ * diagnostic hint only — matching never reads it, so an unrelated insertion
+ * shifting it can never break this row. A row missing `titleFingerprint`
+ * fails this schema loudly (Zod `min(1)`), never silently matching nothing.
+ */
 const TestBudgetLedgerEntrySchema = z.object({
   path: z.string().min(1),
-  line: z.number().int().positive(),
+  titleFingerprint: z.string().min(1),
   spawnCount: z.number().int().positive(),
+  /** Diagnostic hint only — see the field-level note above. Never read by `checkLedger`. */
+  line: z.number().int().positive(),
   reason: z.string().min(1),
 });
 
@@ -241,13 +314,40 @@ export class TestBudgetLedgerError extends Error {
 }
 
 /**
+ * Thrown by `checkLedger` when two or more scanned violations in the SAME
+ * file share an identical `(titleFingerprint, spawnCount)` pair — a
+ * title-keyed ledger cannot tell them apart, and this oracle refuses to
+ * resolve the ambiguity implicitly ("first match wins" would be a silent,
+ * nondeterministic fallback, exactly what D5/AC-5 forbid). Two `it()`/
+ * `test()` cases with the byte-identical title ARE legal in both runners —
+ * this is not a parse error — but they must be given distinct titles (or a
+ * different spawn-call count) before this oracle can key a ledger row to
+ * either one specifically.
+ */
+export class TestBudgetFingerprintCollisionError extends Error {
+  constructor(
+    public readonly file: string,
+    public readonly titleFingerprint: string,
+    public readonly spawnCount: number,
+    public readonly occurrences: number,
+  ) {
+    super(
+      `${file}: ${occurrences} test cases share the identical title "${titleFingerprint}" and spawnCount ${spawnCount} — ` +
+        `a ledger keyed on (path, titleFingerprint, spawnCount) cannot disambiguate them. Rename one of the it()/test() ` +
+        `titles (or change one case's spawn-call count) so each has a distinct (title, spawnCount) pair within this file.`,
+    );
+    this.name = "TestBudgetFingerprintCollisionError";
+  }
+}
+
+/**
  * Parses and Zod-validates raw ledger file content. Pure (no IO) — the IO
  * shell is `loadLedgerFromDisk`, below.
  *
  * @throws {TestBudgetLedgerError} `code: "invalid_json"` if `raw` is not
  *   valid JSON; `code: "schema"` if it parses but fails
- *   `TestBudgetLedgerFileSchema` (e.g. a row missing `reason`, or a
- *   non-positive `line`/`spawnCount`).
+ *   `TestBudgetLedgerFileSchema` (e.g. a row missing `titleFingerprint` or
+ *   `reason`, or a non-positive `line`/`spawnCount`).
  */
 export function parseLedgerFile(raw: string): TestBudgetLedgerFile {
   let json: unknown;
@@ -291,13 +391,50 @@ export function loadLedgerFromDisk(repoRoot: string): TestBudgetLedgerFile {
 export interface LedgerCheckResult {
   /** Scanned violations with NO matching ledger entry — new debt, always fails (exit 2). */
   readonly newViolations: readonly Violation[];
-  /** Ledger rows whose path exists but no longer match a real violation at that exact `(path, line, spawnCount)` — fixed, or drifted (exit 5). */
+  /** Ledger rows whose path exists but no longer match a real violation at that exact `(path, titleFingerprint, spawnCount)` — renamed, removed, or fixed (exit 5). */
   readonly orphanedEntries: readonly TestBudgetLedgerEntry[];
   /** Ledger rows whose `path` does not exist at all (exit 5). */
   readonly missingPathEntries: readonly TestBudgetLedgerEntry[];
 }
 
-const ledgerKey = (path: string, line: number): string => `${path}:${line}`;
+/**
+ * Composite matching key: `path` + `titleFingerprint` + `spawnCount` — see
+ * the module header's "Why the key is a title fingerprint, not a line".
+ * `line` deliberately never participates. Joined with ` ` (a byte that
+ * cannot appear in a JS/TS test title or a repo-relative path) rather than a
+ * printable delimiter like `:`, because a title is free text and could
+ * legitimately contain a colon (e.g. `"handles path a:b:3"`) — a printable
+ * delimiter risks a coincidental cross-field collision that ` ` cannot.
+ */
+const ledgerKey = (path: string, titleFingerprint: string, spawnCount: number): string => `${path} ${titleFingerprint} ${spawnCount}`;
+
+/**
+ * Scans `violations` for two or more entries in the SAME file sharing an
+ * identical `(titleFingerprint, spawnCount)` pair — the one shape a
+ * title-keyed ledger cannot disambiguate (AC-5: duplicate `it()`/`test()`
+ * titles are legal source, not a parse error, but they break exact-match
+ * ledger keying). Returns the FIRST such collision found, in scan order
+ * (deterministic — never "first match wins" silently, this is surfaced as a
+ * loud, named failure instead by the caller).
+ */
+function findFirstFingerprintCollision(
+  violations: readonly Violation[],
+): { file: string; titleFingerprint: string; spawnCount: number; occurrences: number } | undefined {
+  const seen = new Map<string, { file: string; titleFingerprint: string; spawnCount: number; occurrences: number }>();
+  for (const v of violations) {
+    const key = ledgerKey(v.file, v.title, v.spawnCount);
+    const existing = seen.get(key);
+    if (existing) {
+      existing.occurrences += 1;
+    } else {
+      seen.set(key, { file: v.file, titleFingerprint: v.title, spawnCount: v.spawnCount, occurrences: 1 });
+    }
+  }
+  for (const group of seen.values()) {
+    if (group.occurrences > 1) return group;
+  }
+  return undefined;
+}
 
 /**
  * Cross-checks `violations` (a full repo-tree scan) against the ledger's
@@ -305,21 +442,33 @@ const ledgerKey = (path: string, line: number): string => `${path}:${line}`;
  * without touching disk (the IO caller in `main` passes
  * `(p) => existsSync(join(repoRoot, p))`).
  *
- * A ledger entry EXEMPTS a violation iff `(entry.path, entry.line)` matches
- * `(violation.file, violation.line)` exactly AND `entry.spawnCount ===
- * violation.spawnCount` — an exact match, not "same location, any count":
- * see the module header's Baseline + exemption ledger §1 for why a drifted
- * count must re-open the row rather than silently keep exempting it.
+ * A ledger entry EXEMPTS a violation iff `(entry.path, entry.titleFingerprint,
+ * entry.spawnCount)` matches `(violation.file, violation.title,
+ * violation.spawnCount)` exactly — an exact match on both title AND spawn
+ * count, never path-alone and never "same title, any count": see the module
+ * header's "Why the key is a title fingerprint, not a line" for why a
+ * drifted spawn count must re-open the row rather than silently keep
+ * exempting it, and why `line` never participates in this match.
  *
  * @param violations the full current scan result (ALL files, not pre-filtered).
  * @param entries the ledger's entry list (already Zod-validated).
  * @param pathExists injected existence check, keyed by the entry's repo-relative path.
+ * @throws {TestBudgetFingerprintCollisionError} if two `violations` in the
+ *   same file share an identical `(titleFingerprint, spawnCount)` — see
+ *   `findFirstFingerprintCollision`. Thrown BEFORE any ledger matching is
+ *   attempted, so an ambiguous scan never silently produces a one-sided
+ *   result.
  */
 export function checkLedger(
   violations: readonly Violation[],
   entries: readonly TestBudgetLedgerEntry[],
   pathExists: (path: string) => boolean,
 ): LedgerCheckResult {
+  const collision = findFirstFingerprintCollision(violations);
+  if (collision) {
+    throw new TestBudgetFingerprintCollisionError(collision.file, collision.titleFingerprint, collision.spawnCount, collision.occurrences);
+  }
+
   const missingPathEntries: TestBudgetLedgerEntry[] = [];
   const checkableEntries: TestBudgetLedgerEntry[] = [];
   for (const entry of entries) {
@@ -331,20 +480,21 @@ export function checkLedger(
   }
 
   const violationByKey = new Map<string, Violation>();
-  for (const v of violations) violationByKey.set(ledgerKey(v.file, v.line), v);
+  for (const v of violations) violationByKey.set(ledgerKey(v.file, v.title, v.spawnCount), v);
 
   const exemptedKeys = new Set<string>();
   const orphanedEntries: TestBudgetLedgerEntry[] = [];
   for (const entry of checkableEntries) {
-    const match = violationByKey.get(ledgerKey(entry.path, entry.line));
-    if (match !== undefined && match.spawnCount === entry.spawnCount) {
-      exemptedKeys.add(ledgerKey(entry.path, entry.line));
+    const key = ledgerKey(entry.path, entry.titleFingerprint, entry.spawnCount);
+    const match = violationByKey.get(key);
+    if (match !== undefined) {
+      exemptedKeys.add(key);
     } else {
       orphanedEntries.push(entry);
     }
   }
 
-  const newViolations = violations.filter((v) => !exemptedKeys.has(ledgerKey(v.file, v.line)));
+  const newViolations = violations.filter((v) => !exemptedKeys.has(ledgerKey(v.file, v.title, v.spawnCount)));
 
   return { newViolations, orphanedEntries, missingPathEntries };
 }
@@ -884,14 +1034,31 @@ function walkTestFiles(dir: string, repoRoot: string, out: string[]): void {
   }
 }
 
+/** The raw scan result of `scanRepoTree`, before any ledger cross-check. */
+export interface RepoScanResult {
+  /** Every repo-relative `.test.ts`/`.bun.test.ts` path scanned. */
+  readonly files: readonly string[];
+  /** All violations found across every file that DID parse. */
+  readonly violations: readonly Violation[];
+  /** `"<file>: <message>"` for every file `scanFile` could not lexically parse. */
+  readonly parseFailures: readonly string[];
+}
+
 /**
- * CLI entrypoint: walks `<repoRoot>/packages` for test files, scans each
- * with `scanFile`, cross-checks the result against the baseline exemption
- * ledger (`loadLedgerFromDisk` + `checkLedger` — see the module header's
- * Baseline + exemption ledger section), and prints a report. Returns the
- * process exit code (never calls `process.exit` itself, so it stays testable).
+ * Walks `<repoRoot>/packages` for every `.test.ts`/`.bun.test.ts` file and
+ * `scanFile`s each one — the exact scan `main` performs internally, exposed
+ * as its own function so a caller OTHER than the CLI entrypoint can derive a
+ * violation's CURRENT title/spawnCount by actually running this oracle
+ * against the tree. The canonical such caller is the ledger migration
+ * script (`scripts/migrate-test-budget-ledger-to-title-fingerprint.ts`,
+ * task `task-key-test-budget-ledger-rows-on-a-test-title-fingerprint`) —
+ * AC-2 there forbids hand-transcribing a title, which would reintroduce the
+ * contiguous-substring failure this repo has measured repeatedly.
+ *
+ * IO (reads every scanned file from disk); pure in the sense that it never
+ * writes anything and never calls `process.exit`.
  */
-export function main(repoRoot: string = REPO_ROOT): number {
+export function scanRepoTree(repoRoot: string = REPO_ROOT): RepoScanResult {
   const files: string[] = [];
   walkTestFiles(join(repoRoot, "packages"), repoRoot, files);
 
@@ -910,6 +1077,19 @@ export function main(repoRoot: string = REPO_ROOT): number {
       }
     }
   }
+
+  return { files, violations, parseFailures };
+}
+
+/**
+ * CLI entrypoint: runs `scanRepoTree`, cross-checks the result against the
+ * baseline exemption ledger (`loadLedgerFromDisk` + `checkLedger` — see the
+ * module header's Baseline + exemption ledger section), and prints a
+ * report. Returns the process exit code (never calls `process.exit` itself,
+ * so it stays testable).
+ */
+export function main(repoRoot: string = REPO_ROOT): number {
+  const { files, violations, parseFailures } = scanRepoTree(repoRoot);
 
   if (parseFailures.length > 0) {
     console.error(`check-test-budgets: ${parseFailures.length} file(s) could not be parsed:\n`);
@@ -935,20 +1115,24 @@ export function main(repoRoot: string = REPO_ROOT): number {
   if (ledgerCheck.missingPathEntries.length > 0) {
     console.error(`\ncheck-test-budgets: ${ledgerCheck.missingPathEntries.length} ledger entry(ies) in ${LEDGER_RELATIVE_PATH} reference a path that does not exist:\n`);
     for (const e of ledgerCheck.missingPathEntries) {
-      console.error(`  ${e.path}:${e.line} — recorded ${e.spawnCount} spawn(s) — ${e.reason}`);
+      console.error(`  ${e.path} — "${e.titleFingerprint}" (recorded ${e.spawnCount} spawn(s), last seen near line ${e.line}) — ${e.reason}`);
     }
     console.error(`\nRemove this row from ${LEDGER_RELATIVE_PATH} — a ledger entry must point at a file that still exists.`);
   }
 
   if (ledgerCheck.orphanedEntries.length > 0) {
-    console.error(`\ncheck-test-budgets: ${ledgerCheck.orphanedEntries.length} ledger entry(ies) in ${LEDGER_RELATIVE_PATH} no longer match a real violation (fixed, or drifted):\n`);
+    console.error(
+      `\ncheck-test-budgets: ${ledgerCheck.orphanedEntries.length} ledger entry(ies) in ${LEDGER_RELATIVE_PATH} no longer match a real violation:\n`,
+    );
     for (const e of ledgerCheck.orphanedEntries) {
-      console.error(`  ${e.path}:${e.line} — recorded ${e.spawnCount} spawn(s) — ${e.reason}`);
+      console.error(`  ${e.path} — "${e.titleFingerprint}" (recorded ${e.spawnCount} spawn(s), last seen near line ${e.line}) — ${e.reason}`);
     }
     console.error(
       `\nAn exempt ledger entry must keep matching a REAL violation ` +
-        `(adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3) — ` +
-        `retire this row from ${LEDGER_RELATIVE_PATH} in the SAME commit that fixed (or changed) it.`,
+        `(adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3). Rows now key on the test's TITLE, not its ` +
+        `line, so this orphan means the test case itself was renamed, removed, or actually fixed — never merely that an unrelated ` +
+        `insertion elsewhere in the file shifted its line (that class of false break is exactly what this key change eliminates). ` +
+        `Retire this row from ${LEDGER_RELATIVE_PATH} in the SAME commit that renamed/removed/fixed it.`,
     );
   }
 

@@ -174,3 +174,138 @@ describe("broken fixture — never a silent skip", () => {
   });
 });
 `;
+
+// ─────────────────────────────────────────────────────────────────────────
+// task-key-test-budget-ledger-rows-on-a-test-title-fingerprint — AC-5
+// (duplicate-title collision) and AC-6 (insertion-shift regression) fixtures.
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * AC-6 regression fixture: ONE violating test case (title overridable via
+ * `title` — used by the rename control), preceded by `extraLinesAbove` inert
+ * comment lines. Proves a title-keyed ledger row survives a pure
+ * line-INSERTION above it — the exact scenario that broke the old
+ * `(path, line, spawnCount)` key three times in ~24 hours with zero git
+ * conflict and zero anchor overlap
+ * (`knowledge-file-level-anchor-mutex-does-not-prevent-one-agent-s`).
+ */
+export function insertionShiftFixture(extraLinesAbove: number, title = "the violating case"): string {
+  const padding = "// padding line to shift the case below\n".repeat(extraLinesAbove);
+  return `import { describe, it, expect } from "bun:test";
+import { spawnSync } from "node:child_process";
+
+function runBinary(args: string[]): number {
+  const result = spawnSync("true", args);
+  return result.status ?? 0;
+}
+
+${padding}describe("insertion-shift suite", () => {
+  it(${JSON.stringify(title)}, () => {
+    runBinary(["a"]);
+    runBinary(["b"]);
+    runBinary(["c"]);
+    expect(true).toBe(true);
+  });
+});
+`;
+}
+
+/** AC-6 control (b): the same suite with the violating case entirely REMOVED — its ledger row must orphan (fail loud), never silently vanish. */
+export const INSERTION_SHIFT_FIXTURE_CASE_DELETED = `import { describe, it, expect } from "bun:test";
+
+describe("insertion-shift suite", () => {
+  it("an unrelated, clean case", () => {
+    expect(true).toBe(true);
+  });
+});
+`;
+
+/** AC-6 control (c): the original violating case PLUS a genuinely NEW, differently-titled violating case — the new one must report as new debt while the original stays exempted (not double-counted, not hidden). */
+export const INSERTION_SHIFT_FIXTURE_PLUS_NEW_VIOLATION = `import { describe, it, expect } from "bun:test";
+import { spawnSync } from "node:child_process";
+
+function runBinary(args: string[]): number {
+  const result = spawnSync("true", args);
+  return result.status ?? 0;
+}
+
+describe("insertion-shift suite", () => {
+  it("the violating case", () => {
+    runBinary(["a"]);
+    runBinary(["b"]);
+    runBinary(["c"]);
+    expect(true).toBe(true);
+  });
+
+  it("a genuinely new violating case", () => {
+    runBinary(["x"]);
+    runBinary(["y"]);
+    runBinary(["z"]);
+    expect(true).toBe(true);
+  });
+});
+`;
+
+/**
+ * AC-5: two `it()` cases in the SAME file sharing an identical title AND an
+ * identical spawn count — legal source in both runners, but the one shape a
+ * `(path, titleFingerprint, spawnCount)`-keyed ledger cannot disambiguate.
+ * `checkLedger` must refuse this loud (`TestBudgetFingerprintCollisionError`),
+ * never "first match wins" silently.
+ */
+export const DUPLICATE_TITLE_SAME_SPAWN_COUNT = `import { describe, it, expect } from "bun:test";
+import { spawnSync } from "node:child_process";
+
+function runBinary(args: string[]): number {
+  const result = spawnSync("true", args);
+  return result.status ?? 0;
+}
+
+describe("duplicate title suite", () => {
+  it("duplicate case title", () => {
+    runBinary(["a"]);
+    runBinary(["b"]);
+    runBinary(["c"]);
+    expect(true).toBe(true);
+  });
+
+  it("duplicate case title", () => {
+    runBinary(["d"]);
+    runBinary(["e"]);
+    runBinary(["f"]);
+    expect(true).toBe(true);
+  });
+});
+`;
+
+/**
+ * BOUNDARY companion to `DUPLICATE_TITLE_SAME_SPAWN_COUNT`: identical title,
+ * but a DIFFERENT spawn count — `spawnCount` still disambiguates the pair,
+ * so this must NOT be treated as a collision (AC-4: spawnCount stays part
+ * of the exact-match key, never dropped for "same title, any count").
+ */
+export const DUPLICATE_TITLE_DIFFERENT_SPAWN_COUNT = `import { describe, it, expect } from "bun:test";
+import { spawnSync } from "node:child_process";
+
+function runBinary(args: string[]): number {
+  const result = spawnSync("true", args);
+  return result.status ?? 0;
+}
+
+describe("duplicate title, different spawn count suite", () => {
+  it("same title different count", () => {
+    runBinary(["a"]);
+    runBinary(["b"]);
+    runBinary(["c"]);
+    expect(true).toBe(true);
+  });
+
+  it("same title different count", () => {
+    runBinary(["d"]);
+    runBinary(["e"]);
+    runBinary(["f"]);
+    runBinary(["g"]);
+    expect(true).toBe(true);
+  });
+});
+`;
