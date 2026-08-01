@@ -19,19 +19,39 @@
  *                                   and `⚑?`; NEVER counted as green.
  *   rm   <spec> <id> [--force]     Remove a criterion (exit 4 if evidence still
  *                                   references it, unless --force).
+ *   set  <spec> <id> [--statement <s>] [--oracle <o>] [--command <c>] [--rubric <r>]
+ *        [--note <n>] [--covers <req-id>]
+ *                                   In-place edit of ONE declared criterion
+ *                                   (spec-lore-ac-set-in-place-edit-of-a-declared-
+ *                                   acceptance D1-D6). `id`/`mode` are NOT editable —
+ *                                   `--mode` exits 2 naming the rm+add path (D1). At
+ *                                   least one other flag is required — zero flags
+ *                                   exits 2 (D3), never a silent no-op. `--statement`/
+ *                                   `--covers` are mode-agnostic; `--oracle`/`--command`
+ *                                   (script) / `--rubric` (ai) / `--note` (human) exit 4
+ *                                   against a criterion of a different mode (D5). On an
+ *                                   `approved` spec this demotes it to `draft`, exactly
+ *                                   like a content/title edit (D2). `--covers` REPLACES
+ *                                   `requirement_refs` wholesale across repeated flags in
+ *                                   one call; `--covers ""` clears it to `[]`.
  *
  * All subcommands accept --json for machine-readable output (SPEC-003 §4).
  * Exit codes per SPEC-003 §5 (via utils.ts::exitCode):
  *   0 = success
+ *   2 = CLI usage error (`set --mode`, `set` with zero field flags — both
+ *       argv-decidable, judged before any service call, spec-lore-ac-set-in-place-
+ *       edit-of-a-declared-acceptance D5a)
  *   3 = DOC_NOT_FOUND (spec not found)
  *   4 = VALIDATION_ERROR (malformed criterion, duplicate id, 50-entry cap, unknown
- *       id on rm, evidence blocking rm without --force)
+ *       id on rm/set naming the declared ids, evidence blocking rm without --force,
+ *       a mode-inconsistent flag on set naming the flag and the actual mode)
  *   5 = STALE_VERSION
  *
  * Source: SPEC-038 §4, §6 AC-ACODE-7; SPEC-039 §2 D8 (attested coverage annotation);
  *   SPEC-061 §Scope D5 (inconclusive badge); SPEC-070 AC-070-12 (shared fail-first
  *   precedence via @lore/core's deriveAcCoverageState); spec-workflow-hardening-
- *   evidence-red-vocabulary-claim-worktree §M1 AC-WH-1 (expected-fail badge)
+ *   evidence-red-vocabulary-claim-worktree §M1 AC-WH-1 (expected-fail badge);
+ *   spec-lore-ac-set-in-place-edit-of-a-declared-acceptance D1-D6 (`set` subcommand)
  */
 
 import { defineCommand } from "citty";
@@ -39,7 +59,7 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
 import { deriveAcCoverageState } from "@lore/core";
 import type { AcceptanceCriterion } from "@lore/core";
-import type { AcService, AcListResult } from "../../../service/ac-service.js";
+import type { AcService, AcListResult, SetCriterionPatch } from "../../../service/ac-service.js";
 import type { App } from "../../../app.js";
 
 /**
@@ -58,7 +78,7 @@ function requireAcService(app: App): AcService {
 export default defineCommand({
   meta: {
     name: "ac",
-    description: "Manage structured acceptance criteria on a spec (add / list / rm)",
+    description: "Manage structured acceptance criteria on a spec (add / list / rm / set)",
   },
   subCommands: {
     add: defineCommand({
@@ -229,6 +249,101 @@ export default defineCommand({
         }
       },
     }),
+
+    set: defineCommand({
+      meta: {
+        name: "set",
+        description: "Edit one declared acceptance criterion in place (id/mode are NOT editable)",
+      },
+      args: {
+        spec: {
+          type: "positional",
+          description: "Spec document ID or slug",
+          required: true,
+        },
+        id: {
+          type: "positional",
+          description: "Criterion id to edit",
+          required: true,
+        },
+        statement: {
+          type: "string",
+          description: "Replace the statement (mode-agnostic)",
+        },
+        oracle: {
+          type: "string",
+          description: "script mode only: replace the oracle (tsc|test|lint|build|e2e|other)",
+        },
+        command: {
+          type: "string",
+          description: "script mode only: replace the command",
+        },
+        rubric: {
+          type: "string",
+          description: "ai mode only: replace the judging rubric text",
+        },
+        note: {
+          type: "string",
+          description: "human mode only: replace the free-text note",
+        },
+        covers: {
+          type: "string",
+          description:
+            "[repeatable] replace covered PRD requirement ids wholesale (mode-agnostic); pass '' to clear to []",
+        },
+        mode: {
+          type: "string",
+          description: "NOT editable — exits 2; use `ac rm --force` then `ac add --mode <new>` instead",
+        },
+        json: {
+          type: "boolean",
+          description: "Output result as JSON",
+        },
+      },
+      async run({ args }) {
+        // D1/D5a — argv-decidable, judged BEFORE the app/store is even opened:
+        // `--mode` names a rule the command line alone already violates.
+        if (typeof args.mode === "string") {
+          process.stderr.write(
+            "Error: --mode cannot be changed via `lore ac set` — mode reinterprets every historical " +
+              "evidence row attributed to this id. Use `lore ac rm --force <spec> <id>` then " +
+              "`lore ac add <spec> <id> --mode <new-mode> ...` instead.\n",
+          );
+          process.exitCode = 2;
+          return;
+        }
+
+        const patch = buildSetPatch(args);
+        if (patch === null) {
+          process.stderr.write(
+            "Error: lore ac set requires at least one field to change: --statement, --oracle, --command, --rubric, --note, --covers\n",
+          );
+          process.exitCode = 2;
+          return;
+        }
+
+        const { app } = loadLoreApp();
+        try {
+          const result = await requireAcService(app).setCriterion(args.spec as string, args.id as string, patch);
+
+          if (!result.ok) {
+            process.stderr.write(formatError(result.error) + "\n");
+            process.exitCode = exitCode(result.error);
+            return;
+          }
+
+          if (args.json) {
+            console.log(JSON.stringify({ ok: true, data: { criteria: result.value } }, null, 2));
+            return;
+          }
+
+          console.log(`Updated acceptance criterion "${args.id as string}" on spec ${args.spec as string}`);
+          renderCriteriaList({ criteria: result.value, coverage: null, dangling: [] });
+        } finally {
+          app.close();
+        }
+      },
+    }),
   },
 });
 
@@ -281,6 +396,38 @@ function buildCriterionCandidate(args: Record<string, unknown>): unknown {
     verify,
     ...(requirement_refs !== undefined ? { requirement_refs } : {}),
   };
+}
+
+/**
+ * Assemble a {@link SetCriterionPatch} from raw CLI args for `lore ac set` — returns
+ * `null` when NO field flag was passed at all (D3's zero-flag no-op case), which the
+ * caller treats as an argv-decidable exit-2 usage error before ever opening the app
+ * (D5a: judged from the command line alone, the document is never opened for this
+ * check). `--mode` is deliberately absent here — it is rejected earlier, in `run`,
+ * before this function is even called.
+ *
+ * @remarks `--covers` mirrors `buildCriterionCandidate`'s citty normalization (string
+ *   for one occurrence, array for ≥2, undefined for zero) with ONE addition specific
+ *   to `set` (D1): a SINGLE occurrence of the empty string (`--covers ""`) is the
+ *   documented "clear to `[]`" sentinel, distinct from `add`'s "no `--covers` at all
+ *   means no `requirement_refs` field" (there is no prior value to clear on `add`).
+ */
+function buildSetPatch(args: Record<string, unknown>): SetCriterionPatch | null {
+  const patch: SetCriterionPatch = {};
+  if (typeof args.statement === "string") patch.statement = args.statement;
+  if (typeof args.oracle === "string") patch.oracle = args.oracle;
+  if (typeof args.command === "string") patch.command = args.command;
+  if (typeof args.rubric === "string") patch.rubric = args.rubric;
+  if (typeof args.note === "string") patch.note = args.note;
+
+  const coversRaw = args.covers;
+  if (typeof coversRaw === "string") {
+    patch.covers = coversRaw === "" ? [] : [coversRaw];
+  } else if (Array.isArray(coversRaw)) {
+    patch.covers = coversRaw as string[];
+  }
+
+  return Object.keys(patch).length === 0 ? null : patch;
 }
 
 // ─── Output Helpers ──────────────────────────────────────────────────────────

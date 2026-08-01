@@ -12,6 +12,11 @@
  *   addCriterion(specIdOrSlug, criterion)          → AcceptanceCriterion[] (updated list)
  *   listCriteria(specIdOrSlug)                     → AcListResult { criteria, coverage, dangling }
  *   removeCriterion(specIdOrSlug, acId, opts?)     → AcceptanceCriterion[] (updated list)
+ *   setCriterion(specIdOrSlug, acId, patch)        → AcceptanceCriterion[] (updated list) —
+ *     in-place edit of ONE declared criterion (spec-lore-ac-set-in-place-edit-of-a-declared-
+ *     acceptance, D1-D6). `id`/`mode` are immutable; `statement`/`covers` are mode-agnostic;
+ *     `oracle`/`command` (script) / `rubric` (ai) / `note` (human) are mode-specific and
+ *     rejected as VALIDATION_ERROR when passed against a criterion of a different mode (D5).
  *
  * @invariant All methods return Promise<Result<T, LoreError>> — no thrown exceptions.
  * @invariant `addCriterion` validates the FULL candidate array (existing + new) via
@@ -46,9 +51,19 @@
  *   actor "system") — same shape as `CorpusService.set`'s spec-extra write path, so
  *   `AuditService.verify`'s versions⋈audit completeness oracle (SPEC-035 §2) is
  *   satisfied without a special case for AC writes.
+ * @invariant `setCriterion` applies the SAME approved→draft demotion rule
+ *   `CorpusService.set` applies to a content/title edit (`isApprovedAutoResetToDraft`
+ *   in corpus-service.ts: `existing.status === "approved" && contentChanged` ⇒
+ *   `"draft"`) — an in-place AC edit changes the spec's governing contract exactly as
+ *   much as a content edit does (D2). This is a MIRROR, not a shared import: services
+ *   in this module never cross-import each other (see module CLAUDE.md "no
+ *   cross-service imports"); the one-line predicate is trivial enough that
+ *   `computeSetStatus` below and `corpus-service.ts`'s own inline check are each other's
+ *   single source of truth for the RULE (not the code), cross-referenced by name in
+ *   both places so a future edit to one is a deliberate signal to check the other.
  *
  * Side-effect class: IO (reads and writes via StoreInterface).
- * Source: SPEC-038 §4, §6, §7 D4
+ * Source: SPEC-038 §4, §6, §7 D4; spec-lore-ac-set-in-place-edit-of-a-declared-acceptance D1-D6
  */
 
 import { err, ok, type Result } from "@lore/core";
@@ -62,6 +77,7 @@ import {
   resolveGoverningSpecByAcScope,
   type AcceptanceCriterion,
   type AcCoverageFact,
+  type AcVerifyMode,
 } from "@lore/core";
 import type { DocId, DocRecord } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
@@ -97,6 +113,33 @@ export interface AcListResult {
 export interface RemoveCriterionOpts {
   /** Remove even when task evidence still references this id (see class invariant). */
   force?: boolean;
+}
+
+/**
+ * Patch for {@link AcService.setCriterion} — every field optional, each one present
+ * REPLACES that field on the target criterion, each one absent leaves it untouched
+ * (D1). Deliberately has no `id`/`mode` field — those two are NOT editable through
+ * this verb (D1): a caller wanting to change `mode` must use `rm` + `add` instead,
+ * which this type cannot even represent, making the immutability structural rather
+ * than a runtime check alone.
+ *
+ * @invariant `statement` and `covers` are mode-agnostic — every criterion has a
+ *   statement, and any criterion may declare covered PRD requirement ids.
+ * @invariant `oracle`/`command` apply only to a `mode: "script"` criterion, `rubric`
+ *   only to `"ai"`, `note` only to `"human"` — passing one against a criterion of a
+ *   different mode is VALIDATION_ERROR (D5), never silently accepted-and-dropped.
+ * @invariant `covers`, when present, REPLACES `requirement_refs` wholesale — an
+ *   empty array (`[]`) clears it. `undefined` (the field omitted) leaves the
+ *   existing `requirement_refs` untouched. The caller (CLI `commands/ac.ts`) is
+ *   responsible for turning a bare `--covers ""` into `[]` before calling here.
+ */
+export interface SetCriterionPatch {
+  statement?: string;
+  oracle?: string;
+  command?: string;
+  rubric?: string;
+  note?: string;
+  covers?: string[];
 }
 
 // ─── AcService ─────────────────────────────────────────────────────────────
@@ -284,6 +327,121 @@ export class AcService {
     return ok(updated);
   }
 
+  // ── setCriterion ──────────────────────────────────────────────────────────
+
+  /**
+   * Edit ONE declared acceptance criterion in place — `id` stable, every OTHER
+   * criterion and every other `extra` key untouched (D6), no `--force`, ever.
+   *
+   * @param specIdOrSlug - Spec document ULID or slug
+   * @param acId - The criterion's id (unchanged by this call — see {@link SetCriterionPatch})
+   * @param patch - Fields to replace; at least one MUST be present (D3 — a
+   *   completely-empty patch is VALIDATION_ERROR here as defense in depth, though the
+   *   CLI already refuses it pre-service at exit 2, argv-decidable, before this method
+   *   is ever called — D5a)
+   * @returns Updated criteria array (all entries, target replaced in place)
+   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a spec / empty patch / unknown id,
+   *   naming the declared ids (D4) / a mode-inconsistent flag, naming the flag and the
+   *   criterion's actual mode (D5) / malformed resulting shape), STALE_VERSION
+   *
+   * @example
+   * await acService.setCriterion("spec-my-feature", "AC-ACODE-1", {
+   *   statement: "Rejects malformed input with a named field",
+   * });
+   */
+  async setCriterion(
+    specIdOrSlug: string,
+    acId: string,
+    patch: SetCriterionPatch,
+  ): Promise<Result<AcceptanceCriterion[], LoreError>> {
+    const hasAnyField =
+      patch.statement !== undefined ||
+      patch.oracle !== undefined ||
+      patch.command !== undefined ||
+      patch.rubric !== undefined ||
+      patch.note !== undefined ||
+      patch.covers !== undefined;
+    if (!hasAnyField) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "patch",
+        message:
+          "lore ac set requires at least one field to change: --statement, --oracle, --command, --rubric, --note, --covers",
+        value: patch,
+      });
+    }
+
+    const specResult = await this.resolveSpec(specIdOrSlug);
+    if (!specResult.ok) return specResult;
+    const spec = specResult.value;
+
+    const existing = extractCriteria(spec);
+    const index = existing.findIndex((c) => c.id === acId);
+    if (index === -1) {
+      const declaredIds = existing.map((c) => c.id);
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "acceptance_criteria[].id",
+        message:
+          declaredIds.length > 0
+            ? `Acceptance criterion "${acId}" is not declared on this spec. Declared ids: ${declaredIds.join(", ")}`
+            : `Acceptance criterion "${acId}" is not declared on this spec — no criteria are declared yet`,
+        value: acId,
+      });
+    }
+    const target = existing[index] as AcceptanceCriterion;
+
+    // D5 — mode-inconsistent flag guard: VALIDATION_ERROR (document-state fault,
+    // D5a) naming BOTH the offending flag and the criterion's actual mode. Checked
+    // in a fixed order (oracle, command, rubric, note) so a caller passing more
+    // than one wrong flag at once still gets a single deterministic message.
+    const mode = target.verify.mode;
+    if (patch.oracle !== undefined && mode !== "script") {
+      return err(modeMismatchError(acId, "--oracle", mode));
+    }
+    if (patch.command !== undefined && mode !== "script") {
+      return err(modeMismatchError(acId, "--command", mode));
+    }
+    if (patch.rubric !== undefined && mode !== "ai") {
+      return err(modeMismatchError(acId, "--rubric", mode));
+    }
+    if (patch.note !== undefined && mode !== "human") {
+      return err(modeMismatchError(acId, "--note", mode));
+    }
+
+    const candidateCriterion: Record<string, unknown> = {
+      id: target.id,
+      statement: patch.statement ?? target.statement,
+      verify: buildVerifyCandidate(target.verify, patch),
+      ...(patch.covers !== undefined
+        ? { requirement_refs: patch.covers }
+        : target.requirement_refs !== undefined
+          ? { requirement_refs: target.requirement_refs }
+          : {}),
+    };
+
+    const candidateArray = existing.map((c, i) => (i === index ? candidateCriterion : c));
+    const parsed = specAcceptanceCriteriaSchema.safeParse(candidateArray);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      return err({
+        code: "VALIDATION_ERROR",
+        field: issue !== undefined ? `acceptance_criteria.${issue.path.join(".")}` : "acceptance_criteria",
+        message: issue !== undefined ? issue.message : "Invalid acceptance criterion",
+        value: candidateCriterion,
+      });
+    }
+
+    // D2 — mirrors CorpusService.set's isApprovedAutoResetToDraft (see class
+    // invariant above): an approved spec demotes to draft on this edit; a
+    // non-approved spec's status is untouched.
+    const newStatus = computeSetStatus(spec.status);
+
+    const writeResult = await this.writeCriteria(spec, parsed.data, "set", { status: newStatus, acId });
+    if (!writeResult.ok) return writeResult;
+    return ok(parsed.data);
+  }
+
   // ── Private Helpers ───────────────────────────────────────────────────────
 
   /** Resolves idOrSlug and validates it is a spec document. */
@@ -369,23 +527,30 @@ export class AcService {
   }
 
   /**
-   * Shared CAS-guarded write path for addCriterion/removeCriterion: bumps the spec's
-   * version, writes one insertVersion snapshot, then one audit entry (action "update",
-   * actor "system") — same shape as CorpusService.set's spec-extra write, so
+   * Shared CAS-guarded write path for addCriterion/removeCriterion/setCriterion: bumps
+   * the spec's version, writes one insertVersion snapshot, then one audit entry (action
+   * "update", actor "system") — same shape as CorpusService.set's spec-extra write, so
    * AuditService.verify's versions⋈audit completeness oracle needs no special case.
+   *
+   * @param opts.status - Explicit status to write (setCriterion's D2 demotion); omitted
+   *   for add/remove, which never change status — defaults to `spec.status` unchanged.
+   * @param opts.acId - The edited criterion's id, for setCriterion's change_summary/audit
+   *   `details` only (add/remove operate on the whole array, no single id to name).
    */
   private async writeCriteria(
     spec: DocRecord,
     criteria: AcceptanceCriterion[],
-    operation: "add" | "remove",
+    operation: "add" | "remove" | "set",
+    opts: { status?: DocRecord["status"]; acId?: string } = {},
   ): Promise<Result<DocRecord, LoreError>> {
     const now = new Date().toISOString();
     const newVersion = spec.version + 1;
     const newExtra: Record<string, unknown> = { ...spec.extra, acceptance_criteria: criteria };
+    const newStatus = opts.status ?? spec.status;
 
     const updateResult = await this.store.update(
       spec.id,
-      { extra: newExtra, updated_at: now, version: newVersion },
+      { extra: newExtra, updated_at: now, version: newVersion, status: newStatus },
       { expected_version: spec.version },
     );
     if (!updateResult.ok) return updateResult;
@@ -400,7 +565,10 @@ export class AcService {
       action: "update",
       created_at: now,
       created_by: "system",
-      change_summary: `Acceptance criteria ${operation === "add" ? "updated" : "updated (removal)"} — ${criteria.length} entries`,
+      change_summary:
+        operation === "set"
+          ? buildSetChangeSummary(criteria.length, opts.acId, spec.status, newStatus)
+          : `Acceptance criteria ${operation === "add" ? "updated" : "updated (removal)"} — ${criteria.length} entries`,
       // SPEC-072 D1/D2 — this write path only touches `extra`; carry the
       // current (unchanged) slug.
       slug: updateResult.value.slug,
@@ -413,7 +581,12 @@ export class AcService {
       session_id: spec.id,
       action: "update",
       doc_id: spec.id,
-      details: { operation, criteria_count: criteria.length, version: newVersion },
+      details: {
+        operation,
+        criteria_count: criteria.length,
+        version: newVersion,
+        ...(opts.acId !== undefined ? { ac_id: opts.acId } : {}),
+      },
     });
     if (!auditResult.ok) return auditResult;
 
@@ -432,4 +605,90 @@ export class AcService {
 function extractCriteria(spec: DocRecord): AcceptanceCriterion[] {
   const parsed = specAcceptanceCriteriaSchema.safeParse(spec.extra["acceptance_criteria"]);
   return parsed.success ? parsed.data : [];
+}
+
+/**
+ * Build the candidate `verify` object for {@link AcService.setCriterion} — mode is
+ * ALWAYS carried over from `existingVerify` unchanged (D1: not editable through this
+ * verb); each mode-specific field is `patch`'s value when supplied, else the
+ * existing value. Deliberately returns `Record<string, unknown>` (not the typed
+ * `AcceptanceCriterion["verify"]` union) — same pattern `commands/ac.ts`'s
+ * `buildCriterionCandidate` already uses for `add`: the candidate is validated by
+ * `specAcceptanceCriteriaSchema.safeParse` immediately after, which is the single
+ * source of truth for shape correctness, not this assembly step.
+ */
+function buildVerifyCandidate(
+  existingVerify: AcceptanceCriterion["verify"],
+  patch: SetCriterionPatch,
+): Record<string, unknown> {
+  switch (existingVerify.mode) {
+    case "script":
+      return {
+        mode: "script",
+        oracle: patch.oracle ?? existingVerify.oracle,
+        command: patch.command ?? existingVerify.command,
+        ...(existingVerify.timeout_ms !== undefined ? { timeout_ms: existingVerify.timeout_ms } : {}),
+      };
+    case "ai":
+      return { mode: "ai", rubric: patch.rubric ?? existingVerify.rubric };
+    case "human":
+      return {
+        mode: "human",
+        ...(patch.note !== undefined
+          ? { note: patch.note }
+          : existingVerify.note !== undefined
+            ? { note: existingVerify.note }
+            : {}),
+      };
+  }
+}
+
+/**
+ * D5's VALIDATION_ERROR for a flag that does not apply to the target criterion's
+ * mode — names BOTH the flag and the actual mode (D5: "accepting-and-dropping would
+ * let a caller believe an oracle was rewritten when it was not"). Exit-4 family per
+ * D5a: this is decidable only against the RESOLVED document's declared mode, never
+ * from argv alone.
+ */
+function modeMismatchError(acId: string, flag: string, actualMode: AcVerifyMode): LoreError {
+  return {
+    code: "VALIDATION_ERROR",
+    field: "verify",
+    message: `${flag} only applies to a "${modeFieldName(flag)}"-mode criterion — "${acId}" is mode "${actualMode}"`,
+    value: { ac_id: acId, flag, mode: actualMode },
+  };
+}
+
+/** The verify mode a given mode-specific flag belongs to (for modeMismatchError's message). */
+function modeFieldName(flag: string): AcVerifyMode {
+  if (flag === "--oracle" || flag === "--command") return "script";
+  if (flag === "--rubric") return "ai";
+  return "human";
+}
+
+/**
+ * D2 — mirrors CorpusService.set's `isApprovedAutoResetToDraft` rule
+ * (`existing.status === "approved" && contentChanged` ⇒ `"draft"`). Every
+ * `setCriterion` call changes governing content by construction (the empty-patch
+ * case already returned VALIDATION_ERROR before this is reached), so the
+ * `contentChanged` conjunct is always true here — this function only re-states the
+ * `existingStatus === "approved"` half.
+ */
+function computeSetStatus(existingStatus: DocRecord["status"]): DocRecord["status"] {
+  return existingStatus === "approved" ? "draft" : existingStatus;
+}
+
+/**
+ * change_summary for a `setCriterion` write — names the edited id, and appends a
+ * demotion note ONLY when this write actually moved `approved` → `draft` (AC-ACS-4:
+ * the draft-stays-draft case must show no status-transition text at all).
+ */
+function buildSetChangeSummary(
+  count: number,
+  acId: string | undefined,
+  fromStatus: DocRecord["status"],
+  toStatus: DocRecord["status"],
+): string {
+  const base = `Acceptance criterion "${acId ?? "?"}" updated — ${count} entries`;
+  return fromStatus === "approved" && toStatus === "draft" ? `${base} (demoted approved → draft on edit)` : base;
 }
