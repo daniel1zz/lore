@@ -105,7 +105,21 @@
  * routed through this command, so an MCP-originated self-reported pass could
  * bypass the precheck entirely.
  *
- * Source: SPEC-025 §4 AC-WF-1, AC-WF-2; SPEC-038 §4, §7 D3; SPEC-056 §Design Decisions D8
+ * Refusal message names the checked root(s) (task-lore-evidence-s-oracle-
+ * file-precheck-resolves-against-the) — `../evidence-precheck.js::
+ * describePrecheckRoots` recomputes the SAME candidate roots
+ * `findMissingOracleFilesForEvidence` just tried (SSOT, never drifts) so an
+ * author reading "Oracle file(s) not found" can tell "your file is genuinely
+ * missing" from "the precheck looked in the wrong tree". This CLI surface's
+ * `cwd` is always correct by construction (a fresh subprocess per invocation
+ * inherits the caller's real shell cwd) — the MCP surface (`../../mcp/tools.js`)
+ * is where a long-lived stdio server's own `process.cwd()` can differ from
+ * the calling agent's actual directory, and gains a `caller_cwd` escape hatch
+ * there instead (mirrors `lore verify`'s `--execution-root`, SPEC-063, for the
+ * identical class of problem).
+ *
+ * Source: SPEC-025 §4 AC-WF-1, AC-WF-2; SPEC-038 §4, §7 D3; SPEC-056 §Design Decisions D8;
+ *   task-lore-evidence-s-oracle-file-precheck-resolves-against-the
  */
 
 import { existsSync, readFileSync } from "fs";
@@ -118,6 +132,7 @@ import { requirePhaseWorkflowService } from "../phase-wiring.js";
 import {
   findMissingOracleFilesForEvidence,
   findFilteredPassRefusal,
+  describePrecheckRoots,
 } from "../evidence-precheck.js";
 
 const VALID_RESULTS = ["pass", "fail", "expected-fail"] as const;
@@ -207,23 +222,33 @@ export default defineCommand({
       // findMissingOracleFilesForEvidence (../evidence-precheck.js) — shared
       // verbatim with the MCP adapter's lore_evidence_add handler, so the two
       // surfaces cannot drift on which calls are in scope.
-      const missing = findMissingOracleFilesForEvidence({
-        oracle: args.oracle as string,
-        result: args.result as string,
-        command: args.command as string,
+      const precheckRoots = {
         cwd: process.cwd(),
         // reason: dbPath is <corpusRoot>/.lore/lore.db — the corpus root is two
         // levels up. Distinct from cwd whenever the invocation runs from a
         // subdirectory of the corpus (or a linked worktree, SPEC-063).
         corpusRoot: dirname(dirname(dbPath)),
+      };
+      const missing = findMissingOracleFilesForEvidence({
+        oracle: args.oracle as string,
+        result: args.result as string,
+        command: args.command as string,
+        ...precheckRoots,
         fileExists: existsSync,
       });
       if (missing.length > 0) {
+        // reason: task-lore-evidence-s-oracle-file-precheck-resolves-against-the
+        // — the refusal must name WHICH root(s) it checked, so an author can
+        // tell "your file is genuinely missing" from "I looked in the wrong
+        // tree" (`describePrecheckRoots` recomputes the SAME candidates
+        // `findMissingOracleFilesForEvidence` just tried — SSOT, never drifts).
+        const checkedRoots = describePrecheckRoots(args.command as string, precheckRoots);
         const precheckError: LoreError = {
           code: "VALIDATION_ERROR",
           field: "command",
           message:
             `Oracle file(s) not found: ${missing.join(", ")}. ` +
+            `Checked root(s): ${checkedRoots.join(", ")}. ` +
             "Author the oracle file or fix the path in --command; " +
             "use --oracle manual for genuinely manual checks.",
           value: args.command,

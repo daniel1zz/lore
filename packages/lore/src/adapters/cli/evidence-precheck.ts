@@ -20,6 +20,11 @@
  *     `lore_evidence_add`) adapters share ONE decision of which calls are even
  *     in scope for this precheck (task-mcp-lore-evidence-add-bypasses-the-
  *     oracle-file-existence)
+ *   - describePrecheckRoots(command, opts) — names the exact absolute root
+ *     paths `findMissingOracleFiles` would check `command`'s tokens against,
+ *     for refusal-message construction (defect: task-lore-evidence-s-oracle-
+ *     file-precheck-resolves-against-the — the pre-fix refusal named no root
+ *     at all)
  *   - findFilteredPassProofGap(input) / findFilteredPassRefusal(input) —
  *     the SECOND self-report guard hosted here (SPEC-061 AC-061-11..14, 17): a
  *     `--result pass` whose `--command` carries a `-t` case filter must arrive
@@ -43,7 +48,9 @@
  *
  * Source: task-lore-evidence-self-reported-pass-lacks-oracle-file;
  *   task-lore-evidence-must-refuse-a-t-filtered-pass-with-no (SPEC-061,
- *   adr-lore-evidence-proves-a-filtered-pass-with-the-runner-s-own)
+ *   adr-lore-evidence-proves-a-filtered-pass-with-the-runner-s-own);
+ *   task-lore-evidence-s-oracle-file-precheck-resolves-against-the
+ *   (MCP `caller_cwd` escape hatch + roots-named refusal message)
  */
 
 import {
@@ -156,17 +163,73 @@ function joinPath(base: string, segment: string): string {
 }
 
 /**
- * Reports which test-file tokens extracted from `command` resolve to no
- * existing file under ANY plausible root: the cd-prefix target (if the
- * command starts with `cd <dir> &&`/`cd <dir>; `), `opts.cwd`, and
- * `opts.corpusRoot` (when distinct from `cwd`). A token already absolute is
- * checked as-is (no root candidates). A token counts as "missing" only when
- * it fails EVERY applicable root — the check is deliberately permissive
- * about WHERE the file lives, strict about WHETHER it exists anywhere
- * plausible.
+ * Shared root-candidate computation for BOTH {@link findMissingOracleFiles}
+ * (existence checking) and {@link describePrecheckRoots} (refusal-message
+ * naming) — SSOT so the two can never drift on "which roots did we actually
+ * try" (defect: task-lore-evidence-s-oracle-file-precheck-resolves-against-
+ * the — the pre-fix refusal named NO root at all, leaving an author unable to
+ * tell "your file is missing" from "I looked in the wrong tree").
+ *
+ * `opts.additionalCwds` (SPEC-042/M4-class fix, MCP-surface specific) is
+ * treated EXACTLY like `opts.cwd` — including cd-prefix joining — never a
+ * bare extra root. A long-lived MCP stdio server's own `process.cwd()`
+ * reflects wherever THAT PROCESS was launched, not the calling agent's actual
+ * current directory (a per-invocation CLI subprocess has no such gap —
+ * `process.cwd()` there IS the caller's real cwd). `additionalCwds` gives the
+ * calling agent an explicit channel to declare its real directory instead
+ * (mirrors `lore verify`'s `--execution-root` escape hatch for the identical
+ * class of "a process cannot autonomously know its correct execution root"
+ * problem, SPEC-063). Purely ADDITIVE — every root `findMissingOracleFiles`
+ * already tried is still tried; a genuinely-missing file still fails every
+ * root, `additionalCwds` included (the anti-vacuous-pass control is
+ * unaffected by construction: more candidates can only ever resolve MORE
+ * tokens, never suppress a real miss).
  *
  * @param command - the exact command string recorded via `lore evidence --command`
  * @param opts.cwd - absolute current working directory
+ * @param opts.additionalCwds - absolute directories to ALSO treat as `cwd`
+ *   (cd-prefix joining included for each) — omitted for every caller that
+ *   doesn't need this (CLI; MCP callers that never pass `caller_cwd`)
+ * @param opts.corpusRoot - absolute discovered `.lore/` corpus root; omitted
+ *   or equal to `cwd` means only `cwd` (+ any `additionalCwds`) is tried
+ * @returns de-duplicated, order-preserving absolute root paths this command
+ *   would be checked against (cd-target-joined bases first, then bare bases,
+ *   then `corpusRoot` if distinct from every base)
+ */
+function computeCandidateRoots(
+  command: string,
+  opts: { cwd: string; additionalCwds?: string[]; corpusRoot?: string },
+): string[] {
+  const cdTarget = extractCdPrefixTarget(command);
+  const bases = [opts.cwd, ...(opts.additionalCwds ?? [])];
+  const roots: string[] = [];
+  const seen = new Set<string>();
+  const pushUnique = (root: string): void => {
+    if (seen.has(root)) return;
+    seen.add(root);
+    roots.push(root);
+  };
+  for (const base of bases) {
+    if (cdTarget !== null) pushUnique(joinPath(base, cdTarget));
+    pushUnique(base);
+  }
+  if (opts.corpusRoot !== undefined) pushUnique(opts.corpusRoot);
+  return roots;
+}
+
+/**
+ * Reports which test-file tokens extracted from `command` resolve to no
+ * existing file under ANY plausible root: the cd-prefix target (if the
+ * command starts with `cd <dir> &&`/`cd <dir>; `), `opts.cwd` (and any
+ * `opts.additionalCwds`), and `opts.corpusRoot` (when distinct from every
+ * cwd candidate). A token already absolute is checked as-is (no root
+ * candidates). A token counts as "missing" only when it fails EVERY
+ * applicable root — the check is deliberately permissive about WHERE the
+ * file lives, strict about WHETHER it exists anywhere plausible.
+ *
+ * @param command - the exact command string recorded via `lore evidence --command`
+ * @param opts.cwd - absolute current working directory
+ * @param opts.additionalCwds - see {@link computeCandidateRoots}'s param docs
  * @param opts.corpusRoot - absolute discovered `.lore/` corpus root; omitted
  *   or equal to `cwd` means only `cwd` is tried
  * @param opts.fileExists - injected existence check (real caller: `fs.existsSync`)
@@ -183,19 +246,12 @@ function joinPath(base: string, segment: string): string {
  */
 export function findMissingOracleFiles(
   command: string,
-  opts: { cwd: string; corpusRoot?: string; fileExists: FileExistsPort },
+  opts: { cwd: string; additionalCwds?: string[]; corpusRoot?: string; fileExists: FileExistsPort },
 ): string[] {
   const tokens = extractTestFileTokens(command);
   if (tokens.length === 0) return [];
 
-  const cdTarget = extractCdPrefixTarget(command);
-  const roots = [
-    ...(cdTarget !== null ? [joinPath(opts.cwd, cdTarget)] : []),
-    opts.cwd,
-    ...(opts.corpusRoot !== undefined && opts.corpusRoot !== opts.cwd
-      ? [opts.corpusRoot]
-      : []),
-  ];
+  const roots = computeCandidateRoots(command, opts);
 
   const missing: string[] = [];
   for (const token of tokens) {
@@ -209,6 +265,34 @@ export function findMissingOracleFiles(
     if (!existsSomewhere) missing.push(token);
   }
   return missing;
+}
+
+/**
+ * Names the exact absolute root paths {@link findMissingOracleFiles} would
+ * check `command`'s extracted test-file tokens against — for refusal-message
+ * construction ONLY (never re-derives the existence check itself; SSOT via
+ * {@link computeCandidateRoots}). Exists so a caller reading the refusal
+ * message can tell "your file is missing" from "I looked in the wrong tree"
+ * (defect: task-lore-evidence-s-oracle-file-precheck-resolves-against-the) —
+ * the pre-fix message named neither.
+ *
+ * @param command - the exact command string recorded via `lore evidence --command`
+ * @param opts - same shape {@link findMissingOracleFiles} accepts (minus `fileExists`)
+ * @returns de-duplicated, order-preserving absolute root paths — `[]` iff
+ *   `command` references no extractable test-file token at all (nothing
+ *   would be checked, so there is nothing to name)
+ * @example
+ *   describePrecheckRoots("cd packages/lore && bun test tests/x.bun.test.ts", {
+ *     cwd: "/repo", corpusRoot: "/main-checkout",
+ *   })
+ *   // => ["/repo/packages/lore", "/repo", "/main-checkout"]
+ */
+export function describePrecheckRoots(
+  command: string,
+  opts: { cwd: string; additionalCwds?: string[]; corpusRoot?: string },
+): string[] {
+  if (extractTestFileTokens(command).length === 0) return [];
+  return computeCandidateRoots(command, opts);
 }
 
 /**
@@ -249,6 +333,9 @@ function isSelfReportedPassInScope(input: { oracle: string; result: string }): b
  * @param input.command - the exact command string, passed straight through to
  *   `findMissingOracleFiles`
  * @param input.cwd - absolute current working directory
+ * @param input.additionalCwds - see {@link computeCandidateRoots}'s param
+ *   docs — the MCP-surface `caller_cwd`-style escape hatch, omitted by every
+ *   caller that doesn't need it (CLI; MCP callers that never pass it)
  * @param input.corpusRoot - absolute discovered corpus root; omitted or equal
  *   to `cwd` means only `cwd` is tried
  * @param input.fileExists - injected existence check (real caller:
@@ -269,6 +356,7 @@ export function findMissingOracleFilesForEvidence(input: {
   result: string;
   command: string;
   cwd: string;
+  additionalCwds?: string[];
   corpusRoot?: string;
   fileExists: FileExistsPort;
 }): string[] {
@@ -276,10 +364,12 @@ export function findMissingOracleFilesForEvidence(input: {
   return findMissingOracleFiles(input.command, {
     cwd: input.cwd,
     // reason: exactOptionalPropertyTypes — conditionally spread rather than
-    // pass `corpusRoot: input.corpusRoot` verbatim, since `input.corpusRoot`'s
-    // type is `string | undefined` (an explicit `undefined` call-site value is
-    // legal here) while findMissingOracleFiles's own `corpusRoot?: string`
-    // rejects an explicit `undefined` under this tsconfig.
+    // pass the field verbatim, since the input's type is `T | undefined` (an
+    // explicit `undefined` call-site value is legal here) while
+    // findMissingOracleFiles's own optional fields reject an explicit
+    // `undefined` under this tsconfig (mirrors the pre-existing `corpusRoot`
+    // spread immediately below).
+    ...(input.additionalCwds !== undefined ? { additionalCwds: input.additionalCwds } : {}),
     ...(input.corpusRoot !== undefined ? { corpusRoot: input.corpusRoot } : {}),
     fileExists: input.fileExists,
   });
