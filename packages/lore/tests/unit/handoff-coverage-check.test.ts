@@ -986,6 +986,148 @@ describe("AC-RCH-8 — the exit status carries no verdict", () => {
   });
 });
 
+// ─── AC-RCS-1 ───────────────────────────────────────────────────────────────
+//
+// spec-resume-coverage-floor-the-satisfaction-boundaries-a S1: an accepted
+// deferral requires a non-empty reason after RESUME_DISPOSITION_DEFERRED_PREFIX.
+
+describe("AC-RCS-1 — an accepted deferral requires a non-empty reason (S1: deferral reason)", () => {
+  /** One `last_assistant_message` payload class against the TWO_AND_TWO fixture (N=4 items) and the verdict it must produce. */
+  interface DeferralReasonFixture {
+    readonly label: string;
+    readonly message: (ids: readonly string[]) => string;
+    readonly expectBlock: boolean;
+  }
+
+  const DEFERRAL_REASON_FIXTURES: readonly DeferralReasonFixture[] = [
+    {
+      label: "every item deferred with NOTHING after the colon (bare prefix) still blocks",
+      message: (ids) => ids.map((id) => dispositionLine(id, RESUME_DISPOSITION_DEFERRED_PREFIX)).join("\n"),
+      expectBlock: true,
+    },
+    {
+      label: "every item deferred with ONLY WHITESPACE after the colon still blocks",
+      message: (ids) => ids.map((id) => dispositionLine(id, `${RESUME_DISPOSITION_DEFERRED_PREFIX}   `)).join("\n"),
+      expectBlock: true,
+    },
+    {
+      label: "control: every item deferred with a NON-EMPTY reason closes cleanly",
+      message: (ids) =>
+        ids.map((id) => dispositionLine(id, `${RESUME_DISPOSITION_DEFERRED_PREFIX}out of scope`)).join("\n"),
+      expectBlock: false,
+    },
+    {
+      label: "control: every item marked done closes cleanly",
+      message: (ids) => ids.map((id) => dispositionLine(id, RESUME_DISPOSITION_DONE)).join("\n"),
+      expectBlock: false,
+    },
+    {
+      label: "control: no disposition lines at all still blocks — the detector was armed and capable of blocking",
+      message: () => "no accounting whatsoever",
+      expectBlock: true,
+    },
+  ];
+
+  it("BOUNDARY: the fixture array covers both a blocking half and a control half — an emptied or one-sided array registers no vacuous pass", () => {
+    expect(DEFERRAL_REASON_FIXTURES.filter((f) => f.expectBlock).length).toBeGreaterThanOrEqual(2);
+    expect(DEFERRAL_REASON_FIXTURES.filter((f) => !f.expectBlock).length).toBeGreaterThanOrEqual(2);
+    expect(sortedUnique(DEFERRAL_REASON_FIXTURES.map((f) => f.label))).toHaveLength(DEFERRAL_REASON_FIXTURES.length);
+    // N>=2: the fixture ticket carries 4 items (2 key decisions, 2 next steps).
+    expect(TWO_AND_TWO_IDS.length).toBeGreaterThanOrEqual(2);
+  });
+
+  for (const fixture of DEFERRAL_REASON_FIXTURES) {
+    it(`${fixture.expectBlock ? "NEGATIVE" : "HAPPY"}: ${fixture.label}`, () => {
+      const transcriptPath = writeArmedTicketTranscript(tmpDir, TWO_AND_TWO_TICKET_TEXT);
+
+      const result = runCoverageCheck({
+        transcript_path: transcriptPath,
+        last_assistant_message: fixture.message(TWO_AND_TWO_IDS),
+      });
+
+      expect(result.exitCode).toBe(0);
+      if (fixture.expectBlock) {
+        const payload = parseDecisionPayload(result.stdout);
+        expect(payload.decision).toBe(BLOCK_DECISION);
+        // Set-equality both ways: an empty reason must close NO item, so
+        // naming extra or fewer ids than the full set fails.
+        expect(sortedUnique(parseUndispositionedIds(result.stderr))).toEqual(sortedUnique(TWO_AND_TWO_IDS));
+      } else {
+        expect(result.stdout).toBe("");
+        expect(result.stderr).toBe("");
+      }
+    });
+  }
+});
+
+// ─── AC-RCS-2 ───────────────────────────────────────────────────────────────
+//
+// spec-resume-coverage-floor-the-satisfaction-boundaries-a S2: dispositions
+// satisfy only from main-chain entries; arming stays chain-blind.
+
+describe("AC-RCS-2 — a sidechain disposition does not satisfy, but a sidechain-produced ticket still arms (S2: sidechain)", () => {
+  /**
+   * Tags a transcript entry object with a TOP-LEVEL `isSidechain` field —
+   * spreads onto whatever shape the base builder produced. Measured
+   * 2026-08-01 against real transcripts: `isSidechain` sits alongside `type`
+   * on the entry itself, never nested under `message`.
+   */
+  function withIsSidechain(entry: unknown, isSidechain: boolean): unknown {
+    return { ...(entry as Record<string, unknown>), isSidechain };
+  }
+
+  it("NEGATIVE: a disposition-bearing entry with isSidechain exactly true does not satisfy — the full item set stays unaccounted", () => {
+    const transcriptPath = writeArmedTicketTranscript(tmpDir, TWO_AND_TWO_TICKET_TEXT, [
+      withIsSidechain(assistantTextEntry(fullAccounting(TWO_AND_TWO_IDS)), true),
+    ]);
+
+    const result = runCoverageCheck({ transcript_path: transcriptPath, last_assistant_message: "" });
+
+    expect(result.exitCode).toBe(0);
+    const payload = parseDecisionPayload(result.stdout);
+    expect(payload.decision).toBe(BLOCK_DECISION);
+    expect(sortedUnique(parseUndispositionedIds(result.stderr))).toEqual(sortedUnique(TWO_AND_TWO_IDS));
+  });
+
+  it("HAPPY control: the BYTE-IDENTICAL disposition text at isSidechain:false DOES satisfy — the negative above is not a parser that stopped reading transcript dispositions altogether", () => {
+    const transcriptPath = writeArmedTicketTranscript(tmpDir, TWO_AND_TWO_TICKET_TEXT, [
+      withIsSidechain(assistantTextEntry(fullAccounting(TWO_AND_TWO_IDS)), false),
+    ]);
+
+    const result = runCoverageCheck({ transcript_path: transcriptPath, last_assistant_message: "" });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("");
+  });
+
+  it("HAPPY: a ticket whose PRODUCING tool_use and tool_result entries both carry isSidechain:true still ARMS — arming is chain-blind while satisfaction is filtered", () => {
+    const transcriptPath = writeTranscript(tmpDir, [
+      withIsSidechain(bashToolUseEntry(TICKET_TOOL_USE_ID, `lore ${FEED_TOKEN} ${SESSION_RESUME_CHECKPOINT}`), true),
+      withIsSidechain(toolResultEntry(TICKET_TOOL_USE_ID, TWO_AND_TWO_TICKET_TEXT), true),
+    ]);
+
+    const result = runCoverageCheck({ transcript_path: transcriptPath, last_assistant_message: "" });
+
+    expect(result.exitCode).toBe(0);
+    const payload = parseDecisionPayload(result.stdout);
+    expect(payload.decision).toBe(BLOCK_DECISION);
+    expect(sortedUnique(parseUndispositionedIds(result.stderr))).toEqual(sortedUnique(TWO_AND_TWO_IDS));
+  });
+
+  it("BOUNDARY: a disposition-bearing entry with the isSidechain field entirely ABSENT still satisfies — strict equality to true, never truthiness", () => {
+    const transcriptPath = writeArmedTicketTranscript(tmpDir, TWO_AND_TWO_TICKET_TEXT, [
+      assistantTextEntry(fullAccounting(TWO_AND_TWO_IDS)),
+    ]);
+
+    const result = runCoverageCheck({ transcript_path: transcriptPath, last_assistant_message: "" });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("");
+  });
+});
+
 // ─── NEGATIVE — the disposition grammar rejects what it must ────────────────
 
 describe("NEGATIVE — an accounting must use one of the two accepted dispositions (D5)", () => {

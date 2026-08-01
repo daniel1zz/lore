@@ -360,12 +360,19 @@ interface TranscriptScan {
  *      ({@link isSessionResumeFeedToolUse}) — SPEC-112 D6's arming predicate,
  *      replaced wholesale;
  *   2. every `assistant` text message carrying the disposition marker, so
- *      accounting done in an EARLIER post-ticket turn still counts (H5).
+ *      accounting done in an EARLIER post-ticket turn still counts (H5) —
+ *      MAIN-CHAIN entries only (`spec-resume-coverage-floor-the-satisfaction-boundaries-a`
+ *      S2): an entry whose `isSidechain` field is exactly `true` is excluded
+ *      from this collection, so no subagent output can discharge the
+ *      obligation. Arming (point 1 above) is deliberately NOT filtered the
+ *      same way — a sidechain-produced ticket still arms — which is the
+ *      asymmetry S2 exists to create.
  *
- * Only marker-bearing assistant texts are retained — a whole session's prose
- * would be an unbounded copy of the transcript in memory, and
+ * Only marker-bearing MAIN-CHAIN assistant texts are retained — a whole
+ * session's prose would be an unbounded copy of the transcript in memory, and
  * `parseDispositionedIds` can only ever recognize a line that starts with the
- * marker, so a text without one contributes nothing.
+ * marker, so a text without one (or one filtered out by S2) contributes
+ * nothing.
  *
  * One forward pass suffices because a JSONL transcript is append-only and a
  * tool's result is always appended after its call, so the producing
@@ -414,11 +421,21 @@ function scanTranscript(transcriptText: string): TranscriptScan {
         for (const block of content) {
           if (!isPlainRecord(block) || block.type !== "tool_use") continue;
           if (typeof block.id !== "string" || typeof block.name !== "string") continue;
+          // S2: arming stays chain-blind — a sidechain-produced ticket still
+          // arms the floor, so this scan is deliberately NOT filtered on
+          // `entry.isSidechain`.
           if (isSessionResumeFeedToolUse(block.name, block.input)) armingToolUseIds.add(block.id);
         }
       }
+      // S2: satisfaction is main-chain only. `entry.isSidechain === true`
+      // (strict equality, never truthiness, so a field absent on every
+      // pre-existing transcript preserves today's behaviour) excludes this
+      // entry from the disposition-bearing set — no subagent output can
+      // discharge an obligation the main agent has not itself accounted for.
       const text = extractContentText(content);
-      if (text.includes(RESUME_DISPOSITION_MARKER)) dispositionBearingMessages.push({ entryIndex, text });
+      if (text.includes(RESUME_DISPOSITION_MARKER) && entry.isSidechain !== true) {
+        dispositionBearingMessages.push({ entryIndex, text });
+      }
       continue;
     }
 
@@ -450,6 +467,18 @@ function scanTranscript(transcriptText: string): TranscriptScan {
  * then surfaces on stderr, which is the loud-failure behavior D7 requires
  * over a silent accept-anything parse.
  *
+ * `spec-resume-coverage-floor-the-satisfaction-boundaries-a` S1: a deferral is
+ * accepted only when the text FOLLOWING `RESUME_DISPOSITION_DEFERRED_PREFIX`,
+ * trimmed, is non-empty. A bare `deferred:` and a whitespace-only
+ * `deferred:   ` are both UNRECOGNIZED dispositions under this rule — routed
+ * through the same loud path as any other unrecognized token (the id stays
+ * out of `dispositioned`, surfaces on stderr, and appears in the block
+ * reason), never a second warning channel. `assistantText` arrives here
+ * already `.trim()`ed per-line by the loop above, so a whitespace-only reason
+ * in practice reduces to the bare-prefix case before this function ever sees
+ * it — the explicit `.trim()` below is kept anyway so this function's own
+ * contract does not silently depend on that upstream trim.
+ *
  * Called once per disposition source and unioned by the caller
  * (spec-resume-ticket-coverage-floor-blocking-channel-arming H5): every
  * post-ticket assistant message from the transcript, plus the current turn's
@@ -471,8 +500,15 @@ function parseDispositionedIds(assistantText: string): ReadonlySet<string> {
     if (colonIndex === -1) continue;
     const itemId = rest.slice(0, colonIndex).trim();
     const disposition = rest.slice(colonIndex + 1).trim();
+    // S1: a deferral is accepted only with a non-empty reason after the
+    // prefix — a bare `deferred:` (or one reducing to it after trimming
+    // whitespace) leaves `deferralReason` empty and is therefore rejected,
+    // same as any other unrecognized disposition token.
+    const deferralReason = disposition.startsWith(RESUME_DISPOSITION_DEFERRED_PREFIX)
+      ? disposition.slice(RESUME_DISPOSITION_DEFERRED_PREFIX.length).trim()
+      : undefined;
     const isAccepted =
-      disposition === RESUME_DISPOSITION_DONE || disposition.startsWith(RESUME_DISPOSITION_DEFERRED_PREFIX);
+      disposition === RESUME_DISPOSITION_DONE || (deferralReason !== undefined && deferralReason.length > 0);
     if (itemId.length > 0 && isAccepted) dispositioned.add(itemId);
   }
   return dispositioned;
