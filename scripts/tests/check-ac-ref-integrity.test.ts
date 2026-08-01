@@ -482,7 +482,20 @@ function buildFixture(cwd: string, opts: { forceRemove: boolean }): { taskSlug: 
   }
 
   const plan = createDoc(cwd, "plan", "Fixture plan", "Fixture plan body.", ["--parent", spec.id]);
-  const task = createDoc(cwd, "task", "Fixture task", "Fixture task body.", ["--plan-id", plan.id]);
+  // reason: spec-declaring-ac-scope-is-required-at-task-creation-so-the (landed on
+  // main mid-task, merged into this branch) — task-create is a gated checkpoint:
+  // when the parent plan's spec-tier ancestor declares >= 1 script-mode AC, creation
+  // is REFUSED without a declared --ac-scope (D1). This fixture's spec declares
+  // exactly FIXTURE_AC_ID, so the task must claim it explicitly — an empty
+  // --ac-scope would also satisfy the gate (D2) but would misrepresent what this
+  // fixture task actually claims (it genuinely references FIXTURE_AC_ID in its
+  // evidence below), so the real id is declared, not a vacuous empty array.
+  const task = createDoc(cwd, "task", "Fixture task", "Fixture task body.", [
+    "--plan-id",
+    plan.id,
+    "--ac-scope",
+    FIXTURE_AC_ID,
+  ]);
 
   const evidence = runLore(
     ["evidence", task.id, "--oracle", "test", "--command", "true", "--result", "pass", "--ac", FIXTURE_AC_ID, "--by", ACTOR, "--json"],
