@@ -32,8 +32,10 @@
  *     (as opposed to validation or any other store error)?
  *   - `classifyConcurrencyOutcome` — the D2 verdict over a pair of
  *     `{exitCode, stderr}` observations (AC-IC-1's oracle).
- *   - `classifyForcedContentionOutcome` — the AC-IC-2 control's verdict:
- *     did the fixture actually produce the declared loud failure?
+ *   - `classifyForcedContentionOutcome` — the AC-IC-2 control's verdict: did
+ *     the fixture actually produce the declared loud failure? Also excludes
+ *     (never counts as `undetected`) a native-module load race or a
+ *     startup-phase lock refusal from a layer other than the report write.
  *
  * Invariants:
  *   - `extra.issue_report` is deliberately NOT a Zod-validated field on the
@@ -589,28 +591,53 @@ export function classifyConcurrencyOutcome(
  * pinning it would encode the fixture's mechanics rather than the contract.
  * A run in which BOTH invocations succeed FAILS the criterion: it shows the
  * fixture never created contention.
+ *
+ * Two `not_attributable` reasons — D7's forced-contention decision table
+ * (§Contract Details, row 3 and row 4). A run that never measured two
+ * competing report-writers is excluded regardless of which classifier reads
+ * it, so both reasons mirror {@link ConcurrencyVerdict}'s:
+ *   - `native_module_load_race` — the compiled-binary dlopen race.
+ *   - `contention_outside_report_write` — the EXTERNAL holder blocks the
+ *     per-command STARTUP write first (every `lore` invocation writes its own
+ *     corpus at startup, §Contract Details), so a sibling invocation can die
+ *     on a generic locked-database refusal before the report write this
+ *     control targets is ever attempted. Counting that as `undetected` is a
+ *     FALSE RED: the run never reached the contract, it just never got there.
  */
 export type ForcedContentionVerdict =
   | { readonly outcome: "detected"; readonly refused: 1 | 2 }
   | { readonly outcome: "undetected"; readonly detail: string }
   | {
       readonly outcome: "not_attributable";
-      readonly reason: "native_module_load_race";
+      readonly reason: "native_module_load_race" | "contention_outside_report_write";
       readonly detail: string;
     };
 
 /**
  * Classifies ONE forced-contention control run.
  *
- * A detected loud failure WINS over a native-module load race on the other
- * invocation (the criterion is satisfied by one declared refusal, and the
- * crashed sibling cannot un-observe it) — so the race check runs SECOND.
+ * Evaluation order is significant and is D7's forced-contention table made
+ * executable:
+ *   1. a detected declared loud failure on EITHER invocation WINS over BOTH
+ *      exclusion reasons — the criterion is satisfied by one declared
+ *      refusal, and a crashed OR startup-blocked sibling cannot un-observe it
+ *      (checked first, so this beats both of the checks below);
+ *   2. a native-module load race in either invocation excludes the run (the
+ *      pair never became two competing writers);
+ *   3. a locked-database refusal from another layer — same predicate as
+ *      {@link classifyConcurrencyOutcome}'s ({@link hasContentionOutsideReportWrite},
+ *      reused rather than re-implemented, D6) — excludes the run: this is the
+ *      row 4 fix, closing the false RED described on the type above;
+ *   4. both exit 0 → undetected, the fixture created no contention;
+ *   5. everything else → undetected, with both exit codes/stderrs quoted back.
  *
  * @param first - one invocation's outcome
  * @param second - the other invocation's outcome
  * @returns `detected` (with how many invocations refused), `undetected` (the
  *   criterion fails — `detail` says why, e.g. both succeeded), or
- *   `not_attributable` when the run only produced a native-module load race
+ *   `not_attributable` when the run only measured a non-report-write
+ *   contention source (native-module load race, or a startup-phase lock
+ *   refusal — see {@link ForcedContentionVerdict})
  * @example
  *   classifyForcedContentionOutcome({exitCode: 0, stderr: ""}, {exitCode: 0, stderr: ""})
  *   // { outcome: "undetected", detail: "both invocations succeeded — …" }
@@ -630,6 +657,18 @@ export function classifyForcedContentionOutcome(
         outcome: "not_attributable",
         reason: "native_module_load_race",
         detail: `compiled-binary native module load race: ${firstMatchingLine(outcome.stderr, DLOPEN_TOKEN_PATTERN)}`,
+      };
+    }
+  }
+
+  for (const outcome of [first, second]) {
+    if (hasContentionOutsideReportWrite(outcome)) {
+      return {
+        outcome: "not_attributable",
+        reason: "contention_outside_report_write",
+        detail:
+          "a locked-database refusal outside the report write (startup-phase corpus write): " +
+          firstMatchingLine(outcome.stderr, LOCKED_DATABASE_MESSAGE_PATTERN),
       };
     }
   }

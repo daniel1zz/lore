@@ -39,6 +39,18 @@
  * fails LOUDLY regardless, because AC-IC-2's forced-contention control demands
  * the declared loud failure in all 10 of its runs.
  *
+ * ── D7 discharge (task-discharge-d7-in-code) ──
+ *   Gap 1: `classifyForcedContentionOutcome` now ALSO excludes a startup-phase
+ *     lock refusal (D7 forced-contention table row 4) instead of reporting it
+ *     `undetected` — a false RED, since the external holder blocks the
+ *     STARTUP write first and the run never reached the report-write contract.
+ *     See `@lore/core`'s `issue-report.ts` and the row-4/precedence/control
+ *     unit cases in `issue-concurrency-classifier.test.ts`.
+ *   Gap 2: the readable-run floor (`MIN_CONCLUSIVE_RUNS`) is raised to EQUAL
+ *     `TARGET_RUNS` — no degraded-power pass. Proven without spawning via the
+ *     "Gap 2" describe block below, which injects a synthetic census into the
+ *     extracted `assertConclusiveSample`.
+ *
  * Six-dimension coverage:
  *   HAPPY:      AC-IC-1's 50 runs (the natural case is both-succeed, via the
  *               declared bounded wait).
@@ -84,10 +96,28 @@ const TMP_ROOT = tmpdir();
 const TARGET_RUNS = 50;
 /**
  * The floor of contract-readable runs below which AC-IC-1 goes RED instead of
- * declaring itself inconclusive. 20 is this file's OWN documented power
- * reference (see `TARGET_RUNS`: at a ~10%-per-run defect rate a 20-run harness
- * still catches the bug ~88% of the time), so it is the smallest sample this
- * harness has ever claimed to learn anything from.
+ * declaring itself inconclusive.
+ *
+ * DERIVATION (D7 "Sampling power" — §Contract Details): at the measured ~10%
+ * per-run defect rate, the probability that an n-run sample misses the defect
+ * ENTIRELY is `(1 - 0.10)^n`.
+ *   - n=20 → `0.9^20 ≈ 12.2%` miss probability. That is the EXACT number this
+ *     file's own `TARGET_RUNS` comment rejects ("a 20-run harness misses the
+ *     bug ~12% of the time") — so 20 cannot ALSO be the floor a passing run is
+ *     allowed to clear, or a pass would land at precisely the detection power
+ *     this criterion exists to reject (a false green wearing a census banner).
+ *   - Target chosen here: miss probability under 1%. Solving `0.9^n <= 0.01`
+ *     gives `n >= ln(0.01)/ln(0.9) ≈ 43.7`, so n=44 already clears it
+ *     (`0.9^44 ≈ 0.97%`).
+ *   - n=50 (`TARGET_RUNS`) → `0.9^50 ≈ 0.52%` — comfortably inside the chosen
+ *     target with margin to spare. Raising the floor to `TARGET_RUNS` both
+ *     clears this derived requirement AND matches the spec's explicit
+ *     resolution: "the floor EQUALS TARGET_RUNS = 50 … there is no
+ *     degraded-power pass" — floor and sizing COINCIDE by construction (this
+ *     references `TARGET_RUNS` rather than repeating the literal `50`, so the
+ *     two can never drift apart), so a shortfall can never be dressed up as an
+ *     inconclusive pass. See `assertConclusiveSample` / `SamplingPower` below
+ *     for where the old "degraded" pass state was removed.
  *
  * It is also the guard that keeps exclusions from swallowing a real
  * regression: `hasContentionOutsideReportWrite` excuses ANY locked-database
@@ -96,7 +126,7 @@ const TARGET_RUNS = 50;
  * regression shows up here as an exclusion epidemic — collected runs collapsing
  * toward zero — which this floor turns into a loud RED.
  */
-const MIN_CONCLUSIVE_RUNS = 20;
+const MIN_CONCLUSIVE_RUNS = TARGET_RUNS;
 /** AC-IC-2's control-run budget. */
 const CONTROL_RUNS = 10;
 /**
@@ -358,16 +388,22 @@ function upstreamTaskCount(upstream: UpstreamFixture): number {
  * verdict about the HARNESS's sample, never about the contract — every
  * contract verdict still comes from `@lore/core`'s classifiers (D6).
  *
- * - `full`       — `TARGET_RUNS` contract-readable runs collected.
- * - `degraded`   — a ceiling was hit first, but at least `MIN_CONCLUSIVE_RUNS`
- *                  runs were still read. Reported LOUDLY and green: zero
- *                  contract violations across a reduced-but-meaningful sample
- *                  is an honest inconclusive, and machine load is not a defect
- *                  of the code under test.
- * - `unmeasured` — fewer than `MIN_CONCLUSIVE_RUNS`. RED: the harness learned
- *                  nothing, and an exclusion epidemic can itself BE the defect.
+ * Gap 2 REMOVED the `"degraded"` state that used to sit here: D7 "Sampling
+ * power" is explicit that "the floor IS the sizing, and a short sample never
+ * passes" — with `MIN_CONCLUSIVE_RUNS` now equal to `TARGET_RUNS` (see its
+ * derivation above), a "ceiling hit but still ≥ floor" state is no longer
+ * reachable, so keeping it as a type member would have been dead code
+ * pretending to be a real outcome.
+ *
+ * - `full`       — `TARGET_RUNS` contract-readable runs collected. The ONLY
+ *                  passing power.
+ * - `unmeasured` — fewer than `TARGET_RUNS`. RED, reported as measured-nothing
+ *                  with the collected count and every exclusion reason: an
+ *                  exclusion epidemic can itself BE the defect, and machine
+ *                  load never buys a smaller counted sample — only more
+ *                  attempts (see `MAX_ATTEMPTS` / `SAMPLING_BUDGET_MS`).
  */
-type SamplingPower = "full" | "degraded" | "unmeasured";
+type SamplingPower = "full" | "unmeasured";
 
 interface SamplingCensus {
   /** Runs the contract could be read from — conforming plus non-conforming. */
@@ -380,14 +416,12 @@ interface SamplingCensus {
 }
 
 function classifySamplingPower(collected: number): SamplingPower {
-  if (collected >= TARGET_RUNS) return "full";
-  return collected >= MIN_CONCLUSIVE_RUNS ? "degraded" : "unmeasured";
+  return collected >= TARGET_RUNS ? "full" : "unmeasured";
 }
 
 const POWER_HEADLINES: Readonly<Record<SamplingPower, string>> = {
   full: "CONCLUSIVE — full sample collected",
-  degraded: "INCONCLUSIVE — reduced sample, zero contract violations in it",
-  unmeasured: "UNMEASURED — too few contract-readable runs to conclude anything",
+  unmeasured: `FAILURE — fewer than ${TARGET_RUNS} contract-readable runs; no degraded-power pass (D7 Sampling power)`,
 };
 
 /**
@@ -408,6 +442,59 @@ function renderCensus(census: SamplingCensus, power: SamplingPower): string {
     `[AC-IC-1]   attempts: ${census.attempts}/${MAX_ATTEMPTS}` +
       `   elapsed: ${(census.elapsedMs / 1000).toFixed(1)}s/${SAMPLING_BUDGET_MS / 1000}s`,
   ].join("\n");
+}
+
+/**
+ * D7 "Sampling power" made unit-testable without a spawn: the census's OWN
+ * pass/fail evaluation, extracted from the live spawning test below so Gap 2
+ * (fewer than `TARGET_RUNS` collected runs must FAIL, never degrade to a
+ * pass) can be proven by INJECTING a synthetic census and synthetic run
+ * arrays — never by loading the machine to starve a real run, which is
+ * unreproducible on demand. The live `AC-IC-1` test calls this with its real
+ * accumulated arrays; the "Gap 2" pure describe block below calls it with
+ * fabricated ones.
+ *
+ * Throws (via `expect`) in the same order the live test always has:
+ *   1. the contract itself, over every collected sample, unconditionally;
+ *   2. the readable-run floor — D7: no degraded-power pass, so a shortfall
+ *      fails HERE, loud and named, never as a bare length mismatch below;
+ *   3. the exact collected count, asserted unconditionally now that the floor
+ *      EQUALS `TARGET_RUNS` (Gap 2) — gating this behind `power === "full"`
+ *      would silently reintroduce the reduced-sample pass Gap 2 removes.
+ *
+ * @param conformingShapes - every collected run's conforming `shape` string
+ * @param nonConforming - every collected run's non-conforming detail string
+ *   (must be empty for the contract check to pass)
+ * @param census - the sampling census (collected/excluded/attempts/elapsed)
+ * @param excludedDetails - one line per excluded run, quoted into the floor
+ *   failure message so a shortfall names its exclusions, not just a count
+ */
+function assertConclusiveSample(
+  conformingShapes: readonly string[],
+  nonConforming: readonly string[],
+  census: SamplingCensus,
+  excludedDetails: readonly string[],
+): void {
+  const power = classifySamplingPower(census.collected);
+
+  // 1. THE CONTRACT, over every collected sample, first and unconditionally.
+  //    A sample shortfall never suppresses a violation, and diagnostics come
+  //    first so a failure names the offending runs rather than just a count.
+  expect(nonConforming).toEqual([]);
+
+  // 2. The floor. Exclusions are unbounded in COUNT (they scale with MACHINE
+  //    LOAD, so capping their count would fail a busy host whose contract
+  //    held perfectly) but the COUNTED sample must still reach it — see
+  //    MIN_CONCLUSIVE_RUNS's derivation.
+  expect(
+    census.collected,
+    `AC-IC-1 measured nothing — fewer than ${MIN_CONCLUSIVE_RUNS} contract-readable runs.\n` +
+      `${renderCensus(census, power)}\n` +
+      `excluded runs:\n${excludedDetails.join("\n")}`,
+  ).toBeGreaterThanOrEqual(MIN_CONCLUSIVE_RUNS);
+
+  // 3. The sample is exact — never a silent short count dressed up as a pass.
+  expect(conformingShapes).toHaveLength(TARGET_RUNS);
 }
 
 // ─── Suite setup ─────────────────────────────────────────────────────────────
@@ -499,33 +586,12 @@ describe("AC-IC-1: two concurrent report-issue invocations only ever produce con
         attempts,
         elapsedMs: performance.now() - samplingStartedAt,
       };
-      const power = classifySamplingPower(census.collected);
       // Always printed, green or red — see renderCensus.
-      console.log(renderCensus(census, power));
+      console.log(renderCensus(census, classifySamplingPower(census.collected)));
 
-      // 1. THE CONTRACT, over every collected sample, first and unconditionally.
-      //    A sample shortfall never suppresses a violation, and diagnostics come
-      //    first so a failure names the offending runs rather than just a count.
-      expect(nonConforming).toEqual([]);
-
-      // 2. The floor. Replaces the old absolute cap on excluded runs
-      //    (`excluded <= MAX_ATTEMPTS - TARGET_RUNS`), which measured the wrong
-      //    thing: exclusions scale with MACHINE LOAD, so capping their count
-      //    fails a busy host whose contract held perfectly. What actually has to
-      //    hold is that ENOUGH runs stayed readable — see MIN_CONCLUSIVE_RUNS.
-      expect(
-        census.collected,
-        `AC-IC-1 measured nothing — fewer than ${MIN_CONCLUSIVE_RUNS} contract-readable runs.\n` +
-          `${renderCensus(census, power)}\n` +
-          `excluded runs:\n${excluded.join("\n")}`,
-      ).toBeGreaterThanOrEqual(MIN_CONCLUSIVE_RUNS);
-
-      // 3. At full power the sample is exact. At `degraded` power the banner
-      //    above is the verdict: loud, named, and green — never a silent short
-      //    count dressed up as a length mismatch.
-      if (power === "full") {
-        expect(conformingShapes).toHaveLength(TARGET_RUNS);
-      }
+      // Contract, floor, and exact-count checks — see `assertConclusiveSample`
+      // (D7 "Sampling power": no degraded-power pass, Gap 2).
+      assertConclusiveSample(conformingShapes, nonConforming, census, excluded);
 
       // REGRESSION: the upstream holds exactly one task per successful
       // invocation — a refusal wrote nothing, and no success was lost.
@@ -533,6 +599,78 @@ describe("AC-IC-1: two concurrent report-issue invocations only ever produce con
     },
     AC_IC_1_TIMEOUT_MS,
   );
+});
+
+// ─── Gap 2: the readable-run floor rejects a short sample (pure, no spawn) ──
+//
+// D7 "Sampling power" resolves a contradiction the old MIN_CONCLUSIVE_RUNS=20
+// left standing: §Acceptance Criteria's own rationale for AC-IC-1's 50 runs
+// rejects 20 as underpowered ("a 20-run harness misses the bug ~12% of the
+// time"), so a harness that PASSED at 20 collected runs was landing at exactly
+// the detection power the criterion exists to reject — a false green wearing
+// a census banner. These three cases inject a synthetic census into
+// `assertConclusiveSample` rather than starving a real run by machine load
+// (unreproducible on demand, and the dispatch constraint above forbids
+// contending with it anyway).
+describe("Gap 2 — D7 Sampling power: the floor now EQUALS TARGET_RUNS, no degraded-power pass", () => {
+  it("GAP-2 CONTROL: 50 counted runs, all conforming — still passes", () => {
+    const conformingShapes = Array.from({ length: TARGET_RUNS }, () => "both_succeeded");
+    const census: SamplingCensus = {
+      collected: TARGET_RUNS,
+      exclusionsByReason: new Map(),
+      excluded: 0,
+      attempts: TARGET_RUNS,
+      elapsedMs: 1000,
+    };
+    expect(() => assertConclusiveSample(conformingShapes, [], census, [])).not.toThrow();
+  });
+
+  it("GAP-2: fewer than TARGET_RUNS collected runs FAILS, naming the collected count and every exclusion reason", () => {
+    const shortfall = TARGET_RUNS - 1; // one below the floor — simulates machine-load starvation
+    const conformingShapes = Array.from({ length: shortfall }, () => "both_succeeded");
+    const exclusionsByReason = new Map([
+      ["native_module_load_race", 12],
+      ["contention_outside_report_write", 7],
+    ]);
+    const census: SamplingCensus = {
+      collected: shortfall,
+      exclusionsByReason,
+      excluded: 19,
+      attempts: MAX_ATTEMPTS,
+      elapsedMs: 250_000,
+    };
+    let thrown: unknown;
+    try {
+      assertConclusiveSample(
+        conformingShapes,
+        [],
+        census,
+        ["r1: native_module_load_race — compiled-binary native module load race: …", "r2: contention_outside_report_write — a locked-database refusal …"],
+      );
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown, "expected assertConclusiveSample to throw on a below-floor census").toBeDefined();
+    const message = String((thrown as { message?: unknown } | undefined)?.message ?? thrown);
+    expect(message).toContain(String(shortfall));
+    expect(message).toContain("native_module_load_race");
+    expect(message).toContain("contention_outside_report_write");
+  });
+
+  it("GAP-2 REGRESSION: the OLD floor (20) would have wrongly passed a 20-run sample — it must fail now", () => {
+    // Pinned so this cannot silently regress back toward the rejected 12%
+    // miss-probability floor: a HARNESS RUN that collected exactly the old
+    // MIN_CONCLUSIVE_RUNS=20 must now be rejected, not accepted.
+    const conformingShapes = Array.from({ length: 20 }, () => "both_succeeded");
+    const census: SamplingCensus = {
+      collected: 20,
+      exclusionsByReason: new Map(),
+      excluded: 0,
+      attempts: 20,
+      elapsedMs: 5000,
+    };
+    expect(() => assertConclusiveSample(conformingShapes, [], census, [])).toThrow();
+  });
 });
 
 // ─── AC-IC-2 ─────────────────────────────────────────────────────────────────
