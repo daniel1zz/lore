@@ -411,6 +411,7 @@ describe("lore ready evidence badge — STATE", () => {
         oracle: "tsc",
         command: "bun run typecheck",
         result: "expected-fail",
+        "output-tail": "error TS2339: Property 'evidenceBadge' does not exist on type 'typeof import(\"./ready.js\")'.",
         by: "alice",
       },
     });
