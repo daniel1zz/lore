@@ -349,11 +349,23 @@ describe("changed-tests selector — classifyBinaryConsumer / isBinaryConsumerCa
 // judges files via a RUNTIME FILESYSTEM SCAN, invisible to import tracing
 // exactly like a binary-consumer's subprocess spawn (rule (c)) is invisible
 // to it. `check-test-budgets.test.ts` and `check-no-nul-bytes.test.ts` are
-// the two known instances, verified empirically (see this task's own
-// `lore get`): the content snippets below mirror each REAL file's actual
-// shape (a bare `main()` call proving an unmocked real-tree run; the
+// the two known REAL production instances, verified empirically (see this
+// task's own `lore get`): the content snippets below mirror each REAL file's
+// actual shape (a bare `main()` call proving an unmocked real-tree run; the
 // no-nul-bytes test additionally imports `hasTextSourceExtension`), never a
 // hardcoded filename check.
+//
+// ⛔ Self-referential note (measured post-merge, not hypothetical): THIS
+// FILE is itself a third match for `BARE_MAIN_INVOCATION_RE` +
+// `REPO_TRACKED_TEXT_SOURCE_MARKER_RE` (`scripts/changed-tests.ts`'s own
+// doc comment for those markers has the full account) — the fixture strings
+// below happen to contain a literal bare `main()` substring and, in several
+// places, the literal identifier `hasTextSourceExtension`, so this whole
+// file classifies as `"repo-tracked-text-source"` and gets selected
+// alongside the two real oracles on nearly any tracked text-source change.
+// Known and accepted (over-selection is the safe direction, AC-2) — not a
+// defect in this suite, and not something a future edit here should try to
+// "clean up" by rewording the fixture strings to dodge the markers.
 // ─────────────────────────────────────────────────────────────────────────
 
 describe("changed-tests selector — classifyTreeScanningOracle (rule (d))", () => {
