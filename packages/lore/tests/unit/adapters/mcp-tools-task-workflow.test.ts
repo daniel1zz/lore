@@ -561,6 +561,145 @@ describe("lore_evidence_add — missing-oracle-file precheck", () => {
   });
 });
 
+// ─── lore_evidence_add — caller_cwd escape hatch ───────────────────────────────
+//
+// task-lore-evidence-s-oracle-file-precheck-resolves-against-the: this MCP
+// server is a long-lived stdio process — its own `process.cwd()` (vitest's
+// repo-root cwd here) reflects wherever the server process was launched,
+// never the calling agent's actual directory. MEASURED 2026-08-01 by directly
+// invoking the live `lore_evidence_add` MCP tool from a linked git worktree
+// against a file that exists ONLY there: refused, even though the identical
+// command via the CLI (a fresh subprocess per invocation, `process.cwd()`
+// correctly tracking the caller) found the file. `caller_cwd` lets the
+// caller declare its real directory as an ADDITIONAL root — real filesystem,
+// no injected fileExists, same "use real repo-relative paths" convention the
+// precheck describe block above already establishes.
+describe("lore_evidence_add — caller_cwd escape hatch (task-lore-evidence-s-oracle-file-precheck-resolves-against-the)", () => {
+  const call = () => getToolHandler(server, "lore_evidence_add");
+  // This test file itself, referenced as it would be from a caller whose real
+  // cwd is `packages/lore` (a token with NO "packages/lore/" prefix — missing
+  // from repo-root's own perspective, present relative to that subdirectory).
+  const RELATIVE_TO_PACKAGE_DIR = "tests/unit/adapters/mcp-tools-task-workflow.test.ts";
+  const CALLER_CWD = `${process.cwd()}/packages/lore`;
+
+  function spyOnAddEvidence(): { called: () => boolean; restore: () => void } {
+    const original = app.taskWorkflowService.addEvidence.bind(app.taskWorkflowService);
+    let wasCalled = false;
+    app.taskWorkflowService.addEvidence = ((idOrSlug: string, entry: EvidenceInput, now?: () => string) => {
+      wasCalled = true;
+      return original(idOrSlug, entry, now);
+    }) as typeof app.taskWorkflowService.addEvidence;
+    return {
+      called: () => wasCalled,
+      restore: () => {
+        app.taskWorkflowService.addEvidence = original;
+      },
+    };
+  }
+
+  describe("happy path", () => {
+    it("AC-2.H1 (GREEN): a token missing relative to process.cwd() but present relative to the declared caller_cwd records normally", async () => {
+      const planId = await createPlan();
+      const taskId = await createTask(planId);
+      const spy = spyOnAddEvidence();
+
+      try {
+        const result = await call()({
+          id_or_slug: taskId,
+          oracle: "test",
+          command: `bunx vitest run ${RELATIVE_TO_PACKAGE_DIR}`,
+          result: "pass",
+          recorded_by: "alice",
+          caller_cwd: CALLER_CWD,
+        });
+        expect(result.isError).toBeFalsy();
+        expect(spy.called()).toBe(true);
+      } finally {
+        spy.restore();
+      }
+    });
+  });
+
+  describe("error handling / regression", () => {
+    it("AC-2.RED: the IDENTICAL token WITHOUT caller_cwd is refused (RED pin — reproduces the measured defect)", async () => {
+      const planId = await createPlan();
+      const taskId = await createTask(planId);
+      const spy = spyOnAddEvidence();
+
+      try {
+        const result = await call()({
+          id_or_slug: taskId,
+          oracle: "test",
+          command: `bunx vitest run ${RELATIVE_TO_PACKAGE_DIR}`,
+          result: "pass",
+          recorded_by: "alice",
+          // caller_cwd omitted — pre-fix behavior.
+        });
+        expect(result.isError).toBe(true);
+        expect(spy.called()).toBe(false);
+        const error = parseResult(result) as { code: string; message: string };
+        expect(error.code).toBe("VALIDATION_ERROR");
+        expect(error.message).toContain(RELATIVE_TO_PACKAGE_DIR);
+      } finally {
+        spy.restore();
+      }
+    });
+
+    it("AC-2.CONTROL: a genuinely nonexistent file is STILL refused even WITH caller_cwd supplied (additive, never a vacuous pass)", async () => {
+      const planId = await createPlan();
+      const taskId = await createTask(planId);
+      const spy = spyOnAddEvidence();
+      const GHOST = "tests/unit/adapters/ghost-nonexistent-oracle-file.test.ts";
+
+      try {
+        const result = await call()({
+          id_or_slug: taskId,
+          oracle: "test",
+          command: `bunx vitest run ${GHOST}`,
+          result: "pass",
+          recorded_by: "alice",
+          caller_cwd: CALLER_CWD,
+        });
+        expect(result.isError).toBe(true);
+        expect(spy.called()).toBe(false);
+        const error = parseResult(result) as { code: string; message: string };
+        expect(error.code).toBe("VALIDATION_ERROR");
+        expect(error.message).toContain(GHOST);
+        // reason: the refusal must name which root(s) it checked (AC per the
+        // governing task) — asserts BOTH the server's own cwd AND the
+        // caller-declared cwd appear, proving neither silently dropped the
+        // other (additive, not a replacement).
+        expect(error.message).toContain("Checked root(s):");
+        expect(error.message).toContain(process.cwd());
+        expect(error.message).toContain(CALLER_CWD);
+      } finally {
+        spy.restore();
+      }
+    });
+
+    it("AC-2.REG: omitting caller_cwd entirely is byte-identical to pre-fix behavior for an EXISTING repo-root-relative file", async () => {
+      const planId = await createPlan();
+      const taskId = await createTask(planId);
+      const spy = spyOnAddEvidence();
+      const EXISTING_FROM_REPO_ROOT = "packages/lore/tests/unit/adapters/mcp-tools-task-workflow.test.ts";
+
+      try {
+        const result = await call()({
+          id_or_slug: taskId,
+          oracle: "test",
+          command: `bunx vitest run ${EXISTING_FROM_REPO_ROOT}`,
+          result: "pass",
+          recorded_by: "alice",
+        });
+        expect(result.isError).toBeFalsy();
+        expect(spy.called()).toBe(true);
+      } finally {
+        spy.restore();
+      }
+    });
+  });
+});
+
 // ─── lore_ready ──────────────────────────────────────────────────────────────
 
 describe("lore_ready", () => {

@@ -513,99 +513,62 @@ export class VerifyRunnerService {
   }
 
   /**
-   * Runs a plan's declared script-mode acceptance criteria for real and records
-   * runner-attested evidence for each. See the class-level JSDoc for the four-step
-   * pipeline and the module-level invariants (launch-failure abort semantics, the
-   * draft-spec advisory, ai/human skip reporting).
+   * Shared execution+recording tail (steps ③④) for BOTH `verifyPlan` (plan-owned
+   * tasks, resolved via `getPlanBundle` + claim-based `resolveTargetTask`) and
+   * {@link verifyAdhocTask} (SPEC-069 ad-hoc tasks — task-the-ad-hoc-task-channel-
+   * has-no-attested-evidence-path-lore — resolved via an explicit task + a
+   * searched-for governing spec). Extracted so the two entry points, which reach
+   * `{task, spec, selectedCriteria}` through completely different resolution
+   * paths, share IDENTICAL execution semantics: the M2 command-provenance
+   * approval gate, the execution-root/env resolution, the build-freshness and
+   * SPEC-061 completeness guards, and the sole `recordVerifiedEvidence`
+   * attestation write. Neither caller may skip or reorder any of this — see the
+   * class-level JSDoc's four-step pipeline. Behavior-preserving extraction: this
+   * method's body is `verifyPlan`'s pre-existing step-③④ code, unchanged
+   * (REGRESSION — `verify-runner-service.test.ts`'s pre-existing suite exercises
+   * this exact logic through `verifyPlan` and passes unmodified).
    *
-   * @param planIdOrSlug - Plan document ULID or slug
-   * @param opts - `{ acIds?, explicitTaskIdOrSlug?, by, nowIso, allowNewCommands?,
-   *   confirmUnapprovedCommand? }`
-   * @returns `VerifyPlanResult` — every recorded AC outcome, every skipped
-   *   non-script AC, and any advisory warnings
-   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (plan has no parent spec / spec has no
-   *   structured acceptance_criteria / unknown acIds / target-task ambiguity / any
-   *   of step ②.4's four declared-scope refusals — absent, empty, out-of-scope
-   *   `--ac`, fully-dangling scope),
-   *   STALE_VERSION (a concurrent writer raced an evidence write), STORE_ERROR
-   *   (a script command failed to LAUNCH — the run aborts, no partial evidence
-   *   ambiguity; the message lists every AC id already recorded before the abort),
-   *   NEEDS_APPROVAL (SPEC-039 §M2 — a new/changed command was rejected by the
-   *   command-provenance approval gate; same partial-completion accounting as the
-   *   STORE_ERROR launch-failure abort)
+   * @param selectedCriteria - Already `_selectDeclaredScopeCriteria`-filtered
+   *   criteria (both callers run that same pre-flight before reaching here).
+   * @param task - The resolved target task evidence is recorded against.
+   * @param spec - The resolved governing spec (consulted for the draft/active
+   *   advisory only — no other field of it is read here).
+   * @param opts - Same `VerifyPlanOpts` the public entry points receive.
+   * @param recordAcRef - `true` for `verifyPlan` (plan-owned tasks), `false` for
+   *   `verifyAdhocTask`. MEASURED 2026-08-01: `TaskWorkflowService.appendEvidenceEntry`
+   *   (the shared implementation behind the injected `recordVerifiedEvidence` port)
+   *   cross-validates any supplied `ac_ref` by calling `resolveDeclaredAcIds(task.
+   *   parent_id)` — which itself hard-requires `task.parent_id` to resolve to a
+   *   `type: "plan"` document. An ad-hoc task's `parent_id` is the corpus root PRD,
+   *   so that call refuses `Expected a plan document; got type 'prd'` — the EXACT
+   *   defect this task fixes, one layer DEEPER than `VerifyRunnerService` itself
+   *   (confirmed by direct reproduction: `lore verify --task <adhoc>` failed with
+   *   this message even after this class's OWN `getPlanBundle` bypass, because
+   *   `_runVerification`'s downstream `recordVerifiedEvidence` call re-triggers the
+   *   SAME cross-entity walk from a completely different module). Fixing THAT walk
+   *   to accept an ad-hoc task's own already-verified `ac_scope` membership as
+   *   sufficient proof requires editing `task-workflow-service.ts` (and likely
+   *   `corpus-service.ts::resolveDeclaredAcIds`) — both OUTSIDE this task's declared
+   *   file anchors (`verify.ts`, `verify-runner-service.ts`), and both shared,
+   *   heavily-modified files this session was told other concurrent batches may be
+   *   editing. Rather than expand into that blast radius, this method OMITS
+   *   `ac_ref` for the ad-hoc path — the evidence entry is still GENUINELY
+   *   runner-attested (real oracle execution, real `attestation.runner: "lore-cli"`
+   *   / `exit_code` / `duration_ms`), it simply cannot (yet) be cross-referenced by
+   *   AC-coverage aggregation (`computeAcCoverage`, `lore ac list`, plan-close
+   *   coverage). This is a NAMED, NARROWER remaining gap — not silently dropped —
+   *   see `verifyAdhocTask`'s own JSDoc and this task's completion report.
    */
-  async verifyPlan(
-    planIdOrSlug: string,
+  private async _runVerification(
+    selectedCriteria: AcceptanceCriterion[],
+    task: DocRecord,
+    spec: DocRecord,
     opts: VerifyPlanOpts,
+    recordAcRef: boolean,
   ): Promise<Result<VerifyPlanResult, LoreError>> {
-    // ① bundle
-    const bundleResult = await this.getPlanBundle(planIdOrSlug);
-    if (!bundleResult.ok) return bundleResult;
-    const { plan, spec, tasks } = bundleResult.value;
-
-    if (spec === undefined) {
-      return err({
-        code: "VALIDATION_ERROR",
-        field: "spec",
-        message: `plan "${plan.slug}" has no parent spec — nothing to verify`,
-        value: plan.id,
-      });
-    }
-
-    const criteriaParsed = specAcceptanceCriteriaSchema.safeParse(
-      spec.extra["acceptance_criteria"],
-    );
-    if (!criteriaParsed.success || criteriaParsed.data.length === 0) {
-      return err({
-        code: "VALIDATION_ERROR",
-        field: "acceptance_criteria",
-        message: `spec "${spec.slug}" has no structured acceptance_criteria declared — nothing to verify`,
-        value: spec.id,
-      });
-    }
-
-    // The pre-existing unknown-AC-id check stays HERE, ahead of target-task
-    // resolution: an id no spec criterion declares is a caller error regardless
-    // of which task the run would target (REGRESSION-pinned — the refusal names
-    // field "acIds" and fires even for an ambiguous target).
-    if (opts.acIds !== undefined) {
-      const declaredIds = new Set(criteriaParsed.data.map((c) => c.id));
-      const unknown = opts.acIds.filter((id) => !declaredIds.has(id));
-      if (unknown.length > 0) {
-        return err({
-          code: "VALIDATION_ERROR",
-          field: "acIds",
-          message: `unknown AC id(s) not declared on spec "${spec.slug}": ${unknown.join(", ")}`,
-          value: unknown,
-        });
-      }
-    }
-
-    // ② resolve target task (core, pure)
-    const targetResult = resolveTargetTask(tasks, {
-      ...(opts.explicitTaskIdOrSlug !== undefined
-        ? { explicitTaskIdOrSlug: opts.explicitTaskIdOrSlug }
-        : {}),
-      nowIso: opts.nowIso,
-      ttlMinutes: this.config.claimTtlMinutes,
-    });
-    if (!targetResult.ok) return targetResult;
-    const task = targetResult.value;
-
-    // ②.4 declared-scope selection + pre-flight refusal — MUST run after ② (the
-    // declaration lives on the resolved task) and BEFORE anything in step ③,
-    // so a refusal leaves zero executions and zero recorded entries.
-    const selectionResult = this._selectDeclaredScopeCriteria(
-      criteriaParsed.data,
-      task,
-      spec.slug,
-      opts.acIds,
-    );
-    if (!selectionResult.ok) return selectionResult;
-
     const scriptCriteria: ScriptAcceptanceCriterion[] = [];
     const skipped: VerifySkippedAc[] = [];
-    for (const criterion of selectionResult.value) {
+    for (const criterion of selectedCriteria) {
       if (criterion.verify.mode === "script") {
         scriptCriteria.push(criterion as ScriptAcceptanceCriterion);
       } else {
@@ -775,7 +738,13 @@ export class VerifyRunnerService {
           command: criterion.verify.command,
           result: verifyResult,
           recorded_by: opts.by,
-          ac_ref: criterion.id,
+          // reason: see this method's `recordAcRef` param JSDoc — omitted (never a
+          // bogus/best-effort value) for the ad-hoc path, whose target task has no
+          // plan-mediated spec `appendEvidenceEntry`'s cross-entity ac_ref check can
+          // walk to. `VerifyAcResult.ac_id` (below) still names the AC in the
+          // in-memory/CLI-rendered outcome either way — only the STORED evidence
+          // entry's `ac_ref` differs.
+          ...(recordAcRef ? { ac_ref: criterion.id } : {}),
           ...(outputTail !== "" ? { output_tail: outputTail } : {}),
           attestation: {
             runner: "lore-cli",
@@ -817,5 +786,273 @@ export class VerifyRunnerService {
     }
 
     return ok({ task: { id: task.id, slug: task.slug }, results, skipped, warnings });
+  }
+
+  /**
+   * SPEC-069 ad-hoc-task runner path (task-the-ad-hoc-task-channel-has-no-
+   * attested-evidence-path-lore) — `lore verify --task <adhoc-task>` with NO
+   * PLAN positional. An ad-hoc task (`extra.adhoc === true`, SPEC-069 §Design
+   * Decisions D2) has no `plan_id` and is parented to the corpus root PRD, so
+   * `getPlanBundle` structurally cannot resolve a governing spec for it — this
+   * method takes the ALREADY-RESOLVED task and the full candidate spec list as
+   * plain data instead (both fetched by the CLI adapter via `app.corpusService`,
+   * mirroring this class's existing "adapter resolves IO, service decides"
+   * split for `getPlanBundle` itself — no NEW constructor port is needed).
+   *
+   * Governing-spec resolution (measured 2026-08-01: no structural plan/spec
+   * link exists for an ad-hoc task — a real corpus task implementing an AC on a
+   * named spec, `task-ac-ll-8-guards-the-loader-strip-not-the-no-sync-bearing`,
+   * carries NO `ac_scope` and NO link to that spec; the association exists only
+   * in prose). The task's declared `extra.ac_scope` must name AC ids that are
+   * declared, IN FULL, on EXACTLY ONE candidate spec's `acceptance_criteria` —
+   * zero or multiple matching specs REFUSE loud (`VALIDATION_ERROR`). This
+   * method never guesses which spec governs an ad-hoc task: `AC-*` ids are
+   * unique only WITHIN one spec's declared criteria (`specAcceptanceCriteriaSchema`),
+   * never enforced globally, so guessing wrong would silently attest a real
+   * script command against the wrong spec's acceptance criteria.
+   *
+   * Every step AFTER spec resolution (declared-scope selection, M2 approval
+   * gate, execution, freshness/completeness guards, attested evidence write) is
+   * the IDENTICAL shared tail `verifyPlan` uses ({@link _runVerification},
+   * `recordAcRef: false` here — see that param's own JSDoc) — an ad-hoc task
+   * attests exactly as trustworthily as a plan-owned one: the recorded evidence
+   * carries a REAL `attestation.runner: "lore-cli"` / `exit_code` / `duration_ms`
+   * from an ACTUAL executed command, not a synthesized marker. The ONE remaining
+   * difference from a plan-owned task's evidence is `ac_ref` — omitted here,
+   * NAMED AS A GAP, not silently dropped: `TaskWorkflowService.appendEvidenceEntry`
+   * cross-validates any supplied `ac_ref` via `resolveDeclaredAcIds(task.parent_id)`,
+   * which hard-requires that parent to resolve to a `plan` — structurally
+   * impossible for an ad-hoc task (measured: reproduces the identical `Expected a
+   * plan document; got type 'prd'` refusal one layer BELOW this service).
+   * Closing that gap needs a change to `task-workflow-service.ts` (and likely
+   * `corpus-service.ts`), both outside this task's declared file anchors — see
+   * this task's completion report for the concrete follow-up shape.
+   *
+   * @param task - The resolved target task (caller MUST have already resolved
+   *   this by id/slug; this method does no id resolution of its own).
+   * @param candidateSpecs - Every `spec`-typed doc in the corpus (caller-fetched,
+   *   e.g. `corpusService.listFull({type: "spec"}).docs`) — filtered here down
+   *   to the ones that fully declare the task's ac_scope.
+   * @param opts - Same `VerifyPlanOpts` `verifyPlan` accepts.
+   * @returns Same `VerifyPlanResult` contract as `verifyPlan`.
+   * @throws (as `Result`) VALIDATION_ERROR — `task` is not type "task"; task is
+   *   not ad-hoc (`extra.adhoc !== true`); ac_scope absent/empty; ac_scope
+   *   matches zero or more than one candidate spec; unknown `--ac` id (SAME
+   *   message shape `verifyPlan` uses); any of `_selectDeclaredScopeCriteria`'s
+   *   four refusals — plus everything `_runVerification` can throw.
+   */
+  async verifyAdhocTask(
+    task: DocRecord,
+    candidateSpecs: DocRecord[],
+    opts: VerifyPlanOpts,
+  ): Promise<Result<VerifyPlanResult, LoreError>> {
+    if (task.type !== "task") {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "type",
+        message:
+          `Expected a task document for the ad-hoc verify path; got type '${task.type}'. ` +
+          "The no-PLAN-positional invocation targets a SPEC-069 --adhoc TASK only.",
+        value: task.type,
+      });
+    }
+    if (task.extra["adhoc"] !== true) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "adhoc",
+        message:
+          `task "${task.slug}" is not ad-hoc (extra.adhoc !== true) — the no-PLAN-positional ` +
+          "lore verify path is reachable ONLY for a SPEC-069 --adhoc task. Pass the PLAN " +
+          "positional (this task's plan_id) to verify a plan-owned task.",
+        value: task.slug,
+      });
+    }
+
+    const declared = extractDeclaredAcScope(task);
+    if (declared === undefined) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "ac_scope",
+        message:
+          `ad-hoc task "${task.slug}" has no declared ac_scope, so lore verify cannot resolve ` +
+          "a governing spec for it (no plan/spec link exists for an --adhoc task, SPEC-069 " +
+          `D2) — declare one with '${SCOPE_WRITER_HINT} ${task.slug} <AC-ID>' first.`,
+        value: task.slug,
+      });
+    }
+    if (declared.length === 0) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "ac_scope",
+        message:
+          `ad-hoc task "${task.slug}" ${EMPTY_SCOPE_LITERAL} — its ac_scope is an EMPTY array, ` +
+          "so there is no declared AC id to resolve a governing spec from. Re-declare with " +
+          `'${SCOPE_WRITER_HINT} ${task.slug} <AC-ID>' before verifying.`,
+        value: task.slug,
+      });
+    }
+
+    const declaredSet = new Set(declared);
+    const matches: { spec: DocRecord; criteria: AcceptanceCriterion[] }[] = [];
+    for (const candidate of candidateSpecs) {
+      const parsed = specAcceptanceCriteriaSchema.safeParse(candidate.extra["acceptance_criteria"]);
+      if (!parsed.success || parsed.data.length === 0) continue;
+      const specIds = new Set(parsed.data.map((c) => c.id));
+      const coversAll = [...declaredSet].every((id) => specIds.has(id));
+      if (coversAll) matches.push({ spec: candidate, criteria: parsed.data });
+    }
+
+    if (matches.length === 0) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "ac_scope",
+        message:
+          `ad-hoc task "${task.slug}"'s declared ac_scope (${declared.join(", ")}) matches no ` +
+          "spec's acceptance_criteria in full — lore verify cannot infer a governing spec for " +
+          "an ad-hoc task without a structural plan/spec link (SPEC-069 D2). Ensure ac_scope " +
+          "names AC ids that all exist on exactly one spec.",
+        value: declared,
+      });
+    }
+    if (matches.length > 1) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "ac_scope",
+        message:
+          `ad-hoc task "${task.slug}"'s declared ac_scope (${declared.join(", ")}) matches ` +
+          `${matches.length} specs (${matches.map((m) => m.spec.slug).join(", ")}) — ambiguous. ` +
+          "lore verify never guesses which spec governs an ad-hoc task; narrow the declared " +
+          "ac_scope to AC ids unique to a single spec.",
+        value: matches.map((m) => m.spec.slug),
+      });
+    }
+
+    const matched = matches[0];
+    if (matched === undefined) {
+      // Unreachable — `matches.length` is exactly 1 at this point (both the
+      // zero- and multi-match branches above already returned). Guards
+      // `noUncheckedIndexedAccess` without an unsafe non-null assertion.
+      return err({
+        code: "STORE_ERROR",
+        message: "internal error: ad-hoc governing-spec match lost between length check and read",
+      });
+    }
+    const { spec, criteria } = matched;
+
+    // Mirrors verifyPlan's pre-existing unknown-acIds check (SAME field/message
+    // shape) — a caller-named --ac id must be declared on the RESOLVED spec.
+    if (opts.acIds !== undefined) {
+      const declaredIds = new Set(criteria.map((c) => c.id));
+      const unknown = opts.acIds.filter((id) => !declaredIds.has(id));
+      if (unknown.length > 0) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "acIds",
+          message: `unknown AC id(s) not declared on spec "${spec.slug}": ${unknown.join(", ")}`,
+          value: unknown,
+        });
+      }
+    }
+
+    const selectionResult = this._selectDeclaredScopeCriteria(criteria, task, spec.slug, opts.acIds);
+    if (!selectionResult.ok) return selectionResult;
+
+    // recordAcRef: false — see _runVerification's own param JSDoc for why.
+    return this._runVerification(selectionResult.value, task, spec, opts, false);
+  }
+
+  /**
+   * Runs a plan's declared script-mode acceptance criteria for real and records
+   * runner-attested evidence for each. See the class-level JSDoc for the four-step
+   * pipeline and the module-level invariants (launch-failure abort semantics, the
+   * draft-spec advisory, ai/human skip reporting).
+   *
+   * @param planIdOrSlug - Plan document ULID or slug
+   * @param opts - `{ acIds?, explicitTaskIdOrSlug?, by, nowIso, allowNewCommands?,
+   *   confirmUnapprovedCommand? }`
+   * @returns `VerifyPlanResult` — every recorded AC outcome, every skipped
+   *   non-script AC, and any advisory warnings
+   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (plan has no parent spec / spec has no
+   *   structured acceptance_criteria / unknown acIds / target-task ambiguity / any
+   *   of step ②.4's four declared-scope refusals — absent, empty, out-of-scope
+   *   `--ac`, fully-dangling scope),
+   *   STALE_VERSION (a concurrent writer raced an evidence write), STORE_ERROR
+   *   (a script command failed to LAUNCH — the run aborts, no partial evidence
+   *   ambiguity; the message lists every AC id already recorded before the abort),
+   *   NEEDS_APPROVAL (SPEC-039 §M2 — a new/changed command was rejected by the
+   *   command-provenance approval gate; same partial-completion accounting as the
+   *   STORE_ERROR launch-failure abort)
+   */
+  async verifyPlan(
+    planIdOrSlug: string,
+    opts: VerifyPlanOpts,
+  ): Promise<Result<VerifyPlanResult, LoreError>> {
+    // ① bundle
+    const bundleResult = await this.getPlanBundle(planIdOrSlug);
+    if (!bundleResult.ok) return bundleResult;
+    const { plan, spec, tasks } = bundleResult.value;
+
+    if (spec === undefined) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "spec",
+        message: `plan "${plan.slug}" has no parent spec — nothing to verify`,
+        value: plan.id,
+      });
+    }
+
+    const criteriaParsed = specAcceptanceCriteriaSchema.safeParse(
+      spec.extra["acceptance_criteria"],
+    );
+    if (!criteriaParsed.success || criteriaParsed.data.length === 0) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "acceptance_criteria",
+        message: `spec "${spec.slug}" has no structured acceptance_criteria declared — nothing to verify`,
+        value: spec.id,
+      });
+    }
+
+    // The pre-existing unknown-AC-id check stays HERE, ahead of target-task
+    // resolution: an id no spec criterion declares is a caller error regardless
+    // of which task the run would target (REGRESSION-pinned — the refusal names
+    // field "acIds" and fires even for an ambiguous target).
+    if (opts.acIds !== undefined) {
+      const declaredIds = new Set(criteriaParsed.data.map((c) => c.id));
+      const unknown = opts.acIds.filter((id) => !declaredIds.has(id));
+      if (unknown.length > 0) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "acIds",
+          message: `unknown AC id(s) not declared on spec "${spec.slug}": ${unknown.join(", ")}`,
+          value: unknown,
+        });
+      }
+    }
+
+    // ② resolve target task (core, pure)
+    const targetResult = resolveTargetTask(tasks, {
+      ...(opts.explicitTaskIdOrSlug !== undefined
+        ? { explicitTaskIdOrSlug: opts.explicitTaskIdOrSlug }
+        : {}),
+      nowIso: opts.nowIso,
+      ttlMinutes: this.config.claimTtlMinutes,
+    });
+    if (!targetResult.ok) return targetResult;
+    const task = targetResult.value;
+
+    // ②.4 declared-scope selection + pre-flight refusal — MUST run after ② (the
+    // declaration lives on the resolved task) and BEFORE anything in step ③,
+    // so a refusal leaves zero executions and zero recorded entries.
+    const selectionResult = this._selectDeclaredScopeCriteria(
+      criteriaParsed.data,
+      task,
+      spec.slug,
+      opts.acIds,
+    );
+    if (!selectionResult.ok) return selectionResult;
+
+    // recordAcRef: true — BYTE-IDENTICAL to pre-SPEC-069 behavior (REGRESSION).
+    return this._runVerification(selectionResult.value, task, spec, opts, true);
   }
 }

@@ -49,6 +49,28 @@
  * task/phase dispatch, via the SAME shared gate + extractor the CLI's `lore evidence`
  * command uses (`findMissingOracleFilesForEvidence`, `../cli/evidence-precheck.js`).
  *
+ * `lore_evidence_add` gains an optional `caller_cwd` field (defect: task-lore-
+ * evidence-s-oracle-file-precheck-resolves-against-the, MEASURED 2026-08-01 by
+ * directly invoking this session's own connected `lore_evidence_add` tool
+ * against a file that exists ONLY in a linked git worktree — reproduced
+ * exactly, whereas the CLI's `lore evidence` correctly found the SAME file via
+ * its own `process.cwd()`). Root cause: this MCP server is a long-lived stdio
+ * process — its `process.cwd()` reflects wherever THAT PROCESS was launched
+ * from, once, at startup; it is NOT re-observed per tool call, so it does not
+ * track "which directory the calling agent is logically operating in right
+ * now" the way a fresh CLI subprocess's `process.cwd()` does. `caller_cwd`
+ * (absolute path, optional — omitted is BYTE-IDENTICAL to pre-fix behavior)
+ * lets the calling agent declare its own real directory; threaded as an
+ * ADDITIONAL root candidate (`findMissingOracleFilesForEvidence`'s
+ * `additionalCwds`, `../cli/evidence-precheck.js`) alongside the existing
+ * `process.cwd()`/`app.repoRoot` roots — never a replacement, so a genuinely
+ * missing file still fails every root, `caller_cwd` included. Mirrors `lore
+ * verify`'s `--execution-root` escape hatch (SPEC-063) for the identical class
+ * of "a process cannot autonomously know its correct execution root" problem.
+ * The refusal message also now names every root checked (`describePrecheckRoots`,
+ * same module) — the pre-fix message named none, leaving an author unable to
+ * tell "your file is missing" from "the precheck looked in the wrong tree".
+ *
  * Architecture: Tools with input use the `registerToolWithArgs` helper defined below, which:
  *   1. Calls `server.tool(name, desc, handler)` in 3-arg form (avoids ZodRawShapeCompat type bomb)
  *   2. Immediately patches `_registeredTools[name].inputSchema = schema` on the registered tool
@@ -121,6 +143,7 @@ import { requirePhaseWorkflowService, getPhaseStatus, buildPhaseFeedFlowDeps } f
 import {
   findMissingOracleFilesForEvidence,
   findFilteredPassRefusal,
+  describePrecheckRoots,
 } from "../cli/evidence-precheck.js";
 import { IssueReportService } from "../../service/issue-report-service.js";
 import { hasZeroReleaseEvidence, ZERO_EVIDENCE_RELEASE_WARNING } from "../../service/task-workflow-service.js";
@@ -450,6 +473,18 @@ export const LoreEvidenceAddSchema = z.object({
   recorded_by: z.string().min(1),
   ac_ref: z.string().optional(),
   checklist_ref: z.string().optional(),
+  /**
+   * Absolute path the CALLING AGENT asserts is its own real current directory
+   * (task-lore-evidence-s-oracle-file-precheck-resolves-against-the) — pass
+   * this when the caller is operating from a linked git worktree, since this
+   * MCP server's own `process.cwd()` (fixed at server startup) does not track
+   * it. Used as an ADDITIONAL missing-oracle-file precheck root alongside the
+   * server's own cwd/corpus root — never a replacement, so an omitted value
+   * is byte-identical to pre-fix behavior and a genuinely missing file is
+   * still refused regardless. Mirrors `lore verify`'s `--execution-root`
+   * (SPEC-063).
+   */
+  caller_cwd: z.string().optional(),
 });
 
 /** Input schema for lore_phase_status (SPEC-056 task-skill-implement-cli-mcp-surfaces-checklist-ref-evidence). */
@@ -1342,23 +1377,39 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
     // is the corpus root (`dirname(dirname(dbPath))`, same value the CLI
     // passes as `corpusRoot` — see App's own JSDoc); always wired in
     // production, optional only for hand-built test App stubs.
-    const missingOracleFiles = findMissingOracleFilesForEvidence({
-      oracle: args.oracle,
-      result: args.result,
-      command: args.command,
+    //
+    // reason: `args.caller_cwd` (task-lore-evidence-s-oracle-file-precheck-
+    // resolves-against-the) is an ADDITIONAL root, never a replacement for
+    // `process.cwd()` — see this handler's own module-header paragraph and
+    // the schema field's own JSDoc for why a long-lived MCP server needs this
+    // escape hatch at all.
+    const precheckRoots = {
       cwd: process.cwd(),
+      ...(args.caller_cwd !== undefined ? { additionalCwds: [args.caller_cwd] } : {}),
       // reason: exactOptionalPropertyTypes — app.repoRoot is `string | undefined`;
       // conditionally spread rather than pass it verbatim (see evidence-precheck.ts's
       // matching comment on its own forwarding call).
       ...(app.repoRoot !== undefined ? { corpusRoot: app.repoRoot } : {}),
+    };
+    const missingOracleFiles = findMissingOracleFilesForEvidence({
+      oracle: args.oracle,
+      result: args.result,
+      command: args.command,
+      ...precheckRoots,
       fileExists: existsSync,
     });
     if (missingOracleFiles.length > 0) {
+      // reason: refusal names the checked root(s) (task-lore-evidence-s-oracle-
+      // file-precheck-resolves-against-the) — `describePrecheckRoots` recomputes
+      // the SAME candidates `findMissingOracleFilesForEvidence` just tried
+      // (SSOT, never drifts), same fix as the CLI's `commands/evidence.ts`.
+      const checkedRoots = describePrecheckRoots(args.command, precheckRoots);
       return errorContent({
         code: "VALIDATION_ERROR",
         field: "command",
         message:
           `Oracle file(s) not found: ${missingOracleFiles.join(", ")}. ` +
+          `Checked root(s): ${checkedRoots.join(", ")}. ` +
           'Author the oracle file or fix the path in "command"; ' +
           'use oracle: "manual" for genuinely manual checks.',
         value: args.command,

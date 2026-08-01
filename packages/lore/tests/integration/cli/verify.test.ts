@@ -608,3 +608,118 @@ describe("lore evidence — forged --attestation is rejected outright (SPEC-051 
     expect(parsed.data?.doc?.extra?.verification_evidence ?? []).toHaveLength(0);
   });
 });
+
+// ─── SPEC-069 ad-hoc-task runner path ──────────────────────────────────────────
+// task-the-ad-hoc-task-channel-has-no-attested-evidence-path-lore
+//
+// `lore verify --task <adhoc-task>` with NO PLAN positional. Coverage:
+//   REGRESSION (RED pin): the OLD, unsupported shape — passing a non-plan id
+//     (an ad-hoc task's own slug) AS the PLAN positional — still refuses with
+//     the exact pre-existing leaky message, unchanged by this fix.
+//   HAPPY: a unique matching spec resolves, executes, and records ATTESTED
+//     evidence (attestation.runner "lore-cli") readable back via `lore get`.
+//   NEGATIVE: no PLAN and no --task (usage error, exit 2); --task naming a
+//     NON-ad-hoc (plan-owned) task (exit 4, names "not ad-hoc").
+//   ERROR: ac_scope matching AC ids declared on TWO independent specs is
+//     ambiguous and refused (never guesses), naming both spec slugs.
+//   CONTROL: every pre-existing `<PLAN> ...` test above in this file exercises
+//     the untouched plan-path unmodified — this file, run as a whole, IS that
+//     control.
+
+/** Create a SPEC-069 `--adhoc` task (no --parent/--plan-id), declaring `acScope` via `--ac-scope`. */
+function createAdhocTask(title: string, acScope: readonly string[] = []): string {
+  const args = ["create", "task", "--title", title, "--adhoc", "--no-ai", "--content", "body"];
+  for (const acId of acScope) args.push("--ac-scope", acId);
+  const r = runLore(args, tmpDir);
+  if (r.exitCode !== 0) throw new Error(`create adhoc task failed: ${r.stderr}`);
+  return extractSlug(r.stdout);
+}
+
+describe("lore verify — SPEC-069 ad-hoc-task runner path", () => {
+  it("REGRESSION (RED pin): passing an ad-hoc task's own slug as PLAN still refuses with the pre-existing leaky message", () => {
+    // reason: --adhoc task creation parents to the corpus root PRD — a PRD must
+    // exist first (unrelated to the assertion below, purely a creation precondition).
+    createPrd("RedPin PRD");
+    const adhocTask = createAdhocTask("RedPin Adhoc Task", ["AC-ADHOC-RED-1"]);
+
+    // reason: this is the OLD, unsupported shape (a non-plan id passed as the
+    // PLAN positional) — deliberately left alone. The NEW supported shape is
+    // `--task <adhoc>` with PLAN OMITTED, exercised by the GREEN test below.
+    const result = runLore(["verify", adhocTask], tmpDir);
+
+    expect(result.exitCode).toBe(4);
+    expect(result.stderr).toContain("Expected a plan document");
+    expect(result.stderr).toContain("task");
+  });
+
+  it("HAPPY (GREEN): --task naming an ad-hoc task with no PLAN positional resolves the governing spec and records attested evidence", () => {
+    const prdSlug = createPrd("Adhoc Green PRD");
+    const specSlug = createSpec("Adhoc Green Spec", prdSlug);
+    declareScriptAc(specSlug, "AC-ADHOC-G1", "true");
+    const adhocTask = createAdhocTask("Adhoc Green Task", ["AC-ADHOC-G1"]);
+
+    const result = runLore(["verify", "--task", adhocTask, "--allow-new-commands"], tmpDir);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("AC-ADHOC-G1");
+    expect(result.stdout).toContain("pass");
+    // reason: buildVerifyHeaderLines' planArg carries a descriptive "(ad-hoc, no
+    // plan)" marker instead of a real plan id/slug — a human reading the run
+    // output can tell this was the ad-hoc path, not a mis-resolved plan.
+    expect(result.stdout).toContain("ad-hoc, no plan");
+
+    const got = runLore(["get", adhocTask, "--json"], tmpDir);
+    expect(got.exitCode).toBe(0);
+    const parsed = JSON.parse(got.stdout) as {
+      data?: { doc?: { extra?: { verification_evidence?: Array<Record<string, unknown>> } } };
+    };
+    const evidence = parsed.data?.doc?.extra?.verification_evidence ?? [];
+    expect(evidence).toHaveLength(1);
+    const attestation = evidence[0]?.["attestation"] as Record<string, unknown> | undefined;
+    expect(attestation?.["runner"]).toBe("lore-cli");
+    expect(attestation?.["exit_code"]).toBe(0);
+    // reason: MEASURED gap, NAMED not silently dropped — TaskWorkflowService.
+    // appendEvidenceEntry's cross-entity ac_ref check requires task.parent_id to
+    // resolve to a plan, structurally impossible for an ad-hoc task (parent is
+    // the root PRD). The evidence above is still GENUINELY runner-attested (real
+    // exit_code/runner); only the ac_ref coverage-link is absent. Closing this
+    // needs a task-workflow-service.ts/corpus-service.ts change outside this
+    // task's file anchors — see the completion report for the follow-up shape.
+    expect(evidence[0]?.["ac_ref"]).toBeUndefined();
+  });
+
+  it("NEGATIVE: no PLAN positional and no --task → usage error, exit 2, names the requirement", () => {
+    const result = runLore(["verify"], tmpDir);
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain("PLAN positional is required");
+    expect(result.stderr).toContain("--adhoc");
+  });
+
+  it("NEGATIVE: --task naming a NON-ad-hoc (plan-owned) task with no PLAN positional refuses, naming the cause", () => {
+    const { taskSlug } = buildFixture("NotAdhocViaTaskOnly", [{ id: "AC-NOT-ADHOC-1", command: "true" }]);
+
+    const result = runLore(["verify", "--task", taskSlug], tmpDir);
+
+    expect(result.exitCode).toBe(4);
+    expect(result.stderr).toContain("not ad-hoc");
+    expect(result.stderr).not.toContain("Expected a plan document");
+  });
+
+  it("ERROR: ac_scope matching AC ids declared on TWO independent specs is ambiguous and refused", () => {
+    const prdA = createPrd("Ambiguous PRD A");
+    const specA = createSpec("Ambiguous Spec A", prdA);
+    declareScriptAc(specA, "AC-SHARED-ADHOC-1", "true");
+    const prdB = createPrd("Ambiguous PRD B");
+    const specB = createSpec("Ambiguous Spec B", prdB);
+    declareScriptAc(specB, "AC-SHARED-ADHOC-1", "true");
+    const adhocTask = createAdhocTask("Ambiguous Adhoc Task", ["AC-SHARED-ADHOC-1"]);
+
+    const result = runLore(["verify", "--task", adhocTask, "--allow-new-commands"], tmpDir);
+
+    expect(result.exitCode).toBe(4);
+    expect(result.stderr).toContain("ambiguous");
+    expect(result.stderr).toContain(specA);
+    expect(result.stderr).toContain(specB);
+  });
+});

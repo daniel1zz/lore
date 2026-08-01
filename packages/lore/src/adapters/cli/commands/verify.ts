@@ -99,8 +99,39 @@
  *       the command-provenance approval gate; the message names the exact
  *       `--allow-new-commands` recovery flag)
  *
+ * SPEC-069 ad-hoc-task runner path (task-the-ad-hoc-task-channel-has-no-
+ * attested-evidence-path-lore) — the `<PLAN>` positional is OPTIONAL. Omit it
+ * ONLY when `--task` names a `--adhoc` task (SPEC-069 §Design Decisions D2): no
+ * `plan_id` exists to resolve, so `getPlanBundle` structurally cannot reach a
+ * governing spec for it (confirmed RED: `lore verify <that-task-id>` — passing
+ * the task's own id as `<PLAN>` — refuses `Expected a plan document; got type
+ * 'task'`, the exact leaky message this path exists to avoid). This adapter
+ * resolves the named task + every corpus spec directly via `app.corpusService`
+ * (no new constructor port on `VerifyRunnerService` — the same "adapter
+ * resolves IO, service decides" split `getPlanBundle` itself already uses) and
+ * calls `VerifyRunnerService.verifyAdhocTask`, which searches for the ONE spec
+ * whose `acceptance_criteria` fully declares the task's `extra.ac_scope` ids —
+ * zero or multiple matches refuse loud, never guessed. Every step after that
+ * (declared-scope selection, M2 approval, execution, attested evidence write)
+ * is the IDENTICAL shared pipeline `<PLAN>`-mode runs — a GENUINE runner
+ * attestation (real command execution, real `attestation.runner`/`exit_code`/
+ * `duration_ms`), NOT a synthesized marker. ONE known, NAMED gap remains: the
+ * recorded evidence omits `ac_ref` (see `VerifyRunnerService._runVerification`'s
+ * `recordAcRef` param JSDoc) — `TaskWorkflowService.appendEvidenceEntry`'s
+ * cross-entity `ac_ref` check independently requires `task.parent_id` to
+ * resolve to a `plan`, which is structurally impossible for an ad-hoc task;
+ * closing that needs a `task-workflow-service.ts`/`corpus-service.ts` change
+ * outside this task's file anchors (see the completion report for the
+ * follow-up shape) — so an ad-hoc task's attested evidence does not (yet)
+ * contribute to AC-coverage aggregation, though it IS genuinely attested.
+ * Omitting `<PLAN>` with no `--task`, or naming a non-ad-hoc task, is a usage
+ * error (exit 2) naming the requirement explicitly — never the internal
+ * `getPlanBundle` leak. The `<PLAN>`-given path is BYTE-IDENTICAL to
+ * pre-SPEC-069 behavior (REGRESSION — `verify-runner-service.test.ts`'s
+ * pre-existing suite passes unmodified).
+ *
  * Source: SPEC-039 §2, §3, §4 AC-VRF-10; §M2; SPEC-061 §Scope D3; SPEC-063
- *   §Design Decisions D1-D4
+ *   §Design Decisions D1-D4; SPEC-069 §Design Decisions D2
  */
 
 import { spawnSync } from "node:child_process";
@@ -111,8 +142,8 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 import { formatAcResultLine, buildVerifyHeaderLines } from "../verify-render.js";
 import { resolveVerifyExecutionRoot } from "@lore/core";
-import type { VerifyGitFacts, VerifyExecutionRootResolution } from "@lore/core";
-import type { VerifyRunnerService } from "../../../service/verify-runner-service.js";
+import type { VerifyGitFacts, VerifyExecutionRootResolution, LoreError, Result } from "@lore/core";
+import type { VerifyRunnerService, VerifyPlanResult } from "../../../service/verify-runner-service.js";
 import type { App } from "../../../app.js";
 
 /**
@@ -287,8 +318,10 @@ export default defineCommand({
   args: {
     plan: {
       type: "positional",
-      description: "Plan document ID or slug",
-      required: true,
+      description:
+        "Plan document ID or slug. Optional ONLY when --task names a SPEC-069 --adhoc task " +
+        "(the ad-hoc runner path — no PLAN positional, no plan_id to resolve).",
+      required: false,
     },
     ac: {
       type: "string",
@@ -370,15 +403,73 @@ export default defineCommand({
         explicitExecutionRootArg,
       );
 
-      const result = await requireVerifyRunnerService(app).verifyPlan(args.plan as string, {
-        ...(acIds !== undefined ? { acIds } : {}),
-        ...(typeof args.task === "string" ? { explicitTaskIdOrSlug: args.task } : {}),
-        by,
-        nowIso: new Date().toISOString(),
-        ...(allowNewCommands ? { allowNewCommands: true } : {}),
-        ...(confirmUnapprovedCommand !== undefined ? { confirmUnapprovedCommand } : {}),
-        executionRoot,
-      });
+      // SPEC-069 ad-hoc-task runner path (module header) — the PLAN positional is
+      // now OPTIONAL; branch on its presence rather than casting `args.plan` as a
+      // guaranteed string.
+      const planArg = typeof args.plan === "string" ? args.plan : undefined;
+      const taskArg = typeof args.task === "string" ? args.task : undefined;
+
+      let result: Result<VerifyPlanResult, LoreError>;
+      let planArgForHeader: string;
+
+      if (planArg !== undefined) {
+        // REGRESSION — byte-identical to pre-SPEC-069 behavior (same call, same
+        // opts shape, `--task` still only overrides claim-based resolution
+        // WITHIN this plan, exactly as before).
+        result = await requireVerifyRunnerService(app).verifyPlan(planArg, {
+          ...(acIds !== undefined ? { acIds } : {}),
+          ...(taskArg !== undefined ? { explicitTaskIdOrSlug: taskArg } : {}),
+          by,
+          nowIso: new Date().toISOString(),
+          ...(allowNewCommands ? { allowNewCommands: true } : {}),
+          ...(confirmUnapprovedCommand !== undefined ? { confirmUnapprovedCommand } : {}),
+          executionRoot,
+        });
+        planArgForHeader = planArg;
+      } else {
+        // No PLAN positional — reachable ONLY for a SPEC-069 --adhoc task, named
+        // explicitly via --task (there is no plan-wide claim state to resolve
+        // against for a single ad-hoc task, so --task is not optional here).
+        if (taskArg === undefined) {
+          process.stderr.write(
+            "Error: PLAN positional is required unless --task names a SPEC-069 --adhoc task " +
+              "(the ad-hoc runner path omits PLAN entirely; see 'lore verify --help').\n",
+          );
+          process.exitCode = 2;
+          return;
+        }
+
+        // Resolved directly via app.corpusService (no new VerifyRunnerService
+        // constructor port needed) — mirrors this adapter's existing direct
+        // corpusService reads elsewhere (e.g. task-feed-wiring.ts, gate.ts).
+        const taskResult = await app.corpusService.get(taskArg);
+        if (!taskResult.ok) {
+          process.stderr.write(formatError(taskResult.error) + "\n");
+          process.exitCode = exitCode(taskResult.error);
+          return;
+        }
+
+        const specsResult = await app.corpusService.listFull({ type: "spec" });
+        if (!specsResult.ok) {
+          process.stderr.write(formatError(specsResult.error) + "\n");
+          process.exitCode = exitCode(specsResult.error);
+          return;
+        }
+
+        result = await requireVerifyRunnerService(app).verifyAdhocTask(
+          taskResult.value.doc,
+          specsResult.value.docs,
+          {
+            ...(acIds !== undefined ? { acIds } : {}),
+            by,
+            nowIso: new Date().toISOString(),
+            ...(allowNewCommands ? { allowNewCommands: true } : {}),
+            ...(confirmUnapprovedCommand !== undefined ? { confirmUnapprovedCommand } : {}),
+            executionRoot,
+          },
+        );
+        planArgForHeader = `${taskResult.value.doc.slug} (ad-hoc, no plan)`;
+      }
 
       if (!result.ok) {
         process.stderr.write(formatError(result.error) + "\n");
@@ -435,7 +526,7 @@ export default defineCommand({
         mode: executionRoot.mode,
         root: executionRoot.root,
         explicitOverride,
-        planArg: args.plan as string,
+        planArg: planArgForHeader,
         taskSlug: task.slug,
       })) {
         console.log(line);

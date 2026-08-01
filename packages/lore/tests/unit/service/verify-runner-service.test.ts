@@ -3,6 +3,30 @@
  * trust-hardening: command-provenance approval gate + env-allowlist threading +
  * first_seen annotation).
  *
+ * SPEC-069 ad-hoc-task runner path (task-the-ad-hoc-task-channel-has-no-attested-
+ * evidence-path-lore) — `verifyAdhocTask`'s own describe blocks live at the END of
+ * this file (search "ad-hoc"). Dimension mapping for that addition:
+ *   REGRESSION: `verifyPlan` given a non-plan id STILL refuses with the exact
+ *               pre-existing leaky message (RED pin, unchanged by this fix) —
+ *               documents the defect this task measured before fixing it
+ *   HAPPY:      one ad-hoc task + two candidate specs (one matching, one not) →
+ *               resolves the governing spec unambiguously, executes, records
+ *               GENUINELY attested evidence (real attestation.runner "lore-cli"
+ *               / exit_code / duration_ms) — `ac_ref` is intentionally OMITTED
+ *               (a NAMED, measured remaining gap; see `recordAcRef`'s JSDoc on
+ *               `VerifyRunnerService._runVerification`), never silently faked
+ *   NEGATIVE:   not type "task"; not ad-hoc; ac_scope absent; ac_scope empty;
+ *               zero matching specs; unknown --ac id against the resolved spec
+ *   ERROR:      ac_scope matching MULTIPLE candidate specs — ambiguous, refused,
+ *               names every matched spec slug
+ *   STATE:      the M2 command-provenance approval gate still applies to the
+ *               ad-hoc path (proves real delegation to the shared `_runVerification`
+ *               tail, not a re-implementation)
+ *   BOUNDARY:   an ad-hoc task's ac_scope matching a spec whose declared criteria
+ *               are a STRICT SUPERSET of the scope (the spec also declares AC ids
+ *               the task does NOT claim) still resolves — coverage is "spec
+ *               declares every scoped id", not "scope equals spec's full set"
+ *
  * This is orchestration logic over three injected ports (`getPlanBundle`,
  * `recordVerifiedEvidence`, `executor`) — tested entirely with HAND-WRITTEN test
  * doubles for all three, mirroring `task-workflow-service.test.ts`'s
@@ -777,5 +801,262 @@ describe("§M2 STATE — resolved env is threaded onto every executor call's spa
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(executor.calls[0]?.env).toBeUndefined();
+  });
+});
+
+// ─── SPEC-069 ad-hoc-task runner path ──────────────────────────────────────────
+// task-the-ad-hoc-task-channel-has-no-attested-evidence-path-lore
+
+/** An ad-hoc task (SPEC-069 §Design Decisions D2) — no plan_id, parented to a PRD. */
+function makeAdhocTask(id: string, overrides: Partial<DocRecord> = {}): DocRecord {
+  return makeDoc({
+    id,
+    type: "task",
+    title: `Ad-hoc Task ${id}`,
+    slug: id,
+    parent_id: "prd-root",
+    ...overrides,
+    extra: { adhoc: true, ...(overrides.extra ?? {}) },
+  });
+}
+
+describe("REGRESSION — verifyPlan given a non-plan id still refuses with the pre-existing leaky message (RED pin)", () => {
+  it("propagates getPlanBundle's exact 'Expected a plan document' message verbatim, unchanged by the SPEC-069 fix", async () => {
+    // reason: this is what `lore verify <adhoc-task-id>` (passing a non-plan id
+    // as the PLAN positional — the ONLY way to reach VerifyRunnerService before
+    // this task's fix) actually produced, and STILL produces: `getPlanBundle`
+    // structurally cannot resolve an ad-hoc task (or its PRD parent) as a plan.
+    // This test measures that the OLD, unsupported invocation shape is
+    // deliberately left alone — the NEW supported shape is `verifyAdhocTask`
+    // below, reached via a DIFFERENT CLI invocation (no PLAN positional).
+    const failingGetPlanBundle = async (
+      _planIdOrSlug: string,
+    ): Promise<Result<PlanBundle, LoreError>> =>
+      err({
+        code: "VALIDATION_ERROR",
+        field: "type",
+        message: "Expected a plan document; got type 'task'",
+        value: "task",
+      });
+    const executor = makeExecutor([]);
+    const recorder = makeRecordVerifiedEvidence([]);
+    const service = new VerifyRunnerService(failingGetPlanBundle, recorder.fn, executor.fn, config);
+
+    const result = await service.verifyPlan("adhoc-task-1", { by: "runner", nowIso: NOW });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (result.error.code !== "VALIDATION_ERROR") return;
+    expect(result.error.message).toBe("Expected a plan document; got type 'task'");
+    expect(executor.callCount).toBe(0);
+  });
+});
+
+describe("HAPPY — verifyAdhocTask resolves the unique matching spec and attests (AC-VRF-adhoc)", () => {
+  it("two candidate specs, only one fully declares the task's ac_scope — executes and records GENUINE attestation (ac_ref intentionally omitted, see recordAcRef JSDoc)", async () => {
+    const matchingSpec = makeSpec([scriptAc("AC-1", "cmd-1"), scriptAc("AC-2", "cmd-2")], {
+      id: "spec-match",
+      slug: "spec-match",
+    });
+    const otherSpec = makeSpec([scriptAc("AC-OTHER-1", "cmd-x")], { id: "spec-other", slug: "spec-other" });
+    const task = makeAdhocTask("adhoc-1", { extra: { adhoc: true, ac_scope: ["AC-1"] } });
+
+    const executor = makeExecutor([ok({ exitCode: 0, outputTail: "out", durationMs: 10, timedOut: false })]);
+    const recorder = makeRecordVerifiedEvidence([ok(makeTask("adhoc-1", { version: 2 }))]);
+    const { fn: getPlanBundle } = makeGetPlanBundle({ plan: makePlan(), spec: undefined, tasks: [] });
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config);
+
+    const result = await service.verifyAdhocTask(task, [otherSpec, matchingSpec], {
+      by: "runner",
+      nowIso: NOW,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.task).toEqual({ id: "adhoc-1", slug: "adhoc-1" });
+    expect(result.value.results).toHaveLength(1);
+    expect(result.value.results[0]).toMatchObject({ ac_id: "AC-1", result: "pass", exit_code: 0 });
+    expect(executor.callCount).toBe(1);
+    expect(recorder.callCount).toBe(1);
+    // reason: MEASURED gap (recordAcRef: false for the ad-hoc path, see
+    // _runVerification's JSDoc) — TaskWorkflowService.appendEvidenceEntry's
+    // cross-entity ac_ref check requires task.parent_id to resolve to a plan,
+    // structurally impossible for an ad-hoc task (its parent is the root PRD).
+    // The evidence is still GENUINELY attested — real exit_code/duration/runner —
+    // just not (yet) AC-coverage-linkable. Fixing that needs task-workflow-
+    // service.ts/corpus-service.ts, outside this task's file anchors.
+    expect(recorder.calls[0]?.entry.ac_ref).toBeUndefined();
+    expect(recorder.calls[0]?.entry.attestation?.runner).toBe("lore-cli");
+    expect(recorder.calls[0]?.entry.attestation?.exit_code).toBe(0);
+    expect(recorder.calls[0]?.entry.attestation?.duration_ms).toBe(10);
+  });
+
+  it("BOUNDARY — a matching spec whose declared criteria are a strict superset of ac_scope still resolves", async () => {
+    // reason: coverage is "spec declares every scoped id", never "scope equals
+    // the spec's full declared set" — a spec that ALSO declares unrelated ACs
+    // the ad-hoc task does not claim is still a valid, unambiguous match.
+    const spec = makeSpec([scriptAc("AC-1", "cmd-1"), scriptAc("AC-UNRELATED", "cmd-y")], {
+      id: "spec-super",
+      slug: "spec-super",
+    });
+    const task = makeAdhocTask("adhoc-2", { extra: { adhoc: true, ac_scope: ["AC-1"] } });
+    const executor = makeExecutor([ok({ exitCode: 0, outputTail: "", durationMs: 1, timedOut: false })]);
+    const recorder = makeRecordVerifiedEvidence([ok(makeTask("adhoc-2", { version: 2 }))]);
+    const { fn: getPlanBundle } = makeGetPlanBundle({ plan: makePlan(), spec: undefined, tasks: [] });
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config);
+
+    const result = await service.verifyAdhocTask(task, [spec], { by: "runner", nowIso: NOW });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.results).toHaveLength(1);
+    expect(result.value.results[0]?.ac_id).toBe("AC-1");
+  });
+
+  it("STATE — the M2 command-provenance approval gate still applies (proves real delegation to the shared execution tail)", async () => {
+    const spec = makeSpec([scriptAc("AC-1", "cmd-1")], { id: "spec-gated", slug: "spec-gated" });
+    const task = makeAdhocTask("adhoc-3", { extra: { adhoc: true, ac_scope: ["AC-1"] } });
+    const executor = makeExecutor([]);
+    const recorder = makeRecordVerifiedEvidence([]);
+    const { fn: getPlanBundle } = makeGetPlanBundle({ plan: makePlan(), spec: undefined, tasks: [] });
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, gatedConfig);
+
+    const result = await service.verifyAdhocTask(task, [spec], { by: "runner", nowIso: NOW });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("NEEDS_APPROVAL");
+    expect(executor.callCount).toBe(0);
+  });
+});
+
+describe("NEGATIVE — verifyAdhocTask refuses structurally-invalid inputs before any execution", () => {
+  const { fn: getPlanBundle } = makeGetPlanBundle({ plan: makePlan(), spec: undefined, tasks: [] });
+
+  it("target is not type 'task' — VALIDATION_ERROR field 'type'", async () => {
+    const executor = makeExecutor([]);
+    const recorder = makeRecordVerifiedEvidence([]);
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config);
+    const notATask = makeDoc({ id: "spec-1", type: "spec", title: "Spec", slug: "spec-1" });
+
+    const result = await service.verifyAdhocTask(notATask, [], { by: "runner", nowIso: NOW });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (result.error.code !== "VALIDATION_ERROR") return;
+    expect(result.error.field).toBe("type");
+    expect(executor.callCount).toBe(0);
+  });
+
+  it("task is not ad-hoc (extra.adhoc !== true) — VALIDATION_ERROR field 'adhoc'", async () => {
+    const executor = makeExecutor([]);
+    const recorder = makeRecordVerifiedEvidence([]);
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config);
+    const planOwnedTask = makeTask("task-1"); // extra.ac_scope set, but extra.adhoc absent
+
+    const result = await service.verifyAdhocTask(planOwnedTask, [], { by: "runner", nowIso: NOW });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (result.error.code !== "VALIDATION_ERROR") return;
+    expect(result.error.field).toBe("adhoc");
+    expect(result.error.message).toContain("not ad-hoc");
+    expect(executor.callCount).toBe(0);
+  });
+
+  it("ac_scope absent — VALIDATION_ERROR field 'ac_scope', names lore scope add", async () => {
+    const executor = makeExecutor([]);
+    const recorder = makeRecordVerifiedEvidence([]);
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config);
+    const task = makeAdhocTask("adhoc-4"); // no ac_scope key at all
+
+    const result = await service.verifyAdhocTask(task, [], { by: "runner", nowIso: NOW });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (result.error.code !== "VALIDATION_ERROR") return;
+    expect(result.error.field).toBe("ac_scope");
+    expect(result.error.message).toContain("no declared ac_scope");
+    expect(result.error.message).toContain("lore scope add");
+    expect(executor.callCount).toBe(0);
+  });
+
+  it("ac_scope empty array — VALIDATION_ERROR field 'ac_scope', EMPTY_SCOPE_LITERAL", async () => {
+    const executor = makeExecutor([]);
+    const recorder = makeRecordVerifiedEvidence([]);
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config);
+    const task = makeAdhocTask("adhoc-5", { extra: { adhoc: true, ac_scope: [] } });
+
+    const result = await service.verifyAdhocTask(task, [], { by: "runner", nowIso: NOW });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (result.error.code !== "VALIDATION_ERROR") return;
+    expect(result.error.field).toBe("ac_scope");
+    expect(result.error.message).toContain("declares no acceptance criterion");
+    expect(executor.callCount).toBe(0);
+  });
+
+  it("zero candidate specs declare the scope in full — VALIDATION_ERROR field 'ac_scope', 'matches no'", async () => {
+    const executor = makeExecutor([]);
+    const recorder = makeRecordVerifiedEvidence([]);
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config);
+    const task = makeAdhocTask("adhoc-6", { extra: { adhoc: true, ac_scope: ["AC-NOWHERE"] } });
+    const unrelatedSpec = makeSpec([scriptAc("AC-1", "cmd-1")], { id: "spec-1", slug: "spec-1" });
+
+    const result = await service.verifyAdhocTask(task, [unrelatedSpec], { by: "runner", nowIso: NOW });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (result.error.code !== "VALIDATION_ERROR") return;
+    expect(result.error.field).toBe("ac_scope");
+    expect(result.error.message).toContain("matches no");
+    expect(executor.callCount).toBe(0);
+  });
+
+  it("unknown --ac id against the resolved spec — VALIDATION_ERROR field 'acIds'", async () => {
+    const executor = makeExecutor([]);
+    const recorder = makeRecordVerifiedEvidence([]);
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config);
+    const spec = makeSpec([scriptAc("AC-1", "cmd-1")], { id: "spec-1", slug: "spec-1" });
+    const task = makeAdhocTask("adhoc-7", { extra: { adhoc: true, ac_scope: ["AC-1"] } });
+
+    const result = await service.verifyAdhocTask(task, [spec], {
+      by: "runner",
+      nowIso: NOW,
+      acIds: ["AC-DOES-NOT-EXIST"],
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (result.error.code !== "VALIDATION_ERROR") return;
+    expect(result.error.field).toBe("acIds");
+    expect(executor.callCount).toBe(0);
+  });
+});
+
+describe("ERROR — ac_scope matching MULTIPLE candidate specs is ambiguous and refused", () => {
+  it("VALIDATION_ERROR field 'ac_scope', message names every matched spec slug, never guesses", async () => {
+    const { fn: getPlanBundle } = makeGetPlanBundle({ plan: makePlan(), spec: undefined, tasks: [] });
+    const executor = makeExecutor([]);
+    const recorder = makeRecordVerifiedEvidence([]);
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config);
+
+    // reason: AC-* ids are unique only WITHIN one spec's declared criteria
+    // (never enforced globally) — two independent specs each declaring an
+    // "AC-SHARED-1" is a legitimate corpus state this method must handle by
+    // refusing, never by picking one arbitrarily.
+    const specA = makeSpec([scriptAc("AC-SHARED-1", "cmd-a")], { id: "spec-a", slug: "spec-a" });
+    const specB = makeSpec([scriptAc("AC-SHARED-1", "cmd-b")], { id: "spec-b", slug: "spec-b" });
+    const task = makeAdhocTask("adhoc-8", { extra: { adhoc: true, ac_scope: ["AC-SHARED-1"] } });
+
+    const result = await service.verifyAdhocTask(task, [specA, specB], { by: "runner", nowIso: NOW });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (result.error.code !== "VALIDATION_ERROR") return;
+    expect(result.error.field).toBe("ac_scope");
+    expect(result.error.message).toContain("ambiguous");
+    expect(result.error.message).toContain("spec-a");
+    expect(result.error.message).toContain("spec-b");
+    expect(executor.callCount).toBe(0);
   });
 });
