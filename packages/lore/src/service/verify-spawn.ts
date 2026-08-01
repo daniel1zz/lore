@@ -8,9 +8,13 @@
  *
  * Public surface:
  *   - buildVerifySpawnSpec(criterion, opts) — the ONLY function that should compute
- *     {cmd, cwd, timeoutMs, killGraceMs, env?} for a script-mode acceptance criterion
+ *     {cmd, cwd, timeoutMs, killGraceMs, env?, acRef?} for a script-mode acceptance criterion
  *   - deriveVerifyResult(exitCode, timedOut) — pure exit-code → pass/fail mapping
  *   - resolveVerifyEnv(processEnv, opts) — pure env-allowlist filter (SPEC-039 §M2)
+ *   - selectOutputTailWindow(stream, acRef, maxChars) — pure output_tail window
+ *     selection (spec-evidence-output-tail-integrity-a-self-reported-non-pass §D4):
+ *     prefers a window around `acRef`'s LAST occurrence over the literal stream end,
+ *     but ONLY when the plain end-of-stream tail would otherwise miss it
  *   - DEFAULT_VERIFY_ENV_ALLOWLIST — the built-in default allowlist (before any
  *     `verify.env.allowlist` config additions)
  *   - VerifySpawnSpec — the input shape, consumed directly by verify-executor.ts
@@ -60,6 +64,7 @@
  * Source: SPEC-039 §2 D5, D6, D9; §3; §4 AC-VRF-4; §M2 (env allowlist hardening)
  */
 
+import { headChars, tailChars } from "@lore/core";
 import type { AcceptanceCriterion } from "@lore/core";
 
 /** Fixed grace period between SIGTERM and SIGKILL escalation (SPEC-039 §2 D6). Not configurable. */
@@ -168,6 +173,17 @@ export interface VerifySpawnSpec {
    * to `Bun.spawn({ env })` when present, and omits the `env` option entirely when absent.
    */
   readonly env?: Record<string, string>;
+  /**
+   * The AC id this spawn's evidence row will be filed under, when the caller intends
+   * to attach one (spec-evidence-output-tail-integrity-a-self-reported-non-pass §D4).
+   * OPTIONAL — absent means "no AC-witnessing preference", the executor falls back to
+   * the plain stream-tail unconditionally (byte-identical pre-D4 behavior). Present
+   * iff `VerifyRunnerService`'s `recordAcRef` flag is true for this run (mirrors the
+   * `ac_ref` field it separately stamps onto the evidence row itself — see
+   * `buildVerifySpawnSpec`'s `opts.acRef` JSDoc for why this is caller-supplied rather
+   * than always `criterion.id`).
+   */
+  readonly acRef?: string;
 }
 
 /**
@@ -180,6 +196,12 @@ export interface VerifySpawnSpec {
  * @param opts.env - Pre-resolved env map (typically the ONE {@link resolveVerifyEnv} call a
  *   `verifyPlan` run makes, reused across every AC — see `VerifyRunnerService`). `undefined`
  *   (omitted) means "inherit the full parent env" — see this module's header invariant.
+ * @param opts.acRef - The AC id to prefer when the executor selects the output_tail window
+ *   (D4). Caller-supplied rather than always defaulting to `criterion.id` so the caller's
+ *   own `recordAcRef` gate (whether the evidence row will actually carry `ac_ref` at all)
+ *   stays the single source of truth for "does this run witness an AC id" — mirrors how
+ *   `VerifyRunnerService` already gates the `ac_ref` evidence field itself on that same flag.
+ *   Omitted means "no preference" — the executor stores the plain stream tail.
  * @returns {@link VerifySpawnSpec} ready to hand to `executeVerifySpawnSpec`
  *
  * @example
@@ -199,7 +221,12 @@ export interface VerifySpawnSpec {
  */
 export function buildVerifySpawnSpec(
   criterion: ScriptAcceptanceCriterion,
-  opts: { repoRoot: string; defaultTimeoutMs: number; env?: Record<string, string> },
+  opts: {
+    repoRoot: string;
+    defaultTimeoutMs: number;
+    env?: Record<string, string>;
+    acRef?: string;
+  },
 ): VerifySpawnSpec {
   return {
     cmd: ["sh", "-c", criterion.verify.command],
@@ -207,6 +234,7 @@ export function buildVerifySpawnSpec(
     timeoutMs: criterion.verify.timeout_ms ?? opts.defaultTimeoutMs,
     killGraceMs: KILL_GRACE_MS,
     ...(opts.env !== undefined ? { env: opts.env } : {}),
+    ...(opts.acRef !== undefined ? { acRef: opts.acRef } : {}),
   };
 }
 
@@ -221,7 +249,12 @@ export interface VerifyExecutionResult {
    *  a number (never null) — a killed process still reports a signal-derived code
    *  (e.g. 143 for SIGTERM, 137 for SIGKILL), not null. */
   readonly exitCode: number;
-  /** stdout + stderr concatenated, tail-truncated to 4000 chars. */
+  /**
+   * stdout + stderr concatenated, truncated to 4000 chars via
+   * {@link selectOutputTailWindow} — the plain stream-tail UNLESS the spawn spec
+   * carried an `acRef` that occurs earlier than that plain tail's window, in which
+   * case this is a window around the id's LAST occurrence instead (D4).
+   */
   readonly outputTail: string;
   /** Wall-clock duration from spawn to exit, in whole milliseconds. */
   readonly durationMs: number;
@@ -249,4 +282,81 @@ export interface VerifyExecutionResult {
  */
 export function deriveVerifyResult(exitCode: number | null, timedOut: boolean): "pass" | "fail" {
   return !timedOut && exitCode === 0 ? "pass" : "fail";
+}
+
+/**
+ * Select the `output_tail` window for a captured verify-run stream
+ * (spec-evidence-output-tail-integrity-a-self-reported-non-pass §D4).
+ *
+ * The plain end-of-stream tail (`tailChars(stream, maxChars)`) is the DEFAULT and the
+ * unconditional fallback — this only overrides it when ALL of the following hold:
+ *   1. `acRef` is a non-empty string (a caller intends to witness a specific AC id).
+ *   2. `acRef` occurs SOMEWHERE in `stream` (`String.lastIndexOf`).
+ *   3. That last occurrence is NOT already visible in the plain tail — i.e. it already
+ *      scrolled out of the last `maxChars` characters. An id already visible in the
+ *      ordinary window is left alone (returns the identical plain tail), so this
+ *      function never surprises a caller whose output happens to fit the cap already.
+ *
+ * When it does override, the window is centered on the id's last occurrence: up to
+ * `maxChars / 2` characters of LEADING context, then filled forward to the `maxChars`
+ * budget (trailing context, capped at the stream's actual end) — so a short run of
+ * output after the match (e.g. a test runner's own summary line) still has a chance to
+ * survive, not just the match itself.
+ *
+ * Composed ENTIRELY from `headChars`/`tailChars` (`@lore/core`, BUG-001 surrogate-pair
+ * safety) — every cut point here is a plain numeric OFFSET fed to one of those two
+ * primitives, never a raw `.slice(start, end)` on `stream` itself. A boundary that
+ * happens to land mid surrogate-pair self-corrects the same way the pre-existing
+ * plain-tail cut already does; hand-rolling the arithmetic directly against `stream`
+ * would reintroduce exactly the bug `tailChars`/`headChars` exist to prevent.
+ *
+ * @param stream - stdout+stderr concatenated, the FULL (untruncated) captured text.
+ * @param acRef - The AC id this run's evidence row is filed under, when the caller
+ *   intends to attach one (`VerifySpawnSpec.acRef`, present iff `recordAcRef` is true
+ *   for this run — see that field's own JSDoc). `undefined` or `""` means "no
+ *   preference" — always the plain tail (AC-ETI-8 control).
+ * @param maxChars - The `output_tail` budget (`OUTPUT_TAIL_MAX_CHARS`, 4000 in
+ *   production). `maxChars <= 0` returns `""`, matching `tailChars`'s own contract.
+ * @returns The text to store as `output_tail`.
+ *
+ * @example
+ * // acRef never occurs anywhere — byte-identical to the plain tail (AC-ETI-8).
+ * selectOutputTailWindow("some unrelated output\n".repeat(500), "AC-ETI-7", 4000)
+ * // => tailChars("some unrelated output\n".repeat(500), 4000)
+ *
+ * @example
+ * // acRef occurs, but already inside the plain tail's window — left unchanged.
+ * selectOutputTailWindow("noise ".repeat(10) + "AC-ETI-7 passed", "AC-ETI-7", 4000)
+ * // => the full string (shorter than 4000 chars, nothing to override)
+ *
+ * @example
+ * // acRef scrolled out of the plain tail — windowed around its LAST occurrence instead.
+ * const stream = "AC-ETI-7 passed\n" + "z".repeat(9000);
+ * selectOutputTailWindow(stream, "AC-ETI-7", 4000).includes("AC-ETI-7") // => true
+ * tailChars(stream, 4000).includes("AC-ETI-7") // => false — the bug this fixes
+ */
+export function selectOutputTailWindow(
+  stream: string,
+  acRef: string | undefined,
+  maxChars: number,
+): string {
+  const plainTail = tailChars(stream, maxChars);
+  if (acRef === undefined || acRef === "") return plainTail;
+
+  const idx = stream.lastIndexOf(acRef);
+  if (idx === -1) return plainTail;
+
+  // The plain tail's own start offset, recovered from the lengths involved (not by
+  // re-deriving tailChars's internal surrogate-boundary check) — exact regardless of
+  // whether tailChars shrank the cut by one code unit to dodge a split pair.
+  const plainTailStart = stream.length - plainTail.length;
+  if (idx >= plainTailStart) return plainTail; // already witnessed in the ordinary tail
+
+  const leadBudget = Math.floor(maxChars / 2);
+  const windowStart = Math.max(0, idx - leadBudget);
+  // "Drop the first windowStart characters" — expressed as tailChars keeping the last
+  // (length - windowStart) characters, never a raw `stream.slice(windowStart)`.
+  const fromWindowStart = tailChars(stream, stream.length - windowStart);
+  // Cap the total to maxChars, taking from the (safe) start of that suffix forward.
+  return headChars(fromWindowStart, maxChars);
 }
