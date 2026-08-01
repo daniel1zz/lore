@@ -81,7 +81,9 @@ afterEach(() => {
 });
 
 describe("BOUNDARY — `lore ac set` with zero field flags (AC-ACS-3)", () => {
-  it("no field flag exits 2", () => {
+  // 6 CLI spawns (prd/spec/ac add/ac set ×2 + list) — declares its budget per
+  // spec-a-test-case-s-timeout-budget-must-be-declared-when-its D1.
+  it("no field flag exits 2", { timeout: 60_000 }, () => {
     const prd = runLore(
       ["create", "prd", "--title", "AC Set CLI PRD", "--content", "root", "--no-ai"],
       tmpDir,
