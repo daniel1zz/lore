@@ -89,6 +89,7 @@ import type {
   PlanBundle,
   ScopeMismatchWarning,
   SourceVersionRef,
+  TypedGap,
   UnverifiableEntry,
 } from "@lore/core";
 import {
@@ -261,12 +262,15 @@ export function computeGroundingWarnings(
 
 /**
  * spec-lore-assess-project-evidence-rows-instead-of-embedding-the D3/D4 — suppress, not
- * merely warn about, every `dimension_scores` entry `findUngroundedAbsenceDimensions`
- * flags: the flagged entry is REMOVED from the returned `dimension_scores`, and a
+ * merely warn about, EVERY published expression of a `dimension_scores` entry
+ * `findUngroundedAbsenceDimensions` flags: the flagged `dimension_scores` entry is
+ * REMOVED, its matching `typed_gaps[]` entries (task-t6, joined on `typed_gaps[].dimension
+ * === dimensionKey`, exact equality — see @invariant below) are ALSO removed, and a
  * corresponding `unverifiable[]` entry naming the dimension is appended in its place — the
  * assessment still records that the material could not be judged, it just no longer
- * asserts a defect about it (D3). Reuses `findUngroundedAbsenceDimensions`, the SAME
- * grounding-match computation `computeGroundingWarnings` uses — never a second,
+ * asserts a defect about it anywhere in the persisted record (D3). Reuses
+ * `findUngroundedAbsenceDimensions`, the SAME grounding-match computation
+ * `computeGroundingWarnings` uses, called EXACTLY ONCE per invocation — never a second,
  * independently-drifting heuristic (D4).
  *
  * Supersedes SPEC-067 D3's `applyGroundingConfidenceDowngrade` (removed by this change):
@@ -275,36 +279,67 @@ export function computeGroundingWarnings(
  * quality record anyway (see this task's governing spec's Overview). A warning/downgrade
  * that does not change what lands in the record is not a mechanism.
  *
- * @invariant Pure — returns the EXACT SAME `dimensionScores`/`unverifiableEntries`
- *   references when nothing is ungrounded (mirrors the AC-067-6 healthy-path identity
- *   precedent the superseded function established — `_finalizeAssessment` never needs to
- *   distinguish "unchanged" from "not called").
- * @invariant Every non-flagged entry (evidence-based, or absence-based but grounded) is
- *   copied through byte-identical — only ungrounded entries are removed.
+ * task-t6 (2026-08-01): the ORIGINAL version of this function removed only the
+ * `dimension_scores` row, leaving `typed_gaps[]` (and consequently the legacy `gaps[]`
+ * projection `deriveLegacyFindings` derives from it) to still publish the exact finding
+ * `unverifiable[]` claims was suppressed — measured on
+ * `knowledge-assessment-implementation-evidence-output-tail`. This extension closes that:
+ * `typed_gaps[]` is now filtered by the SAME `ungrounded` list, never a second match rule.
+ *
+ * @invariant Pure — returns the EXACT SAME `dimensionScores`/`unverifiableEntries`/
+ *   `typedGaps` references when nothing is ungrounded (mirrors the AC-067-6 healthy-path
+ *   identity precedent the superseded function established — `_finalizeAssessment` never
+ *   needs to distinguish "unchanged" from "not called").
+ * @invariant Every non-flagged `dimension_scores` entry (evidence-based, or absence-based
+ *   but grounded) is copied through byte-identical — only ungrounded entries are removed.
+ * @invariant `typed_gaps[].dimension` is joined against `ungrounded` by EXACT string
+ *   equality, NOT the case-insensitive substring heuristic `findUngroundedAbsenceDimensions`
+ *   uses internally — that heuristic exists solely to match a dimension name against
+ *   free-text `unverifiable[]`/`truncated[]` strings a judge might phrase loosely;
+ *   `typed_gaps[].dimension` is a structured field the judge is expected to set to the
+ *   exact `dimension_scores` key it scores (see `typedGapSchema`'s own JSDoc), so exact
+ *   equality is the correct — and only — join here (AC-AEP-11/AC-AEP-7's "single match
+ *   rule" invariant is about `ungrounded` itself never being re-derived, not about this
+ *   join needing the substring heuristic too).
+ * @invariant `typed_recommendations[]` is NEVER filtered here (deliberately out of this
+ *   function's scope — see `_finalizeAssessment`'s own `// reason:` comment for why: the
+ *   schema carries no field linking a recommendation to a specific gap/dimension).
  * @param dimensionScores - `parsed.dimension_scores` (may be undefined — no-op)
  * @param unverifiableEntries - `parsed.unverifiable` (may be undefined — treated as `[]`)
  * @param truncatedSections - `judgment.truncated[]` — same input `computeGroundingWarnings` takes
+ * @param typedGaps - `parsed.typed_gaps` (may be undefined — no-op, stays `undefined`)
  * @returns `dimensionScores` with every ungrounded absence entry removed (`undefined` when
- *   none remain), and `unverifiable` with one new entry per removed dimension appended
- *   (identical reference to the input when nothing was suppressed)
+ *   none remain), `unverifiable` with one new entry per removed dimension appended
+ *   (identical reference to the input when nothing was suppressed), and `typedGaps` with
+ *   every entry keyed to a removed dimension filtered out (stays `undefined` when the
+ *   input was `undefined`; becomes `[]`, never `undefined`, when the input was a
+ *   non-empty array that filtered down to nothing — presence is preserved, only content
+ *   changes, mirroring how the legacy `gaps[]` array itself is never omitted)
  *
  * @example
  * suppressUngroundedAbsenceFindings(
  *   { scope_fidelity: { score: 20, confidence: 0.2, based_on: "absence", reasoning: "cannot verify" } },
  *   undefined,
  *   [],
+ *   [{ dimension: "scope_fidelity", severity: "major", statement: "cannot be inspected" }],
  * );
  * // → { dimensionScores: undefined,
- * //     unverifiable: [{ material: "scope_fidelity dimension score", reason: "..." }] }
+ * //     unverifiable: [{ material: "scope_fidelity dimension score", reason: "..." }],
+ * //     typedGaps: [] }
  */
 function suppressUngroundedAbsenceFindings(
   dimensionScores: DimensionScores | undefined,
   unverifiableEntries: UnverifiableEntry[] | undefined,
   truncatedSections: string[],
-): { dimensionScores: DimensionScores | undefined; unverifiable: UnverifiableEntry[] | undefined } {
+  typedGaps: TypedGap[] | undefined,
+): {
+  dimensionScores: DimensionScores | undefined;
+  unverifiable: UnverifiableEntry[] | undefined;
+  typedGaps: TypedGap[] | undefined;
+} {
   const ungrounded = findUngroundedAbsenceDimensions(dimensionScores, unverifiableEntries, truncatedSections);
   if (ungrounded.length === 0) {
-    return { dimensionScores, unverifiable: unverifiableEntries };
+    return { dimensionScores, unverifiable: unverifiableEntries, typedGaps };
   }
 
   // reason: findUngroundedAbsenceDimensions only ever returns a non-empty array when
@@ -320,9 +355,18 @@ function suppressUngroundedAbsenceFindings(
       `suppressed as ungrounded rather than published as a finding.`,
   }));
 
+  // reason: task-t6 — same `ungrounded` list as the dimension_scores filter above, joined
+  // against typed_gaps[].dimension by exact equality (see this function's own @invariant
+  // for why exact-not-substring is correct here). `undefined` input stays `undefined`
+  // (nothing to filter); a defined input is always filtered, even down to `[]`.
+  const ungroundedSet = new Set(ungrounded);
+  const remainingTypedGaps: TypedGap[] | undefined =
+    typedGaps === undefined ? undefined : typedGaps.filter((gap) => !ungroundedSet.has(gap.dimension));
+
   return {
     dimensionScores: Object.keys(remaining).length > 0 ? remaining : undefined,
     unverifiable: [...(unverifiableEntries ?? []), ...suppressedAsUnverifiable],
+    typedGaps: remainingTypedGaps,
   };
 }
 
@@ -1299,6 +1343,12 @@ export class AIProviderService {
    *     downgraded, and a corresponding `unverifiable[]` entry naming the dimension is
    *     appended in its place (D3) — the assessment still records that the material could
    *     not be judged, it just no longer asserts a defect about it.
+   *   - task-t6: the SAME call ALSO filters `typed_gaps[]` down to the suppressed
+   *     dimension set, and `gaps[]` is derived from that FILTERED array (not the raw
+   *     `parsed.typed_gaps`) — otherwise the legacy projection would still publish a
+   *     finding whose `typed_gaps`/`dimension_scores` siblings were just suppressed
+   *     (measured 2026-08-01: the bug this task exists to close). `typed_recommendations`
+   *     is deliberately left untouched — see the `// reason:` comment below.
    *   - `judgment.overall_confidence`/`degraded_by_truncation` are set when
    *     `computeTaskTruncationRatio(truncated, bundle.tasks.length)` exceeds
    *     `TRUNCATION_DOWNGRADE_THRESHOLDS.confidenceCapRatio` (D4).
@@ -1331,14 +1381,6 @@ export class AIProviderService {
     sourceVersions: SourceVersionRef[],
     scopeWarning: ScopeMismatchWarning | undefined,
   ): AssessmentResult {
-    // reason: SPEC-040 D3 — only substitute the legacy string arrays when the judge
-    // actually emitted the corresponding typed array; a typed_gaps-less response leaves
-    // parsed.gaps untouched (independently keyed per array, not an all-or-nothing swap).
-    const legacy = deriveLegacyFindings(parsed.typed_gaps, parsed.typed_recommendations);
-    const gaps = parsed.typed_gaps !== undefined ? legacy.gaps : parsed.gaps;
-    const recommendations =
-      parsed.typed_recommendations !== undefined ? legacy.recommendations : parsed.recommendations;
-
     // reason: SPEC-040 D4 — grounding cross-check runs on the validated-but-not-yet-final
     // output; warnings are advisory-only and never fail the run.
     const groundingWarnings = computeGroundingWarnings(parsed, truncated);
@@ -1346,15 +1388,39 @@ export class AIProviderService {
 
     // reason: spec-lore-assess-project-evidence-rows-instead-of-embedding-the D3/D4 —
     // suppress (not merely warn about) every ungrounded absence-based dimension_scores
-    // entry over the SAME ungrounded-dimension set groundingWarnings above already
-    // identified (findUngroundedAbsenceDimensions is the shared computation both call).
-    // Returns parsed.dimension_scores/unverifiable UNCHANGED (same references) when
+    // entry, AND (task-t6) every typed_gaps[] entry keyed to that same dimension, over the
+    // SAME ungrounded-dimension set groundingWarnings above already identified
+    // (findUngroundedAbsenceDimensions is the shared computation both call). Returns
+    // parsed.dimension_scores/unverifiable/typed_gaps UNCHANGED (same references) when
     // nothing is ungrounded — mirrors the AC-067-6 healthy-path identity precedent.
-    const { dimensionScores, unverifiable } = suppressUngroundedAbsenceFindings(
+    const { dimensionScores, unverifiable, typedGaps } = suppressUngroundedAbsenceFindings(
       parsed.dimension_scores,
       parsed.unverifiable,
       truncated,
+      parsed.typed_gaps,
     );
+
+    // reason: SPEC-040 D3 — only substitute the legacy string arrays when the judge
+    // actually emitted the corresponding typed array; a typed_gaps-less response leaves
+    // parsed.gaps untouched (independently keyed per array, not an all-or-nothing swap).
+    // task-t6: `gaps` is derived from the SUPPRESSED `typedGaps` (not the raw
+    // `parsed.typed_gaps`) — otherwise the legacy projection would still publish a gap
+    // whose typed_gaps sibling was just removed, reintroducing the exact "still
+    // publishes, twice" bug this task exists to close. The PRESENCE check stays on the
+    // raw `parsed.typed_gaps` — D3's original rule ("did the judge emit the array at
+    // all") is unaffected by suppression; only the projected VALUE changes.
+    const legacy = deriveLegacyFindings(typedGaps, parsed.typed_recommendations);
+    const gaps = parsed.typed_gaps !== undefined ? legacy.gaps : parsed.gaps;
+    // reason: task-t6 — typed_recommendations carries NO field linking a recommendation to
+    // a specific gap/dimension (typedRecommendationSchema is only target/action/rationale
+    // — see assessment.ts). Inferring "this recommendation's ONLY support was the
+    // suppressed gap" would require inventing an unstated heuristic (e.g. textual
+    // similarity against `rationale`), which is exactly the second,
+    // independently-drifting matcher D4 forbids for the dimension join above. Decision:
+    // leave typed_recommendations (and therefore its legacy `recommendations[]`
+    // projection) COMPLETELY untouched by suppression, always — not an oversight.
+    const recommendations =
+      parsed.typed_recommendations !== undefined ? legacy.recommendations : parsed.recommendations;
 
     // reason: SPEC-067 D4 — task-truncation coverage caps overall confidence, and at 100%
     // refuses a numeric overall_score / forces verdict to "inconclusive". Computed from the
@@ -1365,22 +1431,25 @@ export class AIProviderService {
     const degradedByTruncation = taskTruncationRatio > TRUNCATION_DOWNGRADE_THRESHOLDS.confidenceCapRatio;
     const fullyTruncated = taskTruncationRatio >= TRUNCATION_DOWNGRADE_THRESHOLDS.inconclusiveRatio;
 
-    // reason: destructure OUT verdict/overall_score/dimension_scores/unverifiable so the
-    // object below can OMIT overall_score entirely at 100% truncation (a `key: undefined`
-    // spread would leave an own-property, which JSON.stringify drops but Zod's optional()
-    // still treats as present-with-undefined under exactOptionalPropertyTypes) and override
-    // the other three with the suppression-augmented values computed above — every other
-    // field on `parsed` (ac_scores, typed_gaps, typed_recommendations, rubric_warning)
-    // passes through via ...restParsed exactly as `...parsed` did before.
+    // reason: destructure OUT verdict/overall_score/dimension_scores/unverifiable/
+    // typed_gaps so the object below can OMIT overall_score entirely at 100% truncation (a
+    // `key: undefined` spread would leave an own-property, which JSON.stringify drops but
+    // Zod's optional() still treats as present-with-undefined under
+    // exactOptionalPropertyTypes) and override the other four with the
+    // suppression-augmented values computed above — every other field on `parsed`
+    // (ac_scores, typed_recommendations, rubric_warning) passes through via ...restParsed
+    // exactly as `...parsed` did before.
     const {
       verdict: judgeVerdict,
       overall_score: judgeOverallScore,
       dimension_scores: _unusedRawDimensionScores,
       unverifiable: _unusedRawUnverifiable,
+      typed_gaps: _unusedRawTypedGaps,
       ...restParsed
     } = parsed;
     void _unusedRawDimensionScores; // reason: destructured only to exclude it from restParsed; suppressed value re-added below.
     void _unusedRawUnverifiable; // reason: destructured only to exclude it from restParsed; suppressed value re-added below.
+    void _unusedRawTypedGaps; // reason: destructured only to exclude it from restParsed; suppressed value re-added below.
 
     return {
       ...restParsed,
@@ -1388,6 +1457,7 @@ export class AIProviderService {
       ...(fullyTruncated ? {} : { overall_score: judgeOverallScore }),
       ...(dimensionScores !== undefined ? { dimension_scores: dimensionScores } : {}),
       ...(unverifiable !== undefined ? { unverifiable } : {}),
+      ...(typedGaps !== undefined ? { typed_gaps: typedGaps } : {}),
       gaps,
       recommendations,
       ...(rubricWarning.length > 0 ? { rubric_warning: rubricWarning } : {}),

@@ -26,13 +26,22 @@
  *     downgraded to "low") still fires correctly when suppression ALSO runs in the same
  *     call, and suppression never corrupts `gaps`/`recommendations` (`deriveLegacyFindings`
  *     projection) — no contradictory "no gaps found" summary when a real gap exists.
+ *   - AC-AEP-11: task-t6 — a suppressed dimension's matching `typed_gaps[]` entries are
+ *     ALSO removed (not just the `dimension_scores` row), and the legacy `gaps[]`
+ *     projection `deriveLegacyFindings` derives from `typed_gaps` no longer carries the
+ *     suppressed gap's text — closing the "still publishes, twice" bug measured on
+ *     `knowledge-assessment-implementation-evidence-output-tail`.
+ *   - AC-AEP-12: CONTROL for AC-AEP-11 — a GROUNDED absence dimension keeps BOTH its
+ *     `dimension_scores` row and its `typed_gaps` entry; a `based_on='evidence'`
+ *     dimension's `typed_gaps` entry is never touched; and emptying `typed_gaps` entirely
+ *     via suppression does not corrupt `verdict` into a false "clean" reading.
  *
  * Task-truncation coverage (AC-AEP-7/8) is driven through the REAL production path
  * (`buildAssessPromptV6`/`buildAssessPrompt` → `truncateSection(task.content,
  * budgets.max_task_chars)`), not a hand-built `judgment` fixture — a small `max_task_chars`
  * budget plus controlled task content lengths deterministically puts a task over budget.
  *
- * @spec_ref AC-AEP-5, AC-AEP-6, AC-AEP-7, AC-AEP-8
+ * @spec_ref AC-AEP-5, AC-AEP-6, AC-AEP-7, AC-AEP-8, AC-AEP-11, AC-AEP-12
  */
 
 import { describe, it, expect } from "vitest";
@@ -341,5 +350,156 @@ describe("AC-AEP-8: REGRESSION — the 100%-task-truncation branch still forces 
     expect(result.value.gaps).toEqual(["missing feature X"]);
     expect(result.value.recommendations).toEqual(["implement X"]);
     expect(result.value.dimension_scores?.["outcome"]).toBeDefined();
+  });
+});
+
+// ─── AC-AEP-11: suppression extends to typed_gaps[] and the legacy gaps[] projection ─
+
+describe("AC-AEP-11: a suppressed dimension's matching typed_gaps entries are also removed, and legacy gaps[] no longer carries the suppressed gap's text", () => {
+  it("AC-AEP-11: the typed_gaps entry keyed to the ungrounded dimension is removed, an unrelated dimension's typed_gaps entry survives, and gaps[] no longer contains the suppressed statement", async () => {
+    const bundle = await makeBundleWithTasks([{ title: "Task One", content: UNDER_BUDGET_CONTENT }]);
+    const judgeJson = JSON.stringify({
+      verdict: "partially_met",
+      overall_score: 50,
+      ac_scores: [],
+      gaps: [],
+      recommendations: [],
+      dimension_scores: {
+        scope_fidelity: { score: 20, confidence: 0.2, based_on: "absence", reasoning: "cannot verify" },
+        outcome: { score: 80, confidence: 0.8, based_on: "evidence", reasoning: "solid" },
+      },
+      // No unverifiable[] citing "scope_fidelity" and no truncated[] mentioning it →
+      // ungrounded, same fixture shape as AC-AEP-5.
+      typed_gaps: [
+        {
+          dimension: "scope_fidelity",
+          severity: "major",
+          statement: "diff_available=false. The plan pins exact anchors and cannot be inspected.",
+        },
+        { dimension: "outcome", severity: "minor", statement: "AC-9 partially covered." },
+      ],
+    });
+    const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeJson });
+    const service = makeAssessService(provider);
+
+    const result = await service.assessPlan(bundle, {});
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // The dimension_scores row is suppressed — existing T4 mechanism, unaffected.
+    expect(result.value.dimension_scores?.["scope_fidelity"]).toBeUndefined();
+
+    // T6: the matching typed_gaps entry must ALSO be removed — not merely the score row —
+    // else the finding still publishes via typed_gaps even though dimension_scores says
+    // it was suppressed.
+    const survivingDimensions = (result.value.typed_gaps ?? []).map((gap) => gap.dimension);
+    expect(survivingDimensions).not.toContain("scope_fidelity");
+    // An unrelated (evidence-based, non-suppressed) dimension's typed_gaps entry is
+    // completely untouched.
+    expect(survivingDimensions).toContain("outcome");
+    expect(result.value.typed_gaps).toHaveLength(1);
+
+    // The legacy gaps[] projection (deriveLegacyFindings over typed_gaps) must not carry
+    // the suppressed gap's text either — this is the "still publishes, twice" bug T6
+    // exists to close.
+    expect(result.value.gaps.some((g) => g.includes("cannot be inspected"))).toBe(false);
+    expect(result.value.gaps).toEqual(["AC-9 partially covered."]);
+
+    // The unverifiable[] entry's own claim ("suppressed... rather than published as a
+    // finding") is now actually true: the material is not published anywhere.
+    const unverifiable = result.value.unverifiable ?? [];
+    expect(unverifiable.some((u) => u.material.toLowerCase().includes("scope_fidelity"))).toBe(true);
+  });
+});
+
+// ─── AC-AEP-12: CONTROL — grounded/evidence dimensions untouched; no false "clean" reading ─
+
+describe("AC-AEP-12: CONTROL — a grounded absence dimension keeps both rows, evidence dimensions are untouched, and an emptied typed_gaps never implies a clean verdict", () => {
+  it("AC-AEP-12: a GROUNDED absence dimension keeps BOTH its dimension_scores row AND its typed_gaps entry", async () => {
+    const bundle = await makeBundleWithTasks([{ title: "Task One", content: UNDER_BUDGET_CONTENT }]);
+    const judgeJson = JSON.stringify({
+      verdict: "partially_met",
+      overall_score: 60,
+      ac_scores: [],
+      gaps: [],
+      recommendations: [],
+      dimension_scores: {
+        scope_fidelity: { score: 20, confidence: 0.2, based_on: "absence", reasoning: "cannot verify" },
+      },
+      unverifiable: [{ material: "scope_fidelity evidence", reason: "the diff was not provided" }],
+      typed_gaps: [{ dimension: "scope_fidelity", severity: "major", statement: "Scope drift suspected." }],
+    });
+    const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeJson });
+    const service = makeAssessService(provider);
+
+    const result = await service.assessPlan(bundle, {});
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.dimension_scores?.["scope_fidelity"]).toBeDefined();
+    expect((result.value.typed_gaps ?? []).map((gap) => gap.dimension)).toContain("scope_fidelity");
+    expect(result.value.gaps).toEqual(["Scope drift suspected."]);
+  });
+
+  it("AC-AEP-12: a based_on='evidence' dimension's typed_gaps entry is never touched", async () => {
+    const bundle = await makeBundleWithTasks([{ title: "Task One", content: UNDER_BUDGET_CONTENT }]);
+    const judgeJson = JSON.stringify({
+      verdict: "met",
+      overall_score: 90,
+      ac_scores: [],
+      gaps: [],
+      recommendations: [],
+      dimension_scores: {
+        outcome: { score: 90, confidence: 0.9, based_on: "evidence", reasoning: "well supported" },
+      },
+      typed_gaps: [{ dimension: "outcome", severity: "minor", statement: "Small polish item." }],
+    });
+    const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeJson });
+    const service = makeAssessService(provider);
+
+    const result = await service.assessPlan(bundle, {});
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.dimension_scores?.["outcome"]).toBeDefined();
+    expect((result.value.typed_gaps ?? []).map((gap) => gap.dimension)).toContain("outcome");
+    expect(result.value.gaps).toEqual(["Small polish item."]);
+  });
+
+  it("AC-AEP-12 REGRESSION: suppression emptying typed_gaps entirely does not corrupt verdict into a false clean reading", async () => {
+    const bundle = await makeBundleWithTasks([{ title: "Task One", content: UNDER_BUDGET_CONTENT }]);
+    const judgeJson = JSON.stringify({
+      verdict: "partially_met",
+      overall_score: 40,
+      ac_scores: [],
+      gaps: [],
+      recommendations: [],
+      dimension_scores: {
+        scope_fidelity: { score: 20, confidence: 0.2, based_on: "absence", reasoning: "cannot verify" },
+      },
+      // The ONLY typed gap is on the dimension that gets suppressed — after T6's fix,
+      // typed_gaps/gaps both become empty in this response.
+      typed_gaps: [
+        { dimension: "scope_fidelity", severity: "major", statement: "Only gap, on the suppressed dimension." },
+      ],
+    });
+    const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeJson });
+    const service = makeAssessService(provider);
+
+    const result = await service.assessPlan(bundle, {});
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // typed_gaps/gaps are correctly emptied by suppression...
+    expect(result.value.typed_gaps).toEqual([]);
+    expect(result.value.gaps).toEqual([]);
+
+    // ...but the verdict is NOT rewritten to "met" (or otherwise silently upgraded) as a
+    // side effect of the gaps list becoming empty — the judge's own (unresolved) verdict
+    // passes through untouched, and an unverifiable[] entry stays present recording that
+    // something could not be judged. An empty gaps[] here means "the one gap we had was
+    // ungrounded and suppressed", never "nothing wrong was found".
+    expect(result.value.verdict).toBe("partially_met");
+    expect(result.value.unverifiable?.some((u) => u.material.toLowerCase().includes("scope_fidelity"))).toBe(true);
   });
 });
