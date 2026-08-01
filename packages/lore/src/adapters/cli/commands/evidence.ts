@@ -54,8 +54,24 @@
  * Exit codes: 0 = success, 2 = argument error (both/neither output-tail flags
  *   given inconsistently), 3 = DOC_NOT_FOUND, 4 = VALIDATION_ERROR (not a task/phase,
  *   50-entry cap reached, bad oracle/result value, unknown ac_ref/checklist_ref, OR
- *   a missing oracle file / an unproven filtered pass per the two prechecks
- *   below), 5 = STALE_VERSION.
+ *   a missing oracle file / an unproven filtered pass / a mixed-runner command per
+ *   the three prechecks below), 5 = STALE_VERSION.
+ *
+ * Mixed-runner invocation guard (defect: task-vitest-run-silently-drops-a-bun-
+ * test-ts-named-alongside-a) — a single `vitest run` invocation naming a
+ * `.bun.test.ts` path alongside a real vitest file (or the symmetric `bun test`
+ * invocation naming a plain `.test.ts` file) used to record a self-reported
+ * `pass` cleanly even though the runner silently ran ONLY the files belonging
+ * to the invoked runner and dropped the rest — vitest's own "no test files
+ * found" loud refusal evaluates over the WHOLE invocation, not per named
+ * argument, so a quorum of one matching file silences it. Runs AFTER the
+ * missing-oracle-file precheck (a nonexistent path is refused for that more
+ * fundamental reason first) and BEFORE the filtered-pass guard (whether the
+ * invocation would even run a named file matters before asking whether a
+ * filter matched inside it). The decision itself lives in
+ * `../evidence-precheck.js::findMixedRunnerRefusal`, shared verbatim with the
+ * MCP `lore_evidence_add` handler — same CLI/MCP split the other two
+ * prechecks already use.
  *
  * Filtered-pass matched-count guard (SPEC-061 AC-061-11..14, decided by
  * adr-lore-evidence-proves-a-filtered-pass-with-the-runner-s-own) — a
@@ -132,6 +148,7 @@ import { requirePhaseWorkflowService } from "../phase-wiring.js";
 import {
   findMissingOracleFilesForEvidence,
   findFilteredPassRefusal,
+  findMixedRunnerRefusal,
   describePrecheckRoots,
 } from "../evidence-precheck.js";
 
@@ -255,6 +272,24 @@ export default defineCommand({
         };
         process.stderr.write(formatError(precheckError) + "\n");
         process.exitCode = exitCode(precheckError);
+        return;
+      }
+
+      // reason: mixed-runner invocation guard (see module header) — runs
+      // AFTER the missing-oracle-file precheck (a nonexistent path is refused
+      // for that more fundamental reason first) and BEFORE the filtered-pass
+      // guard below (whether the invocation would even run a named file
+      // matters before asking whether a filter matched inside it). The
+      // decision itself lives in `../evidence-precheck.js` and is shared
+      // verbatim with the MCP `lore_evidence_add` handler.
+      const mixedRunnerRefusal = findMixedRunnerRefusal({
+        oracle: args.oracle as string,
+        result: args.result as string,
+        command: args.command as string,
+      });
+      if (mixedRunnerRefusal !== null) {
+        process.stderr.write(formatError(mixedRunnerRefusal) + "\n");
+        process.exitCode = exitCode(mixedRunnerRefusal);
         return;
       }
 

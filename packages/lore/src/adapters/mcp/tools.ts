@@ -71,6 +71,16 @@
  * same module) — the pre-fix message named none, leaving an author unable to
  * tell "your file is missing" from "the precheck looked in the wrong tree".
  *
+ * `lore_evidence_add` gains the mixed-runner invocation guard (defect: task-
+ * vitest-run-silently-drops-a-bun-test-ts-named-alongside-a) — a self-reported
+ * `oracle: "test"|"e2e"`, `result: "pass"` call whose `command` is a single
+ * `vitest run` invocation naming a `.bun.test.ts` path alongside a real vitest
+ * file (or the symmetric `bun test` invocation naming a plain `.test.ts` file)
+ * now returns `isError` `VALIDATION_ERROR` — the runner silently executes only
+ * the files belonging to the invoked runner and exits 0 with no warning about
+ * the rest. Same shared-decision CLI/MCP split as the two guards above
+ * (`findMixedRunnerRefusal`, `../cli/evidence-precheck.js`).
+ *
  * Architecture: Tools with input use the `registerToolWithArgs` helper defined below, which:
  *   1. Calls `server.tool(name, desc, handler)` in 3-arg form (avoids ZodRawShapeCompat type bomb)
  *   2. Immediately patches `_registeredTools[name].inputSchema = schema` on the registered tool
@@ -144,6 +154,7 @@ import { deriveCommitSetForPlan, type DiffSourceRecord } from "../cli/assess-com
 import {
   findMissingOracleFilesForEvidence,
   findFilteredPassRefusal,
+  findMixedRunnerRefusal,
   describePrecheckRoots,
 } from "../cli/evidence-precheck.js";
 import { IssueReportService } from "../../service/issue-report-service.js";
@@ -1418,6 +1429,25 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
           'use oracle: "manual" for genuinely manual checks.',
         value: args.command,
       });
+    }
+
+    // reason: mixed-runner invocation guard (defect: task-vitest-run-silently-
+    // drops-a-bun-test-ts-named-alongside-a) — gate PARITY with the CLI is
+    // structural: both surfaces call the SAME `findMixedRunnerRefusal`, which
+    // returns the fully-formed LoreError rather than a boolean, so
+    // scope/code/field/wording cannot drift. Runs after the missing-oracle-
+    // file precheck above (a nonexistent path is refused for that more
+    // fundamental reason first) and before the filtered-pass guard below
+    // (whether the invocation would even run a named file matters before
+    // asking whether a filter matched inside it) — same ordering the CLI's
+    // `commands/evidence.ts` documents.
+    const mixedRunnerRefusal = findMixedRunnerRefusal({
+      oracle: args.oracle,
+      result: args.result,
+      command: args.command,
+    });
+    if (mixedRunnerRefusal !== null) {
+      return errorContent(mixedRunnerRefusal);
     }
 
     // reason: filtered-pass matched-count guard (SPEC-061 AC-061-17) — gate
