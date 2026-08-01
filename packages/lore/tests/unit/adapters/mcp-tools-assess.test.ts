@@ -24,10 +24,22 @@
  *   STATE:      the informs link is queryable after a successful assess (doc graph updated)
  *   REGRESSION: sub_type/knowledge doc shape matches what CLI assess.ts produces (parity)
  *
- * @spec_ref AC-ASSESS-1, AC-ASSESS-8, AC-ASSESS-9, AC-ASSESS-10
+ * Also covers (task-lore-assess-asks-the-caller-for-a-git-range-that-cannot-be):
+ * when `diff_text` is OMITTED, `lore_assess` now auto-derives the plan's own commit set
+ * from real git history (mirrors the CLI's assess.ts) instead of running with no diff at
+ * all — a dedicated describe block below chdir's into a throwaway `git init` fixture
+ * (real subprocess git, same idiom as `assess-ai.bun.test.ts`) for PRIMARY ORACLE
+ * (interleaved foreign history excluded) and BOUNDARY (no discoverable commits → named
+ * outcome) coverage.
+ *
+ * @spec_ref AC-ASSESS-1, AC-ASSESS-8, AC-ASSESS-9, AC-ASSESS-10, task-lore-assess-asks-the-caller-for-a-git-range-that-cannot-be
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -153,6 +165,33 @@ async function createEmptyPlan(): Promise<string> {
   const planResult = await corpusService.create({ type: "plan", title: "Empty Assess Plan", content: "goals" } as CreateDocInput);
   if (!planResult.ok) throw new Error(`Failed to create plan: ${JSON.stringify(planResult.error)}`);
   return planResult.value.id;
+}
+
+/**
+ * Creates a plan with N tasks named `taskTitles`, returning each task's REAL slug — the
+ * git-fixture-driven derivation tests below must reference the actual generated slug,
+ * never a guessed one (`deriveCommitSetForPlan` matches on the corpus's own `task.slug`).
+ */
+async function createPlanWithNamedTasks(taskTitles: string[]): Promise<{ planId: string; taskSlugs: string[] }> {
+  const planResult = await corpusService.create({
+    type: "plan",
+    title: "MCP Assess Derivation Plan",
+    content: "goals",
+  } as CreateDocInput);
+  if (!planResult.ok) throw new Error(`Failed to create plan: ${JSON.stringify(planResult.error)}`);
+  const taskSlugs: string[] = [];
+  for (const title of taskTitles) {
+    const taskResult = await corpusService.create({
+      type: "task",
+      title,
+      parent_id: planResult.value.id,
+      content: "body",
+      extra: { plan_id: planResult.value.id },
+    } as CreateDocInput);
+    if (!taskResult.ok) throw new Error(`Failed to create task: ${JSON.stringify(taskResult.error)}`);
+    taskSlugs.push(taskResult.value.slug);
+  }
+  return { planId: planResult.value.id, taskSlugs };
 }
 
 // ─── Test Setup ────────────────────────────────────────────────────────────────
@@ -301,5 +340,94 @@ describe("lore_assess — ERROR (provider failure passthrough)", () => {
     const afterResult = await store.findMany({});
     if (!afterResult.ok) throw new Error("findMany failed");
     expect(afterResult.value.length).toBe(beforeCount);
+  });
+});
+
+// ─── lore_assess — auto-derived commit set (task-lore-assess-asks-the-caller-for-a-
+// git-range-that-cannot-be) ──────────────────────────────────────────────────────
+//
+// When `diff_text` is omitted, lore_assess now derives the plan's own commit set from
+// REAL git history (mirrors the CLI's assess.ts) instead of running with no diff. These
+// tests chdir into a throwaway `git init` fixture so `process.cwd()`-based derivation
+// has real, controlled history to work against — restored in afterEach so it never
+// leaks into sibling tests in this file (which run against the real project repo's cwd
+// and rely on derivation harmlessly finding nothing there).
+
+describe("lore_assess — auto-derived commit set: PRIMARY ORACLE + BOUNDARY", () => {
+  const call = () => getToolHandler(server, "lore_assess");
+
+  let gitTmpDir: string;
+  let originalCwd: string;
+  const gitEnv = {
+    ...process.env,
+    GIT_AUTHOR_NAME: "Tester",
+    GIT_AUTHOR_EMAIL: "t@example.com",
+    GIT_COMMITTER_NAME: "Tester",
+    GIT_COMMITTER_EMAIL: "t@example.com",
+  };
+
+  beforeEach(() => {
+    gitTmpDir = mkdtempSync(join(tmpdir(), "lore-mcp-assess-derivation-test-"));
+    spawnSync("git", ["init", "-q"], { cwd: gitTmpDir, env: gitEnv });
+    originalCwd = process.cwd();
+    process.chdir(gitTmpDir);
+  });
+
+  afterEach(() => {
+    process.chdir(originalCwd);
+    try {
+      rmSync(gitTmpDir, { recursive: true, force: true });
+    } catch {
+      /* best-effort cleanup */
+    }
+  });
+
+  function gitCommit(filename: string, content: string, message: string) {
+    writeFileSync(join(gitTmpDir, filename), content);
+    spawnSync("git", ["add", filename], { cwd: gitTmpDir, env: gitEnv });
+    spawnSync("git", ["commit", "-q", "-m", message], { cwd: gitTmpDir, env: gitEnv });
+  }
+
+  it("PRIMARY ORACLE: excludes every interleaved foreign commit from the prompt sent to the judge", async () => {
+    const { planId, taskSlugs } = await createPlanWithNamedTasks(["MCP Own Task Alpha", "MCP Own Task Beta"]);
+    gitCommit("seed.txt", "seed\n", "seed commit");
+    gitCommit("foreign1.txt", "MCP_FOREIGN_ALPHA\n", "unrelated foreign change alpha");
+    gitCommit("own-a.txt", "MCP_OWN_A\n", `implements ${taskSlugs[0]}`);
+    gitCommit("foreign2.txt", "MCP_FOREIGN_BETA\n", "unrelated foreign change beta");
+    gitCommit("own-b.txt", "MCP_OWN_B\n", `implements ${taskSlugs[1]}`);
+    gitCommit("foreign3.txt", "MCP_FOREIGN_GAMMA\n", "unrelated foreign change gamma");
+
+    const result = await call()({ plan_id_or_slug: planId, ai: true }); // NOTE: no diff_text
+    expect(result.isError).toBeFalsy();
+
+    expect(aiProvider.calls).toHaveLength(1);
+    const prompt = aiProvider.calls[0]?.prompt ?? "";
+    expect(prompt).toContain("MCP_OWN_A");
+    expect(prompt).toContain("MCP_OWN_B");
+    expect(prompt).not.toContain("MCP_FOREIGN_ALPHA");
+    expect(prompt).not.toContain("MCP_FOREIGN_BETA");
+    expect(prompt).not.toContain("MCP_FOREIGN_GAMMA");
+
+    const data = parseResult(result) as { assessment: DocRecord; diff_source: { mode: string; status?: string; commits?: unknown[] } };
+    expect(data.diff_source.mode).toBe("auto_derived");
+    expect(data.diff_source.status).toBe("derived");
+    expect(data.diff_source.commits).toHaveLength(2);
+    expect(data.assessment.extra["diff_source"]).toEqual(data.diff_source);
+  });
+
+  it("BOUNDARY: no commit anywhere references either task slug — a loud named outcome, never a silent empty diff", async () => {
+    const { planId } = await createPlanWithNamedTasks(["MCP Unreferenced Task One", "MCP Unreferenced Task Two"]);
+    gitCommit("unrelated.txt", "unrelated\n", "a commit naming neither task");
+
+    const result = await call()({ plan_id_or_slug: planId, ai: true });
+    expect(result.isError).toBeFalsy();
+
+    expect(aiProvider.calls).toHaveLength(1);
+    expect(aiProvider.calls[0]?.prompt ?? "").not.toContain("diff --git");
+
+    const data = parseResult(result) as { diff_source: { mode: string; status?: string; tasks_without_commits?: string[] } };
+    expect(data.diff_source.mode).toBe("auto_derived");
+    expect(data.diff_source.status).toBe("no_commits_found");
+    expect(data.diff_source.tasks_without_commits).toHaveLength(2);
   });
 });
