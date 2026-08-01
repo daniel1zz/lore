@@ -775,6 +775,21 @@ export const contextConfigSchema = z
           })
           .strict()
           .default({}),
+        /**
+         * Fraction (0–1) of a ceiling at which `computeHeadroom`
+         * (`packages/lore/src/service/claude-md-check.ts`) marks a metric as
+         * "approaching" — an ADVISORY-only warning surfaced by `lore status
+         * --check-claude-md`, never a breach and never exit-affecting
+         * (task-lore-status-check-claude-md-reports-a-saturated-file-as: a
+         * bare pass/fail hid a file sitting 5 bytes from its ceiling as
+         * "within budget", so the threshold that decides "worth flagging"
+         * must be a config number, not a value baked into the check). Default
+         * `0.9` (90%) — the incident that motivated this field measured
+         * 99.98% used with zero signal anywhere before the write; 90% still
+         * leaves an author real runway to plan a trim ahead of the
+         * `claude-md-guard.sh` hook's hard denial.
+         */
+        warn_threshold_fraction: z.number().min(0).max(1).default(0.9),
       })
       .strict()
       .default({}),
@@ -1504,19 +1519,20 @@ export function resolveBootstrapInjectionBudgets(config: LoreConfig | undefined)
  * absence of the whole config, the `context` section, or
  * `context.memory_files` specifically all fall back to the schema defaults
  * (root 300L/30720B, module 200L/16384B, enabled: true,
- * filenames: ["CLAUDE.md"]). Unlike {@link resolveBootstrapInjectionBudgets},
- * this returns the section's own snake_case shape verbatim — no
- * camelCase projection — since `packages/lore/src/service/claude-md-check.ts`'s
- * `lintMemoryFiles` (downstream task) is the sole consumer and the spec's
+ * filenames: ["CLAUDE.md"], warn_threshold_fraction: 0.9). Unlike
+ * {@link resolveBootstrapInjectionBudgets}, this returns the section's own
+ * snake_case shape verbatim — no camelCase projection — since
+ * `packages/lore/src/service/claude-md-check.ts`'s `lintMemoryFiles`/
+ * `computeHeadroom` are the sole consumers and the spec's
  * `MemoryFileFinding` shape is itself snake_case-free-form.
  *
  * @param config - Parsed LoreConfig, or undefined when no config file was loaded
- * @returns `{enabled, filenames, root: {max_lines, max_bytes}, module: {max_lines, max_bytes}}`
+ * @returns `{enabled, filenames, root: {max_lines, max_bytes}, module: {max_lines, max_bytes}, warn_threshold_fraction}`
  * @example
  *   resolveMemoryFileBudgets(undefined)
- *   // => { enabled: true, filenames: ["CLAUDE.md"], root: {max_lines: 300, max_bytes: 30720}, module: {max_lines: 200, max_bytes: 16384} }
+ *   // => { enabled: true, filenames: ["CLAUDE.md"], root: {max_lines: 300, max_bytes: 30720}, module: {max_lines: 200, max_bytes: 16384}, warn_threshold_fraction: 0.9 }
  *   resolveMemoryFileBudgets({ ..., context: { memory_files: { enabled: false } } })
- *   // => { enabled: false, filenames: ["CLAUDE.md"], root: {max_lines: 300, max_bytes: 30720}, module: {max_lines: 200, max_bytes: 16384} }
+ *   // => { enabled: false, filenames: ["CLAUDE.md"], root: {max_lines: 300, max_bytes: 30720}, module: {max_lines: 200, max_bytes: 16384}, warn_threshold_fraction: 0.9 }
  */
 export function resolveMemoryFileBudgets(config: LoreConfig | undefined): MemoryFileBudgets {
   return (config?.context ?? contextConfigSchema.parse({})).memory_files;

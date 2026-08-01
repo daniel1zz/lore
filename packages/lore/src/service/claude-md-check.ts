@@ -24,6 +24,21 @@
  *     TODO-style markers) that suggest transient status narrative leaking
  *     into a standing-discipline file. Returns a wholly separate
  *     `AdvisoryFinding[]` type — never mixed into `MemoryFileFinding[]`.
+ *   - computeHeadroom(files, budgets) — DETERMINISTIC, NEVER exit-relevant:
+ *     the reporting counterpart to `lintMemoryFiles` — for EVERY file it
+ *     returns the SAME two measurements (`countLines`/`Buffer.byteLength`)
+ *     against the SAME per-role ceiling pair, but as used/ceiling/remaining
+ *     numbers rather than a pass/fail finding, so a caller can render
+ *     headroom on EVERY run, not only once a ceiling is already breached
+ *     (task-lore-status-check-claude-md-reports-a-saturated-file-as: a file
+ *     five bytes from its ceiling printed identically to a file at 10% used).
+ *   - computeHeadroomWarnings(reports) — ADVISORY ONLY, NEVER exit-relevant:
+ *     projects `computeHeadroom`'s rows whose `.warn` flag is set (used
+ *     crossed `budgets.warn_threshold_fraction` of its ceiling) into
+ *     `AdvisoryFinding`s — entering the near-ceiling band is worth a loud
+ *     line in the report, but is NOT itself a breach; `lintMemoryFiles` alone
+ *     ever decides breach/exit-code (mirrors the `detectNarrativeSmells`
+ *     advisory/deterministic split, spec §D7).
  *
  * Invariants:
  *   - `budgets.enabled === false` short-circuits `lintMemoryFiles` to zero
@@ -61,11 +76,24 @@
  *     `lintMemoryFiles`'s output and NEVER affects exit-relevant shape (spec
  *     §D7: "narrative smells NEVER exit-affecting" — advisory findings are a
  *     structurally distinct type, not an extra `kind` on `MemoryFileFinding`).
+ *   - `computeHeadroom`'s `warn_threshold_fraction` comes EXCLUSIVELY from the
+ *     caller-supplied `budgets` (`@lore/core`'s `contextConfigSchema`,
+ *     resolved via `resolveMemoryFileBudgets`) — this module never hardcodes
+ *     a near-ceiling threshold, mirroring its existing rule for the
+ *     `max_lines`/`max_bytes` ceilings themselves (this is a project-wide
+ *     "numbers live in config" discipline, not a new one introduced here).
+ *   - `computeHeadroom`/`computeHeadroomWarnings` share `lintMemoryFiles`'s
+ *     `budgets.enabled === false` short-circuit (empty array) and its SAME
+ *     `countLines`/`Buffer.byteLength` measurement functions — this module
+ *     is the SOLE SSOT both `lore status --check-claude-md` and
+ *     `flows/context-flow.ts`'s `runContextRefresh` pre-write admission
+ *     consume; neither surface re-derives its own line/byte measurement.
  *
  * Side-effect class: pure
  *
  * Source: spec-project-claude-md-content-contract-governance-injected,
- * AC-CMC-1; spec-context-verb-family-two-zone-claude-md-anatomy-lore, AC-CTX-2
+ * AC-CMC-1; spec-context-verb-family-two-zone-claude-md-anatomy-lore, AC-CTX-2;
+ * task-lore-status-check-claude-md-reports-a-saturated-file-as
  */
 
 import { normalizeFileAnchors, type MemoryFileBudgets } from "@lore/core";
@@ -293,18 +321,28 @@ export function checkReferenceExistence(
 
 // ─── Narrative smells (advisory, AC-CTX-2 / spec §D7) ───────────────────────
 
-/** Which smell an {@link AdvisoryFinding} flags — NEVER a {@link MemoryFileFindingKind}. */
-export type AdvisoryFindingKind = "iso_date_density" | "status_word";
+/**
+ * Which smell/condition an {@link AdvisoryFinding} flags — NEVER a
+ * {@link MemoryFileFindingKind}. `headroom_warning` is emitted by
+ * {@link computeHeadroomWarnings} (task-lore-status-check-claude-md-reports-
+ * a-saturated-file-as); `iso_date_density`/`status_word` by
+ * {@link detectNarrativeSmells}.
+ */
+export type AdvisoryFindingKind = "iso_date_density" | "status_word" | "headroom_warning";
 
 /**
- * One narrative-smell observation — structurally SEPARATE from
+ * One advisory observation — structurally SEPARATE from
  * {@link MemoryFileFinding} on purpose (spec §D7: advisory findings must
  * never be mistakable for, or merged into, a deterministic exit-relevant
  * finding).
  */
 export interface AdvisoryFinding {
   kind: AdvisoryFindingKind;
-  /** Occurrence count backing `message`. */
+  /**
+   * Occurrence count for `iso_date_density`/`status_word`; remaining
+   * headroom (`ceiling - used`, same value as the source
+   * {@link MetricHeadroom.remaining}) for `headroom_warning`.
+   */
   measured: number;
   /** Human-readable summary. */
   message: string;
@@ -363,6 +401,146 @@ export function detectNarrativeSmells(content: string): AdvisoryFinding[] {
         kind: "status_word",
         measured: matches.length,
         message: `content contains ${matches.length} occurrence(s) of status wording (${label}) — consider whether this belongs in the corpus instead`,
+      });
+    }
+  }
+
+  return findings;
+}
+
+// ─── Headroom reporting (deterministic numbers + advisory warn band) ───────
+// task-lore-status-check-claude-md-reports-a-saturated-file-as: a bare
+// pass/fail on `lintMemoryFiles`'s findings gave an author no way to tell
+// "plenty of room" from "the next byte breaches" — both rendered as "within
+// budget (0 findings)". The functions below are a REPORTING layer alongside
+// `lintMemoryFiles`, never a replacement for it: breach/exit-code decisions
+// stay exclusively `lintMemoryFiles`'s job.
+
+/** One metric's (lines or bytes) measured headroom against its ceiling. */
+export interface MetricHeadroom {
+  /** The SAME measurement `lintMemoryFiles` uses for this metric (line count or `Buffer.byteLength`). */
+  used: number;
+  ceiling: number;
+  /** `ceiling - used` — goes negative once `used` exceeds `ceiling` (a real breach; `lintMemoryFiles` is the exit-relevant source for that, this field only reports the number). */
+  remaining: number;
+  /** `true` once `used` reaches `budgets.warn_threshold_fraction` of `ceiling` — the SAME predicate {@link computeHeadroomWarnings} filters on. */
+  warn: boolean;
+}
+
+/**
+ * One memory file's full headroom picture — BOTH metrics, always both,
+ * mirroring `lintMemoryFiles`'s own "never measure just one" invariant
+ * (spec §D2), but organized per-file (not per-finding) since this is a
+ * REPORT meant to render on every run, not a list that is empty when
+ * everything is fine.
+ */
+export interface HeadroomReport {
+  /** The measured file's path, verbatim. */
+  path: string;
+  role: MemoryFileRole;
+  lines: MetricHeadroom;
+  bytes: MetricHeadroom;
+}
+
+/**
+ * Builds one {@link MetricHeadroom} row. `warn` is a plain fraction
+ * comparison (`used / ceiling >= warnThresholdFraction`, computed via
+ * cross-multiplication to avoid a division) — deliberately INDEPENDENT of
+ * whether `used` already exceeds `ceiling`: a breach is, by definition, also
+ * "in the warn band" (both conditions can be true at once; `lintMemoryFiles`
+ * alone decides what a breach means for the exit code).
+ */
+function buildMetricHeadroom(used: number, ceiling: number, warnThresholdFraction: number): MetricHeadroom {
+  return {
+    used,
+    ceiling,
+    remaining: ceiling - used,
+    warn: used >= ceiling * warnThresholdFraction,
+  };
+}
+
+/**
+ * Computes a {@link HeadroomReport} for every file — the used/ceiling/
+ * remaining numbers `lore status --check-claude-md` (and any other caller)
+ * needs to show real margin instead of a bare pass/fail. This is a
+ * REPORTING function: it never affects, and is never affected by,
+ * `lintMemoryFiles`'s exit-relevant findings.
+ *
+ * @param files - Discovered memory files (see {@link MemoryFileRecord}).
+ * @param budgets - Corpus-governed ceilings AND `warn_threshold_fraction`,
+ *   resolved via `resolveMemoryFileBudgets` (`@lore/core`) — the config knob
+ *   backing `.warn` on each row, never a hardcoded fraction.
+ * @returns One {@link HeadroomReport} per file (both metrics inside). Empty
+ *   array when `budgets.enabled` is `false` or `files` is empty — mirrors
+ *   `lintMemoryFiles`'s own `enabled` short-circuit (spec §D1: a global
+ *   opt-out, never per-file).
+ * @example
+ * computeHeadroom(
+ *   [{ path: "CLAUDE.md", role: "root", content: "..." }],
+ *   resolveMemoryFileBudgets(config),
+ * );
+ * // => [{ path: "CLAUDE.md", role: "root",
+ * //       lines: { used: 289, ceiling: 300, remaining: 11, warn: false },
+ * //       bytes: { used: 24571, ceiling: 24576, remaining: 5, warn: true } }]
+ */
+export function computeHeadroom(files: MemoryFileRecord[], budgets: MemoryFileBudgets): HeadroomReport[] {
+  if (!budgets.enabled) return [];
+
+  return files.map((file) => {
+    const ceilings = budgets[file.role];
+    const lineCount = countLines(file.content);
+    const byteCount = Buffer.byteLength(file.content, "utf8");
+
+    return {
+      path: file.path,
+      role: file.role,
+      lines: buildMetricHeadroom(lineCount, ceilings.max_lines, budgets.warn_threshold_fraction),
+      bytes: buildMetricHeadroom(byteCount, ceilings.max_bytes, budgets.warn_threshold_fraction),
+    };
+  });
+}
+
+/**
+ * Projects {@link computeHeadroom}'s rows whose `.warn` flag is set into
+ * {@link AdvisoryFinding}s (`kind: "headroom_warning"`) — ADVISORY ONLY,
+ * NEVER exit-relevant (mirrors `detectNarrativeSmells`'s advisory/
+ * deterministic split, spec §D7): entering the near-ceiling band is worth a
+ * loud line in the report, but is NOT itself a breach.
+ *
+ * @param reports - {@link computeHeadroom}'s own output for the SAME files
+ *   this call is reporting on — never independently recomputed.
+ * @returns One `headroom_warning` finding per (file, metric) row crossing
+ *   the band — a file near BOTH ceilings produces two findings. Empty array
+ *   when no row crosses the band (the CONTROL requirement: a comfortably-
+ *   small file must stay silent here, never "always warns").
+ * @example
+ * computeHeadroomWarnings([
+ *   { path: "CLAUDE.md", role: "root",
+ *     lines: { used: 289, ceiling: 300, remaining: 11, warn: false },
+ *     bytes: { used: 24571, ceiling: 24576, remaining: 5, warn: true } },
+ * ]);
+ * // => [{ kind: "headroom_warning", measured: 5, message: "..." }]
+ */
+export function computeHeadroomWarnings(reports: HeadroomReport[]): AdvisoryFinding[] {
+  const findings: AdvisoryFinding[] = [];
+
+  for (const report of reports) {
+    if (report.lines.warn) {
+      findings.push({
+        kind: "headroom_warning",
+        measured: report.lines.remaining,
+        message:
+          `${report.path} (${report.role}) is approaching its max_lines ceiling: ` +
+          `${report.lines.used}/${report.lines.ceiling} lines used, ${report.lines.remaining} remaining`,
+      });
+    }
+    if (report.bytes.warn) {
+      findings.push({
+        kind: "headroom_warning",
+        measured: report.bytes.remaining,
+        message:
+          `${report.path} (${report.role}) is approaching its max_bytes ceiling: ` +
+          `${report.bytes.used}/${report.bytes.ceiling} bytes used, ${report.bytes.remaining} remaining`,
       });
     }
   }

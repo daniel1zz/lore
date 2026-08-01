@@ -12,7 +12,12 @@
  *   against corpus-governed line/byte ceilings (spec-project-claude-md-
  *   content-contract-governance-injected §D9) — see that branch's own inline
  *   comment for why it is dispatched BEFORE every other flag reaches
- *   `loadLoreApp`.
+ *   `loadLoreApp`. ALWAYS additionally reports used/ceiling/remaining
+ *   headroom for every measured file (task-lore-status-check-claude-md-
+ *   reports-a-saturated-file-as: a bare pass/fail hid a file 5 bytes from
+ *   its ceiling as "within budget"), and emits an advisory (never
+ *   exit-affecting) warning once a metric crosses
+ *   `context.memory_files.warn_threshold_fraction` of its ceiling.
  * With --json: output check result(s) as a JSON envelope.
  *
  * --check-tree and --check-drift COMPOSE (SPEC-045 D5 restructure — neither check
@@ -86,7 +91,13 @@ import {
 // setup-check.ts's identical precedent for this exact import.
 import { loadConfig } from "@lore/core/node";
 import { discoverMemoryFiles } from "../../real-memory-file-probe.js";
-import { lintMemoryFiles, type MemoryFileFinding } from "../../../service/claude-md-check.js";
+import {
+  computeHeadroom,
+  computeHeadroomWarnings,
+  lintMemoryFiles,
+  type HeadroomReport,
+  type MemoryFileFinding,
+} from "../../../service/claude-md-check.js";
 
 /** All CallerSurface values in a stable display order. */
 const ALL_SURFACES: ReadonlyArray<CallerSurface> = [
@@ -387,6 +398,21 @@ function renderClaudeMdFinding(finding: MemoryFileFinding): void {
 }
 
 /**
+ * Text rendering for one `--check-claude-md` headroom row — printed on
+ * EVERY run (task-lore-status-check-claude-md-reports-a-saturated-file-as:
+ * a bare pass/fail hid a file 5 bytes from its ceiling as "within budget",
+ * so used/ceiling/remaining now render unconditionally, never only on a
+ * breach).
+ */
+function renderHeadroomLine(report: HeadroomReport): void {
+  console.log(
+    `  ${report.path} (${report.role}): lines ${report.lines.used}/${report.lines.ceiling} ` +
+      `(${report.lines.remaining} remaining), bytes ${report.bytes.used}/${report.bytes.ceiling} ` +
+      `(${report.bytes.remaining} remaining)`,
+  );
+}
+
+/**
  * Resolves the effective `context.memory_files.*` budgets for
  * `--check-claude-md` from `<cwd>/.lore/config.yaml`, tolerating a config
  * file that is invalid EVERYWHERE ELSE (spec-project-claude-md-content-
@@ -461,7 +487,7 @@ export default defineCommand({
     "check-claude-md": {
       type: "boolean",
       description:
-        "Lint project memory files (CLAUDE.md by default) against corpus-governed line/byte ceilings. Config-only, never loads the corpus DB. Breach → exit 3.",
+        "Lint project memory files (CLAUDE.md by default) against corpus-governed line/byte ceilings, always reporting used/ceiling/remaining headroom. Config-only, never loads the corpus DB. Breach → exit 3; a near-ceiling advisory warning never changes the exit code.",
     },
   },
   async run({ args }) {
@@ -485,15 +511,30 @@ export default defineCommand({
       const budgets = resolveClaudeMdBudgets(process.cwd());
       const files = discoverMemoryFiles(process.cwd(), budgets.filenames);
       const findings = lintMemoryFiles(files, budgets);
+      // Headroom/warnings are a REPORTING layer alongside `lintMemoryFiles` —
+      // task-lore-status-check-claude-md-reports-a-saturated-file-as: they
+      // never affect `findings` or the exit code below (still `findings.length
+      // > 0 ? 3 : 0`, byte-identical breach semantics to before this change).
+      const headroom = computeHeadroom(files, budgets);
+      const warnings = computeHeadroomWarnings(headroom);
 
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: { claude_md: { findings } } }, null, 2));
-      } else if (findings.length === 0) {
-        console.log("CLAUDE.md: within budget (0 findings).");
+        console.log(JSON.stringify({ ok: true, data: { claude_md: { findings, headroom, warnings } } }, null, 2));
       } else {
-        console.log(`CLAUDE.md: BREACHED (${findings.length} finding(s)):`);
-        for (const finding of findings) renderClaudeMdFinding(finding);
-        console.log("  fix: trim the file, or run `lore governance claude-md` for the content contract.");
+        if (findings.length === 0) {
+          console.log("CLAUDE.md: within budget (0 findings).");
+        } else {
+          console.log(`CLAUDE.md: BREACHED (${findings.length} finding(s)):`);
+          for (const finding of findings) renderClaudeMdFinding(finding);
+          console.log("  fix: trim the file, or run `lore governance claude-md` for the content contract.");
+        }
+
+        for (const report of headroom) renderHeadroomLine(report);
+
+        if (warnings.length > 0) {
+          console.log(`CLAUDE.md: approaching ceiling (${warnings.length} advisory warning(s), exit code unaffected):`);
+          for (const warning of warnings) console.log(`  - ${warning.message}`);
+        }
       }
 
       process.exitCode = findings.length > 0 ? 3 : 0;
