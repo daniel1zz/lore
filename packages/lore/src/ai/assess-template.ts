@@ -56,12 +56,30 @@
  *     required going forward, but its EXISTING tests must stay green. `buildAssessPromptV6`
  *     extends v5's role→materials→rubric→output structure with a "# Deterministic Facts"
  *     section and a three-dimension rubric; see its own JSDoc for the full delta.
+ *   - **Evidence row projection, not embedding (SPEC-lore-assess-project-evidence-rows-
+ *     instead-of-embedding-the D1)**: `renderTaskEvidence` projects each evidence row as
+ *     `(oracle, ac_ref, result, command, tail_bytes)` — `tail_bytes` ALWAYS rendered (0 for
+ *     an absent/empty tail, never omitted) — and shows the full clipped `output_tail` text
+ *     ONLY for a row whose `ac_ref` is among `computeAcIdsUnderJudgment`'s result (v5: the
+ *     spec's full declared set; v6: the plan-scope-restricted subset, D5 — AC-AEP-4 pins
+ *     both builders agreeing). This is the root fix for a heavily-evidenced task's RENDERED
+ *     TEXT ballooning unboundedly (AC-AEP-2): the OLD rendering embedded every row's full
+ *     500-char-clipped tail regardless of relevance; the NEW compact projection keeps the
+ *     evidence block itself small. `truncateSection(task.content, budgets.max_task_chars)`
+ *     is UNCHANGED — it measures `task.content` ALONE, never the rendered evidence text
+ *     (AC-067-5 pins this in isolation: a tiny task budget with zero evidence must truncate
+ *     purely on content length) — the `` `task:${task.slug}` `` truncated[] entry vocabulary
+ *     is likewise UNCHANGED (frozen — `computeTaskTruncationRatio`, `@lore/core/assessment.ts`,
+ *     keys off the `task:` prefix; `findUngroundedAbsenceDimensions`,
+ *     `../service/ai-provider-service.ts`, substring-matches it) — AC-AEP-3 regression-pins
+ *     the exact string.
  *
  * Side-effect class: pure
  *
  * Source: SPEC-026 §3 D2, D7, D8; §5; SPEC-028 AC-AE-2, AC-AE-3, AC-AE-4; SPEC-029 AC-AR-1;
  * bugfix F3 (`knowledge-assess-diff-truncation-systematically-hides-tests-from`);
- * SPEC-040 §T2 D1, D2, D3, D5, D6
+ * SPEC-040 §T2 D1, D2, D3, D5, D6;
+ * SPEC-lore-assess-project-evidence-rows-instead-of-embedding-the D1, D2
  */
 
 import { err, ok, truncateSection, type LoreError, type PlanBundle, type DocRecord, type Result } from "@lore/core";
@@ -168,11 +186,49 @@ export type AssessTemplateFn = (
 const evidenceArraySchema = z.array(evidenceEntrySchema);
 
 /**
- * Render a task's verification_evidence entries as a compact text block for the prompt.
+ * The set of acceptance-criterion ids currently "under judgment" for evidence full-tail
+ * visibility (SPEC-lore-assess-project-evidence-rows-instead-of-embedding-the D1) — the
+ * SAME set the prompt's "ac_id MUST be one of" output instruction restricts the judge to.
+ * Single derivation site so v5 (the spec's full declared set) and v6 (its plan-scope-
+ * restricted subset, D5) can never independently drift on what "under judgment" means —
+ * AC-AEP-4 asserts both builders agree.
+ *
+ * @param criteria - Declared acceptance criteria already resolved for this prompt (v5:
+ *   `declaredCriteria`; v6: `scopedDeclaredCriteria`)
+ * @returns A `Set` of the criteria's ids, for O(1) membership tests in {@link renderTaskEvidence}
+ *
+ * @example
+ * computeAcIdsUnderJudgment([{ id: "AC-X-1", ... }]); // → Set(["AC-X-1"])
+ */
+function computeAcIdsUnderJudgment(criteria: AcceptanceCriterion[]): Set<string> {
+  return new Set(criteria.map((c) => c.id));
+}
+
+/**
+ * Render a task's verification_evidence entries as a compact text block for the prompt
+ * (SPEC-lore-assess-project-evidence-rows-instead-of-embedding-the D1). Per row this
+ * projects ONLY `(oracle, ac_ref, result, command, tail_bytes)` — never the raw evidence
+ * body — plus the clipped `output_tail` text itself, but ONLY when the row's `ac_ref` is
+ * among `acIdsUnderJudgment`. `tail_bytes` is ALWAYS rendered, even when `output_tail` is
+ * absent or empty (`tail_bytes=0`) — an omitted field would be indistinguishable from
+ * "nobody looked," which is exactly the defect this fixes (measured: two red-first rows
+ * with an empty tail went unnoticed inside a whole-body embedding — see
+ * `knowledge-a-task-doc-that-accumulated-10-evidence-rows`). Byte count (not char count)
+ * because `output_tail` can carry multi-byte UTF-8 content — matches this codebase's
+ * existing `Buffer.byteLength(text, "utf8")` convention (`claude-md-check.ts`).
+ *
  * Malformed/absent evidence renders as "(no evidence recorded)" rather than throwing —
  * `extra` is untyped storage, and a judge prompt should degrade gracefully, not crash.
+ *
+ * @param task - The task doc whose `extra.verification_evidence` is rendered
+ * @param acIdsUnderJudgment - AC ids currently being scored ({@link computeAcIdsUnderJudgment})
+ * @returns The rendered evidence block, or `"(no evidence recorded)"` when absent/malformed
+ *
+ * @example
+ * renderTaskEvidence(taskWithOneRow, new Set(["AC-X-1"]));
+ * // => `  [1] oracle=test ac_ref=AC-X-1 result=pass command="bun test" tail_bytes=42\n      output_tail: ...`
  */
-function renderTaskEvidence(task: PlanBundle["tasks"][number]): string {
+function renderTaskEvidence(task: PlanBundle["tasks"][number], acIdsUnderJudgment: ReadonlySet<string>): string {
   const raw = task.extra["verification_evidence"];
   if (!Array.isArray(raw) || raw.length === 0) return "(no evidence recorded)";
 
@@ -180,11 +236,18 @@ function renderTaskEvidence(task: PlanBundle["tasks"][number]): string {
   if (!parsed.success || parsed.data.length === 0) return "(no evidence recorded)";
 
   return parsed.data
-    .map(
-      (e, i) =>
-        `  [${i + 1}] oracle=${e.oracle} command="${e.command}" result=${e.result} recorder=${e.recorded_by}` +
-        (e.output_tail ? `\n      output_tail: ${e.output_tail.slice(0, 500)}` : ""),
-    )
+    .map((e, i) => {
+      const tailBytes = e.output_tail ? Buffer.byteLength(e.output_tail, "utf8") : 0;
+      const acRef = e.ac_ref ?? "(none)";
+      const line =
+        `  [${i + 1}] oracle=${e.oracle} ac_ref=${acRef} result=${e.result} ` +
+        `command="${e.command}" tail_bytes=${tailBytes}`;
+      // reason: D1 — the full tail is shown ONLY for a row whose ac_ref names one of the
+      // ids currently under judgment; every other row still gets its tail_bytes count above,
+      // which is the load-bearing fact (an empty tail must be VISIBLE, not inferable).
+      const showFullTail = e.ac_ref !== undefined && acIdsUnderJudgment.has(e.ac_ref) && e.output_tail;
+      return line + (showFullTail ? `\n      output_tail: ${e.output_tail!.slice(0, 500)}` : "");
+    })
     .join("\n");
 }
 
@@ -387,13 +450,21 @@ export function buildAssessPrompt(
     specBlock = specSection.text;
   }
 
+  // reason: SPEC-lore-assess-project-evidence-rows... D1 — the ids under judgment for v5
+  // are the spec's full declared set (v5 has no plan-scope restriction, unlike v6's D5).
+  const acIdsUnderJudgment = computeAcIdsUnderJudgment(declaredCriteria);
   const taskBlocks = bundle.tasks.map((task) => {
+    // reason: task.content ALONE is what participates in max_task_chars (UNCHANGED from
+    // pre-D1 behavior — AC-067-5 pins this in isolation via a tiny budget + zero evidence,
+    // so evidence text must never enter this measurement). The compact per-row projection
+    // (D1) is what keeps the RENDERED evidence text itself small regardless — AC-AEP-2
+    // measures that compactness directly on the assembled block, not via this truncation flag.
     const taskSection = truncateSection(task.content, budgets.max_task_chars);
     if (taskSection.truncated) truncated.push(`task:${task.slug}`);
     return (
       `### Task: ${task.title} (${task.slug}, status=${task.status})\n` +
       `${taskSection.text}\n` +
-      `Evidence:\n${renderTaskEvidence(task)}`
+      `Evidence:\n${renderTaskEvidence(task, acIdsUnderJudgment)}`
     );
   });
 
@@ -618,6 +689,15 @@ export function buildAssessPromptV6(
       ? new Set(resolvedFacts.scope.scoped_ids)
       : undefined;
 
+  // reason: the declared-id universe for the containment check narrows to the plan's
+  // scoped subset when ac_scope is declared (D5) — hoisted above the task-block loop
+  // (moved from its original post-loop position) so `computeAcIdsUnderJudgment` can use
+  // the SAME scope-restricted set the "ac_id MUST be one of" output instruction uses below,
+  // rather than a second, possibly-drifting derivation (AC-AEP-4).
+  const scopedDeclaredCriteria = scopedIds
+    ? declaredCriteria.filter((c) => scopedIds.has(c.id))
+    : declaredCriteria;
+
   let specHeading = "## Spec Acceptance Criteria (verbatim)";
   let specBlock = "(plan has no linked spec — it is parented directly under a PRD; there are no verbatim ACs to judge against beyond the plan's own goals)";
   if (hasStructuredAc) {
@@ -632,13 +712,19 @@ export function buildAssessPromptV6(
     specBlock = specSection.text;
   }
 
+  // reason: SPEC-lore-assess-project-evidence-rows... D1/D5 — v6's ids under judgment are
+  // the plan-scope-restricted subset (the SAME set the "ac_id MUST be one of" instruction
+  // below names), not the spec's full declared set.
+  const acIdsUnderJudgment = computeAcIdsUnderJudgment(scopedDeclaredCriteria);
   const taskBlocks = bundle.tasks.map((task) => {
+    // reason: task.content ALONE participates in max_task_chars (UNCHANGED — mirrors v5's
+    // identical reasoning; AC-067-5 pins content-only measurement in isolation).
     const taskSection = truncateSection(task.content, budgets.max_task_chars);
     if (taskSection.truncated) truncated.push(`task:${task.slug}`);
     return (
       `### Task: ${task.title} (${task.slug}, status=${task.status})\n` +
       `${taskSection.text}\n` +
-      `Evidence:\n${renderTaskEvidence(task)}`
+      `Evidence:\n${renderTaskEvidence(task, acIdsUnderJudgment)}`
     );
   });
 
@@ -653,13 +739,6 @@ export function buildAssessPromptV6(
     diffBlock = diffResult.text;
     truncationManifest = buildTruncationManifest(diffResult.omittedFiles);
   }
-
-  // reason: the declared-id universe for the containment check narrows to the plan's
-  // scoped subset when ac_scope is declared (D5) — this is what gets returned as
-  // `declaredAcIds`, not the spec's full declared set.
-  const scopedDeclaredCriteria = scopedIds
-    ? declaredCriteria.filter((c) => scopedIds.has(c.id))
-    : declaredCriteria;
 
   const prompt =
     `# Role\n` +

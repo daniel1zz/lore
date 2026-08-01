@@ -540,7 +540,11 @@ describe("assessPlan — prompt content carries the plan bundle's materials (AC-
     expect(prompt).toContain("oracle=tsc");
     expect(prompt).toContain('command="bun run typecheck"');
     expect(prompt).toContain("result=pass");
-    expect(prompt).toContain("recorder=alice");
+    // reason: SPEC-lore-assess-project-evidence-rows... D1 retired the `recorder=` field —
+    // the row projection is now (oracle, ac_ref, result, command, tail_bytes); this fixture's
+    // evidence entry has neither ac_ref nor output_tail, so both render their "absent" form.
+    expect(prompt).toContain("ac_ref=(none)");
+    expect(prompt).toContain("tail_bytes=0");
   });
 
   it("prompt contains the task's title", async () => {
