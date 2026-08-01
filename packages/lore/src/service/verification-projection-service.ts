@@ -9,9 +9,18 @@
  *
  * @invariant ZERO local derivation math (SPEC-075 D3/AC-075-10) — every
  *   coverage/counting/ratio computation is imported from `@lore/core`
- *   (`computeAcCoverage`, `buildTaskAttestationInfos`, `deriveAttestationSummary`).
+ *   (`computeAcCoverage`, `buildTaskAttestationInfos`, `deriveAttestationSummary`,
+ *   `deriveDeclaredScopeCoverage`, `declaredScopeCoverageVerdict`).
  *   This file declares no function named `derive*`/`compute*` — the AC-075-10
  *   grep oracle pins that.
+ * @invariant The `plan` branch's `declared_scope_coverage`/`declared_scope_verdict`
+ *   (task-meets-floor-renders-pass-while-the-declared-scope-conjunct) are derived
+ *   via the SAME `deriveDeclaredScopeCoverage`/`declaredScopeCoverageVerdict`
+ *   (`@lore/core`) that `CorpusService.set`'s plan-close gate wiring feeds
+ *   `attestationFloor` — so the dashboard's `PlanAttestationPanel` badge and the
+ *   `plan-close` gate can never disagree on whether the declared-scope conjunct
+ *   blocks. `attestation.meets_floor` alone is the RATIO conjunct only; a
+ *   consumer needing the full gate-agreeing picture must read both fields.
  * @invariant `resolvePlanTasks` (D9) fails loud (`VALIDATION_ERROR`) when a plan
  *   has ≥1 `phase`-typed child and ZERO `task`-typed children — a raw
  *   `type: "task"` `findMany` filter would otherwise silently return `[]` for a
@@ -28,7 +37,9 @@ import type { DocId, DocRecord, LoreError } from "@lore/core";
 import {
   buildTaskAttestationInfos,
   computeAcCoverage,
+  declaredScopeCoverageVerdict,
   deriveAttestationSummary,
+  deriveDeclaredScopeCoverage,
   extractEvidence,
   specAcceptanceCriteriaSchema,
   type AcceptanceCriterion,
@@ -134,7 +145,8 @@ export class VerificationProjectionService {
    *   - `task` → its own evidence log + distinct declared `ac_ref`s.
    *   - `spec` → aggregated AC coverage across every child plan's tasks
    *     (`resolvePlanTasks` per plan, D9 fail-loud propagates through).
-   *   - `plan` → plan-wide attestation summary + per-task attestation facts.
+   *   - `plan` → plan-wide attestation summary + per-task attestation facts +
+   *     the declared-scope coverage conjunct (fact + three-valued verdict).
    *   - anything else (prd/adr/knowledge/phase) → `{doc_type: "other"}`
    *     (no evidence surface — the dashboard hides the Evidence tab).
    *
@@ -205,7 +217,26 @@ export class VerificationProjectionService {
 
         const taskAttestationInfos = buildTaskAttestationInfos(tasksResult.value);
         const attestation = deriveAttestationSummary(taskAttestationInfos, this.minRatio, acCoverage);
-        return ok({ doc_type: "plan", attestation, tasks: taskAttestationInfos });
+
+        // reason: task-meets-floor-renders-pass-while-the-declared-scope-conjunct
+        // — `attestation.meets_floor` carries ONLY the opt-in ratio conjunct
+        // (`AttestationSummary.meets_floor`'s own doc comment, `@lore/core`); the
+        // `plan-close` gate ANDs it with the DECLARED-scope conjunct, computed by
+        // `CorpusService.set`'s gate wiring from the SAME two core fns called here
+        // (`deriveDeclaredScopeCoverage` over these SAME resolved tasks + the SAME
+        // `acCoverage` above, then `declaredScopeCoverageVerdict`). Without this,
+        // the dashboard badge could read "meets floor" on a plan the gate actually
+        // denies for an undeclared/unattested scope — the exact defect this fixes.
+        const declaredScopeCoverage = deriveDeclaredScopeCoverage(tasksResult.value, acCoverage);
+        const declaredScopeVerdict = declaredScopeCoverageVerdict(declaredScopeCoverage, doc.slug);
+
+        return ok({
+          doc_type: "plan",
+          attestation,
+          tasks: taskAttestationInfos,
+          declared_scope_coverage: declaredScopeCoverage,
+          declared_scope_verdict: declaredScopeVerdict,
+        });
       }
 
       default:

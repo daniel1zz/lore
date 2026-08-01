@@ -636,11 +636,38 @@ export interface SpecEvidencePanel {
   task_count: number;
 }
 
-/** Evidence-tab projection for a `plan` doc — plan-wide attestation + per-task facts. */
+/**
+ * Evidence-tab projection for a `plan` doc — plan-wide attestation + per-task
+ * facts, PLUS the declared-scope coverage conjunct (task-meets-floor-renders-
+ * pass-while-the-declared-scope-conjunct). `attestation.meets_floor` carries
+ * ONLY the opt-in ratio conjunct (see {@link AttestationSummary.meets_floor}'s
+ * own doc comment); the `plan-close` gate's actual verdict ANDs that with the
+ * DECLARED-scope conjunct ({@link declaredScopeCoverageVerdict}, the SAME
+ * function `gate-predicates.ts::attestationFloor` calls). This projection
+ * carries both facts so a rendering consumer can never show a "meets floor"
+ * badge while the gate denies on undeclared/unattested scope.
+ */
 export interface PlanEvidencePanel {
   doc_type: "plan";
   attestation: AttestationSummary;
   tasks: TaskAttestationInfo[];
+  /**
+   * The DECLARED-scope coverage fact ({@link deriveDeclaredScopeCoverage}'s own
+   * output) — the plan-close coverage conjunct's input. Carried alongside
+   * {@link PlanEvidencePanel.declared_scope_verdict} (not only the verdict) so
+   * a rendering consumer can list which ids are declared/unattested, mirroring
+   * `attestation.claimed_ac_coverage`'s own "fact + list" shape.
+   */
+  declared_scope_coverage: DeclaredScopeCoverage;
+  /**
+   * {@link declaredScopeCoverageVerdict}'s three-valued verdict over
+   * `declared_scope_coverage` — `{ok: true}`, `{ok: false, unattested_acs}`, or
+   * `{notApplicable: true, reason: "scope-undeclared", referent}`. A rendering
+   * consumer MUST branch on all three (never collapse `notApplicable` into
+   * either pass or fail) — that collapse is exactly the proxy-for-invariant
+   * defect this field exists to remove.
+   */
+  declared_scope_verdict: DeclaredScopeCoverageVerdict;
 }
 
 /** Evidence-tab projection for every other doc type (prd/adr/knowledge/phase) — no evidence surface. */

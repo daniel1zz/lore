@@ -62,6 +62,8 @@ import {
   UNRESOLVED_DECLARED_SCOPE,
   type AttestationSummary,
   type ClaimedAcCoverage,
+  type DeclaredScopeCoverage,
+  type DeclaredScopeCoverageVerdict,
   type EvidencePanelProjection,
   type TaskAttestationInfo,
 } from "./evidence-panel.js";
@@ -72,6 +74,19 @@ import type { DocId, DocRecord } from "./types.js";
 /** Vacuous claimed-AC coverage — the fixture value for every pre-existing test
  *  in this file that never modeled AC declarations at all. */
 const EMPTY_COVERAGE: ClaimedAcCoverage = { exercised_acs: [], unattested_acs: [], meets_coverage: true };
+
+/** Vacuous declared-scope coverage (nothing declarable, nothing declared) — the
+ *  fixture value for `summarizeForAdjudicationBar`'s pre-existing `plan` tests,
+ *  which pin `meets_floor`-only behavior and never model declared scope. */
+const EMPTY_DECLARED_SCOPE: DeclaredScopeCoverage = {
+  declared_acs: [],
+  unattested_acs: [],
+  scope_undeclared: false,
+  meets_coverage: true,
+};
+
+/** A resolved, satisfied declared-scope verdict — pairs with {@link EMPTY_DECLARED_SCOPE}. */
+const DECLARED_SCOPE_OK: DeclaredScopeCoverageVerdict = { ok: true };
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -657,6 +672,8 @@ describe("summarizeForAdjudicationBar", () => {
         zero_attested_tasks: [],
       },
       tasks: [],
+      declared_scope_coverage: EMPTY_DECLARED_SCOPE,
+      declared_scope_verdict: DECLARED_SCOPE_OK,
     };
     expect(summarizeForAdjudicationBar(panel)).toEqual({
       doc_type: "plan",
@@ -681,6 +698,8 @@ describe("summarizeForAdjudicationBar", () => {
         zero_attested_tasks: [],
       },
       tasks: [],
+      declared_scope_coverage: EMPTY_DECLARED_SCOPE,
+      declared_scope_verdict: DECLARED_SCOPE_OK,
     };
     expect(summarizeForAdjudicationBar(panel).status).toBe("none");
   });

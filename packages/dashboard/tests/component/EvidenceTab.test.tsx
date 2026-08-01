@@ -82,8 +82,22 @@ describe("EvidenceTab", () => {
     it("dispatches a plan projection to PlanAttestationPanel", async () => {
       const projection: EvidencePanelProjection = {
         doc_type: "plan",
-        attestation: { total_evidence: 0, attested: 0, ratio: null, min_ratio: 0.5, meets_floor: true, zero_attested_tasks: [] },
+        attestation: {
+          total_evidence: 0,
+          attested: 0,
+          ratio: null,
+          min_ratio: 0.5,
+          claimed_ac_coverage: { exercised_acs: [], unattested_acs: [], meets_coverage: true },
+          meets_floor: true,
+          zero_attested_tasks: [],
+        },
         tasks: [],
+        // reason: task-meets-floor-renders-pass-while-the-declared-scope-conjunct
+        // — PlanEvidencePanel's two new required fields. This test's tasks: []
+        // early-returns PlanAttestationPanel before either is ever read, so any
+        // resolved value is fine here — kept for type-completeness only.
+        declared_scope_coverage: { declared_acs: [], unattested_acs: [], scope_undeclared: false, meets_coverage: true },
+        declared_scope_verdict: { ok: true },
       };
       mockedApiGetEvidencePanel.mockResolvedValue(projection);
       renderWithClient(<EvidenceTab doc={makeTaskDoc({ type: "plan" })} />);

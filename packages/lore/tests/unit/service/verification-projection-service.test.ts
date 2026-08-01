@@ -117,6 +117,29 @@ async function makeTask(
   } as CreateDocInput);
 }
 
+/**
+ * Like {@link makeTask}, but also declares `extra.ac_scope` — the task-owned
+ * declared-scope fact `deriveDeclaredScopeCoverage` reads (task-meets-floor-
+ * renders-pass-while-the-declared-scope-conjunct). A task built via plain
+ * `makeTask` never sets this key at all (absent, not empty) — that absence is
+ * exactly what `findDeclaredAcScope` (`@lore/core`) reports as UNDECLARED.
+ */
+async function makeTaskWithScope(
+  cs: CorpusService,
+  plan: DocRecord,
+  title: string,
+  acScope: string[],
+  evidence: EvidenceEntry[] = [],
+): Promise<DocRecord> {
+  return mustCreate(cs, {
+    type: "task",
+    title,
+    parent_id: plan.id,
+    content: "## Task\n\nbody",
+    extra: { plan_id: plan.id, ac_scope: acScope, verification_evidence: evidence },
+  } as CreateDocInput);
+}
+
 /** Raw-inserts a `phase` doc directly (migration-created only, never via CorpusService.create). */
 async function makePhase(store: InMemoryStore, plan: DocRecord): Promise<DocRecord> {
   const id = ulid();
@@ -293,6 +316,15 @@ describe("VerificationProjectionService — BOUNDARY (AC-075-3)", () => {
         meets_floor: true,
         zero_attested_tasks: [],
       },
+      // reason: task-meets-floor-renders-pass-while-the-declared-scope-conjunct
+      // — a plan with zero tasks has nothing to declare, so the declared-scope
+      // fact is vacuously satisfied (`scope_undeclared: false`, no evidence-
+      // bearing task exists to have left it undeclared) and the verdict is a
+      // resolved pass, not the `notApplicable` sentinel (that sentinel is for
+      // an UNRESOLVED caller, `UNRESOLVED_DECLARED_SCOPE` — this projection
+      // always resolves the fact from the plan's own tasks).
+      declared_scope_coverage: { declared_acs: [], unattested_acs: [], scope_undeclared: false, meets_coverage: true },
+      declared_scope_verdict: { ok: true },
     });
   });
 
@@ -462,5 +494,83 @@ describe("VerificationProjectionService — AC-PCI-13: ratio disabled render", (
     expect(result.value.attestation.claimed_ac_coverage).toEqual(expectedCoverage);
     // AC-1 was claimed (>=1 ref) but the only ref is self-reported — unattested.
     expect(result.value.attestation.claimed_ac_coverage.unattested_acs).toEqual(["AC-1"]);
+  });
+});
+
+// ─── task-meets-floor-renders-pass-while-the-declared-scope-conjunct: the ───
+// ─── `plan` branch surfaces the DECLARED-scope conjunct (fact + verdict), ───
+// ─── computed via the SAME core fns `CorpusService.set`'s plan-close gate ───
+// ─── wiring feeds `attestationFloor`, so the dashboard badge and the gate ───
+// ─── can never disagree ──────────────────────────────────────────────────────
+
+describe("VerificationProjectionService — declared-scope conjunct (task-meets-floor-renders-pass-while-the-declared-scope-conjunct)", () => {
+  it("HAPPY: a task that declares AC-1 and is fully attested resolves declared_scope_verdict to {ok: true}", async () => {
+    const { corpusService, projectionService } = makeHarness();
+    const prd = await makePrd(corpusService);
+    const spec = await makeSpec(corpusService, prd, [AC_1]);
+    const plan = await makePlan(corpusService, spec);
+    await makeTaskWithScope(corpusService, plan, "Task", ["AC-1"], [
+      attestedEntry("bun test", { ac_ref: "AC-1" }),
+    ]);
+
+    const result = await projectionService.evidencePanel(plan.slug);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    if (result.value.doc_type !== "plan") throw new Error("expected plan doc_type");
+    expect(result.value.declared_scope_coverage).toEqual({
+      declared_acs: ["AC-1"],
+      unattested_acs: [],
+      scope_undeclared: false,
+      meets_coverage: true,
+    });
+    expect(result.value.declared_scope_verdict).toEqual({ ok: true });
+    // control: a genuinely-passing plan still reports the ratio conjunct as met too —
+    // proving this fixture is not "everything renders as failing now".
+    expect(result.value.attestation.meets_floor).toBe(true);
+  });
+
+  it("NEGATIVE (the oracle fixture, mirrors AC-VS-6): an evidence-bearing task with NO declared ac_scope resolves declared_scope_verdict to the notApplicable(scope-undeclared) verdict, even though the ratio conjunct alone passes", async () => {
+    const { corpusService, projectionService } = makeHarness();
+    const prd = await makePrd(corpusService);
+    const spec = await makeSpec(corpusService, prd, [AC_1]);
+    const plan = await makePlan(corpusService, spec);
+    // makeTask (not makeTaskWithScope) — extra.ac_scope is ABSENT, not empty.
+    await makeTask(corpusService, plan, "Task", [attestedEntry("bun test", { ac_ref: "AC-1" })]);
+
+    const result = await projectionService.evidencePanel(plan.slug);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    if (result.value.doc_type !== "plan") throw new Error("expected plan doc_type");
+    // The RATIO conjunct alone passes (full attestation) — this is exactly the
+    // defect fixture: `meets_floor` is true while the declared-scope conjunct
+    // has nothing to audit at all.
+    expect(result.value.attestation.meets_floor).toBe(true);
+    expect(result.value.declared_scope_coverage.scope_undeclared).toBe(true);
+    expect(result.value.declared_scope_coverage.declared_acs).toEqual([]);
+    expect(result.value.declared_scope_verdict).toEqual({
+      notApplicable: true,
+      reason: "scope-undeclared",
+      referent: plan.slug,
+    });
+  });
+
+  it("BOUNDARY: a task that declares AC-1 but never attests it resolves declared_scope_verdict to {ok: false, unattested_acs: ['AC-1']}", async () => {
+    const { corpusService, projectionService } = makeHarness();
+    const prd = await makePrd(corpusService);
+    const spec = await makeSpec(corpusService, prd, [AC_1]);
+    const plan = await makePlan(corpusService, spec);
+    await makeTaskWithScope(corpusService, plan, "Task", ["AC-1"], [
+      selfReportedEntry("bun test", { ac_ref: "AC-1" }),
+    ]);
+
+    const result = await projectionService.evidencePanel(plan.slug);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    if (result.value.doc_type !== "plan") throw new Error("expected plan doc_type");
+    expect(result.value.declared_scope_coverage.declared_acs).toEqual(["AC-1"]);
+    expect(result.value.declared_scope_verdict).toEqual({ ok: false, unattested_acs: ["AC-1"] });
   });
 });
