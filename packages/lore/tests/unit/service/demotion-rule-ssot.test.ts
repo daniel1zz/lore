@@ -88,9 +88,17 @@ vi.mock("@lore/core", async (importOriginal) => {
   };
 });
 
-const { InMemoryStore } = await import("../../../src/store/in-memory-store.js");
-const { CorpusService } = await import("../../../src/service/corpus-service.js");
-const { AcService } = await import("../../../src/service/ac-service.js");
+// reason: these MUST be static imports, never `await import(...)`. `vi.mock` above is
+// hoisted over them by vitest's transform, so they still receive the mocked
+// `@lore/core` — but `scripts/changed-tests.ts` builds its reverse-dependency graph
+// from a REGEX SCAN OF STATIC IMPORTS ONLY and ignores dynamic `import(...)` by design
+// (see its module header). Under dynamic imports this file would be invisible to
+// `bun run test:changed`, i.e. the one oracle guarding the two call sites would not be
+// selected when a future session edits either of them — the mechanism would exist but
+// never run.
+import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { CorpusService } from "../../../src/service/corpus-service.js";
+import { AcService } from "../../../src/service/ac-service.js";
 
 // ─── Fixtures (mirrors ac-set.test.ts) ─────────────────────────────────────────
 
