@@ -52,6 +52,15 @@
  *     (`"pass"`/`"fail"`/`"scope-undeclared"` here vs `"meets-floor"`/
  *     `"below-floor"`/`"scope-undeclared"` on the panel).
  *
+ * `summarizeForAdjudicationBar`'s `task`/`spec` branches derive their counts via
+ * `tallyEvidenceResults` (`task-workflow.ts`, the shared classifier) rather than
+ * hand-rolling `.filter((e) => e.result === "pass")`/`"fail"` pairs — the latter
+ * silently dropped `"expected-fail"`/`"inconclusive"` rows into neither bucket,
+ * rendering `status: "none"` for a task whose only evidence is a deliberate RED
+ * pin (task-two-more-evidence-consumers-erase-an-expected-fail-row-doc). Both
+ * branches now surface `expected_fail_count`/`inconclusive_count` and a matching
+ * `status` value instead of erasing the row.
+ *
  * Invariants:
  *   - `AttestationSummary.ratio` is `null`, never a fabricated `0`, when
  *     `total_evidence === 0` (SPEC-075 task packet, "never a fabricated 0") — the
@@ -99,11 +108,18 @@
  *   task-meets-floor-renders-pass-while-the-declared-scope-conjunct (the
  *   PlanAttestationPanel three-state badge fix); task-adjudicationbar-s-
  *   compact-status-chip-still-derives-from (this module's matching fix for
- *   the compact chip, so the two dashboard surfaces can no longer disagree).
+ *   the compact chip, so the two dashboard surfaces can no longer disagree);
+ *   task-two-more-evidence-consumers-erase-an-expected-fail-row-doc (the
+ *   `task`/`spec` branches' expected-fail/inconclusive fix).
  */
 
 import type { AcCoverageFact, AcceptanceCriterion } from "./acceptance.js";
-import { extractEvidence, type EvidenceEntry } from "./task-workflow.js";
+import {
+  extractEvidence,
+  tallyEvidenceResults,
+  type EvidenceEntry,
+  type EvidenceResultTally,
+} from "./task-workflow.js";
 import type { DocRecord } from "./types.js";
 
 // ─── Task Attestation Counting ──────────────────────────────────────────────
@@ -719,8 +735,27 @@ export interface AdjudicationBarSummary {
   pass_count: number;
   fail_count: number;
   /**
-   * `task`/`spec`/`other`: fail-first — any fail wins over any pass; no
-   * evidence at all is `"none"`.
+   * Count of self-reported deliberate RED (`"expected-fail"`) rows — `task`/
+   * `spec` branches only (0 for `plan`/`other`, which don't derive this
+   * per-row breakdown). Never counted in `pass_count`/`fail_count`
+   * (task-two-more-evidence-consumers-erase-an-expected-fail-row-doc).
+   */
+  expected_fail_count: number;
+  /**
+   * Count of runner-issued zero/under-match (`"inconclusive"`, SPEC-061)
+   * rows — same scope/exclusion rules as {@link expected_fail_count}.
+   */
+  inconclusive_count: number;
+  /**
+   * `task`/`spec`/`other`: fail-first — any fail wins over any pass; then
+   * `"inconclusive"` (an oracle DID run but produced no trustworthy signal)
+   * outranks `"expected-fail"` (a self-declared "not built yet" pin) —
+   * mirrors `commands/ac.ts::coverageBadge`'s identical precedence for the
+   * exact same reason (an inconclusive result is a more urgent, ambiguous
+   * signal than a deliberate, already-explained RED); no evidence at all is
+   * `"none"`. Neither non-green value was reachable here before
+   * task-two-more-evidence-consumers-erase-an-expected-fail-row-doc — both
+   * used to render `"none"`, byte-identical to zero evidence.
    *
    * `plan`: no evidence at all is `"none"` (the vacuous-pass case, unchanged);
    * otherwise this is {@link derivePlanCloseChipStatus}'s three-valued verdict
@@ -730,9 +765,11 @@ export interface AdjudicationBarSummary {
    * (task-adjudicationbar-s-compact-status-chip-still-derives-from). It must
    * never collapse into `"pass"` (the exact defect this fix removes) nor into
    * `"fail"` (an escalation this function does not attempt — see
-   * {@link derivePlanCloseChipStatus}'s own doc comment).
+   * {@link derivePlanCloseChipStatus}'s own doc comment). `"expected-fail"`/
+   * `"inconclusive"` are never reachable for `doc_type: "plan"` — the plan
+   * branch derives its status from attestation facts, not a per-row tally.
    */
-  status: "pass" | "fail" | "none" | "scope-undeclared";
+  status: "pass" | "fail" | "inconclusive" | "expected-fail" | "none" | "scope-undeclared";
 }
 
 /**
@@ -785,50 +822,95 @@ export function derivePlanCloseChipStatus(
 }
 
 /**
+ * The `task`/`spec`/`other`-branch precedence over a full {@link EvidenceResultTally}
+ * (mirrors `acceptance.ts::deriveAcCoverageState`'s "a fail always wins" rule,
+ * extended to the two non-green values): FAIL > PASS > INCONCLUSIVE >
+ * EXPECTED-FAIL > NONE. Inconclusive outranks expected-fail for the SAME reason
+ * `commands/ac.ts::coverageBadge` orders its own residual checks that way — an
+ * oracle that genuinely ran but produced no trustworthy signal is a more urgent,
+ * unexplained state than a self-declared, already-understood RED pin.
+ *
+ * @param tally - {@link tallyEvidenceResults}' exhaustive 4-bucket count.
+ * @returns The single status this bucket set reduces to.
+ */
+function deriveEvidenceTallyStatus(
+  tally: EvidenceResultTally,
+): "pass" | "fail" | "inconclusive" | "expected-fail" | "none" {
+  if (tally.fail > 0) return "fail";
+  if (tally.pass > 0) return "pass";
+  if (tally.inconclusive > 0) return "inconclusive";
+  if (tally.expected_fail > 0) return "expected-fail";
+  return "none";
+}
+
+/**
  * Reduces an {@link EvidencePanelProjection} to a compact {@link AdjudicationBarSummary}.
- * Fail-first precedence (mirrors `acceptance.ts::deriveAcCoverageState`'s "a fail
- * always wins over any pass" rule) for `task`/`spec`/`other`: any failing
- * evidence/coverage makes the status `"fail"`, regardless of how much
- * passing/attested evidence also exists. For `plan`, status instead comes from
- * {@link derivePlanCloseChipStatus} (never `meets_floor` alone —
- * task-adjudicationbar-s-compact-status-chip-still-derives-from), preserving
- * the pre-existing `"none"` vacuous-pass rendering when there is no evidence
- * at all.
+ * `task`/`spec`/`other` derive their tally via {@link tallyEvidenceResults} (the
+ * shared classifier, task-two-more-evidence-consumers-erase-an-expected-fail-
+ * row-doc) and reduce it via {@link deriveEvidenceTallyStatus} — never a
+ * hand-rolled `.filter((e) => e.result === "pass")`/`"fail"` pair, which used to
+ * silently drop `"expected-fail"`/`"inconclusive"` rows into neither bucket,
+ * rendering `"none"` for a task/spec whose only evidence was a deliberate RED
+ * pin or an inconclusive run — byte-identical to genuinely zero evidence. For
+ * `plan`, status instead comes from {@link derivePlanCloseChipStatus} (never
+ * `meets_floor` alone — task-adjudicationbar-s-compact-status-chip-still-
+ * derives-from), preserving the pre-existing `"none"` vacuous-pass rendering
+ * when there is no evidence at all.
  *
  * @example
  * summarizeForAdjudicationBar({ doc_type: "other" });
  * // => { doc_type: "other", evidence_count: 0, attested_count: 0, pass_count: 0,
- * //      fail_count: 0, status: "none" }
+ * //      fail_count: 0, expected_fail_count: 0, inconclusive_count: 0, status: "none" }
+ * @example
+ * // a task whose ONLY evidence is a deliberate RED pin — status is "expected-fail",
+ * // never "none" (the defect task-two-more-evidence-consumers-erase-an-expected-
+ * // fail-row-doc removes)
+ * summarizeForAdjudicationBar({
+ *   doc_type: "task", ac_refs: [],
+ *   evidence: [{ oracle: "test", command: "bun test", result: "expected-fail",
+ *     recorded_at: "2026-08-01T00:00:00.000Z", recorded_by: "agent:t" }],
+ * });
+ * // => { doc_type: "task", evidence_count: 1, attested_count: 0, pass_count: 0,
+ * //      fail_count: 0, expected_fail_count: 1, inconclusive_count: 0, status: "expected-fail" }
  */
 export function summarizeForAdjudicationBar(panel: EvidencePanelProjection): AdjudicationBarSummary {
   switch (panel.doc_type) {
     case "task": {
-      const passCount = panel.evidence.filter((e) => e.result === "pass").length;
-      const failCount = panel.evidence.filter((e) => e.result === "fail").length;
+      const tally = tallyEvidenceResults(panel.evidence);
       const attestedCount = panel.evidence.filter((e) => e.attestation !== undefined).length;
       return {
         doc_type: "task",
         evidence_count: panel.evidence.length,
         attested_count: attestedCount,
-        pass_count: passCount,
-        fail_count: failCount,
-        status: failCount > 0 ? "fail" : passCount > 0 ? "pass" : "none",
+        pass_count: tally.pass,
+        fail_count: tally.fail,
+        expected_fail_count: tally.expected_fail,
+        inconclusive_count: tally.inconclusive,
+        status: deriveEvidenceTallyStatus(tally),
       };
     }
     case "spec": {
-      const passCount = panel.coverage.reduce((sum, fact) => sum + fact.pass, 0);
-      const failCount = panel.coverage.reduce((sum, fact) => sum + fact.fail, 0);
+      // reason: computeAcCoverage's own `fact.pass`/`fact.fail` are exact-match
+      // counts that already exclude expected-fail/inconclusive BY DESIGN (see
+      // that function's own JSDoc) — but `fact.refs` still carries every row's
+      // raw result for audit visibility, so tallying the FLATTENED refs (rather
+      // than trusting only the two pre-aggregated fields) recovers the residual
+      // counts this read site used to erase entirely.
+      const allRefs = panel.coverage.flatMap((fact) => fact.refs);
+      const tally = tallyEvidenceResults(allRefs);
       const attestedCount = panel.coverage.reduce(
         (sum, fact) => sum + fact.attested_pass + fact.attested_fail,
         0,
       );
       return {
         doc_type: "spec",
-        evidence_count: passCount + failCount,
+        evidence_count: allRefs.length,
         attested_count: attestedCount,
-        pass_count: passCount,
-        fail_count: failCount,
-        status: failCount > 0 ? "fail" : passCount > 0 ? "pass" : "none",
+        pass_count: tally.pass,
+        fail_count: tally.fail,
+        expected_fail_count: tally.expected_fail,
+        inconclusive_count: tally.inconclusive,
+        status: deriveEvidenceTallyStatus(tally),
       };
     }
     case "plan": {
@@ -848,6 +930,8 @@ export function summarizeForAdjudicationBar(panel: EvidencePanelProjection): Adj
         attested_count: attested,
         pass_count: 0,
         fail_count: 0,
+        expected_fail_count: 0,
+        inconclusive_count: 0,
         status,
       };
     }
@@ -858,6 +942,8 @@ export function summarizeForAdjudicationBar(panel: EvidencePanelProjection): Adj
         attested_count: 0,
         pass_count: 0,
         fail_count: 0,
+        expected_fail_count: 0,
+        inconclusive_count: 0,
         status: "none",
       };
   }

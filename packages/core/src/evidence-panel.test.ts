@@ -11,8 +11,12 @@
  *               exercised script-mode set (AC-PCI-5); deriveDeclaredScopeCoverage
  *               resolves a declared+attested scope to an ok verdict (AC-VS-6
  *               control); summarizeForAdjudicationBar reduces every
- *               EvidencePanelProjection branch to the expected chip summary;
- *               derivePlanCloseChipStatus resolves both conjuncts passing to "pass"
+ *               EvidencePanelProjection branch to the expected chip summary,
+ *               including a task/spec panel whose only evidence is
+ *               expected-fail/inconclusive reducing to that SAME status (never
+ *               "none" — task-two-more-evidence-consumers-erase-an-expected-
+ *               fail-row-doc); derivePlanCloseChipStatus resolves both conjuncts
+ *               passing to "pass"
  *   NEGATIVE:   a task with malformed extra.verification_evidence (non-array) does
  *               not throw and contributes zero counts (extractEvidence's own
  *               fail-closed behavior); an ai-mode/human-mode criterion with refs
@@ -50,7 +54,15 @@
  *               compliant declaration; summarizeForAdjudicationBar's plan branch
  *               still reduces a zero-evidence plan to "none" (never "pass" or
  *               "scope-undeclared") regardless of the declared-scope verdict
- *               (task-adjudicationbar-s-compact-status-chip-still-derives-from)
+ *               (task-adjudicationbar-s-compact-status-chip-still-derives-from);
+ *               pass_count/fail_count are UNCHANGED for pass/fail-only panels
+ *               after the expected-fail/inconclusive fix (task-two-more-
+ *               evidence-consumers-erase-an-expected-fail-row-doc)
+ *   CONTROL:    (task-two-more-evidence-consumers-erase-an-expected-fail-row-doc)
+ *               a task panel with only a pass row, only an expected-fail row,
+ *               and zero evidence at all produce three mutually distinct
+ *               summaries — guards the distinguishing-status assertions above
+ *               against passing vacuously
  *
  * @spec_ref spec-declared-scope-attestation-contract-task-owned-ac-scope §Facts
  *   (D4 exercised-vs-declared split, D5 demoted per-task floor), AC-VS-6;
@@ -60,7 +72,10 @@
  *   task-meets-floor-renders-pass-while-the-declared-scope-conjunct (the
  *   PlanAttestationPanel three-state badge fix this file's plan-branch chip
  *   tests mirror); task-adjudicationbar-s-compact-status-chip-still-derives-from
- *   (this file's derivePlanCloseChipStatus + summarizeForAdjudicationBar tests)
+ *   (this file's derivePlanCloseChipStatus + summarizeForAdjudicationBar tests);
+ *   task-two-more-evidence-consumers-erase-an-expected-fail-row-doc (the
+ *   task/spec branches' expected-fail/inconclusive fix — supersedes the
+ *   AC-WH-1 "reduces to none" pins that used to live in this describe block)
  */
 
 import { describe, it, expect } from "vitest";
@@ -625,6 +640,8 @@ describe("summarizeForAdjudicationBar", () => {
       attested_count: 2,
       pass_count: 2,
       fail_count: 1,
+      expected_fail_count: 0,
+      inconclusive_count: 0,
       status: "fail",
     });
   });
@@ -646,14 +663,35 @@ describe("summarizeForAdjudicationBar", () => {
       attested_count: 0,
       pass_count: 0,
       fail_count: 0,
+      expected_fail_count: 0,
+      inconclusive_count: 0,
       status: "none",
     });
   });
 
   it("HAPPY: a spec panel aggregates pass/fail/attested across every AC's coverage fact", () => {
     const coverage: AcCoverageFact[] = [
-      { ac_id: "AC-1", mode: "script", pass: 2, fail: 0, refs: [], attested_pass: 1, attested_fail: 0 },
-      { ac_id: "AC-2", mode: "script", pass: 0, fail: 1, refs: [], attested_pass: 0, attested_fail: 1 },
+      {
+        ac_id: "AC-1",
+        mode: "script",
+        pass: 2,
+        fail: 0,
+        refs: [
+          { task_id: "t1", result: "pass", attested: true },
+          { task_id: "t2", result: "pass" },
+        ],
+        attested_pass: 1,
+        attested_fail: 0,
+      },
+      {
+        ac_id: "AC-2",
+        mode: "script",
+        pass: 0,
+        fail: 1,
+        refs: [{ task_id: "t3", result: "fail", attested: true }],
+        attested_pass: 0,
+        attested_fail: 1,
+      },
     ];
     const criteria: AcceptanceCriterion[] = [];
     const panel: EvidencePanelProjection = { doc_type: "spec", criteria, coverage, task_count: 3 };
@@ -663,6 +701,8 @@ describe("summarizeForAdjudicationBar", () => {
       attested_count: 2,
       pass_count: 2,
       fail_count: 1,
+      expected_fail_count: 0,
+      inconclusive_count: 0,
       status: "fail",
     });
   });
@@ -694,6 +734,8 @@ describe("summarizeForAdjudicationBar", () => {
       attested_count: 2,
       pass_count: 0,
       fail_count: 0,
+      expected_fail_count: 0,
+      inconclusive_count: 0,
       status: "fail",
     });
   });
@@ -725,19 +767,24 @@ describe("summarizeForAdjudicationBar", () => {
       attested_count: 0,
       pass_count: 0,
       fail_count: 0,
+      expected_fail_count: 0,
+      inconclusive_count: 0,
       status: "none",
     });
   });
 
   // ─── spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M1
-  //     (AC-WH-1, task-t5-close-ac-wh-1-rendering-clause-oracle-coverage-assess) —
-  //     classification assertions the 2026-07-27 assess flagged as untested. These
-  //     are REGRESSION pins on EXISTING-correct behavior, not new-behavior
-  //     assertions: `result === "pass"`/`result === "fail"` filters already exclude
-  //     "expected-fail" from both buckets by construction (same property
-  //     `"inconclusive"` already had) — no code in this file changed for this task,
-  //     only the assertions below are new. ────────────────────────────────────
-  it("AC-WH-1 REGRESSION: a task panel whose only evidence is expected-fail reduces to status none, never pass or fail", () => {
+  //     (AC-WH-1) classification assertions — UPDATED by
+  //     task-two-more-evidence-consumers-erase-an-expected-fail-row-doc, which
+  //     found the ORIGINAL AC-WH-1 pins here were pinning the DEFECT itself: a
+  //     task/spec whose only evidence was a deliberate RED pin rendered
+  //     `status: "none"`, byte-identical to zero evidence at all — the
+  //     "auditor told the opposite of the truth" bug. `pass_count`/`fail_count`
+  //     still correctly exclude "expected-fail"/"inconclusive" (unchanged,
+  //     REGRESSION-pinned above), but the row no longer vanishes: it now
+  //     surfaces via `expected_fail_count`/`inconclusive_count` and a matching
+  //     `status`. ────────────────────────────────────────────────────────────
+  it("task-two-more-evidence-consumers-erase-an-expected-fail-row-doc: a task panel whose only evidence is expected-fail reduces to status 'expected-fail', NEVER 'none' (the defect this fix removes)", () => {
     const expectedFailEntry: EvidenceEntry = {
       oracle: "test",
       command: "bun test",
@@ -756,8 +803,47 @@ describe("summarizeForAdjudicationBar", () => {
       attested_count: 0,
       pass_count: 0,
       fail_count: 0,
-      status: "none",
+      expected_fail_count: 1,
+      inconclusive_count: 0,
+      status: "expected-fail",
     });
+  });
+
+  it("a task panel whose only evidence is inconclusive reduces to status 'inconclusive', NEVER 'none' (same fix, the runner-issued sibling value)", () => {
+    const inconclusiveEntry: EvidenceEntry = {
+      oracle: "test",
+      command: "bun test",
+      result: "inconclusive",
+      recorded_at: "2026-07-27T00:00:00.000Z",
+      recorded_by: "agent:t",
+    };
+    const panel: EvidencePanelProjection = {
+      doc_type: "task",
+      evidence: [inconclusiveEntry],
+      ac_refs: [],
+    };
+    expect(summarizeForAdjudicationBar(panel)).toEqual({
+      doc_type: "task",
+      evidence_count: 1,
+      attested_count: 0,
+      pass_count: 0,
+      fail_count: 0,
+      expected_fail_count: 0,
+      inconclusive_count: 1,
+      status: "inconclusive",
+    });
+  });
+
+  it("an inconclusive row outranks an expected-fail row when both are present and neither pass nor fail exists (precedence: fail > pass > inconclusive > expected-fail > none)", () => {
+    const panel: EvidencePanelProjection = {
+      doc_type: "task",
+      evidence: [
+        { oracle: "test", command: "bun test a", result: "expected-fail", recorded_at: "t", recorded_by: "agent:t" },
+        { oracle: "test", command: "bun test b", result: "inconclusive", recorded_at: "t", recorded_by: "agent:t" },
+      ],
+      ac_refs: [],
+    };
+    expect(summarizeForAdjudicationBar(panel).status).toBe("inconclusive");
   });
 
   it("AC-WH-1 REGRESSION: an expected-fail entry alongside a real fail still reduces to fail-first status, never masked", () => {
@@ -778,27 +864,64 @@ describe("summarizeForAdjudicationBar", () => {
     // reason: evidence_count includes the expected-fail entry (it IS a recorded
     // evidence entry), but pass_count/fail_count must not — expected-fail
     // contributes to neither bucket, matching "inconclusive"'s exact same property.
+    // It still surfaces via expected_fail_count instead of vanishing.
     expect(summary.evidence_count).toBe(2);
     expect(summary.pass_count).toBe(0);
     expect(summary.fail_count).toBe(1);
+    expect(summary.expected_fail_count).toBe(1);
   });
 
-  it("AC-WH-1 REGRESSION: a spec panel's coverage aggregation never counts expected-fail refs toward pass_count or fail_count (computeAcCoverage's own exclusion, re-asserted at this read site)", () => {
-    // AcCoverageFact.pass/fail are computeAcCoverage's own counts — an AC whose
-    // criterion has ONLY expected-fail refs surfaces here as pass:0, fail:0 (never
-    // green), which is exactly what this read site must not misclassify.
+  it("task-two-more-evidence-consumers-erase-an-expected-fail-row-doc: a spec panel whose only referenced evidence is expected-fail (via fact.refs) reduces to status 'expected-fail', not 'none' (computeAcCoverage's pass/fail exclusion is preserved — refs is where the fix reads the residual value from)", () => {
+    // AcCoverageFact.pass/fail are computeAcCoverage's own exact-match counts and
+    // correctly stay 0/0 for an AC with only expected-fail refs (unchanged,
+    // computeAcCoverage itself is out of this task's scope) — but `fact.refs`
+    // still carries the raw "expected-fail" row, and THIS read site must recover
+    // it from there rather than trusting only the two pre-aggregated fields.
     const coverage: AcCoverageFact[] = [
-      { ac_id: "AC-1", mode: "script", pass: 0, fail: 0, refs: [], attested_pass: 0, attested_fail: 0 },
+      {
+        ac_id: "AC-1",
+        mode: "script",
+        pass: 0,
+        fail: 0,
+        refs: [{ task_id: "t1", result: "expected-fail" }],
+        attested_pass: 0,
+        attested_fail: 0,
+      },
     ];
     const panel: EvidencePanelProjection = { doc_type: "spec", criteria: [], coverage, task_count: 1 };
     expect(summarizeForAdjudicationBar(panel)).toEqual({
       doc_type: "spec",
-      evidence_count: 0,
+      evidence_count: 1,
       attested_count: 0,
       pass_count: 0,
       fail_count: 0,
-      status: "none",
+      expected_fail_count: 1,
+      inconclusive_count: 0,
+      status: "expected-fail",
     });
+  });
+
+  it("BOUNDARY/CONTROL: a task panel with only a pass row, only an expected-fail row, and zero evidence produce three mutually distinct summaries (guards the assertions above against passing vacuously)", () => {
+    const passOnly: EvidencePanelProjection = { doc_type: "task", evidence: [attestedEntry("a")], ac_refs: [] };
+    const expectedFailOnly: EvidencePanelProjection = {
+      doc_type: "task",
+      evidence: [
+        { oracle: "test", command: "bun test", result: "expected-fail", recorded_at: "t", recorded_by: "agent:t" },
+      ],
+      ac_refs: [],
+    };
+    const zeroEvidence: EvidencePanelProjection = { doc_type: "task", evidence: [], ac_refs: [] };
+
+    const a = summarizeForAdjudicationBar(passOnly);
+    const b = summarizeForAdjudicationBar(expectedFailOnly);
+    const c = summarizeForAdjudicationBar(zeroEvidence);
+
+    expect(a.status).toBe("pass");
+    expect(b.status).toBe("expected-fail");
+    expect(c.status).toBe("none");
+    expect(a).not.toEqual(b);
+    expect(b).not.toEqual(c);
+    expect(a).not.toEqual(c);
   });
 
   // ─── task-adjudicationbar-s-compact-status-chip-still-derives-from ─────────

@@ -6,7 +6,10 @@
  *
  * Six-dimension coverage for this file:
  *   HAPPY:      each of the 5 meta-bearing types (spec/adr/knowledge/plan/task)
- *               produces the correct shape from well-formed extra; prd → undefined
+ *               produces the correct shape from well-formed extra; prd → undefined;
+ *               a task carrying one of EACH of the four evidence-result values
+ *               tallies all four independently (task-two-more-evidence-consumers-
+ *               erase-an-expected-fail-row-doc)
  *   NEGATIVE:   extra is null; extra.claim wrong type; extra.verification_evidence
  *               not an array; extra.phases not an array; extra.spec_kind /
  *               extra.decision_status / extra.sub_type present-but-invalid — every
@@ -17,15 +20,24 @@
  *               absent (exactOptionalPropertyTypes discipline); claim+ttl wired to
  *               isClaimStale for unambiguous stale/fresh cases; phases absent vs
  *               empty array → phase_count 0 either way; evidence array present but
- *               empty → 0/0
+ *               empty → 0/0; an inconclusive-only task carries evidence_inconclusive
+ *               (distinguishable from zero evidence); a pass/fail-only task never
+ *               carries the evidence_expected_fail/evidence_inconclusive keys at all
+ *               (present-iff-nonzero, never a fabricated 0)
  *   ERROR:      n/a — pure function, no Result channel (mirrors the "n/a" dimension
  *               already used in task-workflow.test.ts for the same reason)
  *   STATE:      evidence tally with a MIX of pass and fail entries (multi-entry
  *               case) — chosen for this dimension since deriveTypeMeta itself is
  *               stateless; this is the closest "state-shaped" input this module has
  *   REGRESSION: deriveTypeMeta never mutates its doc argument
+ *   CONTROL:    (task-two-more-evidence-consumers-erase-an-expected-fail-row-doc,
+ *               its own dedicated block) pass-only / expected-fail-only / zero-
+ *               evidence tasks produce three mutually distinct `deriveTypeMeta`
+ *               outputs — guards the HAPPY/BOUNDARY distinguishing-field
+ *               assertions above against passing vacuously
  *
- * @spec_ref AC-36-7, AC-36-10
+ * @spec_ref AC-36-7, AC-36-10; task-two-more-evidence-consumers-erase-an-
+ *   expected-fail-row-doc
  */
 
 import { describe, it, expect } from "vitest";
@@ -92,6 +104,28 @@ function failEntry(recordedAt: string) {
   };
 }
 
+/** A deliberate RED pin — task-two-more-evidence-consumers-erase-an-expected-fail-row-doc. */
+function expectedFailEntry(recordedAt: string) {
+  return {
+    oracle: "test" as const,
+    command: "bun test tests/x.test.ts",
+    result: "expected-fail" as const,
+    recorded_at: recordedAt,
+    recorded_by: "alice",
+  };
+}
+
+/** A runner-issued zero/under-match outcome (SPEC-061). */
+function inconclusiveEntry(recordedAt: string) {
+  return {
+    oracle: "test" as const,
+    command: "bun test",
+    result: "inconclusive" as const,
+    recorded_at: recordedAt,
+    recorded_by: "alice",
+  };
+}
+
 // ─── HAPPY ───────────────────────────────────────────────────────────────────
 
 describe("deriveTypeMeta — HAPPY", () => {
@@ -150,9 +184,62 @@ describe("deriveTypeMeta — HAPPY", () => {
     expect(result && "claimed_by" in result).toBe(false);
   });
 
+  it("task-two-more-evidence-consumers-erase-an-expected-fail-row-doc: a task with one of EACH of the four evidence-result values tallies all four independently, none dropped", () => {
+    const doc = makeDoc("task", {
+      verification_evidence: [
+        passEntry("2026-07-01T01:00:00.000Z"),
+        failEntry("2026-07-01T02:00:00.000Z"),
+        expectedFailEntry("2026-07-01T03:00:00.000Z"),
+        inconclusiveEntry("2026-07-01T04:00:00.000Z"),
+      ],
+    });
+    expect(deriveTypeMeta(doc)).toEqual({
+      t: "task",
+      evidence_pass: 1,
+      evidence_fail: 1,
+      evidence_expected_fail: 1,
+      evidence_inconclusive: 1,
+    });
+  });
+
   it("prd → undefined (no meta variant for this type)", () => {
     const doc = makeDoc("prd", { anything: "goes" });
     expect(deriveTypeMeta(doc)).toBeUndefined();
+  });
+});
+
+// ─── CONTROL (AC-2, task-two-more-evidence-consumers-erase-an-expected- ──────
+// ─── fail-row-doc): three mutually distinct outputs, so the distinguishing ───
+// ─── field assertion above cannot pass vacuously ─────────────────────────────
+
+describe("deriveTypeMeta — CONTROL: pass-only vs expected-fail-only vs zero evidence produce three mutually distinct outputs", () => {
+  it("a task with only a pass row, only an expected-fail row, and zero evidence at all are pairwise distinct — and the expected-fail case is NOT byte-identical to zero evidence", () => {
+    const passOnly = deriveTypeMeta(
+      makeDoc("task", { verification_evidence: [passEntry("2026-07-01T01:00:00.000Z")] }),
+    );
+    const expectedFailOnly = deriveTypeMeta(
+      makeDoc("task", { verification_evidence: [expectedFailEntry("2026-07-01T01:00:00.000Z")] }),
+    );
+    const zeroEvidence = deriveTypeMeta(makeDoc("task", {}));
+
+    expect(passOnly).toEqual({ t: "task", evidence_pass: 1, evidence_fail: 0 });
+    expect(expectedFailOnly).toEqual({
+      t: "task",
+      evidence_pass: 0,
+      evidence_fail: 0,
+      evidence_expected_fail: 1,
+    });
+    expect(zeroEvidence).toEqual({ t: "task", evidence_pass: 0, evidence_fail: 0 });
+
+    // Pairwise distinct — the assertion this CONTROL exists to make un-vacuous.
+    expect(passOnly).not.toEqual(expectedFailOnly);
+    expect(expectedFailOnly).not.toEqual(zeroEvidence);
+    expect(passOnly).not.toEqual(zeroEvidence);
+
+    // Direct field assertion (never a rendered phrase): the expected-fail-only
+    // task carries the distinguishing key; zero-evidence does not.
+    expect(expectedFailOnly && "evidence_expected_fail" in expectedFailOnly).toBe(true);
+    expect(zeroEvidence && "evidence_expected_fail" in zeroEvidence).toBe(false);
   });
 });
 
@@ -308,6 +395,24 @@ describe("deriveTypeMeta — BOUNDARY", () => {
   it("task with verification_evidence present but an empty array → evidence_pass: 0, evidence_fail: 0", () => {
     const doc = makeDoc("task", { verification_evidence: [] });
     expect(deriveTypeMeta(doc)).toEqual({ t: "task", evidence_pass: 0, evidence_fail: 0 });
+  });
+
+  it("task with only an inconclusive row → evidence_inconclusive: 1, distinguishable from zero evidence (mirrors evidence_expected_fail's distinguishing purpose)", () => {
+    const doc = makeDoc("task", { verification_evidence: [inconclusiveEntry("2026-07-01T01:00:00.000Z")] });
+    const result = deriveTypeMeta(doc);
+    expect(result).toEqual({ t: "task", evidence_pass: 0, evidence_fail: 0, evidence_inconclusive: 1 });
+    expect(result && "evidence_expected_fail" in result).toBe(false);
+  });
+
+  it("task with only pass/fail evidence never carries the evidence_expected_fail/evidence_inconclusive keys at all (present-iff-nonzero, not a fabricated 0)", () => {
+    const doc = makeDoc("task", {
+      verification_evidence: [passEntry("2026-07-01T01:00:00.000Z"), failEntry("2026-07-01T02:00:00.000Z")],
+    });
+    const result = deriveTypeMeta(doc);
+    expect(result).toBeDefined();
+    if (!result) return;
+    expect("evidence_expected_fail" in result).toBe(false);
+    expect("evidence_inconclusive" in result).toBe(false);
   });
 });
 

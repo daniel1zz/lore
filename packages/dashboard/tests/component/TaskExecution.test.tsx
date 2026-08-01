@@ -25,6 +25,9 @@
  *     - evidence entries render newest-first
  *     - a "fail" result renders the destructive badge variant; "pass" renders secondary
  *     - output_tail is collapsed behind a <details> disclosure
+ *     - an "expected-fail"/"inconclusive" result renders the neutral outline
+ *       badge, never destructive (task-two-more-evidence-consumers-erase-an-
+ *       expected-fail-row-doc)
  */
 
 import "@testing-library/jest-dom/vitest";
@@ -138,6 +141,33 @@ describe("TaskExecution", () => {
       const passBadge = screen.getByText("pass");
       expect(failBadge).toHaveClass("text-destructive-foreground");
       expect(passBadge).not.toHaveClass("text-destructive-foreground");
+    });
+
+    it("task-two-more-evidence-consumers-erase-an-expected-fail-row-doc: an 'expected-fail'/'inconclusive' result renders the neutral outline badge, NEVER the destructive one a real 'fail' gets", () => {
+      const doc = makeTaskDoc({
+        verification_evidence: [
+          {
+            oracle: "test",
+            command: "cmd-red",
+            result: "expected-fail",
+            recorded_at: "2026-01-01T00:00:00.000Z",
+            recorded_by: "alice",
+          },
+          {
+            oracle: "test",
+            command: "cmd-inconclusive",
+            result: "inconclusive",
+            recorded_at: "2026-01-02T00:00:00.000Z",
+            recorded_by: "bob",
+          },
+        ],
+      });
+      render(<TaskExecution task={doc} />);
+
+      const expectedFailBadge = screen.getByText("expected-fail");
+      const inconclusiveBadge = screen.getByText("inconclusive");
+      expect(expectedFailBadge).not.toHaveClass("text-destructive-foreground");
+      expect(inconclusiveBadge).not.toHaveClass("text-destructive-foreground");
     });
 
     it("collapses output_tail behind a <details> disclosure", () => {

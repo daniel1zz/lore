@@ -912,8 +912,13 @@ export interface DeclaredPhaseScorecard {
   orphaned: boolean;
   /** Count of `task`-typed plan children whose `extra.phase` names this phase. */
   task_count: number;
-  /** Sum of `verification_evidence[].result` across every task grouped here. */
-  evidence: { pass: number; fail: number };
+  /**
+   * Sum of `verification_evidence[].result` across every task grouped here.
+   * `expected_fail`/`inconclusive` are present iff > 0 (task-two-more-evidence-
+   * consumers-erase-an-expected-fail-row-doc) — not yet rendered by
+   * `PhaseProgressPanel.tsx`, which still shows only the pass/fail chips.
+   */
+  evidence: { pass: number; fail: number; expected_fail?: number; inconclusive?: number };
   /** AC-scope coverage for this phase's tasks, computed server-side via `computeAcCoverage` — never recomputed here. */
   ac_coverage: AcCoverageFact[];
 }

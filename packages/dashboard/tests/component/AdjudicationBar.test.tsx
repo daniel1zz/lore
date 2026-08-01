@@ -217,6 +217,27 @@ describe("AdjudicationBar", () => {
     });
   });
 
+  describe("expected-fail/inconclusive chip (task-two-more-evidence-consumers-erase-an-expected-fail-row-doc)", () => {
+    it("renders the neutral 'expected fail' chip — never 'none' — for a task panel whose only evidence is a deliberate RED pin", () => {
+      const taskPanelExpectedFailOnly: EvidencePanelProjection = {
+        doc_type: "task",
+        ac_refs: [],
+        evidence: [
+          {
+            oracle: "test",
+            command: "bun test",
+            result: "expected-fail",
+            recorded_at: "2026-01-01T00:00:00.000Z",
+            recorded_by: "alice",
+          },
+        ],
+      };
+      render(<AdjudicationBar doc={makeDoc()} panel={taskPanelExpectedFailOnly} onMutated={vi.fn()} />);
+      expect(screen.getByText("expected fail")).toBeInTheDocument();
+      expect(screen.queryByText("none")).not.toBeInTheDocument();
+    });
+  });
+
   describe("project identity label (SPEC-078 T10 R-13, AC-078-7 component-test half)", () => {
     it("renders the active project's name adjacent to the approve/reject controls", () => {
       render(<AdjudicationBar doc={makeDoc()} panel={taskPanelWithFail} project="acme" onMutated={vi.fn()} />);
