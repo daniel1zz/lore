@@ -1,43 +1,60 @@
 /**
  * Unit suite for `scripts/check-test-budgets.ts`'s pure `scanFile` algorithm
  * (`spec-a-test-case-s-timeout-budget-must-be-declared-when-its`, task
- * `task-t1-structural-test-budget-oracle`, AC-TB-1/2/3/5).
+ * `task-t1-structural-test-budget-oracle`, AC-TB-1/2/3/5) PLUS the baseline
+ * exemption ledger mechanism (`adr-a-newly-armed-structural-oracle-enforces-from-a-baseline`,
+ * task `task-land-the-baseline-ledger-policy-for-check-test-budgets-55`).
  *
- * Every case here drives `scanFile` directly against an injected fixture
- * SOURCE STRING — no subprocess, no real filesystem walk — mirroring
+ * Every `scanFile`/`checkLedger`/`parseLedgerFile` case here drives the
+ * function directly against an injected fixture — no subprocess — mirroring
  * `packages/lore/tests/unit/scripts/changed-tests-selector.test.ts`'s
  * established pattern for unit-testing a `scripts/*.ts` algorithm apart from
- * its CLI/IO shell. `bun run check:test-budgets` (the real repo-tree scan,
- * AC-TB-1) is a SEPARATE, deliberately un-mocked invocation — see that
- * task's completion report for why it is expected to exit non-zero at this
- * commit (AC-TB-4/task T2, a different task, has not yet declared the
- * reported instance's budget).
+ * its CLI/IO shell. The one exception is the "real repo tree" describe block
+ * below, which deliberately calls `main()` with NO injected repoRoot — a
+ * genuine, un-mocked run against this checkout's own test tree and the
+ * checked-in `scripts/test-budget-ledger.json`, because that is the only way
+ * to actually PROVE the ledger currently zeroes out every real violation
+ * (task Acceptance Criterion #1) rather than merely asserting it manually.
  *
- * Coverage (six dimensions):
- *   HAPPY — a clean 2-spawn body (no violation), plus 3-spawn bodies that
- *     DO declare an explicit timeout (numeric and `{ timeout }` object
- *     forms) — declaration alone must satisfy the oracle regardless of the
- *     number (D1).
- *   NEGATIVE — the AC-TB-2 control fixture (3 spawns, no timeout) IS
- *     reported, naming its exact test title; a bare trailing comma is never
- *     mistaken for an explicit-timeout declaration; a `.spawn(` member call
- *     on an unrelated, non-imported, non-wrapper object is never miscounted.
- *   BOUNDARY — AC-TB-3's matched pair: the SAME fixture at 2 spawns (clean)
- *     and 3 spawns (reported).
- *   ERROR — AC-TB-5: a file with a genuinely unbalanced paren count throws
- *     `TestBudgetParseError` naming its path, never returns a result.
- *   STATE — `scanFile` is idempotent: two calls on the same source produce
- *     structurally identical violations.
- *   REGRESSION — a fixture mirroring the ACTUAL reported incident's shape
- *     (`cli-plan-promote-advisory.bun.test.ts`'s AC-VRW-5b case) is
- *     reported with its EXACT verbatim title text.
+ * Coverage (six dimensions), scanFile suites unchanged from the original
+ * landing; the ledger suites below add:
+ *   HAPPY — an exact `(path, line, spawnCount)` match exempts a violation;
+ *     `main()` exits 0 against the real repo tree with the real ledger.
+ *   NEGATIVE — a violation with no ledger row is reported as new debt
+ *     (task AC #2); invalid JSON / schema-invalid ledger content is rejected.
+ *   BOUNDARY — a ledger row whose `spawnCount` has drifted from the current
+ *     measurement (same path+line, different count) is treated as orphaned,
+ *     not silently re-matched — the match is exact, not "close enough".
+ *   ERROR — a ledger row whose violation was fixed is orphaned and fails
+ *     loud (task AC #3); a row pointing at a nonexistent path is reported
+ *     by name (task AC #4); a missing ledger file on disk throws
+ *     `TestBudgetLedgerError` (`code: "not_found"`).
+ *   STATE — `checkLedger` and `parseLedgerFile` are idempotent.
+ *   REGRESSION — the real, checked-in ledger's every entry carries all four
+ *     required fields (task AC #5): `path` / `line` / `spawnCount` / `reason`.
  *
  * @spec_ref spec-a-test-case-s-timeout-budget-must-be-declared-when-its
  *   §Acceptance Criteria AC-TB-1, AC-TB-2, AC-TB-3, AC-TB-5
+ * @spec_ref adr-a-newly-armed-structural-oracle-enforces-from-a-baseline
  */
 
-import { describe, it, expect } from "vitest";
-import { scanFile, SPAWN_THRESHOLD, TestBudgetParseError } from "../check-test-budgets.js";
+import { describe, it, expect, afterEach } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  scanFile,
+  SPAWN_THRESHOLD,
+  TestBudgetParseError,
+  checkLedger,
+  parseLedgerFile,
+  loadLedgerFromDisk,
+  TestBudgetLedgerError,
+  LEDGER_RELATIVE_PATH,
+  main,
+  type Violation,
+  type TestBudgetLedgerEntry,
+} from "../check-test-budgets.js";
 import {
   boundaryFixture,
   CONTROL_THREE_SPAWNS_NO_TIMEOUT,
@@ -164,5 +181,255 @@ describe("check-test-budgets: REGRESSION — reported instance shape", () => {
     expect(violations.length).toBe(1);
     expect(violations[0]?.title).toBe("prints ZERO advisory lines and exits 0 when the ancestor spec declares >= 1 script-mode AC");
     expect(violations[0]?.spawnCount).toBeGreaterThanOrEqual(SPAWN_THRESHOLD);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// Baseline exemption ledger (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline)
+// task-land-the-baseline-ledger-policy-for-check-test-budgets-55
+// ═══════════════════════════════════════════════════════════════════════
+
+function violation(file: string, line: number, spawnCount: number, title = "probe"): Violation {
+  return { file, line, spawnCount, title };
+}
+
+function ledgerEntry(path: string, line: number, spawnCount: number, reason = "pre-existing debt"): TestBudgetLedgerEntry {
+  return { path, line, spawnCount, reason };
+}
+
+// ─── checkLedger: HAPPY ──────────────────────────────────────────────────
+
+describe("check-test-budgets ledger: checkLedger HAPPY", () => {
+  it("an exact (path, line, spawnCount) match fully exempts the violation", () => {
+    const violations = [violation("a.test.ts", 10, 3)];
+    const entries = [ledgerEntry("a.test.ts", 10, 3)];
+    const result = checkLedger(violations, entries, () => true);
+    expect(result.newViolations).toEqual([]);
+    expect(result.orphanedEntries).toEqual([]);
+    expect(result.missingPathEntries).toEqual([]);
+  });
+
+  it("multiple entries across multiple files each exempt their own violation independently", () => {
+    const violations = [violation("a.test.ts", 10, 3), violation("b.test.ts", 20, 5)];
+    const entries = [ledgerEntry("a.test.ts", 10, 3), ledgerEntry("b.test.ts", 20, 5)];
+    const result = checkLedger(violations, entries, () => true);
+    expect(result.newViolations).toEqual([]);
+    expect(result.orphanedEntries).toEqual([]);
+  });
+});
+
+// ─── checkLedger: NEGATIVE (task AC #2 — new debt is never exempt) ──────
+
+describe("check-test-budgets ledger: checkLedger NEGATIVE — task AC #2 new violation", () => {
+  it("a violation introduced after the baseline (no matching ledger row) is reported as new debt", () => {
+    const path = "scripts/tests/fixtures/new-debt.test.ts";
+    const violations = scanFile(path, CONTROL_THREE_SPAWNS_NO_TIMEOUT); // 1 real violation, via the real scanFile engine
+    const result = checkLedger(violations, [], () => true); // empty ledger — nothing recorded yet
+    expect(result.newViolations.length).toBe(1);
+    expect(result.newViolations[0]?.file).toBe(path);
+    expect(result.orphanedEntries).toEqual([]);
+    expect(result.missingPathEntries).toEqual([]);
+  });
+
+  it("a violation covered by ONE ledger entry still reports an UNRELATED second violation in the same file as new debt", () => {
+    const violations = [violation("a.test.ts", 10, 3), violation("a.test.ts", 40, 4)];
+    const entries = [ledgerEntry("a.test.ts", 10, 3)]; // only the first is recorded
+    const result = checkLedger(violations, entries, () => true);
+    expect(result.newViolations.length).toBe(1);
+    expect(result.newViolations[0]?.line).toBe(40);
+  });
+});
+
+// ─── checkLedger: BOUNDARY — exact match, not fuzzy ─────────────────────
+
+describe("check-test-budgets ledger: checkLedger BOUNDARY — spawnCount drift", () => {
+  it("a ledger row at the SAME (path, line) but a DIFFERENT spawnCount than currently measured is orphaned, not silently re-exempted", () => {
+    const violations = [violation("a.test.ts", 10, 4)]; // now measures 4 spawns
+    const entries = [ledgerEntry("a.test.ts", 10, 3)]; // ledger recorded 3
+    const result = checkLedger(violations, entries, () => true);
+    expect(result.orphanedEntries.length).toBe(1);
+    expect(result.orphanedEntries[0]?.line).toBe(10);
+    // reason: the drifted violation itself is ALSO unexempted new debt — the
+    // ledger's stale row does not protect it.
+    expect(result.newViolations.length).toBe(1);
+    expect(result.newViolations[0]?.spawnCount).toBe(4);
+  });
+});
+
+// ─── checkLedger: ERROR (task AC #3 — fixed violation orphans its row) ──
+
+describe("check-test-budgets ledger: checkLedger ERROR — task AC #3 orphaned entry", () => {
+  it("a ledger row whose violation has been fixed (scanFile now finds nothing there) is orphaned and fails loud", () => {
+    const path = "scripts/tests/fixtures/fixed.test.ts";
+    // THREE_SPAWNS_WITH_NUMERIC_TIMEOUT now declares an explicit timeout — scanFile finds ZERO violations for it.
+    const violations = scanFile(path, THREE_SPAWNS_WITH_NUMERIC_TIMEOUT);
+    expect(violations).toEqual([]); // sanity: this fixture really is clean now
+    const entries = [ledgerEntry(path, 1, 3, "was pre-existing debt before it declared a timeout")];
+    const result = checkLedger(violations, entries, () => true);
+    expect(result.orphanedEntries.length).toBe(1);
+    expect(result.orphanedEntries[0]?.path).toBe(path);
+    expect(result.newViolations).toEqual([]);
+  });
+});
+
+// ─── checkLedger: ERROR (task AC #4 — nonexistent path) ─────────────────
+
+describe("check-test-budgets ledger: checkLedger ERROR — task AC #4 nonexistent path", () => {
+  it("a ledger row whose path does not exist is reported by name, separately from orphanedEntries", () => {
+    const entries = [ledgerEntry("packages/lore/tests/does-not-exist.test.ts", 10, 3)];
+    const result = checkLedger([], entries, () => false); // pathExists is always false
+    expect(result.missingPathEntries.length).toBe(1);
+    expect(result.missingPathEntries[0]?.path).toBe("packages/lore/tests/does-not-exist.test.ts");
+    // reason: a missing-path row must be counted ONCE, in its own bucket — not
+    // double-reported as also "orphaned" (that bucket is reserved for rows
+    // whose path DOES exist but no longer matches a real violation).
+    expect(result.orphanedEntries).toEqual([]);
+  });
+
+  it("pathExists is invoked with the entry's exact repo-relative path", () => {
+    const seen: string[] = [];
+    const entries = [ledgerEntry("some/file.test.ts", 1, 3)];
+    checkLedger([], entries, (p) => {
+      seen.push(p);
+      return true;
+    });
+    expect(seen).toEqual(["some/file.test.ts"]);
+  });
+});
+
+// ─── checkLedger: STATE ──────────────────────────────────────────────────
+
+describe("check-test-budgets ledger: checkLedger STATE", () => {
+  it("is idempotent — identical inputs produce structurally identical results", () => {
+    const violations = [violation("a.test.ts", 10, 3), violation("b.test.ts", 5, 4)];
+    const entries = [ledgerEntry("a.test.ts", 10, 3)];
+    const first = checkLedger(violations, entries, () => true);
+    const second = checkLedger(violations, entries, () => true);
+    expect(second).toEqual(first);
+    expect(second.newViolations.length).toBe(1);
+  });
+});
+
+// ─── parseLedgerFile / loadLedgerFromDisk ────────────────────────────────
+
+describe("check-test-budgets ledger: parseLedgerFile HAPPY", () => {
+  it("parses valid, schema-conformant ledger JSON", () => {
+    const raw = JSON.stringify({
+      baseline_commit: "48d3dbc",
+      entries: [{ path: "a.test.ts", line: 10, spawnCount: 3, reason: "debt" }],
+    });
+    const ledger = parseLedgerFile(raw);
+    expect(ledger.baseline_commit).toBe("48d3dbc");
+    expect(ledger.entries).toEqual([{ path: "a.test.ts", line: 10, spawnCount: 3, reason: "debt" }]);
+  });
+
+  it("is idempotent across repeated parses of the same content", () => {
+    const raw = JSON.stringify({ baseline_commit: "x", entries: [] });
+    expect(parseLedgerFile(raw)).toEqual(parseLedgerFile(raw));
+  });
+});
+
+describe("check-test-budgets ledger: parseLedgerFile NEGATIVE", () => {
+  it("rejects non-JSON content with a TestBudgetLedgerError coded invalid_json", () => {
+    let threw = false;
+    try {
+      parseLedgerFile("{ not valid json");
+    } catch (e) {
+      threw = true;
+      expect(e).toBeInstanceOf(TestBudgetLedgerError);
+      expect((e as TestBudgetLedgerError).code).toBe("invalid_json");
+    }
+    expect(threw).toBe(true);
+  });
+
+  it("rejects JSON that fails schema validation (missing 'reason') with code schema", () => {
+    const raw = JSON.stringify({ baseline_commit: "x", entries: [{ path: "a.ts", line: 1, spawnCount: 3 }] });
+    let threw = false;
+    try {
+      parseLedgerFile(raw);
+    } catch (e) {
+      threw = true;
+      expect(e).toBeInstanceOf(TestBudgetLedgerError);
+      expect((e as TestBudgetLedgerError).code).toBe("schema");
+    }
+    expect(threw).toBe(true);
+  });
+
+  it("rejects a non-positive line number", () => {
+    const raw = JSON.stringify({ baseline_commit: "x", entries: [{ path: "a.ts", line: 0, spawnCount: 3, reason: "r" }] });
+    expect(() => parseLedgerFile(raw)).toThrow(TestBudgetLedgerError);
+  });
+});
+
+describe("check-test-budgets ledger: loadLedgerFromDisk", () => {
+  let tmpDir: string | undefined;
+
+  afterEach(() => {
+    if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
+    tmpDir = undefined;
+  });
+
+  it("ERROR: throws TestBudgetLedgerError coded not_found when the ledger file is absent", () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "tb-ledger-"));
+    let threw = false;
+    try {
+      loadLedgerFromDisk(tmpDir);
+    } catch (e) {
+      threw = true;
+      expect(e).toBeInstanceOf(TestBudgetLedgerError);
+      expect((e as TestBudgetLedgerError).code).toBe("not_found");
+    }
+    expect(threw).toBe(true);
+  });
+
+  it("HAPPY: reads and validates a real ledger file from disk at the conventional path", () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "tb-ledger-"));
+    mkdirSync(join(tmpDir, "scripts"), { recursive: true }); // LEDGER_RELATIVE_PATH lives under <repoRoot>/scripts/
+    writeFileSync(
+      join(tmpDir, LEDGER_RELATIVE_PATH),
+      JSON.stringify({ baseline_commit: "abc123", entries: [{ path: "x.ts", line: 1, spawnCount: 3, reason: "r" }] }),
+      "utf8",
+    );
+    const ledger = loadLedgerFromDisk(tmpDir);
+    expect(ledger.entries.length).toBe(1);
+    expect(ledger.entries[0]?.path).toBe("x.ts");
+  });
+});
+
+// ─── main(): real repo tree (task AC #1) ─────────────────────────────────
+
+describe("check-test-budgets ledger: main() — real repo tree, task Acceptance Criterion #1", () => {
+  it("exits 0 against THIS checkout's real test tree with the checked-in ledger in place", () => {
+    // Deliberately un-mocked: no injected repoRoot, no injected violations,
+    // no injected ledger. This is the actual `bun run check:test-budgets`
+    // code path, proving the production ledger (scripts/test-budget-ledger.json)
+    // currently accounts for every real violation in the tree.
+    const exitCode = main();
+    expect(exitCode).toBe(0);
+  });
+});
+
+// ─── REGRESSION: the real ledger's shape (task AC #5) ────────────────────
+
+describe("check-test-budgets ledger: REGRESSION — the real ledger's entries carry all four required fields (task AC #5)", () => {
+  it("every entry in scripts/test-budget-ledger.json has path, line, spawnCount, and reason", () => {
+    const ledger = loadLedgerFromDisk(join(__dirname, "..", ".."));
+    expect(ledger.entries.length).toBeGreaterThan(0);
+    for (const entry of ledger.entries) {
+      expect(typeof entry.path).toBe("string");
+      expect(entry.path.length).toBeGreaterThan(0);
+      expect(Number.isInteger(entry.line)).toBe(true);
+      expect(entry.line).toBeGreaterThan(0);
+      expect(Number.isInteger(entry.spawnCount)).toBe(true);
+      expect(entry.spawnCount).toBeGreaterThanOrEqual(SPAWN_THRESHOLD);
+      expect(typeof entry.reason).toBe("string");
+      expect(entry.reason.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("the real ledger has no duplicate (path, line) rows", () => {
+    const ledger = loadLedgerFromDisk(join(__dirname, "..", ".."));
+    const keys = ledger.entries.map((e) => `${e.path}:${e.line}`);
+    expect(new Set(keys).size).toBe(keys.length);
   });
 });
