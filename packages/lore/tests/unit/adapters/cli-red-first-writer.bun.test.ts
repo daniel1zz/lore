@@ -132,7 +132,18 @@ describe("HAPPY — lore red-first declares the flag and lore done accepts a pro
     const slug = createAdhocTask(tmpDir, "Proven Red First");
     mustRun(["red-first", slug], tmpDir);
     mustRun(
-      ["evidence", slug, "--oracle", "test", "--command", "bunx vitest run --grep new-feature", "--result", "expected-fail"],
+      [
+        "evidence",
+        slug,
+        "--oracle",
+        "test",
+        "--command",
+        "bunx vitest run --grep new-feature",
+        "--result",
+        "expected-fail",
+        "--output-tail",
+        "AssertionError: expected 1 to equal 2",
+      ],
       tmpDir,
     );
     mustRun(
