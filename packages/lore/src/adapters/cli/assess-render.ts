@@ -10,6 +10,12 @@
  *     recommendations + judge metadata (legacy shape, byte-identical when no SPEC-040
  *     typed fields are present) PLUS, additively, dimension scores / typed gaps /
  *     typed recommendations / rubric warnings tables when present on the result.
+ *   - computeGitDiffMaxBuffer(maxDiffChars) — sizes `spawnSync`'s `maxBuffer` for the
+ *     `git diff` acquisition call against the EFFECTIVE `ai.assess.max_diff_chars`
+ *     budget (task-lore-assess-diff-spawnsync-sets-no-maxbuffer-a-diff-over-1).
+ *   - formatGitDiffEnobufsMessage(range, maxBufferBytes, maxDiffChars) — the
+ *     ENOBUFS-specific refusal message naming this call site's own buffer ceiling
+ *     instead of blaming git.
  *
  * Invariants:
  *   - No IO, no wall-clock reads — pure string assembly over an already-computed
@@ -24,11 +30,81 @@
  *
  * Side-effect class: pure
  *
- * Source: SPEC-026 §8.3; SPEC-040 §T3 D3, AC-ADF-13
+ * Source: SPEC-026 §8.3; SPEC-040 §T3 D3, AC-ADF-13;
+ * task-lore-assess-diff-spawnsync-sets-no-maxbuffer-a-diff-over-1
  */
 
 import type { AssessmentResult } from "@lore/core";
 import { formatTable } from "./utils.js";
+
+/**
+ * Worst-case UTF-8 bytes per JS string length unit, used to size `spawnSync`'s
+ * `maxBuffer` against a character budget (`ai.assess.max_diff_chars`).
+ *
+ * `max_diff_chars` is compared against `diffText.length` — a JS string's UTF-16 code
+ * unit count — but `maxBuffer` caps raw BYTES read off the child's stdout pipe, before
+ * any decoding happens. A single Unicode code point can take up to 4 bytes in UTF-8
+ * (the canonical worst case, U+10000-U+10FFFF); a code point in that range also costs 2
+ * UTF-16 code units (a surrogate pair), i.e. 2 bytes/unit, while a 3-byte-UTF-8 BMP code
+ * point (e.g. most CJK ideographs, U+0800-U+FFFF) costs exactly 1 UTF-16 unit, i.e. 3
+ * bytes/unit -- the actual worst ratio per length-unit. Using the canonical "4 bytes per
+ * UTF-8 code point" figure is therefore a deliberately conservative over-estimate in
+ * every case: it can only make the buffer LARGER than the tightest possible bound,
+ * never smaller, which is what AC-1 requires ("the smallest value that cannot truncate
+ * BELOW" the configured budget -- erring large is safe, erring small silently
+ * reintroduces the bug this fix closes).
+ */
+const UTF8_WORST_CASE_BYTES_PER_CHAR = 4;
+
+/**
+ * Sizes `spawnSync`'s `maxBuffer` (bytes) for `lore assess --diff`'s `git diff`
+ * acquisition call against the EFFECTIVE `ai.assess.max_diff_chars` budget (config
+ * default or override -- callers must pass `app.aiProviderService.assessMaxDiffChars`,
+ * never the hardcoded schema default, so the buffer tracks a live config edit).
+ *
+ * Node's own default (1 MiB) is an arbitrary constant unrelated to this command's
+ * diff-size budget -- an ordinary multi-task-plan diff can exceed it. Sizing the buffer
+ * against `max_diff_chars` instead of a bigger arbitrary constant is deliberate: any
+ * diff text beyond that budget is truncated by file (`truncateDiffByFile`,
+ * `../../ai/diff-truncation.js`) before it reaches the judge prompt anyway, so a buffer
+ * bigger than "enough to prove the diff exceeds budget" buys nothing.
+ *
+ * @param maxDiffChars - Effective `ai.assess.max_diff_chars` value (chars, i.e. JS
+ *   string length units).
+ * @returns Buffer size in bytes -- the smallest value that cannot truncate a diff BELOW
+ *   `maxDiffChars` characters (see {@link UTF8_WORST_CASE_BYTES_PER_CHAR}).
+ */
+export function computeGitDiffMaxBuffer(maxDiffChars: number): number {
+  return maxDiffChars * UTF8_WORST_CASE_BYTES_PER_CHAR;
+}
+
+/**
+ * Renders the ENOBUFS-specific refusal message for `lore assess --diff`'s `git diff`
+ * spawn, naming this call site's own buffer ceiling instead of blaming git. The
+ * pre-fix message rendered as `git diff <range> failed: spawnSync ENOBUFS` -- an
+ * operator reading it goes looking at git, when the failure is entirely this call
+ * site's `maxBuffer` sizing (task-lore-assess-diff-spawnsync-sets-no-maxbuffer-a-diff-over-1).
+ * The generic `git diff <range> failed: <reason>` message stays unchanged for every
+ * OTHER spawn error (non-zero exit, ENOENT, ...) -- this function is invoked ONLY on a
+ * confirmed `error.code === "ENOBUFS"`.
+ *
+ * @param range - The `--diff` git range argument, verbatim (for the operator to re-run).
+ * @param maxBufferBytes - The `maxBuffer` value that was exceeded (from
+ *   {@link computeGitDiffMaxBuffer}).
+ * @param maxDiffChars - The effective `ai.assess.max_diff_chars` the buffer was sized
+ *   from, so the operator knows which knob to raise.
+ * @returns A single-line message, WITHOUT a trailing newline (caller appends one, same
+ *   convention as `formatError`).
+ */
+export function formatGitDiffEnobufsMessage(range: string, maxBufferBytes: number, maxDiffChars: number): string {
+  return (
+    `Error: git diff ${range} produced more output than this command's buffer allows ` +
+    `(${String(maxBufferBytes)} bytes, sized from ai.assess.max_diff_chars=${String(maxDiffChars)}). ` +
+    `This is not a git failure -- it is this call site's own buffer ceiling. Narrow the ` +
+    `range with --diff, or raise ai.assess.max_diff_chars in .lore/config.yaml (the ` +
+    `buffer scales with it).`
+  );
+}
 
 /** Human-readable verdict + AC score table rendering for terminal output. */
 export function formatAssessmentSummary(result: AssessmentResult): string {
