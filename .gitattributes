@@ -1,0 +1,69 @@
+# Force git to treat known text-source paths as TEXT for diff purposes —
+# `diff` (bare, boolean-set) per gitattributes(5) §"Generating diff text":
+# "A path to which the diff attribute is set is treated as text, even when
+# they contain byte values that normally never appear in text files, such
+# as NUL." Without this, git's content-sniffing heuristic (binary iff a NUL
+# appears in the first core.bigFileThreshold-ish window, or the file looks
+# sufficiently non-text) can render a path as `Bin N -> M bytes` with NO
+# diff at all — unreviewable, in a repo whose entire review discipline is
+# diff-based.
+#
+# This is DEFENSE IN DEPTH, not a substitute for
+# `scripts/check-no-nul-bytes.ts` (the PREVENTIVE guard — fails the test
+# suite outright when a raw NUL lands in a tracked text file; see its
+# module header for the full mechanism and
+# `task-literal-nul-bytes-in-two-scripts-source-files-one-is` for the
+# incident). Two reasons this ALSO exists, not just the guard:
+#
+#   1. A `git commit --no-verify`/direct push bypasses any pre-commit or
+#      pre-push wiring; this attribute keeps history reviewable regardless.
+#   2. It is the ONLY fix for content ALREADY MERGED before the guard
+#      existed: `scripts/migrate-test-budget-ledger-to-title-fingerprint.ts`
+#      was committed with 4 raw NUL bytes (task
+#      `task-literal-nul-bytes-in-two-scripts-source-files-one-is`) — even
+#      after that content is fixed, `git diff`/`git show --stat` against the
+#      PARENT commit still reports `Bin N -> M bytes`, because git's binary
+#      check runs independently on EACH side of a diff and the parent's
+#      blob is still genuinely NUL-poisoned. No amount of content-only
+#      fixing in a later commit can retroactively un-poison a historical
+#      blob; this attribute is what makes that specific diff (and any other
+#      diff against a historically-poisoned blob) render as text anyway.
+#      (Measured: `git diff --numstat`/`-a`/`--text` all still printed the
+#      binary marker for that file WITHOUT this attribute; only the `diff`
+#      gitattribute — not `text`, which governs line-ending conversion, a
+#      different concern — fixed the numstat line.)
+#
+# This list mirrors `scripts/check-no-nul-bytes.ts`'s
+# TEXT_SOURCE_EXTENSIONS/TEXT_SOURCE_DOTFILES allowlist — the same
+# classification of "this is a file we hand-author as text" governs both
+# "must never contain a raw NUL" (the guard) and "must always diff as text
+# regardless" (this file). Keep the two lists in sync.
+*.ts diff
+*.tsx diff
+*.js diff
+*.jsx diff
+*.mjs diff
+*.cjs diff
+*.mts diff
+*.cts diff
+*.json diff
+*.md diff
+*.mdx diff
+*.yaml diff
+*.yml diff
+*.sh diff
+*.css diff
+*.html diff
+*.txt diff
+*.toml diff
+*.sql diff
+*.py diff
+*.template diff
+*.example diff
+*.lock diff
+.gitignore diff
+
+# Extensionless shebang scripts (no glob covers these; list explicitly —
+# see check-no-nul-bytes.ts's hasShebang/hasNoExtension for the same pair).
+hooks/pre-push diff
+assets/project/pre-push diff

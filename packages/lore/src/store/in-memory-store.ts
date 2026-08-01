@@ -50,6 +50,21 @@ import { allocateWithBoundedRetry, computeAuditEntryHash } from "./store-shared.
 
 // ─── InMemoryStore ─────────────────────────────────────────────────────────────
 
+/**
+ * Composite-map-key separator used ONLY by {@link InMemoryStore.countTraceDenyByCheckpoint}
+ * to join `(checkpoint, layer)` into a single `Map` key it later splits back apart.
+ * A NUL byte can never occur in a checkpoint name or a layer discriminator
+ * (`SPEC-102` D7's closed set), so it cannot collide with either field.
+ *
+ * MUST stay this escape sequence, never a literal NUL byte typed into the
+ * source: a raw NUL inside git's first-8000-byte binary-sniff window makes
+ * the WHOLE FILE unreviewable to `git diff`/`git show --stat` (measured
+ * incident: `task-literal-nul-bytes-in-two-scripts-source-files-one-is` —
+ * this exact file carried two raw NUL bytes at this call site, silently,
+ * for one migration cycle, past the sniff window).
+ */
+const TRACE_BUCKET_KEY_SEP = "\0";
+
 export class InMemoryStore implements StoreInterface {
   private readonly docs = new Map<DocId, DocRecord>();
   private links: LinkRecord[] = [];
@@ -961,12 +976,12 @@ export class InMemoryStore implements StoreInterface {
       const checkpoint = e.checkpoint ?? "unknown";
       const details = e.details ?? {};
       const layer = typeof details["layer"] === "string" ? (details["layer"] as string) : "unknown";
-      const key = `${checkpoint} ${layer}`;
+      const key = `${checkpoint}${TRACE_BUCKET_KEY_SEP}${layer}`;
       buckets.set(key, (buckets.get(key) ?? 0) + 1);
     }
     return ok(
       [...buckets.entries()].map(([key, count]) => {
-        const [checkpoint = "unknown", layer = "unknown"] = key.split(" ");
+        const [checkpoint = "unknown", layer = "unknown"] = key.split(TRACE_BUCKET_KEY_SEP);
         return { checkpoint, layer, count };
       }),
     );

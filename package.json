@@ -22,7 +22,8 @@
     "check:ordinal-sites": "node scripts/check-ordinal-write-sites.mjs",
     "check:test-budgets": "bun scripts/check-test-budgets.ts",
     "check:no-timer-retry": "bun scripts/check-no-timer-retry.ts",
-    "check:ac-ref-integrity": "bun scripts/check-ac-ref-integrity.ts"
+    "check:ac-ref-integrity": "bun scripts/check-ac-ref-integrity.ts",
+    "check:no-nul-bytes": "bun scripts/check-no-nul-bytes.ts"
   },
   "devDependencies": {
     "bun-types": "^1.3.14",
