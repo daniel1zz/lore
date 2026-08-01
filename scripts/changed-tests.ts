@@ -214,8 +214,44 @@ export interface ImportGraph {
   readonly reverse: ReadonlyMap<string, ReadonlySet<string>>;
 }
 
-/** Why a file was selected — precedence `changed-test` > `binary-consumer` > `tree-scan-oracle` > `transitive` (see `selectAffectedTests`). */
-export type SelectionReason = "changed-test" | "transitive" | "binary-consumer" | "tree-scan-oracle";
+/**
+ * Runtime SSOT for the selection-reason vocabulary. {@link SelectionReason}
+ * (below) is DERIVED from this tuple via `(typeof SELECTION_REASONS)[number]`
+ * — never the reverse, and never hand-transcribed independently elsewhere.
+ * Mirrors `@lore/core`'s `EVIDENCE_RESULTS` shape (`task-workflow.ts`): any
+ * consumer that needs to recognise every valid reason at runtime (e.g. a test
+ * assertion matcher built over `formatAccounting`'s rendered `(reason)`
+ * suffix) must read this array, not re-transcribe the union into an
+ * independent regex/list of its own — the exact transcription drift that
+ * silently narrowed a consumer's hard-coded regex out of sync the moment
+ * rule (d) added `"tree-scan-oracle"` to the TYPE alone (a type erases at
+ * runtime, so nothing forced that consumer to notice — task
+ * `task-main-is-red-a-fourth-selectionreason-was-added-to-the`).
+ *
+ * Array order is enumeration order only — it carries NO precedence meaning.
+ * The real precedence rule (`changed-test` > `binary-consumer` >
+ * `tree-scan-oracle` > `transitive`) lives solely in `selectAffectedTests`'s
+ * rule-application order below.
+ */
+export const SELECTION_REASONS = ["changed-test", "transitive", "binary-consumer", "tree-scan-oracle"] as const;
+
+/** Why a file was selected — derived from {@link SELECTION_REASONS}; add a new reason THERE, never as an independent literal here. Precedence when a file qualifies under >=1 rule: `changed-test` > `binary-consumer` > `tree-scan-oracle` > `transitive` (see `selectAffectedTests`). */
+export type SelectionReason = (typeof SELECTION_REASONS)[number];
+
+/**
+ * Type guard narrowing an untrusted string to {@link SelectionReason} — proof
+ * a scraped tag is a REAL member of the vocabulary, not merely "looked like
+ * one." A regex alternation built from `SELECTION_REASONS.join("|")` alone
+ * can only ever match a KNOWN member by construction, which makes it
+ * incapable of failing against an unknown tag; pairing it with this
+ * independent membership check (or using this guard directly against an
+ * extracted tag) is what lets a consumer's assertion actually reject an
+ * out-of-vocabulary value instead of vacuously accepting anything shaped like
+ * `(word)` (see `changed-tests-cli.bun.test.ts`'s CONTROL case).
+ */
+export function isSelectionReason(value: string): value is SelectionReason {
+  return (SELECTION_REASONS as readonly string[]).includes(value);
+}
 /** Which runner executes this file, derived solely from the `.bun.test.ts` naming convention (`isBunTestFile`). */
 export type TestRunner = "vitest" | "bun";
 
