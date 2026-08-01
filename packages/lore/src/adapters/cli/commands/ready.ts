@@ -44,8 +44,73 @@ import { exitCode, formatError } from "../utils.js";
 import type { ReadyRecord, ReadySession } from "@lore/core";
 import type { AnchorConflict } from "../../../service/task-workflow-service.js";
 
-/** Render one readiness line, e.g. "[READY] task-foo (draft) ✔2". */
-function formatReadyLine(record: ReadyRecord): string {
+/** The literal set `ReadyRecord.latest_evidence.result` can hold (@lore/core task-workflow.ts). */
+type EvidenceResult = NonNullable<ReadyRecord["latest_evidence"]>["result"];
+
+/**
+ * Evidence-count badge for one readiness line — task-lore-ready-renders-an-
+ * expected-fail-evidence-row-as-a (prerequisite of task-red-first-discipline-
+ * is-asked-for-in-prose-but-never).
+ *
+ * Prior behavior only special-cased `"fail"`; every other `latest_evidence.result`
+ * — INCLUDING `"expected-fail"` (a deliberate pre-implementation RED pin) and
+ * `"inconclusive"` (an oracle ran but produced no trustworthy signal) — fell
+ * through to plain `✔n`. That is a FALSE GREEN: a task whose most recent evidence
+ * is a deliberate RED pin rendered indistinguishable from one with a real passing
+ * oracle. Vocabulary is intentionally the SAME glyphs
+ * `commands/ac.ts::coverageBadge` and `utils.ts::formatWorkflowBadge` already use
+ * for these exact two states (spec-workflow-hardening-evidence-red-vocabulary-
+ * claim-worktree §M1) — `⚑R` expected-fail, `⚑?` inconclusive — so a reader learns
+ * one marker vocabulary across every evidence-rendering surface; only the numeral
+ * placement (`⚑R{n}` suffix here, matching this function's pre-existing
+ * `✔{n}`/`✘{n}` suffix shape) differs from ac.ts's parenthetical `⚑R({n})`.
+ *
+ * `undefined` result (BOUNDARY: `evidence_count > 0` but `latest_evidence` absent
+ * or malformed) and any value outside the known literal set (NEGATIVE: corrupted/
+ * legacy `extra` data reaching this formatter) both fall to the SAME `⚑?n` default
+ * `formatWorkflowBadge` uses — never `✔n`. The `default` branch's `never`
+ * assignment is a compile-time trip-wire: a future `EvidenceEntry.result` literal
+ * added to `@lore/core` fails typecheck HERE too, so this badge cannot silently
+ * regress back to the bug this task fixes.
+ *
+ * @param result - `record.latest_evidence?.result`, verbatim (may be `undefined`
+ *   or, at runtime, a value outside the typed literal set if `extra` is corrupted)
+ * @param count - `record.evidence_count`
+ * @returns `""` when `count <= 0`; otherwise a leading-space-prefixed glyph+count
+ *
+ * Exported (unlike this file's other render helpers) so its deterministic
+ * formatting is directly unit-testable without spawning the CLI or a real
+ * store — mirrors `commands/ac.ts::coverageBadge`'s identical rationale.
+ */
+export function evidenceBadge(result: EvidenceResult | undefined, count: number): string {
+  if (count <= 0) return "";
+  switch (result) {
+    case "pass":
+      return ` ✔${count}`;
+    case "fail":
+      return ` ✘${count}`;
+    case "inconclusive":
+      return ` ⚑?${count}`;
+    case "expected-fail":
+      return ` ⚑R${count}`;
+    case undefined:
+      return ` ⚑?${count}`;
+    default: {
+      const _exhaustive: never = result;
+      void _exhaustive;
+      return ` ⚑?${count}`;
+    }
+  }
+}
+
+/**
+ * Render one readiness line, e.g. "[READY] task-foo (draft) ✔2" — or
+ * "[READY] task-foo (draft) ⚑R2" when the latest evidence is a deliberate
+ * `expected-fail` RED pin (see {@link evidenceBadge}).
+ *
+ * Exported for direct unit testing (same rationale as {@link evidenceBadge}).
+ */
+export function formatReadyLine(record: ReadyRecord): string {
   const status = record.ready
     ? "READY"
     : record.task.status === "archived" || record.task.status === "deprecated"
@@ -54,12 +119,7 @@ function formatReadyLine(record: ReadyRecord): string {
   const claimPart = record.claim
     ? ` claimed:${record.claim.by}${record.claim.stale ? " (stale)" : ""}`
     : "";
-  const evidencePart =
-    record.evidence_count > 0
-      ? record.latest_evidence?.result === "fail"
-        ? ` ✘${record.evidence_count}`
-        : ` ✔${record.evidence_count}`
-      : "";
+  const evidencePart = evidenceBadge(record.latest_evidence?.result, record.evidence_count);
   const blockersPart =
     record.unmet_blockers.length > 0
       ? ` blocked-by:${record.unmet_blockers.map((b) => b.slug).join(",")}`
