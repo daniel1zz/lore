@@ -151,7 +151,12 @@ describe("HAPPY — lore red-first declares the flag and lore done accepts a pro
       tmpDir,
     );
 
-    const result = runLore(["done", slug], tmpDir);
+    // reason: adr-lore-done-requires-a-runner-attested-pass-the-sixth-false — this
+    // fixture's evidence is self-reported (`lore evidence`, never `lore verify`,
+    // exactly the --adhoc/no-declared-AC shape the ADR calls out as structurally
+    // unattestable) so the audited escape hatch is required to reach exit 0. This
+    // suite's subject is the red-first floor, not the attestation floor.
+    const result = runLore(["done", slug, "--override-attestation", "red-first-writer fixture: self-reported only"], tmpDir);
     expect(result.exitCode).toBe(0);
     expect(getDoc(slug, tmpDir).extra["red_first"]).toBe(true);
   });
@@ -163,7 +168,15 @@ describe("NEGATIVE — lore done refuses a red_first task holding only a pass ro
     mustRun(["red-first", slug], tmpDir);
     mustRun(["evidence", slug, "--oracle", "test", "--command", "bun run typecheck", "--result", "pass"], tmpDir);
 
-    const result = runLore(["done", slug], tmpDir);
+    // reason: adr-lore-done-requires-a-runner-attested-pass-the-sixth-false — the
+    // escape hatch clears the ATTESTATION floor (this fixture's evidence is
+    // self-reported only, structurally unattestable for a --adhoc/no-declared-AC
+    // task) so the RED-FIRST floor underneath — this suite's actual subject — is
+    // what fires and is what this assertion proves.
+    const result = runLore(
+      ["done", slug, "--override-attestation", "red-first-writer fixture: self-reported only"],
+      tmpDir,
+    );
     expect(result.exitCode).toBe(4);
     expect(result.stderr).toContain(slug);
     expect(result.stderr).toMatch(/expected-fail|"fail"/);
@@ -189,12 +202,21 @@ describe("ERROR — lore red-first on a nonexistent task", () => {
   });
 });
 
-describe("STATE — a plain task (no red-first declared) is unaffected by this feature", () => {
-  it("lore done succeeds on pass-only evidence, exactly as before red-first existed", () => {
+describe("STATE — a plain task (no red-first declared) is unaffected by THIS feature", () => {
+  it("lore done archives a plain task exactly as before red-first existed, once the (unrelated) attestation floor is satisfied", () => {
     const slug = createAdhocTask(tmpDir, "Plain Task");
     mustRun(["evidence", slug, "--oracle", "test", "--command", "bun run typecheck", "--result", "pass"], tmpDir);
 
-    const result = runLore(["done", slug], tmpDir);
+    // reason: adr-lore-done-requires-a-runner-attested-pass-the-sixth-false — a
+    // self-reported pass alone no longer suffices for ANY task, red-first or not
+    // (a separate, independent floor from red-first's own). The escape hatch is
+    // the only way this --adhoc/no-declared-AC fixture can reach exit 0 at all;
+    // the assertion this test actually cares about is red_first staying
+    // undefined/unaffected, not the attestation floor itself.
+    const result = runLore(
+      ["done", slug, "--override-attestation", "red-first-writer fixture: self-reported only"],
+      tmpDir,
+    );
     expect(result.exitCode).toBe(0);
     expect(getDoc(slug, tmpDir).extra["red_first"]).toBeUndefined();
   });

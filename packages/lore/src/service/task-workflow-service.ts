@@ -115,9 +115,43 @@
  *   for `done` (spec-workflow-hardening-evidence-red-vocabulary-claim-worktree
  *   §Overview "(c)"). "Atomic" describes the caller's experience (one command) not a
  *   single store transaction — see `done()`'s own JSDoc for the mid-walk-failure
- *   contract. Refuses (VALIDATION_ERROR) with no passing (`result: "pass"`) evidence
- *   or a fresh foreign claim; an already-terminal task is an idempotent no-op, never
- *   an error — see `DoneResult`'s own JSDoc.
+ *   contract. Refuses (VALIDATION_ERROR) with no RUNNER-ATTESTED passing
+ *   (`result: "pass"` AND `attestation !== undefined`) evidence or a fresh foreign
+ *   claim; an already-terminal task is an idempotent no-op, never an error — see
+ *   `DoneResult`'s own JSDoc.
+ * @invariant `done()`'s evidence floor requires ATTESTATION, not merely
+ *   `result: "pass"` (adr-lore-done-requires-a-runner-attested-pass-the-sixth-false,
+ *   the sixth false-oracle face — an unfiltered multi-file `lore evidence --result
+ *   pass` records cleanly with no proof any file ran; `lore evidence` stays a
+ *   self-report ledger BY DESIGN, so the fix closes the read side, at the ONE
+ *   command that drives a task to its irreversible terminal state, not the write
+ *   side). A self-reported-only pass (`attestation === undefined`, the shape every
+ *   CLI/MCP `lore evidence` write produces — `recordVerifiedEvidence` is the SOLE
+ *   `attestation` injection point, `VerifyRunnerService`-only) is refused with a
+ *   message naming BOTH repairs: `lore verify <plan>` (attests it) and the escape
+ *   hatch below. This floor is evaluated BEFORE the red-first and unfiltered-test-
+ *   file-run floors below (so it can mask neither, per the existing "each floor
+ *   independent" contract) but AFTER the already-terminal idempotent short-circuit
+ *   (AC-4: idempotency must never regress retroactively against evidence authored
+ *   before this floor armed).
+ * @invariant `done()`'s audited escape hatch (`DoneOpts.overrideReason`) bypasses
+ *   ONLY the attestation floor immediately above — never the red-first or
+ *   unfiltered-test-file-run floors, which read `result`/`command` and are
+ *   attestation-agnostic already. For verification `lore verify` structurally
+ *   cannot perform (`--oracle manual` browser/visual checks; any oracle with no
+ *   script-mode AC to bind to) — mirrors this repo's `lore approve
+ *   --override-judgment`/`lore outline exempt --reason` shape: an explicit,
+ *   mandatory free-text justification, written VERBATIM onto every lifecycle
+ *   step's audit entry as `details.override_reason` (+ `details
+ *   .attestation_overridden: true`) this call produces — never silent, never
+ *   defaulted, no env-var form. A blank/whitespace-only reason is refused
+ *   VALIDATION_ERROR here too (belt-and-suspenders — `commands/done.ts` already
+ *   refuses it as a CLI usage error, exit 2, before this service is ever called;
+ *   this second check protects any OTHER caller, e.g. a test or a future MCP tool,
+ *   that constructs `DoneOpts` directly). `overrideReason` is silently IGNORED
+ *   (never checked, never persisted) when an attested pass already satisfies the
+ *   floor above — the escape hatch is for tasks that structurally cannot attest,
+ *   not a blanket "always audit" switch.
  * @invariant `done()` also refuses over an UNMET unfiltered-test-file-run floor
  *   (task-every-ac-oracle-is-t-scoped-so-the-file-passes-is-attested) — a THIRD,
  *   INDEPENDENT floor evaluated after the result:pass floor and the red-first floor
@@ -139,7 +173,9 @@
  *         SPEC-039 §2 D2, §4 AC-VRF-2; BUG-011 (anchor-overlap gate TOCTOU hardening);
  *         spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M3, AC-WH-3;
  *         task-every-ac-oracle-is-t-scoped-so-the-file-passes-is-attested (the
- *         unfiltered-test-file-run floor)
+ *         unfiltered-test-file-run floor); adr-lore-done-requires-a-runner-attested-
+ *         pass-the-sixth-false / task-lore-done-accepts-an-unattested-self-reported-
+ *         pass-as (the attested-pass floor + its audited escape hatch)
  */
 
 import { z } from "zod";
@@ -245,6 +281,24 @@ export interface DoneOpts {
   by: string;
   /** See {@link ClaimOpts.source}. */
   source?: string;
+  /**
+   * Audited escape hatch for the attested-pass floor (adr-lore-done-requires-a-
+   * runner-attested-pass-the-sixth-false) — a mandatory free-text justification
+   * for archiving WITHOUT a runner-attested `result: "pass"` evidence row, for
+   * verification `lore verify` structurally cannot perform (`--oracle manual`
+   * browser/visual checks; any oracle with no script-mode AC to bind to).
+   * Written VERBATIM to every lifecycle step's audit entry as
+   * `details.override_reason` (+ `details.attestation_overridden: true`) — never
+   * silent, never defaulted, no env-var form (mirrors `lore approve
+   * --override-judgment`/`lore outline exempt --reason`'s audited-escape shape).
+   * `commands/done.ts` refuses a blank/whitespace-only value as a CLI usage
+   * error (exit 2) before this service is ever called; `done()` refuses it too
+   * (VALIDATION_ERROR) as a belt-and-suspenders check for any OTHER caller that
+   * constructs `DoneOpts` directly (see `done()`'s own JSDoc). IGNORED entirely
+   * when an attested pass already satisfies the floor — this does not relax the
+   * independent red-first / unfiltered-test-file-run floors below it.
+   */
+  overrideReason?: string;
 }
 
 /**
@@ -1362,8 +1416,19 @@ export class TaskWorkflowService {
    * treats as "met" (only `archived`/`deprecated` are terminal).
    *
    * Refuses (VALIDATION_ERROR) when:
-   *   - the task holds no `result: "pass"` evidence entry — `"expected-fail"` (M1),
-   *     `"fail"`, and `"inconclusive"` never count, regardless of how many of them exist;
+   *   - the task holds no RUNNER-ATTESTED `result: "pass"` evidence entry — i.e. no
+   *     entry with BOTH `result: "pass"` AND `attestation !== undefined`
+   *     (adr-lore-done-requires-a-runner-attested-pass-the-sixth-false). `"expected-
+   *     fail"` (M1), `"fail"`, and `"inconclusive"` never count, regardless of how many
+   *     of them exist; a SELF-REPORTED-ONLY pass (`attestation === undefined` — the
+   *     shape every CLI/MCP `lore evidence` write produces) does not count either. The
+   *     refusal message names both repairs: `lore verify <plan>` (attests a pass), or
+   *     `opts.overrideReason` (the audited escape hatch below, for verification `lore
+   *     verify` structurally cannot perform). This floor bypasses via `overrideReason`
+   *     ONLY — never via a red-first or unfiltered-file-run row, which are independent;
+   *   - `opts.overrideReason` IS supplied but is blank/whitespace-only — refused here
+   *     as a defense-in-depth check (`commands/done.ts` already refuses this shape as a
+   *     CLI usage error, exit 2, before this service is ever called);
    *   - the task declares `extra.red_first: true` (task-red-first-discipline-is-asked-
    *     for-in-prose-but-never) and holds no `"expected-fail"`/`"fail"` evidence entry —
    *     a SECOND, INDEPENDENT floor evaluated only for a task claiming red-first
@@ -1395,15 +1460,16 @@ export class TaskWorkflowService {
    * the freshly-read `task.status` each call).
    *
    * @param idOrSlug - Task document ULID or slug
-   * @param opts - `{ by, source? }`
+   * @param opts - `{ by, source?, overrideReason? }` — see {@link DoneOpts.overrideReason}
+   *   for the audited attestation-floor escape hatch
    * @param now - Time seam (D10) — ONE reading shared by every step's timestamp
    * @returns `DoneResult` — see that type's own JSDoc
-   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a task / no passing evidence / a
-   *   red_first claim with no red evidence row / an unsatisfied test-file-anchor
-   *   unfiltered-run floor / fresh foreign claim / illegal lifecycle step — the
-   *   last one structurally unreachable given `computeArchiveWalk`'s own
-   *   base-graph-only steps, kept as a fail-loud guard rather than a non-null
-   *   assertion), STALE_VERSION
+   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a task / no runner-attested passing
+   *   evidence and no (or a blank) `overrideReason` / a red_first claim with no red
+   *   evidence row / an unsatisfied test-file-anchor unfiltered-run floor / fresh
+   *   foreign claim / illegal lifecycle step — the last one structurally unreachable
+   *   given `computeArchiveWalk`'s own base-graph-only steps, kept as a fail-loud guard
+   *   rather than a non-null assertion), STALE_VERSION
    */
   async done(
     idOrSlug: string,
@@ -1437,16 +1503,49 @@ export class TaskWorkflowService {
     }
 
     const evidence = readEvidence(task);
-    if (!evidence.some((e) => e.result === "pass")) {
-      return err({
-        code: "VALIDATION_ERROR",
-        field: "extra.verification_evidence",
-        message:
-          `Task "${task.slug}" holds no result:pass evidence entry — lore done requires ` +
-          `at least one passing oracle verification before archiving ("expected-fail", ` +
-          `"fail", and "inconclusive" entries never count)`,
-        value: evidence.map((e) => e.result),
-      });
+    const hasAttestedPass = evidence.some((e) => e.result === "pass" && e.attestation !== undefined);
+    let overrideReason: string | undefined;
+    if (!hasAttestedPass) {
+      // reason: adr-lore-done-requires-a-runner-attested-pass-the-sixth-false — a
+      // self-reported result:pass (the ONLY shape any CLI/MCP `lore evidence` write
+      // can produce; attestation is runner-issued only, recordVerifiedEvidence's own
+      // @invariant above) is no longer sufficient to archive. `opts.overrideReason`
+      // is the ONE audited bypass — checked here, not before this branch, so a task
+      // that already holds an attested pass never even looks at it (never "always
+      // audit"). A zero-length trimmed reason is refused identically to an absent
+      // one, never silently treated as "no override requested".
+      if (opts.overrideReason === undefined || opts.overrideReason.trim() === "") {
+        if (opts.overrideReason !== undefined) {
+          return err({
+            code: "VALIDATION_ERROR",
+            field: "overrideReason",
+            message:
+              "--override-attestation requires a non-empty, non-whitespace reason — " +
+              "the CLI usage-error check (exit 2) should have caught this before " +
+              "reaching the service; a direct caller must supply a real reason too",
+            value: opts.overrideReason,
+          });
+        }
+        const hasSelfReportedPass = evidence.some((e) => e.result === "pass");
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "extra.verification_evidence",
+          message: hasSelfReportedPass
+            ? `Task "${task.slug}" holds only SELF-REPORTED result:pass evidence (no ` +
+              `runner attestation) — lore done requires a runner-attested pass before ` +
+              `archiving; run \`lore verify <plan>\` to attest it, or use the audited ` +
+              `--override-attestation "<reason>" escape hatch for verification lore ` +
+              `verify structurally cannot perform`
+            : `Task "${task.slug}" holds no result:pass evidence entry — lore done ` +
+              `requires at least one RUNNER-ATTESTED passing oracle verification before ` +
+              `archiving ("expected-fail", "fail", and "inconclusive" entries never ` +
+              `count); run \`lore verify <plan>\` to attest one, or use the audited ` +
+              `--override-attestation "<reason>" escape hatch for verification lore ` +
+              `verify structurally cannot perform`,
+          value: evidence.map((e) => ({ result: e.result, attested: e.attestation !== undefined })),
+        });
+      }
+      overrideReason = opts.overrideReason;
     }
 
     // reason: the red-first floor (task-red-first-discipline-is-asked-for-in-
@@ -1520,6 +1619,7 @@ export class TaskWorkflowService {
         nowIso,
         opts.by,
         `lore done: ${task.status} → ${nextStatus}`,
+        overrideReason,
       );
       if (!stepResult.ok) return stepResult;
       task = stepResult.value;
@@ -2402,6 +2502,14 @@ export class TaskWorkflowService {
    * reader, mirroring the `archive-cascade`/`archive-sweep` precedent's OWN comment in
    * `corpus-service.ts` for why the versions-row action and the audit-entry action can
    * diverge under this exact-version join.
+   *
+   * `overrideReason` (adr-lore-done-requires-a-runner-attested-pass-the-sixth-false) —
+   * present iff this `done()` call used the audited attestation-floor escape hatch;
+   * merged verbatim onto EVERY step's audit `details` this call produces as
+   * `override_reason` + `attestation_overridden: true`, so a multi-step walk
+   * (draft -> approved -> active -> archived) leaves the justification attached to
+   * each individual audited step, not just the first. `undefined` (the common case —
+   * an attested pass already satisfied the floor) adds neither key.
    */
   private async writeTaskStatus(
     task: DocRecord,
@@ -2409,6 +2517,7 @@ export class TaskWorkflowService {
     nowIso: string,
     actor: string,
     changeSummary: string,
+    overrideReason?: string,
   ): Promise<Result<DocRecord, LoreError>> {
     const newVersion = task.version + 1;
     const updateResult = await this.store.update(
@@ -2445,6 +2554,9 @@ export class TaskWorkflowService {
         status_to: newStatus,
         version: newVersion,
         done: true,
+        ...(overrideReason !== undefined
+          ? { override_reason: overrideReason, attestation_overridden: true }
+          : {}),
       },
     });
     if (!auditResult.ok) return auditResult;
