@@ -34,6 +34,12 @@
  * was genuinely retired/merged rather than accidentally orphaned. A ledger entry that
  * no longer matches any REAL dangling ref (fixed, or drifted) fails loud on its own
  * (completeness criterion 3) — it must never silently outlive the debt it names.
+ * Each applied exemption's `(spec, id)` AND justification (the ledger row's `date` +
+ * `reason`, truncated-with-pointer via `formatExemptionReasonForDisplay` when long)
+ * are echoed to stdout on the OK path — an exemption is auditable only if the reason
+ * an auditor needs reaches them without opening the ledger file separately; printing
+ * only a COUNT was the exact defect this echo fixes
+ * (task-check-ac-ref-integrity-prints-an-exemption-count-not-its).
  *
  * Public surface: `collectCorpusData` (IO — fetches every `task`/`plan`/`spec` doc,
  * unbounded, via `CorpusService.listFull` — no `limit`/`offset`, so this NEVER
@@ -67,6 +73,8 @@ import {
   findDanglingRefs,
   checkAcRefLedger,
   loadLedgerFromDisk,
+  findLedgerEntryForRef,
+  formatExemptionReasonForDisplay,
   LEDGER_RELATIVE_PATH,
   AcRefLedgerError,
   type AcRefLedgerFile,
@@ -219,6 +227,31 @@ export async function main(dbPathOverride?: string, repoRootOverride?: string): 
       console.log(
         `check-ac-ref-integrity: OK — 0 dangling ac_ref(s); ${report.ledgerCheck.exempted.length} pre-existing exemption(s) via ${LEDGER_RELATIVE_PATH}.`,
       );
+
+      if (report.ledgerCheck.exempted.length > 0) {
+        console.log(
+          `\ncheck-ac-ref-integrity: applied exemption(s) — each converts a detector failure into an audited, justified pass:\n`,
+        );
+        for (const ref of report.ledgerCheck.exempted) {
+          const entry = findLedgerEntryForRef(ref, ledger.entries);
+          // `checkAcRefLedger` only places a ref into `exempted` when a ledger entry
+          // actually matched it (see that function's doc comment), and
+          // `findLedgerEntryForRef` re-derives the SAME (spec, id) key — so `entry`
+          // is always found here. The `undefined` branch is unreachable by
+          // construction; it is handled explicitly (never a silent skip) so a future
+          // change to either matching rule fails loud instead of quietly dropping
+          // an exemption's justification from the audit trail.
+          if (entry === undefined) {
+            console.log(
+              `  spec="${ref.specSlug}" id="${ref.acRef}" — exempted but no matching ledger entry found (this is a bug: report it, do not ignore).`,
+            );
+            continue;
+          }
+          console.log(`  spec="${entry.spec}" id="${entry.id}" — recorded ${entry.date}`);
+          console.log(`    ${formatExemptionReasonForDisplay(entry.reason)}`);
+        }
+      }
+
       return 0;
     }
 

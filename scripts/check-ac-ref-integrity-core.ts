@@ -35,6 +35,17 @@
  *     — same {id/spec/date/reason} row shape, same "ledger is DATA the oracle reads"
  *     discipline, same completeness assertion via `orphanedEntries` below)
  *   - checkAcRefLedger(dangling, entries)      — partitions a scan into new/exempted/orphaned
+ *   - findLedgerEntryForRef(ref, entries)      — looks up the ONE ledger entry that exempts a
+ *     given dangling ref, reusing `checkAcRefLedger`'s own `(spec, id)` matching key (never a
+ *     second, independently-maintained matching rule) — the IO shell uses this to recover the
+ *     `date`/`reason` that `checkAcRefLedger`'s `exempted: DanglingRef[]` return deliberately
+ *     drops (see that function's own doc comment), so an exemption's justification can be
+ *     echoed to stdout instead of just its count
+ *     (task-check-ac-ref-integrity-prints-an-exemption-count-not-its)
+ *   - formatExemptionReasonForDisplay(reason)  — truncates a ledger entry's (long,
+ *     paragraph-length) `reason` for direct stdout display, with an explicit pointer back to
+ *     the ledger file — never a bare silent cut (see `MAX_REASON_DISPLAY_CHARS`'s doc comment
+ *     for why the threshold was measured against the real ledger's own reasons, not guessed)
  *
  * Side-effect class: `resolveGoverningSpec`/`extractDeclaredAcIds`/`findDanglingRefs`/
  * `parseAcRefLedgerFile`/`checkAcRefLedger` are pure (no IO). `loadLedgerFromDisk` reads
@@ -316,4 +327,78 @@ export function checkAcRefLedger(
   const orphanedEntries = entries.filter((e) => !matchedKeys.has(exemptionKey(e.spec, e.id)));
 
   return { newDangling, exempted, orphanedEntries };
+}
+
+// ─── Exemption echo (task-check-ac-ref-integrity-prints-an-exemption-count-not-its) ──
+
+/**
+ * Recovers the ONE ledger entry that exempts a given dangling ref — i.e. the entry
+ * `checkAcRefLedger` matched when it placed this ref into its `exempted` bucket.
+ * Reuses {@link exemptionKey} (the SAME `(spec, id)` matching rule `checkAcRefLedger`
+ * uses internally) rather than re-deriving the match condition a second time — an
+ * exemption is auditable only if its "is this ref exempted" and "which entry exempts
+ * it" questions are answered by ONE rule, never two independently-maintained ones
+ * that could silently drift apart.
+ *
+ * `checkAcRefLedger`'s own `exempted: DanglingRef[]` return deliberately does not
+ * carry the matching entry's `date`/`reason` (see its doc comment) — this function
+ * is how a caller that already knows a ref is exempted (via `checkAcRefLedger`)
+ * recovers those fields for display, e.g. the IO shell echoing WHY the exemption
+ * was granted instead of only counting it.
+ *
+ * @returns The matching entry, or `undefined` if none matches — a ref with
+ *   `specSlug === null` never matches (mirrors {@link checkAcRefLedger}'s own rule:
+ *   there is no `(spec, id)` pair to key a match on), and this function never throws
+ *   for an unmatched ref (a fact for the caller to handle, not an error).
+ * @example
+ * const entries = [{ id: "AC-X", spec: "spec-a", date: "2026-08-01", reason: "merged" }];
+ * findLedgerEntryForRef({ taskId: "t1", taskSlug: "task-1", acRef: "AC-X", specSlug: "spec-a" }, entries);
+ * // => entries[0]
+ */
+export function findLedgerEntryForRef(
+  ref: DanglingRef,
+  entries: readonly AcRefLedgerEntry[],
+): AcRefLedgerEntry | undefined {
+  if (ref.specSlug === null) return undefined;
+  const key = exemptionKey(ref.specSlug, ref.acRef);
+  return entries.find((e) => exemptionKey(e.spec, e.id) === key);
+}
+
+/**
+ * Max characters of a ledger entry's `reason` shown directly in the detector's
+ * stdout before truncating with a pointer back to {@link LEDGER_RELATIVE_PATH}.
+ * Measured, not guessed: the three real ledger reasons authored 2026-08-01 place
+ * BOTH load-bearing facts this echo exists to surface — the spec-version citation
+ * (`removed at vNN ... replaced ... at vMM`, ~330-420 chars in) and the
+ * merged-vs-lost verdict sentence (`Genuinely superseded, not lost: ...`, ending
+ * ~730-800 chars in) — within the first ~800 characters of all three; the
+ * remaining ~270-410 trailing chars are elaboration (which evidence row this
+ * superseded, why re-declaring would violate D7) an auditor can still reach via
+ * the pointer, but does not need inline to trust the exemption. 850 leaves a
+ * comfortable margin above the widest measured verdict-sentence end (794).
+ */
+export const MAX_REASON_DISPLAY_CHARS = 850;
+
+/**
+ * Formats one ledger entry's `reason` for direct stdout display: unchanged if it
+ * already fits within {@link MAX_REASON_DISPLAY_CHARS}, otherwise truncated to that
+ * length with an explicit pointer back to {@link LEDGER_RELATIVE_PATH} for the full
+ * text. Never a bare silent cut — the pointer names exactly how many characters
+ * were dropped and where to find them, so an auditor who needs the elided tail
+ * knows it exists and where to look, rather than assuming the truncated line is
+ * the whole reason.
+ *
+ * @example
+ * formatExemptionReasonForDisplay("short"); // => "short" (unchanged)
+ * formatExemptionReasonForDisplay("x".repeat(900));
+ * // => "xxxx...xxxx… [truncated 50 more chars — see scripts/ac-ref-exemption-ledger.json for the full reason]"
+ */
+export function formatExemptionReasonForDisplay(reason: string): string {
+  if (reason.length <= MAX_REASON_DISPLAY_CHARS) return reason;
+  const cutChars = reason.length - MAX_REASON_DISPLAY_CHARS;
+  const charWord = cutChars === 1 ? "char" : "chars";
+  return (
+    `${reason.slice(0, MAX_REASON_DISPLAY_CHARS)}… ` +
+    `[truncated ${cutChars} more ${charWord} — see ${LEDGER_RELATIVE_PATH} for the full reason]`
+  );
 }

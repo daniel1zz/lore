@@ -30,27 +30,39 @@
  * Six-dimension coverage for this file:
  *   HAPPY:      resolveGoverningSpec walks task -> plan -> spec correctly; a
  *               declared ac_ref is never reported dangling; a valid ledger file
- *               parses; the e2e GREEN fixture exits 0
+ *               parses; the e2e GREEN fixture exits 0; an applied exemption's
+ *               reason reaches stdout via the real detector subprocess
  *   NEGATIVE:   an ac_ref absent from the governing spec's declared ids IS
  *               dangling; a task parented to a non-plan doc resolves no governing
  *               spec; a dangling ref with no matching ledger entry is newDangling;
- *               the e2e RED fixture exits non-zero and names the (task, ac_ref) pair
+ *               the e2e RED fixture exits non-zero and names the (task, ac_ref) pair;
+ *               a truncated reason drops its trailing elaboration text
  *   BOUNDARY:   the SAME (task, ac_ref) pair from multiple evidence rows is
  *               deduped to exactly one DanglingRef; a spec with no
  *               extra.acceptance_criteria key at all yields an empty declared set;
- *               a dangling ref with specSlug===null can never be ledger-exempted
+ *               a dangling ref with specSlug===null can never be ledger-exempted;
+ *               a reason at/one-over MAX_REASON_DISPLAY_CHARS; a deliberately long
+ *               fixture reason (built, not assumed) still carries its version
+ *               citation and merged/lost verdict past truncation; an EMPTY ledger
+ *               against a clean corpus prints NO exemption lines (control)
  *   ERROR:      malformed ledger JSON throws AcRefLedgerError("invalid_json");
  *               schema-invalid ledger content (missing "reason") throws
  *               AcRefLedgerError("schema"); a task with no resolvable governing
  *               spec (null parent_id) still reports its dangling ac_ref
  *   STATE:      an evidence row with NO ac_ref never contributes a finding
  *               alongside one that does, on the same task; a ledger entry whose
- *               (spec,id) no longer matches any real dangling ref is orphaned
+ *               (spec,id) no longer matches any real dangling ref is orphaned;
+ *               findLedgerEntryForRef keys on the EXACT (spec,id) pair — a same-id
+ *               entry for a different spec is never conflated with the right one
  *   REGRESSION: the shipped scripts/ac-ref-exemption-ledger.json parses cleanly;
- *               findDanglingRefs output is deterministically sorted
+ *               findDanglingRefs output is deterministically sorted; a ledger
+ *               entry matching no real dangling ref still exits 5 naming the stale
+ *               row (unchanged wiring); all three REAL ledger reasons require
+ *               truncation and keep their citation + verdict after it
  *
  * @spec_ref spec-lore-ac-set-in-place-edit-of-a-declared-acceptance §D7, AC-ACS-7
  * @spec_ref adr-a-newly-armed-structural-oracle-enforces-from-a-baseline (ledger shape)
+ * @spec_ref task-check-ac-ref-integrity-prints-an-exemption-count-not-its (exemption echo)
  */
 
 import { describe, it, expect } from "vitest";
@@ -66,9 +78,13 @@ import {
   checkAcRefLedger,
   parseAcRefLedgerFile,
   loadLedgerFromDisk,
+  findLedgerEntryForRef,
+  formatExemptionReasonForDisplay,
+  MAX_REASON_DISPLAY_CHARS,
   AcRefLedgerError,
   LEDGER_RELATIVE_PATH,
   type AcRefLedgerEntry,
+  type DanglingRef,
 } from "../check-ac-ref-integrity-core.js";
 import type { DocRecord, DocId } from "@lore/core";
 
@@ -401,6 +417,132 @@ describe("parseAcRefLedgerFile / loadLedgerFromDisk", () => {
   });
 });
 
+// ─── Exemption echo (task-check-ac-ref-integrity-prints-an-exemption-count-not-its) ──
+//
+// Deliberately long fixture reason, modeled on the real ledger's own structure
+// (citation early, verdict mid-text, elaboration after — measured against the real
+// scripts/ac-ref-exemption-ledger.json: version tokens land ~330-420 chars in, the
+// verdict sentence ends ~730-800 chars in) but with the two load-bearing facts placed
+// at POSITIONS THIS TEST CONTROLS, so it does not depend on the real ledger's prose
+// surviving future edits. Built (not assumed) to actually require truncation: total
+// length 1473 > MAX_REASON_DISPLAY_CHARS (850), verdict sentence ends at 613 (237
+// chars of margin below 850), and the must-not-survive trailing sentence starts at
+// 933 (83 chars of margin above 850) -- see this task's own measurement transcript.
+const LONG_REASON_CITATION =
+  "Diagnosed via `lore diff --from 10 --to 11` (fixture): the criterion was removed at v10 " +
+  "and replaced one edit later at v11 by AC-FIX-REPLACEMENT, which targets the identical " +
+  "test target with a refined statement. ";
+const LONG_REASON_PADDING =
+  "Padding sentence to push the verdict well past a trivial length so truncation is genuinely exercised. ".repeat(
+    3,
+  );
+const LONG_REASON_VERDICT =
+  "Genuinely superseded, not lost: content lives on under AC-FIX-REPLACEMENT, currently declared. ";
+const LONG_REASON_POST_VERDICT_FILLER =
+  "More non-essential context an auditor can still reach via the pointer if truncated, filling space between the verdict and the part that truly must not survive. ".repeat(
+    2,
+  );
+const LONG_REASON_TRAILING =
+  "Trailing elaboration only the pointer, not the inline echo, is responsible for surfacing -- this sentence must NOT survive truncation. ".repeat(
+    4,
+  );
+const LONG_REASON =
+  LONG_REASON_CITATION + LONG_REASON_PADDING + LONG_REASON_VERDICT + LONG_REASON_POST_VERDICT_FILLER + LONG_REASON_TRAILING;
+
+describe("formatExemptionReasonForDisplay", () => {
+  it("HAPPY: a reason at or under MAX_REASON_DISPLAY_CHARS is returned byte-for-byte unchanged", () => {
+    const reason = "short reason, well under the threshold";
+    expect(formatExemptionReasonForDisplay(reason)).toBe(reason);
+  });
+
+  it("BOUNDARY: a reason exactly MAX_REASON_DISPLAY_CHARS long is NOT truncated", () => {
+    const reason = "a".repeat(MAX_REASON_DISPLAY_CHARS);
+    expect(formatExemptionReasonForDisplay(reason)).toBe(reason);
+  });
+
+  it("BOUNDARY: a reason ONE char over MAX_REASON_DISPLAY_CHARS IS truncated, naming exactly 1 cut char", () => {
+    const reason = "a".repeat(MAX_REASON_DISPLAY_CHARS + 1);
+    const formatted = formatExemptionReasonForDisplay(reason);
+    // NOT a "formatted is shorter" assertion: for content only marginally over the
+    // threshold, the appended pointer text is itself longer than the single dropped
+    // char, so total length can GROW. The real invariant is that the kept prefix is
+    // capped at exactly MAX_REASON_DISPLAY_CHARS (never the untruncated original) and
+    // the pointer names exactly how many chars were cut.
+    expect(formatted).not.toBe(reason);
+    expect(formatted.startsWith("a".repeat(MAX_REASON_DISPLAY_CHARS) + "…")).toBe(true);
+    expect(formatted).toContain("truncated 1 more char ");
+    expect(formatted).not.toContain("1 more chars");
+  });
+
+  it("BOUNDARY (deliberately long fixture, built not assumed): a reason long enough to REQUIRE truncation still carries the version citation and the merged/lost verdict", () => {
+    expect(LONG_REASON.length).toBeGreaterThan(MAX_REASON_DISPLAY_CHARS);
+    const formatted = formatExemptionReasonForDisplay(LONG_REASON);
+
+    expect(formatted.length).toBeLessThan(LONG_REASON.length);
+    // Independent, lone tokens -- not a remembered contiguous phrase of the whole line.
+    expect(formatted).toContain("v10");
+    expect(formatted).toContain("v11");
+    expect(formatted).toContain("Genuinely superseded, not lost");
+    expect(formatted).toContain(LEDGER_RELATIVE_PATH);
+  });
+
+  it("NEGATIVE: truncation drops the trailing elaboration text -- it does not survive past the cut", () => {
+    const formatted = formatExemptionReasonForDisplay(LONG_REASON);
+    expect(formatted).not.toContain("Trailing elaboration");
+  });
+
+  it("REGRESSION: all three real ledger reasons require truncation and preserve their own version citation + merged/lost verdict", () => {
+    const ledger = loadLedgerFromDisk(REPO_ROOT);
+    expect(ledger.entries.length).toBeGreaterThan(0);
+    for (const entry of ledger.entries) {
+      expect(entry.reason.length).toBeGreaterThan(MAX_REASON_DISPLAY_CHARS);
+      const formatted = formatExemptionReasonForDisplay(entry.reason);
+      expect(formatted).toContain("Genuinely superseded, not lost");
+      const versionTokens = entry.reason.match(/\bv\d+\b/g) ?? [];
+      expect(versionTokens.length).toBeGreaterThanOrEqual(2);
+      for (const token of versionTokens.slice(0, 2)) {
+        expect(formatted).toContain(token);
+      }
+    }
+  });
+});
+
+describe("findLedgerEntryForRef", () => {
+  const ref: DanglingRef = { taskId: "01HT1", taskSlug: "task-1", acRef: "AC-X", specSlug: "spec-a" };
+
+  it("HAPPY: finds the entry matching the exact (spec, id) pair", () => {
+    const entries: AcRefLedgerEntry[] = [{ id: "AC-X", spec: "spec-a", date: "2026-08-01", reason: "matched" }];
+    expect(findLedgerEntryForRef(ref, entries)?.reason).toBe("matched");
+  });
+
+  it("STATE: a same-id entry for a DIFFERENT spec is never returned -- spec is part of the key, not just id", () => {
+    const entries: AcRefLedgerEntry[] = [
+      { id: "AC-X", spec: "spec-b", date: "2026-08-01", reason: "WRONG_SPEC" },
+      { id: "AC-X", spec: "spec-a", date: "2026-08-01", reason: "RIGHT_SPEC" },
+    ];
+    expect(findLedgerEntryForRef(ref, entries)?.reason).toBe("RIGHT_SPEC");
+  });
+
+  it("BOUNDARY: specSlug === null never matches, even with a coincidental id match in entries", () => {
+    const nullSpecRef: DanglingRef = { taskId: "01HT2", taskSlug: "task-2", acRef: "AC-X", specSlug: null };
+    const entries: AcRefLedgerEntry[] = [{ id: "AC-X", spec: "spec-a", date: "2026-08-01", reason: "n/a" }];
+    expect(findLedgerEntryForRef(nullSpecRef, entries)).toBeUndefined();
+  });
+
+  it("NEGATIVE: no entry matches -> undefined (never throws)", () => {
+    expect(() => findLedgerEntryForRef(ref, [])).not.toThrow();
+    expect(findLedgerEntryForRef(ref, [])).toBeUndefined();
+  });
+
+  it("ERROR: an entries array containing only unrelated ids never coincidentally matches", () => {
+    const entries: AcRefLedgerEntry[] = [
+      { id: "AC-UNRELATED-1", spec: "spec-a", date: "2026-08-01", reason: "n/a" },
+      { id: "AC-UNRELATED-2", spec: "spec-a", date: "2026-08-01", reason: "n/a" },
+    ];
+    expect(findLedgerEntryForRef(ref, entries)).toBeUndefined();
+  });
+});
+
 // ─── End-to-end fixture: mkdtemp + lore init, never the repo's own .lore/ ─────
 
 interface RunResult {
@@ -421,25 +563,36 @@ function runLore(args: string[], cwd: string): RunResult {
 }
 
 /**
- * Builds a throwaway "repo root" containing only an EMPTY `scripts/ac-ref-exemption-ledger.json`
- * (`{"entries": []}`) at the exact `LEDGER_RELATIVE_PATH` the real detector reads. Passed to
- * `runDetector` via `LORE_AC_REF_LEDGER_REPO_ROOT` so this fixture's corpus-scan assertions
- * stay independent of the REAL repo's shipped ledger content — which, once it carries any
- * entry (task-t3, 2026-08-01), would otherwise make every one of THIS fixture's unrelated,
- * throwaway-corpus runs report those real entries as spuriously "orphaned" (they match no
- * dangling ref in a fixture corpus that never produced them) and fail loud for a reason that
- * has nothing to do with what this suite is actually proving.
+ * Builds a throwaway "repo root" containing `scripts/ac-ref-exemption-ledger.json` at the
+ * exact `LEDGER_RELATIVE_PATH` the real detector reads, with `entries` (default EMPTY —
+ * `{"entries": []}`). Passed to `runDetector` via `LORE_AC_REF_LEDGER_REPO_ROOT` so this
+ * fixture's corpus-scan assertions stay independent of the REAL repo's shipped ledger
+ * content — which, once it carries any entry (task-t3, 2026-08-01), would otherwise make
+ * every one of THIS fixture's unrelated, throwaway-corpus runs report those real entries as
+ * spuriously "orphaned" (they match no dangling ref in a fixture corpus that never produced
+ * them) and fail loud for a reason that has nothing to do with what this suite is actually
+ * proving. Accepting `entries` (task-check-ac-ref-integrity-prints-an-exemption-count-not-its)
+ * lets a test seed a REAL exemption (or a deliberately stale one) for the fixture corpus's
+ * OWN dangling ref, still isolated from the real repo's ledger.
  */
-function initFixtureLedgerRoot(): string {
+function initFixtureLedgerRoot(entries: AcRefLedgerEntry[] = []): string {
   const root = mkdtempSync(join(tmpdir(), "lore-ac-ref-ledger-root-"));
   mkdirSync(join(root, "scripts"), { recursive: true });
-  writeFileSync(join(root, LEDGER_RELATIVE_PATH), JSON.stringify({ entries: [] }), "utf8");
+  writeFileSync(join(root, LEDGER_RELATIVE_PATH), JSON.stringify({ entries }), "utf8");
   return root;
 }
 
-/** Spawns the REAL detector script (`bun run scripts/check-ac-ref-integrity.ts`) with `cwd` set to the fixture corpus directory, exactly as the registered AC-ACS-7 oracle command would run it from that directory — pointed at an isolated throwaway ledger (see `initFixtureLedgerRoot`) so this fixture's own corpus-scan assertions are never coupled to the real repo's shipped ledger content. */
-function runDetector(cwd: string): RunResult {
-  const ledgerRoot = initFixtureLedgerRoot();
+/**
+ * Spawns the REAL detector script (`bun run scripts/check-ac-ref-integrity.ts`) with `cwd`
+ * set to the fixture corpus directory, exactly as the registered AC-ACS-7 oracle command
+ * would run it from that directory — pointed at an isolated throwaway ledger (see
+ * `initFixtureLedgerRoot`) so this fixture's own corpus-scan assertions are never coupled to
+ * the real repo's shipped ledger content. `ledgerEntries` defaults to EMPTY (the original
+ * behaviour every pre-existing caller relies on); a caller seeding a specific exemption (or a
+ * deliberately stale row) passes its own entries.
+ */
+function runDetector(cwd: string, ledgerEntries: AcRefLedgerEntry[] = []): RunResult {
+  const ledgerRoot = initFixtureLedgerRoot(ledgerEntries);
   try {
     const result = spawnSync("bun", ["run", DETECTOR_SCRIPT], {
       cwd,
@@ -565,6 +718,67 @@ describe("check-ac-ref-integrity: end-to-end fixture (mkdtemp + lore init, never
 
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toContain("OK");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  }, 30000);
+});
+
+describe("check-ac-ref-integrity: exemption echo wiring (task-check-ac-ref-integrity-prints-an-exemption-count-not-its)", () => {
+  it("HAPPY: an applied exemption's (spec, id) and reason reach the real detector's stdout, keyed on independent tokens (never a remembered contiguous phrase)", () => {
+    const cwd = initFixtureCorpus();
+    try {
+      const { specSlug } = buildFixture(cwd, { forceRemove: true });
+      const result = runDetector(cwd, [
+        { id: FIXTURE_AC_ID, spec: specSlug, date: "2026-08-01", reason: LONG_REASON },
+      ]);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain(specSlug);
+      expect(result.stdout).toContain(FIXTURE_AC_ID);
+      // Independent, lone tokens -- not the whole reason sentence copied verbatim.
+      expect(result.stdout).toContain("v10");
+      expect(result.stdout).toContain("v11");
+      expect(result.stdout).toContain("Genuinely superseded, not lost");
+      // Independent negative-adjacent condition: the count claim in the SAME run must
+      // actually be non-zero, not a static string present regardless of scan outcome.
+      expect(result.stdout).toContain("1 pre-existing exemption(s)");
+      // The trailing elaboration must NOT survive -- proves this is a genuinely
+      // truncated echo, not an accidental full dump that happens to contain the tokens.
+      expect(result.stdout).not.toContain("Trailing elaboration");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  }, 30000);
+
+  it("CONTROL: an empty ledger against a clean (non-dangling) corpus prints NO exemption lines at all -- the assertion above cannot pass vacuously", () => {
+    const cwd = initFixtureCorpus();
+    try {
+      buildFixture(cwd, { forceRemove: false });
+      const result = runDetector(cwd, []);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("0 pre-existing exemption(s)");
+      expect(result.stdout).not.toContain("applied exemption");
+      expect(result.stdout).not.toContain(" — recorded ");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  }, 30000);
+
+  it("REGRESSION: a ledger entry matching no real dangling ref still exits 5, naming the stale row (unchanged behaviour, not touched by this task)", () => {
+    const cwd = initFixtureCorpus();
+    try {
+      buildFixture(cwd, { forceRemove: false }); // zero dangling refs in this corpus
+      const result = runDetector(cwd, [
+        { id: "AC-DOES-NOT-EXIST", spec: "spec-does-not-exist", date: "2026-08-01", reason: "stale row, never matched by any real scan" },
+      ]);
+
+      expect(result.exitCode).toBe(5);
+      const combinedOutput = result.stdout + result.stderr;
+      expect(combinedOutput).toContain("AC-DOES-NOT-EXIST");
+      expect(combinedOutput).toContain("spec-does-not-exist");
+      expect(combinedOutput).toContain("no longer match a real dangling ac_ref");
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
