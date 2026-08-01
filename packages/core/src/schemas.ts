@@ -799,6 +799,85 @@ export function getAllowedTransitions(from: DocStatus, docType?: DocType): DocSt
   return base;
 }
 
+/**
+ * The ONE implementation of the contract-edit demotion rule: an `approved` doc
+ * whose governing contract content changes returns to `draft`, because a changed
+ * contract has not been reviewed.
+ *
+ * Lives here, beside {@link VALID_TRANSITIONS}, because it is the same KIND of
+ * rule — a lifecycle authority over `DocStatus` — and because its two consumers
+ * live in DIFFERENT services that are forbidden to import each other
+ * (`packages/lore/src/service/CLAUDE.md`: *"service per concern, no cross-service
+ * imports — composition lives in app.ts"*):
+ *
+ *   - `CorpusService.set` — a `content`/`title` edit; passes its own measured
+ *     change flag, since a `priority`/`tags`/`slug`-only patch is not a contract
+ *     change (slug is an address, not content).
+ *   - `AcService.setCriterion` — an in-place acceptance-criterion edit; passes a
+ *     literal `true`, because such an edit is ALWAYS a contract change by
+ *     construction (an empty patch is rejected before the write is reached).
+ *
+ * Neither service may own the rule without creating that forbidden edge, so
+ * `@lore/core` is the only home. `contentChanged` is therefore kept as an
+ * EXPLICIT parameter rather than split into a second `AcService`-shaped overload:
+ * the reasoning "an AC edit is always a contract change" then stays visible at the
+ * call site that makes the claim, instead of being buried in a second function
+ * that would immediately be a second copy of half the rule.
+ *
+ * reason: the demotion is not a convenience — it is what discharges I12
+ * (`no self-weakening`) for an acceptance-criterion edit. Until 2026-08-01 the
+ * rule was MIRRORED (an inline check in `CorpusService.set`, a `computeSetStatus`
+ * twin in `AcService`), cross-referenced only by comments. Two copies of a
+ * governance rule drift, the copy that drifts is the one nobody is looking at, and
+ * the failure is SILENT: an edit that should have demoted simply does not, and the
+ * criterion is re-reviewed by nobody. A cross-referencing comment is a prose
+ * mitigation for a mechanism problem.
+ *
+ * ⛔ Do NOT re-inline this rule at a call site, and do NOT add a wrapper that
+ * re-states either half of it (the `approved` trigger or the `draft` target) — the
+ * whole rule, both halves, is this function.
+ * `packages/lore/tests/unit/service/demotion-rule-ssot.test.ts` stubs THIS function
+ * and asserts both call sites move together, so a re-inlined copy fails that test
+ * instead of drifting quietly.
+ *
+ * `approved → draft` is deliberately ABSENT from {@link VALID_TRANSITIONS}: it is
+ * an internal lifecycle side effect, never a user-requestable transition. A caller
+ * that also runs {@link isValidTransition} MUST exempt the status this function
+ * returns from that check (`CorpusService.set` does exactly that), or a legitimate
+ * demotion is rejected as an illegal jump.
+ *
+ * Side-effect class: pure — no IO, no store access, no wall-clock read.
+ * Referentially transparent: equal inputs always yield an equal result.
+ *
+ * @param currentStatus - The doc's status BEFORE the edit.
+ * @param contentChanged - Whether this edit changes governing contract content.
+ * @returns `"draft"` when an `approved` doc's contract content changed; otherwise
+ *   `currentStatus`, returned unchanged.
+ * @throws {Error} When `currentStatus` is not a known {@link DocStatus}. A value
+ *   outside the closed union can only arrive via an unchecked cast, and returning
+ *   it unchanged would silently skip a demotion that was owed — the exact silent
+ *   failure this SSOT exists to prevent. `VALID_TRANSITIONS`' own key set is the
+ *   status domain, so no second list of statuses is introduced here. A bare `Error`
+ *   matches this module's other fail-loud programmer-error guards
+ *   (`slugifyWithCollision`); Zod's `docStatusSchema` owns boundary validation.
+ * @example
+ * resolveStatusAfterContractEdit("approved", true);  // "draft"    — demoted
+ * resolveStatusAfterContractEdit("approved", false); // "approved" — metadata-only patch
+ * resolveStatusAfterContractEdit("active", true);    // "active"   — only `approved` demotes
+ *
+ * Source: SPEC-002 §3; spec-lore-ac-set-in-place-edit-of-a-declared-acceptance D2;
+ *   task-the-approved-to-draft-demotion-rule-is-mirrored-in-ac.
+ */
+export function resolveStatusAfterContractEdit(currentStatus: DocStatus, contentChanged: boolean): DocStatus {
+  if (!Object.prototype.hasOwnProperty.call(VALID_TRANSITIONS, currentStatus)) {
+    throw new Error(
+      `resolveStatusAfterContractEdit: unknown doc status "${String(currentStatus)}" — ` +
+        `expected one of ${Object.keys(VALID_TRANSITIONS).join(", ")}`,
+    );
+  }
+  return currentStatus === "approved" && contentChanged ? "draft" : currentStatus;
+}
+
 // ─── Slug Generation ───────────────────────────────────────────────────────
 
 /**

@@ -48,6 +48,7 @@ import {
   computeAcCoverage,
   extractDeclaredAcScope,
   resolveGoverningSpecByAcScope,
+  resolveStatusAfterContractEdit,
 } from "@lore/core";
 import type {
   CreateDocInput,
@@ -1549,9 +1550,20 @@ export class CorpusService {
     // ask. It also unconditionally OVERRIDES any status the caller requested
     // in the same patch, matching the pre-existing behavior this block always
     // had (a content/title edit on an approved doc always demotes to draft).
-    const isApprovedAutoResetToDraft = existing.status === "approved" && contentOrTitleChanged;
+    //
+    // The RULE itself (trigger AND target status) lives in ONE place:
+    // `@lore/core`'s `resolveStatusAfterContractEdit`, beside `VALID_TRANSITIONS`.
+    // `AcService.setCriterion` calls that same function for an in-place
+    // acceptance-criterion edit (spec-lore-ac-set-in-place-edit-of-a-declared-
+    // acceptance D2). ⛔ Never re-inline the `=== "approved"` / `"draft"` literals
+    // here: the rule was mirrored across the two services until 2026-08-01 and the
+    // cross-referencing comments were the only thing holding them together —
+    // `tests/unit/service/demotion-rule-ssot.test.ts` now stubs the shared function
+    // and fails if EITHER call site stops following it.
+    const demotedStatus = resolveStatusAfterContractEdit(existing.status, contentOrTitleChanged);
+    const isApprovedAutoResetToDraft = demotedStatus !== existing.status;
     if (isApprovedAutoResetToDraft) {
-      newStatus = "draft";
+      newStatus = demotedStatus;
     }
 
     // Reject illegal USER-requested lifecycle transitions (B1 blocker fix) —
