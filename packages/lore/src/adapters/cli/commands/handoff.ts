@@ -110,8 +110,37 @@ const COVERAGE_CHECK_SUBCOMMAND = "coverage-check";
  * PARSES, not the format it uses to REPORT its own verdict). One
  * undispositioned item id per stderr line, behind a fixed, greppable prefix
  * so a consumer/test parses exact ids rather than scraping free text.
+ *
+ * @invariant Reserved EXCLUSIVELY for an item id this verb never saw named at
+ *   all. An id that WAS named by a marker line but carried a disposition
+ *   token matching neither accepted form uses
+ *   {@link UNRECOGNIZED_DISPOSITION_STDERR_PREFIX} instead — reusing this
+ *   prefix for that case is exactly the defect
+ *   task-resume-coverage-disposition-parser-an-unrecognised-token closed: a
+ *   parser that has already recovered the item id and reports "never
+ *   mentioned" anyway is asserting something it knows to be false.
  */
 const UNDISPOSITIONED_ITEM_STDERR_PREFIX = "Undispositioned resume ticket item: ";
+
+/**
+ * Own presentation literal for the OTHER unaccounted-item outcome
+ * (task-resume-coverage-disposition-parser-an-unrecognised-token) — a marker
+ * line DID name this item id, but its disposition token matched neither
+ * {@link RESUME_DISPOSITION_DONE} by identity nor
+ * {@link RESUME_DISPOSITION_DEFERRED_PREFIX} as a prefix at all. (A
+ * bare/whitespace-only `deferred:` DOES match that prefix and stays on the
+ * {@link UNDISPOSITIONED_ITEM_STDERR_PREFIX} path unchanged —
+ * spec-resume-coverage-floor-the-satisfaction-boundaries-a S1 — this prefix
+ * is reserved for a token matching NEITHER form's shape at all.) Distinct
+ * from that prefix on purpose: "never mentioned" and "mentioned with a token
+ * this verb does not recognize" are different facts, and collapsing them was
+ * the defect this task closed — a consumer re-emitting the identical
+ * malformed line forever could not tell the two failures apart under one
+ * prefix. Measured live (2026-08-01): `done` immediately followed by a
+ * non-ASCII em-dash and a reason was rejected, reported as "unmentioned",
+ * re-emitted unchanged, and rejected again.
+ */
+const UNRECOGNIZED_DISPOSITION_STDERR_PREFIX = "Unrecognized disposition for resume ticket item: ";
 
 /**
  * The Claude Code Stop-hook contract's blocking decision value
@@ -370,7 +399,7 @@ interface TranscriptScan {
  *
  * Only marker-bearing MAIN-CHAIN assistant texts are retained — a whole
  * session's prose would be an unbounded copy of the transcript in memory, and
- * `parseDispositionedIds` can only ever recognize a line that starts with the
+ * `parseDispositionLines` can only ever recognize a line that starts with the
  * marker, so a text without one (or one filtered out by S2) contributes
  * nothing.
  *
@@ -458,40 +487,77 @@ function scanTranscript(transcriptText: string): TranscriptScan {
 }
 
 /**
+ * What one call to {@link parseDispositionLines} recovers from a single
+ * assistant text: the item ids it ACCOUNTS for, and — separately — the item
+ * ids it merely NAMES with a disposition token this parser does not
+ * recognize (task-resume-coverage-disposition-parser-an-unrecognised-token).
+ *
+ * The two sets are disjoint by construction (an id lands in exactly one, or
+ * neither if the text never names it at all) and BOTH matter to the caller:
+ * before this type existed, `runCoverageCheck` could only see `accepted`, so
+ * an id it had already recovered from a marker line — just with a token it
+ * didn't recognize — was indistinguishable from an id the text never
+ * mentioned. Both ended up "missing" and both were reported identically as
+ * "Undispositioned … never mentioned", which is false for the second case:
+ * the parser HAD the item id and threw that fact away.
+ */
+interface DispositionParseResult {
+  /** Item ids this text accounts for (`RESUME_DISPOSITION_DONE` or a non-empty `RESUME_DISPOSITION_DEFERRED_PREFIX<reason>` — SPEC-112 D5: account, not complete). */
+  readonly accepted: ReadonlySet<string>;
+  /**
+   * Item id → the VERBATIM (trimmed) disposition text a marker line carried,
+   * for every line whose token matched NEITHER accepted form's shape at all
+   * (`disposition !== RESUME_DISPOSITION_DONE` AND it does not even start
+   * with `RESUME_DISPOSITION_DEFERRED_PREFIX`).
+   *
+   * Deliberately EXCLUDES a bare/whitespace-only `deferred:` — that token DOES
+   * start with the accepted prefix, so it fails only the S1 non-empty-reason
+   * check, not "matches neither form". `spec-resume-coverage-floor-the-satisfaction-boundaries-a`
+   * S1 already classifies that case as "not an accounting" via the plain
+   * `accepted`-miss path, and this task's own requirement pins that
+   * classification UNCHANGED — it must keep surfacing through
+   * {@link UNDISPOSITIONED_ITEM_STDERR_PREFIX}, not this map.
+   */
+  readonly unrecognized: ReadonlyMap<string, string>;
+}
+
+/**
  * Parses `${RESUME_DISPOSITION_MARKER} <item-id>: <disposition>` lines out of
- * ONE assistant text and returns the set of item ids carrying an ACCEPTED
- * disposition (`RESUME_DISPOSITION_DONE` or
- * `RESUME_DISPOSITION_DEFERRED_PREFIX<reason>` — SPEC-112 D5: the obligation is
- * to account, not to complete). A line carrying the marker but an
- * unrecognized disposition token is NOT counted as dispositioned — that id
- * then surfaces on stderr, which is the loud-failure behavior D7 requires
- * over a silent accept-anything parse.
+ * ONE assistant text, separating every named item id into exactly one of
+ * {@link DispositionParseResult}'s two buckets. A line carrying the marker but
+ * an unrecognized disposition token is never silently counted as
+ * dispositioned — that id surfaces via `unrecognized` (or, for the S1
+ * bare-deferred case, via neither bucket at all and the caller's plain
+ * "missing" fallback), which is the loud-failure behavior D7 requires over a
+ * silent accept-anything parse.
  *
  * `spec-resume-coverage-floor-the-satisfaction-boundaries-a` S1: a deferral is
  * accepted only when the text FOLLOWING `RESUME_DISPOSITION_DEFERRED_PREFIX`,
  * trimmed, is non-empty. A bare `deferred:` and a whitespace-only
- * `deferred:   ` are both UNRECOGNIZED dispositions under this rule — routed
- * through the same loud path as any other unrecognized token (the id stays
- * out of `dispositioned`, surfaces on stderr, and appears in the block
- * reason), never a second warning channel. `assistantText` arrives here
- * already `.trim()`ed per-line by the loop above, so a whitespace-only reason
- * in practice reduces to the bare-prefix case before this function ever sees
- * it — the explicit `.trim()` below is kept anyway so this function's own
- * contract does not silently depend on that upstream trim.
+ * `deferred:   ` are both UNRECOGNIZED dispositions under this rule, but they
+ * are NOT added to `unrecognized` (see that field's own doc) — this function
+ * changed to add the NEW bucket without touching S1's already-verified
+ * behavior. `assistantText` arrives here already `.trim()`ed per-line by the
+ * loop above, so a whitespace-only reason in practice reduces to the
+ * bare-prefix case before this function ever sees it — the explicit
+ * `.trim()` below is kept anyway so this function's own contract does not
+ * silently depend on that upstream trim.
  *
  * Called once per disposition source and unioned by the caller
  * (spec-resume-ticket-coverage-floor-blocking-channel-arming H5): every
  * post-ticket assistant message from the transcript, plus the current turn's
  * `last_assistant_message`. It is also the parser AC-RCH-2 feeds the block
  * reason's own template lines back through — {@link buildBlockReason} composes
- * lines this function accepts, so "ready to copy" is a round-trip property, not
- * a claim about wording.
+ * lines this function's `accepted` half recognizes, so "ready to copy" is a
+ * round-trip property, not a claim about wording.
  *
  * @param assistantText - One assistant message's plain text.
- * @returns The item ids that text accounts for.
+ * @returns The item ids that text accounts for, and those it names with an
+ *   unrecognized token.
  */
-function parseDispositionedIds(assistantText: string): ReadonlySet<string> {
-  const dispositioned = new Set<string>();
+function parseDispositionLines(assistantText: string): DispositionParseResult {
+  const accepted = new Set<string>();
+  const unrecognized = new Map<string, string>();
   for (const rawLine of assistantText.split(/\r?\n/)) {
     const line = rawLine.trim();
     if (!line.startsWith(RESUME_DISPOSITION_MARKER)) continue;
@@ -499,6 +565,7 @@ function parseDispositionedIds(assistantText: string): ReadonlySet<string> {
     const colonIndex = rest.indexOf(":");
     if (colonIndex === -1) continue;
     const itemId = rest.slice(0, colonIndex).trim();
+    if (itemId.length === 0) continue;
     const disposition = rest.slice(colonIndex + 1).trim();
     // S1: a deferral is accepted only with a non-empty reason after the
     // prefix — a bare `deferred:` (or one reducing to it after trimming
@@ -507,11 +574,26 @@ function parseDispositionedIds(assistantText: string): ReadonlySet<string> {
     const deferralReason = disposition.startsWith(RESUME_DISPOSITION_DEFERRED_PREFIX)
       ? disposition.slice(RESUME_DISPOSITION_DEFERRED_PREFIX.length).trim()
       : undefined;
-    const isAccepted =
-      disposition === RESUME_DISPOSITION_DONE || (deferralReason !== undefined && deferralReason.length > 0);
-    if (itemId.length > 0 && isAccepted) dispositioned.add(itemId);
+    if (disposition === RESUME_DISPOSITION_DONE || (deferralReason !== undefined && deferralReason.length > 0)) {
+      accepted.add(itemId);
+      continue;
+    }
+    // `deferralReason === undefined` means `disposition` did not even start
+    // with the deferred prefix — it matches NEITHER accepted form's shape,
+    // which is exactly `unrecognized`'s contract. A DEFINED-but-empty
+    // `deferralReason` (S1's bare/whitespace-only `deferred:`) falls through
+    // here without being recorded anywhere — unchanged, per this task's own
+    // requirement that S1's classification stays as-is.
+    if (deferralReason === undefined) unrecognized.set(itemId, disposition);
   }
-  return dispositioned;
+  return { accepted, unrecognized };
+}
+
+/** One item still unaccounted for after unioning every disposition source — either never named at all, or named with a token {@link parseDispositionLines} did not recognize. */
+interface MissingItem {
+  readonly id: string;
+  /** Present only when some message named this id with an unrecognized token — the verbatim (trimmed) text it carried. */
+  readonly unrecognizedToken?: string;
 }
 
 /**
@@ -528,12 +610,12 @@ function parseDispositionedIds(assistantText: string): ReadonlySet<string> {
  *      never a hand-typed copy, which would be the remembered-wording drift
  *      vector SPEC-112 D7 forbids and which AC-RCH-2 pins with a zero-hit
  *      search over this source for a typed marker literal.
- *   2. Feeding the returned text back through {@link parseDispositionedIds}
- *      recognizes EXACTLY `missingIds` — the per-id lines are literally
- *      copyable, and the surrounding prose lines are written so none of them
- *      begins with the marker and parses as a spurious id. Round-tripping,
- *      rather than substring presence, is what makes "ready to copy" a
- *      measurable property.
+ *   2. Feeding the returned text back through {@link parseDispositionLines}
+ *      recognizes EXACTLY `missing`'s ids as `accepted` — the per-id template
+ *      lines are literally copyable, and the surrounding prose lines are
+ *      written so none of them begins with the marker and parses as a
+ *      spurious id. Round-tripping, rather than substring presence, is what
+ *      makes "ready to copy" a measurable property.
  *
  * reason for carrying a template at all: the measured control arm. Over one
  * 7h46m session, `stop-doc-sync.mjs`'s reason (an instruction plus a
@@ -541,21 +623,46 @@ function parseDispositionedIds(assistantText: string): ReadonlySet<string> {
  * stderr symptom line earned 0/130 — the model was never told what to write.
  * The `Required output` framing is copied from that arm deliberately.
  *
- * @param missingIds - The undispositioned item ids, in ticket order.
+ * task-resume-coverage-disposition-parser-an-unrecognised-token: every id in
+ * `missing` still gets its copyable template line regardless of
+ * `unrecognizedToken` — closing the item must stay possible with one copy —
+ * but an item carrying `unrecognizedToken` ALSO gets a distinct trailing
+ * note naming the exact token it was rejected for and the two accepted
+ * forms, so the model reading this `reason` (the ONLY channel it ever sees —
+ * H1/H2 keep the exit status uninformative) can tell "you never mentioned
+ * this" apart from "you mentioned this, but I didn't recognize what you
+ * wrote".
+ *
+ * @param missing - The undispositioned items, in ticket order.
  * @returns The `reason` text for the stdout block decision.
  */
-function buildBlockReason(missingIds: readonly string[]): string {
-  const dispositionLines = missingIds
-    .map((id) => `${RESUME_DISPOSITION_MARKER} ${id}: ${RESUME_DISPOSITION_DONE}`)
+function buildBlockReason(missing: readonly MissingItem[]): string {
+  const dispositionLines = missing
+    .map((item) => `${RESUME_DISPOSITION_MARKER} ${item.id}: ${RESUME_DISPOSITION_DONE}`)
     .join("\n");
+  const unrecognizedItems = missing.filter(
+    (item): item is MissingItem & { unrecognizedToken: string } => item.unrecognizedToken !== undefined,
+  );
+  const unrecognizedSection =
+    unrecognizedItems.length > 0
+      ? [
+          "",
+          `The following item(s) were already named this session, but with a disposition token this verb does not recognize — that is NOT the same as never mentioning them:`,
+          ...unrecognizedItems.map(
+            (item) =>
+              `- ${item.id}: received "${item.unrecognizedToken}" — the only accepted forms are \`${RESUME_DISPOSITION_DONE}\` or \`${RESUME_DISPOSITION_DEFERRED_PREFIX}<reason>\`.`,
+          ),
+        ].join("\n")
+      : "";
   return [
-    `${missingIds.length} item(s) from this session's resume ticket are still unaccounted for. ${RESUME_COVERAGE_FLOOR}`,
+    `${missing.length} item(s) from this session's resume ticket are still unaccounted for. ${RESUME_COVERAGE_FLOOR}`,
     "",
     `Required output — emit exactly these lines in your final message, replacing \`${RESUME_DISPOSITION_DONE}\` with \`${RESUME_DISPOSITION_DEFERRED_PREFIX}<reason>\` on any item this session did not handle:`,
     "",
     dispositionLines,
     "",
     `Accounting is not completion: \`${RESUME_DISPOSITION_DONE}\` and \`${RESUME_DISPOSITION_DEFERRED_PREFIX}<reason>\` are equally accepted, and a deferral must carry its reason after the colon. Items already dispositioned earlier in this session are not listed above and need not be restated.`,
+    unrecognizedSection,
   ].join("\n");
 }
 
@@ -580,9 +687,14 @@ function buildBlockReason(missingIds: readonly string[]): string {
  *   - Every recovered item id dispositioned, by any post-ticket turn or this
  *     one (H5) → empty stdout.
  *   - ≥1 recovered item id undispositioned → one `{"decision":"block"}` JSON
- *     object on stdout, plus each missing id on its own
- *     `UNDISPOSITIONED_ITEM_STDERR_PREFIX` stderr line for the operator
- *     watching a terminal (H2).
+ *     object on stdout, plus each missing id on its own stderr line for the
+ *     operator watching a terminal (H2) — `UNDISPOSITIONED_ITEM_STDERR_PREFIX`
+ *     when the id was never named at all, or
+ *     `UNRECOGNIZED_DISPOSITION_STDERR_PREFIX` (naming the verbatim token
+ *     received) when a marker line DID name it but with a token neither
+ *     accepted form matches
+ *     (task-resume-coverage-disposition-parser-an-unrecognised-token) — never
+ *     the former for the latter case, which is the defect that task closed.
  *
  * `process.exitCode` is deliberately left untouched on every path; the only
  * non-zero exits reachable through this verb are the cardinality-template
@@ -629,19 +741,49 @@ function runCoverageCheck(): void {
   // transcript, THIS turn read from `last_assistant_message`. The channel split
   // is D8's and survives: only the current turn's final message is exposed to
   // the flush race, and it is exactly the one not read from the transcript.
+  //
+  // task-resume-coverage-disposition-parser-an-unrecognised-token: alongside
+  // `dispositioned`, `unrecognizedTokenByItemId` accumulates every id a
+  // message NAMED with a token neither accepted form matches. Later sources
+  // overwrite earlier ones for the same id (chronological order: transcript
+  // turns, then the current turn), so the token shown is the most recent
+  // attempt — moot for an id that ends up `dispositioned` anyway, since only
+  // ids that are still `missing` below ever consult this map.
   const dispositioned = new Set<string>();
+  const unrecognizedTokenByItemId = new Map<string, string>();
   for (const message of scan.dispositionBearingMessages) {
     if (message.entryIndex <= ticket.entryIndex) continue;
-    for (const id of parseDispositionedIds(message.text)) dispositioned.add(id);
+    const parsed = parseDispositionLines(message.text);
+    for (const id of parsed.accepted) dispositioned.add(id);
+    for (const [id, token] of parsed.unrecognized) unrecognizedTokenByItemId.set(id, token);
   }
-  for (const id of parseDispositionedIds(lastAssistantMessage)) dispositioned.add(id);
+  const currentTurn = parseDispositionLines(lastAssistantMessage);
+  for (const id of currentTurn.accepted) dispositioned.add(id);
+  for (const [id, token] of currentTurn.unrecognized) unrecognizedTokenByItemId.set(id, token);
 
-  const missing = expectedIds.filter((id) => !dispositioned.has(id));
+  const missing: MissingItem[] = expectedIds
+    .filter((id) => !dispositioned.has(id))
+    .map((id) => {
+      // `exactOptionalPropertyTypes`: omit the property entirely rather than
+      // set it to `undefined` when this id was never named with a bad token.
+      const unrecognizedToken = unrecognizedTokenByItemId.get(id);
+      return unrecognizedToken === undefined ? { id } : { id, unrecognizedToken };
+    });
 
   if (missing.length === 0) return; // every item accounted for — nothing on stdout
 
-  for (const id of missing) {
-    process.stderr.write(`${UNDISPOSITIONED_ITEM_STDERR_PREFIX}${id}\n`);
+  for (const item of missing) {
+    // The defect this task closed: an id already recovered from a marker line
+    // must never be reported through the "never mentioned" prefix — that is
+    // a claim the parser knows to be false the moment `unrecognizedToken` is
+    // defined.
+    if (item.unrecognizedToken !== undefined) {
+      process.stderr.write(
+        `${UNRECOGNIZED_DISPOSITION_STDERR_PREFIX}${item.id}: received "${item.unrecognizedToken}" (accepted: "${RESUME_DISPOSITION_DONE}" or "${RESUME_DISPOSITION_DEFERRED_PREFIX}<reason>")\n`,
+      );
+    } else {
+      process.stderr.write(`${UNDISPOSITIONED_ITEM_STDERR_PREFIX}${item.id}\n`);
+    }
   }
   // H1: the verdict travels the Stop contract's block channel. One JSON object,
   // no trailing newline (byte-identical framing to `stop-doc-sync.mjs`, whose

@@ -119,6 +119,18 @@ const VERB_SOURCE_PATH = join(PACKAGE_ROOT, "src", "adapters", "cli", "commands"
  */
 const UNDISPOSITIONED_PREFIX = "Undispositioned resume ticket item: ";
 
+/**
+ * The verb's DISTINCT stderr prefix for "this id was named, but with a token
+ * matching neither accepted form"
+ * (task-resume-coverage-disposition-parser-an-unrecognised-token). Hand-typed
+ * here for the same reason {@link UNDISPOSITIONED_PREFIX} is — not part of the
+ * `@lore/core` grammar, no export to key on. Deliberately a DIFFERENT literal
+ * from that prefix: the whole point of this task is that the two facts
+ * ("never mentioned" vs. "mentioned with a bad token") must not collapse into
+ * one channel.
+ */
+const UNRECOGNIZED_DISPOSITION_PREFIX = "Unrecognized disposition for resume ticket item: ";
+
 /** The Stop-hook contract's blocking decision value — the HARNESS's vocabulary, not lore corpus grammar, so a literal is correct here (see the verb's own `STOP_HOOK_BLOCK_DECISION` doc). */
 const BLOCK_DECISION = "block";
 
@@ -311,6 +323,18 @@ function parseUndispositionedIds(stderr: string): string[] {
   for (const line of stderr.split("\n")) {
     if (!line.startsWith(UNDISPOSITIONED_PREFIX)) continue;
     ids.push(line.slice(UNDISPOSITIONED_PREFIX.length).trim());
+  }
+  return ids;
+}
+
+/** Extracts every id named on an `UNRECOGNIZED_DISPOSITION_PREFIX` stderr line (task-resume-coverage-disposition-parser-an-unrecognised-token). */
+function parseUnrecognizedDispositionIds(stderr: string): string[] {
+  const ids: string[] = [];
+  for (const line of stderr.split("\n")) {
+    if (!line.startsWith(UNRECOGNIZED_DISPOSITION_PREFIX)) continue;
+    const rest = line.slice(UNRECOGNIZED_DISPOSITION_PREFIX.length);
+    const colonIndex = rest.indexOf(":");
+    ids.push((colonIndex === -1 ? rest : rest.slice(0, colonIndex)).trim());
   }
   return ids;
 }
@@ -1131,28 +1155,47 @@ describe("AC-RCS-2 — a sidechain disposition does not satisfy, but a sidechain
 // ─── NEGATIVE — the disposition grammar rejects what it must ────────────────
 
 describe("NEGATIVE — an accounting must use one of the two accepted dispositions (D5)", () => {
-  it("a marker line carrying an unrecognized disposition token is not an accounting", () => {
+  // task-resume-coverage-disposition-parser-an-unrecognised-token: both cases
+  // below name a REAL item id with a token matching NEITHER accepted form's
+  // shape at all ("maybe later" has no colon at all; "deferred" — missing its
+  // trailing colon — does not even start with RESUME_DISPOSITION_DEFERRED_PREFIX).
+  // Before that task, both were reported identically to a truly-never-mentioned
+  // id via UNDISPOSITIONED_PREFIX — a false claim, since the parser had already
+  // recovered the item id. They must now surface via the DISTINCT
+  // UNRECOGNIZED_DISPOSITION_PREFIX channel instead (full coverage in the
+  // dedicated describe block below); asserted here only as the regression
+  // guard that they are no longer reported through the generic prefix.
+  it("a marker line carrying an unrecognized disposition token is not an accounting, and is NOT reported through the generic 'never mentioned' prefix", () => {
     const transcriptPath = writeArmedTicketTranscript(tmpDir, TWO_AND_TWO_TICKET_TEXT);
     const message = TWO_AND_TWO_IDS.map((id) => dispositionLine(id, "maybe later")).join("\n");
 
     const result = runCoverageCheck({ transcript_path: transcriptPath, last_assistant_message: message });
 
     expect(parseDecisionPayload(result.stdout).decision).toBe(BLOCK_DECISION);
-    expect(sortedUnique(parseUndispositionedIds(result.stderr))).toEqual(sortedUnique(TWO_AND_TWO_IDS));
+    // Still unaccounted (every id remains open)…
+    expect(sortedUnique(parseUnrecognizedDispositionIds(result.stderr))).toEqual(sortedUnique(TWO_AND_TWO_IDS));
+    // …but NOT via the "never mentioned" prefix — the parser recovered every
+    // one of these ids, so reporting them as unmentioned would be false.
+    expect(parseUndispositionedIds(result.stderr)).toEqual([]);
   });
 
-  it("a bare deferral with no reason after the colon is not an accounting — D5 requires the reason", () => {
+  it("a disposition token missing its colon entirely (bare 'deferred', not 'deferred:') matches neither accepted form and is NOT reported through the generic 'never mentioned' prefix", () => {
     const transcriptPath = writeArmedTicketTranscript(tmpDir, TWO_AND_TWO_TICKET_TEXT);
     // `RESUME_DISPOSITION_DEFERRED_PREFIX` minus its trailing colon: the token
-    // is derived from the export, never re-typed.
+    // is derived from the export, never re-typed. Without the colon this does
+    // NOT start with the prefix at all — a different case from S1's bare
+    // `deferred:` (empty reason AFTER a recognized prefix), which is covered
+    // separately by the AC-RCS-1 describe block and stays on the generic path.
     const bareDeferred = RESUME_DISPOSITION_DEFERRED_PREFIX.replace(/:$/, "");
     expect(bareDeferred).not.toBe(RESUME_DISPOSITION_DEFERRED_PREFIX);
+    expect(bareDeferred.startsWith(RESUME_DISPOSITION_DEFERRED_PREFIX)).toBe(false);
     const message = TWO_AND_TWO_IDS.map((id) => dispositionLine(id, bareDeferred)).join("\n");
 
     const result = runCoverageCheck({ transcript_path: transcriptPath, last_assistant_message: message });
 
     expect(parseDecisionPayload(result.stdout).decision).toBe(BLOCK_DECISION);
-    expect(sortedUnique(parseUndispositionedIds(result.stderr))).toEqual(sortedUnique(TWO_AND_TWO_IDS));
+    expect(sortedUnique(parseUnrecognizedDispositionIds(result.stderr))).toEqual(sortedUnique(TWO_AND_TWO_IDS));
+    expect(parseUndispositionedIds(result.stderr)).toEqual([]);
   });
 
   it("a text with no marker at all leaves every id unaccounted", () => {
@@ -1164,6 +1207,179 @@ describe("NEGATIVE — an accounting must use one of the two accepted dispositio
     });
 
     expect(sortedUnique(parseUndispositionedIds(result.stderr))).toEqual(sortedUnique(TWO_AND_TWO_IDS));
+  });
+});
+
+// ─── task-resume-coverage-disposition-parser-an-unrecognised-token ─────────
+//
+// The defect: a recognized item id carrying an unrecognized disposition token
+// was reported identically to an item never mentioned at all — a claim the
+// parser knew to be false, since it had already recovered the item id. Fixed
+// by splitting the "missing" outcome into two distinguishable diagnostics
+// (UNRECOGNIZED_DISPOSITION_PREFIX vs. UNDISPOSITIONED_PREFIX), asserted on
+// BOTH channels the verb writes to: stderr (the operator channel) and the
+// stdout `reason` (the ONLY channel the acting model itself ever sees, per
+// H1/H2 — this is why the live incident happened at all: the model read a
+// misleading "unaccounted for" claim about an item it had, in fact, named).
+
+describe("task-resume-coverage-disposition-parser-an-unrecognised-token — an unrecognized token on a KNOWN item id fails loud, distinct from 'never mentioned'", () => {
+  it("NEGATIVE: a real ticket item named with an unrecognized token produces a diagnostic containing that item id AND the verbatim token, on both stderr and the stdout reason", () => {
+    const transcriptPath = writeArmedTicketTranscript(tmpDir, TWO_AND_TWO_TICKET_TEXT);
+    const targetId = TWO_AND_TWO_IDS[1] as string;
+    const rawToken = "maybe later, need to check with the team first";
+    // The other three ids are fully (and validly) accounted for, so only
+    // `targetId` can possibly appear in either diagnostic channel below — a
+    // sharper assertion than checking set membership over all four.
+    const otherIds = TWO_AND_TWO_IDS.filter((id) => id !== targetId);
+    const message = [dispositionLine(targetId, rawToken), fullAccounting(otherIds)].join("\n");
+
+    const result = runCoverageCheck({ transcript_path: transcriptPath, last_assistant_message: message });
+
+    expect(result.exitCode).toBe(0);
+    const reason = blockReasonOf(result);
+    // Assert on the TOKEN SUBSTRING itself, not a remembered phrase of the
+    // whole message — a rewritten prose template must not make this vacuous.
+    expect(reason).toContain(targetId);
+    expect(reason).toContain(rawToken);
+    expect(result.stderr).toContain(targetId);
+    expect(result.stderr).toContain(rawToken);
+    // The two accepted forms must be stated too (requirement 1), composed
+    // from the SAME exported constants the verb parses with, never a
+    // hand-typed copy.
+    expect(reason).toContain(RESUME_DISPOSITION_DONE);
+    expect(reason).toContain(RESUME_DISPOSITION_DEFERRED_PREFIX);
+
+    // It must NOT be reported as an unmentioned item: the only id in this
+    // fixture ever unaccounted for is `targetId`, and it must surface
+    // EXCLUSIVELY via the unrecognized-token channel.
+    expect(parseUnrecognizedDispositionIds(result.stderr)).toEqual([targetId]);
+    expect(parseUndispositionedIds(result.stderr)).toEqual([]);
+  });
+
+  it("CONTROL: a message naming NO ticket item at all (no marker, just garbage) produces no unrecognized-token diagnostic — silence stays correct for 'does not concern a ticket item'", () => {
+    const transcriptPath = writeArmedTicketTranscript(tmpDir, TWO_AND_TWO_TICKET_TEXT);
+
+    const result = runCoverageCheck({
+      transcript_path: transcriptPath,
+      last_assistant_message: "totally unrelated prose, no marker, no colon-shaped item reference anywhere",
+    });
+
+    // Positive control FIRST (anti-vacuity): the SAME fixture class, with a
+    // marker line naming a real id, DOES fire the diagnostic (proven by the
+    // NEGATIVE test above) — so this empty result is a measured absence, not
+    // a detector that never runs.
+    expect(parseUnrecognizedDispositionIds(result.stderr)).toEqual([]);
+    // Case (1) is still correctly silent-as-generic: every id is unmentioned,
+    // reported the ORIGINAL way.
+    expect(sortedUnique(parseUndispositionedIds(result.stderr))).toEqual(sortedUnique(TWO_AND_TWO_IDS));
+  });
+
+  it("CONTROL: a marker line naming an id NOT part of this ticket, with a garbled token, produces no diagnostic of any kind once every REAL id is validly accounted for", () => {
+    const transcriptPath = writeArmedTicketTranscript(tmpDir, TWO_AND_TWO_TICKET_TEXT);
+    const foreignId = "KD99"; // not one of TWO_AND_TWO_IDS — this ticket only ever printed KD1/KD2/NS1/NS2
+    expect(TWO_AND_TWO_IDS).not.toContain(foreignId);
+    const message = [fullAccounting(TWO_AND_TWO_IDS), dispositionLine(foreignId, "garbled nonsense")].join("\n");
+
+    const result = runCoverageCheck({ transcript_path: transcriptPath, last_assistant_message: message });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("");
+  });
+
+  it("BOUNDARY: the exact live failure — `done` immediately followed by a non-ASCII em-dash and a reason, no separator at all", () => {
+    const transcriptPath = writeArmedTicketTranscript(tmpDir, TWO_AND_TWO_TICKET_TEXT);
+    const targetId = TWO_AND_TWO_IDS[3] as string;
+    // Measured live 2026-08-01: `done` directly touching U+2014 EM DASH
+    // (doubled), no space — NOT `done ` + a dash, which would not reproduce
+    // this: the absence of any separator is the point.
+    const rawToken = `${RESUME_DISPOSITION_DONE}——git branch -a shows only main, the named stale branch no longer exists`;
+    expect(rawToken.startsWith(`${RESUME_DISPOSITION_DONE} `)).toBe(false);
+    expect(rawToken).not.toBe(RESUME_DISPOSITION_DONE);
+    const otherIds = TWO_AND_TWO_IDS.filter((id) => id !== targetId);
+    const message = [dispositionLine(targetId, rawToken), fullAccounting(otherIds)].join("\n");
+
+    const result = runCoverageCheck({ transcript_path: transcriptPath, last_assistant_message: message });
+
+    expect(result.exitCode).toBe(0);
+    const reason = blockReasonOf(result);
+    // The literal character, not an ASCII stand-in — `done--reason` would
+    // pass against code that still mishandles U+2014 specifically.
+    expect(reason).toContain(rawToken);
+    expect(result.stderr).toContain(rawToken);
+    expect(parseUnrecognizedDispositionIds(result.stderr)).toEqual([targetId]);
+    expect(parseUndispositionedIds(result.stderr)).toEqual([]);
+  });
+
+  it("ERROR: a token embedding a literal double-quote character does not crash the verb and still surfaces as a plain substring", () => {
+    const transcriptPath = writeArmedTicketTranscript(tmpDir, TWO_AND_TWO_TICKET_TEXT);
+    const targetId = TWO_AND_TWO_IDS[0] as string;
+    const rawToken = `done, or so I thought — see "the incident notes" for why it wasn't`;
+    const otherIds = TWO_AND_TWO_IDS.filter((id) => id !== targetId);
+    const message = [dispositionLine(targetId, rawToken), fullAccounting(otherIds)].join("\n");
+
+    const result = runCoverageCheck({ transcript_path: transcriptPath, last_assistant_message: message });
+
+    expect(result.exitCode).toBe(0);
+    // A crash would leave stdout unparseable — parseDecisionPayload itself
+    // throws on that, so this call is the "did not crash" assertion.
+    const reason = blockReasonOf(result);
+    expect(reason).toContain(rawToken);
+    expect(result.stderr).toContain(rawToken);
+  });
+
+  it("STATE: an id first named with an unrecognized token in an EARLIER turn, then correctly dispositioned later, closes cleanly with no diagnostic at all", () => {
+    const targetId = TWO_AND_TWO_IDS[2] as string;
+    const transcriptPath = writeArmedTicketTranscript(tmpDir, TWO_AND_TWO_TICKET_TEXT, [
+      assistantTextEntry(dispositionLine(targetId, "not sure yet, will decide")),
+    ]);
+
+    const result = runCoverageCheck({
+      transcript_path: transcriptPath,
+      last_assistant_message: fullAccounting(TWO_AND_TWO_IDS),
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("");
+
+    // Self-guard: WITHOUT the corrective final accounting, that same stale
+    // malformed attempt surfaces via the unrecognized-token channel — proving
+    // it was real and the clean close above is attributable to the later
+    // correction, not to the malformed attempt never having been read.
+    const withoutCorrection = runCoverageCheck({ transcript_path: transcriptPath, last_assistant_message: "" });
+    expect(parseUnrecognizedDispositionIds(withoutCorrection.stderr)).toEqual([targetId]);
+  });
+
+  it("REGRESSION: bare `done` and `deferred:<reason>` are both still accepted with no diagnostic of either kind", () => {
+    const transcriptPath = writeArmedTicketTranscript(tmpDir, TWO_AND_TWO_TICKET_TEXT);
+
+    const result = runCoverageCheck({
+      transcript_path: transcriptPath,
+      last_assistant_message: fullAccounting(TWO_AND_TWO_IDS), // alternates RESUME_DISPOSITION_DONE / RESUME_DISPOSITION_DEFERRED_PREFIX+reason
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("");
+  });
+
+  it("REGRESSION: a bare/whitespace-only `deferred:` (S1) is still REJECTED, and still ONLY through the ORIGINAL generic prefix — never the new unrecognized-token one", () => {
+    const transcriptPath = writeArmedTicketTranscript(tmpDir, TWO_AND_TWO_TICKET_TEXT);
+    const message = TWO_AND_TWO_IDS.map((id) => dispositionLine(id, `${RESUME_DISPOSITION_DEFERRED_PREFIX}   `)).join(
+      "\n",
+    );
+
+    const result = runCoverageCheck({ transcript_path: transcriptPath, last_assistant_message: message });
+
+    expect(result.exitCode).toBe(0);
+    expect(parseDecisionPayload(result.stdout).decision).toBe(BLOCK_DECISION);
+    // S1's classification (task requirement 2/3: "assert unchanged") — this
+    // is the discriminator this task's fix must NOT blur: a token that DOES
+    // start with the accepted prefix but fails only the non-empty-reason
+    // check stays on the pre-existing generic path.
+    expect(sortedUnique(parseUndispositionedIds(result.stderr))).toEqual(sortedUnique(TWO_AND_TWO_IDS));
+    expect(parseUnrecognizedDispositionIds(result.stderr)).toEqual([]);
   });
 });
 
