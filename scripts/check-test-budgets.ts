@@ -14,16 +14,61 @@
  * timeout (`it(name, fn, 10000)` or `it(name, fn, { timeout: 10000 })`).
  *
  * Public surface: `scanFile` (pure — given a repo-relative path and its
- * source text, returns the violations found in THAT file) and `main` (IO —
- * walks `packages/**` for `.test.ts` / `.bun.test.ts` files and reports).
- * `TestBudgetParseError` is the typed failure for source this script cannot
- * lexically parse — thrown, never swallowed (D5: parse failure is loud).
+ * source text, returns the violations found in THAT file), `checkLedger`
+ * (pure — cross-checks a scan's violations against the exemption ledger),
+ * `parseLedgerFile` (pure — validates ledger JSON against its Zod schema),
+ * and `main` (IO — walks `packages/**` for `.test.ts` / `.bun.test.ts`
+ * files, loads the ledger from disk, and reports). `TestBudgetParseError`
+ * is the typed failure for source this script cannot lexically parse —
+ * thrown, never swallowed (D5: parse failure is loud). `TestBudgetLedgerError`
+ * is the typed failure for a ledger file this script cannot load or validate.
  *
- * Side-effect class: `scanFile` is pure (no IO). `main` reads files from
- * disk and writes to stdout/stderr. The `import.meta.main` guard below is
- * the CLI entrypoint; nothing at module scope has a side effect, so this
- * file is safe to `import` from a test for direct, subprocess-free unit
- * coverage of `scanFile` (see `scripts/tests/check-test-budgets.test.ts`).
+ * Side-effect class: `scanFile`, `checkLedger`, and `parseLedgerFile` are
+ * pure (no IO). `main` reads files from disk (test sources + the ledger)
+ * and writes to stdout/stderr. The `import.meta.main` guard below is the
+ * CLI entrypoint; nothing at module scope has a side effect, so this file
+ * is safe to `import` from a test for direct, subprocess-free unit coverage
+ * (see `scripts/tests/check-test-budgets.test.ts`).
+ *
+ * ## Baseline + exemption ledger (`adr-a-newly-armed-structural-oracle-enforces-from-a-baseline`)
+ *
+ * This oracle armed with **58 pre-existing violations already in the tree**
+ * (measured at ledger-landing time, task
+ * `task-land-the-baseline-ledger-policy-for-check-test-budgets-55` — the
+ * task's own title cites an earlier, now-stale count of 55; the ADR's three
+ * criteria apply regardless of the exact number). Requiring a tree-wide
+ * exit 0 as this oracle's landing bar would have meant either fabricating
+ * 58 timeout values nobody measured, or leaving the check permanently red
+ * (both rejected by the ADR — see its Alternatives table). Instead:
+ *
+ *   1. **Baseline-scoped enforcement**: every violation present at
+ *      ledger-landing time is recorded in `scripts/test-budget-ledger.json`
+ *      (`LEDGER_RELATIVE_PATH`) with its measured `path`/`line`/`spawnCount`
+ *      plus a `reason`. `checkLedger` partitions each scan's violations into
+ *      `newViolations` (NOT in the ledger — new debt, always fails) and the
+ *      ledger-covered rest (exempted). A violation is "in the ledger" iff a
+ *      ledger entry's `(path, line)` matches AND its recorded `spawnCount`
+ *      equals the violation's CURRENT spawn count — an exact match, not a
+ *      fuzzy one, so a file edited near a ledgered test (shifting its line,
+ *      or changing its spawn count) forces a ledger update rather than
+ *      silently continuing to exempt a since-drifted violation.
+ *   2. **The ledger is DATA the oracle reads** (JSON, Zod-validated via
+ *      `parseLedgerFile`), never a `--exclude` glob buried in this script —
+ *      auditable, diffable, and impossible to silently widen.
+ *   3. **Ledger completeness is asserted**: a ledger row whose `(path, line,
+ *      spawnCount)` no longer matches any current violation (`orphanedEntries`)
+ *      or whose `path` no longer exists on disk (`missingPathEntries`) makes
+ *      this oracle exit non-zero, NAMING the offending row — the fail-loud
+ *      control that stops the ledger from quietly outliving the debt it
+ *      describes and becoming an unaudited suppression list. Retiring a
+ *      violation (adding an explicit timeout) therefore REQUIRES removing its
+ *      ledger row in the same commit; this is the ADR's documented,
+ *      deliberate consequence, not a defect.
+ *
+ * The historical baseline commit is `48d3dbc` (recorded as `baseline_commit`
+ * in the ledger file, for provenance only — the oracle itself never computes
+ * a git diff against it; the ledger's CONTENT, not a git ref, is what defines
+ * "already accounted for").
  *
  * ## D1 — declaration, never the number
  *
@@ -96,18 +141,28 @@
  *          oracle.
  *
  * Exit codes:
- *   0 — no violations, no parse failures.
+ *   0 — no violations, no parse failures, and the ledger itself is clean
+ *       (every row still matches a real violation at an existing path).
  *   2 — >=1 test case spawns >= SPAWN_THRESHOLD times without an explicit
- *       timeout argument.
- *   3 — >=1 test file could not be parsed (takes priority over 2 — an
- *       unparseable file must never read as merely "no violations found").
+ *       timeout argument AND is not covered by the exemption ledger (new
+ *       debt introduced beyond the recorded baseline).
+ *   3 — >=1 test file could not be parsed (takes priority over everything
+ *       else — an unparseable file must never read as merely "no violations
+ *       found", and a partial scan is never cross-checked against the ledger).
  *   4 — the scan itself failed outside a single file's parse (e.g. the
- *       `packages/` directory is unreadable).
+ *       `packages/` directory is unreadable, or the ledger file is missing /
+ *       malformed / fails Zod validation — `TestBudgetLedgerError`).
+ *   5 — the exemption ledger itself is unsound: >=1 row no longer matches a
+ *       real violation (`orphanedEntries` — the debt was fixed but the row
+ *       wasn't retired) or names a path that no longer exists
+ *       (`missingPathEntries`). This is criterion 3's fail-loud control —
+ *       see the module header's "Baseline + exemption ledger" section.
  */
 
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { z } from "zod";
 
 /** Threshold is 3 direct spawn-helper calls in one test body (spec D2 — two spawns fit the default budget comfortably; three is where the observed failure lives). */
 export const SPAWN_THRESHOLD = 3;
@@ -137,6 +192,161 @@ export interface Violation {
   readonly title: string;
   readonly line: number;
   readonly spawnCount: number;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Baseline exemption ledger (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline)
+// ─────────────────────────────────────────────────────────────────────────
+
+/** Repo-relative path to the exemption ledger — DATA the oracle reads (module header §Baseline + exemption ledger), never a suppression list embedded in this script. */
+export const LEDGER_RELATIVE_PATH = "scripts/test-budget-ledger.json";
+
+/** One recorded exemption: a violation present at ledger-landing time, with its measured location/quantity and why it is exempt. The four fields an auditor needs — nothing more. */
+const TestBudgetLedgerEntrySchema = z.object({
+  path: z.string().min(1),
+  line: z.number().int().positive(),
+  spawnCount: z.number().int().positive(),
+  reason: z.string().min(1),
+});
+
+/** Derived TypeScript type for one ledger row — see `TestBudgetLedgerEntrySchema` (Zod is the SSOT, this is inferred, never hand-duplicated). */
+export type TestBudgetLedgerEntry = z.infer<typeof TestBudgetLedgerEntrySchema>;
+
+/** The whole ledger file's shape: provenance metadata (`baseline_commit`, informational only — see module header) plus the entry list `checkLedger` actually reads. */
+const TestBudgetLedgerFileSchema = z.object({
+  baseline_commit: z.string().min(1),
+  entries: z.array(TestBudgetLedgerEntrySchema),
+});
+
+/** Derived TypeScript type for the whole ledger file. */
+export type TestBudgetLedgerFile = z.infer<typeof TestBudgetLedgerFileSchema>;
+
+/**
+ * Thrown when the exemption ledger cannot be loaded or fails Zod validation
+ * — a config-level failure, distinct from a per-file `TestBudgetParseError`
+ * and from a per-row `orphanedEntries`/`missingPathEntries` finding (those
+ * are reported by `checkLedger`, not thrown; the ledger file ITSELF being
+ * absent, unreadable, invalid JSON, or schema-invalid is a harder failure
+ * that blocks the scan entirely — see exit code 4 in the module header).
+ */
+export class TestBudgetLedgerError extends Error {
+  constructor(
+    public readonly code: "not_found" | "invalid_json" | "schema",
+    message: string,
+    public readonly context?: Record<string, unknown>,
+  ) {
+    super(message);
+    this.name = "TestBudgetLedgerError";
+  }
+}
+
+/**
+ * Parses and Zod-validates raw ledger file content. Pure (no IO) — the IO
+ * shell is `loadLedgerFromDisk`, below.
+ *
+ * @throws {TestBudgetLedgerError} `code: "invalid_json"` if `raw` is not
+ *   valid JSON; `code: "schema"` if it parses but fails
+ *   `TestBudgetLedgerFileSchema` (e.g. a row missing `reason`, or a
+ *   non-positive `line`/`spawnCount`).
+ */
+export function parseLedgerFile(raw: string): TestBudgetLedgerFile {
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch (e) {
+    throw new TestBudgetLedgerError("invalid_json", `ledger file is not valid JSON: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  const parsed = TestBudgetLedgerFileSchema.safeParse(json);
+  if (!parsed.success) {
+    throw new TestBudgetLedgerError("schema", `ledger file failed schema validation: ${parsed.error.message}`, {
+      issues: parsed.error.issues,
+    });
+  }
+  return parsed.data;
+}
+
+/**
+ * Reads and validates the ledger file at `<repoRoot>/${LEDGER_RELATIVE_PATH}`.
+ * The only IO wrapper around `parseLedgerFile`.
+ *
+ * @throws {TestBudgetLedgerError} `code: "not_found"` if the file cannot be
+ *   read (missing, permissions); otherwise propagates `parseLedgerFile`'s errors.
+ */
+export function loadLedgerFromDisk(repoRoot: string): TestBudgetLedgerFile {
+  const ledgerPath = join(repoRoot, LEDGER_RELATIVE_PATH);
+  let raw: string;
+  try {
+    raw = readFileSync(ledgerPath, "utf8");
+  } catch (e) {
+    throw new TestBudgetLedgerError(
+      "not_found",
+      `ledger file not found at ${LEDGER_RELATIVE_PATH}: ${e instanceof Error ? e.message : String(e)}`,
+      { path: ledgerPath },
+    );
+  }
+  return parseLedgerFile(raw);
+}
+
+/** Result of cross-checking a scan's `Violation[]` against the ledger's entries — the three buckets `main` reports and exits on. */
+export interface LedgerCheckResult {
+  /** Scanned violations with NO matching ledger entry — new debt, always fails (exit 2). */
+  readonly newViolations: readonly Violation[];
+  /** Ledger rows whose path exists but no longer match a real violation at that exact `(path, line, spawnCount)` — fixed, or drifted (exit 5). */
+  readonly orphanedEntries: readonly TestBudgetLedgerEntry[];
+  /** Ledger rows whose `path` does not exist at all (exit 5). */
+  readonly missingPathEntries: readonly TestBudgetLedgerEntry[];
+}
+
+const ledgerKey = (path: string, line: number): string => `${path}:${line}`;
+
+/**
+ * Cross-checks `violations` (a full repo-tree scan) against the ledger's
+ * `entries`. Pure — `pathExists` is injected so this stays unit-testable
+ * without touching disk (the IO caller in `main` passes
+ * `(p) => existsSync(join(repoRoot, p))`).
+ *
+ * A ledger entry EXEMPTS a violation iff `(entry.path, entry.line)` matches
+ * `(violation.file, violation.line)` exactly AND `entry.spawnCount ===
+ * violation.spawnCount` — an exact match, not "same location, any count":
+ * see the module header's Baseline + exemption ledger §1 for why a drifted
+ * count must re-open the row rather than silently keep exempting it.
+ *
+ * @param violations the full current scan result (ALL files, not pre-filtered).
+ * @param entries the ledger's entry list (already Zod-validated).
+ * @param pathExists injected existence check, keyed by the entry's repo-relative path.
+ */
+export function checkLedger(
+  violations: readonly Violation[],
+  entries: readonly TestBudgetLedgerEntry[],
+  pathExists: (path: string) => boolean,
+): LedgerCheckResult {
+  const missingPathEntries: TestBudgetLedgerEntry[] = [];
+  const checkableEntries: TestBudgetLedgerEntry[] = [];
+  for (const entry of entries) {
+    if (pathExists(entry.path)) {
+      checkableEntries.push(entry);
+    } else {
+      missingPathEntries.push(entry);
+    }
+  }
+
+  const violationByKey = new Map<string, Violation>();
+  for (const v of violations) violationByKey.set(ledgerKey(v.file, v.line), v);
+
+  const exemptedKeys = new Set<string>();
+  const orphanedEntries: TestBudgetLedgerEntry[] = [];
+  for (const entry of checkableEntries) {
+    const match = violationByKey.get(ledgerKey(entry.path, entry.line));
+    if (match !== undefined && match.spawnCount === entry.spawnCount) {
+      exemptedKeys.add(ledgerKey(entry.path, entry.line));
+    } else {
+      orphanedEntries.push(entry);
+    }
+  }
+
+  const newViolations = violations.filter((v) => !exemptedKeys.has(ledgerKey(v.file, v.line)));
+
+  return { newViolations, orphanedEntries, missingPathEntries };
 }
 
 function escapeRegExp(literal: string): string {
@@ -676,8 +886,10 @@ function walkTestFiles(dir: string, repoRoot: string, out: string[]): void {
 
 /**
  * CLI entrypoint: walks `<repoRoot>/packages` for test files, scans each
- * with `scanFile`, and prints a report. Returns the process exit code
- * (never calls `process.exit` itself, so it stays testable).
+ * with `scanFile`, cross-checks the result against the baseline exemption
+ * ledger (`loadLedgerFromDisk` + `checkLedger` — see the module header's
+ * Baseline + exemption ledger section), and prints a report. Returns the
+ * process exit code (never calls `process.exit` itself, so it stays testable).
  */
 export function main(repoRoot: string = REPO_ROOT): number {
   const files: string[] = [];
@@ -703,24 +915,66 @@ export function main(repoRoot: string = REPO_ROOT): number {
     console.error(`check-test-budgets: ${parseFailures.length} file(s) could not be parsed:\n`);
     for (const f of parseFailures) console.error(`  ${f}`);
     console.error(`\nAn unparseable test file is never silently skipped — fix its syntax so this oracle can scan it.`);
+    if (violations.length > 0) {
+      // reason: still surface what WAS found in the files that DID parse, but
+      // never cross-check a partial scan against the ledger — a violation
+      // hidden inside the unparseable file itself would be silently absent
+      // from `violations`, which could misreport its ledger row as orphaned
+      // even though the violation is still there, just unscanned.
+      console.error(`\ncheck-test-budgets: ${violations.length} test case(s) also spawn >= ${SPAWN_THRESHOLD} times without declaring an explicit timeout (ledger cross-check skipped — fix the parse failure(s) above first):\n`);
+      for (const v of violations) {
+        console.error(`  ${v.file}:${v.line}: "${v.title}" — ${v.spawnCount} spawn-helper call(s), no explicit timeout argument`);
+      }
+    }
+    return 3;
   }
 
-  if (violations.length > 0) {
-    console.error(`\ncheck-test-budgets: ${violations.length} test case(s) spawn >= ${SPAWN_THRESHOLD} times without declaring an explicit timeout:\n`);
-    for (const v of violations) {
+  const ledger = loadLedgerFromDisk(repoRoot);
+  const ledgerCheck = checkLedger(violations, ledger.entries, (p) => existsSync(join(repoRoot, p)));
+
+  if (ledgerCheck.missingPathEntries.length > 0) {
+    console.error(`\ncheck-test-budgets: ${ledgerCheck.missingPathEntries.length} ledger entry(ies) in ${LEDGER_RELATIVE_PATH} reference a path that does not exist:\n`);
+    for (const e of ledgerCheck.missingPathEntries) {
+      console.error(`  ${e.path}:${e.line} — recorded ${e.spawnCount} spawn(s) — ${e.reason}`);
+    }
+    console.error(`\nRemove this row from ${LEDGER_RELATIVE_PATH} — a ledger entry must point at a file that still exists.`);
+  }
+
+  if (ledgerCheck.orphanedEntries.length > 0) {
+    console.error(`\ncheck-test-budgets: ${ledgerCheck.orphanedEntries.length} ledger entry(ies) in ${LEDGER_RELATIVE_PATH} no longer match a real violation (fixed, or drifted):\n`);
+    for (const e of ledgerCheck.orphanedEntries) {
+      console.error(`  ${e.path}:${e.line} — recorded ${e.spawnCount} spawn(s) — ${e.reason}`);
+    }
+    console.error(
+      `\nAn exempt ledger entry must keep matching a REAL violation ` +
+        `(adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3) — ` +
+        `retire this row from ${LEDGER_RELATIVE_PATH} in the SAME commit that fixed (or changed) it.`,
+    );
+  }
+
+  if (ledgerCheck.newViolations.length > 0) {
+    console.error(
+      `\ncheck-test-budgets: ${ledgerCheck.newViolations.length} test case(s) spawn >= ${SPAWN_THRESHOLD} times without declaring an explicit timeout, and are NOT covered by ${LEDGER_RELATIVE_PATH}:\n`,
+    );
+    for (const v of ledgerCheck.newViolations) {
       console.error(`  ${v.file}:${v.line}: "${v.title}" — ${v.spawnCount} spawn-helper call(s), no explicit timeout argument`);
     }
     console.error(
       `\nDeclare an explicit timeout as the it()/test() third argument — a number in ms, or { timeout: <ms> }.` +
-        ` This oracle judges DECLARATION, never the number (spec-a-test-case-s-timeout-budget-must-be-declared-when-its D1).`,
+        ` This oracle judges DECLARATION, never the number (spec-a-test-case-s-timeout-budget-must-be-declared-when-its D1).` +
+        ` New debt is never exempt — this is not pre-existing baseline debt (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline).`,
     );
   }
 
-  if (parseFailures.length === 0 && violations.length === 0) {
-    console.log(`check-test-budgets: OK — scanned ${files.length} test file(s), no undeclared spawn-heavy test cases.`);
+  const clean = ledgerCheck.missingPathEntries.length === 0 && ledgerCheck.orphanedEntries.length === 0 && ledgerCheck.newViolations.length === 0;
+  if (clean) {
+    console.log(
+      `check-test-budgets: OK — scanned ${files.length} test file(s); ${violations.length} pre-existing violation(s) exempted via ${LEDGER_RELATIVE_PATH}; 0 new violations.`,
+    );
     return 0;
   }
-  return parseFailures.length > 0 ? 3 : 2;
+  if (ledgerCheck.missingPathEntries.length > 0 || ledgerCheck.orphanedEntries.length > 0) return 5;
+  return 2;
 }
 
 if (import.meta.main) {
@@ -728,6 +982,9 @@ if (import.meta.main) {
     process.exit(main());
   } catch (e) {
     console.error(`check-test-budgets: scan failed — ${e instanceof Error ? e.message : String(e)}`);
+    if (e instanceof TestBudgetLedgerError && e.context) {
+      console.error(JSON.stringify(e.context));
+    }
     process.exit(4);
   }
 }
