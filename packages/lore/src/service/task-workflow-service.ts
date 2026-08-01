@@ -19,7 +19,14 @@
  *                                             to `archived` (spec-workflow-hardening-
  *                                             evidence-red-vocabulary-claim-worktree
  *                                             §M3, AC-WH-3); idempotent on an
- *                                             already-terminal task
+ *                                             already-terminal task; ALSO refuses a
+ *                                             `extra.red_first: true` task with no
+ *                                             red evidence row (task-red-first-
+ *                                             discipline-is-asked-for-in-prose-but-never)
+ *   declareRedFirst(idOrSlug, opts, now?)  → sets extra.red_first: true (`lore
+ *                                             red-first <task>`) — the ONLY writer
+ *                                             for that flag (task-red-first-
+ *                                             discipline-is-asked-for-in-prose-but-never)
  *   ready(planIdOrSlug, now?)              → computed readiness report (zero writes)
  *   readyAdhoc(now?)                       → OPEN ad-hoc (planless) task listing (zero
  *                                             writes, SPEC-069 D2) — the `--adhoc`
@@ -322,6 +329,22 @@ function readEvidence(task: DocRecord): EvidenceEntry[] {
   if (!Array.isArray(raw)) return [];
   const parsed = z.array(evidenceEntrySchema).safeParse(raw);
   return parsed.success ? parsed.data : [];
+}
+
+/**
+ * Reads task.extra.red_first (task-red-first-discipline-is-asked-for-in-
+ * prose-but-never). Mirrors `readClaim`/`readEvidence`'s "malformed → safe
+ * default" contract — anything other than the literal boolean `true`
+ * (absent, `false`, or a corrupted non-boolean value from a legacy row)
+ * reads as "not declared", never a thrown error.
+ */
+function readRedFirstDeclared(task: DocRecord): boolean {
+  return task.extra["red_first"] === true;
+}
+
+/** The two evidence `result` values that count as proof a RED run happened (SPEC red-first). */
+function isRedRunResult(result: EvidenceEntry["result"]): boolean {
+  return result === "expected-fail" || result === "fail";
 }
 
 /**
@@ -1190,6 +1213,11 @@ export class TaskWorkflowService {
    * Refuses (VALIDATION_ERROR) when:
    *   - the task holds no `result: "pass"` evidence entry — `"expected-fail"` (M1),
    *     `"fail"`, and `"inconclusive"` never count, regardless of how many of them exist;
+   *   - the task declares `extra.red_first: true` (task-red-first-discipline-is-asked-
+   *     for-in-prose-but-never) and holds no `"expected-fail"`/`"fail"` evidence entry —
+   *     a SECOND, INDEPENDENT floor evaluated only for a task claiming red-first
+   *     discipline, checked AFTER the `result:pass` floor above so neither floor can
+   *     mask the other; a task that never sets the flag never reaches this check;
    *   - a FRESH claim (same `isClaimStale` freshness test `claim()`/`ready()` use) is
    *     held by a DIFFERENT actor than `opts.by` — a STALE claim, or a fresh claim held
    *     by `opts.by` itself, never blocks.
@@ -1214,9 +1242,10 @@ export class TaskWorkflowService {
    * @param opts - `{ by, source? }`
    * @param now - Time seam (D10) — ONE reading shared by every step's timestamp
    * @returns `DoneResult` — see that type's own JSDoc
-   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a task / no passing evidence / fresh
-   *   foreign claim / illegal lifecycle step — the last one structurally unreachable
-   *   given `computeArchiveWalk`'s own base-graph-only steps, kept as a fail-loud guard
+   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a task / no passing evidence / a
+   *   red_first claim with no red evidence row / fresh foreign claim / illegal
+   *   lifecycle step — the last one structurally unreachable given
+   *   `computeArchiveWalk`'s own base-graph-only steps, kept as a fail-loud guard
    *   rather than a non-null assertion), STALE_VERSION
    */
   async done(
@@ -1259,6 +1288,26 @@ export class TaskWorkflowService {
           `Task "${task.slug}" holds no result:pass evidence entry — lore done requires ` +
           `at least one passing oracle verification before archiving ("expected-fail", ` +
           `"fail", and "inconclusive" entries never count)`,
+        value: evidence.map((e) => e.result),
+      });
+    }
+
+    // reason: the red-first floor (task-red-first-discipline-is-asked-for-in-
+    // prose-but-never) — mirrors the result:pass floor immediately above,
+    // evaluated ONLY when the task itself claims red-first discipline. A task
+    // that never sets extra.red_first is completely unaffected (this branch
+    // never fires); a task that DOES set it needs BOTH floors independently —
+    // this one is reached only after the pass floor above already succeeded,
+    // so it can never mask (or be masked by) that check.
+    if (readRedFirstDeclared(task) && !evidence.some((e) => isRedRunResult(e.result))) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "extra.verification_evidence",
+        message:
+          `Task "${task.slug}" declares extra.red_first but holds no "expected-fail"/"fail" ` +
+          `evidence entry — lore done requires proof the test was actually run red before ` +
+          `archiving a red-first claim (record one via \`lore evidence ${task.slug} --oracle ` +
+          `<kind> --command "<cmd>" --result expected-fail\`)`,
         value: evidence.map((e) => e.result),
       });
     }
@@ -1594,6 +1643,56 @@ export class TaskWorkflowService {
       `Declared ac_scope ${op === "add" ? "extended" : "reduced"} by ${by} (${next.length} id(s))`,
       "update",
       { by, scope_op: op, count: next.length },
+    );
+  }
+
+  // ── Red-First Declaration (task-red-first-discipline-is-asked-for-in-prose-but-never) ──
+
+  /**
+   * Declares that `idOrSlug`'s tests were written RED FIRST — sets
+   * `extra.red_first: true`. `done()` (see its own JSDoc) then demands ≥1
+   * `"expected-fail"`/`"fail"` evidence row on this task, ALONGSIDE the
+   * pre-existing `result: "pass"` floor, before it may archive.
+   *
+   * This is the ONLY writer for `extra.red_first` — deliberately no
+   * create-time `lore create task --red-first` flag (the claim is typically
+   * made AFTER a task already exists, once its tests are actually written —
+   * exactly the ordering `lore red-first <task>` supports) and deliberately
+   * no `lore set --red-first` (wholesale `extra` replace, the same reason
+   * `file_anchors`/`ac_scope`/`claim`/`verification_evidence` each have a
+   * dedicated writer instead).
+   *
+   * Read-modify-write via {@link writeTaskExtra} — every sibling `extra` key
+   * (`claim`/`verification_evidence`/`ac_scope`/`file_anchors`) survives
+   * byte-identical. Idempotent: declaring on an already-`true` task is a
+   * normal successful write (still `red_first: true`, one more version/audit
+   * row), never an error.
+   *
+   * @param idOrSlug - Task document ULID or slug
+   * @param opts - `{ by, source? }`
+   * @param now - Time seam (D10)
+   * @returns The updated task DocRecord
+   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a task), STALE_VERSION
+   */
+  async declareRedFirst(
+    idOrSlug: string,
+    opts: AnchorMutationOpts,
+    now: () => string = defaultNow,
+  ): Promise<Result<DocRecord, LoreError>> {
+    const taskResult = await this.resolveTask(idOrSlug);
+    if (!taskResult.ok) return taskResult;
+    const task = taskResult.value;
+
+    const nowIso = now();
+    const newExtra: Record<string, unknown> = { ...task.extra, red_first: true };
+    return this.writeTaskExtra(
+      task,
+      newExtra,
+      nowIso,
+      opts.by,
+      `Declared red-first test discipline by ${opts.by}`,
+      "update",
+      { by: opts.by, red_first: true },
     );
   }
 
