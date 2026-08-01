@@ -6,7 +6,7 @@
  * Dimension mapping:
  *   HAPPY:      buildHookSettingsEntries produces the correct
  *               command/event/matcher shape for a real claudeDir
- *   BOUNDARY:   HOOK_REGISTRATIONS is exactly the declared 11-hook / 17-entry
+ *   BOUNDARY:   HOOK_REGISTRATIONS is exactly the declared 12-hook / 18-entry
  *               (all matchers expanded) set; a trailing slash on claudeDir
  *               does not double up in the command string
  *   NEGATIVE:   pre-subagent-gate.mjs / pre-no-general-agent-gate.mjs are
@@ -29,6 +29,8 @@ const EXPECTED_FILES = [
   "lore-gate-g3-plan-promote.sh",
   "lore-gate-g4-task-claim.sh",
   "session-start-resume.mjs",
+  // Same-session-authorship marker (task-verifying-a-handoff-you-just-authored-arms-the-coverage, 2026-08-01).
+  "session-start-marker.mjs",
   "stop-doc-sync.mjs",
   // Stop-time resume-ticket coverage floor (spec-resume-ticket-coverage-a-shipped-upper-bound-left-the, 2026-07-31).
   "stop-handoff-coverage.mjs",
@@ -81,14 +83,14 @@ describe("HAPPY: buildHookSettingsEntries", () => {
 });
 
 describe("BOUNDARY: HOOK_REGISTRATIONS shape", () => {
-  it("declares exactly the 11 core-governance-and-security hook files", () => {
+  it("declares exactly the 12 core-governance-and-security hook files", () => {
     const files = [...new Set(HOOK_REGISTRATIONS.map((r) => r.file))].sort();
     expect(files).toEqual([...EXPECTED_FILES].sort());
   });
 
-  it("expands to exactly 17 entries (11 hooks, per-matcher expansion for the 4 gate hooks)", () => {
-    // pre-bash-git-safety-gate: 1, g1: 2, g2: 3, g3: 3, g4: 2, session-start: 1, stop-doc-sync: 1, stop-handoff-coverage: 1, subagent-context: 1, subagent-stop-commit-guard: 1, claude-md-guard: 1 = 17
-    expect(HOOK_REGISTRATIONS).toHaveLength(17);
+  it("expands to exactly 18 entries (12 hooks, per-matcher expansion for the 4 gate hooks)", () => {
+    // pre-bash-git-safety-gate: 1, g1: 2, g2: 3, g3: 3, g4: 2, session-start-resume: 1, session-start-marker: 1, stop-doc-sync: 1, stop-handoff-coverage: 1, subagent-context: 1, subagent-stop-commit-guard: 1, claude-md-guard: 1 = 18
+    expect(HOOK_REGISTRATIONS).toHaveLength(18);
   });
 
   it("tolerates a trailing slash on claudeDir without a double slash in the command", () => {
