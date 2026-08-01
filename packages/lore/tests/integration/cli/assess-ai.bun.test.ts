@@ -419,7 +419,16 @@ describe("lore assess — auto-derived commit set: PRIMARY ORACLE (interleaved f
     } finally {
       app.close();
     }
-  });
+  }, 20000);
+  // ^ explicit timeout (spec-a-test-case-s-timeout-budget-must-be-declared-when-its
+  // D1/check-test-budgets): 9 direct spawn calls — 1 `spawnSync` (git init) + 6
+  // calls to the locally-defined `gitCommit` helper (itself a registered spawn
+  // helper, 2 direct `spawnSync` calls in its own body) + the 2 `spawnSync`
+  // calls textually inside that helper's definition, which this oracle's
+  // lexical scan also counts as part of the enclosing test body. Measured
+  // 854-1167ms in isolation across 3 runs (this file also runs the real
+  // `assess` command end-to-end, heavier than a bare git fixture); 20000ms
+  // gives >=17x headroom for a concurrent-worktree load spike.
 });
 
 // ─── CONTROL: contiguous commits (SPEC oracle #5) ────────────────────────────────
@@ -466,7 +475,14 @@ describe("lore assess — auto-derived commit set: CONTROL (contiguous, no forei
     const naiveDiff = spawnSync("git", ["diff", `${firstOwn}^..${lastOwn}`], { cwd: tmpDir, encoding: "utf8" }).stdout;
     expect(naiveDiff).toContain("CONTIGUOUS_A_CONTENT");
     expect(naiveDiff).toContain("CONTIGUOUS_B_CONTENT");
-  });
+  }, 20000);
+  // ^ explicit timeout (spec-a-test-case-s-timeout-budget-must-be-declared-when-its
+  // D1/check-test-budgets): 8 direct spawn calls — 1 `spawnSync` (git init) + 3
+  // calls to the locally-defined `gitCommit` helper + the 2 `spawnSync` calls
+  // textually inside that helper's own definition + 2 trailing direct
+  // `spawnSync` calls (naive-range `git log`, naive-range `git diff`). Measured
+  // 754-1059ms in isolation across 3 runs; 20000ms gives >=18x headroom for a
+  // concurrent-worktree load spike.
 });
 
 // ─── BOUNDARY: no discoverable commits (zero-commit AND squashed-history alike) ──
@@ -517,7 +533,11 @@ describe("lore assess — auto-derived commit set: BOUNDARY (no discoverable com
     } finally {
       app.close();
     }
-  });
+  }, 15000);
+  // ^ explicit timeout (spec-a-test-case-s-timeout-budget-must-be-declared-when-its
+  // D1/check-test-budgets): 3 direct `spawnSync` calls (git init, git add, git
+  // commit). Measured 540-852ms in isolation across 3 runs; 15000ms gives >=17x
+  // headroom for a concurrent-worktree load spike.
 });
 
 // ─── SPEC-028 AC-AE-1: pre-flight diff-budget stderr warning ─────────────────

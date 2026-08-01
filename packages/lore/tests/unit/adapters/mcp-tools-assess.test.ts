@@ -413,7 +413,13 @@ describe("lore_assess — auto-derived commit set: PRIMARY ORACLE + BOUNDARY", (
     expect(data.diff_source.status).toBe("derived");
     expect(data.diff_source.commits).toHaveLength(2);
     expect(data.assessment.extra["diff_source"]).toEqual(data.diff_source);
-  });
+  }, 15000);
+  // ^ explicit timeout (spec-a-test-case-s-timeout-budget-must-be-declared-when-its
+  // D1/check-test-budgets): 6 direct `spawnSync`/`gitCommit` calls in this body
+  // (`gitCommit` is itself a spawn helper — its own body directly calls
+  // `spawnSync` twice — so calling it 6 times counts as 6 spawn-helper
+  // invocations for this oracle). Measured 380-708ms in isolation across 2
+  // runs; 15000ms gives >=21x headroom for a concurrent-worktree load spike.
 
   it("BOUNDARY: no commit anywhere references either task slug — a loud named outcome, never a silent empty diff", async () => {
     const { planId } = await createPlanWithNamedTasks(["MCP Unreferenced Task One", "MCP Unreferenced Task Two"]);
