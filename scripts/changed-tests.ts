@@ -49,7 +49,9 @@
  *      reverse-dependent test (most of them — `scripts/build.ts`,
  *      `scripts/platform-map.ts`, ...) selects nothing when it alone
  *      changes; this is the SAME D3 zero-selection-warning path every other
- *      untested source file already takes (step 5) — never a crash, never a
+ *      untested source file already takes (step 5/6 — the accounting prints
+ *      `WARNING:` because the file was graph-known, AND the run now exits
+ *      non-zero via the loud-zero rule, step 6) — never a crash, never a
  *      silent select-everything fallback, and NOT a scripts/-specific
  *      special case.
  *   3. Selection = union of:
@@ -83,13 +85,31 @@
  *      is observable without actually running anything — without executing
  *      any runner.
  *   5. Accounting is mandatory, not optional: a `selected N` line per runner
- *      plus a reason tag per selected file, always printed — and a changed
- *      source file that selects zero tests prints a loud `WARNING:` line
- *      rather than exiting silently green.
+ *      plus a reason tag per selected file, always printed — a changed,
+ *      graph-known source file that selects zero tests additionally prints a
+ *      `WARNING:` line, and the loud-zero rule (step 6) prints a `FAIL:`
+ *      line naming every unselected changed path whenever it fires.
+ *   6. Loud zero (`isLoudZero`, task
+ *      `task-test-changed-selects-nothing-for-any-scripts-change-and`): the
+ *      ONE legitimate silent zero-selection is a genuinely EMPTY changed-file
+ *      set (nothing changed at all). Any other zero-selection outcome —
+ *      including a changed file OUTSIDE the traced universe entirely (a
+ *      repo-root config file, or a future directory nobody thought to widen
+ *      `loadFileMap` for) — is loud, not silent: `runCli` returns exit code 1
+ *      for it, in BOTH `--list` and executing mode, so `--list`'s output AND
+ *      exit code both distinguish "nothing changed" from "N files changed, 0
+ *      selected" — they must never render alike. Before this rule, a
+ *      worktree agent whose entire slice lived in an untraced directory got
+ *      exit 0 with zero files selected and had measured nothing (the exact
+ *      incident this task fixes; the `scripts/` tracing gap that TRIGGERED
+ *      it is closed separately by step 2's universe widening — this rule is
+ *      the backstop for the NEXT untraced directory nobody thought of).
  *
- * Exit code is non-zero iff any executed runner fails, or a git/import-graph
+ * Exit code is non-zero iff any executed runner fails, a git/import-graph
  * resolution step fails (missing `packages/core/package.json` exports,
- * unreachable git ref, etc.) — never a silent partial result.
+ * unreachable git ref, etc.), OR the loud-zero condition above fires — never
+ * a silent partial result and never a silent zero-selection unless truly
+ * nothing changed.
  *
  * Usage:
  *   bun scripts/changed-tests.ts                # diff against merge-base(main, HEAD)
@@ -168,6 +188,19 @@ export interface SelectionResult {
   readonly selected: readonly SelectedFile[];
   /** True iff >=1 changed, graph-known file selected zero tests — the "never silent" signal (D3). */
   readonly zeroSelectionWarning: boolean;
+  /**
+   * The full changed-file list exactly as given to `selectAffectedTests` —
+   * unlike `selected`/`zeroSelectionWarning`, this counts EVERY changed path,
+   * including ones outside the traced universe entirely (not even present in
+   * `fileMap` — e.g. a repo-root config file, or a future directory nobody
+   * thought to widen `loadFileMap` for). This is the SSOT for the loud-zero
+   * decision (`isLoudZero`, task
+   * `task-test-changed-selects-nothing-for-any-scripts-change-and`): an EMPTY
+   * list here is the ONE legitimate silent zero-selection state (nothing
+   * changed at all); anything else combined with `selected.length === 0` is
+   * not, regardless of whether any of those files were graph-known.
+   */
+  readonly changedFiles: readonly string[];
 }
 
 const FROM_IMPORT_RE = /\b(?:import|export)\b[^;'"()]*?\bfrom\s*["']([^"']+)["']/g;
@@ -395,7 +428,30 @@ export function selectAffectedTests(params: {
   return {
     selected,
     zeroSelectionWarning: knownChanged.length > 0 && selected.length === 0,
+    changedFiles,
   };
+}
+
+/**
+ * The "loud zero" predicate (requirement 2 of
+ * `task-test-changed-selects-nothing-for-any-scripts-change-and`): true iff
+ * the changed-file set was NON-EMPTY yet nothing was selected overall. The
+ * single legitimate silent zero-selection is the reverse — a genuinely empty
+ * changed-file set (`selection.changedFiles.length === 0`, the CONTROL case:
+ * nothing changed at all).
+ *
+ * This condition is a strict SUPERSET of `zeroSelectionWarning`: every
+ * graph-known-zero-selection case (`zeroSelectionWarning === true`) also has
+ * `changedFiles.length > 0` and `selected.length === 0`, so it is also a loud
+ * zero. It additionally covers a changed file OUTSIDE the traced universe
+ * entirely — a directory `loadFileMap` never learned to walk — which
+ * `zeroSelectionWarning` alone cannot see (it only looks at graph-known
+ * files via `knownChanged`). `runCli` uses this predicate to decide the exit
+ * code in BOTH `--list` and executing mode — never only one of them, since a
+ * hollow `--list` preview is exactly as misleading as a hollow executing run.
+ */
+export function isLoudZero(selection: SelectionResult): boolean {
+  return selection.changedFiles.length > 0 && selection.selected.length === 0;
 }
 
 /**
@@ -426,6 +482,21 @@ export function formatAccounting(selection: SelectionResult): string {
       "WARNING: 0 tests selected despite >=1 changed source/test file reachable in the import graph " +
         "— selection may be incomplete (verify import-graph coverage before trusting a green run)",
     );
+  }
+
+  // D3' — the loud-zero rule (requirement 2 of
+  // task-test-changed-selects-nothing-for-any-scripts-change-and): this block
+  // is what makes AC-3's "0 selected because nothing changed" render
+  // differently from "0 selected although N files changed" — the former
+  // never reaches here (isLoudZero requires changedFiles.length > 0), the
+  // latter always does. Lists every changed path since, when selected.length
+  // is 0, ALL of them are unselected by definition — never a diff to compute.
+  if (isLoudZero(selection)) {
+    lines.push(
+      `FAIL: 0 tests selected despite ${selection.changedFiles.length} changed file(s) — refusing to report ` +
+        "this as a passing run. Unselected changed path(s):",
+    );
+    for (const f of selection.changedFiles) lines.push(`  ${f}`);
   }
 
   return lines.join("\n");
@@ -649,6 +720,19 @@ export function runCli(argv: readonly string[], cwd: string): number {
 
   const selection = selectAffectedTests({ changedFiles, fileMap, aliasMap });
   console.log(formatAccounting(selection));
+
+  // requirement 2 (task-test-changed-selects-nothing-for-any-scripts-change-and):
+  // a non-empty changed-file set that selected zero tests must never exit 0 —
+  // checked BEFORE the --list early-return so a hollow preview fails exactly
+  // as loud as a hollow executing run (both consult the same predicate, over
+  // the same selection data — no separate re-derivation).
+  if (isLoudZero(selection)) {
+    console.error(
+      `changed-tests: 0 tests selected across ${changedFiles.length} changed file(s) — exiting non-zero ` +
+        "instead of a hollow success (see the FAIL block above for the unselected path(s)).",
+    );
+    return 1;
+  }
 
   if (args.list) return 0;
 

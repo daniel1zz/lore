@@ -91,12 +91,37 @@
  *     import edge, reason `transitive` — asserted directly rather than
  *     assumed to "fall out" of the widening.
  *   - NEGATIVE: a `scripts/` source file with no test importing it (mirrors
- *     `scripts/build.ts`) selects nothing spurious — loud `WARNING:`, exit 0,
- *     never a crash, never a select-everything fallback.
+ *     `scripts/build.ts`) selects nothing spurious — loud `WARNING:` AND exit
+ *     1 via the loud-zero rule below, never a crash, never a
+ *     select-everything fallback.
  *   - BOUNDARY/REGRESSION: against the REAL repo tree, no `.bun.test.ts`
  *     file exists under `scripts/` today — runner assignment for
  *     `scripts/tests/*.test.ts` stays filename-derived (`isBunTestFile`),
  *     never a hardcoded scripts-is-always-vitest special case.
+ *
+ * Loud-zero rule (task
+ * `task-test-changed-selects-nothing-for-any-scripts-change-and`,
+ * `isLoudZero`): a NON-EMPTY changed-file set that selects zero tests must
+ * never again exit 0 — the ONE legitimate silent zero-selection is a
+ * genuinely EMPTY changed-file set. Covered at two levels:
+ *   - Pure (`describe("...isLoudZero...")`): HAPPY (the canonical shape),
+ *     NEGATIVE (false whenever something WAS selected), BOUNDARY/CONTROL
+ *     (false when nothing changed at all), STATE (the existing
+ *     `zeroSelectionWarning` implies `isLoudZero` — a strict subset
+ *     relationship), REGRESSION (an ordinary non-empty transitive selection
+ *     stays `isLoudZero === false`).
+ *   - End-to-end, same fixture-repo pattern as the scripts/-universe suite
+ *     above (real CLI subprocess, isolated git fixture): the existing
+ *     `scripts/build.ts` NEGATIVE case now additionally asserts exit 1 +
+ *     `FAIL:` + a controlled (non-killed) process; BOUNDARY (AC-4) mutates a
+ *     repo-root `README.md` — traced by NEITHER rule, so `WARNING:` does
+ *     NOT fire (not graph-known) but `FAIL:`/exit 1 still do (ERROR
+ *     dimension: the failure is a clean `return 1`, not an exception — both
+ *     assert `signal` is `null`); CONTROL (AC-2) runs with zero mutations at
+ *     all (exit 0, fully silent); REGRESSION (AC-3) mutates the fixture's new
+ *     `packages/lore/src/service/some-service.ts`, proving an ordinary
+ *     `packages/lore/src/**` change keeps selecting its transitive test
+ *     unaffected by either the scripts/ widening or the loud-zero rule.
  */
 
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
@@ -125,6 +150,7 @@ interface SelectedFile {
 interface SelectionResult {
   selected: readonly SelectedFile[];
   zeroSelectionWarning: boolean;
+  changedFiles: readonly string[];
 }
 interface ImportGraph {
   forward: ReadonlyMap<string, ReadonlySet<string>>;
@@ -148,6 +174,7 @@ type ClassifyBinaryConsumerFn = (path: string, content: string) => BinaryConsume
 type IsBinaryConsumerCandidateFn = (path: string, content: string) => boolean;
 type SelectAffectedTestsFn = (params: { changedFiles: readonly string[]; fileMap: FileMap; aliasMap: AliasMap }) => SelectionResult;
 type FormatAccountingFn = (selection: SelectionResult) => string;
+type IsLoudZeroFn = (selection: SelectionResult) => boolean;
 type ParseArgsFn = (argv: readonly string[]) => ChangedTestsCliArgs;
 type ChangedTestsErrorCtor = new (
   code: "cli" | "git" | "graph" | "runner",
@@ -170,6 +197,7 @@ let classifyBinaryConsumer: ClassifyBinaryConsumerFn;
 let isBinaryConsumerCandidate: IsBinaryConsumerCandidateFn;
 let selectAffectedTests: SelectAffectedTestsFn;
 let formatAccounting: FormatAccountingFn;
+let isLoudZero: IsLoudZeroFn;
 let parseArgs: ParseArgsFn;
 let ChangedTestsError: ChangedTestsErrorCtor;
 
@@ -184,6 +212,7 @@ beforeAll(async () => {
   isBinaryConsumerCandidate = mod.isBinaryConsumerCandidate;
   selectAffectedTests = mod.selectAffectedTests;
   formatAccounting = mod.formatAccounting;
+  isLoudZero = mod.isLoudZero;
   parseArgs = mod.parseArgs;
   ChangedTestsError = mod.ChangedTestsError;
 });
@@ -472,7 +501,7 @@ describe("changed-tests selector — selectAffectedTests", () => {
     ]);
   });
 
-  it("6. BOUNDARY: a changed source file with zero reachable tests selects nothing AND raises the loud zero-selection warning", () => {
+  it("6. BOUNDARY: a changed source file with zero reachable tests selects nothing AND raises the loud zero-selection warning AND the loud-zero rule (isLoudZero, requirement 2)", () => {
     const fileMap: FileMap = new Map([["packages/lore/src/orphan/no-tests.ts", "export const O = 1;"]]);
 
     const result = selectAffectedTests({
@@ -484,6 +513,11 @@ describe("changed-tests selector — selectAffectedTests", () => {
     expect(result.selected).toEqual([]);
     expect(result.zeroSelectionWarning).toBe(true);
     expect(formatAccounting(result)).toMatch(/WARNING:/);
+    // requirement 2: a graph-known zero-selection is ALSO a loud zero — the
+    // FAIL block must render alongside (not instead of) the pre-existing WARNING.
+    expect(isLoudZero(result)).toBe(true);
+    expect(formatAccounting(result)).toMatch(/FAIL: 0 tests selected despite 1 changed file\(s\)/);
+    expect(formatAccounting(result)).toContain("  packages/lore/src/orphan/no-tests.ts");
   });
 
   it("7. STATE: a file that is both a changed test AND a binary-consumer keeps reason changed-test (highest precedence), but STILL carries its binaryConsumerKind (AC-2 — the build-first decision must not depend on WHY a file was selected)", () => {
@@ -579,11 +613,12 @@ describe("changed-tests selector — parseArgs", () => {
 });
 
 describe("changed-tests selector — formatAccounting", () => {
-  it("REGRESSION: always prints both runner count lines, even when both are zero", () => {
-    const output = formatAccounting({ selected: [], zeroSelectionWarning: false });
+  it("REGRESSION/CONTROL: always prints both runner count lines even when both are zero, and — since changedFiles is empty here (the ONE legitimate silent zero) — prints neither WARNING nor FAIL", () => {
+    const output = formatAccounting({ selected: [], zeroSelectionWarning: false, changedFiles: [] });
     expect(output).toMatch(/vitest: selected 0/);
     expect(output).toMatch(/bun: selected 0/);
     expect(output).not.toMatch(/WARNING:/);
+    expect(output).not.toMatch(/FAIL:/);
   });
 
   it("HAPPY: prints a reason tag per selected file", () => {
@@ -593,11 +628,14 @@ describe("changed-tests selector — formatAccounting", () => {
         { path: "packages/lore/tests/unit/b.bun.test.ts", reason: "transitive", runner: "bun" },
       ],
       zeroSelectionWarning: false,
+      changedFiles: ["packages/lore/tests/unit/a.test.ts"],
     });
     expect(output).toMatch(/vitest: selected 1/);
     expect(output).toMatch(/bun: selected 1/);
     expect(output).toMatch(/a\.test\.ts \(changed-test\)/);
     expect(output).toMatch(/b\.bun\.test\.ts \(transitive\)/);
+    // requirement 2: a NON-empty selection is never a loud zero, regardless of changedFiles.
+    expect(output).not.toMatch(/FAIL:/);
   });
 
   it("AC-2/AC-5: build-first is observable and reads 'no' when the selection contains ONLY source-kind binary-consumers (no compiled spawner present)", () => {
@@ -611,6 +649,7 @@ describe("changed-tests selector — formatAccounting", () => {
         },
       ],
       zeroSelectionWarning: false,
+      changedFiles: ["packages/lore/src/service/verify-runner-service.ts"],
     });
     expect(output).toMatch(/^build-first: no$/m);
   });
@@ -632,8 +671,51 @@ describe("changed-tests selector — formatAccounting", () => {
         },
       ],
       zeroSelectionWarning: false,
+      changedFiles: ["packages/lore/src/index.ts"],
     });
     expect(output).toMatch(/^build-first: yes \(1 compiled binary-consumer file\(s\) selected\)$/m);
+  });
+});
+
+describe("changed-tests selector — isLoudZero (loud-zero rule, requirement 2 of task-test-changed-selects-nothing-for-any-scripts-change-and)", () => {
+  it("HAPPY: true for the canonical shape — >=1 changed file, zero selected", () => {
+    expect(isLoudZero({ selected: [], zeroSelectionWarning: false, changedFiles: ["scripts/build.ts"] })).toBe(true);
+  });
+
+  it("NEGATIVE: false whenever >=1 file WAS selected, regardless of how many files changed", () => {
+    const selected = [{ path: "packages/lore/tests/unit/a.test.ts", reason: "changed-test" as const, runner: "vitest" as const }];
+    expect(isLoudZero({ selected, zeroSelectionWarning: false, changedFiles: ["packages/lore/tests/unit/a.test.ts"] })).toBe(false);
+  });
+
+  it("BOUNDARY/CONTROL: false when changedFiles is genuinely empty — the ONE legitimate silent zero, even though selected is also empty", () => {
+    expect(isLoudZero({ selected: [], zeroSelectionWarning: false, changedFiles: [] })).toBe(false);
+  });
+
+  it("STATE: zeroSelectionWarning=true implies isLoudZero=true (subset invariant) — a graph-known zero-selection is ALWAYS also a loud zero", () => {
+    const result = selectAffectedTests({
+      changedFiles: ["packages/lore/src/orphan/state-invariant.ts"],
+      fileMap: new Map([["packages/lore/src/orphan/state-invariant.ts", "export const O = 1;"]]),
+      aliasMap: ALIAS_MAP,
+    });
+    expect(result.zeroSelectionWarning).toBe(true);
+    expect(isLoudZero(result)).toBe(true);
+  });
+
+  it("REGRESSION: an ordinary transitive HAPPY selection (packages/core/src -> packages/lore/src -> .bun.test.ts, the incident shape from case 1) stays isLoudZero=false — widening the predicate must not retroactively flag an established non-empty selection", () => {
+    const fileMap: FileMap = new Map([
+      ["packages/core/src/schemas.ts", "export const AttestationExemptKind = 1;"],
+      [
+        "packages/lore/src/service/corpus-service.ts",
+        'import { AttestationExemptKind } from "../../../core/src/schemas.js";\nexport const CorpusService = AttestationExemptKind;',
+      ],
+      [
+        "packages/lore/tests/unit/store/plan-close-cascade.bun.test.ts",
+        'import { CorpusService } from "../../../src/service/corpus-service.js";\n// bun:sqlite fixture regression',
+      ],
+    ]);
+    const result = selectAffectedTests({ changedFiles: ["packages/core/src/schemas.ts"], fileMap, aliasMap: ALIAS_MAP });
+    expect(result.selected.length).toBeGreaterThan(0);
+    expect(isLoudZero(result)).toBe(false);
   });
 });
 
@@ -683,6 +765,8 @@ describe("changed-tests selector — scripts/ universe widening: end-to-end via 
   interface RunResult {
     readonly stdout: string;
     readonly exitCode: number;
+    /** `spawnSync`'s `signal` field — non-null iff the process was killed rather than returning normally. Asserted null in the loud-zero cases below to prove the new exit-1 path is a controlled `return`, not a crash. */
+    readonly signal: NodeJS.Signals | null;
   }
 
   /** Spawns the REAL `scripts/changed-tests.ts` with `cwd` pointed at the fixture repo — explicit `maxBuffer` per this repo's spawnSync-truncation discipline (project CLAUDE.md), even though every payload here is small. */
@@ -692,7 +776,7 @@ describe("changed-tests selector — scripts/ universe widening: end-to-end via 
       encoding: "utf8",
       maxBuffer: 4 * 1024 * 1024,
     });
-    return { stdout: result.stdout ?? "", exitCode: result.status ?? 1 };
+    return { stdout: result.stdout ?? "", exitCode: result.status ?? 1, signal: result.signal };
   }
 
   /**
@@ -702,13 +786,20 @@ describe("changed-tests selector — scripts/ universe widening: end-to-end via 
    * `loadCoreAliasMap` never needs the alias TARGETS to exist on disk), a
    * `scripts/` source file with a `scripts/tests/` sibling importing it
    * directly (mirrors the real `scripts/check-test-budgets.ts` /
-   * `scripts/tests/check-test-budgets.test.ts` pair), and a `scripts/`
-   * source file with NO test at all (mirrors the real `scripts/build.ts` —
-   * the "most scripts/ files have no test" case). Returns the repo dir and
-   * the base commit's sha so each test can mutate a file UNCOMMITTED and
-   * rely on `git status --porcelain` to surface it as changed — an explicit
-   * `<base>` sha sidesteps `resolveBaseRef`'s `merge-base main HEAD` default,
-   * which would fail here (the fixture repo has no `main` branch).
+   * `scripts/tests/check-test-budgets.test.ts` pair), a `scripts/` source
+   * file with NO test at all (mirrors the real `scripts/build.ts` — the
+   * "most scripts/ files have no test" case), a `packages/lore/src` /
+   * `packages/lore/tests` transitive pair (for the REGRESSION control, AC-3
+   * of `task-test-changed-selects-nothing-for-any-scripts-change-and` — an
+   * ordinary `packages/lore/src/**` change must keep selecting its existing
+   * transitive set unaffected by the scripts/ widening or the loud-zero
+   * rule), and a repo-root `README.md` traced by NEITHER rule (for the
+   * BOUNDARY control, AC-4 — a changed file entirely outside the traced
+   * universe). Returns the repo dir and the base commit's sha so each test
+   * can mutate a file UNCOMMITTED and rely on `git status --porcelain` to
+   * surface it as changed — an explicit `<base>` sha sidesteps
+   * `resolveBaseRef`'s `merge-base main HEAD` default, which would fail here
+   * (the fixture repo has no `main` branch).
    */
   function buildFixtureRepo(): { dir: string; baseSha: string } {
     const dir = mkdtempSync(join(tmpdir(), "changed-tests-scripts-universe-"));
@@ -736,6 +827,31 @@ describe("changed-tests selector — scripts/ universe widening: end-to-end via 
     );
     // mirrors the real scripts/build.ts — a scripts/ source file with NO test importing it.
     writeFileSync(join(dir, "scripts", "build.ts"), "export const BUILD_MARKER = 1;\n", "utf8");
+
+    // packages/lore/src -> packages/lore/tests transitive pair (AC-3 REGRESSION control below).
+    mkdirSync(join(dir, "packages", "lore", "src", "service"), { recursive: true });
+    mkdirSync(join(dir, "packages", "lore", "tests", "unit"), { recursive: true });
+    writeFileSync(
+      join(dir, "packages", "lore", "src", "service", "some-service.ts"),
+      "export const SOME_VALUE = 1;\n",
+      "utf8",
+    );
+    writeFileSync(
+      join(dir, "packages", "lore", "tests", "unit", "some-service.test.ts"),
+      [
+        'import { describe, it, expect } from "vitest";',
+        'import { SOME_VALUE } from "../../src/service/some-service.js";',
+        'describe("fixture", () => {',
+        '  it("noop", () => { expect(SOME_VALUE).toBe(1); });',
+        "});",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    // a repo-root file traced by NEITHER rule — not under packages/*/src,
+    // packages/*/tests, or scripts/** (AC-4 BOUNDARY control below).
+    writeFileSync(join(dir, "README.md"), "# fixture\n", "utf8");
 
     spawnSync("git", ["init", "-q"], { cwd: dir });
     spawnSync("git", ["add", "-A"], { cwd: dir });
@@ -781,17 +897,62 @@ describe("changed-tests selector — scripts/ universe widening: end-to-end via 
     expect(result.stdout).toMatch(/vitest: selected 1/);
   });
 
-  it("NEGATIVE: a scripts/ source file with no test (scripts/build.ts) selects nothing spurious — loud WARNING, exit 0, never a crash, never a select-everything fallback", () => {
+  it("NEGATIVE: a scripts/ source file with no test (scripts/build.ts) selects nothing spurious — WARNING (graph-known) AND exit 1 via the loud-zero rule (requirement 2), never a crash, never a select-everything fallback", () => {
     const noTestFile = join(fixture.dir, "scripts", "build.ts");
     writeFileSync(noTestFile, `${readFileSync(noTestFile, "utf8")}\n// negative control mutation\n`, "utf8");
 
     const result = runChangedTests(["--list", fixture.baseSha], fixture.dir);
 
-    expect(result.exitCode).toBe(0);
+    // requirement 2: a genuinely zero selection over a non-empty changed set
+    // is no longer reported as success, even under --list.
+    expect(result.exitCode).toBe(1);
+    expect(result.signal).toBeNull(); // a controlled `return 1`, not a crash/kill
     expect(result.stdout).toMatch(/vitest: selected 0/);
     expect(result.stdout).toMatch(/bun: selected 0/);
     expect(result.stdout).toMatch(/WARNING:/);
+    expect(result.stdout).toMatch(/FAIL: 0 tests selected despite 1 changed file\(s\)/);
+    expect(result.stdout).toContain("  scripts/build.ts");
     expect(result.stdout).not.toMatch(/check-test-budgets\.test\.ts/);
+  });
+
+  it("BOUNDARY (AC-4): a changed file in a directory traced by NEITHER rule (README.md — outside packages/*/src, packages/*/tests, and scripts/**) produces the loud-zero outcome, not a green run — exit 1, FAIL names the path; UNLIKE the graph-known scripts/build.ts case above, no WARNING fires since the file is not even in fileMap", () => {
+    const readme = join(fixture.dir, "README.md");
+    writeFileSync(readme, `${readFileSync(readme, "utf8")}\n<!-- untraced mutation -->\n`, "utf8");
+
+    const result = runChangedTests(["--list", fixture.baseSha], fixture.dir);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.signal).toBeNull();
+    expect(result.stdout).toMatch(/vitest: selected 0/);
+    expect(result.stdout).toMatch(/bun: selected 0/);
+    expect(result.stdout).not.toMatch(/WARNING:/);
+    expect(result.stdout).toMatch(/FAIL: 0 tests selected despite 1 changed file\(s\)/);
+    expect(result.stdout).toContain("  README.md");
+  });
+
+  it("CONTROL (AC-2): genuinely no changed files still exits 0 and selects nothing, silently — the ONE legitimate zero-selection state, not to be confused with the loud-zero cases above", () => {
+    // no mutation at all: base === HEAD and the working tree is clean, so
+    // both the diff and the porcelain status are empty.
+    const result = runChangedTests(["--list", fixture.baseSha], fixture.dir);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toMatch(/vitest: selected 0/);
+    expect(result.stdout).toMatch(/bun: selected 0/);
+    expect(result.stdout).not.toMatch(/WARNING:/);
+    expect(result.stdout).not.toMatch(/FAIL:/);
+  });
+
+  it("REGRESSION (AC-3): an ordinary packages/lore/src/** change still selects its existing transitive set, unaffected by the scripts/ universe widening or the loud-zero rule added alongside it", () => {
+    const serviceFile = join(fixture.dir, "packages", "lore", "src", "service", "some-service.ts");
+    writeFileSync(serviceFile, `${readFileSync(serviceFile, "utf8")}\n// regression mutation\n`, "utf8");
+
+    const result = runChangedTests(["--list", fixture.baseSha], fixture.dir);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toMatch(/packages\/lore\/tests\/unit\/some-service\.test\.ts \(transitive\)/);
+    expect(result.stdout).toMatch(/vitest: selected 1/);
+    expect(result.stdout).not.toMatch(/WARNING:/);
+    expect(result.stdout).not.toMatch(/FAIL:/);
   });
 });
 
