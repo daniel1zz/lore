@@ -118,11 +118,28 @@
  *   contract. Refuses (VALIDATION_ERROR) with no passing (`result: "pass"`) evidence
  *   or a fresh foreign claim; an already-terminal task is an idempotent no-op, never
  *   an error — see `DoneResult`'s own JSDoc.
+ * @invariant `done()` also refuses over an UNMET unfiltered-test-file-run floor
+ *   (task-every-ac-oracle-is-t-scoped-so-the-file-passes-is-attested) — a THIRD,
+ *   INDEPENDENT floor evaluated after the result:pass floor and the red-first floor
+ *   above (so none of the three can mask another). For EVERY declared test-file
+ *   anchor (`extra.file_anchors`, filtered to {@link isTestFileAnchor} — a
+ *   directory-scoped anchor names no single file and is unaffected), at least one
+ *   `oracle:"test"` `result:"pass"` evidence row must run that exact file with no
+ *   recognised case-name filter ({@link commandRunsFileUnfiltered}). A task
+ *   declaring zero test-file anchors has nothing to attest and is a clean pass —
+ *   mirrors the red-first floor's "never sets the flag → never reaches this check"
+ *   shape. Rationale: a `-t`-scoped AC oracle attests only the ONE assertion it
+ *   binds to, never that the file, taken as a whole, passes together (two tests
+ *   sharing mutable fixture state can each pass individually under `-t` and fail
+ *   when the file runs unfiltered — `knowledge-assessment-implementation-lore-ac-
+ *   set-the-dangling-ac`'s finding).
  *
  * Side-effect class: IO (reads/writes via StoreInterface; emits telemetry).
  * Source: SPEC-025 §3 D2, D3, D5, D7, D8, D10; §4 AC-WF-1..11; §8.2, §8.3; SPEC-038 §4, §7 D4;
  *         SPEC-039 §2 D2, §4 AC-VRF-2; BUG-011 (anchor-overlap gate TOCTOU hardening);
- *         spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M3, AC-WH-3
+ *         spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M3, AC-WH-3;
+ *         task-every-ac-oracle-is-t-scoped-so-the-file-passes-is-attested (the
+ *         unfiltered-test-file-run floor)
  */
 
 import { z } from "zod";
@@ -143,6 +160,9 @@ import {
   anchorsOverlap,
   computeAcScopeEdit,
   extractDeclaredAcScope,
+  isTestFileAnchor,
+  commandRunsFileUnfiltered,
+  UNFILTERED_RUN_CASE_FILTER_DESCRIPTION,
   type AcScopeEditOp,
   type EvidenceEntry,
   type TaskClaim,
@@ -357,6 +377,48 @@ function readRedFirstDeclared(task: DocRecord): boolean {
 /** The two evidence `result` values that count as proof a RED run happened (SPEC red-first). */
 function isRedRunResult(result: EvidenceEntry["result"]): boolean {
   return result === "expected-fail" || result === "fail";
+}
+
+/**
+ * The task's declared test-file anchors (task-every-ac-oracle-is-t-scoped-
+ * so-the-file-passes-is-attested) still lacking an attested UNFILTERED
+ * `result:pass` run — `done()`'s THIRD, independent evidence floor. Mirrors
+ * `readRedFirstDeclared`/`isRedRunResult` immediately above: a small, pure,
+ * synchronous predicate over already-read data, never a store call of its
+ * own.
+ *
+ * A directory-scoped anchor (trailing `/`, SPEC-042 D4) is NOT a "test
+ * file" — {@link isTestFileAnchor} excludes it — because it never names a
+ * single file this floor could demand a specific unfiltered command for; a
+ * task declaring only directory-scoped (or no) test-file anchors returns
+ * `[]` here and is unaffected by this floor entirely (mirrors the "no test-
+ * file anchors → nothing to attest" boundary this task's own oracle
+ * requires).
+ *
+ * Only `oracle: "test"` evidence rows are candidates — an unfiltered
+ * `tsc`/`lint`/`build` command could coincidentally NAME a test-file path as
+ * an argument without that ever constituting a test PASS of that file, so
+ * non-test oracles never even reach the command-matching check. Only
+ * `result: "pass"` rows count — an unfiltered RED run (the exact fixture
+ * this task's own AC-4 requires: two tests that each pass individually
+ * under `-t` and fail when the file runs together) must NOT satisfy this
+ * floor; it is proof the file does NOT yet pass unfiltered, the opposite of
+ * what this floor attests.
+ *
+ * @returns Every anchor lacking a satisfying row, in declaration order —
+ *   `[]` iff every declared test-file anchor is satisfied (or none exist).
+ */
+function findMissingUnfilteredTestFileRuns(task: DocRecord, evidence: EvidenceEntry[]): string[] {
+  const testFileAnchors = extractFileAnchors(task).filter(isTestFileAnchor);
+  if (testFileAnchors.length === 0) return [];
+
+  const unfilteredPassingCommands = evidence
+    .filter((entry) => entry.oracle === "test" && entry.result === "pass")
+    .map((entry) => entry.command);
+
+  return testFileAnchors.filter(
+    (anchor) => !unfilteredPassingCommands.some((command) => commandRunsFileUnfiltered(command, anchor)),
+  );
 }
 
 /**
@@ -1306,6 +1368,11 @@ export class TaskWorkflowService {
    *     a SECOND, INDEPENDENT floor evaluated only for a task claiming red-first
    *     discipline, checked AFTER the `result:pass` floor above so neither floor can
    *     mask the other; a task that never sets the flag never reaches this check;
+   *   - a declared test-file anchor (task-every-ac-oracle-is-t-scoped-so-the-file-
+   *     passes-is-attested) holds no `oracle:"test"` `result:"pass"` evidence entry
+   *     whose command runs that exact file with no case-name filter — a THIRD,
+   *     INDEPENDENT floor checked AFTER the two above, naming every unsatisfied
+   *     anchor; a task declaring no test-file anchors never reaches this check;
    *   - a FRESH claim (same `isClaimStale` freshness test `claim()`/`ready()` use) is
    *     held by a DIFFERENT actor than `opts.by` — a STALE claim, or a fresh claim held
    *     by `opts.by` itself, never blocks.
@@ -1331,10 +1398,11 @@ export class TaskWorkflowService {
    * @param now - Time seam (D10) — ONE reading shared by every step's timestamp
    * @returns `DoneResult` — see that type's own JSDoc
    * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a task / no passing evidence / a
-   *   red_first claim with no red evidence row / fresh foreign claim / illegal
-   *   lifecycle step — the last one structurally unreachable given
-   *   `computeArchiveWalk`'s own base-graph-only steps, kept as a fail-loud guard
-   *   rather than a non-null assertion), STALE_VERSION
+   *   red_first claim with no red evidence row / an unsatisfied test-file-anchor
+   *   unfiltered-run floor / fresh foreign claim / illegal lifecycle step — the
+   *   last one structurally unreachable given `computeArchiveWalk`'s own
+   *   base-graph-only steps, kept as a fail-loud guard rather than a non-null
+   *   assertion), STALE_VERSION
    */
   async done(
     idOrSlug: string,
@@ -1397,6 +1465,27 @@ export class TaskWorkflowService {
           `archiving a red-first claim (record one via \`lore evidence ${task.slug} --oracle ` +
           `<kind> --command "<cmd>" --result expected-fail\`)`,
         value: evidence.map((e) => e.result),
+      });
+    }
+
+    // reason: the unfiltered-test-file-run floor (task-every-ac-oracle-is-t-
+    // scoped-so-the-file-passes-is-attested) — a THIRD, independent floor,
+    // checked only after BOTH floors above already succeeded, so none of the
+    // three can mask another. A task declaring no test-file anchors returns
+    // [] here and never fires this branch.
+    const missingUnfilteredRuns = findMissingUnfilteredTestFileRuns(task, evidence);
+    if (missingUnfilteredRuns.length > 0) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "extra.verification_evidence",
+        message:
+          `Task "${task.slug}" declares test-file anchor(s) with no attested UNFILTERED ` +
+          `result:pass run: ${missingUnfilteredRuns.join(", ")} — lore done requires, for ` +
+          `EACH declared test-file anchor, at least one oracle:test result:pass evidence ` +
+          `row whose command runs that file with no ${UNFILTERED_RUN_CASE_FILTER_DESCRIPTION} ` +
+          `case filter (record one via \`lore evidence ${task.slug} --oracle test --command ` +
+          `"<unfiltered file command>" --result pass\`)`,
+        value: missingUnfilteredRuns,
       });
     }
 
