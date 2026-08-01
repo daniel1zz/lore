@@ -141,6 +141,7 @@ import {
   resolveTargetTask,
   extractDeclaredAcScope,
   isAcInDeclaredScope,
+  resolveGoverningSpecByAcScope,
   isApprovedVerifyCommand,
   countExplicitPathArgs,
   parseExecutedUnits,
@@ -535,29 +536,23 @@ export class VerifyRunnerService {
    *   advisory only — no other field of it is read here).
    * @param opts - Same `VerifyPlanOpts` the public entry points receive.
    * @param recordAcRef - `true` for `verifyPlan` (plan-owned tasks), `false` for
-   *   `verifyAdhocTask`. MEASURED 2026-08-01: `TaskWorkflowService.appendEvidenceEntry`
-   *   (the shared implementation behind the injected `recordVerifiedEvidence` port)
-   *   cross-validates any supplied `ac_ref` by calling `resolveDeclaredAcIds(task.
-   *   parent_id)` — which itself hard-requires `task.parent_id` to resolve to a
-   *   `type: "plan"` document. An ad-hoc task's `parent_id` is the corpus root PRD,
-   *   so that call refuses `Expected a plan document; got type 'prd'` — the EXACT
-   *   defect this task fixes, one layer DEEPER than `VerifyRunnerService` itself
-   *   (confirmed by direct reproduction: `lore verify --task <adhoc>` failed with
-   *   this message even after this class's OWN `getPlanBundle` bypass, because
-   *   `_runVerification`'s downstream `recordVerifiedEvidence` call re-triggers the
-   *   SAME cross-entity walk from a completely different module). Fixing THAT walk
-   *   to accept an ad-hoc task's own already-verified `ac_scope` membership as
-   *   sufficient proof requires editing `task-workflow-service.ts` (and likely
-   *   `corpus-service.ts::resolveDeclaredAcIds`) — both OUTSIDE this task's declared
-   *   file anchors (`verify.ts`, `verify-runner-service.ts`), and both shared,
-   *   heavily-modified files this session was told other concurrent batches may be
-   *   editing. Rather than expand into that blast radius, this method OMITS
-   *   `ac_ref` for the ad-hoc path — the evidence entry is still GENUINELY
-   *   runner-attested (real oracle execution, real `attestation.runner: "lore-cli"`
-   *   / `exit_code` / `duration_ms`), it simply cannot (yet) be cross-referenced by
-   *   AC-coverage aggregation (`computeAcCoverage`, `lore ac list`, plan-close
-   *   coverage). This is a NAMED, NARROWER remaining gap — not silently dropped —
-   *   see `verifyAdhocTask`'s own JSDoc and this task's completion report.
+   *   `verifyAdhocTask`. HISTORICAL (measured 2026-08-01, fixed by task-an-ad-hoc-
+   *   task-s-attested-evidence-cannot-carry-ac-ref): `TaskWorkflowService.
+   *   appendEvidenceEntry` (the shared implementation behind the injected
+   *   `recordVerifiedEvidence` port) used to cross-validate any supplied `ac_ref`
+   *   by calling `resolveDeclaredAcIds(task.parent_id)` UNCONDITIONALLY — which
+   *   hard-requires `task.parent_id` to resolve to a `type: "plan"` document. An
+   *   ad-hoc task's `parent_id` is the corpus root PRD, so that call refused
+   *   `Expected a plan document; got type 'prd'` for EVERY ad-hoc task, one layer
+   *   DEEPER than `VerifyRunnerService` itself. `appendEvidenceEntry` now BRANCHES
+   *   on `task.extra.adhoc` — an ad-hoc task's `ac_ref` resolves via the injected
+   *   `resolveAdhocGoverningAcIds` port (`CorpusService.resolveDeclaredAcIdsForAdhocTask`,
+   *   which runs the SAME `resolveGoverningSpecByAcScope` search this class's own
+   *   `verifyAdhocTask` runs, `@lore/core`) instead of the plan-only walk — so
+   *   supplying `ac_ref` from THIS method for an ad-hoc task would now succeed.
+   *   `verifyAdhocTask` still passes `recordAcRef: false` anyway: a DELIBERATE,
+   *   separately-scoped decision (see that method's own JSDoc) — not a
+   *   structural impossibility any more.
    */
   private async _runVerification(
     selectedCriteria: AcceptanceCriterion[],
@@ -809,7 +804,11 @@ export class VerifyRunnerService {
    * method never guesses which spec governs an ad-hoc task: `AC-*` ids are
    * unique only WITHIN one spec's declared criteria (`specAcceptanceCriteriaSchema`),
    * never enforced globally, so guessing wrong would silently attest a real
-   * script command against the wrong spec's acceptance criteria.
+   * script command against the wrong spec's acceptance criteria. The actual
+   * search (zero/multi-match refusal included) is `resolveGoverningSpecByAcScope`
+   * (`@lore/core`) — shared verbatim with `CorpusService.resolveDeclaredAcIdsForAdhocTask`
+   * (task-an-ad-hoc-task-s-attested-evidence-cannot-carry-ac-ref) so the two
+   * surfaces can never disagree about which spec governs a given ad-hoc task.
    *
    * Every step AFTER spec resolution (declared-scope selection, M2 approval
    * gate, execution, freshness/completeness guards, attested evidence write) is
@@ -818,15 +817,20 @@ export class VerifyRunnerService {
    * attests exactly as trustworthily as a plan-owned one: the recorded evidence
    * carries a REAL `attestation.runner: "lore-cli"` / `exit_code` / `duration_ms`
    * from an ACTUAL executed command, not a synthesized marker. The ONE remaining
-   * difference from a plan-owned task's evidence is `ac_ref` — omitted here,
-   * NAMED AS A GAP, not silently dropped: `TaskWorkflowService.appendEvidenceEntry`
-   * cross-validates any supplied `ac_ref` via `resolveDeclaredAcIds(task.parent_id)`,
-   * which hard-requires that parent to resolve to a `plan` — structurally
-   * impossible for an ad-hoc task (measured: reproduces the identical `Expected a
-   * plan document; got type 'prd'` refusal one layer BELOW this service).
-   * Closing that gap needs a change to `task-workflow-service.ts` (and likely
-   * `corpus-service.ts`), both outside this task's declared file anchors — see
-   * this task's completion report for the concrete follow-up shape.
+   * difference from a plan-owned task's evidence is `ac_ref` — still omitted
+   * here, but the REASON has changed: `TaskWorkflowService.appendEvidenceEntry`'s
+   * cross-entity validation for an ad-hoc task now resolves correctly (via the
+   * injected `resolveAdhocGoverningAcIds` port → `CorpusService.
+   * resolveDeclaredAcIdsForAdhocTask` → this same `resolveGoverningSpecByAcScope`
+   * search) — task-an-ad-hoc-task-s-attested-evidence-cannot-carry-ac-ref fixed
+   * that. `recordAcRef: false` stays here as a DELIBERATE, separately-scoped
+   * decision, not a structural impossibility any more: wiring `ac_ref` into this
+   * runner-attested path changes this method's own recorded-evidence shape and
+   * touches this class's own test suite (`verify-runner-service.test.ts`,
+   * `ac_ref intentionally omitted` assertions) — outside that fix task's declared
+   * anchors and its Oracle (which only exercises `lore evidence --ac`, the
+   * self-reported path via `TaskWorkflowService.addEvidence`). A future task can
+   * flip this flag once it owns updating that suite.
    *
    * @param task - The resolved target task (caller MUST have already resolved
    *   this by id/slug; this method does no id resolution of its own).
@@ -892,52 +896,16 @@ export class VerifyRunnerService {
       });
     }
 
-    const declaredSet = new Set(declared);
-    const matches: { spec: DocRecord; criteria: AcceptanceCriterion[] }[] = [];
-    for (const candidate of candidateSpecs) {
-      const parsed = specAcceptanceCriteriaSchema.safeParse(candidate.extra["acceptance_criteria"]);
-      if (!parsed.success || parsed.data.length === 0) continue;
-      const specIds = new Set(parsed.data.map((c) => c.id));
-      const coversAll = [...declaredSet].every((id) => specIds.has(id));
-      if (coversAll) matches.push({ spec: candidate, criteria: parsed.data });
-    }
-
-    if (matches.length === 0) {
-      return err({
-        code: "VALIDATION_ERROR",
-        field: "ac_scope",
-        message:
-          `ad-hoc task "${task.slug}"'s declared ac_scope (${declared.join(", ")}) matches no ` +
-          "spec's acceptance_criteria in full — lore verify cannot infer a governing spec for " +
-          "an ad-hoc task without a structural plan/spec link (SPEC-069 D2). Ensure ac_scope " +
-          "names AC ids that all exist on exactly one spec.",
-        value: declared,
-      });
-    }
-    if (matches.length > 1) {
-      return err({
-        code: "VALIDATION_ERROR",
-        field: "ac_scope",
-        message:
-          `ad-hoc task "${task.slug}"'s declared ac_scope (${declared.join(", ")}) matches ` +
-          `${matches.length} specs (${matches.map((m) => m.spec.slug).join(", ")}) — ambiguous. ` +
-          "lore verify never guesses which spec governs an ad-hoc task; narrow the declared " +
-          "ac_scope to AC ids unique to a single spec.",
-        value: matches.map((m) => m.spec.slug),
-      });
-    }
-
-    const matched = matches[0];
-    if (matched === undefined) {
-      // Unreachable — `matches.length` is exactly 1 at this point (both the
-      // zero- and multi-match branches above already returned). Guards
-      // `noUncheckedIndexedAccess` without an unsafe non-null assertion.
-      return err({
-        code: "STORE_ERROR",
-        message: "internal error: ad-hoc governing-spec match lost between length check and read",
-      });
-    }
-    const { spec, criteria } = matched;
+    // Shared search (task-an-ad-hoc-task-s-attested-evidence-cannot-carry-ac-ref)
+    // — SAME function `CorpusService.resolveDeclaredAcIdsForAdhocTask` calls, so
+    // the two surfaces can never disagree about which spec governs this task.
+    const resolveResult = resolveGoverningSpecByAcScope(
+      declared,
+      candidateSpecs,
+      `ad-hoc task "${task.slug}"`,
+    );
+    if (!resolveResult.ok) return resolveResult;
+    const { spec, criteria } = resolveResult.value;
 
     // Mirrors verifyPlan's pre-existing unknown-acIds check (SAME field/message
     // shape) — a caller-named --ac id must be declared on the RESOLVED spec.

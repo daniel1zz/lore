@@ -46,6 +46,8 @@ import {
   computePlanCloseCascadeTargets,
   isLedgerKnowledgeSubType,
   computeAcCoverage,
+  extractDeclaredAcScope,
+  resolveGoverningSpecByAcScope,
 } from "@lore/core";
 import type {
   CreateDocInput,
@@ -3346,6 +3348,77 @@ export class CorpusService {
     if (!parsed.success) return ok(null);
 
     return ok(new Set(parsed.data.map((c) => c.id)));
+  }
+
+  /**
+   * The `--adhoc`-task sibling of {@link resolveDeclaredAcIds} (task-an-ad-hoc-
+   * task-s-attested-evidence-cannot-carry-ac-ref). An `--adhoc` task (SPEC-069
+   * §Design Decisions D2) has no `plan_id` and is parented to the corpus root
+   * PRD by construction, so `resolveDeclaredAcIds`'s hard `Expected a plan
+   * document` requirement can NEVER be satisfied for it — the SAME `Expected a
+   * plan document; got type 'prd'` refusal `VerifyRunnerService.verifyAdhocTask`
+   * was filed to fix, one layer deeper (reproduced by `TaskWorkflowService.
+   * appendEvidenceEntry`'s cross-entity `ac_ref` check, which used to call
+   * `resolveDeclaredAcIds(task.parent_id)` unconditionally).
+   *
+   * Resolves the governing spec via the task's OWN declared `extra.ac_scope`
+   * instead of a plan→spec walk, using `resolveGoverningSpecByAcScope`
+   * (`@lore/core`) — the EXACT SAME search `VerifyRunnerService.verifyAdhocTask`
+   * runs to find its own governing spec — so the two surfaces can never
+   * disagree about which spec governs a given ad-hoc task. Never guesses: an
+   * absent/empty ac_scope, or one matching zero/multiple specs, all refuse loud
+   * rather than picking a spec arbitrarily.
+   *
+   * @param task - The ALREADY-RESOLVED target ad-hoc task (caller resolves by
+   *   id/slug; this method does no id resolution of its own — same contract as
+   *   `VerifyRunnerService.verifyAdhocTask`'s own `task` param).
+   * @returns `Set<string>` of every AC id declared on the ONE spec that fully
+   *   covers the task's declared ac_scope. UNLIKE `resolveDeclaredAcIds`, there
+   *   is no `null` ("nothing declared") case: an ad-hoc task's ac_scope IS the
+   *   only signal available to resolve a governing spec, so an absent/empty
+   *   scope is itself a hard refusal, never "nothing to check against".
+   * @throws VALIDATION_ERROR field `ac_scope` — ac_scope absent, empty, or
+   *   matches zero/multiple specs (same message family
+   *   `VerifyRunnerService.verifyAdhocTask` raises).
+   *
+   * Source: task-an-ad-hoc-task-s-attested-evidence-cannot-carry-ac-ref
+   */
+  async resolveDeclaredAcIdsForAdhocTask(task: DocRecord): Promise<Result<Set<string>, LoreError>> {
+    const declared = extractDeclaredAcScope(task);
+    if (declared === undefined) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "ac_scope",
+        message:
+          `ad-hoc task "${task.slug}" has no declared ac_scope, so its governing spec cannot ` +
+          "be resolved (no plan/spec link exists for an --adhoc task, SPEC-069 D2) — declare " +
+          `one with 'lore scope add ${task.slug} <AC-ID>' first.`,
+        value: task.slug,
+      });
+    }
+    if (declared.length === 0) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "ac_scope",
+        message:
+          `ad-hoc task "${task.slug}" declares no acceptance criterion — its ac_scope is an ` +
+          "EMPTY array, so there is no declared AC id to resolve a governing spec from. " +
+          `Re-declare with 'lore scope add ${task.slug} <AC-ID>' before recording evidence.`,
+        value: task.slug,
+      });
+    }
+
+    const specsResult = await this.store.findMany({ type: "spec" });
+    if (!specsResult.ok) return specsResult;
+
+    const resolveResult = resolveGoverningSpecByAcScope(
+      declared,
+      specsResult.value,
+      `ad-hoc task "${task.slug}"`,
+    );
+    if (!resolveResult.ok) return resolveResult;
+
+    return ok(new Set(resolveResult.value.criteria.map((c) => c.id)));
   }
 
   // ── Feeding Skill Discovery (IoC vertical-slice tech-spec §4.1/§11, P1 slice-2) ──
