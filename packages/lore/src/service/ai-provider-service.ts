@@ -260,56 +260,70 @@ export function computeGroundingWarnings(
 }
 
 /**
- * SPEC-067 D3 — mechanically downgrade every ungrounded absence-based `dimension_scores`
- * entry's `confidence` to the `"low"` sentinel, stamping `confidence_reason`. Reuses
- * `findUngroundedAbsenceDimensions`, the SAME grounding-match computation
- * `computeGroundingWarnings` uses — never a second, independently-drifting heuristic.
+ * spec-lore-assess-project-evidence-rows-instead-of-embedding-the D3/D4 — suppress, not
+ * merely warn about, every `dimension_scores` entry `findUngroundedAbsenceDimensions`
+ * flags: the flagged entry is REMOVED from the returned `dimension_scores`, and a
+ * corresponding `unverifiable[]` entry naming the dimension is appended in its place — the
+ * assessment still records that the material could not be judged, it just no longer
+ * asserts a defect about it (D3). Reuses `findUngroundedAbsenceDimensions`, the SAME
+ * grounding-match computation `computeGroundingWarnings` uses — never a second,
+ * independently-drifting heuristic (D4).
  *
- * @invariant Pure — returns a NEW `DimensionScores` record when anything changed; returns
- *   the EXACT SAME reference when nothing is ungrounded (AC-067-6 healthy-path regression —
- *   `_finalizeAssessment` can conditionally re-spread this result without ever
- *   distinguishing "unchanged" from "not called").
+ * Supersedes SPEC-067 D3's `applyGroundingConfidenceDowngrade` (removed by this change):
+ * that mechanism downgraded these exact entries' `confidence` to `"low"` but left them in
+ * the persisted record — measured 2026-08-01 to ship false findings into the permanent
+ * quality record anyway (see this task's governing spec's Overview). A warning/downgrade
+ * that does not change what lands in the record is not a mechanism.
+ *
+ * @invariant Pure — returns the EXACT SAME `dimensionScores`/`unverifiableEntries`
+ *   references when nothing is ungrounded (mirrors the AC-067-6 healthy-path identity
+ *   precedent the superseded function established — `_finalizeAssessment` never needs to
+ *   distinguish "unchanged" from "not called").
  * @invariant Every non-flagged entry (evidence-based, or absence-based but grounded) is
- *   copied through byte-identical — only ungrounded entries gain `confidence: "low"` +
- *   `confidence_reason`.
+ *   copied through byte-identical — only ungrounded entries are removed.
  * @param dimensionScores - `parsed.dimension_scores` (may be undefined — no-op)
  * @param unverifiableEntries - `parsed.unverifiable` (may be undefined — treated as `[]`)
  * @param truncatedSections - `judgment.truncated[]` — same input `computeGroundingWarnings` takes
- * @returns The (possibly) downgraded `DimensionScores`, or the original `undefined`
+ * @returns `dimensionScores` with every ungrounded absence entry removed (`undefined` when
+ *   none remain), and `unverifiable` with one new entry per removed dimension appended
+ *   (identical reference to the input when nothing was suppressed)
  *
  * @example
- * applyGroundingConfidenceDowngrade(
- *   { scope_fidelity: { score: 40, confidence: 0.5, based_on: "absence", reasoning: "no data" } },
+ * suppressUngroundedAbsenceFindings(
+ *   { scope_fidelity: { score: 20, confidence: 0.2, based_on: "absence", reasoning: "cannot verify" } },
  *   undefined,
  *   [],
  * );
- * // → { scope_fidelity: { score: 40, confidence: "low", based_on: "absence", reasoning: "no data",
- * //     confidence_reason: 'Forced to "low": ...' } }
+ * // → { dimensionScores: undefined,
+ * //     unverifiable: [{ material: "scope_fidelity dimension score", reason: "..." }] }
  */
-function applyGroundingConfidenceDowngrade(
+function suppressUngroundedAbsenceFindings(
   dimensionScores: DimensionScores | undefined,
   unverifiableEntries: UnverifiableEntry[] | undefined,
   truncatedSections: string[],
-): DimensionScores | undefined {
-  if (!dimensionScores) return dimensionScores;
-
+): { dimensionScores: DimensionScores | undefined; unverifiable: UnverifiableEntry[] | undefined } {
   const ungrounded = findUngroundedAbsenceDimensions(dimensionScores, unverifiableEntries, truncatedSections);
-  if (ungrounded.length === 0) return dimensionScores;
-
-  const next: DimensionScores = { ...dimensionScores };
-  for (const dimensionKey of ungrounded) {
-    // reason: dimensionKey came from Object.entries(dimensionScores) inside
-    // findUngroundedAbsenceDimensions above — this lookup cannot miss.
-    const entry = dimensionScores[dimensionKey]!;
-    next[dimensionKey] = {
-      ...entry,
-      confidence: "low",
-      confidence_reason:
-        `Forced to "low": based_on="absence" with no matching unverifiable[] or ` +
-        `judgment.truncated[] entry citing "${dimensionKey}" — the absence claim is ungrounded (SPEC-067 D3).`,
-    };
+  if (ungrounded.length === 0) {
+    return { dimensionScores, unverifiable: unverifiableEntries };
   }
-  return next;
+
+  // reason: findUngroundedAbsenceDimensions only ever returns a non-empty array when
+  // dimensionScores is defined (its own first line is `if (!dimensionScores) return [];`)
+  // — this non-null assertion cannot miss.
+  const remaining: DimensionScores = Object.fromEntries(
+    Object.entries(dimensionScores!).filter(([dimensionKey]) => !ungrounded.includes(dimensionKey)),
+  );
+  const suppressedAsUnverifiable: UnverifiableEntry[] = ungrounded.map((dimensionKey) => ({
+    material: `${dimensionKey} dimension score`,
+    reason:
+      `based_on="absence" cited no matching unverifiable[]/judgment.truncated[] entry — ` +
+      `suppressed as ungrounded rather than published as a finding.`,
+  }));
+
+  return {
+    dimensionScores: Object.keys(remaining).length > 0 ? remaining : undefined,
+    unverifiable: [...(unverifiableEntries ?? []), ...suppressedAsUnverifiable],
+  };
 }
 
 // ─── AIProviderService ────────────────────────────────────────────────────────
@@ -1273,11 +1287,18 @@ export class AIProviderService {
    *   - `rubric_warning` accumulates the judge's own (optional) warnings plus this
    *     method's D4 grounding cross-check (`computeGroundingWarnings`) — never fatal.
    *
-   * SPEC-067 §T2/D3/D4 additions:
-   *   - `dimension_scores` is passed through `applyGroundingConfidenceDowngrade` — every
-   *     ungrounded absence-based entry's `confidence` is forced to `"low"` with a stamped
-   *     `confidence_reason` (D3). The existing `rubric_warning` text (D4, above) stays as
-   *     the human-readable trace of the SAME ungrounded-dimension computation.
+   * SPEC-067 §T2/D4 additions:
+   *   - The existing `rubric_warning` text (D4, above) stays as the human-readable trace of
+   *     the ungrounded-dimension computation `computeGroundingWarnings` performs.
+   *
+   * spec-lore-assess-project-evidence-rows-instead-of-embedding-the D3/D4 additions
+   * (SUPERSEDES SPEC-067 D3's confidence-downgrade-only mechanism, removed):
+   *   - `dimension_scores` is passed through `suppressUngroundedAbsenceFindings` — every
+   *     ungrounded absence-based entry (the SAME `findUngroundedAbsenceDimensions`
+   *     computation, D4) is REMOVED from the persisted findings rather than merely
+   *     downgraded, and a corresponding `unverifiable[]` entry naming the dimension is
+   *     appended in its place (D3) — the assessment still records that the material could
+   *     not be judged, it just no longer asserts a defect about it.
    *   - `judgment.overall_confidence`/`degraded_by_truncation` are set when
    *     `computeTaskTruncationRatio(truncated, bundle.tasks.length)` exceeds
    *     `TRUNCATION_DOWNGRADE_THRESHOLDS.confidenceCapRatio` (D4).
@@ -1323,11 +1344,17 @@ export class AIProviderService {
     const groundingWarnings = computeGroundingWarnings(parsed, truncated);
     const rubricWarning = [...(parsed.rubric_warning ?? []), ...groundingWarnings];
 
-    // reason: SPEC-067 D3 — mechanical confidence downgrade over the SAME ungrounded-dimension
-    // set groundingWarnings above already identified (findUngroundedAbsenceDimensions is the
-    // shared computation both call). Returns parsed.dimension_scores UNCHANGED (same reference)
-    // when nothing is ungrounded — AC-067-6 healthy-path regression.
-    const dimensionScores = applyGroundingConfidenceDowngrade(parsed.dimension_scores, parsed.unverifiable, truncated);
+    // reason: spec-lore-assess-project-evidence-rows-instead-of-embedding-the D3/D4 —
+    // suppress (not merely warn about) every ungrounded absence-based dimension_scores
+    // entry over the SAME ungrounded-dimension set groundingWarnings above already
+    // identified (findUngroundedAbsenceDimensions is the shared computation both call).
+    // Returns parsed.dimension_scores/unverifiable UNCHANGED (same references) when
+    // nothing is ungrounded — mirrors the AC-067-6 healthy-path identity precedent.
+    const { dimensionScores, unverifiable } = suppressUngroundedAbsenceFindings(
+      parsed.dimension_scores,
+      parsed.unverifiable,
+      truncated,
+    );
 
     // reason: SPEC-067 D4 — task-truncation coverage caps overall confidence, and at 100%
     // refuses a numeric overall_score / forces verdict to "inconclusive". Computed from the
@@ -1338,21 +1365,29 @@ export class AIProviderService {
     const degradedByTruncation = taskTruncationRatio > TRUNCATION_DOWNGRADE_THRESHOLDS.confidenceCapRatio;
     const fullyTruncated = taskTruncationRatio >= TRUNCATION_DOWNGRADE_THRESHOLDS.inconclusiveRatio;
 
-    // reason: destructure OUT verdict/overall_score/dimension_scores so the object below can
-    // OMIT overall_score entirely at 100% truncation (a `key: undefined` spread would leave
-    // an own-property, which JSON.stringify drops but Zod's optional() still treats as
-    // present-with-undefined under exactOptionalPropertyTypes) and override the other two —
-    // every other field on `parsed` (ac_scores, unverifiable, typed_gaps, typed_recommendations,
-    // rubric_warning) passes through via ...restParsed exactly as `...parsed` did before.
-    const { verdict: judgeVerdict, overall_score: judgeOverallScore, dimension_scores: _unusedRaw, ...restParsed } =
-      parsed;
-    void _unusedRaw; // reason: destructured only to exclude it from restParsed; downgraded value re-added below.
+    // reason: destructure OUT verdict/overall_score/dimension_scores/unverifiable so the
+    // object below can OMIT overall_score entirely at 100% truncation (a `key: undefined`
+    // spread would leave an own-property, which JSON.stringify drops but Zod's optional()
+    // still treats as present-with-undefined under exactOptionalPropertyTypes) and override
+    // the other three with the suppression-augmented values computed above — every other
+    // field on `parsed` (ac_scores, typed_gaps, typed_recommendations, rubric_warning)
+    // passes through via ...restParsed exactly as `...parsed` did before.
+    const {
+      verdict: judgeVerdict,
+      overall_score: judgeOverallScore,
+      dimension_scores: _unusedRawDimensionScores,
+      unverifiable: _unusedRawUnverifiable,
+      ...restParsed
+    } = parsed;
+    void _unusedRawDimensionScores; // reason: destructured only to exclude it from restParsed; suppressed value re-added below.
+    void _unusedRawUnverifiable; // reason: destructured only to exclude it from restParsed; suppressed value re-added below.
 
     return {
       ...restParsed,
       verdict: fullyTruncated ? "inconclusive" : judgeVerdict,
       ...(fullyTruncated ? {} : { overall_score: judgeOverallScore }),
       ...(dimensionScores !== undefined ? { dimension_scores: dimensionScores } : {}),
+      ...(unverifiable !== undefined ? { unverifiable } : {}),
       gaps,
       recommendations,
       ...(rubricWarning.length > 0 ? { rubric_warning: rubricWarning } : {}),

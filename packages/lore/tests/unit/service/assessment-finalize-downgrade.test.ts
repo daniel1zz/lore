@@ -1,12 +1,24 @@
 /**
- * Tests for SPEC-067 D3 (mechanical grounding downgrade) + D4 (truncation-coverage
- * downgrade) inside `AIProviderService._finalizeAssessment` — exercised end-to-end via the
- * public `assessPlan` entry point with a scripted `InMemoryAIProvider` (no real AI calls,
- * mirrors `ai-provider-service-assess-grounding.test.ts`'s existing pattern for D4/SPEC-040).
+ * Tests for SPEC-067 D4 (truncation-coverage downgrade) inside
+ * `AIProviderService._finalizeAssessment` — exercised end-to-end via the public
+ * `assessPlan` entry point with a scripted `InMemoryAIProvider` (no real AI calls, mirrors
+ * `ai-provider-service-assess-grounding.test.ts`'s existing pattern for D4/SPEC-040).
  *
- * Spec-first expectations:
- *   - AC-067-4: an ungrounded absence-based dimension score emerges from finalization with
- *     that dimension's `confidence === "low"` and a stamped `confidence_reason`.
+ * ⛔ SUPERSEDED (2026-08-01): SPEC-067 D3's confidence-downgrade-only mechanism
+ * (`applyGroundingConfidenceDowngrade`) is REMOVED by
+ * spec-lore-assess-project-evidence-rows-instead-of-embedding-the D3/D4
+ * (task-t4-suppress-ungrounded-absence-findings-instead-of-merely) — a downgrade that
+ * leaves the ungrounded finding in the permanent record was measured shipping false
+ * findings anyway. An ungrounded absence-based dimension score is now REMOVED from
+ * `dimension_scores` entirely (not merely confidence-downgraded), with a corresponding
+ * `unverifiable[]` entry naming the dimension added in its place. The three former
+ * "AC-067-4" sub-tests below are retitled `REGRESSION (superseded)` and updated to assert
+ * the new removal behavior; SPEC-067's own AC-067-4 statement ("emerges from finalization
+ * with confidence low") is now stale and needs a follow-up update/invalidation at the
+ * governance layer — new suppression coverage (AC-AEP-5/6/7/8) lives in
+ * `assess-absence-suppression.test.ts`.
+ *
+ * Spec-first expectations (current):
  *   - AC-067-5: >25% of a plan's tasks truncated in the judge prompt caps overall confidence
  *     at "low" with `degraded_by_truncation: true`; 100% truncation yields verdict
  *     "inconclusive" with no `overall_score` at all.
@@ -18,7 +30,7 @@
  * fixture — a small `max_task_chars` budget plus controlled task content lengths deterministically
  * puts exactly N of the plan's tasks over budget.
  *
- * @spec_ref AC-067-4, AC-067-5, AC-067-6, SPEC-067 D3, D4
+ * @spec_ref AC-067-5, AC-067-6, SPEC-067 D4; superseded: AC-067-4, SPEC-067 D3
  */
 
 import { describe, it, expect } from "vitest";
@@ -77,8 +89,8 @@ const UNDER_BUDGET_CONTENT = "ok"; // <= 20 chars → not truncated
 
 // ─── AC-067-4: ungrounded absence dimension → confidence forced to "low" ─────
 
-describe("AC-067-4: ungrounded absence-based dimension score is mechanically downgraded", () => {
-  it("AC-067-4: confidence is forced to 'low' with a stamped confidence_reason", async () => {
+describe("REGRESSION (superseded AC-067-4): ungrounded absence-based dimension score is now SUPPRESSED, not merely downgraded", () => {
+  it("REGRESSION (superseded AC-067-4): the entry is REMOVED from dimension_scores and an unverifiable[] entry naming it is added", async () => {
     const bundle = await makeBundleWithTasks([UNDER_BUDGET_CONTENT]);
     const judgeJson = JSON.stringify({
       verdict: "partially_met",
@@ -98,14 +110,15 @@ describe("AC-067-4: ungrounded absence-based dimension score is mechanically dow
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    const entry = result.value.dimension_scores?.["scope_fidelity"];
-    expect(entry).toBeDefined();
-    expect(entry?.confidence).toBe("low");
-    expect(entry?.confidence_reason).toBeDefined();
-    expect(entry?.confidence_reason).toContain("scope_fidelity");
+    // reason: task-t4-suppress-ungrounded-absence-findings-instead-of-merely D3 — the
+    // old downgrade-and-keep behavior (confidence forced to "low", entry survives) is
+    // superseded: the entry is removed entirely rather than merely re-confidenced.
+    expect(result.value.dimension_scores?.["scope_fidelity"]).toBeUndefined();
+    const unverifiable = result.value.unverifiable ?? [];
+    expect(unverifiable.some((u) => u.material.toLowerCase().includes("scope_fidelity"))).toBe(true);
   });
 
-  it("AC-067-4: the original numeric confidence is discarded, not merely annotated", async () => {
+  it("REGRESSION (superseded AC-067-4): the entry is removed, not merely re-confidenced — the original numeric confidence never survives because nothing of the entry does", async () => {
     const bundle = await makeBundleWithTasks([UNDER_BUDGET_CONTENT]);
     const judgeJson = JSON.stringify({
       verdict: "partially_met",
@@ -123,12 +136,14 @@ describe("AC-067-4: ungrounded absence-based dimension score is mechanically dow
     const result = await service.assessPlan(bundle, {});
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    // reason: 0.9 (the judge's self-reported float) must NOT survive — "low" fully replaces it.
-    expect(result.value.dimension_scores?.["outcome"]?.confidence).toBe("low");
-    expect(result.value.dimension_scores?.["outcome"]?.confidence).not.toBe(0.9);
+    // reason: 0.9 (the judge's self-reported float) does not survive — but neither does
+    // any other part of the entry; it is removed wholesale, not merely re-confidenced.
+    expect(result.value.dimension_scores?.["outcome"]).toBeUndefined();
+    const unverifiable = result.value.unverifiable ?? [];
+    expect(unverifiable.some((u) => u.material.toLowerCase().includes("outcome"))).toBe(true);
   });
 
-  it("AC-067-4: score/based_on/reasoning are preserved untouched — only confidence changes", async () => {
+  it("REGRESSION (superseded AC-067-4): score/based_on/reasoning no longer survive either — the whole entry is removed, not partially edited", async () => {
     const bundle = await makeBundleWithTasks([UNDER_BUDGET_CONTENT]);
     const judgeJson = JSON.stringify({
       verdict: "partially_met",
@@ -147,9 +162,9 @@ describe("AC-067-4: ungrounded absence-based dimension score is mechanically dow
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const entry = result.value.dimension_scores?.["evidence_integrity"];
-    expect(entry?.score).toBe(33);
-    expect(entry?.based_on).toBe("absence");
-    expect(entry?.reasoning).toBe("cannot verify");
+    expect(entry).toBeUndefined();
+    const unverifiable = result.value.unverifiable ?? [];
+    expect(unverifiable.some((u) => u.material.toLowerCase().includes("evidence_integrity"))).toBe(true);
   });
 
   it("AC-067-4: a GROUNDED absence claim (cites the dimension in unverifiable[]) is left untouched", async () => {
