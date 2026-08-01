@@ -731,7 +731,13 @@ describe("lore assess --diff <range> — git-diff spawnSync maxBuffer (task-lore
     } finally {
       app.close();
     }
-  });
+  }, 10000);
+  // ^ explicit timeout (spec-a-test-case-s-timeout-budget-must-be-declared-when-its
+  // D1/check-test-budgets): 3 spawn-helper call(s) — `gitInit()` + 2x `gitCommit()`
+  // (each itself 2 direct `spawnSync` calls, add + commit). ENOBUFS fires before the
+  // AI provider is ever reached, so this is the LIGHTEST case in this describe block.
+  // Measured 137-158ms in isolation across 3 runs; 10000ms gives >=63x headroom for a
+  // concurrent-worktree load spike.
 
   it("NEGATIVE: a non-ENOBUFS git failure (no repository) still renders the pre-existing GENERIC message, untouched by the maxBuffer fix", async () => {
     const { planSlug } = await createPlanWithTask();
@@ -789,7 +795,14 @@ describe("lore assess --diff <range> — git-diff spawnSync maxBuffer (task-lore
     expect(existsSync(captureFile)).toBe(true);
     const stderrText = output.stderr.join("");
     expect(stderrText).not.toContain("bytes, sized from ai.assess.max_diff_chars");
-  });
+  }, 15000);
+  // ^ explicit timeout (spec-a-test-case-s-timeout-budget-must-be-declared-when-its
+  // D1/check-test-budgets): 4 spawn-helper call(s) — `gitInit()` + 2x `gitCommit()` +
+  // `measureActualDiffBytes()` (itself 1 direct `spawnSync` probe of `git diff`). The
+  // ONLY case in this block that succeeds through to a real AI-provider-script
+  // invocation (the other three all early-return at Step 3 before reaching it), making
+  // it the heaviest. Measured 588-816ms in isolation across 3 runs; 15000ms gives
+  // >=18x headroom for a concurrent-worktree load spike.
 
   it("BOUNDARY: a diff just OVER the configured buffer ENOBUFS's — message names the buffer, not git", async () => {
     const { planSlug } = await createPlanWithTask();
@@ -816,7 +829,14 @@ describe("lore assess --diff <range> — git-diff spawnSync maxBuffer (task-lore
     const stderrText = output.stderr.join("");
     expect(stderrText).toContain(`ai.assess.max_diff_chars=${maxDiffChars}`);
     expect(stderrText).not.toContain("spawnSync ENOBUFS");
-  });
+  }, 10000);
+  // ^ explicit timeout (spec-a-test-case-s-timeout-budget-must-be-declared-when-its
+  // D1/check-test-budgets): 4 spawn-helper call(s) — `gitInit()` + 2x `gitCommit()` +
+  // `measureActualDiffBytes()`. ENOBUFS fires before the AI provider is ever reached
+  // (provider unreachable, `/bin/true`), same shape as the ERROR case above despite
+  // one extra spawn-helper call for the byte-length probe. Measured 112-138ms in
+  // isolation across 3 runs; 10000ms gives >=72x headroom for a concurrent-worktree
+  // load spike.
 });
 
 // ─── ERROR: double-malformed provider output → exit 6, no doc created (AC-ASSESS-4) ─
