@@ -26,16 +26,32 @@
  *      via `git merge-base main HEAD` (correct under a worktree checkout,
  *      where `main` itself may be checked out elsewhere) — an explicit
  *      `<base>` argument overrides this and is diffed against directly.
- *   2. Import graph: every `packages/*\/src/**\/*.ts(x)` and
- *      `packages/*\/tests/**\/*.ts` file is regex-scanned for static
- *      `import ... from "..."` / `export ... from "..."` specifiers (see
- *      `extractImportSpecifiers`). Relative specifiers resolve against the
- *      importing file's directory with this repo's `.js`-import→`.ts`-file
- *      convention; the workspace aliases `@lore/core` / `@lore/core/node`
- *      resolve via `packages/core/package.json`'s `exports` map. Dynamic
- *      `import(...)` and any other non-literal specifier are IGNORED BY
- *      DESIGN — a regex scan cannot evaluate expressions, and this repo does
- *      not use dynamic imports for cross-module wiring.
+ *   2. Import graph: every `packages/*\/src/**\/*.ts(x)` file, every
+ *      `packages/*\/tests/**\/*.ts` file, AND every `scripts/**\/*.ts` file
+ *      (flat — `scripts/` has no `src`/`tests` split of its own;
+ *      `scripts/tests/` is walked as part of the same `scripts/` tree) is
+ *      regex-scanned for static `import ... from "..."` / `export ... from
+ *      "..."` specifiers (see `extractImportSpecifiers`). `scripts/` was
+ *      ADDED to this universe (previously `packages/*` only) because it
+ *      hosts this repo's OWN deterministic gates — the test-budget ledger,
+ *      AC-ref integrity, and this very selector — and a changed
+ *      `scripts/tests/*.test.ts` file went unselected under the narrower
+ *      universe even though rule (a), "changed test files", is the simplest
+ *      rule this script has (task
+ *      `task-test-changed-s-file-universe-is-packages-not-the-repo-the`).
+ *      Relative specifiers resolve against the importing file's directory
+ *      with this repo's `.js`-import→`.ts`-file convention; the workspace
+ *      aliases `@lore/core` / `@lore/core/node` resolve via
+ *      `packages/core/package.json`'s `exports` map. Dynamic `import(...)`
+ *      and any other non-literal specifier are IGNORED BY DESIGN — a regex
+ *      scan cannot evaluate expressions, and this repo does not use dynamic
+ *      imports for cross-module wiring. A `scripts/*.ts` file with no
+ *      reverse-dependent test (most of them — `scripts/build.ts`,
+ *      `scripts/platform-map.ts`, ...) selects nothing when it alone
+ *      changes; this is the SAME D3 zero-selection-warning path every other
+ *      untested source file already takes (step 5) — never a crash, never a
+ *      silent select-everything fallback, and NOT a scripts/-specific
+ *      special case.
  *   3. Selection = union of:
  *      (a) changed test files themselves (`changed-test`);
  *      (b) test files whose transitive reverse-dependency closure reaches
@@ -289,6 +305,16 @@ export function isBinaryConsumerCandidate(path: string, content: string): boolea
   return classifyBinaryConsumer(path, content) !== undefined;
 }
 
+/**
+ * Rule (c)'s trigger stays scoped to `packages/{lore,core}/src/` ON PURPOSE —
+ * the binary-consumer escape hatch (subprocess spawns of the CLI entry) is a
+ * property of THOSE two packages' source, not of `scripts/`. Widening the
+ * file UNIVERSE (see `loadFileMap`) to include `scripts/**\/*.ts` does not
+ * change this trigger's prefix; it only grows the CANDIDATE pool the trigger
+ * scans over (any `scripts/tests/*.test.ts` that itself matched a
+ * binary-consumer marker would now be eligible too — none do today, see the
+ * `changed-tests-selector.test.ts` scripts/-universe coverage).
+ */
 const LORE_OR_CORE_SRC_PREFIX_RE = /^packages\/(?:lore|core)\/src\//;
 
 /**
@@ -513,7 +539,7 @@ function walkDir(repoRoot: string, dir: string, matches: (relPath: string) => bo
   }
 }
 
-/** Load every `packages/*\/src/**\/*.ts(x)` and `packages/*\/tests/**\/*.ts` file under `repoRoot` into a `FileMap`, keyed by repo-relative posix path. */
+/** Load every `packages/*\/src/**\/*.ts(x)` file, every `packages/*\/tests/**\/*.ts` file, and every `scripts/**\/*.ts` file (flat — no src/tests split there; `scripts/tests/` falls out of the same walk) under `repoRoot` into a `FileMap`, keyed by repo-relative posix path. */
 function loadFileMap(repoRoot: string): FileMap {
   const files: string[] = [];
   const packagesDir = osJoin(repoRoot, "packages");
@@ -527,6 +553,22 @@ function loadFileMap(repoRoot: string): FileMap {
     if (existsSync(osJoin(repoRoot, testsDir))) {
       walkDir(repoRoot, testsDir, (p) => /\.ts$/.test(p), files);
     }
+  }
+
+  // reason: scripts/ hosts this repo's OWN deterministic gates (test-budget
+  // ledger, AC-ref integrity, this selector) plus its vitest suite
+  // (scripts/tests/*.test.ts) — omitted from the original packages/*-only
+  // universe, which left a changed scripts/tests/*.test.ts unselected even
+  // under rule (a) ("changed test files") and left every scripts/*.ts source
+  // file unreachable for rule (b) reverse-dependency tracing (task
+  // task-test-changed-s-file-universe-is-packages-not-the-repo-the). Walked
+  // flat, `.ts` only — no `.tsx` file exists under scripts/ today (asserted
+  // in packages/lore/tests/unit/scripts/changed-tests-selector.test.ts) —
+  // because scripts/ has no src/tests split of its own; `walkDir`'s existing
+  // node_modules/dotdir skip applies identically to this call.
+  const scriptsDir = "scripts";
+  if (existsSync(osJoin(repoRoot, scriptsDir))) {
+    walkDir(repoRoot, scriptsDir, (p) => /\.ts$/.test(p), files);
   }
 
   const contents = new Map<string, string>();

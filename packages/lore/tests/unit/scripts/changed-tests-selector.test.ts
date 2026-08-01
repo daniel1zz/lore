@@ -72,11 +72,39 @@
  *     from `--list`-shaped output — a selection with only source-kind
  *     binary-consumers prints `build-first: no`; one with >=1 compiled-kind
  *     prints `build-first: yes`.
+ *
+ * scripts/ universe widening (task
+ * task-test-changed-s-file-universe-is-packages-not-the-repo-the): the
+ * selector's file universe was `packages/*` only — `loadFileMap` (private,
+ * unexported — the IO shell, not the pure core the rest of this suite drives
+ * via an injected `FileMap`) never walked `scripts/`, so a changed
+ * `scripts/tests/*.test.ts` went unselected even under rule (a), the
+ * simplest rule this script has. Proving the widened walk actually reaches
+ * disk requires the REAL CLI subprocess against a REAL (throwaway, isolated)
+ * git fixture — never a synthetic in-process `FileMap`, which would assume
+ * the walk instead of proving it. Two dedicated `describe` blocks at the end
+ * of this file:
+ *   - rule (a) HAPPY: a changed `scripts/tests/*.test.ts` selects itself,
+ *     reason `changed-test`.
+ *   - rule (b) HAPPY: a source-ONLY change (the test file untouched) still
+ *     selects the test via the widened map's `scripts/` -> `scripts/tests/`
+ *     import edge, reason `transitive` — asserted directly rather than
+ *     assumed to "fall out" of the widening.
+ *   - NEGATIVE: a `scripts/` source file with no test importing it (mirrors
+ *     `scripts/build.ts`) selects nothing spurious — loud `WARNING:`, exit 0,
+ *     never a crash, never a select-everything fallback.
+ *   - BOUNDARY/REGRESSION: against the REAL repo tree, no `.bun.test.ts`
+ *     file exists under `scripts/` today — runner assignment for
+ *     `scripts/tests/*.test.ts` stays filename-derived (`isBunTestFile`),
+ *     never a hardcoded scripts-is-always-vitest special case.
  */
 
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 
 // ─────────────────────────────────────────────────────────────────────────
 // Structural mirrors of scripts/changed-tests.ts's exported shapes (see
@@ -130,6 +158,8 @@ type ChangedTestsErrorCtor = new (
 // packages/lore/tests/unit/scripts/changed-tests-selector.test.ts -> repo root is 5 levels up.
 const REPO_ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..", "..", "..");
 const CHANGED_TESTS_SPECIFIER = pathToFileURL(join(REPO_ROOT, "scripts", "changed-tests.ts")).href;
+/** Real file path (not a `file://` URL) — used to spawn the CLI shell as a subprocess for the scripts/-universe end-to-end controls below, as opposed to `CHANGED_TESTS_SPECIFIER`'s in-process `import()` of the pure algorithm exports. */
+const CHANGED_TESTS_SCRIPT = join(REPO_ROOT, "scripts", "changed-tests.ts");
 
 let extractImportSpecifiers: ExtractImportSpecifiersFn;
 let resolveImportSpecifier: ResolveImportSpecifierFn;
@@ -631,5 +661,165 @@ describe("changed-tests selector — end-to-end incident control (AC-5): selectA
     expect(result.selected.map((f) => f.path)).toContain("packages/lore/tests/integration/cli/verify.test.ts");
     expect(output).toContain("packages/lore/tests/integration/cli/verify.test.ts (binary-consumer)");
     expect(output).toMatch(/^build-first: no$/m);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// scripts/ universe widening (task
+// task-test-changed-s-file-universe-is-packages-not-the-repo-the): the
+// selector's file UNIVERSE was `packages/*` only — `loadFileMap` never
+// walked `scripts/`, so a changed `scripts/tests/*.test.ts` went unselected
+// even under rule (a) ("changed test files"), the simplest rule this script
+// has. `loadFileMap` is a private, unexported function (deliberately — it is
+// the IO shell, not the pure core the rest of this suite drives via an
+// injected FileMap), so the ONLY way to prove the widened universe actually
+// reaches disk is to run the REAL CLI subprocess against a REAL (throwaway,
+// isolated) git repo — never this repo's own working tree, and never a
+// synthetic in-process FileMap, which would just assume the walk instead of
+// proving it.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("changed-tests selector — scripts/ universe widening: end-to-end via real CLI subprocess + isolated git fixture", () => {
+  interface RunResult {
+    readonly stdout: string;
+    readonly exitCode: number;
+  }
+
+  /** Spawns the REAL `scripts/changed-tests.ts` with `cwd` pointed at the fixture repo — explicit `maxBuffer` per this repo's spawnSync-truncation discipline (project CLAUDE.md), even though every payload here is small. */
+  function runChangedTests(args: readonly string[], cwd: string): RunResult {
+    const result = spawnSync("bun", ["run", CHANGED_TESTS_SCRIPT, ...args], {
+      cwd,
+      encoding: "utf8",
+      maxBuffer: 4 * 1024 * 1024,
+    });
+    return { stdout: result.stdout ?? "", exitCode: result.status ?? 1 };
+  }
+
+  /**
+   * Builds an isolated throwaway git repo mirroring just enough of the real
+   * repo's shape for `loadFileMap`/`loadCoreAliasMap` to succeed:
+   * `packages/core/package.json` (an `exports` field only —
+   * `loadCoreAliasMap` never needs the alias TARGETS to exist on disk), a
+   * `scripts/` source file with a `scripts/tests/` sibling importing it
+   * directly (mirrors the real `scripts/check-test-budgets.ts` /
+   * `scripts/tests/check-test-budgets.test.ts` pair), and a `scripts/`
+   * source file with NO test at all (mirrors the real `scripts/build.ts` —
+   * the "most scripts/ files have no test" case). Returns the repo dir and
+   * the base commit's sha so each test can mutate a file UNCOMMITTED and
+   * rely on `git status --porcelain` to surface it as changed — an explicit
+   * `<base>` sha sidesteps `resolveBaseRef`'s `merge-base main HEAD` default,
+   * which would fail here (the fixture repo has no `main` branch).
+   */
+  function buildFixtureRepo(): { dir: string; baseSha: string } {
+    const dir = mkdtempSync(join(tmpdir(), "changed-tests-scripts-universe-"));
+
+    mkdirSync(join(dir, "packages", "core"), { recursive: true });
+    writeFileSync(
+      join(dir, "packages", "core", "package.json"),
+      JSON.stringify({ name: "@lore/core", exports: { ".": "./src/index.ts", "./node": "./src/node.ts" } }),
+      "utf8",
+    );
+
+    mkdirSync(join(dir, "scripts", "tests"), { recursive: true });
+    writeFileSync(join(dir, "scripts", "check-test-budgets.ts"), "export const SCAN_THRESHOLD = 1;\n", "utf8");
+    writeFileSync(
+      join(dir, "scripts", "tests", "check-test-budgets.test.ts"),
+      [
+        'import { describe, it, expect } from "vitest";',
+        'import { SCAN_THRESHOLD } from "../check-test-budgets.js";',
+        'describe("fixture", () => {',
+        '  it("noop", () => { expect(SCAN_THRESHOLD).toBe(1); });',
+        "});",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    // mirrors the real scripts/build.ts — a scripts/ source file with NO test importing it.
+    writeFileSync(join(dir, "scripts", "build.ts"), "export const BUILD_MARKER = 1;\n", "utf8");
+
+    spawnSync("git", ["init", "-q"], { cwd: dir });
+    spawnSync("git", ["add", "-A"], { cwd: dir });
+    spawnSync(
+      "git",
+      ["-c", "user.email=fixture@example.com", "-c", "user.name=fixture", "commit", "-q", "-m", "base"],
+      { cwd: dir },
+    );
+    const baseSha = spawnSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).stdout.trim();
+
+    return { dir, baseSha };
+  }
+
+  let fixture: { dir: string; baseSha: string };
+
+  beforeEach(() => {
+    fixture = buildFixtureRepo();
+  });
+
+  afterEach(() => {
+    rmSync(fixture.dir, { recursive: true, force: true });
+  });
+
+  it("rule (a) HAPPY: a changed scripts/tests/*.test.ts is selected as changed-test, independent of any import edge", () => {
+    const testFile = join(fixture.dir, "scripts", "tests", "check-test-budgets.test.ts");
+    writeFileSync(testFile, `${readFileSync(testFile, "utf8")}\n// rule (a) mutation\n`, "utf8");
+
+    const result = runChangedTests(["--list", fixture.baseSha], fixture.dir);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toMatch(/scripts\/tests\/check-test-budgets\.test\.ts \(changed-test\)/);
+    expect(result.stdout).toMatch(/vitest: selected 1/);
+  });
+
+  it("rule (b) HAPPY: a source-only change (scripts/check-test-budgets.ts, test file untouched) still selects the test transitively — proves the widened map's scripts/ -> scripts/tests/ import edges are actually FOLLOWED, not merely assumed to fall out", () => {
+    const sourceFile = join(fixture.dir, "scripts", "check-test-budgets.ts");
+    writeFileSync(sourceFile, `${readFileSync(sourceFile, "utf8")}\n// rule (b) mutation, source only\n`, "utf8");
+
+    const result = runChangedTests(["--list", fixture.baseSha], fixture.dir);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toMatch(/scripts\/tests\/check-test-budgets\.test\.ts \(transitive\)/);
+    expect(result.stdout).toMatch(/vitest: selected 1/);
+  });
+
+  it("NEGATIVE: a scripts/ source file with no test (scripts/build.ts) selects nothing spurious — loud WARNING, exit 0, never a crash, never a select-everything fallback", () => {
+    const noTestFile = join(fixture.dir, "scripts", "build.ts");
+    writeFileSync(noTestFile, `${readFileSync(noTestFile, "utf8")}\n// negative control mutation\n`, "utf8");
+
+    const result = runChangedTests(["--list", fixture.baseSha], fixture.dir);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toMatch(/vitest: selected 0/);
+    expect(result.stdout).toMatch(/bun: selected 0/);
+    expect(result.stdout).toMatch(/WARNING:/);
+    expect(result.stdout).not.toMatch(/check-test-budgets\.test\.ts/);
+  });
+});
+
+describe("changed-tests selector — scripts/ runner-assignment stays filename-derived (no .bun.test.ts under scripts/ today)", () => {
+  it("BOUNDARY/REGRESSION: asserts, against the REAL repo tree, that no .bun.test.ts file exists under scripts/ — runner assignment for scripts/tests/*.test.ts falls out of isBunTestFile's existing filename check, never a hardcoded scripts-is-always-vitest special case", () => {
+    const scriptsDir = join(REPO_ROOT, "scripts");
+    const allPaths: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (entry.isDirectory()) {
+          if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+          walk(join(dir, entry.name));
+          continue;
+        }
+        allPaths.push(join(dir, entry.name));
+      }
+    };
+    walk(scriptsDir);
+
+    const bunTestFiles = allPaths.filter((p) => isBunTestFile(p));
+    expect(bunTestFiles).toEqual([]);
+
+    // the assumption that DOES hold today: every scripts/tests/*.test.ts is a plain vitest file,
+    // via the SAME isBunTestFile check every packages/* test file goes through — not a special case.
+    const scriptsTestFiles = allPaths.filter((p) => isTestFile(p) && p.includes(`${join("scripts", "tests")}`));
+    expect(scriptsTestFiles.length).toBeGreaterThan(0);
+    for (const p of scriptsTestFiles) {
+      expect(isBunTestFile(p)).toBe(false);
+    }
   });
 });

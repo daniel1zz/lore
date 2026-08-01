@@ -398,15 +398,33 @@ export interface LedgerCheckResult {
 }
 
 /**
+ * Composite-map-key separator (used here, and re-exported for
+ * `scripts/migrate-test-budget-ledger-to-title-fingerprint.ts`'s OLD
+ * `(path, line, spawnCount)` key). A NUL byte can never occur in a JS/TS
+ * test title or a repo-relative path, so it cannot collide with field
+ * content the way a printable delimiter like `:` could — a title is free
+ * text and could legitimately contain a colon (e.g. `"handles path
+ * a:b:3"`), which risks a coincidental cross-field collision this
+ * separator cannot.
+ *
+ * MUST stay this escape sequence, never a literal NUL byte typed into the
+ * source: a raw NUL inside git's first-8000-byte binary-sniff window
+ * makes the WHOLE FILE unreviewable (`git show --stat` reports
+ * `Bin 0 -> N bytes`, no diff at all) — this named constant exists
+ * specifically so a future edit can't reintroduce that mistake at a call
+ * site (measured incident:
+ * `task-literal-nul-bytes-in-two-scripts-source-files-one-is`).
+ */
+export const KEY_SEP = "\0";
+
+/**
  * Composite matching key: `path` + `titleFingerprint` + `spawnCount` — see
  * the module header's "Why the key is a title fingerprint, not a line".
- * `line` deliberately never participates. Joined with ` ` (a byte that
- * cannot appear in a JS/TS test title or a repo-relative path) rather than a
- * printable delimiter like `:`, because a title is free text and could
- * legitimately contain a colon (e.g. `"handles path a:b:3"`) — a printable
- * delimiter risks a coincidental cross-field collision that ` ` cannot.
+ * `line` deliberately never participates. Joined with `KEY_SEP` — see that
+ * constant's doc for why a NUL separator is safe here.
  */
-const ledgerKey = (path: string, titleFingerprint: string, spawnCount: number): string => `${path} ${titleFingerprint} ${spawnCount}`;
+const ledgerKey = (path: string, titleFingerprint: string, spawnCount: number): string =>
+  `${path}${KEY_SEP}${titleFingerprint}${KEY_SEP}${spawnCount}`;
 
 /**
  * Scans `violations` for two or more entries in the SAME file sharing an
