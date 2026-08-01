@@ -340,6 +340,15 @@ function makeRealProjectRemoveFs(): ProjectFsRemovePort {
 
 function makeRealProjectExec(): ExecPort {
   return {
+    // reason: no explicit `maxBuffer` here (unlike `commands/assess.ts`'s `git diff`
+    // spawn, task-lore-assess-diff-spawnsync-sets-no-maxbuffer-a-diff-over-1) — this
+    // generic `run` takes ARBITRARY argv, but `ExecPort`'s OWN contract (see its
+    // docstring in `../../../flows/setup-project-flow.ts`) restricts every real caller
+    // to `git config --get core.hooksPath` / `git config core.hooksPath hooks`: output
+    // is always a single config value or empty, never diff-shaped or unbounded. Bounded
+    // by the CALLER's narrow usage, not by this generic implementation — if a future
+    // caller ever passes a command with unbounded output through this port, it needs
+    // its own `maxBuffer` sizing at that point, not a preemptive one here.
     async run(argv: string[], cwd: string) {
       const [cmd, ...rest] = argv;
       if (!cmd) return { code: -1, stdout: "", stderr: "empty argv" };

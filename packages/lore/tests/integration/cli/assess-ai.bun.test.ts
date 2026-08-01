@@ -34,14 +34,19 @@
  *               that tees stdin to a file before emitting its fixed JSON response);
  *               no discoverable commits → loud named outcome, never a silent empty diff
  *   ERROR:      double-malformed provider output → exit 6, AI_PROVIDER_ERROR, and NO
- *               knowledge doc is created (AC-ASSESS-4, end-to-end through the real CLI)
+ *               knowledge doc is created (AC-ASSESS-4, end-to-end through the real CLI);
+ *               a diff far exceeding the git-diff spawnSync maxBuffer → real ENOBUFS,
+ *               message names the buffer + ai.assess.max_diff_chars, never git
+ *               (task-lore-assess-diff-spawnsync-sets-no-maxbuffer-a-diff-over-1)
  *   STATE:      after a successful assess, the plan's tree shows the new assessment
- *               doc linked via informs
+ *               doc linked via informs; an ENOBUFS early-return creates NO doc
  *   REGRESSION: a plan with tasks that succeeds does NOT also trip the zero-task gate;
  *               CONTROL — a contiguous (non-interleaved) commit set agrees with today's
- *               naive range, so auto-derivation is not a behavior break for the simple case
+ *               naive range, so auto-derivation is not a behavior break for the simple case;
+ *               a non-ENOBUFS git failure still renders the pre-existing generic message
  *
- * @spec_ref AC-ASSESS-1, AC-ASSESS-4, AC-ASSESS-6, task-lore-assess-asks-the-caller-for-a-git-range-that-cannot-be
+ * @spec_ref AC-ASSESS-1, AC-ASSESS-4, AC-ASSESS-6, task-lore-assess-asks-the-caller-for-a-git-range-that-cannot-be,
+ * task-lore-assess-diff-spawnsync-sets-no-maxbuffer-a-diff-over-1
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
@@ -645,6 +650,172 @@ describe("lore assess — SPEC-028 AC-AE-1: pre-flight diff-budget stderr warnin
 
     const stderrText = output.stderr.join("");
     expect(stderrText).not.toContain("Warning: diff is");
+  });
+});
+
+// ─── git-diff spawnSync maxBuffer (task-lore-assess-diff-spawnsync-sets-no-maxbuffer- ──
+// ─── a-diff-over-1) ─────────────────────────────────────────────────────────────────
+//
+// `spawnSync("git", ["diff", args.diff], ...)` now sizes `maxBuffer` against the
+// EFFECTIVE `ai.assess.max_diff_chars` (computeGitDiffMaxBuffer, 4 bytes/char worst-case
+// UTF-8 — assess-render.ts) instead of Node's arbitrary 1 MiB default. These tests
+// configure a SMALL `max_diff_chars` via `writeAiConfigWithDiffBudget` so a small, fast
+// git fixture can drive a REAL ENOBUFS — no need to construct a >1 MiB diff.
+//
+// Six-dimension coverage:
+//   ERROR:      a diff decisively larger than the buffer -> ENOBUFS; message names the
+//               buffer size + ai.assess.max_diff_chars, NEVER "spawnSync ENOBUFS"/git
+//   NEGATIVE:   a non-ENOBUFS git failure (no repository) still renders the PRE-EXISTING
+//               generic "git diff <range> failed: <reason>" message, untouched by this fix
+//   BOUNDARY:   a diff just UNDER the configured buffer succeeds; just OVER it ENOBUFS's
+//               (buffer sized from the diff's OWN measured byte length, not guessed)
+//   STATE:      the ENOBUFS early-return skips Step 6 — no knowledge doc is created
+//   REGRESSION: covered by the pre-existing "real git subprocess fixture" HAPPY tests
+//               above, unmodified — an ordinary small diff at the DEFAULT budget still
+//               reaches the judge prompt exactly as before this fix
+
+describe("lore assess --diff <range> — git-diff spawnSync maxBuffer (task-lore-assess-diff-spawnsync-sets-no-maxbuffer-a-diff-over-1)", () => {
+  const gitEnv = {
+    ...process.env,
+    GIT_AUTHOR_NAME: "Tester",
+    GIT_AUTHOR_EMAIL: "t@example.com",
+    GIT_COMMITTER_NAME: "Tester",
+    GIT_COMMITTER_EMAIL: "t@example.com",
+  };
+
+  function gitInit() {
+    spawnSync("git", ["init", "-q"], { cwd: tmpDir, env: gitEnv });
+  }
+  function gitCommit(filename: string, content: string, message: string) {
+    writeFileSync(join(tmpDir, filename), content);
+    spawnSync("git", ["add", filename], { cwd: tmpDir, env: gitEnv });
+    spawnSync("git", ["commit", "-q", "-m", message], { cwd: tmpDir, env: gitEnv });
+  }
+  /** Measures the EXACT byte length `git diff HEAD~1..HEAD` will produce in tmpDir. */
+  function measureActualDiffBytes(): number {
+    const probe = spawnSync("git", ["diff", "HEAD~1..HEAD"], { cwd: tmpDir, env: gitEnv, encoding: "utf8" });
+    return Buffer.byteLength(probe.stdout, "utf8");
+  }
+
+  it("ERROR: a diff far exceeding the configured buffer triggers ENOBUFS — message names the buffer + knob, not git; no doc created (STATE)", async () => {
+    const { planSlug } = await createPlanWithTask();
+    const maxDiffChars = 50; // maxBuffer = 200 bytes
+    writeAiConfigWithDiffBudget("/bin/true", maxDiffChars); // provider unreachable — ENOBUFS returns before Step 4/5
+
+    gitInit();
+    gitCommit("big.txt", "v1\n", "v1");
+    gitCommit("big.txt", `v1\n${"X".repeat(5000)}\n`, "v2, huge change"); // decisively > 200 bytes
+
+    const cmd = await importAssessCommand();
+    const output = captureOutput();
+    try {
+      await cmd.run({ args: { plan: planSlug, diff: "HEAD~1..HEAD", json: true } });
+    } finally {
+      output.restore();
+    }
+
+    expect(process.exitCode).toBe(2);
+    const stderrText = output.stderr.join("");
+    expect(stderrText).toContain("200 bytes"); // names the buffer size (maxDiffChars * 4)
+    expect(stderrText).toContain("ai.assess.max_diff_chars=50"); // names the knob + effective value
+    expect(stderrText).toContain("not a git failure");
+    expect(stderrText).not.toContain("spawnSync ENOBUFS"); // never the misleading pre-fix wording
+
+    // STATE: the early ENOBUFS return skips Step 6 entirely — no knowledge doc lands.
+    const app = createApp(join(tmpDir, ".lore", "lore.db"));
+    try {
+      const docsResult = await app.corpusService.listFull({ type: "knowledge" });
+      expect(docsResult.ok).toBe(true);
+      if (!docsResult.ok) return;
+      expect(docsResult.value.docs).toHaveLength(0);
+    } finally {
+      app.close();
+    }
+  });
+
+  it("NEGATIVE: a non-ENOBUFS git failure (no repository) still renders the pre-existing GENERIC message, untouched by the maxBuffer fix", async () => {
+    const { planSlug } = await createPlanWithTask();
+    // No git repo initialized in tmpDir at all — `git diff` exits nonzero with a plain
+    // "fatal: not a git repository" — never touches maxBuffer/ENOBUFS.
+    writeAiConfig("/bin/true");
+
+    const cmd = await importAssessCommand();
+    const output = captureOutput();
+    try {
+      await cmd.run({ args: { plan: planSlug, diff: "HEAD~1..HEAD", json: true } });
+    } finally {
+      output.restore();
+    }
+
+    expect(process.exitCode).toBe(2);
+    const stderrText = output.stderr.join("");
+    expect(stderrText).toContain("git diff HEAD~1..HEAD failed:");
+    expect(stderrText).not.toContain("ai.assess.max_diff_chars"); // generic path never names the knob
+    expect(stderrText).not.toContain("buffer");
+  });
+
+  it("BOUNDARY: a diff just UNDER the configured buffer succeeds — no ENOBUFS, run reaches the AI provider", async () => {
+    const { planSlug } = await createPlanWithTask();
+    const captureFile = join(tmpDir, "captured-boundary-under-prompt.txt");
+    const scriptPath = writeFixedJsonProviderScript(captureFile);
+
+    gitInit();
+    gitCommit("boundary-under.txt", "v1\n", "v1");
+    gitCommit("boundary-under.txt", `v1\n${"y".repeat(300)}\n`, "v2");
+
+    // Size the budget from the diff's OWN measured byte length (never a guessed constant
+    // against git's header/hunk overhead) — buffer clears the actual size by >=100 bytes.
+    // NOTE: this deliberately does NOT assert the marker survives into the captured judge
+    // prompt — `ai.assess.max_diff_chars` ALSO drives the UNRELATED file-boundary prompt
+    // truncation (`truncateDiffByFile`, tested separately above/in diff-truncation.test.ts)
+    // over the exact same diffText.length, so a small buffer margin here can legitimately
+    // still truncate the PROMPT even though spawnSync captured the FULL diff with no
+    // ENOBUFS — that is the thing this test asserts, not the prompt's own truncation.
+    const actualDiffBytes = measureActualDiffBytes();
+    const maxDiffChars = Math.ceil((actualDiffBytes + 100) / 4);
+    writeAiConfigWithDiffBudget(scriptPath, maxDiffChars);
+
+    const cmd = await importAssessCommand();
+    const output = captureOutput();
+    try {
+      await cmd.run({ args: { plan: planSlug, diff: "HEAD~1..HEAD", json: true } });
+    } finally {
+      output.restore();
+    }
+
+    expect(process.exitCode === 0 || process.exitCode === undefined).toBe(true);
+    // Proof the run reached the AI provider (i.e. spawnSync fully captured the diff and
+    // returned no ENOBUFS — an ENOBUFS early-return, Step 3, would never write this file).
+    expect(existsSync(captureFile)).toBe(true);
+    const stderrText = output.stderr.join("");
+    expect(stderrText).not.toContain("bytes, sized from ai.assess.max_diff_chars");
+  });
+
+  it("BOUNDARY: a diff just OVER the configured buffer ENOBUFS's — message names the buffer, not git", async () => {
+    const { planSlug } = await createPlanWithTask();
+
+    gitInit();
+    gitCommit("boundary-over.txt", "v1\n", "v1");
+    gitCommit("boundary-over.txt", `v1\n${"z".repeat(400)}\n`, "v2");
+
+    // Size the budget from the diff's OWN measured byte length — buffer sits >=100 bytes
+    // BELOW the actual size, so ENOBUFS fires with clear margin (never a razor-tight guess).
+    const actualDiffBytes = measureActualDiffBytes();
+    const maxDiffChars = Math.floor((actualDiffBytes - 100) / 4);
+    writeAiConfigWithDiffBudget("/bin/true", maxDiffChars);
+
+    const cmd = await importAssessCommand();
+    const output = captureOutput();
+    try {
+      await cmd.run({ args: { plan: planSlug, diff: "HEAD~1..HEAD", json: true } });
+    } finally {
+      output.restore();
+    }
+
+    expect(process.exitCode).toBe(2);
+    const stderrText = output.stderr.join("");
+    expect(stderrText).toContain(`ai.assess.max_diff_chars=${maxDiffChars}`);
+    expect(stderrText).not.toContain("spawnSync ENOBUFS");
   });
 });
 

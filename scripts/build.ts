@@ -324,6 +324,15 @@ if (skipDashboardBuild) {
   console.log(DASHBOARD_SHORT_CIRCUIT_MARKER);
 } else {
   console.log(DASHBOARD_BUILD_START_MARKER);
+  // reason: no explicit `maxBuffer` here (unlike `commands/assess.ts`'s `git diff` spawn,
+  // task-lore-assess-diff-spawnsync-sets-no-maxbuffer-a-diff-over-1) — `maxBuffer` only
+  // governs Node's OWN in-process accumulation of a `pipe`-mode child's stdout/stderr
+  // (spawnSync's default `stdio`); `stdio: "inherit"` here passes the dashboard build's
+  // fds straight through to THIS process's own stdout/stderr, bypassing that
+  // accumulation buffer entirely (confirmed via Node's child_process docs: `maxBuffer`
+  // is documented as bounding output captured through `pipe`, and `inherit` never
+  // creates a pipe to capture through). ENOBUFS is structurally impossible here
+  // regardless of how much the dashboard build logs.
   const dashboardBuildResult = spawnSync("bun", ["run", "--filter", "@lore/dashboard", "build"], {
     cwd: root,
     stdio: "inherit",

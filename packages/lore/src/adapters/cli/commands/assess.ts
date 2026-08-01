@@ -45,9 +45,21 @@
  * in the `--json` envelope, so `diff_available` alone is never the only signal an
  * auditor has for telling a complete diff from a partial one.
  *
+ * `--diff`'s git-diff maxBuffer (task-lore-assess-diff-spawnsync-sets-no-maxbuffer-a-diff-
+ * over-1): the `spawnSync("git", ["diff", ...])` call sizes its `maxBuffer` against the
+ * EFFECTIVE `ai.assess.max_diff_chars` (`../assess-render.js::computeGitDiffMaxBuffer`,
+ * 4 bytes/char worst-case UTF-8) instead of Node's arbitrary 1 MiB default — an ordinary
+ * multi-task-plan diff can exceed 1 MiB. A confirmed `error.code === "ENOBUFS"` renders a
+ * dedicated message naming the buffer size and the `ai.assess.max_diff_chars` knob
+ * (`../assess-render.js::formatGitDiffEnobufsMessage`) instead of the generic "git diff
+ * ... failed: spawnSync ENOBUFS", which sent an operator to look at git for a failure
+ * that was entirely this call site's own buffer ceiling. Every OTHER spawn failure
+ * (non-zero exit, ENOENT, ...) still renders the pre-existing generic message, unchanged.
+ *
  * Source: SPEC-026 §3 D1-D5; §4 AC-ASSESS-1, AC-ASSESS-6, AC-ASSESS-8, AC-ASSESS-9;
  * SPEC-028 AC-AE-1; task-assess-diff-range-scope-mismatch-warning; SPEC-106 AC-FRESH-4;
- * task-lore-assess-asks-the-caller-for-a-git-range-that-cannot-be
+ * task-lore-assess-asks-the-caller-for-a-git-range-that-cannot-be;
+ * task-lore-assess-diff-spawnsync-sets-no-maxbuffer-a-diff-over-1
  */
 
 import { spawnSync } from "node:child_process";
@@ -57,7 +69,7 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
 import { isAssessAiBraked } from "../../../ai/resolve-ai.js";
 import { renderAssessmentContent } from "@lore/core";
-import { formatAssessmentSummary } from "../assess-render.js";
+import { formatAssessmentSummary, computeGitDiffMaxBuffer, formatGitDiffEnobufsMessage } from "../assess-render.js";
 import { assessmentFreshness } from "../../../service/gate-predicates.js";
 import { deriveCommitSetForPlan, type DiffSourceRecord } from "../assess-commit-derivation.js";
 
@@ -184,11 +196,31 @@ export default defineCommand({
       }
 
       // ─── Step 3: diff acquisition (CLI layer only — SPEC-026 §3 D3) ───────────
+      // reason: read ONCE, before diff acquisition, so the maxBuffer sizing below (AC-1,
+      // task-lore-assess-diff-spawnsync-sets-no-maxbuffer-a-diff-over-1) and the
+      // pre-flight budget warning in Step 3.5 share the SAME effective value — never two
+      // reads that could observe a config edit landing between them.
+      const maxDiffChars = app.aiProviderService.assessMaxDiffChars;
       let diffText: string | undefined;
       let diffSource: DiffSourceRecord;
       if (args.diff !== undefined) {
-        const gitResult = spawnSync("git", ["diff", args.diff], { encoding: "utf8" });
+        // reason: Node's default maxBuffer (1 MiB) is an arbitrary constant unrelated to
+        // this command's own diff-size budget — an ordinary multi-task-plan diff can
+        // exceed it. computeGitDiffMaxBuffer sizes the buffer against the EFFECTIVE
+        // ai.assess.max_diff_chars instead (task-lore-assess-diff-spawnsync-sets-no-
+        // maxbuffer-a-diff-over-1, AC-1).
+        const maxBuffer = computeGitDiffMaxBuffer(maxDiffChars);
+        const gitResult = spawnSync("git", ["diff", args.diff], { encoding: "utf8", maxBuffer });
         if (gitResult.error || gitResult.status !== 0) {
+          // reason: ENOBUFS is THIS call site's own buffer ceiling, not a git failure —
+          // name the buffer + the ai.assess.max_diff_chars knob instead of rendering the
+          // generic "git diff ... failed: spawnSync ENOBUFS" message, which sends an
+          // operator to look at git (AC-2, same task).
+          if (gitResult.error && (gitResult.error as NodeJS.ErrnoException).code === "ENOBUFS") {
+            process.stderr.write(formatGitDiffEnobufsMessage(args.diff, maxBuffer, maxDiffChars) + "\n");
+            process.exitCode = 2;
+            return;
+          }
           const reason = gitResult.error?.message ?? gitResult.stderr?.trim() ?? `git exited ${gitResult.status}`;
           process.stderr.write(`Error: git diff ${args.diff} failed: ${reason}\n`);
           process.exitCode = 2;
@@ -239,7 +271,6 @@ export default defineCommand({
       // clean envelope. Actual truncation (file-boundary, not blind tail cut) happens
       // later inside buildAssessPrompt via truncateDiffByFile — this is advance notice.
       if (diffText !== undefined) {
-        const maxDiffChars = app.aiProviderService.assessMaxDiffChars;
         if (diffText.length > maxDiffChars) {
           process.stderr.write(
             `Warning: diff is ${diffText.length} chars, exceeding the configured ai.assess.max_diff_chars ` +
