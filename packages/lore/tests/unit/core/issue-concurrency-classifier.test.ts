@@ -18,22 +18,38 @@
  *     harness to distinguish from a contract violation or it reports a false
  *     RED.
  *
+ * D7 Gap 1 (task-discharge-d7-in-code-the-forced-contention-control-cannot)
+ * adds `classifyForcedContentionOutcome`'s second `not_attributable` reason,
+ * `contention_outside_report_write` (forced-contention table row 4): the
+ * control used to report a startup-phase lock refusal as `undetected` — a
+ * FALSE RED, since the externally-held write transaction blocks the STARTUP
+ * write first and the run never reached the report-write contract at all.
+ *
  * Six-dimension coverage:
  *   HAPPY:      both invocations exit 0; one exits 0 + the other refuses with
- *               the declared code and template (either order).
+ *               the declared code and template (either order); D7 Gap 1's row
+ *               4 — a startup-phase lock refusal excluded from the control.
  *   NEGATIVE:   two non-zero exits; a non-zero exit whose code is not the
  *               declared one; a loser carrying the declared code but a
  *               non-conforming message.
  *   BOUNDARY:   template match keyed on three INDEPENDENT parts — dropping
  *               any single one (headline / source line / retry line) must
- *               stop matching; a zero bound and a multi-line-prefixed stderr.
+ *               stop matching; a zero bound and a multi-line-prefixed stderr;
+ *               D7 Gap 1's bare pre-contract wording on both sides staying
+ *               `undetected` rather than being excused.
  *   ERROR:      `isWriteContentionFailure` over the real SQLITE_BUSY shape vs
  *               unrelated store failures.
  *   STATE:      forced-contention (control) classifier — detected with one or
  *               both invocations refused, undetected when both succeed.
  *   REGRESSION: the measured pre-change stderr classifies as NON-conforming
  *               (so removing the enforcement can never pass), and the
- *               measured dlopen stderr classifies as not-attributable.
+ *               measured dlopen stderr classifies as not-attributable; D7 Gap
+ *               1's PRECEDENCE assertion — a detected loud failure wins over
+ *               BOTH exclusion reasons — plus the CONTROL proving the
+ *               classifier can still return `undetected` for an ordinary
+ *               unrelated failure with no lock message anywhere, and the
+ *               governed-path-throw case proving the shared predicate was not
+ *               over-broadened by reuse.
  */
 
 import { describe, expect, it } from "vitest";
@@ -469,6 +485,119 @@ describe("report-issue concurrency classifier (AC-IC-6, pure — no spawn)", () 
       outcome: "not_attributable",
       reason: "native_module_load_race",
       detail: expect.stringContaining("dlopen"),
+    });
+  });
+
+  // ── D7 Gap 1: the forced-contention control's row-4 fix ────────────────────
+  //
+  // task-discharge-d7-in-code-the-forced-contention-control-cannot: the
+  // control used to fall through to `undetected` for a startup-phase lock
+  // refusal (D7 forced-contention table row 4) — a FALSE RED, because the
+  // externally-held write transaction blocks the STARTUP write first, so a
+  // sibling invocation can die on a generic `database is locked` before the
+  // report write this control targets is ever attempted. The run never
+  // reached the contract; it must be EXCLUDED, not counted as a failure.
+  it("D7 GAP 1 / row 4: a startup-phase lock refusal is not_attributable / contention_outside_report_write, not undetected", () => {
+    const refused = { exitCode: WRITE_CONTENTION_EXIT_CODE, stderr: declaredStderr() };
+
+    // HAPPY (the fix): neither invocation refuses loudly; ONE carries a
+    // locked-database refusal from another layer (the CLI startup path's own
+    // hint) — excluded, in either position.
+    expect(
+      classifyForcedContentionOutcome(OK, { exitCode: 1, stderr: MEASURED_STARTUP_PHASE_LOCK_ERROR }),
+    ).toEqual({
+      outcome: "not_attributable",
+      reason: "contention_outside_report_write",
+      detail: expect.stringContaining("locked"),
+    });
+    expect(
+      classifyForcedContentionOutcome({ exitCode: 1, stderr: MEASURED_STARTUP_PHASE_LOCK_ERROR }, OK),
+    ).toEqual({
+      outcome: "not_attributable",
+      reason: "contention_outside_report_write",
+      detail: expect.stringContaining("locked"),
+    });
+    // …and the same shape via an uncaught stack trace naming no governed frame.
+    expect(
+      classifyForcedContentionOutcome(OK, { exitCode: 1, stderr: STARTUP_UNCAUGHT_LOCK_CRASH }),
+    ).toEqual({
+      outcome: "not_attributable",
+      reason: "contention_outside_report_write",
+      detail: expect.stringContaining("locked"),
+    });
+    // …both invocations, from the SOURCE-mode and MINIFIED renderings alike
+    // (root CLAUDE.md "contiguous-substring assumption" — prove both).
+    expect(
+      classifyForcedContentionOutcome(
+        { exitCode: 1, stderr: STARTUP_PATH_UNCAUGHT_LOCK_CRASH_SOURCE_MODE },
+        { exitCode: 1, stderr: STARTUP_PATH_UNCAUGHT_LOCK_CRASH_MINIFIED },
+      ).outcome,
+    ).toBe("not_attributable");
+
+    // PRECEDENCE (AC #2): a DETECTED loud failure wins over BOTH exclusion
+    // reasons — a co-occurrence case for each, because a declared refusal
+    // satisfies the criterion and a crashed-or-startup-blocked sibling cannot
+    // un-observe it. Order is part of the contract, not an implementation
+    // detail (D7): the loud-failure check must run FIRST.
+    expect(
+      classifyForcedContentionOutcome(refused, { exitCode: 1, stderr: MEASURED_STARTUP_PHASE_LOCK_ERROR }),
+    ).toEqual({ outcome: "detected", refused: 1 });
+    expect(
+      classifyForcedContentionOutcome({ exitCode: 1, stderr: MEASURED_STARTUP_PHASE_LOCK_ERROR }, refused),
+    ).toEqual({ outcome: "detected", refused: 1 });
+    // …and against the OTHER exclusion reason (dlopen), for completeness —
+    // one declared refusal beats either exclusion, not just one of them.
+    expect(
+      classifyForcedContentionOutcome(refused, { exitCode: 1, stderr: MEASURED_DLOPEN_STDERR }),
+    ).toEqual({ outcome: "detected", refused: 1 });
+
+    // CONTROL (AC #4 — the single most important assertion in this task):
+    // the classifier must STILL be able to return `undetected`. Neither
+    // invocation refuses loudly AND no locked-database message appears
+    // anywhere — an ordinary unrelated non-zero exit. Without this, Gap 1's
+    // fix would be indistinguishable from making the criterion unfalsifiable
+    // (excusing every non-conforming run as "some other layer's problem").
+    expect(
+      classifyForcedContentionOutcome(
+        { exitCode: 1, stderr: "TypeError: undefined is not a function\n" },
+        { exitCode: 2, stderr: "some unrelated crash, no lock anywhere\n" },
+      ),
+    ).toEqual({
+      outcome: "undetected",
+      detail: expect.stringContaining("exit codes 1/2"),
+    });
+
+    // REGRESSION (DRY reuse, D6): the SAME predicate this control now shares
+    // with `classifyConcurrencyOutcome` must still refuse to excuse an
+    // uncaught throw out of the GOVERNED report-write path — that is a real
+    // contract violation (the write should have refused with the declared
+    // code + template), so it must surface as `undetected`, never quietly
+    // excluded.
+    expect(
+      classifyForcedContentionOutcome(OK, {
+        exitCode: 1,
+        stderr: MEASURED_GOVERNED_PATH_UNCAUGHT_LOCK_CRASH,
+      }).outcome,
+    ).toBe("undetected");
+    expect(
+      classifyForcedContentionOutcome(OK, {
+        exitCode: 1,
+        stderr: SOURCE_MODE_GOVERNED_PATH_UNCAUGHT_LOCK_CRASH,
+      }).outcome,
+    ).toBe("undetected");
+
+    // BOUNDARY: bare pre-contract wording (no source field, no stack trace,
+    // no startup hint) on BOTH sides stays `undetected`, never excused — this
+    // is exactly what a contended report write printed before this contract
+    // existed (asserted above, REGRESSION), so it must never read as excluded.
+    expect(
+      classifyForcedContentionOutcome(
+        { exitCode: 1, stderr: PRE_CHANGE_BARE_STORE_ERROR },
+        { exitCode: 1, stderr: PRE_CHANGE_BARE_STORE_ERROR },
+      ),
+    ).toEqual({
+      outcome: "undetected",
+      detail: expect.stringContaining("neither invocation produced the declared loud failure"),
     });
   });
 });
