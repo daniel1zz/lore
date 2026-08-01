@@ -325,6 +325,85 @@ export function upstreamHasAcceptanceCriteria(
   return { ok: false, reason: "UPSTREAM_NO_AC" };
 }
 
+/** {@link acScopeRequiredAtCreate}'s single machine-readable failure reason. */
+export const AC_SCOPE_REQUIRED_REASON = "AC_SCOPE_REQUIRED";
+
+/** The `PredicateResult.field` value {@link acScopeRequiredAtCreate}'s failure carries. */
+export const AC_SCOPE_REQUIRED_FIELD = "ac-scope-required";
+
+/**
+ * `task-create`'s ONE predicate (spec-declaring-ac-scope-is-required-at-task-
+ * creation-so-the §Design Decisions D1/D2/D3) — a task whose parent plan
+ * resolves a spec-tier ancestor declaring >= 1 SCRIPT-MODE acceptance
+ * criterion must declare `extra.ac_scope` (any array, INCLUDING an empty one
+ * — D2's "a decision, never a non-empty claim") before it may be created.
+ * Closes a reachability hole: `VerifyRunnerService.verifyPlan`/
+ * `verifyAdhocTask` refuse a task whose `ac_scope` is absent, but nothing at
+ * AUTHORING time previously required the declaration — a task could be
+ * created, worked, and only discover at `lore verify` time that its evidence
+ * can never be runner-attested.
+ *
+ * Vacuous PASS in two structurally distinct cases, mirroring
+ * `verifyReachability`'s identical two-tier vacuity one section down in this
+ * file:
+ *   1. No spec-tier ancestor at all (`hasSpecParent !== true`) — covers an
+ *      unparented/`prd`-parented plan AND, per D3, an `--adhoc` task's
+ *      structurally-absent parent plan (its resolved parent is the corpus
+ *      root PRD, not a plan, so the caller never resolves a spec ancestor at
+ *      all). This is NOT-APPLICABLE, never EXEMPT: an `--adhoc` task that
+ *      wants `lore verify`-attested evidence still needs `ac_scope`, because
+ *      `verifyAdhocTask` resolves its governing spec THROUGH that field — the
+ *      predicate simply never fires for it, it does not waive a requirement
+ *      that would otherwise apply.
+ *   2. A spec ancestor declaring ONLY `ai`/`human`-mode criteria, or none at
+ *      all (`parentSpecScriptAcCount < 1`) — nothing runner-attestable exists
+ *      to declare a scope against, so demanding one would be friction with no
+ *      attestation payoff (D1).
+ *
+ * @param hasSpecParent - Same `GateContext` field `task-claim`/`plan-promote`
+ *   populate — `true` iff the task's parent plan resolves a spec-tier
+ *   ancestor. `undefined`/`false` both vacuous-pass here (no ancestor to gate
+ *   against).
+ * @param parentSpecScriptAcCount - Count of `verify.mode === "script"`
+ *   criteria declared on that ancestor spec (`countScriptModeAcceptanceCriteria`,
+ *   `checkpoint-registry.ts`) — `undefined` treated identically to `0`.
+ * @param acScopeDeclared - Whether the CANDIDATE task's own `extra.ac_scope`
+ *   key is present at all (any array, empty or not) — `true` satisfies D2
+ *   regardless of the array's length; `false`/`undefined` means the key is
+ *   absent (no decision has been made yet).
+ * @returns `{ok: true}` when either vacuous condition holds OR the key is
+ *   present; `{ok: false, reason: AC_SCOPE_REQUIRED_REASON, field:
+ *   AC_SCOPE_REQUIRED_FIELD}` otherwise.
+ * @example
+ * acScopeRequiredAtCreate(false, undefined, undefined);
+ *   // => { ok: true } — D3 vacuous, no spec-tier ancestor (incl. --adhoc)
+ * @example
+ * acScopeRequiredAtCreate(true, 0, undefined);
+ *   // => { ok: true } — D1 vacuous, ai/human-only or zero declared criteria
+ * @example
+ * acScopeRequiredAtCreate(true, 2, true);
+ *   // => { ok: true } — declared (D2 — empty or non-empty both satisfy)
+ * @example
+ * acScopeRequiredAtCreate(true, 2, false);
+ *   // => { ok: false, reason: "AC_SCOPE_REQUIRED", field: "ac-scope-required" }
+ */
+export function acScopeRequiredAtCreate(
+  hasSpecParent: boolean | undefined,
+  parentSpecScriptAcCount: number | undefined,
+  acScopeDeclared: boolean | undefined,
+): PredicateResult {
+  if (hasSpecParent !== true) {
+    return { ok: true };
+  }
+  if ((parentSpecScriptAcCount ?? 0) < 1) {
+    return { ok: true };
+  }
+  if (acScopeDeclared === true) {
+    return { ok: true };
+  }
+  return { ok: false, reason: AC_SCOPE_REQUIRED_REASON, field: AC_SCOPE_REQUIRED_FIELD };
+}
+
 /**
  * One sibling task's claim snapshot, precomputed by the CALLER (SPEC-042 §Design
  * Decisions D5 seam pinning) — `stale` is derived from the SAME `nowIso` +

@@ -177,6 +177,15 @@ function createDeniedPlan(dir: string): { planSlug: string } {
       "--plan-id", planSlug,
       "--content", "Estimate: S\nApproach: fixture task.",
       "--no-ai",
+      // reason: spec-declaring-ac-scope-is-required-at-task-creation-so-the —
+      // this plan's spec declares a script-mode AC (AC-069-13-1), so
+      // task-create's admission gate now requires ac_scope to be declared.
+      // Explicit EMPTY (never the AC's own id) — the fixture's evidence below
+      // is deliberately SELF-REPORTED with no --ac, so this task must not
+      // newly participate in AC-069-13-1's declared-scope coverage
+      // computation; an explicit "claims nothing" preserves the pre-existing
+      // ratio-conjunct-only denial this test's assertions pin.
+      "--ac-scope", "",
     ],
     dir,
   );

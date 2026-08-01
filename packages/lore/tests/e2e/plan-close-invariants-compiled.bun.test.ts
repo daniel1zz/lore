@@ -174,12 +174,26 @@ afterAll(() => {
  * is the only thing this suite is proving), and
  * `review.judgment_required_types: []` (neutralizes the unrelated SPEC-103
  * gate on the spec approval below).
+ *
+ * `task-create` (spec-declaring-ac-scope-is-required-at-task-creation-so-the)
+ * is disabled here for a DIFFERENT reason than the others: scenario B/PCI-21
+ * deliberately construct a task that declares NO `ac_scope` at all — that
+ * absence is the exact precondition `plan-close`'s declared-scope-coverage
+ * conjunct (§Facts D4/D5) is being proven against. Since this suite "cannot
+ * author `ac_scope` through the binary yet" (module header), the ONLY way to
+ * construct that state under a spec that now REQUIRES declaring it at create
+ * time is to disable the admission checkpoint for this fixture's corpus —
+ * `task-create` and `plan-close` are two independent checkpoints; disabling
+ * the former changes nothing about the latter's behavior under test here.
  */
 function writeConfig(dir: string): void {
   const config: LoreConfig = {
     project: { name: "t5-pci12-compiled-e2e", author: "t5-tester" },
     workflow: {
-      gates: { "plan-close": { prd_sync: { enabled: true } } },
+      gates: {
+        "plan-close": { prd_sync: { enabled: true } },
+        "task-create": { enabled: false },
+      },
       review: { judgment_required_types: [] },
     },
   } as unknown as LoreConfig;
@@ -202,7 +216,10 @@ function writeConfigWithRatioFloor(dir: string, minRatio: number): void {
   const config: LoreConfig = {
     project: { name: "t5-pci12-compiled-e2e", author: "t5-tester" },
     workflow: {
-      gates: { "plan-close": { prd_sync: { enabled: true } } },
+      gates: {
+        "plan-close": { prd_sync: { enabled: true } },
+        "task-create": { enabled: false },
+      },
       review: { judgment_required_types: [] },
       attestation: { min_ratio: minRatio },
     },

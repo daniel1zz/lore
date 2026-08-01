@@ -215,6 +215,12 @@ function createFullChain(dir: string): {
       "--anchor",
       "packages/lore/src/flows/task-feed-flow.ts",
       "--no-ai",
+      // reason: spec-declaring-ac-scope-is-required-at-task-creation-so-the —
+      // this plan's spec declares a script-mode AC (AC-T1-1), so task-create's
+      // admission gate now requires ac_scope to be declared. Matches the
+      // criterion this fixture's evidence calls reference below.
+      "--ac-scope",
+      "AC-T1-1",
     ],
     dir,
   );

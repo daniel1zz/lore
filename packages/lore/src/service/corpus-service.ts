@@ -83,6 +83,7 @@ import {
   computeArmedGates,
   buildUpstreamSpecContext,
   countScriptModeAcceptanceCriteria,
+  isNonPlanParentError,
 } from "./checkpoint-registry.js";
 import { attestationExemptKindValid } from "./gate-predicates.js";
 import { resolvePrdSyncDomainDoc } from "./prd-sync-domain-doc.js";
@@ -1050,6 +1051,51 @@ export class CorpusService {
       };
       const gateResult = this.gateEnforcer.enforce("spec-create", gateCtx);
       if (!gateResult.ok) return gateResult;
+    }
+
+    // Gate `task-create` (spec-declaring-ac-scope-is-required-at-task-creation-
+    // so-the): a task whose parent plan resolves a spec-tier ancestor declaring
+    // >= 1 script-mode acceptance criterion must declare extra.ac_scope (D1/D2)
+    // before it may be created — closes the reachability hole where `lore
+    // verify` refuses a task's ac_scope-absent evidence with nothing at
+    // authoring time requiring the declaration. Checked BEFORE the getPlanBundle
+    // IO below (mirrors TaskWorkflowService.enforceClaimGate's isEnabled-before-
+    // IO order for the SAME reason: a disabled checkpoint must stay byte-
+    // identical to pre-this-change behavior, never blocked by a broken
+    // ancestor-spec lookup). An --adhoc task's resolvedParentId is the corpus
+    // root PRD (not a plan, see the ad-hoc auto-parenting block above) —
+    // getPlanBundle on it fails with isNonPlanParentError, which this treats as
+    // D3's vacuous "no spec-tier ancestor" pass, the SAME structural shape
+    // enforceClaimGate already uses for task-claim's identical ad-hoc case
+    // (never an exemption: an ad-hoc task that wants attested evidence still
+    // needs ac_scope, since VerifyRunnerService.verifyAdhocTask resolves its
+    // governing spec THROUGH that field).
+    if (data.type === "task" && this.gateEnforcer && this.gateEnforcer.isEnabled("task-create")) {
+      let upstreamCtx: GateContext = { hasSpecParent: false };
+      if (resolvedParentId !== null) {
+        const bundleResult = await this.getPlanBundle(resolvedParentId);
+        if (!bundleResult.ok) {
+          if (!isNonPlanParentError(bundleResult.error)) return bundleResult;
+          // reason: a non-plan parent (the --adhoc root-PRD auto-parenting
+          // branch above) has no spec-tier ancestor to resolve against — D3
+          // vacuous pass, never an exemption. `upstreamCtx` keeps its
+          // `hasSpecParent: false` default from initialization above.
+        } else {
+          const spec = bundleResult.value.spec;
+          upstreamCtx = {
+            ...buildUpstreamSpecContext(spec),
+            ...(spec !== undefined
+              ? { parentSpecScriptAcCount: countScriptModeAcceptanceCriteria(spec) }
+              : {}),
+          };
+        }
+      }
+      const taskCreateGateResult = this.gateEnforcer.enforce("task-create", {
+        ...upstreamCtx,
+        candidateAcScopeDeclared: Array.isArray(data.extra?.["ac_scope"]),
+        targetIdOrSlug: slug,
+      });
+      if (!taskCreateGateResult.ok) return taskCreateGateResult;
     }
 
     const doc: DocRecord = {

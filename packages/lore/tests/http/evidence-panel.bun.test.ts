@@ -99,6 +99,11 @@ async function makeTestServer(): Promise<TestContext> {
     content: "## Task",
     extra: {
       plan_id: planResult.value.id,
+      // reason: spec-declaring-ac-scope-is-required-at-task-creation-so-the —
+      // this plan's spec declares a script-mode AC (AC-1), so task-create's
+      // admission gate now requires ac_scope to be declared. Matches the
+      // evidence entry's own ac_ref below.
+      ac_scope: ["AC-1"],
       verification_evidence: [
         {
           oracle: "test",

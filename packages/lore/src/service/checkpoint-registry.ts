@@ -112,6 +112,7 @@ import {
   verifyReachability,
   attestationExemptKindValid,
   assessmentFreshness,
+  acScopeRequiredAtCreate,
   ANCHOR_OVERLAP_FIELD,
   ACTOR_IDENTITY_FIELD,
   AC_QUANTIFIABLE_FIELD,
@@ -162,7 +163,22 @@ export type GateCheckpoint =
    * type-agnostic checkpoint (unlike `spec-promote`, which is `spec`-only) — the SAME
    * `check`/`feed` pair runs regardless of which configured type is being approved.
    */
-  | "review-judgment";
+  | "review-judgment"
+  /**
+   * spec-declaring-ac-scope-is-required-at-task-creation-so-the — a COMMIT-TIME
+   * admission rule on `CorpusService.create`/`_createImpl` (never `set`/`approve`):
+   * when a candidate task's parent plan resolves a spec-tier ancestor declaring
+   * >= 1 script-mode acceptance criterion, the task must declare `extra.ac_scope`
+   * (D1/D2 — any array, including an empty one) or creation is refused, naming
+   * the `--ac-scope` flag and the governing spec's script-mode criterion ids
+   * (D5). `--adhoc` tasks are NOT-APPLICABLE, never EXEMPT (D3) — see
+   * `acScopeRequiredAtCreate`'s own JSDoc (`gate-predicates.ts`) for the full
+   * vacuous-pass rationale. Deliberately NOT added to `ALL_GATE_CHECKPOINTS`
+   * below — that list mirrors the ORIGINAL IoC vertical-slice tech-spec's five
+   * checkpoints for SPEC-041/-043's bootstrap "armed gates" rendering, widening
+   * it is a separate concern (same precedent `"review-judgment"` set above).
+   */
+  | "task-create";
 
 /**
  * Pre-fetched, checkpoint-agnostic input to a `CheckpointDef`'s `check` / `feed`
@@ -340,6 +356,20 @@ export interface GateContext {
    * enabled (same default philosophy as `anchorOverlapEnabled`).
    */
   readonly actorIdentityEnabled?: boolean;
+
+  // -- task-create: check() (spec-declaring-ac-scope-is-required-at-task-creation-so-the) --
+  /**
+   * Whether the CANDIDATE task's own (not-yet-persisted) `extra.ac_scope` key is
+   * present at all — any array, INCLUDING an empty one (D2: a decision, never a
+   * non-empty claim). Populated by the CALLER (`CorpusService._createImpl`) from
+   * the schema-validated `CreateDocInput.extra` it already has in hand — no
+   * extra IO. Reuses `hasSpecParent`/`parentSpecScriptAcCount`/`parentSpec`/
+   * `parentSpecPointer` from the `task-claim`/`plan-promote` sections above
+   * (SAME fields, same "the task's parent plan's spec ancestor" semantics) —
+   * this checkpoint adds no new upstream-resolution fields, only this one
+   * candidate-side signal.
+   */
+  readonly candidateAcScopeDeclared?: boolean;
 
   // -- plan-close: check() + feed() (SPEC-054) --
   /**
@@ -2137,6 +2167,83 @@ export function countScriptModeAcceptanceCriteria(spec: DocRecord): number {
 }
 
 /**
+ * Lists the `id`s of `verify.mode === "script"` acceptance criteria declared
+ * on a resolved ancestor spec's `extra` bag — the D5 "enumerate the ids so
+ * the author can copy one rather than query for legal values" detail
+ * `feedTaskCreate` needs (spec-declaring-ac-scope-is-required-at-task-
+ * creation-so-the, AC-ACS-7). Takes `extra` directly rather than a full
+ * `DocRecord` (unlike {@link countScriptModeAcceptanceCriteria}) because
+ * `GateContext.parentSpec` only carries `{type, status, extra, deleted_at}` —
+ * the SAME projection `buildUpstreamSpecContext` builds for
+ * `upstreamApproved`/`upstreamHasAcceptanceCriteria` — never a full
+ * `DocRecord`.
+ *
+ * @param extra - `ctx.parentSpec?.extra`, or `undefined` when no ancestor
+ *   spec resolved.
+ * @returns The script-mode criteria's ids, in declaration order; `[]` for a
+ *   missing/invalid/absent `acceptance_criteria` array.
+ * @example
+ * listScriptModeCriterionIds({ acceptance_criteria: [
+ *   { id: "AC-1", statement: "x", verify: { mode: "script", oracle: "test", command: "bun test" } },
+ *   { id: "AC-2", statement: "y", verify: { mode: "human" } },
+ * ] }); // => ["AC-1"]
+ * @example
+ * listScriptModeCriterionIds(undefined); // => []
+ */
+function listScriptModeCriterionIds(extra: Record<string, unknown> | undefined): string[] {
+  const parsed = specAcceptanceCriteriaSchema.safeParse(extra?.["acceptance_criteria"]);
+  if (!parsed.success) return [];
+  return parsed.data.filter((criterion) => criterion.verify.mode === "script").map((c) => c.id);
+}
+
+/**
+ * `task-create`'s ONE check (spec-declaring-ac-scope-is-required-at-task-
+ * creation-so-the) — a thin dispatch to {@link acScopeRequiredAtCreate}
+ * supplying the pre-fetched `ctx` fields. Reuses `hasSpecParent`/
+ * `parentSpecScriptAcCount` (the SAME fields `task-claim`/`plan-promote`
+ * already populate for "the task's parent plan's spec ancestor") — this
+ * checkpoint introduces no new upstream-resolution logic, only the admission
+ * predicate itself.
+ */
+function checkTaskCreate(ctx: GateContext): PredicateResult[] {
+  return [
+    acScopeRequiredAtCreate(ctx.hasSpecParent, ctx.parentSpecScriptAcCount, ctx.candidateAcScopeDeclared),
+  ];
+}
+
+/**
+ * `task-create`'s feeding message (D5) — names the literal `--ac-scope` flag
+ * (AC-ACS-1's "the message contains the literal `--ac-scope`", AC-ACS-7's
+ * "enumerates the governing spec's script-mode criterion ids so the author
+ * can copy one rather than query for legal values"). Mirrors
+ * `feedUpstreamSpecCheckpoint`'s pointers-not-dump shape (spec slug/title/
+ * status only, never the full markdown body).
+ */
+function feedTaskCreate(ctx: GateContext, failures: PredicateResult[]): string {
+  const pointer = ctx.parentSpecPointer;
+  const ids = listScriptModeCriterionIds(ctx.parentSpec?.extra);
+  const idsLine =
+    ids.length > 0
+      ? `Script-mode criteria you may declare via --ac-scope: ${ids.join(", ")}.`
+      : "(no script-mode criteria found on the governing spec — declare --ac-scope with an explicit empty value to record that this task claims none)";
+  const ruleMarkdown =
+    (pointer !== undefined
+      ? `Parent spec: ${pointer.slug} — "${pointer.title}" (status: ${pointer.status}). `
+      : "(no ancestor spec resolved). ") +
+    "Required for task-create: this task's plan resolves a spec-tier ancestor declaring " +
+    "at least one script-mode acceptance criterion, so this task must declare --ac-scope " +
+    '(repeatable; pass an explicit empty value to declare "claims nothing" — an empty ' +
+    "array is a valid decision, not a missing one, per D2). " +
+    idsLine;
+  const pack = buildFeedingPack({
+    ruleSource: pointer !== undefined ? `corpus ${pointer.slug}` : "corpus (unresolved)",
+    ruleMarkdown,
+    missing: selectFailures(failures).map((f) => f.reason),
+  });
+  return renderFeedingPack(pack);
+}
+
+/**
  * Builds the `candidateBy` / `candidateAnchors` / `siblingClaims` trio
  * `task-claim`'s `noAnchorOverlap` predicate consumes (SPEC-042 §Design
  * Decisions D5) — co-located with {@link buildUpstreamSpecContext} per the
@@ -2207,6 +2314,10 @@ export const checkpointRegistry: Partial<Record<GateCheckpoint, CheckpointDef>> 
   // impl `feedTaskClaim` uses) — the "ONE-LINE registry addition" the RED
   // suite's CONTRACT NOTE §2 calls for.
   "phase-claim": { id: "phase-claim", check: checkTaskClaim, feed: feedPhaseClaim },
+  // reason: spec-declaring-ac-scope-is-required-at-task-creation-so-the —
+  // Option B (§Options Considered): a checkpointRegistry predicate, composing
+  // with the existing GateEnforcer enforcement all three adapters share.
+  "task-create": { id: "task-create", check: checkTaskCreate, feed: feedTaskCreate },
   // reason: SPEC-103 §Mechanisms M2 — generic, type-agnostic judgment-required
   // checkpoint; NOT added to ALL_GATE_CHECKPOINTS below (that list mirrors the
   // ORIGINAL IoC vertical-slice tech-spec's five checkpoints for SPEC-041/-043's

@@ -107,7 +107,13 @@ async function makeTestServer(): Promise<TestContext> {
     title: "Phase Status Non-Phase Target",
     parent_id: planResult.value.id,
     content: "## Task",
-    extra: { plan_id: planResult.value.id },
+    // reason: spec-declaring-ac-scope-is-required-at-task-creation-so-the —
+    // this plan's spec declares a script-mode AC (AC-1), so task-create's
+    // admission gate now requires ac_scope to be declared (any array,
+    // including empty). Declared here as ["AC-1"] to match the spec's own
+    // criterion — this task's ROLE in the suite is merely "a non-phase
+    // document to probe /api/phase-status against", unaffected either way.
+    extra: { plan_id: planResult.value.id, ac_scope: ["AC-1"] },
   } as CreateDocInput);
   if (!taskResult.ok) throw new Error("Failed to create seed task");
 
@@ -244,7 +250,13 @@ async function createTaskInPhase(
     title: `Task in ${phaseName}`,
     parent_id: ctx.planId,
     content: "## Task",
-    extra: { plan_id: ctx.planId, phase: phaseName, verification_evidence },
+    // reason: spec-declaring-ac-scope-is-required-at-task-creation-so-the —
+    // this plan's spec declares a script-mode AC (AC-1), so task-create's
+    // admission gate now requires ac_scope to be declared on every task
+    // created here — unrelated to the declared-PHASE-level ac_scope this
+    // file's scorecard assertions read (a phase doc's OWN extra.ac_scope,
+    // never a task's).
+    extra: { plan_id: ctx.planId, phase: phaseName, ac_scope: ["AC-1"], verification_evidence },
   } as unknown as CreateDocInput);
   if (!result.ok) throw new Error(`Failed to create seed task: ${JSON.stringify(result.error)}`);
   return { id: result.value.id };

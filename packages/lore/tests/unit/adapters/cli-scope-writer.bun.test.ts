@@ -136,9 +136,26 @@ function seedFixture(cwd: string): void {
   // that shape leaves task-claim fully armed while reading as disabled. The
   // `mustRun(["claim", …])` call in the STATE case is the live control that this
   // append actually took effect (it throws if the gate still fires).
+  //
+  // reason: task-create (spec-declaring-ac-scope-is-required-at-task-creation-
+  // so-the) is disabled for the SAME reason — this fixture's spec declares 2
+  // script-mode ACs (AC-SC-1/2), which would otherwise make EVERY undeclared-
+  // scope `createTask` call in this file (the writer's own subject — most
+  // fixture tasks deliberately omit --ac-scope to exercise `lore scope add`
+  // post-create) refuse at creation with AC_SCOPE_REQUIRED. This suite tests
+  // the scope WRITER, not the admission gate; that gate has its own dedicated
+  // coverage (create-task-ac-scope.test.ts / create-task-ac-scope-e2e.bun.test.ts).
   appendFileSync(
     join(cwd, ".lore", "config.yaml"),
-    ["workflow:", "  gates:", '    "task-claim":', "      enabled: false", ""].join("\n"),
+    [
+      "workflow:",
+      "  gates:",
+      '    "task-claim":',
+      "      enabled: false",
+      '    "task-create":',
+      "      enabled: false",
+      "",
+    ].join("\n"),
     "utf8",
   );
   mustRun(["create", "prd", "--title", "Scope Root", "--content", "## Overview\nroot", "--no-ai"], cwd);
