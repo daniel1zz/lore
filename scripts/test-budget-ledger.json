@@ -1,355 +1,355 @@
 {
   "baseline_commit": "48d3dbc",
   "adr": "adr-a-newly-armed-structural-oracle-enforces-from-a-baseline",
-  "note": "Every entry below was measured by running `bun run check:test-budgets` against the tree at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55) — none of these spawnCount/line values are fabricated. This is the frozen debt snapshot: any violation NOT listed here is new debt introduced after this commit and gates the build.",
+  "note": "Every entry below was measured by running `bun run check:test-budgets` against the tree at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55) \u2014 none of these spawnCount/line values are fabricated. This is the frozen debt snapshot: any violation NOT listed here is new debt introduced after this commit and gates the build.",
   "entries": [
     {
       "path": "packages/lore/tests/e2e/cli.bun.test.ts",
       "line": 213,
       "spawnCount": 7,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/e2e/cli.bun.test.ts",
       "line": 341,
       "spawnCount": 3,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/e2e/cli.bun.test.ts",
       "line": 358,
       "spawnCount": 3,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/e2e/cli.bun.test.ts",
       "line": 482,
       "spawnCount": 4,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/e2e/cli.bun.test.ts",
       "line": 750,
       "spawnCount": 3,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/e2e/context-provenance-compiled.bun.test.ts",
       "line": 247,
       "spawnCount": 3,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/e2e/context-provenance-compiled.bun.test.ts",
       "line": 416,
       "spawnCount": 7,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/e2e/issue-closed-state.bun.test.ts",
       "line": 227,
       "spawnCount": 3,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/e2e/issue-closed-state.bun.test.ts",
       "line": 301,
       "spawnCount": 6,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/e2e/issue-closed-state.bun.test.ts",
       "line": 389,
       "spawnCount": 3,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/e2e/issue-closure.bun.test.ts",
       "line": 431,
       "spawnCount": 3,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/e2e/issue-closure.bun.test.ts",
       "line": 495,
       "spawnCount": 3,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/e2e/issue-closure.bun.test.ts",
       "line": 540,
       "spawnCount": 5,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/e2e/issue-closure.bun.test.ts",
       "line": 594,
       "spawnCount": 5,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/e2e/migrate-ordinals-compiled.bun.test.ts",
       "line": 463,
       "spawnCount": 5,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/e2e/plan-exempt-attestation-compiled.bun.test.ts",
       "line": 223,
       "spawnCount": 4,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/e2e/plan-exempt-attestation-compiled.bun.test.ts",
       "line": 291,
       "spawnCount": 4,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/e2e/plan-exempt-attestation-compiled.bun.test.ts",
       "line": 319,
       "spawnCount": 3,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/e2e/setup-freshness-cycle.bun.test.ts",
       "line": 228,
       "spawnCount": 3,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/integration/ai-stub-binary.bun.test.ts",
       "line": 230,
       "spawnCount": 3,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/integration/archive-sweep-cli.bun.test.ts",
-      "line": 92,
+      "line": 133,
       "spawnCount": 9,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped). Line moved 92->133 on 2026-08-01 when the live gate-disable control was inserted earlier in the same file (merge 52c5aef); the violation itself is unchanged and still unfixed."
     },
     {
       "path": "packages/lore/tests/integration/cli-feed-task-start.bun.test.ts",
       "line": 566,
       "spawnCount": 3,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/integration/cli-outline.bun.test.ts",
       "line": 183,
       "spawnCount": 3,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/integration/cli/assess-ai.bun.test.ts",
       "line": 260,
       "spawnCount": 5,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/integration/cli/assessment-freshness.bun.test.ts",
       "line": 199,
       "spawnCount": 3,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/integration/cli/migrate-phases.test.ts",
       "line": 279,
       "spawnCount": 3,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/integration/cli/migrate-spec-kind.test.ts",
       "line": 251,
       "spawnCount": 3,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/integration/cli/phase-workflow-e2e.bun.test.ts",
       "line": 148,
       "spawnCount": 6,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/integration/cli/phase.test.ts",
       "line": 161,
       "spawnCount": 3,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/integration/cli/phase.test.ts",
       "line": 183,
       "spawnCount": 3,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/integration/cli/phase.test.ts",
       "line": 235,
       "spawnCount": 3,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/integration/cli/phase.test.ts",
       "line": 290,
       "spawnCount": 5,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/integration/cli/setup.test.ts",
       "line": 225,
       "spawnCount": 5,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/integration/cli/setup.test.ts",
       "line": 363,
       "spawnCount": 7,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/integration/cli/setup.test.ts",
       "line": 478,
       "spawnCount": 3,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/integration/cli/tiered-review-gate.bun.test.ts",
       "line": 294,
       "spawnCount": 3,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/integration/cli/tiered-review-gate.bun.test.ts",
       "line": 392,
       "spawnCount": 4,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/integration/cli/trace-stats.bun.test.ts",
       "line": 156,
       "spawnCount": 4,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/integration/cli/trace-stats.bun.test.ts",
       "line": 183,
       "spawnCount": 3,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/integration/cli/trace-stats.bun.test.ts",
       "line": 268,
       "spawnCount": 3,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/integration/gate-config-disable.bun.test.ts",
       "line": 162,
       "spawnCount": 3,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/integration/gate-hooks.bun.test.ts",
       "line": 346,
       "spawnCount": 4,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/integration/gate-hooks.bun.test.ts",
       "line": 534,
       "spawnCount": 3,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/integration/p2-e2e-closed-loop.bun.test.ts",
       "line": 189,
       "spawnCount": 6,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/integration/real-git-port.test.ts",
       "line": 131,
       "spawnCount": 6,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/integration/tree-consistency.bun.test.ts",
       "line": 550,
       "spawnCount": 3,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/unit/adapters/cli-claim-anchors.bun.test.ts",
       "line": 244,
       "spawnCount": 4,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/unit/adapters/cli-claim-anchors.bun.test.ts",
       "line": 291,
       "spawnCount": 4,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/unit/adapters/cli-invalidate.bun.test.ts",
       "line": 165,
       "spawnCount": 5,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/unit/adapters/cli-invalidate.bun.test.ts",
       "line": 205,
       "spawnCount": 3,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/unit/adapters/cli-invalidate.bun.test.ts",
       "line": 277,
       "spawnCount": 4,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/unit/adapters/cli-staleness.bun.test.ts",
       "line": 263,
       "spawnCount": 4,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/unit/hooks/session-seat-injection.test.ts",
       "line": 197,
       "spawnCount": 3,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/unit/hooks/session-seat-injection.test.ts",
       "line": 284,
       "spawnCount": 3,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/unit/hooks/session-seat-injection.test.ts",
       "line": 312,
       "spawnCount": 6,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/unit/hooks/session-seat-injection.test.ts",
       "line": 346,
       "spawnCount": 3,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/unit/hooks/session-seat-injection.test.ts",
       "line": 375,
       "spawnCount": 3,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/unit/hooks/session-seat-injection.test.ts",
       "line": 405,
       "spawnCount": 3,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
+      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 \u2014 an orphaned row fails loud, it is never silently dropped)."
     }
   ]
 }
