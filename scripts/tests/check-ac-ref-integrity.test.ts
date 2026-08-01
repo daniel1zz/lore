@@ -55,7 +55,7 @@
 
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -420,14 +420,37 @@ function runLore(args: string[], cwd: string): RunResult {
   return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", exitCode: result.status ?? 1 };
 }
 
-/** Spawns the REAL detector script (`bun run scripts/check-ac-ref-integrity.ts`) with `cwd` set to the fixture corpus directory, exactly as the registered AC-ACS-7 oracle command would run it from that directory. */
+/**
+ * Builds a throwaway "repo root" containing only an EMPTY `scripts/ac-ref-exemption-ledger.json`
+ * (`{"entries": []}`) at the exact `LEDGER_RELATIVE_PATH` the real detector reads. Passed to
+ * `runDetector` via `LORE_AC_REF_LEDGER_REPO_ROOT` so this fixture's corpus-scan assertions
+ * stay independent of the REAL repo's shipped ledger content — which, once it carries any
+ * entry (task-t3, 2026-08-01), would otherwise make every one of THIS fixture's unrelated,
+ * throwaway-corpus runs report those real entries as spuriously "orphaned" (they match no
+ * dangling ref in a fixture corpus that never produced them) and fail loud for a reason that
+ * has nothing to do with what this suite is actually proving.
+ */
+function initFixtureLedgerRoot(): string {
+  const root = mkdtempSync(join(tmpdir(), "lore-ac-ref-ledger-root-"));
+  mkdirSync(join(root, "scripts"), { recursive: true });
+  writeFileSync(join(root, LEDGER_RELATIVE_PATH), JSON.stringify({ entries: [] }), "utf8");
+  return root;
+}
+
+/** Spawns the REAL detector script (`bun run scripts/check-ac-ref-integrity.ts`) with `cwd` set to the fixture corpus directory, exactly as the registered AC-ACS-7 oracle command would run it from that directory — pointed at an isolated throwaway ledger (see `initFixtureLedgerRoot`) so this fixture's own corpus-scan assertions are never coupled to the real repo's shipped ledger content. */
 function runDetector(cwd: string): RunResult {
-  const result = spawnSync("bun", ["run", DETECTOR_SCRIPT], {
-    cwd,
-    encoding: "utf8",
-    maxBuffer: 20 * 1024 * 1024,
-  });
-  return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", exitCode: result.status ?? 1 };
+  const ledgerRoot = initFixtureLedgerRoot();
+  try {
+    const result = spawnSync("bun", ["run", DETECTOR_SCRIPT], {
+      cwd,
+      encoding: "utf8",
+      maxBuffer: 20 * 1024 * 1024,
+      env: { ...process.env, LORE_AC_REF_LEDGER_REPO_ROOT: ledgerRoot },
+    });
+    return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", exitCode: result.status ?? 1 };
+  } finally {
+    rmSync(ledgerRoot, { recursive: true, force: true });
+  }
 }
 
 function initFixtureCorpus(): string {

@@ -231,7 +231,21 @@ export async function main(dbPathOverride?: string, repoRootOverride?: string): 
 
 if (import.meta.main) {
   try {
-    const code = await main();
+    // `LORE_AC_REF_LEDGER_REPO_ROOT` finishes wiring the `repoRootOverride` seam
+    // `main()` already exposes (see its doc comment) to this real CLI entrypoint.
+    // Never set by production callers — production always resolves the ledger
+    // from THIS script's own repo (REPO_ROOT above). It exists because this
+    // script's own E2E fixture (`scripts/tests/check-ac-ref-integrity.test.ts`)
+    // MUST spawn this exact file as a subprocess (bun:sqlite in its import graph
+    // makes an in-process vitest call impossible — see check-ac-ref-integrity-core.ts's
+    // header) against a throwaway `mkdtemp` corpus, while still needing an
+    // isolated, empty ledger for that unrelated corpus — otherwise every REAL
+    // entry in the repo's shipped ledger (scripts/ac-ref-exemption-ledger.json)
+    // reports as "orphaned" (criterion 3: an entry with no matching real dangling
+    // ref in THIS scan fails loud) purely because the fixture corpus is a
+    // different corpus, not because the ledger is actually unsound. Diagnosed
+    // 2026-08-01 (task-t3) the moment the ledger gained its first 3 real rows.
+    const code = await main(undefined, process.env.LORE_AC_REF_LEDGER_REPO_ROOT);
     process.exit(code);
   } catch (e) {
     if (e instanceof AcRefLedgerError) {
