@@ -31,14 +31,23 @@
  *   buildFeed(app, checkpoint, parentIdOrSlug?) — the full composition
  *   SESSION_RESUME_CHECKPOINT                — the `"session-resume"` checkpoint
  *                                               literal (SPEC-041 §3 D5)
- *   renderResumeFeed(resume)                 — pure `ResumeResult` → advisory text,
+ *   renderResumeFeed(resume, suppressFloor?)  — pure `ResumeResult` → advisory text,
  *                                               closing with `RESUME_SCOPE_CLOSURE`
  *                                               whenever a ticket is actually rendered
  *                                               (spec-context-provenance-injected-corpus-global-state-and-a
- *                                               D3)
+ *                                               D3). `suppressFloor` (default `false`,
+ *                                               task-verifying-a-handoff-you-just-authored-arms-the-coverage
+ *                                               D1) withholds `RESUME_COVERAGE_FLOOR`
+ *                                               on the single-record path when `true` —
+ *                                               computed by `buildResumeFeed` below, NEVER
+ *                                               by this function itself (stays pure).
  *   buildResumeFeed(app, opts)               — SPEC-041 S2 resume dispatch, called
  *                                               BEFORE `buildFeed`'s
- *                                               `CHECKPOINT_PRODUCED_TYPE` lookup
+ *                                               `CHECKPOINT_PRODUCED_TYPE` lookup. Also
+ *                                               computes the same-session-authorship
+ *                                               `suppressFloor` decision (D1 below) via
+ *                                               the ONE new IO read in this module: the
+ *                                               SessionStart hook's marker file.
  *   SPECIAL_FEED_CHECKPOINTS                 — SPEC-070 Fix F7 SSOT: the special
  *                                               checkpoint set (session-resume/
  *                                               phase-start/task-start) + which
@@ -80,21 +89,47 @@
  *   record's `content` by `renderHandoffContent`, `@lore/core`'s SSOT
  *   projection point — this module renders NO items itself, see
  *   `renderResumeRecord` below).
+ * @invariant `buildResumeFeed`'s `suppressFloor` decision
+ *   (task-verifying-a-handoff-you-just-authored-arms-the-coverage D1) is the
+ *   ONLY place this module reads a wall clock's persisted trace or the
+ *   filesystem beyond `app`'s own store — `readSessionStartIso` below reads
+ *   `os.tmpdir()` for the SessionStart hook's marker
+ *   (`assets/hooks/session-start-marker.mjs`), never `app.corpusService` —
+ *   the marker is a session-scoped fact, orthogonal to the corpus. ANY
+ *   failure to establish it (missing session-id env var, missing/unreadable/
+ *   corrupt marker) yields `sessionStartIso: undefined`, and
+ *   `isSameSessionAuthorship` (`@lore/core`) is fail-safe on `undefined` —
+ *   arms, never suppresses, on an unknown boundary (ADR "Q2 Silence" review).
+ *   `renderResumeFeed` itself performs NO IO for this decision — it only
+ *   consumes the already-computed boolean, so it stays pure/testable exactly
+ *   as before this task.
  *
  * Side-effect class: IO (corpusService reads, outlineService MDX resolution,
- *   sessionService reads — no writes)
+ *   sessionService reads, `os.tmpdir()` marker read for `suppressFloor` — no
+ *   writes)
  * Source: IoC vertical-slice tech-spec §4.1/§11, P4 slice; SPEC-041 §3 D5;
  *   spec-context-provenance-injected-corpus-global-state-and-a D3;
- *   spec-resume-ticket-coverage-a-shipped-upper-bound-left-the D3, D10
+ *   spec-resume-ticket-coverage-a-shipped-upper-bound-left-the D3, D10;
+ *   task-verifying-a-handoff-you-just-authored-arms-the-coverage D1, D2
  */
 
+import { existsSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { App } from "../app.js";
 import type { DocRecord, LoreError, Result } from "@lore/core";
-import { err, ok, RESUME_COVERAGE_FLOOR, RESUME_SCOPE_CLOSURE } from "@lore/core";
+import {
+  err,
+  ok,
+  isSameSessionAuthorship,
+  sessionStartMarkerFilename,
+  RESUME_COVERAGE_FLOOR,
+  RESUME_SCOPE_CLOSURE,
+} from "@lore/core";
 import { buildFeedingPack, renderFeedingPack } from "../service/gate-feeding.js";
 import { renderResolvedToMarkdown } from "../service/outline-service.js";
 import type { ResumeHandoffRecord, ResumeResult } from "../service/session-service.js";
-import { formatError } from "../adapters/cli/utils.js";
+import { formatError, resolveActor } from "../adapters/cli/utils.js";
 import { PHASE_START_CHECKPOINT } from "./phase-feed-flow.js";
 import { TASK_START_CHECKPOINT } from "./task-feed-flow.js";
 
@@ -354,12 +389,24 @@ function renderReadinessPointer(readiness: ResumeResult["readiness"]): string {
  *   `stdout.endsWith(RESUME_SCOPE_CLOSURE + "\n")` REGRESSION assertion,
  *   predating this task. The `multi_actor` branch never appends the floor
  *   (D10) — only `RESUME_SCOPE_CLOSURE`, unchanged from before this task.
+ * @invariant `suppressFloor` (task-verifying-a-handoff-you-just-authored-arms-the-coverage
+ *   D1) withholds `RESUME_COVERAGE_FLOOR` on the single-record path ONLY —
+ *   it has NO effect on the `multi_actor` branch (which never appends the
+ *   floor regardless, D10) nor on `RESUME_SCOPE_CLOSURE` (always present
+ *   whenever a ticket is rendered, unchanged by this task). Defaults to
+ *   `false` (arm) so every pre-existing call site that does not pass this
+ *   argument keeps today's exact behavior — this function performs NO IO to
+ *   decide the value itself; {@link buildResumeFeed} computes it and passes
+ *   it in, keeping this function pure/testable exactly as before.
  * @param resume - A `SessionService.resume` result.
+ * @param suppressFloor - When `true` on the single-record path, omits
+ *   `RESUME_COVERAGE_FLOOR` from the rendered text (default `false`).
  * @returns `"(no handoff recorded)"` when `!resume.found`; a multi-actor
  *   result ending in `RESUME_SCOPE_CLOSURE`; otherwise a single-record ticket
- *   ending in `RESUME_COVERAGE_FLOOR` then `RESUME_SCOPE_CLOSURE`.
+ *   ending in `RESUME_COVERAGE_FLOOR` (unless `suppressFloor`) then
+ *   `RESUME_SCOPE_CLOSURE`.
  */
-export function renderResumeFeed(resume: ResumeResult): string {
+export function renderResumeFeed(resume: ResumeResult, suppressFloor = false): string {
   if (!resume.found) {
     return "(no handoff recorded)";
   }
@@ -378,11 +425,56 @@ export function renderResumeFeed(resume: ResumeResult): string {
   return [
     renderResumeRecord(record),
     renderReadinessPointer(resume.readiness),
-    RESUME_COVERAGE_FLOOR,
+    ...(suppressFloor ? [] : [RESUME_COVERAGE_FLOOR]),
     RESUME_SCOPE_CLOSURE,
   ]
     .filter((s) => s !== "")
     .join("\n\n");
+}
+
+/**
+ * Reads the CURRENTLY-arming session's start-time marker
+ * (task-verifying-a-handoff-you-just-authored-arms-the-coverage D1) —
+ * written ONCE per session, idempotently, by the `SessionStart`
+ * `assets/hooks/session-start-marker.mjs` hook into `os.tmpdir()`. Session
+ * identity is read from `CLAUDE_CODE_SESSION_ID`/`CLAUDE_SESSION_ID` — the
+ * SAME precedence `@lore/core/node`'s `resolveActorWithSource` already
+ * trusts for cross-process session identity, deliberately NOT
+ * `assets/hooks/lib/turn-state.mjs::resolveSessionId()` (documented in
+ * `commands/handoff.ts`'s own D8 note to resolve DIFFERENTLY for a Stop-hook
+ * child than for a Bash-tool child — exactly the mismatch that would make a
+ * SessionStart-hook-written marker invisible to a later `lore feed`
+ * invocation).
+ *
+ * @invariant Never throws. An absent/blank session-id env var, a
+ *   missing/unreadable/corrupt marker file, or a marker missing a string
+ *   `started_at` field ALL degrade to `undefined` — the ONLY signal this
+ *   function ever returns for "no session-start fact available". The caller
+ *   ({@link buildResumeFeed}) must treat `undefined` as unknown, never as a
+ *   match (`isSameSessionAuthorship`'s own Q2 fail-safe contract, `@lore/core`).
+ * @param env - Environment map (test seam); defaults to `process.env`.
+ * @returns This session's marker `started_at` (ISO 8601), or `undefined`.
+ */
+function readSessionStartIso(env: Record<string, string | undefined> = process.env): string | undefined {
+  const sessionId = env["CLAUDE_CODE_SESSION_ID"] ?? env["CLAUDE_SESSION_ID"];
+  if (sessionId === undefined || sessionId.trim() === "") return undefined;
+
+  const markerPath = join(tmpdir(), sessionStartMarkerFilename(sessionId));
+  try {
+    if (!existsSync(markerPath)) return undefined;
+    const parsed: unknown = JSON.parse(readFileSync(markerPath, "utf8"));
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      "started_at" in parsed &&
+      typeof (parsed as Record<string, unknown>)["started_at"] === "string"
+    ) {
+      return (parsed as Record<string, unknown>)["started_at"] as string;
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -392,6 +484,20 @@ export function renderResumeFeed(resume: ResumeResult): string {
  * `buildFeed` (never fails — advisory-only), this CAN fail: an unresolvable
  * `--plan`/`--handoff` target is `SessionService.resume`'s own documented input
  * error, not a "no handoff yet" fact.
+ *
+ * Also computes the `suppressFloor` decision
+ * (task-verifying-a-handoff-you-just-authored-arms-the-coverage D1): on the
+ * single-record, found path, this session's own resolved actor
+ * (`resolveActor(opts.by)` — the SAME full precedence chain
+ * `--by`/`$LORE_ACTOR`/session-tier/worktree/OS-username every other corpus
+ * write surface uses, computed here PURELY for this side-decision, never
+ * forwarded to `SessionService.resume` — `opts` itself is passed through
+ * untouched, so the resume/candidate-selection behavior is byte-identical to
+ * before this task) plus this session's start marker
+ * ({@link readSessionStartIso}) feed `isSameSessionAuthorship` (`@lore/core`).
+ * A multi-record or not-found result never attempts this — `suppressFloor`
+ * stays `false`, matching `renderResumeFeed`'s own default and its
+ * pre-existing multi_actor behavior (D10, unchanged).
  *
  * @param app - Wired `App` providing `sessionService`.
  * @param opts - `{plan?, handoff?, by?}`, forwarded to `SessionService.resume` untouched.
@@ -414,10 +520,19 @@ export async function buildResumeFeed(
   }
   const result = await app.sessionService.resume(opts);
   if (!result.ok) return result;
+
+  const resume = result.value;
+  let suppressFloor = false;
+  if (resume.found && !resume.multi_actor && resume.handoff !== undefined) {
+    const currentActor = resolveActor(opts.by);
+    const sessionStartIso = readSessionStartIso();
+    suppressFloor = isSameSessionAuthorship(resume.handoff, currentActor, sessionStartIso);
+  }
+
   return ok({
     checkpoint: SESSION_RESUME_CHECKPOINT,
-    resume: result.value,
-    feed: renderResumeFeed(result.value),
+    resume,
+    feed: renderResumeFeed(resume, suppressFloor),
   });
 }
 

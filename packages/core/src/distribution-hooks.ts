@@ -63,6 +63,23 @@
  * mis-registration cannot wedge a session and a grammar change cannot
  * strand it.
  *
+ * `session-start-marker.mjs` (added 2026-08-01,
+ * task-verifying-a-handoff-you-just-authored-arms-the-coverage D1) joins the
+ * set for the SAME "governance backstop, not routing policy" reasoning as
+ * the pair above: it constrains a single, universal fact — "this session's
+ * own start time is recorded" — needed by `lore feed session-resume`'s
+ * `buildResumeFeed` (`packages/lore/src/flows/feed-flow.ts`) to narrow WHEN
+ * the resume-ticket coverage floor arms (never suppressing it for an
+ * unrelated, genuinely earlier session's ticket — the floor stays
+ * unconditional otherwise, no new flag, no opt-in). Registering it is what
+ * makes the fix reachable: `readSessionStartIso` degrades to "unknown
+ * boundary" (fail-safe: arms) whenever no marker exists, so an
+ * INSTALLED-but-unregistered copy would leave every project in exactly the
+ * pre-fix defect state — the same silent-inertness class `stop-handoff-
+ * coverage.mjs`'s own note above already forbids. Fail-open by construction
+ * (see the hook's own module header): an absent session-id env var or any fs
+ * error is silently skipped, never blocking session start.
+ *
  * Public surface:
  *   - HookRunner — the closed `"node" | "bash"` interpreter set
  *   - HookRegistration — one settings.json hook registration (file/runner/event/matcher?)
@@ -120,8 +137,9 @@ export interface HookRegistration {
 /**
  * The full declared "core governance + security" hook set (owner decision,
  * 2026-07-20; `subagent-stop-commit-guard.mjs` added 2026-07-21;
- * `stop-handoff-coverage.mjs` added 2026-07-31) — already matcher-expanded,
- * one entry per distinct `(event, matcher)` pair.
+ * `stop-handoff-coverage.mjs` added 2026-07-31; `session-start-marker.mjs`
+ * added 2026-08-01) — already matcher-expanded, one entry per distinct
+ * `(event, matcher)` pair.
  * Deliberately EXCLUDES `pre-subagent-gate.mjs` and
  * `pre-no-general-agent-gate.mjs` (orchestration-policy hooks, not
  * governance/security — see module doc).
@@ -150,6 +168,9 @@ export const HOOK_REGISTRATIONS: readonly HookRegistration[] = [
 
   // session-start-resume.mjs — injects bootstrap/seat/resume-hint state at session open.
   { file: "session-start-resume.mjs", runner: "node", event: "SessionStart" },
+
+  // session-start-marker.mjs — records this session's own start time (tmpdir marker, keyed by session id) so `lore feed session-resume` can tell a just-authored handoff from a genuinely earlier session's.
+  { file: "session-start-marker.mjs", runner: "node", event: "SessionStart" },
 
   // stop-doc-sync.mjs — doc-sync reminder gate on turn end.
   { file: "stop-doc-sync.mjs", runner: "node", event: "Stop" },

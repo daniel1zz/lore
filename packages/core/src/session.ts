@@ -101,6 +101,34 @@
  *     disposition line back into a verdict is sibling T3's job (the
  *     `lore handoff` coverage-check verb, the SOLE parser of that grammar —
  *     D9).
+ *   - sessionStartMarkerFilename(sessionId) / isSameSessionAuthorship(record,
+ *     currentActor, sessionStartIso) — task-verifying-a-handoff-you-just-authored-arms-the-coverage
+ *     D1/D2: narrows WHEN the resume-ticket coverage floor above arms.
+ *     Measured 2026-08-01: a session that authors a handoff and then runs
+ *     `lore feed session-resume` on it PURELY TO VERIFY the ticket a human
+ *     will paste was arming the floor against itself, demanding disposition
+ *     of the very next-steps it was explicitly handing off. `isSameSessionAuthorship`
+ *     answers "was `record` plausibly authored during the CURRENTLY-arming
+ *     session" from two INDEPENDENTLY-required facts — `record.by ===
+ *     currentActor` (identity) AND `record.at >= sessionStartIso` (a REAL
+ *     stored session-start timestamp, never a "created recently" heuristic
+ *     window) — never from identity alone (a lone actor-identity predicate
+ *     was measured insufficient: a stable orchestrator actor persists across
+ *     many LATER, LEGITIMATE resumes of its own past handoffs, which must
+ *     still arm). `sessionStartIso` is supplied by the CALLER
+ *     (`packages/lore/src/flows/feed-flow.ts::buildResumeFeed`), which reads
+ *     it from a marker `assets/hooks/session-start-marker.mjs` (a NEW
+ *     SessionStart hook, registered in `distribution-hooks.ts`) writes ONCE
+ *     per session into `os.tmpdir()`, keyed by
+ *     `CLAUDE_CODE_SESSION_ID`/`CLAUDE_SESSION_ID` — no stored session-start
+ *     fact existed anywhere in this codebase before this task (measured: a
+ *     "session" was previously DERIVED-never-stored, SPEC-042 D1, and the
+ *     one genuine session boundary that DOES exist — the Claude Code
+ *     transcript's own per-entry timestamps — is reachable only from the
+ *     Stop-hook's own process, `commands/handoff.ts`, out of this task's
+ *     anchors). This module stays pure/browser-safe: `sessionStartMarkerFilename`
+ *     is a plain string transform, and `isSameSessionAuthorship` takes the
+ *     marker's already-read value as a parameter — neither touches `fs`/`os`.
  *
  * Invariants:
  *   - No IO, no wall-clock reads, no randomness — `renderHandoffContent` is deterministic:
@@ -139,6 +167,11 @@
  *     produce the same string. `renderHandoffContent` calls both directly
  *     (same module, no import needed) and remains itself pure/deterministic
  *     after gaining the ordinal/cardinality lines (D1).
+ *   - `isSameSessionAuthorship` (task-verifying-a-handoff-you-just-authored-arms-the-coverage
+ *     D2, Q2 fail-safe) returns `false` (arm) whenever `sessionStartIso` is
+ *     `undefined` — an UNKNOWN session boundary NEVER reads as "same
+ *     session". This is the ONE precondition-absent branch in this whole
+ *     module that a caller must not silently upgrade to "match".
  *
  * Source: SPEC-041 §3 D2, D3; SPEC-042 §Design Decisions D1;
  * SPEC-080(bootstrap-injection; corpus slug
@@ -159,7 +192,9 @@
  * cross-process state), D9 (the coverage-check verb is the sole grammar
  * parser; this module only names the disposition tokens), D10 (the floor
  * binds on the single-record resume-ticket path only — `feed-flow.ts`'s
- * job, not this module's).
+ * job, not this module's);
+ * task-verifying-a-handoff-you-just-authored-arms-the-coverage §Candidate
+ * predicates (2), §Oracle (same-session authorship, fail-safe direction).
  */
 
 import { z } from "zod";
@@ -949,6 +984,119 @@ export function renderResumeCoverageCardinalityLine(
 ): string {
   const total = keyDecisionsCount + nextStepsCount;
   return `SCOPE: ${keyDecisionsCount} decisions + ${nextStepsCount} next steps = ${total} items to account for`;
+}
+
+// ─── Same-Session Authorship (task-verifying-a-handoff-you-just-authored-arms-the-coverage D1, D2) ───
+//
+// The coverage floor above (RESUME_COVERAGE_FLOOR et al.) is correct for a
+// CONSUMED handoff — a genuinely different, later session catching up on
+// someone else's (or its own past) ticket. Measured 2026-08-01: it also armed
+// against the WRITING session, the moment that session ran `lore feed
+// session-resume` purely to VERIFY the ticket it had just authored is
+// consumable — charging the author with the very next-steps it was
+// explicitly handing off. These two functions are the narrowing predicate
+// `feed-flow.ts::buildResumeFeed` uses to withhold the floor for that one
+// case, and ONLY that case.
+
+/**
+ * Filesystem-safe filename for one session's start-time marker
+ * (task-verifying-a-handoff-you-just-authored-arms-the-coverage D1) —
+ * written by the `assets/hooks/session-start-marker.mjs` SessionStart hook
+ * (idempotent: first write for a given session id wins, never overwritten)
+ * and read by `feed-flow.ts::buildResumeFeed` to learn when the
+ * CURRENTLY-arming session began. Pure string transform — the marker's
+ * actual location (`os.tmpdir()`) and all file IO are each caller's own job,
+ * kept out of this browser-safe module.
+ *
+ * @invariant The hook script (a standalone installed `.mjs` file with no
+ *   `@lore/core` import — every hook in this repo's registered set is
+ *   self-contained, `packages/core/src/distribution-hooks.ts`'s own module
+ *   doc) cannot import this function directly. Its own copy of the SAME
+ *   one-line sanitizing transform is a DELIBERATE literal duplicate —
+ *   mirrors the precedent `assets/hooks/session-start-resume.mjs` documents
+ *   for `SETUP_CHECK_CACHE_FILENAME` ("that module owns the write side, this
+ *   hook only ever reads it, and the two live in physically separate
+ *   deployable artifacts with no shared import surface"). Reviewed together,
+ *   never independently re-derived.
+ * @param sessionId - Raw `CLAUDE_CODE_SESSION_ID`/`CLAUDE_SESSION_ID` env value.
+ * @returns A bare filename (never a path) — non-`[A-Za-z0-9._-]` characters
+ *   replaced with `-` so an unexpected session-id shape can never escape the
+ *   intended directory or collide with an unrelated file.
+ * @example
+ * sessionStartMarkerFilename("3de02220-5d69-4b5a-ac23-d66e14c0261b");
+ * // => "lore-session-start-3de02220-5d69-4b5a-ac23-d66e14c0261b.json"
+ */
+export function sessionStartMarkerFilename(sessionId: string): string {
+  return `lore-session-start-${sessionId.replace(/[^A-Za-z0-9._-]/g, "-")}.json`;
+}
+
+/**
+ * Answers whether `record` (a resolved resume-ticket handoff) was plausibly
+ * authored DURING the currently-arming session
+ * (task-verifying-a-handoff-you-just-authored-arms-the-coverage D1) — the
+ * predicate `feed-flow.ts::buildResumeFeed` uses to decide whether to
+ * withhold `RESUME_COVERAGE_FLOOR` from a rendered resume feed.
+ *
+ * TWO independently-required facts must both hold, or this returns `false`
+ * (arm) — the ADR's own "Q1 Proxy" review rejected identity ALONE
+ * (predicate (1)): a stable orchestrator actor persists across many
+ * sessions, so matching on `by` alone would ALSO suppress arming for a
+ * legitimate LATER session resuming its own past ticket.
+ *   1. Identity — `record.by === currentActor`.
+ *   2. Session boundary — `record.at >= sessionStartIso`: the handoff could
+ *      only have been written AFTER the currently-arming session began. A
+ *      genuinely EARLIER session's handoff necessarily predates its
+ *      successor's own start marker, so this comparison alone tells the two
+ *      apart WITHOUT any wall-clock "created recently" threshold (a
+ *      threshold was explicitly rejected — a long session would eventually
+ *      see its OWN just-written ticket age out of any fixed window and
+ *      re-arm against itself, which is the exact false-obligation failure
+ *      this predicate exists to close).
+ *
+ * @invariant Fail-safe (Q2 review): `sessionStartIso === undefined` (no
+ *   marker could be read — missing `CLAUDE_CODE_SESSION_ID`, the hook never
+ *   fired, or an unreadable/corrupt marker file) ALWAYS returns `false`
+ *   (arm) — checked FIRST, before identity, so an unknown boundary can never
+ *   be short-circuited into a match by an identity coincidence.
+ * @invariant Lexicographic ISO-8601 string comparison (`>=`), the same
+ *   convention {@link deriveLastActivityAt} already uses in this module —
+ *   both timestamps are `Date.toISOString()` output, which compares
+ *   correctly as plain strings without `Date` parsing.
+ * @param record - `by` (author actor) and `at` (created_at, ISO 8601) from
+ *   the resolved `ResumeHandoffRecord`.
+ * @param currentActor - The CURRENT `lore feed session-resume` invocation's
+ *   resolved actor identity.
+ * @param sessionStartIso - The currently-arming session's start-marker
+ *   timestamp (ISO 8601), or `undefined` when no session-start fact could be
+ *   established.
+ * @returns `true` only when both the identity and session-boundary facts hold.
+ * @example
+ * isSameSessionAuthorship(
+ *   { by: "agent:main-orchestrator", at: "2026-08-01T10:05:00.000Z" },
+ *   "agent:main-orchestrator",
+ *   "2026-08-01T10:00:00.000Z", // this session started BEFORE the handoff was written
+ * ); // => true — verifying my own just-authored ticket
+ * @example
+ * isSameSessionAuthorship(
+ *   { by: "agent:main-orchestrator", at: "2026-07-30T10:05:00.000Z" },
+ *   "agent:main-orchestrator",
+ *   "2026-08-01T09:00:00.000Z", // this (new) session started AFTER the handoff was written
+ * ); // => false — a genuinely earlier session's ticket; arms (CONTROL)
+ * @example
+ * isSameSessionAuthorship(
+ *   { by: "agent:main-orchestrator", at: "2026-08-01T10:05:00.000Z" },
+ *   "agent:main-orchestrator",
+ *   undefined, // no session-start fact available
+ * ); // => false — unknown boundary, fail-safe arms (Q2)
+ */
+export function isSameSessionAuthorship(
+  record: { readonly by: string; readonly at: string },
+  currentActor: string,
+  sessionStartIso: string | undefined,
+): boolean {
+  if (sessionStartIso === undefined) return false;
+  if (record.by !== currentActor) return false;
+  return record.at >= sessionStartIso;
 }
 
 /**
