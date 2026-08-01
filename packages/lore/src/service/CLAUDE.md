@@ -56,7 +56,7 @@ Full pre-compression mechanism walkthroughs (per-spec design decisions, byproduc
 | `JudgmentService` | record/latestFor/listFor AI review judgments; recordCalibration/computeCalibrationStats (Wilson-bound) |
 | `StalenessProbeService` | probeBatch/probeOne for `lore review --staleness`; never mutates the probed doc, collect-and-continue on partial failure |
 | `AuditService` | query (thin delegation) / verify (completeness join + hash-chain walk + anchor check) / getChainHead |
-| `AcService` | add/list/removeCriterion on `spec.extra.acceptance_criteria`; aggregates per-AC evidence coverage across child plans' tasks |
+| `AcService` | add/list/remove/setCriterion on `spec.extra.acceptance_criteria`; aggregates per-AC evidence coverage across child plans' tasks (incl. `--adhoc` tasks whose `ac_scope` resolves to the spec). `setCriterion` edits a declared criterion IN PLACE — id and `mode` immutable, `ac_ref` never dangles (no removal window), and an `approved` spec is demoted to `draft` exactly as a prose edit would. SSOT: `spec-lore-ac-set-in-place-edit-of-a-declared-acceptance` |
 | `VerifyRunnerService` | `verifyPlan` — trusted-runner orchestration for `lore verify` (command-provenance approval gate, env allowlist, attested evidence, declared-scope selection + its pre-flight refusals) |
 | `SetupService` | planInstall/install/uninstall — global-machine installer over a resolved `targetDir`, manifest-authoritative |
 | `ProjectSetupService` | Thin wrapper over `scaffoldProject` — per-repo `lore setup --project` scaffold |
