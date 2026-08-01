@@ -32,7 +32,7 @@
  */
 
 import { describe, expect, it, beforeAll, afterAll } from "bun:test";
-import { mkdirSync, rmSync, readFileSync } from "fs";
+import { mkdirSync, rmSync, readFileSync, writeFileSync, chmodSync, symlinkSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { assertFreshBinary } from "./helpers/assert-fresh-binary";
@@ -46,6 +46,11 @@ const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 const G1_SHIM = join(REPO_ROOT, "hooks", "g1-spec-create.sh");
 const G2_SHIM = join(REPO_ROOT, "hooks", "g2-spec-promote.sh");
 const G3_SHIM = join(REPO_ROOT, "hooks", "g3-plan-promote.sh");
+const G4_SHIM = join(REPO_ROOT, "hooks", "g4-task-claim.sh");
+// The SHIPPED copy of g1 (assets/ SSOT → assets manifest → `lore setup` →
+// consumer `~/.claude/hooks/`). Asserting only the vendored `hooks/` copy would
+// leave every consumer install unfixed (CLAUDE.md distribution-first lesson).
+const G1_ASSET_SHIM = join(REPO_ROOT, "assets", "hooks", "lore-gate-g1-spec-create.sh");
 const SEED_SCRIPT = join(REPO_ROOT, "scripts", "seed-write-spec-rule.ts");
 const SETTINGS_JSON = join(REPO_ROOT, ".claude", "settings.json");
 
@@ -703,5 +708,407 @@ describe(".claude/settings.json PreToolUse hook wiring", () => {
     expect(approveCommands.some((c) => c.includes("g3-plan-promote.sh"))).toBe(true);
     expect(setCommands.some((c) => c.includes("g2-spec-promote.sh"))).toBe(true);
     expect(setCommands.some((c) => c.includes("g3-plan-promote.sh"))).toBe(true);
+  });
+});
+
+// ─── Suite: g1 `--help` is read-only, never a create-predicate violation ────
+//
+// task-g1-spec-create-gate-denies-lore-create-spec-help-with (finding 1 of
+// knowledge `g1 hook false denies: help flag gated, …`, 2026-07-24; re-measured
+// 2026-08-01): `lore create spec --help` writes NOTHING — citty prints the usage
+// block and exits 0 (measured) — yet g1 matched it on COMMAND POSITION alone
+// (SPEC-050 D4), assembled an empty payload, and denied with PARENT_REQUIRED +
+// MISSING_SKELETON. A gate that denies a read-only introspection command teaches
+// its operator that its denials are noise.
+//
+// Every assertion below runs against BOTH copies of the parity-pinned pair:
+//   - `hooks/g1-spec-create.sh` (vendored, wired by this repo's .claude/settings.json)
+//   - `assets/hooks/lore-gate-g1-spec-create.sh` (shipped SSOT — what consumers install)
+// The asset copy needs a different environment, per its two documented
+// divergences from the vendored copy: it resolves the binary from PATH
+// (`command -v lore`, vs `$REPO_ROOT/dist/lore`), and it defers to a project's
+// vendored copy whenever `$CLAUDE_PROJECT_DIR/hooks/g1-spec-create.sh` is
+// executable. That dedupe clause allows UNCONDITIONALLY, so leaving
+// CLAUDE_PROJECT_DIR pointed at this repo would make every asset-copy assertion
+// below vacuously green — it is blanked, and the paired deny controls prove the
+// asset copy is actually live in this harness.
+//
+// Coverage: HAPPY (AC-1) / NEGATIVE (AC-2 controls) / BOUNDARY (AC-3 flag-VALUE
+// and chain-segment cases) / ERROR (malformed stdin still fails open) / STATE
+// (LORE_GATE_BYPASS short-circuit unchanged) / REGRESSION (AC-4 g2/g3/g4 immunity).
+
+describe("g1 spec-create hook — read-only `--help` invocation", () => {
+  let tmpDir: string;
+  let prdSlug: string;
+  let lorePathDir: string;
+
+  beforeAll(() => {
+    tmpDir = makeTempDir("g1-help");
+    initCorpus(tmpDir);
+    seedRuleDoc(tmpDir);
+    prdSlug = createPrd(tmpDir, "g1-help-prd");
+    // PATH entry carrying `lore` for the asset copy's `command -v lore`
+    // resolution. Prepended (not appended) so a globally-installed `lore` of a
+    // different vintage can never be the binary under measurement.
+    lorePathDir = makeTempDir("g1-help-bin");
+    symlinkSync(LORE_BIN, join(lorePathDir, "lore"));
+  });
+
+  afterAll(() => {
+    cleanupDir(tmpDir);
+    cleanupDir(lorePathDir);
+  });
+
+  /** Runs the SHIPPED asset copy — see the divergence note above this describe. */
+  function runAssetShim(payload: HookPayload, extraEnv: Record<string, string> = {}): RunResult {
+    return runShim(G1_ASSET_SHIM, payload, {
+      CLAUDE_PROJECT_DIR: "",
+      PATH: `${lorePathDir}:${process.env["PATH"] ?? ""}`,
+      ...extraEnv,
+    });
+  }
+
+  // ── AC-1 HAPPY — the help invocation is allowed, on both copies ──────────
+
+  it("AC-1 HAPPY: vendored copy allows `lore create spec --help`", () => {
+    const result = runShim(G1_SHIM, {
+      tool_name: "Bash",
+      tool_input: { command: `${LORE_BIN} create spec --help` },
+      cwd: tmpDir,
+    });
+    const hook = parseHookOutput(result.stdout);
+    expect(hook.permissionDecision).toBe("allow");
+  });
+
+  it("AC-1 HAPPY: shipped asset copy allows `lore create spec --help`", () => {
+    const result = runAssetShim({
+      tool_name: "Bash",
+      tool_input: { command: `lore create spec --help` },
+      cwd: tmpDir,
+    });
+    const hook = parseHookOutput(result.stdout);
+    expect(hook.permissionDecision).toBe("allow");
+  });
+
+  it("AC-1 HAPPY: the short form `-h` is allowed too, on both copies (citty accepts it: measured exit 0 + usage)", () => {
+    const vendored = parseHookOutput(
+      runShim(G1_SHIM, {
+        tool_name: "Bash",
+        tool_input: { command: `${LORE_BIN} create spec -h` },
+        cwd: tmpDir,
+      }).stdout,
+    );
+    expect(vendored.permissionDecision).toBe("allow");
+
+    const asset = parseHookOutput(
+      runAssetShim({
+        tool_name: "Bash",
+        tool_input: { command: `lore create spec -h` },
+        cwd: tmpDir,
+      }).stdout,
+    );
+    expect(asset.permissionDecision).toBe("allow");
+  });
+
+  it("AC-1 HAPPY: `--help` after other flags is still a help invocation (allow), on both copies", () => {
+    const command = `create spec --title "Some Spec" --kind tech --help`;
+    const vendored = parseHookOutput(
+      runShim(G1_SHIM, {
+        tool_name: "Bash",
+        tool_input: { command: `${LORE_BIN} ${command}` },
+        cwd: tmpDir,
+      }).stdout,
+    );
+    expect(vendored.permissionDecision).toBe("allow");
+
+    const asset = parseHookOutput(
+      runAssetShim({
+        tool_name: "Bash",
+        tool_input: { command: `lore ${command}` },
+        cwd: tmpDir,
+      }).stdout,
+    );
+    expect(asset.permissionDecision).toBe("allow");
+  });
+
+  // ── AC-2 NEGATIVE — the paired control: the gate is NOT disarmed ─────────
+  // ⛔ AC-1 on its own is also satisfied by deleting the hook. These two cases
+  // are what make AC-1 meaningful, and for the asset copy they double as the
+  // liveness control (an allow-deferring environment would fail HERE).
+
+  it("AC-2 NEGATIVE/CONTROL: vendored copy still denies a real `lore create spec` with no parent", () => {
+    const result = runShim(G1_SHIM, {
+      tool_name: "Bash",
+      tool_input: { command: `${LORE_BIN} create spec --title "Bad Spec"` },
+      cwd: tmpDir,
+    });
+    const hook = parseHookOutput(result.stdout);
+    expect(hook.permissionDecision).toBe("deny");
+    expect(hook.permissionDecisionReason ?? "").toContain("PARENT_REQUIRED");
+  });
+
+  it("AC-2 NEGATIVE/CONTROL: shipped asset copy still denies a real `lore create spec` with no parent", () => {
+    const result = runAssetShim({
+      tool_name: "Bash",
+      tool_input: { command: `lore create spec --title "Bad Spec"` },
+      cwd: tmpDir,
+    });
+    const hook = parseHookOutput(result.stdout);
+    expect(hook.permissionDecision).toBe("deny");
+    expect(hook.permissionDecisionReason ?? "").toContain("PARENT_REQUIRED");
+  });
+
+  // ── AC-3 BOUNDARY — a help SPELLING that is not a help FLAG ──────────────
+  // A naive substring test on the raw command string passes AC-1 and AC-2 and
+  // still hands an agent a one-token disarm (`--title "--help"`). The guard must
+  // key on the token's POSITION as a flag inside the matched segment.
+
+  it("AC-3 BOUNDARY: `--title \"--help\"` is a flag VALUE, not a help flag — still denied on both copies", () => {
+    const vendored = parseHookOutput(
+      runShim(G1_SHIM, {
+        tool_name: "Bash",
+        tool_input: { command: `${LORE_BIN} create spec --title "--help"` },
+        cwd: tmpDir,
+      }).stdout,
+    );
+    expect(vendored.permissionDecision).toBe("deny");
+    expect(vendored.permissionDecisionReason ?? "").toContain("PARENT_REQUIRED");
+
+    const asset = parseHookOutput(
+      runAssetShim({
+        tool_name: "Bash",
+        tool_input: { command: `lore create spec --title "--help"` },
+        cwd: tmpDir,
+      }).stdout,
+    );
+    expect(asset.permissionDecision).toBe("deny");
+    expect(asset.permissionDecisionReason ?? "").toContain("PARENT_REQUIRED");
+  });
+
+  it("AC-3 BOUNDARY: `--content \"-h\"` is a flag VALUE, not a help flag — still denied on both copies", () => {
+    const args = `create spec --parent ${prdSlug} --kind tech --content "-h"`;
+    const vendored = parseHookOutput(
+      runShim(G1_SHIM, {
+        tool_name: "Bash",
+        tool_input: { command: `${LORE_BIN} ${args}` },
+        cwd: tmpDir,
+      }).stdout,
+    );
+    expect(vendored.permissionDecision).toBe("deny");
+    expect(vendored.permissionDecisionReason ?? "").toContain("MISSING_SKELETON");
+
+    const asset = parseHookOutput(
+      runAssetShim({
+        tool_name: "Bash",
+        tool_input: { command: `lore ${args}` },
+        cwd: tmpDir,
+      }).stdout,
+    );
+    expect(asset.permissionDecision).toBe("deny");
+    expect(asset.permissionDecisionReason ?? "").toContain("MISSING_SKELETON");
+  });
+
+  it("AC-3 BOUNDARY: single-quoted `--title '-h'` is a flag VALUE too — still denied (both quote styles blanked)", () => {
+    const result = runShim(G1_SHIM, {
+      tool_name: "Bash",
+      tool_input: { command: `${LORE_BIN} create spec --title '-h'` },
+      cwd: tmpDir,
+    });
+    const hook = parseHookOutput(result.stdout);
+    expect(hook.permissionDecision).toBe("deny");
+    expect(hook.permissionDecisionReason ?? "").toContain("PARENT_REQUIRED");
+  });
+
+  it("AC-3 BOUNDARY: a help flag in a DIFFERENT chain segment does not disarm the create segment", () => {
+    // Segment 2 is the create-spec segment; segment 1's `--help` belongs to
+    // another command entirely and must not be read as this one's flag.
+    const trailing = parseHookOutput(
+      runShim(G1_SHIM, {
+        tool_name: "Bash",
+        tool_input: { command: `echo --help && ${LORE_BIN} create spec --title "Bad Spec"` },
+        cwd: tmpDir,
+      }).stdout,
+    );
+    expect(trailing.permissionDecision).toBe("deny");
+    expect(trailing.permissionDecisionReason ?? "").toContain("PARENT_REQUIRED");
+
+    // …and the mirror image: the create segment comes first, a later segment
+    // carries the help flag.
+    const leading = parseHookOutput(
+      runShim(G1_SHIM, {
+        tool_name: "Bash",
+        tool_input: { command: `${LORE_BIN} create spec --title "Bad Spec" && ${LORE_BIN} --help` },
+        cwd: tmpDir,
+      }).stdout,
+    );
+    expect(leading.permissionDecision).toBe("deny");
+    expect(leading.permissionDecisionReason ?? "").toContain("PARENT_REQUIRED");
+  });
+
+  it("AC-3 BOUNDARY: `--helpful` / `-hh` are not help flags — still denied (token boundary, not prefix)", () => {
+    const result = runShim(G1_SHIM, {
+      tool_name: "Bash",
+      tool_input: { command: `${LORE_BIN} create spec --title Bad --helpful -hh` },
+      cwd: tmpDir,
+    });
+    const hook = parseHookOutput(result.stdout);
+    expect(hook.permissionDecision).toBe("deny");
+    expect(hook.permissionDecisionReason ?? "").toContain("PARENT_REQUIRED");
+  });
+
+  // ── ERROR — the fail-open contract is untouched ──────────────────────────
+
+  it("ERROR: malformed stdin JSON still fails open on the shipped asset copy", () => {
+    const proc = Bun.spawnSync([G1_ASSET_SHIM], {
+      stdin: Buffer.from("{not valid json"),
+      env: {
+        ...process.env,
+        CLAUDE_PROJECT_DIR: "",
+        PATH: `${lorePathDir}:${process.env["PATH"] ?? ""}`,
+      },
+    });
+    expect(proc.exitCode).toBe(0);
+    expect(parseHookOutput(proc.stdout.toString()).permissionDecision).toBe("allow");
+  });
+
+  // ── STATE — LORE_GATE_BYPASS ordering unchanged ──────────────────────────
+
+  it("STATE: LORE_GATE_BYPASS=1 still short-circuits before any help/segment parsing", () => {
+    const result = runShim(
+      G1_SHIM,
+      {
+        tool_name: "Bash",
+        tool_input: { command: `${LORE_BIN} create spec --title "--help"` },
+        cwd: tmpDir,
+      },
+      { LORE_GATE_BYPASS: "1" },
+    );
+    const hook = parseHookOutput(result.stdout);
+    expect(hook.permissionDecision).toBe("allow");
+  });
+});
+
+// ─── Suite: the help allow-path never reaches the gate at all ───────────────
+//
+// Placement proof for AC-1: the guard bails BEFORE payload assembly, so a help
+// invocation costs zero `lore gate` invocations. Asserted with a LOGGING STUB
+// `lore` on PATH (the shipped copy resolves its binary via `command -v lore`),
+// which also supplies the control that makes the empty log meaningful: the same
+// stub logs — and denies — a real no-parent create.
+
+describe("g1 spec-create hook — `--help` bails before invoking the gate", () => {
+  let scratch: string;
+  let stubBinDir: string;
+  let invocationLog: string;
+
+  beforeAll(() => {
+    scratch = makeTempDir("g1-help-stub");
+    // The shipped copy allows untouched unless a `.lore/` corpus sits at
+    // TARGET_CWD; the stub answers the gate call, so no real corpus is needed.
+    mkdirSync(join(scratch, ".lore"), { recursive: true });
+    stubBinDir = makeTempDir("g1-help-stubbin");
+    invocationLog = join(scratch, "lore-invocations.log");
+    writeFileSync(
+      join(stubBinDir, "lore"),
+      `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "${invocationLog}"
+if [ "$1" = "gate" ] && [ "$2" = "spec-create" ]; then
+  echo '[stub] Missing:'
+  echo '- PARENT_REQUIRED'
+  exit 4
+fi
+exit 0
+`,
+    );
+    chmodSync(join(stubBinDir, "lore"), 0o755);
+  });
+
+  afterAll(() => {
+    cleanupDir(scratch);
+    cleanupDir(stubBinDir);
+  });
+
+  function runWithStub(command: string): RunResult {
+    return runShim(
+      G1_ASSET_SHIM,
+      { tool_name: "Bash", tool_input: { command }, cwd: scratch },
+      { CLAUDE_PROJECT_DIR: "", PATH: `${stubBinDir}:${process.env["PATH"] ?? ""}` },
+    );
+  }
+
+  function readInvocations(): string[] {
+    if (!existsSync(invocationLog)) return [];
+    const raw = readFileSync(invocationLog, "utf-8").trim();
+    return raw.length === 0 ? [] : raw.split("\n");
+  }
+
+  it("HAPPY: `lore create spec --help` allows without a single `lore` invocation", () => {
+    rmSync(invocationLog, { force: true });
+    const hook = parseHookOutput(runWithStub("lore create spec --help").stdout);
+    expect(hook.permissionDecision).toBe("allow");
+    expect(readInvocations()).toEqual([]);
+  });
+
+  it("CONTROL: the same stub IS reached (and denies) for a real no-parent create", () => {
+    rmSync(invocationLog, { force: true });
+    const hook = parseHookOutput(runWithStub(`lore create spec --title "Bad Spec"`).stdout);
+    expect(hook.permissionDecision).toBe("deny");
+    expect(hook.permissionDecisionReason ?? "").toContain("PARENT_REQUIRED");
+    const invocations = readInvocations();
+    expect(invocations.length).toBeGreaterThan(0);
+    expect(invocations.some((line) => line.startsWith("gate spec-create"))).toBe(true);
+  });
+});
+
+// ─── Suite: AC-4 — g2/g3/g4 immunity is PINNED, not assumed ────────────────
+//
+// The defect is g1-ONLY, and these three cases exist so that a future
+// matcher-unification refactor cannot quietly reintroduce it in three more
+// places. WHY they need no help guard of their own — MEASURED, not assumed:
+// each of g2/g3/g4 matches `lore <verb> <token>` and captures that token as the
+// DOC ID, so `--help` IS captured (the doc id is not empty — the shape's
+// "missing id" branch never runs). They then run a doc-TYPE pre-check,
+// `lore get --help --json`, which citty answers with the `get` usage block at
+// exit 0 (measured 2026-08-01) — no `.data.doc.type` — so the type never equals
+// spec/plan/task and all three fail OPEN before reaching their gate. g1 alone
+// needs an explicit guard because its predicates read straight off argv and
+// require no resolvable doc id, so nothing upstream of the gate can absorb a
+// help invocation.
+
+describe("g2/g3/g4 hooks — own `--help` invocations are already allowed (AC-4 immunity pin)", () => {
+  let tmpDir: string;
+
+  beforeAll(() => {
+    tmpDir = makeTempDir("g234-help");
+    initCorpus(tmpDir);
+  });
+
+  afterAll(() => cleanupDir(tmpDir));
+
+  it("REGRESSION: g2 allows `lore approve --help`", () => {
+    const result = runShim(G2_SHIM, {
+      tool_name: "Bash",
+      tool_input: { command: `${LORE_BIN} approve --help` },
+      cwd: tmpDir,
+    });
+    expect(parseHookOutput(result.stdout).permissionDecision).toBe("allow");
+  });
+
+  it("REGRESSION: g3 allows `lore set --help`", () => {
+    const result = runShim(G3_SHIM, {
+      tool_name: "Bash",
+      tool_input: { command: `${LORE_BIN} set --help` },
+      cwd: tmpDir,
+    });
+    expect(parseHookOutput(result.stdout).permissionDecision).toBe("allow");
+  });
+
+  it("REGRESSION: g4 allows `lore claim --help`", () => {
+    const result = runShim(G4_SHIM, {
+      tool_name: "Bash",
+      tool_input: { command: `${LORE_BIN} claim --help` },
+      cwd: tmpDir,
+    });
+    expect(parseHookOutput(result.stdout).permissionDecision).toBe("allow");
   });
 });

@@ -115,6 +115,67 @@ is_command_position_match() {
     | grep -Eq "^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*${pattern}"
 }
 
+# ─── task-g1-spec-create-gate-denies-lore-create-spec-help-with: help is read-only ───
+# `lore create spec --help` writes NOTHING — citty prints the usage block and
+# exits 0 (measured 2026-08-01) — but the D4 trigger above tests COMMAND
+# POSITION only, so a help invocation reached predicate evaluation with an empty
+# payload and was denied with PARENT_REQUIRED + MISSING_SKELETON: a deny that
+# cannot possibly be measuring anything, and one that teaches its operator to
+# read this gate's denials as noise (recorded 2026-07-24 as finding 1 of the
+# knowledge doc `g1 hook false denies: help flag gated, unparseable content
+# flag, backtick heredoc trigger`).
+#
+# g1 is the ONLY one of the four gate hooks that needs this guard, measured not
+# assumed: g2/g3/g4 capture their positional token as the DOC ID, so `--help`
+# becomes an unresolvable id whose `lore get --help --json` type pre-check
+# answers with citty's usage block (exit 0, no `.data.doc.type`) — all three
+# already fail OPEN before reaching their gate. g1's predicates read straight
+# off argv and need no resolvable doc, so nothing upstream absorbs a help
+# invocation. Do NOT "unify" a help guard into the other three; pin their
+# immunity with tests instead.
+#
+# ⛔ The test is POSITIONAL, not a substring scan of the command string: a
+# substring test would hand any caller a one-token disarm through a flag VALUE
+# that merely SPELLS the flag (`--title "--help"`, `--content "-h"`). Quoted
+# values (both styles) are blanked first, then the surviving words must contain
+# an EXACT `--help` or `-h` token. Only those two forms count, because they are
+# the only two citty accepts: `--help=1` is rejected as an unknown option (exit
+# 2, no write — measured), and `--helpful` / `-hh` are unrelated flags. Scope is
+# the MATCHED SEGMENT, never the whole command, so a help flag belonging to a
+# neighbouring chain segment cannot disarm the create segment.
+#
+# Unparseable input keeps the pre-existing DENY (deliberately fail-closed here,
+# unlike this file's other anomaly paths): an unbalanced quote leaves raw text
+# in place, and the worst case is a help flag that was never one. The mirror
+# risk — appending `--help` to smuggle a real create past this shim — buys
+# nothing: with a genuine help flag present citty prints usage and writes
+# NOTHING, and the service-layer GateEnforcer re-runs these same predicates on
+# every real write regardless.
+
+# $1 = raw Bash command string. $2 = the command-position pattern that matched.
+# Prints the LAST matching segment (same last-match convention as
+# build_chain_block_banner below and the greedy flag-extraction seds further
+# down, all of which resolve to the segment the gate actually runs against);
+# empty when nothing matches. ⛔ Keep the split expression and the anchor
+# identical to is_command_position_match above — SPEC-050 D4 semantics live in
+# three walkers in this file and drift between them is silent.
+extract_matched_segment() {
+  local cmd="$1" pattern="$2"
+  printf '%s' "$cmd" \
+    | sed -E 's/(\&\&|\|\||;|\||\$\(|`)/\n/g' \
+    | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' \
+    | grep -E "^([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*${pattern}" \
+    | tail -n 1
+}
+
+# $1 = ONE command segment. Returns success iff that segment carries a help FLAG
+# token (`--help` or `-h`) — see the positional-not-substring note above.
+segment_requests_help() {
+  local unquoted
+  unquoted="$(printf '%s' "$1" | sed -E 's/"[^"]*"/""/g' | sed -E "s/'[^']*'/''/g")"
+  printf '%s' "$unquoted" | grep -Eq '(^|[[:space:]])(--help|-h)([[:space:]]|$)'
+}
+
 # ─── task-gate-hook-denies-the-whole-chained-bash-command-when-any: chain-block banner ───
 # PreToolUse hooks are all-or-nothing per Bash tool call — there is no way to let an
 # earlier chain segment execute and block only a LATER one that trips this gate. Left
@@ -286,6 +347,14 @@ case "$TOOL_NAME" in
     if ! is_command_position_match "$COMMAND" "$CREATE_SPEC_PATTERN"; then
       allow
     fi
+
+    # Read-only help invocation → allow BEFORE any flag extraction, payload
+    # assembly or gate spawn (a help call has nothing to measure, so it must
+    # cost zero gate invocations). See segment_requests_help above.
+    if segment_requests_help "$(extract_matched_segment "$COMMAND" "$CREATE_SPEC_PATTERN")"; then
+      allow
+    fi
+
     CHAIN_MATCH_PATTERN="$CREATE_SPEC_PATTERN"
     CHAIN_COMMAND="$COMMAND"
 
