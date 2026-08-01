@@ -511,7 +511,22 @@ describe("attestationFloor — REGRESSION: a pure-planning plan (no evidence any
   // with two audited recoveries: declare via `lore scope add`, or take a typed
   // plan-level attestation exemption.
   it("a plan whose evidence-bearing tasks declare NO ac_scope is DENIED — an undeclared claim is not an excused one", async () => {
-    const { corpusService } = makeHarness(attestationConfig());
+    // reason: spec-declaring-ac-scope-is-required-at-task-creation-so-the — this
+    // scenario's entire point is a task that NEVER declared `ac_scope` reaching
+    // `plan-close` with real evidence attached (the pre-declaration "legacy
+    // shape"). That state is now refused at `task-create` time by the very gate
+    // this spec introduced, so constructing it here needs `task-create`
+    // disabled for THIS harness only — `plan-close` (the checkpoint actually
+    // under test) stays on its real default (enabled, not overridden), so the
+    // DENIED assertion below still exercises the genuine gate, not a
+    // predicate-only shortcut. Do NOT "fix" this by adding `ac_scope` to the
+    // fixture task — that erases the exact precondition
+    // (`gate:plan-close:attestation-scope-undeclared`) this test exists to pin.
+    const config = {
+      project: { name: "t", author: "t" },
+      workflow: { gates: { "task-create": { enabled: false } } },
+    } as unknown as LoreConfig;
+    const { corpusService } = makeHarness(config);
     const prd = await makePrd(corpusService);
     const spec = await makeSpecWithAc(corpusService, prd, [AC_X1]);
     const plan = await makeApprovedPlanUnderSpec(corpusService, spec);
