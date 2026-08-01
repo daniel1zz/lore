@@ -51,7 +51,7 @@ bun run test:vitest       # bunx vitest run — covers non-bun:sqlite files
 bun run test:bun          # cd packages/lore && bun test .bun.test
 bun run test              # both runners in sequence
 bun run test:changed [<base>]  # deterministic worktree oracle: transitive reverse-dep selection across BOTH runners (default base: merge-base main HEAD); --list to preview
-                               # binary-consumer escape hatch covers BOTH CLI-spawn shapes — compiled (dist/lore|LORE_BIN) and source (INDEX_TS) — so tests/integration/cli/* IS selected; `bun run build` runs first only for the compiled kind. ⛔ Residuals: selection reads CONTENT MARKERS (a subprocess test naming none is invisible), and the file universe is `packages/**` — ALL of `scripts/**`, incl. `scripts/tests/*.test.ts`, is unseen even by changed-test selection
+                               # binary-consumer escape hatch covers BOTH CLI-spawn shapes — compiled (dist/lore|LORE_BIN) and source (INDEX_TS); universe spans `packages/**` + `scripts/**`, so `tests/integration/cli/*` and `scripts/tests/*` ARE selected; `bun run build` runs first only for the compiled kind. ⛔ Residual: selection reads CONTENT MARKERS, so a subprocess test naming none of them is invisible
 
 # Run a single vitest test file
 bunx vitest run packages/lore/tests/unit/service/corpus-service.test.ts
