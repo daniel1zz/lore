@@ -22,6 +22,17 @@
  *       (read-only context) but still renders the chip summary
  *   REGRESSION:
  *     - a fail-count > 0 renders the destructive "fail" status chip
+ *
+ * Plan declared-scope conjunct chip (task-adjudicationbar-s-compact-status-
+ * chip-still-derives-from — the compact chip used to derive its status from
+ * `meets_floor` ALONE, so it disagreed with `PlanAttestationPanel`'s badge on
+ * a scope-undeclared plan):
+ *   HAPPY (this was the exact disagreement, now fixed):
+ *     - a scope-undeclared plan panel (ratio conjunct alone passing) renders
+ *       the neutral-outline "scope undeclared" chip, never the passing chip
+ *   CONTROL (AC #3):
+ *     - a plan that genuinely meets both conjuncts still renders the passing
+ *       "pass" chip on the compact bar (not turned unconditionally negative)
  */
 
 import "@testing-library/jest-dom/vitest";
@@ -85,6 +96,38 @@ const taskPanelWithFail: EvidencePanelProjection = {
 };
 
 const otherPanel: EvidencePanelProjection = { doc_type: "other" };
+
+/**
+ * A non-vacuous plan panel (`total_evidence > 0`) whose RATIO conjunct alone
+ * passes but whose declared-scope conjunct is UNRESOLVED — the EXACT fixture
+ * shape `PlanAttestationPanel.test.tsx`'s "external oracle" test uses, which
+ * renders that panel's badge as "scope undeclared". This is the fixture that
+ * used to make the compact chip disagree with the panel
+ * (task-adjudicationbar-s-compact-status-chip-still-derives-from).
+ */
+const planPanelScopeUndeclared: EvidencePanelProjection = {
+  doc_type: "plan",
+  attestation: {
+    total_evidence: 4,
+    attested: 2,
+    ratio: 0.5,
+    min_ratio: 0.5,
+    claimed_ac_coverage: { exercised_acs: [], unattested_acs: [], meets_coverage: true },
+    meets_floor: true,
+    zero_attested_tasks: [],
+  },
+  tasks: [],
+  declared_scope_coverage: { declared_acs: [], unattested_acs: [], scope_undeclared: true, meets_coverage: true },
+  declared_scope_verdict: { notApplicable: true, reason: "scope-undeclared", referent: "plan-x" },
+};
+
+/** Pairs with {@link planPanelScopeUndeclared} — the CONTROL fixture: a plan
+ *  that genuinely resolves BOTH conjuncts to a pass. */
+const planPanelMeetsFloor: EvidencePanelProjection = {
+  ...planPanelScopeUndeclared,
+  declared_scope_coverage: { declared_acs: ["AC-1"], unattested_acs: [], scope_undeclared: false, meets_coverage: true },
+  declared_scope_verdict: { ok: true },
+};
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -199,6 +242,31 @@ describe("AdjudicationBar", () => {
       await user.click(screen.getByRole("button", { name: "Approve" }));
 
       expect(mockedApprove).toHaveBeenCalledWith("acme", "01HTASK00000000000000000001", {});
+    });
+  });
+
+  describe("plan declared-scope conjunct chip (task-adjudicationbar-s-compact-status-chip-still-derives-from)", () => {
+    it("HAPPY (this was the exact disagreement, now fixed): renders the neutral 'scope undeclared' chip, never a passing chip, for a plan whose declared scope is undeclared", () => {
+      render(<AdjudicationBar doc={makeDoc({ type: "plan" })} panel={planPanelScopeUndeclared} onMutated={vi.fn()} />);
+
+      const chip = screen.getByText("scope undeclared");
+      expect(chip).toBeInTheDocument();
+      // reason: outline variant renders neither the destructive nor secondary
+      // classes — the same neutral styling PlanAttestationPanel's "scope
+      // undeclared" badge uses, distinguishing it from a real pass/fail chip.
+      expect(chip.className).not.toMatch(/destructive/);
+      expect(chip.className).not.toMatch(/bg-secondary/);
+      expect(screen.queryByText("pass")).not.toBeInTheDocument();
+      expect(screen.queryByText("fail")).not.toBeInTheDocument();
+    });
+
+    it("CONTROL (AC #3, guards against an unconditionally-negative chip): renders the passing 'pass' chip for a plan that genuinely meets both conjuncts", () => {
+      render(<AdjudicationBar doc={makeDoc({ type: "plan" })} panel={planPanelMeetsFloor} onMutated={vi.fn()} />);
+
+      const chip = screen.getByText("pass");
+      expect(chip).toBeInTheDocument();
+      expect(chip.className).toMatch(/bg-secondary/);
+      expect(screen.queryByText("scope undeclared")).not.toBeInTheDocument();
     });
   });
 });

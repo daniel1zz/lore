@@ -16,6 +16,14 @@
  *     from; this component computes no coverage/attestation math itself
  *     (AC-075-10-adjacent discipline, even though this file isn't the
  *     projection-service the AC's grep oracle targets).
+ *   - For a `plan` doc, `summary.status` can be `"scope-undeclared"` — a
+ *     GENUINELY THIRD state (task-adjudicationbar-s-compact-status-chip-
+ *     still-derives-from), the SAME one `PlanAttestationPanel`'s badge
+ *     renders, over the SAME `meets_floor` + `declared_scope_verdict` facts.
+ *     `STATUS_LABEL`/`statusVariant` render it as its own neutral-outline
+ *     "scope undeclared" chip — never collapsed into the "pass" chip (the
+ *     defect this fix removes) nor the "fail" chip (an escalation this
+ *     component does not attempt).
  *   - Approve/reject reuse `apiApproveDoc`/`apiRejectDoc` (SPEC-033 F1) with
  *     an optional `calibrationNote` — the EXACT write semantics and
  *     warnings-toast handling `TriageQueue.tsx`'s inline adjudicate block
@@ -33,11 +41,33 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import type { DocRecord, EvidencePanelProjection } from "@lore/core";
+import type { AdjudicationBarSummary, DocRecord, EvidencePanelProjection } from "@lore/core";
 import { summarizeForAdjudicationBar } from "@lore/core";
 import { Badge } from "@/components/ui/badge";
 import { ProjectIdentityLabel } from "@/components/ProjectIdentityLabel";
 import { apiApproveDoc, apiRejectDoc, DashboardApiError } from "@/api/mutations";
+
+/** The compact chip's rendered badge variant per {@link AdjudicationBarSummary.status}.
+ *  `"scope-undeclared"` renders `"outline"` — the SAME neutral variant
+ *  `PlanAttestationPanel`'s "scope undeclared" badge uses, never the
+ *  destructive/secondary variant of a genuine fail/pass. */
+function statusVariant(status: AdjudicationBarSummary["status"]): "secondary" | "destructive" | "outline" {
+  if (status === "fail") return "destructive";
+  if (status === "pass") return "secondary";
+  return "outline";
+}
+
+/** Human-readable chip text per {@link AdjudicationBarSummary.status} — the ONE
+ *  definition site (mirrors `PlanAttestationPanel`'s `BADGE_COPY`). `"scope-
+ *  undeclared"` renders as the space-separated "scope undeclared", the EXACT
+ *  same copy the panel's badge uses, so a reader sees identical wording on
+ *  both surfaces (task-adjudicationbar-s-compact-status-chip-still-derives-from). */
+const STATUS_LABEL: Record<AdjudicationBarSummary["status"], string> = {
+  pass: "pass",
+  fail: "fail",
+  none: "none",
+  "scope-undeclared": "scope undeclared",
+};
 
 export interface AdjudicationBarProps {
   /** The full `DocRecord` (`GET /api/docs/:id`) — gates rendering on `status === "in-review"`. */
@@ -53,13 +83,6 @@ export interface AdjudicationBarProps {
    * `HistoryTab`'s established gating convention.
    */
   onMutated?: () => void;
-}
-
-/** Badge color for the compact fail-first status chip. */
-function statusVariant(status: "pass" | "fail" | "none"): "secondary" | "destructive" | "outline" {
-  if (status === "fail") return "destructive";
-  if (status === "pass") return "secondary";
-  return "outline";
 }
 
 /**
@@ -108,7 +131,7 @@ export function AdjudicationBar({
     <div aria-label="Adjudication" className="rounded-lg border p-3 space-y-2 bg-muted/30">
       <div className="flex items-center gap-1.5 flex-wrap" aria-label="Evidence summary">
         <Badge variant={statusVariant(summary.status)} className="text-xs">
-          {summary.status}
+          {STATUS_LABEL[summary.status]}
         </Badge>
         <Badge variant="outline" className="text-xs">
           {summary.evidence_count} evidence
