@@ -44,11 +44,17 @@
  *     `STORE_ERROR` is this codebase's general infra-failure code (see
  *     `migration-service.ts`'s "cannot read source directory" precedent) — no
  *     SPEC-039-specific LoreError variant exists (core is out of this task's scope).
- *   - `outputTail` is stdout+stderr CONCATENATED then tail-truncated to the last 4000
- *     chars (matches `evidenceEntrySchema.output_tail`'s cap) via `@lore/core`'s
- *     code-point-safe `tailChars` (BUG-001 fix, `packages/core/src/truncate.ts`) — the
- *     SAME helper `adapters/cli/commands/evidence.ts` and `commands/handoff.ts` use,
- *     never a locally re-implemented copy.
+ *   - `outputTail` is stdout+stderr CONCATENATED then windowed to at most 4000 chars
+ *     (matches `evidenceEntrySchema.output_tail`'s cap) via `verify-spawn.ts`'s pure
+ *     `selectOutputTailWindow` (spec-evidence-output-tail-integrity-a-self-reported-non-pass
+ *     §D4) — the plain stream-END tail UNLESS `spec.acRef` is set and that id occurs
+ *     earlier in the stream than the plain tail's own window, in which case the window
+ *     is taken around the id's LAST occurrence instead, so a run whose captured output
+ *     exceeds the cap after the AC's own result line still stores a tail that witnesses
+ *     it. `selectOutputTailWindow` itself is built from `@lore/core`'s code-point-safe
+ *     `tailChars`/`headChars` (BUG-001 fix, `packages/core/src/truncate.ts`) — the SAME
+ *     helpers `adapters/cli/commands/evidence.ts` and `commands/handoff.ts` use, never a
+ *     locally re-implemented copy.
  *   - Never throws. Every path returns `Result<VerifyExecutionResult, LoreError>`.
  *   - `spec.env` (SPEC-039 §M2, when present) REPLACES the spawned process's
  *     environment entirely — `Bun.spawn({ env })` does not merge with `process.env`.
@@ -60,8 +66,9 @@
  * Source: SPEC-039 §2 D6; §3; §4 AC-VRF-5, AC-VRF-6; §M2 (env allowlist)
  */
 
-import { err, ok, tailChars } from "@lore/core";
+import { err, ok } from "@lore/core";
 import type { LoreError, Result } from "@lore/core";
+import { selectOutputTailWindow } from "./verify-spawn.js";
 import type { VerifySpawnSpec, VerifyExecutionResult } from "./verify-spawn.js";
 
 export type { VerifyExecutionResult } from "./verify-spawn.js";
@@ -147,7 +154,11 @@ export async function executeVerifySpawnSpec(
   if (killTimer !== undefined) clearTimeout(killTimer);
 
   const durationMs = Math.round(performance.now() - t0);
-  const outputTail = tailChars(stdout + stderr, OUTPUT_TAIL_MAX_CHARS);
+  // SPEC "evidence output_tail integrity" §D4 — prefer a window around spec.acRef's
+  // LAST occurrence over the literal stream end (see selectOutputTailWindow's own
+  // JSDoc for the full precedence: absent/not-found/already-visible all fall back to
+  // the plain stream tail unconditionally).
+  const outputTail = selectOutputTailWindow(stdout + stderr, spec.acRef, OUTPUT_TAIL_MAX_CHARS);
 
   return ok({ exitCode, outputTail, durationMs, timedOut });
 }

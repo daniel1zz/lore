@@ -648,10 +648,16 @@ export class VerifyRunnerService {
       // not unconditionally `this.config.repoRoot` (the pre-SPEC-063 corpus-root
       // constant that silently mis-executed against the main checkout when the
       // caller was actually standing inside a linked worktree).
+      // reason: `acRef` is gated on the SAME `recordAcRef` flag the `ac_ref` evidence
+      // field below is (spec-evidence-output-tail-integrity-a-self-reported-non-pass
+      // §D4) — the runner should only prefer an AC-witnessing output_tail window when
+      // the resulting row will actually carry that ac_ref, keeping the two in lockstep
+      // rather than letting the tail witness an id the row itself doesn't declare.
       const spawnSpec = buildVerifySpawnSpec(criterion, {
         repoRoot: resolvedExecutionRoot.root,
         defaultTimeoutMs: this.config.defaultTimeoutMs,
         ...(resolvedEnv !== undefined ? { env: resolvedEnv } : {}),
+        ...(recordAcRef ? { acRef: criterion.id } : {}),
       });
 
       const execResult = await this.executor(spawnSpec);
