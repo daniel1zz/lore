@@ -44,6 +44,34 @@
  *      argument rather than silently ignoring them.
  *   9. REGRESSION — `formatAccounting` always prints both runner count
  *      lines, even when both are zero (never omits a runner's line).
+ *
+ * `classifyBinaryConsumer` / `isBinaryConsumerCandidate` (task
+ * `task-test-changed-cannot-see-the-whole-integration-cli-tier-the`, AC-1/
+ * AC-4): the binary-consumer predicate widened from `.bun.test.ts`-only to
+ * ANY `*.test.ts`/`*.test.tsx` file, and now tells apart a "compiled"
+ * (`dist/lore`/`LORE_BIN`) spawn from a "source" (`INDEX_TS`) spawn so the
+ * step-4 pre-build gate (AC-2) can key on the compiled case only. Covered in
+ * a dedicated describe block below:
+ *   - HAPPY: a vitest `.test.ts` spawning the entry SOURCE via `INDEX_TS` IS
+ *     a candidate, kind `"source"` — the exact incident shape
+ *     (`verify.test.ts` never imports the changed module, it subprocess-
+ *     spawns `bun run <INDEX_TS>`).
+ *   - REGRESSION: a `.bun.test.ts` spawning the COMPILED binary (`dist/lore`)
+ *     is still a candidate, kind `"compiled"` (pre-existing behaviour, must
+ *     not regress).
+ *   - NEGATIVE: a plain test file with no spawn marker at all is not a
+ *     candidate.
+ *   - BOUNDARY: a non-test `.ts` SOURCE file containing the marker string
+ *     is NOT a candidate — `isTestFile` gates entry regardless of content.
+ *   - STATE (design-choice, asserted either way): a marker appearing only
+ *     inside a comment still counts — this regex scan is no more
+ *     comment-aware than the import-specifier scan above it, and this suite
+ *     pins that as a deliberate, tested choice rather than an accident.
+ *   - AC-2: `selectAffectedTests` + `formatAccounting` together prove the
+ *     build-first decision is carried on the selection data and observable
+ *     from `--list`-shaped output — a selection with only source-kind
+ *     binary-consumers prints `build-first: no`; one with >=1 compiled-kind
+ *     prints `build-first: yes`.
  */
 
 import { describe, it, expect, beforeAll } from "vitest";
@@ -59,10 +87,12 @@ type FileMap = ReadonlyMap<string, string>;
 type AliasMap = Readonly<Record<string, string>>;
 type SelectionReason = "changed-test" | "transitive" | "binary-consumer";
 type TestRunner = "vitest" | "bun";
+type BinaryConsumerKind = "compiled" | "source";
 interface SelectedFile {
   path: string;
   reason: SelectionReason;
   runner: TestRunner;
+  binaryConsumerKind?: BinaryConsumerKind;
 }
 interface SelectionResult {
   selected: readonly SelectedFile[];
@@ -86,6 +116,8 @@ type ResolveImportSpecifierFn = (specifier: string, fromFile: string, fileMap: F
 type BuildImportGraphFn = (fileMap: FileMap, aliasMap: AliasMap) => ImportGraph;
 type IsTestFileFn = (path: string) => boolean;
 type IsBunTestFileFn = (path: string) => boolean;
+type ClassifyBinaryConsumerFn = (path: string, content: string) => BinaryConsumerKind | undefined;
+type IsBinaryConsumerCandidateFn = (path: string, content: string) => boolean;
 type SelectAffectedTestsFn = (params: { changedFiles: readonly string[]; fileMap: FileMap; aliasMap: AliasMap }) => SelectionResult;
 type FormatAccountingFn = (selection: SelectionResult) => string;
 type ParseArgsFn = (argv: readonly string[]) => ChangedTestsCliArgs;
@@ -104,6 +136,8 @@ let resolveImportSpecifier: ResolveImportSpecifierFn;
 let buildImportGraph: BuildImportGraphFn;
 let isTestFile: IsTestFileFn;
 let isBunTestFile: IsBunTestFileFn;
+let classifyBinaryConsumer: ClassifyBinaryConsumerFn;
+let isBinaryConsumerCandidate: IsBinaryConsumerCandidateFn;
 let selectAffectedTests: SelectAffectedTestsFn;
 let formatAccounting: FormatAccountingFn;
 let parseArgs: ParseArgsFn;
@@ -116,6 +150,8 @@ beforeAll(async () => {
   buildImportGraph = mod.buildImportGraph;
   isTestFile = mod.isTestFile;
   isBunTestFile = mod.isBunTestFile;
+  classifyBinaryConsumer = mod.classifyBinaryConsumer;
+  isBinaryConsumerCandidate = mod.isBinaryConsumerCandidate;
   selectAffectedTests = mod.selectAffectedTests;
   formatAccounting = mod.formatAccounting;
   parseArgs = mod.parseArgs;
@@ -137,6 +173,66 @@ describe("changed-tests selector — isTestFile / isBunTestFile", () => {
   it("HAPPY: only .bun.test.ts is a bun test file", () => {
     expect(isBunTestFile("packages/lore/tests/unit/foo.bun.test.ts")).toBe(true);
     expect(isBunTestFile("packages/lore/tests/unit/foo.test.ts")).toBe(false);
+  });
+});
+
+describe("changed-tests selector — classifyBinaryConsumer / isBinaryConsumerCandidate (AC-1/AC-4)", () => {
+  it("HAPPY: a vitest .test.ts spawning the entry SOURCE via the INDEX_TS marker IS a candidate, kind 'source' — the exact incident shape", () => {
+    const path = "packages/lore/tests/integration/cli/verify.test.ts";
+    const content = [
+      'import { spawnSync } from "child_process";',
+      'const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");',
+      'const result = spawnSync("bun", ["run", INDEX_TS, "verify", planId]);',
+    ].join("\n");
+
+    expect(classifyBinaryConsumer(path, content)).toBe("source");
+    expect(isBinaryConsumerCandidate(path, content)).toBe(true);
+  });
+
+  it("REGRESSION: a .bun.test.ts spawning the COMPILED binary (dist/lore) is still a candidate, kind 'compiled'", () => {
+    const path = "packages/lore/tests/e2e/cli-binary.bun.test.ts";
+    const content = 'const LORE_BIN = join(REPO_ROOT, "dist", "lore");\nBun.spawnSync([LORE_BIN, "init"]);';
+
+    expect(classifyBinaryConsumer(path, content)).toBe("compiled");
+    expect(isBinaryConsumerCandidate(path, content)).toBe(true);
+  });
+
+  it("REGRESSION: a .bun.test.ts spawning via the LORE_BIN identifier alone (no literal 'dist/lore' substring) is still a candidate, kind 'compiled'", () => {
+    const path = "packages/lore/tests/e2e/other-binary.bun.test.ts";
+    const content = 'const proc = Bun.spawnSync([LORE_BIN, "status"]);';
+
+    expect(classifyBinaryConsumer(path, content)).toBe("compiled");
+  });
+
+  it("NEGATIVE: a plain test file with no spawn marker at all is not a candidate", () => {
+    const path = "packages/lore/tests/unit/service/corpus-service.test.ts";
+    const content = 'import { CorpusService } from "../../../src/service/corpus-service.js";\nexpect(1).toBe(1);';
+
+    expect(classifyBinaryConsumer(path, content)).toBeUndefined();
+    expect(isBinaryConsumerCandidate(path, content)).toBe(false);
+  });
+
+  it("BOUNDARY: a non-test .ts SOURCE file containing the marker string is NOT a candidate — isTestFile gates entry regardless of content", () => {
+    const path = "packages/lore/src/adapters/cli/build-info.ts";
+    const content = 'export const BIN_PATH = "dist/lore";\nexport const INDEX_TS = "src/index.ts";';
+
+    expect(isTestFile(path)).toBe(false);
+    expect(classifyBinaryConsumer(path, content)).toBeUndefined();
+    expect(isBinaryConsumerCandidate(path, content)).toBe(false);
+  });
+
+  it("STATE (design choice, asserted either way): a marker appearing only inside a comment still counts — this scan is not comment-aware, matching the pre-existing import-specifier scan's own limitation", () => {
+    const path = "packages/lore/tests/unit/scripts/doc-comment-only.test.ts";
+    const content = "// this test used to spawn INDEX_TS directly but no longer does\nexpect(1).toBe(1);";
+
+    expect(classifyBinaryConsumer(path, content)).toBe("source");
+  });
+
+  it("HAPPY: the COMPILED marker takes precedence when a file's content matches both markers", () => {
+    const path = "packages/lore/tests/integration/cli/both-markers.test.ts";
+    const content = 'const INDEX_TS = "src/index.ts";\nconst LORE_BIN = "dist/lore";';
+
+    expect(classifyBinaryConsumer(path, content)).toBe("compiled");
   });
 });
 
@@ -271,7 +367,12 @@ describe("changed-tests selector — selectAffectedTests", () => {
     });
 
     expect(result.selected).toEqual([
-      { path: "packages/lore/tests/e2e/cli-binary.bun.test.ts", reason: "binary-consumer", runner: "bun" },
+      {
+        path: "packages/lore/tests/e2e/cli-binary.bun.test.ts",
+        reason: "binary-consumer",
+        runner: "bun",
+        binaryConsumerKind: "compiled",
+      },
     ]);
 
     // a packages/core/src change ALSO triggers binary-consumer inclusion (not just packages/lore/src).
@@ -284,6 +385,37 @@ describe("changed-tests selector — selectAffectedTests", () => {
       aliasMap: ALIAS_MAP,
     });
     expect(resultFromCore.selected.map((f) => f.path)).toContain("packages/lore/tests/e2e/cli-binary.bun.test.ts");
+  });
+
+  it("4b. HAPPY (AC-1/AC-5 incident shape): a vitest .test.ts source-entry spawner (INDEX_TS marker) is selected as binary-consumer, kind 'source', with zero import relationship — the exact verify.test.ts shape that was previously invisible", () => {
+    const fileMap: FileMap = new Map([
+      ["packages/lore/src/service/verify-runner-service.ts", "export const VERIFY = 1;"],
+      [
+        "packages/lore/tests/integration/cli/verify.test.ts",
+        [
+          'import { spawnSync } from "child_process";',
+          'const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");',
+          '// never imports verify-runner-service.ts — reaches it by subprocess spawn',
+          'spawnSync("bun", ["run", INDEX_TS, "verify", planId]);',
+        ].join("\n"),
+      ],
+      ["packages/lore/tests/unit/other/unrelated.test.ts", "// no spawn marker here, no import relation"],
+    ]);
+
+    const result = selectAffectedTests({
+      changedFiles: ["packages/lore/src/service/verify-runner-service.ts"],
+      fileMap,
+      aliasMap: ALIAS_MAP,
+    });
+
+    expect(result.selected).toEqual([
+      {
+        path: "packages/lore/tests/integration/cli/verify.test.ts",
+        reason: "binary-consumer",
+        runner: "vitest",
+        binaryConsumerKind: "source",
+      },
+    ]);
   });
 
   it("5. HAPPY: @lore/core alias resolution participates in the transitive BFS", () => {
@@ -324,7 +456,7 @@ describe("changed-tests selector — selectAffectedTests", () => {
     expect(formatAccounting(result)).toMatch(/WARNING:/);
   });
 
-  it("7. STATE: a file that is both a changed test AND a binary-consumer keeps reason changed-test (highest precedence)", () => {
+  it("7. STATE: a file that is both a changed test AND a binary-consumer keeps reason changed-test (highest precedence), but STILL carries its binaryConsumerKind (AC-2 — the build-first decision must not depend on WHY a file was selected)", () => {
     const fileMap: FileMap = new Map([
       ["packages/lore/src/index.ts", "export const ENTRY = 1;"],
       [
@@ -340,7 +472,12 @@ describe("changed-tests selector — selectAffectedTests", () => {
     });
 
     expect(result.selected).toEqual([
-      { path: "packages/lore/tests/e2e/cli-binary.bun.test.ts", reason: "changed-test", runner: "bun" },
+      {
+        path: "packages/lore/tests/e2e/cli-binary.bun.test.ts",
+        reason: "changed-test",
+        runner: "bun",
+        binaryConsumerKind: "compiled",
+      },
     ]);
   });
 
@@ -431,5 +568,68 @@ describe("changed-tests selector — formatAccounting", () => {
     expect(output).toMatch(/bun: selected 1/);
     expect(output).toMatch(/a\.test\.ts \(changed-test\)/);
     expect(output).toMatch(/b\.bun\.test\.ts \(transitive\)/);
+  });
+
+  it("AC-2/AC-5: build-first is observable and reads 'no' when the selection contains ONLY source-kind binary-consumers (no compiled spawner present)", () => {
+    const output = formatAccounting({
+      selected: [
+        {
+          path: "packages/lore/tests/integration/cli/verify.test.ts",
+          reason: "binary-consumer",
+          runner: "vitest",
+          binaryConsumerKind: "source",
+        },
+      ],
+      zeroSelectionWarning: false,
+    });
+    expect(output).toMatch(/^build-first: no$/m);
+  });
+
+  it("AC-2/AC-5: build-first is observable and reads 'yes' (with a count) when >=1 compiled-kind binary-consumer is selected, even alongside source-kind ones", () => {
+    const output = formatAccounting({
+      selected: [
+        {
+          path: "packages/lore/tests/integration/cli/verify.test.ts",
+          reason: "binary-consumer",
+          runner: "vitest",
+          binaryConsumerKind: "source",
+        },
+        {
+          path: "packages/lore/tests/e2e/cli-binary.bun.test.ts",
+          reason: "binary-consumer",
+          runner: "bun",
+          binaryConsumerKind: "compiled",
+        },
+      ],
+      zeroSelectionWarning: false,
+    });
+    expect(output).toMatch(/^build-first: yes \(1 compiled binary-consumer file\(s\) selected\)$/m);
+  });
+});
+
+describe("changed-tests selector — end-to-end incident control (AC-5): selectAffectedTests + formatAccounting together over the real verify.test.ts shape", () => {
+  it("a change to verify-runner-service.ts selects verify.test.ts as binary-consumer/source, and the printed accounting shows build-first: no for that selection alone", () => {
+    const fileMap: FileMap = new Map([
+      ["packages/lore/src/service/verify-runner-service.ts", "export const VERIFY = 1;"],
+      [
+        "packages/lore/tests/integration/cli/verify.test.ts",
+        [
+          'import { spawnSync } from "child_process";',
+          'const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");',
+          'spawnSync("bun", ["run", INDEX_TS, "verify", planId]);',
+        ].join("\n"),
+      ],
+    ]);
+
+    const result = selectAffectedTests({
+      changedFiles: ["packages/lore/src/service/verify-runner-service.ts"],
+      fileMap,
+      aliasMap: ALIAS_MAP,
+    });
+    const output = formatAccounting(result);
+
+    expect(result.selected.map((f) => f.path)).toContain("packages/lore/tests/integration/cli/verify.test.ts");
+    expect(output).toContain("packages/lore/tests/integration/cli/verify.test.ts (binary-consumer)");
+    expect(output).toMatch(/^build-first: no$/m);
   });
 });

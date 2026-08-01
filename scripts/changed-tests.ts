@@ -40,18 +40,32 @@
  *      (a) changed test files themselves (`changed-test`);
  *      (b) test files whose transitive reverse-dependency closure reaches
  *          >=1 changed source file (`transitive`);
- *      (c) binary-consumers — `.bun.test.ts` files that spawn the compiled
- *          binary (matched by a `dist/lore` / `LORE_BIN` marker in their own
- *          source), included whenever ANY `packages/lore/src/**` or
- *          `packages/core/src/**` file changed. These spawn a subprocess, so
- *          import tracing cannot see through to them — pretending it could
+ *      (c) binary-consumers — ANY `*.test.ts` / `*.test.tsx` file (not only
+ *          `.bun.test.ts`) whose OWN content spawns this repo's CLI entry as
+ *          a subprocess, included whenever ANY `packages/lore/src/**` or
+ *          `packages/core/src/**` file changed (`binary-consumer`). Two
+ *          distinct spawn shapes exist in this repo and are told apart by
+ *          marker (`classifyBinaryConsumer`): a "compiled" spawn (`dist/lore`
+ *          / `LORE_BIN` marker) runs the built binary; a "source" spawn
+ *          (`INDEX_TS` marker — every `tests/integration/cli/*.test.ts` file
+ *          spawns `bun run <INDEX_TS>` where `INDEX_TS` resolves to
+ *          `src/index.ts`) runs the entry source directly. Both spawn a
+ *          subprocess, so import tracing cannot see through to either — only
+ *          the COMPILED kind additionally gates the step-4 pre-build (a
+ *          source-entry spawn always runs current source, never a stale
+ *          artifact). Pretending either kind were reachable by import tracing
  *          would silently rebuild the exact blind spot this script exists to
- *          close (`binary-consumer`).
+ *          close.
  *   4. Execution: selected vitest files run via one `bunx vitest run <files>`;
  *      selected bun files run via `cd packages/lore && bun test <files>`. If
- *      >=1 binary-consumer was selected, `bun run build` runs FIRST (a stale
- *      compiled `dist/lore` is a known false-oracle vector). `--list` prints
- *      the selection and accounting without running anything.
+ *      >=1 COMPILED binary-consumer was selected (as opposed to a source-only
+ *      one — see step 3(c)), `bun run build` runs FIRST (a stale compiled
+ *      `dist/lore` is a known false-oracle vector); this decision is carried
+ *      on the selection data (`SelectedFile.binaryConsumerKind`), never
+ *      re-derived by re-reading files at execution time. `--list` prints the
+ *      selection and accounting — including the build-first decision, so it
+ *      is observable without actually running anything — without executing
+ *      any runner.
  *   5. Accounting is mandatory, not optional: a `selected N` line per runner
  *      plus a reason tag per selected file, always printed — and a changed
  *      source file that selects zero tests prints a loud `WARNING:` line
@@ -114,11 +128,23 @@ export type SelectionReason = "changed-test" | "transitive" | "binary-consumer";
 /** Which runner executes this file, derived solely from the `.bun.test.ts` naming convention (`isBunTestFile`). */
 export type TestRunner = "vitest" | "bun";
 
-/** One file in the final selection, with its runner and the reason it was included. */
+/** Which CLI-entry shape a binary-consumer test spawns — see `classifyBinaryConsumer`. Only the `"compiled"` kind needs a fresh `dist/lore` before running (step 4's pre-build gate). */
+export type BinaryConsumerKind = "compiled" | "source";
+
+/**
+ * One file in the final selection, with its runner and the reason it was
+ * included. `binaryConsumerKind` is set whenever this file's own content
+ * matches a binary-consumer marker (`classifyBinaryConsumer`), REGARDLESS of
+ * `reason` — a file can be selected as `changed-test` or `transitive` and
+ * still itself be a binary-consumer that needs the pre-build gate (AC-2: the
+ * kind is computed once here, in the selection data, never re-derived later
+ * by re-reading files at execution time).
+ */
 export interface SelectedFile {
   readonly path: string;
   readonly reason: SelectionReason;
   readonly runner: TestRunner;
+  readonly binaryConsumerKind?: BinaryConsumerKind;
 }
 
 /** The full output of `selectAffectedTests` — the selection plus the mandatory zero-selection signal. */
@@ -221,11 +247,46 @@ export function isBunTestFile(path: string): boolean {
   return /\.bun\.test\.ts$/.test(path);
 }
 
-const BINARY_CONSUMER_MARKER_RE = /dist\/lore|LORE_BIN/;
+/** Matches a test file that spawns the COMPILED binary — `LORE_BIN`/`dist/lore` are this repo's established constant name / path for that spawn target (see e.g. `tests/e2e/libsql-lazy-load.test.ts`, `tests/integration/cli/slugify-compiled.bun.test.ts`). */
+const COMPILED_BINARY_MARKER_RE = /dist\/lore|LORE_BIN/;
+/**
+ * Matches a test file that spawns the entry SOURCE directly (`bun run
+ * <INDEX_TS>`, where `INDEX_TS` resolves to `packages/lore/src/index.ts` —
+ * every `tests/integration/cli/*.test.ts` file, and ~40 more across the
+ * suite, declare `const INDEX_TS = join(..., "src", "index.ts")` and spawn
+ * via that identifier, never a literal path string). Keyed on the identifier
+ * rather than a `src/index.ts` path substring on purpose: a literal-path scan
+ * would also match unrelated prose like "packages/core/src/index.ts" (e.g.
+ * `tests/unit/core/barrel-isolation.test.ts`'s doc comment) which spawns
+ * nothing at all.
+ */
+const SOURCE_ENTRY_MARKER_RE = /\bINDEX_TS\b/;
 
-/** `true` iff `path` is a `.bun.test.ts` file whose own content spawns the compiled binary (D2 — a dependency-closure escape import tracing cannot see through). */
+/**
+ * Classify `path`/`content` as one of two binary-consumer kinds, or neither.
+ * A binary-consumer is ANY test file (`isTestFile` — not only
+ * `.bun.test.ts`) whose OWN content spawns this repo's CLI entry as a
+ * subprocess: there is no import edge for the reverse-dependency walk to
+ * traverse through a subprocess call (D2 — a dependency-closure escape import
+ * tracing cannot see through). Both kinds are escape-hatch candidates for
+ * SELECTION; only `"compiled"` additionally forces the step-4 pre-build gate
+ * (a "source" spawn runs `bun run <INDEX_TS>` against current source
+ * directly — never a stale artifact, so no build is needed first). A marker
+ * occurring only inside a comment still counts: neither this scan nor the
+ * import-specifier scan above it is comment-aware, and a regex cannot
+ * evaluate "is this line executable" any more than it can evaluate a dynamic
+ * `import()` expression (see module header, step 2).
+ */
+export function classifyBinaryConsumer(path: string, content: string): BinaryConsumerKind | undefined {
+  if (!isTestFile(path)) return undefined;
+  if (COMPILED_BINARY_MARKER_RE.test(content)) return "compiled";
+  if (SOURCE_ENTRY_MARKER_RE.test(content)) return "source";
+  return undefined;
+}
+
+/** `true` iff `path`/`content` is a binary-consumer candidate of EITHER kind (see `classifyBinaryConsumer`) — the boolean gate rule (c) uses to decide inclusion. */
 export function isBinaryConsumerCandidate(path: string, content: string): boolean {
-  return isBunTestFile(path) && BINARY_CONSUMER_MARKER_RE.test(content);
+  return classifyBinaryConsumer(path, content) !== undefined;
 }
 
 const LORE_OR_CORE_SRC_PREFIX_RE = /^packages\/(?:lore|core)\/src\//;
@@ -283,8 +344,26 @@ export function selectAffectedTests(params: {
     }
   }
 
+  // Attach binaryConsumerKind to EVERY selected file (not only ones selected
+  // BECAUSE of rule (c)) — a file selected as changed-test or transitive can
+  // still itself spawn the CLI entry and therefore still needs the step-4
+  // pre-build gate when its kind is "compiled" (AC-2: computed once here from
+  // the in-memory fileMap already scanned above, never re-derived by
+  // re-reading files later at execution time).
   const selected: SelectedFile[] = [...reasonByPath.entries()]
-    .map(([path, reason]) => ({ path, reason, runner: (isBunTestFile(path) ? "bun" : "vitest") as TestRunner }))
+    .map(([path, reason]) => {
+      const runner: TestRunner = isBunTestFile(path) ? "bun" : "vitest";
+      // Invariant: every `path` here came FROM `fileMap` (knownChanged is
+      // `fileMap.has`-filtered; rule (c) iterates `fileMap` directly; the BFS
+      // below walks edges built only from `fileMap` keys) — `.get` cannot
+      // miss. Non-null assertion, not a silent fallback (mirrors
+      // `buildImportGraph`'s established `forward.get(file)!` convention
+      // above).
+      const binaryConsumerKind = classifyBinaryConsumer(path, fileMap.get(path)!);
+      return binaryConsumerKind === undefined
+        ? { path, reason, runner }
+        : { path, reason, runner, binaryConsumerKind };
+    })
     .sort((a, b) => a.path.localeCompare(b.path));
 
   return {
@@ -293,16 +372,28 @@ export function selectAffectedTests(params: {
   };
 }
 
-/** Render the mandatory accounting block: per-runner `selected N` line, a reason tag per selected file, and the zero-selection warning when it applies (D3 — never silent). */
+/**
+ * Render the mandatory accounting block: per-runner `selected N` line, a
+ * reason tag per selected file, the build-first decision (AC-2/AC-5 —
+ * printed here so it is observable from `--list` output alone, without
+ * actually executing anything), and the zero-selection warning when it
+ * applies (D3 — never silent).
+ */
 export function formatAccounting(selection: SelectionResult): string {
   const vitestFiles = selection.selected.filter((f) => f.runner === "vitest");
   const bunFiles = selection.selected.filter((f) => f.runner === "bun");
+  const compiledBinaryConsumers = selection.selected.filter((f) => f.binaryConsumerKind === "compiled");
 
   const lines: string[] = [];
   lines.push(`vitest: selected ${vitestFiles.length}`);
   for (const f of vitestFiles) lines.push(`  [vitest] ${f.path} (${f.reason})`);
   lines.push(`bun: selected ${bunFiles.length}`);
   for (const f of bunFiles) lines.push(`  [bun] ${f.path} (${f.reason})`);
+  lines.push(
+    compiledBinaryConsumers.length > 0
+      ? `build-first: yes (${compiledBinaryConsumers.length} compiled binary-consumer file(s) selected)`
+      : "build-first: no",
+  );
 
   if (selection.zeroSelectionWarning) {
     lines.push(
@@ -521,10 +612,14 @@ export function runCli(argv: readonly string[], cwd: string): number {
 
   const vitestFiles = selection.selected.filter((f) => f.runner === "vitest").map((f) => f.path);
   const bunFiles = selection.selected.filter((f) => f.runner === "bun").map((f) => f.path);
-  const hasBinaryConsumer = selection.selected.some((f) => f.reason === "binary-consumer");
+  // AC-2: keyed on the COMPILED kind only — a source-entry spawn (`bun run
+  // <INDEX_TS>`) always runs current source and never needs a fresh
+  // `dist/lore` first. Read from the selection data computed once in
+  // `selectAffectedTests`, never re-derived by re-reading files here.
+  const hasCompiledBinaryConsumer = selection.selected.some((f) => f.binaryConsumerKind === "compiled");
 
-  if (hasBinaryConsumer) {
-    console.log("changed-tests: >=1 binary-consumer selected — running `bun run build` first");
+  if (hasCompiledBinaryConsumer) {
+    console.log("changed-tests: >=1 compiled binary-consumer selected — running `bun run build` first");
     const buildStatus = runBuild(repoRoot);
     if (buildStatus !== 0) {
       console.error(`changed-tests: bun run build failed (exit ${buildStatus})`);
