@@ -21,13 +21,68 @@
  * test runs is `packages/lore`, not the repo root the script needs.
  */
 
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, beforeAll } from "bun:test";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 const REPO_ROOT = resolve(import.meta.dir, "../../../../..");
+
+// reason: the selection-reason vocabulary is a runtime SSOT
+// (`scripts/changed-tests.ts`'s `SELECTION_REASONS` + `isSelectionReason`) —
+// this suite's own accounting-line matcher is built FROM it, never
+// hand-transcribed as an independent regex/list. That transcription drift is
+// exactly what went stale and turned `main` red when a fourth reason
+// (`"tree-scan-oracle"`) was added to the producer's TYPE alone (task
+// `task-main-is-red-a-fourth-selectionreason-was-added-to-the`) — a type
+// erases at runtime, so a hand-copied regex here had nothing forcing it to
+// notice.
+//
+// A STATIC `import { SELECTION_REASONS } from "../../../../../scripts/
+// changed-tests.js"` was tried first and rejected: `scripts/changed-tests.ts`
+// lives OUTSIDE `packages/lore/tsconfig.tests.json`'s `rootDir` ("."), and a
+// static import pulls it (plus its own `./check-no-nul-bytes.js` import) into
+// that tsconfig's program, failing `bun run typecheck` with TS6059 ("File is
+// not under rootDir") — this is TRUE REGARDLESS of which test runner
+// eventually executes the file; typecheck is runner-agnostic. This is the
+// EXACT constraint already documented and worked around in
+// `changed-tests-selector.test.ts` (the vitest sibling suite) and
+// `tests/unit/distribution/platform-map.test.ts`: a **dynamic** `import()`
+// with a runtime-COMPUTED (non-literal) specifier, resolved once in
+// `beforeAll`. TypeScript cannot statically resolve a computed specifier, so
+// the target file never enters this project's compilation graph — the
+// rootDir violation cannot occur. (`tests/e2e/resume-coverage-compiled.bun
+// .test.ts`'s STATIC import of `scripts/embed-assets-manifest.mjs` does not
+// hit this: that target is plain `.mjs` with no `allowJs`/`checkJs` in this
+// repo's tsconfig, so tsc never adds it to the program at all — a `.ts`
+// target has no such exemption.)
+const CHANGED_TESTS_SPECIFIER = pathToFileURL(join(REPO_ROOT, "scripts", "changed-tests.ts")).href;
+
+let SELECTION_REASONS: readonly string[];
+let isSelectionReason: (value: string) => boolean;
+/**
+ * Accounting-line reason-tag matcher, derived from {@link SELECTION_REASONS}
+ * — NEVER an independently hand-transcribed alternation. Captures the tag
+ * inside the parens so callers can additionally assert SET MEMBERSHIP on the
+ * captured value (see the HAPPY case below): the alternation alone can only
+ * ever match a KNOWN member by construction, which makes it structurally
+ * incapable of catching an unknown tag — the CONTROL case below proves that
+ * capability using synthetic data instead, since this repo's own real
+ * accounting output can never legitimately contain an out-of-vocabulary tag.
+ */
+let KNOWN_REASON_TAG_RE: RegExp;
+
+beforeAll(async () => {
+  const mod: {
+    SELECTION_REASONS: readonly string[];
+    isSelectionReason: (value: string) => boolean;
+  } = await import(CHANGED_TESTS_SPECIFIER);
+  SELECTION_REASONS = mod.SELECTION_REASONS;
+  isSelectionReason = mod.isSelectionReason;
+  KNOWN_REASON_TAG_RE = new RegExp(`\\((${SELECTION_REASONS.join("|")})\\)`);
+});
 
 describe("bun run test:changed CLI — --list HEAD (AC-TC-2)", () => {
   it("HAPPY: exits 0 and prints a selected-count line for both runners", () => {
@@ -45,7 +100,7 @@ describe("bun run test:changed CLI — --list HEAD (AC-TC-2)", () => {
     expect(stdout).toMatch(/^bun: selected \d+$/m);
   });
 
-  it("HAPPY: at least one reason tag is printed for a selected file (this suite's own new test files are uncommitted changed-test entries)", () => {
+  it("HAPPY: at least one reason tag is printed for a selected file, and the captured tag is a real SELECTION_REASONS member (this suite's own new test files are uncommitted changed-test entries)", () => {
     const result = Bun.spawnSync(["bun", "scripts/changed-tests.ts", "--list", "HEAD"], {
       cwd: REPO_ROOT,
       stdout: "pipe",
@@ -54,14 +109,76 @@ describe("bun run test:changed CLI — --list HEAD (AC-TC-2)", () => {
 
     const stdout = result.stdout.toString("utf8");
     expect(result.exitCode).toBe(0);
-    // reason tags are rendered as "(changed-test)" / "(transitive)" / "(binary-consumer)"
-    // on a per-file line — assert at least one of the three appears somewhere in the
-    // accounting block (mandatory accounting, D3 — never a bare count with no detail
-    // when something was actually selected).
+    // reason tags are rendered as "(<reason>)" on a per-file line — assert at least
+    // one SELECTION_REASONS member appears somewhere in the accounting block
+    // (mandatory accounting, D3 — never a bare count with no detail when something
+    // was actually selected). BOUNDARY: when nothing was selected (selectedAny ===
+    // false), no tag is required at all — this guard is what keeps a zero-selection
+    // run from being wrongly forced to match anything (see the dedicated BOUNDARY
+    // case below for a synthetic proof this guard itself still discriminates).
     const selectedAny = /^vitest: selected [1-9]/m.test(stdout) || /^bun: selected [1-9]/m.test(stdout);
     if (selectedAny) {
-      expect(stdout).toMatch(/\((changed-test|transitive|binary-consumer)\)/);
+      const match = KNOWN_REASON_TAG_RE.exec(stdout);
+      expect(match, `expected a "(<reason>)" tag somewhere in:\n${stdout}`).not.toBeNull();
+      const capturedTag = match![1]!;
+      // Explicit membership assertion on the CAPTURED value (not merely "the regex
+      // matched") — a future loosened regex (e.g. accidentally widened to `\((\w+)\)`)
+      // would still satisfy "match is non-null" but would fail THIS line, since
+      // isSelectionReason/SELECTION_REASONS.includes only accept real vocabulary
+      // members.
+      expect(isSelectionReason(capturedTag)).toBe(true);
+      expect(SELECTION_REASONS).toContain(capturedTag);
     }
+  });
+
+  it("NEGATIVE (CONTROL): a synthetic accounting line carrying an unknown tag is REJECTED — proves the SSOT-derived matcher can still fail, not just widen forever", () => {
+    // Synthetic — this repo's REAL accounting output can never legitimately contain
+    // an out-of-vocabulary tag, so the rejection capability must be proven here
+    // against constructed data instead. Without this control, "any of the known
+    // reasons" trivially matches every tagged line and the assertion above would be
+    // vacuous no matter how badly a future regex degraded.
+    const syntheticLine = "  [vitest] packages/lore/tests/unit/example.test.ts (not-a-real-reason)";
+
+    // 1) The SSOT-derived alternation itself must not match the unknown tag.
+    expect(KNOWN_REASON_TAG_RE.test(syntheticLine)).toBe(false);
+
+    // 2) Even extracted via a generic "(<anything>)" pattern (simulating a future
+    //    consumer that loosened the capture), isSelectionReason/SELECTION_REASONS
+    //    membership must independently reject it — the two-part mechanism (regex +
+    //    membership) required by this task's AC-2, not one lone check that could
+    //    itself silently degrade.
+    const genericMatch = /\(([^()]+)\)/.exec(syntheticLine);
+    expect(genericMatch).not.toBeNull();
+    const extractedTag = genericMatch![1]!;
+    expect(isSelectionReason(extractedTag)).toBe(false);
+    expect(SELECTION_REASONS).not.toContain(extractedTag);
+  });
+
+  it("BOUNDARY: a synthetic zero-selection accounting block requires no reason tag — the selectedAny guard stays meaningful (never forced to match on an empty selection)", () => {
+    const syntheticZeroAccounting = ["vitest: selected 0", "bun: selected 0", "build-first: no"].join("\n");
+
+    const selectedAny =
+      /^vitest: selected [1-9]/m.test(syntheticZeroAccounting) || /^bun: selected [1-9]/m.test(syntheticZeroAccounting);
+    expect(selectedAny).toBe(false);
+    // No reason tag is present in a genuine zero-selection block, and the guard
+    // above must be false here precisely so no tag is ever required in this case —
+    // asserted directly rather than left implicit.
+    expect(KNOWN_REASON_TAG_RE.test(syntheticZeroAccounting)).toBe(false);
+  });
+
+  it("STATE/REGRESSION: the three pre-existing reasons (changed-test, transitive, binary-consumer) remain valid SELECTION_REASONS members alongside the newly added tree-scan-oracle", () => {
+    for (const preExisting of ["changed-test", "transitive", "binary-consumer"] as const) {
+      expect(SELECTION_REASONS).toContain(preExisting);
+      expect(isSelectionReason(preExisting)).toBe(true);
+    }
+    // tree-scan-oracle — the fourth reason whose TYPE-only addition originally broke
+    // the hand-transcribed regex this task replaces — must also be recognised now.
+    expect(SELECTION_REASONS).toContain("tree-scan-oracle");
+    expect(isSelectionReason("tree-scan-oracle")).toBe(true);
+    // ERROR-adjacent: isSelectionReason is a total function over `string` — it never
+    // throws for a malformed/empty/unexpected input, only ever returns false.
+    expect(isSelectionReason("")).toBe(false);
+    expect(isSelectionReason("CHANGED-TEST")).toBe(false); // case-sensitive, not normalized
   });
 
   it("REGRESSION: --list never spawns vitest or bun test (accounting-only, no runner subprocess side effects) — verified by absence of a runner's own summary output", () => {
