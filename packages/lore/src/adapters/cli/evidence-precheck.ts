@@ -29,11 +29,21 @@
  *     the SECOND self-report guard hosted here (SPEC-061 AC-061-11..14, 17): a
  *     `--result pass` whose `--command` carries a `-t` case filter must arrive
  *     with the runner's own summary line as matched-count proof
+ *   - findCrossRunnerTokens(command) / findMixedRunnerRefusal(input) — the
+ *     THIRD self-report guard hosted here (defect: task-vitest-run-silently-
+ *     drops-a-bun-test-ts-named-alongside-a): a single `vitest run` invocation
+ *     naming a `.bun.test.ts` path alongside a real vitest file (or the
+ *     symmetric `bun test` invocation naming a plain `.test.ts` file) silently
+ *     runs only the files belonging to the runner it actually invoked — the
+ *     OTHER named file is dropped with exit 0 and no warning, because vitest's
+ *     own "no test files found" loud refusal is evaluated over the WHOLE
+ *     invocation, not per named argument
  *
- * Both guards are ADJACENT but INDEPENDENT: the first asks "does the file this
- * command names exist at all", the second asks "did the filter this command
- * carries match anything". They share only the oracle/result scope gate
- * (`isSelfReportedPassInScope`).
+ * All three guards are ADJACENT but INDEPENDENT: the first asks "does the
+ * file this command names exist at all", the second asks "did the filter this
+ * command carries match anything", the third asks "would this command's OWN
+ * invoked runner actually run every file it names". They share only the
+ * oracle/result scope gate (`isSelfReportedPassInScope`).
  *
  * Design: token EXTRACTION and existence-port CHECKING both live here so the
  * whole precheck is unit-testable with a fake `fileExists` — no real
@@ -50,7 +60,9 @@
  *   task-lore-evidence-must-refuse-a-t-filtered-pass-with-no (SPEC-061,
  *   adr-lore-evidence-proves-a-filtered-pass-with-the-runner-s-own);
  *   task-lore-evidence-s-oracle-file-precheck-resolves-against-the
- *   (MCP `caller_cwd` escape hatch + roots-named refusal message)
+ *   (MCP `caller_cwd` escape hatch + roots-named refusal message);
+ *   task-vitest-run-silently-drops-a-bun-test-ts-named-alongside-a (mixed-
+ *   runner invocation guard)
  */
 
 import {
@@ -373,6 +385,162 @@ export function findMissingOracleFilesForEvidence(input: {
     ...(input.corpusRoot !== undefined ? { corpusRoot: input.corpusRoot } : {}),
     fileExists: input.fileExists,
   });
+}
+
+// ─── Mixed-Runner Invocation Guard (task-vitest-run-silently-drops-a-bun-test-ts-named-alongside-a) ─
+
+/**
+ * Matches a command invoking vitest's `run` subcommand — every shape this
+ * repo actually emits (`bunx vitest run <files>`, `vitest run <files>`,
+ * `npx vitest run <files>`; `package.json`'s own `test:vitest` script is
+ * `bunx vitest run`). Requires the `run` subcommand token, not just the bare
+ * word `vitest`, so a command that merely references `vitest.config.ts` in a
+ * path (no invocation at all) is never mistaken for one.
+ */
+const VITEST_RUN_INVOCATION_PATTERN = /\bvitest\s+run\b/;
+
+/**
+ * Matches a command invoking `bun test` — every shape this repo actually
+ * emits (`bun test <files>`, `cd packages/lore && bun test <files>`;
+ * `package.json`'s own `test:bun` script is `cd packages/lore && bun test
+ * --timeout 30000 .bun.test`). Requires an actual whitespace gap between the
+ * two tokens, so a path component like `bun.test.ts` (no space) never matches.
+ */
+const BUN_TEST_INVOCATION_PATTERN = /\bbun\s+test\b/;
+
+/**
+ * The suffix that makes a token `bun test`'s EXCLUSIVE file, per this repo's
+ * two-runner split (root CLAUDE.md "Test file convention"): `.bun.test.ts`
+ * files use `bun:sqlite` and are excluded from `vitest.config.ts`; every
+ * OTHER extracted suffix (`.test.ts`, `.test.tsx`, `.spec.ts`) runs under
+ * vitest only. Checked via `endsWith` (never a second regex) because
+ * `.bun.test.ts` itself contains the substring `.test.ts` — a plain
+ * `.includes(".test.ts")` would misclassify it as a vitest-only file.
+ */
+const BUN_ONLY_FILE_SUFFIX = ".bun.test.ts";
+
+/**
+ * Reports which of `command`'s extracted test-file tokens
+ * ({@link extractTestFileTokens}) belong to the OTHER runner's EXCLUSIVE
+ * suffix — the exact defect shape measured 2026-08-01
+ * (task-vitest-run-silently-drops-a-bun-test-ts-named-alongside-a): a single
+ * `vitest run` invocation naming a `.bun.test.ts` path alongside a genuine
+ * vitest file exits 0 having silently run ONLY the vitest file. vitest's own
+ * "no test files found" loud refusal is evaluated over the WHOLE invocation,
+ * not per named argument — a quorum of one matching file silences it for
+ * every OTHER named file the runner drops. The symmetric case (a `bun test`
+ * invocation naming a plain `.test.ts`/`.test.tsx`/`.spec.ts` file) is
+ * reported for the same reason: this repo's two-runner convention never
+ * intends that file to run under `bun test`.
+ *
+ * Deliberately narrow to the two invocation shapes this repo actually emits
+ * ({@link VITEST_RUN_INVOCATION_PATTERN}, {@link BUN_TEST_INVOCATION_PATTERN})
+ * — NOT a shell-grammar parser (mirrors {@link extractCdPrefixTarget}'s own
+ * documented narrowness). A command naming BOTH invocation shapes (a chained
+ * `vitest run … && … bun test …`) or NEITHER is left alone: this detector
+ * cannot attribute a token to one sub-invocation over the other in the
+ * former case, and has no runner to classify against in the latter — the
+ * same "cannot be checked, so it is not blocked" fail-open posture
+ * {@link extractTestFileTokens}'s "no extractable token" case already has.
+ *
+ * @param command - the exact command string recorded via `lore evidence --command`
+ * @returns the subset of extracted tokens this command's OWN invoked runner
+ *   would silently exclude; `[]` when the command invokes neither runner (or
+ *   both), or invokes exactly one and names no token belonging to the other's
+ *   exclusive suffix
+ * @example
+ *   findCrossRunnerTokens("bunx vitest run a.test.ts b.bun.test.ts")
+ *   // => ["b.bun.test.ts"]
+ * @example
+ *   findCrossRunnerTokens("cd packages/lore && bun test tests/x.bun.test.ts")
+ *   // => [] — the only named token IS bun test's own file
+ */
+export function findCrossRunnerTokens(command: string): string[] {
+  const tokens = extractTestFileTokens(command);
+  if (tokens.length === 0) return [];
+
+  const invokesVitest = VITEST_RUN_INVOCATION_PATTERN.test(command);
+  const invokesBunTest = BUN_TEST_INVOCATION_PATTERN.test(command);
+  // reason: both true (a chained multi-runner command) or both false (neither
+  // recognised) are equally "cannot attribute", so both collapse to the same
+  // fail-open branch — see this function's own doc.
+  if (invokesVitest === invokesBunTest) return [];
+
+  return invokesVitest
+    ? tokens.filter((token) => token.endsWith(BUN_ONLY_FILE_SUFFIX))
+    : tokens.filter((token) => !token.endsWith(BUN_ONLY_FILE_SUFFIX));
+}
+
+/**
+ * How an operator repairs a mixed-runner command — appended verbatim to the
+ * refusal so it always ends with the action, not just the diagnosis.
+ */
+const MIXED_RUNNER_REPAIR_HINT =
+  'Split into two separate --command recordings, one per runner: run the vitest-only ' +
+  'files through "vitest run <files>" and the .bun.test.ts files through ' +
+  '"bun test <files>" (cd packages/lore first) — record each as its OWN lore evidence call.';
+
+/**
+ * The THIRD self-report guard hosted here — refuses a `--result pass` whose
+ * `--command` names test files belonging to two DIFFERENT runners in a
+ * single invocation (see {@link findCrossRunnerTokens}'s header for the exact
+ * defect shape). Composes the same oracle/result scope gate the other two
+ * guards in this module share ({@link isSelfReportedPassInScope}).
+ *
+ * // reason: why this is a PATH-SHAPE check, not the fabricable-integer class
+ * // this module's `findFilteredPassRefusal` header excludes a `--matched <n>`
+ * // flag for. A `--matched <n>` flag would be a bare number the caller
+ * // asserts INDEPENDENTLY of what the command actually names — pure
+ * // self-report, exactly as fabricable as the `pass` it would gate. This
+ * // guard reads the `--command` string the caller ALREADY supplied to name
+ * // what ran; there is no separate number to lie about. The caller cannot
+ * // satisfy it by typing something different while leaving the real
+ * // invocation unchanged — the only way to pass is to actually split the
+ * // command into two genuinely single-runner invocations, which IS the fix,
+ * // not a workaround around the check.
+ *
+ * @param input - same shape {@link findFilteredPassRefusal} accepts minus
+ *   `outputTail` — this guard needs nothing from the runner's own output; the
+ *   command string alone proves the shape
+ * @returns a `VALIDATION_ERROR` (exit code 4 via `utils.ts::exitCode`) naming
+ *   the cross-runner token(s) and the two-command repair, or `null` when the
+ *   write may proceed
+ *
+ * @example
+ * findMixedRunnerRefusal({
+ *   oracle: "test", result: "pass",
+ *   command: "bunx vitest run a.test.ts b.bun.test.ts",
+ * })
+ * // => VALIDATION_ERROR naming "b.bun.test.ts"
+ */
+export function findMixedRunnerRefusal(input: {
+  oracle: string;
+  result: string;
+  command: string;
+}): LoreError | null {
+  if (!isSelfReportedPassInScope(input)) return null;
+
+  const crossRunnerTokens = findCrossRunnerTokens(input.command);
+  if (crossRunnerTokens.length === 0) return null;
+
+  const invokedVitest = VITEST_RUN_INVOCATION_PATTERN.test(input.command);
+  const invokedRunner = invokedVitest ? "vitest run" : "bun test";
+  const droppedRunner = invokedVitest ? "bun test" : "vitest run";
+
+  return {
+    code: "VALIDATION_ERROR",
+    field: "command",
+    message:
+      `Mixed-runner --command: this "${invokedRunner}" invocation also names ` +
+      `${droppedRunner}-only file(s) (${crossRunnerTokens.join(", ")}). This repo splits test ` +
+      'files across two runners (root CLAUDE.md "Test file convention"), and a single ' +
+      "invocation only ever executes the files belonging to the runner it actually invoked — " +
+      "the rest are silently excluded with NO warning and exit 0 (vitest's own \"no test files " +
+      "found\" refusal is evaluated over the WHOLE invocation, not per named argument, so any " +
+      "one matching file silences it for every other named file that gets dropped). " +
+      MIXED_RUNNER_REPAIR_HINT,
+    value: input.command,
+  };
 }
 
 // ─── Filtered-Pass Matched-Count Proof (SPEC-061 AC-061-11..14, 17) ─────────
