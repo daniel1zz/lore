@@ -12,20 +12,31 @@
  *   HAPPY:      one ad-hoc task + two candidate specs (one matching, one not) →
  *               resolves the governing spec unambiguously, executes, records
  *               GENUINELY attested evidence (real attestation.runner "lore-cli"
- *               / exit_code / duration_ms) — `ac_ref` is intentionally OMITTED
- *               (a NAMED, measured remaining gap; see `recordAcRef`'s JSDoc on
- *               `VerifyRunnerService._runVerification`), never silently faked
+ *               / exit_code / duration_ms) AND `ac_ref` equal to the executed
+ *               criterion's id (AC-069-15,
+ *               task-verifyadhoctask-stamps-ac-ref-on-its-runner-attested —
+ *               retiring the last shape difference from a plan-owned task's
+ *               evidence), never silently faked
  *   NEGATIVE:   not type "task"; not ad-hoc; ac_scope absent; ac_scope empty;
  *               zero matching specs; unknown --ac id against the resolved spec
  *   ERROR:      ac_scope matching MULTIPLE candidate specs — ambiguous, refused,
- *               names every matched spec slug
+ *               names every matched spec slug; AC-069-16 — a downstream
+ *               `recordVerifiedEvidence` ac_ref cross-validation refusal
+ *               propagates verbatim (no silent bypass now that `ac_ref` is
+ *               actually sent through the ad-hoc path)
  *   STATE:      the M2 command-provenance approval gate still applies to the
  *               ad-hoc path (proves real delegation to the shared `_runVerification`
- *               tail, not a re-implementation)
+ *               tail, not a re-implementation); the recorded entry's full shape
+ *               (ac_ref + attestation.runner/exit_code/duration_ms together, not
+ *               just the one new field) is asserted in the same HAPPY case above
  *   BOUNDARY:   an ad-hoc task's ac_scope matching a spec whose declared criteria
  *               are a STRICT SUPERSET of the scope (the spec also declares AC ids
  *               the task does NOT claim) still resolves — coverage is "spec
  *               declares every scoped id", not "scope equals spec's full set"
+ *   REGRESSION: AC-069-16 — the plan-owned `verifyPlan` path stays identical in
+ *               the `ac_ref` it stamps (see the tagged assertion inside
+ *               `describe("HAPPY — two script-mode ACs both pass...")` above,
+ *               unmodified by this task)
  *
  * This is orchestration logic over three injected ports (`getPlanBundle`,
  * `recordVerifiedEvidence`, `executor`) — tested entirely with HAND-WRITTEN test
@@ -256,7 +267,7 @@ const gatedConfig = { ...config, requireCommandApproval: true, envPassthroughAll
 // ─── HAPPY ────────────────────────────────────────────────────────────────────
 
 describe("HAPPY — two script-mode ACs both pass, recorded distinctly (AC-VRF-3)", () => {
-  it("executes both ACs in order and records each with its OWN command/exit-code/duration (defeats a hardcoded-return stub)", async () => {
+  it("executes both ACs in order and records each with its OWN command/exit-code/duration (defeats a hardcoded-return stub) — AC-069-16 regression: plan-owned ac_ref stamping unchanged", async () => {
     const ac1 = scriptAc("AC-1", "cmd-1");
     const ac2 = scriptAc("AC-2", "cmd-2");
     const spec = makeSpec([ac1, ac2]);
@@ -853,7 +864,7 @@ describe("REGRESSION — verifyPlan given a non-plan id still refuses with the p
 });
 
 describe("HAPPY — verifyAdhocTask resolves the unique matching spec and attests (AC-VRF-adhoc)", () => {
-  it("two candidate specs, only one fully declares the task's ac_scope — executes and records GENUINE attestation (ac_ref intentionally omitted, see recordAcRef JSDoc)", async () => {
+  it("AC-069-15: two candidate specs, only one fully declares the task's ac_scope — executes and records GENUINE attestation WITH ac_ref stamped to the executed criterion's id", async () => {
     const matchingSpec = makeSpec([scriptAc("AC-1", "cmd-1"), scriptAc("AC-2", "cmd-2")], {
       id: "spec-match",
       slug: "spec-match",
@@ -878,14 +889,17 @@ describe("HAPPY — verifyAdhocTask resolves the unique matching spec and attest
     expect(result.value.results[0]).toMatchObject({ ac_id: "AC-1", result: "pass", exit_code: 0 });
     expect(executor.callCount).toBe(1);
     expect(recorder.callCount).toBe(1);
-    // reason: MEASURED gap (recordAcRef: false for the ad-hoc path, see
-    // _runVerification's JSDoc) — TaskWorkflowService.appendEvidenceEntry's
-    // cross-entity ac_ref check requires task.parent_id to resolve to a plan,
-    // structurally impossible for an ad-hoc task (its parent is the root PRD).
-    // The evidence is still GENUINELY attested — real exit_code/duration/runner —
-    // just not (yet) AC-coverage-linkable. Fixing that needs task-workflow-
-    // service.ts/corpus-service.ts, outside this task's file anchors.
-    expect(recorder.calls[0]?.entry.ac_ref).toBeUndefined();
+    // AC-069-15: `recordAcRef: true` now flows through the ad-hoc path (fixed
+    // by task-verifyadhoctask-stamps-ac-ref-on-its-runner-attested) — cross-
+    // validated through the ad-hoc governing-AC port
+    // (`resolveAdhocGoverningAcIds` → `CorpusService.
+    // resolveDeclaredAcIdsForAdhocTask` → the SAME `resolveGoverningSpecByAcScope`
+    // search this method itself ran above), not the plan-only `parent_id` walk
+    // (task-an-ad-hoc-task-s-attested-evidence-cannot-carry-ac-ref removed that
+    // structural impossibility first). STATE — asserted alongside the REST of
+    // the recorded entry's shape below, not in isolation: a real
+    // attestation.runner/exit_code/duration_ms from an ACTUAL executed command.
+    expect(recorder.calls[0]?.entry.ac_ref).toBe("AC-1");
     expect(recorder.calls[0]?.entry.attestation?.runner).toBe("lore-cli");
     expect(recorder.calls[0]?.entry.attestation?.exit_code).toBe(0);
     expect(recorder.calls[0]?.entry.attestation?.duration_ms).toBe(10);
@@ -925,6 +939,49 @@ describe("HAPPY — verifyAdhocTask resolves the unique matching spec and attest
     if (result.ok) return;
     expect(result.error.code).toBe("NEEDS_APPROVAL");
     expect(executor.callCount).toBe(0);
+  });
+});
+
+describe("ERROR — AC-069-16: flipping recordAcRef for the ad-hoc channel opens no bypass", () => {
+  it("AC-069-16: a downstream recordVerifiedEvidence ac_ref cross-validation refusal propagates verbatim — the run aborts, it is never silently swallowed", async () => {
+    // reason: pre-fix, `verifyAdhocTask` NEVER sent `ac_ref` at all (recordAcRef
+    // was hardcoded false), so a downstream cross-validation refusal like the
+    // one this test injects could never even be TRIGGERED by this call site —
+    // the entry.ac_ref assertion below is what actually distinguishes "the flip
+    // landed" from "it didn't". Post-fix, `ac_ref` IS sent, so this refusal is a
+    // REAL reachable state that must abort the run exactly like verifyPlan's own
+    // write-failure abort does (SPEC-039 §4 D6) — proving the flip opens no
+    // bypass: an out-of-scope/undeclared criterion id is still refused, just one
+    // layer deeper (TaskWorkflowService.appendEvidenceEntry's
+    // resolveAdhocGoverningAcIds cross-validation) than the pre-flight checks
+    // this suite's NEGATIVE/ERROR describe blocks already cover.
+    const spec = makeSpec([scriptAc("AC-1", "cmd-1")], { id: "spec-bypass", slug: "spec-bypass" });
+    const task = makeAdhocTask("adhoc-bypass", { extra: { adhoc: true, ac_scope: ["AC-1"] } });
+    const executor = makeExecutor([ok({ exitCode: 0, outputTail: "", durationMs: 5, timedOut: false })]);
+    const recorder = makeRecordVerifiedEvidence([
+      err({
+        code: "VALIDATION_ERROR",
+        field: "ac_ref",
+        message: "ac_ref 'AC-1' is not declared on the parent spec",
+        value: "AC-1",
+      }),
+    ]);
+    const { fn: getPlanBundle } = makeGetPlanBundle({ plan: makePlan(), spec: undefined, tasks: [] });
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config);
+
+    const result = await service.verifyAdhocTask(task, [spec], { by: "runner", nowIso: NOW });
+
+    // The write this call ATTEMPTED must actually carry the resolved criterion
+    // id — proves `_runVerification` sends `ac_ref` through the ad-hoc path now.
+    expect(recorder.calls[0]?.entry.ac_ref).toBe("AC-1");
+    // The refusal is NOT swallowed: verifyAdhocTask propagates it verbatim,
+    // same Result shape verifyPlan's own recordVerifiedEvidence-failure abort
+    // uses — no new bypass.
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (result.error.code !== "VALIDATION_ERROR") return;
+    expect(result.error.field).toBe("ac_ref");
   });
 });
 

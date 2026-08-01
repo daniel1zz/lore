@@ -535,24 +535,30 @@ export class VerifyRunnerService {
    * @param spec - The resolved governing spec (consulted for the draft/active
    *   advisory only — no other field of it is read here).
    * @param opts - Same `VerifyPlanOpts` the public entry points receive.
-   * @param recordAcRef - `true` for `verifyPlan` (plan-owned tasks), `false` for
-   *   `verifyAdhocTask`. HISTORICAL (measured 2026-08-01, fixed by task-an-ad-hoc-
-   *   task-s-attested-evidence-cannot-carry-ac-ref): `TaskWorkflowService.
-   *   appendEvidenceEntry` (the shared implementation behind the injected
-   *   `recordVerifiedEvidence` port) used to cross-validate any supplied `ac_ref`
-   *   by calling `resolveDeclaredAcIds(task.parent_id)` UNCONDITIONALLY — which
+   * @param recordAcRef - `true` for BOTH `verifyPlan` (plan-owned tasks) AND
+   *   {@link verifyAdhocTask} (SPEC-069 ad-hoc tasks, AC-069-15,
+   *   task-verifyadhoctask-stamps-ac-ref-on-its-runner-attested) — every
+   *   runner-attested evidence entry this method writes carries `ac_ref` equal
+   *   to the executed criterion's id. Kept as an explicit caller-supplied
+   *   boolean (not hardcoded `true` inline) so this shared tail's contract is
+   *   spelled out at both call sites, not assumed. HISTORICAL (measured
+   *   2026-08-01, fixed by task-an-ad-hoc-task-s-attested-evidence-cannot-carry-
+   *   ac-ref): `TaskWorkflowService.appendEvidenceEntry` (the shared
+   *   implementation behind the injected `recordVerifiedEvidence` port) used to
+   *   cross-validate any supplied `ac_ref` by calling
+   *   `resolveDeclaredAcIds(task.parent_id)` UNCONDITIONALLY — which
    *   hard-requires `task.parent_id` to resolve to a `type: "plan"` document. An
    *   ad-hoc task's `parent_id` is the corpus root PRD, so that call refused
    *   `Expected a plan document; got type 'prd'` for EVERY ad-hoc task, one layer
-   *   DEEPER than `VerifyRunnerService` itself. `appendEvidenceEntry` now BRANCHES
+   *   DEEPER than `VerifyRunnerService` itself — which is why `verifyAdhocTask`
+   *   used to pass `recordAcRef: false` here. `appendEvidenceEntry` now BRANCHES
    *   on `task.extra.adhoc` — an ad-hoc task's `ac_ref` resolves via the injected
    *   `resolveAdhocGoverningAcIds` port (`CorpusService.resolveDeclaredAcIdsForAdhocTask`,
    *   which runs the SAME `resolveGoverningSpecByAcScope` search this class's own
    *   `verifyAdhocTask` runs, `@lore/core`) instead of the plan-only walk — so
-   *   supplying `ac_ref` from THIS method for an ad-hoc task would now succeed.
-   *   `verifyAdhocTask` still passes `recordAcRef: false` anyway: a DELIBERATE,
-   *   separately-scoped decision (see that method's own JSDoc) — not a
-   *   structural impossibility any more.
+   *   supplying `ac_ref` from THIS method for an ad-hoc task now succeeds, and
+   *   an undeclared criterion id is refused (AC-069-16 — no new bypass) exactly
+   *   as the plan-owned path already was.
    */
   private async _runVerification(
     selectedCriteria: AcceptanceCriterion[],
@@ -733,12 +739,14 @@ export class VerifyRunnerService {
           command: criterion.verify.command,
           result: verifyResult,
           recorded_by: opts.by,
-          // reason: see this method's `recordAcRef` param JSDoc — omitted (never a
-          // bogus/best-effort value) for the ad-hoc path, whose target task has no
-          // plan-mediated spec `appendEvidenceEntry`'s cross-entity ac_ref check can
-          // walk to. `VerifyAcResult.ac_id` (below) still names the AC in the
-          // in-memory/CLI-rendered outcome either way — only the STORED evidence
-          // entry's `ac_ref` differs.
+          // reason: see this method's `recordAcRef` param JSDoc — both call
+          // sites (verifyPlan, verifyAdhocTask) now pass `true` (AC-069-15), so
+          // every runner-attested entry carries `ac_ref` equal to the executed
+          // criterion's id, cross-validated by `appendEvidenceEntry` through
+          // either the plan-owned `parent_id` walk or (for an ad-hoc task) the
+          // injected `resolveAdhocGoverningAcIds` port — an id it can't resolve
+          // there is refused (AC-069-16), which this method surfaces verbatim
+          // via the `recordResult.ok` check below (no bypass).
           ...(recordAcRef ? { ac_ref: criterion.id } : {}),
           ...(outputTail !== "" ? { output_tail: outputTail } : {}),
           attestation: {
@@ -813,24 +821,30 @@ export class VerifyRunnerService {
    * Every step AFTER spec resolution (declared-scope selection, M2 approval
    * gate, execution, freshness/completeness guards, attested evidence write) is
    * the IDENTICAL shared tail `verifyPlan` uses ({@link _runVerification},
-   * `recordAcRef: false` here — see that param's own JSDoc) — an ad-hoc task
-   * attests exactly as trustworthily as a plan-owned one: the recorded evidence
+   * `recordAcRef: true` here — see that param's own JSDoc) — an ad-hoc task's
+   * runner-attested evidence is now SHAPE-IDENTICAL to a plan-owned task's: it
    * carries a REAL `attestation.runner: "lore-cli"` / `exit_code` / `duration_ms`
-   * from an ACTUAL executed command, not a synthesized marker. The ONE remaining
-   * difference from a plan-owned task's evidence is `ac_ref` — still omitted
-   * here, but the REASON has changed: `TaskWorkflowService.appendEvidenceEntry`'s
-   * cross-entity validation for an ad-hoc task now resolves correctly (via the
-   * injected `resolveAdhocGoverningAcIds` port → `CorpusService.
-   * resolveDeclaredAcIdsForAdhocTask` → this same `resolveGoverningSpecByAcScope`
-   * search) — task-an-ad-hoc-task-s-attested-evidence-cannot-carry-ac-ref fixed
-   * that. `recordAcRef: false` stays here as a DELIBERATE, separately-scoped
-   * decision, not a structural impossibility any more: wiring `ac_ref` into this
-   * runner-attested path changes this method's own recorded-evidence shape and
-   * touches this class's own test suite (`verify-runner-service.test.ts`,
-   * `ac_ref intentionally omitted` assertions) — outside that fix task's declared
-   * anchors and its Oracle (which only exercises `lore evidence --ac`, the
-   * self-reported path via `TaskWorkflowService.addEvidence`). A future task can
-   * flip this flag once it owns updating that suite.
+   * from an ACTUAL executed command (never a synthesized marker) AND `ac_ref`
+   * equal to the executed criterion's id (AC-069-15,
+   * task-verifyadhoctask-stamps-ac-ref-on-its-runner-attested — the LAST
+   * remaining shape difference between the two channels, now retired).
+   *
+   * HISTORICAL (measured 2026-08-01): `ac_ref` used to be that one remaining
+   * difference, because `TaskWorkflowService.appendEvidenceEntry`'s cross-entity
+   * validation for an ad-hoc task called `resolveDeclaredAcIds(task.parent_id)`
+   * UNCONDITIONALLY — which hard-requires `task.parent_id` to resolve to a
+   * `type: "plan"` document, structurally impossible for an ad-hoc task (its
+   * parent is the root PRD). `task-an-ad-hoc-task-s-attested-evidence-cannot-
+   * carry-ac-ref` fixed that: `appendEvidenceEntry` now resolves an ad-hoc
+   * task's `ac_ref` via the injected `resolveAdhocGoverningAcIds` port →
+   * `CorpusService.resolveDeclaredAcIdsForAdhocTask` → this SAME
+   * `resolveGoverningSpecByAcScope` search — so supplying `ac_ref` from this
+   * method is cross-validated the same way a plan-owned task's is, and a
+   * criterion id the resolved governing spec does not declare is still refused
+   * (AC-069-16 — no new bypass): that refusal surfaces as a `recordVerifiedEvidence`
+   * `Result` failure, which this method's shared `_runVerification` tail
+   * propagates verbatim (same abort semantics as any other write failure —
+   * never silently swallowed).
    *
    * @param task - The resolved target task (caller MUST have already resolved
    *   this by id/slug; this method does no id resolution of its own).
@@ -925,8 +939,10 @@ export class VerifyRunnerService {
     const selectionResult = this._selectDeclaredScopeCriteria(criteria, task, spec.slug, opts.acIds);
     if (!selectionResult.ok) return selectionResult;
 
-    // recordAcRef: false — see _runVerification's own param JSDoc for why.
-    return this._runVerification(selectionResult.value, task, spec, opts, false);
+    // recordAcRef: true (AC-069-15) — see _runVerification's own param JSDoc
+    // for the historical reason this used to be false and why supplying
+    // ac_ref here is now cross-validated safely.
+    return this._runVerification(selectionResult.value, task, spec, opts, true);
   }
 
   /**
