@@ -73,6 +73,47 @@
  *     binary-consumers prints `build-first: no`; one with >=1 compiled-kind
  *     prints `build-first: yes`.
  *
+ * `classifyTreeScanningOracle` / `isChangedFileInTreeScanScope` (rule (d),
+ * task `task-test-changed-s-fourth-invisible-edge-a-tree-scanning`): a test
+ * that judges files via a RUNTIME FILESYSTEM SCAN (never an import edge) is
+ * invisible to rules (a)-(c) exactly like a binary-consumer's subprocess
+ * spawn is invisible to import tracing — the incident measured TWICE in one
+ * day against the real `scripts/tests/check-test-budgets.test.ts`. Covered in
+ * dedicated describe blocks below:
+ *   - `classifyTreeScanningOracle`: HAPPY for both real oracle shapes (the
+ *     REAL `check-test-budgets.test.ts` content -> `"packages-test-tree"`;
+ *     the REAL `check-no-nul-bytes.test.ts` content, which additionally
+ *     imports `hasTextSourceExtension` -> `"repo-tracked-text-source"`);
+ *     NEGATIVE for a non-test file with the marker (isTestFile gates
+ *     regardless of content, mirroring `classifyBinaryConsumer`'s own
+ *     BOUNDARY case) and for a test file that calls `main(dir)` WITH an
+ *     argument only (an injected-fixture suite, not a real-tree scan);
+ *     STATE (design choice, mirroring the binary-consumer marker's own
+ *     comment-insensitivity): a marker inside a comment still counts.
+ *   - `isChangedFileInTreeScanScope`: HAPPY for both scopes; BOUNDARY —
+ *     a `packages/`-prefixed NON-test file does not match
+ *     `"packages-test-tree"` (test-file-ness is still required, not just the
+ *     prefix); NEGATIVE — a non-text-source extension does not match
+ *     `"repo-tracked-text-source"`.
+ *   - `selectAffectedTests` end-to-end: HAPPY — the INCIDENT CONTROL itself
+ *     (load-bearing per the task's own Oracle): a changed
+ *     `packages/lore/tests/unit/adapters/assess-commit-derivation.test.ts`
+ *     (real path, the exact file the incident touched) selects the REAL
+ *     `check-test-budgets.test.ts` content as `tree-scan-oracle`; HAPPY —
+ *     `check-no-nul-bytes.test.ts` is selected on a changed file OUTSIDE the
+ *     traced universe entirely (e.g. a `docs/*.md` path not present in
+ *     `fileMap` at all), proving rule (d) consults the FULL raw
+ *     `changedFiles` list, not just `knownChanged`; NEGATIVE — a changed
+ *     file matching NEITHER oracle's scope (a `.png` asset) selects neither;
+ *     BOUNDARY (per-oracle scoping, not a blanket trigger) — a changed
+ *     `.md` file selects ONLY `check-no-nul-bytes.test.ts` and explicitly
+ *     NOT `check-test-budgets.test.ts` (which only judges `packages/**`
+ *     test files); STATE (precedence) — a tree-scanning oracle that is
+ *     ITSELF the changed file keeps reason `changed-test` (highest
+ *     precedence), never `tree-scan-oracle`; REGRESSION (precedence) — a
+ *     file matching BOTH the binary-consumer marker and a tree-scan-oracle
+ *     shape keeps reason `binary-consumer` (rule (c) precedes rule (d)).
+ *
  * scripts/ universe widening (task
  * task-test-changed-s-file-universe-is-packages-not-the-repo-the): the
  * selector's file universe was `packages/*` only — `loadFileMap` (private,
@@ -138,9 +179,10 @@ import { tmpdir } from "node:os";
 
 type FileMap = ReadonlyMap<string, string>;
 type AliasMap = Readonly<Record<string, string>>;
-type SelectionReason = "changed-test" | "transitive" | "binary-consumer";
+type SelectionReason = "changed-test" | "transitive" | "binary-consumer" | "tree-scan-oracle";
 type TestRunner = "vitest" | "bun";
 type BinaryConsumerKind = "compiled" | "source";
+type TreeScanScope = "packages-test-tree" | "repo-tracked-text-source";
 interface SelectedFile {
   path: string;
   reason: SelectionReason;
@@ -172,6 +214,8 @@ type IsTestFileFn = (path: string) => boolean;
 type IsBunTestFileFn = (path: string) => boolean;
 type ClassifyBinaryConsumerFn = (path: string, content: string) => BinaryConsumerKind | undefined;
 type IsBinaryConsumerCandidateFn = (path: string, content: string) => boolean;
+type ClassifyTreeScanningOracleFn = (path: string, content: string) => TreeScanScope | undefined;
+type ChangedFileMatchesTreeScanScopeFn = (changedPath: string, scope: TreeScanScope) => boolean;
 type SelectAffectedTestsFn = (params: { changedFiles: readonly string[]; fileMap: FileMap; aliasMap: AliasMap }) => SelectionResult;
 type FormatAccountingFn = (selection: SelectionResult) => string;
 type IsLoudZeroFn = (selection: SelectionResult) => boolean;
@@ -195,6 +239,8 @@ let isTestFile: IsTestFileFn;
 let isBunTestFile: IsBunTestFileFn;
 let classifyBinaryConsumer: ClassifyBinaryConsumerFn;
 let isBinaryConsumerCandidate: IsBinaryConsumerCandidateFn;
+let classifyTreeScanningOracle: ClassifyTreeScanningOracleFn;
+let isChangedFileInTreeScanScope: ChangedFileMatchesTreeScanScopeFn;
 let selectAffectedTests: SelectAffectedTestsFn;
 let formatAccounting: FormatAccountingFn;
 let isLoudZero: IsLoudZeroFn;
@@ -210,6 +256,8 @@ beforeAll(async () => {
   isBunTestFile = mod.isBunTestFile;
   classifyBinaryConsumer = mod.classifyBinaryConsumer;
   isBinaryConsumerCandidate = mod.isBinaryConsumerCandidate;
+  classifyTreeScanningOracle = mod.classifyTreeScanningOracle;
+  isChangedFileInTreeScanScope = mod.isChangedFileInTreeScanScope;
   selectAffectedTests = mod.selectAffectedTests;
   formatAccounting = mod.formatAccounting;
   isLoudZero = mod.isLoudZero;
@@ -292,6 +340,113 @@ describe("changed-tests selector — classifyBinaryConsumer / isBinaryConsumerCa
     const content = 'const INDEX_TS = "src/index.ts";\nconst LORE_BIN = "dist/lore";';
 
     expect(classifyBinaryConsumer(path, content)).toBe("compiled");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Rule (d): tree-scanning oracles (task
+// task-test-changed-s-fourth-invisible-edge-a-tree-scanning) — a test that
+// judges files via a RUNTIME FILESYSTEM SCAN, invisible to import tracing
+// exactly like a binary-consumer's subprocess spawn (rule (c)) is invisible
+// to it. `check-test-budgets.test.ts` and `check-no-nul-bytes.test.ts` are
+// the two known instances, verified empirically (see this task's own
+// `lore get`): the content snippets below mirror each REAL file's actual
+// shape (a bare `main()` call proving an unmocked real-tree run; the
+// no-nul-bytes test additionally imports `hasTextSourceExtension`), never a
+// hardcoded filename check.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("changed-tests selector — classifyTreeScanningOracle (rule (d))", () => {
+  it("HAPPY: the REAL check-test-budgets.test.ts shape (bare main(), no hasTextSourceExtension import) classifies as packages-test-tree", () => {
+    const path = "scripts/tests/check-test-budgets.test.ts";
+    const content = [
+      'import { main } from "../check-test-budgets.js";',
+      'describe("check-test-budgets ledger: main() — real repo tree, task Acceptance Criterion #1", () => {',
+      '  it("exits 0 against THIS checkout\'s real test tree", () => {',
+      "    const exitCode = main();",
+      "    expect(exitCode).toBe(0);",
+      "  });",
+      "});",
+    ].join("\n");
+
+    expect(classifyTreeScanningOracle(path, content)).toBe("packages-test-tree");
+  });
+
+  it("HAPPY: the REAL check-no-nul-bytes.test.ts shape (bare main() AND an hasTextSourceExtension import) classifies as repo-tracked-text-source", () => {
+    const path = "scripts/tests/check-no-nul-bytes.test.ts";
+    const content = [
+      'import { hasTextSourceExtension, main } from "../check-no-nul-bytes.js";',
+      'describe("check-no-nul-bytes: hasTextSourceExtension / hasNoExtension", () => {',
+      '  it("HAPPY: a .ts file matches", () => { expect(hasTextSourceExtension("a.ts")).toBe(true); });',
+      "});",
+      'describe("check-no-nul-bytes: real repo tree (task oracle)", () => {',
+      '  it("HAPPY: exits 0 against THIS checkout\'s own git-tracked tree", () => {',
+      "    expect(main()).toBe(0);",
+      "  });",
+      "});",
+    ].join("\n");
+
+    expect(classifyTreeScanningOracle(path, content)).toBe("repo-tracked-text-source");
+  });
+
+  it("NEGATIVE: a non-test SOURCE file containing both markers is NOT classified — isTestFile gates entry regardless of content, mirroring classifyBinaryConsumer's own boundary case", () => {
+    const path = "scripts/check-test-budgets.ts";
+    const content = 'export function main(repoRoot = REPO_ROOT) { return 0; }\nfunction hasTextSourceExtension(p) { return true; }\n// main()';
+
+    expect(isTestFile(path)).toBe(false);
+    expect(classifyTreeScanningOracle(path, content)).toBeUndefined();
+  });
+
+  it("NEGATIVE: a test file whose ONLY main(...) calls pass an argument (an injected-fixture suite, not a real-tree scan) is NOT classified", () => {
+    const path = "scripts/tests/check-test-budgets.test.ts";
+    const content = [
+      'import { main } from "../check-test-budgets.js";',
+      'describe("check-test-budgets ledger: loadLedgerFromDisk", () => {',
+      '  it("HAPPY: reads a real ledger file from disk at the conventional path", () => {',
+      "    const ledger = main(tmpDir);", // arity-1 call, never bare main()
+      "    expect(ledger).toBeDefined();",
+      "  });",
+      "});",
+    ].join("\n");
+
+    expect(classifyTreeScanningOracle(path, content)).toBeUndefined();
+  });
+
+  it("NEGATIVE: an ordinary test file with neither marker is not classified", () => {
+    const path = "packages/lore/tests/unit/service/corpus-service.test.ts";
+    const content = 'import { CorpusService } from "../../../src/service/corpus-service.js";\nexpect(1).toBe(1);';
+
+    expect(classifyTreeScanningOracle(path, content)).toBeUndefined();
+  });
+
+  it("STATE (design choice, mirroring classifyBinaryConsumer's own comment-insensitivity): a bare main() appearing only inside a comment still counts — this scan is no more comment-aware than the rest of this file's regex scans", () => {
+    const path = "scripts/tests/comment-only.test.ts";
+    const content = "// this test used to call main() directly but no longer does\nexpect(1).toBe(1);";
+
+    expect(classifyTreeScanningOracle(path, content)).toBe("packages-test-tree");
+  });
+});
+
+describe("changed-tests selector — isChangedFileInTreeScanScope (rule (d))", () => {
+  it("HAPPY: a packages/**/*.test.ts changed path matches packages-test-tree", () => {
+    expect(isChangedFileInTreeScanScope("packages/lore/tests/unit/adapters/assess-commit-derivation.test.ts", "packages-test-tree")).toBe(true);
+  });
+
+  it("BOUNDARY: a packages/-prefixed NON-test file does not match packages-test-tree — the prefix alone is not enough, test-file-ness is still required", () => {
+    expect(isChangedFileInTreeScanScope("packages/lore/src/service/corpus-service.ts", "packages-test-tree")).toBe(false);
+  });
+
+  it("NEGATIVE: a scripts/tests/*.test.ts changed path does NOT match packages-test-tree — scanRepoTree's own scan root is packages/ ONLY, excluding scripts/tests/ by design", () => {
+    expect(isChangedFileInTreeScanScope("scripts/tests/check-test-budgets.test.ts", "packages-test-tree")).toBe(false);
+  });
+
+  it("HAPPY: any tracked text-source extension (e.g. .md, .json) matches repo-tracked-text-source, regardless of directory or test-file-ness", () => {
+    expect(isChangedFileInTreeScanScope("docs/some-doc.md", "repo-tracked-text-source")).toBe(true);
+    expect(isChangedFileInTreeScanScope("scripts/test-budget-ledger.json", "repo-tracked-text-source")).toBe(true);
+  });
+
+  it("NEGATIVE: a non-allowlisted (binary asset) extension does not match repo-tracked-text-source", () => {
+    expect(isChangedFileInTreeScanScope("packages/dashboard/public/favicon.png", "repo-tracked-text-source")).toBe(false);
   });
 });
 
@@ -567,6 +722,145 @@ describe("changed-tests selector — selectAffectedTests", () => {
     // other.ts changing does NOT transitively select dynamic.test.ts, since the
     // import() call is invisible to the static regex scan (documented limitation).
     expect(result.selected).toEqual([]);
+  });
+
+  // ─── rule (d): tree-scanning oracles ──────────────────────────────────
+  // Content mirrors each REAL oracle test's actual shape — see
+  // classifyTreeScanningOracle's own describe block above for why these two
+  // specific snippets (bare main(), plus hasTextSourceExtension for the
+  // wider scope) are what earns membership, not the filenames themselves.
+
+  const CHECK_TEST_BUDGETS_TEST_CONTENT = [
+    'import { main } from "../check-test-budgets.js";',
+    'describe("check-test-budgets ledger: main() — real repo tree, task Acceptance Criterion #1", () => {',
+    '  it("exits 0 against THIS checkout\'s real test tree", () => {',
+    "    const exitCode = main();",
+    "    expect(exitCode).toBe(0);",
+    "  });",
+    "});",
+  ].join("\n");
+
+  const CHECK_NO_NUL_BYTES_TEST_CONTENT = [
+    'import { hasTextSourceExtension, main } from "../check-no-nul-bytes.js";',
+    'describe("check-no-nul-bytes: hasTextSourceExtension / hasNoExtension", () => {',
+    '  it("HAPPY: a .ts file matches", () => { expect(hasTextSourceExtension("a.ts")).toBe(true); });',
+    "});",
+    'describe("check-no-nul-bytes: real repo tree (task oracle)", () => {',
+    '  it("HAPPY: exits 0 against THIS checkout\'s own git-tracked tree", () => {',
+    "    expect(main()).toBe(0);",
+    "  });",
+    "});",
+  ].join("\n");
+
+  it("8. HAPPY (INCIDENT CONTROL, load-bearing per the task's own Oracle): a changed packages/lore/tests/unit/adapters/assess-commit-derivation.test.ts — the REAL path the incident touched — selects check-test-budgets.test.ts as tree-scan-oracle", () => {
+    const fileMap: FileMap = new Map([
+      [
+        "packages/lore/tests/unit/adapters/assess-commit-derivation.test.ts",
+        'import { describe, it } from "vitest";\n// unrelated content — the incident shape does not require any import relationship',
+      ],
+      ["scripts/tests/check-test-budgets.test.ts", CHECK_TEST_BUDGETS_TEST_CONTENT],
+    ]);
+
+    const result = selectAffectedTests({
+      changedFiles: ["packages/lore/tests/unit/adapters/assess-commit-derivation.test.ts"],
+      fileMap,
+      aliasMap: ALIAS_MAP,
+    });
+
+    expect(result.selected).toEqual([
+      {
+        path: "packages/lore/tests/unit/adapters/assess-commit-derivation.test.ts",
+        reason: "changed-test",
+        runner: "vitest",
+      },
+      { path: "scripts/tests/check-test-budgets.test.ts", reason: "tree-scan-oracle", runner: "vitest" },
+    ]);
+  });
+
+  it("9. HAPPY: check-no-nul-bytes.test.ts is selected on a changed file OUTSIDE the traced universe entirely (not present in fileMap at all) — proves rule (d) consults the FULL raw changedFiles list, not just knownChanged", () => {
+    const fileMap: FileMap = new Map([["scripts/tests/check-no-nul-bytes.test.ts", CHECK_NO_NUL_BYTES_TEST_CONTENT]]);
+
+    const result = selectAffectedTests({
+      changedFiles: ["docs/some-doc.md"], // not a key in fileMap at all
+      fileMap,
+      aliasMap: ALIAS_MAP,
+    });
+
+    expect(result.selected).toEqual([
+      { path: "scripts/tests/check-no-nul-bytes.test.ts", reason: "tree-scan-oracle", runner: "vitest" },
+    ]);
+  });
+
+  it("10. NEGATIVE: a changed file matching NEITHER oracle's scope (a non-allowlisted binary asset) selects neither tree-scanning oracle", () => {
+    const fileMap: FileMap = new Map([
+      ["scripts/tests/check-test-budgets.test.ts", CHECK_TEST_BUDGETS_TEST_CONTENT],
+      ["scripts/tests/check-no-nul-bytes.test.ts", CHECK_NO_NUL_BYTES_TEST_CONTENT],
+    ]);
+
+    const result = selectAffectedTests({
+      changedFiles: ["packages/dashboard/public/favicon.png"],
+      fileMap,
+      aliasMap: ALIAS_MAP,
+    });
+
+    expect(result.selected).toEqual([]);
+    expect(result.zeroSelectionWarning).toBe(false); // favicon.png is not graph-known (not in fileMap) — no WARNING, matching the established BOUNDARY convention
+  });
+
+  it("11. BOUNDARY (per-oracle scoping, NOT a blanket 'always select these'): a changed .md file selects ONLY check-no-nul-bytes.test.ts, explicitly NOT check-test-budgets.test.ts (which only judges packages/** test files)", () => {
+    const fileMap: FileMap = new Map([
+      ["scripts/tests/check-test-budgets.test.ts", CHECK_TEST_BUDGETS_TEST_CONTENT],
+      ["scripts/tests/check-no-nul-bytes.test.ts", CHECK_NO_NUL_BYTES_TEST_CONTENT],
+    ]);
+
+    const result = selectAffectedTests({
+      changedFiles: ["docs/some-doc.md"],
+      fileMap,
+      aliasMap: ALIAS_MAP,
+    });
+
+    const selectedPaths = result.selected.map((f) => f.path);
+    expect(selectedPaths).toEqual(["scripts/tests/check-no-nul-bytes.test.ts"]);
+    expect(selectedPaths).not.toContain("scripts/tests/check-test-budgets.test.ts");
+  });
+
+  it("12. STATE (precedence): a tree-scanning oracle that is ITSELF the changed file keeps reason changed-test, never tree-scan-oracle", () => {
+    const fileMap: FileMap = new Map([["scripts/tests/check-test-budgets.test.ts", CHECK_TEST_BUDGETS_TEST_CONTENT]]);
+
+    const result = selectAffectedTests({
+      changedFiles: ["scripts/tests/check-test-budgets.test.ts"],
+      fileMap,
+      aliasMap: ALIAS_MAP,
+    });
+
+    expect(result.selected).toEqual([
+      { path: "scripts/tests/check-test-budgets.test.ts", reason: "changed-test", runner: "vitest" },
+    ]);
+  });
+
+  it("13. REGRESSION (precedence): a file matching BOTH the binary-consumer marker and a tree-scan-oracle shape keeps reason binary-consumer — rule (c) precedes rule (d)", () => {
+    const fileMap: FileMap = new Map([
+      ["packages/lore/src/index.ts", "export const ENTRY = 1;"],
+      [
+        "scripts/tests/both-rules.test.ts",
+        `const bin = "dist/lore";\n${CHECK_TEST_BUDGETS_TEST_CONTENT}`, // both a binary-consumer marker AND a bare main() call
+      ],
+    ]);
+
+    const result = selectAffectedTests({
+      changedFiles: ["packages/lore/src/index.ts"],
+      fileMap,
+      aliasMap: ALIAS_MAP,
+    });
+
+    expect(result.selected).toEqual([
+      {
+        path: "scripts/tests/both-rules.test.ts",
+        reason: "binary-consumer",
+        runner: "vitest",
+        binaryConsumerKind: "compiled",
+      },
+    ]);
   });
 });
 
