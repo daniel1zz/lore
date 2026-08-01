@@ -30,6 +30,24 @@
  *     decision yielding a {@link BinaryFreshnessVerdict}; the caller performs
  *     the actual `stat()` calls (mtimes arrive as DATA, mirrors the
  *     `FsProbe`/git-facts precedent used elsewhere in this codebase).
+ *   - isTestFileAnchor(anchor) — recognises whether a normalized
+ *     `file_anchors` entry names a SPECIFIC test file (as opposed to a
+ *     SPEC-042 D3 directory scope, trailing `/`) — task
+ *     task-every-ac-oracle-is-t-scoped-so-the-file-passes-is-attested.
+ *   - commandRunsFileUnfiltered(command, filePath) — pure decision: does
+ *     `command` run the exact `filePath` test file with NO recognised
+ *     case-name filter (a STRICT SUPERSET of `commandHasCaseFilter`'s flag
+ *     set — see {@link UNFILTERED_RUN_CASE_FILTER_DESCRIPTION}'s own doc for
+ *     why the two must not share one set). Consumed by
+ *     `TaskWorkflowService.done`'s third evidence floor: one attested
+ *     UNFILTERED `result:pass` run per declared test-file anchor, alongside
+ *     the `-t`-scoped AC rows (`knowledge-assessment-implementation-lore-ac-
+ *     set-the-dangling-ac`'s finding that a `-t`-filtered oracle attests only
+ *     the ONE assertion it binds to, never "the file as a whole passes").
+ *   - UNFILTERED_RUN_CASE_FILTER_DESCRIPTION — the human-facing spelling of
+ *     the (broader) flag set {@link commandRunsFileUnfiltered} recognises,
+ *     colocated for the same anti-drift reason as
+ *     {@link CASE_FILTER_FLAGS_DESCRIPTION}.
  *
  * Invariants:
  *   - Referentially transparent: same input in → same output, always.
@@ -54,6 +72,15 @@
  *     vitest report every test as `skipped` (e.g. `"Tests 46 skipped (46)"`),
  *     so reading the total would report 46 matched cases for a filter that
  *     matched none. See {@link countMatchedVitestCases}.
+ *   - `commandRunsFileUnfiltered` requires an EXACT token match against the
+ *     target `filePath` (never a substring/"looks like a path" test) — this
+ *     is deliberate: it is what makes the predicate immune to vitest's bare
+ *     POSITIONAL filename filter (`vitest run <substring>`, no flag at all)
+ *     without having to special-case that flag. Anything this module's
+ *     `stripCdPrefix`/token comparison doesn't recognise (nested `cd`,
+ *     subshells, glob expansion, `bun run <script>` indirection) fails
+ *     CLOSED — no match found, never a fabricated one — forcing a clearer
+ *     evidence command rather than risking a false positive.
  *
  * Side-effect class: pure
  *
@@ -63,7 +90,9 @@
  *   count guard), AC-061-9, AC-061-10; task
  *   task-fix-spec-061-miss-vitest-t-zero-matched-case-run-recorded (fixes the
  *   vitest "-t matches 0 cases but every test is reported `skipped`, not
- *   `passed`" miss — SPEC-075 T1-stage incident)
+ *   `passed`" miss — SPEC-075 T1-stage incident); task
+ *   task-every-ac-oracle-is-t-scoped-so-the-file-passes-is-attested (the
+ *   unfiltered-file-run detector, §"Unfiltered-File-Run Detection" below)
  */
 
 // ─── Explicit Path-Argument Counting ────────────────────────────────────────
@@ -597,4 +626,213 @@ export function judgeBinaryFreshness(input: BinaryFreshnessInput): BinaryFreshne
   }
 
   return "fresh";
+}
+
+// ─── Unfiltered-File-Run Detection (task-every-ac-oracle-is-t-scoped) ───────
+//
+// A `-t`-scoped oracle attests exactly the ONE assertion it binds to — it
+// never proves the test FILE, taken as a whole, passes together (two tests
+// sharing mutable fixture state, or depending on execution order, can each
+// pass individually under `-t` and fail when the file runs unfiltered). This
+// section supplies the pure predicates `TaskWorkflowService.done`'s third
+// evidence floor uses to require one attested UNFILTERED `result:pass` run
+// per declared test-file anchor, alongside the `-t`-scoped AC rows.
+
+/**
+ * Recognises whether a normalized `file_anchors` entry (SPEC-042 D3 —
+ * `file-anchors.ts::normalizeFileAnchors`'s output shape: repo-relative, no
+ * leading `./`, a trailing `/` iff it is a DIRECTORY scope) names a SPECIFIC
+ * test file.
+ *
+ * A directory-scoped anchor is deliberately EXCLUDED — it never names a
+ * single file this module could demand one specific unfiltered command for;
+ * a task declaring only directory-scoped anchors has nothing this floor can
+ * check (the same "nothing declared → nothing to attest" shape
+ * {@link judgeCompleteness}'s `declaredPaths === 0` short-circuit already
+ * uses). Reuses {@link TEST_FILE_PATH_PATTERN} — the identical suffix
+ * convention {@link countExplicitPathArgs} recognises — so "what counts as a
+ * test file" is defined in exactly one place in this module.
+ *
+ * @param anchor - An already-normalized `file_anchors` entry.
+ * @returns `true` iff `anchor` is NOT directory-scoped and its final two
+ *   dot-segments match the `.test.<ext>`/`.spec.<ext>` convention.
+ *
+ * @example
+ * isTestFileAnchor("packages/core/tests/attestation-completeness.test.ts") // => true
+ *
+ * @example
+ * isTestFileAnchor("packages/core/tests/") // => false — directory scope, names no specific file
+ *
+ * @example
+ * isTestFileAnchor("packages/core/src/attestation-completeness.ts") // => false — not a test file
+ */
+export function isTestFileAnchor(anchor: string): boolean {
+  if (anchor.endsWith("/")) return false;
+  return TEST_FILE_PATH_PATTERN.test(anchor);
+}
+
+/**
+ * Case-name-filter flag spellings {@link commandRunsFileUnfiltered}
+ * recognises — a STRICT SUPERSET of {@link commandHasCaseFilter}'s set,
+ * deliberately kept as an INDEPENDENT set rather than widening that
+ * function: `commandHasCaseFilter` already has a production consumer
+ * (`adapters/cli/evidence-precheck.ts`, pinned by AC-061-14's single-
+ * definition-site scan) and widening its detected set is out of this task's
+ * scope/blast-radius. Empirically verified against the two runners this repo
+ * actually uses (`bunx vitest run --help`, `bun test --help`) before being
+ * hardcoded — evidence-driven, not guessed:
+ *   - `-t` / `--testNamePattern` — vitest's own spelling (camelCase); also
+ *     accepted by bun test's short `-t`.
+ *   - `--test-name-pattern` — bun test's own spelling (kebab-case);
+ *     vitest's cac-based parser ALSO accepts this kebab alias (confirmed:
+ *     `vitest run <file> --test-name-pattern=<pattern>` narrows the run
+ *     identically to `--testNamePattern=<pattern>`).
+ *   - any of the three joined to its value with `=` (`-t=foo`,
+ *     `--testNamePattern=foo`, `--test-name-pattern=foo` — all three
+ *     confirmed to actually narrow: `vitest run <file> -t=alpha` and
+ *     `bun test <file> -t=alpha` each report a skipped/filtered-out test,
+ *     not a full run of the file).
+ *
+ * Deliberately NOT handled: vitest's bare POSITIONAL filename filter
+ * (`vitest run <substring>`, no flag at all) is not a case-name filter at
+ * all — it narrows which FILES load, never which tests within an
+ * already-loaded file execute — so it has no entry in this set.
+ * {@link commandRunsFileUnfiltered} defends against it a DIFFERENT way: it
+ * requires an EXACT token match against the target anchor's full
+ * repo-relative path, never a substring/prefix test, so a command carrying
+ * only a vague positional filter (that happens to also match the target
+ * file, and possibly others) never counts as "ran THIS file" — it fails
+ * CLOSED unless the literal declared path is present as its own token.
+ */
+const UNFILTERED_RUN_CASE_FILTER_TOKENS = new Set(["-t", "--testNamePattern", "--test-name-pattern"]);
+const UNFILTERED_RUN_CASE_FILTER_EQUALS_PREFIXES = ["-t=", "--testNamePattern=", "--test-name-pattern="];
+
+/**
+ * Human-facing spelling of the (broader) flag set
+ * {@link commandRunsFileUnfiltered} recognises, for embedding in an
+ * operator-facing refusal message — colocated with the set itself for the
+ * same anti-drift reason as {@link CASE_FILTER_FLAGS_DESCRIPTION} (a
+ * consumer imports this rather than retyping the flag spellings).
+ */
+export const UNFILTERED_RUN_CASE_FILTER_DESCRIPTION =
+  "-t / --testNamePattern / --test-name-pattern (or any of the three joined to a value with '=')";
+
+function commandHasAnyCaseFilter(command: string): boolean {
+  const tokens = tokenizeCommand(command);
+  return tokens.some(
+    (token) =>
+      UNFILTERED_RUN_CASE_FILTER_TOKENS.has(token) ||
+      UNFILTERED_RUN_CASE_FILTER_EQUALS_PREFIXES.some((prefix) => token.startsWith(prefix)),
+  );
+}
+
+/** Matches ONE leading `cd <dir> && ` segment — see {@link stripCdPrefix}. */
+const CD_PREFIX_PATTERN = /^\s*cd\s+(\S+)\s*&&\s*/;
+
+/**
+ * Strips zero or more leading `cd <dir> && ` segments off `command`,
+ * returning the accumulated repo-relative directory offset and the
+ * remaining command string (the actual invocation to tokenize).
+ *
+ * Handles ONLY this exact, observed shape — the real bound-command example
+ * this task's dispatch measured is `cd packages/lore && bun test
+ * tests/integration/verify-executor.bun.test.ts`. Nothing fancier is
+ * attempted: no `;`-joined `cd`, no subshells, no `cd -`, no glob expansion.
+ * An unrecognised prefix shape is simply left unstripped (`offset` stays
+ * `""`), which means {@link commandRunsFileUnfiltered}'s token comparison
+ * falls through to a repo-root-relative match and correctly fails to find
+ * the anchor — the FAIL-CLOSED direction this module's header promises: a
+ * legitimately cd-offset command this parser doesn't recognise never
+ * produces a FALSE MATCH, it just isn't recognised as attesting (forcing a
+ * clearer evidence command rather than risking a silent false positive).
+ *
+ * @example
+ * stripCdPrefix("cd packages/lore && bun test tests/a.bun.test.ts")
+ * // => { offset: "packages/lore", rest: "bun test tests/a.bun.test.ts" }
+ *
+ * @example
+ * stripCdPrefix("bunx vitest run packages/core/tests/a.test.ts")
+ * // => { offset: "", rest: "bunx vitest run packages/core/tests/a.test.ts" }
+ */
+function stripCdPrefix(command: string): { offset: string; rest: string } {
+  let offset = "";
+  let rest = command;
+  let match = CD_PREFIX_PATTERN.exec(rest);
+  while (match !== null) {
+    const dir = match[1] ?? "";
+    offset = offset.length > 0 ? `${offset}/${dir}` : dir;
+    rest = rest.slice(match[0].length);
+    match = CD_PREFIX_PATTERN.exec(rest);
+  }
+  return { offset, rest };
+}
+
+/**
+ * Collapses `./`/empty/repeated-slash segments for path COMPARISON only —
+ * never used to validate or normalize a STORED anchor (that remains
+ * `normalizeFileAnchors`'s exclusive job); this is a read-only equality
+ * helper for {@link commandRunsFileUnfiltered}.
+ */
+function normalizeForComparison(rawPath: string): string {
+  return rawPath
+    .split("/")
+    .filter((segment) => segment.length > 0 && segment !== ".")
+    .join("/");
+}
+
+/**
+ * True iff `command` runs `filePath` (an already-normalized test-file
+ * anchor — see {@link isTestFileAnchor}) WITHOUT any recognised case-name
+ * filter (task-every-ac-oracle-is-t-scoped-so-the-file-passes-is-attested).
+ *
+ * "Runs `filePath`" means: after stripping a leading `cd <dir> &&` chain
+ * ({@link stripCdPrefix}) and tokenizing what remains, at least one non-flag
+ * token, joined to the accumulated `cd` offset, is EXACTLY `filePath` (after
+ * collapsing `./`/redundant slashes on both sides for comparison — see
+ * {@link normalizeForComparison}). Exact token identity — never a
+ * substring/prefix test — is what makes this predicate immune to vitest's
+ * bare positional filename filter without special-casing it (see
+ * {@link UNFILTERED_RUN_CASE_FILTER_TOKENS}'s own doc).
+ *
+ * @param command - The full evidence `command` string.
+ * @param filePath - The target test-file anchor (repo-relative, already
+ *   normalized — see {@link isTestFileAnchor}).
+ * @returns `true` iff `command` is a genuine unfiltered run of `filePath`.
+ *
+ * @example
+ * commandRunsFileUnfiltered(
+ *   "bunx vitest run packages/core/tests/attestation-completeness.test.ts",
+ *   "packages/core/tests/attestation-completeness.test.ts",
+ * ); // => true
+ *
+ * @example
+ * commandRunsFileUnfiltered(
+ *   "cd packages/lore && bun test tests/integration/verify-executor.bun.test.ts",
+ *   "packages/lore/tests/integration/verify-executor.bun.test.ts",
+ * ); // => true — the `cd` offset is folded into the comparison
+ *
+ * @example
+ * commandRunsFileUnfiltered(
+ *   "bunx vitest run packages/core/tests/attestation-completeness.test.ts -t 'one case'",
+ *   "packages/core/tests/attestation-completeness.test.ts",
+ * ); // => false — a case filter is present, even though the file path is named
+ *
+ * @example
+ * commandRunsFileUnfiltered("bun run test:changed main", "packages/core/tests/attestation-completeness.test.ts");
+ * // => false — no token names the file at all; a selective/derived-set
+ * // command never counts, however plausible it is that the file ran
+ */
+export function commandRunsFileUnfiltered(command: string, filePath: string): boolean {
+  if (commandHasAnyCaseFilter(command)) return false;
+
+  const { offset, rest } = stripCdPrefix(command);
+  const target = normalizeForComparison(filePath);
+  const tokens = tokenizeCommand(rest);
+
+  for (const token of tokens) {
+    if (token.length === 0 || token.startsWith("-")) continue;
+    const joined = offset.length > 0 ? `${offset}/${token}` : token;
+    if (normalizeForComparison(joined) === target) return true;
+  }
+  return false;
 }

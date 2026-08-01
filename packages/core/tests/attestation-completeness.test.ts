@@ -36,6 +36,8 @@ import {
   commandHasCaseFilter,
   commandReferencesCompiledBinary,
   judgeBinaryFreshness,
+  isTestFileAnchor,
+  commandRunsFileUnfiltered,
 } from "../src/attestation-completeness.js";
 
 describe("countExplicitPathArgs", () => {
@@ -400,5 +402,147 @@ describe("judgeBinaryFreshness", () => {
 
   it("BOUNDARY: newestSourceMtimeMs 0 (no source files found) with a real binary is fresh", () => {
     expect(judgeBinaryFreshness({ binaryMtimeMs: 500, newestSourceMtimeMs: 0 })).toBe("fresh");
+  });
+});
+
+// ─── isTestFileAnchor / commandRunsFileUnfiltered ────────────────────────────
+// task-every-ac-oracle-is-t-scoped-so-the-file-passes-is-attested — the
+// unfiltered-file-run detector `TaskWorkflowService.done`'s third evidence
+// floor consumes.
+//
+// Dimension mapping:
+//   HAPPY:      a plain file anchor is recognised as a test file; a plain
+//               unfiltered command matches its exact anchor; a `cd <dir> &&`
+//               prefixed command folds the offset into the match
+//   NEGATIVE:   a directory-scoped anchor (trailing "/") is never a test
+//               file; a command naming no token equal to the anchor never
+//               matches; every enumerated case-filter spelling (long/short,
+//               camel/kebab, "=" joined) defeats a match even when the exact
+//               file token IS present
+//   BOUNDARY:   a bare filename anchor (no "/") still recognised; a `./`
+//               prefixed token still matches via comparison normalization;
+//               an unrecognised cd-prefix shape (missing "&&") fails closed
+//               rather than guessing an offset
+//   ERROR:      n/a — both functions are pure/total, no throw surface;
+//               garbage/empty input degrades to a boolean, never an exception
+//   STATE:      n/a — no external state, pure function of its arguments
+//   REGRESSION: a full-suite command with no explicit file token (`bun run
+//               test`) and a selective/derived-set command (`bun run
+//               test:changed main`) never count as an unfiltered run of a
+//               specific file, however plausible it is that the file ran —
+//               this module never DERIVES a touched-file set from a command
+
+describe("isTestFileAnchor", () => {
+  it("HAPPY: a .test.ts anchor is recognised", () => {
+    expect(isTestFileAnchor("packages/core/tests/attestation-completeness.test.ts")).toBe(true);
+  });
+
+  it("HAPPY: a .bun.test.ts anchor is recognised (final two dot-segments match)", () => {
+    expect(isTestFileAnchor("packages/lore/tests/unit/store/sqlite-store.bun.test.ts")).toBe(true);
+  });
+
+  it("HAPPY: a .spec.tsx anchor is recognised", () => {
+    expect(isTestFileAnchor("packages/dashboard/src/components/Foo.spec.tsx")).toBe(true);
+  });
+
+  it("NEGATIVE: a directory-scoped anchor (trailing '/') is never a test file, even with a test-shaped name", () => {
+    expect(isTestFileAnchor("packages/core/tests/")).toBe(false);
+  });
+
+  it("NEGATIVE: an ordinary source file is not a test file", () => {
+    expect(isTestFileAnchor("packages/core/src/attestation-completeness.ts")).toBe(false);
+  });
+
+  it("BOUNDARY: a bare filename anchor with no '/' at all is still recognised", () => {
+    expect(isTestFileAnchor("standalone.test.ts")).toBe(true);
+  });
+
+  it("REGRESSION: agrees with countExplicitPathArgs's own test-file convention on the same path", () => {
+    const path = "packages/lore/tests/unit/setup-service.test.ts";
+    expect(isTestFileAnchor(path)).toBe(true);
+    expect(countExplicitPathArgs(`bunx vitest run ${path}`)).toBe(1);
+  });
+});
+
+describe("commandRunsFileUnfiltered", () => {
+  const FILE = "packages/core/tests/attestation-completeness.test.ts";
+
+  it("HAPPY: a plain unfiltered vitest command naming the exact file matches", () => {
+    expect(commandRunsFileUnfiltered(`bunx vitest run ${FILE}`, FILE)).toBe(true);
+  });
+
+  it("HAPPY: a cd-prefixed bun test command folds the offset into the match", () => {
+    const command = "cd packages/lore && bun test tests/integration/verify-executor.bun.test.ts";
+    expect(
+      commandRunsFileUnfiltered(command, "packages/lore/tests/integration/verify-executor.bun.test.ts"),
+    ).toBe(true);
+  });
+
+  it("HAPPY: a multi-file batch command matches on the file that IS present", () => {
+    const command = `bunx vitest run ${FILE} packages/core/tests/other.test.ts`;
+    expect(commandRunsFileUnfiltered(command, FILE)).toBe(true);
+  });
+
+  it("NEGATIVE: a command naming no token equal to the anchor never matches", () => {
+    expect(commandRunsFileUnfiltered("bunx vitest run packages/core/tests/other.test.ts", FILE)).toBe(
+      false,
+    );
+  });
+
+  it("NEGATIVE: -t (short, space-separated) defeats a match even though the file is named", () => {
+    expect(commandRunsFileUnfiltered(`bunx vitest run ${FILE} -t 'one case'`, FILE)).toBe(false);
+  });
+
+  it("NEGATIVE: --testNamePattern (long, camelCase, space-separated) defeats a match", () => {
+    expect(commandRunsFileUnfiltered(`bunx vitest run ${FILE} --testNamePattern 'one case'`, FILE)).toBe(
+      false,
+    );
+  });
+
+  it("NEGATIVE: --test-name-pattern (long, kebab-case — bun test's own spelling) defeats a match", () => {
+    expect(
+      commandRunsFileUnfiltered(`bun test ${FILE} --test-name-pattern 'one case'`, FILE),
+    ).toBe(false);
+  });
+
+  it("NEGATIVE: -t=<pattern> ('=' joined short form) defeats a match", () => {
+    expect(commandRunsFileUnfiltered(`bunx vitest run ${FILE} -t=alpha`, FILE)).toBe(false);
+  });
+
+  it("NEGATIVE: --testNamePattern=<pattern> ('=' joined camelCase) defeats a match", () => {
+    expect(commandRunsFileUnfiltered(`bunx vitest run ${FILE} --testNamePattern=alpha`, FILE)).toBe(
+      false,
+    );
+  });
+
+  it("NEGATIVE: --test-name-pattern=<pattern> ('=' joined kebab-case) defeats a match", () => {
+    expect(commandRunsFileUnfiltered(`bun test ${FILE} --test-name-pattern=alpha`, FILE)).toBe(false);
+  });
+
+  it("BOUNDARY: a './'-prefixed token still matches via comparison normalization", () => {
+    expect(commandRunsFileUnfiltered(`bunx vitest run ./${FILE}`, FILE)).toBe(true);
+  });
+
+  it("BOUNDARY: an unrecognised cd-prefix shape (missing '&&') fails closed rather than guessing an offset", () => {
+    // "cd packages/lore bun test tests/x.bun.test.ts" has no "&&" — stripCdPrefix
+    // leaves it untouched, so the (unstripped) command is tokenized as-is and no
+    // token equals the repo-root-relative target — never a false positive.
+    const command = "cd packages/lore bun test tests/integration/verify-executor.bun.test.ts";
+    expect(
+      commandRunsFileUnfiltered(command, "packages/lore/tests/integration/verify-executor.bun.test.ts"),
+    ).toBe(false);
+  });
+
+  it("ERROR: an empty command string never throws, degrades to false", () => {
+    expect(() => commandRunsFileUnfiltered("", FILE)).not.toThrow();
+    expect(commandRunsFileUnfiltered("", FILE)).toBe(false);
+  });
+
+  it("REGRESSION: a full-suite command with no explicit file token never counts as an unfiltered run of a specific file", () => {
+    expect(commandRunsFileUnfiltered("bun run test", FILE)).toBe(false);
+  });
+
+  it("REGRESSION: a selective/derived-set command (test:changed) never counts, however plausible the file ran", () => {
+    expect(commandRunsFileUnfiltered("bun run test:changed main", FILE)).toBe(false);
   });
 });

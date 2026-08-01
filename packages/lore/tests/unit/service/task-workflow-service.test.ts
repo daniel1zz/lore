@@ -2086,6 +2086,354 @@ describe("REGRESSION — declareRedFirst + a red row together satisfy done()'s n
   });
 });
 
+// ─── done()'s unfiltered-test-file-run floor ─────────────────────────────────
+// (task-every-ac-oracle-is-t-scoped-so-the-file-passes-is-attested)
+//
+// A `-t`-scoped AC oracle attests only the ONE assertion it binds to — never
+// that the test FILE, taken as a whole, passes together. This is a THIRD,
+// independent `done()` floor (beside the pre-existing result:pass floor and
+// the red-first floor immediately above): for EACH declared test-file
+// anchor (SPEC-042 `file_anchors`, filtered to a specific file — a
+// directory-scoped anchor names no single file and is unaffected), at least
+// one `oracle:"test"` `result:"pass"` evidence row must run that file with
+// no case-name filter.
+
+describe("HAPPY — done() accepts a test-file anchor with a genuine unfiltered pass row (AC-2 CONTROL)", () => {
+  it("a -t-scoped pass row PLUS an unfiltered pass row for the same file → done succeeds", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const FILE = "packages/core/tests/attestation-completeness.test.ts";
+    const taskId = await createTask(corpusService, planId, "Anchored Task", { file_anchors: [FILE] });
+
+    await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({ oracle: "test", command: `bunx vitest run ${FILE} -t "AC-1"`, result: "pass" }),
+    );
+    await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({ oracle: "test", command: `bunx vitest run ${FILE}`, result: "pass" }),
+    );
+
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    expect(doneResult.ok).toBe(true);
+    if (!doneResult.ok) return;
+    expect(doneResult.value.transitions).toEqual(["approved", "active", "archived"]);
+  });
+});
+
+describe("NEGATIVE — done() refuses a test-file anchor backed ONLY by -t-scoped evidence (AC-1)", () => {
+  it("only a -t-scoped pass row for the anchored file → VALIDATION_ERROR naming the file", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const FILE = "packages/core/tests/attestation-completeness.test.ts";
+    const taskId = await createTask(corpusService, planId, "Anchored Task", { file_anchors: [FILE] });
+
+    await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({ oracle: "test", command: `bunx vitest run ${FILE} -t "AC-1"`, result: "pass" }),
+    );
+
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    expect(doneResult.ok).toBe(false);
+    if (doneResult.ok) return;
+    expect(doneResult.error.code).toBe("VALIDATION_ERROR");
+    if (doneResult.error.code !== "VALIDATION_ERROR") return;
+    expect(doneResult.error.message).toContain(FILE);
+    expect(doneResult.error.message).toContain("UNFILTERED");
+
+    const doc = await corpusService.get(taskId);
+    expect(doc.ok).toBe(true);
+    if (!doc.ok) return;
+    expect(doc.value.doc.status).toBe("draft");
+  });
+
+  it("an unfiltered run of a DIFFERENT anchored file does not satisfy this one — names only the unmet file", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const FILE_A = "packages/core/tests/attestation-completeness.test.ts";
+    const FILE_B = "packages/lore/tests/unit/service/task-workflow-service.test.ts";
+    const taskId = await createTask(corpusService, planId, "Two-Anchor Task", {
+      file_anchors: [FILE_A, FILE_B],
+    });
+
+    // FILE_A gets a genuine unfiltered pass; FILE_B only ever gets a -t-scoped one.
+    await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({ oracle: "test", command: `bunx vitest run ${FILE_A}`, result: "pass" }),
+    );
+    await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({ oracle: "test", command: `bunx vitest run ${FILE_B} -t "some case"`, result: "pass" }),
+    );
+
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    expect(doneResult.ok).toBe(false);
+    if (doneResult.ok) return;
+    expect(doneResult.error.code).toBe("VALIDATION_ERROR");
+    if (doneResult.error.code !== "VALIDATION_ERROR") return;
+    expect(doneResult.error.message).toContain(FILE_B);
+    expect(doneResult.error.message).not.toContain(FILE_A);
+  });
+
+  it("a case filter present alongside the exact file token still refuses (a -t run is never 'unfiltered')", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const FILE = "packages/core/tests/attestation-completeness.test.ts";
+    const taskId = await createTask(corpusService, planId, "Anchored Task", { file_anchors: [FILE] });
+
+    await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({ oracle: "test", command: `bunx vitest run ${FILE} --test-name-pattern=alpha`, result: "pass" }),
+    );
+
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    expect(doneResult.ok).toBe(false);
+  });
+});
+
+describe("BOUNDARY — a directory-scoped anchor names no specific file, so it never blocks (D3/D4 trailing '/')", () => {
+  it("a task declaring ONLY a directory-scoped anchor is unaffected by this floor", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId, "Dir-Anchored Task", {
+      file_anchors: ["packages/core/tests/"],
+    });
+
+    await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
+
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    expect(doneResult.ok).toBe(true);
+  });
+});
+
+describe("STATE — a task with no test-file anchors at all is completely unaffected (AC3, no new friction)", () => {
+  it("no file_anchors declared + only a result:pass row → done succeeds exactly as before", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
+
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    expect(doneResult.ok).toBe(true);
+  });
+
+  it("file_anchors declared but naming only non-test source files → done succeeds (nothing to attest)", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId, "Source-Only Anchors", {
+      file_anchors: ["packages/core/src/attestation-completeness.ts"],
+    });
+
+    await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
+
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    expect(doneResult.ok).toBe(true);
+  });
+});
+
+describe("ERROR — a malformed extra.file_anchors value degrades to 'no anchors', never crashes (defensive read)", () => {
+  it("extra.file_anchors stored as a non-array value is treated as empty — done succeeds on pass alone", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId, "Malformed Anchors Task");
+    // Bypasses the create-time normalizeFileAnchors gate on purpose — simulates a
+    // corrupted row, mirroring extractFileAnchors's own "malformed → []" contract.
+    await corpusService.set(taskId, { extra: { plan_id: planId, file_anchors: "not-an-array" } });
+
+    await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
+
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    expect(doneResult.ok).toBe(true);
+  });
+});
+
+describe("BOUNDARY — the three done() evidence floors are independent; none masks another (AC3)", () => {
+  it("red_first:true + an unmet unfiltered-file floor + only an expected-fail row → the PRE-EXISTING pass floor fires first", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const FILE = "packages/core/tests/attestation-completeness.test.ts";
+    const taskId = await createTask(corpusService, planId, "Triple-Floor Task", {
+      red_first: true,
+      file_anchors: [FILE],
+    });
+
+    await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({
+        oracle: "test",
+        command: `bunx vitest run ${FILE} -t "AC-1"`,
+        result: "expected-fail",
+        output_tail: "AssertionError: expected 1 to equal 2",
+      }),
+    );
+
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    expect(doneResult.ok).toBe(false);
+    if (doneResult.ok) return;
+    expect(doneResult.error.code).toBe("VALIDATION_ERROR");
+    if (doneResult.error.code !== "VALIDATION_ERROR") return;
+    // The result:pass floor's own message — proves it fired, not red-first or the new floor.
+    expect(doneResult.error.message).toContain("holds no result:pass evidence entry");
+  });
+
+  it("red_first:true + a pass row + an unmet unfiltered-file floor, NO red row → the red-first floor fires (not the new floor)", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const FILE = "packages/core/tests/attestation-completeness.test.ts";
+    const taskId = await createTask(corpusService, planId, "Triple-Floor Task 2", {
+      red_first: true,
+      file_anchors: [FILE],
+    });
+
+    // A -t-scoped pass — satisfies neither red-first (no red row) nor the new
+    // unfiltered-file floor (still -t-scoped), so BOTH would refuse; the
+    // red-first floor is evaluated first and must be the one that actually fires.
+    await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({ oracle: "test", command: `bunx vitest run ${FILE} -t "AC-1"`, result: "pass" }),
+    );
+
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    expect(doneResult.ok).toBe(false);
+    if (doneResult.ok) return;
+    expect(doneResult.error.code).toBe("VALIDATION_ERROR");
+    if (doneResult.error.code !== "VALIDATION_ERROR") return;
+    expect(doneResult.error.message).toContain("declares extra.red_first");
+  });
+
+  it("red_first satisfied + pass:result satisfied + unfiltered-file floor UNMET → the new floor fires distinctly", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const FILE = "packages/core/tests/attestation-completeness.test.ts";
+    const taskId = await createTask(corpusService, planId, "Triple-Floor Task 3", {
+      red_first: true,
+      file_anchors: [FILE],
+    });
+
+    await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({
+        oracle: "test",
+        command: `bunx vitest run ${FILE} -t "AC-1"`,
+        result: "expected-fail",
+        output_tail: "AssertionError: expected 1 to equal 2",
+      }),
+    );
+    await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({ oracle: "test", command: `bunx vitest run ${FILE} -t "AC-1"`, result: "pass" }),
+    );
+
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    expect(doneResult.ok).toBe(false);
+    if (doneResult.ok) return;
+    expect(doneResult.error.code).toBe("VALIDATION_ERROR");
+    if (doneResult.error.code !== "VALIDATION_ERROR") return;
+    // Neither the pass floor nor the red-first floor's own message — proves
+    // the NEW floor, and only it, is what refused this call.
+    expect(doneResult.error.message).not.toContain("holds no result:pass evidence entry");
+    expect(doneResult.error.message).not.toContain("declares extra.red_first");
+    expect(doneResult.error.message).toContain(FILE);
+  });
+});
+
+describe("REGRESSION — the interaction the floor exists to catch: two tests, each green under -t, red together (AC-4)", () => {
+  // Real, independently-observed transcripts (not fabricated): a throwaway
+  // fixture file with two tests sharing mutable module state —
+  //   let counter = 0;
+  //   test("first bumps the shared counter to one", () => { counter += 1; expect(counter).toBe(1); });
+  //   test("second assumes it is the only test touching the counter", () => {
+  //     expect(counter).toBe(0); counter += 1;
+  //   });
+  // — run three times with `bunx vitest run`:
+  //   -t "first bumps the shared counter to one"                  -> exit 0 (1 passed | 1 skipped)
+  //   -t "second assumes it is the only test touching the counter" -> exit 0 (1 passed | 1 skipped)
+  //   (unfiltered)                                                  -> exit 1 (1 failed | 1 passed):
+  //     AssertionError: expected 1 to be +0 // Object.is equality
+  // Both per-test -t runs are green; only the unfiltered run exposes the
+  // ordering-dependent interaction. This is exactly the false-green shape
+  // this task exists to close: per-AC -t-scoped evidence alone would leave
+  // it undetected.
+  const FIXTURE = "packages/core/tests/fixtures/counter-interaction.test.ts";
+
+  it("two -t-scoped PASS rows (one per test) with NO unfiltered row at all → refused, naming the fixture", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId, "Interaction Fixture Task", {
+      file_anchors: [FIXTURE],
+    });
+
+    await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({
+        oracle: "test",
+        command: `bunx vitest run ${FIXTURE} -t "first bumps the shared counter to one"`,
+        result: "pass",
+      }),
+    );
+    await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({
+        oracle: "test",
+        command: `bunx vitest run ${FIXTURE} -t "second assumes it is the only test touching the counter"`,
+        result: "pass",
+      }),
+    );
+
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    expect(doneResult.ok).toBe(false);
+    if (doneResult.ok) return;
+    expect(doneResult.error.code).toBe("VALIDATION_ERROR");
+    if (doneResult.error.code !== "VALIDATION_ERROR") return;
+    expect(doneResult.error.message).toContain(FIXTURE);
+  });
+
+  it("the REAL unfiltered run, recorded verbatim as result:fail (RED), still does not satisfy the floor", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId, "Interaction Fixture Task Red", {
+      file_anchors: [FIXTURE],
+    });
+
+    await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({
+        oracle: "test",
+        command: `bunx vitest run ${FIXTURE} -t "first bumps the shared counter to one"`,
+        result: "pass",
+      }),
+    );
+    await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({
+        oracle: "test",
+        command: `bunx vitest run ${FIXTURE} -t "second assumes it is the only test touching the counter"`,
+        result: "pass",
+      }),
+    );
+    // The genuine unfiltered run, recorded verbatim as observed — real exit
+    // code 1, real AssertionError tail. Proof this floor requires an
+    // UNFILTERED PASS, not merely an unfiltered ATTEMPT.
+    await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({
+        oracle: "test",
+        command: `bunx vitest run ${FIXTURE}`,
+        result: "fail",
+        output_tail: "AssertionError: expected 1 to be +0 // Object.is equality",
+      }),
+    );
+
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    expect(doneResult.ok).toBe(false);
+    if (doneResult.ok) return;
+    expect(doneResult.error.code).toBe("VALIDATION_ERROR");
+    if (doneResult.error.code !== "VALIDATION_ERROR") return;
+    expect(doneResult.error.message).toContain(FIXTURE);
+  });
+});
+
 // ─── Placeholder-command evidence write-time guard ───────────────────────────
 // (task-reject-placeholder-command-strings-at-evidence-write-time)
 //
