@@ -8,19 +8,27 @@
  *     the prompt text or rubric changes materially
  *   - AssessTemplateFn — the shape every registry entry must satisfy (mirrors
  *     review-template.ts's ReviewTemplateFn)
- *   - ASSESS_TEMPLATES — version-keyed registry (SPEC-040 §T2 D6); `5` is the frozen v5
- *     entry (`buildAssessPrompt`, provenance only), `6` is the active entry (`buildAssessPromptV6`)
+ *   - ASSESS_TEMPLATES — version-keyed registry (SPEC-040 §T2 D6, re-keyed T5): `5` is the
+ *     frozen v5 entry (`buildAssessPrompt`, provenance only), `6` is the FROZEN pre-projection
+ *     v6 entry (`buildAssessPromptV6Frozen` — byte-identical to `buildAssessPromptV6`'s
+ *     behaviour before T3/a639485), `7` is the active entry (`buildAssessPromptV7`, T3's
+ *     projected evidence renderer)
  *   - getAssessTemplate(version) — Result-returning registry lookup; an absent version is
  *     err(AI_PROVIDER_ERROR) naming it, never an uncaught throw
  *   - buildAssessPrompt(bundle, diffText, budgets) — the v5 prompt builder (registry entry `5`)
- *   - buildAssessPromptV6(bundle, diffText, budgets, facts?) — the v6 prompt builder (registry
- *     entry `6`, SPEC-040 §T2): adds a "# Deterministic Facts" section (from
- *     `computeAssessmentFacts`, @lore/core), a three-dimension rubric (outcome /
- *     evidence_integrity / scope_fidelity), and — when the plan declares `extra.ac_scope` —
- *     marks out-of-scope AC-table rows and restricts the output's allowed `ac_id` set (D5)
+ *   - buildAssessPromptV6(bundle, diffText, budgets, facts?) / buildAssessPromptV7(same
+ *     signature) — two names for the SAME active builder (registry entry `7`, T5): adds a
+ *     "# Deterministic Facts" section (from `computeAssessmentFacts`, @lore/core), a
+ *     three-dimension rubric (outcome / evidence_integrity / scope_fidelity), and — when the
+ *     plan declares `extra.ac_scope` — marks out-of-scope AC-table rows and restricts the
+ *     output's allowed `ac_id` set (D5). `buildAssessPromptV6`'s name is kept because
+ *     AC-AEP-4 pins a direct caller asserting it renders the SAME projected evidence shape
+ *     as v5 — it could not be repurposed to mean "frozen" without breaking that spec-level
+ *     AC, so the frozen entry got a new name (`buildAssessPromptV6Frozen`) instead of this
+ *     one. `buildAssessPromptV7` is the forward-looking alias for any new caller.
  *   - buildAssessDiffMeta(diffText) — derives the {@link DiffMeta} regression-signal shape
  *     from the SAME diff-header parse `truncateDiffByFile` uses (`listDiffFiles`,
- *     `diff-truncation.ts`) — single derivation site, consumed by both v6's own facts
+ *     `diff-truncation.ts`) — single derivation site, consumed by both v6/v7's own facts
  *     fallback and `AIProviderService.assessPlan`'s once-only facts computation
  *   - buildAssessRetryPrompt(originalPrompt, parseErrorMessage) — one corrective retry prompt
  *
@@ -56,12 +64,43 @@
  *     required going forward, but its EXISTING tests must stay green. `buildAssessPromptV6`
  *     extends v5's role→materials→rubric→output structure with a "# Deterministic Facts"
  *     section and a three-dimension rubric; see its own JSDoc for the full delta.
+ *   - **Evidence row projection, not embedding (SPEC-lore-assess-project-evidence-rows-
+ *     instead-of-embedding-the D1)**: `renderTaskEvidence` projects each evidence row as
+ *     `(oracle, ac_ref, result, command, tail_bytes)` — `tail_bytes` ALWAYS rendered (0 for
+ *     an absent/empty tail, never omitted) — and shows the full clipped `output_tail` text
+ *     ONLY for a row whose `ac_ref` is among `computeAcIdsUnderJudgment`'s result (v5: the
+ *     spec's full declared set; v6: the plan-scope-restricted subset, D5 — AC-AEP-4 pins
+ *     both builders agreeing). This is the root fix for a heavily-evidenced task's RENDERED
+ *     TEXT ballooning unboundedly (AC-AEP-2): the OLD rendering embedded every row's full
+ *     500-char-clipped tail regardless of relevance; the NEW compact projection keeps the
+ *     evidence block itself small. `truncateSection(task.content, budgets.max_task_chars)`
+ *     is UNCHANGED — it measures `task.content` ALONE, never the rendered evidence text
+ *     (AC-067-5 pins this in isolation: a tiny task budget with zero evidence must truncate
+ *     purely on content length) — the `` `task:${task.slug}` `` truncated[] entry vocabulary
+ *     is likewise UNCHANGED (frozen — `computeTaskTruncationRatio`, `@lore/core/assessment.ts`,
+ *     keys off the `task:` prefix; `findUngroundedAbsenceDimensions`,
+ *     `../service/ai-provider-service.ts`, substring-matches it) — AC-AEP-3 regression-pins
+ *     the exact string.
+ *   - **Evidence renderer parameterized, not forked (SPEC-lore-assess-project-evidence-rows-
+ *     instead-of-embedding-the T5, AC-AEP-9/10)**: the defect the bullet above's D1 change
+ *     surfaced is that `renderTaskEvidence` is SHARED by `buildAssessPrompt` (v5) and the
+ *     v6/v7 builder, so changing it changed BOTH at once — but `ASSESS_PROMPT_VERSION` was
+ *     still `6`, meaning an assessment stamped `prompt_version: 6` rendered differently
+ *     before and after that change landed. The fix is an injectable `EvidenceRenderer`
+ *     parameter on the shared v6/v7 builder core (`assembleFactsBasedAssessPrompt`) — ONE
+ *     builder body, not a forked twin. `ASSESS_TEMPLATES[6]` now binds
+ *     `renderTaskEvidenceV6Frozen` (byte-identical to `renderTaskEvidence`'s PRE-D1
+ *     behaviour, captured from `a639485^`), and `ASSESS_TEMPLATES[7]` binds the current
+ *     (projected) `renderTaskEvidence` and becomes `ASSESS_PROMPT_VERSION`. See the
+ *     `buildAssessPromptV6` doc for why that exported NAME still means "projected" even
+ *     though its registry slot moved to `7`.
  *
  * Side-effect class: pure
  *
  * Source: SPEC-026 §3 D2, D7, D8; §5; SPEC-028 AC-AE-2, AC-AE-3, AC-AE-4; SPEC-029 AC-AR-1;
  * bugfix F3 (`knowledge-assess-diff-truncation-systematically-hides-tests-from`);
- * SPEC-040 §T2 D1, D2, D3, D5, D6
+ * SPEC-040 §T2 D1, D2, D3, D5, D6;
+ * SPEC-lore-assess-project-evidence-rows-instead-of-embedding-the D1, D2 (T3), T5 (freeze + registry re-key)
  */
 
 import { err, ok, truncateSection, type LoreError, type PlanBundle, type DocRecord, type Result } from "@lore/core";
@@ -122,8 +161,23 @@ import {
  * allowed `ac_id` set to the plan's scoped subset (D5). `ASSESS_PROMPT_VERSION` is now the
  * REGISTRY KEY — always look it up via {@link getAssessTemplate}, never call
  * `buildAssessPromptV6` (or `buildAssessPrompt`) directly from a version-agnostic caller.
+ *
+ * **v6 → v7 (SPEC-lore-assess-project-evidence-rows-instead-of-embedding-the T5, AC-AEP-9/10)**:
+ * T3 changed the evidence-row rendering SHARED by `buildAssessPrompt` (v5) and the v6/v7
+ * builder, while `ASSESS_PROMPT_VERSION` stayed `6` — so an assessment stamped
+ * `prompt_version: 6` rendered differently before and after that landed, breaking the
+ * documented "prompt and stamped version can never drift apart" invariant
+ * (`../service/ai-provider-service.ts`). Fixed by PARAMETERIZING the shared builder core
+ * (`assembleFactsBasedAssessPrompt`) over an injectable evidence renderer instead of
+ * forking it: `ASSESS_TEMPLATES[6]` now binds `renderTaskEvidenceV6Frozen` (byte-identical
+ * to the PRE-T3 rendering, so `getAssessTemplate(6)` stays reproducible forever), and
+ * `ASSESS_TEMPLATES[7]` binds T3's projected renderer and becomes the active
+ * `ASSESS_PROMPT_VERSION`. `buildAssessPromptV6` (the exported function) keeps its NAME and
+ * its (projected) BEHAVIOUR unchanged — AC-AEP-4 pins a direct caller asserting it matches
+ * v5's projected shape — it simply moved to registry slot `7`; `buildAssessPromptV7` is the
+ * same function under the name that matches its new active slot.
  */
-export const ASSESS_PROMPT_VERSION = 6;
+export const ASSESS_PROMPT_VERSION = 7;
 
 /** Character budgets for each prompt section, sourced from `config.ai.assess.*`. */
 export interface AssessBudgets {
@@ -168,11 +222,111 @@ export type AssessTemplateFn = (
 const evidenceArraySchema = z.array(evidenceEntrySchema);
 
 /**
- * Render a task's verification_evidence entries as a compact text block for the prompt.
+ * The set of acceptance-criterion ids currently "under judgment" for evidence full-tail
+ * visibility (SPEC-lore-assess-project-evidence-rows-instead-of-embedding-the D1) — the
+ * SAME set the prompt's "ac_id MUST be one of" output instruction restricts the judge to.
+ * Single derivation site so v5 (the spec's full declared set) and v6 (its plan-scope-
+ * restricted subset, D5) can never independently drift on what "under judgment" means —
+ * AC-AEP-4 asserts both builders agree.
+ *
+ * @param criteria - Declared acceptance criteria already resolved for this prompt (v5:
+ *   `declaredCriteria`; v6: `scopedDeclaredCriteria`)
+ * @returns A `Set` of the criteria's ids, for O(1) membership tests in {@link renderTaskEvidence}
+ *
+ * @example
+ * computeAcIdsUnderJudgment([{ id: "AC-X-1", ... }]); // → Set(["AC-X-1"])
+ */
+function computeAcIdsUnderJudgment(criteria: AcceptanceCriterion[]): Set<string> {
+  return new Set(criteria.map((c) => c.id));
+}
+
+/**
+ * Render a task's verification_evidence entries as a compact text block for the prompt
+ * (SPEC-lore-assess-project-evidence-rows-instead-of-embedding-the D1). Per row this
+ * projects ONLY `(oracle, ac_ref, result, command, tail_bytes)` — never the raw evidence
+ * body — plus the clipped `output_tail` text itself, but ONLY when the row's `ac_ref` is
+ * among `acIdsUnderJudgment`. `tail_bytes` is ALWAYS rendered, even when `output_tail` is
+ * absent or empty (`tail_bytes=0`) — an omitted field would be indistinguishable from
+ * "nobody looked," which is exactly the defect this fixes (measured: two red-first rows
+ * with an empty tail went unnoticed inside a whole-body embedding — see
+ * `knowledge-a-task-doc-that-accumulated-10-evidence-rows`). Byte count (not char count)
+ * because `output_tail` can carry multi-byte UTF-8 content — matches this codebase's
+ * existing `Buffer.byteLength(text, "utf8")` convention (`claude-md-check.ts`).
+ *
  * Malformed/absent evidence renders as "(no evidence recorded)" rather than throwing —
  * `extra` is untyped storage, and a judge prompt should degrade gracefully, not crash.
+ *
+ * @param task - The task doc whose `extra.verification_evidence` is rendered
+ * @param acIdsUnderJudgment - AC ids currently being scored ({@link computeAcIdsUnderJudgment})
+ * @returns The rendered evidence block, or `"(no evidence recorded)"` when absent/malformed
+ *
+ * @example
+ * renderTaskEvidence(taskWithOneRow, new Set(["AC-X-1"]));
+ * // => `  [1] oracle=test ac_ref=AC-X-1 result=pass command="bun test" tail_bytes=42\n      output_tail: ...`
  */
-function renderTaskEvidence(task: PlanBundle["tasks"][number]): string {
+function renderTaskEvidence(task: PlanBundle["tasks"][number], acIdsUnderJudgment: ReadonlySet<string>): string {
+  const raw = task.extra["verification_evidence"];
+  if (!Array.isArray(raw) || raw.length === 0) return "(no evidence recorded)";
+
+  const parsed = evidenceArraySchema.safeParse(raw);
+  if (!parsed.success || parsed.data.length === 0) return "(no evidence recorded)";
+
+  return parsed.data
+    .map((e, i) => {
+      const tailBytes = e.output_tail ? Buffer.byteLength(e.output_tail, "utf8") : 0;
+      const acRef = e.ac_ref ?? "(none)";
+      const line =
+        `  [${i + 1}] oracle=${e.oracle} ac_ref=${acRef} result=${e.result} ` +
+        `command="${e.command}" tail_bytes=${tailBytes}`;
+      // reason: D1 — the full tail is shown ONLY for a row whose ac_ref names one of the
+      // ids currently under judgment; every other row still gets its tail_bytes count above,
+      // which is the load-bearing fact (an empty tail must be VISIBLE, not inferable).
+      const showFullTail = e.ac_ref !== undefined && acIdsUnderJudgment.has(e.ac_ref) && e.output_tail;
+      return line + (showFullTail ? `\n      output_tail: ${e.output_tail!.slice(0, 500)}` : "");
+    })
+    .join("\n");
+}
+
+/**
+ * Evidence-row renderer signature injectable into the shared v6/v7 builder core
+ * ({@link assembleFactsBasedAssessPrompt}) — SPEC-lore-assess-project-evidence-rows-
+ * instead-of-embedding-the T5 ("parameterize, don't fork"). T3 changed `renderTaskEvidence`,
+ * which is SHARED by `buildAssessPrompt` (v5) and the v6/v7 builder, while
+ * `ASSESS_PROMPT_VERSION` stayed `6` — so a prompt stamped `prompt_version: 6` rendered
+ * differently before and after that change. Both {@link renderTaskEvidenceV6Frozen}
+ * (`ASSESS_TEMPLATES[6]`) and {@link renderTaskEvidence} (`ASSESS_TEMPLATES[7]`) satisfy
+ * this shape, so ONE builder body can bind either without a duplicated twin.
+ */
+type EvidenceRenderer = (
+  task: PlanBundle["tasks"][number],
+  acIdsUnderJudgment: ReadonlySet<string>,
+) => string;
+
+/**
+ * FROZEN pre-projection evidence renderer (SPEC-lore-assess-project-evidence-rows-instead-
+ * of-embedding-the T5, AC-AEP-9) — byte-identical to `renderTaskEvidence`'s behaviour
+ * BEFORE a639485 (T3) repurposed it into the `(oracle, ac_ref, result, command,
+ * tail_bytes)` projection (captured verbatim from `git show a639485^:.../assess-template.ts`).
+ * Registered as `ASSESS_TEMPLATES[6]` so `getAssessTemplate(6)` keeps rendering exactly
+ * what it always has, independent of whatever `renderTaskEvidence` itself does for the
+ * ACTIVE version — an assessment stamped `prompt_version: 6` must stay reproducible.
+ * Ignores `acIdsUnderJudgment` (this pre-projection shape has no "under judgment" concept —
+ * every row's tail was shown unconditionally); the parameter exists only so this function
+ * satisfies the shared {@link EvidenceRenderer} signature used by
+ * {@link assembleFactsBasedAssessPrompt}.
+ *
+ * @param task - The task doc whose `extra.verification_evidence` is rendered
+ * @param _acIdsUnderJudgment - Unused; present only for {@link EvidenceRenderer} conformance
+ * @returns The rendered evidence block, or `"(no evidence recorded)"` when absent/malformed
+ *
+ * @example
+ * renderTaskEvidenceV6Frozen(taskWithOneRow, new Set());
+ * // => `  [1] oracle=test command="bun test" result=pass recorder=alice\n      output_tail: ...`
+ */
+function renderTaskEvidenceV6Frozen(
+  task: PlanBundle["tasks"][number],
+  _acIdsUnderJudgment: ReadonlySet<string>,
+): string {
   const raw = task.extra["verification_evidence"];
   if (!Array.isArray(raw) || raw.length === 0) return "(no evidence recorded)";
 
@@ -387,13 +541,21 @@ export function buildAssessPrompt(
     specBlock = specSection.text;
   }
 
+  // reason: SPEC-lore-assess-project-evidence-rows... D1 — the ids under judgment for v5
+  // are the spec's full declared set (v5 has no plan-scope restriction, unlike v6's D5).
+  const acIdsUnderJudgment = computeAcIdsUnderJudgment(declaredCriteria);
   const taskBlocks = bundle.tasks.map((task) => {
+    // reason: task.content ALONE is what participates in max_task_chars (UNCHANGED from
+    // pre-D1 behavior — AC-067-5 pins this in isolation via a tiny budget + zero evidence,
+    // so evidence text must never enter this measurement). The compact per-row projection
+    // (D1) is what keeps the RENDERED evidence text itself small regardless — AC-AEP-2
+    // measures that compactness directly on the assembled block, not via this truncation flag.
     const taskSection = truncateSection(task.content, budgets.max_task_chars);
     if (taskSection.truncated) truncated.push(`task:${task.slug}`);
     return (
       `### Task: ${task.title} (${task.slug}, status=${task.status})\n` +
       `${taskSection.text}\n` +
-      `Evidence:\n${renderTaskEvidence(task)}`
+      `Evidence:\n${renderTaskEvidence(task, acIdsUnderJudgment)}`
     );
   });
 
@@ -565,11 +727,19 @@ function renderFactsSection(facts: AssessmentFacts): string {
 }
 
 /**
- * Assemble the v6 judge prompt for `lore assess` (SPEC-040 §T2 D2, D3, D5): role →
- * materials (same as v5: plan, spec ACs, per-task evidence, optional diff) → **# Deterministic
- * Facts** (new) → rubric (v5's per-AC anchors PLUS a new three-dimension rubric) → output
- * instruction (v5's `ac_scores` shape PLUS `dimension_scores`/`typed_gaps`/
- * `typed_recommendations`/`unverifiable`).
+ * Shared v6/v7 builder core (SPEC-lore-assess-project-evidence-rows-instead-of-embedding-
+ * the T5) — role → materials (same as v5: plan, spec ACs, per-task evidence, optional
+ * diff) → **# Deterministic Facts** → rubric (v5's per-AC anchors PLUS a new
+ * three-dimension rubric) → output instruction (v5's `ac_scores` shape PLUS
+ * `dimension_scores`/`typed_gaps`/`typed_recommendations`/`unverifiable`), PARAMETERIZED
+ * by which {@link EvidenceRenderer} projects each task's verification_evidence rows. Both
+ * registered builders below — the FROZEN `ASSESS_TEMPLATES[6]` and the active
+ * `ASSESS_TEMPLATES[7]` — delegate here, binding {@link renderTaskEvidenceV6Frozen} or
+ * {@link renderTaskEvidence} respectively. ONE builder body, never a forked twin: forking
+ * is exactly the defect T3 surfaced (`renderTaskEvidence` was shared, so changing it
+ * changed BOTH v5's AND this builder's output even though `ASSESS_PROMPT_VERSION` didn't
+ * move) — a duplicated twin would only reintroduce the same drift risk one level up, for
+ * every non-evidence line in this prompt (facts section, rubric, output instruction).
  *
  * D5 scope-fit: when `facts.scope.scoped_ids` is non-empty (the plan declares
  * `extra.ac_scope`), the structured AC table marks every OUT-of-scope declared criterion
@@ -587,18 +757,17 @@ function renderFactsSection(facts: AssessmentFacts): string {
  *   (e.g. a direct/standalone call), this function computes its own via
  *   {@link computeAssessmentFacts} and {@link buildAssessDiffMeta} — never re-derives
  *   `ac_coverage` itself (single derivation site, `@lore/core`).
+ * @param evidenceRenderer - The {@link EvidenceRenderer} to project each task's evidence
+ *   rows with — the ONLY behavioural difference between the frozen v6 entry and the
+ *   active v7 entry.
  * @returns { prompt, truncated, declaredAcIds } — `declaredAcIds` is scope-restricted (D5)
- *
- * @example
- * const { prompt, truncated, declaredAcIds } = buildAssessPromptV6(bundle, undefined, {
- *   max_plan_chars: 8000, max_spec_chars: 12000, max_task_chars: 4000, max_diff_chars: 24000,
- * });
  */
-export function buildAssessPromptV6(
+function assembleFactsBasedAssessPrompt(
   bundle: PlanBundle,
   diffText: string | undefined,
   budgets: AssessBudgets,
-  facts?: AssessmentFacts,
+  facts: AssessmentFacts | undefined,
+  evidenceRenderer: EvidenceRenderer,
 ): BuildAssessPromptResult {
   const truncated: string[] = [];
 
@@ -618,6 +787,15 @@ export function buildAssessPromptV6(
       ? new Set(resolvedFacts.scope.scoped_ids)
       : undefined;
 
+  // reason: the declared-id universe for the containment check narrows to the plan's
+  // scoped subset when ac_scope is declared (D5) — hoisted above the task-block loop
+  // (moved from its original post-loop position) so `computeAcIdsUnderJudgment` can use
+  // the SAME scope-restricted set the "ac_id MUST be one of" output instruction uses below,
+  // rather than a second, possibly-drifting derivation (AC-AEP-4).
+  const scopedDeclaredCriteria = scopedIds
+    ? declaredCriteria.filter((c) => scopedIds.has(c.id))
+    : declaredCriteria;
+
   let specHeading = "## Spec Acceptance Criteria (verbatim)";
   let specBlock = "(plan has no linked spec — it is parented directly under a PRD; there are no verbatim ACs to judge against beyond the plan's own goals)";
   if (hasStructuredAc) {
@@ -632,13 +810,22 @@ export function buildAssessPromptV6(
     specBlock = specSection.text;
   }
 
+  // reason: SPEC-lore-assess-project-evidence-rows... D1/D5 — v6's ids under judgment are
+  // the plan-scope-restricted subset (the SAME set the "ac_id MUST be one of" instruction
+  // below names), not the spec's full declared set.
+  const acIdsUnderJudgment = computeAcIdsUnderJudgment(scopedDeclaredCriteria);
   const taskBlocks = bundle.tasks.map((task) => {
+    // reason: task.content ALONE participates in max_task_chars (UNCHANGED — mirrors v5's
+    // identical reasoning; AC-067-5 pins content-only measurement in isolation).
     const taskSection = truncateSection(task.content, budgets.max_task_chars);
     if (taskSection.truncated) truncated.push(`task:${task.slug}`);
     return (
       `### Task: ${task.title} (${task.slug}, status=${task.status})\n` +
       `${taskSection.text}\n` +
-      `Evidence:\n${renderTaskEvidence(task)}`
+      // reason: SPEC-...T5 — the evidence rendering is the ONE thing that differs between
+      // the frozen v6 entry and the active v7 entry; injected as a parameter rather than
+      // forking this whole builder (AC-AEP-10).
+      `Evidence:\n${evidenceRenderer(task, acIdsUnderJudgment)}`
     );
   });
 
@@ -653,13 +840,6 @@ export function buildAssessPromptV6(
     diffBlock = diffResult.text;
     truncationManifest = buildTruncationManifest(diffResult.omittedFiles);
   }
-
-  // reason: the declared-id universe for the containment check narrows to the plan's
-  // scoped subset when ac_scope is declared (D5) — this is what gets returned as
-  // `declaredAcIds`, not the spec's full declared set.
-  const scopedDeclaredCriteria = scopedIds
-    ? declaredCriteria.filter((c) => scopedIds.has(c.id))
-    : declaredCriteria;
 
   const prompt =
     `# Role\n` +
@@ -758,15 +938,88 @@ export function buildAssessPromptV6(
 }
 
 /**
- * Version-keyed registry of assess judge prompt builders (SPEC-040 §T2 D6, mirrors
+ * The active assess judge prompt builder — binds {@link assembleFactsBasedAssessPrompt} to
+ * the projected {@link renderTaskEvidence} (T3's `(oracle, ac_ref, result, command,
+ * tail_bytes)` shape). Registered at `ASSESS_TEMPLATES[7]` via {@link buildAssessPromptV7}
+ * below (the SAME function reference) — this export keeps the PRE-T5 name and behaviour
+ * unchanged on purpose: AC-AEP-4 (SPEC-lore-assess-project-evidence-rows-instead-of-
+ * embedding-the) pins a direct caller of `buildAssessPromptV6` asserting it renders the
+ * identical projected evidence shape as `buildAssessPrompt` (v5), so this name could not be
+ * repurposed to mean "frozen" without breaking that spec-level AC — the FROZEN pre-
+ * projection entry is {@link buildAssessPromptV6Frozen} instead, a distinct function.
+ *
+ * @param bundle - {plan, spec?, tasks[], knowledge_links?} from CorpusService.getPlanBundle
+ * @param diffText - Optional git diff / diff-file content (already read by the CLI layer)
+ * @param budgets - Character budgets from config.ai.assess.*
+ * @param facts - Pre-computed {@link AssessmentFacts}; see {@link assembleFactsBasedAssessPrompt}
+ * @returns { prompt, truncated, declaredAcIds } — `declaredAcIds` is scope-restricted (D5)
+ *
+ * @example
+ * const { prompt, truncated, declaredAcIds } = buildAssessPromptV6(bundle, undefined, {
+ *   max_plan_chars: 8000, max_spec_chars: 12000, max_task_chars: 4000, max_diff_chars: 24000,
+ * });
+ */
+export function buildAssessPromptV6(
+  bundle: PlanBundle,
+  diffText: string | undefined,
+  budgets: AssessBudgets,
+  facts?: AssessmentFacts,
+): BuildAssessPromptResult {
+  return assembleFactsBasedAssessPrompt(bundle, diffText, budgets, facts, renderTaskEvidence);
+}
+
+/**
+ * Alias for {@link buildAssessPromptV6} under the name that matches its ACTIVE registry
+ * slot (`ASSESS_TEMPLATES[7]`, `ASSESS_PROMPT_VERSION`) — same shared core, same projected
+ * {@link renderTaskEvidence}, byte-identical output for the same input. Prefer this name
+ * for any NEW caller; `buildAssessPromptV6` is kept only because AC-AEP-4 pins a
+ * pre-existing direct caller of that historical name (see its own JSDoc for why the name
+ * and the registry slot number diverge).
+ */
+export function buildAssessPromptV7(
+  bundle: PlanBundle,
+  diffText: string | undefined,
+  budgets: AssessBudgets,
+  facts?: AssessmentFacts,
+): BuildAssessPromptResult {
+  return assembleFactsBasedAssessPrompt(bundle, diffText, budgets, facts, renderTaskEvidence);
+}
+
+/**
+ * FROZEN registry entry for `ASSESS_TEMPLATES[6]` (SPEC-lore-assess-project-evidence-rows-
+ * instead-of-embedding-the T5, AC-AEP-9) — the SAME shared {@link assembleFactsBasedAssessPrompt}
+ * core as {@link buildAssessPromptV6}/{@link buildAssessPromptV7}, bound to the
+ * pre-projection {@link renderTaskEvidenceV6Frozen} renderer instead of the active
+ * {@link renderTaskEvidence}. This is what makes `getAssessTemplate(6)` stay
+ * byte-identical to its behaviour before a639485 (T3), independent of whatever
+ * `renderTaskEvidence` itself does for the active version — an assessment stamped
+ * `prompt_version: 6` remains reproducible. Not exported: nothing outside this module's own
+ * registry needs to call the frozen entry directly.
+ */
+function buildAssessPromptV6Frozen(
+  bundle: PlanBundle,
+  diffText: string | undefined,
+  budgets: AssessBudgets,
+  facts?: AssessmentFacts,
+): BuildAssessPromptResult {
+  return assembleFactsBasedAssessPrompt(bundle, diffText, budgets, facts, renderTaskEvidenceV6Frozen);
+}
+
+/**
+ * Version-keyed registry of assess judge prompt builders (SPEC-040 §T2 D6, re-keyed by
+ * SPEC-lore-assess-project-evidence-rows-instead-of-embedding-the T5, mirrors
  * `review-template.ts`'s `REVIEW_TEMPLATES`). `5` is the frozen v5 entry
- * (`buildAssessPrompt`) kept for provenance; `6` is the active `ASSESS_PROMPT_VERSION`
- * entry. A future prompt revision adds a new key here rather than mutating an existing
+ * (`buildAssessPrompt`) kept for provenance; `6` is the FROZEN pre-projection v6 entry
+ * (`buildAssessPromptV6Frozen` — byte-identical to `buildAssessPromptV6`'s behaviour
+ * before T3/a639485, so `getAssessTemplate(6)` stays reproducible forever); `7` is the
+ * active `ASSESS_PROMPT_VERSION` entry (`buildAssessPromptV7`, T3's projected evidence
+ * renderer). A future prompt revision adds a new key here rather than mutating an existing
  * one, so historical assessments' `judgment.prompt_version` stays meaningful.
  */
 export const ASSESS_TEMPLATES: Record<number, AssessTemplateFn> = {
   5: buildAssessPrompt,
-  6: buildAssessPromptV6,
+  6: buildAssessPromptV6Frozen,
+  7: buildAssessPromptV7,
 };
 
 /**

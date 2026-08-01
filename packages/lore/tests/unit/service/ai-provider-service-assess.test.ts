@@ -540,7 +540,11 @@ describe("assessPlan — prompt content carries the plan bundle's materials (AC-
     expect(prompt).toContain("oracle=tsc");
     expect(prompt).toContain('command="bun run typecheck"');
     expect(prompt).toContain("result=pass");
-    expect(prompt).toContain("recorder=alice");
+    // reason: SPEC-lore-assess-project-evidence-rows... D1 retired the `recorder=` field —
+    // the row projection is now (oracle, ac_ref, result, command, tail_bytes); this fixture's
+    // evidence entry has neither ac_ref nor output_tail, so both render their "absent" form.
+    expect(prompt).toContain("ac_ref=(none)");
+    expect(prompt).toContain("tail_bytes=0");
   });
 
   it("prompt contains the task's title", async () => {
@@ -950,18 +954,20 @@ describe("buildAssessPrompt — structured acceptance criteria table (SPEC-038 A
     expect(result.declaredAcIds).toEqual(["AC-X-1", "AC-X-2"]);
   });
 
-  // reason: SPEC-040 §T2 D6 bumped the ACTIVE registry version to 6 (buildAssessPromptV6) —
-  // buildAssessPrompt itself is now frozen provenance-only as the registry's `5` entry, so
+  // reason: SPEC-040 §T2 D6 bumped the ACTIVE registry version to 6 (buildAssessPromptV6),
+  // and SPEC-lore-assess-project-evidence-rows-instead-of-embedding-the T5 re-bumped it to
+  // 7 (buildAssessPromptV7, frozen pre-projection rendering kept reproducible at slot 6) —
+  // buildAssessPrompt itself is still frozen provenance-only as the registry's `5` entry, so
   // this reconciled assertion pins THAT (ASSESS_TEMPLATES[5] === buildAssessPrompt) rather
   // than the now-stale "ASSESS_PROMPT_VERSION is 5" claim. See ai/assess-template-registry.test.ts
-  // for the full registry-dispatch coverage.
-  it("ASSESS_PROMPT_VERSION is 6 (the active registry entry); buildAssessPrompt itself stays pinned as ASSESS_TEMPLATES[5] (SPEC-040 §T2 D6)", async () => {
+  // and ai/assess-prompt-version-freeze.test.ts for the full registry-dispatch coverage.
+  it("ASSESS_PROMPT_VERSION is 7 (the active registry entry, T5); buildAssessPrompt itself stays pinned as ASSESS_TEMPLATES[5] (SPEC-040 §T2 D6)", async () => {
     const { ASSESS_TEMPLATES } = await import("../../../src/ai/assess-template.js");
-    expect(ASSESS_PROMPT_VERSION).toBe(6);
+    expect(ASSESS_PROMPT_VERSION).toBe(7);
     expect(ASSESS_TEMPLATES[5]).toBe(buildAssessPrompt);
   });
 
-  it("a full assessPlan() call against the structured-AC bundle carries prompt_version 6 (the active registry version, SPEC-040 §T2 D6) in the persisted judgment", async () => {
+  it("a full assessPlan() call against the structured-AC bundle carries prompt_version 7 (the active registry version, T5) in the persisted judgment", async () => {
     const store = new InMemoryStore();
     const bundle = await makeStructuredAcBundle(store);
     const scriptedJson = JSON.stringify({
@@ -980,7 +986,7 @@ describe("buildAssessPrompt — structured acceptance criteria table (SPEC-038 A
     const result = await service.assessPlan(bundle, {});
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.judgment.prompt_version).toBe(6);
+    expect(result.value.judgment.prompt_version).toBe(7);
   });
 });
 
@@ -1097,7 +1103,7 @@ describe("buildAssessPrompt — legacy verbatim path is byte-identical for specs
     expect(result.declaredAcIds).toEqual([]);
   });
 
-  it("a full assessPlan() call against the legacy (no structured ACs) bundle also carries prompt_version 6 (the active registry version, SPEC-040 §T2 D6) end-to-end", async () => {
+  it("a full assessPlan() call against the legacy (no structured ACs) bundle also carries prompt_version 7 (the active registry version, T5) end-to-end", async () => {
     const store = new InMemoryStore();
     const bundle = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
@@ -1106,7 +1112,7 @@ describe("buildAssessPrompt — legacy verbatim path is byte-identical for specs
     const result = await service.assessPlan(bundle, {});
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.judgment.prompt_version).toBe(6);
+    expect(result.value.judgment.prompt_version).toBe(7);
   });
 });
 
