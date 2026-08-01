@@ -52,15 +52,21 @@
  *   `AuditService.verify`'s versions⋈audit completeness oracle (SPEC-035 §2) is
  *   satisfied without a special case for AC writes.
  * @invariant `setCriterion` applies the SAME approved→draft demotion rule
- *   `CorpusService.set` applies to a content/title edit (`isApprovedAutoResetToDraft`
- *   in corpus-service.ts: `existing.status === "approved" && contentChanged` ⇒
- *   `"draft"`) — an in-place AC edit changes the spec's governing contract exactly as
- *   much as a content edit does (D2). This is a MIRROR, not a shared import: services
- *   in this module never cross-import each other (see module CLAUDE.md "no
- *   cross-service imports"); the one-line predicate is trivial enough that
- *   `computeSetStatus` below and `corpus-service.ts`'s own inline check are each other's
- *   single source of truth for the RULE (not the code), cross-referenced by name in
- *   both places so a future edit to one is a deliberate signal to check the other.
+ *   `CorpusService.set` applies to a content/title edit — an in-place AC edit changes
+ *   the spec's governing contract exactly as much as a content edit does (D2). "The
+ *   same rule" is literal, not asserted by comment: both services call the ONE
+ *   implementation, `resolveStatusAfterContractEdit` in `@lore/core` (schemas.ts,
+ *   beside `VALID_TRANSITIONS`). It lives there because neither service may own it —
+ *   `AcService` importing from `CorpusService` would trade an SSOT violation for the
+ *   module invariant "service per concern, no cross-service imports" (module
+ *   CLAUDE.md), while `@lore/core` is a dependency both already have and creates no
+ *   cross-service edge. This method passes `contentChanged: true` explicitly: an AC
+ *   edit is ALWAYS a contract change (an empty patch already returned
+ *   VALIDATION_ERROR before the write). It was MIRRORED here until 2026-08-01
+ *   (task-the-approved-to-draft-demotion-rule-is-mirrored-in-ac) — the two copies were
+ *   held together by cross-referencing comments only, which is a prose mitigation for a
+ *   mechanism problem; `tests/unit/service/demotion-rule-ssot.test.ts` is now the
+ *   mechanism (it stubs the shared function and fails if either call site drifts).
  *
  * Side-effect class: IO (reads and writes via StoreInterface).
  * Source: SPEC-038 §4, §6, §7 D4; spec-lore-ac-set-in-place-edit-of-a-declared-acceptance D1-D6
@@ -75,6 +81,7 @@ import {
   lintAcQuantifiability,
   extractDeclaredAcScope,
   resolveGoverningSpecByAcScope,
+  resolveStatusAfterContractEdit,
   type AcceptanceCriterion,
   type AcCoverageFact,
   type AcVerifyMode,
@@ -432,10 +439,13 @@ export class AcService {
       });
     }
 
-    // D2 — mirrors CorpusService.set's isApprovedAutoResetToDraft (see class
-    // invariant above): an approved spec demotes to draft on this edit; a
-    // non-approved spec's status is untouched.
-    const newStatus = computeSetStatus(spec.status);
+    // D2 — the SHARED demotion rule (`@lore/core`, beside VALID_TRANSITIONS; the
+    // same function CorpusService.set calls — see class invariant above): an
+    // approved spec demotes to draft on this edit, a non-approved spec's status is
+    // untouched. `true` is passed literally because reaching this line means a
+    // field WAS edited — the no-field-flag case already returned VALIDATION_ERROR
+    // (D3) — and every editable field on a criterion is governing contract content.
+    const newStatus = resolveStatusAfterContractEdit(spec.status, true);
 
     const writeResult = await this.writeCriteria(spec, parsed.data, "set", { status: newStatus, acId });
     if (!writeResult.ok) return writeResult;
@@ -667,21 +677,17 @@ function modeFieldName(flag: string): AcVerifyMode {
 }
 
 /**
- * D2 — mirrors CorpusService.set's `isApprovedAutoResetToDraft` rule
- * (`existing.status === "approved" && contentChanged` ⇒ `"draft"`). Every
- * `setCriterion` call changes governing content by construction (the empty-patch
- * case already returned VALIDATION_ERROR before this is reached), so the
- * `contentChanged` conjunct is always true here — this function only re-states the
- * `existingStatus === "approved"` half.
- */
-function computeSetStatus(existingStatus: DocRecord["status"]): DocRecord["status"] {
-  return existingStatus === "approved" ? "draft" : existingStatus;
-}
-
-/**
  * change_summary for a `setCriterion` write — names the edited id, and appends a
- * demotion note ONLY when this write actually moved `approved` → `draft` (AC-ACS-4:
+ * demotion note ONLY when this write actually moved the spec's status (AC-ACS-4:
  * the draft-stays-draft case must show no status-transition text at all).
+ *
+ * reason: the condition is `fromStatus !== toStatus` and the note interpolates the
+ * OBSERVED pair, deliberately NOT the literals `"approved"`/`"draft"`. Hardcoding
+ * them here would make this function a third partial copy of the demotion rule that
+ * `resolveStatusAfterContractEdit` (`@lore/core`) owns — it would silently stop
+ * annotating the write the day that rule's target status changes. For the
+ * approved→draft transition the rendered text is byte-identical to the pre-SSOT
+ * version ("(demoted approved → draft on edit)").
  */
 function buildSetChangeSummary(
   count: number,
@@ -690,5 +696,5 @@ function buildSetChangeSummary(
   toStatus: DocRecord["status"],
 ): string {
   const base = `Acceptance criterion "${acId ?? "?"}" updated — ${count} entries`;
-  return fromStatus === "approved" && toStatus === "draft" ? `${base} (demoted approved → draft on edit)` : base;
+  return fromStatus !== toStatus ? `${base} (demoted ${fromStatus} → ${toStatus} on edit)` : base;
 }

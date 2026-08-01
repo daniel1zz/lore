@@ -5,6 +5,8 @@ import {
   createDocInputSchema,
   docPatchSchema,
   isValidTransition,
+  resolveStatusAfterContractEdit,
+  type DocStatus,
   slugify,
   docTypeSchema,
   docStatusSchema,
@@ -675,6 +677,78 @@ describe("isValidTransition() (AC-CORE-004)", () => {
     expect(isValidTransition("draft", "approved")).toBe(true);
     expect(isValidTransition("approved", "active")).toBe(true);
     expect(isValidTransition("active", "deprecated")).toBe(true);
+  });
+});
+
+/**
+ * The contract-edit demotion rule's own unit surface. It is the SINGLE
+ * implementation of *"an `approved` doc whose governing contract content changes
+ * resets to `draft`"*, shared by `CorpusService.set` and `AcService.setCriterion`
+ * (which are forbidden to import each other) — the SSOT property that the two call
+ * sites cannot disagree is pinned separately, by
+ * `tests/unit/service/demotion-rule-ssot.test.ts`. This block covers the pure
+ * function: HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE.
+ *
+ * Source: spec-lore-ac-set-in-place-edit-of-a-declared-acceptance D2;
+ *   task-the-approved-to-draft-demotion-rule-is-mirrored-in-ac.
+ */
+describe("resolveStatusAfterContractEdit() — the ONE approved→draft demotion rule", () => {
+  // HAPPY: the only combination that demotes.
+  it("[happy] approved + contentChanged → draft", () => {
+    expect(resolveStatusAfterContractEdit("approved", true)).toBe("draft");
+  });
+
+  // NEGATIVE: an approved doc whose contract content did NOT change keeps its
+  // status — this is the `--priority`/`--tags`-only patch case (a metadata patch
+  // must never cost a review cycle).
+  it("[negative] approved + NOT contentChanged → approved, unchanged", () => {
+    expect(resolveStatusAfterContractEdit("approved", false)).toBe("approved");
+  });
+
+  // BOUNDARY: every non-approved status is returned untouched, with contentChanged
+  // both ways. `approved` is the ONLY status the rule reacts to; in particular a
+  // terminal doc is never resurrected into `draft` by an edit.
+  it("[boundary] every non-approved status is returned unchanged, for both contentChanged values", () => {
+    const nonApproved = docStatusSchema.options.filter((status) => status !== "approved");
+    // Guard the filter itself: a renamed/added status must not silently shrink
+    // this table to nothing (the contiguous-substring / silent-no-match lesson).
+    expect(nonApproved).toEqual(["draft", "in-review", "active", "archived", "deprecated"]);
+    for (const status of nonApproved) {
+      expect(resolveStatusAfterContractEdit(status, true), `${status} + changed`).toBe(status);
+      expect(resolveStatusAfterContractEdit(status, false), `${status} + unchanged`).toBe(status);
+    }
+  });
+
+  // ERROR: a status outside the closed DocStatus union can only arrive via an
+  // unchecked cast. Returning it unchanged would silently skip a demotion that was
+  // owed, so the guard fails LOUD and names both the offending value and the domain.
+  it("[error] an unknown status throws, naming the bad value and the known statuses — no silent pass-through", () => {
+    const bogus = "APPROVED" as unknown as DocStatus; // case-shifted: a real near-miss
+    expect(() => resolveStatusAfterContractEdit(bogus, true)).toThrow(/unknown doc status "APPROVED"/);
+    expect(() => resolveStatusAfterContractEdit(bogus, true)).toThrow(/approved/);
+    // A prototype-chain key must not be mistaken for a declared status.
+    expect(() => resolveStatusAfterContractEdit("toString" as unknown as DocStatus, true)).toThrow(
+      /unknown doc status "toString"/,
+    );
+  });
+
+  // STATE: the rule is pure and referentially transparent — no store, no clock, no
+  // accumulated state, so repeated calls are indistinguishable from the first.
+  it("[state] pure and referentially transparent — repeated calls yield identical results", () => {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      expect(resolveStatusAfterContractEdit("approved", true)).toBe("draft");
+      expect(resolveStatusAfterContractEdit("approved", false)).toBe("approved");
+      expect(resolveStatusAfterContractEdit("draft", true)).toBe("draft");
+    }
+  });
+
+  // The demoted target must itself be a declared status, and the rule must stay
+  // consistent with the transition graph's deliberate omission of approved→draft
+  // (it is an internal side effect, never a user-requestable transition — callers
+  // that also run isValidTransition MUST exempt it).
+  it("[state] returns a declared DocStatus, and approved→draft stays absent from the user-facing graph", () => {
+    expect(docStatusSchema.safeParse(resolveStatusAfterContractEdit("approved", true)).success).toBe(true);
+    expect(isValidTransition("approved", "draft")).toBe(false);
   });
 });
 
