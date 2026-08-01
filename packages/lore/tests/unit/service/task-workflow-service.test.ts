@@ -229,6 +229,7 @@ describe("HAPPY — expected-fail evidence result accepted, stored verbatim (AC-
         oracle: "test",
         command: "bunx vitest run new-feature.test.ts",
         result: "expected-fail",
+        output_tail: "AssertionError: expected 1 to equal 2",
       }),
     );
     expect(result.ok).toBe(true);
@@ -244,7 +245,10 @@ describe("HAPPY — expected-fail evidence result accepted, stored verbatim (AC-
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    const added = await taskWorkflowService.addEvidence(taskId, evidence({ result: "expected-fail" }));
+    const added = await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({ result: "expected-fail", output_tail: "AssertionError: expected 1 to equal 2" }),
+    );
     expect(added.ok).toBe(true);
 
     const readyResult = await taskWorkflowService.ready(planId);
@@ -264,7 +268,11 @@ describe("HAPPY — expected-fail evidence result accepted, stored verbatim (AC-
     await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
     const second = await taskWorkflowService.addEvidence(
       taskId,
-      evidence({ command: "bunx vitest run red.test.ts", result: "expected-fail" }),
+      evidence({
+        command: "bunx vitest run red.test.ts",
+        result: "expected-fail",
+        output_tail: "AssertionError: expected 1 to equal 2",
+      }),
     );
     expect(second.ok).toBe(true);
 
@@ -1651,7 +1659,11 @@ describe("NEGATIVE — done() refuses without a result:pass evidence entry (AC-W
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    await taskWorkflowService.addEvidence(taskId, evidence({ result: "expected-fail" }));
+    const written = await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({ result: "expected-fail", output_tail: "AssertionError: expected 1 to equal 2" }),
+    );
+    expect(written.ok).toBe(true);
 
     const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
     expect(doneResult.ok).toBe(false);
@@ -1669,7 +1681,11 @@ describe("NEGATIVE — done() refuses without a result:pass evidence entry (AC-W
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    await taskWorkflowService.addEvidence(taskId, evidence({ result: "fail" }));
+    const written = await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({ result: "fail", output_tail: "AssertionError: expected 1 to equal 2" }),
+    );
+    expect(written.ok).toBe(true);
 
     const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
     expect(doneResult.ok).toBe(false);
@@ -1682,8 +1698,20 @@ describe("NEGATIVE — done() refuses without a result:pass evidence entry (AC-W
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
-    await taskWorkflowService.addEvidence(taskId, evidence({ result: "expected-fail" }));
-    await taskWorkflowService.addEvidence(taskId, evidence({ result: "fail", command: "run 2" }));
+    const w1 = await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({ result: "expected-fail", output_tail: "AssertionError: expected 1 to equal 2" }),
+    );
+    expect(w1.ok).toBe(true);
+    const w2 = await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({
+        result: "fail",
+        command: "run 2",
+        output_tail: "AssertionError: expected 3 to equal 4",
+      }),
+    );
+    expect(w2.ok).toBe(true);
 
     const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
     expect(doneResult.ok).toBe(false);
@@ -1821,7 +1849,10 @@ describe("HAPPY — done() accepts a red_first task carrying both a pass AND a r
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId, "Red First Task", { red_first: true });
 
-    await taskWorkflowService.addEvidence(taskId, evidence({ result: "expected-fail" }));
+    await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({ result: "expected-fail", output_tail: "AssertionError: expected 1 to equal 2" }),
+    );
     await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass", command: "second run" }));
 
     const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
@@ -1836,7 +1867,10 @@ describe("HAPPY — done() accepts a red_first task carrying both a pass AND a r
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId, "Red First Task Fail Row", { red_first: true });
 
-    await taskWorkflowService.addEvidence(taskId, evidence({ result: "fail" }));
+    await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({ result: "fail", output_tail: "AssertionError: expected 1 to equal 2" }),
+    );
     await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass", command: "second run" }));
 
     const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
@@ -1877,7 +1911,11 @@ describe("BOUNDARY — the pre-existing result:pass floor and the new red-first 
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId, "Red Only Task", { red_first: true });
 
-    await taskWorkflowService.addEvidence(taskId, evidence({ result: "expected-fail" }));
+    const written = await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({ result: "expected-fail", output_tail: "AssertionError: expected 1 to equal 2" }),
+    );
+    expect(written.ok).toBe(true);
 
     const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
     expect(doneResult.ok).toBe(false);
@@ -2037,7 +2075,10 @@ describe("REGRESSION — declareRedFirst + a red row together satisfy done()'s n
     const taskId = await createTask(corpusService, planId);
 
     await taskWorkflowService.declareRedFirst(taskId, { by: "alice" });
-    await taskWorkflowService.addEvidence(taskId, evidence({ result: "expected-fail" }));
+    await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({ result: "expected-fail", output_tail: "AssertionError: expected 1 to equal 2" }),
+    );
     await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass", command: "second" }));
 
     const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });

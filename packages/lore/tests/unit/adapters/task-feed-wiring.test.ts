@@ -297,6 +297,7 @@ describe("STATE — shared fail-first AC coverage precedence (F3/AC-070-12)", ()
       result: "fail",
       ac_ref: "AC-X-1",
       recorded_by: "agent:wiring-test",
+      output_tail: "AssertionError: expected 1 to equal 2",
     });
     expect(failResult.ok).toBe(true);
 

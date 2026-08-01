@@ -426,7 +426,10 @@ describe("REGRESSION — caller-supplied inconclusive result via addEvidence is 
     const planId = await createPlanDoc(corpusService);
     const taskId = await createTaskDoc(corpusService, planId);
 
-    const result = await taskWorkflowService.addEvidence(taskId, evidence({ result: "fail" }));
+    const result = await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({ result: "fail", output_tail: "AssertionError: expected 1 to equal 2" }),
+    );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const evidenceArr = result.value.extra["verification_evidence"];

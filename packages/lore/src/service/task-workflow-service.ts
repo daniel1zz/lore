@@ -77,6 +77,18 @@
  *   never silently strips the key. `recordVerifiedEvidence` is the only method that
  *   accepts `attestation`, and it is never wired to a CLI/MCP surface (VerifyRunnerService
  *   is its sole caller, bound in app.ts the same way `resolveDeclaredAcIds` is bound).
+ * @invariant addEvidence rejects a self-reported `result: "fail"`/`"expected-fail"`
+ *   carrying no `output_tail`, or one that is whitespace-only after trimming
+ *   (spec-evidence-output-tail-integrity-a-self-reported-non-pass §D1/§D3,
+ *   `rejectMissingNonPassOutputTail`, exported for PhaseWorkflowService's identical
+ *   AC-ETI-6 guard) — a non-pass self-report's ONLY evidentiary value is its output.
+ *   WRITE-PATH ONLY, same as the placeholder-command guard above:
+ *   `recordVerifiedEvidence`/`appendEvidenceEntry` are deliberately EXEMPT — a
+ *   runner-attested `fail` can legitimately carry an empty tail (silent nonzero
+ *   exit, `--quiet` tool, or a timeout killed before flush), and binding this rule
+ *   to the shared chokepoint would abort `lore verify` at that AC instead of
+ *   reporting the failure. `"pass"` rows are never bound (that gap is
+ *   `findFilteredPassRefusal`'s, `adapters/cli/evidence-precheck.ts`).
  * @invariant addEvidence and recordVerifiedEvidence share ONE append implementation
  *   (private `appendEvidenceEntry`) — cap check, schema validation, ac_ref cross-entity
  *   validation, and the writeTaskExtra commit path are never duplicated between them.
@@ -502,6 +514,74 @@ function rejectHashInTaskAnchors(anchors: string[]): Result<void, LoreError> {
 }
 
 /**
+ * Rejects a self-reported non-pass evidence write (`result: "fail"` or
+ * `"expected-fail"`) whose `output_tail` is absent or whitespace-only
+ * (spec-evidence-output-tail-integrity-a-self-reported-non-pass §D1/§D3). A
+ * non-pass row's ENTIRE evidentiary value is its captured output — with no
+ * runner attestation to independently confirm the exit code, an empty tail
+ * shows nothing about why the run came out that way.
+ *
+ * SELF-REPORT PATH ONLY — called from BOTH services' own `_addEvidenceImpl`,
+ * never from the shared `appendEvidenceEntry`/`recordVerifiedEvidence` chokepoint
+ * (see this module's own header invariant for the general split). A
+ * runner-attested `fail` can legitimately carry an EMPTY tail
+ * (`verify-executor.ts:150` yields `""` whenever the child wrote nothing to
+ * stdout+stderr — a silent nonzero exit, a `--quiet` tool, or a timeout killed
+ * before flush); binding this rule to the shared chokepoint instead would abort
+ * `lore verify` at that AC (`verify-runner-service.ts:770` early-returns on a
+ * failed record), converting a reportable failed AC into a partial-abort error.
+ * This asymmetry mirrors `evidence-precheck.ts::findFilteredPassProofGap`'s own
+ * documented reasoning for the same split (the runner independently observed
+ * the exit code; `lore evidence` observed nothing) — do not harmonise the two.
+ *
+ * Exported (not module-private, unlike {@link rejectPlaceholderEvidenceCommand}
+ * below) — `PhaseWorkflowService._addEvidenceImpl` is a PARALLEL implementation
+ * that must reject a tail-less non-pass row identically (AC-ETI-6), so it
+ * imports this SAME function rather than re-deriving the rule, mirroring the
+ * {@link rejectBlankClaimWorktree}/{@link computeArchiveWalk} SSOT-export
+ * precedent above.
+ *
+ * `pass` rows are NEVER bound by this rule (D2) — a filtered `pass` lacking
+ * matched-count proof is already covered by the CLI-layer
+ * `findFilteredPassRefusal` (`evidence-precheck.ts`); widening this guard to
+ * `pass` would collide with that existing guard's own error vocabulary, so this
+ * function deliberately uses its OWN message wording, never
+ * `findFilteredPassRefusal`'s.
+ *
+ * @param result - `EvidenceInput.result` as received (never `"inconclusive"` —
+ *   the caller has already rejected that above)
+ * @param outputTail - `EvidenceInput.output_tail` as received, `undefined` when omitted
+ * @returns `ok(undefined)` for `"pass"` (any tail, D2) or a non-pass row with a
+ *   genuinely non-empty tail (D3 — tested after trimming); `err(VALIDATION_ERROR)`
+ *   naming `output_tail` otherwise
+ * @example
+ * rejectMissingNonPassOutputTail("fail", undefined);
+ * // => err({ code: "VALIDATION_ERROR", field: "output_tail", ... })
+ * @example
+ * rejectMissingNonPassOutputTail("fail", "\n");
+ * // => err(...) — whitespace-only fails the D3 trim test
+ * @example
+ * rejectMissingNonPassOutputTail("pass", undefined); // => ok(undefined) — D2 control
+ */
+export function rejectMissingNonPassOutputTail(
+  result: string,
+  outputTail: string | undefined,
+): Result<void, LoreError> {
+  if (result !== "fail" && result !== "expected-fail") return ok(undefined);
+  if (outputTail !== undefined && outputTail.trim().length > 0) return ok(undefined);
+  return err({
+    code: "VALIDATION_ERROR",
+    field: "output_tail",
+    message:
+      `a self-reported result "${result}" must carry a non-empty output_tail — with no ` +
+      "runner-observed exit code, the tail is the only evidence this run actually failed. " +
+      "Capture the real failure output and retry with --output-tail (or --output-tail-file; " +
+      "MCP: output_tail).",
+    value: outputTail,
+  });
+}
+
+/**
  * Genuine short commands exempted from {@link rejectPlaceholderEvidenceCommand}'s
  * 3-character floor — real runnable commands that happen to be under 3 characters.
  * Deliberately a closed, explicit list (never inferred from a heuristic like "looks
@@ -773,6 +853,14 @@ export class TaskWorkflowService {
         value: entry.result,
       });
     }
+
+    // spec-evidence-output-tail-integrity-a-self-reported-non-pass §D1/§D3 —
+    // fourth self-report-only guard, beside the two above and the
+    // placeholder-command check below. Pure input-shape check (no store read),
+    // so it runs here alongside the other input-only guards rather than after
+    // resolveTask.
+    const tailCheck = rejectMissingNonPassOutputTail(entry.result, entry.output_tail);
+    if (!tailCheck.ok) return tailCheck;
 
     // task-fix-ordering-regression-placeholder-command-guard-preempts — resolve
     // and doc-type-validate the target BEFORE the placeholder-command check so a
