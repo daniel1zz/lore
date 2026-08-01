@@ -30,10 +30,42 @@
  *     judgment's `truncated` field — a STRUCTURAL signal (this field), not a string-match
  *     against `truncated.includes("doc")`, so callers never have to know the "doc" section
  *     name is the doc-body marker.
+ *   - **Omitted-section heading list (task-the-judge-truncation-notice-says-content-was-cut-but-never)**
+ *     — the bare "treat it as present but unseen" instruction was measured to fail in BOTH
+ *     directions: a judge escalated on a section it wrongly assumed absent (it was actually
+ *     declared past the cut), and a judge correctly obeyed the notice but then could not say
+ *     WHICH cross-referenced sections were unverifiable. The fix is `extractSectionHeadings`,
+ *     run over the FULL, untruncated `bundle.doc.content` (never the truncated copy — a
+ *     heading list built from the truncated copy could only ever name headings that already
+ *     survived, which is vacuous), splitting them into shown/omitted by the ACTUAL visible
+ *     char count (`docSection.text.length`, NOT `budgets.max_doc_chars` directly — the two
+ *     differ when `headChars` backs off one code unit to avoid splitting a surrogate pair).
+ *     `buildOmittedSectionsNotice` renders this as a trailing sentence appended to the
+ *     existing "# Truncation Notice" body — the pre-existing instruction text is untouched
+ *     byte-for-byte (REGRESSION); only a new trailing line is added. A document with zero
+ *     detected headings (no markdown structure at all) gets a distinct "cannot be named"
+ *     sentence rather than a silently-empty list — an empty list with no further comment
+ *     reads as "nothing was cut," the exact false-green this fix exists to prevent.
+ *   - **Design decision — positional (byte-prefix) truncation stays; NO semantic reordering
+ *     of sections into the window.** The measured defect (source task's runs 5 vs 6 vs 7) was
+ *     the judge's INABILITY TO DISTINGUISH "not declared anywhere" from "declared past the
+ *     cut," not that the byte-prefix window picked bad bytes — run 7 only "fixed" itself
+ *     because an author manually moved a section earlier, proving the window's CONTENTS were
+ *     never the defect, only the judge's blindness to what the window omitted. A semantic/
+ *     importance-ranked window would (a) need a heuristic or a second LLM call to score
+ *     "decision-carrying," reintroducing the exact invisible, unenforced, author-phrasing-
+ *     sensitive fragility the manual-reordering workaround already demonstrated, (b) violate
+ *     this module's own "no IO, pure string assembly" invariant if done via a live call, and
+ *     (c) still leave a cliff — just relocated to whichever section the heuristic ranks
+ *     lowest; two genuinely load-bearing sections would still have one lose. The heading list
+ *     makes the cliff's existence and LOCATION fully transparent to the judge regardless of
+ *     where an author places anything, which is what the requirement actually asks for — a
+ *     ranker would solve a different, harder, out-of-scope problem ("which section matters
+ *     most") the measured evidence does not call for.
  *
  * Side-effect class: pure
  *
- * Source: SPEC-034 §2, §4; SPEC-040 §T2 D8
+ * Source: SPEC-034 §2, §4; SPEC-040 §T2 D8; task-the-judge-truncation-notice-says-content-was-cut-but-never
  */
 
 import {
@@ -103,6 +135,122 @@ function renderChecksBlock(checks: CheckResult[]): string {
   return checks
     .map((c) => `- ${c.check}: ${c.outcome}${c.detail ? ` — ${c.detail}` : ""}`)
     .join("\n");
+}
+
+// ─── Omitted-section heading list (task-the-judge-truncation-notice-…) ────────
+
+/** One ATX-style markdown heading found while scanning a document body, paired with the
+ *  0-based character offset (in the source text it was extracted from) of its heading
+ *  LINE's first character. */
+interface DocSectionHeading {
+  /** Heading text, trimmed, with leading `#` markers and any trailing closing `#`s stripped. */
+  text: string;
+  /** Offset of this heading line's first character in the text passed to {@link extractSectionHeadings}. */
+  index: number;
+}
+
+/** Matches an ATX heading line (`#` through `######`, a mandatory space, then text) with
+ *  an optional closing `#` sequence stripped. Requires the mandatory space so `#Not a
+ *  heading` (no space — invalid ATX syntax) is correctly never matched. */
+const ATX_HEADING_LINE = /^(#{1,6})\s+(.+?)\s*#*\s*$/;
+
+/** Matches a fenced-code-block delimiter line (` ``` ` or `~~~`, any leading indent/language tag). */
+const CODE_FENCE_LINE = /^(```|~~~)/;
+
+/**
+ * Extract ATX-style markdown headings (`#` through `######`) from a document body, in
+ * document order, each paired with the character offset of its heading line's first
+ * character. Lines inside fenced code blocks are skipped — a `#`-prefixed shell comment in
+ * a code sample is not a document section. Deliberately narrow: no setext heading support
+ * (`===`/`---` underlines) and no nesting-aware parsing (blockquotes, lists) — every
+ * spec/PRD/ADR/task this corpus renders uses ATX headings exclusively (see any
+ * `lore get <slug>` rendering), and a general markdown parser is unneeded machinery for a
+ * reporting-only heading census.
+ *
+ * @param text - Document body to scan. MUST be the FULL, untruncated body — see the
+ *   module header's "Omitted-section heading list" invariant. Scanning a truncated copy
+ *   can only ever find headings that already survived the cut, which defeats the entire
+ *   point of naming what was omitted.
+ * @returns Headings in document order; `[]` when the document has no detected heading
+ *   structure at all — the caller MUST treat this as "unknown," never as "nothing omitted."
+ *
+ * @example
+ * extractSectionHeadings("## Overview\nText.\n## D7\nMore text.");
+ * // => [{ text: "Overview", index: 0 }, { text: "D7", index: 18 }]
+ */
+function extractSectionHeadings(text: string): DocSectionHeading[] {
+  const headings: DocSectionHeading[] = [];
+  let offset = 0;
+  let inFence = false;
+  for (const line of text.split("\n")) {
+    if (CODE_FENCE_LINE.test(line.trim())) {
+      inFence = !inFence;
+    } else if (!inFence) {
+      const match = ATX_HEADING_LINE.exec(line);
+      if (match) headings.push({ text: match[2]!.trim(), index: offset });
+    }
+    offset += line.length + 1; // +1 accounts for the '\n' delimiter split() consumed.
+  }
+  return headings;
+}
+
+/**
+ * Render the trailing sentence appended to the "# Truncation Notice" section naming which
+ * section headings — enumerated from the FULL document, never the truncated copy — fell
+ * outside the visible window. This is the direct fix for the measured defect: a judge told
+ * only "something is missing" cannot distinguish a section that was never declared from
+ * one that was declared past the cut (source task, runs 5 vs 6). Four distinct outcomes,
+ * NONE of which is a silent empty string when the document has real content beyond the
+ * cut — an empty list rendered with no further comment reads as "nothing was omitted,"
+ * the false-green form of this defect (AC4):
+ *   1. No headings detected anywhere in the document → say so explicitly; the omission
+ *      census cannot run at all, which is a DIFFERENT claim than "nothing was omitted."
+ *   2. Headings exist but ALL fall inside the window → say so explicitly ("every heading
+ *      is visible, only trailing content was cut") — a genuine, non-vacuous empty list.
+ *   3. Headings exist and NONE fall inside the window → say so LOUDLY (distinct wording)
+ *      before naming them, since a judge seeing an otherwise-ordinary list might assume at
+ *      least the first section survived.
+ *   4. The common case: some survive, some don't → name the omitted ones.
+ *
+ * @param fullDocText - The FULL, untruncated document body (never `docSection.text`)
+ * @param visibleChars - The ACTUAL number of characters shown to the judge
+ *   (`docSection.text.length` — not `budgets.max_doc_chars` directly; see module header)
+ * @returns A single sentence, always non-empty when this is called (the caller only calls
+ *   it when `docSection.truncated` is true)
+ *
+ * @example
+ * buildOmittedSectionsNotice("## D7\n" + "x".repeat(20) + "\n## Rollout\nmore", 10);
+ * // => "Sections not shown (1 of 2): Rollout."
+ */
+function buildOmittedSectionsNotice(fullDocText: string, visibleChars: number): string {
+  const headings = extractSectionHeadings(fullDocText);
+  if (headings.length === 0) {
+    return (
+      "No section headings were detected anywhere in this document, so specific omitted " +
+      "sections cannot be named — treat the entire region beyond the excerpt above as " +
+      "structurally unknown, not as confirmed-empty."
+    );
+  }
+
+  const shown = headings.filter((h) => h.index < visibleChars);
+  const omitted = headings.filter((h) => h.index >= visibleChars);
+
+  if (omitted.length === 0) {
+    return (
+      `Every declared section heading (${shown.length} of ${headings.length}) is visible ` +
+      `above; only trailing content within the last one was cut for budget.`
+    );
+  }
+
+  const names = omitted.map((h) => h.text).join(", ");
+  if (shown.length === 0) {
+    return (
+      `NONE of this document's ${headings.length} section heading(s) are visible above ` +
+      `— the visible window falls before the first heading or within an oversized one. ` +
+      `Sections not shown: ${names}.`
+    );
+  }
+  return `Sections not shown (${omitted.length} of ${headings.length}): ${names}.`;
 }
 
 /**
@@ -186,14 +334,20 @@ function assembleReviewPrompt(
 
   // reason: SPEC-040 D8 — the doc-body-only truncation notice. Parent-context truncation
   // is a different, lower-stakes concern (supplementary context, not the artifact under
-  // review) and deliberately does NOT trigger this section — see module header.
+  // review) and deliberately does NOT trigger this section — see module header. The
+  // trailing sentence (task-the-judge-truncation-notice-…) names WHICH section headings
+  // fell outside the window, derived from `bundle.doc.content` (the FULL body) — never
+  // from `docSection.text` (the truncated copy) — split at `docSection.text.length` (the
+  // ACTUAL visible-char count, which can be one less than `budgets.max_doc_chars` when
+  // `headChars` backs off to avoid splitting a surrogate pair).
   const truncationNotice = docSection.truncated
     ? `# Truncation Notice\n` +
       `The document body above was truncated to fit this prompt's character budget. Treat ` +
       `the FULL document as present but unseen beyond what is shown — do NOT conclude a ` +
       `section is missing, incomplete, or absent merely because it isn't visible here. Any ` +
       `escalation or finding about "unseen" or "missing" content MUST cite this notice ` +
-      `explicitly, not silence alone.\n\n`
+      `explicitly, not silence alone.\n` +
+      `${buildOmittedSectionsNotice(bundle.doc.content, docSection.text.length)}\n\n`
     : "";
 
   // reason: SPEC-043 §Design Decisions D9 — when the bundle's own doc or its parent is
