@@ -90,6 +90,10 @@ const main = defineCommand({
     // dedicated writer for a task's/phase's `extra.ac_scope`, the anchor
     // command's sibling; see commands/scope.ts's module header.
     scope: () => import("./commands/scope.js").then(wrapDefault("scope")),
+    // red-first (task-red-first-discipline-is-asked-for-in-prose-but-never) —
+    // dedicated writer for a task's `extra.red_first`; see commands/red-first.ts's
+    // module header.
+    "red-first": () => import("./commands/red-first.js").then(wrapDefault("red-first")),
     invalidate: () => import("./commands/invalidate.js").then(wrapDefault("invalidate")),
     setup: () => import("./commands/setup.js").then(wrapDefault("setup")),
     // governance (SPEC-083 D1) — bootstrap-stage, no corpus required; see

@@ -309,6 +309,65 @@ describe("createDocInputSchema (AC-CORE-002)", () => {
     expect(result.success).toBe(false);
   });
 
+  // ─── extra.red_first (task-red-first-discipline-is-asked-for-in-prose-but-never) ──
+  // The machine-readable declaration a task uses to claim red-first test
+  // discipline — `TaskWorkflowService.done` demands ≥1 "expected-fail"/"fail"
+  // evidence row whenever this is `true` (see task-workflow-service.test.ts's
+  // "red-first discipline floor" suite for the done()-time enforcement).
+  // This block only covers the SHAPE contract: a boolean, optional, validated
+  // at write time — never silently coerced or dropped.
+  describe("extra.red_first (task-red-first-discipline-is-asked-for-in-prose-but-never)", () => {
+    it("[happy] task with extra.red_first: true passes", () => {
+      const result = createDocInputSchema.safeParse({
+        type: "task",
+        title: "Add red-first test",
+        parent_id: "01J5X7KZRF4AXRHX9WKE6DVP6P",
+        extra: { plan_id: "01J5X7KZRF4AXRHX9WKE6DVP7Q", red_first: true },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("[happy] task with extra.red_first: false passes (explicit false is a valid boolean)", () => {
+      const result = createDocInputSchema.safeParse({
+        type: "task",
+        title: "Add red-first test",
+        parent_id: "01J5X7KZRF4AXRHX9WKE6DVP6P",
+        extra: { plan_id: "01J5X7KZRF4AXRHX9WKE6DVP7Q", red_first: false },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("[regression] a task with no extra.red_first at all still passes (zero new friction)", () => {
+      const result = createDocInputSchema.safeParse({
+        type: "task",
+        title: "Plain task",
+        parent_id: "01J5X7KZRF4AXRHX9WKE6DVP6P",
+        extra: { plan_id: "01J5X7KZRF4AXRHX9WKE6DVP7Q" },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("[negative] extra.red_first as a string ('true') fails loud — never silently coerced", () => {
+      const result = createDocInputSchema.safeParse({
+        type: "task",
+        title: "Bad flag task",
+        parent_id: "01J5X7KZRF4AXRHX9WKE6DVP6P",
+        extra: { plan_id: "01J5X7KZRF4AXRHX9WKE6DVP7Q", red_first: "true" },
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("[negative] extra.red_first as a number fails loud", () => {
+      const result = createDocInputSchema.safeParse({
+        type: "task",
+        title: "Bad flag task",
+        parent_id: "01J5X7KZRF4AXRHX9WKE6DVP6P",
+        extra: { plan_id: "01J5X7KZRF4AXRHX9WKE6DVP7Q", red_first: 1 },
+      });
+      expect(result.success).toBe(false);
+    });
+  });
+
   describe("knowledge sub_type=prompt / sub_type=skill (AC-P1-1)", () => {
     // HAPPY: sub_type + full extra.prompt/extra.skill payload validates.
     it("[happy] sub_type=prompt with extra.prompt={variables:[...]} passes", () => {
