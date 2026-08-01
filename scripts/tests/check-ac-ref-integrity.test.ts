@@ -31,12 +31,16 @@
  *   HAPPY:      resolveGoverningSpec walks task -> plan -> spec correctly; a
  *               declared ac_ref is never reported dangling; a valid ledger file
  *               parses; the e2e GREEN fixture exits 0; an applied exemption's
- *               reason reaches stdout via the real detector subprocess
+ *               reason reaches stdout via the real detector subprocess; an
+ *               --adhoc task's non-empty ac_scope resolves via the SAME
+ *               shared resolveGoverningSpecByAcScope the write path uses
  *   NEGATIVE:   an ac_ref absent from the governing spec's declared ids IS
  *               dangling; a task parented to a non-plan doc resolves no governing
  *               spec; a dangling ref with no matching ledger entry is newDangling;
  *               the e2e RED fixture exits non-zero and names the (task, ac_ref) pair;
- *               a truncated reason drops its trailing elaboration text
+ *               a truncated reason drops its trailing elaboration text; an
+ *               --adhoc task's ac_scope matching ZERO specs is
+ *               adhoc-scope-no-match
  *   BOUNDARY:   the SAME (task, ac_ref) pair from multiple evidence rows is
  *               deduped to exactly one DanglingRef; a spec with no
  *               extra.acceptance_criteria key at all yields an empty declared set;
@@ -44,22 +48,35 @@
  *               a reason at/one-over MAX_REASON_DISPLAY_CHARS; a deliberately long
  *               fixture reason (built, not assumed) still carries its version
  *               citation and merged/lost verdict past truncation; an EMPTY ledger
- *               against a clean corpus prints NO exemption lines (control)
+ *               against a clean corpus prints NO exemption lines (control); an
+ *               --adhoc task's EXPLICIT EMPTY ac_scope ([], distinct from
+ *               absent) never silently resolves (adhoc-scope-empty); an
+ *               --adhoc task's ac_scope matching MULTIPLE specs
+ *               (adhoc-scope-ambiguous) is a DISTINCT named outcome from
+ *               adhoc-scope-no-match, never collapsed into one "no governing
+ *               spec resolvable" bucket
  *   ERROR:      malformed ledger JSON throws AcRefLedgerError("invalid_json");
  *               schema-invalid ledger content (missing "reason") throws
  *               AcRefLedgerError("schema"); a task with no resolvable governing
- *               spec (null parent_id) still reports its dangling ac_ref
+ *               spec (null parent_id) still reports its dangling ac_ref; a
+ *               non-boolean truthy extra.adhoc (e.g. the string "true") never
+ *               takes the adhoc branch (strict === true guard)
  *   STATE:      an evidence row with NO ac_ref never contributes a finding
  *               alongside one that does, on the same task; a ledger entry whose
  *               (spec,id) no longer matches any real dangling ref is orphaned;
  *               findLedgerEntryForRef keys on the EXACT (spec,id) pair — a same-id
- *               entry for a different spec is never conflated with the right one
+ *               entry for a different spec is never conflated with the right
+ *               one; extra.adhoc === true selects the ac_scope branch
+ *               regardless of whatever parent_id happens to be set to
  *   REGRESSION: the shipped scripts/ac-ref-exemption-ledger.json parses cleanly;
  *               findDanglingRefs output is deterministically sorted; a ledger
  *               entry matching no real dangling ref still exits 5 naming the stale
  *               row (unchanged wiring); all three REAL ledger reasons require
- *               truncation and keep their citation + verdict after it
+ *               truncation and keep their citation + verdict after it; a
+ *               plan-bound task's structural walk is byte-identical to
+ *               before this task's ad-hoc resolver fix
  *
+ * @spec_ref task-check-ac-ref-integrity-re-implements-governing-spec (shared ad-hoc resolver)
  * @spec_ref spec-lore-ac-set-in-place-edit-of-a-declared-acceptance §D7, AC-ACS-7
  * @spec_ref adr-a-newly-armed-structural-oracle-enforces-from-a-baseline (ledger shape)
  * @spec_ref task-check-ac-ref-integrity-prints-an-exemption-count-not-its (exemption echo)
@@ -129,49 +146,171 @@ function makeDoc(overrides: Partial<DocRecord> & { type: DocRecord["type"] }): D
 // ─── Pure: resolveGoverningSpec / extractDeclaredAcIds ─────────────────────
 
 describe("resolveGoverningSpec", () => {
-  it("HAPPY: walks task -> plan -> plan's parent spec", () => {
+  // ── Plan-bound branch (extra.adhoc !== true): structural task->plan->spec walk ──
+
+  it("HAPPY: plan-bound task walks task -> plan -> plan's parent spec", () => {
     const spec = makeDoc({ type: "spec", parent_id: null });
     const plan = makeDoc({ type: "plan", parent_id: spec.id });
     const task = makeDoc({ type: "task", parent_id: plan.id, extra: { plan_id: plan.id } });
     const docsById = new Map([[plan.id, plan], [spec.id, spec]]);
 
-    expect(resolveGoverningSpec(task, docsById)).toBe(spec);
+    expect(resolveGoverningSpec(task, docsById, [spec])).toEqual({ spec, failureReason: null });
   });
 
-  it("NEGATIVE: task's parent_id resolves to a non-plan doc -> null", () => {
+  it("NEGATIVE: task's parent_id resolves to a non-plan doc -> structural-walk-failed", () => {
     const notAPlan = makeDoc({ type: "spec" });
     const task = makeDoc({ type: "task", parent_id: notAPlan.id });
     const docsById = new Map([[notAPlan.id, notAPlan]]);
 
-    expect(resolveGoverningSpec(task, docsById)).toBeNull();
+    expect(resolveGoverningSpec(task, docsById, [])).toEqual({ spec: null, failureReason: "structural-walk-failed" });
   });
 
-  it("NEGATIVE: plan's parent_id resolves to a non-spec doc -> null", () => {
+  it("NEGATIVE: plan's parent_id resolves to a non-spec doc -> structural-walk-failed", () => {
     const prd = makeDoc({ type: "prd" });
     const plan = makeDoc({ type: "plan", parent_id: prd.id });
     const task = makeDoc({ type: "task", parent_id: plan.id });
     const docsById = new Map([[prd.id, prd], [plan.id, plan]]);
 
-    expect(resolveGoverningSpec(task, docsById)).toBeNull();
+    expect(resolveGoverningSpec(task, docsById, [])).toEqual({ spec: null, failureReason: "structural-walk-failed" });
   });
 
-  it("BOUNDARY: task.parent_id === null -> null", () => {
+  it("BOUNDARY: non-adhoc task.parent_id === null -> structural-walk-failed", () => {
     const task = makeDoc({ type: "task", parent_id: null });
-    expect(resolveGoverningSpec(task, new Map())).toBeNull();
+    expect(resolveGoverningSpec(task, new Map(), [])).toEqual({ spec: null, failureReason: "structural-walk-failed" });
   });
 
-  it("BOUNDARY: plan.parent_id === null -> null", () => {
+  it("BOUNDARY: plan.parent_id === null -> structural-walk-failed", () => {
     const plan = makeDoc({ type: "plan", parent_id: null });
     const task = makeDoc({ type: "task", parent_id: plan.id });
     const docsById = new Map([[plan.id, plan]]);
 
-    expect(resolveGoverningSpec(task, docsById)).toBeNull();
+    expect(resolveGoverningSpec(task, docsById, [])).toEqual({ spec: null, failureReason: "structural-walk-failed" });
   });
 
-  it("ERROR: task.parent_id references an id absent from docsById -> null (never throws)", () => {
+  it("ERROR: task.parent_id references an id absent from docsById -> structural-walk-failed (never throws)", () => {
     const task = makeDoc({ type: "task", parent_id: "01HMISSINGPLANIDXXXXXX" });
-    expect(() => resolveGoverningSpec(task, new Map())).not.toThrow();
-    expect(resolveGoverningSpec(task, new Map())).toBeNull();
+    expect(() => resolveGoverningSpec(task, new Map(), [])).not.toThrow();
+    expect(resolveGoverningSpec(task, new Map(), [])).toEqual({ spec: null, failureReason: "structural-walk-failed" });
+  });
+
+  // ── --adhoc branch: delegates to the SHARED resolveGoverningSpecByAcScope ──
+  // (task-check-ac-ref-integrity-re-implements-governing-spec — this detector's
+  // OWN prior copy of governing-spec resolution walked ONLY task->plan->spec,
+  // so it returned null for every --adhoc task regardless of ac_scope. These
+  // cases prove the fix calls the SAME resolver the write path
+  // (TaskWorkflowService.addEvidence / CorpusService.resolveDeclaredAcIdsForAdhocTask)
+  // already uses, rather than re-implementing a THIRD copy of the search.)
+
+  it("HAPPY: an --adhoc task's non-empty ac_scope resolves via the SAME shared resolveGoverningSpecByAcScope the write path uses", () => {
+    const spec = makeDoc({
+      type: "spec",
+      slug: "spec-governs-adhoc",
+      extra: {
+        acceptance_criteria: [
+          { id: "AC-ADHOC-1", statement: "s", verify: { mode: "script", oracle: "test", command: "bun test" } },
+        ],
+      },
+    });
+    const task = makeDoc({ type: "task", parent_id: null, extra: { adhoc: true, ac_scope: ["AC-ADHOC-1"] } });
+
+    expect(resolveGoverningSpec(task, new Map(), [spec])).toEqual({ spec, failureReason: null });
+  });
+
+  it("BOUNDARY: an --adhoc task with ABSENT ac_scope (flag never passed) -> adhoc-scope-absent, never silently resolved", () => {
+    const spec = makeDoc({ type: "spec", extra: { acceptance_criteria: [] } });
+    const task = makeDoc({ type: "task", parent_id: null, extra: { adhoc: true } });
+
+    expect(resolveGoverningSpec(task, new Map(), [spec])).toEqual({ spec: null, failureReason: "adhoc-scope-absent" });
+  });
+
+  it('BOUNDARY (AC 4): an --adhoc task with the EXPLICIT EMPTY ac_scope ([], --ac-scope "") -> adhoc-scope-empty, never silently resolved', () => {
+    const spec = makeDoc({
+      type: "spec",
+      extra: {
+        acceptance_criteria: [
+          { id: "AC-ANY", statement: "s", verify: { mode: "script", oracle: "test", command: "bun test" } },
+        ],
+      },
+    });
+    const task = makeDoc({ type: "task", parent_id: null, extra: { adhoc: true, ac_scope: [] } });
+
+    // An empty scope is vacuously "covered" by every candidate spec -- must
+    // NOT resolve to whichever spec happens to be first in allSpecs.
+    expect(resolveGoverningSpec(task, new Map(), [spec])).toEqual({ spec: null, failureReason: "adhoc-scope-empty" });
+  });
+
+  it("NEGATIVE: an --adhoc task's ac_scope matching ZERO specs -> adhoc-scope-no-match", () => {
+    const spec = makeDoc({
+      type: "spec",
+      extra: {
+        acceptance_criteria: [
+          { id: "AC-OTHER", statement: "s", verify: { mode: "script", oracle: "test", command: "bun test" } },
+        ],
+      },
+    });
+    const task = makeDoc({ type: "task", parent_id: null, extra: { adhoc: true, ac_scope: ["AC-NOWHERE"] } });
+
+    expect(resolveGoverningSpec(task, new Map(), [spec])).toEqual({ spec: null, failureReason: "adhoc-scope-no-match" });
+  });
+
+  it("BOUNDARY (AC 5): an --adhoc task's ac_scope matching MULTIPLE specs -> adhoc-scope-ambiguous, a DISTINCT named outcome from adhoc-scope-no-match", () => {
+    const specA = makeDoc({
+      type: "spec",
+      slug: "spec-a-covers-shared",
+      extra: {
+        acceptance_criteria: [
+          { id: "AC-SHARED", statement: "s", verify: { mode: "script", oracle: "test", command: "bun test" } },
+        ],
+      },
+    });
+    const specB = makeDoc({
+      type: "spec",
+      slug: "spec-b-covers-shared",
+      extra: {
+        acceptance_criteria: [
+          { id: "AC-SHARED", statement: "s2", verify: { mode: "script", oracle: "test", command: "bun test" } },
+        ],
+      },
+    });
+    const ambiguousTask = makeDoc({ type: "task", parent_id: null, extra: { adhoc: true, ac_scope: ["AC-SHARED"] } });
+    const zeroMatchTask = makeDoc({ type: "task", parent_id: null, extra: { adhoc: true, ac_scope: ["AC-NOWHERE"] } });
+
+    const ambiguousResult = resolveGoverningSpec(ambiguousTask, new Map(), [specA, specB]);
+    const zeroMatchResult = resolveGoverningSpec(zeroMatchTask, new Map(), [specA, specB]);
+
+    expect(ambiguousResult).toEqual({ spec: null, failureReason: "adhoc-scope-ambiguous" });
+    // The core assertion of AC 5: these two refusal kinds are DISTINCT named
+    // outcomes, never collapsed into one "no governing spec resolvable" fact.
+    expect(zeroMatchResult.failureReason).toBe("adhoc-scope-no-match");
+    expect(ambiguousResult.failureReason).not.toBe(zeroMatchResult.failureReason);
+  });
+
+  it('ERROR: a non-boolean truthy extra.adhoc (e.g. the string "true") never takes the adhoc branch (strict === true guard)', () => {
+    const task = makeDoc({ type: "task", parent_id: null, extra: { adhoc: "true", ac_scope: ["AC-X"] } });
+    // Falls through to the plan-bound branch (parent_id null there too) --
+    // NOT adhoc-scope-absent, which would mean the loose value was accepted.
+    expect(resolveGoverningSpec(task, new Map(), [])).toEqual({ spec: null, failureReason: "structural-walk-failed" });
+  });
+
+  it("STATE: extra.adhoc === true selects the ac_scope branch regardless of whatever parent_id happens to be set to", () => {
+    const spec = makeDoc({
+      type: "spec",
+      extra: {
+        acceptance_criteria: [
+          { id: "AC-STATE-1", statement: "s", verify: { mode: "script", oracle: "test", command: "bun test" } },
+        ],
+      },
+    });
+    // parent_id points at a doc that doesn't even exist in docsById -- the
+    // plan-bound walk would fail immediately, but the adhoc branch never
+    // consults parent_id/docsById at all.
+    const task = makeDoc({
+      type: "task",
+      parent_id: "01HSOMEUNRELATEDIDXXXX",
+      extra: { adhoc: true, ac_scope: ["AC-STATE-1"] },
+    });
+
+    expect(resolveGoverningSpec(task, new Map(), [spec])).toEqual({ spec, failureReason: null });
   });
 });
 
@@ -245,7 +384,7 @@ describe("findDanglingRefs", () => {
       },
     });
     expect(findDanglingRefs([task], docsById)).toEqual([
-      { taskId: task.id, taskSlug: "task-negative", acRef: "AC-GONE", specSlug: "spec-under-test" },
+      { taskId: task.id, taskSlug: "task-negative", acRef: "AC-GONE", specSlug: "spec-under-test", failureReason: null },
     ]);
   });
 
@@ -299,7 +438,13 @@ describe("findDanglingRefs", () => {
       },
     });
     expect(findDanglingRefs([task], new Map())).toEqual([
-      { taskId: task.id, taskSlug: "task-orphaned", acRef: "AC-ANYTHING", specSlug: null },
+      {
+        taskId: task.id,
+        taskSlug: "task-orphaned",
+        acRef: "AC-ANYTHING",
+        specSlug: null,
+        failureReason: "structural-walk-failed",
+      },
     ]);
   });
 
@@ -320,13 +465,171 @@ describe("findDanglingRefs", () => {
     const result = findDanglingRefs([taskB, taskA], docsById);
     expect(result.map((r) => r.taskSlug)).toEqual(["task-a", "task-b"]);
   });
+
+  // ── --adhoc tasks: the shared resolveGoverningSpecByAcScope reaching findDanglingRefs ──
+  // (task-check-ac-ref-integrity-re-implements-governing-spec — these six rows are the
+  // shape of the six real, previously-false-positive corpus rows this task fixes.)
+
+  function adhocHarness() {
+    const spec = makeDoc({
+      type: "spec",
+      slug: "spec-governs-adhoc-tasks",
+      extra: {
+        acceptance_criteria: [
+          { id: "AC-ADHOC-OK", statement: "declared", verify: { mode: "script", oracle: "test", command: "bun test" } },
+        ],
+      },
+    });
+    // Only the spec goes into docsById -- an --adhoc task has NO plan in its
+    // ancestry (SPEC-069 D2); findDanglingRefs derives its allSpecs candidate
+    // list from docsById's spec-typed entries alone.
+    const docsById = new Map([[spec.id, spec]]);
+    return { spec, docsById };
+  }
+
+  it("HAPPY: an --adhoc task whose ac_scope resolves and whose evidence ac_ref IS declared is never dangling", () => {
+    const { docsById } = adhocHarness();
+    const task = makeDoc({
+      type: "task",
+      slug: "task-adhoc-happy",
+      parent_id: null,
+      extra: {
+        adhoc: true,
+        ac_scope: ["AC-ADHOC-OK"],
+        verification_evidence: [
+          { oracle: "test", command: "x", result: "pass", recorded_at: "2026-08-01T00:00:00.000Z", recorded_by: "a", ac_ref: "AC-ADHOC-OK" },
+        ],
+      },
+    });
+    expect(findDanglingRefs([task], docsById)).toEqual([]);
+  });
+
+  it("REGRESSION: an --adhoc task whose ac_scope RESOLVES but whose evidence ac_ref is NOT declared by that spec is still dangling, naming the resolved spec", () => {
+    const { spec, docsById } = adhocHarness();
+    const task = makeDoc({
+      type: "task",
+      slug: "task-adhoc-undeclared",
+      parent_id: null,
+      extra: {
+        adhoc: true,
+        ac_scope: ["AC-ADHOC-OK"],
+        verification_evidence: [
+          { oracle: "test", command: "x", result: "pass", recorded_at: "2026-08-01T00:00:00.000Z", recorded_by: "a", ac_ref: "AC-ADHOC-NEVER-DECLARED" },
+        ],
+      },
+    });
+    expect(findDanglingRefs([task], docsById)).toEqual([
+      {
+        taskId: task.id,
+        taskSlug: "task-adhoc-undeclared",
+        acRef: "AC-ADHOC-NEVER-DECLARED",
+        specSlug: spec.slug,
+        failureReason: null,
+      },
+    ]);
+  });
+
+  it("BOUNDARY (AC 4): an --adhoc task with an EXPLICIT EMPTY ac_scope plus an evidence ac_ref is dangling, not silently resolved", () => {
+    const { docsById } = adhocHarness();
+    const task = makeDoc({
+      type: "task",
+      slug: "task-adhoc-empty-scope",
+      parent_id: null,
+      extra: {
+        adhoc: true,
+        ac_scope: [],
+        verification_evidence: [
+          { oracle: "test", command: "x", result: "pass", recorded_at: "2026-08-01T00:00:00.000Z", recorded_by: "a", ac_ref: "AC-ADHOC-OK" },
+        ],
+      },
+    });
+    expect(findDanglingRefs([task], docsById)).toEqual([
+      {
+        taskId: task.id,
+        taskSlug: "task-adhoc-empty-scope",
+        acRef: "AC-ADHOC-OK",
+        specSlug: null,
+        failureReason: "adhoc-scope-empty",
+      },
+    ]);
+  });
+
+  it("NEGATIVE: an --adhoc task whose ac_scope matches ZERO specs is dangling with adhoc-scope-no-match", () => {
+    const { docsById } = adhocHarness();
+    const task = makeDoc({
+      type: "task",
+      slug: "task-adhoc-no-match",
+      parent_id: null,
+      extra: {
+        adhoc: true,
+        ac_scope: ["AC-DOES-NOT-EXIST-ANYWHERE"],
+        verification_evidence: [
+          { oracle: "test", command: "x", result: "pass", recorded_at: "2026-08-01T00:00:00.000Z", recorded_by: "a", ac_ref: "AC-DOES-NOT-EXIST-ANYWHERE" },
+        ],
+      },
+    });
+    expect(findDanglingRefs([task], docsById)).toEqual([
+      {
+        taskId: task.id,
+        taskSlug: "task-adhoc-no-match",
+        acRef: "AC-DOES-NOT-EXIST-ANYWHERE",
+        specSlug: null,
+        failureReason: "adhoc-scope-no-match",
+      },
+    ]);
+  });
+
+  it("BOUNDARY (AC 5): an --adhoc task whose ac_scope matches MULTIPLE specs is dangling with adhoc-scope-ambiguous -- DISTINCT from adhoc-scope-no-match in the SAME returned shape", () => {
+    const specA = makeDoc({
+      type: "spec",
+      slug: "spec-adhoc-ambiguous-a",
+      extra: {
+        acceptance_criteria: [
+          { id: "AC-SHARED-2", statement: "s", verify: { mode: "script", oracle: "test", command: "bun test" } },
+        ],
+      },
+    });
+    const specB = makeDoc({
+      type: "spec",
+      slug: "spec-adhoc-ambiguous-b",
+      extra: {
+        acceptance_criteria: [
+          { id: "AC-SHARED-2", statement: "s2", verify: { mode: "script", oracle: "test", command: "bun test" } },
+        ],
+      },
+    });
+    const docsById = new Map([[specA.id, specA], [specB.id, specB]]);
+    const task = makeDoc({
+      type: "task",
+      slug: "task-adhoc-ambiguous",
+      parent_id: null,
+      extra: {
+        adhoc: true,
+        ac_scope: ["AC-SHARED-2"],
+        verification_evidence: [
+          { oracle: "test", command: "x", result: "pass", recorded_at: "2026-08-01T00:00:00.000Z", recorded_by: "a", ac_ref: "AC-SHARED-2" },
+        ],
+      },
+    });
+    const result = findDanglingRefs([task], docsById);
+    expect(result).toEqual([
+      {
+        taskId: task.id,
+        taskSlug: "task-adhoc-ambiguous",
+        acRef: "AC-SHARED-2",
+        specSlug: null,
+        failureReason: "adhoc-scope-ambiguous",
+      },
+    ]);
+    expect(result[0]?.failureReason).not.toBe("adhoc-scope-no-match");
+  });
 });
 
 // ─── Pure: exemption ledger ─────────────────────────────────────────────────
 
 describe("checkAcRefLedger", () => {
-  const dangling = [
-    { taskId: "01HT1", taskSlug: "task-1", acRef: "AC-RETIRED", specSlug: "spec-a" },
+  const dangling: DanglingRef[] = [
+    { taskId: "01HT1", taskSlug: "task-1", acRef: "AC-RETIRED", specSlug: "spec-a", failureReason: null },
   ];
 
   it("HAPPY: a dangling ref matching a ledger entry (same spec + id) is exempted, not newDangling", () => {
@@ -344,7 +647,9 @@ describe("checkAcRefLedger", () => {
   });
 
   it("BOUNDARY: a dangling ref with specSlug null can never be ledger-exempted, even by a coincidental id match", () => {
-    const orphanRef = [{ taskId: "01HT2", taskSlug: "task-2", acRef: "AC-RETIRED", specSlug: null }];
+    const orphanRef: DanglingRef[] = [
+      { taskId: "01HT2", taskSlug: "task-2", acRef: "AC-RETIRED", specSlug: null, failureReason: "structural-walk-failed" },
+    ];
     const entries: AcRefLedgerEntry[] = [{ id: "AC-RETIRED", spec: "spec-a", date: "2026-08-01", reason: "n/a" }];
     const result = checkAcRefLedger(orphanRef, entries);
     expect(result.newDangling).toEqual(orphanRef);
@@ -508,7 +813,7 @@ describe("formatExemptionReasonForDisplay", () => {
 });
 
 describe("findLedgerEntryForRef", () => {
-  const ref: DanglingRef = { taskId: "01HT1", taskSlug: "task-1", acRef: "AC-X", specSlug: "spec-a" };
+  const ref: DanglingRef = { taskId: "01HT1", taskSlug: "task-1", acRef: "AC-X", specSlug: "spec-a", failureReason: null };
 
   it("HAPPY: finds the entry matching the exact (spec, id) pair", () => {
     const entries: AcRefLedgerEntry[] = [{ id: "AC-X", spec: "spec-a", date: "2026-08-01", reason: "matched" }];
@@ -524,7 +829,13 @@ describe("findLedgerEntryForRef", () => {
   });
 
   it("BOUNDARY: specSlug === null never matches, even with a coincidental id match in entries", () => {
-    const nullSpecRef: DanglingRef = { taskId: "01HT2", taskSlug: "task-2", acRef: "AC-X", specSlug: null };
+    const nullSpecRef: DanglingRef = {
+      taskId: "01HT2",
+      taskSlug: "task-2",
+      acRef: "AC-X",
+      specSlug: null,
+      failureReason: "structural-walk-failed",
+    };
     const entries: AcRefLedgerEntry[] = [{ id: "AC-X", spec: "spec-a", date: "2026-08-01", reason: "n/a" }];
     expect(findLedgerEntryForRef(nullSpecRef, entries)).toBeUndefined();
   });
