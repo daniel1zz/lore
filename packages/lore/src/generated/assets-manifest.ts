@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "f5fef8774eb2cb4629776dffbfaca2c74cf4024264e2ffe68428bc8059993f16",
+  tree_digest: "716c60a06ba6fe55622b3f82de8ecee042aff4131383fb9447ffe9ad4677fcd4",
   entries: [
   { path: "agents/lore-explorer.md", kind: "agent", ownership: "managed", sha256: "18b80554da11704960849d5b68ea9ef763bdc88315ebe89acc26a1e86d7e5629" },
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "324340b8173cae8e3133968185fdf882b81daee2115c988f7506e1bc968a5364" },
@@ -300,8 +300,8 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "skills/lore-review/references/security-patterns.md", kind: "skill", ownership: "managed", sha256: "04bcb93e18b8d3963c16c66bf8568e94bcecb923f6ab04c28aeeac4bc7a6435e" },
   { path: "skills/lore-session-capture/SKILL.md", kind: "skill", ownership: "managed", sha256: "1b0181f49f52c299a4744e2e2ec2c8ae3555400a0768fea1dfcf09bd86c0cb3c" },
   { path: "skills/lore-session-capture/references/knowledge-types.md", kind: "skill", ownership: "managed", sha256: "6233c1e477537afe7b32586ca64bf3fa7881fa8e177855f449a04b7c2b756396" },
-  { path: "skills/lore-session-review/SKILL.md", kind: "skill", ownership: "managed", sha256: "8c407dde945bbf3137f566c1452cd80c7ee5ce1e299ed3d7d361495aeadcfde5" },
-  { path: "skills/lore-session-review/references/invariants.md", kind: "skill", ownership: "managed", sha256: "fb12a3e74d5637cd9d741a127415a17f399b20cd240e61a5841d2d03bd1bc64d" },
+  { path: "skills/lore-session-review/SKILL.md", kind: "skill", ownership: "managed", sha256: "1a0457232dd9bafc6c6167c7960a20eb0de53c51d87610710f66d8202b047835" },
+  { path: "skills/lore-session-review/references/invariants.md", kind: "skill", ownership: "managed", sha256: "7b907902b4e79d632c9234d807845932cc166e40ada61c39c2684718f33547f1" },
   { path: "skills/lore-tdd/SKILL.md", kind: "skill", ownership: "managed", sha256: "3548b4129232ad48377a7d2beceda0bb712aa462550da9df6ee9f02733665e66" },
   { path: "skills/lore-tdd/deep-modules.md", kind: "skill", ownership: "managed", sha256: "f2123700bf953db1740625686c75bdd145efd486357c47c6818c869fee657a32" },
   { path: "skills/lore-tdd/interface-design.md", kind: "skill", ownership: "managed", sha256: "764c5ff0e3fa6b4ab7095eb65ccc7201e090baf19fa16051dfdb72c06d27417d" },
