@@ -507,9 +507,20 @@ describe("AC-097-4: archive_candidates injection surfacing (spec-lifecycle-archi
 
     // Disable plan-close so this fixture (out of THIS suite's scope — it's
     // about the INJECTION surfacing, not the gate) can archive a plan with
-    // zero ceremony.
+    // zero ceremony. APPENDS (never a wholesale overwrite, per the same
+    // `bootstrap_injection` override two blocks above in this file): a
+    // `writeFileSync` here would discard the `project:` block `initCorpus`
+    // just wrote, failing `LoreConfigSchema` and silently reverting to
+    // `rawConfig = undefined` — this file's own plan has no spec-tier
+    // ancestor, so the archive currently succeeds regardless (the ONLY
+    // plan-close predicate reachable there, the attestation floor, is
+    // vacuous either way) — but that made the "disable" itself unverified,
+    // exactly the defect class task-archive-sweep-gate-disable-is-silently-
+    // inert-a-wholesale named. Appending is safe here because this is the
+    // FIRST workflow override on this fixture's config.
     const cfgPath = join(dir, ".lore", "config.yaml");
-    writeFileSync(cfgPath, 'workflow:\n  gates:\n    "plan-close":\n      enabled: false\n', "utf8");
+    const existing = readFileSync(cfgPath, "utf8");
+    writeFileSync(cfgPath, `${existing}\nworkflow:\n  gates:\n    "plan-close":\n      enabled: false\n`, "utf8");
 
     const prdResult = runLore(["create", "prd", "--title", "Archive Candidates PRD", "--content", "root", "--no-ai"], dir);
     expect(prdResult.exitCode).toBe(0);
