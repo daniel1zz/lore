@@ -1,12 +1,30 @@
 /**
- * ValidityService — the SOLE write path for `knowledge`/`adr` bi-temporal validity
- * metadata (`extra.validity`, SPEC-043 §Design Decisions D2). Stateless, store-injected,
- * read-modify-write via the `TaskWorkflowService.writeTaskExtra` pattern (CAS-guarded
- * `store.update`, one `insertVersion`, one `appendAuditEntry`).
+ * ValidityService — the SOLE write path for `knowledge`/`adr`/`task` bi-temporal
+ * validity metadata (`extra.validity`, SPEC-043 §Design Decisions D2). Stateless,
+ * store-injected, read-modify-write via the `TaskWorkflowService.writeTaskExtra`
+ * pattern (CAS-guarded `store.update`, one `insertVersion`, one `appendAuditEntry`).
  *
  * Public surface:
  *   invalidate(idOrSlug, opts, now?) → mark a doc invalid (or clear it via opts.undo)
  *
+ * @invariant `VALIDITY_ELIGIBLE_TYPES` amended (task-a-task-cannot-be-retracted-
+ *   supersedes-emits-a-repair, Defect 2) to ALSO accept `task` — a task had no
+ *   retraction path visible to `list`/`ready`/`search` at all before this: its
+ *   `VALID_TRANSITIONS` only reaches `deprecated` from `approved`/`active`, so a
+ *   task caught wrong while still `draft` (the normal case) could never be
+ *   deprecated, and editing its body to say "RETRACTED" is invisible to every
+ *   read surface. Extending validity metadata was chosen over adding a
+ *   `draft -> deprecated` lifecycle edge specifically because `isInvalidated`/
+ *   `renderValidityBanner`/list()'s and search()'s D3 default-exclusion are ALL
+ *   already type-agnostic pure functions (`@lore/core/validity.ts` never branches
+ *   on `doc.type`) — reusing them costs zero new read-side code, where a
+ *   status-based mechanism would need a brand-new default-exclusion filter (list/
+ *   search currently apply NO default status filter at all) and a parallel banner
+ *   implementation. Deliberately NOT reachable via the `--supersedes` CREATE-time
+ *   compose flag, which stays scoped to knowledge/adr by its OWN, narrower,
+ *   independently-declared constant (`SUPERSEDE_CREATE_ELIGIBLE_TYPES`,
+ *   `adapters/cli/commands/create.ts`) — see that constant's doc comment for why
+ *   the two sets are intentionally different, not an accidental SSOT fork.
  * @invariant `CorpusService.set` closes the OTHER side door onto `extra.validity`
  *   (D10) — this service is the only path that may CHANGE it; `set` rejects any patch
  *   whose `extra.validity` differs from the doc's current value.
@@ -45,8 +63,10 @@ import {
   err,
   ok,
   extractValidity,
+  extractClaim,
   validitySchema,
   type DocRecord,
+  type DocStatus,
   type LoreError,
   type Result,
   type ReviewJudgment,
@@ -59,8 +79,26 @@ import { resolveDoc, resolveDocId } from "./resolve.js";
 
 const defaultNow = (): string => new Date().toISOString();
 
-/** Doc types this service is legal to operate on (D1 — validity is scoped to these two). */
-const VALIDITY_ELIGIBLE_TYPES: ReadonlySet<DocRecord["type"]> = new Set(["knowledge", "adr"]);
+/**
+ * Doc types this service is legal to operate on. `knowledge`/`adr` (D1,
+ * SPEC-043 original scope); `task` added by task-a-task-cannot-be-retracted-
+ * supersedes-emits-a-repair (Defect 2, see this file's class-level
+ * @invariant for the full rationale). Exported so a caller that genuinely
+ * needs to reference "what `lore invalidate` accepts" — as opposed to a
+ * DELIBERATELY narrower business rule like `--supersedes`'s create-time
+ * eligibility — has one place to import it from instead of re-declaring the
+ * literal set.
+ */
+export const VALIDITY_ELIGIBLE_TYPES: ReadonlySet<DocRecord["type"]> = new Set([
+  "knowledge",
+  "adr",
+  "task",
+]);
+
+/** `doc.status` values that were already terminal (workflow-closed) BEFORE an
+ *  invalidate call — used only for the task-scoped `task_already_terminal`
+ *  advisory below; not a validity concept itself (D5). */
+const TERMINAL_TASK_STATUSES: ReadonlySet<DocStatus> = new Set(["archived", "deprecated"]);
 
 /** Options for {@link ValidityService.invalidate}. */
 export interface InvalidateOpts {
@@ -93,6 +131,29 @@ export interface InvalidateResult {
    * (CLI `--json` / MCP payload) instead of leaving it discoverable only via help text.
    */
   decision_status_unchanged?: "superseded";
+  /**
+   * BOUNDARY advisory (task-a-task-cannot-be-retracted-supersedes-emits-a-
+   * repair AC6) — present iff `doc.type === "task"` and its `status` was
+   * ALREADY `"archived"`/`"deprecated"` (terminal) at the moment THIS call
+   * ran, carrying that prior status verbatim. Retraction still applies (D5 —
+   * bi-temporal validity is orthogonal to workflow status) but the caller is
+   * told, rather than silently succeeding as if the task were still open
+   * work. Never populated for `undo` or for a non-task target.
+   */
+  task_already_terminal?: DocStatus;
+  /**
+   * BOUNDARY advisory (task-a-task-cannot-be-retracted-supersedes-emits-a-
+   * repair AC6) — present iff `doc.type === "task"` and it carried a
+   * recorded `extra.claim` held by a DIFFERENT actor than `opts.by` at the
+   * moment THIS call ran (ANY claim, fresh or stale — a claim lease is a
+   * workflow-domain fact this service does not otherwise consult, so
+   * freshness is not re-derived here). Retraction still proceeds
+   * unconditionally (naming the fact is the whole point — a blocking
+   * refusal would strand an operator retracting a genuinely wrong task
+   * whose holder is unreachable). Never populated for `undo` or for a
+   * non-task target.
+   */
+  task_claim_holder?: string;
 }
 
 /**
@@ -142,13 +203,15 @@ export class ValidityService {
   /**
    * Marks `idOrSlug` invalid (or undoes a prior invalidation, `opts.undo: true`).
    *
-   * @param idOrSlug - Target `knowledge`/`adr` document ULID or slug
+   * @param idOrSlug - Target `knowledge`/`adr`/`task` document ULID or slug
+   *   (see {@link VALIDITY_ELIGIBLE_TYPES})
    * @param opts - `{ by, supersededBy?, reason?, undo?, invalidAt?, source? }`
    * @param now - Time seam (D1/D10 convention); defaults to `() => new Date().toISOString()`
-   * @returns `{doc, decision_status_unchanged?}` — the updated document
+   * @returns `{doc, decision_status_unchanged?, task_already_terminal?, task_claim_holder?}`
+   *   — the updated document plus task-scoped BOUNDARY advisories (AC6)
    * @throws DOC_NOT_FOUND (target or supersededBy don't resolve), VALIDATION_ERROR
-   *   (non-knowledge/adr target; future invalid_at; malformed validity; undo on a
-   *   never-invalidated doc), STALE_VERSION
+   *   (target type outside {@link VALIDITY_ELIGIBLE_TYPES}; future invalid_at;
+   *   malformed validity; undo on a never-invalidated doc), STALE_VERSION
    */
   async invalidate(
     idOrSlug: string,
@@ -174,7 +237,9 @@ export class ValidityService {
       return err({
         code: "VALIDATION_ERROR",
         field: "type",
-        message: `Validity metadata only applies to knowledge/adr documents; got type "${doc.type}"`,
+        message:
+          `Validity metadata only applies to ${[...VALIDITY_ELIGIBLE_TYPES].join("/")} documents; ` +
+          `got type "${doc.type}"`,
         value: doc.type,
       });
     }
@@ -311,6 +376,19 @@ export class ValidityService {
       }
     }
 
+    // BOUNDARY advisories (AC6, task-a-task-cannot-be-retracted-supersedes-
+    // emits-a-repair) — computed from the ORIGINAL (pre-commit) `doc`, task-
+    // scoped only, NAMED-not-silent per the task's requirement. Neither
+    // blocks the write: an already-terminal task is still retractable (D5),
+    // and a foreign claim holder is surfaced, not enforced against, so a
+    // genuinely wrong task stays retractable even when its holder is
+    // unreachable.
+    const taskAlreadyTerminal: DocStatus | undefined =
+      doc.type === "task" && TERMINAL_TASK_STATUSES.has(doc.status) ? doc.status : undefined;
+    const existingClaim = doc.type === "task" ? extractClaim(doc) : undefined;
+    const taskClaimHolder: string | undefined =
+      existingClaim !== undefined && existingClaim.by !== opts.by ? existingClaim.by : undefined;
+
     const commitResult = await this.commitValidityExtra(
       doc,
       newExtra,
@@ -338,7 +416,11 @@ export class ValidityService {
     const calibrationResult = await this.maybeRecordStalenessCalibration(doc, opts.by);
     if (!calibrationResult.ok) return calibrationResult;
 
-    return ok({ doc: updatedDoc });
+    return ok({
+      doc: updatedDoc,
+      ...(taskAlreadyTerminal !== undefined ? { task_already_terminal: taskAlreadyTerminal } : {}),
+      ...(taskClaimHolder !== undefined ? { task_claim_holder: taskClaimHolder } : {}),
+    });
   }
 
   /**

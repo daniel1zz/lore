@@ -116,23 +116,28 @@ const ORPHAN_DETECTION_BLUEPRINT: TreeBlueprint = {
 };
 
 /**
- * Builds a DocId → " [invalid]" badge map covering every invalidated knowledge/adr
- * doc in the corpus (SPEC-043 D3/D4 — `lore tree` never filters invalidated docs,
- * but must always mark them, unlike search/list which filter by default). Two
- * `listFull` calls (knowledge + adr) regardless of the tree's root type — cheap
- * relative to store round trips this command already makes, and correct for any
- * root (a knowledge/adr node can appear anywhere in the tree, not only under a plan).
+ * Builds a DocId → " [invalid]" badge map covering every invalidated
+ * knowledge/adr/task doc in the corpus (SPEC-043 D3/D4 — `lore tree` never
+ * filters invalidated docs, but must always mark them, unlike search/list
+ * which filter by default; `task` added by
+ * task-a-task-cannot-be-retracted-supersedes-emits-a-repair, mirroring
+ * `ValidityService.VALIDITY_ELIGIBLE_TYPES`). Three `listFull` calls
+ * (knowledge + adr + task) regardless of the tree's root type — cheap
+ * relative to store round trips this command already makes, and correct for
+ * any root (an invalidated node of any of these three types can appear
+ * anywhere in the tree, not only under a plan).
  */
 async function buildValidityBadges(
   app: ReturnType<typeof loadLoreApp>["app"],
   nowIso: string,
 ): Promise<Map<string, string>> {
   const badges = new Map<string, string>();
-  const [knowledgeResult, adrResult] = await Promise.all([
+  const [knowledgeResult, adrResult, taskResult] = await Promise.all([
     app.corpusService.listFull({ type: "knowledge" }),
     app.corpusService.listFull({ type: "adr" }),
+    app.corpusService.listFull({ type: "task" }),
   ]);
-  for (const listResult of [knowledgeResult, adrResult]) {
+  for (const listResult of [knowledgeResult, adrResult, taskResult]) {
     if (!listResult.ok) continue;
     for (const doc of listResult.value.docs) {
       const badge = formatValidityBadge(doc, nowIso);

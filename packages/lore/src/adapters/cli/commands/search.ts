@@ -33,7 +33,7 @@ export default defineCommand({
     },
     "include-invalid": {
       type: "boolean",
-      description: "Include invalidated knowledge/adr docs (excluded by default). Source: SPEC-043 D3.",
+      description: "Include invalidated knowledge/adr/task docs (excluded by default). Source: SPEC-043 D3, task-a-task-cannot-be-retracted-supersedes-emits-a-repair.",
     },
   },
   async run({ args }) {

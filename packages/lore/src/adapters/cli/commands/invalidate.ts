@@ -1,11 +1,16 @@
 /**
- * lore invalidate <id-or-slug> — mark a knowledge/adr document invalid, or undo a
- * prior invalidation (--undo). Thin pipe over `ValidityService.invalidate` (SPEC-043
- * §Design Decisions D2) — the SOLE write path for `extra.validity`.
+ * lore invalidate <id-or-slug> — mark a knowledge/adr/task document invalid
+ * (retract it, for a task), or undo a prior invalidation (--undo). Thin pipe
+ * over `ValidityService.invalidate` (SPEC-043 §Design Decisions D2) — the SOLE
+ * write path for `extra.validity`. `task` was added to the eligible-types set
+ * by task-a-task-cannot-be-retracted-supersedes-emits-a-repair (Defect 2) —
+ * a task's own `VALID_TRANSITIONS` graph has no `draft -> deprecated` edge, so
+ * a wrong task caught while still `draft` had no retraction path visible to
+ * `list`/`ready`/`search` at all before this.
  *
  * Exit codes: 0 = success; 3 = DOC_NOT_FOUND (target or --superseded-by doesn't
- * resolve); 4 = VALIDATION_ERROR (non-knowledge/adr target, future invalid_at, undo on
- * a never-invalidated doc); 5 = STALE_VERSION.
+ * resolve); 4 = VALIDATION_ERROR (target type outside knowledge/adr/task, future
+ * invalid_at, undo on a never-invalidated doc); 5 = STALE_VERSION.
  */
 
 import { defineCommand } from "citty";
@@ -16,7 +21,7 @@ import type { InvalidateOpts } from "../../../service/validity-service.js";
 export default defineCommand({
   meta: {
     name: "invalidate",
-    description: "Mark a knowledge/adr document invalid, or undo a prior invalidation",
+    description: "Mark a knowledge/adr/task document invalid (retract it), or undo a prior invalidation",
   },
   args: {
     id: {
@@ -68,7 +73,7 @@ export default defineCommand({
         return;
       }
 
-      const { doc, decision_status_unchanged } = result.value;
+      const { doc, decision_status_unchanged, task_already_terminal, task_claim_holder } = result.value;
 
       if (args.json) {
         console.log(
@@ -78,6 +83,8 @@ export default defineCommand({
               data: {
                 doc,
                 ...(decision_status_unchanged !== undefined ? { decision_status_unchanged } : {}),
+                ...(task_already_terminal !== undefined ? { task_already_terminal } : {}),
+                ...(task_claim_holder !== undefined ? { task_claim_holder } : {}),
               },
             },
             null,
@@ -96,6 +103,15 @@ export default defineCommand({
         }
       } else {
         console.log(`Invalidated ${doc.slug} (v${doc.version})`);
+        // BOUNDARY advisories (AC6, task-a-task-cannot-be-retracted-
+        // supersedes-emits-a-repair) — NAMED, non-blocking notes; the
+        // retraction always applies regardless of either condition.
+        if (task_already_terminal !== undefined) {
+          console.log(`  Note: this task was already "${task_already_terminal}" (terminal) before retraction.`);
+        }
+        if (task_claim_holder !== undefined) {
+          console.log(`  Note: this task carries a claim held by "${task_claim_holder}".`);
+        }
       }
     } finally {
       app.close();

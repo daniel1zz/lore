@@ -317,7 +317,9 @@ export class ExportDocsService {
    *
    * @param opts - Project root, dry-run flag, optional type filter, optional force-overwrite.
    * @param now - Time seam (SPEC-043 D3/D4 convention) — drives the invalidation banner
-   *   prepended to knowledge/adr bodies below; defaults to `() => new Date().toISOString()`.
+   *   prepended below to any invalidated doc's body (knowledge/adr/task, per
+   *   `ValidityService.VALIDITY_ELIGIBLE_TYPES` — `resolveValidityBanner` is type-agnostic
+   *   and this loop is not type-filtered); defaults to `() => new Date().toISOString()`.
    * @returns ok(ExportReport) always — per-doc errors are inside report.errors, not top-level err().
    * @throws Never — StoreInterface errors propagate as err(LoreError).
    */

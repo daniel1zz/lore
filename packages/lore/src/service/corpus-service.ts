@@ -2646,8 +2646,9 @@ export class CorpusService {
    *   — see {@link ListFilters.limit} for the paging + `include_invalid`
    *   interaction). Omitted `limit`/`offset` → unbounded, byte-identical to
    *   pre-pagination behavior.
-   * @param now - Time seam (D3) — drives the default invalidated-knowledge/adr
-   *   exclusion; defaults to `() => new Date().toISOString()`.
+   * @param now - Time seam (D3) — drives the default invalidated-doc
+   *   exclusion (knowledge/adr/task, per `ValidityService.VALIDITY_ELIGIBLE_TYPES`);
+   *   defaults to `() => new Date().toISOString()`.
    */
   async list(
     filters: ListFilters,
@@ -2661,9 +2662,12 @@ export class CorpusService {
       return storeResult;
     }
 
-    // SPEC-043 D3 — invalidated knowledge/adr docs are excluded by default from this
-    // list-shaped read; isInvalidated is a no-op for every other doc type (they never
-    // carry extra.validity), so this filter naturally scopes itself.
+    // SPEC-043 D3 — invalidated docs (knowledge/adr/task, per
+    // ValidityService.VALIDITY_ELIGIBLE_TYPES — task added by
+    // task-a-task-cannot-be-retracted-supersedes-emits-a-repair) are excluded
+    // by default from this list-shaped read; isInvalidated is a no-op for
+    // every OTHER doc type (they never carry extra.validity), so this filter
+    // naturally scopes itself.
     const nowIso = now();
     const visibleDocs =
       include_invalid === true
@@ -2750,8 +2754,9 @@ export class CorpusService {
    * Telemetry: records one event with query length and result count.
    *
    * @param filters - Standard filters plus SPEC-043 D3's `include_invalid` escape.
-   * @param now - Time seam (D3) — drives the default invalidated-knowledge/adr
-   *   exclusion; defaults to `() => new Date().toISOString()`.
+   * @param now - Time seam (D3) — drives the default invalidated-doc
+   *   exclusion (knowledge/adr/task, per `ValidityService.VALIDITY_ELIGIBLE_TYPES`);
+   *   defaults to `() => new Date().toISOString()`.
    */
   async search(
     query: string,
@@ -2766,8 +2771,8 @@ export class CorpusService {
       return storeResult;
     }
 
-    // SPEC-043 D3 — invalidated knowledge/adr hits are excluded by default. The
-    // narrow SearchHit.validity projection (SPEC-037/SPEC-043) makes this computable
+    // SPEC-043 D3 — invalidated hits (knowledge/adr/task) are excluded by
+    // default. The narrow SearchHit.validity projection (SPEC-037/SPEC-043) makes this computable
     // with ZERO extra store reads (review S3's "no N+1 per-hit fetch") — order of
     // surviving hits is preserved either way (AC-MH-5's order-preservation oracle).
     const nowIso = now();

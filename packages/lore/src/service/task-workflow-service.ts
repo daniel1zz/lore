@@ -163,6 +163,7 @@ import {
   isTestFileAnchor,
   commandRunsFileUnfiltered,
   UNFILTERED_RUN_CASE_FILTER_DESCRIPTION,
+  isInvalidated,
   type AcScopeEditOp,
   type EvidenceEntry,
   type TaskClaim,
@@ -1925,11 +1926,18 @@ export class TaskWorkflowService {
 
     const tasksResult = await this.store.findMany({ parent_id: plan.id, type: "task" });
     if (!tasksResult.ok) return tasksResult;
-    const tasks = tasksResult.value;
-
-    if (tasks.length === 0) return ok({ records: [], sessions: [], anchor_conflicts: [] });
 
     const nowIso = now();
+    // reason: task-a-task-cannot-be-retracted-supersedes-emits-a-repair AC3 —
+    // a retracted (validity-invalidated) task is excluded from readiness
+    // entirely, mirroring CorpusService.list()/search()'s D3 default
+    // exclusion. `isInvalidated` is a type-agnostic pure predicate (never a
+    // no-op check on `doc.type`) that reads false for every task that was
+    // never invalidated, so this filter is a byte-identical no-op for every
+    // pre-existing plan.
+    const tasks = tasksResult.value.filter((t) => !isInvalidated(t, nowIso));
+
+    if (tasks.length === 0) return ok({ records: [], sessions: [], anchor_conflicts: [] });
 
     const taskIds = tasks.map((t) => t.id);
     const linksResult = await this.store.findLinksByToIds(taskIds, "blocks");
@@ -1987,6 +1995,9 @@ export class TaskWorkflowService {
    * only the SOURCE SET differs (every corpus-wide `extra.adhoc === true`
    * task, not one plan's children). `parentSpecStatus` is always `null` here
    * (no plan → no upstream-spec advisory is possible for this listing).
+   * A retracted (validity-invalidated) task is excluded here too, same as
+   * `ready(plan)` — task-a-task-cannot-be-retracted-supersedes-emits-a-repair
+   * AC3.
    *
    * "Open" = not yet terminal — `task.status` is neither `archived` nor
    * `deprecated` — the SAME terminal-state notion `formatReadyLine`'s "done"
@@ -2016,7 +2027,12 @@ export class TaskWorkflowService {
   async readyAdhoc(now: () => string = defaultNow): Promise<Result<ReadyRecord[], LoreError>> {
     const tasksResult = await this.store.findMany({ type: "task" });
     if (!tasksResult.ok) return tasksResult;
+    const nowIso = now();
     const openAdhocTasks = tasksResult.value.filter((t) => {
+      // reason: task-a-task-cannot-be-retracted-supersedes-emits-a-repair
+      // AC3 — a retracted ad-hoc task is excluded here too, same rationale
+      // as ready()'s identical filter above.
+      if (isInvalidated(t, nowIso)) return false;
       if (t.extra?.["adhoc"] !== true) return false;
       if (t.status === "archived" || t.status === "deprecated") return false;
       // reason: foreign-authored issue reports are review-gated (SPEC-072,
@@ -2031,8 +2047,6 @@ export class TaskWorkflowService {
     });
 
     if (openAdhocTasks.length === 0) return ok([]);
-
-    const nowIso = now();
 
     const taskIds = openAdhocTasks.map((t) => t.id);
     const linksResult = await this.store.findLinksByToIds(taskIds, "blocks");
