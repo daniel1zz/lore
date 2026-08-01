@@ -27,16 +27,21 @@
  *
  * Six-dimension coverage for this file:
  *   HAPPY:      --diff-file hermetic success creates a knowledge doc + informs link
- *               (AC-ASSESS-1); real-git --diff fixture succeeds end-to-end
+ *               (AC-ASSESS-1); real-git --diff fixture succeeds end-to-end; PRIMARY
+ *               ORACLE — auto-derived commit set excludes interleaved foreign commits
+ *               (task-lore-assess-asks-the-caller-for-a-git-range-that-cannot-be)
  *   BOUNDARY:   the diff text actually reaches the judge prompt (captured via a script
- *               that tees stdin to a file before emitting its fixed JSON response)
+ *               that tees stdin to a file before emitting its fixed JSON response);
+ *               no discoverable commits → loud named outcome, never a silent empty diff
  *   ERROR:      double-malformed provider output → exit 6, AI_PROVIDER_ERROR, and NO
  *               knowledge doc is created (AC-ASSESS-4, end-to-end through the real CLI)
  *   STATE:      after a successful assess, the plan's tree shows the new assessment
  *               doc linked via informs
- *   REGRESSION: a plan with tasks that succeeds does NOT also trip the zero-task gate
+ *   REGRESSION: a plan with tasks that succeeds does NOT also trip the zero-task gate;
+ *               CONTROL — a contiguous (non-interleaved) commit set agrees with today's
+ *               naive range, so auto-derivation is not a behavior break for the simple case
  *
- * @spec_ref AC-ASSESS-1, AC-ASSESS-4, AC-ASSESS-6
+ * @spec_ref AC-ASSESS-1, AC-ASSESS-4, AC-ASSESS-6, task-lore-assess-asks-the-caller-for-a-git-range-that-cannot-be
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
@@ -139,6 +144,43 @@ async function createPlanWithTask(): Promise<{ planId: string; planSlug: string 
     } as CreateDocInput);
     if (!taskResult.ok) throw new Error(`task create failed: ${JSON.stringify(taskResult.error)}`);
     return { planId: planResult.value.id, planSlug: planResult.value.slug };
+  } finally {
+    app.close();
+  }
+}
+
+/**
+ * Creates a plan with N tasks named `taskTitles`, returning each task's REAL slug (the
+ * commit-derivation fixtures below must reference the actual generated slug, never a
+ * guessed one — `deriveCommitSetForPlan` matches on the corpus's own `task.slug`).
+ */
+async function createPlanWithNamedTasks(taskTitles: string[]): Promise<{ planId: string; planSlug: string; taskSlugs: string[] }> {
+  const app = createApp(join(tmpDir, ".lore", "lore.db"));
+  try {
+    const planResult = await app.corpusService.create({
+      type: "plan",
+      title: "Assess Commit Derivation Plan",
+      content: "Plan body for commit-derivation CLI tests.",
+    } as CreateDocInput);
+    if (!planResult.ok) throw new Error(`plan create failed: ${JSON.stringify(planResult.error)}`);
+    const taskSlugs: string[] = [];
+    for (const title of taskTitles) {
+      const taskResult = await app.corpusService.create({
+        type: "task",
+        title,
+        parent_id: planResult.value.id,
+        content: "Task body.",
+        extra: {
+          plan_id: planResult.value.id,
+          verification_evidence: [
+            { oracle: "tsc", command: "bun run typecheck", result: "pass", recorded_at: "2026-07-01T00:00:00.000Z", recorded_by: "alice" },
+          ],
+        },
+      } as CreateDocInput);
+      if (!taskResult.ok) throw new Error(`task create failed: ${JSON.stringify(taskResult.error)}`);
+      taskSlugs.push(taskResult.value.slug);
+    }
+    return { planId: planResult.value.id, planSlug: planResult.value.slug, taskSlugs };
   } finally {
     app.close();
   }
@@ -309,6 +351,169 @@ describe("lore assess --diff <range> — real git subprocess fixture (AC-ASSESS-
       expect(docsResult.ok).toBe(true);
       if (!docsResult.ok) return;
       expect(docsResult.value.docs).toHaveLength(0);
+    } finally {
+      app.close();
+    }
+  });
+});
+
+// ─── HAPPY / PRIMARY ORACLE: auto-derived commit set, interleaved foreign history ──
+//
+// task-lore-assess-asks-the-caller-for-a-git-range-that-cannot-be — `lore assess <plan>`
+// with NEITHER --diff NOR --diff-file must derive the plan's own commit set from git
+// history itself, and the derived diff must contain ONLY the plan's own commits, never
+// a foreign plan's, even when they are interleaved in main's history.
+
+describe("lore assess — auto-derived commit set: PRIMARY ORACLE (interleaved foreign history)", () => {
+  it("excludes every interleaved foreign commit; only the plan's own task-referencing commits reach the judge prompt", async () => {
+    const { planSlug, taskSlugs } = await createPlanWithNamedTasks(["Own Task Alpha", "Own Task Beta"]);
+    const captureFile = join(tmpDir, "captured-derived-prompt.txt");
+    const scriptPath = writeFixedJsonProviderScript(captureFile);
+    writeAiConfig(scriptPath);
+
+    const gitEnv = { ...process.env, GIT_AUTHOR_NAME: "Tester", GIT_AUTHOR_EMAIL: "t@example.com", GIT_COMMITTER_NAME: "Tester", GIT_COMMITTER_EMAIL: "t@example.com" };
+    spawnSync("git", ["init", "-q"], { cwd: tmpDir, env: gitEnv });
+    const gitCommit = (filename: string, content: string, message: string) => {
+      writeFileSync(join(tmpDir, filename), content);
+      spawnSync("git", ["add", filename], { cwd: tmpDir, env: gitEnv });
+      spawnSync("git", ["commit", "-q", "-m", message], { cwd: tmpDir, env: gitEnv });
+    };
+    gitCommit("seed.txt", "seed\n", "seed commit");
+    gitCommit("foreign1.txt", "FOREIGN_ALPHA_CONTENT\n", "unrelated foreign change alpha");
+    gitCommit("own-a.txt", "OWN_A_CONTENT\n", `implements ${taskSlugs[0]}`);
+    gitCommit("foreign2.txt", "FOREIGN_BETA_CONTENT\n", "unrelated foreign change beta");
+    gitCommit("own-b.txt", "OWN_B_CONTENT\n", `implements ${taskSlugs[1]}`);
+    gitCommit("foreign3.txt", "FOREIGN_GAMMA_CONTENT\n", "unrelated foreign change gamma");
+
+    const cmd = await importAssessCommand();
+    const output = captureOutput();
+    try {
+      // Deliberately NO --diff / --diff-file — this is the auto-derivation path.
+      await cmd.run({ args: { plan: planSlug, json: true } });
+    } finally {
+      output.restore();
+    }
+
+    expect(process.exitCode === 0 || process.exitCode === undefined).toBe(true);
+    expect(existsSync(captureFile)).toBe(true);
+    const capturedPrompt = readFileSync(captureFile, "utf8");
+    expect(capturedPrompt).toContain("OWN_A_CONTENT");
+    expect(capturedPrompt).toContain("OWN_B_CONTENT");
+    expect(capturedPrompt).not.toContain("FOREIGN_ALPHA_CONTENT");
+    expect(capturedPrompt).not.toContain("FOREIGN_BETA_CONTENT");
+    expect(capturedPrompt).not.toContain("FOREIGN_GAMMA_CONTENT");
+
+    // AC #3: the assessment RECORDS which commits it diffed — not just diff_available.
+    const app = createApp(join(tmpDir, ".lore", "lore.db"));
+    try {
+      const docsResult = await app.corpusService.listFull({ type: "knowledge" });
+      expect(docsResult.ok).toBe(true);
+      if (!docsResult.ok) return;
+      const diffSource = docsResult.value.docs[0]?.extra["diff_source"] as
+        | { mode: string; status?: string; commits?: unknown[]; tasks_without_commits?: string[] }
+        | undefined;
+      expect(diffSource?.mode).toBe("auto_derived");
+      expect(diffSource?.status).toBe("derived");
+      expect(diffSource?.commits).toHaveLength(2);
+      expect(diffSource?.tasks_without_commits).toEqual([]);
+    } finally {
+      app.close();
+    }
+  });
+});
+
+// ─── CONTROL: contiguous commits (SPEC oracle #5) ────────────────────────────────
+
+describe("lore assess — auto-derived commit set: CONTROL (contiguous, no foreign interleaving)", () => {
+  it("produces the same reachable content as today's naive contiguous range when there is no foreign interleaving", async () => {
+    const { planSlug, taskSlugs } = await createPlanWithNamedTasks(["Contiguous Task Alpha", "Contiguous Task Beta"]);
+    const captureFile = join(tmpDir, "captured-control-prompt.txt");
+    const scriptPath = writeFixedJsonProviderScript(captureFile);
+    writeAiConfig(scriptPath);
+
+    const gitEnv = { ...process.env, GIT_AUTHOR_NAME: "Tester", GIT_AUTHOR_EMAIL: "t@example.com", GIT_COMMITTER_NAME: "Tester", GIT_COMMITTER_EMAIL: "t@example.com" };
+    spawnSync("git", ["init", "-q"], { cwd: tmpDir, env: gitEnv });
+    const gitCommit = (filename: string, content: string, message: string) => {
+      writeFileSync(join(tmpDir, filename), content);
+      spawnSync("git", ["add", filename], { cwd: tmpDir, env: gitEnv });
+      spawnSync("git", ["commit", "-q", "-m", message], { cwd: tmpDir, env: gitEnv });
+    };
+    gitCommit("seed.txt", "seed\n", "seed commit");
+    gitCommit("y-a.txt", "CONTIGUOUS_A_CONTENT\n", `implements ${taskSlugs[0]}`);
+    gitCommit("y-b.txt", "CONTIGUOUS_B_CONTENT\n", `implements ${taskSlugs[1]}`);
+
+    const cmd = await importAssessCommand();
+    const output = captureOutput();
+    try {
+      await cmd.run({ args: { plan: planSlug, json: true } });
+    } finally {
+      output.restore();
+    }
+
+    expect(process.exitCode === 0 || process.exitCode === undefined).toBe(true);
+    const capturedPrompt = readFileSync(captureFile, "utf8");
+    expect(capturedPrompt).toContain("CONTIGUOUS_A_CONTENT");
+    expect(capturedPrompt).toContain("CONTIGUOUS_B_CONTENT");
+
+    // The naive "first task commit .. last task commit" range (today's pre-fix rule,
+    // CLAUDE.md standing lesson) — contiguous here, so it AGREES with the derivation
+    // (nothing foreign sits between them to disagree about).
+    const naiveRange = spawnSync("git", ["log", "--format=%H", "--reverse"], { cwd: tmpDir, encoding: "utf8" })
+      .stdout.trim()
+      .split("\n");
+    const firstOwn = naiveRange[1]; // index 0 is the seed commit
+    const lastOwn = naiveRange[naiveRange.length - 1];
+    const naiveDiff = spawnSync("git", ["diff", `${firstOwn}^..${lastOwn}`], { cwd: tmpDir, encoding: "utf8" }).stdout;
+    expect(naiveDiff).toContain("CONTIGUOUS_A_CONTENT");
+    expect(naiveDiff).toContain("CONTIGUOUS_B_CONTENT");
+  });
+});
+
+// ─── BOUNDARY: no discoverable commits (zero-commit AND squashed-history alike) ──
+
+describe("lore assess — auto-derived commit set: BOUNDARY (no discoverable commits)", () => {
+  it("produces a loud, named outcome instead of a silent empty derived diff", async () => {
+    const { planSlug } = await createPlanWithNamedTasks(["Unreferenced Task One", "Unreferenced Task Two"]);
+    const captureFile = join(tmpDir, "captured-boundary-derive-prompt.txt");
+    const scriptPath = writeFixedJsonProviderScript(captureFile);
+    writeAiConfig(scriptPath);
+
+    // Real git repo exists, but NO commit anywhere mentions either task's slug —
+    // mechanically identical to "history was squashed and lost the references".
+    const gitEnv = { ...process.env, GIT_AUTHOR_NAME: "Tester", GIT_AUTHOR_EMAIL: "t@example.com", GIT_COMMITTER_NAME: "Tester", GIT_COMMITTER_EMAIL: "t@example.com" };
+    spawnSync("git", ["init", "-q"], { cwd: tmpDir, env: gitEnv });
+    writeFileSync(join(tmpDir, "unrelated.txt"), "unrelated\n");
+    spawnSync("git", ["add", "unrelated.txt"], { cwd: tmpDir, env: gitEnv });
+    spawnSync("git", ["commit", "-q", "-m", "a commit naming neither task"], { cwd: tmpDir, env: gitEnv });
+
+    const cmd = await importAssessCommand();
+    const output = captureOutput();
+    try {
+      await cmd.run({ args: { plan: planSlug, json: true } });
+    } finally {
+      output.restore();
+    }
+
+    // The run still succeeds (assess degrades to "no diff", same as never passing
+    // --diff at all pre-fix) — it must NOT fail just because derivation found nothing.
+    expect(process.exitCode === 0 || process.exitCode === undefined).toBe(true);
+
+    const stderrText = output.stderr.join("");
+    expect(stderrText).toContain("could not derive any commits");
+
+    const app = createApp(join(tmpDir, ".lore", "lore.db"));
+    try {
+      const docsResult = await app.corpusService.listFull({ type: "knowledge" });
+      expect(docsResult.ok).toBe(true);
+      if (!docsResult.ok) return;
+      const diffSource = docsResult.value.docs[0]?.extra["diff_source"] as
+        | { mode: string; status?: string; tasks_without_commits?: string[] }
+        | undefined;
+      // Never a false green: status is the named "no_commits_found", not a silently
+      // empty "derived".
+      expect(diffSource?.mode).toBe("auto_derived");
+      expect(diffSource?.status).toBe("no_commits_found");
+      expect(diffSource?.tasks_without_commits).toHaveLength(2);
     } finally {
       app.close();
     }

@@ -3,17 +3,25 @@
  * a-declared-acceptance D1-D6). Uses InMemoryStore + CorpusService (fixture builder
  * only) — no file I/O, no SQLite. Mirrors ac-service.test.ts's fixture-helper style.
  *
- * Dimension mapping (AC-ACS-1..6; AC-ACS-3 is CLI-layer, covered by
+ * Dimension mapping (AC-ACS-1..9; AC-ACS-3 is CLI-layer, covered by
  * cli-ac-set.test.ts's zero-flag exit-2 test, and AC-ACS-7 belongs to the sibling
  * dangling-ac_ref-detector task, not this file):
  *   HAPPY (AC-ACS-1):      setCriterion replaces the statement in place — id and
- *                          criterion count unchanged, listCriteria round-trips it
+ *                          criterion count unchanged (the WRITE half only)
+ *   HAPPY (AC-ACS-8):      a following listCriteria (lore ac list) round-trips the
+ *                          new statement text for that id (the READ half only — split
+ *                          from AC-ACS-1 by
+ *                          task-split-the-compound-ac-acs-1-ac-acs-4-into-one-assertion,
+ *                          since one test title standing in for both the write and the
+ *                          read was two unmeasured claims behind one badge)
  *   NEGATIVE (AC-ACS-2):   an unknown id exits VALIDATION_ERROR (CLI exit 4), stderr-
  *                          bound message enumerates the declared ids, doc unchanged
- *   STATE (AC-ACS-4):      an approved spec demotes to draft on edit; a draft spec
- *                          stays draft, with no status-transition recorded in the
- *                          version log for that edit (consecutive versions' `status`
- *                          fields are equal)
+ *   STATE (AC-ACS-4):      an approved spec demotes to draft on edit (the demotion
+ *                          half only)
+ *   STATE (AC-ACS-9):      a draft spec stays draft on edit, with no status-transition
+ *                          recorded in the version log for that edit (consecutive
+ *                          versions' `status` fields are equal — the non-demotion half,
+ *                          split from AC-ACS-4 by the same task named above)
  *   ERROR (AC-ACS-5):      a mode-inconsistent flag (--rubric against a script-mode
  *                          criterion) exits VALIDATION_ERROR naming both the flag and
  *                          the criterion's actual mode
@@ -22,7 +30,7 @@
  *                          untouched (guards the `lore set`-replaces-extra failure
  *                          mode this whole spec exists to avoid)
  *
- * @spec_ref AC-ACS-1 AC-ACS-2 AC-ACS-4 AC-ACS-5 AC-ACS-6
+ * @spec_ref AC-ACS-1 AC-ACS-2 AC-ACS-4 AC-ACS-5 AC-ACS-6 AC-ACS-8 AC-ACS-9
  */
 
 import { describe, it, expect } from "vitest";
@@ -85,26 +93,46 @@ describe("HAPPY — setCriterion replaces the statement in place (AC-ACS-1)", ()
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    // id unchanged, criterion count unchanged.
+    // id unchanged, criterion count unchanged. (The READ half — a following
+    // `lore ac list` printing this new text — is AC-ACS-8, tested independently
+    // below; this test asserts only the WRITE half's own return value.)
     expect(result.value).toHaveLength(1);
     expect(result.value[0]?.id).toBe("AC-X-1");
     expect(result.value[0]?.statement).toBe(
       "Rejects malformed input with a specific field name in the error",
     );
 
-    // A following listCriteria prints the new text for AC-X-1.
+    const after = await store.find(specId);
+    if (!after.ok || after.value === null) throw new Error("spec re-fetch failed");
+    expect(after.value.version).toBe(versionBefore + 1);
+  });
+});
+
+// ─── HAPPY (read half, split from AC-ACS-1) ─────────────────────────────────────
+
+describe("HAPPY — a subsequent lore ac list reflects the new statement (AC-ACS-8)", () => {
+  it("lore ac list reflects the new statement after set", async () => {
+    const { corpusService, acService } = makeServices();
+    const prdId = await createPrd(corpusService);
+    const specId = await createSpec(corpusService, prdId);
+    await acService.addCriterion(specId, scriptCriterion());
+
+    const setResult = await acService.setCriterion(specId, "AC-X-1", {
+      statement: "Rejects malformed input with a specific field name in the error",
+    });
+    expect(setResult.ok).toBe(true);
+
+    // A following listCriteria (the `lore ac list` read path) prints the new text
+    // for AC-X-1 — this is the READ half of the original compound AC-ACS-1. The
+    // WRITE half (setCriterion's own return value) is asserted independently above.
     const listed = await acService.listCriteria(specId);
     expect(listed.ok).toBe(true);
     if (!listed.ok) return;
     expect(listed.value.criteria).toHaveLength(1);
+    expect(listed.value.criteria[0]?.id).toBe("AC-X-1");
     expect(listed.value.criteria[0]?.statement).toBe(
       "Rejects malformed input with a specific field name in the error",
     );
-    expect(listed.value.criteria[0]?.id).toBe("AC-X-1");
-
-    const after = await store.find(specId);
-    if (!after.ok || after.value === null) throw new Error("spec re-fetch failed");
-    expect(after.value.version).toBe(versionBefore + 1);
   });
 });
 
@@ -139,11 +167,13 @@ describe("NEGATIVE — unknown id exits 4 naming declared ids (AC-ACS-2)", () =>
 
 // ─── STATE ──────────────────────────────────────────────────────────────────────
 
-describe("STATE — demotes an approved spec to draft; a draft spec stays draft with no status-transition entry (AC-ACS-4)", () => {
+describe("STATE — demotes an approved spec to draft (AC-ACS-4)", () => {
   it("demotes an approved spec to draft", async () => {
     const { store, corpusService, acService } = makeServices();
 
-    // Half 1: an APPROVED spec is demoted to draft by the edit.
+    // An APPROVED spec is demoted to draft by the edit. (The non-demotion half —
+    // a DRAFT spec staying draft with no status-transition log entry — is
+    // AC-ACS-9, tested independently below.)
     const prdId1 = await createPrd(corpusService, "Test PRD Approved");
     const approvedSpecId = await createSpec(corpusService, prdId1, "Approved Spec");
     await acService.addCriterion(approvedSpecId, scriptCriterion());
@@ -160,10 +190,19 @@ describe("STATE — demotes an approved spec to draft; a draft spec stays draft 
     const afterApprovedEdit = await store.find(approvedSpecId);
     if (!afterApprovedEdit.ok || afterApprovedEdit.value === null) throw new Error("spec re-fetch failed");
     expect(afterApprovedEdit.value.status).toBe("draft");
+  });
+});
 
-    // Half 2: a DRAFT spec stays draft, and the version log records NO
-    // status-transition for this edit — consecutive versions' `status` fields
-    // must be equal (both "draft"), proving nothing transitioned.
+// ─── STATE (non-demotion half, split from AC-ACS-4) ─────────────────────────────
+
+describe("STATE — a draft spec is not transitioned by an edit (AC-ACS-9)", () => {
+  it("draft spec stays draft with no status-transition entry recorded", async () => {
+    const { store, corpusService, acService } = makeServices();
+
+    // A DRAFT spec stays draft, and the version log records NO status-transition
+    // for this edit — consecutive versions' `status` fields must be equal (both
+    // "draft"), proving nothing transitioned. The demotion half (an APPROVED spec
+    // demoting to draft) is AC-ACS-4, tested independently above.
     const prdId2 = await createPrd(corpusService, "Test PRD Draft");
     const draftSpecId = await createSpec(corpusService, prdId2, "Draft Spec");
     await acService.addCriterion(draftSpecId, scriptCriterion());

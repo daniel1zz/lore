@@ -140,6 +140,7 @@ import { loadTreeBlueprint } from "../../flows/blueprint-flow.js";
 import { buildRealFsProbe } from "../real-fs-probe.js";
 import { buildAssessSummaryText } from "./assess-render.js";
 import { requirePhaseWorkflowService, getPhaseStatus, buildPhaseFeedFlowDeps } from "../cli/phase-wiring.js";
+import { deriveCommitSetForPlan, type DiffSourceRecord } from "../cli/assess-commit-derivation.js";
 import {
   findMissingOracleFilesForEvidence,
   findFilteredPassRefusal,
@@ -526,9 +527,11 @@ export const LoreAnchorSetSchema = z.object({
 
 /**
  * Input schema for lore_assess (SPEC-026).
- * `diff_text` — optional pre-acquired diff content (MCP has no subprocess/file-read seam
- * like the CLI's `--diff`/`--diff-file` — callers that want diff context read/generate it
- * themselves and pass the text directly).
+ * `diff_text` — optional pre-acquired diff content, an explicit override (mirrors the
+ * CLI's `--diff`/`--diff-file`). When OMITTED, `lore_assess` now auto-derives the plan's
+ * own commit set from git history itself (`../cli/assess-commit-derivation.js`, same
+ * mechanism the CLI uses via its own `process.cwd()`) instead of requiring the caller to
+ * assemble a diff — task-lore-assess-asks-the-caller-for-a-git-range-that-cannot-be.
  * `ai` — explicit AI opt-in/out. Unlike lore_create's `ai` (default false — MCP callers are
  * always agents), assess has no non-AI mode (SPEC-026 §3 D5: the tool name IS the AI intent).
  * Passing `ai: false` is a contradiction (mirrors CLI `--no-ai` → exit 2) and always errors.
@@ -1562,8 +1565,28 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
         });
       }
 
+      // ─── Diff acquisition: explicit diff_text override, else auto-derive ──────
+      // reason: task-lore-assess-asks-the-caller-for-a-git-range-that-cannot-be —
+      // mirrors the CLI's assess.ts: an explicit `diff_text` always wins (this MCP
+      // surface has no subprocess/file-read seam of its own, so an override still
+      // comes in as pre-acquired text); when omitted, derive the plan's own commit
+      // set from git history via the SAME shared mechanism the CLI uses, instead of
+      // requiring the caller to assemble a diff themselves.
+      let diffText: string | undefined = args.diff_text;
+      let diffSource: DiffSourceRecord;
+      if (args.diff_text !== undefined) {
+        diffSource = { mode: "explicit_diff_text" };
+      } else {
+        const derivation = deriveCommitSetForPlan(
+          process.cwd(),
+          bundle.tasks.map((t) => t.slug),
+        );
+        diffSource = { mode: "auto_derived", ...derivation };
+        if (derivation.status === "derived") diffText = derivation.diff_text;
+      }
+
       const assessResult = await app.aiProviderService.assessPlan(bundle, {
-        ...(args.diff_text !== undefined ? { diffText: args.diff_text } : {}),
+        ...(diffText !== undefined ? { diffText } : {}),
         source: app.callerSurface,
       });
       if (!assessResult.ok) return errorContent(assessResult.error);
@@ -1572,7 +1595,11 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
         type: "knowledge",
         title: `Assessment: ${bundle.plan.title} (${new Date().toISOString().slice(0, 10)})`,
         parent_id: bundle.plan.id,
-        extra: { sub_type: "assessment", assessment: assessResult.value },
+        // reason: `diff_source` is additive on the passthrough `extra` object (never a
+        // core `assessmentResultSchema` change) — records HOW this run's diff (if any)
+        // was obtained, so `diff_available` alone is never the only auditable signal
+        // (AC #3, task-lore-assess-asks-the-caller-for-a-git-range-that-cannot-be).
+        extra: { sub_type: "assessment", assessment: assessResult.value, diff_source: diffSource },
         content: renderAssessmentContent(assessResult.value),
       });
       if (!createResult.ok) return errorContent(createResult.error);
@@ -1588,6 +1615,7 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
         assessment: createResult.value,
         result: assessResult.value,
         summary: buildAssessSummaryText(assessResult.value),
+        diff_source: diffSource,
       });
     },
   );

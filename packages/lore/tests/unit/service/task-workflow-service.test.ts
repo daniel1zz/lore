@@ -1814,6 +1814,245 @@ describe("REGRESSION — done() telemetry emits exactly one task.done event per 
   });
 });
 
+// ─── done()'s red-first discipline floor ─────────────────────────────────────
+// (task-red-first-discipline-is-asked-for-in-prose-but-never)
+//
+// A task carrying `extra.red_first: true` claims its tests were written RED
+// FIRST. `done()` now demands ≥1 "expected-fail"/"fail" evidence row on such a
+// task — the SAME `result:pass` floor above still applies independently, so a
+// red_first task needs BOTH a passing row AND a red row; a task that never
+// sets the flag is completely unaffected (zero new friction).
+
+describe("HAPPY — done() accepts a red_first task carrying both a pass AND a red row", () => {
+  it("red_first:true + pass + expected-fail rows → done succeeds", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId, "Red First Task", { red_first: true });
+
+    await taskWorkflowService.addEvidence(taskId, evidence({ result: "expected-fail" }));
+    await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass", command: "second run" }));
+
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    expect(doneResult.ok).toBe(true);
+    if (!doneResult.ok) return;
+    expect(doneResult.value.already_done).toBe(false);
+    expect(doneResult.value.task.status).toBe("archived");
+  });
+
+  it("red_first:true + pass + a plain 'fail' row (not just expected-fail) also satisfies the floor", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId, "Red First Task Fail Row", { red_first: true });
+
+    await taskWorkflowService.addEvidence(taskId, evidence({ result: "fail" }));
+    await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass", command: "second run" }));
+
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    expect(doneResult.ok).toBe(true);
+  });
+});
+
+describe("NEGATIVE — done() refuses a red_first task holding only result:pass evidence (AC1)", () => {
+  it("red_first:true + pass only (no red row) → VALIDATION_ERROR naming the task and the missing row", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId, "Unproven Red First Task", { red_first: true });
+
+    await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
+    const before = await corpusService.get(taskId);
+    expect(before.ok).toBe(true);
+    if (!before.ok) return;
+    const slug = before.value.doc.slug;
+
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    expect(doneResult.ok).toBe(false);
+    if (doneResult.ok) return;
+    expect(doneResult.error.code).toBe("VALIDATION_ERROR");
+    if (doneResult.error.code !== "VALIDATION_ERROR") return;
+    expect(doneResult.error.message).toContain(slug);
+    expect(doneResult.error.message).toMatch(/expected-fail|"fail"/);
+
+    const doc = await corpusService.get(taskId);
+    expect(doc.ok).toBe(true);
+    if (!doc.ok) return;
+    expect(doc.value.doc.status).toBe("draft");
+  });
+});
+
+describe("BOUNDARY — the pre-existing result:pass floor and the new red-first floor are independent (AC4)", () => {
+  it("red_first:true + only an expected-fail row (NO pass) is still refused, by the PRE-EXISTING pass floor", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId, "Red Only Task", { red_first: true });
+
+    await taskWorkflowService.addEvidence(taskId, evidence({ result: "expected-fail" }));
+
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    expect(doneResult.ok).toBe(false);
+    if (doneResult.ok) return;
+    expect(doneResult.error.code).toBe("VALIDATION_ERROR");
+    if (doneResult.error.code !== "VALIDATION_ERROR") return;
+    // The PASS floor's own message — proves it, not the new floor, is what fired.
+    expect(doneResult.error.message).toContain("holds no result:pass evidence entry");
+  });
+});
+
+describe("ERROR — a malformed extra.red_first value degrades to 'not declared', never crashes (defensive read)", () => {
+  it("extra.red_first stored as a non-boolean string ('yes') is treated as undeclared — done succeeds on pass alone", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId, "Malformed Flag Task");
+    // Bypasses the Zod write-time gate on purpose — simulates a legacy/corrupted
+    // row, mirroring readClaim/readEvidence's "malformed → safe default" contract.
+    await corpusService.set(taskId, { extra: { plan_id: planId, red_first: "yes" } });
+
+    await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
+
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    expect(doneResult.ok).toBe(true);
+  });
+});
+
+describe("STATE — a task that never declares red_first is completely unaffected (AC3, no new friction)", () => {
+  it("no extra.red_first at all + only a result:pass row → done succeeds exactly as before", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
+
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    expect(doneResult.ok).toBe(true);
+  });
+
+  it("extra.red_first explicitly false + only a result:pass row → done succeeds (false behaves like absent)", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId, "Explicit False Task", { red_first: false });
+
+    await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
+
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    expect(doneResult.ok).toBe(true);
+  });
+});
+
+describe("REGRESSION — pre-existing done() behavior over legacy (no red_first field) tasks is byte-identical", () => {
+  it("a plain task with pass-only evidence archives via the same transitions as before this change", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    expect(doneResult.ok).toBe(true);
+    if (!doneResult.ok) return;
+    expect(doneResult.value.transitions).toEqual(["approved", "active", "archived"]);
+  });
+});
+
+// ─── TaskWorkflowService.declareRedFirst — the dedicated write-time verb ────
+// (task-red-first-discipline-is-asked-for-in-prose-but-never, Q2)
+// `lore red-first <task>`'s service-layer implementation. Read-modify-write,
+// never through `lore set` (wholesale extra replace) — same reason
+// `file_anchors`/`ac_scope`/`claim`/`verification_evidence` each have a
+// dedicated writer.
+
+describe("HAPPY — declareRedFirst sets extra.red_first: true and preserves sibling extra keys", () => {
+  it("declares true on a fresh task, bumps version, appends an audit row", async () => {
+    const { corpusService, taskWorkflowService, store } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId, "Declare Target", { linkage: "kept" });
+
+    const result = await taskWorkflowService.declareRedFirst(taskId, { by: "alice" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.extra["red_first"]).toBe(true);
+    expect(result.value.extra["linkage"]).toBe("kept");
+    expect(result.value.version).toBe(2); // v1 create, v2 declare
+
+    const auditResult = await store.queryAudit({ doc_id: taskId });
+    expect(auditResult.ok).toBe(true);
+    if (!auditResult.ok) return;
+    expect(auditResult.value.some((e) => e.details?.["red_first"] === true)).toBe(true);
+  });
+});
+
+describe("NEGATIVE — declareRedFirst refuses a non-task target", () => {
+  it("a plan target → VALIDATION_ERROR naming the type", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+
+    const result = await taskWorkflowService.declareRedFirst(planId, { by: "alice" });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+  });
+});
+
+describe("BOUNDARY — declareRedFirst is idempotent on an already-declared task", () => {
+  it("declaring twice leaves red_first true both times, second call still succeeds", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const first = await taskWorkflowService.declareRedFirst(taskId, { by: "alice" });
+    expect(first.ok).toBe(true);
+    const second = await taskWorkflowService.declareRedFirst(taskId, { by: "alice" });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.value.extra["red_first"]).toBe(true);
+  });
+});
+
+describe("ERROR — declareRedFirst on a nonexistent target", () => {
+  it("an unknown id/slug → DOC_NOT_FOUND", async () => {
+    const { taskWorkflowService } = makeServices();
+    const result = await taskWorkflowService.declareRedFirst("task-does-not-exist", { by: "alice" });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("DOC_NOT_FOUND");
+  });
+});
+
+describe("STATE — declareRedFirst never touches claim/verification_evidence (AC-S3-5-style)", () => {
+  it("a claimed task with evidence keeps both byte-identical after declareRedFirst", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+    await taskWorkflowService.claim(taskId, { by: "alice" });
+    await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass" }));
+
+    const before = await corpusService.get(taskId);
+    expect(before.ok).toBe(true);
+    if (!before.ok) return;
+
+    const result = await taskWorkflowService.declareRedFirst(taskId, { by: "alice" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(JSON.stringify(result.value.extra["claim"])).toBe(JSON.stringify(before.value.doc.extra["claim"]));
+    expect(JSON.stringify(result.value.extra["verification_evidence"])).toBe(
+      JSON.stringify(before.value.doc.extra["verification_evidence"]),
+    );
+  });
+});
+
+describe("REGRESSION — declareRedFirst + a red row together satisfy done()'s new floor end to end", () => {
+  it("declareRedFirst then evidence(expected-fail) then evidence(pass) then done() succeeds", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    await taskWorkflowService.declareRedFirst(taskId, { by: "alice" });
+    await taskWorkflowService.addEvidence(taskId, evidence({ result: "expected-fail" }));
+    await taskWorkflowService.addEvidence(taskId, evidence({ result: "pass", command: "second" }));
+
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    expect(doneResult.ok).toBe(true);
+  });
+});
+
 // ─── Placeholder-command evidence write-time guard ───────────────────────────
 // (task-reject-placeholder-command-strings-at-evidence-write-time)
 //
